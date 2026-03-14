@@ -12,6 +12,13 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Units
+using Oceananigans.TurbulenceClosures
+using Oceananigans.Fields: fractional_x_index, fractional_y_index
+using Oceananigans.OutputReaders: Time
+using NumericalEarth
+using NumericalEarth.DataWrangling: BoundingBox, download_dataset
+using NumericalEarth.DataWrangling.ERA5
+using CDSAPI # for ERA5 download
 using Dates
 using Printf
 using Statistics: mean
@@ -24,45 +31,72 @@ using Statistics: mean
 Nz = 100
 grid = RectilinearGrid(size = Nz,
                        x = 0, y = 0,
-                       z = (0, 15kilometers),
+                       z = (0, 4kilometers),
                        topology = (Flat, Flat, Bounded))
 
-FT = eltype(grid)
+ref_loc = (latitude=18.0, longitude=-61.5)
 
 # ## Dynamics and reference state
 
+FT = eltype(grid)
+θ₀ = FT(300)
+p₀ = FT(101325)
+q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
+
 constants = ThermodynamicConstants(FT)
-reference_state = ReferenceState(grid, constants;
-                                 surface_pressure = 101325,
-                                 potential_temperature = FT(300))
-dynamics = AnelasticDynamics(reference_state)
+
+ref_state = ReferenceState(grid, constants;
+                           surface_pressure = p₀,
+                           potential_temperature = θ₀)
+dynamics = AnelasticDynamics(ref_state)
+
+# ## Pre-download ERA5 data (optional)
+
+dates = DateTime(2004, 12, 16):Hour(1):DateTime(2005, 01, 09)
+
+# bounding box should enclose ref_loc
+bounding_box = BoundingBox(latitude=(17, 18.5), longitude=(-62.5, -61))
+
+plev_vars = [:temperature,
+             :eastward_velocity,
+             :northward_velocity]
+
+selected_levels = filter(≥(250hPa), ERA5_all_pressure_levels) # select all levels below 250 hPa
+dataset = ERA5HourlyPressureLevels(pressure_levels=selected_levels)
+
+download_dataset(plev_vars, dataset, dates; bounding_box)
 
 # ## Nudging FTS
 #
 # Three one-dimensional `FieldTimeSeries` objects provide the reference
-# profiles for u, v, and θ as a function of height and time.
-# The times are in seconds; here we create 49-step hourly time series
-# (as one might load from ERA5).
-#
-# In practice, load these from disk, e.g.:
-#   u_ref = FieldTimeSeries("era5_column.jld2", "u")
-#
-# Requirements:
-#   - Grid must be 1×1×Nz (or Flat×Flat×Nz) with the same vertical levels
-#     as the simulation grid so that no vertical interpolation is needed.
-#   - Values must be specific (u in m/s, v in m/s, θ in K) — not density-weighted.
+# profiles for u, v, and θ as a function of height and time. Note these are
+# the primitive, not conserved, variables.
 
-nudging_times = range(0, 48hours, step=1hour) |> collect  # 49 hourly snapshots
+# We downloaded a subset of the ERA5, defined by bounding_box. Because this data grid is not
+# coincident with the simulation grid, we need to perform a mapping to the reference lat, lon.
 
-u_ref = FieldTimeSeries{Face, Center, Center}(grid, nudging_times)
-v_ref = FieldTimeSeries{Center, Face, Center}(grid, nudging_times)
-θ_ref = FieldTimeSeries{Center, Center, Center}(grid, nudging_times)
+temp = Field(Metadatum(:temperature; dataset, date=first(dates), bounding_box))
+Δλ = temp.grid.Δλᶜᵃᵃ
+Δφ = temp.grid.Δφᵃᶜᵃ
 
-# Fill with placeholder profiles (replace with actual data)
-for n in 1:length(nudging_times)
-    set!(u_ref[n], (x, y, z) -> FT(-5 + 0.001z))   # e.g. westerly shear
-    set!(v_ref[n], (x, y, z) -> FT(0))
-    set!(θ_ref[n], (x, y, z) -> FT(300 + 8e-3 * z)) # stable stratification
+xn = [ref_loc.longitude - Δλ/2, ref_loc.longitude + Δλ/2]
+yn = [ref_loc.latitude  - Δφ/2, ref_loc.latitude  + Δφ/2]
+zn = znodes(grid, Center(), Center(), Face(); with_halos=false)
+
+column_grid = RectilinearGrid(size=(1, 1, Nz),
+                              x=xn, y=yn, z=zn,
+                              topology=(Bounded, Bounded, Bounded))
+
+u_ref = FieldTimeSeries(Metadata(:eastward_velocity;  dataset, dates, bounding_box), column_grid)
+v_ref = FieldTimeSeries(Metadata(:northward_velocity; dataset, dates, bounding_box), column_grid)
+T_ref = FieldTimeSeries(Metadata(:temperature;        dataset, dates, bounding_box), column_grid)
+
+# convert to potential temperature
+θ_ref = FieldTimeSeries{Center, Center, Center}(column_grid, T_ref.times)
+p_col = interior(ref_state.pressure, 1, 1, :)  # 1D pressure profile
+R_cp = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+for n in eachindex(T_ref.times)
+    interior(θ_ref[n]) .= interior(T_ref[n]) .* (ref_state.standard_pressure ./ reshape(p_col, 1, 1, :)).^R_cp
 end
 
 # ## Nudging forcings
@@ -70,9 +104,9 @@ end
 # `RelaxationForcing` automatically enters profile mode when the reference FTS
 # has no horizontal dimensions (Nx=Ny=1). The horizontal average of each field
 # is compared to the reference column, and nudging is applied only above
-# `z_bottom = 1500` m with a 6-hour relaxation time scale.
+# `z_bottom = 1500` m with a 1-hour relaxation time scale.
 
-τ_nudging = 1hour
+τ_nudging = 6hours
 
 u_nudging = RelaxationForcing(u_ref; time_scale=τ_nudging, z_bottom=1500)
 v_nudging = RelaxationForcing(v_ref; time_scale=τ_nudging, z_bottom=1500)
@@ -80,45 +114,11 @@ v_nudging = RelaxationForcing(v_ref; time_scale=τ_nudging, z_bottom=1500)
 
 forcing = (; ρu = u_nudging, ρv = v_nudging, ρθ = θ_nudging)
 
-# ## Surface flux FTS
+# ## Diffusion
 #
-# Two scalar `FieldTimeSeries` provide the surface fluxes.
-# Units:
-#   - heat_flux:     kinematic heat flux ρ w'θ'  [kg K m⁻² s⁻¹]
-#                    (= sensible heat flux H [W m⁻²] divided by dry air heat capacity cₚ ≈ 1004 J kg⁻¹ K⁻¹)
-#   - moisture_flux: kinematic moisture flux ρ w'q'  [kg m⁻² s⁻¹]
-#                    (= latent heat flux LE [W m⁻²] divided by Lᵥ ≈ 2.5×10⁶ J kg⁻¹)
-#
-# Positive values denote upward flux from the surface into the atmosphere.
+# For this simple demo, use constant diffusivity instead of a PBL scheme
 
-surface_times = nudging_times   # can differ from nudging times
-
-# Single-point FTS for surface scalars
-surface_grid = RectilinearGrid(size = 1,
-                               x = 0, y = 0,
-                               z = (0, 1),
-                               topology = (Flat, Flat, Bounded))
-
-heat_flux_fts     = FieldTimeSeries{Center, Center, Center}(surface_grid, surface_times)
-moisture_flux_fts = FieldTimeSeries{Center, Center, Center}(surface_grid, surface_times)
-
-# Fill with placeholder diurnal cycles (replace with actual data)
-for n in 1:length(surface_times)
-    t = surface_times[n]
-    H_kinematic = FT(8e-3 * max(0, sin(2π * t / 86400)))  # diurnal sensible heat
-    E_kinematic = FT(5.2e-5)                                # constant evaporation
-    set!(heat_flux_fts[n],     (x, y, z) -> H_kinematic)
-    set!(moisture_flux_fts[n], (x, y, z) -> E_kinematic)
-end
-
-# Continuous-form BC functions: called at every grid point with (x, y, t)
-@inline surface_heat_flux(x, y, t)     = heat_flux_fts[1, 1, 1, Time(t)]
-@inline surface_moisture_flux(x, y, t) = moisture_flux_fts[1, 1, 1, Time(t)]
-
-ρθ_bcs  = FieldBoundaryConditions(bottom = FluxBoundaryCondition(surface_heat_flux))
-ρqᵗ_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(surface_moisture_flux))
-
-boundary_conditions = (; ρθ = ρθ_bcs, ρqᵗ = ρqᵗ_bcs)
+closure = VerticalScalarDiffusivity(ν=10, κ=10)   # [m² s⁻¹]
 
 # ## Model
 
@@ -126,16 +126,15 @@ model = AtmosphereModel(grid;
                         dynamics,
                         formulation = :LiquidIcePotentialTemperature,
                         forcing,
-                        boundary_conditions)
+                        closure)
 
 # ## Initial conditions
 
-θ₀ = reference_state.potential_temperature
 set!(model; θ = θ₀, qᵗ = FT(0.01))
 
 # ## Simulation
 
-simulation = Simulation(model; Δt = 60seconds, stop_time = 48hours)
+simulation = Simulation(model; Δt = 60seconds, stop_time = T_ref.times[end])
 
 # Progress reporting
 function progress(sim)
@@ -148,7 +147,7 @@ simulation.callbacks[:progress] = Callback(progress, IterationInterval(60))
 # Output
 simulation.output_writers[:fields] = JLD2Writer(model, merge(model.velocities, (; θ=model.temperature));
                                                 filename = "single_column_nudging.jld2",
-                                                schedule = TimeInterval(1hour),
+                                                schedule = TimeInterval(600seconds),
                                                 overwrite_existing = true)
 
 run!(simulation)
