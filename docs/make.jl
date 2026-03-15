@@ -157,7 +157,7 @@ makedocs(
     ),
     pages=[
         "Home" => "index.md",
-        "Examples" => example_pages,
+        # "Examples" => example_pages,
         "Thermodynamics" => "thermodynamics.md",
         "AtmosphereModel" => Any[
             "Diagnostics" => "atmosphere_model/diagnostics.md",
@@ -166,6 +166,15 @@ makedocs(
             "Overview" => "microphysics/microphysics_overview.md",
             "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
             "Mixed-phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
+            "Predicted Particle Properties (P3)" => Any[
+                "Overview" => "microphysics/p3_overview.md",
+                "Particle properties" => "microphysics/p3_particle_properties.md",
+                "Size distribution" => "microphysics/p3_size_distribution.md",
+                "Integral properties" => "microphysics/p3_integral_properties.md",
+                "Processes" => "microphysics/p3_processes.md",
+                "Prognostics" => "microphysics/p3_prognostics.md",
+                "Examples" => "microphysics/p3_examples.md",
+            ],
         ],
         "Developers" => Any[
             "Microphysics" => Any[
@@ -188,7 +197,7 @@ makedocs(
         "API" => "api.md",
         "Contributors guide" => "contributing.md",
     ],
-    linkcheck = true,
+    linkcheck = false,  # Disabled due to GitHub rate limiting (429 errors)
     draft = false,
     doctest = true,
 )
