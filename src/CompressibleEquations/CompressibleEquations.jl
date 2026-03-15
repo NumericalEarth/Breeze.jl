@@ -39,12 +39,15 @@ using DocStringExtensions: TYPEDEF, TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, prognostic_fields
+using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, ZFaceField, prognostic_fields
+using Oceananigans.Grids: rnode, znode
+using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
-using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity, dry_air_gas_constant, ExnerReferenceState
+using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity, dry_air_gas_constant,
+                             ExnerReferenceState
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density, standard_pressure, thermodynamic_density, specific_prognostic_moisture
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
@@ -59,5 +62,6 @@ const CompressibleModel = AtmosphereModel{<:CompressibleDynamics}
 include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
 include("acoustic_substepping.jl")
+include("terrain_compressible_physics.jl")
 
 end # module
