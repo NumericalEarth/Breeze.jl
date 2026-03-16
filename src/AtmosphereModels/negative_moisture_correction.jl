@@ -142,28 +142,30 @@ end
         @inbounds ρqᵛᵉ[i, j, k - 1] -= deficit / Δz_below   # receive deficit
     end
 
-    # Phase 2b: If bottom level still negative, borrow from level above
-    # (only meaningful when Nz >= 2)
-    if Nz >= 2
-        @inbounds ρqᵛ_bot = ρqᵛᵉ[i, j, 1]
-        @inbounds ρ_bot = ρ₀[i, j, 1]
-        qᵛ_bot = ρqᵛ_bot / ρ_bot
+    # Phase 2b: If bottom level still negative, borrow from level above.
+    # Use ifelse (not if/else) for GPU kernel compatibility.
+    # When Nz < 2, clamp indices to 1 so reads are valid but dq_mass = 0.
+    k_bot = 1
+    k_top = max(2, Nz)  # safe index: equals 2 when Nz >= 2, equals Nz when Nz < 2
 
-        @inbounds ρqᵛ_top = ρqᵛᵉ[i, j, 2]
-        @inbounds ρ_top = ρ₀[i, j, 2]
-        qᵛ_top = ρqᵛ_top / ρ_top
+    @inbounds ρqᵛ_bot = ρqᵛᵉ[i, j, k_bot]
+    @inbounds ρ_bot = ρ₀[i, j, k_bot]
+    qᵛ_bot = ρqᵛ_bot / ρ_bot
 
-        Δz_bot = Δzᶜᶜᶜ(i, j, 1, grid)
-        Δz_top = Δzᶜᶜᶜ(i, j, 2, grid)
+    @inbounds ρqᵛ_top = ρqᵛᵉ[i, j, k_top]
+    @inbounds ρ_top = ρ₀[i, j, k_top]
+    qᵛ_top = ρqᵛ_top / ρ_top
 
-        can_borrow = (qᵛ_bot < 0) & (qᵛ_top > 0)
-        needed = -ρqᵛ_bot * Δz_bot       # mass needed at bottom [kg/m²]
-        available = ρqᵛ_top * Δz_top      # mass available above [kg/m²]
-        dq_mass = ifelse(can_borrow, min(needed, available), zero(ρqᵛ_bot))
+    Δz_bot = Δzᶜᶜᶜ(i, j, k_bot, grid)
+    Δz_top = Δzᶜᶜᶜ(i, j, k_top, grid)
 
-        @inbounds ρqᵛᵉ[i, j, 1] += dq_mass / Δz_bot
-        @inbounds ρqᵛᵉ[i, j, 2] -= dq_mass / Δz_top
-    end
+    can_borrow = (Nz >= 2) & (qᵛ_bot < 0) & (qᵛ_top > 0)
+    needed = -ρqᵛ_bot * Δz_bot       # mass needed at bottom [kg/m²]
+    available = ρqᵛ_top * Δz_top      # mass available above [kg/m²]
+    dq_mass = ifelse(can_borrow, min(needed, available), zero(ρqᵛ_bot))
+
+    @inbounds ρqᵛᵉ[i, j, k_bot] += dq_mass / Δz_bot
+    @inbounds ρqᵛᵉ[i, j, k_top] -= dq_mass / Δz_top
 end
 
 #####
