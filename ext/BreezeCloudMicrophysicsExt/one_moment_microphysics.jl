@@ -686,7 +686,7 @@ end
 #   ρqʳ:  +Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ    (collection sources; evaporation sink)
 #####
 
-@inline function _mp_ne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+@inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories)
@@ -745,18 +745,18 @@ end
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    return _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
+    return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    return _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
+    return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜⁱ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     # TODO: Add autoconversion cloud ice → snow when snow processes are implemented
-    return _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜⁱ
+    return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜⁱ
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqʳ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    return _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+    return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
 end
