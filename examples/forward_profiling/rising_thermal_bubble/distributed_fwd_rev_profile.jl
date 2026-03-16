@@ -60,6 +60,7 @@ using CairoMakie
 using Dates
 
 Reactant.set_default_backend(backend)
+Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
 
 # Workaround: Reactant is missing Base.zero for distributed ConcretePJRTNumber.
 # Without this, Enzyme.make_zero fails on models whose Clock holds a sharded scalar.
@@ -124,7 +125,7 @@ function main()
     topology = (Periodic, Bounded, Bounded)
 
     # Benchmark config
-    grid_sizes       = [(32, 32, 32)]
+    grid_sizes       = [(128, 128, 32)]
     loss_z_threshold = float_type(5000.0)
     nsteps           = 100
     bench_seconds    = 30
@@ -189,10 +190,10 @@ function main()
         @info "=" ^ 60
 
         grid_kwargs = (; size=(Nx, Ny, Nz),
-                         x=(0, domain_x), y=(0, domain_y), z=(0, domain_z),
+                         x=(0, domain_x), y=(0, domain_y), z=(0, domain_z), halo=(6, 6, 6),
                          topology)
 
-        advection = Centered(order=2)
+        advection = WENO(order=5)
         coriolis  = FPlane(; latitude)
 
         @info "Building grid + model (Centered advection, $ndevices devices)..."

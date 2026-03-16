@@ -1,11 +1,11 @@
 # # Baroclinic Wave — Weak-Scaling Forward Benchmark
 #
 # Measures weak scaling of the Jablonowski–Williamson baroclinic wave
-# on a LatitudeLongitudeGrid with CompressibleDynamics + WENOVectorInvariant(5).
+# on a LatitudeLongitudeGrid with CompressibleDynamics + WENO(5).
 #
-# Weak scaling: each device always gets the same local grid size.
-# The global Nλ grows proportionally to the number of devices
-# (partitioned along longitude via Partition(ndev, 1, 1)).
+# Weak scaling: specify the global grid for the max-device case (Nλ_max).
+# The per-device local Nλ = Nλ_max ÷ ndevices_total stays constant as
+# we scale down (partitioned along longitude via Partition(ndev, 1, 1)).
 #
 # The outer loop starts from the most devices (4) and works down to 1,
 # so any sharding-related issues surface early.
@@ -25,6 +25,9 @@ if !haskey(ENV, "XLA_PYTHON_CLIENT_MEM_FRACTION")
     ENV["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.5"
 end
 
+# XLA_FLAGS must be set BEFORE `using Reactant` — XLA reads them at init.
+# xla_gpu_enable_priority_fusion is removed from the XLA proto, so it can
+# only be controlled via this env var (not via @compile xla_debug_options).
 let xla_flags = get(ENV, "XLA_FLAGS", "")
     if backend == "cpu"
         ndevices = parse(Int, get(ENV, "BREEZE_NDEVICES", "4"))
@@ -32,11 +35,17 @@ let xla_flags = get(ENV, "XLA_FLAGS", "")
             xla_flags *= " --xla_force_host_platform_device_count=$ndevices"
         end
     end
-    if backend == "gpu" && !contains(xla_flags, "xla_gpu_enable_command_buffer")
-        xla_flags *= " --xla_gpu_enable_command_buffer="
+    for (flag, val) in [
+        "xla_gpu_enable_command_buffer"    => "",
+        "xla_gpu_enable_priority_fusion"   => "false",
+    ]
+        if !contains(xla_flags, flag)
+            xla_flags *= " --$flag=$val"
+        end
     end
     ENV["XLA_FLAGS"] = strip(xla_flags)
 end
+@info "XLA_FLAGS = $(ENV["XLA_FLAGS"])"
 
 using Breeze
 using Oceananigans
@@ -144,11 +153,12 @@ function main()
     Oceananigans.defaults.FloatType = FT
 
     # ── Weak-scaling configuration ────────────────────────────────────
-    # Per-device local grid size (Nλ_local, Nφ, Nz).
-    # Global Nλ = ndev × Nλ_local; partitioned via Partition(ndev, 1, 1).
-    Nλ_local = 128
-    Nφ       = 256
-    Nz       = 32
+    # Specify the GLOBAL grid for the max-device case (Nλ_max, Nφ, Nz).
+    # Nλ_max must be divisible by the number of devices so that the local
+    # Nλ per device stays constant as we scale down.
+    Nλ_max = 512
+    Nφ     = 256
+    Nz     = 32
 
     H       = 30_000.0
     nsteps  = 100
@@ -168,6 +178,9 @@ function main()
     ndevices_total = length(all_devices)
     device_counts = sort(unique([ndevices_total, ndevices_total ÷ 2, 1]); rev=true)
     filter!(n -> n ≥ 1, device_counts)
+
+    Nλ_local = Nλ_max ÷ ndevices_total
+    # @assert Nλ_max % ndevices_total == 0 "Nλ_max ($Nλ_max) must be divisible by ndevices_total ($ndevices_total)"
 
     # ── Closures that capture H ───────────────────────────────────────
     θᵢ_H(λ, φ, z) = θᵢ(λ, φ, z, H)
@@ -207,7 +220,7 @@ function main()
         grid_label = @sprintf("%dx%dx%d", Nλ, Nφ, Nz)
 
         grid_kwargs = (; size = (Nλ, Nφ, Nz),
-                         halo = (5, 5, 5),
+                         halo = (6, 6, 6),
                          longitude = (0, 360),
                          latitude = (-85, 85),
                          z = (0, FT(H)))
@@ -226,7 +239,7 @@ function main()
             ExplicitTimeStepping();
             surface_pressure = p₀,
             reference_potential_temperature = θᵇ)
-        advection = WENOVectorInvariant(order=5)
+        advection = WENO(order=5)
         @time model = AtmosphereModel(grid; dynamics, coriolis, advection)
 
         @info "Setting initial conditions..."
@@ -322,9 +335,9 @@ function main()
     # ── Write summary.md ─────────────────────────────────────────────────
     open(joinpath(summary_dir, "summary.md"), "w") do io
         println(io, "# Baroclinic Wave — Weak-Scaling Forward Benchmark")
-        println(io, "\nCompressible dynamics, WENOVectorInvariant(5), ExplicitTimeStepping, HydrostaticSphericalCoriolis")
-        println(io, @sprintf("Local grid per device: %d × %d × %d  |  nsteps=%d  |  precision=%s",
-                             Nλ_local, Nφ, Nz, nsteps, FT))
+        println(io, "\nCompressible dynamics, WENO(5), ExplicitTimeStepping, HydrostaticSphericalCoriolis")
+        println(io, @sprintf("Max global grid: %d × %d × %d  |  Local per device: %d × %d × %d  |  nsteps=%d  |  precision=%s",
+                             Nλ_max, Nφ, Nz, Nλ_local, Nφ, Nz, nsteps, FT))
         println(io, "\n| Devices | Global Grid | HLO (s) | Compile (s) | Forward (s) | Samples | Efficiency | Loss |")
         println(io, "|---------|-------------|---------|-------------|-------------|---------|------------|------|")
         for r in results
@@ -346,7 +359,7 @@ function main()
         ax = Axis(fig[1, 1];
             xlabel = "Number of devices",
             ylabel = "Forward pass time (s)",
-            title  = @sprintf("Weak Scaling — Baroclinic Wave Forward\n(local %d×%d×%d per device, %d steps, %s, WENOVectorInvariant5)",
+            title  = @sprintf("Weak Scaling — Baroclinic Wave Forward\n(local %d×%d×%d per device, %d steps, %s, WENO5)",
                               Nλ_local, Nφ, Nz, nsteps, FT),
             xticks = ndevs)
 
