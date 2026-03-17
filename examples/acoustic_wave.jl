@@ -92,7 +92,7 @@ set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
 
 Δx, Δz = Lx / Nx, Lz / Nz
 Δt = 0.5 * min(Δx, Δz) / (ℂᵃᶜ + Uᵢ(Lz))
-stop_time = 1  # seconds
+stop_time = 0.01  # seconds
 
 simulation = Simulation(model; Δt, stop_time)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
@@ -367,5 +367,59 @@ Colorbar(fig_sens[1, 2], hm; label = "∂J/∂ρ′₀")
 
 save("acoustic_wave_sensitivity.png", fig_sens; px_per_unit = 2)
 @info "Saved acoustic_wave_sensitivity.png"
+
+nothing #hide
+
+# ## Finite-difference verification
+#
+# As a sanity check, we compare the AD gradient against one-sided finite
+# differences at two grid cells:
+# ```math
+# \frac{J(\rho'_0 + \varepsilon\,\mathbf{e}_{i,k}) \;-\; J(\rho'_0)}{\varepsilon}
+# \;\approx\;
+# \left.\frac{\partial J}{\partial \rho'_{0,\,i,k}}\right|_{\text{AD}}
+# ```
+# No new grid or model is needed: the original CPU `model` and `grid` from the
+# first half of this example are still in scope. The `@trace` loop inside `loss`
+# is a no-op outside of Reactant compilation, so the call runs as ordinary Julia
+# on CPU.
+#
+# A completely fresh model is needed — the original `model` carries hidden state
+# from `run!(simulation)` (clock iteration, tendencies, etc.) that `set!` alone
+# does not fully reset.
+
+ε_fd     = 1e-7
+model_fd = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+δρᵢ_fd   = CenterField(grid); set!(δρᵢ_fd, (x, z) -> δρ * gaussian(x, z))
+ρᵗ_fd    = CenterField(grid)
+ρᵇᵍ_fd   = CenterField(grid); set!(ρᵇᵍ_fd, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
+uᵇᵍ_fd   = XFaceField(grid);  set!(uᵇᵍ_fd, (x, z) -> Uᵢ(z))
+
+J₀ = only(loss(model_fd, δρᵢ_fd, ρᵗ_fd, ρᵇᵍ_fd, uᵇᵍ_fd, θ₀, Δt, Nsteps, target_i, target_k))
+@info @sprintf("FD baseline J₀ = %.6e  (Reactant J = %.6e, rel.diff = %.2e)",
+               J₀, Float64(only(J)), abs(J₀ - Float64(only(J))) / (abs(J₀) + eps()))
+
+function fd_check(ip, kp)
+    interior(δρᵢ_fd, ip, 1, kp)[] += ε_fd
+    J₊ = only(loss(model_fd, δρᵢ_fd, ρᵗ_fd, ρᵇᵍ_fd, uᵇᵍ_fd, θ₀, Δt, Nsteps, target_i, target_k))
+    interior(δρᵢ_fd, ip, 1, kp)[] -= ε_fd
+    return (J₊ - J₀) / ε_fd
+end
+
+# Probe 1: the receiver cell.
+
+ad₁, fd₁ = sensitivity[target_i, target_k], fd_check(target_i, target_k)
+
+# Probe 2: an unrelated point in the upper-left quadrant.
+
+probe_i, probe_k = round(Int, 0.25Nx), round(Int, 0.75Nz)
+ad₂, fd₂ = sensitivity[probe_i, probe_k], fd_check(probe_i, probe_k)
+
+rel_err(a, b) = abs(a - b) / (abs(a) + eps())
+
+@info @sprintf("FD check — receiver (i=%d, k=%d): AD=%+.4e  FD=%+.4e  rel.err=%.2e",
+               target_i, target_k, ad₁, fd₁, rel_err(ad₁, fd₁))
+@info @sprintf("FD check — probe    (i=%d, k=%d): AD=%+.4e  FD=%+.4e  rel.err=%.2e",
+               probe_i, probe_k, ad₂, fd₂, rel_err(ad₂, fd₂))
 
 nothing #hide
