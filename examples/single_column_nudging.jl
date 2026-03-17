@@ -13,7 +13,6 @@ using Breeze
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.TurbulenceClosures
-using Oceananigans.Fields: fractional_x_index, fractional_y_index
 using Oceananigans.OutputReaders: Time
 using NumericalEarth
 using NumericalEarth.DataWrangling: BoundingBox, download_dataset
@@ -38,12 +37,10 @@ ref_loc = (latitude=18.0, longitude=-61.5)
 
 # ## Dynamics and reference state
 
-FT = eltype(grid)
-θ₀ = FT(300)
-p₀ = FT(101325)
-q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
+θ₀ = 300
+p₀ = 101325
 
-constants = ThermodynamicConstants(FT)
+constants = ThermodynamicConstants()
 
 ref_state = ReferenceState(grid, constants;
                            surface_pressure = p₀,
@@ -52,19 +49,21 @@ dynamics = AnelasticDynamics(ref_state)
 
 # ## Pre-download ERA5 data (optional)
 
-dates = DateTime(2004, 12, 16):Hour(1):DateTime(2005, 01, 09)
+start_date = DateTime(2004, 12, 16)
+end_date = DateTime(2005, 01, 09)
+dates = start_date:Hour(1):end_date
 
 # bounding box should enclose ref_loc
 bounding_box = BoundingBox(latitude=(17, 18.5), longitude=(-62.5, -61))
 
-plev_vars = [:temperature,
-             :eastward_velocity,
-             :northward_velocity]
+vars_on_pressure_levels = [:temperature,
+                           :eastward_velocity,
+                           :northward_velocity]
 
 selected_levels = filter(≥(250hPa), ERA5_all_pressure_levels) # select all levels below 250 hPa
 dataset = ERA5HourlyPressureLevels(pressure_levels=selected_levels)
 
-download_dataset(plev_vars, dataset, dates; bounding_box)
+download_dataset(vars_on_pressure_levels, dataset, dates; bounding_box)
 
 # ## Nudging FTS
 #
@@ -116,7 +115,8 @@ forcing = (; ρu = u_nudging, ρv = v_nudging, ρθ = θ_nudging)
 
 # ## Diffusion
 #
-# For this simple demo, use constant diffusivity instead of a PBL scheme
+# For this simple demo, use constant diffusivity instead of a turbulence closure (typically a
+# planteary boundary layer scheme)
 
 closure = VerticalScalarDiffusivity(ν=10, κ=10)   # [m² s⁻¹]
 
@@ -130,7 +130,7 @@ model = AtmosphereModel(grid;
 
 # ## Initial conditions
 
-set!(model; θ = θ₀, qᵗ = FT(0.01))
+set!(model; θ = θ₀)
 
 # ## Simulation
 
