@@ -13,6 +13,6 @@ using Breeze.AtmosphereModels: AtmosphereModels, dynamics_density
 
 const ReactantLatLonModel = AtmosphereModel{<:Any, <:Any, <:ReactantState, <:Any, <:LatitudeLongitudeGrid}
 
-function AtmosphereModels.set_field_product!(dest::Field{<:Any, <:Any, <:Any, <:Any, <:LatitudeLongitudeGrid}, a, b)
+function AtmosphereModels.set_product!(dest::Field{<:Any, <:Any, <:Any, <:Any, <:LatitudeLongitudeGrid}, a, b)
     @jit set!(dest, a * b)
 end

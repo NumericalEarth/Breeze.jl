@@ -32,12 +32,12 @@ function set_thermodynamic_variable! end
 #####
 
 """
-    set_field_product!(dest, a, b)
+    set_product!(dest, a, b)
 
 Set `dest` to the product `a * b`. Overridable for architectures (e.g. ReactantState)
 that require specialised dispatch to compute field products correctly.
 """
-set_field_product!(dest, a, b) = set!(dest, a * b)
+set_product!(dest, a, b) = set!(dest, a * b)
 
 """
     set_velocity!(model, name, value)
@@ -50,7 +50,7 @@ function set_velocity!(model::AtmosphereModel, name::Symbol, value)
     set!(u, value)
     ρ = dynamics_density(model.dynamics)
     ϕ = model.momentum[Symbol(:ρ, name)]
-    set_field_product!(ϕ, ρ, u)
+    set_product!(ϕ, ρ, u)
     return nothing
 end
 

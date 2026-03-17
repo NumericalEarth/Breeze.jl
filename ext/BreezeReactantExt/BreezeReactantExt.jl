@@ -2,7 +2,8 @@ module BreezeReactantExt
 
 using Breeze
 
-include("PotentialTemperatureFormulation.jl")
 include("Timesteppers.jl")
+
+include("set_field_product!.jl")
 
 end # module
