@@ -12,12 +12,12 @@ using Adapt: Adapt
 ##### RelaxationForcing struct
 #####
 
-struct RelaxationForcing{F, S, Cl, D, P, RC, TS, ZB}
-    reference        :: F    # FieldTimeSeries of the specific variable ϕ
-    target           :: S    # Field of ϕᵣ interpolated to current time; Nothing pre-materialization
+struct RelaxationForcing{R, TF, Cl, D, F, RC, TS, ZB}
+    reference        :: R    # FieldTimeSeries of the specific variable ϕᵣ
+    target           :: TF   # Field of ϕᵣ interpolated to current time, horizontally averaged to a single column in profile mode; Nothing pre-materialization
     clock            :: Cl   # Model Clock; Nothing pre-materialization
     density          :: D    # Reference density ρᵣ(z); Nothing pre-materialization
-    current_field    :: P    # Specific field ϕ (3D) or Average(ϕ) (profile); Nothing pre-materialization
+    current_field    :: F    # Specific field ϕ (3D) or Average(ϕ) (profile); Nothing pre-materialization
     time_scale       :: TS   # Relaxation time scale (seconds)
     reference_column :: RC   # Nothing (3D mode) or NTuple{2,Int} (profile mode)
     z_bottom         :: ZB   # Height below which no nudging is applied (meters)
@@ -86,7 +86,7 @@ end
 #####
 
 """
-    find_reference_column(grid, reference_position)
+$(TYPEDSIGNATURES)
 
 Return the `(i, j)` index in `grid` nearest to
 `reference_position = (latitude=..., longitude=...)`.
@@ -157,7 +157,7 @@ end
 
 function AtmosphereModels.compute_forcing!(forcing::RelaxationForcing)
     t = forcing.clock.time
-    ref_field = forcing.reference[Time(t)]
+    ref_field = forcing.reference[Time(t)] # interpolate to t
     update_target!(forcing.target, ref_field, forcing.reference_column)
     compute!(forcing.current_field)
     return nothing
