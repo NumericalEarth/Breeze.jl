@@ -348,7 +348,7 @@ x_target = xs[target_i]
 z_target = zs[target_k]
 
 @info @sprintf("Receiver density J = %.6e  at (x=%.1f m, z=%.1f m) after %d steps",
-               Float64(J), x_target, z_target, nsteps)
+               Float64(only(J)), x_target, z_target, nsteps)
 
 # ### Sensitivity visualization
 
