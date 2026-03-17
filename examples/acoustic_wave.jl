@@ -195,3 +195,168 @@ end
 nothing #hide
 
 # ![](acoustic_wave.mp4)
+
+# ## Differentiability: sensitivity to the initial perturbation
+#
+# A natural follow-up question is: *how sensitive is the acoustic field at some
+# distant observation point to the shape of the initial density pulse?*
+# Answering this with finite differences would require re-running the simulation
+# once per grid cell. Automatic differentiation (AD) gives us the full
+# sensitivity field in a single backward pass.
+#
+# We use [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) for reverse-mode AD
+# and [Reactant.jl](https://github.com/EnzymeAD/Reactant.jl) to compile the
+# model to XLA so that Enzyme can differentiate through it.
+#
+# ### Why Reactant?
+#
+# Reactant traces Julia code into an intermediate representation (StableHLO) that
+# XLA can optimize and Enzyme can differentiate.  The key requirement is that the
+# model lives on `ReactantState` — Reactant's architecture — so that all arrays
+# are XLA buffers.  We therefore rebuild the *same* physical setup on a new grid
+# whose architecture is `ReactantState()`.  Everything else — domain, resolution,
+# thermodynamic constants, wind profile, perturbation shape — is identical.
+
+using CUDA       # required for Reactant extension loading
+using Reactant
+using Enzyme
+using Oceananigans.Architectures: ReactantState
+using Reactant: @trace
+
+Reactant.set_default_backend("cpu")
+
+# Rebuild the grid and model on `ReactantState`.
+
+grid_ad = RectilinearGrid(ReactantState(); size = (Nx, Nz),
+                          x = (-Lx/2, Lx/2), z = (0, Lz),
+                          topology = (Periodic, Flat, Bounded))
+
+FT = eltype(grid_ad)
+
+model_ad = AtmosphereModel(grid_ad; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+
+# ### Background fields
+#
+# The hydrostatic background density and the log-layer wind profile do not
+# change between evaluations of the objective, so we precompute them once.
+# These are *not* recomputed inside the loss function.
+
+ρᵇᵍ = CenterField(grid_ad)
+uᵇᵍ = XFaceField(grid_ad)
+set!(ρᵇᵍ, (x, z) -> FT(adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)))
+set!(uᵇᵍ, (x, z) -> FT(Uᵢ(z)))
+
+# The initial density perturbation is the quantity we differentiate with respect
+# to.  We also allocate its adjoint (shadow) field, which Enzyme will fill with
+# the gradient ``\partial J / \partial \rho'_0``.
+
+δρᵢ  = CenterField(grid_ad)
+dδρᵢ = CenterField(grid_ad)
+set!(δρᵢ, (x, z) -> FT(δρ * gaussian(x, z)))
+set!(dδρᵢ, FT(0))
+
+# A scratch field for the total initial density (background + perturbation).
+
+ρ_total = CenterField(grid_ad)
+
+# The shadow model stores accumulated adjoints for every prognostic field.
+
+dmodel_ad = Enzyme.make_zero(model_ad)
+
+# ### Time step and observation point
+#
+# We reuse the CFL-based time step from above.  The `Simulation` API is not used
+# here because Reactant compiles a fixed-length traced loop instead.
+# `nsteps` must be a **perfect square** when gradient checkpointing is enabled
+# (a current Reactant requirement).
+
+Δt_ad    = FT(Δt)
+nsteps   = 4
+target_i = Int(clamp(round(0.75Nx), 1, Nx))
+target_k = Int(clamp(round(0.35Nz), 1, Nz))
+
+# ### Defining the objective
+#
+# The loss function must contain `set!` so that the model is re-initialized from
+# the current perturbation field on every evaluation. Without this, the backward
+# pass would differentiate a stale trajectory.
+#
+# Only two things are recomputed each call:
+#
+# 1. The total initial density ``\rho_0 = \bar\rho(z) + \rho'_0(x,z)`` — because
+#    the perturbation field is the input we vary.
+# 2. The forward trajectory — because time stepping mutates the model in place.
+#
+# Everything else (grid, background fields, constants, compiled artifacts) is
+# allocated once and reused.
+
+function loss(model, δρᵢ, ρ_total, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
+    parent(ρ_total) .= parent(ρᵇᵍ) .+ parent(δρᵢ)
+    set!(model; ρ = ρ_total, θ = θ₀, u = uᵇᵍ)
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
+        time_step!(model, Δt)
+    end
+    return interior(model.dynamics.density, it, 1, kt)
+end
+
+# ### The gradient wrapper
+#
+# `grad_loss` zeroes the adjoint buffer and calls `Enzyme.autodiff` in reverse
+# mode.  The model and the perturbation field are `Duplicated` (primal + shadow);
+# everything else is `Const` (no gradient needed).
+
+function grad_loss(model, dmodel, δρᵢ, dδρᵢ,
+                   ρ_total, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
+    parent(dδρᵢ) .= zero(FT)
+    _, J = Enzyme.autodiff(
+        Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
+        loss, Enzyme.Active,
+        Enzyme.Duplicated(model, dmodel),
+        Enzyme.Duplicated(δρᵢ, dδρᵢ),
+        Enzyme.Const(ρ_total),
+        Enzyme.Const(ρᵇᵍ),
+        Enzyme.Const(uᵇᵍ),
+        Enzyme.Const(θ₀),
+        Enzyme.Const(Δt),
+        Enzyme.Const(nsteps),
+        Enzyme.Const(it),
+        Enzyme.Const(kt))
+    return dδρᵢ, J
+end
+
+# ### Compilation and execution
+#
+# `Reactant.@compile` traces the function once to build an XLA executable.
+# The flags `raise=true` and `raise_first=true` ensure that every
+# KernelAbstractions kernel is "raised" to StableHLO before Enzyme
+# differentiates through it — a requirement for the backward pass.
+
+@time "Compiling gradient" compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+    model_ad, dmodel_ad, δρᵢ, dδρᵢ,
+    ρ_total, ρᵇᵍ, uᵇᵍ, FT(θ₀), Δt_ad, nsteps, target_i, target_k)
+
+@time "Running gradient" dδρ, J = compiled_grad(
+    model_ad, dmodel_ad, δρᵢ, dδρᵢ,
+    ρ_total, ρᵇᵍ, uᵇᵍ, FT(θ₀), Δt_ad, nsteps, target_i, target_k)
+
+@info @sprintf("Observation density J = %.6e  at (i=%d, k=%d) after %d steps",
+               Float64(J), target_i, target_k, nsteps)
+
+# ### Sensitivity visualization
+
+sensitivity = Array(interior(dδρ, :, 1, :))
+sens_lim = max(maximum(abs, sensitivity), eps(Float64))
+
+fig_sens = Figure(size = (800, 350), fontsize = 12)
+Label(fig_sens[0, :],
+      @sprintf("∂ρ(i=%d, k=%d, t=%d Δt) / ∂ρ′₀", target_i, target_k, nsteps),
+      fontsize = 14, tellwidth = false)
+ax_sens = Axis(fig_sens[1, 1]; xlabel = "x (grid index)", ylabel = "z (grid index)",
+               aspect = DataAspect())
+hm = heatmap!(ax_sens, sensitivity; colormap = :balance, colorrange = (-sens_lim, sens_lim))
+Colorbar(fig_sens[1, 2], hm; label = "∂J/∂ρ′₀")
+
+save("acoustic_wave_sensitivity.png", fig_sens; px_per_unit = 2)
+@info "Saved acoustic_wave_sensitivity.png"
+
+nothing #hide
