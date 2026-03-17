@@ -135,6 +135,7 @@ simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
                                               overwrite_existing = true)
 
 run!(simulation)
+nsteps_fwd = simulation.model.clock.iteration
 
 # ## Visualization
 #
@@ -265,13 +266,13 @@ dmodel_ad = Enzyme.make_zero(model_ad)
 
 # ### Time step and observation point
 #
-# We reuse the CFL-based time step from above.  The `Simulation` API is not used
-# here because Reactant compiles a fixed-length traced loop instead.
-# `nsteps` must be a **perfect square** when gradient checkpointing is enabled
-# (a current Reactant requirement).
+# We reuse the CFL-based time step and the exact number of iterations from the
+# forward simulation above.  The `Simulation` API is not used here because
+# Reactant compiles a fixed-length traced loop instead.  Gradient checkpointing
+# requires a perfect-square step count, so we round up to the next perfect square.
 
 Δt_ad    = FT(Δt)
-nsteps   = 4
+nsteps   = (isqrt(nsteps_fwd - 1) + 1)^2
 target_i = Int(clamp(round(0.75Nx), 1, Nx))
 target_k = Int(clamp(round(0.35Nz), 1, Nz))
 
@@ -331,16 +332,23 @@ end
 # KernelAbstractions kernel is "raised" to StableHLO before Enzyme
 # differentiates through it — a requirement for the backward pass.
 
-@time "Compiling gradient" compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+@info "Compiling differentiated model — this may take a minute..."
+compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
     model_ad, dmodel_ad, δρᵢ, dδρᵢ,
     ρ_total, ρᵇᵍ, uᵇᵍ, FT(θ₀), Δt_ad, nsteps, target_i, target_k)
 
-@time "Running gradient" dδρ, J = compiled_grad(
+@info "Running gradient..."
+dδρ, J = compiled_grad(
     model_ad, dmodel_ad, δρᵢ, dδρᵢ,
     ρ_total, ρᵇᵍ, uᵇᵍ, FT(θ₀), Δt_ad, nsteps, target_i, target_k)
 
-@info @sprintf("Observation density J = %.6e  at (i=%d, k=%d) after %d steps",
-               Float64(J), target_i, target_k, nsteps)
+xs = xnodes(grid_ad, Center())
+zs = znodes(grid_ad, Center())
+x_target = xs[target_i]
+z_target = zs[target_k]
+
+@info @sprintf("Receiver density J = %.6e  at (x=%.1f m, z=%.1f m) after %d steps",
+               Float64(J), x_target, z_target, nsteps)
 
 # ### Sensitivity visualization
 
@@ -349,11 +357,14 @@ sens_lim = max(maximum(abs, sensitivity), eps(Float64))
 
 fig_sens = Figure(size = (800, 350), fontsize = 12)
 Label(fig_sens[0, :],
-      @sprintf("∂ρ(i=%d, k=%d, t=%d Δt) / ∂ρ′₀", target_i, target_k, nsteps),
+      @sprintf("∂ρ / ∂ρ′₀  (receiver at x=%.0f m, z=%.0f m, t=%d Δt)",
+               x_target, z_target, nsteps),
       fontsize = 14, tellwidth = false)
-ax_sens = Axis(fig_sens[1, 1]; xlabel = "x (grid index)", ylabel = "z (grid index)",
-               aspect = DataAspect())
-hm = heatmap!(ax_sens, sensitivity; colormap = :balance, colorrange = (-sens_lim, sens_lim))
+ax_sens = Axis(fig_sens[1, 1]; xlabel = "x (m)", ylabel = "z (m)")
+hm = heatmap!(ax_sens, xs, zs, sensitivity; colormap = :balance, colorrange = (-sens_lim, sens_lim))
+scatter!(ax_sens, [x_target], [z_target]; color = :black, marker = :star5,
+         markersize = 14, label = "receiver")
+axislegend(ax_sens; position = :rt)
 Colorbar(fig_sens[1, 2], hm; label = "∂J/∂ρ′₀")
 
 save("acoustic_wave_sensitivity.png", fig_sens; px_per_unit = 2)
