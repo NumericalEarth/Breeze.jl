@@ -135,7 +135,6 @@ simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
                                               overwrite_existing = true)
 
 run!(simulation)
-nsteps_fwd = simulation.model.clock.iteration
 
 # ## Visualization
 #
@@ -233,8 +232,6 @@ grid_ad = RectilinearGrid(ReactantState(); size = (Nx, Nz),
                           x = (-Lx/2, Lx/2), z = (0, Lz),
                           topology = (Periodic, Flat, Bounded))
 
-FT = eltype(grid_ad)
-
 model_ad = AtmosphereModel(grid_ad; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
 
 # ### Background fields
@@ -245,8 +242,8 @@ model_ad = AtmosphereModel(grid_ad; dynamics = CompressibleDynamics(ExplicitTime
 
 ρᵇᵍ = CenterField(grid_ad)
 uᵇᵍ = XFaceField(grid_ad)
-set!(ρᵇᵍ, (x, z) -> FT(adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)))
-set!(uᵇᵍ, (x, z) -> FT(Uᵢ(z)))
+set!(ρᵇᵍ, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
+set!(uᵇᵍ, (x, z) -> Uᵢ(z))
 
 # The initial density perturbation is the quantity we differentiate with respect
 # to.  We also allocate its adjoint (shadow) field, which Enzyme will fill with
@@ -254,12 +251,12 @@ set!(uᵇᵍ, (x, z) -> FT(Uᵢ(z)))
 
 δρᵢ  = CenterField(grid_ad)
 dδρᵢ = CenterField(grid_ad)
-set!(δρᵢ, (x, z) -> FT(δρ * gaussian(x, z)))
-set!(dδρᵢ, FT(0))
+set!(δρᵢ, (x, z) -> δρ * gaussian(x, z))
+set!(dδρᵢ, 0)
 
 # A scratch field for the total initial density (background + perturbation).
 
-ρ_total = CenterField(grid_ad)
+ρᵗ = CenterField(grid_ad)
 
 # The shadow model stores accumulated adjoints for every prognostic field.
 
@@ -272,8 +269,8 @@ dmodel_ad = Enzyme.make_zero(model_ad)
 # Reactant compiles a fixed-length traced loop instead.  Gradient checkpointing
 # requires a perfect-square step count, so we round up to the next perfect square.
 
-Δt_ad    = FT(Δt)
-nsteps   = (isqrt(nsteps_fwd - 1) + 1)^2
+Nt = simulation.model.clock.iteration
+Nsteps = (isqrt(Nt - 1) + 1)^2
 target_i = round(Int, 0.75Nx)
 target_k = round(Int, 0.35Nz)
 
@@ -292,9 +289,9 @@ target_k = round(Int, 0.35Nz)
 # Everything else (grid, background fields, constants, compiled artifacts) is
 # allocated once and reused.
 
-function loss(model, δρᵢ, ρ_total, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
-    parent(ρ_total) .= parent(ρᵇᵍ) .+ parent(δρᵢ)
-    set!(model; ρ = ρ_total, θ = θ₀, u = uᵇᵍ)
+function loss(model, δρᵢ, ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
+    parent(ρᵗ) .= parent(ρᵇᵍ) .+ parent(δρᵢ)
+    set!(model; ρ = ρᵗ, θ = θ₀, u = uᵇᵍ)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
@@ -308,14 +305,14 @@ end
 # everything else is `Const` (no gradient needed).
 
 function grad_loss(model, dmodel, δρᵢ, dδρᵢ,
-                   ρ_total, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
-    parent(dδρᵢ) .= zero(FT)
+                   ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
+    parent(dδρᵢ) .= 0
     _, J = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
         Enzyme.Duplicated(model, dmodel),
         Enzyme.Duplicated(δρᵢ, dδρᵢ),
-        Enzyme.Const(ρ_total),
+        Enzyme.Const(ρᵗ),
         Enzyme.Const(ρᵇᵍ),
         Enzyme.Const(uᵇᵍ),
         Enzyme.Const(θ₀),
@@ -336,12 +333,12 @@ end
 @info "Compiling differentiated model — this may take a minute..."
 compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
     model_ad, dmodel_ad, δρᵢ, dδρᵢ,
-    ρ_total, ρᵇᵍ, uᵇᵍ, FT(θ₀), Δt_ad, nsteps, target_i, target_k)
+    ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
 
 @info "Running gradient..."
 dδρ, J = compiled_grad(
     model_ad, dmodel_ad, δρᵢ, dδρᵢ,
-    ρ_total, ρᵇᵍ, uᵇᵍ, FT(θ₀), Δt_ad, nsteps, target_i, target_k)
+    ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
 
 xs = xnodes(grid_ad, Center())
 zs = znodes(grid_ad, Center())
@@ -349,7 +346,7 @@ x_target = xs[target_i]
 z_target = zs[target_k]
 
 @info @sprintf("Receiver density J = %.6e  at (x=%.1f m, z=%.1f m) after %d steps",
-               Float64(only(J)), x_target, z_target, nsteps)
+               Float64(only(J)), x_target, z_target, Nsteps)
 
 # ### Sensitivity visualization
 
@@ -358,7 +355,7 @@ sens_lim = maximum(abs, dδρ) + eps(Float64)
 fig_sens = Figure(size = (800, 350), fontsize = 12)
 Label(fig_sens[0, :],
       @sprintf("∂ρ / ∂ρ′₀  (receiver at x=%.0f m, z=%.0f m, t=%d Δt)",
-               x_target, z_target, nsteps),
+               x_target, z_target, Nsteps),
       fontsize = 14, tellwidth = false)
 ax_sens = Axis(fig_sens[1, 1]; xlabel = "x (m)", ylabel = "z (m)")
 hm = heatmap!(ax_sens, dδρ; colormap = :balance, colorrange = (-sens_lim, sens_lim))
