@@ -255,8 +255,12 @@ set!(δρᵢ, (x, z) -> δρ * gaussian(x, z))
 set!(dδρᵢ, 0)
 
 # A scratch field for the total initial density (background + perturbation).
+# It is mutated inside `loss` as the bridge between `δρᵢ` and the model, so it
+# must be `Duplicated` — Enzyme needs a shadow buffer to propagate the adjoint
+# from `set!(model; ρ = ρᵗ, …)` back through `parent(ρᵗ) .= …` to `dδρᵢ`.
 
-ρᵗ = CenterField(grid_ad)
+ρᵗ  = CenterField(grid_ad)
+dρᵗ = CenterField(grid_ad)
 
 # The shadow model stores accumulated adjoints for every prognostic field.
 
@@ -301,18 +305,19 @@ end
 # ### The gradient wrapper
 #
 # `grad_loss` zeroes the adjoint buffer and calls `Enzyme.autodiff` in reverse
-# mode.  The model and the perturbation field are `Duplicated` (primal + shadow);
-# everything else is `Const` (no gradient needed).
+# mode.  The model, the perturbation field, and the scratch total-density buffer
+# are `Duplicated` (primal + shadow); everything else is `Const`.
 
 function grad_loss(model, dmodel, δρᵢ, dδρᵢ,
-                   ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
+                   ρᵗ, dρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
     parent(dδρᵢ) .= 0
+    parent(dρᵗ) .= 0
     _, J = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
         Enzyme.Duplicated(model, dmodel),
         Enzyme.Duplicated(δρᵢ, dδρᵢ),
-        Enzyme.Const(ρᵗ),
+        Enzyme.Duplicated(ρᵗ, dρᵗ),
         Enzyme.Const(ρᵇᵍ),
         Enzyme.Const(uᵇᵍ),
         Enzyme.Const(θ₀),
@@ -333,12 +338,12 @@ end
 @info "Compiling differentiated model — this may take a minute..."
 compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
     model_ad, dmodel_ad, δρᵢ, dδρᵢ,
-    ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
+    ρᵗ, dρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
 
 @info "Running gradient..."
 dδρ, J = compiled_grad(
     model_ad, dmodel_ad, δρᵢ, dδρᵢ,
-    ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
+    ρᵗ, dρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
 
 xs = xnodes(grid_ad, Center())
 zs = znodes(grid_ad, Center())
@@ -352,6 +357,8 @@ z_target = zs[target_k]
 
 sensitivity = Array(interior(dδρ, :, 1, :))
 sens_min, sens_max = minimum(sensitivity), maximum(sensitivity)
+@info @sprintf("Sensitivity stats: min=%+.4e  max=%+.4e  at corners: (1,1)=%+.4e  (Nx,Nz)=%+.4e",
+               sens_min, sens_max, sensitivity[1,1], sensitivity[Nx, Nz])
 
 fig_sens = Figure(size = (800, 350), fontsize = 12)
 Label(fig_sens[0, :],
