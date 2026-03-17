@@ -9,9 +9,11 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
+using Oceananigans.Grids: Periodic
 using Reactant
 using Reactant: @trace
 using Enzyme
+using GPUArraysCore: @allowscalar
 using Statistics: mean
 using Test
 using CUDA
@@ -135,8 +137,10 @@ end
                 dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, ns)
                 @test loss_val > 0
                 @test isfinite(loss_val)
-                @test maximum(abs, interior(dθ)) > 0
-                @test !any(isnan, interior(dθ))
+                @allowscalar begin
+                    @test maximum(abs, interior(dθ)) > 0
+                    @test !any(isnan, interior(dθ))
+                end
             end
         end
     end
