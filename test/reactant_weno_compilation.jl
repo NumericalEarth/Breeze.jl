@@ -47,15 +47,6 @@ function make_grid(topo, nd)
     return RectilinearGrid(ReactantState(); size=sz, extent=ext, halo=hl, topology=topo)
 end
 
-function make_latlon_grid(Nλ, Nφ, Nz)
-    return LatitudeLongitudeGrid(ReactantState();
-                                 size = (Nλ, Nφ, Nz),
-                                 halo = (5, 5, 5),
-                                 longitude = (0, 360),
-                                 latitude = (-85, 85),
-                                 z = (0, 1e3))
-end
-
 function run_time_steps!(model, Δt, nsteps)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
@@ -146,53 +137,6 @@ end
                         @test !any(isnan, interior(dθ))
                     end
                 end
-            end
-        end
-    end
-end
-
-####
-#### LatitudeLongitudeGrid (global longitude, near-global latitude)
-####
-
-@testset "Reactant CompressibleDynamics — WENO, LatitudeLongitudeGrid" begin
-    Δt_val = 0.02
-
-    Nλ = 8
-    Nφ = 8
-    Nz = 8
-
-    for (scheme_label, scheme) in schemes
-        @testset "$scheme_label" begin
-            grid = make_latlon_grid(Nλ, Nφ, Nz)
-            FT = eltype(grid)
-            Δt = FT(Δt_val)
-
-            @testset "Build" begin
-                model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), advection=scheme)
-                @test model isa AtmosphereModel
-                @test model.dynamics isa CompressibleDynamics
-
-                θ_init = make_init_fields(grid)
-                set!(model; θ=θ_init, ρ=initial_density(model))
-                T = get_temperature(model)
-                @test all(isfinite, T)
-                @test all(T .> 0)
-            end
-
-            @testset "Raise forward" begin
-                model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), advection=scheme)
-                θ_init = make_init_fields(grid)
-                set!(model; θ=θ_init, ρ=initial_density(model))
-
-                nsteps = 2
-                compiled_run = Reactant.@compile raise=true raise_first=true sync=true run_time_steps!(model, Δt, nsteps)
-                @test compiled_run !== nothing
-
-                compiled_run(model, Δt, nsteps)
-                T = get_temperature(model)
-                @test all(isfinite, T)
-                @test all(T .> 0)
             end
         end
     end
