@@ -9,7 +9,6 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
-using Oceananigans.Grids: Periodic
 using Reactant
 using Reactant: @trace
 using Enzyme
