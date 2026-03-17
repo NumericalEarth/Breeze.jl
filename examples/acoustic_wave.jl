@@ -207,7 +207,8 @@ nothing #hide
 #
 # We use [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) for reverse-mode AD
 # and [Reactant.jl](https://github.com/EnzymeAD/Reactant.jl) to compile the
-# model to XLA so that Enzyme can differentiate through it.
+# model to XLA so that we can target multiple accelerators (GPU, TPU, etc...) and
+# differentiate through it with Enzyme.
 #
 # ### Why Reactant?
 #
@@ -273,8 +274,8 @@ dmodel_ad = Enzyme.make_zero(model_ad)
 
 Δt_ad    = FT(Δt)
 nsteps   = (isqrt(nsteps_fwd - 1) + 1)^2
-target_i = Int(clamp(round(0.75Nx), 1, Nx))
-target_k = Int(clamp(round(0.35Nz), 1, Nz))
+target_i = round(Int, 0.75Nx)
+target_k = round(Int, 0.35Nz)
 
 # ### Defining the objective
 #
@@ -352,8 +353,7 @@ z_target = zs[target_k]
 
 # ### Sensitivity visualization
 
-sensitivity = Array(interior(dδρ, :, 1, :))
-sens_lim = max(maximum(abs, sensitivity), eps(Float64))
+sens_lim = maximum(abs, dδρ) + eps(Float64)
 
 fig_sens = Figure(size = (800, 350), fontsize = 12)
 Label(fig_sens[0, :],
@@ -361,7 +361,7 @@ Label(fig_sens[0, :],
                x_target, z_target, nsteps),
       fontsize = 14, tellwidth = false)
 ax_sens = Axis(fig_sens[1, 1]; xlabel = "x (m)", ylabel = "z (m)")
-hm = heatmap!(ax_sens, xs, zs, sensitivity; colormap = :balance, colorrange = (-sens_lim, sens_lim))
+hm = heatmap!(ax_sens, dδρ; colormap = :balance, colorrange = (-sens_lim, sens_lim))
 scatter!(ax_sens, [x_target], [z_target]; color = :black, marker = :star5,
          markersize = 14, label = "receiver")
 axislegend(ax_sens; position = :rt)
