@@ -14,10 +14,10 @@ using Adapt: Adapt
 
 struct RelaxationForcing{R, TF, Cl, D, F, RC, TS, ZB}
     reference        :: R    # FieldTimeSeries of the specific variable ϕᵣ
-    target           :: TF   # Field of ϕᵣ interpolated to current time, horizontally averaged to a single column in profile mode; Nothing pre-materialization
-    clock            :: Cl   # Model Clock; Nothing pre-materialization
-    density          :: D    # Reference density ρᵣ(z); Nothing pre-materialization
-    current_field    :: F    # Specific field ϕ (3D) or Average(ϕ) (profile); Nothing pre-materialization
+    target           :: TF   # Field of ϕᵣ interpolated to current time, horizontally averaged to a single column in profile mode
+    clock            :: Cl   # Model Clock
+    density          :: D    # Reference density ρᵣ(z)
+    current_field    :: F    # Specific field ϕ (3D) or Average(ϕ) (profile)
     time_scale       :: TS   # Relaxation time scale (seconds)
     reference_column :: RC   # Nothing (3D mode) or NTuple{2,Int} (profile mode)
     z_bottom         :: ZB   # Height below which no nudging is applied (meters)
