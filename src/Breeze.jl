@@ -1,6 +1,6 @@
 """
-Julia package for finite volume GPU and CPU large eddy simulations (LES)
-of atmospheric flows. The abstractions, design, and finite volume engine
+Julia package for finite-volume GPU and CPU large eddy simulations (LES)
+of atmospheric flows. The abstractions, design, and finite-volume engine
 are based on Oceananigans.
 """
 module Breeze
@@ -10,11 +10,16 @@ export
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
+    ExnerReferenceState,
+    compute_reference_state!,
+    set_to_mean!,
     surface_density,
     AnelasticDynamics,
     AnelasticModel,
     CompressibleDynamics,
     CompressibleModel,
+    SplitExplicitTimeDiscretization,
+    ExplicitTimeStepping,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -52,11 +57,16 @@ export
     surface_precipitation_flux,
     total_pressure,
     specific_humidity,
+    moisture_prognostic_name,
+    moisture_specific_name,
+    specific_prognostic_moisture,
 
     # Thermodynamics
     temperature,
     supersaturation,
     saturation_specific_humidity,
+    adiabatic_hydrostatic_density,
+    dry_air_gas_constant,
     PlanarLiquidSurface,
     PlanarIceSurface,
 
@@ -81,7 +91,7 @@ export
     BulkSensibleHeatFlux,
     BulkVaporFlux,
     PolynomialCoefficient,
-    DefaultStabilityFunction,
+    FittedStabilityFunction,
     default_neutral_drag_polynomial,
     default_neutral_sensible_heat_polynomial,
     default_neutral_latent_heat_polynomial,
@@ -95,11 +105,16 @@ export
 
     # TimeSteppers
     SSPRungeKutta3,
+    AcousticSSPRungeKutta3,
+    AcousticRungeKutta3,
+    AcousticSubstepper,
 
     # ParcelDynamics
     ParcelDynamics,
     ParcelModel,
-    ParcelState
+    ParcelState,
+    PrescribedVerticalVelocity,
+    PrognosticVerticalVelocity
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
@@ -181,10 +196,14 @@ include("AnelasticEquations/AnelasticEquations.jl")
 using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 
 include("CompressibleEquations/CompressibleEquations.jl")
-using .CompressibleEquations: CompressibleDynamics, CompressibleModel
+using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
+                              SplitExplicitTimeDiscretization, ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
+
+include("TimeSteppers/TimeSteppers.jl")
+using .TimeSteppers
 
 include("ParcelModels/ParcelModels.jl")
 using .ParcelModels
@@ -206,8 +225,5 @@ using .Forcings
 
 include("VerticalGrids.jl")
 using .VerticalGrids
-
-include("TimeSteppers/TimeSteppers.jl")
-using .TimeSteppers
 
 end # module Breeze

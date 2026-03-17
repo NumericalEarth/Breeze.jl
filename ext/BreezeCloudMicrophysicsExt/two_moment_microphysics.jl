@@ -121,11 +121,12 @@ Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) 
 - `aerosol_activation`: `AerosolActivation` parameters for cloud droplet nucleation (or `nothing` to disable)
 
 # References
+
+* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
+  2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
     parameterization for mixed-phase clouds. Part 1: Model description.
     Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
-* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
-  2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 """
 struct TwoMomentCategories{W, AP, LV, RV, AA}
     warm_processes :: W
@@ -260,6 +261,7 @@ See the [CloudMicrophysics.jl 2M documentation](https://clima.github.io/CloudMic
 for details on the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) scheme.
 
 # References
+
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
     parameterization for mixed-phase clouds. Part 1: Model description.
     Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
@@ -394,51 +396,59 @@ end
     sb = categories.warm_processes
 
     # Cloud liquid terminal velocities: (number-weighted, mass-weighted)
-    vt_cloud = CM2.cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
-                                           max(0, qᶜˡ), ρ, Nᶜˡ)
-    wᶜˡₙ = -vt_cloud[1]  # number-weighted, negative = downward
-    wᶜˡ = -vt_cloud[2]   # mass-weighted
+    𝕎_cl = CM2.cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
+                                       max(0, qᶜˡ), ρ, Nᶜˡ)
+
+    wᶜˡₙ = -𝕎_cl[1]  # number-weighted, negative = downward
+    wᶜˡ = -𝕎_cl[2]   # mass-weighted
 
     # Rain terminal velocities: (number-weighted, mass-weighted)
-    vt_rain = CM2.rain_terminal_velocity(sb, categories.rain_fall_velocity,
-                                         max(0, qʳ), ρ, Nʳ)
-    wʳₙ = -vt_rain[1]  # number-weighted
-    wʳ = -vt_rain[2]   # mass-weighted
+    qʳ⁺ = max(0, qʳ)
+    𝕎  = CM2.rain_terminal_velocity(sb, categories.rain_fall_velocity, qʳ⁺, ρ, Nʳ)
+
+    wʳₙ = -𝕎[1]  # number-weighted
+    wʳ = -𝕎[2]   # mass-weighted
 
     # Apply bottom boundary condition
     bc = bμp.precipitation_boundary_condition
-    wᶜˡ₀ = bottom_terminal_velocity(bc, wᶜˡ)
+    wᶜˡ₀  = bottom_terminal_velocity(bc, wᶜˡ)
     wᶜˡₙ₀ = bottom_terminal_velocity(bc, wᶜˡₙ)
-    wʳ₀ = bottom_terminal_velocity(bc, wʳ)
-    wʳₙ₀ = bottom_terminal_velocity(bc, wʳₙ)
+    wʳ₀   = bottom_terminal_velocity(bc, wʳ)
+    wʳₙ₀  = bottom_terminal_velocity(bc, wʳₙ)
 
     @inbounds begin
-        μ.wᶜˡ[i, j, k] = ifelse(k == 1, wᶜˡ₀, wᶜˡ)
+        μ.wᶜˡ[i, j, k]  = ifelse(k == 1, wᶜˡ₀,  wᶜˡ)
         μ.wᶜˡₙ[i, j, k] = ifelse(k == 1, wᶜˡₙ₀, wᶜˡₙ)
-        μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
-        μ.wʳₙ[i, j, k] = ifelse(k == 1, wʳₙ₀, wʳₙ)
+        μ.wʳ[i, j, k]   = ifelse(k == 1, wʳ₀,   wʳ)
+        μ.wʳₙ[i, j, k]  = ifelse(k == 1, wʳₙ₀,  wʳₙ)
     end
 
     return nothing
 end
 
 #####
+##### specific_prognostic_moisture_from_total: convert qᵗ to qᵛᵉ
+#####
+
+# NE two-moment: qᵛ = qᵗ - qᶜˡ - qʳ (subtract all condensate)
+@inline AtmosphereModels.specific_prognostic_moisture_from_total(bμp::WPNE2M, qᵗ, ℳ::WarmPhaseTwoMomentState) = max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
+
+#####
 ##### Moisture fraction computation
 #####
 
-@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qᵛ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
-    qᵛ = qᵗ - qˡ
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
-# Gridless version for parcel models
-@inline function AtmosphereModels.moisture_fractions(bμp::WPNE2M, ℳ::WarmPhaseTwoMomentState, qᵗ)
+# Gridless version for parcel models.
+# Input qᵛᵉ is scheme-dependent specific moisture (vapor for non-equilibrium).
+@inline function AtmosphereModels.moisture_fractions(bμp::WPNE2M, ℳ::WarmPhaseTwoMomentState, qᵛᵉ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
-    qᵛ = qᵗ - qˡ
-    return MoistureMassFractions(qᵛ, qˡ)
+    return MoistureMassFractions(qᵛᵉ, qˡ)
 end
 
 #####
@@ -446,7 +456,7 @@ end
 #####
 
 # Non-equilibrium: no adjustment (cloud liquid is prognostic)
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::WPNE2M, qᵗ, constants) = 𝒰₀
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::WPNE2M, qᵛ, constants) = 𝒰₀
 
 #####
 ##### Microphysical velocities for advection

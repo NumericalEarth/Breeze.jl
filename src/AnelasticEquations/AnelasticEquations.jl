@@ -24,7 +24,6 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field
 using Oceananigans.Fields: set!
 using Oceananigans.Grids: topology, ZDirection, inactive_cell, FullyConnected
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.Models.NonhydrostaticModels: NonhydrostaticModels
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
 using Oceananigans.DistributedComputations: DistributedFourierTridiagonalPoissonSolver, reconstruct_global_grid

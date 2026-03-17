@@ -43,6 +43,13 @@ using RRTMGP
             @test radiation.downwelling_longwave_flux !== nothing
             @test radiation.downwelling_shortwave_flux !== nothing
 
+            # Check flux divergence field
+            @test radiation.flux_divergence !== nothing
+            @test size(radiation.flux_divergence) == (1, 1, Nz)
+
+            # Check schedule
+            @test radiation.schedule !== nothing
+
             # Check flux fields have correct size (Nz+1 levels)
             @test size(radiation.upwelling_longwave_flux) == (1, 1, Nz + 1)
             @test size(radiation.downwelling_longwave_flux) == (1, 1, Nz + 1)

@@ -1,5 +1,6 @@
 import Breeze
 using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests
+using Test
 
 # Start with autodiscovered tests
 testsuite = find_tests(@__DIR__)
@@ -7,11 +8,14 @@ testsuite = find_tests(@__DIR__)
 # Parse arguments
 args = parse_args(ARGS)
 
+const REACTANT_COMPAT = !((VERSION >= v"1.12") || (Base.JLOptions().check_bounds == 1))
+
 if filter_tests!(testsuite, args)
-    # Skip Enzyme/Reactant tests in Julia v1.12+ until upstream
-    # support is improved.
-    if VERSION >= v"1.12"
-        delete!(testsuite, "reactant_compilation")
+    # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
+    # limitation) and Julia < 1.12 until upstream support is improved.
+    if !REACTANT_COMPAT
+        delete!(testsuite, "reactant_centered_compilation")
+        delete!(testsuite, "reactant_weno_compilation")
     end
 end
 
