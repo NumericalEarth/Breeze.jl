@@ -37,7 +37,7 @@ jobs:
         include:
           - dynamics: 'anelastic'
             microphysics: 'nothing'
-            grid: '128^3, 512x512x256, 768x768x256'
+            grid: '256x256x128, 512x512x256, 768x768x256'
             advection: 'WENO5, WENO9'
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
