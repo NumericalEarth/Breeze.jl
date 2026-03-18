@@ -144,7 +144,7 @@ end
                                 J₊ = loss(make_fd_model(), θ_fd, Δt, Ns)
                                 fd = (J₊ - J₀) / ε
                                 ad = ad_grad[ic, jc, kc]
-                                @test ad ≈ fd rtol=0.01
+                                @test ad ≈ fd rtol=0.001
                             end
                         end
                     end
