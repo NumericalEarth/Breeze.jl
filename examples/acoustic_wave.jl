@@ -92,7 +92,7 @@ set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
 
 Δx, Δz = Lx / Nx, Lz / Nz
 Δt = 0.5 * min(Δx, Δz) / (ℂᵃᶜ + Uᵢ(Lz))
-stop_time = 0.01  # seconds
+stop_time = 1  # seconds
 
 simulation = Simulation(model; Δt, stop_time)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
@@ -299,7 +299,8 @@ function loss(model, δρᵢ, ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, 
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
-    return interior(model.dynamics.density, it, 1, kt)
+    return @allowscalar interior(model.dynamics.density)[it, 1, kt]^2
+    # return mean(interior(model.dynamics.density) .^ 2)
 end
 
 # ### The gradient wrapper
@@ -309,15 +310,14 @@ end
 # are `Duplicated` (primal + shadow); everything else is `Const`.
 
 function grad_loss(model, dmodel, δρᵢ, dδρᵢ,
-                   ρᵗ, dρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
+                   ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
     parent(dδρᵢ) .= 0
-    parent(dρᵗ) .= 0
     _, J = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
         Enzyme.Duplicated(model, dmodel),
         Enzyme.Duplicated(δρᵢ, dδρᵢ),
-        Enzyme.Duplicated(ρᵗ, dρᵗ),
+        Enzyme.Const(ρᵗ),
         Enzyme.Const(ρᵇᵍ),
         Enzyme.Const(uᵇᵍ),
         Enzyme.Const(θ₀),
@@ -338,12 +338,12 @@ end
 @info "Compiling differentiated model — this may take a minute..."
 compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
     model_ad, dmodel_ad, δρᵢ, dδρᵢ,
-    ρᵗ, dρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
+    ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
 
 @info "Running gradient..."
 dδρ, J = compiled_grad(
     model_ad, dmodel_ad, δρᵢ, dδρᵢ,
-    ρᵗ, dρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
+    ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
 
 xs = xnodes(grid_ad, Center())
 zs = znodes(grid_ad, Center())
@@ -395,21 +395,26 @@ nothing #hide
 # from `run!(simulation)` (clock iteration, tendencies, etc.) that `set!` alone
 # does not fully reset.
 
-ε_fd     = 1e-7
-model_fd = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+ε_fd     = 1e-4
 δρᵢ_fd   = CenterField(grid); set!(δρᵢ_fd, (x, z) -> δρ * gaussian(x, z))
-ρᵗ_fd    = CenterField(grid)
 ρᵇᵍ_fd   = CenterField(grid); set!(ρᵇᵍ_fd, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
 uᵇᵍ_fd   = XFaceField(grid);  set!(uᵇᵍ_fd, (x, z) -> Uᵢ(z))
 
-J₀ = only(loss(model_fd, δρᵢ_fd, ρᵗ_fd, ρᵇᵍ_fd, uᵇᵍ_fd, θ₀, Δt, Nsteps, target_i, target_k))
+function eval_fd_loss(δρ_field)
+    model_fd = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+    ρᵗ_fd = CenterField(grid)
+    return only(loss(model_fd, δρ_field, ρᵗ_fd, ρᵇᵍ_fd, uᵇᵍ_fd, θ₀, Δt, Nsteps, target_i, target_k))
+end
+
+J₀ = eval_fd_loss(δρᵢ_fd)
 @info @sprintf("FD baseline J₀ = %.6e  (Reactant J = %.6e, rel.diff = %.2e)",
                J₀, Float64(only(J)), abs(J₀ - Float64(only(J))) / (abs(J₀) + eps()))
 
 function fd_check(ip, kp)
-    interior(δρᵢ_fd, ip, 1, kp)[] += ε_fd
-    J₊ = only(loss(model_fd, δρᵢ_fd, ρᵗ_fd, ρᵇᵍ_fd, uᵇᵍ_fd, θ₀, Δt, Nsteps, target_i, target_k))
-    interior(δρᵢ_fd, ip, 1, kp)[] -= ε_fd
+    δρᵢ_pert = CenterField(grid)
+    parent(δρᵢ_pert) .= parent(δρᵢ_fd)
+    interior(δρᵢ_pert, ip, 1, kp)[] += ε_fd
+    J₊ = eval_fd_loss(δρᵢ_pert)
     return (J₊ - J₀) / ε_fd
 end
 
