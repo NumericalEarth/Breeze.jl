@@ -300,7 +300,6 @@ function loss(model, δρᵢ, ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, 
         time_step!(model, Δt)
     end
     return @allowscalar interior(model.dynamics.density)[it, 1, kt]^2
-    # return mean(interior(model.dynamics.density) .^ 2)
 end
 
 # ### The gradient wrapper
@@ -383,10 +382,11 @@ nothing #hide
 # spatial grid. A fresh model is built per FD evaluation to avoid hidden state.
 # The same `loss` runs on CPU since `@trace` is a no-op outside Reactant.
 
-ε_fd = 1e-4
+ε_fd = 1e-6
 stride_x, stride_z = 8, 8
-sample_i = collect(1:stride_x:Nx)
-sample_k = collect(1:stride_z:Nz)
+sample_i = 1:stride_x:Nx
+sample_k = 1:stride_z:Nz
+n_samples = length(sample_i) * length(sample_k)
 
 δρᵢ_fd = CenterField(grid); set!(δρᵢ_fd, (x, z) -> δρ * gaussian(x, z))
 ρᵇᵍ_fd = CenterField(grid); set!(ρᵇᵍ_fd, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
@@ -394,64 +394,54 @@ uᵇᵍ_fd = XFaceField(grid);  set!(uᵇᵍ_fd, (x, z) -> Uᵢ(z))
 
 function eval_fd_loss(δρ_field)
     m = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
-    ρᵗ_scratch = CenterField(grid)
-    return only(loss(m, δρ_field, ρᵗ_scratch, ρᵇᵍ_fd, uᵇᵍ_fd, θ₀, Δt, Nsteps, target_i, target_k))
+    return only(loss(m, δρ_field, CenterField(grid), ρᵇᵍ_fd, uᵇᵍ_fd, θ₀, Δt, Nsteps, target_i, target_k))
 end
 
 J₀ = eval_fd_loss(δρᵢ_fd)
 @info @sprintf("FD baseline J₀ = %.6e  (AD J = %.6e,  Δ = %.2e)",
                J₀, Float64(only(J)), abs(J₀ - Float64(only(J))) / (abs(J₀) + eps()))
 
+@info @sprintf("Coarse FD sweep: stride %d×%d, %d samples, ε = %.0e",
+               stride_x, stride_z, n_samples, ε_fd)
+
 fd_coarse = zeros(length(sample_i), length(sample_k))
-ad_coarse = zeros(length(sample_i), length(sample_k))
+ad_coarse = [sensitivity[i, k] for i in sample_i, k in sample_k]
 
-@info @sprintf("Running coarse FD sweep (%d×%d stride, %d samples)...",
-               stride_x, stride_z, length(sample_i) * length(sample_k))
-
-@time for (ii, i) in enumerate(sample_i), (kk, k) in enumerate(sample_k)
-    δρ_pert = CenterField(grid)
-    parent(δρ_pert) .= parent(δρᵢ_fd)
+for (ii, i) in enumerate(sample_i), (kk, k) in enumerate(sample_k)
+    δρ_pert = CenterField(grid); parent(δρ_pert) .= parent(δρᵢ_fd)
     interior(δρ_pert, i, 1, k)[] += ε_fd
     fd_coarse[ii, kk] = (eval_fd_loss(δρ_pert) - J₀) / ε_fd
-    ad_coarse[ii, kk] = sensitivity[i, k]
 end
 
-abs_err  = abs.(fd_coarse .- ad_coarse)
-rel_err_field = abs_err ./ (abs.(fd_coarse) .+ eps())
-
-@info @sprintf("FD-vs-AD stats:  mean|err|=%.3e  max|err|=%.3e  median(rel)=%.3e",
-               sum(abs_err) / length(abs_err), maximum(abs_err),
-               sort(vec(rel_err_field))[div(length(rel_err_field), 2)])
+rel_err_coarse = abs.(fd_coarse .- ad_coarse) ./ (abs.(fd_coarse) .+ eps())
+rv = sort(vec(rel_err_coarse))
+@info @sprintf("Rel. error: min=%.2e  median=%.2e  mean=%.2e  max=%.2e",
+               rv[1], rv[div(end,2)], sum(rv)/length(rv), rv[end])
 
 # ### Visualization
 
-xs_c = xs[sample_i]
-zs_c = zs[sample_k]
-diff_coarse = fd_coarse .- ad_coarse
-all_vals = vcat(vec(ad_coarse), vec(fd_coarse), vec(diff_coarse))
-cmax = maximum(abs, all_vals)
-crange = (-cmax, cmax)
+xs_c, zs_c = xs[sample_i], zs[sample_k]
+cmax = max(maximum(abs, ad_coarse), maximum(abs, fd_coarse))
 
 fig_fd = Figure(size = (1400, 350), fontsize = 12)
 Label(fig_fd[0, 1:3],
       @sprintf("AD vs FD  (stride %d×%d,  ε = %.0e,  %d samples)",
-               stride_x, stride_z, ε_fd, length(sample_i) * length(sample_k)),
+               stride_x, stride_z, ε_fd, n_samples),
       fontsize = 14, tellwidth = false)
 
-ax1 = Axis(fig_fd[1, 1]; xlabel="x (m)", ylabel="z (m)", title="AD (coarse)")
-hm1 = heatmap!(ax1, xs_c, zs_c, ad_coarse; colormap=:balance, colorrange=crange)
-scatter!(ax1, [x_target], [z_target]; color=:black, marker=:star5, markersize=12)
+for (col, data, title) in [(1, ad_coarse, "AD (coarse)"),
+                            (2, fd_coarse, "FD (coarse)")]
+    local ax = Axis(fig_fd[1, col]; xlabel="x (m)", ylabel="z (m)", title)
+    heatmap!(ax, xs_c, zs_c, data; colormap=:balance, colorrange=(-cmax, cmax))
+    scatter!(ax, [x_target], [z_target]; color=:black, marker=:star5, markersize=12)
+end
+Colorbar(fig_fd[1, 3], limits=(-cmax, cmax), colormap=:balance, label="∂J/∂ρ′₀")
 
-ax2 = Axis(fig_fd[1, 2]; xlabel="x (m)", ylabel="z (m)", title="FD (coarse)")
-hm2 = heatmap!(ax2, xs_c, zs_c, fd_coarse; colormap=:balance, colorrange=crange)
-scatter!(ax2, [x_target], [z_target]; color=:black, marker=:star5, markersize=12)
-
-Colorbar(fig_fd[1, 3], hm1; label="∂J/∂ρ′₀")
-
-ax3 = Axis(fig_fd[1, 4]; xlabel="x (m)", ylabel="z (m)", title="|FD − AD| / |FD|")
-hm3 = heatmap!(ax3, xs_c, zs_c, rel_err_field; colormap=:magma)
+ax3 = Axis(fig_fd[1, 4]; xlabel="x (m)", ylabel="z (m)", title="log₁₀ rel. error")
+log_rel = log10.(clamp.(rel_err_coarse, 1e-10, Inf))
+hm3 = heatmap!(ax3, xs_c, zs_c, log_rel; colormap=:inferno)
 scatter!(ax3, [x_target], [z_target]; color=:white, marker=:star5, markersize=12)
-Colorbar(fig_fd[1, 5], hm3; label="relative error")
+Colorbar(fig_fd[1, 5], hm3; label="log₁₀(|FD−AD|/|FD|)")
 
 save("acoustic_wave_fd_comparison.png", fig_fd; px_per_unit=2)
 @info "Saved acoustic_wave_fd_comparison.png"
