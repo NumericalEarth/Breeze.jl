@@ -15,7 +15,6 @@ export SSPRungeKutta3, AcousticSSPRungeKutta3, AcousticRungeKutta3,
        maybe_initialize_state!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
-using Oceananigans: AbstractModel
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  AbstractTimeStepper,
                                  update_state!, maybe_initialize_state!

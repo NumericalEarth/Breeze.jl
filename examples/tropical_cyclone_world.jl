@@ -26,6 +26,10 @@ using Printf
 using Random
 
 Random.seed!(2019)
+if CUDA.functional()
+    CUDA.seed!(2019)
+end
+
 Oceananigans.defaults.FloatType = Float32
 
 # ## Domain and grid
@@ -116,11 +120,11 @@ Uᵍ = 1
                                                                gustiness = Uᵍ,
                                                                surface_temperature = T₀))
 
-ρqᵗ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = β*Cᵀ,
-                                                         gustiness = Uᵍ,
-                                                         surface_temperature = T₀))
+ρqᵉ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = β*Cᵀ,
+                                                        gustiness = Uᵍ,
+                                                        surface_temperature = T₀))
 
-boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs)
+boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs)
 nothing #hide
 
 # ## Radiative forcing
@@ -161,7 +165,7 @@ nothing #hide
 
 momentum_advection = WENO(order=9)
 scalar_advection = (ρθ = WENO(order=5),
-                    ρqᵗ = WENO(order=5, bounds=(0, 1)))
+                    ρqᵉ = WENO(order=5, bounds=(0, 1)))
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
@@ -195,6 +199,7 @@ set!(model, T = Tᵢ, qᵗ = qᵗᵢ)
 
 simulation = Simulation(model; Δt=1, stop_time=4days)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Output and progress
 
@@ -203,11 +208,11 @@ u, v, w = model.velocities
 s = @at (Center, Center, Center) sqrt(u^2 + v^2)
 s₀ = Field(s, indices = (:, :, 1))
 
-ρqᵗ = model.moisture_density
+ρqᵉ = model.moisture_density
 ρe = static_energy_density(model)
 ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T₀, constants)
 𝒬ᵀ = BoundaryConditionOperation(ρe, :bottom, model)
-Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
+Jᵛ = BoundaryConditionOperation(ρqᵉ, :bottom, model)
 𝒬 = Field(𝒬ᵀ + ℒˡ * Jᵛ)
 
 function progress(sim)
@@ -231,15 +236,15 @@ add_callback!(simulation, progress, IterationInterval(1000))
 
 # Horizontally-averaged profiles.
 
-qᵗ = model.specific_moisture
+qᵛ = specific_humidity(model)
 ℋ = RelativeHumidity(model)
 
 avg_outputs = (θ = Average(θ, dims=(1, 2)),
-               qᵗ = Average(qᵗ, dims=(1, 2)),
+               qᵛ = Average(qᵛ, dims=(1, 2)),
                ℋ = Average(ℋ, dims=(1, 2)),
                w² = Average(w^2, dims=(1, 2)),
                wθ = Average(w * θ, dims=(1, 2)),
-               wqᵗ = Average(w * qᵗ, dims=(1, 2)))
+               wqᵛ = Average(w * qᵛ, dims=(1, 2)))
 
 function save_parameters(file, model)
     file["parameters/β"] = β
@@ -277,11 +282,11 @@ run!(simulation)
 # and the vertical potential temperature flux.
 
 θt = FieldTimeSeries("tc_world_profiles.jld2", "θ")
-qᵗt = FieldTimeSeries("tc_world_profiles.jld2", "qᵗ")
+qᵛt = FieldTimeSeries("tc_world_profiles.jld2", "qᵛ")
 ℋt = FieldTimeSeries("tc_world_profiles.jld2", "ℋ")
 w²t = FieldTimeSeries("tc_world_profiles.jld2", "w²")
 wθt = FieldTimeSeries("tc_world_profiles.jld2", "wθ")
-wqᵗt = FieldTimeSeries("tc_world_profiles.jld2", "wqᵗ")
+wqᵛt = FieldTimeSeries("tc_world_profiles.jld2", "wqᵛ")
 
 times = θt.times
 Nt = length(times)
@@ -289,11 +294,11 @@ Nt = length(times)
 fig = Figure(size=(900, 400), fontsize=10)
 
 axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
-axqᵗ = Axis(fig[1, 2], xlabel="qᵗ (kg/kg)")
+axqᵛ = Axis(fig[1, 2], xlabel="qᵛ (kg/kg)")
 axℋ = Axis(fig[1, 3], xlabel="ℋ")
 axw² = Axis(fig[1, 4], xlabel="w² (m²/s²)")
 axwθ = Axis(fig[1, 5], xlabel="wθ (m²/s² K)")
-axwqᵗ = Axis(fig[1, 6], xlabel="wqᵗ (m²/s² kg/kg)", ylabel="z (m)", yaxisposition=:right)
+axwqᵛ = Axis(fig[1, 6], xlabel="wqᵛ (m²/s² kg/kg)", ylabel="z (m)", yaxisposition=:right)
 
 default_colours = Makie.wong_colors()
 colors = [default_colours[mod1(n, length(default_colours))] for n in 1:Nt]
@@ -303,20 +308,20 @@ alpha = 0.6
 for n in 1:Nt
     label = n == 1 ? "initial" : "t = $(prettytime(times[n]))"
     lines!(axθ, θt[n], color=colors[n]; label, linewidth, alpha)
-    lines!(axqᵗ, qᵗt[n], color=colors[n]; linewidth, alpha)
+    lines!(axqᵛ, qᵛt[n], color=colors[n]; linewidth, alpha)
     lines!(axℋ, ℋt[n], color=colors[n]; linewidth, alpha)
     lines!(axw², w²t[n], color=colors[n]; linewidth, alpha)
     lines!(axwθ, wθt[n], color=colors[n]; linewidth, alpha)
-    lines!(axwqᵗ, wqᵗt[n], color=colors[n]; linewidth, alpha)
+    lines!(axwqᵛ, wqᵛt[n], color=colors[n]; linewidth, alpha)
 end
 
-for ax in (axqᵗ, axℋ, axw², axwθ)
+for ax in (axqᵛ, axℋ, axw², axwθ)
     hideydecorations!(ax, grid=false)
     hidespines!(ax, :t, :r, :l)
 end
 
 hidespines!(axθ, :t, :r)
-hidespines!(axwqᵗ, :t, :l)
+hidespines!(axwqᵛ, :t, :l)
 xlims!(axℋ, -0.1, 1.1)
 
 Legend(fig[2, :], axθ, labelsize=12, orientation=:horizontal)
