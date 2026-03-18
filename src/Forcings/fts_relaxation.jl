@@ -200,7 +200,7 @@ end
     z  = znode(i, j, k, grid, Center(), Center(), Center())
     ϕ̄  = @inbounds f.current_field[1, 1, k]
     ϕᵣ = @inbounds f.target[1, 1, k]
-    ρ  = @inbounds f.density[1, 1, k]
+    ρ  = @inbounds f.density[i, j, k]
     tendency = -ρ * (ϕ̄ - ϕᵣ) / f.time_scale
     return ifelse(z < f.z_bottom, 0, tendency)
 end
