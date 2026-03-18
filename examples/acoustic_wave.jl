@@ -92,7 +92,7 @@ set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
 
 Δx, Δz = Lx / Nx, Lz / Nz
 Δt = 0.5 * min(Δx, Δz) / (ℂᵃᶜ + Uᵢ(Lz))
-stop_time = 0.01  # seconds
+stop_time = 1  # seconds
 
 simulation = Simulation(model; Δt, stop_time)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
@@ -299,7 +299,7 @@ function loss(model, δρᵢ, ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, 
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
-    return interior(model.dynamics.density, it, 1, kt)
+    return @allowscalar interior(model.dynamics.density)[it, 1, kt]^2
 end
 
 # ### The gradient wrapper
@@ -309,15 +309,14 @@ end
 # are `Duplicated` (primal + shadow); everything else is `Const`.
 
 function grad_loss(model, dmodel, δρᵢ, dδρᵢ,
-                   ρᵗ, dρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
+                   ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
     parent(dδρᵢ) .= 0
-    parent(dρᵗ) .= 0
     _, J = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
         Enzyme.Duplicated(model, dmodel),
         Enzyme.Duplicated(δρᵢ, dδρᵢ),
-        Enzyme.Duplicated(ρᵗ, dρᵗ),
+        Enzyme.Const(ρᵗ),
         Enzyme.Const(ρᵇᵍ),
         Enzyme.Const(uᵇᵍ),
         Enzyme.Const(θ₀),
@@ -338,12 +337,12 @@ end
 @info "Compiling differentiated model — this may take a minute..."
 compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
     model_ad, dmodel_ad, δρᵢ, dδρᵢ,
-    ρᵗ, dρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
+    ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
 
 @info "Running gradient..."
 dδρ, J = compiled_grad(
     model_ad, dmodel_ad, δρᵢ, dδρᵢ,
-    ρᵗ, dρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
+    ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
 
 xs = xnodes(grid_ad, Center())
 zs = znodes(grid_ad, Center())
@@ -379,54 +378,72 @@ nothing #hide
 
 # ## Finite-difference verification
 #
-# As a sanity check, we compare the AD gradient against one-sided finite
-# differences at two grid cells:
-# ```math
-# \frac{J(\rho'_0 + \varepsilon\,\mathbf{e}_{i,k}) \;-\; J(\rho'_0)}{\varepsilon}
-# \;\approx\;
-# \left.\frac{\partial J}{\partial \rho'_{0,\,i,k}}\right|_{\text{AD}}
-# ```
-# No new grid or model is needed: the original CPU `model` and `grid` from the
-# first half of this example are still in scope. The `@trace` loop inside `loss`
-# is a no-op outside of Reactant compilation, so the call runs as ordinary Julia
-# on CPU.
-#
-# A completely fresh model is needed — the original `model` carries hidden state
-# from `run!(simulation)` (clock iteration, tendencies, etc.) that `set!` alone
-# does not fully reset.
+# We compare the AD gradient against one-sided finite differences on a coarse
+# spatial grid. A fresh model is built per FD evaluation to avoid hidden state.
+# The same `loss` runs on CPU since `@trace` is a no-op outside Reactant.
 
-ε_fd     = 1e-7
-model_fd = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
-δρᵢ_fd   = CenterField(grid); set!(δρᵢ_fd, (x, z) -> δρ * gaussian(x, z))
-ρᵗ_fd    = CenterField(grid)
-ρᵇᵍ_fd   = CenterField(grid); set!(ρᵇᵍ_fd, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
-uᵇᵍ_fd   = XFaceField(grid);  set!(uᵇᵍ_fd, (x, z) -> Uᵢ(z))
+ε_fd = 1e-4
+stride_x, stride_z = 8, 8
+sample_i = 1:stride_x:Nx
+sample_k = 1:stride_z:Nz
+n_samples = length(sample_i) * length(sample_k)
 
-J₀ = only(loss(model_fd, δρᵢ_fd, ρᵗ_fd, ρᵇᵍ_fd, uᵇᵍ_fd, θ₀, Δt, Nsteps, target_i, target_k))
-@info @sprintf("FD baseline J₀ = %.6e  (Reactant J = %.6e, rel.diff = %.2e)",
-               J₀, Float64(only(J)), abs(J₀ - Float64(only(J))) / (abs(J₀) + eps()))
+δρᵢ_fd = CenterField(grid); set!(δρᵢ_fd, (x, z) -> δρ * gaussian(x, z))
+ρᵇᵍ_fd = CenterField(grid); set!(ρᵇᵍ_fd, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
+uᵇᵍ_fd = XFaceField(grid);  set!(uᵇᵍ_fd, (x, z) -> Uᵢ(z))
 
-function fd_check(ip, kp)
-    interior(δρᵢ_fd, ip, 1, kp)[] += ε_fd
-    J₊ = only(loss(model_fd, δρᵢ_fd, ρᵗ_fd, ρᵇᵍ_fd, uᵇᵍ_fd, θ₀, Δt, Nsteps, target_i, target_k))
-    interior(δρᵢ_fd, ip, 1, kp)[] -= ε_fd
-    return (J₊ - J₀) / ε_fd
+function eval_fd_loss(δρ_field)
+    m = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+    return only(loss(m, δρ_field, CenterField(grid), ρᵇᵍ_fd, uᵇᵍ_fd, θ₀, Δt, Nsteps, target_i, target_k))
 end
 
-# Probe 1: the receiver cell.
+J₀ = eval_fd_loss(δρᵢ_fd)
+@info @sprintf("FD baseline J₀ = %.6e  (AD J = %.6e,  Δ = %.2e)",
+               J₀, Float64(only(J)), abs(J₀ - Float64(only(J))) / (abs(J₀) + eps()))
 
-ad₁, fd₁ = sensitivity[target_i, target_k], fd_check(target_i, target_k)
+@info @sprintf("Coarse FD sweep: stride %d×%d, %d samples, ε = %.0e",
+               stride_x, stride_z, n_samples, ε_fd)
 
-# Probe 2: an unrelated point in the upper-left quadrant.
+fd_coarse = zeros(length(sample_i), length(sample_k))
+ad_coarse = [sensitivity[i, k] for i in sample_i, k in sample_k]
 
-probe_i, probe_k = round(Int, 0.25Nx), round(Int, 0.75Nz)
-ad₂, fd₂ = sensitivity[probe_i, probe_k], fd_check(probe_i, probe_k)
+for (ii, i) in enumerate(sample_i), (kk, k) in enumerate(sample_k)
+    δρ_pert = CenterField(grid); parent(δρ_pert) .= parent(δρᵢ_fd)
+    interior(δρ_pert, i, 1, k)[] += ε_fd
+    fd_coarse[ii, kk] = (eval_fd_loss(δρ_pert) - J₀) / ε_fd
+end
 
-rel_err(a, b) = abs(a - b) / (abs(a) + eps())
+rel_err_coarse = abs.(fd_coarse .- ad_coarse) ./ (abs.(fd_coarse) .+ eps())
+rv = sort(vec(rel_err_coarse))
+@info @sprintf("Rel. error: min=%.2e  median=%.2e  mean=%.2e  max=%.2e",
+               rv[1], rv[div(end,2)], sum(rv)/length(rv), rv[end])
 
-@info @sprintf("FD check — receiver (i=%d, k=%d): AD=%+.4e  FD=%+.4e  rel.err=%.2e",
-               target_i, target_k, ad₁, fd₁, rel_err(ad₁, fd₁))
-@info @sprintf("FD check — probe    (i=%d, k=%d): AD=%+.4e  FD=%+.4e  rel.err=%.2e",
-               probe_i, probe_k, ad₂, fd₂, rel_err(ad₂, fd₂))
+# ### Visualization
+
+xs_c, zs_c = xs[sample_i], zs[sample_k]
+cmax = max(maximum(abs, ad_coarse), maximum(abs, fd_coarse))
+
+fig_fd = Figure(size = (1400, 350), fontsize = 12)
+Label(fig_fd[0, 1:3],
+      @sprintf("AD vs FD  (stride %d×%d,  ε = %.0e,  %d samples)",
+               stride_x, stride_z, ε_fd, n_samples),
+      fontsize = 14, tellwidth = false)
+
+for (col, data, title) in [(1, ad_coarse, "AD (coarse)"),
+                            (2, fd_coarse, "FD (coarse)")]
+    local ax = Axis(fig_fd[1, col]; xlabel="x (m)", ylabel="z (m)", title)
+    heatmap!(ax, xs_c, zs_c, data; colormap=:balance, colorrange=(-cmax, cmax))
+    scatter!(ax, [x_target], [z_target]; color=:black, marker=:star5, markersize=12)
+end
+Colorbar(fig_fd[1, 3], limits=(-cmax, cmax), colormap=:balance, label="∂J/∂ρ′₀")
+
+ax3 = Axis(fig_fd[1, 4]; xlabel="x (m)", ylabel="z (m)", title="log₁₀ rel. error")
+log_rel = log10.(clamp.(rel_err_coarse, 1e-10, Inf))
+hm3 = heatmap!(ax3, xs_c, zs_c, log_rel; colormap=:inferno)
+scatter!(ax3, [x_target], [z_target]; color=:white, marker=:star5, markersize=12)
+Colorbar(fig_fd[1, 5], hm3; label="log₁₀(|FD−AD|/|FD|)")
+
+save("acoustic_wave_fd_comparison.png", fig_fd; px_per_unit=2)
+@info "Saved acoustic_wave_fd_comparison.png"
 
 nothing #hide
