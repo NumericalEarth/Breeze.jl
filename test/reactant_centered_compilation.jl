@@ -45,8 +45,8 @@ function make_grid(topo, nd; arch=ReactantState())
     return RectilinearGrid(arch; size=sz, extent=ext, topology=topo)
 end
 
-function run_time_steps!(model, Δt, nsteps)
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
+function run_time_steps!(model, Δt, Nsteps)
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
         time_step!(model, Δt)
     end
     return nothing
@@ -60,15 +60,15 @@ function make_init_fields(grid)
     return θ_init, dθ_init
 end
 
-function loss(model, θ_init, Δt, nsteps)
+function loss(model, θ_init, Δt, Nsteps)
     set!(model; θ=θ_init, ρ=1.0)
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
         time_step!(model, Δt)
     end
     return mean(interior(model.temperature) .^ 2)
 end
 
-function grad_loss(model, dmodel, θ_init, dθ_init, Δt, nsteps)
+function grad_loss(model, dmodel, θ_init, dθ_init, Δt, Nsteps)
     parent(dθ_init) .= 0
     _, loss_value = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
@@ -76,7 +76,7 @@ function grad_loss(model, dmodel, θ_init, dθ_init, Δt, nsteps)
         Enzyme.Duplicated(model, dmodel),
         Enzyme.Duplicated(θ_init, dθ_init),
         Enzyme.Const(Δt),
-        Enzyme.Const(nsteps))
+        Enzyme.Const(Nsteps))
     return dθ_init, loss_value
 end
 
@@ -109,11 +109,11 @@ end
 
             θ_init, dθ_init = make_init_fields(grid)
             dmodel = Enzyme.make_zero(model)
-            ns = 1
+            Ns = 1
 
             compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-                model, dmodel, θ_init, dθ_init, Δt, ns)
-            dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, ns)
+                model, dmodel, θ_init, dθ_init, Δt, Ns)
+            dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
             ad_grad = @allowscalar Array(interior(dθ))
 
             # ── Raise backward ──
@@ -134,7 +134,7 @@ end
                 make_cpu_model() = AtmosphereModel(grid_cpu; dynamics=CompressibleDynamics())
 
                 θ₀_cpu = CenterField(grid_cpu); set!(θ₀_cpu, (args...) -> 300.0)
-                J₀ = loss(make_cpu_model(), θ₀_cpu, Δt, ns)
+                J₀ = loss(make_cpu_model(), θ₀_cpu, Δt, Ns)
 
                 test_cells = nd == 2 ? [(1,1,1), (4,4,1)] : [(1,1,1), (4,4,4)]
 
@@ -142,7 +142,7 @@ end
                     for (ic, jc, kc) in test_cells
                         θ_fd = CenterField(grid_cpu); set!(θ_fd, (args...) -> 300.0)
                         interior(θ_fd, ic, jc, kc)[] += ε
-                        J₊ = loss(make_cpu_model(), θ_fd, Δt, ns)
+                        J₊ = loss(make_cpu_model(), θ_fd, Δt, Ns)
                         fd = (J₊ - J₀) / ε
                         ad = ad_grad[ic, jc, kc]
                         rel = abs(ad - fd) / (max(abs(ad), abs(fd)) + eps())
