@@ -16,7 +16,7 @@ struct FieldTimeSeriesRelaxation{R, TF, Cl, D, F, RC, TS, ZB}
     reference        :: R    # FieldTimeSeries of the specific variable ϕᵣ
     target           :: TF   # Field of ϕᵣ interpolated to current time, horizontally averaged to a single column in profile mode
     clock            :: Cl   # Model Clock
-    density          :: D    # Reference density ρᵣ(z)
+    density          :: D    # Reference density ρᵣ(z) or ρ(x,y,z,t) for AnelasticDynamics and CompressibleDynamics, respectively
     current_field    :: F    # Specific field ϕ (3D) or Average(ϕ) (profile)
     time_scale       :: TS   # Relaxation time scale (seconds)
     reference_column :: RC   # Nothing (3D mode) or NTuple{2,Int} (profile mode)

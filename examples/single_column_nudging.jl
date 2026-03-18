@@ -142,7 +142,9 @@ function progress(sim)
     u_max = maximum(abs, sim.model.velocities.u)
     θ_mean = mean(sim.model.temperature)
     @printf "t = %s, max|u| = %.2f m/s, mean T = %.2f K\n" prettytime(sim) u_max θ_mean
+    return nothing
 end
+
 simulation.callbacks[:progress] = Callback(progress, IterationInterval(60))
 
 # Output
@@ -168,9 +170,9 @@ Nt = length(simtimes)
 Nz = length(z)
 
 # Build Nz × Nt data matrices
-u_data = view(interior(u_ts), 1, 1, :, :)
-v_data = view(interior(v_ts), 1, 1, :, :)
-θ_data = view(interior(θ_ts), 1, 1, :, :)
+u_data = interior(u_ts, 1, 1, :, :)
+v_data = interior(v_ts, 1, 1, :, :)
+θ_data = interior(θ_ts, 1, 1, :, :)
 
 # Color limits
 ulim = max(maximum(abs, u_data), 1e-6)
