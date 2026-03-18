@@ -139,15 +139,14 @@ end
 
                         test_cells = nd == 2 ? [(1,1,1), (4,4,1)] : [(1,1,1), (4,4,4)]
 
-                        for ε in [1e-4, 1e-6]
-                            for (ic, jc, kc) in test_cells
+                        for ε in (1e-4, 1e-6), (ic, jc, kc) in test_cells
+                            @testset let ε=ε, (ic, jc, kc)=(ic, jc, kc)
                                 θ_fd = CenterField(grid_fd); set!(θ_fd, (args...) -> 300.0)
                                 @allowscalar interior(θ_fd, ic, jc, kc)[] += ε
                                 J₊ = loss(make_fd_model(), θ_fd, Δt, Ns)
                                 fd = (J₊ - J₀) / ε
                                 ad = ad_grad[ic, jc, kc]
-                                rel = abs(ad - fd) / (max(abs(ad), abs(fd)) + eps())
-                                @test rel < 0.01
+                                @test ad ≈ fd rtol=0.01
                             end
                         end
                     end
