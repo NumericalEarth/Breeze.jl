@@ -84,7 +84,10 @@ correct_negative_moisture!(model) = correct_negative_moisture!(model.microphysic
 
 correct_negative_moisture!(::Nothing, model) = nothing
 
+negative_moisture_correction(microphysics) = true
+
 function correct_negative_moisture!(microphysics, model)
+    negative_moisture_correction(microphysics) || return nothing
     moisture_fields = correction_moisture_fields(microphysics, model.microphysical_fields)
     isempty(moisture_fields) && return nothing
 

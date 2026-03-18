@@ -17,11 +17,14 @@ Bulk microphysics scheme with cloud formation and precipitation categories.
 - `precipitation_boundary_condition`: Bottom boundary condition for precipitation sedimentation.
   - `nothing` (default): Precipitation passes through the bottom (open boundary)
   - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom (zero terminal velocity at surface)
+- `negative_moisture_correction`: When `true`, correct negative moisture produced by advection
+  via same-level borrowing and vertical redistribution at each time step.
 """
 struct BulkMicrophysics{N, C, B}
     cloud_formation :: N
     categories :: C
     precipitation_boundary_condition :: B
+    negative_moisture_correction :: Bool
 end
 
 # Bulk microphysics schemes (including those from extensions like CloudMicrophysics)
@@ -30,6 +33,8 @@ end
 # cloud formation schemes to hook into the update cycle.
 AtmosphereModels.microphysics_model_update!(bμp::BulkMicrophysics, model) =
     AtmosphereModels.microphysics_model_update!(bμp.cloud_formation, model)
+
+AtmosphereModels.negative_moisture_correction(bμp::BulkMicrophysics) = bμp.negative_moisture_correction
 
 Base.summary(::BulkMicrophysics) = "BulkMicrophysics"
 
@@ -189,13 +194,16 @@ Return a `BulkMicrophysics` microphysics scheme.
 - `precipitation_boundary_condition`: Bottom boundary condition for precipitation sedimentation.
   - `nothing` (default): Precipitation passes through the bottom
   - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom
+- `negative_moisture_correction`: When `true` (default), correct negative moisture produced
+  by the advection operator via same-level borrowing and vertical redistribution.
 """
 function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                           categories = nothing,
                           cloud_formation = SaturationAdjustment(FT),
-                          precipitation_boundary_condition = nothing)
+                          precipitation_boundary_condition = nothing,
+                          negative_moisture_correction = false)
 
-    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition)
+    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction)
 end
 
 # Forward moisture_prognostic_name to cloud_formation scheme
