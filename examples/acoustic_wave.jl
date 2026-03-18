@@ -382,7 +382,7 @@ nothing #hide
 # spatial grid. A fresh model is built per FD evaluation to avoid hidden state.
 # The same `loss` runs on CPU since `@trace` is a no-op outside Reactant.
 
-ε_fd = 1e-6
+ε_fd = 1e-4
 stride_x, stride_z = 8, 8
 sample_i = 1:stride_x:Nx
 sample_k = 1:stride_z:Nz
