@@ -10,7 +10,7 @@ and interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 ## Language & Environment
 
 - **Julia 1.10+** | CPU and GPU (CUDA)
-- **Key packages**: Oceananigans.jl, CloudMicrophysics.jl, RRTMGP.jl, ClimaOcean.jl,
+- **Key packages**: Oceananigans.jl, CloudMicrophysics.jl, RRTMGP.jl, NumericalEarth.jl,
                     KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
 - **Style**: ExplicitImports.jl for source code; `using Oceananigans` and `using Breeze` for examples
 - **Testing**: ParallelTestRunner.jl for distributed testing
