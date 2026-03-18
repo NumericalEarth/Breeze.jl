@@ -2,17 +2,17 @@
 ##### Reactant compilation tests — WENO advection
 #####
 #
-# Phase structure per topology:
-#   (a)   Build model on ReactantState
-#   (b)   Compile + raise forward (Enzyme forward mode)
+# Phase structure:
+#   RectilinearGrid:      Build + compile/raise backward (Enzyme reverse mode)
+#   LatitudeLongitudeGrid: Build + compile/raise forward
 
 using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
-using Oceananigans.Grids: Periodic
 using Reactant
 using Reactant: @trace
 using Enzyme
+using Statistics: mean
 using Test
 using CUDA
 
@@ -56,6 +56,39 @@ end
 
 get_temperature(model) = Array(interior(model.temperature))
 
+function make_init_fields(grid)
+    FT = eltype(grid)
+    θ_init = CenterField(grid)
+    set!(θ_init, (args...) -> FT(300))
+    return θ_init
+end
+
+function initial_density(model)
+    FT = eltype(model.grid)
+    ref = model.dynamics.reference_state
+    return isnothing(ref) ? one(FT) : ref.density
+end
+
+function loss(model, θ_init, Δt, nsteps)
+    set!(model; θ=θ_init, ρ=initial_density(model))
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
+        time_step!(model, Δt)
+    end
+    return mean(interior(model.temperature) .^ 2)
+end
+
+function grad_loss(model, dmodel, θ_init, dθ_init, Δt, nsteps)
+    parent(dθ_init) .= 0
+    _, loss_value = Enzyme.autodiff(
+        Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
+        loss, Enzyme.Active,
+        Enzyme.Duplicated(model, dmodel),
+        Enzyme.Duplicated(θ_init, dθ_init),
+        Enzyme.Const(Δt),
+        Enzyme.Const(nsteps))
+    return dθ_init, loss_value
+end
+
 #####
 ##### Tests
 #####
@@ -83,19 +116,25 @@ get_temperature(model) = Array(interior(model.temperature))
                         @test all(T .> 0)
                     end
 
-                    # ── Raise forward ──
-                    @testset "Raise forward" begin
+                    # ── Raise backward ──
+                    @testset "Raise backward" begin
                         model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), advection=scheme)
-                        set!(model; θ=FT(300), ρ=one(FT))
+                        θ_init = make_init_fields(grid)
+                        dθ_init = CenterField(grid)
+                        set!(dθ_init, FT(0))
+                        set!(model; θ=θ_init, ρ=initial_density(model))
 
-                        nsteps = 2
-                        compiled_run = Reactant.@compile raise=true raise_first=true sync=true run_time_steps!(model, Δt, nsteps)
-                        @test compiled_run !== nothing
+                        dmodel = Enzyme.make_zero(model)
+                        ns = 1
 
-                        compiled_run(model, Δt, nsteps)
-                        T = get_temperature(model)
-                        @test all(isfinite, T)
-                        @test all(T .> 0)
+                        compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+                            model, dmodel, θ_init, dθ_init, Δt, ns)
+
+                        dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, ns)
+                        @test loss_val > 0
+                        @test isfinite(loss_val)
+                        @test maximum(abs, interior(dθ)) > 0
+                        @test !any(isnan, interior(dθ))
                     end
                 end
             end
