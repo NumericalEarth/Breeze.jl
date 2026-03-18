@@ -131,7 +131,8 @@ See the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrop
 function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                     cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
                                     categories = one_moment_cloud_microphysics_categories(FT),
-                                    precipitation_boundary_condition = nothing)
+                                    precipitation_boundary_condition = nothing,
+                                    negative_moisture_correction = false)
 
     # If `cloud_formation` is a `NonEquilibriumCloudFormation`, materialize `ConstantRateCondensateFormation`
     # models from the category parameters. The `rate` field stores `1/τ_relax`.
@@ -154,7 +155,7 @@ function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
         cloud_formation = NonEquilibriumCloudFormation(liquid, ice)
     end
 
-    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition)
+    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction)
 end
 
 # Materialize a condensate-formation model from a placeholder or category parameter.

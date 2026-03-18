@@ -73,7 +73,7 @@ function ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatT
                                     S_0 = FT(S_0))
 
     # Zero-moment schemes don't have explicit sedimentation, so precipitation_bottom = nothing
-    return BulkMicrophysics(cloud_formation, categories, nothing)
+    return BulkMicrophysics(cloud_formation, categories, nothing, false)
 end
 
 #####

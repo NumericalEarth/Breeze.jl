@@ -277,7 +277,8 @@ for details on the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) scheme.
 function TwoMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                     cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
                                     categories = two_moment_cloud_microphysics_categories(FT),
-                                    precipitation_boundary_condition = nothing)
+                                    precipitation_boundary_condition = nothing,
+                                    negative_moisture_correction = false)
 
     # Two-moment scheme requires non-equilibrium cloud formation
     if !(cloud_formation isa NonEquilibriumCloudFormation)
@@ -301,7 +302,7 @@ function TwoMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
 
     cloud_formation = NonEquilibriumCloudFormation(liquid, nothing)
 
-    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition)
+    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction)
 end
 
 # Default relaxation timescale for 2M cloud liquid (seconds)
