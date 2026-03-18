@@ -18,9 +18,7 @@ using Statistics: mean
 using Test
 using CUDA
 
-device_arch = default_arch isa GPU ? GPU() : CPU()
-
-if device_arch isa GPU
+if default_arch isa GPU
     Reactant.set_default_backend("gpu")
 else
     Reactant.set_default_backend("cpu")
@@ -131,7 +129,7 @@ end
             # Checked at two grid cells and two step sizes to confirm
             # convergence is not an artifact of a particular ε.
             @testset "FD validation" begin
-                grid_fd = make_grid(topo, nd; arch=device_arch)
+                grid_fd = make_grid(topo, nd; arch=default_arch)
                 make_fd_model() = AtmosphereModel(grid_fd; dynamics=CompressibleDynamics())
 
                 θ₀_fd = CenterField(grid_fd); set!(θ₀_fd, (args...) -> 300.0)
