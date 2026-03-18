@@ -19,7 +19,9 @@ using Statistics: mean
 using Test
 using CUDA
 
-if default_arch isa GPU
+device_arch = default_arch isa GPU ? GPU() : CPU()
+
+if device_arch isa GPU
     Reactant.set_default_backend("gpu")
 else
     Reactant.set_default_backend("cpu")
@@ -129,19 +131,19 @@ end
                     # Checked at two grid cells and two step sizes to confirm
                     # convergence is not an artifact of a particular ε.
                     @testset "FD validation" begin
-                        grid_cpu = make_grid(topo, nd; arch=CPU())
-                        make_cpu_model() = AtmosphereModel(grid_cpu; dynamics=CompressibleDynamics(), advection=scheme)
+                        grid_fd = make_grid(topo, nd; arch=device_arch)
+                        make_fd_model() = AtmosphereModel(grid_fd; dynamics=CompressibleDynamics(), advection=scheme)
 
-                        θ₀_cpu = CenterField(grid_cpu); set!(θ₀_cpu, (args...) -> 300.0)
-                        J₀ = loss(make_cpu_model(), θ₀_cpu, Δt, Ns)
+                        θ₀_fd = CenterField(grid_fd); set!(θ₀_fd, (args...) -> 300.0)
+                        J₀ = loss(make_fd_model(), θ₀_fd, Δt, Ns)
 
                         test_cells = nd == 2 ? [(1,1,1), (4,4,1)] : [(1,1,1), (4,4,4)]
 
                         for ε in [1e-4, 1e-6]
                             for (ic, jc, kc) in test_cells
-                                θ_fd = CenterField(grid_cpu); set!(θ_fd, (args...) -> 300.0)
-                                interior(θ_fd, ic, jc, kc)[] += ε
-                                J₊ = loss(make_cpu_model(), θ_fd, Δt, Ns)
+                                θ_fd = CenterField(grid_fd); set!(θ_fd, (args...) -> 300.0)
+                                @allowscalar interior(θ_fd, ic, jc, kc)[] += ε
+                                J₊ = loss(make_fd_model(), θ_fd, Δt, Ns)
                                 fd = (J₊ - J₀) / ε
                                 ad = ad_grad[ic, jc, kc]
                                 rel = abs(ad - fd) / (max(abs(ad), abs(fd)) + eps())
