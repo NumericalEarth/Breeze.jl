@@ -15,12 +15,10 @@ export SSPRungeKutta3, AcousticSSPRungeKutta3, AcousticRungeKutta3,
        maybe_initialize_state!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
-using Oceananigans: AbstractModel
+using Oceananigans: AbstractModel, prognostic_state, restore_prognostic_state!
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  AbstractTimeStepper,
                                  update_state!, maybe_initialize_state!
-
-import Oceananigans.TimeSteppers: prognostic_state, restore_prognostic_state!
 
 abstract type AbstractBreezeTimeStepper <: AbstractTimeStepper end
 
@@ -42,12 +40,12 @@ OceananigansTimeSteppers.TimeStepper(::Val{:AcousticRungeKutta3}, args...; kwarg
 ##### Checkpointing
 #####
 
-function prognostic_state(timestepper::AbstractBreezeTimeStepper)
+function Oceananigans.prognostic_state(timestepper::AbstractBreezeTimeStepper)
     return (U⁰ = prognostic_state(timestepper.U⁰),
             Gⁿ = prognostic_state(timestepper.Gⁿ))
 end
 
-function restore_prognostic_state!(restored::AbstractBreezeTimeStepper, from)
+function Oceananigans.restore_prognostic_state!(restored::AbstractBreezeTimeStepper, from)
     restore_prognostic_state!(restored.U⁰, from.U⁰)
     restore_prognostic_state!(restored.Gⁿ, from.Gⁿ)
     return restored
