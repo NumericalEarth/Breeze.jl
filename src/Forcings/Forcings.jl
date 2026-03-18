@@ -4,7 +4,7 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
     GeostrophicForcing,
-    RelaxationForcing
+    FieldTimeSeriesRelaxation
 
 using DocStringExtensions: TYPEDSIGNATURES
 
@@ -16,7 +16,7 @@ using ..AtmosphereModels: AtmosphereModels, materialize_atmosphere_model_forcing
 
 include("geostrophic_forcings.jl")
 include("subsidence_forcing.jl")
-include("relaxation_forcing.jl")
+include("fts_relaxation.jl")
 
 #####
 ##### Extension of materialize_forcing with context argument

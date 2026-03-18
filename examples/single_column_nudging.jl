@@ -105,16 +105,16 @@ end
 
 # ## Nudging forcings
 #
-# `RelaxationForcing` automatically enters profile mode when the reference FTS
+# `FieldTimeSeriesRelaxation` automatically enters profile mode when the reference FTS
 # has no horizontal dimensions (Nx=Ny=1). The horizontal average of each field
 # is compared to the reference column, and nudging is applied only above
 # `z_bottom = 1500` m with a 1-hour relaxation time scale.
 
 τ_nudging = 6hours
 
-u_nudging = RelaxationForcing(u_ref; time_scale=τ_nudging, z_bottom=1500)
-v_nudging = RelaxationForcing(v_ref; time_scale=τ_nudging, z_bottom=1500)
-θ_nudging = RelaxationForcing(θ_ref; time_scale=τ_nudging, z_bottom=1500)
+u_nudging = FieldTimeSeriesRelaxation(u_ref; time_scale=τ_nudging, z_bottom=1500)
+v_nudging = FieldTimeSeriesRelaxation(v_ref; time_scale=τ_nudging, z_bottom=1500)
+θ_nudging = FieldTimeSeriesRelaxation(θ_ref; time_scale=τ_nudging, z_bottom=1500)
 
 forcing = (; ρu = u_nudging, ρv = v_nudging, ρθ = θ_nudging)
 
@@ -127,11 +127,7 @@ closure = VerticalScalarDiffusivity(ν=10, κ=10)   # [m² s⁻¹]
 
 # ## Model
 
-model = AtmosphereModel(grid;
-                        dynamics,
-                        formulation = :LiquidIcePotentialTemperature,
-                        forcing,
-                        closure)
+model = AtmosphereModel(grid; dynamics, forcing, closure)
 
 # ## Initial conditions
 

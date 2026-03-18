@@ -9,10 +9,10 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt
 
 #####
-##### RelaxationForcing struct
+##### FieldTimeSeriesRelaxation struct
 #####
 
-struct RelaxationForcing{R, TF, Cl, D, F, RC, TS, ZB}
+struct FieldTimeSeriesRelaxation{R, TF, Cl, D, F, RC, TS, ZB}
     reference        :: R    # FieldTimeSeries of the specific variable ϕᵣ
     target           :: TF   # Field of ϕᵣ interpolated to current time, horizontally averaged to a single column in profile mode
     clock            :: Cl   # Model Clock
@@ -69,16 +69,16 @@ using Breeze
 
 grid = RectilinearGrid(size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 3000))
 fts = FieldTimeSeries{Center, Center, Center}(grid, [0.0, 3600.0])
-nudging = RelaxationForcing(fts; time_scale=3600.0)
+nudging = FieldTimeSeriesRelaxation(fts; time_scale=3600.0)
 nudging.z_bottom
 
 # output
 1500
 ```
 """
-function RelaxationForcing(reference; time_scale, z_bottom=1500, reference_position=nothing)
-    return RelaxationForcing(reference, nothing, nothing, nothing, nothing,
-                             time_scale, reference_position, z_bottom)
+function FieldTimeSeriesRelaxation(reference; time_scale, z_bottom=1500, reference_position=nothing)
+    return FieldTimeSeriesRelaxation(reference, nothing, nothing, nothing, nothing,
+                                     time_scale, reference_position, z_bottom)
 end
 
 #####
@@ -126,8 +126,9 @@ end
 ##### Materialization
 #####
 
-function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::RelaxationForcing, field, name,
-                                                               model_field_names, context::NamedTuple)
+function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::FieldTimeSeriesRelaxation,
+                                                               field, name, model_field_names,
+                                                               context::NamedTuple)
     grid = field.grid
 
     specific_name = strip_density_prefix(name)
@@ -147,15 +148,16 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Relaxati
         current_field = specific_field
     end
 
-    return RelaxationForcing(forcing.reference, target, context.clock, context.density,
-                             current_field, forcing.time_scale, reference_column, forcing.z_bottom)
+    return FieldTimeSeriesRelaxation(forcing.reference, target, context.clock, context.density,
+                                     current_field, forcing.time_scale, reference_column,
+                                     forcing.z_bottom)
 end
 
 #####
 ##### compute_forcing!: update target and current field each time step
 #####
 
-function AtmosphereModels.compute_forcing!(forcing::RelaxationForcing)
+function AtmosphereModels.compute_forcing!(forcing::FieldTimeSeriesRelaxation)
     t = forcing.clock.time
     ref_field = forcing.reference[Time(t)] # interpolate to t
     update_target!(forcing.target, ref_field, forcing.reference_column)
@@ -184,7 +186,7 @@ end
 #####
 
 # 3D mode (reference_column = Nothing): compare local value to 3D reference
-@inline function (f::RelaxationForcing{<:Any, <:Any, <:Any, <:Any, <:Any, Nothing})(i, j, k, grid, clock, fields)
+@inline function (f::FieldTimeSeriesRelaxation{<:Any, <:Any, <:Any, <:Any, <:Any, Nothing})(i, j, k, grid, clock, fields)
     z  = znode(i, j, k, grid, Center(), Center(), Center())
     ϕ  = @inbounds f.current_field[i, j, k]
     ϕᵣ = @inbounds f.target[i, j, k]
@@ -194,7 +196,7 @@ end
 end
 
 # Profile mode (reference_column = NTuple{2,Int}): compare horizontal average to reference column
-@inline function (f::RelaxationForcing{<:Any, <:Any, <:Any, <:Any, <:Any, <:NTuple{2}})(i, j, k, grid, clock, fields)
+@inline function (f::FieldTimeSeriesRelaxation{<:Any, <:Any, <:Any, <:Any, <:Any, <:NTuple{2}})(i, j, k, grid, clock, fields)
     z  = znode(i, j, k, grid, Center(), Center(), Center())
     ϕ̄  = @inbounds f.current_field[1, 1, k]
     ϕᵣ = @inbounds f.target[1, 1, k]
@@ -207,27 +209,27 @@ end
 ##### GPU adaptation
 #####
 
-Adapt.adapt_structure(to, f::RelaxationForcing) =
-    RelaxationForcing(Adapt.adapt(to, f.reference),
-                      Adapt.adapt(to, f.target),
-                      f.clock,
-                      Adapt.adapt(to, f.density),
-                      Adapt.adapt(to, f.current_field),
-                      f.time_scale,
-                      f.reference_column,
-                      f.z_bottom)
+Adapt.adapt_structure(to, f::FieldTimeSeriesRelaxation) =
+    FieldTimeSeriesRelaxation(Adapt.adapt(to, f.reference),
+                              Adapt.adapt(to, f.target),
+                              f.clock,
+                              Adapt.adapt(to, f.density),
+                              Adapt.adapt(to, f.current_field),
+                              f.time_scale,
+                              f.reference_column,
+                              f.z_bottom)
 
 #####
 ##### Show
 #####
 
-function Base.summary(f::RelaxationForcing)
-    isnothing(f.target) && return "RelaxationForcing (pre-materialization)"
-    isnothing(f.reference_column) && return "RelaxationForcing (3D mode)"
-    return "RelaxationForcing (profile mode)"
+function Base.summary(f::FieldTimeSeriesRelaxation)
+    isnothing(f.target) && return "FieldTimeSeriesRelaxation (pre-materialization)"
+    isnothing(f.reference_column) && return "FieldTimeSeriesRelaxation (3D mode)"
+    return "FieldTimeSeriesRelaxation (profile mode)"
 end
 
-function Base.show(io::IO, f::RelaxationForcing)
+function Base.show(io::IO, f::FieldTimeSeriesRelaxation)
     print(io, summary(f), "\n")
     print(io, "├── time_scale: ", prettysummary(f.time_scale), " seconds\n")
     print(io, "├── z_bottom: ", prettysummary(f.z_bottom), " m\n")
