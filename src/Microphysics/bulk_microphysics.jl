@@ -9,6 +9,16 @@ using ..Thermodynamics:
 """
 $(TYPEDEF)
 
+Correct negative moisture produced by advection via same-level borrowing
+and vertical redistribution at each time step.
+
+See [`correct_negative_moisture!`](@ref) for details.
+"""
+struct VerticalBorrowing end
+
+"""
+$(TYPEDEF)
+
 Bulk microphysics scheme with cloud formation and precipitation categories.
 
 # Fields
@@ -17,14 +27,15 @@ Bulk microphysics scheme with cloud formation and precipitation categories.
 - `precipitation_boundary_condition`: Bottom boundary condition for precipitation sedimentation.
   - `nothing` (default): Precipitation passes through the bottom (open boundary)
   - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom (zero terminal velocity at surface)
-- `negative_moisture_correction`: When `true`, correct negative moisture produced by advection
-  via same-level borrowing and vertical redistribution at each time step.
+- `negative_moisture_correction`: Correction scheme for negative moisture produced by advection.
+  - `nothing` (default): No correction
+  - `VerticalBorrowing()`: Same-level borrowing and vertical redistribution
 """
-struct BulkMicrophysics{N, C, B}
+struct BulkMicrophysics{N, C, B, NMC}
     cloud_formation :: N
     categories :: C
     precipitation_boundary_condition :: B
-    negative_moisture_correction :: Bool
+    negative_moisture_correction :: NMC
 end
 
 # Bulk microphysics schemes (including those from extensions like CloudMicrophysics)
@@ -34,7 +45,7 @@ end
 AtmosphereModels.microphysics_model_update!(bμp::BulkMicrophysics, model) =
     AtmosphereModels.microphysics_model_update!(bμp.cloud_formation, model)
 
-AtmosphereModels.negative_moisture_correction(bμp::BulkMicrophysics) = bμp.negative_moisture_correction
+AtmosphereModels.negative_moisture_correction(bμp::BulkMicrophysics) = bμp.negative_moisture_correction !== nothing
 
 Base.summary(::BulkMicrophysics) = "BulkMicrophysics"
 
@@ -180,7 +191,7 @@ end
 FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities) =
     FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities, nothing)
 
-const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories, <:Any}
+const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories, <:Any, <:Any}
 Base.summary(::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"
 
 """
@@ -194,14 +205,15 @@ Return a `BulkMicrophysics` microphysics scheme.
 - `precipitation_boundary_condition`: Bottom boundary condition for precipitation sedimentation.
   - `nothing` (default): Precipitation passes through the bottom
   - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom
-- `negative_moisture_correction`: When `true` (default), correct negative moisture produced
-  by the advection operator via same-level borrowing and vertical redistribution.
+- `negative_moisture_correction`: Correction scheme for negative moisture produced by advection.
+  - `nothing` (default): No correction
+  - `VerticalBorrowing()`: Same-level borrowing and vertical redistribution
 """
 function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                           categories = nothing,
                           cloud_formation = SaturationAdjustment(FT),
                           precipitation_boundary_condition = nothing,
-                          negative_moisture_correction = false)
+                          negative_moisture_correction = nothing)
 
     return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction)
 end
@@ -213,7 +225,7 @@ AtmosphereModels.moisture_prognostic_name(bμp::BulkMicrophysics) =
 AtmosphereModels.moisture_prognostic_name(::NonEquilibriumCloudFormation) = :ρqᵛ
 
 # Non-categorical bulk microphysics
-const NCBM = BulkMicrophysics{<:Any, Nothing, <:Any}
+const NCBM = BulkMicrophysics{<:Any, Nothing, <:Any, <:Any}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
 maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵛ, constants) =

@@ -11,7 +11,7 @@ The 0M scheme instantly removes precipitable condensate above a threshold.
 Interface is identical to non-precipitating microphysics except that
 `maybe_adjust_thermodynamic_state` calls CloudMicrophysics `remove_precipitation` first.
 """
-const ZeroMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M, <:Any}
+const ZeroMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M, <:Any, <:Any}
 const ZMCM = ZeroMomentCloudMicrophysics
 
 AtmosphereModels.prognostic_field_names(::ZMCM) = tuple()
@@ -73,7 +73,7 @@ function ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatT
                                     S_0 = FT(S_0))
 
     # Zero-moment schemes don't have explicit sedimentation, so precipitation_bottom = nothing
-    return BulkMicrophysics(cloud_formation, categories, nothing, false)
+    return BulkMicrophysics(cloud_formation, categories, nothing, nothing)
 end
 
 #####

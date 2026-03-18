@@ -176,10 +176,10 @@ end
 
 # Type aliases for two-moment microphysics
 const CM2MCategories = TwoMomentCategories{<:SB2006, <:AirProperties, <:StokesRegimeVelType, <:Any, <:Any, <:Any}
-const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories, <:Any}
+const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories, <:Any, <:Any}
 
 # Warm-phase non-equilibrium with 2M precipitation
-const WarmPhaseNonEquilibrium2M = BulkMicrophysics{<:WarmPhaseNE, <:CM2MCategories, <:Any}
+const WarmPhaseNonEquilibrium2M = BulkMicrophysics{<:WarmPhaseNE, <:CM2MCategories, <:Any, <:Any}
 const WPNE2M = WarmPhaseNonEquilibrium2M
 
 
@@ -278,7 +278,7 @@ function TwoMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
                                     cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
                                     categories = two_moment_cloud_microphysics_categories(FT),
                                     precipitation_boundary_condition = nothing,
-                                    negative_moisture_correction = false)
+                                    negative_moisture_correction = nothing)
 
     # Two-moment scheme requires non-equilibrium cloud formation
     if !(cloud_formation isa NonEquilibriumCloudFormation)
