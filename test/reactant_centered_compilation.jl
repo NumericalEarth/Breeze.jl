@@ -39,10 +39,10 @@ topologies = [
 ##### Helpers
 #####
 
-function make_grid(topo, nd)
+function make_grid(topo, nd; arch=ReactantState())
     sz  = nd == 2 ? (8, 8)     : (8, 8, 8)
     ext = nd == 2 ? (1e3, 1e3) : (1e3, 1e3, 1e3)
-    return RectilinearGrid(ReactantState(); size=sz, extent=ext, topology=topo)
+    return RectilinearGrid(arch; size=sz, extent=ext, topology=topo)
 end
 
 function run_time_steps!(model, Δt, nsteps)
@@ -55,15 +55,13 @@ end
 get_temperature(model) = Array(interior(model.temperature))
 
 function make_init_fields(grid)
-    FT = eltype(grid)
-    θ_init  = CenterField(grid); set!(θ_init,  (args...) -> FT(300))
-    dθ_init = CenterField(grid); set!(dθ_init, FT(0))
+    θ_init  = CenterField(grid); set!(θ_init,  (args...) -> 300.0)
+    dθ_init = CenterField(grid); set!(dθ_init, 0)
     return θ_init, dθ_init
 end
 
 function loss(model, θ_init, Δt, nsteps)
-    FT = eltype(model.grid)
-    set!(model; θ=θ_init, ρ=one(FT))
+    set!(model; θ=θ_init, ρ=1.0)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
@@ -87,21 +85,20 @@ end
 #####
 
 @testset "Reactant CompressibleDynamics — Centered" begin
-    Δt_val = 0.02
+    Δt = 0.02
 
     for (label, topo, nd) in topologies
         @testset "$label" begin
             grid = make_grid(topo, nd)
-            FT = eltype(grid)
-            Δt = FT(Δt_val)
 
             # ── Build ──
+            @info "Building model..."
             @testset "Build" begin
                 model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
                 @test model isa AtmosphereModel
                 @test model.dynamics isa CompressibleDynamics
 
-                set!(model; θ=FT(300), ρ=one(FT))
+                set!(model; θ=300.0, ρ=1.0)
                 T = get_temperature(model)
                 @test all(isfinite, T)
                 @test all(T .> 0)
@@ -109,23 +106,48 @@ end
 
             # Reconstruct for compilation phases
             model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
-            set!(model; θ=FT(300), ρ=one(FT))
+
+            θ_init, dθ_init = make_init_fields(grid)
+            dmodel = Enzyme.make_zero(model)
+            ns = 1
+
+            compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+                model, dmodel, θ_init, dθ_init, Δt, ns)
+            dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, ns)
+            ad_grad = @allowscalar Array(interior(dθ))
 
             # ── Raise backward ──
             @testset "Raise backward" begin
-                θ_init, dθ_init = make_init_fields(grid)
-                dmodel = Enzyme.make_zero(model)
-                ns = 1
-
-                compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-                    model, dmodel, θ_init, dθ_init, Δt, ns)
-
-                dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, ns)
                 @test loss_val > 0
                 @test isfinite(loss_val)
-                @allowscalar begin
-                    @test maximum(abs, interior(dθ)) > 0
-                    @test !any(isnan, interior(dθ))
+                @test maximum(abs, ad_grad) > 0
+                @test !any(isnan, ad_grad)
+            end
+
+            # ── FD validation ──
+            # Verify AD gradients against one-sided finite differences:
+            #   ∂J/∂θ(i,j,k) ≈ (J(θ + ε·eᵢⱼₖ) - J(θ)) / ε
+            # Checked at two grid cells and two step sizes to confirm
+            # convergence is not an artifact of a particular ε.
+            @testset "FD validation" begin
+                grid_cpu = make_grid(topo, nd; arch=CPU())
+                make_cpu_model() = AtmosphereModel(grid_cpu; dynamics=CompressibleDynamics())
+
+                θ₀_cpu = CenterField(grid_cpu); set!(θ₀_cpu, (args...) -> 300.0)
+                J₀ = loss(make_cpu_model(), θ₀_cpu, Δt, ns)
+
+                test_cells = nd == 2 ? [(1,1,1), (4,4,1)] : [(1,1,1), (4,4,4)]
+
+                for ε in [1e-4, 1e-6]
+                    for (ic, jc, kc) in test_cells
+                        θ_fd = CenterField(grid_cpu); set!(θ_fd, (args...) -> 300.0)
+                        interior(θ_fd, ic, jc, kc)[] += ε
+                        J₊ = loss(make_cpu_model(), θ_fd, Δt, ns)
+                        fd = (J₊ - J₀) / ε
+                        ad = ad_grad[ic, jc, kc]
+                        rel = abs(ad - fd) / (max(abs(ad), abs(fd)) + eps())
+                        @test rel < 0.01
+                    end
                 end
             end
         end
