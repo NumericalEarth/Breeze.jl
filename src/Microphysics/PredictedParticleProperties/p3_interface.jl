@@ -142,6 +142,14 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     ρzⁱ  = CenterField(grid)  # Ice 6th moment
     ρqʷⁱ = CenterField(grid)  # Liquid on ice
 
+    # Diagnostic mixing ratio / number-concentration fields
+    # (updated each step in update_microphysical_auxiliaries!, matching the Kessler pattern)
+    qᶜˡ = CenterField(grid)  # Cloud liquid specific humidity [kg/kg]
+    qʳ  = CenterField(grid)  # Rain specific humidity [kg/kg]
+    nʳ  = CenterField(grid)  # Rain number concentration [kg⁻¹]
+    qⁱ  = CenterField(grid)  # Ice specific humidity [kg/kg]
+    nⁱ  = CenterField(grid)  # Ice number concentration [kg⁻¹]
+
     # Diagnostic field for vapor
     qᵛ = CenterField(grid)
 
@@ -166,7 +174,8 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     cache_ρqʷⁱ = CenterField(grid)
     cache_ρqᵛ  = CenterField(grid)
 
-    return (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ, qᵛ,
+    return (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ,
+              qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᵛ,
               wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
               cache_ρqᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
               cache_ρqᶠ, cache_ρbᶠ, cache_ρzⁱ, cache_ρqʷⁱ, cache_ρqᵛ)
@@ -218,7 +227,12 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
 @inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
     FT = typeof(ρ)
 
-    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    @inbounds μ.qᵛ[i, j, k]  = 𝒰.moisture_mass_fractions.vapor
+    @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
+    @inbounds μ.qʳ[i, j, k]  = ℳ.qʳ
+    @inbounds μ.nʳ[i, j, k]  = ℳ.nʳ
+    @inbounds μ.qⁱ[i, j, k]  = ℳ.qⁱ
+    @inbounds μ.nⁱ[i, j, k]  = ℳ.nⁱ
 
     # Compute ice properties for terminal velocity
     Fᶠ = safe_divide(ℳ.qᶠ, ℳ.qⁱ, zero(FT))
