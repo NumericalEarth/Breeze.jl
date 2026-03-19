@@ -1,5 +1,5 @@
 using Breeze
-using Breeze: ReferenceState, AnelasticDynamics, RelaxationForcing
+using Breeze: ReferenceState, AnelasticDynamics, FieldTimeSeriesRelaxation
 using Oceananigans: Oceananigans, FieldTimeSeries, prognostic_fields
 using Oceananigans.Fields: interior
 using Oceananigans.Grids: znodes, Center
@@ -9,12 +9,12 @@ using Test
 ##### Stub construction
 #####
 
-@testset "RelaxationForcing stub construction [$(FT)]" for FT in test_float_types()
+@testset "FieldTimeSeriesRelaxation stub construction [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 8), x=(0, 100), y=(0, 100), z=(0, 3000))
     fts = FieldTimeSeries{Center, Center, Center}(grid, [FT(0), FT(3600)])
 
-    nudging = RelaxationForcing(fts; time_scale=FT(3600))
+    nudging = FieldTimeSeriesRelaxation(fts; time_scale=FT(3600))
 
     @test nudging.reference === fts
     @test nudging.time_scale == FT(3600)
@@ -30,7 +30,7 @@ end
 ##### Profile mode materialization (1D FTS)
 #####
 
-@testset "RelaxationForcing profile mode materialization [$(FT)]" for FT in test_float_types()
+@testset "FieldTimeSeriesRelaxation profile mode materialization [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 3000))
 
@@ -38,11 +38,11 @@ end
     column_grid = RectilinearGrid(default_arch; size=(1, 1, 8), x=(0, 100), y=(0, 100), z=(0, 3000))
     fts = FieldTimeSeries{Center, Center, Center}(column_grid, [FT(0), FT(3600)])
 
-    nudging = RelaxationForcing(fts; time_scale=FT(3600))
+    nudging = FieldTimeSeriesRelaxation(fts; time_scale=FT(3600))
     model = AtmosphereModel(grid; forcing=(; ρθ=nudging))
 
     mat = model.forcing.ρθ
-    @test mat isa RelaxationForcing
+    @test mat isa FieldTimeSeriesRelaxation
     @test !isnothing(mat.target)
     @test !isnothing(mat.current_field)
     @test mat.reference_column == (1, 1)   # profile mode
@@ -54,16 +54,16 @@ end
 ##### 3D mode materialization
 #####
 
-@testset "RelaxationForcing 3D mode materialization [$(FT)]" for FT in test_float_types()
+@testset "FieldTimeSeriesRelaxation 3D mode materialization [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 3000))
     fts = FieldTimeSeries{Center, Center, Center}(grid, [FT(0), FT(3600)])
 
-    nudging = RelaxationForcing(fts; time_scale=FT(3600))
+    nudging = FieldTimeSeriesRelaxation(fts; time_scale=FT(3600))
     model = AtmosphereModel(grid; forcing=(; ρθ=nudging))
 
     mat = model.forcing.ρθ
-    @test mat isa RelaxationForcing
+    @test mat isa FieldTimeSeriesRelaxation
     @test isnothing(mat.reference_column)  # 3D mode
     @test !isnothing(mat.target)
     @test !isnothing(mat.clock)
@@ -73,7 +73,7 @@ end
 ##### Analytical tendency test: profile mode
 #####
 
-@testset "RelaxationForcing profile tendency [$(FT)]" for FT in test_float_types()
+@testset "FieldTimeSeriesRelaxation profile tendency [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     Nz = 8
@@ -92,7 +92,7 @@ end
         parent(fts[n]) .= θ_ref
     end
 
-    nudging = RelaxationForcing(fts; time_scale=τ, z_bottom=FT(0))
+    nudging = FieldTimeSeriesRelaxation(fts; time_scale=τ, z_bottom=FT(0))
     model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature,
                             forcing=(; ρθ=nudging))
 
@@ -120,7 +120,7 @@ end
 ##### z_bottom cutoff: no nudging below z_bottom
 #####
 
-@testset "RelaxationForcing z_bottom cutoff [$(FT)]" for FT in test_float_types()
+@testset "FieldTimeSeriesRelaxation z_bottom cutoff [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     Nz = 8
@@ -134,7 +134,7 @@ end
         parent(fts[n]) .= FT(300)
     end
 
-    nudging = RelaxationForcing(fts; time_scale=FT(3600), z_bottom=z_bottom)
+    nudging = FieldTimeSeriesRelaxation(fts; time_scale=FT(3600), z_bottom=z_bottom)
     model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature,
                             forcing=(; ρθ=nudging))
 
