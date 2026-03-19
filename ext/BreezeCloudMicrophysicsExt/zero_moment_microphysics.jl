@@ -11,7 +11,7 @@ The 0M scheme instantly removes precipitable condensate above a threshold.
 Interface is identical to non-precipitating microphysics except that
 `maybe_adjust_thermodynamic_state` calls CloudMicrophysics `remove_precipitation` first.
 """
-const ZeroMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M, <:Any, <:Any}
+const ZeroMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M}
 const ZMCM = ZeroMomentCloudMicrophysics
 
 AtmosphereModels.prognostic_field_names(::ZMCM) = tuple()

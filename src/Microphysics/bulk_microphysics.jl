@@ -191,7 +191,7 @@ end
 FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities) =
     FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities, nothing)
 
-const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories, <:Any, <:Any}
+const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories}
 Base.summary(::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"
 
 """
@@ -225,7 +225,7 @@ AtmosphereModels.moisture_prognostic_name(bμp::BulkMicrophysics) =
 AtmosphereModels.moisture_prognostic_name(::NonEquilibriumCloudFormation) = :ρqᵛ
 
 # Non-categorical bulk microphysics
-const NCBM = BulkMicrophysics{<:Any, Nothing, <:Any, <:Any}
+const NCBM = BulkMicrophysics{<:Any, Nothing}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
 maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵛ, constants) =

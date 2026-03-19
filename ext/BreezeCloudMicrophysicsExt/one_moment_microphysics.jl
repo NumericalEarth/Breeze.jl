@@ -85,7 +85,7 @@ function one_moment_cloud_microphysics_categories(
 end
 
 const CM1MCategories = FourCategories{<:CloudLiquid, <:CloudIce, <:Rain, <:Snow, <:CollisionEff, <:Blk1MVelType, <:AirProperties}
-const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories, <:Any, <:Any}
+const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories}
 
 """
     OneMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
@@ -196,21 +196,21 @@ const IBC = BoundaryCondition{<:Open, Nothing}
 const ACF = AbstractCondensateFormation
 
 # Warm-phase saturation adjustment with 1M precipitation
-const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCategories, <:Any, <:Any}
+const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCategories}
 
 # Mixed-phase saturation adjustment with 1M precipitation
-const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories, <:Any, <:Any}
+const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories}
 
 # Non-equilibrium cloud formation type aliases (liquid only vs liquid + ice)
 const WarmPhaseNE = NonEquilibriumCloudFormation{<:ACF, Nothing}
 const MixedPhaseNE = NonEquilibriumCloudFormation{<:ACF, <:ACF}
 
 # Warm-phase non-equilibrium with 1M precipitation
-const WarmPhaseNonEquilibrium1M = BulkMicrophysics{<:WarmPhaseNE, <:CM1MCategories, <:Any, <:Any}
+const WarmPhaseNonEquilibrium1M = BulkMicrophysics{<:WarmPhaseNE, <:CM1MCategories}
 const WPNE1M = WarmPhaseNonEquilibrium1M
 
 # Mixed-phase non-equilibrium with 1M precipitation
-const MixedPhaseNonEquilibrium1M = BulkMicrophysics{<:MixedPhaseNE, <:CM1MCategories, <:Any, <:Any}
+const MixedPhaseNonEquilibrium1M = BulkMicrophysics{<:MixedPhaseNE, <:CM1MCategories}
 const MPNE1M = MixedPhaseNonEquilibrium1M
 
 # Union types for dispatch

@@ -175,11 +175,11 @@ function two_moment_cloud_microphysics_categories(FT::DataType = Oceananigans.de
 end
 
 # Type aliases for two-moment microphysics
-const CM2MCategories = TwoMomentCategories{<:SB2006, <:AirProperties, <:StokesRegimeVelType, <:Any, <:Any, <:Any}
-const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories, <:Any, <:Any}
+const CM2MCategories = TwoMomentCategories{<:SB2006, <:AirProperties, <:StokesRegimeVelType}
+const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories}
 
 # Warm-phase non-equilibrium with 2M precipitation
-const WarmPhaseNonEquilibrium2M = BulkMicrophysics{<:WarmPhaseNE, <:CM2MCategories, <:Any, <:Any}
+const WarmPhaseNonEquilibrium2M = BulkMicrophysics{<:WarmPhaseNE, <:CM2MCategories}
 const WPNE2M = WarmPhaseNonEquilibrium2M
 
 
