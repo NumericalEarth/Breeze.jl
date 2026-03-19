@@ -3,7 +3,7 @@
 #####
 
 """
-    ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+    ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
 
 Compute ice melting rate using the heat balance equation from
 Morrison & Milbrandt (2015a) Eq. 44.
@@ -36,12 +36,15 @@ where:
 - `qᵛ⁺`: Saturation vapor mass fraction over liquid [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
+- `ρ`: Air density [kg/m³]
+- `constants`: Thermodynamic constants (or `nothing` for Fortran-matched hardcoded values)
+- `transport`: Pre-computed air transport properties `(; D_v, K_a, nu)`
 
 # Returns
 - Rate of ice → rain conversion [kg/kg/s]
 """
 @inline function ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
-                                   transport=air_transport_properties(T, P))
+                                   constants, transport)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -54,9 +57,10 @@ where:
     ΔT = T - T₀
     is_melting = ΔT > 0
 
-    # Thermodynamic constants
-    L_f = FT(3.34e5)          # Latent heat of fusion [J/kg]
-    L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
+    # Thermodynamic constants: L_f and L_v are T-dependent when constants
+    # are provided (H1), hardcoded otherwise. R_v hardcoded to match Fortran.
+    L_f = _fusion_latent_heat(constants, T)
+    L_v = _vaporization_latent_heat(constants, T)
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
@@ -113,8 +117,20 @@ where:
     return ifelse(is_melting, melt_rate, zero(FT))
 end
 
+# Backward-compatible: explicit transport, hardcoded latent heats
+@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+                                   transport::NamedTuple)
+    return ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, nothing, transport)
+end
+
+# Backward-compatible: default transport, hardcoded latent heats
+@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+    return ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, nothing,
+                             air_transport_properties(T, P))
+end
+
 """
-    ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+    ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
 
 Compute partitioned ice melting rates following Milbrandt et al. (2025).
 
@@ -136,17 +152,20 @@ particle reaches this capacity, additional meltwater sheds to rain.
 - `qᵛ⁺`: Saturation vapor mass fraction over liquid [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
+- `ρ`: Air density [kg/m³]
+- `constants`: Thermodynamic constants (or `nothing` for Fortran-matched hardcoded values)
+- `transport`: Pre-computed air transport properties `(; D_v, K_a, nu)`
 
 # Returns
 - NamedTuple with `partial_melting` and `complete_melting` rates [kg/kg/s]
 """
 @inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
-                                    transport=air_transport_properties(T, P))
+                                    constants, transport)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
     # Get total melting rate
-    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, transport)
+    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
 
     # Maximum liquid fraction capacity (Milbrandt et al. 2025):
     # default 0.3 (30% liquid by mass) from ProcessRateParameters.
@@ -171,6 +190,18 @@ particle reaches this capacity, additional meltwater sheds to rain.
     complete = total_melt * (1 - fraction_to_coating)
 
     return (partial_melting = partial, complete_melting = complete)
+end
+
+# Backward-compatible: explicit transport, hardcoded latent heats
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+                                    transport::NamedTuple)
+    return ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, nothing, transport)
+end
+
+# Backward-compatible: default transport, hardcoded latent heats
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+    return ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, nothing,
+                              air_transport_properties(T, P))
 end
 
 """

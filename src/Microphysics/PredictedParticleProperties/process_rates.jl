@@ -15,6 +15,7 @@ using Breeze.Thermodynamics: temperature,
                              PlanarLiquidSurface,
                              PlanarIceSurface,
                              liquid_latent_heat,
+                             ice_latent_heat,
                              mixture_heat_capacity,
                              vapor_gas_constant,
                              MoistureMassFractions
@@ -61,6 +62,53 @@ end
 @inline safe_divide(a, b) = safe_divide(a, b, zero(a))
 
 #####
+##### Thermodynamic latent heat helpers (H1)
+#####
+##### When thermodynamic constants are available, use T-dependent latent heats
+##### for energy-budget consistency with the condensation path. When `nothing`
+##### is passed (backward-compatible path), fall back to the Fortran P3 v5.5.0
+##### hardcoded constants.
+#####
+
+@inline _sublimation_latent_heat(::Nothing, T) = typeof(T)(2.835e6)
+@inline _sublimation_latent_heat(constants, T) = ice_latent_heat(T, constants)
+
+@inline _vaporization_latent_heat(::Nothing, T) = typeof(T)(2.5e6)
+@inline _vaporization_latent_heat(constants, T) = liquid_latent_heat(T, constants)
+
+@inline _fusion_latent_heat(constants, T) = _sublimation_latent_heat(constants, T) - _vaporization_latent_heat(constants, T)
+
+#####
+##### Ventilation Sc correction (H4)
+#####
+##### The ventilation-enhanced table stores 0.44 × ∫ C(D)√(V×D) N'(D) dD
+##### with dimensions [m² s^(-1/2)]. At runtime, multiplying by Sc^(1/3)/√ν
+##### restores the correct dimensions [m]. This helper centralizes the
+##### correction so that all call sites (deposition, Z-tendency) stay in sync.
+#####
+
+"""
+    ventilation_sc_correction(nu, D_v)
+
+Schmidt number correction factor for ventilation-enhanced table values.
+
+The P3 lookup table stores the ventilation-enhanced integral without the
+`Sc^{1/3}/√ν` factor (matching the Fortran convention). This function
+computes the correction that must be applied at runtime:
+
+```math
+f_{Sc} = \\frac{Sc^{1/3}}{\\sqrt{\\nu}} = \\frac{(\\nu/D_v)^{1/3}}{\\sqrt{\\nu}}
+```
+
+See `quadrature.jl` for the table storage convention.
+"""
+@inline function ventilation_sc_correction(nu, D_v)
+    FT = typeof(nu)
+    Sc = nu / max(D_v, FT(1e-30))
+    return cbrt(Sc) / sqrt(nu)
+end
+
+#####
 ##### Table-dispatched helpers for PSD-integrated process rates
 #####
 ##### These functions dispatch on whether a table field is a TabulatedFunction3D
@@ -82,12 +130,9 @@ Dispatches on table type for PSD-integrated or mean-mass path.
     Fˡ = zero(FT)
     # vent stores the constant ventilation term (0.65 × ∫ C(D) N'(D) dD)
     # vent_e stores the enhanced term (0.44 × ∫ C(D)√(V×D) N'(D) dD)  [m² s^(-1/2)]
-    # Runtime correction: multiply vent_e by Sc^(1/3)/√ν  [s^(1/2) m^(-1)]
-    # Dimensional check: table [m² s^(-1/2)] × Sc^(1/3)/√ν [s^(1/2)/m] = [m]
-    # See rain_quadrature.jl:510-511 for the table storage convention.
-    Sc = nu / max(D_v, FT(1e-30))
-    sc_correction = cbrt(Sc) / sqrt(nu)
-    return vent(log_m, Fᶠ, Fˡ) + sc_correction * vent_e(log_m, Fᶠ, Fˡ)
+    # Runtime correction via ventilation_sc_correction: Sc^(1/3)/√ν [s^(1/2) m^(-1)]
+    # Dimensional check: table [m² s^(-1/2)] × correction [s^(1/2)/m] = [m]
+    return vent(log_m, Fᶠ, Fˡ) + ventilation_sc_correction(nu, D_v) * vent_e(log_m, Fᶠ, Fˡ)
 end
 
 @inline function _deposition_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
@@ -228,7 +273,7 @@ end
 #####
 
 """
-    ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P)
+    ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport)
 
 Compute ventilation-enhanced ice deposition/sublimation rate.
 
@@ -256,22 +301,25 @@ The bulk rate integrates over the size distribution:
 - `ρᶠ`: Rime density [kg/m³]
 - `T`: Temperature [K]
 - `P`: Pressure [Pa]
+- `constants`: Thermodynamic constants (or `nothing` for Fortran-matched hardcoded values)
+- `transport`: Pre-computed air transport properties `(; D_v, K_a, nu)`
 
 # Returns
 - Rate of vapor → ice conversion [kg/kg/s] (positive = deposition)
 """
 @inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P,
-                                                  transport=air_transport_properties(T, P))
+                                                  constants, transport)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
-    # Thermodynamic constants
-    R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
-    R_d = FT(287.0)           # Matches Fortran P3 v5.5.0 exactly (not 287.04). See L7.
-    L_s = FT(2.835e6)         # Latent heat of sublimation [J/kg]
+    # Thermodynamic constants: R_v and R_d hardcoded to match Fortran P3 v5.5.0 (L7).
+    # Latent heat L_s is T-dependent when constants are provided (H1).
+    R_v = FT(461.5)
+    R_d = FT(287.0)
+    L_s = _sublimation_latent_heat(constants, T)
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
@@ -318,6 +366,18 @@ The bulk rate integrates over the size distribution:
     max_sublim = -qⁱ_eff / τ_dep
 
     return ifelse(is_sublimation, max(dep_rate, max_sublim), dep_rate)
+end
+
+# Backward-compatible: explicit transport, hardcoded latent heats
+@inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P,
+                                                  transport::NamedTuple)
+    return ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, nothing, transport)
+end
+
+# Backward-compatible: default transport, hardcoded latent heats
+@inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P)
+    return ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, nothing,
+                                            air_transport_properties(T, P))
 end
 
 #####
@@ -463,11 +523,11 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Phase 1: Ice deposition/sublimation and melting
     # =========================================================================
-    dep = ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, transport)
+    dep = ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport)
     dep = ifelse(qⁱ > FT(1e-20), dep, zero(FT))
 
     # Partitioned melting: partial stays on ice, complete goes to rain
-    melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ, transport)
+    melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ, constants, transport)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
     # Only complete melting removes ice particles; partial melting keeps particles as ice
@@ -935,9 +995,8 @@ pre-computed lookup tables. Otherwise, falls back to proportional scaling.
 
     # Schmidt number correction for enhanced ventilation integrals
     # Table stores 0.44 × ∫ C(D)√(V×D) N'(D) dD; runtime applies Sc^(1/3)/√ν
-    # (see rain_quadrature.jl:510-511 and _deposition_ventilation for dimensional derivation)
-    Sc = nu / max(D_v, FT(1e-30))
-    sc_correction = cbrt(Sc) / sqrt(nu)
+    # (see ventilation_sc_correction and _deposition_ventilation for dimensional derivation)
+    sc_correction = ventilation_sc_correction(nu, D_v)
 
     z_tendency = _tabulated_z_tendency(
         p3.ice.sixth_moment, log_mean_mass, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ, sc_correction

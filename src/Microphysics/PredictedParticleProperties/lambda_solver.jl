@@ -789,7 +789,10 @@ function solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
     f₀, f₁ = f(x₀), f(x₁)
 
     for _ in 1:max_iterations
-        Δx = f₁ * (x₁ - x₀) / (f₁ - f₀)
+        denom = f₁ - f₀
+        abs(denom) < eps(FT) && return x₁
+
+        Δx = f₁ * (x₁ - x₀) / denom
         x₂ = clamp(x₁ - Δx, FT(logλ_bounds[1]), FT(logλ_bounds[2]))
 
         abs(Δx) < tolerance * abs(x₁) && return x₂
