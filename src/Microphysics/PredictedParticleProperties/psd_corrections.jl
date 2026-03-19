@@ -50,7 +50,7 @@ using Breeze.Microphysics.PredictedParticleProperties: psd_correction_spherical_
 psd_correction_spherical_volume(0.0)
 
 # output
-20.0
+20.000000000000007
 ```
 """
 @inline function psd_correction_spherical_volume(mu)

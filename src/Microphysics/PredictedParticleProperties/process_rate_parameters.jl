@@ -164,7 +164,7 @@ deposition, nucleation, and sedimentation.
 # Example
 
 ```jldoctest
-using Breeze.PredictedParticleProperties: ProcessRateParameters
+using Breeze.Microphysics.PredictedParticleProperties: ProcessRateParameters
 params = ProcessRateParameters(Float64)
 typeof(params)
 
