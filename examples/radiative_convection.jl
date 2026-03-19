@@ -30,6 +30,9 @@ using RRTMGP
 using CUDA
 
 Random.seed!(2025)
+if CUDA.functional()
+    CUDA.seed!(2025)
+end
 
 # ## Grid
 #
@@ -242,7 +245,7 @@ reference_state = model.dynamics.reference_state
 set_to_mean!(reference_state, model, rescale_densities=true)
 
 T = model.temperature
-qᵗ = model.specific_moisture
+qᵗ = specific_prognostic_moisture(model)
 u, w = model.velocities.u, model.velocities.w
 qˡ = model.microphysical_fields.qˡ
 
@@ -258,6 +261,7 @@ qˡ = model.microphysical_fields.qˡ
 
 simulation = Simulation(model; Δt=1, stop_time=3days)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Surface temperature callback
 #
