@@ -149,6 +149,10 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     nʳ  = CenterField(grid)  # Rain number concentration [kg⁻¹]
     qⁱ  = CenterField(grid)  # Ice specific humidity [kg/kg]
     nⁱ  = CenterField(grid)  # Ice number concentration [kg⁻¹]
+    qᶠ  = CenterField(grid)  # Rime mass mixing ratio [kg/kg]
+    bᶠ  = CenterField(grid)  # Rime volume [m³/kg]
+    zⁱ  = CenterField(grid)  # Ice sixth moment [m⁶/kg]
+    qʷⁱ = CenterField(grid)  # Liquid water on ice [kg/kg]
 
     # Diagnostic field for vapor
     qᵛ = CenterField(grid)
@@ -175,7 +179,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     cache_ρqᵛ  = CenterField(grid)
 
     return (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ,
-              qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᵛ,
+              qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, qᵛ,
               wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
               cache_ρqᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
               cache_ρqᶠ, cache_ρbᶠ, cache_ρzⁱ, cache_ρqʷⁱ, cache_ρqᵛ)
@@ -233,6 +237,10 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.nʳ[i, j, k]  = ℳ.nʳ
     @inbounds μ.qⁱ[i, j, k]  = ℳ.qⁱ
     @inbounds μ.nⁱ[i, j, k]  = ℳ.nⁱ
+    @inbounds μ.qᶠ[i, j, k]  = ℳ.qᶠ
+    @inbounds μ.bᶠ[i, j, k]  = ℳ.bᶠ
+    @inbounds μ.zⁱ[i, j, k]  = ℳ.zⁱ
+    @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
 
     # Compute ice properties for terminal velocity
     Fᶠ = safe_divide(ℳ.qᶠ, ℳ.qⁱ, zero(FT))
