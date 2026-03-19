@@ -1,4 +1,5 @@
 using Test
+import Breeze
 using Breeze.Microphysics.PredictedParticleProperties
 using Breeze.AtmosphereModels: prognostic_field_names
 
@@ -1062,6 +1063,31 @@ using Oceananigans: CPU
         @test thresholds_rimed.ρ_graupel > 0
     end
 
+    @testset "Regime-4 particle area uses blended area" begin
+        FT = Float64
+        state = IceSizeDistributionState(FT;
+            intercept = 1e6,
+            shape = 0.0,
+            slope = 1000.0,
+            rime_fraction = 0.5,
+            rime_density = 500.0)
+
+        thresholds = Breeze.Microphysics.PredictedParticleProperties.regime_thresholds_from_state(FT, state)
+        D = thresholds.partial_rime * FT(1.01)
+
+        A = Breeze.Microphysics.PredictedParticleProperties.particle_area_ice_only(D, state, thresholds)
+
+        A_sphere = FT(π) / 4 * D^2
+        σ = FT(1.88)
+        γ = FT(0.2285) * FT(100)^(σ - 2)
+        A_aggregate = γ * D^σ
+        A_blended = (1 - state.rime_fraction) * A_aggregate + state.rime_fraction * A_sphere
+
+        @test isfinite(A)
+        @test A ≈ A_blended
+        @test A != A_sphere
+    end
+
     @testset "Ice mass computation" begin
         mass = IceMassPowerLaw()
 
@@ -1137,6 +1163,15 @@ using Oceananigans: CPU
 
         logλ_zero_N = solve_lambda(1e-4, 0.0, 0.0, 400.0)
         @test logλ_zero_N == log(1e7)
+
+        mass = IceMassPowerLaw()
+        ρ_dep_zero_rime = Breeze.Microphysics.PredictedParticleProperties.deposited_ice_density(mass, 0.0, 400.0)
+        ρ_dep_tiny_rime = Breeze.Microphysics.PredictedParticleProperties.deposited_ice_density(mass, 1e-12, 400.0)
+
+        @test isfinite(ρ_dep_zero_rime)
+        @test isfinite(ρ_dep_tiny_rime)
+        @test ρ_dep_zero_rime ≈ mass.ice_density
+        @test ρ_dep_tiny_rime > 0
     end
 
     @testset "Lambda solver - L/N dependence" begin
@@ -1251,6 +1286,27 @@ using Oceananigans: CPU
         @test tendency_ρzⁱ(zero_rates, ρ, FT(1e-4), FT(1e5), FT(1e-8)) == 0.0
         @test tendency_ρqʷⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρqᵛ(zero_rates, ρ) == 0.0
+    end
+
+    @testset "Tendency functions - nucleation adds sixth moment" begin
+        FT = Float64
+        ρ = FT(1.0)
+        prp = ProcessRateParameters(FT)
+
+        rates = P3ProcessRates(
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0), FT(0.0),
+            FT(1e-9), FT(10.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0)
+        )
+
+        D_nuc_cubed = 6 * prp.nucleated_ice_mass / (FT(π) * prp.pure_ice_density)
+        expected = ρ * rates.nucleation_number * D_nuc_cubed^2
+
+        @test tendency_ρzⁱ(rates, ρ, FT(0.0), FT(0.0), FT(0.0), prp) ≈ expected
+        @test tendency_ρzⁱ(rates, ρ, FT(0.0), FT(0.0), FT(0.0), prp) > 0
     end
 
     @testset "Tendency functions - Float32 type stability" begin

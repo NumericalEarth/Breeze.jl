@@ -237,7 +237,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.cache_ρnⁱ[i, j, k]  = tendency_ρnⁱ(rates, ρ)
     @inbounds μ.cache_ρqᶠ[i, j, k]  = tendency_ρqᶠ(rates, ρ, Fᶠ)
     @inbounds μ.cache_ρbᶠ[i, j, k]  = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, ℳ.qⁱ, p3.process_rates)
-    @inbounds μ.cache_ρzⁱ[i, j, k]  = tendency_ρzⁱ(rates, ρ, ℳ.qⁱ, ℳ.nⁱ, ℳ.zⁱ)
+    @inbounds μ.cache_ρzⁱ[i, j, k]  = tendency_ρzⁱ(rates, ρ, ℳ.qⁱ, ℳ.nⁱ, ℳ.zⁱ, p3.process_rates)
     @inbounds μ.cache_ρqʷⁱ[i, j, k] = tendency_ρqʷⁱ(rates, ρ)
     @inbounds μ.cache_ρqᵛ[i, j, k]  = tendency_ρqᵛ(rates, ρ)
 
@@ -385,7 +385,7 @@ Ice sixth moment tendency: changes with deposition, melting, riming, and nucleat
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρzⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, qⁱ, nⁱ, zⁱ, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ)
+    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, p3.process_rates)
 end
 
 """

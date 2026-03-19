@@ -388,7 +388,8 @@ to avoid redundant threshold computations within a quadrature loop.
     A_aggregate = γ * D^σ
 
     is_small = D < thresholds.spherical
-    is_graupel = D ≥ thresholds.graupel
+    is_partially_rimed = D ≥ thresholds.partial_rime
+    is_graupel = (D ≥ thresholds.graupel) & !is_partially_rimed
 
     A_intermediate = (1 - Fᶠ) * A_aggregate + Fᶠ * A_sphere
 

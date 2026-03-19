@@ -942,7 +942,7 @@ This simplified version uses proportional scaling (Z/q ratio).
 For more accurate 3-moment treatment, use the version that accepts
 the p3 scheme to access tabulated sixth moment integrals.
 """
-@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ)
+@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, prp::ProcessRateParameters)
     FT = typeof(ρ)
 
     # Simplified: Z changes proportionally to mass changes
@@ -954,8 +954,15 @@ the p3 scheme to access tabulated sixth moment integrals.
     total_melting = rates.partial_melting + rates.complete_melting
     mass_change = rates.deposition - total_melting +
                   rates.cloud_riming + rates.rain_riming + rates.refreezing
+    z_nuc = _nucleation_sixth_moment_tendency(rates.nucleation_number, prp)
 
-    return ρ * ratio * mass_change
+    return ρ * (ratio * mass_change + z_nuc)
+end
+
+@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ)
+    FT = typeof(ρ)
+    prp = ProcessRateParameters(FT)
+    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp)
 end
 
 """
@@ -999,7 +1006,8 @@ pre-computed lookup tables. Otherwise, falls back to proportional scaling.
     sc_correction = ventilation_sc_correction(nu, D_v)
 
     z_tendency = _tabulated_z_tendency(
-        p3.ice.sixth_moment, log_mean_mass, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ, sc_correction
+        p3.ice.sixth_moment, log_mean_mass, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ,
+        p3.process_rates, sc_correction
     )
 
     return z_tendency
@@ -1016,7 +1024,8 @@ end
 
 # Tabulated version: use TabulatedFunction3D lookups for each process
 @inline function _tabulated_z_tendency(sixth::IceSixthMoment{<:TabulatedFunction3D},
-                                        log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ, sc_correction)
+                                        log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ,
+                                        prp::ProcessRateParameters, sc_correction)
     FT = typeof(ρ)
 
     # Look up normalized Z contribution for each process
@@ -1046,19 +1055,22 @@ end
     # sublimation have separate normalized Z-change rates, as in Fortran P3.
     is_sublimating = rates.deposition < 0
     z_rate = z_rate + ifelse(is_sublimating, z_sub * abs(rates.deposition), zero(FT))
+    z_rate = z_rate + _nucleation_sixth_moment_tendency(rates.nucleation_number, prp)
 
     return ρ * z_rate
 end
 
 # Fallback: use proportional scaling when integrals are not tabulated
-@inline function _tabulated_z_tendency(::IceSixthMoment, log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ, sc_correction)
+@inline function _tabulated_z_tendency(::IceSixthMoment, log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ,
+                                       prp::ProcessRateParameters, sc_correction)
     # Fall back to the simple proportional scaling
-    FT = typeof(ρ)
-    ratio = safe_divide(zⁱ, qⁱ, zero(FT))
-    total_melting = rates.partial_melting + rates.complete_melting
-    mass_change = rates.deposition - total_melting +
-                  rates.cloud_riming + rates.rain_riming + rates.refreezing
-    return ρ * ratio * mass_change
+    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp)
+end
+
+@inline function _nucleation_sixth_moment_tendency(nucleation_number, prp::ProcessRateParameters)
+    FT = typeof(nucleation_number)
+    D_nuc_cubed = 6 * prp.nucleated_ice_mass / (FT(π) * prp.pure_ice_density)
+    return nucleation_number * D_nuc_cubed^2
 end
 
 """

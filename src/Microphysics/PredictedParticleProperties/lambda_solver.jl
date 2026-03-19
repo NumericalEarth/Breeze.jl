@@ -352,7 +352,7 @@ Equation 16 in [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterizati
     k = (1 - Fᶠ_safe)^(-1 / (3 - β))
     num = ρᶠ * Fᶠ_safe
     den = (β - 2) * (k - 1) / ((1 - Fᶠ_safe) * k - 1) - (1 - Fᶠ_safe)
-    ρ_dep_rimed = num / den
+    ρ_dep_rimed = num / max(den, eps(FT))
 
     # Return ice_density for unrimed case, computed density otherwise
     return ifelse(Fᶠ <= eps(FT), mass.ice_density, ρ_dep_rimed)
