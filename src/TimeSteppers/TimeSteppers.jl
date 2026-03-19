@@ -9,13 +9,12 @@ Provides time stepping schemes for AtmosphereModel, including:
 module TimeSteppers
 
 export SSPRungeKutta3, AcousticSSPRungeKutta3, AcousticRungeKutta3,
-       AbstractBreezeTimeStepper,
        store_initial_state!,
        ssp_rk3_substep!,
        maybe_initialize_state!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
-using Oceananigans: AbstractModel, prognostic_state, restore_prognostic_state!
+using Oceananigans
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  AbstractTimeStepper,
                                  update_state!, maybe_initialize_state!
@@ -41,13 +40,11 @@ OceananigansTimeSteppers.TimeStepper(::Val{:AcousticRungeKutta3}, args...; kwarg
 #####
 
 function Oceananigans.prognostic_state(timestepper::AbstractBreezeTimeStepper)
-    return (U⁰ = prognostic_state(timestepper.U⁰),
-            Gⁿ = prognostic_state(timestepper.Gⁿ))
+    return (Gⁿ = Oceananigans.prognostic_state(timestepper.Gⁿ),)
 end
 
 function Oceananigans.restore_prognostic_state!(restored::AbstractBreezeTimeStepper, from)
-    restore_prognostic_state!(restored.U⁰, from.U⁰)
-    restore_prognostic_state!(restored.Gⁿ, from.Gⁿ)
+    Oceananigans.restore_prognostic_state!(restored.Gⁿ, from.Gⁿ)
     return restored
 end
 
