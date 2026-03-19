@@ -3,7 +3,7 @@
 struct DewpointTemperatureKernelFunction{μ, M, MF, T, R, TH, FT}
     microphysics :: μ
     microphysical_fields :: M
-    specific_moisture :: MF
+    specific_prognostic_moisture :: MF
     temperature :: T
     reference_state :: R
     thermodynamic_constants :: TH
@@ -16,7 +16,7 @@ Oceananigans.Utils.prettysummary(kf::DewpointTemperatureKernelFunction) = "Dewpo
 Adapt.adapt_structure(to, k::DewpointTemperatureKernelFunction) =
     DewpointTemperatureKernelFunction(adapt(to, k.microphysics),
                                       adapt(to, k.microphysical_fields),
-                                      adapt(to, k.specific_moisture),
+                                      adapt(to, k.specific_prognostic_moisture),
                                       adapt(to, k.temperature),
                                       adapt(to, k.reference_state),
                                       adapt(to, k.thermodynamic_constants),
@@ -82,7 +82,7 @@ T⁺_field = Field(T⁺)
 function DewpointTemperature(model; tolerance=1e-4, maxiter=10)
     func = DewpointTemperatureKernelFunction(model.microphysics,
                                              model.microphysical_fields,
-                                             model.specific_moisture,
+                                             specific_prognostic_moisture(model),
                                              model.temperature,
                                              model.dynamics.reference_state,
                                              model.thermodynamic_constants,
@@ -100,7 +100,7 @@ function (d::DewpointTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
         pᵣ = d.reference_state.pressure[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]
-        qᵗ = d.specific_moisture[i, j, k]
+        qᵛᵉ = d.specific_prognostic_moisture[i, j, k]
         T = d.temperature[i, j, k]
     end
 
@@ -109,7 +109,7 @@ function (d::DewpointTemperatureKernelFunction)(i, j, k, grid)
     surface = equilibrated_surface(equilibrium, T)
 
     # Get vapor specific humidity from microphysics partition
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛᵉ, d.microphysical_fields)
     qᵛ = q.vapor
 
     # Compute density and vapor pressure

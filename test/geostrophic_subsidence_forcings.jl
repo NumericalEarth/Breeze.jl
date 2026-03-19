@@ -57,7 +57,7 @@ end
 
     reference_state = ReferenceState(grid)
     dynamics = AnelasticDynamics(reference_state)
-    model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature, forcing=(; ρqᵗ=subsidence))
+    model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature, forcing=(; ρqᵛ=subsidence))
 
     θ₀ = model.dynamics.reference_state.potential_temperature
 
@@ -66,10 +66,10 @@ end
     qᵗ_profile(x, y, z) = q₀ - Γq * z
     set!(model, θ=θ₀, qᵗ=qᵗ_profile)
 
-    @test haskey(model.forcing, :ρqᵗ)
-    @test model.forcing.ρqᵗ isa SubsidenceForcing
+    @test haskey(model.forcing, :ρqᵛ)
+    @test model.forcing.ρqᵛ isa SubsidenceForcing
 
-    ρqᵗ_initial = sum(model.moisture_density)
+    ρqᵛ_initial = sum(model.moisture_density)
 
     # Reduced iterations (from 10 to 3)
     Δt = FT(0.1)
@@ -77,10 +77,10 @@ end
         time_step!(model, Δt)
     end
 
-    ρqᵗ_final = sum(model.moisture_density)
+    ρqᵛ_final = sum(model.moisture_density)
 
-    @test !isnan(ρqᵗ_final)
-    @test ρqᵗ_final < ρqᵗ_initial
+    @test !isnan(ρqᵛ_final)
+    @test ρqᵛ_final < ρqᵛ_initial
 end
 
 @testset "θ → e conversion in StaticEnergy model [$(FT)]" for FT in test_float_types()
@@ -146,7 +146,7 @@ end
     subsidence = SubsidenceForcing(FT(wˢ))
 
     # Test a representative subset of fields (reduced from 5 to 3)
-    @testset "Subsidence forcing with constant gradient [$name, $FT]" for name in (:ρu, :ρθ, :ρqᵗ)
+    @testset "Subsidence forcing with constant gradient [$name, $FT]" for name in (:ρu, :ρθ, :ρqᵛ)
         # Test solo configuration only (combined is tested above)
         forcing = (; name => subsidence)
 
