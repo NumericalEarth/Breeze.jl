@@ -32,7 +32,7 @@ function set_thermodynamic_variable! end
 #####
 
 """
-    set_product!(dest, a, b)
+$(TYPEDSIGNATURES)
 
 Set `dest` to the product `a * b`. Overridable for architectures (e.g. ReactantState)
 that require specialised dispatch to compute field products correctly.

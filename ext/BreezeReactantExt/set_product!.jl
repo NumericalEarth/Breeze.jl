@@ -2,8 +2,7 @@ using Reactant: @jit
 using Oceananigans: ReactantState
 using Oceananigans.Grids: LatitudeLongitudeGrid
 using Oceananigans.Fields: set!
-using Oceananigans.Architectures: architecture
-using Breeze.AtmosphereModels: AtmosphereModels, dynamics_density
+using Breeze.AtmosphereModels: AtmosphereModels
 
 # Workaround: on LatitudeLongitudeGrid + ReactantState, eager KA kernel compilation
 # rejects getindex on the grid's ConcretePJRTArray metric vectors.
