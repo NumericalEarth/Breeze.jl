@@ -53,7 +53,8 @@ using Breeze.Thermodynamics:
     MoistureMassFractions,
     LiquidIcePotentialTemperatureState
 
-using Oceananigans: CPU
+using Oceananigans: CPU, RectilinearGrid
+using Oceananigans.Fields: interior
 
 @testset "Predicted Particle Properties (P3) Microphysics" begin
 
@@ -74,6 +75,32 @@ using Oceananigans: CPU
         @test p3_f32.water_density isa Float32
         @test p3_f32.minimum_mass_mixing_ratio isa Float32
         @test p3_f32.ice.fall_speed.reference_air_density isa Float32
+    end
+
+    @testset "AtmosphereModel initialization converts total moisture to vapor" begin
+        FT = Float64
+        grid = RectilinearGrid(CPU(); size=(1, 1, 1), extent=(1, 1, 1))
+
+        constants = ThermodynamicConstants(FT)
+        reference_state = Breeze.ReferenceState(grid, constants;
+                                                surface_pressure = FT(101325),
+                                                potential_temperature = FT(300))
+        dynamics = Breeze.AnelasticDynamics(reference_state)
+        model = Breeze.AtmosphereModel(grid; dynamics,
+                                       thermodynamic_constants = constants,
+                                       microphysics = PredictedParticlePropertiesMicrophysics(FT))
+
+        qᵗ = FT(0.02)
+        qᶜˡ = FT(0.005)
+        qʳ = FT(0.001)
+        qⁱ = FT(0.002)
+        qʷⁱ = FT(0.0005)
+        expected_qᵛ = qᵗ - qᶜˡ - qʳ - qⁱ - qʷⁱ
+
+        Breeze.set!(model; θ = FT(300), qᵗ, qᶜˡ, qʳ, qⁱ, qʷⁱ)
+
+        qᵛ_actual = first(Array(interior(model.microphysical_fields.qᵛ)))
+        @test qᵛ_actual ≈ expected_qᵛ
     end
 
     @testset "Ice properties construction" begin

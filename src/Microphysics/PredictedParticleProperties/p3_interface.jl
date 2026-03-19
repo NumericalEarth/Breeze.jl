@@ -97,9 +97,15 @@ $(TYPEDSIGNATURES)
 Convert total moisture to the prognostic moisture variable for P3.
 
 For P3, the prognostic moisture is vapor: `qᵛ = qᵗ - qᶜˡ - qʳ - qⁱ - qʷⁱ`.
+
+This helper is used by parcel-style paths that still carry total moisture.
 """
 @inline function AM.specific_prognostic_moisture_from_total(::P3, qᵗ, ℳ::P3MicrophysicalState)
     return max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ - ℳ.qⁱ - ℳ.qʷⁱ)
+end
+
+@inline function AM.specific_prognostic_moisture_from_total(::P3, qᵗ, μ_fields::NamedTuple, ρ)
+    return qᵗ - μ_fields.ρqᶜˡ / ρ - μ_fields.ρqʳ / ρ - μ_fields.ρqⁱ / ρ - μ_fields.ρqʷⁱ / ρ
 end
 
 #####
@@ -122,7 +128,7 @@ The P3 scheme requires the following fields on `grid`:
 - `ρqʷⁱ`: Liquid water on ice mass density
 
 **Diagnostic:**
-- `qᵛ`: Vapor specific humidity (computed from total moisture)
+- `qᵛ`: Vapor specific humidity (mirrors the prognostic vapor field)
 """
 function AM.materialize_microphysical_fields(::P3, grid, bcs)
     # Create all prognostic fields

@@ -25,15 +25,15 @@ After multiple bug fix batches, the remaining open issues are:
 - **0 CRITICAL**: All critical issues fixed
 - **2 HIGH**: Missing rime-density table axis (H2),
   no sedimentation sub-stepping (H5)
-- **4 MEDIUM**: Regime-4 area (M1), no ice-rain sub-table (M2), unvalidated
-  sixth moment (M4), Hallett-Mossop shape (M5)
+- **3 MEDIUM**: No ice-rain sub-table (M2), unvalidated sixth moment (M4),
+  Hallett-Mossop shape (M5)
 - **1 LOW**: Vestigial `maximum_shape_parameter` (L5)
 
 **New findings (2026-03-19):**
-- N1: `deposited_ice_density` lacks a `max(den, eps)` guard — can produce NaN when `den ≈ 0` at edge-case rime fractions
-- N2: `particle_area_ice_only` returns spherical area for regime 4 (D ≥ D_cr) — Fortran uses aggregate-like blended area (same as M1, confirming)
+- ~~N1~~: `deposited_ice_density` lacks a `max(den, eps)` guard — **FIXED** in `lambda_solver.jl` to match the guarded quadrature path.
+- ~~N2~~: `particle_area_ice_only` returns spherical area for regime 4 (D ≥ D_cr) — **FIXED** by restricting spherical area to regime 3 graupel while keeping regime 4 blended.
 - N3: Rain number tendency from evaporation uses `nʳ/qʳ` proportional removal — Fortran P3 has a more nuanced approach where `nr_evap` depends on μ_r
-- N4: Sixth moment tendency for nucleation missing — new ice crystals (mi0 mass) should add z_nuc = n_nuc × D_nuc^6 but `tendency_ρzⁱ` omits nucleation contribution entirely
+- ~~N4~~: Sixth moment tendency for nucleation missing — **FIXED** by adding a nucleation source term `z_nuc = n_nuc × D_nuc^6` in both fallback and tabulated `tendency_ρzⁱ` paths.
 
 ---
 
@@ -105,7 +105,7 @@ After multiple bug fix batches, the remaining open issues are:
 - `TwoMomentClosure`: `μ = 0.00191*λ^0.8 - 2` clamped [0,6] — algebraically identical to Fortran `0.076*(lam/100)^0.8 - 2`
 - `P3Closure`: D_mvd threshold = 0.2mm, large regime `0.25*(D_mvd_mm - 0.2)*f_ρ*Ff` — matches Fortran exactly
 - `ThreeMomentClosure`: Bisection over [μmin=0, μmax=20] — correct
-- `deposited_ice_density`: MM15a Eq. 16 — matches Fortran. **NEW (N1)**: `den` in the denominator can approach zero for edge-case rime fractions near β=2, but in `ice_regime_thresholds` a `max(den, eps)` guard is present via `Fᶠ_safe`. The `lambda_solver.jl` version at line 354 does NOT have this guard — potential NaN source.
+- `deposited_ice_density`: MM15a Eq. 16 — matches Fortran. **FIXED (N1)**: `den` is now guarded with `max(den, eps(FT))`, matching the safer `quadrature.jl` implementation and preventing NaNs at edge-case rime fractions.
 - `DiameterBounds`: D_max=40mm vs Fortran effective ~500μm — Breeze more permissive
 - `IceMassPowerLaw`: `α=0.0121`, `β=1.9`, `ρᵢ=917` — all match Fortran
 
@@ -127,7 +127,7 @@ After multiple bug fix batches, the remaining open issues are:
 - Stokes fallback at X<1e-5 for tiny particles
 - **Rain fall speed**: Piecewise Gunn-Kinzer/Beard (4-regime) vs Fortran single `V=842*D^0.8` — deliberate physics upgrade
 - **Particle mass**: 4-regime branchless `ifelse` cascade — matches Fortran `m(D)`. Uses `ρ_w=1000` (unified after L3 fix)
-- **Particle area**: Regime-4 (partially rimed, D≥D_cr) returns spherical area via `is_graupel` gate — **Fortran uses aggregate-like blended area** for regime 4. Overestimates cross-section of large partially-rimed aggregates. (M1/N2 confirmed)
+- **Particle area**: **FIXED (M1/N2)** — regime 3 graupel remains spherical, while regime 4 (partially rimed, D≥D_cr) now uses the aggregate-like blended area consistent with Fortran.
 - **Capacitance**: `cap=1 → capm=D` convention — matches Fortran. Rate equations use `2π×capm` correctly.
 - **Ventilation**: `a_v=0.65, b_v=0.44` match Fortran. Table stores raw `0.44*sqrt(V*D)` without `Sc^(1/3)/sqrt(nu)` — applied at runtime
 - `nrwat` (RainCollectionNumber): D≥100μm threshold — matches Fortran
@@ -221,7 +221,7 @@ After multiple bug fix batches, the remaining open issues are:
 - **Latent heats**: ~~Hardcoded (H1)~~ **FIXED** — `_sublimation_latent_heat`, `_vaporization_latent_heat`, `_fusion_latent_heat` dispatch on thermodynamic constants. When `compute_p3_process_rates` passes `constants`, uses T-dependent `ice_latent_heat(T)` / `liquid_latent_heat(T)`. Gas constants `R_v=461.5, R_d=287.0` remain hardcoded (deliberate Fortran match, L7).
 - **Rime density**: Cober-List (1993) with Stokes impact parameter — physics upgrade over Fortran's simpler `max(min(-0.5*T_C + 475, 900), 170)`
 - **Rime volume tendency**: Includes melt-densification (Fortran lines 3841-3844), cloud/rain rime use different ρ conventions, homogeneous freezing uses `ρ_ice=917`
-- **Sixth moment tendency**: Tabulated path uses all 9 integrals with proper Sc correction; fallback uses proportional Z/q scaling. **NEW (N4)**: Nucleation contributes zero to Z tendency — newly nucleated ice crystals with mass mi0 should add `n_nuc × D_nuc^6`. This underestimates Z growth during active nucleation episodes.
+- **Sixth moment tendency**: Tabulated path uses all 9 integrals with proper Sc correction; fallback uses proportional Z/q scaling. **FIXED (N4)**: Both paths now add an explicit nucleation source `n_nuc × D_nuc^6` using `mi0` and `ρ_ice`, so newly nucleated crystals contribute reflectivity immediately.
 - `::Nothing` fallback methods return `zero(ρ)` for clean dispatch
 
 **`ice_nucleation_rates.jl`** (377 lines) — COMPLETE
@@ -335,11 +335,11 @@ These are intentional design choices, not bugs:
 | ~~H6~~ | ~~**Aggregation missing ρ factor**~~ | collection_rates.jl:82 | **FIXED**: Added ρ parameter to `ice_aggregation_rate`; rate now `ρ * K * n²`. |
 | ~~H7~~ | ~~**Deposition ventilation uses unrimed-only fall speed**~~ | process_rates.jl:104 | **FIXED**: Fall speed coefficients now blended with rime fraction. |
 
-### MEDIUM Priority (14 issues, 7 fixed/documented)
+### MEDIUM Priority (14 issues, 8 fixed/documented)
 
 | # | Issue | File(s) |
 |---|-------|---------|
-| M1 | Particle area treats partially rimed (regime 4) as spherical instead of aggregate-like | quadrature.jl |
+| ~~M1~~ | ~~Particle area treats partially rimed (regime 4) as spherical instead of aggregate-like~~ | quadrature.jl | **FIXED**: Regime-4 area now stays on the blended aggregate-like branch; only regime-3 graupel uses spherical area. |
 | M2 | No ice-rain sub-table with rain diameter dimension (structural difference from Fortran) | tabulation.jl |
 | ~~M3~~ | ~~Duplicated regime threshold code with different eps guards~~ | quadrature.jl + lambda_solver.jl | **FIXED** |
 | M4 | Sixth moment integrands unvalidated against Fortran | quadrature.jl |
@@ -358,10 +358,10 @@ These are intentional design choices, not bugs:
 
 | # | Severity | Issue | File(s) | Impact |
 |---|----------|-------|---------|--------|
-| N1 | MEDIUM | `deposited_ice_density` in lambda_solver.jl:354 has no `max(den, eps)` guard | lambda_solver.jl | Potential NaN for edge-case rime fractions. The quadrature.jl version at line 441 has the guard. |
-| N2 | MEDIUM | Regime-4 particle area returns spherical (confirms M1) | quadrature.jl:391-397 | `is_graupel = D ≥ thresholds.graupel` gate makes D≥D_gr all spherical, including regime 4 (D≥D_cr). Fortran uses blended aggregate area for regime 4. |
+| ~~N1~~ | ~~MEDIUM~~ | ~~`deposited_ice_density` in lambda_solver.jl:354 has no `max(den, eps)` guard~~ | lambda_solver.jl | **FIXED**: Added `max(den, eps(FT))` guard to match the quadrature path and prevent edge-case NaNs. |
+| ~~N2~~ | ~~MEDIUM~~ | ~~Regime-4 particle area returns spherical (confirms M1)~~ | quadrature.jl:391-397 | **FIXED**: Regime-4 particles no longer fall through the graupel spherical-area gate. |
 | N3 | LOW | Rain number evaporation proportional removal | rain_process_rates.jl, process_rates.jl:709 | Fortran has μ_r-dependent factor; Breeze uses simple nʳ/qʳ ratio. Equivalent for μ_r=0. |
-| N4 | MEDIUM | Sixth moment tendency missing nucleation contribution | process_rates.jl:895-898 | New ice crystals with mass mi0 should contribute z_nuc ∝ n_nuc × D_nuc^6. The proportional Z/q scaling misses this because newly nucleated ice has a different Z/q ratio than the existing distribution. |
+| ~~N4~~ | ~~MEDIUM~~ | ~~Sixth moment tendency missing nucleation contribution~~ | process_rates.jl:895-898 | **FIXED**: Added an explicit nucleation sixth-moment source to both fallback and tabulated Z-tendency paths. |
 
 ### LOW Priority (8 issues, 7 fixed/documented)
 
@@ -475,13 +475,10 @@ These are intentional design choices, not bugs:
 
 ## Remaining Work (Priority Order)
 
-1. **Fix deposited_ice_density guard (N1)** — Add `max(den, eps(FT))` in `lambda_solver.jl:354`, matching `quadrature.jl:441`.
-2. **Add nucleation Z contribution (N4)** — In `tendency_ρzⁱ`, add `z_nuc = n_nuc × (6*mi0/(π*917))^2` for newly nucleated ice crystals.
-3. **Fix regime-4 particle area (M1/N2)** — In `particle_area_ice_only`, regime 4 (D ≥ D_cr) should use blended aggregate-like area, not spherical.
-4. **Sedimentation sub-stepping (H5)** — Required for production LES with large dt.
-5. **Add rime_density table dimension (H2)** — TabulatedFunction4D with 5 rime density values.
-8. **Validate sixth moment integrals** against Fortran 3-moment tables (M4).
-9. **3D LES validation cases** (BOMEX+ice, deep convection).
-10. **Prognostic Nc** (future: removes need for ni-explosion cap).
-11. **Multi-ice category integration** into process rates.
-12. **Radar reflectivity diagnostics**.
+1. **Sedimentation sub-stepping (H5)** — Required for production LES with large dt.
+2. **Add rime_density table dimension (H2)** — TabulatedFunction4D with 5 rime density values.
+3. **Validate sixth moment integrals** against Fortran 3-moment tables (M4).
+4. **3D LES validation cases** (BOMEX+ice, deep convection).
+5. **Prognostic Nc** (future: removes need for ni-explosion cap).
+6. **Multi-ice category integration** into process rates.
+7. **Radar reflectivity diagnostics**.
