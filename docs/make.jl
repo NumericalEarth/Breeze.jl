@@ -40,6 +40,7 @@ examples = [
     Example("Rising parcel: adiabatic ascent", "rising_parcels", true),
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
     Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
+    Example("P3 ice particle explorer", "p3_explorer", true),
     Example("Splitting supercell", "splitting_supercell", false),
     Example("Tropical cyclone world", "tropical_cyclone_world", false),
     Example("Diurnal cycle of radiative convection", "radiative_convection", false),
