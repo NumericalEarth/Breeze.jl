@@ -80,6 +80,27 @@ end
 @inline _fusion_latent_heat(constants, T) = _sublimation_latent_heat(constants, T) - _vaporization_latent_heat(constants, T)
 
 #####
+##### Ice psychrometric correction Γⁱ
+#####
+##### Accounts for the latent-heat feedback that reduces the effective
+##### supersaturation drive during ice deposition (Fortran P3 "abi" factor).
+##### Γⁱ = 1 + Lₛ² qᵛ⁺ⁱ / (Rᵛ T² cᵖ)
+##### Analogous to Γˡ in cloud_condensation_rate; both are linearisations
+##### of the saturation adjustment Jacobian as used in SaturationAdjustment.
+#####
+
+@inline function _ice_psychrometric_correction(::Nothing, q, L_s, qᵛ⁺ⁱ, Rᵛ, T)
+    FT = typeof(T)
+    cₚᵈ = FT(1004.64)   # Fortran P3 dry-air heat capacity [J/(kg·K)]
+    return 1 + L_s^2 * qᵛ⁺ⁱ / (Rᵛ * T^2 * cₚᵈ)
+end
+
+@inline function _ice_psychrometric_correction(constants, q, L_s, qᵛ⁺ⁱ, Rᵛ, T)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    return 1 + L_s^2 * qᵛ⁺ⁱ / (Rᵛ * T^2 * cᵖᵐ)
+end
+
+#####
 ##### Saturation vapor pressure at freezing (M6)
 #####
 ##### When thermodynamic constants are available, derive e_s(T₀) from the
@@ -287,22 +308,27 @@ end
 #####
 
 """
-    ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport)
+    ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport, q)
 
-Compute ventilation-enhanced ice deposition/sublimation rate.
+Compute ventilation-enhanced ice deposition/sublimation rate with latent-heat
+psychrometric correction.
 
-Following Morrison & Milbrandt (2015a) Eq. 30, the deposition rate is:
+Following Morrison & Milbrandt (2015a) Eq. 30, the single-particle growth rate is:
 
 ```math
-\\frac{dm}{dt} = \\frac{4πC f_v (S_i - 1)}{\\frac{L_s}{K_a T}(\\frac{L_s}{R_v T} - 1) + \\frac{R_v T}{e_{si} D_v}}
+\\frac{dm}{dt} = \\frac{4πC f_v (S_i - 1)}{Γⁱ \\left[\\frac{L_s}{K_a T}\\left(\\frac{L_s}{R_v T} - 1\\right) + \\frac{R_v T}{e_{si} D_v}\\right]}
 ```
 
-where f_v is the ventilation factor and C is the capacitance.
+where ``Γⁱ = 1 + L_s^2 q^{v+i} / (R_v T^2 c_p^m)`` is the latent-heat psychrometric
+correction (analogous to Fortran P3's `abi` factor and to ``Γˡ`` in
+[`cloud_condensation_rate`](@ref)). It accounts for the reduction in the effective
+supersaturation drive caused by latent heat released during deposition and is
+consistent with Breeze's `SaturationAdjustment` Jacobian linearisation.
 
 The bulk rate integrates over the size distribution:
 
 ```math
-\\frac{dq^i}{dt} = ∫ \\frac{dm}{dt}(D) N'(D) dD
+\\frac{dq^i}{dt} = \\int \\frac{dm}{dt}(D)\\, N'(D)\\, dD
 ```
 
 # Arguments
@@ -317,12 +343,13 @@ The bulk rate integrates over the size distribution:
 - `P`: Pressure [Pa]
 - `constants`: Thermodynamic constants (or `nothing` for Fortran-matched hardcoded values)
 - `transport`: Pre-computed air transport properties `(; D_v, K_a, nu)`
+- `q`: Moisture mass fractions used to compute mixture heat capacity for ``Γⁱ``
 
 # Returns
 - Rate of vapor → ice conversion [kg/kg/s] (positive = deposition)
 """
 @inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P,
-                                                  constants, transport)
+                                                  constants, transport, q)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -366,11 +393,17 @@ The bulk rate integrates over the size distribution:
     B = Rᵛ * T / (e_si * D_v)
     thermodynamic_factor = A + B
 
+    # Latent-heat psychrometric correction Γⁱ (Fortran P3 "abi"):
+    # Reduces the effective supersaturation drive to account for the
+    # warming produced by the latent heat of deposition.
+    # Γⁱ = 1 + Lₛ² qᵛ⁺ⁱ / (Rᵛ T² cᵖᵐ)  ≡  1 + (Lₛ/cᵖᵐ) dqᵛ⁺ⁱ/dT
+    Γⁱ = _ice_psychrometric_correction(constants, q, L_s, qᵛ⁺ⁱ_safe, Rᵛ, T)
+
     # Deposition rate per particle (Eq. 30 from MM15a)
     # Uses 2π (not 4π) because the ventilation integral stores capm = cap × D
     # (P3 Fortran convention), which is 2× the physical capacitance C = D/2.
     # The product 2π × capm = 2π × 2C = 4πC is physically correct.
-    dm_dt = FT(2π) * C_fv * (S_i - 1) / thermodynamic_factor
+    dm_dt = FT(2π) * C_fv * (S_i - 1) / (Γⁱ * thermodynamic_factor)
 
     # Scale by number concentration
     dep_rate = nⁱ_eff * dm_dt
@@ -381,6 +414,15 @@ The bulk rate integrates over the size distribution:
     max_sublim = -qⁱ_eff / τ_dep
 
     return ifelse(is_sublimation, max(dep_rate, max_sublim), dep_rate)
+end
+
+# Backward-compatible: explicit transport, no explicit q
+# Uses all-vapor moisture fractions; when constants=nothing the correction
+# uses the Fortran hardcoded cpd and q is not accessed.
+@inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P,
+                                                  constants, transport)
+    q = MoistureMassFractions(qᵛ)
+    return ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport, q)
 end
 
 # Backward-compatible: explicit transport, hardcoded latent heats
@@ -542,7 +584,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Phase 1: Ice deposition/sublimation and melting
     # =========================================================================
-    dep = ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport)
+    dep = ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport, q)
     dep = ifelse(qⁱ > FT(1e-20), dep, zero(FT))
 
     # Partitioned melting: partial stays on ice, complete goes to rain
