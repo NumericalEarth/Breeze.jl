@@ -43,7 +43,7 @@ See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
     # Density correction factor (Foote & du Toit 1969; Fortran P3 uses 0.54)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
-    vₜ = _tabulated_rain_mass_weighted_velocity(p3.rain.velocity_mass,
+    vₜ = tabulated_rain_mass_weighted_velocity(p3.rain.velocity_mass,
                                                  qʳ_eff, nʳ_eff, ρ_correction,
                                                  ρʷ, prp, FT)
 
@@ -51,7 +51,7 @@ See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
 end
 
 # Tabulated path: look up PSD-integrated mass-weighted velocity
-@inline function _tabulated_rain_mass_weighted_velocity(table::TabulatedFunction1D,
+@inline function tabulated_rain_mass_weighted_velocity(table::TabulatedFunction1D,
                                                          qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
     m̄  = qʳ / nʳ
     λ_r = cbrt(FT(π) * ρʷ / (6 * max(m̄, FT(1e-15))))
@@ -65,7 +65,7 @@ end
 # Mean-mass fallback path
 # NOTE (M13): Uses power-law V=ar*D^br. When tabulated, uses Gunn-Kinzer/Beard.
 # See rain_quadrature.jl header for the full discussion.
-@inline function _tabulated_rain_mass_weighted_velocity(::AbstractRainIntegral,
+@inline function tabulated_rain_mass_weighted_velocity(::AbstractRainIntegral,
                                                          qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
     a = prp.rain_fall_speed_coefficient
     b = prp.rain_fall_speed_exponent
@@ -114,7 +114,7 @@ Dispatches on `p3.rain.velocity_number`:
     # Density correction factor (Foote & du Toit 1969; Fortran P3 uses 0.54)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
-    vₜ = _tabulated_rain_number_weighted_velocity(p3.rain.velocity_number,
+    vₜ = tabulated_rain_number_weighted_velocity(p3.rain.velocity_number,
                                                    p3.rain.velocity_mass,
                                                    qʳ_eff, nʳ_eff, ρ_correction,
                                                    ρʷ, prp, FT)
@@ -123,7 +123,7 @@ Dispatches on `p3.rain.velocity_number`:
 end
 
 # Tabulated path: look up PSD-integrated number-weighted velocity
-@inline function _tabulated_rain_number_weighted_velocity(table::TabulatedFunction1D,
+@inline function tabulated_rain_number_weighted_velocity(table::TabulatedFunction1D,
                                                            ::AbstractRainIntegral,
                                                            qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
     m̄  = qʳ / nʳ
@@ -136,11 +136,11 @@ end
 end
 
 # Mean-mass fallback: use fixed ratio to mass-weighted velocity
-@inline function _tabulated_rain_number_weighted_velocity(::AbstractRainIntegral,
+@inline function tabulated_rain_number_weighted_velocity(::AbstractRainIntegral,
                                                            vel_mass_field,
                                                            qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
     ratio = prp.velocity_ratio_number_to_mass
-    vₘ = _tabulated_rain_mass_weighted_velocity(vel_mass_field, qʳ, nʳ,
+    vₘ = tabulated_rain_mass_weighted_velocity(vel_mass_field, qʳ, nʳ,
                                                   ρ_correction, ρʷ, prp, FT)
     return ratio * vₘ
 end
@@ -186,13 +186,13 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # Try to use tabulated fall speed if available
-    vₜ = _tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+    vₜ = tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
 
     return clamp(vₜ, v_min, v_max)
 end
 
 # Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
-@inline function _tabulated_mass_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+@inline function tabulated_mass_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
     FT = typeof(m̄)
     log_mean_mass = log10(max(m̄, FT(1e-20)))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
@@ -200,7 +200,7 @@ end
 end
 
 # Fallback: use analytical approximation when not tabulated
-@inline function _tabulated_mass_weighted_fall_speed(::AbstractFallSpeedIntegral, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+@inline function tabulated_mass_weighted_fall_speed(::AbstractFallSpeedIntegral, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
     FT = typeof(m̄)
 
     ρ_eff_unrimed = prp.ice_effective_density_unrimed
@@ -286,13 +286,13 @@ Compute number-weighted terminal velocity for ice.
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # Try to use tabulated fall speed if available
-    vₜ = _tabulated_number_weighted_fall_speed(fs.number_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+    vₜ = tabulated_number_weighted_fall_speed(fs.number_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
 
     return clamp(vₜ, v_min, v_max)
 end
 
 # Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
-@inline function _tabulated_number_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+@inline function tabulated_number_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
     FT = typeof(m̄)
     log_mean_mass = log10(max(m̄, FT(1e-20)))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
@@ -300,9 +300,9 @@ end
 end
 
 # Fallback: use ratio to mass-weighted velocity
-@inline function _tabulated_number_weighted_fall_speed(::AbstractFallSpeedIntegral, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+@inline function tabulated_number_weighted_fall_speed(::AbstractFallSpeedIntegral, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
     ratio = prp.velocity_ratio_number_to_mass
-    vₘ = _tabulated_mass_weighted_fall_speed(MassWeightedFallSpeed(), m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+    vₘ = tabulated_mass_weighted_fall_speed(MassWeightedFallSpeed(), m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
     return ratio * vₘ
 end
 
@@ -341,13 +341,13 @@ When tabulated integrals are available, uses pre-computed lookup tables.
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # Try to use tabulated fall speed if available
-    vₜ = _tabulated_reflectivity_weighted_fall_speed(fs.reflectivity_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+    vₜ = tabulated_reflectivity_weighted_fall_speed(fs.reflectivity_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
 
     return clamp(vₜ, v_min, v_max)
 end
 
 # Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
-@inline function _tabulated_reflectivity_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+@inline function tabulated_reflectivity_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
     FT = typeof(m̄)
     log_mean_mass = log10(max(m̄, FT(1e-20)))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
@@ -355,9 +355,9 @@ end
 end
 
 # Fallback: use ratio to mass-weighted velocity
-@inline function _tabulated_reflectivity_weighted_fall_speed(::AbstractFallSpeedIntegral, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+@inline function tabulated_reflectivity_weighted_fall_speed(::AbstractFallSpeedIntegral, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
     ratio = prp.velocity_ratio_reflectivity_to_mass
-    vₘ = _tabulated_mass_weighted_fall_speed(MassWeightedFallSpeed(), m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+    vₘ = tabulated_mass_weighted_fall_speed(MassWeightedFallSpeed(), m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
     return ratio * vₘ
 end
 
@@ -407,13 +407,13 @@ speed framework.
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # --- Dispatch into the tabulated / analytical internals ---
-    vₜ_mass = _tabulated_mass_weighted_fall_speed(
+    vₜ_mass = tabulated_mass_weighted_fall_speed(
         fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
 
-    vₜ_number = _tabulated_number_weighted_fall_speed(
+    vₜ_number = tabulated_number_weighted_fall_speed(
         fs.number_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
 
-    vₜ_refl = _tabulated_reflectivity_weighted_fall_speed(
+    vₜ_refl = tabulated_reflectivity_weighted_fall_speed(
         fs.reflectivity_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
 
     return (mass_weighted        = clamp(vₜ_mass,   v_min, v_max),

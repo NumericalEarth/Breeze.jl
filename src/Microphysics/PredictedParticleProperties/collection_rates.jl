@@ -74,7 +74,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
     # Self-collection kernel: dispatches to PSD-integrated table or
     # mean-mass path. Returns E-free kernel (A × ΔV per particle pair).
-    AV_kernel = _aggregation_kernel(p3.ice.collection.aggregation,
+    AV_kernel = aggregation_kernel(p3.ice.collection.aggregation,
                                      m_mean, Fᶠ, ρᶠ, prp)
 
     # Collection kernel with temperature-dependent sticking efficiency
@@ -144,7 +144,7 @@ factor for the exponential PSD.
     # Collection kernel ⟨A×V⟩: dispatches to PSD-integrated table or
     # mean-mass path with psd_correction. The RainCollectionNumber integral
     # computes ∫ V(D) A(D) N'(D) dD with E=1, giving the geometric kernel.
-    AV_per_particle = _collection_kernel_per_particle(p3.ice.collection.rain_collection,
+    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
                                                        m_mean, Fᶠ, ρᶠ, prp)
 
     # Air density correction for ice particle fall speed (Heymsfield et al. 2006):
@@ -189,7 +189,7 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
 
     # Same collection kernel as cloud_riming_rate
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
-    AV_per_particle = _collection_kernel_per_particle(p3.ice.collection.rain_collection,
+    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
                                                        m_mean, Fᶠ, ρᶠ, prp)
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
@@ -270,7 +270,7 @@ collection equation with collision kernel integrated over the ice PSD.
 
     # Collection kernel ⟨A×V⟩: dispatches to PSD-integrated table or
     # mean-mass path with psd_correction (same kernel as cloud riming).
-    AV_per_particle = _collection_kernel_per_particle(p3.ice.collection.rain_collection,
+    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
                                                        m_mean, Fᶠ, ρᶠ, prp)
 
     # Air density correction for ice particle fall speed (same convention as cloud riming):

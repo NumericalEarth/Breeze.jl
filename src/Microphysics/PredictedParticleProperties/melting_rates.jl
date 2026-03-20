@@ -59,8 +59,8 @@ where:
 
     # Thermodynamic constants: L_f and L_v are T-dependent when constants
     # are provided (H1), and Rᵛ follows the same runtime thermodynamic source.
-    L_f = _fusion_latent_heat(constants, T)
-    L_v = _vaporization_latent_heat(constants, T)
+    L_f = fusion_latent_heat(constants, T)
+    L_v = vaporization_latent_heat(constants, T)
     thermodynamic_constants = isnothing(constants) ? ThermodynamicConstants(FT) : constants
     Rᵛ = FT(vapor_gas_constant(thermodynamic_constants))
     # T,P-dependent transport properties (pre-computed or computed on demand)
@@ -72,7 +72,7 @@ where:
     # At T₀, ρ_vs corresponds to saturation at melting point.
     # Derived from thermodynamic constants when available (M6);
     # falls back to Fortran P3 v5.5.0 hardcoded 611 Pa otherwise.
-    e_s0 = _saturation_vapor_pressure_at_freezing(constants, T₀)
+    e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
     ρ_vs = e_s0 / (Rᵛ * T₀)  # Saturation vapor density at T₀
 
     # Ambient vapor density (from mixing ratio and actual air density)
@@ -83,7 +83,7 @@ where:
 
     # Ventilation integral C(D) × f_v(D): dispatches to PSD-integrated
     # table or mean-mass path depending on p3.ice.deposition type.
-    C_fv = _deposition_ventilation(p3.ice.deposition.ventilation,
+    C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
                                     m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
 

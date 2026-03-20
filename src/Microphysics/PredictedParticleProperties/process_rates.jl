@@ -71,13 +71,13 @@ end
 ##### hardcoded constants.
 #####
 
-@inline _sublimation_latent_heat(::Nothing, T) = typeof(T)(2.835e6)
-@inline _sublimation_latent_heat(constants, T) = ice_latent_heat(T, constants)
+@inline sublimation_latent_heat(::Nothing, T) = typeof(T)(2.835e6)
+@inline sublimation_latent_heat(constants, T) = ice_latent_heat(T, constants)
 
-@inline _vaporization_latent_heat(::Nothing, T) = typeof(T)(2.5e6)
-@inline _vaporization_latent_heat(constants, T) = liquid_latent_heat(T, constants)
+@inline vaporization_latent_heat(::Nothing, T) = typeof(T)(2.5e6)
+@inline vaporization_latent_heat(constants, T) = liquid_latent_heat(T, constants)
 
-@inline _fusion_latent_heat(constants, T) = _sublimation_latent_heat(constants, T) - _vaporization_latent_heat(constants, T)
+@inline fusion_latent_heat(constants, T) = sublimation_latent_heat(constants, T) - vaporization_latent_heat(constants, T)
 
 #####
 ##### Ice psychrometric correction Γⁱ
@@ -89,13 +89,13 @@ end
 ##### of the saturation adjustment Jacobian as used in SaturationAdjustment.
 #####
 
-@inline function _ice_psychrometric_correction(::Nothing, q, L_s, qᵛ⁺ⁱ, Rᵛ, T)
+@inline function ice_psychrometric_correction(::Nothing, q, L_s, qᵛ⁺ⁱ, Rᵛ, T)
     FT = typeof(T)
     cₚᵈ = FT(1004.64)   # Fortran P3 dry-air heat capacity [J/(kg·K)]
     return 1 + L_s^2 * qᵛ⁺ⁱ / (Rᵛ * T^2 * cₚᵈ)
 end
 
-@inline function _ice_psychrometric_correction(constants, q, L_s, qᵛ⁺ⁱ, Rᵛ, T)
+@inline function ice_psychrometric_correction(constants, q, L_s, qᵛ⁺ⁱ, Rᵛ, T)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     return 1 + L_s^2 * qᵛ⁺ⁱ / (Rᵛ * T^2 * cᵖᵐ)
 end
@@ -108,8 +108,8 @@ end
 ##### to the Fortran P3 v5.5.0 hardcoded 611 Pa (≈ e_s at 273.15 K).
 #####
 
-@inline _saturation_vapor_pressure_at_freezing(::Nothing, T₀) = typeof(T₀)(611)
-@inline function _saturation_vapor_pressure_at_freezing(constants, T₀)
+@inline saturation_vapor_pressure_at_freezing(::Nothing, T₀) = typeof(T₀)(611)
+@inline function saturation_vapor_pressure_at_freezing(constants, T₀)
     return saturation_vapor_pressure(T₀, constants, PlanarLiquidSurface())
 end
 
@@ -152,12 +152,12 @@ end
 #####
 
 """
-    _deposition_ventilation(vent, vent_e, m_mean, Fᶠ, ρᶠ, prp)
+    deposition_ventilation(vent, vent_e, m_mean, Fᶠ, ρᶠ, prp)
 
 Compute per-particle ventilation integral C(D) × f_v(D) for deposition.
 Dispatches on table type for PSD-integrated or mean-mass path.
 """
-@inline function _deposition_ventilation(vent::TabulatedFunction4D,
+@inline function deposition_ventilation(vent::TabulatedFunction4D,
                                           vent_e::TabulatedFunction4D,
                                           m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
     FT = typeof(m_mean)
@@ -170,7 +170,7 @@ Dispatches on table type for PSD-integrated or mean-mass path.
     return vent(log_m, Fᶠ, Fˡ, ρᶠ) + ventilation_sc_correction(nu, D_v) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ)
 end
 
-@inline function _deposition_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
+@inline function deposition_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
                                           m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
     FT = typeof(m_mean)
     ρ_eff_unrimed = prp.ice_effective_density_unrimed
@@ -179,7 +179,7 @@ end
     D_threshold = prp.ice_diameter_threshold
     # P3 Fortran convention: capm = cap × D where cap=1 for sphere, 0.48 for aggregate
     C = ifelse(D_mean < D_threshold, D_mean, FT(0.48) * D_mean)
-    # H7: Blend fall speed coefficients with rime fraction (matching _collection_kernel_per_particle)
+    # H7: Blend fall speed coefficients with rime fraction (matching collection_kernel_per_particle)
     a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
     b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
     V = a_V * D_mean^b_V
@@ -191,20 +191,20 @@ end
 end
 
 """
-    _collection_kernel_per_particle(coll, m_mean, Fᶠ, ρᶠ, prp)
+    collection_kernel_per_particle(coll, m_mean, Fᶠ, ρᶠ, prp)
 
 Compute per-particle collection kernel ⟨A × V⟩ for riming.
 Table path: returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle).
 Analytical path: returns A_mean × V_mean × psd_correction.
 """
-@inline function _collection_kernel_per_particle(coll::TabulatedFunction4D,
+@inline function collection_kernel_per_particle(coll::TabulatedFunction4D,
                                                   m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
     return coll(log_m, Fᶠ, zero(FT), ρᶠ)
 end
 
-@inline function _collection_kernel_per_particle(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
+@inline function collection_kernel_per_particle(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
     ρ_eff_unrimed = prp.ice_effective_density_unrimed
     ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
@@ -225,13 +225,13 @@ end
 end
 
 """
-    _aggregation_kernel(coll, m_mean, Fᶠ, ρᶠ, prp)
+    aggregation_kernel(coll, m_mean, Fᶠ, ρᶠ, prp)
 
 Compute aggregation kernel for self-collection.
 Table path: uses PSD-integrated kernel from table.
 Analytical path: A_mean × ΔV at mean diameter.
 """
-@inline function _aggregation_kernel(coll::TabulatedFunction4D,
+@inline function aggregation_kernel(coll::TabulatedFunction4D,
                                       m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
@@ -241,7 +241,7 @@ Analytical path: A_mean × ΔV at mean diameter.
     return coll(log_m, Fᶠ, zero(FT), ρᶠ)
 end
 
-@inline function _aggregation_kernel(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
+@inline function aggregation_kernel(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
     ρ_eff_unrimed = prp.ice_effective_density_unrimed
     ρ_eff = max(FT(50), (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ)
@@ -361,7 +361,7 @@ The bulk rate integrates over the size distribution:
     thermodynamic_constants = isnothing(constants) ? ThermodynamicConstants(FT) : constants
     Rᵛ = FT(vapor_gas_constant(thermodynamic_constants))
     Rᵈ = FT(dry_air_gas_constant(thermodynamic_constants))
-    L_s = _sublimation_latent_heat(constants, T)
+    L_s = sublimation_latent_heat(constants, T)
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
@@ -382,7 +382,7 @@ The bulk rate integrates over the size distribution:
 
     # Ventilation integral C(D) × f_v(D): dispatches to PSD-integrated
     # table or mean-mass analytical path depending on p3.ice.deposition type.
-    C_fv = _deposition_ventilation(p3.ice.deposition.ventilation,
+    C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
                                     m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
 
@@ -397,7 +397,7 @@ The bulk rate integrates over the size distribution:
     # Reduces the effective supersaturation drive to account for the
     # warming produced by the latent heat of deposition.
     # Γⁱ = 1 + Lₛ² qᵛ⁺ⁱ / (Rᵛ T² cᵖᵐ)  ≡  1 + (Lₛ/cᵖᵐ) dqᵛ⁺ⁱ/dT
-    Γⁱ = _ice_psychrometric_correction(constants, q, L_s, qᵛ⁺ⁱ_safe, Rᵛ, T)
+    Γⁱ = ice_psychrometric_correction(constants, q, L_s, qᵛ⁺ⁱ_safe, Rᵛ, T)
 
     # Deposition rate per particle (Eq. 30 from MM15a)
     # Uses 2π (not 4π) because the ventilation integral stores capm = cap × D
@@ -1033,7 +1033,7 @@ the p3 scheme to access tabulated sixth moment integrals.
     total_melting = rates.partial_melting + rates.complete_melting
     mass_change = rates.deposition - total_melting +
                   rates.cloud_riming + rates.rain_riming + rates.refreezing
-    z_nuc = _nucleation_sixth_moment_tendency(rates.nucleation_number, prp)
+    z_nuc = nucleation_sixth_moment_tendency(rates.nucleation_number, prp)
 
     return ρ * (ratio * mass_change + z_nuc)
 end
@@ -1081,10 +1081,10 @@ pre-computed lookup tables. Otherwise, falls back to proportional scaling.
 
     # Schmidt number correction for enhanced ventilation integrals
     # Table stores 0.44 × ∫ C(D)√(V×D) N'(D) dD; runtime applies Sc^(1/3)/√ν
-    # (see ventilation_sc_correction and _deposition_ventilation for dimensional derivation)
+    # (see ventilation_sc_correction and deposition_ventilation for dimensional derivation)
     sc_correction = ventilation_sc_correction(nu, D_v)
 
-    z_tendency = _tabulated_z_tendency(
+    z_tendency = tabulated_z_tendency(
         p3.ice.sixth_moment, log_mean_mass, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
         p3.process_rates, sc_correction
     )
@@ -1102,7 +1102,7 @@ end
 end
 
 # Tabulated version: use TabulatedFunction4D lookups for each process
-@inline function _tabulated_z_tendency(sixth::IceSixthMoment{<:TabulatedFunction4D},
+@inline function tabulated_z_tendency(sixth::IceSixthMoment{<:TabulatedFunction4D},
                                         log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
                                         prp::ProcessRateParameters, sc_correction)
     FT = typeof(ρ)
@@ -1136,19 +1136,19 @@ end
              z_agg * rates.aggregation * safe_divide(qⁱ, nⁱ, FT(1e-12)) +  # agg is positive magnitude (M7)
              z_shed * rates.shedding -
              z_melt * total_melting
-    z_rate = z_rate + _nucleation_sixth_moment_tendency(rates.nucleation_number, prp)
+    z_rate = z_rate + nucleation_sixth_moment_tendency(rates.nucleation_number, prp)
 
     return ρ * z_rate
 end
 
 # Fallback: use proportional scaling when integrals are not tabulated
-@inline function _tabulated_z_tendency(::IceSixthMoment, log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
+@inline function tabulated_z_tendency(::IceSixthMoment, log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
                                        prp::ProcessRateParameters, sc_correction)
     # Fall back to the simple proportional scaling
     return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp)
 end
 
-@inline function _nucleation_sixth_moment_tendency(nucleation_number, prp::ProcessRateParameters)
+@inline function nucleation_sixth_moment_tendency(nucleation_number, prp::ProcessRateParameters)
     FT = typeof(nucleation_number)
     D_nuc_cubed = 6 * prp.nucleated_ice_mass / (FT(π) * prp.pure_ice_density)
     return nucleation_number * D_nuc_cubed^2

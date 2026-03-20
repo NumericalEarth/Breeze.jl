@@ -446,7 +446,7 @@ end
 ##### Trilinear interpolation for TabulatedFunction3D
 #####
 
-@inline function _clamp_and_index(val, v_min, v_max, inverse_Δv, n)
+@inline function clamp_and_index(val, v_min, v_max, inverse_Δv, n)
     v_clamped = clamp(val, v_min, v_max)
     fractional_idx = (v_clamped - v_min) * inverse_Δv
 
@@ -467,9 +467,9 @@ Evaluate the tabulated function using trilinear interpolation.
 @inline function (f::TabulatedFunction3D)(x, y, z)
     nx, ny, nz = size(f.table)
 
-    i⁻, i⁺, ξx = _clamp_and_index(x, f.x_min, f.x_max, f.inverse_Δx, nx)
-    j⁻, j⁺, ξy = _clamp_and_index(y, f.y_min, f.y_max, f.inverse_Δy, ny)
-    k⁻, k⁺, ξz = _clamp_and_index(z, f.z_min, f.z_max, f.inverse_Δz, nz)
+    i⁻, i⁺, ξx = clamp_and_index(x, f.x_min, f.x_max, f.inverse_Δx, nx)
+    j⁻, j⁺, ξy = clamp_and_index(y, f.y_min, f.y_max, f.inverse_Δy, ny)
+    k⁻, k⁺, ξz = clamp_and_index(z, f.z_min, f.z_max, f.inverse_Δz, nz)
 
     # Trilinear interpolation
     @inbounds begin
@@ -673,10 +673,10 @@ Evaluate the tabulated function using quadrilinear interpolation.
 @inline function (f::TabulatedFunction4D)(x, y, z, w)
     nx, ny, nz, nw = size(f.table)
 
-    i⁻, i⁺, ξx = _clamp_and_index(x, f.x_min, f.x_max, f.inverse_Δx, nx)
-    j⁻, j⁺, ξy = _clamp_and_index(y, f.y_min, f.y_max, f.inverse_Δy, ny)
-    k⁻, k⁺, ξz = _clamp_and_index(z, f.z_min, f.z_max, f.inverse_Δz, nz)
-    l⁻, l⁺, ξw = _clamp_and_index(w, f.w_min, f.w_max, f.inverse_Δw, nw)
+    i⁻, i⁺, ξx = clamp_and_index(x, f.x_min, f.x_max, f.inverse_Δx, nx)
+    j⁻, j⁺, ξy = clamp_and_index(y, f.y_min, f.y_max, f.inverse_Δy, ny)
+    k⁻, k⁺, ξz = clamp_and_index(z, f.z_min, f.z_max, f.inverse_Δz, nz)
+    l⁻, l⁺, ξw = clamp_and_index(w, f.w_min, f.w_max, f.inverse_Δw, nw)
 
     # Quadrilinear interpolation: interpolate in x, then y, then z, then w
     @inbounds begin

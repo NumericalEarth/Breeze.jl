@@ -224,7 +224,7 @@ approximation path depending on `p3.rain.evaporation`:
 
     # Internal helpers return negative (S - 1 < 0 when subsaturated).
     # Negate to get positive magnitude (M7 sign convention).
-    evap_rate = -_rain_evaporation_rate(p3.rain.evaporation, qʳ_eff, nʳ_eff, S,
+    evap_rate = -rain_evaporation_rate(p3.rain.evaporation, qʳ_eff, nʳ_eff, S,
                                         thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
 
     # Cannot evaporate more than available
@@ -236,7 +236,7 @@ approximation path depending on `p3.rain.evaporation`:
 end
 
 # Tabulated path: use PSD-integrated ventilation integral I_evap(λ_r)
-@inline function _rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
+@inline function rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
                                         thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
     ρ_water = p3.water_density
 
@@ -266,7 +266,7 @@ end
 # PSD using the physical piecewise Gunn-Kinzer/Beard fall speed law.
 # This fallback uses the Fortran P3 power-law V = ar × D^br (842 × D^0.8)
 # consistently with terminal_velocities.jl and process_rate_parameters.jl.
-@inline function _rain_evaporation_rate(::AbstractRainIntegral, qʳ, nʳ, S,
+@inline function rain_evaporation_rate(::AbstractRainIntegral, qʳ, nʳ, S,
                                         thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
     ρ_water = p3.water_density
 
