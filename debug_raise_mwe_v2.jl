@@ -164,7 +164,7 @@ z_disc = StaticVerticalDiscretization(zf, zc, Δz, Δz)
 struct ReactantState end
 
 grid = RectilinearGrid{Float64, Periodic, Flat, Bounded,
-    typeof(z_disc), Float64, Float64, typeof(xf), typeof(xc), ReactantState}(
+    typeof(z_disc), Float64, Float64, typeof(xf), Nothing, ReactantState}(
     ReactantState(),
     Nx, 1, Nz, Hx, Hy, Hz,
     Lx, 0.0, Lz,
