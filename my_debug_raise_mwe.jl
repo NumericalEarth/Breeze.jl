@@ -1,6 +1,6 @@
 using CUDA, Reactant, Enzyme
 using Breeze, Oceananigans
-using Oceananigans.Architectures: ReactantState, architecture, convert_to_device
+using Oceananigans.Architectures: ReactantState
 using Oceananigans.Fields: CenterField, Field, instantiated_location
 using Reactant: TracedRNumber, ConcreteRNumber
 using OffsetArrays: OffsetArray
@@ -37,20 +37,17 @@ grid = RectilinearGrid(ReactantState(); size=(Nx, Nz),
 ρ      = CenterField(grid)
 clock  = Clock(time=0.0, last_Δt=Inf, last_stage_Δt=Inf, iteration=ConcreteRNumber(0), stage=1)
 mf     = ()
+@info ρ.boundary_conditions
+
 
 function fhr!(field::Field, positional_args...; kwargs...)
-    arch = architecture(field.grid)
-    args = (field.data,
-            field.boundary_conditions,
-            field.indices,
-            instantiated_location(field),
-            field.grid,
-            positional_args...)
-
-    GC.@preserve args begin
-        converted_args = convert_to_device(arch, args)
-        fill_halo_regions!(converted_args...; kwargs...)
-    end
+    fill_halo_regions!(field.data,
+                       field.boundary_conditions,
+                       field.indices,
+                       instantiated_location(field),
+                       field.grid,
+                       positional_args...;
+                       kwargs...)
     return nothing
 end
 
