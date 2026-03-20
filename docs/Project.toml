@@ -18,6 +18,7 @@ Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 
 [sources]
 Breeze = {path = ".."}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "4da9e657e0667d5425d3f496ee484e7f9bd8022d"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
