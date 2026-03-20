@@ -68,8 +68,10 @@ where:
     nu  = transport.nu        # Kinematic viscosity [m²/s]
 
     # Vapor density terms
-    # At T₀, ρ_vs corresponds to saturation at melting point
-    e_s0 = FT(611)  # Saturation vapor pressure at 273.15 K [Pa]
+    # At T₀, ρ_vs corresponds to saturation at melting point.
+    # Derived from thermodynamic constants when available (M6);
+    # falls back to Fortran P3 v5.5.0 hardcoded 611 Pa otherwise.
+    e_s0 = _saturation_vapor_pressure_at_freezing(constants, T₀)
     ρ_vs = e_s0 / (R_v * T₀)  # Saturation vapor density at T₀
 
     # Ambient vapor density (from mixing ratio and actual air density)
@@ -207,7 +209,7 @@ end
 """
     ice_melting_number_rate(qⁱ, nⁱ, qⁱ_melt_rate)
 
-Compute ice number tendency from melting.
+Compute ice number loss from melting.
 
 Number of melted particles equals number of rain drops produced.
 
@@ -217,7 +219,7 @@ Number of melted particles equals number of rain drops produced.
 - `qⁱ_melt_rate`: Ice mass melting rate [kg/kg/s]
 
 # Returns
-- Rate of ice number reduction [1/kg/s]
+- Rate of ice number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
 @inline function ice_melting_number_rate(qⁱ, nⁱ, qⁱ_melt_rate)
     FT = typeof(qⁱ)
@@ -225,8 +227,9 @@ Number of melted particles equals number of rain drops produced.
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
-    # ∂nⁱ/∂t = (nⁱ/qⁱ) × ∂qⁱ_melt/∂t
+    # |∂nⁱ/∂t| = (nⁱ/qⁱ) × ∂qⁱ_melt/∂t (positive magnitude)
+    # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
     ratio = safe_divide(nⁱ_eff, qⁱ_eff, zero(FT))
 
-    return -ratio * qⁱ_melt_rate
+    return ratio * qⁱ_melt_rate
 end

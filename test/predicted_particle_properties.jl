@@ -1248,27 +1248,28 @@ using Oceananigans.Fields: interior
         prp = ProcessRateParameters(FT)
 
         # Create rates with typical warm-rain and ice process activity
+        # Sign convention (M7): all one-directional rates are positive magnitudes
         rates = P3ProcessRates(
-            # Phase 1: Cloud condensation/evaporation
-            FT(5e-7),   # condensation (positive = condensation)
-            # Phase 1: Rain
+            # Phase 1: Cloud condensation/evaporation (bidirectional: +cond, −evap)
+            FT(5e-7),   # condensation
+            # Phase 1: Rain (all positive magnitudes)
             FT(1e-7),   # autoconversion
             FT(2e-7),   # accretion
-            FT(-5e-8),  # rain_evaporation (negative = loss)
-            FT(-1e-6),  # rain_self_collection (negative = loss)
+            FT(5e-8),   # rain_evaporation (positive magnitude)
+            FT(1e-6),   # rain_self_collection (positive magnitude)
             FT(5e-7),   # rain_breakup (positive = number source)
-            # Phase 1: Ice
+            # Phase 1: Ice (deposition bidirectional; others positive magnitude)
             FT(3e-7),   # deposition
             FT(1e-8),   # partial_melting
             FT(5e-8),   # complete_melting
-            FT(-1e3),   # melting_number (negative = loss)
-            # Phase 2: Aggregation
-            FT(-500.0), # aggregation (negative = number loss)
-            # Phase 2: Riming
+            FT(1e3),    # melting_number (positive magnitude)
+            # Phase 2: Aggregation (positive magnitude)
+            FT(500.0),  # aggregation
+            # Phase 2: Riming (all positive magnitudes)
             FT(1e-7),   # cloud_riming
-            FT(-1e4),   # cloud_riming_number
+            FT(1e4),    # cloud_riming_number (positive magnitude)
             FT(5e-8),   # rain_riming
-            FT(-500.0), # rain_riming_number
+            FT(500.0),  # rain_riming_number (positive magnitude)
             FT(300.0),  # rime_density_new
             # Phase 2: Shedding and refreezing
             FT(2e-8),   # shedding
@@ -1428,11 +1429,11 @@ using Oceananigans.Fields: interior
         ρ = FT(1.0)
         P = FT(101325.0)
 
-        # Subsaturated: qv < qv_sat → negative evaporation rate
+        # Subsaturated: qv < qv_sat → positive evaporation rate (M7: positive magnitude)
         qv_sat = FT(0.012)
         qv_sub = FT(0.008)    # 67% RH
         rate_sub = rain_evaporation_rate(p3, qr, nr, qv_sub, qv_sat, T, ρ, P)
-        @test rate_sub < 0     # Negative = rain evaporating
+        @test rate_sub > 0     # Positive magnitude = rain evaporating
 
         # Saturated: qv = qv_sat → zero evaporation
         rate_sat = rain_evaporation_rate(p3, qr, nr, qv_sat, qv_sat, T, ρ, P)
@@ -1584,13 +1585,13 @@ using Oceananigans.Fields: interior
         T_warm = FT(268.15)    # -5C
         ρ = FT(1.0)
         rate_warm = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ)
-        @test rate_warm < 0     # Number reduction rate is negative
+        @test rate_warm > 0     # Positive magnitude (M7)
 
         # Very cold (T < 253.15 K): much less aggregation
         T_cold = FT(233.15)    # -40C
         rate_cold = ice_aggregation_rate(p3, qi, ni, T_cold, Ff, ρf, ρ)
         # Aggregation efficiency at very cold T is 0.001 vs ~0.15 at -5C
-        @test abs(rate_cold) < abs(rate_warm)
+        @test rate_cold < rate_warm
 
         # Zero ice: zero aggregation
         rate_noice = ice_aggregation_rate(p3, FT(0), FT(0), T_warm, Ff, ρf, ρ)
@@ -1720,8 +1721,8 @@ using Oceananigans.Fields: interior
         @test rates.partial_melting == 0
         @test rates.complete_melting == 0
 
-        # Aggregation should be negative (number loss)
-        @test rates.aggregation <= 0
+        # Aggregation should be positive magnitude (M7)
+        @test rates.aggregation >= 0
 
         # Rime density should be physical
         @test rates.rime_density_new >= 50
@@ -1781,7 +1782,7 @@ using Oceananigans.Fields: interior
         @test rates_tab.cloud_riming > 0
         @test rates_tab.partial_melting == 0
         @test rates_tab.complete_melting == 0
-        @test rates_tab.aggregation <= 0
+        @test rates_tab.aggregation >= 0
 
         # Compute rates with analytical scheme for comparison
         rates_ana = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
@@ -1793,7 +1794,7 @@ using Oceananigans.Fields: interior
         @test rates_tab.accretion ≈ rates_ana.accretion
         @test rates_tab.condensation ≈ rates_ana.condensation
         # Rain evaporation is now also table-dependent, so allow differences
-        @test rates_tab.rain_evaporation < 0   # Must be negative (evaporation)
+        @test rates_tab.rain_evaporation > 0   # Must be positive magnitude (M7)
         @test isfinite(rates_tab.rain_evaporation)
 
         # Table-dependent rates should be same sign and order of magnitude
@@ -1962,7 +1963,7 @@ using Oceananigans.Fields: interior
     end
 
     @testset "rain_evaporation_rate sign with tabulated scheme" begin
-        # With tabulated rain, evaporation in subsaturated air should be negative
+        # With tabulated rain, evaporation in subsaturated air should be positive magnitude (M7)
         p3 = PredictedParticlePropertiesMicrophysics()
         p3_tab = tabulate(p3, :rain, CPU();
                           lambda_points=20,
@@ -1979,7 +1980,7 @@ using Oceananigans.Fields: interior
         qv_sub = FT(0.008)   # 67% RH — subsaturated
 
         rate_sub = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P)
-        @test rate_sub < 0   # Evaporation removes rain
+        @test rate_sub > 0   # Positive magnitude (M7)
 
         # Saturated: zero evaporation
         rate_sat = rain_evaporation_rate(p3_tab, qr, nr, qv_sat, qv_sat, T, ρ, P)
@@ -2010,15 +2011,15 @@ using Oceananigans.Fields: interior
         rate_ana = rain_evaporation_rate(p3_ana, qr, nr, qv_sub, qv_sat, T, ρ, P)
         rate_tab = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P)
 
-        # Both should be negative (evaporation) and finite
-        @test rate_ana < 0
-        @test rate_tab < 0
+        # Both should be positive magnitude (M7) and finite
+        @test rate_ana > 0
+        @test rate_tab > 0
         @test isfinite(rate_ana)
         @test isfinite(rate_tab)
 
-        # Same sign and both physically reasonable (not zero, not astronomical)
-        @test abs(rate_tab) > 0
-        @test abs(rate_tab) < 1.0   # Cannot evaporate more than all rain per second
+        # Both physically reasonable (not zero, not astronomical)
+        @test rate_tab > 0
+        @test rate_tab < 1.0   # Cannot evaporate more than all rain per second
     end
 
     @testset "tabulated rain terminal velocity - positive and monotone" begin
@@ -2227,22 +2228,23 @@ using Oceananigans.Fields: interior
         ρ = FT(1.0)
 
         # Create rates with typical mixed-phase values, including homogeneous freezing
+        # Sign convention (M7): all one-directional rates are positive magnitudes
         rates = P3ProcessRates(
-            FT(5e-7),   # condensation
+            FT(5e-7),   # condensation (bidirectional)
             FT(1e-7),   # autoconversion
             FT(2e-7),   # accretion
-            FT(-5e-8),  # rain_evaporation
-            FT(-1e-6),  # rain_self_collection
+            FT(5e-8),   # rain_evaporation (positive magnitude)
+            FT(1e-6),   # rain_self_collection (positive magnitude)
             FT(5e-7),   # rain_breakup
-            FT(3e-7),   # deposition
+            FT(3e-7),   # deposition (bidirectional)
             FT(1e-8),   # partial_melting
             FT(5e-8),   # complete_melting
-            FT(-1e3),   # melting_number
-            FT(-500.0), # aggregation
+            FT(1e3),    # melting_number (positive magnitude)
+            FT(500.0),  # aggregation (positive magnitude)
             FT(1e-7),   # cloud_riming
-            FT(-1e4),   # cloud_riming_number
+            FT(1e4),    # cloud_riming_number (positive magnitude)
             FT(5e-8),   # rain_riming
-            FT(-500.0), # rain_riming_number
+            FT(500.0),  # rain_riming_number (positive magnitude)
             FT(300.0),  # rime_density_new
             FT(2e-8),   # shedding
             FT(100.0),  # shedding_number

@@ -79,7 +79,7 @@ Follows [Seifert and Beheng (2001)](@cite SeifertBeheng2001).
 - `ρ`: Air density [kg/m³]
 
 # Returns
-- Rate of rain number reduction [1/kg/s]
+- Rate of rain number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
 @inline function rain_self_collection_rate(p3, qʳ, nʳ, ρ)
     prp = p3.process_rates
@@ -87,10 +87,11 @@ Follows [Seifert and Beheng (2001)](@cite SeifertBeheng2001).
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = clamp_positive(nʳ)
 
-    # ∂nʳ/∂t = -k_rr × ρ × qʳ × nʳ
+    # |∂nʳ/∂t| = k_rr × ρ × qʳ × nʳ (positive magnitude)
+    # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
     k_rr = prp.self_collection_coefficient
 
-    return -k_rr * ρ * qʳ_eff * nʳ_eff
+    return k_rr * ρ * qʳ_eff * nʳ_eff
 end
 
 """
@@ -112,7 +113,7 @@ The breakup rate is ``-(Φ_{br} + 1) \\times`` self-collection rate.
 - `p3`: P3 microphysics scheme (provides parameters)
 - `qʳ`: Rain mass fraction [kg/kg]
 - `nʳ`: Rain number concentration [1/kg]
-- `self_collection`: Self-collection rate [1/kg/s] (negative)
+- `self_collection`: Self-collection rate [1/kg/s] (positive magnitude)
 
 # Returns
 - Breakup rate [1/kg/s] (positive = number source)
@@ -148,8 +149,9 @@ The breakup rate is ``-(Φ_{br} + 1) \\times`` self-collection rate.
                           k_br * ΔD,
                           FT(2) * (exp(κ_br * ΔD) - FT(1))))
 
-    # Breakup rate: -(Φ_br + 1) × self_collection (Eq. 13 from SB2006)
-    return -(Φ_br + FT(1)) * self_collection
+    # Breakup rate: (Φ_br + 1) × self_collection (Eq. 13 from SB2006)
+    # self_collection is positive magnitude (M7); breakup is positive (number source).
+    return (Φ_br + FT(1)) * self_collection
 end
 
 """
@@ -186,7 +188,7 @@ approximation path depending on `p3.rain.evaporation`:
 - `P`: Air pressure [Pa]
 
 # Returns
-- Rate of rain → vapor conversion [kg/kg/s] (negative = evaporation)
+- Rate of rain evaporation [kg/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
 @inline function rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P,
                                        transport=air_transport_properties(T, P))
@@ -220,13 +222,15 @@ approximation path depending on `p3.rain.evaporation`:
     B = R_v * T / (e_s * D_v)
     thermodynamic_factor = max(A + B, FT(1e-10))
 
-    evap_rate = _rain_evaporation_rate(p3.rain.evaporation, qʳ_eff, nʳ_eff, S,
-                                       thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
+    # Internal helpers return negative (S - 1 < 0 when subsaturated).
+    # Negate to get positive magnitude (M7 sign convention).
+    evap_rate = -_rain_evaporation_rate(p3.rain.evaporation, qʳ_eff, nʳ_eff, S,
+                                        thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
 
     # Cannot evaporate more than available
     τ_evap = prp.rain_evaporation_timescale
-    max_evap = -qʳ_eff / τ_evap
-    evap_rate = max(evap_rate, max_evap)
+    max_evap = qʳ_eff / τ_evap
+    evap_rate = min(evap_rate, max_evap)
 
     return ifelse(is_subsaturated, evap_rate, zero(FT))
 end

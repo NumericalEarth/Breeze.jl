@@ -24,8 +24,7 @@ After multiple bug fix batches, the remaining open issues are:
 
 - **0 CRITICAL**: All critical issues fixed
 - **1 HIGH**: No sedimentation sub-stepping (H5)
-- **3 MEDIUM**: No ice-rain sub-table (M2), unvalidated sixth moment (M4),
-  Hallett-Mossop shape (M5)
+- **2 MEDIUM**: No ice-rain sub-table (M2), Hallett-Mossop shape (M5)
 - **1 LOW**: Vestigial `maximum_shape_parameter` (L5)
 
 **New findings (2026-03-19):**
@@ -334,17 +333,17 @@ These are intentional design choices, not bugs:
 | ~~H6~~ | ~~**Aggregation missing ρ factor**~~ | collection_rates.jl:82 | **FIXED**: Added ρ parameter to `ice_aggregation_rate`; rate now `ρ * K * n²`. |
 | ~~H7~~ | ~~**Deposition ventilation uses unrimed-only fall speed**~~ | process_rates.jl:104 | **FIXED**: Fall speed coefficients now blended with rime fraction. |
 
-### MEDIUM Priority (14 issues, 8 fixed/documented)
+### MEDIUM Priority (14 issues, 11 fixed/documented)
 
 | # | Issue | File(s) |
 |---|-------|---------|
 | ~~M1~~ | ~~Particle area treats partially rimed (regime 4) as spherical instead of aggregate-like~~ | quadrature.jl | **FIXED**: Regime-4 area now stays on the blended aggregate-like branch; only regime-3 graupel uses spherical area. |
 | M2 | No ice-rain sub-table with rain diameter dimension (structural difference from Fortran) | tabulation.jl |
 | ~~M3~~ | ~~Duplicated regime threshold code with different eps guards~~ | quadrature.jl + lambda_solver.jl | **FIXED** |
-| M4 | Sixth moment integrands unvalidated against Fortran | quadrature.jl |
+| ~~M4~~ | ~~Sixth moment integrands unvalidated against Fortran~~ | quadrature.jl, process_rates.jl | **FIXED**: Removed sublimation double-counting bug in `_tabulated_z_tendency` — since `SixthMomentDeposition` and `SixthMomentSublimation` have identical integrands, `z_dep × rates.deposition` already handles both signs correctly. The erroneous correction `z_sub × |dep|` was zeroing out sublimation Z tendency. |
 | M5 | Hallett-Mossop Gaussian vs Fortran piecewise linear | ice_nucleation_rates.jl |
-| M6 | Fixed e_s0=611 Pa in melting (should derive from thermodynamics) | melting_rates.jl |
-| M7 | Sign convention mixing in tendency assembly (maintenance risk) | process_rates.jl |
+| ~~M6~~ | ~~Fixed e_s0=611 Pa in melting (should derive from thermodynamics)~~ | melting_rates.jl, process_rates.jl | **FIXED**: Added `_saturation_vapor_pressure_at_freezing` helper that derives `e_s(T₀)` from `saturation_vapor_pressure(T₀, constants, PlanarLiquidSurface())` when thermodynamic constants are available. Falls back to Fortran-matched 611 Pa when `constants=nothing`. |
+| ~~M7~~ | ~~Sign convention mixing in tendency assembly (maintenance risk)~~ | process_rates.jl, collection_rates.jl, rain_process_rates.jl, melting_rates.jl | **FIXED**: All one-directional rate functions now return positive magnitudes. Signs applied explicitly in `tendency_*` functions as `gain − loss`. Bidirectional rates (condensation, deposition) retain natural sign. Added sign convention documentation block. |
 | ~~M8~~ | ~~Breakup D_r clamped at 2.5mm (not in Fortran)~~ | rain_process_rates.jl | **DOCUMENTED** |
 | ~~M9~~ | ~~No D>=100um threshold in analytical (non-tabulated) riming path~~ | process_rates.jl | **FIXED** |
 | ~~M10~~ | ~~`inter_category_collection` dimensionally suspect (placeholder)~~ | multi_ice_category.jl | **DOCUMENTED** |

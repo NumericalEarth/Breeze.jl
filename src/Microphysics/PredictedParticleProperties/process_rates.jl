@@ -12,6 +12,7 @@ using Oceananigans: Oceananigans
 
 using Breeze.Thermodynamics: temperature,
                              saturation_specific_humidity,
+                             saturation_vapor_pressure,
                              PlanarLiquidSurface,
                              PlanarIceSurface,
                              liquid_latent_heat,
@@ -77,6 +78,19 @@ end
 @inline _vaporization_latent_heat(constants, T) = liquid_latent_heat(T, constants)
 
 @inline _fusion_latent_heat(constants, T) = _sublimation_latent_heat(constants, T) - _vaporization_latent_heat(constants, T)
+
+#####
+##### Saturation vapor pressure at freezing (M6)
+#####
+##### When thermodynamic constants are available, derive e_s(T₀) from the
+##### Clausius-Clapeyron or Tetens formula. When `nothing` is passed, fall back
+##### to the Fortran P3 v5.5.0 hardcoded 611 Pa (≈ e_s at 273.15 K).
+#####
+
+@inline _saturation_vapor_pressure_at_freezing(::Nothing, T₀) = typeof(T₀)(611)
+@inline function _saturation_vapor_pressure_at_freezing(constants, T₀)
+    return saturation_vapor_pressure(T₀, constants, PlanarLiquidSurface())
+end
 
 #####
 ##### Ventilation Sc correction (H4)
@@ -393,32 +407,36 @@ Includes Phase 1 (rain, deposition, melting), Phase 2 (aggregation, riming, shed
 Following Milbrandt et al. (2025), melting is partitioned:
 - `partial_melting`: Meltwater stays on ice as liquid coating (large particles)
 - `complete_melting`: Meltwater sheds to rain (small particles)
+
+Sign convention (M7): All one-directional rates store **positive magnitudes**.
+Bidirectional rates (condensation, deposition) are positive for source, negative for sink.
+Signs are applied explicitly in the `tendency_*` functions.
 """
 struct P3ProcessRates{FT}
-    # Phase 1: Cloud condensation/evaporation
-    condensation :: FT             # Vapor → cloud liquid [kg/kg/s] (positive = condensation, negative = evaporation)
+    # Phase 1: Cloud condensation/evaporation (BIDIRECTIONAL: +cond / −evap)
+    condensation :: FT             # Vapor ↔ cloud liquid [kg/kg/s] (+cond, −evap)
 
-    # Phase 1: Rain tendencies
+    # Phase 1: Rain tendencies (all positive magnitudes)
     autoconversion :: FT           # Cloud → rain mass [kg/kg/s]
     accretion :: FT                # Cloud → rain mass (via rain sweep-out) [kg/kg/s]
-    rain_evaporation :: FT         # Rain → vapor mass [kg/kg/s]
-    rain_self_collection :: FT     # Rain number reduction [1/kg/s]
-    rain_breakup :: FT             # Rain number increase from breakup [1/kg/s]
+    rain_evaporation :: FT         # Rain evaporation magnitude [kg/kg/s]
+    rain_self_collection :: FT     # Rain number loss magnitude [1/kg/s]
+    rain_breakup :: FT             # Rain number gain from breakup [1/kg/s]
 
-    # Phase 1: Ice tendencies
-    deposition :: FT               # Vapor → ice mass [kg/kg/s]
+    # Phase 1: Ice tendencies (BIDIRECTIONAL deposition; positive melting/number)
+    deposition :: FT               # Vapor ↔ ice mass [kg/kg/s] (+dep, −sublim)
     partial_melting :: FT          # Ice → liquid coating (stays on ice) [kg/kg/s]
     complete_melting :: FT         # Ice → rain mass (sheds) [kg/kg/s]
-    melting_number :: FT           # Ice number reduction from melting [1/kg/s]
+    melting_number :: FT           # Ice number loss magnitude from melting [1/kg/s]
 
-    # Phase 2: Ice aggregation
-    aggregation :: FT              # Ice number reduction from self-collection [1/kg/s]
+    # Phase 2: Ice aggregation (positive magnitude)
+    aggregation :: FT              # Ice number loss magnitude from self-collection [1/kg/s]
 
-    # Phase 2: Riming
+    # Phase 2: Riming (all positive magnitudes)
     cloud_riming :: FT             # Cloud → ice via riming [kg/kg/s]
-    cloud_riming_number :: FT      # Cloud number reduction [1/kg/s]
+    cloud_riming_number :: FT      # Cloud number loss magnitude [1/kg/s]
     rain_riming :: FT              # Rain → ice via riming [kg/kg/s]
-    rain_riming_number :: FT       # Rain number reduction [1/kg/s]
+    rain_riming_number :: FT       # Rain number loss magnitude [1/kg/s]
     rime_density_new :: FT         # Density of new rime [kg/m³]
 
     # Phase 2: Shedding and refreezing
@@ -678,6 +696,20 @@ end
 ##### Phase 1 processes: autoconversion, accretion, evaporation, deposition, melting
 ##### Phase 2 processes: aggregation, riming, shedding, refreezing
 #####
+##### Sign convention (M7):
+##### ─────────────────────
+##### All ONE-DIRECTIONAL rate functions return POSITIVE MAGNITUDES.
+##### Signs are applied here in the tendency assembly as explicit gain − loss.
+#####
+##### BIDIRECTIONAL rates (condensation, deposition) retain their natural sign:
+###   positive = source (condensation/deposition)
+###   negative = sink   (evaporation/sublimation)
+##### These are used directly as gains; their negative values contribute as losses.
+#####
+##### This convention ensures each tendency function reads as:
+#####   tendency = ρ × (gains − losses)
+##### with no hidden negations inside the rate functions.
+#####
 
 """
     tendency_ρqᶜˡ(rates)
@@ -730,8 +762,8 @@ Rain loses from:
     # Above-freezing: cloud collected by melting ice shed as rain (Fortran qcshd)
     gain = rates.autoconversion + rates.accretion + rates.complete_melting +
            rates.shedding + rates.cloud_warm_collection
-    loss = -rates.rain_evaporation + rates.rain_riming + rates.rain_freezing_mass +
-           rates.rain_homogeneous_mass  # evap is negative
+    loss = rates.rain_evaporation + rates.rain_riming + rates.rain_freezing_mass +
+           rates.rain_homogeneous_mass
     return ρ * (gain - loss)
 end
 
@@ -765,18 +797,22 @@ Rain number loses from:
     n_from_melt = safe_divide(nⁱ * rates.complete_melting, qⁱ, zero(FT))
 
     # Phase 1: Evaporation removes rain number proportionally (Fortran P3 v5.5.0)
-    # nr_evap = nr * (evap_rate / qr);  evap_rate is negative, so n_evap is negative
+    # rain_evaporation is positive magnitude (M7); proportional number loss is positive.
     n_from_evap = safe_divide(nʳ * rates.rain_evaporation, qʳ, zero(FT))
 
-    return ρ * (n_from_autoconv + n_from_melt +
-                n_from_evap +
-                rates.rain_self_collection +
-                rates.rain_breakup +
-                rates.shedding_number +
-                rates.cloud_warm_collection_number +
-                rates.rain_riming_number -
-                rates.rain_freezing_number -
-                rates.rain_homogeneous_number)
+    # Gains
+    n_gain = n_from_autoconv + n_from_melt +
+             rates.rain_breakup +
+             rates.shedding_number +
+             rates.cloud_warm_collection_number
+    # Losses (all positive magnitudes, M7)
+    n_loss = n_from_evap +
+             rates.rain_self_collection +
+             rates.rain_riming_number +
+             rates.rain_freezing_number +
+             rates.rain_homogeneous_number
+
+    return ρ * (n_gain - n_loss)
 end
 
 # Backward-compatible overload without nʳ/qʳ (no evaporation number contribution)
@@ -837,9 +873,9 @@ Ice number loses from:
     gain = rates.nucleation_number + rates.cloud_freezing_number +
            rates.rain_freezing_number + rates.splintering_number +
            rates.cloud_homogeneous_number + rates.rain_homogeneous_number
-    # melting_number and aggregation are already negative (represent losses)
-    loss_rates = rates.melting_number + rates.aggregation
-    return ρ * (gain + loss_rates)
+    # Losses (all positive magnitudes, M7)
+    loss = rates.melting_number + rates.aggregation
+    return ρ * (gain - loss)
 end
 
 """
@@ -1031,30 +1067,32 @@ end
     # Look up normalized Z contribution for each process
     # deposition/sublimation have constant + enhanced ventilation integrals;
     # enhanced terms require Sc^(1/3)/√ν correction (same as H1 for mass deposition)
+    # Deposition and sublimation integrands are identical (both 6D⁵ × f_v × C × N'),
+    # so z_dep handles both via the sign of rates.deposition. The separate z_sub
+    # table entries are retained for potential future divergence (e.g., size-dependent
+    # sublimation thresholds) but are not needed in the current tendency calculation.
     z_dep = sixth.deposition(log_m, Fᶠ, Fˡ, ρᶠ) + sc_correction * sixth.deposition1(log_m, Fᶠ, Fˡ, ρᶠ)
     z_melt = sixth.melt1(log_m, Fᶠ, Fˡ, ρᶠ) + sixth.melt2(log_m, Fᶠ, Fˡ, ρᶠ)
     z_rime = sixth.rime(log_m, Fᶠ, Fˡ, ρᶠ)
     z_agg = sixth.aggregation(log_m, Fᶠ, Fˡ, ρᶠ)
     z_shed = sixth.shedding(log_m, Fᶠ, Fˡ, ρᶠ)
-    z_sub = sixth.sublimation(log_m, Fᶠ, Fˡ, ρᶠ) + sc_correction * sixth.sublimation1(log_m, Fᶠ, Fˡ, ρᶠ)
 
     # Total melting
     total_melting = rates.partial_melting + rates.complete_melting
 
-    # Compute Z tendency from tabulated integrals
-    # Each integral gives the normalized Z rate per unit mass rate
+    # Compute Z tendency from tabulated integrals.
+    # Each integral gives the normalized Z rate per unit mass rate.
+    #
+    # Deposition/sublimation: rates.deposition is positive for deposition,
+    # negative for sublimation. Since SixthMomentDeposition and
+    # SixthMomentSublimation have identical integrands (6D⁵ × f_v × C × N'),
+    # z_dep == z_sub, so z_dep × rates.deposition correctly gives:
+    #   positive Z change for deposition, negative Z change for sublimation.
     z_rate = z_dep * rates.deposition +
-             z_rime * (rates.cloud_riming + rates.rain_riming) +
-             z_agg * rates.aggregation * safe_divide(qⁱ, nⁱ, FT(1e-12)) +  # agg is number rate
+             z_rime * (rates.cloud_riming + rates.rain_riming) -
+             z_agg * rates.aggregation * safe_divide(qⁱ, nⁱ, FT(1e-12)) +  # agg is positive magnitude (M7)
              z_shed * rates.shedding -
              z_melt * total_melting
-
-    # Sublimation correction (when deposition is negative):
-    # z_dep and z_sub are DIFFERENT table integrals (SixthMomentDeposition vs
-    # SixthMomentSublimation). This is not double-counting — deposition and
-    # sublimation have separate normalized Z-change rates, as in Fortran P3.
-    is_sublimating = rates.deposition < 0
-    z_rate = z_rate + ifelse(is_sublimating, z_sub * abs(rates.deposition), zero(FT))
     z_rate = z_rate + _nucleation_sixth_moment_tendency(rates.nucleation_number, prp)
 
     return ρ * z_rate
@@ -1110,11 +1148,13 @@ Vapor is produced by:
 - Sublimation (negative deposition)
 """
 @inline function tendency_ρqᵛ(rates::P3ProcessRates, ρ)
-    # Condensation: positive = vapor loss, negative = vapor gain (evap)
-    # Deposition: positive = vapor loss (dep), negative = vapor gain (sublimation)
-    # Rain evaporation: negative = rain loss = vapor gain
-    # Nucleation: always vapor loss
-    return ρ * (-rates.condensation - rates.deposition - rates.nucleation_mass - rates.rain_evaporation)
+    # Condensation: positive = vapor loss (cond), negative = vapor gain (cloud evap)
+    # Deposition:   positive = vapor loss (dep),  negative = vapor gain (sublimation)
+    # Rain evaporation: positive magnitude (M7) = vapor gain
+    # Nucleation: always positive = vapor loss
+    vapor_loss = rates.condensation + rates.deposition + rates.nucleation_mass
+    vapor_gain = rates.rain_evaporation  # positive magnitude (M7)
+    return ρ * (vapor_gain - vapor_loss)
 end
 
 #####

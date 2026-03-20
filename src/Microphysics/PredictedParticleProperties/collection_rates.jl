@@ -36,7 +36,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 - `ρ`: Air density [kg/m³]
 
 # Returns
-- Rate of ice number reduction [1/kg/s]
+- Rate of ice number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
 @inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
     FT = typeof(qⁱ)
@@ -80,11 +80,12 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # Collection kernel with temperature-dependent sticking efficiency
     K_mean = Eᵢᵢ * AV_kernel
 
-    # Number tendency: dn/dt = -ρ × K × n²
+    # Number loss rate: ρ × K × n² (positive magnitude)
     # The ρ factor converts the volumetric kernel [m³/s] to mass-specific
     # tendency [1/kg/s]. The 1/2 self-collection factor is already included
     # in the kernel (table stores half-integral, analytical path includes 0.5 factor).
-    rate = -ρ * K_mean * nⁱ_eff^2
+    # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
+    rate = ρ * K_mean * nⁱ_eff^2
 
     return ifelse(aggregation_active, rate, zero(FT))
 end
@@ -206,7 +207,7 @@ end
 
 Compute cloud droplet number sink from riming.
 
-Returns `-(Nᶜ / qᶜˡ) * riming_rate`, which has units [1/m³/s] because Nᶜ
+Returns `(Nᶜ / qᶜˡ) * riming_rate`, which has units [1/m³/s] because Nᶜ
 is in [1/m³] while qᶜˡ and riming_rate are in [kg/kg] and [kg/kg/s].
 Note: this rate is currently computed but unused by the tendency kernel
 (cloud droplet number is prescribed, not predicted, in the P3 scheme).
@@ -217,14 +218,14 @@ Note: this rate is currently computed but unused by the tendency kernel
 - `riming_rate`: Cloud riming mass rate [kg/kg/s]
 
 # Returns
-- Rate of cloud number reduction [1/m³/s]
+- Rate of cloud number loss [1/m³/s] (positive magnitude; sign applied in tendency assembly)
 """
 @inline function cloud_riming_number_rate(qᶜˡ, Nᶜ, riming_rate)
     FT = typeof(qᶜˡ)
 
     ratio = safe_divide(Nᶜ, qᶜˡ, zero(FT))
 
-    return -ratio * riming_rate
+    return ratio * riming_rate
 end
 
 """
@@ -286,7 +287,7 @@ end
 """
     rain_riming_number_rate(qʳ, nʳ, riming_rate)
 
-Compute rain number sink from riming.
+Compute rain number loss from riming.
 
 # Arguments
 - `qʳ`: Rain mass fraction [kg/kg]
@@ -294,14 +295,14 @@ Compute rain number sink from riming.
 - `riming_rate`: Rain riming mass rate [kg/kg/s]
 
 # Returns
-- Rate of rain number reduction [1/kg/s]
+- Rate of rain number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
 @inline function rain_riming_number_rate(qʳ, nʳ, riming_rate)
     FT = typeof(qʳ)
 
     ratio = safe_divide(nʳ, qʳ, zero(FT))
 
-    return -ratio * riming_rate
+    return ratio * riming_rate
 end
 
 """
