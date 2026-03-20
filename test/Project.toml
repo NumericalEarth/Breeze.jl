@@ -27,6 +27,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 Breeze = {path = ".."}
+Reactant=  {url = "https://github.com/EnzymeAD/Reactant.jl.git", rev = "main"}
 
 [compat]
 Adapt = "4.3.0"
@@ -44,7 +45,7 @@ NCDatasets = "0.14"
 Oceananigans = "0.105.1"
 ParallelTestRunner = "2.0.1"
 RRTMGP = "0.21"
-Reactant = "0.2.210"
+Reactant = "= 0.2.237"
 SpecialFunctions = "2"
 Statistics = "<0.0.1, 1"
 Test = "<0.0.1, 1"
