@@ -5,6 +5,8 @@ using Oceananigans.Fields: CenterField
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Reactant: TracedRNumber, ConcreteRNumber
 
+Reactant.Compiler.DUMP_LLVMIR[] = true
+
 Reactant.set_default_backend("cpu")
 
 Nx, Nz = 16, 8
