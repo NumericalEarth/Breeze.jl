@@ -156,6 +156,7 @@ export
 
     # PSD correction functions
     psd_correction_spherical_volume,
+    liu_daum_shape_parameter,
 
     # Interface functions
     prognostic_field_names,
@@ -221,6 +222,13 @@ include("ice_rain_collection.jl")
 include("ice_properties.jl")
 
 #####
+##### PSD correction functions (analytical gamma-distribution factors)
+##### Must precede cloud_droplet_properties.jl which uses psd_correction_spherical_volume.
+#####
+
+include("psd_corrections.jl")
+
+#####
 ##### Rain and cloud properties
 #####
 
@@ -232,12 +240,6 @@ include("cloud_droplet_properties.jl")
 #####
 
 include("transport_properties.jl")
-
-#####
-##### PSD correction functions (analytical gamma-distribution factors)
-#####
-
-include("psd_corrections.jl")
 
 #####
 ##### Process rate parameters

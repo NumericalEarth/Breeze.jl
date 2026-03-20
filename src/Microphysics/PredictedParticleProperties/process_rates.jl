@@ -475,6 +475,9 @@ struct P3ProcessRates{FT}
     # Phase 2: Ice aggregation (positive magnitude)
     aggregation :: FT              # Ice number loss magnitude from self-collection [1/kg/s]
 
+    # C3: Global ice number limiter — Fortran impose_max_Ni (positive magnitude)
+    ni_limit :: FT                 # Ice number excess removal rate [1/kg/s]
+
     # Phase 2: Riming (all positive magnitudes)
     cloud_riming :: FT             # Cloud → ice via riming [kg/kg/s]
     cloud_riming_number :: FT      # Cloud number loss magnitude [1/kg/s]
@@ -600,12 +603,22 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 
     # =========================================================================
+    # C3: Global ice number limiter (Fortran impose_max_Ni)
+    # =========================================================================
+    # Relaxation sink: remove excess Nᵢ above N_max/ρ over one dt_safety period.
+    # Using a relaxation rate (not a hard clamp) maintains GPU-kernel compatibility
+    # and is consistent with the existing sink_limiting_factor pattern.
+    N_max = prp.maximum_ice_number_density
+    ni_lim = clamp_positive(nⁱ - N_max / ρ) / prp.sink_limiting_timescale
+
+    # =========================================================================
     # Phase 2: Riming
     # =========================================================================
     cloud_rim = cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
     cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜ, cloud_rim)
 
-    rain_rim = rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    # C5: Pass nʳ so rain_riming_rate can apply the rain-DSD cross-section correction.
+    rain_rim = rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
     rain_rim_n = rain_riming_number_rate(qʳ, nʳ, rain_rim)
 
     # Rime density for new rime (use actual ice fall speed, not placeholder)
@@ -715,8 +728,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         autoconv, accr, rain_evap, rain_self, rain_br,
         # Phase 1: Ice
         dep, partial_melt, complete_melt, melt_n,
-        # Phase 2: Aggregation
-        agg,
+        # Phase 2: Aggregation + C3 global Nᵢ limiter
+        agg, ni_lim,
         # Phase 2: Riming
         cloud_rim, cloud_rim_n, rain_rim, rain_rim_n, ρᶠ_new,
         # Phase 2: Shedding and refreezing
@@ -910,6 +923,7 @@ Ice number gains from:
 Ice number loses from:
 - Melting (Phase 1)
 - Aggregation (Phase 2)
+- Global number limiter (C3, impose_max_Ni)
 """
 @inline function tendency_ρnⁱ(rates::P3ProcessRates, ρ)
     # Gains from nucleation, freezing, splintering, homogeneous freezing
@@ -917,7 +931,8 @@ Ice number loses from:
            rates.rain_freezing_number + rates.splintering_number +
            rates.cloud_homogeneous_number + rates.rain_homogeneous_number
     # Losses (all positive magnitudes, M7)
-    loss = rates.melting_number + rates.aggregation
+    # ni_limit: C3 global Nᵢ cap (impose_max_Ni); relaxation sink above N_max/ρ.
+    loss = rates.melting_number + rates.aggregation + rates.ni_limit
     return ρ * (gain - loss)
 end
 

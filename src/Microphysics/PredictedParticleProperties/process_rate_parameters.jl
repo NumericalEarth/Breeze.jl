@@ -140,6 +140,10 @@ struct ProcessRateParameters{FT}
     # If total sinks for any species × dt_safety exceed available mass,
     # all sink rates for that species are rescaled proportionally.
     sink_limiting_timescale :: FT            # dt_safety [s]
+
+    # Global ice number limiter (Fortran P3 v5.5.0 impose_max_Ni)
+    # Applied as a relaxation sink whenever nⁱ × ρ > N_max.
+    maximum_ice_number_density :: FT         # Nᵢ_max [1/m³]
 end
 
 """
@@ -308,7 +312,11 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         rain_lambda_max = 100000.0, # lamr_max [1/m] ≈ D_min ~10μm
 
         # Sink-limiting safety timescale
-        sink_limiting_timescale = 1.0) # dt_safety [s]
+        sink_limiting_timescale = 1.0, # dt_safety [s]
+
+        # Global ice number limiter (Fortran P3 v5.5.0 impose_max_Ni)
+        # Relaxation sink drains nⁱ toward N_max/ρ when nⁱ × ρ > N_max.
+        maximum_ice_number_density = 2e6)  # [1/m³], Fortran impose_max_Ni cap
 
     return ProcessRateParameters(
         FT(liquid_water_density),
@@ -384,7 +392,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(minimum_cloud_drop_mass),
         FT(rain_lambda_min),
         FT(rain_lambda_max),
-        FT(sink_limiting_timescale)
+        FT(sink_limiting_timescale),
+        FT(maximum_ice_number_density)
     )
 end
 

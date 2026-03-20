@@ -48,7 +48,8 @@ using Breeze.Microphysics.PredictedParticleProperties:
     homogeneous_freezing_cloud_rate,
     homogeneous_freezing_rain_rate,
     air_transport_properties,
-    psd_correction_spherical_volume
+    psd_correction_spherical_volume,
+    liu_daum_shape_parameter
 
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
@@ -214,9 +215,21 @@ using Oceananigans.Fields: interior
         @test cloud.autoconversion_threshold ≈ 25e-6
         @test cloud.condensation_timescale ≈ 1.0
 
+        # μ_c is diagnosed from Nc via Liu-Daum (2000) by default.
+        # For Nc = 100e6 m⁻³ (100 cm⁻³): χ = 0.0005714*100 + 0.2714 = 0.32854,
+        # μ_c = 1/0.32854² - 1 ≈ 8.26 (clamped to [2, 15])
+        @test 2 ≤ cloud.shape_parameter ≤ 15
+        @test cloud.shape_parameter ≈ liu_daum_shape_parameter(100e6)
+
+        # Explicit shape_parameter overrides Liu-Daum
+        cloud_override = CloudDropletProperties(Float64; shape_parameter=5)
+        @test cloud_override.shape_parameter ≈ 5.0
+
         # Test custom parameters
         cloud_custom = CloudDropletProperties(Float64; number_concentration=50e6)
         @test cloud_custom.number_concentration ≈ 50e6
+        # Marine Nc → higher μ_c than continental (fewer, larger, more uniform drops)
+        @test cloud_custom.shape_parameter > cloud.shape_parameter
     end
 
     @testset "Water density is shared" begin
@@ -1269,6 +1282,7 @@ using Oceananigans.Fields: interior
             FT(1e3),    # melting_number (positive magnitude)
             # Phase 2: Aggregation (positive magnitude)
             FT(500.0),  # aggregation
+            FT(0.0),    # ni_limit (C3: global Nᵢ cap; zero in warm-environment test)
             # Phase 2: Riming (all positive magnitudes)
             FT(1e-7),   # cloud_riming
             FT(1e4),    # cloud_riming_number (positive magnitude)
@@ -1337,12 +1351,12 @@ using Oceananigans.Fields: interior
         prp = ProcessRateParameters(FT)
 
         rates = P3ProcessRates(
-            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
-            FT(0.0), FT(0.0), FT(0.0), FT(0.0),
-            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
-            FT(0.0), FT(0.0), FT(0.0),
-            FT(1e-9), FT(10.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
-            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0)
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # condensation + 5 rain
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0),                     # deposition, partial_melt, complete_melt, melt_n
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # agg, ni_limit (C3), 5 riming
+            FT(0.0), FT(0.0), FT(0.0),                              # shedding, shedding_n, refreezing
+            FT(1e-9), FT(10.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # nucleation
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0)  # splintering + homogeneous + warm
         )
 
         D_nuc_cubed = 6 * prp.nucleated_ice_mass / (FT(π) * prp.pure_ice_density)
@@ -2274,6 +2288,7 @@ using Oceananigans.Fields: interior
             FT(5e-8),   # complete_melting
             FT(1e3),    # melting_number (positive magnitude)
             FT(500.0),  # aggregation (positive magnitude)
+            FT(0.0),    # ni_limit (C3: global Nᵢ cap)
             FT(1e-7),   # cloud_riming
             FT(1e4),    # cloud_riming_number (positive magnitude)
             FT(5e-8),   # rain_riming

@@ -229,14 +229,31 @@ Note: this rate is currently computed but unused by the tendency kernel
 end
 
 """
-    rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 
 Compute rain collection (riming) by ice particles using the continuous
-collection equation with collision kernel integrated over the ice PSD.
+collection equation with collision kernel integrated over the ice PSD,
+plus a correction for the rain drop size distribution (C5 fix).
+
+**C5 correction (double-PSD integration):**
+
+The Fortran P3 f1pr07/f1pr08 lookup entries integrate over *both* the ice PSD
+and the rain PSD, capturing how rain drop size affects the collision geometry.
+The geometric cross section is ``π/4 (D_i + D_r)^2``, not just ``π/4 D_i^2``.
+For an exponential rain PSD (μ_r = 0) the exact cross-section correction to the
+single-PSD ice-side integral is:
+
+```math
+C = 1 + 8 \\frac{D_r^{\\rm mean}}{D_i^{\\rm mean}} + 20 \\left(\\frac{D_r^{\\rm mean}}{D_i^{\\rm mean}}\\right)^2
+```
+
+where ``D_r^{\\rm mean} = 1/λ_r`` and ``D_i^{\\rm mean}`` is the mean ice diameter.
+When ``n_r = 0`` the correction is 1 (no change from the legacy path).
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `qʳ`: Rain mass fraction [kg/kg]
+- `nʳ`: Rain number concentration [1/kg]; use 0 to disable C5 correction
 - `qⁱ`: Ice mass fraction [kg/kg]
 - `nⁱ`: Ice number concentration [1/kg]
 - `T`: Temperature [K]
@@ -247,7 +264,7 @@ collection equation with collision kernel integrated over the ice PSD.
 # Returns
 - Rate of rain → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-@inline function rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+@inline function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -255,6 +272,7 @@ collection equation with collision kernel integrated over the ice PSD.
     T₀ = prp.freezing_temperature
 
     qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = clamp_positive(nʳ)
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
@@ -278,10 +296,48 @@ collection equation with collision kernel integrated over the ice PSD.
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
-    # Collection rate = E × qr × ni × ρ × rhofaci × ⟨A×V⟩
-    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle
+    # C5: Rain-DSD cross-section correction for double-PSD integration.
+    # The Fortran f1pr07/f1pr08 table integrates over BOTH ice and rain PSDs,
+    # capturing the (D_i + D_r)² collision geometry. The single-PSD path above
+    # only uses D_i². For exponential rain (μ_r = 0), the exact correction is:
+    #   correction = 1 + 8*(D_r_mean/D_i_mean) + 20*(D_r_mean/D_i_mean)²
+    # (derived from the ratio of double-PSD to single-PSD cross-section integrals;
+    # see P3_FORTRAN_COMPARISON.md, issue C5).
+    #
+    # Rain mean diameter: λ_r³ = π ρ_w nʳ / qʳ  (exponential PSD, μ_r = 0)
+    # D_r_mean = 1/λ_r (number-weighted mean diameter for μ_r = 0)
+    λ_r_cubed = FT(π) * prp.liquid_water_density * nʳ_eff / max(qʳ_eff, FT(1e-15))
+    λ_r = clamp(cbrt(λ_r_cubed), prp.rain_lambda_min, prp.rain_lambda_max)
+    D_r_mean = 1 / λ_r
+
+    # Ice mean diameter at mean mass (mean-mass approximation)
+    ρ_eff = (1 - Fᶠ) * prp.ice_effective_density_unrimed + Fᶠ * max(ρᶠ, FT(50))
+    D_i_mean = cbrt(6 * m_mean / (FT(π) * max(ρ_eff, FT(50))))
+    D_i_mean = clamp(D_i_mean, prp.ice_diameter_min, prp.ice_diameter_max)
+
+    r_ratio = D_r_mean / max(D_i_mean, FT(prp.ice_diameter_min))
+    rain_dsd_correction = 1 + 8 * r_ratio + 20 * r_ratio^2
+
+    # Only apply the rain-DSD correction when rain number is available (nʳ > 0).
+    # When nʳ = 0 the correction is 1 (matches the legacy 8-argument overload behavior).
+    rain_dsd_correction = ifelse(nʳ_eff > FT(1), rain_dsd_correction, one(FT))
+
+    # Collection rate = E × qr × ni × ρ × rhofaci × ⟨A×V⟩ × rain_dsd_correction
+    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle * rain_dsd_correction
 
     return ifelse(active, rate, zero(FT))
+end
+
+"""
+    rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+
+Backward-compatible 8-argument overload of `rain_riming_rate` without rain DSD correction.
+Passes `nʳ = 0`, which disables the C5 double-PSD cross-section correction.
+Prefer the 9-argument form `rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)`.
+"""
+@inline function rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    FT = typeof(qʳ)
+    return rain_riming_rate(p3, qʳ, zero(FT), qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 end
 
 """

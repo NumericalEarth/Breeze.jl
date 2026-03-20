@@ -92,7 +92,11 @@ negligible for small droplets.
     T₀ = prp.freezing_temperature
     ρ_water = FT(prp.liquid_water_density)
     bimm = prp.immersion_freezing_nucleation_coefficient
-    psd_correction = prp.freezing_cloud_psd_correction
+    # C4: use cloud DSD shape parameter μ_c from CloudDropletProperties.
+    # psd_correction = C(μ_c) = Γ(μ_c+7)Γ(μ_c+1)/Γ(μ_c+4)² is pre-computed at
+    # construction time for GPU compatibility (psd_corrections.jl).
+    # Previously used ProcessRateParameters.freezing_cloud_psd_correction (hardcoded μ_c=2.3).
+    psd_correction = FT(p3.cloud.freezing_psd_correction)
 
     qᶜˡ_eff = clamp_positive(qᶜˡ)
 
