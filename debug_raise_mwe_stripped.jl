@@ -1,42 +1,55 @@
-# MWE: fill_halo_regions! stripped of Oceananigans
+# MWE: LLVM operand count mismatch on Julia 1.12 (works on 1.11)
 #
-# Original (debug_raise_mwe.jl) compiles fill_halo_regions! on:
-#   CenterField on RectilinearGrid(ReactantState();
-#       size=(16,8), topology=(Periodic, Flat, Bounded))
+# The Oceananigans periodic halo kernel has signature:
+#   _fill_periodic_west_and_east_halo!(
+#       c         :: OffsetArray{Float64, 3, CuTracedArray},
+#       west_bc   :: BoundaryCondition{Periodic, Nothing},   # singleton / ghost
+#       east_bc   :: BoundaryCondition{Periodic, Nothing},   # singleton / ghost
+#       loc       :: Tuple{Center, Center, Center},           # singleton / ghost
+#       grid      :: RectilinearGrid{...},                    # complex struct
+#       args      :: Tuple{Clock, Tuple{}})                   # traced values
 #
-# Replacements:
-#   RectilinearGrid → Grid struct (Int sizes only — Lx/Δx are ConcreteRNumber
-#                     in the real grid but unused by halo fill)
-#   CenterField     → raw 3D parent array, shape (Nx+2H, 1, Nz+2H)
-#   Clock           → MiniClock (time/iteration as ConcreteRNumber)
-#   fill_halo_regions! → direct loops (no KernelAbstractions, no BC dispatch)
+# On Julia 1.12, the LLVM function definition has 5 params but the call
+# site passes 4 — the ghost/singleton types are lowered differently.
 #
-# Topology (Periodic, Flat, Bounded):
-#   x — periodic wrap    (H ghost cells each side)
-#   y — flat, no halo    (dim size 1)
-#   z — no-flux / mirror (H ghost cells each side)
-#
-# Parent array layout (1-based):
-#   x-interior: [H+1 : H+Nx]     halos: [1:H] and [H+Nx+1 : 2H+Nx]
-#   z-interior: [H+1 : H+Nz]     halos: [1:H] and [H+Nz+1 : 2H+Nz]
+# This MWE reproduces the kernel argument structure without importing
+# Oceananigans.
 
-using CUDA, Reactant, Enzyme, KernelAbstractions
+using CUDA, Reactant, Enzyme, KernelAbstractions, OffsetArrays
 using Reactant: ConcreteRNumber
 using GPUArraysCore: @allowscalar
 
 Reactant.set_default_backend("cpu")
 CUDA.allowscalar(true)
 
-Reactant.Compiler.DUMP_LLVMIR[] = false
+# ── Singleton types (ghost in 1.11, possibly non-ghost in 1.12) ──
 
-# ── Types ──
+struct Periodic end
+struct Center end
 
-struct Grid
+struct BC{C, T}
+    classification :: C
+    condition :: T
+end
+
+const PBC = BC{Periodic, Nothing}
+PBC() = BC(Periodic(), nothing)
+
+# ── Grid (mirrors RectilinearGrid field layout) ──
+
+struct MiniGrid{FT}
     Nx :: Int
+    Ny :: Int
     Nz :: Int
     Hx :: Int
+    Hy :: Int
     Hz :: Int
+    Lx :: FT
+    Ly :: FT
+    Lz :: FT
 end
+
+# ── Clock ──
 
 mutable struct MiniClock{T, I}
     time          :: T
@@ -46,40 +59,30 @@ mutable struct MiniClock{T, I}
     stage         :: Int
 end
 
-# ── Halo fill (KernelAbstractions kernels) ──
-# The inner `for i in 1:H` loop generates an scf.while in MLIR that the
-# StableHLO raiser can't handle.  Fix: promote the halo index to a kernel
-# dimension so each thread handles exactly one halo cell — no loops.
-# N and H are passed directly as Int args (not through the struct).
+# ── Kernel: matches Oceananigans signature with all arg types ──
+# 3D kernel (no inner loop) to avoid the scf.while issue and reach
+# the LLVM lowering stage where the operand mismatch occurs.
 
-@kernel function _fill_periodic_x!(c, N, H)
+@kernel function _fill_periodic_x!(c, west_bc, east_bc, loc, grid, args)
     i, j, k = @index(Global, NTuple)
-    @inbounds c[i, j, k]          = c[N + i, j, k]      # west ← east interior
-    @inbounds c[N + H + i, j, k] = c[H + i, j, k]      # east ← west interior
-end
-
-@kernel function _fill_flux_z!(c, N, H)
-    i, j, k = @index(Global, NTuple)
-    @inbounds c[i, j, k]          = c[i, j, 2H + 1 - k]      # bottom mirror
-    @inbounds c[i, j, N + H + k] = c[i, j, N + H + 1 - k]    # top mirror
-end
-
-function fill_halos!(c, g, clock, mf)
-    backend = KernelAbstractions.get_backend(c)
-    _fill_periodic_x!(backend)(c, g.Nx, g.Hx;
-        ndrange=(g.Hx, 1, g.Nz + 2g.Hz))
-    _fill_flux_z!(backend)(c, g.Nz, g.Hz;
-        ndrange=(g.Nx + 2g.Hx, 1, g.Hz))
-    KernelAbstractions.synchronize(backend)
-    return nothing
+    N = grid.Nx
+    H = grid.Hx
+    @inbounds parent(c)[i, j, k]          = parent(c)[N + i, j, k]
+    @inbounds parent(c)[N + H + i, j, k] = parent(c)[H + i, j, k]
 end
 
 # ── Setup ──
 
 Nx, Nz, H = 16, 8, 3
-g = Grid(Nx, Nz, H, H)
 
-c = Reactant.to_rarray(zeros(Nx + 2H, 1, Nz + 2H))
+grid = MiniGrid(Nx, 1, Nz, H, 0, H, 10000.0, 0.0, 10000.0)
+
+raw  = Reactant.to_rarray(zeros(Nx + 2H, 1, Nz + 2H))
+c    = OffsetArray(raw, -H+1:Nx+H, 1:1, -H+1:Nz+H)
+
+bc_w = PBC()
+bc_e = PBC()
+loc  = (Center(), Center(), Center())
 
 clock = MiniClock(
     ConcreteRNumber(0.0),
@@ -90,12 +93,17 @@ clock = MiniClock(
 
 mf = ()
 
-function loss(c, clock, mf)
-    fill_halos!(c, g, clock, mf)
+function loss(c, bc_w, bc_e, loc, grid, clock, mf)
+    backend = KernelAbstractions.get_backend(parent(c))
+    args = (clock, mf)
+    _fill_periodic_x!(backend)(c, bc_w, bc_e, loc, grid, args;
+        ndrange=(grid.Hx, 1, grid.Nz + 2grid.Hz))
+    KernelAbstractions.synchronize(backend)
     return 0.0
 end
 
 @info "Compiling..."
-@time compiled = Reactant.@compile raise=true raise_first=true loss(c, clock, mf)
+@time compiled = Reactant.@compile raise=true raise_first=true loss(
+    c, bc_w, bc_e, loc, grid, clock, mf)
 
-@info compiled(c, clock, mf)
+@info compiled(c, bc_w, bc_e, loc, grid, clock, mf)
