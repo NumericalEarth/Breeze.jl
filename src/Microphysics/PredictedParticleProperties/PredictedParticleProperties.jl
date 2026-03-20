@@ -169,6 +169,7 @@ export
     tabulate,
     TabulationParameters,
     TabulatedFunction3D,
+    TabulatedFunction4D,
     P3IntegralEvaluator,
 
     # Lambda solver

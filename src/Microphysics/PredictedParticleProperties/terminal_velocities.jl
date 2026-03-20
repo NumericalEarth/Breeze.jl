@@ -191,13 +191,11 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     return clamp(vₜ, v_min, v_max)
 end
 
-# Tabulated version: use TabulatedFunction3D lookup
-@inline function _tabulated_mass_weighted_fall_speed(table::TabulatedFunction3D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+# Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
+@inline function _tabulated_mass_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
     FT = typeof(m̄)
-    # Compute log mean mass (guarding against log(0))
     log_mean_mass = log10(max(m̄, FT(1e-20)))
-    # Look up normalized velocity from table
-    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ)
+    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
     return vₜ_norm * ρ_correction
 end
 
@@ -293,11 +291,11 @@ Compute number-weighted terminal velocity for ice.
     return clamp(vₜ, v_min, v_max)
 end
 
-# Tabulated version: use TabulatedFunction3D lookup
-@inline function _tabulated_number_weighted_fall_speed(table::TabulatedFunction3D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+# Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
+@inline function _tabulated_number_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
     FT = typeof(m̄)
     log_mean_mass = log10(max(m̄, FT(1e-20)))
-    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ)
+    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
     return vₜ_norm * ρ_correction
 end
 
@@ -348,11 +346,11 @@ When tabulated integrals are available, uses pre-computed lookup tables.
     return clamp(vₜ, v_min, v_max)
 end
 
-# Tabulated version: use TabulatedFunction3D lookup
-@inline function _tabulated_reflectivity_weighted_fall_speed(table::TabulatedFunction3D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
+# Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
+@inline function _tabulated_reflectivity_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
     FT = typeof(m̄)
     log_mean_mass = log10(max(m̄, FT(1e-20)))
-    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ)
+    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
     return vₜ_norm * ρ_correction
 end
 

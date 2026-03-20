@@ -7,7 +7,7 @@
 #####
 
 export tabulate, TabulationParameters, P3IntegralEvaluator, TabulatedFunction1D,
-       tabulated_function_1d
+       TabulatedFunction4D, tabulated_function_1d
 
 using Adapt: Adapt
 using Oceananigans.Architectures: CPU, on_architecture
@@ -103,11 +103,6 @@ The evaluated integral value.
 """
 @inline function (e::P3IntegralEvaluator)(log_mean_mass, rime_fraction, liquid_fraction;
                                            rime_density = typeof(log_mean_mass)(400))
-    # NOTE (H2): rime_density is fixed at 400 kg/m³ for all tabulated evaluations.
-    # Fortran P3 has a 4th table dimension over 5 rime densities (50, 250, 450,
-    # 650, 900 kg/m³). This single-value approximation introduces 10-30% error
-    # for dense graupel (ρ_r ≈ 900 kg/m³). A TabulatedFunction4D with the full
-    # rime density axis is planned for a future PR.
     FT = typeof(log_mean_mass)
     mean_particle_mass = FT(10)^log_mean_mass
 
@@ -538,6 +533,236 @@ function Base.show(io::IO, f::TabulatedFunction3D)
 end
 
 #####
+##### TabulatedFunction4D - 4D extension for the (mass, rime_fraction, liquid_fraction, rime_density) parameter space
+#####
+
+"""
+    TabulatedFunction4D{F, T, FT}
+
+A wrapper around a quaternary callable `func(x, y, z, w)` that precomputes values in a
+4D lookup table for fast quadrilinear interpolation. This extends the
+`TabulatedFunction3D` pattern to four dimensions by adding the rime density axis.
+
+The P3 Fortran code v5.5.0 tabulates bulk integrals over four dimensions:
+1. Log mean particle mass
+2. Rime fraction
+3. Liquid fraction
+4. Rime density (5 values: 50, 250, 450, 650, 900 kg/m³)
+
+Adding the rime density axis eliminates the 10-30% error for dense graupel
+that the fixed ρ_r = 400 kg/m³ approximation introduced (H2).
+
+# Fields
+\$(TYPEDFIELDS)
+"""
+struct TabulatedFunction4D{F, T, FT}
+    "The original callable being tabulated (for reference/fallback)"
+    func :: F
+    "Precomputed values (4D array)"
+    table :: T
+    "Minimum x value (log mean particle mass)"
+    x_min :: FT
+    "Maximum x value"
+    x_max :: FT
+    "Inverse spacing in x"
+    inverse_Δx :: FT
+    "Minimum y value (rime fraction)"
+    y_min :: FT
+    "Maximum y value"
+    y_max :: FT
+    "Inverse spacing in y"
+    inverse_Δy :: FT
+    "Minimum z value (liquid fraction)"
+    z_min :: FT
+    "Maximum z value"
+    z_max :: FT
+    "Inverse spacing in z"
+    inverse_Δz :: FT
+    "Minimum w value (rime density [kg/m³])"
+    w_min :: FT
+    "Maximum w value"
+    w_max :: FT
+    "Inverse spacing in w"
+    inverse_Δw :: FT
+end
+
+"""
+\$(TYPEDSIGNATURES)
+
+Construct a `TabulatedFunction4D` by precomputing values of `func` over a 4D grid.
+
+# Arguments
+- `func`: Callable `func(x, y, z; rime_density=w)` to tabulate
+- `arch`: Architecture (`CPU()` or `GPU()`)
+- `FT`: Float type
+
+# Keyword Arguments
+- `x_range`: Tuple `(x_min, x_max)` for first dimension (log mean mass)
+- `y_range`: Tuple `(y_min, y_max)` for second dimension (rime fraction)
+- `z_range`: Tuple `(z_min, z_max)` for third dimension (liquid fraction)
+- `w_range`: Tuple `(w_min, w_max)` for fourth dimension (rime density [kg/m³])
+- `x_points`: Number of grid points in x (default 50)
+- `y_points`: Number of grid points in y (default 4)
+- `z_points`: Number of grid points in z (default 4)
+- `w_points`: Number of grid points in w (default 5)
+"""
+function TabulatedFunction4D(func, arch=CPU(), FT=Float64;
+                              x_range,
+                              y_range = (FT(0), FT(1)),
+                              z_range = (FT(0), FT(1)),
+                              w_range = (FT(50), FT(900)),
+                              x_points = 50,
+                              y_points = 4,
+                              z_points = 4,
+                              w_points = 5)
+
+    x_min, x_max = x_range
+    y_min, y_max = y_range
+    z_min, z_max = z_range
+    w_min, w_max = w_range
+
+    Δx = (x_max - x_min) / (x_points - 1)
+    Δy = (y_max - y_min) / max(y_points - 1, 1)
+    Δz = (z_max - z_min) / max(z_points - 1, 1)
+    Δw = (w_max - w_min) / max(w_points - 1, 1)
+
+    inverse_Δx = 1 / Δx
+    inverse_Δy = ifelse(y_points > 1, 1 / Δy, zero(FT))
+    inverse_Δz = ifelse(z_points > 1, 1 / Δz, zero(FT))
+    inverse_Δw = ifelse(w_points > 1, 1 / Δw, zero(FT))
+
+    # Precompute table values on CPU first
+    table = zeros(FT, x_points, y_points, z_points, w_points)
+
+    for l in 1:w_points
+        w = w_min + (l - 1) * Δw
+        for k in 1:z_points
+            z = z_min + (k - 1) * Δz
+            for j in 1:y_points
+                y = y_min + (j - 1) * Δy
+                for i in 1:x_points
+                    x = x_min + (i - 1) * Δx
+                    table[i, j, k, l] = func(x, y, z; rime_density=w)
+                end
+            end
+        end
+    end
+
+    # Transfer to target architecture
+    table = on_architecture(arch, table)
+
+    return TabulatedFunction4D(
+        func,
+        table,
+        convert(FT, x_min), convert(FT, x_max), convert(FT, inverse_Δx),
+        convert(FT, y_min), convert(FT, y_max), convert(FT, inverse_Δy),
+        convert(FT, z_min), convert(FT, z_max), convert(FT, inverse_Δz),
+        convert(FT, w_min), convert(FT, w_max), convert(FT, inverse_Δw)
+    )
+end
+
+#####
+##### Quadrilinear interpolation for TabulatedFunction4D
+#####
+
+"""
+    (f::TabulatedFunction4D)(x, y, z, w)
+
+Evaluate the tabulated function using quadrilinear interpolation.
+"""
+@inline function (f::TabulatedFunction4D)(x, y, z, w)
+    nx, ny, nz, nw = size(f.table)
+
+    i⁻, i⁺, ξx = _clamp_and_index(x, f.x_min, f.x_max, f.inverse_Δx, nx)
+    j⁻, j⁺, ξy = _clamp_and_index(y, f.y_min, f.y_max, f.inverse_Δy, ny)
+    k⁻, k⁺, ξz = _clamp_and_index(z, f.z_min, f.z_max, f.inverse_Δz, nz)
+    l⁻, l⁺, ξw = _clamp_and_index(w, f.w_min, f.w_max, f.inverse_Δw, nw)
+
+    # Quadrilinear interpolation: interpolate in x, then y, then z, then w
+    @inbounds begin
+        # w⁻ slice (8 corners)
+        c0000 = f.table[i⁻, j⁻, k⁻, l⁻]
+        c1000 = f.table[i⁺, j⁻, k⁻, l⁻]
+        c0100 = f.table[i⁻, j⁺, k⁻, l⁻]
+        c1100 = f.table[i⁺, j⁺, k⁻, l⁻]
+        c0010 = f.table[i⁻, j⁻, k⁺, l⁻]
+        c1010 = f.table[i⁺, j⁻, k⁺, l⁻]
+        c0110 = f.table[i⁻, j⁺, k⁺, l⁻]
+        c1110 = f.table[i⁺, j⁺, k⁺, l⁻]
+
+        # w⁺ slice (8 corners)
+        c0001 = f.table[i⁻, j⁻, k⁻, l⁺]
+        c1001 = f.table[i⁺, j⁻, k⁻, l⁺]
+        c0101 = f.table[i⁻, j⁺, k⁻, l⁺]
+        c1101 = f.table[i⁺, j⁺, k⁻, l⁺]
+        c0011 = f.table[i⁻, j⁻, k⁺, l⁺]
+        c1011 = f.table[i⁺, j⁻, k⁺, l⁺]
+        c0111 = f.table[i⁻, j⁺, k⁺, l⁺]
+        c1111 = f.table[i⁺, j⁺, k⁺, l⁺]
+    end
+
+    # Interpolate in x (16 → 8)
+    c000 = (1 - ξx) * c0000 + ξx * c1000
+    c100 = (1 - ξx) * c0100 + ξx * c1100
+    c010 = (1 - ξx) * c0010 + ξx * c1010
+    c110 = (1 - ξx) * c0110 + ξx * c1110
+    c001 = (1 - ξx) * c0001 + ξx * c1001
+    c101 = (1 - ξx) * c0101 + ξx * c1101
+    c011 = (1 - ξx) * c0011 + ξx * c1011
+    c111 = (1 - ξx) * c0111 + ξx * c1111
+
+    # Interpolate in y (8 → 4)
+    c00 = (1 - ξy) * c000 + ξy * c100
+    c10 = (1 - ξy) * c010 + ξy * c110
+    c01 = (1 - ξy) * c001 + ξy * c101
+    c11 = (1 - ξy) * c011 + ξy * c111
+
+    # Interpolate in z (4 → 2)
+    c0 = (1 - ξz) * c00 + ξz * c10
+    c1 = (1 - ξz) * c01 + ξz * c11
+
+    # Interpolate in w (2 → 1)
+    return (1 - ξw) * c0 + ξw * c1
+end
+
+#####
+##### GPU/architecture support for TabulatedFunction4D
+#####
+
+Oceananigans.Architectures.on_architecture(arch, f::TabulatedFunction4D) =
+    TabulatedFunction4D(f.func,
+                        on_architecture(arch, f.table),
+                        f.x_min, f.x_max, f.inverse_Δx,
+                        f.y_min, f.y_max, f.inverse_Δy,
+                        f.z_min, f.z_max, f.inverse_Δz,
+                        f.w_min, f.w_max, f.inverse_Δw)
+
+Adapt.adapt_structure(to, f::TabulatedFunction4D) =
+    TabulatedFunction4D(nothing,
+                        Adapt.adapt(to, f.table),
+                        f.x_min, f.x_max, f.inverse_Δx,
+                        f.y_min, f.y_max, f.inverse_Δy,
+                        f.z_min, f.z_max, f.inverse_Δz,
+                        f.w_min, f.w_max, f.inverse_Δw)
+
+#####
+##### Pretty printing
+#####
+
+function Base.summary(f::TabulatedFunction4D)
+    nx, ny, nz, nw = size(f.table)
+    return "TabulatedFunction4D with $(nx)×$(ny)×$(nz)×$(nw) points"
+end
+
+function Base.show(io::IO, f::TabulatedFunction4D)
+    print(io, summary(f))
+    print(io, " over x∈[$(f.x_min), $(f.x_max)], y∈[$(f.y_min), $(f.y_max)], z∈[$(f.z_min), $(f.z_max)], w∈[$(f.w_min), $(f.w_max)]")
+    if f.func !== nothing
+        print(io, " of ", typeof(f.func).name.name)
+    end
+end
+
+#####
 ##### TabulatedFunction1D - 1D lookup table for rain integrals
 #####
 
@@ -663,8 +888,11 @@ struct TabulationParameters{FT}
     number_of_mass_points :: Int
     number_of_rime_fraction_points :: Int
     number_of_liquid_fraction_points :: Int
+    number_of_rime_density_points :: Int
     minimum_log_mean_particle_mass :: FT
     maximum_log_mean_particle_mass :: FT
+    minimum_rime_density :: FT
+    maximum_rime_density :: FT
     number_of_quadrature_points :: Int
     shape_parameter_override :: FT
 end
@@ -674,43 +902,54 @@ $(TYPEDSIGNATURES)
 
 Configure the lookup table grid for P3 integrals.
 
-The P3 Fortran code pre-computes bulk integrals on a 3D grid indexed by:
+The P3 Fortran code pre-computes bulk integrals on a 4D grid indexed by:
 
 1. **Log mean particle mass** `log₁₀(qⁱ/Nⁱ)` [log kg]: Mass per particle (linearly spaced in log)
 2. **Rime fraction** `∈ [0, 1]`: Mass fraction that is rime (frozen accretion)
 3. **Liquid fraction** `∈ [0, 1]`: Mass fraction that is liquid water on ice
+4. **Rime density** `∈ [50, 900]` [kg/m³]: Density of the accreted rime layer
 
 During simulation, integral values are interpolated from this table rather
 than computed via quadrature, which is much faster.
 
 # Keyword Arguments
 
-- `number_of_mass_points`: Grid points in mean particle mass (default 50)
-- `number_of_rime_fraction_points`: Grid points in rime fraction (default 4)
+- `number_of_mass_points`: Grid points in mean particle mass (default 150)
+- `number_of_rime_fraction_points`: Grid points in rime fraction (default 8)
 - `number_of_liquid_fraction_points`: Grid points in liquid fraction (default 4)
-- `minimum_log_mean_particle_mass`: Minimum log₁₀(mass) [log kg], default -15
-- `maximum_log_mean_particle_mass`: Maximum log₁₀(mass) [log kg], default -5
+- `number_of_rime_density_points`: Grid points in rime density (default 5, matching Fortran)
+- `minimum_log_mean_particle_mass`: Minimum log₁₀(mass) [log kg], default -17.3
+- `maximum_log_mean_particle_mass`: Maximum log₁₀(mass) [log kg], default -5.3
+- `minimum_rime_density`: Minimum rime density [kg/m³], default 50
+- `maximum_rime_density`: Maximum rime density [kg/m³], default 900
 - `number_of_quadrature_points`: Quadrature points for filling table (default 64)
 - `shape_parameter_override`: Fixed μ for PSD (default NaN = use P3Closure; 0 = exponential)
 
 # References
 
 Table structure follows `create_p3_lookupTable_1.f90` in P3-microphysics.
+Fortran P3 v5.5.0 uses 5 rime density values: 50, 250, 450, 650, 900 kg/m³.
 """
 function TabulationParameters(FT::Type{<:AbstractFloat} = Float64;
                                number_of_mass_points::Int = 150,
                                number_of_rime_fraction_points::Int = 8,
                                number_of_liquid_fraction_points::Int = 4,
+                               number_of_rime_density_points::Int = 5,
                                minimum_log_mean_particle_mass = FT(-17.3),
                                maximum_log_mean_particle_mass = FT(-5.3),
+                               minimum_rime_density = FT(50),
+                               maximum_rime_density = FT(900),
                                number_of_quadrature_points::Int = 64,
                                shape_parameter_override = FT(NaN))
     return TabulationParameters(
         number_of_mass_points,
         number_of_rime_fraction_points,
         number_of_liquid_fraction_points,
+        number_of_rime_density_points,
         FT(minimum_log_mean_particle_mass),
         FT(maximum_log_mean_particle_mass),
+        FT(minimum_rime_density),
+        FT(maximum_rime_density),
         number_of_quadrature_points,
         FT(shape_parameter_override)
     )
@@ -723,9 +962,10 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Tabulate a P3 integral using the `TabulatedFunction3D` pattern.
+Tabulate a P3 integral using the `TabulatedFunction4D` pattern.
 
-Creates a callable evaluator function and tabulates it over the 3D parameter space.
+Creates a callable evaluator function and tabulates it over the 4D parameter space
+(log mean mass, rime fraction, liquid fraction, rime density).
 
 # Arguments
 - `integral`: Integral type to tabulate (e.g., `MassWeightedFallSpeed()`)
@@ -733,7 +973,7 @@ Creates a callable evaluator function and tabulates it over the 3D parameter spa
 - `params`: [`TabulationParameters`](@ref) defining the grid
 
 # Returns
-A [`TabulatedFunction3D`](@ref) that can be called like the original evaluator.
+A [`TabulatedFunction4D`](@ref) that can be called like the original evaluator.
 
 # Example
 
@@ -745,8 +985,8 @@ using Breeze.Microphysics.PredictedParticleProperties
 params = TabulationParameters()
 tabulated = tabulate(MassWeightedFallSpeed(), CPU(), params)
 
-# Evaluate via interpolation (fast)
-value = tabulated(-12.0, 0.5, 0.0)
+# Evaluate via interpolation (fast) — includes rime density axis
+value = tabulated(-12.0, 0.5, 0.0, 400.0)
 ```
 """
 function tabulate(integral::AbstractP3Integral, arch=CPU(),
@@ -759,15 +999,18 @@ function tabulate(integral::AbstractP3Integral, arch=CPU(),
                                      number_of_quadrature_points = params.number_of_quadrature_points,
                                      shape_parameter_override = params.shape_parameter_override)
 
-    # Tabulate using TabulatedFunction3D
-    return TabulatedFunction3D(evaluator, arch, FT;
+    # Tabulate using TabulatedFunction4D (rime density is the 4th dimension)
+    return TabulatedFunction4D(evaluator, arch, FT;
                                 x_range = (params.minimum_log_mean_particle_mass,
                                           params.maximum_log_mean_particle_mass),
                                 y_range = (zero(FT), one(FT)),
                                 z_range = (zero(FT), one(FT)),
+                                w_range = (params.minimum_rime_density,
+                                          params.maximum_rime_density),
                                 x_points = params.number_of_mass_points,
                                 y_points = params.number_of_rime_fraction_points,
-                                z_points = params.number_of_liquid_fraction_points)
+                                z_points = params.number_of_liquid_fraction_points,
+                                w_points = params.number_of_rime_density_points)
 end
 
 """
@@ -941,7 +1184,7 @@ $(TYPEDSIGNATURES)
 Tabulate specific integrals within a P3 microphysics scheme.
 
 Returns a new `PredictedParticlePropertiesMicrophysics` with the specified
-integrals replaced by `TabulatedFunction3D` lookup tables.
+integrals replaced by `TabulatedFunction4D` lookup tables.
 
 # Arguments
 - `p3`: [`PredictedParticlePropertiesMicrophysics`](@ref)
@@ -974,8 +1217,11 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
                   number_of_mass_points::Int = 150,
                   number_of_rime_fraction_points::Int = 8,
                   number_of_liquid_fraction_points::Int = 4,
+                  number_of_rime_density_points::Int = 5,
                   minimum_log_mean_particle_mass = FT(-17.3),
                   maximum_log_mean_particle_mass = FT(-5.3),
+                  minimum_rime_density = FT(50),
+                  maximum_rime_density = FT(900),
                   number_of_quadrature_points::Int = 64,
                   shape_parameter_override = FT(NaN),
                   # Shared kwargs
@@ -1002,8 +1248,11 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
                  number_of_mass_points,
                  number_of_rime_fraction_points,
                  number_of_liquid_fraction_points,
+                 number_of_rime_density_points,
                  minimum_log_mean_particle_mass,
                  maximum_log_mean_particle_mass,
+                 minimum_rime_density,
+                 maximum_rime_density,
                  number_of_quadrature_points,
                  shape_parameter_override)
 

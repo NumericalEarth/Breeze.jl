@@ -122,8 +122,8 @@ end
 Compute per-particle ventilation integral C(D) × f_v(D) for deposition.
 Dispatches on table type for PSD-integrated or mean-mass path.
 """
-@inline function _deposition_ventilation(vent::TabulatedFunction3D,
-                                          vent_e::TabulatedFunction3D,
+@inline function _deposition_ventilation(vent::TabulatedFunction4D,
+                                          vent_e::TabulatedFunction4D,
                                           m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
@@ -132,7 +132,7 @@ Dispatches on table type for PSD-integrated or mean-mass path.
     # vent_e stores the enhanced term (0.44 × ∫ C(D)√(V×D) N'(D) dD)  [m² s^(-1/2)]
     # Runtime correction via ventilation_sc_correction: Sc^(1/3)/√ν [s^(1/2) m^(-1)]
     # Dimensional check: table [m² s^(-1/2)] × correction [s^(1/2)/m] = [m]
-    return vent(log_m, Fᶠ, Fˡ) + ventilation_sc_correction(nu, D_v) * vent_e(log_m, Fᶠ, Fˡ)
+    return vent(log_m, Fᶠ, Fˡ, ρᶠ) + ventilation_sc_correction(nu, D_v) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ)
 end
 
 @inline function _deposition_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
@@ -162,11 +162,11 @@ Compute per-particle collection kernel ⟨A × V⟩ for riming.
 Table path: returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle).
 Analytical path: returns A_mean × V_mean × psd_correction.
 """
-@inline function _collection_kernel_per_particle(coll::TabulatedFunction3D,
+@inline function _collection_kernel_per_particle(coll::TabulatedFunction4D,
                                                   m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
-    return coll(log_m, Fᶠ, zero(FT))
+    return coll(log_m, Fᶠ, zero(FT), ρᶠ)
 end
 
 @inline function _collection_kernel_per_particle(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
@@ -196,14 +196,14 @@ Compute aggregation kernel for self-collection.
 Table path: uses PSD-integrated kernel from table.
 Analytical path: A_mean × ΔV at mean diameter.
 """
-@inline function _aggregation_kernel(coll::TabulatedFunction3D,
+@inline function _aggregation_kernel(coll::TabulatedFunction4D,
                                       m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
     # Table stores the half-integral (Fortran convention):
     # (1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂
     # No E_agg — collection efficiency is applied by the caller.
-    return coll(log_m, Fᶠ, zero(FT))
+    return coll(log_m, Fᶠ, zero(FT), ρᶠ)
 end
 
 @inline function _aggregation_kernel(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
@@ -993,7 +993,7 @@ pre-computed lookup tables. Otherwise, falls back to proportional scaling.
 # Returns
 - Tendency of density-weighted sixth moment [kg/m³ × m⁶/kg / s]
 """
-@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3, nu, D_v)
+@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3, nu, D_v)
     FT = typeof(ρ)
 
     # Mean ice particle mass for table lookup
@@ -1006,7 +1006,7 @@ pre-computed lookup tables. Otherwise, falls back to proportional scaling.
     sc_correction = ventilation_sc_correction(nu, D_v)
 
     z_tendency = _tabulated_z_tendency(
-        p3.ice.sixth_moment, log_mean_mass, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ,
+        p3.ice.sixth_moment, log_mean_mass, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
         p3.process_rates, sc_correction
     )
 
@@ -1014,29 +1014,29 @@ pre-computed lookup tables. Otherwise, falls back to proportional scaling.
 end
 
 # Backward-compatible overload without transport properties (uses reference Sc correction)
-@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3)
+@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3)
     FT = typeof(ρ)
     # Reference conditions: nu ≈ 1.5e-5, D_v ≈ 2.2e-5 → Sc ≈ 0.68, Sc^(1/3)/√ν ≈ 227
     nu_ref = FT(1.5e-5)
     D_v_ref = FT(2.2e-5)
-    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3, nu_ref, D_v_ref)
+    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3, nu_ref, D_v_ref)
 end
 
-# Tabulated version: use TabulatedFunction3D lookups for each process
-@inline function _tabulated_z_tendency(sixth::IceSixthMoment{<:TabulatedFunction3D},
-                                        log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ,
+# Tabulated version: use TabulatedFunction4D lookups for each process
+@inline function _tabulated_z_tendency(sixth::IceSixthMoment{<:TabulatedFunction4D},
+                                        log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
                                         prp::ProcessRateParameters, sc_correction)
     FT = typeof(ρ)
 
     # Look up normalized Z contribution for each process
     # deposition/sublimation have constant + enhanced ventilation integrals;
     # enhanced terms require Sc^(1/3)/√ν correction (same as H1 for mass deposition)
-    z_dep = sixth.deposition(log_m, Fᶠ, Fˡ) + sc_correction * sixth.deposition1(log_m, Fᶠ, Fˡ)
-    z_melt = sixth.melt1(log_m, Fᶠ, Fˡ) + sixth.melt2(log_m, Fᶠ, Fˡ)
-    z_rime = sixth.rime(log_m, Fᶠ, Fˡ)
-    z_agg = sixth.aggregation(log_m, Fᶠ, Fˡ)
-    z_shed = sixth.shedding(log_m, Fᶠ, Fˡ)
-    z_sub = sixth.sublimation(log_m, Fᶠ, Fˡ) + sc_correction * sixth.sublimation1(log_m, Fᶠ, Fˡ)
+    z_dep = sixth.deposition(log_m, Fᶠ, Fˡ, ρᶠ) + sc_correction * sixth.deposition1(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_melt = sixth.melt1(log_m, Fᶠ, Fˡ, ρᶠ) + sixth.melt2(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_rime = sixth.rime(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_agg = sixth.aggregation(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_shed = sixth.shedding(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_sub = sixth.sublimation(log_m, Fᶠ, Fˡ, ρᶠ) + sc_correction * sixth.sublimation1(log_m, Fᶠ, Fˡ, ρᶠ)
 
     # Total melting
     total_melting = rates.partial_melting + rates.complete_melting
@@ -1061,7 +1061,7 @@ end
 end
 
 # Fallback: use proportional scaling when integrals are not tabulated
-@inline function _tabulated_z_tendency(::IceSixthMoment, log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ,
+@inline function _tabulated_z_tendency(::IceSixthMoment, log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
                                        prp::ProcessRateParameters, sc_correction)
     # Fall back to the simple proportional scaling
     return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp)

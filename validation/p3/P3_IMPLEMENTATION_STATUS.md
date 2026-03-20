@@ -23,8 +23,7 @@ median <1%, P90 <3% error for unrimed ice.
 After multiple bug fix batches, the remaining open issues are:
 
 - **0 CRITICAL**: All critical issues fixed
-- **2 HIGH**: Missing rime-density table axis (H2),
-  no sedimentation sub-stepping (H5)
+- **1 HIGH**: No sedimentation sub-stepping (H5)
 - **3 MEDIUM**: No ice-rain sub-table (M2), unvalidated sixth moment (M4),
   Hallett-Mossop shape (M5)
 - **1 LOW**: Vestigial `maximum_shape_parameter` (L5)
@@ -112,8 +111,8 @@ After multiple bug fix batches, the remaining open issues are:
 **`tabulation.jl`** (1418 lines) — COMPLETE
 - Runtime table generation and trilinear interpolation
 - Fortran equivalent: `create_p3_lookupTable_1.f90`, `find_lookupTable_indices_1`
-- **Missing rime_density axis**: Fortran has outer loop over 5 ρ_r (50, 250, 450, 650, 900). Breeze uses fixed ρ_r=400. 10-30% error for dense graupel.
-- Table grid: 150 mass × 8 Fr × 4 Fl (Breeze) vs 50 Qnorm × 4 Fr × 4 Fl × 5 ρ_r (Fortran)
+- **Rime density axis**: **FIXED (H2)** — `TabulatedFunction4D` with 5 uniformly-spaced rime density values over [50, 900] kg/m³. Fortran uses 5 values (50, 250, 450, 650, 900); Breeze uses uniform spacing for efficient quadrilinear interpolation.
+- Table grid: 150 mass × 8 Fr × 4 Fl × 5 ρ_r (Breeze) vs 50 Qnorm × 4 Fr × 4 Fl × 5 ρ_r (Fortran)
 - **No ice-rain binned sub-table**: Fortran has `itabcol(i_Qnorm, i_Drscale, i_Fr, i_Fl)` with 30 rain-size bins
 - `Adapt.adapt_structure` for GPU transfer on all 10 container structs
 - Full `tabulate(p3, arch)` and `tabulate(p3, :rain, arch)` entry points
@@ -323,12 +322,12 @@ These are intentional design choices, not bugs:
 | ~~C1~~ | ~~**KK2000 accretion exponent placement**~~ | rain_process_rates.jl:64 | **FIXED**: Changed `k₂ * qcl * qr^α` → `k₂ * (qcl * qr)^α` (KK2000 Eq. 5 / Fortran P3). |
 | ~~C2~~ | ~~**Lambda solver div-by-zero** (two-moment)~~ | lambda_solver.jl:792 | **FIXED**: Added `abs(denom) < eps(FT) && return x₁` guard, matching three-moment solver pattern. |
 
-### HIGH Priority (7 issues, 5 fixed)
+### HIGH Priority (7 issues, 6 fixed)
 
 | # | Issue | File(s) | Impact |
 |---|-------|---------|--------|
 | ~~H1~~ | ~~**Hardcoded latent heats** inconsistent with Breeze thermodynamics~~ | process_rates.jl, melting_rates.jl | **FIXED**: Threaded thermodynamic constants through deposition/melting; uses `ice_latent_heat(T)` and `liquid_latent_heat(T)` when constants available. Backward-compatible: hardcoded values when called without constants. |
-| H2 | **Missing rime_density axis** in lookup tables | tabulation.jl | Tables assume ρ_r=400 for all rime densities; 10-30% error for dense graupel (ρ_r=900). |
+| ~~H2~~ | ~~**Missing rime_density axis** in lookup tables~~ | tabulation.jl | **FIXED**: Upgraded from `TabulatedFunction3D` to `TabulatedFunction4D` with rime density as the 4th axis. Default 5 grid points over [50, 900] kg/m³, matching Fortran P3 v5.5.0. Quadrilinear interpolation at runtime. All ice integral dispatch updated. |
 | ~~H3~~ | ~~**Analytical ice fall speed mass-weight factor** wrong for Stokes regime~~ | terminal_velocities.jl | **FIXED**: Regime-dependent factor — Γ(6)/Γ(4)=20 for Stokes, 1.787 for large particles |
 | ~~H4~~ | ~~**VentilationEnhanced table convention** requires Sc/nu correction at runtime~~ | quadrature.jl → process_rates.jl | **FIXED**: Extracted `ventilation_sc_correction(nu, D_v)` helper used by all call sites (deposition, Z-tendency). Eliminates duplicated Sc^(1/3)/√ν computation. |
 | H5 | **Sedimentation sub-stepping absent** | p3_interface.jl | Production LES with large dt needs sub-stepping for CFL stability with fast-falling graupel |
@@ -449,7 +448,7 @@ These are intentional design choices, not bugs:
 4. **Type diagnostics** (qi_type: cloud ice/snow/graupel/hail classification)
 5. **Precipitation rate diagnostics** by hydrometeor type
 6. **Effective radius diagnostics** (diag_reffc, diag_reffi)
-7. **Rime density table dimension** (5 ρ_r values vs fixed 400)
+7. ~~**Rime density table dimension**~~ **(FIXED)** — `TabulatedFunction4D` with 5 rime density values
 8. **Ice-rain binned sub-table** (rain size dimension)
 9. **Multi-category ice interactions** (nCat > 1, full inter-category collection)
 10. **Sequential rate application** with intermediate clipping (Lie splitting)
@@ -476,7 +475,6 @@ These are intentional design choices, not bugs:
 ## Remaining Work (Priority Order)
 
 1. **Sedimentation sub-stepping (H5)** — Required for production LES with large dt.
-2. **Add rime_density table dimension (H2)** — TabulatedFunction4D with 5 rime density values.
 3. **Validate sixth moment integrals** against Fortran 3-moment tables (M4).
 4. **3D LES validation cases** (BOMEX+ice, deep convection).
 5. **Prognostic Nc** (future: removes need for ni-explosion cap).
