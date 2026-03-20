@@ -1,34 +1,39 @@
-using CUDA, Reactant, Enzyme
-using Breeze, Oceananigans
-using Oceananigans.Architectures: ReactantState
-using Oceananigans.Fields: CenterField, Field, instantiated_location
-using Reactant: TracedRNumber, ConcreteRNumber
-using OffsetArrays: OffsetArray
+using CUDA, Reactant, Enzyme, KernelAbstractions, OffsetArrays
+using Reactant: ConcreteRNumber
+using Adapt: Adapt
 
 Reactant.Compiler.DUMP_LLVMIR[] = false
-
 Reactant.set_default_backend("cpu")
 
-# ── Inlined from Oceananigans.BoundaryConditions ──
+# ── Clock (from Oceananigans src/TimeSteppers/clock.jl) ──
+
+mutable struct Clock{TT, S}
+    time :: TT
+    stage :: S
+end
+
+Adapt.adapt_structure(to, clock::Clock) = (time          = clock.time,
+                                           stage         = clock.stage)
+
+@kernel function _fill_halo!(c, N, H, args)
+    i = @index(Global)
+    @inbounds parent(c)[i] = parent(c)[i]
+end
 
 # ── Setup ──
 
-Nx, Nz = 16, 8
-grid = RectilinearGrid(ReactantState(); size=(Nx, Nz),
-                       x=(-5000, 5000), z=(0, 10000),
-                       topology=(Periodic, Flat, Bounded))
+Nx, H = 16, 3
+raw = Reactant.to_rarray(zeros(Nx + 2H))
+c   = OffsetArray(raw, 1-H:Nx+H)
+clock = Clock(ConcreteRNumber(0.0), 1)
+mf    = ()
 
-ρ      = CenterField(grid)
-clock  = Clock(time=0.0, last_Δt=Inf, last_stage_Δt=Inf, iteration=ConcreteRNumber(0), stage=1)
-mf     = ()
-we_kernel = ρ.boundary_conditions.kernels.west_and_east
-we_bcs    = ρ.boundary_conditions.ordered_bcs.west_and_east
-loc       = instantiated_location(ρ)
-
-function loss(ρ, clock, mf)
-    we_kernel(ρ.data, we_bcs[1], we_bcs[2], loc, ρ.grid, (clock, mf))
+function loss(c, clock, mf)
+    backend = KernelAbstractions.get_backend(parent(c))
+    _fill_halo!(backend)(c, Nx, H, (mf, clock); ndrange=size(c))
+    KernelAbstractions.synchronize(backend)
     return 0.0
 end
 
-@info "Compiling with $(length(mf)) fields..."
-@time compiled = Reactant.@compile raise=true raise_first=true loss(ρ, clock, mf)
+@info "Compiling..."
+@time compiled = Reactant.@compile raise=true raise_first=true loss(c, clock, mf)
