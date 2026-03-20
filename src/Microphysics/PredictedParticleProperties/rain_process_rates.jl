@@ -203,8 +203,8 @@ approximation path depending on `p3.rain.evaporation`:
     is_subsaturated = S < 1
 
     # Thermodynamic constants
-    Rᵛ = FT(PredictedParticleProperties.Rᵛ)
-    Rᵈ = FT(PredictedParticleProperties.Rᵈ)
+    Rᵛ = FT(vapor_gas_constant(ThermodynamicConstants()))
+    Rᵈ = FT(dry_air_gas_constant(ThermodynamicConstants()))
     L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]

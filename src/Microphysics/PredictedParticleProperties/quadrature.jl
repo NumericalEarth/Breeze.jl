@@ -17,7 +17,7 @@ export evaluate, chebyshev_gauss_nodes_weights
 # Reference conditions for fall speed parameterization
 const P3_REF_T = 253.15       # Reference temperature [K]
 const P3_REF_P = 60000.0      # Reference pressure [Pa]
-const P3_REF_RHO = P3_REF_P / (Rᵈ * P3_REF_T) # ≈ 0.825 kg/m³
+const P3_REF_RHO = P3_REF_P / (dry_air_gas_constant(ThermodynamicConstants()) * P3_REF_T) # ≈ 0.825 kg/m³
 
 # Dynamic viscosity at reference conditions (Sutherland's law)
 # μ = 1.496e-6 * T^1.5 / (T + 120)
@@ -242,7 +242,7 @@ Calculates velocity at reference conditions (P3_REF_T, P3_REF_P).
 """
 @inline function ice_fall_speed_mh2005(D, state::IceSizeDistributionState, m, A)
     FT = typeof(D)
-    g = FT(PredictedParticleProperties.g)
+    g = FT(ThermodynamicConstants().gravitational_acceleration)
 
     # Reference properties
     ρ_ref = FT(P3_REF_RHO)

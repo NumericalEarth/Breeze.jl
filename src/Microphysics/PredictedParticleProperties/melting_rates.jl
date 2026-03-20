@@ -58,10 +58,11 @@ where:
     is_melting = ΔT > 0
 
     # Thermodynamic constants: L_f and L_v are T-dependent when constants
-    # are provided (H1), while Rᵛ comes from Breeze's thermodynamic constants.
+    # are provided (H1), and Rᵛ follows the same runtime thermodynamic source.
     L_f = _fusion_latent_heat(constants, T)
     L_v = _vaporization_latent_heat(constants, T)
-    Rᵛ = FT(PredictedParticleProperties.Rᵛ)
+    thermodynamic_constants = isnothing(constants) ? ThermodynamicConstants(FT) : constants
+    Rᵛ = FT(vapor_gas_constant(thermodynamic_constants))
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]

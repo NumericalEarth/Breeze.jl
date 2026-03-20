@@ -180,7 +180,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         pure_ice_density = 917,
         # Reference density for rain fall speed correction (P=1000 hPa, T=0°C)
         # computed from Breeze's internal dry-air gas constant.
-        reference_air_density = 100000 / (Rᵈ * 273.15),
+        reference_air_density = 100000 / (dry_air_gas_constant(ThermodynamicConstants()) * 273.15),
         nucleated_ice_mass = 4π/3 * 900 * (1e-6)^3,  # Fortran mi0: sphere r=1μm, ρ=900 kg/m³ [kg]
         freezing_temperature = 273.15,
 

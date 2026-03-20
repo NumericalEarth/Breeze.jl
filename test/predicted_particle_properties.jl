@@ -1512,6 +1512,19 @@ using Oceananigans.Fields: interior
         props_surface = air_transport_properties(FT(273.15), FT(101325.0))
         props_aloft = air_transport_properties(FT(240.0), FT(30000.0))
         @test props_aloft.D_v > props_surface.D_v
+
+        default_constants = ThermodynamicConstants(FT)
+        custom_constants = ThermodynamicConstants(FT;
+                                                  dry_air_molar_mass = FT(0.031),
+                                                  vapor_molar_mass = FT(0.020))
+        transport = air_transport_properties(T, P)
+
+        rate_default_constants = ventilation_enhanced_deposition(
+            p3, qi, ni, qv_super, qv_sat_ice, Ff, ρf, T, P, default_constants, transport)
+        rate_custom_constants = ventilation_enhanced_deposition(
+            p3, qi, ni, qv_super, qv_sat_ice, Ff, ρf, T, P, custom_constants, transport)
+
+        @test !isapprox(rate_custom_constants, rate_default_constants; rtol=1e-12, atol=0)
     end
 
     @testset "ice_melting_rate" begin
@@ -1546,6 +1559,17 @@ using Oceananigans.Fields: interior
         T_hot = FT(278.15)     # +5C
         rate_hot = ice_melting_rate(p3, qi, ni, T_hot, P, qv, qv_sat, Ff, ρf, ρ)
         @test rate_hot > rate_warm
+
+        default_constants = ThermodynamicConstants(FT)
+        custom_constants = ThermodynamicConstants(FT; vapor_molar_mass = FT(0.020))
+        transport = air_transport_properties(T_warm, P)
+
+        melt_default_constants = ice_melting_rate(
+            p3, qi, ni, T_warm, P, qv, qv_sat, Ff, ρf, ρ, default_constants, transport)
+        melt_custom_constants = ice_melting_rate(
+            p3, qi, ni, T_warm, P, qv, qv_sat, Ff, ρf, ρ, custom_constants, transport)
+
+        @test !isapprox(melt_custom_constants, melt_default_constants; rtol=1e-12, atol=0)
     end
 
     @testset "ice_melting_rates partitioning" begin

@@ -160,7 +160,7 @@ the raw integral ∫ f(D) N'(D) dD gives per-particle values.
     params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
                                       mass, closure)
 
-    reference_air_density = FT(60000 / (Rᵈ * 253.15))
+    reference_air_density = FT(60000 / (dry_air_gas_constant(ThermodynamicConstants()) * 253.15))
 
     return IceSizeDistributionState(
         params.N₀,

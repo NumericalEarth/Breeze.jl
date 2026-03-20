@@ -201,11 +201,6 @@ using Oceananigans.Architectures: CPU
 using Breeze.AtmosphereModels: prognostic_field_names
 using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant, vapor_gas_constant
 
-const p3_thermodynamic_constants = ThermodynamicConstants(Float64)
-const Rᵈ = dry_air_gas_constant(p3_thermodynamic_constants)
-const Rᵛ = vapor_gas_constant(p3_thermodynamic_constants)
-const g = p3_thermodynamic_constants.gravitational_acceleration
-
 #####
 ##### Integral types (must be first - no dependencies)
 #####

@@ -329,10 +329,11 @@ The bulk rate integrates over the size distribution:
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
-    # Thermodynamic constants come from Breeze's internal ThermodynamicConstants.
-    # Latent heat L_s is T-dependent when constants are provided (H1).
-    Rᵛ = FT(PredictedParticleProperties.Rᵛ)
-    Rᵈ = FT(PredictedParticleProperties.Rᵈ)
+    # When runtime thermodynamic constants are provided, use their gas constants
+    # consistently with the latent heat and saturation calculations.
+    thermodynamic_constants = isnothing(constants) ? ThermodynamicConstants(FT) : constants
+    Rᵛ = FT(vapor_gas_constant(thermodynamic_constants))
+    Rᵈ = FT(dry_air_gas_constant(thermodynamic_constants))
     L_s = _sublimation_latent_heat(constants, T)
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
