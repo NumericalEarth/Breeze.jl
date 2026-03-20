@@ -11,22 +11,6 @@ Reactant.set_default_backend("cpu")
 
 # ── Inlined from Oceananigans.BoundaryConditions ──
 
-const NoBCs = Union{Nothing, Missing, Tuple{Vararg{Nothing}}}
-
-@inline fill_halo_event!(c, kernel!, bcs::Tuple{Any, Any}, loc, grid, args...; kwargs...) =
-    kernel!(c, bcs[1], bcs[2], loc, grid, Tuple(args))
-@inline fill_halo_event!(c, kernel!, bcs::Tuple{Any}, loc, grid, args...; kwargs...) =
-    kernel!(c, bcs[1], loc, grid, Tuple(args))
-@inline fill_halo_event!(c, ::Nothing, ::NoBCs, loc, grid, args...; kwargs...) = nothing
-
-function fill_halo_regions!(c::OffsetArray, boundary_conditions, indices, loc, grid, args...; kwargs...)
-    kernels!, bcs = boundary_conditions.kernels, boundary_conditions.ordered_bcs
-    for task = 1:length(kernels!)
-        @inbounds fill_halo_event!(c, kernels![task], bcs[task], loc, grid, args...; kwargs...)
-    end
-    return nothing
-end
-
 # ── Setup ──
 
 Nx, Nz = 16, 8
@@ -37,22 +21,12 @@ grid = RectilinearGrid(ReactantState(); size=(Nx, Nz),
 ρ      = CenterField(grid)
 clock  = Clock(time=0.0, last_Δt=Inf, last_stage_Δt=Inf, iteration=ConcreteRNumber(0), stage=1)
 mf     = ()
-@info ρ.boundary_conditions
-
-
-function fhr!(field::Field, positional_args...; kwargs...)
-    fill_halo_regions!(field.data,
-                       field.boundary_conditions,
-                       field.indices,
-                       instantiated_location(field),
-                       field.grid,
-                       positional_args...;
-                       kwargs...)
-    return nothing
-end
+we_kernel = ρ.boundary_conditions.kernels.west_and_east
+we_bcs    = ρ.boundary_conditions.ordered_bcs.west_and_east
+loc       = instantiated_location(ρ)
 
 function loss(ρ, clock, mf)
-    fhr!(ρ, clock, mf)
+    we_kernel(ρ.data, we_bcs[1], we_bcs[2], loc, ρ.grid, (clock, mf))
     return 0.0
 end
 
