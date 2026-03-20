@@ -6,7 +6,12 @@ using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
 using Oceananigans.Utils: launch! # , KernelParameters
+using Oceananigans.Fields: location
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
+
+# Column fields have Nothing location in x and y; distributed halo communication
+# doesn't handle these correctly, so they need only_local_halos=true.
+_is_column_field(f) = location(f, 1) === Nothing && location(f, 2) === Nothing
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
@@ -101,10 +106,11 @@ function compute_velocities!(model::AtmosphereModel)
     # Ensure halos are filled before velocity computation
     # (prognostic field halo fill in update_state! is async)
     density = dynamics_density(model.dynamics)
-    # Note: only_local_halos=true is needed because the density may be a column field
-    # (Flat in x and y, e.g. for AnelasticDynamics reference state), and Oceananigans'
-    # distributed halo communication does not handle Flat-located dimensions correctly.
-    fill_halo_regions!(density; only_local_halos=true)
+    # Note: only_local_halos=true is needed for column fields (Flat in x and y,
+    # e.g. AnelasticDynamics reference state), because Oceananigans' distributed
+    # halo communication does not handle Flat-located dimensions correctly.
+    # For 3D density fields (CompressibleDynamics), full halo communication is required.
+    fill_halo_regions!(density; only_local_halos=_is_column_field(density))
     fill_halo_regions!(model.momentum)
 
     launch!(arch, grid, :xyz,

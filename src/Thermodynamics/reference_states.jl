@@ -355,7 +355,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
     pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants))
-    fill_halo_regions!(pᵣ)
+    fill_halo_regions!(pᵣ; only_local_halos=true)
 
     if discrete_hydrostatic_balance
         g = constants.gravitational_acceleration
@@ -364,7 +364,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
 
     Tᵣ = Field{Nothing, Nothing, Center}(grid)
     set!(Tᵣ, z -> hydrostatic_temperature(z, p₀, θᵣ, pˢᵗ, constants))
-    fill_halo_regions!(Tᵣ)
+    fill_halo_regions!(Tᵣ; only_local_halos=true)
 
     return ReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
 end
@@ -502,7 +502,7 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     # Build θᵣ field (temporary, used only during construction)
     θᵣ = Field{Nothing, Nothing, Center}(grid)
     set!(θᵣ, potential_temperature)
-    fill_halo_regions!(θᵣ)
+    fill_halo_regions!(θᵣ; only_local_halos=true)
 
     # Surface values for boundary conditions and display
     θ₀ = convert(FT, _surface_value(potential_temperature))
@@ -520,9 +520,9 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     launch!(arch, grid, tuple(1), _compute_exner_reference!,
             πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, π₀, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
 
-    fill_halo_regions!(πᵣ)
-    fill_halo_regions!(pᵣ)
-    fill_halo_regions!(ρᵣ)
+    fill_halo_regions!(πᵣ; only_local_halos=true)
+    fill_halo_regions!(pᵣ; only_local_halos=true)
+    fill_halo_regions!(ρᵣ; only_local_halos=true)
 
     return ExnerReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ, πᵣ)
 end
@@ -565,7 +565,7 @@ function enforce_discrete_hydrostatic_balance!(pᵣ, ρᵣ, grid, g)
     arch = architecture(grid)
     Nz = size(grid, 3)
     launch!(arch, grid, tuple(1), _enforce_discrete_hydrostatic_balance!, pᵣ, ρᵣ, grid, Nz, g)
-    fill_halo_regions!(pᵣ)
+    fill_halo_regions!(pᵣ; only_local_halos=true)
     return nothing
 end
 
