@@ -58,10 +58,10 @@ where:
     is_melting = ΔT > 0
 
     # Thermodynamic constants: L_f and L_v are T-dependent when constants
-    # are provided (H1), hardcoded otherwise. R_v hardcoded to match Fortran.
+    # are provided (H1), while Rᵛ comes from Breeze's thermodynamic constants.
     L_f = _fusion_latent_heat(constants, T)
     L_v = _vaporization_latent_heat(constants, T)
-    R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
+    Rᵛ = FT(PredictedParticleProperties.Rᵛ)
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
@@ -72,7 +72,7 @@ where:
     # Derived from thermodynamic constants when available (M6);
     # falls back to Fortran P3 v5.5.0 hardcoded 611 Pa otherwise.
     e_s0 = _saturation_vapor_pressure_at_freezing(constants, T₀)
-    ρ_vs = e_s0 / (R_v * T₀)  # Saturation vapor density at T₀
+    ρ_vs = e_s0 / (Rᵛ * T₀)  # Saturation vapor density at T₀
 
     # Ambient vapor density (from mixing ratio and actual air density)
     ρ_v = qᵛ * ρ

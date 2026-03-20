@@ -50,8 +50,8 @@ This container organizes all ice-related computations:
 
 - `minimum_rime_density`: Lower bound for ρᶠ [kg/m³], default 50
 - `maximum_rime_density`: Upper bound for ρᶠ [kg/m³], default 900 (pure ice)
-- `maximum_shape_parameter`: Upper limit on μ [-], default 10
-- `minimum_reflectivity`: Numerical floor for Z [m⁶/m³], default 10⁻²²
+- `maximum_shape_parameter`: Upper limit on μ [-], default 20
+- `minimum_reflectivity`: Numerical floor for Z [m⁶/m³], default 10⁻³⁵
 
 # References
 
@@ -63,8 +63,8 @@ with sixth moment formulations from
 function IceProperties(FT::Type{<:AbstractFloat} = Float64;
                        minimum_rime_density = 50,
                        maximum_rime_density = 900,
-                       maximum_shape_parameter = 10,
-                       minimum_reflectivity = 1e-22)
+                       maximum_shape_parameter = 20,
+                       minimum_reflectivity = 1e-35)
     return IceProperties(
         FT(minimum_rime_density),
         FT(maximum_rime_density),

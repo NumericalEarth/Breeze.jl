@@ -329,10 +329,10 @@ The bulk rate integrates over the size distribution:
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
-    # Thermodynamic constants: R_v and R_d hardcoded to match Fortran P3 v5.5.0 (L7).
+    # Thermodynamic constants come from Breeze's internal ThermodynamicConstants.
     # Latent heat L_s is T-dependent when constants are provided (H1).
-    R_v = FT(461.5)
-    R_d = FT(287.0)
+    Rᵛ = FT(PredictedParticleProperties.Rᵛ)
+    Rᵈ = FT(PredictedParticleProperties.Rᵈ)
     L_s = _sublimation_latent_heat(constants, T)
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
@@ -342,7 +342,7 @@ The bulk rate integrates over the size distribution:
     # Saturation vapor pressure over ice
     # Derived from qᵛ⁺ⁱ: qᵛ⁺ⁱ = ε × e_si / (P - (1-ε) × e_si)
     # Rearranging: e_si = P × qᵛ⁺ⁱ / (ε + qᵛ⁺ⁱ × (1 - ε))
-    ε = R_d / R_v
+    ε = Rᵈ / Rᵛ
     qᵛ⁺ⁱ_safe = max(qᵛ⁺ⁱ, FT(1e-30))
     e_si = P * qᵛ⁺ⁱ_safe / (ε + qᵛ⁺ⁱ_safe * (1 - ε))
 
@@ -361,8 +361,8 @@ The bulk rate integrates over the size distribution:
     # Denominator: thermodynamic resistance terms (Mason 1971)
     # A = L_s/(K_a × T) × (L_s/(R_v × T) - 1)
     # B = R_v × T / (e_si × D_v)
-    A = L_s / (K_a * T) * (L_s / (R_v * T) - 1)
-    B = R_v * T / (e_si * D_v)
+    A = L_s / (K_a * T) * (L_s / (Rᵛ * T) - 1)
+    B = Rᵛ * T / (e_si * D_v)
     thermodynamic_factor = A + B
 
     # Deposition rate per particle (Eq. 30 from MM15a)

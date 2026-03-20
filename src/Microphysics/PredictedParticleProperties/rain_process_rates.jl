@@ -203,8 +203,8 @@ approximation path depending on `p3.rain.evaporation`:
     is_subsaturated = S < 1
 
     # Thermodynamic constants
-    R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
-    R_d = FT(287.0)           # Matches Fortran P3 v5.5.0 exactly (not 287.04). See L7.
+    Rᵛ = FT(PredictedParticleProperties.Rᵛ)
+    Rᵈ = FT(PredictedParticleProperties.Rᵈ)
     L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
@@ -213,13 +213,13 @@ approximation path depending on `p3.rain.evaporation`:
 
     # Saturation vapor pressure derived from qᵛ⁺ˡ via inversion of
     # qᵛ⁺ˡ = ε × e_s / (P - (1 - ε) × e_s), consistent with ice deposition path
-    ε = R_d / R_v
+    ε = Rᵈ / Rᵛ
     qᵛ⁺ˡ_safe = max(qᵛ⁺ˡ, FT(1e-30))
     e_s = P * qᵛ⁺ˡ_safe / (ε + qᵛ⁺ˡ_safe * (1 - ε))
 
     # Thermodynamic resistance (Mason 1971)
-    A = L_v / (K_a * T) * (L_v / (R_v * T) - 1)
-    B = R_v * T / (e_s * D_v)
+    A = L_v / (K_a * T) * (L_v / (Rᵛ * T) - 1)
+    B = Rᵛ * T / (e_s * D_v)
     thermodynamic_factor = max(A + B, FT(1e-10))
 
     # Internal helpers return negative (S - 1 < 0 when subsaturated).

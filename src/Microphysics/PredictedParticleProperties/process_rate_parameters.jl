@@ -178,9 +178,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Physical constants
         liquid_water_density = 1000,
         pure_ice_density = 917,
-        # Fortran P3 v5.5.0: rhosur = 80000/(287.15*273.15) ≈ 1.02 kg/m³
-        # Reference density for rain fall speed correction (P=800 hPa, T=0°C)
-        reference_air_density = 80000 / (287.15 * 273.15),
+        # Reference density for rain fall speed correction (P=1000 hPa, T=0°C)
+        # computed from Breeze's internal dry-air gas constant.
+        reference_air_density = 100000 / (Rᵈ * 273.15),
         nucleated_ice_mass = 4π/3 * 900 * (1e-6)^3,  # Fortran mi0: sphere r=1μm, ρ=900 kg/m³ [kg]
         freezing_temperature = 273.15,
 
@@ -234,7 +234,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Deposition nucleation
         nucleation_temperature_threshold = 258.15,
-        nucleation_supersaturation_threshold = 0.0,
+        nucleation_supersaturation_threshold = 0.05,
         nucleation_maximum_concentration = 100e3,
         nucleation_timescale = 60.0,
         nucleation_coefficient = 5.0,
@@ -291,10 +291,10 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # dependence on drop size. For spherical drops with a gamma PSD N'(D) = N₀ D^μ exp(-λD)
         # the analytical correction is C(μ) = Γ(μ+7)Γ(μ+1) / Γ(μ+4)²
         # (see psd_correction_spherical_volume).
-        # Cloud drops: μ ≈ 2.3 → C ≈ 5.08; rain drops: μ ≈ 1.0 → C = 8.75 (exact)
+        # Cloud drops: μ ≈ 2.3 → C ≈ 5.08; rain drops: μ = 0 → C = 20.0 (exact)
         riming_psd_correction = 2.0,  # Tunable: keep as empirical parameter
         freezing_cloud_psd_correction = psd_correction_spherical_volume(2.3),
-        freezing_rain_psd_correction = psd_correction_spherical_volume(1.0),
+        freezing_rain_psd_correction = psd_correction_spherical_volume(0.0),
 
         # Homogeneous freezing
         homogeneous_freezing_temperature = 233.15,
@@ -304,8 +304,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         minimum_cloud_drop_mass = 1e-12,
 
         # Rain DSD bounds (Fortran P3 v5.5.0: 1/(dlamr) intervals)
-        rain_lambda_min = 125.0,   # lamr_min [1/m] ≈ D_max ~8mm
-        rain_lambda_max = 50000.0, # lamr_max [1/m] ≈ D_min ~20μm
+        rain_lambda_min = 500.0,    # lamr_min [1/m] ≈ D_max ~2mm
+        rain_lambda_max = 100000.0, # lamr_max [1/m] ≈ D_min ~10μm
 
         # Sink-limiting safety timescale
         sink_limiting_timescale = 1.0) # dt_safety [s]

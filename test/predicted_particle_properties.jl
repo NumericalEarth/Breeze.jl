@@ -2,6 +2,7 @@ using Test
 import Breeze
 using Breeze.Microphysics.PredictedParticleProperties
 using Breeze.AtmosphereModels: prognostic_field_names
+using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
 
 using Breeze.Microphysics.PredictedParticleProperties:
     IceSizeDistributionState,
@@ -109,7 +110,8 @@ using Oceananigans.Fields: interior
         @test ice isa IceProperties
         @test ice.minimum_rime_density == 50.0
         @test ice.maximum_rime_density == 900.0
-        @test ice.maximum_shape_parameter == 10.0
+        @test ice.maximum_shape_parameter == 20.0
+        @test ice.minimum_reflectivity == 1e-35
 
         # Check all sub-containers exist
         @test ice.fall_speed isa IceFallSpeed
@@ -123,7 +125,9 @@ using Oceananigans.Fields: interior
 
     @testset "Ice fall speed" begin
         fs = IceFallSpeed()
-        @test fs.reference_air_density ≈ 60000 / (287.15 * 253.15)
+        constants = ThermodynamicConstants(Float64)
+        Rᵈ = dry_air_gas_constant(constants)
+        @test fs.reference_air_density ≈ 60000 / (Rᵈ * 253.15)
 
         @test fs.number_weighted isa NumberWeightedFallSpeed
         @test fs.mass_weighted isa MassWeightedFallSpeed
@@ -2129,7 +2133,7 @@ using Oceananigans.Fields: interior
     @testset "Air transport properties - reference values" begin
         # T=273.15K, P=101325Pa: D_v ≈ 2.23e-5, K_a ≈ 0.024, nu ≈ 1.33e-5
         # Formula: D_v = 8.794e-5 * T^1.81 / P, K_a = 1414 * 1.496e-6 * T^1.5 / (T+120),
-        #          nu  = K_a / 1414 * 287 * T / P
+        #          nu  = K_a / 1414 * 287.15 * T / P
         props = air_transport_properties(273.15, 101325.0)
         @test props.D_v ≈ 2.23e-5 atol=5e-7
         @test props.K_a ≈ 0.0243 atol=5e-4
@@ -2212,10 +2216,15 @@ using Oceananigans.Fields: interior
         # freezing_cloud_psd_correction: psd_correction_spherical_volume(2.3) ≈ 5.08
         @test prp.freezing_cloud_psd_correction ≈ psd_correction_spherical_volume(2.3) rtol=1e-6
 
-        # freezing_rain_psd_correction: psd_correction_spherical_volume(1.0)
-        # Gamma(8)*Gamma(2)/Gamma(5)^2 = 5040*1/576 ≈ 8.75
-        @test prp.freezing_rain_psd_correction ≈ psd_correction_spherical_volume(1.0) rtol=1e-6
-        @test prp.freezing_rain_psd_correction ≈ 8.75 atol=0.01
+        # freezing_rain_psd_correction: psd_correction_spherical_volume(0.0)
+        # Gamma(7)*Gamma(1)/Gamma(4)^2 = 720/36 = 20.0
+        @test prp.freezing_rain_psd_correction ≈ psd_correction_spherical_volume(0.0) rtol=1e-6
+        @test prp.freezing_rain_psd_correction ≈ 20.0 atol=0.01
+
+        @test prp.reference_air_density ≈ 100000 / (dry_air_gas_constant(ThermodynamicConstants(Float64)) * 273.15) rtol=1e-12
+        @test prp.nucleation_supersaturation_threshold == 0.05
+        @test prp.rain_lambda_min == 500.0
+        @test prp.rain_lambda_max == 100000.0
 
         # riming_psd_correction should remain unchanged at 2.0
         @test prp.riming_psd_correction ≈ 2.0
