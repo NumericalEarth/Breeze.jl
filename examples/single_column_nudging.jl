@@ -84,23 +84,27 @@ temp = Field(Metadatum(:temperature; dataset, date=first(dates), bounding_box))
 
 xn = [ref_loc.longitude - Δλ/2, ref_loc.longitude + Δλ/2]
 yn = [ref_loc.latitude  - Δφ/2, ref_loc.latitude  + Δφ/2]
-zn = znodes(grid, Center(), Center(), Face(); with_halos=false)
+zn = znodes(grid, Nothing(), Nothing(), Face(); with_halos=false)
 
 # interpolate to a single column
 column_grid = RectilinearGrid(size=(1, 1, Nz),
-                              x=xn, y=yn, z=zn,
-                              topology=(Bounded, Bounded, Bounded))
+                              x=xn, y=yn, z=zn)
 
-u_ref = FieldTimeSeries(Metadata(:eastward_velocity;  dataset, dates, bounding_box), column_grid)
-v_ref = FieldTimeSeries(Metadata(:northward_velocity; dataset, dates, bounding_box), column_grid)
-T_ref = FieldTimeSeries(Metadata(:temperature;        dataset, dates, bounding_box), column_grid)
+# reference fields to nudge toward
+uᵣ = FieldTimeSeries(Metadata(:eastward_velocity;  dataset, dates, bounding_box), column_grid)
+vᵣ = FieldTimeSeries(Metadata(:northward_velocity; dataset, dates, bounding_box), column_grid)
+Tᵣ = FieldTimeSeries(Metadata(:temperature;        dataset, dates, bounding_box), column_grid)
 
 # convert to potential temperature
-θ_ref = FieldTimeSeries{Center, Center, Center}(column_grid, T_ref.times)
-p_col = interior(ref_state.pressure, 1, 1, :)  # 1D pressure profile
-R_cp = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
-for n in eachindex(T_ref.times)
-    interior(θ_ref[n]) .= interior(T_ref[n]) .* (ref_state.standard_pressure ./ reshape(p_col, 1, 1, :)).^R_cp
+pᵣ  = ref_state.pressure
+pˢᵗ = ref_state.standard_pressure
+Rᵈ  = dry_air_gas_constant(constants)
+cᵖᵈ = constants.dry_air.heat_capacity
+θᵣ  = FieldTimeSeries{Nothing, Nothing, Center}(column_grid, Tᵣ.times)
+Tᵣn = Field{Nothing,Nothing,Center}(pᵣ.grid) # temporary Field to force grid agreement for set!
+for n in eachindex(Tᵣ.times)
+    set!(Tᵣn, Tᵣ[n])
+    set!(θᵣ[n], Tᵣn * (pˢᵗ / pᵣ)^(Rᵈ/cᵖᵈ))
 end
 
 # ## Nudging forcings
@@ -112,9 +116,9 @@ end
 
 τ_nudging = 6hours
 
-u_nudging = FieldTimeSeriesRelaxation(u_ref; time_scale=τ_nudging, z_bottom=1500)
-v_nudging = FieldTimeSeriesRelaxation(v_ref; time_scale=τ_nudging, z_bottom=1500)
-θ_nudging = FieldTimeSeriesRelaxation(θ_ref; time_scale=τ_nudging, z_bottom=1500)
+u_nudging = FieldTimeSeriesRelaxation(uᵣ; time_scale=τ_nudging, z_bottom=1500)
+v_nudging = FieldTimeSeriesRelaxation(vᵣ; time_scale=τ_nudging, z_bottom=1500)
+θ_nudging = FieldTimeSeriesRelaxation(θᵣ; time_scale=τ_nudging, z_bottom=1500)
 
 forcing = (; ρu = u_nudging, ρv = v_nudging, ρθ = θ_nudging)
 
@@ -135,7 +139,7 @@ set!(model; θ = θ₀)
 
 # ## Simulation
 
-simulation = Simulation(model; Δt = 60seconds, stop_time = T_ref.times[end])
+simulation = Simulation(model; Δt = 60seconds, stop_time = Tᵣ.times[end])
 
 # Progress reporting
 function progress(sim)
