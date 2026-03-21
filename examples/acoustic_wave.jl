@@ -198,25 +198,27 @@ nothing #hide
 
 # ## Differentiability: sensitivity to the initial perturbation
 #
-# A natural follow-up question is: *how sensitive is the acoustic field at some
-# distant observation point to the shape of the initial density pulse?*
-# Answering this with finite differences would require re-running the simulation
-# once per grid cell. Automatic differentiation (AD) gives us the full
-# sensitivity field in a single backward pass.
+# A natural follow-up question is: *how sensitive is the acoustic field at some distant
+# observation point to the shape of the initial density pulse?* Answering this with [finite
+# differences](https://en.wikipedia.org/wiki/Finite_difference) (FD) would require
+# re-running the simulation once per grid cell. [Automatic
+# differentiation](https://en.wikipedia.org/wiki/Automatic_differentiation) (AD) gives us
+# the full sensitivity field in a single backward pass.
 #
-# We use [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) for reverse-mode AD
-# and [Reactant.jl](https://github.com/EnzymeAD/Reactant.jl) to compile the
-# model to XLA so that we can target multiple accelerators (GPU, TPU, etc...) and
-# differentiate through it with Enzyme.
+# We use [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) for reverse-mode AD and
+# [Reactant.jl](https://github.com/EnzymeAD/Reactant.jl) to compile the model to
+# [XLA](https://en.wikipedia.org/wiki/Accelerated_Linear_Algebra) so that we can target
+# multiple accelerators (GPU, TPU, etc...) and differentiate through it with Enzyme.
 #
 # ### Why Reactant?
 #
-# Reactant traces Julia code into an intermediate representation (StableHLO) that
-# XLA can optimize and Enzyme can differentiate.  The key requirement is that the
-# model lives on `ReactantState` — Reactant's architecture — so that all arrays
-# are XLA buffers.  We therefore rebuild the *same* physical setup on a new grid
-# whose architecture is `ReactantState()`.  Everything else — domain, resolution,
-# thermodynamic constants, wind profile, perturbation shape — is identical.
+# Reactant traces Julia code into an intermediate representation (StableHLO) that XLA can
+# optimize and Enzyme can differentiate.  The key requirement is that the model lives on
+# [`ReactantState`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Architectures.ReactantState)
+# — Reactant's architecture in Oceananigans — so that all arrays are XLA buffers.  We
+# therefore rebuild the *same* physical setup on a new grid whose architecture is
+# `ReactantState()`.  Everything else — domain, resolution, thermodynamic constants, wind
+# profile, perturbation shape — is identical.
 
 using CUDA       # required for Reactant extension loading
 using Reactant
@@ -443,5 +445,3 @@ Colorbar(fig_fd[1, 5], hm3; label="log₁₀(|FD−AD|/|FD|)")
 
 save("acoustic_wave_fd_comparison.png", fig_fd; px_per_unit=2) #src
 fig_fd
-
-nothing #hide
