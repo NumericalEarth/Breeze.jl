@@ -191,6 +191,57 @@ end
 end
 
 """
+    melting_ventilation(vent, vent_e, m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v)
+
+Compute per-particle ventilation integral C(D) × f_v(D) for melting,
+blending ice (0.65, 0.44) and rain (0.78, 0.28) ventilation coefficients
+weighted by liquid fraction Fl.
+
+Table path falls back to ice-only ventilation; full Fl-blended table entries
+(f1pr24–f1pr27) require new table generation.
+
+Analytical path applies the Fortran Fl-blended formula (H10):
+
+```math
+f_v = [(1-F_l) \\times 0.65 + F_l \\times 0.78]
+    + [(1-F_l) \\times 0.44 \\times Re_{ice} + F_l \\times 0.28 \\times Re_{rain}] \\times Sc^{1/3}
+```
+"""
+@inline function melting_ventilation(vent::TabulatedFunction4D,
+                                       vent_e::TabulatedFunction4D,
+                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v)
+    FT = typeof(m_mean)
+    log_m = log10(max(m_mean, FT(1e-20)))
+    # Table path: Fl-blended entries not yet generated; fall back to ice-only (Fˡ = 0)
+    Fˡ = zero(FT)
+    return vent(log_m, Fᶠ, Fˡ, ρᶠ) + ventilation_sc_correction(nu, D_v) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ)
+end
+
+@inline function melting_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
+                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v)
+    FT = typeof(m_mean)
+    ρ_eff_unrimed = prp.ice_effective_density_unrimed
+    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
+    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
+    D_threshold = prp.ice_diameter_threshold
+    # P3 Fortran convention: capm = cap × D
+    C = ifelse(D_mean < D_threshold, D_mean, FT(0.48) * D_mean)
+    # Ice fall speed (matching deposition_ventilation)
+    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
+    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
+    V_ice = a_V * D_mean^b_V
+    # Rain fall speed at same diameter (liquid-coated particle approaching full melt)
+    V_rain = prp.rain_fall_speed_coefficient * D_mean^prp.rain_fall_speed_exponent
+    Sc = nu / max(D_v, FT(1e-30))
+    Re_ice  = sqrt(V_ice  * D_mean / max(nu, FT(1e-30)))
+    Re_rain = sqrt(V_rain * D_mean / max(nu, FT(1e-30)))
+    # Fortran: blend ice (0.65/0.44) and rain (0.78/0.28) by liquid fraction Fl
+    f_v = ((1 - Fl) * FT(0.65) + Fl * FT(0.78)) +
+          ((1 - Fl) * FT(0.44) * Re_ice + Fl * FT(0.28) * Re_rain) * cbrt(Sc)
+    return C * f_v
+end
+
+"""
     collection_kernel_per_particle(coll, m_mean, Fᶠ, ρᶠ, prp)
 
 Compute per-particle collection kernel ⟨A × V⟩ for riming.
@@ -546,6 +597,16 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     bᶠ = ℳ.bᶠ
     qʷⁱ = ℳ.qʷⁱ
 
+    # H4: Rain DSD lambda bounds and Nr adjustment (Fortran get_rain_dsd2).
+    # When λ_r hits DSD bounds, recompute nʳ to stay mass-consistent with qʳ.
+    # λ_r = (π ρ_w nʳ / qʳ)^(1/3)  →  nʳ = qʳ λ_r³ / (π ρ_w)
+    rain_active = (qʳ > FT(1e-14)) & (nʳ > FT(1e-16))
+    qʳ_pos = clamp_positive(qʳ)
+    nʳ_pos = clamp_positive(nʳ)
+    λ_r = clamp(cbrt(FT(π) * prp.liquid_water_density * nʳ_pos / max(qʳ_pos, FT(1e-20))),
+                prp.rain_lambda_min, prp.rain_lambda_max)
+    nʳ = ifelse(rain_active, qʳ_pos * λ_r^3 / (FT(π) * prp.liquid_water_density), nʳ)
+
     # Rime properties
     Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))
     ρᶠ = safe_divide(qᶠ, bᶠ, FT(400))
@@ -630,7 +691,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     shed = shedding_rate(p3, qʷⁱ, qⁱ, T)
     shed_n = shedding_number_rate(p3, shed)
-    refrz = refreezing_rate(p3, qʷⁱ, T)
+    refrz = refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
 
     # =========================================================================
     # Ice nucleation (deposition nucleation and immersion freezing)

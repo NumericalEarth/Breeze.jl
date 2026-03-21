@@ -566,3 +566,96 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
     return rate
 end
+
+"""
+    refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+
+Compute refreezing rate of liquid on ice using the heat-balance formula.
+
+Below freezing, liquid coating on ice particles refreezes. The rate is
+determined by the heat flux at the particle surface:
+
+```math
+\\frac{dm}{dt} = \\frac{2\\pi C f_v}{L_f} [K_a(T_0-T) + L_s D_v (\\rho_{vs} - \\rho_v)]
+```
+
+This mirrors the melting formula with reversed temperature gradient.
+See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
+
+# Arguments
+- `p3`: P3 microphysics scheme
+- `qʷⁱ`: Liquid water on ice [kg/kg]
+- `qⁱ`: Ice mass fraction [kg/kg]
+- `nⁱ`: Ice number concentration [1/kg]
+- `T`: Temperature [K]
+- `P`: Pressure [Pa] (unused; reserved for future transport recomputation)
+- `qᵛ`: Vapor mass fraction [kg/kg]
+- `Fᶠ`: Rime fraction [-]
+- `ρᶠ`: Rime density [kg/m³]
+- `ρ`: Air density [kg/m³]
+- `constants`: Thermodynamic constants (or `nothing` for Fortran-matched hardcoded values)
+- `transport`: Pre-computed air transport properties `(; D_v, K_a, nu)`
+
+# Returns
+- Rate of liquid → ice refreezing [kg/kg/s]
+"""
+@inline function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+    FT = typeof(qʷⁱ)
+    prp = p3.process_rates
+
+    qʷⁱ_eff = clamp_positive(qʷⁱ)
+    qⁱ_eff  = clamp_positive(qⁱ)
+    nⁱ_eff  = clamp_positive(nⁱ)
+
+    T₀ = prp.freezing_temperature
+    below_freezing = T < T₀
+    ΔT = T₀ - T  # positive when below freezing
+
+    L_f = fusion_latent_heat(constants, T)
+    L_s = sublimation_latent_heat(constants, T)
+    thermodynamic_constants = isnothing(constants) ? ThermodynamicConstants(FT) : constants
+    Rᵛ = FT(vapor_gas_constant(thermodynamic_constants))
+
+    K_a = transport.K_a
+    D_v = transport.D_v
+    nu  = transport.nu
+
+    # Saturation vapor density at T₀ (liquid surface at melting point)
+    e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
+    ρ_vs = e_s0 / (Rᵛ * T₀)
+
+    # Ambient vapor density
+    ρ_v = qᵛ * ρ
+
+    # Mean ice particle mass
+    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+
+    # Ventilation integral (ice-particle capacitance; same path as deposition)
+    C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
+                                    p3.ice.deposition.ventilation_enhanced,
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
+
+    # Heat balance for refreezing:
+    # Conductive: K_a × (T₀ - T) removes heat from liquid → promotes freezing
+    Q_sensible = K_a * ΔT
+
+    # Vapor: L_s × D_v × (ρ_vs - ρ_v)
+    # Subsaturated (ρ_vs > ρ_v): evaporation cools particle → promotes freezing
+    # Supersaturated (ρ_vs < ρ_v): condensation warms particle → opposes freezing
+    Q_latent = L_s * D_v * (ρ_vs - ρ_v)
+
+    # Only refreeze when net heat balance favors it
+    Q_total = clamp_positive(Q_sensible + Q_latent)
+
+    # Uses 2π (Fortran capm = cap × D convention: 2× physical capacitance)
+    dm_dt_refrz = FT(2π) * C_fv * Q_total / L_f
+
+    refrz_rate = nⁱ_eff * dm_dt_refrz
+
+    # Limit to available liquid on ice
+    τ_safety = FT(1)  # [s]
+    max_refrz = qʷⁱ_eff / τ_safety
+    refrz_rate = min(refrz_rate, max_refrz)
+
+    return ifelse(below_freezing, refrz_rate, zero(FT))
+end

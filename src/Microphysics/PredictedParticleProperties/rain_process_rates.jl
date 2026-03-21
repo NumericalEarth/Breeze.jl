@@ -97,17 +97,20 @@ end
 """
     rain_breakup_rate(p3, qʳ, nʳ, self_collection)
 
-Compute rain breakup rate following [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
+Compute rain breakup rate following Fortran P3 v5.5.0.
 
 Large rain drops spontaneously break up into smaller fragments, producing
-a number source that counterbalances self-collection. Uses a three-piece
-function of the volume-mean drop diameter ``D_r``:
+a number source that counterbalances self-collection. Uses a two-piece
+function of ``D_r = (q_r / (π ρ_w n_r))^{1/3} = 1/λ_r`` (Fortran convention,
+no factor of 6; this equals the mean-mass diameter for an exponential DSD):
 
-1. ``D_r < D_{th}`` (0.35 mm): No effect (``Φ_{br} = -1``)
-2. ``D_{th} ≤ D_r ≤ D_{eq}`` (0.35–0.9 mm): Linear transition
-3. ``D_r > D_{eq}`` (0.9 mm): Exponential breakup dominates
+1. ``D_r < D_{th}``: No breakup effect (``dum = 1``, breakup = 0)
+2. ``D_r ≥ D_{th}``: ``dum = 2 - \\exp(κ_{br} (D_r - D_{th}))``, breakup > 0
 
-The breakup rate is ``-(Φ_{br} + 1) \\times`` self-collection rate.
+The breakup rate is ``(1 - dum) \\times`` self-collection rate.
+
+Note: ``D_r`` here uses the Fortran 1/λ_r convention (no factor of 6), which
+is smaller than the physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -125,33 +128,25 @@ The breakup rate is ``-(Φ_{br} + 1) \\times`` self-collection rate.
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = clamp_positive(nʳ)
 
-    # Volume-mean drop diameter: D_r = (6 qʳ / (π ρ_w nʳ))^(1/3)
+    # Fortran P3 convention: D_r = (qr / (π ρ_w nr))^(1/3) = 1/λ_r
+    # (no factor of 6; this is the exponential-DSD mean diameter at μ=0)
     ρ_water = prp.liquid_water_density
     mean_mass = safe_divide(qʳ_eff, nʳ_eff, FT(1e-10))
-    D_r = cbrt(FT(6) * mean_mass / (FT(π) * ρ_water))
+    D_r = cbrt(mean_mass / (FT(π) * ρ_water))
 
-    # NOTE (M8): This 2.5mm clamp is Breeze-specific (not in Fortran P3 v5.5.0).
-    # Fortran allows D_r to grow unbounded before applying the breakup function.
-    # The clamp prevents extreme exponential breakup rates exp(κ_br × ΔD) when
-    # numerical transients produce momentarily large D_r.
-    D_r = min(D_r, FT(2.5e-3))
-
-    # Three-piece breakup function (Seifert & Beheng 2006, Eq. 13)
-    D_eq = prp.rain_breakup_diameter_threshold  # 0.9mm: equilibrium diameter
+    # Two-piece breakup function (Fortran P3 v5.5.0)
+    D_th = prp.rain_breakup_diameter_threshold  # 280 μm: breakup threshold (1/λ_r convention)
     κ_br = prp.rain_breakup_coefficient         # 2300 m⁻¹: exponential coefficient
-    D_th = FT(0.35e-3)                          # transition diameter
-    k_br = FT(1000)                             # linear coefficient [1/m]
-    ΔD = D_r - D_eq
 
-    Φ_br = ifelse(D_r < D_th,
-                   FT(-1),
-                   ifelse(D_r ≤ D_eq,
-                          k_br * ΔD,
-                          FT(2) * (exp(κ_br * ΔD) - FT(1))))
+    dum = ifelse(D_r < D_th,
+                  FT(1),
+                  FT(2) - exp(κ_br * (D_r - D_th)))
 
-    # Breakup rate: (Φ_br + 1) × self_collection (Eq. 13 from SB2006)
+    # Breakup rate: (1 - dum) × self_collection
+    # When D_r < D_th: dum=1 → breakup=0 (no effect)
+    # When D_r ≥ D_th: dum < 1 → breakup > 0 (number source)
     # self_collection is positive magnitude (M7); breakup is positive (number source).
-    return (Φ_br + FT(1)) * self_collection
+    return (FT(1) - dum) * self_collection
 end
 
 """

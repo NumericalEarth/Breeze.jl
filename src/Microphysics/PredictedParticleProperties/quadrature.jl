@@ -784,7 +784,7 @@ end
 # WARNING: This single-integral integrand uses the Wisner (1972) approximation
 # (V × A × N'²) which has different magnitude than the double integral stored
 # in tables. Do NOT use evaluate(AggregationNumber(), state) for runtime
-# computation — use aggregation_kernel() dispatch instead.
+# computation — use _aggregation_kernel() dispatch instead.
 # For tabulation, evaluate_quadrature is specialized to compute the full double integral.
 @inline function integrand(::AggregationNumber, D, state::IceSizeDistributionState, thresholds)
     V = terminal_velocity(D, state, thresholds)

@@ -32,9 +32,9 @@ struct ProcessRateParameters{FT}
     accretion_coefficient :: FT              # k₂ [s⁻¹]
     accretion_exponent :: FT                 # α [-]
 
-    # Rain self-collection and breakup (Seifert-Beheng 2001, 2006)
+    # Rain self-collection and breakup (Seifert-Beheng 2001; Fortran P3 v5.5.0 breakup)
     self_collection_coefficient :: FT        # k_rr [-]
-    rain_breakup_diameter_threshold :: FT    # D_eq threshold for breakup [m]
+    rain_breakup_diameter_threshold :: FT    # D_th threshold for breakup [m] (1/λ_r convention)
     rain_breakup_coefficient :: FT           # κ_br [1/m]
 
     # Evaporation/sublimation timescales
@@ -204,7 +204,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Rain self-collection and breakup
         self_collection_coefficient = 5.78,
-        rain_breakup_diameter_threshold = 0.9e-3,
+        rain_breakup_diameter_threshold = 280e-6,  # 280 μm: Fortran P3 breakup threshold (1/λ_r convention)
         rain_breakup_coefficient = 2300.0,
 
         # Timescales

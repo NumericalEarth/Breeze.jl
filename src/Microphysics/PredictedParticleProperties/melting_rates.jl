@@ -43,7 +43,7 @@ where:
 # Returns
 - Rate of ice → rain conversion [kg/kg/s]
 """
-@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+@inline function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
                                    constants, transport)
     FT = typeof(qⁱ)
     prp = p3.process_rates
@@ -81,11 +81,16 @@ where:
     # Mean particle properties
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
 
-    # Ventilation integral C(D) × f_v(D): dispatches to PSD-integrated
-    # table or mean-mass path depending on p3.ice.deposition type.
-    C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
-                                    p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
+    # H10: Liquid fraction for Fl-blended ventilation.
+    # Fl = qʷⁱ / (qⁱ + qʷⁱ): fraction of ice-particle mass that is liquid.
+    qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(1e-20))
+    Fl = clamp_positive(qʷⁱ) / qⁱ_total
+
+    # H10: Ventilation integral C(D) × f_v(D) with Fl-blended ice/rain coefficients.
+    # Dispatches to PSD-integrated table or mean-mass path.
+    C_fv = melting_ventilation(p3.ice.deposition.ventilation,
+                                p3.ice.deposition.ventilation_enhanced,
+                                m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v)
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: K_a × (T - T₀)
@@ -118,6 +123,13 @@ where:
     melt_rate = min(melt_rate, max_melt)
 
     return ifelse(is_melting, melt_rate, zero(FT))
+end
+
+# Backward-compatible: no liquid fraction provided; assumes pure ice (Fl = 0)
+@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+                                   constants, transport)
+    FT = typeof(qⁱ)
+    return ice_melting_rate(p3, qⁱ, nⁱ, zero(FT), T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
 end
 
 # Backward-compatible: explicit transport, hardcoded latent heats
@@ -167,8 +179,8 @@ particle reaches this capacity, additional meltwater sheds to rain.
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
-    # Get total melting rate
-    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
+    # Get total melting rate (H10: pass qʷⁱ for Fl-blended ventilation)
+    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
 
     # Maximum liquid fraction capacity (Milbrandt et al. 2025):
     # default 0.3 (30% liquid by mass) from ProcessRateParameters.
