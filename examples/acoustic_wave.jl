@@ -371,10 +371,8 @@ scatter!(ax_sens, [x_target], [z_target]; color = :black, marker = :star5,
 axislegend(ax_sens; position = :rt)
 Colorbar(fig_sens[1, 2], hm; label = "∂J/∂ρ′₀")
 
-save("acoustic_wave_sensitivity.png", fig_sens; px_per_unit = 2)
-@info "Saved acoustic_wave_sensitivity.png"
-
-nothing #hide
+save("acoustic_wave_sensitivity.png", fig_sens; px_per_unit = 2) #src
+fig_sens
 
 # ## Finite-difference verification
 #
@@ -443,7 +441,7 @@ hm3 = heatmap!(ax3, xs_c, zs_c, log_rel; colormap=:inferno)
 scatter!(ax3, [x_target], [z_target]; color=:white, marker=:star5, markersize=12)
 Colorbar(fig_fd[1, 5], hm3; label="log₁₀(|FD−AD|/|FD|)")
 
-save("acoustic_wave_fd_comparison.png", fig_fd; px_per_unit=2)
-@info "Saved acoustic_wave_fd_comparison.png"
+save("acoustic_wave_fd_comparison.png", fig_fd; px_per_unit=2) #src
+fig_fd
 
 nothing #hide
