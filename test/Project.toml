@@ -22,6 +22,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 Breeze = {path = ".."}
+Reactant = {url = "https://github.com/EnzymeAD/Reactant.jl.git", rev = "9cfca0c417dca2768b70ece0b342bf9aa08098ba"}
 
 [compat]
 Adapt = "4.3.0"
