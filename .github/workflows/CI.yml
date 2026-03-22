@@ -28,7 +28,8 @@ permissions:
 env:
   # Don't make Reactant occupy all the GPU memory
   XLA_REACTANT_GPU_PREALLOCATE: 'false'
-  JULIA_PKG_SERVER_REGISTRY_PREFERENCE: eager
+  JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
+  JULIA_PKG_SERVER: ''
 
 jobs:
   test:
@@ -84,7 +85,7 @@ jobs:
           # caches pkgimages and such, so we don't need to cache here most things.  Only
           # useful thing is the scratchspaces, in particular ParallelTestRunner's to make
           # scheduling of test jobs more efficients.
-          cache-artifacts: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+          cache-artifacts: false
           cache-packages: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
           cache-registries: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
           cache-compiled: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}

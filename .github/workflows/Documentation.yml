@@ -25,7 +25,8 @@ env:
   BREEZE_LABEL_BUILD_ALL_EXAMPLES: 'build all examples 🏗️'
   # Don't make Reactant occupy all the GPU memory
   XLA_REACTANT_GPU_PREALLOCATE: 'false'
-  JULIA_PKG_SERVER_REGISTRY_PREFERENCE: eager
+  JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
+  JULIA_PKG_SERVER: ''
 
 jobs:
   build-docs:
@@ -98,6 +99,8 @@ jobs:
         with:
           version: "1.12.5"
       - uses: julia-actions/cache@v3
+        with:
+          cache-registries: false
       - uses: actions/download-artifact@v8
         with:
           name: documentation-build

@@ -23,7 +23,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  JULIA_PKG_SERVER_REGISTRY_PREFERENCE: eager
+  JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
+  JULIA_PKG_SERVER: ''
 
 # needed to allow julia-actions/cache to delete old caches that it has created
 permissions:
@@ -48,6 +49,8 @@ jobs:
         with:
           version: ${{ matrix.version }}
       - uses: julia-actions/cache@v3
+        with:
+          cache-registries: false
       - name: Instantiate examples environment
         shell: julia --color=yes --project=examples {0}
         run: |
