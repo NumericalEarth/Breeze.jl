@@ -217,7 +217,8 @@ end
     ρn, ρq = pairs[1]
     @inbounds ρn_val = ρn[i, j, k]
     @inbounds ρn[i, j, k] = ifelse(ρq[i, j, k] <= 0, zero(ρn_val), ρn_val)
-    zero_orphaned_numbers!(i, j, k, Base.tail(pairs))
+    zero_orphaned_numbers!(i, j, k, Base.tail(pairs))\
+    return nothing
 end
 
 @inline zero_orphaned_numbers!(i, j, k, ::Tuple{}) = nothing
