@@ -346,7 +346,7 @@ fs_tab = tabulate(fs, CPU(), params)
 
 println("Tabulated fall speed integrals:")
 println("  Table summary: $(summary(fs_tab.number_weighted))")
-println("  Sample value: $(fs_tab.number_weighted.table[5, 2, 1])")
+println("  Sample value: $(fs_tab.number_weighted.table[5, 2, 1, 3])")
 ```
 
 ## Summary

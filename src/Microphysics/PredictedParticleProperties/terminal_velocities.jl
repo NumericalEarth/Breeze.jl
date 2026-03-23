@@ -372,7 +372,7 @@ This is a performance convenience wrapper over the individual
 `ice_terminal_velocity_reflectivity_weighted` functions. The individual functions
 remain available for cases where only one velocity is needed.
 
-See [Heymsfield et al. (2006)](@cite Heymsfield2006) for the density correction exponent
+See [Heymsfield et al. (2006)](@cite HeymsfieldEtAl2006) for the density correction exponent
 and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) for the P3 fall
 speed framework.
 
