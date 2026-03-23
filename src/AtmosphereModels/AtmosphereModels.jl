@@ -31,6 +31,12 @@ export
     moisture_specific_name,
     specific_prognostic_moisture,
 
+    # Negative moisture correction types
+    AbstractNegativeMoistureCorrection,
+    VerticalBorrowing,
+    SpeciesBorrowing,
+    AbstractNumberConcentrationCategories,
+
     # Microphysics interface
     AbstractMicrophysicalState,
     NothingMicrophysicalState,

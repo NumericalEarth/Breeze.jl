@@ -11,7 +11,6 @@ export
     ConstantRateCondensateFormation,
     NonEquilibriumCloudFormation,
     BulkMicrophysics,
-    VerticalBorrowing,
     FourCategories,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,

@@ -129,7 +129,7 @@ Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) 
     parameterization for mixed-phase clouds. Part 1: Model description.
     Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
 """
-struct TwoMomentCategories{W, AP, LV, RV, AA, TL}
+struct TwoMomentCategories{W, AP, LV, RV, AA, TL} <: AbstractNumberConcentrationCategories
     warm_processes :: W
     air_properties :: AP
     cloud_liquid_fall_velocity :: LV

@@ -9,16 +9,6 @@ using ..Thermodynamics:
 """
 $(TYPEDEF)
 
-Correct negative moisture produced by advection via same-level borrowing
-and vertical redistribution at each time step.
-
-See [`fix_negative_moisture!`](@ref Breeze.AtmosphereModels.fix_negative_moisture!) for details.
-"""
-struct VerticalBorrowing end
-
-"""
-$(TYPEDEF)
-
 Bulk microphysics scheme with cloud formation and precipitation categories.
 
 # Fields
@@ -29,7 +19,8 @@ Bulk microphysics scheme with cloud formation and precipitation categories.
   - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom (zero terminal velocity at surface)
 - `negative_moisture_correction`: Correction scheme for negative moisture produced by advection.
   - `nothing` (default): No correction
-  - `VerticalBorrowing()`: Same-level borrowing and vertical redistribution
+  - `SpeciesBorrowing()`: Same-level species borrowing only
+  - `SpeciesBorrowing(vertical_borrowing=VerticalBorrowing())`: Species borrowing with vertical redistribution
 """
 struct BulkMicrophysics{N, C, B, NMC}
     cloud_formation :: N
@@ -45,7 +36,7 @@ end
 AtmosphereModels.microphysics_model_update!(bμp::BulkMicrophysics, model) =
     AtmosphereModels.microphysics_model_update!(bμp.cloud_formation, model)
 
-AtmosphereModels.negative_moisture_correction(bμp::BulkMicrophysics) = bμp.negative_moisture_correction !== nothing
+AtmosphereModels.negative_moisture_correction(bμp::BulkMicrophysics) = bμp.negative_moisture_correction
 
 Base.summary(::BulkMicrophysics) = "BulkMicrophysics"
 
@@ -207,7 +198,8 @@ Return a `BulkMicrophysics` microphysics scheme.
   - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom
 - `negative_moisture_correction`: Correction scheme for negative moisture produced by advection.
   - `nothing` (default): No correction
-  - `VerticalBorrowing()`: Same-level borrowing and vertical redistribution
+  - `SpeciesBorrowing()`: Same-level species borrowing only
+  - `SpeciesBorrowing(vertical_borrowing=VerticalBorrowing())`: Species borrowing with vertical redistribution
 """
 function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                           categories = nothing,
