@@ -25,6 +25,7 @@ env:
   BREEZE_LABEL_BUILD_ALL_EXAMPLES: 'build all examples 🏗️'
   # Don't make Reactant occupy all the GPU memory
   XLA_REACTANT_GPU_PREALLOCATE: 'false'
+  JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
 
 jobs:
   build-docs:
