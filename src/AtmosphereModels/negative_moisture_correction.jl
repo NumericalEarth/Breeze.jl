@@ -227,11 +227,8 @@ end
 #####
 
 # Clamp negative number concentrations to zero
-@inline function clamp_negative_numbers!(i, j, k, fields::Tuple{F, Vararg}) where {F}
-    ρn = fields[1]
-    @inbounds ρn_val = ρn[i, j, k]
-    @inbounds ρn[i, j, k] = max(0, ρn_val)
-    clamp_negative_numbers!(i, j, k, Base.tail(fields))
+@inline function clamp_negative_numbers!(i, j, k, fields)
+    for f in fields
+        @inbounds f[i, j, k] = max(0, f[i, j, k])
+    end
 end
-
-@inline clamp_negative_numbers!(i, j, k, ::Tuple{}) = nothing
