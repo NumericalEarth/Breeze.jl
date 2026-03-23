@@ -231,7 +231,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Shedding
         shedding_timescale = 60.0,
         maximum_liquid_fraction = 0.3,
-        shed_drop_mass = 5.2e-7,
+        shed_drop_mass = 1 / 1.928e6,
 
         # Refreezing
         refreezing_timescale = 30.0,

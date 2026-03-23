@@ -717,7 +717,7 @@ end
 # where 0.1892 ≈ π⁵|K_w|²/λ⁴ Rayleigh prefactor
 @inline function integrand(::Reflectivity, D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
-    ρ_ice = FT(917)
+    ρ_ice = FT(916.7)
     K_refl = FT(0.1892) * (6 / (FT(π) * ρ_ice))^2
     m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
@@ -747,7 +747,7 @@ The density is computed from the mass and volume:
 ρ_eff(D) = m(D) / V(D) = m(D) / [(π/6) D³]
 
 This gives regime-dependent effective densities:
-- Small spherical ice: ρ_eff = ρᵢ = 917 kg/m³
+- Small spherical ice: ρ_eff = ρᵢ = 900 kg/m³
 - Aggregates: ρ_eff = 6α D^(β-3) / π (decreases with size for β < 3)
 - Graupel: ρ_eff = ρ_g
 - Partially rimed: ρ_eff = 6α D^(β-3) / [π(1-Fᶠ)]

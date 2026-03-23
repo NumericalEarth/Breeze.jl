@@ -50,7 +50,7 @@ their properties evolve continuously without discrete category jumps.
 
 - `coefficient`: α in m(D) = α D^β [kg/m^β], default 0.0121
 - `exponent`: β in m(D) = α D^β [-], default 1.9
-- `ice_density`: Pure ice density [kg/m³], default 917
+- `ice_density`: Pure ice density [kg/m³], default 900
 
 # References
 
@@ -60,7 +60,7 @@ supplementary material, based on aircraft observations.
 function IceMassPowerLaw(FT = Oceananigans.defaults.FloatType;
                          coefficient = 0.0121,
                          exponent = 1.9,
-                         ice_density = 917)
+                         ice_density = 900)
     return IceMassPowerLaw(FT(coefficient), FT(exponent), FT(ice_density))
 end
 

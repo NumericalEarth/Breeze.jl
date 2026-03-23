@@ -322,7 +322,7 @@ function normalize_integral(::EffectiveRadius, raw_mass, mean_particle_mass, sta
         Np = size_distribution(D, state)
         area_integral += w * A * Np * J
     end
-    ρ_ice = FT(917)  # Pure ice density [kg/m³]
+    ρ_ice = FT(916.7)  # Pure ice density [kg/m³]
     return 3 * raw_mass / (4 * ρ_ice * max(area_integral, eps(FT)))
 end
 
