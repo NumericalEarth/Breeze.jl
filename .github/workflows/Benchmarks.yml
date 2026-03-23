@@ -22,7 +22,6 @@ env:
   # Don't make Reactant occupy all the GPU memory
   XLA_REACTANT_GPU_PREALLOCATE: 'false'
   JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
-  JULIA_PKG_SERVER: ''
 
 jobs:
   run-benchmarks:
