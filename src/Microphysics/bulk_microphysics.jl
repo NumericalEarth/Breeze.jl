@@ -12,7 +12,7 @@ $(TYPEDEF)
 Correct negative moisture produced by advection via same-level borrowing
 and vertical redistribution at each time step.
 
-See [`correct_negative_moisture!`](@ref Breeze.AtmosphereModels.correct_negative_moisture!) for details.
+See [`fix_negative_moisture!`](@ref Breeze.AtmosphereModels.fix_negative_moisture!) for details.
 """
 struct VerticalBorrowing end
 

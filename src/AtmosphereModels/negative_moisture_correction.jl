@@ -80,13 +80,13 @@ prognostics are moist-conserved variables.
 The borrowing chain is defined by [`correction_moisture_fields`](@ref), which
 microphysics schemes extend to specify their prognostic mass fields.
 """
-correct_negative_moisture!(model) = correct_negative_moisture!(model.microphysics, model)
+fix_negative_moisture!(model) = fix_negative_moisture!(model.microphysics, model)
 
-correct_negative_moisture!(::Nothing, model) = nothing
+fix_negative_moisture!(::Nothing, model) = nothing
 
 negative_moisture_correction(microphysics) = true
 
-function correct_negative_moisture!(microphysics, model)
+function fix_negative_moisture!(microphysics, model)
     negative_moisture_correction(microphysics) || return nothing
     moisture_fields = correction_moisture_fields(microphysics, model.microphysical_fields)
     isempty(moisture_fields) && return nothing
@@ -100,7 +100,7 @@ function correct_negative_moisture!(microphysics, model)
     number_fields = correction_number_fields(microphysics, model.microphysical_fields)
 
     launch!(arch, grid, :xy,
-            _correct_negative_moisture_column!,
+            _fix_negative_moisture_column!,
             moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid, Nz)
 
     return nothing
@@ -110,7 +110,7 @@ end
 ##### Column-wise kernel
 #####
 
-@kernel function _correct_negative_moisture_column!(moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid, Nz)
+@kernel function _fix_negative_moisture_column!(moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid, Nz)
     i, j = @index(Global, NTuple)
 
     # Phase 1: Same-level borrowing at each level
