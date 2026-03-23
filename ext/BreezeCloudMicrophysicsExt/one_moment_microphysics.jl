@@ -746,7 +746,8 @@ end
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
+   G = mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants)
+   return G.ρqᵛ
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
