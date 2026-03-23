@@ -203,6 +203,7 @@ end
     sink = ifelse(q < 0, min(-q, max(0, qᵛ)), zero(q))
     @inbounds ρq[i, j, k] += ρ * sink
     @inbounds ρqᵛᵉ[i, j, k] -= ρ * sink
+    return nothing
 end
 
 # Empty tuple: nothing to do
