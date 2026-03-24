@@ -158,7 +158,7 @@ makedocs(
     ),
     pages=[
         "Home" => "index.md",
-        # "Examples" => example_pages,
+        "Examples" => example_pages,
         "Thermodynamics" => "thermodynamics.md",
         "AtmosphereModel" => Any[
             "Diagnostics" => "atmosphere_model/diagnostics.md",
