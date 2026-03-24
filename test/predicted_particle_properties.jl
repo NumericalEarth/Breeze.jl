@@ -16,6 +16,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     TabulatedFunction1D,
     P3ProcessRates,
     compute_p3_process_rates,
+    consistent_rime_state,
     tendency_ρqᶜˡ,
     tendency_ρqʳ,
     tendency_ρnʳ,
@@ -1716,6 +1717,97 @@ using Oceananigans.Fields: interior
         # Rain dominates ice (qr > qi): H3 fix — no longer gated, rate is positive
         rate_rain_dom = rain_riming_rate(p3, FT(1e-3), FT(1e-5), ni, T_cold, Ff, ρf, ρ)
         @test rate_rain_dom > 0
+    end
+
+    @testset "Rime consistency enforcement" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        prp = p3.process_rates
+
+        function fortran_calc_bulk_rho_rime(qⁱ, qᶠ, bᶠ)
+            qᶠ = max(qᶠ, 0)
+            bᶠ = max(bᶠ, 0)
+            ρᶠ = FT(NaN)
+
+            if bᶠ >= FT(1e-15)
+                ρᶠ = qᶠ / bᶠ
+                if ρᶠ < prp.minimum_rime_density
+                    ρᶠ = prp.minimum_rime_density
+                    bᶠ = qᶠ / ρᶠ
+                elseif ρᶠ > prp.maximum_rime_density
+                    ρᶠ = prp.maximum_rime_density
+                    bᶠ = qᶠ / ρᶠ
+                end
+            else
+                qᶠ = 0
+                bᶠ = 0
+                ρᶠ = 0
+            end
+
+            if qᶠ < p3.minimum_mass_mixing_ratio
+                qᶠ = 0
+                bᶠ = 0
+            elseif qᶠ > max(qⁱ, 0) && ρᶠ > 0
+                qᶠ = max(qⁱ, 0)
+                bᶠ = qᶠ / ρᶠ
+            end
+
+            return (; qᶠ, bᶠ, ρᶠ)
+        end
+
+        no_volume = consistent_rime_state(p3, FT(1e-4), FT(1e-5), FT(1e-16))
+        @test no_volume.qᶠ == 0
+        @test no_volume.bᶠ == 0
+        @test no_volume.ρᶠ == 0
+        @test no_volume.Fᶠ == 0
+
+        tiny_rime = consistent_rime_state(p3, FT(1e-4), FT(5e-15), FT(1e-15))
+        @test tiny_rime.qᶠ == 0
+        @test tiny_rime.bᶠ == 0
+
+        low_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-6))
+        @test low_density.ρᶠ == prp.minimum_rime_density
+        @test low_density.bᶠ ≈ low_density.qᶠ / prp.minimum_rime_density
+
+        high_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-8))
+        @test high_density.ρᶠ == prp.maximum_rime_density
+        @test high_density.bᶠ ≈ high_density.qᶠ / prp.maximum_rime_density
+
+        capped = consistent_rime_state(p3, FT(1e-5), FT(2e-5), FT(5e-8))
+        @test capped.qᶠ == FT(1e-5)
+        @test capped.ρᶠ ≈ FT(400)
+        @test capped.bᶠ ≈ capped.qᶠ / capped.ρᶠ
+        @test capped.Fᶠ == 1
+
+        ρ = FT(1.0)
+        μ = (
+            ρqᶜˡ = FT(0),
+            ρqʳ = FT(0),
+            ρnʳ = FT(0),
+            ρqⁱ = ρ * FT(1e-5),
+            ρnⁱ = ρ * FT(1e5),
+            ρqᶠ = ρ * FT(2e-5),
+            ρbᶠ = ρ * FT(5e-8),
+            ρzⁱ = ρ * FT(1e-10),
+            ρqʷⁱ = FT(0),
+        )
+        ℳ = Breeze.AtmosphereModels.microphysical_state(p3, ρ, μ, nothing, nothing)
+        @test ℳ.qᶠ == FT(1e-5)
+        @test ℳ.bᶠ ≈ FT(2.5e-8)
+
+        for (qⁱ, qᶠ, bᶠ) in (
+            (FT(1e-4), FT(1e-5), FT(1e-16)),
+            (FT(1e-4), FT(5e-15), FT(1e-15)),
+            (FT(1e-4), FT(2e-5), FT(2e-6)),
+            (FT(1e-4), FT(2e-5), FT(2e-8)),
+            (FT(1e-5), FT(2e-5), FT(5e-8)),
+        )
+            got = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
+            ref = fortran_calc_bulk_rho_rime(qⁱ, qᶠ, bᶠ)
+            @test got.qᶠ == ref.qᶠ
+            @test got.bᶠ ≈ ref.bᶠ
+            @test got.ρᶠ ≈ ref.ρᶠ
+        end
     end
 
     @testset "compute_p3_process_rates integration" begin

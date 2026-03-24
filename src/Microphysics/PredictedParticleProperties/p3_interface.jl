@@ -199,16 +199,17 @@ Build a [`P3MicrophysicalState`](@ref) from density-weighted prognostic variable
 P3 is a non-equilibrium scheme, so all cloud and precipitation variables come
 from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
 """
-@inline function AM.microphysical_state(::P3, ρ, μ, 𝒰, velocities)
+@inline function AM.microphysical_state(p3::P3, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
     qʳ  = μ.ρqʳ / ρ
     nʳ  = μ.ρnʳ / ρ
     qⁱ  = μ.ρqⁱ / ρ
     nⁱ  = μ.ρnⁱ / ρ
-    qᶠ  = μ.ρqᶠ / ρ
-    bᶠ  = μ.ρbᶠ / ρ
     zⁱ  = μ.ρzⁱ / ρ
     qʷⁱ = μ.ρqʷⁱ / ρ
+    rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ)
+    qᶠ  = rime_state.qᶠ
+    bᶠ  = rime_state.bᶠ
     return P3MicrophysicalState(qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ)
 end
 
@@ -229,7 +230,11 @@ After the moisture refactor, vapor is the prognostic moisture variable.
 The diagnostic `qᵛ` field is updated from the thermodynamic state.
 """
 @inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
-    FT = typeof(ρ)
+    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ)
+    qᶠ = rime_state.qᶠ
+    bᶠ = rime_state.bᶠ
+    Fᶠ = rime_state.Fᶠ
+    ρᶠ = rime_state.ρᶠ
 
     @inbounds μ.qᵛ[i, j, k]  = 𝒰.moisture_mass_fractions.vapor
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
@@ -237,14 +242,10 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.nʳ[i, j, k]  = ℳ.nʳ
     @inbounds μ.qⁱ[i, j, k]  = ℳ.qⁱ
     @inbounds μ.nⁱ[i, j, k]  = ℳ.nⁱ
-    @inbounds μ.qᶠ[i, j, k]  = ℳ.qᶠ
-    @inbounds μ.bᶠ[i, j, k]  = ℳ.bᶠ
+    @inbounds μ.qᶠ[i, j, k]  = qᶠ
+    @inbounds μ.bᶠ[i, j, k]  = bᶠ
     @inbounds μ.zⁱ[i, j, k]  = ℳ.zⁱ
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
-
-    # Compute ice properties for terminal velocity
-    Fᶠ = safe_divide(ℳ.qᶠ, ℳ.qⁱ, zero(FT))
-    ρᶠ = safe_divide(ℳ.qᶠ, ℳ.bᶠ, FT(400))
 
     # Pre-compute terminal velocities for sedimentation (stored as negative w)
     @inbounds μ.wʳ[i, j, k]   = -rain_terminal_velocity_mass_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
@@ -341,13 +342,12 @@ end
 
 # Helper to compute P3 rates and extract ice properties from ℳ
 @inline function p3_rates_and_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    FT = typeof(ρ)
-
     # Compute all process rates from microphysical state ℳ and thermodynamic state 𝒰
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
 
-    Fᶠ = safe_divide(ℳ.qᶠ, ℳ.qⁱ, zero(FT))
-    ρᶠ = safe_divide(ℳ.qᶠ, ℳ.bᶠ, FT(400))
+    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ)
+    Fᶠ = rime_state.Fᶠ
+    ρᶠ = rime_state.ρᶠ
 
     return rates, ℳ.qⁱ, ℳ.nⁱ, ℳ.zⁱ, Fᶠ, ρᶠ
 end

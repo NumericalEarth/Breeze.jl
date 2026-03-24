@@ -62,6 +62,44 @@ end
 # Convenience overload for common case
 @inline safe_divide(a, b) = safe_divide(a, b, zero(a))
 
+"""
+    consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
+
+Apply the Fortran `calc_bulkRhoRime` consistency pass to the prognostic rime
+state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density `ρᶠ`.
+"""
+@inline function consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
+    FT = typeof(qⁱ)
+    prp = p3.process_rates
+
+    qⁱ_available = clamp_positive(qⁱ)
+    qᶠ_raw = clamp_positive(qᶠ)
+    bᶠ_raw = clamp_positive(bᶠ)
+
+    has_rime_volume = bᶠ_raw >= FT(1e-15)
+    ρᶠ_raw = safe_divide(qᶠ_raw, bᶠ_raw, zero(FT))
+    ρᶠ_bounded = clamp(ρᶠ_raw, prp.minimum_rime_density, prp.maximum_rime_density)
+
+    qᶠ_after_volume = ifelse(has_rime_volume, qᶠ_raw, zero(FT))
+    bᶠ_after_volume = ifelse(has_rime_volume,
+                             safe_divide(qᶠ_after_volume, ρᶠ_bounded, zero(FT)),
+                             zero(FT))
+    ρᶠ = ifelse(has_rime_volume, ρᶠ_bounded, zero(FT))
+
+    rime_not_small = qᶠ_after_volume >= p3.minimum_mass_mixing_ratio
+    qᶠ_after_small = ifelse(rime_not_small, qᶠ_after_volume, zero(FT))
+    bᶠ_after_small = ifelse(rime_not_small, bᶠ_after_volume, zero(FT))
+
+    exceeds_available_ice = (qᶠ_after_small > qⁱ_available) & (ρᶠ > zero(FT))
+    qᶠ_consistent = ifelse(exceeds_available_ice, qⁱ_available, qᶠ_after_small)
+    bᶠ_consistent = ifelse(exceeds_available_ice,
+                           safe_divide(qᶠ_consistent, ρᶠ, zero(FT)),
+                           bᶠ_after_small)
+    Fᶠ = safe_divide(qᶠ_consistent, qⁱ_available, zero(FT))
+
+    return (; qᶠ = qᶠ_consistent, bᶠ = bᶠ_consistent, Fᶠ, ρᶠ)
+end
+
 #####
 ##### Thermodynamic latent heat helpers (H1)
 #####
@@ -600,8 +638,6 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     nʳ = ℳ.nʳ
     qⁱ = ℳ.qⁱ
     nⁱ = ℳ.nⁱ
-    qᶠ = ℳ.qᶠ
-    bᶠ = ℳ.bᶠ
     qʷⁱ = ℳ.qʷⁱ
 
     # H4: Rain DSD lambda bounds and Nr adjustment (Fortran get_rain_dsd2).
@@ -614,9 +650,12 @@ suitable for use in GPU kernels where grid indexing is handled externally.
                 prp.rain_lambda_min, prp.rain_lambda_max)
     nʳ = ifelse(rain_active, qʳ_pos * λ_r^3 / (FT(π) * prp.liquid_water_density), nʳ)
 
-    # Rime properties
-    Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))
-    ρᶠ = safe_divide(qᶠ, bᶠ, FT(400))
+    # Rime properties (Fortran calc_bulkRhoRime consistency)
+    rime_state = consistent_rime_state(p3, qⁱ, ℳ.qᶠ, ℳ.bᶠ)
+    qᶠ = rime_state.qᶠ
+    bᶠ = rime_state.bᶠ
+    Fᶠ = rime_state.Fᶠ
+    ρᶠ = rime_state.ρᶠ
 
     # Thermodynamic state
     T = temperature(𝒰, constants)
