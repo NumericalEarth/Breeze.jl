@@ -730,7 +730,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
 
     # Rime density for new rime (use actual ice fall speed, not placeholder)
     vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
-    ρᶠ_new = rime_density(p3, T, vᵢ)
+    ρᶠ_new = rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
 
     # =========================================================================
     # Phase 2: Wet growth capacity and collection rerouting

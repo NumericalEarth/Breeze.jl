@@ -41,6 +41,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     cloud_riming_rate,
     cloud_warm_collection_rate,
     rain_riming_rate,
+    rime_density,
     P3MicrophysicalState,
     RainMassWeightedVelocityEvaluator,
     RainNumberWeightedVelocityEvaluator,
@@ -1766,6 +1767,56 @@ using Oceananigans.Fields: interior
         # Rain dominates ice (qr > qi): H3 fix — no longer gated, rate is positive
         rate_rain_dom = rain_riming_rate(p3, FT(1e-3), FT(1e-5), ni, T_cold, Ff, ρf, ρ)
         @test rate_rain_dom > 0
+    end
+
+    @testset "rime_density follows the Fortran Ri fit" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+
+        qcl = FT(1e-3)
+        cloud_rim = FT(2e-7)
+        T = FT(263.15)
+        vᵢ = FT(1.0)
+        ρ = FT(1.0)
+        P = FT(90000.0)
+        transport = air_transport_properties(T, P)
+
+        ρ_rime = rime_density(p3, qcl, cloud_rim, T, vᵢ, ρ, constants, transport)
+
+        prp = p3.process_rates
+        μ_c = p3.cloud.shape_parameter
+        Nᶜ = p3.cloud.number_concentration
+        ρ_water = prp.liquid_water_density
+
+        qcl_abs = qcl * ρ
+        μ_air = transport.nu * ρ
+        λ_c_uncapped = cbrt(
+            FT(π) * ρ_water * Nᶜ * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
+            (FT(6) * qcl_abs)
+        )
+        λ_c = clamp(λ_c_uncapped, (μ_c + 1) * FT(2.5e4), (μ_c + 1) * FT(1e6))
+        a_cn = constants.gravitational_acceleration * ρ_water / (FT(18) * μ_air)
+        Vt_qc = a_cn * (μ_c + 5) * (μ_c + 4) / λ_c^2
+        D_c = (μ_c + 4) / λ_c
+        inverse_supercooling = inv(min(FT(-0.001), T - prp.freezing_temperature))
+        Ri = clamp(-(FT(0.5e6) * D_c) * abs(vᵢ - Vt_qc) * inverse_supercooling, FT(1), FT(12))
+        expected = ifelse(
+            Ri <= FT(8),
+            (FT(0.051) + FT(0.114) * Ri - FT(0.0055) * Ri^2) * FT(1000),
+            FT(611) + FT(72.25) * (Ri - FT(8))
+        )
+
+        @test ρ_rime ≈ expected
+        @test ρ_rime != 400
+
+        T_warm = FT(278.15)
+        transport_warm = air_transport_properties(T_warm, P)
+        ρ_warm = rime_density(p3, qcl, cloud_rim, T_warm, vᵢ, ρ, constants, transport_warm)
+        @test ρ_warm == 400
+
+        ρ_no_cloud = rime_density(p3, qcl, FT(0), T, vᵢ, ρ, constants, transport)
+        @test ρ_no_cloud == 400
     end
 
     @testset "Rime consistency enforcement" begin

@@ -415,106 +415,68 @@ Compute rain number loss from riming.
 end
 
 """
-    rime_density_cober_list(p3, T, vᵢ, D_drop, D_ice, lwc)
+    rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
 
-Compute rime density using the Cober & List (1993) parameterization.
-Fortran P3 (v5.5.0) uses a simpler temperature-dependent formula.
-The Cober & List parameterization accounts for impact velocity and
-droplet size via the Stokes impact parameter.
+Compute the density of newly accreted cloud rime using the Fortran P3 Ri fit.
 
-The rime density depends on the impact conditions:
-
-```math
-ρ_f = ρ_0 × exp(a × K^b)
-```
-
-where K is a dimensionless impact parameter that depends on:
-- Impact velocity (v_i)
-- Cloud droplet diameter (D_drop)
-- Surface temperature
-
-For wet growth conditions (T > -10°C, high LWC), rime density approaches
-the density of liquid water (soaking). Disabled when `liquid_fraction_active`
-(Fortran `log_LiquidFrac=.true.`) because liquid is tracked explicitly in qʷⁱ.
+This follows the `p3_main` cloud-riming branch: diagnose the cloud gamma PSD
+from `qᶜˡ` and prescribed `Nᶜ`, compute the droplet impact speed relative to
+falling ice, form the rime-impact parameter `Ri`, and apply the same piecewise
+fit for `ρ_rime`. When cloud riming is inactive or the air is above freezing,
+the Fortran fallback value `400 kg m⁻³` is used.
 
 # Arguments
 - `p3`: P3 microphysics scheme
+- `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
+- `cloud_rim`: Cloud-riming mass tendency [kg/kg/s]
 - `T`: Temperature [K]
 - `vᵢ`: Ice particle fall speed [m/s]
-- `D_drop`: Median cloud droplet diameter [m] (default 20 μm)
-- `D_ice`: Ice particle diameter [m] (for Reynolds number)
-- `lwc`: Liquid water content [kg/m³] (for wet growth check)
+- `ρ`: Air density [kg/m³]
+- `constants`: Thermodynamic constants
+- `transport`: Air transport properties at `(T, P)`
 
 # Returns
 - Rime density [kg/m³]
-
-# References
-[Cober and List (1993)](@cite CoberList1993)
 """
-@inline function rime_density_cober_list(p3, T, vᵢ, D_drop, D_ice, lwc)
+@inline function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
     FT = typeof(T)
     prp = p3.process_rates
+    qsmall = p3.minimum_mass_mixing_ratio
 
     ρ_rim_min = prp.minimum_rime_density
     ρ_rim_max = prp.maximum_rime_density
     T₀ = prp.freezing_temperature
-    ρ_water = p3.water_density
+    ρ_water = prp.liquid_water_density
+    μ_c = p3.cloud.shape_parameter
+    Nᶜ = p3.cloud.number_concentration
 
-    # Temperature in Celsius
-    Tc = T - T₀
+    qᶜˡ_abs = clamp_positive(qᶜˡ) * ρ
+    μ_air = transport.nu * ρ
+    g = constants.gravitational_acceleration
 
-    # Clamp temperature to supercooled range
-    Tc_clamped = clamp(Tc, FT(-40), FT(0))
+    λ_c_uncapped = cbrt(
+        FT(π) * ρ_water * Nᶜ * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
+        (FT(6) * max(qᶜˡ_abs, FT(1e-20)))
+    )
+    λ_c = clamp(λ_c_uncapped, (μ_c + 1) * FT(2.5e4), (μ_c + 1) * FT(1e6))
 
-    # Impact velocity (approximately fall speed minus droplet fall speed)
-    v_impact = max(vᵢ, FT(0.1))
+    # Fortran get_cloud_dsd2 / p3_main: bcn = 2 and Γ(μ+6)/Γ(μ+4) = (μ+5)(μ+4).
+    a_cn = g * ρ_water / (FT(18) * max(μ_air, FT(1e-20)))
+    Vt_qc = a_cn * (μ_c + 5) * (μ_c + 4) / λ_c^2
+    D_c = (μ_c + 4) / λ_c
+    inverse_supercooling = inv(min(FT(-0.001), T - T₀))
+    Ri = clamp(-(FT(0.5e6) * D_c) * abs(vᵢ - Vt_qc) * inverse_supercooling, FT(1), FT(12))
 
-    # Droplet Stokes number (St = ρ_w × D_drop² × v_impact / (18 × μ × D_ice))
-    # Simplified: use dimensionless impact parameter K
-    μ = FT(1.8e-5)  # Dynamic viscosity of air [Pa·s]
-    K = ρ_water * D_drop^2 * v_impact / (18 * μ * max(D_ice, FT(1e-5)))
+    ρ_rime_Ri = ifelse(
+        Ri <= FT(8),
+        (FT(0.051) + FT(0.114) * Ri - FT(0.0055) * Ri^2) * FT(1000),
+        FT(611) + FT(72.25) * (Ri - FT(8))
+    )
 
-    # Cober & List (1993) empirical fit for dry growth regime
-    # ρ_f = 110 + 290 × (1 - exp(-1.25 × K^0.75))
-    # This asymptotes to ~400 kg/m³ for high K (dense rime/graupel)
-    # and to ~110 kg/m³ for low K (fluffy rime)
-    K_clamped = clamp(K, FT(0.01), FT(100))
-    ρ_dry = FT(110) + FT(290) * (1 - exp(-FT(1.25) * K_clamped^FT(0.75)))
-
-    # Temperature correction: slightly denser rime near 0°C
-    T_factor = 1 + FT(0.1) * (Tc_clamped + FT(40)) / FT(40)
-    ρ_dry = ρ_dry * T_factor
-
-    # Wet growth regime: when T > -10°C and high LWC
-    # Rime density approaches water density (spongy graupel).
-    # When liquid_fraction_active (Fortran log_LiquidFrac=.true.), wet growth
-    # densification is suppressed because liquid is tracked explicitly in qʷⁱ
-    # (Fortran line 3251: "Densification from wet growth turn off").
-    liquid_fraction_active = prp.liquid_fraction_active
-    is_wet_growth = !liquid_fraction_active & (Tc > FT(-10)) & (lwc > FT(0.5e-3))
-    wet_fraction = clamp((Tc + FT(10)) / FT(10), zero(FT), one(FT))
-    ρ_wet = ρ_dry * (1 - wet_fraction) + ρ_water * FT(0.8) * wet_fraction
-
-    ρᶠ = ifelse(is_wet_growth, ρ_wet, ρ_dry)
+    active_cloud_riming = (cloud_rim >= qsmall) & (qᶜˡ >= qsmall) & (T < T₀)
+    ρᶠ = ifelse(active_cloud_riming, ρ_rime_Ri, FT(400))
 
     return clamp(ρᶠ, ρ_rim_min, ρ_rim_max)
-end
-
-# Simplified version for backward compatibility
-@inline function rime_density(p3, T, vᵢ)
-    FT = typeof(T)
-    prp = p3.process_rates
-
-    ρ_rim_min = prp.minimum_rime_density
-    ρ_rim_max = prp.maximum_rime_density
-    T₀ = prp.freezing_temperature
-
-    # Default droplet and ice properties
-    D_drop = FT(20e-6)  # 20 μm cloud droplets
-    D_ice = FT(1e-3)    # 1 mm ice particle
-    lwc = FT(0.3e-3)    # 0.3 g/m³ typical LWC
-
-    return rime_density_cober_list(p3, T, vᵢ, D_drop, D_ice, lwc)
 end
 
 #####
