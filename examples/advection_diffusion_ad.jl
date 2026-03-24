@@ -95,7 +95,7 @@ CFL = 0.01      # CFL number  (Δt = CFL × Δx / U₀)
 # velocity, so the *discrete* ``\partial J/\partial U_0`` is nonzero but
 # should shrink as ``O(\Delta x^p)``.
 #
-# !!! note "``\partial J/\partial \kappa``"
+# !!! note "``∂J/∂κ``"
 #     The diffusivity ``\kappa`` enters through `ScalarDiffusivity` at
 #     model construction time, which lives **outside** the AD tape.
 #     Differentiating through it requires placing the closure inside
