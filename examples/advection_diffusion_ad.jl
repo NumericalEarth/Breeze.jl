@@ -28,9 +28,6 @@ using Enzyme
 using CairoMakie
 using Printf
 
-Reactant.set_default_backend("cpu")
-Reactant.allowscalar(true)
-
 # ## 1. The continuous PDE
 #
 # On a doubly periodic square ``\Omega = [-L/2,\,L/2]^2`` we solve the
@@ -58,7 +55,7 @@ A   = 2.0       # amplitude
 U₀  = 10.0      # advection velocity           [m/s]
 L   = 200.0     # domain side length           [m]
 t_f = 1.0       # integration time             [s]
-CFL = 0.01      # CFL number  (Δt = CFL × Δx / U₀)
+CFL = 0.05      # CFL number  (Δt = CFL × Δx / U₀)
 
 # With these values ``s_f = \sigma_0^2 + 2\kappa t_f = 480`` m² and
 # the Gaussian translates ``U_0 t_f = 10`` m — less than one coarse
@@ -186,8 +183,7 @@ function loss(model, T⁰, θ, xc, yc, Δt, Nₛ, Δx)
     T_vals = A_ .* exp.(-r² ./ (2 * σ₀_^2))
     interior(T⁰) .= reshape(T_vals, size(interior(T⁰)))
 
-    set!(model; ρc = T⁰, ρ = 1.0, θ = 300.0, u = U₀_, v = 0.0, w = 0.0,
-               enforce_mass_conservation = false)
+    set!(model; ρc = T⁰, ρ = 1.0, θ = 300.0, u = U₀_, v = 0.0, w = 0.0)
     @trace track_numbers = false mincut = true checkpointing = false for _ in 1:Nₛ
         time_step!(model, Δt)
     end
@@ -221,7 +217,7 @@ end
 # ``(\nabla_\theta J,\; J)`` in a single AD call, and (4) compare
 # against the analytical reference.
 
-N_list = [16, 32, 64]
+N_list = [16, 32, 64, 128]
 
 @info "Advection–diffusion AD verification: N ∈ $N_list"
 
@@ -309,6 +305,4 @@ axislegend(ax, position = :rb)
 
 outfile = "advection_diffusion_gradient_convergence.png"
 save(outfile, fig)
-@info "Saved convergence plot → $outfile"
-
-nothing #hide
+fig
