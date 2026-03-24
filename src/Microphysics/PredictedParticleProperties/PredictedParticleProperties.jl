@@ -178,6 +178,7 @@ export
     P3Closure,
     TwoMomentClosure,
     ThreeMomentClosure,
+    ThreeMomentClosureExact,
     FixedShapeParameter,
     ShapeParameterRelation,  # alias for TwoMomentClosure
     IceRegimeThresholds,

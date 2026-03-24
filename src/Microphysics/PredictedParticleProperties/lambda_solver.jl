@@ -261,12 +261,15 @@ end
 ##### Three-moment closure: Z/N constraint
 #####
 
+abstract type AbstractThreeMomentClosure end
+
 """
     ThreeMomentClosure
 
-Three-moment closure using reflectivity. See [`ThreeMomentClosure()`](@ref) constructor.
+Fortran-parity three-moment closure using the upstream P3 `solve_mui` approximation.
+See [`ThreeMomentClosure()`](@ref) constructor.
 """
-struct ThreeMomentClosure{FT}
+struct ThreeMomentClosure{FT} <: AbstractThreeMomentClosure
     μmin :: FT
     μmax :: FT
 end
@@ -274,11 +277,50 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct a three-moment closure for gamma size distribution.
+Construct the Fortran-parity three-moment closure for gamma size distribution.
 
-With three prognostic moments (mass L, number N, and reflectivity Z),
-the shape parameter μ can be diagnosed directly from the moment ratios,
-without requiring an empirical μ-λ relationship.
+This closure follows the current upstream P3 implementation: it iterates on bulk
+ice density, approximates the third diameter moment as spherical, and applies the
+piecewise-polynomial `G(μ)` inversion used by `solve_mui`.
+
+Use this closure when Fortran parity is the priority.
+
+# Keyword Arguments
+
+- `μmin`: Minimum shape parameter, default 0 (exponential distribution)
+- `μmax`: Maximum shape parameter, default 20
+
+# References
+
+[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
+[Morrison et al. (2025)](@cite Morrison2025complete3moment).
+"""
+function ThreeMomentClosure(FT = Oceananigans.defaults.FloatType;
+                            μmin = 0,
+                            μmax = 20)
+    return ThreeMomentClosure(FT(μmin), FT(μmax))
+end
+
+"""
+    ThreeMomentClosureExact
+
+Three-moment closure that solves the full Breeze moment constraints against the
+piecewise mass-diameter relation. See [`ThreeMomentClosureExact()`](@ref) constructor.
+"""
+struct ThreeMomentClosureExact{FT} <: AbstractThreeMomentClosure
+    μmin :: FT
+    μmax :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct the exact three-moment closure for gamma size distribution.
+
+With three prognostic moments (mass L, number N, and reflectivity Z), the shape
+parameter μ is diagnosed by solving the full Breeze mass and reflectivity
+constraints using the same piecewise mass-diameter relation employed elsewhere
+in the P3 implementation.
 
 # Three-Moment Approach
 
@@ -313,10 +355,10 @@ unknowns (μ, λ), eliminating the need for the empirical μ-λ closure.
 [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) introduced three-moment ice,
 [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024) refined the implementation.
 """
-function ThreeMomentClosure(FT = Oceananigans.defaults.FloatType;
-                            μmin = 0,
-                            μmax = 20)
-    return ThreeMomentClosure(FT(μmin), FT(μmax))
+function ThreeMomentClosureExact(FT = Oceananigans.defaults.FloatType;
+                                 μmin = 0,
+                                 μmax = 20)
+    return ThreeMomentClosureExact(FT(μmin), FT(μmax))
 end
 
 #####
@@ -637,22 +679,53 @@ function log_lambda_from_reflectivity(μ, log_Z_over_N)
 end
 
 """
+    shape_parameter_from_moments(mom0, mom3, mom6, μmax)
+
+Approximate the three-moment ice shape parameter using the Fortran P3 `G(μ)` fit.
+
+This matches `compute_mu_3mom_1` in the reference P3 Fortran code:
+it forms ``G = M₀ M₆ / M₃²`` and applies the piecewise polynomial inversion
+used by `solve_mui`.
+"""
+@inline function shape_parameter_from_moments(mom0, mom3, mom6, μmax)
+    FT = promote_type(typeof(mom0), typeof(mom3), typeof(mom6), typeof(μmax))
+    eps_m3 = FT(1e-20)
+
+    mom3 <= eps_m3 && return FT(μmax)
+
+    G = (mom0 / mom3) * (mom6 / mom3)
+    G² = G * G
+
+    μ = if G >= FT(20)
+        FT(0)
+    elseif G >= FT(13.31)
+        FT(3.3638e-3) * G² - FT(1.7152e-1) * G + FT(2.0857)
+    elseif G >= FT(7.123)
+        FT(1.5900e-2) * G² - FT(4.8202e-1) * G + FT(4.0108)
+    elseif G >= FT(4.2)
+        FT(1.0730e-1) * G² - FT(1.7481) * G + FT(8.4246)
+    elseif G >= FT(2.946)
+        FT(5.9070e-1) * G² - FT(5.7918) * G + FT(16.919)
+    elseif G >= FT(1.793)
+        FT(4.3966) * G² - FT(26.659) * G + FT(45.477)
+    elseif G >= FT(1.472)
+        FT(47.552) * G² - FT(179.58) * G + FT(181.26)
+    else
+        FT(μmax)
+    end
+
+    return min(max(μ, FT(0)), FT(μmax))
+end
+
+"""
     mass_residual_three_moment(mass, rime_fraction, rime_density, μ, log_Z_over_N, log_L_over_N)
 
-Compute the mass constraint residual for three-moment solving.
-
-Given μ and log(Z/N), we can compute λ. Then the residual is:
-  computed log(L/N) - target log(L/N)
-
-This should be zero at the correct μ.
+Compute the full three-moment mass residual for the exact closure.
 """
 function mass_residual_three_moment(mass::IceMassPowerLaw,
                                     rime_fraction, rime_density,
                                     μ, log_Z_over_N, log_L_over_N)
-    # Compute λ from Z/N constraint
     logλ = log_lambda_from_reflectivity(μ, log_Z_over_N)
-
-    # Compute L/N at this (μ, λ)
     log_L_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ)
     log_N_over_N₀ = log_gamma_moment(μ, logλ)
     computed_log_L_over_N = log_L_over_N₀ - log_N_over_N₀
@@ -664,15 +737,19 @@ end
     solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
                           mass = IceMassPowerLaw(),
                           closure = ThreeMomentClosure(),
-                          max_iterations = 50,
-                          tolerance = 1e-10)
+                          max_iterations = nothing,
+                          tolerance = nothing,
+                          density_quadrature_points = 64)
 
-Solve for shape parameter μ using the three-moment constraint.
+Solve for shape parameter μ using the selected three-moment closure.
 
-The algorithm:
-1. For each candidate μ, compute λ from the Z/N constraint
-2. Check if the resulting (μ, λ) satisfies the L/N constraint
-3. Use bisection to find the μ that satisfies both constraints
+Supported closures:
+- `ThreeMomentClosure()`: Fortran-parity `solve_mui` iteration
+- `ThreeMomentClosureExact()`: full Breeze residual solve
+
+Closure-specific defaults:
+- `ThreeMomentClosure`: `max_iterations = 5`, `tolerance = 0.25`
+- `ThreeMomentClosureExact`: `max_iterations = 50`, `tolerance = 1e-10`
 
 # Arguments
 - `L_ice`: Ice mass concentration [kg/m³]
@@ -687,47 +764,94 @@ The algorithm:
 function solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
                                mass = IceMassPowerLaw(),
                                closure = ThreeMomentClosure(),
-                               max_iterations = 50,
-                               tolerance = 1e-10)
+                               max_iterations = nothing,
+                               tolerance = nothing,
+                               density_quadrature_points = 64)
+    return solve_shape_parameter_with_closure(closure, L_ice, N_ice, Z_ice, rime_fraction, rime_density;
+                                              mass, max_iterations, tolerance, density_quadrature_points)
+end
+
+function solve_shape_parameter_with_closure(closure::ThreeMomentClosure,
+                                            L_ice, N_ice, Z_ice, rime_fraction, rime_density;
+                                            mass = IceMassPowerLaw(),
+                                            max_iterations = nothing,
+                                            tolerance = nothing,
+                                            density_quadrature_points = 64)
     FT = typeof(L_ice)
+    max_iterations = isnothing(max_iterations) ? 5 : max_iterations
+    tolerance = FT(isnothing(tolerance) ? 0.25 : tolerance)
 
     # Handle edge cases
     (iszero(N_ice) || iszero(L_ice) || iszero(Z_ice)) && return closure.μmin
 
-    # Target ratios
+    nodes, weights = chebyshev_gauss_nodes_weights(FT, density_quadrature_points)
+    μ_old = clamp(FT(0.5), closure.μmin, closure.μmax)
+    μ = μ_old
+
+    for _ in 1:max_iterations
+        logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ_old; mass)
+        λ = exp(logλ)
+        N₀ = intercept_parameter(N_ice, μ_old, logλ)
+
+        state = IceSizeDistributionState(FT;
+            intercept = N₀,
+            shape = μ_old,
+            slope = λ,
+            rime_fraction = rime_fraction,
+            rime_density = rime_density,
+            mass_coefficient = mass.coefficient,
+            mass_exponent = mass.exponent,
+            ice_density = mass.ice_density)
+
+        ρ_bulk = max(evaluate_quadrature(MeanDensity(), state, nodes, weights), eps(FT))
+        mom3 = FT(6) * L_ice / (ρ_bulk * FT(π))
+        μ = shape_parameter_from_moments(N_ice, mom3, Z_ice, closure.μmax)
+        μ = clamp(μ, closure.μmin, closure.μmax)
+
+        abs(μ_old - μ) < tolerance && return μ
+        μ_old = μ
+    end
+
+    return μ
+end
+
+function solve_shape_parameter_with_closure(closure::ThreeMomentClosureExact,
+                                            L_ice, N_ice, Z_ice, rime_fraction, rime_density;
+                                            mass = IceMassPowerLaw(),
+                                            max_iterations = nothing,
+                                            tolerance = nothing,
+                                            density_quadrature_points = 64)
+    FT = typeof(L_ice)
+    max_iterations = isnothing(max_iterations) ? 50 : max_iterations
+    tolerance = FT(isnothing(tolerance) ? 1e-10 : tolerance)
+
+    (iszero(N_ice) || iszero(L_ice) || iszero(Z_ice)) && return closure.μmin
+
     log_Z_over_N = log(Z_ice) - log(N_ice)
     log_L_over_N = log(L_ice) - log(N_ice)
 
-    # Residual function
     f(μ) = mass_residual_three_moment(mass, rime_fraction, rime_density,
-                                       μ, log_Z_over_N, log_L_over_N)
+                                      μ, log_Z_over_N, log_L_over_N)
 
-    # Bisection method over [μmin, μmax]
     μ_lo = closure.μmin
     μ_hi = closure.μmax
-
     f_lo = f(μ_lo)
     f_hi = f(μ_hi)
 
-    # Check if solution is in bounds
-    # If residuals have same sign, clamp to appropriate bound
     same_sign = f_lo * f_hi > 0
-    is_below = f_lo > 0  # Both residuals positive means μ is too small
+    is_below = f_lo > 0
 
-    # If no sign change, return boundary value
     if same_sign
         return ifelse(is_below, closure.μmax, closure.μmin)
     end
 
-    # Bisection iteration
     for _ in 1:max_iterations
         μ_mid = (μ_lo + μ_hi) / 2
         f_mid = f(μ_mid)
 
         abs(f_mid) < tolerance && return μ_mid
-        (μ_hi - μ_lo) < tolerance * μ_mid && return μ_mid
+        (μ_hi - μ_lo) < tolerance * max(μ_mid, one(FT)) && return μ_mid
 
-        # Update bounds
         if f_lo * f_mid < 0
             μ_hi = μ_mid
             f_hi = f_mid

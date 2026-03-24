@@ -1106,6 +1106,18 @@ using Oceananigans.Fields: interior
         @test μ ≤ relation.μmax
     end
 
+    @testset "Three-moment closure construction" begin
+        p3_closure = ThreeMomentClosure()
+        exact_closure = ThreeMomentClosureExact()
+        compat_closure = ThreeMomentClosure()
+
+        @test p3_closure.μmin ≈ 0.0
+        @test p3_closure.μmax ≈ 20.0
+        @test exact_closure.μmin ≈ 0.0
+        @test exact_closure.μmax ≈ 20.0
+        @test compat_closure isa ThreeMomentClosure
+    end
+
     @testset "Ice regime thresholds" begin
         mass = IceMassPowerLaw()
 
@@ -1232,6 +1244,43 @@ using Oceananigans.Fields: interior
         @test isfinite(ρ_dep_tiny_rime)
         @test ρ_dep_zero_rime ≈ mass.ice_density
         @test ρ_dep_tiny_rime > 0
+    end
+
+    @testset "Three-moment μ polynomial matches Fortran fit" begin
+        μ_from_moments = Breeze.Microphysics.PredictedParticleProperties.shape_parameter_from_moments
+
+        @test μ_from_moments(1.0, 1.0, 21.0, 20.0) == 0.0
+
+        G_mid = 10.0
+        μ_mid_expected = 1.5900e-2 * G_mid^2 - 4.8202e-1 * G_mid + 4.0108e+0
+        @test μ_from_moments(1.0, 1.0, G_mid, 20.0) ≈ μ_mid_expected
+
+        @test μ_from_moments(1.0, 1.0, 1.3, 20.0) == 20.0
+    end
+
+    @testset "Three-moment μ solver follows Fortran-style fixed point" begin
+        p3_closure = ThreeMomentClosure()
+
+        μ_rimed = solve_shape_parameter(1e-4, 1e6, 1e-11, 0.2, 500.0; closure=p3_closure)
+        @test μ_rimed ≈ 11.340146819205977
+
+        μ_large = solve_shape_parameter(1e-3, 1e5, 1e-8, 0.5, 700.0; closure=p3_closure)
+        @test μ_large ≈ 1.0341241878429641
+
+        μ_broad = solve_shape_parameter(1e-4, 1e6, 1e-9, 0.2, 500.0; closure=p3_closure)
+        @test μ_broad == 0.0
+    end
+
+    @testset "Exact three-moment closure solves the full residual" begin
+        p3_closure = ThreeMomentClosure()
+        exact_closure = ThreeMomentClosureExact()
+
+        μ_p3 = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=p3_closure)
+        μ_exact = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=exact_closure)
+
+        @test μ_p3 == 20.0
+        @test μ_exact == 0.0
+        @test μ_p3 != μ_exact
     end
 
     @testset "Lambda solver - L/N dependence" begin

@@ -309,7 +309,9 @@ The benefit of three-moment ice is improved representation of:
 Both two-moment and three-moment solvers are implemented:
 
 - **Two-moment**: Use `distribution_parameters(L, N, Fᶠ, ρᶠ)` with `TwoMomentClosure`
-- **Three-moment**: Use `distribution_parameters(L, N, Z, Fᶠ, ρᶠ)` with `ThreeMomentClosure`
+- **Three-moment**: Use `distribution_parameters(L, N, Z, Fᶠ, ρᶠ)` with either
+  `ThreeMomentClosure` (Original P3 solver)
+  or `ThreeMomentClosureExact` (Breeze residual solver)
 
 ## Summary
 
