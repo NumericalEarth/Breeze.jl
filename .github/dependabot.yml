@@ -11,10 +11,15 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/" # Location of package manifests
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     labels:
       - "dependencies 🖇️"
-  - package-ecosystem: "julia" # See documentation for possible values
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+  - package-ecosystem: "julia"
     # Location of Julia projects
     directories:
       - "/"
