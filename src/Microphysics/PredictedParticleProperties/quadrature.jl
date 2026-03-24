@@ -730,12 +730,16 @@ end
 # Shape parameter μ - diagnostic, not an integral
 @inline integrand(::ShapeParameter, D, state::IceSizeDistributionState, thresholds) = zero(D)
 
-# Shedding rate: integral over particles above melting threshold
+# Shedding rate: integral over particles with D ≥ 9 mm (Rasmussen et al. 2011).
+# Fortran P3 f1pr28: ∫_{D≥9mm} m(D) N'(D) dD, normalized per particle.
+# Uses Fl-blended mass ((1-Fl)*m_ice + Fl*m_liquid), matching Fortran table
+# generation (create_p3_lookupTable_1.f90 line 1600). The rime fraction Fr
+# and liquid fraction Fl multiplier are applied at runtime.
 @inline function integrand(::SheddingRate, D, state::IceSizeDistributionState, thresholds)
     m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
-    Fˡ = state.liquid_fraction
-    return Fˡ * m * Np  # Simplified: liquid fraction times mass
+    # Only particles with D ≥ 9 mm can shed (Rasmussen et al. 2011)
+    return ifelse(D >= typeof(D)(0.009), m * Np, zero(D))
 end
 
 """
@@ -885,11 +889,11 @@ end
     return D^6 * V * A * Np^2
 end
 
-# Sixth moment shedding
+# Sixth moment shedding: D^6 contribution from particles with D ≥ 9 mm.
+# Like SheddingRate, the Fl and Fr factors are applied at runtime.
 @inline function integrand(::SixthMomentShedding, D, state::IceSizeDistributionState, thresholds)
     Np = size_distribution(D, state)
-    Fˡ = state.liquid_fraction
-    return Fˡ * D^6 * Np
+    return ifelse(D >= typeof(D)(0.009), D^6 * Np, zero(D))
 end
 
 # Sixth moment sublimation tendencies

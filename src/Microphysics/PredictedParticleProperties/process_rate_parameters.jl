@@ -144,6 +144,15 @@ struct ProcessRateParameters{FT}
     # Global ice number limiter (Fortran P3 v5.5.0 impose_max_Ni)
     # Applied as a relaxation sink whenever nⁱ × ρ > N_max.
     maximum_ice_number_density :: FT         # Nᵢ_max [1/m³]
+
+    # Liquid fraction clipping threshold (Milbrandt et al. 2025)
+    # Fl < this: instantly freeze all qwi to rime; Fl > (1 - this): fully melt to rain
+    liquid_fraction_small :: FT              # Fortran liqfracsmall [-]
+
+    # Liquid fraction mode (Fortran log_LiquidFrac).
+    # When true: wet growth rime densification is suppressed (liquid tracked
+    # explicitly in qʷⁱ), and melt-densification is skipped.
+    liquid_fraction_active :: Bool
 end
 
 """
@@ -316,7 +325,13 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Global ice number limiter (Fortran P3 v5.5.0 impose_max_Ni)
         # Relaxation sink drains nⁱ toward N_max/ρ when nⁱ × ρ > N_max.
-        maximum_ice_number_density = 2e6)  # [1/m³], Fortran impose_max_Ni cap
+        maximum_ice_number_density = 2e6,  # [1/m³], Fortran impose_max_Ni cap
+
+        # Liquid fraction clipping (Milbrandt et al. 2025)
+        liquid_fraction_small = 0.01,  # Fortran liqfracsmall
+
+        # Liquid fraction mode (Fortran log_LiquidFrac)
+        liquid_fraction_active = true)
 
     return ProcessRateParameters(
         FT(liquid_water_density),
@@ -393,7 +408,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(rain_lambda_min),
         FT(rain_lambda_max),
         FT(sink_limiting_timescale),
-        FT(maximum_ice_number_density)
+        FT(maximum_ice_number_density),
+        FT(liquid_fraction_small),
+        Bool(liquid_fraction_active)
     )
 end
 

@@ -203,6 +203,59 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
 end
 
 """
+    rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+
+Compute above-freezing rain collection by melting ice (Fortran qrcoll pathway).
+
+When `T > T₀` and liquid fraction is active, rain drops collected by ice
+contribute to the liquid coating (qʷⁱ) rather than to rime.
+Uses the same collection kernel as rain riming.
+See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
+
+# Returns
+- Rain mass rate collected onto ice [kg/kg/s]
+"""
+@inline function rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    FT = typeof(qʳ)
+    prp = p3.process_rates
+
+    Eʳⁱ = prp.rain_ice_collection_efficiency
+    T₀ = prp.freezing_temperature
+
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = clamp_positive(nʳ)
+    qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = clamp_positive(nⁱ)
+
+    q_threshold = FT(1e-8)
+    n_threshold = FT(1)
+    above_freezing = T >= T₀
+    active = above_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
+
+    # Same collection kernel as rain_riming_rate
+    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
+                                                       m_mean, Fᶠ, ρᶠ, prp)
+    ρ₀ = p3.ice.fall_speed.reference_air_density
+    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+
+    # Rain-DSD cross-section correction (C5)
+    λ_r_cubed = FT(π) * prp.liquid_water_density * nʳ_eff / max(qʳ_eff, FT(1e-15))
+    λ_r = clamp(cbrt(λ_r_cubed), prp.rain_lambda_min, prp.rain_lambda_max)
+    D_r_mean = 1 / λ_r
+    ρ_eff = (1 - Fᶠ) * prp.ice_effective_density_unrimed + Fᶠ * max(ρᶠ, FT(50))
+    D_i_mean = cbrt(6 * m_mean / (FT(π) * max(ρ_eff, FT(50))))
+    D_i_mean = clamp(D_i_mean, prp.ice_diameter_min, prp.ice_diameter_max)
+    r_ratio = D_r_mean / max(D_i_mean, FT(prp.ice_diameter_min))
+    rain_dsd_correction = 1 + 8 * r_ratio + 20 * r_ratio^2
+    rain_dsd_correction = ifelse(nʳ_eff > FT(1), rain_dsd_correction, one(FT))
+
+    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle * rain_dsd_correction
+
+    return ifelse(active, rate, zero(FT))
+end
+
+"""
     cloud_riming_number_rate(qᶜˡ, Nᶜ, riming_rate)
 
 Compute cloud droplet number sink from riming.
@@ -432,8 +485,12 @@ the density of liquid water (soaking).
     ρ_dry = ρ_dry * T_factor
 
     # Wet growth regime: when T > -10°C and high LWC
-    # Rime density approaches water density (spongy graupel)
-    is_wet_growth = (Tc > FT(-10)) & (lwc > FT(0.5e-3))
+    # Rime density approaches water density (spongy graupel).
+    # When liquid_fraction_active (Fortran log_LiquidFrac=.true.), wet growth
+    # densification is suppressed because liquid is tracked explicitly in qʷⁱ
+    # (Fortran line 3251: "Densification from wet growth turn off").
+    liquid_fraction_active = prp.liquid_fraction_active
+    is_wet_growth = !liquid_fraction_active & (Tc > FT(-10)) & (lwc > FT(0.5e-3))
     wet_fraction = clamp((Tc + FT(10)) / FT(10), zero(FT), one(FT))
     ρ_wet = ρ_dry * (1 - wet_fraction) + ρ_water * FT(0.8) * wet_fraction
 
@@ -464,47 +521,71 @@ end
 #####
 
 """
-    shedding_rate(p3, qʷⁱ, qⁱ, T)
+    shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
 
-Compute liquid shedding rate from ice particles.
+Compute liquid shedding rate from ice particles following
+[Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
-When ice particles carry too much liquid coating (from partial melting
-or warm riming), excess liquid is shed as rain drops.
-See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
+PSD-integrated shedding of liquid from mixed-phase ice particles with D ≥ 9 mm
+(Rasmussen et al. 2011). Matches Fortran P3 v5.5.0:
+
+```math
+q_{lshd} = F_r \\times f_{1pr28} \\times N_i \\times F_l
+```
+
+where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
+`Fr = qirim / (qitot - qiliq)` is the rime fraction of ice-only mass, and
+`Fl = qiliq / qitot` is the liquid fraction.
 
 # Arguments
-- `p3`: P3 microphysics scheme (provides parameters)
+- `p3`: P3 microphysics scheme (provides shedding table)
 - `qʷⁱ`: Liquid water on ice [kg/kg]
-- `qⁱ`: Ice mass fraction [kg/kg]
-- `T`: Temperature [K]
+- `qⁱ`: Ice mass fraction [kg/kg] (dry ice, excluding qʷⁱ)
+- `nⁱ`: Ice number concentration [1/kg]
+- `Fᶠ`: Rime fraction (= qᶠ/qⁱ) [-]
+- `Fˡ`: Liquid fraction (= qʷⁱ/(qⁱ+qʷⁱ)) [-]
+- `ρᶠ`: Rime density [kg/m³]
+- `m_mean`: Mean ice particle mass [kg]
 
 # Returns
 - Rate of liquid → rain shedding [kg/kg/s]
 """
-@inline function shedding_rate(p3, qʷⁱ, qⁱ, T)
+@inline function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
     FT = typeof(qʷⁱ)
-    prp = p3.process_rates
-
-    τ_shed = prp.shedding_timescale
-    qʷⁱ_max_frac = prp.maximum_liquid_fraction
-    T₀ = prp.freezing_temperature
 
     qʷⁱ_eff = clamp_positive(qʷⁱ)
-    qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = clamp_positive(nⁱ)
 
-    # Total particle mass
-    qᵗᵒᵗ = qⁱ_eff + qʷⁱ_eff
+    # Lookup ∫_{D≥9mm} m(D) N'(D) dD (normalized per particle)
+    f1pr28 = shedding_integral(p3.ice.bulk_properties.shedding, m_mean, Fᶠ, Fˡ, ρᶠ)
 
-    # Maximum liquid that can be retained
-    qʷⁱ_max = qʷⁱ_max_frac * qᵗᵒᵗ
+    # Fortran: qlshd = Fr × f1pr28 × ni × Fl
+    # Fr = rime fraction of ice-only mass (= Fᶠ in Julia convention since qⁱ excludes qʷⁱ)
+    rate = Fᶠ * f1pr28 * nⁱ_eff * Fˡ
 
-    # Excess liquid sheds
-    qʷⁱ_excess = clamp_positive(qʷⁱ_eff - qʷⁱ_max)
+    # Bound by available liquid: qlshd ≤ qwi / dt_safety
+    rate = clamp_positive(rate)
+    τ_safety = FT(1)  # [s]
+    rate = min(rate, qʷⁱ_eff / τ_safety)
 
-    # Enhanced shedding above freezing
-    T_factor = ifelse(T > T₀, FT(3), FT(1))
+    return rate
+end
 
-    return T_factor * qʷⁱ_excess / τ_shed
+"""
+    shedding_integral(table, m_mean, Fᶠ, Fˡ, ρᶠ)
+
+Lookup the PSD-integrated shedding mass for D ≥ 9 mm particles.
+Dispatches on table type (TabulatedFunction4D or analytical fallback).
+"""
+@inline function shedding_integral(table::TabulatedFunction4D, m_mean, Fᶠ, Fˡ, ρᶠ)
+    FT = typeof(m_mean)
+    log_m = log10(max(m_mean, FT(1e-20)))
+    return table(log_m, Fᶠ, Fˡ, ρᶠ)
+end
+
+# Analytical fallback: zero shedding when table is not available
+@inline function shedding_integral(::Any, m_mean, Fᶠ, Fˡ, ρᶠ)
+    return zero(m_mean)
 end
 
 """
@@ -528,43 +609,78 @@ Shed liquid forms rain drops of approximately 1 mm diameter.
 end
 
 """
-    refreezing_rate(p3, qʷⁱ, T)
+    wet_growth_capacity(p3, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
 
-Compute refreezing rate of liquid on ice particles.
+Compute the wet growth freezing capacity following
+[Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
-Below freezing, liquid coating on ice particles refreezes,
-transferring mass from liquid-on-ice to ice+rime.
-See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
+The wet growth capacity is the maximum rate at which collected
+hydrometeors can be frozen, determined by the ventilated heat balance:
+
+```math
+q_{wgrth} = \\frac{2π C f_v}{L_f} [K_a(T_0-T) + L_s D_v(ρ_{vs}-ρ_v)] × N_i
+```
+
+When the collection rate (cloud + rain riming) exceeds this capacity,
+the excess collected water stays liquid and is redirected into qʷⁱ.
 
 # Arguments
-- `p3`: P3 microphysics scheme (provides parameters)
-- `qʷⁱ`: Liquid water on ice [kg/kg]
+- `p3`: P3 microphysics scheme
+- `qⁱ`: Ice mass fraction [kg/kg]
+- `nⁱ`: Ice number concentration [1/kg]
 - `T`: Temperature [K]
+- `P`: Pressure [Pa]
+- `qᵛ`: Vapor mass fraction [kg/kg]
+- `Fᶠ`: Rime fraction [-]
+- `ρᶠ`: Rime density [kg/m³]
+- `ρ`: Air density [kg/m³]
+- `constants`: Thermodynamic constants (or `nothing`)
+- `transport`: Pre-computed air transport properties `(; D_v, K_a, nu)`
 
 # Returns
-- Rate of liquid → ice refreezing [kg/kg/s]
+- Wet growth capacity [kg/kg/s] (positive; zero when T ≥ T₀)
 """
-@inline function refreezing_rate(p3, qʷⁱ, T)
-    FT = typeof(qʷⁱ)
+@inline function wet_growth_capacity(p3, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+    FT = typeof(qⁱ)
     prp = p3.process_rates
 
-    τ_frz = prp.refreezing_timescale
+    qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = clamp_positive(nⁱ)
+
     T₀ = prp.freezing_temperature
-
-    qʷⁱ_eff = clamp_positive(qʷⁱ)
-
-    # Only refreeze below freezing
     below_freezing = T < T₀
 
-    # Faster refreezing at colder temperatures
-    ΔT = clamp_positive(T₀ - T)
-    T_factor = FT(1) + FT(0.1) * ΔT
+    L_f = fusion_latent_heat(constants, T)
+    L_s = sublimation_latent_heat(constants, T)
+    thermodynamic_constants = isnothing(constants) ? ThermodynamicConstants(FT) : constants
+    Rᵛ = FT(vapor_gas_constant(thermodynamic_constants))
 
-    rate = ifelse(below_freezing & (qʷⁱ_eff > FT(1e-10)),
-                   T_factor * qʷⁱ_eff / τ_frz,
-                   zero(FT))
+    K_a = transport.K_a
+    D_v = transport.D_v
+    nu  = transport.nu
 
-    return rate
+    # Saturation mixing ratio at T₀ over liquid (Fortran: qsat0)
+    e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
+    ρ_vs = e_s0 / (Rᵛ * T₀)
+    ρ_v = qᵛ * ρ
+
+    # Mean ice particle mass
+    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+
+    # Ventilation integral (same as deposition/refreezing)
+    C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
+                                    p3.ice.deposition.ventilation_enhanced,
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
+
+    # Heat balance: sensible + latent
+    Q_sensible = K_a * (T₀ - T)
+    Q_latent = L_s * D_v * (ρ_vs - ρ_v)
+    Q_total = Q_sensible + Q_latent
+
+    # Wet growth capacity (2π for Fortran capm convention)
+    qwgrth = FT(2π) * C_fv * Q_total / L_f * nⁱ_eff
+
+    return ifelse(below_freezing, clamp_positive(qwgrth), zero(FT))
 end
 
 """

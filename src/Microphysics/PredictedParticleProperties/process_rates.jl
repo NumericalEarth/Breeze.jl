@@ -559,9 +559,16 @@ struct P3ProcessRates{FT}
     rain_homogeneous_mass :: FT    # Rain → ice from homogeneous freezing [kg/kg/s]
     rain_homogeneous_number :: FT  # Rain number → ice [1/kg/s]
 
-    # Above-freezing cloud collection (T > T₀, Fortran qcshd pathway)
-    cloud_warm_collection :: FT        # Cloud → rain via warm ice collection [kg/kg/s]
-    cloud_warm_collection_number :: FT # Rain number from shed 1mm drops [1/kg/s]
+    # Above-freezing collection (T > T₀): collected hydrometeors → qʷⁱ
+    # (Milbrandt et al. 2025; Fortran qccoll/qrcoll pathway)
+    cloud_warm_collection :: FT        # Cloud collected above T₀ → qʷⁱ [kg/kg/s]
+    cloud_warm_collection_number :: FT # Cloud number loss from warm collection [1/kg/s]
+    rain_warm_collection :: FT         # Rain collected above T₀ → qʷⁱ [kg/kg/s]
+
+    # Wet growth: collected hydrometeors redirected to qʷⁱ when collection
+    # exceeds freezing capacity (Milbrandt et al. 2025; Fortran qwgrth1c/qwgrth1r)
+    wet_growth_cloud :: FT             # Cloud collection redirected to qʷⁱ [kg/kg/s]
+    wet_growth_rain :: FT              # Rain collection redirected to qʷⁱ [kg/kg/s]
 end
 
 """
@@ -687,9 +694,34 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     ρᶠ_new = rime_density(p3, T, vᵢ)
 
     # =========================================================================
+    # Phase 2: Wet growth capacity and collection rerouting
+    # (Milbrandt et al. 2025; Fortran qwgrth/qwgrth1c/qwgrth1r)
+    # =========================================================================
+    # When collection rate exceeds the freezing capacity (wet growth),
+    # all collected hydrometeors stay liquid and are redirected to qʷⁱ.
+    qwgrth = wet_growth_capacity(p3, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+
+    # Check if total riming exceeds wet growth capacity
+    total_collection = cloud_rim + rain_rim
+    is_wet_growth = total_collection > qwgrth + FT(1e-10)
+
+    # During wet growth: redirect ALL collection to qʷⁱ, zero out rime
+    wg_cloud = ifelse(is_wet_growth, cloud_rim, zero(FT))
+    wg_rain  = ifelse(is_wet_growth, rain_rim, zero(FT))
+    cloud_rim   = ifelse(is_wet_growth, zero(FT), cloud_rim)
+    cloud_rim_n = ifelse(is_wet_growth, zero(FT), cloud_rim_n)
+    rain_rim    = ifelse(is_wet_growth, zero(FT), rain_rim)
+    rain_rim_n  = ifelse(is_wet_growth, zero(FT), rain_rim_n)
+
+    # =========================================================================
     # Phase 2: Shedding and refreezing
     # =========================================================================
-    shed = shedding_rate(p3, qʷⁱ, qⁱ, T)
+    # Liquid fraction for shedding (Fl = qʷⁱ / (qⁱ + qʷⁱ))
+    qⁱ_total = max(clamp_positive(qⁱ) + clamp_positive(qʷⁱ), FT(1e-20))
+    Fˡ = clamp_positive(qʷⁱ) / qⁱ_total
+    m_mean = safe_divide(clamp_positive(qⁱ), clamp_positive(nⁱ), FT(1e-12))
+
+    shed = shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
     shed_n = shedding_number_rate(p3, shed)
     refrz = refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
 
@@ -712,9 +744,10 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     rain_hom_q, rain_hom_n = homogeneous_freezing_rain_rate(p3, qʳ, nʳ, T)
 
     # =========================================================================
-    # Above-freezing cloud collection (Fortran qcshd/ncshdc pathway)
+    # Above-freezing collection (Milbrandt et al. 2025: qccoll/qrcoll → qʷⁱ)
     # =========================================================================
     cloud_warm_q, cloud_warm_n = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    rain_warm_q = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 
     # =========================================================================
     # Sink limiting: rescale sink rates so total sinks × dt_safety ≤ available
@@ -727,7 +760,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Cloud evaporation (negative condensation) is already self-limited in
     # cloud_condensation_rate, so only count the positive-definite sinks.
     cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
-                       cloud_hom_q + cloud_warm_q
+                       cloud_hom_q + cloud_warm_q + wg_cloud
     f_cloud = sink_limiting_factor(cloud_sink_total, max(0, qᶜˡ), dt_safety)
     autoconv      = autoconv * f_cloud
     accr          = accr * f_cloud
@@ -739,10 +772,11 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     cloud_hom_n   = cloud_hom_n * f_cloud
     cloud_warm_q  = cloud_warm_q * f_cloud
     cloud_warm_n  = cloud_warm_n * f_cloud
+    wg_cloud      = wg_cloud * f_cloud
 
     # --- Rain sinks ---
     # Rain evaporation is already self-limited in rain_evaporation_rate.
-    rain_sink_total = rain_rim + rain_frz_q + rain_hom_q
+    rain_sink_total = rain_rim + rain_frz_q + rain_hom_q + rain_warm_q + wg_rain
     f_rain = sink_limiting_factor(rain_sink_total, max(0, qʳ), dt_safety)
     rain_rim      = rain_rim * f_rain
     rain_rim_n    = rain_rim_n * f_rain
@@ -750,6 +784,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     rain_frz_n    = rain_frz_n * f_rain
     rain_hom_q    = rain_hom_q * f_rain
     rain_hom_n    = rain_hom_n * f_rain
+    rain_warm_q   = rain_warm_q * f_rain
+    wg_rain       = wg_rain * f_rain
 
     # --- Ice sinks ---
     # Sublimation (negative deposition) is already self-limited in
@@ -801,8 +837,10 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         spl_q, spl_n,
         # Homogeneous freezing
         cloud_hom_q, cloud_hom_n, rain_hom_q, rain_hom_n,
-        # Above-freezing cloud collection
-        cloud_warm_q, cloud_warm_n
+        # Above-freezing collection → qʷⁱ
+        cloud_warm_q, cloud_warm_n, rain_warm_q,
+        # Wet growth collection → qʷⁱ
+        wg_cloud, wg_rain
     )
 end
 
@@ -848,10 +886,11 @@ Cloud liquid is consumed by:
     gain = rates.condensation
     # Phase 1: autoconversion and accretion
     # Phase 2: cloud riming by ice, immersion freezing, homogeneous freezing
-    # Above-freezing: cloud collected by melting ice and shed as rain
+    # Above-freezing: cloud collected by melting ice → qʷⁱ
+    # Wet growth: cloud collection redirected to qʷⁱ
     loss = rates.autoconversion + rates.accretion + rates.cloud_riming +
            rates.cloud_freezing_mass + rates.cloud_homogeneous_mass +
-           rates.cloud_warm_collection
+           rates.cloud_warm_collection + rates.wet_growth_cloud
     return ρ * (gain - loss)
 end
 
@@ -864,23 +903,25 @@ Rain gains from:
 - Autoconversion (Phase 1)
 - Accretion (Phase 1)
 - Complete melting (Phase 1) - meltwater that sheds from ice
-- Shedding (Phase 2) - liquid coating shed from ice
-- Warm cloud collection (above freezing) - cloud swept by melting ice → rain
+- Shedding (Phase 2) - liquid coating shed from ice (D ≥ 9 mm)
 
 Rain loses from:
 - Evaporation (Phase 1)
 - Riming (Phase 2)
 - Immersion freezing (Phase 2)
 - Homogeneous freezing (Phase 2, T < -40°C)
+- Rain warm collection by ice (T > T₀) → qʷⁱ
+- Wet growth rain rerouting → qʷⁱ
 """
 @inline function tendency_ρqʳ(rates::P3ProcessRates, ρ)
     # Phase 1: gains from autoconv, accr, complete_melt; loses from evap
-    # Phase 2: gains from shedding; loses from riming, freezing, and homogeneous freezing
-    # Above-freezing: cloud collected by melting ice shed as rain (Fortran qcshd)
+    # Phase 2: gains from shedding; loses from riming, freezing, homogeneous freezing
+    # Milbrandt et al. (2025): above-freezing collection and wet growth go to qʷⁱ, NOT rain.
+    # Rain warm collection is a rain SINK (collected by ice → qʷⁱ).
     gain = rates.autoconversion + rates.accretion + rates.complete_melting +
-           rates.shedding + rates.cloud_warm_collection
+           rates.shedding
     loss = rates.rain_evaporation + rates.rain_riming + rates.rain_freezing_mass +
-           rates.rain_homogeneous_mass
+           rates.rain_homogeneous_mass + rates.rain_warm_collection + rates.wet_growth_rain
     return ρ * (gain - loss)
 end
 
@@ -917,11 +958,10 @@ Rain number loses from:
     # rain_evaporation is positive magnitude (M7); proportional number loss is positive.
     n_from_evap = safe_divide(nʳ * rates.rain_evaporation, qʳ, zero(FT))
 
-    # Gains
+    # Gains: shedding produces rain drops; warm collection no longer goes to rain
     n_gain = n_from_autoconv + n_from_melt +
              rates.rain_breakup +
-             rates.shedding_number +
-             rates.cloud_warm_collection_number
+             rates.shedding_number
     # Losses (all positive magnitudes, M7)
     n_loss = n_from_evap +
              rates.rain_self_collection +
@@ -1046,9 +1086,10 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
     # Phase 2: Volume gain from new rime
     # Cloud riming uses Cober-List computed density; rain riming uses rho_rimeMax = 900
     # Immersion freezing uses rho_rimeMax = 900 (Fortran convention, not water density)
+    # Refreezing uses rho_rimeMax = 900 (Fortran: qifrz * i_rho_rimeMax, line 4253)
     volume_gain = rates.cloud_riming / ρ_rim_new_safe +
                    rates.rain_riming / ρ_rimemax +
-                   rates.refreezing / ρᶠ_safe +
+                   rates.refreezing / ρ_rimemax +
                    (rates.cloud_freezing_mass + rates.rain_freezing_mass) / ρ_rimemax +
                    (rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass) / ρ_rim_hom
 
@@ -1056,14 +1097,17 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
     total_melting = rates.partial_melting + rates.complete_melting
     volume_loss = Fᶠ * total_melting / ρᶠ_safe
 
-    # M3: Melt-densification (Fortran P3 v5.5.0 lines 3841-3844)
+    # M3: Melt-densification (Fortran P3 v5.5.0 lines 4309-4313)
     # Low-density rime portions melt first → remaining ice approaches 917 kg/m³.
     # In tendency form: additional volume reduction = bᶠ × (917 - ρᶠ) × |melt| / (ρᶠ × qⁱ)
+    # Fortran guards with `.not. log_LiquidFrac`: when liquid fraction is active,
+    # melt-densification is skipped because the liquid is tracked explicitly in qʷⁱ.
     qⁱ_safe = max(qⁱ, FT(1e-12))
     bᶠ = Fᶠ * qⁱ_safe / ρᶠ_safe
     densification = bᶠ * (ρ_rim_hom - ρᶠ_safe) * total_melting / (ρᶠ_safe * qⁱ_safe)
-    # Only apply when ρᶠ < 917 and there is melting
-    densification = ifelse(ρᶠ_safe < ρ_rim_hom, densification, zero(FT))
+    # Only apply when ρᶠ < 917, there is melting, AND liquid fraction is not active
+    apply_densification = (ρᶠ_safe < ρ_rim_hom) & !prp.liquid_fraction_active
+    densification = ifelse(apply_densification, densification, zero(FT))
 
     return ρ * (volume_gain - volume_loss - densification)
 end
@@ -1077,7 +1121,7 @@ end
 # qⁱ cancels in the densification term (bᶠ × ... / qⁱ), so any nonzero value is correct
 @inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ)
     FT = typeof(ρ)
-    prp = (pure_ice_density = FT(917), maximum_rime_density = FT(900))
+    prp = (pure_ice_density = FT(917), maximum_rime_density = FT(900), liquid_fraction_active = true)
     return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, one(FT), prp)
 end
 
@@ -1235,18 +1279,31 @@ end
 
 Compute liquid on ice tendency from P3 process rates.
 
-Liquid on ice:
-- Gains from partial melting above freezing (meltwater stays on ice)
-- Loses from shedding (Phase 2) - liquid sheds to rain
-- Loses from refreezing (Phase 2) - liquid refreezes to ice
+Following [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction), the
+full budget is:
 
-Following Milbrandt et al. (2025), partial melting adds to the liquid coating
-while complete melting sheds directly to rain.
+```math
+\\frac{dq^{wi}}{dt} = q_{melt,partial} + q_{ccoll} + q_{rcoll} + q_{wgrth1c} + q_{wgrth1r}
+                    - q_{lshd} - q_{ifrz}
+```
+
+Gains from:
+- Partial melting (meltwater stays on ice as liquid coating)
+- Above-freezing cloud collection (qccoll: T > T₀, cloud → qʷⁱ)
+- Above-freezing rain collection (qrcoll: T > T₀, rain → qʷⁱ)
+- Wet growth cloud rerouting (qwgrth1c: excess collection → qʷⁱ)
+- Wet growth rain rerouting (qwgrth1r: excess collection → qʷⁱ)
+
+Loses from:
+- Shedding (liquid sheds to rain from D ≥ 9 mm particles)
+- Refreezing (liquid refreezes to rime)
 """
 @inline function tendency_ρqʷⁱ(rates::P3ProcessRates, ρ)
-    # Gains from partial melting (meltwater stays on ice as liquid coating)
-    # Loses from shedding (liquid sheds to rain) and refreezing (liquid refreezes)
-    gain = rates.partial_melting
+    gain = rates.partial_melting +
+           rates.cloud_warm_collection +
+           rates.rain_warm_collection +
+           rates.wet_growth_cloud +
+           rates.wet_growth_rain
     loss = rates.shedding + rates.refreezing
     return ρ * (gain - loss)
 end

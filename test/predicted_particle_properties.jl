@@ -803,19 +803,23 @@ using Oceananigans.Fields: interior
             intercept = 1e6, shape = 0.0, slope = 1000.0,
             liquid_fraction = 0.3)
 
-        # Shedding should be zero when dry, positive when wet
+        # Shedding integrand enforces D ≥ 9 mm threshold (Rasmussen et al. 2011).
+        # The Fl-blended mass makes the integral depend on liquid fraction
+        # (matching Fortran table generation). Wet particles have larger mass
+        # at a given D because liquid is denser than ice aggregates.
         shed_dry = evaluate(SheddingRate(), state_dry)
         shed_wet = evaluate(SheddingRate(), state_wet)
 
-        @test shed_dry ≈ 0 atol=1e-20
-        @test shed_wet > 0
+        @test shed_dry ≥ 0
+        @test shed_wet ≥ 0
+        @test shed_wet > shed_dry  # wet particles have larger blended mass
 
-        # Sixth moment shedding similarly
+        # Sixth moment shedding also enforces D ≥ 9 mm; no Fl in integrand
         m6_shed_dry = evaluate(SixthMomentShedding(), state_dry)
         m6_shed_wet = evaluate(SixthMomentShedding(), state_wet)
 
-        @test m6_shed_dry ≈ 0 atol=1e-20
-        @test m6_shed_wet > 0
+        @test m6_shed_dry ≈ m6_shed_wet  # D^6 * Np does not depend on Fl
+        @test m6_shed_wet ≥ 0
     end
 
     @testset "Deposition integrals physical consistency" begin
@@ -1082,7 +1086,7 @@ using Oceananigans.Fields: interior
         mass = IceMassPowerLaw()
         @test mass.coefficient ≈ 0.0121
         @test mass.exponent ≈ 1.9
-        @test mass.ice_density ≈ 917.0
+        @test mass.ice_density ≈ 900.0
 
         mass32 = IceMassPowerLaw(Float32)
         @test mass32.coefficient isa Float32
@@ -1310,6 +1314,9 @@ using Oceananigans.Fields: interior
             FT(0.0),    # rain_homogeneous_number
             FT(0.0),    # cloud_warm_collection (warm environment test)
             FT(0.0),    # cloud_warm_collection_number
+            FT(0.0),    # rain_warm_collection
+            FT(0.0),    # wet_growth_cloud
+            FT(0.0),    # wet_growth_rain
         )
 
         # Test each tendency function returns a finite number
@@ -1356,7 +1363,10 @@ using Oceananigans.Fields: interior
             FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # agg, ni_limit (C3), 5 riming
             FT(0.0), FT(0.0), FT(0.0),                              # shedding, shedding_n, refreezing
             FT(1e-9), FT(10.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # nucleation
-            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0)  # splintering + homogeneous + warm
+            FT(0.0), FT(0.0),                                          # splintering
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0),                      # homogeneous
+            FT(0.0), FT(0.0), FT(0.0),                                # warm collection
+            FT(0.0), FT(0.0)                                          # wet growth
         )
 
         D_nuc_cubed = 6 * prp.nucleated_ice_mass / (FT(π) * prp.pure_ice_density)
@@ -2309,8 +2319,11 @@ using Oceananigans.Fields: interior
             FT(1e5),    # cloud_homogeneous_number
             FT(1e-7),   # rain_homogeneous_mass
             FT(500.0),  # rain_homogeneous_number
-            FT(1e-8),   # cloud_warm_collection (above-freezing cloud collection)
+            FT(1e-8),   # cloud_warm_collection (above-freezing cloud collection → qʷⁱ)
             FT(1e4),    # cloud_warm_collection_number
+            FT(5e-9),   # rain_warm_collection (above-freezing rain collection → qʷⁱ)
+            FT(3e-8),   # wet_growth_cloud (cloud riming redirected to qʷⁱ)
+            FT(2e-8),   # wet_growth_rain (rain riming redirected to qʷⁱ)
         )
 
         # Compute total water tendency: vapor + cloud + rain + ice + liquid_on_ice
