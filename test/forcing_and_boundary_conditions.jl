@@ -296,6 +296,20 @@ end
         @test expected_θ_flux ≈ 𝒬 / cᵖᵐ
     end
 
+    @testset "Function-type ρe BC (via ρe→ρθ conversion) is unambiguous [$FT]" begin
+        # Regression test: FluxBoundaryCondition wraps Julia functions in
+        # ContinuousBoundaryFunction{Nothing,Nothing,Nothing} at construction time.
+        # The EnergyFluxBoundaryConditionFunction wrapper must forward regularization
+        # so the inner ContinuousBoundaryFunction gets proper {LX,LY,LZ} type params.
+        grid_1 = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+        𝒬_func(x, y, t) = FT(500)
+        ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬_func))
+        model = AtmosphereModel(grid_1; boundary_conditions=(; ρe=ρe_bcs))
+        set!(model; θ=model.dynamics.reference_state.potential_temperature, qᵗ=qᵗ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+    end
+
     @testset "Error when specifying both ρθ and ρe boundary conditions [$FT]" begin
         grid_1 = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
