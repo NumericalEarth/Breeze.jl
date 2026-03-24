@@ -29,6 +29,8 @@ using Enzyme
 using CairoMakie
 using Printf
 
+ENV["XLA_FLAGS"] = get(ENV, "XLA_FLAGS", "") * " --xla_gpu_asm_extra_flags=-w" #src
+
 # ## 1. The continuous PDE
 #
 # On a doubly periodic square ``\Omega = [-L/2,\,L/2]^2`` we solve the
