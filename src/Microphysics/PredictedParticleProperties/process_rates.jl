@@ -725,6 +725,18 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     shed_n = shedding_number_rate(p3, shed)
     refrz = refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
 
+    # Liquid fraction clipping (Fortran freeze_tiny_liqfrac, lines 11620-11624):
+    # When Fl < liqfracsmall below freezing, drain all qʷⁱ → rime.
+    # When Fl > 1-liqfracsmall above freezing, drain all qʷⁱ → rain (complete melt).
+    # Implemented as relaxation over refreezing_timescale (Fortran does it instantaneously).
+    Fl_small = prp.liquid_fraction_small
+    τ_clip = prp.refreezing_timescale
+    qʷⁱ_eff = clamp_positive(qʷⁱ)
+    clip_freeze = (T < T₀) & (Fˡ < Fl_small) & (Fˡ > 0)
+    clip_melt   = (T >= T₀) & (Fˡ > 1 - Fl_small)
+    refrz = ifelse(clip_freeze, refrz + qʷⁱ_eff / τ_clip, refrz)
+    complete_melt = ifelse(clip_melt, complete_melt + qʷⁱ_eff / τ_clip, complete_melt)
+
     # =========================================================================
     # Ice nucleation (deposition nucleation and immersion freezing)
     # =========================================================================

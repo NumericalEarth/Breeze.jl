@@ -146,7 +146,8 @@ struct ProcessRateParameters{FT}
     maximum_ice_number_density :: FT         # Nᵢ_max [1/m³]
 
     # Liquid fraction clipping threshold (Milbrandt et al. 2025)
-    # Fl < this: instantly freeze all qwi to rime; Fl > (1 - this): fully melt to rain
+    # Fl < this: instantly freeze all qwi to rime; Fl > (1 - this): fully melt to rain.
+    # Implemented as a relaxation drain over refreezing_timescale.
     liquid_fraction_small :: FT              # Fortran liqfracsmall [-]
 
     # Liquid fraction mode (Fortran log_LiquidFrac).
