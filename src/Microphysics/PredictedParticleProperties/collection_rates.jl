@@ -417,10 +417,10 @@ end
 """
     rime_density_cober_list(p3, T, vᵢ, D_drop, D_ice, lwc)
 
-Compute rime density using the full Cober & List (1993) parameterization.
-This is a deliberate physics upgrade over Fortran P3 (v5.5.0), which uses a
-simpler temperature-dependent formula. The Cober & List parameterization
-accounts for impact velocity and droplet size via the Stokes impact parameter.
+Compute rime density using the Cober & List (1993) parameterization.
+Fortran P3 (v5.5.0) uses a simpler temperature-dependent formula.
+The Cober & List parameterization accounts for impact velocity and
+droplet size via the Stokes impact parameter.
 
 The rime density depends on the impact conditions:
 
@@ -433,8 +433,9 @@ where K is a dimensionless impact parameter that depends on:
 - Cloud droplet diameter (D_drop)
 - Surface temperature
 
-For wet growth conditions (T > -3°C, high LWC), rime density approaches
-the density of liquid water (soaking).
+For wet growth conditions (T > -10°C, high LWC), rime density approaches
+the density of liquid water (soaking). Disabled when `liquid_fraction_active`
+(Fortran `log_LiquidFrac=.true.`) because liquid is tracked explicitly in qʷⁱ.
 
 # Arguments
 - `p3`: P3 microphysics scheme
