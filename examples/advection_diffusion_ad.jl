@@ -58,7 +58,7 @@ A   = 2.0       # amplitude
 U₀  = 10.0      # advection velocity           [m/s]
 L   = 200.0     # domain side length           [m]
 t_f = 1.0       # integration time             [s]
-CFL = 0.08      # CFL number  (Δt = CFL × Δx / U₀)
+CFL = 0.01      # CFL number  (Δt = CFL × Δx / U₀)
 
 # With these values ``s_f = \sigma_0^2 + 2\kappa t_f = 480`` m² and
 # the Gaussian translates ``U_0 t_f = 10`` m — less than one coarse

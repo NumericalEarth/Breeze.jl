@@ -43,7 +43,7 @@ examples = [
     Example("Splitting supercell", "splitting_supercell", false),
     Example("Tropical cyclone world", "tropical_cyclone_world", false),
     Example("Diurnal cycle of radiative convection", "radiative_convection", false),
-    Example("Advection–diffusion AD verification", "advection_diffusion_ad", false),
+    Example("Advection–diffusion AD verification", "advection_diffusion_ad", true),
 ]
 
 # Filter out long-running example if necessary
