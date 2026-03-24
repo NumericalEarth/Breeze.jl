@@ -23,7 +23,8 @@ using Oceananigans.TurbulenceClosures: ScalarDiffusivity
 using Oceananigans.Grids: xnodes, ynodes
 using CUDA
 using Reactant
-using Reactant: @trace, @allowscalar
+using Reactant: @trace
+using GPUArraysCore: @allowscalar
 using Enzyme
 using CairoMakie
 using Printf
@@ -303,6 +304,5 @@ lines!(ax, Δx_vec, ref₂, linestyle = :dash, color = :black,
 
 axislegend(ax, position = :rb)
 
-outfile = "advection_diffusion_gradient_convergence.png"
-save(outfile, fig)
+save("advection_diffusion_gradient_convergence.png", fig) #src
 fig
