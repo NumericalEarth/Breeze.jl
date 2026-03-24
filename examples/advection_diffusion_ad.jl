@@ -29,7 +29,7 @@ using Enzyme
 using CairoMakie
 using Printf
 
-ENV["XLA_FLAGS"] = get(ENV, "XLA_FLAGS", "") * " --xla_gpu_asm_extra_flags=-w" #src
+ENV["XLA_FLAGS"] = get(ENV, "XLA_FLAGS", "") * " --xla_gpu_asm_extra_flags=-w" #hide
 
 # ## 1. The continuous PDE
 #
