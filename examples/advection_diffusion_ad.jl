@@ -56,7 +56,7 @@ A   = 2.0       # amplitude
 U₀  = 10.0      # advection velocity           [m/s]
 L   = 200.0     # domain side length           [m]
 t_f = 1.0       # integration time             [s]
-CFL = 0.05      # CFL number  (Δt = CFL × Δx / U₀)
+CFL = 0.01      # CFL number  (Δt = CFL × Δx / U₀)
 
 # With these values ``s_f = \sigma_0^2 + 2\kappa t_f = 480`` m² and
 # the Gaussian translates ``U_0 t_f = 10`` m — less than one coarse
@@ -162,13 +162,7 @@ end
 # (needed because `θ[i]` on a traced array is a scalar read).
 # The Gaussian IC is then built entirely via **broadcasts** on the
 # coordinate arrays `xc`, `yc` — no per-element `set!` calls are
-# required:
-#
-# ```julia
-# r² = X .^ 2 .+ Y .^ 2            # (N,) ⊗ (1,N) → (N,N)
-# T_vals = A .* exp.(-r² ./ (2σ₀²))
-# interior(T⁰) .= reshape(T_vals, size(interior(T⁰)))
-# ```
+# required.
 #
 # The coordinate arrays and all remaining scalar arguments
 # (``\Delta t``, ``N_s``, ``\Delta x``) are passed as `Const`.
