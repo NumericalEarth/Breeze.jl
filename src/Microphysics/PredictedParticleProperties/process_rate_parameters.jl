@@ -83,6 +83,9 @@ struct ProcessRateParameters{FT}
     splintering_temperature_peak :: FT       # T_peak [K]
     splintering_temperature_width :: FT      # width [K]
     splintering_rate :: FT                   # splinters per kg rime
+    splintering_diameter_threshold :: FT     # D_min [m] for HM splintering
+    splintering_liquid_fraction_max :: FT    # Fˡ max for HM splintering
+    splintering_surface_temperature_max :: FT # warm-surface shutoff [K]
 
     # Rain terminal velocity (power law v = a D^b)
     rain_fall_speed_coefficient :: FT        # a [m^(1-b)/s]
@@ -263,6 +266,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         splintering_temperature_peak = 268.15,
         splintering_temperature_width = 2.5,
         splintering_rate = 3.5e8,
+        splintering_diameter_threshold = 250e-6,
+        splintering_liquid_fraction_max = 0.1,
+        splintering_surface_temperature_max = 282.0,
 
         # Rain terminal velocity
         rain_fall_speed_coefficient = 842.0,
@@ -377,6 +383,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(splintering_temperature_peak),
         FT(splintering_temperature_width),
         FT(splintering_rate),
+        FT(splintering_diameter_threshold),
+        FT(splintering_liquid_fraction_max),
+        FT(splintering_surface_temperature_max),
         FT(rain_fall_speed_coefficient),
         FT(rain_fall_speed_exponent),
         FT(rain_diameter_min),

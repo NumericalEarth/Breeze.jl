@@ -332,7 +332,7 @@ end
 #####
 
 """
-    rime_splintering_rate(p3, cloud_riming, rain_riming, T)
+    rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, surface_T, qᶠ)
 
 Compute secondary ice production from rime splintering (Hallett-Mossop effect).
 
@@ -345,37 +345,57 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
 - `cloud_riming`: Cloud droplet riming rate [kg/kg/s]
 - `rain_riming`: Rain riming rate [kg/kg/s]
 - `T`: Temperature [K]
+- `D_ice`: Mean ice diameter [m]
+- `Fˡ`: Liquid fraction on ice [-]
+- `surface_T`: Surface-temperature proxy for the warm-season shutoff [K]
+- `qᶠ`: Existing rimed-ice mass [kg/kg]
 
 # Returns
 - Tuple (Q_spl, N_spl): ice mass rate [kg/kg/s] and number rate [1/kg/s]
 """
-@inline function rime_splintering_rate(p3, cloud_riming, rain_riming, T)
+@inline function rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, surface_T, qᶠ)
     FT = typeof(T)
     prp = p3.process_rates
 
     T_low = prp.splintering_temperature_low
     T_high = prp.splintering_temperature_high
     T_peak = prp.splintering_temperature_peak
-    T_width = prp.splintering_temperature_width
     c_splinter = prp.splintering_rate
     mᵢ₀ = prp.nucleated_ice_mass
 
-    # Hallett-Mossop temperature window
-    in_HM_window = (T > T_low) & (T < T_high)
+    warm_branch = clamp((T - T_low) / (T_peak - T_low), zero(FT), one(FT))
+    cold_branch = clamp((T_high - T) / (T_high - T_peak), zero(FT), one(FT))
+    efficiency = ifelse(T <= T_peak, warm_branch, cold_branch)
 
-    # Efficiency peaks at T_peak, tapers to zero at boundaries
-    efficiency = exp(-((T - T_peak) / T_width)^2)
-
-    # Total riming rate
-    total_riming = clamp_positive(cloud_riming + rain_riming)
+    # Fortran nCat=1 path uses rain riming only, plus size, liquid-fraction,
+    # and warm-surface guards for Hallett-Mossop splintering.
+    total_riming = clamp_positive(rain_riming)
+    has_rime = qᶠ >= p3.minimum_mass_mixing_ratio
+    active = (D_ice ≥ prp.splintering_diameter_threshold) &
+             has_rime &
+             (Fˡ < prp.splintering_liquid_fraction_max) &
+             (surface_T < prp.splintering_surface_temperature_max)
 
     # Number of splinters produced
-    N_spl = ifelse(in_HM_window,
-                    efficiency * c_splinter * total_riming,
-                    zero(FT))
+    N_spl = ifelse(active, efficiency * c_splinter * total_riming, zero(FT))
 
     # Mass of splinters
     Q_spl = N_spl * mᵢ₀
 
     return Q_spl, N_spl
+end
+
+@inline function rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, surface_T)
+    FT = typeof(T)
+    return rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, surface_T, FT(Inf))
+end
+
+@inline function rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ)
+    FT = typeof(T)
+    return rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, T, FT(Inf))
+end
+
+@inline function rime_splintering_rate(p3, cloud_riming, rain_riming, T)
+    FT = typeof(T)
+    return rime_splintering_rate(p3, cloud_riming, rain_riming, T, FT(Inf), zero(FT), T, FT(Inf))
 end

@@ -365,6 +365,62 @@ end
     return particle_mass_ice_only(D, state, thresholds)
 end
 
+@inline function partially_rimed_mass_weight(D, state::IceSizeDistributionState, thresholds)
+    FT = typeof(D)
+    α = state.mass_coefficient
+    β = state.mass_exponent
+
+    m_actual = particle_mass_ice_only(D, state, thresholds)
+    m_unrimed = α * D^β
+    m_graupel = thresholds.ρ_graupel * FT(π) / 6 * D^3
+    Δm = m_graupel - m_unrimed
+    weight = ifelse(abs(Δm) > eps(FT), (m_actual - m_unrimed) / Δm, one(FT))
+
+    return clamp(weight, zero(FT), one(FT))
+end
+
+"""
+    particle_diameter_ice_only(m_ice, state, thresholds)
+
+Invert the piecewise ice-only mass-diameter relation to recover diameter from mass.
+
+Accepts precomputed `thresholds` from [`regime_thresholds_from_state`](@ref)
+to avoid redundant threshold computations within a quadrature loop.
+"""
+@inline function particle_diameter_ice_only(m_ice, state::IceSizeDistributionState, thresholds)
+    FT = typeof(m_ice)
+    α = state.mass_coefficient
+    β = state.mass_exponent
+    ρᵢ = state.ice_density
+
+    Fᶠ_safe = min(state.rime_fraction, one(FT) - eps(FT))
+    m_positive = max(0, m_ice)
+
+    D_spherical = cbrt(6 * m_positive / (FT(π) * ρᵢ))
+    D_aggregate = (m_positive / α)^(1 / β)
+    D_graupel = cbrt(6 * m_positive / (FT(π) * thresholds.ρ_graupel))
+    D_partial = ((1 - Fᶠ_safe) * m_positive / α)^(1 / β)
+
+    m_spherical = ρᵢ * FT(π) / 6 * thresholds.spherical^3
+    m_graupel = thresholds.ρ_graupel * FT(π) / 6 * thresholds.graupel^3
+    m_partial = α / (1 - Fᶠ_safe) * thresholds.partial_rime^β
+
+    is_regime_4 = m_positive ≥ m_partial
+    is_regime_3 = m_positive ≥ m_graupel
+    is_regime_2 = m_positive ≥ m_spherical
+
+    D = ifelse(is_regime_4, D_partial, D_graupel)
+    D = ifelse(is_regime_3, D, D_aggregate)
+    D = ifelse(is_regime_2, D, D_spherical)
+
+    return D
+end
+
+@inline function particle_diameter_ice_only(m_ice, state::IceSizeDistributionState)
+    thresholds = regime_thresholds_from_state(m_ice, state)
+    return particle_diameter_ice_only(m_ice, state, thresholds)
+end
+
 """
     particle_area_ice_only(D, state, thresholds)
 
@@ -375,7 +431,6 @@ to avoid redundant threshold computations within a quadrature loop.
 """
 @inline function particle_area_ice_only(D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
-    Fᶠ = state.rime_fraction
 
     # Spherical area
     A_sphere = FT(π) / 4 * D^2
@@ -391,10 +446,13 @@ to avoid redundant threshold computations within a quadrature loop.
     is_partially_rimed = D ≥ thresholds.partial_rime
     is_graupel = (D ≥ thresholds.graupel) & !is_partially_rimed
 
-    A_intermediate = (1 - Fᶠ) * A_aggregate + Fᶠ * A_sphere
+    partial_rime_weight = partially_rimed_mass_weight(D, state, thresholds)
+    A_partial = A_aggregate + partial_rime_weight * (A_sphere - A_aggregate)
 
-    A = ifelse(is_small, A_sphere, A_intermediate)
+    A = A_aggregate
+    A = ifelse(is_partially_rimed, A_partial, A)
     A = ifelse(is_graupel, A_sphere, A)
+    A = ifelse(is_small, A_sphere, A)
 
     return A
 end
@@ -649,7 +707,7 @@ See Pruppacher & Klett (1997) Chapter 13.
 """
 @inline function capacitance(D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
-    Fᶠ = state.rime_fraction
+    Fˡ = state.liquid_fraction
 
     # Sphere capacitance (P3 Fortran convention: cap=1.0, capm = cap × D)
     # Physical capacitance is D/2; the extra factor of 2 is absorbed by using
@@ -660,22 +718,19 @@ See Pruppacher & Klett (1997) Chapter 13.
     # P3 Fortran: cap=0.48, capm = 0.48 × D
     C_nonspherical = FT(0.48) * D
 
-    # Small spherical ice
     is_small = D < thresholds.spherical
+    is_partially_rimed = D ≥ thresholds.partial_rime
+    is_graupel = (D ≥ thresholds.graupel) & !is_partially_rimed
 
-    # Heavily rimed particles become more spherical
-    # Graupel and heavily rimed particles: use spherical capacitance
-    is_graupel = D ≥ thresholds.graupel
+    partial_rime_weight = partially_rimed_mass_weight(D, state, thresholds)
+    C_ice = C_nonspherical + partial_rime_weight * (C_sphere - C_nonspherical)
 
-    # Interpolate based on rime fraction for intermediate regime
-    # More rime → more spherical
-    C_intermediate = (1 - Fᶠ) * C_nonspherical + Fᶠ * C_sphere
-
-    # Select based on regime
-    C = ifelse(is_small, C_sphere, C_intermediate)
+    C = C_nonspherical
+    C = ifelse(is_partially_rimed, C_ice, C)
     C = ifelse(is_graupel, C_sphere, C)
+    C = ifelse(is_small, C_sphere, C)
 
-    return C
+    return (1 - Fˡ) * C + Fˡ * C_sphere
 end
 
 # Backward-compatible method: compute thresholds on the fly

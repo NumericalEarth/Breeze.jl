@@ -1136,7 +1136,7 @@ using Oceananigans.Fields: interior
         @test thresholds_rimed.ρ_graupel > 0
     end
 
-    @testset "Regime-4 particle area uses blended area" begin
+    @testset "Regime-4 particle area uses mass-ratio interpolation" begin
         FT = Float64
         state = IceSizeDistributionState(FT;
             intercept = 1e6,
@@ -1154,11 +1154,95 @@ using Oceananigans.Fields: interior
         σ = FT(1.88)
         γ = FT(0.2285) * FT(100)^(σ - 2)
         A_aggregate = γ * D^σ
-        A_blended = (1 - state.rime_fraction) * A_aggregate + state.rime_fraction * A_sphere
+        m_actual = Breeze.Microphysics.PredictedParticleProperties.particle_mass_ice_only(D, state, thresholds)
+        m_unrimed = state.mass_coefficient * D^state.mass_exponent
+        m_graupel = thresholds.ρ_graupel * FT(π) / 6 * D^3
+        weight = (m_actual - m_unrimed) / (m_graupel - m_unrimed)
+        A_expected = A_aggregate + weight * (A_sphere - A_aggregate)
+        A_rime_fraction = (1 - state.rime_fraction) * A_aggregate + state.rime_fraction * A_sphere
 
         @test isfinite(A)
-        @test A ≈ A_blended
+        @test A ≈ A_expected
+        @test A != A_rime_fraction
         @test A != A_sphere
+    end
+
+    @testset "Aggregate and partially-rimed geometry follow Fortran regime logic" begin
+        FT = Float64
+        state = IceSizeDistributionState(FT;
+            intercept = 1e6,
+            shape = 0.0,
+            slope = 1000.0,
+            rime_fraction = 0.5,
+            liquid_fraction = 0.25,
+            rime_density = 500.0)
+
+        thresholds = Breeze.Microphysics.PredictedParticleProperties.regime_thresholds_from_state(FT, state)
+        σ = FT(1.88)
+        γ = FT(0.2285) * FT(100)^(σ - 2)
+
+        D_aggregate = sqrt(thresholds.spherical * thresholds.graupel)
+        A_aggregate = Breeze.Microphysics.PredictedParticleProperties.particle_area_ice_only(D_aggregate, state, thresholds)
+        @test A_aggregate ≈ γ * D_aggregate^σ
+
+        C_aggregate = Breeze.Microphysics.PredictedParticleProperties.capacitance(D_aggregate, state, thresholds)
+        C_aggregate_expected = (1 - state.liquid_fraction) * FT(0.48) * D_aggregate +
+                               state.liquid_fraction * D_aggregate
+        @test C_aggregate ≈ C_aggregate_expected
+
+        D_partial = thresholds.partial_rime * FT(1.01)
+        C_partial = Breeze.Microphysics.PredictedParticleProperties.capacitance(D_partial, state, thresholds)
+        m_actual = Breeze.Microphysics.PredictedParticleProperties.particle_mass_ice_only(D_partial, state, thresholds)
+        m_unrimed = state.mass_coefficient * D_partial^state.mass_exponent
+        m_graupel = thresholds.ρ_graupel * FT(π) / 6 * D_partial^3
+        weight = (m_actual - m_unrimed) / (m_graupel - m_unrimed)
+        C_ice_expected = (FT(0.48) + weight * (1 - FT(0.48))) * D_partial
+        C_expected = (1 - state.liquid_fraction) * C_ice_expected + state.liquid_fraction * D_partial
+        @test C_partial ≈ C_expected
+    end
+
+    @testset "Rime splintering follows Fortran guards" begin
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        prp = p3.process_rates
+
+        cloud_riming = FT(3e-7)
+        rain_riming = FT(2e-7)
+        D_ice = FT(300e-6)
+        Fˡ = FT(0.05)
+        surface_T = FT(280)
+        qᶠ = FT(1e-6)
+
+        left_q, left_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
+            p3, cloud_riming, rain_riming, FT(266.15), D_ice, Fˡ, surface_T, qᶠ)
+        peak_q, peak_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
+            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
+        right_q, right_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
+            p3, cloud_riming, rain_riming, FT(269.15), D_ice, Fˡ, surface_T, qᶠ)
+
+        @test left_n ≈ (FT(1) / FT(3)) * prp.splintering_rate * rain_riming
+        @test peak_n ≈ prp.splintering_rate * rain_riming
+        @test right_n ≈ FT(0.5) * prp.splintering_rate * rain_riming
+        @test left_q ≈ left_n * prp.nucleated_ice_mass
+        @test peak_q ≈ peak_n * prp.nucleated_ice_mass
+        @test right_q ≈ right_n * prp.nucleated_ice_mass
+
+        _, cloud_only_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
+            p3, cloud_riming, zero(FT), prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
+        _, small_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
+            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, FT(200e-6), Fˡ, surface_T, qᶠ)
+        _, wet_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
+            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, D_ice, FT(0.2), surface_T, qᶠ)
+        _, warm_surface_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
+            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, D_ice, Fˡ, FT(283), qᶠ)
+        _, no_rime_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
+            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, zero(FT))
+
+        @test cloud_only_n == 0
+        @test small_n == 0
+        @test wet_n == 0
+        @test warm_surface_n == 0
+        @test no_rime_n == 0
     end
 
     @testset "Ice mass computation" begin

@@ -62,6 +62,32 @@ end
 # Convenience overload for common case
 @inline safe_divide(a, b) = safe_divide(a, b, zero(a))
 
+@inline function mean_ice_distribution_state(FT, Fᶠ, Fˡ, ρᶠ, prp)
+    mass = IceMassPowerLaw(FT)
+
+    return IceSizeDistributionState(FT;
+                                    intercept = one(FT),
+                                    shape = zero(FT),
+                                    slope = one(FT),
+                                    rime_fraction = Fᶠ,
+                                    liquid_fraction = Fˡ,
+                                    rime_density = ρᶠ,
+                                    mass_coefficient = mass.coefficient,
+                                    mass_exponent = mass.exponent,
+                                    ice_density = mass.ice_density,
+                                    reference_air_density = prp.reference_air_density,
+                                    air_density = prp.reference_air_density)
+end
+
+@inline function mean_ice_particle_diameter(m_mean, Fᶠ, Fˡ, ρᶠ, prp)
+    FT = typeof(m_mean)
+    state = mean_ice_distribution_state(FT, Fᶠ, Fˡ, ρᶠ, prp)
+    thresholds = regime_thresholds_from_state(FT, state)
+    D_mean = particle_diameter_ice_only(clamp_positive(m_mean), state, thresholds)
+
+    return D_mean, state, thresholds
+end
+
 """
     consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
 
@@ -211,12 +237,8 @@ end
 @inline function deposition_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
                                           m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
     FT = typeof(m_mean)
-    ρ_eff_unrimed = prp.ice_effective_density_unrimed
-    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
-    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
-    D_threshold = prp.ice_diameter_threshold
-    # P3 Fortran convention: capm = cap × D where cap=1 for sphere, 0.48 for aggregate
-    C = ifelse(D_mean < D_threshold, D_mean, FT(0.48) * D_mean)
+    D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, zero(FT), ρᶠ, prp)
+    C = capacitance(D_mean, state, thresholds)
     # H7: Blend fall speed coefficients with rime fraction (matching collection_kernel_per_particle)
     a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
     b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
@@ -258,12 +280,8 @@ end
 @inline function melting_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
                                        m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v)
     FT = typeof(m_mean)
-    ρ_eff_unrimed = prp.ice_effective_density_unrimed
-    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
-    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
-    D_threshold = prp.ice_diameter_threshold
-    # P3 Fortran convention: capm = cap × D
-    C = ifelse(D_mean < D_threshold, D_mean, FT(0.48) * D_mean)
+    D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, Fl, ρᶠ, prp)
+    C = capacitance(D_mean, state, thresholds)
     # Ice fall speed (matching deposition_ventilation)
     a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
     b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
@@ -295,9 +313,7 @@ end
 
 @inline function collection_kernel_per_particle(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
-    ρ_eff_unrimed = prp.ice_effective_density_unrimed
-    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
-    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
+    D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, zero(FT), ρᶠ, prp)
     D_mean = clamp(D_mean, prp.ice_diameter_min, prp.ice_diameter_max)
     # M9: Fortran P3 only includes ice particles with D >= 100 μm in the
     # collection integral (nrwat threshold). Zero the kernel for sub-threshold
@@ -306,9 +322,7 @@ end
     a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
     b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
     V_mean = a_V * D_mean^b_V
-    A_agg = prp.ice_projected_area_coefficient * D_mean^prp.ice_projected_area_exponent
-    A_sphere = FT(π) / 4 * D_mean^2
-    A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
+    A_mean = particle_area_ice_only(D_mean, state, thresholds)
     psd_correction = prp.riming_psd_correction
     return ifelse(below_threshold, zero(FT), A_mean * V_mean * psd_correction)
 end
@@ -332,15 +346,11 @@ end
 
 @inline function aggregation_kernel(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
-    ρ_eff_unrimed = prp.ice_effective_density_unrimed
-    ρ_eff = max(FT(50), (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ)
-    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
+    D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, zero(FT), ρᶠ, prp)
     a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
     b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
     V_mean = a_V * D_mean^b_V
-    A_agg = prp.ice_projected_area_coefficient * D_mean^prp.ice_projected_area_exponent
-    A_sphere = FT(π) / 4 * D_mean^2
-    A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
+    A_mean = particle_area_ice_only(D_mean, state, thresholds)
     ΔV = FT(0.5) * V_mean
     # Factor of 0.5 for self-collection (half-integral convention, matching table)
     return FT(0.5) * A_mean * ΔV
@@ -759,6 +769,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     qⁱ_total = max(clamp_positive(qⁱ) + clamp_positive(qʷⁱ), FT(1e-20))
     Fˡ = clamp_positive(qʷⁱ) / qⁱ_total
     m_mean = safe_divide(clamp_positive(qⁱ), clamp_positive(nⁱ), FT(1e-12))
+    D_mean = first(mean_ice_particle_diameter(m_mean, Fᶠ, Fˡ, ρᶠ, prp))
 
     shed = shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
     shed_n = shedding_number_rate(p3, shed)
@@ -786,7 +797,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Rime splintering (Hallett-Mossop secondary ice production)
     # =========================================================================
-    spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T)
+    spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T, D_mean, Fˡ, T, qᶠ)
 
     # =========================================================================
     # Homogeneous freezing (T < -40°C, instantaneous conversion)
@@ -867,7 +878,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     refrz  = refrz * f_qwi
 
     # Recompute splintering from sink-limited riming rates
-    spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T)
+    spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T, D_mean, Fˡ, T, qᶠ)
 
     return P3ProcessRates(
         # Phase 1: Condensation
