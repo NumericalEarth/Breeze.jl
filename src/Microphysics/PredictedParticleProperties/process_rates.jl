@@ -519,27 +519,6 @@ The bulk rate integrates over the size distribution:
     return ifelse(is_sublimation, max(dep_rate, max_sublim), dep_rate)
 end
 
-# Backward-compatible: explicit transport, no explicit q
-# Uses all-vapor moisture fractions; when constants=nothing the correction
-# uses the Fortran hardcoded cpd and q is not accessed.
-@inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P,
-                                                  constants, transport)
-    q = MoistureMassFractions(qᵛ)
-    return ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport, q)
-end
-
-# Backward-compatible: explicit transport, hardcoded latent heats
-@inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P,
-                                                  transport::NamedTuple)
-    return ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, nothing, transport)
-end
-
-# Backward-compatible: default transport, hardcoded latent heats
-@inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P)
-    return ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, nothing,
-                                            air_transport_properties(T, P))
-end
-
 #####
 ##### Combined P3 tendency calculation
 #####
@@ -1038,12 +1017,6 @@ Rain number loses from:
     return ρ * (n_gain - n_loss)
 end
 
-# Backward-compatible overload without nʳ/qʳ (no evaporation number contribution)
-@inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ, prp::ProcessRateParameters)
-    FT = typeof(ρ)
-    return tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, zero(FT), one(FT), prp)
-end
-
 """
     tendency_ρqⁱ(rates)
 
@@ -1178,19 +1151,6 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
     return ρ * (volume_gain - volume_loss - densification)
 end
 
-# Backward-compatible overloads
-# qⁱ cancels in the densification term (bᶠ × ... / qⁱ), so any nonzero value is correct
-@inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ, prp::ProcessRateParameters)
-    return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, one(typeof(ρ)), prp)
-end
-
-# qⁱ cancels in the densification term (bᶠ × ... / qⁱ), so any nonzero value is correct
-@inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ)
-    FT = typeof(ρ)
-    prp = (pure_ice_density = FT(917), maximum_rime_density = FT(900), liquid_fraction_active = true)
-    return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, one(FT), prp)
-end
-
 """
     tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ)
 
@@ -1276,15 +1236,6 @@ pre-computed lookup tables. Otherwise, falls back to proportional scaling.
     )
 
     return z_tendency
-end
-
-# Backward-compatible overload without transport properties (uses reference Sc correction)
-@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3)
-    FT = typeof(ρ)
-    # Reference conditions: nu ≈ 1.5e-5, D_v ≈ 2.2e-5 → Sc ≈ 0.68, Sc^(1/3)/√ν ≈ 227
-    nu_ref = FT(1.5e-5)
-    D_v_ref = FT(2.2e-5)
-    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3, nu_ref, D_v_ref)
 end
 
 # Tabulated version: use TabulatedFunction4D lookups for Z tendencies.

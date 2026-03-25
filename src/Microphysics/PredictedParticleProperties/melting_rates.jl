@@ -3,7 +3,7 @@
 #####
 
 """
-    ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
+    ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
 
 Compute ice melting rate using the heat balance equation from
 Morrison & Milbrandt (2015a) Eq. 44.
@@ -125,25 +125,6 @@ where:
     return ifelse(is_melting, melt_rate, zero(FT))
 end
 
-# Backward-compatible: no liquid fraction provided; assumes pure ice (Fl = 0)
-@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
-                                   constants, transport)
-    FT = typeof(qⁱ)
-    return ice_melting_rate(p3, qⁱ, nⁱ, zero(FT), T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
-end
-
-# Backward-compatible: explicit transport, hardcoded latent heats
-@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
-                                   transport::NamedTuple)
-    return ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, nothing, transport)
-end
-
-# Backward-compatible: default transport, hardcoded latent heats
-@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
-    return ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, nothing,
-                             air_transport_properties(T, P))
-end
-
 """
     ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
 
@@ -205,18 +186,6 @@ particle reaches this capacity, additional meltwater sheds to rain.
     complete = total_melt * (1 - fraction_to_coating)
 
     return (partial_melting = partial, complete_melting = complete)
-end
-
-# Backward-compatible: explicit transport, hardcoded latent heats
-@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
-                                    transport::NamedTuple)
-    return ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, nothing, transport)
-end
-
-# Backward-compatible: default transport, hardcoded latent heats
-@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
-    return ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, nothing,
-                              air_transport_properties(T, P))
 end
 
 """

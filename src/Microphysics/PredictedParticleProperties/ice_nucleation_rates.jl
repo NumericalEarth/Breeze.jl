@@ -384,18 +384,3 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
 
     return Q_spl, N_spl
 end
-
-@inline function rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, surface_T)
-    FT = typeof(T)
-    return rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, surface_T, FT(Inf))
-end
-
-@inline function rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ)
-    FT = typeof(T)
-    return rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, T, FT(Inf))
-end
-
-@inline function rime_splintering_rate(p3, cloud_riming, rain_riming, T)
-    FT = typeof(T)
-    return rime_splintering_rate(p3, cloud_riming, rain_riming, T, FT(Inf), zero(FT), T, FT(Inf))
-end

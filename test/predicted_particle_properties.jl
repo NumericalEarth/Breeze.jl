@@ -1472,11 +1472,11 @@ using Oceananigans.Fields: interior
         # Test each tendency function returns a finite number
         @test isfinite(tendency_ρqᶜˡ(rates, ρ))
         @test isfinite(tendency_ρqʳ(rates, ρ))
-        @test isfinite(tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, prp))
+        @test isfinite(tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, zero(FT), one(FT), prp))
         @test isfinite(tendency_ρqⁱ(rates, ρ))
         @test isfinite(tendency_ρnⁱ(rates, ρ))
         @test isfinite(tendency_ρqᶠ(rates, ρ, Fᶠ))
-        @test isfinite(tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ))
+        @test isfinite(tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, one(FT), ProcessRateParameters(FT)))
         @test isfinite(tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ))
         @test isfinite(tendency_ρqʷⁱ(rates, ρ))
         @test isfinite(tendency_ρqᵛ(rates, ρ))
@@ -1492,11 +1492,11 @@ using Oceananigans.Fields: interior
 
         @test tendency_ρqᶜˡ(zero_rates, ρ) == 0.0
         @test tendency_ρqʳ(zero_rates, ρ) == 0.0
-        @test tendency_ρnʳ(zero_rates, ρ, FT(1e5), FT(1e-4), ProcessRateParameters(FT)) == 0.0
+        @test tendency_ρnʳ(zero_rates, ρ, FT(1e5), FT(1e-4), zero(FT), one(FT), ProcessRateParameters(FT)) == 0.0
         @test tendency_ρqⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρnⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρqᶠ(zero_rates, ρ, FT(0.3)) == 0.0
-        @test tendency_ρbᶠ(zero_rates, ρ, FT(0.3), FT(400.0)) == 0.0
+        @test tendency_ρbᶠ(zero_rates, ρ, FT(0.3), FT(400.0), one(FT), ProcessRateParameters(FT)) == 0.0
         @test tendency_ρzⁱ(zero_rates, ρ, FT(1e-4), FT(1e5), FT(1e-8)) == 0.0
         @test tendency_ρqʷⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρqᵛ(zero_rates, ρ) == 0.0
@@ -1533,11 +1533,11 @@ using Oceananigans.Fields: interior
 
         @test tendency_ρqᶜˡ(rates, ρ) isa FT
         @test tendency_ρqʳ(rates, ρ) isa FT
-        @test tendency_ρnʳ(rates, ρ, FT(1e5), FT(1e-4), ProcessRateParameters(FT)) isa FT
+        @test tendency_ρnʳ(rates, ρ, FT(1e5), FT(1e-4), zero(FT), one(FT), ProcessRateParameters(FT)) isa FT
         @test tendency_ρqⁱ(rates, ρ) isa FT
         @test tendency_ρnⁱ(rates, ρ) isa FT
         @test tendency_ρqᶠ(rates, ρ, FT(0.3)) isa FT
-        @test tendency_ρbᶠ(rates, ρ, FT(0.3), FT(400.0)) isa FT
+        @test tendency_ρbᶠ(rates, ρ, FT(0.3), FT(400.0), one(FT), ProcessRateParameters(FT)) isa FT
         @test tendency_ρzⁱ(rates, ρ, FT(1e-4), FT(1e5), FT(1e-8)) isa FT
         @test tendency_ρqʷⁱ(rates, ρ) isa FT
         @test tendency_ρqᵛ(rates, ρ) isa FT
@@ -1668,16 +1668,20 @@ using Oceananigans.Fields: interior
         # Supersaturated over ice: positive deposition
         qv_sat_ice = FT(0.0005)
         qv_super = FT(0.001)    # Well above ice saturation
-        rate_dep = ventilation_enhanced_deposition(p3, qi, ni, qv_super, qv_sat_ice, Ff, ρf, T, P)
+        transport = air_transport_properties(T, P)
+        rate_dep = ventilation_enhanced_deposition(p3, qi, ni, qv_super, qv_sat_ice, Ff, ρf, T, P,
+                                                   nothing, transport, MoistureMassFractions(qv_super))
         @test rate_dep > 0
 
         # Subsaturated over ice: negative (sublimation)
         qv_sub = FT(0.0001)
-        rate_sub = ventilation_enhanced_deposition(p3, qi, ni, qv_sub, qv_sat_ice, Ff, ρf, T, P)
+        rate_sub = ventilation_enhanced_deposition(p3, qi, ni, qv_sub, qv_sat_ice, Ff, ρf, T, P,
+                                                   nothing, transport, MoistureMassFractions(qv_sub))
         @test rate_sub < 0
 
         # Zero ice gives zero deposition rate (mean mass → default)
-        rate_noice = ventilation_enhanced_deposition(p3, FT(0), FT(0), qv_super, qv_sat_ice, Ff, ρf, T, P)
+        rate_noice = ventilation_enhanced_deposition(p3, FT(0), FT(0), qv_super, qv_sat_ice, Ff, ρf, T, P,
+                                                     nothing, transport, MoistureMassFractions(qv_super))
         @test abs(rate_noice) < 1e-20
 
         # Verify that D_v increases at altitude (larger at T=240K/P=30kPa than surface).
@@ -1694,9 +1698,11 @@ using Oceananigans.Fields: interior
         transport = air_transport_properties(T, P)
 
         rate_default_constants = ventilation_enhanced_deposition(
-            p3, qi, ni, qv_super, qv_sat_ice, Ff, ρf, T, P, default_constants, transport)
+            p3, qi, ni, qv_super, qv_sat_ice, Ff, ρf, T, P,
+            default_constants, transport, MoistureMassFractions(qv_super))
         rate_custom_constants = ventilation_enhanced_deposition(
-            p3, qi, ni, qv_super, qv_sat_ice, Ff, ρf, T, P, custom_constants, transport)
+            p3, qi, ni, qv_super, qv_sat_ice, Ff, ρf, T, P,
+            custom_constants, transport, MoistureMassFractions(qv_super))
 
         @test !isapprox(rate_custom_constants, rate_default_constants; rtol=1e-12, atol=0)
     end
@@ -1716,22 +1722,26 @@ using Oceananigans.Fields: interior
 
         # Above freezing: positive melting
         T_warm = FT(275.15)    # +2C
-        rate_warm = ice_melting_rate(p3, qi, ni, T_warm, P, qv, qv_sat, Ff, ρf, ρ)
+        rate_warm = ice_melting_rate(p3, qi, ni, FT(0), T_warm, P, qv, qv_sat, Ff, ρf, ρ,
+                                     nothing, air_transport_properties(T_warm, P))
         @test rate_warm > 0
 
         # Below freezing: zero melting
         T_cold = FT(263.15)    # -10C
-        rate_cold = ice_melting_rate(p3, qi, ni, T_cold, P, qv, qv_sat, Ff, ρf, ρ)
+        rate_cold = ice_melting_rate(p3, qi, ni, FT(0), T_cold, P, qv, qv_sat, Ff, ρf, ρ,
+                                     nothing, air_transport_properties(T_cold, P))
         @test rate_cold == 0
 
         # Exactly at freezing: zero (no ΔT to drive melting)
         T_freeze = FT(273.15)
-        rate_freeze = ice_melting_rate(p3, qi, ni, T_freeze, P, qv, qv_sat, Ff, ρf, ρ)
+        rate_freeze = ice_melting_rate(p3, qi, ni, FT(0), T_freeze, P, qv, qv_sat, Ff, ρf, ρ,
+                                       nothing, air_transport_properties(T_freeze, P))
         @test rate_freeze == 0
 
         # Warmer temperatures give faster melting
         T_hot = FT(278.15)     # +5C
-        rate_hot = ice_melting_rate(p3, qi, ni, T_hot, P, qv, qv_sat, Ff, ρf, ρ)
+        rate_hot = ice_melting_rate(p3, qi, ni, FT(0), T_hot, P, qv, qv_sat, Ff, ρf, ρ,
+                                    nothing, air_transport_properties(T_hot, P))
         @test rate_hot > rate_warm
 
         default_constants = ThermodynamicConstants(FT)
@@ -1739,9 +1749,9 @@ using Oceananigans.Fields: interior
         transport = air_transport_properties(T_warm, P)
 
         melt_default_constants = ice_melting_rate(
-            p3, qi, ni, T_warm, P, qv, qv_sat, Ff, ρf, ρ, default_constants, transport)
+            p3, qi, ni, FT(0), T_warm, P, qv, qv_sat, Ff, ρf, ρ, default_constants, transport)
         melt_custom_constants = ice_melting_rate(
-            p3, qi, ni, T_warm, P, qv, qv_sat, Ff, ρf, ρ, custom_constants, transport)
+            p3, qi, ni, FT(0), T_warm, P, qv, qv_sat, Ff, ρf, ρ, custom_constants, transport)
 
         @test !isapprox(melt_custom_constants, melt_default_constants; rtol=1e-12, atol=0)
     end
@@ -1762,7 +1772,8 @@ using Oceananigans.Fields: interior
 
         # No liquid on ice: all melting is partial (goes to coating)
         qwi_zero = FT(0)
-        rates_dry = ice_melting_rates(p3, qi, ni, qwi_zero, T, P, qv, qv_sat, Ff, ρf, ρ)
+        rates_dry = ice_melting_rates(p3, qi, ni, qwi_zero, T, P, qv, qv_sat, Ff, ρf, ρ,
+                                      nothing, air_transport_properties(T, P))
         total = rates_dry.partial_melting + rates_dry.complete_melting
         @test total > 0
         @test rates_dry.partial_melting >= 0
@@ -1770,7 +1781,8 @@ using Oceananigans.Fields: interior
 
         # Saturated liquid coating: more complete melting
         qwi_high = FT(0.5 * qi)   # 50% liquid fraction
-        rates_wet = ice_melting_rates(p3, qi, ni, qwi_high, T, P, qv, qv_sat, Ff, ρf, ρ)
+        rates_wet = ice_melting_rates(p3, qi, ni, qwi_high, T, P, qv, qv_sat, Ff, ρf, ρ,
+                                      nothing, air_transport_properties(T, P))
         @test rates_wet.complete_melting >= rates_dry.complete_melting
     end
 
@@ -2172,8 +2184,8 @@ using Oceananigans.Fields: interior
             index == 9 ? FT(1e-7) : zero(FT)
         end, fieldcount(P3ProcessRates))...)
 
-        @test tendency_ρzⁱ(partial_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab) ≈ 0
-        @test tendency_ρzⁱ(complete_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab) != 0
+        @test tendency_ρzⁱ(partial_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, FT(1.5e-5), FT(2.2e-5)) ≈ 0
+        @test tendency_ρzⁱ(complete_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, FT(1.5e-5), FT(2.2e-5)) != 0
     end
 
     #####
