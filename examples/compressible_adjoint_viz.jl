@@ -8,96 +8,7 @@ using CairoMakie
 Reactant.allowscalar(true)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Generic adjoint accumulation infrastructure (from viz_mwe.jl)
-#
-# The user provides:
-#   step!(model)          — mutates model state in-place
-#   loss(model) -> scalar — terminal objective
-#   get_state(model)      — extract the state as a flat 1-D vector (copy)
-#   set_state!(model, u)  — restore the state from a flat 1-D vector
-# ══════════════════════════════════════════════════════════════════════════════
-
-function get_state end
-function set_state! end
-
-function collect_adjoints(model, u0, K, step!_fn, loss_fn)
-    set_state!(model, u0)
-
-    @info "  Compiling forward step …"
-    compiled_step! = @compile raise=true raise_first=true donated_args=:none step!_fn(model)
-
-    function grad_loss(m, dm)
-        _, J = Enzyme.autodiff(
-            Enzyme.ReverseWithPrimal, Enzyme.Const(loss_fn), Enzyme.Active,
-            Enzyme.Duplicated(m, dm)
-        )
-        return J
-    end
-    @info "  Compiling terminal gradient (grad_loss) …"
-    compiled_grad_loss = @compile raise=true raise_first=true donated_args=:none grad_loss(model, Enzyme.make_zero(model))
-
-    function vjp_kernel(u_prev, du, λ, m, dm)
-        set_state!(m, u_prev)
-        step!_fn(m)
-        Enzyme.autodiff(
-            Enzyme.Reverse,
-            Enzyme.Const((x, v, mdl) -> begin
-                set_state!(mdl, x)
-                step!_fn(mdl)
-                return sum(get_state(mdl) .* v)
-            end),
-            Enzyme.Active,
-            Enzyme.Duplicated(u_prev, du),
-            Enzyme.Const(λ),
-            Enzyme.Duplicated(m, dm)
-        )
-        return nothing
-    end
-    @info "  Compiling VJP kernel …"
-    compiled_vjp = @compile raise=true raise_first=true donated_args=:none vjp_kernel(
-        Reactant.to_rarray(Array(u0)),
-        Enzyme.make_zero(u0),
-        Reactant.to_rarray(ones(Float64, size(Array(u0)))),
-        model,
-        Enzyme.make_zero(model),
-    )
-
-    # ── forward sweep ───────────────────────────────────────────────────────
-    @info "  Forward sweep: $K steps …"
-    snapshots = Vector{Vector{Float64}}(undef, K + 1)
-    snapshots[1] = Array(u0)
-    for k in 1:K
-        compiled_step!(model)
-        snapshots[k + 1] = Array(get_state(model))
-        @info "    step $k/$K done"
-    end
-
-    # ── terminal adjoint ────────────────────────────────────────────────────
-    @info "  Computing terminal adjoint (dg/d state_K) …"
-    λs = Vector{Vector{Float64}}(undef, K + 1)
-    set_state!(model, snapshots[end])
-    dmodel = Enzyme.make_zero(model)
-    compiled_grad_loss(model, dmodel)
-    λs[K + 1] = Array(get_state(dmodel))
-
-    # ── backward sweep ──────────────────────────────────────────────────────
-    @info "  Backward sweep: $K VJP steps …"
-    for k in K:-1:1
-        u_prev_r = Reactant.to_rarray(snapshots[k])
-        du_r     = Reactant.to_rarray(zeros(Float64, size(Array(u0))))
-        λ_r      = Reactant.to_rarray(λs[k + 1])
-        dm_r     = Enzyme.make_zero(model)
-        compiled_vjp(u_prev_r, du_r, λ_r, model, dm_r)
-        λs[k] = Array(du_r)
-        @info "    VJP step $k/$K done"
-    end
-
-    @info "  Adjoint accumulation complete."
-    return snapshots, λs
-end
-
-# ══════════════════════════════════════════════════════════════════════════════
-# AtmosphereModel interface — flatten/unflatten prognostic fields
+# AtmosphereModel state interface — flatten/unflatten prognostic fields
 #
 # Prognostic field order (CompressibleDynamics + LiquidIcePotentialTemperature):
 #   ρ, ρu, ρv, ρw, ρθ, ρqᵛ
@@ -186,13 +97,14 @@ zc = Lz / 2
 set!(model; ρ = ρᵢ, θ = θᵢ)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step and loss
+# Parameters
 # ══════════════════════════════════════════════════════════════════════════════
 
 CFL = 0.3
 Δx  = Lx / Nx
 Δz  = Lz / Nz
 Δt  = CFL * min(Δx, Δz) / ℂᵃᶜ
+K   = 5
 
 breeze_step!(m) = time_step!(m, Δt)
 
@@ -203,16 +115,109 @@ function breeze_loss(m)
     return sum(θ .^ 2)
 end
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Run
-# ══════════════════════════════════════════════════════════════════════════════
-
-K  = 5
 u0 = get_state(model)
+N_state = length(Array(u0))
 
-@info "State vector length: $(length(Array(u0)))"
-@info "Starting adjoint accumulation: K=$K steps, Nx=$Nx, Nz=$Nz, Δt=$(round(Δt; sigdigits=3))s"
-snapshots, λs = collect_adjoints(model, u0, K, breeze_step!, breeze_loss)
+@info "State vector length: $N_state"
+@info "Adjoint parameters: K=$K steps, Δt=$(round(Δt; sigdigits=3))s"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 1: Compile all kernels up front (before any execution)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@info "Phase 1 — Compiling set_state! …"
+function restore_state!(m, u)
+    set_state!(m, u)
+    return nothing
+end
+compiled_set_state! = @compile raise=true raise_first=true donated_args=:none restore_state!(model, u0)
+
+@info "Phase 1 — Compiling forward step …"
+compiled_step! = @compile raise=true raise_first=true donated_args=:none breeze_step!(model)
+
+@info "Phase 1 — Compiling terminal gradient …"
+function grad_loss(m, dm)
+    _, J = Enzyme.autodiff(
+        Enzyme.ReverseWithPrimal, Enzyme.Const(breeze_loss), Enzyme.Active,
+        Enzyme.Duplicated(m, dm)
+    )
+    return J
+end
+dmodel = Enzyme.make_zero(model)
+compiled_grad_loss = @compile raise=true raise_first=true donated_args=:none grad_loss(model, dmodel)
+
+@info "Phase 1 — Compiling VJP kernel …"
+function vjp_kernel(u_prev, du, λ, m, dm)
+    set_state!(m, u_prev)
+    breeze_step!(m)
+    Enzyme.autodiff(
+        Enzyme.Reverse,
+        Enzyme.Const((x, v, mdl) -> begin
+            set_state!(mdl, x)
+            breeze_step!(mdl)
+            return sum(get_state(mdl) .* v)
+        end),
+        Enzyme.Active,
+        Enzyme.Duplicated(u_prev, du),
+        Enzyme.Const(λ),
+        Enzyme.Duplicated(m, dm)
+    )
+    return nothing
+end
+compiled_vjp = @compile raise=true raise_first=true donated_args=:none vjp_kernel(
+    Reactant.to_rarray(Array(u0)),
+    Enzyme.make_zero(u0),
+    Reactant.to_rarray(ones(Float64, N_state)),
+    model,
+    Enzyme.make_zero(model),
+)
+
+@info "Phase 1 complete — all kernels compiled."
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 2: Forward sweep (checkpoint K snapshots)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@info "Phase 2 — Forward sweep: $K steps …"
+compiled_set_state!(model, u0)
+
+snapshots = Vector{Vector{Float64}}(undef, K + 1)
+snapshots[1] = Array(u0)
+for k in 1:K
+    compiled_step!(model)
+    snapshots[k + 1] = Array(get_state(model))
+    @info "  step $k/$K done"
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 3: Terminal adjoint  dg/d(state_K)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@info "Phase 3 — Computing terminal adjoint …"
+compiled_set_state!(model, Reactant.to_rarray(snapshots[end]))
+
+λs = Vector{Vector{Float64}}(undef, K + 1)
+dmodel = Enzyme.make_zero(model)
+compiled_grad_loss(model, dmodel)
+λs[K + 1] = Array(get_state(dmodel))
+@info "  terminal loss gradient ‖λ_K‖ = $(sum(abs, λs[K+1]))"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 4: Backward sweep (VJP at each checkpoint)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@info "Phase 4 — Backward sweep: $K VJP steps …"
+for k in K:-1:1
+    u_prev_r = Reactant.to_rarray(snapshots[k])
+    du_r     = Reactant.to_rarray(zeros(Float64, N_state))
+    λ_r      = Reactant.to_rarray(λs[k + 1])
+    dm_r     = Enzyme.make_zero(model)
+    compiled_vjp(u_prev_r, du_r, λ_r, model, dm_r)
+    λs[k] = Array(du_r)
+    @info "  VJP step $k/$K done"
+end
+
+@info "Adjoint accumulation complete."
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Visualize
