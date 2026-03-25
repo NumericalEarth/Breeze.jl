@@ -65,10 +65,10 @@ State of a Lagrangian air parcel with position, thermodynamic state, and microph
 The parcel model evolves **specific quantities** (qᵗ, ℰ) directly for exact conservation.
 Density-weighted forms (ρqᵗ, ρℰ) are also stored for consistency with the microphysics interface.
 
-- `w`: parcel vertical velocity [m/s] (prognostic for `PrognosticVerticalVelocity`,
-  zero for `PrescribedVerticalVelocity`)
-- `ρ`: **environmental** density at parcel height [kg/m³] (interpolated from background
-  profile, not the parcel's own density). The parcel density is computed from
+- `w`: parcel vertical velocity [m/s], prognostic for `PrognosticVerticalVelocity`,
+  zero for `PrescribedVerticalVelocity`
+- `ρ`: **environmental** density at parcel height [kg/m³], interpolated from background
+  profile, not the parcel's own density. The parcel density is computed from
   `density(𝒰, constants)` using the ideal gas law applied to the parcel's thermodynamic state.
 """
 mutable struct ParcelState{FT, TH, MP}
@@ -352,10 +352,10 @@ conditions interpolated at that height.
 - `w`: Vertical velocity w(z) [m/s] - function, array, or constant (default: 0)
 
 **Parcel state**:
-- `x`: Initial parcel x-position [m] (default: 0)
-- `y`: Initial parcel y-position [m] (default: 0)
-- `z`: Initial parcel height [m] (required to initialize parcel state)
-- `w_parcel`: Initial parcel vertical velocity [m/s] (for `PrognosticVerticalVelocity`)
+- `x`: Initial parcel x-position [m], default: 0
+- `y`: Initial parcel y-position [m], default: 0
+- `z`: Initial parcel height [m], required to initialize parcel state
+- `w_parcel`: Initial parcel vertical velocity [m/s], for `PrognosticVerticalVelocity`
 """
 function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
                            ρ = nothing, p = nothing,

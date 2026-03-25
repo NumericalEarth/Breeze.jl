@@ -71,8 +71,8 @@ with no condensate and computes temperature using the standard thermodynamic rel
 - `constants`: Thermodynamic constants
 
 # Keyword Arguments
-- `pˢᵗ`: Standard pressure for potential temperature definition [Pa] (default: 1e5)
-- `qᵛ`: Specific humidity [kg/kg] (default: 0, dry air)
+- `pˢᵗ`: Standard pressure for potential temperature definition [Pa], default: 1e5
+- `qᵛ`: Specific humidity [kg/kg], default: 0, dry air
 """
 @inline function temperature_from_potential_temperature(θ, p, constants; pˢᵗ=1e5, qᵛ=zero(θ))
     q = MoistureMassFractions(qᵛ)  # vapor only, no condensate
