@@ -62,11 +62,12 @@ function state_layout(model)
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Model setup: warm bubble in a compressible atmosphere
+# Model setup: acoustic pulse in a sheared compressible atmosphere
+# (following examples/acoustic_wave.jl)
 # ══════════════════════════════════════════════════════════════════════════════
 
-Nx, Nz = 32, 16
-Lx, Lz = 1000.0, 500.0
+Nx, Nz = 128, 64
+Lx, Lz = 1000.0, 200.0
 
 @info "Building grid (Nx=$Nx, Nz=$Nz) and AtmosphereModel …"
 grid = RectilinearGrid(ReactantState();
@@ -86,33 +87,37 @@ cᵖᵈ = constants.dry_air.heat_capacity
 γ   = cᵖᵈ / (cᵖᵈ - Rᵈ)
 ℂᵃᶜ = sqrt(γ * Rᵈ * θ₀)
 
-Δθ = 2.0
-zc = Lz / 2
-σ  = 50.0
+U₀ = 20.0
+ℓ  = 1.0
+Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
 
-θᵢ(x, z) = θ₀ + Δθ * exp(-(x^2 + (z - zc)^2) / (2σ^2))
-ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
+δρ = 0.01
+σ  = 20.0
 
-@info "Setting initial conditions: Gaussian θ perturbation (Δθ=$Δθ K, σ=$σ m, zc=$zc m)"
-set!(model; ρ = ρᵢ, θ = θᵢ)
+gaussian(x, z) = exp(-(x^2 + z^2) / (2σ^2))
+ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
+uᵢ(x, z) = Uᵢ(z)
+
+@info "Setting initial conditions: acoustic density pulse (δρ=$δρ kg/m³, σ=$σ m) + log-layer wind (U₀=$U₀ m/s)"
+set!(model; ρ = ρᵢ, θ = θ₀, u = uᵢ)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Parameters
 # ══════════════════════════════════════════════════════════════════════════════
 
-CFL = 0.3
+CFL = 0.5
 Δx  = Lx / Nx
 Δz  = Lz / Nz
-Δt  = CFL * min(Δx, Δz) / ℂᵃᶜ
-K   = 5
+Δt  = CFL * min(Δx, Δz) / (ℂᵃᶜ + Uᵢ(Lz))
+K   = 50
+
+target_i = round(Int, 0.75Nx)
+target_k = round(Int, 0.35Nz)
 
 breeze_step!(m) = time_step!(m, Δt)
 
 function breeze_loss(m)
-    ρθ = interior(m.formulation.potential_temperature_density)
-    ρ  = interior(m.dynamics.density)
-    θ  = ρθ ./ ρ
-    return sum(θ .^ 2)
+    return interior(m.dynamics.density)[target_i, 1, target_k]^2
 end
 
 u0 = get_state(model)
@@ -120,6 +125,7 @@ N_state = length(Array(u0))
 
 @info "State vector length: $N_state"
 @info "Adjoint parameters: K=$K steps, Δt=$(round(Δt; sigdigits=3))s"
+@info "Observation point: grid index ($target_i, $target_k)"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 1: Compile all kernels up front (before any execution)
@@ -223,39 +229,102 @@ end
 # Visualize
 # ══════════════════════════════════════════════════════════════════════════════
 
+using Statistics: median
+
 @info "Preparing visualization …"
 layout = state_layout(model)
 sz_c   = (Nx, Nz)
 
-function slice_θ(snap)
-    ρ  = reshape(snap[layout[:ρ]],  sz_c)
-    ρθ = reshape(snap[layout[:ρθ]], sz_c)
-    return ρθ ./ ρ
-end
-
-slice_λρθ(λ) = reshape(λ[layout[:ρθ]], sz_c)
+slice_ρ(snap) = reshape(snap[layout[:ρ]], sz_c)
+slice_λρ(λ)  = reshape(λ[layout[:ρ]], sz_c)
 
 xc = Array(xnodes(grid, Center()))
 zc_nodes = Array(znodes(grid, Center()))
 
+x_obs = xc[target_i]
+z_obs = zc_nodes[target_k]
+
+ρ_bg = [adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) for _ in xc, z in zc_nodes]
+
+ρ_fields = [slice_ρ(snapshots[k]) .- ρ_bg for k in 1:K+1]
+λ_fields = [slice_λρ(λs[k])               for k in 1:K+1]
+
+function balanced_around_median(fields)
+    all_vals = vcat(vec.(fields)...)
+    med = median(all_vals)
+    half = maximum(abs.(all_vals .- med))
+    return (med - half, med + half)
+end
+
+ρ_clims = balanced_around_median(ρ_fields)
+λ_clims = balanced_around_median(λ_fields)
+
+domain_aspect = Lx / Lz
+
+# ── Static snapshot figure ────────────────────────────────────────────────
+# Top block: ρ′ at selected time steps.  Bottom block: λ_ρ at the same steps.
+
 plot_ks = [1, max(1, K ÷ 2), K + 1]
+n_snaps = length(plot_ks)
 
-fig = Figure(; size = (1000, 400 * length(plot_ks)))
+fig = Figure(; size = (1200, 220 * 2 * n_snaps))
 
-for (row, k) in enumerate(plot_ks)
-    θ_field  = slice_θ(snapshots[k]) .- θ₀
-    λ_field  = slice_λρθ(λs[k])
+for (idx, k) in enumerate(plot_ks)
+    local row = idx
+    local ax = Axis(fig[row, 1]; xlabel = "x [m]", ylabel = "z [m]",
+                     aspect = domain_aspect,
+                     title = "ρ′ = ρ − ρ_bg  (k=$(k-1))")
+    local hm = heatmap!(ax, xc, zc_nodes, ρ_fields[k];
+                         colormap = :balance, colorrange = ρ_clims)
+    scatter!(ax, [x_obs], [z_obs]; color = :black, marker = :star5, markersize = 14)
+    Colorbar(fig[row, 2], hm)
+end
 
-    ax1 = Axis(fig[row, 1]; xlabel = "x [m]", ylabel = "z [m]",
-               title = "θ′ = θ − θ₀  (k=$(k-1))")
-    hm1 = heatmap!(ax1, xc, zc_nodes, θ_field)
-    Colorbar(fig[row, 2], hm1)
-
-    ax2 = Axis(fig[row, 3]; xlabel = "x [m]", ylabel = "z [m]",
-               title = "λ_ρθ = dg/dρθ  (k=$(k-1))")
-    hm2 = heatmap!(ax2, xc, zc_nodes, λ_field)
-    Colorbar(fig[row, 4], hm2)
+for (idx, k) in enumerate(plot_ks)
+    local row = n_snaps + idx
+    local ax = Axis(fig[row, 1]; xlabel = "x [m]", ylabel = "z [m]",
+                     aspect = domain_aspect,
+                     title = "λ_ρ = ∂J/∂ρ  (k=$(k-1))")
+    local hm = heatmap!(ax, xc, zc_nodes, λ_fields[k];
+                         colormap = :balance, colorrange = λ_clims)
+    scatter!(ax, [x_obs], [z_obs]; color = :black, marker = :star5, markersize = 14)
+    Colorbar(fig[row, 2], hm)
 end
 
 save("compressible_adjoint_viz.png", fig)
 @info "Saved compressible_adjoint_viz.png"
+
+# ── Animated GIF (one frame per time-step) ────────────────────────────────
+# ρ′ on top, λ_ρ on bottom, both with domain-proportioned aspect ratio.
+
+@info "Rendering GIF …"
+
+obs_ρ = Observable(ρ_fields[1])
+obs_λ = Observable(λ_fields[1])
+obs_title = Observable("k = 0")
+
+fig_gif = Figure(; size = (1200, 550))
+
+gif_ax1 = Axis(fig_gif[1, 1]; xlabel = "x [m]", ylabel = "z [m]",
+               aspect = domain_aspect,
+               title = @lift("ρ′  " * $obs_title))
+gif_hm1 = heatmap!(gif_ax1, xc, zc_nodes, obs_ρ;
+                    colormap = :balance, colorrange = ρ_clims)
+scatter!(gif_ax1, [x_obs], [z_obs]; color = :black, marker = :star5, markersize = 14)
+Colorbar(fig_gif[1, 2], gif_hm1)
+
+gif_ax2 = Axis(fig_gif[2, 1]; xlabel = "x [m]", ylabel = "z [m]",
+               aspect = domain_aspect,
+               title = @lift("λ_ρ  " * $obs_title))
+gif_hm2 = heatmap!(gif_ax2, xc, zc_nodes, obs_λ;
+                    colormap = :balance, colorrange = λ_clims)
+scatter!(gif_ax2, [x_obs], [z_obs]; color = :black, marker = :star5, markersize = 14)
+Colorbar(fig_gif[2, 2], gif_hm2)
+
+CairoMakie.record(fig_gif, "compressible_adjoint_viz.gif", 1:K+1; framerate = 8) do k
+    obs_ρ[]     = ρ_fields[k]
+    obs_λ[]     = λ_fields[k]
+    obs_title[] = "k = $(k-1)"
+end
+
+@info "Saved compressible_adjoint_viz.gif"
