@@ -1,72 +1,88 @@
 using Enzyme
+using Reactant
 using CairoMakie
+Reactant.allowscalar(true)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Generic adjoint accumulation infrastructure
-#
-# The user provides:
-#   step!(model)          — mutates model state in-place
-#   loss(model) -> scalar — terminal objective
-#   get_state(model)      — extract the state vector (returns a copy)
-#   set_state!(model, u)  — restore the state vector
+# Generic adjoint accumulation infrastructure (Reactant-compiled)
 # ══════════════════════════════════════════════════════════════════════════════
 
-function vjp_step(model, λ, step!_fn)
-    u_prev = get_state(model)
-
-    function f_dot_λ(u0, v, m)
-        set_state!(m, u0)
-        step!_fn(m)
-        s = get_state(m)
-        return sum(s .* v)
-    end
-
-    du = zero(u_prev)
-    Enzyme.autodiff(
-        Enzyme.Reverse, Enzyme.Const(f_dot_λ), Enzyme.Active,
-        Enzyme.Duplicated(copy(u_prev), du),
-        Enzyme.Const(λ),
-        Enzyme.Duplicated(model, Enzyme.make_zero(model))
-    )
-
-    set_state!(model, u_prev)
-    return du
-end
+function get_state end
+function set_state! end
 
 function collect_adjoints(model, u0, K, step!_fn, loss_fn)
     set_state!(model, u0)
 
-    snapshots = Vector{typeof(u0)}(undef, K + 1)
-    snapshots[1] = copy(u0)
+    compiled_step! = @compile step!_fn(model)
+
+    function grad_loss(m, dm)
+        _, J = Enzyme.autodiff(
+            Enzyme.ReverseWithPrimal, Enzyme.Const(loss_fn), Enzyme.Active,
+            Enzyme.Duplicated(m, dm)
+        )
+        return J
+    end
+    compiled_grad_loss = @compile raise=true raise_first=true grad_loss(model, Enzyme.make_zero(model))
+
+    function vjp_kernel(u_prev, du, λ, m, dm)
+        set_state!(m, u_prev)
+        step!_fn(m)
+        Enzyme.autodiff(
+            Enzyme.Reverse,
+            Enzyme.Const((x, v, mdl) -> begin
+                set_state!(mdl, x)
+                step!_fn(mdl)
+                return sum(get_state(mdl) .* v)
+            end),
+            Enzyme.Active,
+            Enzyme.Duplicated(u_prev, du),
+            Enzyme.Const(λ),
+            Enzyme.Duplicated(m, dm)
+        )
+        return nothing
+    end
+    compiled_vjp = @compile raise=true raise_first=true vjp_kernel(
+        Reactant.to_rarray(Array(u0)),
+        Enzyme.make_zero(u0),
+        Reactant.to_rarray(ones(Float64, size(Array(u0)))),
+        model,
+        Enzyme.make_zero(model),
+    )
+
+    # ── forward sweep ───────────────────────────────────────────────────────
+    snapshots = Vector{Vector{Float64}}(undef, K + 1)
+    snapshots[1] = Array(u0)
     for k in 1:K
-        step!_fn(model)
-        snapshots[k + 1] = get_state(model)
+        compiled_step!(model)
+        snapshots[k + 1] = Array(get_state(model))
     end
 
-    λs = Vector{typeof(u0)}(undef, K + 1)
-
+    # ── terminal adjoint ────────────────────────────────────────────────────
+    λs = Vector{Vector{Float64}}(undef, K + 1)
     set_state!(model, snapshots[end])
     dmodel = Enzyme.make_zero(model)
-    Enzyme.autodiff(
-        Enzyme.Reverse, Enzyme.Const(loss_fn), Enzyme.Active,
-        Enzyme.Duplicated(model, dmodel)
-    )
-    λs[K + 1] = get_state(dmodel)
+    compiled_grad_loss(model, dmodel)
+    λs[K + 1] = Array(get_state(dmodel))
 
+    # ── backward sweep ──────────────────────────────────────────────────────
     for k in K:-1:1
-        set_state!(model, snapshots[k])
-        λs[k] = vjp_step(model, λs[k + 1], step!_fn)
+        u_prev_r = Reactant.to_rarray(snapshots[k])
+        du_r     = Reactant.to_rarray(zeros(Float64, size(Array(u0))))
+        λ_r      = Reactant.to_rarray(λs[k + 1])
+        dm_r     = Enzyme.make_zero(model)
+        compiled_vjp(u_prev_r, du_r, λ_r, model, dm_r)
+        λs[k] = Array(du_r)
     end
 
     return snapshots, λs
 end
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Toy model — swap this out for any model that implements the interface above
+# Toy model — swap this out for any model that implements the interface
 # ══════════════════════════════════════════════════════════════════════════════
 
-mutable struct ToyModel
-    u::Vector{Float64}
+mutable struct ToyModel{A<:AbstractVector}
+    u::A
     κ::Float64
 end
 
@@ -92,12 +108,13 @@ toy_loss(model::ToyModel) = sum(model.u .^ 2)
 # ── Run and plot ─────────────────────────────────────────────────────────────
 
 N  = 64
-K  = 100
+K  = 10
 κ  = 0.1
 u0 = [exp(-((i - N/2)^2) / (2 * 5^2)) for i in 1:N]
 
-model = ToyModel(copy(u0), κ)
-snapshots, λs = collect_adjoints(model, u0, K, toy_step!, toy_loss)
+u0_r  = Reactant.to_rarray(u0)
+model = ToyModel(Reactant.to_rarray(copy(u0)), κ)
+snapshots, λs = collect_adjoints(model, u0_r, K, toy_step!, toy_loss)
 
 fig = Figure(; size=(900, 400))
 
