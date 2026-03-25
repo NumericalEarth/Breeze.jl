@@ -1135,24 +1135,29 @@ end
 ##### Ice-rain collection integrals
 #####
 
+# Ice-rain collection integrands: only ice particles with D ≥ 100 μm contribute
+# to riming collection (Fortran P3 v5.5.0: create_p3_lookupTable_1.f90, line 1548).
 @inline function integrand(::IceRainMassCollection, D, state::IceSizeDistributionState, thresholds)
+    FT = typeof(D)
     V = terminal_velocity(D, state, thresholds)
     A = particle_area(D, state, thresholds)
     m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
-    return V * A * m * Np
+    return ifelse(D < FT(100e-6), zero(FT), V * A * m * Np)
 end
 
 @inline function integrand(::IceRainNumberCollection, D, state::IceSizeDistributionState, thresholds)
+    FT = typeof(D)
     V = terminal_velocity(D, state, thresholds)
     A = particle_area(D, state, thresholds)
     Np = size_distribution(D, state)
-    return V * A * Np
+    return ifelse(D < FT(100e-6), zero(FT), V * A * Np)
 end
 
 @inline function integrand(::IceRainSixthMomentCollection, D, state::IceSizeDistributionState, thresholds)
+    FT = typeof(D)
     V = terminal_velocity(D, state, thresholds)
     A = particle_area(D, state, thresholds)
     Np = size_distribution(D, state)
-    return D^6 * V * A * Np
+    return ifelse(D < FT(100e-6), zero(FT), D^6 * V * A * Np)
 end

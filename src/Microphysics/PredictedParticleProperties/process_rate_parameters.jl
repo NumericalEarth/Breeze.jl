@@ -157,6 +157,13 @@ struct ProcessRateParameters{FT}
     # When true: wet growth rime densification is suppressed (liquid tracked
     # explicitly in qʷⁱ), and melt-densification is skipped.
     liquid_fraction_active :: Bool
+
+    # Deposition/sublimation calibration factors (Fortran P3 v5.5.0 clbfact_dep, clbfact_sub).
+    # Ad hoc multipliers to increase or decrease deposition and/or sublimation rates.
+    # The representation of ice capacitances is highly simplified and the appropriate
+    # values in the diffusional growth equation are uncertain (Fortran comment, line 3721).
+    calibration_factor_deposition :: FT
+    calibration_factor_sublimation :: FT
 end
 
 """
@@ -338,7 +345,11 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         liquid_fraction_small = 0.01,  # Fortran liqfracsmall
 
         # Liquid fraction mode (Fortran log_LiquidFrac)
-        liquid_fraction_active = true)
+        liquid_fraction_active = true,
+
+        # Deposition/sublimation calibration factors (Fortran clbfact_dep, clbfact_sub)
+        calibration_factor_deposition = 1.0,
+        calibration_factor_sublimation = 1.0)
 
     return ProcessRateParameters(
         FT(liquid_water_density),
@@ -420,7 +431,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(sink_limiting_timescale),
         FT(maximum_ice_number_density),
         FT(liquid_fraction_small),
-        Bool(liquid_fraction_active)
+        Bool(liquid_fraction_active),
+        FT(calibration_factor_deposition),
+        FT(calibration_factor_sublimation)
     )
 end
 

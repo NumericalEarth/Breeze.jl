@@ -281,8 +281,11 @@ end
     a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
     b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
     V_ice = a_V * D_mean^b_V
-    # Rain fall speed at same diameter (liquid-coated particle approaching full melt)
-    V_rain = prp.rain_fall_speed_coefficient * D_mean^prp.rain_fall_speed_exponent
+    # Fortran create_p3_lookupTable_1.f90 uses the same piecewise rain fall-speed
+    # law here as in the rain lookup tables (via fallr1).
+    ρ₀ = prp.reference_air_density
+    ρ_correction = (ρ₀ / max(ρᶠ, FT(0.01)))^FT(0.54)
+    V_rain = rain_fall_speed(D_mean, ρ_correction)
     Sc = nu / max(D_v, FT(1e-30))
     Re_ice  = sqrt(V_ice  * D_mean / max(nu, FT(1e-30)))
     Re_rain = sqrt(V_rain * D_mean / max(nu, FT(1e-30)))
@@ -502,9 +505,15 @@ The bulk rate integrates over the size distribution:
     # Scale by number concentration
     dep_rate = nⁱ_eff * dm_dt
 
+    # Apply calibration factors (Fortran P3 v5.5.0 clbfact_dep, clbfact_sub).
+    # These ad hoc multipliers account for uncertainty in ice capacitance.
+    is_sublimation = S_i < 1
+    cal = ifelse(is_sublimation, prp.calibration_factor_sublimation,
+                                 prp.calibration_factor_deposition)
+    dep_rate = dep_rate * cal
+
     # Limit sublimation to available ice
     τ_dep = prp.ice_deposition_timescale
-    is_sublimation = S_i < 1
     max_sublim = -qⁱ_eff / τ_dep
 
     return ifelse(is_sublimation, max(dep_rate, max_sublim), dep_rate)

@@ -165,7 +165,8 @@ approximation path depending on `p3.rain.evaporation`:
   applies `dq^r/dt = 2π × N_0 × I_evap × (S-1) / thermo_factor`
   (Mason 1971, capacitance C = D/2 so 4πC = 2πD).
 - **Mean-mass** (`RainEvaporation`): Uses a single representative drop of
-  diameter `D_mean = (6 m_mean / (π ρ_w))^(1/3)` with `V=130 D^0.5`.
+    diameter `D_mean = (6 m_mean / (π ρ_w))^(1/3)` and the same piecewise
+    rain fall-speed law as the tabulated path.
 
 ```math
 \\frac{dm}{dt} = \\frac{4\\pi C f_v (S - 1)}{\\frac{L_v}{K_a T}(\\frac{L_v}{R_v T} - 1)
@@ -259,8 +260,9 @@ end
 # NOTE: The tabulated path (via `tabulate(p3, :rain, CPU())`) is recommended
 # for production use. It integrates D × f_v(D) × N(D) dD exactly over the
 # PSD using the physical piecewise Gunn-Kinzer/Beard fall speed law.
-# This fallback uses the Fortran P3 power-law V = ar × D^br (842 × D^0.8)
-# consistently with terminal_velocities.jl and process_rate_parameters.jl.
+# This fallback now uses the same piecewise Gunn-Kinzer/Beard formula
+# (rain_fall_speed in quadrature.jl) for consistency with the tabulated path
+# and terminal_velocities.jl.
 @inline function rain_evaporation_rate(::AbstractRainIntegral, qʳ, nʳ, S,
                                         thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
     ρ_water = p3.water_density
@@ -269,13 +271,10 @@ end
     m_mean = safe_divide(qʳ, nʳ, FT(1e-12))
     D_mean = cbrt(6 * m_mean / (FT(π) * ρ_water))
 
-    # Terminal velocity: Fortran P3 v5.5.0 power law (ar=842, br=0.8)
-    # M13: Apply density correction (ρ₀/ρ)^0.54 for consistent ventilation at altitude
-    ar = prp.rain_fall_speed_coefficient
-    br = prp.rain_fall_speed_exponent
+    # Terminal velocity: 4-regime Gunn-Kinzer/Beard piecewise formula
     ρ₀ = prp.reference_air_density
     ρ_correction = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
-    V = ar * D_mean^br * ρ_correction
+    V = rain_fall_speed(D_mean, ρ_correction)
 
     # Ventilation factor (Fortran P3 convention: Sc^(1/3) baked into RAIN_F2R=0.308)
     # Use reference viscosity RAIN_NU (not runtime nu) to match the table convention

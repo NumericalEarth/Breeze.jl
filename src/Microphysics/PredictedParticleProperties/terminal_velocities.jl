@@ -2,7 +2,7 @@
 ##### Phase 3: Terminal velocities
 #####
 ##### Terminal velocity calculations for rain and ice sedimentation.
-##### Uses power-law relationships with air density correction.
+##### Rain uses the P3 piecewise Gunn-Kinzer/Beard law with air density correction.
 #####
 
 """
@@ -14,8 +14,8 @@ Dispatches on `p3.rain.velocity_mass`:
 
 - **Tabulated** (`TabulatedFunction1D`): Looks up the PSD-integrated velocity
   at `log10(λ_r)` and applies the air density correction `(ρ₀/ρ)^0.54`.
-- **Mean-mass** (`RainVelocityMass`): Uses power-law `v = a D^b` at the
-  volume-mean drop diameter.
+- **Mean-mass** (`RainVelocityMass`): Uses the same piecewise rain fall-speed
+    law evaluated at the volume-mean drop diameter.
 
 See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
 
@@ -63,19 +63,18 @@ end
 end
 
 # Mean-mass fallback path
-# NOTE (M13): Uses power-law V=ar*D^br. When tabulated, uses Gunn-Kinzer/Beard.
-# See rain_quadrature.jl header for the full discussion.
+# Uses the same 4-regime Gunn-Kinzer/Beard piecewise formula as the tabulated
+# path (rain_fall_speed in quadrature.jl), ensuring consistent V(D) across both
+# code paths. Previously used the single power law V = ar × D^br.
 @inline function tabulated_rain_mass_weighted_velocity(::AbstractRainIntegral,
                                                          qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
-    a = prp.rain_fall_speed_coefficient
-    b = prp.rain_fall_speed_exponent
     D_min = prp.rain_diameter_min
     D_max = prp.rain_diameter_max
 
     m̄ = qʳ / nʳ
     D̄ₘ = cbrt(6 * m̄ / (FT(π) * ρʷ))
     D̄ₘ_clamped = clamp(D̄ₘ, D_min, D_max)
-    return a * D̄ₘ_clamped^b * ρ_correction
+    return rain_fall_speed(D̄ₘ_clamped, ρ_correction)
 end
 
 """

@@ -25,14 +25,11 @@
 ##### - P3 Fortran v5.5.0: ar=842, br=0.8, f1r=0.78, f2r=0.308 (Sc^(1/3) baked in), ν=1.5e-5 m²/s
 #####
 
-##### NOTE (M13): The tabulated and analytical rain paths use different V(D) formulas.
-##### Tabulated: 4-regime Gunn-Kinzer/Beard (rain_fall_speed in quadrature.jl)
-##### Analytical: single power law V = ar × D^br (842 × D^0.8) from ProcessRateParameters
-##### Both are correct physics. The piecewise law captures the terminal velocity
-##### plateau above D ~5mm and Stokes drag below D ~100μm, while the power law
-##### matches the Fortran P3 v5.5.0 convention. Evaporation and sedimentation rates
-##### will shift when switching between paths. The tabulated path is recommended
-##### for production use.
+##### NOTE (M13): Both the tabulated and analytical rain paths now use the same
+##### 4-regime Gunn-Kinzer/Beard piecewise V(D) formula (rain_fall_speed in quadrature.jl).
+##### The piecewise law captures the terminal velocity plateau above D ~5mm and Stokes
+##### drag below D ~100μm. The previous analytical path used a single power law
+##### V = ar × D^br (842 × D^0.8), which has been replaced for consistency.
 
 export RainMassWeightedVelocityEvaluator,
        RainNumberWeightedVelocityEvaluator,
@@ -211,9 +208,10 @@ I_{\\mathrm{evap}}(\\lambda_r) =
 ```
 
 where the ventilation factor is `f_v(D) = f1r + f2r × √Re(D)` with
-`Re(D) = V(D) × D / ν = ar × D^(1+br) / ν` (Reynolds number based on drop diameter),
-`f1r = 0.78`, `f2r = 0.308` (Sc^(1/3) baked in), `ar = 842`, `br = 0.8`, `ν = 1.5e-5 m²/s`
-(Fortran P3 v5.5.0 constants).
+`Re(D) = V(D) × D / ν` (Reynolds number based on drop diameter),
+`f1r = 0.78`, `f2r = 0.308` (Sc^(1/3) baked in), `ν = 1.5e-5 m²/s`, and
+`V(D)` given by the same piecewise Gunn-Kinzer/Beard law used in the Fortran
+rain lookup-table generation.
 
 This integral appears in the PSD-integrated rain evaporation rate (Mason 1971,
 capacitance `C = D/2` for a sphere, so `4πC = 2πD`):
