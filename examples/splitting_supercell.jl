@@ -217,16 +217,15 @@ fig
 # accretion, rain evaporation, and sedimentation processes.
 
 microphysics = DCMIP2016KesslerMicrophysics()
-advection = WENO(order=9, minimum_buffer_upwind_order=3)
+advection = WENO(order=9)
 
 model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
 
 # ## Model initialization
 #
 # We initialize the model with the previously described initial conditions, including a warm-bubble perturbation.
-# We precompute the RH field to ensure GPU compatibility.
 
-ℋᵢ = set!(CenterField(grid), (x, y, z) -> ℋ_background(z))
+ℋᵢ(x, y, z) = ℋ_background(z)
 
 set!(model, θ=θᵢ, ℋ=ℋᵢ, u=uᵢ)
 
