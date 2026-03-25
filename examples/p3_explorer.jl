@@ -11,7 +11,7 @@
 #    changing the launch conditions.
 # 2. **P3 feature exploration**: the same sounding and the same total moisture
 #    are reused, but the parcel is seeded with the same ice population and
-#    different cloud/rain reservoirs. This isolates the P3 idea that one ice
+#    different cloud/rain partitions. This isolates the P3 idea that one ice
 #    category can move smoothly through a continuum of rime fraction, rime
 #    density, size, and fall speed.
 #
@@ -91,13 +91,13 @@ initial_vertical_velocity = 5
 plot_top = 10kilometers
 stop_time = 18minutes
 Δt = 1
-record_interval = 5
+record_interval = 1
 
 seeded_ice_mass = 1e-4
 seeded_ice_number = 5e5
-cloud_reservoir = 8e-4
-rain_reservoir = 3e-4
-rain_number_reservoir = 1e5
+cloud_partition = 8e-4
+rain_partition = 3e-4
+rain_number_partition = 1e5
 
 height_profile = collect(range(0, plot_top, length = 400))
 background_T_profile = [Thermodynamics.temperature_from_potential_temperature(θ_background(z),
@@ -110,7 +110,7 @@ nothing #hide
 # ## Helper functions
 #
 # The helpers below set up the buoyant parcel launch, seed optional
-# microphysics reservoirs, and convert the P3 moments into the continuous ice
+# microphysics partitions, and convert the P3 moments into the continuous ice
 # diagnostics that we want to visualize.
 
 function p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ)
@@ -263,6 +263,20 @@ function seed_kessler_parcel!(model; qᶜˡ = 0, qʳ = 0)
     return nothing
 end
 
+function ascending_branch(values, z)
+    ascending_indices = Int[1]
+    z_max = first(z)
+
+    for i in 2:length(z)
+        if z[i] > z_max
+            push!(ascending_indices, i)
+            z_max = z[i]
+        end
+    end
+
+    return values[ascending_indices], z[ascending_indices]
+end
+
 function run_p3_case(; label, color, qᶜˡ = 0, qʳ = 0, nʳ = 0, qⁱ = 0, nⁱ = 0)
     microphysics = PredictedParticlePropertiesMicrophysics()
     model = supercell_parcel_model(microphysics)
@@ -410,27 +424,27 @@ ax13 = Axis(fig1[1, 3];
 
 lines!(ax11, background_T_profile, height_profile ./ 1000;
        color = :gray40, linestyle = :dot, label = "Environment")
-lines!(ax11, p3_reference.T, p3_reference.z ./ 1000;
+lines!(ax11, ascending_branch(p3_reference.T, p3_reference.z ./ 1000)...;
        color = :magenta, label = p3_reference.label)
-lines!(ax11, kessler_reference.T, kessler_reference.z ./ 1000;
+lines!(ax11, ascending_branch(kessler_reference.T, kessler_reference.z ./ 1000)...;
        color = :black, linestyle = :dash, label = kessler_reference.label)
 
 vlines!(ax12, [0]; color = :gray40, linestyle = :dot)
-lines!(ax12, p3_reference.w, p3_reference.z ./ 1000;
+lines!(ax12, ascending_branch(p3_reference.w, p3_reference.z ./ 1000)...;
        color = p3_reference.color, label = p3_reference.label)
-lines!(ax12, kessler_reference.w, kessler_reference.z ./ 1000;
+lines!(ax12, ascending_branch(kessler_reference.w, kessler_reference.z ./ 1000)...;
        color = kessler_reference.color, linestyle = :dash, label = kessler_reference.label)
 
-lines!(ax13, p3_reference.qᶜˡ, p3_reference.z ./ 1000;
+lines!(ax13, ascending_branch(p3_reference.qᶜˡ, p3_reference.z ./ 1000)...;
        color = :lime, label = "P3 qᶜˡ")
-lines!(ax13, p3_reference.qʳ, p3_reference.z ./ 1000;
+lines!(ax13, ascending_branch(p3_reference.qʳ, p3_reference.z ./ 1000)...;
        color = :orangered, label = "P3 qʳ")
-lines!(ax13, p3_reference.qⁱ, p3_reference.z ./ 1000;
+lines!(ax13, ascending_branch(p3_reference.qⁱ, p3_reference.z ./ 1000)...;
        color = :dodgerblue, label = "P3 qⁱ")
 
-lines!(ax13, kessler_reference.qᶜˡ, kessler_reference.z ./ 1000;
+lines!(ax13, ascending_branch(kessler_reference.qᶜˡ, kessler_reference.z ./ 1000)...;
        color = :lime, linestyle = :dash, label = "Kessler qᶜˡ")
-lines!(ax13, kessler_reference.qʳ, kessler_reference.z ./ 1000;
+lines!(ax13, ascending_branch(kessler_reference.qʳ, kessler_reference.z ./ 1000)...;
        color = :orangered, linestyle = :dash, label = "Kessler qʳ")
 
 ylims!(ax11, 0, plot_top / 1000)
@@ -448,7 +462,7 @@ fig1
 # We now reuse the same sounding and parcel launch, but we keep the parcel
 # temperature and total water fixed while repartitioning that water among vapor,
 # cloud, and rain. All three P3 parcels share the same seeded ice distribution.
-# The only change is how much liquid water is available for riming.
+# The only change is the initial cloud/rain partition available for riming.
 
 p3_feature_cases = [
     run_p3_case(;
@@ -460,16 +474,16 @@ p3_feature_cases = [
     run_p3_case(;
         label = "Cloud riming",
         color = :lime,
-        qᶜˡ = cloud_reservoir,
+        qᶜˡ = cloud_partition,
         qⁱ = seeded_ice_mass,
         nⁱ = seeded_ice_number),
 
     run_p3_case(;
         label = "Cloud + rain riming",
         color = :orangered,
-        qᶜˡ = cloud_reservoir,
-        qʳ = rain_reservoir,
-        nʳ = rain_number_reservoir,
+        qᶜˡ = cloud_partition,
+        qʳ = rain_partition,
+        nʳ = rain_number_partition,
         qⁱ = seeded_ice_mass,
         nⁱ = seeded_ice_number),
 ]
@@ -480,7 +494,7 @@ fig2 = Figure(size = (1250, 950))
 ax21 = Axis(fig2[1, 1];
     xlabel = "Temperature (K)",
     ylabel = "Height (km)",
-    title = "Same launch temperature, different reservoirs")
+    title = "Same launch temperature, different partitions")
 
 ax22 = Axis(fig2[1, 2];
     xlabel = "Vertical velocity (m/s)",
@@ -514,9 +528,9 @@ lines!(ax21, background_T_profile, height_profile ./ 1000;
 vlines!(ax22, [0]; color = :gray40, linestyle = :dot)
 
 for case in p3_feature_cases
-    lines!(ax21, case.T, case.z ./ 1000; color = case.color, label = case.label)
-    lines!(ax22, case.w, case.z ./ 1000; color = case.color, label = case.label)
-    lines!(ax23, case.qⁱ, case.z ./ 1000; color = case.color, label = case.label)
+    lines!(ax21, ascending_branch(case.T, case.z ./ 1000)...; color = case.color, label = case.label)
+    lines!(ax22, ascending_branch(case.w, case.z ./ 1000)...; color = case.color, label = case.label)
+    lines!(ax23, ascending_branch(case.qⁱ, case.z ./ 1000)...; color = case.color, label = case.label)
 
     lines!(ax24, case.Fᶠ, case.ρᶠ; color = case.color, label = case.label)
     scatter!(ax24, [first(case.Fᶠ)], [first(case.ρᶠ)];
@@ -530,7 +544,7 @@ for case in p3_feature_cases
     scatter!(ax25, [last(case.mean_diameter)], [last(case.fall_speed)];
              color = case.color, marker = :utriangle, markersize = 12)
 
-    lines!(ax26, case.Fᶠ, case.z ./ 1000; color = case.color)
+    lines!(ax26, ascending_branch(case.Fᶠ, case.z ./ 1000)...; color = case.color)
 end
 
 ylims!(ax21, 0, plot_top / 1000)
@@ -545,7 +559,7 @@ axislegend(ax24; position = :lt, labelsize = 12, backgroundcolor = (:white, 0.8)
 
 fig2
 
-# ## What to notice
+# ## Discussion
 #
 # - In the first section, the P3 and Kessler parcels start from the same
 #   sounding, the same 0.5 K warm-bubble perturbation, and the same prognostic
@@ -555,7 +569,7 @@ fig2
 #   parcel enters the mixed-phase part of the sounding.
 # - In the second section, all three P3 parcels share the same temperature
 #   perturbation, the same total water, and the same seeded ice. Changing only
-#   the liquid reservoirs pushes that same ice population along different
+#   the liquid partition pushes that same ice population along different
 #   continuous trajectories in ``(Fᶠ, ρᶠ)`` and ``(D, V)`` space.
 # - That is the main P3 idea: there is no handoff between cloud ice, snow,
 #   graupel, and hail categories. One prognostic ice species changes its bulk
