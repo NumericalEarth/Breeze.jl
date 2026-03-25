@@ -156,9 +156,12 @@ the raw integral ∫ f(D) N'(D) dD gives per-particle values.
     N_ice = one(FT)
     L_ice = max(mean_particle_mass, FT(1e-20))
 
-    # Solve for (N₀, λ, μ) using the selected closure
+    # Solve for (N₀, λ, μ) using the selected closure.
+    # Apply Fr-dependent diameter bounds matching Fortran P3 lambda limiter
+    # (create_p3_lookupTable_3.f90 lines 313-315): D_max = 5mm + 20mm×Fr².
+    bounds = DiameterBounds(FT, rime_fraction)
     params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
-                                      mass, closure)
+                                      mass, closure, diameter_bounds=bounds)
 
     reference_air_density = FT(60000 / (dry_air_gas_constant(ThermodynamicConstants()) * 253.15))
 
@@ -261,6 +264,108 @@ function evaluate_quadrature(::AggregationNumber,
     return result * FT(0.5)
 end
 
+"""
+    evaluate_quadrature(::SixthMomentAggregation, state, nodes, weights)
+
+Full double-integral evaluator for the aggregation sixth-moment change (M9 fix).
+
+Computes the change in relative variance G = M₆/M₃² from aggregation,
+following the Fortran `create_p3_lookupTable_1.f90` lines 1415-1471.
+
+The algorithm tracks:
+- Number loss per bin from collisions (`numloss`)
+- Mass gain per bin from collected particles (`massgain`)
+
+Then computes the change in G via:
+```math
+m6agg = \\frac{M_6}{M_3^2} N_{loss} + \\frac{1}{M_3^2}(\\Delta M_6) - \\frac{2 M_6}{M_3^3}(\\Delta M_3)
+```
+
+where ΔM₆ and ΔM₃ include both loss and gain contributions.
+"""
+function evaluate_quadrature(::SixthMomentAggregation,
+                             state::IceSizeDistributionState,
+                             nodes, weights)
+    FT = typeof(state.slope)
+    λ = state.slope
+    n = length(nodes)
+    thresholds = regime_thresholds_from_state(FT, state)
+
+    # Precompute per-node quantities
+    D_arr  = Vector{FT}(undef, n)
+    J_arr  = Vector{FT}(undef, n)
+    V_arr  = Vector{FT}(undef, n)
+    A_arr  = Vector{FT}(undef, n)
+    N_arr  = Vector{FT}(undef, n)
+    m_arr  = Vector{FT}(undef, n)
+
+    for i in 1:n
+        x = nodes[i]
+        D_arr[i] = transform_to_diameter(x, λ)
+        J_arr[i] = jacobian_diameter_transform(x, λ)
+        V_arr[i] = terminal_velocity(D_arr[i], state, thresholds)
+        A_arr[i] = particle_area(D_arr[i], state, thresholds)
+        N_arr[i] = size_distribution(D_arr[i], state)
+        m_arr[i] = particle_mass(D_arr[i], state, thresholds)
+    end
+
+    # Compute collision kernel and track per-node loss/gain.
+    # Fortran uses upper-triangle loop (jj > kk): the smaller particle (kk) is
+    # collected/lost, the larger particle (jj) gains mass. This asymmetry matters
+    # for M6/M3 because loss subtracts D_small^6 while gain adds to D_large^5.
+    # A symmetric loop with ÷2 distributes loss/gain to both particles equally,
+    # which gives incorrect per-node M6/M3 changes.
+    #
+    # Chebyshev-Gauss nodes map monotonically to D via transform_to_diameter:
+    # i=1 → largest D, i=n → smallest D. So i < j means D[i] > D[j].
+    numloss  = zeros(FT, n)
+    massgain = zeros(FT, n)
+    N_loss_total = zero(FT)
+
+    for i in 1:n          # collector (larger D)
+        for j in (i+1):n  # collected (smaller D, since j > i → D[j] < D[i])
+            kernel = (sqrt(A_arr[i]) + sqrt(A_arr[j]))^2 * abs(V_arr[i] - V_arr[j])
+            pair_rate = weights[i] * weights[j] * kernel * N_arr[i] * N_arr[j] * J_arr[i] * J_arr[j]
+
+            # Smaller particle (j) is collected and removed from distribution
+            numloss[j] += pair_rate
+            # Larger particle (i) gains mass of the collected particle
+            massgain[i] += pair_rate * m_arr[j]
+            N_loss_total += pair_rate
+        end
+    end
+
+    # No factor of 1/2: upper-triangle loop counts each pair exactly once,
+    # matching the Fortran convention (jj_loop_3: jj=N..1, kk=1..jj-1).
+
+    # Compute M6 and M3 changes from loss and gain
+    M6_change = zero(FT)
+    M3_change = zero(FT)
+    for k in 1:n
+        dmdD = particle_mass_derivative(D_arr[k], state, thresholds)
+        D = D_arr[k]
+
+        # Loss: removing a particle of size D loses D^6 and D^3
+        M6_change -= numloss[k] * D^6
+        M3_change -= numloss[k] * D^3
+
+        # Gain: mass gained → size increase via chain rule (dD/dm = 1/dmdD)
+        M6_change += massgain[k] / dmdD * 6 * D^5
+        M3_change += massgain[k] / dmdD * 3 * D^2
+    end
+
+    # Analytical distribution moments with N=1 convention
+    μ = state.shape
+    M3 = gamma(μ + 4) / (gamma(μ + 1) * λ^3)
+    M6 = gamma(μ + 7) / (gamma(μ + 1) * λ^6)
+    M3_safe = max(M3, eps(FT))
+
+    # Change in relative variance G = M6/M3²  (Fortran line 1469-1470)
+    return M6 / M3_safe^2 * N_loss_total +
+           M6_change / M3_safe^2 -
+           2 * M6 / M3_safe^3 * M3_change
+end
+
 #####
 ##### Integral normalization for tabulation
 #####
@@ -295,9 +400,13 @@ function normalize_integral(::MassWeightedFallSpeed, raw, mean_particle_mass, st
 end
 
 function normalize_integral(::ReflectivityWeightedFallSpeed, raw, mean_particle_mass, state, nodes, weights)
-    # Reflectivity-weighted fall speed uses D⁶ weighting (not mass-squared Rayleigh)
-    sixth_moment = evaluate_quadrature(SixthMomentRime(), state, nodes, weights)
-    return raw / max(sixth_moment, eps(typeof(raw)))
+    # Reflectivity-weighted fall speed uses D⁶ weighting (not mass-squared Rayleigh).
+    # Compute M6 analytically from the gamma distribution: M6 = Γ(μ+7) / (Γ(μ+1) λ⁶)
+    FT = typeof(raw)
+    μ = state.shape
+    λ = state.slope
+    sixth_moment = FT(gamma(μ + 7) / (gamma(μ + 1) * λ^6))
+    return raw / max(sixth_moment, eps(FT))
 end
 
 function normalize_integral(::EffectiveRadius, raw_mass, mean_particle_mass, state, nodes, weights)
@@ -335,6 +444,241 @@ function normalize_integral(::MeanDensity, raw, mean_particle_mass, state, nodes
     mass_integral = evaluate_quadrature(MassMomentLambdaLimit(), state, nodes, weights)
     return raw / max(mass_integral, eps(typeof(raw)))
 end
+
+#####
+##### Sixth-moment normalization to relative variance (M8 fix)
+#####
+##### Fortran stores dG/dt (change in G = M6/M3²), divided by the corresponding
+##### mass integral, to produce a dimensionless ratio. At runtime:
+#####   z_rate = z_table × mass_rate / N_i
+#####
+##### The normalization formula (Fortran quotient rule for G = M6/M3²):
+#####   dG = raw_M6 / M3² - c × M6/M3³ × companion_M3
+##### where c=2 for most processes and c=1 for sublimation/melting (which also change N).
+#####
+##### The companion M3 integral uses the same process kernel as the M6 integral
+##### but with 3D²/dmdD instead of 6D^5/dmdD.
+#####
+
+"""
+    evaluate_companion_m3(integral, state, nodes, weights)
+
+Evaluate the companion M3 integral for a sixth-moment process.
+
+For each process, the M3 integrand mirrors the M6 integrand but with
+`3 D² / dmdD` instead of `6 D⁵ / dmdD`.
+"""
+function evaluate_companion_m3(::SixthMomentRime, state, nodes, weights)
+    FT = typeof(state.slope)
+    λ = state.slope
+    result = zero(FT)
+    thresholds = regime_thresholds_from_state(FT, state)
+    for i in 1:length(nodes)
+        x = nodes[i]
+        w = weights[i]
+        D = transform_to_diameter(x, λ)
+        J = jacobian_diameter_transform(x, λ)
+        V = terminal_velocity(D, state, thresholds)
+        A = particle_area(D, state, thresholds)
+        Np = size_distribution(D, state)
+        dmdD = particle_mass_derivative(D, state, thresholds)
+        f = ifelse(D >= FT(100e-6), 3 * D^2 * A * V * Np / dmdD, zero(FT))
+        result += w * f * J
+    end
+    return result
+end
+
+function evaluate_companion_m3(::Union{SixthMomentDeposition, SixthMomentSublimation},
+                               state, nodes, weights)
+    FT = typeof(state.slope)
+    λ = state.slope
+    result = zero(FT)
+    thresholds = regime_thresholds_from_state(FT, state)
+    for i in 1:length(nodes)
+        x = nodes[i]
+        w = weights[i]
+        D = transform_to_diameter(x, λ)
+        J = jacobian_diameter_transform(x, λ)
+        fᵛᵉ = ventilation_factor(D, state, true, thresholds)
+        C = capacitance(D, state, thresholds)
+        Np = size_distribution(D, state)
+        dmdD = particle_mass_derivative(D, state, thresholds)
+        result += w * 3 * D^2 * fᵛᵉ * C * Np / dmdD * J
+    end
+    return result
+end
+
+function evaluate_companion_m3(::Union{SixthMomentDeposition1, SixthMomentSublimation1},
+                               state, nodes, weights)
+    FT = typeof(state.slope)
+    λ = state.slope
+    result = zero(FT)
+    thresholds = regime_thresholds_from_state(FT, state)
+    for i in 1:length(nodes)
+        x = nodes[i]
+        w = weights[i]
+        D = transform_to_diameter(x, λ)
+        J = jacobian_diameter_transform(x, λ)
+        fᵛᵉ = ventilation_factor(D, state, false, thresholds)
+        C = capacitance(D, state, thresholds)
+        Np = size_distribution(D, state)
+        dmdD = particle_mass_derivative(D, state, thresholds)
+        result += w * 3 * D^2 * fᵛᵉ * C * Np / dmdD * J
+    end
+    return result
+end
+
+function evaluate_companion_m3(::SixthMomentMelt1, state, nodes, weights)
+    FT = typeof(state.slope)
+    λ = state.slope
+    result = zero(FT)
+    thresholds = regime_thresholds_from_state(FT, state)
+    D_crit = thresholds.spherical
+    for i in 1:length(nodes)
+        x = nodes[i]
+        w = weights[i]
+        D = transform_to_diameter(x, λ)
+        J = jacobian_diameter_transform(x, λ)
+        fᵛᵉ = melt_ventilation_factor(D, state, true, thresholds)
+        C = capacitance(D, state, thresholds)
+        Np = size_distribution(D, state)
+        dmdD = particle_mass_derivative(D, state, thresholds)
+        f = ifelse(D ≤ D_crit, 3 * D^2 * fᵛᵉ * C * Np / dmdD, zero(FT))
+        result += w * f * J
+    end
+    return result
+end
+
+function evaluate_companion_m3(::SixthMomentMelt2, state, nodes, weights)
+    FT = typeof(state.slope)
+    λ = state.slope
+    result = zero(FT)
+    thresholds = regime_thresholds_from_state(FT, state)
+    D_crit = thresholds.spherical
+    for i in 1:length(nodes)
+        x = nodes[i]
+        w = weights[i]
+        D = transform_to_diameter(x, λ)
+        J = jacobian_diameter_transform(x, λ)
+        fᵛᵉ = melt_ventilation_factor(D, state, false, thresholds)
+        C = capacitance(D, state, thresholds)
+        Np = size_distribution(D, state)
+        dmdD = particle_mass_derivative(D, state, thresholds)
+        f = ifelse(D ≤ D_crit, 3 * D^2 * fᵛᵉ * C * Np / dmdD, zero(FT))
+        result += w * f * J
+    end
+    return result
+end
+
+function evaluate_companion_m3(::SixthMomentShedding, state, nodes, weights)
+    FT = typeof(state.slope)
+    λ = state.slope
+    result = zero(FT)
+    thresholds = regime_thresholds_from_state(FT, state)
+    for i in 1:length(nodes)
+        x = nodes[i]
+        w = weights[i]
+        D = transform_to_diameter(x, λ)
+        J = jacobian_diameter_transform(x, λ)
+        Np = size_distribution(D, state)
+        dmdD = particle_mass_derivative(D, state, thresholds)
+        # D^(2+bb) with bb=3 → D^5 (matches M6 integrand which uses D^(5+bb)=D^8)
+        f = ifelse(D >= FT(0.009), 3 * D^5 * Np / dmdD, zero(FT))
+        result += w * f * J
+    end
+    return result
+end
+
+"""
+    sixth_moment_relative_variance(raw_M6_sum, companion_M3_sum, state, c)
+
+Compute the change in relative variance G = M6/M3² (Fortran dG/dt formula).
+
+`c` is the M3 coefficient: 2 for processes that don't change N (deposition, riming, shedding),
+1 for processes that also change N (sublimation, melting).
+"""
+function sixth_moment_relative_variance(raw_M6, companion_M3, state, c)
+    FT = typeof(raw_M6)
+    μ = state.shape
+    λ = state.slope
+    M3 = FT(gamma(μ + 4) / (gamma(μ + 1) * λ^3))
+    M6 = FT(gamma(μ + 7) / (gamma(μ + 1) * λ^6))
+    M3_safe = max(M3, eps(FT))
+    return raw_M6 / M3_safe^2 - c * M6 / M3_safe^3 * companion_M3
+end
+
+# --- Single-term processes: store dG / mass_integral (exact ratio) ---
+
+# Rime: c=2, divide by RainCollectionNumber (∫ A V N'(D) dD for D ≥ 100 μm = nrwat).
+# Runtime: z_rime * mass_rate / Nⁱ = (m6rime/nrwat) * nrwat * env * Nⁱ / Nⁱ = m6rime * env ✓
+function normalize_integral(integral::SixthMomentRime, raw, mean_particle_mass, state, nodes, weights)
+    companion = evaluate_companion_m3(integral, state, nodes, weights)
+    dG = sixth_moment_relative_variance(raw, companion, state, 2)
+    mass_integral = evaluate_quadrature(RainCollectionNumber(), state, nodes, weights)
+    return dG / max(mass_integral, eps(typeof(raw)))
+end
+
+# Shedding: c=2. Fortran integrand includes D^bb (baked into integrand above).
+# The table stores dG_kernel / M3 where M3 = sum4 (bb=3 moment).
+# Runtime: z_shed * mass_rate / Nⁱ = (dG_kernel/M3) * qshed * env * Nⁱ / Nⁱ
+# = (dG_kernel/M3) * qshed * env. Fortran: m6shd * env = (sum3/sum4)*dG_kernel * env
+# = (qshed/M3)*dG_kernel * env. ✓
+function normalize_integral(integral::SixthMomentShedding, raw, mean_particle_mass, state, nodes, weights)
+    FT = typeof(raw)
+    companion = evaluate_companion_m3(integral, state, nodes, weights)
+    dG = sixth_moment_relative_variance(raw, companion, state, 2)
+    μ = state.shape
+    λ = state.slope
+    M3 = FT(gamma(μ + 4) / (gamma(μ + 1) * λ^3))
+    return dG / max(M3, eps(FT))
+end
+
+# Aggregation: the double integral returns dG/dt directly. Divide by nagg.
+# Runtime: z_agg * mass_rate / Nⁱ = (m6agg/nagg) * nagg * Nⁱ² * env / Nⁱ = m6agg * Nⁱ * env ✓
+function normalize_integral(::SixthMomentAggregation, raw, mean_particle_mass, state, nodes, weights)
+    mass_integral = evaluate_quadrature(AggregationNumber(), state, nodes, weights)
+    return raw / max(mass_integral, eps(typeof(raw)))
+end
+
+# --- Two-term ventilation processes: store raw dG/dt (NOT divided by mass integral) ---
+# These have constant + enhanced ventilation components that are combined differently
+# in Z vs mass formulas at runtime. Dividing by the mass integral would introduce
+# cross-term errors. The runtime extracts environmental factors via the mass tables.
+
+# Deposition: c=2. Table stores m6dep and m6dep1 directly.
+function normalize_integral(integral::SixthMomentDeposition, raw, mean_particle_mass, state, nodes, weights)
+    companion = evaluate_companion_m3(integral, state, nodes, weights)
+    return sixth_moment_relative_variance(raw, companion, state, 2)
+end
+
+function normalize_integral(integral::SixthMomentDeposition1, raw, mean_particle_mass, state, nodes, weights)
+    companion = evaluate_companion_m3(integral, state, nodes, weights)
+    return sixth_moment_relative_variance(raw, companion, state, 2)
+end
+
+# Melting: c=1. Table stores m6mlt1 and m6mlt2 directly.
+# Fortran runtime multiplies by mass table: zimlt = (vdepm1*m6mlt1 + vdepm2*m6mlt2*Sc)*thermo
+function normalize_integral(integral::SixthMomentMelt1, raw, mean_particle_mass, state, nodes, weights)
+    companion = evaluate_companion_m3(integral, state, nodes, weights)
+    return sixth_moment_relative_variance(raw, companion, state, 1)
+end
+
+function normalize_integral(integral::SixthMomentMelt2, raw, mean_particle_mass, state, nodes, weights)
+    companion = evaluate_companion_m3(integral, state, nodes, weights)
+    return sixth_moment_relative_variance(raw, companion, state, 1)
+end
+
+# Sublimation: c=1. Table stores m6sub and m6sub1 directly.
+function normalize_integral(integral::SixthMomentSublimation, raw, mean_particle_mass, state, nodes, weights)
+    companion = evaluate_companion_m3(integral, state, nodes, weights)
+    return sixth_moment_relative_variance(raw, companion, state, 1)
+end
+
+function normalize_integral(integral::SixthMomentSublimation1, raw, mean_particle_mass, state, nodes, weights)
+    companion = evaluate_companion_m3(integral, state, nodes, weights)
+    return sixth_moment_relative_variance(raw, companion, state, 1)
+end
+
 
 #####
 ##### TabulatedFunction3D - 3D extension of TabulatedFunction pattern

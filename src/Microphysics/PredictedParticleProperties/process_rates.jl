@@ -257,9 +257,6 @@ Compute per-particle ventilation integral C(D) × f_v(D) for melting,
 blending ice (0.65, 0.44) and rain (0.78, 0.28) ventilation coefficients
 weighted by liquid fraction Fl.
 
-Table path falls back to ice-only ventilation; full Fl-blended table entries
-(f1pr24–f1pr27) require new table generation.
-
 Analytical path applies the Fortran Fl-blended formula (H10):
 
 ```math
@@ -272,9 +269,7 @@ f_v = [(1-F_l) \\times 0.65 + F_l \\times 0.78]
                                        m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
-    # Table path: Fl-blended entries not yet generated; fall back to ice-only (Fˡ = 0)
-    Fˡ = zero(FT)
-    return vent(log_m, Fᶠ, Fˡ, ρᶠ) + ventilation_sc_correction(nu, D_v) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ)
+    return vent(log_m, Fᶠ, Fl, ρᶠ) + ventilation_sc_correction(nu, D_v) * vent_e(log_m, Fᶠ, Fl, ρᶠ)
 end
 
 @inline function melting_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
@@ -1267,7 +1262,7 @@ pre-computed lookup tables. Otherwise, falls back to proportional scaling.
     sc_correction = ventilation_sc_correction(nu, D_v)
 
     z_tendency = tabulated_z_tendency(
-        p3.ice.sixth_moment, log_mean_mass, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
+        p3.ice, log_mean_mass, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
         p3.process_rates, sc_correction
     )
 
@@ -1283,50 +1278,90 @@ end
     return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3, nu_ref, D_v_ref)
 end
 
-# Tabulated version: use TabulatedFunction4D lookups for each process
-@inline function tabulated_z_tendency(sixth::IceSixthMoment{<:TabulatedFunction4D},
+# Tabulated version: use TabulatedFunction4D lookups for Z tendencies.
+#
+# Table convention:
+# - Single-term processes (rime, aggregation, shedding): table stores dG/mass_integral.
+#   Runtime: z_table × mass_rate / Nⁱ (exact).
+# - Two-term ventilation processes (deposition, sublimation, melting): table stores
+#   raw dG/dt values. Runtime extracts environmental factors from mass_rate / mass_table
+#   to avoid cross-term errors from the constant + enhanced ventilation split.
+#
+# Fortran convention:
+#   epsiz = (m6dep + Sc*m6dep1) × 2πρDv              (dep/sub: raw dG × env)
+#   zimlt = (vdepm1*m6mlt1 + vdepm2*m6mlt2*Sc) × thermo  (melt: mass_table × dG × env)
+#   zqccol = m6rime × env_factors                      (rime: dG × env, single term)
+@inline function tabulated_z_tendency(ice::IceProperties{<:Any, <:Any, <:Any, <:Any, <:Any,
+                                                          M6, <:Any, <:Any},
                                         log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-                                        prp::ProcessRateParameters, sc_correction)
+                                        prp::ProcessRateParameters, sc_correction) where {M6 <: IceSixthMoment{<:TabulatedFunction4D}}
     FT = typeof(ρ)
+    sixth = ice.sixth_moment
+    dep = ice.deposition
+    coll = ice.collection
 
-    # Look up normalized Z contribution for each process
-    # deposition/sublimation have constant + enhanced ventilation integrals;
-    # enhanced terms require Sc^(1/3)/√ν correction (same as H1 for mass deposition)
-    # Deposition and sublimation integrands are identical (both 6D⁵ × f_v × C × N'),
-    # so z_dep handles both via the sign of rates.deposition. The separate z_sub
-    # table entries are retained for potential future divergence (e.g., size-dependent
-    # sublimation thresholds) but are not needed in the current tendency calculation.
-    z_dep = sixth.deposition(log_m, Fᶠ, Fˡ, ρᶠ) + sc_correction * sixth.deposition1(log_m, Fᶠ, Fˡ, ρᶠ)
-    z_melt = sixth.melt1(log_m, Fᶠ, Fˡ, ρᶠ) + sixth.melt2(log_m, Fᶠ, Fˡ, ρᶠ)
+    inv_nⁱ = safe_divide(one(FT), nⁱ, eps(FT))
+
+    # --- Deposition / Sublimation ---
+    # Z tables store raw dG/dt. Extract env factor from mass_rate / (mass_table × Nⁱ).
+    # Fortran: epsiz = (m6dep + Sc×m6dep1) × 2πρDv
+    #          epsi  = (vdep  + Sc×vdep1 ) × 2πρDv × Nⁱ
+    # Deposition (c=2) and sublimation (c=1) use different dG normalization,
+    # but the SAME mass integrals (vdep/vdep1). Separate via sign of rates.deposition.
+    mass_dep_combined = dep.ventilation(log_m, Fᶠ, Fˡ, ρᶠ) +
+                        sc_correction * dep.ventilation_enhanced(log_m, Fᶠ, Fˡ, ρᶠ)
+    env_dep = safe_divide(abs(rates.deposition), max(nⁱ * mass_dep_combined, eps(FT)), zero(FT))
+
+    z_dep_combined = sixth.deposition(log_m, Fᶠ, Fˡ, ρᶠ) +
+                     sc_correction * sixth.deposition1(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_sub_combined = sixth.sublimation(log_m, Fᶠ, Fˡ, ρᶠ) +
+                     sc_correction * sixth.sublimation1(log_m, Fᶠ, Fˡ, ρᶠ)
+
+    is_deposition = rates.deposition > zero(FT)
+    z_dep_sub_rate = ifelse(is_deposition, z_dep_combined, -z_sub_combined) * env_dep
+
+    # --- Melting ---
+    # Fortran: zimlt = (vdepm1×m6mlt1 + vdepm2×m6mlt2×Sc) × thermo
+    # Z is the mass-weighted combination of Z tables. Extract thermo from mass_rate / (mass_combined × Nⁱ).
+    mass_melt_const = dep.small_ice_ventilation_constant(log_m, Fᶠ, Fˡ, ρᶠ)
+    mass_melt_enh   = dep.small_ice_ventilation_reynolds(log_m, Fᶠ, Fˡ, ρᶠ)
+    mass_melt_combined = mass_melt_const + sc_correction * mass_melt_enh
+    complete_melting = rates.complete_melting
+    env_melt = safe_divide(complete_melting, max(nⁱ * mass_melt_combined, eps(FT)), zero(FT))
+
+    z_melt1 = sixth.melt1(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_melt2 = sixth.melt2(log_m, Fᶠ, Fˡ, ρᶠ)
+    # Mass-weighted Z: each term multiplied by its own mass table (Fortran convention)
+    z_melt_numerator = mass_melt_const * z_melt1 + sc_correction * mass_melt_enh * z_melt2
+    z_melt_rate = z_melt_numerator * env_melt
+
+    # --- Riming (single term): z_table = dG/mass_integral ---
     z_rime = sixth.rime(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_rime_rate = z_rime * (rates.cloud_riming + rates.rain_riming) * inv_nⁱ
+
+    # --- Aggregation (single term): z_table = dG/nagg ---
     z_agg = sixth.aggregation(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_agg_rate = z_agg * rates.aggregation * inv_nⁱ
+
+    # --- Shedding (single term): z_table = dG_kernel/M3 ---
     z_shed = sixth.shedding(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_shed_rate = z_shed * rates.shedding * inv_nⁱ
 
-    # Total melting
-    total_melting = rates.partial_melting + rates.complete_melting
+    # Total Z rate
+    z_rate = z_dep_sub_rate +
+             z_rime_rate +
+             z_agg_rate -
+             z_shed_rate -
+             z_melt_rate
 
-    # Compute Z tendency from tabulated integrals.
-    # Each integral gives the normalized Z rate per unit mass rate.
-    #
-    # Deposition/sublimation: rates.deposition is positive for deposition,
-    # negative for sublimation. Since SixthMomentDeposition and
-    # SixthMomentSublimation have identical integrands (6D⁵ × f_v × C × N'),
-    # z_dep == z_sub, so z_dep × rates.deposition correctly gives:
-    #   positive Z change for deposition, negative Z change for sublimation.
-    z_rate = z_dep * rates.deposition +
-             z_rime * (rates.cloud_riming + rates.rain_riming) -
-             z_agg * rates.aggregation * safe_divide(qⁱ, nⁱ, FT(1e-12)) +  # agg is positive magnitude (M7)
-             z_shed * rates.shedding -
-             z_melt * total_melting
     z_rate = z_rate + nucleation_sixth_moment_tendency(rates.nucleation_number, prp)
 
     return ρ * z_rate
 end
 
 # Fallback: use proportional scaling when integrals are not tabulated
-@inline function tabulated_z_tendency(::IceSixthMoment, log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
+@inline function tabulated_z_tendency(ice::IceProperties, log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
                                        prp::ProcessRateParameters, sc_correction)
-    # Fall back to the simple proportional scaling
     return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp)
 end
 

@@ -816,12 +816,27 @@ using Oceananigans.Fields: interior
         @test shed_wet ≥ 0
         @test shed_wet > shed_dry  # wet particles have larger blended mass
 
-        # Sixth moment shedding also enforces D ≥ 9 mm; no Fl in integrand
+        # Sixth moment shedding: 6D⁵ Np / dmdD where dmdD depends on Fl
+        # (Fortran convention includes the Jacobian 1/dmdD).
+        # Wet particles have larger dmdD → smaller integrand.
         m6_shed_dry = evaluate(SixthMomentShedding(), state_dry)
         m6_shed_wet = evaluate(SixthMomentShedding(), state_wet)
 
-        @test m6_shed_dry ≈ m6_shed_wet  # D^6 * Np does not depend on Fl
+        @test m6_shed_dry ≥ 0
         @test m6_shed_wet ≥ 0
+
+        D_large = 5e-4
+        melt_const_dry = Breeze.Microphysics.PredictedParticleProperties.integrand(
+            LargeIceVentilationConstant(), D_large, state_dry)
+        melt_const_wet = Breeze.Microphysics.PredictedParticleProperties.integrand(
+            LargeIceVentilationConstant(), D_large, state_wet)
+        melt_re_dry = Breeze.Microphysics.PredictedParticleProperties.integrand(
+            LargeIceVentilationReynolds(), D_large, state_dry)
+        melt_re_wet = Breeze.Microphysics.PredictedParticleProperties.integrand(
+            LargeIceVentilationReynolds(), D_large, state_wet)
+
+        @test melt_const_wet > melt_const_dry
+        @test melt_re_wet != melt_re_dry
     end
 
     @testset "Deposition integrals physical consistency" begin
@@ -2130,6 +2145,35 @@ using Oceananigans.Fields: interior
             ratio = rates_tab.deposition / rates_ana.deposition
             @test 0.01 < abs(ratio) < 100
         end
+    end
+
+    @testset "Tabulated sixth-moment melting matches Fortran branch split" begin
+        FT = Float64
+        p3_tab = tabulate(PredictedParticlePropertiesMicrophysics(), CPU();
+            number_of_mass_points = 12,
+            number_of_rime_fraction_points = 4,
+            number_of_liquid_fraction_points = 3,
+            number_of_rime_density_points = 3,
+            number_of_quadrature_points = 24)
+
+        qⁱ = FT(1e-4)
+        nⁱ = FT(1e5)
+        zⁱ = FT(1e-8)
+        ρ = FT(1.0)
+        Fᶠ = FT(0.2)
+        Fˡ = FT(0.3)
+        ρᶠ = FT(400.0)
+
+        partial_only = P3ProcessRates(ntuple(index -> begin
+            index == 8 ? FT(1e-7) : zero(FT)
+        end, fieldcount(P3ProcessRates))...)
+
+        complete_only = P3ProcessRates(ntuple(index -> begin
+            index == 9 ? FT(1e-7) : zero(FT)
+        end, fieldcount(P3ProcessRates))...)
+
+        @test tendency_ρzⁱ(partial_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab) ≈ 0
+        @test tendency_ρzⁱ(complete_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab) != 0
     end
 
     #####

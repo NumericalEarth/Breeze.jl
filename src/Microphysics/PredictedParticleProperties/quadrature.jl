@@ -580,6 +580,69 @@ end
     return particle_mass(D, state, thresholds)
 end
 
+"""
+    particle_mass_derivative(D, state, thresholds)
+
+Derivative dm/dD of the total (ice + liquid) particle mass with respect to diameter.
+
+For the piecewise power law `m_ice = a D^b`, `dm_ice/dD = a b D^(b-1)`.
+Including liquid fraction Fˡ:
+
+`dm/dD = (1 - Fˡ) dm_ice/dD + Fˡ × (π/2) × 1000 × D²`
+
+This Jacobian is used in the sixth-moment integrand normalization to convert
+mass growth rate to diameter growth rate: `dD/dt = (dm/dt) / (dm/dD)`.
+Matches the Fortran `dmdD` computation in `create_p3_lookupTable_1.f90`.
+"""
+@inline function particle_mass_derivative(D, state::IceSizeDistributionState, thresholds)
+    FT = typeof(D)
+    α = state.mass_coefficient
+    β = state.mass_exponent
+    ρᵢ = state.ice_density
+    Fˡ = state.liquid_fraction
+
+    # dm_ice/dD for each regime (derivative of a D^b → a b D^(b-1))
+    # Regime 1: small spheres
+    a₁ = ρᵢ * FT(π) / 6
+    b₁ = FT(3)
+
+    # Regime 2: aggregates
+    a₂ = FT(α)
+    b₂ = FT(β)
+
+    # Regime 3: graupel
+    a₃ = thresholds.ρ_graupel * FT(π) / 6
+    b₃ = FT(3)
+
+    # Regime 4: partially rimed
+    Fᶠ_safe = min(state.rime_fraction, FT(1) - eps(FT))
+    a₄ = FT(α) / (1 - Fᶠ_safe)
+    b₄ = FT(β)
+
+    is_regime_4 = D ≥ thresholds.partial_rime
+    is_regime_3 = D ≥ thresholds.graupel
+    is_regime_2 = D ≥ thresholds.spherical
+
+    a = ifelse(is_regime_4, a₄, a₃)
+    b = ifelse(is_regime_4, b₄, b₃)
+    a = ifelse(is_regime_3, a, a₂)
+    b = ifelse(is_regime_3, b, b₂)
+    a = ifelse(is_regime_2, a, a₁)
+    b = ifelse(is_regime_2, b, b₁)
+
+    dmdD_ice = a * b * D^(b - 1)
+
+    # Liquid sphere: m_liquid = (π/6) × 1000 × D³ → dm/dD = (π/2) × 1000 × D²
+    dmdD_liquid = FT(π) / 2 * 1000 * D^2
+
+    dmdD = (1 - Fˡ) * dmdD_ice + Fˡ * dmdD_liquid
+    return max(dmdD, eps(FT))
+end
+
+@inline function particle_mass_derivative(D, state::IceSizeDistributionState)
+    thresholds = regime_thresholds_from_state(D, state)
+    return particle_mass_derivative(D, state, thresholds)
+end
 
 #####
 ##### Deposition/ventilation integrals
@@ -635,6 +698,52 @@ end
 
 @inline ventilation_factor(D, state; constant_term=true) = ventilation_factor(D, state, constant_term)
 
+"""
+    melt_ventilation_factor(D, state, constant_term, thresholds)
+
+Fortran P3 melting ventilation factor used for `vdepm*` and `m6mlt*` tables.
+
+For `D ≤ 100 μm`, melting uses the diffusion-limited coefficients `fac1 = 1`
+and `fac2 = 0`. For larger particles it blends the ice and rain ventilation
+branches by liquid fraction Fˡ:
+
+- constant term: `(1 - Fˡ) × 0.65 + Fˡ × 0.78`
+- Reynolds term: `(1 - Fˡ) × 0.44 × √(V_ice D) + Fˡ × 0.28 × √(V_rain D)`
+
+This matches `create_p3_lookupTable_1.f90` lines 1967-1985.
+"""
+@inline function melt_ventilation_factor(D, state::IceSizeDistributionState, constant_term, thresholds)
+    FT = typeof(D)
+    Fˡ = state.liquid_fraction
+
+    D_threshold = FT(100e-6)
+    is_small = D ≤ D_threshold
+    small_value = ifelse(constant_term, one(FT), zero(FT))
+
+    m_ice = particle_mass_ice_only(D, state, thresholds)
+    A_ice = particle_area_ice_only(D, state, thresholds)
+    V_ice = ice_fall_speed_mh2005(D, state, m_ice, A_ice)
+
+    ρ = state.air_density
+    ρ₀ = FT(P3_REF_RHO)
+    ρ_correction = (ρ₀ / max(ρ, FT(0.1)))^FT(0.54)
+
+    V_ice_corr = V_ice * ρ_correction
+    V_rain = rain_fall_speed(D, ρ_correction)
+
+    large_constant = (one(FT) - Fˡ) * FT(0.65) + Fˡ * FT(0.78)
+    large_reynolds = (one(FT) - Fˡ) * FT(0.44) * sqrt(max(V_ice_corr * D, zero(FT))) +
+                     Fˡ * FT(0.28) * sqrt(max(V_rain * D, zero(FT)))
+    large_value = ifelse(constant_term, large_constant, large_reynolds)
+
+    return ifelse(is_small, small_value, large_value)
+end
+
+@inline function melt_ventilation_factor(D, state::IceSizeDistributionState, constant_term)
+    thresholds = regime_thresholds_from_state(D, state)
+    return melt_ventilation_factor(D, state, constant_term, thresholds)
+end
+
 # Basic ventilation: ∫ fᵛᵉ(D) C(D) N'(D) dD
 @inline function integrand(::Ventilation, D, state::IceSizeDistributionState, thresholds)
     fᵛᵉ = ventilation_factor(D, state, true, thresholds)
@@ -653,7 +762,7 @@ end
 # Size-regime-specific ventilation for melting
 @inline function integrand(::SmallIceVentilationConstant, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
-    fᵛᵉ = ventilation_factor(D, state, true, thresholds)
+    fᵛᵉ = melt_ventilation_factor(D, state, true, thresholds)
     C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
@@ -662,7 +771,7 @@ end
 
 @inline function integrand(::SmallIceVentilationReynolds, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
-    fᵛᵉ = ventilation_factor(D, state, false, thresholds)
+    fᵛᵉ = melt_ventilation_factor(D, state, false, thresholds)
     C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
@@ -671,7 +780,7 @@ end
 
 @inline function integrand(::LargeIceVentilationConstant, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
-    fᵛᵉ = ventilation_factor(D, state, true, thresholds)
+    fᵛᵉ = melt_ventilation_factor(D, state, true, thresholds)
     C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
@@ -680,7 +789,7 @@ end
 
 @inline function integrand(::LargeIceVentilationReynolds, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
-    fᵛᵉ = ventilation_factor(D, state, false, thresholds)
+    fᵛᵉ = melt_ventilation_factor(D, state, false, thresholds)
     C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
@@ -899,44 +1008,64 @@ end
 #####
 
 # Sixth moment rime tendency
+# Fortran (create_p3_lookupTable_1.f90 line 1552):
+#   sum2 = ∫ 6*D^5 * A * V * N'(D) / dmdD dD  (for D ≥ 100 μm)
+# The collection kernel (A × V) and Jacobian (1/dmdD) convert the mass-based
+# riming rate into a diameter growth rate for the D^6 moment.
 @inline function integrand(::SixthMomentRime, D, state::IceSizeDistributionState, thresholds)
+    FT = typeof(D)
+    V = terminal_velocity(D, state, thresholds)
+    A = particle_area(D, state, thresholds)
     Np = size_distribution(D, state)
-    return D^6 * Np
+    dmdD = particle_mass_derivative(D, state, thresholds)
+    contribution = 6 * D^5 * A * V * Np / dmdD
+    return ifelse(D >= FT(100e-6), contribution, zero(FT))
 end
 
 # Sixth moment deposition tendencies
+# Fortran (line 2107-2116): includes fv × C × 6D^5 / dmdD
 @inline function integrand(::SixthMomentDeposition, D, state::IceSizeDistributionState, thresholds)
     fᵛᵉ = ventilation_factor(D, state, true, thresholds)
     C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
-    return 6 * D^5 * fᵛᵉ * C * Np
+    dmdD = particle_mass_derivative(D, state, thresholds)
+    return 6 * D^5 * fᵛᵉ * C * Np / dmdD
 end
 
 @inline function integrand(::SixthMomentDeposition1, D, state::IceSizeDistributionState, thresholds)
     fᵛᵉ = ventilation_factor(D, state, false, thresholds)
     C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
-    return 6 * D^5 * fᵛᵉ * C * Np
+    dmdD = particle_mass_derivative(D, state, thresholds)
+    return 6 * D^5 * fᵛᵉ * C * Np / dmdD
 end
 
 # Sixth moment melting tendencies
+# Fortran (line 1991): sum5 = ∫ capm × 6D^5 × fac1 × N'(D) / dmdD dD  (D ≤ D_crit)
+# melt1 = constant ventilation, melt2 = enhanced ventilation (for small ice, D ≤ D_crit)
 @inline function integrand(::SixthMomentMelt1, D, state::IceSizeDistributionState, thresholds)
+    D_crit = thresholds.spherical
+    fᵛᵉ = melt_ventilation_factor(D, state, true, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
-    return 6 * D^5 * Np
+    dmdD = particle_mass_derivative(D, state, thresholds)
+    contribution = 6 * D^5 * fᵛᵉ * C * Np / dmdD
+    return ifelse(D ≤ D_crit, contribution, zero(D))
 end
 
 @inline function integrand(::SixthMomentMelt2, D, state::IceSizeDistributionState, thresholds)
-    m = particle_mass(D, state, thresholds)
+    D_crit = thresholds.spherical
+    fᵛᵉ = melt_ventilation_factor(D, state, false, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
-    return D^6 / m * Np
+    dmdD = particle_mass_derivative(D, state, thresholds)
+    contribution = 6 * D^5 * fᵛᵉ * C * Np / dmdD
+    return ifelse(D ≤ D_crit, contribution, zero(D))
 end
 
 # Sixth moment aggregation
-# WARNING (M12): This single-integral Wisner (1972) approximation (V × A × D^6 × Np^2)
-# differs from the full double integral ∫∫ D₁⁶ (√A₁+√A₂)² |V₁-V₂| N'₁ N'₂ dD₁ dD₂
-# which would properly weight the sixth moment change for each collision pair.
-# Matches the Fortran table convention. A full O(n²) double integral would
-# improve 3-moment quantitative accuracy but is deferred.
+# The single-integral integrand is retained as a fallback. For tabulation,
+# evaluate_quadrature is specialized to compute the full double integral (M9 fix).
 @inline function integrand(::SixthMomentAggregation, D, state::IceSizeDistributionState, thresholds)
     V = terminal_velocity(D, state, thresholds)
     A = particle_area(D, state, thresholds)
@@ -944,26 +1073,38 @@ end
     return D^6 * V * A * Np^2
 end
 
-# Sixth moment shedding: D^6 contribution from particles with D ≥ 9 mm.
-# Like SheddingRate, the Fl and Fr factors are applied at runtime.
+# Sixth moment shedding
+# Fortran (line 1649): 6*D^5 * (sum3/sum4) * D^bb × N'(D) / dmdD for D ≥ 9 mm
+# where bb=3 (line 348). The (sum3/sum4) ratio is constant w.r.t. D and factors
+# out of the integral; D^bb = D^3 does NOT factor out and must be in the integrand.
+# The integrand is thus 6*D^(5+3) = 6*D^8 for M6, and 3*D^(2+3) = 3*D^5 for M3.
+# The normalization divides by sum4 = M3 moment (see normalize_integral).
 @inline function integrand(::SixthMomentShedding, D, state::IceSizeDistributionState, thresholds)
+    FT = typeof(D)
     Np = size_distribution(D, state)
-    return ifelse(D >= typeof(D)(0.009), D^6 * Np, zero(D))
+    dmdD = particle_mass_derivative(D, state, thresholds)
+    # D^(5+bb) with bb=3 → D^8
+    contribution = 6 * D^8 * Np / dmdD
+    return ifelse(D >= FT(0.009), contribution, zero(FT))
 end
 
 # Sixth moment sublimation tendencies
+# Identical integrands to deposition (Fortran line 2132-2134 confirms same sums);
+# the difference is in the normalization coefficient (factor 1 vs 2 in the M3 term).
 @inline function integrand(::SixthMomentSublimation, D, state::IceSizeDistributionState, thresholds)
     fᵛᵉ = ventilation_factor(D, state, true, thresholds)
     C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
-    return 6 * D^5 * fᵛᵉ * C * Np
+    dmdD = particle_mass_derivative(D, state, thresholds)
+    return 6 * D^5 * fᵛᵉ * C * Np / dmdD
 end
 
 @inline function integrand(::SixthMomentSublimation1, D, state::IceSizeDistributionState, thresholds)
     fᵛᵉ = ventilation_factor(D, state, false, thresholds)
     C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
-    return 6 * D^5 * fᵛᵉ * C * Np
+    dmdD = particle_mass_derivative(D, state, thresholds)
+    return 6 * D^5 * fᵛᵉ * C * Np / dmdD
 end
 
 #####

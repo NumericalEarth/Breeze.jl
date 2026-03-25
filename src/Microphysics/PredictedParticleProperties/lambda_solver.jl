@@ -1021,6 +1021,11 @@ struct DiameterBounds{FT}
     D_max :: FT
 end
 
+# Fortran P3 lambda limiter constants (create_p3_lookupTable_3.f90, lines 77-79)
+const P3_DM_MAX_BASE = 5e-3    # 5 mm  (Fortran Dm_max1 = 5000e-6)
+const P3_DM_MAX_RIME = 20e-3   # 20 mm (Fortran Dm_max2 = 20000e-6)
+const P3_DM_MIN      = 2e-6    # 2 μm  (Fortran Dm_min  = 2e-6)
+
 """
 $(TYPEDSIGNATURES)
 
@@ -1049,6 +1054,29 @@ bounds = DiameterBounds(; D_min=5e-6, D_max=20e-3)  # 5 μm to 20 mm
 """
 function DiameterBounds(FT = Float64; D_min = FT(2e-6), D_max = FT(40e-3))
     return DiameterBounds(FT(D_min), FT(D_max))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct Fr-dependent diameter bounds matching the Fortran P3 lambda limiter.
+
+The maximum mean diameter depends on rime fraction Fr:
+  D_max = 5 mm + 20 mm × Fr²
+
+This ranges from 5 mm (unrimed, Fr=0) to 25 mm (fully rimed, Fr=1),
+matching `create_p3_lookupTable_3.f90` lines 313-315. The previous fixed
+default of 40 mm was too permissive for unrimed ice.
+
+# Arguments
+
+- `FT`: Float type
+- `rime_fraction`: Rime mass fraction Fr ∈ [0, 1]
+"""
+@inline function DiameterBounds(FT, rime_fraction)
+    D_min = FT(P3_DM_MIN)
+    D_max = FT(P3_DM_MAX_BASE) + FT(P3_DM_MAX_RIME) * rime_fraction^2
+    return DiameterBounds(D_min, D_max)
 end
 
 """
