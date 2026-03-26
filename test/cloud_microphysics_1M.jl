@@ -26,6 +26,10 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     @test μ1.cloud_formation.liquid isa ConstantRateCondensateFormation
     @test μ1.cloud_formation.ice === nothing
 
+    μ1_vertical = OneMomentCloudMicrophysics(FT;
+                                             negative_moisture_correction = Breeze.AtmosphereModels.VerticalBorrowing())
+    @test μ1_vertical.negative_moisture_correction isa Breeze.AtmosphereModels.VerticalBorrowing
+
     # Mixed-phase non-equilibrium
     μ1_mixed = OneMomentCloudMicrophysics(cloud_formation = NonEquilibriumCloudFormation(nothing, ConstantRateCondensateFormation(FT(0))))
     @test μ1_mixed.cloud_formation.ice isa ConstantRateCondensateFormation

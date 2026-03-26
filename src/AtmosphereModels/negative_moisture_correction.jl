@@ -1,5 +1,5 @@
 #####
-##### Negative moisture correction (species borrowing)
+##### Negative moisture correction
 #####
 #
 # After advection, individual moisture species can become negative because
@@ -37,9 +37,13 @@ abstract type AbstractNegativeMoistureCorrection end
 """
 $(TYPEDEF)
 
-Redistribute remaining negative vapor vertically within each column after
-species borrowing: a top-to-bottom sweep pushes deficits downward, then one
-bottom-to-top step borrows from the level above if the bottom is still negative.
+Redistribute negative vapor vertically within each column via a top-to-bottom
+sweep that pushes deficits downward, followed by one bottom-to-top borrowing
+step if the bottom level is still negative.
+
+This scheme can be used on its own to correct the moisture prognostic, or as the
+second phase of [`SpeciesBorrowing`](@ref) to clean up any vapor deficit that
+remains after same-level species borrowing.
 
 Column-integrated moisture is conserved (Δz-weighted).
 """
@@ -51,8 +55,8 @@ $(TYPEDEF)
 Correct negative moisture produced by advection via same-level species borrowing.
 
 At each grid cell, negative hydrometeors borrow from lighter species in the chain
-(e.g. rain <- cloud liquid <- vapor). Vertical redistribution of remaining negative
-vapor is performed when `vertical_borrowing` is set to [`VerticalBorrowing`](@ref).
+(e.g. rain <- cloud liquid <- vapor). Vertical redistribution of any remaining
+negative vapor is performed when `vertical_borrowing` is set to [`VerticalBorrowing`](@ref).
 
 For microphysics with number concentrations (categories that subtype
 [`AbstractNumberConcentrationCategories`](@ref)), orphaned number concentrations
@@ -140,20 +144,20 @@ $(TYPEDSIGNATURES)
 
 Fix negative moisture mixing ratios produced by the advection operator.
 
-Operates in up to two phases depending on the correction scheme:
-1. **Species borrowing** ([`SpeciesBorrowing`](@ref Breeze.AtmosphereModels.SpeciesBorrowing)):
-   at each grid cell, negative hydrometeors borrow from lighter species
-   (rain <- cloud <- vapor).
+Operates in one or two phases depending on the correction scheme:
+1. **Species borrowing** ([`SpeciesBorrowing`](@ref Breeze.AtmosphereModels.SpeciesBorrowing),
+    optional): at each grid cell, negative hydrometeors borrow from lighter
+    species (rain <- cloud <- vapor).
 2. **Vertical borrowing** ([`VerticalBorrowing`](@ref Breeze.AtmosphereModels.VerticalBorrowing),
-   optional): remaining negative vapor is redistributed vertically within each
-   column (top->bottom sweep, then one bottom->top step).
+    optional): negative vapor is redistributed vertically within each column
+    (top->bottom sweep, then one bottom->top step).
 
 For microphysics with number concentrations (categories subtying
 [`AbstractNumberConcentrationCategories`](@ref Breeze.AtmosphereModels.AbstractNumberConcentrationCategories)),
 orphaned number concentrations are zeroed and negatives are clamped after mass borrowing.
 
-The correction is mass-conserving at each level (phase 1) and column-integrated
-(phase 2). No energy adjustment is needed because Breeze's thermodynamic
+The correction is mass-conserving at each level for species borrowing and
+column-integrated for vertical borrowing. No energy adjustment is needed because Breeze's thermodynamic
 prognostics are moist-conserved variables.
 
 The borrowing chain is defined by [`correction_moisture_fields`](@ref), which
@@ -168,22 +172,21 @@ negative_moisture_correction(microphysics) = nothing
 function fix_negative_moisture!(microphysics, model)
     correction = negative_moisture_correction(microphysics)
     correction === nothing && return nothing
-    # Get the ordered tuple of mass fields that participate in species borrowing
-    # (heaviest to lightest: rain <- cloud <- vapor)
+
+    # Ordered mass fields that participate in species borrowing
+    # (heaviest to lightest: rain <- cloud <- vapor).
     moisture_fields = correction_moisture_fields(microphysics, model.microphysical_fields)
-    isempty(moisture_fields) && return nothing
 
     grid = model.grid
     arch = grid.architecture
     ρ₀ = dynamics_density(model.dynamics)
     ρqᵛᵉ = model.moisture_density
-    Nz = size(grid, 3)
     number_mass_pairs = correction_number_mass_pairs(microphysics, model.microphysical_fields)
     number_fields = correction_number_fields(microphysics, model.microphysical_fields)
 
     launch!(arch, grid, :xy,
             _fix_negative_moisture_column!,
-            correction.vertical_borrowing,
+            correction,
             moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
 
     return nothing
@@ -193,14 +196,14 @@ end
 ##### Column-wise kernel
 #####
 
-@kernel function _fix_negative_moisture_column!(vertical_borrowing, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+@kernel function _fix_negative_moisture_column!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
     # Phase 1: Species borrowing at each level
     for k = 1:Nz
         @inbounds ρ = ρ₀[i, j, k]
-        same_level_borrow!(i, j, k, ρ, moisture_fields, ρqᵛᵉ)
+        apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, correction)
     end
 
     # Zero orphaned number concentrations (mass zeroed but number still positive)
@@ -213,9 +216,22 @@ end
         clamp_negative_numbers!(i, j, k, number_fields)
     end
 
-    # Phase 2: Vertical borrowing (no-op when vertical_borrowing === nothing)
-    vertical_borrow!(ρqᵛᵉ, i, j, grid, vertical_borrowing, ρ₀)
+    # Phase 2: Vertical borrowing (no-op when the scheme does not enable it)
+    apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction, ρ₀)
 end
+
+@inline apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, ::VerticalBorrowing) = nothing
+
+@inline function apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, ::SpeciesBorrowing)
+    same_level_borrow!(i, j, k, ρ, moisture_fields, ρqᵛᵉ)
+    return nothing
+end
+
+@inline apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction::VerticalBorrowing, ρ₀) =
+    vertical_borrow!(ρqᵛᵉ, i, j, grid, correction, ρ₀)
+
+@inline apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction::SpeciesBorrowing, ρ₀) =
+    vertical_borrow!(ρqᵛᵉ, i, j, grid, correction.vertical_borrowing, ρ₀)
 
 #####
 ##### Vertical borrowing helpers

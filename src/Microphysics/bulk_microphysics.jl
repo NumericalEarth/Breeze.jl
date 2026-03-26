@@ -19,6 +19,7 @@ Bulk microphysics scheme with cloud formation and precipitation categories.
   - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom (zero terminal velocity at surface)
 - `negative_moisture_correction`: Correction scheme for negative moisture produced by advection.
   - `nothing` (default): No correction
+    - `VerticalBorrowing()`: Vertical redistribution of the moisture prognostic only
   - `SpeciesBorrowing()`: Same-level species borrowing only
   - `SpeciesBorrowing(vertical_borrowing=VerticalBorrowing())`: Species borrowing with vertical redistribution
 """
@@ -198,6 +199,7 @@ Return a `BulkMicrophysics` microphysics scheme.
   - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom
 - `negative_moisture_correction`: Correction scheme for negative moisture produced by advection.
   - `nothing` (default): No correction
+    - `VerticalBorrowing()`: Vertical redistribution of the moisture prognostic only
   - `SpeciesBorrowing()`: Same-level species borrowing only
   - `SpeciesBorrowing(vertical_borrowing=VerticalBorrowing())`: Species borrowing with vertical redistribution
 """
