@@ -31,6 +31,12 @@ export
     moisture_specific_name,
     specific_prognostic_moisture,
 
+    # Negative moisture correction types
+    AbstractNegativeMoistureCorrection,
+    VerticalBorrowing,
+    SpeciesBorrowing,
+    AbstractNumberConcentrationCategories,
+
     # Microphysics interface
     AbstractMicrophysicalState,
     NothingMicrophysicalState,
@@ -110,6 +116,7 @@ include("atmosphere_model.jl")
 include("atmosphere_model_buoyancy.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
+include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
 
