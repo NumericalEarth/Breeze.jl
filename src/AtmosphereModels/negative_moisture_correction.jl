@@ -168,6 +168,8 @@ negative_moisture_correction(microphysics) = nothing
 function fix_negative_moisture!(microphysics, model)
     correction = negative_moisture_correction(microphysics)
     correction === nothing && return nothing
+    # Get the ordered tuple of mass fields that participate in species borrowing
+    # (heaviest to lightest: rain <- cloud <- vapor)
     moisture_fields = correction_moisture_fields(microphysics, model.microphysical_fields)
     isempty(moisture_fields) && return nothing
 
