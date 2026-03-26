@@ -11,6 +11,7 @@ struct LookupTable1Parameters{FT}
     minimum_rime_density :: FT
     maximum_rime_density :: FT
     number_of_quadrature_points :: Int
+    shape_parameter_override :: FT
 end
 
 struct LookupTable2Parameters{FT}
@@ -60,7 +61,8 @@ function P3TabulationParameters(FT::Type{<:AbstractFloat} = Float64; kwargs...)
         FT(get(parameters, :maximum_log_mean_particle_mass, -5.3)),
         FT(get(parameters, :minimum_rime_density, 50)),
         FT(get(parameters, :maximum_rime_density, 900)),
-        get(parameters, :number_of_quadrature_points, 64))
+        get(parameters, :number_of_quadrature_points, 64),
+        FT(get(parameters, :shape_parameter_override, NaN)))
 
     lookup_table_2 = LookupTable2Parameters(
         get(parameters, :number_of_mass_points, 50),

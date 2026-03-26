@@ -1403,6 +1403,56 @@ Oceananigans.Architectures.on_architecture(arch, x::IceRainCollection) =
                       on_architecture(arch, x.number),
                       on_architecture(arch, x.sixth_moment))
 
+# --- P3 lookup table wrappers ---
+
+Adapt.adapt_structure(to, x::P3LookupTable1) =
+    P3LookupTable1(Adapt.adapt(to, x.fall_speed),
+                   Adapt.adapt(to, x.deposition),
+                   Adapt.adapt(to, x.bulk_properties),
+                   Adapt.adapt(to, x.collection),
+                   Adapt.adapt(to, x.sixth_moment),
+                   Adapt.adapt(to, x.lambda_limiter),
+                   Adapt.adapt(to, x.ice_rain))
+
+Oceananigans.Architectures.on_architecture(arch, x::P3LookupTable1) =
+    P3LookupTable1(on_architecture(arch, x.fall_speed),
+                   on_architecture(arch, x.deposition),
+                   on_architecture(arch, x.bulk_properties),
+                   on_architecture(arch, x.collection),
+                   on_architecture(arch, x.sixth_moment),
+                   on_architecture(arch, x.lambda_limiter),
+                   on_architecture(arch, x.ice_rain))
+
+Adapt.adapt_structure(to, x::P3LookupTable2) =
+    P3LookupTable2(Adapt.adapt(to, x.mass),
+                   Adapt.adapt(to, x.number),
+                   Adapt.adapt(to, x.sixth_moment))
+
+Oceananigans.Architectures.on_architecture(arch, x::P3LookupTable2) =
+    P3LookupTable2(on_architecture(arch, x.mass),
+                   on_architecture(arch, x.number),
+                   on_architecture(arch, x.sixth_moment))
+
+Adapt.adapt_structure(to, x::P3LookupTable3) =
+    P3LookupTable3(Adapt.adapt(to, x.shape),
+                   Adapt.adapt(to, x.slope),
+                   Adapt.adapt(to, x.mean_density))
+
+Oceananigans.Architectures.on_architecture(arch, x::P3LookupTable3) =
+    P3LookupTable3(on_architecture(arch, x.shape),
+                   on_architecture(arch, x.slope),
+                   on_architecture(arch, x.mean_density))
+
+Adapt.adapt_structure(to, x::P3LookupTables) =
+    P3LookupTables(Adapt.adapt(to, x.table_1),
+                   Adapt.adapt(to, x.table_2),
+                   Adapt.adapt(to, x.table_3))
+
+Oceananigans.Architectures.on_architecture(arch, x::P3LookupTables) =
+    P3LookupTables(on_architecture(arch, x.table_1),
+                   on_architecture(arch, x.table_2),
+                   on_architecture(arch, x.table_3))
+
 # --- IceProperties ---
 
 Adapt.adapt_structure(to, x::IceProperties) =

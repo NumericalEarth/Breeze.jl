@@ -5,12 +5,17 @@ using Oceananigans.Utils: TabulatedFunction1D, TabulatedFunction4D
 import Oceananigans.Architectures: on_architecture
 using Breeze.Microphysics.PredictedParticleProperties
 using Breeze.Microphysics.PredictedParticleProperties:
-    IceProperties, NullP3LookupTables, P3TabulationParameters,
-    LookupTable1Parameters, LookupTable2Parameters, LookupTable3Parameters
+    IceProperties, NullP3LookupTables, P3LookupTable1, P3LookupTable2,
+    P3LookupTable3, P3LookupTables, P3TabulationParameters, LookupTable1Parameters,
+    LookupTable2Parameters, LookupTable3Parameters
 
 struct MockArchitecture end
+struct TransferArchitecture end
+struct ShiftArrays end
 
 on_architecture(::MockArchitecture, a::Array) = a
+on_architecture(::TransferArchitecture, a::Array) = a .+ 1
+Adapt.adapt_storage(::ShiftArrays, a::Array) = a .+ 1
 
 @testset "P3 uses Oceananigans generic tabulated function types" begin
     p3 = PredictedParticlePropertiesMicrophysics()
@@ -60,14 +65,28 @@ end
 end
 
 @testset "P3 tabulation parameter overrides propagate to nested families" begin
-    params = P3TabulationParameters(Float64; number_of_mass_points = 4)
+    params = P3TabulationParameters(Float64;
+        number_of_mass_points = 4,
+        shape_parameter_override = 3)
     @test params.lookup_table_1.number_of_mass_points == 4
+    @test params.lookup_table_1.shape_parameter_override == 3
 end
 
 @testset "IceProperties reconstruction preserves lookup_tables" begin
-    lookup_tables = :sentinel_lookup_tables
+    lookup_tables = P3LookupTables(
+        P3LookupTable1([1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0]),
+        P3LookupTable2([8.0], [9.0], [10.0]),
+        P3LookupTable3([11.0], [12.0], [13.0]))
     ice = IceProperties(Float64; lookup_tables)
 
-    @test on_architecture(CPU(), ice).lookup_tables === lookup_tables
-    @test Adapt.adapt(identity, ice).lookup_tables === lookup_tables
+    transferred = on_architecture(TransferArchitecture(), ice)
+    adapted = Adapt.adapt(ShiftArrays(), ice)
+
+    @test transferred.lookup_tables.table_1.fall_speed == [2.0]
+    @test transferred.lookup_tables.table_2.mass == [9.0]
+    @test transferred.lookup_tables.table_3.shape == [12.0]
+
+    @test adapted.lookup_tables.table_1.fall_speed == [2.0]
+    @test adapted.lookup_tables.table_2.mass == [9.0]
+    @test adapted.lookup_tables.table_3.shape == [12.0]
 end
