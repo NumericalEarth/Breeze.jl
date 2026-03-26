@@ -43,7 +43,7 @@ bottom-to-top step borrows from the level above if the bottom is still negative.
 
 Column-integrated moisture is conserved (Δz-weighted).
 """
-struct VerticalBorrowing end
+struct VerticalBorrowing <: AbstractNegativeMoistureCorrection end
 
 """
 $(TYPEDEF)
