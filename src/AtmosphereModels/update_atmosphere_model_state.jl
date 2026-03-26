@@ -212,7 +212,8 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
 
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(model.microphysical_fields)
-    fill_halo_regions!(model.formulation)
+    # Note: formulation (potential temperature density) is a prognostic field
+    # whose halos were already filled by the async prognostic fill in update_state!.
 
     return nothing
 end

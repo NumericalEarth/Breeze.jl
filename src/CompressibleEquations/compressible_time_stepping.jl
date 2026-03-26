@@ -72,10 +72,8 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
     arch = grid.architecture
     dynamics = model.dynamics
 
-    # Ensure halos are filled (may have been async from update_state!)
-    # These fields are needed for pressure computation via equation of state
-    fill_halo_regions!(dynamics.density)
-    fill_halo_regions!(prognostic_fields(model.formulation))
+    # Note: density and ρθ halos were already filled by the async prognostic
+    # fill in update_state! (synchronized by the momentum fill in compute_velocities!).
 
     launch!(arch, grid, :xyz,
             _compute_temperature_and_pressure!,
