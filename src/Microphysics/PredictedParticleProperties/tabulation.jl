@@ -1416,7 +1416,8 @@ Adapt.adapt_structure(to, x::IceProperties) =
                   Adapt.adapt(to, x.collection),
                   Adapt.adapt(to, x.sixth_moment),
                   Adapt.adapt(to, x.lambda_limiter),
-                  Adapt.adapt(to, x.ice_rain))
+                  Adapt.adapt(to, x.ice_rain);
+                  lookup_tables = Adapt.adapt(to, x.lookup_tables))
 
 Oceananigans.Architectures.on_architecture(arch, x::IceProperties) =
     IceProperties(x.minimum_rime_density,
@@ -1429,7 +1430,8 @@ Oceananigans.Architectures.on_architecture(arch, x::IceProperties) =
                   on_architecture(arch, x.collection),
                   on_architecture(arch, x.sixth_moment),
                   on_architecture(arch, x.lambda_limiter),
-                  on_architecture(arch, x.ice_rain))
+                  on_architecture(arch, x.ice_rain);
+                  lookup_tables = on_architecture(arch, x.lookup_tables))
 
 # --- RainProperties ---
 

@@ -73,6 +73,15 @@ export
     IceSixthMoment,
     IceLambdaLimiter,
     IceRainCollection,
+    LookupTable1Parameters,
+    LookupTable2Parameters,
+    LookupTable3Parameters,
+    P3TabulationParameters,
+    NullP3LookupTables,
+    P3LookupTable1,
+    P3LookupTable2,
+    P3LookupTable3,
+    P3LookupTables,
 
     # Rain and cloud droplet properties
     RainProperties,
@@ -222,6 +231,8 @@ include("ice_collection.jl")
 include("ice_sixth_moment.jl")
 include("ice_lambda_limiter.jl")
 include("ice_rain_collection.jl")
+include("p3_tabulation_parameters.jl")
+include("lookup_tables.jl")
 include("ice_properties.jl")
 
 #####

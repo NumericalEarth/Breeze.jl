@@ -9,7 +9,7 @@
 
 Ice particle properties for P3. See [`IceProperties()`](@ref) constructor.
 """
-struct IceProperties{FT, FS, DP, BP, CL, M6, LL, IR}
+struct IceProperties{FT, FS, DP, BP, CL, M6, LL, IR, TABLES}
     # Top-level parameters
     minimum_rime_density :: FT
     maximum_rime_density :: FT
@@ -23,6 +23,34 @@ struct IceProperties{FT, FS, DP, BP, CL, M6, LL, IR}
     sixth_moment :: M6
     lambda_limiter :: LL
     ice_rain :: IR
+    lookup_tables :: TABLES
+end
+
+function IceProperties(minimum_rime_density,
+                       maximum_rime_density,
+                       maximum_shape_parameter,
+                       minimum_reflectivity,
+                       fall_speed,
+                       deposition,
+                       bulk_properties,
+                       collection,
+                       sixth_moment,
+                       lambda_limiter,
+                       ice_rain;
+                       lookup_tables = NullP3LookupTables())
+    return IceProperties(
+        minimum_rime_density,
+        maximum_rime_density,
+        maximum_shape_parameter,
+        minimum_reflectivity,
+        fall_speed,
+        deposition,
+        bulk_properties,
+        collection,
+        sixth_moment,
+        lambda_limiter,
+        ice_rain,
+        lookup_tables)
 end
 
 """
@@ -64,7 +92,8 @@ function IceProperties(FT::Type{<:AbstractFloat} = Float64;
                        minimum_rime_density = 50,
                        maximum_rime_density = 900,
                        maximum_shape_parameter = 20,
-                       minimum_reflectivity = 1e-35)
+                       minimum_reflectivity = 1e-35,
+                       lookup_tables = NullP3LookupTables())
     return IceProperties(
         FT(minimum_rime_density),
         FT(maximum_rime_density),
@@ -76,7 +105,8 @@ function IceProperties(FT::Type{<:AbstractFloat} = Float64;
         IceCollection(FT),
         IceSixthMoment(),
         IceLambdaLimiter(),
-        IceRainCollection()
+        IceRainCollection();
+        lookup_tables
     )
 end
 
