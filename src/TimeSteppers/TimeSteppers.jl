@@ -14,8 +14,12 @@ export SSPRungeKutta3, AcousticSSPRungeKutta3, AcousticRungeKutta3,
        maybe_initialize_state!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Oceananigans
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
+                                 AbstractTimeStepper,
                                  update_state!, maybe_initialize_state!
+
+abstract type AbstractBreezeTimeStepper <: AbstractTimeStepper end
 
 include("ssp_runge_kutta_3.jl")
 include("acoustic_ssp_runge_kutta_3.jl")
@@ -30,5 +34,21 @@ OceananigansTimeSteppers.TimeStepper(::Val{:AcousticSSPRungeKutta3}, args...; kw
 
 OceananigansTimeSteppers.TimeStepper(::Val{:AcousticRungeKutta3}, args...; kwargs...) =
     AcousticRungeKutta3(args...; kwargs...)
+
+#####
+##### Checkpointing
+#####
+
+function Oceananigans.prognostic_state(timestepper::AbstractBreezeTimeStepper)
+    return (Gⁿ = Oceananigans.prognostic_state(timestepper.Gⁿ),)
+end
+
+function Oceananigans.restore_prognostic_state!(restored::AbstractBreezeTimeStepper, from)
+    Oceananigans.restore_prognostic_state!(restored.Gⁿ, from.Gⁿ)
+    return restored
+end
+
+restore_prognostic_state!(::AbstractBreezeTimeStepper, ::Nothing) = nothing
+
 
 end # module

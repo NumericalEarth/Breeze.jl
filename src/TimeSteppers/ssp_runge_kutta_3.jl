@@ -2,7 +2,6 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields
 using Oceananigans.TimeSteppers:
-    AbstractTimeStepper,
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
@@ -45,7 +44,7 @@ Fields
 - `Gⁿ`: Tendency fields at current stage
 - `implicit_solver`: Optional implicit solver for diffusion
 """
-struct SSPRungeKutta3{FT, U0, TG, TI} <: AbstractTimeStepper
+struct SSPRungeKutta3{FT, U0, TG, TI} <: AbstractBreezeTimeStepper
     α¹ :: FT
     α² :: FT
     α³ :: FT

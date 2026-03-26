@@ -3,7 +3,6 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans.Utils: time_difference_seconds
 
 using Oceananigans.TimeSteppers:
-    AbstractTimeStepper,
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
@@ -56,7 +55,7 @@ Klemp, J.B., Skamarock, W.C. and Dudhia, J. (2007). Conservative Split-Explicit
     Time Integration Methods for the Compressible Nonhydrostatic Equations.
     Monthly Weather Review, 135, 2897-2913.
 """
-struct AcousticRungeKutta3{FT, U0, TG, TI, AS} <: AbstractTimeStepper
+struct AcousticRungeKutta3{FT, U0, TG, TI, AS} <: AbstractBreezeTimeStepper
     β₁ :: FT
     β₂ :: FT
     β₃ :: FT
