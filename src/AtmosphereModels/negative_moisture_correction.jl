@@ -182,7 +182,7 @@ function fix_negative_moisture!(microphysics, model)
     launch!(arch, grid, :xy,
             _fix_negative_moisture_column!,
             correction.vertical_borrowing,
-            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid, Nz)
+            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
 
     return nothing
 end
@@ -191,8 +191,9 @@ end
 ##### Column-wise kernel
 #####
 
-@kernel function _fix_negative_moisture_column!(vertical_borrowing, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid, Nz)
+@kernel function _fix_negative_moisture_column!(vertical_borrowing, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
     i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
 
     # Phase 1: Species borrowing at each level
     for k = 1:Nz
@@ -211,16 +212,17 @@ end
     end
 
     # Phase 2: Vertical borrowing (no-op when vertical_borrowing === nothing)
-    vertical_borrow!(i, j, vertical_borrowing, ρqᵛᵉ, ρ₀, grid, Nz)
+    vertical_borrow!(ρqᵛᵉ, i, j, grid, vertical_borrowing, ρ₀)
 end
 
 #####
 ##### Vertical borrowing helpers
 #####
 
-@inline vertical_borrow!(i, j, ::Nothing, ρqᵛᵉ, ρ₀, grid, Nz) = nothing
+@inline vertical_borrow!(ρqᵛᵉ, i, j, grid, ::Nothing, ρ₀) = nothing
 
-@inline function vertical_borrow!(i, j, ::VerticalBorrowing, ρqᵛᵉ, ρ₀, grid, Nz)
+@inline function vertical_borrow!(ρqᵛᵉ, i, j, grid, ::VerticalBorrowing, ρ₀)
+    Nz = size(grid, 3)
     # Sweep from top to bottom, pushing deficit to level below (more moisture there).
     # Breeze convention: k = 1 is bottom, k = Nz is top.
     for k = Nz:-1:2
