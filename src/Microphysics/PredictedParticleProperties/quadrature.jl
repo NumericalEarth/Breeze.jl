@@ -680,8 +680,8 @@ separation for integral evaluation.
     small_value = ifelse(constant_term, one(FT), zero(FT))
 
     # Large particles (Fortran table convention):
-    # The table stores the PSD-dependent part without Sc^(1/3)/√ν.
-    # At runtime, the deposition rate multiplies by Sc^(1/3)/√ν.
+    # The table stores the PSD-dependent part without Sc^(1/3) × √ρ_fac / √ν.
+    # At runtime, the deposition rate multiplies by Sc^(1/3) × √ρ_fac / √ν.
     # constant_term=true → 0.65
     # constant_term=false → 0.44 × √(V × D)
     VD_term = sqrt(max(V * D, zero(FT)))

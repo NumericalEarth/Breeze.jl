@@ -581,7 +581,7 @@ The wet growth capacity is the maximum rate at which collected
 hydrometeors can be frozen, determined by the ventilated heat balance:
 
 ```math
-q_{wgrth} = \\frac{2π C f_v}{L_f} [K_a(T_0-T) + L_s D_v(ρ_{vs}-ρ_v)] × N_i
+q_{wgrth} = C f_v \\left[K_a(T_0-T) + \\frac{2π}{L_f} L_s D_v(ρ_{vs}-ρ_v)\\right] × N_i
 ```
 
 When the collection rate (cloud + rain riming) exceeds this capacity,
@@ -629,19 +629,20 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 
     # Mean ice particle mass
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
 
     # Ventilation integral (same as deposition/refreezing)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
 
     # Heat balance: sensible + latent
     Q_sensible = K_a * (T₀ - T)
     Q_latent = L_s * D_v * (ρ_vs - ρ_v)
-    Q_total = Q_sensible + Q_latent
 
-    # Wet growth capacity (2π for Fortran capm convention)
-    qwgrth = FT(2π) * C_fv * Q_total / L_f * nⁱ_eff
+    # Fortran applies 2π/Lf only to the latent term; the sensible-conduction
+    # term uses the capm convention directly.
+    qwgrth = C_fv * (Q_sensible + FT(2π) * Q_latent / L_f) * nⁱ_eff
 
     return ifelse(below_freezing, clamp_positive(qwgrth), zero(FT))
 end
@@ -655,7 +656,7 @@ Below freezing, liquid coating on ice particles refreezes. The rate is
 determined by the heat flux at the particle surface:
 
 ```math
-\\frac{dm}{dt} = \\frac{2\\pi C f_v}{L_f} [K_a(T_0-T) + L_s D_v (\\rho_{vs} - \\rho_v)]
+\\frac{dm}{dt} = C f_v \\left[K_a(T_0-T) + \\frac{2π}{L_f} L_s D_v (\\rho_{vs} - \\rho_v)\\right]
 ```
 
 This mirrors the melting formula with reversed temperature gradient.
@@ -708,11 +709,12 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
 
     # Mean ice particle mass
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
 
     # Ventilation integral (ice-particle capacitance; same path as deposition)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
 
     # Heat balance for refreezing:
     # Conductive: K_a × (T₀ - T) removes heat from liquid → promotes freezing
@@ -723,11 +725,9 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
     # Supersaturated (ρ_vs < ρ_v): condensation warms particle → opposes freezing
     Q_latent = L_s * D_v * (ρ_vs - ρ_v)
 
-    # Only refreeze when net heat balance favors it
-    Q_total = clamp_positive(Q_sensible + Q_latent)
-
-    # Uses 2π (Fortran capm = cap × D convention: 2× physical capacitance)
-    dm_dt_refrz = FT(2π) * C_fv * Q_total / L_f
+    # Only refreeze when net heat balance favors it. As in the Fortran wet-growth
+    # and refreezing paths, 2π/Lf multiplies only the latent-diffusion term.
+    dm_dt_refrz = clamp_positive(C_fv * (Q_sensible + FT(2π) * Q_latent / L_f))
 
     refrz_rate = nⁱ_eff * dm_dt_refrz
 

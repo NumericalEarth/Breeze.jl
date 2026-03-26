@@ -85,12 +85,13 @@ where:
     # Fl = qʷⁱ / (qⁱ + qʷⁱ): fraction of ice-particle mass that is liquid.
     qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(1e-20))
     Fl = clamp_positive(qʷⁱ) / qⁱ_total
+    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
 
     # H10: Ventilation integral C(D) × f_v(D) with Fl-blended ice/rain coefficients.
     # Dispatches to PSD-integrated table or mean-mass path.
     C_fv = melting_ventilation(p3.ice.deposition.ventilation,
                                 p3.ice.deposition.ventilation_enhanced,
-                                m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v)
+                                m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: K_a × (T - T₀)

@@ -15,6 +15,7 @@ using Breeze.Thermodynamics: temperature,
                              saturation_vapor_pressure,
                              PlanarLiquidSurface,
                              PlanarIceSurface,
+                             density,
                              liquid_latent_heat,
                              ice_latent_heat,
                              mixture_heat_capacity,
@@ -61,6 +62,11 @@ end
 
 # Convenience overload for common case
 @inline safe_divide(a, b) = safe_divide(a, b, zero(a))
+
+@inline function ice_air_density_correction(reference_air_density, air_density)
+    FT = typeof(reference_air_density)
+    return (reference_air_density / max(air_density, FT(0.01)))^FT(0.54)
+end
 
 @inline function mean_ice_distribution_state(FT, Fᶠ, Fˡ, ρᶠ, prp)
     mass = IceMassPowerLaw(FT)
@@ -181,30 +187,31 @@ end
 ##### Ventilation Sc correction (H4)
 #####
 ##### The ventilation-enhanced table stores 0.44 × ∫ C(D)√(V×D) N'(D) dD
-##### with dimensions [m² s^(-1/2)]. At runtime, multiplying by Sc^(1/3)/√ν
-##### restores the correct dimensions [m]. This helper centralizes the
+##### with dimensions [m² s^(-1/2)]. At runtime, multiplying by
+##### Sc^(1/3) × √ρ_fac / √ν restores the correct dimensions [m].
+##### This helper centralizes the
 ##### correction so that all call sites (deposition, Z-tendency) stay in sync.
 #####
 
 """
-    ventilation_sc_correction(nu, D_v)
+    ventilation_sc_correction(nu, D_v, ρ_correction)
 
 Schmidt number correction factor for ventilation-enhanced table values.
 
 The P3 lookup table stores the ventilation-enhanced integral without the
-`Sc^{1/3}/√ν` factor (matching the Fortran convention). This function
+`Sc^{1/3} √rhofaci / √ν` factor (matching the Fortran convention). This function
 computes the correction that must be applied at runtime:
 
 ```math
-f_{Sc} = \\frac{Sc^{1/3}}{\\sqrt{\\nu}} = \\frac{(\\nu/D_v)^{1/3}}{\\sqrt{\\nu}}
+f_{Sc} = \\frac{Sc^{1/3} \\sqrt{\\rho_{fac}}}{\\sqrt{\\nu}}
 ```
 
 See `quadrature.jl` for the table storage convention.
 """
-@inline function ventilation_sc_correction(nu, D_v)
+@inline function ventilation_sc_correction(nu, D_v, ρ_correction = one(typeof(nu)))
     FT = typeof(nu)
     Sc = nu / max(D_v, FT(1e-30))
-    return cbrt(Sc) / sqrt(nu)
+    return cbrt(Sc) * sqrt(ρ_correction) / sqrt(nu)
 end
 
 #####
@@ -223,19 +230,20 @@ Dispatches on table type for PSD-integrated or mean-mass path.
 """
 @inline function deposition_ventilation(vent::TabulatedFunction4D,
                                           vent_e::TabulatedFunction4D,
-                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
+                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
     Fˡ = zero(FT)
     # vent stores the constant ventilation term (0.65 × ∫ C(D) N'(D) dD)
     # vent_e stores the enhanced term (0.44 × ∫ C(D)√(V×D) N'(D) dD)  [m² s^(-1/2)]
-    # Runtime correction via ventilation_sc_correction: Sc^(1/3)/√ν [s^(1/2) m^(-1)]
+    # Runtime correction via ventilation_sc_correction:
+    # Sc^(1/3) × √ρ_fac / √ν [s^(1/2) m^(-1)]
     # Dimensional check: table [m² s^(-1/2)] × correction [s^(1/2)/m] = [m]
-    return vent(log_m, Fᶠ, Fˡ, ρᶠ) + ventilation_sc_correction(nu, D_v) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ)
+    return vent(log_m, Fᶠ, Fˡ, ρᶠ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ)
 end
 
 @inline function deposition_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
-                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
+                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
     FT = typeof(m_mean)
     D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, zero(FT), ρᶠ, prp)
     C = capacitance(D_mean, state, thresholds)
@@ -245,7 +253,7 @@ end
     V = a_V * D_mean^b_V
     # Schmidt number correction (Hall & Pruppacher 1976): Sc = nu / D_v
     Sc = nu / max(D_v, FT(1e-30))
-    Re_term = sqrt(V * D_mean / nu)
+    Re_term = sqrt(ρ_correction) * sqrt(V * D_mean / nu)
     f_v = FT(0.65) + FT(0.44) * cbrt(Sc) * Re_term
     return C * f_v
 end
@@ -266,14 +274,14 @@ f_v = [(1-F_l) \\times 0.65 + F_l \\times 0.78]
 """
 @inline function melting_ventilation(vent::TabulatedFunction4D,
                                        vent_e::TabulatedFunction4D,
-                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v)
+                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
-    return vent(log_m, Fᶠ, Fl, ρᶠ) + ventilation_sc_correction(nu, D_v) * vent_e(log_m, Fᶠ, Fl, ρᶠ)
+    return vent(log_m, Fᶠ, Fl, ρᶠ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fl, ρᶠ)
 end
 
 @inline function melting_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
-                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v)
+                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
     FT = typeof(m_mean)
     D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, Fl, ρᶠ, prp)
     C = capacitance(D_mean, state, thresholds)
@@ -283,11 +291,9 @@ end
     V_ice = a_V * D_mean^b_V
     # Fortran create_p3_lookupTable_1.f90 uses the same piecewise rain fall-speed
     # law here as in the rain lookup tables (via fallr1).
-    ρ₀ = prp.reference_air_density
-    ρ_correction = (ρ₀ / max(ρᶠ, FT(0.01)))^FT(0.54)
     V_rain = rain_fall_speed(D_mean, ρ_correction)
     Sc = nu / max(D_v, FT(1e-30))
-    Re_ice  = sqrt(V_ice  * D_mean / max(nu, FT(1e-30)))
+    Re_ice  = sqrt(ρ_correction) * sqrt(V_ice  * D_mean / max(nu, FT(1e-30)))
     Re_rain = sqrt(V_rain * D_mean / max(nu, FT(1e-30)))
     # Fortran: blend ice (0.65/0.44) and rain (0.78/0.28) by liquid fraction Fl
     f_v = ((1 - Fl) * FT(0.65) + Fl * FT(0.78)) +
@@ -477,11 +483,14 @@ The bulk rate integrates over the size distribution:
     # Mean particle mass
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
 
+    ρ_air = density(T, P, q, thermodynamic_constants)
+    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ_air)
+
     # Ventilation integral C(D) × f_v(D): dispatches to PSD-integrated
     # table or mean-mass analytical path depending on p3.ice.deposition type.
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
 
     # Denominator: thermodynamic resistance terms (Mason 1971)
     # A = L_s/(K_a × T) × (L_s/(R_v × T) - 1)
@@ -1226,9 +1235,11 @@ pre-computed lookup tables. Otherwise, falls back to proportional scaling.
     log_mean_mass = log10(max(m̄, FT(1e-20)))
 
     # Schmidt number correction for enhanced ventilation integrals
-    # Table stores 0.44 × ∫ C(D)√(V×D) N'(D) dD; runtime applies Sc^(1/3)/√ν
+    # Table stores 0.44 × ∫ C(D)√(V×D) N'(D) dD; runtime applies
+    # Sc^(1/3) × √ρ_fac / √ν.
     # (see ventilation_sc_correction and deposition_ventilation for dimensional derivation)
-    sc_correction = ventilation_sc_correction(nu, D_v)
+    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
+    sc_correction = ventilation_sc_correction(nu, D_v, ρ_correction)
 
     z_tendency = tabulated_z_tendency(
         p3.ice, log_mean_mass, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
@@ -1248,8 +1259,8 @@ end
 #   to avoid cross-term errors from the constant + enhanced ventilation split.
 #
 # Fortran convention:
-#   epsiz = (m6dep + Sc*m6dep1) × 2πρDv              (dep/sub: raw dG × env)
-#   zimlt = (vdepm1*m6mlt1 + vdepm2*m6mlt2*Sc) × thermo  (melt: mass_table × dG × env)
+#   epsiz = (m6dep + S_c*m6dep1) × 2πρDv              (dep/sub: raw dG × env)
+#   zimlt = (vdepm1*m6mlt1 + vdepm2*m6mlt2*S_c) × thermo  (melt: mass_table × dG × env)
 #   zqccol = m6rime × env_factors                      (rime: dG × env, single term)
 @inline function tabulated_z_tendency(ice::IceProperties{<:Any, <:Any, <:Any, <:Any, <:Any,
                                                           M6, <:Any, <:Any},
@@ -1264,8 +1275,9 @@ end
 
     # --- Deposition / Sublimation ---
     # Z tables store raw dG/dt. Extract env factor from mass_rate / (mass_table × Nⁱ).
-    # Fortran: epsiz = (m6dep + Sc×m6dep1) × 2πρDv
-    #          epsi  = (vdep  + Sc×vdep1 ) × 2πρDv × Nⁱ
+    # Fortran: epsiz = (m6dep + S_c×m6dep1) × 2πρDv
+    #          epsi  = (vdep  + S_c×vdep1 ) × 2πρDv × Nⁱ
+    # where S_c = Sc^(1/3) × √ρ_fac / √ν.
     # Deposition (c=2) and sublimation (c=1) use different dG normalization,
     # but the SAME mass integrals (vdep/vdep1). Separate via sign of rates.deposition.
     mass_dep_combined = dep.ventilation(log_m, Fᶠ, Fˡ, ρᶠ) +
@@ -1281,7 +1293,7 @@ end
     z_dep_sub_rate = ifelse(is_deposition, z_dep_combined, -z_sub_combined) * env_dep
 
     # --- Melting ---
-    # Fortran: zimlt = (vdepm1×m6mlt1 + vdepm2×m6mlt2×Sc) × thermo
+    # Fortran: zimlt = (vdepm1×m6mlt1 + vdepm2×m6mlt2×S_c) × thermo
     # Z is the mass-weighted combination of Z tables. Extract thermo from mass_rate / (mass_combined × Nⁱ).
     mass_melt_const = dep.small_ice_ventilation_constant(log_m, Fᶠ, Fˡ, ρᶠ)
     mass_melt_enh   = dep.small_ice_ventilation_reynolds(log_m, Fᶠ, Fˡ, ρᶠ)

@@ -1786,6 +1786,82 @@ using Oceananigans.Fields: interior
         @test rates_wet.complete_melting >= rates_dry.complete_melting
     end
 
+    @testset "ventilation_sc_correction includes sqrt(rhofaci)" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        ν = 1.5e-5
+        Dᵥ = 2.0e-5
+
+        base = PPP.ventilation_sc_correction(ν, Dᵥ, 1.0)
+        doubled = PPP.ventilation_sc_correction(ν, Dᵥ, 4.0)
+
+        @test doubled ≈ 2 * base
+    end
+
+    @testset "wet_growth_capacity keeps sensible term outside 2π/Lf" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        qi = FT(1e-4)
+        ni = FT(1e4)
+        T = FT(268.15)
+        P = FT(85000.0)
+        Ff = FT(0.2)
+        ρf = FT(400.0)
+        ρ = FT(1.0)
+        transport = air_transport_properties(T, P)
+
+        T₀ = p3.process_rates.freezing_temperature
+        Rᵥ = Breeze.Thermodynamics.vapor_gas_constant(ThermodynamicConstants(FT))
+        e_s0 = PPP.saturation_vapor_pressure_at_freezing(nothing, T₀)
+        qv = e_s0 / (Rᵥ * T₀ * ρ)
+
+        m_mean = qi / ni
+        ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
+        C_fv = PPP.deposition_ventilation(
+            p3.ice.deposition.ventilation,
+            p3.ice.deposition.ventilation_enhanced,
+            m_mean, Ff, ρf, p3.process_rates, transport.nu, transport.D_v, ρ_correction)
+
+        capacity = PPP.wet_growth_capacity(p3, qi, ni, T, P, qv, Ff, ρf, ρ, nothing, transport)
+        expected = C_fv * transport.K_a * (T₀ - T) * ni
+
+        @test capacity ≈ expected rtol=1e-6
+    end
+
+    @testset "refreezing_rate keeps sensible term outside 2π/Lf" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        qwi = FT(1)
+        qi = FT(1e-4)
+        ni = FT(1e4)
+        T = FT(268.15)
+        P = FT(85000.0)
+        Ff = FT(0.2)
+        ρf = FT(400.0)
+        ρ = FT(1.0)
+        transport = air_transport_properties(T, P)
+
+        T₀ = p3.process_rates.freezing_temperature
+        Rᵥ = Breeze.Thermodynamics.vapor_gas_constant(ThermodynamicConstants(FT))
+        e_s0 = PPP.saturation_vapor_pressure_at_freezing(nothing, T₀)
+        qv = e_s0 / (Rᵥ * T₀ * ρ)
+
+        m_mean = qi / ni
+        ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
+        C_fv = PPP.deposition_ventilation(
+            p3.ice.deposition.ventilation,
+            p3.ice.deposition.ventilation_enhanced,
+            m_mean, Ff, ρf, p3.process_rates, transport.nu, transport.D_v, ρ_correction)
+
+        refreezing = PPP.refreezing_rate(p3, qwi, qi, ni, T, P, qv, Ff, ρf, ρ, nothing, transport)
+        expected = C_fv * transport.K_a * (T₀ - T) * ni
+
+        @test refreezing ≈ expected rtol=1e-6
+    end
+
     @testset "ice_aggregation_rate" begin
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
