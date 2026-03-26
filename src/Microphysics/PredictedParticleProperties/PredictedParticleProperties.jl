@@ -149,6 +149,10 @@ export
     # Tabulated wrapper
     TabulatedIntegral,
     TabulatedFunction1D,
+    TabulatedFunction2D,
+    TabulatedFunction3D,
+    TabulatedFunction4D,
+    TabulatedFunction5D,
     tabulated_function_1d,
 
     # Transport properties
@@ -169,8 +173,6 @@ export
     # Tabulation
     tabulate,
     TabulationParameters,
-    TabulatedFunction3D,
-    TabulatedFunction4D,
     P3IntegralEvaluator,
 
     # Lambda solver
@@ -271,6 +273,7 @@ include("lambda_solver.jl")
 ##### Tabulation (depends on quadrature and lambda solver)
 #####
 
+include("tabulated_function_adapters.jl")
 include("tabulation.jl")
 
 #####
