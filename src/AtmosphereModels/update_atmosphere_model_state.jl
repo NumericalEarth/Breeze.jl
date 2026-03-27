@@ -6,12 +6,7 @@ using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
 using Oceananigans.Utils: launch! # , KernelParameters
-using Oceananigans.Fields: location
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
-
-# Column fields have Nothing location in x and y; distributed halo communication
-# doesn't handle these correctly, so they need only_local_halos=true.
-_is_column_field(f) = location(f, 1) === Nothing && location(f, 2) === Nothing
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
@@ -65,11 +60,6 @@ function tracer_specific_to_density!(tracers, density)
     return nothing
 end
 
-# Kernel launch indices for computing diagnostic fields (e.g., velocities from momentum).
-# For periodic dimensions, we shrink by 1 on each side because the velocity computation
-# uses interpolation operators that access neighboring points (e.g., ℑxᶠᵃᵃ accesses i-1).
-# The outermost halo points are then filled by fill_halo_regions! via periodic wrapping.
-# This requires halo >= 2 for periodic dimensions to ensure the computed region is non-empty.
 diagnostic_indices(::Bounded, N, H) = 1:N+1
 # For Periodic, start at -H+2 because face-interpolation (ℑxᶠᵃᵃ) accesses i-1.
 # Starting at -H+1 would require accessing index -H which is out of bounds.
@@ -103,14 +93,11 @@ function compute_velocities!(model::AtmosphereModel)
 
     # kp = KernelParameters(ii, jj, kk)
 
-    # Ensure halos are filled before velocity computation
-    # (prognostic field halo fill in update_state! is async)
-    density = dynamics_density(model.dynamics)
-    # Note: only_local_halos=true is needed for column fields (Flat in x and y,
-    # e.g. AnelasticDynamics reference state), because Oceananigans' distributed
-    # halo communication does not handle Flat-located dimensions correctly.
-    # For 3D density fields (CompressibleDynamics), full halo communication is required.
-    fill_halo_regions!(density; only_local_halos=_is_column_field(density))
+    # Ensure halos are filled before velocity computation.
+    # The async prognostic field halo fill in update_state! must complete
+    # before we use momentum data. The momentum fill below acts as a sync point.
+    # Note: reference density is constant (z-only) — its halos are filled at
+    # initialization and never need refilling.
     fill_halo_regions!(model.momentum)
 
     launch!(arch, grid, :xyz,
@@ -210,13 +197,23 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.microphysical_fields,
             model.moisture_density)
 
-    fill_halo_regions!(model.temperature)
+    # For CompressibleDynamics, temperature is recomputed from EOS in
+    # compute_auxiliary_dynamics_variables! which also fills its halos.
+    # Skip the redundant fill here for compressible.
+    _fill_thermodynamic_halos!(model.dynamics, model.temperature)
     fill_halo_regions!(model.microphysical_fields)
-    # Note: formulation (potential temperature density) is a prognostic field
-    # whose halos were already filled by the async prognostic fill in update_state!.
+    # Note: formulation (potential temperature) is a prognostic field whose halos
+    # were already filled by the async prognostic fill in update_state!.
+    # fill_halo_regions!(model.formulation)
 
     return nothing
 end
+
+# Temperature halo fill dispatch: skip for compressible (recomputed in compute_auxiliary_dynamics_variables!)
+_fill_thermodynamic_halos!(dynamics, temperature) = fill_halo_regions!(temperature)
+
+# The CompressibleDynamics method is defined in CompressibleEquations/compressible_time_stepping.jl
+# to avoid circular dependency (CompressibleDynamics is defined after AtmosphereModels).
 
 @kernel function _compute_velocities!(velocities, grid, dynamics, momentum)
     i, j, k = @index(Global, NTuple)
