@@ -276,6 +276,43 @@ Rate of snow mass lost to melting [kg/kg/s] (always non-negative)
 end
 
 #####
+##### Warm accretion melt factor (TRANSLATION: uses Breeze thermodynamics for Lf and cv_l)
+#####
+
+"""
+    warm_accretion_melt_factor(snow_params, T, constants)
+
+Compute the thermal melt factor for warm accretion processes.
+
+When cloud liquid or rain collides with snow above freezing, the sensible heat
+carried by the warm hydrometeor melts additional snow. The factor ``α`` gives
+the mass ratio of melted snow to accreted warm hydrometeor mass:
+
+``α = cˡ (T - T_{freeze}) / ℒf``
+
+This is a translation of `CloudMicrophysics.BulkMicrophysicsTendencies.warm_accretion_melt_factor`
+that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
+
+# Arguments
+- `snow_params`: Snow parameters (contains T_freeze)
+- `T`: Temperature
+- `constants`: Breeze ThermodynamicConstants
+
+# Returns
+Thermal melt factor α (zero when T <= T_freeze)
+"""
+@inline function warm_accretion_melt_factor(
+    (; T_freeze)::Snow{FT},
+    T::FT,
+    constants,
+) where {FT}
+    cˡ = constants.liquid.heat_capacity
+    ℒf = ice_latent_heat(T, constants) - liquid_latent_heat(T, constants)
+    ΔT = T - T_freeze
+    return ifelse(T <= T_freeze, zero(FT), cˡ / ℒf * ΔT)
+end
+
+#####
 ##### Two-moment rain evaporation (TRANSLATION: SB2006 evaporation using Breeze thermodynamics)
 #####
 
