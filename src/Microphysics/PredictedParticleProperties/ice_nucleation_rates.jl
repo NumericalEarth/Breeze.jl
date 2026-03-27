@@ -373,9 +373,9 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
     cold_branch = clamp((T_high - T) / (T_high - T_peak), zero(FT), one(FT))
     efficiency = ifelse(T <= T_peak, warm_branch, cold_branch)
 
-    # Fortran nCat=1 path uses rain riming only, plus size, liquid-fraction,
-    # and warm-surface guards for Hallett-Mossop splintering.
-    total_riming = clamp_positive(rain_riming)
+    # Fortran nCat=1 path includes BOTH cloud and rain riming in splintering
+    # (microphy_p3.f90 lines 3547-3574: HM_cloud + HM_rain blocks).
+    total_riming = clamp_positive(cloud_riming) + clamp_positive(rain_riming)
     has_rime = qᶠ >= p3.minimum_mass_mixing_ratio
     active = (D_ice ≥ prp.splintering_diameter_threshold) &
              has_rime &

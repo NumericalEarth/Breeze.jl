@@ -1238,9 +1238,10 @@ using Oceananigans.Fields: interior
         right_q, right_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
             p3, cloud_riming, rain_riming, FT(269.15), D_ice, Fˡ, surface_T, qᶠ)
 
-        @test left_n ≈ (FT(1) / FT(3)) * prp.splintering_rate * rain_riming
-        @test peak_n ≈ prp.splintering_rate * rain_riming
-        @test right_n ≈ FT(0.5) * prp.splintering_rate * rain_riming
+        total_riming = cloud_riming + rain_riming
+        @test left_n ≈ (FT(1) / FT(3)) * prp.splintering_rate * total_riming
+        @test peak_n ≈ prp.splintering_rate * total_riming
+        @test right_n ≈ FT(0.5) * prp.splintering_rate * total_riming
         @test left_q ≈ left_n * prp.nucleated_ice_mass
         @test peak_q ≈ peak_n * prp.nucleated_ice_mass
         @test right_q ≈ right_n * prp.nucleated_ice_mass
@@ -1256,7 +1257,11 @@ using Oceananigans.Fields: interior
         _, no_rime_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
             p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, zero(FT))
 
-        @test cloud_only_n == 0
+        # H4: Cloud riming contributes to splintering
+        @test cloud_only_n > 0
+        cloud_only_q, _ = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
+            p3, cloud_riming, zero(FT), prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
+        @test cloud_only_q > 0
         @test small_n == 0
         @test wet_n == 0
         @test warm_surface_n == 0
