@@ -139,6 +139,76 @@ Rate of change of rain specific humidity (negative = evaporation)
 end
 
 #####
+##### Snow sublimation/deposition (TRANSLATION: uses Breeze thermodynamics over ice surface)
+#####
+
+"""
+    snow_sublimation_deposition(snow_params, vel, aps, q, qˢ, ρ, T, constants)
+
+Compute the snow sublimation/deposition rate (dqˢ/dt).
+
+Positive values mean deposition (vapor → snow), negative means sublimation (snow → vapor).
+Unlike rain evaporation, both signs are physical for snow.
+
+This is a translation of `CloudMicrophysics.Microphysics1M.evaporation_sublimation`
+for snow that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
+
+# Arguments
+- `snow_params`: Snow microphysics parameters (pdf, mass, vent)
+- `vel`: Snow terminal velocity parameters
+- `aps`: Air properties (kinematic viscosity, vapor diffusivity, thermal conductivity)
+- `q`: `MoistureMassFractions` containing vapor, liquid, and ice mass fractions
+- `qˢ`: Snow specific humidity
+- `ρ`: Air density
+- `T`: Temperature
+- `constants`: Breeze ThermodynamicConstants
+
+# Returns
+Rate of change of snow specific humidity (positive = deposition, negative = sublimation)
+"""
+@inline function snow_sublimation_deposition(
+    (; pdf, mass, vent)::Snow{FT},
+    vel::Blk1MVelTypeSnow{FT},
+    aps::AirProperties{FT},
+    q::MoistureMassFractions{FT},
+    qˢ::FT,
+    ρ::FT,
+    T::FT,
+    constants,
+) where {FT}
+    (; ν_air, D_vapor) = aps
+    (; χv, ve, Δv) = vel
+    (; r0) = mass
+    aᵥ = vent.a
+    bᵥ = vent.b
+
+    # Supersaturation over ice (𝒮 > 0 → deposition, 𝒮 < 0 → sublimation)
+    𝒮 = supersaturation(T, ρ, q, constants, PlanarIceSurface())
+
+    G = diffusional_growth_factor_ice(aps, T, constants)
+    n₀ = get_n0(pdf, qˢ, ρ)
+    v₀ = get_v0(vel, ρ)
+    λ⁻¹ = lambda_inverse(pdf, mass, qˢ, ρ)
+
+    # Ventilated sublimation/deposition rate from Mason equation
+    base_rate = 4π * n₀ / ρ * 𝒮 * G * λ⁻¹^2
+
+    # Ventilation correction terms
+    Sc = ν_air / D_vapor
+    Re = 2v₀ * χv / ν_air * λ⁻¹
+    size_factor = (r0 / λ⁻¹)^((ve + Δv) / 2)
+    gamma_factor = Γ((ve + Δv + 5) / 2)
+
+    ventilation = aᵥ + bᵥ * cbrt(Sc) * sqrt(Re) / size_factor * gamma_factor
+
+    rate = base_rate * ventilation
+
+    # Both sublimation (𝒮 < 0) and deposition (𝒮 > 0) are physical for snow
+    has_snow = qˢ > ϵ_numerics(FT)
+    return ifelse(has_snow, rate, zero(FT))
+end
+
+#####
 ##### Two-moment rain evaporation (TRANSLATION: SB2006 evaporation using Breeze thermodynamics)
 #####
 
