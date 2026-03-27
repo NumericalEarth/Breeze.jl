@@ -1,6 +1,4 @@
-export NullP3LookupTables, P3LookupTable1, P3LookupTable2, P3LookupTable3, P3LookupTables
-
-struct NullP3LookupTables end
+export P3LookupTable1, P3LookupTable2, P3LookupTable3, P3LookupTables
 
 struct P3LookupTable1{FS, DP, BP, CL, M6, LL, IR}
     fall_speed :: FS

@@ -77,7 +77,6 @@ export
     LookupTable2Parameters,
     LookupTable3Parameters,
     P3TabulationParameters,
-    NullP3LookupTables,
     P3LookupTable1,
     P3LookupTable2,
     P3LookupTable3,

@@ -6,7 +6,7 @@ import Oceananigans.Architectures: on_architecture
 import Breeze
 using Breeze.Microphysics.PredictedParticleProperties
 using Breeze.Microphysics.PredictedParticleProperties:
-    IceProperties, NullP3LookupTables, P3LookupTable1, P3LookupTable2,
+    IceProperties, P3LookupTable1, P3LookupTable2,
     P3LookupTable3, P3LookupTables, P3TabulationParameters, LookupTable1Parameters,
     LookupTable2Parameters, LookupTable3Parameters
 
@@ -62,7 +62,7 @@ end
     @test params.lookup_table_3.number_of_znorm_points == 80
 
     ice = IceProperties(Float64)
-    @test ice.lookup_tables isa NullP3LookupTables
+    @test ice.lookup_tables === nothing
 end
 
 @testset "P3 tabulation parameter overrides propagate to nested families" begin

@@ -37,7 +37,7 @@ function IceProperties(minimum_rime_density,
                        sixth_moment,
                        lambda_limiter,
                        ice_rain;
-                       lookup_tables = NullP3LookupTables())
+                       lookup_tables = nothing)
     return IceProperties(
         minimum_rime_density,
         maximum_rime_density,
@@ -93,7 +93,7 @@ function IceProperties(FT::Type{<:AbstractFloat} = Float64;
                        maximum_rime_density = 900,
                        maximum_shape_parameter = 20,
                        minimum_reflectivity = 1e-35,
-                       lookup_tables = NullP3LookupTables())
+                       lookup_tables = nothing)
     return IceProperties(
         FT(minimum_rime_density),
         FT(maximum_rime_density),
