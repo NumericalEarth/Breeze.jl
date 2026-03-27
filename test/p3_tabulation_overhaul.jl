@@ -108,7 +108,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     N_ice = 2e4
     Z_ice = 5e-14
     Fᶠ = 0.35
-    Fˡ = 0.25
+    Fˡ = 0.05
     ρᶠ = 450.0
 
     μ_lookup = shape_parameter_lookup(table3, L_ice, N_ice, Z_ice, Fᶠ, Fˡ, ρᶠ)

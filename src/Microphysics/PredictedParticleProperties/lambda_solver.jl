@@ -780,6 +780,21 @@ Matches Fortran `apply_mui_bounds_to_zi` and basic zsmall/zlarge clamps.
     return Z_clamped
 end
 
+# H15: Compute bulk density with liquid fraction blending for the 3-moment solver.
+# The raw MeanDensity quadrature returns ∫ ρ(D)m(D)N'(D)dD (unnormalized).
+# To blend with liquid water density, we normalize to actual mean density first,
+# blend, then scale back to the raw-integral convention used by mom3 = 6L/(πρ_bulk).
+@inline function _liquid_blended_density(state, nodes, weights, L_ice, liquid_fraction)
+    FT = typeof(L_ice)
+    ρ_integral = max(evaluate_quadrature(MeanDensity(), state, nodes, weights), eps(FT))
+    # Normalize to actual mass-weighted mean density: ρ_mean = ∫ρmN'dD / ∫mN'dD
+    ρ_mean_dry = ρ_integral / max(L_ice, eps(FT))
+    # Blend with liquid water density (Fortran convention)
+    ρ_mean = (1 - liquid_fraction) * ρ_mean_dry + liquid_fraction * FT(1000)
+    # Scale back to raw-integral convention for consistency with mom3 = 6L/(πρ_bulk)
+    return max(ρ_mean * L_ice, eps(FT))
+end
+
 """
     solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
                           mass = IceMassPowerLaw(),
@@ -847,10 +862,7 @@ function solve_shape_parameter_with_closure(closure::ThreeMomentClosure,
         liquid_fraction = liquid_fraction,
         mass_coefficient = mass.coefficient, mass_exponent = mass.exponent,
         ice_density = mass.ice_density)
-    ρ_bulk_dry = max(evaluate_quadrature(MeanDensity(), state_init, nodes, weights), eps(FT))
-    # H15: Blend liquid water density (Fortran: rhom = (1-Fl)*cgp(i_rhor) + Fl*1000*π/6)
-    ρ_bulk_init = (1 - liquid_fraction) * ρ_bulk_dry + liquid_fraction * FT(1000)
-    ρ_bulk_init = max(ρ_bulk_init, eps(FT))
+    ρ_bulk_init = _liquid_blended_density(state_init, nodes, weights, L_ice, liquid_fraction)
     Z_ice = enforce_z_bounds(Z_ice, L_ice, N_ice, ρ_bulk_init, closure.μmin, closure.μmax)
 
     for _ in 1:max_iterations
@@ -869,10 +881,7 @@ function solve_shape_parameter_with_closure(closure::ThreeMomentClosure,
             mass_exponent = mass.exponent,
             ice_density = mass.ice_density)
 
-        ρ_bulk_dry = max(evaluate_quadrature(MeanDensity(), state, nodes, weights), eps(FT))
-        # H15: Blend liquid water density into bulk density diagnostic
-        ρ_bulk = (1 - liquid_fraction) * ρ_bulk_dry + liquid_fraction * FT(1000)
-        ρ_bulk = max(ρ_bulk, eps(FT))
+        ρ_bulk = _liquid_blended_density(state, nodes, weights, L_ice, liquid_fraction)
         mom3 = FT(6) * L_ice / (ρ_bulk * FT(π))
         μ = shape_parameter_from_moments(N_ice, mom3, Z_ice, closure.μmax)
         μ = clamp(μ, closure.μmin, closure.μmax)
