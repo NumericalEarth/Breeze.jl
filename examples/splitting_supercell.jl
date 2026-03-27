@@ -3,11 +3,14 @@
 # This example simulates the development of a splitting supercell thunderstorm, following the
 # idealized test case described by [KlempEtAl2015](@citet) and the DCMIP2016
 # supercell intercomparison by [Zarzycki2019](@citet). This benchmark evaluates the model's
-# ability to capture deep moist convection with warm-rain microphysics and strong updrafts.
+# ability to capture deep moist convection with mixed-phase microphysics and strong updrafts.
 #
-# For microphysics we use the Kessler scheme, which includes prognostic cloud water
-# and rain water with autoconversion, accretion, rain evaporation, and sedimentation processes.
-# This is the same scheme used in the DCMIP2016 supercell intercomparison [Zarzycki2019](@cite).
+# For microphysics we use the one-moment bulk scheme from
+# [CloudMicrophysics.jl](https://clima.github.io/CloudMicrophysics.jl/dev/) with
+# mixed-phase saturation adjustment. The scheme prognoses rain and snow, while cloud liquid
+# and cloud ice are diagnosed via saturation adjustment with a temperature-dependent
+# partition between liquid and ice phases. This captures the ice-phase processes important
+# for deep convective storms that extend well above the freezing level.
 #
 # ## Physical setup
 #
@@ -57,7 +60,8 @@
 # development and mesocyclone formation (Equations 15-16 in [KlempEtAl2015](@citet)).
 
 using Breeze
-using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
+using Breeze: TetensFormula
+using CloudMicrophysics
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: znodes
@@ -212,11 +216,17 @@ fig
 
 # ## Model setup
 #
-# We use the DCMIP2016 Kessler microphysics scheme with high-order WENO advection.
-# The Kessler scheme includes prognostic cloud water and rain water with autoconversion,
-# accretion, rain evaporation, and sedimentation processes.
+# We use the one-moment bulk microphysics from
+# [CloudMicrophysics.jl](https://clima.github.io/CloudMicrophysics.jl/dev/) with
+# mixed-phase saturation adjustment and high-order WENO advection.
+# The one-moment scheme prognoses rain and snow density, while cloud liquid and cloud ice
+# are diagnosed via saturation adjustment with a mixed-phase equilibrium surface.
 
-microphysics = DCMIP2016KesslerMicrophysics()
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
+
+cloud_formation = SaturationAdjustment(equilibrium=MixedPhaseEquilibrium())
+microphysics = OneMomentCloudMicrophysics(; cloud_formation)
 advection = WENO(order=9, minimum_buffer_upwind_order=3)
 
 model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
@@ -246,7 +256,9 @@ Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 θˡⁱ = liquid_ice_potential_temperature(model)
 qᶜˡ = model.microphysical_fields.qᶜˡ
+qᶜⁱ = model.microphysical_fields.qᶜⁱ
 qʳ = model.microphysical_fields.qʳ
+qˢ = model.microphysical_fields.qˢ
 qᵛ = model.microphysical_fields.qᵛ
 u, v, w = model.velocities
 
@@ -259,8 +271,8 @@ function progress(sim)
                    iteration(sim), prettytime(sim), prettytime(sim.Δt), prettytime(elapsed),
                    maximum(abs, u), maximum(w), minimum(w))
 
-    msg *= @sprintf(", max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(qʳ): %.2e",
-                    maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ))
+    msg *= @sprintf(", max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(qᶜⁱ): %.2e, max(qʳ): %.2e, max(qˢ): %.2e",
+                    maximum(qᵛ), maximum(qᶜˡ), maximum(qᶜⁱ), maximum(qʳ), maximum(qˢ))
     @info msg
 
     return nothing
@@ -289,8 +301,9 @@ k_5km = searchsortedfirst(z, 5000)
 
 slice_outputs = (
     wxy = view(w, :, :, k_5km),
-    qʳxy = view(qʳ, :, :, k_5km),
     qᶜˡxy = view(qᶜˡ, :, :, k_5km),
+    qʳxy = view(qʳ, :, :, k_5km),
+    qˢxy = view(qˢ, :, :, k_5km),
 )
 
 slices_filename = "splitting_supercell_slices.jld2"
@@ -302,45 +315,52 @@ run!(simulation)
 
 # ## Animation: horizontal slices at z ≈ 5 km
 #
-# We create a 3-panel animation showing the storm structure at mid-levels:
+# We create a 4-panel animation showing the storm structure at mid-levels:
 # - Vertical velocity ``w``: reveals the updraft/downdraft structure
-# - Cloud liquid ``qᶜˡ``: shows the cloud boundaries
-# - Rain ``qʳ``: indicates precipitation regions
+# - Cloud liquid ``qᶜˡ``: shows the warm-phase cloud boundaries
+# - Rain ``qʳ``: indicates rain precipitation regions
+# - Snow ``qˢ``: indicates ice-phase precipitation regions
 #
 # The simulated supercell exhibits splitting behavior, with the initial storm
 # dividing into right-moving and left-moving cells, consistent with the
 # DCMIP2016 intercomparison results [Zarzycki2019](@cite).
 
 wxy_ts = FieldTimeSeries(slices_filename, "wxy")
-qʳxy_ts = FieldTimeSeries(slices_filename, "qʳxy")
 qᶜˡxy_ts = FieldTimeSeries(slices_filename, "qᶜˡxy")
+qʳxy_ts = FieldTimeSeries(slices_filename, "qʳxy")
+qˢxy_ts = FieldTimeSeries(slices_filename, "qˢxy")
 
 times = wxy_ts.times
 Nt = length(times)
 
 wlim = maximum(abs, wxy_ts) / 2
-qʳlim = maximum(qʳxy_ts) / 4
 qᶜˡlim = maximum(qᶜˡxy_ts) / 4
+qʳlim = maximum(qʳxy_ts) / 4
+qˢlim = maximum(qˢxy_ts) / 4
 
-fig = Figure(size=(900, 400), fontsize=12)
+fig = Figure(size=(1200, 400), fontsize=12)
 
 axw = Axis(fig[1, 1], aspect=1, xlabel="x (m)", ylabel="y (m)", title="w (m/s)")
 axqᶜˡ = Axis(fig[1, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qᶜˡ (kg/kg)")
 axqʳ = Axis(fig[1, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qʳ (kg/kg)")
+axqˢ = Axis(fig[1, 4], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qˢ (kg/kg)")
 
 n = Observable(1)
 wxy_n = @lift wxy_ts[$n]
 qᶜˡxy_n = @lift qᶜˡxy_ts[$n]
 qʳxy_n = @lift qʳxy_ts[$n]
+qˢxy_n = @lift qˢxy_ts[$n]
 title = @lift "Splitting supercell at z ≈ 5 km, t = " * prettytime(times[$n])
 
 hmw = heatmap!(axw, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
 hmqᶜˡ = heatmap!(axqᶜˡ, qᶜˡxy_n, colormap=:dense, colorrange=(0, qᶜˡlim))
 hmqʳ = heatmap!(axqʳ, qʳxy_n, colormap=:amp, colorrange=(0, qʳlim))
+hmqˢ = heatmap!(axqˢ, qˢxy_n, colormap=:ice, colorrange=(0, qˢlim))
 
 Colorbar(fig[2, 1], hmw, vertical=false)
 Colorbar(fig[2, 2], hmqᶜˡ, vertical=false)
 Colorbar(fig[2, 3], hmqʳ, vertical=false)
+Colorbar(fig[2, 4], hmqˢ, vertical=false)
 
 fig[0, :] = Label(fig, title, fontsize=14, tellwidth=false)
 
