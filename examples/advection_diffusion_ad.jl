@@ -56,16 +56,21 @@ A   = 2.0       # amplitude
 U₀  = 10.0      # advection velocity           [m/s]
 L   = 200.0     # domain side length           [m]
 t_f = 1.0       # integration time             [s]
-CFL = 0.01      # CFL number  (Δt = CFL × Δx / U₀)
+CFL  = 0.5       # CFL number  (Δt = CFL × Δx / max_speed)
+c_s  = sqrt(1.4 * 287.0 * 300.0)  # approximate sound speed [m/s] for θ = 300 K
 
 # With these values ``s_f = \sigma_0^2 + 2\kappa t_f = 480`` m² and
 # the Gaussian translates ``U_0 t_f = 10`` m — less than one coarse
 # grid cell.  This is enough to exercise WENO nontrivially while
 # keeping the pulse well inside the domain.
 #
-# At each resolution the time step is set by a fixed CFL number,
-# ``\Delta t = \mathrm{CFL}\;\Delta x / U_0``, and the number of
-# steps is ``N_s = \lceil t_f / \Delta t \rceil``.
+# Because `CompressibleDynamics` with `ExplicitTimeStepping` resolves
+# acoustic modes, the time step must satisfy the **acoustic** CFL
+# condition ``\Delta t \le \mathrm{CFL}\;\Delta x / c_s`` (with
+# ``c_s \approx 347`` m/s for dry air at ``\theta = 300`` K).
+# This is far more restrictive than the advective CFL and dominates
+# the step-size selection.  The number of steps is
+# ``N_s = \lceil t_f / \Delta t \rceil``.
 
 # ## 2. Objective and analytical sensitivities
 #
@@ -220,7 +225,7 @@ results = []
 
 for (ℓ, N) in enumerate(N_list)
     Δx  = L / N
-    Δt  = CFL * Δx / U₀
+    Δt  = CFL * Δx / (c_s + U₀)
     Nₛ  = ceil(Int, t_f / Δt)
     Δt  = t_f / Nₛ                  # adjust so Nₛ × Δt = t_f exactly
     @info "Pass $ℓ/$(length(N_list)):  N=$N, Δx=$(round(Δx; digits=3)) m, " *
@@ -250,30 +255,32 @@ for (ℓ, N) in enumerate(N_list)
     rel_J  = abs(J_ad      - exact.J)      / abs(exact.J)
     rel_A  = abs(∂J_∂A_ad  - exact.∂J_∂A)  / abs(exact.∂J_∂A)
     rel_σ₀ = abs(∂J_∂σ₀_ad - exact.∂J_∂σ₀) / abs(exact.∂J_∂σ₀)
-    abs_U₀ = abs(∂J_∂U₀_ad)
+    rel_U₀ = abs(∂J_∂U₀_ad) / abs(exact.J / U₀)
 
     push!(results, (; N, Δx, t_f, J_ad,
-                      rel_J, rel_A, rel_σ₀, abs_U₀,
+                      rel_J, rel_A, rel_σ₀, rel_U₀,
                       ∂J_∂A_ad, ∂J_∂σ₀_ad, ∂J_∂U₀_ad, exact))
 
     @info "  Rel errors:  J = $(round(rel_J; sigdigits=3)),  " *
           "∂J/∂A = $(round(rel_A; sigdigits=3)),  " *
           "∂J/∂σ₀ = $(round(rel_σ₀; sigdigits=3)),  " *
-          "|∂J/∂U₀| = $(round(abs_U₀; sigdigits=3))"
+          "∂J/∂U₀ = $(round(rel_U₀; sigdigits=3))"
 end
 
 # ## 6. Convergence plot
 #
-# All errors should decrease as ``O(\Delta x^2)`` or better.
-# ``|\partial J/\partial U_0|`` is plotted as an absolute value since
-# its analytical target is zero.
+# All errors should decrease as ``O(\Delta x^2)`` or better where x is the grid spacing.
+# Since the analytical ``\partial J/\partial U_0 = 0``, its relative error
+# is undefined; instead we normalise by ``J/U_0`` (the natural scale for
+# a velocity-derivative of the objective) to obtain a dimensionless
+# quantity comparable to the other relative errors.
 
 Δx_vec = [r.Δx for r in results]
 safe(v) = max.(v, eps(Float64))
 
 fig = Figure(size = (820, 520), fontsize = 14)
 ax  = Axis(fig[1, 1];
-    xscale = log10, yscale = log10,
+    xscale = log2, yscale = log2,
     xlabel = L"\Delta x\;[\mathrm{m}]",
     ylabel = "relative error",
     title  = L"AD gradient convergence ($J = \Delta x^2\Sigma\, T_{ij}^2$)")
@@ -281,7 +288,7 @@ ax  = Axis(fig[1, 1];
 err_J_vec  = safe([r.rel_J  for r in results])
 err_A_vec  = safe([r.rel_A  for r in results])
 err_σ₀_vec = safe([r.rel_σ₀ for r in results])
-err_U₀_vec = safe([r.abs_U₀ for r in results])
+err_U₀_vec = safe([r.rel_U₀ for r in results])
 
 scatterlines!(ax, Δx_vec, err_J_vec,  marker = :rect,      linewidth = 2,
               label = L"J")
@@ -290,7 +297,7 @@ scatterlines!(ax, Δx_vec, err_A_vec,  marker = :utriangle, linewidth = 2,
 scatterlines!(ax, Δx_vec, err_σ₀_vec, marker = :diamond,   linewidth = 2,
               label = L"\partial J/\partial \sigma_0")
 scatterlines!(ax, Δx_vec, err_U₀_vec, marker = :star5,     linewidth = 2,
-              label = L"|\partial J/\partial U_0|")
+              label = L"|\partial J/\partial U_0|\, /\, (J/U_0)")
 
 ref₂ = err_J_vec[1] .* (Δx_vec ./ Δx_vec[1]) .^ 2
 lines!(ax, Δx_vec, ref₂, linestyle = :dash, color = :black,
