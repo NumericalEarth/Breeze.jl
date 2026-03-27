@@ -334,9 +334,9 @@ times = wxy_ts.times
 Nt = length(times)
 
 wlim = maximum(abs, wxy_ts) / 2
-qᶜˡlim = maximum(qᶜˡxy_ts) / 4
-qʳlim = maximum(qʳxy_ts) / 4
-qˢlim = maximum(qˢxy_ts) / 4
+qᶜˡlim = max(maximum(qᶜˡxy_ts) / 4, 1e-10)
+qʳlim = max(maximum(qʳxy_ts) / 4, 1e-10)
+qˢlim = max(maximum(qˢxy_ts) / 4, 1e-10)
 
 fig = Figure(size=(1200, 400), fontsize=12)
 
