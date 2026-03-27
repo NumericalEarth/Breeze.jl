@@ -3,11 +3,11 @@
 # This example simulates the development of a splitting supercell thunderstorm, following the
 # idealized test case described by [KlempEtAl2015](@citet) and the DCMIP2016
 # supercell intercomparison by [Zarzycki2019](@citet). This benchmark evaluates the model's
-# ability to capture deep moist convection with warm-rain microphysics and strong updrafts.
+# ability to capture deep moist convection with mixed-phase microphysics and strong updrafts.
 #
-# For microphysics we use the Kessler scheme, which includes prognostic cloud water
-# and rain water with autoconversion, accretion, rain evaporation, and sedimentation processes.
-# This is the same scheme used in the DCMIP2016 supercell intercomparison [Zarzycki2019](@cite).
+# For microphysics we use the mixed-phase non-equilibrium one-moment (MPNE1M) scheme, which
+# includes prognostic cloud liquid, cloud ice, rain, and snow with autoconversion, accretion,
+# evaporation, sublimation/deposition, melting, and sedimentation processes.
 #
 # ## Physical setup
 #
@@ -57,10 +57,15 @@
 # development and mesocyclone formation (Equations 15-16 in [KlempEtAl2015](@citet)).
 
 using Breeze
-using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
+using Breeze: TetensFormula
+using CloudMicrophysics
+using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: znodes
+
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
 using CairoMakie
 using CUDA
@@ -212,11 +217,15 @@ fig
 
 # ## Model setup
 #
-# We use the DCMIP2016 Kessler microphysics scheme with high-order WENO advection.
-# The Kessler scheme includes prognostic cloud water and rain water with autoconversion,
-# accretion, rain evaporation, and sedimentation processes.
+# We use the mixed-phase non-equilibrium one-moment (MPNE1M) microphysics scheme with
+# high-order WENO advection. The MPNE1M scheme tracks five moisture species (vapor, cloud
+# liquid, cloud ice, rain, snow) and includes the full suite of warm-rain and ice-phase
+# processes: condensation/evaporation, deposition/sublimation, autoconversion, accretion,
+# riming, rain-snow collisions, snow melting, and sedimentation.
 
-microphysics = DCMIP2016KesslerMicrophysics()
+FT = Float32
+cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
+microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
 advection = WENO(order=9, minimum_buffer_upwind_order=3)
 
 model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
@@ -246,7 +255,9 @@ Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 θˡⁱ = liquid_ice_potential_temperature(model)
 qᶜˡ = model.microphysical_fields.qᶜˡ
+qᶜⁱ = model.microphysical_fields.qᶜⁱ
 qʳ = model.microphysical_fields.qʳ
+qˢ = model.microphysical_fields.qˢ
 qᵛ = model.microphysical_fields.qᵛ
 u, v, w = model.velocities
 
@@ -259,8 +270,8 @@ function progress(sim)
                    iteration(sim), prettytime(sim), prettytime(sim.Δt), prettytime(elapsed),
                    maximum(abs, u), maximum(w), minimum(w))
 
-    msg *= @sprintf(", max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(qʳ): %.2e",
-                    maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ))
+    msg *= @sprintf(", max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(qᶜⁱ): %.2e, max(qʳ): %.2e, max(qˢ): %.2e",
+                    maximum(qᵛ), maximum(qᶜˡ), maximum(qᶜⁱ), maximum(qʳ), maximum(qˢ))
     @info msg
 
     return nothing
@@ -289,8 +300,10 @@ k_5km = searchsortedfirst(z, 5000)
 
 slice_outputs = (
     wxy = view(w, :, :, k_5km),
-    qʳxy = view(qʳ, :, :, k_5km),
     qᶜˡxy = view(qᶜˡ, :, :, k_5km),
+    qᶜⁱxy = view(qᶜⁱ, :, :, k_5km),
+    qʳxy = view(qʳ, :, :, k_5km),
+    qˢxy = view(qˢ, :, :, k_5km),
 )
 
 slices_filename = "splitting_supercell_slices.jld2"
@@ -302,45 +315,59 @@ run!(simulation)
 
 # ## Animation: horizontal slices at z ≈ 5 km
 #
-# We create a 3-panel animation showing the storm structure at mid-levels:
+# We create a 5-panel animation showing the storm structure at mid-levels:
 # - Vertical velocity ``w``: reveals the updraft/downdraft structure
-# - Cloud liquid ``qᶜˡ``: shows the cloud boundaries
-# - Rain ``qʳ``: indicates precipitation regions
+# - Cloud liquid ``qᶜˡ``: shows warm cloud boundaries
+# - Cloud ice ``qᶜⁱ``: shows ice cloud in the upper storm
+# - Rain ``qʳ``: indicates liquid precipitation
+# - Snow ``qˢ``: indicates frozen precipitation
 #
 # The simulated supercell exhibits splitting behavior, with the initial storm
 # dividing into right-moving and left-moving cells, consistent with the
 # DCMIP2016 intercomparison results [Zarzycki2019](@cite).
 
 wxy_ts = FieldTimeSeries(slices_filename, "wxy")
-qʳxy_ts = FieldTimeSeries(slices_filename, "qʳxy")
 qᶜˡxy_ts = FieldTimeSeries(slices_filename, "qᶜˡxy")
+qᶜⁱxy_ts = FieldTimeSeries(slices_filename, "qᶜⁱxy")
+qʳxy_ts = FieldTimeSeries(slices_filename, "qʳxy")
+qˢxy_ts = FieldTimeSeries(slices_filename, "qˢxy")
 
 times = wxy_ts.times
 Nt = length(times)
 
 wlim = maximum(abs, wxy_ts) / 2
-qʳlim = maximum(qʳxy_ts) / 4
 qᶜˡlim = maximum(qᶜˡxy_ts) / 4
+qᶜⁱlim = maximum(qᶜⁱxy_ts) / 4
+qʳlim = maximum(qʳxy_ts) / 4
+qˢlim = maximum(qˢxy_ts) / 4
 
-fig = Figure(size=(900, 400), fontsize=12)
+fig = Figure(size=(1200, 700), fontsize=12)
 
 axw = Axis(fig[1, 1], aspect=1, xlabel="x (m)", ylabel="y (m)", title="w (m/s)")
 axqᶜˡ = Axis(fig[1, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qᶜˡ (kg/kg)")
-axqʳ = Axis(fig[1, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qʳ (kg/kg)")
+axqᶜⁱ = Axis(fig[1, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qᶜⁱ (kg/kg)")
+axqʳ = Axis(fig[2, 1], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qʳ (kg/kg)")
+axqˢ = Axis(fig[2, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qˢ (kg/kg)")
 
 n = Observable(1)
 wxy_n = @lift wxy_ts[$n]
 qᶜˡxy_n = @lift qᶜˡxy_ts[$n]
+qᶜⁱxy_n = @lift qᶜⁱxy_ts[$n]
 qʳxy_n = @lift qʳxy_ts[$n]
+qˢxy_n = @lift qˢxy_ts[$n]
 title = @lift "Splitting supercell at z ≈ 5 km, t = " * prettytime(times[$n])
 
 hmw = heatmap!(axw, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
 hmqᶜˡ = heatmap!(axqᶜˡ, qᶜˡxy_n, colormap=:dense, colorrange=(0, qᶜˡlim))
+hmqᶜⁱ = heatmap!(axqᶜⁱ, qᶜⁱxy_n, colormap=:ice, colorrange=(0, qᶜⁱlim))
 hmqʳ = heatmap!(axqʳ, qʳxy_n, colormap=:amp, colorrange=(0, qʳlim))
+hmqˢ = heatmap!(axqˢ, qˢxy_n, colormap=:tempo, colorrange=(0, qˢlim))
 
-Colorbar(fig[2, 1], hmw, vertical=false)
-Colorbar(fig[2, 2], hmqᶜˡ, vertical=false)
-Colorbar(fig[2, 3], hmqʳ, vertical=false)
+Colorbar(fig[1, 4], hmw)
+Colorbar(fig[1, 5], hmqᶜˡ)
+Colorbar(fig[1, 6], hmqᶜⁱ)
+Colorbar(fig[2, 3], hmqʳ)
+Colorbar(fig[2, 4], hmqˢ)
 
 fig[0, :] = Label(fig, title, fontsize=14, tellwidth=false)
 
