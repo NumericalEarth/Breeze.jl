@@ -727,9 +727,9 @@ than computed via quadrature, which is much faster.
 - `number_of_mass_points`: Grid points in mean particle mass (default 150)
 - `number_of_rime_fraction_points`: Grid points in rime fraction (default 8)
 - `number_of_liquid_fraction_points`: Grid points in liquid fraction (default 4)
-- `number_of_rime_density_points`: Grid points in rime density (default 5, matching Fortran)
-- `minimum_log_mean_particle_mass`: Minimum log₁₀(mass) [log kg], default -17.3
-- `maximum_log_mean_particle_mass`: Maximum log₁₀(mass) [log kg], default -5.3
+- `number_of_rime_density_points`: Grid points in rime density (default 10)
+- `minimum_log_mean_particle_mass`: Minimum log₁₀(mass) [log kg], default -14.8
+- `maximum_log_mean_particle_mass`: Maximum log₁₀(mass) [log kg], default -0.6
 - `minimum_rime_density`: Minimum rime density [kg/m³], default 50
 - `maximum_rime_density`: Maximum rime density [kg/m³], default 900
 - `number_of_quadrature_points`: Quadrature points for filling table (default 64)
@@ -744,9 +744,9 @@ function TabulationParameters(FT::Type{<:AbstractFloat} = Float64;
                                number_of_mass_points::Int = 150,
                                number_of_rime_fraction_points::Int = 8,
                                number_of_liquid_fraction_points::Int = 4,
-                               number_of_rime_density_points::Int = 5,
-                               minimum_log_mean_particle_mass = FT(-17.3),
-                               maximum_log_mean_particle_mass = FT(-5.3),
+                               number_of_rime_density_points::Int = 10,
+                               minimum_log_mean_particle_mass = FT(-14.8),
+                               maximum_log_mean_particle_mass = FT(-0.6),
                                minimum_rime_density = FT(50),
                                maximum_rime_density = FT(900),
                                number_of_quadrature_points::Int = 64,

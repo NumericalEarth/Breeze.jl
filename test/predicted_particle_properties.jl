@@ -535,9 +535,9 @@ using Oceananigans.Fields: interior
         @test params.number_of_mass_points == 150
         @test params.number_of_rime_fraction_points == 8
         @test params.number_of_liquid_fraction_points == 4
-        @test params.number_of_rime_density_points == 5
-        @test params.minimum_log_mean_particle_mass ≈ -17.3
-        @test params.maximum_log_mean_particle_mass ≈ -5.3
+        @test params.number_of_rime_density_points == 10
+        @test params.minimum_log_mean_particle_mass ≈ -14.8
+        @test params.maximum_log_mean_particle_mass ≈ -0.6
         @test params.minimum_rime_density ≈ 50.0
         @test params.maximum_rime_density ≈ 900.0
         @test params.number_of_quadrature_points == 64
@@ -575,7 +575,7 @@ using Oceananigans.Fields: interior
         @test all(x -> x >= 0, tab_Vn.table)
 
         # Test indexing via table (unrimed, liquid_fraction=0, first rime density)
-        # First point may be ~0 at very small mass (log_m ≈ -17.3); last point must be positive
+        # First point may be ~0 at very small mass (log_m ≈ -14.8); last point must be positive
         @test tab_Vn.table[1, 1, 1, 1] >= 0
         @test tab_Vn.table[5, 1, 1, 1] > 0
     end
