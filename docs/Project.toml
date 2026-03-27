@@ -28,7 +28,11 @@ DocumenterCitations = "1.4"
 InteractiveUtils = "<0.0.1, 1"
 Literate = "2"
 NCDatasets = "0.14"
+<<<<<<< glw/p3
 Oceananigans = "0.106.2"
+=======
+Oceananigans = "0.105.1, 0.106"
+>>>>>>> main
 Pkg = "<0.0.1, 1"
 RRTMGP = "0.21.7"
 Random = "<0.0.1, 1"

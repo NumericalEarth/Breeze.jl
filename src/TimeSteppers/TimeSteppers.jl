@@ -11,11 +11,11 @@ module TimeSteppers
 export SSPRungeKutta3, AcousticSSPRungeKutta3, AcousticRungeKutta3,
        store_initial_state!,
        ssp_rk3_substep!,
-       maybe_initialize_state!
+       maybe_prepare_first_time_step!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
-                                 update_state!, maybe_initialize_state!
+                                 update_state!, maybe_prepare_first_time_step!
 
 include("ssp_runge_kutta_3.jl")
 include("acoustic_ssp_runge_kutta_3.jl")
