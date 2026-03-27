@@ -7,8 +7,11 @@ function build_lookup_table_2(ice::IceProperties, rain::RainProperties, arch, pa
 
     range = table_range((params.minimum_log_mean_particle_mass, params.maximum_log_mean_particle_mass),
                         (params.minimum_log_rain_slope_parameter, params.maximum_log_rain_slope_parameter),
-                        (zero(FT), one(FT)), (zero(FT), one(FT)), (FT(50.0), FT(900.0)))
-    points = (params.number_of_mass_points, params.number_of_rain_size_points, params.number_of_rime_fraction_points, params.number_of_liquid_fraction_points, 5)
+                        (zero(FT), one(FT)), (zero(FT), one(FT)),
+                        (params.minimum_rime_density, params.maximum_rime_density))
+    points = (params.number_of_mass_points, params.number_of_rain_size_points,
+              params.number_of_rime_fraction_points, params.number_of_liquid_fraction_points,
+              params.number_of_rime_density_points)
 
     mass_table = build_tabulated_function(mass_eval, arch, FT, range, points)
     number_table = build_tabulated_function(number_eval, arch, FT, range, points)

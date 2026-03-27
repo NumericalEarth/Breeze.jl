@@ -34,10 +34,13 @@ struct LookupTable2Parameters{FT}
     number_of_rain_size_points :: Int
     number_of_rime_fraction_points :: Int
     number_of_liquid_fraction_points :: Int
+    number_of_rime_density_points :: Int
     minimum_log_mean_particle_mass :: FT
     maximum_log_mean_particle_mass :: FT
     minimum_log_rain_slope_parameter :: FT
     maximum_log_rain_slope_parameter :: FT
+    minimum_rime_density :: FT
+    maximum_rime_density :: FT
     number_of_quadrature_points :: Int
 end
 
@@ -48,10 +51,13 @@ function LookupTable2Parameters(FT::Type{<:AbstractFloat} = Float64; kwargs...)
         Int(get(parameters, :number_of_rain_size_points, 30)),
         Int(get(parameters, :number_of_rime_fraction_points, 4)),
         Int(get(parameters, :number_of_liquid_fraction_points, 4)),
+        Int(get(parameters, :number_of_rime_density_points, 10)),
         FT(get(parameters, :minimum_log_mean_particle_mass, -14.8)),
         FT(get(parameters, :maximum_log_mean_particle_mass, -0.6)),
         FT(get(parameters, :minimum_log_rain_slope_parameter, 2.5)),
         FT(get(parameters, :maximum_log_rain_slope_parameter, 5.5)),
+        FT(get(parameters, :minimum_rime_density, 50)),
+        FT(get(parameters, :maximum_rime_density, 900)),
         Int(get(parameters, :number_of_quadrature_points, 64)))
 end
 

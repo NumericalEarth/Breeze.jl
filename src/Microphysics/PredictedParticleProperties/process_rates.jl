@@ -610,11 +610,18 @@ struct P3ProcessRates{FT}
     cloud_warm_collection :: FT        # Cloud collected above T₀ → qʷⁱ [kg/kg/s]
     cloud_warm_collection_number :: FT # Cloud number loss from warm collection [1/kg/s]
     rain_warm_collection :: FT         # Rain collected above T₀ → qʷⁱ [kg/kg/s]
+    rain_warm_collection_number :: FT  # M9: Rain number loss from warm collection [1/kg/s]
 
     # Wet growth: collected hydrometeors redirected to qʷⁱ when collection
     # exceeds freezing capacity (Milbrandt et al. 2025; Fortran qwgrth1c/qwgrth1r)
     wet_growth_cloud :: FT             # Cloud collection redirected to qʷⁱ [kg/kg/s]
     wet_growth_rain :: FT              # Rain collection redirected to qʷⁱ [kg/kg/s]
+
+    # M9: Warm/mixed-phase budget terms (stubs for Fortran parity)
+    ccn_activation :: FT               # CCN activation (vapor → cloud) [kg/kg/s]
+    rain_condensation :: FT            # Rain condensation (vapor → rain) [kg/kg/s]
+    coating_condensation :: FT         # Condensation on ice liquid coating [kg/kg/s]
+    coating_evaporation :: FT          # Evaporation from ice liquid coating [kg/kg/s]
 end
 
 """
@@ -808,6 +815,9 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     cloud_warm_q, cloud_warm_n = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
     rain_warm_q = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    # M9: Rain number loss from above-freezing collection (Fortran nrcoll).
+    # Proportional to mass collected: Δnʳ/nʳ = Δqʳ/qʳ
+    rain_warm_n = safe_divide(nʳ * rain_warm_q, qʳ, zero(FT))
 
     # =========================================================================
     # Sink limiting: rescale sink rates so total sinks × dt_safety ≤ available
@@ -849,6 +859,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     rain_hom_q    = rain_hom_q * f_rain
     rain_hom_n    = rain_hom_n * f_rain
     rain_warm_q   = rain_warm_q * f_rain
+    rain_warm_n   = rain_warm_n * f_rain
     wg_rain       = wg_rain * f_rain
 
     # --- Ice sinks ---
@@ -904,9 +915,11 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         # Homogeneous freezing
         cloud_hom_q, cloud_hom_n, rain_hom_q, rain_hom_n,
         # Above-freezing collection → qʷⁱ
-        cloud_warm_q, cloud_warm_n, rain_warm_q,
+        cloud_warm_q, cloud_warm_n, rain_warm_q, rain_warm_n,
         # Wet growth collection → qʷⁱ
-        wg_cloud, wg_rain
+        wg_cloud, wg_rain,
+        # M9: Warm/mixed-phase budget stubs (not yet computed; set to zero)
+        zero(FT), zero(FT), zero(FT), zero(FT)
     )
 end
 
@@ -949,7 +962,8 @@ Cloud liquid is consumed by:
 """
 @inline function tendency_ρqᶜˡ(rates::P3ProcessRates, ρ)
     # Phase 1: condensation (positive = cloud forms)
-    gain = rates.condensation
+    # M9: CCN activation (vapor → cloud)
+    gain = rates.condensation + rates.ccn_activation
     # Phase 1: autoconversion and accretion
     # Phase 2: cloud riming by ice, immersion freezing, homogeneous freezing
     # Above-freezing: cloud collected by melting ice → qʷⁱ
@@ -984,8 +998,9 @@ Rain loses from:
     # Phase 2: gains from shedding; loses from riming, freezing, homogeneous freezing
     # Milbrandt et al. (2025): above-freezing collection and wet growth go to qʷⁱ, NOT rain.
     # Rain warm collection is a rain SINK (collected by ice → qʷⁱ).
+    # M9: rain condensation (vapor → rain)
     gain = rates.autoconversion + rates.accretion + rates.complete_melting +
-           rates.shedding
+           rates.shedding + rates.rain_condensation
     loss = rates.rain_evaporation + rates.rain_riming + rates.rain_freezing_mass +
            rates.rain_homogeneous_mass + rates.rain_warm_collection + rates.wet_growth_rain
     return ρ * (gain - loss)
@@ -1001,7 +1016,7 @@ Rain number gains from:
 - Complete melting (Phase 1) - new rain drops from melted ice
 - Breakup (Phase 1) - large drops fragment into smaller ones
 - Shedding (Phase 2)
-- Warm cloud collection (above freezing) - shed 1mm drops
+- Cloud warm collection number (M9, Fortran ncshdc)
 
 Rain number loses from:
 - Self-collection (Phase 1)
@@ -1009,6 +1024,7 @@ Rain number loses from:
 - Riming (Phase 2)
 - Immersion freezing (Phase 2)
 - Homogeneous freezing (Phase 2, T < -40°C)
+- Rain warm collection number (M9, Fortran nrcoll)
 """
 @inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ, nʳ, qʳ, prp::ProcessRateParameters)
     FT = typeof(ρ)
@@ -1024,16 +1040,22 @@ Rain number loses from:
     # rain_evaporation is positive magnitude (M7); proportional number loss is positive.
     n_from_evap = safe_divide(nʳ * rates.rain_evaporation, qʳ, zero(FT))
 
-    # Gains: shedding produces rain drops; warm collection no longer goes to rain
+    # Gains: shedding produces rain drops
+    # M9: cloud_warm_collection_number → new rain drops from above-freezing cloud
+    #      collection (Fortran ncshdc)
     n_gain = n_from_autoconv + n_from_melt +
              rates.rain_breakup +
-             rates.shedding_number
+             rates.shedding_number +
+             rates.cloud_warm_collection_number
     # Losses (all positive magnitudes, M7)
+    # M9: rain_warm_collection_number → rain number sink from above-freezing rain
+    #      collection (Fortran nrcoll)
     n_loss = n_from_evap +
              rates.rain_self_collection +
              rates.rain_riming_number +
              rates.rain_freezing_number +
-             rates.rain_homogeneous_number
+             rates.rain_homogeneous_number +
+             rates.rain_warm_collection_number
 
     return ρ * (n_gain - n_loss)
 end
@@ -1326,7 +1348,12 @@ end
     z_melt_numerator = mass_melt_const * z_melt1 + sc_correction * mass_melt_enh * z_melt2
     z_melt_rate = z_melt_numerator * env_melt
 
-    # --- Riming (single term): z_table = dG/mass_integral ---
+    # --- Riming ---
+    # Cloud riming uses the Table 1 rime kernel (same as before).
+    # H6: Rain riming should use the dedicated Table 2 sixth-moment kernel, but
+    # this requires λ_r which is not available here. For now, use Table 1 for
+    # both; the mass and number rates already dispatch to Table 2.
+    # TODO: Pass λ_r to enable Table 2 sixth-moment kernel for rain riming.
     z_rime = sixth.rime(log_m, Fᶠ, Fˡ, ρᶠ)
     z_rime_rate = z_rime * (rates.cloud_riming + rates.rain_riming) * inv_nⁱ
 
@@ -1416,8 +1443,11 @@ Vapor is produced by:
     # Deposition:   positive = vapor loss (dep),  negative = vapor gain (sublimation)
     # Rain evaporation: positive magnitude (M7) = vapor gain
     # Nucleation: always positive = vapor loss
-    vapor_loss = rates.condensation + rates.deposition + rates.nucleation_mass
-    vapor_gain = rates.rain_evaporation  # positive magnitude (M7)
+    # M9: CCN activation, rain condensation, and coating condensation are all vapor sinks;
+    #      coating evaporation is a vapor source.
+    vapor_loss = rates.condensation + rates.deposition + rates.nucleation_mass +
+                 rates.ccn_activation + rates.rain_condensation + rates.coating_condensation
+    vapor_gain = rates.rain_evaporation + rates.coating_evaporation
     return ρ * (vapor_gain - vapor_loss)
 end
 

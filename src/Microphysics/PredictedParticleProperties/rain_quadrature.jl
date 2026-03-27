@@ -13,11 +13,12 @@
 #####  2. Number-weighted terminal velocity:
 #####       V_num = ∫ V(D) exp(-λ_r D) dD / ∫ exp(-λ_r D) dD              [m/s]
 #####
-#####  3. Evaporation Reynolds integral (M3):
-#####       I_Re = ∫ D √Re(D) exp(-λ_r D) dD                              [m²]
-#####       where Re(D) = ar * D^(1+br) / ν  [= V(D)*D/ν]
+#####  3. Evaporation velocity-diameter integral (M18):
+#####       I_VD = ∫ D √(V(D)×D) exp(-λ_r D) dD                           [m^(5/2)]
+#####       where V(D) is the piecewise Gunn-Kinzer/Beard fall speed.
+#####       ν is NOT baked in; 1/√ν is applied at runtime.
 #####       Full evaporation integral assembled at runtime:
-#####       I_evap = f1r/λ² + f2r × Sc^(1/3) × I_Re
+#####       I_evap = f1r/λ² + f2r × Sc^(1/3) / √ν × I_VD
 #####
 ##### The integration uses the same domain transformation as ice quadrature:
 #####   D = (scale/λ) * (1+x) / (1-x+ε),  x ∈ [-1, 1]
@@ -202,26 +203,27 @@ end
 """
     RainEvaporationVentilationEvaluator{N, W}
 
-Callable evaluator for the Reynolds part of the rain evaporation ventilation integral:
+Callable evaluator for the velocity-diameter part of the rain evaporation
+ventilation integral (M18):
 
 ```math
-I_{\\mathrm{Re}}(\\lambda_r) =
-    \\int_0^\\infty D\\, \\sqrt{\\mathrm{Re}(D)}\\, e^{-\\lambda_r D}\\, dD
+I_{\\mathrm{VD}}(\\lambda_r) =
+    \\int_0^\\infty D\\, \\sqrt{V(D) \\times D}\\, e^{-\\lambda_r D}\\, dD
 ```
 
-where `Re(D) = V(D) × D / ν` (Reynolds number based on drop diameter),
-`ν = 1.5e-5 m²/s`, and `V(D)` is given by the same piecewise Gunn-Kinzer/Beard
-law used in the Fortran rain lookup-table generation.
+where `V(D)` is the piecewise Gunn-Kinzer/Beard rain fall speed at reference
+density. The kinematic viscosity `ν` is **not** baked into the table; `1/√ν`
+is applied at runtime from T,P-dependent transport properties (Fortran convention).
 
-The full evaporation ventilation integral is assembled at runtime (M3):
+The full evaporation ventilation integral is assembled at runtime:
 
 ```math
 I_{\\mathrm{evap}} = \\frac{f_{1r}}{\\lambda_r^2}
-    + f_{2r}\\, \\mathrm{Sc}^{1/3}\\, I_{\\mathrm{Re}}
+    + f_{2r}\\, \\frac{\\mathrm{Sc}^{1/3}}{\\sqrt{\\nu}}\\, I_{\\mathrm{VD}}
 ```
 
-where `f1r = 0.78`, `f2r = 0.32`, and `Sc = ν / D_v` is the Schmidt number
-computed from T,P-dependent transport properties. The constant term
+where `f1r = 0.78`, `f2r = 0.32`, `Sc = ν / D_v` is the Schmidt number,
+and `ν` is the T,P-dependent kinematic viscosity. The constant term
 `f1r / λ_r²` is the analytical result of `f1r × ∫ D exp(-λD) dD`.
 
 This integral appears in the PSD-integrated rain evaporation rate (Mason 1971,
@@ -257,17 +259,14 @@ end
 """
     (e::RainEvaporationVentilationEvaluator)(log10_lambda_r)
 
-Evaluate `I_Re(λ_r)` = ∫ D √Re(D) exp(-λ_r D) dD at the given `log10(λ_r)`.
+Evaluate `I_VD(λ_r)` = ∫ D √(V(D)×D) exp(-λ_r D) dD at the given `log10(λ_r)`.
 
-Returns the Reynolds integral in [m²]. The constant (f1r) and Schmidt number
-(Sc^(1/3)) contributions are applied at runtime (M3).
+Returns the velocity-diameter integral in [m^(5/2)]. The `1/√ν`, constant (f1r),
+and Schmidt number (Sc^(1/3)) contributions are applied at runtime (M18).
 """
 @inline function (e::RainEvaporationVentilationEvaluator)(log10_lambda_r)
     FT = eltype(e.nodes)
-    λ_r  = FT(10)^log10_lambda_r
-    ar   = FT(842)
-    br   = FT(0.8)
-    ν    = FT(RAIN_NU)
+    λ_r = FT(10)^log10_lambda_r
 
     result = zero(FT)
     n = length(e.nodes)
@@ -278,12 +277,13 @@ Returns the Reynolds integral in [m²]. The constant (f1r) and Schmidt number
         D = transform_to_diameter(x, λ_r)
         J = jacobian_diameter_transform(x, λ_r)
 
-        # √(Re) = √(V(D) × D / ν)
-        Re_sqrt = sqrt(max(ar * D^(br + 1) / ν, zero(FT)))
+        # M18: Use piecewise Gunn-Kinzer/Beard fall speed (Fortran fallr1).
+        # ν is NOT baked in; 1/√ν applied at runtime from T,P-dependent transport.
+        V = rain_fall_speed(D, one(FT))
+        VD_sqrt = sqrt(max(V * D, zero(FT)))
         psd = exp(-λ_r * D)
 
-        # M3: Reynolds integral only (f1r and Sc^(1/3) applied at runtime)
-        result += w * D * Re_sqrt * psd * J
+        result += w * D * VD_sqrt * psd * J
     end
 
     return ifelse(isfinite(result), result, zero(FT))

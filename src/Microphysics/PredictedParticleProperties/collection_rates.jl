@@ -340,53 +340,52 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
     q_threshold = FT(1e-8)
     n_threshold = FT(1)
     below_freezing = T < T₀
-    # Fortran P3 v5.5.0: rain-ice collection proceeds whenever both species
-    # are present and T < T₀ (no qi >= qr condition). Removed Mizuno (1990) gate.
     active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
 
-    # Mean particle mass
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
 
-    # Collection kernel ⟨A×V⟩: dispatches to PSD-integrated table or
-    # mean-mass path with psd_correction (same kernel as cloud riming).
-    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                       m_mean, Fᶠ, ρᶠ, prp, p3)
-
-    # Air density correction for ice particle fall speed (same convention as cloud riming):
-    # uses ice reference density ρ₀_ice ≈ 0.826 kg/m³, NOT rain reference ≈ 1.275 kg/m³.
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
-    # C5: Rain-DSD cross-section correction for double-PSD integration.
-    # The Fortran f1pr07/f1pr08 table integrates over BOTH ice and rain PSDs,
-    # capturing the (D_i + D_r)² collision geometry. The single-PSD path above
-    # only uses D_i². For exponential rain (μ_r = 0), the exact correction is:
-    #   correction = 1 + 8*(D_r_mean/D_i_mean) + 20*(D_r_mean/D_i_mean)²
-    # (derived from the ratio of double-PSD to single-PSD cross-section integrals;
-    # see P3_FORTRAN_COMPARISON.md, issue C5).
-    #
-    # Rain mean diameter: λ_r³ = π ρ_w nʳ / qʳ  (exponential PSD, μ_r = 0)
-    # D_r_mean = 1/λ_r (number-weighted mean diameter for μ_r = 0)
+    # Diagnose rain DSD slope parameter
     λ_r_cubed = FT(π) * prp.liquid_water_density * nʳ_eff / max(qʳ_eff, FT(1e-15))
     λ_r = clamp(cbrt(λ_r_cubed), prp.rain_lambda_min, prp.rain_lambda_max)
-    D_r_mean = 1 / λ_r
 
-    # Ice mean diameter at mean mass (mean-mass approximation)
+    # Liquid fraction for Table 2 lookup
+    qⁱ_total = max(qⁱ_eff + clamp_positive(zero(FT)), FT(1e-20))
+    Fˡ = zero(FT)
+
+    # H6: Dispatch to Table 2 (double-PSD kernel) when available,
+    # otherwise fall back to Table 1 + analytical rain-DSD correction.
+    mass_kernel = _rain_riming_mass_kernel(lookup_table_2(p3),
+        m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3)
+
+    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * mass_kernel
+
+    return ifelse(active, rate, zero(FT))
+end
+
+# H6: Table 2 path — use the dedicated ice-rain mass collection table (Fortran f1pr07).
+@inline function _rain_riming_mass_kernel(table2::P3LookupTable2,
+                                           m_mean, λ_r, nʳ, Fᶠ, Fˡ, ρᶠ, prp, p3)
+    mass_kernel, _, _ = ice_rain_collection_lookup(table2, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ)
+    return mass_kernel
+end
+
+# H6: Fallback — use Table 1 ice-side kernel with analytical rain-DSD correction.
+@inline function _rain_riming_mass_kernel(::Nothing,
+                                           m_mean, λ_r, nʳ, Fᶠ, Fˡ, ρᶠ, prp, p3)
+    FT = typeof(m_mean)
+    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
+                                                       m_mean, Fᶠ, ρᶠ, prp, p3)
+    D_r_mean = 1 / λ_r
     ρ_eff = (1 - Fᶠ) * prp.ice_effective_density_unrimed + Fᶠ * max(ρᶠ, FT(50))
     D_i_mean = cbrt(6 * m_mean / (FT(π) * max(ρ_eff, FT(50))))
     D_i_mean = clamp(D_i_mean, prp.ice_diameter_min, prp.ice_diameter_max)
-
     r_ratio = D_r_mean / max(D_i_mean, FT(prp.ice_diameter_min))
     rain_dsd_correction = 1 + 8 * r_ratio + 20 * r_ratio^2
-
-    # Only apply the rain-DSD correction when rain number is available (nʳ > 0).
-    # When nʳ = 0 the correction is 1 (matches the legacy 8-argument overload behavior).
-    rain_dsd_correction = ifelse(nʳ_eff > FT(1), rain_dsd_correction, one(FT))
-
-    # Collection rate = E × qr × ni × ρ × rhofaci × ⟨A×V⟩ × rain_dsd_correction
-    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle * rain_dsd_correction
-
-    return ifelse(active, rate, zero(FT))
+    rain_dsd_correction = ifelse(nʳ > FT(1), rain_dsd_correction, one(FT))
+    return AV_per_particle * rain_dsd_correction
 end
 
 """
@@ -441,21 +440,38 @@ independent PSD-integrated number collection rate.
     below_freezing = T < T₀
     active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nʳ_eff > n_threshold) & (nⁱ_eff > n_threshold)
 
-    # Mean ice particle mass (same as in rain_riming_rate)
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
-
-    # H6: Use number-weighted collection kernel from RainCollectionNumber table
-    # (Fortran f1pr07), instead of monodisperse approximation (nʳ/qʳ × mass_rate).
-    AV_number = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                m_mean, Fᶠ, ρᶠ, prp, p3)
 
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
-    # Number collection rate = E × nʳ × nⁱ × ρ × rhofaci × ⟨A×V⟩_number
-    rate = Eʳⁱ * nʳ_eff * nⁱ_eff * ρ * rhofaci * AV_number
+    # Diagnose rain DSD slope parameter
+    λ_r_cubed = FT(π) * prp.liquid_water_density * nʳ_eff / max(qʳ_eff, FT(1e-15))
+    λ_r = clamp(cbrt(λ_r_cubed), prp.rain_lambda_min, prp.rain_lambda_max)
+
+    Fˡ = zero(FT)
+
+    # H6: Dispatch to Table 2 (number-weighted kernel) when available.
+    number_kernel = _rain_riming_number_kernel(lookup_table_2(p3),
+        m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3)
+
+    rate = Eʳⁱ * nʳ_eff * nⁱ_eff * ρ * rhofaci * number_kernel
 
     return ifelse(active, rate, zero(FT))
+end
+
+# H6: Table 2 path — use the dedicated ice-rain number collection table (Fortran f1pr08).
+@inline function _rain_riming_number_kernel(table2::P3LookupTable2,
+                                             m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3)
+    _, number_kernel, _ = ice_rain_collection_lookup(table2, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ)
+    return number_kernel
+end
+
+# H6: Fallback — use Table 1 ice-side kernel (same kernel for mass and number).
+@inline function _rain_riming_number_kernel(::Nothing,
+                                             m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3)
+    return collection_kernel_per_particle(p3.ice.collection.rain_collection,
+                                           m_mean, Fᶠ, ρᶠ, prp, p3)
 end
 
 """

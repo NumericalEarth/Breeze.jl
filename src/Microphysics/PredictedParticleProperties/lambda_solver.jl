@@ -804,22 +804,25 @@ Closure-specific defaults:
 - `Z_ice`: Ice sixth moment / reflectivity [m⁶/m³]
 - `rime_fraction`: Mass fraction of rime [-]
 - `rime_density`: Density of rime [kg/m³]
+- `liquid_fraction`: Liquid water fraction from partial melting [-] (H15)
 
 # Returns
 - Shape parameter μ
 """
 function solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
+                               liquid_fraction = zero(typeof(L_ice)),
                                mass = IceMassPowerLaw(),
                                closure = ThreeMomentClosure(),
                                max_iterations = nothing,
                                tolerance = nothing,
                                density_quadrature_points = 64)
     return solve_shape_parameter_with_closure(closure, L_ice, N_ice, Z_ice, rime_fraction, rime_density;
-                                              mass, max_iterations, tolerance, density_quadrature_points)
+                                              liquid_fraction, mass, max_iterations, tolerance, density_quadrature_points)
 end
 
 function solve_shape_parameter_with_closure(closure::ThreeMomentClosure,
                                             L_ice, N_ice, Z_ice, rime_fraction, rime_density;
+                                            liquid_fraction = zero(typeof(L_ice)),
                                             mass = IceMassPowerLaw(),
                                             max_iterations = nothing,
                                             tolerance = nothing,
@@ -841,9 +844,13 @@ function solve_shape_parameter_with_closure(closure::ThreeMomentClosure,
     state_init = IceSizeDistributionState(FT;
         intercept = N₀_init, shape = μ_old, slope = exp(logλ_init),
         rime_fraction = rime_fraction, rime_density = rime_density,
+        liquid_fraction = liquid_fraction,
         mass_coefficient = mass.coefficient, mass_exponent = mass.exponent,
         ice_density = mass.ice_density)
-    ρ_bulk_init = max(evaluate_quadrature(MeanDensity(), state_init, nodes, weights), eps(FT))
+    ρ_bulk_dry = max(evaluate_quadrature(MeanDensity(), state_init, nodes, weights), eps(FT))
+    # H15: Blend liquid water density (Fortran: rhom = (1-Fl)*cgp(i_rhor) + Fl*1000*π/6)
+    ρ_bulk_init = (1 - liquid_fraction) * ρ_bulk_dry + liquid_fraction * FT(1000)
+    ρ_bulk_init = max(ρ_bulk_init, eps(FT))
     Z_ice = enforce_z_bounds(Z_ice, L_ice, N_ice, ρ_bulk_init, closure.μmin, closure.μmax)
 
     for _ in 1:max_iterations
@@ -857,11 +864,15 @@ function solve_shape_parameter_with_closure(closure::ThreeMomentClosure,
             slope = λ,
             rime_fraction = rime_fraction,
             rime_density = rime_density,
+            liquid_fraction = liquid_fraction,
             mass_coefficient = mass.coefficient,
             mass_exponent = mass.exponent,
             ice_density = mass.ice_density)
 
-        ρ_bulk = max(evaluate_quadrature(MeanDensity(), state, nodes, weights), eps(FT))
+        ρ_bulk_dry = max(evaluate_quadrature(MeanDensity(), state, nodes, weights), eps(FT))
+        # H15: Blend liquid water density into bulk density diagnostic
+        ρ_bulk = (1 - liquid_fraction) * ρ_bulk_dry + liquid_fraction * FT(1000)
+        ρ_bulk = max(ρ_bulk, eps(FT))
         mom3 = FT(6) * L_ice / (ρ_bulk * FT(π))
         μ = shape_parameter_from_moments(N_ice, mom3, Z_ice, closure.μmax)
         μ = clamp(μ, closure.μmin, closure.μmax)
@@ -875,6 +886,7 @@ end
 
 function solve_shape_parameter_with_closure(closure::ThreeMomentClosureExact,
                                             L_ice, N_ice, Z_ice, rime_fraction, rime_density;
+                                            liquid_fraction = zero(typeof(L_ice)),
                                             mass = IceMassPowerLaw(),
                                             max_iterations = nothing,
                                             tolerance = nothing,
@@ -1322,6 +1334,7 @@ params = distribution_parameters(L_ice, N_ice, Z_ice, 0.0, 400.0)
 [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024) refined the approach.
 """
 function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
+                                  liquid_fraction = zero(typeof(L_ice)),
                                   mass = IceMassPowerLaw(),
                                   closure = ThreeMomentClosure(),
                                   diameter_bounds = nothing)
@@ -1348,8 +1361,9 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
         return IceDistributionParameters(N₀, λ, μ)
     end
 
-    # Solve for μ using three-moment constraint
-    μ = solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density; mass, closure)
+    # H15: Solve for μ using three-moment constraint with liquid fraction
+    μ = solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
+                              liquid_fraction, mass, closure)
 
     # Solve for λ at this μ
     logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass)

@@ -125,14 +125,14 @@ end
 """
     ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
 
-Compute partitioned ice melting rates following Milbrandt et al. (2025).
+Compute partitioned ice melting rates using PSD-resolved partitioning (H9).
 
-Above freezing, ice particles melt. The meltwater is partitioned:
-- **Partial melting** (large particles): Meltwater stays on ice as liquid coating (qʷⁱ)
-- **Complete melting** (small particles): Meltwater sheds directly to rain
+Above freezing, ice particles melt. The meltwater is partitioned using
+tabulated small/large ice ventilation integrals (Fortran f1pr24-f1pr27):
+- **Complete melting** (small particles, D ≤ D_crit): Meltwater sheds to rain
+- **Partial melting** (large particles, D > D_crit): Meltwater stays as liquid coating (qʷⁱ)
 
-The partitioning is based on a maximum liquid fraction capacity. Once the
-particle reaches this capacity, additional meltwater sheds to rain.
+When tables are not available, falls back to a bulk liquid-fraction heuristic.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -160,35 +160,59 @@ particle reaches this capacity, additional meltwater sheds to rain.
     # Get total melting rate (H10: pass qʷⁱ for Fl-blended ventilation)
     total_melt = ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
 
-    # Maximum liquid fraction capacity (Milbrandt et al. 2025):
-    # default 0.3 (30% liquid by mass) from ProcessRateParameters.
-    max_liquid_fraction = prp.maximum_liquid_fraction
+    # H9: PSD-resolved melting partitioning using tabulated small/large ice
+    # ventilation integrals (Fortran f1pr24-f1pr27).
+    qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = clamp_positive(nⁱ)
+    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(1e-20))
+    Fl = clamp_positive(qʷⁱ) / qⁱ_total
+    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
+    nu = transport.nu
+    D_v = transport.D_v
 
-    # Total ice mass (ice + liquid coating)
-    qⁱ_total = qⁱ + qʷⁱ
-    qⁱ_total_safe = max(qⁱ_total, FT(1e-20))
+    rain_fraction = psd_melting_rain_fraction(
+        p3.ice.deposition.small_ice_ventilation_constant,
+        p3.ice.deposition.small_ice_ventilation_reynolds,
+        p3.ice.deposition.large_ice_ventilation_constant,
+        p3.ice.deposition.large_ice_ventilation_reynolds,
+        m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
 
-    # Current liquid fraction
-    current_liquid_fraction = qʷⁱ / qⁱ_total_safe
-
-    # Partition melting based on liquid fraction capacity
-    # If below capacity: melting goes to liquid coating
-    # If at/above capacity: melting sheds to rain
-    fraction_to_coating = clamp_positive(max_liquid_fraction - current_liquid_fraction) / max_liquid_fraction
-
-    # Limit to [0, 1]
-    fraction_to_coating = clamp(fraction_to_coating, FT(0), FT(1))
-
-    # H9: Fortran PSD-based partitioning (f1pr24-f1pr27) always sends some
-    # meltwater to rain from small particles that fully melt, regardless of
-    # current liquid fraction. Approximate with a minimum rain floor.
-    min_to_rain = prp.minimum_complete_melting_fraction
-    fraction_to_coating = clamp(fraction_to_coating, 0, FT(1) - min_to_rain)
-
-    partial = total_melt * fraction_to_coating
-    complete = total_melt * (1 - fraction_to_coating)
+    complete = total_melt * rain_fraction
+    partial  = total_melt * (1 - rain_fraction)
 
     return (partial_melting = partial, complete_melting = complete)
+end
+
+# H9: Tabulated path — use PSD-integrated small/large ice ventilation integrals
+# to compute the fraction of melting that goes to rain (small particles, D ≤ D_crit).
+# Fortran: qrmlt uses f1pr24/f1pr25, qiliqcol uses f1pr26/f1pr27.
+@inline function psd_melting_rain_fraction(sc::TabulatedFunction4D, sr::TabulatedFunction4D,
+                                            lc::TabulatedFunction4D, lr::TabulatedFunction4D,
+                                            m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+    FT = typeof(m_mean)
+    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
+    sc_corr = ventilation_sc_correction(nu, D_v, ρ_correction)
+
+    small = sc(log_m, Fᶠ, Fl, ρᶠ) + sc_corr * sr(log_m, Fᶠ, Fl, ρᶠ)
+    large = lc(log_m, Fᶠ, Fl, ρᶠ) + sc_corr * lr(log_m, Fᶠ, Fl, ρᶠ)
+    total = small + large
+
+    return ifelse(total > eps(FT), clamp(small / total, FT(0), FT(1)), FT(0.5))
+end
+
+# H9: Analytical fallback — when tables are not available, use the bulk
+# liquid-fraction heuristic with a minimum rain floor.
+@inline function psd_melting_rain_fraction(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
+                                            ::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
+                                            m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+    FT = typeof(m_mean)
+    max_liquid_fraction = prp.maximum_liquid_fraction
+    fraction_to_coating = clamp_positive(max_liquid_fraction - Fl) / max_liquid_fraction
+    fraction_to_coating = clamp(fraction_to_coating, FT(0), FT(1))
+    min_to_rain = prp.minimum_complete_melting_fraction
+    fraction_to_coating = clamp(fraction_to_coating, FT(0), FT(1) - min_to_rain)
+    return 1 - fraction_to_coating
 end
 
 """
