@@ -31,7 +31,7 @@ using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiq
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: Architectures
 using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid, znode
-using Oceananigans.Fields: Field, set!
+using Oceananigans.Fields: Field, AbstractField, set!
 using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        BoundaryCondition,
                                        DefaultBoundaryCondition,

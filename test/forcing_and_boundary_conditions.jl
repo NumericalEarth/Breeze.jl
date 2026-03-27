@@ -87,6 +87,22 @@ end
         @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
     end
 
+    @testset "BulkDrag with Field coefficient (time-varying via callback) [$FT]" begin
+        C_field = Field{Center, Center, Nothing}(grid)
+        fill!(C_field, Cᴰ)
+        ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=C_field, gustiness=gustiness))
+        ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=C_field, gustiness=gustiness))
+        model = AtmosphereModel(grid; boundary_conditions=(; ρu=ρu_bcs, ρv=ρv_bcs))
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀)
+        time_step!(model, 1e-6)
+        @test true
+        # Simulate a callback update: fill! C_field, then step again
+        fill!(C_field, 2Cᴰ)
+        time_step!(model, 1e-6)
+        @test true
+    end
+
     @testset "BulkSensibleHeatFlux construction and application [$FT]" begin
         bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
         @test bc isa BoundaryCondition

@@ -635,6 +635,7 @@ end
 #####
 
 @inline bulk_coefficient(i, j, grid, C::Number, fields, T₀) = C
+@inline bulk_coefficient(i, j, grid, C::AbstractField, fields, T₀) = @inbounds C[i, j, 1]
 
 @inline function bulk_coefficient(i, j, grid, C::PolynomialCoefficient, fields, T₀)
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
