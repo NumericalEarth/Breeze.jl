@@ -136,9 +136,14 @@ state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density 
     return (; qᶠ = qᶠ_consistent, bᶠ = bᶠ_consistent, Fᶠ, ρᶠ)
 end
 
-@inline lookup_table_1(p3) = p3.ice.lookup_tables.table_1
-@inline lookup_table_2(p3) = p3.ice.lookup_tables.table_2
-@inline lookup_table_3(p3) = p3.ice.lookup_tables.table_3
+@inline lookup_table_1(p3) = _lookup_field(p3.ice.lookup_tables, Val(:table_1))
+@inline lookup_table_2(p3) = _lookup_field(p3.ice.lookup_tables, Val(:table_2))
+@inline lookup_table_3(p3) = _lookup_field(p3.ice.lookup_tables, Val(:table_3))
+
+@inline _lookup_field(tables::P3LookupTables, ::Val{:table_1}) = tables.table_1
+@inline _lookup_field(tables::P3LookupTables, ::Val{:table_2}) = tables.table_2
+@inline _lookup_field(tables::P3LookupTables, ::Val{:table_3}) = tables.table_3
+@inline _lookup_field(::Nothing, ::Val) = nothing
 
 #####
 ##### Thermodynamic latent heat helpers (H1)
