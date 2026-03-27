@@ -92,11 +92,13 @@ negligible for small droplets.
     T₀ = prp.freezing_temperature
     ρ_water = FT(prp.liquid_water_density)
     bimm = prp.immersion_freezing_nucleation_coefficient
-    # C4: use cloud DSD shape parameter μ_c from CloudDropletProperties.
-    # psd_correction = C(μ_c) = Γ(μ_c+7)Γ(μ_c+1)/Γ(μ_c+4)² is pre-computed at
-    # construction time for GPU compatibility (psd_corrections.jl).
-    # Previously used ProcessRateParameters.freezing_cloud_psd_correction (hardcoded μ_c=2.3).
-    psd_correction = FT(p3.cloud.freezing_psd_correction)
+
+    # H2: Compute μ_c dynamically from local Nᶜ (already [1/m³]) via Liu-Daum (2000),
+    # then derive the PSD correction C(μ_c) = Γ(μ+7)Γ(μ+1)/Γ(μ+4)².
+    # This replaces the precomputed construction-time value, allowing the correction
+    # to vary spatially with the local droplet population.
+    μ_c = liu_daum_shape_parameter(Nᶜ)
+    psd_correction = psd_correction_spherical_volume(μ_c)
 
     qᶜˡ_eff = clamp_positive(qᶜˡ)
 
@@ -105,8 +107,8 @@ negligible for small droplets.
 
     # Barklie-Gokhale (1959) stochastic immersion freezing.
     # Per-drop freezing probability: P(D) = bimm × V_drop × exp(aimm × ΔT)
-    # For a gamma PSD, the PSD-integrated rate is boosted by Γ(7+μ)Γ(1+μ)/Γ(4+μ)²
-    # relative to monodisperse: ≈20× for μ=0, ≈3× for μ=10.
+    # For a gamma PSD, the PSD-integrated mass rate is boosted by C(μ_c),
+    # but the number rate has C_N = 1 (no PSD correction).
     ΔT = max(T₀ - T, zero(FT))
 
     # Individual droplet mass and volume (monodisperse assumption)
@@ -115,13 +117,15 @@ negligible for small droplets.
     m_drop = qᶜˡ_eff / nᶜ                     # [kg]
     V_drop = m_drop / ρ_water                   # [m³]
 
-    # Per-drop freezing probability per second
-    prob_per_s = bimm * psd_correction * V_drop * exp(aimm * ΔT)
+    # H1: Per-drop freezing probability per second (NO psd_correction).
+    # The PSD correction applies only to the mass (6th moment) rate,
+    # not the number (3rd moment) rate, matching Fortran P3 v5.5.0.
+    prob_per_s = bimm * V_drop * exp(aimm * ΔT)
 
-    # Mass freezing rate [kg/kg/s]: each drop freezes with its own mass
-    Q_frz = qᶜˡ_eff * prob_per_s
+    # Mass freezing rate [kg/kg/s]: boosted by PSD correction (large drops freeze first)
+    Q_frz = qᶜˡ_eff * psd_correction * prob_per_s
 
-    # Number freezing rate [1/kg/s]
+    # Number freezing rate [1/kg/s]: no PSD correction (C_N = 1)
     N_frz = nᶜ * prob_per_s
 
     Q_frz = ifelse(freezing_active, Q_frz, zero(FT))
@@ -174,13 +178,15 @@ parameterization, following Fortran P3 v5.5.0.
     m_drop = qʳ_eff / nʳ_safe          # [kg]
     V_drop = m_drop / ρ_water            # [m³]
 
-    # Per-drop freezing probability per second: bimm × psd × V_drop × exp(a × ΔT)
-    prob_per_s = bimm * psd_correction * V_drop * exp(aimm * ΔT)
+    # H1: Per-drop freezing probability per second (NO psd_correction).
+    # The PSD correction applies only to the mass (6th moment) rate,
+    # not the number (3rd moment) rate, matching Fortran P3 v5.5.0.
+    prob_per_s = bimm * V_drop * exp(aimm * ΔT)
 
-    # Mass freezing rate: qʳ × prob (each drop freezes with its own mass)
-    Q_frz = qʳ_eff * prob_per_s
+    # Mass freezing rate: boosted by PSD correction (large drops freeze first)
+    Q_frz = qʳ_eff * psd_correction * prob_per_s
 
-    # Number freezing rate: nʳ × prob
+    # Number freezing rate: no PSD correction (C_N = 1)
     N_frz = nʳ_eff * prob_per_s
 
     Q_frz = ifelse(freezing_active, Q_frz, zero(FT))

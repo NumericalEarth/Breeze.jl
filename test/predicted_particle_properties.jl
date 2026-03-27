@@ -49,6 +49,8 @@ using Breeze.Microphysics.PredictedParticleProperties:
     tabulated_function_1d,
     homogeneous_freezing_cloud_rate,
     homogeneous_freezing_rain_rate,
+    immersion_freezing_cloud_rate,
+    immersion_freezing_rain_rate,
     air_transport_properties,
     psd_correction_spherical_volume,
     liu_daum_shape_parameter
@@ -2581,6 +2583,36 @@ using Oceananigans.Fields: interior
         Q32r, N32r = homogeneous_freezing_rain_rate(p3, Float32(1e-3), Float32(1e4), Float32(220.0))
         @test Q32r isa Float32
         @test N32r isa Float32
+    end
+
+    @testset "Immersion freezing PSD weighting (H1)" begin
+        p3 = PredictedParticlePropertiesMicrophysics(Float64)
+
+        # Cloud immersion freezing: PSD correction on mass only.
+        # Large drops freeze preferentially, so mean frozen mass > mean drop mass.
+        T = 260.0
+        ρ = 1.0
+        Nc = 100e6  # [1/m³]
+        qcl = 1e-3  # [kg/kg]
+        Q_frz, N_frz = immersion_freezing_cloud_rate(p3, qcl, Nc, T, ρ)
+        m_mean = qcl / (Nc / ρ)  # mean drop mass [kg]
+        @test Q_frz / max(N_frz, 1e-30) > m_mean
+        @test Q_frz > 0
+        @test N_frz > 0
+
+        # Rain immersion freezing: same split (PSD correction on mass only).
+        qr = 1e-3
+        nr = 1e4   # [1/kg]
+        Q_frz_r, N_frz_r = immersion_freezing_rain_rate(p3, qr, nr, T)
+        m_mean_r = qr / nr
+        @test Q_frz_r / max(N_frz_r, 1e-30) > m_mean_r
+        @test Q_frz_r > 0
+        @test N_frz_r > 0
+
+        # Above threshold temperature: zero rates
+        Q_warm, N_warm = immersion_freezing_cloud_rate(p3, qcl, Nc, 280.0, ρ)
+        @test Q_warm == 0
+        @test N_warm == 0
     end
 
     #####
