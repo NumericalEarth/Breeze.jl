@@ -207,7 +207,7 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
     nⁱ  = μ.ρnⁱ / ρ
     zⁱ  = μ.ρzⁱ / ρ
     qʷⁱ = μ.ρqʷⁱ / ρ
-    rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ)
+    rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ, qʷⁱ)
     qᶠ  = rime_state.qᶠ
     bᶠ  = rime_state.bᶠ
     return P3MicrophysicalState(qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ)
@@ -230,7 +230,7 @@ After the moisture refactor, vapor is the prognostic moisture variable.
 The diagnostic `qᵛ` field is updated from the thermodynamic state.
 """
 @inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
-    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ)
+    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
     qᶠ = rime_state.qᶠ
     bᶠ = rime_state.bᶠ
     Fᶠ = rime_state.Fᶠ
@@ -345,7 +345,7 @@ end
     # Compute all process rates from microphysical state ℳ and thermodynamic state 𝒰
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
 
-    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ)
+    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
     Fᶠ = rime_state.Fᶠ
     ρᶠ = rime_state.ρᶠ
 

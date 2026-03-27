@@ -1370,13 +1370,13 @@ using Oceananigans.Fields: interior
         p3_closure = ThreeMomentClosure()
 
         μ_rimed = solve_shape_parameter(1e-4, 1e6, 1e-11, 0.2, 500.0; closure=p3_closure)
-        @test μ_rimed ≈ 11.340146819205977
+        @test μ_rimed ≈ 6.373017711118983
 
         μ_large = solve_shape_parameter(1e-3, 1e5, 1e-8, 0.5, 700.0; closure=p3_closure)
         @test μ_large ≈ 1.0341241878429641
 
         μ_broad = solve_shape_parameter(1e-4, 1e6, 1e-9, 0.2, 500.0; closure=p3_closure)
-        @test μ_broad == 0.0
+        @test μ_broad ≈ 0.16224550152975636
     end
 
     @testset "Exact three-moment closure solves the full residual" begin
@@ -1386,7 +1386,7 @@ using Oceananigans.Fields: interior
         μ_p3 = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=p3_closure)
         μ_exact = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=exact_closure)
 
-        @test μ_p3 == 20.0
+        @test μ_p3 ≈ 8.328332094974208
         @test μ_exact == 0.0
         @test μ_p3 != μ_exact
     end
@@ -1824,8 +1824,11 @@ using Oceananigans.Fields: interior
 
         T₀ = p3.process_rates.freezing_temperature
         Rᵥ = Breeze.Thermodynamics.vapor_gas_constant(ThermodynamicConstants(FT))
+        Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(ThermodynamicConstants(FT))
+        ε = Rᵈ / Rᵥ
         e_s0 = PPP.saturation_vapor_pressure_at_freezing(nothing, T₀)
-        qv = e_s0 / (Rᵥ * T₀ * ρ)
+        # M10: set qv = q_sat0 (mixing ratio convention) so latent term vanishes
+        qv = ε * e_s0 / max(P - e_s0, FT(1))
 
         m_mean = qi / ni
         ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
@@ -1857,8 +1860,11 @@ using Oceananigans.Fields: interior
 
         T₀ = p3.process_rates.freezing_temperature
         Rᵥ = Breeze.Thermodynamics.vapor_gas_constant(ThermodynamicConstants(FT))
+        Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(ThermodynamicConstants(FT))
+        ε = Rᵈ / Rᵥ
         e_s0 = PPP.saturation_vapor_pressure_at_freezing(nothing, T₀)
-        qv = e_s0 / (Rᵥ * T₀ * ρ)
+        # M10: set qv = q_sat0 (mixing ratio convention) so latent term vanishes
+        qv = ε * e_s0 / max(P - e_s0, FT(1))
 
         m_mean = qi / ni
         ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
@@ -2053,29 +2059,36 @@ using Oceananigans.Fields: interior
             return (; qᶠ, bᶠ, ρᶠ)
         end
 
-        no_volume = consistent_rime_state(p3, FT(1e-4), FT(1e-5), FT(1e-16))
+        no_volume = consistent_rime_state(p3, FT(1e-4), FT(1e-5), FT(1e-16), FT(0))
         @test no_volume.qᶠ == 0
         @test no_volume.bᶠ == 0
         @test no_volume.ρᶠ == 0
         @test no_volume.Fᶠ == 0
 
-        tiny_rime = consistent_rime_state(p3, FT(1e-4), FT(5e-15), FT(1e-15))
+        tiny_rime = consistent_rime_state(p3, FT(1e-4), FT(5e-15), FT(1e-15), FT(0))
         @test tiny_rime.qᶠ == 0
         @test tiny_rime.bᶠ == 0
 
-        low_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-6))
+        low_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-6), FT(0))
         @test low_density.ρᶠ == prp.minimum_rime_density
         @test low_density.bᶠ ≈ low_density.qᶠ / prp.minimum_rime_density
 
-        high_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-8))
+        high_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-8), FT(0))
         @test high_density.ρᶠ == prp.maximum_rime_density
         @test high_density.bᶠ ≈ high_density.qᶠ / prp.maximum_rime_density
 
-        capped = consistent_rime_state(p3, FT(1e-5), FT(2e-5), FT(5e-8))
+        capped = consistent_rime_state(p3, FT(1e-5), FT(2e-5), FT(5e-8), FT(0))
         @test capped.qᶠ == FT(1e-5)
         @test capped.ρᶠ ≈ FT(400)
         @test capped.bᶠ ≈ capped.qᶠ / capped.ρᶠ
         @test capped.Fᶠ == 1
+
+        # M5: liquid fraction reduces available dry ice for rime bounding
+        liquid_rime = consistent_rime_state(p3, FT(1e-4), FT(8e-5), FT(2e-7), FT(5e-5))
+        # qʷⁱ = 5e-5, so dry ice = 1e-4 - 5e-5 = 5e-5
+        # qᶠ = 8e-5 > dry ice = 5e-5, so should be capped
+        @test liquid_rime.qᶠ ≈ FT(5e-5)
+        @test liquid_rime.Fᶠ ≈ FT(1)  # fully rimed within dry ice
 
         ρ = FT(1.0)
         μ = (
@@ -2100,7 +2113,7 @@ using Oceananigans.Fields: interior
             (FT(1e-4), FT(2e-5), FT(2e-8)),
             (FT(1e-5), FT(2e-5), FT(5e-8)),
         )
-            got = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
+            got = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, FT(0))
             ref = fortran_calc_bulk_rho_rime(qⁱ, qᶠ, bᶠ)
             @test got.qᶠ == ref.qᶠ
             @test got.bᶠ ≈ ref.bᶠ
@@ -2355,20 +2368,18 @@ using Oceananigans.Fields: interior
     end
 
     @testset "RainEvaporationVentilationEvaluator - large λ_r limit" begin
-        # At λ_r → ∞ (tiny drops), f_v → f1r = 0.78, so:
-        # I_evap → 0.78 / λ_r²
-        # At λ_r = 1e5 (D_mean = 10μm), the Reynolds correction adds ~12%:
-        # f_v ≈ 0.78 + 0.32 × sqrt(842 × (10μm)^1.8 / 1.5e-5) ≈ 0.875
-        # So I_evap should be between 0.78/λ² and 1.2×0.78/λ²
+        # M3: Evaluator now returns Reynolds integral only: I_Re = ∫ D √Re exp(-λD) dD
+        # At λ_r → ∞ (tiny drops), √Re → 0, so I_Re → 0 (but stays positive).
+        # The full evaporation integral is assembled at runtime:
+        #   I_evap = f1r/λ² + f2r × Sc^(1/3) × I_Re
         evaluator = RainEvaporationVentilationEvaluator()
 
         λ_r = 1e5   # Large (very tiny drops)
-        I_evap = evaluator(log10(λ_r))
-        I_lower = 0.78 / λ_r^2   # lower bound (f_v = f1r only)
-        I_upper = 1.5 / λ_r^2    # upper bound (generous for finite Reynolds)
+        I_Re = evaluator(log10(λ_r))
 
-        @test I_evap >= I_lower
-        @test I_evap < I_upper
+        # Reynolds integral should be positive but small relative to 1/λ²
+        @test I_Re > 0
+        @test I_Re < 1.0 / λ_r^2   # upper bound: √Re contribution is small for tiny drops
     end
 
     @testset "RainEvaporationVentilationEvaluator - positive" begin

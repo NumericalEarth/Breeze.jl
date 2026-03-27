@@ -687,10 +687,11 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     D_v = transport.D_v
     nu  = transport.nu
 
-    # Saturation mixing ratio at T₀ over liquid (Fortran: qsat0)
+    # M10: use mixing ratio convention (Fortran: rho*Ls*Dv*(qsat0-Qv))
+    Rᵈ = FT(dry_air_gas_constant(thermodynamic_constants))
+    ε = Rᵈ / Rᵛ
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
-    ρ_vs = e_s0 / (Rᵛ * T₀)
-    ρ_v = qᵛ * ρ
+    q_sat0 = ε * e_s0 / max(P - e_s0, FT(1))
 
     # Mean ice particle mass
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
@@ -703,7 +704,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 
     # Heat balance: sensible + latent
     Q_sensible = K_a * (T₀ - T)
-    Q_latent = L_s * D_v * (ρ_vs - ρ_v)
+    Q_latent = L_s * D_v * ρ * (q_sat0 - qᵛ)
 
     # Fortran applies 2π/Lf only to the latent term; the sensible-conduction
     # term uses the capm convention directly.
@@ -721,7 +722,7 @@ Below freezing, liquid coating on ice particles refreezes. The rate is
 determined by the heat flux at the particle surface:
 
 ```math
-\\frac{dm}{dt} = C f_v \\left[K_a(T_0-T) + \\frac{2π}{L_f} L_s D_v (\\rho_{vs} - \\rho_v)\\right]
+\\frac{dm}{dt} = C f_v \\left[K_a(T_0-T) + \\frac{2π}{L_f} ρ L_s D_v (q_{sat0} - q_v)\\right]
 ```
 
 This mirrors the melting formula with reversed temperature gradient.
@@ -765,12 +766,11 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
     D_v = transport.D_v
     nu  = transport.nu
 
-    # Saturation vapor density at T₀ (liquid surface at melting point)
+    # M10: use mixing ratio convention (Fortran: rho*Ls*Dv*(qsat0-Qv))
+    Rᵈ = FT(dry_air_gas_constant(thermodynamic_constants))
+    ε = Rᵈ / Rᵛ
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
-    ρ_vs = e_s0 / (Rᵛ * T₀)
-
-    # Ambient vapor density
-    ρ_v = qᵛ * ρ
+    q_sat0 = ε * e_s0 / max(P - e_s0, FT(1))
 
     # Mean ice particle mass
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
@@ -785,10 +785,10 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
     # Conductive: K_a × (T₀ - T) removes heat from liquid → promotes freezing
     Q_sensible = K_a * ΔT
 
-    # Vapor: L_s × D_v × (ρ_vs - ρ_v)
-    # Subsaturated (ρ_vs > ρ_v): evaporation cools particle → promotes freezing
-    # Supersaturated (ρ_vs < ρ_v): condensation warms particle → opposes freezing
-    Q_latent = L_s * D_v * (ρ_vs - ρ_v)
+    # Vapor: L_s × D_v × ρ × (q_sat0 - qᵛ)
+    # Subsaturated (q_sat0 > qᵛ): evaporation cools particle → promotes freezing
+    # Supersaturated (q_sat0 < qᵛ): condensation warms particle → opposes freezing
+    Q_latent = L_s * D_v * ρ * (q_sat0 - qᵛ)
 
     # Only refreeze when net heat balance favors it. As in the Fortran wet-growth
     # and refreezing paths, 2π/Lf multiplies only the latent-diffusion term.

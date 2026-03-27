@@ -13,16 +13,18 @@
 #####  2. Number-weighted terminal velocity:
 #####       V_num = ∫ V(D) exp(-λ_r D) dD / ∫ exp(-λ_r D) dD              [m/s]
 #####
-#####  3. Evaporation ventilation integral:
-#####       I_evap = ∫ D f_v(D) exp(-λ_r D) dD                             [m²]
-#####       where f_v(D) = f1r + f2r * sqrt(Re),  Re = ar * D^(1+br) / ν  [= V(D)*D/ν]
+#####  3. Evaporation Reynolds integral (M3):
+#####       I_Re = ∫ D √Re(D) exp(-λ_r D) dD                              [m²]
+#####       where Re(D) = ar * D^(1+br) / ν  [= V(D)*D/ν]
+#####       Full evaporation integral assembled at runtime:
+#####       I_evap = f1r/λ² + f2r × Sc^(1/3) × I_Re
 #####
 ##### The integration uses the same domain transformation as ice quadrature:
 #####   D = (scale/λ) * (1+x) / (1-x+ε),  x ∈ [-1, 1]
 ##### with a scale of 10 (10 exponential decay lengths covers >99.99% of the integral).
 #####
 ##### References:
-##### - P3 Fortran v5.5.0: ar=842, br=0.8, f1r=0.78, f2r=0.308 (Sc^(1/3) baked in), ν=1.5e-5 m²/s
+##### - P3 Fortran v5.5.0: ar=842, br=0.8, f1r=0.78, f2r=0.32, ν=1.5e-5 m²/s
 #####
 
 ##### NOTE (M13): Both the tabulated and analytical rain paths now use the same
@@ -37,7 +39,7 @@ export RainMassWeightedVelocityEvaluator,
 
 # Rain ventilation constants (Fortran P3 v5.5.0)
 const RAIN_F1R = 0.78       # constant term in ventilation factor [-]
-const RAIN_F2R = 0.308      # Reynolds-dependent coefficient [-] (Fortran P3: Sc^(1/3) baked in)
+const RAIN_F2R = 0.32       # Reynolds-dependent ventilation coefficient [-] (Fortran P3 v5.5.0)
 const RAIN_NU  = 1.5e-5     # kinematic viscosity [m²/s]
 
 #####
@@ -200,18 +202,27 @@ end
 """
     RainEvaporationVentilationEvaluator{N, W}
 
-Callable evaluator for the rain evaporation ventilation integral:
+Callable evaluator for the Reynolds part of the rain evaporation ventilation integral:
 
 ```math
-I_{\\mathrm{evap}}(\\lambda_r) =
-    \\int_0^\\infty D\\, f_v(D)\\, e^{-\\lambda_r D}\\, dD
+I_{\\mathrm{Re}}(\\lambda_r) =
+    \\int_0^\\infty D\\, \\sqrt{\\mathrm{Re}(D)}\\, e^{-\\lambda_r D}\\, dD
 ```
 
-where the ventilation factor is `f_v(D) = f1r + f2r × √Re(D)` with
-`Re(D) = V(D) × D / ν` (Reynolds number based on drop diameter),
-`f1r = 0.78`, `f2r = 0.308` (Sc^(1/3) baked in), `ν = 1.5e-5 m²/s`, and
-`V(D)` given by the same piecewise Gunn-Kinzer/Beard law used in the Fortran
-rain lookup-table generation.
+where `Re(D) = V(D) × D / ν` (Reynolds number based on drop diameter),
+`ν = 1.5e-5 m²/s`, and `V(D)` is given by the same piecewise Gunn-Kinzer/Beard
+law used in the Fortran rain lookup-table generation.
+
+The full evaporation ventilation integral is assembled at runtime (M3):
+
+```math
+I_{\\mathrm{evap}} = \\frac{f_{1r}}{\\lambda_r^2}
+    + f_{2r}\\, \\mathrm{Sc}^{1/3}\\, I_{\\mathrm{Re}}
+```
+
+where `f1r = 0.78`, `f2r = 0.32`, and `Sc = ν / D_v` is the Schmidt number
+computed from T,P-dependent transport properties. The constant term
+`f1r / λ_r²` is the analytical result of `f1r × ∫ D exp(-λD) dD`.
 
 This integral appears in the PSD-integrated rain evaporation rate (Mason 1971,
 capacitance `C = D/2` for a sphere, so `4πC = 2πD`):
@@ -221,9 +232,6 @@ capacitance `C = D/2` for a sphere, so `4πC = 2πD`):
 ```
 
 where A+B is the thermodynamic resistance factor.
-
-**Analytical limit**: At λ_r → ∞ (tiny drops), `f_v ≈ f1r = 0.78`, giving
-`I_evap ≈ 0.78 * 1/λ_r²` (from `∫₀^∞ D exp(-λD) dD = 1/λ²`).
 
 # Fields
 $(TYPEDFIELDS)
@@ -249,17 +257,16 @@ end
 """
     (e::RainEvaporationVentilationEvaluator)(log10_lambda_r)
 
-Evaluate `I_evap(λ_r)` = ∫ D f_v(D) exp(-λ_r D) dD at the given `log10(λ_r)`.
+Evaluate `I_Re(λ_r)` = ∫ D √Re(D) exp(-λ_r D) dD at the given `log10(λ_r)`.
 
-Returns the integral value in [m²].
+Returns the Reynolds integral in [m²]. The constant (f1r) and Schmidt number
+(Sc^(1/3)) contributions are applied at runtime (M3).
 """
 @inline function (e::RainEvaporationVentilationEvaluator)(log10_lambda_r)
     FT = eltype(e.nodes)
     λ_r  = FT(10)^log10_lambda_r
     ar   = FT(842)
     br   = FT(0.8)
-    f1r  = FT(RAIN_F1R)
-    f2r  = FT(RAIN_F2R)
     ν    = FT(RAIN_NU)
 
     result = zero(FT)
@@ -271,12 +278,12 @@ Returns the integral value in [m²].
         D = transform_to_diameter(x, λ_r)
         J = jacobian_diameter_transform(x, λ_r)
 
-        # Reynolds number: Re = V(D) × D / ν = ar × D^br × D / ν = ar × D^(1+br) / ν
+        # √(Re) = √(V(D) × D / ν)
         Re_sqrt = sqrt(max(ar * D^(br + 1) / ν, zero(FT)))
-        f_v = f1r + f2r * Re_sqrt
         psd = exp(-λ_r * D)
 
-        result += w * D * f_v * psd * J
+        # M3: Reynolds integral only (f1r and Sc^(1/3) applied at runtime)
+        result += w * D * Re_sqrt * psd * J
     end
 
     return ifelse(isfinite(result), result, zero(FT))

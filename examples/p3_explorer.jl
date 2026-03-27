@@ -125,7 +125,7 @@ function p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ)
                   reflectivity = zero(FT))
     end
 
-    rime_state = PredictedParticleProperties.consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
+    rime_state = PredictedParticleProperties.consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, FT(0))
     Fᶠ = rime_state.Fᶠ
     ρᶠ = rime_state.ρᶠ
     Fˡ = qʷⁱ > 0 ? qʷⁱ / (qⁱ + qʷⁱ) : zero(FT)

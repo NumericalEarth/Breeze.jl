@@ -11,7 +11,7 @@ Morrison & Milbrandt (2015a) Eq. 44.
 The melting rate is determined by the heat flux to the particle:
 
 ```math
-\\frac{dm}{dt} = -\\frac{2π \\, \\text{capm}}{L_f} × [K_a(T-T_0) + L_v D_v(ρ_v - ρ_{vs})] × f_v
+\\frac{dm}{dt} = -\\frac{2π \\, \\text{capm}}{L_f} × [K_a(T-T_0) + ρ L_v D_v(q_v - q_{sat0})] × f_v
 ```
 
 where capm = cap × D is the P3 Fortran capacitance convention (2× physical C).
@@ -23,7 +23,7 @@ where:
 - T_0 is the freezing temperature
 - L_v is latent heat of vaporization
 - D_v is diffusivity of water vapor
-- ρ_v, ρ_vs are vapor density and saturation vapor density
+- q_v, q_sat0 are vapor mixing ratio and saturation mixing ratio at T₀
 - f_v is the ventilation factor
 
 # Arguments
@@ -68,15 +68,11 @@ where:
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
     nu  = transport.nu        # Kinematic viscosity [m²/s]
 
-    # Vapor density terms
-    # At T₀, ρ_vs corresponds to saturation at melting point.
-    # Derived from thermodynamic constants when available (M6);
-    # falls back to Fortran P3 v5.5.0 hardcoded 611 Pa otherwise.
+    # M10: use mixing ratio convention (Fortran: rho*Lv*Dv*(Qv-qsat0))
+    Rᵈ = FT(dry_air_gas_constant(thermodynamic_constants))
+    ε = Rᵈ / Rᵛ
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
-    ρ_vs = e_s0 / (Rᵛ * T₀)  # Saturation vapor density at T₀
-
-    # Ambient vapor density (from mixing ratio and actual air density)
-    ρ_v = qᵛ * ρ
+    q_sat0 = ε * e_s0 / max(P - e_s0, FT(1))
 
     # Mean particle properties
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
@@ -97,9 +93,9 @@ where:
     # Sensible heat: K_a × (T - T₀)
     Q_sensible = K_a * ΔT
 
-    # Latent heat: L_v × D_v × (ρ_v - ρ_vs)
+    # Latent heat: L_v × D_v × ρ × (qᵛ - q_sat0)
     # When subsaturated, this is negative and opposes melting
-    Q_latent = L_v * D_v * (ρ_v - ρ_vs)
+    Q_latent = L_v * D_v * ρ * (qᵛ - q_sat0)
 
     # Total heat flux
     Q_total = Q_sensible + Q_latent

@@ -218,7 +218,7 @@ function P3Closure(FT = Oceananigans.defaults.FloatType;
 end
 
 """
-    shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, mass_params)
+    shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, liquid_fraction, mass_params)
 
 Compute shape parameter μ.
 """
@@ -228,14 +228,16 @@ Compute shape parameter μ.
     return clamp(μ, 0, closure.μmax)
 end
 
-@inline function shape_parameter(closure::P3Closure, logλ, L_ice, rime_fraction, rime_density, mass::IceMassPowerLaw)
+@inline function shape_parameter(closure::P3Closure, logλ, L_ice, rime_fraction, rime_density, liquid_fraction, mass::IceMassPowerLaw)
     FT = typeof(closure.a)
     λ = exp(logλ)
 
     # 1. Compute graupel density (rho_g)
     ρ_dep = deposited_ice_density(mass, rime_fraction, rime_density)
     ρ_g_rimed = graupel_density(rime_fraction, rime_density, ρ_dep)
-    ρ_g = ifelse(iszero(rime_fraction), mass.ice_density, ρ_g_rimed)
+    ρ_g_dry = ifelse(iszero(rime_fraction), mass.ice_density, ρ_g_rimed)
+    # M12: blend liquid water density into bulk density (Fortran diagnostic_mui_Fl)
+    ρ_g = (1 - liquid_fraction) * ρ_g_dry + liquid_fraction * FT(1000)
 
     # 2. Compute D_mvd (Mean Volume Diameter)
     # D_mvd = (L / ((pi/6) * rho_g))^(1/3)
@@ -658,15 +660,15 @@ end
 #####
 
 """
-    log_mass_number_ratio(mass, closure, rime_fraction, rime_density, logλ, L_ice)
+    log_mass_number_ratio(mass, closure, rime_fraction, rime_density, liquid_fraction, logλ, L_ice)
 
 Compute log(L_ice / N_ice) as a function of logλ for two-moment closure.
 Includes L_ice argument to support the P3Closure diagnostic.
 """
 function log_mass_number_ratio(mass::IceMassPowerLaw,
                                closure,
-                               rime_fraction, rime_density, logλ, L_ice)
-    μ = shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, mass)
+                               rime_fraction, rime_density, liquid_fraction, logλ, L_ice)
+    μ = shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, liquid_fraction, mass)
     log_L_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ)
     log_N_over_N₀ = log_gamma_moment(μ, logλ)
     return log_L_over_N₀ - log_N_over_N₀
@@ -744,6 +746,41 @@ function mass_residual_three_moment(mass::IceMassPowerLaw,
 end
 
 """
+    g_of_mu(μ)
+
+Compute G(μ) = Γ(μ+7)Γ(μ+1) / Γ(μ+4)² for the three-moment μ-Z constraint.
+Simplifies to (μ+6)(μ+5)(μ+4) / ((μ+3)(μ+2)(μ+1)).
+Matches Fortran `G_of_mu`.
+"""
+@inline function g_of_mu(μ)
+    return (μ + 6) * (μ + 5) * (μ + 4) / ((μ + 3) * (μ + 2) * (μ + 1))
+end
+
+"""
+    enforce_z_bounds(Z_ice, L_ice, N_ice, ρ_bulk, μmin, μmax)
+
+Bound Z_ice to a physically consistent range based on the μ bounds.
+Matches Fortran `apply_mui_bounds_to_zi` and basic zsmall/zlarge clamps.
+"""
+@inline function enforce_z_bounds(Z_ice, L_ice, N_ice, ρ_bulk, μmin, μmax)
+    FT = typeof(Z_ice)
+    # Basic magnitude bounds (Fortran zsmall/zlarge)
+    Z_clamped = clamp(Z_ice, FT(1e-35), FT(1))
+
+    # Moment-based bounds: G(μ_max) × mom3²/N ≤ Z ≤ G(μ_min) × mom3²/N
+    mom3 = FT(6) * L_ice / (FT(π) * max(ρ_bulk, eps(FT)))
+    tmp = mom3^2 / max(N_ice, eps(FT))
+
+    G_min = g_of_mu(μmin)  # upper Z bound (wide distribution)
+    G_max = g_of_mu(μmax)  # lower Z bound (narrow distribution)
+
+    Z_clamped = min(Z_clamped, G_min * tmp)
+    Z_clamped = max(Z_clamped, G_max * tmp)
+
+    return Z_clamped
+end
+
+"""
     solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
                           mass = IceMassPowerLaw(),
                           closure = ThreeMomentClosure(),
@@ -798,6 +835,17 @@ function solve_shape_parameter_with_closure(closure::ThreeMomentClosure,
     μ_old = clamp(FT(0.5), closure.μmin, closure.μmax)
     μ = μ_old
 
+    # M15: enforce Z bounds before solve (Fortran apply_mui_bounds_to_zi)
+    logλ_init = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ_old; mass)
+    N₀_init = intercept_parameter(N_ice, μ_old, logλ_init)
+    state_init = IceSizeDistributionState(FT;
+        intercept = N₀_init, shape = μ_old, slope = exp(logλ_init),
+        rime_fraction = rime_fraction, rime_density = rime_density,
+        mass_coefficient = mass.coefficient, mass_exponent = mass.exponent,
+        ice_density = mass.ice_density)
+    ρ_bulk_init = max(evaluate_quadrature(MeanDensity(), state_init, nodes, weights), eps(FT))
+    Z_ice = enforce_z_bounds(Z_ice, L_ice, N_ice, ρ_bulk_init, closure.μmin, closure.μmax)
+
     for _ in 1:max_iterations
         logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ_old; mass)
         λ = exp(logλ)
@@ -836,6 +884,11 @@ function solve_shape_parameter_with_closure(closure::ThreeMomentClosureExact,
     tolerance = FT(isnothing(tolerance) ? 1e-10 : tolerance)
 
     (iszero(N_ice) || iszero(L_ice) || iszero(Z_ice)) && return closure.μmin
+
+    # M15: enforce Z bounds before solve
+    # Use ice density as a conservative estimate for moment-based Z bounding
+    ρ_estimate = FT(mass.ice_density)
+    Z_ice = enforce_z_bounds(Z_ice, L_ice, N_ice, ρ_estimate, closure.μmin, closure.μmax)
 
     log_Z_over_N = log(Z_ice) - log(N_ice)
     log_L_over_N = log(L_ice) - log(N_ice)
@@ -876,6 +929,7 @@ end
 
 """
     solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
+                 liquid_fraction = zero(typeof(L_ice)),
                  mass = IceMassPowerLaw(),
                  closure = P3Closure(),
                  logλ_bounds = (log(10), log(1e7)),
@@ -895,6 +949,7 @@ matches the observed ratio. This is the two-moment solver using the
 - `rime_density`: Density of rime [kg/m³]
 
 # Keyword Arguments
+- `liquid_fraction`: Liquid water fraction [-] (default 0)
 - `mass`: Power law parameters (default: `IceMassPowerLaw()`)
 - `closure`: Two-moment closure (default: `P3Closure()`)
 
@@ -902,6 +957,7 @@ matches the observed ratio. This is the two-moment solver using the
 - `logλ`: Log of slope parameter
 """
 function solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
+                      liquid_fraction = zero(typeof(L_ice)),
                       mass = IceMassPowerLaw(),
                       closure = P3Closure(),
                       logλ_bounds = (log(10), log(1e7)),
@@ -916,7 +972,7 @@ function solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
 
     target = log(L_ice) - log(N_ice)
     # Pass L_ice to log_mass_number_ratio for P3 closure diagnostic
-    f(logλ) = log_mass_number_ratio(mass, closure, rime_fraction, rime_density, logλ, L_ice) - target
+    f(logλ) = log_mass_number_ratio(mass, closure, rime_fraction, rime_density, liquid_fraction, logλ, L_ice) - target
 
     # Secant method
     x₀, x₁ = FT.(logλ_bounds)
@@ -1184,14 +1240,15 @@ params = distribution_parameters(L_ice, N_ice, 0.0, 400.0)
 See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Section 2b.
 """
 function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
+                                  liquid_fraction = zero(typeof(L_ice)),
                                   mass = IceMassPowerLaw(),
                                   closure = P3Closure(),
                                   diameter_bounds = nothing)
     FT = typeof(L_ice)
 
-    logλ = solve_lambda(L_ice, N_ice, rime_fraction, rime_density; mass, closure)
+    logλ = solve_lambda(L_ice, N_ice, rime_fraction, rime_density; liquid_fraction, mass, closure)
     λ = exp(logλ)
-    μ = shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, mass)
+    μ = shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, liquid_fraction, mass)
 
     # Enforce diameter bounds if provided
     if !isnothing(diameter_bounds)

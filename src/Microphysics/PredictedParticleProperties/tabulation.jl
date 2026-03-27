@@ -166,7 +166,7 @@ the raw integral ∫ f(D) N'(D) dD gives per-particle values.
     # (create_p3_lookupTable_3.f90 lines 313-315): D_max = 5mm + 20mm×Fr².
     bounds = DiameterBounds(FT, rime_fraction)
     params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
-                                      mass, closure, diameter_bounds=bounds)
+                                      liquid_fraction, mass, closure, diameter_bounds=bounds)
 
     reference_air_density = FT(60000 / (dry_air_gas_constant(ThermodynamicConstants()) * 253.15))
 

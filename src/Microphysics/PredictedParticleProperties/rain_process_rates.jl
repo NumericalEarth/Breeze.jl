@@ -247,7 +247,14 @@ end
     N_0 = nʳ * λ_r
 
     log_λ = log10(λ_r)
-    I_evap = table(log_λ)
+    I_Re = table(log_λ)
+
+    # M3: Combine constant + Reynolds terms with T,P-dependent Sc^(1/3)
+    # Constant term: f1r × ∫ D × exp(-λD) dD = f1r / λ² (analytical for μ_r=0)
+    I_const = FT(RAIN_F1R) / (λ_r * λ_r)
+    # Schmidt number correction applied at runtime (not baked into table)
+    Sc_cbrt = cbrt(nu / max(D_v, FT(1e-10)))
+    I_evap = I_const + FT(RAIN_F2R) * Sc_cbrt * I_Re
 
     # Evaporation rate (Mason 1971, PSD-integrated):
     #   dm/dt per drop = 4π × C × f_v × (S-1)/Φ,  C = D/2 (spherical capacitance)
@@ -276,10 +283,10 @@ end
     ρ_correction = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
     V = rain_fall_speed(D_mean, ρ_correction)
 
-    # Ventilation factor (Fortran P3 convention: Sc^(1/3) baked into RAIN_F2R=0.308)
-    # Use reference viscosity RAIN_NU (not runtime nu) to match the table convention
+    # M3: Ventilation factor with T,P-dependent Sc^(1/3) applied at runtime
     Re_term = sqrt(V * D_mean / FT(RAIN_NU))
-    f_v = FT(0.78) + FT(RAIN_F2R) * Re_term
+    Sc_cbrt = cbrt(nu / max(D_v, FT(1e-10)))
+    f_v = FT(RAIN_F1R) + FT(RAIN_F2R) * Sc_cbrt * Re_term
 
     # Evaporation rate per drop (negative for evaporation)
     dm_dt = FT(4π) * (D_mean / 2) * f_v * (S - 1) / thermodynamic_factor

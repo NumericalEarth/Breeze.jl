@@ -95,16 +95,19 @@ end
 end
 
 """
-    consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
+    consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, qʷⁱ)
 
 Apply the Fortran `calc_bulkRhoRime` consistency pass to the prognostic rime
 state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density `ρᶠ`.
 """
-@inline function consistent_rime_state(p3, qⁱ, qᶠ, bᶠ)
+@inline function consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, qʷⁱ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
     qⁱ_available = clamp_positive(qⁱ)
+    qʷⁱ_available = clamp_positive(qʷⁱ)
+    # M5: rime cannot exceed dry ice mass (Fortran: qirim <= qitot - qiliq)
+    qⁱ_dry = clamp_positive(qⁱ_available - qʷⁱ_available)
     qᶠ_raw = clamp_positive(qᶠ)
     bᶠ_raw = clamp_positive(bᶠ)
 
@@ -122,12 +125,13 @@ state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density 
     qᶠ_after_small = ifelse(rime_not_small, qᶠ_after_volume, zero(FT))
     bᶠ_after_small = ifelse(rime_not_small, bᶠ_after_volume, zero(FT))
 
-    exceeds_available_ice = (qᶠ_after_small > qⁱ_available) & (ρᶠ > zero(FT))
-    qᶠ_consistent = ifelse(exceeds_available_ice, qⁱ_available, qᶠ_after_small)
-    bᶠ_consistent = ifelse(exceeds_available_ice,
+    # M5: bound rime mass by dry ice mass, not total ice mass
+    exceeds_dry_ice = (qᶠ_after_small > qⁱ_dry) & (ρᶠ > zero(FT))
+    qᶠ_consistent = ifelse(exceeds_dry_ice, qⁱ_dry, qᶠ_after_small)
+    bᶠ_consistent = ifelse(exceeds_dry_ice,
                            safe_divide(qᶠ_consistent, ρᶠ, zero(FT)),
                            bᶠ_after_small)
-    Fᶠ = safe_divide(qᶠ_consistent, qⁱ_available, zero(FT))
+    Fᶠ = safe_divide(qᶠ_consistent, qⁱ_dry, zero(FT))
 
     return (; qᶠ = qᶠ_consistent, bᶠ = bᶠ_consistent, Fᶠ, ρᶠ)
 end
@@ -655,7 +659,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     nʳ = ifelse(rain_active, qʳ_pos * λ_r^3 / (FT(π) * prp.liquid_water_density), nʳ)
 
     # Rime properties (Fortran calc_bulkRhoRime consistency)
-    rime_state = consistent_rime_state(p3, qⁱ, ℳ.qᶠ, ℳ.bᶠ)
+    rime_state = consistent_rime_state(p3, qⁱ, ℳ.qᶠ, ℳ.bᶠ, qʷⁱ)
     qᶠ = rime_state.qᶠ
     bᶠ = rime_state.bᶠ
     Fᶠ = rime_state.Fᶠ
@@ -808,16 +812,19 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Sink limiting: rescale sink rates so total sinks × dt_safety ≤ available
     # mass for each species. Prevents negative mixing ratios with explicit
-    # time integration (Fortran P3 convention).
+    # time integration.
+    # M16: source-inclusive limiting (Fortran convention):
+    #   available = current_mass + source_rates × dt_safety
+    # This accounts for mass produced within the timestep.
     # =========================================================================
     dt_safety = prp.sink_limiting_timescale
 
     # --- Cloud liquid sinks ---
-    # Cloud evaporation (negative condensation) is already self-limited in
-    # cloud_condensation_rate, so only count the positive-definite sinks.
+    cloud_source_total = max(0, cond)
+    cloud_available = max(0, qᶜˡ) + cloud_source_total * dt_safety
     cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
                        cloud_hom_q + cloud_warm_q + wg_cloud
-    f_cloud = sink_limiting_factor(cloud_sink_total, max(0, qᶜˡ), dt_safety)
+    f_cloud = sink_limiting_factor(cloud_sink_total, cloud_available, dt_safety)
     autoconv      = autoconv * f_cloud
     accr          = accr * f_cloud
     cloud_rim     = cloud_rim * f_cloud
@@ -831,9 +838,10 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     wg_cloud      = wg_cloud * f_cloud
 
     # --- Rain sinks ---
-    # Rain evaporation is already self-limited in rain_evaporation_rate.
+    rain_source_total = autoconv + accr + complete_melt + shed
+    rain_available = max(0, qʳ) + rain_source_total * dt_safety
     rain_sink_total = rain_rim + rain_frz_q + rain_hom_q + rain_warm_q + wg_rain
-    f_rain = sink_limiting_factor(rain_sink_total, max(0, qʳ), dt_safety)
+    f_rain = sink_limiting_factor(rain_sink_total, rain_available, dt_safety)
     rain_rim      = rain_rim * f_rain
     rain_rim_n    = rain_rim_n * f_rain
     rain_frz_q    = rain_frz_q * f_rain
@@ -844,29 +852,31 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     wg_rain       = wg_rain * f_rain
 
     # --- Ice sinks ---
-    # Sublimation (negative deposition) is already self-limited in
-    # ventilation_enhanced_deposition. Only count melting as sinks here.
+    ice_source_total = max(0, dep) + cloud_rim + rain_rim + refrz +
+                       nuc_q + cloud_frz_q + rain_frz_q +
+                       cloud_hom_q + rain_hom_q
+    ice_available = max(0, qⁱ) + ice_source_total * dt_safety
     ice_sink_total = partial_melt + complete_melt
-    f_ice = sink_limiting_factor(ice_sink_total, max(0, qⁱ), dt_safety)
+    f_ice = sink_limiting_factor(ice_sink_total, ice_available, dt_safety)
     partial_melt  = partial_melt * f_ice
     complete_melt = complete_melt * f_ice
     melt_n        = melt_n * f_ice
 
     # --- Vapor sinks ---
-    # Only count positive condensation and positive deposition as vapor sinks.
-    # Nucleation mass is always a vapor sink.
+    vapor_source_total = rain_evap + clamp_positive(-dep) + clamp_positive(-cond)
+    vapor_available = max(0, qᵛ) + vapor_source_total * dt_safety
     vapor_sink_total = max(0, cond) + max(0, dep) + nuc_q
-    f_vapor = sink_limiting_factor(vapor_sink_total, max(0, qᵛ), dt_safety)
+    f_vapor = sink_limiting_factor(vapor_sink_total, vapor_available, dt_safety)
     cond  = ifelse(cond > 0, cond * f_vapor, cond)
     dep   = ifelse(dep > 0, dep * f_vapor, dep)
     nuc_q = nuc_q * f_vapor
     nuc_n = nuc_n * f_vapor
 
-    # --- Liquid on ice (qʷⁱ) sinks (M11) ---
-    # Shedding and refreezing are both sinks of qʷⁱ. Without this limiting,
-    # explicit time integration can drive qʷⁱ negative.
+    # --- Liquid on ice (qʷⁱ) sinks ---
+    qwi_source_total = partial_melt + cloud_warm_q + rain_warm_q + wg_cloud + wg_rain
+    qwi_available = max(0, qʷⁱ) + qwi_source_total * dt_safety
     qwi_sink_total = shed + refrz
-    f_qwi = sink_limiting_factor(qwi_sink_total, max(0, qʷⁱ), dt_safety)
+    f_qwi = sink_limiting_factor(qwi_sink_total, qwi_available, dt_safety)
     shed   = shed * f_qwi
     shed_n = shed_n * f_qwi
     refrz  = refrz * f_qwi
@@ -1101,6 +1111,7 @@ Rime mass gains from:
 
 Rime mass loses from:
 - Melting (proportional to rime fraction) (Phase 1)
+- Sublimation (proportional to rime fraction) (Phase 1)
 """
 @inline function tendency_ρqᶠ(rates::P3ProcessRates, ρ, Fᶠ)
     # Phase 2: gains from riming, refreezing, freezing, and homogeneous freezing
@@ -1108,9 +1119,12 @@ Rime mass loses from:
     gain = rates.cloud_riming + rates.rain_riming + rates.refreezing +
            rates.cloud_freezing_mass + rates.rain_freezing_mass +
            rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass
-    # Phase 1: melts proportionally with ice mass
+    # Phase 1: melts and sublimates proportionally with ice mass
+    # M8: sublimation (negative deposition) also removes rime proportionally
+    sublimation = clamp_positive(-rates.deposition)
     # Splintering mass is subtracted from rime (splinters fragment existing rime)
-    loss = Fᶠ * (rates.partial_melting + rates.complete_melting) + rates.splintering_mass
+    loss = Fᶠ * (rates.partial_melting + rates.complete_melting + sublimation) +
+           rates.splintering_mass
     return ρ * (gain - loss)
 end
 
@@ -1120,6 +1134,7 @@ end
 Compute rime volume tendency from P3 process rates.
 
 Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime.
+Includes sublimation loss (M8): sublimation removes rime volume proportionally.
 Includes melt-densification (Fortran P3 v5.5.0): during melting, low-density
 rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
 """
@@ -1143,9 +1158,11 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
                    (rates.cloud_freezing_mass + rates.rain_freezing_mass) / ρ_rimemax +
                    (rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass) / ρ_rim_hom
 
-    # Phase 1: Volume loss from melting (proportional to rime fraction)
+    # Phase 1: Volume loss from melting and sublimation (proportional to rime fraction)
+    # M8: sublimation (negative deposition) also removes rime volume proportionally
+    sublimation = clamp_positive(-rates.deposition)
     total_melting = rates.partial_melting + rates.complete_melting
-    volume_loss = Fᶠ * total_melting / ρᶠ_safe
+    volume_loss = Fᶠ * (total_melting + sublimation) / ρᶠ_safe
 
     # M3: Melt-densification (Fortran P3 v5.5.0 lines 4309-4313)
     # Low-density rime portions melt first → remaining ice approaches 917 kg/m³.
