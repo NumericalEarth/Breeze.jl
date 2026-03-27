@@ -169,7 +169,7 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
 - `evap_rate_1`: Rate of change of mass mixing ratio [kg/kg/s], negative for evaporation
 """
 @inline function rain_evaporation_2m(
-    (; pdf_r, evap)::SB2006{FT},
+    (; pdf_r, evap)::SB2006,
     aps::AirProperties{FT},
     q::MoistureMassFractions{FT},
     qʳ::FT,
