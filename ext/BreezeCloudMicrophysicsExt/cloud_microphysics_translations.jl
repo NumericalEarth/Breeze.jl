@@ -209,6 +209,73 @@ Rate of change of snow specific humidity (positive = deposition, negative = subl
 end
 
 #####
+##### Snow melting (TRANSLATION: uses Breeze thermodynamics for latent heat of fusion)
+#####
+
+"""
+    snow_melting(snow_params, vel, aps, qˢ, ρ, T, constants)
+
+Compute the snow melting rate (dqˢ/dt due to melting, always non-negative).
+
+Sensible-heat-driven melting: heat from warm air (T > T_freeze) melts snow to rain.
+The rate is proportional to (T - T_freeze) and includes ventilation corrections.
+
+This is a translation of `CloudMicrophysics.Microphysics1M.snow_melt`
+that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
+
+# Arguments
+- `snow_params`: Snow microphysics parameters (T_freeze, pdf, mass, vent)
+- `vel`: Snow terminal velocity parameters
+- `aps`: Air properties (kinematic viscosity, vapor diffusivity, thermal conductivity)
+- `qˢ`: Snow specific humidity
+- `ρ`: Air density
+- `T`: Temperature
+- `constants`: Breeze ThermodynamicConstants
+
+# Returns
+Rate of snow mass lost to melting [kg/kg/s] (always non-negative)
+"""
+@inline function snow_melting(
+    (; T_freeze, pdf, mass, vent)::Snow{FT},
+    vel::Blk1MVelTypeSnow{FT},
+    aps::AirProperties{FT},
+    qˢ::FT,
+    ρ::FT,
+    T::FT,
+    constants,
+) where {FT}
+    (; ν_air, D_vapor, K_therm) = aps
+    (; χv, ve, Δv) = vel
+    (; r0) = mass
+    aᵥ = vent.a
+    bᵥ = vent.b
+
+    # Latent heat of fusion: ℒⁱ(vapor→ice) - ℒˡ(vapor→liquid) = ℒf(liquid→ice)
+    ℒf = ice_latent_heat(T, constants) - liquid_latent_heat(T, constants)
+
+    n₀ = get_n0(pdf, qˢ, ρ)
+    v₀ = get_v0(vel, ρ)
+    λ⁻¹ = lambda_inverse(pdf, mass, qˢ, ρ)
+
+    # Sensible-heat-driven melting rate
+    base_rate = 4π * n₀ / ρ * K_therm / ℒf * (T - T_freeze) * λ⁻¹^2
+
+    # Ventilation correction terms
+    Sc = ν_air / D_vapor
+    Re = 2v₀ * χv / ν_air * λ⁻¹
+    size_factor = (r0 / λ⁻¹)^((ve + Δv) / 2)
+    gamma_factor = Γ((ve + Δv + 5) / 2)
+
+    ventilation = aᵥ + bᵥ * cbrt(Sc) * sqrt(Re) / size_factor * gamma_factor
+
+    melt_rate = base_rate * ventilation
+
+    # Only melt when snow exists and temperature is above freezing
+    melting = (qˢ > ϵ_numerics(FT)) & (T > T_freeze)
+    return ifelse(melting, melt_rate, zero(FT))
+end
+
+#####
 ##### Two-moment rain evaporation (TRANSLATION: SB2006 evaporation using Breeze thermodynamics)
 #####
 
