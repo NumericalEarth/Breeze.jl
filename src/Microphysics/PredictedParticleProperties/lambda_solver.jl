@@ -264,6 +264,16 @@ end
 abstract type AbstractThreeMomentClosure end
 
 """
+    ThreeMomentLookupClosure
+
+Three-moment closure that uses lookup tables for shape parameter μ and slope
+parameter λ. See [`ThreeMomentLookupClosure()`](@ref) constructor.
+"""
+struct ThreeMomentLookupClosure{TABLE} <: AbstractThreeMomentClosure
+    table :: TABLE
+end
+
+"""
     ThreeMomentClosure
 
 Fortran-parity three-moment closure using the upstream P3 `solve_mui` approximation.

@@ -190,6 +190,7 @@ export
     TwoMomentClosure,
     ThreeMomentClosure,
     ThreeMomentClosureExact,
+    ThreeMomentLookupClosure,
     FixedShapeParameter,
     ShapeParameterRelation,  # alias for TwoMomentClosure
     IceRegimeThresholds,
@@ -284,6 +285,10 @@ include("lambda_solver.jl")
 ##### Tabulation (depends on quadrature and lambda solver)
 #####
 
+include("table_generation_common.jl")
+include("lookup_table_1.jl")
+include("lookup_table_2.jl")
+include("lookup_table_3.jl")
 include("tabulated_function_adapters.jl")
 include("tabulation.jl")
 

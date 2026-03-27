@@ -132,6 +132,10 @@ state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density 
     return (; qᶠ = qᶠ_consistent, bᶠ = bᶠ_consistent, Fᶠ, ρᶠ)
 end
 
+@inline lookup_table_1(p3) = p3.ice.lookup_tables.table_1
+@inline lookup_table_2(p3) = p3.ice.lookup_tables.table_2
+@inline lookup_table_3(p3) = p3.ice.lookup_tables.table_3
+
 #####
 ##### Thermodynamic latent heat helpers (H1)
 #####
@@ -223,16 +227,16 @@ end
 #####
 
 """
-    deposition_ventilation(vent, vent_e, m_mean, Fᶠ, ρᶠ, prp)
+    deposition_ventilation(vent, vent_e, m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
 
 Compute per-particle ventilation integral C(D) × f_v(D) for deposition.
 Dispatches on table type for PSD-integrated or mean-mass path.
 """
 @inline function deposition_ventilation(vent::TabulatedFunction4D,
                                           vent_e::TabulatedFunction4D,
-                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
+                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
     FT = typeof(m_mean)
-    log_m = log10(max(m_mean, FT(1e-20)))
+    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
     Fˡ = zero(FT)
     # vent stores the constant ventilation term (0.65 × ∫ C(D) N'(D) dD)
     # vent_e stores the enhanced term (0.44 × ∫ C(D)√(V×D) N'(D) dD)  [m² s^(-1/2)]
@@ -243,7 +247,7 @@ Dispatches on table type for PSD-integrated or mean-mass path.
 end
 
 @inline function deposition_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
-                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
+                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
     FT = typeof(m_mean)
     D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, zero(FT), ρᶠ, prp)
     C = capacitance(D_mean, state, thresholds)
@@ -274,14 +278,13 @@ f_v = [(1-F_l) \\times 0.65 + F_l \\times 0.78]
 """
 @inline function melting_ventilation(vent::TabulatedFunction4D,
                                        vent_e::TabulatedFunction4D,
-                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
-    FT = typeof(m_mean)
-    log_m = log10(max(m_mean, FT(1e-20)))
+                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
     return vent(log_m, Fᶠ, Fl, ρᶠ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fl, ρᶠ)
 end
 
 @inline function melting_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
-                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
+                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
     FT = typeof(m_mean)
     D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, Fl, ρᶠ, prp)
     C = capacitance(D_mean, state, thresholds)
@@ -309,13 +312,12 @@ Table path: returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle).
 Analytical path: returns A_mean × V_mean × psd_correction.
 """
 @inline function collection_kernel_per_particle(coll::TabulatedFunction4D,
-                                                  m_mean, Fᶠ, ρᶠ, prp)
-    FT = typeof(m_mean)
-    log_m = log10(max(m_mean, FT(1e-20)))
-    return coll(log_m, Fᶠ, zero(FT), ρᶠ)
+                                                  m_mean, Fᶠ, ρᶠ, prp, p3)
+    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
+    return coll(log_m, Fᶠ, zero(typeof(m_mean)), ρᶠ)
 end
 
-@inline function collection_kernel_per_particle(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
+@inline function collection_kernel_per_particle(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp, p3)
     FT = typeof(m_mean)
     D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, zero(FT), ρᶠ, prp)
     D_mean = clamp(D_mean, prp.ice_diameter_min, prp.ice_diameter_max)
@@ -339,16 +341,15 @@ Table path: uses PSD-integrated kernel from table.
 Analytical path: A_mean × ΔV at mean diameter.
 """
 @inline function aggregation_kernel(coll::TabulatedFunction4D,
-                                      m_mean, Fᶠ, ρᶠ, prp)
-    FT = typeof(m_mean)
-    log_m = log10(max(m_mean, FT(1e-20)))
+                                      m_mean, Fᶠ, ρᶠ, prp, p3)
+    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
     # Table stores the half-integral (Fortran convention):
     # (1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂
     # No E_agg — collection efficiency is applied by the caller.
-    return coll(log_m, Fᶠ, zero(FT), ρᶠ)
+    return coll(log_m, Fᶠ, zero(typeof(m_mean)), ρᶠ)
 end
 
-@inline function aggregation_kernel(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
+@inline function aggregation_kernel(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp, p3)
     FT = typeof(m_mean)
     D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, zero(FT), ρᶠ, prp)
     a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
@@ -490,7 +491,8 @@ The bulk rate integrates over the size distribution:
     # table or mean-mass analytical path depending on p3.ice.deposition type.
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+
 
     # Denominator: thermodynamic resistance terms (Mason 1971)
     # A = L_s/(K_a × T) × (L_s/(R_v × T) - 1)
@@ -1243,7 +1245,7 @@ pre-computed lookup tables. Otherwise, falls back to proportional scaling.
 
     z_tendency = tabulated_z_tendency(
         p3.ice, log_mean_mass, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-        p3.process_rates, sc_correction
+        p3.process_rates, sc_correction, p3
     )
 
     return z_tendency
@@ -1265,11 +1267,11 @@ end
 @inline function tabulated_z_tendency(ice::IceProperties{<:Any, <:Any, <:Any, <:Any, <:Any,
                                                           M6, <:Any, <:Any},
                                         log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-                                        prp::ProcessRateParameters, sc_correction) where {M6 <: IceSixthMoment{<:TabulatedFunction4D}}
+                                        prp::ProcessRateParameters, sc_correction, p3) where {M6 <: IceSixthMoment{<:TabulatedFunction4D}}
     FT = typeof(ρ)
-    sixth = ice.sixth_moment
-    dep = ice.deposition
-    coll = ice.collection
+    lt1 = lookup_table_1(p3)
+    sixth = lt1.sixth_moment
+    dep = lt1.deposition
 
     inv_nⁱ = safe_divide(one(FT), nⁱ, eps(FT))
 
@@ -1333,7 +1335,7 @@ end
 
 # Fallback: use proportional scaling when integrals are not tabulated
 @inline function tabulated_z_tendency(ice::IceProperties, log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-                                       prp::ProcessRateParameters, sc_correction)
+                                       prp::ProcessRateParameters, sc_correction, p3)
     return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp)
 end
 

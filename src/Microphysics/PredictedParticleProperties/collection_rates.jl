@@ -1,3 +1,9 @@
+@inline function ice_rain_collection_lookup(table::P3LookupTable2, m̄, λr, Fᶠ, Fˡ, ρᶠ)
+    return table.mass(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ),
+           table.number(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ),
+           table.sixth_moment(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ)
+end
+
 #####
 ##### Phase 2: Ice aggregation
 #####
@@ -75,7 +81,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # Self-collection kernel: dispatches to PSD-integrated table or
     # mean-mass path. Returns E-free kernel (A × ΔV per particle pair).
     AV_kernel = aggregation_kernel(p3.ice.collection.aggregation,
-                                     m_mean, Fᶠ, ρᶠ, prp)
+                                     m_mean, Fᶠ, ρᶠ, prp, p3)
 
     # Collection kernel with temperature-dependent sticking efficiency
     K_mean = Eᵢᵢ * AV_kernel
@@ -145,7 +151,7 @@ factor for the exponential PSD.
     # mean-mass path with psd_correction. The RainCollectionNumber integral
     # computes ∫ V(D) A(D) N'(D) dD with E=1, giving the geometric kernel.
     AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                       m_mean, Fᶠ, ρᶠ, prp)
+                                                       m_mean, Fᶠ, ρᶠ, prp, p3)
 
     # Air density correction for ice particle fall speed (Heymsfield et al. 2006):
     # ρfaci = (ρ₀_ice / ρ)^0.54, where ρ₀_ice = 60000/(287.15×253.15) ≈ 0.826 kg/m³
@@ -190,7 +196,7 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
     # Same collection kernel as cloud_riming_rate
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
     AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                       m_mean, Fᶠ, ρᶠ, prp)
+                                                       m_mean, Fᶠ, ρᶠ, prp, p3)
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
@@ -235,7 +241,7 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
     # Same collection kernel as rain_riming_rate
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
     AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                       m_mean, Fᶠ, ρᶠ, prp)
+                                                       m_mean, Fᶠ, ρᶠ, prp, p3)
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
@@ -342,7 +348,7 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
     # Collection kernel ⟨A×V⟩: dispatches to PSD-integrated table or
     # mean-mass path with psd_correction (same kernel as cloud riming).
     AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                       m_mean, Fᶠ, ρᶠ, prp)
+                                                       m_mean, Fᶠ, ρᶠ, prp, p3)
 
     # Air density correction for ice particle fall speed (same convention as cloud riming):
     # uses ice reference density ρ₀_ice ≈ 0.826 kg/m³, NOT rain reference ≈ 1.275 kg/m³.
@@ -634,7 +640,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     # Ventilation integral (same as deposition/refreezing)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
 
     # Heat balance: sensible + latent
     Q_sensible = K_a * (T₀ - T)
@@ -714,7 +720,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
     # Ventilation integral (ice-particle capacitance; same path as deposition)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
 
     # Heat balance for refreezing:
     # Conductive: K_a × (T₀ - T) removes heat from liquid → promotes freezing

@@ -192,8 +192,7 @@ end
 
 # Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
 @inline function tabulated_mass_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
-    FT = typeof(m̄)
-    log_mean_mass = log10(max(m̄, FT(1e-20)))
+    log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
     return vₜ_norm * ρ_correction
 end
@@ -292,8 +291,7 @@ end
 
 # Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
 @inline function tabulated_number_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
-    FT = typeof(m̄)
-    log_mean_mass = log10(max(m̄, FT(1e-20)))
+    log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
     return vₜ_norm * ρ_correction
 end
@@ -347,8 +345,7 @@ end
 
 # Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
 @inline function tabulated_reflectivity_weighted_fall_speed(table::TabulatedFunction4D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
-    FT = typeof(m̄)
-    log_mean_mass = log10(max(m̄, FT(1e-20)))
+    log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
     return vₜ_norm * ρ_correction
 end

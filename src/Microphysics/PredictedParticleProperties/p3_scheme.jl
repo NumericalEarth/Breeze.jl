@@ -59,7 +59,8 @@ P3 v5.5 carries three prognostic moments for ice particles:
 3. **Reflectivity** (``zⁱ``): Sixth moment of size distribution
 
 The third moment improves representation of precipitation-sized particles
-and enables better simulation of radar reflectivity.
+and enables better simulation of radar reflectivity. The default three-moment
+runtime path uses `lookupTable_3` for distribution parameter closure.
 
 # Prognostic Variables
 

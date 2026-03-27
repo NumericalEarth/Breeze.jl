@@ -6,8 +6,9 @@
 ##### (mean_particle_mass, rime_fraction, liquid_fraction) parameter space.
 #####
 
-export tabulate, TabulationParameters, P3IntegralEvaluator, TabulatedFunction1D,
-       TabulatedFunction4D, tabulated_function_1d
+export tabulate, P3TabulationParameters, LookupTable1Parameters,
+       LookupTable2Parameters, LookupTable3Parameters,
+       P3LookupTables, shape_parameter_lookup, slope_parameter_lookup
 
 using Adapt: Adapt
 using Oceananigans.Architectures: CPU, on_architecture
@@ -779,7 +780,7 @@ Creates a callable evaluator function and tabulates it over the 4D parameter spa
 # Arguments
 - `integral`: Integral type to tabulate (e.g., `MassWeightedFallSpeed()`)
 - `arch`: `CPU()` or `GPU()` - determines where table is stored
-- `params`: [`TabulationParameters`](@ref) defining the grid
+- `params`: [`LookupTable1Parameters`](@ref) defining the grid
 
 # Returns
 A [`TabulatedFunction4D`](@ref) that can be called like the original evaluator.
@@ -791,7 +792,7 @@ using Oceananigans
 using Breeze.Microphysics.PredictedParticleProperties
 
 # Create and tabulate a fall speed integral
-params = TabulationParameters()
+params = LookupTable1Parameters(...)
 tabulated = tabulate(MassWeightedFallSpeed(), CPU(), params)
 
 # Evaluate via interpolation (fast) — includes rime density axis
@@ -799,14 +800,13 @@ value = tabulated(-12.0, 0.5, 0.0, 400.0)
 ```
 """
 function tabulate(integral::AbstractP3Integral, arch=CPU(),
-                  params::TabulationParameters = TabulationParameters())
+                  params::LookupTable1Parameters = LookupTable1Parameters())
 
     FT = typeof(params.minimum_log_mean_particle_mass)
 
     # Create the evaluator function
     evaluator = P3IntegralEvaluator(integral, FT;
-                                     number_of_quadrature_points = params.number_of_quadrature_points,
-                                     shape_parameter_override = params.shape_parameter_override)
+                                     number_of_quadrature_points = params.number_of_quadrature_points)
 
     # Tabulate using TabulatedFunction4D (rime density is the 4th dimension)
     return TabulatedFunction4D(evaluator, arch, FT;
@@ -830,7 +830,7 @@ Tabulate all integrals in an `IceFallSpeed` container.
 Returns a new `IceFallSpeed` with `TabulatedFunction3D` fields.
 """
 function tabulate(fall_speed::IceFallSpeed, arch=CPU(),
-                  params::TabulationParameters = TabulationParameters())
+                  params::LookupTable1Parameters = LookupTable1Parameters())
 
     return IceFallSpeed(
         fall_speed.reference_air_density,
@@ -846,7 +846,7 @@ $(TYPEDSIGNATURES)
 Tabulate all integrals in an `IceDeposition` container.
 """
 function tabulate(deposition::IceDeposition, arch=CPU(),
-                  params::TabulationParameters = TabulationParameters())
+                  params::LookupTable1Parameters = LookupTable1Parameters())
 
     return IceDeposition(
         deposition.thermal_conductivity,
@@ -866,7 +866,7 @@ $(TYPEDSIGNATURES)
 Tabulate all integrals in an `IceBulkProperties` container.
 """
 function tabulate(bulk::IceBulkProperties, arch=CPU(),
-                  params::TabulationParameters = TabulationParameters())
+                  params::LookupTable1Parameters = LookupTable1Parameters())
 
     return IceBulkProperties(
         bulk.maximum_mean_diameter,
@@ -887,7 +887,7 @@ $(TYPEDSIGNATURES)
 Tabulate all integrals in an `IceCollection` container.
 """
 function tabulate(collection::IceCollection, arch=CPU(),
-                  params::TabulationParameters = TabulationParameters())
+                  params::LookupTable1Parameters = LookupTable1Parameters())
 
     return IceCollection(
         collection.ice_cloud_collection_efficiency,
@@ -903,7 +903,7 @@ $(TYPEDSIGNATURES)
 Tabulate all integrals in an `IceSixthMoment` container.
 """
 function tabulate(sixth::IceSixthMoment, arch=CPU(),
-                  params::TabulationParameters = TabulationParameters())
+                  params::LookupTable1Parameters = LookupTable1Parameters())
 
     return IceSixthMoment(
         tabulate(sixth.rime, arch, params),
@@ -924,7 +924,7 @@ $(TYPEDSIGNATURES)
 Tabulate all integrals in an `IceLambdaLimiter` container.
 """
 function tabulate(limiter::IceLambdaLimiter, arch=CPU(),
-                  params::TabulationParameters = TabulationParameters())
+                  params::LookupTable1Parameters = LookupTable1Parameters())
 
     return IceLambdaLimiter(
         tabulate(limiter.small_q, arch, params),
@@ -938,7 +938,7 @@ $(TYPEDSIGNATURES)
 Tabulate all integrals in an `IceRainCollection` container.
 """
 function tabulate(ice_rain::IceRainCollection, arch=CPU(),
-                  params::TabulationParameters = TabulationParameters())
+                  params::LookupTable1Parameters = LookupTable1Parameters())
 
     return IceRainCollection(
         tabulate(ice_rain.mass, arch, params),
@@ -1003,7 +1003,7 @@ integrals replaced by `TabulatedFunction4D` lookup tables.
 - `arch`: `CPU()` or `GPU()`
 
 # Keyword Arguments
-Passed to [`TabulationParameters`](@ref): `number_of_mass_points`,
+Passed to [`P3TabulationParameters`](@ref): `number_of_mass_points`,
 `number_of_rime_fraction_points`, etc.
 
 # Example
@@ -1022,25 +1022,14 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
                   # Rain-specific kwargs (only used when property == :rain)
                   lambda_points::Int = 200,
                   log_lambda_range = (FT(2.5), FT(5.5)),
-                  # Ice-specific kwargs (only used for ice properties)
-                  number_of_mass_points::Int = 150,
-                  number_of_rime_fraction_points::Int = 8,
-                  number_of_liquid_fraction_points::Int = 4,
-                  number_of_rime_density_points::Int = 5,
-                  minimum_log_mean_particle_mass = FT(-17.3),
-                  maximum_log_mean_particle_mass = FT(-5.3),
-                  minimum_rime_density = FT(50),
-                  maximum_rime_density = FT(900),
-                  number_of_quadrature_points::Int = 64,
-                  shape_parameter_override = FT(NaN),
                   # Shared kwargs
-                  quadrature_points::Int = number_of_quadrature_points) where FT
+                  kwargs...) where FT
 
     if property == :rain
         new_rain = tabulate(p3.rain, arch, FT;
                             lambda_points,
                             log_lambda_range,
-                            quadrature_points)
+                            quadrature_points = get(kwargs, :number_of_quadrature_points, 64))
         return PredictedParticlePropertiesMicrophysics(
             p3.water_density,
             p3.minimum_mass_mixing_ratio,
@@ -1053,20 +1042,10 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
         )
     end
 
-    params = TabulationParameters(FT;
-                 number_of_mass_points,
-                 number_of_rime_fraction_points,
-                 number_of_liquid_fraction_points,
-                 number_of_rime_density_points,
-                 minimum_log_mean_particle_mass,
-                 maximum_log_mean_particle_mass,
-                 minimum_rime_density,
-                 maximum_rime_density,
-                 number_of_quadrature_points,
-                 shape_parameter_override)
+    params = P3TabulationParameters(FT; kwargs...)
 
     if property == :ice_fall_speed
-        new_fall_speed = tabulate(p3.ice.fall_speed, arch, params)
+        new_fall_speed = tabulate(p3.ice.fall_speed, arch, params.lookup_table_1)
         new_ice = IceProperties(
             p3.ice.minimum_rime_density,
             p3.ice.maximum_rime_density,
@@ -1078,7 +1057,8 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
             p3.ice.collection,
             p3.ice.sixth_moment,
             p3.ice.lambda_limiter,
-            p3.ice.ice_rain
+            p3.ice.ice_rain,
+            p3.ice.lookup_tables
         )
         return PredictedParticlePropertiesMicrophysics(
             p3.water_density,
@@ -1092,7 +1072,7 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
         )
 
     elseif property == :ice_deposition
-        new_deposition = tabulate(p3.ice.deposition, arch, params)
+        new_deposition = tabulate(p3.ice.deposition, arch, params.lookup_table_1)
         new_ice = IceProperties(
             p3.ice.minimum_rime_density,
             p3.ice.maximum_rime_density,
@@ -1104,7 +1084,8 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
             p3.ice.collection,
             p3.ice.sixth_moment,
             p3.ice.lambda_limiter,
-            p3.ice.ice_rain
+            p3.ice.ice_rain,
+            p3.ice.lookup_tables
         )
         return PredictedParticlePropertiesMicrophysics(
             p3.water_density,
@@ -1118,7 +1099,7 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
         )
 
     elseif property == :ice_bulk_properties
-        new_bulk = tabulate(p3.ice.bulk_properties, arch, params)
+        new_bulk = tabulate(p3.ice.bulk_properties, arch, params.lookup_table_1)
         new_ice = IceProperties(
             p3.ice.minimum_rime_density,
             p3.ice.maximum_rime_density,
@@ -1130,7 +1111,8 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
             p3.ice.collection,
             p3.ice.sixth_moment,
             p3.ice.lambda_limiter,
-            p3.ice.ice_rain
+            p3.ice.ice_rain,
+            p3.ice.lookup_tables
         )
         return PredictedParticlePropertiesMicrophysics(
             p3.water_density,
@@ -1144,7 +1126,7 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
         )
 
     elseif property == :ice_collection
-        new_collection = tabulate(p3.ice.collection, arch, params)
+        new_collection = tabulate(p3.ice.collection, arch, params.lookup_table_1)
         new_ice = IceProperties(
             p3.ice.minimum_rime_density,
             p3.ice.maximum_rime_density,
@@ -1156,7 +1138,8 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
             new_collection,
             p3.ice.sixth_moment,
             p3.ice.lambda_limiter,
-            p3.ice.ice_rain
+            p3.ice.ice_rain,
+            p3.ice.lookup_tables
         )
         return PredictedParticlePropertiesMicrophysics(
             p3.water_density,
@@ -1170,7 +1153,7 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
         )
 
     elseif property == :ice_sixth_moment
-        new_sixth = tabulate(p3.ice.sixth_moment, arch, params)
+        new_sixth = tabulate(p3.ice.sixth_moment, arch, params.lookup_table_1)
         new_ice = IceProperties(
             p3.ice.minimum_rime_density,
             p3.ice.maximum_rime_density,
@@ -1182,7 +1165,8 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
             p3.ice.collection,
             new_sixth,
             p3.ice.lambda_limiter,
-            p3.ice.ice_rain
+            p3.ice.ice_rain,
+            p3.ice.lookup_tables
         )
         return PredictedParticlePropertiesMicrophysics(
             p3.water_density,
@@ -1215,7 +1199,7 @@ and other integral properties in one call.
 - `arch`: Architecture (`CPU()` or `GPU()`)
 
 # Keyword Arguments
-Passed to [`TabulationParameters`](@ref).
+Passed to [`P3TabulationParameters`](@ref).
 
 # Returns
 A new `PredictedParticlePropertiesMicrophysics` with all ice integrals tabulated.
@@ -1233,35 +1217,30 @@ p3_tabulated = tabulate(p3, CPU())
 function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT}, arch=CPU();
                   kwargs...) where FT
 
-    params = TabulationParameters(FT; kwargs...)
+    params = P3TabulationParameters(FT; kwargs...)
 
-    # Tabulate all ice integral categories
-    tabulated_fall_speed    = tabulate(p3.ice.fall_speed, arch, params)
-    tabulated_deposition    = tabulate(p3.ice.deposition, arch, params)
-    tabulated_bulk          = tabulate(p3.ice.bulk_properties, arch, params)
-    tabulated_collection    = tabulate(p3.ice.collection, arch, params)
-    tabulated_sixth_moment  = tabulate(p3.ice.sixth_moment, arch, params)
-    tabulated_lambda        = tabulate(p3.ice.lambda_limiter, arch, params)
-    tabulated_ice_rain      = tabulate(p3.ice.ice_rain, arch, params)
+    tabulated_rain = tabulate(p3.rain, arch, FT;
+                              lambda_points = params.rain_lambda_points,
+                              log_lambda_range = params.rain_log_lambda_range,
+                              quadrature_points = params.lookup_table_1.number_of_quadrature_points)
+
+    lookup_table_1 = build_lookup_table_1(p3.ice, arch, params.lookup_table_1)
+    lookup_table_2 = build_lookup_table_2(p3.ice, tabulated_rain, arch, params.lookup_table_2)
+    lookup_table_3 = build_lookup_table_3(p3.ice, arch, params.lookup_table_3)
 
     new_ice = IceProperties(
         p3.ice.minimum_rime_density,
         p3.ice.maximum_rime_density,
         p3.ice.maximum_shape_parameter,
         p3.ice.minimum_reflectivity,
-        tabulated_fall_speed,
-        tabulated_deposition,
-        tabulated_bulk,
-        tabulated_collection,
-        tabulated_sixth_moment,
-        tabulated_lambda,
-        tabulated_ice_rain
-    )
-
-    # Tabulate rain integrals (use ice quadrature point count for consistency)
-    tabulated_rain = tabulate(p3.rain, arch, FT;
-                              lambda_points = 200,
-                              quadrature_points = params.number_of_quadrature_points)
+        lookup_table_1.fall_speed,
+        lookup_table_1.deposition,
+        lookup_table_1.bulk_properties,
+        lookup_table_1.collection,
+        lookup_table_1.sixth_moment,
+        lookup_table_1.lambda_limiter,
+        lookup_table_1.ice_rain,
+        P3LookupTables(lookup_table_1, lookup_table_2, lookup_table_3))
 
     return PredictedParticlePropertiesMicrophysics(
         p3.water_density,
@@ -1271,8 +1250,7 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT}, arch=CPU();
         tabulated_rain,
         p3.cloud,
         p3.process_rates,
-        p3.precipitation_boundary_condition
-    )
+        p3.precipitation_boundary_condition)
 end
 
 #####

@@ -329,14 +329,17 @@ println("  Difference: $(abs(V_n_128 - V_n_64))")
 
 ## Tabulation
 
-For efficiency in simulations, integrals can be pre-computed and stored in
-lookup tables:
+For efficiency in simulations, integrals are organized into three Breeze lookup-table families:
+
+- `lookupTable_1`: fall speed, ventilation, bulk, collection, sixth-moment, and lambda-limiter integrals
+- `lookupTable_2`: ice-rain and inter-category collection families
+- `lookupTable_3`: three-moment diagnostic lookup for `μᶦ`, `λᶦ`, and companion fields
 
 ```@example p3_integrals
 using Oceananigans: CPU
 
 # Create tabulated fall speed integrals
-params = TabulationParameters(Float64;
+params = LookupTable1Parameters(Float64;
     number_of_mass_points = 10,
     number_of_rime_fraction_points = 3,
     number_of_liquid_fraction_points = 2,

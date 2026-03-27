@@ -91,7 +91,7 @@ where:
     # Dispatches to PSD-integrated table or mean-mass path.
     C_fv = melting_ventilation(p3.ice.deposition.ventilation,
                                 p3.ice.deposition.ventilation_enhanced,
-                                m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction)
+                                m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: K_a × (T - T₀)

@@ -50,27 +50,24 @@ size distribution. They are used for radiation, radar, and diagnostics.
 # Keyword Arguments
 
 - `maximum_mean_diameter`: Upper Dm limit [m], default 0.02 (2 cm)
-- `minimum_mean_diameter`: Lower Dm limit [m], default 1×10⁻⁵ (10 μm)
+- `minimum_mean_diameter`: Lower Dm limit [m], default 2×10⁻⁶ (2 μm)
 
 # References
 
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization),
 [Field et al. (2007)](@cite FieldEtAl2007) for μ-λ relationship.
 """
-function IceBulkProperties(FT::Type{<:AbstractFloat} = Float64;
-                           maximum_mean_diameter = 2e-2,
-                           minimum_mean_diameter = 1e-5)
+function IceBulkProperties(FT::Type{<:AbstractFloat} = Float64)
     return IceBulkProperties(
-        FT(maximum_mean_diameter),
-        FT(minimum_mean_diameter),
+        FT(20e-3),
+        FT(2e-6),
         EffectiveRadius(),
         MeanDiameter(),
         MeanDensity(),
         Reflectivity(),
         SlopeParameter(),
         ShapeParameter(),
-        SheddingRate()
-    )
+        SheddingRate())
 end
 
 Base.summary(::IceBulkProperties) = "IceBulkProperties"

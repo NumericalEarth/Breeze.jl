@@ -10,7 +10,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     chebyshev_gauss_nodes_weights,
     size_distribution,
     tabulate,
-    TabulationParameters,
+    LookupTable1Parameters,
     TabulatedFunction3D,
     TabulatedFunction4D,
     TabulatedFunction1D,
@@ -152,8 +152,9 @@ using Oceananigans.Fields: interior
 
     @testset "Ice bulk properties" begin
         bp = IceBulkProperties()
-        @test bp.maximum_mean_diameter ≈ 0.02
-        @test bp.minimum_mean_diameter ≈ 1e-5
+        @test bp.maximum_mean_diameter ≈ 2.0e-2
+        @test bp.minimum_mean_diameter ≈ 2.0e-6
+
 
         @test bp.effective_radius isa EffectiveRadius
         @test bp.mean_diameter isa MeanDiameter
@@ -528,7 +529,7 @@ using Oceananigans.Fields: interior
     end
 
     @testset "Tabulation parameters" begin
-        params = TabulationParameters()
+        params = LookupTable1Parameters()
         @test params.number_of_mass_points == 150
         @test params.number_of_rime_fraction_points == 8
         @test params.number_of_liquid_fraction_points == 4
@@ -540,7 +541,7 @@ using Oceananigans.Fields: interior
         @test params.number_of_quadrature_points == 64
 
         # Custom parameters
-        params_custom = TabulationParameters(Float32;
+        params_custom = LookupTable1Parameters(Float32;
             number_of_mass_points=20,
             number_of_rime_fraction_points=3,
             number_of_liquid_fraction_points=2,
@@ -554,7 +555,7 @@ using Oceananigans.Fields: interior
     end
 
     @testset "Tabulate single integral" begin
-        params = TabulationParameters(Float64;
+        params = LookupTable1Parameters(Float64;
             number_of_mass_points=5,
             number_of_rime_fraction_points=2,
             number_of_liquid_fraction_points=2,
@@ -578,7 +579,7 @@ using Oceananigans.Fields: interior
     end
 
     @testset "Tabulate IceFallSpeed container" begin
-        params = TabulationParameters(Float64;
+        params = LookupTable1Parameters(Float64;
             number_of_mass_points=5,
             number_of_rime_fraction_points=2,
             number_of_liquid_fraction_points=2,
@@ -603,7 +604,7 @@ using Oceananigans.Fields: interior
     end
 
     @testset "Tabulate IceDeposition container" begin
-        params = TabulationParameters(Float64;
+        params = LookupTable1Parameters(Float64;
             number_of_mass_points=5,
             number_of_rime_fraction_points=2,
             number_of_liquid_fraction_points=2,
@@ -1821,7 +1822,7 @@ using Oceananigans.Fields: interior
         C_fv = PPP.deposition_ventilation(
             p3.ice.deposition.ventilation,
             p3.ice.deposition.ventilation_enhanced,
-            m_mean, Ff, ρf, p3.process_rates, transport.nu, transport.D_v, ρ_correction)
+            m_mean, Ff, ρf, p3.process_rates, transport.nu, transport.D_v, ρ_correction, p3)
 
         capacity = PPP.wet_growth_capacity(p3, qi, ni, T, P, qv, Ff, ρf, ρ, nothing, transport)
         expected = C_fv * transport.K_a * (T₀ - T) * ni
@@ -1854,7 +1855,7 @@ using Oceananigans.Fields: interior
         C_fv = PPP.deposition_ventilation(
             p3.ice.deposition.ventilation,
             p3.ice.deposition.ventilation_enhanced,
-            m_mean, Ff, ρf, p3.process_rates, transport.nu, transport.D_v, ρ_correction)
+            m_mean, Ff, ρf, p3.process_rates, transport.nu, transport.D_v, ρ_correction, p3)
 
         refreezing = PPP.refreezing_rate(p3, qwi, qi, ni, T, P, qv, Ff, ρf, ρ, nothing, transport)
         expected = C_fv * transport.K_a * (T₀ - T) * ni
