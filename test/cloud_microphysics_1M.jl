@@ -334,3 +334,65 @@ end
     vel_cloud = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
     @test vel_cloud === nothing
 end
+
+@testset "Mixed-phase non-equilibrium snow field materialization [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=260)
+    dynamics = AnelasticDynamics(reference_state)
+
+    cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+    model = AtmosphereModel(grid; dynamics, microphysics)
+
+    # Snow terminal velocity field should exist
+    @test haskey(model.microphysical_fields, :wˢ)
+
+    # Snow sedimentation velocity dispatch
+    μ = model.microphysical_fields
+    vel_snow = microphysical_velocities(microphysics, μ, Val(:ρqˢ))
+    @test vel_snow !== nothing
+    @test haskey(vel_snow, :w)
+
+    # Other tracers still have correct dispatch
+    vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
+    @test vel_rain !== nothing
+    vel_cloud = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
+    @test vel_cloud === nothing
+end
+
+@testset "MPNE1M snow processes time-stepping [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 10
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 1), y=(0, 1), z=(0, 1000),
+                           topology=(Periodic, Periodic, Bounded))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=260)
+    dynamics = AnelasticDynamics(reference_state)
+
+    cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+    model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants, microphysics)
+
+    # Cold, supersaturated conditions → cloud ice should form via deposition
+    set!(model; θ=260, qᵗ=FT(0.010))
+
+    # Run for a few relaxation timescales
+    τ = FT(1) / microphysics.cloud_formation.ice.rate
+    simulation = Simulation(model; Δt=τ/5, stop_time=10τ, verbose=false)
+    run!(simulation)
+
+    # Cloud ice should have formed from deposition
+    qᶜⁱ_max = maximum(model.microphysical_fields.qᶜⁱ)
+    @test qᶜⁱ_max > FT(1e-6)
+
+    # Snow should have formed from ice autoconversion
+    qˢ_max = maximum(model.microphysical_fields.qˢ)
+    @test qˢ_max > FT(0)
+
+    # Model should complete without errors (all tendencies computed)
+    @test model.clock.iteration > 0
+end
