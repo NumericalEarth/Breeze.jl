@@ -1,6 +1,11 @@
 export LookupTable1Parameters, LookupTable2Parameters, LookupTable3Parameters,
        P3TabulationParameters
 
+"""
+    LookupTable1Parameters{FT}
+
+Grid parameters for P3 lookup table family 1 (ice-only integrals).
+"""
 struct LookupTable1Parameters{FT}
     number_of_mass_points :: Int
     number_of_rime_fraction_points :: Int
@@ -93,6 +98,11 @@ function LookupTable3Parameters(FT::Type{<:AbstractFloat} = Float64; kwargs...)
         Int(get(parameters, :number_of_quadrature_points, 64)))
 end
 
+"""
+    P3TabulationParameters{FT, LT1, LT2, LT3}
+
+Combined parameters for all three P3 lookup table families plus rain table settings.
+"""
 struct P3TabulationParameters{FT, LT1, LT2, LT3}
     lookup_table_1 :: LT1
     lookup_table_2 :: LT2

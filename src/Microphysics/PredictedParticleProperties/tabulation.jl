@@ -783,7 +783,7 @@ Creates a callable evaluator function and tabulates it over the 4D parameter spa
 - `params`: [`LookupTable1Parameters`](@ref) defining the grid
 
 # Returns
-A [`TabulatedFunction4D`](@ref) that can be called like the original evaluator.
+A `TabulatedFunction4D` that can be called like the original evaluator.
 
 # Example
 
