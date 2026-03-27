@@ -832,10 +832,13 @@ end
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜⁱ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    # TODO: Add autoconversion cloud ice → snow when snow processes are implemented
     return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜⁱ
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqʳ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+end
+
+@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqˢ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+    return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqˢ
 end
