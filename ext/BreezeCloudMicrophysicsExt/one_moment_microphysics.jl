@@ -686,8 +686,6 @@ end
 ##### Microphysical tendencies for mixed-phase non-equilibrium 1M (MPNE1M)
 #####
 #
-# Conservation: d(ρqᵛ)/dt + d(ρqᶜˡ)/dt + d(ρqᶜⁱ)/dt + d(ρqʳ)/dt = 0 (from phase changes)
-#
 # The deposition rate follows Morrison and Grabowski (2008, JAS), Appendix Eq. (A3), but for ice:
 #
 #   dqⁱ/dt = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ τⁱ)
@@ -698,10 +696,11 @@ end
 # `ice_thermodynamic_adjustment_factor` and `deposition_rate` are defined in `Breeze.Microphysics`
 # so they can be shared by multiple bulk microphysics schemes.
 #
-#   ρqᵛ:  −Sᶜᵒⁿᵈ − Sᵈᵉᵖ − Sᵉᵛᵃᵖ    (vapor loses to condensation and deposition)
-#   ρqᶜˡ: +Sᶜᵒⁿᵈ − Sᵃᶜⁿᵛ − Sᵃᶜᶜ    (condensation source; collection sinks)
-#   ρqᶜⁱ: +Sᵈᵉᵖ                     (deposition source only; ice→snow TODO)
-#   ρqʳ:  +Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ    (collection sources; evaporation sink)
+#   ρqᵛ:  −Sᶜᵒⁿᵈ − Sᵈᵉᵖ − Sᵉᵛᵃᵖ − Sˢᵘᵇˡ
+#   ρqᶜˡ: +Sᶜᵒⁿᵈ − Sᵃᶜⁿᵛ − Sᵃᶜᶜ − Sᵃᶜᶜˡˢ
+#   ρqᶜⁱ: +Sᵈᵉᵖ − Sᵃᶜⁿᵛⁱˢ − Sᵃᶜᶜⁱˢ − Sᵃᶜᶜⁱʳ
+#   ρqʳ:  +Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ − Sᵃᶜᶜʳⁱ + Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢ, Sʳˢ, Sˢʳ, α)
+#   ρqˢ:  +Sᵃᶜⁿᵛⁱˢ + Sᵃᶜᶜⁱˢ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ − Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢ, Sʳˢ, Sˢʳ, α)
 #####
 
 @inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
@@ -711,6 +710,7 @@ end
     qᶜˡ = ℳ.qᶜˡ
     qᶜⁱ = ℳ.qᶜⁱ
     qʳ = ℳ.qʳ
+    qˢ = ℳ.qˢ
 
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
@@ -733,22 +733,81 @@ end
                              q, qʳ, ρ, T, constants)
     Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
 
+    # Snow sublimation/deposition: snow ↔ vapor (positive = deposition)
+    Sˢᵘᵇˡ = snow_sublimation_deposition(categories.snow,
+                                        categories.hydrometeor_velocities.snow,
+                                        categories.air_properties,
+                                        q, qˢ, ρ, T, constants)
+    Sˢᵘᵇˡ = max(Sˢᵘᵇˡ, -max(0, qˢ) / τⁿᵘᵐ)
+
+    # Snow melting: snow → rain (always non-negative)
+    Sᵐᵉˡᵗ = snow_melting(categories.snow,
+                         categories.hydrometeor_velocities.snow,
+                         categories.air_properties,
+                         qˢ, ρ, T, constants)
+    Sᵐᵉˡᵗ = min(Sᵐᵉˡᵗ, max(0, qˢ) / τⁿᵘᵐ)
+
     # Collection: cloud liquid → rain (does not involve vapor)
     Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
     Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
                      categories.hydrometeor_velocities.rain, categories.collisions,
                      qᶜˡ, qʳ, ρ)
 
-    # Physics tendencies — conserved by construction: ρqᵛ_phys + ρqᶜˡ_phys + ρqᶜⁱ_phys + ρqʳ_phys = 0
-    ρqᵛ_phys  = ρ * (-Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ)
-    ρqᶜˡ_phys = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
-    ρqᶜⁱ_phys = ρ * Sᵈᵉᵖ
-    ρqʳ_phys  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
+    # Ice → snow autoconversion
+    Sᵃᶜⁿᵛⁱˢ = conv_q_icl_to_q_sno_no_supersat(categories.snow.acnv1M, qᶜⁱ, true)
+
+    # Accretion: cloud liquid + snow
+    Sᵃᶜᶜˡˢ = accretion(categories.cloud_liquid, categories.snow,
+                       categories.hydrometeor_velocities.snow, categories.collisions,
+                       qᶜˡ, qˢ, ρ)
+
+    # Accretion: cloud ice + snow → snow
+    Sᵃᶜᶜⁱˢ = accretion(categories.cloud_ice, categories.snow,
+                       categories.hydrometeor_velocities.snow, categories.collisions,
+                       qᶜⁱ, qˢ, ρ)
+
+    # Accretion: cloud ice + rain → snow (ice sink)
+    Sᵃᶜᶜⁱʳ = accretion(categories.cloud_ice, categories.rain,
+                       categories.hydrometeor_velocities.rain, categories.collisions,
+                       qᶜⁱ, qʳ, ρ)
+
+    # Rain sink from ice-rain collisions (rain sink, forms snow)
+    Sᵃᶜᶜʳⁱ = accretion_rain_sink(categories.rain, categories.cloud_ice,
+                                 categories.hydrometeor_velocities.rain, categories.collisions,
+                                 qᶜⁱ, qʳ, ρ)
+
+    # Rain-snow collisions (computed for both cold and warm pathways)
+    Sʳˢ = accretion_snow_rain(categories.snow, categories.rain,
+                             categories.hydrometeor_velocities.snow,
+                             categories.hydrometeor_velocities.rain,
+                             categories.collisions, qˢ, qʳ, ρ)
+    Sˢʳ = accretion_snow_rain(categories.rain, categories.snow,
+                             categories.hydrometeor_velocities.rain,
+                             categories.hydrometeor_velocities.snow,
+                             categories.collisions, qʳ, qˢ, ρ)
+
+    # Thermal melt factor for warm accretion
+    α = warm_accretion_melt_factor(categories.snow, T, constants)
+
+    # Temperature routing (branchless)
+    is_warm = T >= categories.snow.T_freeze
+
+    # Physics tendencies — conserved by construction: sum of all five = 0
+    ρqᵛ_phys  = ρ * (-Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ - Sˢᵘᵇˡ)
+    ρqᶜˡ_phys = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ - Sᵃᶜᶜˡˢ)
+    ρqᶜⁱ_phys = ρ * ( Sᵈᵉᵖ - Sᵃᶜⁿᵛⁱˢ - Sᵃᶜᶜⁱˢ - Sᵃᶜᶜⁱʳ)
+    ρqʳ_phys  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ - Sᵃᶜᶜʳⁱ + Sᵐᵉˡᵗ
+                     + ifelse(is_warm, Sᵃᶜᶜˡˢ + α * Sᵃᶜᶜˡˢ + Sˢʳ + α * Sʳˢ, zero(T))
+                     - ifelse(is_warm, zero(T), Sʳˢ))
+    ρqˢ_phys  = ρ * ( Sᵃᶜⁿᵛⁱˢ + Sᵃᶜᶜⁱˢ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ - Sᵐᵉˡᵗ
+                     + ifelse(is_warm, zero(T), Sᵃᶜᶜˡˢ + Sʳˢ)
+                     - ifelse(is_warm, α * Sᵃᶜᶜˡˢ + Sˢʳ + α * Sʳˢ, zero(T)))
 
     # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
     # When q < 0, replace with -ρq/τ and route the delta to the coupled tracer:
     #   v→cl (condensation), cl→r (collection), ci→v (deposition), r→v (evaporation).
-    # This preserves ρqᵛ + ρqᶜˡ + ρqᶜⁱ + ρqʳ = 0 regardless of which guards fire.
+    # This preserves ρqᵛ + ρqᶜˡ + ρqᶜⁱ + ρqʳ + ρqˢ = 0 regardless of which guards fire.
+    # Snow has no correction — rate limiters on sublimation and melting suffice.
     δᵛ  = ifelse(qᵛ  >= 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
     δᶜˡ = ifelse(qᶜˡ >= 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τᶜˡ  - ρqᶜˡ_phys)
     δᶜⁱ = ifelse(qᶜⁱ >= 0, zero(ρqᶜⁱ_phys), -ρ * qᶜⁱ / τᶜⁱ  - ρqᶜⁱ_phys)
@@ -758,8 +817,9 @@ end
     ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
     ρqᶜⁱ = ρqᶜⁱ_phys + δᶜⁱ
     ρqʳ  = ρqʳ_phys  + δʳ  - δᶜˡ
+    ρqˢ  = ρqˢ_phys
 
-    return (; ρqᵛ, ρqᶜˡ, ρqᶜⁱ, ρqʳ)
+    return (; ρqᵛ, ρqᶜˡ, ρqᶜⁱ, ρqʳ, ρqˢ)
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
