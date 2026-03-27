@@ -164,6 +164,11 @@ struct ProcessRateParameters{FT}
     # values in the diffusional growth equation are uncertain (Fortran comment, line 3721).
     calibration_factor_deposition :: FT
     calibration_factor_sublimation :: FT
+
+    # Fortran PSD-based partitioning always sends some meltwater to rain
+    # (from small particles that fully melt). This floor approximates that
+    # effect without requiring size-threshold table integrals (f1pr24-f1pr27).
+    minimum_complete_melting_fraction :: FT
 end
 
 """
@@ -349,7 +354,12 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Deposition/sublimation calibration factors (Fortran clbfact_dep, clbfact_sub)
         calibration_factor_deposition = 1.0,
-        calibration_factor_sublimation = 1.0)
+        calibration_factor_sublimation = 1.0,
+
+        # Fortran PSD-based partitioning always sends some meltwater to rain
+        # (from small particles that fully melt). This floor approximates that
+        # effect without requiring size-threshold table integrals (f1pr24-f1pr27).
+        minimum_complete_melting_fraction = 0.2)
 
     return ProcessRateParameters(
         FT(liquid_water_density),
@@ -433,7 +443,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(liquid_fraction_small),
         Bool(liquid_fraction_active),
         FT(calibration_factor_deposition),
-        FT(calibration_factor_sublimation)
+        FT(calibration_factor_sublimation),
+        FT(minimum_complete_melting_fraction)
     )
 end
 

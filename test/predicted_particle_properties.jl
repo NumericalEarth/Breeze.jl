@@ -1787,6 +1787,9 @@ using Oceananigans.Fields: interior
         @test rates_dry.partial_melting >= 0
         @test rates_dry.complete_melting >= 0
 
+        # Check that even at zero liquid fraction, some melt goes to rain (H9)
+        @test rates_dry.complete_melting >= 0.2 * total - eps(total)
+
         # Saturated liquid coating: more complete melting
         qwi_high = FT(0.5 * qi)   # 50% liquid fraction
         rates_wet = ice_melting_rates(p3, qi, ni, qwi_high, T, P, qv, qv_sat, Ff, ρf, ρ,

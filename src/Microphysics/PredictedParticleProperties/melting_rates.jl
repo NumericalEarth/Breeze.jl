@@ -183,6 +183,12 @@ particle reaches this capacity, additional meltwater sheds to rain.
     # Limit to [0, 1]
     fraction_to_coating = clamp(fraction_to_coating, FT(0), FT(1))
 
+    # H9: Fortran PSD-based partitioning (f1pr24-f1pr27) always sends some
+    # meltwater to rain from small particles that fully melt, regardless of
+    # current liquid fraction. Approximate with a minimum rain floor.
+    min_to_rain = prp.minimum_complete_melting_fraction
+    fraction_to_coating = clamp(fraction_to_coating, 0, FT(1) - min_to_rain)
+
     partial = total_melt * fraction_to_coating
     complete = total_melt * (1 - fraction_to_coating)
 
