@@ -113,7 +113,8 @@ using Breeze.Microphysics.PredictedParticleProperties:
 
     μ_lookup = shape_parameter_lookup(table3, L_ice, N_ice, Z_ice, Fᶠ, Fˡ, ρᶠ)
     λ_lookup = slope_parameter_lookup(table3, L_ice, N_ice, Z_ice, Fᶠ, Fˡ, ρᶠ)
-    μ_ref = solve_shape_parameter(L_ice, N_ice, Z_ice, Fᶠ, ρᶠ; closure = ThreeMomentClosure())
+    μ_ref = solve_shape_parameter(L_ice, N_ice, Z_ice, Fᶠ, ρᶠ;
+                                  liquid_fraction = Fˡ, closure = ThreeMomentClosure())
 
     @test μ_lookup ≈ μ_ref rtol = 5e-2
     @test λ_lookup > 0

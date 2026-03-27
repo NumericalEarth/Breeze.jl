@@ -1473,8 +1473,13 @@ using Oceananigans.Fields: interior
             FT(0.0),    # cloud_warm_collection (warm environment test)
             FT(0.0),    # cloud_warm_collection_number
             FT(0.0),    # rain_warm_collection
+            FT(0.0),    # rain_warm_collection_number (M9)
             FT(0.0),    # wet_growth_cloud
             FT(0.0),    # wet_growth_rain
+            FT(0.0),    # ccn_activation (M9 stub)
+            FT(0.0),    # rain_condensation (M9 stub)
+            FT(0.0),    # coating_condensation (M9 stub)
+            FT(0.0),    # coating_evaporation (M9 stub)
         )
 
         # Test each tendency function returns a finite number
@@ -1523,8 +1528,9 @@ using Oceananigans.Fields: interior
             FT(1e-9), FT(10.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # nucleation
             FT(0.0), FT(0.0),                                          # splintering
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),                      # homogeneous
-            FT(0.0), FT(0.0), FT(0.0),                                # warm collection
-            FT(0.0), FT(0.0)                                          # wet growth
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0),                        # warm collection + rain_warm_n (M9)
+            FT(0.0), FT(0.0),                                         # wet growth
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0)                       # M9 stubs
         )
 
         D_nuc_cubed = 6 * prp.nucleated_ice_mass / (FT(π) * prp.pure_ice_density)
@@ -1908,10 +1914,11 @@ using Oceananigans.Fields: interior
         rate_rimed = ice_aggregation_rate(p3, qi, ni, T_warm, FT(0.95), ρf, ρ)
         @test rate_rimed == 0
 
-        # H6: Rate scales linearly with ρ (volumetric kernel → mass-specific tendency)
+        # Rate scales with ρ × rhofaci where rhofaci = (ρ₀/ρ)^0.54 (M11).
+        # Combined scaling: rate ∝ ρ × (ρ₀/ρ)^0.54 = ρ₀^0.54 × ρ^0.46
         ρ_half = FT(0.5)
         rate_half_ρ = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ_half)
-        @test rate_half_ρ ≈ rate_warm * ρ_half / ρ
+        @test rate_half_ρ ≈ rate_warm * (ρ_half / ρ)^FT(0.46)
     end
 
     @testset "cloud_riming_rate" begin
@@ -2782,8 +2789,13 @@ using Oceananigans.Fields: interior
             FT(1e-8),   # cloud_warm_collection (above-freezing cloud collection → qʷⁱ)
             FT(1e4),    # cloud_warm_collection_number
             FT(5e-9),   # rain_warm_collection (above-freezing rain collection → qʷⁱ)
+            FT(1e2),    # rain_warm_collection_number (M9)
             FT(3e-8),   # wet_growth_cloud (cloud riming redirected to qʷⁱ)
             FT(2e-8),   # wet_growth_rain (rain riming redirected to qʷⁱ)
+            FT(0.0),    # ccn_activation (M9 stub)
+            FT(0.0),    # rain_condensation (M9 stub)
+            FT(0.0),    # coating_condensation (M9 stub)
+            FT(0.0),    # coating_evaporation (M9 stub)
         )
 
         # Compute total water tendency: vapor + cloud + rain + ice + liquid_on_ice
