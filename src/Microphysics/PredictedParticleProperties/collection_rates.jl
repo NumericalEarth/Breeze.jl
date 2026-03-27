@@ -400,9 +400,68 @@ Prefer the 9-argument form `rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, 
 end
 
 """
+    rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+
+Compute rain number loss from riming using the tabulated number-weighted
+collection kernel (RainCollectionNumber / Fortran f1pr07).
+
+Replaces the monodisperse approximation `(nʳ/qʳ) × mass_rate` with an
+independent PSD-integrated number collection rate.
+
+# Arguments
+- `p3`: P3 microphysics scheme
+- `qʳ`: Rain mass fraction [kg/kg]
+- `nʳ`: Rain number concentration [1/kg]
+- `qⁱ`: Ice mass fraction [kg/kg]
+- `nⁱ`: Ice number concentration [1/kg]
+- `T`: Temperature [K]
+- `Fᶠ`: Rime fraction [-]
+- `ρᶠ`: Rime density [kg/m³]
+- `ρ`: Air density [kg/m³]
+
+# Returns
+- Rate of rain number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
+"""
+@inline function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    FT = typeof(qʳ)
+    prp = p3.process_rates
+
+    Eʳⁱ = prp.rain_ice_collection_efficiency
+    T₀ = prp.freezing_temperature
+
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = clamp_positive(nʳ)
+    qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = clamp_positive(nⁱ)
+
+    q_threshold = FT(1e-8)
+    n_threshold = FT(1)
+    below_freezing = T < T₀
+    active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nʳ_eff > n_threshold) & (nⁱ_eff > n_threshold)
+
+    # Mean ice particle mass (same as in rain_riming_rate)
+    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+
+    # H6: Use number-weighted collection kernel from RainCollectionNumber table
+    # (Fortran f1pr07), instead of monodisperse approximation (nʳ/qʳ × mass_rate).
+    AV_number = collection_kernel_per_particle(p3.ice.collection.rain_collection,
+                                                m_mean, Fᶠ, ρᶠ, prp, p3)
+
+    ρ₀ = p3.ice.fall_speed.reference_air_density
+    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+
+    # Number collection rate = E × nʳ × nⁱ × ρ × rhofaci × ⟨A×V⟩_number
+    rate = Eʳⁱ * nʳ_eff * nⁱ_eff * ρ * rhofaci * AV_number
+
+    return ifelse(active, rate, zero(FT))
+end
+
+"""
     rain_riming_number_rate(qʳ, nʳ, riming_rate)
 
-Compute rain number loss from riming.
+Backward-compatible fallback: compute rain number loss from riming using the
+monodisperse approximation `(nʳ/qʳ) × mass_rate`.
+Prefer the 9-argument form `rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)`.
 
 # Arguments
 - `qʳ`: Rain mass fraction [kg/kg]

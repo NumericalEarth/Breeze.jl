@@ -730,7 +730,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
 
     # C5: Pass nʳ so rain_riming_rate can apply the rain-DSD cross-section correction.
     rain_rim = rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
-    rain_rim_n = rain_riming_number_rate(qʳ, nʳ, rain_rim)
+    rain_rim_n = rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 
     # Rime density for new rime (use actual ice fall speed, not placeholder)
     vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
