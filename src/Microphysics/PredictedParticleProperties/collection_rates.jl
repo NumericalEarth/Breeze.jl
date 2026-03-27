@@ -86,12 +86,14 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # Collection kernel with temperature-dependent sticking efficiency
     K_mean = Eᵢᵢ * AV_kernel
 
-    # Number loss rate: ρ × K × n² (positive magnitude)
+    # Number loss rate: ρ × K × n² × rhofaci (positive magnitude)
     # The ρ factor converts the volumetric kernel [m³/s] to mass-specific
     # tendency [1/kg/s]. The 1/2 self-collection factor is already included
     # in the kernel (table stores half-integral, analytical path includes 0.5 factor).
     # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
-    rate = ρ * K_mean * nⁱ_eff^2
+    ρ₀ = prp.reference_air_density
+    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+    rate = ρ * K_mean * nⁱ_eff^2 * rhofaci
 
     return ifelse(aggregation_active, rate, zero(FT))
 end
