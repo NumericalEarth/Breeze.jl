@@ -219,6 +219,9 @@ const MixedPhase1M = Union{MP1M, MPNE1M}
 const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
 const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 
+# Snow sedimentation: snow falls with terminal velocity (mixed-phase schemes only)
+@inline AM.microphysical_velocities(bμp::MixedPhase1M, μ, ::Val{:ρqˢ}) = (u=zf, v=zf, w=μ.wˢ)
+
 #####
 ##### Gridless MicrophysicalState construction
 #####
@@ -310,10 +313,16 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
 
     center_fields = center_field_tuple(grid, center_names...)
 
-    # Rain terminal velocity (negative = downward)
+    # Precipitation terminal velocities (negative = downward)
     # bottom = nothing ensures the kernel-set value is preserved during fill_halo_regions!
-    wʳ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
-    wʳ = ZFaceField(grid; boundary_conditions=wʳ_bcs)
+    face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+    wʳ = ZFaceField(grid; boundary_conditions=face_bcs)
+
+    if bμp isa MixedPhase1M
+        wˢ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+        wˢ = ZFaceField(grid; boundary_conditions=wˢ_bcs)
+        return (; zip(center_names, center_fields)..., wʳ, wˢ)
+    end
 
     return (; zip(center_names, center_fields)..., wʳ)
 end
@@ -364,12 +373,20 @@ end
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
     @inbounds μ.qⁱ[i, j, k] = ℳ.qᶜⁱ + ℳ.qˢ
 
-    # Terminal velocity with bottom boundary condition
+    # Terminal velocities with bottom boundary condition
     categories = bμp.categories
+
+    # Rain terminal velocity
     𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
     wʳ = -𝕎 # negative = downward
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+
+    # Snow terminal velocity
+    𝕎ˢ = terminal_velocity(categories.snow, categories.hydrometeor_velocities.snow, ρ, ℳ.qˢ)
+    wˢ = -𝕎ˢ # negative = downward
+    wˢ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wˢ)
+    @inbounds μ.wˢ[i, j, k] = ifelse(k == 1, wˢ₀, wˢ)
 
     return nothing
 end
