@@ -218,7 +218,9 @@ fig
 # ## Model setup
 #
 # We use the mixed-phase non-equilibrium one-moment (MPNE1M) microphysics scheme with
-# high-order WENO advection. The MPNE1M scheme tracks five moisture species (vapor, cloud
+# high-order WENO advection. Bounds-preserving WENO is used for all moisture tracers
+# to prevent negative values at sharp gradients — critical for the mixed-phase scheme's
+# numerical stability. The MPNE1M scheme tracks five moisture species (vapor, cloud
 # liquid, cloud ice, rain, snow) and includes the full suite of warm-rain and ice-phase
 # processes: condensation/evaporation, deposition/sublimation, autoconversion, accretion,
 # riming, rain-snow collisions, snow melting, and sedimentation.
@@ -226,9 +228,20 @@ fig
 FT = Float32
 cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
 microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
-advection = WENO(order=9, minimum_buffer_upwind_order=3)
 
-model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
+weno = WENO(order=9, minimum_buffer_upwind_order=3)
+bounds_preserving_weno = WENO(order=9, minimum_buffer_upwind_order=3, bounds=(0, 1))
+
+momentum_advection = weno
+scalar_advection = (ρθ = weno,
+                    ρqᵛ = bounds_preserving_weno,
+                    ρqᶜˡ = bounds_preserving_weno,
+                    ρqᶜⁱ = bounds_preserving_weno,
+                    ρqʳ = bounds_preserving_weno,
+                    ρqˢ = bounds_preserving_weno)
+
+model = AtmosphereModel(grid; dynamics, microphysics, momentum_advection, scalar_advection,
+                        thermodynamic_constants=constants)
 
 # ## Model initialization
 #
