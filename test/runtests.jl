@@ -16,6 +16,7 @@ if filter_tests!(testsuite, args)
     if !REACTANT_COMPAT
         delete!(testsuite, "reactant_centered_compilation")
         delete!(testsuite, "reactant_weno_compilation")
+        delete!(testsuite, "reactant_microphysics_compilation")
     end
 end
 
