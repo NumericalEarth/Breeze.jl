@@ -1,0 +1,347 @@
+#####
+##### Negative moisture correction
+#####
+#
+# After advection, individual moisture species can become negative because
+# the advection operator might not be positive-definite. This correction:
+#
+#   1. Species borrowing: fix negatives by borrowing from related species
+#      in the same grid cell, following the chain:
+#        rain <- cloud liquid <- vapor  (warm phase)
+#   2. Vertical borrowing (optional): remaining negative vapor is fixed by
+#      transferring mass from adjacent levels, sweeping top->bottom then
+#      one upward step.
+#
+# Conservation:
+#   - Species borrowing: total moisture at each level is preserved (sum unchanged).
+#   - Vertical: column-integrated moisture is preserved (Δz-weighted).
+#   - Energy: no explicit adjustment needed because Breeze's thermodynamic
+#     prognostics (θ_li or moist static energy) are conserved under phase
+#     changes. Temperature is correctly rediagnosed at the next auxiliary
+#     variable update.
+#####
+
+#####
+##### Correction scheme types
+#####
+
+"""
+$(TYPEDEF)
+
+Abstract supertype for negative moisture correction schemes.
+
+See [`fix_negative_moisture!`](@ref) for details.
+"""
+abstract type AbstractNegativeMoistureCorrection end
+
+"""
+$(TYPEDEF)
+
+Redistribute negative vapor vertically within each column via a top-to-bottom
+sweep that pushes deficits downward, followed by one bottom-to-top borrowing
+step if the bottom level is still negative.
+
+This scheme can be used on its own to correct the moisture prognostic, or as the
+second phase of [`SpeciesBorrowing`](@ref) to clean up any vapor deficit that
+remains after same-level species borrowing.
+
+Column-integrated moisture is conserved (Δz-weighted).
+"""
+struct VerticalBorrowing <: AbstractNegativeMoistureCorrection end
+
+"""
+$(TYPEDEF)
+
+Correct negative moisture produced by advection via same-level species borrowing.
+
+At each grid cell, negative hydrometeors borrow from lighter species in the chain
+(e.g. rain <- cloud liquid <- vapor). Vertical redistribution of any remaining
+negative vapor is performed when `vertical_borrowing` is set to [`VerticalBorrowing`](@ref).
+
+For microphysics with number concentrations (categories that subtype
+[`AbstractNumberConcentrationCategories`](@ref)), orphaned number concentrations
+are zeroed and negative number concentrations are clamped after mass borrowing.
+
+See [`fix_negative_moisture!`](@ref) for details.
+
+# Fields
+- `vertical_borrowing`: `nothing` (default) or `VerticalBorrowing()` to enable vertical redistribution
+"""
+struct SpeciesBorrowing{VB} <: AbstractNegativeMoistureCorrection
+    vertical_borrowing :: VB
+end
+
+SpeciesBorrowing(; vertical_borrowing=nothing) = SpeciesBorrowing(vertical_borrowing)
+
+"""
+$(TYPEDEF)
+
+Abstract supertype for microphysics categories that track number concentrations
+(e.g. two-moment schemes, aerosol-aware schemes).
+
+Subtypes opt in to number concentration corrections (orphan zeroing and clamping)
+in the negative moisture correction. Schemes should extend
+[`correction_number_mass_pairs`](@ref) and [`correction_number_fields`](@ref)
+for their specific prognostic number fields.
+"""
+abstract type AbstractNumberConcentrationCategories end
+
+#####
+##### Correction field interfaces
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a tuple of `Field` objects for density-weighted prognostic moisture mass
+fields that participate in the negative-moisture correction, ordered from heaviest
+hydrometeor to lightest.
+
+Each field borrows from the next in the chain. The lightest field borrows from
+the moisture prognostic (vapor or equilibrium moisture, stored in
+`model.moisture_density`). Remaining vapor deficits are fixed by vertical borrowing
+when enabled.
+
+Default: empty tuple (no correction).
+"""
+correction_moisture_fields(microphysics, microphysical_fields) = ()
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a tuple of `(number_field, mass_field)` pairs for number concentration
+consistency. After species borrowing, any number field whose corresponding
+mass field is non-positive is zeroed to avoid unphysical states (e.g., finite
+droplet number with zero mass).
+
+Only called for microphysics whose categories subtype
+[`AbstractNumberConcentrationCategories`](@ref Breeze.AtmosphereModels.AbstractNumberConcentrationCategories).
+
+Default: empty tuple (no number fields to correct).
+"""
+correction_number_mass_pairs(microphysics, microphysical_fields) = ()
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a tuple of `Field` objects for density-weighted number concentration
+fields that should be clamped to non-negative after advection.
+
+Number concentrations can become negative because the advection scheme
+might not be positive-definite. Unlike mass fields (which use borrowing to
+preserve conservation), number concentrations are simply zeroed since there
+is no meaningful conservation constraint for droplet number.
+
+Only called for microphysics whose categories subtype
+[`AbstractNumberConcentrationCategories`](@ref Breeze.AtmosphereModels.AbstractNumberConcentrationCategories).
+
+Default: empty tuple (no number fields to clamp).
+"""
+correction_number_fields(microphysics, microphysical_fields) = ()
+
+"""
+$(TYPEDSIGNATURES)
+
+Fix negative moisture mixing ratios produced by the advection operator.
+
+Operates in one or two phases depending on the correction scheme:
+1. **Species borrowing** ([`SpeciesBorrowing`](@ref Breeze.AtmosphereModels.SpeciesBorrowing),
+    optional): at each grid cell, negative hydrometeors borrow from lighter
+    species (rain <- cloud <- vapor).
+2. **Vertical borrowing** ([`VerticalBorrowing`](@ref Breeze.AtmosphereModels.VerticalBorrowing),
+    optional): negative vapor is redistributed vertically within each column
+    (top->bottom sweep, then one bottom->top step).
+
+For microphysics with number concentrations (categories subtying
+[`AbstractNumberConcentrationCategories`](@ref Breeze.AtmosphereModels.AbstractNumberConcentrationCategories)),
+orphaned number concentrations are zeroed and negatives are clamped after mass borrowing.
+
+The correction is mass-conserving at each level for species borrowing and
+column-integrated for vertical borrowing. No energy adjustment is needed because Breeze's thermodynamic
+prognostics are moist-conserved variables.
+
+The borrowing chain is defined by [`correction_moisture_fields`](@ref), which
+microphysics schemes extend to specify their prognostic mass fields.
+"""
+fix_negative_moisture!(model) = fix_negative_moisture!(model.microphysics, model)
+
+fix_negative_moisture!(::Nothing, model) = nothing
+
+negative_moisture_correction(microphysics) = nothing
+
+function fix_negative_moisture!(microphysics, model)
+    correction = negative_moisture_correction(microphysics)
+    correction === nothing && return nothing
+
+    # Ordered mass fields that participate in species borrowing
+    # (heaviest to lightest: rain <- cloud <- vapor).
+    moisture_fields = correction_moisture_fields(microphysics, model.microphysical_fields)
+
+    grid = model.grid
+    arch = grid.architecture
+    ρ₀ = dynamics_density(model.dynamics)
+    ρqᵛᵉ = model.moisture_density
+    number_mass_pairs = correction_number_mass_pairs(microphysics, model.microphysical_fields)
+    number_fields = correction_number_fields(microphysics, model.microphysical_fields)
+
+    launch!(arch, grid, :xy,
+            _fix_negative_moisture_column!,
+            correction,
+            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+
+    return nothing
+end
+
+#####
+##### Column-wise kernel
+#####
+
+@kernel function _fix_negative_moisture_column!(correction, moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    # Phase 1: Species borrowing at each level
+    for k = 1:Nz
+        @inbounds ρ = ρ₀[i, j, k]
+        apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, correction)
+    end
+
+    # Zero orphaned number concentrations (mass zeroed but number still positive)
+    for k = 1:Nz
+        zero_orphaned_numbers!(i, j, k, number_mass_pairs)
+    end
+
+    # Clamp negative number concentrations to zero
+    for k = 1:Nz
+        clamp_negative_numbers!(i, j, k, number_fields)
+    end
+
+    # Phase 2: Vertical borrowing (no-op when the scheme does not enable it)
+    apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction, ρ₀)
+end
+
+@inline apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, ::VerticalBorrowing) = nothing
+
+@inline function apply_same_level_correction!(i, j, k, ρ, moisture_fields, ρqᵛᵉ, ::SpeciesBorrowing)
+    same_level_borrow!(i, j, k, ρ, moisture_fields, ρqᵛᵉ)
+    return nothing
+end
+
+@inline apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction::VerticalBorrowing, ρ₀) =
+    vertical_borrow!(ρqᵛᵉ, i, j, grid, correction, ρ₀)
+
+@inline apply_vertical_correction!(ρqᵛᵉ, i, j, grid, correction::SpeciesBorrowing, ρ₀) =
+    vertical_borrow!(ρqᵛᵉ, i, j, grid, correction.vertical_borrowing, ρ₀)
+
+#####
+##### Vertical borrowing helpers
+#####
+
+@inline vertical_borrow!(ρqᵛᵉ, i, j, grid, ::Nothing, ρ₀) = nothing
+
+@inline function vertical_borrow!(ρqᵛᵉ, i, j, grid, ::VerticalBorrowing, ρ₀)
+    Nz = size(grid, 3)
+    # Sweep from top to bottom, pushing deficit to level below (more moisture there).
+    # Breeze convention: k = 1 is bottom, k = Nz is top.
+    for k = Nz:-1:2
+        @inbounds ρqᵛ_k = ρqᵛᵉ[i, j, k]
+        @inbounds ρ = ρ₀[i, j, k]
+        qᵛ = ρqᵛ_k / ρ
+        Δz_k = Δzᶜᶜᶜ(i, j, k, grid)
+        Δz_below = Δzᶜᶜᶜ(i, j, k - 1, grid)
+
+        # Mass deficit [kg/m²] to push downward (positive when qᵛ < 0)
+        deficit = ifelse(qᵛ < 0, -ρqᵛ_k * Δz_k, zero(ρqᵛ_k))
+        @inbounds ρqᵛᵉ[i, j, k] += deficit / Δz_k          # -> 0 when deficit > 0
+        @inbounds ρqᵛᵉ[i, j, k - 1] -= deficit / Δz_below   # receive deficit
+    end
+
+    # If bottom level still negative, borrow from level above.
+    # Use ifelse (not if/else) for GPU kernel compatibility.
+    # When Nz < 2, clamp indices to 1 so reads are valid but dq_mass = 0.
+    k_bot = 1
+    k_top = max(2, Nz)  # safe index: equals 2 when Nz >= 2, equals Nz when Nz < 2
+
+    @inbounds ρqᵛ_bot = ρqᵛᵉ[i, j, k_bot]
+    @inbounds ρ_bot = ρ₀[i, j, k_bot]
+    qᵛ_bot = ρqᵛ_bot / ρ_bot
+
+    @inbounds ρqᵛ_top = ρqᵛᵉ[i, j, k_top]
+    @inbounds ρ_top = ρ₀[i, j, k_top]
+    qᵛ_top = ρqᵛ_top / ρ_top
+
+    Δz_bot = Δzᶜᶜᶜ(i, j, k_bot, grid)
+    Δz_top = Δzᶜᶜᶜ(i, j, k_top, grid)
+
+    can_borrow = (Nz >= 2) & (qᵛ_bot < 0) & (qᵛ_top > 0)
+    needed = -ρqᵛ_bot * Δz_bot       # mass needed at bottom [kg/m²]
+    available = ρqᵛ_top * Δz_top      # mass available above [kg/m²]
+    dq_mass = ifelse(can_borrow, min(needed, available), zero(ρqᵛ_bot))
+
+    @inbounds ρqᵛᵉ[i, j, k_bot] += dq_mass / Δz_bot
+    @inbounds ρqᵛᵉ[i, j, k_top] -= dq_mass / Δz_top
+end
+
+#####
+##### Recursive same-level borrowing helpers
+#####
+
+# Two or more fields: heaviest borrows from next lighter, then recurse
+@inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1, F2, Vararg}, ρqᵛᵉ) where {F1, F2}
+    ρq_heavy = fields[1]
+    ρq_light = fields[2]
+
+    @inbounds q_heavy = ρq_heavy[i, j, k] / ρ
+    @inbounds q_light = ρq_light[i, j, k] / ρ
+
+    # Borrow from lighter species to fix negative heavier species
+    sink = ifelse(q_heavy < 0, min(-q_heavy, max(0, q_light)), zero(q_heavy))
+    @inbounds ρq_heavy[i, j, k] += ρ * sink
+    @inbounds ρq_light[i, j, k] -= ρ * sink
+
+    # Continue down the chain
+    same_level_borrow!(i, j, k, ρ, Base.tail(fields), ρqᵛᵉ)
+end
+
+# Last field: borrows from moisture prognostic (vapor / equilibrium moisture)
+@inline function same_level_borrow!(i, j, k, ρ, fields::Tuple{F1}, ρqᵛᵉ) where {F1}
+    ρq = fields[1]
+
+    @inbounds q = ρq[i, j, k] / ρ
+    @inbounds qᵛ = ρqᵛᵉ[i, j, k] / ρ
+
+    # Borrow from vapor to fix negative lightest hydrometeor
+    sink = ifelse(q < 0, min(-q, max(0, qᵛ)), zero(q))
+    @inbounds ρq[i, j, k] += ρ * sink
+    @inbounds ρqᵛᵉ[i, j, k] -= ρ * sink
+    return nothing
+end
+
+# Empty tuple: nothing to do
+@inline same_level_borrow!(i, j, k, ρ, ::Tuple{}, ρqᵛᵉ) = nothing
+
+#####
+##### Number concentration consistency helpers
+#####
+
+# Zero number concentration when corresponding mass is non-positive
+@inline function zero_orphaned_numbers!(i, j, k, pairs::Tuple{P, Vararg}) where {P}
+    ρn, ρq = pairs[1]
+    @inbounds ρn_val = ρn[i, j, k]
+    @inbounds ρn[i, j, k] = ifelse(ρq[i, j, k] <= 0, zero(ρn_val), ρn_val)
+    zero_orphaned_numbers!(i, j, k, Base.tail(pairs))
+    return nothing
+end
+
+@inline zero_orphaned_numbers!(i, j, k, ::Tuple{}) = nothing
+
+#####
+##### Negative number concentration clamping
+#####
+
+# Clamp negative number concentrations to zero
+@inline function clamp_negative_numbers!(i, j, k, fields)
+    for f in fields
+        @inbounds f[i, j, k] = max(0, f[i, j, k])
+    end
+end

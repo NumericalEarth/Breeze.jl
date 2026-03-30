@@ -26,6 +26,10 @@ using Printf
 using Random
 
 Random.seed!(2019)
+if CUDA.functional()
+    CUDA.seed!(2019)
+end
+
 Oceananigans.defaults.FloatType = Float32
 
 # ## Domain and grid
@@ -195,6 +199,7 @@ set!(model, T = Tᵢ, qᵗ = qᵗᵢ)
 
 simulation = Simulation(model; Δt=1, stop_time=4days)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Output and progress
 

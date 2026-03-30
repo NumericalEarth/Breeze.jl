@@ -24,6 +24,9 @@ using Printf
 using Random
 
 Random.seed!(938)
+if CUDA.functional()
+    CUDA.seed!(938)
+end
 
 # ## Domain and grid
 #
@@ -252,6 +255,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
 simulation = Simulation(model; Δt=10, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Output and progress
 #

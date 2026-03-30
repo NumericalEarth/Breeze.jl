@@ -175,8 +175,8 @@ Each RK stage:
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:AcousticRungeKutta3}, Δt; callbacks=[])
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
-    # Be paranoid and update state at iteration 0
-    maybe_initialize_state!(model, callbacks)
+    # Be paranoid and prepare at iteration 0, in case run! is not used:
+    maybe_prepare_first_time_step!(model, callbacks)
 
     ts = model.timestepper
     β₁ = ts.β₁
