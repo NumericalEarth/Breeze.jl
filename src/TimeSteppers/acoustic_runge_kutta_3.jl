@@ -176,7 +176,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
     # Be paranoid and update state at iteration 0
-    maybe_initialize_state!(model, callbacks)
+    maybe_prepare_first_time_step!(model, callbacks)
 
     ts = model.timestepper
     β₁ = ts.β₁

@@ -1,76 +1,52 @@
 # # Baroclinic wave on the sphere
 #
 # This example simulates the growth of a baroclinic wave on a near-global
-# `LatitudeLongitudeGrid`, inspired by the dynamical core benchmark described
-# by [JablonowskiWilliamson2006](@citet).
-# A midlatitude jet in thermal wind balance with a meridional temperature
-# gradient is seeded with a localized perturbation that triggers baroclinic
-# instability, producing growing Rossby waves over roughly ten days.
+# `LatitudeLongitudeGrid` following the DCMIP2016 specification
+# [UllrichEtAl2016](@citet), which extends the classic
+# [JablonowskiWilliamson2006](@citet) test case.
+# A midlatitude jet in thermal-wind balance with a meridional temperature
+# gradient is seeded with a localized zonal-wind perturbation that triggers
+# baroclinic instability, producing growing Rossby waves over roughly ten days.
 #
-# This is the first spherical-geometry example in Breeze, exercising
-# `CompressibleDynamics` with `ExplicitTimeStepping`
+# This example exercises `CompressibleDynamics` with `ExplicitTimeStepping`
 # and `HydrostaticSphericalCoriolis` on a latitude-longitude grid spanning
 # 85° S to 85° N.
 #
 # ## Physical setup
 #
-# The background atmosphere is stably stratified with a constant Brunt-Väisälä
-# frequency ``N``, giving a potential-temperature profile
+# The background state is an analytic steady-state solution of the dry,
+# adiabatic, inviscid primitive equations in height coordinates.
+# The temperature field has two parts: a horizontally uniform stratification
+# controlled by a lapse rate ``Λ`` and a meridional gradient that creates
+# warm equator / cold pole contrast:
 #
 # ```math
-# θ^{\rm b}(z) = θ_0 \exp \left( \frac{N^2 z}{g} \right)
+# T(φ, z) = \frac{1}{τ_1(z) - τ_2(z)\, F(φ)}
 # ```
 #
-# with ``θ_0 = 300\,{\rm K}`` and ``N^2 = 10^{-4}\,{\rm s^{-2}}``.
-#
-# ### Meridional temperature gradient
-#
-# A pole-to-equator temperature difference ``Δθ_{\rm ep} = 60\,{\rm K}``
-# drives the baroclinic instability. The temperature gradient is confined
-# to the troposphere (below the tropopause height ``z_T = 15\,{\rm km}``):
-#
-# ```math
-# θ(φ, z) = θ^{\rm b}(z) - Δθ_{\rm ep} \sin φ \max(0, 1 - z/z_T)
-# ```
-#
-# This creates a cold pole / warm equator contrast at the surface that
-# weakens linearly with height and vanishes at the tropopause.
+# where ``τ_1`` and ``τ_2`` encode the vertical structure and
+# ``F(φ) = \cos^K φ - \frac{K}{K+2} \cos^{K+2} φ`` is the meridional shape
+# with jet-width parameter ``K = 3``.
 #
 # ### Balanced zonal jet
 #
-# The zonal wind is derived from the meridional temperature gradient
-# via thermal wind balance. The thermal wind relation on the sphere,
-#
-# ```math
-# f \frac{∂u}{∂z} = -\frac{g}{R θ_0} \frac{∂θ}{∂φ}
-# ```
-#
-# yields a jet in geostrophic balance with the temperature field:
-#
-# ```math
-# u(φ, z) = \frac{g\, Δθ_{\rm ep}}{a\, θ_0\, Ω}\, \cos φ
-#            \times \begin{cases}
-#              \dfrac{z}{2} \left( 2 - \dfrac{z}{z_T} \right) & z \le z_T \\[6pt]
-#              \dfrac{z_T}{2} & z > z_T
-#            \end{cases}
-# ```
-#
-# where ``R`` is the Earth's radius.
-# The ``\cos φ`` factor gives a broad jet that peaks at the equator (~32 m/s)
-# and is roughly 22 m/s at 45° latitude.
-# By initializing with a balanced state we avoid spurious gravity-wave transients and
-# allows baroclinic instability to develop cleanly from the perturbation.
+# The zonal wind is derived analytically from gradient-wind balance,
+# producing a subtropical jet peaking near 30 m/s at 45° latitude
+# in the upper troposphere.
 #
 # ### Perturbation
 #
-# A localized potential-temperature Gaussian bump centered at
-# ``(λ_c, φ_c) = (90°, 45°)`` seeds the instability:
+# A localized zonal-wind perturbation centered at
+# ``(λ_c, φ_c) = (20°\text{E}, 40°\text{N})`` seeds the instability.
+# The perturbation decays exponentially with great-circle distance from the
+# center and is tapered smoothly to zero above 15 km:
 #
 # ```math
-# θ'(λ, φ, z) = Δθ \exp \left[ -\frac{(λ - λ_c)^2 + (φ - φ_c)^2}{2σ^2} \right] \sin \left( \frac{π z}{H} \right)
+# u'(λ, φ, z) = u_p \, \mathcal{T}(z) \, \exp\!\left(-\left(\frac{d}{r_p}\right)^2\right)
 # ```
 #
-# with amplitude ``Δθ = 1\,{\rm K}`` and width ``σ = 10°``.
+# where ``d`` is the great-circle distance, ``r_p = 0.1\,a``, ``u_p = 1`` m/s,
+# and ``\mathcal{T}(z) = 1 - 3(z/z_p)^2 + 2(z/z_p)^3`` for ``z < z_p``.
 
 using Breeze
 using Oceananigans
@@ -97,118 +73,152 @@ grid = LatitudeLongitudeGrid(GPU();
                              latitude = (-85, 85),
                              z = (0, H))
 
-# ## Physical parameters
+# ## DCMIP2016 parameters
+#
+# All parameters follow the DCMIP2016 test case document
+# (Ullrich, Melvin, Staniforth, and Jablonowski, 2016).
 
-constants = ThermodynamicConstants()
-g  = constants.gravitational_acceleration
-p₀ = 100000 # Pa — surface pressure
-θ₀ = 300    # K — surface potential temperature
-N² = 1e-4   # s⁻² — Brunt-Väisälä frequency squared
+const 𝑎  = 6371220.0   # m — Earth radius
+const Ω  = 7.29212e-5  # s⁻¹ — Earth rotation rate
+const 𝑔  = 9.80616     # m/s² — gravitational acceleration
+const Rᵈ = 287.0       # J/(kg·K) — dry air gas constant
+const cₚ = 1004.5      # J/(kg·K) — specific heat capacity
+const κ  = 2 / 7       # Rᵈ/cₚ
+const p₀ = 100000.0    # Pa — surface pressure
 
-# Background potential temperature with stable stratification:
+## Temperature profile parameters
+const T₀E   = 310.0    # K — equatorial surface temperature
+const T₀P   = 240.0    # K — polar surface temperature
+const T₀    = 0.5 * (T₀E + T₀P)  # K — mean surface temperature
+const K_jet  = 3.0     # jet width parameter
+const B_jet  = 2.0     # jet half-width parameter
+const Λ      = 0.005   # K/m — lapse rate
 
-θᵇ(z) = θ₀ * exp(N² * z / g)
+## Derived constants
+const constA = 1.0 / Λ
+const constB = (T₀ - T₀P) / (T₀ * T₀P)
+const constC = 0.5 * (K_jet + 2) * (T₀E - T₀P) / (T₀E * T₀P)
+const constH = Rᵈ * T₀ / 𝑔
+
+## Perturbation parameters (exponential type)
+const pertup   = 1.0          # m/s — perturbation amplitude
+const pertexpr = 0.1          # perturbation radius in Earth radii
+const pertlon  = π / 9        # 20° E
+const pertlat  = 2π / 9       # 40° N
+const pertz    = 15000.0      # m — perturbation height cap
+
+# ## Analytic initial conditions
+#
+# The temperature and pressure are computed from the DCMIP2016 analytic
+# formulas. The vertical structure functions ``τ_1, τ_2`` and their
+# integrals encode the stratification and meridional gradient.
+
+## Vertical structure functions (shallow atmosphere, X = 1)
+function τ_and_integrals(z)
+    scaledZ = z / (B_jet * constH)
+    expZ2 = exp(-scaledZ^2)
+
+    τ₁    = constA * Λ / T₀ * exp(Λ * z / T₀) + constB * (1 - 2 * scaledZ^2) * expZ2
+    τ₂    = constC * (1 - 2 * scaledZ^2) * expZ2
+    ∫τ₁   = constA * (exp(Λ * z / T₀) - 1) + constB * z * expZ2
+    ∫τ₂   = constC * z * expZ2
+
+    return τ₁, τ₂, ∫τ₁, ∫τ₂
+end
+
+## Meridional shape functions
+F_T(φ) = cosd(φ)^K_jet - K_jet / (K_jet + 2) * cosd(φ)^(K_jet + 2)
+F_U(φ) = cosd(φ)^(K_jet - 1) - cosd(φ)^(K_jet + 1)
+
+## Temperature: T(φ, z) = 1 / (τ₁ - τ₂ F(φ))
+function Tᵢ(λ, φ, z)
+    τ₁, τ₂, _, _ = τ_and_integrals(z)
+    return 1.0 / (τ₁ - τ₂ * F_T(φ))
+end
+
+## Pressure: p(φ, z) = p₀ exp(-g/Rᵈ (∫τ₁ - ∫τ₂ F(φ)))
+function pᵢ(λ, φ, z)
+    _, _, ∫τ₁, ∫τ₂ = τ_and_integrals(z)
+    return p₀ * exp(-𝑔 / Rᵈ * (∫τ₁ - ∫τ₂ * F_T(φ)))
+end
+
+## Density from the ideal gas law
+ρᵢ(λ, φ, z) = pᵢ(λ, φ, z) / (Rᵈ * Tᵢ(λ, φ, z))
+
+## Potential temperature: θ = T (p₀/p)^κ
+function θᵢ(λ, φ, z)
+    T = Tᵢ(λ, φ, z)
+    p = pᵢ(λ, φ, z)
+    return T * (p₀ / p)^κ
+end
+
+# ### Balanced zonal wind
+#
+# The zonal wind satisfies gradient-wind balance with the temperature field.
+# For the shallow atmosphere (``r = a``):
+#
+# ```math
+# u = -Ω a \cos φ + \sqrt{Ω^2 a^2 \cos^2 φ + a \cos φ \, U(φ, z)}
+# ```
+#
+# where ``U = (g/a) K \int τ_2 \, T \, (\cos^{K-1} φ - \cos^{K+1} φ)``.
+
+function uᵢ(λ, φ, z)
+    _, _, _, ∫τ₂ = τ_and_integrals(z)
+    T = Tᵢ(λ, φ, z)
+
+    bigU = 𝑔 / 𝑎 * K_jet * ∫τ₂ * F_U(φ) * T
+    rcosφ = 𝑎 * cosd(φ)
+    Ωrcosφ = Ω * rcosφ
+
+    u_bal = -Ωrcosφ + sqrt(Ωrcosφ^2 + rcosφ * bigU)
+
+    ## Add the exponential perturbation
+    φ_rad = deg2rad(φ)
+    λ_rad = deg2rad(λ)
+    great_circle = 1 / pertexpr * acos(sin(pertlat) * sin(φ_rad) +
+                                       cos(pertlat) * cos(φ_rad) * cos(λ_rad - pertlon))
+
+    taper = ifelse(z < pertz, 1 - 3 * (z / pertz)^2 + 2 * (z / pertz)^3, 0.0)
+    u_pert = ifelse(great_circle < 1.0, pertup * taper * exp(-great_circle^2), 0.0)
+
+    return u_bal + u_pert
+end
 
 # ## Model configuration
 #
-# We use split-explicit compressible dynamics with acoustic substepping.
-# The outer time step is limited by the advective CFL, while fast
-# acoustic modes are subcycled with smaller substeps computed
-# automatically from the acoustic CFL condition.
-# The reference state uses the stratified ``θ^{\rm b}(z)`` profile, so the buoyancy
-# force is computed as a perturbation ``ρ b = -g (ρ - ρ_r)`` for accuracy.
-# `HydrostaticSphericalCoriolis` retains the traditional ``f = 2 Ω \sin φ``
+# We use fully explicit compressible dynamics. The time step is limited
+# by the acoustic CFL. The reference state uses the equatorial column
+# ``θ(z)`` profile evaluated at the equator, so the buoyancy force is
+# computed as a perturbation for accuracy.
+# `HydrostaticSphericalCoriolis` retains the traditional ``f = 2Ω \sin φ``
 # Coriolis terms.
+
+## Reference potential temperature at the equator
+θ_ref(z) = θᵢ(0, 0, z)
 
 coriolis = HydrostaticSphericalCoriolis()
 
 dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                 surface_pressure = p₀,
-                                reference_potential_temperature = θᵇ)
+                                reference_potential_temperature = θ_ref)
 
 model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 
-# ## Initial conditions
-#
-# The temperature field combines the background stratification, a meridional
-# gradient, and a localized perturbation. The zonal wind is derived analytically
-# from the thermal wind relation for the meridional gradient.
-
-Ω     = coriolis.rotation_rate               # s⁻¹ — Earth rotation rate
-R     = Oceananigans.defaults.planet_radius  # m — Earth radius
-Δθ_ep = 60                                   # K — equator-to-pole θ difference
-z_T   = 15_000                               # m — tropopause height
-τ_bal = R * θ₀ * Ω / (g * Δθ_ep)             # s — thermal wind parameter timescale
-
-# Perturbation parameters:
-λ_c = 90  # degrees — perturbation center longitude
-φ_c = 45  # degrees — perturbation center latitude
-σ   = 10  # degrees — Gaussian half-width
-Δθ  = 1   # K — perturbation amplitude
-
-# Balanced zonal wind from the thermal wind relation:
-
-function uᵢ(λ, φ, z)
-    vertical_scale = ifelse(z ≤ z_T, z / 2 * (2 - z / z_T), z_T / 2)
-    return (vertical_scale / τ_bal) * cosd(φ) # m/s
-end
-
-# Potential temperature: background + meridional gradient + perturbation:
-
-function θᵢ(λ, φ, z)
-    θ_merid = - Δθ_ep * sind(φ) * max(0, 1 - z / z_T)
-
-    r² = (λ - λ_c)^2 + (φ - φ_c)^2
-    θ_pert = Δθ * exp(-r² / 2σ^2) * sin(π * z / H)
-    return θᵇ(z) + θ_merid + θ_pert
-end
-
-# ### Hydrostatic density
-#
-# The density must be in hydrostatic balance with the full ``θ(φ, z)`` field
-# (not just the 1D reference profile). We integrate:
-#
-# ```math
-# \frac{∂Π}{∂z} = -\frac{κ\, g}{R^d\, θ}
-# ```
-#
-# from the surface up to height ``z`` for each column to get Exner function ``Π``
-# and then recover the density via ``ρ = p_0\, Π^{c_v/R^d} / (R^d\, θ)``.
-
-Rᵈ = dry_air_gas_constant(constants)
-cᵖ = constants.dry_air.heat_capacity
-κ  = Rᵈ / cᵖ
-cᵥ_over_Rᵈ = (cᵖ - Rᵈ) / Rᵈ
-
-function ρᵢ(λ, φ, z)
-    nsteps = max(1, round(Int, z / 100)) # ~100 m steps
-    dz = z / nsteps
-    Π = 1.0 # Exner at surface (pˢᵗ = p₀)
-    for n in 1:nsteps
-        zn = (n - 1/2) * dz
-        θn = θᵢ(λ, φ, zn)
-        Π -= κ * g / (Rᵈ * θn) * dz
-    end
-    θ = θᵢ(λ, φ, z)
-    return p₀ * Π^cᵥ_over_Rᵈ / (Rᵈ * θ)
-end
+# ## Set initial conditions
 
 set!(model, θ=θᵢ, u=uᵢ, ρ=ρᵢ)
 
 # ## Time-stepping
 #
-# With use split-explicit substepping: the outer time step is limited
-# by the advective CFL rather than the acoustic CFL. For the jet speed
-# ``U ≈ 30`` m/s and ``Δx ≈ 200`` km, the advective CFL allows
-# ``Δt ≈ 20`` s — 10× larger than the fully explicit acoustic
-# limit of ~3 s. Each outer step does extra work for the acoustic
-# substeps, yielding a net ~7× wall-clock speedup. The number of
-# acoustic substeps is computed adaptively each time step.
-#
-# We run for 20 days to observe baroclinic wave growth.
+# With explicit time stepping the time step is limited by the acoustic CFL.
+# For ``Δx ≈ 200`` km and sound speed ``c_s ≈ 340`` m/s,
+# the acoustic CFL gives ``Δt ≈ 2`` s.
+# We run for 15 days to observe baroclinic wave growth; the instability
+# becomes visible around day 4 and develops explosive cyclogenesis near day 8.
 
 Δt = 2seconds
-stop_time = 20days
+stop_time = 15days
 
 simulation = Simulation(model; Δt, stop_time)
 
@@ -225,14 +235,16 @@ add_callback!(simulation, progress, IterationInterval(1000))
 
 # ## Output
 #
-# We save the velocities and the potential temperature perturbation (i.e., the
-# departure from background stratification) for visualization.
+# We save the velocities and the potential temperature for visualization.
+# Also save surface pressure (bottom-level pressure) for comparison with
+# published DCMIP reference solutions.
 
 θ = PotentialTemperature(model)
 
-θᵇᵍ = CenterField(grid)
-set!(θᵇᵍ, (λ, φ, z) -> θᵇ(z))
-θ′ = θ - θᵇᵍ
+## Background θ at the equator for computing perturbation θ′
+θ_bg = CenterField(grid)
+set!(θ_bg, (λ, φ, z) -> θ_ref(z))
+θ′ = θ - θ_bg
 
 outputs = merge(model.velocities, (; θ′))
 
@@ -248,10 +260,7 @@ run!(simulation)
 # ## Visualization
 #
 # We plot the potential-temperature perturbation ``θ'`` (departure from the
-# horizontally uniform background ``θ^{\rm b}(z)``) and the zonal wind
-# on the sphere. Oceananigans' Makie extension converts fields on a
-# `LatitudeLongitudeGrid` to spherical coordinates automatically when
-# plotted with `surface!` on an `Axis3`.
+# equatorial background ``θ^{\rm ref}(z)``) and the zonal wind on the sphere.
 
 θ′_ts = FieldTimeSeries("baroclinic_wave.jld2", "θ′")
 u_ts = FieldTimeSeries("baroclinic_wave.jld2", "u")

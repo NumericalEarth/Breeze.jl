@@ -185,6 +185,59 @@ end
 # end
 
 #####
+##### Solid body rotation on LatitudeLongitudeGrid
+#####
+##### Solid body rotation u = u₀ cos(φ), v = 0 is an exact steady-state solution
+##### on the sphere when Coriolis and curvature metric terms are correctly balanced.
+##### Any drift in v or w, or change in u, indicates incorrect metric terms.
+#####
+
+@testset "Solid body rotation on LatitudeLongitudeGrid [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = build_test_llg(default_arch; Nx=36, Ny=34, Nz=4, Lz=10kilometers)
+
+    coriolis = HydrostaticSphericalCoriolis()
+    dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                    surface_pressure = 100000,
+                                    reference_potential_temperature = 300)
+
+    model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
+
+    ## Solid body rotation: u = u₀ cos(φ), uniform θ and ρ
+    u₀ = 10.0 # m/s — modest rotation speed
+    uᵢ(λ, φ, z) = u₀ * cosd(φ)
+
+    ref = model.dynamics.reference_state
+    set!(model; θ=300, u=uᵢ, ρ=ref.density)
+
+    ## Record initial max|v| and max|w| (should be ~0)
+    v_init = @allowscalar maximum(abs, interior(model.velocities.v))
+    w_init = @allowscalar maximum(abs, interior(model.velocities.w))
+
+    ## Run a few time steps
+    Δt = 0.1
+    simulation = Simulation(model; Δt, stop_iteration=10, verbose=false)
+    run!(simulation)
+
+    @test model.clock.iteration == 10
+
+    ## After 10 steps, v and w should remain small if metrics are correct.
+    ## Without correct metric terms, v grows O(u₀² tanφ / a) ≈ 1e-5 m/s per step,
+    ## accumulating to ~1e-4 after 10 steps. With wrong metrics this would be O(1).
+    v_max = @allowscalar maximum(abs, interior(model.velocities.v))
+    w_max = @allowscalar maximum(abs, interior(model.velocities.w))
+
+    @test v_max < 0.1  # should be ≪ u₀
+    @test w_max < 0.1
+
+    ## u should not have drifted significantly from initial profile
+    u_max = @allowscalar maximum(abs, interior(model.velocities.u))
+    @test u_max < 2 * u₀  # should still be O(u₀)
+    @test !any(isnan, parent(model.momentum.ρu))
+    @test !any(isnan, parent(model.momentum.ρv))
+end
+
+#####
 ##### Explicit compressible time stepping on LatitudeLongitudeGrid
 #####
 
