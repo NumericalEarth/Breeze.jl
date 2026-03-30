@@ -14,6 +14,8 @@ using Breeze.AtmosphereModels:
     AtmosphereModel,
     SlowTendencyMode,
     dynamics_density,
+    transport_momentum,
+    transport_velocities,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
@@ -140,13 +142,16 @@ function compute_slow_momentum_tendencies!(model)
 
     model_fields = fields(model)
 
+    # Use transport momentum (contravariant for terrain-following grids)
+    advecting_momentum = transport_momentum(model)
+
     momentum_args = (
         dynamics_density(model.dynamics),
         model.advection.momentum,
         model.velocities,
         model.closure,
         model.closure_fields,
-        model.momentum,
+        advecting_momentum,
         model.coriolis,
         model.clock,
         model_fields)
@@ -195,12 +200,15 @@ function compute_slow_scalar_tendencies!(model)
 
     # Compute Gˢχ = full thermodynamic tendency (no correction needed)
     # Writes directly to model.timestepper.Gⁿ.ρθ (or other thermodynamic field)
+    # Use transport velocities (contravariant for terrain-following grids)
+    advecting_velocities = transport_velocities(model)
+
     common_args = (
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
         specific_prognostic_moisture(model),
-        model.velocities,
+        advecting_velocities,
         model.microphysics,
         model.microphysical_fields,
         model.closure,
