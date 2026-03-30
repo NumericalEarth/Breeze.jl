@@ -17,8 +17,36 @@
 using CloudMicrophysics.Utilities: ϵ_numerics
 using CloudMicrophysics.Microphysics1M: lambda_inverse, get_n0, get_v0, SF
 
-# gamma function from SpecialFunctions (via CloudMicrophysics)
-const Γ = SF.gamma
+# Lanczos approximation to the gamma function.
+# Uses only +, -, *, /, ^, exp, sqrt — all supported by StableHLO,
+# so this is guaranteed to raise through Reactant/XLA.
+# Accurate to ~15 digits for real z > 0.
+@inline function lanczos_gamma(z::T) where {T <: Real}
+    p = (T(0.99999999999980993),
+         T(676.5203681218851),
+         T(-1259.1392167224028),
+         T(771.32342877765313),
+         T(-176.61502916214059),
+         T(12.507343278686905),
+         T(-0.13857109526572012),
+         T(9.9843695780195716e-6),
+         T(1.5056327351493116e-7))
+
+    z′ = z - one(T)
+    x  = p[1]
+    x += p[2] / (z′ + one(T))
+    x += p[3] / (z′ + T(2))
+    x += p[4] / (z′ + T(3))
+    x += p[5] / (z′ + T(4))
+    x += p[6] / (z′ + T(5))
+    x += p[7] / (z′ + T(6))
+    x += p[8] / (z′ + T(7))
+    x += p[9] / (z′ + T(8))
+    t = z′ + T(7.5)
+    return sqrt(T(2π)) * t ^ (z′ + T(0.5)) * exp(-t) * x
+end
+
+const Γ = lanczos_gamma
 
 #####
 ##### Diffusional growth factor (TRANSLATION: uses Thermodynamics.jl in CloudMicrophysics)
