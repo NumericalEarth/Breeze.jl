@@ -733,21 +733,17 @@ end
                              categories.hydrometeor_velocities.rain,
                              categories.air_properties,
                              q, qʳ, ρ, T, constants)
-    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
-
     # Snow sublimation/deposition: snow ↔ vapor (positive = deposition)
     Sˢᵘᵇˡ = snow_sublimation_deposition(categories.snow,
                                         categories.hydrometeor_velocities.snow,
                                         categories.air_properties,
                                         q, qˢ, ρ, T, constants)
-    Sˢᵘᵇˡ = max(Sˢᵘᵇˡ, -max(0, qˢ) / τⁿᵘᵐ)
 
     # Snow melting: snow → rain (always non-negative)
     Sᵐᵉˡᵗ = snow_melting(categories.snow,
                          categories.hydrometeor_velocities.snow,
                          categories.air_properties,
                          qˢ, ρ, T, constants)
-    Sᵐᵉˡᵗ = min(Sᵐᵉˡᵗ, max(0, qˢ) / τⁿᵘᵐ)
 
     # Collection: cloud liquid → rain (does not involve vapor)
     Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
@@ -789,37 +785,92 @@ end
                              categories.collisions, qʳ, qˢ, ρ)
 
     # Thermal melt factor for warm accretion
-    α = warm_accretion_melt_factor(categories.snow, T, constants)
+    αᵐ = warm_accretion_melt_factor(categories.snow, T, constants)
 
     # Temperature routing (branchless)
     is_warm = T >= categories.snow.T_freeze
 
-    # Physics tendencies — conserved by construction: sum of all five = 0
-    ρqᵛ_phys  = ρ * (-Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ - Sˢᵘᵇˡ)
-    ρqᶜˡ_phys = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ - Sᵃᶜᶜˡˢ)
-    ρqᶜⁱ_phys = ρ * ( Sᵈᵉᵖ - Sᵃᶜⁿᵛⁱˢ - Sᵃᶜᶜⁱˢ - Sᵃᶜᶜⁱʳ)
-    ρqʳ_phys  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ - Sᵃᶜᶜʳⁱ + Sᵐᵉˡᵗ
-                     + ifelse(is_warm, Sᵃᶜᶜˡˢ + α * Sᵃᶜᶜˡˢ + Sˢʳ + α * Sʳˢ, zero(T))
-                     - ifelse(is_warm, zero(T), Sʳˢ))
-    ρqˢ_phys  = ρ * ( Sᵃᶜⁿᵛⁱˢ + Sᵃᶜᶜⁱˢ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ - Sᵐᵉˡᵗ
-                     + ifelse(is_warm, zero(T), Sᵃᶜᶜˡˢ + Sʳˢ)
-                     - ifelse(is_warm, α * Sᵃᶜᶜˡˢ + Sˢʳ + α * Sʳˢ, zero(T)))
+    # ===== Coupled per-reservoir sink limiting =====
+    #
+    # For each reservoir compute total sinks and a scaling factor α ∈ [0, 1]
+    # so that microphysics cannot deplete a species faster than qˣ / τⁿᵘᵐ.
 
-    # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
+    ε = eps(typeof(qᵛ))
+
+    # Vapor sinks: condensation (+), deposition (+), snow deposition (+)
+    vapor_sink = max(0, Sᶜᵒⁿᵈ) + max(0, Sᵈᵉᵖ) + max(0, Sˢᵘᵇˡ)
+    max_vapor  = max(0, qᵛ) / τⁿᵘᵐ
+    α_vapor    = ifelse(vapor_sink > max_vapor, max_vapor / max(vapor_sink, ε), one(qᵛ))
+
+    # Cloud liquid sinks: autoconversion, accretion by rain, accretion by snow, evaporation (Sᶜᵒⁿᵈ < 0)
+    cloud_sink = Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢ + max(0, -Sᶜᵒⁿᵈ)
+    max_cloud  = max(0, qᶜˡ) / τⁿᵘᵐ
+    α_cloud    = ifelse(cloud_sink > max_cloud, max_cloud / max(cloud_sink, ε), one(qᶜˡ))
+
+    # Cloud ice sinks: autoconversion, accretion by snow, accretion by rain, sublimation (Sᵈᵉᵖ < 0)
+    ice_sink = Sᵃᶜⁿᵛⁱˢ + Sᵃᶜᶜⁱˢ + Sᵃᶜᶜⁱʳ + max(0, -Sᵈᵉᵖ)
+    max_ice  = max(0, qᶜⁱ) / τⁿᵘᵐ
+    α_ice    = ifelse(ice_sink > max_ice, max_ice / max(ice_sink, ε), one(qᶜⁱ))
+
+    # Rain sinks: evaporation, ice-rain accretion, cold rain-snow collision
+    rain_sink = max(0, -Sᵉᵛᵃᵖ) + Sᵃᶜᶜʳⁱ + ifelse(is_warm, zero(T), Sʳˢ)
+    max_rain  = max(0, qʳ) / τⁿᵘᵐ
+    α_rain    = ifelse(rain_sink > max_rain, max_rain / max(rain_sink, ε), one(qʳ))
+
+    # Snow sinks: sublimation (Sˢᵘᵇˡ < 0), melting, warm pathway losses
+    snow_sink = max(0, -Sˢᵘᵇˡ) + Sᵐᵉˡᵗ + ifelse(is_warm, αᵐ * Sᵃᶜᶜˡˢ + Sˢʳ + αᵐ * Sʳˢ, zero(T))
+    max_snow  = max(0, qˢ) / τⁿᵘᵐ
+    α_snow    = ifelse(snow_sink > max_snow, max_snow / max(snow_sink, ε), one(qˢ))
+
+    # ===== Apply coupled limiting =====
+
+    # Phase changes: split by sign, scale by depleted reservoir
+    Sᶜᵒⁿᵈ_lim = α_vapor * max(0, Sᶜᵒⁿᵈ) - α_cloud * max(0, -Sᶜᵒⁿᵈ)
+    Sᵈᵉᵖ_lim  = α_vapor * max(0, Sᵈᵉᵖ)  - α_ice   * max(0, -Sᵈᵉᵖ)
+    Sˢᵘᵇˡ_lim  = α_vapor * max(0, Sˢᵘᵇˡ)  - α_snow  * max(0, -Sˢᵘᵇˡ)
+    Sᵉᵛᵃᵖ_lim  = α_rain  * Sᵉᵛᵃᵖ
+    Sᵐᵉˡᵗ_lim  = α_snow  * Sᵐᵉˡᵗ
+
+    # Collection: scaled by source reservoir
+    Sᵃᶜⁿᵛ_lim  = α_cloud * Sᵃᶜⁿᵛ
+    Sᵃᶜᶜ_lim   = α_cloud * Sᵃᶜᶜ
+    Sᵃᶜᶜˡˢ_lim = α_cloud * Sᵃᶜᶜˡˢ
+    Sᵃᶜⁿᵛⁱˢ_lim = α_ice * Sᵃᶜⁿᵛⁱˢ
+    Sᵃᶜᶜⁱˢ_lim  = α_ice * Sᵃᶜᶜⁱˢ
+    Sᵃᶜᶜⁱʳ_lim  = α_ice * Sᵃᶜᶜⁱʳ
+
+    # Cross-category collisions: scaled by the reservoir being depleted
+    Sᵃᶜᶜʳⁱ_lim = α_rain * Sᵃᶜᶜʳⁱ
+    Sʳˢ_lim     = α_rain * Sʳˢ
+    Sˢʳ_lim     = α_snow * Sˢʳ
+
+    # Physics tendencies — conserved by construction: sum of all five = 0
+    ρqᵛ_phys  = ρ * (-Sᶜᵒⁿᵈ_lim - Sᵈᵉᵖ_lim - Sᵉᵛᵃᵖ_lim - Sˢᵘᵇˡ_lim)
+    ρqᶜˡ_phys = ρ * ( Sᶜᵒⁿᵈ_lim - Sᵃᶜⁿᵛ_lim - Sᵃᶜᶜ_lim - Sᵃᶜᶜˡˢ_lim)
+    ρqᶜⁱ_phys = ρ * ( Sᵈᵉᵖ_lim - Sᵃᶜⁿᵛⁱˢ_lim - Sᵃᶜᶜⁱˢ_lim - Sᵃᶜᶜⁱʳ_lim)
+    ρqʳ_phys  = ρ * ( Sᵃᶜⁿᵛ_lim + Sᵃᶜᶜ_lim + Sᵉᵛᵃᵖ_lim - Sᵃᶜᶜʳⁱ_lim + Sᵐᵉˡᵗ_lim
+                     + ifelse(is_warm, Sᵃᶜᶜˡˢ_lim + αᵐ * Sᵃᶜᶜˡˢ_lim + Sˢʳ_lim + αᵐ * Sʳˢ_lim, zero(T))
+                     - ifelse(is_warm, zero(T), Sʳˢ_lim))
+    ρqˢ_phys  = ρ * ( Sᵃᶜⁿᵛⁱˢ_lim + Sᵃᶜᶜⁱˢ_lim + Sᵃᶜᶜⁱʳ_lim + Sᵃᶜᶜʳⁱ_lim + Sˢᵘᵇˡ_lim - Sᵐᵉˡᵗ_lim
+                     + ifelse(is_warm, zero(T), Sᵃᶜᶜˡˢ_lim + Sʳˢ_lim)
+                     - ifelse(is_warm, αᵐ * Sᵃᶜᶜˡˢ_lim + Sˢʳ_lim + αᵐ * Sʳˢ_lim, zero(T)))
+
+    # ===== Numerical relaxation guards =====
+    # Conserved by routing each correction to its exchange partner.
     # When q < 0, replace with -ρq/τ and route the delta to the coupled tracer:
     #   v→cl (condensation), cl→r (collection), ci→v (deposition), r→v (evaporation).
     # This preserves ρqᵛ + ρqᶜˡ + ρqᶜⁱ + ρqʳ + ρqˢ = 0 regardless of which guards fire.
-    # Snow has no correction — rate limiters on sublimation and melting suffice.
     δᵛ  = ifelse(qᵛ  >= 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
     δᶜˡ = ifelse(qᶜˡ >= 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τᶜˡ  - ρqᶜˡ_phys)
     δᶜⁱ = ifelse(qᶜⁱ >= 0, zero(ρqᶜⁱ_phys), -ρ * qᶜⁱ / τᶜⁱ  - ρqᶜⁱ_phys)
     δʳ  = ifelse(qʳ  >= 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
+    δˢ  = ifelse(qˢ  >= 0, zero(ρqˢ_phys),  -ρ * qˢ  / τⁿᵘᵐ - ρqˢ_phys)
 
-    ρqᵛ  = ρqᵛ_phys  + δᵛ  - δᶜⁱ - δʳ
+    ρqᵛ  = ρqᵛ_phys  + δᵛ  - δᶜⁱ - δʳ - δˢ
     ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
     ρqᶜⁱ = ρqᶜⁱ_phys + δᶜⁱ
     ρqʳ  = ρqʳ_phys  + δʳ  - δᶜˡ
-    ρqˢ  = ρqˢ_phys
+    ρqˢ  = ρqˢ_phys  + δˢ
 
     return (; ρqᵛ, ρqᶜˡ, ρqᶜⁱ, ρqʳ, ρqˢ)
 end
