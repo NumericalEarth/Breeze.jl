@@ -184,13 +184,14 @@ microphysics = OneMomentCloudMicrophysics(; cloud_formation)
 weno = WENO(order=5)
 bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
 
+closure = DynamicSmagorinsky(schedule=IterationInterval(5))
 momentum_advection = weno
 scalar_advection = (ρθ = weno,
                     ρqᵉ = bounds_preserving_weno,
                     ρqᶜˡ = bounds_preserving_weno,
                     ρqʳ = bounds_preserving_weno)
 
-model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
+model = AtmosphereModel(grid; dynamics, coriolis, microphysics, closure,
                         momentum_advection, scalar_advection, forcing, boundary_conditions)
 
 # ## Initial conditions
