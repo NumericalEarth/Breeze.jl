@@ -46,7 +46,8 @@ using CloudMicrophysics.Microphysics1M: lambda_inverse, get_n0, get_v0, SF
     return sqrt(T(2π)) * t ^ (z′ + T(0.5)) * exp(-t) * x
 end
 
-const Γ = lanczos_gamma
+# const Γ = lanczos_gamma
+const Γ = SF.gamma
 
 #####
 ##### Diffusional growth factor (TRANSLATION: uses Thermodynamics.jl in CloudMicrophysics)
