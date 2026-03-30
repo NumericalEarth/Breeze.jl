@@ -31,6 +31,9 @@ using CloudMicrophysics.Parameters:
     Chen2022VelTypeRain,
     AerosolActivationParameters
 
+using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ
+using Breeze.Thermodynamics: exner_function
+
 # Use qualified access to avoid conflicts with Microphysics1M
 # CM2 is imported as a module alias in BreezeCloudMicrophysicsExt.jl
 # CMAM (AerosolModel) is imported in BreezeCloudMicrophysicsExt.jl
@@ -506,6 +509,56 @@ end
 @inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρnʳ})
     wʳₙ = μ.wʳₙ
     return (; u = ZeroField(), v = ZeroField(), w = wʳₙ)
+end
+
+#####
+##### Precipitation sedimentation tendency for thermodynamic variables
+#####
+#
+# Liquid water (both cloud and rain: qˡ = qᶜˡ + qʳ) sediments at respective terminal velocities
+# (wᶜˡ and wʳ). Since θ_li and static energy e contain latent heat terms proportional to total
+# liquid water, the missing latent heat flux divergence due to sedimentation is added here
+# as a grid_microphysical_tendency.
+#
+# To avoid unphysical numerical oscillations around sharp gradients, the face values of ρq
+# are reconstructed using 1st-order upwinding:
+#   F = w · (-ℒˡᵣ) · ρq_upwind
+# and the tendency is -V⁻¹ δz(F).
+#
+# Note: the mass sedimentation for ρqʳ uses Oceananigans' configured advection scheme,
+# which may differ from the 1st-order upwinding used here. This introduces a small
+# discrete inconsistency between the energy and mass sedimentation fluxes.
+#####
+
+# Vertical flux of liquid water latent heat contribution on z-faces.
+# Terminal velocities live on z-faces; mass densities are reconstructed via
+# 1st-order upwinding (since sedimentation is downward, upstream is generally k).
+@inline function sedimentation_latent_heat_flux_z(i, j, k, grid, ℒˡᵣ, wᶜˡ, wʳ, ρqᶜˡ, ρqʳ)
+    @inbounds wᶜˡ_face = wᶜˡ[i, j, k]
+    @inbounds wʳ_face = wʳ[i, j, k]
+
+    # Upwind differencing: terminal velocities are typically <= 0 (downward).
+    @inbounds ρqᶜˡ_upwind = ifelse(wᶜˡ_face <= 0, ρqᶜˡ[i, j, k], ρqᶜˡ[i, j, k-1])
+    @inbounds ρqʳ_upwind  = ifelse(wʳ_face <= 0, ρqʳ[i, j, k], ρqʳ[i, j, k-1])
+
+    return -ℒˡᵣ * (wᶜˡ_face * ρqᶜˡ_upwind + wʳ_face * ρqʳ_upwind)
+end
+
+# Sedimentation tendency for ρe: flux divergence of liquid latent heat.
+@inline function AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρe}, ρ, μ, 𝒰, constants, velocities)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    sedimentation = -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_latent_heat_flux_z, ℒˡᵣ, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ)
+    return sedimentation
+end
+
+# Sedimentation tendency for ρθ: same flux divergence scaled by 1/(cᵖᵐ Π).
+@inline function AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρθ}, ρ, μ, 𝒰, constants, velocities)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    q = 𝒰.moisture_mass_fractions
+    Π = exner_function(𝒰, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    sedimentation = -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_latent_heat_flux_z, ℒˡᵣ, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ)
+    return sedimentation / (cᵖᵐ * Π)
 end
 
 #####
