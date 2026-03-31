@@ -52,6 +52,8 @@ grid = RectilinearGrid(GPU(); x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
+FT = eltype(grid)
+
 # ## Reference state and formulation
 #
 # We use the anelastic formulation with a dry adiabatic reference state.
@@ -94,6 +96,25 @@ T₀ = 299.8    # Sea surface temperature (K)
 # Here we can use the values from [vanZanten2011](@citet) verbatim because
 # we use the recommended vertical grid spacing of 40 m.
 
+# ## Mean profiles
+#
+# Piecewise linear functions are provided by [vanZanten2011](@citet):
+#
+#    - Liquid-ice potential temperature ``θ^{\ell i}(z)``
+#    - Total water specific humidity ``q^t(z)``
+#    - Zonal velocity ``u(z)`` and meridional velocity ``v(z)``
+#
+# The profiles are implemented in the wonderfully useful
+# [AtmosphericProfilesLibrary](https://github.com/CliMA/AtmosphericProfilesLibrary.jl)
+# package developed by the Climate Modeling Alliance.
+#
+# These are used for initial conditions and sponge layer.
+
+θˡⁱ₀ = AtmosphericProfilesLibrary.Rico_θ_liq_ice(FT)
+qᵗ₀ = AtmosphericProfilesLibrary.Rico_q_tot(FT)
+u₀ = AtmosphericProfilesLibrary.Rico_u(FT)
+v₀ = AtmosphericProfilesLibrary.Rico_v(FT)
+
 # ## Sponge layer
 #
 # To prevent spurious wave reflections from the upper boundary, we add a Rayleigh
@@ -102,7 +123,29 @@ T₀ = 299.8    # Sea surface temperature (K)
 
 sponge_rate = 1/8  # s⁻¹ - relaxation rate (8 s timescale)
 sponge_mask = GaussianMask{:z}(center=4000, width=200) # sponge layer thickness ≈ 500 m
-sponge = Relaxation(rate=sponge_rate, mask=sponge_mask)
+
+w_sponge = Relaxation(rate=sponge_rate, mask=sponge_mask)
+
+# It would be nice to be able to sponge towards the reference liquid-ice potential
+# temperature, but the issue is we need to multiply by density, which is a 1-D Field.
+# This is then no longer callable. Passing in a Field is also problematic because there's no
+# pathway to resolve that Field reference inside materialize_forcing for GPU adaptation.
+#
+# Instead, we use a DiscreteForcing with parameters so that Oceananigans properly adapts
+# them for GPU.
+
+ρᵣ = reference_state.density
+ρθˡⁱ₀ = Field{Nothing, Nothing, Center}(grid)
+set!(ρθˡⁱ₀, z -> θˡⁱ₀(z))
+set!(ρθˡⁱ₀, ρᵣ * ρθˡⁱ₀)
+ρθˡⁱ₀_data = Oceananigans.interior(ρθˡⁱ₀, 1, 1, :)
+
+@inline function ρθ_sponge_func(i, j, k, grid, clock, model_fields, p)
+    z = znode(k, grid, Center())
+    return p.rate * p.mask(0, 0, z) * (@inbounds p.target[k] - model_fields.ρθ[i, j, k])
+end
+ρθ_sponge = Forcing(ρθ_sponge_func; discrete_form=true,
+                    parameters=(rate=sponge_rate, mask=sponge_mask, target=ρθˡⁱ₀_data))
 
 # ## Large-scale subsidence
 #
@@ -110,7 +153,6 @@ sponge = Relaxation(rate=sponge_rate, mask=sponge_mask)
 # The subsidence velocity profile increases linearly to ``-0.005`` m/s at 2260 m and
 # remains constant above [vanZanten2011](@cite),
 
-FT = eltype(grid)
 wˢ_profile = AtmosphericProfilesLibrary.Rico_subsidence(FT)
 wˢ = Field{Nothing, Nothing, Face}(grid)
 set!(wˢ, z -> wˢ_profile(z))
@@ -159,9 +201,9 @@ set!(∂t_ρθ_large_scale, ρᵣ * ∂t_θ_large_scale)
 
 Fρu = (subsidence, geostrophic.ρu)
 Fρv = (subsidence, geostrophic.ρv)
-Fρw = sponge
+Fρw = w_sponge
 Fρqᵉ = (subsidence, ∂t_ρqᵉ_large_scale_forcing)
-Fρθ = (subsidence, ρθ_large_scale_forcing)
+Fρθ = (ρθ_sponge, subsidence, ρθ_large_scale_forcing)
 
 forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵉ=Fρqᵉ, ρθ=Fρθ)
 boundary_conditions = (ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
@@ -195,23 +237,9 @@ model = AtmosphereModel(grid; dynamics, coriolis, microphysics, closure,
                         momentum_advection, scalar_advection, forcing, boundary_conditions)
 
 # ## Initial conditions
-#
-# Mean profiles are specified as piecewise linear functions by [vanZanten2011](@citet):
-#
-#    - Liquid-ice potential temperature ``θ^{\ell i}(z)``
-#    - Total water specific humidity ``q^t(z)``
-#    - Zonal velocity ``u(z)`` and meridional velocity ``v(z)``
-#
-# The profiles are implemented in the wonderfully useful
-# [AtmosphericProfilesLibrary](https://github.com/CliMA/AtmosphericProfilesLibrary.jl)
-# package developed by the Climate Modeling Alliance,
 
-θˡⁱ₀ = AtmosphericProfilesLibrary.Rico_θ_liq_ice(FT)
-qᵗ₀ = AtmosphericProfilesLibrary.Rico_q_tot(FT)
-u₀ = AtmosphericProfilesLibrary.Rico_u(FT)
-v₀ = AtmosphericProfilesLibrary.Rico_v(FT)
-
-# We add a small random perturbation below 1500 m to trigger convection.
+# Mean profiles from [vanZanten2011](@citet) with a small random perturbation below
+# 1500 m to trigger convection.
 
 zϵ = 1500 # m
 
