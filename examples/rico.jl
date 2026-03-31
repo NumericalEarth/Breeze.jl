@@ -223,10 +223,12 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 microphysics = OneMomentCloudMicrophysics(; cloud_formation)
 
+closure = DynamicSmagorinsky(schedule = IterationInterval(5), # recompute Cₛ every 5 steps
+                             averaging = (1,2))
+
 weno = WENO(order=5)
 bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
 
-closure = DynamicSmagorinsky(schedule=IterationInterval(5))
 momentum_advection = weno
 scalar_advection = (ρθ = weno,
                     ρqᵉ = bounds_preserving_weno,
@@ -323,8 +325,6 @@ simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filen
 # - xz-slices of qᶜˡ (cloud liquid) and qʳ (rain mass fraction)
 # - xy-slice of w (vertical velocity) with qˡ contours overlaid
 
-w = model.velocities.w
-
 z = Oceananigans.Grids.znodes(grid, Center())
 k = searchsortedfirst(z, 1500)  # cloud layer height for RICO
 @info "Saving xy slices at z = $(z[k]) m (k = $k)"
@@ -343,7 +343,7 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
                                                 schedule = TimeInterval(output_interval),
                                                 overwrite_existing = true)
 
-# We're finally ready to run this thing,
+# We're finally ready to run this thing.
 
 run!(simulation)
 
