@@ -168,25 +168,10 @@ end
     return (ℂ²ᶠ / θᶠ * δz_ρθ / Δzᶠ + ρᶠ * g) * (k > 1)
 end
 
-## ρθ: cancel vertical advective flux
-@inline AtmosphereModels.vertical_acoustic_correction_ρθ(i, j, k, grid,
-        dynamics::CompressibleDynamics, formulation, velocities) =
-    _vac_ρθ(i, j, k, grid, dynamics.vertical_acoustic_solver, formulation, velocities)
-
-@inline _vac_ρθ(i, j, k, grid, ::Nothing, formulation, velocities) = zero(grid)
-
-@inline function _vac_ρθ(i, j, k, grid, ::VerticalAcousticSolver, formulation, velocities)
-    ρθ = formulation.potential_temperature_density
-    w = velocities.w
-    Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
-    @inbounds begin
-        ρθᶠ_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρθ)
-        w_top = w[i, j, k + 1]
-        ρθᶠ_bot = ℑzᵃᵃᶠ(i, j, k, grid, ρθ)
-        w_bot = w[i, j, k]
-    end
-    return (ρθᶠ_top * w_top - ρθᶠ_bot * w_bot) / Δzᶜ
-end
+## ρθ: no correction needed. The acoustic coupling for ρθ is handled entirely
+## by the Helmholtz solve + back-solve. The explicit advection (div_ρUc) stays explicit.
+## Subtracting vertical ρθ advection here would create an interpolation mismatch
+## with the advection scheme (e.g., WENO vs centered) and cause instability.
 
 #####
 ##### Helmholtz: [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] δρθ = -αΔt ∂z(θᶠ ρw*)
