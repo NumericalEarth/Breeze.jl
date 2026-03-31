@@ -418,11 +418,28 @@ end
 function _set_exner_reference!(substepper, model, ::Nothing, pˢᵗ, κ)
     grid = model.grid
     arch = architecture(grid)
-    fill!(parent(substepper.reference_exner_function), 0)
+
+    p_ref = model.dynamics.terrain_reference_pressure
+    if p_ref !== nothing
+        # With terrain-following coordinates, use the 3D terrain reference pressure
+        # to define a proper reference Exner function πᵣ = (p_ref/pˢᵗ)^κ.
+        # This keeps π' = π - πᵣ small (perturbation), which is essential for
+        # numerical stability of the split-explicit acoustic substepping.
+        launch!(arch, grid, :xyz, _compute_reference_exner_from_pressure!,
+                substepper.reference_exner_function, p_ref, pˢᵗ, κ)
+    else
+        fill!(parent(substepper.reference_exner_function), 0)
+    end
+
     launch!(arch, grid, :xyz, _recompute_pi_prime!,
             substepper.exner_perturbation, substepper.filtered_exner_perturbation,
             model.dynamics.pressure, substepper.reference_exner_function, pˢᵗ, κ)
     return nothing
+end
+
+@kernel function _compute_reference_exner_from_pressure!(πᵣ, p_ref, pˢᵗ, κ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds πᵣ[i, j, k] = (p_ref[i, j, k] / pˢᵗ)^κ
 end
 
 @inline reference_exner(i, j, k, ::Nothing, pˢᵗ, κ) = zero(pˢᵗ)
