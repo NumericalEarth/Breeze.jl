@@ -399,7 +399,7 @@ end
     return nothing
 end
 
-@inline function _cloud_terminal_velocity(
+@inline function cloud_terminal_velocity(
     pdf_c, (; ρw, grav, ν_air), q_liq, ρₐ, N_liq,
 )
     # Local copy of CM2.cloud_terminal_velocity with 2//3 → FT(2/3)
@@ -441,8 +441,8 @@ end
     Nʳ = max(ρ * max(0, nʳ), Nʳ_min)
 
     # Cloud liquid terminal velocities: (number-weighted, mass-weighted)
-    𝕎_cl = _cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
-                                    qᶜˡ⁺, ρ, Nᶜˡ)
+    𝕎_cl = cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
+                                   qᶜˡ⁺, ρ, Nᶜˡ)
 
     wᶜˡₙ = -𝕎_cl[1]  # number-weighted, negative = downward
     wᶜˡ = -𝕎_cl[2]   # mass-weighted
