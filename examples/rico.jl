@@ -101,7 +101,7 @@ T₀ = 299.8    # Sea surface temperature (K)
 # velocity toward zero using Oceananigans' `Relaxation` forcing with a `GaussianMask`.
 
 sponge_rate = 1/8  # s⁻¹ - relaxation rate (8 s timescale)
-sponge_mask = GaussianMask{:z}(center=3500, width=500)
+sponge_mask = GaussianMask{:z}(center=4000, width=200) # sponge layer thickness ≈ 500 m
 sponge = Relaxation(rate=sponge_rate, mask=sponge_mask)
 
 # ## Large-scale subsidence
