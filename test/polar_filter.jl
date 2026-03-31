@@ -196,12 +196,62 @@ end
 end
 
 #####
+##### GPU filtering correctness tests
+#####
+
+@testset "Low wavenumber preserved on $(default_arch) [$(FT)]" for FT in test_float_types()
+    grid = build_polar_filter_test_grid(default_arch; FT)
+    pf = PolarFilter(grid; threshold_latitude=60)
+
+    f = CenterField(grid)
+    set!(f, (λ, φ, z) -> cosd(λ))
+    f_orig = deepcopy(Array(interior(f)))
+
+    apply_polar_filter!(pf, f)
+
+    @test maximum(abs, Array(interior(f)) .- f_orig) < 100 * eps(FT)
+end
+
+@testset "High wavenumber removed on $(default_arch) [$(FT)]" for FT in test_float_types()
+    grid = build_polar_filter_test_grid(default_arch; FT)
+
+    pf = PolarFilter(grid; threshold_latitude=60, filter_mode=SharpTruncation())
+    f = CenterField(grid)
+    set!(f, (λ, φ, z) -> cosd(17λ))
+    apply_polar_filter!(pf, f)
+
+    j_high = pf.filtered_indices[1]
+    data = Array(interior(f))
+    rms_high = sqrt(sum(data[:, j_high, 1] .^ 2) / grid.Nx)
+    @test rms_high < 100 * eps(FT)
+end
+
+@testset "Equatorial latitudes unchanged on $(default_arch) [$(FT)]" for FT in test_float_types()
+    grid = build_polar_filter_test_grid(default_arch; FT)
+    pf = PolarFilter(grid; threshold_latitude=60)
+
+    f = CenterField(grid)
+    set!(f, (λ, φ, z) -> cosd(17λ) * cosd(φ))
+    f_orig = deepcopy(Array(interior(f)))
+
+    apply_polar_filter!(pf, f)
+
+    φ = φnodes(grid, Center())
+    data = Array(interior(f))
+    for j in 1:grid.Ny
+        if abs(φ[j]) <= 60
+            @test maximum(abs, data[:, j, :] .- f_orig[:, j, :]) < eps(FT)
+        end
+    end
+end
+
+#####
 ##### Callback integration test
 #####
 
 @testset "add_polar_filter! callback [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = build_polar_filter_test_grid(CPU(); FT, Nx=36, Ny=34, Nz=4)
+    grid = build_polar_filter_test_grid(default_arch; FT, Nx=36, Ny=34, Nz=4)
 
     dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                     surface_pressure = 100000,

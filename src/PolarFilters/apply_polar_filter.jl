@@ -26,11 +26,14 @@ function apply_polar_filter!(filter::PolarFilter, field)
     buf_c = filter.buffer_complex
     data = interior(field)
 
+    ## Bring interior data to CPU for FFT processing
+    data_cpu = Array(data)
+
     ## Gather filtered rows into buffer_real
     for (row, j) in enumerate(filter.filtered_indices)
         for k in 1:Nz
             batch = (row - 1) * Nz + k
-            @views buf_r[:, batch] .= data[:, j, k]
+            @views buf_r[:, batch] .= data_cpu[:, j, k]
         end
     end
 
@@ -45,17 +48,20 @@ function apply_polar_filter!(filter::PolarFilter, field)
         end
     end
 
-    ## Inverse brfft (batched along dim 1) — brfft is unnormalized
+    ## Inverse brfft (batched along dim 1) — brfft is unnormalized, apply 1/Nλ
     buf_r .= filter.inverse_plan * buf_c
+    buf_r .*= 1 / Nλ
 
-    ## Scatter back into field (with 1/Nλ normalization)
-    inv_Nλ = 1 / Nλ
+    ## Scatter filtered rows back into the CPU copy
     for (row, j) in enumerate(filter.filtered_indices)
         for k in 1:Nz
             batch = (row - 1) * Nz + k
-            @views data[:, j, k] .= buf_r[:, batch] .* inv_Nλ
+            @views data_cpu[:, j, k] .= buf_r[:, batch]
         end
     end
+
+    ## Copy the full array back to the device
+    copyto!(data, data_cpu)
 
     return nothing
 end

@@ -10,6 +10,11 @@ using Oceananigans.Utils: sum_of_velocities
 @inline div_ρUc(i, j, k, grid, args...) = zero(grid)
 @inline c_div_ρU(i, j, k, grid, args...) = zero(grid)
 
+# Vertically implicit: zero out vertical PGF and buoyancy from explicit tendency
+# (handled by the implicit Helmholtz solve + back-solve instead).
+@inline explicit_z_pressure_gradient(i, j, k, grid, dynamics) = z_pressure_gradient(i, j, k, grid, dynamics)
+@inline explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid, args...) = buoyancy_forceᶜᶜᶠ(i, j, k, grid, args...)
+
 """
     ∇_dot_Jᶜ(i, j, k, grid, ρ, closure::AbstractTurbulenceClosure, closure_fields,
              id, c, clock, model_fields, buoyancy)
@@ -106,9 +111,9 @@ end
 
     return ( - div_𝐯w(i, j, k, grid, advection, momentum, velocities.w)
              - U_dot_∇w_metric(i, j, k, grid, advection, momentum, velocities)
-             - z_pressure_gradient(i, j, k, grid, dynamics)
-             + buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, temperature,
-                                 specific_prognostic_moisture, microphysics, microphysical_fields, constants)
+             - explicit_z_pressure_gradient(i, j, k, grid, dynamics)
+             + explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, temperature,
+                                           specific_prognostic_moisture, microphysics, microphysical_fields, constants)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
              + ρw_forcing(i, j, k, grid, clock, model_fields))
