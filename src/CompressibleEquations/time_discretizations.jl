@@ -59,6 +59,35 @@ All tendencies (including pressure gradient and acoustic modes) are computed
 together and time-stepped explicitly. This requires small time steps limited
 by the acoustic CFL condition (sound speed ~340 m/s).
 
-Use [`SplitExplicitTimeDiscretization`](@ref) for more efficient time-stepping with larger Δt.
+Use [`SplitExplicitTimeDiscretization`](@ref) or
+[`VerticallyImplicitTimeStepping`](@ref) for more efficient time-stepping with larger Δt.
 """
 struct ExplicitTimeStepping end
+
+"""
+$(TYPEDEF)
+
+Vertically implicit time discretization for compressible dynamics.
+
+Treats vertical acoustic propagation implicitly by decomposing the vertical
+pressure gradient and vertical ρθ advective flux into linear and nonlinear
+parts. The linear vertical acoustic coupling between ρw and ρθ is solved
+via a tridiagonal system (backward Euler) after each explicit SSP-RK3 stage,
+while all other terms remain explicit.
+
+The tridiagonal equation for the implicit correction is:
+
+```math
+\\left[I - (α Δt)^2 \\partial_z (\\mathbb{C}^{ac2} \\partial_z)\\right] (ρθ)^+ = (ρθ)^*
+```
+
+followed by a back-solve for ``(ρw)^+``. The linearization state (θ and ℂᵃᶜ²)
+comes from the most recent `update_state!` call.
+
+This eliminates the vertical acoustic CFL constraint, allowing time steps limited
+only by the horizontal acoustic CFL and advective CFL — typically ~30x larger
+than [`ExplicitTimeStepping`](@ref) for kilometer-scale vertical grids.
+
+See also [`ExplicitTimeStepping`](@ref), [`SplitExplicitTimeDiscretization`](@ref).
+"""
+struct VerticallyImplicitTimeStepping end

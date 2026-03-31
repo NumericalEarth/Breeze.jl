@@ -31,6 +31,9 @@ export
     AcousticSubstepper,
     SplitExplicitTimeDiscretization,
     ExplicitTimeStepping,
+    VerticallyImplicitTimeStepping,
+    VerticalAcousticSolver,
+    vertical_acoustic_implicit_step!,
     prepare_acoustic_cache!,
     acoustic_rk3_substep_loop!,
     acoustic_substep_loop!
@@ -58,6 +61,7 @@ const CompressibleModel = AtmosphereModel{<:CompressibleDynamics}
 
 include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
+include("vertical_implicit_solver.jl")
 include("acoustic_substepping.jl")
 
 end # module

@@ -93,6 +93,9 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(dynamics.pressure)
 
+    # Compute ℂᵃᶜ² for vertically implicit time stepping (no-op otherwise)
+    _compute_ℂᵃᶜ²!(model, dynamics.vertical_acoustic_solver)
+
     return nothing
 end
 

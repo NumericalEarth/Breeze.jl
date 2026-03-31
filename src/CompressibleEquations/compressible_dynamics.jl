@@ -14,21 +14,24 @@ Fields
 - `pressure`: Diagnostic pressure field p = ρ Rᵐ T
 - `standard_pressure`: Reference pressure pˢᵗ for potential temperature (default 10⁵ Pa)
 - `surface_pressure`: Mean pressure at the bottom of the atmosphere p₀
-- `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref) or [`ExplicitTimeStepping`](@ref))
+- `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref), [`ExplicitTimeStepping`](@ref), or [`VerticallyImplicitTimeStepping`](@ref))
 - `reference_state`: Fixed hydrostatically-balanced reference state for base-state pressure correction (`nothing` or [`ExnerReferenceState`](@ref))
+- `vertical_acoustic_solver`: [`VerticalAcousticSolver`](@ref) for implicit vertical acoustic correction (`nothing` unless using [`VerticallyImplicitTimeStepping`](@ref))
 
 The `time_discretization` determines how tendencies are computed and which
 time-stepper is used:
 - [`SplitExplicitTimeDiscretization`](@ref): Acoustic substepping with separate slow/fast tendencies
 - [`ExplicitTimeStepping`](@ref): All tendencies computed together (small Δt required)
+- [`VerticallyImplicitTimeStepping`](@ref): Vertical acoustics implicit, horizontal explicit
 """
-struct CompressibleDynamics{TD, D, P, FT, RS}
-    time_discretization :: TD # SplitExplicitTimeDiscretization or ExplicitTimeStepping
-    density :: D              # ρ (prognostic)
-    pressure :: P             # p = ρ R^m T (diagnostic)
-    standard_pressure :: FT   # pˢᵗ (reference pressure for potential temperature)
-    surface_pressure :: FT    # p₀ (mean pressure at the bottom of the atmosphere)
-    reference_state :: RS     # ExnerReferenceState for base-state pressure correction (or Nothing)
+struct CompressibleDynamics{TD, D, P, FT, RS, VAS}
+    time_discretization :: TD      # SplitExplicitTimeDiscretization, ExplicitTimeStepping, or VerticallyImplicitTimeStepping
+    density :: D                   # ρ (prognostic)
+    pressure :: P                  # p = ρ R^m T (diagnostic)
+    standard_pressure :: FT        # pˢᵗ (reference pressure for potential temperature)
+    surface_pressure :: FT         # p₀ (mean pressure at the bottom of the atmosphere)
+    reference_state :: RS          # ExnerReferenceState for base-state pressure correction (or Nothing)
+    vertical_acoustic_solver :: VAS # VerticalAcousticSolver for implicit vertical acoustics (or Nothing)
 end
 
 """
@@ -41,7 +44,8 @@ Positional Arguments
 ====================
 
 - `time_discretization`: Time discretization scheme. Default: [`ExplicitTimeStepping`](@ref).
-  Use [`SplitExplicitTimeDiscretization`](@ref) for acoustic substepping.
+  Use [`SplitExplicitTimeDiscretization`](@ref) for acoustic substepping or
+  [`VerticallyImplicitTimeStepping`](@ref) for implicit vertical acoustics.
 
 Keyword Arguments
 =================
@@ -62,7 +66,7 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     pˢᵗ = convert(FT, standard_pressure)
     p₀ = convert(FT, surface_pressure)
     # Store reference_potential_temperature temporarily; ExnerReferenceState is built in materialize_dynamics
-    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, reference_potential_temperature)
+    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, reference_potential_temperature, nothing)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
@@ -71,7 +75,8 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.pressure),
                          dynamics.standard_pressure,
                          dynamics.surface_pressure,
-                         adapt(to, dynamics.reference_state))
+                         adapt(to, dynamics.reference_state),
+                         adapt(to, dynamics.vertical_acoustic_solver))
 
 #####
 ##### Materialization
@@ -110,8 +115,11 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
                                               standard_pressure)
     end
 
+    vertical_acoustic_solver = materialize_vertical_acoustic_solver(dynamics.time_discretization, grid)
+
     return CompressibleDynamics(dynamics.time_discretization, density, pressure,
-                                standard_pressure, surface_pressure, reference_state)
+                                standard_pressure, surface_pressure, reference_state,
+                                vertical_acoustic_solver)
 end
 
 #####
@@ -216,6 +224,7 @@ AtmosphereModels.default_timestepper(dynamics::CompressibleDynamics) =
 
 default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticSSPRungeKutta3
 default_timestepper(::ExplicitTimeStepping) = :SSPRungeKutta3
+default_timestepper(::VerticallyImplicitTimeStepping) = :SSPRungeKutta3
 
 #####
 ##### Show methods
@@ -223,6 +232,7 @@ default_timestepper(::ExplicitTimeStepping) = :SSPRungeKutta3
 
 Base.summary(::SplitExplicitTimeDiscretization) = "SplitExplicitTimeDiscretization"
 Base.summary(::ExplicitTimeStepping) = "ExplicitTimeStepping"
+Base.summary(::VerticallyImplicitTimeStepping) = "VerticallyImplicitTimeStepping"
 
 function Base.summary(dynamics::CompressibleDynamics)
     td = summary(dynamics.time_discretization)

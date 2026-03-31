@@ -10,6 +10,7 @@ using Oceananigans.TimeSteppers:
     implicit_step!
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
+using Breeze.CompressibleEquations: vertical_acoustic_implicit_step!
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 """
@@ -197,6 +198,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     compute_flux_bc_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α¹)
+    vertical_acoustic_implicit_step!(model, α¹ * Δt)
 
     compute_pressure_correction!(model, Δt)
     make_pressure_correction!(model, Δt)
@@ -211,6 +213,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     compute_flux_bc_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α²)
+    vertical_acoustic_implicit_step!(model, α² * Δt)
 
     compute_pressure_correction!(model, α² * Δt)
     make_pressure_correction!(model, α² * Δt)
@@ -225,6 +228,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     compute_flux_bc_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α³)
+    vertical_acoustic_implicit_step!(model, α³ * Δt)
 
     compute_pressure_correction!(model, α³ * Δt)
     make_pressure_correction!(model, α³ * Δt)

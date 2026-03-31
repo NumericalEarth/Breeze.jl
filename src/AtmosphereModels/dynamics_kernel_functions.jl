@@ -10,6 +10,10 @@ using Oceananigans.Utils: sum_of_velocities
 @inline div_ρUc(i, j, k, grid, args...) = zero(grid)
 @inline c_div_ρU(i, j, k, grid, args...) = zero(grid)
 
+# Vertically implicit acoustic corrections (zero for non-compressible dynamics)
+@inline vertical_acoustic_correction_ρw(i, j, k, grid, dynamics, formulation) = zero(grid)
+@inline vertical_acoustic_correction_ρθ(i, j, k, grid, dynamics, formulation, velocities) = zero(grid)
+
 """
     ∇_dot_Jᶜ(i, j, k, grid, ρ, closure::AbstractTurbulenceClosure, closure_fields,
              id, c, clock, model_fields, buoyancy)
@@ -107,6 +111,7 @@ end
     return ( - div_𝐯w(i, j, k, grid, advection, momentum, velocities.w)
              - U_dot_∇w_metric(i, j, k, grid, advection, momentum, velocities)
              - z_pressure_gradient(i, j, k, grid, dynamics)
+             + vertical_acoustic_correction_ρw(i, j, k, grid, dynamics, formulation)
              + buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, temperature,
                                  specific_prognostic_moisture, microphysics, microphysical_fields, constants)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
