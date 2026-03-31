@@ -68,3 +68,4 @@ end
     i, j, k = @index(Global, NTuple)
     @inbounds Gρ[i, j, k] = - divᶜᶜᶜ(i, j, k, grid, momentum.ρu, momentum.ρv, momentum.ρw)
 end
+

@@ -27,7 +27,7 @@ using Adapt: Adapt, adapt
 using Oceananigans: CenterField, architecture
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
-using Oceananigans.Operators: ℑzᵃᵃᶠ, δzᵃᵃᶠ, Δzᶜᶜᶜ, Δzᶜᶜᶠ
+using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ, Δzᶜᶜᶠ
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
@@ -140,38 +140,18 @@ end
 end
 
 #####
-##### Tendency corrections — subtract vertical fast terms
+##### Tendency corrections — zero vertical PGF and buoyancy from explicit tendency
+#####
+##### Rather than subtracting an approximate correction (which leaves an O(Δz²)
+##### secular residual), we zero the vertical PGF and buoyancy directly so the
+##### cancellation is exact to machine precision.
 #####
 
-## ρw: cancel vertical PGF and buoyancy (both handled implicitly)
-## In hydrostatic balance: (ℂᵃᶜ²/θ) ∂(ρθ)/∂z + ρg ≈ 0
-@inline AtmosphereModels.vertical_acoustic_correction_ρw(i, j, k, grid,
-        dynamics::CompressibleDynamics, formulation, constants) =
-    _vac_ρw(i, j, k, grid, dynamics.vertical_acoustic_solver, dynamics, formulation, constants)
+@inline AtmosphereModels.explicit_z_pressure_gradient(i, j, k, grid,
+        ::CompressibleDynamics{<:VerticallyImplicitTimeStepping}) = zero(grid)
 
-@inline _vac_ρw(i, j, k, grid, ::Nothing, dynamics, formulation, constants) = zero(grid)
-
-@inline function _vac_ρw(i, j, k, grid, solver::VerticalAcousticSolver,
-                         dynamics, formulation, constants)
-    ρθ = formulation.potential_temperature_density
-    θ = formulation.potential_temperature
-    ℂᵃᶜ² = solver.acoustic_speed_squared
-    ρ = dynamics_density(dynamics)
-    g = constants.gravitational_acceleration
-
-    ℂ²ᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℂᵃᶜ²)
-    θᶠ = ℑzᵃᵃᶠ(i, j, k, grid, θ)
-    ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-    δz_ρθ = δzᵃᵃᶠ(i, j, k, grid, ρθ)
-    Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
-
-    return (ℂ²ᶠ / θᶠ * δz_ρθ / Δzᶠ + ρᶠ * g) * (k > 1)
-end
-
-## ρθ: no correction needed. The acoustic coupling for ρθ is handled entirely
-## by the Helmholtz solve + back-solve. The explicit advection (div_ρUc) stays explicit.
-## Subtracting vertical ρθ advection here would create an interpolation mismatch
-## with the advection scheme (e.g., WENO vs centered) and cause instability.
+@inline AtmosphereModels.explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid,
+        ::CompressibleDynamics{<:VerticallyImplicitTimeStepping}, args...) = zero(grid)
 
 #####
 ##### Helmholtz: [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] δρθ = -αΔt ∂z(θᶠ ρw*)
@@ -228,10 +208,12 @@ end
 ##### This preserves hydrostatic balance: if δρθ ≈ 0, then (ρw)⁺ ≈ (ρw)*.
 #####
 
-@kernel function _back_solve_ρw!(ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ, ρθ_scratch)
+@kernel function _back_solve_ρw_and_update_ρ!(ρw, ρ, grid, αΔt, ℂᵃᶜ², θ, ρθ, ρθ_scratch)
     i, j, k = @index(Global, NTuple)
+    Nz = size(grid, 3)
 
     @inbounds begin
+        ## --- Back-solve ρw at face (i, j, k) ---
         ℂ²ᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℂᵃᶜ²)
         θᶠ = ℑzᵃᵃᶠ(i, j, k, grid, θ)
 
@@ -241,7 +223,30 @@ end
         Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
         δz_δρθ = (δρθ_above - δρθ_below) / Δzᶠ
 
-        ρw[i, j, k] = (ρw[i, j, k] - αΔt * ℂ²ᶠ / θᶠ * δz_δρθ) * (k > 1)
+        ## δρw at this face
+        δρw_k = -αΔt * ℂ²ᶠ / θᶠ * δz_δρθ * (k > 1)
+        ρw[i, j, k] = ρw[i, j, k] + δρw_k
+
+        ## --- Update ρ at cell center (i, j, k) from vertical divergence of δρw ---
+        ## δρ = -αΔt (1/V) δz(Az δρw)
+        ## We need δρw at faces k and k+1. Since δρw_k is computed at face k,
+        ## we need to also compute δρw at face k+1.
+        ℂ²ᶠ_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, ℂᵃᶜ²)
+        θᶠ_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, θ)
+        δρθ_above_top = ifelse(k < Nz, ρθ[i, j, k + 1] - ρθ_scratch[i, j, k + 1], zero(eltype(grid)))
+        δρθ_below_top = δρθ_above  # = ρθ[i,j,k] - ρθ_scratch[i,j,k]
+        Δzᶠ_top = Δzᶜᶜᶠ(i, j, k + 1, grid)
+        δz_δρθ_top = (δρθ_above_top - δρθ_below_top) / Δzᶠ_top
+
+        δρw_top = -αΔt * ℂ²ᶠ_top / θᶠ_top * δz_δρθ_top * (k < Nz)
+
+        ## Vertical divergence of δρw at cell center
+        Azᵇ = Az_qᶜᶜᶠ(i, j, k, grid, δρw_k)      # = Az_bot * δρw_bot (but δρw is a scalar not a field)
+        # Actually we need Az at faces times δρw. Since δρw is a scalar, not a field:
+        Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
+        div_z_δρw = (δρw_top - δρw_k) / Δzᶜ
+
+        ρ[i, j, k] = ρ[i, j, k] - αΔt * div_z_δρw
     end
 end
 
@@ -267,6 +272,16 @@ end
 $(TYPEDSIGNATURES)
 
 Apply the vertically implicit acoustic correction after an explicit SSP-RK3 substep.
+
+Following Gardner et al. (2018, GMD), the minimum HEVI implicit terms are:
+1. Vertical PGF + buoyancy in ρw equation (subtracted from explicit, restored here)
+2. Vertical density flux in continuity equation (corrected here via ρ update)
+
+The implicit solve proceeds:
+1. Helmholtz solve for δ(ρθ) from the vertical ρw flux
+2. Update ρθ
+3. Back-solve ρw from the ρθ change
+4. Update ρ from the vertical divergence of the ρw change
 """
 vertical_acoustic_implicit_step!(model, αΔt) =
     _vertical_acoustic_implicit_step!(model, model.dynamics, αΔt)
@@ -284,9 +299,11 @@ function _vertical_acoustic_implicit_step!(model,
     ρθ = model.formulation.potential_temperature_density
     θ = model.formulation.potential_temperature
     ρw = model.momentum.ρw
+    ρ = dynamics.density
     ℂᵃᶜ² = sc.acoustic_speed_squared
 
-    ## 1. Save (ρθ)* for computing δρθ after the solve
+    ## 1. Save (ρθ)* and (ρw)* for computing changes after the solve
+    ##    Use ρθ_scratch for (ρθ)* and rhs for (ρw)* temporarily
     launch!(arch, grid, :xyz, _copy_field!, sc.ρθ_scratch, ρθ)
 
     ## 2. Build and solve for δρθ: [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] δρθ = flux
@@ -300,8 +317,11 @@ function _vertical_acoustic_implicit_step!(model,
     launch!(arch, grid, :xyz, _add_field!, ρθ, sc.ρθ_scratch)
 
     ## 4. Back-solve ρw using δρθ = (ρθ)⁺ − (ρθ)* (not the full ρθ⁺)
-    launch!(arch, grid, :xyz, _back_solve_ρw!,
-            ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch)
+    ##    and simultaneously update ρ from the vertical divergence of δρw.
+    ##    δρw = ρw⁺ - ρw* = -αΔt (ℂ²/θ)ᶠ ∂(δρθ)/∂z
+    ##    δρ = -αΔt (1/V) δz(Az δρw)
+    launch!(arch, grid, :xyz, _back_solve_ρw_and_update_ρ!,
+            ρw, ρ, grid, αΔt, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch)
 
     return nothing
 end
