@@ -399,14 +399,14 @@ end
     return nothing
 end
 
-# Local copy of CM2.cloud_terminal_velocity with 2//3 → FT(2/3)
-# so that Rational literals don't appear
 @inline function _cloud_terminal_velocity(
     pdf_c, (; ρw, grav, ν_air), q_liq, ρₐ, N_liq,
 )
+    # Local copy of CM2.cloud_terminal_velocity with 2//3 → FT(2/3)
+    # so that Rational literals don't appear inside Reactant-traced code.
     FT = eltype(q_liq)
-    ϵN = FT(1e-20)
-    ϵM = FT(1e-20)
+    ϵN = CloudMicrophysics.Utilities.ϵ_numerics_2M_N(FT)
+    ϵM = CloudMicrophysics.Utilities.ϵ_numerics_2M_M(FT)
 
     (; νc, μc) = pdf_c
     (; Bc) = CM2.pdf_cloud_parameters_mass(pdf_c, q_liq, ρₐ, N_liq)
