@@ -139,19 +139,10 @@ end
     @inbounds ℂᵃᶜ²_field[i, j, k] = γᵐ * Rᵐ * T
 end
 
-#####
-##### Tendency corrections — zero vertical PGF and buoyancy from explicit tendency
-#####
-##### Rather than subtracting an approximate correction (which leaves an O(Δz²)
-##### secular residual), we zero the vertical PGF and buoyancy directly so the
-##### cancellation is exact to machine precision.
-#####
-
-@inline AtmosphereModels.explicit_z_pressure_gradient(i, j, k, grid,
-        ::CompressibleDynamics{<:VerticallyImplicitTimeStepping}) = zero(grid)
-
-@inline AtmosphereModels.explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid,
-        ::CompressibleDynamics{<:VerticallyImplicitTimeStepping}, args...) = zero(grid)
+##### No tendency corrections needed: the explicit step keeps the full vertical
+##### PGF + buoyancy. The implicit solve provides a perturbation correction
+##### on top of the explicit solution (ERF / Klemp 2018 approach).
+##### This is stable because for a balanced state, the correction is zero.
 
 #####
 ##### Helmholtz: [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] δρθ = -αΔt ∂z(θᶠ ρw*)
@@ -293,6 +284,7 @@ function _vertical_acoustic_implicit_step!(model,
     arch = architecture(grid)
     sc = dynamics.vertical_acoustic_solver
     solver = sc.vertical_solver
+    β = dynamics.time_discretization.β
 
     ρθ = model.formulation.potential_temperature_density
     θ = model.formulation.potential_temperature
@@ -300,27 +292,29 @@ function _vertical_acoustic_implicit_step!(model,
     ρ = dynamics.density
     ℂᵃᶜ² = sc.acoustic_speed_squared
 
-    ## 1. Save (ρθ)* and (ρw)* for computing changes after the solve
-    ##    Use ρθ_scratch for (ρθ)* and rhs for (ρw)* temporarily
+    ## β·αΔt is the effective implicit time scale.
+    ## β = 1 (backward Euler): maximum acoustic damping.
+    ## β = 0.5 (Crank–Nicolson): second-order, less damping.
+    βαΔt = β * αΔt
+
+    ## 1. Save (ρθ)* for computing δρθ after the solve
     launch!(arch, grid, :xyz, _copy_field!, sc.ρθ_scratch, ρθ)
 
-    ## 2. Build and solve for δρθ: [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] δρθ = flux
+    ## 2. Build and solve: [I - (β αΔt)² Op] δρθ = -β αΔt div_z(θᶠ ρw*)
     launch!(arch, grid, :xyz, _build_ρθ_tridiagonal!,
             solver.a, solver.b, solver.c, sc.rhs,
-            grid, αΔt, ℂᵃᶜ², ρθ, θ, ρw)
+            grid, βαΔt, ℂᵃᶜ², ρθ, θ, ρw)
 
     solve!(ρθ, solver, sc.rhs)  # ρθ now holds δρθ
 
     ## 3. Recover (ρθ)⁺ = (ρθ)* + δρθ
     launch!(arch, grid, :xyz, _add_field!, ρθ, sc.ρθ_scratch)
 
-    ## 4. Back-solve ρw using δρθ = (ρθ)⁺ − (ρθ)* (not the full ρθ⁺)
+    ## 4. Back-solve: δρw = -β αΔt (ℂ²/θ)ᶠ ∂(δρθ)/∂z
     launch!(arch, grid, :xyz, _back_solve_ρw!,
-            ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch)
+            ρw, grid, βαΔt, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch)
 
     ## 5. Update ρ from the vertical divergence of the corrected ρw.
-    ##    The explicit density tendency only has horizontal divergence,
-    ##    so we apply -αΔt ∂(ρw⁺)/∂z here (Klemp et al. 2018, eq. 23).
     launch!(arch, grid, :xyz, _update_density_vertical!,
             ρ, grid, αΔt, ρw)
 
