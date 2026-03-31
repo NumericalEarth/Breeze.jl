@@ -55,6 +55,32 @@ using Printf
 using CairoMakie
 using CUDA
 
+# ## DCMIP2016 parameters
+#
+# All parameters follow the DCMIP2016 test case document
+# [UllrichEtAl2016](@citet). We set the Oceananigans defaults and build a
+# custom [`ThermodynamicConstants`](@ref) matching the DCMIP specification
+# so that the grid, Coriolis, and model thermodynamics are all consistent
+# with the analytic initial conditions.
+
+Oceananigans.defaults.FloatType = Float32
+Oceananigans.defaults.gravitational_acceleration = 9.80616
+Oceananigans.defaults.planet_radius = 6371220.0
+Oceananigans.defaults.planet_rotation_rate = 7.29212e-5
+
+constants = ThermodynamicConstants(;
+    gravitational_acceleration = Oceananigans.defaults.gravitational_acceleration,
+    dry_air_heat_capacity = 1004.5,
+    dry_air_molar_mass = 8.314462618 / 287.0)
+
+g   = constants.gravitational_acceleration
+Rᵈ  = dry_air_gas_constant(constants)
+cᵖᵈ = constants.dry_air.heat_capacity
+κ   = Rᵈ / cᵖᵈ
+p₀  = 1e5    # Pa — surface pressure
+a   = Oceananigans.defaults.planet_radius
+Ω   = Oceananigans.defaults.planet_rotation_rate
+
 # ## Domain and grid
 #
 # We use a near-global latitude-longitude grid at roughly 2° horizontal
@@ -73,39 +99,13 @@ grid = LatitudeLongitudeGrid(GPU();
                              latitude = (-85, 85),
                              z = (0, H))
 
-# ## DCMIP2016 parameters
-#
-# All parameters follow the DCMIP2016 test case document
-# (Ullrich, Melvin, Staniforth, and Jablonowski, 2016).
-
-const 𝑎  = 6371220.0   # m — Earth radius
-const Ω  = 7.29212e-5  # s⁻¹ — Earth rotation rate
-const 𝑔  = 9.80616     # m/s² — gravitational acceleration
-const Rᵈ = 287.0       # J/(kg·K) — dry air gas constant
-const cₚ = 1004.5      # J/(kg·K) — specific heat capacity
-const κ  = 2 / 7       # Rᵈ/cₚ
-const p₀ = 100000.0    # Pa — surface pressure
-
 ## Temperature profile parameters
-const T₀E   = 310.0    # K — equatorial surface temperature
-const T₀P   = 240.0    # K — polar surface temperature
-const T₀    = 0.5 * (T₀E + T₀P)  # K — mean surface temperature
-const K_jet  = 3.0     # jet width parameter
-const B_jet  = 2.0     # jet half-width parameter
-const Λ      = 0.005   # K/m — lapse rate
-
-## Derived constants
-const constA = 1.0 / Λ
-const constB = (T₀ - T₀P) / (T₀ * T₀P)
-const constC = 0.5 * (K_jet + 2) * (T₀E - T₀P) / (T₀E * T₀P)
-const constH = Rᵈ * T₀ / 𝑔
-
-## Perturbation parameters (exponential type)
-const pertup   = 1.0          # m/s — perturbation amplitude
-const pertexpr = 0.1          # perturbation radius in Earth radii
-const pertlon  = π / 9        # 20° E
-const pertlat  = 2π / 9       # 40° N
-const pertz    = 15000.0      # m — perturbation height cap
+Tᴱ = 310.0   # K — equatorial surface temperature
+Tᴾ = 240.0   # K — polar surface temperature
+Tₘ = (Tᴱ + Tᴾ) / 2
+Γ  = 0.005    # K/m — lapse rate
+K  = 3        # jet width parameter
+b  = 2        # vertical half-width parameter
 
 # ## Analytic initial conditions
 #
@@ -115,40 +115,44 @@ const pertz    = 15000.0      # m — perturbation height cap
 
 ## Vertical structure functions (shallow atmosphere, X = 1)
 function τ_and_integrals(z)
-    scaledZ = z / (B_jet * constH)
-    expZ2 = exp(-scaledZ^2)
+    Hₛ = Rᵈ * Tₘ / g
+    η  = z / (b * Hₛ)
+    e  = exp(-η^2)
 
-    τ₁    = constA * Λ / T₀ * exp(Λ * z / T₀) + constB * (1 - 2 * scaledZ^2) * expZ2
-    τ₂    = constC * (1 - 2 * scaledZ^2) * expZ2
-    ∫τ₁   = constA * (exp(Λ * z / T₀) - 1) + constB * z * expZ2
-    ∫τ₂   = constC * z * expZ2
+    A = (Tₘ - Tᴾ) / (Tₘ * Tᴾ)
+    C = (K + 2) / 2 * (Tᴱ - Tᴾ) / (Tᴱ * Tᴾ)
+
+    τ₁  = exp(Γ * z / Tₘ) / (Γ * Tₘ) + A * (1 - 2η^2) * e
+    τ₂  = C * (1 - 2η^2) * e
+    ∫τ₁ = (exp(Γ * z / Tₘ) - 1) / Γ + A * z * e
+    ∫τ₂ = C * z * e
 
     return τ₁, τ₂, ∫τ₁, ∫τ₂
 end
 
 ## Meridional shape functions
-F_T(φ) = cosd(φ)^K_jet - K_jet / (K_jet + 2) * cosd(φ)^(K_jet + 2)
-F_U(φ) = cosd(φ)^(K_jet - 1) - cosd(φ)^(K_jet + 1)
+F(φ)  = cosd(φ)^K - K / (K + 2) * cosd(φ)^(K + 2)
+dF(φ) = cosd(φ)^(K - 1) - cosd(φ)^(K + 1)
 
 ## Temperature: T(φ, z) = 1 / (τ₁ - τ₂ F(φ))
-function Tᵢ(λ, φ, z)
+function temperature(λ, φ, z)
     τ₁, τ₂, _, _ = τ_and_integrals(z)
-    return 1.0 / (τ₁ - τ₂ * F_T(φ))
+    return 1 / (τ₁ - τ₂ * F(φ))
 end
 
 ## Pressure: p(φ, z) = p₀ exp(-g/Rᵈ (∫τ₁ - ∫τ₂ F(φ)))
-function pᵢ(λ, φ, z)
+function pressure(λ, φ, z)
     _, _, ∫τ₁, ∫τ₂ = τ_and_integrals(z)
-    return p₀ * exp(-𝑔 / Rᵈ * (∫τ₁ - ∫τ₂ * F_T(φ)))
+    return p₀ * exp(-g / Rᵈ * (∫τ₁ - ∫τ₂ * F(φ)))
 end
 
 ## Density from the ideal gas law
-ρᵢ(λ, φ, z) = pᵢ(λ, φ, z) / (Rᵈ * Tᵢ(λ, φ, z))
+density(λ, φ, z) = pressure(λ, φ, z) / (Rᵈ * temperature(λ, φ, z))
 
 ## Potential temperature: θ = T (p₀/p)^κ
-function θᵢ(λ, φ, z)
-    T = Tᵢ(λ, φ, z)
-    p = pᵢ(λ, φ, z)
+function potential_temperature(λ, φ, z)
+    T = temperature(λ, φ, z)
+    p = pressure(λ, φ, z)
     return T * (p₀ / p)^κ
 end
 
@@ -163,51 +167,54 @@ end
 #
 # where ``U = (g/a) K \int τ_2 \, T \, (\cos^{K-1} φ - \cos^{K+1} φ)``.
 
-function uᵢ(λ, φ, z)
+function zonal_velocity(λ, φ, z)
     _, _, _, ∫τ₂ = τ_and_integrals(z)
-    T = Tᵢ(λ, φ, z)
+    T = temperature(λ, φ, z)
 
-    bigU = 𝑔 / 𝑎 * K_jet * ∫τ₂ * F_U(φ) * T
-    rcosφ = 𝑎 * cosd(φ)
+    ## Gradient-wind balance
+    U = g / a * K * ∫τ₂ * dF(φ) * T
+    rcosφ  = a * cosd(φ)
     Ωrcosφ = Ω * rcosφ
+    u_balanced = -Ωrcosφ + sqrt(Ωrcosφ^2 + rcosφ * U)
 
-    u_bal = -Ωrcosφ + sqrt(Ωrcosφ^2 + rcosφ * bigU)
+    ## Localized perturbation (DCMIP2016 §3.3)
+    uₚ = 1.0       # m/s — amplitude
+    rₚ = 0.1       # perturbation radius (Earth radii)
+    λₚ = π / 9     # 20°E center longitude
+    φₚ = 2π / 9    # 40°N center latitude
+    zₚ = 15000.0   # m — height cap
 
-    ## Add the exponential perturbation
-    φ_rad = deg2rad(φ)
-    λ_rad = deg2rad(λ)
-    great_circle = 1 / pertexpr * acos(sin(pertlat) * sin(φ_rad) +
-                                       cos(pertlat) * cos(φ_rad) * cos(λ_rad - pertlon))
+    φʳ = deg2rad(φ)
+    λʳ = deg2rad(λ)
+    great_circle = acos(sin(φₚ) * sin(φʳ) + cos(φₚ) * cos(φʳ) * cos(λʳ - λₚ)) / rₚ
 
-    taper = ifelse(z < pertz, 1 - 3 * (z / pertz)^2 + 2 * (z / pertz)^3, 0.0)
-    u_pert = ifelse(great_circle < 1.0, pertup * taper * exp(-great_circle^2), 0.0)
+    taper = ifelse(z < zₚ, 1 - 3 * (z / zₚ)^2 + 2 * (z / zₚ)^3, 0.0)
+    u_perturbation = ifelse(great_circle < 1, uₚ * taper * exp(-great_circle^2), 0.0)
 
-    return u_bal + u_pert
+    return u_balanced + u_perturbation
 end
 
 # ## Model configuration
 #
-# We use fully explicit compressible dynamics. The time step is limited
-# by the acoustic CFL. The reference state uses the equatorial column
-# ``θ(z)`` profile evaluated at the equator, so the buoyancy force is
-# computed as a perturbation for accuracy.
+# We use fully explicit compressible dynamics with no reference state
+# subtraction. The vertical momentum equation computes the full pressure
+# gradient and gravitational force directly: ``∂(ρw)/∂t = -∂p/∂z - ρg + \ldots``
+# This avoids errors from a 1D reference state that cannot capture the
+# meridional density structure of the balanced jet.
 # `HydrostaticSphericalCoriolis` retains the traditional ``f = 2Ω \sin φ``
 # Coriolis terms.
 
-## Reference potential temperature at the equator
-θ_ref(z) = θᵢ(0, 0, z)
+coriolis = HydrostaticSphericalCoriolis(rotation_rate=Ω)
 
-coriolis = HydrostaticSphericalCoriolis()
+dynamics = CompressibleDynamics(ExplicitTimeStepping(); surface_pressure = p₀)
 
-dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                surface_pressure = p₀,
-                                reference_potential_temperature = θ_ref)
-
-model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
+model = AtmosphereModel(grid; dynamics, coriolis,
+                        thermodynamic_constants = constants,
+                        advection = WENO())
 
 # ## Set initial conditions
 
-set!(model, θ=θᵢ, u=uᵢ, ρ=ρᵢ)
+set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
 
 # ## Time-stepping
 #
@@ -221,6 +228,16 @@ set!(model, θ=θᵢ, u=uᵢ, ρ=ρᵢ)
 stop_time = 15days
 
 simulation = Simulation(model; Δt, stop_time)
+
+# ## Polar filter
+#
+# On a latitude-longitude grid the zonal grid spacing shrinks as
+# ``Δx(φ) = a \cos φ \, Δλ``, reaching roughly one-eleventh of the equatorial
+# value at 85°. The polar filter damps unresolvable high-wavenumber zonal
+# modes poleward of 60° using a batched spectral truncation, following the
+# WRF approach ([Skamarock et al., 2008](@cite Skamarock2008Description)).
+
+add_polar_filter!(simulation; threshold_latitude=60)
 
 # Progress callback:
 
@@ -241,9 +258,9 @@ add_callback!(simulation, progress, IterationInterval(1000))
 
 θ = PotentialTemperature(model)
 
-## Background θ at the equator for computing perturbation θ′
+## Background θ from the initial profile for computing perturbation θ′
 θ_bg = CenterField(grid)
-set!(θ_bg, (λ, φ, z) -> θ_ref(z))
+set!(θ_bg, potential_temperature)
 θ′ = θ - θ_bg
 
 outputs = merge(model.velocities, (; θ′))
