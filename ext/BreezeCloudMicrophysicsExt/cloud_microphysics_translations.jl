@@ -378,11 +378,11 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
 
     # Ventilation factors for number and mass tendencies
     t_star = cbrt(6 * x_star / xr_mean_safe)
-    a_vent_0 = av * Γ_incl(FT(-1), t_star) / FT(6)^(-2 // 3)
-    b_vent_0 = bv * Γ_incl(-1 // 2 + 3 // 2 * β, t_star) / FT(6)^(β / 2 - 1 // 2)
+    a_vent_0 = av * Γ_incl(FT(-1), t_star) / FT(6)^(FT(-2) / FT(3))
+    b_vent_0 = bv * Γ_incl(FT(-0.5) + FT(1.5) * β, t_star) / FT(6)^((β - one(FT)) / FT(2))
 
     a_vent_1 = av * Γ(FT(2)) / cbrt(FT(6))
-    b_vent_1 = bv * Γ(5 // 2 + 3 // 2 * β) / 6^(β / 2 + 1 // 2)
+    b_vent_1 = bv * Γ(FT(2.5) + FT(1.5) * β) / FT(6)^((β + one(FT)) / FT(2))
 
     # Reynolds number
     Re = α * xr_mean_safe^β * sqrt(ρ0 / ρ) * Dʳ / ν_air
