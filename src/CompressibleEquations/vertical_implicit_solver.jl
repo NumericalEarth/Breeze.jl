@@ -27,7 +27,7 @@ using Adapt: Adapt, adapt
 using Oceananigans: CenterField, architecture
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
-using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ, Δzᶜᶜᶠ
+using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ, Δzᶜᶜᶠ, Azᶜᶜᶠ, Vᶜᶜᶜ
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
@@ -163,32 +163,34 @@ end
     Nz = size(grid, 3)
 
     @inbounds begin
-        Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
+        ## Volume and face areas for proper metric-consistent divergence
+        V = Vᶜᶜᶜ(i, j, k, grid)
+        Az_bot = Azᶜᶜᶠ(i, j, k, grid)
+        Az_top = Azᶜᶜᶠ(i, j, k + 1, grid)
         ℂ²_bot = ℑzᵃᵃᶠ(i, j, k, grid, ℂᵃᶜ²)
         ℂ²_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, ℂᵃᶜ²)
         Δzᶠ_bot = Δzᶜᶜᶠ(i, j, k, grid)
         Δzᶠ_top = Δzᶜᶜᶠ(i, j, k + 1, grid)
 
+        ## Helmholtz coefficients: V⁻¹ δz(Az ℂ² δz(·)/Δzᶠ)
         αΔt² = αΔt * αΔt
-        Q_bot = αΔt² * ℂ²_bot / (Δzᶠ_bot * Δzᶜ)
-        Q_top = αΔt² * ℂ²_top / (Δzᶠ_top * Δzᶜ)
+        Q_bot = αΔt² * Az_bot * ℂ²_bot / (Δzᶠ_bot * V)
+        Q_top = αΔt² * Az_top * ℂ²_top / (Δzᶠ_top * V)
 
         Q_bot = ifelse(k == 1, zero(Q_bot), Q_bot)
         Q_top = ifelse(k == Nz, zero(Q_top), Q_top)
 
         ## Solver convention: a[k] is the sub-diagonal for row k+1.
-        ## Q_bot(k+1) shares the same face as Q_top(k) but uses Δzᶜ at k+1.
-        Δzᶜ_above = Δzᶜᶜᶜ(i, j, k + 1, grid)
-        Q_lower = αΔt² * ℂ²_top / (Δzᶠ_top * Δzᶜ_above)
+        ## Q_bot(k+1) uses the same face as Q_top(k) but V at k+1.
+        V_above = Vᶜᶜᶜ(i, j, k + 1, grid)
+        Q_lower = αΔt² * Az_top * ℂ²_top / (Δzᶠ_top * V_above)
         Q_lower = ifelse(k >= Nz, zero(Q_lower), Q_lower)
 
         lower[i, j, k] = -Q_lower
         upper[i, j, k] = -Q_top
         diag[i, j, k] = 1 + Q_bot + Q_top
 
-        ## RHS for δρθ equation: (I - α²Op)·δρθ = flux
-        ## Solving for the perturbation δρθ guarantees the hydrostatically
-        ## balanced state is a fixed point: flux = 0 → δρθ = 0.
+        ## RHS: V⁻¹ δz(Az θᶠ ρw) — area-weighted vertical flux divergence
         θᶠ_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, θ)
         θᶠ_bot = ℑzᵃᵃᶠ(i, j, k, grid, θ)
 
@@ -197,7 +199,7 @@ end
         ρw_top = ρw[i, j, k + 1] * (k < Nz)
         ρw_bot = ρw[i, j, k] * (k > 1)
 
-        rhs_field[i, j, k] = -αΔt / Δzᶜ * (θᶠ_top * ρw_top - θᶠ_bot * ρw_bot)
+        rhs_field[i, j, k] = -αΔt / V * (Az_top * θᶠ_top * ρw_top - Az_bot * θᶠ_bot * ρw_bot)
     end
 end
 
@@ -221,6 +223,28 @@ end
         δz_δρθ = (δρθ_above - δρθ_below) / Δzᶠ
 
         ρw[i, j, k] = (ρw[i, j, k] - αΔt * ℂ²ᶠ / θᶠ * δz_δρθ) * (k > 1)
+    end
+end
+
+##### Update ρ from the vertical divergence of the corrected ρw.
+##### The explicit density tendency has only horizontal divergence for VITS,
+##### so the vertical part ∂(ρw)/∂z is applied here after the ρw back-solve.
+##### Following Klemp et al. (2018, eq. 23).
+
+@kernel function _update_density_vertical!(ρ, grid, αΔt, ρw)
+    i, j, k = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    @inbounds begin
+        ## Area-weighted vertical divergence: V⁻¹ δz(Az ρw)
+        ## Consistent with div_xyᶜᶜᶜ so that div_xy + div_z = divᶜᶜᶜ.
+        ρw_top = ifelse(k < Nz, ρw[i, j, k + 1], zero(eltype(grid)))
+        ρw_bot = ifelse(k > 1,  ρw[i, j, k],     zero(eltype(grid)))
+        Az_top = Azᶜᶜᶠ(i, j, k + 1, grid)
+        Az_bot = Azᶜᶜᶠ(i, j, k, grid)
+        V = Vᶜᶜᶜ(i, j, k, grid)
+
+        ρ[i, j, k] = ρ[i, j, k] - αΔt * (Az_top * ρw_top - Az_bot * ρw_bot) / V
     end
 end
 
@@ -293,6 +317,12 @@ function _vertical_acoustic_implicit_step!(model,
     ## 4. Back-solve ρw using δρθ = (ρθ)⁺ − (ρθ)* (not the full ρθ⁺)
     launch!(arch, grid, :xyz, _back_solve_ρw!,
             ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch)
+
+    ## 5. Update ρ from the vertical divergence of the corrected ρw.
+    ##    The explicit density tendency only has horizontal divergence,
+    ##    so we apply -αΔt ∂(ρw⁺)/∂z here (Klemp et al. 2018, eq. 23).
+    launch!(arch, grid, :xyz, _update_density_vertical!,
+            ρ, grid, αΔt, ρw)
 
     return nothing
 end

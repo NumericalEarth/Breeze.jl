@@ -10,7 +10,7 @@
 ##### x/y/z_pressure_gradient interface functions.
 #####
 
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, div_xyᶜᶜᶜ
 
 #####
 ##### Pressure gradient for compressible dynamics
@@ -58,14 +58,22 @@ function AtmosphereModels.compute_dynamics_tendency!(model::CompressibleModel)
     arch = grid.architecture
     Gρ = model.timestepper.Gⁿ.ρ
     momentum = model.momentum
+    td = model.dynamics.time_discretization
 
-    launch!(arch, grid, :xyz, _compute_density_tendency!, Gρ, grid, momentum)
+    launch!(arch, grid, :xyz, _compute_density_tendency!, Gρ, grid, momentum, td)
 
     return nothing
 end
 
-@kernel function _compute_density_tendency!(Gρ, grid, momentum)
+## Full 3D divergence for explicit and split-explicit time stepping
+@kernel function _compute_density_tendency!(Gρ, grid, momentum, td)
     i, j, k = @index(Global, NTuple)
     @inbounds Gρ[i, j, k] = - divᶜᶜᶜ(i, j, k, grid, momentum.ρu, momentum.ρv, momentum.ρw)
+end
+
+## Horizontal-only divergence for VITS — vertical ∂(ρw)/∂z handled by the implicit solver
+@kernel function _compute_density_tendency!(Gρ, grid, momentum, ::VerticallyImplicitTimeStepping)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gρ[i, j, k] = - div_xyᶜᶜᶜ(i, j, k, grid, momentum.ρu, momentum.ρv)
 end
 
