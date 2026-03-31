@@ -97,6 +97,56 @@ with Δt=2s.
 2. If VITD fails or is unstable: Breeze with `ExplicitTimeStepping`, Δt = 2s
 3. Compare against existing MPAS coarse output
 
+## Pre-flight checks (run before Test 1)
+
+These are quick offline checks that don't require a full simulation.
+Run on CPU, no GPU needed.
+
+### A. Pressure gradient operator on flat LLG
+
+```julia
+grid = LatitudeLongitudeGrid(CPU(); size=(10, 10, 10), halo=(3,3,3),
+           longitude=(0,360), latitude=(-80,80), z=(0,10000))
+# ∂x_z should be zero on a flat (non-terrain-following) grid
+@test Oceananigans.Operators.∂x_zᶠᶜᶜ(5, 5, 5, grid) == 0
+```
+
+If nonzero, the horizontal PGF has a spurious vertical correction
+that would corrupt the thermal wind balance.
+
+### B. Divergence operator on LLG
+
+Set up solid-body-rotation mass flux ρu = ρ₀ cosφ, ρv = 0, ρw = 0.
+Compute `divᶜᶜᶜ(grid, ρu, ρv, ρw)`. Should be zero everywhere
+(mass is conserved for non-divergent flow). Any nonzero residual
+indicates the divergence operator doesn't correctly handle LLG metrics.
+
+### C. Extended solid body rotation
+
+Run solid body rotation (u = u₀ cosφ) for 1000 steps at 2° with Δt=10s.
+Record max|v| drift rate per day. Compare with MPAS running the same
+solid body rotation. This extends the existing 10-step test to detect
+slow-growing imbalances.
+
+### D. Reference state isolation
+
+Run Test 1 (thermal wind, no perturbation) twice:
+1. Without reference state: `dynamics = CompressibleDynamics(ExplicitTimeStepping(); surface_pressure=p₀)`
+2. With reference state: `dynamics = CompressibleDynamics(ExplicitTimeStepping(); surface_pressure=p₀, reference_potential_temperature=θ_ref)`
+
+Compare drift rates. If (2) drifts more than (1), the reference state
+is confirmed as a source of error.
+
+## Convergence test
+
+Run Test 2 at both 4° and 2° resolution. Compare:
+- Dominant wavenumber at day 9
+- Growth rate (slope of log(max|v|) vs time during days 4-8)
+
+If wavenumber converges toward MPAS's wn 8-9 with increasing resolution,
+the issue is numerical diffusion (acceptable). If it stays at wn 6,
+there's an operator bug.
+
 ### Reference data locations
 
 - MPAS coarse output: `/tmp/mpas_jw_coarse/output.nc` (x1.10242, 17 daily snapshots)
