@@ -802,13 +802,13 @@ end
 #####
 #
 # Rain sediments at terminal velocity wʳ. Since θ_li and static energy e contain
-# latent heat terms proportional to total liquid water (including rain), the
-# missing latent heat flux divergence due to sedimentation is added here
-# as a grid_microphysical_tendency.
+# rain-water enthalpy terms, the missing sedimentation flux divergence is added
+# here as a grid_microphysical_tendency.
 #
 # Face values of ρqʳ are reconstructed using 1st-order upwinding.
 #
-# For ρe the flux is  F = w · (-ℒˡᵣ) · ρq_upwind  and the tendency is  -V⁻¹ δz(F).
+# For ρe the flux is  F = w · hˡ · ρq_upwind  and the tendency is  -V⁻¹ δz(F),
+# where hˡ = cˡ T - ℒˡᵣ is the rain-water enthalpy per unit mass.
 #
 # For ρθ, rain carries both latent heat (-ℒˡᵣ) and sensible heat (cˡ T) per unit
 # mass.  The θˡⁱ contribution per unit hydrometeor mass is

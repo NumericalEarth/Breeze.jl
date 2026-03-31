@@ -528,13 +528,13 @@ end
 #####
 #
 # Liquid water (both cloud and rain: qˡ = qᶜˡ + qʳ) sediments at respective terminal velocities
-# (wᶜˡ and wʳ). Since θ_li and static energy e contain latent heat terms proportional to total
-# liquid water, the missing latent heat flux divergence due to sedimentation is added here
-# as a grid_microphysical_tendency.
+# (wᶜˡ and wʳ). Since θ_li and static energy e contain liquid-water enthalpy terms, the missing
+# sedimentation flux divergence is added here as a grid_microphysical_tendency.
 #
 # Face values of ρq are reconstructed using 1st-order upwinding.
 #
-# For ρe the flux is  F = w · (-ℒˡᵣ) · ρq_upwind  and the tendency is  -V⁻¹ δz(F).
+# For ρe the flux is  F = w · hˡ · ρq_upwind  and the tendency is  -V⁻¹ δz(F),
+# where hˡ = cˡ T - ℒˡᵣ is the liquid-water enthalpy per unit mass.
 #
 # For ρθ, liquid water carries both latent heat (-ℒˡᵣ) and sensible heat (cˡ T)
 # per unit mass.  The θˡⁱ contribution per unit liquid mass is
