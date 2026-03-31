@@ -115,13 +115,10 @@ end
 
 # Model with VerticallyImplicitTimeStepping
 
-θ_reference(z) = potential_temperature(0, 0, z)
-
 coriolis = HydrostaticSphericalCoriolis()
 
 dynamics = CompressibleDynamics(VerticallyImplicitTimeStepping();
-                                surface_pressure = p₀,
-                                reference_potential_temperature = θ_reference)
+                                surface_pressure = p₀)
 
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
