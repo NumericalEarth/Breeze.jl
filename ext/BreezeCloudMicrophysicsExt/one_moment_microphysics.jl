@@ -27,7 +27,7 @@
 using Breeze.AtmosphereModels: AbstractMicrophysicalState
 using Breeze.AtmosphereModels: AtmosphereModels as AM
 
-using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ
+using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ, ℑzᵃᵃᶜ
 using Breeze.Thermodynamics: exner_function
 
 #####
@@ -809,6 +809,8 @@ end
 #
 # For ρe the flux is  F = w · hˡ · ρq_upwind  and the tendency is  -V⁻¹ δz(F),
 # where hˡ = cˡ T - ℒˡᵣ is the rain-water enthalpy per unit mass.
+# Terminal-fall drag converts the lost hydrometeor geopotential energy into
+# local heating, Qᵈ = -g Fᵐ where Fᵐ is the downward hydrometeor mass flux.
 #
 # For ρθ, rain carries both latent heat (-ℒˡᵣ) and sensible heat (cˡ T) per unit
 # mass.  The θˡⁱ contribution per unit hydrometeor mass is
@@ -816,6 +818,7 @@ end
 #   Θⁱ = (cⁱ T - ℒⁱᵣ) / (cᵖᵐ Π)   [ice]
 # These are precomputed at cell centers during update_microphysical_auxiliaries!
 # and upwinded at faces.  The flux is  F_θ = w · ρq_upwind · Θ_upwind.
+# The precipitation drag heating is added consistently as Qᵈ / (cᵖᵐ Π).
 #
 # Note: the mass sedimentation for ρqʳ uses Oceananigans' configured advection scheme,
 # which may differ from the 1st-order upwinding used here. This introduces a small
@@ -843,14 +846,35 @@ end
     return wʳ_face * ρqʳ_upwind * hˡ_r + wˢ_face * ρqˢ_upwind * hⁱ_s
 end
 
-# Sedimentation tendency for ρe: flux divergence of sensible + latent enthalpy.
+# Vertical flux of hydrometeor mass on z-faces.
+@inline function sedimentation_mass_flux_z(i, j, k, grid, wʳ, ρqʳ)
+    @inbounds wʳ_face = wʳ[i, j, k]
+    @inbounds ρqʳ_upwind = ifelse(wʳ_face <= 0, ρqʳ[i, j, k], ρqʳ[i, j, k-1])
+    return wʳ_face * ρqʳ_upwind
+end
+
+@inline function sedimentation_mass_flux_z(i, j, k, grid, wʳ, ρqʳ, wˢ, ρqˢ)
+    @inbounds wʳ_face = wʳ[i, j, k]
+    @inbounds ρqʳ_upwind = ifelse(wʳ_face <= 0, ρqʳ[i, j, k], ρqʳ[i, j, k-1])
+
+    @inbounds wˢ_face = wˢ[i, j, k]
+    @inbounds ρqˢ_upwind = ifelse(wˢ_face <= 0, ρqˢ[i, j, k], ρqˢ[i, j, k-1])
+
+    return wʳ_face * ρqʳ_upwind + wˢ_face * ρqˢ_upwind
+end
+
+# Sedimentation tendency for ρe: flux divergence of sensible + latent enthalpy,
+# plus precipitation drag heating.
 @inline function AM.grid_microphysical_tendency(i, j, k, grid, bμp::OMCM, ::Val{:ρe}, ρ, μ, 𝒰, constants, velocities)
     if hasproperty(μ, :wˢ) && hasproperty(μ, :ρqˢ)
         sedimentation = -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, μ.wʳ, μ.ρqʳ, μ.hˡ, μ.wˢ, μ.ρqˢ, μ.hⁱ)
+        Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, μ.wʳ, μ.ρqʳ, μ.wˢ, μ.ρqˢ)
     else
         sedimentation = -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, μ.wʳ, μ.ρqʳ, μ.hˡ)
+        Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, μ.wʳ, μ.ρqʳ)
     end
-    return sedimentation
+    precipitation_drag_heating = -constants.gravitational_acceleration * Fᵐ
+    return sedimentation + precipitation_drag_heating
 end
 
 # Vertical flux of θˡⁱ contribution from rain sedimentation on z-faces.
@@ -874,12 +898,20 @@ end
     return wʳ_face * ρqʳ_upwind * Θˡ_r + wˢ_face * ρqˢ_upwind * Θⁱ_s
 end
 
-# Sedimentation tendency for ρθ: upwinded θˡⁱ flux including sensible + latent heat.
+# Sedimentation tendency for ρθ: upwinded θˡⁱ flux including sensible + latent heat,
+# plus precipitation drag heating converted to θˡⁱ units.
 @inline function AM.grid_microphysical_tendency(i, j, k, grid, bμp::OMCM, ::Val{:ρθ}, ρ, μ, 𝒰, constants, velocities)
+    q = 𝒰.moisture_mass_fractions
+    Π = exner_function(𝒰, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+
     if hasproperty(μ, :wˢ) && hasproperty(μ, :ρqˢ)
         sedimentation = -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_theta_flux_z, μ.wʳ, μ.ρqʳ, μ.Θˡ, μ.wˢ, μ.ρqˢ, μ.Θⁱ)
+        Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, μ.wʳ, μ.ρqʳ, μ.wˢ, μ.ρqˢ)
     else
         sedimentation = -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_theta_flux_z, μ.wʳ, μ.ρqʳ, μ.Θˡ)
+        Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, μ.wʳ, μ.ρqʳ)
     end
-    return sedimentation
+    precipitation_drag_heating = -constants.gravitational_acceleration * Fᵐ / (cᵖᵐ * Π)
+    return sedimentation + precipitation_drag_heating
 end

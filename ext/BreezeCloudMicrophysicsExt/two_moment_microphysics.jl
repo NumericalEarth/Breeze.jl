@@ -31,7 +31,7 @@ using CloudMicrophysics.Parameters:
     Chen2022VelTypeRain,
     AerosolActivationParameters
 
-using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ
+using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ, ℑzᵃᵃᶜ
 using Breeze.Thermodynamics: exner_function
 
 # Use qualified access to avoid conflicts with Microphysics1M
@@ -535,12 +535,15 @@ end
 #
 # For ρe the flux is  F = w · hˡ · ρq_upwind  and the tendency is  -V⁻¹ δz(F),
 # where hˡ = cˡ T - ℒˡᵣ is the liquid-water enthalpy per unit mass.
+# Terminal-fall dissipation converts the lost condensate geopotential energy
+# into local heating, Qᵈ = -g Fᵐ where Fᵐ is the downward liquid mass flux.
 #
 # For ρθ, liquid water carries both latent heat (-ℒˡᵣ) and sensible heat (cˡ T)
 # per unit mass.  The θˡⁱ contribution per unit liquid mass is
 #   Θˡ = (cˡ T - ℒˡᵣ) / (cᵖᵐ Π)
 # This is precomputed at cell centers during update_microphysical_fields!
 # and upwinded at faces.  The flux is  F_θ = w · ρq_upwind · Θˡ_upwind.
+# The terminal-fall dissipation heating is added consistently as Qᵈ / (cᵖᵐ Π).
 #
 # Note: the mass sedimentation for ρqʳ uses Oceananigans' configured advection scheme,
 # which may differ from the 1st-order upwinding used here. This introduces a small
@@ -561,9 +564,28 @@ end
     return wᶜˡ_face * ρqᶜˡ_upwind * hˡ_cl + wʳ_face * ρqʳ_upwind * hˡ_r
 end
 
-# Sedimentation tendency for ρe: flux divergence of sensible + latent enthalpy.
+# Vertical flux of liquid-water mass on z-faces.
+@inline function sedimentation_mass_flux_z(i, j, k, grid, wᶜˡ, wʳ, ρqᶜˡ, ρqʳ)
+    @inbounds wᶜˡ_face = wᶜˡ[i, j, k]
+    @inbounds ρqᶜˡ_upwind = ifelse(wᶜˡ_face <= 0, ρqᶜˡ[i, j, k], ρqᶜˡ[i, j, k-1])
+
+    @inbounds wʳ_face = wʳ[i, j, k]
+    @inbounds ρqʳ_upwind = ifelse(wʳ_face <= 0, ρqʳ[i, j, k], ρqʳ[i, j, k-1])
+
+    return wᶜˡ_face * ρqᶜˡ_upwind + wʳ_face * ρqʳ_upwind
+end
+
+# Sedimentation tendency for ρe: flux divergence of sensible + latent enthalpy,
+# plus terminal-fall dissipation heating.
 @inline function AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρe}, ρ, μ, 𝒰, constants, velocities)
-    return -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ, μ.hˡ)
+    enthalpy_sedimentation =
+        -V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+        δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ, μ.hˡ)
+
+    Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ)
+    precipitation_drag_heating = -constants.gravitational_acceleration * Fᵐ
+
+    return enthalpy_sedimentation + precipitation_drag_heating
 end
 
 # Vertical flux of θˡⁱ contribution from liquid sedimentation on z-faces.
@@ -580,9 +602,20 @@ end
     return wᶜˡ_face * ρqᶜˡ_upwind * Θˡ_cl + wʳ_face * ρqʳ_upwind * Θˡ_r
 end
 
-# Sedimentation tendency for ρθ: upwinded θˡⁱ flux including sensible + latent heat.
+# Sedimentation tendency for ρθ: upwinded θˡⁱ flux including sensible + latent heat,
+# plus terminal-fall dissipation heating converted to θˡⁱ units.
 @inline function AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρθ}, ρ, μ, 𝒰, constants, velocities)
-    return -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_theta_flux_z, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ, μ.Θˡ)
+    theta_sedimentation =
+        -V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+        δzᵃᵃᶜ(i, j, k, grid, sedimentation_theta_flux_z, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ, μ.Θˡ)
+
+    q = 𝒰.moisture_mass_fractions
+    Π = exner_function(𝒰, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ)
+    precipitation_drag_heating = -constants.gravitational_acceleration * Fᵐ / (cᵖᵐ * Π)
+
+    return theta_sedimentation + precipitation_drag_heating
 end
 
 #####
