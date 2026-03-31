@@ -180,3 +180,41 @@ println("  max|δρθ| = ", maximum(abs, δρθ))
 2. Step 7 (1D column) — 10 minutes, isolates vertical solver
 3. Step 3 (tendency correction check) — 15 minutes, checks physics
 4. Steps 4-6 (operator details) — 30 minutes, checks numerics
+
+## Key finding: interpolation mismatch
+
+The ρθ tendency correction (`_vac_ρθ`) subtracts the vertical flux using
+**centered** interpolation (ℑzᵃᵃᶠ):
+
+```julia
+(ρθᶠ_top * w_top - ρθᶠ_bot * w_bot) / Δzᶜ
+```
+
+But the actual advection operator `div_ρUc` uses **WENO** interpolation for the
+same flux. The difference (WENO − centered) is nonzero and gets passed to
+the Helmholtz solver as if it were the full vertical flux. This means:
+
+1. The explicit tendency has the WENO vertical flux subtracted AND the
+   centered vertical flux re-added (net: WENO − centered = nonzero residual)
+2. The Helmholtz solver then "corrects" for a flux that was never fully removed
+3. The mismatch acts as a spurious forcing that grows
+
+### Test: does the mismatch explain the blow-up?
+
+Replace WENO with Centered(order=2) in the model to eliminate the
+interpolation mismatch. If VITS is then stable, the mismatch is the cause.
+
+```julia
+model = AtmosphereModel(grid; dynamics, coriolis, advection=Centered(order=2))
+```
+
+### Fix
+
+The correction should use the SAME interpolation as the advection operator.
+Options:
+1. Use the actual advective flux kernel for the correction (complex)
+2. Only subtract the centered part and solve for the centered acoustic mode
+   (simpler, but the residual WENO−centered part remains in the explicit step)
+3. Don't subtract the vertical advection from ρθ at all — only the vertical
+   PGF+buoyancy from ρw. This is what some models do (eg MPAS subtracts
+   only the acoustic pressure-velocity coupling, not the advection)
