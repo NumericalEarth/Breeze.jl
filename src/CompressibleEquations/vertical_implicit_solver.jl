@@ -208,45 +208,19 @@ end
 ##### This preserves hydrostatic balance: if δρθ ≈ 0, then (ρw)⁺ ≈ (ρw)*.
 #####
 
-@kernel function _back_solve_ρw_and_update_ρ!(ρw, ρ, grid, αΔt, ℂᵃᶜ², θ, ρθ, ρθ_scratch)
+@kernel function _back_solve_ρw!(ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ, ρθ_scratch)
     i, j, k = @index(Global, NTuple)
-    Nz = size(grid, 3)
 
     @inbounds begin
-        ## --- Back-solve ρw at face (i, j, k) ---
         ℂ²ᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℂᵃᶜ²)
         θᶠ = ℑzᵃᵃᶠ(i, j, k, grid, θ)
 
-        ## δρθ = (ρθ)⁺ − (ρθ)* at cell centers above and below this face
         δρθ_above = ρθ[i, j, k] - ρθ_scratch[i, j, k]
         δρθ_below = ρθ[i, j, k - 1] - ρθ_scratch[i, j, k - 1]
         Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
         δz_δρθ = (δρθ_above - δρθ_below) / Δzᶠ
 
-        ## δρw at this face
-        δρw_k = -αΔt * ℂ²ᶠ / θᶠ * δz_δρθ * (k > 1)
-        ρw[i, j, k] = ρw[i, j, k] + δρw_k
-
-        ## --- Update ρ at cell center (i, j, k) from vertical divergence of δρw ---
-        ## δρ = -αΔt (1/V) δz(Az δρw)
-        ## We need δρw at faces k and k+1. Since δρw_k is computed at face k,
-        ## we need to also compute δρw at face k+1.
-        ℂ²ᶠ_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, ℂᵃᶜ²)
-        θᶠ_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, θ)
-        δρθ_above_top = ifelse(k < Nz, ρθ[i, j, k + 1] - ρθ_scratch[i, j, k + 1], zero(eltype(grid)))
-        δρθ_below_top = δρθ_above  # = ρθ[i,j,k] - ρθ_scratch[i,j,k]
-        Δzᶠ_top = Δzᶜᶜᶠ(i, j, k + 1, grid)
-        δz_δρθ_top = (δρθ_above_top - δρθ_below_top) / Δzᶠ_top
-
-        δρw_top = -αΔt * ℂ²ᶠ_top / θᶠ_top * δz_δρθ_top * (k < Nz)
-
-        ## Vertical divergence of δρw at cell center
-        Azᵇ = Az_qᶜᶜᶠ(i, j, k, grid, δρw_k)      # = Az_bot * δρw_bot (but δρw is a scalar not a field)
-        # Actually we need Az at faces times δρw. Since δρw is a scalar, not a field:
-        Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
-        div_z_δρw = (δρw_top - δρw_k) / Δzᶜ
-
-        ρ[i, j, k] = ρ[i, j, k] - αΔt * div_z_δρw
+        ρw[i, j, k] = (ρw[i, j, k] - αΔt * ℂ²ᶠ / θᶠ * δz_δρθ) * (k > 1)
     end
 end
 
@@ -317,11 +291,8 @@ function _vertical_acoustic_implicit_step!(model,
     launch!(arch, grid, :xyz, _add_field!, ρθ, sc.ρθ_scratch)
 
     ## 4. Back-solve ρw using δρθ = (ρθ)⁺ − (ρθ)* (not the full ρθ⁺)
-    ##    and simultaneously update ρ from the vertical divergence of δρw.
-    ##    δρw = ρw⁺ - ρw* = -αΔt (ℂ²/θ)ᶠ ∂(δρθ)/∂z
-    ##    δρ = -αΔt (1/V) δz(Az δρw)
-    launch!(arch, grid, :xyz, _back_solve_ρw_and_update_ρ!,
-            ρw, ρ, grid, αΔt, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch)
+    launch!(arch, grid, :xyz, _back_solve_ρw!,
+            ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch)
 
     return nothing
 end
