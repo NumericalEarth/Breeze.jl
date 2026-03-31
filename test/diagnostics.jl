@@ -1,6 +1,7 @@
 using Test
 using Breeze
 using Breeze.Thermodynamics: dry_air_gas_constant, adiabatic_hydrostatic_pressure
+using Breeze.Thermodynamics: MoistureMassFractions, mixture_heat_capacity
 using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using GPUArraysCore: @allowscalar
@@ -96,6 +97,33 @@ end
     e_density_field = Field(e_density)
     @test all(isfinite.(interior(e_density_field)))
     @test all(interior(e_density_field) .> 0)
+
+    grid_ice = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+    constants = ThermodynamicConstants(FT)
+    reference_state = ReferenceState(grid_ice, constants; surface_pressure=101325, potential_temperature=288)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
+    model_ice = AtmosphereModel(grid_ice; dynamics, microphysics)
+
+    pᵣ = @allowscalar first(reference_state.pressure)
+    ρᵣ = @allowscalar first(reference_state.density)
+    z = @allowscalar Oceananigans.Grids.znode(1, 1, 1, grid_ice, Center(), Center(), Center())
+
+    T_cold = FT(220)
+    qᵗ = FT(0.01)
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(T_cold, pᵣ, qᵗ, constants, microphysics.equilibrium)
+    qⁱ = qᵗ - qᵛ⁺
+    q = MoistureMassFractions(qᵛ⁺, zero(FT), qⁱ)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    e_expected = cᵖᵐ * T_cold + constants.gravitational_acceleration * z - ℒⁱᵣ * qⁱ
+
+    set!(model_ice, ρe = ρᵣ * e_expected, qᵗ = qᵗ)
+
+    e_ice = Field(StaticEnergy(model_ice))
+    qⁱ_model = @allowscalar first(model_ice.microphysical_fields.qⁱ)
+    @test qⁱ_model > zero(FT)
+    @test @allowscalar first(e_ice) ≈ e_expected rtol = FT(1e-6)
 end
 
 @testset "Relative humidity diagnostics [$(FT)]" for FT in test_float_types()

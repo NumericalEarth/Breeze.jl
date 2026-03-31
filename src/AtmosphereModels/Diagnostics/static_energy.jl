@@ -110,7 +110,7 @@ function (d::StaticEnergyKernelFunction)(i, j, k, grid)
     qⁱ = q.ice
 
     # Moist static energy
-    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ
+    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
     if d.flavor isa Specific
         return e
