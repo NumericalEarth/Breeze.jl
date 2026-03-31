@@ -229,14 +229,14 @@ FT = Float32
 cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
 microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
 
-weno = WENO(order=9, minimum_buffer_upwind_order=3)
-bounds_preserving_weno = WENO(order=9, minimum_buffer_upwind_order=3, bounds=(0, 1))
+weno = WENO(order=9)
+bounds_preserving_weno = WENO(order=9, bounds=(0, 1))
 
 momentum_advection = weno
-scalar_advection = (ρθ = weno,
+scalar_advection = (ρθ  = weno,
                     ρqᵛ = bounds_preserving_weno,
-                    ρqᶜˡ = bounds_preserving_weno,
-                    ρqᶜⁱ = bounds_preserving_weno,
+                    ρqᶜˡ= bounds_preserving_weno,
+                    ρqᶜⁱ= bounds_preserving_weno,
                     ρqʳ = bounds_preserving_weno,
                     ρqˢ = bounds_preserving_weno)
 
@@ -257,7 +257,7 @@ set!(model, θ=θᵢ, ℋ=ℋᵢ, u=uᵢ)
 # Run for 2 hours with adaptive time stepping (CFL = 0.7):
 
 simulation = Simulation(model; Δt=2, stop_time=2hours)
-conjure_time_step_wizard!(simulation, cfl=0.7)
+#conjure_time_step_wizard!(simulation, cfl=0.7)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Output and progress
