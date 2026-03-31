@@ -126,8 +126,8 @@ model = AtmosphereModel(grid; dynamics, coriolis,
 
 set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
 
-# Time-stepping: VITS allows ~30x larger Δt than explicit (2s → 60s)
-Δt = 60
+# Time-stepping: VITS removes vertical acoustic CFL; start with Δt=10s
+Δt = 10
 stop_time = 1days
 
 simulation = Simulation(model; Δt, stop_time)

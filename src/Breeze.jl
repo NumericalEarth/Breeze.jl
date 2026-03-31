@@ -115,7 +115,14 @@ export
     ParcelModel,
     ParcelState,
     PrescribedVerticalVelocity,
-    PrognosticVerticalVelocity
+    PrognosticVerticalVelocity,
+
+    # PolarFilters
+    PolarFilter,
+    add_polar_filter!,
+    apply_polar_filter!,
+    SharpTruncation,
+    ExponentialRolloff
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
@@ -231,5 +238,8 @@ using .Forcings
 
 include("VerticalGrids.jl")
 using .VerticalGrids
+
+include("PolarFilters/PolarFilters.jl")
+using .PolarFilters
 
 end # module Breeze

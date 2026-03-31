@@ -1,18 +1,18 @@
 #####
 ##### Vertically Implicit Acoustic Solver for CompressibleDynamics
 #####
-##### Treats vertical acoustic propagation implicitly by solving a tridiagonal
-##### system for ρθ after each explicit SSP-RK3 stage, then back-solving for ρw.
+##### Damps vertical acoustic modes by applying a Helmholtz filter after
+##### each explicit SSP-RK3 stage.  No tendency modifications are needed:
+##### the full PGF and buoyancy remain in the explicit step, and the
+##### implicit solve smooths any vertical acoustic instability.
 #####
-##### The linear vertical acoustic mode couples ρw and ρθ through:
-#####   ∂(ρw)/∂t = ... - (ℂᵃᶜ²/θ) ∂(ρθ)/∂z   (linear PGF)
-#####   ∂(ρθ)/∂t = ... - ∂(ρθ w)/∂z            (linear vertical flux)
-#####
-##### The tridiagonal system (backward Euler):
+##### The tridiagonal (at cell centers, for ρθ):
 #####   [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] (ρθ)⁺ = (ρθ)*
 #####
-##### Back-solve:
-#####   (ρw)⁺ = (ρw)* - αΔt (ℂᵃᶜ²/θ) ∂(ρθ)⁺/∂z
+##### Back-solve (at z-faces, for ρw):
+#####   (ρw)⁺ = (ρw)* + αΔt [-(ℂᵃᶜ²/θ) ∂(ρθ)⁺/∂z - ρg]
+#####
+##### In hydrostatic balance the PGF and buoyancy cancel, so (ρw)⁺ ≈ (ρw)*.
 #####
 
 using KernelAbstractions: @kernel, @index
@@ -36,8 +36,9 @@ $(TYPEDEF)
 Solver for the vertically implicit acoustic correction in compressible dynamics.
 
 Created during model materialization when [`VerticallyImplicitTimeStepping`](@ref)
-is used. Holds workspace fields for the tridiagonal solve that couples ρw and ρθ
-through the vertical acoustic mode.
+is used. Holds workspace fields for the tridiagonal solve that damps vertical
+acoustic modes while preserving the full nonlinear pressure gradient and buoyancy
+in the explicit tendencies.
 
 Fields
 ======
@@ -135,55 +136,12 @@ end
 end
 
 #####
-##### Tendency corrections — subtract linear vertical acoustic terms
-#####
-##### These are @inline dispatch functions that compile to zero for non-VITS dynamics.
-#####
-
-## ρw correction: +(ℂᵃᶜ²/θ)ᶠ ∂(ρθ)/∂z — cancels linear vertical PGF
-## Extends the fallback defined in AtmosphereModels.dynamics_kernel_functions
-@inline AtmosphereModels.vertical_acoustic_correction_ρw(i, j, k, grid, dynamics::CompressibleDynamics, formulation) =
-    _vac_ρw(i, j, k, grid, dynamics.vertical_acoustic_solver, formulation)
-
-@inline _vac_ρw(i, j, k, grid, ::Nothing, formulation) = zero(grid)
-
-@inline function _vac_ρw(i, j, k, grid, solver::VerticalAcousticSolver, formulation)
-    ρθ = formulation.potential_temperature_density
-    θ = formulation.potential_temperature
-    ℂᵃᶜ² = solver.acoustic_speed_squared
-    ℂ²ᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℂᵃᶜ²)
-    θᶠ = ℑzᵃᵃᶠ(i, j, k, grid, θ)
-    δz_ρθ = δzᵃᵃᶠ(i, j, k, grid, ρθ)
-    Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
-    return ℂ²ᶠ / θᶠ * δz_ρθ / Δzᶠ * (k > 1)
-end
-
-## ρθ correction: +∂(ρθ w)/∂z — cancels linear vertical advective flux
-## Extends the fallback defined in AtmosphereModels.dynamics_kernel_functions
-@inline AtmosphereModels.vertical_acoustic_correction_ρθ(i, j, k, grid, dynamics::CompressibleDynamics, formulation, velocities) =
-    _vac_ρθ(i, j, k, grid, dynamics.vertical_acoustic_solver, formulation, velocities)
-
-@inline _vac_ρθ(i, j, k, grid, ::Nothing, formulation, velocities) = zero(grid)
-
-@inline function _vac_ρθ(i, j, k, grid, ::VerticalAcousticSolver, formulation, velocities)
-    ρθ = formulation.potential_temperature_density
-    w = velocities.w
-    Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
-    @inbounds begin
-        ρθᶠ_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρθ)
-        w_top = w[i, j, k + 1]
-        ρθᶠ_bot = ℑzᵃᵃᶠ(i, j, k, grid, ρθ)
-        w_bot = w[i, j, k]
-    end
-    flux_top = ρθᶠ_top * w_top
-    flux_bot = ρθᶠ_bot * w_bot
-    return (flux_top - flux_bot) / Δzᶜ
-end
-
-#####
 ##### Tridiagonal build kernel
 #####
-##### Solves: [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] (ρθ)⁺ = (ρθ)*
+##### Helmholtz filter: [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] (ρθ)⁺ = (ρθ)*
+#####
+##### This damps vertical acoustic oscillations in ρθ without modifying
+##### the explicit tendencies.  The RHS is the full explicit update (ρθ)*.
 #####
 
 @kernel function _build_ρθ_tridiagonal!(lower, diag, upper, rhs_field,
@@ -222,23 +180,30 @@ end
 ##### Back-solve kernel for ρw
 #####
 ##### After solving for (ρθ)⁺, compute:
-#####   (ρw)⁺ = (ρw)* - αΔt (ℂᵃᶜ²/θ)ᶠ ∂(ρθ)⁺/∂z
+#####   (ρw)⁺ = (ρw)* + αΔt [-(ℂᵃᶜ²/θ)ᶠ ∂(ρθ)⁺/∂z - ρᶠ g]
 #####
+##### In hydrostatic balance the PGF and buoyancy cancel, preserving (ρw)* ≈ 0.
 ##### θ and ℂᵃᶜ² are from the previous update_state! (the linearization state).
 #####
 
-@kernel function _back_solve_ρw!(ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ)
+@kernel function _back_solve_ρw!(ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ, density, g)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         ℂ²ᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℂᵃᶜ²)
         θᶠ = ℑzᵃᵃᶠ(i, j, k, grid, θ)
+        ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, density)
         δz_ρθ = δzᵃᵃᶠ(i, j, k, grid, ρθ)
         Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
 
-        ## (ρw)⁺ = (ρw)* - αΔt (ℂᵃᶜ²/θ)ᶠ ∂(ρθ)⁺/∂z
+        ## PGF: -(ℂᵃᶜ²/θ)ᶠ ∂(ρθ)⁺/∂z
+        ## Buoyancy: -ρᶠ g
+        ## In hydrostatic balance these cancel: -(ℂᵃᶜ²/θ) ∂(ρθ)/∂z ≈ +ρg
+        pgf_plus_buoyancy = -ℂ²ᶠ / θᶠ * δz_ρθ / Δzᶠ - ρᶠ * g
+
+        ## (ρw)⁺ = (ρw)* + αΔt (PGF + buoyancy)
         ## Zero at k=1 (bottom boundary: w=0)
-        ρw[i, j, k] = (ρw[i, j, k] - αΔt * ℂ²ᶠ / θᶠ * δz_ρθ / Δzᶠ) * (k > 1)
+        ρw[i, j, k] = (ρw[i, j, k] + αΔt * pgf_plus_buoyancy) * (k > 1)
     end
 end
 
@@ -250,6 +215,12 @@ end
 $(TYPEDSIGNATURES)
 
 Apply the vertically implicit acoustic correction after an explicit SSP-RK3 substep.
+
+The implicit step filters vertical acoustic oscillations by solving a Helmholtz
+equation for ρθ, then recomputing ρw from the filtered ρθ with the full pressure
+gradient and buoyancy.  No tendency modifications are needed: the explicit step
+retains the complete nonlinear dynamics, and the implicit solve acts as a damping
+filter on the vertical acoustic mode.
 
 Dispatches on `model.dynamics.vertical_acoustic_solver`: no-op when `nothing`
 (i.e., for [`ExplicitTimeStepping`](@ref) or [`SplitExplicitTimeDiscretization`](@ref)).
@@ -270,19 +241,21 @@ function _vertical_acoustic_implicit_step!(model,
     ρθ = model.formulation.potential_temperature_density
     θ = model.formulation.potential_temperature
     ρw = model.momentum.ρw
+    ρ = dynamics.density
     ℂᵃᶜ² = solver_cache.acoustic_speed_squared
+    g = model.thermodynamic_constants.gravitational_acceleration
 
-    ## Build tridiagonal system: [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] (ρθ)⁺ = (ρθ)*
+    ## 1. Build Helmholtz filter: [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] (ρθ)⁺ = (ρθ)*
     launch!(arch, grid, :xyz, _build_ρθ_tridiagonal!,
             solver.a, solver.b, solver.c, solver_cache.rhs,
             grid, αΔt, ℂᵃᶜ², ρθ)
 
-    ## Solve tridiagonal system: (ρθ)⁺ overwrites the ρθ field
+    ## 2. Solve: (ρθ)⁺ overwrites the ρθ field
     solve!(ρθ, solver, solver_cache.rhs)
 
-    ## Back-solve: (ρw)⁺ from the updated ρθ
+    ## 3. Recompute ρw from filtered ρθ with full PGF + buoyancy
     launch!(arch, grid, :xyz, _back_solve_ρw!,
-            ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ)
+            ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ, ρ, g)
 
     return nothing
 end

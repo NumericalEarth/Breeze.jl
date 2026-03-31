@@ -52,30 +52,31 @@ Nλ, Nφ, Nz = size(grid)
 
 # ## DCMIP2016 parameters (must match the example)
 
-const 𝑎  = 6371220.0
-const Rᵈ = 287.0
-const cₚ = 1004.5
-const κ  = 2 / 7
-const p₀ = 100000.0
-const T₀E = 310.0
-const T₀P = 240.0
-const T₀  = 0.5 * (T₀E + T₀P)
-const K_jet = 3.0
-const B_jet = 2.0
-const Λ    = 0.005
-const constA = 1.0 / Λ
-const constB = (T₀ - T₀P) / (T₀ * T₀P)
-const constC = 0.5 * (K_jet + 2) * (T₀E - T₀P) / (T₀E * T₀P)
-const constH = Rᵈ * T₀ / 9.80616
+g  = 9.80616    # m/s²
+Rᵈ = 287.0      # J/(kg·K)
+p₀ = 1e5        # Pa
+
+Tᴱ = 310.0      # K — equatorial surface temperature
+Tᴾ = 240.0      # K — polar surface temperature
+Tₘ = (Tᴱ + Tᴾ) / 2
+Γ  = 0.005       # K/m — lapse rate
+K  = 3           # jet width parameter
+b  = 2           # vertical half-width parameter
 
 ## Recompute pressure at grid points from the analytic formula
 function pressure_at(λ, φ, z)
-    scaledZ = z / (B_jet * constH)
-    expZ2 = exp(-scaledZ^2)
-    ∫τ₁ = constA * (exp(Λ * z / T₀) - 1) + constB * z * expZ2
-    ∫τ₂ = constC * z * expZ2
-    F = cosd(φ)^K_jet - K_jet / (K_jet + 2) * cosd(φ)^(K_jet + 2)
-    return p₀ * exp(-9.80616 / Rᵈ * (∫τ₁ - ∫τ₂ * F))
+    Hₛ = Rᵈ * Tₘ / g
+    η  = z / (b * Hₛ)
+    e  = exp(-η^2)
+
+    A = (Tₘ - Tᴾ) / (Tₘ * Tᴾ)
+    C = (K + 2) / 2 * (Tᴱ - Tᴾ) / (Tᴱ * Tᴾ)
+
+    ∫τ₁ = (exp(Γ * z / Tₘ) - 1) / Γ + A * z * e
+    ∫τ₂ = C * z * e
+    F   = cosd(φ)^K - K / (K + 2) * cosd(φ)^(K + 2)
+
+    return p₀ * exp(-g / Rᵈ * (∫τ₁ - ∫τ₂ * F))
 end
 
 # ## 1. Surface pressure minimum over time
