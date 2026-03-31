@@ -218,3 +218,52 @@ Options:
 3. Don't subtract the vertical advection from ρθ at all — only the vertical
    PGF+buoyancy from ρw. This is what some models do (eg MPAS subtracts
    only the acoustic pressure-velocity coupling, not the advection)
+
+## Root cause identified: IMEX splitting is conditionally stable
+
+The VITS solver is NOT unconditionally stable. Stability sweep:
+
+| Δt (s) | max|v| at 100 steps | Growth rate |
+|--------|---------------------|-------------|
+| 2      | 0.16                | baseline    |
+| 5      | 0.80                | 5×          |
+| 10     | 3.68                | 23×         |
+| 20     | 8.70                | 54×         |
+| 40     | 16.8                | 105×        |
+
+Growth scales as ~Δt². The vertical acoustic CFL (Δz/cs ≈ 3s) is still
+the effective stability limit. The implicit solve handles the vertical
+column in isolation, but the horizontal PGF couples into w through
+continuity, creating a horizontal-vertical acoustic mode that the
+purely vertical implicit solve cannot stabilize.
+
+### Why the Helmholtz solve alone isn't enough
+
+The acoustic mode is 3D: pressure perturbations propagate both
+horizontally and vertically. The VITS only handles the vertical part:
+
+```
+∂(ρw)/∂t = -∂p/∂z - ρg    ← implicitly solved
+∂p/∂t ∝ -(∂u/∂x + ∂v/∂y + ∂w/∂z)  ← horizontal part is explicit
+```
+
+When Δt > Δz/cs, the vertical implicit solve correctly damps the
+purely vertical acoustic mode. But the horizontal divergence
+(∂u/∂x + ∂v/∂y) creates pressure perturbations that drive w through
+the explicit vertical PGF residual. The Helmholtz solve corrects
+the w→p coupling but not the (horizontal divergence)→p→w pathway.
+
+### Options going forward
+
+1. **Accept Δt ≈ 3s**: The VITS provides no speedup over explicit.
+   Useful only for eliminating acoustic noise (w is much cleaner).
+
+2. **Split-explicit with vertical implicit acoustic substeps**: Like MPAS.
+   Outer Δt limited by advective CFL (~200s), inner acoustic substeps
+   at Δτ ≈ Δx/cs with implicit vertical. This is the correct approach
+   but requires significant rework.
+
+3. **Fully implicit acoustic solve**: Solve the 3D Helmholtz problem
+   (horizontal + vertical). Very expensive but unconditionally stable.
+
+Option 2 (MPAS-style) is the industry standard and the right path forward.
