@@ -115,14 +115,12 @@ function ssp_rk3_substep!(model, Δt, α)
     Gⁿ = model.timestepper.Gⁿ
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic_fields(model), U⁰, Gⁿ))
-        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
+        # Step 1: Forward Euler update (no blending yet)
+        #   u_fe = u^(m-1) + Δt * G
+        launch!(arch, grid, :xyz, _forward_euler_step!, u, G, Δt)
 
-        # Field index for implicit solver:
-        # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
-        # - indices 4+ are scalars (ρθ/ρe, ρqᵗ, microphysics, tracers)
-        # For scalars, we use Val(i - 3) to get Val(1), Val(2), etc.
+        # Step 2: Implicit diffusion step on the forward-Euler state
         field_index = Val(i - 3)
-
         implicit_step!(u,
                        model.timestepper.implicit_solver,
                        model.closure,
@@ -130,18 +128,30 @@ function ssp_rk3_substep!(model, Δt, α)
                        field_index,
                        model.clock,
                        fields(model),
-                       α * Δt)
+                       Δt)
+    end
+
+    # Step 3: Acoustic implicit correction on the forward-Euler state
+    # (before blending with u⁰)
+    vertical_acoustic_implicit_step!(model, Δt)
+
+    # Step 4: SSP-RK3 blending with u⁰
+    #   u^(m) = (1 - α) * u⁰ + α * u_fe
+    for (u, u⁰) in zip(prognostic_fields(model), U⁰)
+        launch!(arch, grid, :xyz, _ssp_rk3_blend!, u, u⁰, α)
     end
 
     return nothing
 end
 
-@kernel function _ssp_rk3_substep!(u, u⁰, G, Δt, α)
+@kernel function _forward_euler_step!(u, G, Δt)
     i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        # u^(m) = (1 - α) * u^(0) + α * (u^(m-1) + Δt * G)
-        u[i, j, k] = (1 - α) * u⁰[i, j, k] + α * (u[i, j, k] + Δt * G[i, j, k])
-    end
+    @inbounds u[i, j, k] = u[i, j, k] + Δt * G[i, j, k]
+end
+
+@kernel function _ssp_rk3_blend!(u, u⁰, α)
+    i, j, k = @index(Global, NTuple)
+    @inbounds u[i, j, k] = (1 - α) * u⁰[i, j, k] + α * u[i, j, k]
 end
 
 """
@@ -198,7 +208,6 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     compute_flux_bc_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α¹)
-    vertical_acoustic_implicit_step!(model, α¹ * Δt)
 
     compute_pressure_correction!(model, Δt)
     make_pressure_correction!(model, Δt)
@@ -213,7 +222,6 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     compute_flux_bc_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α²)
-    vertical_acoustic_implicit_step!(model, α² * Δt)
 
     compute_pressure_correction!(model, α² * Δt)
     make_pressure_correction!(model, α² * Δt)
@@ -228,7 +236,6 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     compute_flux_bc_tendencies!(model)
     ssp_rk3_substep!(model, Δt, α³)
-    vertical_acoustic_implicit_step!(model, α³ * Δt)
 
     compute_pressure_correction!(model, α³ * Δt)
     make_pressure_correction!(model, α³ * Δt)
