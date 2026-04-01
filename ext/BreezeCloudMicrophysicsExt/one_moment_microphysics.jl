@@ -78,13 +78,13 @@ function one_moment_cloud_microphysics_categories(
     rain = Rain(FT),
     snow = Snow(FT),
     collisions = CollisionEff(FT),
-    hydrometeor_velocities = Blk1MVelType(FT),
+    hydrometeor_velocities = TerminalVelocityParams(FT),
     air_properties = AirProperties(FT))
 
     return FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities, air_properties)
 end
 
-const CM1MCategories = FourCategories{<:CloudLiquid, <:CloudIce, <:Rain, <:Snow, <:CollisionEff, <:Blk1MVelType, <:AirProperties}
+const CM1MCategories = FourCategories{<:CloudLiquid, <:CloudIce, <:Rain, <:Snow, <:CollisionEff, <:TerminalVelocityParams, <:AirProperties}
 const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories}
 
 """
@@ -222,6 +222,12 @@ const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 # Snow sedimentation: snow falls with terminal velocity (mixed-phase schemes only)
 @inline AM.microphysical_velocities(bμp::MixedPhase1M, μ, ::Val{:ρqˢ}) = (u=zf, v=zf, w=μ.wˢ)
 
+# Cloud liquid sedimentation (non-equilibrium schemes only, where ρqᶜˡ is prognostic)
+@inline AM.microphysical_velocities(bμp::NonEquilibrium1M, μ, ::Val{:ρqᶜˡ}) = (u=zf, v=zf, w=μ.wᶜˡ)
+
+# Cloud ice sedimentation (mixed-phase non-equilibrium only, where ρqᶜⁱ is prognostic)
+@inline AM.microphysical_velocities(bμp::MPNE1M, μ, ::Val{:ρqᶜⁱ}) = (u=zf, v=zf, w=μ.wᶜⁱ)
+
 #####
 ##### Gridless MicrophysicalState construction
 #####
@@ -318,10 +324,17 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
     face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
     wʳ = ZFaceField(grid; boundary_conditions=face_bcs)
 
-    if bμp isa MixedPhase1M
-        wˢ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
-        wˢ = ZFaceField(grid; boundary_conditions=wˢ_bcs)
+    if bμp isa MPNE1M
+        wˢ = ZFaceField(grid; boundary_conditions=face_bcs)
+        wᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs)
+        wᶜⁱ = ZFaceField(grid; boundary_conditions=face_bcs)
+        return (; zip(center_names, center_fields)..., wʳ, wˢ, wᶜˡ, wᶜⁱ)
+    elseif bμp isa MP1M
+        wˢ = ZFaceField(grid; boundary_conditions=face_bcs)
         return (; zip(center_names, center_fields)..., wʳ, wˢ)
+    elseif bμp isa WPNE1M
+        wᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs)
+        return (; zip(center_names, center_fields)..., wʳ, wᶜˡ)
     end
 
     return (; zip(center_names, center_fields)..., wʳ)
@@ -350,7 +363,7 @@ end
 
     # Terminal velocity with bottom boundary condition
     categories = bμp.categories
-    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
+    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.blk1m.rain, ρ, ℳ.qʳ)
     wʳ = -𝕎 # negative = downward
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
@@ -377,16 +390,89 @@ end
     categories = bμp.categories
 
     # Rain terminal velocity
-    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
+    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.blk1m.rain, ρ, ℳ.qʳ)
     wʳ = -𝕎 # negative = downward
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
 
     # Snow terminal velocity
-    𝕎ˢ = terminal_velocity(categories.snow, categories.hydrometeor_velocities.snow, ρ, ℳ.qˢ)
+    𝕎ˢ = terminal_velocity(categories.snow, categories.hydrometeor_velocities.blk1m.snow, ρ, ℳ.qˢ)
     wˢ = -𝕎ˢ # negative = downward
     wˢ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wˢ)
     @inbounds μ.wˢ[i, j, k] = ifelse(k == 1, wˢ₀, wˢ)
+
+    return nothing
+end
+
+# Warm-phase non-equilibrium: adds cloud liquid sedimentation
+@inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, bμp::WPNE1M, ℳ::WarmPhaseOneMomentState, ρ, 𝒰, constants)
+    # State fields
+    @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
+    @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
+
+    # Vapor from thermodynamic state
+    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+
+    # Derived: total liquid
+    @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
+
+    categories = bμp.categories
+
+    # Rain terminal velocity with bottom boundary condition
+    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.blk1m.rain, ρ, ℳ.qʳ)
+    wʳ = -𝕎 # negative = downward
+    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
+    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+
+    # Cloud liquid terminal velocity (Stokes regime)
+    𝕎ᶜˡ = CMNonEq.terminal_velocity(categories.cloud_liquid, categories.hydrometeor_velocities.stokes, ρ, ℳ.qᶜˡ)
+    wᶜˡ = -𝕎ᶜˡ
+    wᶜˡ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wᶜˡ)
+    @inbounds μ.wᶜˡ[i, j, k] = ifelse(k == 1, wᶜˡ₀, wᶜˡ)
+
+    return nothing
+end
+
+# Mixed-phase non-equilibrium: adds cloud liquid and ice sedimentation
+@inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, bμp::MPNE1M, ℳ::MixedPhaseOneMomentState, ρ, 𝒰, constants)
+    # State fields
+    @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
+    @inbounds μ.qᶜⁱ[i, j, k] = ℳ.qᶜⁱ
+    @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
+    @inbounds μ.qˢ[i, j, k] = ℳ.qˢ
+
+    # Vapor from thermodynamic state
+    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+
+    # Derived: total liquid and ice
+    @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
+    @inbounds μ.qⁱ[i, j, k] = ℳ.qᶜⁱ + ℳ.qˢ
+
+    categories = bμp.categories
+
+    # Rain terminal velocity
+    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.blk1m.rain, ρ, ℳ.qʳ)
+    wʳ = -𝕎 # negative = downward
+    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
+    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+
+    # Snow terminal velocity
+    𝕎ˢ = terminal_velocity(categories.snow, categories.hydrometeor_velocities.blk1m.snow, ρ, ℳ.qˢ)
+    wˢ = -𝕎ˢ # negative = downward
+    wˢ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wˢ)
+    @inbounds μ.wˢ[i, j, k] = ifelse(k == 1, wˢ₀, wˢ)
+
+    # Cloud liquid terminal velocity (Stokes regime)
+    𝕎ᶜˡ = CMNonEq.terminal_velocity(categories.cloud_liquid, categories.hydrometeor_velocities.stokes, ρ, ℳ.qᶜˡ)
+    wᶜˡ = -𝕎ᶜˡ
+    wᶜˡ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wᶜˡ)
+    @inbounds μ.wᶜˡ[i, j, k] = ifelse(k == 1, wᶜˡ₀, wᶜˡ)
+
+    # Cloud ice terminal velocity (Chen 2022 small ice)
+    𝕎ᶜⁱ = CMNonEq.terminal_velocity(categories.cloud_ice, categories.hydrometeor_velocities.chen2022.small_ice, ρ, ℳ.qᶜⁱ)
+    wᶜⁱ = -𝕎ᶜⁱ
+    wᶜⁱ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wᶜⁱ)
+    @inbounds μ.wᶜⁱ[i, j, k] = ifelse(k == 1, wᶜⁱ₀, wᶜⁱ)
 
     return nothing
 end
@@ -549,14 +635,14 @@ const τⁿᵘᵐ = 10  # seconds
 
     # Accretion: cloud liquid captured by falling rain
     Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
-                     categories.hydrometeor_velocities.rain, categories.collisions,
+                     categories.hydrometeor_velocities.blk1m.rain, categories.collisions,
                      qᶜˡ, qʳ, ρ)
 
     # Rain evaporation in subsaturated air
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     Sᵉᵛᵃᵖ = rain_evaporation(categories.rain,
-                             categories.hydrometeor_velocities.rain,
+                             categories.hydrometeor_velocities.blk1m.rain,
                              categories.air_properties,
                              q, qʳ, ρ, T, constants)
 
@@ -584,14 +670,14 @@ end
 
     # Accretion: cloud liquid captured by falling rain
     Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
-                     categories.hydrometeor_velocities.rain, categories.collisions,
+                     categories.hydrometeor_velocities.blk1m.rain, categories.collisions,
                      qᶜˡ, qʳ, ρ)
 
     # Rain evaporation in subsaturated air
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     Sᵉᵛᵃᵖ = rain_evaporation(categories.rain,
-                             categories.hydrometeor_velocities.rain,
+                             categories.hydrometeor_velocities.blk1m.rain,
                              categories.air_properties,
                              q, qʳ, ρ, T, constants)
 
@@ -640,7 +726,7 @@ end
 
     # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
     Sᵉᵛᵃᵖ = rain_evaporation(categories.rain,
-                             categories.hydrometeor_velocities.rain,
+                             categories.hydrometeor_velocities.blk1m.rain,
                              categories.air_properties,
                              q, qʳ, ρ, T, constants)
     Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
@@ -648,7 +734,7 @@ end
     # Collection: cloud liquid → rain (does not involve vapor)
     Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
     Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
-                     categories.hydrometeor_velocities.rain, categories.collisions,
+                     categories.hydrometeor_velocities.blk1m.rain, categories.collisions,
                      qᶜˡ, qʳ, ρ)
 
     # Physics tendencies — conserved by construction: ρqᵛ_phys + ρqᶜˡ_phys + ρqʳ_phys = 0
@@ -730,21 +816,21 @@ end
 
     # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
     Sᵉᵛᵃᵖ = rain_evaporation(categories.rain,
-                             categories.hydrometeor_velocities.rain,
+                             categories.hydrometeor_velocities.blk1m.rain,
                              categories.air_properties,
                              q, qʳ, ρ, T, constants)
     Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
 
     # Snow sublimation/deposition: snow ↔ vapor (positive = deposition)
     Sˢᵘᵇˡ = snow_sublimation_deposition(categories.snow,
-                                        categories.hydrometeor_velocities.snow,
+                                        categories.hydrometeor_velocities.blk1m.snow,
                                         categories.air_properties,
                                         q, qˢ, ρ, T, constants)
     Sˢᵘᵇˡ = max(Sˢᵘᵇˡ, -max(0, qˢ) / τⁿᵘᵐ)
 
     # Snow melting: snow → rain (always non-negative)
     Sᵐᵉˡᵗ = snow_melting(categories.snow,
-                         categories.hydrometeor_velocities.snow,
+                         categories.hydrometeor_velocities.blk1m.snow,
                          categories.air_properties,
                          qˢ, ρ, T, constants)
     Sᵐᵉˡᵗ = min(Sᵐᵉˡᵗ, max(0, qˢ) / τⁿᵘᵐ)
@@ -752,7 +838,7 @@ end
     # Collection: cloud liquid → rain (does not involve vapor)
     Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
     Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
-                     categories.hydrometeor_velocities.rain, categories.collisions,
+                     categories.hydrometeor_velocities.blk1m.rain, categories.collisions,
                      qᶜˡ, qʳ, ρ)
 
     # Ice → snow autoconversion
@@ -760,32 +846,32 @@ end
 
     # Accretion: cloud liquid + snow
     Sᵃᶜᶜˡˢ = accretion(categories.cloud_liquid, categories.snow,
-                       categories.hydrometeor_velocities.snow, categories.collisions,
+                       categories.hydrometeor_velocities.blk1m.snow, categories.collisions,
                        qᶜˡ, qˢ, ρ)
 
     # Accretion: cloud ice + snow → snow
     Sᵃᶜᶜⁱˢ = accretion(categories.cloud_ice, categories.snow,
-                       categories.hydrometeor_velocities.snow, categories.collisions,
+                       categories.hydrometeor_velocities.blk1m.snow, categories.collisions,
                        qᶜⁱ, qˢ, ρ)
 
     # Accretion: cloud ice + rain → snow (ice sink)
     Sᵃᶜᶜⁱʳ = accretion(categories.cloud_ice, categories.rain,
-                       categories.hydrometeor_velocities.rain, categories.collisions,
+                       categories.hydrometeor_velocities.blk1m.rain, categories.collisions,
                        qᶜⁱ, qʳ, ρ)
 
     # Rain sink from ice-rain collisions (rain sink, forms snow)
     Sᵃᶜᶜʳⁱ = accretion_rain_sink(categories.rain, categories.cloud_ice,
-                                 categories.hydrometeor_velocities.rain, categories.collisions,
+                                 categories.hydrometeor_velocities.blk1m.rain, categories.collisions,
                                  qᶜⁱ, qʳ, ρ)
 
     # Rain-snow collisions (computed for both cold and warm pathways)
     Sʳˢ = accretion_snow_rain(categories.snow, categories.rain,
-                             categories.hydrometeor_velocities.snow,
-                             categories.hydrometeor_velocities.rain,
+                             categories.hydrometeor_velocities.blk1m.snow,
+                             categories.hydrometeor_velocities.blk1m.rain,
                              categories.collisions, qˢ, qʳ, ρ)
     Sˢʳ = accretion_snow_rain(categories.rain, categories.snow,
-                             categories.hydrometeor_velocities.rain,
-                             categories.hydrometeor_velocities.snow,
+                             categories.hydrometeor_velocities.blk1m.rain,
+                             categories.hydrometeor_velocities.blk1m.snow,
                              categories.collisions, qʳ, qˢ, ρ)
 
     # Thermal melt factor for warm accretion

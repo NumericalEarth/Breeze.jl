@@ -331,8 +331,11 @@ end
     @test vel_rain !== nothing
     @test haskey(vel_rain, :w)
 
+    # Cloud liquid sedimentation velocity (non-equilibrium has it)
+    @test haskey(model.microphysical_fields, :wᶜˡ)
     vel_cloud = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
-    @test vel_cloud === nothing
+    @test vel_cloud !== nothing
+    @test haskey(vel_cloud, :w)
 end
 
 @testset "Mixed-phase non-equilibrium snow field materialization [$(FT)]" for FT in test_float_types()
@@ -359,8 +362,20 @@ end
     # Other tracers still have correct dispatch
     vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
     @test vel_rain !== nothing
+
+    # Cloud condensate velocity fields should exist
+    @test haskey(model.microphysical_fields, :wᶜˡ)
+    @test haskey(model.microphysical_fields, :wᶜⁱ)
+
+    # Cloud liquid sedimentation velocity dispatch
     vel_cloud = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
-    @test vel_cloud === nothing
+    @test vel_cloud !== nothing
+    @test haskey(vel_cloud, :w)
+
+    # Cloud ice sedimentation velocity dispatch
+    vel_ice = microphysical_velocities(microphysics, μ, Val(:ρqᶜⁱ))
+    @test vel_ice !== nothing
+    @test haskey(vel_ice, :w)
 end
 
 @testset "MPNE1M snow processes time-stepping [$(FT)]" for FT in test_float_types()
