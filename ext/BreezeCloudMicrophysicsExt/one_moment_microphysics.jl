@@ -845,16 +845,31 @@ end
            _advective_tracer_flux_z(i, j, k, grid, advection, wˢ, ρqˢ)
 end
 
+@inline function one_moment_enthalpy_sedimentation(i, j, k, grid, ::WarmPhase1M, μ, advection)
+    return -V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+           δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.hˡ)
+end
+
+@inline function one_moment_enthalpy_sedimentation(i, j, k, grid, ::MixedPhase1M, μ, advection)
+    # Mixed-phase 1M currently materializes rain fall velocities only.
+    return -V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+           δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.hˡ)
+end
+
+@inline function one_moment_sedimentation_mass_flux(i, j, k, grid, ::WarmPhase1M, μ, advection)
+    return ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wʳ, μ.ρqʳ)
+end
+
+@inline function one_moment_sedimentation_mass_flux(i, j, k, grid, ::MixedPhase1M, μ, advection)
+    # Mixed-phase 1M currently materializes rain fall velocities only.
+    return ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wʳ, μ.ρqʳ)
+end
+
 # Sedimentation tendency for ρe: flux divergence of sensible + latent enthalpy,
 # plus precipitation drag heating.
-@inline function AM.grid_microphysical_tendency(i, j, k, grid, bμp::OMCM, ::Val{:ρe}, ρ, μ, 𝒰, constants, velocities, advection)
-    if hasproperty(μ, :wˢ) && hasproperty(μ, :ρqˢ)
-        sedimentation = -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.hˡ, μ.wˢ, μ.ρqˢ, μ.hⁱ)
-        Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.wˢ, μ.ρqˢ)
-    else
-        sedimentation = -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.hˡ)
-        Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wʳ, μ.ρqʳ)
-    end
+@inline function AM.grid_microphysical_tendency(i, j, k, grid, bμp::OneMomentLiquidRain, ::Val{:ρe}, ρ, μ, 𝒰, constants, velocities, advection)
+    sedimentation = one_moment_enthalpy_sedimentation(i, j, k, grid, bμp, μ, advection)
+    Fᵐ = one_moment_sedimentation_mass_flux(i, j, k, grid, bμp, μ, advection)
     precipitation_drag_heating = -constants.gravitational_acceleration * Fᵐ
     return sedimentation + precipitation_drag_heating
 end
@@ -863,18 +878,13 @@ end
 # plus precipitation drag heating converted to θˡⁱ units.
 # Uses the same enthalpy flux as the ρe formulation, then converts to θ units
 # with local thermodynamic properties to ensure physical consistency.
-@inline function AM.grid_microphysical_tendency(i, j, k, grid, bμp::OMCM, ::Val{:ρθ}, ρ, μ, 𝒰, constants, velocities, advection)
+@inline function AM.grid_microphysical_tendency(i, j, k, grid, bμp::OneMomentLiquidRain, ::Val{:ρθ}, ρ, μ, 𝒰, constants, velocities, advection)
     q = 𝒰.moisture_mass_fractions
     Π = exner_function(𝒰, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
 
-    if hasproperty(μ, :wˢ) && hasproperty(μ, :ρqˢ)
-        enthalpy_sedimentation = -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.hˡ, μ.wˢ, μ.ρqˢ, μ.hⁱ)
-        Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.wˢ, μ.ρqˢ)
-    else
-        enthalpy_sedimentation = -V⁻¹ᶜᶜᶜ(i, j, k, grid) * δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.hˡ)
-        Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wʳ, μ.ρqʳ)
-    end
+    enthalpy_sedimentation = one_moment_enthalpy_sedimentation(i, j, k, grid, bμp, μ, advection)
+    Fᵐ = one_moment_sedimentation_mass_flux(i, j, k, grid, bμp, μ, advection)
 
     # Convert enthalpy flux divergence to θˡⁱ units using LOCAL cᵖᵐ and Π
     theta_sedimentation = enthalpy_sedimentation / (cᵖᵐ * Π)
