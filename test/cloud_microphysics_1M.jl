@@ -334,3 +334,31 @@ end
     vel_cloud = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
     @test vel_cloud === nothing
 end
+
+@testset "Mixed-phase one-moment snow sedimentation velocities [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=260)
+    dynamics = AnelasticDynamics(reference_state)
+
+    cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+    model = AtmosphereModel(grid; dynamics, microphysics)
+
+    set!(model; θ=260, qᵗ=FT(0.010), qᶜⁱ=FT(5e-4), qˢ=FT(1e-3))
+
+    μ = model.microphysical_fields
+    @test haskey(μ, :wˢ)
+
+    vel_snow = microphysical_velocities(microphysics, μ, Val(:ρqˢ))
+    @test vel_snow !== nothing
+    @test haskey(vel_snow, :w)
+end
+
+@testset "OneMomentCloudMicrophysics uses explicit dispatch for sedimentation tendencies" begin
+    source = read(joinpath(dirname(pathof(BreezeCloudMicrophysicsExt)), "one_moment_microphysics.jl"), String)
+    @test !contains(source, "hasproperty(μ, :wˢ)")
+    @test !contains(source, "hasproperty(μ, :ρqˢ)")
+end

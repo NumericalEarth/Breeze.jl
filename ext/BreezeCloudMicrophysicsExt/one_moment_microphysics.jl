@@ -222,6 +222,8 @@ const MixedPhase1M = Union{MP1M, MPNE1M}
 const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
 const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 
+@inline AM.microphysical_velocities(bμp::MixedPhase1M, μ, ::Val{:ρqˢ}) = (u=zf, v=zf, w=μ.wˢ)
+
 #####
 ##### Gridless MicrophysicalState construction
 #####
@@ -318,7 +320,13 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
     wʳ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
     wʳ = ZFaceField(grid; boundary_conditions=wʳ_bcs)
 
-    return (; zip(center_names, center_fields)..., wʳ)
+    if bμp isa MixedPhase1M
+        wˢ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+        wˢ = ZFaceField(grid; boundary_conditions=wˢ_bcs)
+        return (; zip(center_names, center_fields)..., wʳ, wˢ)
+    else
+        return (; zip(center_names, center_fields)..., wʳ)
+    end
 end
 
 #####
@@ -381,10 +389,14 @@ end
 
     # Terminal velocity with bottom boundary condition
     categories = bμp.categories
-    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
+    𝕎ʳ = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
+    𝕎ˢ = terminal_velocity(categories.snow, categories.hydrometeor_velocities.snow, ρ, ℳ.qˢ)
+    wʳ = -𝕎ʳ # negative = downward
+    wˢ = -𝕎ˢ # negative = downward
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
+    wˢ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wˢ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    @inbounds μ.wˢ[i, j, k] = ifelse(k == 1, wˢ₀, wˢ)
 
     # Sedimentation enthalpies per unit liquid/ice mass.
     # Used by both ρe and ρθ sedimentation tendencies.
@@ -851,9 +863,8 @@ end
 end
 
 @inline function one_moment_enthalpy_sedimentation(i, j, k, grid, ::MixedPhase1M, μ, advection)
-    # Mixed-phase 1M currently materializes rain fall velocities only.
     return -V⁻¹ᶜᶜᶜ(i, j, k, grid) *
-           δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.hˡ)
+           δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.hˡ, μ.wˢ, μ.ρqˢ, μ.hⁱ)
 end
 
 @inline function one_moment_sedimentation_mass_flux(i, j, k, grid, ::WarmPhase1M, μ, advection)
@@ -861,8 +872,7 @@ end
 end
 
 @inline function one_moment_sedimentation_mass_flux(i, j, k, grid, ::MixedPhase1M, μ, advection)
-    # Mixed-phase 1M currently materializes rain fall velocities only.
-    return ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wʳ, μ.ρqʳ)
+    return ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.wˢ, μ.ρqˢ)
 end
 
 # Sedimentation tendency for ρe: flux divergence of sensible + latent enthalpy,
