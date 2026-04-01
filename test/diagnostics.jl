@@ -123,7 +123,7 @@ end
     e_ice = Field(StaticEnergy(model_ice))
     qⁱ_model = @allowscalar first(model_ice.microphysical_fields.qⁱ)
     @test qⁱ_model > zero(FT)
-    @test @allowscalar first(e_ice) ≈ e_expected rtol = FT(1e-6)
+    @test @allowscalar(first(e_ice)) ≈ e_expected rtol = FT(1e-6)
 end
 
 @testset "Relative humidity diagnostics [$(FT)]" for FT in test_float_types()
