@@ -3,7 +3,7 @@
 # This example simulates precipitating shallow cumulus convection following the
 # Rain in Cumulus over the Ocean (RICO) intercomparison case [vanZanten2011](@cite).
 # RICO is a canonical test case for large eddy simulations of trade-wind cumulus
-# with active microphysics.
+# with active warm-rain microphysics.
 #
 # The case is based on observations from the RICO field campaign conducted in the
 # winter of 2004-2005 near Antigua and Barbuda in the Caribbean. Unlike BOMEX,
@@ -14,10 +14,9 @@
 #
 # Initial and boundary conditions for this case are provided by the wonderfully useful
 # package [AtmosphericProfilesLibrary.jl](https://github.com/CliMA/AtmosphericProfilesLibrary.jl).
-# For microphysics we use the mixed-phase non-equilibrium one-moment (MPNE1M) scheme from
+# For precipitation we use the 1-moment scheme from
 # [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl), which provides
-# prognostic cloud liquid, cloud ice, rain, and snow with the full suite of warm-rain and
-# ice-phase processes. In this warm tropical case, ice processes are largely dormant.
+# prognostic rain mass with autoconversion and accretion processes.
 
 using Breeze
 using Oceananigans: Oceananigans
@@ -26,7 +25,6 @@ using Oceananigans.Units
 using AtmosphericProfilesLibrary
 using CairoMakie
 using CloudMicrophysics
-using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using Printf
 using Random
 using CUDA
@@ -83,10 +81,10 @@ T₀ = 299.8    # Sea surface temperature (K)
 # currently extends only to constant coefficients (but could expand in the future),
 
 ρe_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
-ρqᵛ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
+ρqᵉ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
 
 ρe_bcs = FieldBoundaryConditions(bottom=ρe_flux)
-ρqᵛ_bcs = FieldBoundaryConditions(bottom=ρqᵛ_flux)
+ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_flux)
 
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
@@ -139,11 +137,11 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # by the large-scale circulation [vanZanten2011](@cite).
 
 ρᵣ = reference_state.density
-∂t_ρqᵛ_large_scale = Field{Nothing, Nothing, Center}(grid)
+∂t_ρqᵉ_large_scale = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Rico_dqtdt(FT)
-set!(∂t_ρqᵛ_large_scale, z -> dqdt_profile(z))
-set!(∂t_ρqᵛ_large_scale, ρᵣ * ∂t_ρqᵛ_large_scale)
-∂t_ρqᵛ_large_scale_forcing = Forcing(∂t_ρqᵛ_large_scale)
+set!(∂t_ρqᵉ_large_scale, z -> dqdt_profile(z))
+set!(∂t_ρqᵉ_large_scale, ρᵣ * ∂t_ρqᵉ_large_scale)
+∂t_ρqᵉ_large_scale_forcing = Forcing(∂t_ρqᵉ_large_scale)
 
 # ## Radiative cooling
 #
@@ -162,37 +160,35 @@ set!(∂t_ρθ_large_scale, ρᵣ * ∂t_θ_large_scale)
 Fρu = (subsidence, geostrophic.ρu)
 Fρv = (subsidence, geostrophic.ρv)
 Fρw = sponge
-Fρqᵛ = (subsidence, ∂t_ρqᵛ_large_scale_forcing)
+Fρqᵉ = (subsidence, ∂t_ρqᵉ_large_scale_forcing)
 Fρθ = (subsidence, ρθ_large_scale_forcing)
 
-forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵛ=Fρqᵛ, ρθ=Fρθ)
-boundary_conditions = (ρe=ρe_bcs, ρqᵛ=ρqᵛ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
+forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵉ=Fρqᵉ, ρθ=Fρθ)
+boundary_conditions = (ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
 # ## Model setup
 #
 # We use one-moment bulk microphysics from [CloudMicrophysics](https://clima.github.io/CloudMicrophysics.jl/dev/)
-# with non-equilibrium cloud formation and 5th-order WENO advection. The mixed-phase non-equilibrium
-# one-moment (MPNE1M) scheme prognoses cloud liquid, cloud ice, rain, and snow with the full suite
-# of warm-rain and ice-phase processes. In this warm tropical case, ice processes are largely dormant.
+# with cloud formatiom modeled with warm-phase saturationa adjustment and 5th-order WENO advection.
+# The one-moment scheme prognoses rain density `ρqʳ` includes autoconversion (cloud liquid → rain)
+# and accretion (cloud liquid swept up by falling rain) processes. This is a more physically-realistic
+# representation of warm-rain precipitation than the zero-moment scheme.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
-FT = Float32
-cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
-microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+microphysics = OneMomentCloudMicrophysics(; cloud_formation)
 
 weno = WENO(order=5)
 bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
 
 momentum_advection = weno
 scalar_advection = (ρθ = weno,
-                    ρqᵛ = bounds_preserving_weno,
+                    ρqᵉ = bounds_preserving_weno,
                     ρqᶜˡ = bounds_preserving_weno,
-                    ρqᶜⁱ = bounds_preserving_weno,
-                    ρqʳ = bounds_preserving_weno,
-                    ρqˢ = bounds_preserving_weno)
+                    ρqʳ = bounds_preserving_weno)
 
 model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
                         momentum_advection, scalar_advection, forcing, boundary_conditions)
@@ -267,8 +263,6 @@ function progress(sim)
                     qᶜˡmax, qʳmin, qʳmax)
 
     @info msg
-
-    wall_clock[] = time_ns()
 
     return nothing
 end
