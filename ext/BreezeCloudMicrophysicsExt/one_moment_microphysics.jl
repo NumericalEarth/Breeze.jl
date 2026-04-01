@@ -830,20 +830,20 @@ end
 #####
 
 # Vertical flux of hydrometeor enthalpy on z-faces.
-# hˡ = cˡ T - ℒˡᵣ (and hⁱ = cⁱ T - ℒⁱᵣ) are precomputed and upwinded alongside ρq.
-# The mass reconstruction uses the configured advection scheme to match
-# the mass transport operator, while hˡ/hⁱ are upwinded (slowly varying).
+# hˡ = cˡ T - ℒˡᵣ (and hⁱ = cⁱ T - ℒⁱᵣ) are precomputed alongside ρq.
+# The mass reconstruction uses the configured advection scheme applied to the
+# combined enthalpy field ρqh to prevent order mismatches.
 @inline function sedimentation_enthalpy_flux_z(i, j, k, grid, advection, wʳ, ρqʳ, hˡ)
-    @inbounds hˡ_upwind = ifelse(wʳ[i, j, k] <= 0, hˡ[i, j, k], hˡ[i, j, k-1])
-    return _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqʳ) * hˡ_upwind
+    ρqh_r = TracerEnthalpyProduct(ρqʳ, hˡ)
+    return _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqh_r)
 end
 
 @inline function sedimentation_enthalpy_flux_z(i, j, k, grid, advection, wʳ, ρqʳ, hˡ, wˢ, ρqˢ, hⁱ)
-    @inbounds hˡ_r = ifelse(wʳ[i, j, k] <= 0, hˡ[i, j, k], hˡ[i, j, k-1])
-    @inbounds hⁱ_s = ifelse(wˢ[i, j, k] <= 0, hⁱ[i, j, k], hⁱ[i, j, k-1])
+    ρqh_r = TracerEnthalpyProduct(ρqʳ, hˡ)
+    ρqh_s = TracerEnthalpyProduct(ρqˢ, hⁱ)
 
-    return _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqʳ) * hˡ_r +
-           _advective_tracer_flux_z(i, j, k, grid, advection, wˢ, ρqˢ) * hⁱ_s
+    return _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqh_r) +
+           _advective_tracer_flux_z(i, j, k, grid, advection, wˢ, ρqh_s)
 end
 
 # Vertical flux of hydrometeor mass on z-faces.

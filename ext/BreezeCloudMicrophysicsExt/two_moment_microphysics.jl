@@ -568,17 +568,17 @@ end
 #####
 
 # Vertical flux of liquid enthalpy on z-faces.
-# hˡ = cˡ T - ℒˡᵣ is precomputed and upwinded alongside ρq.
-# The mass reconstruction uses the configured advection scheme to match
-# the mass transport operator, while hˡ is upwinded (slowly varying).
+# hˡ = cˡ T - ℒˡᵣ is precomputed alongside ρq.
+# The mass reconstruction uses the configured advection scheme applied to the
+# combined enthalpy field ρqh to prevent order mismatches.
 @inline function sedimentation_enthalpy_flux_z(i, j, k, grid, advection, wᶜˡ, wʳ, ρqᶜˡ, ρqʳ, hˡ)
-    @inbounds hˡ_cl = ifelse(wᶜˡ[i, j, k] <= 0, hˡ[i, j, k], hˡ[i, j, k-1])
-    @inbounds hˡ_r  = ifelse(wʳ[i, j, k] <= 0, hˡ[i, j, k], hˡ[i, j, k-1])
+    ρqh_cl = TracerEnthalpyProduct(ρqᶜˡ, hˡ)
+    ρqh_r  = TracerEnthalpyProduct(ρqʳ, hˡ)
 
-    Fᶜˡ = _advective_tracer_flux_z(i, j, k, grid, advection, wᶜˡ, ρqᶜˡ)
-    Fʳ  = _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqʳ)
+    Fᶜˡ = _advective_tracer_flux_z(i, j, k, grid, advection, wᶜˡ, ρqh_cl)
+    Fʳ  = _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqh_r)
 
-    return Fᶜˡ * hˡ_cl + Fʳ * hˡ_r
+    return Fᶜˡ + Fʳ
 end
 
 # Vertical flux of liquid-water mass on z-faces.
