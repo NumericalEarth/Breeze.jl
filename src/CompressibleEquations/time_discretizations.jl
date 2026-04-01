@@ -88,6 +88,14 @@ This eliminates the vertical acoustic CFL constraint, allowing time steps limite
 only by the horizontal acoustic CFL and advective CFL — typically ~30x larger
 than [`ExplicitTimeStepping`](@ref) for kilometer-scale vertical grids.
 
+The parameter `β` controls the implicitness of the acoustic coupling:
+  - `β = 0.5` (default): Crank–Nicolson — second-order accurate, moderate acoustic damping
+  - `β = 1`: backward Euler — maximum damping of vertical acoustic modes
+
 See also [`ExplicitTimeStepping`](@ref), [`SplitExplicitTimeDiscretization`](@ref).
 """
-struct VerticallyImplicitTimeStepping end
+struct VerticallyImplicitTimeStepping{FT}
+    β :: FT
+end
+
+VerticallyImplicitTimeStepping(; β=0.5) = VerticallyImplicitTimeStepping(β)
