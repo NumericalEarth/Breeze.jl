@@ -63,6 +63,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 using Oceananigans: Center, Face, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Advection: _advective_tracer_flux_z
 using Oceananigans.Fields: ZeroField, ZFaceField
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, Open
 using Adapt: Adapt, adapt

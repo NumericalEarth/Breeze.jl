@@ -220,7 +220,7 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 #####
 
 """
-    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
+    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities, advection)
 
 Compute the tendency for microphysical variable `name` at grid point `(i, j, k)`.
 
@@ -233,14 +233,17 @@ this method directly without using `microphysical_state`.
 
 # Arguments
 - `velocities`: NamedTuple of velocity components `(; u, v, w)` [m/s].
+- `advection`: Advection scheme used for tracer transport. Passed to sedimentation
+  flux functions so that the mass reconstruction matches the scheme used by the
+  advection operator for mass transport.
 """
-@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
+@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities, advection)
     ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, velocities)
     return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 end
 
 # Explicit Nothing fallback (for backward compatibility)
-@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
+@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, velocities, advection) = zero(grid)
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
