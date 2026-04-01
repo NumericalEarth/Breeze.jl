@@ -112,7 +112,7 @@ jobs:
               TEST_ARGS+=(--jobs=2)
               # ...but also set a more conservative limit to memory usage before
               # reciclying a worker, to avoid trashing memory or out-of-memory errors.
-              JULIA_TEST_MAXRSS_MB=2000
+              JULIA_TEST_MAXRSS_MB=1900
               echo "JULIA_TEST_MAXRSS_MB=${JULIA_TEST_MAXRSS_MB}" | tee -a "${GITHUB_ENV}"
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" | tee -a "${GITHUB_ENV}"
