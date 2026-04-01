@@ -139,10 +139,8 @@ end
     @inbounds ℂᵃᶜ²_field[i, j, k] = γᵐ * Rᵐ * T
 end
 
-##### No tendency corrections needed: the explicit step keeps the full vertical
-##### PGF + buoyancy. The implicit solve provides a perturbation correction
-##### on top of the explicit solution (ERF / Klemp 2018 approach).
-##### This is stable because for a balanced state, the correction is zero.
+##### The explicit step keeps the full vertical PGF + buoyancy.
+##### The implicit solve provides a Crank-Nicolson correction on top.
 
 #####
 ##### Helmholtz: [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] δρθ = -αΔt ∂z(θᶠ ρw*)
@@ -289,7 +287,6 @@ function _vertical_acoustic_implicit_step!(model,
     ρθ = model.formulation.potential_temperature_density
     θ = model.formulation.potential_temperature
     ρw = model.momentum.ρw
-    ρ = dynamics.density
     ℂᵃᶜ² = sc.acoustic_speed_squared
 
     ## β·αΔt is the effective implicit time scale.
@@ -310,13 +307,12 @@ function _vertical_acoustic_implicit_step!(model,
     ## 3. Recover (ρθ)⁺ = (ρθ)* + δρθ
     launch!(arch, grid, :xyz, _add_field!, ρθ, sc.ρθ_scratch)
 
-    ## 4. Back-solve: δρw = -β αΔt (ℂ²/θ)ᶠ ∂(δρθ)/∂z
+    ## 4. Back-solve: ρw⁺ = ρw* - β αΔt (ℂ²/θ)ᶠ ∂(δρθ)/∂z
     launch!(arch, grid, :xyz, _back_solve_ρw!,
             ρw, grid, βαΔt, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch)
 
-    ## 5. Update ρ from the vertical divergence of the corrected ρw.
-    launch!(arch, grid, :xyz, _update_density_vertical!,
-            ρ, grid, αΔt, ρw)
+    ## No ρ update needed: the explicit step already has the full 3D divergence.
+    ## The implicit correction to ρw is captured in the next time step's divergence.
 
     return nothing
 end
