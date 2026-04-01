@@ -109,7 +109,7 @@ jobs:
           if [[ ${{ runner.os }} == "macOS" ]]; then
               # Encourage ParallelTestRunner to use multiple jobs on macOS, rather
               # than the single one it'd use by default.
-              TEST_ARGS+=(--jobs=3)
+              TEST_ARGS+=(--jobs=2)
               # ...but also set a more conservative limit to memory usage before
               # reciclying a worker, to avoid out-of-memory issues.
               JULIA_TEST_MAXRSS_MB=2500
