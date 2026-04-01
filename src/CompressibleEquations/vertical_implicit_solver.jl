@@ -139,8 +139,23 @@ end
     @inbounds ℂᵃᶜ²_field[i, j, k] = γᵐ * Rᵐ * T
 end
 
-##### The explicit step keeps the full vertical PGF + buoyancy.
-##### The implicit solve provides a Crank-Nicolson correction on top.
+##### IMPORTANT for IMEX-RK time steppers (ARS343, SSP332):
+##### The explicit tendency fᴱ MUST exclude vertical PGF + buoyancy + vertical
+##### density flux, because these are handled by the implicit tendency fᴵ.
+##### Including them in both fᴱ and fᴵ double-counts and causes instability.
+#####
+##### For the SSP-RK3 time stepper with additive VITS correction (non-IMEX),
+##### the explicit step keeps the full PGF+buoyancy and the implicit solve
+##### provides a small correction. This only works at Δt ≤ Δz/cs.
+#####
+##### The dispatches below zero the vertical PGF+buoyancy from the explicit
+##### tendency when using VITS. This is required for proper IMEX-RK.
+
+@inline AtmosphereModels.explicit_z_pressure_gradient(i, j, k, grid,
+        ::CompressibleDynamics{<:VerticallyImplicitTimeStepping}) = zero(grid)
+
+@inline AtmosphereModels.explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid,
+        ::CompressibleDynamics{<:VerticallyImplicitTimeStepping}, args...) = zero(grid)
 
 #####
 ##### Helmholtz: [I - (αΔt)² ∂z(ℂᵃᶜ² ∂z)] δρθ = -αΔt ∂z(θᶠ ρw*)
