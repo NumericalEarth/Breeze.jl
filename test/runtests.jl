@@ -8,18 +8,15 @@ testsuite = find_tests(@__DIR__)
 # Parse arguments
 args = parse_args(ARGS)
 
-const REACTANT_COMPAT = !((VERSION >= v"1.12") || (Base.JLOptions().check_bounds == 1))
+const REACTANT_COMPAT = VERSION < v"1.13-" && Base.JLOptions().check_bounds != 1
 
 if filter_tests!(testsuite, args)
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
-    # limitation) and Julia < 1.12 until upstream support is improved.
+    # limitation).
     if !REACTANT_COMPAT
         delete!(testsuite, "reactant_centered_compilation")
+        delete!(testsuite, "reactant_weno_compilation")
     end
-
-    # WENO compilation is always removed from the parallel suite and run in
-    # its own subprocess to avoid OOM under ParallelTestRunner.
-    delete!(testsuite, "reactant_weno_compilation")
 end
 
 const init_code = quote
@@ -46,25 +43,4 @@ const init_code = quote
     all_float_types() = (Float32, Float64)
 end
 
-@testset "Breeze" begin
-    runtests(Breeze, args; testsuite, init_code)
-
-    # Run WENO compilation in an isolated subprocess to avoid OOM when
-    # sharing memory with the parallel test runner (mirrors the pattern
-    # used for MPI tests in Reactant's test suite).
-    if REACTANT_COMPAT && (
-        isempty(args.positionals) ||
-        "reactant_weno_compilation" ∈ args.positionals
-    )
-        @testset "Reactant WENO compilation (subprocess)" begin
-            test_file = joinpath(@__DIR__, "reactant_weno_compilation.jl")
-            code = """
-            import CUDA
-            using Oceananigans.Architectures: CPU, GPU
-            const default_arch = CUDA.functional() ? GPU() : CPU()
-            include($(repr(test_file)))
-            """
-            run(`$(Base.julia_cmd()) --check-bounds=auto --project=$(Base.active_project()) -e $code`)
-        end
-    end
-end
+runtests(Breeze, args; testsuite, init_code)

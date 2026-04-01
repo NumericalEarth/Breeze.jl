@@ -30,6 +30,9 @@ using Random
 using CUDA
 
 Random.seed!(42)
+if CUDA.functional()
+    CUDA.seed!(42)
+end
 
 # ## Domain and grid
 #
@@ -227,6 +230,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 
 simulation = Simulation(model; Δt=2, stop_time=8hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Output and progress
 #
@@ -259,6 +263,8 @@ function progress(sim)
                     qᶜˡmax, qʳmin, qʳmax)
 
     @info msg
+
+    wall_clock[] = time_ns()
 
     return nothing
 end

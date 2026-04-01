@@ -9,15 +9,15 @@ using ClimaComms: ClimaComms
 using Dates: Dates
 using RRTMGP: RRTMGP
 using SpecialFunctions: SpecialFunctions
-if VERSION < v"1.12"
-    using Reactant: Reactant
+using Reactant: Reactant
 
+allow_unanalyzable = if VERSION < v"1.12"
     # For some reason `BreezeReactantExt` is non-analyzable,
     # but only in Julia v1.11-.
     BreezeReactantExt = isdefined(Base, :get_extension) ? Base.get_extension(Breeze, :BreezeReactantExt) : Breeze.BreezeReactantExt
-    allow_unanalyzable = (BreezeReactantExt,)
+    (BreezeReactantExt,)
 else
-    allow_unanalyzable = ()
+    ()
 end
 
 @testset "Aqua" begin

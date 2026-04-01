@@ -10,6 +10,7 @@ using Oceananigans.Utils: launch! # , KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
+    fix_negative_moisture!(model)  # fix negative moisture from advection
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
@@ -121,13 +122,16 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
     Gρv = model.timestepper.Gⁿ.ρv
     Gρw = model.timestepper.Gⁿ.ρw
 
+    # Use transport momentum (contravariant for terrain-following grids)
+    advecting_momentum = transport_momentum(model)
+
     momentum_args = (
         dynamics_density(model.dynamics),
         model.advection.momentum,
         model.velocities,
         model.closure,
         model.closure_fields,
-        model.momentum,
+        advecting_momentum,
         model.coriolis,
         model.clock,
         model_fields)
@@ -275,13 +279,16 @@ function compute_tendencies!(model::AtmosphereModel)
 
     compute_momentum_tendencies!(model, model_fields)
 
+    # Use transport velocities (contravariant for terrain-following grids)
+    advecting_velocities = transport_velocities(model)
+
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
         specific_prognostic_moisture(model),
-        model.velocities,
+        advecting_velocities,
         model.microphysics,
         model.microphysical_fields,
         model.closure,
@@ -315,7 +322,9 @@ function compute_tendencies!(model::AtmosphereModel)
     ##### Tracer density tendencies
     #####
 
-    prognostic_microphysical_fields = NamedTuple(name => model.microphysical_fields[name]
+    # Pass specific (per-mass) fields for scalar advection: div_ρUc computes ∇·(ρ₀uq),
+    # so passing density-weighted ρ₀q would double-count ρ₀.
+    prognostic_microphysical_fields = NamedTuple(name => model.microphysical_fields[specific_field_name(name)]
                                                  for name in prognostic_field_names(model.microphysics))
 
     scalars = merge(prognostic_microphysical_fields, model.tracers)

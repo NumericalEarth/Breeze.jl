@@ -175,10 +175,9 @@ u^(3) = 1/3 u^(0) + 2/3 u^(2) + 2/3 Δt L(u^(2))
 where `L` above is the right-hand-side, e.g., `∂u/∂t = L(u)`.
 """
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}, Δt; callbacks=[])
-    Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
-    # Be paranoid and update state at iteration 0, in case run! is not used:
-    maybe_initialize_state!(model, callbacks)
+    # Be paranoid and prepare at iteration 0, in case run! is not used:
+    maybe_prepare_first_time_step!(model, callbacks)
 
     ts = model.timestepper
     α¹ = ts.α¹

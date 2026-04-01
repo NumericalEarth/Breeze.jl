@@ -23,6 +23,7 @@ using CloudMicrophysics.Microphysics1M:
 using CloudMicrophysics: Microphysics2M as CM2
 
 using Breeze.AtmosphereModels: AtmosphereModels,
+    AbstractNumberConcentrationCategories,
     materialize_microphysical_fields,
     update_microphysical_fields!,
     grid_moisture_fractions
