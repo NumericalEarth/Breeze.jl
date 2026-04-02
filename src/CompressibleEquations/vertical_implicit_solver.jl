@@ -24,7 +24,7 @@ using KernelAbstractions: @kernel, @index
 
 using Adapt: Adapt, adapt
 
-using Oceananigans: CenterField, architecture
+using Oceananigans: CenterField, Average, Field, architecture, compute!, set!
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ, Δzᶜᶜᶠ, Azᶜᶜᶠ, Vᶜᶜᶜ
@@ -40,22 +40,24 @@ $(TYPEDEF)
 
 Solver for the vertically implicit acoustic correction in compressible dynamics.
 
+Uses the Exner-function splitting (same as acoustic substepping / WRF / MPAS):
+buoyancy goes in the explicit tendency, perturbation Exner PGF goes in the
+implicit solve. The Helmholtz is purely acoustic (no gravity operator).
+
 Fields
 ======
 
 - `acoustic_speed_squared`: ℂᵃᶜ² = γᵐ Rᵐ T at cell centers, updated each time step
 - `rhs`: Scratch field for the tridiagonal right-hand side
 - `ρθ_scratch`: Scratch field storing (ρθ)* before the solve for computing δρθ
-- `mean_pressure`: p̄(z) horizontal-mean pressure, updated each stage
-- `mean_density`: ρ̄(z) horizontal-mean density, updated each stage
+- `exner_perturbation`: Π' = Π - Π₀ at cell centers, updated each implicit stage
 - `vertical_solver`: `BatchedTridiagonalSolver` for Nₓ × Nᵧ independent column solves
 """
 struct VerticalAcousticSolver{F, S}
     acoustic_speed_squared  :: F
     rhs                     :: F
     ρθ_scratch              :: F
-    mean_pressure           :: F
-    mean_density            :: F
+    exner_perturbation      :: F
     vertical_solver         :: S
 end
 
@@ -67,8 +69,7 @@ function VerticalAcousticSolver(grid)
     acoustic_speed_squared = CenterField(grid)
     rhs = CenterField(grid)
     ρθ_scratch = CenterField(grid)
-    mean_pressure = CenterField(grid)
-    mean_density = CenterField(grid)
+    exner_perturbation = CenterField(grid)
 
     lower_diagonal = zeros(arch, FT, Nx, Ny, Nz)
     diagonal       = zeros(arch, FT, Nx, Ny, Nz)
@@ -83,15 +84,14 @@ function VerticalAcousticSolver(grid)
                                                tridiagonal_direction = ZDirection())
 
     return VerticalAcousticSolver(acoustic_speed_squared, rhs, ρθ_scratch,
-                                  mean_pressure, mean_density, vertical_solver)
+                                  exner_perturbation, vertical_solver)
 end
 
 Adapt.adapt_structure(to, s::VerticalAcousticSolver) =
     VerticalAcousticSolver(adapt(to, s.acoustic_speed_squared),
                            adapt(to, s.rhs),
                            adapt(to, s.ρθ_scratch),
-                           adapt(to, s.mean_pressure),
-                           adapt(to, s.mean_density),
+                           adapt(to, s.exner_perturbation),
                            nothing)
 
 #####
@@ -100,7 +100,8 @@ Adapt.adapt_structure(to, s::VerticalAcousticSolver) =
 
 materialize_vertical_acoustic_solver(::ExplicitTimeStepping, grid) = nothing
 materialize_vertical_acoustic_solver(::SplitExplicitTimeDiscretization, grid) = nothing
-materialize_vertical_acoustic_solver(::VerticallyImplicitTimeStepping, grid) = VerticalAcousticSolver(grid)
+materialize_vertical_acoustic_solver(::VerticallyImplicitTimeStepping, grid) =
+    VerticalAcousticSolver(grid)
 
 #####
 ##### Compute ℂᵃᶜ² = γᵐ Rᵐ T
@@ -149,70 +150,24 @@ end
 end
 
 #####
-##### Compute discrete hydrostatic pressure from current density
+##### Compute Exner perturbation: Π' = (p/pˢᵗ)^κ - Π₀
 #####
-##### Integrates ρg downward column-by-column so that the discrete
-##### finite-difference gradient exactly satisfies hydrostatic balance:
-#####
-#####   (pₕ[k] - pₕ[k-1]) / Δzᶠ[k] + ℑz(ρ)[k] · g = 0
-#####
-##### Starting from pₕ[Nz] = p[Nz] (match EOS pressure at top center).
-##### The non-hydrostatic perturbation p' = p - pₕ is then small
-##### everywhere, independent of horizontal temperature gradients.
+##### Π₀ is the fixed ExnerReferenceState (may be 1D or latitude-dependent 3D).
+##### Π' is small when the reference matches the atmosphere's θ(φ,z) structure.
 #####
 
-@kernel function _compute_discrete_hydrostatic_pressure!(pₕ, grid, p, ρ, g)
-    i, j = @index(Global, NTuple)
-    Nz = size(grid, 3)
-
-    ## Start from top: pₕ[Nz] = p[Nz]
-    @inbounds pₕ[i, j, Nz] = p[i, j, Nz]
-
-    ## Integrate downward: pₕ[k] = pₕ[k+1] + ℑz(ρ)[k+1] · g · Δzᶠ[k+1]
-    for k in Nz-1 : -1 : 1
-        @inbounds begin
-            ρᶠ = (ρ[i, j, k] + ρ[i, j, k + 1]) / 2
-            Δzᶠ = Δzᶜᶜᶠ(i, j, k + 1, grid)
-            pₕ[i, j, k] = pₕ[i, j, k + 1] + ρᶠ * g * Δzᶠ
-        end
-    end
-end
-
-function compute_discrete_hydrostatic_pressure!(pₕ, grid, p, ρ, g)
-    arch = architecture(grid)
-    launch!(arch, grid, :xy, _compute_discrete_hydrostatic_pressure!, pₕ, grid, p, ρ, g)
-    fill_halo_regions!(pₕ)
-    return nothing
-end
-
-#####
-##### Compute horizontal-mean reference state (p̄, ρ̄) for the Helmholtz
-#####
-##### Updated every implicit stage from the current 3D fields.
-##### Perturbations p-p̄ and ρ-ρ̄ have zero horizontal mean by construction,
-##### so the gravity RHS has no constant-in-x bias.
-#####
-
-@kernel function _set_horizontal_mean!(mean_field, grid, field)
+@kernel function _compute_exner_perturbation!(Π′, grid, p, Π₀, pˢᵗ, κ)
     i, j, k = @index(Global, NTuple)
-    Nx = size(grid, 1)
-    Ny = max(1, size(grid, 2))
-    inv_N = 1 / (Nx * Ny)
-    s = zero(eltype(grid))
-    for jj in 1:Ny
-        for ii in 1:Nx
-            @inbounds s += field[ii, jj, k]
-        end
+    @inbounds begin
+        Πⁱ = (p[i, j, k] / pˢᵗ)^κ
+        Π′[i, j, k] = Πⁱ - Π₀[i, j, k]
     end
-    @inbounds mean_field[i, j, k] = s * inv_N
 end
 
-function compute_mean_reference_state!(sc, grid, p, ρ)
+function compute_exner_perturbation!(sc, grid, p, Π₀, pˢᵗ, κ)
     arch = architecture(grid)
-    launch!(arch, grid, :xyz, _set_horizontal_mean!, sc.mean_pressure, grid, p)
-    launch!(arch, grid, :xyz, _set_horizontal_mean!, sc.mean_density,  grid, ρ)
-    fill_halo_regions!(sc.mean_pressure)
-    fill_halo_regions!(sc.mean_density)
+    launch!(arch, grid, :xyz, _compute_exner_perturbation!, sc.exner_perturbation, grid, p, Π₀, pˢᵗ, κ)
+    fill_halo_regions!(sc.exner_perturbation)
     return nothing
 end
 
@@ -232,25 +187,76 @@ end
         ::CompressibleDynamics{<:VerticallyImplicitTimeStepping}, args...) = zero(grid)
 
 #####
-##### Schur complement Helmholtz for δρθ (acoustic + gravity):
+##### Exner buoyancy: ρ·b where b = -(cₚᵈ θᵥ ∂Π₀/∂z + g)
 #####
-#####   [I - τ² L - τ²g ∂/∂z] δρθ = -τ θ₀ div_z(ρw*)
-#####                                 + τ² div_z(ℂ² ∂ρθ*/∂z + ρθ* g)
+##### The ExnerReferenceState guarantees cₚᵈ θ₀_face (Π₀[k]-Π₀[k-1])/Δz = -g
+##### exactly. When θᵥ ≈ θ₀, buoyancy b ≈ 0. For latitude-dependent references,
+##### b is small everywhere. This is the slow buoyancy forcing (explicit tendency).
 #####
-##### L = V⁻¹ δz(Az ℂ² δ(·)/Δzᶠ)   (acoustic, symmetric second derivative)
-##### τ²g ∂/∂z                        (gravity, skew-symmetric first derivative)
+
+@inline function AtmosphereModels.exner_buoyancy_forceᶜᶜᶠ(i, j, k, grid,
+        dynamics::CompressibleDynamics{<:VerticallyImplicitTimeStepping},
+        temperature, specific_prognostic_moisture, microphysics, microphysical_fields, constants)
+
+    ref = dynamics.reference_state
+    ref === nothing && return zero(grid)
+
+    Π₀ = ref.exner_function
+    ρ = dynamics.density
+    p = dynamics.pressure
+    g = constants.gravitational_acceleration
+    cₚᵈ = constants.dry_air.heat_capacity
+    Rᵈ = dry_air_gas_constant(constants)
+    κ = Rᵈ / cₚᵈ
+    pˢᵗ = dynamics.standard_pressure
+
+    ## Virtual potential temperature at the face (dry: θᵥ = T/Π)
+    @inbounds begin
+        T_above = temperature[i, j, k]
+        T_below = temperature[i, j, k - 1]
+        p_above = p[i, j, k]
+        p_below = p[i, j, k - 1]
+    end
+    Π_above = (p_above / pˢᵗ)^κ
+    Π_below = (p_below / pˢᵗ)^κ
+    θᵥ_above = T_above / Π_above
+    θᵥ_below = T_below / Π_below
+    θᵥᶠ = (θᵥ_above + θᵥ_below) / 2
+
+    ## ∂Π₀/∂z at the face
+    Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
+    @inbounds δz_Π₀ = Π₀[i, j, k] - Π₀[i, j, k - 1]
+
+    ## Buoyancy: b = -(cₚ θᵥ ∂Π₀/∂z + g)
+    b = -cₚᵈ * θᵥᶠ * δz_Π₀ / Δzᶠ - g
+
+    ## ρ at the face
+    ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+
+    return ρᶠ * b * (k > 1)
+end
+
 #####
-##### The gravity ∂/∂z term comes from the Schur complement: eliminating δρ
-##### from the coupled (ρw, ρθ, ρ) system using δρ = δρθ/θ₀ introduces
-##### a buoyancy feedback -τ(g/θ₀)δρθ in the ρw equation. Substituting
-##### into the δρθ equation gives the first-derivative gravity operator.
+##### Purely acoustic Helmholtz for δρθ (Exner splitting):
 #####
-##### The back-solve gives the FULL linearized fᴵ_ρw:
-#####   δρw = -τ(ℂ²/θ)∂δρθ/∂z - τ(g/θ₀)δρθ - τ[(ℂ²/θ)∂ρθ*/∂z + ρg]
+#####   [I - τ² div_z(ℂᵃᶜ² ∂/∂z)] δρθ = -τ div_z(θ (ρw)*)
+#####                                      + τ² div_z(ℂᵃᶜ² ρθ* ∂Π'/∂z)
+#####
+##### No gravity operator on the LHS — gravity is entirely in the explicit
+##### buoyancy b = -(cₚ θᵥ ∂Π₀/∂z + g). The Helmholtz is purely acoustic:
+##### L = V⁻¹ δz(Az ℂ² δ(·)/Δzᶠ).
+#####
+##### The RHS perturbation Exner term comes from the mean fᴵ_ρw at the
+##### predictor: -ρ cₚ θᵥ ∂Π'/∂z = -ℂᵃᶜ² ρθ ∂Π'/∂z / (θ p) × p ≈ ...
+##### Simplified using ℂᵃᶜ² = γᵐ Rᵐ T and ∂p/∂(ρθ) = ℂᵃᶜ²/θ,
+##### the perturbation Exner PGF at the predictor is -(ℂᵃᶜ²/θ) ρθ ∂Π'/∂z.
+#####
+##### Back-solve (2 terms, no gravity):
+#####   δρw = -τ (ℂ²/θ) ∂(δρθ)/∂z  -  τ cₚ (ρθ)_face ∂Π'/∂z
 #####
 
 @kernel function _build_ρθ_tridiagonal!(lower, diag, upper, rhs_field,
-                                         grid, αΔt, ℂᵃᶜ², ρθ, θ, ρw, ρ, p, g, p̄, ρ̄)
+                                         grid, αΔt, ℂᵃᶜ², ρθ, θ, ρw, Π′, cₚᵈ)
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -263,7 +269,7 @@ end
         Δzᶠ_bot = Δzᶜᶜᶠ(i, j, k, grid)
         Δzᶠ_top = Δzᶜᶜᶠ(i, j, k + 1, grid)
 
-        ## Acoustic Helmholtz: V⁻¹ δz(Az ℂ² δz(·)/Δzᶠ)
+        ## Purely acoustic Helmholtz: V⁻¹ δz(Az ℂ² δz(·)/Δzᶠ)
         αΔt² = αΔt * αΔt
         Q_bot = αΔt² * Az_bot * ℂ²_bot / (Δzᶠ_bot * V)
         Q_top = αΔt² * Az_top * ℂ²_top / (Δzᶠ_top * V)
@@ -274,13 +280,9 @@ end
         Q_lower = αΔt² * Az_top * ℂ²_top / (Δzᶠ_top * V_above)
         Q_lower = ifelse(k >= Nz, zero(Q_lower), Q_lower)
 
-        ## Gravity first-derivative: ±τ²g/(2Δz) from Schur complement
-        Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
-        G_grav = αΔt² * g / (2 * Δzᶜ)
-
-        ## Acoustic (symmetric) + gravity (skew-symmetric) tridiagonal
-        lower[i, j, k] = -Q_lower + G_grav
-        upper[i, j, k] = -Q_top - G_grav
+        ## Symmetric acoustic tridiagonal (no gravity first-derivative)
+        lower[i, j, k] = -Q_lower
+        upper[i, j, k] = -Q_top
         diag[i, j, k] = 1 + Q_bot + Q_top
 
         ## RHS term 1: acoustic flux from predictor ρw
@@ -291,36 +293,34 @@ end
 
         flux_rhs = -αΔt / V * (Az_top * θᶠ_top * ρw_top - Az_bot * θᶠ_bot * ρw_bot)
 
-        ## RHS term 2: gravity from perturbation ∂(p-p̄)/∂z + g(ρ-ρ̄).
-        ## p̄, ρ̄ are horizontal means → perturbations have zero horizontal mean
-        ## → no constant-in-x spurious forcing.
-        ρᶠ_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
-        ρᶠ_bot = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-        ρ̄ᶠ_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ̄)
-        ρ̄ᶠ_bot = ℑzᵃᵃᶠ(i, j, k, grid, ρ̄)
+        ## RHS term 2: perturbation Exner PGF at predictor.
+        ## fᴵ_ρw(z*) = -cₚ (ρθ)_face ∂Π'/∂z (small, no cancellation).
+        ρθᶠ_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρθ)
+        ρθᶠ_bot = ℑzᵃᵃᶠ(i, j, k, grid, ρθ)
 
-        pgf_top = (p[i,j,k+1] - p̄[i,j,k+1] - p[i,j,k] + p̄[i,j,k]) / Δzᶠ_top + g * (ρᶠ_top - ρ̄ᶠ_top)
-        pgf_bot = (p[i,j,k] - p̄[i,j,k] - p[i,j,k-1] + p̄[i,j,k-1]) / Δzᶠ_bot + g * (ρᶠ_bot - ρ̄ᶠ_bot)
-        pgf_top = ifelse(k == Nz, zero(pgf_top), pgf_top)
-        pgf_bot = ifelse(k == 1, zero(pgf_bot), pgf_bot)
+        dΠ′_top = (Π′[i, j, k + 1] - Π′[i, j, k]) / Δzᶠ_top * (k < Nz)
+        dΠ′_bot = (Π′[i, j, k] - Π′[i, j, k - 1]) / Δzᶠ_bot * (k > 1)
 
-        grav_rhs = αΔt² / V * (Az_top * θᶠ_top * pgf_top - Az_bot * θᶠ_bot * pgf_bot)
+        fᴵ_ρw_top = -cₚᵈ * ρθᶠ_top * dΠ′_top
+        fᴵ_ρw_bot = -cₚᵈ * ρθᶠ_bot * dΠ′_bot
 
-        rhs_field[i, j, k] = flux_rhs + grav_rhs
+        exner_rhs = αΔt² / V * (Az_top * θᶠ_top * fᴵ_ρw_top - Az_bot * θᶠ_bot * fᴵ_ρw_bot)
+
+        rhs_field[i, j, k] = flux_rhs + exner_rhs
     end
 end
 
 #####
-##### Back-solve: full linearized fᴵ_ρw
+##### Back-solve: perturbation PGF + mean perturbation Exner PGF
 #####
-#####   δρw = -τ (ℂ²/θ)ᶠ ∂(δρθ)/∂z  -  τ [(ℂ²/θ)ᶠ ∂(ρθ*)/∂z + ρᶠ g]
+#####   δρw = -τ (ℂ²/θ)ᶠ ∂(δρθ)/∂z  -  τ cₚ (ρθ)_face ∂Π'*/∂z
 #####
-##### The first term is the acoustic perturbation PGF from the Helmholtz.
-##### The second term is the mean linearized PGF+gravity at the predictor.
-##### In hydrostatic balance the second term ≈ 0.
+##### Term 1: acoustic PGF from the Helmholtz correction δρθ.
+##### Term 2: perturbation Exner PGF at the predictor (small, no cancellation).
+##### No gravity-density coupling — gravity is in the explicit buoyancy.
 #####
 
-@kernel function _back_solve_ρw!(ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ, ρθ_scratch, ρ, p, g, p̄, ρ̄)
+@kernel function _back_solve_ρw!(ρw, grid, αΔt, ℂᵃᶜ², θ, ρθ, ρθ_scratch, Π′, cₚᵈ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -330,20 +330,16 @@ end
 
         δρθ_above = ρθ[i, j, k] - ρθ_scratch[i, j, k]
         δρθ_below = ρθ[i, j, k - 1] - ρθ_scratch[i, j, k - 1]
-        δρθ_face = (δρθ_above + δρθ_below) / 2
 
-        ## 1. Perturbation PGF: -(ℂ²/θ) ∂(δρθ)/∂z
+        ## 1. Perturbation PGF from Helmholtz: -(ℂ²/θ) ∂(δρθ)/∂z
         perturbation_pgf = -ℂ²ᶠ / θᶠ * (δρθ_above - δρθ_below) / Δzᶠ
 
-        ## 2. Gravity buoyancy from δρ = δρθ/θ₀: -(g/θ₀) δρθ
-        gravity_buoyancy = -(g / θᶠ) * δρθ_face
+        ## 2. Perturbation Exner PGF at predictor: -cₚ (ρθ)_face ∂Π'/∂z
+        ρθᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρθ_scratch)
+        dΠ′ = (Π′[i, j, k] - Π′[i, j, k - 1]) / Δzᶠ
+        mean_exner_pgf = -cₚᵈ * ρθᶠ * dΠ′
 
-        ## 3. Mean PGF+gravity from horizontal-mean reference: -(∂(p-p̄)/∂z + g(ρ-ρ̄))
-        ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-        ρ̄ᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ̄)
-        mean_pgf_grav = -((p[i,j,k] - p̄[i,j,k] - p[i,j,k-1] + p̄[i,j,k-1]) / Δzᶠ + g * (ρᶠ - ρ̄ᶠ))
-
-        ρw[i, j, k] = (ρw[i, j, k] + αΔt * (perturbation_pgf + gravity_buoyancy + mean_pgf_grav)) * (k > 1)
+        ρw[i, j, k] = (ρw[i, j, k] + αΔt * (perturbation_pgf + mean_exner_pgf)) * (k > 1)
     end
 end
 
@@ -444,37 +440,39 @@ function _vertical_acoustic_implicit_step!(model,
     ρ = dynamics.density
     ℂᵃᶜ² = sc.acoustic_speed_squared
 
+    cₚᵈ = model.thermodynamic_constants.dry_air.heat_capacity
+    Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
+    κ = Rᵈ / cₚᵈ
+    g = model.thermodynamic_constants.gravitational_acceleration
+    pˢᵗ = dynamics.standard_pressure
+
     ## β·αΔt is the effective implicit time scale.
-    ## β = 1 (backward Euler): maximum acoustic damping.
-    ## β = 0.5 (Crank–Nicolson): second-order, less damping.
     βαΔt = β * αΔt
 
     ## 1. Save (ρθ)* for computing δρθ after the solve
     launch!(arch, grid, :xyz, _copy_field!, sc.ρθ_scratch, ρθ)
 
-    g = model.thermodynamic_constants.gravitational_acceleration
-    p = dynamics.pressure
+    ## 2. Exner perturbation Π' = (p/pˢᵗ)^κ - Π₀ from fixed reference
+    ref = dynamics.reference_state
+    compute_exner_perturbation!(sc, grid, dynamics.pressure, ref.exner_function, pˢᵗ, κ)
 
-    ## 2. Compute horizontal-mean reference state (p̄, ρ̄)
-    compute_mean_reference_state!(sc, grid, p, ρ)
-
-    ## 3. Helmholtz (acoustic + gravity with mean-subtracted RHS)
+    ## 3. Purely acoustic Helmholtz with perturbation Exner RHS
     launch!(arch, grid, :xyz, _build_ρθ_tridiagonal!,
             solver.a, solver.b, solver.c, sc.rhs,
-            grid, βαΔt, ℂᵃᶜ², ρθ, θ, ρw, ρ, p, g, sc.mean_pressure, sc.mean_density)
+            grid, βαΔt, ℂᵃᶜ², ρθ, θ, ρw, sc.exner_perturbation, cₚᵈ)
 
     solve!(ρθ, solver, sc.rhs)  # ρθ now holds δρθ
 
     ## 4. Recover (ρθ)⁺ = (ρθ)* + δρθ
     launch!(arch, grid, :xyz, _add_field!, ρθ, sc.ρθ_scratch)
 
-    ## 5. Back-solve with mean-subtracted PGF+gravity
+    ## 5. Back-solve with perturbation Exner PGF (no gravity)
     launch!(arch, grid, :xyz, _back_solve_ρw!,
-            ρw, grid, βαΔt, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch, ρ, p, g, sc.mean_pressure, sc.mean_density)
+            ρw, grid, βαΔt, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch, sc.exner_perturbation, cₚᵈ)
 
-    ## 6. Update ρ from the vertical divergence of the corrected ρw.
-    launch!(arch, grid, :xyz, _update_density_vertical!,
-            ρ, grid, αΔt, ρw)
+    ## No density update here — ρ uses full 3D divergence in the explicit tendency.
+    ## This avoids split-weighting instability from different Butcher coefficients
+    ## on horizontal vs vertical density divergence.
 
     return nothing
 end

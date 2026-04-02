@@ -65,16 +65,12 @@ function AtmosphereModels.compute_dynamics_tendency!(model::CompressibleModel)
     return nothing
 end
 
-## Full 3D divergence for explicit and split-explicit time stepping
+## Full 3D divergence for all time steppings.
+## For VITS: density is NOT split between fᴱ and fᴵ. The full 3D divergence
+## goes in fᴱ_ρ, avoiding split-weighting instability from different Butcher
+## coefficients on horizontal vs vertical divergence (MPAS does the same).
 @kernel function _compute_density_tendency!(Gρ, grid, momentum, td)
     i, j, k = @index(Global, NTuple)
     @inbounds Gρ[i, j, k] = - divᶜᶜᶜ(i, j, k, grid, momentum.ρu, momentum.ρv, momentum.ρw)
-end
-
-## Horizontal-only divergence for VITS — vertical div_z(ρw) is part of fᴵ,
-## evaluated via evaluate_implicit_tendency! and accumulated by the ARK predictor.
-@kernel function _compute_density_tendency!(Gρ, grid, momentum, ::VerticallyImplicitTimeStepping)
-    i, j, k = @index(Global, NTuple)
-    @inbounds Gρ[i, j, k] = - div_xyᶜᶜᶜ(i, j, k, grid, momentum.ρu, momentum.ρv)
 end
 

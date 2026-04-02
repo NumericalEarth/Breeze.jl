@@ -106,6 +106,12 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     # ensuring exact discrete Exner hydrostatic balance. This is used for both
     # split-explicit (acoustic substepping) and explicit time stepping.
     θ₀ = dynamics.reference_state  # temporarily stored θ₀ (or nothing)
+
+    ## Auto-construct ExnerReferenceState for VITS if not user-specified
+    if θ₀ === nothing && dynamics.time_discretization isa VerticallyImplicitTimeStepping
+        θ₀ = 300  # default reference θ for HEVI
+    end
+
     if θ₀ === nothing
         reference_state = nothing
     else

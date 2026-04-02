@@ -22,6 +22,7 @@ using Oceananigans.TimeSteppers: update_state!, tick_stage!, compute_flux_bc_ten
                                   step_lagrangian_particles!, maybe_prepare_first_time_step!
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
+using Breeze.Thermodynamics: dry_air_gas_constant
 using Breeze.CompressibleEquations: CompressibleEquations,
                                     VerticallyImplicitTimeStepping, CompressibleDynamics,
                                     _compute_ℂᵃᶜ²!, VerticalAcousticSolver,
@@ -106,34 +107,35 @@ function imex_acoustic_solve!(model, τ)
     ρ = dynamics.density
     ℂᵃᶜ² = sc.acoustic_speed_squared
 
+    cₚᵈ = model.thermodynamic_constants.dry_air.heat_capacity
+    Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
+    κ = Rᵈ / cₚᵈ
     g = model.thermodynamic_constants.gravitational_acceleration
+    pˢᵗ = dynamics.standard_pressure
 
     ## 1. Save (ρθ)* before solve
     launch!(arch, grid, :xyz, _copy_field!, sc.ρθ_scratch, ρθ)
 
-    p = dynamics.pressure
+    ## 2. Exner perturbation Π' = (p/pˢᵗ)^κ - Π₀ from fixed reference
+    ref = dynamics.reference_state
+    CompressibleEquations.compute_exner_perturbation!(sc, grid, dynamics.pressure,
+                                                       ref.exner_function, pˢᵗ, κ)
 
-    ## 2. Compute horizontal-mean reference state (p̄, ρ̄)
-    CompressibleEquations.compute_mean_reference_state!(sc, grid, p, dynamics.density)
-
-    ## 3. Helmholtz (acoustic + gravity with mean-subtracted RHS)
+    ## 3. Purely acoustic Helmholtz with perturbation Exner RHS
     launch!(arch, grid, :xyz, _build_ρθ_tridiagonal!,
             solver.a, solver.b, solver.c, sc.rhs,
-            grid, τ, ℂᵃᶜ², ρθ, θ, ρw, dynamics.density, p, g,
-            sc.mean_pressure, sc.mean_density)
+            grid, τ, ℂᵃᶜ², ρθ, θ, ρw, sc.exner_perturbation, cₚᵈ)
 
     solve!(ρθ, solver, sc.rhs)  # ρθ now holds δρθ
 
-    ## 3. Recover ρθ⁺ = (ρθ)* + δρθ
+    ## 4. Recover ρθ⁺ = (ρθ)* + δρθ
     launch!(arch, grid, :xyz, _add_field!, ρθ, sc.ρθ_scratch)
 
-    ## 5. Back-solve with mean-subtracted PGF+gravity
+    ## 5. Back-solve with perturbation Exner PGF (no gravity)
     launch!(arch, grid, :xyz, _back_solve_ρw!,
-            ρw, grid, τ, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch, dynamics.density, p, g,
-            sc.mean_pressure, sc.mean_density)
+            ρw, grid, τ, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch, sc.exner_perturbation, cₚᵈ)
 
-    ## 6. Update ρ from vertical divergence of corrected ρw
-    launch!(arch, grid, :xyz, _update_density!, ρ, grid, τ, ρw)
+    ## No density update — ρ uses full 3D divergence in the explicit tendency.
 
     return nothing
 end
@@ -159,22 +161,22 @@ end
 ##### Used at stages where γᵢ = 0 (no Helmholtz solve). The implicit function
 ##### values are still needed by subsequent stages through aᴵᵢⱼ fᴵ(zⱼ).
 #####
-##### fᴵ_ρw = -(ℂ²/θ)∂ρθ/∂z - ρg   (linearized PGF + gravity)
+##### Exner splitting: fᴵ_ρw = -cₚ (ρθ)_face ∂Π'/∂z (perturbation Exner PGF)
 ##### fᴵ_ρθ = -V⁻¹ δz(Az θ ρw)      (vertical ρθ flux)
 ##### fᴵ_ρ  = -V⁻¹ δz(Az ρw)         (vertical density flux)
 #####
 
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ, ∂zᶜᶜᶠ
 
-## fᴵ_ρw = -∂p/∂z - ρg  (using the ACTUAL EOS pressure, not linearized)
-## This avoids the O(Δz²) mismatch between (ℂ²/θ)∂ρθ/∂z and ∂p/∂z
-## that causes secular drift when accumulated through the ARK predictor.
-@kernel function _evaluate_fI_ρw!(fI_ρw, grid, pressure, ρ, g)
+## fᴵ_ρw = -cₚ (ρθ)_face ∂Π'/∂z  (perturbation Exner PGF, small)
+## Gravity is in the explicit buoyancy b = -(cₚ θᵥ ∂Π₀/∂z + g), not here.
+@kernel function _evaluate_fI_ρw!(fI_ρw, grid, ρθ, Π′, cₚᵈ)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ∂z_p = ∂zᶜᶜᶠ(i, j, k, grid, pressure)
-        ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-        fI_ρw[i, j, k] = -(∂z_p + ρᶠ * g) * (k > 1)
+        ρθᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρθ)
+        Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
+        dΠ′ = (Π′[i, j, k] - Π′[i, j, k - 1]) / Δzᶠ
+        fI_ρw[i, j, k] = (-cₚᵈ * ρθᶠ * dΠ′) * (k > 1)
     end
 end
 
@@ -197,24 +199,28 @@ function evaluate_implicit_tendency!(fI_tuple, model)
     grid = model.grid
     arch = architecture(grid)
     fI_ρθ, fI_ρw, fI_ρ = fI_tuple
+    dynamics = model.dynamics
+    sc = dynamics.vertical_acoustic_solver
+
+    cₚᵈ = model.thermodynamic_constants.dry_air.heat_capacity
+    Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
+    κ = Rᵈ / cₚᵈ
     g = model.thermodynamic_constants.gravitational_acceleration
+    pˢᵗ = dynamics.standard_pressure
 
-    ## fᴵ_ρw = -(∂p/∂z + ρg): full EOS PGF+gravity.
-    ## This exactly matches what `explicit_z_pressure_gradient` and
-    ## `explicit_buoyancy_forceᶜᶜᶠ` zeroed from fᴱ.
+    ## Exner perturbation from fixed reference
+    CompressibleEquations.compute_exner_perturbation!(sc, grid, dynamics.pressure,
+                                                       dynamics.reference_state.exner_function, pˢᵗ, κ)
+
+    ## fᴵ_ρw = -cₚ (ρθ)_face ∂Π'/∂z: perturbation Exner PGF.
+    ## Gravity is in the explicit buoyancy, not in fᴵ.
     launch!(arch, grid, :xyz, _evaluate_fI_ρw!,
-            fI_ρw, grid, model.dynamics.pressure, model.dynamics.density, g)
+            fI_ρw, grid, model.formulation.potential_temperature_density, sc.exner_perturbation, cₚᵈ)
 
-    ## fᴵ_ρθ = -div_z(θ ρw): vertical ρθ flux (acoustic compressibility).
-    ## The caller must subtract this from fᴱ_ρθ to avoid double-counting
-    ## (since fᴱ includes full 3D advection of ρθ).
-    launch!(arch, grid, :xyz, _evaluate_fI_ρθ!,
-            fI_ρθ, grid, model.formulation.potential_temperature, model.momentum.ρw)
-
-    ## fᴵ_ρ = -div_z(ρw): vertical density flux, matches the
-    ## horizontal-only divergence in fᴱ_ρ.
-    launch!(arch, grid, :xyz, _store_vertical_divergence!,
-            fI_ρ, grid, model.momentum.ρw)
+    ## fᴵ_ρθ = 0 and fᴵ_ρ = 0: only ρw is split between fᴱ/fᴵ.
+    ## ρθ and ρ use full 3D tendencies in fᴱ with uniform Butcher weights.
+    fill!(parent(fI_ρθ), 0)
+    fill!(parent(fI_ρ), 0)
 
     return nothing
 end
@@ -228,10 +234,9 @@ end
 #####   fᴱ_adj = fᴱ_full - fᴵ_ρθ  →  fᴱ_adj + fᴵ_ρθ = fᴱ_full
 #####
 
+## With the Exner splitting, fᴵ_ρθ = 0 and fᴱ_ρθ keeps full 3D advection.
+## No subtraction needed — avoids split-weighting instability.
 function remove_vertical_ρθ_flux_from_explicit!(fE, fI_ρθ, grid)
-    arch = architecture(grid)
-    launch!(arch, grid, :xyz, _accumulate_tendency!,
-            fE.ρθ, -1, fI_ρθ)
     return nothing
 end
 
@@ -244,22 +249,19 @@ end
 #####
 
 function store_implicit_tendency!(fI_ρθ, fI_ρw, fI_ρ, model, τ, ρw_scratch)
-    ## All from solve residual: (field_after - field_before) / τ.
-    ## The back-solve now includes reference-subtracted mean PGF+gravity,
-    ## so the ρw residual captures the full perturbation fᴵ_ρw.
     grid = model.grid
     arch = architecture(grid)
     sc = model.dynamics.vertical_acoustic_solver
     inv_τ = 1 / τ
 
-    launch!(arch, grid, :xyz, _compute_implicit_tendency!,
-            fI_ρθ, model.formulation.potential_temperature_density, sc.ρθ_scratch, inv_τ)
+    ## Only ρw has nonzero fᴵ (Exner PGF splitting).
+    ## ρθ and ρ use full 3D tendencies in fᴱ — no splitting.
+    fill!(parent(fI_ρθ), 0)
 
     launch!(arch, grid, :xyz, _compute_implicit_tendency!,
             fI_ρw, model.momentum.ρw, ρw_scratch, inv_τ)
 
-    launch!(arch, grid, :xyz, _store_vertical_divergence!,
-            fI_ρ, grid, model.momentum.ρw)
+    fill!(parent(fI_ρ), 0)
 
     return nothing
 end

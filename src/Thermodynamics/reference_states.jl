@@ -1,4 +1,4 @@
-using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
+using Oceananigans: Oceananigans, Center, CenterField, Field, set!, fill_halo_regions!
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 using Oceananigans.Fields: ZeroField
@@ -281,7 +281,7 @@ end
 
 # Surface value extraction
 _surface_value(x::Number) = x
-_surface_value(f::Function) = f(0)
+_surface_value(f::Function) = _nargs(f) == 1 ? f(0) : f(0, 0, 0)
 
 """
 $(TYPEDSIGNATURES)
@@ -497,34 +497,82 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     κ = Rᵈ / cᵖᵈ
     g = constants.gravitational_acceleration
     Nz = size(grid, 3)
-    loc = (nothing, nothing, Center())
 
-    # Build θᵣ field (temporary, used only during construction)
-    θᵣ = Field{Nothing, Nothing, Center}(grid)
-    set!(θᵣ, potential_temperature)
-    fill_halo_regions!(θᵣ)
+    # Detect whether θ₀ depends on horizontal coordinates (3D reference).
+    # Functions of 1 arg → f(z), functions of 2+ args → f(x,y,z) or f(x,z).
+    needs_3d = _needs_3d_reference(potential_temperature)
 
-    # Surface values for boundary conditions and display
-    θ₀ = convert(FT, _surface_value(potential_temperature))
-    π₀ = (p₀ / pˢᵗ)^κ
-    ρ₀ = p₀ / (Rᵈ * θ₀ * π₀)
+    if needs_3d
+        # 3D reference: per-column integration for latitude-dependent θ₀(φ,z)
+        θᵣ = CenterField(grid)
+        set!(θᵣ, potential_temperature)
+        fill_halo_regions!(θᵣ)
 
-    # Allocate output fields
-    πᵣ = Field{Nothing, Nothing, Center}(grid)
-    p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
-    pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
-    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
-    ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+        πᵣ = CenterField(grid)
+        pᵣ = CenterField(grid)
+        ρᵣ = CenterField(grid)
 
-    # Build π₀ by discrete upward integration, then derive p₀ and ρ₀
-    launch!(arch, grid, tuple(1), _compute_exner_reference!,
-            πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, π₀, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+        launch!(arch, grid, :xy, _compute_exner_reference_3d!,
+                πᵣ, pᵣ, ρᵣ, θᵣ, grid, p₀, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+    else
+        # 1D reference: single column, broadcast to all (i,j)
+        loc = (nothing, nothing, Center())
+        θᵣ = Field{Nothing, Nothing, Center}(grid)
+        set!(θᵣ, potential_temperature)
+        fill_halo_regions!(θᵣ)
+
+        πᵣ = Field{Nothing, Nothing, Center}(grid)
+        π₀_surface = (p₀ / pˢᵗ)^κ
+        θ₀_surface = convert(FT, _surface_value(potential_temperature))
+        ρ₀_surface = p₀ / (Rᵈ * θ₀_surface * π₀_surface)
+
+        p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
+        pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
+        ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀_surface))
+        ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+
+        launch!(arch, grid, tuple(1), _compute_exner_reference!,
+                πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, π₀_surface, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+    end
 
     fill_halo_regions!(πᵣ)
     fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
 
+    θ₀ = convert(FT, _surface_value(potential_temperature))
+
     return ExnerReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ, πᵣ)
+end
+
+# Detect if θ₀ needs a 3D (per-column) reference.
+# Functions with ≥2 methods or ≥2 arguments → 3D.
+_needs_3d_reference(::Number) = false
+_needs_3d_reference(f::Function) = _nargs(f) > 1
+_nargs(f) = maximum(m.nargs for m in methods(f)) - 1  # subtract 1 for the function itself
+
+@kernel function _compute_exner_reference_3d!(π₀, pᵣ, ρᵣ, θ₀, grid, p₀, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    @inbounds begin
+        π₀_k = (p₀ / pˢᵗ)^κ
+        π₀[i, j, 1] = π₀_k
+        pᵣ[i, j, 1] = pˢᵗ * π₀_k^(1/κ)
+        ρᵣ[i, j, 1] = pᵣ[i, j, 1] / (Rᵈ * θ₀[i, j, 1] * π₀_k)
+    end
+
+    for k in 2:Nz
+        @inbounds begin
+            Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
+            θ₀_face = (θ₀[i, j, k] + θ₀[i, j, k - 1]) / 2
+            π₀_k = π₀[i, j, k - 1] - g * Δzᶠ / (cᵖᵈ * θ₀_face)
+            pᵏ = pˢᵗ * π₀_k^(1/κ)
+            Tᵏ = θ₀[i, j, k] * π₀_k
+            π₀[i, j, k] = π₀_k
+            pᵣ[i, j, k] = pᵏ
+            ρᵣ[i, j, k] = pᵏ / (Rᵈ * Tᵏ)
+        end
+    end
 end
 
 # ExnerReferenceState has the same surface_density interface as ReferenceState
