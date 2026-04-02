@@ -34,6 +34,9 @@ where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + gustiness²)` is th
   with stability correction. Can be a `Field`, `Function`, or `Number`. (default: `nothing`)
 """
 function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0, surface_temperature=nothing)
+    if ((coefficient isa PolynomialCoefficient) & isnothing(surface_temperature))
+        error("surface_temperature keyword argument must be provided when using a polynomial drag coefficient")
+    end
     return BulkDragFunction(direction, coefficient, gustiness, surface_temperature)
 end
 
