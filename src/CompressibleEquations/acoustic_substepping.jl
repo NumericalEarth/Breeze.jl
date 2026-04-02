@@ -1523,12 +1523,18 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     ū = substepper.averaged_velocities
     launch!(arch, grid, :xyz, _zero_avg_velocities!, ū)
 
-    # MPAS-style: reset all acoustic perturbation variables to ZERO.
+    # Reset perturbation variables at each stage start.
+    # NOTE: MPAS only resets at stage 1 and accumulates across stages.
+    # But our recovery doesn't properly support accumulation yet, so we
+    # reset per-stage for stability. This loses the inter-stage accumulation
+    # but prevents the exponential growth from recovery feedback.
+    # TODO: implement proper MPAS recovery that handles accumulated perturbations.
     fill!(parent(substepper.exner_perturbation), 0)
     fill!(parent(substepper.filtered_exner_perturbation), 0)
     fill!(parent(substepper.previous_exner_perturbation), 0)
+    fill!(parent(substepper.rho_pp), 0)
     fill!(parent(substepper.rtheta_pp), 0)
-    fill!(parent(substepper.stage_thermodynamic_density), 0)
+    fill!(parent(substepper.rw_p), 0)
 
     u = model.velocities.u
     v = model.velocities.v
