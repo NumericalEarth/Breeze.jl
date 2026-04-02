@@ -11,11 +11,19 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: architecture
 using Oceananigans.Fields: interpolate
 using Oceananigans.Grids: xnode, ynode, topology, Flat
-using Oceananigans.Utils: launch!, KernelParameters
+using Oceananigans.Utils: launch!, KernelParameters, prettysummary
 
 #####
 ##### FilteredSurfaceVelocities
 #####
+
+struct FilteredSurfaceVelocities{U, V, H, FT, R}
+    u :: U   # Field{Face, Center, Nothing}
+    v :: V   # Field{Center, Face, Nothing}
+    height :: H
+    filter_timescale :: FT
+    last_update :: R  # Ref{Tuple{Int, Int}} on CPU, Tuple{Int, Int} on GPU
+end
 
 """
     FilteredSurfaceVelocities(grid; height=nothing, filter_timescale=Inf)
@@ -37,14 +45,6 @@ where `τ` is the `filter_timescale`.
   interpolated to that height.
 - `filter_timescale`: Filter time scale `τ` in seconds (default: `Inf`, no filtering).
 """
-struct FilteredSurfaceVelocities{U, V, H, FT, R}
-    u :: U   # Field{Face, Center, Nothing}
-    v :: V   # Field{Center, Face, Nothing}
-    height :: H
-    filter_timescale :: FT
-    last_update :: R  # Ref{Tuple{Int, Int}} on CPU, Tuple{Int, Int} on GPU
-end
-
 function FilteredSurfaceVelocities(grid; height=nothing, filter_timescale=Inf)
     u = Field{Face, Center, Nothing}(grid)
     v = Field{Center, Face, Nothing}(grid)
@@ -66,9 +66,25 @@ Base.summary(fv::FilteredSurfaceVelocities) =
     string("FilteredSurfaceVelocities(height=", fv.height,
            ", filter_timescale=", fv.filter_timescale, ")")
 
+function Base.show(io::IO, fv::FilteredSurfaceVelocities)
+    print(io, summary(fv), ":\n",
+          "├── u: ", prettysummary(fv.u), '\n',
+          "├── v: ", prettysummary(fv.v), '\n',
+          "├── height: ", prettysummary(fv.height), '\n',
+          "├── filter_timescale: ", prettysummary(fv.filter_timescale), '\n',
+          "└── last_update: ", fv.last_update)
+end
+
 #####
 ##### FilteredSurfaceScalar
 #####
+
+struct FilteredSurfaceScalar{F, H, FT, R}
+    field :: F   # Field{Center, Center, Nothing}
+    height :: H
+    filter_timescale :: FT
+    last_update :: R  # Ref{Tuple{Int, Int}} on CPU, Tuple{Int, Int} on GPU
+end
 
 """
     FilteredSurfaceScalar(grid; height=nothing, filter_timescale=Inf)
@@ -84,13 +100,6 @@ The filter update is the same exponential form as `FilteredSurfaceVelocities`.
   first grid cell center value is used.
 - `filter_timescale`: Filter time scale `τ` in seconds (default: `Inf`).
 """
-struct FilteredSurfaceScalar{F, H, FT, R}
-    field :: F   # Field{Center, Center, Nothing}
-    height :: H
-    filter_timescale :: FT
-    last_update :: R  # Ref{Tuple{Int, Int}} on CPU, Tuple{Int, Int} on GPU
-end
-
 function FilteredSurfaceScalar(grid; height=nothing, filter_timescale=Inf)
     field = Field{Center, Center, Nothing}(grid)
     FT = typeof(filter_timescale)
@@ -106,6 +115,14 @@ Adapt.adapt_structure(to, fs::FilteredSurfaceScalar) =
 Base.summary(fs::FilteredSurfaceScalar) =
     string("FilteredSurfaceScalar(height=", fs.height,
            ", filter_timescale=", fs.filter_timescale, ")")
+
+function Base.show(io::IO, fs::FilteredSurfaceScalar)
+    print(io, summary(fs), ":\n",
+          "├── field: ", prettysummary(fs.field), '\n',
+          "├── height: ", prettysummary(fs.height), '\n',
+          "├── filter_timescale: ", prettysummary(fs.filter_timescale), '\n',
+          "└── last_update: ", fs.last_update)
+end
 
 #####
 ##### Kernel parameters for filtered surface fields
