@@ -204,11 +204,11 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
 
     # Ventilation factors for number and mass tendencies
     t_star = cbrt(6 * x_star / xr_mean_safe)
-    a_vent_0 = av * Γ_incl(FT(-1), t_star) / FT(6)^(-2 // 3)
-    b_vent_0 = bv * Γ_incl(-1 // 2 + 3 // 2 * β, t_star) / FT(6)^(β / 2 - 1 // 2)
+    a_vent_0 = av * Γ_incl(FT(-1), t_star) / FT(6)^(FT(-2) / FT(3))
+    b_vent_0 = bv * Γ_incl(FT(-0.5) + FT(1.5) * β, t_star) / FT(6)^((β - one(FT)) / FT(2))
 
     a_vent_1 = av * Γ(FT(2)) / cbrt(FT(6))
-    b_vent_1 = bv * Γ(5 // 2 + 3 // 2 * β) / 6^(β / 2 + 1 // 2)
+    b_vent_1 = bv * Γ(FT(2.5) + FT(1.5) * β) / FT(6)^((β + one(FT)) / FT(2))
 
     # Reynolds number
     Re = α * xr_mean_safe^β * sqrt(ρ0 / ρ) * Dʳ / ν_air
@@ -447,30 +447,34 @@ end
     # ARG 2000 parameterization is only valid for positive updraft velocities
     w⁺ = max(eps(FT), w)
 
-    ζ = 2A / 3 * sqrt(α * w⁺ / G)
+    # All intermediate quantities should be non-negative for physical states.
+    # Guard with max(0, ...) to handle extreme/unphysical transient states.
+    αwG = max(0, α * w⁺ / G)
+    ζ = max(0, 2A / 3) * sqrt(αwG)
 
     # Compute critical supersaturation and contribution from each mode
     Σ_inv_Sᵐᵃˣ² = zero(FT)
     for mode in ad.modes
 
         # Mean hygroscopicity for mode (volume-weighted κ)
-        κ̄ = mean_hygroscopicity(ap, mode)
+        κ̄ = max(eps(FT), mean_hygroscopicity(ap, mode))
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * sqrt(A / (3 * mode.r_dry))^3
+        Sᶜʳⁱᵗ = max(eps(FT), 2 / sqrt(κ̄) * sqrt(max(0, A / (3 * mode.r_dry)))^3)
 
         # Fitting parameters (fᵥ and gᵥ are ventilation-related)
         fᵥ = ap.f1 * exp(ap.f2 * log(mode.stdev)^2)
         gᵥ = ap.g1 + ap.g2 * log(mode.stdev)
 
         # η parameter
-        η = sqrt(α * w⁺ / G)^3 / (2π * ρᴸ * γ * mode.N)
+        η = max(eps(FT), sqrt(αwG)^3 / (2π * ρᴸ * γ * mode.N))
 
         # Contribution to 1/Sᵐᵃˣ² (Eq. 6 in ARG 2000)
+        # All bases of fractional exponents are guaranteed positive by guards above
         Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * (ζ / η)^ap.p1 + gᵥ * (Sᶜʳⁱᵗ^2 / (η + 3 * ζ))^ap.p2)
     end
 
-    Sᵐᵃˣ_computed = 1 / sqrt(Σ_inv_Sᵐᵃˣ²)
+    Sᵐᵃˣ_computed = 1 / sqrt(max(eps(FT), Σ_inv_Sᵐᵃˣ²))
 
     # Return 0 for no updraft (w <= 0), otherwise return computed value
     return ifelse(w > zero(FT), Sᵐᵃˣ_computed, zero(FT))

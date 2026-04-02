@@ -29,6 +29,10 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     @test μ2.cloud_formation.liquid isa ConstantRateCondensateFormation
     @test μ2.cloud_formation.ice === nothing
 
+    μ2_vertical = TwoMomentCloudMicrophysics(FT;
+                                             negative_moisture_correction = Breeze.AtmosphereModels.VerticalBorrowing())
+    @test μ2_vertical.negative_moisture_correction isa Breeze.AtmosphereModels.VerticalBorrowing
+
     @test μ2.categories isa TwoMomentCategories
     @test μ2.categories.warm_processes isa CloudMicrophysics.Parameters.SB2006
 
