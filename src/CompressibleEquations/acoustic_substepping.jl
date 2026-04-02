@@ -1181,6 +1181,25 @@ end
     end
 end
 
+##### MPAS-style direct ρθ recovery: ρθ_new = ρθ⁰ + rtheta_pp.
+##### Density from θ⁺ = θⁿ + Δt_stage Gˢθ, then ρ = ρθ / θ⁺.
+
+@kernel function _mpas_recovery_wsrk3!(ρ, ρχ, rtheta_pp, rho_pp,
+                                        θᵥ, Gˢρχ, Gˢρ,
+                                        ρ⁰, ρχ⁰, Δt_stage)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        # ρθ_new = ρθ⁰ + rtheta_pp (direct, no EOS conversion needed)
+        ρχ⁰_ijk = ρχ⁰[i, j, k]
+        ρχ⁺ = ρχ⁰_ijk + rtheta_pp[i, j, k]
+        ρχ[i, j, k] = ρχ⁺
+
+        # ρ_new = ρ⁰ + rho_pp (direct from MPAS acoustic density perturbation)
+        ρ[i, j, k] = ρ⁰[i, j, k] + rho_pp[i, j, k]
+    end
+end
+
 ##### Convert rw_p (momentum perturbation) to velocity w.
 @kernel function _convert_rw_p_to_w!(w, rw_p, ρ, grid)
     i, j, k = @index(Global, NTuple)
@@ -1577,29 +1596,28 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     # Use the formulation's ρθ as ρθ₀ (still holds U⁰ during acoustic loop).
     ρθ₀ = model.formulation.potential_temperature_density
 
-    # Convert final rtheta_pp to π' for the existing recovery code.
-    pˢᵗ = model.dynamics.standard_pressure
-    κ_local = Rᵈ / cᵖ
-    launch!(arch, grid, :xyz, _update_pi_from_rtheta_pp!,
-            substepper.exner_perturbation, substepper.filtered_exner_perturbation,
-            substepper.rtheta_pp, ρθ₀,
-            substepper.reference_exner_function, pˢᵗ, Rᵈ, κ_local,
-            zero(eltype(grid)))
-
-    # Set stage_thermodynamic_density to π'_initial = 0 for the Δπ' recovery.
-    fill!(parent(substepper.stage_thermodynamic_density), 0)
-
     # Convert rw_p to w velocity for momentum recovery.
-    # w = rw_p / ρ_face (MPAS rw_p is momentum, our w is velocity).
-    # Actually, our w field was already updated by the horizontal forward step
-    # but NOT by the vertical solve (the MPAS kernel updates rw_p, not w).
-    # We need to convert rw_p to w and put it in the velocity field.
     launch!(arch, grid, :xyz, _convert_rw_p_to_w!,
             w, substepper.rw_p, model.dynamics.density, grid)
 
-    # Recovery: convert acoustic variables back to Breeze prognostic fields.
+    # MPAS-style direct ρθ recovery (bypass Exner conversion).
+    # ρθ_new = ρθ⁰ + rtheta_pp
+    # ρ: diagnosed from ρ = ρθ / θ⁺ where θ⁺ = θⁿ + Δt_stage Gˢθ
     Δt_stage = Nτ * Δτ
-    recover_full_fields!(model, substepper, U⁰, Δt_stage)
+    ρχ = thermodynamic_density(model.formulation)
+    Gⁿ = model.timestepper.Gⁿ
+    χ_name = thermodynamic_density_name(model.formulation)
+    Gˢρχ = getproperty(Gⁿ, χ_name)
+
+    launch!(arch, grid, :xyz, _mpas_recovery_wsrk3!,
+            model.dynamics.density, ρχ,
+            substepper.rtheta_pp, substepper.rho_pp,
+            substepper.virtual_potential_temperature, Gˢρχ, Gⁿ.ρ,
+            U⁰[1], U⁰[5], Δt_stage)
+
+    # Reconstruct momentum from updated density and velocity
+    launch!(arch, grid, :xyz, _recover_momentum!,
+            model.momentum, model.dynamics.density, model.velocities, grid)
 
     return nothing
 end
