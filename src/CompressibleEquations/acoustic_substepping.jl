@@ -1195,14 +1195,18 @@ end
 ##### π' ≈ (R/cv) * rtheta_pp / ρθ₀ (linearized EOS).
 ##### Also applies the ϰᵈⁱ forward-extrapolation filter for stability.
 
-@kernel function _update_pi_from_rtheta_pp!(π′, π̃′, rtheta_pp, ρθ₀, rcv, ϰᵈⁱ)
+@kernel function _update_pi_from_rtheta_pp!(π′, π̃′, rtheta_pp, ρθ₀, πᵣ, pˢᵗ, Rᵈ, κ, ϰᵈⁱ)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρθ₀_safe = ifelse(ρθ₀[i, j, k] == 0, one(eltype(ρθ₀)), ρθ₀[i, j, k])
+        # Nonlinear EOS: π_new = (Rd * (ρθ₀ + rtheta_pp) / p_st)^(R/cv)
+        # π' = π_new - π_ref
+        R_over_cv = κ / (1 - κ)
+        ρθ_total = ρθ₀[i, j, k] + rtheta_pp[i, j, k]
+        ρθ_total_safe = max(ρθ_total, eltype(ρθ₀)(1e-10))
+        π_new = (Rᵈ * ρθ_total_safe / pˢᵗ)^R_over_cv
         π′_old = π′[i, j, k]
-        π′_new = rcv * rtheta_pp[i, j, k] / ρθ₀_safe
+        π′_new = π_new - πᵣ[i, j, k]
         π′[i, j, k] = π′_new
-        # Forward-extrapolation filter: π̃' = π' + ϰᵈⁱ (π' - π'_old)
         π̃′[i, j, k] = π′_new + ϰᵈⁱ * (π′_new - π′_old)
     end
 end
@@ -1558,25 +1562,31 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 substep == 1)
 
         # Update π' from rtheta_pp for the horizontal PGF in the next substep.
-        # π' ≈ rcv * rtheta_pp / ρθ (linearized EOS conversion)
-        # Also update filtered π' for the next forward step.
-        rcv = Rᵈ / (cᵖ - Rᵈ)
+        # Nonlinear EOS: π = (Rd*(ρθ₀+rtheta_pp)/p_st)^(R/cv), π' = π - π_ref
+        # Use the formulation's ρθ as ρθ₀ (it holds U⁰ during the acoustic loop).
+        pˢᵗ = model.dynamics.standard_pressure
+        κ_local = Rᵈ / cᵖ
+        ρθ₀ = model.formulation.potential_temperature_density
         launch!(arch, grid, :xyz, _update_pi_from_rtheta_pp!,
                 substepper.exner_perturbation, substepper.filtered_exner_perturbation,
-                substepper.rtheta_pp, substepper.stage_thermodynamic_density,
-                rcv, substepper.divergence_damping_coefficient)
+                substepper.rtheta_pp, ρθ₀,
+                substepper.reference_exner_function, pˢᵗ, Rᵈ, κ_local,
+                substepper.divergence_damping_coefficient)
     end
 
+    # Use the formulation's ρθ as ρθ₀ (still holds U⁰ during acoustic loop).
+    ρθ₀ = model.formulation.potential_temperature_density
+
     # Convert final rtheta_pp to π' for the existing recovery code.
-    # π'_final ≈ rcv * rtheta_pp / ρθ_stage (linearized EOS).
-    # π'_initial = 0 (stored in stage_thermodynamic_density).
-    rcv = Rᵈ / (cᵖ - Rᵈ)
+    pˢᵗ = model.dynamics.standard_pressure
+    κ_local = Rᵈ / cᵖ
     launch!(arch, grid, :xyz, _update_pi_from_rtheta_pp!,
             substepper.exner_perturbation, substepper.filtered_exner_perturbation,
-            substepper.rtheta_pp, substepper.stage_thermodynamic_density,
-            rcv, zero(eltype(grid)))  # no filter for final conversion
+            substepper.rtheta_pp, ρθ₀,
+            substepper.reference_exner_function, pˢᵗ, Rᵈ, κ_local,
+            zero(eltype(grid)))
 
-    # Reset stage_thermodynamic_density to 0 for recovery (π'_initial = 0).
+    # Set stage_thermodynamic_density to π'_initial = 0 for the Δπ' recovery.
     fill!(parent(substepper.stage_thermodynamic_density), 0)
 
     # Convert rw_p to w velocity for momentum recovery.
