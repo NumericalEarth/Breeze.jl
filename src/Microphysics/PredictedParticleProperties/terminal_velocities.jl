@@ -38,7 +38,7 @@ See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
     v_max = prp.rain_velocity_max
 
     qʳ_eff = clamp_positive(qʳ)
-    nʳ_eff = max(nʳ, FT(1))
+    nʳ_eff = max(nʳ, FT(1e-16))
 
     # Density correction factor (Foote & du Toit 1969; Fortran P3 uses 0.54)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
@@ -108,7 +108,7 @@ Dispatches on `p3.rain.velocity_number`:
     v_max = prp.rain_velocity_max
 
     qʳ_eff = clamp_positive(qʳ)
-    nʳ_eff = max(nʳ, FT(1))
+    nʳ_eff = max(nʳ, FT(1e-16))
 
     # Density correction factor (Foote & du Toit 1969; Fortran P3 uses 0.54)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
@@ -176,7 +176,7 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     v_max = prp.ice_velocity_max
 
     qⁱ_eff = clamp_positive(qⁱ)
-    nⁱ_eff = max(nⁱ, FT(1))
+    nⁱ_eff = max(nⁱ, FT(1e-16))
 
     # Mean ice particle mass
     m̄ = qⁱ_eff / nⁱ_eff
@@ -279,7 +279,7 @@ Compute number-weighted terminal velocity for ice.
     v_max = prp.ice_velocity_max
 
     qⁱ_eff = clamp_positive(qⁱ)
-    nⁱ_eff = max(nⁱ, FT(1))
+    nⁱ_eff = max(nⁱ, FT(1e-16))
     m̄ = qⁱ_eff / nⁱ_eff
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
@@ -333,7 +333,7 @@ When tabulated integrals are available, uses pre-computed lookup tables.
     v_max = prp.ice_velocity_max
 
     qⁱ_eff = clamp_positive(qⁱ)
-    nⁱ_eff = max(nⁱ, FT(1))
+    nⁱ_eff = max(nⁱ, FT(1e-16))
     m̄ = qⁱ_eff / nⁱ_eff
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
@@ -396,7 +396,7 @@ speed framework.
 
     # --- Shared computation (done once instead of three times) ---
     qⁱ_eff = clamp_positive(qⁱ)
-    nⁱ_eff = max(nⁱ, FT(1))
+    nⁱ_eff = max(nⁱ, FT(1e-16))
     m̄ = qⁱ_eff / nⁱ_eff
 
     # Density correction factor (Heymsfield et al. 2006, exponent 0.54 for ice)

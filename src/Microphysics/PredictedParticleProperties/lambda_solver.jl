@@ -1112,6 +1112,7 @@ end
 const P3_DM_MAX_BASE = 5e-3    # 5 mm  (Fortran Dm_max1 = 5000e-6)
 const P3_DM_MAX_RIME = 20e-3   # 20 mm (Fortran Dm_max2 = 20000e-6)
 const P3_DM_MIN      = 2e-6    # 2 μm  (Fortran Dm_min  = 2e-6)
+const P3_LAMBDA_MAX  = 1.6e7   # Fortran brute-force search upper bound
 
 """
 $(TYPEDSIGNATURES)
@@ -1180,7 +1181,7 @@ Returns (λ_min, λ_max).
 @inline function lambda_bounds_from_diameter(μ, bounds::DiameterBounds)
     FT = typeof(μ)
     λ_min = (μ + 1) / bounds.D_max
-    λ_max = (μ + 1) / bounds.D_min
+    λ_max = max((μ + 1) / bounds.D_min, FT(P3_LAMBDA_MAX))
     return (λ_min, λ_max)
 end
 

@@ -44,7 +44,7 @@ struct ProcessRateParameters{FT}
     # Ice aggregation
     aggregation_efficiency_max :: FT         # Eᵢᵢ_max [-]
     aggregation_timescale :: FT              # τ_agg [s]
-    aggregation_efficiency_temperature_low :: FT   # T below which E=0.1 [K]
+    aggregation_efficiency_temperature_low :: FT   # T below which E=0.001 [K]
     aggregation_efficiency_temperature_high :: FT  # T above which E=max [K]
     aggregation_reference_concentration :: FT # n_ref [1/kg]
 
@@ -81,7 +81,6 @@ struct ProcessRateParameters{FT}
     splintering_temperature_low :: FT        # T_low [K]
     splintering_temperature_high :: FT       # T_high [K]
     splintering_temperature_peak :: FT       # T_peak [K]
-    splintering_temperature_width :: FT      # width [K]
     splintering_rate :: FT                   # splinters per kg rime
     splintering_diameter_threshold :: FT     # D_min [m] for HM splintering
     splintering_liquid_fraction_max :: FT    # Fˡ max for HM splintering
@@ -276,14 +275,13 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         splintering_temperature_low = 265.15,
         splintering_temperature_high = 270.15,
         splintering_temperature_peak = 268.15,
-        splintering_temperature_width = 2.5,
         splintering_rate = 3.5e8,
         splintering_diameter_threshold = 250e-6,
         splintering_liquid_fraction_max = 0.1,
         splintering_surface_temperature_max = 282.0,
 
         # Rain terminal velocity
-        rain_fall_speed_coefficient = 842.0,
+        rain_fall_speed_coefficient = 841.99667,
         rain_fall_speed_exponent = 0.8,
         rain_diameter_min = 1e-4,
         rain_diameter_max = 5e-3,
@@ -402,7 +400,6 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(splintering_temperature_low),
         FT(splintering_temperature_high),
         FT(splintering_temperature_peak),
-        FT(splintering_temperature_width),
         FT(splintering_rate),
         FT(splintering_diameter_threshold),
         FT(splintering_liquid_fraction_max),

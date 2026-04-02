@@ -876,13 +876,14 @@ end
     return ρ * m * Np
 end
 
-# Reflectivity (Fortran Rayleigh convention):
-# refl = ∫ 0.1892 × (6/(π ρ_ice))² × m(D)² × N'(D) dD
-# where 0.1892 ≈ π⁵|K_w|²/λ⁴ Rayleigh prefactor
+# Reflectivity (Fortran `refl` / sum5 convention):
+# refl = ∫ (6/(π ρ_ice))² × m(D)² × N'(D) dD
+# No Rayleigh prefactor — matches Fortran Table 1 `refl` (sum5).
+# Fortran `refl2` (with 0.1892 prefactor) is a separate diagnostic not yet implemented.
 @inline function integrand(::Reflectivity, D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
-    ρ_ice = FT(916.7)
-    K_refl = FT(0.1892) * (6 / (FT(π) * ρ_ice))^2
+    ρ_ice = FT(917.0)
+    K_refl = (6 / (FT(π) * ρ_ice))^2
     m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
     return K_refl * m^2 * Np

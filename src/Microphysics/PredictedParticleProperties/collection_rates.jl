@@ -56,7 +56,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     nⁱ_eff = clamp_positive(nⁱ)
 
     # Thresholds
-    qⁱ_threshold = FT(1e-8)
+    qⁱ_threshold = FT(1e-14)
     nⁱ_threshold = FT(1e2)
 
     aggregation_active = (qⁱ_eff > qⁱ_threshold) & (nⁱ_eff > nⁱ_threshold)
@@ -141,7 +141,7 @@ factor for the exponential PSD.
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
-    q_threshold = FT(1e-8)
+    q_threshold = FT(1e-14)
     n_threshold = FT(1)
     below_freezing = T < T₀
     active = below_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
@@ -190,7 +190,7 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
-    q_threshold = FT(1e-8)
+    q_threshold = FT(1e-14)
     n_threshold = FT(1)
     above_freezing = T >= T₀
     active = above_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
@@ -235,7 +235,7 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
-    q_threshold = FT(1e-8)
+    q_threshold = FT(1e-14)
     n_threshold = FT(1)
     above_freezing = T >= T₀
     active = above_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
@@ -337,7 +337,7 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
-    q_threshold = FT(1e-8)
+    q_threshold = FT(1e-14)
     n_threshold = FT(1)
     below_freezing = T < T₀
     active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
@@ -435,7 +435,7 @@ independent PSD-integrated number collection rate.
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
-    q_threshold = FT(1e-8)
+    q_threshold = FT(1e-14)
     n_threshold = FT(1)
     below_freezing = T < T₀
     active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nʳ_eff > n_threshold) & (nⁱ_eff > n_threshold)

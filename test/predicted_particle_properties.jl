@@ -205,7 +205,7 @@ using Oceananigans.Fields: interior
     @testset "Rain properties" begin
         rain = RainProperties()
         @test rain.maximum_mean_diameter ≈ 6e-3
-        @test rain.fall_speed_coefficient ≈ 842.0
+        @test rain.fall_speed_coefficient ≈ 841.99667
         @test rain.fall_speed_exponent ≈ 0.8
 
         @test rain.shape_parameter isa RainShapeParameter
@@ -2350,7 +2350,7 @@ using Oceananigans.Fields: interior
         # ar = 842, br = 0.8 (Fortran P3 rain fall speed coefficients)
         using SpecialFunctions: gamma
 
-        ar = 842.0
+        ar = 841.99667
         br = 0.8
         λ_r = 5000.0
         # Analytical: V_mass = ar * Γ(4+br) / (Γ(4) * λ^br)
@@ -2570,8 +2570,8 @@ using Oceananigans.Fields: interior
         @test N_trace ≈ Q_trace / min_drop_mass  # cap active: N_uncapped ≫ N_capped
         @test N_trace < Nc_continental / ρ / τ_hom  # verify cap reduced from uncapped value
 
-        # Below threshold with qᶜˡ below guard (1e-8): zero rates
-        Q_hom_tiny, N_hom_tiny = homogeneous_freezing_cloud_rate(p3, FT(1e-10), Nc, T_cold, ρ)
+        # Below threshold with qᶜˡ below guard (1e-14): zero rates
+        Q_hom_tiny, N_hom_tiny = homogeneous_freezing_cloud_rate(p3, FT(1e-15), Nc, T_cold, ρ)
         @test Q_hom_tiny == 0
         @test N_hom_tiny == 0
 
@@ -2591,8 +2591,8 @@ using Oceananigans.Fields: interior
         @test Q_hom_r ≈ qr / τ_hom
         @test N_hom_r ≈ nr / τ_hom
 
-        # Below threshold with qʳ below guard (1e-8): zero rates
-        Q_hom_r_tiny, N_hom_r_tiny = homogeneous_freezing_rain_rate(p3, FT(1e-10), nr, T_very_cold)
+        # Below threshold with qʳ below guard (1e-14): zero rates
+        Q_hom_r_tiny, N_hom_r_tiny = homogeneous_freezing_rain_rate(p3, FT(1e-15), nr, T_very_cold)
         @test Q_hom_r_tiny == 0
         @test N_hom_r_tiny == 0
 

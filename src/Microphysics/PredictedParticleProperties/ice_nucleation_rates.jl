@@ -103,7 +103,7 @@ negligible for small droplets.
     qᶜˡ_eff = clamp_positive(qᶜˡ)
 
     # Conditions for freezing
-    freezing_active = (T < T_max) & (qᶜˡ_eff > FT(1e-8))
+    freezing_active = (T <= T_max) & (qᶜˡ_eff > FT(1e-14))
 
     # Barklie-Gokhale (1959) stochastic immersion freezing.
     # Per-drop freezing probability: P(D) = bimm × V_drop × exp(aimm × ΔT)
@@ -167,7 +167,7 @@ parameterization, following Fortran P3 v5.5.0.
     nʳ_eff = clamp_positive(nʳ)
 
     # Conditions for freezing
-    freezing_active = (T < T_max) & (qʳ_eff > FT(1e-8))
+    freezing_active = (T <= T_max) & (qʳ_eff > FT(1e-14))
 
     # Barklie-Gokhale (1959) stochastic volume-dependent freezing.
     # PSD correction for rain (broader PSD than cloud, μ_r ≈ 1-3).
@@ -254,7 +254,7 @@ Float64
     qᶜˡ_eff = clamp_positive(qᶜˡ)
 
     # Guard: temperature below threshold AND sufficient cloud liquid present
-    freezing_active = (T < T_threshold) & (qᶜˡ_eff > FT(1e-8))
+    freezing_active = (T < T_threshold) & (qᶜˡ_eff > FT(1e-14))
 
     # Instantaneous conversion: rate = mixing ratio / timescale
     Q_hom = qᶜˡ_eff / τ_hom
@@ -319,7 +319,7 @@ Float64
     qʳ_eff = clamp_positive(qʳ)
 
     # Guard: temperature below threshold AND sufficient rain present
-    freezing_active = (T < T_threshold) & (qʳ_eff > FT(1e-8))
+    freezing_active = (T < T_threshold) & (qʳ_eff > FT(1e-14))
 
     # Instantaneous conversion: rate = mixing ratio / timescale
     Q_hom = qʳ_eff / τ_hom
