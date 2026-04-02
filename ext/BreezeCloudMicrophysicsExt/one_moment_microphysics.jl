@@ -834,13 +834,13 @@ end
 # The mass reconstruction uses the configured advection scheme applied to the
 # combined enthalpy field ρqh to prevent order mismatches.
 @inline function sedimentation_enthalpy_flux_z(i, j, k, grid, advection, wʳ, ρqʳ, hˡ)
-    ρqh_r = TracerEnthalpyProduct(ρqʳ, hˡ)
+    ρqh_r = ProductOfArrays(ρqʳ, hˡ)
     return _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqh_r)
 end
 
 @inline function sedimentation_enthalpy_flux_z(i, j, k, grid, advection, wʳ, ρqʳ, hˡ, wˢ, ρqˢ, hⁱ)
-    ρqh_r = TracerEnthalpyProduct(ρqʳ, hˡ)
-    ρqh_s = TracerEnthalpyProduct(ρqˢ, hⁱ)
+    ρqh_r = ProductOfArrays(ρqʳ, hˡ)
+    ρqh_s = ProductOfArrays(ρqˢ, hⁱ)
 
     return _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqh_r) +
            _advective_tracer_flux_z(i, j, k, grid, advection, wˢ, ρqh_s)

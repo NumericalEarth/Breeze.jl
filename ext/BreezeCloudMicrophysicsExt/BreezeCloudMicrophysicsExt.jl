@@ -68,12 +68,7 @@ using Oceananigans.Fields: ZeroField, ZFaceField
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, Open
 using Adapt: Adapt, adapt
 
-struct TracerEnthalpyProduct{TR, TH}
-    ρq :: TR
-    h  :: TH
-end
-
-@inline Base.getindex(p::TracerEnthalpyProduct, i, j, k) = @inbounds p.ρq[i, j, k] * p.h[i, j, k]
+using Breeze: ProductOfArrays
 
 include("cloud_microphysics_translations.jl")
 include("zero_moment_microphysics.jl")

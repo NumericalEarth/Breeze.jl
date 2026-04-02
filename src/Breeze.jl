@@ -119,7 +119,10 @@ export
     ParcelModel,
     ParcelState,
     PrescribedVerticalVelocity,
-    PrognosticVerticalVelocity
+    PrognosticVerticalVelocity,
+
+    # Utils
+    ProductOfArrays
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
@@ -175,6 +178,9 @@ export
     FieldTimeSeries, FieldDataset, InMemory, OnDisk,
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
+
+include("Utils/Utils.jl")
+using .Utils
 
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
