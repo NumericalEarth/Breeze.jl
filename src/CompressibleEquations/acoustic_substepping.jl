@@ -1500,13 +1500,21 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     # Compute substep count (adaptive when substeps === nothing)
     N = acoustic_substeps(substepper.substeps, grid, Δt, model.thermodynamic_constants)
 
-    # Substep count varies per stage: Nτ ≈ β * N
-    Nτ = max(round(Int, β_stage * N), 1)
-
-    # Substep size adjusted so Nτ * Δτ = β * Δt exactly.
-    # This ensures the slow tendency accumulates the correct total for each
-    # WS-RK3 stage, avoiding time mismatch from integer rounding of Nτ.
-    Δτ = β_stage * Δt / Nτ
+    # MPAS WS-RK3 substep counts and sizes (verbatim from mpas_atm_time_integration.F):
+    #   Stage 1: 1 substep, dts = dt/3
+    #   Stage 2: N/2 substeps, dts = dt/N
+    #   Stage 3: N substeps, dts = dt/N
+    # The stage fraction β determines which stage: β=1/3 → stage 1, β=1/2 → stage 2, β=1 → stage 3.
+    if β_stage ≈ 1//3
+        Nτ = 1
+        Δτ = Δt / 3
+    elseif β_stage ≈ 1//2
+        Nτ = max(1, N ÷ 2)
+        Δτ = Δt / N
+    else  # β ≈ 1
+        Nτ = N
+        Δτ = Δt / N
+    end
 
     # Convert slow tendencies to velocity/pressure form
     convert_slow_tendencies!(substepper, model)
