@@ -397,7 +397,7 @@ function prepare_acoustic_cache!(substepper, model)
     launch!(arch, grid, :xy, _compute_mpas_tridiagonal_coefficients!,
             substepper.cofwz, substepper.cofwr, substepper.cofwt, substepper.coftz,
             substepper.alpha_tri, substepper.gamma_tri,
-            grid, cᵖ, Rᵈ, g, epssm,
+            grid, cᵖ, Rᵈ, g, epssm, pˢᵗ,
             substepper.virtual_potential_temperature,
             model.dynamics.pressure,
             ref isa Nothing ? substepper.virtual_potential_temperature : ref.density,
@@ -419,14 +419,15 @@ end
 
 @kernel function _compute_mpas_tridiagonal_coefficients!(cofwz, cofwr, cofwt_field, coftz,
                                                           alpha_tri, gamma_tri,
-                                                          grid, cₚ, Rᵈ, g, epssm,
-                                                          θ_m, exner, ρ_base, exner_base,
+                                                          grid, cₚ, Rᵈ, g, epssm, pˢᵗ,
+                                                          θ_m, pressure, ρ_base, exner_base,
                                                           ρ, ρθ_stage)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
     rcv = Rᵈ / (cₚ - Rᵈ)         # MPAS rcv = rgas/(cp-rgas) = R/cv
     c2 = cₚ * rcv                  # MPAS c2 = cp * rcv
+    κ = Rᵈ / cₚ                    # R/cp for Exner conversion
 
     # dtseps will be multiplied by actual Δτ at runtime; store coefficients per unit dtseps.
     # Actually, MPAS computes these once per stage with the actual dts.
@@ -456,7 +457,9 @@ end
 
             # MPAS: cofwz(k) = dtseps * c2 * (fzm*zz(k)+fzp*zz(k-1)) * rdzu(k) * cqw(k) * Π_face(k)
             # With zz=1, cqw=1: cofwz = dtseps * c2 / Δzᶠ * Π_face
-            Π_face = fzm * exner[i, j, k] + fzp * exner[i, j, k - 1]
+            Π_k = (pressure[i, j, k] / pˢᵗ)^κ
+            Π_km1 = (pressure[i, j, k - 1] / pˢᵗ)^κ
+            Π_face = fzm * Π_k + fzp * Π_km1
             cofwz[i, j, k] = c2 / Δzᶠ * Π_face  # × dtseps at runtime
 
             # MPAS: coftz(k) = dtseps * (fzm*t(k) + fzp*t(k-1))
@@ -475,7 +478,8 @@ end
             ρθ_total_safe = ifelse(ρθ_total == 0, one(ρθ_total), ρθ_total)
             Π_base = exner_base[i, j, k]
             Π_base_safe = ifelse(Π_base == 0, one(Π_base), Π_base)
-            cofwt_field[i, j, k] = rcv / 2 * g * ρ_base[i, j, k] * exner[i, j, k] /
+            Π_k = (pressure[i, j, k] / pˢᵗ)^κ
+            cofwt_field[i, j, k] = rcv / 2 * g * ρ_base[i, j, k] * Π_k /
                                    (ρθ_total_safe * Π_base_safe)  # × dtseps at runtime
         end
 
@@ -1034,18 +1038,15 @@ end
         ## multiplied by appropriate densities.
 
         for k in 1:Nz
-            V = Vᶜᶜᶜ(i, j, k, grid)
-            div_h_u = (Axᶠᶜᶜ(i + 1, j, k, grid) * u[i + 1, j, k] - Axᶠᶜᶜ(i, j, k, grid) * u[i, j, k] +
-                        Ayᶜᶠᶜ(i, j + 1, k, grid) * v[i, j + 1, k] - Ayᶜᶠᶜ(i, j, k, grid) * v[i, j, k]) / V
-
-            # MPAS: rs(k) = -flux (mass), ts(k) = -flux * 0.5*(θ_cell1 + θ_cell2)
-            # For structured grid: horizontal ρ-flux div ≈ ρ * div_h(u), θ-flux div ≈ ρθ * div_h(u)
-            # But MPAS uses ru_p (perturbation momentum) not ρu. And the flux uses
-            # θ_m from adjacent cells.
-            # Simplification: ts_horiz ≈ -θ_m * dts * div_h(velocity_perturbation)
-            # Since velocities were already updated by the forward step:
-            rs_k = -ρ[i, j, k] * dts * div_h_u
-            ts_k = -θ_m[i, j, k] * ρ[i, j, k] * dts * div_h_u
+            # Horizontal flux contribution to ts/rs.
+            # MPAS accumulates flux from ru_p (acoustic momentum perturbation, starts at 0).
+            # In Breeze, the full velocity u is updated by the forward step, not a perturbation.
+            # The horizontal acoustic flux is small (O(Δτ * acoustic_perturbation_velocity)),
+            # so we skip it for now. The dominant ts/rs contributions come from the slow
+            # tendency and the vertical flux divergence (computed below).
+            # TODO: track ru_p separately for proper horizontal acoustic flux.
+            rs_k = zero(eltype(rho_pp))
+            ts_k = zero(eltype(rtheta_pp))
 
             # Step 4b: Add previous perturbation + slow tendency + vertical flux (MPAS lines 2891-2896)
             # MPAS: cofrz(k) = dtseps * rdzw(k) = dtseps / Δzᶜ(k)
@@ -1093,8 +1094,10 @@ end
             cofwt_k = cofwt_field[i, j, k] * dtseps
             cofwt_km1 = cofwt_field[i, j, k - 1] * dtseps
 
-            # MPAS explicit w update (verbatim lines 2907-2916, with zz=1):
-            rw_p[i, j, k] = rw_p[i, j, k] + dts * Gˢw[i, j, k] -
+            # MPAS explicit w update (lines 2907-2916, with zz=1).
+            # Gˢw is velocity tendency; multiply by ρ_face for momentum.
+            ρ_face_k = (ρ[i, j, k] + ρ[i, j, k - 1]) / 2
+            rw_p[i, j, k] = rw_p[i, j, k] + dts * ρ_face_k * Gˢw[i, j, k] -
                              cofwz_k * ((ts_k - ts_km1) +
                                         resm * (rtheta_pp_old_k - rtheta_pp_old_km1)) -
                              cofwr_k * ((rs_k + rs_km1) +
