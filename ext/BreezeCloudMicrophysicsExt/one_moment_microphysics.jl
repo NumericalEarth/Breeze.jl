@@ -27,6 +27,9 @@
 using Breeze.AtmosphereModels: AbstractMicrophysicalState
 using Breeze.AtmosphereModels: AtmosphereModels as AM
 
+using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ, ℑzᵃᵃᶜ
+using Breeze.Thermodynamics: exner_function
+
 #####
 ##### MicrophysicalState structs for one-moment schemes
 #####
@@ -219,6 +222,8 @@ const MixedPhase1M = Union{MP1M, MPNE1M}
 const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
 const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 
+@inline AM.microphysical_velocities(bμp::MixedPhase1M, μ, ::Val{:ρqˢ}) = (u=zf, v=zf, w=μ.wˢ)
+
 #####
 ##### Gridless MicrophysicalState construction
 #####
@@ -294,8 +299,8 @@ AM.correction_moisture_fields(::WPNE1M, μ) = (μ.ρqʳ, μ.ρqᶜˡ)
 ##### Field materialization
 #####
 
-const warm_phase_field_names = (:ρqʳ, :qᵛ, :qˡ, :qᶜˡ, :qʳ)
-const ice_phase_field_names = (:ρqˢ, :qⁱ, :qᶜⁱ, :qˢ)
+const warm_phase_field_names = (:ρqʳ, :qᵛ, :qˡ, :qᶜˡ, :qʳ, :hˡ)
+const ice_phase_field_names = (:ρqˢ, :qⁱ, :qᶜⁱ, :qˢ, :hⁱ)
 
 function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bcs)
     if bμp isa WP1M
@@ -315,7 +320,13 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
     wʳ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
     wʳ = ZFaceField(grid; boundary_conditions=wʳ_bcs)
 
-    return (; zip(center_names, center_fields)..., wʳ)
+    if bμp isa MixedPhase1M
+        wˢ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+        wˢ = ZFaceField(grid; boundary_conditions=wˢ_bcs)
+        return (; zip(center_names, center_fields)..., wʳ, wˢ)
+    else
+        return (; zip(center_names, center_fields)..., wʳ)
+    end
 end
 
 #####
@@ -346,6 +357,18 @@ end
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
 
+    # Sedimentation enthalpy per unit liquid mass: hˡ = cˡ T - ℒˡᵣ.
+    # Used by both ρe and ρθ sedimentation tendencies.
+    q = 𝒰.moisture_mass_fractions
+    Π = exner_function(𝒰, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    cˡ = constants.liquid.heat_capacity
+    θ = 𝒰.potential_temperature
+    T = Π * θ + (ℒˡᵣ * q.liquid + constants.ice.reference_latent_heat * q.ice) / cᵖᵐ
+    hˡ = cˡ * T - ℒˡᵣ
+    @inbounds μ.hˡ[i, j, k] = hˡ
+
     return nothing
 end
 
@@ -366,10 +389,30 @@ end
 
     # Terminal velocity with bottom boundary condition
     categories = bμp.categories
-    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
+    𝕎ʳ = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
+    𝕎ˢ = terminal_velocity(categories.snow, categories.hydrometeor_velocities.snow, ρ, ℳ.qˢ)
+    wʳ = -𝕎ʳ # negative = downward
+    wˢ = -𝕎ˢ # negative = downward
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
+    wˢ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wˢ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    @inbounds μ.wˢ[i, j, k] = ifelse(k == 1, wˢ₀, wˢ)
+
+    # Sedimentation enthalpies per unit liquid/ice mass.
+    # Used by both ρe and ρθ sedimentation tendencies.
+    q = 𝒰.moisture_mass_fractions
+    Π = exner_function(𝒰, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    cˡ = constants.liquid.heat_capacity
+    cⁱ = constants.ice.heat_capacity
+    θ = 𝒰.potential_temperature
+    T = Π * θ + (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
+    hˡ = cˡ * T - ℒˡᵣ
+    hⁱ = cⁱ * T - ℒⁱᵣ
+    @inbounds μ.hˡ[i, j, k] = hˡ
+    @inbounds μ.hⁱ[i, j, k] = hⁱ
 
     return nothing
 end
@@ -761,4 +804,100 @@ end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqʳ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+end
+
+#####
+##### Precipitation sedimentation tendency for thermodynamic variables
+#####
+#
+# Rain sediments at terminal velocity wʳ. Since θ_li and static energy e contain
+# rain-water enthalpy terms, the missing sedimentation flux divergence is added
+# here as a grid_microphysical_tendency.
+#
+# Face values of ρq are reconstructed using the configured advection scheme,
+# matching the scheme used by Oceananigans for mass transport.
+# The slowly-varying enthalpy hˡ = cˡ T - ℒˡᵣ (and hⁱ = cⁱ T - ℒⁱᵣ) is upwinded at faces.
+#
+# For ρe the flux is  F = hˡ_upwind · F_mass  and the tendency is  -V⁻¹ δz(F),
+# where F_mass = advective_flux(w, ρq) uses the configured advection scheme.
+# Terminal-fall drag converts the lost hydrometeor geopotential energy into
+# local heating, Qᵈ = -g Fᵐ where Fᵐ is the downward hydrometeor mass flux.
+#
+# For ρθ, the enthalpy flux divergence (same as ρe) is divided by LOCAL cᵖᵐ Π
+# to convert to θˡⁱ units. This ensures physical consistency: the 1/(cᵖᵐ Π)
+# conversion factor must be evaluated at the cell where the tendency is applied,
+# not at the upwind cell. The terminal-fall dissipation is Qᵈ / (cᵖᵐ Π).
+#####
+
+# Vertical flux of hydrometeor enthalpy on z-faces.
+# hˡ = cˡ T - ℒˡᵣ (and hⁱ = cⁱ T - ℒⁱᵣ) are precomputed alongside ρq.
+# The mass reconstruction uses the configured advection scheme applied to the
+# combined enthalpy field ρqh to prevent order mismatches.
+@inline function sedimentation_enthalpy_flux_z(i, j, k, grid, advection, wʳ, ρqʳ, hˡ)
+    ρqh_r = ProductOfArrays(ρqʳ, hˡ)
+    return _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqh_r)
+end
+
+@inline function sedimentation_enthalpy_flux_z(i, j, k, grid, advection, wʳ, ρqʳ, hˡ, wˢ, ρqˢ, hⁱ)
+    ρqh_r = ProductOfArrays(ρqʳ, hˡ)
+    ρqh_s = ProductOfArrays(ρqˢ, hⁱ)
+
+    return _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqh_r) +
+           _advective_tracer_flux_z(i, j, k, grid, advection, wˢ, ρqh_s)
+end
+
+# Vertical flux of hydrometeor mass on z-faces.
+# Uses the configured advection scheme for mass reconstruction.
+@inline function sedimentation_mass_flux_z(i, j, k, grid, advection, wʳ, ρqʳ)
+    return _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqʳ)
+end
+
+@inline function sedimentation_mass_flux_z(i, j, k, grid, advection, wʳ, ρqʳ, wˢ, ρqˢ)
+    return _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqʳ) +
+           _advective_tracer_flux_z(i, j, k, grid, advection, wˢ, ρqˢ)
+end
+
+@inline function one_moment_enthalpy_sedimentation(i, j, k, grid, ::WarmPhase1M, μ, advection)
+    return -V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+           δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.hˡ)
+end
+
+@inline function one_moment_enthalpy_sedimentation(i, j, k, grid, ::MixedPhase1M, μ, advection)
+    return -V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+           δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.hˡ, μ.wˢ, μ.ρqˢ, μ.hⁱ)
+end
+
+@inline function one_moment_sedimentation_mass_flux(i, j, k, grid, ::WarmPhase1M, μ, advection)
+    return ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wʳ, μ.ρqʳ)
+end
+
+@inline function one_moment_sedimentation_mass_flux(i, j, k, grid, ::MixedPhase1M, μ, advection)
+    return ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wʳ, μ.ρqʳ, μ.wˢ, μ.ρqˢ)
+end
+
+# Sedimentation tendency for ρe: flux divergence of sensible + latent enthalpy,
+# plus precipitation drag heating.
+@inline function AM.grid_microphysical_tendency(i, j, k, grid, bμp::OneMomentLiquidRain, ::Val{:ρe}, ρ, μ, 𝒰, constants, velocities, advection)
+    sedimentation = one_moment_enthalpy_sedimentation(i, j, k, grid, bμp, μ, advection)
+    Fᵐ = one_moment_sedimentation_mass_flux(i, j, k, grid, bμp, μ, advection)
+    precipitation_drag_heating = -constants.gravitational_acceleration * Fᵐ
+    return sedimentation + precipitation_drag_heating
+end
+
+# Sedimentation tendency for ρθ: enthalpy flux divergence divided by local cᵖᵐ Π,
+# plus precipitation drag heating converted to θˡⁱ units.
+# Uses the same enthalpy flux as the ρe formulation, then converts to θ units
+# with local thermodynamic properties to ensure physical consistency.
+@inline function AM.grid_microphysical_tendency(i, j, k, grid, bμp::OneMomentLiquidRain, ::Val{:ρθ}, ρ, μ, 𝒰, constants, velocities, advection)
+    q = 𝒰.moisture_mass_fractions
+    Π = exner_function(𝒰, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+
+    enthalpy_sedimentation = one_moment_enthalpy_sedimentation(i, j, k, grid, bμp, μ, advection)
+    Fᵐ = one_moment_sedimentation_mass_flux(i, j, k, grid, bμp, μ, advection)
+
+    # Convert enthalpy flux divergence to θˡⁱ units using LOCAL cᵖᵐ and Π
+    theta_sedimentation = enthalpy_sedimentation / (cᵖᵐ * Π)
+    precipitation_drag_heating = -constants.gravitational_acceleration * Fᵐ / (cᵖᵐ * Π)
+    return theta_sedimentation + precipitation_drag_heating
 end
