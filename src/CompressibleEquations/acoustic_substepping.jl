@@ -638,36 +638,27 @@ end
     Nz = size(grid, 3)
 
     @inbounds begin
-        # MPAS-style: slow velocity tendencies include the FULL horizontal
-        # PGF at the current RK stage state. The momentum tendencies Gˢρu, Gˢρv
-        # exclude PGF (zeroed by SlowTendencyMode), so we add it here using
-        # the full Exner π = π₀ + π'. Since π₀ is 1D, ∂π₀/∂x = ∂π₀/∂y = 0,
-        # so the horizontal PGF comes entirely from π'.
+        # Slow velocity tendencies: Gˢu = Gˢρu/ρ, Gˢv = Gˢρv/ρ.
+        # The horizontal PGF enters through the MPAS horizontal forward step
+        # (from rtheta_pp gradient), NOT through the slow tendency.
         ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
-        θᵥᶠᶜᶜ = ℑxTᶠᵃᵃ(i, j, k, grid, θᵥ)
-        ∂x_π = δxTᶠᵃᵃ(i, j, k, grid, π′) / Δxᶠᶜᶜ(i, j, k, grid)
-        Gˢu[i, j, k] = (Gˢρu[i, j, k] / ρᶠᶜᶜ - cᵖᵈ * θᵥᶠᶜᶜ * ∂x_π) * !on_x_boundary(i, j, k, grid)
+        Gˢu[i, j, k] = Gˢρu[i, j, k] / ρᶠᶜᶜ * !on_x_boundary(i, j, k, grid)
 
         ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
-        θᵥᶜᶠᶜ = ℑyTᵃᶠᵃ(i, j, k, grid, θᵥ)
-        ∂y_π = δyTᵃᶠᵃ(i, j, k, grid, π′) / Δyᶜᶠᶜ(i, j, k, grid)
-        Gˢv[i, j, k] = (Gˢρv[i, j, k] / ρᶜᶠᶜ - cᵖᵈ * θᵥᶜᶠᶜ * ∂y_π) * !on_y_boundary(i, j, k, grid)
+        Gˢv[i, j, k] = Gˢρv[i, j, k] / ρᶜᶠᶜ * !on_y_boundary(i, j, k, grid)
 
         ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 
-        # MPAS-style: slow w tendency includes the FULL Exner PGF + gravity,
-        # evaluated at the current RK stage state. The acoustic loop only
-        # provides the small acoustic perturbation PGF from π' changes
-        # that develop DURING the substep loop (π' starts at zero).
-        #
-        # Full vertical acceleration = -cₚ θᵥ ∂(π₀+π')/∂z - g
+        # MPAS-style: slow w tendency = Gˢρw/ρ + buoyancy from base-state mismatch.
+        # The buoyancy is b = -cₚ θᵥ ∂π₀/∂z - g (reference PGF + gravity).
+        # The acoustic perturbation PGF from ρθ' enters through cofwz in the
+        # MPAS kernel — NOT through the slow tendency.
         θᵥᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, θᵥ)
         δz_πᵣ = δzTᵃᵃᶠ(i, j, k, grid, πᵣ)
-        δz_π′ = δzTᵃᵃᶠ(i, j, k, grid, π′)
         Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
-        full_pgf_grav = -cᵖᵈ * θᵥᶠ * (δz_πᵣ + δz_π′) / Δzᶠ - g
+        b = -cᵖᵈ * θᵥᶠ * δz_πᵣ / Δzᶠ - g
 
-        Gˢw[i, j, k] = (Gˢρw[i, j, k] / ρᶜᶜᶠ + full_pgf_grav) * (k > 1)
+        Gˢw[i, j, k] = (Gˢρw[i, j, k] / ρᶜᶜᶠ + b) * (k > 1)
 
         # Slow Exner pressure tendency: Gˢπ = -u · ∇π
         #
@@ -719,6 +710,34 @@ end
 end
 
 #####
+##### MPAS-style horizontal forward step using ρθ perturbation PGF.
+##### MPAS: u += dts * (Gˢu - c2 * Π_face * ∂(rtheta_pp)/∂x * cqw / zz_face)
+##### For dry air, no terrain: cqw=1, zz=1.
+
+@kernel function _mpas_horizontal_forward!(u, v, grid, Δτ,
+                                            rtheta_pp, πᵣ,
+                                            Gˢu, Gˢv,
+                                            cₚ, Rᵈ)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        rcv = Rᵈ / (cₚ - Rᵈ)
+        c2 = cₚ * rcv  # cp * R/cv
+
+        # u-face: PGF from ρθ perturbation gradient
+        Π_u_face = (πᵣ[i, j, k] + πᵣ[i - 1, j, k]) / 2
+        ∂x_ρθ = (rtheta_pp[i, j, k] - rtheta_pp[i - 1, j, k]) / Δxᶠᶜᶜ(i, j, k, grid)
+        pgf_u = -c2 * Π_u_face * ∂x_ρθ
+        u[i, j, k] += Δτ * (Gˢu[i, j, k] + pgf_u) * !on_x_boundary(i, j, k, grid)
+
+        # v-face: PGF from ρθ perturbation gradient
+        Π_v_face = (πᵣ[i, j, k] + πᵣ[i, j - 1, k]) / 2
+        ∂y_ρθ = (rtheta_pp[i, j, k] - rtheta_pp[i, j - 1, k]) / Δyᶜᶠᶜ(i, j, k, grid)
+        pgf_v = -c2 * Π_v_face * ∂y_ρθ
+        v[i, j, k] += Δτ * (Gˢv[i, j, k] + pgf_v) * !on_y_boundary(i, j, k, grid)
+    end
+end
+
 ##### MPAS-style ts/rtheta_pp tracking for gravity-wave coupling
 #####
 ##### ts accumulates the total ρθ perturbation at each substep:
@@ -1569,14 +1588,17 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
 
     for substep in 1:Nτ
         # Step 1: Horizontal forward — update u, v from PGF and slow tendency.
-        # MPAS does this on the unstructured mesh; we use the existing kernel.
-        # The PGF uses filtered_exner_perturbation (π̃').
-        launch!(arch, grid, :xyz, _acoustic_horizontal_forward!,
-                u, v, grid, Δτ, cᵖ,
-                substepper.filtered_exner_perturbation,
-                substepper.virtual_potential_temperature,
+        # MPAS uses the ρθ perturbation gradient for the horizontal PGF:
+        #   pgf_x = -c2 * Π_face * ∂(rtheta_pp)/∂x
+        # NOT the Exner perturbation gradient. This provides horizontal
+        # acoustic coupling through the accumulated ρθ perturbation.
+        launch!(arch, grid, :xyz, _mpas_horizontal_forward!,
+                u, v, grid, Δτ,
+                substepper.rtheta_pp,
+                substepper.reference_exner_function,
                 substepper.slow_tendencies.velocity.u,
-                substepper.slow_tendencies.velocity.v)
+                substepper.slow_tendencies.velocity.v,
+                cᵖ, Rᵈ)
 
         # Steps 2-8: MPAS column kernel — ts/rs accumulation, explicit w update,
         # tridiagonal solve, rho_pp/rtheta_pp update.
