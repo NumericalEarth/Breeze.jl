@@ -1576,17 +1576,10 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 ū, 1 / Nτ,
                 substep == 1)
 
-        # Update π' from rtheta_pp for the horizontal PGF in the next substep.
-        # Nonlinear EOS: π = (Rd*(ρθ₀+rtheta_pp)/p_st)^(R/cv), π' = π - π_ref
-        # Use the formulation's ρθ as ρθ₀ (it holds U⁰ during the acoustic loop).
-        pˢᵗ = model.dynamics.standard_pressure
-        κ_local = Rᵈ / cᵖ
-        ρθ₀ = model.formulation.potential_temperature_density
-        launch!(arch, grid, :xyz, _update_pi_from_rtheta_pp!,
-                substepper.exner_perturbation, substepper.filtered_exner_perturbation,
-                substepper.rtheta_pp, ρθ₀,
-                substepper.reference_exner_function, pˢᵗ, Rᵈ, κ_local,
-                substepper.divergence_damping_coefficient)
+        # MPAS does NOT update the Exner between substeps. The horizontal
+        # PGF uses the stage-frozen π' (reset to 0 at stage start).
+        # In MPAS, horizontal fluxes are tracked through ru_p (momentum
+        # perturbation), not through an updated Exner field.
     end
 
     # Use the formulation's ρθ as ρθ₀ (still holds U⁰ during acoustic loop).
