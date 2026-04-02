@@ -649,14 +649,31 @@ end
 
         ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 
-        # MPAS-style: slow w tendency = Gˢρw/ρ + buoyancy from base-state mismatch.
-        # The buoyancy is b = -cₚ θᵥ ∂π₀/∂z - g (reference PGF + gravity).
-        # The acoustic perturbation PGF from ρθ' enters through cofwz in the
-        # MPAS kernel — NOT through the slow tendency.
+        # MPAS buoyancy: g * (θ_m - θ_base) / θ_base at each w-face.
+        # θ_base = θ₀ / Π₀ from the ExnerReferenceState.
+        # Uses the PERTURBATION from the local base state, not the global θ₀.
         θᵥᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, θᵥ)
+        # θ_base at face: θ₀ / Π₀_face. Since ∂π₀/∂z = -g/(cₚ θ₀):
+        # θ_base_face = θ₀ / Π₀_face. We can compute this from the reference Exner.
+        # Or equivalently: b = g * (θᵥ/θ_base - 1) = g * (θᵥ Π₀_face / θ₀ - 1)
+        # But we don't have θ₀ directly. Use the discrete approach instead:
+        # MPAS: b = -cₚ θᵥ ∂π₀/∂z - g ≈ g(θᵥ/θ₀ - 1) for constant θ₀.
+        # For the CORRECT base-state buoyancy matching MPAS:
+        #   b = g * (θ_m_face - θ_base_face) / θ_base_face
+        # where θ_base_face from the reference state:
+        #   θ_base(k) = ρθ_base(k) / ρ_base(k) = rtb(k) / rb(k)
+        # We don't have rtb directly. But from the reference:
+        #   cₚ θ₀ ∂Π₀/∂z = -g → θ_base = θ₀/Π₀ (for constant θ₀ reference)
+        # The buoyancy from MPAS: b ≈ g Δθ / θ_base = g * 15 / (θ₀/Π₀)
+        # = g * 15 * Π₀ / θ₀
+        # But computing θ_base from the Exner reference:
         δz_πᵣ = δzTᵃᵃᶠ(i, j, k, grid, πᵣ)
         Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
-        b = -cᵖᵈ * θᵥᶠ * δz_πᵣ / Δzᶠ - g
+        # θ_base at face ≈ -g / (cₚ ∂Π₀/∂z) = g Δz / (cₚ (Π₀_above - Π₀_below))
+        # Careful: ∂Π₀/∂z < 0, so θ_base = -g / (cₚ ∂Π₀/∂z) > 0
+        dπ_dz = δz_πᵣ / Δzᶠ
+        θ_base_face = ifelse(dπ_dz == 0, θᵥᶠ, -g / (cᵖᵈ * dπ_dz))
+        b = g * (θᵥᶠ - θ_base_face) / θ_base_face
 
         Gˢw[i, j, k] = (Gˢρw[i, j, k] / ρᶜᶜᶠ + b) * (k > 1)
 
