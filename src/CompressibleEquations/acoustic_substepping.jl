@@ -797,7 +797,9 @@ end
             upper[i, j, k] = -(Qz_above + Qw_above)
             diag[i, j, k] = 1 + Qz_above + Qz_below + Qw_above + Qw_below
 
-            # RHS: explicit w + cofwt from ts (explicit part)
+            # RHS: explicit w with acoustic PGF + cofwt buoyancy from ts.
+            # The slow tendency Gˢw already includes the full PGF+gravity.
+            # The acoustic π' provides the implicit-time correction only.
             δz_π = π′[i, j, kf] - π′[i, j, kf - 1]
             ts_face = (ts[i, j, kf] + ts[i, j, kf - 1]) / 2
             ρ_face = (ρ[i, j, kf] + ρ[i, j, kf - 1]) / 2
@@ -1036,34 +1038,8 @@ end
     end
 end
 
-@kernel function _update_w_from_pressure!(w, grid, ω, Δτ, cᵖᵈ, g, κ,
-                                          π′⁺, π′⁻, θᵥ, ts, ρ,
-                                          Gˢw)
-    i, j, k = @index(Global, NTuple)
-
-    @inbounds begin
-        Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
-        θᵥᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, θᵥ)
-        Mᵖ = cᵖᵈ * θᵥᶠ / Δzᶠ
-
-        # Off-centered vertical PGF: (1-ω) δz(π'⁻) + ω δz(π'⁺)
-        ω̄ = 1 - ω
-        δz_π⁻ = δzTᵃᵃᶠ(i, j, k, grid, π′⁻)
-        δz_π⁺ = δzTᵃᵃᶠ(i, j, k, grid, π′⁺)
-
-        # cofwt: buoyancy from accumulated ρθ perturbation (ts)
-        rcv = κ / (1 - κ)
-        tsᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, ts)
-        ρᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, ρ)
-        ρᶠ_safe = ifelse(ρᶠ == 0, one(ρᶠ), ρᶠ)
-        θᵥᶠ_safe = ifelse(θᵥᶠ == 0, one(θᵥᶠ), θᵥᶠ)
-        cofwt = rcv / 2 * g * tsᶠ / (ρᶠ_safe * θᵥᶠ_safe)
-
-        # w⁺ = w + Δτ Gˢw - Δτ Mᵖ ((1-ω) δz(π'⁻) + ω δz(π'⁺)) + Δτ cofwt
-        w⁺ = w[i, j, k] + Δτ * Gˢw[i, j, k] - Δτ * Mᵖ * (ω̄ * δz_π⁻ + ω * δz_π⁺) + Δτ * cofwt
-        w[i, j, k] = w⁺ * (k > 1)
-    end
-end
+## Back-solve is no longer needed — _recover_w_and_update_pi! handles both
+## w recovery and π' update after the tridiagonal solve.
 
 #####
 ##### Section 8: Update π' with new w, apply damping, accumulate averages
