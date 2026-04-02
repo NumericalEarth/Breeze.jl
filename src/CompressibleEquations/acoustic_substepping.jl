@@ -997,6 +997,7 @@ end
 @kernel function _mpas_acoustic_substep!(rw_p, rho_pp, rtheta_pp,
                                           ts_scratch, rs_scratch, gamma_scratch,
                                           u, v, w,
+                                          ρu⁰, ρv⁰, ρ⁰,
                                           cofwz, cofwr, cofwt_field, coftz,
                                           grid, dts, dtseps, resm, epssm,
                                           Gˢw, Gˢρ, Gˢρθ,
@@ -1038,13 +1039,7 @@ end
         ## multiplied by appropriate densities.
 
         for k in 1:Nz
-            # Horizontal flux contribution to ts/rs.
-            # MPAS accumulates flux from ru_p (acoustic momentum perturbation, starts at 0).
-            # In Breeze, the full velocity u is updated by the forward step, not a perturbation.
-            # The horizontal acoustic flux is small (O(Δτ * acoustic_perturbation_velocity)),
-            # so we skip it for now. The dominant ts/rs contributions come from the slow
-            # tendency and the vertical flux divergence (computed below).
-            # TODO: track ru_p separately for proper horizontal acoustic flux.
+            # Horizontal flux (set to zero for now — MPAS uses ru_p accumulation).
             rs_k = zero(eltype(rho_pp))
             ts_k = zero(eltype(rtheta_pp))
 
@@ -1573,6 +1568,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 substepper.rw_p, substepper.rho_pp, substepper.rtheta_pp,
                 ts_scratch, rs_scratch, substepper.gamma_tri,
                 u, v, w,
+                U⁰[2], U⁰[3], U⁰[1],  # ρu⁰, ρv⁰, ρ⁰
                 substepper.cofwz, substepper.cofwr, substepper.cofwt, substepper.coftz,
                 grid, FT(Δτ), dtseps, resm, epssm,
                 substepper.slow_tendencies.velocity.w, Gⁿ.ρ, Gˢρθ,
