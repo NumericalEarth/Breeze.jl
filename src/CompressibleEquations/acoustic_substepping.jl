@@ -146,6 +146,7 @@ Fields
 - `slow_tendencies`: Frozen slow tendencies (velocity, exner_pressure). Momentum tendencies
   are stored in the outer timestepper's `Gⁿ` fields; density and thermodynamic density
   tendencies are also read directly from `Gⁿ`.
+- `rtheta_pp`: Acoustic ρθ perturbation at cell centers (MPAS-style tracking)
 - `vertical_solver`: BatchedTridiagonalSolver for implicit w-π' coupling
 - `rhs`: Right-hand side storage for tridiagonal solve
 """
@@ -161,6 +162,7 @@ struct AcousticSubstepper{N, FT, CF, AV, ST, TS}
     previous_exner_perturbation :: CF          # Previous-substep π' (for damping)
     filtered_exner_perturbation :: CF            # Filtered π̃' used in PGF
     stage_thermodynamic_density :: CF          # Stage-frozen ρθ
+    rtheta_pp :: CF                            # Acoustic ρθ perturbation (MPAS ts/rtheta_pp)
     averaged_velocities :: AV                  # Time-averaged velocities for scalar advection
     slow_tendencies :: ST                      # Frozen slow tendencies (NamedTuple)
     vertical_solver :: TS                      # BatchedTridiagonalSolver for implicit w-π' coupling
@@ -184,6 +186,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.previous_exner_perturbation),
                        adapt(to, a.filtered_exner_perturbation),
                        adapt(to, a.stage_thermodynamic_density),
+                       adapt(to, a.rtheta_pp),
                        map(f -> adapt(to, f), a.averaged_velocities),
                        _adapt_slow_tendencies(to, a.slow_tendencies),
                        adapt(to, a.vertical_solver),
@@ -208,6 +211,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     previous_exner_perturbation = CenterField(grid)
     filtered_exner_perturbation = CenterField(grid)
     stage_thermodynamic_density = CenterField(grid)
+    rtheta_pp = CenterField(grid)
 
     averaged_velocities = (u = XFaceField(grid),
                            v = YFaceField(grid),
@@ -243,6 +247,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               previous_exner_perturbation,
                               filtered_exner_perturbation,
                               stage_thermodynamic_density,
+                              rtheta_pp,
                               averaged_velocities,
                               slow_tendencies,
                               vertical_solver,
@@ -564,6 +569,50 @@ end
 end
 
 #####
+##### MPAS-style ts/rtheta_pp tracking for gravity-wave coupling
+#####
+##### ts accumulates the total ρθ perturbation at each substep:
+#####   ts = rtheta_pp_old + Δτ Gˢρθ - θ_m Δτ div_h(u)
+#####
+##### After the w solve, rtheta_pp is updated:
+#####   rtheta_pp_new = ts - θ_m Δτ (w_new(k+1) - w_new(k)) / Δz
+#####
+##### The cofwt term uses ts to provide the gravity-wave restoring force.
+#####
+
+@kernel function _compute_ts!(ts, grid, Δτ, u, v, rtheta_pp, Gˢρθ, θ_m)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        V = Vᶜᶜᶜ(i, j, k, grid)
+
+        # Horizontal ρθ flux divergence: -θ_m div_h(u)
+        θ_mᵢ = θ_m[i, j, k]
+        div_h = (Axᶠᶜᶜ(i + 1, j, k, grid) * u[i + 1, j, k] - Axᶠᶜᶜ(i, j, k, grid) * u[i, j, k] +
+                 Ayᶜᶠᶜ(i, j + 1, k, grid) * v[i, j + 1, k] - Ayᶜᶠᶜ(i, j, k, grid) * v[i, j, k]) / V
+
+        # ts = previous rtheta_pp + slow tendency + horizontal flux
+        ts[i, j, k] = rtheta_pp[i, j, k] + Δτ * Gˢρθ[i, j, k] - θ_mᵢ * Δτ * div_h
+    end
+end
+
+@kernel function _update_rtheta_pp!(rtheta_pp, ts, grid, Δτ, w, θ_m)
+    i, j, k = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    @inbounds begin
+        # Vertical θ-flux divergence: θ_m (w(k+1) - w(k)) / Δz
+        w_top = ifelse(k < Nz, w[i, j, k + 1], zero(eltype(w)))
+        w_bot = ifelse(k > 1,  w[i, j, k],     zero(eltype(w)))
+        Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
+        θ_mᵢ = θ_m[i, j, k]
+
+        # rtheta_pp = ts - θ_m Δτ ∂w/∂z
+        rtheta_pp[i, j, k] = ts[i, j, k] - θ_mᵢ * Δτ * (w_top - w_bot) / Δzᶜ
+    end
+end
+
+#####
 ##### Section 5: Acoustic forward step — horizontal velocity only
 #####
 ##### Updates u, v from the PGF (∂π'/∂x, ∂π'/∂y) and slow tendency (Gˢu, Gˢv).
@@ -647,35 +696,284 @@ function implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
     arch = architecture(grid)
     ω = substepper.forward_weight
     cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
+    Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
+    κ = Rᵈ / cᵖᵈ
     g = model.thermodynamic_constants.gravitational_acceleration
     solver = substepper.vertical_solver
 
-    # Build tridiagonal system for π' and solve
-    launch!(arch, grid, :xyz, _build_π′_tridiagonal!,
+    # Build w-primary tridiagonal (cofwz + cofwt in matrix).
+    # Face k=2..Nz mapped to center index k-1=1..Nz-1.
+    # Index Nz stores the π' forcing for the pressure update.
+    launch!(arch, grid, :xyz, _build_w_tridiagonal!,
             solver.a, solver.b, solver.c, substepper.rhs,
-            grid, ω, Δτ, cᵖᵈ, g,
-            w, substepper.exner_perturbation, π′_forcing,
-            substepper.virtual_potential_temperature, substepper.acoustic_compression,
-            substepper.reference_exner_function,
+            grid, ω, Δτ, cᵖᵈ, g, κ,
+            w, substepper.exner_perturbation,
+            substepper.virtual_potential_temperature,
+            substepper.acoustic_compression,
+            substepper.stage_thermodynamic_density,
+            model.dynamics.density,
             substepper.slow_tendencies.velocity.w)
 
-    # Solve: A π'⁺ = rhs → result overwrites π'
+    # Solve the w tridiagonal. Result goes into exner_perturbation (scratch).
     solve!(substepper.exner_perturbation, solver, substepper.rhs)
 
-    # Back-solve: w⁺ from the off-centered pressure gradient + cofwt buoyancy
-    launch!(arch, grid, :xyz, _update_w_from_pressure!,
-            w, grid, ω, Δτ, cᵖᵈ, g,
-            substepper.exner_perturbation, substepper.previous_exner_perturbation,
-            substepper.virtual_potential_temperature, substepper.reference_exner_function,
-            substepper.slow_tendencies.velocity.w)
+    # Copy solved w back to face field and update π'
+    # w_solved is in exner_perturbation (scratch), π'_old in previous_exner_perturbation
+    launch!(arch, grid, :xyz, _recover_w_and_update_pi!,
+            w, substepper.rhs,  # rhs is now free, use it for new π'
+            substepper.exner_perturbation, substepper.previous_exner_perturbation, π′_forcing,
+            grid, ω, Δτ, substepper.acoustic_compression)
+
+    # Copy new π' from rhs back to exner_perturbation
+    parent(substepper.exner_perturbation) .= parent(substepper.rhs)
 
     return nothing
 end
 
+##### MPAS-style w-primary tridiagonal with cofwt in the matrix.
+#####
+##### The w equation at face k:
+#####   w⁺(k) = wᵉ(k) - ω Δτ Mᵖ δz(π'⁺) + ω Δτ cofwt_coef * ts_new
+#####
+##### where π'⁺ depends on ∂w⁺/∂z (pressure equation) and ts_new depends
+##### on ∂(θw⁺)/∂z (ρθ flux). Substituting creates a tridiagonal for w.
+#####
+##### Face k=2..Nz → center index k-1=1..Nz-1 for the BatchedTridiagonalSolver.
+##### Index Nz is unused (padded with identity row).
+
+@kernel function _build_w_tridiagonal!(lower, diag, upper, rhs_field,
+                                        grid, ω, Δτ, cᵖᵈ, g, κ,
+                                        w, π′,
+                                        θᵥ, S, ts, ρ,
+                                        Gˢw)
+    i, j, k = @index(Global, NTuple)
+    Nz = size(grid, 3)
+    kf = k + 1  # face index (k=1 in solver → face k=2)
+
+    @inbounds begin
+        rcv = κ / (1 - κ)
+        ω̄ = 1 - ω
+
+        if k >= Nz
+            # Padding row: identity (unused face Nz+1 or beyond)
+            lower[i, j, k] = 0
+            diag[i, j, k] = 1
+            upper[i, j, k] = 0
+            rhs_field[i, j, k] = 0
+        else
+            # Face kf = k+1 (interior face, k goes 1..Nz-1)
+            Δzᶠ = Δzᶜᶜᶠ(i, j, kf, grid)
+            θᵥᶠ = (θᵥ[i, j, kf] + θᵥ[i, j, kf - 1]) / 2
+            Mᵖ = cᵖᵈ * θᵥᶠ / Δzᶠ
+
+            # Acoustic coupling: cofwz through Schur complement
+            # w depends on π' gradient, π' depends on ∂w/∂z
+            Δzᶜ_above = Δzᶜᶜᶜ(i, j, kf, grid)
+            Δzᶜ_below = Δzᶜᶜᶜ(i, j, kf - 1, grid)
+            S_above = S[i, j, kf]
+            S_below = S[i, j, kf - 1]
+
+            Qz_above = ω * ω * Δτ * Δτ * S_above * Mᵖ / Δzᶜ_above
+            Qz_below = ω * ω * Δτ * Δτ * S_below * Mᵖ / Δzᶜ_below
+            Qz_above = ifelse(kf == Nz, zero(Qz_above), Qz_above)
+
+            # cofwt coupling: w depends on ts_new, ts_new depends on ∂(θw)/∂z
+            θ_above = θᵥ[i, j, kf]
+            θ_below = θᵥ[i, j, kf - 1]
+            ρ_above_safe = ifelse(ρ[i, j, kf] == 0, one(eltype(ρ)), ρ[i, j, kf])
+            ρ_below_safe = ifelse(ρ[i, j, kf - 1] == 0, one(eltype(ρ)), ρ[i, j, kf - 1])
+            θ_above_safe = ifelse(θ_above == 0, one(θ_above), θ_above)
+            θ_below_safe = ifelse(θ_below == 0, one(θ_below), θ_below)
+
+            cofwt_above = rcv / 2 * g / (ρ_above_safe * θ_above_safe)
+            cofwt_below = rcv / 2 * g / (ρ_below_safe * θ_below_safe)
+
+            Qw_above = ω * Δτ * cofwt_above * θ_above * ω * Δτ / Δzᶜ_above
+            Qw_below = ω * Δτ * cofwt_below * θ_below * ω * Δτ / Δzᶜ_below
+            Qw_above = ifelse(kf == Nz, zero(Qw_above), Qw_above)
+
+            # Tridiagonal coefficients (face k → solver index k-1)
+            lower[i, j, k] = ifelse(kf == 2, zero(Qz_below), -(Qz_below + Qw_below))
+            upper[i, j, k] = -(Qz_above + Qw_above)
+            diag[i, j, k] = 1 + Qz_above + Qz_below + Qw_above + Qw_below
+
+            # RHS: explicit w + cofwt from ts (explicit part)
+            δz_π = π′[i, j, kf] - π′[i, j, kf - 1]
+            ts_face = (ts[i, j, kf] + ts[i, j, kf - 1]) / 2
+            ρ_face = (ρ[i, j, kf] + ρ[i, j, kf - 1]) / 2
+            ρ_face_safe = ifelse(ρ_face == 0, one(ρ_face), ρ_face)
+            θᵥᶠ_safe = ifelse(θᵥᶠ == 0, one(θᵥᶠ), θᵥᶠ)
+
+            wᵉ = w[i, j, kf] + Δτ * Gˢw[i, j, kf] - ω̄ * Δτ * Mᵖ * δz_π +
+                  rcv / 2 * g * ts_face / (ρ_face_safe * θᵥᶠ_safe)
+
+            rhs_field[i, j, k] = wᵉ
+        end
+    end
+end
+
+@kernel function _recover_w_and_update_pi!(w, π′, w_solved, π′_old, π′_forcing,
+                                            grid, ω, Δτ, S)
+    i, j, k = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    @inbounds begin
+        # Copy solved w from center-indexed array to face field
+        # Solver index k=1..Nz-1 → face k+1=2..Nz
+        kf = k + 1
+        if k < Nz
+            w[i, j, kf] = w_solved[i, j, k]
+        end
+        # Boundaries
+        if k == 1
+            w[i, j, 1] = 0
+        end
+
+        # Update π' from pressure equation:
+        # π'⁺(k) = π'_old(k) + π'_forcing(k) - ω Δτ S(k) (w⁺(k+1) - w⁺(k)) / Δz(k)
+        Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
+        w_top = ifelse(k < Nz, w_solved[i, j, k], zero(eltype(w)))  # w at face k+1
+        w_bot = ifelse(k > 1,  w_solved[i, j, k - 1], zero(eltype(w)))  # w at face k
+        π′[i, j, k] = π′_old[i, j, k] + π′_forcing[i, j, k] - ω * Δτ * S[i, j, k] * (w_top - w_bot) / Δzᶜ
+    end
+end
+
+##### Legacy column solve (kept for reference)
+##### MPAS-style column solve: tridiagonal for w at faces, then update π'.
+##### The tridiagonal includes cofwz (acoustic PGF), cofwr (gravity on ρ'),
+##### and cofwt (buoyancy from θ'), all from the implicit coupling between
+##### w, ρθ_pp, and ρ_pp through vertical flux divergence.
+#####
+##### After solving for w, π' is updated from the pressure equation:
+#####   π'⁺ = π' + π'_forcing - ω Δτ S ∂w⁺/∂z
+
+@kernel function _mpas_implicit_w_column_solve!(w, π′,
+                                                 grid, ω, Δτ, cᵖᵈ, g, κ,
+                                                 π′⁻, π′_forcing,
+                                                 θᵥ, S, ts, ρ, Gˢw)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    # R/cv for cofwt
+    rcv = κ / (1 - κ)
+
+    ## ── Step 1: Build explicit w at each face ──
+    ## wᵉ(k) = w_old(k) + Δτ Gˢw(k) - (1-ω) Δτ Mᵖ δz(π') + cofwt(ts)
+    ## Also compute tridiagonal coefficients for the implicit part.
+
+    @inbounds begin
+        ω̄ = 1 - ω
+
+        ## Forward elimination arrays (stored on stack for the column)
+        ## For faces k=2..Nz, the tridiagonal is:
+        ##   a(k) w(k-1) + b(k) w(k) + c(k) w(k+1) = rhs(k)
+        ## with w(1) = 0 and w(Nz+1) = 0.
+        ##
+        ## The implicit coupling comes from:
+        ## - cofwz: w depends on π' gradient → π' depends on ∂w/∂z
+        ## - cofwt: w depends on ts → ts depends on ∂(θ w)/∂z
+
+        for k in 2:Nz
+            Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
+            θᵥᶠ = (θᵥ[i, j, k] + θᵥ[i, j, k - 1]) / 2
+            Mᵖ = cᵖᵈ * θᵥᶠ / Δzᶠ
+
+            # Explicit w: PGF from old π' + slow tendency + explicit cofwt
+            δz_π = π′[i, j, k] - π′[i, j, k - 1]
+            ts_face = (ts[i, j, k] + ts[i, j, k - 1]) / 2
+            ρ_face = (ρ[i, j, k] + ρ[i, j, k - 1]) / 2
+            θᵥᶠ_safe = ifelse(θᵥᶠ == 0, one(θᵥᶠ), θᵥᶠ)
+            ρ_safe = ifelse(ρ_face == 0, one(ρ_face), ρ_face)
+
+            wᵉ = w[i, j, k] + Δτ * Gˢw[i, j, k] - ω̄ * Δτ * Mᵖ * δz_π +
+                  rcv / 2 * g * ts_face / (ρ_safe * θᵥᶠ_safe)
+
+            # Implicit coupling: cofwz gives w ∝ -ω Δτ Mᵖ δz(π'_new)
+            # and π'_new = π' + forcing - ω Δτ S ∂w_new/∂z
+            # Substituting: the tridiagonal for w has coefficients from
+            # ω² Δτ² Mᵖ S / Δz at each face-center-face stencil.
+            #
+            # cofwt adds: w ∝ cofwt_coef * ts_new, where
+            # ts_new(k) = ts(k) - θ_m(k) ω Δτ (w_new(k+1) - w_new(k)) / Δz(k)
+            # This creates additional coupling to w(k-1), w(k), w(k+1)
+            # through the θ_m weighted vertical divergence.
+
+            Δzᶜ_above = Δzᶜᶜᶜ(i, j, k, grid)
+            Δzᶜ_below = Δzᶜᶜᶜ(i, j, k - 1, grid)
+            S_above = S[i, j, k]
+            S_below = S[i, j, k - 1]
+            θ_above = θᵥ[i, j, k]
+            θ_below = θᵥ[i, j, k - 1]
+
+            # cofwz coupling: ω² Δτ² Mᵖ S / Δz (standard acoustic)
+            # At face k, π' at centers k and k-1 couple through Mᵖ.
+            # The Schur complement gives diagonal and off-diagonal terms.
+            Qz_above = ω * ω * Δτ * Δτ * S_above * Mᵖ / Δzᶜ_above
+            Qz_below = ω * ω * Δτ * Δτ * S_below * Mᵖ / Δzᶜ_below
+
+            # cofwt coupling through ts → vertical θ-divergence of w.
+            # At center k: ts_new(k) = ts(k) - θ(k) ω Δτ (w(k+1) - w(k)) / Δz(k)
+            # cofwt at face k from center k: cofwt_coef(k) * ts_new(k)
+            #   = cofwt_coef(k) * [ts(k) - θ(k) ω Δτ (w(k+1) - w(k)) / Δz(k)]
+            # The w-dependent part: -cofwt_coef(k) θ(k) ω Δτ / Δz(k) * (w(k+1) - w(k))
+            cofwt_k   = rcv / 2 * g / (ρ[i, j, k] * θ_above)
+            cofwt_km1 = rcv / 2 * g / (ρ[i, j, k - 1] * θ_below)
+
+            Qw_above = ω * Δτ * cofwt_k * θ_above * ω * Δτ / Δzᶜ_above
+            Qw_below = ω * Δτ * cofwt_km1 * θ_below * ω * Δτ / Δzᶜ_below
+
+            # Tridiagonal coefficients at face k:
+            # a(k) = coupling to w(k-1)
+            # b(k) = diagonal
+            # c(k) = coupling to w(k+1)
+            a_k = ifelse(k == 2, zero(Qz_below),
+                         -Qz_below - Qw_below)
+            c_k = ifelse(k == Nz, zero(Qz_above),
+                         -Qz_above - Qw_above)
+            b_k = 1 + Qz_above + Qz_below + Qw_above + Qw_below
+
+            # Thomas algorithm: forward elimination
+            if k == 2
+                # First row: no a_k
+                alpha = 1 / b_k
+                w[i, j, k] = wᵉ * alpha
+                # Store gamma for back-substitution
+                π′[i, j, k - 1] = c_k * alpha  # reuse π'[k-1] as gamma storage
+            else
+                gamma_prev = π′[i, j, k - 2]  # gamma from previous row
+                denom = b_k - a_k * gamma_prev
+                alpha = 1 / denom
+                w[i, j, k] = (wᵉ - a_k * w[i, j, k - 1]) * alpha
+                π′[i, j, k - 1] = c_k * alpha
+            end
+        end
+
+        ## ── Step 2: Back-substitution ──
+        for k in (Nz - 1):-1:2
+            gamma_k = π′[i, j, k - 1]
+            w[i, j, k] = w[i, j, k] - gamma_k * w[i, j, k + 1]
+        end
+
+        # Boundary conditions
+        w[i, j, 1] = 0
+        # w[i, j, Nz+1] is already 0 (face field)
+
+        ## ── Step 3: Update π' from pressure equation ──
+        ## π'⁺(k) = π'_old(k) + π'_forcing(k) - ω Δτ S(k) (w⁺(k+1) - w⁺(k)) / Δz(k)
+        for k in 1:Nz
+            Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
+            w_top = ifelse(k < Nz, w[i, j, k + 1], zero(eltype(w)))
+            w_bot = ifelse(k > 1,  w[i, j, k],     zero(eltype(w)))
+            π′[i, j, k] = π′⁻[i, j, k] + π′_forcing[i, j, k] - ω * Δτ * S[i, j, k] * (w_top - w_bot) / Δzᶜ
+        end
+    end
+end
+
+##### Legacy π'-primary tridiagonal (kept for reference/fallback)
 @kernel function _build_π′_tridiagonal!(lower, diag, upper, rhs_field,
-                                        grid, ω, Δτ, cᵖᵈ, g,
+                                        grid, ω, Δτ, cᵖᵈ, g, κ,
                                         w, π′, π′_forcing,
-                                        θᵥ, S, πᵣ,
+                                        θᵥ, S, ts, ρ,
                                         Gˢw)
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
@@ -703,26 +1001,23 @@ end
         upper[i, j, k] = -Q_top
         diag[i, j, k] = 1 + Q_bot + Q_top
 
-        # cofwt: buoyancy feedback from θ' perturbation (MPAS gravity-wave coupling).
+        # cofwt: MPAS-style buoyancy feedback from accumulated ρθ perturbation (ts).
         #
-        # From linearizing -cₚ ρθ ∂Π/∂z - ρg, the cross-term -cₚ ρθ' ∂Π₀/∂z
-        # gives buoyancy proportional to ρθ'. In Exner variables:
-        #   ρθ' ≈ (cv/R) ρθ₀ π'/π₀
-        # so the buoyancy contribution to w at face k is:
-        #   Δw ≈ ω Δτ g (π'/π₀)_face
-        #
-        # This restores the gravity-wave physics that the off-centering damps.
-        # Without it, vertical gravity waves are over-damped and the solution
-        # drifts to instability on timescales of ~10 hours.
-        π₀_bot = ifelse(k == 1, zero(eltype(πᵣ)), πᵣ[i, j, k - 1])
-        π₀_k   = πᵣ[i, j, k]
-        π′_bot_face = ifelse(k == 1, zero(eltype(π′)), (π′[i, j, k] + π′[i, j, k - 1]) / 2)
-        π₀_bot_face = ifelse(k == 1, one(eltype(πᵣ)),  (π₀_k + π₀_bot) / 2)
-        π′_top_face = ifelse(k == Nz, zero(eltype(π′)), (π′[i, j, k + 1] + π′[i, j, k]) / 2)
-        π₀_top_face = ifelse(k == Nz, one(eltype(πᵣ)),  (πᵣ[i, j, k + 1] + π₀_k) / 2)
+        # ts carries the total ρθ perturbation from horizontal fluxes, slow
+        # tendency, and previous acoustic corrections. The buoyancy at face k
+        # is g ts_face / ρ_face (the θ perturbation times g).
+        # MPAS coefficient: cofwt ≈ 0.5 ω Δτ (R/cv) g ρ_base / ρθ_total
+        # Simplified: cofwt * ts / ρ_face ≈ ω Δτ g ts_face / (ρ_face θ_face)
+        ρᶠ_bot = ifelse(k == 1, one(eltype(ρ)), (ρ[i, j, k] + ρ[i, j, k - 1]) / 2)
+        ρᶠ_top = ifelse(k == Nz, one(eltype(ρ)), (ρ[i, j, k + 1] + ρ[i, j, k]) / 2)
+        ts_bot = ifelse(k == 1, zero(eltype(ts)), (ts[i, j, k] + ts[i, j, k - 1]) / 2)
+        ts_top = ifelse(k == Nz, zero(eltype(ts)), (ts[i, j, k + 1] + ts[i, j, k]) / 2)
 
-        cofwt_bot = ω * Δτ * g * π′_bot_face / π₀_bot_face
-        cofwt_top = ω * Δτ * g * π′_top_face / π₀_top_face
+        # MPAS cofwt: 0.5 ω Δτ (R/cv) g / θ, applied to ts
+        # In velocity: Δw = 0.5 ω Δτ (R/cv) g ts_face / (ρ_face θ_face)
+        rcv = κ / (1 - κ)
+        cofwt_bot = rcv / 2 * ω * Δτ * g * ts_bot / (ρᶠ_bot * θᵥᶠ_bot)
+        cofwt_top = rcv / 2 * ω * Δτ * g * ts_top / (ρᶠ_top * θᵥᶠ_top)
 
         # Explicit w at faces: wᵉ = w + Δτ Gˢw - (1-ω) Δτ Mᵖ δz(π') + cofwt
         δz_π_bot = ifelse(k == 1, zero(eltype(π′)), π′[i, j, k] - π′[i, j, k - 1])
@@ -741,27 +1036,28 @@ end
     end
 end
 
-@kernel function _update_w_from_pressure!(w, grid, ω, Δτ, cᵖᵈ, g,
-                                          π′⁺, π′⁻, θᵥ, πᵣ,
+@kernel function _update_w_from_pressure!(w, grid, ω, Δτ, cᵖᵈ, g, κ,
+                                          π′⁺, π′⁻, θᵥ, ts, ρ,
                                           Gˢw)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
         θᵥᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, θᵥ)
-        Mᵖ = cᵖᵈ * θᵥᶠ / Δzᶠ  # vertical PGF coefficient
+        Mᵖ = cᵖᵈ * θᵥᶠ / Δzᶠ
 
         # Off-centered vertical PGF: (1-ω) δz(π'⁻) + ω δz(π'⁺)
         ω̄ = 1 - ω
         δz_π⁻ = δzTᵃᵃᶠ(i, j, k, grid, π′⁻)
         δz_π⁺ = δzTᵃᵃᶠ(i, j, k, grid, π′⁺)
 
-        # cofwt: buoyancy feedback from θ' (off-centered like the PGF)
-        π′ᶠ_old = ℑzTᵃᵃᶠ(i, j, k, grid, π′⁻)
-        π′ᶠ_new = ℑzTᵃᵃᶠ(i, j, k, grid, π′⁺)
-        π₀ᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, πᵣ)
-        π₀ᶠ_safe = ifelse(π₀ᶠ == 0, one(π₀ᶠ), π₀ᶠ)
-        cofwt = g * (ω̄ * π′ᶠ_old + ω * π′ᶠ_new) / π₀ᶠ_safe
+        # cofwt: buoyancy from accumulated ρθ perturbation (ts)
+        rcv = κ / (1 - κ)
+        tsᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, ts)
+        ρᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, ρ)
+        ρᶠ_safe = ifelse(ρᶠ == 0, one(ρᶠ), ρᶠ)
+        θᵥᶠ_safe = ifelse(θᵥᶠ == 0, one(θᵥᶠ), θᵥᶠ)
+        cofwt = rcv / 2 * g * tsᶠ / (ρᶠ_safe * θᵥᶠ_safe)
 
         # w⁺ = w + Δτ Gˢw - Δτ Mᵖ ((1-ω) δz(π'⁻) + ω δz(π'⁺)) + Δτ cofwt
         w⁺ = w[i, j, k] + Δτ * Gˢw[i, j, k] - Δτ * Mᵖ * (ω̄ * δz_π⁻ + ω * δz_π⁺) + Δτ * cofwt
@@ -856,17 +1152,11 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     ū = substepper.averaged_velocities
     launch!(arch, grid, :xyz, _zero_avg_velocities!, ū)
 
-    # MPAS-style: reset π' to ZERO at the start of each RK stage.
-    # The slow tendency already includes the full PGF at the stage state,
-    # so the acoustic loop only needs to handle the small perturbation
-    # PGF from compression/rarefaction during the substep loop.
+    # MPAS-style: reset all acoustic perturbation variables to ZERO.
     fill!(parent(substepper.exner_perturbation), 0)
     fill!(parent(substepper.filtered_exner_perturbation), 0)
     fill!(parent(substepper.previous_exner_perturbation), 0)
-
-    # Save π'_initial = 0 for the perturbation recovery.
-    # Recovery computes: π_new = π_eval + Δπ' = (πᵣ + π'_eval) + π'_final
-    # since π'_initial = 0, Δπ' = π'_final.
+    fill!(parent(substepper.rtheta_pp), 0)
     fill!(parent(substepper.stage_thermodynamic_density), 0)
 
     u = model.velocities.u
@@ -888,6 +1178,11 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
 
     π′_forcing = CenterField(grid)  # TODO: pre-allocate this
 
+    Gⁿ = model.timestepper.Gⁿ
+    χ_name = thermodynamic_density_name(model.formulation)
+    Gˢρθ = getproperty(Gⁿ, χ_name)
+    g = model.thermodynamic_constants.gravitational_acceleration
+
     for _ in 1:Nτ
         # Step 1: Forward — update u, v from PGF and slow tendency
         launch!(arch, grid, :xyz, _acoustic_horizontal_forward!,
@@ -895,6 +1190,16 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 substepper.filtered_exner_perturbation, substepper.virtual_potential_temperature,
                 substepper.slow_tendencies.velocity.u,
                 substepper.slow_tendencies.velocity.v)
+
+        # Step 1b: Accumulate ts (MPAS-style ρθ perturbation).
+        # ts = rtheta_pp_old + Δτ Gˢρθ - θ_m Δτ div_h(u)
+        # This carries the gravity-wave signal through the substep loop.
+        # Stored in stage_thermodynamic_density (scratch during substep loop).
+        ts = substepper.stage_thermodynamic_density
+        launch!(arch, grid, :xyz, _compute_ts!,
+                ts, grid, Δτ,
+                u, v, substepper.rtheta_pp, Gˢρθ,
+                substepper.virtual_potential_temperature)
 
         # Step 2: Explicit π' forcing (Gˢπ + horizontal divergence + (1-ω)·∂w⁻/∂z)
         launch!(arch, grid, :xyz, _compute_π′_forcing!,
@@ -907,9 +1212,12 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         # Step 3: Implicit solve — tridiagonal for π'⁺, back-solve for w⁺
         implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
 
-        # Step 3b: Klemp (2018) divergence damping (if ϰᵃᶜ > 0)
-        # Damp u, v proportional to ∂(π'⁺ - π'⁻)/∂x.
-        # Total damping per outer Δt is constant regardless of N.
+        # Step 3b: Update rtheta_pp from ts and new w (vertical θ-flux divergence)
+        launch!(arch, grid, :xyz, _update_rtheta_pp!,
+                substepper.rtheta_pp, ts, grid, Δτ, w,
+                substepper.virtual_potential_temperature)
+
+        # Step 3c: Klemp (2018) divergence damping (if ϰᵃᶜ > 0)
         if ϰᵃᶜ > 0
             launch!(arch, grid, :xyz, _acoustic_divergence_damping!,
                     u, v, substepper.exner_perturbation, substepper.previous_exner_perturbation,
@@ -923,8 +1231,10 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 grid, ϰᵈⁱ, 1 / Nτ)
     end
 
+    # Restore π'_initial = 0 for recovery (stage_thermodynamic_density was used as ts scratch)
+    fill!(parent(substepper.stage_thermodynamic_density), 0)
+
     # Recovery: convert acoustic variables back to Breeze prognostic fields.
-    # Pass the stage time (β·Δt) for slow θ evolution in recovery.
     Δt_stage = Nτ * Δτ
     recover_full_fields!(model, substepper, U⁰, Δt_stage)
 
