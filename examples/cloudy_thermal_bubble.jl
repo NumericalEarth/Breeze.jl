@@ -155,7 +155,12 @@ nothing #hide
 # For pedagogical purposes, we build a new model with warm-phase saturation adjustment microphysics.
 # (We could have also used this model for the dry simulation):
 
-microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
+
+cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+microphysics = OneMomentCloudMicrophysics(; cloud_formation)
+
 moist_model = AtmosphereModel(grid; dynamics, thermodynamic_constants, advection, microphysics)
 
 # ## Moist thermal bubble initial conditions
