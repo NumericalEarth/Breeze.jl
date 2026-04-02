@@ -22,7 +22,8 @@ using Oceananigans.TimeSteppers: update_state!, tick_stage!, compute_flux_bc_ten
                                   step_lagrangian_particles!, maybe_prepare_first_time_step!
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
-using Breeze.CompressibleEquations: VerticallyImplicitTimeStepping, CompressibleDynamics,
+using Breeze.CompressibleEquations: CompressibleEquations,
+                                    VerticallyImplicitTimeStepping, CompressibleDynamics,
                                     _compute_ℂᵃᶜ²!, VerticalAcousticSolver,
                                     _build_ρθ_tridiagonal!, _back_solve_ρw!,
                                     _copy_field!, _add_field!
@@ -105,28 +106,33 @@ function imex_acoustic_solve!(model, τ)
     ρ = dynamics.density
     ℂᵃᶜ² = sc.acoustic_speed_squared
 
+    g = model.thermodynamic_constants.gravitational_acceleration
+
     ## 1. Save (ρθ)* before solve
     launch!(arch, grid, :xyz, _copy_field!, sc.ρθ_scratch, ρθ)
 
-    ## 2. Helmholtz solve: [I - τ² Op] δρθ = -τ V⁻¹ δz(Az θᶠ ρw*)
+    p = dynamics.pressure
+
+    ## 2. Compute horizontal-mean reference state (p̄, ρ̄)
+    CompressibleEquations.compute_mean_reference_state!(sc, grid, p, dynamics.density)
+
+    ## 3. Helmholtz (acoustic + gravity with mean-subtracted RHS)
     launch!(arch, grid, :xyz, _build_ρθ_tridiagonal!,
             solver.a, solver.b, solver.c, sc.rhs,
-            grid, τ, ℂᵃᶜ², ρθ, θ, ρw)
+            grid, τ, ℂᵃᶜ², ρθ, θ, ρw, dynamics.density, p, g,
+            sc.mean_pressure, sc.mean_density)
 
     solve!(ρθ, solver, sc.rhs)  # ρθ now holds δρθ
 
     ## 3. Recover ρθ⁺ = (ρθ)* + δρθ
     launch!(arch, grid, :xyz, _add_field!, ρθ, sc.ρθ_scratch)
 
-    ## 4. Back-solve: δρw = -τ (ℂ²/θ)ᶠ ∂(δρθ)/∂z
+    ## 5. Back-solve with mean-subtracted PGF+gravity
     launch!(arch, grid, :xyz, _back_solve_ρw!,
-            ρw, grid, τ, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch)
+            ρw, grid, τ, ℂᵃᶜ², θ, ρθ, sc.ρθ_scratch, dynamics.density, p, g,
+            sc.mean_pressure, sc.mean_density)
 
-    ## 5. Update ρ from vertical divergence of corrected ρw:
-    ##    ρ⁺ = ρ* + τ fᴵ_ρ = ρ* - τ div_z(ρw⁺)
-    ##    This keeps ρ consistent with ρθ for the subsequent update_state!
-    ##    which diagnoses p = p(ρ, ρθ). The predictor will reset ρ at the
-    ##    next stage, so this only affects the tendency evaluation.
+    ## 6. Update ρ from vertical divergence of corrected ρw
     launch!(arch, grid, :xyz, _update_density!, ρ, grid, τ, ρw)
 
     return nothing
@@ -148,6 +154,88 @@ function zero_boundary_ρw!(model)
 end
 
 #####
+##### Evaluate the implicit function fᴵ at a given state (no solve needed)
+#####
+##### Used at stages where γᵢ = 0 (no Helmholtz solve). The implicit function
+##### values are still needed by subsequent stages through aᴵᵢⱼ fᴵ(zⱼ).
+#####
+##### fᴵ_ρw = -(ℂ²/θ)∂ρθ/∂z - ρg   (linearized PGF + gravity)
+##### fᴵ_ρθ = -V⁻¹ δz(Az θ ρw)      (vertical ρθ flux)
+##### fᴵ_ρ  = -V⁻¹ δz(Az ρw)         (vertical density flux)
+#####
+
+using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ, ∂zᶜᶜᶠ
+
+## fᴵ_ρw = -∂p/∂z - ρg  (using the ACTUAL EOS pressure, not linearized)
+## This avoids the O(Δz²) mismatch between (ℂ²/θ)∂ρθ/∂z and ∂p/∂z
+## that causes secular drift when accumulated through the ARK predictor.
+@kernel function _evaluate_fI_ρw!(fI_ρw, grid, pressure, ρ, g)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ∂z_p = ∂zᶜᶜᶠ(i, j, k, grid, pressure)
+        ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+        fI_ρw[i, j, k] = -(∂z_p + ρᶠ * g) * (k > 1)
+    end
+end
+
+@kernel function _evaluate_fI_ρθ!(fI_ρθ, grid, θ, ρw)
+    i, j, k = @index(Global, NTuple)
+    Nz = size(grid, 3)
+    @inbounds begin
+        θᶠ_top = ℑzᵃᵃᶠ(i, j, k + 1, grid, θ)
+        θᶠ_bot = ℑzᵃᵃᶠ(i, j, k, grid, θ)
+        ρw_top = ifelse(k < Nz, ρw[i, j, k + 1], zero(eltype(grid)))
+        ρw_bot = ifelse(k > 1,  ρw[i, j, k],     zero(eltype(grid)))
+        Az_top = Azᶜᶜᶠ(i, j, k + 1, grid)
+        Az_bot = Azᶜᶜᶠ(i, j, k, grid)
+        V = Vᶜᶜᶜ(i, j, k, grid)
+        fI_ρθ[i, j, k] = -(Az_top * θᶠ_top * ρw_top - Az_bot * θᶠ_bot * ρw_bot) / V
+    end
+end
+
+function evaluate_implicit_tendency!(fI_tuple, model)
+    grid = model.grid
+    arch = architecture(grid)
+    fI_ρθ, fI_ρw, fI_ρ = fI_tuple
+    g = model.thermodynamic_constants.gravitational_acceleration
+
+    ## fᴵ_ρw = -(∂p/∂z + ρg): full EOS PGF+gravity.
+    ## This exactly matches what `explicit_z_pressure_gradient` and
+    ## `explicit_buoyancy_forceᶜᶜᶠ` zeroed from fᴱ.
+    launch!(arch, grid, :xyz, _evaluate_fI_ρw!,
+            fI_ρw, grid, model.dynamics.pressure, model.dynamics.density, g)
+
+    ## fᴵ_ρθ = -div_z(θ ρw): vertical ρθ flux (acoustic compressibility).
+    ## The caller must subtract this from fᴱ_ρθ to avoid double-counting
+    ## (since fᴱ includes full 3D advection of ρθ).
+    launch!(arch, grid, :xyz, _evaluate_fI_ρθ!,
+            fI_ρθ, grid, model.formulation.potential_temperature, model.momentum.ρw)
+
+    ## fᴵ_ρ = -div_z(ρw): vertical density flux, matches the
+    ## horizontal-only divergence in fᴱ_ρ.
+    launch!(arch, grid, :xyz, _store_vertical_divergence!,
+            fI_ρ, grid, model.momentum.ρw)
+
+    return nothing
+end
+
+#####
+##### Remove double-counted vertical ρθ flux from explicit tendency
+#####
+##### The explicit ρθ tendency includes full 3D advection (horizontal + vertical).
+##### The implicit fᴵ_ρθ also contains the vertical ρθ flux. To ensure
+##### fᴱ + fᴵ = f (total tendency), subtract fᴵ_ρθ from fᴱ_ρθ:
+#####   fᴱ_adj = fᴱ_full - fᴵ_ρθ  →  fᴱ_adj + fᴵ_ρθ = fᴱ_full
+#####
+
+function remove_vertical_ρθ_flux_from_explicit!(fE, fI_ρθ, grid)
+    arch = architecture(grid)
+    launch!(arch, grid, :xyz, _accumulate_tendency!,
+            fE.ρθ, -1, fI_ρθ)
+    return nothing
+end
+
+#####
 ##### Store implicit tendency from solve residual
 #####
 ##### fᴵ_ρθ(zⱼ) = (ρθⱼ - ρθⱼ*) / τ     (from Helmholtz + add-back)
@@ -156,6 +244,9 @@ end
 #####
 
 function store_implicit_tendency!(fI_ρθ, fI_ρw, fI_ρ, model, τ, ρw_scratch)
+    ## All from solve residual: (field_after - field_before) / τ.
+    ## The back-solve now includes reference-subtracted mean PGF+gravity,
+    ## so the ρw residual captures the full perturbation fᴵ_ρw.
     grid = model.grid
     arch = architecture(grid)
     sc = model.dynamics.vertical_acoustic_solver

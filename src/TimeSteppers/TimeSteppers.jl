@@ -9,6 +9,8 @@ Provides time stepping schemes for AtmosphereModel, including:
 module TimeSteppers
 
 export SSPRungeKutta3, AcousticSSPRungeKutta3, AcousticRungeKutta3,
+       IMEXRungeKuttaARS232,
+       IMEXRungeKuttaSSP3332,
        store_initial_state!,
        ssp_rk3_substep!,
        maybe_prepare_first_time_step!
@@ -20,6 +22,9 @@ using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
 include("ssp_runge_kutta_3.jl")
 include("acoustic_ssp_runge_kutta_3.jl")
 include("acoustic_runge_kutta_3.jl")
+include("imex_ark_common.jl")
+include("imex_ark_ars232.jl")
+include("imex_ark_ssp3332.jl")
 
 # Extend TimeStepper to support time steppers via Symbol
 OceananigansTimeSteppers.TimeStepper(::Val{:SSPRungeKutta3}, args...; kwargs...) =
@@ -30,5 +35,11 @@ OceananigansTimeSteppers.TimeStepper(::Val{:AcousticSSPRungeKutta3}, args...; kw
 
 OceananigansTimeSteppers.TimeStepper(::Val{:AcousticRungeKutta3}, args...; kwargs...) =
     AcousticRungeKutta3(args...; kwargs...)
+
+OceananigansTimeSteppers.TimeStepper(::Val{:IMEXRungeKuttaARS232}, args...; kwargs...) =
+    IMEXRungeKuttaARS232(args...; kwargs...)
+
+OceananigansTimeSteppers.TimeStepper(::Val{:IMEXRungeKuttaSSP3332}, args...; kwargs...) =
+    IMEXRungeKuttaSSP3332(args...; kwargs...)
 
 end # module

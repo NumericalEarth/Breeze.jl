@@ -288,6 +288,8 @@ _timestepper_uses_dynamics(::Val) = false
 _timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
 _timestepper_uses_dynamics(::Val{:AcousticSSPRungeKutta3}) = true
 _timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
+_timestepper_uses_dynamics(::Val{:IMEXRungeKuttaARS232}) = true
+_timestepper_uses_dynamics(::Val{:IMEXRungeKuttaSSP3332}) = true
 _timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
 
 function Base.summary(model::AtmosphereModel)

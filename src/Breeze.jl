@@ -108,6 +108,8 @@ export
     SSPRungeKutta3,
     AcousticSSPRungeKutta3,
     AcousticRungeKutta3,
+    IMEXRungeKuttaARS232,
+    IMEXRungeKuttaSSP3332,
     AcousticSubstepper,
 
     # ParcelDynamics

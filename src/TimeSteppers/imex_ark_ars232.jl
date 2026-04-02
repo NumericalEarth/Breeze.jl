@@ -107,16 +107,23 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
         parent(u⁰) .= parent(u)
     end
 
-    ## ─── Stage 1 (γ₁ = 0, fully explicit) ───
-    ## z₁ = yₙ.  Compute fᴱ(z₁); fᴵ(z₁) = 0.
+    ## ─── Stage 1 (γ₁ = 0, no implicit solve) ───
+    ## z₁ = yₙ.  Compute fᴱ(z₁) and fᴵ(z₁).
+    ## Even though γ₁=0 (no Helmholtz solve), the implicit FUNCTION must be
+    ## evaluated at z₁ and stored — subsequent stages use aᴵᵢ₁ fᴵ(z₁).
+    ## fᴵ_ρw = -(ℂ²/θ)∂ρθ/∂z - ρg  (PGF + gravity at initial state)
+    ## fᴵ_ρθ = -div_z(θ ρw)          (vertical ρθ flux)
+    ## fᴵ_ρ  = -div_z(ρw)            (vertical density flux)
 
     compute_flux_bc_tendencies!(model)
     for (fE_field, G) in zip(ts.fE[1], ts.Gⁿ)
         parent(fE_field) .= parent(G)
     end
 
+    evaluate_implicit_tendency!(ts.fI[1], model)
+
     ## ─── Stage 2 (γ₂ = γ) ───
-    ## z*₂ = yₙ + h [2γ fᴱ₁ + γ fᴵ₁] = yₙ + 2γh fᴱ₁
+    ## z*₂ = yₙ + h [2γ fᴱ₁ + γ fᴵ₁]
 
     set_stage_predictor!(model, ts.U⁰, h, ts.fE, ts.fI, aE[2], aI[2], 1)
     zero_boundary_ρw!(model)
