@@ -583,7 +583,7 @@ end
 
 # Vertical flux of liquid-water mass on z-faces.
 # Uses the configured advection scheme for mass reconstruction.
-@inline function sedimentation_mass_flux_z(i, j, k, grid, advection, wᶜˡ, wʳ, ρqᶜˡ, ρqʳ)
+@inline function two_moment_sedimentation_mass_flux_z(i, j, k, grid, advection, wᶜˡ, wʳ, ρqᶜˡ, ρqʳ)
     return _advective_tracer_flux_z(i, j, k, grid, advection, wᶜˡ, ρqᶜˡ) +
            _advective_tracer_flux_z(i, j, k, grid, advection, wʳ, ρqʳ)
 end
@@ -595,7 +595,7 @@ end
         -V⁻¹ᶜᶜᶜ(i, j, k, grid) *
         δzᵃᵃᶜ(i, j, k, grid, sedimentation_enthalpy_flux_z, advection, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ, μ.hˡ)
 
-    Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ)
+    Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, two_moment_sedimentation_mass_flux_z, advection, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ)
     precipitation_drag_heating = -constants.gravitational_acceleration * Fᵐ
 
     return enthalpy_sedimentation + precipitation_drag_heating
@@ -617,7 +617,7 @@ end
     cᵖᵐ = mixture_heat_capacity(q, constants)
     theta_sedimentation = enthalpy_sedimentation / (cᵖᵐ * Π)
 
-    Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, sedimentation_mass_flux_z, advection, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ)
+    Fᵐ = ℑzᵃᵃᶜ(i, j, k, grid, two_moment_sedimentation_mass_flux_z, advection, μ.wᶜˡ, μ.wʳ, μ.ρqᶜˡ, μ.ρqʳ)
     precipitation_drag_heating = -constants.gravitational_acceleration * Fᵐ / (cᵖᵐ * Π)
 
     return theta_sedimentation + precipitation_drag_heating
