@@ -182,6 +182,8 @@ export
     tabulate,
     TabulationParameters,
     P3IntegralEvaluator,
+    save_p3_lookup_tables,
+    load_p3_lookup_tables,
 
     # Lambda solver
     IceMassPowerLaw,
@@ -208,6 +210,7 @@ export
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDFIELDS
 using SpecialFunctions: loggamma, gamma_inc, gamma
+using JLD2: jldsave, jldopen
 
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU
@@ -290,6 +293,7 @@ include("lookup_table_2.jl")
 include("lookup_table_3.jl")
 include("tabulated_function_adapters.jl")
 include("tabulation.jl")
+include("lookup_table_io.jl")
 
 #####
 ##### Rain PSD quadrature evaluators (must follow tabulation.jl and quadrature.jl)

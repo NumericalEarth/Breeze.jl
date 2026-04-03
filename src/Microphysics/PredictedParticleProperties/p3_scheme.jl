@@ -77,26 +77,29 @@ The scheme tracks 9 prognostic densities:
 
 # Keyword Arguments
 
+- `lookup_tables`: Path to a JLD2 file with pre-computed lookup tables (default `nothing`).
+  When provided, loads a fully tabulated scheme from file (fast). Generate with
+  [`save_p3_lookup_tables`](@ref) or the `scripts/generate_p3_tables.jl` script.
 - `water_density`: Liquid water density [kg/m³] (default 1000)
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation
   (default `nothing` = open boundary, precipitation exits domain)
 
-# Tabulation (recommended for Fortran parity)
+# Tabulation
 
-The default constructor creates a scheme with analytical fallback paths for
-all process rates. For Fortran-consistent behavior, pre-compute lookup tables
-with [`tabulate`](@ref):
+For Fortran-consistent behavior, use pre-computed lookup tables:
 
 ```julia
-using Oceananigans
+# Fast: load pre-computed tables from file
+p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables="data/p3_lookup_tables.jld2")
+
+# Or compute on the fly (slower)
 p3 = PredictedParticlePropertiesMicrophysics()
-p3 = tabulate(p3, CPU())  # Pre-compute all lookup tables
+p3 = tabulate(p3, CPU())
 ```
 
 Without tabulation, the scheme uses simplified mean-mass approximations that
-systematically underestimate PSD-integrated rates (see `P3_IMPLEMENTATION_STATUS.md`).
-The analytical path is useful for development and testing but does not reproduce
-the Fortran `P3_INIT` lookup-table behavior.
+systematically underestimate PSD-integrated rates. The analytical path is useful
+for development and testing but does not reproduce Fortran lookup-table behavior.
 
 # Known limitations
 
@@ -110,11 +113,11 @@ the Fortran `P3_INIT` lookup-table behavior.
 ```julia
 using Breeze
 
-# Create P3 scheme with default parameters
-microphysics = PredictedParticlePropertiesMicrophysics()
+# Load pre-computed tables (recommended)
+microphysics = PredictedParticlePropertiesMicrophysics(; lookup_tables="data/p3_lookup_tables.jld2")
 
-# Get prognostic field names for model setup
-fields = prognostic_field_names(microphysics)
+# Or without tables (for testing)
+microphysics = PredictedParticlePropertiesMicrophysics()
 ```
 
 # References
@@ -131,8 +134,13 @@ Key papers describing P3:
 See also the [P3 documentation](@ref p3_overview) for detailed physics.
 """
 function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Float64;
+                                                  lookup_tables = nothing,
                                                   water_density = 1000,
                                                   precipitation_boundary_condition = nothing)
+    if !isnothing(lookup_tables)
+        return load_p3_lookup_tables(lookup_tables)
+    end
+
     return PredictedParticlePropertiesMicrophysics(
         FT(water_density),
         FT(1e-14),   # minimum_mass_mixing_ratio [kg/kg]
