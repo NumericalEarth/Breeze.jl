@@ -364,8 +364,8 @@ function materialize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCond
     fs = if isnothing(bf.filtered_velocities)
         nothing
     else
-         FilteredSurfaceScalar(grid; height=bf.filtered_velocities.height,
-                               filter_timescale=bf.filtered_velocities.filter_timescale)
+        FilteredSurfaceScalar(grid; height=bf.filtered_velocities.height,
+                              filter_timescale=bf.filtered_velocities.filter_timescale)
     end
 
     new_bf = BulkVaporFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants, surface,
