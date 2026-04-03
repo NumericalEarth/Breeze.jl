@@ -342,18 +342,25 @@ end
 ##### PolynomialCoefficient struct
 #####
 
+struct PolynomialCoefficient{FT, C, SF, S, θᵛ, P, TC, TT}
+    polynomial :: C
+    roughness_length :: FT
+    minimum_wind_speed :: FT
+    stability_function :: SF
+    surface :: S
+    virtual_potential_temperature :: θᵛ
+    surface_pressure :: P
+    thermodynamic_constants :: TC
+    transfer_type :: TT
+end
+
 """
-    PolynomialCoefficient(;
-        polynomial = nothing,
-        roughness_length = 1.5e-4,
-        stability_function = FittedStabilityFunction(roughness_length / 7.3),
-        surface = PlanarLiquidSurface()
-    )
+$(TYPEDSIGNATURES)
 
 A bulk transfer coefficient that depends on wind speed and atmospheric stability,
 following [Large and Yeager (2009)](@cite LargeYeager2009).
 
-The neutral transfer coefficient at 10 m follows the Large & Yeager (2009) form:
+The neutral transfer coefficient at 10 m follows the Large and Yeager (2009) form:
 ```math
 C^N_{10}(U_h) = (a_0 + a_1 U_h + a_2 / U_h) × 10^{-3}
 ```
@@ -362,7 +369,7 @@ where ``U_h`` is the wind speed at measurement height ``h``.
 The coefficient is adjusted for measurement height using logarithmic profile theory,
 and stability correction is applied based on the bulk Richardson number.
 
-When `polynomial` is `nothing`, the appropriate Large & Yeager (2009) polynomial
+When `polynomial` is `nothing`, the appropriate [Large and Yeager (2009)](@cite LargeYeager2009) polynomial
 will be automatically selected based on the boundary condition type:
 - `BulkDrag`: `default_neutral_drag_polynomial` = `(0.142, 0.076, 2.7)` for momentum
 - `BulkSensibleHeatFlux`: `default_neutral_sensible_heat_polynomial` = `(0.128, 0.068, 2.43)` for sensible heat
@@ -374,10 +381,10 @@ will be automatically selected based on the boundary condition type:
 - `roughness_length`: Surface roughness `ℓ` in meters (default: 1.5e-4, typical for ocean)
 - `minimum_wind_speed`: Minimum wind speed to avoid singularity in a₂/U term (default: 0.1 m/s)
 - `stability_function`: Stability correction strategy.
-  Default is [`FittedStabilityFunction`](@ref) using Li et al. (2010) ``Riᴮ → ζ`` mapping
-  with Hogström (1996) / Beljaars & Holtslag (1991) MOST stability functions.
-  The scalar roughness length defaults to `roughness_length / 7.3` (typical ocean value).
-  Use `nothing` to disable stability correction.
+  Default is [`FittedStabilityFunction`](@ref) using [Li et al. (2010)](@cite Li2010) ``Riᴮ → ζ`` mapping
+  with [Hogström (1996)](@cite hogstrom1996review) / [Beljaars & Holtslag (1991)](@cite beljaars1991flux)
+  MOST stability functions. The scalar roughness length defaults to `roughness_length / 7.3`
+  (typical ocean value). Use `nothing` to disable stability correction.
 - `surface`: Surface type for computing saturation specific humidity in the stability correction.
   Default is `PlanarLiquidSurface()`. Use `PlanarIceSurface()` for ice surfaces.
 
@@ -440,19 +447,6 @@ PolynomialCoefficient{Float64}
 * Large, W., & Yeager, S. G. (2009). The global climatology of an interannually varying air–sea flux data set. Climate dynamics, 33(2), 341-364.
 * Li, Y., Gao, Z., Lenschow, D. H., & Chen, F. (2010). An improved approach for parameterizing surface-layer turbulent transfer coefficients in numerical models. Boundary-Layer Meteorology, 137, 153-165.
 """
-struct PolynomialCoefficient{FT, C, SF, S, θᵛ, P, TC, TT}
-    polynomial :: C
-    roughness_length :: FT
-    minimum_wind_speed :: FT
-    stability_function :: SF
-    surface :: S
-    virtual_potential_temperature :: θᵛ
-    surface_pressure :: P
-    thermodynamic_constants :: TC
-    transfer_type :: TT
-end
-
-# Constructor with sensible defaults
 function PolynomialCoefficient(FT = Oceananigans.defaults.FloatType;
                                polynomial = nothing,
                                roughness_length = 1.5e-4,
@@ -501,10 +495,15 @@ Base.summary(::Nothing) = "Nothing"
 """
 $(TYPEDSIGNATURES)
 
-Compute neutral transfer coefficient at 10 m using the Large & Yeager (2009) form:
+Compute neutral transfer coefficient at 10 m using the
+[Large and Yeager (2009)](@cite LargeYeager2009) form:
 C¹⁰_N(U) = (a₀ + a₁ U + a₂ / U) × 10⁻³
 
 Wind speed is clamped to `U_min` to avoid singularity in the a₂/U term.
+
+# References
+
+* Large, W., & Yeager, S. G. (2009). The global climatology of an interannually varying air–sea flux data set. Climate dynamics, 33(2), 341-364.
 """
 @inline function neutral_coefficient_10m(polynomial, U₁₀, U_min)
     a₀, a₁, a₂ = polynomial
