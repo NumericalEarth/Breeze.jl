@@ -164,7 +164,7 @@ $(TYPEDSIGNATURES)
 Step forward `model` one time step `Δt` with Wicker-Skamarock RK3 and acoustic substepping.
 
 The algorithm follows [Wicker and Skamarock (2002)](@cite WickerSkamarock2002):
-- Outer loop: 3-stage RK3 with stage fractions `Δt/3`, `Δt/2`, `Δt`
+- Outer loop: 3-stage RK3 with stage fractions ``Δt/3``, ``Δt/2``, ``Δt``
 - Inner loop: Acoustic substeps for fast (pressure) tendencies
 
 Each RK stage:
