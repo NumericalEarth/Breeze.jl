@@ -144,6 +144,13 @@ jobs:
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
           julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mlir-dumps-${{ matrix.version }}-${{ matrix.os }}
+          path: tmp/
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: julia-actions/julia-processcoverage@03114f09f119417c3242a9fb6e0b722676aedf38 # v1.2.2
       - uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3
         with:
