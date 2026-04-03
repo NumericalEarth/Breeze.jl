@@ -19,7 +19,7 @@ p3 = PredictedParticlePropertiesMicrophysics()
 
 ## Tabulate with default (full resolution) parameters
 @info "Tabulating lookup tables (this may take a few minutes)..."
-p3_tabulated = tabulate(p3, CPU())
+p3_tabulated = tabulate(p3)
 
 ## Save to JLD2
 @info "Saving to $output_path..."
