@@ -30,6 +30,41 @@ The kernel now takes a precomputed `coef_div_damp = 2 * smdiv * len_disp / Δτ`
 uses `divΘ = -(rtheta_pp_new - rtheta_pp_old)` (correct negative sign), and
 divides by `(θ₁ + θ₂)` (sum, not average). Matches MPAS lines 3044-3057.
 
+## Open issue: horizontal PGF discrete mismatch
+
+**The slow tendency `Gˢu` includes the FULL EOS horizontal PGF `∂p_EOS/∂x`.**
+This is NOT zeroed for `SplitExplicitTimeDiscretization` (only vertical PGF is zeroed).
+
+The acoustic horizontal PGF uses the Exner linearization:
+```julia
+pgrad_u = c2 * Π_face * ∂(rtheta_pp)/∂x
+```
+
+In MPAS, `tend_u_euler` uses the SAME linearized `pp` for horizontal PGF (line 5383):
+```fortran
+tend_u_euler = -cqu * (pp(cell2) - pp(cell1)) * invDcEdge / (0.5*(zz2+zz1))
+```
+
+Both slow and acoustic horizontal PGFs use the SAME linearization → no mismatch.
+
+In Breeze: slow horizontal PGF is `∂p_EOS/∂x` (nonlinear), acoustic is
+`c2*Π*∂(rtheta_pp)/∂x` (linear). The mismatch is O(|ρθ'|²/ρθ²) per substep.
+For the baroclinic wave with 60K gradient: ~4% per substep, ~24% accumulated
+over 6 substeps.
+
+**Fix**: Also zero `x_pressure_gradient` and `y_pressure_gradient` for
+`SplitExplicitTimeDiscretization`, and compute the linearized horizontal `pp`
+gradient in `_convert_slow_tendencies!`.
+
+## Additional minor issues
+
+1. **`ρθ_base` derived on-the-fly**: Computed as `pᵣ/(Rᵈ*Π_base)` instead of
+   stored directly. Float32 roundoff may matter. MPAS stores `rtheta_base`.
+
+2. **Stale comment on line ~1025**: "The slow tendency Gˢw already includes the
+   full PGF+gravity" — wrong now that PGF+buoyancy are zeroed and re-added in
+   Exner form.
+
 ## Potential issues (need verification)
 
 ### 3. Horizontal flux divergence may have extra Δτ factor
