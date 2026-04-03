@@ -24,7 +24,7 @@ Wicker-Skamarock third-order Runge-Kutta time stepper with acoustic substepping
 for fully compressible dynamics.
 
 Unlike [`AcousticSSPRungeKutta3`](@ref) which uses convex combinations,
-this scheme uses stage fractions ``Δt/3``, ``Δt/2``, and `` ``:
+this scheme uses stage fractions ``Δt/3``, ``Δt/2``, and ``Δt``:
 
 - Stage 1: ``U^* = U^n + (Δt/3) \\, R(U^n)``
 - Stage 2: ``U^{**} = U^n + (Δt/2) \\, R(U^*)``
