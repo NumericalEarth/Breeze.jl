@@ -225,13 +225,16 @@ Note: H₂O is computed from the model's prognostic moisture field.
 
 # Example
 
-```julia
+```@example
+julia> using Breeze
+
 # Constant ozone
-background = BackgroundAtmosphere(CO₂ = 400e-6)
+julia> background = BackgroundAtmosphere(CO₂ = 400e-6)
 
 # Height-varying ozone (function of z in meters)
-tropical_ozone(z) = 30e-9 * (1 + z / 10000)
-background = BackgroundAtmosphere(CO₂ = 400e-6, O₃ = tropical_ozone)
+julia> tropical_ozone(z) = 30e-9 * (1 + z / 10000);
+
+julia> background = BackgroundAtmosphere(CO₂ = 400e-6, O₃ = tropical_ozone)
 ```
 """
 function BackgroundAtmosphere(; N₂  = 0.78084,      # Nitrogen (~78%)
