@@ -115,3 +115,33 @@ Set to zero (line 477). Correct for impenetrable top BC since rw_p[Nz+1] = 0.
 ### Tridiagonal b_k uses coftz_k twice
 Verified against MPAS source (line 2340-2342): MPAS also uses `coftz(k)` in both
 positions of the cofwz contribution to b_k. NOT a bug.
+
+## Phase 2 analysis (2026-04-04)
+
+### N=2 works at Δt=600s, N=6 crashes at all Δt
+
+The bug amplifies per substep. Verified that the following are NOT the cause:
+- Off-centering sign is correct (forward-biased = damping) ✓
+- dtseps scales correctly with Δτ (smaller Δτ → smaller corrections) ✓
+- Divergence damping coefficient scales correctly (coef ∝ 1/Δτ) ✓
+- No scratch field aliasing between ts_scratch, rs_scratch, rtheta_pp_old ✓
+- Total accumulated ru_p over the full stage is the same for N=2 and N=6 ✓
+- Tridiagonal is rebuilt with correct dtseps each substep ✓
+
+### Outstanding discrepancies that could affect N=6 stability
+
+**#3 (epssm=0.2)**: Stronger off-centering should increase damping. But the
+interaction between stronger implicit weighting and the acoustic coupling
+through rtheta_pp might behave non-monotonically. Worth testing with epssm=0.1.
+
+**#15 (len_disp=minimum_xspacing)**: If the grid has non-uniform spacing,
+the divergence damping coefficient varies across the domain. For a
+LatitudeLongitudeGrid with polar filter at 60°, the minimum spacing is at
+the poles. With `len_disp = min(Δx_min, Δy_min)`, the damping is calibrated
+for the smallest cells. At lower latitudes where cells are larger, the
+damping is too WEAK relative to MPAS (which uses the nominal resolution).
+Insufficient damping at lower latitudes could allow acoustic modes to grow.
+
+### Recommendation
+Test with epssm=0.1 and len_disp = nominal grid resolution (not minimum)
+to eliminate discrepancies #3 and #15 before further debugging.
