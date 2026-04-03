@@ -288,7 +288,9 @@ When cloud liquid or rain collides with snow above freezing, the sensible heat
 carried by the warm hydrometeor melts additional snow. The factor ``α`` gives
 the mass ratio of melted snow to accreted warm hydrometeor mass:
 
-``α = cˡ (T - T_{freeze}) / ℒf``
+```math
+α = cˡ (T - T_{freeze}) / ℒf
+````
 
 This is a translation of `CloudMicrophysics.BulkMicrophysicsTendencies.warm_accretion_melt_factor`
 that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
@@ -452,8 +454,8 @@ to compute the activation source term for cloud droplet number concentration.
 - `nucleation_timescale`: Nucleation timescale [s] for converting activation deficit to rate (default: 1s)
 
 # References
-* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
-  2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
+* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation: 2. Multiple
+    aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 """
 struct AerosolActivation{AP, AD, FT}
     activation_parameters :: AP
