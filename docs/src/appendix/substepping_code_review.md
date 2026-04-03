@@ -60,6 +60,10 @@ gradient in `_convert_slow_tendencies!`.
 
 1. **`ρθ_base` derived on-the-fly**: Computed as `pᵣ/(Rᵈ*Π_base)` instead of
    stored directly. Float32 roundoff may matter. MPAS stores `rtheta_base`.
+   **Recommendation**: Add `potential_temperature_density` field to
+   `ExnerReferenceState` (computed once during construction, like `density`
+   and `pressure`). Then the linearized `pp = Rᵈ*(Π*ρθ_p + ρθ_base*(Π-Π_base))`
+   uses the pre-stored ρθ_base without roundoff.
 
 2. **Stale comment on line ~1025**: "The slow tendency Gˢw already includes the
    full PGF+gravity" — wrong now that PGF+buoyancy are zeroed and re-added in
