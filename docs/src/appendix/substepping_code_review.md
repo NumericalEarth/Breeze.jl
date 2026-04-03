@@ -56,6 +56,35 @@ over 6 substeps.
 `SplitExplicitTimeDiscretization`, and compute the linearized horizontal `pp`
 gradient in `_convert_slow_tendencies!`.
 
+## Bug: w recovery missing ρw⁰ (line 1764)
+
+`_convert_rw_p_to_w!` computes `w = rw_p / ρ_recovered`. But `rw_p` is the acoustic
+perturbation from zero (reset each stage). The full ρw should be `ρw⁰ + rw_p`.
+So the correct formula is:
+
+```julia
+w[i,j,k] = (ρw⁰[i,j,k] + rw_p[i,j,k]) / ρ_face
+```
+
+**Impact**: For the first time step (ρw⁰ = 0), this is fine. For subsequent steps,
+`w` is missing the base-state vertical velocity. This causes momentum reconstruction
+(`ρw = ρ_face * w`) to lose the initial ρw⁰, creating a systematic error that grows
+over time. This likely explains the "crashes after a few steps" behavior.
+
+**Same issue for u and v**: After the substep loop, `u` and `v` were reset to
+U⁰ values and then incrementally updated. But `_recover_momentum!` reconstructs
+`ρu = ρ_face * u` using the RECOVERED density, which differs from ρ⁰. So
+`ρu_recovered = ρ_new * u_from_substeps ≠ ρu⁰ + perturbation`. This is a minor
+inconsistency but not as severe as the w bug.
+
+## Bug: fzm/fzp weights swapped (lines 455-456, 710-713)
+
+Breeze: `fzm = Δz_above / (Δz_above + Δz_below)` (weight for value at level k)
+MPAS: `fzm(k) = dzw(k-1) / (dzw(k-1) + dzw(k))` = `Δz_below / (Δz_below + Δz_above)`
+
+The weights are swapped. No effect on uniform grids (both = 0.5) but incorrect
+interpolation for non-uniform vertical grids.
+
 ## Additional minor issues
 
 1. **`ρθ_base` derived on-the-fly**: Computed as `pᵣ/(Rᵈ*Π_base)` instead of
