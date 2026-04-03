@@ -968,13 +968,15 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Advance the parcel model by one time step `Δt` using SSP RK3.
+Advance the parcel model by one time step ``Δt`` using SSP RK3.
 
 The SSP RK3 scheme [Shu and Osher (1988)](@cite Shu1988Efficient) is:
 ```math
-u^{(1)} = u^{(0)} + Δt G(u^{(0)})
-u^{(2)} = \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt G(u^{(1)})
-u^{(3)} = \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt G(u^{(2)})
+\\begin{align*}
+u^{(1)} &= u^{(0)} + Δt \\, G(u^{(0)}) \\\\
+u^{(2)} &= \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt \\, G(u^{(1)}) \\\\
+u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt \\, G(u^{(2)})
+\\end{align}
 ```
 
 This scheme has CFL coefficient = 1 and is TVD (total variation diminishing).

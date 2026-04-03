@@ -8,7 +8,7 @@ are small perturbations from a dry, hydrostatic, adiabatic reference state.
 The key constraint is that mass flux divergence vanishes:
 
 ```math
-\\boldsymbol{\\nabla} ⋅ (ρᵣ \\boldsymbol{u}) = 0``
+\\boldsymbol{\\nabla} ⋅ (ρᵣ \\boldsymbol{u}) = 0
 ```
 """
 module AnelasticEquations
