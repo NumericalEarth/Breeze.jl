@@ -279,9 +279,18 @@ function hydrostatic_temperature(z, p₀, θᵣ::Function, pˢᵗ, constants)
     return θᵣ(z) * (p / pˢᵗ)^κ
 end
 
-# Surface value extraction
-_surface_value(x::Number) = x
-_surface_value(f::Function) = f(0)
+# Evaluate a profile (Number or Function) at a given height.
+# Used both here and in terrain_compressible_physics.jl for reference state construction.
+"""
+    evaluate_profile(profile, z)
+
+Evaluate a vertical profile at height `z`. If `profile` is a `Number`, returns it unchanged.
+If `profile` is a `Function`, calls `profile(z)`.
+"""
+@inline evaluate_profile(value::Number, z) = value
+@inline evaluate_profile(f::Function, z) = f(z)
+
+_surface_value(x) = evaluate_profile(x, 0)
 
 """
 $(TYPEDSIGNATURES)

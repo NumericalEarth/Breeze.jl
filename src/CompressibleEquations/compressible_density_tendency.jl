@@ -34,7 +34,7 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
     return ∂z_p - ∂z_pᵣ
 end
 
-@inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ::Nothing) = 0
+@inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ::Nothing) = false
 @inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ref::ExnerReferenceState) = ∂zᶜᶜᶠ(i, j, k, grid, ref.pressure)
 
 #####

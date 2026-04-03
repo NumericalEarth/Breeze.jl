@@ -37,5 +37,5 @@ Without a reference state, the full gravitational force ``-gρ`` is used.
     return -g * (ρ - ρᵣ)
 end
 
-@inline reference_densityᶜᶜᶜ(i, j, k, grid, ::Nothing) = 0
+@inline reference_densityᶜᶜᶜ(i, j, k, grid, ::Nothing) = false
 @inline reference_densityᶜᶜᶜ(i, j, k, grid, ref::ExnerReferenceState) = @inbounds ref.density[i, j, k]

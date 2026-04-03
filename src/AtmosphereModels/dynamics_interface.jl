@@ -372,7 +372,7 @@ Adapt.adapt_structure(to, s::HorizontalSlowMode) = HorizontalSlowMode(adapt(to, 
 #####
 
 """
-    compute_dynamics_tendency!(model)
+$(TYPEDSIGNATURES)
 
 Compute tendencies for dynamics-specific prognostic fields.
 
@@ -386,11 +386,38 @@ For compressible dynamics, this computes the density tendency from the continuit
 compute_dynamics_tendency!(model) = nothing  # default: no dynamics-specific tendencies
 
 #####
+##### Transport velocity/momentum interface (for terrain-following coordinates)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the velocity tuple used for scalar advection transport.
+
+For standard (non-terrain) models, this is `model.velocities`.
+For terrain-following coordinates, the vertical component is replaced
+by the contravariant vertical velocity ``\\tilde{\\Omega}``.
+"""
+transport_velocities(model) = model.velocities
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the momentum tuple used for momentum advection transport
+and the continuity equation divergence.
+
+For standard (non-terrain) models, this is `model.momentum`.
+For terrain-following coordinates, the vertical component `ρw` is
+replaced by the contravariant vertical momentum ``\\rho \\tilde{\\Omega}``.
+"""
+transport_momentum(model) = model.momentum
+
+#####
 ##### Auxiliary dynamics variables interface
 #####
 
 """
-    compute_auxiliary_dynamics_variables!(model)
+$(TYPEDSIGNATURES)
 
 Compute auxiliary (diagnostic) variables specific to the dynamics formulation.
 
