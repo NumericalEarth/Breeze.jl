@@ -31,7 +31,7 @@ using KernelAbstractions: @index, @kernel
 """
     struct DCMIP2016KesslerMicrophysics{FT}
 
-DCMIP2016 implementation of the Kessler (1969) warm-rain bulk microphysics scheme.
+DCMIP2016 implementation of the [Kessler (1969)](@cite Kessler1969) warm-rain bulk microphysics scheme.
 See the constructor [`DCMIP2016KesslerMicrophysics`](@ref) for full documentation.
 """
 struct DCMIP2016KesslerMicrophysics{FT}
@@ -67,10 +67,10 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct a DCMIP2016 implementation of the Kessler (1969) warm-rain bulk microphysics scheme.
+Construct a DCMIP2016 implementation of the [Kessler (1969)](@cite Kessler1969) warm-rain bulk microphysics scheme.
 
 This implementation follows the DCMIP2016 test case specification, which is based on
-Klemp and Wilhelmson (1978).
+[Klemp and Wilhelmson (1978)](@cite Klemp1978).
 
 # Positional Arguments
 - `FT`: Floating-point type for all parameters (default: `Oceananigans.defaults.FloatType`).
@@ -79,7 +79,7 @@ Klemp and Wilhelmson (1978).
 - Zarzycki, C. M., et al. (2019). DCMIP2016: the splitting supercell test case. Geoscientific Model Development, 12, 879–892.
 - Kessler, E. (1969). On the Distribution and Continuity of Water Substance in Atmospheric Circulations.
   Meteorological Monographs, 10(32).
-- Klemp, J. B., & Wilhelmson, R. B. (1978). The Simulation of Three-Dimensional Convective Storm Dynamics.
+- Klemp, J. B., & Wilhelmson, R. B. (1978). The simulation of three-dimensional convective storm dynamics.
   Journal of the Atmospheric Sciences, 35(6), 1070-1096.
 - DCMIP2016 Fortran implementation (`kessler.f90` in [DOI: 10.5281/zenodo.1298671](https://doi.org/10.5281/zenodo.1298671))
 

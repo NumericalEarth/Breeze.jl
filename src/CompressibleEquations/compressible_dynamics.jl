@@ -23,15 +23,15 @@ time-stepper is used:
 - [`ExplicitTimeStepping`](@ref): All tendencies computed together (small Δt required)
 """
 struct CompressibleDynamics{TD, D, P, FT, RS, TM, CV, CM, TRP, TRD}
-    time_discretization :: TD # SplitExplicitTimeDiscretization or ExplicitTimeStepping
-    density :: D              # ρ (prognostic)
-    pressure :: P             # p = ρ R^m T (diagnostic)
-    standard_pressure :: FT   # pˢᵗ (reference pressure for potential temperature)
-    surface_pressure :: FT    # p₀ (mean pressure at the bottom of the atmosphere)
-    reference_state :: RS     # ExnerReferenceState for base-state pressure correction (or Nothing)
-    terrain_metrics :: TM     # TerrainMetrics for terrain-following coordinates (or Nothing)
-    Ω̃ :: CV                   # Contravariant vertical velocity diagnostic field (or Nothing)
-    ρΩ̃ :: CM                  # Contravariant vertical momentum diagnostic field (or Nothing)
+    time_discretization :: TD         # SplitExplicitTimeDiscretization or ExplicitTimeStepping
+    density :: D                      # ρ (prognostic)
+    pressure :: P                     # p = ρ R^m T (diagnostic)
+    standard_pressure :: FT           # pˢᵗ (reference pressure for potential temperature)
+    surface_pressure :: FT            # p₀ (mean pressure at the bottom of the atmosphere)
+    reference_state :: RS             # ExnerReferenceState for base-state pressure correction (or Nothing)
+    terrain_metrics :: TM             # TerrainMetrics for terrain-following coordinates (or Nothing)
+    Ω̃ :: CV                           # Contravariant vertical velocity diagnostic field (or Nothing)
+    ρΩ̃ :: CM                          # Contravariant vertical momentum diagnostic field (or Nothing)
     terrain_reference_pressure :: TRP # 3D reference pressure for terrain PG (or Nothing)
     terrain_reference_density :: TRD  # 3D reference density for terrain buoyancy (or Nothing)
 end

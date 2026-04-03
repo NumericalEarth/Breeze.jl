@@ -1002,8 +1002,8 @@ function recover_full_fields!(model, substepper, U⁰, Δt_stage)
 end
 
 @kernel function _nonlinear_recovery_wsrk3!(ρ, ρχ, π′_final, π′_initial, πᵣ,
-                                             θᵥ, Gˢρχ, Gˢρ,
-                                             ρ⁰, ρχ⁰, pˢᵗ, Rᵈ, κ, Δt_stage)
+                                            θᵥ, Gˢρχ, Gˢρ,
+                                            ρ⁰, ρχ⁰, pˢᵗ, Rᵈ, κ, Δt_stage)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
