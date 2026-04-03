@@ -136,11 +136,14 @@ IMEX-ARK approach that caused instability in our HEVI implementation).
 
 ### 6. Source term re-evaluation
 
-**ERF:** Re-evaluates momentum and cell-centered source terms EVERY acoustic substep
-(`make_sources`, `make_mom_sources`). This is more expensive but allows time-varying
-forcing during the acoustic loop.
+**ERF:** Calls `make_sources` and `make_mom_sources` every acoustic substep, but with
+`is_slow_step=false` only a SUBSET is recomputed: Rayleigh damping and immersed boundary
+forcing (if enabled). The main physics (subsidence, nudging, radiation) are only computed
+on the slow step. Momentum sources (Coriolis, geostrophic wind) are also re-evaluated
+per substep since they depend on the current velocity.
 
 **MPAS:** Slow tendencies are computed ONCE per RK stage and frozen during all substeps.
+No source re-evaluation within the acoustic loop.
 
 ### 7. Code structure
 
@@ -164,7 +167,7 @@ forcing during the acoustic loop.
 | Tridiagonal | Combined P/Q coeffs | Three separate couplings | **MPAS**: clearer physics, matches tech note |
 | Divergence damping | Forward extrap only | Forward extrap + 3D filter | **MPAS**: more complete damping |
 | Density | Full prognostic | Perturbation | **MPAS**: consistent with perturbation framework |
-| Source re-eval | Every substep | Once per RK stage | **MPAS**: cheaper, standard practice |
+| Source re-eval | Subset per substep | Once per RK stage | **MPAS**: simpler, standard practice |
 | Code complexity | Simpler (one approach) | More complex (many options) | ERF is easier to read; MPAS is more complete |
 
 **Bottom line:** ERF and MPAS implement the same algorithm (Klemp et al. 2007) with
