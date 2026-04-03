@@ -70,9 +70,9 @@ Pre-computed terrain derivative fields and model top height.
 Fields
 ======
 
-- `topography`: 2D `CenterField` storing ``h(x, y)``
-- `∂x_h`: 2D field storing ``\\partial h / \\partial x`` at ``(Face, Center)``
-- `∂y_h`: 2D field storing ``\\partial h / \\partial y`` at ``(Center, Face)``
+- `topography`: 2D field storing ``h(x, y)`` at `(Center, Center)`
+- `∂x_h`: 2D field storing ``\\partial h / \\partial x`` at `(Face, Center)`
+- `∂y_h`: 2D field storing ``\\partial h / \\partial y`` at `(Center, Face)`
 - `z_top`: Height of the model top (top of the reference coordinate)
 - `pressure_gradient_stencil`: Stencil type for the terrain-corrected horizontal
   pressure gradient ([`SlopeOutsideInterpolation`](@ref) or [`SlopeInsideInterpolation`](@ref))

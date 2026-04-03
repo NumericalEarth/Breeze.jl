@@ -24,13 +24,13 @@ Wicker-Skamarock third-order Runge-Kutta time stepper with acoustic substepping
 for fully compressible dynamics.
 
 Unlike [`AcousticSSPRungeKutta3`](@ref) which uses convex combinations,
-this scheme uses stage fractions `Δt/3, Δt/2, Δt`:
+this scheme uses stage fractions ``Δt/3``, ``Δt/2``, and `` ``:
 
 - Stage 1: ``U^* = U^n + (Δt/3) \\, R(U^n)``
 - Stage 2: ``U^{**} = U^n + (Δt/2) \\, R(U^*)``
 - Stage 3: ``U^{n+1} = U^n + Δt \\, R(U^{**})``
 
-Each stage evaluates the RHS at the current stage state, then resets to ``U^n``
+Each stage evaluates the RHS, ``R``, at the current stage state, then resets to ``U^n``
 and advances by ``β Δt``. The absence of convex combinations makes this scheme
 compatible with split-explicit acoustic substepping, allowing the full pressure
 gradient and buoyancy to be included in the slow tendency.
@@ -68,9 +68,9 @@ end
 
 """
     AcousticRungeKutta3(grid, prognostic_fields;
-                         dynamics,
-                         implicit_solver = nothing,
-                         Gⁿ = map(similar, prognostic_fields))
+                        dynamics,
+                        implicit_solver = nothing,
+                        Gⁿ = map(similar, prognostic_fields))
 
 Construct an `AcousticRungeKutta3` time stepper for fully compressible dynamics.
 
@@ -82,9 +82,9 @@ Keyword Arguments
 - `Gⁿ`: Tendency fields at current stage. Default: similar to `prognostic_fields`
 """
 function AcousticRungeKutta3(grid, prognostic_fields;
-                              dynamics,
-                              implicit_solver::TI = nothing,
-                              Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
+                             dynamics,
+                             implicit_solver::TI = nothing,
+                             Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 
     FT = eltype(grid)
 
@@ -164,7 +164,7 @@ $(TYPEDSIGNATURES)
 Step forward `model` one time step `Δt` with Wicker-Skamarock RK3 and acoustic substepping.
 
 The algorithm follows [Wicker and Skamarock (2002)](@cite WickerSkamarock2002):
-- Outer loop: 3-stage RK3 with stage fractions `Δt/3, Δt/2, Δt`
+- Outer loop: 3-stage RK3 with stage fractions `Δt/3`, `Δt/2`, `Δt`
 - Inner loop: Acoustic substeps for fast (pressure) tendencies
 
 Each RK stage:

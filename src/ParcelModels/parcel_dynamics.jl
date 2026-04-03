@@ -40,11 +40,13 @@ Singleton type for prognostic vertical velocity dynamics. The parcel has a
 prognostic vertical velocity driven by buoyancy:
 
 ```math
-dw/dt = b
-dz/dt = w
+\\begin{align*}
+dw/dt &= b \\\\
+dz/dt &= w
+\\end{align*}
 ```
 
-where `b = -g (ρᵖ - ρᵉ) / ρᵉ` is the net buoyancy from the density
+where ``b = -g (ρᵖ - ρᵉ) / ρᵉ`` is the net buoyancy from the density
 difference, including both the virtual temperature effect and condensate loading.
 """
 struct PrognosticVerticalVelocity end
@@ -806,14 +808,14 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Apply an SSP RK3 substep with coefficient `α`:
+Apply an SSP RK3 substep with coefficient ``α``:
 
 ```math
 u^{(m)} = (1 - α) u^{(0)} + α (u^{(m-1)} + Δt G^{(m-1)})
 ```
 
-where `u^{(0)}` is the initial state, `u^{(m-1)}` is the current state,
-and `G^{(m-1)}` is the tendency at the current state.
+where ``u^{(0)}`` is the initial state, ``u^{(m-1)}`` is the current state,
+and ``G^{(m-1)}`` is the tendency at the current state.
 
 The parcel model steps specific quantities (e, qᵗ) directly for exact conservation.
 For adiabatic ascent with no microphysics sources, de/dt = dqᵗ/dt = 0, so these
@@ -905,9 +907,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Step the parcel state forward using Forward Euler: `x^(n+1) = x^n + Δt * G^n`.
+Step the parcel state forward using Forward Euler:
 
-Computes tendencies at the current state, then advances all prognostic variables.
+    x^(n+1) = x^n + Δt * G^n
+
+Compute tendencies at the current state, then advance all prognostic variables.
 After updating position, the thermodynamic state is adjusted for the
 new height (adiabatic adjustment) and environmental conditions are
 updated from the profiles.
