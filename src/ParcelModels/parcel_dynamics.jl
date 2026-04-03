@@ -909,7 +909,9 @@ $(TYPEDSIGNATURES)
 
 Step the parcel state forward using Forward Euler:
 
-    x^(n+1) = x^n + Δt * G^n
+```math
+x^{n+1} = x^n + Δt G^n
+```
 
 Compute tendencies at the current state, then advance all prognostic variables.
 After updating position, the thermodynamic state is adjusted for the
