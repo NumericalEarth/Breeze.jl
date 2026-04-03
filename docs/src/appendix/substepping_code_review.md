@@ -118,20 +118,80 @@ Matches MPAS's `flux * 0.5*(theta_m(cell1) + theta_m(cell2))`.
 | Per-stage reset | ✓ works | Yes |
 | Stage-frozen Exner | ✓ works | Yes |
 
-### Remaining concern: discrete consistency of slow PGF
+### CRITICAL: Discrete consistency of slow PGF with cofwz
 
-MPAS computes `tend_w_euler` in the SAME Exner form as the cofwz coefficient:
-```
-tend_w = -c2 * Π * ∂(ρθ_p)/∂z + buoyancy
+**This is the most important remaining issue.**
+
+MPAS is designed so the slow tendency and acoustic solver use **discretely identical**
+pressure gradient formulations. Specifically:
+
+**MPAS slow w tendency** (line 5905-5907):
+```fortran
+tend_w_euler(k) = -cqw(k) * (rdzu(k) * (pp(k) - pp(k-1)) - fzm(k)*dpdz(k) - fzp(k)*dpdz(k-1))
 ```
 
-Breeze computes the slow w tendency from the conservation-form model tendency:
-```
-Gˢw = (1/ρ) * [-∂(p-p_ref)/∂z + g(ρ-ρ_ref) + advection + Coriolis + ...]
+where `pp` is the **linearized** perturbation pressure (line 6985-6988):
+```fortran
+pressure_p(k) = zz * rgas * (exner(k)*rtheta_p(k) + rtheta_base(k)*(exner(k)-exner_base(k)))
 ```
 
-The conservation-form PGF `∂p/∂z` and the Exner-form PGF `c2 Π ∂(ρθ)/∂z` are
-analytically equivalent but discretely different (different stencil/interpolation).
-If the slow tendency's PGF doesn't match the acoustic solver's cofwz, the mismatch
-creates a spurious source/sink at each substep. This may appear as acoustic noise
-proportional to Δτ. Watch for it in test results.
+This is NOT `p_EOS - p_base`. It is a specific linearization of the EOS that is
+**discretely consistent** with cofwz's `c2 * Π * ∂(ρθ)/∂z`.
+
+**MPAS acoustic cofwz**:
+```fortran
+cofwz(k) = dtseps * c2 * zz_face * rdzu * cqw * pi_face
+```
+
+The slow PGF `rdzu * (pp(k) - pp(k-1))` and the acoustic correction `cofwz * ∂(ρθ_pp)/∂z`
+use the SAME discrete operator. Their sum gives the correct total pressure gradient.
+The slow part captures the stage-frozen PGF; the acoustic part corrects for the
+ρθ perturbation accumulated during substeps.
+
+**Breeze current state** — slow tendency uses conservation-form PGF:
+```julia
+Gˢw = Gˢρw / ρ   where Gˢρw includes -∂p_EOS/∂z + g(ρ-ρ_ref)
+```
+
+The EOS PGF `∂p/∂z = ∂/∂z[p₀(Rᵈρθ/p₀)^γ]` is discretely different from the
+Exner-form PGF `c2 Π ∂(ρθ)/∂z`. The difference is O(Δz²) and creates a spurious
+forcing at every substep. Over N substeps per stage, this accumulates to O(N Δτ Δz²).
+
+**The same issue applies to:**
+1. **Horizontal slow PGF**: Gˢu includes `∂p/∂x` from EOS, but acoustic horizontal
+   PGF uses `c2 Π ∂(rtheta_pp)/∂x`. Discrete mismatch.
+2. **Buoyancy**: Gˢw includes `-g(ρ-ρ_ref)/ρ`, but cofwr uses `g/2`. Different
+   discrete forms.
+
+**The fix (matching MPAS architecture):**
+
+Restore the `SplitExplicitTimeDiscretization` zeroing dispatches for PGF and buoyancy
+in `compressible_density_tendency.jl`, then compute the Exner-form PGF+buoyancy in
+`_convert_slow_tendencies!`:
+
+```julia
+# In _convert_slow_tendencies!:
+# Vertical PGF in Exner form (matches cofwz discretization):
+rcv = Rᵈ / (cₚ - Rᵈ)
+c2 = cₚ * rcv
+Π_face = ℑzᵃᵃᶠ(i, j, k, grid, Π)  # stage-frozen full Exner
+ρθ_p = model_ρθ - ρθ_base  # perturbation ρθ from reference
+∂z_ρθ_p = (ρθ_p[i,j,k] - ρθ_p[i,j,k-1]) / Δzᶠ
+pgf_exner = -c2 * Π_face * ∂z_ρθ_p
+
+# Buoyancy (MPAS dpdz form):
+# dpdz = -g * (ρ_base * qtot + ρ_p * (1 + qtot))
+# For dry: dpdz = -g * ρ_p = -g * (ρ - ρ_base)
+buoyancy = g * (ρ - ρ_base) / ρ  # velocity form
+
+Gˢw[i,j,k] = (Gˢρw[i,j,k]/ρ + pgf_exner/ρ_face + buoyancy) * (k > 1)
+```
+
+Wait — actually the momentum tendency Gˢρw already includes advection + Coriolis
+but NOT PGF+buoyancy (if zeroed by dispatch). So:
+
+```julia
+Gˢw = (Gˢρw/ρ) + exner_PGF/ρ + buoyancy   [PGF+buoyancy added in Exner form]
+```
+
+This ensures the slow PGF matches cofwz's discretization exactly.
