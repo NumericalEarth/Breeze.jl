@@ -6,7 +6,10 @@ Module implementing anelastic dynamics for atmosphere models.
 The anelastic approximation filters acoustic waves by assuming density and pressure
 are small perturbations from a dry, hydrostatic, adiabatic reference state.
 The key constraint is that mass flux divergence vanishes:
-``\\boldsymbol{\\nabla} ⋅ (ρᵣ \\boldsymbol{u}) = 0``.
+
+```math
+\\boldsymbol{\\nabla} ⋅ (ρᵣ \\boldsymbol{u}) = 0``
+```
 """
 module AnelasticEquations
 
