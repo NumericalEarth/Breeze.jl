@@ -35,7 +35,7 @@ where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + gustiness²)` is th
 """
 function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0, surface_temperature=nothing)
     if coefficient isa PolynomialCoefficient && isnothing(surface_temperature)
-        error("surface_temperature keyword argument must be provided when using a polynomial drag coefficient")
+        throw(ArgumentError("surface_temperature keyword argument must be provided when configuring BulkDrag with a PolynomialCoefficient"))
     end
     return BulkDragFunction(direction, coefficient, gustiness, surface_temperature)
 end
