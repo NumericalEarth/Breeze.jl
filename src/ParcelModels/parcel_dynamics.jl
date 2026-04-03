@@ -36,18 +36,11 @@ struct PrescribedVerticalVelocity end
 """
     PrognosticVerticalVelocity
 
-Singleton type for prognostic vertical velocity dynamics. The parcel has a
-prognostic vertical velocity driven by buoyancy:
-
-```math
-\\begin{align*}
-dw/dt &= b \\\\
-dz/dt &= w
-\\end{align*}
-```
-
-where ``b = -g (ρᵖ - ρᵉ) / ρᵉ`` is the net buoyancy from the density
-difference, including both the virtual temperature effect and condensate loading.
+Singleton type for prognostic vertical velocity dynamics. The parcel
+has a prognostic vertical velocity driven by buoyancy, i.e.,
+dz/dt = w and dw/dt = b, where b = -g (ρᵖ - ρᵉ) / ρᵉ is the net buoyancy
+from the density difference, including both the virtual temperature effect
+and condensate loading.
 """
 struct PrognosticVerticalVelocity end
 
@@ -466,7 +459,7 @@ $(TYPEDSIGNATURES)
 Set specific humidity field from relative humidity, computing
 
 ```math
-qᵗ = ℋ * qᵛ⁺(T, ρ).
+qᵗ = ℋ qᵛ⁺(T, ρ).
 ```
 
 where ``qᵗ`` is the total specific moisture, ``ℋ`` is the relative humidity,
@@ -648,8 +641,8 @@ $(TYPEDSIGNATURES)
 
 Compute vertical velocity tendencies for [`PrognosticVerticalVelocity`](@ref).
 
-The parcel has a prognostic vertical velocity driven by buoyancy:
-`dw/dt = B`, `dz/dt = w`.
+The parcel has a prognostic vertical velocity driven by buoyancy, i.e.,
+dz/dt = w and dw/dt = B.
 """
 @inline function compute_vertical_velocity_tendencies!(tendencies, state, dynamics, model, ::PrognosticVerticalVelocity)
     B = parcel_buoyancy(state, dynamics, model.thermodynamic_constants)
