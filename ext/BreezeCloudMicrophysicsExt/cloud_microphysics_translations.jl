@@ -119,7 +119,7 @@ Rate of change of rain specific humidity (negative = evaporation)
 
     # Ventilated evaporation rate from Mason equation
     # Base evaporation rate (unventilated)
-    base_rate = 4π * n₀ / ρ * 𝒮 * G * λ⁻¹^2
+    base_rate = FT(4π) * n₀ / ρ * 𝒮 * G * λ⁻¹^2
 
     # Ventilation correction terms
     Sc = ν_air / D_vapor
@@ -191,7 +191,7 @@ Rate of change of snow specific humidity (positive = deposition, negative = subl
     λ⁻¹ = lambda_inverse(pdf, mass, qˢ, ρ)
 
     # Ventilated sublimation/deposition rate from Mason equation
-    base_rate = 4π * n₀ / ρ * 𝒮 * G * λ⁻¹^2
+    base_rate = FT(4π) * n₀ / ρ * 𝒮 * G * λ⁻¹^2
 
     # Ventilation correction terms
     Sc = ν_air / D_vapor
@@ -258,7 +258,7 @@ Rate of snow mass lost to melting [kg/kg/s] (always non-negative)
     λ⁻¹ = lambda_inverse(pdf, mass, qˢ, ρ)
 
     # Sensible-heat-driven melting rate
-    base_rate = 4π * n₀ / ρ * K_therm / ℒf * (T - T_freeze) * λ⁻¹^2
+    base_rate = FT(4π) * n₀ / ρ * K_therm / ℒf * (T - T_freeze) * λ⁻¹^2
 
     # Ventilation correction terms
     Sc = ν_air / D_vapor
@@ -556,14 +556,14 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
 
     # Liquid relaxation
-    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / (Nˡ * ρᴸ * (4π / 3))), zero(FT))
-    Kˡ = 4π * ρᴸ * Nˡ * rˡ * G * γ
+    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / (Nˡ * ρᴸ * FT(4π / 3))), zero(FT))
+    Kˡ = FT(4π) * ρᴸ * Nˡ * rˡ * G * γ
 
     # Ice relaxation
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / (Rᵛ * cᵖᵐ * T * p)
-    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / (Nⁱ * ρᴵ * (4π / 3))), zero(FT))
+    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / (Nⁱ * ρᴵ * FT(4π / 3))), zero(FT))
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
-    Kⁱ = 4π * Nⁱ * rⁱ * Gⁱ * γⁱ
+    Kⁱ = FT(4π) * Nⁱ * rⁱ * Gⁱ * γⁱ
 
     ξ = pᵛ⁺ / pᵛ⁺ⁱ
 
