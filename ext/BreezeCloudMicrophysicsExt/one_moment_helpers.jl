@@ -45,7 +45,7 @@ Adapt.adapt_structure(to, k::OneMomentPrecipitationRateKernel) =
 
     # Accretion: cloud liquid captured by falling rain
     Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
-                     categories.hydrometeor_velocities.rain, categories.collisions,
+                     categories.hydrometeor_velocities.blk1m.rain, categories.collisions,
                      qᶜˡ, qʳ, ρ)
 
     # Total precipitation production rate (kg/kg/s)
@@ -186,6 +186,7 @@ function Utils.prettysummary(aspr::CloudMicrophysics.Parameters.SnowAspectRatio)
 end
 
 Utils.prettysummary(vel::Blk1MVelType) = "Blk1MVelType(...)"
+Utils.prettysummary(vel::TerminalVelocityParams) = "TerminalVelocityParams(...)"
 Utils.prettysummary(vel::Blk1MVelTypeRain) = "Blk1MVelTypeRain(...)"
 Utils.prettysummary(vel::Blk1MVelTypeSnow) = "Blk1MVelTypeSnow(...)"
 
