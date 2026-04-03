@@ -75,7 +75,7 @@ grid = RectilinearGrid(CPU(), size=(Nx, Nz), halo=(5, 5),
 
 Δθ = 0.01    # K - perturbation amplitude
 a  = 5000    # m - perturbation half-width parameter
-x₀ = Lx / 3 # m - perturbation center in x
+x₀ = Lx / 3  # m - perturbation center in x
 
 constants = ThermodynamicConstants()
 g = constants.gravitational_acceleration
@@ -92,24 +92,24 @@ Ns = 8 # acoustic substeps for fixed-substep cases
 surface_pressure = p₀
 potential_temperature = θ₀
 
-# Case 1: Anelastic
+# ### Case 1: Anelastic
 
 reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature)
 anelastic_dynamics = AnelasticDynamics(reference_state)
 
-# Case 2: Compressible (fully explicit, no substepping)
+# ### Case 2: Compressible (fully explicit, no substepping)
 compressible_dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                               surface_pressure,
                                               reference_potential_temperature=θᵇᵍ)
 
-# Case 3: Boussinesq (constant reference density)
+# ### Case 3: Boussinesq (constant reference density)
 constant_density_reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature)
 
 ρ₀ = adiabatic_hydrostatic_density(0, p₀, θ₀, pˢᵗ, constants)
 set!(constant_density_reference_state.density, ρ₀)
 boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
 
-# Case 4: Split-explicit with adaptive substeps at the advective time step.
+# ### Case 4: Split-explicit with adaptive substeps at the advective time step.
 # The number of acoustic substeps is computed automatically from the CFL condition
 # each time step: `N = ceil(safety_factor · Δt · ℂᵃᶜ / Δx_min)`.
 # We use SSP-RK3 because it is stable at larger advective CFL than WS-RK3.
@@ -117,7 +117,7 @@ adaptive_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                           surface_pressure,
                                           reference_potential_temperature=θᵇᵍ)
 
-# Case 5: Split-explicit with SSP-RK3 outer loop
+# ### Case 5: Split-explicit with SSP-RK3 outer loop
 # Uses acoustic substepping with Exner pressure variables (velocity + π') and
 # vertically implicit w-π' coupling. The reference potential temperature enables
 # base-state subtraction for accurate perturbation pressure.
@@ -126,7 +126,7 @@ ssp_dynamics = CompressibleDynamics(ssp_time_discretization;
                                     surface_pressure,
                                     reference_potential_temperature = θᵇᵍ)
 
-# Case 6: Split-explicit with Wicker-Skamarock RK3 outer loop
+# ### Case 6: Split-explicit with Wicker-Skamarock RK3 outer loop
 # Same acoustic substepping as SSP-RK3, but with WS-RK3 stage fractions (Δt/3, Δt/2, Δt)
 # instead of SSP convex combinations.
 ws_time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.10)
