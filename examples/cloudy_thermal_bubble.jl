@@ -11,6 +11,7 @@ using Oceananigans.Units
 using Statistics
 using Printf
 using CairoMakie
+using CloudMicrophysics
 
 # ## Dry thermal bubble
 #
@@ -274,7 +275,6 @@ nothing #hide
 # Note: The one-moment microphysics requires the CloudMicrophysics.jl package to be loaded,
 # which activates the `BreezeCloudMicrophysicsExt` extension.
 
-using CloudMicrophysics
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
