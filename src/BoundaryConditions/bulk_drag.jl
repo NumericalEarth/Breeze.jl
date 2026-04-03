@@ -11,7 +11,8 @@ struct BulkDragFunction{D, C, G, T, FV}
 end
 
 """
-    BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0, surface_temperature=nothing)
+    BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0,
+                       surface_temperature=nothing, filtered_velocities=nothing)
 
 Create a bulk drag function for computing surface momentum fluxes using bulk aerodynamic
 formulas. The drag function computes a quadratic drag:
@@ -38,6 +39,9 @@ where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + gustiness²)` is th
 """
 function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0,
                             surface_temperature=nothing, filtered_velocities=nothing)
+    if coefficient isa PolynomialCoefficient && isnothing(surface_temperature)
+        throw(ArgumentError("surface_temperature keyword argument must be provided when configuring BulkDrag with a PolynomialCoefficient"))
+    end
     return BulkDragFunction(direction, coefficient, gustiness, surface_temperature, filtered_velocities)
 end
 
