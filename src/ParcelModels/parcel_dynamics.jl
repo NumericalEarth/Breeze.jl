@@ -972,9 +972,9 @@ Advance the parcel model by one time step `Δt` using SSP RK3.
 
 The SSP RK3 scheme [Shu and Osher (1988)](@cite Shu1988Efficient) is:
 ```math
-u^{(1)} = u^{(0)} + Δt L(u^{(0)})
-u^{(2)} = \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt L(u^{(1)})
-u^{(3)} = \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt L(u^{(2)})
+u^{(1)} = u^{(0)} + Δt G(u^{(0)})
+u^{(2)} = \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt G(u^{(1)})
+u^{(3)} = \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt G(u^{(2)})
 ```
 
 This scheme has CFL coefficient = 1 and is TVD (total variation diminishing).
@@ -988,19 +988,19 @@ function TimeSteppers.time_step!(model::AtmosphereModel{<:ParcelDynamics, <:Any,
     # Store initial state for SSP RK3 stages
     store_initial_parcel_state!(U⁰, state)
 
-    # Stage 1: u^(1) = u^(0) + Δt * L(u^(0))
+    # Stage 1: u^(1) = u^(0) + Δt * G(u^(0))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α¹)
     tick_stage!(model.clock, Δt)
 
-    # Stage 2: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * L(u^(1)))
+    # Stage 2: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * G(u^(1)))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α²)
     # Don't tick - still at t + Δt for time-dependent forcing
 
-    # Stage 3: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * L(u^(2)))
+    # Stage 3: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * G(u^(2)))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α³)
 
     # Final clock update (adjust for floating point error)
-    tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹*Δt in stage 1
+    tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹ * Δt in stage 1
     corrected_Δt = tⁿ⁺¹ - model.clock.time
     tick_stage!(model.clock, corrected_Δt, Δt)
 
