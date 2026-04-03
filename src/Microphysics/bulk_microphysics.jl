@@ -146,11 +146,10 @@ condensation; negative values indicate evaporation. Evaporation is limited by th
 """
 @inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
-    timescale = Γˡ * τᶜˡ
-    Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / timescale
+    Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / (Γˡ * τᶜˡ)
 
     # Limit evaporation to available cloud liquid
-    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / timescale
+    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
     return max(Sᶜᵒⁿᵈ, Sᶜᵒⁿᵈ_min)
 end
 
@@ -164,11 +163,10 @@ deposition; negative values indicate sublimation. Sublimation is limited by the 
 """
 @inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
     Γⁱ = ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
-    timescale = Γⁱ * τᶜⁱ
-    Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / timescale
+    Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ * τᶜⁱ)
 
     # Limit sublimation to available cloud ice
-    Sᵈᵉᵖ_min = -max(0, qᶜⁱ) / timescale
+    Sᵈᵉᵖ_min = -max(0, qᶜⁱ) / τᶜⁱ
     return max(Sᵈᵉᵖ, Sᵈᵉᵖ_min)
 end
 
