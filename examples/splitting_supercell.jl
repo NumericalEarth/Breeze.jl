@@ -24,8 +24,8 @@
 #
 # ```math
 # θ(z) = \begin{cases}
-#     θ_0 + (θ_{\rm tr} - θ_0) \left(\frac{z}{z_{\rm tr}}\right)^{5/4} & z \leq z_{\rm tr} \\
-#     θ_{\rm tr} \exp\left(\frac{g}{c_p^d T_{\rm tr}} (z - z_{\rm tr})\right) & z > z_{\rm tr}
+#     θ_0 + (θ_{\rm tr} - θ_0) \left(\dfrac{z}{z_{\rm tr}}\right)^{5/4} & z \leq z_{\rm tr} \\
+#     θ_{\rm tr} \exp\left[\dfrac{g}{c_p^d T_{\rm tr}} (z - z_{\rm tr})\right] & z > z_{\rm tr}
 # \end{cases}
 # ```
 #
@@ -40,12 +40,12 @@
 #
 # ```math
 # θ'(x, y, z) = \begin{cases}
-#     Δθ \cos^2\left(\frac{\pi}{2} R\right) & R < 1 \\
+#     Δθ \cos^2\left(π R / 2 \right) & R < 1 \\
 #     0 & R \geq 1
 # \end{cases}
 # ```
 #
-# where ``R = \sqrt{(r/r_h)^2 + ((z-z_c)/r_z)^2}`` is the normalized radius,
+# where ``R = \sqrt{(r/r_h)^2 + [(z-z_c)/r_z]^2}`` is the normalized radius,
 # ``r = \sqrt{(x-x_c)^2 + (y-y_c)^2}`` is the horizontal distance from the bubble center,
 # ``Δθ = 3 \, {\rm K}`` is the perturbation amplitude, ``r_h = 10 \, {\rm km}`` is the
 # horizontal radius, and ``r_z = 1.5 \, {\rm km}`` is the vertical radius.
@@ -163,7 +163,7 @@ function θᵢ(x, y, z)
     θ̄ = θ_background(z)
     r = sqrt((x - xᵇ)^2 + (y - yᵇ)^2)
     R = sqrt((r / rᵇʰ)^2 + ((z - zᵇ) / rᵇᵛ)^2)
-    θ′ = ifelse(R < 1, Δθ * cos((π / 2) * R)^2, 0.0)
+    θ′ = ifelse(R < 1, Δθ * cos(π * R / 2)^2, 0.0)
     return θ̄ + θ′
 end
 
