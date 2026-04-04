@@ -804,7 +804,7 @@ $(TYPEDSIGNATURES)
 Apply an SSP RK3 substep with coefficient ``α``:
 
 ```math
-u^{(m)} = (1 - α) u^{(0)} + α (u^{(m-1)} + Δt G^{(m-1)})
+u^{(m)} = (1 - α) u^{(0)} + α \\left[u^{(m-1)} + Δt \\, G^{(m-1)}\\right]
 ```
 
 where ``u^{(0)}`` is the initial state, ``u^{(m-1)}`` is the current state,
@@ -903,7 +903,7 @@ $(TYPEDSIGNATURES)
 Step the parcel state forward using Forward Euler:
 
 ```math
-x^{n+1} = x^n + Δt G^n
+x^{n+1} = x^n + Δt \\, G^n
 ```
 
 Compute tendencies at the current state, then advance all prognostic variables.

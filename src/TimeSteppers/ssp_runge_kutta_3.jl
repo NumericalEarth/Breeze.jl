@@ -21,9 +21,9 @@ This time stepper uses the classic SSP RK3 scheme ([Shu-Osher 2006](@cite Shu198
 
 ```math
 \\begin{align*}
-u^{(1)} &= u^{(0)} + Δt G(u^{(0)}) \\\\
-u^{(2)} &= \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt G(u^{(1)}) \\\\
-u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt G(u^{(2)})
+u^{(1)} &= u^{(0)} + Δt \\, G(u^{(0)}) \\\\
+u^{(2)} &= \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt \\, G(u^{(1)}) \\\\
+u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt \\, G(u^{(2)})
 \\end{align*}
 ```
 
@@ -31,11 +31,11 @@ where ``G`` above is the right-hand-side, e.g., ``\\partial_t u = G(u)``.
 
 Each stage can be written in the form:
 ```math
-u^{(m)} = (1 - α) u^{(0)} + α \\left[u^{(m-1)} + Δt G(u^{(m-1)}) \\right]
+u^{(m)} = (1 - α) u^{(0)} + α \\left[u^{(m-1)} + Δt \\, G(u^{(m-1)}) \\right]
 ```
 with ``α = 1, 1/4, 2/3`` for stages 1, 2, 3 respectively.
 
-This scheme has CFL coefficient = 1 and is TVD (total variation diminishing).
+This scheme has CFL coefficient equal to 1 and it is TVD (total variation diminishing).
 
 Fields
 ======
@@ -55,9 +55,7 @@ struct SSPRungeKutta3{FT, U0, TG, TI} <: AbstractTimeStepper
 end
 
 """
-    SSPRungeKutta3(grid, prognostic_fields;
-                   implicit_solver = nothing,
-                   Gⁿ = map(similar, prognostic_fields))
+$(TYPEDSIGNATURES)
 
 Construct an `SSPRungeKutta3` on `grid` with `prognostic_fields` as described
 by [Shu and Osher (1988)](@cite Shu1988Efficient).
