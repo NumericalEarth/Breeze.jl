@@ -260,7 +260,7 @@ end
     # Use ifelse (not if/else) for GPU kernel compatibility.
     # When Nz < 2, clamp indices to 1 so reads are valid but dq_mass = 0.
     k_bot = 1
-    k_top = max(2, Nz)  # safe index: equals 2 when Nz >= 2, equals Nz when Nz < 2
+    k_top = max(2, Nz)  # safe index: equals 2 when Nz ≥ 2, equals Nz when Nz < 2
 
     @inbounds ρqᵛ_bot = ρqᵛᵉ[i, j, k_bot]
     @inbounds ρ_bot = ρ₀[i, j, k_bot]
@@ -273,7 +273,7 @@ end
     Δz_bot = Δzᶜᶜᶜ(i, j, k_bot, grid)
     Δz_top = Δzᶜᶜᶜ(i, j, k_top, grid)
 
-    can_borrow = (Nz >= 2) & (qᵛ_bot < 0) & (qᵛ_top > 0)
+    can_borrow = (Nz ≥ 2) & (qᵛ_bot < 0) & (qᵛ_top > 0)
     needed = -ρqᵛ_bot * Δz_bot       # mass needed at bottom [kg/m²]
     available = ρqᵛ_top * Δz_top      # mass available above [kg/m²]
     dq_mass = ifelse(can_borrow, min(needed, available), zero(ρqᵛ_bot))
@@ -328,7 +328,7 @@ end
 @inline function zero_orphaned_numbers!(i, j, k, pairs::Tuple{P, Vararg}) where {P}
     ρn, ρq = pairs[1]
     @inbounds ρn_val = ρn[i, j, k]
-    @inbounds ρn[i, j, k] = ifelse(ρq[i, j, k] <= 0, zero(ρn_val), ρn_val)
+    @inbounds ρn[i, j, k] = ifelse(ρq[i, j, k] ≤ 0, zero(ρn_val), ρn_val)
     zero_orphaned_numbers!(i, j, k, Base.tail(pairs))
     return nothing
 end

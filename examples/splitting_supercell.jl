@@ -126,12 +126,12 @@ nothing #hide
 function θ_background(z)
     θᵗ = θ₀ + (θᵖ - θ₀) * (z / zᵖ)^(5/4)
     θˢ = θᵖ * exp(g / (cᵖᵈ * Tᵖ) * (z - zᵖ))
-    return (z <= zᵖ) * θᵗ + (z > zᵖ) * θˢ
+    return (z ≤ zᵖ) * θᵗ + (z > zᵖ) * θˢ
 end
 
 # Relative humidity profile (decreases with height, 25% above tropopause):
 
-ℋ_background(z) = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z <= zᵖ) + 1/4 * (z > zᵖ)
+ℋ_background(z) = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z ≤ zᵖ) + 1/4 * (z > zᵖ)
 
 # Zonal wind profile with linear shear below ``zˢ`` and smooth transition (Equations 15-16):
 
@@ -140,7 +140,7 @@ function u_background(z)
     uᵗ = (-4/5 + 3 * (z / zˢ) - 5/4 * (z / zˢ)^2) * uˢ - uᶜ
     uᵘ = uˢ - uᶜ
     return (z < (zˢ - 1000)) * uˡ +
-           (abs(z - zˢ) <= 1000) * uᵗ +
+           (abs(z - zˢ) ≤ 1000) * uᵗ +
            (z > (zˢ + 1000)) * uᵘ
 end
 

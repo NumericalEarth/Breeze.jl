@@ -784,7 +784,7 @@ environmental profiles (pressure, density) beyond the grid is unphysical.
 """
 function check_domain_bounds!(state, grid)
     z_max = grid.Lz
-    if state.z >= z_max
+    if state.z ≥ z_max
         error("Parcel reached the model top (z = $(state.z) m ≥ Lz = $(z_max) m). " *
               "Increase the domain height or reduce the simulation stop_time.")
     elseif state.z < 0

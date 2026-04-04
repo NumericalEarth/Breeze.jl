@@ -301,7 +301,7 @@ that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 - `constants`: Breeze ThermodynamicConstants
 
 # Returns
-Thermal melt factor α (zero when T <= T_freeze)
+Thermal melt factor α (zero when T ≤ T_freeze)
 """
 @inline function warm_accretion_melt_factor(
     (; T_freeze)::Snow{FT},
@@ -311,7 +311,7 @@ Thermal melt factor α (zero when T <= T_freeze)
     cˡ = constants.liquid.heat_capacity
     ℒf = ice_latent_heat(T, constants) - liquid_latent_heat(T, constants)
     ΔT = T - T_freeze
-    return ifelse(T <= T_freeze, zero(FT), cˡ / ℒf * ΔT)
+    return ifelse(T ≤ T_freeze, zero(FT), cˡ / ℒf * ΔT)
 end
 
 #####
@@ -619,7 +619,7 @@ end
     ap = aerosol_activation.activation_parameters
     ad = aerosol_activation.aerosol_distribution
 
-    # Use safe positive w to avoid NaN in computation; result is 0 when w <= 0
+    # Use safe positive w to avoid NaN in computation; result is 0 when w ≤ 0
     # ARG 2000 parameterization is only valid for positive updraft velocities
     w⁺ = max(eps(FT), w)
 
@@ -652,6 +652,6 @@ end
 
     Sᵐᵃˣ_computed = 1 / sqrt(max(eps(FT), Σ_inv_Sᵐᵃˣ²))
 
-    # Return 0 for no updraft (w <= 0), otherwise return computed value
+    # Return 0 for no updraft (w ≤ 0), otherwise return computed value
     return ifelse(w > zero(FT), Sᵐᵃˣ_computed, zero(FT))
 end

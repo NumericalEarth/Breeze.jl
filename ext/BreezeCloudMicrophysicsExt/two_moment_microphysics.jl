@@ -682,9 +682,9 @@ end
     # ===== Numerical relaxation guards =====
 
     # Mass: conserved routing v→cl, cl→r, r→v
-    δᵛ  = ifelse(qᵛ  >= 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
-    δᶜˡ = ifelse(qᶜˡ >= 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τⁿᵘᵐ - ρqᶜˡ_phys)
-    δʳ  = ifelse(qʳ  >= 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
+    δᵛ  = ifelse(qᵛ  ≥ 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
+    δᶜˡ = ifelse(qᶜˡ ≥ 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τⁿᵘᵐ - ρqᶜˡ_phys)
+    δʳ  = ifelse(qʳ  ≥ 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
 
     ρqᵛ  = ρqᵛ_phys  + δᵛ  - δʳ
     ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
@@ -695,9 +695,9 @@ end
     Sⁿᵘᵐ_rain = -Nʳ  / τⁿᵘᵐ
     Sⁿᵘᵐ_aer  = -Nᵃ  / τⁿᵘᵐ
 
-    ρnᶜˡ = ifelse(nᶜˡ >= 0, Σ_dNᶜˡ, Sⁿᵘᵐ_cl)
-    ρnʳ  = ifelse(nʳ  >= 0, Σ_dNʳ,  Sⁿᵘᵐ_rain)
-    ρnᵃ  = ifelse(nᵃ  >= 0, dNᵃ_lim, Sⁿᵘᵐ_aer)
+    ρnᶜˡ = ifelse(nᶜˡ ≥ 0, Σ_dNᶜˡ, Sⁿᵘᵐ_cl)
+    ρnʳ  = ifelse(nʳ  ≥ 0, Σ_dNʳ,  Sⁿᵘᵐ_rain)
+    ρnᵃ  = ifelse(nᵃ  ≥ 0, dNᵃ_lim, Sⁿᵘᵐ_aer)
 
     return (; ρqᵛ, ρqᶜˡ, ρqʳ, ρnᶜˡ, ρnʳ, ρnᵃ)
 end
