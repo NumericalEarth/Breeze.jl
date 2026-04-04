@@ -490,8 +490,8 @@ redundant cube-root and deposited-ice-density calculations.
     # Both must produce identical thresholds. If one is changed, update the other.
     is_unrimed = Fᶠ < eps(FT)
 
-    # Safe rime fraction for rimed calculations
-    Fᶠ_safe = max(Fᶠ, eps(FT))
+    # Clamp Fᶠ away from 0 and 1 to avoid 0*Inf=NaN in IEEE arithmetic
+    Fᶠ_safe = clamp(Fᶠ, eps(FT), 1 - eps(FT))
 
     # Deposited ice density (Eq. 16 from MM15a)
     k = (1 - Fᶠ_safe)^(-1 / (3 - β))

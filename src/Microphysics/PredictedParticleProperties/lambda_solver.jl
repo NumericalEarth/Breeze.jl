@@ -401,8 +401,9 @@ Equation 16 in [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterizati
     ρᶠ = rime_density
     FT = typeof(β)
 
-    # Compute rimed density (use safe Fᶠ to avoid division by zero)
-    Fᶠ_safe = max(Fᶠ, eps(FT))
+    # Compute rimed density (clamp Fᶠ away from both 0 and 1 to avoid
+    # division by zero at Fᶠ=0 and 0*Inf=NaN at Fᶠ=1 in IEEE arithmetic)
+    Fᶠ_safe = clamp(Fᶠ, eps(FT), 1 - eps(FT))
     k = (1 - Fᶠ_safe)^(-1 / (3 - β))
     num = ρᶠ * Fᶠ_safe
     den = (β - 2) * (k - 1) / ((1 - Fᶠ_safe) * k - 1) - (1 - Fᶠ_safe)
@@ -480,8 +481,8 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Equatio
     D_spherical = regime_threshold(α, β, ρᵢ)
 
     # Compute rimed case thresholds (will be ignored if unrimed)
-    # Use safe values to avoid division by zero when Fᶠ = 0
-    Fᶠ_safe = max(Fᶠ, eps(FT))
+    # Clamp Fᶠ away from 0 and 1 to avoid 0*Inf=NaN in IEEE arithmetic
+    Fᶠ_safe = clamp(Fᶠ, eps(FT), 1 - eps(FT))
     ρ_dep = deposited_ice_density(mass, Fᶠ_safe, ρᶠ)
     ρ_g = graupel_density(Fᶠ_safe, ρᶠ, ρ_dep)
 
@@ -613,13 +614,19 @@ function logaddexp(a, b)
 end
 
 """
-    log_mass_moment(mass, rime_fraction, rime_density, μ, logλ; n=0)
+    log_mass_moment(mass, rime_fraction, rime_density, μ, logλ; n=0, liquid_fraction=0)
 
 Compute log(∫₀^∞ Dⁿ m(D) N'(D) dD / N₀) over the piecewise mass-diameter relationship.
+
+When `liquid_fraction` Fˡ > 0, the total mass includes a liquid coating term:
+`m(D) = (1 - Fˡ) × m_ice(D) + Fˡ × ρ_water × π/6 × D³`,
+matching the Fortran convention in `create_p3_lookupTable_1.f90`.
 """
-function log_mass_moment(mass::IceMassPowerLaw, rime_fraction, rime_density, μ, logλ; n = 0)
+function log_mass_moment(mass::IceMassPowerLaw, rime_fraction, rime_density, μ, logλ;
+                         n = 0, liquid_fraction = zero(typeof(μ)))
     FT = typeof(μ)
     Fᶠ = rime_fraction
+    Fˡ = liquid_fraction
 
     thresholds = ice_regime_thresholds(mass, rime_fraction, rime_density)
     α = mass.coefficient
@@ -635,8 +642,8 @@ function log_mass_moment(mass::IceMassPowerLaw, rime_fraction, rime_density, μ,
     unrimed_result = logaddexp(log_M₁, log_M₂_unrimed)
 
     # Compute rimed case (regimes 2-4)
-    # Use safe rime fraction to avoid division by zero
-    Fᶠ_safe = max(Fᶠ, eps(FT))
+    # Clamp Fᶠ away from 0 and 1 to avoid 0*Inf=NaN in IEEE arithmetic
+    Fᶠ_safe = clamp(Fᶠ, eps(FT), 1 - eps(FT))
 
     # Regime 2: rimed aggregates [D_spherical, D_graupel)
     log_M₂ = log_gamma_inc_moment(thresholds.spherical, thresholds.graupel, μ, logλ; k = β + n, scale = α)
@@ -651,8 +658,21 @@ function log_mass_moment(mass::IceMassPowerLaw, rime_fraction, rime_density, μ,
 
     rimed_result = logaddexp(logaddexp(log_M₁, log_M₂), logaddexp(log_M₃, log_M₄))
 
-    # Select result based on whether ice is rimed
-    return ifelse(iszero(Fᶠ), unrimed_result, rimed_result)
+    # Select ice-only mass moment based on whether ice is rimed
+    log_M_ice = ifelse(iszero(Fᶠ), unrimed_result, rimed_result)
+
+    # Add liquid mass contribution: Fˡ × ρ_water × π/6 × D³
+    # Total mass = (1 - Fˡ) × m_ice(D) + Fˡ × ρ_water × π/6 × D³
+    # In log-space: logaddexp(log(1-Fˡ) + log_M_ice, log(Fˡ) + log_M_liquid)
+    ρ_water = FT(1000)
+    a_liquid = ρ_water * FT(π) / 6
+    log_M_liquid = log_gamma_moment(μ, logλ; k = 3 + n, scale = a_liquid)
+
+    Fˡ_safe = clamp(Fˡ, eps(FT), 1 - eps(FT))
+    log_total = logaddexp(log(1 - Fˡ_safe) + log_M_ice, log(Fˡ_safe) + log_M_liquid)
+
+    # If no liquid, return ice-only result
+    return ifelse(Fˡ < eps(FT), log_M_ice, log_total)
 end
 
 #####
@@ -669,7 +689,8 @@ function log_mass_number_ratio(mass::IceMassPowerLaw,
                                closure,
                                rime_fraction, rime_density, liquid_fraction, logλ, L_ice)
     μ = shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, liquid_fraction, mass)
-    log_L_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ)
+    log_L_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ;
+                                     liquid_fraction)
     log_N_over_N₀ = log_gamma_moment(μ, logλ)
     return log_L_over_N₀ - log_N_over_N₀
 end
@@ -1181,7 +1202,8 @@ Returns (λ_min, λ_max).
 @inline function lambda_bounds_from_diameter(μ, bounds::DiameterBounds)
     FT = typeof(μ)
     λ_min = (μ + 1) / bounds.D_max
-    λ_max = max((μ + 1) / bounds.D_min, FT(P3_LAMBDA_MAX))
+    # Match Fortran: λ_max = (μ+1)/D_min (create_p3_lookupTable_1.f90 line 1071)
+    λ_max = (μ + 1) / bounds.D_min
     return (λ_min, λ_max)
 end
 
