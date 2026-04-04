@@ -933,10 +933,11 @@ to avoid redundant threshold computations within a quadrature loop.
     # Particle volume (sphere)
     V = FT(π) / 6 * D^3
 
-    # Effective density = mass / volume
-    # No clamping — the P3 m-D relationship already constrains density
-    # through the four regimes (sphere, aggregate, graupel, partial rime)
-    return m / max(V, eps(FT))
+    # Effective density = mass / volume.
+    # D is always positive in quadrature, so V > 0.  Guard only against
+    # exact zero (not eps(FT), which is ~2e-16 and larger than the volume
+    # of micrometer-scale particles).
+    return m / max(V, FT(1e-100))
 end
 
 # Backward-compatible method: compute thresholds on the fly

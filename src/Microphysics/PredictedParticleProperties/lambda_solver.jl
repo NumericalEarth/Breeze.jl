@@ -596,7 +596,10 @@ function log_gamma_inc_moment(D₁, D₂, μ, logλ; k = 0, scale = 1)
     (_, q₁) = gamma_inc(z, λ * D₁)
     (_, q₂) = gamma_inc(z, λ * D₂)
 
-    Δq = max(q₁ - q₂, eps(FT))
+    # Use a tiny floor (eps²) instead of eps to avoid amplification by large
+    # scale factors (e.g. α/(1-Fr) at Fr≈1).  The old eps floor produced
+    # spurious regime-4 contributions when multiplied by ~1e15 scale.
+    Δq = max(q₁ - q₂, eps(FT)^2)
 
     return -z * logλ + loggamma(z) + log(Δq) + log(FT(scale))
 end
