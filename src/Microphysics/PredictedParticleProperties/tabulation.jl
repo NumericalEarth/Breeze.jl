@@ -66,6 +66,11 @@ repeated evaluation during tabulation.
 
 # Keyword Arguments
 - `number_of_quadrature_points`: Number of quadrature points (default 64)
+- `quadrature`: Quadrature method — `:chebyshev` (default) or `:midpoint`.
+  Midpoint uses fixed-width bins matching the Fortran convention
+  (dd=2μm, 40000 bins). Override bin parameters via `bin_width` and `num_bins`.
+- `bin_width`: Bin width for midpoint rule [m] (default 2e-6, Fortran `dd`)
+- `num_bins`: Number of bins for midpoint rule (default 40000, Fortran `num_int_bins`)
 - `pure_ice_density`: Pure ice density [kg/m³] (default 917)
 - `unrimed_density_factor`: Effective density factor for unrimed aggregates (default 0.1)
 - `shape_parameter_override`: Fixed μ for PSD (default NaN = use P3Closure; 0 = exponential)
@@ -73,11 +78,18 @@ repeated evaluation during tabulation.
 function P3IntegralEvaluator(integral::AbstractP3Integral,
                               FT::Type{<:AbstractFloat} = Float64;
                               number_of_quadrature_points::Int = 64,
+                              quadrature::Symbol = :chebyshev,
+                              bin_width = 2e-6,
+                              num_bins = 40000,
                               pure_ice_density = FT(917),
                               unrimed_density_factor = FT(0.1),
                               shape_parameter_override = FT(NaN))
 
-    nodes, weights = chebyshev_gauss_nodes_weights(FT, number_of_quadrature_points)
+    if quadrature == :midpoint
+        nodes, weights = midpoint_nodes_weights(FT; bin_width=FT(bin_width), num_bins)
+    else
+        nodes, weights = chebyshev_gauss_nodes_weights(FT, number_of_quadrature_points)
+    end
 
     return P3IntegralEvaluator(
         integral,

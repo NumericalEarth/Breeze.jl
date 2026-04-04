@@ -71,6 +71,39 @@ end
 
 chebyshev_gauss_nodes_weights(n::Int) = chebyshev_gauss_nodes_weights(Float64, n)
 
+"""
+    MidpointNode{FT}
+
+Wrapper around a diameter value for midpoint-rule quadrature.
+
+When used with [`transform_to_diameter`](@ref) and [`jacobian_diameter_transform`](@ref),
+returns identity values (D itself and Jacobian = 1), so all existing Chebyshev integration
+loops work unchanged via dispatch.
+"""
+struct MidpointNode{FT}
+    D :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct midpoint-rule quadrature nodes and weights matching the Fortran P3 convention.
+
+Returns `(nodes::Vector{MidpointNode}, weights::Vector{FT})` where each node stores
+a diameter value `D_i = (i - 0.5) × bin_width` and each weight equals `bin_width`.
+
+Fortran defaults: `bin_width = 2μm`, `num_bins = 40000` for single integrals;
+`bin_width = 50μm`, `num_bins = 1500` for collection (double) integrals.
+"""
+function midpoint_nodes_weights(FT::Type{<:AbstractFloat} = Float64;
+                                bin_width::Real = 2e-6,
+                                num_bins::Int = 40000)
+    dd = FT(bin_width)
+    nodes   = [MidpointNode(FT((i - 0.5) * dd)) for i in 1:num_bins]
+    weights = fill(dd, num_bins)
+    return nodes, weights
+end
+
 #####
 ##### Domain transformation
 #####
@@ -95,6 +128,9 @@ relative to the characteristic size 1/λ.
     return scale / λ * (1 + x) / (1 - x + ε)
 end
 
+# Identity transform for midpoint-rule nodes (already in diameter space)
+@inline transform_to_diameter(node::MidpointNode, λ; scale=10) = node.D
+
 """
     jacobian_diameter_transform(x, λ; scale=10)
 
@@ -105,6 +141,9 @@ Jacobian dD/dx for the diameter transformation.
     denom = (1 - x + ε)^2
     return scale / λ * 2 / denom
 end
+
+# Identity Jacobian for midpoint-rule nodes (weight already equals bin width)
+@inline jacobian_diameter_transform(::MidpointNode{FT}, λ; scale=10) where {FT} = one(FT)
 
 #####
 ##### Generic integration interface
