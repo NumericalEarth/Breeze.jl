@@ -112,8 +112,8 @@ $(TYPEDSIGNATURES)
 Apply a Wicker-Skamarock RK3 substep with acoustic substepping.
 
 The acoustic substep loop handles momentum, density, and the thermodynamic
-variable (ρθ or ρe). The substep size is constant ``Δτ = Δt/N`` across all
-stages, with the substep count varying as ``Nτ = \\mathrm{round}(β N)``.
+variable (``ρθ`` or ``ρe``). The substep size is constant ``Δτ = Δt / N`` across all
+stages, with the substep count varying as ``N_τ = \\mathrm{round}(β N)``.
 Remaining scalars (tracers) are updated with standard RK3.
 """
 function acoustic_rk3_substep!(model, Δt, β)
