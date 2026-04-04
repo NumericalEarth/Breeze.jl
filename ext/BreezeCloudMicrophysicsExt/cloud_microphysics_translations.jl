@@ -217,14 +217,14 @@ end
 
 Compute the snow melting rate (dqˢ/dt due to melting, always non-negative).
 
-Sensible-heat-driven melting: heat from warm air (T > T_freeze) melts snow to rain.
-The rate is proportional to (T - T_freeze) and includes ventilation corrections.
+Sensible-heat-driven melting: heat from warm air (``T > T_{freeze}``) melts snow to rain.
+The rate is proportional to (``T - T_{freeze}``) and includes ventilation corrections.
 
 This is a translation of `CloudMicrophysics.Microphysics1M.snow_melt`
 that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 
 # Arguments
-- `snow_params`: Snow microphysics parameters (T_freeze, pdf, mass, vent)
+- `snow_params`: Snow microphysics parameters (``T_{freeze}``, pdf, mass, vent)
 - `vel`: Snow terminal velocity parameters
 - `aps`: Air properties (kinematic viscosity, vapor diffusivity, thermal conductivity)
 - `qˢ`: Snow specific humidity
@@ -296,12 +296,12 @@ This is a translation of `CloudMicrophysics.BulkMicrophysicsTendencies.warm_accr
 that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 
 # Arguments
-- `snow_params`: Snow parameters (contains T_freeze)
+- `snow_params`: Snow parameters (contains ``T_{freeze}``)
 - `T`: Temperature
 - `constants`: Breeze ThermodynamicConstants
 
 # Returns
-Thermal melt factor α (zero when T ≤ T_freeze)
+Thermal melt factor α (zero when ``T ≤ T_{freeze}``)
 """
 @inline function warm_accretion_melt_factor(
     (; T_freeze)::Snow{FT},
