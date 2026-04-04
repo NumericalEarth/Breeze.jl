@@ -326,7 +326,7 @@ $(TYPEDSIGNATURES)
 
 Return the surface precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
 
-The surface precipitation flux is \$\rho q^r v^t_{rain}\$ at the surface, matching the
+The surface precipitation flux is ``\rho q^r v^t_{rain}`` at the surface, matching the
 one-moment microphysics definition. Units are kg/m²/s.
 
 This implements the Breeze `surface_precipitation_flux(model)` interface.
@@ -366,11 +366,11 @@ Compute rain terminal velocity (m/s) following Klemp and Wilhelmson (1978) eq. 2
 
 The terminal velocity is computed as:
 ```math
-𝕎ʳ = a^𝕎 × (ρ × rʳ × Cᵨ)^{β^𝕎} × \\sqrt{ρ₀/ρ}
+𝕎ʳ = a^𝕎 (ρ rʳ Cᵨ)^{β^𝕎} \\sqrt{ρ₀/ρ}
 ```
 
-where `a^𝕎` is `terminal_velocity_coefficient`, `Cᵨ` is `density_scale`,
-and `β^𝕎` is `terminal_velocity_exponent`.
+where ``a^𝕎`` is the `terminal_velocity_coefficient`, ``Cᵨ`` is the `density_scale`,
+and ``β^𝕎`` is the `terminal_velocity_exponent`.
 """
 @inline function kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
     a𝕎 = microphysics.terminal_velocity_coefficient
@@ -382,13 +382,18 @@ end
 """
     cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
 
-Compute cloud-to-rain production rate from autoconversion and accretion (Klemp & Wilhelmson 1978, eq. 2.13).
+Compute cloud-to-rain production rate from autoconversion and accretion
+([Klemp and Wilhelmson 1978](@cite Klemp1978), eq. 2.13).
 
 This implements the combined effect of:
 - **Autoconversion**: Cloud water spontaneously converting to rain when `rᶜˡ > rᶜˡ★`
 - **Accretion**: Rain collecting cloud water as it falls
 
 The formula uses an implicit time integration for numerical stability.
+
+# References
+- Klemp, J. B., & Wilhelmson, R. B. (1978). The simulation of three-dimensional convective storm dynamics.
+  Journal of the Atmospheric Sciences, 35(6), 1070-1096.
 """
 @inline function cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
     k₁   = microphysics.autoconversion_rate
@@ -396,7 +401,7 @@ The formula uses an implicit time integration for numerical stability.
     k₂   = microphysics.accretion_rate
     βᵃᶜᶜ = microphysics.accretion_exponent
 
-    Aʳ = max(0, k₁ * (rᶜˡ - rᶜˡ★))    # Autoconversion rate
+    Aʳ = max(0, k₁ * (rᶜˡ - rᶜˡ★))      # Autoconversion rate
     denom = 1 + Δt * k₂ * rʳ^βᵃᶜᶜ       # Implicit accretion factor
     Δrᴾ = rᶜˡ - (rᶜˡ - Δt * Aʳ) / denom
     return Δrᴾ
@@ -414,7 +419,7 @@ Apply the Kessler microphysics to the model.
 This function launches a kernel that processes each column independently, with rain sedimentation subcycling.
 
 The kernel handles conversion between mass fractions and mixing ratios
-internally for efficiency. Water vapor is diagnosed from \$q^v = q^t - q^{cl} - q^r\$.
+internally for efficiency. Water vapor is diagnosed from ``q^v = q^t - q^{cl} - q^r``.
 """
 function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model)
     grid = model.grid

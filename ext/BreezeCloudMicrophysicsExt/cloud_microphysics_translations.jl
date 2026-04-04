@@ -341,7 +341,7 @@ that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 
 # Returns
 Named tuple `(; evap_rate_0, evap_rate_1)` where:
-- `evap_rate_0`: Rate of change of number concentration [1/(m³·s)], negative for evaporation
+- `evap_rate_0`: Rate of change of number concentration [m⁻³ s⁻¹)], negative for evaporation
 - `evap_rate_1`: Rate of change of mass mixing ratio [kg/kg/s], negative for evaporation
 """
 @inline function rain_evaporation_2m(

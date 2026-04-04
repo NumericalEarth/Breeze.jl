@@ -613,7 +613,7 @@ $(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
 
-The surface precipitation flux is `wʳ * ρqʳ` at the bottom face (k=1), representing
+The surface precipitation flux is `wʳ * ρqʳ` at the bottom face (`k = 1`), representing
 the rate at which rain mass leaves the domain through the bottom boundary.
 
 Units: kg/m²/s (positive = downward flux out of domain)
