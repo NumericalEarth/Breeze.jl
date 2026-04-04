@@ -233,9 +233,12 @@ end
     λ = exp(logλ)
 
     # 1. Compute graupel density (rho_g)
+    # Fortran convention: for Fr=0, cgp = crp = ρ_rime × π/6, so the effective
+    # density used in D_mvd is ρ_rime (not ρ_ice).  This matches the Fortran's
+    # diagnostic_mui / diagnostic_mui_Fl shape parameter diagnostic.
     ρ_dep = deposited_ice_density(mass, rime_fraction, rime_density)
     ρ_g_rimed = graupel_density(rime_fraction, rime_density, ρ_dep)
-    ρ_g_dry = ifelse(iszero(rime_fraction), mass.ice_density, ρ_g_rimed)
+    ρ_g_dry = ifelse(iszero(rime_fraction), rime_density, ρ_g_rimed)
     # M12: blend liquid water density into bulk density (Fortran diagnostic_mui_Fl)
     ρ_g = (1 - liquid_fraction) * ρ_g_dry + liquid_fraction * FT(1000)
 
