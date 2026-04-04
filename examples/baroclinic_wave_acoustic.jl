@@ -1,7 +1,7 @@
 # Baroclinic wave: Acoustic substepping (MPAS-style) test
 #
 # Uses AcousticRungeKutta3 with SplitExplicitTimeDiscretization.
-# Fixed 1D reference state at T₀=250K (matching MPAS).
+# Isothermal T₀=250K reference state (matching MPAS convention).
 
 using Breeze
 using Oceananigans
@@ -70,13 +70,18 @@ end
 
 coriolis = HydrostaticSphericalCoriolis(rotation_rate=Ω)
 
-## Fixed 1D reference at T₀=250K (matching MPAS)
-## reference_potential_temperature = 250 gives an isothermal base state
+## MPAS isothermal T₀=250K reference state: θ₀(z) = T₀ exp(gz/(cₚT₀))
+T₀_ref = 250.0
+θ_ref(z) = T₀_ref * exp(g * z / (cᵖᵈ * T₀_ref))
+
 dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                 surface_pressure=p₀,
-                                reference_potential_temperature=250)
+                                reference_potential_temperature=θ_ref)
 
-Δt = 20.0
+## Time step limited by outer-loop gravity-wave CFL, not acoustic CFL.
+## Acoustic substepping removes the acoustic CFL constraint, giving ~5×
+## speedup over the explicit solver (Δt=2s).
+Δt = 10.0
 stop_time = 1days
 
 model = AtmosphereModel(grid; dynamics, coriolis,

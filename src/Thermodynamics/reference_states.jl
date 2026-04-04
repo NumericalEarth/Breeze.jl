@@ -3,6 +3,7 @@ using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 using Oceananigans.Fields: ZeroField
 using Oceananigans.Grids: znode
+using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ
 using Oceananigans.Utils: launch!
 
@@ -430,20 +431,69 @@ end
 
 Base.show(io::IO, ref::ExnerReferenceState) = print(io, summary(ref))
 
+@kernel function _compute_isothermal_reference!(π₀, pᵣ, ρᵣ, θᵣ, grid, Nz, p₀, pˢᵗ, κ, Rᵈ, g, T₀)
+    _ = @index(Global)
+
+    # MPAS isothermal base state (init_atm_cases.F lines 813-817):
+    #   ppb(k) = p0 * exp(-g * z_center / (Rᵈ * T₀))
+    #   pb(k)  = (ppb(k) / p0)^κ
+    #   rb(k)  = ppb(k) / (Rᵈ * T₀)
+    #   tb(k)  = T₀ / pb(k)
+    for k in 1:Nz
+        @inbounds begin
+            z_center = znode(1, 1, k, grid, Center(), Center(), Center())
+            p_base = p₀ * exp(-g * z_center / (Rᵈ * T₀))
+            Π_base = (p_base / pˢᵗ)^κ
+            pᵣ[1, 1, k] = p_base
+            π₀[1, 1, k] = Π_base
+            ρᵣ[1, 1, k] = p_base / (Rᵈ * T₀)
+            θᵣ[1, 1, k] = T₀ / Π_base
+        end
+    end
+end
+
 @kernel function _compute_exner_reference!(π₀, pᵣ, ρᵣ, θ₀, grid, Nz, π₀_surface, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
     _ = @index(Global)
 
-    # Initialize π₀ at the bottom from the surface pressure
-    @inbounds π₀[1, 1, 1] = π₀_surface
+    # MPAS-style integration: surface → top (up), then top → centers (down).
+    # This matches MPAS init_atm_cases.F lines 1747-1772.
+    #
+    # Step 1: Integrate UP from surface (Π=π₀_surface) to model top.
+    #   - Half-step from surface (z=0) to center k=1
+    #   - Interior steps between adjacent centers (using face spacing)
+    #   - Half-step from center Nz to model top
 
-    # Integrate upward: π₀[k] = π₀[k-1] - g Δz / (cᵖᵈ avg(θᵣ))
-    for k in 2:Nz
-        Δz_face = Δzᶜᶜᶠ(1, 1, k, grid)
-        @inbounds θ₀_face = (θ₀[1, 1, k] + θ₀[1, 1, k-1]) / 2
-        @inbounds π₀[1, 1, k] = π₀[1, 1, k-1] - g * Δz_face / (cᵖᵈ * θ₀_face)
+    @inbounds begin
+        Δzᶜ₁ = Δzᶜᶜᶜ(1, 1, 1, grid)  # cell thickness at k=1 (= MPAS dzw(1))
+        pi_top = π₀_surface - g * Δzᶜ₁ / (2 * cᵖᵈ * θ₀[1, 1, 1])
     end
 
-    # Derive pressure and density from π₀
+    for k in 2:Nz
+        Δzᶠₖ = Δzᶜᶜᶠ(1, 1, k, grid)  # center-to-center at face k (= MPAS dzu(k))
+        @inbounds θ_face = (θ₀[1, 1, k] + θ₀[1, 1, k-1]) / 2
+        pi_top = pi_top - g * Δzᶠₖ / (cᵖᵈ * θ_face)
+    end
+
+    @inbounds begin
+        Δzᶜₙ = Δzᶜᶜᶜ(1, 1, Nz, grid)
+        pi_top = pi_top - g * Δzᶜₙ / (2 * cᵖᵈ * θ₀[1, 1, Nz])
+    end
+
+    # Step 2: Integrate DOWN from top to get Π at each cell center.
+    #   - Half-step from top to center Nz
+    #   - Interior steps between adjacent centers (downward)
+    @inbounds begin
+        π₀[1, 1, Nz] = pi_top + g * Δzᶜₙ / (2 * cᵖᵈ * θ₀[1, 1, Nz])
+    end
+
+    for k in (Nz - 1):-1:1
+        Δzᶠₖ₊₁ = Δzᶜᶜᶠ(1, 1, k + 1, grid)
+        @inbounds θ_face = (θ₀[1, 1, k] + θ₀[1, 1, k + 1]) / 2
+        @inbounds π₀[1, 1, k] = π₀[1, 1, k + 1] + g * Δzᶠₖ₊₁ / (cᵖᵈ * θ_face)
+    end
+
+    # Step 3: Derive pressure and density from π₀ (same as MPAS).
+    # ρ = Π^(cᵥ/Rᵈ) × p₀ / (Rᵈ × θ)  (= MPAS rb = pb^(1/rcv) / ((rgas/p0)*tb))
     for k in 1:Nz
         @inbounds begin
             πᵏ = π₀[1, 1, k]
@@ -460,17 +510,17 @@ $(TYPEDSIGNATURES)
 
 Construct an `ExnerReferenceState` by discrete Exner integration on `grid`.
 
-The Exner function π₀ is built by integrating upward from the surface:
-```math
-π₀[k] = π₀[k-1] - \\frac{g \\, Δz}{cᵖᵈ \\, θᵣ^{face}[k]}
-```
-where ``θᵣ^{face}`` is the face-averaged reference potential temperature.
-This ensures the discrete Exner hydrostatic balance is exact.
+Two modes are supported, controlled by which keyword is provided:
 
-Pressure and density are then derived from π₀:
-- ``p₀ = pˢᵗ \\, π₀^{cᵖᵈ/Rᵈ}``
-- ``T₀ = θᵣ \\, π₀``
-- ``ρ₀ = p₀ / (Rᵈ \\, T₀)``
+**Isentropic** (`potential_temperature`): Constant or z-dependent θ₀.
+The Exner function is built by MPAS-style up-then-down integration using
+``ΔΠ = -g Δz / (cᵖᵈ θ₀^{face})``. Density: ``ρ₀ = p₀ / (Rᵈ θ₀ Π₀)``.
+
+**Isothermal** (`reference_temperature`): Constant T₀ (MPAS baroclinic wave
+convention). Uses the analytic isothermal solution:
+``p₀(z) = pˢ \\exp(-g z / (Rᵈ T₀))``, ``Π₀ = (p₀/pˢᵗ)^κ``,
+``ρ₀ = p₀/(Rᵈ T₀)``, ``θ₀ = T₀/Π₀``.
+This matches MPAS init_atm_cases.F lines 813-817 exactly.
 
 Arguments
 =========
@@ -480,12 +530,15 @@ Arguments
 Keyword Arguments
 =================
 - `surface_pressure`: Pressure at z=0 (default: 101325 Pa)
-- `potential_temperature`: Constant value or function `θᵣ(z)` for reference potential temperature (default: 288 K)
+- `potential_temperature`: Constant value or function `θᵣ(z)` for isentropic reference (default: 288 K)
+- `reference_temperature`: Constant T₀ for isothermal reference (default: `nothing`).
+  When provided, overrides `potential_temperature`.
 - `standard_pressure`: pˢᵗ for potential temperature definition (default: 1e5 Pa)
 """
 function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
                              surface_pressure = 101325,
                              potential_temperature = 288,
+                             reference_temperature = nothing,
                              standard_pressure = 1e5)
 
     FT = eltype(grid)
@@ -498,50 +551,76 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     g = constants.gravitational_acceleration
     Nz = size(grid, 3)
 
-    # Detect whether θ₀ depends on horizontal coordinates (3D reference).
-    # Functions of 1 arg → f(z), functions of 2+ args → f(x,y,z) or f(x,z).
-    needs_3d = _needs_3d_reference(potential_temperature)
-
-    if needs_3d
-        # 3D reference: per-column integration for latitude-dependent θ₀(φ,z)
-        θᵣ = CenterField(grid)
-        set!(θᵣ, potential_temperature)
-        fill_halo_regions!(θᵣ)
-
-        πᵣ = CenterField(grid)
-        pᵣ = CenterField(grid)
-        ρᵣ = CenterField(grid)
-
-        launch!(arch, grid, :xy, _compute_exner_reference_3d!,
-                πᵣ, pᵣ, ρᵣ, θᵣ, grid, p₀, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
-    else
-        # 1D reference: single column, broadcast to all (i,j)
+    if reference_temperature !== nothing
+        # ── Isothermal base state (MPAS baroclinic wave convention) ──
+        # Analytic solution: p(z) = p₀ exp(-gz/(Rᵈ T₀)), Π = (p/pˢᵗ)^κ,
+        # ρ = p/(Rᵈ T₀), θ = T₀/Π.  (MPAS init_atm_cases.F lines 813-817)
+        T₀ = convert(FT, reference_temperature)
         loc = (nothing, nothing, Center())
+
         θᵣ = Field{Nothing, Nothing, Center}(grid)
-        set!(θᵣ, potential_temperature)
-        fill_halo_regions!(θᵣ)
-
         πᵣ = Field{Nothing, Nothing, Center}(grid)
-        π₀_surface = (p₀ / pˢᵗ)^κ
-        θ₀_surface = convert(FT, _surface_value(potential_temperature))
-        ρ₀_surface = p₀ / (Rᵈ * θ₀_surface * π₀_surface)
-
+        pᵣ = Field{Nothing, Nothing, Center}(grid)
+        ρ₀_surface = p₀ / (Rᵈ * T₀)
         p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
         pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
         ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀_surface))
         ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
 
-        launch!(arch, grid, tuple(1), _compute_exner_reference!,
-                πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, π₀_surface, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+        launch!(arch, grid, tuple(1), _compute_isothermal_reference!,
+                πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, p₀, pˢᵗ, κ, Rᵈ, g, T₀)
+    else
+        # ── Isentropic base state (constant or z-dependent θ₀) ──
+        # Detect whether θ₀ depends on horizontal coordinates (3D reference).
+        needs_3d = _needs_3d_reference(potential_temperature)
+
+        if needs_3d
+            # 3D reference: per-column integration for latitude-dependent θ₀(φ,z)
+            θᵣ = CenterField(grid)
+            set!(θᵣ, potential_temperature)
+            fill_halo_regions!(θᵣ)
+
+            πᵣ = CenterField(grid)
+            pᵣ = CenterField(grid)
+            ρᵣ = CenterField(grid)
+
+            launch!(arch, grid, :xy, _compute_exner_reference_3d!,
+                    πᵣ, pᵣ, ρᵣ, θᵣ, grid, p₀, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+        else
+            # 1D reference: single column, broadcast to all (i,j)
+            loc = (nothing, nothing, Center())
+            θᵣ = Field{Nothing, Nothing, Center}(grid)
+            set!(θᵣ, potential_temperature)
+            fill_halo_regions!(θᵣ)
+
+            πᵣ = Field{Nothing, Nothing, Center}(grid)
+            π₀_surface = (p₀ / pˢᵗ)^κ
+            θ₀_surface = convert(FT, _surface_value(potential_temperature))
+            ρ₀_surface = p₀ / (Rᵈ * θ₀_surface * π₀_surface)
+
+            p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
+            pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
+            ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀_surface))
+            ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+
+            launch!(arch, grid, tuple(1), _compute_exner_reference!,
+                    πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, π₀_surface, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+        end
     end
 
+    fill_halo_regions!(θᵣ)
     fill_halo_regions!(πᵣ)
     fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
 
-    θ₀ = convert(FT, _surface_value(potential_temperature))
+    # Surface θ₀ for the struct: for isothermal, θ_surface = T₀/Π_surface = T₀
+    θ₀_val = if reference_temperature !== nothing
+        convert(FT, reference_temperature)  # T₀ (at surface Π≈1, θ≈T)
+    else
+        convert(FT, _surface_value(potential_temperature))
+    end
 
-    return ExnerReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ, πᵣ)
+    return ExnerReferenceState(p₀, θ₀_val, pˢᵗ, pᵣ, ρᵣ, πᵣ)
 end
 
 # Detect if θ₀ needs a 3D (per-column) reference.
@@ -554,21 +633,41 @@ _nargs(f) = maximum(m.nargs for m in methods(f)) - 1  # subtract 1 for the funct
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
+    # MPAS-style up-then-down integration (same logic as 1D kernel).
+    π₀_surface = (p₀ / pˢᵗ)^κ
+
     @inbounds begin
-        π₀_k = (p₀ / pˢᵗ)^κ
-        π₀[i, j, 1] = π₀_k
-        pᵣ[i, j, 1] = pˢᵗ * π₀_k^(1/κ)
-        ρᵣ[i, j, 1] = pᵣ[i, j, 1] / (Rᵈ * θ₀[i, j, 1] * π₀_k)
+        # Step 1: UP — surface → center 1 → ... → center Nz → top
+        Δzᶜ₁ = Δzᶜᶜᶜ(i, j, 1, grid)
+        pi_top = π₀_surface - g * Δzᶜ₁ / (2 * cᵖᵈ * θ₀[i, j, 1])
     end
 
     for k in 2:Nz
+        Δzᶠₖ = Δzᶜᶜᶠ(i, j, k, grid)
+        @inbounds θ_face = (θ₀[i, j, k] + θ₀[i, j, k - 1]) / 2
+        pi_top = pi_top - g * Δzᶠₖ / (cᵖᵈ * θ_face)
+    end
+
+    @inbounds begin
+        Δzᶜₙ = Δzᶜᶜᶜ(i, j, Nz, grid)
+        pi_top = pi_top - g * Δzᶜₙ / (2 * cᵖᵈ * θ₀[i, j, Nz])
+    end
+
+    # Step 2: DOWN — top → center Nz → ... → center 1
+    @inbounds π₀[i, j, Nz] = pi_top + g * Δzᶜₙ / (2 * cᵖᵈ * θ₀[i, j, Nz])
+
+    for k in (Nz - 1):-1:1
+        Δzᶠₖ₊₁ = Δzᶜᶜᶠ(i, j, k + 1, grid)
+        @inbounds θ_face = (θ₀[i, j, k] + θ₀[i, j, k + 1]) / 2
+        @inbounds π₀[i, j, k] = π₀[i, j, k + 1] + g * Δzᶠₖ₊₁ / (cᵖᵈ * θ_face)
+    end
+
+    # Step 3: Derive p, ρ from π₀
+    for k in 1:Nz
         @inbounds begin
-            Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
-            θ₀_face = (θ₀[i, j, k] + θ₀[i, j, k - 1]) / 2
-            π₀_k = π₀[i, j, k - 1] - g * Δzᶠ / (cᵖᵈ * θ₀_face)
-            pᵏ = pˢᵗ * π₀_k^(1/κ)
-            Tᵏ = θ₀[i, j, k] * π₀_k
-            π₀[i, j, k] = π₀_k
+            πᵏ = π₀[i, j, k]
+            pᵏ = pˢᵗ * πᵏ^(1/κ)
+            Tᵏ = θ₀[i, j, k] * πᵏ
             pᵣ[i, j, k] = pᵏ
             ρᵣ[i, j, k] = pᵏ / (Rᵈ * Tᵏ)
         end

@@ -1,30 +1,10 @@
 #####
 ##### Tendencies for CompressibleDynamics
 #####
-##### The compressible Euler equations in conservation form include:
-#####
-##### Continuity: ∂ρ/∂t + ∇·(ρu) = 0
-##### Momentum:   ∂(ρu)/∂t + ... + ∇p = ...
-#####
-##### The pressure gradient is added to the momentum equations via the
-##### x/y/z_pressure_gradient interface functions.
-#####
 
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, div_xyᶜᶜᶜ
 
-#####
-##### Pressure gradient for compressible dynamics
-#####
-##### When a reference state exists, the vertical pressure gradient subtracts the
-##### reference pressure gradient ∂z(p_ref). Combined with the reference-subtracted
-##### buoyancy -g(ρ - ρ_ref), this eliminates the O(Δz²) hydrostatic truncation error.
-##### The reference pressure is in discrete hydrostatic balance with the reference
-##### density, so ∂z(p_ref) + g*ℑz(ρ_ref) = 0 exactly at the discrete level.
-#####
-##### Horizontal pressure gradients are unaffected because the reference state
-##### is a column (varies only in z).
-#####
-
+##### Pressure gradient
 @inline AtmosphereModels.x_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
 @inline AtmosphereModels.y_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
 
@@ -34,24 +14,26 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, div_x
     return ∂z_p - ∂z_pᵣ
 end
 
+# For SplitExplicitTimeDiscretization: zero ONLY the vertical PGF and buoyancy.
+# These are computed from the linearized pp formula (§5-7) in _convert_slow_tendencies!,
+# using U⁰ values frozen across all RK stages (matching MPAS tend_w_euler at rk_step=1).
+#
+# The HORIZONTAL PGF is NOT zeroed — it flows through from the dynamics kernel
+# using the current state's pressure, matching MPAS which recomputes pp (and thus
+# the horizontal PGF tend_u_euler) at every RK stage.
+@inline AtmosphereModels.explicit_z_pressure_gradient(i, j, k, grid,
+        d::CompressibleDynamics{<:SplitExplicitTimeDiscretization}) = zero(grid)
+@inline AtmosphereModels.explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid,
+        d::CompressibleDynamics{<:SplitExplicitTimeDiscretization}, args...) = zero(grid)
+
 @inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ::Nothing) = 0
 @inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ref::ExnerReferenceState) = ∂zᶜᶜᶠ(i, j, k, grid, ref.pressure)
 
-#####
-##### Density tendency from continuity equation
-#####
-
+##### Density tendency
 """
 $(TYPEDSIGNATURES)
 
 Compute the density tendency for compressible dynamics using the continuity equation.
-
-The density evolves according to:
-```math
-\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u})
-```
-
-Since momentum `ρu` is already available, this is simply the negative divergence of momentum.
 """
 function AtmosphereModels.compute_dynamics_tendency!(model::CompressibleModel)
     grid = model.grid
@@ -59,18 +41,11 @@ function AtmosphereModels.compute_dynamics_tendency!(model::CompressibleModel)
     Gρ = model.timestepper.Gⁿ.ρ
     momentum = model.momentum
     td = model.dynamics.time_discretization
-
     launch!(arch, grid, :xyz, _compute_density_tendency!, Gρ, grid, momentum, td)
-
     return nothing
 end
 
-## Full 3D divergence for all time steppings.
-## For VITS: density is NOT split between fᴱ and fᴵ. The full 3D divergence
-## goes in fᴱ_ρ, avoiding split-weighting instability from different Butcher
-## coefficients on horizontal vs vertical divergence (MPAS does the same).
 @kernel function _compute_density_tendency!(Gρ, grid, momentum, td)
     i, j, k = @index(Global, NTuple)
     @inbounds Gρ[i, j, k] = - divᶜᶜᶜ(i, j, k, grid, momentum.ρu, momentum.ρv, momentum.ρw)
 end
-

@@ -60,13 +60,20 @@ Keyword Arguments
 function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               standard_pressure = 1e5,
                               surface_pressure = 101325.0,
-                              reference_potential_temperature = nothing) where TD
+                              reference_potential_temperature = nothing,
+                              reference_temperature = nothing) where TD
 
     FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
     pˢᵗ = convert(FT, standard_pressure)
     p₀ = convert(FT, surface_pressure)
-    # Store reference_potential_temperature temporarily; ExnerReferenceState is built in materialize_dynamics
-    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, reference_potential_temperature, nothing)
+    # Store reference spec temporarily; ExnerReferenceState is built in materialize_dynamics.
+    # If reference_temperature is given, store it as a NamedTuple to distinguish from θ₀.
+    ref_spec = if reference_temperature !== nothing
+        (; reference_temperature)
+    else
+        reference_potential_temperature
+    end
+    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, ref_spec, nothing)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
@@ -101,23 +108,27 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     standard_pressure = convert(FT, dynamics.standard_pressure)
     surface_pressure = convert(FT, dynamics.surface_pressure)
 
-    # Build reference state if reference_potential_temperature was provided.
-    # ExnerReferenceState builds the Exner function π₀ by discrete integration,
-    # ensuring exact discrete Exner hydrostatic balance. This is used for both
-    # split-explicit (acoustic substepping) and explicit time stepping.
-    θ₀ = dynamics.reference_state  # temporarily stored θ₀ (or nothing)
+    # Build reference state from the stored spec (θ₀, T₀ NamedTuple, or nothing).
+    ref_spec = dynamics.reference_state
 
     ## Auto-construct ExnerReferenceState for VITS if not user-specified
-    if θ₀ === nothing && dynamics.time_discretization isa VerticallyImplicitTimeStepping
-        θ₀ = 300  # default reference θ for HEVI
+    if ref_spec === nothing && dynamics.time_discretization isa VerticallyImplicitTimeStepping
+        ref_spec = 300  # default reference θ for HEVI
     end
 
-    if θ₀ === nothing
+    if ref_spec === nothing
         reference_state = nothing
-    else
+    elseif ref_spec isa NamedTuple && haskey(ref_spec, :reference_temperature)
+        # Isothermal base state (MPAS baroclinic wave convention)
         reference_state = ExnerReferenceState(grid, thermodynamic_constants;
                                               surface_pressure,
-                                              potential_temperature = θ₀,
+                                              reference_temperature = ref_spec.reference_temperature,
+                                              standard_pressure)
+    else
+        # Isentropic base state (constant or z-dependent θ₀)
+        reference_state = ExnerReferenceState(grid, thermodynamic_constants;
+                                              surface_pressure,
+                                              potential_temperature = ref_spec,
                                               standard_pressure)
     end
 

@@ -17,9 +17,11 @@ using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
 using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
-    ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
+    ℑxᶠᵃᵃ, ℑxᶜᵃᵃ, ℑyᵃᶠᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
+    δxᶜᵃᵃ, δxᶠᵃᵃ, δyᵃᶜᵃ, δyᵃᶠᵃ,
     δxTᶠᵃᵃ, δyTᵃᶠᵃ, δzᵃᵃᶜ, δzᵃᵃᶠ,
-    divᶜᶜᶜ,
+    divᶜᶜᶜ, div_xyᶜᶜᶜ,
+    Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ,
     Δxᶠᶜᶜ, Δyᶜᶠᶜ, Δzᶜᶜᶜ, Δzᶜᶜᶠ,
     Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ
 
@@ -43,7 +45,7 @@ using Adapt: Adapt, adapt
 @inline ℑxTᶠᵃᵃ(i, j, k, grid, f::AbstractArray) = ℑxᶠᵃᵃ(i, j, k, grid, f)
 @inline ℑyTᵃᶠᵃ(i, j, k, grid, f::AbstractArray) = ℑyᵃᶠᵃ(i, j, k, grid, f)
 @inline ℑzTᵃᵃᶠ(i, j, k, grid, f::AbstractArray) = ℑzᵃᵃᶠ(i, j, k, grid, f)
-@inline ℑzTᵃᵃᶠ(i, j, k, grid, f, args...)        = ℑzᵃᵃᶠ(i, j, k, grid, f, args...)
+@inline ℑzTᵃᵃᶠ(i, j, k, grid, f, args...)       = ℑzᵃᵃᶠ(i, j, k, grid, f, args...)
 @inline ℑzTᵃᵃᶜ(i, j, k, grid, f::AbstractArray) = ℑzᵃᵃᶜ(i, j, k, grid, f)
 
 # Fallback: use standard difference
@@ -61,7 +63,7 @@ const PY = AbstractUnderlyingGrid{FT, <:Any, Periodic} where FT
 const BX = AbstractUnderlyingGrid{FT, Bounded} where FT
 const BY = AbstractUnderlyingGrid{FT, <:Any, Bounded} where FT
 
-# For periodic/flat topologies, no boundary faces exist
+# For periodic topologies, no boundary faces exist
 @inline on_x_boundary(i, j, k, grid) = false
 @inline on_y_boundary(i, j, k, grid) = false
 
@@ -155,7 +157,7 @@ Fields
 - `alpha_tri`, `gamma_tri`: LU-decomposed tridiagonal for w
 - `rhs`: Right-hand side storage for tridiagonal solve
 """
-struct AcousticSubstepper{N, FT, CF, FF, AV, ST, TS}
+struct AcousticSubstepper{N, FT, CF, FF, XF, YF, AV, ST, TS}
     substeps :: N
     forward_weight :: FT                       # Off-centering ω → epssm = 2ω - 1
     divergence_damping_coefficient :: FT
@@ -170,6 +172,8 @@ struct AcousticSubstepper{N, FT, CF, FF, AV, ST, TS}
     rho_pp :: CF                               # MPAS rho_pp — acoustic ρ perturbation
     rtheta_pp :: CF                            # MPAS rtheta_pp — acoustic ρθ perturbation
     rw_p :: FF                                 # MPAS rw_p — acoustic ρw perturbation (face)
+    ru_p :: XF                                 # MPAS ru_p — acoustic ρu perturbation (x-face)
+    rv_p :: YF                                 # MPAS rv_p — acoustic ρv perturbation (y-face)
     cofwz :: FF                                # MPAS cofwz — PGF coefficient (face)
     cofwr :: FF                                # MPAS cofwr — gravity coefficient (face)
     cofwt :: CF                                # MPAS cofwt — buoyancy coefficient (center)
@@ -202,6 +206,8 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.rho_pp),
                        adapt(to, a.rtheta_pp),
                        adapt(to, a.rw_p),
+                       adapt(to, a.ru_p),
+                       adapt(to, a.rv_p),
                        adapt(to, a.cofwz),
                        adapt(to, a.cofwr),
                        adapt(to, a.cofwt),
@@ -233,10 +239,12 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     filtered_exner_perturbation = CenterField(grid)
     stage_thermodynamic_density = CenterField(grid)
 
-    # MPAS perturbation variables
+    # MPAS perturbation variables (Eq. 3.23: V''_h, Ω'', Θ''_m, ρ̃''_d)
     rho_pp = CenterField(grid)
     rtheta_pp = CenterField(grid)
     rw_p = ZFaceField(grid)
+    ru_p = XFaceField(grid)   # MPAS ru_p — horizontal momentum perturbation
+    rv_p = YFaceField(grid)   # MPAS rv_p — horizontal momentum perturbation
 
     # MPAS implicit coefficients (precomputed per-stage)
     cofwz_field = ZFaceField(grid)
@@ -280,7 +288,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               previous_exner_perturbation,
                               filtered_exner_perturbation,
                               stage_thermodynamic_density,
-                              rho_pp, rtheta_pp, rw_p,
+                              rho_pp, rtheta_pp, rw_p, ru_p, rv_p,
                               cofwz_field, cofwr_field, cofwt_field, coftz_field,
                               alpha_tri_field, gamma_tri_field,
                               averaged_velocities,
@@ -310,10 +318,10 @@ Following CM1, the substep count satisfies `Δτ · ℂᵃᶜ / Δx_min ≤ 1` w
 to ensure stability with the forward-backward splitting.
 """
 function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
-    cᵖ = thermodynamic_constants.dry_air.heat_capacity
+    cᵖᵈ = thermodynamic_constants.dry_air.heat_capacity
     Rᵈ = dry_air_gas_constant(thermodynamic_constants)
-    cᵥ = cᵖ - Rᵈ
-    γ = cᵖ / cᵥ
+    cᵛᵈ = cᵖᵈ - Rᵈ
+    γ = cᵖᵈ / cᵛᵈ
     Tᵣ = 300 # Conservative reference temperature (surface conditions)
     ℂᵃᶜ = sqrt(γ * Rᵈ * Tᵣ) # ≈ 347 m/s
 
@@ -329,6 +337,7 @@ end
 
 # When substeps is specified, use it directly
 @inline acoustic_substeps(N::Int, grid, Δt, constants) = N
+
 # When substeps is nothing, compute from acoustic CFL
 @inline acoustic_substeps(::Nothing, grid, Δt, constants) = compute_acoustic_substeps(grid, Δt, constants)
 
@@ -409,6 +418,7 @@ function prepare_acoustic_cache!(substepper, model)
     fill_halo_regions!(substepper.cofwr)
     fill_halo_regions!(substepper.cofwt)
     fill_halo_regions!(substepper.coftz)
+    fill_halo_regions!(substepper.virtual_potential_temperature)
 
     return nothing
 end
@@ -448,8 +458,9 @@ end
             Δzᶜ_below = Δzᶜᶜᶜ(i, j, k - 1, grid)
 
             # Interpolation weights (MPAS fzm, fzp)
-            fzm = Δzᶜ_above / (Δzᶜ_above + Δzᶜ_below)
-            fzp = Δzᶜ_below / (Δzᶜ_above + Δzᶜ_below)
+            # fzm(k) = Δz_w(k-1) / (Δz_w(k-1) + Δz_w(k)) = below / total
+            fzm = Δzᶜ_below / (Δzᶜ_above + Δzᶜ_below)
+            fzp = Δzᶜ_above / (Δzᶜ_above + Δzᶜ_below)
 
             # MPAS: cofwr(k) = 0.5 * dtseps * gravity * (fzm*zz(k) + fzp*zz(k-1))
             # With zz = 1 (no terrain): cofwr = 0.5 * dtseps * g
@@ -594,15 +605,19 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Convert slow momentum tendencies (Gˢρu, Gˢρv, Gˢρw) to slow velocity
-tendencies (uten, vten, wten) and slow pressure tendency (Gˢπ).
+Convert slow momentum tendencies to velocity form and add the MPAS linearized
+pressure gradient and buoyancy (§5-8 of mpas_algorithm_complete.md).
 
-The velocity tendency is: uten ≈ Gˢρu / ρ
-The pressure tendency is: Gˢπ = -u · ∇π
+For `SplitExplicitTimeDiscretization`, the dynamics kernel zeroes the vertical
+PGF, buoyancy, and horizontal PGF. These are added back here using:
+- §5: pp(k) = Rᵈ (Π(k) ρθ_p(k) + ρθ_base(k) (Π(k) - Π_base(k)))
+- §6: dpdz(k) = -g (ρ(k) - ρ_base(k))
+- §7: tend_w_euler = -rdzu (pp_k - pp_{k-1}) + fzm dpdz_k + fzp dpdz_{k-1}
+- §8: tend_u_euler = -(pp(i,j,k) - pp(i-1,j,k)) / Δx
 
-These are frozen during the acoustic substep loop.
+All computed from U⁰ (step-start state), frozen across all RK stages.
 """
-function convert_slow_tendencies!(substepper, model)
+function convert_slow_tendencies!(substepper, model, U⁰)
     grid = model.grid
     arch = architecture(grid)
     cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
@@ -610,6 +625,11 @@ function convert_slow_tendencies!(substepper, model)
     Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
     κ = Rᵈ / cᵖᵈ
     Gⁿ = model.timestepper.Gⁿ
+    pˢᵗ = model.dynamics.standard_pressure
+
+    ref = model.dynamics.reference_state
+    ρᵣ = ref isa Nothing ? model.dynamics.density : ref.density
+    pᵣ = ref isa Nothing ? model.dynamics.pressure : ref.pressure
 
     launch!(arch, grid, :xyz, _convert_slow_tendencies!,
             substepper.slow_tendencies.velocity.u,
@@ -624,90 +644,87 @@ function convert_slow_tendencies!(substepper, model)
             substepper.exner_perturbation,
             substepper.reference_exner_function,
             substepper.virtual_potential_temperature,
-            grid, κ, cᵖᵈ, g)
+            grid, κ, cᵖᵈ, g,
+            U⁰.ρθ, U⁰.ρ, pˢᵗ, ρᵣ, pᵣ)
 
     return nothing
+end
+
+##### Compute pp (linearized perturbation pressure, §5) at a cell center.
+##### pp(k) = Rᵈ (Π(k) ρθ_p(k) + ρθ_base(k) (Π(k) - Π_base(k)))
+@inline function linearized_pp(i, j, k, ρθ⁰, πᵣ, pᵣ, Rᵈ, rcv, pˢᵗ)
+    @inbounds begin
+        Π_base = πᵣ[i, j, k]
+        Π_base_safe = ifelse(Π_base == 0, one(Π_base), Π_base)
+        ρθ_base = pᵣ[i, j, k] / (Rᵈ * Π_base_safe)
+        ρθ_p = ρθ⁰[i, j, k] - ρθ_base
+        Π = (Rᵈ * ρθ⁰[i, j, k] / pˢᵗ)^rcv
+        return Rᵈ * (Π * ρθ_p + ρθ_base * (Π - Π_base))
+    end
 end
 
 @kernel function _convert_slow_tendencies!(Gˢu, Gˢv, Gˢw, Gˢπ,
                                            Gˢρu, Gˢρv, Gˢρw,
                                            ρ, u, v, w,
                                            π′, πᵣ, θᵥ,
-                                           grid, κ, cᵖᵈ, g)
+                                           grid, κ, cᵖᵈ, g,
+                                           ρθ⁰, ρ⁰, pˢᵗ, ρᵣ, pᵣ)
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
+    Rᵈ = κ * cᵖᵈ
+    rcv = κ / (1 - κ)   # Rᵈ/cᵥ
 
     @inbounds begin
-        # Slow velocity tendencies: Gˢu = Gˢρu/ρ, Gˢv = Gˢρv/ρ.
-        # The horizontal PGF enters through the MPAS horizontal forward step
-        # (from rtheta_pp gradient), NOT through the slow tendency.
         ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
-        Gˢu[i, j, k] = Gˢρu[i, j, k] / ρᶠᶜᶜ * !on_x_boundary(i, j, k, grid)
-
         ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
-        Gˢv[i, j, k] = Gˢρv[i, j, k] / ρᶜᶠᶜ * !on_y_boundary(i, j, k, grid)
-
         ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 
-        # MPAS buoyancy: g * (θ_m - θ_base) / θ_base at each w-face.
-        # θ_base = θ₀ / Π₀ from the ExnerReferenceState.
-        # Uses the PERTURBATION from the local base state, not the global θ₀.
-        θᵥᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, θᵥ)
-        # θ_base at face: θ₀ / Π₀_face. Since ∂π₀/∂z = -g/(cₚ θ₀):
-        # θ_base_face = θ₀ / Π₀_face. We can compute this from the reference Exner.
-        # Or equivalently: b = g * (θᵥ/θ_base - 1) = g * (θᵥ Π₀_face / θ₀ - 1)
-        # But we don't have θ₀ directly. Use the discrete approach instead:
-        # MPAS: b = -cₚ θᵥ ∂π₀/∂z - g ≈ g(θᵥ/θ₀ - 1) for constant θ₀.
-        # For the CORRECT base-state buoyancy matching MPAS:
-        #   b = g * (θ_m_face - θ_base_face) / θ_base_face
-        # where θ_base_face from the reference state:
-        #   θ_base(k) = ρθ_base(k) / ρ_base(k) = rtb(k) / rb(k)
-        # We don't have rtb directly. But from the reference:
-        #   cₚ θ₀ ∂Π₀/∂z = -g → θ_base = θ₀/Π₀ (for constant θ₀ reference)
-        # The buoyancy from MPAS: b ≈ g Δθ / θ_base = g * 15 / (θ₀/Π₀)
-        # = g * 15 * Π₀ / θ₀
-        # But computing θ_base from the Exner reference:
-        δz_πᵣ = δzTᵃᵃᶠ(i, j, k, grid, πᵣ)
-        Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
-        # θ_base at face ≈ -g / (cₚ ∂Π₀/∂z) = g Δz / (cₚ (Π₀_above - Π₀_below))
-        # Careful: ∂Π₀/∂z < 0, so θ_base = -g / (cₚ ∂Π₀/∂z) > 0
-        dπ_dz = δz_πᵣ / Δzᶠ
-        θ_base_face = ifelse(dπ_dz == 0, θᵥᶠ, -g / (cᵖᵈ * dπ_dz))
-        b = g * (θᵥᶠ - θ_base_face) / θ_base_face
+        # Horizontal tendencies: Gˢu = Gˢρu/ρ, Gˢv = Gˢρv/ρ.
+        # Gˢρu from dynamics includes the FULL horizontal PGF (∂p/∂x) which is
+        # recomputed at each RK stage from the current state's pressure.
+        # This matches MPAS where tend_u_euler is recomputed per stage.
+        Gˢu[i, j, k] = Gˢρu[i, j, k] / ρᶠᶜᶜ * !on_x_boundary(i, j, k, grid)
+        Gˢv[i, j, k] = Gˢρv[i, j, k] / ρᶜᶠᶜ * !on_y_boundary(i, j, k, grid)
 
-        Gˢw[i, j, k] = (Gˢρw[i, j, k] / ρᶜᶜᶠ + b) * (k > 1)
+        # ── §5-7: Vertical PGF + buoyancy from linearized pp and dpdz ──
+        # Gˢρw from dynamics has vertical PGF + buoyancy ZEROED (SplitExplicit).
+        # Compute tend_w_euler from U⁰ (frozen across stages, matching MPAS rk_step=1).
+        if k > 1
+            pp_k = linearized_pp(i, j, k, ρθ⁰, πᵣ, pᵣ, Rᵈ, rcv, pˢᵗ)
+            pp_km1 = linearized_pp(i, j, k - 1, ρθ⁰, πᵣ, pᵣ, Rᵈ, rcv, pˢᵗ)
 
-        # Slow Exner pressure tendency: Gˢπ = -u · ∇π
-        #
-        # The full π equation splits into slow and fast parts:
-        #   ∂π'/∂t = Gˢπ - S · ∇·u
-        # where S·∇·u is the fast (acoustic) compression handled by the
-        # acoustic backward step, and Gˢπ captures slow advection of π.
-        #
-        # From π = (ρθ Rᵈ/p₀)^(Rᵈ/cᵥᵈ), the chain rule gives:
-        #   dπ/dt = (R/cᵥ)(π/ρθ) · d(ρθ)/dt
-        # The slow part is (R/cᵥ)(π/ρθ)·(-u·∇ρθ) = -u·∇π (no extra factor).
-        #
-        # Computing Gˢπ = -u·∇π directly (rather than from Gˢρθ) avoids a
-        # discretization mismatch: Gˢρθ uses WENO flux-divergence while the
-        # compression correction ρθ·∇·u uses centered differences.
-        #
-        # We use centered differences for ∇π. Since πᵣ varies only in z,
-        # horizontal derivatives involve only π'.
-        Δx = Δxᶠᶜᶜ(i, j, k, grid)
-        Δy = Δyᶜᶠᶜ(i, j, k, grid)
+            # §7: PGF = rdzu * (pp_k - pp_{k-1})
+            Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
+            pgf = (pp_k - pp_km1) / Δzᶠ
+
+            # §6: dpdz = -g * (ρ⁰ - ρ_base) at centers
+            dpdz_k = -g * (ρ⁰[i, j, k] - ρᵣ[i, j, k])
+            dpdz_km1 = -g * (ρ⁰[i, j, k - 1] - ρᵣ[i, j, k - 1])
+
+            # §7: tend_w_euler = -pgf + fzm*dpdz_k + fzp*dpdz_{k-1}
+            # fzm = Δz_below / total, fzp = Δz_above / total (MPAS convention)
+            Δzᶜ_above = Δzᶜᶜᶜ(i, j, k, grid)
+            Δzᶜ_below = Δzᶜᶜᶜ(i, j, k - 1, grid)
+            fzm = Δzᶜ_below / (Δzᶜ_above + Δzᶜ_below)
+            fzp = Δzᶜ_above / (Δzᶜ_above + Δzᶜ_below)
+            tend_w_euler = -pgf + fzm * dpdz_k + fzp * dpdz_km1
+
+            # Total: Gˢw = advection/ρ + tend_w_euler/ρ
+            Gˢw[i, j, k] = Gˢρw[i, j, k] / ρᶜᶜᶠ + tend_w_euler / ρᶜᶜᶠ
+        else
+            Gˢw[i, j, k] = zero(eltype(Gˢw))
+        end
+
+        # ── Slow Exner pressure tendency: Gˢπ = -u · ∇π ──
+        # Use topology-safe operators: ℑxᶜᵃᵃ(∂xᶠᶜᶜ(π')) gives the centered
+        # gradient (f[i+1]-f[i-1])/(2Δx) on uniform grids; automatically zero for Flat.
+        uᶜ = ℑxᶜᵃᵃ(i, j, k, grid, u)
+        ∂π_∂x = ℑxᶜᵃᵃ(i, j, k, grid, ∂xᶠᶜᶜ, π′)
+
+        vᶜ = ℑyᵃᶜᵃ(i, j, k, grid, v)
+        ∂π_∂y = ℑyᵃᶜᵃ(i, j, k, grid, ∂yᶜᶠᶜ, π′)
+
         Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
-
-        # u · ∂π/∂x: centered average of u to cell center × centered π' gradient
-        uᶜ = (u[i, j, k] + u[i + 1, j, k]) / 2
-        ∂π_∂x = (π′[i + 1, j, k] - π′[i - 1, j, k]) / (2 * Δx)
-
-        # v · ∂π/∂y: (zero for Flat y; centered for Periodic/Bounded)
-        vᶜ = (v[i, j, k] + v[i, j + 1, k]) / 2
-        ∂π_∂y = (π′[i, j + 1, k] - π′[i, j - 1, k]) / (2 * Δy)
-
-        # w · ∂π/∂z: full π = πᵣ + π', using centered differences
-        # At boundaries, π values from halos; w→0 at solid boundaries
         π_above = ifelse(k == Nz, πᵣ[i, j, k] + π′[i, j, k],
                          πᵣ[i, j, k + 1] + π′[i, j, k + 1])
         π_below = ifelse(k == 1, πᵣ[i, j, k] + π′[i, j, k],
@@ -717,12 +734,7 @@ end
                      (w[i, j, k] + w[i, j, k + 1]) / 2))
         ∂π_∂z = (π_above - π_below) / (2 * Δzᶜ)
 
-        u_dot_grad_π = uᶜ * ∂π_∂x + vᶜ * ∂π_∂y + wᶜ * ∂π_∂z
-
-        # Gˢπ = -u · ∇π (no extra R/cᵥ factor needed)
-        # The chain rule already accounts for it: u·∇π = (R/cᵥ)(π/ρθ)·u·∇(ρθ),
-        # so -u·∇π = (R/cᵥ)(π/ρθ)·(-u·∇ρθ) which is the correct slow π tendency.
-        Gˢπ[i, j, k] = -u_dot_grad_π
+        Gˢπ[i, j, k] = -(uᶜ * ∂π_∂x + vᶜ * ∂π_∂y + wᶜ * ∂π_∂z)
     end
 end
 
@@ -731,27 +743,43 @@ end
 ##### MPAS: u += dts * (Gˢu - c2 * Π_face * ∂(rtheta_pp)/∂x * cqw / zz_face)
 ##### For dry air, no terrain: cqw=1, zz=1.
 
-@kernel function _mpas_horizontal_forward!(u, v, grid, Δτ,
-                                            rtheta_pp, πᵣ,
+# Exner function at a cell center, for interpolation via function composition.
+@inline _exner_from_p(i, j, k, grid, p, pˢᵗ, κ) = (p[i, j, k] / pˢᵗ)^κ
+
+@kernel function _mpas_horizontal_forward!(u, v, ru_p, rv_p, grid, Δτ,
+                                            rtheta_pp, pressure, ρ,
                                             Gˢu, Gˢv,
-                                            cₚ, Rᵈ)
+                                            cₚ, Rᵈ, pˢᵗ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         rcv = Rᵈ / (cₚ - Rᵈ)
-        c2 = cₚ * rcv  # cp * R/cv
+        c2 = cₚ * rcv  # cp * R/cv = γR_d (Eq. 3.25)
+        κ = Rᵈ / cₚ
 
-        # u-face: PGF from ρθ perturbation gradient
-        Π_u_face = (πᵣ[i, j, k] + πᵣ[i - 1, j, k]) / 2
-        ∂x_ρθ = (rtheta_pp[i, j, k] - rtheta_pp[i - 1, j, k]) / Δxᶠᶜᶜ(i, j, k, grid)
-        pgf_u = -c2 * Π_u_face * ∂x_ρθ
-        u[i, j, k] += Δτ * (Gˢu[i, j, k] + pgf_u) * !on_x_boundary(i, j, k, grid)
+        # MPAS horizontal momentum update (line 2808-2812):
+        #   pgrad = c2 * Π_avg * Δ(rtheta_pp) / dcEdge
+        #   ru_p += dts * (tend_ru - pgrad)
+        # Exner interpolated to faces via function composition (topology-safe).
+        Π_u_face = ℑxᶠᵃᵃ(i, j, k, grid, _exner_from_p, pressure, pˢᵗ, κ)
+        ∂x_ρθ = ∂xᶠᶜᶜ(i, j, k, grid, rtheta_pp)
+        pgrad_u = c2 * Π_u_face * ∂x_ρθ
 
-        # v-face: PGF from ρθ perturbation gradient
-        Π_v_face = (πᵣ[i, j, k] + πᵣ[i, j - 1, k]) / 2
-        ∂y_ρθ = (rtheta_pp[i, j, k] - rtheta_pp[i, j - 1, k]) / Δyᶜᶠᶜ(i, j, k, grid)
-        pgf_v = -c2 * Π_v_face * ∂y_ρθ
-        v[i, j, k] += Δτ * (Gˢv[i, j, k] + pgf_v) * !on_y_boundary(i, j, k, grid)
+        ρ_u_face = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
+        ρ_u_safe = ifelse(ρ_u_face == 0, one(ρ_u_face), ρ_u_face)
+        not_bdy_x = !on_x_boundary(i, j, k, grid)
+        u[i, j, k] += Δτ * (Gˢu[i, j, k] - pgrad_u / ρ_u_safe) * not_bdy_x
+        ru_p[i, j, k] += Δτ * (ρ_u_face * Gˢu[i, j, k] - pgrad_u) * not_bdy_x
+
+        Π_v_face = ℑyᵃᶠᵃ(i, j, k, grid, _exner_from_p, pressure, pˢᵗ, κ)
+        ∂y_ρθ = ∂yᶜᶠᶜ(i, j, k, grid, rtheta_pp)
+        pgrad_v = c2 * Π_v_face * ∂y_ρθ
+
+        ρ_v_face = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
+        ρ_v_safe = ifelse(ρ_v_face == 0, one(ρ_v_face), ρ_v_face)
+        not_bdy_y = !on_y_boundary(i, j, k, grid)
+        v[i, j, k] += Δτ * (Gˢv[i, j, k] - pgrad_v / ρ_v_safe) * not_bdy_y
+        rv_p[i, j, k] += Δτ * (ρ_v_face * Gˢv[i, j, k] - pgrad_v) * not_bdy_y
     end
 end
 
@@ -766,16 +794,62 @@ end
 ##### The cofwt term uses ts to provide the gravity-wave restoring force.
 #####
 
+##### MPAS divergence damping (Eq. 3.45, Klemp, Skamarock & Ha 2018)
+##### Applied after each acoustic substep to V''_h (horizontal momentum perturbation):
+#####   V''_h += (γ_D Δx / Θ^t_m) δ_τ Θ''_m
+##### where δ_τ Θ'' = (rtheta_pp_new - rtheta_pp_old) / Δτ is the acoustic θ tendency.
+##### Using δ_τ Θ'' as the divergence proxy ensures numerical consistency with the
+##### discrete pressure equation, preventing corruption of gravity wave frequencies.
+
+##### MPAS divergence damping (Eq. 3.45, atm_divergence_damping_3d)
+##### Applied after each acoustic substep to V''_h (horizontal momentum perturbation):
+#####   ru_p += coef * (rtheta_pp_new - rtheta_pp_old) * dvEdge / (dcEdge * 2 * θ_m_edge)
+##### where coef = 2 * smdiv * len_disp / dts.
+##### Using δ_τ Θ'' as the divergence proxy ensures numerical consistency with the
+##### discrete pressure equation (Klemp, Skamarock & Ha 2018).
+
+##### Inline helpers for function composition with topology-safe operators.
+
+# Exner perturbation change per substep (for legacy divergence damping).
+@inline _Δπ(i, j, k, grid, π′, π′⁻) = π′[i, j, k] - π′⁻[i, j, k]
+
+##### Divergence proxy for MPAS damping: divCell = -(rtheta_pp - rtheta_pp_old)
+@inline _neg_δΘ(i, j, k, grid, rtheta_pp, rtheta_pp_old) =
+    -(rtheta_pp[i, j, k] - rtheta_pp_old[i, j, k])
+
+@kernel function _mpas_divergence_damping!(ru_p, rv_p,
+                                            rtheta_pp, rtheta_pp_old, θ_m,
+                                            grid, coef_div_damp)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        # MPAS (lines 3059-3062): divCell = -(rtheta_pp_new - rtheta_pp_old)
+        # ru_p += coef_divdamp * δx(divCell) / (θ_cell1 + θ_cell2)
+        # Uses topology-safe operators: ∂xᶠᶜᶜ returns 0 for Flat x.
+
+        # x-direction: gradient of divΘ at u-face, divided by θ sum
+        ∂x_divΘ = δxᶠᵃᵃ(i, j, k, grid, _neg_δΘ, rtheta_pp, rtheta_pp_old)
+        θ_sum_u = 2 * ℑxᶠᵃᵃ(i, j, k, grid, θ_m)
+        θ_sum_u_safe = ifelse(θ_sum_u == 0, one(θ_sum_u), θ_sum_u)
+        ru_p[i, j, k] += coef_div_damp * ∂x_divΘ / θ_sum_u_safe *
+                          !on_x_boundary(i, j, k, grid)
+
+        # y-direction: gradient of divΘ at v-face, divided by θ sum
+        ∂y_divΘ = δyᵃᶠᵃ(i, j, k, grid, _neg_δΘ, rtheta_pp, rtheta_pp_old)
+        θ_sum_v = 2 * ℑyᵃᶠᵃ(i, j, k, grid, θ_m)
+        θ_sum_v_safe = ifelse(θ_sum_v == 0, one(θ_sum_v), θ_sum_v)
+        rv_p[i, j, k] += coef_div_damp * ∂y_divΘ / θ_sum_v_safe *
+                          !on_y_boundary(i, j, k, grid)
+    end
+end
+
 @kernel function _compute_ts!(ts, grid, Δτ, u, v, rtheta_pp, Gˢρθ, θ_m)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        V = Vᶜᶜᶜ(i, j, k, grid)
-
-        # Horizontal ρθ flux divergence: -θ_m div_h(u)
+        # Horizontal ρθ flux divergence: -θ_m div_h(u) (topology-safe)
         θ_mᵢ = θ_m[i, j, k]
-        div_h = (Axᶠᶜᶜ(i + 1, j, k, grid) * u[i + 1, j, k] - Axᶠᶜᶜ(i, j, k, grid) * u[i, j, k] +
-                 Ayᶜᶠᶜ(i, j + 1, k, grid) * v[i, j + 1, k] - Ayᶜᶠᶜ(i, j, k, grid) * v[i, j, k]) / V
+        div_h = div_xyᶜᶜᶜ(i, j, k, grid, u, v)
 
         # ts = previous rtheta_pp + slow tendency + horizontal flux
         ts[i, j, k] = rtheta_pp[i, j, k] + Δτ * Gˢρθ[i, j, k] - θ_mᵢ * Δτ * div_h
@@ -837,11 +911,8 @@ end
     Nz = size(grid, 3)
 
     @inbounds begin
-        # Area-weighted horizontal velocity divergence: V⁻¹ (Ax u|ᵢ₊₁ - Ax u|ᵢ + Ay v|ⱼ₊₁ - Ay v|ⱼ)
-        # Required for LatitudeLongitudeGrid where cell areas vary with latitude.
-        V = Vᶜᶜᶜ(i, j, k, grid)
-        ∇ₕ_u = (Axᶠᶜᶜ(i + 1, j, k, grid) * u[i + 1, j, k] - Axᶠᶜᶜ(i, j, k, grid) * u[i, j, k] +
-                 Ayᶜᶠᶜ(i, j + 1, k, grid) * v[i, j + 1, k] - Ayᶜᶠᶜ(i, j, k, grid) * v[i, j, k]) / V
+        # Horizontal velocity divergence (topology-safe)
+        ∇ₕ_u = div_xyᶜᶜᶜ(i, j, k, grid, u, v)
 
         # (1-ω)-weighted vertical divergence from old w (before implicit solve)
         w⁻_bot = ifelse(k == 1, zero(eltype(w)), w[i, j, k])
@@ -1027,6 +1098,10 @@ end
 end
 
 ##### MPAS acoustic substep: verbatim translation of Sections 3-8.
+##### Area-weighted θ fluxes for the topology-safe divergence computation.
+@inline Ax_θ_ru(i, j, k, grid, θ_m, ru_p) = Axᶠᶜᶜ(i, j, k, grid) * ℑxᶠᵃᵃ(i, j, k, grid, θ_m) * ru_p[i, j, k]
+@inline Ay_θ_rv(i, j, k, grid, θ_m, rv_p) = Ayᶜᶠᶜ(i, j, k, grid) * ℑyᵃᶠᵃ(i, j, k, grid, θ_m) * rv_p[i, j, k]
+
 ##### This kernel does ONE complete substep for ONE column (i,j).
 ##### Launched with :xy worksize. Sequential k-loops match MPAS exactly.
 
@@ -1034,6 +1109,7 @@ end
                                           ts_scratch, rs_scratch, gamma_scratch,
                                           u, v, w,
                                           ρu⁰, ρv⁰, ρ⁰,
+                                          ru_p, rv_p,
                                           cofwz, cofwr, cofwt_field, coftz,
                                           grid, dts, dtseps, resm, epssm,
                                           Gˢw, Gˢρ, Gˢρθ,
@@ -1054,33 +1130,34 @@ end
             rw_p[i, j, Nz + 1] = 0
         end
 
-        ## ── MPAS Section 4: Compute ts, rs ──
+        ## ── MPAS Section 4: Compute ts, rs (Eqs. 3.27-3.28, 3.41-3.42) ──
         ## ts(k) = rtheta_pp + dts*Gˢρθ + horizontal_θ_flux - resm*vertical_θ_flux
         ## rs(k) = rho_pp + dts*Gˢρ + horizontal_ρ_flux - resm*vertical_ρ_flux
 
-        ## Step 4a: Horizontal flux divergence for ts and rs.
-        ## MPAS accumulates flux from edges. In Breeze's structured grid:
-        ## horizontal ρ flux divergence = div_xy(ρu) (area-weighted)
-        ## horizontal ρθ flux divergence = θ_m * div_xy(ρu) (approx, using stage-frozen θ_m)
-        ##
-        ## Actually, MPAS computes: flux = sign * dts * dvEdge * ru_p * invArea
-        ## where ru_p is the acoustic perturbation of ρu at edges.
-        ## On the first substep, ru_p comes from the initial velocity perturbation.
-        ## In Breeze, the velocities u,v are updated by the forward step BEFORE this
-        ## kernel. So we compute the horizontal divergence from the current u,v.
-        ## The ρ flux div = div_xy(u) (since MPAS works with velocity not momentum here
-        ## ... actually ru_p IS momentum perturbation).
-        ##
-        ## For simplicity and correctness: use area-weighted velocity divergence
-        ## multiplied by appropriate densities.
-
         for k in 1:Nz
-            # Horizontal flux (set to zero for now — MPAS uses ru_p accumulation).
-            rs_k = zero(eltype(rho_pp))
-            ts_k = zero(eltype(rtheta_pp))
+            ## Step 4a: Horizontal flux divergence from ru_p, rv_p (MPAS Eq. 3.27-3.28).
+            ## MPAS: ts -= dts * Σ(dvEdge * ru_p * θ_m_edge) / cellArea
+            ## MPAS: rs -= dts * Σ(dvEdge * ru_p) / cellArea
+            ## In structured grid: area-weighted divergence of momentum perturbation.
+            ##
+            ## NOTE: In MPAS, the horizontal flux uses ru_p from the CURRENT substep
+            ## (after the horizontal forward step updated ru_p). The flux divergence
+            ## is computed using the area-weighted form with edge-interpolated θ_m.
+            V = Vᶜᶜᶜ(i, j, k, grid)
 
-            # Step 4b: Add previous perturbation + slow tendency + vertical flux (MPAS lines 2891-2896)
-            # MPAS: cofrz(k) = dtseps * rdzw(k) = dtseps / Δzᶜ(k)
+            # Mass flux divergence: ∇·V''_h (Eq. 3.28)
+            # Uses topology-safe div_xyᶜᶜᶜ — automatically zero for Flat dimensions.
+            mass_flux_div = div_xyᶜᶜᶜ(i, j, k, grid, ru_p, rv_p)
+
+            # θ flux divergence: ∇·(V''_h θ^t_m) (Eq. 3.27)
+            # Area-weighted θ flux at each face, using topology-safe δx/δy operators.
+            theta_flux_div = (δxᶜᵃᵃ(i, j, k, grid, Ax_θ_ru, θ_m, ru_p) +
+                              δyᵃᶜᵃ(i, j, k, grid, Ay_θ_rv, θ_m, rv_p)) / V
+
+            rs_k = -dts * mass_flux_div
+            ts_k = -dts * theta_flux_div
+
+            ## Step 4b: Add previous perturbation + slow tendency + vertical flux
             Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
             cofrz_k = dtseps / Δzᶜ
 
@@ -1097,8 +1174,6 @@ end
             ts_k = rtheta_pp[i, j, k] + dts * Gˢρθ[i, j, k] + ts_k -
                     resm / Δzᶜ * (coftz_top * dtseps * rw_top - coftz_bot * dtseps * rw_bot)
 
-            # Store ts, rs in scratch fields (separate from rho_pp/rtheta_pp
-            # which hold the OLD values needed for the resm term in Section 5).
             ts_scratch[i, j, k] = ts_k
             rs_scratch[i, j, k] = rs_k
         end
@@ -1125,8 +1200,8 @@ end
             cofwt_k = cofwt_field[i, j, k] * dtseps
             cofwt_km1 = cofwt_field[i, j, k - 1] * dtseps
 
-            # MPAS explicit w update (lines 2907-2916, with zz=1).
-            # Gˢw is velocity tendency; multiply by ρ_face for momentum.
+            # MPAS explicit w update (lines 2964-2972, with zz=1).
+            # cofwr uses simple sum (rs_k + rs_km1), matching MPAS exactly.
             ρ_face_k = (ρ[i, j, k] + ρ[i, j, k - 1]) / 2
             rw_p[i, j, k] = rw_p[i, j, k] + dts * ρ_face_k * Gˢw[i, j, k] -
                              cofwz_k * ((ts_k - ts_km1) +
@@ -1232,12 +1307,17 @@ end
 end
 
 ##### Convert rw_p (momentum perturbation) to velocity w.
-@kernel function _convert_rw_p_to_w!(w, rw_p, ρ, grid)
+##### MPAS recovery for w (line 3331-3334):
+#####   rw(k) = rw_save(k) + rw_p(k)
+#####   w(k) = rw(k) / (fzm*rho_zz(k) + fzp*rho_zz(k-1))
+##### rw_save is the vertical momentum at step start (ρw⁰ from U⁰).
+@kernel function _convert_rw_p_to_w!(w, rw_p, ρw⁰, ρ, grid)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, ρ)
+        ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
         ρᶠ_safe = ifelse(ρᶠ == 0, one(ρᶠ), ρᶠ)
-        w[i, j, k] = rw_p[i, j, k] / ρᶠ_safe * (k > 1)
+        rw_total = ρw⁰[i, j, k] + rw_p[i, j, k]
+        w[i, j, k] = rw_total / ρᶠ_safe * (k > 1)
     end
 end
 
@@ -1501,17 +1581,14 @@ end
         #
         # The cᵖ θᵥ factor matches the PGF scaling so that ϰᵃᶜ is a
         # dimensionless O(1) coefficient (ϰᵃᶜ ∈ [2, 10] typical).
-        Δπ_i   = π′[i, j, k]     - π′⁻[i, j, k]
-        Δπ_im1 = π′[i - 1, j, k] - π′⁻[i - 1, j, k]
-        Δx = Δxᶠᶜᶜ(i, j, k, grid)
+        # Topology-safe: ∂xᶠᶜᶜ and ∂yᶜᶠᶜ return 0 for Flat dimensions.
+        ∂Δπ_∂x = ∂xᶠᶜᶜ(i, j, k, grid, _Δπ, π′, π′⁻)
         θᵥᶠᶜᶜ = ℑxTᶠᵃᵃ(i, j, k, grid, θᵥ)
-        u[i, j, k] -= ϰᵃᶜ * cᵖ * θᵥᶠᶜᶜ * (Δπ_i - Δπ_im1) / Δx * !on_x_boundary(i, j, k, grid)
+        u[i, j, k] -= ϰᵃᶜ * cᵖ * θᵥᶠᶜᶜ * ∂Δπ_∂x * !on_x_boundary(i, j, k, grid)
 
-        Δπ_j   = π′[i, j, k]     - π′⁻[i, j, k]
-        Δπ_jm1 = π′[i, j - 1, k] - π′⁻[i, j - 1, k]
-        Δy = Δyᶜᶠᶜ(i, j, k, grid)
+        ∂Δπ_∂y = ∂yᶜᶠᶜ(i, j, k, grid, _Δπ, π′, π′⁻)
         θᵥᶜᶠᶜ = ℑyTᵃᶠᵃ(i, j, k, grid, θᵥ)
-        v[i, j, k] -= ϰᵃᶜ * cᵖ * θᵥᶜᶠᶜ * (Δπ_j - Δπ_jm1) / Δy * !on_y_boundary(i, j, k, grid)
+        v[i, j, k] -= ϰᵃᶜ * cᵖ * θᵥᶜᶠᶜ * ∂Δπ_∂y * !on_y_boundary(i, j, k, grid)
     end
 end
 
@@ -1533,44 +1610,54 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     arch = architecture(grid)
     cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
 
-    # Compute substep count (adaptive when substeps === nothing)
-    N = acoustic_substeps(substepper.substeps, grid, Δt, model.thermodynamic_constants)
+    # Compute substep count (adaptive when substeps === nothing).
+    # MPAS requires N even (stage 2 uses N/2 substeps) and N ≥ 2.
+    N_raw = acoustic_substeps(substepper.substeps, grid, Δt, model.thermodynamic_constants)
+    N = max(2, N_raw + N_raw % 2)  # ensure even and ≥ 2
 
-    # MPAS WS-RK3 substep counts and sizes (verbatim from mpas_atm_time_integration.F):
-    #   Stage 1: 1 substep, dts = dt/3
-    #   Stage 2: N/2 substeps, dts = dt/N
-    #   Stage 3: N substeps, dts = dt/N
-    # The stage fraction β determines which stage: β=1/3 → stage 1, β=1/2 → stage 2, β=1 → stage 3.
+    # MPAS WS-RK3 substep counts and sizes (mpas_atm_time_integration.F):
+    #   Stage 1: 1 substep, dts = dt/3                → total = dt/3
+    #   Stage 2: N/2 substeps, dts = dt/N              → total = dt/2
+    #   Stage 3: N substeps, dts = dt/N                → total = dt
     if β_stage ≈ 1//3
         Nτ = 1
         Δτ = Δt / 3
     elseif β_stage ≈ 1//2
-        Nτ = max(1, N ÷ 2)
+        Nτ = N ÷ 2
         Δτ = Δt / N
     else  # β ≈ 1
         Nτ = N
         Δτ = Δt / N
     end
 
-    # Convert slow tendencies to velocity/pressure form
-    convert_slow_tendencies!(substepper, model)
+    # Convert slow tendencies to velocity/pressure form.
+    # MPAS: tend_w_euler (vertical PGF + buoyancy) is computed ONLY at rk_step=1
+    # Uses U⁰ for the linearized pp PGF+buoyancy (§5-8). Since U⁰ is frozen
+    # across all stages, tend_w_euler and tend_u_euler are the same at every stage.
+    convert_slow_tendencies!(substepper, model, U⁰)
+
+    # Fill halos for slow tendencies (read by horizontal forward at boundary faces)
+    fill_halo_regions!(substepper.slow_tendencies.velocity.u)
+    fill_halo_regions!(substepper.slow_tendencies.velocity.v)
+    fill_halo_regions!(substepper.slow_tendencies.velocity.w)
+    fill_halo_regions!(substepper.slow_tendencies.exner_pressure)
 
     # Initialize time-averaged velocities to zero
     ū = substepper.averaged_velocities
     launch!(arch, grid, :xyz, _zero_avg_velocities!, ū)
 
     # Reset perturbation variables at each stage start.
-    # NOTE: MPAS only resets at stage 1 and accumulates across stages.
-    # But our recovery doesn't properly support accumulation yet, so we
-    # reset per-stage for stability. This loses the inter-stage accumulation
-    # but prevents the exponential growth from recovery feedback.
-    # TODO: implement proper MPAS recovery that handles accumulated perturbations.
+    # MPAS accumulates across stages (only resets at stage 1), but this requires
+    # the accumulated perturbation to be consistent with the velocity reset and
+    # slow tendency re-evaluation. Per-stage reset is the standard WS-RK3 approach.
     fill!(parent(substepper.exner_perturbation), 0)
     fill!(parent(substepper.filtered_exner_perturbation), 0)
     fill!(parent(substepper.previous_exner_perturbation), 0)
     fill!(parent(substepper.rho_pp), 0)
     fill!(parent(substepper.rtheta_pp), 0)
     fill!(parent(substepper.rw_p), 0)
+    fill!(parent(substepper.ru_p), 0)
+    fill!(parent(substepper.rv_p), 0)
 
     u = model.velocities.u
     v = model.velocities.v
@@ -1583,6 +1670,10 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     # are added as forcing during the acoustic substeps.
     launch!(arch, grid, :xyz, _reset_velocities_to_U0!,
             u, v, w, U⁰[2], U⁰[3], U⁰[4], U⁰[1], grid)
+
+    # Fill halos for all stage-frozen fields read with horizontal neighbor access
+    fill_halo_regions!(u)
+    fill_halo_regions!(v)
 
     ω = substepper.forward_weight
     ω̄ = 1 - ω
@@ -1609,13 +1700,26 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         #   pgf_x = -c2 * Π_face * ∂(rtheta_pp)/∂x
         # NOT the Exner perturbation gradient. This provides horizontal
         # acoustic coupling through the accumulated ρθ perturbation.
+        pˢᵗ = model.dynamics.reference_state.standard_pressure
         launch!(arch, grid, :xyz, _mpas_horizontal_forward!,
-                u, v, grid, Δτ,
+                u, v, substepper.ru_p, substepper.rv_p, grid, Δτ,
                 substepper.rtheta_pp,
-                substepper.reference_exner_function,
+                model.dynamics.pressure, model.dynamics.density,
                 substepper.slow_tendencies.velocity.u,
                 substepper.slow_tendencies.velocity.v,
-                cᵖ, Rᵈ)
+                cᵖ, Rᵈ, pˢᵗ)
+
+        # Fill halos after horizontal forward: ru_p/rv_p were updated in the
+        # interior; the column kernel reads ru_p[i+1] via div_xyᶜᶜᶜ.
+        # Also fill u/v halos since the column kernel may indirectly need them.
+        fill_halo_regions!(substepper.ru_p)
+        fill_halo_regions!(substepper.rv_p)
+        fill_halo_regions!(u)
+        fill_halo_regions!(v)
+
+        # Save rtheta_pp before substep for divergence damping (δ_τΘ'' computation)
+        rtheta_pp_old = substepper.filtered_exner_perturbation  # scratch reuse
+        parent(rtheta_pp_old) .= parent(substepper.rtheta_pp)
 
         # Steps 2-8: MPAS column kernel — ts/rs accumulation, explicit w update,
         # tridiagonal solve, rho_pp/rtheta_pp update.
@@ -1624,6 +1728,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 ts_scratch, rs_scratch, substepper.gamma_tri,
                 u, v, w,
                 U⁰[2], U⁰[3], U⁰[1],  # ρu⁰, ρv⁰, ρ⁰
+                substepper.ru_p, substepper.rv_p,
                 substepper.cofwz, substepper.cofwr, substepper.cofwt, substepper.coftz,
                 grid, FT(Δτ), dtseps, resm, epssm,
                 substepper.slow_tendencies.velocity.w, Gⁿ.ρ, Gˢρθ,
@@ -1631,22 +1736,39 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 ū, 1 / Nτ,
                 substep == 1)
 
-        # MPAS does NOT update the Exner between substeps. The horizontal
-        # PGF uses the stage-frozen π' (reset to 0 at stage start).
-        # In MPAS, horizontal fluxes are tracked through ru_p (momentum
-        # perturbation), not through an updated Exner field.
+        # Fill rtheta_pp halos before divergence damping reads δx(rtheta_pp_new - rtheta_pp_old).
+        # The column kernel updated interior rtheta_pp but not halos; stale halos create
+        # a spurious gradient at periodic boundaries that feeds back into ru_p.
+        fill_halo_regions!(substepper.rtheta_pp)
+
+        # MPAS divergence damping (atm_divergence_damping_3d):
+        #   coef = 2 * smdiv * len_disp / dts
+        #   ru_p += coef * (δΘ_cell2 - δΘ_cell1) * dvEdge / (dcEdge * 2 * θ_edge)
+        # config_smdiv = 0.1, config_len_disp = grid resolution.
+        smdiv = FT(0.1)  # MPAS default
+        # MPAS config_len_disp = nominal grid resolution (single scalar).
+        # On LatLonGrid, minimum_xspacing gives tiny polar spacing (wrong).
+        # Use minimum_yspacing = R·Δφ (constant, represents nominal resolution).
+        TX, TY, _ = topology(grid)
+        len_disp = TY === Flat ? (TX === Flat ? FT(1) : FT(minimum_xspacing(grid))) : FT(minimum_yspacing(grid))
+        coef_div_damp = 2 * smdiv * len_disp / FT(Δτ)
+        launch!(arch, grid, :xyz, _mpas_divergence_damping!,
+                substepper.ru_p, substepper.rv_p,
+                substepper.rtheta_pp, rtheta_pp_old,
+                substepper.virtual_potential_temperature,
+                grid, coef_div_damp)
+
+        # MPAS halo exchanges (lines 1279-1322): communicate rho_pp, rtheta_pp,
+        # ru_p after each substep so the next substep's horizontal forward step
+        # and horizontal flux use up-to-date neighbor values.
+        fill_halo_regions!(substepper.rtheta_pp)
+        fill_halo_regions!(substepper.rho_pp)
+        fill_halo_regions!(substepper.ru_p)
+        fill_halo_regions!(substepper.rv_p)
     end
 
-    # Use the formulation's ρθ as ρθ₀ (still holds U⁰ during acoustic loop).
-    ρθ₀ = model.formulation.potential_temperature_density
-
-    # Convert rw_p to w velocity for momentum recovery.
-    launch!(arch, grid, :xyz, _convert_rw_p_to_w!,
-            w, substepper.rw_p, model.dynamics.density, grid)
-
-    # MPAS-style direct ρθ recovery (bypass Exner conversion).
-    # ρθ_new = ρθ⁰ + rtheta_pp
-    # ρ: diagnosed from ρ = ρθ / θ⁺ where θ⁺ = θⁿ + Δt_stage Gˢθ
+    # MPAS recovery order: ρ and ρθ first, then w from recovered density.
+    # This matches MPAS lines 3319-3334: rho_zz updated before w = rw/rho_face.
     Δt_stage = Nτ * Δτ
     ρχ = thermodynamic_density(model.formulation)
     Gⁿ = model.timestepper.Gⁿ
@@ -1658,6 +1780,10 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
             substepper.rtheta_pp, substepper.rho_pp,
             substepper.virtual_potential_temperature, Gˢρχ, Gⁿ.ρ,
             U⁰[1], U⁰[5], Δt_stage)
+
+    # Convert rw_p to w velocity: w = (ρw⁰ + rw_p) / ρ_recovered (MPAS line 3331-3334).
+    launch!(arch, grid, :xyz, _convert_rw_p_to_w!,
+            w, substepper.rw_p, U⁰[4], model.dynamics.density, grid)  # U⁰[4] = ρw⁰
 
     # Reconstruct momentum from updated density and velocity
     launch!(arch, grid, :xyz, _recover_momentum!,
@@ -1817,8 +1943,8 @@ function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
     Δτ = Δt / Ns
     Nτ = Ns
 
-    # Convert slow tendencies
-    convert_slow_tendencies!(substepper, model)
+    # Convert slow tendencies (uses U⁰ for frozen pp PGF)
+    convert_slow_tendencies!(substepper, model, U⁰)
 
     # Initialize time-averaged velocities to zero
     ū = substepper.averaged_velocities
