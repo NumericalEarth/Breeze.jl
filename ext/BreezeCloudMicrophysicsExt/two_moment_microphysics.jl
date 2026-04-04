@@ -793,7 +793,7 @@ instantaneous supersaturation. See eq. 19 in [Abdul-Razzak et al. (1998)](@cite 
 
 The mass tendency is then:
 ```math
-\\frac{dq^{cl}}{dt}_{act} = \\frac{dN^{cl}}{dt}_{act} \\frac{4}{3} π r_{act}^3 \\frac{ρ_w}{ρ}
+\\frac{\\mathrm{d}q^{cl}}{\\mathrm{d}t}_{act} = \\frac{\\mathrm{d}N^{cl}}{\\mathrm{d}t}_{act} \\frac{4}{3} π r_{act}^3 \\frac{ρ_w}{ρ}
 ```
 
 The activation rate is controlled by the nucleation timescale `τⁿᵘᶜ` stored in
@@ -827,7 +827,7 @@ Mass tendency for cloud liquid [kg/kg/s]
     ρᴸ = ap.ρ_w  # intrinsic density of liquid water [kg/m³]
     σ = ap.σ     # surface tension [N/m]
 
-    A = 2 * σ / (ρᴸ * Rᵛ * T)
+    A = 2σ / (ρᴸ * Rᵛ * T)
 
     # Use instantaneous supersaturation to compute activation radius
     # Following CloudMicrophysics parcel model: use r_nuc as fallback when no activation or no supersaturation

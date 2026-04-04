@@ -187,7 +187,7 @@ Using off-centering parameter ``\alpha`` (default 0.6), the update is split into
 w^{\tau + \Delta\tau} &= w^\tau + \Delta\tau \, \dot{w}^s
     - \Delta\tau \, c_p^d \bar{\theta}_v \left[ \beta \frac{\partial \pi'^{\,\tau}}{\partial z} + \alpha \frac{\partial \pi'^{\,\tau+\Delta\tau}}{\partial z} \right] \\
 \pi'^{\,\tau+\Delta\tau} &= \pi'^{\,\tau} + \Delta\tau \, \dot{\pi}^s
-    + \Delta\tau \, S \left[ \nabla_h \cdot \boldsymbol{u}^{\tau+\Delta\tau}
+    + \Delta\tau \, S \left[ \boldsymbol{\nabla}_h \boldsymbol{\cdot} \boldsymbol{u}^{\tau+\Delta\tau}
     + \beta \frac{\partial w^\tau}{\partial z} + \alpha \frac{\partial w^{\tau+\Delta\tau}}{\partial z} \right]
 \end{aligned}
 ```
@@ -241,7 +241,7 @@ recovery applies the acoustic perturbation to the **initial** state:
 
 ```math
 \begin{aligned}
-\pi^n &= \left( \frac{R^d \, (\rho\theta)^n}{p^{st}} \right)^{R/c_v} \\
+\pi^n &= \left[ \frac{R^d \, (\rho\theta)^n}{p^{st}} \right]^{R/c_v} \\
 \pi_{\text{new}} &= \pi^n + \Delta\pi', \qquad \Delta\pi' = \pi'_{\text{final}} - \pi'_{\text{initial}} \\
 \rho\theta_{\text{new}} &= \frac{p^{st}}{R^d} \, \pi_{\text{new}}^{\,c_v / R} \\
 \theta_{\text{new}} &= \theta^n + \beta \, \Delta t \, \dot{\theta}^s \\
@@ -299,15 +299,15 @@ arising from the mismatch between the reference state and the actual hydrostatic
 The slow Exner pressure tendency represents the advective transport of ``\pi``:
 
 ```math
-\dot{\pi}^s = -\boldsymbol{u} \cdot \nabla \pi
+\dot{\pi}^s = -\boldsymbol{u} \boldsymbol{\cdot} \boldsymbol{\nabla} \pi
 ```
 
 This is computed using centered differences (not WENO) to maintain consistency with the
 centered-difference divergence operator in the acoustic loop.
 
-!!! warning "No ``R/c_v`` factor in ``\\dot{\\pi}^s``"
+!!! warning "No \$R/c_v\$ factor in \$\\dot{\\pi}^s\$"
     The chain rule for ``\pi = f(\rho\theta)`` gives
-    ``\boldsymbol{u} \cdot \nabla\pi = (R/c_v)(\pi / \rho\theta) \, \boldsymbol{u} \cdot \nabla(\rho\theta)``,
+    ``\boldsymbol{u} \boldsymbol{\cdot} \boldsymbol{\nabla} \pi = (R/c_v)(\pi / \rho\theta) \, \boldsymbol{u} \boldsymbol{\cdot} \boldsymbol{\nabla} (\rho\theta)``,
     so the ``R/c_v`` factor is already embedded in the advection of ``\pi``.
     Writing ``\dot{\pi}^s = -(R/c_v) \, \boldsymbol{u} \cdot \nabla\pi`` would double-count
     this factor and reduce the perturbation amplitude by a factor of ``\sim 2.5``.
@@ -351,7 +351,7 @@ With ``c_s \approx 347\,``m/s and ``Δz = 1000\,``m, this restricts
 short of what the advective CFL would allow.
 
 The Exner pressure formulation resolves this by evolving ``\pi'`` as the acoustic prognostic
-variable. Since the acoustic pressure gradient ``c_p^d \bar{\theta}_v \nabla\pi'`` uses
+variable. Since the acoustic pressure gradient ``c_p^d \bar{\theta}_v \boldsymbol{\nabla} \pi'`` uses
 stage-frozen ``\bar{\theta}_v``, the acoustic dynamics are decoupled from the outer
 Runge-Kutta integration. The equation of state is still re-evaluated between stages (providing
 an accurate state for the next stage's slow tendencies), but this re-evaluation does not feed
@@ -394,7 +394,7 @@ The complete algorithm for one Wicker-Skamarock RK3 time step is:
    4. Initialize ``\pi' = \pi(U^n) - \pi_0`` (consistent with velocity reset to ``U^n``)
    5. Reset velocities ``(u, v, w)`` to ``U^n``
    6. **Acoustic substep loop** (``N_\tau`` iterations with ``\Delta\tau = \Delta t / N_s``):
-      - Forward: update ``u, v`` from ``\dot{u}^s`` and ``c_p^d \bar{\theta}_v \nabla\tilde{\pi}'``
+      - Forward: update ``u, v`` from ``\dot{u}^s`` and ``c_p^d \bar{\theta}_v \boldsymbol{\nabla} \tilde{\pi}'``
       - Implicit: solve tridiagonal for ``\pi'`` and recover ``w``
       - Filter: apply forward-extrapolation to ``\pi'``
       - Accumulate time-averaged velocities
