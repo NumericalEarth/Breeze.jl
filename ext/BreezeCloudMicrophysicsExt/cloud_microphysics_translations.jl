@@ -290,7 +290,7 @@ the mass ratio of melted snow to accreted warm hydrometeor mass:
 
 ```math
 α = cˡ (T - T_{freeze}) / ℒf
-````
+```
 
 This is a translation of `CloudMicrophysics.BulkMicrophysicsTendencies.warm_accretion_melt_factor`
 that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.

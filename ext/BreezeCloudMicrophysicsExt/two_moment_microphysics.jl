@@ -148,10 +148,11 @@ Base.summary(::TwoMomentCategories) = "TwoMomentCategories"
                                              rain_fall_velocity = SB2006VelType(FT),
                                              aerosol_activation = default_aerosol_activation(FT))
 
-Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters and aerosol activation.
+Construct `TwoMomentCategories` with default [Seifert-Beheng 2006](@cite SeifertBeheng2006)
+parameters and aerosol activation.
 
 # Keyword arguments
-- `warm_processes`: SB2006 parameters for warm-rain microphysics
+- `warm_processes`: [Seifert-Beheng 2006](@cite SeifertBeheng2006) parameters for warm-rain microphysics
 - `air_properties`: Air properties for thermodynamic calculations
 - `cloud_liquid_fall_velocity`: Terminal velocity parameters for cloud droplets (Stokes regime)
 - `rain_fall_velocity`: Terminal velocity parameters for rain drops
@@ -160,6 +161,11 @@ Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters and 
 - `τⁿᵘᵐ`: Timescale [s] for per-reservoir tendency limiting.
   Must satisfy `τⁿᵘᵐ ≥ Δt` to prevent reservoir overdraw.
   Default: 10 seconds.
+
+# References
+* Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
+    parameterization for mixed-phase clouds. Part 1: Model description.
+    Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
 """
 function two_moment_cloud_microphysics_categories(FT::DataType = Oceananigans.defaults.FloatType;
                                                   warm_processes = SB2006(FT),
