@@ -419,7 +419,8 @@ using CloudMicrophysics.AerosolModel: Mode_B, Mode_κ
 Microphysical state for warm-phase two-moment bulk microphysics.
 
 Contains the local mixing ratios and number concentrations needed to compute
-tendencies for cloud liquid and rain following the Seifert-Beheng 2006 scheme.
+tendencies for cloud liquid and rain following the
+[Seifert-Beheng 2006](@cite SeifertBeheng2006) scheme.
 
 # Fields
 - `qᶜˡ`: Cloud liquid mixing ratio (kg/kg)
@@ -429,6 +430,11 @@ tendencies for cloud liquid and rain following the Seifert-Beheng 2006 scheme.
 - `nᵃ`: Aerosol number per unit mass (1/kg)
 - `velocities`: NamedTuple of velocity components `(; u, v, w)` [m/s].
   The vertical velocity `w` is used for aerosol activation.
+
+# References
+* Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
+    parameterization for mixed-phase clouds. Part 1: Model description.
+    Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
 """
 struct WarmPhaseTwoMomentState{FT, V} <: AbstractMicrophysicalState{FT}
     qᶜˡ :: FT         # cloud liquid mixing ratio
