@@ -185,10 +185,10 @@ Using off-centering parameter ``\alpha`` (default 0.6), the update is split into
 ```math
 \begin{aligned}
 w^{\tau + \Delta\tau} &= w^\tau + \Delta\tau \, \dot{w}^s
-    - \Delta\tau \, c_p^d \bar{\theta}_v \left[ \beta \frac{\partial \pi'^{\,\tau}}{\partial z} + \alpha \frac{\partial \pi'^{\,\tau+\Delta\tau}}{\partial z} \right] \\
+    - \Delta\tau \, c_p^d \bar{\theta}_v \left( \beta \frac{\partial \pi'^{\,\tau}}{\partial z} + \alpha \frac{\partial \pi'^{\,\tau+\Delta\tau}}{\partial z} \right) \\
 \pi'^{\,\tau+\Delta\tau} &= \pi'^{\,\tau} + \Delta\tau \, \dot{\pi}^s
-    + \Delta\tau \, S \left[ \boldsymbol{\nabla}_h \boldsymbol{\cdot} \boldsymbol{u}^{\tau+\Delta\tau}
-    + \beta \frac{\partial w^\tau}{\partial z} + \alpha \frac{\partial w^{\tau+\Delta\tau}}{\partial z} \right]
+    + \Delta\tau \, S \left( \boldsymbol{\nabla}_h \boldsymbol{\cdot} \boldsymbol{u}^{\tau+\Delta\tau}
+    + \beta \frac{\partial w^\tau}{\partial z} + \alpha \frac{\partial w^{\tau+\Delta\tau}}{\partial z} \right)
 \end{aligned}
 ```
 
