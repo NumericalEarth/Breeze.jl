@@ -497,13 +497,16 @@ $(TYPEDSIGNATURES)
 
 Compute neutral transfer coefficient at 10 m using the
 [Large and Yeager (2009)](@cite LargeYeager2009) form:
-C¹⁰_N(U) = (a₀ + a₁ U + a₂ / U) × 10⁻³
+```math
+C^N_{10}(U) = (a_0 + a_1 U + a_2 / U) × 10^{-3}
+```
 
-Wind speed is clamped to `U_min` to avoid singularity in the a₂/U term.
+Wind speed is clamped to `U_min` to avoid singularity in the ``a_2/U`` term.
 
 # References
 
-* Large, W., & Yeager, S. G. (2009). The global climatology of an interannually varying air–sea flux data set. Climate dynamics, 33(2), 341-364.
+* Large, W., & Yeager, S. G. (2009). The global climatology of an interannually varying
+    air–sea flux data set. Climate dynamics, 33(2), 341-364.
 """
 @inline function neutral_coefficient_10m(polynomial, U₁₀, U_min)
     a₀, a₁, a₂ = polynomial
