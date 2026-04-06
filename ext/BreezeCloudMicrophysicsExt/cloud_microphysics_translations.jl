@@ -455,7 +455,7 @@ particles when air becomes supersaturated. This struct bundles the parameters ne
 to compute the activation source term for cloud droplet number concentration.
 
 # Fields
-- `activation_parameters`: [`AerosolActivationParameters`] from CloudMicrophysics.jl
+- `activation_parameters`: `AerosolActivationParameters` from CloudMicrophysics.jl
 - `aerosol_distribution`: Aerosol size distribution (modes with number, size, hygroscopicity)
 - `nucleation_timescale`: Nucleation timescale [s] for converting activation deficit to rate (default: 1s)
 
@@ -486,7 +486,7 @@ Base.summary(::AerosolActivation) = "AerosolActivation"
 """
     max_supersaturation_breeze(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
 
-Compute the maximum supersaturation using the Abdul-Razzak and Ghan (2000) parameterization.
+Compute the maximum supersaturation using the [Abdul-Razzak and Ghan (2000)](@cite AbdulRazzakGhan2000) parameterization.
 
 This is a translation of `CloudMicrophysics.AerosolActivation.max_supersaturation` that uses
 Breeze's thermodynamics instead of Thermodynamics.jl.
@@ -501,6 +501,10 @@ Breeze's thermodynamics instead of Thermodynamics.jl.
 
 # Returns
 Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
+
+# References
+* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation: 2. Multiple
+    aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 """
 @inline function max_supersaturation_breeze(
     aerosol_activation::AerosolActivation,
