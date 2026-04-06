@@ -1,7 +1,7 @@
-@inline function ice_rain_collection_lookup(table::P3LookupTable2, m̄, λr, Fᶠ, Fˡ, ρᶠ)
-    return table.mass(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ),
-           table.number(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ),
-           table.sixth_moment(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ)
+@inline function ice_rain_collection_lookup(table::P3LookupTable2, m̄, λr, Fᶠ, Fˡ, ρᶠ, μ = zero(typeof(m̄)))
+    return table.mass(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ, μ),
+           table.number(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ, μ),
+           table.sixth_moment(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ, μ)
 end
 
 #####

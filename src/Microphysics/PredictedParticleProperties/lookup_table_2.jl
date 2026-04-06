@@ -8,10 +8,11 @@ function build_lookup_table_2(ice::IceProperties, rain::RainProperties, arch, pa
     range = table_range((params.minimum_log_mean_particle_mass, params.maximum_log_mean_particle_mass),
                         (params.minimum_log_rain_slope_parameter, params.maximum_log_rain_slope_parameter),
                         (zero(FT), one(FT)), (zero(FT), one(FT)),
-                        (params.minimum_rime_density, params.maximum_rime_density))
+                        (params.minimum_rime_density, params.maximum_rime_density),
+                        (params.minimum_shape_parameter, params.maximum_shape_parameter))
     points = (params.number_of_mass_points, params.number_of_rain_size_points,
               params.number_of_rime_fraction_points, params.number_of_liquid_fraction_points,
-              params.number_of_rime_density_points)
+              params.number_of_rime_density_points, params.number_of_shape_parameter_points)
 
     mass_table = build_tabulated_function(mass_eval, arch, FT, range, points)
     number_table = build_tabulated_function(number_eval, arch, FT, range, points)
@@ -34,12 +35,15 @@ function build_ice_rain_family_entry(integral, FT::Type{<:AbstractFloat};
                                      rain_density = FT(997))
     ice_eval = P3IntegralEvaluator(integral, FT; number_of_quadrature_points = quadrature_points)
 
-    return function (log_q, log_λr, Fᶠ, Fˡ, ρᶠ)
+    return function (log_q, log_λr, Fᶠ, Fˡ, ρᶠ, μ)
         λ_r = FT(10)^log_λr
         mean_particle_mass = FT(10)^log_q
 
-        # Build ice PSD state
-        state = state_from_mean_particle_mass(ice_eval, mean_particle_mass, Fᶠ, Fˡ; rime_density = ρᶠ)
+        # Build ice PSD state with shape parameter override from mu axis
+        mu_eval = P3IntegralEvaluator(integral, FT;
+                                       number_of_quadrature_points = quadrature_points,
+                                       shape_parameter_override = μ)
+        state = state_from_mean_particle_mass(mu_eval, mean_particle_mass, Fᶠ, Fˡ; rime_density = ρᶠ)
         thresholds = regime_thresholds_from_state(FT, state)
         λ_ice = state.slope
 
@@ -113,14 +117,14 @@ function build_ice_rain_family_entry(::IceRainSixthMomentCollection, FT::Type{<:
                                      quadrature_points = 64,
                                      rain_quadrature_points = 40,
                                      rain_density = FT(997))
-    ice_eval = P3IntegralEvaluator(IceRainSixthMomentCollection(), FT;
-                                    number_of_quadrature_points = quadrature_points)
-
-    return function (log_q, log_λr, Fᶠ, Fˡ, ρᶠ)
+    return function (log_q, log_λr, Fᶠ, Fˡ, ρᶠ, μ)
         λ_r = FT(10)^log_λr
         mean_particle_mass = FT(10)^log_q
 
-        # Build ice PSD state
+        # Build ice PSD state with shape parameter override from mu axis
+        ice_eval = P3IntegralEvaluator(IceRainSixthMomentCollection(), FT;
+                                        number_of_quadrature_points = quadrature_points,
+                                        shape_parameter_override = μ)
         state = state_from_mean_particle_mass(ice_eval, mean_particle_mass, Fᶠ, Fˡ; rime_density = ρᶠ)
         thresholds = regime_thresholds_from_state(FT, state)
         λ_ice = state.slope
@@ -180,10 +184,10 @@ function build_ice_rain_family_entry(::IceRainSixthMomentCollection, FT::Type{<:
         end
 
         # PSD moments: mom_k = N₀ × Γ(μ + k + 1) / λ^(μ + k + 1)
-        μ = state.shape
+        μ_state = state.shape
         N₀ = state.intercept
-        mom3 = N₀ * FT(gamma(μ + 4)) / λ_ice^(μ + 4)
-        mom6 = N₀ * FT(gamma(μ + 7)) / λ_ice^(μ + 7)
+        mom3 = N₀ * FT(gamma(μ_state + 4)) / λ_ice^(μ_state + 4)
+        mom6 = N₀ * FT(gamma(μ_state + 7)) / λ_ice^(μ_state + 7)
         mom3_safe = max(mom3, eps(FT))
 
         # Relative-variance formula: dG/dt for G = M6/M3²

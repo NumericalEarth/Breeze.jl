@@ -2912,4 +2912,31 @@ using Oceananigans.Fields: interior
         # The formula produces a mix of positive and negative values
         # (or at least values that differ from the raw D^6 integral)
     end
+
+    @testset "Ice-rain collection table is 6D with mu axis" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        FT = Float64
+        params = LookupTable2Parameters(FT;
+            number_of_mass_points=3,
+            number_of_rain_size_points=3,
+            number_of_rime_fraction_points=2,
+            number_of_liquid_fraction_points=2,
+            number_of_rime_density_points=2,
+            number_of_shape_parameter_points=3,
+            minimum_shape_parameter=0.0,
+            maximum_shape_parameter=4.0)
+
+        p3 = PredictedParticlePropertiesMicrophysics()
+        tables = PPP.build_lookup_table_2(p3.ice, p3.rain, CPU(), params)
+
+        @test tables.mass isa TabulatedFunction6D
+        @test tables.number isa TabulatedFunction6D
+        @test tables.sixth_moment isa TabulatedFunction6D
+        @test size(tables.mass.table) == (3, 3, 2, 2, 2, 3)
+
+        # Different mu values should produce different collection rates
+        v_mu0 = tables.mass(log10(1e-8), 3.5, 0.0, 0.0, 400.0, 0.0)
+        v_mu4 = tables.mass(log10(1e-8), 3.5, 0.0, 0.0, 400.0, 4.0)
+        @test v_mu0 != v_mu4
+    end
 end
