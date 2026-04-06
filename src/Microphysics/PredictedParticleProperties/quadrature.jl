@@ -36,6 +36,13 @@ const MH_C₂ = MH_δ₀^2 / 4
 # (create_p3_lookupTable_1.f90 line 325: g = 9.861)
 const P3_REF_G = 9.861
 
+# Slinn (1983) collection efficiency constants
+# (create_p3_lookupTable_1.f90 lines 335-338)
+const P3_BOLTZMANN = 1.3806503e-23   # Boltzmann constant [J/K]
+const P3_MEAN_FREE_PATH = 0.0256e-6  # Mean free path of air [m]
+const P3_DAW = 0.04e-6               # Water-friendly aerosol diameter [m]
+const P3_DAI = 0.8e-6                # Ice-friendly aerosol diameter [m]
+
 #####
 ##### Chebyshev-Gauss quadrature
 #####
@@ -1016,22 +1023,79 @@ end
     return ifelse(D < FT(100e-6), zero(FT), V * A * Np)
 end
 
-# Slinn (1983) aerosol collection by cloud/water: ∫ V(D) × A(D) × N'(D) dD
-# Fortran P3: nawcol. Collection efficiency applied at runtime.
-@inline function integrand(::CloudAerosolCollection, D, state::IceSizeDistributionState, thresholds)
-    V = terminal_velocity(D, state, thresholds)
-    A = particle_area(D, state, thresholds)
-    Np = size_distribution(D, state)
-    return V * A * Np
+# Slinn (1983) collection efficiency for aerosol scavenging by ice particles.
+# Faithfully translates Fortran P3 create_p3_lookupTable_1.f90 lines 1560-1586.
+# All constants (mu, rho, etc.) match the Fortran reference conditions used for
+# lookup-table generation.
+#
+# Arguments:
+#   D_ice   — ice particle diameter [m]
+#   V_ice   — ice particle terminal velocity [m/s]
+#   D_aer   — aerosol (or cloud droplet) diameter [m]
+@inline function slinn_collection_efficiency(D_ice, V_ice, D_aer)
+    FT = typeof(D_ice)
+
+    # Reference conditions matching Fortran table generation
+    ρ  = FT(P3_REF_RHO)           # air density [kg/m³]
+    ν  = FT(P3_REF_NU)            # kinematic viscosity [m²/s] (Fortran "mu")
+    T  = FT(P3_REF_T)             # temperature [K]
+    kB = FT(P3_BOLTZMANN)         # Boltzmann constant [J/K]
+    λ_mfp = FT(P3_MEAN_FREE_PATH) # mean free path [m]
+
+    # Reynolds number (Fortran: Re = 0.5*rho*d1*fall1(jj)/mu)
+    Re = FT(0.5) * ρ * D_ice * V_ice / ν
+
+    # Cunningham slip correction (Fortran: wcc)
+    wcc = 1 + 2 * λ_mfp / D_aer * (FT(1.257) + FT(0.4) * exp(FT(-0.55) * D_aer / λ_mfp))
+
+    # Brownian diffusivity (Fortran: diffin = boltzman*t*wcc/(3.*pi*mu*Daw))
+    D_B = kB * T * wcc / (3 * FT(π) * ν * D_aer)
+
+    # Schmidt number (Fortran: Sc = mu/(rho*diffin))
+    Sc = ν / (ρ * D_B)
+
+    # Stokes number (Fortran: St = Daw*Daw*fall1(jj)*1000.*wcc/(9.*mu*d1))
+    St = D_aer^2 * V_ice * FT(1000) * wcc / (9 * ν * D_ice)
+
+    # Critical Stokes number (Fortran: aval, St2)
+    aval = log(1 + Re)
+    St2 = (FT(1.2) + aval / 12) / (1 + aval)
+
+    # Slinn (1983) collection efficiency
+    # Brownian diffusion + interception terms
+    Eff = 4 / (Re * Sc) * (1 + FT(0.4) * Re^FT(0.5) * Sc^FT(0.3333) +
+              FT(0.16) * Re^FT(0.5) * Sc^FT(0.5)) +
+          4 * D_aer / D_ice * (FT(0.02) + D_aer / D_ice * (1 + 2 * Re^FT(0.5)))
+
+    # Inertial impaction term (only when St > St2)
+    # Use max(0, ...) to keep the base non-negative, since ifelse evaluates both branches.
+    ΔSt = max(0, St - St2)
+    Eff = Eff + ifelse(St > St2, (ΔSt / (ΔSt + FT(0.666667)))^FT(1.5), zero(FT))
+
+    # Clamp to [1e-5, 1]
+    return clamp(Eff, FT(1e-5), one(FT))
 end
 
-# Slinn (1983) aerosol collection by ice: ∫ V(D) × A(D) × N'(D) dD
-# Fortran P3: naicol. Collection efficiency applied at runtime.
-@inline function integrand(::IceAerosolCollection, D, state::IceSizeDistributionState, thresholds)
+# Slinn (1983) aerosol collection by water-friendly aerosol: ∫ E(D) × V(D) × A(D) × N'(D) dD
+# Fortran P3: nawcol. Uses Daw = 0.04 μm (water-friendly aerosol diameter).
+@inline function integrand(::CloudAerosolCollection, D, state::IceSizeDistributionState, thresholds)
+    FT = typeof(D)
     V = terminal_velocity(D, state, thresholds)
     A = particle_area(D, state, thresholds)
     Np = size_distribution(D, state)
-    return V * A * Np
+    Eff = slinn_collection_efficiency(D, V, FT(P3_DAW))
+    return V * A * Eff * Np
+end
+
+# Slinn (1983) aerosol collection by ice-friendly aerosol: ∫ E(D) × V(D) × A(D) × N'(D) dD
+# Fortran P3: naicol. Uses Dai = 0.8 μm (ice-friendly aerosol diameter).
+@inline function integrand(::IceAerosolCollection, D, state::IceSizeDistributionState, thresholds)
+    FT = typeof(D)
+    V = terminal_velocity(D, state, thresholds)
+    A = particle_area(D, state, thresholds)
+    Np = size_distribution(D, state)
+    Eff = slinn_collection_efficiency(D, V, FT(P3_DAI))
+    return V * A * Eff * Np
 end
 
 """
