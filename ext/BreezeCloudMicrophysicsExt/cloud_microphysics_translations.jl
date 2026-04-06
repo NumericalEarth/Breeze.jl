@@ -486,7 +486,8 @@ Base.summary(::AerosolActivation) = "AerosolActivation"
 """
     max_supersaturation_breeze(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
 
-Compute the maximum supersaturation using the [Abdul-Razzak and Ghan (2000)](@cite AbdulRazzakGhan2000) parameterization.
+Compute the maximum supersaturation using the [Abdul-Razzak and Ghan (2000)](@cite AbdulRazzakGhan2000)
+parameterization.
 
 This is a translation of `CloudMicrophysics.AerosolActivation.max_supersaturation` that uses
 Breeze's thermodynamics instead of Thermodynamics.jl.
