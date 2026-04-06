@@ -1,3 +1,5 @@
+using Oceananigans.Utils: prettysummary
+
 #####
 ##### Terrain metric terms
 #####
@@ -18,7 +20,7 @@
 ##### two types control the order of interpolation and multiplication:
 #####
 ##### SlopeOutsideInterpolation (default):
-#####   slope(i,j,k) * ℑz(ℑx(∂z(p')))
+#####   slope(i, j, k) * ℑz(ℑx(∂z(p')))
 #####   — slope is evaluated at the target (Face, Center, Center) point and
 #####     multiplied after averaging the vertical pressure derivative.
 #####
@@ -92,16 +94,25 @@ Adapt.adapt_structure(to, m::TerrainMetrics) =
                    m.z_top,
                    m.pressure_gradient_stencil)
 
+function Base.show(io::IO, tm::TerrainMetrics)
+    print(io, "TerrainMetrics\n")
+    print(io, "├── topography: ", summary(tm.topography), '\n')
+    print(io, "├── ∂x_h: ", prettysummary(tm.∂x_h), '\n')
+    print(io, "├── ∂y_h: ", prettysummary(tm.∂y_h), '\n')
+    print(io, "├── z_top: ", prettysummary(tm.z_top), '\n')
+    print(io, "└── pressure_gradient_stencil: ", prettysummary(tm.pressure_gradient_stencil))
+end
+
 """
 $(TYPEDSIGNATURES)
 
-Compute ``(\\partial z / \\partial x)_\\zeta`` at horizontal location ``(Face, Center)``
+Compute ``(∂z/∂x)_\\zeta`` at horizontal location `(Face, Center)`
 and vertical location `ℓz` (either `Center()` or `Face()`).
 
 For basic terrain-following coordinates:
 ```math
-\\left(\\frac{\\partial z}{\\partial x}\\right)_\\zeta
-= \\frac{\\partial h}{\\partial x} \\left(1 - \\frac{\\zeta}{z_{top}}\\right)
+\\left(\\frac{∂z}{∂x}\\right)_\\zeta
+    = \\frac{∂h}{∂x} \\left(1 - \\frac{\\zeta}{z_{top}}\\right)
 ```
 """
 @inline function terrain_slope_x(i, j, k, grid, metrics, ℓz)
@@ -114,8 +125,10 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute ``(\\partial z / \\partial y)_\\zeta`` at horizontal location ``(Center, Face)``
+Compute ``(∂z/∂y)_\\zeta`` at horizontal location `(Center, Face)`
 and vertical location `ℓz` (either `Center()` or `Face()`).
+
+See also [`terrain_slope_x`](@ref).
 """
 @inline function terrain_slope_y(i, j, k, grid, metrics, ℓz)
     ζ = rnode(k, grid, ℓz)
