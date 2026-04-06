@@ -76,11 +76,11 @@ end
     Cᴰ = bulk_coefficient(i, j, grid, drag.coefficient, model_fields, T₀)
 
     # Friction velocity: u★² = Cᴰ Ũ²
-    u_star = sqrt(Cᴰ * Ũ²)
+    u★ = sqrt(Cᴰ * Ũ²)
 
     # Height of first cell center
     z₁ = znode(i, j, 1, grid, Center(), Center(), Center())
 
     # MOST eddy viscosity
-    @inbounds νₑ[i, j, 1] = κ * u_star * z₁
+    @inbounds νₑ[i, j, 1] = κ * u★ * z₁
 end

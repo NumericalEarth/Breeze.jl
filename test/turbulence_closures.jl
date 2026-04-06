@@ -146,8 +146,8 @@ end
             U = sqrt(u₁^2 + v₁^2)
 
             gustiness = FT(0.5)
-            u_star = sqrt(Cᴰ * (U^2 + gustiness^2))
-            νₑ_expected = κ * u_star * z₁
+            u★ = sqrt(Cᴰ * (U^2 + gustiness^2))
+            νₑ_expected = κ * u★ * z₁
 
             # Check at an interior point (avoid boundary halo effects)
             νₑ_actual = interior(νₑ, 2, 2, 1)[]
