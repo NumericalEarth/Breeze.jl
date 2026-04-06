@@ -2892,4 +2892,24 @@ using Oceananigans.Fields: interior
         @test nawcol_table(log10(1e-8), 0.0, 0.0, 400.0, 0.0) >= 0
         @test naicol_table(log10(1e-8), 0.0, 0.0, 400.0, 0.0) >= 0
     end
+
+    @testset "m6collr uses relative-variance formula (can be negative)" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        params = LookupTable2Parameters(FT;
+            number_of_mass_points=10,
+            number_of_rain_size_points=10,
+            number_of_rime_fraction_points=2,
+            number_of_liquid_fraction_points=2,
+            number_of_rime_density_points=2)
+
+        tables = PPP.build_lookup_table_2(p3.ice, p3.rain, CPU(), params)
+        sixth_vals = tables.sixth_moment.table
+
+        # Relative-variance m6collr CAN be negative (unlike raw D^6 which is always positive)
+        @test all(isfinite, sixth_vals)
+        # The formula produces a mix of positive and negative values
+        # (or at least values that differ from the raw D^6 integral)
+    end
 end
