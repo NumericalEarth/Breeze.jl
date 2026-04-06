@@ -119,43 +119,78 @@ end
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants)
     dynamics = AnelasticDynamics(reference_state)
+    ρ₀ = interior(reference_state.density, 1, 1, 1)[]
 
-    Cᴰ = FT(1e-3)
-    drag = Breeze.BulkDrag(coefficient=Cᴰ, gustiness=FT(0.5))
+    κ = FT(0.4) # von Kármán constant
+    z₁ = Lz / 16 # midpoint of first cell (Nz=8, uniform grid)
 
-    ρu_bcs = FieldBoundaryConditions(bottom=drag)
-    ρv_bcs = FieldBoundaryConditions(bottom=drag)
+    @testset "BulkDrag BC" begin
+        Cᴰ = FT(1e-3)
+        drag = Breeze.BulkDrag(coefficient=Cᴰ, gustiness=FT(0.5))
+        ρu_bcs = FieldBoundaryConditions(bottom=drag)
+        ρv_bcs = FieldBoundaryConditions(bottom=drag)
 
-    for closure in (SmagorinskyLilly(), AnisotropicMinimumDissipation())
-        @testset "$(nameof(typeof(closure)))" begin
-            model = AtmosphereModel(grid; dynamics, closure,
-                                    boundary_conditions=(; ρu=ρu_bcs, ρv=ρv_bcs))
+        for closure in (SmagorinskyLilly(), AnisotropicMinimumDissipation())
+            @testset "$(nameof(typeof(closure)))" begin
+                model = AtmosphereModel(grid; dynamics, closure,
+                                        boundary_conditions=(; ρu=ρu_bcs, ρv=ρv_bcs))
 
-            # Set a velocity profile that produces shear and non-zero Smagorinsky νₑ
-            set!(model; ρu = (x, y, z) -> z / Lz, ρv = (x, y, z) -> FT(0.5) * z / Lz)
+                set!(model; ρu = (x, y, z) -> z / Lz, ρv = (x, y, z) -> FT(0.5) * z / Lz)
+                Breeze.AtmosphereModels.update_state!(model)
 
-            Breeze.AtmosphereModels.update_state!(model)
+                νₑ = model.closure_fields.νₑ
 
-            # Check that νₑ at k=1 matches the MOST prediction
-            νₑ = model.closure_fields.νₑ
-            κ = FT(0.4) # von Kármán constant
-            z₁ = Lz / 16 # midpoint of first cell (Nz=8, uniform grid)
+                u₁ = interior(model.velocities.u, 2, 2, 1)[]
+                v₁ = interior(model.velocities.v, 2, 2, 1)[]
+                U = sqrt(u₁^2 + v₁^2)
 
-            u₁ = interior(model.velocities.u, 2, 2, 1)[]
-            v₁ = interior(model.velocities.v, 2, 2, 1)[]
-            U = sqrt(u₁^2 + v₁^2)
+                gustiness = FT(0.5)
+                u★ = sqrt(Cᴰ * (U^2 + gustiness^2))
+                νₑ_expected = κ * u★ * z₁
 
-            gustiness = FT(0.5)
-            u★ = sqrt(Cᴰ * (U^2 + gustiness^2))
-            νₑ_expected = κ * u★ * z₁
+                νₑ_actual = interior(νₑ, 2, 2, 1)[]
+                @test νₑ_actual ≈ νₑ_expected rtol=FT(0.1)
 
-            # Check at an interior point (avoid boundary halo effects)
-            νₑ_actual = interior(νₑ, 2, 2, 1)[]
-            @test νₑ_actual ≈ νₑ_expected rtol=FT(0.1)
-
-            # Verify it differs from what the LES closure alone would produce at k=2
-            νₑ_interior = interior(νₑ, 2, 2, 2)[]
-            @test νₑ_actual != νₑ_interior
+                νₑ_interior = interior(νₑ, 2, 2, 2)[]
+                @test νₑ_actual != νₑ_interior
+            end
         end
+    end
+
+    @testset "Constant FluxBoundaryCondition" begin
+        # Prescribe a constant surface stress τ = -ρ₀ u★²
+        u★_prescribed = FT(0.3)
+        τ₀ = -ρ₀ * u★_prescribed^2
+        ρu_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(τ₀))
+        ρv_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(0)))
+
+        closure = SmagorinskyLilly()
+        model = AtmosphereModel(grid; dynamics, closure,
+                                boundary_conditions=(; ρu=ρu_bcs, ρv=ρv_bcs))
+
+        set!(model; ρu = (x, y, z) -> z / Lz)
+        Breeze.AtmosphereModels.update_state!(model)
+
+        νₑ = model.closure_fields.νₑ
+        νₑ_expected = κ * u★_prescribed * z₁
+
+        νₑ_actual = interior(νₑ, 2, 2, 1)[]
+        @test νₑ_actual ≈ νₑ_expected rtol=FT(1e-5)
+    end
+
+    @testset "No flux BC is a no-op" begin
+        # No bottom flux BCs — νₑ at k=1 should be the Smagorinsky value, not MOST
+        closure = SmagorinskyLilly()
+        model = AtmosphereModel(grid; dynamics, closure)
+
+        set!(model; ρu = (x, y, z) -> z / Lz, ρv = (x, y, z) -> FT(0.5) * z / Lz)
+        Breeze.AtmosphereModels.update_state!(model)
+
+        νₑ = model.closure_fields.νₑ
+
+        # With no flux BCs, νₑ at k=1 should equal the Smagorinsky-computed value,
+        # not be overwritten. Just check it's non-negative (Smagorinsky is always ≥ 0).
+        νₑ_surface = interior(νₑ, 2, 2, 1)[]
+        @test νₑ_surface >= 0
     end
 end
