@@ -109,3 +109,53 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         end
     end
 end
+
+@testset "Surface layer consistency [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    Lz = FT(400)
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 400), y=(0, 400), z=(0, Lz))
+
+    constants = ThermodynamicConstants(FT)
+    reference_state = ReferenceState(grid, constants)
+    dynamics = AnelasticDynamics(reference_state)
+
+    Cᴰ = FT(1e-3)
+    drag = Breeze.BulkDrag(coefficient=Cᴰ, gustiness=FT(0.5))
+
+    ρu_bcs = FieldBoundaryConditions(bottom=drag)
+    ρv_bcs = FieldBoundaryConditions(bottom=drag)
+
+    for closure in (SmagorinskyLilly(), AnisotropicMinimumDissipation())
+        @testset "$(nameof(typeof(closure)))" begin
+            model = AtmosphereModel(grid; dynamics, closure,
+                                    boundary_conditions=(; ρu=ρu_bcs, ρv=ρv_bcs))
+
+            # Set a velocity profile that produces shear and non-zero Smagorinsky νₑ
+            set!(model; ρu = (x, y, z) -> z / Lz, ρv = (x, y, z) -> FT(0.5) * z / Lz)
+
+            Breeze.AtmosphereModels.update_state!(model)
+
+            # Check that νₑ at k=1 matches the MOST prediction
+            νₑ = model.closure_fields.νₑ
+            κ = FT(0.4) # von Kármán constant
+            z₁ = Lz / 16 # midpoint of first cell (Nz=8, uniform grid)
+
+            u₁ = interior(model.velocities.u, 2, 2, 1)[]
+            v₁ = interior(model.velocities.v, 2, 2, 1)[]
+            U = sqrt(u₁^2 + v₁^2)
+
+            gustiness = FT(0.5)
+            u_star = sqrt(Cᴰ * (U^2 + gustiness^2))
+            νₑ_expected = κ * u_star * z₁
+
+            # Check at an interior point (avoid boundary halo effects)
+            νₑ_actual = interior(νₑ, 2, 2, 1)[]
+            @test νₑ_actual ≈ νₑ_expected rtol=FT(0.1)
+
+            # Verify it differs from what the LES closure alone would produce at k=2
+            νₑ_interior = interior(νₑ, 2, 2, 2)[]
+            @test νₑ_actual != νₑ_interior
+        end
+    end
+end

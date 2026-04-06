@@ -1,6 +1,8 @@
 module TurbulenceClosures
 
 using Oceananigans: Oceananigans
+using Oceananigans.Utils: launch!
+using KernelAbstractions: @kernel, @index
 
 using Oceananigans.Operators:
     # Face-centered difference operators with area metrics
@@ -98,5 +100,11 @@ end
         + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶠ, 𝒯_wy, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
         + δzᵃᵃᶠ(i, j, k, grid, Az_qᶜᶜᶜ, 𝒯_wz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
 end
+
+#####
+##### Surface layer consistency
+#####
+
+include("surface_layer_consistency.jl")
 
 end # module TurbulenceClosures

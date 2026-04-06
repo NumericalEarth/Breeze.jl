@@ -179,10 +179,22 @@ function compute_auxiliary_variables!(model)
     # Compute diffusivities
     compute_closure_fields!(model.closure_fields, model.closure, model)
 
+    # Overwrite near-surface νₑ for MOST consistency (implemented in TurbulenceClosures)
+    enforce_surface_layer_consistency!(model)
+
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
     return nothing
 end
+
+"""
+    enforce_surface_layer_consistency!(model)
+
+Overwrite near-surface eddy viscosity for MOST consistency.
+
+Declared here; methods provided by TurbulenceClosures module.
+"""
+function enforce_surface_layer_consistency! end
 
 function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     grid = model.grid

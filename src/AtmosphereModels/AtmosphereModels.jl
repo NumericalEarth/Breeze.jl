@@ -84,7 +84,10 @@ export
     # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
-    compute_z_momentum_tendency!
+    compute_z_momentum_tendency!,
+
+    # Surface layer consistency (extended by TurbulenceClosures)
+    enforce_surface_layer_consistency!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt

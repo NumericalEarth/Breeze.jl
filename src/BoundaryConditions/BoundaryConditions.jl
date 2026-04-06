@@ -45,6 +45,13 @@ using Adapt: Adapt
 using DocStringExtensions: TYPEDSIGNATURES
 
 #####
+##### Constants
+#####
+
+"""Von Kármán constant for surface layer similarity theory."""
+const κ = 0.4
+
+#####
 ##### Helper functions
 #####
 
