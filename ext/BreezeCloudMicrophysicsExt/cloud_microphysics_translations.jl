@@ -34,7 +34,7 @@ The ``G`` factor combines the effects of thermal conductivity and vapor diffusiv
 on phase change. It appears in the Mason equation for droplet growth:
 
 ```math
-\\frac{dm}{dt} = 4π r G 𝒮
+\\frac{\\mathrm{d}m}{\\mathrm{d}t} = 4π r G 𝒮
 ```
 
 where ``𝒮`` is supersaturation and ``r`` is droplet radius.
