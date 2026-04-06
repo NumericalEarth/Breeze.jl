@@ -1370,13 +1370,13 @@ using Oceananigans.Fields: interior
         p3_closure = ThreeMomentClosure()
 
         μ_rimed = solve_shape_parameter(1e-4, 1e6, 1e-11, 0.2, 500.0; closure=p3_closure)
-        @test μ_rimed ≈ 6.373017711118983
+        @test μ_rimed ≈ 6.373591950060266
 
         μ_large = solve_shape_parameter(1e-3, 1e5, 1e-8, 0.5, 700.0; closure=p3_closure)
-        @test μ_large ≈ 1.0341241878429641
+        @test μ_large ≈ 1.0341241245488653
 
         μ_broad = solve_shape_parameter(1e-4, 1e6, 1e-9, 0.2, 500.0; closure=p3_closure)
-        @test μ_broad ≈ 0.16224550152975636
+        @test μ_broad ≈ 0.1622133993223811
     end
 
     @testset "Exact three-moment closure solves the full residual" begin
@@ -1386,7 +1386,7 @@ using Oceananigans.Fields: interior
         μ_p3 = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=p3_closure)
         μ_exact = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=exact_closure)
 
-        @test μ_p3 ≈ 8.328332094974208
+        @test μ_p3 ≈ 8.328335493704905
         @test μ_exact == 0.0
         @test μ_p3 != μ_exact
     end

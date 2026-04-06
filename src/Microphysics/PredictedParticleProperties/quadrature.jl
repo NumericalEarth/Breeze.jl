@@ -32,6 +32,10 @@ const MH_C₀ = 0.6
 const MH_C₁ = 4 / (MH_δ₀^2 * sqrt(MH_C₀))
 const MH_C₂ = MH_δ₀^2 / 4
 
+# Gravitational acceleration matching the Fortran P3 lookup table code
+# (create_p3_lookupTable_1.f90 line 325: g = 9.861)
+const P3_REF_G = 9.861
+
 #####
 ##### Chebyshev-Gauss quadrature
 #####
@@ -281,7 +285,7 @@ Calculates velocity at reference conditions (P3_REF_T, P3_REF_P).
 """
 @inline function ice_fall_speed_mh2005(D, state::IceSizeDistributionState, m, A)
     FT = typeof(D)
-    g = FT(ThermodynamicConstants().gravitational_acceleration)
+    g = FT(P3_REF_G)
 
     # Reference properties
     ρ_ref = FT(P3_REF_RHO)
@@ -311,17 +315,15 @@ Calculates velocity at reference conditions (P3_REF_T, P3_REF_P).
     # Note: X^b1 can be small.
     # Fortran computes `xx**b1` then `a1 = ... / xx**b1`
 
-    # Stokes regime (small X): V = m g / (3 π η D)
-    V_stokes = m * g / (3 * FT(π) * η_ref * D)
-
     a₁ = MH_C₂ * (term - 1)^2 / max(X^b₁, eps(FT))
 
     # Velocity formula derived from MH2005 power law fit Re = a X^b
     # V = a₁ * ν^(1-2b₁) * (2 m g / (ρ A))^b₁ * D^(2b₁ - 1)
+    # Fortran always uses MH2005 (no Stokes regime switch)
     term_bracket = 2 * m * g / (ρ_ref * A_safe)
-    V_mh = a₁ * ν_ref^(1 - 2*b₁) * term_bracket^b₁ * D^(2*b₁ - 1)
+    V = a₁ * ν_ref^(1 - 2*b₁) * term_bracket^b₁ * D^(2*b₁ - 1)
 
-    return ifelse(X < FT(1e-5), V_stokes, V_mh)
+    return V
 end
 
 """

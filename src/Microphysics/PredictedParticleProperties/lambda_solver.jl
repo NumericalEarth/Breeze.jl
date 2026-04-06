@@ -1305,7 +1305,16 @@ function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
         λ = enforce_diameter_bounds(λ, μ, diameter_bounds)
     end
 
-    N₀ = intercept_parameter(N_ice, μ, log(λ))
+    # Compute N₀ from the mass constraint: L = N₀ × ∫ m(D) D^μ exp(-λD) dD.
+    # This matches Fortran (create_p3_lookupTable_1.f90 line 1054):
+    #   n0 = q / ((1-Fl)*(cs1*intgrR1 + ...) + Fl*cs5*intgrR5)
+    # When λ is clamped at the upper bound, the number-normalized N₀
+    # (= λ^(μ+1)/Γ(μ+1)) violates the mass constraint.  The mass-constrained
+    # N₀ ensures the PSD always integrates to the correct total mass.
+    logλ = log(λ)
+    log_M_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ;
+                                     liquid_fraction)
+    N₀ = L_ice / exp(log_M_over_N₀)
 
     return IceDistributionParameters(N₀, λ, μ)
 end

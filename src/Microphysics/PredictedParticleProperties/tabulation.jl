@@ -401,7 +401,7 @@ Normalize a raw quadrature integral for tabulation.
 With the N_ice = 1 convention, different integral types require different
 normalization to produce physically meaningful table values:
 
-- **Number-weighted fall speed**: ∫ V N' dD / N = raw (since N = 1)
+- **Number-weighted fall speed**: ∫ V N' dD / ∫ N' dD (divide by number integral)
 - **Mass-weighted fall speed**: ∫ V m N' dD / ∫ m N' dD (divide by mass integral)
 - **Reflectivity-weighted fall speed**: ∫ V D⁶ N' dD / ∫ D⁶ N' dD
 - **Effective radius**: 3 × ∫ m N' dD / (4 × ρ_ice × ∫ A N' dD)
@@ -410,6 +410,13 @@ normalization to produce physically meaningful table values:
 - **All other integrals**: raw (per-particle since N = 1)
 """
 normalize_integral(::AbstractP3Integral, raw, mean_particle_mass, state, nodes, weights) = raw
+
+function normalize_integral(::NumberWeightedFallSpeed, raw, mean_particle_mass, state, nodes, weights)
+    # Fortran: uns = Σ V·N'·dD / Σ N'·dD.  With mass-constrained N₀ (matching
+    # Fortran), ∫ N' dD ≠ 1 when λ is clamped, so we must divide explicitly.
+    number_integral = evaluate_quadrature(NumberMomentLambdaLimit(), state, nodes, weights)
+    return raw / max(number_integral, eps(typeof(raw)))
+end
 
 function normalize_integral(::MassWeightedFallSpeed, raw, mean_particle_mass, state, nodes, weights)
     mass_integral = evaluate_quadrature(MassMomentLambdaLimit(), state, nodes, weights)
