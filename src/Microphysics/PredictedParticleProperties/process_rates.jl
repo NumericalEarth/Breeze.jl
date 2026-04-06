@@ -1069,9 +1069,10 @@ Rime mass loses from:
     # Phase 1: melts and sublimates proportionally with ice mass
     # M8: sublimation (negative deposition) also removes rime proportionally
     sublimation = clamp_positive(-rates.deposition)
-    # Splintering mass is subtracted from rime (splinters fragment existing rime)
-    loss = Fᶠ * (rates.partial_melting + rates.complete_melting + sublimation) +
-           rates.splintering_mass
+    # Splintering (nCat=1): Fortran subtracts splintering from riming then adds it back
+    # as qcmul/qrmul, netting to zero effect on rime. Since cloud_riming and rain_riming
+    # are the full (unreduced) rates, no splintering subtraction is needed here.
+    loss = Fᶠ * (rates.partial_melting + rates.complete_melting + sublimation)
     return ρ * (gain - loss)
 end
 

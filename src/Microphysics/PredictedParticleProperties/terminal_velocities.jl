@@ -50,7 +50,8 @@ end
 @inline function tabulated_rain_mass_weighted_velocity(table::TabulatedFunction1D,
                                                          qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
     m̄  = qʳ / nʳ
-    λ_r = cbrt(FT(π) * ρʷ / (6 * max(m̄, FT(1e-15))))
+    # For exponential PSD (μ_r=0): <m> = π ρ_w / λ³, so λ = (π ρ_w / m̄)^(1/3)
+    λ_r = cbrt(FT(π) * ρʷ / max(m̄, FT(1e-15)))
     # H6: Clamp λ_r to Fortran P3 bounds (prevents unphysical lookup)
     λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
     log_λ = log10(λ_r)
@@ -103,7 +104,8 @@ end
                                                            ::AbstractRainIntegral,
                                                            qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
     m̄  = qʳ / nʳ
-    λ_r = cbrt(FT(π) * ρʷ / (6 * max(m̄, FT(1e-15))))
+    # For exponential PSD (μ_r=0): <m> = π ρ_w / λ³, so λ = (π ρ_w / m̄)^(1/3)
+    λ_r = cbrt(FT(π) * ρʷ / max(m̄, FT(1e-15)))
     # H6: Clamp λ_r to Fortran P3 bounds
     λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
     log_λ = log10(λ_r)

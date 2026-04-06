@@ -237,9 +237,9 @@ end
     ρ_water = p3.water_density
 
     # Diagnose λ_r from (q_r, N_r) for exponential DSD (μ_r = 0):
-    #   q_r = N_r * <m> = N_r * (π/6) ρ_w / λ_r³  ⟹  λ_r = (π ρ_w N_r / (6 q_r))^(1/3)
+    #   q_r = N_r * <m> = N_r * π ρ_w / λ_r³  ⟹  λ_r = (π ρ_w / m̄)^(1/3)
     m_mean = safe_divide(qʳ, nʳ, FT(1e-12))
-    λ_r = cbrt(FT(π) * ρ_water / (6 * max(m_mean, FT(1e-15))))
+    λ_r = cbrt(FT(π) * ρ_water / max(m_mean, FT(1e-15)))
     # H6: Clamp λ_r to Fortran P3 bounds
     λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
 

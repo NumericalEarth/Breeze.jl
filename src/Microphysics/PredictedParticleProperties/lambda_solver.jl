@@ -807,19 +807,17 @@ Matches Fortran `apply_mui_bounds_to_zi` and basic zsmall/zlarge clamps.
     return Z_clamped
 end
 
-# H15: Compute bulk density with liquid fraction blending for the 3-moment solver.
-# The raw MeanDensity quadrature returns ∫ ρ(D)m(D)N'(D)dD (unnormalized).
-# To blend with liquid water density, we normalize to actual mean density first,
-# blend, then scale back to the raw-integral convention used by mom3 = 6L/(πρ_bulk).
+# H15: Compute liquid-blended mass-weighted mean density for the 3-moment solver.
+# Returns ρ_mean [kg/m³] so callers can compute mom3 = 6 L_ice / (π ρ_mean).
+# Fortran `solve_mui` uses rhoi from lookup table interpolation for the same purpose.
 @inline function _liquid_blended_density(state, nodes, weights, L_ice, liquid_fraction)
     FT = typeof(L_ice)
     ρ_integral = max(evaluate_quadrature(MeanDensity(), state, nodes, weights), eps(FT))
-    # Normalize to actual mass-weighted mean density: ρ_mean = ∫ρmN'dD / ∫mN'dD
+    # Mass-weighted mean density: ρ_mean = ∫ρ(D)m(D)N'(D)dD / ∫m(D)N'(D)dD
     ρ_mean_dry = ρ_integral / max(L_ice, eps(FT))
     # Blend with liquid water density (Fortran convention)
     ρ_mean = (1 - liquid_fraction) * ρ_mean_dry + liquid_fraction * FT(1000)
-    # Scale back to raw-integral convention for consistency with mom3 = 6L/(πρ_bulk)
-    return max(ρ_mean * L_ice, eps(FT))
+    return max(ρ_mean, eps(FT))
 end
 
 """

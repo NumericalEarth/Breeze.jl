@@ -90,7 +90,8 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # tendency [1/kg/s]. The 1/2 self-collection factor is already included
     # in the kernel (table stores half-integral, analytical path includes 0.5 factor).
     # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
-    ρ₀ = prp.reference_air_density
+    # Use ice reference density (Fortran rhosui, P=600 hPa, T=-20°C), not rain reference.
+    ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
     rate = ρ * K_mean * nⁱ_eff^2 * rhofaci
 
