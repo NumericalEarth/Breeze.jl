@@ -524,7 +524,9 @@ end
 $(TYPEDSIGNATURES)
 
 Compute bulk Richardson number:
-Riᴮ = (g/θ̄ᵥ) × h × (θᵥ - θᵥ₀) / U²
+```math
+Riᴮ = (g / θ̄ᵥ) h (θᵥ - θᵥ₀) / U²
+```
 
 Wind speed is clamped to `U_min` to avoid singularity.
 
