@@ -45,7 +45,7 @@ This scheme can be used on its own to correct the moisture prognostic, or as the
 second phase of [`SpeciesBorrowing`](@ref) to clean up any vapor deficit that
 remains after same-level species borrowing.
 
-Column-integrated moisture is conserved (Δz-weighted).
+Column-integrated moisture is conserved (``Δz``-weighted).
 """
 struct VerticalBorrowing <: AbstractNegativeMoistureCorrection end
 

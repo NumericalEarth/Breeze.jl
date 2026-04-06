@@ -126,7 +126,7 @@ See the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrop
 # References
 * Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
     microphysics in models: Description and tests using a kinematic framework.
-    J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
+    J. Atmos. Sci., 65, 1528–1548. <https://doi.org/10.1175/2007JAS2491.1>
 """
 function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                     cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),

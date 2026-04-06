@@ -434,7 +434,7 @@ tendencies for cloud liquid and rain following the
 # References
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
     parameterization for mixed-phase clouds. Part 1: Model description.
-    Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
+    Meteorol. Atmos. Phys., 92, 45-66. <https://doi.org/10.1007/s00703-005-0112-4>
 """
 struct WarmPhaseTwoMomentState{FT, V} <: AbstractMicrophysicalState{FT}
     qᶜˡ :: FT         # cloud liquid mixing ratio

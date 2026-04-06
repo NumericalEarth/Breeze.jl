@@ -127,7 +127,7 @@ Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) 
     aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
     parameterization for mixed-phase clouds. Part 1: Model description.
-    Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
+    Meteorol. Atmos. Phys., 92, 45-66. <https://doi.org/10.1007/s00703-005-0112-4>
 """
 struct TwoMomentCategories{W, AP, LV, RV, AA, TL} <: AbstractNumberConcentrationCategories
     warm_processes :: W
@@ -165,7 +165,7 @@ parameters and aerosol activation.
 # References
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
     parameterization for mixed-phase clouds. Part 1: Model description.
-    Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
+    Meteorol. Atmos. Phys., 92, 45-66. <https://doi.org/10.1007/s00703-005-0112-4>
 """
 function two_moment_cloud_microphysics_categories(FT::DataType = Oceananigans.defaults.FloatType;
                                                   warm_processes = SB2006(FT),
@@ -276,7 +276,7 @@ for details on the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) scheme.
 
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
     parameterization for mixed-phase clouds. Part 1: Model description.
-    Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
+    Meteorol. Atmos. Phys., 92, 45-66. <https://doi.org/10.1007/s00703-005-0112-4>
 * Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation: 2. Multiple
     aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 """
