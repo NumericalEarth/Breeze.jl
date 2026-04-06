@@ -13,6 +13,8 @@ using Breeze.Microphysics.PredictedParticleProperties:
     LookupTable1Parameters,
     TabulatedFunction3D,
     TabulatedFunction4D,
+    TabulatedFunction5D,
+    TabulatedFunction6D,
     TabulatedFunction1D,
     P3ProcessRates,
     compute_p3_process_rates,
@@ -2335,6 +2337,30 @@ using Oceananigans.Fields: interior
         # Values outside range should clamp to boundary
         @test f(-1.0) ≈ f(0.0) atol=1e-10
         @test f(2.0) ≈ f(1.0) atol=1e-10
+    end
+
+    @testset "TabulatedFunction6D - construction and interpolation" begin
+        f(x, y, z, w, v, u) = x * y + z * w + v * u
+        FT = Float64
+
+        f6d = TabulatedFunction6D(f, CPU(), FT;
+                                   x_range=(0.0, 1.0), y_range=(0.0, 1.0),
+                                   z_range=(0.0, 1.0), w_range=(0.0, 1.0),
+                                   v_range=(0.0, 1.0), u_range=(0.0, 1.0),
+                                   x_points=5, y_points=5, z_points=5,
+                                   w_points=5, v_points=5, u_points=5)
+
+        @test f6d isa TabulatedFunction6D
+        @test size(f6d.table) == (5, 5, 5, 5, 5, 5)
+
+        # Interpolation at grid points should be exact
+        @test f6d(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) ≈ 0.0
+        @test f6d(1.0, 1.0, 1.0, 1.0, 1.0, 1.0) ≈ 3.0
+        @test f6d(0.5, 0.5, 0.5, 0.5, 0.5, 0.5) ≈ 0.75 atol=0.05
+
+        # Clamping: out-of-range inputs should clamp to boundary values
+        @test f6d(-1.0, 0.0, 0.0, 0.0, 0.0, 0.0) ≈ f6d(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        @test f6d(2.0, 0.0, 0.0, 0.0, 0.0, 0.0) ≈ f6d(1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     end
 
     @testset "RainMassWeightedVelocityEvaluator - monotonicity" begin

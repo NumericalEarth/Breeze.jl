@@ -161,6 +161,7 @@ export
     TabulatedFunction3D,
     TabulatedFunction4D,
     TabulatedFunction5D,
+    TabulatedFunction6D,
     tabulated_function_1d,
 
     # Transport properties
