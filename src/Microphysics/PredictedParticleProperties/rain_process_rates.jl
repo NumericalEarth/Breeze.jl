@@ -3,7 +3,7 @@
 #####
 
 """
-    rain_autoconversion_rate(p3, qᶜˡ, Nᶜ)
+    rain_autoconversion_rate(p3, qᶜˡ, Nᶜ, ρ)
 
 Compute rain autoconversion rate following [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000).
 
@@ -13,19 +13,24 @@ Cloud droplets larger than a threshold undergo collision-coalescence to form rai
 - `p3`: P3 microphysics scheme (provides parameters)
 - `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
 - `Nᶜ`: Cloud droplet number concentration [1/m³]
+- `ρ`: Air density [kg/m³]
 
 # Returns
 - Rate of cloud → rain conversion [kg/kg/s]
 """
-@inline function rain_autoconversion_rate(p3, qᶜˡ, Nᶜ)
+@inline function rain_autoconversion_rate(p3, qᶜˡ, Nᶜ, ρ)
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
     # KK2000 uses cloud liquid directly (no threshold subtraction)
     qᶜˡ_eff = clamp_positive(qᶜˡ)
 
-    # Scale droplet concentration
-    Nᶜ_scaled = Nᶜ / prp.autoconversion_reference_concentration
+    # D11: Fortran KK2000 uses (nc_permass * rho * 1e-6)^β where nc is per-mass [1/kg].
+    # Julia's Nᶜ is per-volume [1/m³]; applying ρ/ρ₀ captures the density dependence:
+    # at high altitude (low ρ), fewer droplets per volume → less autoconversion.
+    ρ₀ = prp.reference_air_density
+    Nᶜ_effective = Nᶜ * (ρ / ρ₀)
+    Nᶜ_scaled = Nᶜ_effective / prp.autoconversion_reference_concentration
     Nᶜ_scaled = max(Nᶜ_scaled, FT(0.01))
 
     # Khairoutdinov-Kogan (2000): ∂qʳ/∂t = k₁ × qᶜˡ^α × (Nᶜ/Nᶜ_ref)^β

@@ -1298,10 +1298,10 @@ function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
     λ = exp(logλ)
     μ = shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, liquid_fraction, mass)
 
-    # Enforce diameter bounds if provided
-    if !isnothing(diameter_bounds)
-        λ = enforce_diameter_bounds(λ, μ, diameter_bounds)
-    end
+    # D9: Fortran always applies Fr-dependent diameter bounds (D_max = 5mm + 20mm×Fr²).
+    # Default to DiameterBounds(FT, rime_fraction) when not explicitly specified.
+    bounds = isnothing(diameter_bounds) ? DiameterBounds(FT, rime_fraction) : diameter_bounds
+    λ = enforce_diameter_bounds(λ, μ, bounds)
 
     # Compute N₀ from the mass constraint: L = N₀ × ∫ m(D) D^μ exp(-λD) dD.
     # This matches Fortran (create_p3_lookupTable_1.f90 line 1054):
@@ -1391,16 +1391,15 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
         return IceDistributionParameters(zero(FT), zero(FT), zero(FT))
     end
 
+    # D9: Fortran always applies Fr-dependent diameter bounds.
+    bounds = isnothing(diameter_bounds) ? DiameterBounds(FT, rime_fraction) : diameter_bounds
+
     # If Z is zero or negative, fall back to two-moment with μ at lower bound
     if Z_ice ≤ 0
         μ = closure.μmin
         logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass)
         λ = exp(logλ)
-
-        # Enforce diameter bounds if provided
-        if !isnothing(diameter_bounds)
-            λ = enforce_diameter_bounds(λ, μ, diameter_bounds)
-        end
+        λ = enforce_diameter_bounds(λ, μ, bounds)
 
         N₀ = intercept_parameter(N_ice, μ, log(λ))
         return IceDistributionParameters(N₀, λ, μ)
@@ -1413,11 +1412,7 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
     # Solve for λ at this μ
     logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass)
     λ = exp(logλ)
-
-    # Enforce diameter bounds if provided
-    if !isnothing(diameter_bounds)
-        λ = enforce_diameter_bounds(λ, μ, diameter_bounds)
-    end
+    λ = enforce_diameter_bounds(λ, μ, bounds)
 
     # Compute N₀ from normalization
     N₀ = intercept_parameter(N_ice, μ, log(λ))

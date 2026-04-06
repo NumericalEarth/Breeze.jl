@@ -545,6 +545,11 @@ struct P3ProcessRates{FT}
     wet_growth_cloud :: FT             # Cloud collection redirected to qʷⁱ [kg/kg/s]
     wet_growth_rain :: FT              # Rain collection redirected to qʷⁱ [kg/kg/s]
 
+    # D8: Wet growth shedding — excess collection beyond freezing capacity goes to rain
+    # (Fortran nrshdr/qcshd: mass that can't freeze sheds as 1 mm rain drops)
+    wet_growth_shedding :: FT          # Excess collection → rain mass [kg/kg/s]
+    wet_growth_shedding_number :: FT   # Rain number from wet growth shedding [1/kg/s]
+
     # M9: Warm/mixed-phase budget terms (stubs for Fortran parity)
     ccn_activation :: FT               # CCN activation (vapor → cloud) [kg/kg/s]
     rain_condensation :: FT            # Rain condensation (vapor → rain) [kg/kg/s]
@@ -582,6 +587,11 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     qⁱ = ℳ.qⁱ
     nⁱ = ℳ.nⁱ
     qʷⁱ = ℳ.qʷⁱ
+
+    # D10: Fortran impose_max_Ni — hard cap on ice number before PSD solve.
+    # Fortran: nitot = min(nitot, max_Ni / rho) where max_Ni = 2e6 [1/m³].
+    # This prevents unphysical PSD parameters from extreme number concentrations.
+    nⁱ = min(nⁱ, prp.maximum_ice_number_density / ρ)
 
     # H4: Rain DSD lambda bounds and Nr adjustment (Fortran get_rain_dsd2).
     # When λ_r hits DSD bounds, recompute nʳ to stay mass-consistent with qʳ.
@@ -628,7 +638,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # — shared by deposition, melting, and rain evaporation (eliminates triple computation)
     transport = air_transport_properties(T, P)
 
-    autoconv = rain_autoconversion_rate(p3, qᶜˡ, Nᶜ)
+    autoconv = rain_autoconversion_rate(p3, qᶜˡ, Nᶜ, ρ)
     accr = rain_accretion_rate(p3, qᶜˡ, qʳ)
     rain_evap = rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P, transport)
     rain_self = rain_self_collection_rate(p3, qʳ, nʳ, ρ)
@@ -697,6 +707,14 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     cloud_rim_n = ifelse(is_wet_growth, zero(FT), cloud_rim_n)
     rain_rim    = ifelse(is_wet_growth, zero(FT), rain_rim)
     rain_rim_n  = ifelse(is_wet_growth, zero(FT), rain_rim_n)
+
+    # D8: Wet growth shedding (Fortran nrshdr/qcshd).
+    # Fortran only sheds excess when log_LiquidFrac = .FALSE.; when liquid fraction
+    # is active, ALL collection goes to qiliq with no shedding (lines 3254-3264).
+    # Shed drops are 1 mm diameter (Fortran 1.923e6 drops/kg).
+    shed_active = !prp.liquid_fraction_active & is_wet_growth
+    wg_shed   = ifelse(shed_active, clamp_positive(total_collection - qwgrth), zero(FT))
+    wg_shed_n = wg_shed * FT(1.923e6)
 
     # =========================================================================
     # Phase 2: Shedding and refreezing
@@ -779,7 +797,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     wg_cloud      = wg_cloud * f_cloud
 
     # --- Rain sinks ---
-    rain_source_total = autoconv + accr + complete_melt + shed
+    rain_source_total = autoconv + accr + complete_melt + shed + wg_shed
     rain_available = max(0, qʳ) + rain_source_total * dt_safety
     rain_sink_total = rain_rim + rain_frz_q + rain_hom_q + rain_warm_q + wg_rain
     f_rain = sink_limiting_factor(rain_sink_total, rain_available, dt_safety)
@@ -815,13 +833,16 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     nuc_n = nuc_n * f_vapor
 
     # --- Liquid on ice (qʷⁱ) sinks ---
+    # D8: wg_shed diverts incoming wet growth mass from qʷⁱ to rain.
     qwi_source_total = partial_melt + cloud_warm_q + rain_warm_q + wg_cloud + wg_rain
     qwi_available = max(0, qʷⁱ) + qwi_source_total * dt_safety
-    qwi_sink_total = shed + refrz
+    qwi_sink_total = shed + refrz + wg_shed
     f_qwi = sink_limiting_factor(qwi_sink_total, qwi_available, dt_safety)
-    shed   = shed * f_qwi
-    shed_n = shed_n * f_qwi
-    refrz  = refrz * f_qwi
+    shed      = shed * f_qwi
+    shed_n    = shed_n * f_qwi
+    refrz     = refrz * f_qwi
+    wg_shed   = wg_shed * f_qwi
+    wg_shed_n = wg_shed_n * f_qwi
 
     # Recompute splintering from sink-limited riming rates
     spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T, D_mean, Fˡ, T, qᶠ)
@@ -906,6 +927,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         cloud_warm_q, cloud_warm_n, rain_warm_q, rain_warm_n,
         # Wet growth collection → qʷⁱ
         wg_cloud, wg_rain,
+        # D8: Wet growth shedding → rain
+        wg_shed, wg_shed_n,
         # M9: CCN activation and rain condensation stubs
         zero(FT), zero(FT),
         # D1: Coating condensation/evaporation
@@ -974,6 +997,7 @@ Rain gains from:
 - Accretion (Phase 1)
 - Complete melting (Phase 1) - meltwater that sheds from ice
 - Shedding (Phase 2) - liquid coating shed from ice (D ≥ 9 mm)
+- Wet growth shedding (D8) - excess collection beyond freezing capacity
 
 Rain loses from:
 - Evaporation (Phase 1)
@@ -989,8 +1013,9 @@ Rain loses from:
     # Milbrandt et al. (2025): above-freezing collection and wet growth go to qʷⁱ, NOT rain.
     # Rain warm collection is a rain SINK (collected by ice → qʷⁱ).
     # M9: rain condensation (vapor → rain)
+    # D8: wet_growth_shedding — excess collection beyond freezing capacity goes to rain.
     gain = rates.autoconversion + rates.accretion + rates.complete_melting +
-           rates.shedding + rates.rain_condensation
+           rates.shedding + rates.rain_condensation + rates.wet_growth_shedding
     loss = rates.rain_evaporation + rates.rain_riming + rates.rain_freezing_mass +
            rates.rain_homogeneous_mass + rates.rain_warm_collection + rates.wet_growth_rain
     return ρ * (gain - loss)
@@ -1033,10 +1058,12 @@ Rain number loses from:
     # Gains: shedding produces rain drops
     # M9: cloud_warm_collection_number → new rain drops from above-freezing cloud
     #      collection (Fortran ncshdc)
+    # D8: wet_growth_shedding_number → rain drops from excess wet growth (Fortran nrshdr)
     n_gain = n_from_autoconv + n_from_melt +
              rates.rain_breakup +
              rates.shedding_number +
-             rates.cloud_warm_collection_number
+             rates.cloud_warm_collection_number +
+             rates.wet_growth_shedding_number
     # Losses (all positive magnitudes, M7)
     # M9: rain_warm_collection_number → rain number sink from above-freezing rain
     #      collection (Fortran nrcoll)
@@ -1404,13 +1431,15 @@ Loses from:
 """
 @inline function tendency_ρqʷⁱ(rates::P3ProcessRates, ρ)
     # D1: Include coating condensation/evaporation (Fortran qlcon/qlevp)
+    # D8: wet_growth_shedding diverts excess wet growth mass from qʷⁱ to rain.
     gain = rates.partial_melting +
            rates.cloud_warm_collection +
            rates.rain_warm_collection +
            rates.wet_growth_cloud +
            rates.wet_growth_rain +
            rates.coating_condensation
-    loss = rates.shedding + rates.refreezing + rates.coating_evaporation
+    loss = rates.shedding + rates.refreezing + rates.coating_evaporation +
+           rates.wet_growth_shedding
     return ρ * (gain - loss)
 end
 

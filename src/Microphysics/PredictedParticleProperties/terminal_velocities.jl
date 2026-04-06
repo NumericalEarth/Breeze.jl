@@ -30,8 +30,6 @@ See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
 
     ρ₀ = prp.reference_air_density
     ρʷ = prp.liquid_water_density
-    v_min = prp.rain_velocity_min
-    v_max = prp.rain_velocity_max
 
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = max(nʳ, FT(1e-16))
@@ -39,11 +37,10 @@ See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
     # Density correction factor (Foote & du Toit 1969; Fortran P3 uses 0.54)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
-    vₜ = tabulated_rain_mass_weighted_velocity(p3.rain.velocity_mass,
-                                                 qʳ_eff, nʳ_eff, ρ_correction,
-                                                 ρʷ, prp, FT)
-
-    return clamp(vₜ, v_min, v_max)
+    # m9: Fortran applies no velocity clamping; table bounds are sufficient.
+    return tabulated_rain_mass_weighted_velocity(p3.rain.velocity_mass,
+                                                  qʳ_eff, nʳ_eff, ρ_correction,
+                                                  ρʷ, prp, FT)
 end
 
 # Tabulated path: look up PSD-integrated mass-weighted velocity
@@ -52,7 +49,10 @@ end
     m̄  = qʳ / nʳ
     # For exponential PSD (μ_r=0): <m> = π ρ_w / λ³, so λ = (π ρ_w / m̄)^(1/3)
     λ_r = cbrt(FT(π) * ρʷ / max(m̄, FT(1e-15)))
-    # H6: Clamp λ_r to Fortran P3 bounds (prevents unphysical lookup)
+    # H6: Clamp λ_r to Fortran P3 bounds (prevents unphysical lookup).
+    # m10: Fortran get_rain_dsd2 also recomputes nr when λ is clamped;
+    # that adjustment is done in compute_p3_process_rates (H4) and does not
+    # affect the velocity lookup which depends only on λ_r.
     λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
     log_λ = log10(λ_r)
     vₜ_ref = table(log_λ)
@@ -82,8 +82,6 @@ Looks up the PSD-integrated number-weighted velocity from a tabulated
 
     ρ₀ = prp.reference_air_density
     ρʷ = prp.liquid_water_density
-    v_min = prp.rain_velocity_min
-    v_max = prp.rain_velocity_max
 
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = max(nʳ, FT(1e-16))
@@ -91,12 +89,11 @@ Looks up the PSD-integrated number-weighted velocity from a tabulated
     # Density correction factor (Foote & du Toit 1969; Fortran P3 uses 0.54)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
-    vₜ = tabulated_rain_number_weighted_velocity(p3.rain.velocity_number,
-                                                   p3.rain.velocity_mass,
-                                                   qʳ_eff, nʳ_eff, ρ_correction,
-                                                   ρʷ, prp, FT)
-
-    return clamp(vₜ, v_min, v_max)
+    # m9: Fortran applies no velocity clamping; table bounds are sufficient.
+    return tabulated_rain_number_weighted_velocity(p3.rain.velocity_number,
+                                                    p3.rain.velocity_mass,
+                                                    qʳ_eff, nʳ_eff, ρ_correction,
+                                                    ρʷ, prp, FT)
 end
 
 # Tabulated path: look up PSD-integrated number-weighted velocity
@@ -106,7 +103,8 @@ end
     m̄  = qʳ / nʳ
     # For exponential PSD (μ_r=0): <m> = π ρ_w / λ³, so λ = (π ρ_w / m̄)^(1/3)
     λ_r = cbrt(FT(π) * ρʷ / max(m̄, FT(1e-15)))
-    # H6: Clamp λ_r to Fortran P3 bounds
+    # H6: Clamp λ_r to Fortran P3 bounds.
+    # m10: nr adjustment handled by H4 in compute_p3_process_rates.
     λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
     log_λ = log10(λ_r)
     vₜ_ref = table(log_λ)
@@ -140,8 +138,6 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     fs = p3.ice.fall_speed
 
     ρ₀ = fs.reference_air_density
-    v_min = prp.ice_velocity_min
-    v_max = prp.ice_velocity_max
 
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = max(nⁱ, FT(1e-16))
@@ -152,10 +148,8 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # Density correction factor (Heymsfield et al. 2006)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
-    # Tabulated fall speed lookup
-    vₜ = tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
-
-    return clamp(vₜ, v_min, v_max)
+    # m9: Fortran applies no velocity clamping; table bounds are sufficient.
+    return tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
 end
 
 # Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
@@ -187,18 +181,14 @@ Compute number-weighted terminal velocity for ice.
     fs = p3.ice.fall_speed
 
     ρ₀ = fs.reference_air_density
-    v_min = prp.ice_velocity_min
-    v_max = prp.ice_velocity_max
 
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = max(nⁱ, FT(1e-16))
     m̄ = qⁱ_eff / nⁱ_eff
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
-    # Tabulated fall speed lookup
-    vₜ = tabulated_number_weighted_fall_speed(fs.number_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
-
-    return clamp(vₜ, v_min, v_max)
+    # m9: Fortran applies no velocity clamping; table bounds are sufficient.
+    return tabulated_number_weighted_fall_speed(fs.number_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
 end
 
 # Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
@@ -234,18 +224,14 @@ Uses pre-computed lookup tables for accurate PSD integration.
     fs = p3.ice.fall_speed
 
     ρ₀ = fs.reference_air_density
-    v_min = prp.ice_velocity_min
-    v_max = prp.ice_velocity_max
 
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = max(nⁱ, FT(1e-16))
     m̄ = qⁱ_eff / nⁱ_eff
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
-    # Tabulated fall speed lookup
-    vₜ = tabulated_reflectivity_weighted_fall_speed(fs.reflectivity_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
-
-    return clamp(vₜ, v_min, v_max)
+    # m9: Fortran applies no velocity clamping; table bounds are sufficient.
+    return tabulated_reflectivity_weighted_fall_speed(fs.reflectivity_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
 end
 
 # Tabulated version: use TabulatedFunction4D lookup (includes rime density axis)
@@ -289,8 +275,6 @@ speed framework.
     fs = p3.ice.fall_speed
 
     ρ₀ = fs.reference_air_density
-    v_min = prp.ice_velocity_min
-    v_max = prp.ice_velocity_max
 
     # --- Shared computation (done once instead of three times) ---
     qⁱ_eff = clamp_positive(qⁱ)
@@ -301,6 +285,7 @@ speed framework.
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # --- Tabulated PSD-integrated fall speed lookups ---
+    # m9: Fortran applies no velocity clamping; table bounds are sufficient.
     vₜ_mass = tabulated_mass_weighted_fall_speed(
         fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
 
@@ -310,7 +295,7 @@ speed framework.
     vₜ_refl = tabulated_reflectivity_weighted_fall_speed(
         fs.reflectivity_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
 
-    return (mass_weighted        = clamp(vₜ_mass,   v_min, v_max),
-            number_weighted      = clamp(vₜ_number, v_min, v_max),
-            reflectivity_weighted = clamp(vₜ_refl,   v_min, v_max))
+    return (mass_weighted         = vₜ_mass,
+            number_weighted       = vₜ_number,
+            reflectivity_weighted = vₜ_refl)
 end

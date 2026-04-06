@@ -219,7 +219,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         autoconversion_coefficient = 1350 * 100.0^(-1.79),
         autoconversion_exponent_cloud = 2.47,
         autoconversion_exponent_droplet = -1.79,
-        autoconversion_threshold = 1e-8,  # Fortran P3 v5.5.0 qsmall
+        autoconversion_threshold = 1e-8,  # Fortran P3 v5.5.0 qsmall_dry1
         autoconversion_reference_concentration = 1e8,
 
         # Rain accretion

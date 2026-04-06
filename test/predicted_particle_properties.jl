@@ -1370,13 +1370,13 @@ using Oceananigans.Fields: interior
         p3_closure = ThreeMomentClosure()
 
         μ_rimed = solve_shape_parameter(1e-4, 1e6, 1e-11, 0.2, 500.0; closure=p3_closure)
-        @test μ_rimed ≈ 6.373591950060266
+        @test μ_rimed ≈ 0.1622133993223902
 
         μ_large = solve_shape_parameter(1e-3, 1e5, 1e-8, 0.5, 700.0; closure=p3_closure)
-        @test μ_large ≈ 1.0341241245488653
+        @test μ_large ≈ 0.20614751259613406
 
         μ_broad = solve_shape_parameter(1e-4, 1e6, 1e-9, 0.2, 500.0; closure=p3_closure)
-        @test μ_broad ≈ 0.1622133993223811
+        @test μ_broad ≈ 0.16221339932238688
     end
 
     @testset "Exact three-moment closure solves the full residual" begin
@@ -1386,7 +1386,7 @@ using Oceananigans.Fields: interior
         μ_p3 = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=p3_closure)
         μ_exact = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=exact_closure)
 
-        @test μ_p3 ≈ 8.328335493704905
+        @test μ_p3 ≈ 8.328335493705275
         @test μ_exact == 0.0
         @test μ_p3 != μ_exact
     end
@@ -1442,6 +1442,8 @@ using Oceananigans.Fields: interior
             FT(1e-8),   # partial_melting
             FT(5e-8),   # complete_melting
             FT(1e3),    # melting_number (positive magnitude)
+            # D2: Sublimation number loss
+            FT(0.0),    # sublimation_number
             # Phase 2: Aggregation (positive magnitude)
             FT(500.0),  # aggregation
             FT(0.0),    # ni_limit (C3: global Nᵢ cap; zero in warm-environment test)
@@ -1476,6 +1478,8 @@ using Oceananigans.Fields: interior
             FT(0.0),    # rain_warm_collection_number (M9)
             FT(0.0),    # wet_growth_cloud
             FT(0.0),    # wet_growth_rain
+            FT(0.0),    # wet_growth_shedding (D8)
+            FT(0.0),    # wet_growth_shedding_number (D8)
             FT(0.0),    # ccn_activation (M9 stub)
             FT(0.0),    # rain_condensation (M9 stub)
             FT(0.0),    # coating_condensation (M9 stub)
@@ -1523,6 +1527,7 @@ using Oceananigans.Fields: interior
         rates = P3ProcessRates(
             FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # condensation + 5 rain
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),                     # deposition, partial_melt, complete_melt, melt_n
+            FT(0.0),                                                  # sublimation_number (D2)
             FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # agg, ni_limit (C3), 5 riming
             FT(0.0), FT(0.0), FT(0.0),                              # shedding, shedding_n, refreezing
             FT(1e-9), FT(10.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # nucleation
@@ -1530,6 +1535,7 @@ using Oceananigans.Fields: interior
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),                      # homogeneous
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),                        # warm collection + rain_warm_n (M9)
             FT(0.0), FT(0.0),                                         # wet growth
+            FT(0.0), FT(0.0),                                         # D8 wet growth shedding
             FT(0.0), FT(0.0), FT(0.0), FT(0.0)                       # M9 stubs
         )
 
@@ -1568,23 +1574,24 @@ using Oceananigans.Fields: interior
         # KK2000 formula with typical cumulus values
         qc = FT(1e-3)     # 1 g/kg cloud water
         Nc = FT(100e6)     # 100 cm⁻³ cloud droplet concentration
+        ρ  = FT(1.2)       # sea-level air density
 
-        rate = rain_autoconversion_rate(p3, qc, Nc)
+        rate = rain_autoconversion_rate(p3, qc, Nc, ρ)
         @test rate > 0
         # KK2000 gives O(1e-6) kg/kg/s for these inputs
         @test rate > 1e-8
         @test rate < 1e-3
 
         # Higher cloud water content gives faster autoconversion
-        rate_high = rain_autoconversion_rate(p3, FT(2e-3), Nc)
+        rate_high = rain_autoconversion_rate(p3, FT(2e-3), Nc, ρ)
         @test rate_high > rate
 
         # Zero cloud water gives zero autoconversion
-        rate_zero = rain_autoconversion_rate(p3, FT(0), Nc)
+        rate_zero = rain_autoconversion_rate(p3, FT(0), Nc, ρ)
         @test rate_zero == 0
 
         # Small cloud water gives small but nonzero rate (KK2000 has no threshold)
-        rate_small = rain_autoconversion_rate(p3, FT(5e-5), Nc)
+        rate_small = rain_autoconversion_rate(p3, FT(5e-5), Nc, ρ)
         @test rate_small > 0
         @test rate_small < rate
     end
@@ -2764,6 +2771,7 @@ using Oceananigans.Fields: interior
             FT(1e-8),   # partial_melting
             FT(5e-8),   # complete_melting
             FT(1e3),    # melting_number (positive magnitude)
+            FT(0.0),    # sublimation_number (D2: nisub)
             FT(500.0),  # aggregation (positive magnitude)
             FT(0.0),    # ni_limit (C3: global Nᵢ cap)
             FT(1e-7),   # cloud_riming
@@ -2792,6 +2800,8 @@ using Oceananigans.Fields: interior
             FT(1e2),    # rain_warm_collection_number (M9)
             FT(3e-8),   # wet_growth_cloud (cloud riming redirected to qʷⁱ)
             FT(2e-8),   # wet_growth_rain (rain riming redirected to qʷⁱ)
+            FT(1e-8),   # wet_growth_shedding (D8: excess → rain)
+            FT(1e-8 * 1.923e6),  # wet_growth_shedding_number (D8)
             FT(0.0),    # ccn_activation (M9 stub)
             FT(0.0),    # rain_condensation (M9 stub)
             FT(0.0),    # coating_condensation (M9 stub)

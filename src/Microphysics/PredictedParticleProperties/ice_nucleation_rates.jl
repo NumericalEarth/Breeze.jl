@@ -37,7 +37,8 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
     Sⁱ = (qᵛ - qᵛ⁺ⁱ) / max(qᵛ⁺ⁱ, FT(1e-10))
 
     # Conditions for nucleation
-    nucleation_active = (T < T_threshold) & (Sⁱ > Sⁱ_threshold)
+    # m6: Fortran uses .ge. for supersaturation threshold
+    nucleation_active = (T < T_threshold) & (Sⁱ >= Sⁱ_threshold)
 
     # Cooper (1986): N_ice = c_nuc × exp(0.304 × (T₀ - T)) [1/m³]
     # Default c_nuc = 5.0 /m³ = 0.005 /L from Cooper (1986), divided by ρ for [1/kg]
@@ -54,8 +55,8 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
     Q_nuc = N_nuc * mᵢ₀
 
     # Zero out if conditions not met
-    N_nuc = ifelse(nucleation_active & (N_nuc > FT(1e-20)), N_nuc, zero(FT))
-    Q_nuc = ifelse(nucleation_active & (Q_nuc > FT(1e-30)), Q_nuc, zero(FT))
+    N_nuc = ifelse(nucleation_active & (N_nuc >= FT(1e-20)), N_nuc, zero(FT))
+    Q_nuc = ifelse(nucleation_active & (Q_nuc >= FT(1e-30)), Q_nuc, zero(FT))
 
     return Q_nuc, N_nuc
 end
@@ -103,7 +104,7 @@ negligible for small droplets.
     qᶜˡ_eff = clamp_positive(qᶜˡ)
 
     # Conditions for freezing
-    freezing_active = (T <= T_max) & (qᶜˡ_eff > FT(1e-14))
+    freezing_active = (T <= T_max) & (qᶜˡ_eff >= FT(1e-14))
 
     # Barklie-Gokhale (1959) stochastic immersion freezing.
     # Per-drop freezing probability: P(D) = bimm × V_drop × exp(aimm × ΔT)
@@ -167,7 +168,7 @@ parameterization, following Fortran P3 v5.5.0.
     nʳ_eff = clamp_positive(nʳ)
 
     # Conditions for freezing
-    freezing_active = (T <= T_max) & (qʳ_eff > FT(1e-14))
+    freezing_active = (T <= T_max) & (qʳ_eff >= FT(1e-14))
 
     # Barklie-Gokhale (1959) stochastic volume-dependent freezing.
     # PSD correction for rain (broader PSD than cloud, μ_r ≈ 1-3).
@@ -254,7 +255,7 @@ Float64
     qᶜˡ_eff = clamp_positive(qᶜˡ)
 
     # Guard: temperature below threshold AND sufficient cloud liquid present
-    freezing_active = (T < T_threshold) & (qᶜˡ_eff > FT(1e-14))
+    freezing_active = (T < T_threshold) & (qᶜˡ_eff >= FT(1e-14))
 
     # Instantaneous conversion: rate = mixing ratio / timescale
     Q_hom = qᶜˡ_eff / τ_hom
@@ -319,7 +320,7 @@ Float64
     qʳ_eff = clamp_positive(qʳ)
 
     # Guard: temperature below threshold AND sufficient rain present
-    freezing_active = (T < T_threshold) & (qʳ_eff > FT(1e-14))
+    freezing_active = (T < T_threshold) & (qʳ_eff >= FT(1e-14))
 
     # Instantaneous conversion: rate = mixing ratio / timescale
     Q_hom = qʳ_eff / τ_hom
