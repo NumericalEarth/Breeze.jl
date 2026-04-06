@@ -25,7 +25,7 @@ using Oceananigans.Utils: prettysummary
 #####     multiplied after averaging the vertical pressure derivative.
 #####
 ##### SlopeInsideInterpolation:
-#####   ℑz(ℑx(slope(i,j,k) * ∂z(p')))
+#####   ℑz(ℑx(slope(i, j, k) * ∂z(p')))
 #####   — slope is evaluated at each (Center, Center, Face) stencil point and
 #####     multiplied before averaging, closer to the CM1 approach.
 #####

@@ -6,10 +6,10 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Models: surface_kernel_parameters
 
 """
-    follow_terrain!(grid, topography; smoothing=BasicTerrainFollowing())
+$(TYPEDSIGNATURES)
 
 Transform `grid` into a terrain-following grid by setting the vertical
-coordinate scaling factors ``\\sigma`` and surface displacement ``\\eta``
+coordinate scaling factors ``σ`` and surface displacement ``η``
 on the grid's `MutableVerticalDiscretization`.
 
 Returns a [`TerrainMetrics`](@ref) object containing pre-computed terrain
