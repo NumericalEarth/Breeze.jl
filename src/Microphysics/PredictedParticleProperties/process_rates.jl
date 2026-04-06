@@ -146,6 +146,42 @@ end
 @inline _lookup_field(::Nothing, ::Val) = nothing
 
 #####
+##### Ice shape parameter (μ) from Table 3
+#####
+##### For 3-moment P3, μ is diagnosed from (qⁱ, nⁱ, zⁱ) via Table 3.
+##### For 2-moment fallback (no Table 3), returns 0 (exponential PSD).
+#####
+
+"""
+    compute_ice_shape_parameter(p3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ)
+
+Compute the ice PSD shape parameter μ from the three-moment Table 3 lookup.
+
+For 3-moment P3, μ is diagnosed from the ratio Z/L (sixth moment to mass)
+using the pre-tabulated closure in Table 3. For 2-moment or when Table 3
+is not available, returns zero (exponential PSD).
+
+All inputs are specific (per kg of air); the lookup normalizes by ratios
+so units cancel.
+"""
+@inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ)
+    FT = typeof(qⁱ)
+    table3 = lookup_table_3(p3)
+    return _ice_shape_parameter(table3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
+end
+
+@inline function _ice_shape_parameter(table3::P3LookupTable3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
+    # Clamp to physical range to avoid table lookup at unphysical values
+    qⁱ_safe = max(qⁱ, eps(FT))
+    nⁱ_safe = max(nⁱ, eps(FT))
+    zⁱ_safe = max(zⁱ, eps(FT))
+    return shape_parameter_lookup(table3, qⁱ_safe, nⁱ_safe, zⁱ_safe, Fᶠ, Fˡ, ρᶠ)
+end
+
+# Fallback: no Table 3 available (2-moment or untabulated) → exponential PSD
+@inline _ice_shape_parameter(::Nothing, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT) = zero(FT)
+
+#####
 ##### Thermodynamic latent heat helpers (H1)
 #####
 ##### When thermodynamic constants are available, use T-dependent latent heats
@@ -232,14 +268,14 @@ end
 #####
 
 """
-    deposition_ventilation(vent, vent_e, m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+    deposition_ventilation(vent, vent_e, m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
 
 Compute per-particle ventilation integral C(D) × f_v(D) for deposition
 using PSD-integrated lookup tables.
 """
 @inline function deposition_ventilation(vent::TabulatedFunction5D,
                                           vent_e::TabulatedFunction5D,
-                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
     Fˡ = zero(FT)
@@ -248,13 +284,11 @@ using PSD-integrated lookup tables.
     # Runtime correction via ventilation_sc_correction:
     # Sc^(1/3) × √ρ_fac / √ν [s^(1/2) m^(-1)]
     # Dimensional check: table [m² s^(-1/2)] × correction [s^(1/2)/m] = [m]
-    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
-    μ = zero(FT)
     return vent(log_m, Fᶠ, Fˡ, ρᶠ, μ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ, μ)
 end
 
 """
-    melting_ventilation(vent, vent_e, m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v)
+    melting_ventilation(vent, vent_e, m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
 
 Compute per-particle ventilation integral C(D) × f_v(D) for melting
 using PSD-integrated lookup tables, blending ice (0.65, 0.44) and rain
@@ -262,43 +296,39 @@ using PSD-integrated lookup tables, blending ice (0.65, 0.44) and rain
 """
 @inline function melting_ventilation(vent::TabulatedFunction5D,
                                        vent_e::TabulatedFunction5D,
-                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
-    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
-    μ = zero(FT)
     return vent(log_m, Fᶠ, Fl, ρᶠ, μ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fl, ρᶠ, μ)
 end
 
 """
-    collection_kernel_per_particle(coll, m_mean, Fᶠ, ρᶠ, prp)
+    collection_kernel_per_particle(coll, m_mean, Fᶠ, ρᶠ, prp, p3, μ)
 
 Compute per-particle collection kernel ⟨A × V⟩ for riming.
 Returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from lookup table.
 """
 @inline function collection_kernel_per_particle(coll::TabulatedFunction5D,
-                                                  m_mean, Fᶠ, ρᶠ, prp, p3)
+                                                  m_mean, Fᶠ, ρᶠ, prp, p3, μ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
-    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
-    return coll(log_m, Fᶠ, zero(FT), ρᶠ, zero(FT))
+    return coll(log_m, Fᶠ, zero(FT), ρᶠ, μ)
 end
 
 """
-    aggregation_kernel(coll, m_mean, Fᶠ, ρᶠ, prp)
+    aggregation_kernel(coll, m_mean, Fᶠ, ρᶠ, prp, p3, μ)
 
 Compute aggregation kernel for self-collection using PSD-integrated
 kernel from lookup table.
 """
 @inline function aggregation_kernel(coll::TabulatedFunction5D,
-                                      m_mean, Fᶠ, ρᶠ, prp, p3)
+                                      m_mean, Fᶠ, ρᶠ, prp, p3, μ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
     # Table stores the half-integral (Fortran convention):
     # (1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂
     # No E_agg — collection efficiency is applied by the caller.
-    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
-    return coll(log_m, Fᶠ, zero(FT), ρᶠ, zero(FT))
+    return coll(log_m, Fᶠ, zero(FT), ρᶠ, μ)
 end
 
 #####
@@ -352,7 +382,7 @@ end
 #####
 
 """
-    ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport, q)
+    ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport, q, μ)
 
 Compute ventilation-enhanced ice deposition/sublimation rate with latent-heat
 psychrometric correction.
@@ -393,7 +423,7 @@ The bulk rate integrates over the size distribution:
 - Rate of vapor → ice conversion [kg/kg/s] (positive = deposition)
 """
 @inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P,
-                                                  constants, transport, q)
+                                                  constants, transport, q, μ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -430,7 +460,7 @@ The bulk rate integrates over the size distribution:
     # PSD-integrated ventilation integral C(D) × f_v(D) from lookup table.
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
 
     # Denominator: thermodynamic resistance terms (Mason 1971)
     # A = L_s/(K_a × T) × (L_s/(R_v × T) - 1)
@@ -619,6 +649,12 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     Fᶠ = rime_state.Fᶠ
     ρᶠ = rime_state.ρᶠ
 
+    # Ice PSD shape parameter μ from Table 3 (3-moment) or 0 (2-moment fallback).
+    # Liquid fraction for Table 3 lookup uses qʷⁱ / (qⁱ + qʷⁱ).
+    qⁱ_total_mu = max(clamp_positive(qⁱ) + clamp_positive(qʷⁱ), FT(1e-20))
+    Fˡ_mu = clamp_positive(qʷⁱ) / qⁱ_total_mu
+    μ_ice = compute_ice_shape_parameter(p3, qⁱ, nⁱ, ℳ.zⁱ, Fᶠ, Fˡ_mu, ρᶠ)
+
     # Thermodynamic state
     T = temperature(𝒰, constants)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
@@ -656,11 +692,11 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Phase 1: Ice deposition/sublimation and melting
     # =========================================================================
-    dep = ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport, q)
+    dep = ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport, q, μ_ice)
     dep = ifelse(qⁱ > FT(1e-20), dep, zero(FT))
 
     # Partitioned melting: partial stays on ice, complete goes to rain
-    melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ, constants, transport)
+    melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ, constants, transport, μ_ice)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
     # Only complete melting removes ice particles; partial melting keeps particles as ice
@@ -669,7 +705,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Phase 2: Ice aggregation
     # =========================================================================
-    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice)
 
     # =========================================================================
     # C3: Global ice number limiter (Fortran impose_max_Ni)
@@ -683,15 +719,15 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Phase 2: Riming
     # =========================================================================
-    cloud_rim = cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    cloud_rim = cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice)
     cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜ, cloud_rim)
 
     # C5: Pass nʳ so rain_riming_rate can apply the rain-DSD cross-section correction.
-    rain_rim = rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
-    rain_rim_n = rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    rain_rim = rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice)
+    rain_rim_n = rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice)
 
     # Rime density for new rime (use actual ice fall speed, not placeholder)
-    vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+    vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; μ=μ_ice)
     ρᶠ_new = rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
 
     # =========================================================================
@@ -702,7 +738,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # all collected hydrometeors stay liquid and are redirected to qʷⁱ.
     # D4: Fortran guards wet growth with (qc+qr) >= 1e-6 (microphy_p3.f90 line 3241)
     has_hydrometeors = (clamp_positive(qᶜˡ) + clamp_positive(qʳ)) >= FT(1e-6)
-    qwgrth_raw = wet_growth_capacity(p3, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+    qwgrth_raw = wet_growth_capacity(p3, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ_ice)
     qwgrth = ifelse(has_hydrometeors, qwgrth_raw, zero(FT))
 
     # Check if total riming exceeds wet growth capacity
@@ -734,9 +770,9 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     m_mean = safe_divide(clamp_positive(qⁱ), clamp_positive(nⁱ), FT(1e-12))
     D_mean = first(mean_ice_particle_diameter(m_mean, Fᶠ, Fˡ, ρᶠ, prp))
 
-    shed = shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
+    shed = shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean, μ_ice)
     shed_n = shedding_number_rate(p3, shed)
-    refrz = refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+    refrz = refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ_ice)
 
     # Liquid fraction clipping (Fortran freeze_tiny_liqfrac, lines 11620-11624):
     # When Fl < liqfracsmall below freezing, drain all qʷⁱ → rime.
@@ -771,8 +807,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Above-freezing collection (Milbrandt et al. 2025: qccoll/qrcoll → qʷⁱ)
     # =========================================================================
-    cloud_warm_q, cloud_warm_n = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
-    rain_warm_q = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    cloud_warm_q, cloud_warm_n = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice)
+    rain_warm_q = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice)
     # M9: Rain number loss from above-freezing collection (Fortran nrcoll).
     # Proportional to mass collected: Δnʳ/nʳ = Δqʳ/qʳ
     rain_warm_n = safe_divide(nʳ * rain_warm_q, qʳ, zero(FT))
@@ -887,7 +923,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     C_fv_coat = deposition_ventilation(p3.ice.deposition.ventilation,
                                         p3.ice.deposition.ventilation_enhanced,
                                         m_mean_coat, Fᶠ, ρᶠ, prp, transport.nu, transport.D_v,
-                                        ρ_correction_coat, p3)
+                                        ρ_correction_coat, p3, μ_ice)
     thermodynamic_constants_coat = isnothing(constants) ? ThermodynamicConstants(FT) : constants
     Rᵛ_coat = FT(vapor_gas_constant(thermodynamic_constants_coat))
     Rᵈ_coat = FT(dry_air_gas_constant(thermodynamic_constants_coat))
@@ -1272,7 +1308,7 @@ end
 end
 
 """
-    tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3, nu, D_v)
+    tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3, nu, D_v, μ)
 
 Compute ice sixth moment tendency using tabulated integrals when available.
 
@@ -1299,7 +1335,7 @@ PSD-integrated sixth moment changes per process.
 # Returns
 - Tendency of density-weighted sixth moment [kg/m³ × m⁶/kg / s]
 """
-@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3, nu, D_v)
+@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3, nu, D_v, μ)
     FT = typeof(ρ)
 
     # Mean ice particle mass for table lookup
@@ -1315,7 +1351,7 @@ PSD-integrated sixth moment changes per process.
 
     z_tendency = tabulated_z_tendency(
         p3.ice, log_mean_mass, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-        p3.process_rates, sc_correction, p3
+        p3.process_rates, sc_correction, p3, μ
     )
 
     return z_tendency
@@ -1337,16 +1373,13 @@ end
 @inline function tabulated_z_tendency(ice::IceProperties{<:Any, <:Any, <:Any, <:Any, <:Any,
                                                           M6, <:Any, <:Any},
                                         log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-                                        prp::ProcessRateParameters, sc_correction, p3) where {M6 <: IceSixthMoment{<:TabulatedFunction5D}}
+                                        prp::ProcessRateParameters, sc_correction, p3, μ) where {M6 <: IceSixthMoment{<:TabulatedFunction5D}}
     FT = typeof(ρ)
     lt1 = lookup_table_1(p3)
     sixth = lt1.sixth_moment
     dep = lt1.deposition
 
     inv_nⁱ = safe_divide(one(FT), nⁱ, eps(FT))
-
-    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
-    μ = zero(FT)
 
     # --- Deposition / Sublimation ---
     # Z tables store raw dG/dt. Extract env factor from mass_rate / (mass_table × Nⁱ).

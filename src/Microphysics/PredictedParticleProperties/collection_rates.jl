@@ -9,7 +9,7 @@ end
 #####
 
 """
-    ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ)
 
 Compute ice self-collection (aggregation) rate using proper collision kernel.
 
@@ -44,7 +44,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 # Returns
 - Rate of ice number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-@inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+@inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -80,7 +80,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
     # PSD-integrated self-collection kernel (E-free) from lookup table.
     AV_kernel = aggregation_kernel(p3.ice.collection.aggregation,
-                                     m_mean, Fᶠ, ρᶠ, prp, p3)
+                                     m_mean, Fᶠ, ρᶠ, prp, p3, μ)
 
     # Collection kernel with temperature-dependent sticking efficiency
     K_mean = Eᵢᵢ * AV_kernel
@@ -130,7 +130,7 @@ factor for the exponential PSD.
 # Returns
 - Rate of cloud → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-@inline function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+@inline function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ)
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
@@ -153,7 +153,7 @@ factor for the exponential PSD.
     # PSD-integrated collection kernel ⟨A×V⟩ from lookup table.
     # Computes ∫ V(D) A(D) N'(D) dD with E=1 (geometric kernel).
     AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                       m_mean, Fᶠ, ρᶠ, prp, p3)
+                                                       m_mean, Fᶠ, ρᶠ, prp, p3, μ)
 
     # Air density correction for ice particle fall speed (Heymsfield et al. 2006):
     # ρfaci = (ρ₀_ice / ρ)^0.54, where ρ₀_ice = 60000/(287.15×253.15) ≈ 0.826 kg/m³
@@ -179,7 +179,7 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
 # Returns
 - `(mass_rate, number_rate)`: Cloud → rain mass rate [kg/kg/s] and rain number source [1/kg/s]
 """
-@inline function cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+@inline function cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ)
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
@@ -199,7 +199,7 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
     # Same collection kernel as cloud_riming_rate
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
     AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                       m_mean, Fᶠ, ρᶠ, prp, p3)
+                                                       m_mean, Fᶠ, ρᶠ, prp, p3, μ)
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
@@ -224,7 +224,7 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 # Returns
 - Rain mass rate collected onto ice [kg/kg/s]
 """
-@inline function rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+@inline function rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)))
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -257,7 +257,7 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
     Fˡ = zero(FT)
 
     mass_kernel = _rain_riming_mass_kernel(lookup_table_2(p3),
-        m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3)
+        m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
     rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * mass_kernel
 
@@ -326,7 +326,7 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
 # Returns
 - Rate of rain → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-@inline function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+@inline function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)))
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -359,7 +359,7 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
 
     # H6: Use Table 2 (double-PSD kernel) for ice-rain mass collection.
     mass_kernel = _rain_riming_mass_kernel(lookup_table_2(p3),
-        m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3)
+        m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
     rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * mass_kernel
 
@@ -368,8 +368,9 @@ end
 
 # H6: Table 2 path — use the dedicated ice-rain mass collection table (Fortran f1pr07).
 @inline function _rain_riming_mass_kernel(table2::P3LookupTable2,
-                                           m_mean, λ_r, nʳ, Fᶠ, Fˡ, ρᶠ, prp, p3)
-    mass_kernel, _, _ = ice_rain_collection_lookup(table2, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ)
+                                           m_mean, λ_r, nʳ, Fᶠ, Fˡ, ρᶠ, prp, p3,
+                                           μ = zero(typeof(m_mean)))
+    mass_kernel, _, _ = ice_rain_collection_lookup(table2, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, μ)
     return mass_kernel
 end
 
@@ -408,7 +409,7 @@ independent PSD-integrated number collection rate.
 # Returns
 - Rate of rain number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-@inline function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+@inline function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)))
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -438,7 +439,7 @@ independent PSD-integrated number collection rate.
 
     # H6: Use Table 2 (number-weighted kernel) for ice-rain number collection.
     number_kernel = _rain_riming_number_kernel(lookup_table_2(p3),
-        m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3)
+        m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
     rate = Eʳⁱ * nʳ_eff * nⁱ_eff * ρ * rhofaci * number_kernel
 
@@ -447,8 +448,9 @@ end
 
 # H6: Table 2 path — use the dedicated ice-rain number collection table (Fortran f1pr08).
 @inline function _rain_riming_number_kernel(table2::P3LookupTable2,
-                                             m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3)
-    _, number_kernel, _ = ice_rain_collection_lookup(table2, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ)
+                                             m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3,
+                                             μ = zero(typeof(m_mean)))
+    _, number_kernel, _ = ice_rain_collection_lookup(table2, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, μ)
     return number_kernel
 end
 
@@ -574,14 +576,14 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 # Returns
 - Rate of liquid → rain shedding [kg/kg/s]
 """
-@inline function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
+@inline function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean, μ)
     FT = typeof(qʷⁱ)
 
     qʷⁱ_eff = clamp_positive(qʷⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
     # Lookup ∫_{D≥9mm} m(D) N'(D) dD (normalized per particle)
-    f1pr28 = shedding_integral(p3.ice.bulk_properties.shedding, m_mean, Fᶠ, Fˡ, ρᶠ)
+    f1pr28 = shedding_integral(p3.ice.bulk_properties.shedding, m_mean, Fᶠ, Fˡ, ρᶠ, μ)
 
     # Fortran: qlshd = Fr × f1pr28 × ni × Fl
     # Fr = rime fraction of ice-only mass (= Fᶠ in Julia convention since qⁱ excludes qʷⁱ)
@@ -596,16 +598,15 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 end
 
 """
-    shedding_integral(table, m_mean, Fᶠ, Fˡ, ρᶠ)
+    shedding_integral(table, m_mean, Fᶠ, Fˡ, ρᶠ, μ)
 
 Lookup the PSD-integrated shedding mass for D ≥ 9 mm particles
 from tabulated `TabulatedFunction5D`.
 """
-@inline function shedding_integral(table::TabulatedFunction5D, m_mean, Fᶠ, Fˡ, ρᶠ)
+@inline function shedding_integral(table::TabulatedFunction5D, m_mean, Fᶠ, Fˡ, ρᶠ, μ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
-    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
-    return table(log_m, Fᶠ, Fˡ, ρᶠ, zero(FT))
+    return table(log_m, Fᶠ, Fˡ, ρᶠ, μ)
 end
 
 """
@@ -660,7 +661,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 # Returns
 - Wet growth capacity [kg/kg/s] (positive; zero when T ≥ T₀)
 """
-@inline function wet_growth_capacity(p3, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+@inline function wet_growth_capacity(p3, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -692,7 +693,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     # Ventilation integral (same as deposition/refreezing)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
 
     # Heat balance: sensible + latent
     Q_sensible = K_a * (T₀ - T)
@@ -737,7 +738,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
 # Returns
 - Rate of liquid → ice refreezing [kg/kg/s]
 """
-@inline function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+@inline function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ)
     FT = typeof(qʷⁱ)
     prp = p3.process_rates
 
@@ -771,7 +772,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
     # Ventilation integral (ice-particle capacitance; same path as deposition)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
 
     # Heat balance for refreezing:
     # Conductive: K_a × (T₀ - T) removes heat from liquid → promotes freezing
