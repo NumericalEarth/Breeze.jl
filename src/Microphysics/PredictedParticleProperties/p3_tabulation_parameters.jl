@@ -11,10 +11,13 @@ struct LookupTable1Parameters{FT}
     number_of_rime_fraction_points :: Int
     number_of_liquid_fraction_points :: Int
     number_of_rime_density_points :: Int
+    number_of_shape_parameter_points :: Int
     minimum_log_mean_particle_mass :: FT
     maximum_log_mean_particle_mass :: FT
     minimum_rime_density :: FT
     maximum_rime_density :: FT
+    minimum_shape_parameter :: FT
+    maximum_shape_parameter :: FT
     number_of_quadrature_points :: Int
     shape_parameter_override :: FT
 end
@@ -26,10 +29,13 @@ function LookupTable1Parameters(FT::Type{<:AbstractFloat} = Float64; kwargs...)
         Int(get(parameters, :number_of_rime_fraction_points, 8)),
         Int(get(parameters, :number_of_liquid_fraction_points, 4)),
         Int(get(parameters, :number_of_rime_density_points, 10)),
+        Int(get(parameters, :number_of_shape_parameter_points, 11)),
         FT(get(parameters, :minimum_log_mean_particle_mass, -14.8)),
         FT(get(parameters, :maximum_log_mean_particle_mass, -0.6)),
         FT(get(parameters, :minimum_rime_density, 50)),
         FT(get(parameters, :maximum_rime_density, 900)),
+        FT(get(parameters, :minimum_shape_parameter, 0.0)),
+        FT(get(parameters, :maximum_shape_parameter, 20.0)),
         Int(get(parameters, :number_of_quadrature_points, 64)),
         FT(get(parameters, :shape_parameter_override, NaN)))
 end

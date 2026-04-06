@@ -807,10 +807,10 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Tabulate a P3 integral using the `TabulatedFunction4D` pattern.
+Tabulate a P3 integral using the `TabulatedFunction5D` pattern.
 
-Creates a callable evaluator function and tabulates it over the 4D parameter space
-(log mean mass, rime fraction, liquid fraction, rime density).
+Creates a callable evaluator function and tabulates it over the 5D parameter space
+(log mean mass, rime fraction, liquid fraction, rime density, shape parameter μ).
 
 # Arguments
 - `integral`: Integral type to tabulate (e.g., `MassWeightedFallSpeed()`)
@@ -818,7 +818,7 @@ Creates a callable evaluator function and tabulates it over the 4D parameter spa
 - `params`: [`LookupTable1Parameters`](@ref) defining the grid
 
 # Returns
-A `TabulatedFunction4D` that can be called like the original evaluator.
+A `TabulatedFunction5D` that can be called like the original evaluator.
 
 # Example
 
@@ -830,8 +830,8 @@ using Breeze.Microphysics.PredictedParticleProperties
 params = LookupTable1Parameters(...)
 tabulated = tabulate(MassWeightedFallSpeed(), CPU(), params)
 
-# Evaluate via interpolation (fast) — includes rime density axis
-value = tabulated(-12.0, 0.5, 0.0, 400.0)
+# Evaluate via interpolation (fast) — includes rime density and mu axes
+value = tabulated(-12.0, 0.5, 0.0, 400.0, 0.0)
 ```
 """
 function tabulate(integral::AbstractP3Integral, arch=CPU(),
@@ -839,22 +839,29 @@ function tabulate(integral::AbstractP3Integral, arch=CPU(),
 
     FT = typeof(params.minimum_log_mean_particle_mass)
 
-    # Create the evaluator function
-    evaluator = P3IntegralEvaluator(integral, FT;
-                                     number_of_quadrature_points = params.number_of_quadrature_points)
+    # Wrap the evaluator in a 5-argument closure over mu (shape parameter)
+    function eval_5d(log_mass, rime_fraction, liquid_fraction, rime_density, mu)
+        evaluator = P3IntegralEvaluator(integral, FT;
+                                         number_of_quadrature_points = params.number_of_quadrature_points,
+                                         shape_parameter_override = mu)
+        return evaluator(log_mass, rime_fraction, liquid_fraction, rime_density)
+    end
 
-    # Tabulate using TabulatedFunction4D (rime density is the 4th dimension)
-    return TabulatedFunction4D(evaluator, arch, FT;
+    # Tabulate using TabulatedFunction5D (mu is the 5th dimension)
+    return TabulatedFunction5D(eval_5d, arch, FT;
                                 x_range = (params.minimum_log_mean_particle_mass,
                                           params.maximum_log_mean_particle_mass),
                                 y_range = (zero(FT), one(FT)),
                                 z_range = (zero(FT), one(FT)),
                                 w_range = (params.minimum_rime_density,
                                           params.maximum_rime_density),
+                                v_range = (params.minimum_shape_parameter,
+                                          params.maximum_shape_parameter),
                                 x_points = params.number_of_mass_points,
                                 y_points = params.number_of_rime_fraction_points,
                                 z_points = params.number_of_liquid_fraction_points,
-                                w_points = params.number_of_rime_density_points)
+                                w_points = params.number_of_rime_density_points,
+                                v_points = params.number_of_shape_parameter_points)
 end
 
 """
@@ -1028,7 +1035,7 @@ $(TYPEDSIGNATURES)
 Tabulate specific integrals within a P3 microphysics scheme.
 
 Returns a new `PredictedParticlePropertiesMicrophysics` with the specified
-integrals replaced by `TabulatedFunction4D` lookup tables.
+integrals replaced by `TabulatedFunction5D` lookup tables.
 
 # Arguments
 - `p3`: [`PredictedParticlePropertiesMicrophysics`](@ref)

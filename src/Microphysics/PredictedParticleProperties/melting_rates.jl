@@ -186,15 +186,17 @@ end
 # H9: Tabulated path — use PSD-integrated small/large ice ventilation integrals
 # to compute the fraction of melting that goes to rain (small particles, D ≤ D_crit).
 # Fortran: qrmlt uses f1pr24/f1pr25, qiliqcol uses f1pr26/f1pr27.
-@inline function psd_melting_rain_fraction(sc::TabulatedFunction4D, sr::TabulatedFunction4D,
-                                            lc::TabulatedFunction4D, lr::TabulatedFunction4D,
+@inline function psd_melting_rain_fraction(sc::TabulatedFunction5D, sr::TabulatedFunction5D,
+                                            lc::TabulatedFunction5D, lr::TabulatedFunction5D,
                                             m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
     sc_corr = ventilation_sc_correction(nu, D_v, ρ_correction)
+    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
+    μ = zero(FT)
 
-    small = sc(log_m, Fᶠ, Fl, ρᶠ) + sc_corr * sr(log_m, Fᶠ, Fl, ρᶠ)
-    large = lc(log_m, Fᶠ, Fl, ρᶠ) + sc_corr * lr(log_m, Fᶠ, Fl, ρᶠ)
+    small = sc(log_m, Fᶠ, Fl, ρᶠ, μ) + sc_corr * sr(log_m, Fᶠ, Fl, ρᶠ, μ)
+    large = lc(log_m, Fᶠ, Fl, ρᶠ, μ) + sc_corr * lr(log_m, Fᶠ, Fl, ρᶠ, μ)
     total = small + large
 
     return ifelse(total > eps(FT), clamp(small / total, FT(0), FT(1)), FT(0.5))

@@ -237,8 +237,8 @@ end
 Compute per-particle ventilation integral C(D) × f_v(D) for deposition
 using PSD-integrated lookup tables.
 """
-@inline function deposition_ventilation(vent::TabulatedFunction4D,
-                                          vent_e::TabulatedFunction4D,
+@inline function deposition_ventilation(vent::TabulatedFunction5D,
+                                          vent_e::TabulatedFunction5D,
                                           m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
@@ -248,7 +248,9 @@ using PSD-integrated lookup tables.
     # Runtime correction via ventilation_sc_correction:
     # Sc^(1/3) × √ρ_fac / √ν [s^(1/2) m^(-1)]
     # Dimensional check: table [m² s^(-1/2)] × correction [s^(1/2)/m] = [m]
-    return vent(log_m, Fᶠ, Fˡ, ρᶠ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ)
+    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
+    μ = zero(FT)
+    return vent(log_m, Fᶠ, Fˡ, ρᶠ, μ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ, μ)
 end
 
 """
@@ -258,11 +260,14 @@ Compute per-particle ventilation integral C(D) × f_v(D) for melting
 using PSD-integrated lookup tables, blending ice (0.65, 0.44) and rain
 (0.78, 0.28) ventilation coefficients weighted by liquid fraction Fl.
 """
-@inline function melting_ventilation(vent::TabulatedFunction4D,
-                                       vent_e::TabulatedFunction4D,
+@inline function melting_ventilation(vent::TabulatedFunction5D,
+                                       vent_e::TabulatedFunction5D,
                                        m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+    FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
-    return vent(log_m, Fᶠ, Fl, ρᶠ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fl, ρᶠ)
+    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
+    μ = zero(FT)
+    return vent(log_m, Fᶠ, Fl, ρᶠ, μ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fl, ρᶠ, μ)
 end
 
 """
@@ -271,10 +276,12 @@ end
 Compute per-particle collection kernel ⟨A × V⟩ for riming.
 Returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from lookup table.
 """
-@inline function collection_kernel_per_particle(coll::TabulatedFunction4D,
+@inline function collection_kernel_per_particle(coll::TabulatedFunction5D,
                                                   m_mean, Fᶠ, ρᶠ, prp, p3)
+    FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
-    return coll(log_m, Fᶠ, zero(typeof(m_mean)), ρᶠ)
+    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
+    return coll(log_m, Fᶠ, zero(FT), ρᶠ, zero(FT))
 end
 
 """
@@ -283,13 +290,15 @@ end
 Compute aggregation kernel for self-collection using PSD-integrated
 kernel from lookup table.
 """
-@inline function aggregation_kernel(coll::TabulatedFunction4D,
+@inline function aggregation_kernel(coll::TabulatedFunction5D,
                                       m_mean, Fᶠ, ρᶠ, prp, p3)
+    FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
     # Table stores the half-integral (Fortran convention):
     # (1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂
     # No E_agg — collection efficiency is applied by the caller.
-    return coll(log_m, Fᶠ, zero(typeof(m_mean)), ρᶠ)
+    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
+    return coll(log_m, Fᶠ, zero(FT), ρᶠ, zero(FT))
 end
 
 #####
@@ -1312,7 +1321,7 @@ PSD-integrated sixth moment changes per process.
     return z_tendency
 end
 
-# Tabulated version: use TabulatedFunction4D lookups for Z tendencies.
+# Tabulated version: use TabulatedFunction5D lookups for Z tendencies.
 #
 # Table convention:
 # - Single-term processes (rime, aggregation, shedding): table stores dG/mass_integral.
@@ -1328,13 +1337,16 @@ end
 @inline function tabulated_z_tendency(ice::IceProperties{<:Any, <:Any, <:Any, <:Any, <:Any,
                                                           M6, <:Any, <:Any},
                                         log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-                                        prp::ProcessRateParameters, sc_correction, p3) where {M6 <: IceSixthMoment{<:TabulatedFunction4D}}
+                                        prp::ProcessRateParameters, sc_correction, p3) where {M6 <: IceSixthMoment{<:TabulatedFunction5D}}
     FT = typeof(ρ)
     lt1 = lookup_table_1(p3)
     sixth = lt1.sixth_moment
     dep = lt1.deposition
 
     inv_nⁱ = safe_divide(one(FT), nⁱ, eps(FT))
+
+    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
+    μ = zero(FT)
 
     # --- Deposition / Sublimation ---
     # Z tables store raw dG/dt. Extract env factor from mass_rate / (mass_table × Nⁱ).
@@ -1343,14 +1355,14 @@ end
     # where S_c = Sc^(1/3) × √ρ_fac / √ν.
     # Deposition (c=2) and sublimation (c=1) use different dG normalization,
     # but the SAME mass integrals (vdep/vdep1). Separate via sign of rates.deposition.
-    mass_dep_combined = dep.ventilation(log_m, Fᶠ, Fˡ, ρᶠ) +
-                        sc_correction * dep.ventilation_enhanced(log_m, Fᶠ, Fˡ, ρᶠ)
+    mass_dep_combined = dep.ventilation(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
+                        sc_correction * dep.ventilation_enhanced(log_m, Fᶠ, Fˡ, ρᶠ, μ)
     env_dep = safe_divide(abs(rates.deposition), max(nⁱ * mass_dep_combined, eps(FT)), zero(FT))
 
-    z_dep_combined = sixth.deposition(log_m, Fᶠ, Fˡ, ρᶠ) +
-                     sc_correction * sixth.deposition1(log_m, Fᶠ, Fˡ, ρᶠ)
-    z_sub_combined = sixth.sublimation(log_m, Fᶠ, Fˡ, ρᶠ) +
-                     sc_correction * sixth.sublimation1(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_dep_combined = sixth.deposition(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
+                     sc_correction * sixth.deposition1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    z_sub_combined = sixth.sublimation(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
+                     sc_correction * sixth.sublimation1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
 
     is_deposition = rates.deposition > zero(FT)
     z_dep_sub_rate = ifelse(is_deposition, z_dep_combined, -z_sub_combined) * env_dep
@@ -1358,14 +1370,14 @@ end
     # --- Melting ---
     # Fortran: zimlt = (vdepm1×m6mlt1 + vdepm2×m6mlt2×S_c) × thermo
     # Z is the mass-weighted combination of Z tables. Extract thermo from mass_rate / (mass_combined × Nⁱ).
-    mass_melt_const = dep.small_ice_ventilation_constant(log_m, Fᶠ, Fˡ, ρᶠ)
-    mass_melt_enh   = dep.small_ice_ventilation_reynolds(log_m, Fᶠ, Fˡ, ρᶠ)
+    mass_melt_const = dep.small_ice_ventilation_constant(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    mass_melt_enh   = dep.small_ice_ventilation_reynolds(log_m, Fᶠ, Fˡ, ρᶠ, μ)
     mass_melt_combined = mass_melt_const + sc_correction * mass_melt_enh
     complete_melting = rates.complete_melting
     env_melt = safe_divide(complete_melting, max(nⁱ * mass_melt_combined, eps(FT)), zero(FT))
 
-    z_melt1 = sixth.melt1(log_m, Fᶠ, Fˡ, ρᶠ)
-    z_melt2 = sixth.melt2(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_melt1 = sixth.melt1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    z_melt2 = sixth.melt2(log_m, Fᶠ, Fˡ, ρᶠ, μ)
     # Mass-weighted Z: each term multiplied by its own mass table (Fortran convention)
     z_melt_numerator = mass_melt_const * z_melt1 + sc_correction * mass_melt_enh * z_melt2
     z_melt_rate = z_melt_numerator * env_melt
@@ -1376,15 +1388,15 @@ end
     # this requires λ_r which is not available here. For now, use Table 1 for
     # both; the mass and number rates already dispatch to Table 2.
     # TODO: Pass λ_r to enable Table 2 sixth-moment kernel for rain riming.
-    z_rime = sixth.rime(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_rime = sixth.rime(log_m, Fᶠ, Fˡ, ρᶠ, μ)
     z_rime_rate = z_rime * (rates.cloud_riming + rates.rain_riming) * inv_nⁱ
 
     # --- Aggregation (single term): z_table = dG/nagg ---
-    z_agg = sixth.aggregation(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_agg = sixth.aggregation(log_m, Fᶠ, Fˡ, ρᶠ, μ)
     z_agg_rate = z_agg * rates.aggregation * inv_nⁱ
 
     # --- Shedding (single term): z_table = dG_kernel/M3 ---
-    z_shed = sixth.shedding(log_m, Fᶠ, Fˡ, ρᶠ)
+    z_shed = sixth.shedding(log_m, Fᶠ, Fˡ, ρᶠ, μ)
     z_shed_rate = z_shed * rates.shedding * inv_nⁱ
 
     # Total Z rate

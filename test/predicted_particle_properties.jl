@@ -569,17 +569,17 @@ using Oceananigans.Fields: interior
         # Tabulate number-weighted fall speed
         tab_Vn = tabulate(NumberWeightedFallSpeed(), CPU(), params)
 
-        @test tab_Vn isa TabulatedFunction4D
-        @test size(tab_Vn.table) == (5, 2, 2, 3)
+        @test tab_Vn isa TabulatedFunction5D
+        @test size(tab_Vn.table) == (5, 2, 2, 3, 11)
 
         # Values should be non-negative and finite
         @test all(isfinite, tab_Vn.table)
         @test all(x -> x >= 0, tab_Vn.table)
 
-        # Test indexing via table (unrimed, liquid_fraction=0, first rime density)
+        # Test indexing via table (unrimed, liquid_fraction=0, first rime density, first mu)
         # First point may be ~0 at very small mass (log_m ≈ -14.8); last point must be positive
-        @test tab_Vn.table[1, 1, 1, 1] >= 0
-        @test tab_Vn.table[5, 1, 1, 1] > 0
+        @test tab_Vn.table[1, 1, 1, 1, 1] >= 0
+        @test tab_Vn.table[5, 1, 1, 1, 1] > 0
     end
 
     @testset "Tabulate IceFallSpeed container" begin
@@ -597,14 +597,14 @@ using Oceananigans.Fields: interior
         @test fs_tab.reference_air_density == fs.reference_air_density
 
         # Integrals should be tabulated
-        @test fs_tab.number_weighted isa TabulatedFunction4D
-        @test fs_tab.mass_weighted isa TabulatedFunction4D
-        @test fs_tab.reflectivity_weighted isa TabulatedFunction4D
+        @test fs_tab.number_weighted isa TabulatedFunction5D
+        @test fs_tab.mass_weighted isa TabulatedFunction5D
+        @test fs_tab.reflectivity_weighted isa TabulatedFunction5D
 
-        # Check sizes (4D: mass × rime_fraction × liquid_fraction × rime_density)
-        @test size(fs_tab.number_weighted.table) == (5, 2, 2, 3)
-        @test size(fs_tab.mass_weighted.table) == (5, 2, 2, 3)
-        @test size(fs_tab.reflectivity_weighted.table) == (5, 2, 2, 3)
+        # Check sizes (5D: mass × rime_fraction × liquid_fraction × rime_density × mu)
+        @test size(fs_tab.number_weighted.table) == (5, 2, 2, 3, 11)
+        @test size(fs_tab.mass_weighted.table) == (5, 2, 2, 3, 11)
+        @test size(fs_tab.reflectivity_weighted.table) == (5, 2, 2, 3, 11)
     end
 
     @testset "Tabulate IceDeposition container" begin
@@ -623,12 +623,12 @@ using Oceananigans.Fields: interior
         @test dep_tab.vapor_diffusivity == dep.vapor_diffusivity
 
         # All 6 integrals should be tabulated
-        @test dep_tab.ventilation isa TabulatedFunction4D
-        @test dep_tab.ventilation_enhanced isa TabulatedFunction4D
-        @test dep_tab.small_ice_ventilation_constant isa TabulatedFunction4D
-        @test dep_tab.small_ice_ventilation_reynolds isa TabulatedFunction4D
-        @test dep_tab.large_ice_ventilation_constant isa TabulatedFunction4D
-        @test dep_tab.large_ice_ventilation_reynolds isa TabulatedFunction4D
+        @test dep_tab.ventilation isa TabulatedFunction5D
+        @test dep_tab.ventilation_enhanced isa TabulatedFunction5D
+        @test dep_tab.small_ice_ventilation_constant isa TabulatedFunction5D
+        @test dep_tab.small_ice_ventilation_reynolds isa TabulatedFunction5D
+        @test dep_tab.large_ice_ventilation_constant isa TabulatedFunction5D
+        @test dep_tab.large_ice_ventilation_reynolds isa TabulatedFunction5D
     end
 
     @testset "Tabulate P3 scheme by property" begin
@@ -643,8 +643,8 @@ using Oceananigans.Fields: interior
             number_of_quadrature_points=16)
 
         @test p3_fs isa PredictedParticlePropertiesMicrophysics
-        @test p3_fs.ice.fall_speed.number_weighted isa TabulatedFunction4D
-        @test p3_fs.ice.fall_speed.mass_weighted isa TabulatedFunction4D
+        @test p3_fs.ice.fall_speed.number_weighted isa TabulatedFunction5D
+        @test p3_fs.ice.fall_speed.mass_weighted isa TabulatedFunction5D
 
         # Other properties should be unchanged
         @test p3_fs.ice.deposition.ventilation isa Ventilation
@@ -659,7 +659,7 @@ using Oceananigans.Fields: interior
             number_of_rime_density_points=3,
             number_of_quadrature_points=16)
 
-        @test p3_dep.ice.deposition.ventilation isa TabulatedFunction4D
+        @test p3_dep.ice.deposition.ventilation isa TabulatedFunction5D
         @test p3_dep.ice.fall_speed.number_weighted isa NumberWeightedFallSpeed
     end
 
@@ -2213,11 +2213,11 @@ using Oceananigans.Fields: interior
             number_of_rime_density_points=3,
             number_of_quadrature_points=32)
 
-        # Verify tabulated scheme has TabulatedFunction4D fields
-        @test p3_tab.ice.fall_speed.mass_weighted isa TabulatedFunction4D
-        @test p3_tab.ice.deposition.ventilation isa TabulatedFunction4D
-        @test p3_tab.ice.collection.aggregation isa TabulatedFunction4D
-        @test p3_tab.ice.collection.rain_collection isa TabulatedFunction4D
+        # Verify tabulated scheme has TabulatedFunction5D fields
+        @test p3_tab.ice.fall_speed.mass_weighted isa TabulatedFunction5D
+        @test p3_tab.ice.deposition.ventilation isa TabulatedFunction5D
+        @test p3_tab.ice.collection.aggregation isa TabulatedFunction5D
+        @test p3_tab.ice.collection.rain_collection isa TabulatedFunction5D
 
         ρ = FT(1.0)
 
@@ -2363,6 +2363,29 @@ using Oceananigans.Fields: interior
         @test f6d(2.0, 0.0, 0.0, 0.0, 0.0, 0.0) ≈ f6d(1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     end
 
+    @testset "Table 1 tabulation produces TabulatedFunction5D with mu axis" begin
+        FT = Float64
+        params = LookupTable1Parameters(FT;
+            number_of_mass_points = 5,
+            number_of_rime_fraction_points = 2,
+            number_of_liquid_fraction_points = 2,
+            number_of_rime_density_points = 2,
+            number_of_shape_parameter_points = 3,
+            minimum_shape_parameter = 0.0,
+            maximum_shape_parameter = 4.0)
+
+        table = tabulate(MassWeightedFallSpeed(), CPU(), params)
+        @test table isa TabulatedFunction5D
+        @test size(table.table) == (5, 2, 2, 2, 3)
+
+        # Different mu values should produce different fall speeds
+        v_mu0 = table(log10(1e-8), 0.0, 0.0, 400.0, 0.0)
+        v_mu4 = table(log10(1e-8), 0.0, 0.0, 400.0, 4.0)
+        @test v_mu0 != v_mu4
+        @test isfinite(v_mu0)
+        @test isfinite(v_mu4)
+    end
+
     @testset "RainMassWeightedVelocityEvaluator - monotonicity" begin
         evaluator = RainMassWeightedVelocityEvaluator()
 
@@ -2481,7 +2504,7 @@ using Oceananigans.Fields: interior
         @test p3_tab.rain.evaporation isa TabulatedFunction1D
 
         # Ice should also be tabulated
-        @test p3_tab.ice.fall_speed.mass_weighted isa TabulatedFunction4D
+        @test p3_tab.ice.fall_speed.mass_weighted isa TabulatedFunction5D
     end
 
     @testset "rain_evaporation_rate sign with tabulated scheme" begin

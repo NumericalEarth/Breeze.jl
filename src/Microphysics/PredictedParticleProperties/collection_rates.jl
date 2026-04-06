@@ -599,12 +599,13 @@ end
     shedding_integral(table, m_mean, Fᶠ, Fˡ, ρᶠ)
 
 Lookup the PSD-integrated shedding mass for D ≥ 9 mm particles
-from tabulated `TabulatedFunction4D`.
+from tabulated `TabulatedFunction5D`.
 """
-@inline function shedding_integral(table::TabulatedFunction4D, m_mean, Fᶠ, Fˡ, ρᶠ)
+@inline function shedding_integral(table::TabulatedFunction5D, m_mean, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
-    return table(log_m, Fᶠ, Fˡ, ρᶠ)
+    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
+    return table(log_m, Fᶠ, Fˡ, ρᶠ, zero(FT))
 end
 
 """
