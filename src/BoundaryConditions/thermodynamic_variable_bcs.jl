@@ -120,8 +120,8 @@ const EnergyFluxBCType = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryCondition
 Create a boundary condition that wraps an energy flux and converts it to a potential
 temperature flux for use with `LiquidIcePotentialTemperatureFormulation`.
 
-The energy flux is divided by the local mixture heat capacity `cᵖᵐ` to obtain the
-potential temperature flux: `Jᶿ = 𝒬 / cᵖᵐ`.
+The energy flux is divided by the local mixture heat capacity ``cᵖᵐ`` to obtain the
+potential temperature flux: ``Jᶿ = 𝒬 / cᵖᵐ``.
 """
 function EnergyFluxBoundaryCondition(flux)
     ef = EnergyFluxBoundaryConditionFunction(flux, nothing, nothing, nothing, nothing)
@@ -140,14 +140,14 @@ A wrapper for boundary conditions that converts potential temperature flux to en
 
 When building a diagnostic `energy_density` field from a `PotentialTemperatureFormulation`,
 the boundary conditions on `ρθ` (potential temperature density) must be converted to
-energy flux boundary conditions by multiplying by the local mixture heat capacity `cᵖᵐ`.
+energy flux boundary conditions by multiplying by the local mixture heat capacity ``cᵖᵐ``.
 
 The relationship is:
 ```math
-𝒬 = Jᶿ × cᵖᵐ
+𝒬 = Jᶿ cᵖᵐ
 ```
 
-where `𝒬` is the energy flux and `Jᶿ` is the potential temperature flux.
+where ``𝒬`` is the energy flux and ``Jᶿ`` is the potential temperature flux.
 """
 struct ThetaFluxBoundaryConditionFunction{C, S, M, TC, D}
     condition :: C
@@ -241,8 +241,8 @@ const ThetaFluxBCType = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFu
 Create a boundary condition that wraps a potential temperature flux and converts it to
 an energy flux for use with diagnostic energy density fields.
 
-The potential temperature flux is multiplied by the local mixture heat capacity `cᵖᵐ`
-to obtain the energy flux: `𝒬 = Jᶿ × cᵖᵐ`.
+The potential temperature flux is multiplied by the local mixture heat capacity ``cᵖᵐ``
+to obtain the energy flux: ``𝒬 = Jᶿ cᵖᵐ``.
 """
 function ThetaFluxBoundaryCondition(flux)
     tf = ThetaFluxBoundaryConditionFunction(flux, nothing, nothing, nothing)
