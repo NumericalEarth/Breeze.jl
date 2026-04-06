@@ -114,7 +114,7 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
 The "saturation adjustment coefficient" `f₅` is then computed as
 
 ```math
-f₅ = a × T_DCMIP2016 × ℒˡᵣ / cᵖᵈ
+f₅ = a T_DCMIP2016 ℒˡᵣ / cᵖᵈ
 ```
 
 where `a` is the liquid_coefficient for Tetens' saturation vapor pressure formula,
@@ -224,11 +224,12 @@ Create and return the microphysical fields for the Kessler scheme.
 - `ρqʳ`: Density-weighted rain mass fraction.
 
 # Diagnostic Fields (Mass Fractions)
-- `qᵛ`: Water vapor mass fraction, diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
-- `qᶜˡ`: Cloud liquid mass fraction (\$kg/kg\$).
-- `qʳ`: Rain mass fraction (\$kg/kg\$).
-- `precipitation_rate`: Surface precipitation rate (\$m/s\$), defined as \$q^r \times v^t_{rain}\$ to match one-moment microphysics.
-- `𝕎ʳ`: Rain terminal velocity (\$m/s\$).
+- `qᵛ`: Water vapor mass fraction, diagnosed as ``q^v = q^t - q^{cl} - q^r``.
+- `qᶜˡ`: Cloud liquid mass fraction (kg/kg).
+- `qʳ`: Rain mass fraction (kg/kg).
+- `precipitation_rate`: Surface precipitation rate (m/s), defined as ``q^r  v^t_{rain}``
+  to match one-moment microphysics.
+- `𝕎ʳ`: Rain terminal velocity (m/s).
 """
 function AtmosphereModels.materialize_microphysical_fields(::DCMIP2016KM, grid, boundary_conditions)
     # Prognostic fields (density-weighted)
@@ -326,7 +327,7 @@ $(TYPEDSIGNATURES)
 
 Return the surface precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
 
-The surface precipitation flux is ``\rho q^r v^t_{rain}`` at the surface, matching the
+The surface precipitation flux is ``ρ q^r v^t_{rain}`` at the surface, matching the
 one-moment microphysics definition. Units are kg/m²/s.
 
 This implements the Breeze `surface_precipitation_flux(model)` interface.
