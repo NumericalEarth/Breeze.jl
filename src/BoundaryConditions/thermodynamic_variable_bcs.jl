@@ -17,16 +17,16 @@
 A wrapper for boundary conditions that converts energy flux to potential temperature flux.
 
 When using `LiquidIcePotentialTemperatureFormulation`, the prognostic thermodynamic variable
-is `ρθ` (potential temperature density). This wrapper allows users to specify energy fluxes
+is ``ρθ`` (potential temperature density). This wrapper allows users to specify energy fluxes
 (e.g., sensible heat flux in W/m²) which are converted to potential temperature fluxes by
-dividing by the local mixture heat capacity `cᵖᵐ`.
+dividing by the local mixture heat capacity ``cᵖᵐ``.
 
 The relationship is:
 ```math
 Jᶿ = 𝒬 / cᵖᵐ
 ```
 
-where `𝒬` is the energy flux and `Jᶿ` is the potential temperature flux.
+where ``𝒬`` is the energy flux and ``Jᶿ`` is the potential temperature flux.
 
 The mixture heat capacity is computed using moisture fractions from the microphysics scheme,
 which correctly accounts for liquid and ice condensate when present.

@@ -190,8 +190,8 @@ $(TYPEDSIGNATURES)
 Return the names of prognostic microphysical fields for the Kessler scheme.
 
 # Fields
-- `:ρqᶜˡ`: Density-weighted cloud liquid mass fraction (kg/m^3).
-- `:ρqʳ`: Density-weighted rain mass fraction (kg/m^3).
+- `:ρqᶜˡ`: Density-weighted cloud liquid mass fraction (kg/m³).
+- `:ρqʳ`: Density-weighted rain mass fraction (kg/m³).
 """
 AtmosphereModels.prognostic_field_names(::DCMIP2016KM) = (:ρqᶜˡ, :ρqʳ)
 
