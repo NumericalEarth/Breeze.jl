@@ -494,6 +494,9 @@ struct P3ProcessRates{FT}
     complete_melting :: FT         # Ice → rain mass (sheds) [kg/kg/s]
     melting_number :: FT           # Ice number loss magnitude from melting [1/kg/s]
 
+    # D2: Ice number loss from sublimation (Fortran nisub)
+    sublimation_number :: FT       # Ice number loss magnitude from sublimation [1/kg/s]
+
     # Phase 2: Ice aggregation (positive magnitude)
     aggregation :: FT              # Ice number loss magnitude from self-collection [1/kg/s]
 
@@ -678,7 +681,10 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # When collection rate exceeds the freezing capacity (wet growth),
     # all collected hydrometeors stay liquid and are redirected to qʷⁱ.
-    qwgrth = wet_growth_capacity(p3, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+    # D4: Fortran guards wet growth with (qc+qr) >= 1e-6 (microphy_p3.f90 line 3241)
+    has_hydrometeors = (clamp_positive(qᶜˡ) + clamp_positive(qʳ)) >= FT(1e-6)
+    qwgrth_raw = wet_growth_capacity(p3, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+    qwgrth = ifelse(has_hydrometeors, qwgrth_raw, zero(FT))
 
     # Check if total riming exceeds wet growth capacity
     total_collection = cloud_rim + rain_rim
@@ -820,6 +826,61 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Recompute splintering from sink-limited riming rates
     spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T, D_mean, Fˡ, T, qᶠ)
 
+    # D7: Cap splintering mass at available riming mass and subtract from riming
+    # (Fortran: qccol -= dum2, qrcol -= dum2_rain; conserves total mass).
+    total_rim_for_spl = clamp_positive(cloud_rim) + clamp_positive(rain_rim)
+    spl_q = min(spl_q, total_rim_for_spl)
+    spl_frac = safe_divide(spl_q, total_rim_for_spl, zero(FT))
+    cloud_rim = cloud_rim * (1 - spl_frac)
+    rain_rim  = rain_rim * (1 - spl_frac)
+
+    # D2: Sublimation number loss (Fortran nisub = qisub * ni/qi)
+    sublim_mag = clamp_positive(-dep)
+    sublim_n = sublim_mag * safe_divide(clamp_positive(nⁱ), max(clamp_positive(qⁱ), FT(1e-20)), zero(FT))
+
+    # D1: Coating condensation/evaporation on ice liquid fraction
+    # Vapor condenses onto (or evaporates from) the liquid coating of ice particles,
+    # using the same ventilation integral as deposition but driven by liquid saturation.
+    # Fortran: qlcon/qlevp (microphy_p3.f90 lines 3746-3771).
+    #
+    # Fortran exclusive branching: when Fl >= 1%, ALL diffusional growth goes to
+    # the liquid coating (epsiw) and deposition (epsi) is zeroed. When Fl < 1%,
+    # all goes to deposition and coating is zeroed. They never operate simultaneously.
+    qⁱ_total_coat = max(clamp_positive(qⁱ) + clamp_positive(qʷⁱ), FT(1e-20))
+    Fˡ_coat = clamp_positive(qʷⁱ) / qⁱ_total_coat
+    has_coating = Fˡ_coat >= FT(0.01)  # Fortran threshold: qiliq/qitot >= 0.01
+    # Compute liquid saturation ratio S_l = qv / qv_sat_liq
+    S_l = qᵛ / max(qᵛ⁺ˡ, FT(1e-10))
+    # Use same ventilation integral as deposition, scaled by liquid fraction
+    m_mean_coat = safe_divide(clamp_positive(qⁱ), clamp_positive(nⁱ), FT(1e-12))
+    ρ_correction_coat = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
+    C_fv_coat = deposition_ventilation(p3.ice.deposition.ventilation,
+                                        p3.ice.deposition.ventilation_enhanced,
+                                        m_mean_coat, Fᶠ, ρᶠ, prp, transport.nu, transport.D_v,
+                                        ρ_correction_coat, p3)
+    thermodynamic_constants_coat = isnothing(constants) ? ThermodynamicConstants(FT) : constants
+    Rᵛ_coat = FT(vapor_gas_constant(thermodynamic_constants_coat))
+    Rᵈ_coat = FT(dry_air_gas_constant(thermodynamic_constants_coat))
+    L_v_coat = vaporization_latent_heat(constants, T)
+    ε_coat = Rᵈ_coat / Rᵛ_coat
+    qᵛ⁺ˡ_safe = max(qᵛ⁺ˡ, FT(1e-30))
+    e_sl = P * qᵛ⁺ˡ_safe / (ε_coat + qᵛ⁺ˡ_safe * (1 - ε_coat))
+    A_coat = L_v_coat / (transport.K_a * T) * (L_v_coat / (Rᵛ_coat * T) - 1)
+    B_coat = Rᵛ_coat * T / (e_sl * transport.D_v)
+    Γˡ = 1 + L_v_coat^2 * qᵛ⁺ˡ_safe / (Rᵛ_coat * T^2 * FT(1005))
+    coat_rate = FT(2π) * C_fv_coat * Fˡ_coat * (S_l - 1) / (Γˡ * (A_coat + B_coat)) * clamp_positive(nⁱ)
+    coat_cond = ifelse(has_coating, clamp_positive(coat_rate), zero(FT))
+    # Cap evaporation at available liquid coating (Fortran: min(qlevp, qiliq*i_dt))
+    τ_coat = prp.sink_limiting_timescale
+    coat_evap_raw = ifelse(has_coating, clamp_positive(-coat_rate), zero(FT))
+    coat_evap = min(coat_evap_raw, clamp_positive(qʷⁱ) / τ_coat)
+
+    # Fortran exclusive branching: when coating is active, zero out ice deposition
+    # and sublimation number to avoid double-counting vapor consumption
+    # (Fortran: epsi=0 when epsiw>0; nisub=0 follows from qisub=0).
+    dep = ifelse(has_coating, zero(FT), dep)
+    sublim_n = ifelse(has_coating, zero(FT), sublim_n)
+
     return P3ProcessRates(
         # Phase 1: Condensation
         cond,
@@ -827,6 +888,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         autoconv, accr, rain_evap, rain_self, rain_br,
         # Phase 1: Ice
         dep, partial_melt, complete_melt, melt_n,
+        # D2: Sublimation number loss
+        sublim_n,
         # Phase 2: Aggregation + C3 global Nᵢ limiter
         agg, ni_lim,
         # Phase 2: Riming
@@ -843,8 +906,10 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         cloud_warm_q, cloud_warm_n, rain_warm_q, rain_warm_n,
         # Wet growth collection → qʷⁱ
         wg_cloud, wg_rain,
-        # M9: Warm/mixed-phase budget stubs (not yet computed; set to zero)
-        zero(FT), zero(FT), zero(FT), zero(FT)
+        # M9: CCN activation and rain condensation stubs
+        zero(FT), zero(FT),
+        # D1: Coating condensation/evaporation
+        coat_cond, coat_evap
     )
 end
 
@@ -1039,8 +1104,9 @@ Ice number loses from:
            rates.rain_freezing_number + rates.splintering_number +
            rates.cloud_homogeneous_number + rates.rain_homogeneous_number
     # Losses (all positive magnitudes, M7)
+    # D2: sublimation_number — ice number loss from sublimation (Fortran nisub)
     # ni_limit: C3 global Nᵢ cap (impose_max_Ni); relaxation sink above N_max/ρ.
-    loss = rates.melting_number + rates.aggregation + rates.ni_limit
+    loss = rates.melting_number + rates.sublimation_number + rates.aggregation + rates.ni_limit
     return ρ * (gain - loss)
 end
 
@@ -1094,7 +1160,8 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
 
     # Fortran P3 v5.5.0: rho_rimeMax = 900 for rain rime and freezing
     ρ_rimemax = prp.maximum_rime_density
-    ρ_rim_hom = prp.pure_ice_density          # homogeneous freezing: solid ice sphere (917 kg/m³)
+    # D6: Fortran uses rho_rimeMax (900) for homogeneous freezing rime volume, not 917
+    ρ_rim_hom = prp.maximum_rime_density
 
     # Phase 2: Volume gain from new rime
     # Cloud riming uses Cober-List computed density; rain riming uses rho_rimeMax = 900
@@ -1117,11 +1184,13 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
     # In tendency form: additional volume reduction = bᶠ × (917 - ρᶠ) × |melt| / (ρᶠ × qⁱ)
     # Fortran guards with `.not. log_LiquidFrac`: when liquid fraction is active,
     # melt-densification is skipped because the liquid is tracked explicitly in qʷⁱ.
+    # NOTE: The densification target is solid ice density (917), NOT rho_rimeMax (900).
+    ρ_solid_ice = prp.pure_ice_density  # 917 kg/m³
     qⁱ_safe = max(qⁱ, FT(1e-12))
     bᶠ = Fᶠ * qⁱ_safe / ρᶠ_safe
-    densification = bᶠ * (ρ_rim_hom - ρᶠ_safe) * total_melting / (ρᶠ_safe * qⁱ_safe)
+    densification = bᶠ * (ρ_solid_ice - ρᶠ_safe) * total_melting / (ρᶠ_safe * qⁱ_safe)
     # Only apply when ρᶠ < 917, there is melting, AND liquid fraction is not active
-    apply_densification = (ρᶠ_safe < ρ_rim_hom) & !prp.liquid_fraction_active
+    apply_densification = (ρᶠ_safe < ρ_solid_ice) & !prp.liquid_fraction_active
     densification = ifelse(apply_densification, densification, zero(FT))
 
     return ρ * (volume_gain - volume_loss - densification)
@@ -1334,12 +1403,14 @@ Loses from:
 - Refreezing (liquid refreezes to rime)
 """
 @inline function tendency_ρqʷⁱ(rates::P3ProcessRates, ρ)
+    # D1: Include coating condensation/evaporation (Fortran qlcon/qlevp)
     gain = rates.partial_melting +
            rates.cloud_warm_collection +
            rates.rain_warm_collection +
            rates.wet_growth_cloud +
-           rates.wet_growth_rain
-    loss = rates.shedding + rates.refreezing
+           rates.wet_growth_rain +
+           rates.coating_condensation
+    loss = rates.shedding + rates.refreezing + rates.coating_evaporation
     return ρ * (gain - loss)
 end
 

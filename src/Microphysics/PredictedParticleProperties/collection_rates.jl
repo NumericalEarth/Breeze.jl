@@ -143,7 +143,8 @@ factor for the exponential PSD.
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
-    below_freezing = T < T₀
+    # D3: Fortran uses T <= trplpt for below-freezing riming
+    below_freezing = T <= T₀
     active = below_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
 
     # Mean particle mass
@@ -191,7 +192,8 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
-    above_freezing = T >= T₀
+    # D3: Fortran uses T > trplpt for above-freezing collection
+    above_freezing = T > T₀
     active = above_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
 
     # Same collection kernel as cloud_riming_rate
@@ -236,28 +238,28 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
-    above_freezing = T >= T₀
+    # D3: Fortran uses T > trplpt for above-freezing collection
+    above_freezing = T > T₀
     active = above_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
 
-    # Same collection kernel as rain_riming_rate
+    # D5: Use Table 2 (double-PSD kernel) for above-freezing rain-ice collection,
+    # matching the below-freezing rain_riming_rate path and Fortran P3 convention.
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
-    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                       m_mean, Fᶠ, ρᶠ, prp, p3)
+
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
-    # Rain-DSD cross-section correction (C5)
+    # Diagnose rain lambda for Table 2 lookup
     λ_r_cubed = FT(π) * prp.liquid_water_density * nʳ_eff / max(qʳ_eff, FT(1e-15))
     λ_r = clamp(cbrt(λ_r_cubed), prp.rain_lambda_min, prp.rain_lambda_max)
-    D_r_mean = 1 / λ_r
-    ρ_eff = (1 - Fᶠ) * prp.ice_effective_density_unrimed + Fᶠ * max(ρᶠ, FT(50))
-    D_i_mean = cbrt(6 * m_mean / (FT(π) * max(ρ_eff, FT(50))))
-    D_i_mean = clamp(D_i_mean, prp.ice_diameter_min, prp.ice_diameter_max)
-    r_ratio = D_r_mean / max(D_i_mean, FT(prp.ice_diameter_min))
-    rain_dsd_correction = 1 + 8 * r_ratio + 20 * r_ratio^2
-    rain_dsd_correction = ifelse(nʳ_eff > FT(1), rain_dsd_correction, one(FT))
 
-    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle * rain_dsd_correction
+    # Liquid fraction for Table 2 lookup
+    Fˡ = zero(FT)
+
+    mass_kernel = _rain_riming_mass_kernel(lookup_table_2(p3),
+        m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3)
+
+    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * mass_kernel
 
     return ifelse(active, rate, zero(FT))
 end
@@ -338,7 +340,8 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
-    below_freezing = T < T₀
+    # D3: Fortran uses T <= trplpt for below-freezing riming
+    below_freezing = T <= T₀
     active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
 
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))

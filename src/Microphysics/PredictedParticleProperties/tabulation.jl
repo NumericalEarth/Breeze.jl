@@ -119,9 +119,18 @@ The evaluated integral value.
     FT = typeof(log_mean_mass)
     mean_particle_mass = FT(10)^log_mean_mass
 
-    # Build the ice size distribution state from physical quantities
-    state = state_from_mean_particle_mass(e, mean_particle_mass, rime_fraction, liquid_fraction;
-                                          rime_density)
+    # M5: For melting integrands, Fortran integrates over the dry-ice PSD
+    # (computed from q_dry = (1-Fl)*q_total) rather than the wet-ice PSD.
+    # When Fl > 0 the dry-ice distribution has different N0/mu/lambda.
+    use_dry_state = _is_melting_integral(e.integral) && liquid_fraction > FT(1e-6)
+    if use_dry_state
+        m_dry = (1 - liquid_fraction) * mean_particle_mass
+        state = state_from_mean_particle_mass(e, max(m_dry, FT(1e-20)), rime_fraction, zero(FT);
+                                              rime_density)
+    else
+        state = state_from_mean_particle_mass(e, mean_particle_mass, rime_fraction, liquid_fraction;
+                                              rime_density)
+    end
 
     # Evaluate integral using pre-computed quadrature
     raw = evaluate_quadrature(e.integral, state, e.nodes, e.weights)
@@ -132,6 +141,13 @@ The evaluated integral value.
     # Safety: replace NaN/Inf with zero (can happen at extreme mass bounds)
     return ifelse(isfinite(result), result, zero(FT))
 end
+
+# M5: Identify melting ventilation integrands that should use dry-ice PSD
+_is_melting_integral(::SmallIceVentilationConstant) = true
+_is_melting_integral(::SmallIceVentilationReynolds) = true
+_is_melting_integral(::LargeIceVentilationConstant) = true
+_is_melting_integral(::LargeIceVentilationReynolds) = true
+_is_melting_integral(::AbstractP3Integral) = false
 
 @inline function (e::P3IntegralEvaluator)(log_mean_mass, rime_fraction, liquid_fraction, rime_density)
     return e(log_mean_mass, rime_fraction, liquid_fraction; rime_density = rime_density)
