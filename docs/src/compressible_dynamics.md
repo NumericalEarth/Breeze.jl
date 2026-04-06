@@ -261,7 +261,7 @@ stored initial state ``U^0``.
     pressure gradient seen by the initial velocities is inconsistent with the pressure field,
     generating spurious acoustic oscillations that grow over multiple time steps.
 
-!!! warning "WS-RK3: use ``\\theta^n`` as the base for ``\\theta`` evolution"
+!!! warning "WS-RK3: use θⁿ as the base for θ evolution"
     The slow ``\theta`` tendency must be applied to ``\theta^n`` from ``U^0``, **not** to
     ``\bar{\theta}_v`` from the evaluation state. Using the evaluation state's ``\theta``
     double-counts the ``\theta`` change from earlier stages (since ``\theta(U^*) = \theta^n +
@@ -305,11 +305,11 @@ The slow Exner pressure tendency represents the advective transport of ``\pi``:
 This is computed using centered differences (not WENO) to maintain consistency with the
 centered-difference divergence operator in the acoustic loop.
 
-!!! warning "No \$R/c_v\$ factor in \$\\dot{\\pi}^s\$"
+!!! warning "No R/cᵥ factor in dot-π"
     The chain rule for ``\pi = f(\rho\theta)`` gives
     ``\boldsymbol{u} \boldsymbol{\cdot} \boldsymbol{\nabla} \pi = (R/c_v)(\pi / \rho\theta) \, \boldsymbol{u} \boldsymbol{\cdot} \boldsymbol{\nabla} (\rho\theta)``,
     so the ``R/c_v`` factor is already embedded in the advection of ``\pi``.
-    Writing ``\dot{\pi}^s = -(R/c_v) \, \boldsymbol{u} \cdot \nabla\pi`` would double-count
+    Writing ``\dot{\pi}^s = -(R/c_v) \, \boldsymbol{u} \boldsymbol{\cdot} \boldsymbol{\nabla}\pi`` would double-count
     this factor and reduce the perturbation amplitude by a factor of ``\sim 2.5``.
 
 ### [Forward-extrapolation filter](@id forward-extrapolation-filter)
