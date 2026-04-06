@@ -149,20 +149,27 @@ end
 ##### Ice shape parameter (μ) from Table 3
 #####
 ##### For 3-moment P3, μ is diagnosed from (qⁱ, nⁱ, zⁱ) via Table 3.
-##### For 2-moment fallback (no Table 3), returns 0 (exponential PSD).
+##### For 2-moment (no Table 3), μ is diagnosed from the P3Closure μ-λ
+##### relationship using an analytical λ approximation for unrimed aggregates.
 #####
 
 """
     compute_ice_shape_parameter(p3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ)
 
-Compute the ice PSD shape parameter μ from the three-moment Table 3 lookup.
+Compute the ice PSD shape parameter μ.
 
 For 3-moment P3, μ is diagnosed from the ratio Z/L (sixth moment to mass)
-using the pre-tabulated closure in Table 3. For 2-moment or when Table 3
-is not available, returns zero (exponential PSD).
+using the pre-tabulated closure in Table 3.
 
-All inputs are specific (per kg of air); the lookup normalizes by ratios
-so units cancel.
+For 2-moment P3 (Table 3 absent), μ is computed from the P3Closure
+μ-λ diagnostic relationship. The slope parameter λ is approximated from
+the mean particle mass m̄ = qⁱ/nⁱ assuming the unrimed aggregate regime
+(m(D) = α Dᵝ with exponential PSD μ=0 as starting estimate):
+log λ ≈ (log α + log Γ(β+1) - log m̄) / β. This approximation is
+GPU-compatible and allocation-free (no incomplete gamma functions).
+
+All inputs are specific (per kg of air); the Table 3 lookup normalizes
+by ratios so units cancel, and the 2-moment closure is also scale-free.
 """
 @inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ)
@@ -178,8 +185,31 @@ end
     return shape_parameter_lookup(table3, qⁱ_safe, nⁱ_safe, zⁱ_safe, Fᶠ, Fˡ, ρᶠ)
 end
 
-# Fallback: no Table 3 available (2-moment or untabulated) → exponential PSD
-@inline _ice_shape_parameter(::Nothing, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT) = zero(FT)
+# Fallback: no Table 3 (2-moment mode). Compute μ from the P3Closure μ-λ diagnostic.
+# λ is approximated from m_mean = qⁱ/nⁱ assuming the unrimed aggregate regime (regime 2)
+# with exponential PSD (μ=0) as initial estimate:
+#   m_mean = α Γ(β+1) / λ^β  →  logλ = (log α + loggamma(β+1) - log m_mean) / β
+# μ is then computed from the P3Closure small-particle (Field et al. 2007) μ-λ relation
+# via TwoMomentClosure (which is identical to the P3Closure small-particle branch).
+# This is GPU-safe (no gamma_inc), allocation-free, and scale-free.
+@inline function _ice_shape_parameter(::Nothing, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
+    qⁱ_eff = max(qⁱ, FT(1e-20))
+    nⁱ_eff = max(nⁱ, FT(1e-16))
+    m_mean = qⁱ_eff / nⁱ_eff
+
+    mass = IceMassPowerLaw(FT)
+    α = mass.coefficient
+    β = mass.exponent
+
+    # logλ from mean mass via unrimed aggregate mass-diameter relation
+    logλ = (log(α) + loggamma(β + 1) - log(m_mean)) / β
+    logλ = clamp(logλ, log(FT(10)), log(FT(1e7)))
+
+    # TwoMomentClosure = P3Closure small-particle branch (Field et al. 2007):
+    # μ = clamp(a λ^b - c, 0, μmax)
+    closure = TwoMomentClosure(FT)
+    return shape_parameter(closure, logλ)
+end
 
 #####
 ##### Thermodynamic latent heat helpers (H1)
