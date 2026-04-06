@@ -11,7 +11,7 @@
 Ice collision-coalescence efficiencies and collection integrals.
 See [`IceCollection`](@ref) constructor for details.
 """
-struct IceCollection{FT, AG, RW}
+struct IceCollection{FT, AG, RW, WA, IA}
     # Deprecated: unused by the runtime riming path, which reads
     # ProcessRateParameters.cloud_ice_collection_efficiency instead.
     # Retained for backward compatibility with the tabulation path.
@@ -19,6 +19,8 @@ struct IceCollection{FT, AG, RW}
     ice_rain_collection_efficiency :: FT
     aggregation :: AG
     rain_collection :: RW
+    cloud_aerosol_collection :: WA
+    ice_aerosol_collection :: IA
 end
 
 """
@@ -56,7 +58,9 @@ function IceCollection(FT::Type{<:AbstractFloat} = Float64;
         FT(ice_cloud_collection_efficiency),
         FT(ice_rain_collection_efficiency),
         AggregationNumber(),
-        RainCollectionNumber()
+        RainCollectionNumber(),
+        CloudAerosolCollection(),
+        IceAerosolCollection()
     )
 end
 

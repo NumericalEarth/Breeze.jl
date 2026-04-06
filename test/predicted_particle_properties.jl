@@ -55,7 +55,9 @@ using Breeze.Microphysics.PredictedParticleProperties:
     immersion_freezing_rain_rate,
     air_transport_properties,
     psd_correction_spherical_volume,
-    liu_daum_shape_parameter
+    liu_daum_shape_parameter,
+    CloudAerosolCollection,
+    IceAerosolCollection
 
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
@@ -2867,5 +2869,27 @@ using Oceananigans.Fields: interior
 
         total_water_tendency = dqv + dqc + dqr + dqi + dqwi
         @test abs(total_water_tendency) < 1e-15 * ρ
+    end
+
+    @testset "nawcol and naicol integral types exist and tabulate" begin
+        FT = Float64
+        params = LookupTable1Parameters(FT;
+            number_of_mass_points=5,
+            number_of_rime_fraction_points=2,
+            number_of_liquid_fraction_points=2,
+            number_of_rime_density_points=2,
+            number_of_shape_parameter_points=3,
+            minimum_shape_parameter=0.0,
+            maximum_shape_parameter=4.0)
+
+        nawcol_table = tabulate(CloudAerosolCollection(), CPU(), params)
+        naicol_table = tabulate(IceAerosolCollection(), CPU(), params)
+
+        @test nawcol_table isa TabulatedFunction5D
+        @test naicol_table isa TabulatedFunction5D
+
+        # Both should produce non-negative values for typical ice
+        @test nawcol_table(log10(1e-8), 0.0, 0.0, 400.0, 0.0) >= 0
+        @test naicol_table(log10(1e-8), 0.0, 0.0, 400.0, 0.0) >= 0
     end
 end

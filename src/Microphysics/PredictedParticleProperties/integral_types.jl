@@ -250,6 +250,22 @@ Corresponds to `nrwat` in P3 Fortran code.
 """
 struct RainCollectionNumber <: AbstractCollectionIntegral end
 
+"""
+    CloudAerosolCollection <: AbstractCollectionIntegral
+
+Slinn (1983) cloud/water aerosol collection integral (Fortran nawcol).
+Integrates projected area times fall speed over the ice PSD.
+"""
+struct CloudAerosolCollection <: AbstractCollectionIntegral end
+
+"""
+    IceAerosolCollection <: AbstractCollectionIntegral
+
+Slinn (1983) ice aerosol collection integral (Fortran naicol).
+Integrates projected area times fall speed over the ice PSD.
+"""
+struct IceAerosolCollection <: AbstractCollectionIntegral end
+
 #####
 ##### Sixth moment integrals (9)
 #####

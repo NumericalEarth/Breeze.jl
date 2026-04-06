@@ -935,7 +935,9 @@ function tabulate(collection::IceCollection, arch=CPU(),
         collection.ice_cloud_collection_efficiency,
         collection.ice_rain_collection_efficiency,
         tabulate(collection.aggregation, arch, params),
-        tabulate(collection.rain_collection, arch, params)
+        tabulate(collection.rain_collection, arch, params),
+        tabulate(collection.cloud_aerosol_collection, arch, params),
+        tabulate(collection.ice_aerosol_collection, arch, params)
     )
 end
 

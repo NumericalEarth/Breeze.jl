@@ -122,6 +122,8 @@ export
     # Integral types (concrete) - Collection
     AggregationNumber,
     RainCollectionNumber,
+    CloudAerosolCollection,
+    IceAerosolCollection,
 
     # Integral types (concrete) - Sixth moment
     SixthMomentRime,

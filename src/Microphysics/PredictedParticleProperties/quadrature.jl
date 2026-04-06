@@ -1016,6 +1016,23 @@ end
     return ifelse(D < FT(100e-6), zero(FT), V * A * Np)
 end
 
+# Slinn (1983) aerosol collection by cloud/water: ∫ V(D) × A(D) × N'(D) dD
+# Fortran P3: nawcol. Collection efficiency applied at runtime.
+@inline function integrand(::CloudAerosolCollection, D, state::IceSizeDistributionState, thresholds)
+    V = terminal_velocity(D, state, thresholds)
+    A = particle_area(D, state, thresholds)
+    Np = size_distribution(D, state)
+    return V * A * Np
+end
+
+# Slinn (1983) aerosol collection by ice: ∫ V(D) × A(D) × N'(D) dD
+# Fortran P3: naicol. Collection efficiency applied at runtime.
+@inline function integrand(::IceAerosolCollection, D, state::IceSizeDistributionState, thresholds)
+    V = terminal_velocity(D, state, thresholds)
+    A = particle_area(D, state, thresholds)
+    Np = size_distribution(D, state)
+    return V * A * Np
+end
 
 """
     particle_area(D, state, thresholds)
