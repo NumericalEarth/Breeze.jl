@@ -30,6 +30,10 @@ BreezeCloudMicrophysicsExt = ["CloudMicrophysics", "SpecialFunctions"]
 BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
 BreezeReactantExt = "Reactant"
 
+[sources.Reactant]
+url = "https://github.com/EnzymeAD/Reactant.jl"
+rev = "Pangoraw-patch-2"
+
 [compat]
 Adapt = "4.3.0"
 ClimaComms = "0.6"
