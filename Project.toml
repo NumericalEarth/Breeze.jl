@@ -32,7 +32,7 @@ BreezeReactantExt = "Reactant"
 
 [sources.Reactant]
 url = "https://github.com/EnzymeAD/Reactant.jl"
-rev = "Pangoraw-patch-2"
+rev = "main"
 
 [compat]
 Adapt = "4.3.0"
