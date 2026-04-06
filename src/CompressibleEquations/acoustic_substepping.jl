@@ -1,7 +1,7 @@
 #####
 ##### Acoustic Substepping for CompressibleDynamics — Exner Pressure Formulation
 #####
-##### Implements split-explicit time integration following CM1 (Bryan 2002),
+##### Implements split-explicit time integration following CM1 (Bryan and Fritsch 2002),
 ##### Wicker-Skamarock (2002), and Klemp et al. (2007):
 ##### - Forward-backward acoustic substeps with (velocity, Exner pressure) variables
 ##### - Vertically implicit w-π coupling with off-centering (always on)
