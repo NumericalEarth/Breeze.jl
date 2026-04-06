@@ -138,7 +138,7 @@ Advection of density-weighted scalars ``\rho c`` uses the same contravariant vel
 for vertical transport:
 
 ```math
-\partial_t (\rho c) + \boldsymbol{\nabla}_\zeta \cdot (\rho c \, \tilde{\boldsymbol{U}}) = S_c ,
+\partial_t (\rho c) + \boldsymbol{\nabla}_\zeta \boldsymbol{\cdot} (\rho c \, \tilde{\boldsymbol{U}}) = S_c ,
 ```
 
 where ``\tilde{\boldsymbol{U}} = (u, v, \tilde{\Omega})``. This is handled automatically
