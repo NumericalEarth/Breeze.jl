@@ -207,10 +207,10 @@ end
 """
     numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants)
 
-Compute the dry hydrostatic pressure at height `z` by numerically integrating
-`dp/dz = -gρ` from `z=0`, where `ρ = p/(Rᵈ T)` and `T = θ(z) (p/pˢᵗ)^κ`.
+Compute the dry hydrostatic pressure at height ``z`` by numerically integrating
+``dp/dz = -g ρ`` from ``z=0``, where ``ρ = p/(Rᵈ T)`` and ``T = θ(z) (p/pˢᵗ)^κ``.
 
-This function handles non-uniform potential temperature profiles `θ(z)` for which
+This function handles non-uniform potential temperature profiles ``θ(z)`` for which
 the closed-form adiabatic solution does not apply.
 Uses 1000 midpoint integration steps.
 """
