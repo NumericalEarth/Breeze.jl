@@ -83,8 +83,7 @@ where:
     Fl = clamp_positive(qʷⁱ) / qⁱ_total
     ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
 
-    # H10: Ventilation integral C(D) × f_v(D) with Fl-blended ice/rain coefficients.
-    # Dispatches to PSD-integrated table or mean-mass path.
+    # H10: PSD-integrated ventilation integral C(D) × f_v(D) with Fl-blended coefficients.
     C_fv = melting_ventilation(p3.ice.deposition.ventilation,
                                 p3.ice.deposition.ventilation_enhanced,
                                 m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
@@ -132,7 +131,7 @@ tabulated small/large ice ventilation integrals (Fortran f1pr24-f1pr27):
 - **Complete melting** (small particles, D ≤ D_crit): Meltwater sheds to rain
 - **Partial melting** (large particles, D > D_crit): Meltwater stays as liquid coating (qʷⁱ)
 
-When tables are not available, falls back to a bulk liquid-fraction heuristic.
+Requires tabulated small/large ice ventilation integrals.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -199,20 +198,6 @@ end
     total = small + large
 
     return ifelse(total > eps(FT), clamp(small / total, FT(0), FT(1)), FT(0.5))
-end
-
-# H9: Analytical fallback — when tables are not available, use the bulk
-# liquid-fraction heuristic with a minimum rain floor.
-@inline function psd_melting_rain_fraction(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
-                                            ::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
-                                            m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
-    FT = typeof(m_mean)
-    max_liquid_fraction = prp.maximum_liquid_fraction
-    fraction_to_coating = clamp_positive(max_liquid_fraction - Fl) / max_liquid_fraction
-    fraction_to_coating = clamp(fraction_to_coating, FT(0), FT(1))
-    min_to_rain = prp.minimum_complete_melting_fraction
-    fraction_to_coating = clamp(fraction_to_coating, FT(0), FT(1) - min_to_rain)
-    return 1 - fraction_to_coating
 end
 
 """

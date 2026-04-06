@@ -78,8 +78,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # Mean particle properties
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
 
-    # Self-collection kernel: dispatches to PSD-integrated table or
-    # mean-mass path. Returns E-free kernel (A × ΔV per particle pair).
+    # PSD-integrated self-collection kernel (E-free) from lookup table.
     AV_kernel = aggregation_kernel(p3.ice.collection.aggregation,
                                      m_mean, Fᶠ, ρᶠ, prp, p3)
 
@@ -149,9 +148,8 @@ factor for the exponential PSD.
     # Mean particle mass
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
 
-    # Collection kernel ⟨A×V⟩: dispatches to PSD-integrated table or
-    # mean-mass path with psd_correction. The RainCollectionNumber integral
-    # computes ∫ V(D) A(D) N'(D) dD with E=1, giving the geometric kernel.
+    # PSD-integrated collection kernel ⟨A×V⟩ from lookup table.
+    # Computes ∫ V(D) A(D) N'(D) dD with E=1 (geometric kernel).
     AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
                                                        m_mean, Fᶠ, ρᶠ, prp, p3)
 
@@ -355,8 +353,7 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
     qⁱ_total = max(qⁱ_eff + clamp_positive(zero(FT)), FT(1e-20))
     Fˡ = zero(FT)
 
-    # H6: Dispatch to Table 2 (double-PSD kernel) when available,
-    # otherwise fall back to Table 1 + analytical rain-DSD correction.
+    # H6: Use Table 2 (double-PSD kernel) for ice-rain mass collection.
     mass_kernel = _rain_riming_mass_kernel(lookup_table_2(p3),
         m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3)
 
@@ -370,22 +367,6 @@ end
                                            m_mean, λ_r, nʳ, Fᶠ, Fˡ, ρᶠ, prp, p3)
     mass_kernel, _, _ = ice_rain_collection_lookup(table2, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ)
     return mass_kernel
-end
-
-# H6: Fallback — use Table 1 ice-side kernel with analytical rain-DSD correction.
-@inline function _rain_riming_mass_kernel(::Nothing,
-                                           m_mean, λ_r, nʳ, Fᶠ, Fˡ, ρᶠ, prp, p3)
-    FT = typeof(m_mean)
-    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                       m_mean, Fᶠ, ρᶠ, prp, p3)
-    D_r_mean = 1 / λ_r
-    ρ_eff = (1 - Fᶠ) * prp.ice_effective_density_unrimed + Fᶠ * max(ρᶠ, FT(50))
-    D_i_mean = cbrt(6 * m_mean / (FT(π) * max(ρ_eff, FT(50))))
-    D_i_mean = clamp(D_i_mean, prp.ice_diameter_min, prp.ice_diameter_max)
-    r_ratio = D_r_mean / max(D_i_mean, FT(prp.ice_diameter_min))
-    rain_dsd_correction = 1 + 8 * r_ratio + 20 * r_ratio^2
-    rain_dsd_correction = ifelse(nʳ > FT(1), rain_dsd_correction, one(FT))
-    return AV_per_particle * rain_dsd_correction
 end
 
 """
@@ -451,7 +432,7 @@ independent PSD-integrated number collection rate.
 
     Fˡ = zero(FT)
 
-    # H6: Dispatch to Table 2 (number-weighted kernel) when available.
+    # H6: Use Table 2 (number-weighted kernel) for ice-rain number collection.
     number_kernel = _rain_riming_number_kernel(lookup_table_2(p3),
         m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3)
 
@@ -465,13 +446,6 @@ end
                                              m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3)
     _, number_kernel, _ = ice_rain_collection_lookup(table2, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ)
     return number_kernel
-end
-
-# H6: Fallback — use Table 1 ice-side kernel (same kernel for mass and number).
-@inline function _rain_riming_number_kernel(::Nothing,
-                                             m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3)
-    return collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                           m_mean, Fᶠ, ρᶠ, prp, p3)
 end
 
 """
@@ -620,18 +594,13 @@ end
 """
     shedding_integral(table, m_mean, Fᶠ, Fˡ, ρᶠ)
 
-Lookup the PSD-integrated shedding mass for D ≥ 9 mm particles.
-Dispatches on table type (TabulatedFunction4D or analytical fallback).
+Lookup the PSD-integrated shedding mass for D ≥ 9 mm particles
+from tabulated `TabulatedFunction4D`.
 """
 @inline function shedding_integral(table::TabulatedFunction4D, m_mean, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
     return table(log_m, Fᶠ, Fˡ, ρᶠ)
-end
-
-# Analytical fallback: zero shedding when table is not available
-@inline function shedding_integral(::Any, m_mean, Fᶠ, Fˡ, ρᶠ)
-    return zero(m_mean)
 end
 
 """

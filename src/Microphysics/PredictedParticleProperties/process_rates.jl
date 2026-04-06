@@ -228,18 +228,14 @@ See `quadrature.jl` for the table storage convention.
 end
 
 #####
-##### Table-dispatched helpers for PSD-integrated process rates
-#####
-##### These functions dispatch on whether a table field is a TabulatedFunction3D
-##### (use PSD-integrated lookup) or Any (use mean-mass analytical fallback).
-##### This pattern matches the existing _tabulated_mass_weighted_fall_speed dispatch.
+##### PSD-integrated process rate helpers (tabulated)
 #####
 
 """
     deposition_ventilation(vent, vent_e, m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
 
-Compute per-particle ventilation integral C(D) × f_v(D) for deposition.
-Dispatches on table type for PSD-integrated or mean-mass path.
+Compute per-particle ventilation integral C(D) × f_v(D) for deposition
+using PSD-integrated lookup tables.
 """
 @inline function deposition_ventilation(vent::TabulatedFunction4D,
                                           vent_e::TabulatedFunction4D,
@@ -255,35 +251,12 @@ Dispatches on table type for PSD-integrated or mean-mass path.
     return vent(log_m, Fᶠ, Fˡ, ρᶠ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ)
 end
 
-@inline function deposition_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
-                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
-    FT = typeof(m_mean)
-    D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, zero(FT), ρᶠ, prp)
-    C = capacitance(D_mean, state, thresholds)
-    # H7: Blend fall speed coefficients with rime fraction (matching collection_kernel_per_particle)
-    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
-    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
-    V = a_V * D_mean^b_V
-    # Schmidt number correction (Hall & Pruppacher 1976): Sc = nu / D_v
-    Sc = nu / max(D_v, FT(1e-30))
-    Re_term = sqrt(ρ_correction) * sqrt(V * D_mean / nu)
-    f_v = FT(0.65) + FT(0.44) * cbrt(Sc) * Re_term
-    return C * f_v
-end
-
 """
     melting_ventilation(vent, vent_e, m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v)
 
-Compute per-particle ventilation integral C(D) × f_v(D) for melting,
-blending ice (0.65, 0.44) and rain (0.78, 0.28) ventilation coefficients
-weighted by liquid fraction Fl.
-
-Analytical path applies the Fortran Fl-blended formula (H10):
-
-```math
-f_v = [(1-F_l) \\times 0.65 + F_l \\times 0.78]
-    + [(1-F_l) \\times 0.44 \\times Re_{ice} + F_l \\times 0.28 \\times Re_{rain}] \\times Sc^{1/3}
-```
+Compute per-particle ventilation integral C(D) × f_v(D) for melting
+using PSD-integrated lookup tables, blending ice (0.65, 0.44) and rain
+(0.78, 0.28) ventilation coefficients weighted by liquid fraction Fl.
 """
 @inline function melting_ventilation(vent::TabulatedFunction4D,
                                        vent_e::TabulatedFunction4D,
@@ -292,33 +265,11 @@ f_v = [(1-F_l) \\times 0.65 + F_l \\times 0.78]
     return vent(log_m, Fᶠ, Fl, ρᶠ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fl, ρᶠ)
 end
 
-@inline function melting_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
-                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
-    FT = typeof(m_mean)
-    D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, Fl, ρᶠ, prp)
-    C = capacitance(D_mean, state, thresholds)
-    # Ice fall speed (matching deposition_ventilation)
-    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
-    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
-    V_ice = a_V * D_mean^b_V
-    # Fortran create_p3_lookupTable_1.f90 uses the same piecewise rain fall-speed
-    # law here as in the rain lookup tables (via fallr1).
-    V_rain = rain_fall_speed(D_mean, ρ_correction)
-    Sc = nu / max(D_v, FT(1e-30))
-    Re_ice  = sqrt(ρ_correction) * sqrt(V_ice  * D_mean / max(nu, FT(1e-30)))
-    Re_rain = sqrt(V_rain * D_mean / max(nu, FT(1e-30)))
-    # Fortran: blend ice (0.65/0.44) and rain (0.78/0.28) by liquid fraction Fl
-    f_v = ((1 - Fl) * FT(0.65) + Fl * FT(0.78)) +
-          ((1 - Fl) * FT(0.44) * Re_ice + Fl * FT(0.28) * Re_rain) * cbrt(Sc)
-    return C * f_v
-end
-
 """
     collection_kernel_per_particle(coll, m_mean, Fᶠ, ρᶠ, prp)
 
 Compute per-particle collection kernel ⟨A × V⟩ for riming.
-Table path: returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle).
-Analytical path: returns A_mean × V_mean × psd_correction.
+Returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from lookup table.
 """
 @inline function collection_kernel_per_particle(coll::TabulatedFunction4D,
                                                   m_mean, Fᶠ, ρᶠ, prp, p3)
@@ -326,28 +277,11 @@ Analytical path: returns A_mean × V_mean × psd_correction.
     return coll(log_m, Fᶠ, zero(typeof(m_mean)), ρᶠ)
 end
 
-@inline function collection_kernel_per_particle(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp, p3)
-    FT = typeof(m_mean)
-    D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, zero(FT), ρᶠ, prp)
-    D_mean = clamp(D_mean, prp.ice_diameter_min, prp.ice_diameter_max)
-    # M9: Fortran P3 only includes ice particles with D >= 100 μm in the
-    # collection integral (nrwat threshold). Zero the kernel for sub-threshold
-    # particles to prevent tiny freshly-nucleated ice from riming.
-    below_threshold = D_mean < FT(100e-6)
-    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
-    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
-    V_mean = a_V * D_mean^b_V
-    A_mean = particle_area_ice_only(D_mean, state, thresholds)
-    psd_correction = prp.riming_psd_correction
-    return ifelse(below_threshold, zero(FT), A_mean * V_mean * psd_correction)
-end
-
 """
     aggregation_kernel(coll, m_mean, Fᶠ, ρᶠ, prp)
 
-Compute aggregation kernel for self-collection.
-Table path: uses PSD-integrated kernel from table.
-Analytical path: A_mean × ΔV at mean diameter.
+Compute aggregation kernel for self-collection using PSD-integrated
+kernel from lookup table.
 """
 @inline function aggregation_kernel(coll::TabulatedFunction4D,
                                       m_mean, Fᶠ, ρᶠ, prp, p3)
@@ -356,18 +290,6 @@ Analytical path: A_mean × ΔV at mean diameter.
     # (1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂
     # No E_agg — collection efficiency is applied by the caller.
     return coll(log_m, Fᶠ, zero(typeof(m_mean)), ρᶠ)
-end
-
-@inline function aggregation_kernel(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp, p3)
-    FT = typeof(m_mean)
-    D_mean, state, thresholds = mean_ice_particle_diameter(m_mean, Fᶠ, zero(FT), ρᶠ, prp)
-    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
-    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
-    V_mean = a_V * D_mean^b_V
-    A_mean = particle_area_ice_only(D_mean, state, thresholds)
-    ΔV = FT(0.5) * V_mean
-    # Factor of 0.5 for self-collection (half-integral convention, matching table)
-    return FT(0.5) * A_mean * ΔV
 end
 
 #####
@@ -496,12 +418,10 @@ The bulk rate integrates over the size distribution:
     ρ_air = density(T, P, q, thermodynamic_constants)
     ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ_air)
 
-    # Ventilation integral C(D) × f_v(D): dispatches to PSD-integrated
-    # table or mean-mass analytical path depending on p3.ice.deposition type.
+    # PSD-integrated ventilation integral C(D) × f_v(D) from lookup table.
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
                                     m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
-
 
     # Denominator: thermodynamic resistance terms (Mason 1971)
     # A = L_s/(K_a × T) × (L_s/(R_v × T) - 1)
@@ -1255,8 +1175,8 @@ computed by integrating the contribution of each process over the
 size distribution, properly accounting for how different processes
 affect particles of different sizes.
 
-When tabulated integrals are available via `tabulate(p3, arch)`, uses
-pre-computed lookup tables. Otherwise, falls back to proportional scaling.
+Uses pre-computed lookup tables via `tabulate(p3, arch)` for
+PSD-integrated sixth moment changes per process.
 
 # Arguments
 - `rates`: P3ProcessRates containing mass tendencies
@@ -1380,12 +1300,6 @@ end
     z_rate = z_rate + nucleation_sixth_moment_tendency(rates.nucleation_number, prp)
 
     return ρ * z_rate
-end
-
-# Fallback: use proportional scaling when integrals are not tabulated
-@inline function tabulated_z_tendency(ice::IceProperties, log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-                                       prp::ProcessRateParameters, sc_correction, p3)
-    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp)
 end
 
 @inline function nucleation_sixth_moment_tendency(nucleation_number, prp::ProcessRateParameters)

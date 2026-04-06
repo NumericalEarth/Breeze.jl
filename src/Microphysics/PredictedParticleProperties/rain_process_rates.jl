@@ -263,34 +263,3 @@ end
     #           = 2π × N_0 × I_evap × (S-1) / Φ,  I_evap = ∫ D × f_v × exp(-λD) dD
     return FT(2π) * N_0 * I_evap * (S - 1) / thermodynamic_factor
 end
-
-# Mean-mass fallback (used when evaporation field is not tabulated).
-# NOTE: The tabulated path (via `tabulate(p3, :rain, CPU())`) is recommended
-# for production use. It integrates D × f_v(D) × N(D) dD exactly over the
-# PSD using the physical piecewise Gunn-Kinzer/Beard fall speed law.
-# This fallback now uses the same piecewise Gunn-Kinzer/Beard formula
-# (rain_fall_speed in quadrature.jl) for consistency with the tabulated path
-# and terminal_velocities.jl.
-@inline function rain_evaporation_rate(::AbstractRainIntegral, qʳ, nʳ, S,
-                                        thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
-    ρ_water = p3.water_density
-
-    # Mean drop properties
-    m_mean = safe_divide(qʳ, nʳ, FT(1e-12))
-    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_water))
-
-    # Terminal velocity: 4-regime Gunn-Kinzer/Beard piecewise formula
-    ρ₀ = prp.reference_air_density
-    ρ_correction = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
-    V = rain_fall_speed(D_mean, ρ_correction)
-
-    # M18: Ventilation factor with T,P-dependent ν and Sc^(1/3) applied at runtime
-    Re_term = sqrt(V * D_mean / max(nu, FT(1e-10)))
-    Sc_cbrt = cbrt(nu / max(D_v, FT(1e-10)))
-    f_v = FT(RAIN_F1R) + FT(RAIN_F2R) * Sc_cbrt * Re_term
-
-    # Evaporation rate per drop (negative for evaporation)
-    dm_dt = FT(4π) * (D_mean / 2) * f_v * (S - 1) / thermodynamic_factor
-
-    return nʳ * dm_dt
-end
