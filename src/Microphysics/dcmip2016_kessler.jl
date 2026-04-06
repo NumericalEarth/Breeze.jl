@@ -190,8 +190,8 @@ $(TYPEDSIGNATURES)
 Return the names of prognostic microphysical fields for the Kessler scheme.
 
 # Fields
-- `:ρqᶜˡ`: Density-weighted cloud liquid mass fraction (\$kg/m^3\$).
-- `:ρqʳ`: Density-weighted rain mass fraction (\$kg/m^3\$).
+- `:ρqᶜˡ`: Density-weighted cloud liquid mass fraction (kg/m^3).
+- `:ρqʳ`: Density-weighted rain mass fraction (kg/m^3).
 """
 AtmosphereModels.prognostic_field_names(::DCMIP2016KM) = (:ρqᶜˡ, :ρqʳ)
 
@@ -311,7 +311,7 @@ $(TYPEDSIGNATURES)
 Return the liquid precipitation rate field for the DCMIP2016 Kessler microphysics scheme.
 
 The precipitation rate is computed internally by the Kessler kernel and stored in
-`μ.precipitation_rate`. It is defined as \$q^r \times v^t_{rain}\$ (rain mass fraction
+`μ.precipitation_rate`. It is defined as ``q^r v^t_{rain}`` (rain mass fraction
 times terminal velocity), matching the one-moment microphysics definition. Units are m/s.
 
 This implements the Breeze `precipitation_rate(model, phase)` interface, allowing
