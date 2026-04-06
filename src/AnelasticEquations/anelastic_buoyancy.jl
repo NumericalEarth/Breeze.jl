@@ -12,11 +12,11 @@ Compute the buoyancy force density for anelastic dynamics at cell center `(i, j,
 The anelastic buoyancy force is the gravitational force on the density anomaly:
 
 ```math
--g \\rho' = -g (\\rho - \\rho_r)
+-g ρ' = -g (ρ - ρ_r)
 ```
 
-where ``\\rho = p_r / (R^m T)`` is the in-situ density from the ideal gas law,
-and ``\\rho_r = p_r / (R^m_r T_r)`` is the reference density. Substituting:
+where ``ρ = p_r / (R^m T)`` is the in-situ density from the ideal gas law,
+and ``ρ_r = p_r / (R^m_r T_r)`` is the reference density. Substituting:
 
 ```math
 \\rho' = \\frac{p_r}{R^m T} - \\frac{p_r}{R^m_r T_r}
@@ -25,7 +25,7 @@ and ``\\rho_r = p_r / (R^m_r T_r)`` is the reference density. Substituting:
 ```
 
 This "perturbation form" avoids subtracting two large, nearly-equal numbers
-(``p_r / (R^m T) - \\rho_r``), which causes catastrophic cancellation when ``T \\approx T_r``.
+(``p_r / (R^m T) - ρ_r``), which causes catastrophic cancellation when ``T ≈ T_r``.
 Instead, the ratio ``R^m_r T_r / (R^m T)`` is close
 to 1, and the subtraction of 1 preserves relative precision.
 

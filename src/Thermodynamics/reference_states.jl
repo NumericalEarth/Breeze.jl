@@ -392,7 +392,7 @@ hydrostatic balance
 cᵖᵈ θᵣ^{face} \\frac{π₀[k] - π₀[k-1]}{Δz} = -g
 ```
 
-holds EXACTLY at every interior z-face. This is essential for the Exner pressure
+holds _exactly_ at every interior z-face. This is essential for the Exner pressure
 acoustic substepping formulation, where the vertical pressure gradient is computed
 as ``cᵖᵈ θᵥ ∂π'/∂z`` and the hydrostatic part must cancel to machine precision.
 

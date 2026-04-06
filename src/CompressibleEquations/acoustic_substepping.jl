@@ -260,12 +260,12 @@ $(TYPEDSIGNATURES)
 
 Compute the number of acoustic substeps from the horizontal acoustic CFL condition.
 
-Uses a conservative sound speed estimate `ℂᵃᶜ = √(γ Rᵈ Tᵣ)` with `Tᵣ = 300 K`
-(giving `ℂᵃᶜ ≈ 347 m/s`) and the minimum horizontal grid spacing. The vertical
+Uses a conservative sound speed estimate ``ℂᵃᶜ = (γ Rᵈ Tᵣ)^{1/2}`` with ``Tᵣ = 300\\;\\mathrm{K}``
+(giving ``ℂᵃᶜ ≈ 347\\;\\mathrm{m/s}``) and the minimum horizontal grid spacing. The vertical
 CFL is not needed because the w-π' coupling is vertically implicit.
 
-Following CM1, the substep count satisfies `Δτ · ℂᵃᶜ / Δx_min ≤ 1` where
-`Δτ = Δt / N` is the acoustic substep size. A safety factor of 1.2 is applied
+Following CM1, the substep count satisfies ``ℂᵃᶜ Δτ / Δx_{min} ≤ 1`` where
+``Δτ = Δt / N`` is the acoustic substep size. A safety factor of 1.2 is applied
 to ensure stability with the forward-backward splitting.
 """
 function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
@@ -455,11 +455,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Convert slow momentum tendencies (Gˢρu, Gˢρv, Gˢρw) to slow velocity
-tendencies (uten, vten, wten) and slow pressure tendency (Gˢπ).
+Convert slow momentum tendencies ``(Gˢ_{ρu}, Gˢ_{ρv}, Gˢ_{ρw})`` to slow velocity
+tendencies ``(Gˢ_u, Gˢ_v, Gˢ_w)`` and slow pressure tendency (``Gˢ_π``).
 
-The velocity tendency is: uten ≈ Gˢρu / ρ
-The pressure tendency is: Gˢπ = -u · ∇π
+- velocity tendency: ``Gˢ_{\\boldsymbol{u}} ≈ Gˢ_{ρ\\boldsymbol{u}} / ρ``
+- pressure tendency: ``Gˢ_π = -\\boldsymbol{u} \\boldsymbol{\\cdot} \\boldsymbol{\\nabla} π``
 
 These are frozen during the acoustic substep loop.
 """
@@ -643,7 +643,7 @@ arrays), we solve for π' at cell centers (matching the solver dimensions),
 then back-solve for w.
 
 The approach:
-1. Substitute ``w⁺[k] = w[k] + Δτ Gˢw[k] - Δτ (cᵖ θᵥ / Δz) δz(π'⁺)``
+1. Substitute ``w⁺[k] = w[k] + Δτ Gˢ_w[k] - Δτ (cᵖ θᵥ / Δz) δz(π'⁺)``
    into the pressure equation ``π'⁺ = π' + π'_{forcing} - α Δτ S ∂w⁺/∂z``
 2. This gives a tridiagonal system in π'⁺ at center locations
 3. After solving for π'⁺, back-solve for w⁺ from the new pressure gradient

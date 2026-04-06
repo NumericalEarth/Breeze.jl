@@ -147,13 +147,11 @@ function dynamics_pressure end
     buoyancy_forceᶜᶜᶜ(i, j, k, grid, dynamics, temperature,
                       specific_prognostic_moisture, microphysics, microphysical_fields, constants)
 
-Compute the buoyancy force density `ρ b` at cell center `(i, j, k)`.
-
-For anelastic dynamics, this returns `-g (ρ - ρᵣ)` where `ρᵣ` is the reference density.
-For compressible dynamics, this returns `-g ρ` directly.
+Compute the buoyancy force density ``ρ b`` at cell center `(i, j, k)`.
 
 This function is used in the vertical momentum equation to compute the gravitational
 forcing term.
+
 """
 function buoyancy_forceᶜᶜᶜ end
 
