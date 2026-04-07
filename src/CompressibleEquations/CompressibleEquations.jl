@@ -35,8 +35,8 @@ export
     VerticalAcousticSolver,
     vertical_acoustic_implicit_step!,
     prepare_acoustic_cache!,
-    acoustic_rk3_substep_loop!,
-    acoustic_substep_loop!
+    freeze_outer_step_state!,
+    acoustic_rk3_substep_loop!
 
 using DocStringExtensions: TYPEDEF, TYPEDSIGNATURES
 using Adapt: Adapt, adapt

@@ -79,10 +79,11 @@ Cell 0 is far from the perturbation center (x₀ = 100 km), so θ ≈ θ_base, �
 ### Stage 1, substep 1 (Δτ = Δt/3 = 13.33 s, single substep)
 
 Cell 0 is nearly unperturbed, so tend_rw = 0 at boundaries (k = 2, 10)
-and O(10⁻⁵) elsewhere.
+and O(10⁻⁵) elsewhere. Column headers below use Breeze names with the
+corresponding MPAS names in parentheses.
 
-| k | rw_p | rtheta_pp | rho_pp | tend_rw |
-|---|------|-----------|--------|---------|
+| k | ρw″ (`rw_p`) | ρθ″ (`rtheta_pp`) | ρ″ (`rho_pp`) | tend_rw |
+|---|---|---|---|---|
 | 2 | -7.679e-07 | 2.306e-06 | 7.524e-09 | 0.0 |
 | 3 | -8.975e-06 | -2.130e-05 | -6.659e-08 | -1.036e-05 |
 | 4 | 8.837e-07 | -1.660e-05 | -5.099e-08 | 1.284e-06 |
@@ -95,8 +96,8 @@ and O(10⁻⁵) elsewhere.
 
 ### Stage 1, substep 2 (same stage, accumulated perturbations)
 
-| k | rw_p | rtheta_pp | rho_pp |
-|---|------|-----------|--------|
+| k | ρw″ (`rw_p`) | ρθ″ (`rtheta_pp`) | ρ″ (`rho_pp`) |
+|---|---|---|---|
 | 2 | -3.076e-06 | 5.768e-06 | 1.879e-08 |
 | 3 | -9.222e-06 | -2.355e-05 | -7.131e-08 |
 | 4 | -1.307e-07 | -1.626e-05 | -4.747e-08 |
@@ -112,8 +113,8 @@ and O(10⁻⁵) elsewhere.
 Note: tend_rw is now slightly nonzero at k = 2 (−4.1e-08) — from the
 state change during stage 1.
 
-| k | rw_p | rtheta_pp | rho_pp | tend_rw |
-|---|------|-----------|--------|---------|
+| k | ρw″ (`rw_p`) | ρθ″ (`rtheta_pp`) | ρ″ (`rho_pp`) | tend_rw |
+|---|---|---|---|---|
 | 2 | -8.492e-07 | 2.332e-06 | 7.593e-09 | -4.101e-08 |
 | 3 | -9.290e-06 | -2.133e-05 | -6.647e-08 | -1.056e-05 |
 | 4 | 4.377e-07 | -1.666e-05 | -5.098e-08 | 1.012e-06 |
@@ -150,8 +151,10 @@ Cell near perturbation center (cell 399, x = 100 km):
 
 ## Breeze comparison target
 
-Reproduce the stage 1, substep 1 values above (rw_p, rtheta_pp, rho_pp,
-cofwz, cofwr, tend_rw) at cell (1, 1) of a matching RectilinearGrid.
+Reproduce the stage 1, substep 1 values above (`ρw″`/`rw_p`, `ρθ″`/`rtheta_pp`,
+`ρ″`/`rho_pp`, `cofwz`, `cofwr`, `tend_rw`) at cell (1, 1) of a matching
+RectilinearGrid. See `mpas_breeze_naming.md` for the full Breeze ↔ MPAS
+variable mapping.
 
 The grid differences (hex vs rectilinear, 1200 cells vs 300 cells) mean
 exact agreement is not expected for horizontal operators, but the vertical

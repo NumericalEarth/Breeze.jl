@@ -90,7 +90,6 @@ model = AtmosphereModel(grid; dynamics, coriolis,
 set!(model; θ=θ_ic, u=u_ic, ρ=ρ_ic)
 
 simulation = Simulation(model; Δt, stop_time, verbose=false)
-add_polar_filter!(simulation; threshold_latitude=60)
 
 add_callback!(simulation, sim -> @info(@sprintf("t=%s, max|w|=%.3f, max|u|=%.1f",
     prettytime(sim), maximum(abs, sim.model.velocities.w),

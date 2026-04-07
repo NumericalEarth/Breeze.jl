@@ -233,13 +233,13 @@ $(TYPEDSIGNATURES)
 
 Return the default timestepper for `CompressibleDynamics` based on its `time_discretization`.
 
-- [`SplitExplicitTimeDiscretization`](@ref): Returns `:AcousticSSPRungeKutta3` for acoustic substepping
+- [`SplitExplicitTimeDiscretization`](@ref): Returns `:AcousticRungeKutta3` for acoustic substepping
 - [`ExplicitTimeStepping`](@ref): Returns `:SSPRungeKutta3` for standard explicit time-stepping
 """
 AtmosphereModels.default_timestepper(dynamics::CompressibleDynamics) =
     default_timestepper(dynamics.time_discretization)
 
-default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticSSPRungeKutta3
+default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticRungeKutta3
 default_timestepper(::ExplicitTimeStepping) = :SSPRungeKutta3
 default_timestepper(::VerticallyImplicitTimeStepping) = :SSPRungeKutta3
 
