@@ -170,7 +170,7 @@ Microphysics schemes should implement the gridless version, not this one.
 - `μ_fields`: NamedTuple of microphysical fields
 - `ρ`: Local density (scalar)
 - `𝒰`: Thermodynamic state
-- `velocities`: Velocity fields (u, v, w). Velocities are interpolated to cell centers
+- `velocities`: Velocity fields ``(u, v, w)``. Velocities are interpolated to cell centers
                 for use by microphysics schemes (e.g., aerosol activation uses vertical velocity).
 
 # Returns
@@ -278,7 +278,7 @@ $(TYPEDSIGNATURES)
 
 Return the prognostic specific moisture field for `model`.
 
-This is `qᵛ` for non-equilibrium schemes or `qᵉ` for saturation adjustment schemes.
+This is ``qᵛ`` for non-equilibrium schemes or ``qᵉ`` for saturation adjustment schemes.
 """
 specific_prognostic_moisture(model) = model.microphysical_fields[moisture_specific_name(model.microphysics)]
 
@@ -287,7 +287,7 @@ $(TYPEDSIGNATURES)
 
 Return the specific humidity (vapor mass fraction) field for the given `model`.
 
-This always returns the actual vapor field `qᵛ` from the microphysical fields,
+This always returns the actual vapor field ``qᵛ`` from the microphysical fields,
 regardless of microphysics scheme.
 """
 specific_humidity(model) = model.microphysical_fields.qᵛ
@@ -456,14 +456,14 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Convert total specific moisture `qᵗ` to the scheme-dependent specific moisture `qᵛᵉ`
-by subtracting the appropriate condensate from the microphysical state `ℳ`.
+Convert total specific moisture ``qᵗ`` to the scheme-dependent specific moisture ``qᵛᵉ``
+by subtracting the appropriate condensate from the microphysical state ``ℳ``.
 
 For non-equilibrium schemes, ``qᵛᵉ = qᵛ = qᵗ - qˡ`` (subtract all condensate).
 For saturation adjustment schemes, ``qᵛᵉ = qᵉ = qᵗ - qʳ`` (subtract only precipitation).
 For `Nothing` microphysics, ``qᵛᵉ = qᵗ`` (all moisture is vapor).
 
-This is used by parcel models that store total moisture `qᵗ` as the prognostic
+This is used by parcel models that store total moisture ``qᵗ`` as the prognostic
 variable, to produce the correct input for [`moisture_fractions`](@ref).
 """
 @inline specific_prognostic_moisture_from_total(::Nothing, qᵗ, ℳ) = qᵗ
@@ -477,9 +477,9 @@ variable, to produce the correct input for [`moisture_fractions`](@ref).
 $(TYPEDSIGNATURES)
 
 Compute [`MoistureMassFractions`](@ref) from a microphysical state `ℳ` and
-scheme-dependent specific moisture `qᵛᵉ`.
+scheme-dependent specific moisture ``qᵛᵉs``.
 
-The input `qᵛᵉ` is the scheme-dependent specific moisture: vapor for non-equilibrium
+The input ``qᵛᵉ`` is the scheme-dependent specific moisture: vapor for non-equilibrium
 schemes, or equilibrium moisture (``qᵉ = qᵛ + qᶜˡ``) for saturation adjustment schemes.
 
 This is the state-based (gridless) interface for computing moisture fractions.
@@ -613,7 +613,7 @@ $(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
 
-The surface precipitation flux is `wʳ * ρqʳ` at the bottom face (`k = 1`), representing
+The surface precipitation flux is ``wʳ ρqʳ`` at the bottom face (`k = 1`), representing
 the rate at which rain mass leaves the domain through the bottom boundary.
 
 Units: kg/m²/s (positive = downward flux out of domain)

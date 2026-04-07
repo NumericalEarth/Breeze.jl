@@ -86,7 +86,7 @@ function collect_prognostic_fields end
 """
     compute_auxiliary_thermodynamic_variables!(formulation, dynamics, i, j, k, grid)
 
-Compute auxiliary thermodynamic variables from prognostic fields at grid point (i, j, k).
+Compute auxiliary thermodynamic variables from prognostic fields at grid point `(i, j, k)`.
 """
 function compute_auxiliary_thermodynamic_variables! end
 
