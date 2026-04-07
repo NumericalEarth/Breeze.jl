@@ -33,7 +33,7 @@ end
 arch = GPU()
 Oceananigans.defaults.FloatType = Float32
 
-# Simulation S [Moeng1994](@citet)
+# Simulation "S" (shear-driven ABL) domain setup from [Moeng1994](@citet)
 Nx = Ny = Nz = 96
 x = y = (0, 3000)
 z = (0, 1000)
@@ -55,7 +55,7 @@ reference_state = ReferenceState(grid, constants,
 
 dynamics = AnelasticDynamics(reference_state)
 
-# capping inversion [Moeng1994](cite)
+# capping inversion for simulation "S" in [Moeng1994](citet)
 Δz = grid.z.Δᵃᵃᶜ
 zi  = 468  # m
 zi2 = zi + 6Δz  # m
@@ -72,7 +72,11 @@ zi2 = zi + 6Δz  # m
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{Float32} |> zero
 ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
 
-u★ = 0.5  # m/s, simulation "S" in [Moeng1994](@citet)
+# For testing, we prescribe the surface shear stress. In practice, however,
+# this is not known a priori. A surface layer scheme (i.e., a wall model) will
+# dynamically update u★ based on environmental conditions, including surface
+# roughness and heat fluxes.
+u★ = 0.5  # m/s, _result_ from simulation "S" result from [Moeng1994](@citet)
 @inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
 @inline ρv_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρv / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
 
@@ -111,7 +115,7 @@ end
 
 coriolis = FPlane(f=1e-4)
 
-uᵍ, vᵍ = 15, 0  # m/s, case "S" in [Moeng1994](@citet)
+uᵍ, vᵍ = 15, 0  # m/s, simulation "S" in [Moeng1994](@citet)
 geostrophic = geostrophic_forcings(uᵍ, vᵍ)
 
 # ## Assembling all the forcings
