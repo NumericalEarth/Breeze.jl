@@ -906,14 +906,11 @@ end
 ##### Per-variable tendency dispatchers (all delegate to wpne2m_tendencies)
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    return wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
-end
+@inline AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants) =
+    wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    return wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρnʳ
-end
+@inline AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants) =
+    wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρnʳ
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᵃ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    return wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρnᵃ
-end
+@inline AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᵃ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants) =
+    wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρnᵃ
