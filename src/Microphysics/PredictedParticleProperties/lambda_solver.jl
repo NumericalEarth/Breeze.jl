@@ -1401,7 +1401,11 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
         λ = exp(logλ)
         λ = enforce_diameter_bounds(λ, μ, bounds)
 
-        N₀ = intercept_parameter(N_ice, μ, log(λ))
+        # M11: Use mass-constrained N₀ (matching two-moment path and Fortran).
+        logλ_final = log(λ)
+        log_M_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ_final;
+                                         liquid_fraction)
+        N₀ = L_ice / exp(log_M_over_N₀)
         return IceDistributionParameters(N₀, λ, μ)
     end
 
@@ -1414,8 +1418,13 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
     λ = exp(logλ)
     λ = enforce_diameter_bounds(λ, μ, bounds)
 
-    # Compute N₀ from normalization
-    N₀ = intercept_parameter(N_ice, μ, log(λ))
+    # M11: Use mass-constrained N₀ (matching two-moment path and Fortran).
+    # After λ clamping, number-normalized N₀ = N × λ^(μ+1)/Γ(μ+1) violates
+    # the mass constraint. Mass-constrained N₀ ensures L = N₀ × ∫m(D)D^μ e^{-λD}dD.
+    logλ_final = log(λ)
+    log_M_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ_final;
+                                     liquid_fraction)
+    N₀ = L_ice / exp(log_M_over_N₀)
 
     return IceDistributionParameters(N₀, λ, μ)
 end

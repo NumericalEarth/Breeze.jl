@@ -1476,8 +1476,14 @@ end
 
 @inline function nucleation_sixth_moment_tendency(nucleation_number, prp::ProcessRateParameters)
     FT = typeof(nucleation_number)
-    D_nuc_cubed = 6 * prp.nucleated_ice_mass / (FT(π) * prp.pure_ice_density)
-    return nucleation_number * D_nuc_cubed^2
+    # M10: Fortran update_zi_proc2 uses G(μ_new) × M3² / N where μ_new = μ_r = 0
+    # (exponential rain PSD). G(0) = (6×5×4)/(3×2×1) = 20.
+    # Fortran also uses ρ_i = 900 kg/m³ (not pure_ice_density = 917).
+    ρ_i_nuc = FT(900)
+    D_nuc_cubed = 6 * prp.nucleated_ice_mass / (FT(π) * ρ_i_nuc)
+    # G(μ=0) × N × D⁶ = 20 × N × D³²
+    G_nuc = g_of_mu(zero(FT))
+    return G_nuc * nucleation_number * D_nuc_cubed^2
 end
 
 """

@@ -74,19 +74,27 @@ where:
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
     q_sat0 = ε * e_s0 / max(P - e_s0, FT(1))
 
-    # Mean particle properties
-    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
-
     # H10: Liquid fraction for Fl-blended ventilation.
     # Fl = qʷⁱ / (qⁱ + qʷⁱ): fraction of ice-particle mass that is liquid.
     qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(1e-20))
     Fl = clamp_positive(qʷⁱ) / qⁱ_total
+
+    # M8: Table lookup uses total mass per particle (Fortran qitot/nitot),
+    # not dry-only mass, because tables are indexed by total mass.
+    m_mean = safe_divide(qⁱ_total, nⁱ_eff, FT(1e-12))
     ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
 
-    # H10: PSD-integrated ventilation integral C(D) × f_v(D) with Fl-blended coefficients.
-    C_fv = melting_ventilation(p3.ice.deposition.ventilation,
-                                p3.ice.deposition.ventilation_enhanced,
-                                m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
+    # M9: Use dry-ice PSD ventilation tables (small + large, Fortran f1pr24-f1pr27)
+    # for melting. The total Ventilation/VentilationEnhanced tables use wet-ice PSD
+    # and are not appropriate for melting (they are not flagged as melting integrals
+    # during table generation, so they don't use the dry-ice PSD from the M5 fix).
+    dep = p3.ice.deposition
+    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
+    sc_corr = ventilation_sc_correction(nu, D_v, ρ_correction)
+    C_fv = (dep.small_ice_ventilation_constant(log_m, Fᶠ, Fl, ρᶠ, μ) +
+            sc_corr * dep.small_ice_ventilation_reynolds(log_m, Fᶠ, Fl, ρᶠ, μ)) +
+           (dep.large_ice_ventilation_constant(log_m, Fᶠ, Fl, ρᶠ, μ) +
+            sc_corr * dep.large_ice_ventilation_reynolds(log_m, Fᶠ, Fl, ρᶠ, μ))
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: K_a × (T - T₀)
@@ -163,8 +171,9 @@ Requires tabulated small/large ice ventilation integrals.
     # ventilation integrals (Fortran f1pr24-f1pr27).
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
-    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
     qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(1e-20))
+    # M8: Table lookup uses total mass per particle (Fortran qitot/nitot).
+    m_mean = safe_divide(qⁱ_total, nⁱ_eff, FT(1e-12))
     Fl = clamp_positive(qʷⁱ) / qⁱ_total
     ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
     nu = transport.nu

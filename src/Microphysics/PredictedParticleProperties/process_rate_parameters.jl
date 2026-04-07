@@ -82,6 +82,7 @@ struct ProcessRateParameters{FT}
     splintering_temperature_high :: FT       # T_high [K]
     splintering_temperature_peak :: FT       # T_peak [K]
     splintering_rate :: FT                   # splinters per kg rime
+    splintering_crystal_mass :: FT           # mass per HM splinter [kg] (Fortran Dinit_HM = 10 μm)
     splintering_diameter_threshold :: FT     # D_min [m] for HM splintering
     splintering_liquid_fraction_max :: FT    # Fˡ max for HM splintering
     splintering_surface_temperature_max :: FT # warm-surface shutoff [K]
@@ -276,6 +277,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         splintering_temperature_high = 270.15,
         splintering_temperature_peak = 268.15,
         splintering_rate = 3.5e8,
+        # C6: Fortran Dinit_HM = 10e-6 m; mass = π/6 × 900 × (10e-6)³ = 4.712e-13 kg
+        splintering_crystal_mass = π/6 * 900 * (10e-6)^3,
         splintering_diameter_threshold = 250e-6,
         splintering_liquid_fraction_max = 0.1,
         splintering_surface_temperature_max = 282.0,
@@ -401,6 +404,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(splintering_temperature_high),
         FT(splintering_temperature_peak),
         FT(splintering_rate),
+        FT(splintering_crystal_mass),
         FT(splintering_diameter_threshold),
         FT(splintering_liquid_fraction_max),
         FT(splintering_surface_temperature_max),

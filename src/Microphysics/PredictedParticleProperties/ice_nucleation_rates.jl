@@ -368,7 +368,9 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
     T_high = prp.splintering_temperature_high
     T_peak = prp.splintering_temperature_peak
     c_splinter = prp.splintering_rate
-    mᵢ₀ = prp.nucleated_ice_mass
+    # C6: Use Hallett-Mossop splinter crystal mass (Fortran Dinit_HM = 10 μm),
+    # NOT the nucleated ice mass mi0 (D = 2 μm). Splinters are 125× heavier.
+    mᵢ₀ = prp.splintering_crystal_mass
 
     warm_branch = clamp((T - T_low) / (T_peak - T_low), zero(FT), one(FT))
     cold_branch = clamp((T_high - T) / (T_high - T_peak), zero(FT), one(FT))
