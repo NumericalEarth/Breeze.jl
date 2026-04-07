@@ -18,6 +18,7 @@ using Oceananigans.Units
 using CUDA
 using Printf
 using Random
+using CairoMakie
 
 Random.seed!(42)
 if CUDA.functional()
@@ -97,8 +98,8 @@ set!(ρθˡⁱᵣ, z -> θᵣ(z))
 set!(ρθˡⁱᵣ, ρᵣ * ρθˡⁱᵣ)
 ρθˡⁱᵣ_data = interior(ρθˡⁱᵣ, 1, 1, :)
 @inline function ρθ_sponge_fun(i, j, k, grid, clock, model_fields, p)
-    zc = znode(k, grid, Center())
-    return p.rate * p.mask(0, 0, zc) * (@inbounds p.target[k] - model_fields.ρθ[i, j, k])
+    zᶜ = znode(k, grid, Center())
+    return p.rate * p.mask(0, 0, zᶜ) * (@inbounds p.target[k] - model_fields.ρθ[i, j, k])
 end
 
 ρθ_sponge = Forcing(
@@ -177,7 +178,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(100))
+add_callback!(simulation, progress, IterationInterval(1000))
 
 # Output averaged products for calculating variances
 outputs = merge(model.velocities, model.tracers, (; θ, νₑ,
@@ -185,8 +186,9 @@ outputs = merge(model.velocities, model.tracers, (; θ, νₑ,
                                                     uw = u*w, vw = v*w, θw = θ*w))
 avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
-filename = "abl_averages.jld2"
-simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs; filename,
+avg_filename = "abl_averages.jld2"
+simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
+                                                  filename = avg_filename,
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
@@ -219,3 +221,205 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
 @info "Running ABL simulation..."
 run!(simulation)
 
+## ============================================================================
+## ============================================================================
+## ============================================================================
+
+uts  = FieldTimeSeries(avg_filename, "u")
+vts  = FieldTimeSeries(avg_filename, "v")
+wts  = FieldTimeSeries(avg_filename, "w")
+θts  = FieldTimeSeries(avg_filename, "θ")
+uuts = FieldTimeSeries(avg_filename, "uu")
+vvts = FieldTimeSeries(avg_filename, "vv")
+wwts = FieldTimeSeries(avg_filename, "ww")
+uwts = FieldTimeSeries(avg_filename, "uw")
+vwts = FieldTimeSeries(avg_filename, "vw")
+θwts = FieldTimeSeries(avg_filename, "θw")
+νₑts = FieldTimeSeries(avg_filename, "νₑ")
+
+times = uts.times
+Nt = length(times)
+zᶜ = znodes(uts)  # cell centers (Nz)
+zⁿ = znodes(uts.grid, Center(), Center(), Face())    # face centers (Nz+1)
+
+Nz = length(zᶜ)
+Δz = diff(zᶜ)
+
+## ---- Compute diagnostics at each saved time ----
+WS_mean  = zeros(Nz, Nt)
+WD_mean = zeros(Nz, Nt)
+θ_mean   = zeros(Nz, Nt)
+
+uu_var = zeros(Nz, Nt)
+vv_var = zeros(Nz, Nt)
+ww_var = zeros(Nz+1, Nt)
+
+uw_res = zeros(Nz, Nt)
+vw_res = zeros(Nz, Nt)
+θw_res = zeros(Nz, Nt)
+uw_sgs = zeros(Nz, Nt)
+vw_sgs = zeros(Nz, Nt)
+θw_sgs = zeros(Nz, Nt)
+
+ρᵣ_vec = interior(ρᵣ, 1, 1, :)
+
+for n in 1:Nt
+    u_n    = interior(uts[n],  1, 1, :)
+    v_n    = interior(vts[n],  1, 1, :)
+    w_raw  = interior(wts[n],  1, 1, :)
+    θ_n    = interior(θts[n],  1, 1, :)
+    uu_n   = interior(uuts[n], 1, 1, :)
+    vv_n   = interior(vvts[n], 1, 1, :)
+    ww_raw = interior(wwts[n], 1, 1, :)
+    uw_n   = interior(uwts[n], 1, 1, :)
+    vw_n   = interior(vwts[n], 1, 1, :)
+    θw_n   = interior(θwts[n], 1, 1, :)
+    νₑ_n   = interior(νₑts[n], 1, 1, :)
+
+    ## Interpolate face fields to cell centers
+    w_n  = @views (w_raw[1:end-1] .+ w_raw[2:end]) ./ 2
+
+    ## Fig 1: Mean profiles
+    WS_mean[:, n]  .= sqrt.(u_n.^2 .+ v_n.^2)
+    WD_mean[:, n] .= mod.(270 .- atand.(v_n, u_n), 360)
+    θ_mean[:, n]   .= θ_n
+
+    ## Fig 2: Velocity variances normalized by u★²
+    uu_var[:, n] .= (uu_n .- u_n.^2) ./ u★^2
+    vv_var[:, n] .= (vv_n .- v_n.^2) ./ u★^2
+    ww_var[:, n] .= (ww_raw .- w_raw.^2) ./ u★^2
+
+    ## Vertical derivatives for SGS fluxes
+    ∂z_u = similar(u_n)
+    ∂z_v = similar(v_n)
+    ∂z_θ = similar(θ_n)
+    ∂z_u[1] = (u_n[2] - u_n[1]) / Δz[1]
+    ∂z_v[1] = (v_n[2] - v_n[1]) / Δz[1]
+    ∂z_θ[1] = (θ_n[2] - θ_n[1]) / Δz[1]
+    ∂z_u[end] = (u_n[end] - u_n[end-1]) / Δz[end]
+    ∂z_v[end] = (v_n[end] - v_n[end-1]) / Δz[end]
+    ∂z_θ[end] = (θ_n[end] - θ_n[end-1]) / Δz[end]
+    for k in 2:Nz-1
+        ∂z_u[k] = (u_n[k+1] - u_n[k-1]) / (Δz[k-1] + Δz[k])
+        ∂z_v[k] = (v_n[k+1] - v_n[k-1]) / (Δz[k-1] + Δz[k])
+        ∂z_θ[k] = (θ_n[k+1] - θ_n[k-1]) / (Δz[k-1] + Δz[k])
+    end
+
+    ## Fig 3: Resolved fluxes (momentum normalized by ρ₀u★²)
+    uw_res[:, n] .= ρᵣ_vec .* (uw_n .- u_n .* w_n) ./ (ρ₀ * u★^2)
+    vw_res[:, n] .= ρᵣ_vec .* (vw_n .- v_n .* w_n) ./ (ρ₀ * u★^2)
+    θw_res[:, n] .= θw_n .- θ_n .* w_n
+
+    ## Fig 3: SGS modeled fluxes (ρᵣ νₑ dU/dz normalized by ρ₀u★²; (νₑ/Pr_t) dθ/dz)
+    uw_sgs[:, n] .= -ρᵣ_vec .* νₑ_n .* ∂z_u ./ (ρ₀ * u★^2)
+    vw_sgs[:, n] .= -ρᵣ_vec .* νₑ_n .* ∂z_v ./ (ρ₀ * u★^2)
+    θw_sgs[:, n] .= -νₑ_n ./ closure.Pr .* ∂z_θ
+end
+
+## ---- Color map for time ----
+cmap = cgrad(:viridis)
+colors = [cmap[(n-1)/max(Nt-1, 1)] for n in 1:Nt]
+labels = [n == 1 ? "0–1 hr" : "$(n-1)–$n hr" for n in 1:Nt]
+
+# FINALLY...
+
+## ============================================================
+## Figure 1: Mean profiles (wind speed, wind direction, θ)
+## ============================================================
+fig1 = Figure(size=(800, 400), fontsize=14)
+
+ax1a = Axis(fig1[1, 1], xlabel="√(U² + V²) (m/s)", ylabel="z (m)",
+            title="Horizontal wind speed")
+for n in 1:Nt
+    lines!(ax1a, WS_mean[:, n], zᶜ, color=colors[n], label=labels[n])
+end
+
+ax1b = Axis(fig1[1, 2], xlabel="WD (° from N)", ylabel="z (m)",
+            title="Wind direction")
+for n in 1:Nt
+    lines!(ax1b, WD_mean[:, n], zᶜ, color=colors[n])
+end
+
+ax1c = Axis(fig1[1, 3], xlabel="θ (K)", ylabel="z (m)",
+            title="Potential temperature")
+for n in 1:Nt
+    lines!(ax1c, θ_mean[:, n], zᶜ, color=colors[n])
+end
+
+linkyaxes!(ax1a, ax1b, ax1c)
+hideydecorations!(ax1b, grid=false)
+hideydecorations!(ax1c, grid=false)
+
+Legend(fig1[1, 4], ax1a, "Time", framevisible=false)
+save("nabl_mean_profiles.png", fig1)
+@info "Saved nabl_mean_profiles.png"
+
+## ============================================================
+## Figure 2: Velocity variances normalized by u★²
+## ============================================================
+fig2 = Figure(size=(800, 400), fontsize=14)
+
+ax2a = Axis(fig2[1, 1], xlabel="⟨u′u′⟩ / u★²", ylabel="z (m)",
+            title="u variance")
+for n in 1:Nt
+    lines!(ax2a, uu_var[:, n], zᶜ, color=colors[n], label=labels[n])
+end
+
+ax2b = Axis(fig2[1, 2], xlabel="⟨v′v′⟩ / u★²", ylabel="z (m)",
+            title="v variance")
+for n in 1:Nt
+    lines!(ax2b, vv_var[:, n], zᶜ, color=colors[n])
+end
+
+ax2c = Axis(fig2[1, 3], xlabel="⟨w′w′⟩ / u★²", ylabel="z (m)",
+            title="w variance")
+for n in 1:Nt
+    lines!(ax2c, ww_var[:, n], zⁿ, color=colors[n])
+end
+
+Legend(fig2[1, 4], ax2a, "Time", framevisible=false)
+save("nabl_velocity_variances.png", fig2)
+@info "Saved nabl_velocity_variances.png"
+
+## ============================================================
+## Figure 3: Resolved and SGS fluxes
+## ============================================================
+fig3 = Figure(size=(1200, 450), fontsize=14)
+
+ax3a = Axis(fig3[1, 1], xlabel="τˣ / ρ₀u★²", ylabel="z (m)",
+            title="x-momentum flux")
+for n in 1:Nt
+    lines!(ax3a, uw_res[:, n] .+ uw_sgs[:, n], zᶜ, color=colors[n], label=labels[n])
+    lines!(ax3a, uw_res[:, n], zᶜ, color=colors[n], linestyle=:dash)
+    lines!(ax3a, uw_sgs[:, n], zᶜ, color=colors[n], linestyle=:dot)
+end
+vlines!(ax3a, 0, color=:grey, linewidth=0.5)
+
+ax3b = Axis(fig3[1, 2], xlabel="τʸ / ρ₀u★²", ylabel="z (m)",
+            title="y-momentum flux")
+for n in 1:Nt
+    lines!(ax3b, vw_res[:, n] .+ vw_sgs[:, n], zᶜ, color=colors[n])
+    lines!(ax3b, vw_res[:, n], zᶜ, color=colors[n], linestyle=:dash)
+    lines!(ax3b, vw_sgs[:, n], zᶜ, color=colors[n], linestyle=:dot)
+end
+vlines!(ax3b, 0, color=:grey, linewidth=0.5)
+
+ax3c = Axis(fig3[1, 3], xlabel="Jᶿ (K m/s)", ylabel="z (m)",
+            title="Potential temperature flux")
+for n in 1:Nt
+    lines!(ax3c, θw_res[:, n] .+ θw_sgs[:, n], zᶜ, color=colors[n])
+    lines!(ax3c, θw_res[:, n], zᶜ, color=colors[n], linestyle=:dash)
+    lines!(ax3c, θw_sgs[:, n], zᶜ, color=colors[n], linestyle=:dot)
+end
+vlines!(ax3c, 0, color=:grey, linewidth=0.5)
+
+## Legends: line style (inside panel a) and time (right)
+style_entries = [LineElement(color=:black, linestyle=:solid),
+                 LineElement(color=:black, linestyle=:dash),
+                 LineElement(color=:black, linestyle=:dot)]
+axislegend(ax3a, style_entries, ["total", "resolved", "SGS"],
+           position=:lt, framevisible=false)
+Legend(fig3[1, 4], ax3a, "Time", framevisible=false)
+
+save("nabl_fluxes.png", fig3)
+@info "Saved nabl_fluxes.png"
