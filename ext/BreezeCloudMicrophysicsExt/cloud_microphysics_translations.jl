@@ -289,7 +289,7 @@ carried by the warm hydrometeor melts additional snow. The factor ``α`` gives
 the mass ratio of melted snow to accreted warm hydrometeor mass:
 
 ```math
-α = cˡ (T - T_{freeze}) / ℒf
+α = cˡ (T - T_{freeze}) / ℒ_f
 ```
 
 This is a translation of `CloudMicrophysics.BulkMicrophysicsTendencies.warm_accretion_melt_factor`

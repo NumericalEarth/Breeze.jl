@@ -61,8 +61,8 @@ Return the non-hydrostatic pressure anomaly for `AnelasticDynamics`, in Pa.
 
 !!! note "Kinematic pressure versus pressure"
 
-    The internal field stores the kinematic pressure ``p' / ρᵣ`` (in m²/s²);
-    this function returns ``p'`` in Pa.
+    The internal field stores the kinematic pressure anomaly, i.e., ``p' / ρᵣ``
+    (in m²/s²); this function returns ``p'`` in Pa.
 """
 function AtmosphereModels.pressure_anomaly(dynamics::AnelasticDynamics)
     ρᵣ = dynamics.reference_state.density
@@ -74,8 +74,8 @@ end
 $(TYPEDSIGNATURES)
 
 Return the total pressure for `AnelasticDynamics`, in Pa.
-This is `p = p̄ + p'`, where `p̄` is the hydrostatic reference pressure
-and `p'` is the non-hydrostatic pressure anomaly.
+That is ``p = p̄ + p'``, where ``p̄`` is the hydrostatic reference pressure
+and ``p'`` is the non-hydrostatic pressure anomaly.
 """
 function AtmosphereModels.total_pressure(dynamics::AnelasticDynamics)
     p̄ = mean_pressure(dynamics)

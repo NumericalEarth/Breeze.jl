@@ -61,13 +61,14 @@ $(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the precipitation flux at the bottom boundary.
 
-The surface precipitation flux is `wʳ * ρqʳ` at `k = 1`(bottom face), representing
+The surface precipitation flux is ``wʳ ρqʳ`` at `k = 1` (bottom face), representing
 the rate at which rain mass leaves the domain through the bottom boundary.
 
 Units: kg/m²/s (positive = downward, out of domain)
 
-Note: The returned value is positive when rain is falling out of the domain
-(the terminal velocity `wʳ` is negative, and we flip the sign).
+!!! note "Sign convention"
+    The returned value is positive when rain is falling out of the domain
+    (the terminal velocity ``wʳ`` is negative, and we flip the sign).
 """
 function AtmosphereModels.surface_precipitation_flux(model, microphysics::OneMomentCloudMicrophysics)
     grid = model.grid

@@ -459,9 +459,9 @@ $(TYPEDSIGNATURES)
 Convert total specific moisture `qᵗ` to the scheme-dependent specific moisture `qᵛᵉ`
 by subtracting the appropriate condensate from the microphysical state `ℳ`.
 
-For non-equilibrium schemes, `qᵛᵉ = qᵛ = qᵗ - qˡ` (subtract all condensate).
-For saturation adjustment schemes, `qᵛᵉ = qᵉ = qᵗ - qʳ` (subtract only precipitation).
-For `Nothing` microphysics, `qᵛᵉ = qᵗ` (all moisture is vapor).
+For non-equilibrium schemes, ``qᵛᵉ = qᵛ = qᵗ - qˡ`` (subtract all condensate).
+For saturation adjustment schemes, ``qᵛᵉ = qᵉ = qᵗ - qʳ`` (subtract only precipitation).
+For `Nothing` microphysics, ``qᵛᵉ = qᵗ`` (all moisture is vapor).
 
 This is used by parcel models that store total moisture `qᵗ` as the prognostic
 variable, to produce the correct input for [`moisture_fractions`](@ref).
