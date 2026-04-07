@@ -20,9 +20,9 @@ using Printf
 using Random
 using CairoMakie
 
-Random.seed!(42)
+Random.seed!(1994)
 if CUDA.functional()
-    CUDA.seed!(42)
+    CUDA.seed!(1994)
 end
 
 # ## Domain and grid
