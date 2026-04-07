@@ -847,21 +847,21 @@ function tabulate(integral::AbstractP3Integral, arch=CPU(),
         return evaluator(log_mass, rime_fraction, liquid_fraction, rime_density)
     end
 
-    # Tabulate using TabulatedFunction5D (mu is the 5th dimension)
-    return TabulatedFunction5D(eval_5d, arch, FT;
-                                x_range = (params.minimum_log_mean_particle_mass,
-                                          params.maximum_log_mean_particle_mass),
-                                y_range = (zero(FT), one(FT)),
-                                z_range = (zero(FT), one(FT)),
-                                w_range = (params.minimum_rime_density,
-                                          params.maximum_rime_density),
-                                v_range = (params.minimum_shape_parameter,
-                                          params.maximum_shape_parameter),
-                                x_points = params.number_of_mass_points,
-                                y_points = params.number_of_rime_fraction_points,
-                                z_points = params.number_of_liquid_fraction_points,
-                                w_points = params.number_of_rime_density_points,
-                                v_points = params.number_of_shape_parameter_points)
+    # Tabulate using Oceananigans' TabulatedFunction (5D: mass, Fr, Fl, ρr, μ)
+    return TabulatedFunction(eval_5d, arch, FT;
+                              range = ((params.minimum_log_mean_particle_mass,
+                                        params.maximum_log_mean_particle_mass),
+                                       (zero(FT), one(FT)),
+                                       (zero(FT), one(FT)),
+                                       (params.minimum_rime_density,
+                                        params.maximum_rime_density),
+                                       (params.minimum_shape_parameter,
+                                        params.maximum_shape_parameter)),
+                              points = (params.number_of_mass_points,
+                                        params.number_of_rime_fraction_points,
+                                        params.number_of_liquid_fraction_points,
+                                        params.number_of_rime_density_points,
+                                        params.number_of_shape_parameter_points))
 end
 
 """
@@ -1013,12 +1013,12 @@ function tabulate(rain::RainProperties, arch=CPU(), FT=Float64;
     vel_num_eval   = RainNumberWeightedVelocityEvaluator(FT; n_points=quadrature_points)
     evap_eval      = RainEvaporationVentilationEvaluator(FT; n_points=quadrature_points)
 
-    tab_vel_mass   = TabulatedFunction1D(vel_mass_eval,  arch, FT;
-                                         x_range=log_lambda_range, x_points=lambda_points)
-    tab_vel_num    = TabulatedFunction1D(vel_num_eval,   arch, FT;
-                                         x_range=log_lambda_range, x_points=lambda_points)
-    tab_evap       = TabulatedFunction1D(evap_eval,      arch, FT;
-                                         x_range=log_lambda_range, x_points=lambda_points)
+    tab_vel_mass   = TabulatedFunction(vel_mass_eval,  arch, FT;
+                                       range=log_lambda_range, points=lambda_points)
+    tab_vel_num    = TabulatedFunction(vel_num_eval,   arch, FT;
+                                       range=log_lambda_range, points=lambda_points)
+    tab_evap       = TabulatedFunction(evap_eval,      arch, FT;
+                                       range=log_lambda_range, points=lambda_points)
 
     return RainProperties(
         rain.maximum_mean_diameter,

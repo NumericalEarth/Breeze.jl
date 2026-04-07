@@ -43,8 +43,8 @@ function build_lookup_table_3(ice::IceProperties, arch, params::LookupTable3Para
               params.number_of_rime_fraction_points,
               params.number_of_liquid_fraction_points)
 
-    μ_table = build_tabulated_function(μ_eval, arch, Float64, range, points)
-    λ_table = build_tabulated_function(λ_eval, arch, Float64, range, points)
+    μ_table = TabulatedFunction(μ_eval, arch, Float64; range, points)
+    λ_table = TabulatedFunction(λ_eval, arch, Float64; range, points)
 
     return P3LookupTable3(μ_table, λ_table, nothing)
 end

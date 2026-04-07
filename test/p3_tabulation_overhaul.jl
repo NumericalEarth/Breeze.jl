@@ -1,7 +1,7 @@
 using Test
 using Adapt: Adapt
 using Oceananigans.Architectures: CPU
-using Oceananigans.Utils: TabulatedFunction1D, TabulatedFunction4D
+using Oceananigans.Utils: TabulatedFunction
 import Oceananigans.Architectures: on_architecture
 import Breeze
 using Breeze.Microphysics.PredictedParticleProperties
@@ -10,11 +10,9 @@ using Breeze.Microphysics.PredictedParticleProperties:
     P3LookupTable3, P3LookupTables, P3TabulationParameters, LookupTable1Parameters,
     LookupTable2Parameters, LookupTable3Parameters
 
-struct MockArchitecture end
 struct TransferArchitecture end
 struct ShiftArrays end
 
-on_architecture(::MockArchitecture, a::Array) = a
 on_architecture(::TransferArchitecture, a::Array) = a .+ 1
 Adapt.adapt_storage(::ShiftArrays, a::Array) = a .+ 1
 
@@ -31,27 +29,21 @@ Adapt.adapt_storage(::ShiftArrays, a::Array) = a .+ 1
     @test p3_tab.ice.lookup_tables.table_1 isa P3LookupTable1
 end
 
-@testset "P3 tabulated function adapters preserve singleton axes" begin
-    f1 = TabulatedFunction1D(x -> 3x, MockArchitecture(), Float64;
-        x_range = (2.0, 4.0),
-        x_points = 1)
+@testset "TabulatedFunction construction via Oceananigans" begin
+    f1 = TabulatedFunction(x -> 3x, CPU(), Float64;
+        range = (2.0, 4.0),
+        points = 10)
 
-    @test f1.table == [6.0]
-    @test f1(999.0) ≈ 6.0
+    @test f1(2.0) ≈ 6.0
+    @test f1(3.0) ≈ 9.0
 
-    f4 = TabulatedFunction4D((x, y, z, w) -> x + y + z + w, MockArchitecture(), Float64;
-        x_range = (0.0, 1.0),
-        y_range = (2.0, 3.0),
-        z_range = (5.0, 6.0),
-        w_range = (8.0, 9.0),
-        x_points = 2,
-        y_points = 1,
-        z_points = 1,
-        w_points = 1)
+    f4 = TabulatedFunction((x, y, z, w) -> x + y + z + w, CPU(), Float64;
+        range = ((0.0, 1.0), (2.0, 3.0), (5.0, 6.0), (8.0, 9.0)),
+        points = (5, 5, 5, 5))
 
-    @test size(f4.table) == (2, 1, 1, 1)
+    @test size(f4.table) == (5, 5, 5, 5)
     @test all(isfinite, f4.table)
-    @test f4(0.75, 42.0, 43.0, 44.0) ≈ 15.75
+    @test f4(0.5, 2.5, 5.5, 8.5) ≈ 17.0 rtol = 1e-10
 end
 
 @testset "P3 lookup family parameters and storage" begin
@@ -121,6 +113,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
 end
 
 using Oceananigans.Utils: TabulatedFunction5D
+using Breeze.Microphysics.PredictedParticleProperties: TabulatedFunction6D
 using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, PhasePartition, ThermodynamicConstants
 using Breeze.Microphysics.PredictedParticleProperties: P3MicrophysicalState, compute_p3_process_rates
 
@@ -133,8 +126,8 @@ using Breeze.Microphysics.PredictedParticleProperties: P3MicrophysicalState, com
         number_of_quadrature_points = 24)
 
     @test p3.ice.lookup_tables.table_3.shape isa TabulatedFunction5D
-    @test p3.ice.lookup_tables.table_2.mass isa TabulatedFunction5D
-    @test p3.ice.lookup_tables.table_2.number isa TabulatedFunction5D
+    @test p3.ice.lookup_tables.table_2.mass isa TabulatedFunction6D
+    @test p3.ice.lookup_tables.table_2.number isa TabulatedFunction6D
 
     FT = Float64
     q = Breeze.Thermodynamics.MoistureMassFractions(FT(0.010), FT(0), FT(0))
