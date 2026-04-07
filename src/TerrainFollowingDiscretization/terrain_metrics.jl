@@ -1,3 +1,5 @@
+using Oceananigans.Utils: prettysummary
+
 #####
 ##### Terrain metric terms
 #####
@@ -91,6 +93,17 @@ Adapt.adapt_structure(to, m::TerrainMetrics) =
                    adapt(to, m.∂y_h),
                    m.z_top,
                    m.pressure_gradient_stencil)
+
+Base.summary(tf::TerrainMetrics) = "TerrainMetrics for $(summary(tf.topography)) using $(summary(tf.pressure_gradient_stencil))"
+
+function Base.show(io::IO, tm::TerrainMetrics)
+    print(io, "TerrainMetrics", '\n')
+    print(io, "├── topography: ", summary(tm.topography), '\n')
+    print(io, "├── ∂x_h: ", prettysummary(tm.∂x_h), '\n')
+    print(io, "├── ∂y_h: ", prettysummary(tm.∂y_h), '\n')
+    print(io, "├── z_top: ", prettysummary(tm.z_top), '\n')
+    print(io, "└── pressure_gradient_stencil: ", prettysummary(tm.pressure_gradient_stencil))
+end
 
 """
 $(TYPEDSIGNATURES)
