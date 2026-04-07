@@ -9,6 +9,8 @@ using Oceananigans.TimeSteppers:
     compute_flux_bc_tendencies!,
     step_lagrangian_particles!
 
+using Oceananigans.TurbulenceClosures: step_closure_prognostics!
+
 using Breeze.AtmosphereModels: AtmosphereModel
 
 using Breeze.CompressibleEquations:
@@ -216,6 +218,8 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
 
     compute_flux_bc_tendencies!(model)
     acoustic_rk3_substep!(model, Δt, β₃)
+
+    step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
     # Adjust final time-step
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)

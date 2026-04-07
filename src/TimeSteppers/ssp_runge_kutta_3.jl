@@ -11,6 +11,7 @@ using Oceananigans.TimeSteppers:
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
 using Oceananigans.Utils: launch!, time_difference_seconds
+using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 """
 $(TYPEDEF)
@@ -227,6 +228,8 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     compute_pressure_correction!(model, α³ * Δt)
     make_pressure_correction!(model, α³ * Δt)
+
+    step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
     # Adjust final time-step to reduce floating point error accumulation
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
