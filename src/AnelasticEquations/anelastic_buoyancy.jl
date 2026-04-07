@@ -29,7 +29,7 @@ This "perturbation form" avoids subtracting two large, nearly-equal numbers
 Instead, the ratio ``R^m_r T_r / (R^m T)`` is close
 to 1, and the subtraction of 1 preserves relative precision.
 
-Here ``R^m = q^d R^d + q^v R^v`` is the mixture gas constant for the current
+Here, ``R^m = q^d R^d + q^v R^v`` is the mixture gas constant for the current
 moisture state and ``R^m_r`` is the mixture gas constant for the reference
 moisture state.
 """

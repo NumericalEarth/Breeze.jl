@@ -58,8 +58,11 @@ AtmosphereModels.mean_pressure(dynamics::AnelasticDynamics) = dynamics.reference
 $(TYPEDSIGNATURES)
 
 Return the non-hydrostatic pressure anomaly for `AnelasticDynamics`, in Pa.
-Note: the internal field stores the kinematic pressure `p'/ρᵣ`; this function
-returns `ρᵣ * p'/ρᵣ = p'` in Pa.
+
+!!! note "Kinematic pressure versus pressure"
+
+    The internal field stores the kinematic pressure ``p' / ρᵣ`` (in m²/s²);
+    this function returns ``p'`` in Pa.
 """
 function AtmosphereModels.pressure_anomaly(dynamics::AnelasticDynamics)
     ρᵣ = dynamics.reference_state.density
@@ -90,7 +93,7 @@ $(TYPEDSIGNATURES)
 Return the reference density field for `AnelasticDynamics`.
 
 For anelastic models, the dynamics density is the time-independent
-reference state density `ρᵣ(z)`.
+reference state density ``ρᵣ(z)``.
 """
 AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
@@ -100,7 +103,7 @@ $(TYPEDSIGNATURES)
 Return the reference pressure field for `AnelasticDynamics`.
 
 For anelastic models, the dynamics pressure is the time-independent
-hydrostatic reference state pressure `pᵣ(z)`.
+hydrostatic reference state pressure ``pᵣ(z)``.
 """
 AtmosphereModels.dynamics_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
 
