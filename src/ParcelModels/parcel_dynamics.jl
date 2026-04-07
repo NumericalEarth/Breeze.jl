@@ -599,15 +599,18 @@ $(TYPEDSIGNATURES)
 Compute the net buoyancy acceleration for a parcel.
 
 The buoyancy is computed from the density difference between the parcel and
-environment: `B = -g (ρ_parcel - ρ_env) / ρ_env`.
+environment:
 
-Here `ρ_parcel = p / (Rᵐ T)` is the total parcel density from the ideal gas law,
-where `Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ` with `qᵈ = 1 - qᵛ - qˡ - qⁱ`. This formulation
+```math
+B = -g (ρ_{parcel} - ρ_{env}) / ρ_{env}
+```
+
+Here, ``ρ_{env}`` is the environmental density interpolated at the parcel height
+and ``ρ_{parcel} = p / (Rᵐ T)`` is the total parcel density from the ideal gas law,
+where ``Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ`` with ``qᵈ = 1 - qᵛ - qˡ - qⁱ``. This formulation
 captures both the virtual temperature effect (from vapor content) and the
-condensate loading effect (condensate reduces `qᵈ`, reducing `Rᵐ`, increasing
-`ρ_parcel`) in a single term without double-counting.
-
-`ρ_env` is the environmental density interpolated at the parcel height.
+condensate loading effect (condensate reduces ``qᵈ``, reducing ``Rᵐ``, increasing
+``ρ_{parcel}``) in a single term without double-counting.
 """
 @inline function parcel_buoyancy(state, dynamics, constants)
     g = constants.gravitational_acceleration

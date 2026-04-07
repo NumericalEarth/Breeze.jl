@@ -301,7 +301,7 @@ that includes the hydrostatic reference pressure and reference density.
 The reference state is initialized with a dry adiabatic temperature profile
 and the given moisture profiles (zero by default). The pressure and density
 are then computed by hydrostatic integration using the mixture gas constant
-`Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ` and the ideal gas law `ρ = p / (Rᵐ T)`.
+``Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ`` and the ideal gas law ``ρ = p / (Rᵐ T)``.
 
 Arguments
 =========
@@ -311,11 +311,11 @@ Arguments
 Keyword arguments
 =================
 - `surface_pressure`: By default, 101325.
-- `potential_temperature`: A constant value (default 288) or a function `θ(z)` giving
+- `potential_temperature`: A constant value (default 288) or a function ``θ(z)`` giving
   the potential temperature profile. When a constant is provided, closed-form adiabatic
   hydrostatic profiles are used. When a function is provided, the hydrostatic profiles
-  are computed by numerical integration of `dp/dz = -gρ`.
-- `standard_pressure`: Reference pressure for potential temperature (pˢᵗ). By default, 1e5.
+  are computed by numerical integration of ``∂p/∂z = -g ρ``.
+- `standard_pressure`: Reference pressure for potential temperature (``pˢᵗ``). By default, 1e5.
 - `discrete_hydrostatic_balance`: If `true`, recompute the reference pressure from the
   reference density using discrete integration, so that `∂z(p_ref) + g * ℑz(ρ_ref) = 0`
   exactly at the discrete level. By default, `false`.
