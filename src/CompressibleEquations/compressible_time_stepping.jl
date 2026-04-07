@@ -90,8 +90,7 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
             model.microphysical_fields,
             model.thermodynamic_constants)
 
-    fill_halo_regions!(model.temperature)
-    fill_halo_regions!(dynamics.pressure)
+    fill_halo_regions!((model.temperature, dynamics.pressure))
 
     return nothing
 end
