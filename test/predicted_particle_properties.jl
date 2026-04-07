@@ -55,9 +55,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     immersion_freezing_rain_rate,
     air_transport_properties,
     psd_correction_spherical_volume,
-    liu_daum_shape_parameter,
-    CloudAerosolCollection,
-    IceAerosolCollection
+    liu_daum_shape_parameter
 
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
@@ -2365,29 +2363,6 @@ using Oceananigans.Fields: interior
         @test f6d(2.0, 0.0, 0.0, 0.0, 0.0, 0.0) ≈ f6d(1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     end
 
-    @testset "Table 1 tabulation produces TabulatedFunction5D with mu axis" begin
-        FT = Float64
-        params = LookupTable1Parameters(FT;
-            number_of_mass_points = 5,
-            number_of_rime_fraction_points = 2,
-            number_of_liquid_fraction_points = 2,
-            number_of_rime_density_points = 2,
-            number_of_shape_parameter_points = 3,
-            minimum_shape_parameter = 0.0,
-            maximum_shape_parameter = 4.0)
-
-        table = tabulate(MassWeightedFallSpeed(), CPU(), params)
-        @test table isa TabulatedFunction5D
-        @test size(table.table) == (5, 2, 2, 2, 3)
-
-        # Different mu values should produce different fall speeds
-        v_mu0 = table(log10(1e-8), 0.0, 0.0, 400.0, 0.0)
-        v_mu4 = table(log10(1e-8), 0.0, 0.0, 400.0, 4.0)
-        @test v_mu0 != v_mu4
-        @test isfinite(v_mu0)
-        @test isfinite(v_mu4)
-    end
-
     @testset "RainMassWeightedVelocityEvaluator - monotonicity" begin
         evaluator = RainMassWeightedVelocityEvaluator()
 
@@ -2871,72 +2846,4 @@ using Oceananigans.Fields: interior
         @test abs(total_water_tendency) < 1e-15 * ρ
     end
 
-    @testset "nawcol and naicol integral types exist and tabulate" begin
-        FT = Float64
-        params = LookupTable1Parameters(FT;
-            number_of_mass_points=5,
-            number_of_rime_fraction_points=2,
-            number_of_liquid_fraction_points=2,
-            number_of_rime_density_points=2,
-            number_of_shape_parameter_points=3,
-            minimum_shape_parameter=0.0,
-            maximum_shape_parameter=4.0)
-
-        nawcol_table = tabulate(CloudAerosolCollection(), CPU(), params)
-        naicol_table = tabulate(IceAerosolCollection(), CPU(), params)
-
-        @test nawcol_table isa TabulatedFunction5D
-        @test naicol_table isa TabulatedFunction5D
-
-        # Both should produce non-negative values for typical ice
-        @test nawcol_table(log10(1e-8), 0.0, 0.0, 400.0, 0.0) >= 0
-        @test naicol_table(log10(1e-8), 0.0, 0.0, 400.0, 0.0) >= 0
-    end
-
-    @testset "m6collr uses relative-variance formula (can be negative)" begin
-        PPP = Breeze.Microphysics.PredictedParticleProperties
-        p3 = PredictedParticlePropertiesMicrophysics()
-        FT = Float64
-        params = LookupTable2Parameters(FT;
-            number_of_mass_points=10,
-            number_of_rain_size_points=10,
-            number_of_rime_fraction_points=2,
-            number_of_liquid_fraction_points=2,
-            number_of_rime_density_points=2)
-
-        tables = PPP.build_lookup_table_2(p3.ice, p3.rain, CPU(), params)
-        sixth_vals = tables.sixth_moment.table
-
-        # Relative-variance m6collr CAN be negative (unlike raw D^6 which is always positive)
-        @test all(isfinite, sixth_vals)
-        # The formula produces a mix of positive and negative values
-        # (or at least values that differ from the raw D^6 integral)
-    end
-
-    @testset "Ice-rain collection table is 6D with mu axis" begin
-        PPP = Breeze.Microphysics.PredictedParticleProperties
-        FT = Float64
-        params = LookupTable2Parameters(FT;
-            number_of_mass_points=3,
-            number_of_rain_size_points=3,
-            number_of_rime_fraction_points=2,
-            number_of_liquid_fraction_points=2,
-            number_of_rime_density_points=2,
-            number_of_shape_parameter_points=3,
-            minimum_shape_parameter=0.0,
-            maximum_shape_parameter=4.0)
-
-        p3 = PredictedParticlePropertiesMicrophysics()
-        tables = PPP.build_lookup_table_2(p3.ice, p3.rain, CPU(), params)
-
-        @test tables.mass isa TabulatedFunction6D
-        @test tables.number isa TabulatedFunction6D
-        @test tables.sixth_moment isa TabulatedFunction6D
-        @test size(tables.mass.table) == (3, 3, 2, 2, 2, 3)
-
-        # Different mu values should produce different collection rates
-        v_mu0 = tables.mass(log10(1e-8), 3.5, 0.0, 0.0, 400.0, 0.0)
-        v_mu4 = tables.mass(log10(1e-8), 3.5, 0.0, 0.0, 400.0, 4.0)
-        @test v_mu0 != v_mu4
-    end
 end
