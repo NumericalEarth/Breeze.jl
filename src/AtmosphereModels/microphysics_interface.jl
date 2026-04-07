@@ -477,7 +477,7 @@ variable, to produce the correct input for [`moisture_fractions`](@ref).
 $(TYPEDSIGNATURES)
 
 Compute [`MoistureMassFractions`](@ref) from a microphysical state `ℳ` and
-scheme-dependent specific moisture ``qᵛᵉs``.
+scheme-dependent specific moisture ``qᵛᵉ``.
 
 The input ``qᵛᵉ`` is the scheme-dependent specific moisture: vapor for non-equilibrium
 schemes, or equilibrium moisture (``qᵉ = qᵛ + qᶜˡ``) for saturation adjustment schemes.
