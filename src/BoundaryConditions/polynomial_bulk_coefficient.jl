@@ -24,7 +24,12 @@ end
 
 """
     StabilityFunctionParameters(FT = Oceananigans.defaults.FloatType;
-        γᴰ = 19.3, γᵀ = 11.6, a = 1, b = 2/3, c = 5, d = 0.35)
+                                γᴰ = 19.3,
+                                γᵀ = 11.6,
+                                a = 1,
+                                b = 2/3,
+                                c = 5,
+                                d = 0.35)
 
 Parameters for the integrated Monin-Obukhov stability functions ``Ψ^D(ζ)``
 and ``Ψ^T(ζ)``.
@@ -62,27 +67,6 @@ end
 ##### RichardsonNumberMapping: Li et al. (2010) regression coefficients
 #####
 
-"""
-    RichardsonNumberMapping(FT = Oceananigans.defaults.FloatType; kwargs...)
-
-Regression coefficients for the non-iterative mapping from bulk Richardson number
-``Riᴮ`` to the Monin-Obukhov stability parameter ``ζ = z/L``, following
-[Li et al. (2010)](@cite Li2010).
-
-The superscripts u, w, s denote unstable, weakly stable, and strongly stable
-regimes respectively. Subscript indices follow the original paper.
-
-Three regimes:
-- **Unstable** (``Riᴮ <`` `stable_unstable_transition`): Eq. (12)
-- **Weakly stable** (`stable_unstable_transition` ``≤ Riᴮ ≤`` `strongly_stable_transition`): Eq. (14)
-- **Strongly stable** (``Riᴮ >`` `strongly_stable_transition`): Eq. (16)
-
-# References
-
-* Li, Y., Gao, Z., Lenschow, D. H., & Chen, F. (2010). An improved approach for
-  parameterizing surface-layer turbulent transfer coefficients in numerical models.
-  Boundary-Layer Meteorology, 137, 153-165.
-"""
 struct RichardsonNumberMapping{FT}
     # Regime thresholds
     stable_unstable_transition :: FT
@@ -116,6 +100,38 @@ struct RichardsonNumberMapping{FT}
     bˢ₂₂ :: FT
 end
 
+"""
+    RichardsonNumberMapping(FT = Oceananigans.defaults.FloatType;
+                            stable_unstable_transition = 0,
+                            strongly_stable_transition = 0.2,
+                            aᵘ₁₁ =  0.0450, bᵘ₁₁ =  0.0030, bᵘ₁₂ =  0.0059,
+                            aᵘ₂₁ = -0.0828, aᵘ₂₂ =  0.8845,
+                            bᵘ₃₁ =  0.1739, bᵘ₃₂ = -0.9213, bᵘ₃₃ = -0.1057,
+                            aʷ₁₁ =  0.5738, aʷ₁₂ = -0.4399,
+                            aʷ₂₁ = -4.901,  aʷ₂₂ = 52.50,
+                            bʷ₁₁ = -0.0539, bʷ₁₂ =  1.540,
+                            bʷ₂₁ = -0.6690, bʷ₂₂ = -3.282,
+                            aˢ₁₁ =  0.7529, aˢ₂₁ = 14.94,
+                            bˢ₁₁ =  0.1569, bˢ₂₁ = -0.3091, bˢ₂₂ = -1.303)
+
+Regression coefficients for the non-iterative mapping from bulk Richardson number
+``Riᴮ`` to the Monin-Obukhov stability parameter ``ζ = z/L``, following
+[Li et al. (2010)](@cite Li2010).
+
+The superscripts u, w, s denote unstable, weakly stable, and strongly stable
+regimes respectively. Subscript indices follow the original paper.
+
+Three regimes:
+- **Unstable** (``Riᴮ <`` `stable_unstable_transition`): Eq. (12)
+- **Weakly stable** (`stable_unstable_transition` ``≤ Riᴮ ≤`` `strongly_stable_transition`): Eq. (14)
+- **Strongly stable** (``Riᴮ >`` `strongly_stable_transition`): Eq. (16)
+
+# References
+
+* Li, Y., Gao, Z., Lenschow, D. H., & Chen, F. (2010). An improved approach for
+  parameterizing surface-layer turbulent transfer coefficients in numerical models.
+  Boundary-Layer Meteorology, 137, 153-165.
+"""
 function RichardsonNumberMapping(FT = Oceananigans.defaults.FloatType;
                                  stable_unstable_transition = 0,
                                  strongly_stable_transition = 0.2,
@@ -139,10 +155,16 @@ end
 ##### FittedStabilityFunction
 #####
 
+struct FittedStabilityFunction{FT, RM, SP}
+    scalar_roughness_length :: FT
+    richardson_number_mapping :: RM
+    stability_function_parameters :: SP
+end
+
 """
     FittedStabilityFunction(scalar_roughness_length;
-        richardson_number_mapping = RichardsonNumberMapping(...),
-        stability_function_parameters = StabilityFunctionParameters(...))
+                            richardson_number_mapping = RichardsonNumberMapping(typeof(scalar_roughness_length)),
+                            stability_function_parameters = StabilityFunctionParameters(typeof(scalar_roughness_length)))
 
 Stability correction based on Monin-Obukhov similarity theory using the
 Li et al. (2010) analytical mapping from bulk Richardson number to the
@@ -179,15 +201,9 @@ scalar correction factor.
   parameterizing surface-layer turbulent transfer coefficients in numerical models.
   Boundary-Layer Meteorology, 137, 153-165.
 """
-struct FittedStabilityFunction{FT, RM, SP}
-    scalar_roughness_length :: FT
-    richardson_number_mapping :: RM
-    stability_function_parameters :: SP
-end
-
 function FittedStabilityFunction(scalar_roughness_length;
-    richardson_number_mapping = RichardsonNumberMapping(typeof(scalar_roughness_length)),
-    stability_function_parameters = StabilityFunctionParameters(typeof(scalar_roughness_length)))
+                                 richardson_number_mapping = RichardsonNumberMapping(typeof(scalar_roughness_length)),
+                                 stability_function_parameters = StabilityFunctionParameters(typeof(scalar_roughness_length)))
     return FittedStabilityFunction(scalar_roughness_length,
                                    richardson_number_mapping,
                                    stability_function_parameters)
