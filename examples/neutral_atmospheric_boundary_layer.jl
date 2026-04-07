@@ -261,20 +261,20 @@ uw_sgs = zeros(Nz, Nt)
 vw_sgs = zeros(Nz, Nt)
 θw_sgs = zeros(Nz, Nt)
 
-ρᵣ_vec = interior(ρᵣ, 1, 1, :)
+ρᵣ_vec = Array(interior(ρᵣ, 1, 1, :))
 
 for n in 1:Nt
-    u_n    = interior(uts[n],  1, 1, :)
-    v_n    = interior(vts[n],  1, 1, :)
-    w_raw  = interior(wts[n],  1, 1, :)
-    θ_n    = interior(θts[n],  1, 1, :)
-    uu_n   = interior(uuts[n], 1, 1, :)
-    vv_n   = interior(vvts[n], 1, 1, :)
-    ww_raw = interior(wwts[n], 1, 1, :)
-    uw_n   = interior(uwts[n], 1, 1, :)
-    vw_n   = interior(vwts[n], 1, 1, :)
-    θw_n   = interior(θwts[n], 1, 1, :)
-    νₑ_n   = interior(νₑts[n], 1, 1, :)
+    u_n    = Array(interior(uts[n],  1, 1, :))
+    v_n    = Array(interior(vts[n],  1, 1, :))
+    w_raw  = Array(interior(wts[n],  1, 1, :))
+    θ_n    = Array(interior(θts[n],  1, 1, :))
+    uu_n   = Array(interior(uuts[n], 1, 1, :))
+    vv_n   = Array(interior(vvts[n], 1, 1, :))
+    ww_raw = Array(interior(wwts[n], 1, 1, :))
+    uw_n   = Array(interior(uwts[n], 1, 1, :))
+    vw_n   = Array(interior(vwts[n], 1, 1, :))
+    θw_n   = Array(interior(θwts[n], 1, 1, :))
+    νₑ_n   = Array(interior(νₑts[n], 1, 1, :))
 
     ## Interpolate face fields to cell centers
     w_n  = @views (w_raw[1:end-1] .+ w_raw[2:end]) ./ 2
