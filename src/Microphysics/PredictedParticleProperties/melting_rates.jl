@@ -44,7 +44,7 @@ where:
 - Rate of ice → rain conversion [kg/kg/s]
 """
 @inline function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
-                                   constants, transport)
+                                   constants, transport, μ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -86,7 +86,7 @@ where:
     # H10: PSD-integrated ventilation integral C(D) × f_v(D) with Fl-blended coefficients.
     C_fv = melting_ventilation(p3.ice.deposition.ventilation,
                                 p3.ice.deposition.ventilation_enhanced,
-                                m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+                                m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: K_a × (T - T₀)
@@ -152,12 +152,12 @@ Requires tabulated small/large ice ventilation integrals.
 - NamedTuple with `partial_melting` and `complete_melting` rates [kg/kg/s]
 """
 @inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
-                                    constants, transport)
+                                    constants, transport, μ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
     # Get total melting rate (H10: pass qʷⁱ for Fl-blended ventilation)
-    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport)
+    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport, μ)
 
     # H9: PSD-resolved melting partitioning using tabulated small/large ice
     # ventilation integrals (Fortran f1pr24-f1pr27).
@@ -175,7 +175,7 @@ Requires tabulated small/large ice ventilation integrals.
         p3.ice.deposition.small_ice_ventilation_reynolds,
         p3.ice.deposition.large_ice_ventilation_constant,
         p3.ice.deposition.large_ice_ventilation_reynolds,
-        m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+        m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
 
     complete = total_melt * rain_fraction
     partial  = total_melt * (1 - rain_fraction)
@@ -188,12 +188,10 @@ end
 # Fortran: qrmlt uses f1pr24/f1pr25, qiliqcol uses f1pr26/f1pr27.
 @inline function psd_melting_rain_fraction(sc::TabulatedFunction5D, sr::TabulatedFunction5D,
                                             lc::TabulatedFunction5D, lr::TabulatedFunction5D,
-                                            m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3)
+                                            m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
     sc_corr = ventilation_sc_correction(nu, D_v, ρ_correction)
-    # TODO (Task 6): thread mu from caller; using mu=0 (exponential PSD) as placeholder
-    μ = zero(FT)
 
     small = sc(log_m, Fᶠ, Fl, ρᶠ, μ) + sc_corr * sr(log_m, Fᶠ, Fl, ρᶠ, μ)
     large = lc(log_m, Fᶠ, Fl, ρᶠ, μ) + sc_corr * lr(log_m, Fᶠ, Fl, ρᶠ, μ)

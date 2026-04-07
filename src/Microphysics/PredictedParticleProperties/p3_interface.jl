@@ -247,10 +247,16 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.zⁱ[i, j, k]  = ℳ.zⁱ
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
 
+    # Ice PSD shape parameter μ from Table 3 (3-moment) or 0 (2-moment fallback).
+    FT = typeof(ρ)
+    qⁱ_total_mu = max(clamp_positive(ℳ.qⁱ) + clamp_positive(ℳ.qʷⁱ), FT(1e-20))
+    Fˡ_mu = clamp_positive(ℳ.qʷⁱ) / qⁱ_total_mu
+    μ_ice = compute_ice_shape_parameter(p3, ℳ.qⁱ, ℳ.nⁱ, ℳ.zⁱ, Fᶠ, Fˡ_mu, ρᶠ)
+
     # Pre-compute terminal velocities for sedimentation (stored as negative w)
     @inbounds μ.wʳ[i, j, k]   = -rain_terminal_velocity_mass_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     @inbounds μ.wʳₙ[i, j, k]  = -rain_terminal_velocity_number_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
-    vⁱ = ice_terminal_velocities(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ)
+    vⁱ = ice_terminal_velocities(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ; μ=μ_ice)
     @inbounds μ.wⁱ[i, j, k]   = -vⁱ.mass_weighted
     @inbounds μ.wⁱₙ[i, j, k]  = -vⁱ.number_weighted
     @inbounds μ.wⁱ_z[i, j, k] = -vⁱ.reflectivity_weighted
