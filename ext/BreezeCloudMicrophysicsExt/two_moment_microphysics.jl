@@ -320,8 +320,12 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 # Default fallback for tendencies (state-based)
 @inline AtmosphereModels.microphysical_tendency(bμp::TwoMomentCloudMicrophysics, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
-# Default fallback for velocities
-@inline AtmosphereModels.microphysical_velocities(bμp::TwoMomentCloudMicrophysics, μ, name) = nothing
+# Default fallback for sedimentation speed
+@inline AtmosphereModels.sedimentation_speed(bμp::TwoMomentCloudMicrophysics, μ, name) = nothing
+
+# Water phase classification
+@inline AtmosphereModels.water_phase(bμp::WPNE2M, ::Val{:ρqᶜˡ}) = Val(:liquid)
+@inline AtmosphereModels.water_phase(bμp::WPNE2M, ::Val{:ρqʳ})  = Val(:liquid)
 
 #####
 ##### Relaxation timescale for non-equilibrium cloud formation
@@ -353,17 +357,17 @@ const two_moment_center_field_names = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρ
 function AtmosphereModels.materialize_microphysical_fields(bμp::WPNE2M, grid, bcs)
     center_fields = center_field_tuple(grid, two_moment_center_field_names...)
 
-    # Terminal velocities (negative = downward)
+    # Sedimentation speeds (positive magnitude)
     # bottom = nothing ensures the kernel-set value is preserved during fill_halo_regions!
     w_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
 
-    # Cloud liquid terminal velocity (mass-weighted)
+    # Cloud liquid sedimentation speed (mass-weighted)
     wᶜˡ = ZFaceField(grid; boundary_conditions=w_bcs)
-    # Cloud liquid terminal velocity (number-weighted)
+    # Cloud liquid sedimentation speed (number-weighted)
     wᶜˡₙ = ZFaceField(grid; boundary_conditions=w_bcs)
-    # Rain terminal velocity (mass-weighted)
+    # Rain sedimentation speed (mass-weighted)
     wʳ = ZFaceField(grid; boundary_conditions=w_bcs)
-    # Rain terminal velocity (number-weighted)
+    # Rain sedimentation speed (number-weighted)
     wʳₙ = ZFaceField(grid; boundary_conditions=w_bcs)
 
     return (; zip(two_moment_center_field_names, center_fields)..., wᶜˡ, wᶜˡₙ, wʳ, wʳₙ)
@@ -440,25 +444,25 @@ end
     Nʳ_min = ρ * qʳ⁺ / sb.pdf_r.xr_max
     Nʳ = max(ρ * max(0, nʳ), Nʳ_min)
 
-    # Cloud liquid terminal velocities: (number-weighted, mass-weighted)
-    𝕎_cl = cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
+    # Cloud liquid sedimentation speeds: (number-weighted, mass-weighted)
+    𝕎ᶜˡ = cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
                                    qᶜˡ⁺, ρ, Nᶜˡ)
 
-    wᶜˡₙ = -𝕎_cl[1]  # number-weighted, negative = downward
-    wᶜˡ = -𝕎_cl[2]   # mass-weighted
+    wᶜˡₙ = 𝕎ᶜˡ[1]  # number-weighted, positive magnitude
+    wᶜˡ = 𝕎ᶜˡ[2]   # mass-weighted
 
-    # Rain terminal velocities: (number-weighted, mass-weighted)
-    𝕎  = CM2.rain_terminal_velocity(sb, categories.rain_fall_velocity, qʳ⁺, ρ, Nʳ)
+    # Rain sedimentation speeds: (number-weighted, mass-weighted)
+    𝕎ʳ = CM2.rain_terminal_velocity(sb, categories.rain_fall_velocity, qʳ⁺, ρ, Nʳ)
 
-    wʳₙ = -𝕎[1]  # number-weighted
-    wʳ = -𝕎[2]   # mass-weighted
+    wʳₙ = 𝕎ʳ[1]  # number-weighted
+    wʳ = 𝕎ʳ[2]   # mass-weighted
 
     # Apply bottom boundary condition
     bc = bμp.precipitation_boundary_condition
-    wᶜˡ₀  = bottom_terminal_velocity(bc, wᶜˡ)
-    wᶜˡₙ₀ = bottom_terminal_velocity(bc, wᶜˡₙ)
-    wʳ₀   = bottom_terminal_velocity(bc, wʳ)
-    wʳₙ₀  = bottom_terminal_velocity(bc, wʳₙ)
+    wᶜˡ₀  = bottom_sedimentation_speed(bc, wᶜˡ)
+    wᶜˡₙ₀ = bottom_sedimentation_speed(bc, wᶜˡₙ)
+    wʳ₀   = bottom_sedimentation_speed(bc, wʳ)
+    wʳₙ₀  = bottom_sedimentation_speed(bc, wʳₙ)
 
     @inbounds begin
         μ.wᶜˡ[i, j, k]  = ifelse(k == 1, wᶜˡ₀,  wᶜˡ)
@@ -503,32 +507,20 @@ end
 @inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::WPNE2M, qᵛ, constants) = 𝒰₀
 
 #####
-##### Microphysical velocities for advection
+##### Sedimentation speed interface for advection
 #####
 
-# Cloud liquid mass: use mass-weighted terminal velocity
-@inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρqᶜˡ})
-    wᶜˡ = μ.wᶜˡ
-    return (; u = ZeroField(), v = ZeroField(), w = wᶜˡ)
-end
+# Cloud liquid mass: use mass-weighted sedimentation speed
+@inline AtmosphereModels.sedimentation_speed(bμp::WPNE2M, μ, ::Val{:ρqᶜˡ}) = μ.wᶜˡ
 
-# Cloud liquid number: use number-weighted terminal velocity
-@inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρnᶜˡ})
-    wᶜˡₙ = μ.wᶜˡₙ
-    return (; u = ZeroField(), v = ZeroField(), w = wᶜˡₙ)
-end
+# Cloud liquid number: use number-weighted sedimentation speed
+@inline AtmosphereModels.sedimentation_speed(bμp::WPNE2M, μ, ::Val{:ρnᶜˡ}) = μ.wᶜˡₙ
 
-# Rain mass: use mass-weighted terminal velocity
-@inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρqʳ})
-    wʳ = μ.wʳ
-    return (; u = ZeroField(), v = ZeroField(), w = wʳ)
-end
+# Rain mass: use mass-weighted sedimentation speed
+@inline AtmosphereModels.sedimentation_speed(bμp::WPNE2M, μ, ::Val{:ρqʳ}) = μ.wʳ
 
-# Rain number: use number-weighted terminal velocity
-@inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρnʳ})
-    wʳₙ = μ.wʳₙ
-    return (; u = ZeroField(), v = ZeroField(), w = wʳₙ)
-end
+# Rain number: use number-weighted sedimentation speed
+@inline AtmosphereModels.sedimentation_speed(bμp::WPNE2M, μ, ::Val{:ρnʳ}) = μ.wʳₙ
 
 #####
 ##### Microphysical tendencies

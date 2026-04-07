@@ -1,5 +1,5 @@
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_speed, water_phase
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using GPUArraysCore: @allowscalar
@@ -219,7 +219,7 @@ end
 
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
-    expected_flux = -wʳ * ρqʳ
+    expected_flux = wʳ * ρqʳ  # wʳ is positive (sedimentation speed magnitude)
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] > 0
@@ -314,7 +314,7 @@ end
     @test contains(str_ne, "cloud_formation")
 end
 
-@testset "microphysical_velocities [$(FT)]" for FT in test_float_types()
+@testset "sedimentation_speed, water_phase, and microphysical_velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -327,15 +327,39 @@ end
     set!(model; θ=300, qᵗ=0.015, qʳ=0.001)
 
     μ = model.microphysical_fields
+
+    # sedimentation_speed returns positive magnitude fields
+    fs_rain = sedimentation_speed(microphysics, μ, Val(:ρqʳ))
+    @test fs_rain !== nothing
+    @test fs_rain === μ.wʳ
+
+    # WPNE1M has cloud liquid sedimentation
+    fs_cloud = sedimentation_speed(microphysics, μ, Val(:ρqᶜˡ))
+    @test fs_cloud !== nothing
+    @test fs_cloud === μ.wᶜˡ
+
+    # water_phase classification
+    @test water_phase(microphysics, Val(:ρqʳ)) === Val(:liquid)
+    @test water_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
+
+    # microphysical_velocities wraps sedimentation_speed with NegatedField
     vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
     @test vel_rain !== nothing
     @test haskey(vel_rain, :w)
 
-    # Cloud liquid sedimentation velocity (non-equilibrium has it)
-    @test haskey(model.microphysical_fields, :wᶜˡ)
     vel_cloud = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
     @test vel_cloud !== nothing
     @test haskey(vel_cloud, :w)
+
+    # Sedimentation speed values should be positive
+    wʳ = @allowscalar μ.wʳ[1, 1, 2]
+    @test wʳ >= 0
+
+    # Effective sedimentation velocities exist on model
+    bsv = model.effective_sedimentation_velocities
+    @test bsv !== nothing
+    @test haskey(bsv, :ρqᴸ)
+    @test haskey(bsv, :ρqᴵ)
 end
 
 @testset "Mixed-phase non-equilibrium snow field materialization [$(FT)]" for FT in test_float_types()

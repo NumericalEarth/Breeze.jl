@@ -69,6 +69,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathbb{W}^{ci}``                 | `𝕎ᶜⁱ`  |                                     | Terminal velocity of cloud ice (scalar, positive downward)                     |
 | ``\mathbb{W}^r``                    | `𝕎ʳ`   |                                     | Terminal velocity of rain (scalar, positive downward)                          |
 | ``\mathbb{W}^s``                    | `𝕎ˢ`   |                                     | Terminal velocity of snow (scalar, positive downward)                          |
+| ``\mathbb{W}^{L}``                 | `𝕎ᴸ`  | `AM.effective_sedimentation_velocities.ρqᴸ.w` | Effective total liquid sedimentation speed (mass-weighted average, positive downward) |
+| ``\mathbb{W}^{I}``                 | `𝕎ᴵ`  | `AM.effective_sedimentation_velocities.ρqᴵ.w` | Effective total ice sedimentation speed (mass-weighted average, positive downward)    |
 | ``qᵛ⁺``                             | `qᵛ⁺`  |                                     | Saturation specific humidity over a surface                                    |
 | ``qᵛ⁺ˡ``                            | `qᵛ⁺ˡ` |                                     | Saturation specific humidity over a planar liquid surface                      |
 | ``qᵛ⁺ⁱ``                            | `qᵛ⁺ⁱ` |                                     | Saturation specific humidity over a planar ice surface                         |

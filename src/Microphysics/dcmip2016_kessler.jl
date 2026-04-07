@@ -288,7 +288,7 @@ Return `nothing`.
 
 Rain sedimentation is handled internally by the kernel rather than through the advection interface.
 """
-@inline AtmosphereModels.microphysical_velocities(::DCMIP2016KM, μ, name) = nothing
+@inline AtmosphereModels.sedimentation_speed(::DCMIP2016KM, μ, name) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -814,7 +814,7 @@ end
 #####
 #
 # DCMIP2016 has specific auxiliary fields (no qˡ total liquid field).
-# Rain sedimentation is handled by the internal kernel, not microphysical_velocities.
+# Rain sedimentation is handled by the internal kernel, not sedimentation_speed.
 
 @inline function AtmosphereModels.update_microphysical_auxiliaries!(μ, i, j, k, grid, ::DCMIP2016KM, ℳ::AtmosphereModels.WarmRainState, ρ, 𝒰, constants)
     # State fields
@@ -825,7 +825,7 @@ end
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
 
     # Note: DCMIP2016 does NOT have a qˡ (total liquid) field
-    # Rain sedimentation is handled internally, not via microphysical_velocities
+    # Rain sedimentation is handled internally, not via sedimentation_speed
 
     return nothing
 end

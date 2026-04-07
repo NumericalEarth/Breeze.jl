@@ -52,7 +52,7 @@ function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
     return SaturationAdjustment(tolerance, maxiter, equilibrium)
 end
 
-@inline AtmosphereModels.microphysical_velocities(::SaturationAdjustment, μ, name) = nothing
+@inline AtmosphereModels.sedimentation_speed(::SaturationAdjustment, μ, name) = nothing
 
 # SaturationAdjustment operates through the thermodynamic state adjustment pathway,
 # so no explicit model update is needed.
