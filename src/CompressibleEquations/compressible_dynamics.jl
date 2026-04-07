@@ -22,13 +22,18 @@ time-stepper is used:
 - [`SplitExplicitTimeDiscretization`](@ref): Acoustic substepping with separate slow/fast tendencies
 - [`ExplicitTimeStepping`](@ref): All tendencies computed together (small Δt required)
 """
-struct CompressibleDynamics{TD, D, P, FT, RS}
+struct CompressibleDynamics{TD, D, P, FT, RS, TM, CV, CM, TRP, TRD}
     time_discretization :: TD # SplitExplicitTimeDiscretization or ExplicitTimeStepping
     density :: D              # ρ (prognostic)
     pressure :: P             # p = ρ R^m T (diagnostic)
     standard_pressure :: FT   # pˢᵗ (reference pressure for potential temperature)
     surface_pressure :: FT    # p₀ (mean pressure at the bottom of the atmosphere)
     reference_state :: RS     # ExnerReferenceState for base-state pressure correction (or Nothing)
+    terrain_metrics :: TM     # TerrainMetrics for terrain-following coordinates (or Nothing)
+    Ω̃ :: CV                   # Contravariant vertical velocity diagnostic field (or Nothing)
+    ρΩ̃ :: CM                  # Contravariant vertical momentum diagnostic field (or Nothing)
+    terrain_reference_pressure :: TRP # 3D reference pressure for terrain PG (or Nothing)
+    terrain_reference_density :: TRD  # 3D reference density for terrain buoyancy (or Nothing)
 end
 
 """
@@ -56,13 +61,17 @@ Keyword Arguments
 function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               standard_pressure = 1e5,
                               surface_pressure = 101325.0,
-                              reference_potential_temperature = nothing) where TD
+                              reference_potential_temperature = nothing,
+                              terrain_metrics = nothing) where TD
 
     FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
     pˢᵗ = convert(FT, standard_pressure)
     p₀ = convert(FT, surface_pressure)
     # Store reference_potential_temperature temporarily; ExnerReferenceState is built in materialize_dynamics
-    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, reference_potential_temperature)
+    # terrain_metrics is passed through and stored; Ω̃ and ρΩ̃ are created during materialization
+    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀,
+                                reference_potential_temperature, terrain_metrics,
+                                nothing, nothing, nothing, nothing)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
@@ -71,7 +80,12 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.pressure),
                          dynamics.standard_pressure,
                          dynamics.surface_pressure,
-                         adapt(to, dynamics.reference_state))
+                         adapt(to, dynamics.reference_state),
+                         adapt(to, dynamics.terrain_metrics),
+                         adapt(to, dynamics.Ω̃),
+                         adapt(to, dynamics.ρΩ̃),
+                         adapt(to, dynamics.terrain_reference_pressure),
+                         adapt(to, dynamics.terrain_reference_density))
 
 #####
 ##### Materialization
@@ -100,8 +114,15 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     # ExnerReferenceState builds the Exner function π₀ by discrete integration,
     # ensuring exact discrete Exner hydrostatic balance. This is used for both
     # split-explicit (acoustic substepping) and explicit time stepping.
+    #
+    # For terrain-following grids, the 1D column ExnerReferenceState is NOT used
+    # because Δz varies per column. The column-1 reference creates a mismatch at
+    # other columns that generates spurious vertical accelerations. Instead, terrain
+    # grids use only the 3D terrain_reference_pressure for the horizontal PG.
     θ₀ = dynamics.reference_state  # temporarily stored θ₀ (or nothing)
-    if θ₀ === nothing
+    terrain_metrics = dynamics.terrain_metrics
+
+    if θ₀ === nothing || terrain_metrics !== nothing
         reference_state = nothing
     else
         reference_state = ExnerReferenceState(grid, thermodynamic_constants;
@@ -110,8 +131,40 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
                                               standard_pressure)
     end
 
+    # Create contravariant velocity/momentum fields if terrain metrics are present
+    if terrain_metrics === nothing
+        Ω̃ = nothing
+        ρΩ̃ = nothing
+        terrain_reference_pressure = nothing
+        terrain_reference_density = nothing
+    else
+        Ω̃ = ZFaceField(grid)
+        ρΩ̃ = ZFaceField(grid)
+
+        # Build 3D reference pressure and density fields via per-column discrete
+        # Exner integration. The discrete integration ensures that
+        #   δ(p_ref)/Δz + g ℑ(ρ_ref) ≈ 0
+        # to high accuracy at every grid face, which is essential for reducing
+        # the truncation error from the near-cancellation of ∂p/∂z and -gρ in
+        # the vertical momentum equation. The reference pressure is also used for
+        # the perturbation horizontal PG to reduce terrain-following PGF errors.
+        if θ₀ === nothing
+            terrain_reference_pressure = nothing
+            terrain_reference_density = nothing
+        else
+            terrain_reference_pressure = CenterField(grid)
+            terrain_reference_density = CenterField(grid)
+            compute_terrain_reference_state!(terrain_reference_pressure,
+                                             terrain_reference_density,
+                                             grid, surface_pressure, θ₀,
+                                             standard_pressure, thermodynamic_constants)
+        end
+    end
+
     return CompressibleDynamics(dynamics.time_discretization, density, pressure,
-                                standard_pressure, surface_pressure, reference_state)
+                                standard_pressure, surface_pressure, reference_state,
+                                terrain_metrics, Ω̃, ρΩ̃, terrain_reference_pressure,
+                                terrain_reference_density)
 end
 
 #####

@@ -399,6 +399,28 @@ end
     return nothing
 end
 
+@inline function cloud_terminal_velocity(
+    pdf_c, (; ρw, grav, ν_air), q_liq, ρₐ, N_liq,
+)
+    # Local copy of CM2.cloud_terminal_velocity with 2//3 → FT(2/3)
+    # so that Rational literals don't appear inside Reactant-traced code.
+    FT = eltype(q_liq)
+    ϵN = CloudMicrophysics.Utilities.ϵ_numerics_2M_N(FT)
+    ϵM = CloudMicrophysics.Utilities.ϵ_numerics_2M_M(FT)
+
+    (; νc, μc) = pdf_c
+    (; Bc) = CM2.pdf_cloud_parameters_mass(pdf_c, q_liq, ρₐ, N_liq)
+
+    prefactor = FT(1 / 18) * (6 / ρw / π)^FT(2 / 3) * (ρw / ρₐ - 1) * grav / ν_air
+
+    vt0 = ifelse(N_liq < ϵN, FT(0),
+        prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(2 / 3)) / N_liq)
+    vt1 = ifelse(q_liq < ϵM, FT(0),
+        prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(5 / 3)) / ρₐ / q_liq)
+
+    return (vt0, vt1)
+end
+
 @inline function update_2m_terminal_velocities!(μ, i, j, k, bμp, categories, ρ)
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
@@ -419,8 +441,8 @@ end
     Nʳ = max(ρ * max(0, nʳ), Nʳ_min)
 
     # Cloud liquid terminal velocities: (number-weighted, mass-weighted)
-    𝕎_cl = CM2.cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
-                                       qᶜˡ⁺, ρ, Nᶜˡ)
+    𝕎_cl = cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
+                                   qᶜˡ⁺, ρ, Nᶜˡ)
 
     wᶜˡₙ = -𝕎_cl[1]  # number-weighted, negative = downward
     wᶜˡ = -𝕎_cl[2]   # mass-weighted
