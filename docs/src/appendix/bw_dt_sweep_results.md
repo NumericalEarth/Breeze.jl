@@ -222,18 +222,84 @@ history at that point — it is not a real instability).
    `ρθ″` nor `previous_rtheta_pp` has any history; it relaxes within a few
    steps and does not affect the BCI trajectory.
 
-### Updated recommendation
+## Final controlled comparison: CFL = 0.7 on the (-80, 80) grid
 
-For BW runs that target Δt > 100 s on the 1° lat-lon grid, prefer
-**`PressureProjectionDamping(coefficient = 0.5)`** over the default
-`ThermodynamicDivergenceDamping(coefficient = 0.1)`. It produces a cleaner
-BCI lifecycle at moderate Δt (200) and a slightly higher Δt ceiling, at the
-cost of one CenterField of scratch and a per-cell EOS evaluation per substep.
+The previous sweeps were partially confounded by the polar Δx_min trap on
+`latitude=(-85, 85)`: the smallest cell at lat 85° is ≈ 9.7 km, and at
+the BCI peak (U ≈ 60 m/s) any Δt > 113 s exceeds advective CFL = 0.7. So
+"noise at Δt > 100" might have been advective marginal-stability noise
+rather than the substepper's acoustic noise.
 
-The default in `time_discretizations.jl` is unchanged
-(`ThermodynamicDivergenceDamping(0.1)`) for bit-compatibility with the
-pre-Phase-2 hardcoded path. Users who want larger Δt should opt in
-explicitly.
+To compare damping strategies *as such*, we use a configuration where the
+advective scheme is comfortably stable across the whole BCI lifecycle:
+
+- **Domain**: `latitude = (-80, 80)` (avoids the polar Δx_min trap;
+  Δx_min ≈ 19.3 km at lat 80°).
+- **Time step**: Δt = **225 s**, chosen so the BCI peak (U ≈ 60 m/s)
+  hits CFL = 60 · 225 / 19300 ≈ **0.70** exactly, right at the empirical
+  WS-RK3 + WENO5 limit.
+- **Run target**: 7 simulated days.
+
+At this Δt the advective scheme is stable throughout the run, so any
+noise we see is *acoustic* and the comparison is genuinely about damping
+strategy. Results from `test_bw_cfl07_compare.jl`:
+
+| Strategy                                  | result          | body max\|w\| | day-7 max\|w\| |
+|-------------------------------------------|-----------------|---------------:|---------------:|
+| `NoDivergenceDamping`                     | **crash d2.66** | 14.17          | (n/a)          |
+| `ThermodynamicDivergenceDamping(0.1)`     | day7, noisy     | 5.14           | 4.28           |
+| `ThermodynamicDivergenceDamping(0.5)`     | **crash d0.02** | 1.97e+5        | (n/a)          |
+| `ConservativeProjectionDamping(0.1)`      | day7, noisy     | 6.41           | 3.61           |
+| `PressureProjectionDamping(0.1)`          | day7, noisy     | 6.71           | 4.17           |
+| **`PressureProjectionDamping(0.5)`**      | **day7, clean** | **0.38**       | **0.24**       |
+
+`body max\|w\|` excludes the first 5 startup steps (the projection
+strategies briefly transient on initialisation, see §3 above).
+
+### Findings
+
+1. **`NoDivergenceDamping` crashes at day 2.66 even at CFL = 0.7.** Some
+   form of divergence damping is *necessary* — acoustic noise builds up
+   even when the advective scheme is comfortably below its CFL ceiling.
+
+2. **`ThermodynamicDivergenceDamping(0.5)` crashes at step 10** with
+   `max\|w\| ≈ 200000`. The MPAS Klemp 2018 momentum-correction form is
+   *itself* unstable when the coefficient is too large — the correction
+   becomes large enough that it overshoots the divergence it is supposed
+   to damp. The MPAS default `config_smdiv = 0.1` (= the Breeze default
+   coefficient until this commit) is the maximum useful value of this
+   strategy on this configuration.
+
+3. **The three "moderate damping" strategies** (Thermo(0.1), Cons(0.1),
+   Press(0.1)) all reach day 7 but produce noisy BCIs (max\|w\| ≈ 4–7 m/s).
+   They are stable but they are not removing enough acoustic noise to
+   recover the canonical reference's clean lifecycle.
+
+4. **`PressureProjectionDamping(0.5)` is in a class of its own.** Day-7
+   max\|w\| = 0.24 — essentially identical to the canonical Δt = 60
+   reference. body max\|w\| = 0.38 — the trajectory peak (excluding the
+   benign step-1 transient) is far below any other strategy. This is the
+   first configuration that produces a clean BCI lifecycle at the
+   advective-CFL ceiling.
+
+### Recommendation and new default
+
+The default in `src/CompressibleEquations/time_discretizations.jl` is now
+`damping = PressureProjectionDamping(coefficient = 0.5)`. This is a
+behaviour change from the prior default `ThermodynamicDivergenceDamping(0.1)`
+(which itself was bit-equivalent to the pre-Phase-2 hardcoded path). On the
+canonical Skamarock-Klemp IGW the new default produces max\|w\| = 7.557e-3
+vs the old default's 7.553e-3 — within 0.06 %. On the BW it is the only
+strategy that produces a clean lifecycle at the advective-CFL ceiling.
+
+Users who need bit-equivalence with the pre-Phase-2 hardcoded path should
+construct the time discretization explicitly:
+
+```julia
+SplitExplicitTimeDiscretization(;
+    damping = ThermodynamicDivergenceDamping(coefficient = 0.1)
+)
+```
 
 ## See also
 

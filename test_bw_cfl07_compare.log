@@ -1,0 +1,105 @@
+Δt = 225 s, 2688 outer steps to day 7
+Δx_min at lat 80° ≈ 19.31 km, advective CFL @ U=60 m/s = 0.70
+
+========================================
+=== NoDivergenceDamping ===
+========================================
+day  1.00  max|w|=1.533e-02  max|u|= 28.4  max|v|= 3.28  min(p_bot)=865.8 hPa  [wall 44s]
+day  2.00  max|w|=1.431e+00  max|u|= 47.0  max|v|=15.26  min(p_bot)=811.1 hPa  [wall 49s]
+NaN at outer step 1022 (t=2.66 days)
+
+--- NoDivergenceDamping done: 53s wall, reached day 2.66 ---
+Saved bw_cfl07_none.jld2
+
+========================================
+=== ThermodynamicDivergenceDamping(0.1) ===
+========================================
+day  1.00  max|w|=1.400e-02  max|u|= 28.3  max|v|= 3.25  min(p_bot)=865.8 hPa  [wall 25s]
+day  2.00  max|w|=3.309e-02  max|u|= 28.1  max|v|= 4.24  min(p_bot)=865.8 hPa  [wall 31s]
+day  3.00  max|w|=3.689e-01  max|u|= 28.1  max|v|= 8.14  min(p_bot)=865.8 hPa  [wall 38s]
+day  4.00  max|w|=2.124e+00  max|u|= 47.0  max|v|=15.63  min(p_bot)=864.0 hPa  [wall 44s]
+day  5.00  max|w|=3.296e+00  max|u|= 66.9  max|v|=35.62  min(p_bot)=862.0 hPa  [wall 51s]
+day  6.00  max|w|=4.353e+00  max|u|=107.4  max|v|=61.26  min(p_bot)=862.3 hPa  [wall 58s]
+day  7.00  max|w|=4.279e+00  max|u|= 81.1  max|v|=62.49  min(p_bot)=855.5 hPa  [wall 65s]
+
+--- ThermodynamicDivergenceDamping(0.1) done: 65s wall, reached day 7.00 ---
+Saved bw_cfl07_thermo01.jld2
+
+========================================
+=== ThermodynamicDivergenceDamping(0.5) ===
+========================================
+NaN at outer step 10 (t=0.03 days)
+
+--- ThermodynamicDivergenceDamping(0.5) done: 0s wall, reached day 0.02 ---
+Saved bw_cfl07_thermo05.jld2
+
+========================================
+=== ConservativeProjectionDamping(0.1) ===
+========================================
+day  1.00  max|w|=1.461e-02  max|u|= 28.3  max|v|= 3.26  min(p_bot)=865.8 hPa  [wall 24s]
+day  2.00  max|w|=6.540e-02  max|u|= 28.1  max|v|= 4.22  min(p_bot)=865.8 hPa  [wall 29s]
+day  3.00  max|w|=9.407e-01  max|u|= 28.4  max|v|=15.46  min(p_bot)=865.8 hPa  [wall 34s]
+day  4.00  max|w|=3.986e+00  max|u|= 73.9  max|v|=63.31  min(p_bot)=864.2 hPa  [wall 39s]
+day  5.00  max|w|=5.922e+00  max|u|= 96.1  max|v|=48.94  min(p_bot)=860.5 hPa  [wall 45s]
+day  6.00  max|w|=4.942e+00  max|u|= 93.2  max|v|=57.91  min(p_bot)=863.9 hPa  [wall 50s]
+day  7.00  max|w|=3.613e+00  max|u|= 75.5  max|v|=65.12  min(p_bot)=857.9 hPa  [wall 55s]
+
+--- ConservativeProjectionDamping(0.1) done: 55s wall, reached day 7.00 ---
+Saved bw_cfl07_cons01.jld2
+
+========================================
+=== PressureProjectionDamping(0.1) ===
+========================================
+day  1.00  max|w|=1.456e-02  max|u|= 28.3  max|v|= 3.26  min(p_bot)=865.8 hPa  [wall 24s]
+day  2.00  max|w|=7.303e-02  max|u|= 28.1  max|v|= 4.22  min(p_bot)=865.8 hPa  [wall 29s]
+day  3.00  max|w|=9.286e-01  max|u|= 28.4  max|v|=15.38  min(p_bot)=865.8 hPa  [wall 35s]
+day  4.00  max|w|=4.052e+00  max|u|= 72.6  max|v|=62.71  min(p_bot)=863.3 hPa  [wall 40s]
+day  5.00  max|w|=5.082e+00  max|u|= 92.3  max|v|=46.21  min(p_bot)=859.8 hPa  [wall 45s]
+day  6.00  max|w|=4.751e+00  max|u|= 85.6  max|v|=52.64  min(p_bot)=864.6 hPa  [wall 51s]
+day  7.00  max|w|=4.174e+00  max|u|= 88.3  max|v|=66.05  min(p_bot)=852.5 hPa  [wall 56s]
+
+--- PressureProjectionDamping(0.1) done: 56s wall, reached day 7.00 ---
+Saved bw_cfl07_press01.jld2
+
+========================================
+=== PressureProjectionDamping(0.5) ===
+========================================
+day  1.00  max|w|=1.374e-02  max|u|= 28.3  max|v|= 3.21  min(p_bot)=865.8 hPa  [wall 5s]
+day  2.00  max|w|=1.528e-02  max|u|= 28.1  max|v|= 4.17  min(p_bot)=865.8 hPa  [wall 10s]
+day  3.00  max|w|=9.583e-03  max|u|= 28.0  max|v|= 3.18  min(p_bot)=865.8 hPa  [wall 16s]
+day  4.00  max|w|=1.465e-02  max|u|= 28.4  max|v|= 2.83  min(p_bot)=865.7 hPa  [wall 21s]
+day  5.00  max|w|=2.502e-02  max|u|= 28.3  max|v|= 7.63  min(p_bot)=865.8 hPa  [wall 26s]
+day  6.00  max|w|=1.424e-01  max|u|= 29.0  max|v|=25.38  min(p_bot)=865.9 hPa  [wall 31s]
+day  7.00  max|w|=2.405e-01  max|u|= 31.0  max|v|=38.68  min(p_bot)=855.1 hPa  [wall 36s]
+
+--- PressureProjectionDamping(0.5) done: 36s wall, reached day 7.00 ---
+Saved bw_cfl07_press05.jld2
+┌ Warning: CUDA runtime library `libcusparse.so.12` was loaded from a system path, `/usr/local/cuda/lib64/libcusparse.so.12`.
+│ This may cause errors.
+│ 
+│ If you're running under a profiler, this situation is expected. Otherwise,
+│ ensure that your library path environment variable (e.g., `PATH` on Windows
+│ or `LD_LIBRARY_PATH` on Linux) does not include CUDA library paths.
+│ 
+│ In any other case, please file an issue.
+└ @ CUDA ~/.julia/packages/CUDA/Il00B/src/initialization.jl:198
+┌ Warning: CUDA runtime library `libnvJitLink.so.13` was loaded from a system path, `/usr/local/cuda/lib64/libnvJitLink.so.13`.
+│ This may cause errors.
+│ 
+│ If you're running under a profiler, this situation is expected. Otherwise,
+│ ensure that your library path environment variable (e.g., `PATH` on Windows
+│ or `LD_LIBRARY_PATH` on Linux) does not include CUDA library paths.
+│ 
+│ In any other case, please file an issue.
+└ @ CUDA ~/.julia/packages/CUDA/Il00B/src/initialization.jl:198
+
+
+================================ SUMMARY ================================
+strategy                                   crashed at      final day    body max|w|   day-7 max|w|
+NoDivergenceDamping                         step 1022           2.66     1.4168e+01     1.1286e+01
+ThermodynamicDivergenceDamping(0.1)                 —           7.00     5.1440e+00     4.2793e+00
+ThermodynamicDivergenceDamping(0.5)           step 10           0.02     1.9670e+05     1.9670e+05
+ConservativeProjectionDamping(0.1)                  —           7.00     6.4116e+00     3.6129e+00
+PressureProjectionDamping(0.1)                      —           7.00     6.7075e+00     4.1735e+00
+PressureProjectionDamping(0.5)                      —           7.00     3.7520e-01     2.4047e-01
+=========================================================================
