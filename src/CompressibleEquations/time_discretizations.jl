@@ -6,6 +6,64 @@
 ##### - ExplicitTimeStepping: Standard explicit time-stepping (small Δt required)
 #####
 
+#####
+##### Acoustic substep distribution across the WS-RK3 stages
+#####
+
+"""
+$(TYPEDEF)
+
+Abstract supertype for the choice of how acoustic substeps are distributed
+across the three Wicker–Skamarock RK3 stages.
+
+Concrete subtypes:
+
+  - [`ProportionalSubsteps`](@ref) — every stage uses the same substep size
+    ``Δτ = Δt/N``, with stage-dependent substep counts ``Nτ = \\max(1, \\mathrm{round}(β N))``
+    (so for the canonical β = (1/3, 1/2, 1) this is N/3, N/2, N substeps in
+    stages 1, 2, 3). This is the default and matches CM1.
+
+  - [`MonolithicFirstStage`](@ref) — stage 1 collapses to a single substep of
+    size ``Δt/3``; stages 2 and 3 are the same as `ProportionalSubsteps`. This
+    matches MPAS-A with `config_time_integration_order = 3`.
+"""
+abstract type AcousticSubstepDistribution end
+
+"""
+$(TYPEDEF)
+
+Acoustic substep distribution where every stage uses the same substep size
+``Δτ = Δt/N`` and the substep counts scale with the WS-RK3 stage fraction
+``Nτ = \\max(1, \\mathrm{round}(β_\\mathrm{stage} N))``. For the canonical
+β = (1/3, 1/2, 1) this gives ``N/3``, ``N/2``, ``N`` substeps in stages 1,
+2, 3 respectively.
+
+The horizontal acoustic CFL constraint is set by ``Δτ = Δt/N`` — the same in
+every stage — so no individual stage imposes a tighter Δt ceiling than the
+others.
+
+This is Breeze's default and matches CM1 ([Bryan and Fritsch (2002)](@cite Bryan2002)).
+"""
+struct ProportionalSubsteps <: AcousticSubstepDistribution end
+
+"""
+$(TYPEDEF)
+
+Acoustic substep distribution where stage 1 of WS-RK3 collapses to a single
+substep of size ``Δt/3``, while stages 2 and 3 use the same proportional
+counts as [`ProportionalSubsteps`](@ref) (``N/2`` and ``N`` substeps of size
+``Δt/N``).
+
+Because stage 1 uses a substep of size ``Δt/3`` (rather than the per-substep
+``Δt/N`` of stages 2 and 3), the stage-1 horizontal acoustic CFL becomes
+``Δt/3 < Δx_\\mathrm{min}/c_s``, which is ``N/3`` times tighter than the
+[`ProportionalSubsteps`](@ref) form. This is the dispatch used by MPAS-A
+when `config_time_integration_order = 3` (see `mpas_atm_time_integration.F`),
+and is provided here for bit-compatible comparisons against MPAS reference
+output.
+"""
+struct MonolithicFirstStage <: AcousticSubstepDistribution end
+
 """
 $(TYPEDEF)
 
@@ -30,24 +88,28 @@ Fields
 - `forward_weight`: Off-centering parameter ω for the vertically implicit solver. ω > 0.5 damps vertical acoustic modes. Default: 0.55 (gives epssm=0.1, matching MPAS default)
 - `divergence_damping_coefficient`: Forward-extrapolation filter coefficient ``ϰ^{di}`` applied to the Exner pressure perturbation: ``π̃' = π' + ϰ^{di} (π' - π'_{old})``. Default: 0.10 (CM1 default)
 - `acoustic_damping_coefficient`: Klemp (2018) divergence damping ``ϰ^{ac}``. Post-implicit-solve velocity correction: ``u -= ϰ^{ac} c_p θ_v ∂Δπ'/∂x``. Provides constant damping per outer Δt regardless of substep count. Needed by WS-RK3 at large Δt. Default: 0.0
+- `substep_distribution`: How acoustic substeps are distributed across the three WS-RK3 stages. One of [`ProportionalSubsteps`](@ref) (default; constant ``Δτ = Δt/N`` with stage counts ``N/3``, ``N/2``, ``N``) or [`MonolithicFirstStage`](@ref) (single substep of size ``Δt/3`` in stage 1, MPAS-A `config_time_integration_order = 3` form).
 
 See also [`ExplicitTimeStepping`](@ref).
 """
-struct SplitExplicitTimeDiscretization{N, FT}
+struct SplitExplicitTimeDiscretization{N, FT, AD <: AcousticSubstepDistribution}
     substeps :: N
     forward_weight :: FT
     divergence_damping_coefficient :: FT
     acoustic_damping_coefficient :: FT
+    substep_distribution :: AD
 end
 
 function SplitExplicitTimeDiscretization(; substeps=nothing,
                                            forward_weight=0.6,
                                            divergence_damping_coefficient=0.10,
-                                           acoustic_damping_coefficient=0.0)
+                                           acoustic_damping_coefficient=0.0,
+                                           substep_distribution=ProportionalSubsteps())
     return SplitExplicitTimeDiscretization(substeps,
                                            forward_weight,
                                            divergence_damping_coefficient,
-                                           acoustic_damping_coefficient)
+                                           acoustic_damping_coefficient,
+                                           substep_distribution)
 end
 
 """

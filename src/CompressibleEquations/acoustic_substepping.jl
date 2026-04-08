@@ -170,11 +170,12 @@ Fields
 The `cofwz`, `cofwr`, `cofwt`, `coftz` MPAS coefficients are computed inline by
 helper functions inside the column kernel — no fields are stored.
 """
-struct AcousticSubstepper{N, FT, CF, FF, XF, YF, GT, AV, ST, TS}
+struct AcousticSubstepper{N, FT, AD, CF, FF, XF, YF, GT, AV, ST, TS}
     substeps :: N
     forward_weight :: FT                       # Off-centering ω → epssm = 2ω - 1
     divergence_damping_coefficient :: FT
     acoustic_damping_coefficient :: FT
+    substep_distribution :: AD                 # ProportionalSubsteps or MonolithicFirstStage
     virtual_potential_temperature :: CF        # Stage-frozen θ_m (MPAS `t`)
     reference_exner_function :: CF             # π₀ from reference state
     theta_flux_scratch :: CF                   # ts_scratch in column kernel
@@ -202,6 +203,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        a.forward_weight,
                        a.divergence_damping_coefficient,
                        a.acoustic_damping_coefficient,
+                       a.substep_distribution,
                        adapt(to, a.virtual_potential_temperature),
                        adapt(to, a.reference_exner_function),
                        adapt(to, a.theta_flux_scratch),
@@ -238,6 +240,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     ω = convert(FT, split_explicit.forward_weight)
     ϰᵈⁱ = convert(FT, split_explicit.divergence_damping_coefficient)
     ϰᵃᶜ = convert(FT, split_explicit.acoustic_damping_coefficient)
+    substep_distribution = split_explicit.substep_distribution
 
     virtual_potential_temperature = CenterField(grid)
     reference_exner_function = CenterField(grid)
@@ -295,6 +298,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     frozen_pressure = CenterField(grid)
 
     return AcousticSubstepper(Ns, ω, ϰᵈⁱ, ϰᵃᶜ,
+                              substep_distribution,
                               virtual_potential_temperature,
                               reference_exner_function,
                               theta_flux_scratch,
@@ -1102,39 +1106,60 @@ end
 ##### Section 9: WS-RK3 substep loop
 #####
 
+# Stage substep count and size for ProportionalSubsteps:
+# Δτ is the same in every stage; Nτ scales with the WS-RK3 stage fraction.
+# For β = (1/3, 1/2, 1) and N a multiple of 6 this gives N/3, N/2, N substeps.
+@inline function _stage_substep_count_and_size(::ProportionalSubsteps, β_stage, Δt, N)
+    Δτ = Δt / N
+    Nτ = max(1, round(Int, β_stage * N))
+    return Nτ, Δτ
+end
+
+# Stage substep count and size for MonolithicFirstStage:
+# Stage 1 collapses to a single substep of size Δt/3 (matching MPAS-A
+# `config_time_integration_order = 3`); stages 2 and 3 are identical to
+# ProportionalSubsteps. Stage 1 is identified by β_stage being closer to
+# 1/3 than to 1/2 — a robust comparison that avoids any Float ↔ Rational
+# round-trip in the inner loop.
+@inline function _stage_substep_count_and_size(::MonolithicFirstStage, β_stage, Δt, N)
+    if β_stage < (1//3 + 1//2) / 2   # β_stage is the canonical 1/3
+        return 1, Δt / 3
+    else
+        Δτ = Δt / N
+        Nτ = max(1, round(Int, β_stage * N))
+        return Nτ, Δτ
+    end
+end
+
 """
 $(TYPEDSIGNATURES)
 
-Execute the acoustic substep loop for a Wicker-Skamarock RK3 stage
-using the Exner pressure formulation.
+Execute the acoustic substep loop for a Wicker-Skamarock RK3 stage using
+the Exner pressure formulation. The number and size of substeps in this
+stage depends on `substepper.substep_distribution`:
 
-CM1-style Wicker–Skamarock with constant substep size ``Δτ = Δt/N`` across all
-stages and a stage-dependent substep count ``Nτ = \\max(\\mathrm{round}(β N), 1)``.
-With β₁=1/3, β₂=1/2, β₃=1 and ``N`` a multiple of 6 this gives ``N/3``,
-``N/2``, ``N`` substeps in stages 1, 2, 3 respectively (matching CM1).
+  - [`ProportionalSubsteps`](@ref) (default): every stage uses
+    ``Δτ = Δt/N`` and ``Nτ = \\max(\\mathrm{round}(β N), 1)`` substeps
+    (so for β = 1/3, 1/2, 1 this gives N/3, N/2, N substeps).
+  - [`MonolithicFirstStage`](@ref): stage 1 collapses to a single substep
+    of size ``Δt/3``; stages 2 and 3 are the same as `ProportionalSubsteps`.
+
+`N` is rounded up to a multiple of 6 so that N/3 and N/2 are both integers.
 """
 function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     grid = model.grid
     arch = architecture(grid)
     cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
 
-    # Compute substep count (adaptive when substeps === nothing).
-    # CM1-style WS-RK3 needs `N` to be a multiple of 6 so that BOTH N/3 (stage 1)
-    # and N/2 (stage 2) are integers. We round the auto-computed N up to the
-    # next multiple of 6 with a floor of 6.
+    # Compute substep count (adaptive when substeps === nothing). Round up to
+    # a multiple of 6 so that N/3 (stage 1, ProportionalSubsteps) and N/2
+    # (stage 2) are both integers.
     N_raw = acoustic_substeps(substepper.substeps, grid, Δt, model.thermodynamic_constants)
     N = max(6, 6 * cld(N_raw, 6))
 
-    # CM1-style WS-RK3 (canonical Wicker–Skamarock 1/3, 1/2, 1):
-    #   Stage 1: N/3 substeps, dτ = Δt/N              → total = Δt/3
-    #   Stage 2: N/2 substeps, dτ = Δt/N              → total = Δt/2
-    #   Stage 3: N   substeps, dτ = Δt/N              → total = Δt
-    # The substep size is constant Δτ = Δt/N across all stages — only the
-    # substep count varies with β. Unlike the MPAS 3rd-order variant
-    # (β₁=1/3, 1 substep stage 1 of size dt/3), the stage-1 acoustic CFL is
-    # the SAME as stages 2 and 3, removing the `Δt < 3·Δx_min/cs` ceiling.
-    Δτ = Δt / N
-    Nτ = max(1, round(Int, β_stage * N))
+    # Stage substep count and size — dispatched on the AcousticSubstepDistribution
+    # type carried by the substepper.
+    Nτ, Δτ = _stage_substep_count_and_size(substepper.substep_distribution, β_stage, Δt, N)
 
     # Convert slow tendencies to velocity/pressure form.
     # MPAS: tend_w_euler (vertical PGF + buoyancy) is computed ONLY at rk_step=1
