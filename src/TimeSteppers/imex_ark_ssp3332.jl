@@ -67,8 +67,6 @@ end
 #####
 
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:IMEXRungeKuttaSSP3332}, Δt; callbacks=[])
-    Δt == 0 && @warn "Δt == 0 may cause model blowup!"
-
     maybe_prepare_first_time_step!(model, callbacks)
 
     ts = model.timestepper
