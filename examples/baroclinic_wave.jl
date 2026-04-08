@@ -8,9 +8,13 @@
 # gradient is seeded with a localized zonal-wind perturbation that triggers
 # baroclinic instability, producing growing Rossby waves over roughly ten days.
 #
-# This example exercises `CompressibleDynamics` with `ExplicitTimeStepping`
-# and `HydrostaticSphericalCoriolis` on a latitude-longitude grid spanning
-# 85° S to 85° N.
+# This example exercises `CompressibleDynamics` with `SplitExplicitTimeDiscretization`
+# (acoustic substepping via [`AcousticRungeKutta3`](@ref)) and
+# `HydrostaticSphericalCoriolis` on a 1° latitude-longitude grid spanning
+# 80° S to 80° N. Acoustic substepping lets the outer time step be set by
+# the *advective* CFL rather than the much-tighter acoustic CFL — here Δt
+# is chosen so the BCI-peak jet (`U_max ≈ 60` m/s) hits CFL ≈ 0.7 against
+# the polar `Δx_min`.
 #
 # ## Physical setup
 #
@@ -83,12 +87,15 @@ a   = Oceananigans.defaults.planet_radius
 
 # ## Domain and grid
 #
-# We use a near-global latitude-longitude grid at roughly 2° horizontal
-# resolution, excluding the poles to avoid the coordinate singularity.
-# The domain extends from the surface to 30 km with 30 vertical levels.
+# We use a 1° latitude-longitude grid spanning 80° S to 80° N. Capping the
+# domain at ±80° (rather than ±85°) keeps the polar `Δx_min` at a manageable
+# `a · cos 80° · 2π/Nλ ≈ 19.3 km` instead of the ≈ 9.7 km we would have at
+# 85°. This sets the substepper's outer time step at a useful 225 s rather
+# than 113 s. The domain extends from the surface to 30 km with 30 vertical
+# levels.
 
-Nλ = 180
-Nφ = 85
+Nλ = 360
+Nφ = 160
 Nz = 30
 H  = 30kilometers
 
@@ -96,7 +103,7 @@ grid = LatitudeLongitudeGrid(GPU();
                              size = (Nλ, Nφ, Nz),
                              halo = (5, 5, 5),
                              longitude = (0, 360),
-                             latitude = (-85, 85),
+                             latitude = (-80, 80),
                              z = (0, H))
 
 ## Temperature profile parameters
@@ -196,21 +203,33 @@ end
 
 # ## Model configuration
 #
-# We use fully explicit compressible dynamics with no reference state
-# subtraction. The vertical momentum equation computes the full pressure
-# gradient and gravitational force directly: ``∂(ρw)/∂t = -∂p/∂z - ρg + \ldots``
-# This avoids errors from a 1D reference state that cannot capture the
-# meridional density structure of the balanced jet.
+# We use fully compressible dynamics with **acoustic substepping** via
+# [`SplitExplicitTimeDiscretization`](@ref) and the [`AcousticRungeKutta3`](@ref)
+# (Wicker–Skamarock RK3) outer loop. Acoustic substepping handles the
+# fast acoustic-mode pressure gradient and buoyancy via a vertically-implicit
+# inner loop, so the outer time step is limited only by the *advective*
+# CFL — about 200× larger than the acoustic-CFL-limited Δt = 2 s of the
+# fully explicit solver.
+#
+# We use a hydrostatically-balanced isothermal reference state at
+# `T₀_ref = 250 K` (matching the MPAS convention) so that the substepper's
+# slow tendencies see only perturbations from the background.
 # `HydrostaticSphericalCoriolis` retains the traditional ``f = 2Ω \sin φ``
 # Coriolis terms.
 
 coriolis = HydrostaticSphericalCoriolis(rotation_rate=Ω)
 
-dynamics = CompressibleDynamics(ExplicitTimeStepping(); surface_pressure = p₀)
+T₀_ref = 250.0
+θ_ref(z) = T₀_ref * exp(g * z / (cᵖᵈ * T₀_ref))
+
+dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                surface_pressure = p₀,
+                                reference_potential_temperature = θ_ref)
 
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        advection = WENO())
+                        advection = WENO(),
+                        timestepper = :AcousticRungeKutta3)
 
 # ## Set initial conditions
 
@@ -218,28 +237,27 @@ set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
 
 # ## Time-stepping
 #
-# With explicit time stepping the time step is limited by the acoustic CFL.
-# For ``Δx ≈ 200`` km and sound speed ``c_s ≈ 340`` m/s,
-# the acoustic CFL gives ``Δt ≈ 2`` s.
-# We run for 15 days to observe baroclinic wave growth; the instability
-# becomes visible around day 4 and develops explosive cyclogenesis near day 8.
+# Substepping eliminates the acoustic CFL constraint on the outer Δt. We
+# choose Δt so the BCI peak jet (`U_max ≈ 60 m/s`) hits CFL = 0.7 against
+# the polar `Δx_min ≈ 19.3 km` on this 1° grid:
+#
+# ```math
+# Δt ≈ 0.7 \cdot Δx_{\min} / U_{\max} \approx 225 \text{ s}.
+# ```
+#
+# This is roughly **110× larger** than the acoustic-CFL-limited Δt = 2 s
+# the fully explicit solver requires for the same grid. We run for 14 days
+# to observe baroclinic wave growth — the instability becomes visible
+# around day 4 and develops explosive cyclogenesis near day 8.
 
-Δt = 2seconds
-stop_time = 15days
+Δt = 225seconds
+stop_time = 14days
 
 simulation = Simulation(model; Δt, stop_time)
 
-# ## Polar filter
+# ## Progress callback
 #
-# On a latitude-longitude grid the zonal grid spacing shrinks as
-# ``Δx(φ) = a \cos φ \, Δλ``, reaching roughly one-eleventh of the equatorial
-# value at 85°. The polar filter damps unresolvable high-wavenumber zonal
-# modes poleward of 60° using a batched spectral truncation, following the
-# WRF approach ([Skamarock et al., 2008](@cite Skamarock2008Description)).
-
-add_polar_filter!(simulation; threshold_latitude=60)
-
-# Progress callback:
+# Print every 100 outer steps (~ every 6 simulated hours at Δt = 225 s).
 
 function progress(sim)
     u, v, w = sim.model.velocities
@@ -248,7 +266,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(1000))
+add_callback!(simulation, progress, IterationInterval(100))
 
 # ## Output
 #
