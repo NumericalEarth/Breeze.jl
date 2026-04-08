@@ -287,14 +287,13 @@ function Base.show(io::IO, dynamics::CompressibleDynamics)
     if dynamics.density === nothing
         print(io, "├── density: not materialized\n")
         print(io, "├── pressure: not materialized\n")
-        print(io, "├── time_discretization: ", summary(dynamics.time_discretization), '\n')
-        print(io, "└── reference_state: ", summary(dynamics.reference_state))
     else
         print(io, "├── density: ", prettysummary(dynamics.density), '\n')
         print(io, "├── pressure: ", prettysummary(dynamics.pressure), '\n')
-        print(io, "├── time_discretization: ", summary(dynamics.time_discretization), '\n')
-        print(io, "└── reference_state: ", summary(dynamics.reference_state))
     end
+    print(io, "├── terrain_metrics: ", summary(dynamics.terrain_metrics), '\n')
+    print(io, "├── time_discretization: ", summary(dynamics.time_discretization), '\n')
+    print(io, "└── reference_state: ", summary(dynamics.reference_state))
 end
 
 #####

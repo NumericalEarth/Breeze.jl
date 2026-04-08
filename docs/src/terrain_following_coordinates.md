@@ -177,7 +177,7 @@ Pass the [`TerrainMetrics`](@ref) to [`CompressibleDynamics`](@ref) via the
 ```@example terrain
 dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
 model = AtmosphereModel(grid; dynamics)
-typeof(model.dynamics.terrain_metrics)
+model.dynamics.terrain_metrics
 ```
 
 When `terrain_metrics` is present, the model automatically:
