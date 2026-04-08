@@ -192,6 +192,7 @@ export
     P3IntegralEvaluator,
     save_p3_lookup_tables,
     load_p3_lookup_tables,
+    read_fortran_lookup_tables,
 
     # Lambda solver
     IceMassPowerLaw,
@@ -308,6 +309,12 @@ include("lookup_table_io.jl")
 #####
 
 include("rain_quadrature.jl")
+
+#####
+##### Fortran ASCII table reader (depends on rain_quadrature.jl and tabulated_function_adapters.jl)
+#####
+
+include("fortran_table_reader.jl")
 
 #####
 ##### Process rates
