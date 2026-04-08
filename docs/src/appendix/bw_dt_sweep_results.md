@@ -23,8 +23,7 @@ distribution.
 - **Run target**: 7 simulated days, or first NaN.
 - **Hardware**: NVIDIA H100 80GB.
 
-The script lives at `test_bw_1deg_dt_sweep_compare.jl` and the full log at
-`test_bw_1deg_dt_sweep_compare.log`.
+The script lives at `test_bw_1deg_dt_sweep_compare.jl`.
 
 ## Results
 
@@ -171,8 +170,7 @@ and (b) cranking ``β_d`` extends the Δt ceiling.
 Setup is identical to the table above (1° DCMIP2016 BW, 7-day target,
 `ProportionalSubsteps`) except the damping is
 `PressureProjectionDamping(coefficient = β_d)`. The script is
-`test_bw_1deg_pressure_sweep.jl` and the log
-`test_bw_1deg_pressure_sweep.log`.
+`test_bw_1deg_pressure_sweep.jl`.
 
 The summary shows the **trajectory max\|w\| excluding the first 5 startup
 steps** (the projection produces a benign IC transient at step ≈ 1–2 that
@@ -331,6 +329,6 @@ SplitExplicitTimeDiscretization(;
 
 - [Acoustic Substepping Cleanup and Damping Plan](substepping_cleanup_and_damping_plan.md)
 - The four-strategy comparison at fixed Δt = 1400 s lives in
-  `test_bw_1deg_damping_compare.jl` / `test_bw_1deg_damping_compare.log`,
+  `test_bw_1deg_damping_compare.jl`,
   with the "form of damping matters at the same coefficient, but not enough
   at coefficient = 0.1" finding.
