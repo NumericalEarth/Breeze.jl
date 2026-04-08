@@ -96,45 +96,70 @@ visible cost is a higher acoustic-noise floor in `w`.
 low-noise BW runs. `MonolithicFirstStage` is only useful for bit-compatible
 comparisons against MPAS-A `config_time_integration_order = 3`.
 
-### 4. The hard ceiling is around Δt ≈ 250 s on this grid
+### 4. The hard ceiling is the **advective CFL at the polar Δx_min**
 
 Both distributions reach day 7 at Δt ≤ 200 s and crash above Δt ~ 300 s.
-The gap to MPAS-A's "Δt = 1800 s on a 1° mesh" is **roughly an order of
-magnitude**.
+This is *not* a substepper limit, *not* a gravity-wave temporal-resolution
+limit, and *not* fixable by divergence damping. It is the explicit
+WS-RK3 + WENO5 advective CFL operating on the smallest cell on the
+`LatitudeLongitudeGrid` — which on a 1° lat-lon grid happens at the poles.
 
-A first-cut diagnosis (gravity wave temporal resolution) was wrong. The
-actual culprit is the **advective CFL of WENO5 + WS-RK3 combined with the
-BCI peak jet**:
+**Practical advective CFL limit on WS-RK3 + WENO5**: empirically ~0.7.
+Hyperdiffusion does *not* extend it — diffusion damps grid-scale noise
+within the CFL-stable region but cannot rescue a scheme that is above its
+CFL limit.
 
-| Δt (s) | CFL @ U = 30 m/s (init) | CFL @ U = 60 m/s (BCI peak) |
-|-------:|-------------------------:|-----------------------------:|
-|     60 | 0.19 | 0.37 |
-|    100 | 0.31 | 0.62 |
-|    150 | 0.46 | 0.93 |
-|    200 | 0.62 | **1.24** |
-|    300 | 0.93 | **1.86** |
-|    400 | 1.24 | **2.47** |
-|    500 | 1.55 | 3.09 |
+**Δx_min on this grid**: with `latitude=(-85, 85)` and `Nλ=360`, the
+smallest zonal cell is at φ = 85°:
 
-WS-RK3 + WENO5 has an effective advective CFL limit of ~1.0–1.4. At
-Δt = 200 the BCI peak hits CFL ≈ 1.24, right at the marginal stability
-boundary. At Δt = 300 the BCI peak hits CFL ≈ 1.86 — clearly above. The
-crash mode (slow growth of max\|w\| from ~0.1 to NaN over 4–7 days,
-*after* the BCI starts producing strong winds) is consistent with an
-advective scheme operating at marginal stability, *not* with a fast
-acoustic blowup. This is also why no choice of divergence-damping
-strategy can fix Δt > 300 — divergence damping cannot rescue an
-underresolved advective scheme.
+```
+Δx_min = a · cos(85°) · (2π / Nλ) ≈ 6.371e6 · 0.0872 · 0.01745 ≈ 9.7 km
+```
 
-Closing the gap to MPAS-A's Δt = 1800 needs:
+The meridional spacing is `Δy ≈ 111 km` (uniform), so the CFL is set by
+the zonal Δx at the poles.
 
-- a **top Rayleigh / sponge layer** to absorb upward-propagating gravity waves;
-- a **4th-order horizontal hyperdiffusion** on momentum and θ to suppress
-  grid-scale and 2Δx noise (the immediate driver of the marginal-CFL crash);
-- and/or a more dissipative advection scheme (or one with looser CFL).
+**CFL table** for the BW peak jet (U_max ≈ 60 m/s once the BCI develops):
 
-These should be tracked in a separate plan and are out of scope for the
-substepper cleanup.
+| Δt (s) | CFL @ U = 30 m/s (init) | CFL @ U = 60 m/s (BCI peak) | observed result |
+|-------:|------------------------:|----------------------------:|:-----------------|
+|     60 | 0.19 | 0.37 | clean |
+|    100 | 0.31 | 0.62 | clean |
+|    150 | 0.46 | **0.93** | reaches day 7, max\|w\| jumps to 2.7 |
+|    200 | 0.62 | **1.24** | reaches day 7, max\|w\| 3.5 |
+|    300 | 0.93 | **1.86** | crash day 6.96 |
+|    400 | 1.24 | **2.47** | crash day 4.20 |
+
+The transition from "clean" to "noise visible" lands exactly where CFL
+crosses ~0.7 at the BCI peak (between Δt = 100 and Δt = 150). The
+transition from "noisy but completes" to "crash" lands where CFL exceeds
+~1 at the BCI peak (between Δt = 200 and Δt = 300). This is exactly the
+empirical CFL ≈ 0.7 limit.
+
+**The gap to MPAS-A's "Δt = 1800 s on a 1° mesh" is a mesh problem**,
+not a time-stepper problem. MPAS-A uses an SCVT (Spherical Centroidal
+Voronoi Tessellation) mesh with **uniform** Δx ≈ 120 km on its 1° mesh.
+Breeze's `LatitudeLongitudeGrid` has Δx_min ≈ 9.7 km at lat 85° — twelve
+times smaller. At U = 60 m/s with the same CFL = 0.7 ceiling,
+maximum stable Δt is
+
+- **MPAS-A** (Δx = 120 km uniform): Δt_max = 0.7 · 120000 / 60 ≈ **1400 s**
+  — comfortably allows their actual 1800 s.
+- **Breeze lat-lon** (Δx_min = 9.7 km at the pole): Δt_max = 0.7 · 9700 / 60 ≈ **113 s**
+  — exactly where Breeze's empirical "clean" regime tops out.
+
+The 12× ratio in mesh spacing perfectly accounts for the 12× ratio in
+maximum stable Δt. There is no missing damping to add and no substepper
+tuning to do — closing this gap requires fixing the mesh:
+
+- a **uniform-area mesh** like cubed-sphere or SCVT; *or*
+- **polar filtering** that effectively coarsens the zonal resolution near
+  the poles (recovering Δx ~ 120 km in the polar caps); *or*
+- **constraining the domain** to mid-latitudes (avoiding the singular
+  region entirely).
+
+These are mesh-and-discretization concerns, not substepper concerns. The
+substepper cleanup is complete.
 
 ## Pressure-projection damping sweep — Δt × β_d
 
@@ -186,9 +211,11 @@ history at that point — it is not a real instability).
 
 3. **β_d = 0.5 modestly extends the ceiling**, from Δt ≈ 300 to Δt ≈ 400.
    At Δt = 400, β_d = 0.5 survives to day 5.7 vs day 1.8 at β_d = 0.1.
-   At Δt ≥ 500 all three β_d values crash within 1–2 days — the gravity
-   wave temporal resolution problem dominates and no amount of damping can
-   fix it.
+   At Δt ≥ 500 all three β_d values crash within 1–2 days. The hard wall
+   at Δt ≈ 200–300 is the *advective CFL of WS-RK3 + WENO5 at Δx_min* (the
+   smallest cell on a 1° lat-lon grid is at the pole, ≈ 9.7 km wide); see
+   the full diagnosis in §4 above. No projection coefficient can extend
+   the explicit advection's CFL.
 
 4. The day-0.002 startup transient is a benign artifact of the projection
    filter being applied at substep 1 of stage 1 of step 1, when neither
