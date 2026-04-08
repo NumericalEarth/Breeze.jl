@@ -20,12 +20,12 @@ using Oceananigans.Utils: prettysummary
 ##### two types control the order of interpolation and multiplication:
 #####
 ##### SlopeOutsideInterpolation (default):
-#####   slope(i,j,k) * ℑz(ℑx(∂z(p')))
+#####   slope(i, j, k) * ℑz(ℑx(∂z(p')))
 #####   — slope is evaluated at the target (Face, Center, Center) point and
 #####     multiplied after averaging the vertical pressure derivative.
 #####
 ##### SlopeInsideInterpolation:
-#####   ℑz(ℑx(slope(i,j,k) * ∂z(p')))
+#####   ℑz(ℑx(slope(i, j, k) * ∂z(p')))
 #####   — slope is evaluated at each (Center, Center, Face) stencil point and
 #####     multiplied before averaging, closer to the CM1 approach.
 #####
@@ -72,9 +72,9 @@ Pre-computed terrain derivative fields and model top height.
 Fields
 ======
 
-- `topography`: 2D `CenterField` storing ``h(x, y)``
-- `∂x_h`: 2D field storing ``\\partial h / \\partial x`` at ``(Face, Center)``
-- `∂y_h`: 2D field storing ``\\partial h / \\partial y`` at ``(Center, Face)``
+- `topography`: 2D field storing ``h(x, y)`` at `(Center, Center)`
+- `∂x_h`: 2D field storing ``\\partial h / \\partial x`` at `(Face, Center)`
+- `∂y_h`: 2D field storing ``\\partial h / \\partial y`` at `(Center, Face)`
 - `z_top`: Height of the model top (top of the reference coordinate)
 - `pressure_gradient_stencil`: Stencil type for the terrain-corrected horizontal
   pressure gradient ([`SlopeOutsideInterpolation`](@ref) or [`SlopeInsideInterpolation`](@ref))
@@ -108,13 +108,13 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute ``(\\partial z / \\partial x)_\\zeta`` at horizontal location ``(Face, Center)``
+Compute ``(∂z/∂x)_\\zeta`` at horizontal location `(Face, Center)`
 and vertical location `ℓz` (either `Center()` or `Face()`).
 
 For basic terrain-following coordinates:
 ```math
-\\left(\\frac{\\partial z}{\\partial x}\\right)_\\zeta
-= \\frac{\\partial h}{\\partial x} \\left(1 - \\frac{\\zeta}{z_{top}}\\right)
+\\left(\\frac{∂z}{∂x}\\right)_\\zeta
+    = \\frac{∂h}{∂x} \\left(1 - \\frac{\\zeta}{z_{top}}\\right)
 ```
 """
 @inline function terrain_slope_x(i, j, k, grid, metrics, ℓz)
@@ -127,8 +127,10 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute ``(\\partial z / \\partial y)_\\zeta`` at horizontal location ``(Center, Face)``
+Compute ``(∂z/∂y)_\\zeta`` at horizontal location `(Center, Face)`
 and vertical location `ℓz` (either `Center()` or `Face()`).
+
+See also [`terrain_slope_x`](@ref).
 """
 @inline function terrain_slope_y(i, j, k, grid, metrics, ℓz)
     ζ = rnode(k, grid, ℓz)

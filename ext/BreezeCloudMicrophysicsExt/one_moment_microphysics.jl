@@ -126,7 +126,7 @@ See the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrop
 # References
 * Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
     microphysics in models: Description and tests using a kinematic framework.
-    J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
+    J. Atmos. Sci., 65, 1528–1548. <https://doi.org/10.1175/2007JAS2491.1>
 """
 function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                     cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
@@ -652,7 +652,7 @@ const τⁿᵘᵐ = 10  # seconds
     # Numerical relaxation for negative values
     ρSⁿᵘᵐ = -ρ * qʳ / τⁿᵘᵐ
 
-    return ifelse(qʳ >= 0, ΣρS, ρSⁿᵘᵐ)
+    return ifelse(qʳ ≥ 0, ΣρS, ρSⁿᵘᵐ)
 end
 
 # State-based rain tendency for mixed-phase 1M schemes
@@ -687,7 +687,7 @@ end
     # Numerical relaxation for negative values
     ρSⁿᵘᵐ = -ρ * qʳ / τⁿᵘᵐ
 
-    return ifelse(qʳ >= 0, ΣρS, ρSⁿᵘᵐ)
+    return ifelse(qʳ ≥ 0, ΣρS, ρSⁿᵘᵐ)
 end
 
 #####
@@ -741,9 +741,9 @@ end
     # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
     # When q < 0, replace with -ρq/τ and route the delta: v→cl, cl→r, r→v.
     # This preserves ρqᵛ + ρqᶜˡ + ρqʳ = 0 regardless of which guards fire.
-    δᵛ  = ifelse(qᵛ  >= 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ      - ρqᵛ_phys)
-    δᶜˡ = ifelse(qᶜˡ >= 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τᶜˡ        - ρqᶜˡ_phys)
-    δʳ  = ifelse(qʳ  >= 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ      - ρqʳ_phys)
+    δᵛ  = ifelse(qᵛ  ≥ 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ      - ρqᵛ_phys)
+    δᶜˡ = ifelse(qᶜˡ ≥ 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τᶜˡ        - ρqᶜˡ_phys)
+    δʳ  = ifelse(qʳ  ≥ 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ      - ρqʳ_phys)
 
     ρqᵛ  = ρqᵛ_phys  + δᵛ  - δʳ
     ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
@@ -874,7 +874,7 @@ end
     α = warm_accretion_melt_factor(categories.snow, T, constants)
 
     # Temperature routing (branchless)
-    is_warm = T >= categories.snow.T_freeze
+    is_warm = T ≥ categories.snow.T_freeze
 
     # Physics tendencies — conserved by construction: sum of all five = 0
     ρqᵛ_phys  = ρ * (-Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ - Sˢᵘᵇˡ)
@@ -892,10 +892,10 @@ end
     #   v→cl (condensation), cl→r (collection), ci→v (deposition), r→v (evaporation).
     # This preserves ρqᵛ + ρqᶜˡ + ρqᶜⁱ + ρqʳ + ρqˢ = 0 regardless of which guards fire.
     # Snow has no correction — rate limiters on sublimation and melting suffice.
-    δᵛ  = ifelse(qᵛ  >= 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
-    δᶜˡ = ifelse(qᶜˡ >= 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τᶜˡ  - ρqᶜˡ_phys)
-    δᶜⁱ = ifelse(qᶜⁱ >= 0, zero(ρqᶜⁱ_phys), -ρ * qᶜⁱ / τᶜⁱ  - ρqᶜⁱ_phys)
-    δʳ  = ifelse(qʳ  >= 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
+    δᵛ  = ifelse(qᵛ  ≥ 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
+    δᶜˡ = ifelse(qᶜˡ ≥ 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τᶜˡ  - ρqᶜˡ_phys)
+    δᶜⁱ = ifelse(qᶜⁱ ≥ 0, zero(ρqᶜⁱ_phys), -ρ * qᶜⁱ / τᶜⁱ  - ρqᶜⁱ_phys)
+    δʳ  = ifelse(qʳ  ≥ 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
 
     ρqᵛ  = ρqᵛ_phys  + δᵛ  - δᶜⁱ - δʳ
     ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ

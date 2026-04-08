@@ -177,8 +177,8 @@ function AtmosphereModel(grid;
     # provides the specific_prognostic_moisture reference needed by VirtualPotentialTemperature.
     specific_moisture_field = haskey(preliminary_microphysical_fields, :qᵛ) ? preliminary_microphysical_fields.qᵛ : CenterField(grid)
     boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                          dynamics, microphysics, p₀, thermodynamic_constants,
-                                                                          preliminary_microphysical_fields, specific_moisture_field, temperature)
+                                                                           dynamics, microphysics, p₀, thermodynamic_constants,
+                                                                           preliminary_microphysical_fields, specific_moisture_field, temperature)
 
     # Re-regularize after materialization (materialization may modify boundary conditions)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)

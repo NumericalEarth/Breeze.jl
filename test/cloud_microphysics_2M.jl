@@ -152,7 +152,7 @@ end
     expected_flux = wʳ * ρqʳ  # wʳ is positive (sedimentation speed magnitude)
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
-    @test @allowscalar spf[1, 1] >= 0
+    @test @allowscalar spf[1, 1] ≥ 0
 end
 
 @testset "TwoMomentCloudMicrophysics sedimentation_speed and velocities [$FT]" for FT in test_float_types()
