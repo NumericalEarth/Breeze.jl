@@ -191,3 +191,44 @@ end
     return TabulatedFunction{1, Nothing, typeof(values), typeof(range), typeof(inverse_Δ)}(
         nothing, values, range, inverse_Δ)
 end
+
+#####
+##### Fortran P3 table wrappers with rime-density coordinate transform
+#####
+##### The Fortran lookup tables use a non-uniform rime density grid
+##### {50, 250, 450, 650, 900} kg/m³. These wrappers store tables in
+##### Fortran-index-space (1..5) and apply the piecewise-linear
+##### coordinate transform that the Fortran runtime uses.
+#####
+
+@inline rime_density_index(ρᶠ) = ifelse(ρᶠ ≤ 650, (ρᶠ - 50) * 0.005 + 1,
+                                                     (ρᶠ - 650) * 0.004 + 4)
+
+struct FortranTabulatedFunction5D{T}
+    table :: T
+end
+
+@inline function (f::FortranTabulatedFunction5D)(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    return f.table(log_m, Fᶠ, Fˡ, rime_density_index(ρᶠ), μ)
+end
+
+struct FortranTabulatedFunction6D{T}
+    table :: T
+end
+
+@inline function (f::FortranTabulatedFunction6D)(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)
+    return f.table(log_m, log_λ_r, Fᶠ, Fˡ, rime_density_index(ρᶠ), μ)
+end
+
+# Table 3 has rime density as its 2nd axis: (log_znorm, rho_index, log_qnorm, Fr, Fl)
+struct FortranTabulatedFunction3{T}
+    table :: T
+end
+
+@inline function (f::FortranTabulatedFunction3)(log_z, ρᶠ, log_q, Fᶠ, Fˡ)
+    return f.table(log_z, rime_density_index(ρᶠ), log_q, Fᶠ, Fˡ)
+end
+
+# Union aliases for dispatch: accept either Julia-generated or Fortran-loaded tables
+const P3Table5D = Union{TabulatedFunction5D, FortranTabulatedFunction5D}
+const P3Table6D = Union{TabulatedFunction6D, FortranTabulatedFunction6D}

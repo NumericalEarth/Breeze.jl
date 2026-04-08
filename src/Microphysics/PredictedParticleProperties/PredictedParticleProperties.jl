@@ -165,6 +165,11 @@ export
     TabulatedFunction5D,
     TabulatedFunction6D,
     tabulated_function_1d,
+    FortranTabulatedFunction5D,
+    FortranTabulatedFunction6D,
+    FortranTabulatedFunction3,
+    P3Table5D,
+    P3Table6D,
 
     # Transport properties
     air_transport_properties,
