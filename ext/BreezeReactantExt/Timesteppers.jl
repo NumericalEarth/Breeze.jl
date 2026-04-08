@@ -5,6 +5,7 @@ using Breeze.TimeSteppers: SSPRungeKutta3
 function OceananigansTimeSteppers.first_time_step!(model::AtmosphereModel{<:Any, <:Any, <:ReactantState, <:SSPRungeKutta3}, Δt)
     initialize!(model)
     update_state!(model)
-    time_step!(model, Δt)
+    # time_step!(model, Δt)
+    # Don't call time_step! temporarily for GB purposes
     return nothing
 end
