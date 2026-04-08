@@ -370,6 +370,14 @@ end
     return mass_kernel
 end
 
+# Fallback when Table 2 is unavailable: use single-PSD Table 1 kernel.
+@inline function _rain_riming_mass_kernel(::Nothing,
+                                           m_mean, λ_r, nʳ, Fᶠ, Fˡ, ρᶠ, prp, p3,
+                                           μ = zero(typeof(m_mean)))
+    return collection_kernel_per_particle(p3.ice.collection.rain_collection,
+                                           m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
+end
+
 """
     rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 
@@ -447,6 +455,14 @@ end
                                              μ = zero(typeof(m_mean)))
     _, number_kernel, _ = ice_rain_collection_lookup(table2, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, μ)
     return number_kernel
+end
+
+# Fallback when Table 2 is unavailable: use single-PSD Table 1 kernel.
+@inline function _rain_riming_number_kernel(::Nothing,
+                                             m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3,
+                                             μ = zero(typeof(m_mean)))
+    return collection_kernel_per_particle(p3.ice.collection.rain_collection,
+                                           m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 end
 
 """
@@ -603,6 +619,9 @@ from tabulated `TabulatedFunction5D`.
     log_m = log10(max(m_mean, FT(1e-20)))
     return table(log_m, Fᶠ, Fˡ, ρᶠ, μ)
 end
+
+# Non-tabulated fallback: returns zero (tables required for PSD-integrated shedding)
+@inline shedding_integral(::AbstractP3Integral, m_mean, Fᶠ, Fˡ, ρᶠ, μ) = zero(typeof(m_mean))
 
 """
     shedding_number_rate(p3, shed_rate)

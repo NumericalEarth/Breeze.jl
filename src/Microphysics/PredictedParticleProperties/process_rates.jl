@@ -355,6 +355,17 @@ using PSD-integrated lookup tables.
     return deposition_ventilation(vent, vent_e, m_mean, Fᶠ, zero(FT), ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
 end
 
+# Non-tabulated fallback: returns zero (tables required for PSD-integrated ventilation)
+@inline function deposition_ventilation(vent, vent_e,
+                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
+    return zero(typeof(m_mean))
+end
+
+@inline function deposition_ventilation(vent, vent_e,
+                                          m_mean, Fᶠ, Fˡ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
+    return zero(typeof(m_mean))
+end
+
 @inline function deposition_ventilation(vent::TabulatedFunction5D,
                                           vent_e::TabulatedFunction5D,
                                           m_mean, Fᶠ, Fˡ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
@@ -402,6 +413,10 @@ end
     return coll(log_m, Fᶠ, Fˡ, ρᶠ, μ)
 end
 
+# Non-tabulated fallback: returns zero (tables required for PSD-integrated kernel)
+@inline collection_kernel_per_particle(coll, m_mean, Fᶠ, ρᶠ, prp, p3, μ) = zero(typeof(m_mean))
+@inline collection_kernel_per_particle(coll, m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ) = zero(typeof(m_mean))
+
 """
     aggregation_kernel(coll, m_mean, Fᶠ, ρᶠ, prp, p3, μ)
 
@@ -423,6 +438,10 @@ end
     # No E_agg — collection efficiency is applied by the caller.
     return coll(log_m, Fᶠ, Fˡ, ρᶠ, μ)
 end
+
+# Non-tabulated fallback: returns zero (tables required for PSD-integrated kernel)
+@inline aggregation_kernel(coll, m_mean, Fᶠ, ρᶠ, prp, p3, μ) = zero(typeof(m_mean))
+@inline aggregation_kernel(coll, m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ) = zero(typeof(m_mean))
 
 #####
 ##### Cloud condensation/evaporation

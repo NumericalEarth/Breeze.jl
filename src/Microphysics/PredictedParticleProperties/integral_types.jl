@@ -63,6 +63,11 @@ abstract type AbstractSixthMomentIntegral <: AbstractIceIntegral end
 # Lambda limiter integrals (2)
 abstract type AbstractLambdaLimiterIntegral <: AbstractIceIntegral end
 
+# Non-tabulated integral types are used as placeholders before tabulate() is called.
+# Make them callable so code that calls table entries directly (e.g., melting) returns
+# zero gracefully instead of a MethodError.
+@inline (::AbstractP3Integral)(args...) = zero(args[1])
+
 #####
 ##### Fall speed integrals (3)
 #####

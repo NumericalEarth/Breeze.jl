@@ -209,6 +209,13 @@ end
     return ifelse(total > eps(FT), clamp(small / total, FT(0), FT(1)), FT(0.5))
 end
 
+# Non-tabulated fallback: assume 50/50 partial/complete split when tables unavailable
+@inline function psd_melting_rain_fraction(sc, sr, lc, lr,
+                                            m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
+    FT = typeof(m_mean)
+    return FT(0.5)
+end
+
 """
     ice_melting_number_rate(qⁱ, nⁱ, qⁱ_melt_rate)
 

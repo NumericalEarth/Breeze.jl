@@ -59,6 +59,10 @@ end
     return vₜ_ref * ρ_correction
 end
 
+# Non-tabulated fallback: returns zero (tables required)
+@inline tabulated_rain_mass_weighted_velocity(::AbstractRainIntegral,
+                                               qʳ, nʳ, ρ_correction, ρʷ, prp, FT) = zero(FT)
+
 """
     rain_terminal_velocity_number_weighted(p3, qʳ, nʳ, ρ)
 
@@ -111,6 +115,10 @@ end
     return vₜ_ref * ρ_correction
 end
 
+# Non-tabulated fallback: returns zero (tables required)
+@inline tabulated_rain_number_weighted_velocity(::AbstractRainIntegral, ::AbstractRainIntegral,
+                                                  qʳ, nʳ, ρ_correction, ρʷ, prp, FT) = zero(FT)
+
 """
     ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
 
@@ -159,6 +167,9 @@ end
     return vₜ_norm * ρ_correction
 end
 
+# Non-tabulated fallback
+@inline tabulated_mass_weighted_fall_speed(::AbstractP3Integral, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ) = zero(typeof(m̄))
+
 """
     ice_terminal_velocity_number_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
 
@@ -197,6 +208,9 @@ end
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
     return vₜ_norm * ρ_correction
 end
+
+# Non-tabulated fallback
+@inline tabulated_number_weighted_fall_speed(::AbstractP3Integral, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ) = zero(typeof(m̄))
 
 """
     ice_terminal_velocity_reflectivity_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=0)
@@ -240,6 +254,9 @@ end
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
     return vₜ_norm * ρ_correction
 end
+
+# Non-tabulated fallback
+@inline tabulated_reflectivity_weighted_fall_speed(::AbstractP3Integral, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ) = zero(typeof(m̄))
 
 """
     ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
