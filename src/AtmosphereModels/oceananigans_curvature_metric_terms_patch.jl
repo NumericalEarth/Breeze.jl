@@ -1,6 +1,7 @@
 using Oceananigans.Grids: AbstractHorizontallyCurvilinearGrid
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Operators
+using Oceananigans.Advection: VectorInvariant
 
 #####
 ##### Curvature metric terms for flux-form momentum advection
