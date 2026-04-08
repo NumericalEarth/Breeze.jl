@@ -8,7 +8,7 @@
 
 export tabulate, P3TabulationParameters, LookupTable1Parameters,
        LookupTable2Parameters, LookupTable3Parameters,
-       P3LookupTables, shape_parameter_lookup, slope_parameter_lookup
+       P3LookupTables, shape_parameter_lookup
 
 using Adapt: Adapt
 using Oceananigans.Architectures: CPU, on_architecture

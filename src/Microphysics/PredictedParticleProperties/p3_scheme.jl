@@ -77,9 +77,11 @@ The scheme tracks 9 prognostic densities:
 
 # Keyword Arguments
 
-- `lookup_tables`: Path to a JLD2 file with pre-computed lookup tables (default `nothing`).
-  When provided, loads a fully tabulated scheme from file (fast). Generate with
-  [`save_p3_lookup_tables`](@ref) or the `scripts/generate_p3_tables.jl` script.
+- `lookup_tables`: Path to a directory containing Fortran P3 lookup table files
+  (default `nothing`). When provided, reads ASCII tables from the directory and
+  constructs a fully tabulated scheme.
+- `three_moment_ice`: Force 2-moment (`false`) or 3-moment (`true`) ice, or
+  auto-detect from file presence (`nothing`, default).
 - `water_density`: Liquid water density [kg/m³] (default 1000)
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation
   (default `nothing` = open boundary, precipitation exits domain)
@@ -89,12 +91,9 @@ The scheme tracks 9 prognostic densities:
 For Fortran-consistent behavior, use pre-computed lookup tables:
 
 ```julia
-# Fast: load pre-computed tables from file
-p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables="data/p3_lookup_tables.jld2")
-
-# Or compute on the fly (slower)
-p3 = PredictedParticlePropertiesMicrophysics()
-p3 = tabulate(p3, CPU())
+# Load from Fortran tables (recommended)
+p3 = PredictedParticlePropertiesMicrophysics(;
+    lookup_tables=expanduser("~/Aeolus/P3-microphysics/lookup_tables"))
 ```
 
 Without tabulation, the scheme uses simplified mean-mass approximations that
@@ -113,8 +112,9 @@ for development and testing but does not reproduce Fortran lookup-table behavior
 ```julia
 using Breeze
 
-# Load pre-computed tables (recommended)
-microphysics = PredictedParticlePropertiesMicrophysics(; lookup_tables="data/p3_lookup_tables.jld2")
+# Load from Fortran tables (recommended)
+microphysics = PredictedParticlePropertiesMicrophysics(;
+    lookup_tables=expanduser("~/Aeolus/P3-microphysics/lookup_tables"))
 
 # Or without tables (for testing)
 microphysics = PredictedParticlePropertiesMicrophysics()
@@ -135,10 +135,15 @@ See also the [P3 documentation](@ref p3_overview) for detailed physics.
 """
 function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Float64;
                                                   lookup_tables = nothing,
+                                                  three_moment_ice = nothing,
                                                   water_density = 1000,
                                                   precipitation_boundary_condition = nothing)
     if !isnothing(lookup_tables)
-        return load_p3_lookup_tables(lookup_tables)
+        if isdir(lookup_tables)
+            return read_fortran_lookup_tables(lookup_tables; FT, three_moment_ice)
+        else
+            error("lookup_tables must be a directory containing Fortran P3 table files")
+        end
     end
 
     return PredictedParticlePropertiesMicrophysics(

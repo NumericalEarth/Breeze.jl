@@ -510,7 +510,7 @@ function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
             table3_objs[:mean_density]
         )
     else
-        P3LookupTable3(nothing, nothing, nothing)
+        nothing
     end
 
     return table_1, table_2, table_3
@@ -579,7 +579,8 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
             ice_5d[:m6_sublimation1]
         )
     else
-        IceSixthMoment()
+        IceSixthMoment(nothing, nothing, nothing, nothing,
+                        nothing, nothing, nothing, nothing, nothing)
     end
 
     lambda_limiter = IceLambdaLimiter(
