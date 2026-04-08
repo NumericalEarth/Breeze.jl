@@ -236,24 +236,6 @@ approximation path depending on `p3.rain.evaporation`:
     return ifelse(is_subsaturated, evap_rate, zero(FT))
 end
 
-# Analytical fallback when rain evaporation table is not loaded.
-# Uses power-law V(D) = 842 D^0.8 to evaluate the velocity-diameter integral.
-@inline function rain_evaporation_rate(::RainEvaporation, qʳ, nʳ, S,
-                                        thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
-    m_mean = safe_divide(qʳ, nʳ, FT(1e-12))
-    λ_r = cbrt(FT(π) * p3.water_density / max(m_mean, FT(1e-15)))
-    λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
-    N_0 = nʳ * λ_r
-    I_const = FT(RAIN_F1R) / (λ_r * λ_r)
-    # Analytical ∫ D √(V×D) exp(-λD) dD with V(D) = 842 D^0.8:
-    # = √842 × Γ(2.9) / λ^2.9, where Γ(2.9) ≈ 1.82743
-    I_VD = sqrt(FT(842)) * FT(1.82743) / λ_r^FT(2.9)
-    Sc_cbrt = cbrt(nu / max(D_v, FT(1e-10)))
-    inv_sqrt_nu = 1 / sqrt(max(nu, FT(1e-10)))
-    I_evap = I_const + FT(RAIN_F2R) * Sc_cbrt * inv_sqrt_nu * I_VD
-    return FT(2π) * N_0 * I_evap * (S - 1) / thermodynamic_factor
-end
-
 # Tabulated path: use PSD-integrated ventilation integral I_evap(λ_r)
 @inline function rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
                                         thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
