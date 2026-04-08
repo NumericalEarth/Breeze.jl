@@ -126,18 +126,24 @@ Fields
 ======
 
 - `coefficient`: MPAS `config_smdiv`. Default `0.1`.
-- `length_scale`: Optional override for the dispersion length ``\\ell_\\mathrm{disp}`` (MPAS `config_len_disp`). Default `nothing` (Breeze auto-derives ``\\min(Δx, Δy)`` over non-Flat horizontal axes).
+- `length_scale`: Optional override for the dispersion length ``\\ell_\\mathrm{disp}`` (MPAS `config_len_disp`). Default `nothing` (Breeze auto-derives ``\\min(Δx, Δy)`` over non-Flat horizontal axes). The `LS` type parameter is either `Nothing` (auto-derive) or the same float type as `coefficient`, so the struct is fully concretely typed and GPU-isbits.
 """
-struct ThermodynamicDivergenceDamping{FT} <: AcousticDampingStrategy
+struct ThermodynamicDivergenceDamping{FT, LS} <: AcousticDampingStrategy
     coefficient :: FT
-    length_scale :: Union{FT, Nothing}
+    length_scale :: LS
 end
 
 function ThermodynamicDivergenceDamping(; coefficient = 0.1, length_scale = nothing)
-    FT = length_scale === nothing ? typeof(coefficient) : promote_type(typeof(coefficient), typeof(length_scale))
-    coef_FT = convert(FT, coefficient)
-    len_FT  = length_scale === nothing ? nothing : convert(FT, length_scale)
-    return ThermodynamicDivergenceDamping{FT}(coef_FT, len_FT)
+    if length_scale === nothing
+        FT = typeof(coefficient)
+        coef_FT = convert(FT, coefficient)
+        return ThermodynamicDivergenceDamping{FT, Nothing}(coef_FT, nothing)
+    else
+        FT = promote_type(typeof(coefficient), typeof(length_scale))
+        coef_FT = convert(FT, coefficient)
+        len_FT  = convert(FT, length_scale)
+        return ThermodynamicDivergenceDamping{FT, FT}(coef_FT, len_FT)
+    end
 end
 
 """
