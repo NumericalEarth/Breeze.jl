@@ -23,15 +23,15 @@ time-stepper is used:
 - [`ExplicitTimeStepping`](@ref): All tendencies computed together (small Δt required)
 """
 struct CompressibleDynamics{TD, D, P, FT, RS, TM, CV, CM, TRP, TRD}
-    time_discretization :: TD # SplitExplicitTimeDiscretization or ExplicitTimeStepping
-    density :: D              # ρ (prognostic)
-    pressure :: P             # p = ρ R^m T (diagnostic)
-    standard_pressure :: FT   # pˢᵗ (reference pressure for potential temperature)
-    surface_pressure :: FT    # p₀ (mean pressure at the bottom of the atmosphere)
-    reference_state :: RS     # ExnerReferenceState for base-state pressure correction (or Nothing)
-    terrain_metrics :: TM     # TerrainMetrics for terrain-following coordinates (or Nothing)
-    Ω̃ :: CV                   # Contravariant vertical velocity diagnostic field (or Nothing)
-    ρΩ̃ :: CM                  # Contravariant vertical momentum diagnostic field (or Nothing)
+    time_discretization :: TD         # SplitExplicitTimeDiscretization or ExplicitTimeStepping
+    density :: D                      # ρ (prognostic)
+    pressure :: P                     # p = ρ R^m T (diagnostic)
+    standard_pressure :: FT           # pˢᵗ (reference pressure for potential temperature)
+    surface_pressure :: FT            # p₀ (mean pressure at the bottom of the atmosphere)
+    reference_state :: RS             # ExnerReferenceState for base-state pressure correction (or Nothing)
+    terrain_metrics :: TM             # TerrainMetrics for terrain-following coordinates (or Nothing)
+    Ω̃ :: CV                           # Contravariant vertical velocity diagnostic field (or Nothing)
+    ρΩ̃ :: CM                          # Contravariant vertical momentum diagnostic field (or Nothing)
     terrain_reference_pressure :: TRP # 3D reference pressure for terrain PG (or Nothing)
     terrain_reference_density :: TRD  # 3D reference density for terrain buoyancy (or Nothing)
 end
@@ -287,14 +287,13 @@ function Base.show(io::IO, dynamics::CompressibleDynamics)
     if dynamics.density === nothing
         print(io, "├── density: not materialized\n")
         print(io, "├── pressure: not materialized\n")
-        print(io, "├── time_discretization: ", summary(dynamics.time_discretization), '\n')
-        print(io, "└── reference_state: ", summary(dynamics.reference_state))
     else
         print(io, "├── density: ", prettysummary(dynamics.density), '\n')
         print(io, "├── pressure: ", prettysummary(dynamics.pressure), '\n')
-        print(io, "├── time_discretization: ", summary(dynamics.time_discretization), '\n')
-        print(io, "└── reference_state: ", summary(dynamics.reference_state))
     end
+    print(io, "├── terrain_metrics: ", summary(dynamics.terrain_metrics), '\n')
+    print(io, "├── time_discretization: ", summary(dynamics.time_discretization), '\n')
+    print(io, "└── reference_state: ", summary(dynamics.reference_state))
 end
 
 #####
