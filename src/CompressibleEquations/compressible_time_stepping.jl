@@ -9,6 +9,10 @@
 # No default initialization for compressible models
 AtmosphereModels.initialize_model_thermodynamics!(::CompressibleModel) = nothing
 
+# Skip redundant temperature halo fill in compute_auxiliary_thermodynamic_variables!
+# Temperature is recomputed from EOS in compute_auxiliary_dynamics_variables! below.
+AtmosphereModels._fill_thermodynamic_halos!(::CompressibleDynamics, temperature) = nothing
+
 #####
 ##### Pressure correction (no-op for compressible dynamics)
 #####
@@ -72,10 +76,8 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
     arch = grid.architecture
     dynamics = model.dynamics
 
-    # Ensure halos are filled (may have been async from update_state!)
-    # These fields are needed for pressure computation via equation of state
-    fill_halo_regions!(dynamics.density)
-    fill_halo_regions!(prognostic_fields(model.formulation))
+    # Note: density and ρθ halos were already filled by the async prognostic
+    # fill in update_state! (and synchronized by compute_velocities! momentum fill).
 
     launch!(arch, grid, :xyz,
             _compute_temperature_and_pressure!,

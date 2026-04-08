@@ -2,6 +2,7 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
                     Centered, fields, prognostic_fields
+using Oceananigans.Architectures: Architectures
 using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
@@ -281,6 +282,8 @@ function AtmosphereModel(grid;
 
     return model
 end
+
+Architectures.architecture(model::AtmosphereModel) = model.grid.architecture
 
 # Breeze's acoustic and SSP time steppers accept a `dynamics` keyword;
 # Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.

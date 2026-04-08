@@ -261,11 +261,9 @@ end
     Nz = 40
 
     grid = RectilinearGrid(CPU(),
-                           size = (1, 1, Nz),
-                           x = (0, 100),
-                           y = (0, 100),
+                           size = Nz,
                            z = (0, 4000),
-                           topology = (Periodic, Periodic, Bounded))
+                           topology = (Flat, Flat, Bounded))
 
     z_centers = collect(znodes(grid, Center()))
 

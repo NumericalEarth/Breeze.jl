@@ -72,7 +72,7 @@ adjustment microphysics, ``ℋ = 1`` (or very close to it due to numerical preci
 
 ```jldoctest rh
 using Breeze
-grid = RectilinearGrid(size=(1, 1, 128), extent=(1e3, 1e3, 1e3))
+grid = RectilinearGrid(size=128, z=(0, 1e3), topology=(Flat, Flat, Bounded))
 microphysics = SaturationAdjustment()
 model = AtmosphereModel(grid; microphysics)
 set!(model, θ=300, qᵗ=0.005)  # subsaturated
@@ -80,7 +80,7 @@ set!(model, θ=300, qᵗ=0.005)  # subsaturated
 
 # output
 KernelFunctionOperation at (Center, Center, Center)
-├── grid: 1×1×128 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
+├── grid: 1×1×128 RectilinearGrid{Float64, Flat, Flat, Bounded} on CPU with 0×0×3 halo
 ├── kernel_function: RelativeHumidityKernelFunction
 └── arguments: ()
 ```
@@ -92,13 +92,13 @@ As with other diagnostics, `RelativeHumidity` may be wrapped in `Field` to store
 
 # output
 1×1×128 Field{Center, Center, Center} on RectilinearGrid on CPU
-├── grid: 1×1×128 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
+├── grid: 1×1×128 RectilinearGrid{Float64, Flat, Flat, Bounded} on CPU with 0×0×3 halo
 ├── boundary conditions: FieldBoundaryConditions
-│   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
+│   └── west: Nothing, east: Nothing, south: Nothing, north: Nothing, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
-    └── max=0.214947, min=0.136946, mean=0.172492
+└── data: 1×1×134 OffsetArray(::Array{Float64, 3}, 1:1, 1:1, -2:131) with eltype Float64 with indices 1:1×1:1×-2:131
+    └── max=0.353042, min=0.215746, mean=0.277825
 ```
 
 We also provide a convenience constructor for the Field:
@@ -108,13 +108,13 @@ We also provide a convenience constructor for the Field:
 
 # output
 1×1×128 Field{Center, Center, Center} on RectilinearGrid on CPU
-├── grid: 1×1×128 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
+├── grid: 1×1×128 RectilinearGrid{Float64, Flat, Flat, Bounded} on CPU with 0×0×3 halo
 ├── boundary conditions: FieldBoundaryConditions
-│   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
+│   └── west: Nothing, east: Nothing, south: Nothing, north: Nothing, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
-    └── max=0.214947, min=0.136946, mean=0.172492
+└── data: 1×1×134 OffsetArray(::Array{Float64, 3}, 1:1, 1:1, -2:131) with eltype Float64 with indices 1:1×1:1×-2:131
+    └── max=0.353042, min=0.215746, mean=0.277825
 ```
 """
 function RelativeHumidity(model)

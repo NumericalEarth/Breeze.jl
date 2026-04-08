@@ -16,7 +16,12 @@ function AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics, 
         # With this method, we are using an approximate solver that
         # will produce a divergent velocity field near terrain.
         FourierTridiagonalPoissonSolver(grid.underlying_grid; tridiagonal_formulation)
-    else # the solver is exact
+    elseif any(T -> T === FullyConnected, topology(grid))
+        # Multi-rank distributed grids have FullyConnected topology in split dimensions.
+        # Use the distributed solver with MPI-aware FFT transposes.
+        global_grid = reconstruct_global_grid(grid)
+        DistributedFourierTridiagonalPoissonSolver(global_grid, grid; tridiagonal_formulation)
+    else # the solver is exact (also works for single-rank Distributed)
         FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
     end
 
@@ -91,6 +96,14 @@ function compute_anelastic_source_term!(solver::FourierTridiagonalPoissonSolver,
     rhs = solver.source_term
     arch = architecture(solver)
     grid = solver.grid
+    launch!(arch, grid, :xyz, _compute_anelastic_source_term!, rhs, grid, ρŨ, Δt)
+    return nothing
+end
+
+function compute_anelastic_source_term!(solver::DistributedFourierTridiagonalPoissonSolver, ρŨ, Δt)
+    rhs = solver.storage.zfield
+    grid = solver.local_grid
+    arch = architecture(grid)
     launch!(arch, grid, :xyz, _compute_anelastic_source_term!, rhs, grid, ρŨ, Δt)
     return nothing
 end

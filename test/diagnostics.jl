@@ -168,7 +168,7 @@ end
 
 @testset "Hydrostatic pressure computation [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(1, 1, 20), x=(0, 1000), y=(0, 1000), z=(0, 10000))
+    grid = RectilinearGrid(default_arch; size=20, z=(0, 10000), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()
 
     p₀ = FT(101325) # surface pressure, Pa
@@ -186,7 +186,7 @@ end
     g = constants.gravitational_acceleration
 
     θ_field = CenterField(grid)
-    set!(θ_field, (x, y, z) -> begin
+    set!(θ_field, (z) -> begin
         pᵣ_z = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
         T₀ * (pˢᵗ / pᵣ_z)^(Rᵈ / cᵖᵈ)
     end)

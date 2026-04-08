@@ -194,8 +194,8 @@ function compute_hydrostatic_reference!(ref::ReferenceState, constants)
             ref.liquid_mass_fraction, ref.ice_mass_fraction,
             grid, Nz, p₀, Rᵈ, Rᵛ, g)
 
-    fill_halo_regions!(ref.pressure)
-    fill_halo_regions!(ref.density)
+    fill_halo_regions!(ref.pressure; only_local_halos=true)
+    fill_halo_regions!(ref.density; only_local_halos=true)
 
     return nothing
 end
@@ -359,12 +359,12 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
     set!(ρᵣ, z -> hydrostatic_density(z, p₀, θᵣ, pˢᵗ, constants))
-    fill_halo_regions!(ρᵣ)
+    fill_halo_regions!(ρᵣ; only_local_halos=true)
 
     p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
     pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants))
-    fill_halo_regions!(pᵣ)
+    fill_halo_regions!(pᵣ; only_local_halos=true)
 
     if discrete_hydrostatic_balance
         g = constants.gravitational_acceleration
@@ -373,7 +373,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
 
     Tᵣ = Field{Nothing, Nothing, Center}(grid)
     set!(Tᵣ, z -> hydrostatic_temperature(z, p₀, θᵣ, pˢᵗ, constants))
-    fill_halo_regions!(Tᵣ)
+    fill_halo_regions!(Tᵣ; only_local_halos=true)
 
     return ReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
 end
@@ -511,7 +511,7 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     # Build θᵣ field (temporary, used only during construction)
     θᵣ = Field{Nothing, Nothing, Center}(grid)
     set!(θᵣ, potential_temperature)
-    fill_halo_regions!(θᵣ)
+    fill_halo_regions!(θᵣ; only_local_halos=true)
 
     # Surface values for boundary conditions and display
     θ₀ = convert(FT, _surface_value(potential_temperature))
@@ -529,9 +529,9 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     launch!(arch, grid, tuple(1), _compute_exner_reference!,
             πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, π₀, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
 
-    fill_halo_regions!(πᵣ)
-    fill_halo_regions!(pᵣ)
-    fill_halo_regions!(ρᵣ)
+    fill_halo_regions!(πᵣ; only_local_halos=true)
+    fill_halo_regions!(pᵣ; only_local_halos=true)
+    fill_halo_regions!(ρᵣ; only_local_halos=true)
 
     return ExnerReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ, πᵣ)
 end
@@ -574,7 +574,7 @@ function enforce_discrete_hydrostatic_balance!(pᵣ, ρᵣ, grid, g)
     arch = architecture(grid)
     Nz = size(grid, 3)
     launch!(arch, grid, tuple(1), _enforce_discrete_hydrostatic_balance!, pᵣ, ρᵣ, grid, Nz, g)
-    fill_halo_regions!(pᵣ)
+    fill_halo_regions!(pᵣ; only_local_halos=true)
     return nothing
 end
 
@@ -587,12 +587,12 @@ reference_moisture_field(::Nothing, grid) = ZeroField(eltype(grid))
 function reference_moisture_field(value, grid)
     field = Field{Nothing, Nothing, Center}(grid)
     set!(field, value)
-    fill_halo_regions!(field)
+    fill_halo_regions!(field; only_local_halos=true)
     return field
 end
 
 # set! and fill_halo_regions! are no-ops for ZeroField
-set_reference_field!(field, value) = (set!(field, value); fill_halo_regions!(field); nothing)
+set_reference_field!(field, value) = (set!(field, value); fill_halo_regions!(field; only_local_halos=true); nothing)
 set_reference_field!(::ZeroField, value) = nothing
 
 #####
@@ -615,7 +615,7 @@ This function is useful for:
 """
 function compute_reference_state!(ref::ReferenceState, T̄, q̄ᵛ, q̄ˡ, q̄ⁱ, constants)
     set!(ref.temperature, T̄)
-    fill_halo_regions!(ref.temperature)
+    fill_halo_regions!(ref.temperature; only_local_halos=true)
     set_reference_field!(ref.vapor_mass_fraction, q̄ᵛ)
     set_reference_field!(ref.liquid_mass_fraction, q̄ˡ)
     set_reference_field!(ref.ice_mass_fraction, q̄ⁱ)

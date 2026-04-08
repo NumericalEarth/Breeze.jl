@@ -83,7 +83,7 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
 
     # Update reference temperature and moisture from horizontal means
     mean!(ref.temperature, model.temperature)
-    fill_halo_regions!(ref.temperature)
+    fill_halo_regions!(ref.temperature; only_local_halos=true)
 
     mean_mass_fraction!(ref.vapor_mass_fraction, specific_humidity(model))
     mean_mass_fraction!(ref.liquid_mass_fraction, liquid_mass_fraction(model))
@@ -104,13 +104,13 @@ end
 
 function mean_mass_fraction!(ref_field, field)
     mean!(ref_field, field)
-    fill_halo_regions!(ref_field)
+    fill_halo_regions!(ref_field; only_local_halos=true)
     return nothing
 end
 
 function mean_mass_fraction!(ref_field, ::Nothing)
     interior(ref_field) .= 0
-    fill_halo_regions!(ref_field)
+    fill_halo_regions!(ref_field; only_local_halos=true)
     return nothing
 end
 

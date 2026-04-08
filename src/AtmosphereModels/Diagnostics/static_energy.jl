@@ -51,7 +51,7 @@ This is the prognostic thermodynamic variable used in `StaticEnergyThermodynamic
 ```jldoctest
 using Breeze
 
-grid = RectilinearGrid(size=(1, 1, 8), extent=(1, 1, 1e3))
+grid = RectilinearGrid(size=8, z=(0, 1e3), topology=(Flat, Flat, Bounded))
 model = AtmosphereModel(grid)
 set!(model, θ=300)
 
@@ -60,13 +60,13 @@ Field(e)
 
 # output
 1×1×8 Field{Center, Center, Center} on RectilinearGrid on CPU
-├── grid: 1×1×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
+├── grid: 1×1×8 RectilinearGrid{Float64, Flat, Flat, Bounded} on CPU with 0×0×3 halo
 ├── boundary conditions: FieldBoundaryConditions
-│   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
+│   └── west: Nothing, east: Nothing, south: Nothing, north: Nothing, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=3.03055e5, min=3.02663e5, mean=3.02859e5
+└── data: 1×1×14 OffsetArray(::Array{Float64, 3}, 1:1, 1:1, -2:11) with eltype Float64 with indices 1:1×1:1×-2:11
+    └── max=3.02608e5, min=3.02216e5, mean=3.02412e5
 ```
 """
 function StaticEnergy(model, flavor_symbol=:specific)

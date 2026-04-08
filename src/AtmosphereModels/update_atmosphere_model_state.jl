@@ -94,10 +94,11 @@ function compute_velocities!(model::AtmosphereModel)
 
     # kp = KernelParameters(ii, jj, kk)
 
-    # Ensure halos are filled before velocity computation
-    # (prognostic field halo fill in update_state! is async)
-    density = dynamics_density(model.dynamics)
-    fill_halo_regions!(density)
+    # Ensure halos are filled before velocity computation.
+    # The async prognostic field halo fill in update_state! must complete
+    # before we use momentum data. The momentum fill below acts as a sync point.
+    # Note: reference density is constant (z-only) — its halos are filled at
+    # initialization and never need refilling.
     fill_halo_regions!(model.momentum)
 
     launch!(arch, grid, :xyz,
@@ -200,12 +201,23 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.microphysical_fields,
             model.moisture_density)
 
-    fill_halo_regions!(model.temperature)
+    # For CompressibleDynamics, temperature is recomputed from EOS in
+    # compute_auxiliary_dynamics_variables! which also fills its halos.
+    # Skip the redundant fill here for compressible.
+    _fill_thermodynamic_halos!(model.dynamics, model.temperature)
     fill_halo_regions!(model.microphysical_fields)
-    fill_halo_regions!(model.formulation)
+    # Note: formulation (potential temperature) is a prognostic field whose halos
+    # were already filled by the async prognostic fill in update_state!.
+    # fill_halo_regions!(model.formulation)
 
     return nothing
 end
+
+# Temperature halo fill dispatch: skip for compressible (recomputed in compute_auxiliary_dynamics_variables!)
+_fill_thermodynamic_halos!(dynamics, temperature) = fill_halo_regions!(temperature)
+
+# The CompressibleDynamics method is defined in CompressibleEquations/compressible_time_stepping.jl
+# to avoid circular dependency (CompressibleDynamics is defined after AtmosphereModels).
 
 @kernel function _compute_velocities!(velocities, grid, dynamics, momentum)
     i, j, k = @index(Global, NTuple)
