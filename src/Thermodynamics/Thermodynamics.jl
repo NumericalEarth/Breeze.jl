@@ -1,6 +1,7 @@
 module Thermodynamics
 
-export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_reference_state!, compute_hydrostatic_reference!, IdealGas,
+export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_reference_state!, compute_hydrostatic_reference!,
+       evaluate_profile, IdealGas,
        CondensedPhase,
        ClausiusClapeyron, ClausiusClapeyronThermodynamicConstants,
        TetensFormula, TetensFormulaThermodynamicConstants,

@@ -207,10 +207,10 @@ end
 """
     numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants)
 
-Compute the dry hydrostatic pressure at height `z` by numerically integrating
-`dp/dz = -gρ` from `z=0`, where `ρ = p/(Rᵈ T)` and `T = θ(z) (p/pˢᵗ)^κ`.
+Compute the dry hydrostatic pressure at height ``z`` by numerically integrating
+``∂p/∂z = -g ρ`` from ``z=0``, where ``ρ = p/(Rᵈ T)`` and ``T = θ(z) (p/pˢᵗ)^κ``.
 
-This function handles non-uniform potential temperature profiles `θ(z)` for which
+This function handles non-uniform potential temperature profiles ``θ(z)`` for which
 the closed-form adiabatic solution does not apply.
 Uses 1000 midpoint integration steps.
 """
@@ -279,9 +279,18 @@ function hydrostatic_temperature(z, p₀, θᵣ::Function, pˢᵗ, constants)
     return θᵣ(z) * (p / pˢᵗ)^κ
 end
 
-# Surface value extraction
-_surface_value(x::Number) = x
-_surface_value(f::Function) = f(0)
+# Evaluate a profile (Number or Function) at a given height.
+# Used both here and in terrain_compressible_physics.jl for reference state construction.
+"""
+    evaluate_profile(profile, z)
+
+Evaluate a vertical profile at height `z`. If `profile` is a `Number`, returns it unchanged.
+If `profile` is a `Function`, calls `profile(z)`.
+"""
+@inline evaluate_profile(value::Number, z) = value
+@inline evaluate_profile(f::Function, z) = f(z)
+
+_surface_value(x) = evaluate_profile(x, 0)
 
 """
 $(TYPEDSIGNATURES)
@@ -292,7 +301,7 @@ that includes the hydrostatic reference pressure and reference density.
 The reference state is initialized with a dry adiabatic temperature profile
 and the given moisture profiles (zero by default). The pressure and density
 are then computed by hydrostatic integration using the mixture gas constant
-`Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ` and the ideal gas law `ρ = p / (Rᵐ T)`.
+``Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ`` and the ideal gas law ``ρ = p / (Rᵐ T)``.
 
 Arguments
 =========
@@ -302,11 +311,11 @@ Arguments
 Keyword arguments
 =================
 - `surface_pressure`: By default, 101325.
-- `potential_temperature`: A constant value (default 288) or a function `θ(z)` giving
+- `potential_temperature`: A constant value (default 288) or a function ``θ(z)`` giving
   the potential temperature profile. When a constant is provided, closed-form adiabatic
   hydrostatic profiles are used. When a function is provided, the hydrostatic profiles
-  are computed by numerical integration of `dp/dz = -gρ`.
-- `standard_pressure`: Reference pressure for potential temperature (pˢᵗ). By default, 1e5.
+  are computed by numerical integration of ``∂p/∂z = -g ρ``.
+- `standard_pressure`: Reference pressure for potential temperature (``pˢᵗ``). By default, 1e5.
 - `discrete_hydrostatic_balance`: If `true`, recompute the reference pressure from the
   reference density using discrete integration, so that `∂z(p_ref) + g * ℑz(ρ_ref) = 0`
   exactly at the discrete level. By default, `false`.
@@ -383,7 +392,7 @@ hydrostatic balance
 cᵖᵈ θᵣ^{face} \\frac{π₀[k] - π₀[k-1]}{Δz} = -g
 ```
 
-holds EXACTLY at every interior z-face. This is essential for the Exner pressure
+holds _exactly_ at every interior z-face. This is essential for the Exner pressure
 acoustic substepping formulation, where the vertical pressure gradient is computed
 as ``cᵖᵈ θᵥ ∂π'/∂z`` and the hydrostatic part must cancel to machine precision.
 

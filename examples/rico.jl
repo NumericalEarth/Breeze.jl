@@ -295,8 +295,6 @@ function progress(sim)
 
     @info msg
 
-    wall_clock[] = time_ns()
-
     return nothing
 end
 

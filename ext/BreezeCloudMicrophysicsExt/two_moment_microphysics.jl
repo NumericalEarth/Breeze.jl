@@ -123,11 +123,11 @@ Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) 
 
 # References
 
-* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
-  2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
+* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation: 2. Multiple
+    aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
     parameterization for mixed-phase clouds. Part 1: Model description.
-    Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
+    Meteorol. Atmos. Phys., 92, 45-66. <https://doi.org/10.1007/s00703-005-0112-4>
 """
 struct TwoMomentCategories{W, AP, LV, RV, AA, TL} <: AbstractNumberConcentrationCategories
     warm_processes :: W
@@ -148,10 +148,11 @@ Base.summary(::TwoMomentCategories) = "TwoMomentCategories"
                                              rain_fall_velocity = SB2006VelType(FT),
                                              aerosol_activation = default_aerosol_activation(FT))
 
-Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters and aerosol activation.
+Construct `TwoMomentCategories` with default [Seifert-Beheng 2006](@cite SeifertBeheng2006)
+parameters and aerosol activation.
 
 # Keyword arguments
-- `warm_processes`: SB2006 parameters for warm-rain microphysics
+- `warm_processes`: [Seifert-Beheng 2006](@cite SeifertBeheng2006) parameters for warm-rain microphysics
 - `air_properties`: Air properties for thermodynamic calculations
 - `cloud_liquid_fall_velocity`: Terminal velocity parameters for cloud droplets (Stokes regime)
 - `rain_fall_velocity`: Terminal velocity parameters for rain drops
@@ -160,6 +161,11 @@ Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters and 
 - `τⁿᵘᵐ`: Timescale [s] for per-reservoir tendency limiting.
   Must satisfy `τⁿᵘᵐ ≥ Δt` to prevent reservoir overdraw.
   Default: 10 seconds.
+
+# References
+* Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
+    parameterization for mixed-phase clouds. Part 1: Model description.
+    Meteorol. Atmos. Phys., 92, 45-66. <https://doi.org/10.1007/s00703-005-0112-4>
 """
 function two_moment_cloud_microphysics_categories(FT::DataType = Oceananigans.defaults.FloatType;
                                                   warm_processes = SB2006(FT),
@@ -270,9 +276,9 @@ for details on the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) scheme.
 
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
     parameterization for mixed-phase clouds. Part 1: Model description.
-    Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
-* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
-  2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
+    Meteorol. Atmos. Phys., 92, 45-66. <https://doi.org/10.1007/s00703-005-0112-4>
+* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation: 2. Multiple
+    aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 """
 function TwoMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                     cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
@@ -399,6 +405,28 @@ end
     return nothing
 end
 
+@inline function cloud_terminal_velocity(
+    pdf_c, (; ρw, grav, ν_air), q_liq, ρₐ, N_liq,
+)
+    # Local copy of CM2.cloud_terminal_velocity with 2//3 → FT(2/3)
+    # so that Rational literals don't appear inside Reactant-traced code.
+    FT = eltype(q_liq)
+    ϵN = CloudMicrophysics.Utilities.ϵ_numerics_2M_N(FT)
+    ϵM = CloudMicrophysics.Utilities.ϵ_numerics_2M_M(FT)
+
+    (; νc, μc) = pdf_c
+    (; Bc) = CM2.pdf_cloud_parameters_mass(pdf_c, q_liq, ρₐ, N_liq)
+
+    prefactor = FT(1 / 18) * (6 / ρw / π)^FT(2 / 3) * (ρw / ρₐ - 1) * grav / ν_air
+
+    vt0 = ifelse(N_liq < ϵN, FT(0),
+        prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(2 / 3)) / N_liq)
+    vt1 = ifelse(q_liq < ϵM, FT(0),
+        prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(5 / 3)) / ρₐ / q_liq)
+
+    return (vt0, vt1)
+end
+
 @inline function update_2m_terminal_velocities!(μ, i, j, k, bμp, categories, ρ)
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
@@ -419,8 +447,8 @@ end
     Nʳ = max(ρ * max(0, nʳ), Nʳ_min)
 
     # Cloud liquid terminal velocities: (number-weighted, mass-weighted)
-    𝕎_cl = CM2.cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
-                                       qᶜˡ⁺, ρ, Nᶜˡ)
+    𝕎_cl = cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
+                                   qᶜˡ⁺, ρ, Nᶜˡ)
 
     wᶜˡₙ = -𝕎_cl[1]  # number-weighted, negative = downward
     wᶜˡ = -𝕎_cl[2]   # mass-weighted
@@ -660,9 +688,9 @@ end
     # ===== Numerical relaxation guards =====
 
     # Mass: conserved routing v→cl, cl→r, r→v
-    δᵛ  = ifelse(qᵛ  >= 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
-    δᶜˡ = ifelse(qᶜˡ >= 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τⁿᵘᵐ - ρqᶜˡ_phys)
-    δʳ  = ifelse(qʳ  >= 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
+    δᵛ  = ifelse(qᵛ  ≥ 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
+    δᶜˡ = ifelse(qᶜˡ ≥ 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τⁿᵘᵐ - ρqᶜˡ_phys)
+    δʳ  = ifelse(qʳ  ≥ 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
 
     ρqᵛ  = ρqᵛ_phys  + δᵛ  - δʳ
     ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
@@ -673,9 +701,9 @@ end
     Sⁿᵘᵐ_rain = -Nʳ  / τⁿᵘᵐ
     Sⁿᵘᵐ_aer  = -Nᵃ  / τⁿᵘᵐ
 
-    ρnᶜˡ = ifelse(nᶜˡ >= 0, Σ_dNᶜˡ, Sⁿᵘᵐ_cl)
-    ρnʳ  = ifelse(nʳ  >= 0, Σ_dNʳ,  Sⁿᵘᵐ_rain)
-    ρnᵃ  = ifelse(nᵃ  >= 0, dNᵃ_lim, Sⁿᵘᵐ_aer)
+    ρnᶜˡ = ifelse(nᶜˡ ≥ 0, Σ_dNᶜˡ, Sⁿᵘᵐ_cl)
+    ρnʳ  = ifelse(nʳ  ≥ 0, Σ_dNʳ,  Sⁿᵘᵐ_rain)
+    ρnᵃ  = ifelse(nᵃ  ≥ 0, dNᵃ_lim, Sⁿᵘᵐ_aer)
 
     return (; ρqᵛ, ρqᶜˡ, ρqʳ, ρnᶜˡ, ρnʳ, ρnᵃ)
 end
@@ -765,7 +793,7 @@ instantaneous supersaturation. See eq. 19 in [Abdul-Razzak et al. (1998)](@cite 
 
 The mass tendency is then:
 ```math
-\\frac{dq^{cl}}{dt}_{act} = \\frac{dN^{cl}}{dt}_{act} \\cdot \\frac{4π}{3} r_{act}^3 \\frac{ρ_w}{ρ}
+\\frac{\\mathrm{d}q^{cl}}{\\mathrm{d}t}_{act} = \\frac{\\mathrm{d}N^{cl}}{\\mathrm{d}t}_{act} \\frac{4}{3} π r_{act}^3 \\frac{ρ_w}{ρ}
 ```
 
 The activation rate is controlled by the nucleation timescale `τⁿᵘᶜ` stored in
@@ -799,7 +827,7 @@ Mass tendency for cloud liquid [kg/kg/s]
     ρᴸ = ap.ρ_w  # intrinsic density of liquid water [kg/m³]
     σ = ap.σ     # surface tension [N/m]
 
-    A = 2 * σ / (ρᴸ * Rᵛ * T)
+    A = 2σ / (ρᴸ * Rᵛ * T)
 
     # Use instantaneous supersaturation to compute activation radius
     # Following CloudMicrophysics parcel model: use r_nuc as fallback when no activation or no supersaturation
@@ -878,14 +906,11 @@ end
 ##### Per-variable tendency dispatchers (all delegate to wpne2m_tendencies)
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    return wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
-end
+@inline AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants) =
+    wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    return wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρnʳ
-end
+@inline AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants) =
+    wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρnʳ
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᵃ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    return wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρnᵃ
-end
+@inline AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᵃ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants) =
+    wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρnᵃ

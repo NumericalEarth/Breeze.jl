@@ -24,8 +24,8 @@
 #
 # ```math
 # θ(z) = \begin{cases}
-#     θ_0 + (θ_{\rm tr} - θ_0) \left(\frac{z}{z_{\rm tr}}\right)^{5/4} & z \leq z_{\rm tr} \\
-#     θ_{\rm tr} \exp\left(\frac{g}{c_p^d T_{\rm tr}} (z - z_{\rm tr})\right) & z > z_{\rm tr}
+#     θ_0 + (θ_{\rm tr} - θ_0) \left(\dfrac{z}{z_{\rm tr}}\right)^{5/4} & z \leq z_{\rm tr} \\
+#     θ_{\rm tr} \exp\left[\dfrac{g}{c_p^d T_{\rm tr}} (z - z_{\rm tr})\right] & z > z_{\rm tr}
 # \end{cases}
 # ```
 #
@@ -40,12 +40,12 @@
 #
 # ```math
 # θ'(x, y, z) = \begin{cases}
-#     Δθ \cos^2\left(\frac{\pi}{2} R\right) & R < 1 \\
+#     Δθ \cos^2\left(π R / 2 \right) & R < 1 \\
 #     0 & R \geq 1
 # \end{cases}
 # ```
 #
-# where ``R = \sqrt{(r/r_h)^2 + ((z-z_c)/r_z)^2}`` is the normalized radius,
+# where ``R = \sqrt{(r/r_h)^2 + [(z-z_c)/r_z]^2}`` is the normalized radius,
 # ``r = \sqrt{(x-x_c)^2 + (y-y_c)^2}`` is the horizontal distance from the bubble center,
 # ``Δθ = 3 \, {\rm K}`` is the perturbation amplitude, ``r_h = 10 \, {\rm km}`` is the
 # horizontal radius, and ``r_z = 1.5 \, {\rm km}`` is the vertical radius.
@@ -126,12 +126,12 @@ nothing #hide
 function θ_background(z)
     θᵗ = θ₀ + (θᵖ - θ₀) * (z / zᵖ)^(5/4)
     θˢ = θᵖ * exp(g / (cᵖᵈ * Tᵖ) * (z - zᵖ))
-    return (z <= zᵖ) * θᵗ + (z > zᵖ) * θˢ
+    return (z ≤ zᵖ) * θᵗ + (z > zᵖ) * θˢ
 end
 
 # Relative humidity profile (decreases with height, 25% above tropopause):
 
-ℋ_background(z) = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z <= zᵖ) + 1/4 * (z > zᵖ)
+ℋ_background(z) = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z ≤ zᵖ) + 1/4 * (z > zᵖ)
 
 # Zonal wind profile with linear shear below ``zˢ`` and smooth transition (Equations 15-16):
 
@@ -140,7 +140,7 @@ function u_background(z)
     uᵗ = (-4/5 + 3 * (z / zˢ) - 5/4 * (z / zˢ)^2) * uˢ - uᶜ
     uᵘ = uˢ - uᶜ
     return (z < (zˢ - 1000)) * uˡ +
-           (abs(z - zˢ) <= 1000) * uᵗ +
+           (abs(z - zˢ) ≤ 1000) * uᵗ +
            (z > (zˢ + 1000)) * uᵘ
 end
 
@@ -163,7 +163,7 @@ function θᵢ(x, y, z)
     θ̄ = θ_background(z)
     r = sqrt((x - xᵇ)^2 + (y - yᵇ)^2)
     R = sqrt((r / rᵇʰ)^2 + ((z - zᵇ) / rᵇᵛ)^2)
-    θ′ = ifelse(R < 1, Δθ * cos((π / 2) * R)^2, 0.0)
+    θ′ = ifelse(R < 1, Δθ * cos(π * R / 2)^2, 0.0)
     return θ̄ + θ′
 end
 
@@ -217,16 +217,15 @@ fig
 # accretion, rain evaporation, and sedimentation processes.
 
 microphysics = DCMIP2016KesslerMicrophysics()
-advection = WENO(order=9, minimum_buffer_upwind_order=3)
+advection = WENO(order=9)
 
 model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
 
 # ## Model initialization
 #
 # We initialize the model with the previously described initial conditions, including a warm-bubble perturbation.
-# We precompute the RH field to ensure GPU compatibility.
 
-ℋᵢ = set!(CenterField(grid), (x, y, z) -> ℋ_background(z))
+ℋᵢ(x, y, z) = ℋ_background(z)
 
 set!(model, θ=θᵢ, ℋ=ℋᵢ, u=uᵢ)
 

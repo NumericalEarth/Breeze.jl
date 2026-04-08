@@ -1,7 +1,7 @@
 #####
 ##### Acoustic Substepping for CompressibleDynamics — Exner Pressure Formulation
 #####
-##### Implements split-explicit time integration following CM1 (Bryan 2002),
+##### Implements split-explicit time integration following CM1 (Bryan and Fritsch 2002),
 ##### Wicker-Skamarock (2002), and Klemp et al. (2007):
 ##### - Forward-backward acoustic substeps with (velocity, Exner pressure) variables
 ##### - Vertically implicit w-π coupling with off-centering (always on)
@@ -260,12 +260,12 @@ $(TYPEDSIGNATURES)
 
 Compute the number of acoustic substeps from the horizontal acoustic CFL condition.
 
-Uses a conservative sound speed estimate `ℂᵃᶜ = √(γ Rᵈ Tᵣ)` with `Tᵣ = 300 K`
-(giving `ℂᵃᶜ ≈ 347 m/s`) and the minimum horizontal grid spacing. The vertical
+Uses a conservative sound speed estimate ``ℂᵃᶜ = (γ Rᵈ Tᵣ)^{1/2}`` with ``Tᵣ = 300\\;\\mathrm{K}``
+(giving ``ℂᵃᶜ ≈ 347\\;\\mathrm{m/s}``) and the minimum horizontal grid spacing. The vertical
 CFL is not needed because the w-π' coupling is vertically implicit.
 
-Following CM1, the substep count satisfies `Δτ · ℂᵃᶜ / Δx_min ≤ 1` where
-`Δτ = Δt / N` is the acoustic substep size. A safety factor of 1.2 is applied
+Following CM1, the substep count satisfies ``ℂᵃᶜ Δτ / Δx_{min} ≤ 1`` where
+``Δτ = Δt / N`` is the acoustic substep size. A safety factor of 1.2 is applied
 to ensure stability with the forward-backward splitting.
 """
 function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
@@ -418,11 +418,28 @@ end
 function _set_exner_reference!(substepper, model, ::Nothing, pˢᵗ, κ)
     grid = model.grid
     arch = architecture(grid)
-    fill!(parent(substepper.reference_exner_function), 0)
+
+    p_ref = model.dynamics.terrain_reference_pressure
+    if p_ref !== nothing
+        # With terrain-following coordinates, use the 3D terrain reference pressure
+        # to define a proper reference Exner function πᵣ = (p_ref/pˢᵗ)^κ.
+        # This keeps π' = π - πᵣ small (perturbation), which is essential for
+        # numerical stability of the split-explicit acoustic substepping.
+        launch!(arch, grid, :xyz, _compute_reference_exner_from_pressure!,
+                substepper.reference_exner_function, p_ref, pˢᵗ, κ)
+    else
+        fill!(parent(substepper.reference_exner_function), 0)
+    end
+
     launch!(arch, grid, :xyz, _recompute_pi_prime!,
             substepper.exner_perturbation, substepper.filtered_exner_perturbation,
             model.dynamics.pressure, substepper.reference_exner_function, pˢᵗ, κ)
     return nothing
+end
+
+@kernel function _compute_reference_exner_from_pressure!(πᵣ, p_ref, pˢᵗ, κ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds πᵣ[i, j, k] = (p_ref[i, j, k] / pˢᵗ)^κ
 end
 
 @inline reference_exner(i, j, k, ::Nothing, pˢᵗ, κ) = zero(pˢᵗ)
@@ -438,11 +455,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Convert slow momentum tendencies (Gˢρu, Gˢρv, Gˢρw) to slow velocity
-tendencies (uten, vten, wten) and slow pressure tendency (Gˢπ).
+Convert slow momentum tendencies ``(Gˢ_{ρu}, Gˢ_{ρv}, Gˢ_{ρw})`` to slow velocity
+tendencies ``(Gˢ_u, Gˢ_v, Gˢ_w)`` and slow pressure tendency (``Gˢ_π``).
 
-The velocity tendency is: uten ≈ Gˢρu / ρ
-The pressure tendency is: Gˢπ = -u · ∇π
+- velocity tendency: ``Gˢ_{\\boldsymbol{u}} ≈ Gˢ_{ρ\\boldsymbol{u}} / ρ``
+- pressure tendency: ``Gˢ_π = -\\boldsymbol{u} \\boldsymbol{\\cdot} \\boldsymbol{\\nabla} π``
 
 These are frozen during the acoustic substep loop.
 """
@@ -626,7 +643,7 @@ arrays), we solve for π' at cell centers (matching the solver dimensions),
 then back-solve for w.
 
 The approach:
-1. Substitute ``w⁺[k] = w[k] + Δτ Gˢw[k] - Δτ (cᵖ θᵥ / Δz) δz(π'⁺)``
+1. Substitute ``w⁺[k] = w[k] + Δτ Gˢ_w[k] - Δτ (cᵖ θᵥ / Δz) δz(π'⁺)``
    into the pressure equation ``π'⁺ = π' + π'_{forcing} - α Δτ S ∂w⁺/∂z``
 2. This gives a tridiagonal system in π'⁺ at center locations
 3. After solving for π'⁺, back-solve for w⁺ from the new pressure gradient
@@ -985,8 +1002,8 @@ function recover_full_fields!(model, substepper, U⁰, Δt_stage)
 end
 
 @kernel function _nonlinear_recovery_wsrk3!(ρ, ρχ, π′_final, π′_initial, πᵣ,
-                                             θᵥ, Gˢρχ, Gˢρ,
-                                             ρ⁰, ρχ⁰, pˢᵗ, Rᵈ, κ, Δt_stage)
+                                            θᵥ, Gˢρχ, Gˢρ,
+                                            ρ⁰, ρχ⁰, pˢᵗ, Rᵈ, κ, Δt_stage)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
