@@ -16,7 +16,7 @@ using Breeze.AtmosphereModels:
     AtmosphereModel,
     SlowTendencyMode,
     dynamics_density,
-    transport_momentum,
+    advecting_momentum,
     transport_velocities,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
@@ -144,16 +144,13 @@ function compute_slow_momentum_tendencies!(model)
 
     model_fields = fields(model)
 
-    # Use transport momentum (contravariant for terrain-following grids)
-    advecting_momentum = transport_momentum(model)
-
     momentum_args = (
         dynamics_density(model.dynamics),
         model.advection.momentum,
         model.velocities,
         model.closure,
         model.closure_fields,
-        advecting_momentum,
+        advecting_momentum(model),
         model.coriolis,
         model.clock,
         model_fields)
