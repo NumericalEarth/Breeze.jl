@@ -225,13 +225,27 @@ Note: H₂O is computed from the model's prognostic moisture field.
 
 # Example
 
-```julia
-# Constant ozone
-background = BackgroundAtmosphere(CO₂ = 400e-6)
+```jldoctest
+julia> using Breeze
 
-# Height-varying ozone (function of z in meters)
-tropical_ozone(z) = 30e-9 * (1 + z / 10000)
-background = BackgroundAtmosphere(CO₂ = 400e-6, O₃ = tropical_ozone)
+julia> background = BackgroundAtmosphere(CO₂ = 400e-6)
+BackgroundAtmosphere with 5 active gases:
+  N₂ = 0.78084
+  O₂ = 0.20946
+  CO₂ = 400.0 ppm
+  CH₄ = 1.8 ppm
+  N₂O = 330.0 ppb
+
+julia> tropical_ozone(z) = 30e-9 * (1 + z / 10000);
+
+julia> background = BackgroundAtmosphere(CO₂ = 400e-6, O₃ = tropical_ozone)
+BackgroundAtmosphere with 6 active gases:
+  N₂ = 0.78084
+  O₂ = 0.20946
+  CO₂ = 400.0 ppm
+  CH₄ = 1.8 ppm
+  N₂O = 330.0 ppb
+  O₃ = tropical_ozone (generic function with 1 method)
 ```
 """
 function BackgroundAtmosphere(; N₂  = 0.78084,      # Nitrogen (~78%)

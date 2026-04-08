@@ -283,7 +283,7 @@ function acoustic_scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     n_acoustic = 5  # ρ, ρu, ρv, ρw, ρθ (handled by acoustic loop)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
-        i <= n_acoustic && continue
+        i ≤ n_acoustic && continue
 
         launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
 

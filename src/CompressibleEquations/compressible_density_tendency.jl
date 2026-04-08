@@ -48,7 +48,7 @@ Compute the density tendency for compressible dynamics using the continuity equa
 
 The density evolves according to:
 ```math
-\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u})
+\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot \\,} (\\rho \\boldsymbol{u})
 ```
 
 Since momentum `ρu` is already available, this is simply the negative divergence of momentum.
