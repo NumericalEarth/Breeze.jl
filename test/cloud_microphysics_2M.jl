@@ -218,6 +218,18 @@ end
     @test bsv !== nothing
     @test haskey(bsv, :ρqᴸ)
     @test haskey(bsv, :ρqᴵ)
+
+    # Validate effective liquid sedimentation: sign convention and mass-weighted averaging
+    time_step!(model, 1)
+    qᶜˡ_val = @allowscalar μ.qᶜˡ[1, 1, 2]
+    qʳ_val  = @allowscalar μ.qʳ[1, 1, 2]
+    wᶜˡ_val = @allowscalar μ.wᶜˡ[1, 1, 2]
+    wʳ_val  = @allowscalar μ.wʳ[1, 1, 2]
+    wᴸ_val  = @allowscalar bsv.ρqᴸ.w[1, 1, 2]
+
+    @test qᶜˡ_val + qʳ_val > 0
+    @test wᴸ_val <= 0
+    @test wᴸ_val ≈ -(wᶜˡ_val * qᶜˡ_val + wʳ_val * qʳ_val) / (qᶜˡ_val + qʳ_val)
 end
 
 @testset "TwoMomentCloudMicrophysics ImpenetrableBoundaryCondition [$FT]" for FT in test_float_types()

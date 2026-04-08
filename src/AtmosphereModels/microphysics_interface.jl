@@ -547,8 +547,8 @@ end
 # The sign convention (downward = negative w) is handled by NegatedField.
 #
 # Microphysics schemes implement:
-#   sedimentation_speed(microphysics, name) → field or nothing
-#   water_phase(microphysics, name) → :liquid, :ice, or nothing
+#   sedimentation_speed(microphysics, microphysical_fields, name) → field or nothing
+#   water_phase(microphysics, name) → Val(:liquid), Val(:ice), or nothing
 #
 # The generic microphysical_velocities wrapper calls sedimentation_speed and
 # wraps the result in a NegatedField for the w component.
@@ -561,12 +561,13 @@ the prognostic tracer `name`, or `nothing` if the tracer does not sediment.
 
 Microphysics schemes should extend this function for each sedimenting tracer.
 """
+@inline sedimentation_speed(microphysics, microphysical_fields, name) = nothing
 @inline sedimentation_speed(microphysics::Nothing, microphysical_fields, name) = nothing
 
 """
 $(TYPEDSIGNATURES)
 
-Return the water phase (`:liquid` or `:ice`) associated with tracer `name`,
+Return the water phase (`Val(:liquid)` or `Val(:ice)`) associated with tracer `name`,
 or `nothing` if the tracer has no defined phase.
 
 Microphysics schemes should extend this function.

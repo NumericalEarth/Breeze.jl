@@ -82,18 +82,18 @@ function AtmosphereModels.surface_precipitation_flux(model, microphysics::TwoMom
 end
 
 struct TwoMomentSurfacePrecipitationFluxKernel{W, R}
-    terminal_velocity :: W
+    sedimentation_speed :: W
     rain_density :: R
 end
 
 Adapt.adapt_structure(to, k::TwoMomentSurfacePrecipitationFluxKernel) =
-    TwoMomentSurfacePrecipitationFluxKernel(adapt(to, k.terminal_velocity),
+    TwoMomentSurfacePrecipitationFluxKernel(adapt(to, k.sedimentation_speed),
                                              adapt(to, k.rain_density))
 
 @inline function (kernel::TwoMomentSurfacePrecipitationFluxKernel)(i, j, k_idx, grid)
     # Flux at bottom face (k=1), ignore k_idx since this is a 2D field
     # wʳ > 0 (sedimentation speed magnitude), so wʳ * ρqʳ > 0 represents flux out of domain
-    @inbounds wʳ = kernel.terminal_velocity[i, j, 1]
+    @inbounds wʳ = kernel.sedimentation_speed[i, j, 1]
     @inbounds ρqʳ = kernel.rain_density[i, j, 1]
 
     # Return positive flux for rain leaving domain (downward)
