@@ -357,9 +357,13 @@ Base.summary(::RadiativeTransferModel) = "RadiativeTransferModel"
 
 function Base.show(io::IO, radiation::RadiativeTransferModel)
     print(io, summary(radiation), "\n",
-          "├── solar_constant: ", prettysummary(radiation.solar_constant), " W m⁻²\n",
-          "├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",
-          "├── surface_emissivity: ", radiation.surface_properties.surface_emissivity, "\n",
+          "├── solar_constant: ", prettysummary(radiation.solar_constant), " W m⁻²\n")
+    if radiation.surface_properties.surface_temperature isa Oceananigans.Fields.ConstantField
+        print("├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",)
+    else
+        print("├── surface_temperature: ", summary(radiation.surface_properties.surface_temperature), "\n")
+    end
+    print("├── surface_emissivity: ", radiation.surface_properties.surface_emissivity, "\n",
           "├── direct_surface_albedo: ", radiation.surface_properties.direct_surface_albedo, "\n")
 
     # Show effective radius models if present (for all-sky optics)
