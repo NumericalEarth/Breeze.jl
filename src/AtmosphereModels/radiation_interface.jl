@@ -359,6 +359,8 @@ Base.summary(::RadiativeTransferModel) = "RadiativeTransferModel"
 function Base.show(io::IO, radiation::RadiativeTransferModel)
     print(io, summary(radiation), "\n",
           "├── solar_constant: ", prettysummary(radiation.solar_constant), " W m⁻²\n")
+    @info typeof(radiation.surface_properties.surface_temperature)
+    @info radiation.surface_properties.surface_temperature isa ConstantField
     if radiation.surface_properties.surface_temperature isa ConstantField
         print("├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",)
     else
