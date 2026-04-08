@@ -1,7 +1,14 @@
-using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w,
-                              U_dot_∇u_metric, U_dot_∇v_metric, U_dot_∇w_metric
+using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, z_f_cross_U
 using Oceananigans.Utils: sum_of_velocities
+
+# Monkey patch: define U_dot_∇{u,v,w}_metric (and the hydrostatic / nonhydrostatic
+# variants) inside Breeze.AtmosphereModels itself, instead of importing them
+# from Oceananigans.Advection. This avoids needing the
+# CliMA/Oceananigans.jl#5437 (dkz/curvilinear-advection) branch — the registry
+# Oceananigans does not export these symbols. Source: verbatim copy of
+# `src/Advection/curvature_metric_terms.jl` from PR #5437.
+include("oceananigans_curvature_metric_terms_patch.jl")
 
 # Fallback kernel functions
 @inline ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, args...) = zero(grid)
