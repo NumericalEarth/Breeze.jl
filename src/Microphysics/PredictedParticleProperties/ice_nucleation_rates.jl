@@ -361,7 +361,7 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
 # Returns
 - Tuple (Q_spl, N_spl): ice mass rate [kg/kg/s] and number rate [1/kg/s]
 """
-@inline function rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, surface_T, qᶠ)
+@inline function rime_splintering_rates(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, surface_T, qᶠ)
     FT = typeof(T)
     prp = p3.process_rates
 
@@ -377,20 +377,25 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
     cold_branch = clamp((T_high - T) / (T_high - T_peak), zero(FT), one(FT))
     efficiency = ifelse(T <= T_peak, warm_branch, cold_branch)
 
-    # Fortran nCat=1 path includes BOTH cloud and rain riming in splintering
-    # (microphy_p3.f90 lines 3547-3574: HM_cloud + HM_rain blocks).
-    total_riming = clamp_positive(cloud_riming) + clamp_positive(rain_riming)
+    cloud_riming_eff = clamp_positive(cloud_riming)
+    rain_riming_eff = clamp_positive(rain_riming)
     has_rime = qᶠ >= p3.minimum_mass_mixing_ratio
     active = (D_ice ≥ prp.splintering_diameter_threshold) &
              has_rime &
              (Fˡ < prp.splintering_liquid_fraction_max) &
              (surface_T < prp.splintering_surface_temperature_max)
 
-    # Number of splinters produced
-    N_spl = ifelse(active, efficiency * c_splinter * total_riming, zero(FT))
+    cloud_number = ifelse(active, efficiency * c_splinter * cloud_riming_eff, zero(FT))
+    rain_number = ifelse(active, efficiency * c_splinter * rain_riming_eff, zero(FT))
+    N_spl = cloud_number + rain_number
 
-    # Mass of splinters
-    Q_spl = N_spl * mᵢ₀
+    cloud_mass = cloud_number * mᵢ₀
+    rain_mass = rain_number * mᵢ₀
 
-    return Q_spl, N_spl
+    return cloud_mass, rain_mass, N_spl
+end
+
+@inline function rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, surface_T, qᶠ)
+    cloud_mass, rain_mass, N_spl = rime_splintering_rates(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, surface_T, qᶠ)
+    return cloud_mass + rain_mass, N_spl
 end

@@ -44,7 +44,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 # Returns
 - Rate of ice number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-@inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ)
+@inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -52,14 +52,15 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     T_low = prp.aggregation_efficiency_temperature_low
     T_high = prp.aggregation_efficiency_temperature_high
 
-    qⁱ_eff = clamp_positive(qⁱ)
+    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
     # Thresholds
     qⁱ_threshold = FT(1e-14)
     nⁱ_threshold = FT(1e2)
 
-    aggregation_active = (qⁱ_eff > qⁱ_threshold) & (nⁱ_eff > nⁱ_threshold)
+    aggregation_active = (qⁱ_total > qⁱ_threshold) & (nⁱ_eff > nⁱ_threshold)
 
     # Temperature-dependent sticking efficiency (linear ramp)
     # Cold ice is less sticky, near-melting ice is very sticky
@@ -76,11 +77,11 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     Eᵢᵢ = Eᵢᵢ * Eᵢᵢ_fact
 
     # Mean particle properties
-    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
     # PSD-integrated self-collection kernel (E-free) from lookup table.
     AV_kernel = aggregation_kernel(p3.ice.collection.aggregation,
-                                     m_mean, Fᶠ, ρᶠ, prp, p3, μ)
+                                     m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
     # Collection kernel with temperature-dependent sticking efficiency
     K_mean = Eᵢᵢ * AV_kernel
@@ -130,7 +131,7 @@ factor for the exponential PSD.
 # Returns
 - Rate of cloud → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-@inline function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ)
+@inline function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
@@ -138,22 +139,23 @@ factor for the exponential PSD.
     T₀ = prp.freezing_temperature
 
     qᶜˡ_eff = clamp_positive(qᶜˡ)
-    qⁱ_eff = clamp_positive(qⁱ)
+    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
     # D3: Fortran uses T <= trplpt for below-freezing riming
     below_freezing = T <= T₀
-    active = below_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
+    active = below_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_total > q_threshold) & (nⁱ_eff > n_threshold)
 
     # Mean particle mass
-    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
     # PSD-integrated collection kernel ⟨A×V⟩ from lookup table.
     # Computes ∫ V(D) A(D) N'(D) dD with E=1 (geometric kernel).
     AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                       m_mean, Fᶠ, ρᶠ, prp, p3, μ)
+                                                       m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
     # Air density correction for ice particle fall speed (Heymsfield et al. 2006):
     # ρfaci = (ρ₀_ice / ρ)^0.54, where ρ₀_ice = 60000/(287.15×253.15) ≈ 0.826 kg/m³
@@ -179,7 +181,7 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
 # Returns
 - `(mass_rate, number_rate)`: Cloud → rain mass rate [kg/kg/s] and rain number source [1/kg/s]
 """
-@inline function cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ)
+@inline function cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
@@ -187,19 +189,20 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
     T₀ = prp.freezing_temperature
 
     qᶜˡ_eff = clamp_positive(qᶜˡ)
-    qⁱ_eff = clamp_positive(qⁱ)
+    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
     # D3: Fortran uses T > trplpt for above-freezing collection
     above_freezing = T > T₀
-    active = above_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
+    active = above_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_total > q_threshold) & (nⁱ_eff > n_threshold)
 
     # Same collection kernel as cloud_riming_rate
-    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
     AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
-                                                       m_mean, Fᶠ, ρᶠ, prp, p3, μ)
+                                                       m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
@@ -224,7 +227,7 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 # Returns
 - Rain mass rate collected onto ice [kg/kg/s]
 """
-@inline function rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)))
+@inline function rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -233,28 +236,25 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = clamp_positive(nʳ)
-    qⁱ_eff = clamp_positive(qⁱ)
+    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
     # D3: Fortran uses T > trplpt for above-freezing collection
     above_freezing = T > T₀
-    active = above_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
+    active = above_freezing & (qʳ_eff > q_threshold) & (qⁱ_total > q_threshold) & (nⁱ_eff > n_threshold)
 
     # D5: Use Table 2 (double-PSD kernel) for above-freezing rain-ice collection,
     # matching the below-freezing rain_riming_rate path and Fortran P3 convention.
-    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
     # Diagnose rain lambda for Table 2 lookup
-    λ_r_cubed = FT(π) * prp.liquid_water_density * nʳ_eff / max(qʳ_eff, FT(1e-15))
-    λ_r = clamp(cbrt(λ_r_cubed), prp.rain_lambda_min, prp.rain_lambda_max)
-
-    # Liquid fraction for Table 2 lookup
-    Fˡ = zero(FT)
+    λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
 
     mass_kernel = _rain_riming_mass_kernel(lookup_table_2(p3),
         m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
@@ -326,7 +326,7 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
 # Returns
 - Rate of rain → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-@inline function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)))
+@inline function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -335,27 +335,23 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
 
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = clamp_positive(nʳ)
-    qⁱ_eff = clamp_positive(qⁱ)
+    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
     # D3: Fortran uses T <= trplpt for below-freezing riming
     below_freezing = T <= T₀
-    active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
+    active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_total > q_threshold) & (nⁱ_eff > n_threshold)
 
-    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
     # Diagnose rain DSD slope parameter
-    λ_r_cubed = FT(π) * prp.liquid_water_density * nʳ_eff / max(qʳ_eff, FT(1e-15))
-    λ_r = clamp(cbrt(λ_r_cubed), prp.rain_lambda_min, prp.rain_lambda_max)
-
-    # Liquid fraction for Table 2 lookup
-    qⁱ_total = max(qⁱ_eff + clamp_positive(zero(FT)), FT(1e-20))
-    Fˡ = zero(FT)
+    λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
 
     # H6: Use Table 2 (double-PSD kernel) for ice-rain mass collection.
     mass_kernel = _rain_riming_mass_kernel(lookup_table_2(p3),
@@ -409,7 +405,7 @@ independent PSD-integrated number collection rate.
 # Returns
 - Rate of rain number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-@inline function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)))
+@inline function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -418,25 +414,23 @@ independent PSD-integrated number collection rate.
 
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = clamp_positive(nʳ)
-    qⁱ_eff = clamp_positive(qⁱ)
+    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
     # m14: Fortran uses .le. for both mass and number riming
     below_freezing = T <= T₀
-    active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nʳ_eff > n_threshold) & (nⁱ_eff > n_threshold)
+    active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_total > q_threshold) & (nʳ_eff > n_threshold) & (nⁱ_eff > n_threshold)
 
-    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
     # Diagnose rain DSD slope parameter
-    λ_r_cubed = FT(π) * prp.liquid_water_density * nʳ_eff / max(qʳ_eff, FT(1e-15))
-    λ_r = clamp(cbrt(λ_r_cubed), prp.rain_lambda_min, prp.rain_lambda_max)
-
-    Fˡ = zero(FT)
+    λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
 
     # H6: Use Table 2 (number-weighted kernel) for ice-rain number collection.
     number_kernel = _rain_riming_number_kernel(lookup_table_2(p3),
@@ -662,11 +656,12 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 # Returns
 - Wet growth capacity [kg/kg/s] (positive; zero when T ≥ T₀)
 """
-@inline function wet_growth_capacity(p3, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ)
+@inline function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
-    qⁱ_eff = clamp_positive(qⁱ)
+    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
     T₀ = prp.freezing_temperature
@@ -688,13 +683,13 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     q_sat0 = ε * e_s0 / max(P - e_s0, FT(1))
 
     # Mean ice particle mass
-    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
     ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
 
     # Ventilation integral (same as deposition/refreezing)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
+                                    m_mean, Fᶠ, Fˡ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
 
     # Heat balance: sensible + latent
     Q_sensible = K_a * (T₀ - T)
@@ -744,7 +739,8 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
     prp = p3.process_rates
 
     qʷⁱ_eff = clamp_positive(qʷⁱ)
-    qⁱ_eff  = clamp_positive(qⁱ)
+    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff  = clamp_positive(nⁱ)
 
     T₀ = prp.freezing_temperature
@@ -767,13 +763,13 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
     q_sat0 = ε * e_s0 / max(P - e_s0, FT(1))
 
     # Mean ice particle mass
-    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
     ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
 
     # Ventilation integral (ice-particle capacitance; same path as deposition)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
+                                    m_mean, Fᶠ, Fˡ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
 
     # Heat balance for refreezing:
     # Conductive: K_a × (T₀ - T) removes heat from liquid → promotes freezing

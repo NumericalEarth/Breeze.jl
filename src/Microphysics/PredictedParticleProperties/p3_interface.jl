@@ -230,11 +230,11 @@ After the moisture refactor, vapor is the prognostic moisture variable.
 The diagnostic `qᵛ` field is updated from the thermodynamic state.
 """
 @inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
-    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
-    qᶠ = rime_state.qᶠ
-    bᶠ = rime_state.bᶠ
-    Fᶠ = rime_state.Fᶠ
-    ρᶠ = rime_state.ρᶠ
+    props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+    qᶠ = props.qᶠ
+    bᶠ = props.bᶠ
+    Fᶠ = props.Fᶠ
+    ρᶠ = props.ρᶠ
 
     @inbounds μ.qᵛ[i, j, k]  = 𝒰.moisture_mass_fractions.vapor
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
@@ -244,20 +244,14 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.nⁱ[i, j, k]  = ℳ.nⁱ
     @inbounds μ.qᶠ[i, j, k]  = qᶠ
     @inbounds μ.bᶠ[i, j, k]  = bᶠ
-    @inbounds μ.zⁱ[i, j, k]  = ℳ.zⁱ
+    @inbounds μ.zⁱ[i, j, k]  = props.zⁱ_bounded
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
-
-    # Ice PSD shape parameter μ from Table 3 (3-moment) or 0 (2-moment fallback).
-    FT = typeof(ρ)
-    qⁱ_total_mu = max(clamp_positive(ℳ.qⁱ) + clamp_positive(ℳ.qʷⁱ), FT(1e-20))
-    Fˡ_mu = clamp_positive(ℳ.qʷⁱ) / qⁱ_total_mu
-    μ_ice = compute_ice_shape_parameter(p3, ℳ.qⁱ, ℳ.nⁱ, ℳ.zⁱ, Fᶠ, Fˡ_mu, ρᶠ)
 
     # Pre-compute terminal velocities for sedimentation (stored as negative w)
     @inbounds μ.wʳ[i, j, k]   = -rain_terminal_velocity_mass_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     @inbounds μ.wʳₙ[i, j, k]  = -rain_terminal_velocity_number_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     # D16: Pass actual Fˡ so mixed-phase particles use correct fall speed.
-    vⁱ = ice_terminal_velocities(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=Fˡ_mu, μ=μ_ice)
+    vⁱ = ice_terminal_velocities(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
     @inbounds μ.wⁱ[i, j, k]   = -vⁱ.mass_weighted
     @inbounds μ.wⁱₙ[i, j, k]  = -vⁱ.number_weighted
     @inbounds μ.wⁱ_z[i, j, k] = -vⁱ.reflectivity_weighted
@@ -273,7 +267,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.cache_ρnⁱ[i, j, k]  = tendency_ρnⁱ(rates, ρ)
     @inbounds μ.cache_ρqᶠ[i, j, k]  = tendency_ρqᶠ(rates, ρ, Fᶠ)
     @inbounds μ.cache_ρbᶠ[i, j, k]  = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, ℳ.qⁱ, p3.process_rates)
-    @inbounds μ.cache_ρzⁱ[i, j, k]  = tendency_ρzⁱ(rates, ρ, ℳ.qⁱ, ℳ.nⁱ, ℳ.zⁱ, p3.process_rates)
+    @inbounds μ.cache_ρzⁱ[i, j, k]  = p3_ice_sixth_moment_tendency(lookup_table_1(p3), p3, rates, ρ, ℳ, props)
     @inbounds μ.cache_ρqʷⁱ[i, j, k] = tendency_ρqʷⁱ(rates, ρ)
     @inbounds μ.cache_ρqᵛ[i, j, k]  = tendency_ρqᵛ(rates, ρ)
 
@@ -348,22 +342,42 @@ end
 #   2. Gridless (ParcelModel): microphysical_tendency builds state and computes rates directly.
 
 # Helper to compute P3 rates and extract ice properties from ℳ
+@inline function p3_ice_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    FT = typeof(ρ)
+    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
+    qⁱ_total = max(total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ), FT(1e-20))
+    Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, ℳ.qʷⁱ)
+    μ_ice = compute_ice_shape_parameter(p3, qⁱ_total, ℳ.nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
+    zⁱ_bounded = bound_ice_sixth_moment(p3, qⁱ_total, ℳ.nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ, μ_ice)
+    T = temperature(𝒰, constants)
+    P = 𝒰.reference_pressure
+    transport = air_transport_properties(T, P)
+    λ_r = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
+    return (; qᶠ = rime_state.qᶠ, bᶠ = rime_state.bᶠ, Fᶠ = rime_state.Fᶠ, Fˡ,
+              ρᶠ = rime_state.ρᶠ, qⁱ_total, μ_ice, zⁱ_bounded, transport, λ_r)
+end
+
 @inline function p3_rates_and_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     # Compute all process rates from microphysical state ℳ and thermodynamic state 𝒰
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+    return rates, p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+end
 
-    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
-    Fᶠ = rime_state.Fᶠ
-    ρᶠ = rime_state.ρᶠ
+@inline function p3_ice_sixth_moment_tendency(::Nothing, p3, rates, ρ, ℳ::P3MicrophysicalState, props)
+    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, ℳ.nⁱ, props.zⁱ_bounded, p3.process_rates)
+end
 
-    return rates, ℳ.qⁱ, ℳ.nⁱ, ℳ.zⁱ, Fᶠ, ρᶠ
+@inline function p3_ice_sixth_moment_tendency(::P3LookupTable1, p3, rates, ρ, ℳ::P3MicrophysicalState, props)
+    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, ℳ.nⁱ, props.zⁱ_bounded,
+                        props.Fᶠ, props.Fˡ, props.ρᶠ, p3,
+                        props.transport.nu, props.transport.D_v, props.μ_ice, props.λ_r)
 end
 
 """
 Cloud liquid tendency: loses mass to autoconversion, accretion, and riming.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqᶜˡ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    rates, _, _, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρqᶜˡ(rates, ρ)
 end
 
@@ -371,7 +385,7 @@ end
 Rain mass tendency: gains from autoconversion, accretion, melting, shedding; loses to evaporation, riming.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqʳ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    rates, _, _, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρqʳ(rates, ρ)
 end
 
@@ -379,15 +393,15 @@ end
 Rain number tendency: gains from autoconversion, melting, shedding; loses to self-collection, riming.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnʳ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    rates, qⁱ, nⁱ, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
+    rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    return tendency_ρnʳ(rates, ρ, ℳ.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
 end
 
 """
 Ice mass tendency: gains from deposition, riming, refreezing; loses to melting.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    rates, _, _, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρqⁱ(rates, ρ)
 end
 
@@ -395,7 +409,7 @@ end
 Ice number tendency: loses from melting and aggregation.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    rates, _, _, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρnⁱ(rates, ρ)
 end
 
@@ -403,24 +417,24 @@ end
 Rime mass tendency: gains from cloud/rain riming, refreezing; loses proportionally with melting.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqᶠ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    rates, _, _, _, Fᶠ, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρqᶠ(rates, ρ, Fᶠ)
+    rates, props = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    return tendency_ρqᶠ(rates, ρ, props.Fᶠ)
 end
 
 """
 Rime volume tendency: gains from new rime; loses with melting.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρbᶠ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    rates, _, _, _, Fᶠ, ρᶠ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, ℳ.qⁱ, p3.process_rates)
+    rates, props = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    return tendency_ρbᶠ(rates, ρ, props.Fᶠ, props.ρᶠ, ℳ.qⁱ, p3.process_rates)
 end
 
 """
 Ice sixth moment tendency: changes with deposition, melting, riming, and nucleation.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρzⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    rates, qⁱ, nⁱ, zⁱ, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, p3.process_rates)
+    rates, props = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    return p3_ice_sixth_moment_tendency(lookup_table_1(p3), p3, rates, ρ, ℳ, props)
 end
 
 """

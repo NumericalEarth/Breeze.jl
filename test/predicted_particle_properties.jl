@@ -1244,9 +1244,15 @@ using Oceananigans.Fields: interior
         @test left_n ≈ (FT(1) / FT(3)) * prp.splintering_rate * total_riming
         @test peak_n ≈ prp.splintering_rate * total_riming
         @test right_n ≈ FT(0.5) * prp.splintering_rate * total_riming
-        @test left_q ≈ left_n * prp.nucleated_ice_mass
-        @test peak_q ≈ peak_n * prp.nucleated_ice_mass
-        @test right_q ≈ right_n * prp.nucleated_ice_mass
+        @test left_q ≈ left_n * prp.splintering_crystal_mass
+        @test peak_q ≈ peak_n * prp.splintering_crystal_mass
+        @test right_q ≈ right_n * prp.splintering_crystal_mass
+
+        cloud_peak_q, rain_peak_q, split_peak_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rates(
+            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
+        @test split_peak_n ≈ peak_n
+        @test cloud_peak_q ≈ prp.splintering_rate * cloud_riming * prp.splintering_crystal_mass
+        @test rain_peak_q ≈ prp.splintering_rate * rain_riming * prp.splintering_crystal_mass
 
         _, cloud_only_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
             p3, cloud_riming, zero(FT), prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
@@ -1524,9 +1530,10 @@ using Oceananigans.Fields: interior
         @test tendency_ρqᵛ(zero_rates, ρ) == 0.0
     end
 
-    @testset "Tendency functions - nucleation adds sixth moment" begin
+    @testset "Tendency functions - group-2 sources add sixth moment" begin
         FT = Float64
         ρ = FT(1.0)
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
         prp = ProcessRateParameters(FT)
 
         rates = P3ProcessRates(
@@ -1535,17 +1542,34 @@ using Oceananigans.Fields: interior
             FT(0.0),                                                  # sublimation_number (D2)
             FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # agg, ni_limit (C3), 5 riming
             FT(0.0), FT(0.0), FT(0.0),                              # shedding, shedding_n, refreezing
-            FT(1e-9), FT(10.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # nucleation
-            FT(0.0), FT(0.0),                                          # splintering
-            FT(0.0), FT(0.0), FT(0.0), FT(0.0),                      # homogeneous
+            FT(1e-9), FT(10.0), FT(5e-9), FT(100.0), FT(3e-9), FT(50.0),  # nucleation + immersion freezing
+            FT(1e-10), FT(1.0),                                        # splintering
+            FT(2e-9), FT(20.0), FT(4e-9), FT(40.0),                    # homogeneous
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),                        # warm collection + rain_warm_n (M9)
             FT(0.0), FT(0.0),                                         # wet growth
             FT(0.0), FT(0.0),                                         # D8 wet growth shedding
             FT(0.0), FT(0.0), FT(0.0), FT(0.0)                       # M9 stubs
         )
 
-        D_nuc_cubed = 6 * prp.nucleated_ice_mass / (FT(π) * prp.pure_ice_density)
-        expected = ρ * rates.nucleation_number * D_nuc_cubed^2
+        source_z(mass, number, μ_new) = begin
+            q_source = max(mass, zero(FT))
+            n_source = max(number, zero(FT))
+            if q_source == 0 || n_source == 0
+                return zero(FT)
+            end
+            mom3 = q_source * FT(6) / (FT(900) * FT(π))
+            G = Breeze.Microphysics.PredictedParticleProperties.g_of_mu(μ_new)
+            return G * mom3^2 / n_source
+        end
+
+        expected = ρ * (
+            source_z(rates.nucleation_mass, rates.nucleation_number, zero(FT)) +
+            source_z(rates.cloud_freezing_mass, rates.cloud_freezing_number, zero(FT)) +
+            source_z(rates.rain_freezing_mass, rates.rain_freezing_number, zero(FT)) +
+            source_z(rates.splintering_mass, rates.splintering_number, zero(FT)) +
+            source_z(rates.cloud_homogeneous_mass, rates.cloud_homogeneous_number, zero(FT)) +
+            source_z(rates.rain_homogeneous_mass, rates.rain_homogeneous_number, zero(FT))
+        )
 
         @test tendency_ρzⁱ(rates, ρ, FT(0.0), FT(0.0), FT(0.0), prp) ≈ expected
         @test tendency_ρzⁱ(rates, ρ, FT(0.0), FT(0.0), FT(0.0), prp) > 0
@@ -2294,6 +2318,10 @@ using Oceananigans.Fields: interior
         Fᶠ = FT(0.2)
         Fˡ = FT(0.3)
         ρᶠ = FT(400.0)
+        ν = FT(1.5e-5)
+        D_v = FT(2.2e-5)
+        μ = FT(0.0)
+        λ_r = FT(1e4)
 
         partial_only = P3ProcessRates(ntuple(index -> begin
             index == 8 ? FT(1e-7) : zero(FT)
@@ -2303,8 +2331,47 @@ using Oceananigans.Fields: interior
             index == 9 ? FT(1e-7) : zero(FT)
         end, fieldcount(P3ProcessRates))...)
 
-        @test tendency_ρzⁱ(partial_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, FT(1.5e-5), FT(2.2e-5)) ≈ 0
-        @test tendency_ρzⁱ(complete_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, FT(1.5e-5), FT(2.2e-5)) != 0
+        coat_cond_only = P3ProcessRates(ntuple(index -> begin
+            index == 44 ? FT(1e-8) : zero(FT)
+        end, fieldcount(P3ProcessRates))...)
+
+        coat_evap_only = P3ProcessRates(ntuple(index -> begin
+            index == 45 ? FT(1e-8) : zero(FT)
+        end, fieldcount(P3ProcessRates))...)
+
+        rain_rime_only = P3ProcessRates(ntuple(index -> begin
+            index == 16 ? FT(1e-7) : zero(FT)
+        end, fieldcount(P3ProcessRates))...)
+
+        @test tendency_ρzⁱ(partial_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ) ≈ 0
+        @test tendency_ρzⁱ(complete_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ) != 0
+
+        lt1 = Breeze.Microphysics.PredictedParticleProperties.lookup_table_1(p3_tab)
+        lt2 = Breeze.Microphysics.PredictedParticleProperties.lookup_table_2(p3_tab)
+        log_m = log10(qⁱ / nⁱ)
+        ρ_correction = Breeze.Microphysics.PredictedParticleProperties.ice_air_density_correction(
+            p3_tab.ice.fall_speed.reference_air_density, ρ)
+        sc_correction = Breeze.Microphysics.PredictedParticleProperties.ventilation_sc_correction(
+            ν, D_v, ρ_correction)
+
+        mass_dep_combined = lt1.deposition.ventilation(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
+                            sc_correction * lt1.deposition.ventilation_enhanced(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+        z_dep_combined = lt1.sixth_moment.deposition(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
+                         sc_correction * lt1.sixth_moment.deposition1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+        z_sub_combined = lt1.sixth_moment.sublimation(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
+                         sc_correction * lt1.sixth_moment.sublimation1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+        expected_coat_cond = ρ * z_dep_combined * FT(1e-8) / (nⁱ * mass_dep_combined)
+        expected_coat_evap = -ρ * z_sub_combined * FT(1e-8) / (nⁱ * mass_dep_combined)
+
+        @test tendency_ρzⁱ(coat_cond_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, λ_r) ≈ expected_coat_cond
+        @test tendency_ρzⁱ(coat_evap_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, λ_r) ≈ expected_coat_evap
+
+        expected_rain_rime = ρ * lt2.sixth_moment(log_m, log10(λ_r), Fᶠ, Fˡ, ρᶠ, μ) * FT(1e-7) / nⁱ
+        fallback_cloud_rime = ρ * lt1.sixth_moment.rime(log_m, Fᶠ, Fˡ, ρᶠ, μ) * FT(1e-7) / nⁱ
+        rain_rime_tendency = tendency_ρzⁱ(rain_rime_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, λ_r)
+
+        @test rain_rime_tendency ≈ expected_rain_rime
+        @test !isapprox(rain_rime_tendency, fallback_cloud_rime)
     end
 
     #####
