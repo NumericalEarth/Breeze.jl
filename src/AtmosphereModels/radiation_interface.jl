@@ -359,15 +359,15 @@ Base.summary(::RadiativeTransferModel) = "RadiativeTransferModel"
 function Base.show(io::IO, radiation::RadiativeTransferModel)
     print(io, summary(radiation), "\n",
           "├── solar_constant: ", prettysummary(radiation.solar_constant), " W m⁻²\n")
-    @info typeof(radiation.surface_properties.surface_temperature)
-    @info radiation.surface_properties.surface_temperature isa ConstantField
+
     if radiation.surface_properties.surface_temperature isa ConstantField
-        print("├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",)
+        print(io, "├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",)
     else
-        print("├── surface_temperature: ", summary(radiation.surface_properties.surface_temperature), "\n")
+        print(io, "├── surface_temperature: ", summary(radiation.surface_properties.surface_temperature), "\n")
     end
-    print("├── surface_emissivity: ", radiation.surface_properties.surface_emissivity, "\n",
-          "├── direct_surface_albedo: ", radiation.surface_properties.direct_surface_albedo, "\n")
+
+    print(io, "├── surface_emissivity: ", radiation.surface_properties.surface_emissivity, "\n",
+              "├── direct_surface_albedo: ", radiation.surface_properties.direct_surface_albedo, "\n")
 
     # Show effective radius models if present (for all-sky optics)
     if !isnothing(radiation.liquid_effective_radius)
