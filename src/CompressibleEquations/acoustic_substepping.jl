@@ -1,13 +1,30 @@
 #####
-##### Acoustic Substepping for CompressibleDynamics — Exner Pressure Formulation
+##### Acoustic Substepping for CompressibleDynamics
 #####
-##### Implements split-explicit time integration following CM1 (Bryan 2002),
-##### Wicker-Skamarock (2002), and Klemp et al. (2007):
-##### - Forward-backward acoustic substeps with (velocity, Exner pressure) variables
-##### - Vertically implicit w-π coupling with off-centering (always on)
-##### - Forward-extrapolation filter (ϰᵈⁱ) on the pressure variable
-##### - Constant acoustic substep size Δτ = Δt/N across all RK stages
-##### - Topology-aware operators (no halo filling between substeps)
+##### MPAS-A conservative-perturbation split-explicit acoustic substepper
+##### (Skamarock et al. 2012; Wicker–Skamarock 2002 RK3 outer loop).
+#####
+##### Active path:
+#####   - Fast prognostics:  (ρu)″, (ρv)″, (ρw)″, ρ″, (ρθ)″   (MPAS ru_p, rv_p, rw_p,
+#####                                                          rho_pp, rtheta_pp)
+#####   - Outer scheme:      Wicker–Skamarock RK3 with β = (1/3, 1/2, 1)
+#####   - Substep schedule:  selectable via AcousticSubstepDistribution
+#####                        (ProportionalSubsteps default; MonolithicFirstStage for
+#####                        bit-compatible MPAS `config_time_integration_order = 3`)
+#####   - Vertical solve:    Schur-complement tridiagonal in (ρw)″, (ρθ)″ with
+#####                        forward-weight off-centering ε = 2ω - 1
+#####   - Divergence damping: MPAS Klemp–Skamarock–Ha 2018 momentum correction,
+#####                         applied as a post-substep update to (ρu)″, (ρv)″ using
+#####                         the discrete (ρθ)″ tendency as the divergence proxy.
+#####                         **NOTE**: smdiv is currently hardcoded to 0.1 inside
+#####                         the substep loop — see Phase 2 of
+#####                         `docs/src/appendix/substepping_cleanup_and_damping_plan.md`
+#####                         for the planned fix that restores user control via a
+#####                         typed `damping :: AcousticDampingStrategy`.
+#####   - Topology-safe operators avoid halo fills for boundary face updates.
+#####
+##### See also `docs/src/appendix/acoustic_substepping_overview.md` for the
+##### full documentation index.
 #####
 
 using KernelAbstractions: @kernel, @index
@@ -114,61 +131,60 @@ end
 end
 
 #####
-##### Section 2: AcousticSubstepper struct (Exner pressure formulation)
+##### Section 2: AcousticSubstepper struct (MPAS conservative-perturbation form)
 #####
 
 """
     AcousticSubstepper
 
-Storage and parameters for acoustic substepping using the Exner pressure
-formulation, following CM1's `sound.F`.
+Storage and parameters for the MPAS-A conservative-perturbation acoustic
+substepper. The fast prognostic variables advanced inside the substep loop
+are ``(\\rho u)''``, ``(\\rho v)''``, ``(\\rho w)''``, ``\\rho''``, and
+``(\\rho\\theta)''`` — the same family used by MPAS-A's
+`atm_advance_acoustic_step` and by ERF.
 
-The acoustic loop uses velocity (u, v, w) and Exner pressure perturbation (π')
-as prognostic variables, forming a stable 2-variable system that avoids the
-density-buoyancy instability of the (ρu, ρ, ρθ) formulation.
+Each substep performs:
 
-The forward-backward scheme updates:
-1. **Forward**: Velocity from Exner pressure gradient: ``u += Δτ (u_{ten} - cᵖ θᵥ ∂π'_d/∂x)``
-2. **Backward**: Exner pressure from velocity divergence: ``π' += Δτ (π_{ten} - S ∇·u) + w_{terms}``
-3. **Implicit**: Vertically implicit w-π' coupling (tridiagonal solve)
-4. **Filtering**: ``π̃' = π' + ϰᵈⁱ (π' - π'_{old})``
+1. **Horizontal forward** of ``(\\rho u)''``, ``(\\rho v)''`` from the
+   horizontal pressure-gradient force ``-c^2 \\Pi_\\mathrm{face}\\,
+   \\partial_x(\\rho\\theta)''`` plus the frozen slow horizontal tendency.
+2. **Vertical Schur-complement solve** for ``(\\rho w)''``, ``(\\rho\\theta)''``,
+   ``\\rho''`` along each column with forward-weight off-centering
+   ``\\varepsilon = 2\\omega - 1``. The tridiagonal coefficients (MPAS
+   `cofwz`, `cofwr`, `cofwt`, `coftz`) are computed inline at the linearization
+   point cached in `frozen_pressure`.
+3. **Divergence damping** — Klemp–Skamarock–Ha 2018 momentum correction using
+   the discrete ``(\\rho\\theta)''`` tendency as the divergence proxy. Currently
+   applies a hardcoded `smdiv = 0.1` (the MPAS default); see Phase 2 of
+   `docs/src/appendix/substepping_cleanup_and_damping_plan.md` for the planned
+   typed `AcousticDampingStrategy` API that restores user control.
 
 Fields
 ======
 
-- `substeps`: Number of acoustic substeps for the full time step (Δt)
-- `forward_weight`: Off-centering parameter ω (default 0.55, → ε = 2ω−1 = 0.1, MPAS default)
-- `divergence_damping_coefficient`: Forward-extrapolation filter ϰᵈⁱ for π' (default 0.10)
-- `acoustic_damping_coefficient`: Klemp 2018 ϰᵃᶜ for velocity damping
-- `virtual_potential_temperature`: Stage-frozen θᵥ (CenterField, MPAS `theta_m`/`t`)
-- `reference_exner_function`: Reference π₀ = (p_ref/pˢᵗ)^(R/cᵖ) (CenterField, MPAS `pb`)
-- `theta_flux_scratch`: ts accumulator in the column kernel (CenterField, MPAS `ts`)
-- `mass_flux_scratch`: rs accumulator in the column kernel (CenterField, MPAS `rs`)
-- `previous_rtheta_pp`: (ρθ)″ snapshot before the column kernel — used by divergence damping (CenterField)
-- `ρ″`:  acoustic ρ perturbation (CenterField, MPAS `rho_pp`)
-- `ρθ″`: acoustic ρθ perturbation (CenterField, MPAS `rtheta_pp`)
-- `ρw″`: acoustic ρw perturbation (ZFaceField, MPAS `rw_p`)
-- `ρu″`: acoustic ρu perturbation (XFaceField, MPAS `ru_p`)
-- `ρv″`: acoustic ρv perturbation (YFaceField, MPAS `rv_p`)
-- `gamma_tri`: Thomas sweep scratch in the column kernel (ZFaceField)
-- `averaged_velocities`: Time-averaged velocities for scalar advection (NamedTuple of u, v, w fields)
-- `slow_tendencies`: Frozen slow tendencies (velocity, exner_pressure). Momentum tendencies
-  are stored in the outer timestepper's `Gⁿ` fields; density and thermodynamic density
-  tendencies are also read directly from `Gⁿ`.
-- `vertical_solver`: BatchedTridiagonalSolver for the implicit ρw″ acoustic update
-- `frozen_pressure`: Snapshot of `model.dynamics.pressure` taken once per outer step.
-  Used as the linearization point for `acoustic_pgf_coefficient` and
-  `buoyancy_linearization_coefficient` so that the cofwz/cofwt coefficients seen by
-  the substepper are *frozen across all WS-RK3 stages of an outer step*. This
-  matches MPAS's behavior: MPAS stores `exner` in the diagnostics pool and only
-  recomputes it at `rk_step==3` (end of outer step), so the substepper's
-  linearization point is identical at every stage. Without this snapshot, Breeze's
-  `update_state!` (called between stages) would update `model.dynamics.pressure`
-  to the post-stage value, mismatching MPAS and introducing per-outer-step
-  numerical drift.
+- `substeps`: Number of acoustic substeps ``N`` per outer ``Δt`` (or `nothing` for adaptive).
+- `forward_weight`: Off-centering parameter ``\\omega`` for the implicit solve. ``\\omega > 0.5`` damps vertical acoustic modes. ``\\varepsilon = 2\\omega - 1`` is the MPAS off-centering.
+- `divergence_damping_coefficient`: Currently unused — see the file-level note above and the cleanup plan.
+- `acoustic_damping_coefficient`: Klemp 2018 ``\\varkappa^{ac}`` post-implicit-solve velocity damping coefficient.
+- `substep_distribution`: How acoustic substeps are distributed across the WS-RK3 stages. One of [`ProportionalSubsteps`](@ref) or [`MonolithicFirstStage`](@ref).
+- `virtual_potential_temperature`: Stage-frozen ``\\theta_v`` (CenterField, MPAS `t`).
+- `reference_exner_function`: Reference ``\\Pi_0 = (p_\\mathrm{ref}/p^{st})^{R/c_p}`` (CenterField, MPAS `pb`).
+- `theta_flux_scratch`: ``ts`` accumulator in the column kernel (CenterField, MPAS `ts`).
+- `mass_flux_scratch`: ``rs`` accumulator in the column kernel (CenterField, MPAS `rs`).
+- `previous_rtheta_pp`: ``(\\rho\\theta)''`` snapshot before the column kernel — used by divergence damping (CenterField).
+- `ρ″`:  acoustic ``\\rho`` perturbation (CenterField, MPAS `rho_pp`).
+- `ρθ″`: acoustic ``(\\rho\\theta)`` perturbation (CenterField, MPAS `rtheta_pp`).
+- `ρw″`: acoustic ``(\\rho w)`` perturbation (ZFaceField, MPAS `rw_p`).
+- `ρu″`: acoustic ``(\\rho u)`` perturbation (XFaceField, MPAS `ru_p`).
+- `ρv″`: acoustic ``(\\rho v)`` perturbation (YFaceField, MPAS `rv_p`).
+- `gamma_tri`: Thomas sweep scratch in the column kernel (ZFaceField).
+- `averaged_velocities`: Time-averaged velocities for scalar advection (NamedTuple of u, v, w fields).
+- `slow_tendencies`: Frozen slow tendencies (`velocity`, `exner_pressure`). Momentum tendencies are stored in the outer timestepper's ``G^n`` fields; density and ``(\\rho\\theta)`` tendencies are also read directly from ``G^n``.
+- `vertical_solver`: BatchedTridiagonalSolver for the implicit ``(\\rho w)''`` acoustic update.
+- `frozen_pressure`: Snapshot of `model.dynamics.pressure` taken once per outer step. Used as the linearization point for the implicit Schur coefficients so that the substepper sees the same `exner` at every WS-RK3 stage of the outer step (matches MPAS, where `diag%exner` is only recomputed at `rk_step == 3`).
 
 The `cofwz`, `cofwr`, `cofwt`, `coftz` MPAS coefficients are computed inline by
-helper functions inside the column kernel — no fields are stored.
+helper functions inside the column kernel — no separate fields are stored.
 """
 struct AcousticSubstepper{N, FT, AD, CF, FF, XF, YF, GT, AV, ST, TS}
     substeps :: N
@@ -223,13 +239,15 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
 """
 $(TYPEDSIGNATURES)
 
-Construct an `AcousticSubstepper` using the Exner pressure formulation.
+Construct an `AcousticSubstepper` for the MPAS-A conservative-perturbation
+acoustic substep loop.
 
-The optional `prognostic_momentum` keyword carries the prognostic ρu/ρv/ρw
-fields whose boundary conditions are inherited by the substepper's
-perturbation face fields. This is essential on grids with Bounded horizontal
-topology so that `fill_halo_regions!` enforces impenetrability (v=0 at the
-south/north walls, u=0 at the east/west walls) on the perturbation momenta.
+The optional `prognostic_momentum` keyword carries the prognostic ``\\rho u``,
+``\\rho v``, ``\\rho w`` fields whose boundary conditions are inherited by the
+substepper's perturbation face fields ``(\\rho u)''``, ``(\\rho v)''``,
+``(\\rho w)''``. This is essential on grids with `Bounded` horizontal topology
+so that `fill_halo_regions!` enforces impenetrability (``v = 0`` at the
+south/north walls, ``u = 0`` at the east/west walls) on the perturbation momenta.
 Without this, the substepper's halo fills use default Periodic/NoFlux BCs and
 boundary cells drift away from zero.
 """
@@ -345,11 +363,13 @@ Compute the number of acoustic substeps from the horizontal acoustic CFL conditi
 
 Uses a conservative sound speed estimate `ℂᵃᶜ = √(γ Rᵈ Tᵣ)` with `Tᵣ = 300 K`
 (giving `ℂᵃᶜ ≈ 347 m/s`) and the minimum horizontal grid spacing. The vertical
-CFL is not needed because the w-π' coupling is vertically implicit.
+CFL is not needed because the ``(\\rho w)''``–``(\\rho\\theta)''`` coupling is
+vertically implicit.
 
-Following CM1, the substep count satisfies `Δτ · ℂᵃᶜ / Δx_min ≤ 1` where
-`Δτ = Δt / N` is the acoustic substep size. A safety factor of 1.2 is applied
-to ensure stability with the forward-backward splitting.
+The substep count is chosen so that `Δτ · ℂᵃᶜ / Δx_min ≤ 1` where
+`Δτ = Δt / N` is the acoustic substep size, with a safety factor of 1.2 to
+account for stability with the forward-backward splitting. This is the same
+horizontal acoustic CFL constraint used by MPAS-A and CM1.
 """
 function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
     cᵖᵈ = thermodynamic_constants.dry_air.heat_capacity
@@ -382,17 +402,18 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Prepare the acoustic cache for an RK stage.
+Prepare the stage-frozen cache read by the acoustic substep loop.
 
-Computes stage-frozen coefficients for the Exner pressure acoustic loop:
-1. Virtual potential temperature θᵥ (frozen during acoustic loop)
-2. Pressure tendency coefficient S = c²/(cᵖ ρ₀ θᵥ²)
-3. Exner pressure perturbation π' = (p/pˢᵗ)^(R/cᵖ) - π₀
-4. Reference Exner function π₀ from the reference state
+Computes:
 
-Following CM1's `sound.F`, the acoustic loop prognostics velocity and
-Exner pressure perturbation, with density diagnosed from the equation
-of state after the loop.
+1. Virtual potential temperature ``\\theta_v`` (frozen during the substep loop).
+2. Reference Exner function ``\\Pi_0`` from the model's reference state, used
+   by the implicit solve as the linearization point.
+
+The remaining stage-frozen quantities (``\\rho``, ``\\theta_v``, the implicit
+Schur coefficients) are read directly from the model's prognostic fields and
+from `substepper.frozen_pressure`, which is snapshotted once per outer Δt by
+[`freeze_outer_step_state!`](@ref).
 """
 function prepare_acoustic_cache!(substepper, model)
     grid = model.grid
@@ -582,6 +603,12 @@ end
         end
 
         # ── Slow Exner pressure tendency: Gˢπ = -u · ∇π ──
+        # NOTE (algorithm lineage): the slow Exner tendency was prognostic in the
+        # legacy Exner-pressure-prognostic formulation that this file used to
+        # implement. The active MPAS conservative-perturbation algorithm does not
+        # consume `Gˢπ` anywhere in the substep loop — it is computed here and
+        # halo-filled but never read. To be removed as part of Phase 4 of
+        # `docs/src/appendix/substepping_cleanup_and_damping_plan.md`.
         # Use topology-safe operators: ℑxᶜᵃᵃ(∂xᶠᶜᶜ(π')) gives the centered
         # gradient (f[i+1]-f[i-1])/(2Δx) on uniform grids; automatically zero for Flat.
         uᶜ = ℑxᶜᵃᵃ(i, j, k, grid, u)
@@ -676,10 +703,10 @@ end
 
 ##### Inline helpers for function composition with topology-safe operators.
 
-# Exner perturbation change per substep (for legacy divergence damping).
-@inline _Δπ(i, j, k, grid, π′, π′⁻) = π′[i, j, k] - π′⁻[i, j, k]
-
-##### Divergence proxy for MPAS damping: divCell = -(rtheta_pp - rtheta_pp_old)
+##### Divergence proxy for MPAS damping: divCell = -(rtheta_pp - rtheta_pp_old).
+##### Using the (ρθ)″ tendency as the divergence proxy is the Klemp–Skamarock–Ha
+##### 2018 form — it preserves gravity-wave frequencies while damping the
+##### grid-scale acoustic divergence.
 @inline _neg_δΘ(i, j, k, grid, rtheta_pp, rtheta_pp_old) =
     -(rtheta_pp[i, j, k] - rtheta_pp_old[i, j, k])
 
@@ -1134,17 +1161,18 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Execute the acoustic substep loop for a Wicker-Skamarock RK3 stage using
-the Exner pressure formulation. The number and size of substeps in this
-stage depends on `substepper.substep_distribution`:
+Execute one Wicker–Skamarock RK3 stage of the MPAS conservative-perturbation
+acoustic substep loop. The number and size of substeps in this stage depend
+on `substepper.substep_distribution`:
 
   - [`ProportionalSubsteps`](@ref) (default): every stage uses
     ``Δτ = Δt/N`` and ``Nτ = \\max(\\mathrm{round}(β N), 1)`` substeps
-    (so for β = 1/3, 1/2, 1 this gives N/3, N/2, N substeps).
+    (so for ``β = 1/3, 1/2, 1`` this gives ``N/3``, ``N/2``, ``N`` substeps).
   - [`MonolithicFirstStage`](@ref): stage 1 collapses to a single substep
     of size ``Δt/3``; stages 2 and 3 are the same as `ProportionalSubsteps`.
 
-`N` is rounded up to a multiple of 6 so that N/3 and N/2 are both integers.
+``N`` is rounded up to a multiple of 6 so that ``N/3`` and ``N/2`` are both
+integers.
 """
 function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     grid = model.grid
@@ -1233,10 +1261,11 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
 
     for substep in 1:Nτ
         # Step 1: Horizontal forward — update u, v from PGF and slow tendency.
-        # MPAS uses the ρθ perturbation gradient for the horizontal PGF:
-        #   pgf_x = -c2 * Π_face * ∂(rtheta_pp)/∂x
-        # NOT the Exner perturbation gradient. This provides horizontal
-        # acoustic coupling through the accumulated ρθ perturbation.
+        # MPAS conservative-perturbation form: the horizontal PGF reads the
+        # accumulated (ρθ)″ perturbation,
+        #   pgf_x = -c² · Π_face · ∂(rtheta_pp)/∂x
+        # which provides horizontal acoustic coupling through the accumulated
+        # (ρθ)″ field.
         pˢᵗ = model.dynamics.reference_state.standard_pressure
         launch!(arch, grid, :xyz, _mpas_horizontal_forward!,
                 u, v, substepper.ρu″, substepper.ρv″, grid, Δτ,
@@ -1389,4 +1418,3 @@ end
         m.ρw[i, j, k] = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * vel.w[i, j, k]
     end
 end
-

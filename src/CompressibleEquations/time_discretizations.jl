@@ -67,30 +67,41 @@ struct MonolithicFirstStage <: AcousticSubstepDistribution end
 """
 $(TYPEDEF)
 
-Split-explicit time discretization for compressible dynamics using the
-Exner pressure formulation following CM1 (Bryan 2002).
+Split-explicit acoustic substepping for compressible dynamics using the
+MPAS-A conservative-perturbation formulation.
 
-Uses acoustic substepping following [Wicker and Skamarock (2002)](@cite WickerSkamarock2002):
-- Outer loop: WS-RK3 for slow tendencies (advection, Coriolis, diffusion)
-- Inner loop: Forward-backward acoustic substeps for fast tendencies (pressure gradient)
+The fast prognostic variables — advanced inside the substep loop — are the
+horizontal and vertical momentum perturbations ``(\\rho u)''``, ``(\\rho v)''``,
+``(\\rho w)''``, the density perturbation ``\\rho''``, and the
+``(\\rho\\theta)''`` perturbation. The same family is used by MPAS-A
+([Skamarock et al. 2012](@cite Skamarock2012)) and by ERF.
 
-The acoustic loop uses velocity (u, v, w) and Exner pressure perturbation (π') as
-prognostic variables, with a vertically implicit w-π' coupling and CM1-style
-divergence damping.
+Outer integration is the Wicker–Skamarock RK3 scheme
+([Wicker and Skamarock 2002](@cite WickerSkamarock2002)) with stage fractions
+``β = (1/3, 1/2, 1)``. The substep distribution across stages is selectable
+via the [`AcousticSubstepDistribution`](@ref) interface
+([`ProportionalSubsteps`](@ref) or [`MonolithicFirstStage`](@ref)).
 
-This allows using advective CFL time steps (~10-20 m/s) instead of acoustic CFL
-time steps (~340 m/s), typically enabling ~6x larger time steps.
+The vertically implicit ``(\\rho w)''``–``(\\rho\\theta)''`` coupling is solved
+by a Schur-complement tridiagonal sweep at each substep, eliminating the
+vertical acoustic CFL constraint. Divergence damping is applied each substep
+following the MPAS Klemp–Skamarock–Ha 2018 momentum correction
+(see [`acoustic_substepping.jl`](https://github.com/CliMA/Breeze.jl/blob/main/src/CompressibleEquations/acoustic_substepping.jl)).
+
+This allows the outer time step to be set by the advective CFL rather than
+the acoustic CFL, typically enabling ~6× larger ``Δt`` than fully explicit
+compressible time-stepping.
 
 Fields
 ======
 
-- `substeps`: Number of acoustic substeps for the **full** time step (stage 3 of WS-RK3). For WS-RK3, earlier stages take fewer substeps (``Nτ = \\mathrm{round}(β N)``), keeping ``Δτ = Δt/N`` constant. Default: `nothing` (automatically computed from the acoustic CFL condition each time step)
-- `forward_weight`: Off-centering parameter ω for the vertically implicit solver. ω > 0.5 damps vertical acoustic modes. Default: 0.55 (gives epssm=0.1, matching MPAS default)
-- `divergence_damping_coefficient`: Forward-extrapolation filter coefficient ``ϰ^{di}`` applied to the Exner pressure perturbation: ``π̃' = π' + ϰ^{di} (π' - π'_{old})``. Default: 0.10 (CM1 default)
-- `acoustic_damping_coefficient`: Klemp (2018) divergence damping ``ϰ^{ac}``. Post-implicit-solve velocity correction: ``u -= ϰ^{ac} c_p θ_v ∂Δπ'/∂x``. Provides constant damping per outer Δt regardless of substep count. Needed by WS-RK3 at large Δt. Default: 0.0
+- `substeps`: Number of acoustic substeps ``N`` per outer ``Δt``. Default `nothing` adaptively chooses ``N`` from the horizontal acoustic CFL each step. With [`ProportionalSubsteps`](@ref) the substep size is ``Δτ = Δt/N`` in every stage; with [`MonolithicFirstStage`](@ref) stage 1 instead uses one substep of size ``Δt/3``.
+- `forward_weight`: Off-centering parameter ``ω`` for the vertically implicit ``(\\rho w)''``–``(\\rho\\theta)''`` solve. ``ω > 0.5`` damps vertical acoustic modes; the MPAS off-centering is ``ε = 2ω - 1``. Default: 0.6.
+- `divergence_damping_coefficient`: **Currently unused at runtime — see Phase 2 of `docs/src/appendix/substepping_cleanup_and_damping_plan.md`.** The active divergence-damping kernel hardcodes the MPAS default `smdiv = 0.1`; this field will be replaced by a typed `damping :: AcousticDampingStrategy` API in Phase 2 of the cleanup, which restores user control over the coefficient. Default: 0.10 (matches the active hardcoded value).
+- `acoustic_damping_coefficient`: Optional Klemp 2018 acoustic damping coefficient ``ϰ^{ac}``, applied as a post-implicit-solve velocity correction: ``u -= ϰ^{ac} c_p θ_v ∂Δπ'/∂x``. Default: 0.0.
 - `substep_distribution`: How acoustic substeps are distributed across the three WS-RK3 stages. One of [`ProportionalSubsteps`](@ref) (default; constant ``Δτ = Δt/N`` with stage counts ``N/3``, ``N/2``, ``N``) or [`MonolithicFirstStage`](@ref) (single substep of size ``Δt/3`` in stage 1, MPAS-A `config_time_integration_order = 3` form).
 
-See also [`ExplicitTimeStepping`](@ref).
+See also [`ExplicitTimeStepping`](@ref) and [`VerticallyImplicitTimeStepping`](@ref).
 """
 struct SplitExplicitTimeDiscretization{N, FT, AD <: AcousticSubstepDistribution}
     substeps :: N
