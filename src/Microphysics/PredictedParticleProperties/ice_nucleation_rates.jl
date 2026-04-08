@@ -54,9 +54,10 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
     # Mass nucleation rate
     Q_nuc = N_nuc * mᵢ₀
 
-    # Zero out if conditions not met
-    N_nuc = ifelse(nucleation_active & (N_nuc >= FT(1e-20)), N_nuc, zero(FT))
-    Q_nuc = ifelse(nucleation_active & (Q_nuc >= FT(1e-30)), Q_nuc, zero(FT))
+    # m13: Use single threshold on N_nuc for both (matches Fortran lines 3910-3913)
+    active = nucleation_active & (N_nuc >= FT(1e-20))
+    N_nuc = ifelse(active, N_nuc, zero(FT))
+    Q_nuc = ifelse(active, Q_nuc, zero(FT))
 
     return Q_nuc, N_nuc
 end

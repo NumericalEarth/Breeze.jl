@@ -30,8 +30,8 @@ Cloud droplets larger than a threshold undergo collision-coalescence to form rai
     # at high altitude (low ρ), fewer droplets per volume → less autoconversion.
     ρ₀ = prp.reference_air_density
     Nᶜ_effective = Nᶜ * (ρ / ρ₀)
+    # m15: Fortran has no lower bound on Nc_scaled
     Nᶜ_scaled = Nᶜ_effective / prp.autoconversion_reference_concentration
-    Nᶜ_scaled = max(Nᶜ_scaled, FT(0.01))
 
     # Khairoutdinov-Kogan (2000): ∂qʳ/∂t = k₁ × qᶜˡ^α × (Nᶜ/Nᶜ_ref)^β
     k₁ = prp.autoconversion_coefficient

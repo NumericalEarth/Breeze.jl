@@ -106,7 +106,7 @@ Retained for API stability.
 
 # Keyword Arguments
 
-- `number_concentration`: Nc [1/m³], default 100×10⁶ (continental)
+- `number_concentration`: Nc [1/m³], default 200×10⁶ (Fortran nccnst_2)
 - `autoconversion_threshold`: Conversion diameter [m], default 25 μm
 - `condensation_timescale`: Saturation relaxation [s], default 1.0
 - `shape_parameter`: μ_c for cloud gamma PSD [-], default `nothing` (diagnosed
@@ -123,14 +123,14 @@ Retained for API stability.
 using Oceananigans, Breeze
 using Breeze.Microphysics.PredictedParticleProperties: CloudDropletProperties
 cloud = CloudDropletProperties()
-round(cloud.shape_parameter, digits=1)  # μ_c diagnosed from Nc = 100×10⁶ m⁻³
+round(cloud.shape_parameter, digits=1)  # μ_c diagnosed from Nc = 200×10⁶ m⁻³
 
 # output
-8.3
+5.7
 ```
 """
 function CloudDropletProperties(FT = Oceananigans.defaults.FloatType;
-                                number_concentration = 100e6,
+                                number_concentration = 200e6,
                                 autoconversion_threshold = 25e-6,
                                 condensation_timescale = 1,
                                 shape_parameter = nothing)

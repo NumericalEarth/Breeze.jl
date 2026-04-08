@@ -349,21 +349,25 @@ function evaluate_quadrature(::SixthMomentAggregation,
     # A symmetric loop with ÷2 distributes loss/gain to both particles equally,
     # which gives incorrect per-node M6/M3 changes.
     #
-    # Chebyshev-Gauss nodes map monotonically to D via transform_to_diameter:
-    # i=1 → largest D, i=n → smallest D. So i < j means D[i] > D[j].
+    # m16: Use actual diameter comparison to determine collector (larger D) vs
+    # collected (smaller D), so this works for both Chebyshev and midpoint nodes.
     numloss  = zeros(FT, n)
     massgain = zeros(FT, n)
     N_loss_total = zero(FT)
 
-    for i in 1:n          # collector (larger D)
-        for j in (i+1):n  # collected (smaller D, since j > i → D[j] < D[i])
+    for i in 1:n
+        for j in (i+1):n
             kernel = (sqrt(A_arr[i]) + sqrt(A_arr[j]))^2 * abs(V_arr[i] - V_arr[j])
             pair_rate = weights[i] * weights[j] * kernel * N_arr[i] * N_arr[j] * J_arr[i] * J_arr[j]
 
-            # Smaller particle (j) is collected and removed from distribution
-            numloss[j] += pair_rate
-            # Larger particle (i) gains mass of the collected particle
-            massgain[i] += pair_rate * m_arr[j]
+            # Larger particle collects (gains mass), smaller is collected (lost)
+            if D_arr[i] >= D_arr[j]
+                numloss[j] += pair_rate
+                massgain[i] += pair_rate * m_arr[j]
+            else
+                numloss[i] += pair_rate
+                massgain[j] += pair_rate * m_arr[i]
+            end
             N_loss_total += pair_rate
         end
     end
@@ -650,7 +654,10 @@ end
 # --- Single-term processes: store dG / mass_integral (exact ratio) ---
 
 # Rime: c=2, divide by RainCollectionNumber (∫ A V N'(D) dD for D ≥ 100 μm = nrwat).
-# Runtime: z_rime * mass_rate / Nⁱ = (m6rime/nrwat) * nrwat * env * Nⁱ / Nⁱ = m6rime * env ✓
+# Fortran stores raw dG, but its runtime uses m6rime directly (without mass_rate/Nⁱ):
+#   zqccol = m6rime × qc × eci × ρ × rhofaci = m6rime × qccol / (nrwat × Nⁱ)
+# Julia's runtime multiplies by mass_rate/Nⁱ, where mass_rate = nrwat × Nⁱ × env, so:
+#   z_rime = (dG/nrwat) × (nrwat × Nⁱ × env) / Nⁱ = dG × env ✓ (matches Fortran)
 function normalize_integral(integral::SixthMomentRime, raw, mean_particle_mass, state, nodes, weights)
     companion = evaluate_companion_m3(integral, state, nodes, weights)
     dG = sixth_moment_relative_variance(raw, companion, state, 2)

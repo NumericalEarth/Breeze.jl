@@ -218,15 +218,15 @@ using Oceananigans.Fields: interior
 
     @testset "Cloud droplet properties" begin
         cloud = CloudDropletProperties()
-        @test cloud.number_concentration ≈ 100e6
+        @test cloud.number_concentration ≈ 200e6
         @test cloud.autoconversion_threshold ≈ 25e-6
         @test cloud.condensation_timescale ≈ 1.0
 
         # μ_c is diagnosed from Nc via Liu-Daum (2000) by default.
-        # For Nc = 100e6 m⁻³ (100 cm⁻³): χ = 0.0005714*100 + 0.2714 = 0.32854,
-        # μ_c = 1/0.32854² - 1 ≈ 8.26 (clamped to [2, 15])
+        # For Nc = 200e6 m⁻³ (200 cm⁻³): χ = 0.0005714*200 + 0.2714 = 0.38568,
+        # μ_c = 1/0.38568² - 1 ≈ 5.72 (clamped to [2, 15])
         @test 2 ≤ cloud.shape_parameter ≤ 15
-        @test cloud.shape_parameter ≈ liu_daum_shape_parameter(100e6)
+        @test cloud.shape_parameter ≈ liu_daum_shape_parameter(200e6)
 
         # Explicit shape_parameter overrides Liu-Daum
         cloud_override = CloudDropletProperties(Float64; shape_parameter=5)
@@ -1116,7 +1116,7 @@ using Oceananigans.Fields: interior
 
     @testset "ShapeParameterRelation construction" begin
         relation = ShapeParameterRelation()
-        @test relation.a ≈ 0.00191
+        @test relation.a ≈ 0.076 * 0.01^0.8
         @test relation.b ≈ 0.8
         @test relation.c ≈ 2.0
         @test relation.μmax ≈ 6.0
@@ -1296,7 +1296,7 @@ using Oceananigans.Fields: interior
 
         @test isfinite(logλ)
         @test logλ > log(10)    # Within bounds
-        @test logλ < log(1e7)
+        @test logλ < log(1.6e7)
 
         λ = exp(logλ)
         @test λ > 0
@@ -1341,10 +1341,10 @@ using Oceananigans.Fields: interior
         # Zero mass or number should return the upper bound (smallest particles),
         # not the unphysical λ = 0.
         logλ_zero_L = solve_lambda(0.0, 1e5, 0.0, 400.0)
-        @test logλ_zero_L == log(1e7)
+        @test logλ_zero_L == log(1.6e7)
 
         logλ_zero_N = solve_lambda(1e-4, 0.0, 0.0, 400.0)
-        @test logλ_zero_N == log(1e7)
+        @test logλ_zero_N == log(1.6e7)
 
         mass = IceMassPowerLaw()
         ρ_dep_zero_rime = Breeze.Microphysics.PredictedParticleProperties.deposited_ice_density(mass, 0.0, 400.0)

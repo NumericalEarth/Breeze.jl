@@ -110,7 +110,7 @@ shape parameter and prevents unrealistically narrow distributions.
 
 # Keyword Arguments
 
-- `a`: Coefficient in μ = a λ^b - c, default 0.00191
+- `a`: Coefficient in μ = a λ^b - c, default 0.076 × 0.01^0.8
 - `b`: Exponent in μ = a λ^b - c, default 0.8
 - `c`: Offset in μ = a λ^b - c, default 2
 - `μmax`: Maximum shape parameter, default 6
@@ -121,7 +121,7 @@ From [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 27
 based on [Field et al. (2007)](@cite FieldEtAl2007) observations.
 """
 function TwoMomentClosure(FT = Oceananigans.defaults.FloatType;
-                          a = 0.00191,
+                          a = 0.076 * 0.01^0.8,
                           b = 0.8,
                           c = 2,
                           μmax = 6)
@@ -208,7 +208,7 @@ for riming effects.
 - `D_threshold`: Threshold D_mvd [m] (default 2e-4)
 """
 function P3Closure(FT = Oceananigans.defaults.FloatType;
-                   a = 0.00191,
+                   a = 0.076 * 0.01^0.8,
                    b = 0.8,
                    c = 2,
                    μmax_small = 6,
@@ -997,7 +997,7 @@ end
                  liquid_fraction = zero(typeof(L_ice)),
                  mass = IceMassPowerLaw(),
                  closure = P3Closure(),
-                 logλ_bounds = (log(10), log(1e7)),
+                 logλ_bounds = (log(10), log(P3_LAMBDA_MAX)),
                  max_iterations = 50,
                  tolerance = 1e-10)
 
@@ -1025,7 +1025,7 @@ function solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
                       liquid_fraction = zero(typeof(L_ice)),
                       mass = IceMassPowerLaw(),
                       closure = P3Closure(),
-                      logλ_bounds = (log(10), log(1e7)),
+                      logλ_bounds = (log(10), log(P3_LAMBDA_MAX)),
                       max_iterations = 50,
                       tolerance = 1e-10)
 
@@ -1062,7 +1062,7 @@ end
 """
     solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ;
                  mass = IceMassPowerLaw(),
-                 logλ_bounds = (log(10), log(1e7)),
+                 logλ_bounds = (log(10), log(P3_LAMBDA_MAX)),
                  max_iterations = 50,
                  tolerance = 1e-10)
 
@@ -1084,7 +1084,7 @@ function finds λ that satisfies the L/N constraint at that μ.
 """
 function solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ;
                       mass = IceMassPowerLaw(),
-                      logλ_bounds = (log(10), log(1e7)),
+                      logλ_bounds = (log(10), log(P3_LAMBDA_MAX)),
                       max_iterations = 50,
                       tolerance = 1e-10)
 

@@ -423,7 +423,8 @@ independent PSD-integrated number collection rate.
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
-    below_freezing = T < T₀
+    # m14: Fortran uses .le. for both mass and number riming
+    below_freezing = T <= T₀
     active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nʳ_eff > n_threshold) & (nⁱ_eff > n_threshold)
 
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))

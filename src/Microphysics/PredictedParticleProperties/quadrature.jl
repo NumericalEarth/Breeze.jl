@@ -342,8 +342,8 @@ Compute rain fall speed using piecewise power laws from P3 Fortran.
     FT = typeof(D)
 
     # Mass of water sphere in GRAMS for the formula
-    # ρ_w = 1000 kg/m³ (consistent with ProcessRateParameters.liquid_water_density)
-    m_kg = (FT(π)/6) * FT(1000) * D^3
+    # m3: ρ_w = 997 kg/m³ (Fortran rhow = 997)
+    m_kg = (FT(π)/6) * FT(997) * D^3
     m_g = m_kg * 1000
 
     # Piecewise power law (Gunn-Kinzer/Beard), V in cm/s

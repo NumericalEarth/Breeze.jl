@@ -58,7 +58,7 @@ V_{\\mathrm{mass}}(\\lambda_r) =
          {\\int_0^\\infty m(D)\\, e^{-\\lambda_r D}\\, dD}
 ```
 
-where `m(D) = (π/6) ρ_w D³` (liquid sphere, ρ_w = 1000 kg/m³) and `V(D)` is the
+where `m(D) = (π/6) ρ_w D³` (liquid sphere, ρ_w = 997 kg/m³) and `V(D)` is the
 piecewise Gunn-Kinzer/Beard rain fall speed from [`rain_fall_speed`](@ref) at
 reference density (no density correction applied here; apply at call site).
 
@@ -111,7 +111,7 @@ Apply `(ρ₀/ρ)^0.54` at the call site if needed.
         D = transform_to_diameter(x, λ_r)
         J = jacobian_diameter_transform(x, λ_r)
 
-        m = (FT(π) / 6) * FT(1000) * D^3
+        m = (FT(π) / 6) * FT(997) * D^3
         V = rain_fall_speed(D, ρ_correction)
         psd = exp(-λ_r * D)
 
