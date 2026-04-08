@@ -198,7 +198,9 @@ overloadable functions:
 
 - `transport_velocities(model)`: Returns `(u, v, w)` for standard models or
   `(u, v, Ω̃)` for terrain-following models.
-- `transport_momentum(model)`: Returns `(ρu, ρv, ρw)` or `(ρu, ρv, ρΩ̃)`.
+- `transport_momentum(model)`: Returns `(ρu, ρv, ρw)` for standard models or
+  `(ρu, ρv, ρΩ̃)` for terrain-following models, where `ρΩ̃` is the contravariant
+  vertical momentum.
 
 The momentum and scalar tendency kernels use these transport tuples for advective fluxes,
 so all vertical transport automatically uses the contravariant velocity when terrain is present.
