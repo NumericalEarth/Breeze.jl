@@ -195,8 +195,8 @@ end
 # H9: Tabulated path — use PSD-integrated small/large ice ventilation integrals
 # to compute the fraction of melting that goes to rain (small particles, D ≤ D_crit).
 # Fortran: qrmlt uses f1pr24/f1pr25, qiliqcol uses f1pr26/f1pr27.
-@inline function psd_melting_rain_fraction(sc::TabulatedFunction5D, sr::TabulatedFunction5D,
-                                            lc::TabulatedFunction5D, lr::TabulatedFunction5D,
+@inline function psd_melting_rain_fraction(sc::P3Table5D, sr::P3Table5D,
+                                            lc::P3Table5D, lr::P3Table5D,
                                             m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))

@@ -153,7 +153,7 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 end
 
 # Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
-@inline function tabulated_mass_weighted_fall_speed(table::TabulatedFunction5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+@inline function tabulated_mass_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
     log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
     return vₜ_norm * ρ_correction
@@ -192,7 +192,7 @@ Compute number-weighted terminal velocity for ice.
 end
 
 # Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
-@inline function tabulated_number_weighted_fall_speed(table::TabulatedFunction5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+@inline function tabulated_number_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
     log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
     return vₜ_norm * ρ_correction
@@ -235,7 +235,7 @@ Uses pre-computed lookup tables for accurate PSD integration.
 end
 
 # Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
-@inline function tabulated_reflectivity_weighted_fall_speed(table::TabulatedFunction5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+@inline function tabulated_reflectivity_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
     log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
     return vₜ_norm * ρ_correction

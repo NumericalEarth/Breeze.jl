@@ -348,15 +348,15 @@ end
 Compute per-particle ventilation integral C(D) × f_v(D) for deposition
 using PSD-integrated lookup tables.
 """
-@inline function deposition_ventilation(vent::TabulatedFunction5D,
-                                          vent_e::TabulatedFunction5D,
+@inline function deposition_ventilation(vent::P3Table5D,
+                                          vent_e::P3Table5D,
                                           m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
     FT = typeof(m_mean)
     return deposition_ventilation(vent, vent_e, m_mean, Fᶠ, zero(FT), ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
 end
 
-@inline function deposition_ventilation(vent::TabulatedFunction5D,
-                                          vent_e::TabulatedFunction5D,
+@inline function deposition_ventilation(vent::P3Table5D,
+                                          vent_e::P3Table5D,
                                           m_mean, Fᶠ, Fˡ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
@@ -375,8 +375,8 @@ Compute per-particle ventilation integral C(D) × f_v(D) for melting
 using PSD-integrated lookup tables, blending ice (0.65, 0.44) and rain
 (0.78, 0.28) ventilation coefficients weighted by liquid fraction Fl.
 """
-@inline function melting_ventilation(vent::TabulatedFunction5D,
-                                       vent_e::TabulatedFunction5D,
+@inline function melting_ventilation(vent::P3Table5D,
+                                       vent_e::P3Table5D,
                                        m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
@@ -389,13 +389,13 @@ end
 Compute per-particle collection kernel ⟨A × V⟩ for riming.
 Returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from lookup table.
 """
-@inline function collection_kernel_per_particle(coll::TabulatedFunction5D,
+@inline function collection_kernel_per_particle(coll::P3Table5D,
                                                   m_mean, Fᶠ, ρᶠ, prp, p3, μ)
     FT = typeof(m_mean)
     return collection_kernel_per_particle(coll, m_mean, Fᶠ, zero(FT), ρᶠ, prp, p3, μ)
 end
 
-@inline function collection_kernel_per_particle(coll::TabulatedFunction5D,
+@inline function collection_kernel_per_particle(coll::P3Table5D,
                                                   m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
@@ -408,13 +408,13 @@ end
 Compute aggregation kernel for self-collection using PSD-integrated
 kernel from lookup table.
 """
-@inline function aggregation_kernel(coll::TabulatedFunction5D,
+@inline function aggregation_kernel(coll::P3Table5D,
                                       m_mean, Fᶠ, ρᶠ, prp, p3, μ)
     FT = typeof(m_mean)
     return aggregation_kernel(coll, m_mean, Fᶠ, zero(FT), ρᶠ, prp, p3, μ)
 end
 
-@inline function aggregation_kernel(coll::TabulatedFunction5D,
+@inline function aggregation_kernel(coll::P3Table5D,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
