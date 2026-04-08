@@ -356,7 +356,7 @@ end
     @test wʳ >= 0
 
     # Effective sedimentation velocities exist on model
-    bsv = model.effective_sedimentation_velocities
+    bsv = model.sedimentation_velocities
     @test bsv !== nothing
     @test haskey(bsv, :ρqᴸ)
     @test haskey(bsv, :ρqᴵ)

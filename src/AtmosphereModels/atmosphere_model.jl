@@ -46,7 +46,7 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
     forcing :: Frc
     microphysics :: Mic
     microphysical_fields :: Cnd
-    effective_sedimentation_velocities :: Bsv
+    sedimentation_velocities :: Bsv
     timestepper :: Tst
     closure :: Cls
     closure_fields :: Cfs
@@ -200,7 +200,7 @@ function AtmosphereModel(grid;
 
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
     initialize_model_microphysical_fields!(microphysical_fields, microphysics)
-    effective_sedimentation_velocities = materialize_effective_sedimentation_velocities(microphysics, microphysical_fields, grid)
+    sedimentation_velocities = materialize_sedimentation_velocities(microphysics, microphysical_fields, grid)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
@@ -273,7 +273,7 @@ function AtmosphereModel(grid;
                             forcing,
                             microphysics,
                             microphysical_fields,
-                            effective_sedimentation_velocities,
+                            sedimentation_velocities,
                             timestepper,
                             closure,
                             closure_fields,

@@ -14,7 +14,7 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
 
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
-    update_effective_sedimentation_velocities!(model.effective_sedimentation_velocities, model.microphysics, model.microphysical_fields)
+    update_sedimentation_velocities!(model.sedimentation_velocities, model.microphysics, model.microphysical_fields)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
     microphysics_model_update!(model.microphysics, model)

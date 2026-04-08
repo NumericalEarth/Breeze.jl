@@ -214,7 +214,7 @@ end
     @test wʳ > wᶜˡ
 
     # Effective sedimentation velocities
-    bsv = model.effective_sedimentation_velocities
+    bsv = model.sedimentation_velocities
     @test bsv !== nothing
     @test haskey(bsv, :ρqᴸ)
     @test haskey(bsv, :ρqᴵ)

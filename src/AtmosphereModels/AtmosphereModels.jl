@@ -54,8 +54,8 @@ export
     water_phase,
     microphysical_velocities,
     NegatedField,
-    materialize_effective_sedimentation_velocities,
-    update_effective_sedimentation_velocities!,
+    materialize_sedimentation_velocities,
+    update_sedimentation_velocities!,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     materialize_atmosphere_model_boundary_conditions,

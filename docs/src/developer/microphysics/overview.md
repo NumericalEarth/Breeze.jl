@@ -124,7 +124,7 @@ or ice. Number tracers (e.g. `:ρnᶜˡ`) return `nothing` from `water_phase` an
 #### Model-level bulk sedimentation velocities
 
 Precomputed aggregate sedimentation velocities are stored on the model as
-`model.effective_sedimentation_velocities`, a `NamedTuple` with keys `ρqᴸ` and `ρqᴵ`:
+`model.sedimentation_velocities`, a `NamedTuple` with keys `ρqᴸ` and `ρqᴵ`:
 
 ```julia
 (ρqᴸ = (u=ZeroField(), v=ZeroField(), w=wᴸ),
@@ -133,7 +133,7 @@ Precomputed aggregate sedimentation velocities are stored on the model as
 
 where `wᴸ` and `wᴵ` are `ZFaceField`s storing **negative** values (downward velocity,
 consistent with the advection operator's convention). These fields are updated during
-`update_state!` via `update_effective_sedimentation_velocities!`.
+`update_state!` via `update_sedimentation_velocities!`.
 
 ### Specific Humidity
 

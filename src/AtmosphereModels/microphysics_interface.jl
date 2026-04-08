@@ -631,7 +631,7 @@ $(TYPEDSIGNATURES)
 
 Return `nothing` when microphysics is disabled.
 """
-materialize_effective_sedimentation_velocities(::Nothing, microphysical_fields, grid) = nothing
+materialize_sedimentation_velocities(::Nothing, microphysical_fields, grid) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -642,7 +642,7 @@ with keys `ρqᴸ` and `ρqᴵ`, each containing a velocity NamedTuple `(u, v, w
 The `w` component of each entry is a `ZFaceField` that will be updated each
 time step with the mass-weighted sedimentation velocity for the corresponding phase.
 """
-function materialize_effective_sedimentation_velocities(microphysics, microphysical_fields, grid)
+function materialize_sedimentation_velocities(microphysics, microphysical_fields, grid)
     w_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
     wᴸ = ZFaceField(grid; boundary_conditions=w_bcs)
     wᴵ = ZFaceField(grid; boundary_conditions=w_bcs)
@@ -682,7 +682,7 @@ $(TYPEDSIGNATURES)
 
 No-op when effective sedimentation velocities are disabled.
 """
-update_effective_sedimentation_velocities!(::Nothing, microphysics, microphysical_fields) = nothing
+update_sedimentation_velocities!(::Nothing, microphysics, microphysical_fields) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -691,21 +691,21 @@ Update the precomputed effective sedimentation velocity fields from the current
 microphysical state. Builds liquid and ice sedimentation constituents and
 launches the kernel to compute mass-weighted averages.
 """
-function update_effective_sedimentation_velocities!(effective_sedimentation_velocities, microphysics, microphysical_fields)
-    wᴸ = effective_sedimentation_velocities.ρqᴸ.w
-    wᴵ = effective_sedimentation_velocities.ρqᴵ.w
+function update_sedimentation_velocities!(sedimentation_velocities, microphysics, microphysical_fields)
+    wᴸ = sedimentation_velocities.ρqᴸ.w
+    wᴵ = sedimentation_velocities.ρqᴵ.w
     grid = wᴸ.grid
     arch = grid.architecture
     names = prognostic_field_names(microphysics)
     liquid_components = sedimentation_constituent(microphysics, microphysical_fields, names, Val(:liquid))
     ice_components = sedimentation_constituent(microphysics, microphysical_fields, names, Val(:ice))
     launch!(arch, grid, :xyz,
-            _compute_effective_sedimentation_velocities!,
+            _compute_sedimentation_velocities!,
             wᴸ, wᴵ, grid, liquid_components, ice_components)
     return nothing
 end
 
-@kernel function _compute_effective_sedimentation_velocities!(wᴸ, wᴵ, grid, liquid_components, ice_components)
+@kernel function _compute_sedimentation_velocities!(wᴸ, wᴵ, grid, liquid_components, ice_components)
     i, j, k = @index(Global, NTuple)
 
     # Liquid phase
