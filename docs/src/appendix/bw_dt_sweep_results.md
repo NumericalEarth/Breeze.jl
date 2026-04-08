@@ -284,16 +284,42 @@ strategies briefly transient on initialisation, see §3 above).
 
 ### Recommendation and new default
 
-The default in `src/CompressibleEquations/time_discretizations.jl` is now
-`damping = PressureProjectionDamping(coefficient = 0.5)`. This is a
-behaviour change from the prior default `ThermodynamicDivergenceDamping(0.1)`
-(which itself was bit-equivalent to the pre-Phase-2 hardcoded path). On the
-canonical Skamarock-Klemp IGW the new default produces max\|w\| = 7.557e-3
-vs the old default's 7.553e-3 — within 0.06 %. On the BW it is the only
-strategy that produces a clean lifecycle at the advective-CFL ceiling.
+The default in `src/CompressibleEquations/time_discretizations.jl` is
+`damping = PressureProjectionDamping(coefficient = 0.1)` — the literal
+ERF/CM1/WRF projection form at the WRF/CM1 standard coefficient. This is
+a behaviour change from the prior default
+`ThermodynamicDivergenceDamping(0.1)` (which was itself bit-equivalent to
+the pre-Phase-2 hardcoded path). On the canonical Skamarock-Klemp IGW the
+new default produces max\|w\| = 7.567e-3 vs the old default's 7.553e-3 —
+within 0.2 %.
+
+**Important caveat about `coefficient = 0.5`**: although the table above
+shows that `PressureProjectionDamping(0.5)` is the empirical winner for
+this *one* BW configuration at advective CFL = 0.7, β_d = 0.5 is *too
+aggressive* for small-amplitude wave configurations like the
+Skamarock-Klemp 1994 IGW (peak θ' = 0.01 K, peak |w| ≈ 0.01 m/s). At Δt =
+25 s on the IGW, both `PressureProjectionDamping(0.5)` and
+`ConservativeProjectionDamping(0.5)` crash after ~25 outer steps — the
+forward-extrapolation amplifies the wave growth at each substep until it
+overshoots and the EOS exponentiation `(R(ρθ + (ρθ)″)/p^{st})^{R/c_v}`
+hits a negative base. This is *not* a bug in the substepper or the
+projection kernel; it is the projection form's standard
+forward-extrapolation instability when β_d × (one substep's increment) is
+comparable to the wave amplitude.
+
+Users running large-amplitude / strongly nonlinear configurations
+(baroclinic wave, supercell, tropical cyclone, …) where acoustic noise
+visibly contaminates the solution can opt into a stronger projection
+weight explicitly:
+
+```julia
+SplitExplicitTimeDiscretization(;
+    damping = PressureProjectionDamping(coefficient = 0.5)  # not safe for IGW-like cases
+)
+```
 
 Users who need bit-equivalence with the pre-Phase-2 hardcoded path should
-construct the time discretization explicitly:
+construct the time discretization explicitly with the old strategy:
 
 ```julia
 SplitExplicitTimeDiscretization(;
