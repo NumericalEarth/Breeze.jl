@@ -9,6 +9,8 @@ using Oceananigans.TimeSteppers:
     step_lagrangian_particles!,
     implicit_step!
 
+using Oceananigans.TurbulenceClosures: step_closure_prognostics!
+
 using Breeze.AtmosphereModels:
     AtmosphereModels,
     AtmosphereModel,
@@ -281,7 +283,7 @@ function acoustic_scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     n_acoustic = 5  # ρ, ρu, ρv, ρw, ρθ (handled by acoustic loop)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
-        i <= n_acoustic && continue
+        i ≤ n_acoustic && continue
 
         launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
 
@@ -363,6 +365,8 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
 
     compute_flux_bc_tendencies!(model)
     acoustic_ssp_rk3_substep!(model, Δt, α³, 3)
+
+    step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
     # Adjust final time-step
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
