@@ -31,6 +31,12 @@ export
     moisture_specific_name,
     specific_prognostic_moisture,
 
+    # Negative moisture correction types
+    AbstractNegativeMoistureCorrection,
+    VerticalBorrowing,
+    SpeciesBorrowing,
+    AbstractNumberConcentrationCategories,
+
     # Microphysics interface
     AbstractMicrophysicalState,
     NothingMicrophysicalState,
@@ -71,6 +77,10 @@ export
     compute_hydrostatic_pressure!,
     set_to_mean!,
 
+    # Transport interface (for terrain-following coordinates)
+    transport_velocities,
+    transport_momentum,
+
     # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
@@ -110,6 +120,7 @@ include("atmosphere_model.jl")
 include("atmosphere_model_buoyancy.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
+include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
 

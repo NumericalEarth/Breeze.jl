@@ -26,7 +26,7 @@ end
 @inline AtmosphereModels.explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid,
         d::CompressibleDynamics{<:SplitExplicitTimeDiscretization}, args...) = zero(grid)
 
-@inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ::Nothing) = 0
+@inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ::Nothing) = false
 @inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ref::ExnerReferenceState) = ∂zᶜᶜᶠ(i, j, k, grid, ref.pressure)
 
 ##### Density tendency
@@ -34,6 +34,13 @@ end
 $(TYPEDSIGNATURES)
 
 Compute the density tendency for compressible dynamics using the continuity equation.
+
+The density evolves according to:
+```math
+\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot \\,} (\\rho \\boldsymbol{u})
+```
+
+Since momentum `ρu` is already available, this is simply the negative divergence of momentum.
 """
 function AtmosphereModels.compute_dynamics_tendency!(model::CompressibleModel)
     grid = model.grid

@@ -12,6 +12,7 @@ using Oceananigans.TimeSteppers:
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
 using Breeze.CompressibleEquations: vertical_acoustic_implicit_step!
 using Oceananigans.Utils: launch!, time_difference_seconds
+using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 """
 $(TYPEDEF)
@@ -22,21 +23,21 @@ This time stepper uses the classic SSP RK3 scheme ([Shu-Osher 2006](@cite Shu198
 
 ```math
 \\begin{align*}
-u^{(1)} &= u^{(0)} + Δt L(u^{(0)}) \\\\
-u^{(2)} &= \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt L(u^{(1)}) \\\\
-u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt L(u^{(2)})
+u^{(1)} &= u^{(0)} + Δt \\, G(u^{(0)}) \\\\
+u^{(2)} &= \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt \\, G(u^{(1)}) \\\\
+u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt \\, G(u^{(2)})
 \\end{align*}
 ```
 
-where ``L`` above is the right-hand-side, e.g., ``\\partial_t u = L(u)``.
+where ``G`` above is the right-hand-side, e.g., ``\\partial_t u = G(u)``.
 
 Each stage can be written in the form:
 ```math
-u^{(m)} = (1 - α) u^{(0)} + α [u^{(m-1)} + Δt L(u^{(m-1)})]
+u^{(m)} = (1 - α) u^{(0)} + α \\left[u^{(m-1)} + Δt \\, G(u^{(m-1)}) \\right]
 ```
 with ``α = 1, 1/4, 2/3`` for stages 1, 2, 3 respectively.
 
-This scheme has CFL coefficient = 1 and is TVD (total variation diminishing).
+This scheme has CFL coefficient equal to 1 and it is TVD (total variation diminishing).
 
 Fields
 ======
@@ -56,9 +57,7 @@ struct SSPRungeKutta3{FT, U0, TG, TI} <: AbstractTimeStepper
 end
 
 """
-    SSPRungeKutta3(grid, prognostic_fields;
-                   implicit_solver = nothing,
-                   Gⁿ = map(similar, prognostic_fields))
+$(TYPEDSIGNATURES)
 
 Construct an `SSPRungeKutta3` on `grid` with `prognostic_fields` as described
 by [Shu and Osher (1988)](@cite Shu1988Efficient).
@@ -101,12 +100,12 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Apply an SSP RK3 substep with coefficient α:
+Apply an SSP RK3 substep with coefficient ``α``:
+```math
+u^{(m)} = (1 - α) u^{(0)} + α \\left[ u^{(m-1)} + Δt \\, G \\right]
 ```
-u^(m) = (1 - α) * u^(0) + α * (u^(m-1) + Δt * G)
-```
-where `u^(0)` is stored in the time stepper, `u^(m-1)` is the current field value,
-and `G` is the current tendency.
+where ``u^{(0)}`` is stored in the time stepper, ``u^{(m-1)}`` is the current field value,
+and ``G`` is the current tendency.
 """
 function ssp_rk3_substep!(model, Δt, α)
     grid = model.grid
@@ -174,21 +173,23 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Step forward `model` one time step `Δt` with the SSP RK3 method.
+Step forward `model` one time step ``Δt`` with the SSP RK3 method.
 
 The algorithm is:
-```
-u^(1) = u^(0) + Δt L(u^(0))
-u^(2) = 3/4 u^(0) + 1/4 u^(1) + 1/4 Δt L(u^(1))
-u^(3) = 1/3 u^(0) + 2/3 u^(2) + 2/3 Δt L(u^(2))
+
+```math
+\\begin{align*}
+u^{(1)} &= u^{(0)} + Δt \\, G(u^{(0)}) \\\\
+u^{(2)} &= \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt \\, G(u^{(1)}) \\\\
+u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt \\, G(u^{(2)})
+\\end{align*}
 ```
 
-where `L` above is the right-hand-side, e.g., `∂u/∂t = L(u)`.
+where ``G`` above is the right-hand-side, e.g., ``∂u/∂t = G(u)``.
 """
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}, Δt; callbacks=[])
-    Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
-    # Be paranoid and update state at iteration 0, in case run! is not used:
+    # Be paranoid and prepare at iteration 0, in case run! is not used:
     maybe_prepare_first_time_step!(model, callbacks)
 
     ts = model.timestepper
@@ -203,7 +204,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     store_initial_state!(model)
 
     #
-    # First stage: u^(1) = u^(0) + Δt * L(u^(0))
+    # First stage: u^(1) = u^(0) + Δt * G(u^(0))
     #
 
     compute_flux_bc_tendencies!(model)
@@ -217,7 +218,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     step_lagrangian_particles!(model, Δt)
 
     #
-    # Second stage: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * L(u^(1)))
+    # Second stage: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * G(u^(1)))
     #
 
     compute_flux_bc_tendencies!(model)
@@ -231,7 +232,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     step_lagrangian_particles!(model, α² * Δt)
 
     #
-    # Third stage: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * L(u^(2)))
+    # Third stage: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * G(u^(2)))
     #
 
     compute_flux_bc_tendencies!(model)
@@ -239,6 +240,8 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     compute_pressure_correction!(model, α³ * Δt)
     make_pressure_correction!(model, α³ * Δt)
+
+    step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
     # Adjust final time-step to reduce floating point error accumulation
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)

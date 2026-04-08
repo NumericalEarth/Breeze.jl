@@ -14,11 +14,12 @@
 #####   - Vertical solve:    Schur-complement tridiagonal in (ρw)″, (ρθ)″ with
 #####                        forward-weight off-centering ε = 2ω - 1
 #####   - Divergence damping: selectable via the AcousticDampingStrategy interface.
-#####                         Default ThermodynamicDivergenceDamping(coefficient=0.1)
-#####                         reproduces the MPAS Klemp–Skamarock–Ha 2018 momentum
-#####                         correction. Pressure-projection variants
-#####                         (ConservativeProjectionDamping, PressureProjectionDamping)
-#####                         apply the damping as a pre-PGF filter on (ρθ)″ instead.
+#####                         Default PressureProjectionDamping(coefficient=0.1)
+#####                         is the literal ERF/CM1/WRF projection form at the
+#####                         WRF/CM1 standard coefficient. Other strategies:
+#####                         ThermodynamicDivergenceDamping (MPAS Klemp 2018),
+#####                         ConservativeProjectionDamping (algebraic projection),
+#####                         NoDivergenceDamping (no damping).
 #####   - Topology-safe operators avoid halo fills for boundary face updates.
 #####
 ##### File layout (top-down):
@@ -416,13 +417,13 @@ $(TYPEDSIGNATURES)
 
 Compute the number of acoustic substeps from the horizontal acoustic CFL condition.
 
-Uses a conservative sound speed estimate `ℂᵃᶜ = √(γ Rᵈ Tᵣ)` with `Tᵣ = 300 K`
-(giving `ℂᵃᶜ ≈ 347 m/s`) and the minimum horizontal grid spacing. The vertical
+Uses a conservative sound speed estimate ``ℂᵃᶜ = (γ Rᵈ Tᵣ)^{1/2}`` with ``Tᵣ = 300\\;\\mathrm{K}``
+(giving ``ℂᵃᶜ ≈ 347\\;\\mathrm{m/s}``) and the minimum horizontal grid spacing. The vertical
 CFL is not needed because the ``(\\rho w)''``–``(\\rho\\theta)''`` coupling is
 vertically implicit.
 
-The substep count is chosen so that `Δτ · ℂᵃᶜ / Δx_min ≤ 1` where
-`Δτ = Δt / N` is the acoustic substep size, with a safety factor of 1.2 to
+The substep count is chosen so that ``ℂᵃᶜ Δτ / Δx_{min} ≤ 1`` where
+``Δτ = Δt / N`` is the acoustic substep size, with a safety factor of 1.2 to
 account for stability with the forward-backward splitting. This is the same
 horizontal acoustic CFL constraint used by MPAS-A and CM1.
 """
@@ -532,6 +533,11 @@ end
 function _set_exner_reference!(substepper, model, ::Nothing)
     fill!(parent(substepper.reference_exner_function), 0)
     return nothing
+end
+
+@kernel function _compute_reference_exner_from_pressure!(πᵣ, p_ref, pˢᵗ, κ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds πᵣ[i, j, k] = (p_ref[i, j, k] / pˢᵗ)^κ
 end
 
 @inline reference_exner(i, j, k, ::Nothing, pˢᵗ, κ) = zero(pˢᵗ)

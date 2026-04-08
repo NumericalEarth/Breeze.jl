@@ -36,16 +36,11 @@ struct PrescribedVerticalVelocity end
 """
     PrognosticVerticalVelocity
 
-Singleton type for prognostic vertical velocity dynamics. The parcel has a
-prognostic vertical velocity driven by buoyancy:
-
-```math
-dw/dt = b
-dz/dt = w
-```
-
-where `b = -g (ρᵖ - ρᵉ) / ρᵉ` is the net buoyancy from the density
-difference, including both the virtual temperature effect and condensate loading.
+Singleton type for prognostic vertical velocity dynamics. The parcel
+has a prognostic vertical velocity driven by buoyancy, i.e.,
+dz/dt = w and dw/dt = b, where b = -g (ρᵖ - ρᵉ) / ρᵉ is the net buoyancy
+from the density difference, including both the virtual temperature effect
+and condensate loading.
 """
 struct PrognosticVerticalVelocity end
 
@@ -464,7 +459,7 @@ $(TYPEDSIGNATURES)
 Set specific humidity field from relative humidity, computing
 
 ```math
-qᵗ = ℋ * qᵛ⁺(T, ρ).
+qᵗ = ℋ qᵛ⁺(T, ρ).
 ```
 
 where ``qᵗ`` is the total specific moisture, ``ℋ`` is the relative humidity,
@@ -604,15 +599,18 @@ $(TYPEDSIGNATURES)
 Compute the net buoyancy acceleration for a parcel.
 
 The buoyancy is computed from the density difference between the parcel and
-environment: `B = -g (ρ_parcel - ρ_env) / ρ_env`.
+environment:
 
-Here `ρ_parcel = p / (Rᵐ T)` is the total parcel density from the ideal gas law,
-where `Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ` with `qᵈ = 1 - qᵛ - qˡ - qⁱ`. This formulation
+```math
+B = -g (ρ_{parcel} - ρ_{env}) / ρ_{env}
+```
+
+Here, ``ρ_{env}`` is the environmental density interpolated at the parcel height
+and ``ρ_{parcel} = p / (Rᵐ T)`` is the total parcel density from the ideal gas law,
+where ``Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ`` with ``qᵈ = 1 - qᵛ - qˡ - qⁱ``. This formulation
 captures both the virtual temperature effect (from vapor content) and the
-condensate loading effect (condensate reduces `qᵈ`, reducing `Rᵐ`, increasing
-`ρ_parcel`) in a single term without double-counting.
-
-`ρ_env` is the environmental density interpolated at the parcel height.
+condensate loading effect (condensate reduces ``qᵈ``, reducing ``Rᵐ``, increasing
+``ρ_{parcel}``) in a single term without double-counting.
 """
 @inline function parcel_buoyancy(state, dynamics, constants)
     g = constants.gravitational_acceleration
@@ -646,8 +644,8 @@ $(TYPEDSIGNATURES)
 
 Compute vertical velocity tendencies for [`PrognosticVerticalVelocity`](@ref).
 
-The parcel has a prognostic vertical velocity driven by buoyancy:
-`dw/dt = B`, `dz/dt = w`.
+The parcel has a prognostic vertical velocity driven by buoyancy, i.e.,
+dz/dt = w and dw/dt = B.
 """
 @inline function compute_vertical_velocity_tendencies!(tendencies, state, dynamics, model, ::PrognosticVerticalVelocity)
     B = parcel_buoyancy(state, dynamics, model.thermodynamic_constants)
@@ -789,7 +787,7 @@ environmental profiles (pressure, density) beyond the grid is unphysical.
 """
 function check_domain_bounds!(state, grid)
     z_max = grid.Lz
-    if state.z >= z_max
+    if state.z ≥ z_max
         error("Parcel reached the model top (z = $(state.z) m ≥ Lz = $(z_max) m). " *
               "Increase the domain height or reduce the simulation stop_time.")
     elseif state.z < 0
@@ -806,14 +804,14 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Apply an SSP RK3 substep with coefficient `α`:
+Apply an SSP RK3 substep with coefficient ``α``:
 
 ```math
-u^{(m)} = (1 - α) u^{(0)} + α (u^{(m-1)} + Δt G^{(m-1)})
+u^{(m)} = (1 - α) u^{(0)} + α \\left[u^{(m-1)} + Δt \\, G^{(m-1)}\\right]
 ```
 
-where `u^{(0)}` is the initial state, `u^{(m-1)}` is the current state,
-and `G^{(m-1)}` is the tendency at the current state.
+where ``u^{(0)}`` is the initial state, ``u^{(m-1)}`` is the current state,
+and ``G^{(m-1)}`` is the tendency at the current state.
 
 The parcel model steps specific quantities (e, qᵗ) directly for exact conservation.
 For adiabatic ascent with no microphysics sources, de/dt = dqᵗ/dt = 0, so these
@@ -905,9 +903,13 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Step the parcel state forward using Forward Euler: `x^(n+1) = x^n + Δt * G^n`.
+Step the parcel state forward using Forward Euler:
 
-Computes tendencies at the current state, then advances all prognostic variables.
+```math
+x^{n+1} = x^n + Δt \\, G^n
+```
+
+Compute tendencies at the current state, then advance all prognostic variables.
 After updating position, the thermodynamic state is adjusted for the
 new height (adiabatic adjustment) and environmental conditions are
 updated from the profiles.
@@ -969,13 +971,15 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Advance the parcel model by one time step `Δt` using SSP RK3.
+Advance the parcel model by one time step ``Δt`` using SSP RK3.
 
 The SSP RK3 scheme [Shu and Osher (1988)](@cite Shu1988Efficient) is:
 ```math
-u^{(1)} = u^{(0)} + Δt L(u^{(0)})
-u^{(2)} = \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt L(u^{(1)})
-u^{(3)} = \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt L(u^{(2)})
+\\begin{align*}
+u^{(1)} &= u^{(0)} + Δt \\, G(u^{(0)}) \\\\
+u^{(2)} &= \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt \\, G(u^{(1)}) \\\\
+u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt \\, G(u^{(2)})
+\\end{align}
 ```
 
 This scheme has CFL coefficient = 1 and is TVD (total variation diminishing).
@@ -989,19 +993,19 @@ function TimeSteppers.time_step!(model::AtmosphereModel{<:ParcelDynamics, <:Any,
     # Store initial state for SSP RK3 stages
     store_initial_parcel_state!(U⁰, state)
 
-    # Stage 1: u^(1) = u^(0) + Δt * L(u^(0))
+    # Stage 1: u^(1) = u^(0) + Δt * G(u^(0))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α¹)
     tick_stage!(model.clock, Δt)
 
-    # Stage 2: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * L(u^(1)))
+    # Stage 2: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * G(u^(1)))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α²)
     # Don't tick - still at t + Δt for time-dependent forcing
 
-    # Stage 3: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * L(u^(2)))
+    # Stage 3: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * G(u^(2)))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α³)
 
     # Final clock update (adjust for floating point error)
-    tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹*Δt in stage 1
+    tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹ * Δt in stage 1
     corrected_Δt = tⁿ⁺¹ - model.clock.time
     tick_stage!(model.clock, corrected_Δt, Δt)
 

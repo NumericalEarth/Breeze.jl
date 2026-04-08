@@ -9,6 +9,8 @@ using Oceananigans.TimeSteppers:
     compute_flux_bc_tendencies!,
     step_lagrangian_particles!
 
+using Oceananigans.TurbulenceClosures: step_closure_prognostics!
+
 using Breeze.AtmosphereModels: AtmosphereModel
 
 using Breeze.CompressibleEquations:
@@ -26,12 +28,15 @@ substepping for fully compressible dynamics. Implements the **CM1-style**
 variant in which all three stages use the same constant substep size
 ``Δτ = Δt/N`` and the substep counts scale with the stage fraction:
 
+Unlike [`AcousticSSPRungeKutta3`](@ref) which uses convex combinations,
+this scheme uses stage fractions ``Δt/3``, ``Δt/2``, and ``Δt``:
+
 - Stage 1: ``U^* = U^n + (Δt/3) \\, R(U^n)``       — ``N/3`` substeps
 - Stage 2: ``U^{**} = U^n + (Δt/2) \\, R(U^*)``    — ``N/2`` substeps
 - Stage 3: ``U^{n+1} = U^n + Δt \\, R(U^{**})``    — ``N`` substeps
 
-Each stage evaluates the RHS at the current stage state, then resets to ``U^n``
-and advances by ``β Δt``. The absence of convex combinations makes the scheme
+Each stage evaluates the RHS, ``R``, at the current stage state, then resets to ``U^n``
+and advances by ``β Δt``. The absence of convex combinations makes this scheme
 compatible with split-explicit acoustic substepping, allowing the full pressure
 gradient and buoyancy to be included in the slow tendency.
 
@@ -84,9 +89,9 @@ end
 
 """
     AcousticRungeKutta3(grid, prognostic_fields;
-                         dynamics,
-                         implicit_solver = nothing,
-                         Gⁿ = map(similar, prognostic_fields))
+                        dynamics,
+                        implicit_solver = nothing,
+                        Gⁿ = map(similar, prognostic_fields))
 
 Construct an `AcousticRungeKutta3` time stepper for fully compressible dynamics.
 
@@ -98,9 +103,9 @@ Keyword Arguments
 - `Gⁿ`: Tendency fields at current stage. Default: similar to `prognostic_fields`
 """
 function AcousticRungeKutta3(grid, prognostic_fields;
-                              dynamics,
-                              implicit_solver::TI = nothing,
-                              Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
+                             dynamics,
+                             implicit_solver::TI = nothing,
+                             Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 
     FT = eltype(grid)
 
@@ -146,8 +151,8 @@ $(TYPEDSIGNATURES)
 Apply a Wicker-Skamarock RK3 substep with acoustic substepping.
 
 The acoustic substep loop handles momentum, density, and the thermodynamic
-variable (ρθ or ρe). The substep size is constant ``Δτ = Δt/N`` across all
-stages, with the substep count varying as ``Nτ = \\mathrm{round}(β N)``.
+variable (``ρθ`` or ``ρe``). The substep size is constant ``Δτ = Δt / N`` across all
+stages, with the substep count varying as ``N_τ = \\mathrm{round}(β N)``.
 Remaining scalars (tracers) are updated with standard RK3.
 """
 function acoustic_rk3_substep!(model, Δt, β; snapshot_slow_tendencies=false,
@@ -239,9 +244,9 @@ Step forward `model` one time step `Δt` with Wicker-Skamarock RK3 and acoustic 
 
 The algorithm follows [Wicker and Skamarock (2002)](@cite WickerSkamarock2002),
 in the CM1-style configuration:
-- Outer loop: canonical 3-stage RK3 with stage fractions `Δt/3, Δt/2, Δt`
+- Outer loop: canonical 3-stage RK3 with stage fractions ``Δt/3``, ``Δt/2``, ``Δt``
 - Inner loop: Acoustic substeps for fast (pressure) tendencies, with constant
-  substep size `Δτ = Δt/N` across all stages (`N/3`, `N/2`, `N` substeps in
+  substep size ``Δτ = Δt/N`` across all stages (``N/3``, ``N/2``, ``N`` substeps in
   stages 1, 2, 3 respectively)
 
 Each RK stage:
@@ -250,9 +255,8 @@ Each RK stage:
 3. Update scalars using standard RK update with time-averaged velocities
 """
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:AcousticRungeKutta3}, Δt; callbacks=[])
-    Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
-    # Be paranoid and update state at iteration 0
+    # Be paranoid and prepare at iteration 0, in case run! is not used:
     maybe_prepare_first_time_step!(model, callbacks)
 
     ts = model.timestepper
@@ -308,6 +312,8 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
 
     compute_flux_bc_tendencies!(model)
     acoustic_rk3_substep!(model, Δt, β₃; restore_slow_tendencies = true)
+
+    step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
     # Adjust final time-step
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)

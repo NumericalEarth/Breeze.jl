@@ -111,6 +111,11 @@ export
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
+    follow_terrain!,
+    TerrainMetrics,
+    BasicTerrainFollowing,
+    SlopeOutsideInterpolation,
+    SlopeInsideInterpolation,
 
     # TimeSteppers
     SSPRungeKutta3,
@@ -159,13 +164,13 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     time_step!, xnodes, xspacings, ynodes, yspacings, znodes,
                     zspacings, ∂x, ∂y, ∂z
 
-using Oceananigans.Grids: znode
+using Oceananigans.Grids: znode, MutableVerticalDiscretization
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid, LatitudeLongitudeGrid, ExponentialDiscretization, PiecewiseStretchedDiscretization, Clock,
+    RectilinearGrid, LatitudeLongitudeGrid, ExponentialDiscretization, PiecewiseStretchedDiscretization, MutableVerticalDiscretization, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
@@ -211,6 +216,10 @@ using .StaticEnergyFormulations: StaticEnergyFormulation
 
 include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
 using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
+
+# TerrainFollowingDiscretization (needed by CompressibleEquations for terrain physics)
+include("TerrainFollowingDiscretization/TerrainFollowingDiscretization.jl")
+using .TerrainFollowingDiscretization
 
 # Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
 include("AnelasticEquations/AnelasticEquations.jl")

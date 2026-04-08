@@ -98,9 +98,9 @@ using RRTMGP
 
         # Allow small numerical tolerance (wider for Float32)
         ε = FT == Float32 ? FT(1e-2) : FT(1e-6)
-        @test all(interior(ℐ_lw_up_allsky) .>= -ε)
-        @test all(interior(ℐ_lw_dn_allsky) .<= ε)
-        @test all(interior(ℐ_sw_dn_allsky) .<= ε)
+        @test all(interior(ℐ_lw_up_allsky) .≥ -ε)
+        @test all(interior(ℐ_lw_dn_allsky) .≤ ε)
+        @test all(interior(ℐ_sw_dn_allsky) .≤ ε)
 
         # Surface upwelling LW should be significant
         @allowscalar @test ℐ_lw_up_allsky[1, 1, 1] > 100

@@ -79,7 +79,7 @@ grid = RectilinearGrid(CPU(), size=(Nx, Nz), halo=(5, 5),
 
 Δθ = 0.01    # K - perturbation amplitude
 a  = 5000    # m - perturbation half-width parameter
-x₀ = Lx / 3 # m - perturbation center in x
+x₀ = Lx / 3  # m - perturbation center in x
 
 constants = ThermodynamicConstants()
 g = constants.gravitational_acceleration
@@ -96,17 +96,17 @@ Ns = 8 # acoustic substeps for fixed-substep cases
 surface_pressure = p₀
 potential_temperature = θ₀
 
-# Case 1: Anelastic
+# #### Case 1: Anelastic
 
 reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature)
 anelastic_dynamics = AnelasticDynamics(reference_state)
 
-# Case 2: Compressible (fully explicit, no substepping)
+# #### Case 2: Compressible (fully explicit, no substepping)
 compressible_dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                               surface_pressure,
                                               reference_potential_temperature=θᵇᵍ)
 
-# Case 3: Boussinesq (constant reference density)
+# #### Case 3: Boussinesq (constant reference density)
 constant_density_reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature)
 
 ρ₀ = adiabatic_hydrostatic_density(0, p₀, θ₀, pˢᵗ, constants)
@@ -117,7 +117,8 @@ boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
 # The number of acoustic substeps is computed automatically from the horizontal
 # acoustic CFL condition each step: `N = ceil(safety_factor · Δt · ℂᵃᶜ / Δx_min)`.
 # Defaults to the new Breeze damping ([`PressureProjectionDamping`](@ref) at
-# ``β_d = 0.5``) and the WS-RK3 outer loop ([`AcousticRungeKutta3`](@ref)).
+# ``β_d = 0.1``, the WRF/CM1 standard) and the WS-RK3 outer loop
+# ([`AcousticRungeKutta3`](@ref)).
 adaptive_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                           surface_pressure,
                                           reference_potential_temperature=θᵇᵍ)

@@ -8,11 +8,11 @@ testsuite = find_tests(@__DIR__)
 # Parse arguments
 args = parse_args(ARGS)
 
-const REACTANT_COMPAT = !((VERSION >= v"1.12") || (Base.JLOptions().check_bounds == 1))
+const REACTANT_COMPAT = VERSION < v"1.13-" && Base.JLOptions().check_bounds != 1
 
 if filter_tests!(testsuite, args)
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
-    # limitation) and Julia < 1.12 until upstream support is improved.
+    # limitation).
     if !REACTANT_COMPAT
         delete!(testsuite, "reactant_centered_compilation")
         delete!(testsuite, "reactant_weno_compilation")

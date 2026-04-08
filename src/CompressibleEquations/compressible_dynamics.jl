@@ -17,6 +17,9 @@ Fields
 - `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref), [`ExplicitTimeStepping`](@ref), or [`VerticallyImplicitTimeStepping`](@ref))
 - `reference_state`: Fixed hydrostatically-balanced reference state for base-state pressure correction (`nothing` or [`ExnerReferenceState`](@ref))
 - `vertical_acoustic_solver`: [`VerticalAcousticSolver`](@ref) for implicit vertical acoustic correction (`nothing` unless using [`VerticallyImplicitTimeStepping`](@ref))
+- `terrain_metrics`: [`TerrainMetrics`](@ref) for terrain-following coordinates (or `nothing`)
+- `Ω̃`, `ρΩ̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
+- `terrain_reference_pressure`, `terrain_reference_density`: 3D reference pressure / density for the terrain pressure gradient force (or `nothing`)
 
 The `time_discretization` determines how tendencies are computed and which
 time-stepper is used:
@@ -24,14 +27,19 @@ time-stepper is used:
 - [`ExplicitTimeStepping`](@ref): All tendencies computed together (small Δt required)
 - [`VerticallyImplicitTimeStepping`](@ref): Vertical acoustics implicit, horizontal explicit
 """
-struct CompressibleDynamics{TD, D, P, FT, RS, VAS}
-    time_discretization :: TD      # SplitExplicitTimeDiscretization, ExplicitTimeStepping, or VerticallyImplicitTimeStepping
-    density :: D                   # ρ (prognostic)
-    pressure :: P                  # p = ρ R^m T (diagnostic)
-    standard_pressure :: FT        # pˢᵗ (reference pressure for potential temperature)
-    surface_pressure :: FT         # p₀ (mean pressure at the bottom of the atmosphere)
-    reference_state :: RS          # ExnerReferenceState for base-state pressure correction (or Nothing)
-    vertical_acoustic_solver :: VAS # VerticalAcousticSolver for implicit vertical acoustics (or Nothing)
+struct CompressibleDynamics{TD, D, P, FT, RS, VAS, TM, CV, CM, TRP, TRD}
+    time_discretization :: TD         # SplitExplicitTimeDiscretization, ExplicitTimeStepping, or VerticallyImplicitTimeStepping
+    density :: D                      # ρ (prognostic)
+    pressure :: P                     # p = ρ R^m T (diagnostic)
+    standard_pressure :: FT           # pˢᵗ (reference pressure for potential temperature)
+    surface_pressure :: FT            # p₀ (mean pressure at the bottom of the atmosphere)
+    reference_state :: RS             # ExnerReferenceState for base-state pressure correction (or Nothing)
+    vertical_acoustic_solver :: VAS   # VerticalAcousticSolver for implicit vertical acoustics (or Nothing)
+    terrain_metrics :: TM             # TerrainMetrics for terrain-following coordinates (or Nothing)
+    Ω̃ :: CV                           # Contravariant vertical velocity diagnostic field (or Nothing)
+    ρΩ̃ :: CM                          # Contravariant vertical momentum diagnostic field (or Nothing)
+    terrain_reference_pressure :: TRP # 3D reference pressure for terrain PG (or Nothing)
+    terrain_reference_density :: TRD  # 3D reference density for terrain buoyancy (or Nothing)
 end
 
 """
@@ -61,7 +69,8 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               standard_pressure = 1e5,
                               surface_pressure = 101325.0,
                               reference_potential_temperature = nothing,
-                              reference_temperature = nothing) where TD
+                              reference_temperature = nothing,
+                              terrain_metrics = nothing) where TD
 
     FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
     pˢᵗ = convert(FT, standard_pressure)
@@ -73,7 +82,11 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     else
         reference_potential_temperature
     end
-    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, ref_spec, nothing)
+    # vertical_acoustic_solver, Ω̃, ρΩ̃, terrain_reference_pressure, terrain_reference_density
+    # are all built later in materialize_dynamics.
+    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, ref_spec,
+                                nothing, terrain_metrics,
+                                nothing, nothing, nothing, nothing)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
@@ -83,7 +96,12 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          dynamics.standard_pressure,
                          dynamics.surface_pressure,
                          adapt(to, dynamics.reference_state),
-                         adapt(to, dynamics.vertical_acoustic_solver))
+                         adapt(to, dynamics.vertical_acoustic_solver),
+                         adapt(to, dynamics.terrain_metrics),
+                         adapt(to, dynamics.Ω̃),
+                         adapt(to, dynamics.ρΩ̃),
+                         adapt(to, dynamics.terrain_reference_pressure),
+                         adapt(to, dynamics.terrain_reference_density))
 
 #####
 ##### Materialization
@@ -109,14 +127,23 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     surface_pressure = convert(FT, dynamics.surface_pressure)
 
     # Build reference state from the stored spec (θ₀, T₀ NamedTuple, or nothing).
+    # ExnerReferenceState builds the Exner function π₀ by discrete integration,
+    # ensuring exact discrete Exner hydrostatic balance. This is used for both
+    # split-explicit (acoustic substepping) and explicit time stepping.
+    #
+    # For terrain-following grids, the 1D column ExnerReferenceState is NOT used
+    # because Δz varies per column. The column-1 reference creates a mismatch at
+    # other columns that generates spurious vertical accelerations. Instead, terrain
+    # grids use only the 3D terrain_reference_pressure for the horizontal PG.
     ref_spec = dynamics.reference_state
+    terrain_metrics = dynamics.terrain_metrics
 
     ## Auto-construct ExnerReferenceState for VITS if not user-specified
     if ref_spec === nothing && dynamics.time_discretization isa VerticallyImplicitTimeStepping
         ref_spec = 300  # default reference θ for HEVI
     end
 
-    if ref_spec === nothing
+    if ref_spec === nothing || terrain_metrics !== nothing
         reference_state = nothing
     elseif ref_spec isa NamedTuple && haskey(ref_spec, :reference_temperature)
         # Isothermal base state (MPAS baroclinic wave convention)
@@ -134,9 +161,41 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
 
     vertical_acoustic_solver = materialize_vertical_acoustic_solver(dynamics.time_discretization, grid)
 
+    # Create contravariant velocity/momentum fields and terrain reference state
+    # if terrain metrics are present.
+    if terrain_metrics === nothing
+        Ω̃ = nothing
+        ρΩ̃ = nothing
+        terrain_reference_pressure = nothing
+        terrain_reference_density = nothing
+    else
+        Ω̃ = ZFaceField(grid)
+        ρΩ̃ = ZFaceField(grid)
+
+        # Build 3D reference pressure and density fields via per-column discrete
+        # Exner integration. The discrete integration ensures that
+        #   δ(p_ref)/Δz + g ℑ(ρ_ref) ≈ 0
+        # to high accuracy at every grid face, which is essential for reducing
+        # the truncation error from the near-cancellation of ∂p/∂z and -gρ in
+        # the vertical momentum equation. The reference pressure is also used for
+        # the perturbation horizontal PG to reduce terrain-following PGF errors.
+        if ref_spec === nothing
+            terrain_reference_pressure = nothing
+            terrain_reference_density = nothing
+        else
+            terrain_reference_pressure = CenterField(grid)
+            terrain_reference_density = CenterField(grid)
+            compute_terrain_reference_state!(terrain_reference_pressure,
+                                             terrain_reference_density,
+                                             grid, surface_pressure, ref_spec,
+                                             standard_pressure, thermodynamic_constants)
+        end
+    end
+
     return CompressibleDynamics(dynamics.time_discretization, density, pressure,
                                 standard_pressure, surface_pressure, reference_state,
-                                vertical_acoustic_solver)
+                                vertical_acoustic_solver, terrain_metrics, Ω̃, ρΩ̃,
+                                terrain_reference_pressure, terrain_reference_density)
 end
 
 #####
@@ -261,14 +320,13 @@ function Base.show(io::IO, dynamics::CompressibleDynamics)
     if dynamics.density === nothing
         print(io, "├── density: not materialized\n")
         print(io, "├── pressure: not materialized\n")
-        print(io, "├── time_discretization: ", summary(dynamics.time_discretization), '\n')
-        print(io, "└── reference_state: ", summary(dynamics.reference_state))
     else
         print(io, "├── density: ", prettysummary(dynamics.density), '\n')
         print(io, "├── pressure: ", prettysummary(dynamics.pressure), '\n')
-        print(io, "├── time_discretization: ", summary(dynamics.time_discretization), '\n')
-        print(io, "└── reference_state: ", summary(dynamics.reference_state))
     end
+    print(io, "├── terrain_metrics: ", summary(dynamics.terrain_metrics), '\n')
+    print(io, "├── time_discretization: ", summary(dynamics.time_discretization), '\n')
+    print(io, "└── reference_state: ", summary(dynamics.reference_state))
 end
 
 #####
