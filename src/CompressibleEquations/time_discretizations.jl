@@ -64,6 +64,77 @@ output.
 """
 struct MonolithicFirstStage <: AcousticSubstepDistribution end
 
+#####
+##### Acoustic divergence damping strategies
+#####
+
+"""
+$(TYPEDEF)
+
+Abstract supertype for the choice of acoustic divergence damping applied
+inside the substep loop.
+
+Concrete subtypes:
+
+  - [`NoDivergenceDamping`](@ref) — no damping. Useful as a baseline for
+    "is divergence damping the bottleneck?" experiments.
+  - [`ThermodynamicDivergenceDamping`](@ref) — MPAS Klemp–Skamarock–Ha 2018
+    momentum correction using the discrete ``(\\rho\\theta)''`` tendency as
+    the divergence proxy. This is Breeze's default and matches MPAS-A's
+    `atm_divergence_damping_3d`.
+
+See `docs/src/appendix/substepping_cleanup_and_damping_plan.md` for the full
+strategy design (including two pressure-projection variants planned for
+Phase 3).
+"""
+abstract type AcousticDampingStrategy end
+
+"""
+$(TYPEDEF)
+
+No acoustic divergence damping. The substep loop advances the perturbation
+fields without applying any post-substep momentum correction.
+"""
+struct NoDivergenceDamping <: AcousticDampingStrategy end
+
+"""
+$(TYPEDEF)
+
+MPAS-A Klemp–Skamarock–Ha 2018 acoustic divergence damping
+([Klemp et al. 2018](@cite KlempSkamarockHa2018)).
+
+After each acoustic substep, the horizontal momentum perturbations are
+corrected by
+
+```math
+Δ(\\rho u)'' = \\mathrm{coef}\\,\\partial_x(δ_τ(\\rho\\theta)'') / (2 θ_{m,\\mathrm{edge}})
+```
+
+(and similarly in ``y``), where ``δ_τ(\\rho\\theta)'' = (\\rho\\theta)''_\\mathrm{new} - (\\rho\\theta)''_\\mathrm{old}``
+is the discrete acoustic ``(\\rho\\theta)''`` tendency, ``\\mathrm{coef} = 2\\,
+\\mathrm{smdiv}\\,\\ell_\\mathrm{disp}/Δτ``, and ``\\mathrm{smdiv}`` is the
+strategy's `coefficient` field. Using the discrete pressure-tendency proxy
+ensures the damping preserves gravity-wave frequencies while filtering
+grid-scale acoustic divergence.
+
+Fields
+======
+
+- `coefficient`: MPAS `config_smdiv`. Default `0.1`.
+- `length_scale`: Optional override for the dispersion length ``\\ell_\\mathrm{disp}`` (MPAS `config_len_disp`). Default `nothing` (Breeze auto-derives ``\\min(Δx, Δy)`` over non-Flat horizontal axes).
+"""
+struct ThermodynamicDivergenceDamping{FT} <: AcousticDampingStrategy
+    coefficient :: FT
+    length_scale :: Union{FT, Nothing}
+end
+
+function ThermodynamicDivergenceDamping(; coefficient = 0.1, length_scale = nothing)
+    FT = length_scale === nothing ? typeof(coefficient) : promote_type(typeof(coefficient), typeof(length_scale))
+    coef_FT = convert(FT, coefficient)
+    len_FT  = length_scale === nothing ? nothing : convert(FT, length_scale)
+    return ThermodynamicDivergenceDamping{FT}(coef_FT, len_FT)
+end
+
 """
 $(TYPEDEF)
 
@@ -97,28 +168,44 @@ Fields
 
 - `substeps`: Number of acoustic substeps ``N`` per outer ``Δt``. Default `nothing` adaptively chooses ``N`` from the horizontal acoustic CFL each step. With [`ProportionalSubsteps`](@ref) the substep size is ``Δτ = Δt/N`` in every stage; with [`MonolithicFirstStage`](@ref) stage 1 instead uses one substep of size ``Δt/3``.
 - `forward_weight`: Off-centering parameter ``ω`` for the vertically implicit ``(\\rho w)''``–``(\\rho\\theta)''`` solve. ``ω > 0.5`` damps vertical acoustic modes; the MPAS off-centering is ``ε = 2ω - 1``. Default: 0.6.
-- `divergence_damping_coefficient`: **Currently unused at runtime — see Phase 2 of `docs/src/appendix/substepping_cleanup_and_damping_plan.md`.** The active divergence-damping kernel hardcodes the MPAS default `smdiv = 0.1`; this field will be replaced by a typed `damping :: AcousticDampingStrategy` API in Phase 2 of the cleanup, which restores user control over the coefficient. Default: 0.10 (matches the active hardcoded value).
+- `damping`: Acoustic divergence damping strategy ([`AcousticDampingStrategy`](@ref)). Default: [`ThermodynamicDivergenceDamping`](@ref) with `coefficient = 0.1` (matches MPAS-A `config_smdiv`). Use [`NoDivergenceDamping`](@ref) to disable damping entirely.
 - `acoustic_damping_coefficient`: Optional Klemp 2018 acoustic damping coefficient ``ϰ^{ac}``, applied as a post-implicit-solve velocity correction: ``u -= ϰ^{ac} c_p θ_v ∂Δπ'/∂x``. Default: 0.0.
 - `substep_distribution`: How acoustic substeps are distributed across the three WS-RK3 stages. One of [`ProportionalSubsteps`](@ref) (default; constant ``Δτ = Δt/N`` with stage counts ``N/3``, ``N/2``, ``N``) or [`MonolithicFirstStage`](@ref) (single substep of size ``Δt/3`` in stage 1, MPAS-A `config_time_integration_order = 3` form).
 
 See also [`ExplicitTimeStepping`](@ref) and [`VerticallyImplicitTimeStepping`](@ref).
 """
-struct SplitExplicitTimeDiscretization{N, FT, AD <: AcousticSubstepDistribution}
+struct SplitExplicitTimeDiscretization{N, FT, D <: AcousticDampingStrategy, AD <: AcousticSubstepDistribution}
     substeps :: N
     forward_weight :: FT
-    divergence_damping_coefficient :: FT
+    damping :: D
     acoustic_damping_coefficient :: FT
     substep_distribution :: AD
 end
 
-function SplitExplicitTimeDiscretization(; substeps=nothing,
-                                           forward_weight=0.6,
-                                           divergence_damping_coefficient=0.10,
-                                           acoustic_damping_coefficient=0.0,
-                                           substep_distribution=ProportionalSubsteps())
+function SplitExplicitTimeDiscretization(; substeps = nothing,
+                                           forward_weight = 0.6,
+                                           damping = ThermodynamicDivergenceDamping(),
+                                           acoustic_damping_coefficient = 0.0,
+                                           substep_distribution = ProportionalSubsteps(),
+                                           divergence_damping_coefficient = nothing)
+
+    # Backwards-compat: the old `divergence_damping_coefficient` kwarg was
+    # silently dropped at runtime (Phase 2 bug fix in
+    # docs/src/appendix/substepping_cleanup_and_damping_plan.md). Map it to a
+    # ThermodynamicDivergenceDamping when no explicit `damping` was passed and
+    # warn loudly so users know to migrate to the new API.
+    if divergence_damping_coefficient !== nothing
+        Base.depwarn("`divergence_damping_coefficient` is deprecated. " *
+                     "Pass `damping = ThermodynamicDivergenceDamping(coefficient = $(divergence_damping_coefficient))` " *
+                     "instead. (Note: in prior releases this kwarg was silently ignored at runtime; " *
+                     "the substepper used a hardcoded `smdiv = 0.1`.)",
+                     :SplitExplicitTimeDiscretization)
+        damping = ThermodynamicDivergenceDamping(coefficient = divergence_damping_coefficient)
+    end
+
     return SplitExplicitTimeDiscretization(substeps,
                                            forward_weight,
-                                           divergence_damping_coefficient,
+                                           damping,
                                            acoustic_damping_coefficient,
                                            substep_distribution)
 end

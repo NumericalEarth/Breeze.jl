@@ -164,7 +164,7 @@ Fields
 
 - `substeps`: Number of acoustic substeps ``N`` per outer ``Δt`` (or `nothing` for adaptive).
 - `forward_weight`: Off-centering parameter ``\\omega`` for the implicit solve. ``\\omega > 0.5`` damps vertical acoustic modes. ``\\varepsilon = 2\\omega - 1`` is the MPAS off-centering.
-- `divergence_damping_coefficient`: Currently unused — see the file-level note above and the cleanup plan.
+- `damping`: Acoustic divergence damping strategy ([`AcousticDampingStrategy`](@ref)). Default [`ThermodynamicDivergenceDamping`](@ref) reproduces today's hardcoded MPAS Klemp–Skamarock–Ha 2018 path.
 - `acoustic_damping_coefficient`: Klemp 2018 ``\\varkappa^{ac}`` post-implicit-solve velocity damping coefficient.
 - `substep_distribution`: How acoustic substeps are distributed across the WS-RK3 stages. One of [`ProportionalSubsteps`](@ref) or [`MonolithicFirstStage`](@ref).
 - `virtual_potential_temperature`: Stage-frozen ``\\theta_v`` (CenterField, MPAS `t`).
@@ -186,10 +186,10 @@ Fields
 The `cofwz`, `cofwr`, `cofwt`, `coftz` MPAS coefficients are computed inline by
 helper functions inside the column kernel — no separate fields are stored.
 """
-struct AcousticSubstepper{N, FT, AD, CF, FF, XF, YF, GT, AV, ST, TS}
+struct AcousticSubstepper{N, FT, D, AD, CF, FF, XF, YF, GT, AV, ST, TS}
     substeps :: N
     forward_weight :: FT                       # Off-centering ω → epssm = 2ω - 1
-    divergence_damping_coefficient :: FT
+    damping :: D                               # AcousticDampingStrategy
     acoustic_damping_coefficient :: FT
     substep_distribution :: AD                 # ProportionalSubsteps or MonolithicFirstStage
     virtual_potential_temperature :: CF        # Stage-frozen θ_m (MPAS `t`)
@@ -217,7 +217,7 @@ end
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
     AcousticSubstepper(a.substeps,
                        a.forward_weight,
-                       a.divergence_damping_coefficient,
+                       adapt(to, a.damping),
                        a.acoustic_damping_coefficient,
                        a.substep_distribution,
                        adapt(to, a.virtual_potential_temperature),
@@ -256,8 +256,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     Ns = split_explicit.substeps
     FT = eltype(grid)
     ω = convert(FT, split_explicit.forward_weight)
-    ϰᵈⁱ = convert(FT, split_explicit.divergence_damping_coefficient)
     ϰᵃᶜ = convert(FT, split_explicit.acoustic_damping_coefficient)
+    damping = _convert_damping(FT, split_explicit.damping)
     substep_distribution = split_explicit.substep_distribution
 
     virtual_potential_temperature = CenterField(grid)
@@ -315,7 +315,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     frozen_pressure = CenterField(grid)
 
-    return AcousticSubstepper(Ns, ω, ϰᵈⁱ, ϰᵃᶜ,
+    return AcousticSubstepper(Ns, ω, damping, ϰᵃᶜ,
                               substep_distribution,
                               virtual_potential_temperature,
                               reference_exner_function,
@@ -329,6 +329,14 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               vertical_solver,
                               frozen_pressure)
 end
+
+# Promote damping strategy fields to the grid's float type so the substepper's
+# concrete type parameters match the grid float type. The methods below cover
+# every concrete `AcousticDampingStrategy`. New strategies must add a method.
+@inline _convert_damping(::Type, d::NoDivergenceDamping) = d
+@inline _convert_damping(::Type{FT}, d::ThermodynamicDivergenceDamping) where FT =
+    ThermodynamicDivergenceDamping(coefficient = convert(FT, d.coefficient),
+                                   length_scale = d.length_scale === nothing ? nothing : convert(FT, d.length_scale))
 
 """
 $(TYPEDSIGNATURES)
@@ -734,6 +742,49 @@ end
         rv_p[i, j, k] += coef_div_damp * ∂y_divΘ / θ_sum_v_safe *
                           !on_y_boundary(i, j, k, grid)
     end
+end
+
+#####
+##### Divergence damping strategy dispatch
+#####
+##### Each substep calls `apply_divergence_damping!(strategy, substepper, grid, Δτ)`
+##### immediately after the column kernel + ρθ″ halo fill. The strategy is the
+##### `damping :: AcousticDampingStrategy` field carried by the substepper.
+##### Phase 3 of the cleanup plan adds two pressure-projection variants
+##### (`PressureProjectionDamping`, `ConservativeProjectionDamping`); their
+##### dispatch methods will be added here when implemented.
+#####
+
+@inline apply_divergence_damping!(::NoDivergenceDamping, substepper, grid, Δτ) = nothing
+
+function apply_divergence_damping!(damping::ThermodynamicDivergenceDamping, substepper, grid, Δτ)
+    arch = architecture(grid)
+    FT = eltype(grid)
+
+    # MPAS `config_len_disp` is a user-set scalar nominal grid resolution. By
+    # default we derive it as the minimum horizontal cell spacing, skipping
+    # Flat axes; on a 3D periodic-periodic grid this is min(Δx, Δy); on a
+    # 2D periodic-flat grid it falls back to Δx. Users can override this via
+    # `damping.length_scale`.
+    if damping.length_scale === nothing
+        TX, TY, _ = topology(grid)
+        Δx_eff = TX === Flat ? FT(Inf) : FT(minimum_xspacing(grid))
+        Δy_eff = TY === Flat ? FT(Inf) : FT(minimum_yspacing(grid))
+        len_disp_raw = min(Δx_eff, Δy_eff)
+        len_disp = isfinite(len_disp_raw) ? len_disp_raw : one(FT)
+    else
+        len_disp = convert(FT, damping.length_scale)
+    end
+
+    smdiv = convert(FT, damping.coefficient)
+    coef_div_damp = 2 * smdiv * len_disp / Δτ
+
+    launch!(arch, grid, :xyz, _mpas_divergence_damping!,
+            substepper.ρu″, substepper.ρv″,
+            substepper.ρθ″, substepper.previous_rtheta_pp,
+            substepper.virtual_potential_temperature,
+            grid, coef_div_damp)
+    return nothing
 end
 
 ##### MPAS acoustic substep: verbatim translation of Sections 3-8.
@@ -1236,7 +1287,6 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
 
     ω = substepper.forward_weight
     ω̄ = 1 - ω
-    ϰᵈⁱ = substepper.divergence_damping_coefficient
     ϰᵃᶜ = substepper.acoustic_damping_coefficient
 
     Gⁿ = model.timestepper.Gⁿ
@@ -1326,29 +1376,8 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         # a spurious gradient at periodic boundaries that feeds back into ru_p.
         fill_halo_regions!(substepper.ρθ″)
 
-        # MPAS divergence damping (atm_divergence_damping_3d):
-        #   coef = 2 * smdiv * len_disp / dts
-        #   ru_p += coef * (δΘ_cell2 - δΘ_cell1) * dvEdge / (dcEdge * 2 * θ_edge)
-        # config_smdiv = 0.1, config_len_disp = grid resolution.
-        smdiv = FT(0.1)  # MPAS default
-        # MPAS `config_len_disp` is a user-set scalar nominal grid resolution.
-        # We derive it as the minimum horizontal cell spacing, skipping Flat
-        # axes. On a 3D periodic-periodic grid this is min(Δx, Δy); on a
-        # 2D periodic-flat grid it falls back to Δx. (Previously this used
-        # minimum_yspacing on non-Flat-y grids, which on a RectilinearGrid
-        # with Δy ≠ Δx made `coef_div_damp` mismatched and caused a
-        # bottom-corner instability — see test_sk94_igw_3d.jl.)
-        TX, TY, _ = topology(grid)
-        Δx_eff = TX === Flat ? FT(Inf) : FT(minimum_xspacing(grid))
-        Δy_eff = TY === Flat ? FT(Inf) : FT(minimum_yspacing(grid))
-        len_disp_raw = min(Δx_eff, Δy_eff)
-        len_disp = isfinite(len_disp_raw) ? len_disp_raw : FT(1)
-        coef_div_damp = 2 * smdiv * len_disp / FT(Δτ)
-        launch!(arch, grid, :xyz, _mpas_divergence_damping!,
-                substepper.ρu″, substepper.ρv″,
-                substepper.ρθ″, rtheta_pp_old,
-                substepper.virtual_potential_temperature,
-                grid, coef_div_damp)
+        # Divergence damping — strategy is dispatched on `substepper.damping`.
+        apply_divergence_damping!(substepper.damping, substepper, grid, FT(Δτ))
 
         # MPAS halo exchanges (lines 1279-1322): communicate rho_pp, rtheta_pp,
         # ru_p after each substep so the next substep's horizontal forward step
