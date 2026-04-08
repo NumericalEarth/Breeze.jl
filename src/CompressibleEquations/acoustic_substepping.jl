@@ -257,7 +257,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     FT = eltype(grid)
     ω = convert(FT, split_explicit.forward_weight)
     ϰᵃᶜ = convert(FT, split_explicit.acoustic_damping_coefficient)
-    damping = _convert_damping(FT, split_explicit.damping)
+    damping = materialize_damping(grid, _convert_damping(FT, split_explicit.damping))
     substep_distribution = split_explicit.substep_distribution
 
     virtual_potential_temperature = CenterField(grid)
@@ -337,6 +337,39 @@ end
 @inline _convert_damping(::Type{FT}, d::ThermodynamicDivergenceDamping) where FT =
     ThermodynamicDivergenceDamping(coefficient = convert(FT, d.coefficient),
                                    length_scale = d.length_scale === nothing ? nothing : convert(FT, d.length_scale))
+@inline _convert_damping(::Type{FT}, d::ConservativeProjectionDamping) where FT =
+    ConservativeProjectionDamping{FT, typeof(d.ρθ″_for_pgf)}(convert(FT, d.coefficient), d.ρθ″_for_pgf)
+@inline _convert_damping(::Type{FT}, d::PressureProjectionDamping) where FT =
+    PressureProjectionDamping{FT, typeof(d.ρθ″_for_pgf)}(convert(FT, d.coefficient), d.ρθ″_for_pgf)
+
+# Materialize the damping strategy by allocating any per-strategy scratch
+# fields it needs. Called once at substepper construction. Default no-op for
+# strategies that carry no scratch fields. Concrete projection strategies
+# allocate a CenterField (`ρθ″_for_pgf`) at this point.
+@inline materialize_damping(grid, d::NoDivergenceDamping) = d
+@inline materialize_damping(grid, d::ThermodynamicDivergenceDamping) = d
+
+function materialize_damping(grid, d::ConservativeProjectionDamping{FT}) where FT
+    ρθ″_for_pgf = CenterField(grid)
+    return ConservativeProjectionDamping{FT, typeof(ρθ″_for_pgf)}(d.coefficient, ρθ″_for_pgf)
+end
+
+function materialize_damping(grid, d::PressureProjectionDamping{FT}) where FT
+    ρθ″_for_pgf = CenterField(grid)
+    return PressureProjectionDamping{FT, typeof(ρθ″_for_pgf)}(d.coefficient, ρθ″_for_pgf)
+end
+
+# Adapt methods so projection strategies survive a CPU → GPU adapt.
+Adapt.adapt_structure(to, d::NoDivergenceDamping) = d
+Adapt.adapt_structure(to, d::ThermodynamicDivergenceDamping) = d
+function Adapt.adapt_structure(to, d::ConservativeProjectionDamping{FT}) where FT
+    adapted = adapt(to, d.ρθ″_for_pgf)
+    return ConservativeProjectionDamping{FT, typeof(adapted)}(d.coefficient, adapted)
+end
+function Adapt.adapt_structure(to, d::PressureProjectionDamping{FT}) where FT
+    adapted = adapt(to, d.ρθ″_for_pgf)
+    return PressureProjectionDamping{FT, typeof(adapted)}(d.coefficient, adapted)
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -755,7 +788,94 @@ end
 ##### dispatch methods will be added here when implemented.
 #####
 
+#####
+##### PGF source dispatch
+#####
+##### `pgf_source_field(damping, substepper)` returns the (ρθ)″ field that the
+##### horizontal forward kernel will read as the PGF source. For non-projection
+##### strategies it is `substepper.ρθ″` directly. For projection strategies it
+##### is the strategy's own `ρθ″_for_pgf` scratch CenterField, which is filled
+##### by `apply_pgf_filter!` at the start of each substep.
+#####
+
+@inline pgf_source_field(::AcousticDampingStrategy, substepper) = substepper.ρθ″
+@inline pgf_source_field(damping::ConservativeProjectionDamping, substepper) = damping.ρθ″_for_pgf
+@inline pgf_source_field(damping::PressureProjectionDamping, substepper) = damping.ρθ″_for_pgf
+
+#####
+##### Pre-substep filter dispatch
+#####
+##### Called at the start of every substep, before the horizontal forward step.
+##### Default for `NoDivergenceDamping` and `ThermodynamicDivergenceDamping` is
+##### a no-op (the horizontal forward kernel reads `substepper.ρθ″` directly).
+##### Projection strategies launch a kernel that writes `damping.ρθ″_for_pgf`
+##### from the current `(ρθ)″` and the previous-substep snapshot
+##### `substepper.previous_rtheta_pp`.
+#####
+
+@inline apply_pgf_filter!(::AcousticDampingStrategy, substepper, model, ρθ_stage) = nothing
+
+function apply_pgf_filter!(damping::ConservativeProjectionDamping, substepper, model, ρθ_stage)
+    grid = model.grid
+    arch = architecture(grid)
+    FT = eltype(grid)
+    β = convert(FT, damping.coefficient)
+    launch!(arch, grid, :xyz, _conservative_projection_filter!,
+            damping.ρθ″_for_pgf, substepper.ρθ″, substepper.previous_rtheta_pp, β)
+    # The horizontal forward kernel reads ρθ_for_pgf via ∂xᶠᶜᶜ / ∂yᶜᶠᶜ, which
+    # accesses the i+1 / j+1 halo cells.
+    fill_halo_regions!(damping.ρθ″_for_pgf)
+    return nothing
+end
+
+@kernel function _conservative_projection_filter!(ρθ_for_pgf, ρθ″, ρθ″_old, β)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ρθ_for_pgf[i, j, k] = ρθ″[i, j, k] + β * (ρθ″[i, j, k] - ρθ″_old[i, j, k])
+end
+
+function apply_pgf_filter!(damping::PressureProjectionDamping, substepper, model, ρθ_stage)
+    grid = model.grid
+    arch = architecture(grid)
+    FT = eltype(grid)
+    β = convert(FT, damping.coefficient)
+    cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
+    Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
+    pˢᵗ = FT(model.dynamics.standard_pressure)
+    rcv = FT(Rᵈ / (cᵖ - Rᵈ))   # R/cv (the Π exponent on (Rρθ/pˢᵗ))
+    cv_over_R = FT((cᵖ - Rᵈ) / Rᵈ)
+    launch!(arch, grid, :xyz, _pressure_projection_filter!,
+            damping.ρθ″_for_pgf, substepper.ρθ″, substepper.previous_rtheta_pp,
+            ρθ_stage, β, FT(Rᵈ), pˢᵗ, rcv, cv_over_R)
+    fill_halo_regions!(damping.ρθ″_for_pgf)
+    return nothing
+end
+
+@kernel function _pressure_projection_filter!(ρθ_for_pgf, ρθ″, ρθ″_old,
+                                              ρθ_stage, β, R, pˢᵗ, rcv, cv_over_R)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ρθ_st = ρθ_stage[i, j, k]
+        ρθ_st_safe = ifelse(ρθ_st == 0, one(ρθ_st), ρθ_st)
+        # Π_stage = (R · ρθ_stage / pˢᵗ)^(R/cv) — the EOS Π at the WS-RK3 stage start.
+        Π_stage = (R * ρθ_st / pˢᵗ)^rcv
+        Π_stage_safe = ifelse(Π_stage == 0, one(Π_stage), Π_stage)
+        # Total Π at substep start (from accumulated (ρθ)″) and one substep behind.
+        Π_curr = (R * (ρθ_st + ρθ″[i, j, k])     / pˢᵗ)^rcv
+        Π_old  = (R * (ρθ_st + ρθ″_old[i, j, k]) / pˢᵗ)^rcv
+        π″_curr = Π_curr - Π_stage
+        π″_old  = Π_old  - Π_stage
+        # Linearized EOS conversion factor (cv/R) · ρθ_stage / Π_stage,
+        # i.e. the d(ρθ)/dπ at the frozen state.
+        conversion = cv_over_R * ρθ_st_safe / Π_stage_safe
+        ρθ_for_pgf[i, j, k] = ρθ″[i, j, k] + conversion * β * (π″_curr - π″_old)
+    end
+end
+
 @inline apply_divergence_damping!(::NoDivergenceDamping, substepper, grid, Δτ) = nothing
+# Projection strategies do their work in `apply_pgf_filter!` instead — the
+# post-substep momentum correction is a no-op for them.
+@inline apply_divergence_damping!(::ConservativeProjectionDamping, substepper, grid, Δτ) = nothing
+@inline apply_divergence_damping!(::PressureProjectionDamping,    substepper, grid, Δτ) = nothing
 
 function apply_divergence_damping!(damping::ThermodynamicDivergenceDamping, substepper, grid, Δτ)
     arch = architecture(grid)
@@ -1310,16 +1430,23 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     exner_base = ref isa Nothing ? substepper.reference_exner_function : ref.exner_function
 
     for substep in 1:Nτ
+        # Step 0: pre-PGF filter — projection-style strategies write
+        # `damping.ρθ″_for_pgf` from the current `(ρθ)″` and the previous
+        # substep's snapshot. Default strategies are no-ops.
+        apply_pgf_filter!(substepper.damping, substepper, model, U⁰[5])
+
         # Step 1: Horizontal forward — update u, v from PGF and slow tendency.
         # MPAS conservative-perturbation form: the horizontal PGF reads the
         # accumulated (ρθ)″ perturbation,
         #   pgf_x = -c² · Π_face · ∂(rtheta_pp)/∂x
         # which provides horizontal acoustic coupling through the accumulated
-        # (ρθ)″ field.
+        # (ρθ)″ field. Projection strategies replace the PGF source with the
+        # filtered scratch field returned by `pgf_source_field`.
         pˢᵗ = model.dynamics.reference_state.standard_pressure
+        ρθ_for_pgf = pgf_source_field(substepper.damping, substepper)
         launch!(arch, grid, :xyz, _mpas_horizontal_forward!,
                 u, v, substepper.ρu″, substepper.ρv″, grid, Δτ,
-                substepper.ρθ″,
+                ρθ_for_pgf,
                 substepper.frozen_pressure, model.dynamics.density,
                 substepper.slow_tendencies.velocity.u,
                 substepper.slow_tendencies.velocity.v,

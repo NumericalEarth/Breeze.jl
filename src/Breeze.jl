@@ -25,6 +25,8 @@ export
     AcousticDampingStrategy,
     NoDivergenceDamping,
     ThermodynamicDivergenceDamping,
+    ConservativeProjectionDamping,
+    PressureProjectionDamping,
     ExplicitTimeStepping,
     VerticallyImplicitTimeStepping,
     PrescribedDensity,
@@ -219,6 +221,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               SplitExplicitTimeDiscretization,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermodynamicDivergenceDamping,
+                              ConservativeProjectionDamping, PressureProjectionDamping,
                               ExplicitTimeStepping,
                               VerticallyImplicitTimeStepping, vertical_acoustic_implicit_step!
 

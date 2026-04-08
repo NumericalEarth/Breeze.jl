@@ -82,10 +82,15 @@ Concrete subtypes:
     momentum correction using the discrete ``(\\rho\\theta)''`` tendency as
     the divergence proxy. This is Breeze's default and matches MPAS-A's
     `atm_divergence_damping_3d`.
+  - [`PressureProjectionDamping`](@ref) — literal ERF/CM1/WRF form (Klemp
+    2007): forward-extrapolate the diagnosed Exner perturbation, convert
+    back to ``(\\rho\\theta)''`` via the linearized EOS.
+  - [`ConservativeProjectionDamping`](@ref) — algebraic conservative-variable
+    variant of the above; equivalent at the linearized level but skips the
+    EOS evaluation.
 
 See `docs/src/appendix/substepping_cleanup_and_damping_plan.md` for the full
-strategy design (including two pressure-projection variants planned for
-Phase 3).
+strategy design and the empirical comparison plan.
 """
 abstract type AcousticDampingStrategy end
 
@@ -133,6 +138,94 @@ function ThermodynamicDivergenceDamping(; coefficient = 0.1, length_scale = noth
     coef_FT = convert(FT, coefficient)
     len_FT  = length_scale === nothing ? nothing : convert(FT, length_scale)
     return ThermodynamicDivergenceDamping{FT}(coef_FT, len_FT)
+end
+
+"""
+$(TYPEDEF)
+
+Conservative pressure-projection damping. Forward-extrapolates the
+prognostic ``(\\rho\\theta)''`` perturbation by one substep's worth of
+change before it is read by the next substep's horizontal pressure
+gradient kernel:
+
+```math
+(\\rho\\widetilde{\\theta})''_\\mathrm{for\\ pgf}
+    = (\\rho\\theta)'' + \\beta_d \\bigl((\\rho\\theta)'' - (\\rho\\theta)''_\\mathrm{prev}\\bigr)
+```
+
+where ``(\\rho\\theta)''_\\mathrm{prev}`` is the value at the start of the
+previous substep (already maintained by the substepper as
+`previous_rtheta_pp` for the MPAS damping path) and ``\\beta_d`` is the
+strategy's `coefficient`.
+
+This is a conservative-variable (algebraic) approximation to the literal
+ERF/CM1/WRF [`PressureProjectionDamping`](@ref) — at the strict linearized
+level (perturbations small relative to the reference state, EOS map
+approximated by its tangent at the reference) the two are equivalent. They
+diverge at second order in the perturbations and at the discretization
+level.
+
+Fields
+======
+
+- `coefficient`: forward-projection weight ``\\beta_d``. Default `0.1`.
+- `ρθ″_for_pgf`: scratch `CenterField` written by `apply_pgf_filter!` and read by the next substep's `_mpas_horizontal_forward!`. `nothing` in the user-facing skeleton; allocated by the substepper constructor.
+"""
+struct ConservativeProjectionDamping{FT, F} <: AcousticDampingStrategy
+    coefficient :: FT
+    ρθ″_for_pgf :: F
+end
+
+function ConservativeProjectionDamping(; coefficient = 0.1)
+    FT = typeof(coefficient)
+    return ConservativeProjectionDamping{FT, Nothing}(convert(FT, coefficient), nothing)
+end
+
+"""
+$(TYPEDEF)
+
+Pressure-projection damping in the literal ERF/CM1/WRF form (Klemp et
+al. 2007). Each substep diagnoses the Exner perturbation from the
+prognostic ``(\\rho\\theta)''``, forward-extrapolates it as
+``\\tilde{\\pi}'' = \\pi'' + \\beta_d (\\pi'' - \\pi''_\\mathrm{old})``, and
+converts the projected ``\\tilde{\\pi}''`` back into a projected
+``(\\rho\\widetilde{\\theta})''_\\mathrm{for\\ pgf}`` via the linearized EOS
+so that the existing horizontal pressure gradient kernel
+(``-c^2\\,\\Pi_\\mathrm{face}\\,\\partial_x(\\rho\\theta)''``) reads the
+filtered field without any kernel-signature change.
+
+The linearized EOS conversion at a cell center is
+
+```math
+(\\rho\\widetilde{\\theta})''_\\mathrm{for\\ pgf}
+    = (\\rho\\theta)'' + \\frac{c_v}{R}\\,\\frac{(\\rho\\theta)_\\mathrm{stage}}{\\Pi_\\mathrm{stage}}\\,\\beta_d\\,(\\pi'' - \\pi''_\\mathrm{old}),
+```
+
+with both the diagnosed ``\\pi''`` (from the current ``(\\rho\\theta)''``)
+and the previous-substep ``\\pi''_\\mathrm{old}`` (from the substepper's
+`previous_rtheta_pp` field, which is already maintained by the MPAS
+divergence-damping path) computed via
+``\\pi(\\rho\\theta) = (R\\,\\rho\\theta/p^{st})^{R/c_v}``.
+
+This is the closer-to-ERF / CM1 form of the projection. The cheaper
+[`ConservativeProjectionDamping`](@ref) variant is mathematically
+equivalent at the linearized level but skips the per-cell EOS
+evaluation.
+
+Fields
+======
+
+- `coefficient`: forward-projection weight ``\\beta_d``. Default `0.1`.
+- `ρθ″_for_pgf`: scratch `CenterField` written by `apply_pgf_filter!` and read by the next substep's `_mpas_horizontal_forward!`. `nothing` in the user-facing skeleton; allocated by the substepper constructor.
+"""
+struct PressureProjectionDamping{FT, F} <: AcousticDampingStrategy
+    coefficient :: FT
+    ρθ″_for_pgf :: F
+end
+
+function PressureProjectionDamping(; coefficient = 0.1)
+    FT = typeof(coefficient)
+    return PressureProjectionDamping{FT, Nothing}(convert(FT, coefficient), nothing)
 end
 
 """

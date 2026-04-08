@@ -36,6 +36,8 @@ export
     AcousticDampingStrategy,
     NoDivergenceDamping,
     ThermodynamicDivergenceDamping,
+    ConservativeProjectionDamping,
+    PressureProjectionDamping,
     ExplicitTimeStepping,
     VerticallyImplicitTimeStepping,
     VerticalAcousticSolver,
