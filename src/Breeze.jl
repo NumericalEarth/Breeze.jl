@@ -1,6 +1,6 @@
 """
-Julia package for finite volume GPU and CPU large eddy simulations (LES)
-of atmospheric flows. The abstractions, design, and finite volume engine
+Julia package for finite-volume GPU and CPU large eddy simulations (LES)
+of atmospheric flows. The abstractions, design, and finite-volume engine
 are based on Oceananigans.
 """
 module Breeze
@@ -11,6 +11,8 @@ export
     ThermodynamicConstants,
     ReferenceState,
     ExnerReferenceState,
+    compute_reference_state!,
+    set_to_mean!,
     surface_density,
     AnelasticDynamics,
     AnelasticModel,
@@ -55,6 +57,9 @@ export
     surface_precipitation_flux,
     total_pressure,
     specific_humidity,
+    moisture_prognostic_name,
+    moisture_specific_name,
+    specific_prognostic_moisture,
 
     # Thermodynamics
     temperature,
@@ -97,6 +102,11 @@ export
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
+    follow_terrain!,
+    TerrainMetrics,
+    BasicTerrainFollowing,
+    SlopeOutsideInterpolation,
+    SlopeInsideInterpolation,
 
     # TimeSteppers
     SSPRungeKutta3,
@@ -107,7 +117,9 @@ export
     # ParcelDynamics
     ParcelDynamics,
     ParcelModel,
-    ParcelState
+    ParcelState,
+    PrescribedVerticalVelocity,
+    PrognosticVerticalVelocity
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
@@ -132,13 +144,13 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     time_step!, xnodes, xspacings, ynodes, yspacings, znodes,
                     zspacings, ∂x, ∂y, ∂z
 
-using Oceananigans.Grids: znode
+using Oceananigans.Grids: znode, MutableVerticalDiscretization
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid, ExponentialDiscretization, PiecewiseStretchedDiscretization, Clock,
+    RectilinearGrid, ExponentialDiscretization, PiecewiseStretchedDiscretization, MutableVerticalDiscretization, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
@@ -183,6 +195,10 @@ using .StaticEnergyFormulations: StaticEnergyFormulation
 
 include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
 using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
+
+# TerrainFollowingDiscretization (needed by CompressibleEquations for terrain physics)
+include("TerrainFollowingDiscretization/TerrainFollowingDiscretization.jl")
+using .TerrainFollowingDiscretization
 
 # Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
 include("AnelasticEquations/AnelasticEquations.jl")

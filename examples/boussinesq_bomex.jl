@@ -159,6 +159,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
 simulation = Simulation(model; Δt=1, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # Write a callback to compute *_avg_f
 u_avg = Field(Average(model.velocities.u, dims=(1, 2)))

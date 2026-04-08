@@ -20,6 +20,7 @@
 using Breeze
 using CloudMicrophysics
 using CairoMakie
+using Oceananigans: Oceananigans
 
 # ## Model setup
 #
@@ -57,6 +58,7 @@ function run_parcel_simulation(; microphysics, θ = 300, stop_time = 2000, Δt =
     end
 
     simulation = Simulation(model; Δt, stop_time, verbose=false)
+    Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
     ## Time series storage
     t = Float64[]
@@ -105,12 +107,12 @@ one_moment_cloud_microphysics_categories = BreezeCloudMicrophysicsExt.one_moment
 precipitation_boundary_condition = ImpenetrableBoundaryCondition()
 
 ## First, a slow scheme
-cloud_liquid_slow = CMP.CloudLiquid{Float64}(τ_relax=20.0, ρw=1000.0, r_eff=10e-6)
+cloud_liquid_slow = CMP.CloudLiquid{Float64}(τ_relax=20.0, ρw=1000.0, r_eff=1e-5, N_0=5e8)
 categories = one_moment_cloud_microphysics_categories(cloud_liquid = cloud_liquid_slow)
 microphysics_1m_slow = OneMomentCloudMicrophysics(; categories, precipitation_boundary_condition)
 
 # Then a fast scheme
-cloud_liquid_fast = CMP.CloudLiquid{Float64}(τ_relax=2.0, ρw=1000.0, r_eff=10e-6)
+cloud_liquid_fast = CMP.CloudLiquid{Float64}(τ_relax=2.0, ρw=1000.0, r_eff=1e-5, N_0=5e8)
 categories = one_moment_cloud_microphysics_categories(cloud_liquid = cloud_liquid_fast)
 microphysics_1m_fast = OneMomentCloudMicrophysics(; categories, precipitation_boundary_condition)
 

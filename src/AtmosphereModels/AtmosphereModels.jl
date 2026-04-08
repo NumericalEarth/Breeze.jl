@@ -27,6 +27,15 @@ export
     precipitation_rate,
     surface_precipitation_flux,
     specific_humidity,
+    moisture_prognostic_name,
+    moisture_specific_name,
+    specific_prognostic_moisture,
+
+    # Negative moisture correction types
+    AbstractNegativeMoistureCorrection,
+    VerticalBorrowing,
+    SpeciesBorrowing,
+    AbstractNumberConcentrationCategories,
 
     # Microphysics interface
     AbstractMicrophysicalState,
@@ -35,6 +44,9 @@ export
     microphysical_state,
     microphysical_tendency,
     grid_microphysical_tendency,
+    moisture_fractions,
+    grid_moisture_fractions,
+    specific_prognostic_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
     initial_aerosol_number,
@@ -47,6 +59,7 @@ export
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
     BackgroundAtmosphere,
+    materialize_background_atmosphere,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
@@ -63,6 +76,10 @@ export
     StaticEnergy,
     compute_hydrostatic_pressure!,
     set_to_mean!,
+
+    # Transport interface (for terrain-following coordinates)
+    transport_velocities,
+    transport_momentum,
 
     # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
     compute_x_momentum_tendency!,
@@ -103,6 +120,7 @@ include("atmosphere_model.jl")
 include("atmosphere_model_buoyancy.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
+include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
 

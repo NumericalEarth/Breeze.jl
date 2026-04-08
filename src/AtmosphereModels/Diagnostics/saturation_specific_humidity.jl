@@ -4,7 +4,7 @@ struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     flavor :: FL
     microphysics :: μ
     microphysical_fields :: M
-    specific_moisture :: MF
+    specific_prognostic_moisture :: MF
     temperature :: T
     reference_state :: R
     thermodynamic_constants :: TH
@@ -16,7 +16,7 @@ Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
     SaturationSpecificHumidityKernelFunction(adapt(to, k.flavor),
                                              adapt(to, k.microphysics),
                                              adapt(to, k.microphysical_fields),
-                                             adapt(to, k.specific_moisture),
+                                             adapt(to, k.specific_prognostic_moisture),
                                              adapt(to, k.temperature),
                                              adapt(to, k.reference_state),
                                              adapt(to, k.thermodynamic_constants))
@@ -45,9 +45,9 @@ of *saturation specific humidity* ``qᵛ⁺``.
 * `:equilibrium`
 
   Return the *saturation specific humidity* in potentially-saturated conditions, using the
-  `model.specific_moisture`. This is equivalent to the `:total_moisture` flavor
-  under saturated conditions with no condensate; or in other words, if `model.specific_moisture` happens
-  to be equal to the saturation specific humidity.
+  model's specific moisture field. This is equivalent to the `:total_moisture` flavor
+  under saturated conditions with no condensate; or in other words, if the specific moisture
+  happens to be equal to the saturation specific humidity.
 
 * `:total_moisture`
 
@@ -71,7 +71,7 @@ function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
     func = SaturationSpecificHumidityKernelFunction(flavor,
                                                     model.microphysics,
                                                     model.microphysical_fields,
-                                                    model.specific_moisture,
+                                                    specific_prognostic_moisture(model),
                                                     model.temperature,
                                                     model.dynamics.reference_state,
                                                     model.thermodynamic_constants)
@@ -114,14 +114,14 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
     surface = equilibrated_surface(equilibrium, T)
 
     if d.flavor isa PrognosticFlavor
-        qᵗ = @inbounds d.specific_moisture[i, j, k]
-        q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+        qᵛᵉ = @inbounds d.specific_prognostic_moisture[i, j, k]
+        q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛᵉ, d.microphysical_fields)
         ρ = density(T, pᵣ, q, constants)
         return saturation_specific_humidity(T, ρ, constants, surface)
 
     elseif d.flavor isa EquilibriumFlavor
-        qᵗ = @inbounds d.specific_moisture[i, j, k]
-        return equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
+        qᵛᵉ = @inbounds d.specific_prognostic_moisture[i, j, k]
+        return equilibrium_saturation_specific_humidity(T, pᵣ, qᵛᵉ, constants, surface)
 
     elseif d.flavor isa TotalMoistureFlavor
         return saturation_total_specific_moisture(T, pᵣ, constants, surface)

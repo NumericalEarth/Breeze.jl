@@ -24,7 +24,7 @@ increment_tolerance(::Type{Float64}) = 1e-10
     # Test a representative subset of forcing types (reduced from 4 to 2)
     forcings = [
         Returns(one(FT)),
-        Forcing(Returns(one(FT)), field_dependencies=(:ρe, :ρqᵗ, :ρu), discrete_form=true),
+        Forcing(Returns(one(FT)), field_dependencies=(:ρe, :ρqᵛ, :ρu), discrete_form=true),
     ]
 
     Δt = convert(FT, 1e-6)
@@ -129,8 +129,8 @@ end
         bc = BulkVaporFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
         @test bc isa BoundaryCondition
 
-        ρqᵗ_bcs = FieldBoundaryConditions(bottom=bc)
-        model = AtmosphereModel(grid; boundary_conditions=(; ρqᵗ=ρqᵗ_bcs))
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=bc)
+        model = AtmosphereModel(grid; boundary_conditions=(; ρqᵛ=ρqᵛ_bcs))
         θ₀ = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀)
         time_step!(model, 1e-6)
@@ -167,10 +167,10 @@ end
         ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         ρθ_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀,
                                                                      coefficient=Cᴰ, gustiness=gustiness))
-        ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=T₀,
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=T₀,
                                                                coefficient=Cᴰ, gustiness=gustiness))
 
-        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs)
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
         θ₀ = model.dynamics.reference_state.potential_temperature
@@ -184,10 +184,10 @@ end
         ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         ρe_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀,
                                                                      coefficient=Cᴰ, gustiness=gustiness))
-        ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=T₀,
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=T₀,
                                                                coefficient=Cᴰ, gustiness=gustiness))
 
-        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs)
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; formulation=:StaticEnergy, boundary_conditions)
 
         θ₀ = model.dynamics.reference_state.potential_temperature
@@ -202,9 +202,9 @@ end
         ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
         ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
         ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
 
-        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs)
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
         θ₀_ref = model.dynamics.reference_state.potential_temperature
@@ -219,9 +219,9 @@ end
         ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
         ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
         ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
-        ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
 
-        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs)
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
         θ₀_ref = model.dynamics.reference_state.potential_temperature

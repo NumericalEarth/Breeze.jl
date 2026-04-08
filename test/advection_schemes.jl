@@ -23,7 +23,7 @@ using Test
 
         for model in (static_energy_model, potential_temperature_model)
             @test model.advection.momentum isa Centered
-            @test model.advection.ρqᵗ isa Centered
+            @test model.advection.ρqᵛ isa Centered
             time_step!(model, 1)
         end
     end
@@ -40,7 +40,7 @@ using Test
 
         for model in (static_energy_model, potential_temperature_model)
             @test model.advection.momentum isa WENO
-            @test model.advection.ρqᵗ isa WENO
+            @test model.advection.ρqᵛ isa WENO
             time_step!(model, 1)
         end
     end
@@ -55,7 +55,7 @@ using Test
 
         for model in (static_energy_model, potential_temperature_model)
             @test model.advection.momentum isa WENO
-            @test model.advection.ρqᵗ isa Centered
+            @test model.advection.ρqᵛ isa Centered
             time_step!(model, 1)
         end
     end
@@ -78,10 +78,10 @@ using Test
 
         for model in (static_energy_model, potential_temperature_model)
             @test model.advection.momentum isa FluxFormAdvection
-            @test model.advection.ρqᵗ isa FluxFormAdvection
-            @test model.advection.ρqᵗ.x isa WENO
-            @test model.advection.ρqᵗ.y isa WENO
-            @test model.advection.ρqᵗ.z isa Centered
+            @test model.advection.ρqᵛ isa FluxFormAdvection
+            @test model.advection.ρqᵛ.x isa WENO
+            @test model.advection.ρqᵛ.y isa WENO
+            @test model.advection.ρqᵛ.z isa Centered
             time_step!(model, 1)
         end
     end
@@ -96,14 +96,14 @@ using Test
 
         for model in (static_energy_model, potential_temperature_model)
             @test model.advection.momentum isa Centered
-            @test model.advection.ρqᵗ isa UpwindBiased
+            @test model.advection.ρqᵛ isa UpwindBiased
             @test model.advection.c isa UpwindBiased
             time_step!(model, 1)
         end
     end
 
     @testset "Mixed configuration with tracers" begin
-        scalar_advection = (; c=Centered(order=2), ρqᵗ=WENO())
+        scalar_advection = (; c=Centered(order=2), ρqᵛ=WENO())
         kw = (thermodynamic_constants=constants, tracers = :c, momentum_advection = WENO(), scalar_advection)
         static_energy_model = AtmosphereModel(grid; dynamics, formulation=:StaticEnergy, kw...)
         potential_temperature_model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature, kw...)
@@ -113,7 +113,7 @@ using Test
 
         for model in (static_energy_model, potential_temperature_model)
             @test model.advection.momentum isa WENO
-            @test model.advection.ρqᵗ isa WENO
+            @test model.advection.ρqᵛ isa WENO
             @test model.advection.c isa Centered
             time_step!(model, 1)
         end

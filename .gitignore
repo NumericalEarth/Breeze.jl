@@ -40,7 +40,9 @@ Manifest-v*.toml
 *.DS_Store
 *.vscode
 *.code-workspace
-.claude/
+# Claude Code — ignore user-specific settings, track shared rules/skills
+.claude/settings.local.json
+.claude/debug/
 
 # Paper references (kept locally only)
 examples/tropical_cyclone_world.md

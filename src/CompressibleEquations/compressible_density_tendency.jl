@@ -34,7 +34,7 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
     return ∂z_p - ∂z_pᵣ
 end
 
-@inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ::Nothing) = 0
+@inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ::Nothing) = false
 @inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ref::ExnerReferenceState) = ∂zᶜᶜᶠ(i, j, k, grid, ref.pressure)
 
 #####
@@ -48,7 +48,7 @@ Compute the density tendency for compressible dynamics using the continuity equa
 
 The density evolves according to:
 ```math
-\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u})
+\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot \\,} (\\rho \\boldsymbol{u})
 ```
 
 Since momentum `ρu` is already available, this is simply the negative divergence of momentum.

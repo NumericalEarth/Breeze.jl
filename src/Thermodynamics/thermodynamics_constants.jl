@@ -471,7 +471,7 @@ Mixing ratios are defined as mass of constituent per mass of dry air:
 ```math
 r = q / (1 - qᵗ) = q / qᵈ
 ```
-where `qᵗ` is the total specific moisture and `qᵈ = 1 - qᵗ` is the dry air mass fraction.
+where ``qᵗ`` is the total specific moisture and ``qᵈ = 1 - qᵗ`` is the dry air mass fraction.
 """
 @inline function MoistureMixingRatio(q::MoistureMassFractions)
     qᵗ = total_specific_moisture(q)
@@ -488,7 +488,7 @@ Mass fractions are defined as mass of constituent per total mass:
 ```math
 q = r / (1 + rᵗ)
 ```
-where `rᵗ` is the total mixing ratio.
+where ``rᵗ`` is the total mixing ratio.
 """
 @inline function MoistureMassFractions(r::MoistureMixingRatio)
     rᵗ = total_mixing_ratio(r)

@@ -377,3 +377,96 @@ end
         @test pⁱ_tetens ≈ pⁱ_cc rtol=FT(0.05)
     end
 end
+
+#####
+##### BackgroundAtmosphere
+#####
+
+using Breeze.AtmosphereModels: BackgroundAtmosphere,
+                               materialize_background_atmosphere,
+                               radiation_flux_divergence,
+                               _vmr_string
+
+@testset "BackgroundAtmosphere" begin
+    @testset "Default constructor" begin
+        atm = BackgroundAtmosphere()
+        @test atm.N₂ ≈ 0.78084
+        @test atm.O₂ ≈ 0.20946
+        @test atm.CO₂ ≈ 420e-6
+        @test atm.CH₄ ≈ 1.8e-6
+        @test atm.N₂O ≈ 330e-9
+        @test atm.O₃ == 0.0
+        @test atm.CFC₁₁ == 0.0
+    end
+
+    @testset "Custom constructor" begin
+        atm = BackgroundAtmosphere(CO₂ = 400e-6, O₃ = 30e-9)
+        @test atm.CO₂ ≈ 400e-6
+        @test atm.O₃ ≈ 30e-9
+        @test atm.N₂ ≈ 0.78084  # default preserved
+    end
+
+    @testset "Function-based O₃" begin
+        ozone(z) = 30e-9 * (1 + z / 10000)
+        atm = BackgroundAtmosphere(O₃ = ozone)
+        @test atm.O₃ === ozone
+    end
+
+    @testset "_vmr_string" begin
+        @test _vmr_string(0.0) === nothing
+        @test _vmr_string(0.78084) == "0.78084"
+        @test _vmr_string(420e-6) == "420.0 ppm"
+        @test _vmr_string(330e-9) == "330.0 ppb"
+        @test _vmr_string(1e-12) == "1.0e-12"
+        # Non-number fallback
+        f(z) = z
+        @test _vmr_string(f) isa String
+    end
+
+    @testset "show method" begin
+        atm = BackgroundAtmosphere(CO₂ = 400e-6, CH₄ = 1.8e-6, O₃ = 0.0)
+        s = sprint(show, atm)
+        @test occursin("BackgroundAtmosphere", s)
+        @test occursin("active gases", s)
+        @test occursin("CO₂", s)
+        @test !occursin("O₃", s)  # O₃ = 0, should be hidden
+
+        # With function O₃
+        atm2 = BackgroundAtmosphere(O₃ = z -> 30e-9)
+        s2 = sprint(show, atm2)
+        @test occursin("O₃", s2)
+    end
+
+    @testset "materialize_background_atmosphere [$(FT)]" for FT in test_float_types()
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(default_arch; size=8, z=(0, 10000),
+                               topology=(Flat, Flat, Bounded))
+
+        # Constant O₃
+        atm = BackgroundAtmosphere(CO₂ = 400e-6, O₃ = 30e-9)
+        matm = materialize_background_atmosphere(atm, grid)
+        @test matm.CO₂ isa FT
+        @test matm.CO₂ ≈ FT(400e-6)
+
+        # Function O₃
+        ozone(z) = 30e-9 * (1 + z / 10000)
+        atm2 = BackgroundAtmosphere(O₃ = ozone)
+        matm2 = materialize_background_atmosphere(atm2, grid)
+        @test matm2.O₃ isa Oceananigans.Fields.AbstractField
+
+        # Nothing atmosphere
+        @test materialize_background_atmosphere(nothing, grid) === nothing
+    end
+end
+
+#####
+##### radiation_flux_divergence accessors
+#####
+
+@testset "radiation_flux_divergence" begin
+    @test radiation_flux_divergence(nothing) === nothing
+
+    # Inline Nothing accessor
+    grid = RectilinearGrid(default_arch; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
+    @test radiation_flux_divergence(1, 1, 1, grid, nothing) == zero(eltype(grid))
+end

@@ -43,6 +43,13 @@ using RRTMGP
             @test radiation.downwelling_longwave_flux !== nothing
             @test radiation.downwelling_shortwave_flux !== nothing
 
+            # Check flux divergence field
+            @test radiation.flux_divergence !== nothing
+            @test size(radiation.flux_divergence) == (1, 1, Nz)
+
+            # Check schedule
+            @test radiation.schedule !== nothing
+
             # Check flux fields have correct size (Nz+1 levels)
             @test size(radiation.upwelling_longwave_flux) == (1, 1, Nz + 1)
             @test size(radiation.downwelling_longwave_flux) == (1, 1, Nz + 1)
@@ -167,11 +174,11 @@ end
             # Sign convention: downwelling is negative
             ℐ_sw_toa = ℐ_sw_dn[1, 1, Nz + 1]
             @test ℐ_sw_toa < 0  # Downwelling is negative
-            @test abs(ℐ_sw_toa) <= 1361  # Magnitude cannot exceed solar constant
+            @test abs(ℐ_sw_toa) ≤ 1361  # Magnitude cannot exceed solar constant
         end
 
-        @test all(interior(ℐ_lw_up) .>= 0)  # Upwelling should be positive
-        @test all(interior(ℐ_lw_dn) .<= 0)  # Downwelling should be negative
-        @test all(interior(ℐ_sw_dn) .<= 0)  # Downwelling should be negative
+        @test all(interior(ℐ_lw_up) .≥ 0)  # Upwelling should be positive
+        @test all(interior(ℐ_lw_dn) .≤ 0)  # Downwelling should be negative
+        @test all(interior(ℐ_sw_dn) .≤ 0)  # Downwelling should be negative
     end
 end

@@ -15,7 +15,7 @@
   <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
     <img alt="Documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
   </a>
-  <a href="https://github.com/NumericalEarth/BreezeBenchmarks">
+  <a href="https://numericalearth.github.io/BreezeBenchmarks/">
     <img alt="Benchmarks" src="https://img.shields.io/badge/benchmarks-BreezeBenchmarks-informational?style=flat-square">
   </a>
   </br>
@@ -78,7 +78,7 @@ run!(simulation)
 heatmap(liquid_ice_potential_temperature(model), colormap=:thermal, axis=(; aspect=2))
 ```
 
-<img width="1200" height="618" alt="image" src="https://github.com/user-attachments/assets/cc5e4e97-6963-4ef4-be78-c4ca369e7f94" />
+<img width="1186" height="633" alt="image" src="https://github.com/user-attachments/assets/97d6429a-a68b-4ba5-ad07-9a5075a28c5f" />
 
 Swap `CPU()` for `GPU()` to run on an NVIDIA GPU.
 
@@ -181,7 +181,7 @@ The two packages share a common philosophy: fast, flexible, GPU-native Julia cod
 To learn these foundational components of Breeze, please see the [Oceananigans documentation](https://clima.github.io/OceananigansDocumentation/stable/).
 
 If you're familiar with Oceananigans, you'll feel right at home with Breeze.
-If you're new to both, Breeze is a great entry point—and the skills you develop transfer directly to ocean and climate modeling with Oceananigans and [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl).
+If you're new to both, Breeze is a great entry point—and the skills you develop transfer directly to ocean and climate modeling with Oceananigans and [NumericalEarth.jl](https://github.com/NumericalEarth/NumericalEarth.jl).
 
 ## Citing
 

@@ -15,7 +15,7 @@ using Breeze.Thermodynamics:
     PlanarMixedPhaseSurface
 
 using Breeze.MoistAirBuoyancies: compute_boussinesq_adjustment_temperature
-using Breeze.Microphysics: compute_temperature
+using Breeze.Microphysics: compute_temperature, adjust_thermodynamic_state
 
 using Breeze: adjustment_saturation_specific_humidity
 
@@ -235,6 +235,39 @@ end
             @test qⁱm ≈ qⁱ atol=atol
         end
     end
+end
+
+@testset "Saturation adjustment NaN robustness [$(FT)]" for FT in test_float_types()
+    # Regression test: adjust_thermodynamic_state must never return NaN.
+    # The secant iteration can stagnate (r₂ ≈ r₁) in Float32, producing ΔTΔr = Inf,
+    # then T₂ = ±Inf, then NaN on the next iteration. We test a highly supersaturated
+    # state that stresses the solver (qᵗ well above saturation).
+    Oceananigans.defaults.FloatType = FT
+    constants = ThermodynamicConstants(FT)
+    g = constants.gravitational_acceleration
+    z = zero(FT)
+
+    grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
+    pᵣ = @allowscalar first(reference_state.pressure)
+
+    equilibrium = WarmPhaseEquilibrium()
+    microphysics = SaturationAdjustment(FT; tolerance=FT(1e-3), maxiter=10, equilibrium)
+
+    # Highly supersaturated: qᵗ = 0.05 at T = 300 K (saturation is ~0.022)
+    T_ref = FT(300)
+    qᵗ = FT(0.05)
+    q = MoistureMassFractions(qᵗ)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    e = cᵖᵐ * T_ref + g * z  # energy without condensate correction (all-vapor initial)
+    𝒰₀ = StaticEnergyState(e, q, z, pᵣ)
+
+    𝒰₁ = adjust_thermodynamic_state(𝒰₀, microphysics, constants)
+    T★ = compute_temperature(𝒰₁, nothing, constants)
+
+    @test isfinite(T★)
+    @test 𝒰₁.moisture_mass_fractions.liquid > 0   # condensate formed
+    @test isfinite(𝒰₁.moisture_mass_fractions.liquid)
 end
 
 @testset "Saturation adjustment (MoistAirBuoyancies)" for FT in test_float_types()

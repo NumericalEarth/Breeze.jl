@@ -67,9 +67,9 @@ using GPUArraysCore: @allowscalar
     @test θᵇ isa Oceananigans.AbstractOperations.KernelFunctionOperation
     θᵇ_field = Field(θᵇ)
     @test all(isfinite.(interior(θᵇ_field)))
-    # Stability-equivalent potential temperature should be >= equivalent
+    # Stability-equivalent potential temperature should be ≥ equivalent
     # (equal when no liquid water is present, i.e., qˡ = 0)
-    @test all(interior(θᵇ_field) .>= interior(θᵉ_field))
+    @test all(interior(θᵇ_field) .≥ interior(θᵉ_field))
 
     # Test density flavor
     θᵇ_density = StabilityEquivalentPotentialTemperature(model, :density)
@@ -111,8 +111,8 @@ end
     RH_field = Field(RH)
     @test all(isfinite.(interior(RH_field)))
     # Relative humidity should be between 0 and 1 for subsaturated conditions
-    @test all(interior(RH_field) .>= 0)
-    @test all(interior(RH_field) .<= 1)
+    @test all(interior(RH_field) .≥ 0)
+    @test all(interior(RH_field) .≤ 1)
 
     # With low moisture, should be subsaturated (RH < 1)
     @test all(interior(RH_field) .< 1)
@@ -145,7 +145,7 @@ end
     T⁺_field = Field(T⁺)
     @test all(isfinite.(interior(T⁺_field)))
     # Dewpoint should be less than or equal to temperature
-    @test all(interior(T⁺_field) .<= interior(model.temperature))
+    @test all(interior(T⁺_field) .≤ interior(model.temperature))
     # Dewpoint should be in a reasonable range (above 200K)
     @test all(interior(T⁺_field) .> 200)
 

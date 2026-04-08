@@ -50,7 +50,10 @@ julia> Pkg.add("Breeze")
 ```
 
 If you want to live on the cutting edge, you can use
-`Pkg.add(; url="https://github.com/NumericalEarth/Breeze.jl.git", rev="main")` to install from `main`.
+```julia
+Pkg.add(; url="https://github.com/NumericalEarth/Breeze.jl.git", rev="main")
+```
+to install from `main`.
 For more information, see the [Pkg.jl documentation](https://pkgdocs.julialang.org).
 
 ## Quick Start
@@ -77,11 +80,11 @@ dynamics = AnelasticDynamics(reference_state)
 
 Q₀ = 1000 # heat flux in W / m²
 ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀))
-ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
+ρqᵛ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
 
 advection = WENO()
 model = AtmosphereModel(grid; advection, dynamics,
-                              boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs))
+                              boundary_conditions = (ρe=ρe_bcs, ρqᵛ=ρqᵛ_bcs))
 
 Δθ = 2 # ᵒK
 Tₛ = reference_state.potential_temperature # K

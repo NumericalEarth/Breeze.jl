@@ -100,10 +100,11 @@ function AtmosphereModels.collect_prognostic_fields(formulation::StaticEnergyFor
                                                     dynamics,
                                                     momentum,
                                                     moisture_density,
+                                                    moisture_name,
                                                     microphysical_fields,
                                                     tracers)
     ρe = formulation.energy_density
-    thermodynamic_variables = (ρe=ρe, ρqᵗ=moisture_density)
+    thermodynamic_variables = merge((ρe=ρe,), NamedTuple{(moisture_name,)}((moisture_density,)))
     dynamics_fields = dynamics_prognostic_fields(dynamics)
     return merge(dynamics_fields, momentum, thermodynamic_variables, microphysical_fields, tracers)
 end

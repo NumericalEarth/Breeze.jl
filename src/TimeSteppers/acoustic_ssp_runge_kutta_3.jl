@@ -3,21 +3,26 @@ using Oceananigans.Utils: launch!, time_difference_seconds
 
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
-    tick!,
+    tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
     step_lagrangian_particles!,
     implicit_step!
+
+using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 using Breeze.AtmosphereModels:
     AtmosphereModels,
     AtmosphereModel,
     SlowTendencyMode,
     dynamics_density,
+    transport_momentum,
+    transport_velocities,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
-    compute_dynamics_tendency!
+    compute_dynamics_tendency!,
+    specific_prognostic_moisture
 
 
 using Breeze.CompressibleEquations:
@@ -139,13 +144,16 @@ function compute_slow_momentum_tendencies!(model)
 
     model_fields = fields(model)
 
+    # Use transport momentum (contravariant for terrain-following grids)
+    advecting_momentum = transport_momentum(model)
+
     momentum_args = (
         dynamics_density(model.dynamics),
         model.advection.momentum,
         model.velocities,
         model.closure,
         model.closure_fields,
-        model.momentum,
+        advecting_momentum,
         model.coriolis,
         model.clock,
         model_fields)
@@ -157,7 +165,7 @@ function compute_slow_momentum_tendencies!(model)
                    slow_dynamics,
                    model.formulation,
                    model.temperature,
-                   model.specific_moisture,
+                   specific_prognostic_moisture(model),
                    model.microphysics,
                    model.microphysical_fields,
                    model.thermodynamic_constants)
@@ -194,12 +202,15 @@ function compute_slow_scalar_tendencies!(model)
 
     # Compute Gˢχ = full thermodynamic tendency (no correction needed)
     # Writes directly to model.timestepper.Gⁿ.ρθ (or other thermodynamic field)
+    # Use transport velocities (contravariant for terrain-following grids)
+    advecting_velocities = transport_velocities(model)
+
     common_args = (
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
-        model.specific_moisture,
-        model.velocities,
+        specific_prognostic_moisture(model),
+        advecting_velocities,
         model.microphysics,
         model.microphysical_fields,
         model.closure,
@@ -272,7 +283,7 @@ function acoustic_scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     n_acoustic = 5  # ρ, ρu, ρv, ρw, ρθ (handled by acoustic loop)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
-        i <= n_acoustic && continue
+        i ≤ n_acoustic && continue
 
         launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
 
@@ -312,10 +323,9 @@ Each RK stage:
 3. Update scalars using standard RK update with time-averaged velocities
 """
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:AcousticSSPRungeKutta3}, Δt; callbacks=[])
-    Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
-    # Be paranoid and update state at iteration 0
-    maybe_initialize_state!(model, callbacks)
+    # Be paranoid and prepare at iteration 0, in case run! is not used:
+    maybe_prepare_first_time_step!(model, callbacks)
 
     ts = model.timestepper
     α¹ = ts.α¹
@@ -335,7 +345,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     compute_flux_bc_tendencies!(model)
     acoustic_ssp_rk3_substep!(model, Δt, α¹, 1)
 
-    tick!(model.clock, Δt; stage=true)
+    tick_stage!(model.clock, Δt)
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, Δt)
 
@@ -356,11 +366,11 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     compute_flux_bc_tendencies!(model)
     acoustic_ssp_rk3_substep!(model, Δt, α³, 3)
 
+    step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
+
     # Adjust final time-step
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
-    tick!(model.clock, corrected_Δt)
-    model.clock.last_stage_Δt = corrected_Δt
-    model.clock.last_Δt = Δt
+    tick_stage!(model.clock, corrected_Δt, Δt)
 
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, α³ * Δt)

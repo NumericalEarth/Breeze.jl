@@ -145,15 +145,13 @@ function dynamics_pressure end
 
 """
     buoyancy_forceᶜᶜᶜ(i, j, k, grid, dynamics, temperature,
-                      specific_moisture, microphysics, microphysical_fields, constants)
+                      specific_prognostic_moisture, microphysics, microphysical_fields, constants)
 
-Compute the buoyancy force density `ρ b` at cell center `(i, j, k)`.
-
-For anelastic dynamics, this returns `-g (ρ - ρᵣ)` where `ρᵣ` is the reference density.
-For compressible dynamics, this returns `-g ρ` directly.
+Compute the buoyancy force density ``ρ b`` at cell center `(i, j, k)`.
 
 This function is used in the vertical momentum equation to compute the gravitational
 forcing term.
+
 """
 function buoyancy_forceᶜᶜᶜ end
 
@@ -322,6 +320,8 @@ struct SlowTendencyMode{D}
     dynamics :: D
 end
 
+Adapt.adapt_structure(to, s::SlowTendencyMode) = SlowTendencyMode(adapt(to, s.dynamics))
+
 # Forward dynamics_density to the wrapped dynamics
 @inline dynamics_density(s::SlowTendencyMode) = dynamics_density(s.dynamics)
 
@@ -350,6 +350,8 @@ struct HorizontalSlowMode{D}
     dynamics :: D
 end
 
+Adapt.adapt_structure(to, s::HorizontalSlowMode) = HorizontalSlowMode(adapt(to, s.dynamics))
+
 # Forward dynamics_density to the wrapped dynamics
 @inline dynamics_density(s::HorizontalSlowMode) = dynamics_density(s.dynamics)
 
@@ -368,7 +370,7 @@ end
 #####
 
 """
-    compute_dynamics_tendency!(model)
+$(TYPEDSIGNATURES)
 
 Compute tendencies for dynamics-specific prognostic fields.
 
@@ -376,17 +378,44 @@ For anelastic dynamics, this is a no-op (no prognostic density).
 For compressible dynamics, this computes the density tendency from the continuity equation:
 
 ```math
-\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u})
+\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot \\,} (\\rho \\boldsymbol{u})
 ```
 """
 compute_dynamics_tendency!(model) = nothing  # default: no dynamics-specific tendencies
+
+#####
+##### Transport velocity/momentum interface (for terrain-following coordinates)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the velocity tuple used for scalar advection transport.
+
+For standard (non-terrain) models, this is `model.velocities`.
+For terrain-following coordinates, the vertical component is replaced
+by the contravariant vertical velocity ``\\tilde{\\Omega}``.
+"""
+transport_velocities(model) = model.velocities
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the momentum tuple used for momentum advection transport
+and the continuity equation divergence.
+
+For standard (non-terrain) models, this is `model.momentum`.
+For terrain-following coordinates, the vertical component `ρw` is
+replaced by the contravariant vertical momentum ``\\rho \\tilde{\\Omega}``.
+"""
+transport_momentum(model) = model.momentum
 
 #####
 ##### Auxiliary dynamics variables interface
 #####
 
 """
-    compute_auxiliary_dynamics_variables!(model)
+$(TYPEDSIGNATURES)
 
 Compute auxiliary (diagnostic) variables specific to the dynamics formulation.
 

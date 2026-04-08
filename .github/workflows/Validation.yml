@@ -4,23 +4,15 @@ on:
   push:
     branches:
       - "main"
-    paths:
+    paths: &paths
       - ".github/workflows/Validation.yml"
       - "examples/Project.jl"
       - "examples/boussinesq_bomex.jl"
       - "ext/**"
       - "src/**"
-      - "test/**"
       - "Project.toml"
   pull_request:
-    paths:
-      - ".github/workflows/Validation.yml"
-      - "examples/Project.jl"
-      - "examples/boussinesq_bomex.jl"
-      - "ext/**"
-      - "src/**"
-      - "test/**"
-      - "Project.toml"
+    paths: *paths
   release:
   workflow_dispatch:
 
@@ -35,6 +27,9 @@ permissions:
   actions: write
   contents: read
 
+env:
+  JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
+
 jobs:
   validate:
     name: Validation - Julia ${{ matrix.version }} - ${{ matrix.os }}
@@ -48,12 +43,11 @@ jobs:
         os:
           - ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: julia-actions/setup-julia@v2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: julia-actions/setup-julia@4c0cb0fce8556fdb04a90347310e5db8b1f98fb9 # v2.7.0
         with:
           version: ${{ matrix.version }}
-      - uses: julia-actions/cache@v2
-        id: julia-cache
+      - uses: julia-actions/cache@e97f6fc1a6e21c82253c85e269be7340376aa425 # v3.0.1
       - name: Instantiate examples environment
         shell: julia --color=yes --project=examples {0}
         run: |
@@ -65,11 +59,3 @@ jobs:
           CI: "true"
         run: |
           julia --color=yes --project=examples examples/boussinesq_bomex.jl
-      - name: Save Julia depot cache on cancel or failure
-        id: julia-cache-save
-        if: cancelled() || failure()
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ${{ steps.julia-cache.outputs.cache-paths }}
-          key: ${{ steps.julia-cache.outputs.cache-key }}

@@ -17,11 +17,17 @@ Bulk microphysics scheme with cloud formation and precipitation categories.
 - `precipitation_boundary_condition`: Bottom boundary condition for precipitation sedimentation.
   - `nothing` (default): Precipitation passes through the bottom (open boundary)
   - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom (zero terminal velocity at surface)
+- `negative_moisture_correction`: Correction scheme for negative moisture produced by advection.
+  - `nothing` (default): No correction
+    - `VerticalBorrowing()`: Vertical redistribution of the moisture prognostic only
+  - `SpeciesBorrowing()`: Same-level species borrowing only
+  - `SpeciesBorrowing(vertical_borrowing=VerticalBorrowing())`: Species borrowing with vertical redistribution
 """
-struct BulkMicrophysics{N, C, B}
+struct BulkMicrophysics{N, C, B, NMC}
     cloud_formation :: N
     categories :: C
     precipitation_boundary_condition :: B
+    negative_moisture_correction :: NMC
 end
 
 # Bulk microphysics schemes (including those from extensions like CloudMicrophysics)
@@ -30,6 +36,8 @@ end
 # cloud formation schemes to hook into the update cycle.
 AtmosphereModels.microphysics_model_update!(bμp::BulkMicrophysics, model) =
     AtmosphereModels.microphysics_model_update!(bμp.cloud_formation, model)
+
+AtmosphereModels.negative_moisture_correction(bμp::BulkMicrophysics) = bμp.negative_moisture_correction
 
 Base.summary(::BulkMicrophysics) = "BulkMicrophysics"
 
@@ -138,10 +146,11 @@ condensation; negative values indicate evaporation. Evaporation is limited by th
 """
 @inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
-    Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / (Γˡ * τᶜˡ)
+    timescale = Γˡ * τᶜˡ
+    Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / timescale
 
     # Limit evaporation to available cloud liquid
-    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
+    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / timescale
     return max(Sᶜᵒⁿᵈ, Sᶜᵒⁿᵈ_min)
 end
 
@@ -155,10 +164,11 @@ deposition; negative values indicate sublimation. Sublimation is limited by the 
 """
 @inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
     Γⁱ = ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
-    Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ * τᶜⁱ)
+    timescale = Γⁱ * τᶜⁱ
+    Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / timescale
 
     # Limit sublimation to available cloud ice
-    Sᵈᵉᵖ_min = -max(0, qᶜⁱ) / τᶜⁱ
+    Sᵈᵉᵖ_min = -max(0, qᶜⁱ) / timescale
     return max(Sᵈᵉᵖ, Sᵈᵉᵖ_min)
 end
 
@@ -175,7 +185,7 @@ end
 FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities) =
     FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities, nothing)
 
-const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories, <:Any}
+const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories}
 Base.summary(::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"
 
 """
@@ -189,20 +199,32 @@ Return a `BulkMicrophysics` microphysics scheme.
 - `precipitation_boundary_condition`: Bottom boundary condition for precipitation sedimentation.
   - `nothing` (default): Precipitation passes through the bottom
   - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom
+- `negative_moisture_correction`: Correction scheme for negative moisture produced by advection.
+  - `nothing` (default): No correction
+    - `VerticalBorrowing()`: Vertical redistribution of the moisture prognostic only
+  - `SpeciesBorrowing()`: Same-level species borrowing only
+  - `SpeciesBorrowing(vertical_borrowing=VerticalBorrowing())`: Species borrowing with vertical redistribution
 """
 function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                           categories = nothing,
                           cloud_formation = SaturationAdjustment(FT),
-                          precipitation_boundary_condition = nothing)
+                          precipitation_boundary_condition = nothing,
+                          negative_moisture_correction = nothing)
 
-    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition)
+    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction)
 end
 
+# Forward moisture_prognostic_name to cloud_formation scheme
+AtmosphereModels.moisture_prognostic_name(bμp::BulkMicrophysics) =
+    AtmosphereModels.moisture_prognostic_name(bμp.cloud_formation)
+
+AtmosphereModels.moisture_prognostic_name(::NonEquilibriumCloudFormation) = :ρqᵛ
+
 # Non-categorical bulk microphysics
-const NCBM = BulkMicrophysics{<:Any, Nothing, <:Any}
+const NCBM = BulkMicrophysics{<:Any, Nothing}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
-maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵗ, constants) =
+maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵛ, constants) =
     AtmosphereModels.adjust_thermodynamic_state(𝒰₀, bμp.cloud_formation, constants)
 
 AtmosphereModels.prognostic_field_names(::NPBM) = tuple()
@@ -213,31 +235,29 @@ AtmosphereModels.materialize_microphysical_fields(bμp::NPBM, grid, bcs) = mater
 end
 
 # Forward grid_moisture_fractions to cloud_formation scheme
-@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵗ, μ)
-    return grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵛ, μ)
+    return grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵛ, μ)
 end
 
 # Forward state-based moisture_fractions to cloud_formation scheme
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ, qᵗ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
 
 # Disambiguation for specific state types
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::WarmRainState, qᵗ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::WarmRainState, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
 
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NothingMicrophysicalState, qᵗ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NothingMicrophysicalState, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
 
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NamedTuple, qᵗ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NamedTuple, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
 
 # Forward mass fraction diagnostics to cloud_formation scheme
-AtmosphereModels.vapor_mass_fraction(bμp::NPBM, model) =
-    AtmosphereModels.vapor_mass_fraction(bμp.cloud_formation, model)
 AtmosphereModels.liquid_mass_fraction(bμp::NPBM, model) =
     AtmosphereModels.liquid_mass_fraction(bμp.cloud_formation, model)
 AtmosphereModels.ice_mass_fraction(bμp::NPBM, model) =

@@ -65,7 +65,7 @@ Pkg.test("Breeze"; test_args=`doctests`)
 
 ### GPU tests
 
-When running the tests, if a CUDA GPU is detected, they automatically use the [`GPU` Oceananigans architecture](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Architectures.GPU), otherwise they run on [`CPU`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Architectures.CPU).
+When running the tests, if a CUDA GPU is detected, they automatically use the [`GPU` Oceananigans architecture](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Architectures.GPU), otherwise they run on [`CPU`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Architectures.CPU).
 To temporarily disable the automatic detection of the GPU and forcibly run the tests on CPU you can set the environment variable `CUDA_VISIBLE_DEVICES=-1`.
 For example, from within a Julia session you can do
 

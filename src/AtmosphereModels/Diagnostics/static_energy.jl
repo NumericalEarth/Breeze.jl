@@ -7,7 +7,7 @@ struct StaticEnergyKernelFunction{F, R, μ, M, MF, TMP, TH}
     reference_state :: R
     microphysics :: μ
     microphysical_fields :: M
-    specific_moisture :: MF
+    specific_prognostic_moisture :: MF
     temperature :: TMP
     thermodynamic_constants :: TH
 end
@@ -17,7 +17,7 @@ Adapt.adapt_structure(to, k::StaticEnergyKernelFunction) =
                                adapt(to, k.reference_state),
                                adapt(to, k.microphysics),
                                adapt(to, k.microphysical_fields),
-                               adapt(to, k.specific_moisture),
+                               adapt(to, k.specific_prognostic_moisture),
                                adapt(to, k.temperature),
                                adapt(to, k.thermodynamic_constants))
 
@@ -84,7 +84,7 @@ function StaticEnergy(model, flavor_symbol=:specific)
                                       model.dynamics.reference_state,
                                       model.microphysics,
                                       model.microphysical_fields,
-                                      model.specific_moisture,
+                                      specific_prognostic_moisture(model),
                                       model.temperature,
                                       model.thermodynamic_constants)
 
@@ -94,11 +94,11 @@ end
 function (d::StaticEnergyKernelFunction)(i, j, k, grid)
     @inbounds begin
         ρᵣ = d.reference_state.density[i, j, k]
-        qᵗ = d.specific_moisture[i, j, k]
+        qᵛᵉ = d.specific_prognostic_moisture[i, j, k]
         T = d.temperature[i, j, k]
     end
 
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛᵉ, d.microphysical_fields)
     cᵖᵐ = Thermodynamics.mixture_heat_capacity(q, d.thermodynamic_constants)
 
     g = d.thermodynamic_constants.gravitational_acceleration
