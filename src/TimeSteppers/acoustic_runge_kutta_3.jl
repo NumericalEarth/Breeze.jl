@@ -21,22 +21,36 @@ using Breeze.CompressibleEquations:
 """
 $(TYPEDEF)
 
-Wicker-Skamarock third-order Runge-Kutta time stepper with acoustic substepping
-for fully compressible dynamics.
+Wicker-Skamarock third-order Runge-Kutta time stepper with acoustic
+substepping for fully compressible dynamics. Implements the **CM1-style**
+variant in which all three stages use the same constant substep size
+``Δτ = Δt/N`` and the substep counts scale with the stage fraction:
 
-Unlike [`AcousticSSPRungeKutta3`](@ref) which uses convex combinations,
-this scheme uses stage fractions `Δt/3, Δt/2, Δt`:
-
-- Stage 1: ``U^* = U^n + (Δt/3) \\, R(U^n)``
-- Stage 2: ``U^{**} = U^n + (Δt/2) \\, R(U^*)``
-- Stage 3: ``U^{n+1} = U^n + Δt \\, R(U^{**})``
+- Stage 1: ``U^* = U^n + (Δt/3) \\, R(U^n)``       — ``N/3`` substeps
+- Stage 2: ``U^{**} = U^n + (Δt/2) \\, R(U^*)``    — ``N/2`` substeps
+- Stage 3: ``U^{n+1} = U^n + Δt \\, R(U^{**})``    — ``N`` substeps
 
 Each stage evaluates the RHS at the current stage state, then resets to ``U^n``
-and advances by ``β Δt``. The absence of convex combinations makes this scheme
+and advances by ``β Δt``. The absence of convex combinations makes the scheme
 compatible with split-explicit acoustic substepping, allowing the full pressure
 gradient and buoyancy to be included in the slow tendency.
 
-This is the scheme used by WRF and CM1 for compressible atmospheric dynamics.
+This differs from the two MPAS-A variants:
+
+| variant | β₁  | stage-1 substeps | stage-1 Δτ |
+|---------|-----|------------------|------------|
+| MPAS order=2 (default) | 1/2 | ``N/2`` | ``Δt/N`` |
+| MPAS order=3           | 1/3 | ``1``   | ``Δt/3`` |
+| **CM1 (this)**         | 1/3 | ``N/3`` | ``Δt/N`` |
+
+Like MPAS order=3 we are formally third-order accurate (the β fractions are
+the canonical Wicker–Skamarock 1/3, 1/2, 1), but unlike MPAS order=3 the
+stage-1 substep size is the same ``Δτ = Δt/N`` as the other stages — so the
+horizontal acoustic CFL is set by ``Δτ``, not by the much larger ``Δt/3``
+single-substep imposed by MPAS order=3.
+
+The substepper rounds ``N`` up to a multiple of 6 so that ``N/3`` and ``N/2``
+are both integers.
 
 Fields
 ======
@@ -90,7 +104,8 @@ function AcousticRungeKutta3(grid, prognostic_fields;
 
     FT = eltype(grid)
 
-    # Wicker-Skamarock RK3 stage fractions
+    # Wicker-Skamarock RK3 stage fractions, CM1-style: canonical (1/3, 1/2, 1)
+    # with N/3, N/2, N substeps per stage at constant Δτ = Δt/N.
     β₁ = FT(1//3)
     β₂ = FT(1//2)
     β₃ = FT(1)
@@ -222,9 +237,12 @@ $(TYPEDSIGNATURES)
 
 Step forward `model` one time step `Δt` with Wicker-Skamarock RK3 and acoustic substepping.
 
-The algorithm follows [Wicker and Skamarock (2002)](@cite WickerSkamarock2002):
-- Outer loop: 3-stage RK3 with stage fractions `Δt/3, Δt/2, Δt`
-- Inner loop: Acoustic substeps for fast (pressure) tendencies
+The algorithm follows [Wicker and Skamarock (2002)](@cite WickerSkamarock2002),
+in the CM1-style configuration:
+- Outer loop: canonical 3-stage RK3 with stage fractions `Δt/3, Δt/2, Δt`
+- Inner loop: Acoustic substeps for fast (pressure) tendencies, with constant
+  substep size `Δτ = Δt/N` across all stages (`N/3`, `N/2`, `N` substeps in
+  stages 1, 2, 3 respectively)
 
 Each RK stage:
 1. Compute slow tendencies (advection, Coriolis, diffusion only — PGF/buoyancy in acoustic loop)

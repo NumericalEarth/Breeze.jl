@@ -1108,8 +1108,10 @@ $(TYPEDSIGNATURES)
 Execute the acoustic substep loop for a Wicker-Skamarock RK3 stage
 using the Exner pressure formulation.
 
-The acoustic substep size is constant: ``Δτ = Δt / N``.
-Each stage takes ``Nτ = \\max(\\mathrm{round}(β N), 1)`` substeps.
+CM1-style Wicker–Skamarock with constant substep size ``Δτ = Δt/N`` across all
+stages and a stage-dependent substep count ``Nτ = \\max(\\mathrm{round}(β N), 1)``.
+With β₁=1/3, β₂=1/2, β₃=1 and ``N`` a multiple of 6 this gives ``N/3``,
+``N/2``, ``N`` substeps in stages 1, 2, 3 respectively (matching CM1).
 """
 function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     grid = model.grid
@@ -1117,24 +1119,22 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
 
     # Compute substep count (adaptive when substeps === nothing).
-    # MPAS requires N even (stage 2 uses N/2 substeps) and N ≥ 2.
+    # CM1-style WS-RK3 needs `N` to be a multiple of 6 so that BOTH N/3 (stage 1)
+    # and N/2 (stage 2) are integers. We round the auto-computed N up to the
+    # next multiple of 6 with a floor of 6.
     N_raw = acoustic_substeps(substepper.substeps, grid, Δt, model.thermodynamic_constants)
-    N = max(2, N_raw + N_raw % 2)  # ensure even and ≥ 2
+    N = max(6, 6 * cld(N_raw, 6))
 
-    # MPAS WS-RK3 substep counts and sizes (mpas_atm_time_integration.F):
-    #   Stage 1: 1 substep, dts = dt/3                → total = dt/3
-    #   Stage 2: N/2 substeps, dts = dt/N              → total = dt/2
-    #   Stage 3: N substeps, dts = dt/N                → total = dt
-    if β_stage ≈ 1//3
-        Nτ = 1
-        Δτ = Δt / 3
-    elseif β_stage ≈ 1//2
-        Nτ = N ÷ 2
-        Δτ = Δt / N
-    else  # β ≈ 1
-        Nτ = N
-        Δτ = Δt / N
-    end
+    # CM1-style WS-RK3 (canonical Wicker–Skamarock 1/3, 1/2, 1):
+    #   Stage 1: N/3 substeps, dτ = Δt/N              → total = Δt/3
+    #   Stage 2: N/2 substeps, dτ = Δt/N              → total = Δt/2
+    #   Stage 3: N   substeps, dτ = Δt/N              → total = Δt
+    # The substep size is constant Δτ = Δt/N across all stages — only the
+    # substep count varies with β. Unlike the MPAS 3rd-order variant
+    # (β₁=1/3, 1 substep stage 1 of size dt/3), the stage-1 acoustic CFL is
+    # the SAME as stages 2 and 3, removing the `Δt < 3·Δx_min/cs` ceiling.
+    Δτ = Δt / N
+    Nτ = max(1, round(Int, β_stage * N))
 
     # Convert slow tendencies to velocity/pressure form.
     # MPAS: tend_w_euler (vertical PGF + buoyancy) is computed ONLY at rk_step=1
