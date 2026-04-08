@@ -133,7 +133,7 @@ function AtmosphereModels.transport_velocities(model::TerrainCompressibleModel)
     return (; u, v, w=Ω̃)
 end
 
-function AtmosphereModels.transport_momentum(model::TerrainCompressibleModel)
+function AtmosphereModels.advecting_momentum(model::TerrainCompressibleModel)
     ρΩ̃ = model.dynamics.contravariant_vertical_momentum
     ρu = model.momentum.ρu
     ρv = model.momentum.ρv

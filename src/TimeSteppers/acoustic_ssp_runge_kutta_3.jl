@@ -16,7 +16,7 @@ using Breeze.AtmosphereModels:
     AtmosphereModel,
     SlowTendencyMode,
     dynamics_density,
-    transport_momentum,
+    advecting_momentum,
     transport_velocities,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
@@ -150,7 +150,7 @@ function compute_slow_momentum_tendencies!(model)
         model.velocities,
         model.closure,
         model.closure_fields,
-        transport_momentum(model),
+        advecting_momentum(model),
         model.coriolis,
         model.clock,
         model_fields)

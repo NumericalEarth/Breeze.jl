@@ -126,7 +126,7 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
         model.velocities,
         model.closure,
         model.closure_fields,
-        transport_momentum(model),
+        advecting_momentum(model),
         model.coriolis,
         model.clock,
         model_fields)
