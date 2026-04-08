@@ -12,15 +12,18 @@ end
     return table.slope(z, ρᶠ, q, Fᶠ, Fˡ)
 end
 
-function build_lookup_table_3(ice::IceProperties, arch, params::LookupTable3Parameters)
+function build_lookup_table_3(ice::IceProperties, arch, params::LookupTable3Parameters;
+                              density_table = nothing)
     # H15: Pass liquid fraction (Fˡ) into the 3-moment solve so that the
     # bulk-density diagnostic blends liquid water density (Fortran convention).
+    # D24: Pass Table 1 mean_density for Fortran-parity density lookup.
     μ_eval(log_z, ρᶠ, log_q, Fᶠ, Fˡ) = begin
         L_ice = 10.0^log_q
         N_ice = 1.0
         Z_ice = 10.0^(log_z + log_q)
         solve_shape_parameter(L_ice, N_ice, Z_ice, Fᶠ, ρᶠ;
-                              liquid_fraction = Fˡ, closure = ThreeMomentClosure())
+                              liquid_fraction = Fˡ, closure = ThreeMomentClosure(),
+                              density_table)
     end
 
     λ_eval(log_z, ρᶠ, log_q, Fᶠ, Fˡ) = begin
@@ -28,7 +31,8 @@ function build_lookup_table_3(ice::IceProperties, arch, params::LookupTable3Para
         N_ice = 1.0
         Z_ice = 10.0^(log_z + log_q)
         μ = solve_shape_parameter(L_ice, N_ice, Z_ice, Fᶠ, ρᶠ;
-                                  liquid_fraction = Fˡ, closure = ThreeMomentClosure())
+                                  liquid_fraction = Fˡ, closure = ThreeMomentClosure(),
+                                  density_table)
         exp(solve_lambda(L_ice, N_ice, Z_ice, Fᶠ, ρᶠ, μ))
     end
 

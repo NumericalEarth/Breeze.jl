@@ -659,18 +659,35 @@ function normalize_integral(integral::SixthMomentRime, raw, mean_particle_mass, 
 end
 
 # Shedding: c=2. Fortran integrand includes D^bb (baked into integrand above).
-# The table stores dG_kernel / M3 where M3 = sum4 (bb=3 moment).
-# Runtime: z_shed * mass_rate / Nⁱ = (dG_kernel/M3) * qshed * env * Nⁱ / Nⁱ
-# = (dG_kernel/M3) * qshed * env. Fortran: m6shd * env = (sum3/sum4)*dG_kernel * env
-# = (qshed/M3)*dG_kernel * env. ✓
+# The table stores dG_kernel / M3_trunc where M3_trunc = sum4 (truncated bb=3 moment).
+# Runtime: z_shed * mass_rate / Nⁱ = (dG_kernel/M3_trunc) * qshed * env * Nⁱ / Nⁱ
+# = (dG_kernel/M3_trunc) * qshed * env. ✓
+# D22: Fortran sum4 is the third moment truncated at D >= 100 μm (line 1548-1554),
+# not the full analytical M3. Using the full M3 underestimates shedding Z.
 function normalize_integral(integral::SixthMomentShedding, raw, mean_particle_mass, state, nodes, weights)
     FT = typeof(raw)
     companion = evaluate_companion_m3(integral, state, nodes, weights)
     dG = sixth_moment_relative_variance(raw, companion, state, 2)
-    μ = state.shape
+    # Truncated M3: ∫ D³ N'(D) dD for D >= 100 μm (Fortran sum4)
+    M3_trunc = _truncated_m3(state, nodes, weights, FT(100e-6))
+    return dG / max(M3_trunc, eps(FT))
+end
+
+# Compute truncated third diameter moment ∫ D³ N'(D) dD for D >= D_min.
+function _truncated_m3(state, nodes, weights, D_min)
+    FT = typeof(state.slope)
     λ = state.slope
-    M3 = FT(gamma(μ + 4) / (gamma(μ + 1) * λ^3))
-    return dG / max(M3, eps(FT))
+    result = zero(FT)
+    for i in 1:length(nodes)
+        x = nodes[i]
+        w = weights[i]
+        D = transform_to_diameter(x, λ)
+        J = jacobian_diameter_transform(x, λ)
+        Np = size_distribution(D, state)
+        f = ifelse(D >= D_min, D^3 * Np, zero(FT))
+        result += w * f * J
+    end
+    return result
 end
 
 # Aggregation: the double integral returns dG/dt directly. Divide by nagg.
@@ -1270,7 +1287,10 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT}, arch=CPU();
 
     lookup_table_1 = build_lookup_table_1(p3.ice, arch, params.lookup_table_1)
     lookup_table_2 = build_lookup_table_2(p3.ice, tabulated_rain, arch, params.lookup_table_2)
-    lookup_table_3 = build_lookup_table_3(p3.ice, arch, params.lookup_table_3)
+    # D24: Pass Table 1 mean_density so the 3-moment solver uses table lookup
+    # instead of online quadrature for density (matches Fortran proc_from_LUT_main3mom(12,...)).
+    lookup_table_3 = build_lookup_table_3(p3.ice, arch, params.lookup_table_3;
+                                          density_table = lookup_table_1.bulk_properties.mean_density)
 
     new_ice = IceProperties(
         p3.ice.minimum_rime_density,

@@ -105,9 +105,9 @@ state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density 
     prp = p3.process_rates
 
     qⁱ_available = clamp_positive(qⁱ)
-    qʷⁱ_available = clamp_positive(qʷⁱ)
-    # M5: rime cannot exceed dry ice mass (Fortran: qirim <= qitot - qiliq)
-    qⁱ_dry = clamp_positive(qⁱ_available - qʷⁱ_available)
+    # D14: Julia's qⁱ is already dry ice (= Fortran qitot - qiliq), so
+    # qⁱ_dry = qⁱ_available (no need to subtract qʷⁱ again).
+    qⁱ_dry = qⁱ_available
     qᶠ_raw = clamp_positive(qᶠ)
     bᶠ_raw = clamp_positive(bᶠ)
 
@@ -757,7 +757,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     rain_rim_n = rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice)
 
     # Rime density for new rime (use actual ice fall speed, not placeholder)
-    vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; μ=μ_ice)
+    # D16: Pass actual Fˡ so mixed-phase particles use correct (denser/faster) fall speed.
+    vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=Fˡ_mu, μ=μ_ice)
     ρᶠ_new = rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
 
     # =========================================================================
@@ -837,7 +838,11 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Above-freezing collection (Milbrandt et al. 2025: qccoll/qrcoll → qʷⁱ)
     # =========================================================================
-    cloud_warm_q, cloud_warm_n = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice)
+    cloud_warm_q, cloud_warm_n_raw = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice)
+    # D19: In the liquid-fraction path, above-freezing cloud collection sends mass
+    # to qʷⁱ (not rain), so no rain number should be created. The ncshdc formula
+    # only exists in Fortran's non-liquid-fraction path.
+    cloud_warm_n = ifelse(prp.liquid_fraction_active, zero(FT), cloud_warm_n_raw)
     rain_warm_q = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice)
     # M9: Rain number loss from above-freezing collection (Fortran nrcoll).
     # Proportional to mass collected: Δnʳ/nʳ = Δqʳ/qʳ
@@ -872,9 +877,10 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     wg_cloud      = wg_cloud * f_cloud
 
     # --- Rain sinks ---
+    # D17: Include rain_evap in sink coordination (Fortran jointly limits all sinks).
     rain_source_total = autoconv + accr + complete_melt + shed + wg_shed
     rain_available = max(0, qʳ) + rain_source_total * dt_safety
-    rain_sink_total = rain_rim + rain_frz_q + rain_hom_q + rain_warm_q + wg_rain
+    rain_sink_total = rain_rim + rain_frz_q + rain_hom_q + rain_warm_q + wg_rain + rain_evap
     f_rain = sink_limiting_factor(rain_sink_total, rain_available, dt_safety)
     rain_rim      = rain_rim * f_rain
     rain_rim_n    = rain_rim_n * f_rain
@@ -885,17 +891,22 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     rain_warm_q   = rain_warm_q * f_rain
     rain_warm_n   = rain_warm_n * f_rain
     wg_rain       = wg_rain * f_rain
+    rain_evap     = rain_evap * f_rain
 
     # --- Ice sinks ---
+    # D17: Include sublimation (negative deposition) in ice sink coordination.
+    # Fortran jointly limits all sinks on qitot; Julia's qⁱ is dry ice only,
+    # so only sublimation is added here (shedding/coat_evap affect qʷⁱ).
     ice_source_total = max(0, dep) + cloud_rim + rain_rim + refrz +
                        nuc_q + cloud_frz_q + rain_frz_q +
                        cloud_hom_q + rain_hom_q
     ice_available = max(0, qⁱ) + ice_source_total * dt_safety
-    ice_sink_total = partial_melt + complete_melt
+    ice_sink_total = partial_melt + complete_melt + clamp_positive(-dep)
     f_ice = sink_limiting_factor(ice_sink_total, ice_available, dt_safety)
     partial_melt  = partial_melt * f_ice
     complete_melt = complete_melt * f_ice
     melt_n        = melt_n * f_ice
+    dep           = ifelse(dep < 0, dep * f_ice, dep)
 
     # --- Vapor sinks ---
     vapor_source_total = rain_evap + clamp_positive(-dep) + clamp_positive(-cond)
@@ -906,29 +917,6 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     dep   = ifelse(dep > 0, dep * f_vapor, dep)
     nuc_q = nuc_q * f_vapor
     nuc_n = nuc_n * f_vapor
-
-    # --- Liquid on ice (qʷⁱ) sinks ---
-    # D8: wg_shed diverts incoming wet growth mass from qʷⁱ to rain.
-    qwi_source_total = partial_melt + cloud_warm_q + rain_warm_q + wg_cloud + wg_rain
-    qwi_available = max(0, qʷⁱ) + qwi_source_total * dt_safety
-    qwi_sink_total = shed + refrz + wg_shed
-    f_qwi = sink_limiting_factor(qwi_sink_total, qwi_available, dt_safety)
-    shed      = shed * f_qwi
-    shed_n    = shed_n * f_qwi
-    refrz     = refrz * f_qwi
-    wg_shed   = wg_shed * f_qwi
-    wg_shed_n = wg_shed_n * f_qwi
-
-    # Recompute splintering from sink-limited riming rates
-    spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T, D_mean, Fˡ, T, qᶠ)
-
-    # D7: Cap splintering mass at available riming mass and subtract from riming
-    # (Fortran: qccol -= dum2, qrcol -= dum2_rain; conserves total mass).
-    total_rim_for_spl = clamp_positive(cloud_rim) + clamp_positive(rain_rim)
-    spl_q = min(spl_q, total_rim_for_spl)
-    spl_frac = safe_divide(spl_q, total_rim_for_spl, zero(FT))
-    cloud_rim = cloud_rim * (1 - spl_frac)
-    rain_rim  = rain_rim * (1 - spl_frac)
 
     # D2: Sublimation number loss (Fortran nisub = qisub * ni/qi)
     sublim_mag = clamp_positive(-dep)
@@ -947,7 +935,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     has_coating = Fˡ_coat >= FT(0.01)  # Fortran threshold: qiliq/qitot >= 0.01
     # Compute liquid saturation ratio S_l = qv / qv_sat_liq
     S_l = qᵛ / max(qᵛ⁺ˡ, FT(1e-10))
-    # Use same ventilation integral as deposition, scaled by liquid fraction
+    # Use same ventilation integral as deposition
     m_mean_coat = safe_divide(clamp_positive(qⁱ), clamp_positive(nⁱ), FT(1e-12))
     ρ_correction_coat = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
     C_fv_coat = deposition_ventilation(p3.ice.deposition.ventilation,
@@ -964,7 +952,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     A_coat = L_v_coat / (transport.K_a * T) * (L_v_coat / (Rᵛ_coat * T) - 1)
     B_coat = Rᵛ_coat * T / (e_sl * transport.D_v)
     Γˡ = 1 + L_v_coat^2 * qᵛ⁺ˡ_safe / (Rᵛ_coat * T^2 * FT(1005))
-    coat_rate = FT(2π) * C_fv_coat * Fˡ_coat * (S_l - 1) / (Γˡ * (A_coat + B_coat)) * clamp_positive(nⁱ)
+    # D15: Fortran uses unscaled rate (binary Fl >= 0.01 switch, not continuous scaling).
+    coat_rate = FT(2π) * C_fv_coat * (S_l - 1) / (Γˡ * (A_coat + B_coat)) * clamp_positive(nⁱ)
     coat_cond = ifelse(has_coating, clamp_positive(coat_rate), zero(FT))
     # Cap evaporation at available liquid coating (Fortran: min(qlevp, qiliq*i_dt))
     τ_coat = prp.sink_limiting_timescale
@@ -976,6 +965,31 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # (Fortran: epsi=0 when epsiw>0; nisub=0 follows from qisub=0).
     dep = ifelse(has_coating, zero(FT), dep)
     sublim_n = ifelse(has_coating, zero(FT), sublim_n)
+
+    # --- Liquid on ice (qʷⁱ) sinks ---
+    # D8: wg_shed diverts incoming wet growth mass from qʷⁱ to rain.
+    # D17: Include coat_evap in qʷⁱ sinks (Fortran jointly limits qlevp + qlshd + qifrz).
+    qwi_source_total = partial_melt + cloud_warm_q + rain_warm_q + wg_cloud + wg_rain + coat_cond
+    qwi_available = max(0, qʷⁱ) + qwi_source_total * dt_safety
+    qwi_sink_total = shed + refrz + wg_shed + coat_evap
+    f_qwi = sink_limiting_factor(qwi_sink_total, qwi_available, dt_safety)
+    shed      = shed * f_qwi
+    shed_n    = shed_n * f_qwi
+    refrz     = refrz * f_qwi
+    wg_shed   = wg_shed * f_qwi
+    wg_shed_n = wg_shed_n * f_qwi
+    coat_cond = coat_cond * f_qwi
+    coat_evap = coat_evap * f_qwi
+
+    # Recompute splintering from sink-limited riming rates
+    spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T, D_mean, Fˡ, T, qᶠ)
+
+    # D18: Fortran (nCat=1) subtracts splintering mass from riming but adds both
+    # reduced riming AND splintering mass to ice, so net ice gain = original riming.
+    # Splintering only changes number, not total riming mass transferred to ice.
+    # Cap splintering mass at available riming mass to prevent over-creation.
+    total_rim_for_spl = clamp_positive(cloud_rim) + clamp_positive(rain_rim)
+    spl_q = min(spl_q, total_rim_for_spl)
 
     return P3ProcessRates(
         # Phase 1: Condensation

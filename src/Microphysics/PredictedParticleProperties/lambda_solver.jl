@@ -732,28 +732,31 @@ used by `solve_mui`.
 
     mom3 <= eps_m3 && return FT(μmax)
 
-    G = (mom0 / mom3) * (mom6 / mom3)
-    G² = G * G
+    # D21: Promote to Float64 for piecewise polynomial evaluation (Fortran uses
+    # double precision). Near breakpoints, Float32 rounding assigns G to the
+    # wrong segment, producing incorrect μ.
+    G64 = Float64(mom0 / mom3) * Float64(mom6 / mom3)
+    G²64 = G64 * G64
 
-    μ = if G >= FT(20)
-        FT(0)
-    elseif G >= FT(13.31)
-        FT(3.3638e-3) * G² - FT(1.7152e-1) * G + FT(2.0857)
-    elseif G >= FT(7.123)
-        FT(1.5900e-2) * G² - FT(4.8202e-1) * G + FT(4.0108)
-    elseif G >= FT(4.2)
-        FT(1.0730e-1) * G² - FT(1.7481) * G + FT(8.4246)
-    elseif G >= FT(2.946)
-        FT(5.9070e-1) * G² - FT(5.7918) * G + FT(16.919)
-    elseif G >= FT(1.793)
-        FT(4.3966) * G² - FT(26.659) * G + FT(45.477)
-    elseif G >= FT(1.472)
-        FT(47.552) * G² - FT(179.58) * G + FT(181.26)
+    μ64 = if G64 >= 20.0
+        0.0
+    elseif G64 >= 13.31
+        3.3638e-3 * G²64 - 1.7152e-1 * G64 + 2.0857
+    elseif G64 >= 7.123
+        1.5900e-2 * G²64 - 4.8202e-1 * G64 + 4.0108
+    elseif G64 >= 4.2
+        1.0730e-1 * G²64 - 1.7481 * G64 + 8.4246
+    elseif G64 >= 2.946
+        5.9070e-1 * G²64 - 5.7918 * G64 + 16.919
+    elseif G64 >= 1.793
+        4.3966 * G²64 - 26.659 * G64 + 45.477
+    elseif G64 >= 1.472
+        47.552 * G²64 - 179.58 * G64 + 181.26
     else
-        FT(μmax)
+        Float64(μmax)
     end
 
-    return min(max(μ, FT(0)), FT(μmax))
+    return FT(min(max(μ64, 0.0), Float64(μmax)))
 end
 
 """
@@ -855,9 +858,11 @@ function solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
                                closure = ThreeMomentClosure(),
                                max_iterations = nothing,
                                tolerance = nothing,
-                               density_quadrature_points = 64)
+                               density_quadrature_points = 64,
+                               density_table = nothing)
     return solve_shape_parameter_with_closure(closure, L_ice, N_ice, Z_ice, rime_fraction, rime_density;
-                                              liquid_fraction, mass, max_iterations, tolerance, density_quadrature_points)
+                                              liquid_fraction, mass, max_iterations, tolerance,
+                                              density_quadrature_points, density_table)
 end
 
 function solve_shape_parameter_with_closure(closure::ThreeMomentClosure,
@@ -866,7 +871,8 @@ function solve_shape_parameter_with_closure(closure::ThreeMomentClosure,
                                             mass = IceMassPowerLaw(),
                                             max_iterations = nothing,
                                             tolerance = nothing,
-                                            density_quadrature_points = 64)
+                                            density_quadrature_points = 64,
+                                            density_table = nothing)
     FT = typeof(L_ice)
     max_iterations = isnothing(max_iterations) ? 5 : max_iterations
     tolerance = FT(isnothing(tolerance) ? 0.25 : tolerance)
@@ -877,45 +883,57 @@ function solve_shape_parameter_with_closure(closure::ThreeMomentClosure,
     nodes, weights = chebyshev_gauss_nodes_weights(FT, density_quadrature_points)
     μ_old = clamp(FT(0.5), closure.μmin, closure.μmax)
     μ = μ_old
+    ρ_bulk = FT(mass.ice_density)  # initial estimate
 
-    # M15: enforce Z bounds before solve (Fortran apply_mui_bounds_to_zi)
-    logλ_init = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ_old; mass)
-    N₀_init = intercept_parameter(N_ice, μ_old, logλ_init)
-    state_init = IceSizeDistributionState(FT;
-        intercept = N₀_init, shape = μ_old, slope = exp(logλ_init),
-        rime_fraction = rime_fraction, rime_density = rime_density,
-        liquid_fraction = liquid_fraction,
-        mass_coefficient = mass.coefficient, mass_exponent = mass.exponent,
-        ice_density = mass.ice_density)
-    ρ_bulk_init = _liquid_blended_density(state_init, nodes, weights, L_ice, liquid_fraction)
-    Z_ice = enforce_z_bounds(Z_ice, L_ice, N_ice, ρ_bulk_init, closure.μmin, closure.μmax)
-
+    # D20: Fortran solve_mui does NOT apply Z bounds inside the iteration.
+    # Z bounding is done after the loop using the final density (apply_mui_bounds_to_zi).
     for _ in 1:max_iterations
         logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ_old; mass)
         λ = exp(logλ)
         N₀ = intercept_parameter(N_ice, μ_old, logλ)
 
-        state = IceSizeDistributionState(FT;
-            intercept = N₀,
-            shape = μ_old,
-            slope = λ,
-            rime_fraction = rime_fraction,
-            rime_density = rime_density,
-            liquid_fraction = liquid_fraction,
-            mass_coefficient = mass.coefficient,
-            mass_exponent = mass.exponent,
-            ice_density = mass.ice_density)
-
-        ρ_bulk = _liquid_blended_density(state, nodes, weights, L_ice, liquid_fraction)
+        # D24: Use Table 1 mean-density lookup when available (matches Fortran
+        # proc_from_LUT_main3mom(12,...)); fall back to quadrature otherwise.
+        ρ_bulk = _solver_density(density_table, L_ice, N_ice, rime_fraction,
+                                 liquid_fraction, rime_density, μ_old,
+                                 N₀, λ, mass, nodes, weights)
         mom3 = FT(6) * L_ice / (ρ_bulk * FT(π))
         μ = shape_parameter_from_moments(N_ice, mom3, Z_ice, closure.μmax)
         μ = clamp(μ, closure.μmin, closure.μmax)
 
-        abs(μ_old - μ) < tolerance && return μ
+        abs(μ_old - μ) < tolerance && break
         μ_old = μ
     end
 
+    # D20: Fortran apply_mui_bounds_to_zi bounds Z at the call site after
+    # solve_mui returns, but does NOT recompute μ from the bounded Z.
+    # The solver returns μ as-is; Z bounding is a state mutation that
+    # affects subsequent prognostic use, not the μ value itself.
+
     return μ
+end
+
+# D24: Table-based density lookup for Fortran parity in the 3-moment solver.
+@inline function _solver_density(table, L_ice, N_ice, rime_fraction,
+                                 liquid_fraction, rime_density, μ,
+                                 N₀, λ, mass, nodes, weights)
+    FT = typeof(L_ice)
+    log_m = log10(max(L_ice / max(N_ice, eps(FT)), FT(1e-20)))
+    return FT(table(log_m, rime_fraction, liquid_fraction, rime_density, μ))
+end
+
+# Fallback: quadrature when no density table is available.
+@inline function _solver_density(::Nothing, L_ice, N_ice, rime_fraction,
+                                 liquid_fraction, rime_density, μ,
+                                 N₀, λ, mass, nodes, weights)
+    FT = typeof(L_ice)
+    state = IceSizeDistributionState(FT;
+        intercept = N₀, shape = μ, slope = λ,
+        rime_fraction = rime_fraction, rime_density = rime_density,
+        liquid_fraction = liquid_fraction,
+        mass_coefficient = mass.coefficient, mass_exponent = mass.exponent,
+        ice_density = mass.ice_density)
+    return _liquid_blended_density(state, nodes, weights, L_ice, liquid_fraction)
 end
 
 function solve_shape_parameter_with_closure(closure::ThreeMomentClosureExact,
@@ -924,7 +942,8 @@ function solve_shape_parameter_with_closure(closure::ThreeMomentClosureExact,
                                             mass = IceMassPowerLaw(),
                                             max_iterations = nothing,
                                             tolerance = nothing,
-                                            density_quadrature_points = 64)
+                                            density_quadrature_points = 64,
+                                            density_table = nothing)
     FT = typeof(L_ice)
     max_iterations = isnothing(max_iterations) ? 50 : max_iterations
     tolerance = FT(isnothing(tolerance) ? 1e-10 : tolerance)

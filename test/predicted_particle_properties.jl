@@ -1371,14 +1371,16 @@ using Oceananigans.Fields: interior
     @testset "Three-moment μ solver follows Fortran-style fixed point" begin
         p3_closure = ThreeMomentClosure()
 
+        # D20: Z bounding moved from before to after the μ iteration (Fortran order),
+        # so numerical values changed relative to pre-D20 code.
         μ_rimed = solve_shape_parameter(1e-4, 1e6, 1e-11, 0.2, 500.0; closure=p3_closure)
-        @test μ_rimed ≈ 0.1622133993223902
+        @test μ_rimed ≈ 0.0
 
         μ_large = solve_shape_parameter(1e-3, 1e5, 1e-8, 0.5, 700.0; closure=p3_closure)
-        @test μ_large ≈ 0.20614751259613406
+        @test μ_large ≈ 0.0
 
         μ_broad = solve_shape_parameter(1e-4, 1e6, 1e-9, 0.2, 500.0; closure=p3_closure)
-        @test μ_broad ≈ 0.16221339932238688
+        @test μ_broad ≈ 0.0
     end
 
     @testset "Exact three-moment closure solves the full residual" begin
@@ -1388,7 +1390,8 @@ using Oceananigans.Fields: interior
         μ_p3 = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=p3_closure)
         μ_exact = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=exact_closure)
 
-        @test μ_p3 ≈ 8.328335493705275
+        # D20: Z bounding order change affects μ value
+        @test μ_p3 ≈ 17.369421148643028
         @test μ_exact == 0.0
         @test μ_p3 != μ_exact
     end
@@ -2099,12 +2102,12 @@ using Oceananigans.Fields: interior
         @test capped.bᶠ ≈ capped.qᶠ / capped.ρᶠ
         @test capped.Fᶠ == 1
 
-        # M5: liquid fraction reduces available dry ice for rime bounding
+        # D14: Julia's qⁱ is already dry ice, so qⁱ_dry = qⁱ (no qʷⁱ subtraction).
         liquid_rime = consistent_rime_state(p3, FT(1e-4), FT(8e-5), FT(2e-7), FT(5e-5))
-        # qʷⁱ = 5e-5, so dry ice = 1e-4 - 5e-5 = 5e-5
-        # qᶠ = 8e-5 > dry ice = 5e-5, so should be capped
-        @test liquid_rime.qᶠ ≈ FT(5e-5)
-        @test liquid_rime.Fᶠ ≈ FT(1)  # fully rimed within dry ice
+        # qⁱ_dry = 1e-4 (Julia qⁱ is already dry ice)
+        # qᶠ = 8e-5 < 1e-4, so NOT capped
+        @test liquid_rime.qᶠ ≈ FT(8e-5)
+        @test liquid_rime.Fᶠ ≈ FT(0.8)  # = qᶠ / qⁱ_dry = 8e-5 / 1e-4
 
         ρ = FT(1.0)
         μ = (

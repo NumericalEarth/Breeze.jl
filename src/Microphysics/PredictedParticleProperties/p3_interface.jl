@@ -256,7 +256,8 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     # Pre-compute terminal velocities for sedimentation (stored as negative w)
     @inbounds μ.wʳ[i, j, k]   = -rain_terminal_velocity_mass_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     @inbounds μ.wʳₙ[i, j, k]  = -rain_terminal_velocity_number_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
-    vⁱ = ice_terminal_velocities(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ; μ=μ_ice)
+    # D16: Pass actual Fˡ so mixed-phase particles use correct fall speed.
+    vⁱ = ice_terminal_velocities(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=Fˡ_mu, μ=μ_ice)
     @inbounds μ.wⁱ[i, j, k]   = -vⁱ.mass_weighted
     @inbounds μ.wⁱₙ[i, j, k]  = -vⁱ.number_weighted
     @inbounds μ.wⁱ_z[i, j, k] = -vⁱ.reflectivity_weighted
