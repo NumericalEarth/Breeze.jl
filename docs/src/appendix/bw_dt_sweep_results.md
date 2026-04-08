@@ -100,21 +100,118 @@ comparisons against MPAS-A `config_time_integration_order = 3`.
 
 Both distributions reach day 7 at Δt ≤ 200 s and crash above Δt ~ 300 s.
 The gap to MPAS-A's "Δt = 1800 s on a 1° mesh" is **roughly an order of
-magnitude**, and it is *not* a substepper-tuning problem. As laid out in
-the [substepping cleanup plan](substepping_cleanup_and_damping_plan.md)
-"out of scope" section, closing that gap requires the two damping
-mechanisms MPAS-A has and Breeze does not:
+magnitude**.
+
+A first-cut diagnosis (gravity wave temporal resolution) was wrong. The
+actual culprit is the **advective CFL of WENO5 + WS-RK3 combined with the
+BCI peak jet**:
+
+| Δt (s) | CFL @ U = 30 m/s (init) | CFL @ U = 60 m/s (BCI peak) |
+|-------:|-------------------------:|-----------------------------:|
+|     60 | 0.19 | 0.37 |
+|    100 | 0.31 | 0.62 |
+|    150 | 0.46 | 0.93 |
+|    200 | 0.62 | **1.24** |
+|    300 | 0.93 | **1.86** |
+|    400 | 1.24 | **2.47** |
+|    500 | 1.55 | 3.09 |
+
+WS-RK3 + WENO5 has an effective advective CFL limit of ~1.0–1.4. At
+Δt = 200 the BCI peak hits CFL ≈ 1.24, right at the marginal stability
+boundary. At Δt = 300 the BCI peak hits CFL ≈ 1.86 — clearly above. The
+crash mode (slow growth of max\|w\| from ~0.1 to NaN over 4–7 days,
+*after* the BCI starts producing strong winds) is consistent with an
+advective scheme operating at marginal stability, *not* with a fast
+acoustic blowup. This is also why no choice of divergence-damping
+strategy can fix Δt > 300 — divergence damping cannot rescue an
+underresolved advective scheme.
+
+Closing the gap to MPAS-A's Δt = 1800 needs:
 
 - a **top Rayleigh / sponge layer** to absorb upward-propagating gravity waves;
 - a **4th-order horizontal hyperdiffusion** on momentum and θ to suppress
-  grid-scale and 2Δx noise.
+  grid-scale and 2Δx noise (the immediate driver of the marginal-CFL crash);
+- and/or a more dissipative advection scheme (or one with looser CFL).
 
-These should be tracked in a separate plan.
+These should be tracked in a separate plan and are out of scope for the
+substepper cleanup.
+
+## Pressure-projection damping sweep — Δt × β_d
+
+A follow-up sweep tests [`PressureProjectionDamping`](@ref) at three values
+of the projection weight ``β_d`` to ask whether (a) it can match
+[`ThermodynamicDivergenceDamping`](@ref) for noise suppression at low Δt,
+and (b) cranking ``β_d`` extends the Δt ceiling.
+
+Setup is identical to the table above (1° DCMIP2016 BW, 7-day target,
+`ProportionalSubsteps`) except the damping is
+`PressureProjectionDamping(coefficient = β_d)`. The script is
+`test_bw_1deg_pressure_sweep.jl` and the log
+`test_bw_1deg_pressure_sweep.log`.
+
+The summary shows the **trajectory max\|w\| excluding the first 5 startup
+steps** (the projection produces a benign IC transient at step ≈ 1–2 that
+hits ~1.6 m/s and is identical across β_d, since the projection has no
+history at that point — it is not a real instability).
+
+| Δt (s) | β_d = 0.10 | β_d = 0.25 | β_d = 0.50 |
+|-------:|:----------|:----------|:----------|
+|    60 | day7, max\|w\| ≈ 0.23 | day7, max\|w\| ≈ 0.23 | day7, max\|w\| ≈ 0.25 |
+|   100 | day7, max\|w\| ≈ 0.23 | day7, max\|w\| ≈ 0.23 | day7, max\|w\| ≈ 0.23 |
+|   200 | day7, max\|w\| = **7.69** | day7, max\|w\| = 3.04 | day7, max\|w\| = **0.38** ✓ |
+|   400 | crash d1.81             | crash d2.08             | crash d5.70             |
+|   800 | crash d1.05             | crash d1.19             | crash d2.01             |
+|  1400 | crash d1.12             | crash d1.20             | crash d1.26             |
+
+### Key findings
+
+1. **β_d barely matters at Δt ≤ 100 s.** The day-7 max\|w\| differs by less
+   than 1 % across β_d ∈ {0.10, 0.25, 0.50}: at this Δt the (ρθ)″
+   perturbation evolves slowly enough that the forward-extrapolation by
+   one substep adds essentially nothing. The projection has no work to do
+   when the substepping is already accurate.
+
+2. **β_d = 0.5 at Δt = 200 produces a *cleaner* BCI than `ThermodynamicDivergenceDamping(0.1)` at the same Δt.**
+   Compare:
+   - `ThermodynamicDivergenceDamping(0.1)` at Δt = 200: trajectory max\|w\| = **3.51**
+   - `PressureProjectionDamping(0.5)` at Δt = 200: trajectory max\|w\| (excluding startup) = **0.38**
+     and ts_w\[end\] = 0.26 — comparable to Thermo at Δt = 60.
+
+   This is the first empirical evidence that the literal-ERF/CM1/WRF
+   pressure-projection form, with a strong enough projection weight, is
+   competitive with — actually better than — the MPAS Klemp 2018
+   thermodynamic-divergence form on this configuration. The cost is one
+   additional `CenterField` of scratch storage and a per-cell EOS
+   evaluation.
+
+3. **β_d = 0.5 modestly extends the ceiling**, from Δt ≈ 300 to Δt ≈ 400.
+   At Δt = 400, β_d = 0.5 survives to day 5.7 vs day 1.8 at β_d = 0.1.
+   At Δt ≥ 500 all three β_d values crash within 1–2 days — the gravity
+   wave temporal resolution problem dominates and no amount of damping can
+   fix it.
+
+4. The day-0.002 startup transient is a benign artifact of the projection
+   filter being applied at substep 1 of stage 1 of step 1, when neither
+   `ρθ″` nor `previous_rtheta_pp` has any history; it relaxes within a few
+   steps and does not affect the BCI trajectory.
+
+### Updated recommendation
+
+For BW runs that target Δt > 100 s on the 1° lat-lon grid, prefer
+**`PressureProjectionDamping(coefficient = 0.5)`** over the default
+`ThermodynamicDivergenceDamping(coefficient = 0.1)`. It produces a cleaner
+BCI lifecycle at moderate Δt (200) and a slightly higher Δt ceiling, at the
+cost of one CenterField of scratch and a per-cell EOS evaluation per substep.
+
+The default in `time_discretizations.jl` is unchanged
+(`ThermodynamicDivergenceDamping(0.1)`) for bit-compatibility with the
+pre-Phase-2 hardcoded path. Users who want larger Δt should opt in
+explicitly.
 
 ## See also
 
 - [Acoustic Substepping Cleanup and Damping Plan](substepping_cleanup_and_damping_plan.md)
 - The four-strategy comparison at fixed Δt = 1400 s lives in
   `test_bw_1deg_damping_compare.jl` / `test_bw_1deg_damping_compare.log`,
-  with the "form of damping matters at the same coefficient, but not enough"
-  finding.
+  with the "form of damping matters at the same coefficient, but not enough
+  at coefficient = 0.1" finding.

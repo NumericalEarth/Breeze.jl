@@ -1,0 +1,272 @@
+
+========================================
+=== Δt=  60s / PressureProjectionDamping(0.10) ===
+========================================
+Δt=60s  β_d=0.10  10080 outer steps to day 7
+day  1.00  max|w|=7.944e-03  max|u|= 28.2  max|v|= 1.79  min(p_bot)=865.6 hPa  [wall 59s]
+day  2.00  max|w|=6.990e-03  max|u|= 28.2  max|v|= 1.69  min(p_bot)=865.5 hPa  [wall 79s]
+day  3.00  max|w|=1.481e-02  max|u|= 28.2  max|v|= 2.34  min(p_bot)=865.5 hPa  [wall 99s]
+day  4.00  max|w|=1.252e-02  max|u|= 28.3  max|v|= 2.71  min(p_bot)=865.5 hPa  [wall 119s]
+day  5.00  max|w|=2.496e-02  max|u|= 28.4  max|v|= 7.53  min(p_bot)=865.5 hPa  [wall 139s]
+day  6.00  max|w|=1.353e-01  max|u|= 28.9  max|v|=24.88  min(p_bot)=865.6 hPa  [wall 159s]
+day  7.00  max|w|=2.329e-01  max|u|= 30.8  max|v|=38.43  min(p_bot)=855.5 hPa  [wall 179s]
+
+--- Δt=  60s / PressureProjectionDamping(0.10) done: 179s wall, reached day 7.00 ---
+Saved bw_press_sweep_dt0060_bd010.jld2
+
+========================================
+=== Δt= 100s / PressureProjectionDamping(0.10) ===
+========================================
+Δt=100s  β_d=0.10  6048 outer steps to day 7
+day  1.00  max|w|=6.006e-03  max|u|= 28.2  max|v|= 1.17  min(p_bot)=865.6 hPa  [wall 12s]
+day  2.00  max|w|=8.585e-03  max|u|= 28.2  max|v|= 1.50  min(p_bot)=865.5 hPa  [wall 24s]
+day  3.00  max|w|=2.125e-02  max|u|= 28.2  max|v|= 3.23  min(p_bot)=865.5 hPa  [wall 37s]
+day  4.00  max|w|=1.383e-02  max|u|= 28.3  max|v|= 2.72  min(p_bot)=865.5 hPa  [wall 49s]
+day  5.00  max|w|=2.956e-02  max|u|= 28.3  max|v|= 7.54  min(p_bot)=865.5 hPa  [wall 61s]
+day  6.00  max|w|=1.366e-01  max|u|= 29.0  max|v|=25.08  min(p_bot)=865.6 hPa  [wall 74s]
+day  7.00  max|w|=2.322e-01  max|u|= 30.8  max|v|=38.46  min(p_bot)=855.4 hPa  [wall 86s]
+
+--- Δt= 100s / PressureProjectionDamping(0.10) done: 86s wall, reached day 7.00 ---
+Saved bw_press_sweep_dt0100_bd010.jld2
+
+========================================
+=== Δt= 200s / PressureProjectionDamping(0.10) ===
+========================================
+Δt=200s  β_d=0.10  3024 outer steps to day 7
+day  1.00  max|w|=1.608e-02  max|u|= 28.2  max|v|= 3.86  min(p_bot)=865.6 hPa  [wall 8s]
+day  2.00  max|w|=4.655e-02  max|u|= 28.2  max|v|= 4.80  min(p_bot)=865.5 hPa  [wall 17s]
+day  3.00  max|w|=5.775e-01  max|u|= 28.2  max|v|=10.41  min(p_bot)=865.6 hPa  [wall 26s]
+day  4.00  max|w|=2.966e+00  max|u|= 49.0  max|v|=30.53  min(p_bot)=862.0 hPa  [wall 34s]
+day  5.00  max|w|=6.139e+00  max|u|= 97.9  max|v|=41.86  min(p_bot)=856.1 hPa  [wall 43s]
+day  6.00  max|w|=5.419e+00  max|u|=114.5  max|v|=57.73  min(p_bot)=855.0 hPa  [wall 52s]
+day  7.00  max|w|=5.304e+00  max|u|=105.4  max|v|=60.74  min(p_bot)=855.5 hPa  [wall 60s]
+
+--- Δt= 200s / PressureProjectionDamping(0.10) done: 60s wall, reached day 7.00 ---
+Saved bw_press_sweep_dt0200_bd010.jld2
+
+========================================
+=== Δt= 400s / PressureProjectionDamping(0.10) ===
+========================================
+Δt=400s  β_d=0.10  1512 outer steps to day 7
+day  1.00  max|w|=1.964e-01  max|u|= 28.2  max|v|= 2.49  min(p_bot)=865.6 hPa  [wall 5s]
+NaN at outer step 393 (t=1.82 days)
+
+--- Δt= 400s / PressureProjectionDamping(0.10) done: 10s wall, reached day 1.81 ---
+Saved bw_press_sweep_dt0400_bd010.jld2
+
+========================================
+=== Δt= 800s / PressureProjectionDamping(0.10) ===
+========================================
+Δt=800s  β_d=0.10  756 outer steps to day 7
+day  1.00  max|w|=3.745e+00  max|u|= 58.4  max|v|=57.04  min(p_bot)=865.6 hPa  [wall 5s]
+NaN at outer step 114 (t=1.06 days)
+
+--- Δt= 800s / PressureProjectionDamping(0.10) done: 5s wall, reached day 1.05 ---
+Saved bw_press_sweep_dt0800_bd010.jld2
+
+========================================
+=== Δt=1400s / PressureProjectionDamping(0.10) ===
+========================================
+Δt=1400s  β_d=0.10  432 outer steps to day 7
+day  1.00  max|w|=1.807e+00  max|u|= 31.7  max|v|=18.15  min(p_bot)=865.6 hPa  [wall 4s]
+NaN at outer step 70 (t=1.13 days)
+
+--- Δt=1400s / PressureProjectionDamping(0.10) done: 5s wall, reached day 1.12 ---
+Saved bw_press_sweep_dt1400_bd010.jld2
+
+========================================
+=== Δt=  60s / PressureProjectionDamping(0.25) ===
+========================================
+Δt=60s  β_d=0.25  10080 outer steps to day 7
+day  1.00  max|w|=7.846e-03  max|u|= 28.2  max|v|= 1.78  min(p_bot)=865.6 hPa  [wall 20s]
+day  2.00  max|w|=6.557e-03  max|u|= 28.2  max|v|= 1.68  min(p_bot)=865.5 hPa  [wall 40s]
+day  3.00  max|w|=1.504e-02  max|u|= 28.2  max|v|= 2.34  min(p_bot)=865.5 hPa  [wall 61s]
+day  4.00  max|w|=1.227e-02  max|u|= 28.3  max|v|= 2.71  min(p_bot)=865.5 hPa  [wall 81s]
+day  5.00  max|w|=2.493e-02  max|u|= 28.4  max|v|= 7.54  min(p_bot)=865.5 hPa  [wall 101s]
+day  6.00  max|w|=1.355e-01  max|u|= 29.0  max|v|=24.94  min(p_bot)=865.6 hPa  [wall 121s]
+day  7.00  max|w|=2.338e-01  max|u|= 30.8  max|v|=38.46  min(p_bot)=855.5 hPa  [wall 141s]
+
+--- Δt=  60s / PressureProjectionDamping(0.25) done: 141s wall, reached day 7.00 ---
+Saved bw_press_sweep_dt0060_bd025.jld2
+
+========================================
+=== Δt= 100s / PressureProjectionDamping(0.25) ===
+========================================
+Δt=100s  β_d=0.25  6048 outer steps to day 7
+day  1.00  max|w|=5.628e-03  max|u|= 28.2  max|v|= 1.17  min(p_bot)=865.6 hPa  [wall 12s]
+day  2.00  max|w|=8.467e-03  max|u|= 28.2  max|v|= 1.49  min(p_bot)=865.5 hPa  [wall 24s]
+day  3.00  max|w|=2.127e-02  max|u|= 28.2  max|v|= 3.22  min(p_bot)=865.5 hPa  [wall 36s]
+day  4.00  max|w|=1.366e-02  max|u|= 28.3  max|v|= 2.73  min(p_bot)=865.5 hPa  [wall 48s]
+day  5.00  max|w|=2.509e-02  max|u|= 28.3  max|v|= 7.56  min(p_bot)=865.5 hPa  [wall 60s]
+day  6.00  max|w|=1.337e-01  max|u|= 29.0  max|v|=25.07  min(p_bot)=865.6 hPa  [wall 72s]
+day  7.00  max|w|=2.493e-01  max|u|= 30.9  max|v|=38.52  min(p_bot)=855.4 hPa  [wall 84s]
+
+--- Δt= 100s / PressureProjectionDamping(0.25) done: 84s wall, reached day 7.00 ---
+Saved bw_press_sweep_dt0100_bd025.jld2
+
+========================================
+=== Δt= 200s / PressureProjectionDamping(0.25) ===
+========================================
+Δt=200s  β_d=0.25  3024 outer steps to day 7
+day  1.00  max|w|=1.570e-02  max|u|= 28.2  max|v|= 3.84  min(p_bot)=865.6 hPa  [wall 8s]
+day  2.00  max|w|=1.137e-02  max|u|= 28.2  max|v|= 4.78  min(p_bot)=865.5 hPa  [wall 17s]
+day  3.00  max|w|=5.853e-02  max|u|= 28.1  max|v|= 3.15  min(p_bot)=865.6 hPa  [wall 25s]
+day  4.00  max|w|=1.496e-01  max|u|= 28.3  max|v|= 3.04  min(p_bot)=865.5 hPa  [wall 33s]
+day  5.00  max|w|=8.349e-01  max|u|= 28.4  max|v|= 9.38  min(p_bot)=865.6 hPa  [wall 42s]
+day  6.00  max|w|=1.967e+00  max|u|= 29.6  max|v|=30.69  min(p_bot)=865.6 hPa  [wall 50s]
+day  7.00  max|w|=2.968e+00  max|u|= 58.2  max|v|=39.80  min(p_bot)=857.9 hPa  [wall 59s]
+
+--- Δt= 200s / PressureProjectionDamping(0.25) done: 59s wall, reached day 7.00 ---
+Saved bw_press_sweep_dt0200_bd025.jld2
+
+========================================
+=== Δt= 400s / PressureProjectionDamping(0.25) ===
+========================================
+Δt=400s  β_d=0.25  1512 outer steps to day 7
+day  1.00  max|w|=7.382e-02  max|u|= 28.2  max|v|= 1.27  min(p_bot)=865.6 hPa  [wall 5s]
+day  2.00  max|w|=5.398e+00  max|u|=148.7  max|v|=71.87  min(p_bot)=860.8 hPa  [wall 11s]
+NaN at outer step 450 (t=2.08 days)
+
+--- Δt= 400s / PressureProjectionDamping(0.25) done: 11s wall, reached day 2.08 ---
+Saved bw_press_sweep_dt0400_bd025.jld2
+
+========================================
+=== Δt= 800s / PressureProjectionDamping(0.25) ===
+========================================
+Δt=800s  β_d=0.25  756 outer steps to day 7
+day  1.00  max|w|=1.393e+00  max|u|= 28.8  max|v|=18.68  min(p_bot)=865.6 hPa  [wall 5s]
+NaN at outer step 129 (t=1.19 days)
+
+--- Δt= 800s / PressureProjectionDamping(0.25) done: 5s wall, reached day 1.19 ---
+Saved bw_press_sweep_dt0800_bd025.jld2
+
+========================================
+=== Δt=1400s / PressureProjectionDamping(0.25) ===
+========================================
+Δt=1400s  β_d=0.25  432 outer steps to day 7
+day  1.00  max|w|=1.368e+00  max|u|= 30.9  max|v|=12.55  min(p_bot)=865.6 hPa  [wall 4s]
+NaN at outer step 75 (t=1.22 days)
+
+--- Δt=1400s / PressureProjectionDamping(0.25) done: 5s wall, reached day 1.20 ---
+Saved bw_press_sweep_dt1400_bd025.jld2
+
+========================================
+=== Δt=  60s / PressureProjectionDamping(0.50) ===
+========================================
+Δt=60s  β_d=0.50  10080 outer steps to day 7
+day  1.00  max|w|=7.825e-03  max|u|= 28.2  max|v|= 1.78  min(p_bot)=865.6 hPa  [wall 19s]
+day  2.00  max|w|=6.840e-03  max|u|= 28.2  max|v|= 1.67  min(p_bot)=865.5 hPa  [wall 39s]
+day  3.00  max|w|=1.476e-02  max|u|= 28.2  max|v|= 2.33  min(p_bot)=865.5 hPa  [wall 59s]
+day  4.00  max|w|=1.244e-02  max|u|= 28.3  max|v|= 2.72  min(p_bot)=865.5 hPa  [wall 79s]
+day  5.00  max|w|=2.475e-02  max|u|= 28.4  max|v|= 7.52  min(p_bot)=865.5 hPa  [wall 98s]
+day  6.00  max|w|=1.364e-01  max|u|= 29.0  max|v|=24.99  min(p_bot)=865.6 hPa  [wall 118s]
+day  7.00  max|w|=2.469e-01  max|u|= 30.8  max|v|=38.60  min(p_bot)=855.4 hPa  [wall 138s]
+
+--- Δt=  60s / PressureProjectionDamping(0.50) done: 138s wall, reached day 7.00 ---
+Saved bw_press_sweep_dt0060_bd050.jld2
+
+========================================
+=== Δt= 100s / PressureProjectionDamping(0.50) ===
+========================================
+Δt=100s  β_d=0.50  6048 outer steps to day 7
+day  1.00  max|w|=5.348e-03  max|u|= 28.2  max|v|= 1.16  min(p_bot)=865.6 hPa  [wall 12s]
+day  2.00  max|w|=8.424e-03  max|u|= 28.2  max|v|= 1.48  min(p_bot)=865.5 hPa  [wall 24s]
+day  3.00  max|w|=2.116e-02  max|u|= 28.2  max|v|= 3.21  min(p_bot)=865.5 hPa  [wall 36s]
+day  4.00  max|w|=1.342e-02  max|u|= 28.3  max|v|= 2.73  min(p_bot)=865.5 hPa  [wall 48s]
+day  5.00  max|w|=2.517e-02  max|u|= 28.3  max|v|= 7.58  min(p_bot)=865.5 hPa  [wall 59s]
+day  6.00  max|w|=1.346e-01  max|u|= 29.0  max|v|=25.14  min(p_bot)=865.6 hPa  [wall 71s]
+day  7.00  max|w|=2.415e-01  max|u|= 30.9  max|v|=38.46  min(p_bot)=855.4 hPa  [wall 83s]
+
+--- Δt= 100s / PressureProjectionDamping(0.50) done: 83s wall, reached day 7.00 ---
+Saved bw_press_sweep_dt0100_bd050.jld2
+
+========================================
+=== Δt= 200s / PressureProjectionDamping(0.50) ===
+========================================
+Δt=200s  β_d=0.50  3024 outer steps to day 7
+day  1.00  max|w|=1.543e-02  max|u|= 28.2  max|v|= 3.83  min(p_bot)=865.6 hPa  [wall 8s]
+day  2.00  max|w|=1.103e-02  max|u|= 28.2  max|v|= 4.77  min(p_bot)=865.5 hPa  [wall 17s]
+day  3.00  max|w|=9.276e-03  max|u|= 28.1  max|v|= 3.03  min(p_bot)=865.6 hPa  [wall 25s]
+day  4.00  max|w|=7.005e-03  max|u|= 28.3  max|v|= 2.82  min(p_bot)=865.5 hPa  [wall 33s]
+day  5.00  max|w|=2.501e-02  max|u|= 28.3  max|v|= 7.63  min(p_bot)=865.6 hPa  [wall 42s]
+day  6.00  max|w|=1.413e-01  max|u|= 29.0  max|v|=25.30  min(p_bot)=865.6 hPa  [wall 50s]
+day  7.00  max|w|=2.573e-01  max|u|= 30.8  max|v|=38.68  min(p_bot)=855.1 hPa  [wall 59s]
+
+--- Δt= 200s / PressureProjectionDamping(0.50) done: 59s wall, reached day 7.00 ---
+Saved bw_press_sweep_dt0200_bd050.jld2
+
+========================================
+=== Δt= 400s / PressureProjectionDamping(0.50) ===
+========================================
+Δt=400s  β_d=0.50  1512 outer steps to day 7
+day  1.00  max|w|=1.554e-02  max|u|= 28.2  max|v|= 1.11  min(p_bot)=865.6 hPa  [wall 5s]
+day  2.00  max|w|=2.466e-01  max|u|= 28.2  max|v|= 2.65  min(p_bot)=865.5 hPa  [wall 11s]
+day  3.00  max|w|=1.928e+00  max|u|= 29.0  max|v|=34.41  min(p_bot)=865.6 hPa  [wall 16s]
+day  4.00  max|w|=2.784e+00  max|u|= 63.3  max|v|=49.11  min(p_bot)=865.5 hPa  [wall 22s]
+day  5.00  max|w|=3.744e+00  max|u|= 71.3  max|v|=40.67  min(p_bot)=865.2 hPa  [wall 27s]
+NaN at outer step 1232 (t=5.70 days)
+
+--- Δt= 400s / PressureProjectionDamping(0.50) done: 31s wall, reached day 5.70 ---
+Saved bw_press_sweep_dt0400_bd050.jld2
+
+========================================
+=== Δt= 800s / PressureProjectionDamping(0.50) ===
+========================================
+Δt=800s  β_d=0.50  756 outer steps to day 7
+day  1.00  max|w|=3.534e-01  max|u|= 28.3  max|v|= 5.29  min(p_bot)=865.6 hPa  [wall 4s]
+day  2.00  max|w|=4.858e+00  max|u|=115.9  max|v|=63.69  min(p_bot)=865.5 hPa  [wall 9s]
+NaN at outer step 218 (t=2.02 days)
+
+--- Δt= 800s / PressureProjectionDamping(0.50) done: 9s wall, reached day 2.01 ---
+Saved bw_press_sweep_dt0800_bd050.jld2
+
+========================================
+=== Δt=1400s / PressureProjectionDamping(0.50) ===
+========================================
+Δt=1400s  β_d=0.50  432 outer steps to day 7
+day  1.00  max|w|=7.290e-01  max|u|= 29.8  max|v|=10.27  min(p_bot)=865.6 hPa  [wall 4s]
+NaN at outer step 79 (t=1.28 days)
+
+--- Δt=1400s / PressureProjectionDamping(0.50) done: 5s wall, reached day 1.26 ---
+Saved bw_press_sweep_dt1400_bd050.jld2
+┌ Warning: CUDA runtime library `libcusparse.so.12` was loaded from a system path, `/usr/local/cuda/lib64/libcusparse.so.12`.
+│ This may cause errors.
+│ 
+│ If you're running under a profiler, this situation is expected. Otherwise,
+│ ensure that your library path environment variable (e.g., `PATH` on Windows
+│ or `LD_LIBRARY_PATH` on Linux) does not include CUDA library paths.
+│ 
+│ In any other case, please file an issue.
+└ @ CUDA ~/.julia/packages/CUDA/Il00B/src/initialization.jl:198
+┌ Warning: CUDA runtime library `libnvJitLink.so.13` was loaded from a system path, `/usr/local/cuda/lib64/libnvJitLink.so.13`.
+│ This may cause errors.
+│ 
+│ If you're running under a profiler, this situation is expected. Otherwise,
+│ ensure that your library path environment variable (e.g., `PATH` on Windows
+│ or `LD_LIBRARY_PATH` on Linux) does not include CUDA library paths.
+│ 
+│ In any other case, please file an issue.
+└ @ CUDA ~/.julia/packages/CUDA/Il00B/src/initialization.jl:198
+
+
+================== SUMMARY ==================
+config                                           crashed at    final day         max|w| min(p_bot) hPa   wall (s)
+Δt=  60s / PressureProjectionDamping(0.10)                —         7.00     1.6177e+00          855.5        179
+Δt= 100s / PressureProjectionDamping(0.10)                —         7.00     8.1847e-01          855.4         86
+Δt= 200s / PressureProjectionDamping(0.10)                —         7.00     7.6896e+00          848.9         60
+Δt= 400s / PressureProjectionDamping(0.10)         step 393         1.81     1.6266e+01          862.2         10
+Δt= 800s / PressureProjectionDamping(0.10)         step 114         1.05     8.4129e+00          865.3          5
+Δt=1400s / PressureProjectionDamping(0.10)          step 70         1.12     1.9554e+01          865.3          5
+Δt=  60s / PressureProjectionDamping(0.25)                —         7.00     1.6177e+00          855.5        141
+Δt= 100s / PressureProjectionDamping(0.25)                —         7.00     8.1847e-01          855.4         84
+Δt= 200s / PressureProjectionDamping(0.25)                —         7.00     3.0417e+00          855.8         59
+Δt= 400s / PressureProjectionDamping(0.25)         step 450         2.08     1.0367e+01          859.4         11
+Δt= 800s / PressureProjectionDamping(0.25)         step 129         1.19     8.7655e+00          865.3          5
+Δt=1400s / PressureProjectionDamping(0.25)          step 75         1.20     4.1911e+03          865.3          5
+Δt=  60s / PressureProjectionDamping(0.50)                —         7.00     1.6177e+00          855.4        138
+Δt= 100s / PressureProjectionDamping(0.50)                —         7.00     8.1847e-01          855.4         83
+Δt= 200s / PressureProjectionDamping(0.50)                —         7.00     8.3451e-01          855.1         59
+Δt= 400s / PressureProjectionDamping(0.50)        step 1232         5.70     6.7944e+00          864.4         31
+Δt= 800s / PressureProjectionDamping(0.50)         step 218         2.01     7.4887e+00          864.8          9
+Δt=1400s / PressureProjectionDamping(0.50)          step 79         1.26     8.1255e+00          865.3          5
+============================================

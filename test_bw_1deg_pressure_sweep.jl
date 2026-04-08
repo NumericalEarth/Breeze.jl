@@ -1,0 +1,188 @@
+#!/usr/bin/env julia
+#
+# 1° DCMIP2016 baroclinic wave: PressureProjectionDamping Δt × β_d sweep.
+#
+# Tests the literal-ERF/CM1/WRF pressure-projection damping at multiple
+# coefficients to see whether (a) it can match ThermodynamicDivergenceDamping
+# at low Δt, or (b) cranking β_d allows Δt > 200 s on the 1° lat-lon grid.
+# All runs use ProportionalSubsteps.
+
+using Breeze
+using Oceananigans
+using Oceananigans.Units
+using Printf
+using CUDA
+using JLD2
+
+Oceananigans.defaults.FloatType = Float32
+Oceananigans.defaults.gravitational_acceleration = 9.80616
+Oceananigans.defaults.planet_radius = 6371220.0
+Oceananigans.defaults.planet_rotation_rate = 7.29212e-5
+
+constants = ThermodynamicConstants(;
+    gravitational_acceleration = Oceananigans.defaults.gravitational_acceleration,
+    dry_air_heat_capacity = 1004.5,
+    dry_air_molar_mass = 8.314462618 / 287.0)
+
+g   = constants.gravitational_acceleration
+Rᵈ  = dry_air_gas_constant(constants)
+cᵖᵈ = constants.dry_air.heat_capacity
+κ   = Rᵈ / cᵖᵈ
+p₀  = 1e5
+a   = Oceananigans.defaults.planet_radius
+Ω   = Oceananigans.defaults.planet_rotation_rate
+
+Nλ, Nφ, Nz = 360, 170, 15
+H = 30kilometers
+arch = CUDA.functional() ? GPU() : CPU()
+
+Tᴱ = 310.0; Tᴾ = 240.0; Tₘ = (Tᴱ + Tᴾ) / 2
+Γ = 0.005; K = 3; b_ = 2
+
+function τ_and_integrals(z)
+    Hₛ = Rᵈ * Tₘ / g; η = z / (b_ * Hₛ); e = exp(-η^2)
+    A = (Tₘ - Tᴾ) / (Tₘ * Tᴾ); C = (K + 2) / 2 * (Tᴱ - Tᴾ) / (Tᴱ * Tᴾ)
+    τ₁ = exp(Γ * z / Tₘ) / Tₘ + A * (1 - 2η^2) * e
+    τ₂ = C * (1 - 2η^2) * e
+    ∫τ₁ = (exp(Γ * z / Tₘ) - 1) / Γ + A * z * e
+    ∫τ₂ = C * z * e
+    return τ₁, τ₂, ∫τ₁, ∫τ₂
+end
+
+F(φ) = cosd(φ)^K - K / (K + 2) * cosd(φ)^(K + 2)
+dF(φ) = cosd(φ)^(K - 1) - cosd(φ)^(K + 1)
+T_ic(λ, φ, z) = 1 / (τ_and_integrals(z)[1] - τ_and_integrals(z)[2] * F(φ))
+p_ic(λ, φ, z) = p₀ * exp(-g / Rᵈ * (τ_and_integrals(z)[3] - τ_and_integrals(z)[4] * F(φ)))
+ρ_ic(λ, φ, z) = p_ic(λ, φ, z) / (Rᵈ * T_ic(λ, φ, z))
+θ_ic(λ, φ, z) = T_ic(λ, φ, z) * (p₀ / p_ic(λ, φ, z))^κ
+
+function u_ic(λ, φ, z)
+    _, _, _, ∫τ₂ = τ_and_integrals(z); T = T_ic(λ, φ, z)
+    U = g / a * K * ∫τ₂ * dF(φ) * T
+    rcosφ = a * cosd(φ); Ωrcosφ = Ω * rcosφ
+    u_bal = -Ωrcosφ + sqrt(Ωrcosφ^2 + rcosφ * U)
+    uₚ = 1.0; rₚ = 0.1; λₚ = π / 9; φₚ = 2π / 9; zₚ = 15000.0
+    φʳ = deg2rad(φ); λʳ = deg2rad(λ)
+    gc = acos(sin(φₚ) * sin(φʳ) + cos(φₚ) * cos(φʳ) * cos(λʳ - λₚ)) / rₚ
+    taper = ifelse(z < zₚ, 1 - 3 * (z / zₚ)^2 + 2 * (z / zₚ)^3, 0.0)
+    u_pert = ifelse(gc < 1, uₚ * taper * exp(-gc^2), 0.0)
+    return u_bal + u_pert
+end
+
+T₀_ref = 250.0
+θ_ref(z) = T₀_ref * exp(g * z / (cᵖᵈ * T₀_ref))
+
+function run_one(Δt::Float64, β_d::Float64, savefile)
+    label = @sprintf "Δt=%4.0fs / PressureProjectionDamping(%.2f)" Δt β_d
+    @printf("\n========================================\n")
+    @printf("=== %s ===\n", label)
+    @printf("========================================\n")
+
+    grid = LatitudeLongitudeGrid(arch; size=(Nλ, Nφ, Nz), halo=(5, 5, 5),
+                                 longitude=(0, 360), latitude=(-85, 85), z=(0, H))
+
+    coriolis = HydrostaticSphericalCoriolis(rotation_rate=Ω)
+    td = SplitExplicitTimeDiscretization(;
+        damping = PressureProjectionDamping(coefficient = β_d),
+        acoustic_damping_coefficient = 0.5,
+        substep_distribution = ProportionalSubsteps())
+    dynamics = CompressibleDynamics(td;
+                                    surface_pressure=p₀,
+                                    reference_potential_temperature=θ_ref)
+    model = AtmosphereModel(grid; dynamics, coriolis,
+                            thermodynamic_constants=constants, advection=WENO(),
+                            timestepper=:AcousticRungeKutta3)
+    set!(model; θ=θ_ic, u=u_ic, ρ=ρ_ic)
+
+    n_days_target = 7
+    n_steps = round(Int, n_days_target * 86400 / Δt)
+    @printf("Δt=%.0fs  β_d=%.2f  %d outer steps to day %d\n",
+            Δt, β_d, n_steps, n_days_target)
+
+    function bottom_pressure_min(model)
+        p = interior(model.dynamics.pressure, :, :, 1)
+        return minimum(p)
+    end
+
+    ts_t   = Float64[]
+    ts_w   = Float64[]
+    ts_u   = Float64[]
+    ts_v   = Float64[]
+    ts_psm = Float64[]
+
+    t0 = time()
+    crashed_at = 0
+    daily_print_every = max(1, round(Int, 86400 / Δt))
+    for step in 1:n_steps
+        try
+            time_step!(model, Δt)
+        catch err
+            crashed_at = step
+            @printf("EXCEPTION at outer step %d (t=%.2f days): %s\n",
+                    step, model.clock.time/86400, first(sprint(showerror, err), 200))
+            break
+        end
+        if any(isnan, parent(model.dynamics.density))
+            crashed_at = step
+            @printf("NaN at outer step %d (t=%.2f days)\n", step, model.clock.time/86400)
+            break
+        end
+
+        push!(ts_t,   model.clock.time / 86400)
+        push!(ts_w,   maximum(abs, interior(model.velocities.w)))
+        push!(ts_u,   maximum(abs, interior(model.velocities.u)))
+        push!(ts_v,   maximum(abs, interior(model.velocities.v)))
+        push!(ts_psm, bottom_pressure_min(model))
+
+        if step % daily_print_every == 0 || step == n_steps
+            elapsed = time() - t0
+            day = model.clock.time / 86400
+            @printf("day %5.2f  max|w|=%.3e  max|u|=%5.1f  max|v|=%5.2f  min(p_bot)=%.1f hPa  [wall %.0fs]\n",
+                    day, ts_w[end], ts_u[end], ts_v[end], ts_psm[end]/100, elapsed)
+            flush(stdout)
+        end
+    end
+
+    wall = time() - t0
+    final_day = length(ts_t) > 0 ? ts_t[end] : 0.0
+    @printf("\n--- %s done: %.0fs wall, reached day %.2f ---\n", label, wall, final_day)
+
+    jldsave(savefile;
+            label = label,
+            dt = Δt,
+            beta_d = β_d,
+            ts_t, ts_w, ts_u, ts_v, ts_psm,
+            crashed_at,
+            wall_seconds = wall,
+            final_day = final_day,
+            n_days_target = n_days_target)
+    @printf("Saved %s\n", savefile)
+    flush(stdout)
+    return (label = label, dt = Δt, beta_d = β_d,
+            crashed_at = crashed_at, final_day = final_day,
+            max_w = length(ts_w) > 0 ? maximum(ts_w) : NaN,
+            min_psm_hPa = length(ts_psm) > 0 ? minimum(ts_psm)/100 : NaN,
+            wall = wall)
+end
+
+# ── Δt × β_d sweep ────────────────────────────────────────────────────────────
+δts = [60.0, 100.0, 200.0, 400.0, 800.0, 1400.0]
+βds = [0.1, 0.25, 0.5]
+
+results = []
+for β_d in βds
+    for Δt in δts
+        savefile = @sprintf "bw_press_sweep_dt%04.0f_bd%03d.jld2" Δt round(Int, 100*β_d)
+        push!(results, run_one(Δt, β_d, savefile))
+    end
+end
+
+@printf("\n\n================== SUMMARY ==================\n")
+@printf("%-44s %14s %12s %14s %14s %10s\n",
+        "config", "crashed at", "final day", "max|w|", "min(p_bot) hPa", "wall (s)")
+for r in results
+    crash_str = r.crashed_at == 0 ? "—" : "step $(r.crashed_at)"
+    @printf("%-44s %14s %12.2f %14.4e %14.1f %10.0f\n",
+            r.label, crash_str, r.final_day, r.max_w, r.min_psm_hPa, r.wall)
+end
+@printf("============================================\n")
