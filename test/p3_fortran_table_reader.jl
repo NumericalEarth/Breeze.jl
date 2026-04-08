@@ -1,6 +1,6 @@
 using Test
 using Oceananigans
-using Oceananigans.Utils: TabulatedFunction
+using Oceananigans.Utils: TabulatedFunction, TabulatedFunction1D
 using Breeze.Microphysics.PredictedParticleProperties
 
 @testset "FortranTabulatedFunction5D rime density transform" begin
@@ -54,4 +54,55 @@ end
     @test p3.rain.velocity_mass isa TabulatedFunction
     @test p3.rain.velocity_number isa TabulatedFunction
     @test p3.rain.evaporation isa TabulatedFunction
+end
+
+@testset "Read Fortran lookup tables (2momI)" begin
+    table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
+    isdir(table_dir) || error("Fortran tables not found at $table_dir")
+
+    p3 = read_fortran_lookup_tables(table_dir; three_moment_ice=false)
+
+    tables = p3.ice.lookup_tables
+    @test tables.table_1 isa P3LookupTable1
+    @test tables.table_2 isa P3LookupTable2
+    @test tables.table_3 === nothing
+
+    # Spot-check first row of 2momI: i_rhor=1, i_Fr=1, i_Fl=1, i_Qnorm=1
+    # uns = 0.15624E-03, ums = 0.35587E-03
+    uns = p3.ice.fall_speed.number_weighted(-14.807, 0.0, 0.0, 50.0, 0.0)
+    ums = p3.ice.fall_speed.mass_weighted(-14.807, 0.0, 0.0, 50.0, 0.0)
+    @test uns ≈ 0.15624e-03 rtol=1e-3
+    @test ums ≈ 0.35587e-03 rtol=1e-3
+
+    # 2momI: reflectivity_weighted and sixth_moment should be nothing
+    @test p3.ice.fall_speed.reflectivity_weighted === nothing
+    @test p3.ice.sixth_moment.rime === nothing
+end
+
+@testset "Rain tables are computed (not from Fortran)" begin
+    table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
+    isdir(table_dir) || error("Fortran tables not found at $table_dir")
+
+    p3 = read_fortran_lookup_tables(table_dir)
+
+    @test p3.rain.velocity_mass isa TabulatedFunction1D
+    @test p3.rain.velocity_number isa TabulatedFunction1D
+
+    log_lambda = 3.5
+    @test p3.rain.velocity_mass(log_lambda) > 0
+end
+
+@testset "PredictedParticlePropertiesMicrophysics constructor with Fortran tables" begin
+    table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
+    isdir(table_dir) || error("Fortran tables not found at $table_dir")
+
+    # Test constructor interface
+    p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+    @test p3 isa PredictedParticlePropertiesMicrophysics
+    @test p3.ice.lookup_tables isa P3LookupTables
+
+    # Test 2momI override
+    p3_2mom = PredictedParticlePropertiesMicrophysics(;
+        lookup_tables=table_dir, three_moment_ice=false)
+    @test p3_2mom.ice.lookup_tables.table_3 === nothing
 end
