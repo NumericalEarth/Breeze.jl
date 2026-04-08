@@ -91,12 +91,12 @@ a   = Oceananigans.defaults.planet_radius
 # domain at ±80° (rather than ±85°) keeps the polar `Δx_min` at a manageable
 # `a · cos 80° · 2π/Nλ ≈ 19.3 km` instead of the ≈ 9.7 km we would have at
 # 85°. This sets the substepper's outer time step at a useful 225 s rather
-# than 113 s. The domain extends from the surface to 30 km with 30 vertical
-# levels.
+# than 113 s. The domain extends from the surface to 30 km with 64 vertical
+# levels (Δz ≈ 470 m).
 
 Nλ = 360
 Nφ = 160
-Nz = 30
+Nz = 64
 H  = 30kilometers
 
 grid = LatitudeLongitudeGrid(GPU();
@@ -208,8 +208,16 @@ end
 # (Wicker–Skamarock RK3) outer loop. Acoustic substepping handles the
 # fast acoustic-mode pressure gradient and buoyancy via a vertically-implicit
 # inner loop, so the outer time step is limited only by the *advective*
-# CFL — about 200× larger than the acoustic-CFL-limited Δt = 2 s of the
+# CFL — about 100× larger than the acoustic-CFL-limited Δt = 2 s of the
 # fully explicit solver.
+#
+# For the divergence damping we use [`PressureProjectionDamping`](@ref) at
+# `coefficient = 0.5` rather than the Breeze default `coefficient = 0.1`
+# (which is tuned for small-amplitude wave problems like the Skamarock-Klemp
+# inertia-gravity wave). The DCMIP2016 baroclinic wave produces large-amplitude
+# vertical velocities once the BCI develops, and the empirical CFL=0.7 sweep
+# in `bw_dt_sweep_results.md` shows that the stronger β_d = 0.5 projection is
+# the only setting that produces a clean BCI lifecycle on this configuration.
 #
 # We use a hydrostatically-balanced isothermal reference state at
 # `T₀_ref = 250 K` (matching the MPAS convention) so that the substepper's
@@ -222,7 +230,10 @@ coriolis = HydrostaticSphericalCoriolis(rotation_rate=Ω)
 T₀_ref = 250.0
 θ_ref(z) = T₀_ref * exp(g * z / (cᵖᵈ * T₀_ref))
 
-dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+time_discretization = SplitExplicitTimeDiscretization(;
+    damping = PressureProjectionDamping(coefficient = 0.5))
+
+dynamics = CompressibleDynamics(time_discretization;
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θ_ref)
 

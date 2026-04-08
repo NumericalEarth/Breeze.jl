@@ -43,7 +43,8 @@ a   = Oceananigans.defaults.planet_radius
 Ω   = Oceananigans.defaults.planet_rotation_rate
 
 # 1° resolution at latitude=(-80, 80). Nλ=360 / Nφ=160 keeps Δλ = Δφ = 1°.
-Nλ, Nφ, Nz = 360, 160, 30
+# Nz = 64 gives Δz ≈ 470 m, finer than the 1 km of Nz=30.
+Nλ, Nφ, Nz = 360, 160, 64
 H = 30kilometers
 
 arch = CUDA.functional() ? GPU() : CPU()
@@ -95,8 +96,15 @@ T₀_ref = 250.0
 θ_ref(z) = T₀_ref * exp(g * z / (cᵖᵈ * T₀_ref))
 
 coriolis = HydrostaticSphericalCoriolis(rotation_rate=Ω)
-td = SplitExplicitTimeDiscretization()
-@printf "\nDefault damping: %s(coefficient=%.2f)\n" typeof(td.damping).name.name td.damping.coefficient
+# Use PressureProjectionDamping(0.5) explicitly (stronger than the new default
+# 0.1) — this is the empirical winner for the DCMIP2016 BW from the CFL=0.7
+# four-strategy comparison in `bw_dt_sweep_results.md`. The new default 0.1
+# is too weak for this configuration: it crashes during BCI peak around day 5
+# at Nz=30 because the gravity-wave / acoustic-noise growth outpaces the
+# milder forward-extrapolation projection.
+td = SplitExplicitTimeDiscretization(;
+    damping = PressureProjectionDamping(coefficient = 0.5))
+@printf "\nDamping: %s(coefficient=%.2f)\n" typeof(td.damping).name.name td.damping.coefficient
 
 dynamics = CompressibleDynamics(td;
                                 surface_pressure=p₀,
@@ -125,12 +133,12 @@ for step in 1:n_steps
     try
         time_step!(model, Δt)
     catch err
-        crashed_at = step
+        global crashed_at = step
         @printf "EXCEPTION at outer step %d (t=%.2f days): %s\n" step (model.clock.time/86400) first(sprint(showerror, err), 200)
         break
     end
     if any(isnan, parent(model.dynamics.density))
-        crashed_at = step
+        global crashed_at = step
         @printf "NaN at outer step %d (t=%.2f days)\n" step (model.clock.time/86400)
         break
     end
