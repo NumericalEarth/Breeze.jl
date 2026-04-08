@@ -48,7 +48,7 @@ Based on [P3-microphysics v5.5.0](https://github.com/P3-microphysics/P3-microphy
 
 - Full multiple free ice categories from Milbrandt & Morrison (2016)
   (initial framework exists via `MultiIceCategory`)
-- Fortran-format lookup table I/O (Breeze generates tables via `tabulate()`)
+- Full Fortran-format lookup table I/O for all table types
 """
 module PredictedParticleProperties
 
@@ -73,10 +73,6 @@ export
     IceSixthMoment,
     IceLambdaLimiter,
     IceRainCollection,
-    LookupTable1Parameters,
-    LookupTable2Parameters,
-    LookupTable3Parameters,
-    P3TabulationParameters,
     P3LookupTable1,
     P3LookupTable2,
     P3LookupTable3,
@@ -186,13 +182,10 @@ export
     IceSizeDistributionState,
     chebyshev_gauss_nodes_weights,
 
-    # Tabulation
-    tabulate,
-    TabulationParameters,
-    P3IntegralEvaluator,
-    save_p3_lookup_tables,
-    load_p3_lookup_tables,
+    # Fortran table reader
     read_fortran_lookup_tables,
+    tabulate_rain_from_quadrature,
+    rime_density_index,
 
     # Lambda solver
     IceMassPowerLaw,
@@ -219,7 +212,6 @@ export
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDFIELDS
 using SpecialFunctions: loggamma, gamma_inc, gamma
-using JLD2: jldsave, jldopen
 
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU
@@ -243,7 +235,6 @@ include("ice_collection.jl")
 include("ice_sixth_moment.jl")
 include("ice_lambda_limiter.jl")
 include("ice_rain_collection.jl")
-include("p3_tabulation_parameters.jl")
 include("lookup_tables.jl")
 include("ice_properties.jl")
 
@@ -297,24 +288,21 @@ include("lambda_solver.jl")
 #####
 
 include("table_generation_common.jl")
-include("lookup_table_1.jl")
-include("lookup_table_2.jl")
 include("lookup_table_3.jl")
 include("tabulated_function_adapters.jl")
-include("tabulation.jl")
-include("lookup_table_io.jl")
+include("fortran_table_reader.jl")
 
 #####
-##### Rain PSD quadrature evaluators (must follow tabulation.jl and quadrature.jl)
+##### Rain PSD quadrature evaluators (must follow quadrature.jl)
 #####
 
 include("rain_quadrature.jl")
 
 #####
-##### Fortran ASCII table reader (depends on rain_quadrature.jl and tabulated_function_adapters.jl)
+##### GPU/architecture adaptation methods
 #####
 
-include("fortran_table_reader.jl")
+include("gpu_adaptation.jl")
 
 #####
 ##### Process rates
