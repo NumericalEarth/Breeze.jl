@@ -884,30 +884,33 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     Nᶜ = p3.cloud.number_concentration
 
     # =========================================================================
-    # Phase 1: Cloud condensation/evaporation
-    # =========================================================================
-    cond = cloud_condensation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, constants)
-
-    # =========================================================================
-    # Phase 1: Rain processes
+    # Phase 1: Coupled saturation adjustment (M1/M2/M3)
     # =========================================================================
     P = 𝒰.reference_pressure
-
-    # Compute T,P-dependent transport properties once (Fortran P3 v5.5.0 formulas)
-    # — shared by deposition, melting, and rain evaporation (eliminates triple computation)
     transport = air_transport_properties(T, P)
 
-    autoconv = rain_autoconversion_rate(p3, qᶜˡ, Nᶜ, ρ)
-    accr = rain_accretion_rate(p3, qᶜˡ, qʳ)
-    rain_evap = rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P, transport)
-    rain_self = rain_self_collection_rate(p3, qʳ, nʳ, ρ)
-    rain_br = rain_breakup_rate(p3, qʳ, nʳ, rain_self)
+    # Liquid fraction for exclusive branching (Fortran: epsi vs epsiw)
+    qⁱ_total_coat = max(total_ice_mass(qⁱ, qʷⁱ), FT(1e-20))
+    Fˡ_coat = liquid_fraction_on_ice(qⁱ, qʷⁱ)
+
+    sat = coupled_saturation_rates(p3, qᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+                                    qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, Fˡ_coat, ρᶠ,
+                                    ρ, T, P, constants, transport, q, μ_ice)
+    cond      = sat.condensation
+    rain_cond = sat.rain_condensation
+    rain_evap = sat.rain_evaporation
+    dep       = sat.deposition
+    dep       = ifelse(qⁱ > FT(1e-20), dep, zero(FT))
+    coat_cond = sat.coating_condensation
+    coat_evap = sat.coating_evaporation
 
     # =========================================================================
-    # Phase 1: Ice deposition/sublimation and melting
+    # Phase 1: Rain processes (non-saturation)
     # =========================================================================
-    dep = ventilation_enhanced_deposition(p3, qⁱ, qʷⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport, q, μ_ice)
-    dep = ifelse(qⁱ > FT(1e-20), dep, zero(FT))
+    autoconv = rain_autoconversion_rate(p3, qᶜˡ, Nᶜ, ρ)
+    accr = rain_accretion_rate(p3, qᶜˡ, qʳ)
+    rain_self = rain_self_collection_rate(p3, qʳ, nʳ, ρ)
+    rain_br = rain_breakup_rate(p3, qʳ, nʳ, rain_self)
 
     # Partitioned melting: partial stays on ice, complete goes to rain
     melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ, constants, transport, μ_ice)
@@ -1093,63 +1096,23 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     dep           = ifelse(dep < 0, dep * f_ice, dep)
 
     # --- Vapor sinks ---
-    vapor_source_total = rain_evap + clamp_positive(-dep) + clamp_positive(-cond)
+    vapor_source_total = rain_evap + clamp_positive(-dep) + clamp_positive(-cond) + coat_evap
     vapor_available = max(0, qᵛ) + vapor_source_total * dt_safety
-    vapor_sink_total = max(0, cond) + max(0, dep) + nuc_q
+    vapor_sink_total = max(0, cond) + max(0, dep) + nuc_q + rain_cond + coat_cond
     f_vapor = sink_limiting_factor(vapor_sink_total, vapor_available, dt_safety)
-    cond  = ifelse(cond > 0, cond * f_vapor, cond)
-    dep   = ifelse(dep > 0, dep * f_vapor, dep)
-    nuc_q = nuc_q * f_vapor
-    nuc_n = nuc_n * f_vapor
+    cond      = ifelse(cond > 0, cond * f_vapor, cond)
+    dep       = ifelse(dep > 0, dep * f_vapor, dep)
+    nuc_q     = nuc_q * f_vapor
+    nuc_n     = nuc_n * f_vapor
+    rain_cond = rain_cond * f_vapor
+    coat_cond = coat_cond * f_vapor
 
     # D2: Sublimation number loss (Fortran nisub = qisub * ni/qi).
-    # D1 later adds the nlevp-equivalent coating-evaporation number sink to
-    # this same carried loss term.
     sublim_mag = clamp_positive(-dep)
     sublim_n = sublim_mag * safe_divide(clamp_positive(nⁱ), max(clamp_positive(qⁱ), FT(1e-20)), zero(FT))
 
-    # D1: Coating condensation/evaporation on ice liquid fraction
-    # Vapor condenses onto (or evaporates from) the liquid coating of ice particles,
-    # using the same ventilation integral as deposition but driven by liquid saturation.
-    # Fortran: qlcon/qlevp (microphy_p3.f90 lines 3746-3771).
-    #
-    # Fortran exclusive branching: when Fl >= 1%, ALL diffusional growth goes to
-    # the liquid coating (epsiw) and deposition (epsi) is zeroed. When Fl < 1%,
-    # all goes to deposition and coating is zeroed. They never operate simultaneously.
-    qⁱ_total_coat = max(total_ice_mass(qⁱ, qʷⁱ), FT(1e-20))
-    Fˡ_coat = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    has_coating = Fˡ_coat >= FT(0.01)  # Fortran threshold: qiliq/qitot >= 0.01
-    # Compute liquid saturation ratio S_l = qv / qv_sat_liq
-    S_l = qᵛ / max(qᵛ⁺ˡ, FT(1e-10))
-    # Use same ventilation integral as deposition
-    m_mean_coat = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
-    ρ_correction_coat = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
-    C_fv_coat = deposition_ventilation(p3.ice.deposition.ventilation,
-                                        p3.ice.deposition.ventilation_enhanced,
-                                        m_mean_coat, Fᶠ, Fˡ_coat, ρᶠ, prp, transport.nu, transport.D_v,
-                                        ρ_correction_coat, p3, μ_ice)
-    thermodynamic_constants_coat = isnothing(constants) ? ThermodynamicConstants(FT) : constants
-    Rᵛ_coat = FT(vapor_gas_constant(thermodynamic_constants_coat))
-    Rᵈ_coat = FT(dry_air_gas_constant(thermodynamic_constants_coat))
-    L_v_coat = vaporization_latent_heat(constants, T)
-    ε_coat = Rᵈ_coat / Rᵛ_coat
-    qᵛ⁺ˡ_safe = max(qᵛ⁺ˡ, FT(1e-30))
-    e_sl = P * qᵛ⁺ˡ_safe / (ε_coat + qᵛ⁺ˡ_safe * (1 - ε_coat))
-    A_coat = L_v_coat / (transport.K_a * T) * (L_v_coat / (Rᵛ_coat * T) - 1)
-    B_coat = Rᵛ_coat * T / (e_sl * transport.D_v)
-    Γˡ = 1 + L_v_coat^2 * qᵛ⁺ˡ_safe / (Rᵛ_coat * T^2 * FT(1005))
-    # D15: Fortran uses unscaled rate (binary Fl >= 0.01 switch, not continuous scaling).
-    coat_rate = FT(2π) * C_fv_coat * (S_l - 1) / (Γˡ * (A_coat + B_coat)) * clamp_positive(nⁱ)
-    coat_cond = ifelse(has_coating, clamp_positive(coat_rate), zero(FT))
-    # Cap evaporation at available liquid coating (Fortran: min(qlevp, qiliq*i_dt))
-    τ_coat = prp.sink_limiting_timescale
-    coat_evap_raw = ifelse(has_coating, clamp_positive(-coat_rate), zero(FT))
-    coat_evap = min(coat_evap_raw, clamp_positive(qʷⁱ) / τ_coat)
-
-    # Fortran exclusive branching: when coating is active, zero out ice deposition
-    # and sublimation number to avoid double-counting vapor consumption
-    # (Fortran: epsi=0 when epsiw>0; nisub=0 follows from qisub=0).
-    dep = ifelse(has_coating, zero(FT), dep)
+    # Exclusive branching: zero sublim_n when coating is active
+    has_coating = Fˡ_coat >= FT(0.01)
     sublim_n = ifelse(has_coating, zero(FT), sublim_n)
 
     # D17: Fortran also limits sinks against total ice qitot = qⁱ + qʷⁱ.
@@ -1221,8 +1184,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         wg_cloud, wg_rain,
         # D8: Wet growth shedding → rain
         wg_shed, wg_shed_n,
-        # M9: CCN activation and rain condensation stubs
-        zero(FT), zero(FT),
+        # M9: CCN activation stub and rain condensation from coupled solve
+        zero(FT), rain_cond,
         # D1: Coating condensation/evaporation
         coat_cond, coat_evap
     )
