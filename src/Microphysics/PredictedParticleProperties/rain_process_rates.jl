@@ -265,3 +265,59 @@ end
     #           = 2π × N_0 × I_evap × (S-1) / Φ,  I_evap = ∫ D × f_v × exp(-λD) dD
     return FT(2π) * N_0 * I_evap * (S - 1) / thermodynamic_factor
 end
+
+"""
+    rain_condensation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P, transport)
+
+Compute rain condensation rate (vapor → rain) when the air is supersaturated.
+
+Uses the same Mason (1971) diffusional growth framework as rain evaporation:
+when the saturation ratio ``S > 1``, the growth rate is positive, representing
+direct condensation of vapor onto existing rain drops. This mirrors the Fortran
+P3 v5.5.0 semi-analytic framework where ``q_{rcon}`` can be positive.
+
+# Returns
+- Rate of vapor → rain condensation [kg/kg/s] (positive magnitude)
+"""
+@inline function rain_condensation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P,
+                                        transport=air_transport_properties(T, P))
+    FT = typeof(qʳ)
+    prp = p3.process_rates
+
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = clamp_positive(nʳ)
+
+    # Only condense in supersaturated conditions with existing rain
+    S = qᵛ / max(qᵛ⁺ˡ, FT(1e-10))
+    is_supersaturated = (S > 1) & (qʳ_eff > FT(1e-14))
+
+    # Thermodynamic constants (same as rain evaporation)
+    Rᵛ = FT(vapor_gas_constant(ThermodynamicConstants()))
+    Rᵈ = FT(dry_air_gas_constant(ThermodynamicConstants()))
+    L_v = FT(2.5e6)
+    K_a = transport.K_a
+    D_v = transport.D_v
+    nu  = transport.nu
+
+    ε = Rᵈ / Rᵛ
+    qᵛ⁺ˡ_safe = max(qᵛ⁺ˡ, FT(1e-30))
+    e_s = P * qᵛ⁺ˡ_safe / (ε + qᵛ⁺ˡ_safe * (1 - ε))
+
+    # Thermodynamic resistance (Mason 1971)
+    A = L_v / (K_a * T) * (L_v / (Rᵛ * T) - 1)
+    B = Rᵛ * T / (e_s * D_v)
+    thermodynamic_factor = max(A + B, FT(1e-10))
+
+    # Diffusional growth rate (reuse evaporation ventilation integral)
+    # Positive when S > 1 (condensation)
+    raw_rate = rain_evaporation_rate(p3.rain.evaporation, qʳ_eff, nʳ_eff, S,
+                                      thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
+    cond_rate = clamp_positive(raw_rate)
+
+    # Limit condensation to available vapor (Fortran: min(qrcon, qv*i_dt))
+    τ = prp.sink_limiting_timescale
+    max_cond = clamp_positive(qᵛ - qᵛ⁺ˡ) / τ
+    cond_rate = min(cond_rate, max_cond)
+
+    return ifelse(is_supersaturated, cond_rate, zero(FT))
+end

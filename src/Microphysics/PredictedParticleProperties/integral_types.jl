@@ -200,9 +200,26 @@ struct MeanDensity <: AbstractBulkPropertyIntegral end
     Reflectivity <: AbstractBulkPropertyIntegral
 
 Radar reflectivity factor (6th moment of size distribution).
-Corresponds to `refl` in P3 Fortran code.
+Corresponds to `refl` in P3 Fortran code (sum5 convention, no Rayleigh prefactor).
 """
 struct Reflectivity <: AbstractBulkPropertyIntegral end
+
+"""
+    RayleighReflectivity <: AbstractBulkPropertyIntegral
+
+Rayleigh-scattering radar reflectivity including the dielectric factor ``|K_w|^2``.
+Corresponds to `refl2` in P3 Fortran code (create_p3_lookupTable_1.f90, lines 1227-1268).
+
+For dry ice (Fl = 0): uses ``0.1892 × (6/(π ρ_i))^2 × m^2`` where ``0.1892 ≈ |K_w|^2``
+is the dielectric factor for liquid water at 10 cm wavelength.
+
+For pure liquid (Fl = 1): uses ``D^6`` (equivalent radar reflectivity for water drops).
+
+For intermediate Fl: linearly blends the dry-ice and pure-liquid formulas.
+The Fortran uses full Maxwell-Garnett dielectric mixing via `rayleigh_soak_wetice`
+for intermediate Fl — this is a linear approximation.
+"""
+struct RayleighReflectivity <: AbstractBulkPropertyIntegral end
 
 """
     SlopeParameter <: AbstractBulkPropertyIntegral
@@ -271,6 +288,16 @@ struct IceAerosolCollection <: AbstractCollectionIntegral end
 #####
 ##### m6rime, m6dep, m6dep1, m6mlt1, m6mlt2, m6mlt_all1, m6mlt_all2, m6agg, m6shd, m6sub, m6sub1 in Fortran
 #####
+##### M7 NORMALIZATION NOTE (Fortran create_p3_lookupTable_1.f90, lines 2127-2134):
+##### Fortran normalizes M6 integrals as:
+#####   value = 1/mom3² × sum_M6 - K × mom6/mom3³ × sum_M3
+##### where K differs by process:
+#####   K = 2: deposition, riming, shedding, rain collection (dM0/dt = 0)
+#####   K = 1: sublimation, melting (dM0/dt ≠ 0, includes number change contribution)
+##### The integrands below compute the raw sum_M6 terms; the K factor and mom3/mom6
+##### normalization are applied during tabulation or at runtime.
+##### When Julia generates its own tables, the tabulation code must apply the correct K.
+#####
 
 """
     SixthMomentRime <: AbstractSixthMomentIntegral
@@ -285,6 +312,7 @@ struct SixthMomentRime <: AbstractSixthMomentIntegral end
 
 Sixth moment tendency from vapor deposition.
 Corresponds to `m6dep` in P3 Fortran code.
+M7: Normalization uses K = 2 (deposition does not change particle number).
 """
 struct SixthMomentDeposition <: AbstractSixthMomentIntegral end
 
@@ -301,6 +329,7 @@ struct SixthMomentDeposition1 <: AbstractSixthMomentIntegral end
 
 Sixth moment tendency from melting (term 1).
 Corresponds to `m6mlt1` in P3 Fortran code.
+M7: Normalization uses K = 1 (melting changes particle number).
 """
 struct SixthMomentMelt1 <: AbstractSixthMomentIntegral end
 
@@ -355,6 +384,7 @@ struct SixthMomentShedding <: AbstractSixthMomentIntegral end
 
 Sixth moment tendency from sublimation.
 Corresponds to `m6sub` in P3 Fortran code.
+M7: Normalization uses K = 1 (sublimation changes particle number via complete removal).
 """
 struct SixthMomentSublimation <: AbstractSixthMomentIntegral end
 

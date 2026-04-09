@@ -111,6 +111,7 @@ export
     MeanDiameter,
     MeanDensity,
     Reflectivity,
+    RayleighReflectivity,
     SlopeParameter,
     ShapeParameter,
     SheddingRate,

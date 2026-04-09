@@ -276,6 +276,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         splintering_temperature_low = 265.15,
         splintering_temperature_high = 270.15,
         splintering_temperature_peak = 268.15,
+        # Hallett-Mossop: 3.5e5 splinters/g × 1000 g/kg = 3.5e8 splinters/kg
+        # (Fortran: 35.e+4 * 1000. — the ×1000 kg→g conversion is baked in)
         splintering_rate = 3.5e8,
         # C6: Fortran Dinit_HM = 10e-6 m; mass = π/6 × 900 × (10e-6)³ = 4.712e-13 kg
         splintering_crystal_mass = π/6 * 900 * (10e-6)^3,

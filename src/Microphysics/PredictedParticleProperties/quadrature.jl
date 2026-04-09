@@ -808,6 +808,14 @@ end
 end
 
 # Size-regime-specific ventilation for melting
+# C4 PARITY NOTE: Fortran P3 v5.5.0 (create_p3_lookupTable_1.f90, lines 1985-2006) uses
+# the **dry ice PSD** (n0d, mu_id, lamd) for melting integrals, NOT the wet (total) PSD.
+# The dry PSD from Cholette et al. (2019) represents only the ice portion when Fl > 0.
+# The Julia implementation currently uses the wet PSD via `size_distribution(D, state)`.
+# For Fl = 0, wet = dry (no difference). For Fl > 0, the wet PSD overestimates melting
+# because it includes liquid water in the distribution shape.
+# This only affects Julia-generated tables; runtime reads Fortran-generated tables.
+# TODO: Add dry PSD parameters to IceSizeDistributionState for Fl > 0 table generation.
 @inline function integrand(::SmallIceVentilationConstant, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
     fᵛᵉ = melt_ventilation_factor(D, state, true, thresholds)
@@ -927,7 +935,6 @@ end
 # Reflectivity (Fortran `refl` / sum5 convention):
 # refl = ∫ (6/(π ρ_ice))² × m(D)² × N'(D) dD
 # No Rayleigh prefactor — matches Fortran Table 1 `refl` (sum5).
-# Fortran `refl2` (with 0.1892 prefactor) is a separate diagnostic not yet implemented.
 @inline function integrand(::Reflectivity, D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
     ρ_ice = FT(917.0)
@@ -935,6 +942,33 @@ end
     m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
     return K_refl * m^2 * Np
+end
+
+# M9: Rayleigh-scattering reflectivity (Fortran `refl2` convention):
+# Includes the dielectric factor |K_w|² = 0.1892 for liquid water at 10 cm wavelength.
+# Fortran (create_p3_lookupTable_1.f90, lines 1227-1268) uses three regimes:
+#   Fl = 0:           0.1892 × (6/(π×917))² × m² × N'(D)
+#   Fl intermediate:  rayleigh_soak_wetice (Maxwell-Garnett mixing)
+#   Fl = 1:           D⁶ × N'(D)  (pure water drops)
+# This implementation uses linear blending for intermediate Fl as an approximation.
+@inline function integrand(::RayleighReflectivity, D, state::IceSizeDistributionState, thresholds)
+    FT = typeof(D)
+    ρ_ice = FT(917.0)
+    Fˡ = state.liquid_fraction
+
+    m = particle_mass(D, state, thresholds)
+    Np = size_distribution(D, state)
+
+    # Dry ice: |K_w|² × (6/(π ρ_ice))² × m²
+    K_w_sq = FT(0.1892)
+    K_refl = (6 / (FT(π) * ρ_ice))^2
+    refl_ice = K_w_sq * K_refl * m^2 * Np
+
+    # Pure water: D⁶ (equivalent reflectivity for water drops)
+    refl_water = D^6 * Np
+
+    # Linear blend (approximation; Fortran uses Maxwell-Garnett for 0 < Fl < 1)
+    return (1 - Fˡ) * refl_ice + Fˡ * refl_water
 end
 
 # Slope parameter λ - diagnostic, not an integral
@@ -1167,6 +1201,7 @@ end
 # Sixth moment melting tendencies
 # Fortran (line 1991): sum5 = ∫ capm × 6D^5 × fac1 × N'(D) / dmdD dD  (D ≤ D_crit)
 # melt1 = constant ventilation, melt2 = enhanced ventilation (for small ice, D ≤ D_crit)
+# C4 PARITY NOTE: Same dry PSD issue as mass melting integrands above — see SmallIceVentilationConstant.
 @inline function integrand(::SixthMomentMelt1, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
     fᵛᵉ = melt_ventilation_factor(D, state, true, thresholds)
@@ -1277,29 +1312,41 @@ end
 ##### Ice-rain collection integrals
 #####
 
-# Ice-rain collection integrands: only ice particles with D ≥ 100 μm contribute
-# to riming collection (Fortran P3 v5.5.0: create_p3_lookupTable_1.f90, line 1548).
+# M8 PARITY NOTE: These are **single-integral approximations** over the ice PSD.
+# The Fortran P3 (create_p3_lookupTable_1.f90, lines 1820-1870) computes a DOUBLE
+# integral over both the ice PSD and a binned rain distribution, using the full
+# gravitational collection kernel: K = (√A_ice + √A_rain)² × |V_ice - V_rain|.
+# These single-integral integrands omit: (1) rain PSD integration, (2) rain
+# cross-section, (3) differential fall speed. They are retained as fallback
+# integrands for unit tests; the runtime uses Fortran-generated Table 2 data.
+# The 100 μm threshold applies only to cloud-riming (Fortran line 1548), NOT to
+# ice-rain collection which integrates over ALL ice sizes.
+
+# Rain mass collected by ice (Fortran sum2/qrrain/f1pr08):
+# Single-integral approximation: ∫ V(D) A(D) N'(D) dD (ice-side kernel only)
 @inline function integrand(::IceRainMassCollection, D, state::IceSizeDistributionState, thresholds)
-    FT = typeof(D)
     V = terminal_velocity(D, state, thresholds)
     A = particle_area(D, state, thresholds)
-    m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
-    return ifelse(D < FT(100e-6), zero(FT), V * A * m * Np)
+    return V * A * Np
 end
 
+# Rain number collected by ice (Fortran sum1/nrrain/f1pr07):
+# Same as mass but without rain mass weighting (handled by double integral).
 @inline function integrand(::IceRainNumberCollection, D, state::IceSizeDistributionState, thresholds)
-    FT = typeof(D)
     V = terminal_velocity(D, state, thresholds)
     A = particle_area(D, state, thresholds)
     Np = size_distribution(D, state)
-    return ifelse(D < FT(100e-6), zero(FT), V * A * Np)
+    return V * A * Np
 end
 
+# Sixth moment change from rain collection (Fortran sum3/m6collr):
+# Fortran: ∫∫ K × 6D^5 × m_rain × N'_ice × N'_rain / dmdD dD1 dD2
+# Single-integral approximation: use D^5 / dmdD (M6 Jacobian) instead.
 @inline function integrand(::IceRainSixthMomentCollection, D, state::IceSizeDistributionState, thresholds)
-    FT = typeof(D)
     V = terminal_velocity(D, state, thresholds)
     A = particle_area(D, state, thresholds)
     Np = size_distribution(D, state)
-    return ifelse(D < FT(100e-6), zero(FT), D^6 * V * A * Np)
+    dmdD = particle_mass_derivative(D, state, thresholds)
+    return 6 * D^5 * V * A * Np / dmdD
 end

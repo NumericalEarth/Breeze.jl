@@ -447,6 +447,49 @@ factor that accounts for latent heating during phase change.
     return max(Sᶜᵒⁿᵈ, Sᶜᵒⁿᵈ_min)
 end
 
+"""
+    ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+
+Compute CCN activation rate for the 1-moment (prescribed Nᶜ) case.
+
+Following Fortran P3 v5.5.0 (lines 3953-3963): when the air is supersaturated
+and the cloud mass is below the minimum threshold for the prescribed droplet
+concentration, a seed mass is created. The target cloud mass is
+``N_c / ρ × m_{\\text{drop}}`` where ``m_{\\text{drop}} = (4π/3) ρ_w r^3``
+for ``r = 1`` μm. The rate is limited by the available supersaturation.
+
+# Returns
+- Rate of vapor → cloud liquid conversion from CCN activation [kg/kg/s]
+"""
+@inline function ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+    FT = typeof(qᶜˡ)
+    prp = p3.process_rates
+
+    # Mass of a newly formed cloud droplet (Fortran cons7: radius 1 μm)
+    cons7 = FT(4π / 3 * 1000 * (1e-6)^3)
+
+    # Target cloud mass for prescribed droplet concentration
+    target_qc = Nᶜ / ρ * cons7
+
+    # Deficit: how much mass is needed to reach the minimum
+    deficit = clamp_positive(target_qc - clamp_positive(qᶜˡ))
+
+    # Psychrometric correction (consistent with cloud_condensation_rate)
+    ℒˡ = liquid_latent_heat(T, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    dqᵛ⁺_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
+    Γˡ = 1 + (ℒˡ / cᵖᵐ) * dqᵛ⁺_dT
+
+    # Limit by available supersaturation (Fortran: min(tmp1, (Qv_cld-dumqvs)/ab))
+    max_from_ss = clamp_positive((qᵛ - qᵛ⁺ˡ) / Γˡ)
+    rate = min(deficit, max_from_ss) / prp.sink_limiting_timescale
+
+    # Only activate when supersaturated (Fortran threshold: sup_cld > 1e-6)
+    is_supersaturated = (qᵛ - qᵛ⁺ˡ) / max(qᵛ⁺ˡ, FT(1e-10)) > FT(1e-6)
+    return ifelse(is_supersaturated, rate, zero(FT))
+end
+
 #####
 ##### Ice deposition and sublimation
 #####
@@ -749,6 +792,9 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     cond = cloud_condensation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, constants)
 
+    # C5: CCN activation (1-moment, prescribed Nᶜ)
+    ccn_act = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+
     # =========================================================================
     # Phase 1: Rain processes
     # =========================================================================
@@ -761,6 +807,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     autoconv = rain_autoconversion_rate(p3, qᶜˡ, Nᶜ, ρ)
     accr = rain_accretion_rate(p3, qᶜˡ, qʳ)
     rain_evap = rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P, transport)
+    # C6: Rain condensation (vapor → rain when supersaturated)
+    rain_cond = rain_condensation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P, transport)
     rain_self = rain_self_collection_rate(p3, qʳ, nʳ, ρ)
     rain_br = rain_breakup_rate(p3, qʳ, nʳ, rain_self)
 
@@ -1082,8 +1130,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         wg_cloud, wg_rain,
         # D8: Wet growth shedding → rain
         wg_shed, wg_shed_n,
-        # M9: CCN activation and rain condensation stubs
-        zero(FT), zero(FT),
+        # C5/C6: CCN activation and rain condensation
+        ccn_act, rain_cond,
         # D1: Coating condensation/evaporation
         coat_cond, coat_evap
     )
