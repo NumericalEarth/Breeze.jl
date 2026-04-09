@@ -125,7 +125,11 @@ using Oceananigans.Fields: interior
         @test tendency_ρzⁱ(coat_cond_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, λ_r) ≈ expected_coat_cond
         @test tendency_ρzⁱ(coat_evap_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, λ_r) ≈ expected_coat_evap
 
-        expected_rain_rime = ρ * lt2.sixth_moment(log_m, log10(λ_r), Fᶠ, Fˡ, ρᶠ, μ) * FT(1e-7) / nⁱ
+        # Rain riming Z uses Table 2 sixth_moment divided by the mass kernel (Fortran convention:
+        # zqrcol = N0r × m6collr × env, while qrcol = N0r × 10^f1pr08 × Ni × env).
+        log_λ_r = log10(λ_r)
+        rain_mass_kernel = exp10(lt2.mass(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ))
+        expected_rain_rime = ρ * lt2.sixth_moment(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ) * FT(1e-7) / (nⁱ * rain_mass_kernel)
         fallback_cloud_rime = ρ * lt1.sixth_moment.rime(log_m, Fᶠ, Fˡ, ρᶠ, μ) * FT(1e-7) / nⁱ
         rain_rime_tendency = tendency_ρzⁱ(rain_rime_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, λ_r)
 
