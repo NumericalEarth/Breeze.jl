@@ -28,6 +28,9 @@ build/
 Manifest.toml
 Manifest-v*.toml
 
+# P3 lookup tables (downloaded by scripts/download_p3_tables.jl)
+data/P3_LUT/*.dat*
+
 # output files
 *.jld2
 *.nc
