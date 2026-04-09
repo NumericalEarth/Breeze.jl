@@ -211,7 +211,7 @@ export
     enforce_diameter_bounds
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDFIELDS
-using SpecialFunctions: loggamma, gamma_inc, gamma
+using SpecialFunctions: loggamma, gamma_inc
 
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU

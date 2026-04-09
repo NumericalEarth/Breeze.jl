@@ -236,9 +236,12 @@ prognostic `Nᶜ` is implemented in Breeze, this cap can be removed.
 # Example
 
 ```jldoctest
+using Logging
 using Breeze.Microphysics.PredictedParticleProperties:
     homogeneous_freezing_cloud_rate
-p3 = PredictedParticlePropertiesMicrophysics()
+p3 = with_logger(NullLogger()) do
+    PredictedParticlePropertiesMicrophysics()
+end
 Q, N = homogeneous_freezing_cloud_rate(p3, 1e-3, 100e6, 230.0, 1.2)
 typeof(Q)
 
@@ -301,9 +304,12 @@ following the Fortran P3 v5.5.0 treatment of
 # Example
 
 ```jldoctest
+using Logging
 using Breeze.Microphysics.PredictedParticleProperties:
     homogeneous_freezing_rain_rate
-p3 = PredictedParticlePropertiesMicrophysics()
+p3 = with_logger(NullLogger()) do
+    PredictedParticlePropertiesMicrophysics()
+end
 Q, N = homogeneous_freezing_rain_rate(p3, 1e-3, 1e4, 220.0)
 typeof(Q)
 
