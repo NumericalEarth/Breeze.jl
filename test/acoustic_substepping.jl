@@ -42,9 +42,11 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
         acoustic = AcousticSubstepper(grid, td)
         @test acoustic.substeps === nothing  # adaptive by default
         @test acoustic.forward_weight ≈ FT(0.6)
-        # Default damping is PressureProjectionDamping(coefficient = 0.1)
+        # Default damping is PressureProjectionDamping(coefficient = 0.5),
+        # the BCI-tuned value from the empirical sweep documented in
+        # `docs/src/appendix/bw_dt_sweep_results.md`.
         @test acoustic.damping isa PressureProjectionDamping
-        @test acoustic.damping.coefficient ≈ FT(0.1)
+        @test acoustic.damping.coefficient ≈ FT(0.5)
         @test acoustic.virtual_potential_temperature isa Oceananigans.Fields.Field
     end
 
@@ -254,8 +256,9 @@ end
     grid = RectilinearGrid(acoustic_test_arch; size=(8, 8, 8), halo=(5, 5, 5),
                            x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
 
-    # Use nonzero acoustic_damping_coefficient to exercise _acoustic_divergence_damping! kernel
-    td = SplitExplicitTimeDiscretization(substeps=8, acoustic_damping_coefficient=FT(0.5))
+    # Exercise the divergence-damping path with the typed AcousticDampingStrategy.
+    td = SplitExplicitTimeDiscretization(substeps=8,
+                                         damping=ThermodynamicDivergenceDamping(coefficient=FT(0.5)))
     dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
     model = AtmosphereModel(grid; advection=WENO(), dynamics,
                             timestepper=:AcousticRungeKutta3)

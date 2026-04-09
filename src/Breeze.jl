@@ -94,6 +94,7 @@ export
     initial_aerosol_number,
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
+    ConstantRateCondensateFormation,
 
     # BoundaryConditions
     BulkDrag,

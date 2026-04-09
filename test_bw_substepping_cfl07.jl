@@ -96,14 +96,10 @@ T₀_ref = 250.0
 θ_ref(z) = T₀_ref * exp(g * z / (cᵖᵈ * T₀_ref))
 
 coriolis = HydrostaticSphericalCoriolis(rotation_rate=Ω)
-# Use PressureProjectionDamping(0.5) explicitly (stronger than the new default
-# 0.1) — this is the empirical winner for the DCMIP2016 BW from the CFL=0.7
-# four-strategy comparison in `bw_dt_sweep_results.md`. The new default 0.1
-# is too weak for this configuration: it crashes during BCI peak around day 5
-# at Nz=30 because the gravity-wave / acoustic-noise growth outpaces the
-# milder forward-extrapolation projection.
-td = SplitExplicitTimeDiscretization(;
-    damping = PressureProjectionDamping(coefficient = 0.5))
+# Use the Breeze default — PressureProjectionDamping(0.5), the empirical winner
+# for the DCMIP2016 BW from the CFL=0.7 four-strategy comparison in
+# `bw_dt_sweep_results.md`.
+td = SplitExplicitTimeDiscretization()
 @printf "\nDamping: %s(coefficient=%.2f)\n" typeof(td.damping).name.name td.damping.coefficient
 
 dynamics = CompressibleDynamics(td;

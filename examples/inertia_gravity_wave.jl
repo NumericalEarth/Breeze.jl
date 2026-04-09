@@ -39,7 +39,8 @@
 # 2. **Compressible (explicit)**: Fully compressible with explicit time stepping (small Δt)
 # 3. **Boussinesq**: Anelastic with constant reference density
 # 4. **Split-explicit (adaptive substeps)**: WS-RK3 acoustic substepping at advective Δt with the
-#    Breeze default damping ([`PressureProjectionDamping`](@ref) at ``β_d = 0.5``) and an
+#    Breeze default damping ([`PressureProjectionDamping`](@ref) at ``β_d = 0.5``, the
+#    BW-tuned literal ERF/CM1/WRF projection form) and an
 #    auto-computed substep count
 # 5. **Split-explicit (Thermodynamic damping, smdiv = 0.05)**: WS-RK3 with the MPAS Klemp 2018
 #    momentum-correction damping at the lower coefficient ``\mathrm{smdiv} = 0.05``
@@ -116,8 +117,8 @@ boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
 # Case 4: Split-explicit with adaptive substeps at the advective time step.
 # The number of acoustic substeps is computed automatically from the horizontal
 # acoustic CFL condition each step: `N = ceil(safety_factor · Δt · ℂᵃᶜ / Δx_min)`.
-# Defaults to the new Breeze damping ([`PressureProjectionDamping`](@ref) at
-# ``β_d = 0.1``, the WRF/CM1 standard) and the WS-RK3 outer loop
+# Defaults to the Breeze divergence damping ([`PressureProjectionDamping`](@ref) at
+# ``β_d = 0.5``, tuned on the DCMIP2016 baroclinic wave) and the WS-RK3 outer loop
 # ([`AcousticRungeKutta3`](@ref)).
 adaptive_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                           surface_pressure,

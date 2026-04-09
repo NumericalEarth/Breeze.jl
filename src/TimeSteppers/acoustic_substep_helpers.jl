@@ -122,6 +122,68 @@ end
 end
 
 #####
+##### Slow-tendency freeze policy
+#####
+##### MPAS computes `tend_rho` and `tend_u_euler` (the horizontal PGF) at
+##### `rk_step == 1` and freezes them across the remaining stages. MPAS's
+##### `tend_theta` is computed every stage in perturbation form
+##### `(rw × θ + (rw_save - rw) × θ_save)` and additionally picks up physics
+##### tendencies (microphysics latent heat, radiation) every stage. We mimic
+##### this by:
+#####
+#####   1. snapshotting `Gⁿ.ρ` and the horizontal PGF at stage 1, and
+#####   2. restoring `Gⁿ.ρ` at stages 2 and 3 after the per-stage
+#####      `compute_slow_*_tendencies!` calls.
+#####
+##### **`Gⁿ.ρθ` is NOT snapshotted.** It is recomputed every stage by
+##### `compute_thermodynamic_tendency!`, which is essential for moist runs:
+##### the microphysics latent heat in `scalar_tendency` is a strong function
+##### of the (per-stage) state, and freezing it at stage 1 causes condensate
+##### sources to drift wildly out of step with the thermodynamic state and
+##### blow up within a few outer steps. The dry-case cost is small: the
+##### advective contribution to `Gⁿ.ρθ` only changes by O(Δt × Gρθ̇), which is
+##### well within the WS-RK3 truncation envelope.
+#####
+##### `Gⁿ.ρu` / `Gⁿ.ρv` are recomputed every stage with `SlowTendencyMode`
+##### (which zeroes the PGF), and the frozen horizontal PGF snapshot is added
+##### back on top via `add_horizontal_pgf!`. `Gⁿ.ρw` is not snapshotted: its
+##### `tend_w_euler` is frozen by the substepper's `convert_slow_tendencies!`
+##### kernel, and the per-stage recomputation of `w` advection is needed for
+##### accuracy. Tracer entries (beyond ρ, ρu, ρv, ρw, ρθ) are not touched, so
+##### moisture/scalar transport picks up per-stage updates.
+
+"""
+$(TYPEDSIGNATURES)
+
+Snapshot the slow tendencies that the WS-RK3 freeze policy holds constant
+across stages: `Gⁿ.ρ` and the horizontal pressure gradient force. Called
+once per outer step at WS-RK3 stage 1. `Gⁿ.ρθ` is intentionally not
+snapshotted — see the freeze-policy comment above for the moist-physics
+rationale.
+"""
+function snapshot_slow_tendencies!(snap, model)
+    Gⁿ = model.timestepper.Gⁿ
+    parent(snap.ρ) .= parent(Gⁿ.ρ)
+    snapshot_horizontal_pgf!(snap.ρu, snap.ρv, model)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Restore the snapshotted scalar slow tendency (`Gⁿ.ρ`) onto the model
+timestepper. Called at WS-RK3 stages 2 and 3 after
+`compute_slow_scalar_tendencies!` so the substep loop sees the same density
+tendency as stage 1. `Gⁿ.ρθ` is *not* restored — the per-stage
+recomputation is what makes microphysics latent heat work.
+"""
+function restore_slow_tendencies!(snap, model)
+    Gⁿ = model.timestepper.Gⁿ
+    parent(Gⁿ.ρ) .= parent(snap.ρ)
+    return nothing
+end
+
+#####
 ##### Slow density and thermodynamic tendencies
 #####
 

@@ -124,16 +124,19 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                                                             ρw = prognostic_fields.ρw))
     AS = typeof(substepper)
 
-    # Snapshot storage for the slow tendencies (Gⁿ.ρ, Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw, Gⁿ.ρθ).
+    # Snapshot storage for the slow tendencies that are frozen across stages.
     # Populated at stage 1 from the outer-step-start state and restored at
-    # stages 2 and 3 to mimic MPAS's freeze-tend_rho-at-rk_step==1 behavior.
-    # Tracer entries (beyond the first 5) are NOT stored — those should be
-    # recomputed per stage by update_state!.
+    # stages 2 and 3 to mimic MPAS's freeze-tend_rho-at-rk_step==1 and
+    # freeze-tend_u_euler-at-rk_step==1 behavior. We freeze the density
+    # tendency (`ρ`) and the horizontal PGF (stored on the `ρu` / `ρv`
+    # buffers, populated by `snapshot_horizontal_pgf!`). The thermodynamic
+    # tendency `Gⁿ.ρθ` is intentionally **not** snapshotted — see the
+    # freeze-policy comment in `acoustic_substep_helpers.jl`. Tracer entries
+    # are also not stored: they are recomputed per stage by
+    # `compute_thermodynamic_tendency!`.
     slow_tendency_snapshot = (ρ  = similar(Gⁿ.ρ),
                               ρu = similar(Gⁿ.ρu),
-                              ρv = similar(Gⁿ.ρv),
-                              ρw = similar(Gⁿ.ρw),
-                              ρθ = similar(Gⁿ.ρθ))
+                              ρv = similar(Gⁿ.ρv))
     SS = typeof(slow_tendency_snapshot)
 
     return AcousticRungeKutta3{FT, U0, TG, TI, AS, SS}(β₁, β₂, β₃, U⁰, Gⁿ,
@@ -154,12 +157,23 @@ The acoustic substep loop handles momentum, density, and the thermodynamic
 variable (``ρθ`` or ``ρe``). The substep size is constant ``Δτ = Δt / N`` across all
 stages, with the substep count varying as ``N_τ = \\mathrm{round}(β N)``.
 Remaining scalars (tracers) are updated with standard RK3.
+
+The `freeze` keyword controls the [slow-tendency freeze
+policy](@ref `snapshot_slow_tendencies!`):
+
+- `:snapshot` — snapshot ``G^n.\\rho`` and the horizontal PGF at this stage
+  (use at outer-step stage 1). ``G^n.\\rho\\theta`` is **not** snapshotted —
+  it must be recomputed every stage so that microphysics latent heat sees
+  the per-stage state.
+- `:restore`  — restore the snapshotted ``G^n.\\rho`` after the per-stage
+  `compute_slow_*_tendencies!` calls (use at stages 2, 3).
+- `:none`     — neither snapshot nor restore.
 """
-function acoustic_rk3_substep!(model, Δt, β; snapshot_slow_tendencies=false,
-                                                restore_slow_tendencies=false)
+function acoustic_rk3_substep!(model, Δt, β; freeze::Symbol = :none)
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = ts.U⁰
+    snap = ts.slow_tendency_snapshot
 
     # Prepare stage-frozen reference state (needed by slow tendency computation)
     prepare_acoustic_cache!(substepper, model)
@@ -171,43 +185,11 @@ function acoustic_rk3_substep!(model, Δt, β; snapshot_slow_tendencies=false,
     # Compute slow density and thermodynamic tendencies
     compute_slow_scalar_tendencies!(model)
 
-    # MPAS computes tend_rho ONLY at rk_step==1 and freezes it (line 5433-5450 of
-    # mpas_atm_time_integration.F). Similarly, tend_theta uses a perturbation-form
-    # advection (rw_save × theta_save + rw_p × Δθ) that's ~0 when the wave preserves θ.
-    # Both behaviors are equivalent to "compute slow tendencies once per outer step
-    # and reuse them for all RK3 stages." We snapshot Gⁿ.ρ/ρθ/ρu/ρv/ρw at stage 1 and
-    # restore at stages 2/3. Tracer tendencies (Gⁿ entries beyond the first 5) are
-    # NOT touched, so moisture/scalar transport still picks up per-stage updates.
-    Gⁿ = ts.Gⁿ
-    snap = ts.slow_tendency_snapshot
-    if snapshot_slow_tendencies
-        # MPAS computes tend_rho ONLY at rk_step==1 (line 5433-5450 of
-        # mpas_atm_time_integration.F) and freezes it. MPAS's tend_theta uses a
-        # perturbation-form advection `rw × theta + (rw_save - rw) × theta_save`
-        # that's ~0 when the wave preserves θ. MPAS also computes the horizontal
-        # pressure gradient `tend_u_euler` ONLY at rk_step==1 (line 5467) and
-        # freezes it.
-        #
-        # We snapshot:
-        #   - Gⁿ.ρ and Gⁿ.ρθ as full slow tendency snapshots (replace at stages 2/3).
-        #   - Horizontal PGF into snap.ρu/snap.ρv (these are NOT the full Gρu/v, just
-        #     the −∂p/∂x and −∂p/∂y forces). Added back to Gρu/v at every stage.
-        # The slow advection of u and v is recomputed at every stage by
-        # compute_slow_momentum_tendencies! using SlowTendencyMode (no PGF), then
-        # the frozen PGF snapshot is added on top — matching MPAS exactly.
-        # Gⁿ.ρw is not snapshotted: tend_w_euler is frozen by the substepper's
-        # convert_slow_tendencies! kernel, and the per-stage recomputation of
-        # vertical advection of w is needed for accuracy.
-        parent(snap.ρ)  .= parent(Gⁿ.ρ)
-        parent(snap.ρθ) .= parent(Gⁿ.ρθ)
-        snapshot_horizontal_pgf!(snap.ρu, snap.ρv, model)
-    end
-    if restore_slow_tendencies
-        parent(Gⁿ.ρ)  .= parent(snap.ρ)
-        parent(Gⁿ.ρθ) .= parent(snap.ρθ)
-    end
-    # Add the frozen horizontal PGF snapshot to Gρu, Gρv at every stage.
-    add_horizontal_pgf!(Gⁿ.ρu, Gⁿ.ρv, snap.ρu, snap.ρv, model)
+    # Slow-tendency freeze policy. See `snapshot_slow_tendencies!` for the
+    # MPAS-equivalence rationale.
+    freeze === :snapshot && snapshot_slow_tendencies!(snap, model)
+    freeze === :restore  && restore_slow_tendencies!(snap, model)
+    add_horizontal_pgf!(ts.Gⁿ.ρu, ts.Gⁿ.ρv, snap.ρu, snap.ρv, model)
 
     # Execute acoustic substep loop: constant Δτ = Δt/N, varying Nτ = round(β*N)
     acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰)
@@ -280,16 +262,18 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     #
     # Stage 1: U* = Uⁿ + (Δt/3) R(Uⁿ)
     #
-    # We compute the slow tendencies at stage 1 from the outer-step-start state and
-    # SNAPSHOT them. At stages 2 and 3 the snapshot is restored after compute_slow_*_
-    # tendencies! has run, so the substep loop sees the same slow tendencies as stage 1.
-    # This mimics MPAS, which computes tend_rho only at rk_step==1 and uses a
-    # perturbation-form advection for tend_theta that vanishes when the wave
-    # preserves θ. Tracer tendencies are NOT snapshotted, so moisture/scalar transport
-    # picks up per-stage updates from compute_thermodynamic_tendency!.
+    # We compute the slow tendencies at stage 1 from the outer-step-start state
+    # and SNAPSHOT Gⁿ.ρ and the horizontal PGF. At stages 2 and 3 those frozen
+    # values are restored after compute_slow_*_tendencies! has run, so the
+    # substep loop sees the same density and horizontal PGF tendencies as stage 1
+    # (MPAS computes tend_rho and tend_u_euler only at rk_step==1 and freezes
+    # them for the rest of the outer step). Gⁿ.ρθ is intentionally recomputed
+    # every stage so microphysics latent heat picks up the per-stage state —
+    # see the freeze-policy comment in acoustic_substep_helpers.jl. Tracer
+    # tendencies are also recomputed per stage by compute_thermodynamic_tendency!.
 
     compute_flux_bc_tendencies!(model)
-    acoustic_rk3_substep!(model, Δt, β₁; snapshot_slow_tendencies = true)
+    acoustic_rk3_substep!(model, Δt, β₁; freeze = :snapshot)
 
     tick_stage!(model.clock, β₁ * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
@@ -300,7 +284,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     #
 
     compute_flux_bc_tendencies!(model)
-    acoustic_rk3_substep!(model, Δt, β₂; restore_slow_tendencies = true)
+    acoustic_rk3_substep!(model, Δt, β₂; freeze = :restore)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
@@ -311,7 +295,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     #
 
     compute_flux_bc_tendencies!(model)
-    acoustic_rk3_substep!(model, Δt, β₃; restore_slow_tendencies = true)
+    acoustic_rk3_substep!(model, Δt, β₃; freeze = :restore)
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 

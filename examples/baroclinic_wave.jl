@@ -211,13 +211,10 @@ end
 # CFL — about 100× larger than the acoustic-CFL-limited Δt = 2 s of the
 # fully explicit solver.
 #
-# For the divergence damping we use [`PressureProjectionDamping`](@ref) at
-# `coefficient = 0.5` rather than the Breeze default `coefficient = 0.1`
-# (which is tuned for small-amplitude wave problems like the Skamarock-Klemp
-# inertia-gravity wave). The DCMIP2016 baroclinic wave produces large-amplitude
-# vertical velocities once the BCI develops, and the empirical CFL=0.7 sweep
-# in `bw_dt_sweep_results.md` shows that the stronger β_d = 0.5 projection is
-# the only setting that produces a clean BCI lifecycle on this configuration.
+# We rely on Breeze's default divergence damping
+# ([`PressureProjectionDamping`](@ref) at `coefficient = 0.5`), which the
+# empirical CFL=0.7 sweep in `bw_dt_sweep_results.md` selected as the only
+# setting that produces a clean BCI lifecycle on this configuration.
 #
 # We use a hydrostatically-balanced isothermal reference state at
 # `T₀_ref = 250 K` (matching the MPAS convention) so that the substepper's
@@ -230,10 +227,7 @@ coriolis = HydrostaticSphericalCoriolis(rotation_rate=Ω)
 T₀_ref = 250.0
 θ_ref(z) = T₀_ref * exp(g * z / (cᵖᵈ * T₀_ref))
 
-time_discretization = SplitExplicitTimeDiscretization(;
-    damping = PressureProjectionDamping(coefficient = 0.5))
-
-dynamics = CompressibleDynamics(time_discretization;
+dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θ_ref)
 

@@ -267,8 +267,7 @@ Fields
 
 - `substeps`: Number of acoustic substeps ``N`` per outer ``Δt``. Default `nothing` adaptively chooses ``N`` from the horizontal acoustic CFL each step. With [`ProportionalSubsteps`](@ref) the substep size is ``Δτ = Δt/N`` in every stage; with [`MonolithicFirstStage`](@ref) stage 1 instead uses one substep of size ``Δt/3``.
 - `forward_weight`: Off-centering parameter ``ω`` for the vertically implicit ``(\\rho w)''``–``(\\rho\\theta)''`` solve. ``ω > 0.5`` damps vertical acoustic modes; the MPAS off-centering is ``ε = 2ω - 1``. Default: 0.6.
-- `damping`: Acoustic divergence damping strategy ([`AcousticDampingStrategy`](@ref)). Default: [`PressureProjectionDamping`](@ref) with `coefficient = 0.1`, the literal ERF/CM1/WRF projection form at the WRF/CM1 standard coefficient. The DCMIP2016 baroclinic-wave comparison in `docs/src/appendix/bw_dt_sweep_results.md` shows that a stronger projection coefficient (`coefficient = 0.5`) gives a cleaner BCI lifecycle on that problem, but it is too aggressive for small-amplitude wave configurations like the Skamarock-Klemp 1994 inertia-gravity wave (it crashes the IGW after ~25 outer steps), so `coefficient = 0.1` is the safe default. Other options: [`ThermodynamicDivergenceDamping`](@ref) (the MPAS Klemp-Skamarock-Ha 2018 form), [`ConservativeProjectionDamping`](@ref) (cheaper algebraic variant of `PressureProjectionDamping`), or [`NoDivergenceDamping`](@ref) to disable damping entirely.
-- `acoustic_damping_coefficient`: Optional Klemp 2018 acoustic damping coefficient ``ϰ^{ac}``, applied as a post-implicit-solve velocity correction: ``u -= ϰ^{ac} c_p θ_v ∂Δπ'/∂x``. Default: 0.0.
+- `damping`: Acoustic divergence damping strategy ([`AcousticDampingStrategy`](@ref)). Default: [`PressureProjectionDamping`](@ref) with `coefficient = 0.5`, the literal ERF/CM1/WRF projection form at the empirically-tuned coefficient that produces a clean BCI lifecycle in the DCMIP2016 baroclinic-wave comparison (`docs/src/appendix/bw_dt_sweep_results.md`). For small-amplitude wave configurations like the Skamarock-Klemp 1994 inertia-gravity wave, this coefficient is more aggressive than necessary; pass `damping = PressureProjectionDamping(coefficient = 0.1)` for a milder filter. Other options: [`ThermodynamicDivergenceDamping`](@ref) (the MPAS Klemp-Skamarock-Ha 2018 form), [`ConservativeProjectionDamping`](@ref) (cheaper algebraic variant of `PressureProjectionDamping`), or [`NoDivergenceDamping`](@ref) to disable damping entirely.
 - `substep_distribution`: How acoustic substeps are distributed across the three WS-RK3 stages. One of [`ProportionalSubsteps`](@ref) (default; constant ``Δτ = Δt/N`` with stage counts ``N/3``, ``N/2``, ``N``) or [`MonolithicFirstStage`](@ref) (single substep of size ``Δt/3`` in stage 1, MPAS-A `config_time_integration_order = 3` form).
 
 See also [`ExplicitTimeStepping`](@ref) and [`VerticallyImplicitTimeStepping`](@ref).
@@ -277,14 +276,12 @@ struct SplitExplicitTimeDiscretization{N, FT, D <: AcousticDampingStrategy, AD <
     substeps :: N
     forward_weight :: FT
     damping :: D
-    acoustic_damping_coefficient :: FT
     substep_distribution :: AD
 end
 
 function SplitExplicitTimeDiscretization(; substeps = nothing,
                                            forward_weight = 0.6,
-                                           damping = PressureProjectionDamping(coefficient = 0.1),
-                                           acoustic_damping_coefficient = 0.0,
+                                           damping = PressureProjectionDamping(coefficient = 0.5),
                                            substep_distribution = ProportionalSubsteps(),
                                            divergence_damping_coefficient = nothing)
 
@@ -305,7 +302,6 @@ function SplitExplicitTimeDiscretization(; substeps = nothing,
     return SplitExplicitTimeDiscretization(substeps,
                                            forward_weight,
                                            damping,
-                                           acoustic_damping_coefficient,
                                            substep_distribution)
 end
 
