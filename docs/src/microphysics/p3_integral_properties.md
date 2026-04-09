@@ -336,20 +336,18 @@ For efficiency in simulations, integrals are organized into three Breeze lookup-
 - `lookupTable_3`: three-moment diagnostic lookup for `μᶦ`, `λᶦ`, and companion fields
 
 ```@example p3_integrals
-using Oceananigans: CPU
+using Logging: NullLogger, with_logger
 
-# Create tabulated fall speed integrals
-params = LookupTable1Parameters(Float64;
-    number_of_mass_points = 10,
-    number_of_rime_fraction_points = 3,
-    number_of_liquid_fraction_points = 2,
-    number_of_quadrature_points = 64)
-fs = IceFallSpeed()
-fs_tab = tabulate(fs, CPU(), params)
+# The default constructor reads Fortran ASCII lookup tables
+# (downloaded automatically on first use).
+p3 = with_logger(NullLogger()) do
+    PredictedParticlePropertiesMicrophysics()
+end
 
-println("Tabulated fall speed integrals:")
-println("  Table summary: $(summary(fs_tab.number_weighted))")
-println("  Sample value: $(fs_tab.number_weighted.table[5, 2, 1, 3])")
+fs = p3.ice.fall_speed
+println("Tabulated fall speed integrals from Fortran tables:")
+println("  Number-weighted: $(typeof(fs.number_weighted))")
+println("  Mass-weighted:   $(typeof(fs.mass_weighted))")
 ```
 
 ## Summary
