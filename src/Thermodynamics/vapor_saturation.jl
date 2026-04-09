@@ -215,7 +215,7 @@ The saturated formula corresponds to equation (37) in [Pressel et al. (2015)](@c
     ρ = p / (Rᵐ * T)
     qᵛ⁺₀ = pᵛ⁺ / (ρ * Rᵛ * T)
 
-    return ifelse(qᵗ >= qᵛ⁺₀, qᵛ⁺₁, qᵛ⁺₀)
+    return ifelse(qᵗ ≥ qᵛ⁺₀, qᵛ⁺₁, qᵛ⁺₀)
 end
 
 """
@@ -308,7 +308,7 @@ equals the actual temperature and `T` is returned.
     r₁ = pᵛ⁺₁ - pᵛ
 
     # If saturated or supersaturated, dewpoint equals temperature
-    r₁ <= 0 && return T
+    r₁ ≤ 0 && return T
 
     # Second guess: lower temperature based on relative humidity
     ℋ = pᵛ / pᵛ⁺₁  # relative humidity
