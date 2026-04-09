@@ -267,13 +267,8 @@ Float64
     # Number rate: Nᶜ is [1/m³] → divide by ρ for [1/kg]
     N_hom = Nᶜ / ρ / τ_hom
 
-    # Mass-number consistency cap: cannot produce more particles than the number
-    # of minimum-size droplets that could have frozen (prevents ni explosion when
-    # Nᶜ is prescribed and qᶜˡ is trace).
-    min_drop_mass = FT(prp.minimum_cloud_drop_mass)
-    N_hom_max = Q_hom / min_drop_mass
-    N_hom = min(N_hom, N_hom_max)
-
+    # D25: Fortran has no mass-number consistency cap — it transfers all nc to ice
+    # instantaneously below the homogeneous freezing threshold.
     Q_hom = ifelse(freezing_active, Q_hom, zero(FT))
     N_hom = ifelse(freezing_active, N_hom, zero(FT))
 

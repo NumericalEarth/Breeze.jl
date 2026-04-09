@@ -169,6 +169,11 @@ function read_fortran_lookup_tables(directory::AbstractString;
     table3_fields = if three_moment && isfile(file_table3)
         parse_fortran_table_3(file_table3, FT)
     else
+        # D26: Fortran hard-stops when Table 3 is missing in 3-moment mode.
+        # Match that behavior — a silent fallback to 2-moment μ lookup would give
+        # different results than the 3-moment μ diagnostic.
+        three_moment && error("3-moment mode requested but Table 3 file not found: $file_table3. " *
+                              "Ensure the file is present and unzipped.")
         nothing
     end
 
@@ -528,11 +533,18 @@ function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
     )
 
     sixth_moment = if three_moment
+        # D32: The Fortran table file stores D ≤ D_crit filtered melt Z integrals
+        # (f1pr32/f1pr33) in the m6_melt1/m6_melt2 columns. The non-liquid-fraction
+        # zimlt path in Fortran reuses deposition tables and is dead code (log_full3mom
+        # = .false.). We set melt_all1/melt_all2 to the same file values; the all-D
+        # distinction only applies in the Julia-native quadrature path.
         (rime = ice_5d[:m6_rime],
          deposition = ice_5d[:m6_deposition],
          deposition1 = ice_5d[:m6_deposition1],
          melt1 = ice_5d[:m6_melt1],
          melt2 = ice_5d[:m6_melt2],
+         melt_all1 = ice_5d[:m6_melt1],
+         melt_all2 = ice_5d[:m6_melt2],
          aggregation = ice_5d[:m6_aggregation],
          shedding = ice_5d[:m6_shedding],
          sublimation = ice_5d[:m6_sublimation],
@@ -625,12 +637,16 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
     )
 
     sixth_moment = if three_moment
+        # D32: Fortran file stores D ≤ D_crit melt integrals (f1pr32/f1pr33).
+        # Set melt_all1/melt_all2 to the same values (all-D distinction is Julia-native only).
         IceSixthMoment(
             ice_5d[:m6_rime],
             ice_5d[:m6_deposition],
             ice_5d[:m6_deposition1],
             ice_5d[:m6_melt1],
             ice_5d[:m6_melt2],
+            ice_5d[:m6_melt1],   # melt_all1 = same as melt1 (all-D distinction is quadrature-only)
+            ice_5d[:m6_melt2],   # melt_all2 = same as melt2 (all-D distinction is quadrature-only)
             ice_5d[:m6_shedding],
             ice_5d[:m6_aggregation],
             ice_5d[:m6_sublimation],
@@ -638,7 +654,8 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
         )
     else
         IceSixthMoment(nothing, nothing, nothing, nothing,
-                        nothing, nothing, nothing, nothing, nothing)
+                        nothing, nothing, nothing, nothing,
+                        nothing, nothing, nothing)
     end
 
     lambda_limiter = IceLambdaLimiter(

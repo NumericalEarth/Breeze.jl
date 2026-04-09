@@ -25,13 +25,10 @@ Cloud droplets larger than a threshold undergo collision-coalescence to form rai
     # KK2000 uses cloud liquid directly (no threshold subtraction)
     qᶜˡ_eff = clamp_positive(qᶜˡ)
 
-    # D11: Fortran KK2000 uses (nc_permass * rho * 1e-6)^β where nc is per-mass [1/kg].
-    # Julia's Nᶜ is per-volume [1/m³]; applying ρ/ρ₀ captures the density dependence:
-    # at high altitude (low ρ), fewer droplets per volume → less autoconversion.
-    ρ₀ = prp.reference_air_density
-    Nᶜ_effective = Nᶜ * (ρ / ρ₀)
-    # m15: Fortran has no lower bound on Nc_scaled
-    Nᶜ_scaled = Nᶜ_effective / prp.autoconversion_reference_concentration
+    # D11: Fortran KK2000 uses (nc × rho × 1e-6)^β where nc is per-mass [1/kg].
+    # The nc × rho product is a unit conversion to per-volume [1/m³], so no
+    # reference-density normalization is needed — Julia's Nᶜ is already per-volume.
+    Nᶜ_scaled = Nᶜ / prp.autoconversion_reference_concentration
 
     # Khairoutdinov-Kogan (2000): ∂qʳ/∂t = k₁ × qᶜˡ^α × (Nᶜ/Nᶜ_ref)^β
     k₁ = prp.autoconversion_coefficient

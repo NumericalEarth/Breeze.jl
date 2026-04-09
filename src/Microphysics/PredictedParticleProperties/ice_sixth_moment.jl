@@ -12,12 +12,14 @@
 Sixth moment (reflectivity) tendency integrals for 3-moment ice.
 See [`IceSixthMoment`](@ref) constructor for details.
 """
-struct IceSixthMoment{RI, DP, D1, M1, M2, AG, SH, SB, S1}
+struct IceSixthMoment{RI, DP, D1, M1, M2, MA1, MA2, AG, SH, SB, S1}
     rime :: RI
     deposition :: DP
     deposition1 :: D1
     melt1 :: M1
     melt2 :: M2
+    melt_all1 :: MA1  # D32: all-D melting (no D_crit filter)
+    melt_all2 :: MA2  # D32: all-D melting (no D_crit filter)
     shedding :: SH
     aggregation :: AG
     sublimation :: SB
@@ -41,7 +43,8 @@ Each microphysical process that affects ice mass also affects M₆:
 - `deposition`, `deposition1`: Vapor deposition with/without ventilation
 
 **Melting:**
-- `melt1`, `melt2`: Two terms in the melting tendency
+- `melt1`, `melt2`: Melting tendency for D ≤ D_crit (liquid-fraction path)
+- `melt_all1`, `melt_all2`: Melting tendency for all D (non-liquid-fraction path)
 - `shedding`: Meltwater that leaves the ice particle
 
 **Collection:**
@@ -62,6 +65,8 @@ function IceSixthMoment()
         SixthMomentDeposition1(),
         SixthMomentMelt1(),
         SixthMomentMelt2(),
+        SixthMomentMeltAll1(),
+        SixthMomentMeltAll2(),
         SixthMomentShedding(),
         SixthMomentAggregation(),
         SixthMomentSublimation(),
@@ -70,4 +75,4 @@ function IceSixthMoment()
 end
 
 Base.summary(::IceSixthMoment) = "IceSixthMoment"
-Base.show(io::IO, ::IceSixthMoment) = print(io, "IceSixthMoment(9 integrals)")
+Base.show(io::IO, ::IceSixthMoment) = print(io, "IceSixthMoment(11 integrals)")

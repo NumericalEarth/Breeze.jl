@@ -151,6 +151,45 @@ function CloudDropletProperties(FT = Oceananigans.defaults.FloatType;
     )
 end
 
+"""
+    bounded_cloud_number(Nᶜ, μ_c, qᶜˡ, ρ)
+
+Return the cloud number concentration [1/m³] adjusted for cloud lambda bounds,
+matching Fortran `get_cloud_dsd2` (lines 10557-10575 of `microphy_p3.f90`).
+
+When the cloud mass is too small (or too large) to support the prescribed `Nᶜ` at
+the given `μ_c`, the lambda parameter hits its bounds. Fortran recomputes `nc` from
+the clamped lambda to maintain mass-DSD consistency. This function reproduces that
+adjustment so that downstream rates (autoconversion, immersion freezing) see a
+physically consistent cloud number.
+"""
+@inline function bounded_cloud_number(Nᶜ, μ_c, qᶜˡ, ρ)
+    FT = typeof(qᶜˡ)
+    ρ_water = FT(1000)
+    qᶜˡ_abs = max(qᶜˡ * ρ, FT(1e-20))  # absolute cloud content [kg/m³]
+
+    # Compute unclamped lambda from mass and number
+    λ_c_uncapped = cbrt(
+        FT(π) * ρ_water * Nᶜ * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
+        (FT(6) * qᶜˡ_abs)
+    )
+
+    # Fortran bounds: λ_min = (μ_c+1)×2.5e4, λ_max = (μ_c+1)×1e6
+    λ_min = (μ_c + 1) * FT(2.5e4)
+    λ_max = (μ_c + 1) * FT(1e6)
+    λ_c = clamp(λ_c_uncapped, λ_min, λ_max)
+
+    # If lambda was clamped, recompute N from the clamped lambda to maintain
+    # mass consistency: N = qᶜˡ_abs × λ^(μ+1) × 6 / (π ρ_w Γ(μ+4)/Γ(μ+1))
+    # Since Γ(μ+4)/Γ(μ+1) = (μ+3)(μ+2)(μ+1), the result simplifies to:
+    Nᶜ_bounded = qᶜˡ_abs * FT(6) * λ_c^3 /
+                 (FT(π) * ρ_water * (μ_c + 3) * (μ_c + 2) * (μ_c + 1))
+
+    # Only adjust when clamping was needed; use per-volume [1/m³] convention
+    needs_adjustment = (λ_c_uncapped < λ_min) | (λ_c_uncapped > λ_max)
+    return ifelse(needs_adjustment, Nᶜ_bounded, Nᶜ)
+end
+
 Base.summary(::CloudDropletProperties) = "CloudDropletProperties"
 
 function Base.show(io::IO, c::CloudDropletProperties)

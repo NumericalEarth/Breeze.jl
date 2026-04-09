@@ -256,7 +256,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Shedding
         shedding_timescale = 60.0,
         maximum_liquid_fraction = 0.3,
-        shed_drop_mass = 1 / 1.928e6,
+        shed_drop_mass = 1 / 1.923e6,  # m19: Fortran 1 mm drop mass (microphy_p3.f90 1.923e6 drops/kg)
 
         # Refreezing
         refreezing_timescale = 30.0,

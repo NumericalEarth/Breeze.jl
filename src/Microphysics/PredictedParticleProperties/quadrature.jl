@@ -1187,6 +1187,24 @@ end
     return ifelse(D ≤ D_crit, contribution, zero(D))
 end
 
+# D32: All-D sixth moment melting (Fortran f1pr30/f1pr31).
+# Used in the non-liquid-fraction path where all particles contribute to Z melting.
+@inline function integrand(::SixthMomentMeltAll1, D, state::IceSizeDistributionState, thresholds)
+    fᵛᵉ = melt_ventilation_factor(D, state, true, thresholds)
+    C = capacitance(D, state, thresholds)
+    Np = size_distribution(D, state)
+    dmdD = particle_mass_derivative(D, state, thresholds)
+    return 6 * D^5 * fᵛᵉ * C * Np / dmdD
+end
+
+@inline function integrand(::SixthMomentMeltAll2, D, state::IceSizeDistributionState, thresholds)
+    fᵛᵉ = melt_ventilation_factor(D, state, false, thresholds)
+    C = capacitance(D, state, thresholds)
+    Np = size_distribution(D, state)
+    dmdD = particle_mass_derivative(D, state, thresholds)
+    return 6 * D^5 * fᵛᵉ * C * Np / dmdD
+end
+
 # Sixth moment aggregation
 # The single-integral integrand is retained as a fallback. For tabulation,
 # evaluate_quadrature is specialized to compute the full double integral (M9 fix).

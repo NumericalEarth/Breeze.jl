@@ -738,7 +738,11 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     q = 𝒰.moisture_mass_fractions
 
     # Cloud droplet number concentration
-    Nᶜ = p3.cloud.number_concentration
+    # m22: Apply Fortran get_cloud_dsd2 lambda bounds to compute a mass-consistent
+    # effective Nᶜ. When cloud mass is too small for the prescribed number, Fortran
+    # reduces nc to maintain a physically consistent DSD.
+    μ_c = p3.cloud.shape_parameter
+    Nᶜ = bounded_cloud_number(p3.cloud.number_concentration, μ_c, qᶜˡ, ρ)
 
     # =========================================================================
     # Phase 1: Cloud condensation/evaporation
@@ -831,7 +835,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Shed drops are 1 mm diameter (Fortran 1.923e6 drops/kg).
     shed_active = !prp.liquid_fraction_active & is_wet_growth
     wg_shed   = ifelse(shed_active, clamp_positive(total_collection - qwgrth), zero(FT))
-    wg_shed_n = wg_shed * FT(1.923e6)
+    wg_shed_n = wg_shed / prp.shed_drop_mass
 
     # =========================================================================
     # Phase 2: Shedding and refreezing
@@ -1469,9 +1473,9 @@ end
 
 # Tabulated version: use TabulatedFunction5D lookups for Z tendencies.
 #
-# Table convention:
-# - Single-term processes (rime, aggregation, shedding): table stores dG/mass_integral.
-#   Runtime: z_table × mass_rate / Nⁱ (exact).
+# Table convention (D33 verified: both Julia-native and Fortran-read paths are consistent):
+# - Single-term processes (rime, aggregation, shedding): table stores raw dG (the
+#   PSD-integrated sixth-moment kernel). Runtime: z_table × mass_rate / Nⁱ.
 # - Two-term ventilation processes (deposition, sublimation, melting): table stores
 #   raw dG/dt values. Runtime extracts environmental factors from mass_rate / mass_table
 #   to avoid cross-term errors from the constant + enhanced ventilation split.
@@ -1524,8 +1528,16 @@ end
     complete_melting = rates.complete_melting
     env_melt = safe_divide(complete_melting, max(nⁱ * mass_melt_combined, eps(FT)), zero(FT))
 
-    z_melt1 = sixth.melt1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
-    z_melt2 = sixth.melt2(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    # D32: Fortran uses D ≤ D_crit filtered tables (f1pr32/f1pr33) for Z melting when
+    # liquid fraction is active. The non-liquid-fraction zimlt path in Fortran reuses
+    # deposition tables and is gated by log_full3mom=.false. (dead code in P3 v5.5.0).
+    # Julia provides all-D melt integrands for completeness via melt_all1/melt_all2.
+    z_melt1 = ifelse(prp.liquid_fraction_active,
+                     sixth.melt1(log_m, Fᶠ, Fˡ, ρᶠ, μ),
+                     sixth.melt_all1(log_m, Fᶠ, Fˡ, ρᶠ, μ))
+    z_melt2 = ifelse(prp.liquid_fraction_active,
+                     sixth.melt2(log_m, Fᶠ, Fˡ, ρᶠ, μ),
+                     sixth.melt_all2(log_m, Fᶠ, Fˡ, ρᶠ, μ))
     # Mass-weighted Z: each term multiplied by its own mass table (Fortran convention)
     z_melt_numerator = mass_melt_const * z_melt1 + sc_correction * mass_melt_enh * z_melt2
     z_melt_rate = z_melt_numerator * env_melt
@@ -1535,6 +1547,25 @@ end
     z_cloud_rime_rate = z_cloud_rime * rates.cloud_riming * inv_nⁱ
     z_rain_rime_rate = rain_riming_sixth_moment_tendency(lt2, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
                                                           rates.rain_riming, inv_nⁱ, z_cloud_rime)
+
+    # D31: Wet growth Z contribution.
+    # During wet growth, rates.cloud_riming and rates.rain_riming are zeroed (redirected
+    # to wet_growth_cloud/wet_growth_rain), so z_cloud_rime_rate and z_rain_rime_rate
+    # are zero. The Z contribution must come from the wet growth rates instead.
+    #
+    # Fortran (microphy_p3.f90 lines 3250-3280):
+    # - log_LiquidFrac=.TRUE.  (lines 3257-3259): zqccol/zqrcol keep full values
+    #   ("both ice riming and retention of liquid increase zitot")
+    # - log_LiquidFrac=.FALSE. (lines 3269-3280): zqccol/zqrcol reduced by shedding
+    #   fraction (1 - shed/total_collection)
+    z_wg_cloud_rate = z_cloud_rime * rates.wet_growth_cloud * inv_nⁱ
+    z_wg_rain_rate = rain_riming_sixth_moment_tendency(lt2, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
+                                                        rates.wet_growth_rain, inv_nⁱ, z_cloud_rime)
+    wg_total = rates.wet_growth_cloud + rates.wet_growth_rain
+    shed_frac = safe_divide(rates.wet_growth_shedding, max(wg_total, eps(FT)), zero(FT))
+    z_wg_rate = ifelse(prp.liquid_fraction_active,
+                       z_wg_cloud_rate + z_wg_rain_rate,
+                       (z_wg_cloud_rate + z_wg_rain_rate) * (1 - shed_frac))
 
     # --- Aggregation (single term): z_table = dG/nagg ---
     z_agg = sixth.aggregation(log_m, Fᶠ, Fˡ, ρᶠ, μ)
@@ -1559,6 +1590,7 @@ end
              z_coat_rate +
              z_cloud_rime_rate +
              z_rain_rime_rate +
+             z_wg_rate +
              z_agg_rate -
              z_shed_rate -
              z_melt_rate

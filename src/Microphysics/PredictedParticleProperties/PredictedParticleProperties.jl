@@ -127,6 +127,8 @@ export
     SixthMomentDeposition1,
     SixthMomentMelt1,
     SixthMomentMelt2,
+    SixthMomentMeltAll1,
+    SixthMomentMeltAll2,
     SixthMomentAggregation,
     SixthMomentShedding,
     SixthMomentSublimation,

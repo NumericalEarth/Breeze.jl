@@ -267,9 +267,9 @@ Integrates projected area times fall speed over the ice PSD.
 struct IceAerosolCollection <: AbstractCollectionIntegral end
 
 #####
-##### Sixth moment integrals (9)
+##### Sixth moment integrals (11)
 #####
-##### m6rime, m6dep, m6dep1, m6mlt1, m6mlt2, m6agg, m6shd, m6sub, m6sub1 in Fortran
+##### m6rime, m6dep, m6dep1, m6mlt1, m6mlt2, m6mlt_all1, m6mlt_all2, m6agg, m6shd, m6sub, m6sub1 in Fortran
 #####
 
 """
@@ -311,6 +311,28 @@ Sixth moment tendency from melting (term 2).
 Corresponds to `m6mlt2` in P3 Fortran code.
 """
 struct SixthMomentMelt2 <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentMeltAll1 <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from melting (term 1, all D).
+Unlike `SixthMomentMelt1` which restricts to D ≤ D_crit, this integrates
+over all particle diameters. Used in the non-liquid-fraction path.
+Note: Fortran P3 v5.5.0 non-liqfrac zimlt reuses deposition tables (f1pr30/f1pr31)
+and is gated by `log_full3mom=.false.` (dead code). This Julia integrand provides
+a proper all-D melt Z integral for completeness.
+"""
+struct SixthMomentMeltAll1 <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentMeltAll2 <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from melting (term 2, all D).
+Unlike `SixthMomentMelt2` which restricts to D ≤ D_crit, this integrates
+over all particle diameters. Used in the non-liquid-fraction path.
+See `SixthMomentMeltAll1` for Fortran context.
+"""
+struct SixthMomentMeltAll2 <: AbstractSixthMomentIntegral end
 
 """
     SixthMomentAggregation <: AbstractSixthMomentIntegral

@@ -193,7 +193,7 @@ for riming effects.
 
 # Logic
 
-1. Compute mean volume diameter ``D_{mvd} = (L / (\\frac{\\pi}{6} \\rho_g))^{1/3}``
+1. Compute mean volume diameter ``D_{mvd} = ((L/N) / (\\frac{\\pi}{6} \\rho_g))^{1/3}``
 2. If ``D_{mvd} \\le 0.2`` mm:
    Use Field et al. (2007) relation: ``\\mu = 0.076 \\lambda^{0.8} - 2`` (clamped [0, 6])
 3. If ``D_{mvd} > 0.2`` mm:
@@ -218,7 +218,7 @@ function P3Closure(FT = Oceananigans.defaults.FloatType;
 end
 
 """
-    shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, liquid_fraction, mass_params)
+    shape_parameter(closure, logλ, L_ice, N_ice, rime_fraction, rime_density, liquid_fraction, mass_params)
 
 Compute shape parameter μ.
 """
@@ -228,7 +228,7 @@ Compute shape parameter μ.
     return clamp(μ, 0, closure.μmax)
 end
 
-@inline function shape_parameter(closure::P3Closure, logλ, L_ice, rime_fraction, rime_density, liquid_fraction, mass::IceMassPowerLaw)
+@inline function shape_parameter(closure::P3Closure, logλ, L_ice, N_ice, rime_fraction, rime_density, liquid_fraction, mass::IceMassPowerLaw)
     FT = typeof(closure.a)
     λ = exp(logλ)
 
@@ -243,8 +243,10 @@ end
     ρ_g = (1 - liquid_fraction) * ρ_g_dry + liquid_fraction * FT(1000)
 
     # 2. Compute D_mvd (Mean Volume Diameter)
-    # D_mvd = (L / ((pi/6) * rho_g))^(1/3)
-    val = L_ice / (FT(π)/6 * ρ_g)
+    # D30: Fortran diagnostic_mui uses mean mass per particle q = qi_tot/ni_tot,
+    # then D_mvd = (q / (π/6 × ρ_g))^(1/3). L_ice alone is total mass, not per-particle.
+    mean_mass = L_ice / max(N_ice, eps(FT))
+    val = mean_mass / (FT(π)/6 * ρ_g)
     D_mvd = ifelse(val <= 0, FT(0), val^(1/3))
 
     # 3. Compute both regimes, select based on D_mvd
@@ -686,15 +688,15 @@ end
 #####
 
 """
-    log_mass_number_ratio(mass, closure, rime_fraction, rime_density, liquid_fraction, logλ, L_ice)
+    log_mass_number_ratio(mass, closure, rime_fraction, rime_density, liquid_fraction, logλ, L_ice, N_ice)
 
 Compute log(L_ice / N_ice) as a function of logλ for two-moment closure.
-Includes L_ice argument to support the P3Closure diagnostic.
+Includes L_ice and N_ice arguments to support the P3Closure D_mvd diagnostic.
 """
 function log_mass_number_ratio(mass::IceMassPowerLaw,
                                closure,
-                               rime_fraction, rime_density, liquid_fraction, logλ, L_ice)
-    μ = shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, liquid_fraction, mass)
+                               rime_fraction, rime_density, liquid_fraction, logλ, L_ice, N_ice)
+    μ = shape_parameter(closure, logλ, L_ice, N_ice, rime_fraction, rime_density, liquid_fraction, mass)
     log_L_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ;
                                      liquid_fraction)
     log_N_over_N₀ = log_gamma_moment(μ, logλ)
@@ -1036,8 +1038,8 @@ function solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
     end
 
     target = log(L_ice) - log(N_ice)
-    # Pass L_ice to log_mass_number_ratio for P3 closure diagnostic
-    f(logλ) = log_mass_number_ratio(mass, closure, rime_fraction, rime_density, liquid_fraction, logλ, L_ice) - target
+    # Pass L_ice, N_ice to log_mass_number_ratio for P3 closure D_mvd diagnostic
+    f(logλ) = log_mass_number_ratio(mass, closure, rime_fraction, rime_density, liquid_fraction, logλ, L_ice, N_ice) - target
 
     # Secant method
     x₀, x₁ = FT.(logλ_bounds)
@@ -1315,7 +1317,7 @@ function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
 
     logλ = solve_lambda(L_ice, N_ice, rime_fraction, rime_density; liquid_fraction, mass, closure)
     λ = exp(logλ)
-    μ = shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, liquid_fraction, mass)
+    μ = shape_parameter(closure, logλ, L_ice, N_ice, rime_fraction, rime_density, liquid_fraction, mass)
 
     # D9: Fortran always applies Fr-dependent diameter bounds (D_max = 5mm + 20mm×Fr²).
     # Default to DiameterBounds(FT, rime_fraction) when not explicitly specified.

@@ -356,17 +356,13 @@ using Oceananigans.Fields: interior
         @test Q_hom ≈ qcl / τ_hom
         @test N_hom ≈ Nc / ρ / τ_hom
 
-        # Mass-number consistency cap: prescribed Nc >> physical ni when qᶜˡ is trace.
-        # With Nc=750e6 m⁻³, qᶜˡ=1e-7 kg/kg, min_drop_mass=1e-12 kg:
-        #   N_uncapped = 750e6/1.2/1.0 = 6.25e8 /kg/s
-        #   N_capped   = (1e-7/1.0) / 1e-12 = 1e5 /kg/s  (cap activates)
+        # D25: Fortran has no mass-number consistency cap — all nc transfers to ice.
+        # With trace qᶜˡ and large Nc, N_hom = Nc/ρ/τ (no reduction).
         qcl_trace = FT(1e-7)
         Nc_continental = FT(750e6)
-        min_drop_mass = p3.process_rates.minimum_cloud_drop_mass
         Q_trace, N_trace = homogeneous_freezing_cloud_rate(p3, qcl_trace, Nc_continental, T_cold, ρ)
         @test Q_trace ≈ qcl_trace / τ_hom
-        @test N_trace ≈ Q_trace / min_drop_mass  # cap active: N_uncapped ≫ N_capped
-        @test N_trace < Nc_continental / ρ / τ_hom  # verify cap reduced from uncapped value
+        @test N_trace ≈ Nc_continental / ρ / τ_hom  # uncapped: full Nc transferred
 
         # Below threshold with qᶜˡ below guard (1e-14): zero rates
         Q_hom_tiny, N_hom_tiny = homogeneous_freezing_cloud_rate(p3, FT(1e-15), Nc, T_cold, ρ)
