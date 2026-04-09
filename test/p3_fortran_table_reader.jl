@@ -2,6 +2,9 @@ using Test
 using Oceananigans
 using Oceananigans.Utils: TabulatedFunction, TabulatedFunction1D
 using Breeze.Microphysics.PredictedParticleProperties
+using Breeze.Microphysics.PredictedParticleProperties:
+    ice_terminal_velocities,
+    rain_terminal_velocity_mass_weighted
 
 @testset "FortranTabulatedFunction5D rime density transform" begin
     # Create a 5D table that returns its 4th argument (rime density index)
@@ -105,4 +108,30 @@ end
     p3_2mom = PredictedParticlePropertiesMicrophysics(;
         lookup_tables=table_dir, three_moment_ice=false)
     @test p3_2mom.ice.lookup_tables.table_3 === nothing
+end
+
+@testset "Process rates with Fortran-loaded tables" begin
+    table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
+    isdir(table_dir) || error("Fortran tables not found at $table_dir")
+
+    p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+
+    FT = Float64
+    qⁱ = FT(1e-4)    # ice mass mixing ratio
+    nⁱ = FT(1e5)     # ice number
+    qʳ = FT(1e-4)    # rain mass mixing ratio
+    nʳ = FT(1e5)     # rain number
+    Fᶠ = FT(0.5)     # rime fraction
+    ρᶠ = FT(400.0)   # rime density
+    Fˡ = FT(0.0)     # liquid fraction
+    ρ  = FT(0.8)     # air density
+
+    # Ice terminal velocities should be physical
+    vⁱ = ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ)
+    @test 0 < vⁱ.mass_weighted < 50
+    @test 0 < vⁱ.number_weighted < 50
+
+    # Rain terminal velocity
+    vt_rain = rain_terminal_velocity_mass_weighted(p3, qʳ, nʳ, ρ)
+    @test 0 < vt_rain < 20
 end
