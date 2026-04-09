@@ -148,7 +148,7 @@ function read_fortran_lookup_tables(directory::AbstractString;
     has_2momI = isfile(file_2momI)
 
     if isnothing(three_moment_ice)
-        three_moment = false
+        three_moment = has_3momI
     else
         three_moment = three_moment_ice
     end
