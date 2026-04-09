@@ -5,7 +5,7 @@
 ##### and constructs Julia table objects for use in PredictedParticlePropertiesMicrophysics.
 #####
 
-export read_fortran_lookup_tables
+export read_fortran_lookup_tables, download_p3_lookup_tables
 
 using Oceananigans.Architectures: CPU, on_architecture
 using Oceananigans.Utils: TabulatedFunction
@@ -45,6 +45,56 @@ const LOG_QNORM_MIN = LOG_MASS_MIN
 const LOG_QNORM_MAX = LOG_MASS_MAX
 
 #####
+##### Download helpers
+#####
+
+const P3_TABLE_BASE_URL = "https://github.com/P3-microphysics/P3-microphysics/raw/main/lookup_tables"
+
+const P3_TABLE_FILES = [
+    "p3_lookupTable_1.dat-v6.9-2momI",
+    "p3_lookupTable_1.dat-v6.9-3momI",
+    "p3_lookupTable_3.dat-v1.4",
+]
+
+"""
+$(TYPEDSIGNATURES)
+
+Download P3 lookup tables from the official P3-microphysics GitHub repository.
+
+Downloads compressed `.gz` files and decompresses them with system `gzip`.
+Skips files that already exist. Total download size is approximately 28 MB
+(compressed); decompressed tables are approximately 140 MB.
+
+# Arguments
+
+- `destination`: Directory to store the tables (created if needed)
+"""
+function download_p3_lookup_tables(destination::AbstractString)
+    mkpath(destination)
+
+    for filename in P3_TABLE_FILES
+        outpath = joinpath(destination, filename)
+        isfile(outpath) && continue
+
+        url = "$P3_TABLE_BASE_URL/$filename.gz"
+        gzpath = outpath * ".gz"
+
+        @info "Downloading P3 lookup table $filename.gz (this only happens once)..."
+        # Downloads is a stdlib; load it lazily to avoid adding it as a declared dependency.
+        Downloads = Base.require(Base.PkgId(Base.UUID("f43a241f-c20a-4ad4-852c-f6b1247861c6"), "Downloads"))
+        Downloads.download(url, gzpath)
+
+        run(pipeline(`gzip -d -k $gzpath`))
+        rm(gzpath)
+
+        mb = round(filesize(outpath) / 1e6; digits=1)
+        @info "  Decompressed $filename ($mb MB)"
+    end
+
+    return destination
+end
+
+#####
 ##### Main entry point
 #####
 
@@ -53,6 +103,10 @@ $(TYPEDSIGNATURES)
 
 Read Fortran P3 lookup tables from ASCII files and construct a complete
 `PredictedParticlePropertiesMicrophysics` with tabulated ice integrals.
+
+If the table files are not found in `directory`, they are automatically
+downloaded from the P3-microphysics GitHub repository (approximately 28 MB
+compressed). This only happens once; subsequent calls read from disk.
 
 Auto-detects 2-moment vs 3-moment ice from file presence in `directory`.
 When `three_moment_ice=nothing` (default), prefers 3-moment if available.
@@ -64,7 +118,7 @@ since they are not included in the Fortran ASCII files.
 
 - `directory`: Path to directory containing Fortran table files
   (`p3_lookupTable_1.dat-v6.9-3momI`, `p3_lookupTable_1.dat-v6.9-2momI`,
-   `p3_lookupTable_3.dat-v1.4`)
+   `p3_lookupTable_3.dat-v1.4`). Created and populated automatically if empty.
 
 # Keyword Arguments
 
@@ -82,6 +136,11 @@ function read_fortran_lookup_tables(directory::AbstractString;
     file_3momI = joinpath(directory, "p3_lookupTable_1.dat-v6.9-3momI")
     file_2momI = joinpath(directory, "p3_lookupTable_1.dat-v6.9-2momI")
     file_table3 = joinpath(directory, "p3_lookupTable_3.dat-v1.4")
+
+    # Auto-download if tables are missing
+    if !isfile(file_3momI) && !isfile(file_2momI)
+        download_p3_lookup_tables(directory)
+    end
 
     has_3momI = isfile(file_3momI)
     has_2momI = isfile(file_2momI)
