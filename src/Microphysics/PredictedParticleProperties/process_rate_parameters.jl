@@ -165,6 +165,11 @@ struct ProcessRateParameters{FT}
     calibration_factor_deposition :: FT
     calibration_factor_sublimation :: FT
 
+    # Coupled saturation adjustment timescale (Fortran P3 v5.5.0: uses dt).
+    # Controls the exponential damping factor (1 - exp(-xx τ)) / τ in the
+    # semi-analytic coupled condensation/deposition/evaporation solve.
+    coupled_saturation_timescale :: FT
+
     # Fortran PSD-based partitioning always sends some meltwater to rain
     # (from small particles that fully melt). This floor approximates that
     # effect without requiring size-threshold table integrals (f1pr24-f1pr27).
@@ -357,6 +362,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         calibration_factor_deposition = 1.0,
         calibration_factor_sublimation = 1.0,
 
+        # Coupled saturation adjustment timescale
+        coupled_saturation_timescale = 1.0,
+
         # Fortran PSD-based partitioning always sends some meltwater to rain
         # (from small particles that fully melt). This floor approximates that
         # effect without requiring size-threshold table integrals (f1pr24-f1pr27).
@@ -445,6 +453,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         Bool(liquid_fraction_active),
         FT(calibration_factor_deposition),
         FT(calibration_factor_sublimation),
+        FT(coupled_saturation_timescale),
         FT(minimum_complete_melting_fraction)
     )
 end
