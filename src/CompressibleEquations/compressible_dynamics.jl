@@ -29,19 +29,19 @@ time-stepper is used:
 - [`VerticallyImplicitTimeStepping`](@ref): Vertical acoustics implicit, horizontal explicit
 """
 struct CompressibleDynamics{TD, D, P, FT, RS, VAS, TM, CV, CM, TRP, TRD, PF}
-    time_discretization :: TD         # SplitExplicitTimeDiscretization, ExplicitTimeStepping, or VerticallyImplicitTimeStepping
-    density :: D                      # ρ (prognostic)
-    pressure :: P                     # p = ρ R^m T (diagnostic)
-    standard_pressure :: FT           # pˢᵗ (reference pressure for potential temperature)
-    surface_pressure :: FT            # p₀ (mean pressure at the bottom of the atmosphere)
-    reference_state :: RS             # ExnerReferenceState for base-state pressure correction (or Nothing)
-    vertical_acoustic_solver :: VAS   # VerticalAcousticSolver for implicit vertical acoustics (or Nothing)
-    terrain_metrics :: TM             # TerrainMetrics for terrain-following coordinates (or Nothing)
-    Ω̃ :: CV                           # Contravariant vertical velocity diagnostic field (or Nothing)
-    ρΩ̃ :: CM                          # Contravariant vertical momentum diagnostic field (or Nothing)
-    terrain_reference_pressure :: TRP # 3D reference pressure for terrain PG (or Nothing)
-    terrain_reference_density :: TRD  # 3D reference density for terrain buoyancy (or Nothing)
-    polar_filter :: PF                # PolarFilter for LatitudeLongitudeGrid (or Nothing)
+    time_discretization :: TD                  # SplitExplicitTimeDiscretization, ExplicitTimeStepping, or VerticallyImplicitTimeStepping
+    density :: D                               # ρ (prognostic)
+    pressure :: P                              # p = ρ R^m T (diagnostic)
+    standard_pressure :: FT                    # pˢᵗ (reference pressure for potential temperature)
+    surface_pressure :: FT                     # p₀ (mean pressure at the bottom of the atmosphere)
+    reference_state :: RS                      # ExnerReferenceState for base-state pressure correction (or Nothing)
+    vertical_acoustic_solver :: VAS            # VerticalAcousticSolver for implicit vertical acoustics (or Nothing)
+    terrain_metrics :: TM                      # TerrainMetrics for terrain-following coordinates (or Nothing)
+    contravariant_vertical_velocity :: CV      # Ω̃ diagnostic field (or Nothing)
+    contravariant_vertical_momentum :: CM      # ρΩ̃ diagnostic field (or Nothing)
+    terrain_reference_pressure :: TRP          # 3D reference pressure for terrain PG (or Nothing)
+    terrain_reference_density :: TRD           # 3D reference density for terrain buoyancy (or Nothing)
+    polar_filter :: PF                         # PolarFilter for LatitudeLongitudeGrid (or Nothing)
 end
 
 """
@@ -85,8 +85,8 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     else
         reference_potential_temperature
     end
-    # vertical_acoustic_solver, Ω̃, ρΩ̃, terrain_reference_pressure, terrain_reference_density
-    # are all built later in materialize_dynamics.
+    # vertical_acoustic_solver, contravariant fields, terrain_reference_pressure,
+    # terrain_reference_density are all built later in materialize_dynamics.
     return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, ref_spec,
                                 nothing, terrain_metrics,
                                 nothing, nothing, nothing, nothing,
@@ -102,8 +102,8 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.reference_state),
                          adapt(to, dynamics.vertical_acoustic_solver),
                          adapt(to, dynamics.terrain_metrics),
-                         adapt(to, dynamics.Ω̃),
-                         adapt(to, dynamics.ρΩ̃),
+                         adapt(to, dynamics.contravariant_vertical_velocity),
+                         adapt(to, dynamics.contravariant_vertical_momentum),
                          adapt(to, dynamics.terrain_reference_pressure),
                          adapt(to, dynamics.terrain_reference_density),
                          adapt(to, dynamics.polar_filter))
@@ -169,13 +169,13 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     # Create contravariant velocity/momentum fields and terrain reference state
     # if terrain metrics are present.
     if terrain_metrics === nothing
-        Ω̃ = nothing
-        ρΩ̃ = nothing
+        contravariant_vertical_velocity = nothing
+        contravariant_vertical_momentum = nothing
         terrain_reference_pressure = nothing
         terrain_reference_density = nothing
     else
-        Ω̃ = ZFaceField(grid)
-        ρΩ̃ = ZFaceField(grid)
+        contravariant_vertical_velocity = ZFaceField(grid)
+        contravariant_vertical_momentum = ZFaceField(grid)
 
         # Build 3D reference pressure and density fields via per-column discrete
         # Exner integration. The discrete integration ensures that
@@ -201,7 +201,9 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
 
     return CompressibleDynamics(dynamics.time_discretization, density, pressure,
                                 standard_pressure, surface_pressure, reference_state,
-                                vertical_acoustic_solver, terrain_metrics, Ω̃, ρΩ̃,
+                                vertical_acoustic_solver, terrain_metrics,
+                                contravariant_vertical_velocity,
+                                contravariant_vertical_momentum,
                                 terrain_reference_pressure, terrain_reference_density,
                                 polar_filter)
 end

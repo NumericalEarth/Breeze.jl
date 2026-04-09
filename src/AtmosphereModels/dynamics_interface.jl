@@ -408,7 +408,7 @@ For standard (non-terrain) models, this is `model.momentum`.
 For terrain-following coordinates, the vertical component `ρw` is
 replaced by the contravariant vertical momentum ``\\rho \\tilde{\\Omega}``.
 """
-transport_momentum(model) = model.momentum
+advecting_momentum(model) = model.momentum
 
 #####
 ##### Auxiliary dynamics variables interface
