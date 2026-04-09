@@ -1567,6 +1567,13 @@ end
     return ρ * z_rate
 end
 
+# Fallback for 2-moment ice (no m6 tables): use simplified proportional Z tendency
+@inline function tabulated_z_tendency(ice::IceProperties,
+                                        log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
+                                        prp::ProcessRateParameters, sc_correction, p3, μ, λ_r = nothing)
+    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp)
+end
+
 @inline function rain_riming_sixth_moment_tendency(::Nothing, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
                                                    rain_riming, inv_nⁱ, z_cloud_rime)
     return z_cloud_rime * rain_riming * inv_nⁱ

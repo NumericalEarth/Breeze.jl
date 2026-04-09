@@ -1,8 +1,15 @@
 @inline function ice_rain_collection_lookup(table::P3LookupTable2, m̄, λr, Fᶠ, Fˡ, ρᶠ, μ = zero(typeof(m̄)))
-    return table.mass(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ, μ),
-           table.number(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ, μ),
-           table.sixth_moment(log10(m̄), log10(λr), Fᶠ, Fˡ, ρᶠ, μ)
+    FT = typeof(m̄)
+    log_m = log10(m̄)
+    log_λ = log10(λr)
+    z_val = _ice_rain_sixth_moment_lookup(table.sixth_moment, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ, FT)
+    return table.mass(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ),
+           table.number(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ),
+           z_val
 end
+
+@inline _ice_rain_sixth_moment_lookup(table, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ, FT) = table(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ)
+@inline _ice_rain_sixth_moment_lookup(::Nothing, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ, FT) = zero(FT)
 
 #####
 ##### Phase 2: Ice aggregation
