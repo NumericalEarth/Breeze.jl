@@ -271,7 +271,7 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
     solve_lw!(rtm.longwave_solver, rrtmgp_state)
 
     # Solve shortwave RTE
-    # Note: RRTMGP handles the case when sun is below horizon (cos_zenith <= 0)
+    # Note: RRTMGP handles the case when sun is below horizon (cos_zenith ≤ 0)
     # by producing zero fluxes internally
     solve_sw!(rtm.shortwave_solver, rrtmgp_state)
 

@@ -17,16 +17,16 @@
 A wrapper for boundary conditions that converts energy flux to potential temperature flux.
 
 When using `LiquidIcePotentialTemperatureFormulation`, the prognostic thermodynamic variable
-is `ρθ` (potential temperature density). This wrapper allows users to specify energy fluxes
+is ``ρθ`` (potential temperature density). This wrapper allows users to specify energy fluxes
 (e.g., sensible heat flux in W/m²) which are converted to potential temperature fluxes by
-dividing by the local mixture heat capacity `cᵖᵐ`.
+dividing by the local mixture heat capacity ``cᵖᵐ``.
 
 The relationship is:
 ```math
 Jᶿ = 𝒬 / cᵖᵐ
 ```
 
-where `𝒬` is the energy flux and `Jᶿ` is the potential temperature flux.
+where ``𝒬`` is the energy flux and ``Jᶿ`` is the potential temperature flux.
 
 The mixture heat capacity is computed using moisture fractions from the microphysics scheme,
 which correctly accounts for liquid and ice condensate when present.
@@ -131,8 +131,8 @@ end
 Create a boundary condition that wraps an energy flux and converts it to a potential
 temperature flux for use with `LiquidIcePotentialTemperatureFormulation`.
 
-The energy flux is divided by the local mixture heat capacity `cᵖᵐ` to obtain the
-potential temperature flux: `Jᶿ = 𝒬 / cᵖᵐ`.
+The energy flux is divided by the local mixture heat capacity ``cᵖᵐ`` to obtain the
+potential temperature flux: ``Jᶿ = 𝒬 / cᵖᵐ``.
 """
 function EnergyFluxBoundaryCondition(flux)
     ef = EnergyFluxBoundaryConditionFunction(flux, nothing, nothing, nothing, nothing)
@@ -151,14 +151,14 @@ A wrapper for boundary conditions that converts potential temperature flux to en
 
 When building a diagnostic `energy_density` field from a `PotentialTemperatureFormulation`,
 the boundary conditions on `ρθ` (potential temperature density) must be converted to
-energy flux boundary conditions by multiplying by the local mixture heat capacity `cᵖᵐ`.
+energy flux boundary conditions by multiplying by the local mixture heat capacity ``cᵖᵐ``.
 
 The relationship is:
 ```math
-𝒬 = Jᶿ × cᵖᵐ
+𝒬 = Jᶿ cᵖᵐ
 ```
 
-where `𝒬` is the energy flux and `Jᶿ` is the potential temperature flux.
+where ``𝒬`` is the energy flux and ``Jᶿ`` is the potential temperature flux.
 """
 struct ThetaFluxBoundaryConditionFunction{C, S, M, TC, D}
     condition :: C
@@ -260,8 +260,8 @@ end
 Create a boundary condition that wraps a potential temperature flux and converts it to
 an energy flux for use with diagnostic energy density fields.
 
-The potential temperature flux is multiplied by the local mixture heat capacity `cᵖᵐ`
-to obtain the energy flux: `𝒬 = Jᶿ × cᵖᵐ`.
+The potential temperature flux is multiplied by the local mixture heat capacity ``cᵖᵐ``
+to obtain the energy flux: ``𝒬 = Jᶿ cᵖᵐ``.
 """
 function ThetaFluxBoundaryCondition(flux)
     tf = ThetaFluxBoundaryConditionFunction(flux, nothing, nothing, nothing)
@@ -312,8 +312,8 @@ end
 const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
-                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants,
-                                                  microphysical_fields, specific_prognostic_moisture, temperature)
+                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                                   microphysical_fields, specific_prognostic_moisture, temperature)
     ef = bc.condition
     density = dynamics_density(dynamics)
     new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, density)
@@ -324,8 +324,8 @@ end
 const UnregularizedThetaFluxBC = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
-                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants,
-                                                  microphysical_fields, specific_prognostic_moisture, temperature)
+                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                                   microphysical_fields, specific_prognostic_moisture, temperature)
     tf = bc.condition
     density = dynamics_density(dynamics)
     new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, side, microphysics, constants, density)
@@ -341,8 +341,8 @@ set_sensible_heat_formulation(bc, formulation) = bc
 function set_sensible_heat_formulation(bc::BulkSensibleHeatFluxBoundaryCondition, formulation)
     bf = bc.condition
     new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, bf.surface_temperature,
-                                           bf.surface_pressure, bf.thermodynamic_constants,
-                                           formulation)
+                                          bf.surface_pressure, bf.thermodynamic_constants,
+                                          formulation)
     return BoundaryCondition(Flux(), new_bf)
 end
 
