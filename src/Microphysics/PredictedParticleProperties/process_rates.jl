@@ -194,67 +194,44 @@ end
 ##### Ice shape parameter (μ) from Table 3
 #####
 ##### For 3-moment P3, μ is diagnosed from (qⁱ, nⁱ, zⁱ) via Table 3.
-##### For 2-moment (no Table 3), μ is diagnosed from the P3Closure μ-λ
-##### relationship using an analytical λ approximation for unrimed aggregates.
+##### For 2-moment P3, μ is looked up from Table 1 (mu_i_save column).
 #####
 
 """
     compute_ice_shape_parameter(p3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ)
 
-Compute the ice PSD shape parameter μ.
+Compute the ice PSD shape parameter μ from lookup tables.
 
 For 3-moment P3, μ is diagnosed from the ratio Z/L (sixth moment to mass)
 using the pre-tabulated closure in Table 3.
 
-For 2-moment P3 (Table 3 absent), μ is computed from the P3Closure
-μ-λ diagnostic relationship. The slope parameter λ is approximated from
-the mean particle mass m̄ = qⁱ/nⁱ assuming the unrimed aggregate regime
-(m(D) = α Dᵝ with exponential PSD μ=0 as starting estimate):
-log λ ≈ (log α + log Γ(β+1) - log m̄) / β. This approximation is
-GPU-compatible and allocation-free (no incomplete gamma functions).
-
-All inputs are specific (per kg of air); the Table 3 lookup normalizes
-by ratios so units cancel, and the 2-moment closure is also scale-free.
+For 2-moment P3 (Table 3 absent), μ is looked up directly from Table 1
+(`bulk_properties.shape`), which stores the `mu_i_save` value computed
+during Fortran table generation.
 """
 @inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ)
     table3 = lookup_table_3(p3)
-    return _ice_shape_parameter(table3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
+    return _ice_shape_parameter(table3, p3.ice.bulk_properties.shape,
+                                qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
 end
 
-@inline function _ice_shape_parameter(table3::P3LookupTable3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
-    # Clamp to physical range to avoid table lookup at unphysical values
+# 3-moment: diagnose μ from Table 3 (independent of mu axis)
+@inline function _ice_shape_parameter(table3::P3LookupTable3, shape_table,
+                                      qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
     qⁱ_safe = max(qⁱ, eps(FT))
     nⁱ_safe = max(nⁱ, eps(FT))
     zⁱ_safe = max(zⁱ, eps(FT))
     return shape_parameter_lookup(table3, qⁱ_safe, nⁱ_safe, zⁱ_safe, Fᶠ, Fˡ, ρᶠ)
 end
 
-# Fallback: no Table 3 (2-moment mode). Compute μ from the P3Closure μ-λ diagnostic.
-# λ is approximated from m_mean = qⁱ/nⁱ assuming the unrimed aggregate regime (regime 2)
-# with exponential PSD (μ=0) as initial estimate:
-#   m_mean = α Γ(β+1) / λ^β  →  logλ = (log α + loggamma(β+1) - log m_mean) / β
-# μ is then computed from the P3Closure small-particle (Field et al. 2007) μ-λ relation
-# via TwoMomentClosure (which is identical to the P3Closure small-particle branch).
-# This is GPU-safe (no gamma_inc), allocation-free, and scale-free.
-@inline function _ice_shape_parameter(::Nothing, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
-    qⁱ_eff = max(qⁱ, FT(1e-20))
-    nⁱ_eff = max(nⁱ, FT(1e-16))
-    m_mean = qⁱ_eff / nⁱ_eff
-
-    mass = IceMassPowerLaw(FT)
-    α = mass.coefficient
-    β = mass.exponent
-
-    # logλ from mean mass via unrimed aggregate mass-diameter relation
-    logλ = (log(α) + loggamma(β + 1) - log(m_mean)) / β
-    logλ = clamp(logλ, log(FT(10)), log(FT(1e7)))
-
-    # TwoMomentClosure = P3Closure small-particle branch (Field et al. 2007):
-    # μ = clamp(a λ^b - c, 0, μmax)
-    closure = TwoMomentClosure(FT)
-    return shape_parameter(closure, logλ)
+# 2-moment with tables: look up μ from Table 1 (mu_i_save)
+@inline function _ice_shape_parameter(::Nothing, shape_table::P3Table5D,
+                                      qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
+    log_m = log10(max(qⁱ / max(nⁱ, eps(FT)), eps(FT)))
+    return shape_table(log_m, Fᶠ, Fˡ, ρᶠ, zero(FT))
 end
+
 
 #####
 ##### Thermodynamic latent heat helpers (H1)

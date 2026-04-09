@@ -130,7 +130,9 @@ since they are not included in the Fortran ASCII files.
 function read_fortran_lookup_tables(directory::AbstractString;
                                     FT::Type{<:AbstractFloat} = Float64,
                                     arch = CPU(),
-                                    three_moment_ice::Union{Bool, Nothing} = nothing)
+                                    three_moment_ice::Union{Bool, Nothing} = nothing,
+                                    water_density = 1000,
+                                    precipitation_boundary_condition = nothing)
 
     # Auto-detect 2momI vs 3momI from file presence
     file_3momI = joinpath(directory, "p3_lookupTable_1.dat-v6.9-3momI")
@@ -197,14 +199,14 @@ function read_fortran_lookup_tables(directory::AbstractString;
     process_rates = ProcessRateParameters(FT)
 
     return PredictedParticlePropertiesMicrophysics(
-        FT(1000),    # water_density
+        FT(water_density),
         FT(1e-14),   # minimum_mass_mixing_ratio
         FT(1e-16),   # minimum_number_mixing_ratio
         ice,
         rain,
         cloud,
         process_rates,
-        nothing      # precipitation_boundary_condition
+        precipitation_boundary_condition
     )
 end
 
@@ -237,7 +239,7 @@ function parse_fortran_table_1(filepath::AbstractString, three_moment::Bool, FT:
         :number_weighted, :mass_weighted, :aggregation, :rain_collection,
         :ventilation, :effective_radius, :small_q, :large_q,
         :reflectivity, :ventilation_enhanced, :mean_diameter, :mean_density,
-        :reflectivity_weighted, :_skip_lambda_i, :_skip_mu_i,
+        :reflectivity_weighted, :slope_parameter, :shape_parameter,
         :small_ice_ventilation_constant, :small_ice_ventilation_reynolds,
         :large_ice_ventilation_constant, :large_ice_ventilation_reynolds,
         :shedding,
@@ -251,7 +253,7 @@ function parse_fortran_table_1(filepath::AbstractString, three_moment::Bool, FT:
         :number_weighted, :mass_weighted, :aggregation, :rain_collection,
         :ventilation, :effective_radius, :small_q, :large_q,
         :reflectivity, :ventilation_enhanced, :mean_diameter, :mean_density,
-        :_skip_lambda_i, :_skip_mu_i,
+        :slope_parameter, :shape_parameter,
         :small_ice_ventilation_constant, :small_ice_ventilation_reynolds,
         :large_ice_ventilation_constant, :large_ice_ventilation_reynolds,
         :shedding,
@@ -263,7 +265,6 @@ function parse_fortran_table_1(filepath::AbstractString, three_moment::Bool, FT:
     # Allocate arrays for ice integrals: (Qnorm, Fr, Fl, rhor, mu)
     table1_fields = Dict{Symbol, Array{FT, 5}}()
     for name in col_names
-        startswith(String(name), "_skip") && continue
         table1_fields[name] = zeros(FT, n_q, n_fr, n_fl, n_rhor, n_mu)
     end
 
@@ -297,9 +298,7 @@ function parse_fortran_table_1(filepath::AbstractString, three_moment::Bool, FT:
                         data_offset = n_ice_idx
                         for (col_idx, name) in enumerate(col_names)
                             v = vals[data_offset + col_idx]
-                            if !startswith(String(name), "_skip")
-                                table1_fields[name][i_q, i_fr, i_fl, i_rhor, i_mu] = FT(v)
-                            end
+                            table1_fields[name][i_q, i_fr, i_fl, i_rhor, i_mu] = FT(v)
                         end
                     end
 
@@ -611,8 +610,8 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
         ice_5d[:mean_diameter],
         ice_5d[:mean_density],
         ice_5d[:reflectivity],
-        ice_base.bulk_properties.slope,     # not tabulated from Fortran
-        ice_base.bulk_properties.shape,     # not tabulated from Fortran
+        ice_5d[:slope_parameter],
+        ice_5d[:shape_parameter],
         ice_5d[:shedding]
     )
 
