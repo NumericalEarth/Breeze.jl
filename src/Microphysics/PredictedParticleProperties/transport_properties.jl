@@ -48,10 +48,11 @@ Float64
 """
 @inline function air_transport_properties(T, P)
     FT = typeof(T)
-    D_v = FT(8.794e-5) * T^FT(1.81) / P
-    mu_air = FT(1.496e-6) * T^FT(1.5) / (T + FT(120))
+    T_safe = max(T, FT(1))
+    D_v = FT(8.794e-5) * T_safe^FT(1.81) / P
+    mu_air = FT(1.496e-6) * T_safe^FT(1.5) / (T_safe + FT(120))
     K_a = FT(1414) * mu_air
     Rᵈ = FT(dry_air_gas_constant(ThermodynamicConstants()))
-    nu = mu_air * Rᵈ * T / P
+    nu = mu_air * Rᵈ * T_safe / P
     return (; D_v, K_a, nu)
 end
