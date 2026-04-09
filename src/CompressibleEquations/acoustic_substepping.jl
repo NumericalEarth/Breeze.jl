@@ -45,9 +45,6 @@
 #####   13. WS-RK3 stage substep loop driver
 #####   14. Recovery (ρ_new, w_new, momentum)
 #####
-##### See `docs/src/appendix/acoustic_substepping_overview.md` for the
-##### documentation index.
-#####
 
 using KernelAbstractions: @kernel, @index
 

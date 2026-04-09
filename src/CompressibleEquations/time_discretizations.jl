@@ -88,9 +88,6 @@ Concrete subtypes:
   - [`ConservativeProjectionDamping`](@ref) — algebraic conservative-variable
     variant of the above; equivalent at the linearized level but skips the
     EOS evaluation.
-
-See `docs/src/appendix/substepping_cleanup_and_damping_plan.md` for the full
-strategy design and the empirical comparison plan.
 """
 abstract type AcousticDampingStrategy end
 
@@ -286,10 +283,10 @@ function SplitExplicitTimeDiscretization(; substeps = nothing,
                                            divergence_damping_coefficient = nothing)
 
     # Backwards-compat: the old `divergence_damping_coefficient` kwarg was
-    # silently dropped at runtime (Phase 2 bug fix in
-    # docs/src/appendix/substepping_cleanup_and_damping_plan.md). Map it to a
-    # ThermodynamicDivergenceDamping when no explicit `damping` was passed and
-    # warn loudly so users know to migrate to the new API.
+    # silently dropped at runtime in prior releases (the substepper used a
+    # hardcoded `smdiv = 0.1`). Map it to a ThermodynamicDivergenceDamping
+    # when no explicit `damping` was passed and warn loudly so users know to
+    # migrate to the new API.
     if divergence_damping_coefficient !== nothing
         Base.depwarn("`divergence_damping_coefficient` is deprecated. " *
                      "Pass `damping = ThermodynamicDivergenceDamping(coefficient = $(divergence_damping_coefficient))` " *

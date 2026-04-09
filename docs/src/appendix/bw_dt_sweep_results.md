@@ -327,7 +327,6 @@ SplitExplicitTimeDiscretization(;
 
 ## See also
 
-- [Acoustic Substepping Cleanup and Damping Plan](substepping_cleanup_and_damping_plan.md)
 - The four-strategy comparison at fixed Δt = 1400 s lives in
   `test_bw_1deg_damping_compare.jl`,
   with the "form of damping matters at the same coefficient, but not enough
