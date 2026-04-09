@@ -571,6 +571,149 @@ The bulk rate integrates over the size distribution:
 end
 
 #####
+##### Coupled saturation adjustment (Fortran P3 v5.5.0 semi-analytic formulation)
+#####
+##### Replaces the three independent rate computations (M1: cloud condensation,
+##### M2: ice deposition, M3: rain evaporation) with a single coupled solve.
+##### Vapor is shared among cloud, rain, ice, and coating through a combined
+##### inverse timescale xx. The Bergeron effect and exponential damping emerge
+##### naturally from the coupling.
+#####
+##### With aaa = 0 (no dynamic forcing, correct for operator-split integration)
+##### and SCF = SPF = 1 (no sub-column fractions, per M13):
+#####
+#####   rate_i = ssat x damping x (eps_i / xx) / ab_i  +  Bergeron_i
+#####
+##### where damping = (1 - exp(-xx tau)) / tau.
+#####
+
+@inline function coupled_saturation_rates(
+    p3, qᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ,
+    Fᶠ, Fˡ, ρᶠ, ρ, T, P, constants, transport, q, μ_ice)
+
+    FT = typeof(qᶜˡ)
+    prp = p3.process_rates
+    τ = prp.coupled_saturation_timescale
+    τ = max(τ, FT(1e-20))
+
+    # Transport properties
+    D_v = transport.D_v
+    nu  = transport.nu
+
+    # Thermodynamic constants
+    thermodynamic_constants = isnothing(constants) ? ThermodynamicConstants(FT) : constants
+    Rᵛ = FT(vapor_gas_constant(thermodynamic_constants))
+    L_v = vaporization_latent_heat(constants, T)
+    L_s = sublimation_latent_heat(constants, T)
+    cᵖᵐ = mixture_heat_capacity(q, thermodynamic_constants)
+
+    # Psychrometric corrections (Fortran ab, abi)
+    qᵛ⁺ˡ_safe = max(qᵛ⁺ˡ, FT(1e-30))
+    qᵛ⁺ⁱ_safe = max(qᵛ⁺ⁱ, FT(1e-30))
+    dqsdT  = L_v * qᵛ⁺ˡ_safe / (Rᵛ * T^2)
+    dqsidT = L_s * qᵛ⁺ⁱ_safe / (Rᵛ * T^2)
+    ab  = 1 + (L_v / cᵖᵐ) * dqsdT
+    abi = 1 + (L_s / cᵖᵐ) * dqsidT
+
+    ρ_w = prp.liquid_water_density
+    Nᶜ  = p3.cloud.number_concentration
+
+    # --- Cloud inverse timescale (Fortran: 2pi rho dv cdist) ---
+    # cdist = Nc_m x lambda_c where lambda_c = (pi rho_w Nc_m / (6 qcl))^(1/3)
+    # Nc_m = Nc/rho is the per-mass cloud number concentration [1/kg]
+    Nc_m = Nᶜ / ρ
+    qᶜˡ_eff = clamp_positive(qᶜˡ)
+    cloud_active = qᶜˡ > FT(1e-14)
+    λc = cbrt(FT(π) * ρ_w * Nc_m / (6 * max(qᶜˡ_eff, FT(1e-20))))
+    epsc = ifelse(cloud_active, FT(2π) * ρ * D_v * Nc_m * λc, zero(FT))
+
+    # --- Rain inverse timescale (Fortran: 2pi cdistr rho dv x ventilation) ---
+    # Reuse existing rain ventilation table infrastructure.
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = clamp_positive(nʳ)
+    rain_active = (qʳ > FT(1e-14)) & (nʳ > FT(1e-16))
+    m_mean_r = safe_divide(qʳ_eff, nʳ_eff, FT(1e-12))
+    λ_r = cbrt(FT(π) * ρ_w / max(m_mean_r, FT(1e-15)))
+    λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
+    N₀ʳ = nʳ_eff * λ_r
+    # Rain PSD-integrated ventilation (same computation as rain_evaporation_rate tabulated path)
+    I_const_r = FT(RAIN_F1R) / (λ_r * λ_r)
+    Sc_cbrt = cbrt(nu / max(D_v, FT(1e-10)))
+    inv_sqrt_nu = 1 / sqrt(max(nu, FT(1e-10)))
+    I_VD_r = p3.rain.evaporation(log10(λ_r))
+    I_rain = I_const_r + FT(RAIN_F2R) * Sc_cbrt * inv_sqrt_nu * I_VD_r
+    epsr = ifelse(rain_active, FT(2π) * ρ * D_v * N₀ʳ * I_rain, zero(FT))
+
+    # --- Ice deposition inverse timescale (Fortran: 2pi rho dv x C_fv x Ni) ---
+    qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = clamp_positive(nⁱ)
+    ice_active = qⁱ > FT(1e-14)
+    has_coating = Fˡ >= FT(0.01)
+    m_mean_ice = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
+
+    # Fortran exclusive branching: deposition XOR coating, never both
+    C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
+                                   p3.ice.deposition.ventilation_enhanced,
+                                   m_mean_ice, Fᶠ, Fˡ, ρᶠ, prp, nu, D_v,
+                                   ρ_correction, p3, μ_ice)
+    eps_ice_raw = FT(2π) * ρ * D_v * C_fv * nⁱ_eff
+    epsi  = ifelse(ice_active & !has_coating, eps_ice_raw, zero(FT))
+    epsiw = ifelse(ice_active &  has_coating, eps_ice_raw, zero(FT))
+
+    # --- Combined timescale ---
+    # The ice term carries (1 + Ls/cp x dqsdT) / abi because ice deposition
+    # is driven by ice supersaturation but xx is referenced to liquid saturation.
+    xx = epsc + epsr + epsi * (1 + L_s / cᵖᵐ * dqsdT) / abi + epsiw
+    xx = max(xx, FT(1e-20))
+
+    # --- Coupled rates ---
+    ssat = qᵛ - qᵛ⁺ˡ_safe
+    sup = ssat / qᵛ⁺ˡ_safe                         # fractional supersaturation w.r.t. liquid
+    supi = qᵛ / max(qᵛ⁺ⁱ_safe, FT(1e-30)) - 1     # fractional supersaturation w.r.t. ice
+    damping = (1 - exp(-xx * τ)) / τ
+
+    cond_raw      = ssat * damping * (epsc  / xx) / ab
+    rain_cond_raw = ssat * damping * (epsr  / xx) / ab
+    dep_raw       = ssat * damping * (epsi  / xx) / abi + (qᵛ⁺ˡ_safe - qᵛ⁺ⁱ_safe) * epsi / abi
+    coating_cond_raw = ssat * damping * (epsiw / xx) / ab
+
+    # --- Post-processing (Fortran lines 3683-3775) ---
+
+    # Instant evaporation for trace amounts in dry air
+    cond_raw      = ifelse((sup  < FT(-0.001)) & (qᶜˡ < FT(1e-12)), -qᶜˡ_eff / τ, cond_raw)
+    rain_cond_raw = ifelse((sup  < FT(-0.001)) & (qʳ  < FT(1e-12)), -qʳ_eff  / τ, rain_cond_raw)
+
+    qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(1e-20))
+    dep_raw = ifelse((supi < FT(-0.001)) & (qⁱ_total < FT(1e-12)) & !has_coating,
+                     -qⁱ_eff / τ, dep_raw)
+    coating_cond_raw = ifelse((supi < FT(-0.001)) & (qⁱ_total < FT(1e-12)) & has_coating,
+                              -clamp_positive(qʷⁱ) / τ, coating_cond_raw)
+
+    # Split bidirectional rates and apply caps / calibration
+    # Cloud
+    condensation = ifelse(cond_raw > 0, min(cond_raw, qᵛ / τ), max(cond_raw, -qᶜˡ_eff / τ))
+
+    # Rain: positive = condensation (capped), negative = evaporation (positive magnitude)
+    rain_condensation = ifelse(rain_cond_raw > 0, min(rain_cond_raw, qᵛ / τ), zero(FT))
+    rain_evaporation  = ifelse(rain_cond_raw < 0, min(-rain_cond_raw, qʳ_eff / τ), zero(FT))
+
+    # Ice deposition/sublimation with calibration factors
+    cal_dep = prp.calibration_factor_deposition
+    cal_sub = prp.calibration_factor_sublimation
+    dep_calibrated = ifelse(dep_raw > 0, dep_raw * cal_dep, dep_raw * cal_sub)
+    deposition = ifelse(dep_calibrated > 0, min(dep_calibrated, qᵛ / τ),
+                        max(dep_calibrated, -qⁱ_eff / τ))
+
+    # Coating condensation/evaporation
+    coating_condensation = ifelse(coating_cond_raw > 0, min(coating_cond_raw, qᵛ / τ), zero(FT))
+    coating_evaporation  = ifelse(coating_cond_raw < 0, min(-coating_cond_raw, clamp_positive(qʷⁱ) / τ), zero(FT))
+
+    return (; condensation, rain_condensation, rain_evaporation,
+              deposition, coating_condensation, coating_evaporation)
+end
+
+#####
 ##### Combined P3 tendency calculation
 #####
 

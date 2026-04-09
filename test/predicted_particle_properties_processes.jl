@@ -35,6 +35,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     rain_terminal_velocity_mass_weighted,
     cloud_condensation_rate,
     ventilation_enhanced_deposition,
+    coupled_saturation_rates,
     ice_melting_rate,
     ice_melting_rates,
     ice_aggregation_rate,
@@ -58,7 +59,10 @@ using Breeze.Microphysics.PredictedParticleProperties:
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
     MoistureMassFractions,
-    LiquidIcePotentialTemperatureState
+    LiquidIcePotentialTemperatureState,
+    saturation_specific_humidity,
+    PlanarLiquidSurface,
+    PlanarIceSurface
 
 using Oceananigans: CPU, RectilinearGrid
 using Oceananigans.Fields: interior
@@ -725,6 +729,96 @@ using Oceananigans.Fields: interior
             custom_constants, transport, MoistureMassFractions(qv_super), μ)
 
         @test !isapprox(rate_custom_constants, rate_default_constants; rtol=1e-12, atol=0)
+    end
+
+    @testset "coupled_saturation_rates" begin
+        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        FT = Float64
+
+        # Cold cloud with ice: Bergeron effect test
+        # At -20C, air saturated w.r.t. liquid is supersaturated w.r.t. ice
+        T = FT(253.15)
+        ρ = FT(0.8)
+        P = FT(50000.0)
+        qcl = FT(1e-3)
+        qr = FT(0.0)
+        nr = FT(0.0)
+        qi = FT(1e-4)
+        qwi = FT(0.0)
+        ni = FT(1e4)
+        Ff = FT(0.0)
+        Fl = FT(0.0)
+        ρf = FT(400.0)
+        μ_ice = FT(0.0)
+        transport = air_transport_properties(T, P)
+
+        constants = ThermodynamicConstants(FT)
+        qvs = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        qvi = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+
+        # Exactly saturated w.r.t. liquid: ssat = 0
+        qv = qvs
+        q = MoistureMassFractions(qv, qcl, qi)
+
+        sat = coupled_saturation_rates(p3, qcl, qr, nr, qi, qwi, ni,
+                                        qv, qvs, qvi, Ff, Fl, ρf, ρ, T, P,
+                                        constants, transport, q, μ_ice)
+
+        # Bergeron: ice should deposit even when ssat ~ 0 (driven by qvs - qvi > 0)
+        @test sat.deposition > 0
+
+        # Cloud should evaporate (Bergeron steals vapor, drives ssat < 0)
+        # Combined effect: condensation should be <= 0
+        @test sat.condensation <= 0
+
+        # No rain: zero rain rates
+        @test sat.rain_evaporation == 0
+        @test sat.rain_condensation == 0
+
+        # No coating: zero coating rates
+        @test sat.coating_condensation == 0
+        @test sat.coating_evaporation == 0
+
+        # Supersaturated test: all processes should get vapor
+        qv_super = qvs * FT(1.01)  # 1% supersaturated w.r.t. liquid
+        q_super = MoistureMassFractions(qv_super, qcl, qi)
+        sat_super = coupled_saturation_rates(p3, qcl, qr, nr, qi, qwi, ni,
+                                              qv_super, qvs, qvi, Ff, Fl, ρf, ρ, T, P,
+                                              constants, transport, q_super, μ_ice)
+        @test sat_super.condensation > 0
+        @test sat_super.deposition > 0
+
+        # Subsaturated without cloud: ice sublimates
+        # Cloud must be absent so ice gets a meaningful share of the coupled vapor
+        # removal (when cloud is present, epsc >> epsi and ice gets almost nothing)
+        qv_sub = qvi * FT(0.5)
+        q_sub = MoistureMassFractions(qv_sub, FT(0), qi)
+        sat_sub = coupled_saturation_rates(p3, FT(0), qr, nr, qi, qwi, ni,
+                                            qv_sub, qvs, qvi, Ff, Fl, ρf, ρ, T, P,
+                                            constants, transport, q_sub, μ_ice)
+        @test sat_sub.condensation <= 0
+        @test sat_sub.deposition < 0
+
+        # Vapor partitioning: cloud gets most vapor (epsc >> epsi)
+        @test sat_super.condensation > sat_super.deposition
+
+        # Rain included: adds rain evaporation in subsaturated conditions
+        qr_rain = FT(1e-3)
+        nr_rain = FT(1e4)
+        sat_rain = coupled_saturation_rates(p3, qcl, qr_rain, nr_rain, qi, qwi, ni,
+                                             qv_sub, qvs, qvi, Ff, Fl, ρf, ρ, T, P,
+                                             constants, transport, q_sub, μ_ice)
+        @test sat_rain.rain_evaporation > 0
+
+        # Coating test: Fl >= 0.01 activates coating, deactivates deposition
+        qwi_coat = FT(1e-5)
+        Fl_coat = FT(0.02)  # > 0.01 threshold
+        sat_coat = coupled_saturation_rates(p3, qcl, qr, nr, qi, qwi_coat, ni,
+                                             qv_super, qvs, qvi, Ff, Fl_coat, ρf, ρ, T, P,
+                                             constants, transport, q_super, μ_ice)
+        # Coating active: deposition zeroed, coating gets vapor
+        @test sat_coat.deposition == 0
+        @test sat_coat.coating_condensation > 0
     end
 
     @testset "ice_melting_rate" begin
