@@ -815,7 +815,7 @@ end
 # Fortran `solve_mui` uses rhoi from lookup table interpolation for the same purpose.
 @inline function _liquid_blended_density(state, nodes, weights, L_ice, liquid_fraction)
     FT = typeof(L_ice)
-    ρ_integral = max(evaluate_quadrature(MeanDensity(), state, nodes, weights), eps(FT))
+    ρ_integral = max(evaluate(MeanDensity(), state; n_quadrature=length(nodes)), eps(FT))
     # Mass-weighted mean density: ρ_mean = ∫ρ(D)m(D)N'(D)dD / ∫m(D)N'(D)dD
     ρ_mean_dry = ρ_integral / max(L_ice, eps(FT))
     # Blend with liquid water density (Fortran convention)

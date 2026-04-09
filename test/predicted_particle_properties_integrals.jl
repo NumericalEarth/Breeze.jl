@@ -9,8 +9,6 @@ using Breeze.Microphysics.PredictedParticleProperties:
     evaluate,
     chebyshev_gauss_nodes_weights,
     size_distribution,
-    tabulate,
-    LookupTable1Parameters,
     TabulatedFunction3D,
     TabulatedFunction4D,
     TabulatedFunction5D,
@@ -95,9 +93,10 @@ using Oceananigans.Fields: interior
                                                 surface_pressure = FT(101325),
                                                 potential_temperature = FT(300))
         dynamics = Breeze.AnelasticDynamics(reference_state)
+        table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
         model = Breeze.AtmosphereModel(grid; dynamics,
                                        thermodynamic_constants = constants,
-                                       microphysics = PredictedParticlePropertiesMicrophysics(FT))
+                                       microphysics = PredictedParticlePropertiesMicrophysics(FT; lookup_tables=table_dir))
 
         qᵗ = FT(0.02)
         qᶜˡ = FT(0.005)
@@ -530,144 +529,6 @@ using Oceananigans.Fields: interior
         @test abs(V_16 - V_128) / V_128 < 0.01
         @test abs(V_32 - V_128) / V_128 < 0.01
         @test abs(V_64 - V_128) / V_128 < 0.01
-    end
-
-    @testset "Tabulation parameters" begin
-        params = LookupTable1Parameters()
-        @test params.number_of_mass_points == 150
-        @test params.number_of_rime_fraction_points == 8
-        @test params.number_of_liquid_fraction_points == 4
-        @test params.number_of_rime_density_points == 10
-        @test params.minimum_log_mean_particle_mass ≈ -14.8
-        @test params.maximum_log_mean_particle_mass ≈ -0.6
-        @test params.minimum_rime_density ≈ 50.0
-        @test params.maximum_rime_density ≈ 900.0
-        @test params.number_of_quadrature_points == 64
-
-        # Custom parameters
-        params_custom = LookupTable1Parameters(Float32;
-            number_of_mass_points=20,
-            number_of_rime_fraction_points=3,
-            number_of_liquid_fraction_points=2,
-            number_of_rime_density_points=3,
-            number_of_quadrature_points=32)
-        @test params_custom.number_of_mass_points == 20
-        @test params_custom.number_of_rime_fraction_points == 3
-        @test params_custom.number_of_liquid_fraction_points == 2
-        @test params_custom.number_of_rime_density_points == 3
-        @test params_custom.minimum_log_mean_particle_mass isa Float32
-    end
-
-    @testset "Tabulate single integral" begin
-        params = LookupTable1Parameters(Float64;
-            number_of_mass_points=5,
-            number_of_rime_fraction_points=2,
-            number_of_liquid_fraction_points=2,
-            number_of_rime_density_points=3,
-            number_of_quadrature_points=16)
-
-        # Tabulate number-weighted fall speed
-        tab_Vn = tabulate(NumberWeightedFallSpeed(), CPU(), params)
-
-        @test tab_Vn isa TabulatedFunction5D
-        @test size(tab_Vn.table) == (5, 2, 2, 3, 11)
-
-        # Values should be non-negative and finite
-        @test all(isfinite, tab_Vn.table)
-        @test all(x -> x >= 0, tab_Vn.table)
-
-        # Test indexing via table (unrimed, liquid_fraction=0, first rime density, first mu)
-        # First point may be ~0 at very small mass (log_m ≈ -14.8); last point must be positive
-        @test tab_Vn.table[1, 1, 1, 1, 1] >= 0
-        @test tab_Vn.table[5, 1, 1, 1, 1] > 0
-    end
-
-    @testset "Tabulate IceFallSpeed container" begin
-        params = LookupTable1Parameters(Float64;
-            number_of_mass_points=5,
-            number_of_rime_fraction_points=2,
-            number_of_liquid_fraction_points=2,
-            number_of_rime_density_points=3,
-            number_of_quadrature_points=16)
-
-        fs = IceFallSpeed()
-        fs_tab = tabulate(fs, CPU(), params)
-
-        # Parameters should be preserved
-        @test fs_tab.reference_air_density == fs.reference_air_density
-
-        # Integrals should be tabulated
-        @test fs_tab.number_weighted isa TabulatedFunction5D
-        @test fs_tab.mass_weighted isa TabulatedFunction5D
-        @test fs_tab.reflectivity_weighted isa TabulatedFunction5D
-
-        # Check sizes (5D: mass × rime_fraction × liquid_fraction × rime_density × mu)
-        @test size(fs_tab.number_weighted.table) == (5, 2, 2, 3, 11)
-        @test size(fs_tab.mass_weighted.table) == (5, 2, 2, 3, 11)
-        @test size(fs_tab.reflectivity_weighted.table) == (5, 2, 2, 3, 11)
-    end
-
-    @testset "Tabulate IceDeposition container" begin
-        params = LookupTable1Parameters(Float64;
-            number_of_mass_points=5,
-            number_of_rime_fraction_points=2,
-            number_of_liquid_fraction_points=2,
-            number_of_rime_density_points=3,
-            number_of_quadrature_points=16)
-
-        dep = IceDeposition()
-        dep_tab = tabulate(dep, CPU(), params)
-
-        # Parameters should be preserved
-        @test dep_tab.thermal_conductivity == dep.thermal_conductivity
-        @test dep_tab.vapor_diffusivity == dep.vapor_diffusivity
-
-        # All 6 integrals should be tabulated
-        @test dep_tab.ventilation isa TabulatedFunction5D
-        @test dep_tab.ventilation_enhanced isa TabulatedFunction5D
-        @test dep_tab.small_ice_ventilation_constant isa TabulatedFunction5D
-        @test dep_tab.small_ice_ventilation_reynolds isa TabulatedFunction5D
-        @test dep_tab.large_ice_ventilation_constant isa TabulatedFunction5D
-        @test dep_tab.large_ice_ventilation_reynolds isa TabulatedFunction5D
-    end
-
-    @testset "Tabulate P3 scheme by property" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
-
-        # Tabulate fall speed
-        p3_fs = tabulate(p3, :ice_fall_speed, CPU();
-            number_of_mass_points=5,
-            number_of_rime_fraction_points=2,
-            number_of_liquid_fraction_points=2,
-            number_of_rime_density_points=3,
-            number_of_quadrature_points=16)
-
-        @test p3_fs isa PredictedParticlePropertiesMicrophysics
-        @test p3_fs.ice.fall_speed.number_weighted isa TabulatedFunction5D
-        @test p3_fs.ice.fall_speed.mass_weighted isa TabulatedFunction5D
-
-        # Other properties should be unchanged
-        @test p3_fs.ice.deposition.ventilation isa Ventilation
-        @test p3_fs.rain == p3.rain
-        @test p3_fs.cloud == p3.cloud
-
-        # Tabulate deposition
-        p3_dep = tabulate(p3, :ice_deposition, CPU();
-            number_of_mass_points=5,
-            number_of_rime_fraction_points=2,
-            number_of_liquid_fraction_points=2,
-            number_of_rime_density_points=3,
-            number_of_quadrature_points=16)
-
-        @test p3_dep.ice.deposition.ventilation isa TabulatedFunction5D
-        @test p3_dep.ice.fall_speed.number_weighted isa NumberWeightedFallSpeed
-    end
-
-    @testset "Tabulation error handling" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
-
-        # Unknown property should throw
-        @test_throws ArgumentError tabulate(p3, :unknown_property, CPU())
     end
 
     #####

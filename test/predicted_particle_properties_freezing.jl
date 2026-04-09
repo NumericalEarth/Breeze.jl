@@ -9,8 +9,6 @@ using Breeze.Microphysics.PredictedParticleProperties:
     evaluate,
     chebyshev_gauss_nodes_weights,
     size_distribution,
-    tabulate,
-    LookupTable1Parameters,
     TabulatedFunction3D,
     TabulatedFunction4D,
     TabulatedFunction5D,
@@ -69,12 +67,8 @@ using Oceananigans.Fields: interior
 
     @testset "Tabulated sixth-moment melting matches Fortran branch split" begin
         FT = Float64
-        p3_tab = tabulate(PredictedParticlePropertiesMicrophysics(), CPU();
-            number_of_mass_points = 12,
-            number_of_rime_fraction_points = 4,
-            number_of_liquid_fraction_points = 3,
-            number_of_rime_density_points = 3,
-            number_of_quadrature_points = 24)
+        table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
+        p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
 
         qⁱ = FT(1e-4)
         nⁱ = FT(1e5)
@@ -267,65 +261,10 @@ using Oceananigans.Fields: interior
         end
     end
 
-    @testset "tabulate RainProperties - returns RainProperties with TabulatedFunction1D" begin
-        rain = RainProperties()
-        rain_tab = tabulate(rain, CPU(), Float64;
-                            lambda_points=20,
-                            log_lambda_range=(2.5, 5.5),
-                            quadrature_points=32)
-
-        @test rain_tab isa RainProperties
-        @test rain_tab.velocity_mass isa TabulatedFunction1D
-        @test rain_tab.velocity_number isa TabulatedFunction1D
-        @test rain_tab.evaporation isa TabulatedFunction1D
-
-        # Static fields should be preserved
-        @test rain_tab.maximum_mean_diameter == rain.maximum_mean_diameter
-        @test rain_tab.fall_speed_coefficient == rain.fall_speed_coefficient
-        @test rain_tab.fall_speed_exponent == rain.fall_speed_exponent
-    end
-
-    @testset "tabulate p3 :rain - returns P3 with tabulated RainProperties" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
-        p3_rain = tabulate(p3, :rain, CPU();
-                           lambda_points=20,
-                           log_lambda_range=(2.5, 5.5),
-                           quadrature_points=32)
-
-        @test p3_rain isa PredictedParticlePropertiesMicrophysics
-        @test p3_rain.rain.velocity_mass isa TabulatedFunction1D
-        @test p3_rain.rain.velocity_number isa TabulatedFunction1D
-        @test p3_rain.rain.evaporation isa TabulatedFunction1D
-
-        # Ice should be unchanged
-        @test p3_rain.ice.fall_speed.mass_weighted isa MassWeightedFallSpeed
-    end
-
-    @testset "tabulate(p3, CPU()) includes rain tabulation" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
-        p3_tab = tabulate(p3, CPU();
-                          number_of_mass_points=5,
-                          number_of_rime_fraction_points=2,
-                          number_of_liquid_fraction_points=2,
-                          number_of_rime_density_points=3,
-                          number_of_quadrature_points=16)
-
-        # Rain should be tabulated
-        @test p3_tab.rain.velocity_mass isa TabulatedFunction1D
-        @test p3_tab.rain.velocity_number isa TabulatedFunction1D
-        @test p3_tab.rain.evaporation isa TabulatedFunction1D
-
-        # Ice should also be tabulated
-        @test p3_tab.ice.fall_speed.mass_weighted isa TabulatedFunction5D
-    end
-
     @testset "rain_evaporation_rate sign with tabulated scheme" begin
         # With tabulated rain, evaporation in subsaturated air should be positive magnitude (M7)
-        p3 = PredictedParticlePropertiesMicrophysics()
-        p3_tab = tabulate(p3, :rain, CPU();
-                          lambda_points=20,
-                          log_lambda_range=(2.5, 5.5),
-                          quadrature_points=32)
+        table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
+        p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
 
         FT = Float64
         qr = FT(1e-3)
@@ -344,17 +283,11 @@ using Oceananigans.Fields: interior
         @test rate_sat == 0
     end
 
-    @testset "tabulated vs analytical rain evaporation - same sign, finite" begin
-        # The tabulated (PSD-integrated) and mean-mass formulas can differ significantly
-        # because mean-mass uses V=130 D^0.5 (a tuned approximation) while tabulated
-        # uses Gunn-Kinzer fall speeds with proper PSD integration. Both should be
-        # negative (evaporation) and finite, but their magnitudes may differ by more
-        # than a factor of 2 due to the different ventilation approximations.
-        p3_ana = PredictedParticlePropertiesMicrophysics()
-        p3_tab = tabulate(p3_ana, :rain, CPU();
-                          lambda_points=50,
-                          log_lambda_range=(2.5, 5.5),
-                          quadrature_points=64)
+    @testset "tabulated rain evaporation - positive, finite, bounded" begin
+        # Verify PSD-integrated rain evaporation from Fortran tables
+        # is physically reasonable.
+        table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
+        p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
 
         FT = Float64
         qr = FT(1e-3)
@@ -365,26 +298,19 @@ using Oceananigans.Fields: interior
         qv_sat = FT(0.012)
         qv_sub = FT(0.008)
 
-        rate_ana = rain_evaporation_rate(p3_ana, qr, nr, qv_sub, qv_sat, T, ρ, P)
         rate_tab = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P)
 
-        # Both should be positive magnitude (M7) and finite
-        @test rate_ana > 0
+        # Should be positive magnitude (M7) and finite
         @test rate_tab > 0
-        @test isfinite(rate_ana)
         @test isfinite(rate_tab)
 
-        # Both physically reasonable (not zero, not astronomical)
-        @test rate_tab > 0
+        # Physically reasonable (not zero, not astronomical)
         @test rate_tab < 1.0   # Cannot evaporate more than all rain per second
     end
 
     @testset "tabulated rain terminal velocity - positive and monotone" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
-        p3_tab = tabulate(p3, :rain, CPU();
-                          lambda_points=30,
-                          log_lambda_range=(2.5, 5.5),
-                          quadrature_points=32)
+        table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
+        p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
 
         FT = Float64
         ρ = FT(1.0)

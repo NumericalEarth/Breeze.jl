@@ -1506,7 +1506,7 @@ end
 @inline function tabulated_z_tendency(ice::IceProperties{<:Any, <:Any, <:Any, <:Any, <:Any,
                                                           M6, <:Any, <:Any},
                                         log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-                                        prp::ProcessRateParameters, sc_correction, p3, μ, λ_r = nothing) where {M6 <: IceSixthMoment{<:TabulatedFunction5D}}
+                                        prp::ProcessRateParameters, sc_correction, p3, μ, λ_r = nothing) where {M6 <: IceSixthMoment{<:P3Table5D}}
     FT = typeof(ρ)
     lt1 = lookup_table_1(p3)
     lt2 = lookup_table_2(p3)

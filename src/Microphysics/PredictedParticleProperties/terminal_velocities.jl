@@ -98,7 +98,7 @@ end
 
 # Tabulated path: look up PSD-integrated number-weighted velocity
 @inline function tabulated_rain_number_weighted_velocity(table::TabulatedFunction1D,
-                                                           ::AbstractRainIntegral,
+                                                           ::Union{AbstractRainIntegral, TabulatedFunction1D},
                                                            qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
     m̄  = qʳ / nʳ
     # For exponential PSD (μ_r=0): <m> = π ρ_w / λ³, so λ = (π ρ_w / m̄)^(1/3)
