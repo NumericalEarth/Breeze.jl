@@ -85,15 +85,13 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS, SS} <: AbstractTimeStepper
     implicit_solver :: TI
     substepper :: AS
     slow_tendency_snapshot :: SS
-    physics_substeps :: Int
 end
 
 """
     AcousticRungeKutta3(grid, prognostic_fields;
                         dynamics,
                         implicit_solver = nothing,
-                        Gⁿ = map(similar, prognostic_fields),
-                        physics_substeps = 1)
+                        Gⁿ = map(similar, prognostic_fields))
 
 Construct an `AcousticRungeKutta3` time stepper for fully compressible dynamics.
 
@@ -103,23 +101,11 @@ Keyword Arguments
 - `dynamics`: The [`CompressibleDynamics`](@ref) object containing the `time_discretization`.
 - `implicit_solver`: Optional implicit solver for diffusion. Default: `nothing`
 - `Gⁿ`: Tendency fields at current stage. Default: similar to `prognostic_fields`
-- `physics_substeps`: Number of microphysics fractional-step substeps applied
-  *after* each WS-RK3 outer step (operator splitting). When `> 1`, the WS-RK3
-  dynamics is computed with the microphysics tendency suppressed (so dynamics
-  sees only advection + closure + forcing for the moisture and ρθ tracers),
-  and microphysics is then applied in `physics_substeps` explicit forward-Euler
-  substeps of size `Δt / physics_substeps`, with the EOS state updated between
-  each substep. This decouples the microphysics relaxation timescale from the
-  outer Δt and lets the moist BW run at the dynamics advective CFL even when
-  the rain autoconversion + accretion processes have an effective timescale
-  shorter than the outer Δt. Default: 1 (no operator splitting; microphysics
-  is integrated as part of the WS-RK3 stages, the original behavior).
 """
 function AcousticRungeKutta3(grid, prognostic_fields;
                              dynamics,
                              implicit_solver::TI = nothing,
-                             Gⁿ::TG = map(similar, prognostic_fields),
-                             physics_substeps::Int = 1) where {TI, TG}
+                             Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 
     FT = eltype(grid)
 
@@ -155,8 +141,7 @@ function AcousticRungeKutta3(grid, prognostic_fields;
 
     return AcousticRungeKutta3{FT, U0, TG, TI, AS, SS}(β₁, β₂, β₃, U⁰, Gⁿ,
                                                        implicit_solver, substepper,
-                                                       slow_tendency_snapshot,
-                                                       physics_substeps)
+                                                       slow_tendency_snapshot)
 end
 
 #####
@@ -184,7 +169,7 @@ policy](@ref `snapshot_slow_tendencies!`):
   `compute_slow_*_tendencies!` calls (use at stages 2, 3).
 - `:none`     — neither snapshot nor restore.
 """
-function acoustic_rk3_substep!(model, Δt, β; freeze::Symbol = :none, physics_split::Bool = false)
+function acoustic_rk3_substep!(model, Δt, β; freeze::Symbol = :none)
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = ts.U⁰
@@ -197,9 +182,8 @@ function acoustic_rk3_substep!(model, Δt, β; freeze::Symbol = :none, physics_s
     # handled by the acoustic loop via tend_w_euler in convert_slow_tendencies!).
     compute_slow_momentum_tendencies!(model)
 
-    # Compute slow density and thermodynamic tendencies (with microphysics
-    # tendency suppressed if the time stepper is operator-splitting physics).
-    compute_slow_scalar_tendencies!(model; physics_split=physics_split)
+    # Compute slow density and thermodynamic tendencies
+    compute_slow_scalar_tendencies!(model)
 
     # Slow-tendency freeze policy. See `snapshot_slow_tendencies!` for the
     # MPAS-equivalence rationale.
@@ -262,17 +246,6 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     β₂ = ts.β₂
     β₃ = ts.β₃
 
-    # Operator-splitting hook: when `physics_substeps > 1`, the WS-RK3
-    # dynamics is computed with the microphysics tendency suppressed in
-    # `compute_slow_scalar_tendencies!` / `compute_tendencies!` (so the moist
-    # tracers and ρθ see only advection, closure, and forcing during the
-    # outer step) and microphysics is then applied as a `physics_substeps`-
-    # subcycled fractional step at the end. This decouples the microphysics
-    # relaxation timescale from the outer Δt and lets the moist BW run at the
-    # dynamics advective CFL even when the rain process timescales (~10 s)
-    # are shorter than the outer Δt.
-    physics_split = ts.physics_substeps > 1
-
     # Compute the next time step a priori
     tⁿ⁺¹ = model.clock.time + Δt
 
@@ -300,10 +273,10 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     # tendencies are also recomputed per stage by compute_thermodynamic_tendency!.
 
     compute_flux_bc_tendencies!(model)
-    acoustic_rk3_substep!(model, Δt, β₁; freeze = :snapshot, physics_split=physics_split)
+    acoustic_rk3_substep!(model, Δt, β₁; freeze = :snapshot)
 
     tick_stage!(model.clock, β₁ * Δt)
-    update_state!(model, callbacks; compute_tendencies = true, physics_split=physics_split)
+    update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₁ * Δt)
 
     #
@@ -311,10 +284,10 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     #
 
     compute_flux_bc_tendencies!(model)
-    acoustic_rk3_substep!(model, Δt, β₂; freeze = :restore, physics_split=physics_split)
+    acoustic_rk3_substep!(model, Δt, β₂; freeze = :restore)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
-    update_state!(model, callbacks; compute_tendencies = true, physics_split=physics_split)
+    update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₂ * Δt)
 
     #
@@ -322,34 +295,13 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     #
 
     compute_flux_bc_tendencies!(model)
-    acoustic_rk3_substep!(model, Δt, β₃; freeze = :restore, physics_split=physics_split)
+    acoustic_rk3_substep!(model, Δt, β₃; freeze = :restore)
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
     # Adjust final time-step
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
-
-    #
-    # Phase 2: physics fractional step (when `physics_substeps > 1`).
-    #
-    # We've now advanced the dynamics by `Δt` with microphysics suppressed.
-    # Apply microphysics as `N` explicit forward-Euler substeps of size
-    # `Δτ = Δt / N`, with `update_state!` (full microphysics) between each
-    # substep so the EOS recovery uses the updated condensate amounts and
-    # the next substep's microphysics tendency sees the post-condensation
-    # T, p, qᵛ. The final `update_state!` after the loop produces the
-    # correct end-of-step T, p with full microphysics, exactly as the
-    # non-split path would have.
-    #
-    if physics_split
-        N = ts.physics_substeps
-        Δτ = Δt / N
-        for _ in 1:N
-            update_state!(model, callbacks; compute_tendencies = false)
-            apply_microphysics_substep!(model, Δτ)
-        end
-    end
 
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₃ * Δt)

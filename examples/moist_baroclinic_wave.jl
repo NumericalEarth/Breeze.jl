@@ -274,21 +274,11 @@ scalar_advection = (ρθ  = weno,
                     ρqʳ  = bounds_preserving_weno,
                     ρqˢ  = bounds_preserving_weno)
 
-# Operator-split microphysics: with `physics_substeps = 24` the WS-RK3
-# dynamics integrates the moist tracers and ρθ with the microphysics
-# tendency suppressed, and microphysics is then applied as 24 explicit
-# forward-Euler substeps of size `Δt / 24 ≈ 9 s` between each outer step.
-# This decouples the rain process effective timescale (~10 s) from the
-# outer Δt and lets the moist BW run at the same advective-CFL Δt as the
-# dry baroclinic wave example. Without this, the in-stage microphysics
-# tendency overshoots saturation and the autoconversion + accretion
-# processes blow up within 5–25 outer steps at this Δt.
 model = AtmosphereModel(grid; dynamics, coriolis, microphysics, boundary_conditions,
                         thermodynamic_constants = constants,
                         momentum_advection,
                         scalar_advection,
-                        timestepper = :AcousticRungeKutta3,
-                        timestepper_kwargs = (; physics_substeps = 24))
+                        timestepper = :AcousticRungeKutta3)
 
 # ## Set initial conditions
 
@@ -297,16 +287,21 @@ set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density, qᵛ=specifi
 # ## Time-stepping
 #
 # Acoustic substepping eliminates the acoustic CFL constraint on the outer Δt,
-# and the operator-split microphysics fractional step (`physics_substeps = 24`
-# above) eliminates the microphysics-tendency stiffness, so we can run at the
-# *advective* CFL just like the dry baroclinic wave example. On this 1°
-# `latitude=(-80, 80)` grid the polar `Δx_min ≈ 19.3` km gives a
-# WS-RK3+WENO5 advective-CFL limit of ``Δt ≈ 0.7 \cdot Δx_{\\min}/U_{\\max} ≈
-# 225`` s at the BCI peak (`U_max ≈ 60` m/s). This is **~110× larger** than
-# the explicit acoustic-CFL Δt = 2 s of the original moist baroclinic wave
-# example.
+# so we can run at a much larger ``Δt`` than the original moist baroclinic
+# wave example (which used ``Δt ≈ 2`` s for explicit acoustics). On this 1°
+# `latitude=(-80, 80)` grid the *advective* CFL with ``U_{\\max} ≈ 60`` m/s at
+# the BCI peak comfortably allows ``Δt ≈ 60`` s; the binding constraint here
+# is the **microphysics-dynamics coupling stiffness** instead. With
+# ``τ_{\\rm relax} = 200`` s and explicit (per-stage) microphysics tendencies,
+# the rain autoconversion + accretion processes have an effective stiffness
+# limit of ``Δt ≈ 20`` s on this grid: at ``Δt = 60`` s the integration NaNs
+# within ~25 outer steps, at ``Δt = 30`` s a slow ``2 Δt`` oscillation grows,
+# and at ``Δt = 20`` s the integration is rock-stable with ``\\max |w|`` of a
+# few cm/s. This is still ~10× larger than the explicit acoustic-CFL ``Δt`` of
+# the original moist BW example. (Future work: subcycle the microphysics
+# inside one outer Δt so the dynamics CFL is the only limit.)
 
-Δt = 225.0
+Δt = 20.0
 stop_time = 15days
 
 simulation = Simulation(model; Δt, stop_time)
