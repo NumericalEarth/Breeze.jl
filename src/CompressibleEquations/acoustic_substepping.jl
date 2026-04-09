@@ -1424,6 +1424,12 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         fill_halo_regions!(u)
         fill_halo_regions!(v)
 
+        # Polar filter: damp unresolvable high-wavenumber zonal modes in u, v
+        # and perturbation momentum ρu″, ρv″ at high latitudes.
+        # This matches WRF's pxft(flag_uv=1) call after the horizontal forward step.
+        _apply_polar_filter_substep!(model.dynamics.polar_filter,
+                                     u, v, substepper.ρu″, substepper.ρv″)
+
         # Save rtheta_pp before substep for divergence damping (δ_τΘ'' computation)
         rtheta_pp_old = substepper.previous_rtheta_pp
         parent(rtheta_pp_old) .= parent(substepper.ρθ″)
@@ -1459,6 +1465,12 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 substepper.theta_flux_scratch, substepper.mass_flux_scratch,
                 grid, Δτᵋ,
                 substepper.virtual_potential_temperature)
+
+        # Polar filter: damp unresolvable high-wavenumber zonal modes in ρθ″, ρ″,
+        # and ρw″ after the acoustic solve. Matches WRF's pxft(flag_t=1, flag_mu=1,
+        # flag_wph=1) for non-hydrostatic mode.
+        _apply_polar_filter_scalar_substep!(model.dynamics.polar_filter,
+                                            substepper.ρθ″, substepper.ρ″, substepper.ρw″)
 
         # Fill rtheta_pp halos before divergence damping reads δx(rtheta_pp_new - rtheta_pp_old).
         # The column kernel updated interior rtheta_pp but not halos; stale halos create
@@ -1498,6 +1510,13 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     # Reconstruct momentum from updated density and velocity
     launch!(arch, grid, :xyz, _recover_momentum!,
             model.momentum, model.dynamics.density, model.velocities, grid)
+
+    # Post-recovery polar filter: filter the recovered velocities and scalars
+    # to close the filter loop across RK3 stages. Direct field filtering
+    # (no intensive-form round-trip) avoids reintroducing high-k content through ρ.
+    _apply_polar_filter_recovered!(model.dynamics.polar_filter,
+                                   u, v, w, model.dynamics.density, ρχ,
+                                   model.momentum)
 
     return nothing
 end

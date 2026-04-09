@@ -134,10 +134,8 @@ export
 
     # PolarFilters
     PolarFilter,
-    add_polar_filter!,
-    apply_polar_filter!,
-    SharpTruncation,
-    ExponentialRolloff
+    Shapiro121,
+    AbstractRolloff
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
@@ -222,6 +220,10 @@ using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulatio
 include("TerrainFollowingDiscretization/TerrainFollowingDiscretization.jl")
 using .TerrainFollowingDiscretization
 
+# PolarFilters (needed by CompressibleEquations for materialize_polar_filter)
+include("PolarFilters/PolarFilters.jl")
+using .PolarFilters
+
 # Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
 include("AnelasticEquations/AnelasticEquations.jl")
 using .AnelasticEquations: AnelasticDynamics, AnelasticModel
@@ -261,8 +263,5 @@ using .Forcings
 
 include("VerticalGrids.jl")
 using .VerticalGrids
-
-include("PolarFilters/PolarFilters.jl")
-using .PolarFilters
 
 end # module Breeze

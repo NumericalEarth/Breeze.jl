@@ -1,78 +1,76 @@
 using Oceananigans.Grids: φnodes
 
-## FFTW is a transitive dependency loaded by Oceananigans.
-## Access it via Base.loaded_modules to avoid a direct [deps] entry
-## while satisfying ExplicitImports qualified-access checks.
-const _FFTW_PKGID = Base.PkgId(Base.UUID("7a1cc6ca-52ef-59f5-83cd-3a7055c09341"), "FFTW")
-_fftw() = Base.loaded_modules[_FFTW_PKGID]
-_plan_rfft(args...; kw...) = _fftw().plan_rfft(args...; kw...)
-_plan_brfft(args...; kw...) = _fftw().plan_brfft(args...; kw...)
+#####
+##### Abstract rolloff type
+#####
 
 """
-    AbstractFilterMode
+    AbstractRolloff
 
-Supertype for polar filter spectral truncation strategies.
+Supertype for polar filter spectral rolloff strategies.
 """
-abstract type AbstractFilterMode end
+abstract type AbstractRolloff end
 
 """
 $(TYPEDEF)
 
-Truncate wavenumbers above `k_max(φ)` to zero (sharp cutoff).
-This is the approach used by WRF but may produce Gibbs ringing.
-"""
-struct SharpTruncation <: AbstractFilterMode end
-
-"""
-$(TYPEDEF)
-
-Apply an exponential rolloff above `k_max(φ)`:
-```math
-w(k) = \\exp\\!\\left(-\\left(\\frac{k - k_{\\max}}{N_k - k_{\\max}}\\right)^p\\right)
-```
-where `p` is the `order` (higher = steeper). Default `order = 8`.
-"""
-struct ExponentialRolloff{FT} <: AbstractFilterMode
-    order :: FT
-end
-
-ExponentialRolloff(order::Integer) = ExponentialRolloff(Float64(order))
-
-"""
-$(TYPEDEF)
-
-FFT-based polar filter for `LatitudeLongitudeGrid`.
-
-Removes unresolvable high-wavenumber zonal modes poleward of a
-`threshold_latitude`. For each filtered latitude row, wavenumbers above
-`k_max(φ) = floor(Nλ cos φ / cos φ_c)` are damped or zeroed,
-where `φ_c` is the threshold latitude.
-
-This follows the WRF polar filtering approach
-([Skamarock et al., 2008](@cite Skamarock2008Description), Section 2.5).
+Algebraic 1-2-1 (Shapiro) zonal smoother applied `N(φ)` times per filtered
+latitude row, where `N(φ)` is chosen so the smoother response at the
+latitude's effective cutoff wavenumber is `≤ target_response`. This is the
+default polar filter rolloff, matching NCAR CAM-FV's algebraic smoother.
 
 Fields
 ======
 
 $(TYPEDFIELDS)
 """
-struct PolarFilter{FT, FM <: AbstractFilterMode, FP, IP, SM, BF, BC, FI, G}
+struct Shapiro121{FT} <: AbstractRolloff
+    "Target response at the cutoff wavenumber (default 0.1 = 90 % damping)"
+    target_response :: FT
+    "Maximum passes per row (default 32)"
+    max_passes :: Int
+end
+
+Shapiro121(; target_response=0.1, max_passes=32) = Shapiro121(Float64(target_response), max_passes)
+
+#####
+##### PolarFilter
+#####
+
+"""
+$(TYPEDEF)
+
+Algebraic polar filter for `LatitudeLongitudeGrid`.
+
+Damps unresolvable high-wavenumber zonal modes poleward of a
+`threshold_latitude` using a 1-2-1 Shapiro smoother applied a
+latitude-dependent number of times. For each filtered row, the pass count
+is chosen so the smoother response at
+`k_max(φ) = floor(Nλ cos φ / cos φ_c)` is `≤ target_response`.
+
+Construct with `PolarFilter(; threshold_latitude, rolloff)` to produce
+a *skeleton* (no grid, no buffers). The skeleton is materialized into
+the fully-typed working form by [`materialize_polar_filter`](@ref) when
+`AtmosphereModel` is constructed.
+
+Fields
+======
+
+$(TYPEDFIELDS)
+"""
+struct PolarFilter{FT, RO <: AbstractRolloff, IPV, NPV, BUF, G}
     "Latitude (degrees) above which filtering is applied"
     threshold_latitude :: FT
-    "Spectral truncation strategy"
-    filter_mode :: FM
-    "Pre-planned forward rfft (batched along dim 1)"
-    forward_plan :: FP
-    "Pre-planned inverse brfft (batched along dim 1)"
-    inverse_plan :: IP
-    "Spectral mask array of shape (Nk, N_filtered_rows)"
-    spectral_mask :: SM
-    "Real-valued work buffer of shape (Nλ, N_filtered_rows * Nz)"
-    buffer_real :: BF
-    "Complex-valued work buffer of shape (Nk, N_filtered_rows * Nz)"
-    buffer_complex :: BC
+    "Spectral rolloff strategy"
+    rolloff :: RO
     "Interior j-indices of rows needing filtering (both hemispheres)"
-    filtered_indices :: FI
+    filtered_indices :: IPV
+    "Number of smoother passes per filtered row"
+    passes_per_row :: NPV
+    "Ping buffer of shape (Nλ, N_filtered, Nz)"
+    buffer_a :: BUF
+    "Pong buffer of shape (Nλ, N_filtered, Nz)"
+    buffer_b :: BUF
     "The grid on which the filter operates"
     grid :: G
 end
@@ -80,81 +78,107 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct a `PolarFilter` for `grid`.
+Construct a `PolarFilter` skeleton (no grid, no buffers). Pass this to
+`CompressibleDynamics(; polar_filter = PolarFilter(...))` and it will be
+materialized when the model is built.
 
 Keyword Arguments
 =================
 
 - `threshold_latitude`: latitude in degrees above which filtering is applied (default `60`).
-- `filter_mode`: spectral truncation strategy. Either [`SharpTruncation`](@ref) or
-  [`ExponentialRolloff`](@ref)`(order)` (default `ExponentialRolloff(8)`).
+- `rolloff`: spectral rolloff strategy. Default: [`Shapiro121`](@ref)`()`.
 """
-function PolarFilter(grid;
-                     threshold_latitude = 60,
-                     filter_mode = ExponentialRolloff(8))
+function PolarFilter(; threshold_latitude=60, rolloff=Shapiro121())
+    FT = Float64
+    return PolarFilter(FT(threshold_latitude), rolloff,
+                        nothing, nothing, nothing, nothing, nothing)
+end
 
+#####
+##### Materialization
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Materialize a `PolarFilter` skeleton into a fully-typed working form with
+device-side buffers and per-row pass counts. Called during
+`materialize_dynamics`.
+"""
+function materialize_polar_filter(grid, pf::PolarFilter)
     FT = eltype(grid)
-    threshold_latitude = FT(threshold_latitude)
-
+    threshold_latitude = FT(pf.threshold_latitude)
     Nλ = grid.Nx
     Nz = grid.Nz
-    Nk = Nλ ÷ 2 + 1
 
     ## Identify filtered rows (both hemispheres)
     φ_centers = φnodes(grid, Center())
-    filtered_indices = Int[]
+    filtered_cpu = Int[]
     for j in 1:grid.Ny
-        abs(φ_centers[j]) > threshold_latitude && push!(filtered_indices, j)
+        abs(φ_centers[j]) > threshold_latitude && push!(filtered_cpu, j)
     end
-    N_filtered = length(filtered_indices)
+    N_filtered = length(filtered_cpu)
+    N_filtered == 0 && return nothing
 
-    ## Build spectral mask: (Nk, N_filtered)
+    ## Compute per-row pass count
+    passes_cpu = _compute_passes_per_row(pf.rolloff, φ_centers, filtered_cpu, Nλ, threshold_latitude)
+
+    ## Move to device
+    arch = Oceananigans.architecture(grid)
+    filtered_dev = Oceananigans.Architectures.on_architecture(arch, filtered_cpu)
+    passes_dev = Oceananigans.Architectures.on_architecture(arch, passes_cpu)
+
+    ## Allocate ping-pong buffers on device — sized at Nz+1 to accommodate ZFaceFields
+    Nz_buf = Nz + 1
+    buffer_a = Oceananigans.Architectures.on_architecture(arch, zeros(FT, Nλ, N_filtered, Nz_buf))
+    buffer_b = Oceananigans.Architectures.on_architecture(arch, zeros(FT, Nλ, N_filtered, Nz_buf))
+
+    return PolarFilter(threshold_latitude, pf.rolloff,
+                        filtered_dev, passes_dev,
+                        buffer_a, buffer_b, grid)
+end
+
+## No-op for no filter or non-LLG grids
+materialize_polar_filter(grid, ::Nothing) = nothing
+
+#####
+##### Pass count computation
+#####
+
+function _compute_passes_per_row(rolloff::Shapiro121, φ_centers, filtered_indices, Nλ, threshold_latitude)
     cos_threshold = cosd(threshold_latitude)
-    spectral_mask = ones(FT, Nk, N_filtered)
+    passes = zeros(Int, length(filtered_indices))
 
     for (row, j) in enumerate(filtered_indices)
         φ = abs(φ_centers[j])
-        k_max = max(1, floor(Int, Nλ * cosd(φ) / cos_threshold))
-        _fill_spectral_mask!(view(spectral_mask, :, row), k_max, Nk, filter_mode)
-    end
-
-    ## Allocate work buffers
-    N_batch = N_filtered * Nz
-    buffer_real = zeros(FT, Nλ, N_batch)
-    buffer_complex = zeros(Complex{FT}, Nk, N_batch)
-
-    ## Create FFTW plans (batched 1D transforms along dim 1)
-    forward_plan = _plan_rfft(buffer_real, 1)
-    inverse_plan = _plan_brfft(buffer_complex, Nλ, 1)
-
-    return PolarFilter(threshold_latitude, filter_mode,
-                       forward_plan, inverse_plan,
-                       spectral_mask, buffer_real, buffer_complex,
-                       filtered_indices, grid)
-end
-
-## Spectral mask construction
-
-function _fill_spectral_mask!(mask, k_max, Nk, ::SharpTruncation)
-    for k in 1:Nk
-        mask[k] = ifelse(k <= k_max, 1, 0)
-    end
-    return nothing
-end
-
-function _fill_spectral_mask!(mask, k_max, Nk, mode::ExponentialRolloff)
-    p = mode.order
-    ## α chosen so the Nyquist wavenumber (η = 1) is attenuated to machine precision:
-    ##   mask(Nk) = exp(-α · 1^p) = exp(-α) ≈ ε  →  α = -log(ε)
-    α = -log(eps(eltype(mask)))
-    width = max(1, Nk - k_max)
-    for k in 1:Nk
-        if k <= k_max
-            mask[k] = 1
+        k_max = floor(Int, Nλ * cosd(φ) / cos_threshold)
+        ## Clamp: if k_max ≥ Nλ/2, no filtering needed
+        if k_max >= Nλ ÷ 2
+            passes[row] = 0
         else
-            η = (k - k_max) / width
-            mask[k] = exp(-α * η^p)
+            ## cos²ᴺ(π k_max / Nλ) ≤ target_response
+            ## N ≥ log(target_response) / (2 log(cos(π k_max / Nλ)))
+            cosval = cos(π * k_max / Nλ)
+            if cosval ≤ 0 || cosval ≥ 1
+                passes[row] = 0
+            else
+                N = ceil(Int, log(rolloff.target_response) / (2 * log(cosval)))
+                passes[row] = clamp(N, 0, rolloff.max_passes)
+            end
         end
     end
-    return nothing
+    return passes
 end
+
+#####
+##### Adapt
+#####
+
+Adapt.adapt_structure(to, pf::PolarFilter) =
+    PolarFilter(pf.threshold_latitude,
+                pf.rolloff,
+                adapt(to, pf.filtered_indices),
+                adapt(to, pf.passes_per_row),
+                adapt(to, pf.buffer_a),
+                adapt(to, pf.buffer_b),
+                adapt(to, pf.grid))

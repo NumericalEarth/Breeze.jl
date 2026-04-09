@@ -1,14 +1,17 @@
 module PolarFilters
 
 export PolarFilter,
-       add_polar_filter!,
-       apply_polar_filter!,
-       SharpTruncation,
-       ExponentialRolloff
+       Shapiro121,
+       AbstractRolloff,
+       materialize_polar_filter
 
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS, TYPEDSIGNATURES
 
-using Oceananigans: Oceananigans, interior
+using Adapt: Adapt, adapt
+using KernelAbstractions: @kernel, @index
+
+using Oceananigans
+using Oceananigans.Architectures: on_architecture
 using Oceananigans.Grids: Center
 
 include("polar_filter.jl")

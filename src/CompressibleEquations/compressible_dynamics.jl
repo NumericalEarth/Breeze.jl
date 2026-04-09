@@ -20,6 +20,7 @@ Fields
 - `terrain_metrics`: [`TerrainMetrics`](@ref) for terrain-following coordinates (or `nothing`)
 - `Ω̃`, `ρΩ̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
 - `terrain_reference_pressure`, `terrain_reference_density`: 3D reference pressure / density for the terrain pressure gradient force (or `nothing`)
+- `polar_filter`: [`PolarFilter`](@ref) for damping unresolvable high-wavenumber zonal modes on `LatitudeLongitudeGrid` (or `nothing`)
 
 The `time_discretization` determines how tendencies are computed and which
 time-stepper is used:
@@ -27,7 +28,7 @@ time-stepper is used:
 - [`ExplicitTimeStepping`](@ref): All tendencies computed together (small Δt required)
 - [`VerticallyImplicitTimeStepping`](@ref): Vertical acoustics implicit, horizontal explicit
 """
-struct CompressibleDynamics{TD, D, P, FT, RS, VAS, TM, CV, CM, TRP, TRD}
+struct CompressibleDynamics{TD, D, P, FT, RS, VAS, TM, CV, CM, TRP, TRD, PF}
     time_discretization :: TD         # SplitExplicitTimeDiscretization, ExplicitTimeStepping, or VerticallyImplicitTimeStepping
     density :: D                      # ρ (prognostic)
     pressure :: P                     # p = ρ R^m T (diagnostic)
@@ -40,6 +41,7 @@ struct CompressibleDynamics{TD, D, P, FT, RS, VAS, TM, CV, CM, TRP, TRD}
     ρΩ̃ :: CM                          # Contravariant vertical momentum diagnostic field (or Nothing)
     terrain_reference_pressure :: TRP # 3D reference pressure for terrain PG (or Nothing)
     terrain_reference_density :: TRD  # 3D reference density for terrain buoyancy (or Nothing)
+    polar_filter :: PF                # PolarFilter for LatitudeLongitudeGrid (or Nothing)
 end
 
 """
@@ -70,7 +72,8 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               surface_pressure = 101325.0,
                               reference_potential_temperature = nothing,
                               reference_temperature = nothing,
-                              terrain_metrics = nothing) where TD
+                              terrain_metrics = nothing,
+                              polar_filter = nothing) where TD
 
     FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
     pˢᵗ = convert(FT, standard_pressure)
@@ -86,7 +89,8 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     # are all built later in materialize_dynamics.
     return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, ref_spec,
                                 nothing, terrain_metrics,
-                                nothing, nothing, nothing, nothing)
+                                nothing, nothing, nothing, nothing,
+                                polar_filter)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
@@ -101,7 +105,8 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.Ω̃),
                          adapt(to, dynamics.ρΩ̃),
                          adapt(to, dynamics.terrain_reference_pressure),
-                         adapt(to, dynamics.terrain_reference_density))
+                         adapt(to, dynamics.terrain_reference_density),
+                         adapt(to, dynamics.polar_filter))
 
 #####
 ##### Materialization
@@ -192,10 +197,13 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         end
     end
 
+    polar_filter = materialize_polar_filter(grid, dynamics.polar_filter)
+
     return CompressibleDynamics(dynamics.time_discretization, density, pressure,
                                 standard_pressure, surface_pressure, reference_state,
                                 vertical_acoustic_solver, terrain_metrics, Ω̃, ρΩ̃,
-                                terrain_reference_pressure, terrain_reference_density)
+                                terrain_reference_pressure, terrain_reference_density,
+                                polar_filter)
 end
 
 #####

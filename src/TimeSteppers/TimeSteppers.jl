@@ -17,6 +17,7 @@ export SSPRungeKutta3, AcousticRungeKutta3,
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  update_state!, maybe_prepare_first_time_step!
+using Breeze.PolarFilters: _apply_polar_filter!
 
 include("ssp_runge_kutta_3.jl")
 include("acoustic_substep_helpers.jl")

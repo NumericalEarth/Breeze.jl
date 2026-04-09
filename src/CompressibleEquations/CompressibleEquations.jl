@@ -62,6 +62,7 @@ using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity, dry_ai
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density, standard_pressure, thermodynamic_density, specific_prognostic_moisture
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
+using Breeze.PolarFilters: materialize_polar_filter, _apply_polar_filter_substep!, _apply_polar_filter_scalar_substep!, _apply_polar_filter_recovered!
 
 include("time_discretizations.jl")
 include("compressible_dynamics.jl")
