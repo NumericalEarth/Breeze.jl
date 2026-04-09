@@ -8,7 +8,9 @@ using Oceananigans.TurbulenceClosures: compute_closure_fields!
 using Oceananigans.Utils: launch! # , KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
-function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
+function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[];
+                                    compute_tendencies=true,
+                                    physics_split::Bool=false)
     fix_negative_moisture!(model)  # fix negative moisture from advection
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
@@ -17,7 +19,7 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
     microphysics_model_update!(model.microphysics, model)
-    compute_tendencies && compute_tendencies!(model)
+    compute_tendencies && compute_tendencies!(model; physics_split=physics_split)
 
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
 
@@ -265,7 +267,7 @@ end
     @inbounds temperature[i, j, k] = T
 end
 
-function compute_tendencies!(model::AtmosphereModel)
+function compute_tendencies!(model::AtmosphereModel; physics_split::Bool=false)
     grid = model.grid
     arch = grid.architecture
 
@@ -280,6 +282,21 @@ function compute_tendencies!(model::AtmosphereModel)
     # Use transport velocities (contravariant for terrain-following grids)
     advecting_velocities = transport_velocities(model)
 
+    # Operator-splitting hook: when `physics_split=true`, the time stepper is
+    # going to apply microphysics as a separate fractional step *after* the
+    # WS-RK3 outer step. To prevent the in-stage WS-RK3 path from also
+    # integrating the microphysics tendency (which would over-apply it and
+    # explode the rain processes at large outer Δt), we substitute `nothing`
+    # for the microphysics in `common_args`. The kernel-side dispatch then
+    # falls through to `grid_microphysical_tendency(::Nothing, ...) = 0`
+    # for both the thermodynamic-density and moisture-density tendencies.
+    # The vapor-only `MoistureMassFractions(qᵛ)` returned by the `Nothing`
+    # branch of `grid_moisture_fractions` introduces an O(qˡ + qⁱ) error in
+    # the EOS recovery during dynamics, which is acceptable: cloud condensate
+    # mass fractions are O(1e-6) for the moist BW and the resulting T
+    # mismatch is sub-K.
+    tendency_microphysics = physics_split ? nothing : model.microphysics
+
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
         model.dynamics,
@@ -287,7 +304,7 @@ function compute_tendencies!(model::AtmosphereModel)
         model.thermodynamic_constants,
         specific_prognostic_moisture(model),
         advecting_velocities,
-        model.microphysics,
+        tendency_microphysics,
         model.microphysical_fields,
         model.closure,
         model.closure_fields,

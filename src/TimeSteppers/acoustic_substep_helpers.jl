@@ -14,8 +14,15 @@ using Breeze.AtmosphereModels:
     compute_z_momentum_tendency!,
     compute_dynamics_tendency!,
     specific_prognostic_moisture,
+    grid_moisture_fractions,
+    grid_microphysical_tendency,
+    thermodynamic_density,
+    thermodynamic_density_name,
+    moisture_prognostic_name,
     x_pressure_gradient,
     y_pressure_gradient
+
+import Breeze.AtmosphereModels: diagnose_thermodynamic_state, prognostic_field_names
 
 #####
 ##### Stage-frozen tendency computation
@@ -199,10 +206,18 @@ the acoustic loop advances perturbation variables, not full fields.
 - ``G^s_ρ = -\\boldsymbol{∇·m}^t``: full density tendency (continuity equation)
 - ``G^s_χ``: full thermodynamic tendency (advection + physics)
 """
-function compute_slow_scalar_tendencies!(model)
+function compute_slow_scalar_tendencies!(model; physics_split::Bool=false)
     # Compute Gˢρ = -∇·m^t (full density tendency at stage start)
     # Writes directly to model.timestepper.Gⁿ.ρ
     compute_dynamics_tendency!(model)
+
+    # Operator-splitting hook: when `physics_split=true`, the time stepper is
+    # going to apply microphysics as a separate fractional step after the
+    # WS-RK3 outer step. We substitute `nothing` for the microphysics in
+    # `common_args` so that `compute_thermodynamic_tendency!` does not also
+    # integrate microphysics latent heat in the WS-RK3 stages. See the
+    # corresponding comment in `compute_tendencies!` for the trade-off.
+    tendency_microphysics = physics_split ? nothing : model.microphysics
 
     # Compute Gˢχ = full thermodynamic tendency (no correction needed)
     common_args = (
@@ -211,7 +226,7 @@ function compute_slow_scalar_tendencies!(model)
         model.thermodynamic_constants,
         specific_prognostic_moisture(model),
         model.velocities,
-        model.microphysics,
+        tendency_microphysics,
         model.microphysical_fields,
         model.closure,
         model.closure_fields,
@@ -219,6 +234,103 @@ function compute_slow_scalar_tendencies!(model)
         fields(model))
 
     AtmosphereModels.compute_thermodynamic_tendency!(model, common_args)
+
+    return nothing
+end
+
+#####
+##### Operator-split microphysics fractional step
+#####
+##### When `AcousticRungeKutta3.physics_substeps > 1`, the WS-RK3 outer step
+##### computes the dynamics tendencies with the microphysics tendency
+##### suppressed (so the moist tracers and ρθ see only advection + closure +
+##### forcing during the outer step). After the outer step completes, this
+##### routine applies the suppressed microphysics as `N` explicit
+##### forward-Euler substeps of size `Δτ = Δt / N`. Each substep:
+#####
+#####   1. Reads the current ρ, qᵛ, condensate fields from the model.
+#####   2. Builds the local thermodynamic state via the same path the
+#####      compute_tendencies! kernels use (`grid_moisture_fractions` →
+#####      `diagnose_thermodynamic_state`).
+#####   3. Computes `grid_microphysical_tendency(... Val(name), ...)` for ρθ
+#####      and each prognostic moisture / hydrometeor field.
+#####   4. Forward-Euler updates the corresponding field by `Δτ × tendency`.
+#####
+##### Between substeps, `update_state!(model; compute_tendencies=false)`
+##### refreshes T and p so the next substep's microphysics tendency sees
+##### the post-condensation thermodynamic state. This decouples the
+##### microphysics relaxation timescale from the outer Δt: with `N = 16` at
+##### Δt = 160 s the per-substep `Δτ = 10` s is well below the rain process
+##### effective timescale.
+
+@inline function _microphysics_only_tendency(i, j, k, grid, name_val,
+                                              dynamics, formulation, constants,
+                                              specific_prognostic_moisture, velocities,
+                                              microphysics, microphysical_fields)
+    ρ_field = dynamics_density(dynamics)
+    @inbounds ρ = ρ_field[i, j, k]
+    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
+    return grid_microphysical_tendency(i, j, k, grid, microphysics, name_val, ρ,
+                                        microphysical_fields, 𝒰, constants, velocities)
+end
+
+@kernel function _apply_microphysics_substep_kernel!(field, name_val, grid,
+                                                      dynamics, formulation, constants,
+                                                      specific_prognostic_moisture, velocities,
+                                                      microphysics, microphysical_fields, Δτ)
+    i, j, k = @index(Global, NTuple)
+    S = _microphysics_only_tendency(i, j, k, grid, name_val,
+                                     dynamics, formulation, constants,
+                                     specific_prognostic_moisture, velocities,
+                                     microphysics, microphysical_fields)
+    @inbounds field[i, j, k] += Δτ * S
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply one operator-split microphysics fractional substep of size `Δτ`. Updates
+the thermodynamic density (`ρθ` for `LiquidIcePotentialTemperatureFormulation`)
+plus the prognostic moisture density (`ρqᵛ`) plus every prognostic
+microphysical hydrometeor field (`ρqᶜˡ`, `ρqᶜⁱ`, `ρqʳ`, `ρqˢ`, ...) by
+forward-Euler with `grid_microphysical_tendency` evaluated at the current
+state. Called by `time_step!` for `AcousticRungeKutta3` when
+`physics_substeps > 1`.
+"""
+function apply_microphysics_substep!(model, Δτ)
+    grid = model.grid
+    arch = architecture(grid)
+
+    common = (grid,
+              model.dynamics,
+              model.formulation,
+              model.thermodynamic_constants,
+              specific_prognostic_moisture(model),
+              model.velocities,
+              model.microphysics,
+              model.microphysical_fields)
+
+    # Thermodynamic density (ρθ for LiquidIcePotentialTemperatureFormulation,
+    # ρe for StaticEnergyFormulation). Captures latent heat from cond/evap.
+    ρχ = thermodynamic_density(model.formulation)
+    ρχ_name = thermodynamic_density_name(model.formulation)
+    launch!(arch, grid, :xyz, _apply_microphysics_substep_kernel!,
+            ρχ, Val(ρχ_name), common..., Δτ)
+
+    # Moisture density (ρqᵛ).
+    moist_name = moisture_prognostic_name(model.microphysics)
+    launch!(arch, grid, :xyz, _apply_microphysics_substep_kernel!,
+            model.moisture_density, Val(moist_name), common..., Δτ)
+
+    # Each prognostic hydrometeor density: ρqᶜˡ, ρqᶜⁱ, ρqʳ, ρqˢ for the
+    # mixed-phase 1M scheme; warm-phase has just ρqᶜˡ + ρqʳ; etc.
+    for name in prognostic_field_names(model.microphysics)
+        field = model.microphysical_fields[name]
+        launch!(arch, grid, :xyz, _apply_microphysics_substep_kernel!,
+                field, Val(name), common..., Δτ)
+    end
 
     return nothing
 end
