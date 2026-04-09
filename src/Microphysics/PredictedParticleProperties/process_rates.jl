@@ -1589,7 +1589,12 @@ end
     FT = typeof(log_m)
     log_λ_r = log10(max(FT(λ_r), FT(1e-20)))
     z_rain_rime = table2.sixth_moment(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)
-    return z_rain_rime * rain_riming * inv_nⁱ
+    # Fortran convention: zqrcol = N0r × m6collr × env (no 10^f1pr08 factor).
+    # Since rain_riming = N0r × ni × env × 10^f1pr08 (mass kernel),
+    # divide by the mass kernel to recover: z = m6collr × rain_riming / (ni × mass_kernel).
+    mass_kernel = exp10(table2.mass(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ))
+    inv_mass_kernel = safe_divide(one(FT), mass_kernel, zero(FT))
+    return z_rain_rime * rain_riming * inv_nⁱ * inv_mass_kernel
 end
 
 @inline function split_splintering_mass(rates::P3ProcessRates)

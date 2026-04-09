@@ -3,8 +3,11 @@
     log_m = log10(m̄)
     log_λ = log10(λr)
     z_val = _ice_rain_sixth_moment_lookup(table.sixth_moment, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ, FT)
-    return table.mass(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ),
-           table.number(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ),
+    # Fortran table stores rain-ice mass and number kernels as log10;
+    # exponentiate to recover physical values (Fortran runtime: 10.**proc).
+    # Sixth moment (m6collr) is NOT log10.
+    return exp10(table.mass(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ)),
+           exp10(table.number(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ)),
            z_val
 end
 
@@ -266,7 +269,10 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
     mass_kernel = _rain_riming_mass_kernel(lookup_table_2(p3),
         m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
-    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * mass_kernel
+    # Fortran convention: qrcoll = 10^(f1pr08 + logn0r) × ni × env.
+    # N0r = nr × λr (for μr=0).
+    N0r = nʳ_eff * λ_r
+    rate = Eʳⁱ * N0r * nⁱ_eff * ρ * rhofaci * mass_kernel
 
     return ifelse(active, rate, zero(FT))
 end
@@ -361,10 +367,14 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
 
     # H6: Use Table 2 (double-PSD kernel) for ice-rain mass collection.
+    # Fortran convention: qrcol = 10^(f1pr08 + logn0r) × ni × ρ × rhofaci × E
+    # The table stores the double-PSD integral with N0r factored out.
+    # N0r = nr × λr (for μr=0 used in table generation).
     mass_kernel = _rain_riming_mass_kernel(lookup_table_2(p3),
         m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
-    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * mass_kernel
+    N0r = nʳ_eff * λ_r
+    rate = Eʳⁱ * N0r * nⁱ_eff * ρ * rhofaci * mass_kernel
 
     return ifelse(active, rate, zero(FT))
 end
@@ -440,10 +450,13 @@ independent PSD-integrated number collection rate.
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
 
     # H6: Use Table 2 (number-weighted kernel) for ice-rain number collection.
+    # Fortran convention: nrcol = 10^(f1pr07 + logn0r) × ni × ρ × rhofaci × E
+    # N0r = nr × λr (for μr=0).
     number_kernel = _rain_riming_number_kernel(lookup_table_2(p3),
         m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
-    rate = Eʳⁱ * nʳ_eff * nⁱ_eff * ρ * rhofaci * number_kernel
+    N0r = nʳ_eff * λ_r
+    rate = Eʳⁱ * N0r * nⁱ_eff * ρ * rhofaci * number_kernel
 
     return ifelse(active, rate, zero(FT))
 end
