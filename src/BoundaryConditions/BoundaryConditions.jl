@@ -143,9 +143,9 @@ If `formulation` is `:LiquidIcePotentialTemperature` and `ρe` boundary conditio
 they are automatically converted to `ρθ` boundary conditions using `EnergyFluxBoundaryCondition`.
 """
 function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                          dynamics, microphysics, surface_pressure,
-                                                                          thermodynamic_constants,
-                                                                          microphysical_fields, specific_prognostic_moisture, temperature)
+                                                                           dynamics, microphysics, surface_pressure,
+                                                                           thermodynamic_constants,
+                                                                           microphysical_fields, specific_prognostic_moisture, temperature)
 
     # Convert ρe boundary conditions to ρθ for potential temperature formulations
     boundary_conditions = convert_energy_to_theta_bcs(boundary_conditions, formulation, thermodynamic_constants)
