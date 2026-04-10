@@ -510,7 +510,10 @@ end
     qˡ = zero(qᵛᵉ)
     qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qᵛᵉ)
     qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qᵛᵉ)
-    return MoistureMassFractions(qᵛᵉ, qˡ)
+    qⁱ = zero(qᵛᵉ)
+    qⁱ += haskey(ℳ, :qᶜⁱ) ? ℳ.qᶜⁱ : zero(qᵛᵉ)
+    qⁱ += haskey(ℳ, :qˢ) ? ℳ.qˢ : zero(qᵛᵉ)
+    return MoistureMassFractions(qᵛᵉ, qˡ, qⁱ)
 end
 
 """
