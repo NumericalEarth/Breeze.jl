@@ -46,7 +46,7 @@ end
 @inline function OceanBuoyancyFormulations.∂z_b(i, j, k, grid, b::AtmosphereModelBuoyancy, tracers)
     g = b.thermodynamic_constants.gravitational_acceleration
     # Use ∂z(log ϑ) = ∂z(ϑ)/ϑ to keep the derivative and denominator at consistent grid locations
-    ∂z_log_ϑ = ∂zᶜᶜᶠ(i, j, k, grid, log_virtual_potential_temperature, 
+    ∂z_log_ϑ = ∂zᶜᶜᶠ(i, j, k, grid, log_virtual_potential_temperature,
                      b.thermodynamic_constants, b.dynamics, tracers.T, tracers.qᵛ)
     return g * ∂z_log_ϑ
 end
