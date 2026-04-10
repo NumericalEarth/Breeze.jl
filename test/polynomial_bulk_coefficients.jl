@@ -13,9 +13,11 @@ using Breeze.BoundaryConditions: PolynomialCoefficient,
                                  stability_correction_factor
 using Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
+using GPUArraysCore: @allowscalar
 
 @testset "PolynomialCoefficient [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
+    @allowscalar begin
 
     @testset "Constructor and defaults" begin
         # Test default constructor — uses FittedStabilityFunction
@@ -878,4 +880,5 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         @test fv.u[2, 2, 1] < fv_before  # moved toward actual (< 50)
         @test fv.u[2, 2, 1] > 45.0       # but barely (still close to 50)
     end
+    end # @allowscalar
 end
