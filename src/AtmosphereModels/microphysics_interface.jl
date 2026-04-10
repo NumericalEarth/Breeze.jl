@@ -507,12 +507,9 @@ end
 # NamedTuple contains specific moisture fractions computed from ρ-weighted prognostics.
 # Input qᵛᵉ is scheme-dependent specific moisture (vapor or equilibrium moisture).
 @inline function moisture_fractions(microphysics, ℳ::NamedTuple, qᵛᵉ)
-    qˡ = zero(qᵛᵉ)
-    qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qᵛᵉ)
-    qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qᵛᵉ)
-    qⁱ = zero(qᵛᵉ)
-    qⁱ += haskey(ℳ, :qᶜⁱ) ? ℳ.qᶜⁱ : zero(qᵛᵉ)
-    qⁱ += haskey(ℳ, :qˢ) ? ℳ.qˢ : zero(qᵛᵉ)
+    z = zero(qᵛᵉ)
+    qˡ = get(ℳ, :qᶜˡ, z) + get(ℳ, :qʳ, z)
+    qⁱ = get(ℳ, :qᶜⁱ, z) + get(ℳ, :qˢ, z)
     return MoistureMassFractions(qᵛᵉ, qˡ, qⁱ)
 end
 
