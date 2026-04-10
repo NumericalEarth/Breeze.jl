@@ -428,9 +428,11 @@ factor that accounts for latent heating during phase change.
 - Rate of vapor → cloud liquid conversion [kg/kg/s]
   (positive = condensation, negative = evaporation)
 """
-@inline function cloud_condensation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, constants)
+@inline function cloud_condensation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, constants;
+                                          sˢᵃᵗ = zero(typeof(qᶜˡ)))
     FT = typeof(qᶜˡ)
     τᶜˡ = p3.cloud.condensation_timescale
+    prp = p3.process_rates
 
     # Thermodynamic adjustment factor (psychrometric correction)
     ℒˡ = liquid_latent_heat(T, constants)
@@ -439,12 +441,25 @@ factor that accounts for latent heating during phase change.
     dqᵛ⁺_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
     Γˡ = 1 + (ℒˡ / cᵖᵐ) * dqᵛ⁺_dT
 
-    # Relaxation toward saturation
-    Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺ˡ) / (Γˡ * τᶜˡ)
+    # --- Standard relaxation-to-saturation ---
+    Sᶜᵒⁿᵈ_relax = (qᵛ - qᵛ⁺ˡ) / (Γˡ * τᶜˡ)
+    Sᶜᵒⁿᵈ_min_relax = -max(0, qᶜˡ) / (Γˡ * τᶜˡ)
+    rate_relax = max(Sᶜᵒⁿᵈ_relax, Sᶜᵒⁿᵈ_min_relax)
 
-    # Limit evaporation to available cloud liquid (include Γˡ for consistency)
-    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / (Γˡ * τᶜˡ)
-    return max(Sᶜᵒⁿᵈ, Sᶜᵒⁿᵈ_min)
+    # --- H10: Predicted supersaturation (Grabowski & Morrison 2008) ---
+    # Bounded adjustment: correct discrepancy between diagnosed (qᵛ - qᵛ⁺ˡ) and predicted sˢᵃᵗ.
+    # Fortran lines 2740-2762: epsilon = (qv - qvs - ssat) / ab
+    # NOTE: Fortran also uses ssat for ice saturation ratio (supi = (ssat+qvs-qvi)/qvi,
+    # line 2553), affecting deposition. This Julia implementation only modifies condensation.
+    # TODO: Optionally derive ice saturation ratio from sˢᵃᵗ for deposition parity.
+    epsilon = (qᵛ - qᵛ⁺ˡ - sˢᵃᵗ) / Γˡ
+    # Cannot evaporate more cloud water than available
+    epsilon = max(epsilon, -max(0, qᶜˡ))
+    # When subsaturated, only allow downward adjustment (Fortran: if ssat<0, epsilon=min(0,epsilon))
+    epsilon = ifelse(sˢᵃᵗ < 0, min(0, epsilon), epsilon)
+    rate_ssat = epsilon / τᶜˡ
+
+    return ifelse(prp.predict_supersaturation, rate_ssat, rate_relax)
 end
 
 """
@@ -709,6 +724,11 @@ struct P3ProcessRates{FT}
     rain_condensation :: FT            # Rain condensation (vapor → rain) [kg/kg/s]
     coating_condensation :: FT         # Condensation on ice liquid coating [kg/kg/s]
     coating_evaporation :: FT          # Evaporation from ice liquid coating [kg/kg/s]
+
+    # H9: Wet growth rime densification (Fortran lines 4303-4307)
+    # During wet growth, assume total soaking: qᶠ → qⁱ, bᶠ → qⁱ/ρ_rimeMax.
+    wet_growth_densification_mass :: FT   # Rime mass source: (qⁱ - qᶠ)/τ [kg/kg/s]
+    wet_growth_densification_volume :: FT # Rime volume change: (qⁱ/ρ_max - bᶠ)/τ [m³/kg/s]
 end
 
 """
@@ -791,7 +811,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Phase 1: Cloud condensation/evaporation
     # =========================================================================
-    cond = cloud_condensation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, constants)
+    cond = cloud_condensation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, constants; sˢᵃᵗ=ℳ.sˢᵃᵗ)
 
     # C5: CCN activation (1-moment, prescribed Nᶜ)
     ccn_act = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
@@ -885,6 +905,22 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     shed_active = !prp.liquid_fraction_active & is_wet_growth
     wg_shed   = ifelse(shed_active, clamp_positive(total_collection - qwgrth), zero(FT))
     wg_shed_n = wg_shed / prp.shed_drop_mass
+
+    # H9: Wet growth rime densification (Fortran lines 4303-4307).
+    # During wet growth, assume total soaking: all ice mass becomes rime
+    # at maximum rime density. Express as relaxation tendency over dt_safety.
+    # Fortran disables densification when log_LiquidFrac = .true. (line 3251):
+    # "Densification from wet growth turned off as it is now contained into qiliq".
+    # When liquid fraction is active, log_wetgrowth is never set .true. in Fortran.
+    ρ_rimemax = prp.maximum_rime_density
+    τ_densif = prp.sink_limiting_timescale
+    qⁱ_safe = clamp_positive(qⁱ)
+    bᶠ_safe = max(bᶠ, FT(1e-20))
+    wg_densif_active = is_wet_growth & !prp.liquid_fraction_active & (qⁱ_safe > FT(1e-14))
+    wg_densif_mass = clamp_positive(qⁱ_safe - qᶠ) / τ_densif
+    wg_densif_vol = (qⁱ_safe / ρ_rimemax - bᶠ_safe) / τ_densif
+    wg_densif_mass = ifelse(wg_densif_active, wg_densif_mass, zero(FT))
+    wg_densif_vol  = ifelse(wg_densif_active, wg_densif_vol, zero(FT))
 
     # =========================================================================
     # Phase 2: Shedding and refreezing
@@ -1134,7 +1170,9 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         # C5/C6: CCN activation and rain condensation
         ccn_act, rain_cond,
         # D1: Coating condensation/evaporation
-        coat_cond, coat_evap
+        coat_cond, coat_evap,
+        # H9: Wet growth rime densification
+        wg_densif_mass, wg_densif_vol
     )
 end
 
@@ -1360,7 +1398,8 @@ Rime mass loses from:
     # Frozen cloud/rain becomes fully rimed ice (100% rime fraction for new frozen particles)
     gain = rates.cloud_riming + rates.rain_riming + rates.refreezing +
            rates.cloud_freezing_mass + rates.rain_freezing_mass +
-           rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass
+           rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass +
+           rates.wet_growth_densification_mass
     # Phase 1: melts and sublimates proportionally with ice mass
     # M8: sublimation (negative deposition) also removes rime proportionally
     sublimation = clamp_positive(-rates.deposition)
@@ -1400,7 +1439,8 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
                    rates.rain_riming / ρ_rimemax +
                    rates.refreezing / ρ_rimemax +
                    (rates.cloud_freezing_mass + rates.rain_freezing_mass) / ρ_rimemax +
-                   (rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass) / ρ_rim_hom
+                   (rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass) / ρ_rim_hom +
+                   rates.wet_growth_densification_volume
 
     # Phase 1: Volume loss from melting and sublimation (proportional to rime fraction)
     # M8: sublimation (negative deposition) also removes rime volume proportionally
@@ -1792,6 +1832,32 @@ Vapor is produced by:
     return ρ * (vapor_gain - vapor_loss)
 end
 
+"""
+    tendency_ρsˢᵃᵗ(rates, ρ, prp)
+
+Compute predicted supersaturation tendency (H10: Grabowski & Morrison 2008).
+
+When `predict_supersaturation = true`, supersaturation ``sˢᵃᵗ = qᵛ - q_{vs}``
+is a prognostic variable advected by the dynamical core. The microphysical
+tendency resets it toward the diagnosed value by mirroring the vapor tendency:
+all processes that consume or produce vapor change supersaturation accordingly.
+
+When `predict_supersaturation = false`, returns zero tendency.
+"""
+@inline function tendency_ρsˢᵃᵗ(rates::P3ProcessRates, ρ, prp)
+    # Supersaturation tendency mirrors vapor tendency: sˢᵃᵗ = qᵛ - qᵛ⁺ˡ, so
+    # dsˢᵃᵗ/dt = dqᵛ/dt - dqᵛ⁺ˡ/dT × dT/dt. This approximation captures
+    # dqᵛ/dt from microphysical sources/sinks but omits the qᵛ⁺ˡ adjustment
+    # from latent-heat-driven temperature changes. Fortran compensates by
+    # recalculating ssat = qv - qvs(T) at end of step (lines 5058-5067);
+    # here the advected sˢᵃᵗ field and bounded adjustment serve the same role.
+    vapor_loss = rates.condensation + rates.deposition + rates.nucleation_mass +
+                 rates.ccn_activation + rates.rain_condensation + rates.coating_condensation
+    vapor_gain = rates.rain_evaporation + rates.coating_evaporation
+    raw = ρ * (vapor_gain - vapor_loss)
+    return ifelse(prp.predict_supersaturation, raw, zero(ρ))
+end
+
 #####
 ##### Fallback methods for Nothing rates
 #####
@@ -1809,4 +1875,5 @@ end
 @inline tendency_ρbᶠ(::Nothing, ρ, Fᶠ, ρᶠ, prp...) = zero(ρ)
 @inline tendency_ρzⁱ(::Nothing, ρ, qⁱ, nⁱ, zⁱ) = zero(ρ)
 @inline tendency_ρqʷⁱ(::Nothing, ρ) = zero(ρ)
+@inline tendency_ρsˢᵃᵗ(::Nothing, ρ, prp) = zero(ρ)
 @inline tendency_ρqᵛ(::Nothing, ρ) = zero(ρ)

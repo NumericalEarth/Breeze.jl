@@ -64,16 +64,17 @@ runtime path uses `lookupTable_3` for distribution parameter closure.
 
 # Prognostic Variables
 
-The scheme tracks 9 prognostic densities:
+The scheme tracks 11 prognostic densities:
 
 | Variable | Description |
 |----------|-------------|
-| ``ρqᶜˡ`` | Cloud liquid mass |
+| ``ρqᶜˡ``, ``ρnᶜˡ`` | Cloud liquid mass and number |
 | ``ρqʳ``, ``ρnʳ`` | Rain mass and number |
 | ``ρqⁱ``, ``ρnⁱ`` | Ice mass and number |
 | ``ρqᶠ``, ``ρbᶠ`` | Rime mass and volume |
 | ``ρzⁱ`` | Ice 6th moment (reflectivity) |
 | ``ρqʷⁱ`` | Liquid water on ice |
+| ``ρsˢᵃᵗ`` | Predicted supersaturation (H10, off by default) |
 
 # Keyword Arguments
 

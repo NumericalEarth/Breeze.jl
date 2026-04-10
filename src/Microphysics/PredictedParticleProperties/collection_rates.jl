@@ -639,7 +639,9 @@ Shed liquid forms rain drops of approximately 1 mm diameter.
 - Rate of rain number increase [1/kg/s]
 """
 @inline function shedding_number_rate(p3, shed_rate)
-    m_shed = p3.process_rates.shed_drop_mass
+    # Liquid-fraction shedding uses 1.928e6 drops/kg (Fortran nlshd, line 3350),
+    # slightly different from cloud/wet-growth shedding (1.923e6).
+    m_shed = p3.process_rates.shed_drop_mass_liqfrac
 
     return shed_rate / m_shed
 end

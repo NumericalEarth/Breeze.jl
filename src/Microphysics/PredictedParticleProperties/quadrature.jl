@@ -808,19 +808,16 @@ end
 end
 
 # Size-regime-specific ventilation for melting
-# C4 PARITY NOTE: Fortran P3 v5.5.0 (create_p3_lookupTable_1.f90, lines 1985-2006) uses
+# H12: Fortran P3 v5.5.0 (create_p3_lookupTable_1.f90, lines 1985-2006) uses
 # the **dry ice PSD** (n0d, mu_id, lamd) for melting integrals, NOT the wet (total) PSD.
 # The dry PSD from Cholette et al. (2019) represents only the ice portion when Fl > 0.
-# The Julia implementation currently uses the wet PSD via `size_distribution(D, state)`.
-# For Fl = 0, wet = dry (no difference). For Fl > 0, the wet PSD overestimates melting
-# because it includes liquid water in the distribution shape.
-# This only affects Julia-generated tables; runtime reads Fortran-generated tables.
-# TODO: Add dry PSD parameters to IceSizeDistributionState for Fl > 0 table generation.
+# Uses `dry_size_distribution(D, state)` which analytically adjusts λ and N₀ for dry mass.
+# For Fl = 0, dry = wet (no change). For Fl > 0, correctly excludes liquid water.
 @inline function integrand(::SmallIceVentilationConstant, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
     fᵛᵉ = melt_ventilation_factor(D, state, true, thresholds)
     C = capacitance(D, state, thresholds)
-    Np = size_distribution(D, state)
+    Np = dry_size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
     return ifelse(D ≤ D_crit, contribution, zero(D))
 end
@@ -829,7 +826,7 @@ end
     D_crit = thresholds.spherical
     fᵛᵉ = melt_ventilation_factor(D, state, false, thresholds)
     C = capacitance(D, state, thresholds)
-    Np = size_distribution(D, state)
+    Np = dry_size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
     return ifelse(D ≤ D_crit, contribution, zero(D))
 end
@@ -838,7 +835,7 @@ end
     D_crit = thresholds.spherical
     fᵛᵉ = melt_ventilation_factor(D, state, true, thresholds)
     C = capacitance(D, state, thresholds)
-    Np = size_distribution(D, state)
+    Np = dry_size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
     return ifelse(D > D_crit, contribution, zero(D))
 end
@@ -847,7 +844,7 @@ end
     D_crit = thresholds.spherical
     fᵛᵉ = melt_ventilation_factor(D, state, false, thresholds)
     C = capacitance(D, state, thresholds)
-    Np = size_distribution(D, state)
+    Np = dry_size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
     return ifelse(D > D_crit, contribution, zero(D))
 end
@@ -1278,12 +1275,12 @@ end
 # Sixth moment melting tendencies
 # Fortran (line 1991): sum5 = ∫ capm × 6D^5 × fac1 × N'(D) / dmdD dD  (D ≤ D_crit)
 # melt1 = constant ventilation, melt2 = enhanced ventilation (for small ice, D ≤ D_crit)
-# C4 PARITY NOTE: Same dry PSD issue as mass melting integrands above — see SmallIceVentilationConstant.
+# H12: Uses dry PSD for melting (same fix as mass melting integrands above).
 @inline function integrand(::SixthMomentMelt1, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
     fᵛᵉ = melt_ventilation_factor(D, state, true, thresholds)
     C = capacitance(D, state, thresholds)
-    Np = size_distribution(D, state)
+    Np = dry_size_distribution(D, state)
     dmdD = particle_mass_derivative(D, state, thresholds)
     contribution = 6 * D^5 * fᵛᵉ * C * Np / dmdD
     return ifelse(D ≤ D_crit, contribution, zero(D))
@@ -1293,7 +1290,7 @@ end
     D_crit = thresholds.spherical
     fᵛᵉ = melt_ventilation_factor(D, state, false, thresholds)
     C = capacitance(D, state, thresholds)
-    Np = size_distribution(D, state)
+    Np = dry_size_distribution(D, state)
     dmdD = particle_mass_derivative(D, state, thresholds)
     contribution = 6 * D^5 * fᵛᵉ * C * Np / dmdD
     return ifelse(D ≤ D_crit, contribution, zero(D))
@@ -1304,7 +1301,7 @@ end
 @inline function integrand(::SixthMomentMeltAll1, D, state::IceSizeDistributionState, thresholds)
     fᵛᵉ = melt_ventilation_factor(D, state, true, thresholds)
     C = capacitance(D, state, thresholds)
-    Np = size_distribution(D, state)
+    Np = dry_size_distribution(D, state)
     dmdD = particle_mass_derivative(D, state, thresholds)
     return 6 * D^5 * fᵛᵉ * C * Np / dmdD
 end
@@ -1312,7 +1309,7 @@ end
 @inline function integrand(::SixthMomentMeltAll2, D, state::IceSizeDistributionState, thresholds)
     fᵛᵉ = melt_ventilation_factor(D, state, false, thresholds)
     C = capacitance(D, state, thresholds)
-    Np = size_distribution(D, state)
+    Np = dry_size_distribution(D, state)
     dmdD = particle_mass_derivative(D, state, thresholds)
     return 6 * D^5 * fᵛᵉ * C * Np / dmdD
 end

@@ -61,7 +61,8 @@ struct ProcessRateParameters{FT}
     # Shedding
     shedding_timescale :: FT                 # τ_shed [s]
     maximum_liquid_fraction :: FT            # qʷⁱ_max_frac [-]
-    shed_drop_mass :: FT                     # m_shed [kg]
+    shed_drop_mass :: FT                     # m_shed [kg] (cloud/wet-growth shedding)
+    shed_drop_mass_liqfrac :: FT             # m_shed [kg] (liquid-fraction shedding, Fortran 1.928e6)
 
     # Refreezing
     refreezing_timescale :: FT               # τ_frz [s]
@@ -157,6 +158,12 @@ struct ProcessRateParameters{FT}
     # When true: wet growth rime densification is suppressed (liquid tracked
     # explicitly in qʷⁱ), and melt-densification is skipped.
     liquid_fraction_active :: Bool
+
+    # H10: Predicted supersaturation mode (Fortran log_predictSsat).
+    # When true, carry supersaturation as a prognostic variable and use
+    # bounded Grabowski-Morrison (2008) adjustment for condensation.
+    # When false (default), use relaxation-to-saturation.
+    predict_supersaturation :: Bool
 
     # Deposition/sublimation calibration factors (Fortran P3 v5.5.0 clbfact_dep, clbfact_sub).
     # Ad hoc multipliers to increase or decrease deposition and/or sublimation rates.
@@ -257,6 +264,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         shedding_timescale = 60.0,
         maximum_liquid_fraction = 0.3,
         shed_drop_mass = 1 / 1.923e6,  # m19: Fortran 1 mm drop mass (microphy_p3.f90 1.923e6 drops/kg)
+        # C2: Fortran uses 1.928e6 for liquid-fraction shedding (nlshd, line 3350)
+        shed_drop_mass_liqfrac = 1 / 1.928e6,
 
         # Refreezing
         refreezing_timescale = 30.0,
@@ -355,6 +364,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Liquid fraction mode (Fortran log_LiquidFrac)
         liquid_fraction_active = true,
 
+        # H10: Predicted supersaturation (Fortran log_predictSsat, default .false.)
+        predict_supersaturation = false,
+
         # Deposition/sublimation calibration factors (Fortran clbfact_dep, clbfact_sub)
         calibration_factor_deposition = 1.0,
         calibration_factor_sublimation = 1.0,
@@ -394,6 +406,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(shedding_timescale),
         FT(maximum_liquid_fraction),
         FT(shed_drop_mass),
+        FT(shed_drop_mass_liqfrac),
         FT(refreezing_timescale),
         FT(nucleation_temperature_threshold),
         FT(nucleation_supersaturation_threshold),
@@ -445,6 +458,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(maximum_ice_number_density),
         FT(liquid_fraction_small),
         Bool(liquid_fraction_active),
+        Bool(predict_supersaturation),
         FT(calibration_factor_deposition),
         FT(calibration_factor_sublimation),
         FT(minimum_complete_melting_fraction)

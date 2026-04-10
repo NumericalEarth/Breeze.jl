@@ -119,3 +119,41 @@ The total number concentration is ``N = ∫_0^∞ N'(D) dD``.
     λ = state.slope
     return N₀ * D^μ * exp(-λ * D)
 end
+
+"""
+    dry_size_distribution(D, state::IceSizeDistributionState)
+
+Evaluate the **dry ice** size distribution ``N_d'(D)`` at diameter D.
+
+When liquid fraction ``Fˡ > 0`` (partial melting), the wet (total) PSD
+includes liquid water in the mass constraint. For melting and deposition
+integrals, the Fortran P3 v5.5.0 uses the dry PSD from
+[Cholette et al. (2019)](@cite Cholette2019parameterization) which represents
+only the ice portion.
+
+The dry PSD is derived analytically by adjusting ``λ`` and ``N_0`` so that
+the mass moment matches the dry ice content ``q_{dry} = q_{total}(1 - Fˡ)``,
+using the effective mass-diameter exponent ``β`` from the state:
+
+```math
+λ_d = λ (1-Fˡ)^{-1/β}, \\quad N_{0,d} = N_0 (λ_d/λ)^{μ+1}
+```
+
+When ``Fˡ = 0``, ``λ_d = λ`` and the dry PSD equals the wet PSD.
+"""
+@inline function dry_size_distribution(D, state::IceSizeDistributionState)
+    N₀ = state.intercept
+    μ = state.shape
+    λ = state.slope
+    Fˡ = state.liquid_fraction
+    β = state.mass_exponent
+
+    # Compute λ ratio: (1-Fˡ)^(-1/β). When Fˡ = 0, ratio = 1 (dry = wet).
+    one_minus_Fl = max(1 - Fˡ, eps(typeof(Fˡ)))
+    λ_ratio = one_minus_Fl^(-1 / β)
+    λ_dry = λ * λ_ratio
+    # Adjust N₀ to conserve total number: N = N₀ Γ(μ+1)/λ^(μ+1)
+    N₀_dry = N₀ * λ_ratio^(μ + 1)
+
+    return N₀_dry * D^μ * exp(-λ_dry * D)
+end

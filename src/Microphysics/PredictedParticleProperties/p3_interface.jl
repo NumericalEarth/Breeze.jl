@@ -57,6 +57,8 @@ struct P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
     zⁱ  :: FT
     "Liquid water on ice mixing ratio [kg/kg]"
     qʷⁱ :: FT
+    "Predicted supersaturation [kg/kg] (H10: Grabowski & Morrison 2008)"
+    sˢᵃᵗ :: FT
 end
 
 #####
@@ -68,17 +70,20 @@ $(TYPEDSIGNATURES)
 
 Return prognostic field names for the P3 scheme.
 
-P3 v5.5 with 3-moment ice and predicted liquid fraction has 10 prognostic fields:
+P3 v5.5 with 3-moment ice and predicted liquid fraction has 11 prognostic fields:
 - Cloud: ρqᶜˡ, ρnᶜˡ
 - Rain: ρqʳ, ρnʳ
 - Ice: ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ
+- Supersaturation: ρsˢᵃᵗ (H10: Grabowski & Morrison 2008, inactive by default)
 """
 function AM.prognostic_field_names(::P3)
     cloud_names = (:ρqᶜˡ, :ρnᶜˡ)
     rain_names = (:ρqʳ, :ρnʳ)
     ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ)
+    # H10: supersaturation (always allocated; tendency = 0 when predict_supersaturation = false)
+    ssat_names = (:ρsˢᵃᵗ,)
 
-    return tuple(cloud_names..., rain_names..., ice_names...)
+    return tuple(cloud_names..., rain_names..., ice_names..., ssat_names...)
 end
 
 #####
@@ -143,6 +148,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     ρbᶠ  = CenterField(grid)  # Rime volume
     ρzⁱ  = CenterField(grid)  # Ice 6th moment
     ρqʷⁱ = CenterField(grid)  # Liquid on ice
+    ρsˢᵃᵗ = CenterField(grid) # Predicted supersaturation (H10)
 
     # Diagnostic mixing ratio / number-concentration fields
     # (updated each step in update_microphysical_auxiliaries!, matching the Kessler pattern)
@@ -180,13 +186,14 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     cache_ρbᶠ  = CenterField(grid)
     cache_ρzⁱ  = CenterField(grid)
     cache_ρqʷⁱ = CenterField(grid)
+    cache_ρsˢᵃᵗ = CenterField(grid)
     cache_ρqᵛ  = CenterField(grid)
 
-    return (; ρqᶜˡ, ρnᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ,
+    return (; ρqᶜˡ, ρnᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ, ρsˢᵃᵗ,
               qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, qᵛ,
               wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
               cache_ρqᶜˡ, cache_ρnᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
-              cache_ρqᶠ, cache_ρbᶠ, cache_ρzⁱ, cache_ρqʷⁱ, cache_ρqᵛ)
+              cache_ρqᶠ, cache_ρbᶠ, cache_ρzⁱ, cache_ρqʷⁱ, cache_ρsˢᵃᵗ, cache_ρqᵛ)
 end
 
 #####
@@ -215,7 +222,8 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
     rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ, qʷⁱ)
     qᶠ  = rime_state.qᶠ
     bᶠ  = rime_state.bᶠ
-    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ)
+    sˢᵃᵗ = μ.ρsˢᵃᵗ / ρ
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ)
 end
 
 # Disambiguation for P3 with Nothing or empty microphysical fields
@@ -277,6 +285,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.cache_ρbᶠ[i, j, k]  = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, ℳ.qⁱ, p3.process_rates)
     @inbounds μ.cache_ρzⁱ[i, j, k]  = p3_ice_sixth_moment_tendency(lookup_table_1(p3), p3, rates, ρ, ℳ, props)
     @inbounds μ.cache_ρqʷⁱ[i, j, k] = tendency_ρqʷⁱ(rates, ρ)
+    @inbounds μ.cache_ρsˢᵃᵗ[i, j, k] = tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates)
     @inbounds μ.cache_ρqᵛ[i, j, k]  = tendency_ρqᵛ(rates, ρ)
 
     return nothing
@@ -467,6 +476,14 @@ Liquid on ice tendency: loses from shedding and refreezing.
 end
 
 """
+Supersaturation tendency (H10): zero when predict_supersaturation = false.
+"""
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρsˢᵃᵗ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    return tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates)
+end
+
+"""
 Vapor tendency: loses from condensation, deposition, nucleation; gains from evaporation, sublimation.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqᵛ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -514,6 +531,9 @@ end
 
 @inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqʷⁱ}, ρ, fields, 𝒰, constants, velocities) =
     @inbounds fields.cache_ρqʷⁱ[i, j, k]
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρsˢᵃᵗ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρsˢᵃᵗ[i, j, k]
 
 @inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqᵛ}, ρ, fields, 𝒰, constants, velocities) =
     @inbounds fields.cache_ρqᵛ[i, j, k]

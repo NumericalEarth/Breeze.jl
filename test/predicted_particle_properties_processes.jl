@@ -465,6 +465,8 @@ using Oceananigans.Fields: interior
             FT(0.0),    # rain_condensation (M9 stub)
             FT(0.0),    # coating_condensation (M9 stub)
             FT(0.0),    # coating_evaporation (M9 stub)
+            FT(0.0),    # wet_growth_densification_mass (H9)
+            FT(0.0),    # wet_growth_densification_volume (H9)
         )
 
         # Test each tendency function returns a finite number
@@ -518,7 +520,8 @@ using Oceananigans.Fields: interior
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),                        # warm collection + rain_warm_n (M9)
             FT(0.0), FT(0.0),                                         # wet growth
             FT(0.0), FT(0.0),                                         # D8 wet growth shedding
-            FT(0.0), FT(0.0), FT(0.0), FT(0.0)                       # M9 stubs
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0),                      # M9 stubs
+            FT(0.0), FT(0.0)                                          # H9 wet growth densification
         )
 
         source_z(mass, number, μ_new) = begin
@@ -1132,6 +1135,7 @@ using Oceananigans.Fields: interior
             ρbᶠ = ρ * FT(5e-8),
             ρzⁱ = ρ * FT(1e-10),
             ρqʷⁱ = FT(0),
+            ρsˢᵃᵗ = FT(0),
         )
         ℳ = Breeze.AtmosphereModels.microphysical_state(p3, ρ, μ, nothing, nothing)
         @test ℳ.qᶠ == FT(1e-5)
@@ -1187,6 +1191,7 @@ using Oceananigans.Fields: interior
             FT(qf / 400),  # bᶠ (rime volume)
             FT(1e-10),     # zⁱ (reflectivity)
             FT(0),         # qʷⁱ (liquid on ice)
+            FT(0),         # sˢᵃᵗ (predicted supersaturation)
         )
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
@@ -1246,6 +1251,7 @@ using Oceananigans.Fields: interior
             FT(qf / 400),  # bᶠ
             FT(1e-10),     # zⁱ
             FT(0),         # qʷⁱ
+            FT(0),         # sˢᵃᵗ
         )
 
         ℳ_high_nc = P3MicrophysicalState(
@@ -1259,6 +1265,7 @@ using Oceananigans.Fields: interior
             FT(qf / 400),   # bᶠ
             FT(1e-10),      # zⁱ
             FT(0),          # qʷⁱ
+            FT(0),          # sˢᵃᵗ
         )
 
         rates_low_nc = compute_p3_process_rates(p3, ρ, ℳ_low_nc, 𝒰, constants)
@@ -1293,7 +1300,7 @@ using Oceananigans.Fields: interior
 
         ℳ = P3MicrophysicalState(
             qcl, FT(200e6 / ρ), qr, FT(1e4), qi, FT(1e5), qf,
-            FT(qf / 400), FT(1e-10), FT(0))
+            FT(qf / 400), FT(1e-10), FT(0), FT(0))
 
         # Compute rates with tabulated scheme
         rates_tab = compute_p3_process_rates(p3_tab, ρ, ℳ, 𝒰, constants)

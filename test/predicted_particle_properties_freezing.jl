@@ -594,6 +594,8 @@ using Oceananigans.Fields: interior
             FT(0.0),    # rain_condensation (M9 stub)
             FT(0.0),    # coating_condensation (M9 stub)
             FT(0.0),    # coating_evaporation (M9 stub)
+            FT(0.0),    # wet_growth_densification_mass (H9)
+            FT(0.0),    # wet_growth_densification_volume (H9)
         )
 
         # Compute total water tendency: vapor + cloud + rain + ice + liquid_on_ice
