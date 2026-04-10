@@ -729,6 +729,13 @@ struct P3ProcessRates{FT}
     # During wet growth, assume total soaking: qᶠ → qⁱ, bᶠ → qⁱ/ρ_rimeMax.
     wet_growth_densification_mass :: FT   # Rime mass source: (qⁱ - qᶠ)/τ [kg/kg/s]
     wet_growth_densification_volume :: FT # Rime volume change: (qⁱ/ρ_max - bᶠ)/τ [m³/kg/s]
+
+    # M6: DSD number correction feedback (Fortran get_cloud_dsd2/get_rain_dsd2)
+    # After lambda bounding, the DSD-consistent number may differ from the prognostic
+    # number. Fortran writes the bounded value back instantaneously; here we express
+    # the correction as a relaxation rate over dt_safety.
+    cloud_number_correction :: FT  # (nᶜˡ_bounded - nᶜˡ) / τ [1/kg/s]
+    rain_number_correction :: FT   # (nʳ_bounded - nʳ) / τ [1/kg/s]
 end
 
 """
@@ -945,7 +952,25 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     clip_freeze = (T < T₀) & (Fˡ < Fl_small) & (Fˡ > 0)
     clip_melt   = (T >= T₀) & (Fˡ > 1 - Fl_small)
     refrz = ifelse(clip_freeze, refrz + qʷⁱ_eff / τ_clip, refrz)
-    complete_melt = ifelse(clip_melt, complete_melt + qʷⁱ_eff / τ_clip, complete_melt)
+    # Drain qʷⁱ via shedding pathway (which properly removes from qʷⁱ and adds to qʳ)
+    shed = ifelse(clip_melt, shed + qʷⁱ_eff / τ_clip, shed)
+
+    # M8: Filiq > 0.99 safety clipping (Fortran P3 v5.5.0 lines 4341-4358).
+    # When liquid fraction exceeds 0.99, the ice particle is effectively all liquid.
+    # Transfer ALL ice to rain: dry ice via complete_melt, liquid on ice via shed.
+    # Fortran does this regardless of temperature (applies during wet growth at T < T₀ too).
+    qⁱ_dry = clamp_positive(qⁱ)
+    clip_high_fl = (Fˡ > FT(0.99)) & (qⁱ_dry > 0)
+    complete_melt = ifelse(clip_high_fl, complete_melt + qⁱ_dry / τ_clip, complete_melt)
+    shed = ifelse(clip_high_fl, shed + qʷⁱ_eff / τ_clip, shed)
+
+    # M12(c): Melt tiny ice at T >= T₀ (Fortran k_loop_1 lines 2626-2638).
+    # When total ice is in [qsmall, qsmall_dry) and above freezing, convert all ice to rain.
+    # Fortran qsmall_dry = 1e-12 (liquid fraction mode) or 1e-8 (fast mode).
+    qⁱ_total_clip = qⁱ_dry + qʷⁱ_eff
+    tiny_warm_ice = (T >= T₀) & (qⁱ_total_clip >= FT(1e-14)) & (qⁱ_total_clip < prp.qsmall_dry)
+    complete_melt = ifelse(tiny_warm_ice, complete_melt + qⁱ_dry / τ_clip, complete_melt)
+    shed = ifelse(tiny_warm_ice, shed + qʷⁱ_eff / τ_clip, shed)
 
     # =========================================================================
     # Ice nucleation (deposition nucleation and immersion freezing)
@@ -1140,6 +1165,13 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     rain_spl_q = min(rain_spl_q, clamp_positive(rain_rim))
     spl_q = cloud_spl_q + rain_spl_q
 
+    # M6: DSD number correction feedback (Fortran get_cloud_dsd2/get_rain_dsd2).
+    # After lambda bounding, the DSD-consistent number may differ from the prognostic
+    # number. Fortran writes bounded nc/nr back to the prognostic field each step;
+    # here we express the correction as a relaxation rate.
+    ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
+    nr_correction = (nʳ - ℳ.nʳ) / dt_safety
+
     return P3ProcessRates(
         # Phase 1: Condensation
         cond,
@@ -1172,7 +1204,9 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         # D1: Coating condensation/evaporation
         coat_cond, coat_evap,
         # H9: Wet growth rime densification
-        wg_densif_mass, wg_densif_vol
+        wg_densif_mass, wg_densif_vol,
+        # M6: DSD number correction feedback
+        ncl_correction, nr_correction
     )
 end
 
@@ -1314,7 +1348,8 @@ Rain number loses from:
              rates.rain_homogeneous_number +
              rates.rain_warm_collection_number
 
-    return ρ * (n_gain - n_loss)
+    # M6: DSD number correction feedback (Fortran get_rain_dsd2 writes back bounded nr)
+    return ρ * (n_gain - n_loss + rates.rain_number_correction)
 end
 
 """
@@ -1763,7 +1798,8 @@ to the cloud mass they consume, following the Fortran `nc` budget structure.
                   rates.cloud_homogeneous_number +
                   rates.cloud_warm_collection_number
 
-    return ρ * (activation_number - number_loss)
+    # M6: DSD number correction feedback (Fortran get_cloud_dsd2 writes back bounded nc)
+    return ρ * (activation_number - number_loss + rates.cloud_number_correction)
 end
 
 """

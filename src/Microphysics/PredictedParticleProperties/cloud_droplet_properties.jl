@@ -211,7 +211,7 @@ cloud number together with the PSD correction used by immersion freezing.
 @inline function diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
     FT = typeof(qᶜˡ + nᶜˡ + ρ)
     qᶜˡ_eff = max(0, qᶜˡ)
-    nᶜˡ_eff = max(0, nᶜˡ)
+    nᶜˡ_eff = max(1e-16, nᶜˡ)
     Nᶜ = nᶜˡ_eff * ρ
 
     μ_c = liu_daum_shape_parameter(Nᶜ)

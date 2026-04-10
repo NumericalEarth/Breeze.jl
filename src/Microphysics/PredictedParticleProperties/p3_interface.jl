@@ -217,7 +217,12 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
     nʳ  = μ.ρnʳ / ρ
     qⁱ  = μ.ρqⁱ / ρ
     nⁱ  = μ.ρnⁱ / ρ
-    zⁱ  = μ.ρzⁱ / ρ
+    # M13: Fortran advects z̃ = √(z·N) and converts to physical z at microphysics entry:
+    #   where (nitot > 0) zitot = zitot**2 / nitot; elsewhere zitot = 0
+    # ρzⁱ stores the advected variable z̃; convert to physical z = z̃²/N for internal use.
+    FT = typeof(ρ)
+    z̃ⁱ  = μ.ρzⁱ / ρ
+    zⁱ  = ifelse(nⁱ > FT(1e-20), z̃ⁱ^2 / nⁱ, zero(FT))
     qʷⁱ = μ.ρqʷⁱ / ρ
     rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ, qʷⁱ)
     qᶠ  = rime_state.qᶠ
@@ -283,7 +288,14 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.cache_ρnⁱ[i, j, k]  = tendency_ρnⁱ(rates, ρ)
     @inbounds μ.cache_ρqᶠ[i, j, k]  = tendency_ρqᶠ(rates, ρ, Fᶠ)
     @inbounds μ.cache_ρbᶠ[i, j, k]  = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, ℳ.qⁱ, p3.process_rates)
-    @inbounds μ.cache_ρzⁱ[i, j, k]  = p3_ice_sixth_moment_tendency(lookup_table_1(p3), p3, rates, ρ, ℳ, props)
+    # M13: Convert physical z tendency to advected z̃ = √(z·N) tendency.
+    # d(z̃)/dt = (N·dz/dt + z·dN/dt) / (2·z̃), so d(ρz̃)/dt = (N·d(ρz)/dt + z·d(ρN)/dt) / (2·z̃)
+    tendency_ρz_phys = p3_ice_sixth_moment_tendency(lookup_table_1(p3), p3, rates, ρ, ℳ, props)
+    tendency_ρn = tendency_ρnⁱ(rates, ρ)
+    z_phys = props.zⁱ_bounded
+    FT_cache = typeof(ρ)
+    z̃ = sqrt(max(z_phys * ℳ.nⁱ, FT_cache(1e-30)))
+    @inbounds μ.cache_ρzⁱ[i, j, k] = (ℳ.nⁱ * tendency_ρz_phys + z_phys * tendency_ρn) / (2 * z̃)
     @inbounds μ.cache_ρqʷⁱ[i, j, k] = tendency_ρqʷⁱ(rates, ρ)
     @inbounds μ.cache_ρsˢᵃᵗ[i, j, k] = tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates)
     @inbounds μ.cache_ρqᵛ[i, j, k]  = tendency_ρqᵛ(rates, ρ)
@@ -464,7 +476,13 @@ Ice sixth moment tendency: changes with deposition, melting, riming, and nucleat
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρzⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, props = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return p3_ice_sixth_moment_tendency(lookup_table_1(p3), p3, rates, ρ, ℳ, props)
+    # M13: Convert physical z tendency to advected z̃ = √(z·N) tendency
+    FT = typeof(ρ)
+    tendency_ρz_phys = p3_ice_sixth_moment_tendency(lookup_table_1(p3), p3, rates, ρ, ℳ, props)
+    tendency_ρn = tendency_ρnⁱ(rates, ρ)
+    z_phys = props.zⁱ_bounded
+    z̃ = sqrt(max(z_phys * ℳ.nⁱ, FT(1e-30)))
+    return (ℳ.nⁱ * tendency_ρz_phys + z_phys * tendency_ρn) / (2 * z̃)
 end
 
 """

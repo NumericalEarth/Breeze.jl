@@ -467,6 +467,8 @@ using Oceananigans.Fields: interior
             FT(0.0),    # coating_evaporation (M9 stub)
             FT(0.0),    # wet_growth_densification_mass (H9)
             FT(0.0),    # wet_growth_densification_volume (H9)
+            FT(0.0),    # cloud_number_correction (M6)
+            FT(0.0),    # rain_number_correction (M6)
         )
 
         # Test each tendency function returns a finite number
@@ -521,7 +523,8 @@ using Oceananigans.Fields: interior
             FT(0.0), FT(0.0),                                         # wet growth
             FT(0.0), FT(0.0),                                         # D8 wet growth shedding
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),                      # M9 stubs
-            FT(0.0), FT(0.0)                                          # H9 wet growth densification
+            FT(0.0), FT(0.0),                                         # H9 wet growth densification
+            FT(0.0), FT(0.0)                                          # M6 DSD number corrections
         )
 
         source_z(mass, number, μ_new) = begin

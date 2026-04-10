@@ -154,6 +154,10 @@ struct ProcessRateParameters{FT}
     # Implemented as a relaxation drain over refreezing_timescale.
     liquid_fraction_small :: FT              # Fortran liqfracsmall [-]
 
+    # M12(c): Tiny-ice threshold for warm pre-processing (Fortran qsmall_dry).
+    # Ice with qi ∈ [qsmall, qsmall_dry) at T ≥ T₀ is converted to rain.
+    qsmall_dry :: FT                         # [kg/kg]
+
     # Liquid fraction mode (Fortran log_LiquidFrac).
     # When true: wet growth rime densification is suppressed (liquid tracked
     # explicitly in qʷⁱ), and melt-densification is skipped.
@@ -347,8 +351,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # (≈ 6 μm radius cloud droplet → m ≈ 4/3 π ρ_w r³ ≈ 9e-13 kg; use 1e-12 kg)
         minimum_cloud_drop_mass = 1e-12,
 
-        # Rain DSD bounds (Fortran P3 v5.5.0: 1/(dlamr) intervals)
-        rain_lambda_min = 500.0,    # lamr_min [1/m] ≈ D_max ~2mm
+        # Rain DSD bounds (Fortran P3 v5.5.0 get_rain_dsd2: lammin = (mu_r+1)*inv_Drmax)
+        # inv_Drmax = 1/0.002 = 500 [1/m]. Note: table generation uses 200, runtime uses 500.
+        rain_lambda_min = 500.0,    # lamr_min [1/m] ≈ D_max ~2mm (Fortran runtime parity)
         rain_lambda_max = 100000.0, # lamr_max [1/m] ≈ D_min ~10μm
 
         # Sink-limiting safety timescale
@@ -360,6 +365,11 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Liquid fraction clipping (Milbrandt et al. 2025)
         liquid_fraction_small = 0.01,  # Fortran liqfracsmall
+
+        # M12(c): Tiny-ice threshold for warm pre-processing (Fortran qsmall_dry).
+        # Fortran has qsmall_dry1 = 1e-8 (fast mode) and qsmall_dry2 = 1e-12 (liquid frac mode).
+        # Ice with qi ∈ [qsmall, qsmall_dry) at T ≥ T₀ is converted to rain.
+        qsmall_dry = 1e-12,  # [kg/kg], Fortran qsmall_dry2
 
         # Liquid fraction mode (Fortran log_LiquidFrac)
         liquid_fraction_active = true,
@@ -457,6 +467,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(sink_limiting_timescale),
         FT(maximum_ice_number_density),
         FT(liquid_fraction_small),
+        FT(qsmall_dry),
         Bool(liquid_fraction_active),
         Bool(predict_supersaturation),
         FT(calibration_factor_deposition),

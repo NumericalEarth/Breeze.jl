@@ -82,7 +82,7 @@ function IceSizeDistributionState(FT::Type{<:AbstractFloat} = Float64;
                                    rime_density = FT(400),
                                    mass_coefficient = FT(0.0121),
                                    mass_exponent = FT(1.9),
-                                   ice_density = FT(917),
+                                   ice_density = FT(900),
                                    reference_air_density = FT(60000 / (dry_air_gas_constant(ThermodynamicConstants()) * 253.15)),
                                    air_density = FT(60000 / (dry_air_gas_constant(ThermodynamicConstants()) * 253.15)))
     return IceSizeDistributionState(
