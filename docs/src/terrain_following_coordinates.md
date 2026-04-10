@@ -138,7 +138,7 @@ Advection of density-weighted scalars ``\rho c`` uses the same contravariant vel
 for vertical transport:
 
 ```math
-\partial_t (\rho c) + \boldsymbol{\nabla}_\zeta \cdot (\rho c \, \tilde{\boldsymbol{U}}) = S_c ,
+\partial_t (\rho c) + \boldsymbol{\nabla}_\zeta \boldsymbol{\cdot} (\rho c \, \tilde{\boldsymbol{U}}) = S_c ,
 ```
 
 where ``\tilde{\boldsymbol{U}} = (u, v, \tilde{\Omega})``. This is handled automatically
@@ -177,7 +177,7 @@ Pass the [`TerrainMetrics`](@ref) to [`CompressibleDynamics`](@ref) via the
 ```@example terrain
 dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
 model = AtmosphereModel(grid; dynamics)
-typeof(model.dynamics.terrain_metrics)
+model.dynamics.terrain_metrics
 ```
 
 When `terrain_metrics` is present, the model automatically:
@@ -185,7 +185,7 @@ When `terrain_metrics` is present, the model automatically:
 - Computes ``\tilde{\Omega}`` and ``\rho \tilde{\Omega}`` as auxiliary fields
   during each state update.
 - Uses ``\tilde{\Omega}`` in place of ``w`` for vertical transport of momentum,
-  scalars, and density (via the `transport_velocities` / `transport_momentum`
+  scalars, and density (via the `transport_velocities` / `advecting_momentum`
   dispatch mechanism).
 - Corrects horizontal pressure gradients with the terrain slope terms.
 
@@ -198,7 +198,9 @@ overloadable functions:
 
 - `transport_velocities(model)`: Returns `(u, v, w)` for standard models or
   `(u, v, Ω̃)` for terrain-following models.
-- `transport_momentum(model)`: Returns `(ρu, ρv, ρw)` or `(ρu, ρv, ρΩ̃)`.
+- `advecting_momentum(model)`: Returns `(ρu, ρv, ρw)` for z-coordinate models or
+  `(ρu, ρv, ρΩ̃)` for terrain-following models, where `ρΩ̃` is the contravariant
+  vertical momentum.
 
 The momentum and scalar tendency kernels use these transport tuples for advective fluxes,
 so all vertical transport automatically uses the contravariant velocity when terrain is present.
