@@ -13,7 +13,8 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         ScalarDiffusivity(ν=1, κ=2),
         ScalarDiffusivity(vitd, ν=1),
         SmagorinskyLilly(),
-        AnisotropicMinimumDissipation()
+        DynamicSmagorinsky(),
+        AnisotropicMinimumDissipation(),
     )
 
     for closure in closures
@@ -60,6 +61,14 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             θ₀ = model.dynamics.reference_state.potential_temperature
             set!(model; θ=θ₀, ρu = (x, y, z) -> z / 100)
             Breeze.AtmosphereModels.update_state!(model)
+            @test maximum(abs, model.closure_fields.νₑ) > 0
+        end
+
+        @testset "DynamicSmagorinsky with velocity gradients [$formulation, $(FT)]" begin
+            model = AtmosphereModel(grid; dynamics, formulation, closure=DynamicSmagorinsky())
+            θ₀ = model.dynamics.reference_state.potential_temperature
+            set!(model; θ=θ₀, ρu = (x, y, z) -> z / 100)
+            time_step!(model, 1)
             @test maximum(abs, model.closure_fields.νₑ) > 0
         end
 

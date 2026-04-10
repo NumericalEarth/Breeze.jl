@@ -142,8 +142,8 @@ using Test
 
         @test model isa AtmosphereModel
         @test model.dynamics.terrain_metrics isa TerrainMetrics
-        @test model.dynamics.Ω̃ !== nothing
-        @test model.dynamics.ρΩ̃ !== nothing
+        @test model.dynamics.contravariant_vertical_velocity !== nothing
+        @test model.dynamics.contravariant_vertical_momentum !== nothing
 
         θ₀ = 300.0
         p₀ = 101325.0
@@ -155,7 +155,7 @@ using Test
         Δt = 0.1
         time_step!(model, Δt)
         @test isfinite(maximum(abs, model.velocities.w))
-        @test isfinite(maximum(abs, model.dynamics.Ω̃))
+        @test isfinite(maximum(abs, model.dynamics.contravariant_vertical_velocity))
     end
 
     @testset "Contravariant velocity for horizontal flow over terrain" begin
@@ -189,7 +189,7 @@ using Test
 
         # Ω̃ should be nonzero near the mountain (terrain slopes are nonzero)
         # and near zero far from the mountain (terrain slopes ≈ 0)
-        Ω̃ = model.dynamics.Ω̃
+        Ω̃ = model.dynamics.contravariant_vertical_velocity
         @test maximum(abs, Ω̃) > 0
 
         # At the model top (k = Nz+1), terrain slopes decay to zero so Ω̃ ≈ w
