@@ -51,7 +51,8 @@ end
 end
 
 @inline function log_virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵛ)
-    return log(virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵛ))
+    ϑ = virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵛ)
+    return log(ϑ)
 end
 
 @inline function virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵛ)
