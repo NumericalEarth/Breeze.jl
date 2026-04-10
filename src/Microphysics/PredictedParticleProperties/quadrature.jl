@@ -1111,10 +1111,10 @@ end
 
 # Aggregation number: ∫∫ (√A₁+√A₂)² |V₁-V₂| N'(D₁) N'(D₂) dD₁ dD₂
 # WARNING: This single-integral integrand uses the Wisner (1972) approximation
-# (V × A × N'²) which has different magnitude than the double integral stored
-# in tables. Do NOT use evaluate(AggregationNumber(), state) for runtime
-# computation — use _aggregation_kernel() dispatch instead.
-# For tabulation, evaluate_quadrature is specialized to compute the full double integral.
+# (V × A × N'²) which has different magnitude than the Fortran double integral.
+# At runtime, the Fortran-generated lookup tables provide the correct double-integral
+# values (nagg column). This single-integral integrand is NOT used for production;
+# it exists only as a fallback for unit testing without tables.
 @inline function integrand(::AggregationNumber, D, state::IceSizeDistributionState, thresholds)
     V = terminal_velocity(D, state, thresholds)
     A = particle_area(D, state, thresholds)
@@ -1317,9 +1317,13 @@ end
     return 6 * D^5 * fᵛᵉ * C * Np / dmdD
 end
 
-# Sixth moment aggregation
-# The single-integral integrand is retained as a fallback. For tabulation,
-# evaluate_quadrature is specialized to compute the full double integral (M9 fix).
+# Sixth moment aggregation (L9 parity note)
+# Fortran (create_p3_lookupTable_1.f90:1415-1470) computes m6agg via a double
+# integral with three-term normalization: mom6/mom3² × nagg + 1/mom3² × (sum2+sum3)
+# - 2×mom6/mom3³ × (sum4+sum5). At runtime, the Fortran-generated lookup tables
+# provide the correct double-integral m6agg values. This single-integral Wisner
+# approximation (D⁶ × V × A × N'²) is NOT used for production; it exists only
+# as a fallback for unit testing without tables.
 @inline function integrand(::SixthMomentAggregation, D, state::IceSizeDistributionState, thresholds)
     V = terminal_velocity(D, state, thresholds)
     A = particle_area(D, state, thresholds)
