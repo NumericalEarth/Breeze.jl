@@ -26,11 +26,11 @@ using Breeze.Microphysics.PredictedParticleProperties:
     @test wrapped(0.5, 0.5, 0.5, 150.0, 10.0) ≈ 1.5
 end
 
-@testset "Read Fortran lookup tables (3momI)" begin
-    table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-    isdir(table_dir) || error("Fortran tables not found at $table_dir")
+const _fortran_table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
+const _has_fortran_tables = isdir(_fortran_table_dir)
 
-    p3 = read_fortran_lookup_tables(table_dir; FT=Float64)
+@testset "Read Fortran lookup tables (3momI)" skip=!_has_fortran_tables begin
+    p3 = read_fortran_lookup_tables(_fortran_table_dir; FT=Float64)
 
     tables = p3.ice.lookup_tables
     @test tables isa P3LookupTables
@@ -59,11 +59,8 @@ end
     @test p3.rain.evaporation isa TabulatedFunction
 end
 
-@testset "Read Fortran lookup tables (2momI)" begin
-    table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-    isdir(table_dir) || error("Fortran tables not found at $table_dir")
-
-    p3 = read_fortran_lookup_tables(table_dir; three_moment_ice=false)
+@testset "Read Fortran lookup tables (2momI)" skip=!_has_fortran_tables begin
+    p3 = read_fortran_lookup_tables(_fortran_table_dir; three_moment_ice=false)
 
     tables = p3.ice.lookup_tables
     @test tables.table_1 isa P3LookupTable1
@@ -82,11 +79,8 @@ end
     @test p3.ice.sixth_moment.rime === nothing
 end
 
-@testset "Rain tables are computed (not from Fortran)" begin
-    table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-    isdir(table_dir) || error("Fortran tables not found at $table_dir")
-
-    p3 = read_fortran_lookup_tables(table_dir)
+@testset "Rain tables are computed (not from Fortran)" skip=!_has_fortran_tables begin
+    p3 = read_fortran_lookup_tables(_fortran_table_dir)
 
     @test p3.rain.velocity_mass isa TabulatedFunction1D
     @test p3.rain.velocity_number isa TabulatedFunction1D
@@ -95,26 +89,20 @@ end
     @test p3.rain.velocity_mass(log_lambda) > 0
 end
 
-@testset "PredictedParticlePropertiesMicrophysics constructor with Fortran tables" begin
-    table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-    isdir(table_dir) || error("Fortran tables not found at $table_dir")
-
+@testset "PredictedParticlePropertiesMicrophysics constructor with Fortran tables" skip=!_has_fortran_tables begin
     # Test constructor interface
-    p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+    p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=_fortran_table_dir)
     @test p3 isa PredictedParticlePropertiesMicrophysics
     @test p3.ice.lookup_tables isa P3LookupTables
 
     # Test 2momI override
     p3_2mom = PredictedParticlePropertiesMicrophysics(;
-        lookup_tables=table_dir, three_moment_ice=false)
+        lookup_tables=_fortran_table_dir, three_moment_ice=false)
     @test p3_2mom.ice.lookup_tables.table_3 === nothing
 end
 
-@testset "Process rates with Fortran-loaded tables" begin
-    table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-    isdir(table_dir) || error("Fortran tables not found at $table_dir")
-
-    p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+@testset "Process rates with Fortran-loaded tables" skip=!_has_fortran_tables begin
+    p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=_fortran_table_dir)
 
     FT = Float64
     qⁱ = FT(1e-4)    # ice mass mixing ratio

@@ -65,10 +65,11 @@ using Oceananigans.Fields: interior
 
 @testset "P3 Tabulated and Freezing" begin
 
-    @testset "Tabulated sixth-moment melting matches Fortran branch split" begin
+    _tab_table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
+
+    @testset "Tabulated sixth-moment melting matches Fortran branch split" skip=!isdir(_tab_table_dir) begin
         FT = Float64
-        table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-        p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=_tab_table_dir)
 
         qⁱ = FT(1e-4)
         nⁱ = FT(1e5)
@@ -102,8 +103,8 @@ using Oceananigans.Fields: interior
             index == 16 ? FT(1e-7) : zero(FT)
         end, fieldcount(P3ProcessRates))...)
 
-        @test tendency_ρzⁱ(partial_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ) ≈ 0
-        @test tendency_ρzⁱ(complete_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ) != 0
+        @test tendency_ρzⁱ(partial_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, zero(FT)) ≈ 0
+        @test tendency_ρzⁱ(complete_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, zero(FT)) != 0
 
         lt1 = Breeze.Microphysics.PredictedParticleProperties.lookup_table_1(p3_tab)
         lt2 = Breeze.Microphysics.PredictedParticleProperties.lookup_table_2(p3_tab)
@@ -122,8 +123,8 @@ using Oceananigans.Fields: interior
         expected_coat_cond = ρ * z_dep_combined * FT(1e-8) / (nⁱ * mass_dep_combined)
         expected_coat_evap = -ρ * z_sub_combined * FT(1e-8) / (nⁱ * mass_dep_combined)
 
-        @test tendency_ρzⁱ(coat_cond_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, λ_r) ≈ expected_coat_cond
-        @test tendency_ρzⁱ(coat_evap_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, λ_r) ≈ expected_coat_evap
+        @test tendency_ρzⁱ(coat_cond_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, zero(FT), λ_r) ≈ expected_coat_cond
+        @test tendency_ρzⁱ(coat_evap_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, zero(FT), λ_r) ≈ expected_coat_evap
 
         # Rain riming Z uses Table 2 sixth_moment divided by the mass kernel (Fortran convention:
         # zqrcol = N0r × m6collr × env, while qrcol = N0r × 10^f1pr08 × Ni × env).
@@ -131,7 +132,7 @@ using Oceananigans.Fields: interior
         rain_mass_kernel = exp10(lt2.mass(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ))
         expected_rain_rime = ρ * lt2.sixth_moment(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ) * FT(1e-7) / (nⁱ * rain_mass_kernel)
         fallback_cloud_rime = ρ * lt1.sixth_moment.rime(log_m, Fᶠ, Fˡ, ρᶠ, μ) * FT(1e-7) / nⁱ
-        rain_rime_tendency = tendency_ρzⁱ(rain_rime_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, λ_r)
+        rain_rime_tendency = tendency_ρzⁱ(rain_rime_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, zero(FT), λ_r)
 
         @test rain_rime_tendency ≈ expected_rain_rime
         @test !isapprox(rain_rime_tendency, fallback_cloud_rime)

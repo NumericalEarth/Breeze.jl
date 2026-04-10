@@ -84,8 +84,13 @@ function download_p3_lookup_tables(destination::AbstractString)
         Downloads = Base.require(Base.PkgId(Base.UUID("f43a241f-c20a-4ad4-852c-f6b1247861c6"), "Downloads"))
         Downloads.download(url, gzpath)
 
-        run(pipeline(`gzip -d -k $gzpath`))
-        rm(gzpath)
+        run(ignorestatus(`gzip -d -k $gzpath`))
+        if !isfile(outpath)
+            # HTTP client may have transparently decompressed the content
+            mv(gzpath, outpath)
+        else
+            rm(gzpath; force=true)
+        end
 
         mb = round(filesize(outpath) / 1e6; digits=1)
         @info "  Decompressed $filename ($mb MB)"
