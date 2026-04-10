@@ -784,8 +784,9 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # m22: Apply Fortran get_cloud_dsd2 lambda bounds to compute a mass-consistent
     # effective Nᶜ. When cloud mass is too small for the prescribed number, Fortran
     # reduces nc to maintain a physically consistent DSD.
-    μ_c = p3.cloud.shape_parameter
-    Nᶜ = bounded_cloud_number(p3.cloud.number_concentration, μ_c, qᶜˡ, ρ)
+    cloud = diagnose_cloud_dsd(p3, qᶜˡ, ℳ.nᶜˡ, ρ)
+    μ_c = cloud.μ_c
+    Nᶜ = cloud.Nᶜ
 
     # =========================================================================
     # Phase 1: Cloud condensation/evaporation
@@ -1440,7 +1441,7 @@ This simplified version uses proportional scaling (Z/q ratio).
 For more accurate 3-moment treatment, use the version that accepts
 the p3 scheme to access tabulated sixth moment integrals.
 """
-@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, prp::ProcessRateParameters)
+@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, prp::ProcessRateParameters, μ_cloud = zero(typeof(ρ)))
     FT = typeof(ρ)
 
     # Simplified: Z changes proportionally to mass changes
@@ -1457,7 +1458,7 @@ the p3 scheme to access tabulated sixth moment integrals.
                initiated_ice_sixth_moment_tendency(rates.cloud_freezing_mass, rates.cloud_freezing_number, zero(FT)) +
                initiated_ice_sixth_moment_tendency(rates.rain_freezing_mass, rates.rain_freezing_number, zero(FT)) +
                initiated_ice_sixth_moment_tendency(rates.splintering_mass, rates.splintering_number, zero(FT)) +
-               initiated_ice_sixth_moment_tendency(rates.cloud_homogeneous_mass, rates.cloud_homogeneous_number, zero(FT)) +
+               initiated_ice_sixth_moment_tendency(rates.cloud_homogeneous_mass, rates.cloud_homogeneous_number, μ_cloud) +
                initiated_ice_sixth_moment_tendency(rates.rain_homogeneous_mass, rates.rain_homogeneous_number, zero(FT))
 
     return ρ * (ratio * mass_change + z_group2)
@@ -1497,7 +1498,7 @@ PSD-integrated sixth moment changes per process.
 # Returns
 - Tendency of density-weighted sixth moment [kg/m³ × m⁶/kg / s]
 """
-@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3, nu, D_v, μ, λ_r = nothing)
+@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3, nu, D_v, μ, μ_cloud, λ_r = nothing)
     FT = typeof(ρ)
 
     # Mean ice particle mass for table lookup
@@ -1513,7 +1514,7 @@ PSD-integrated sixth moment changes per process.
 
     z_tendency = tabulated_z_tendency(
         p3.ice, log_mean_mass, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-        p3.process_rates, sc_correction, p3, μ, λ_r
+        p3.process_rates, sc_correction, p3, μ, μ_cloud, λ_r
     )
 
     return z_tendency
@@ -1535,7 +1536,7 @@ end
 @inline function tabulated_z_tendency(ice::IceProperties{<:Any, <:Any, <:Any, <:Any, <:Any,
                                                           M6, <:Any, <:Any},
                                         log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-                                        prp::ProcessRateParameters, sc_correction, p3, μ, λ_r = nothing) where {M6 <: IceSixthMoment{<:P3Table5D}}
+                                        prp::ProcessRateParameters, sc_correction, p3, μ, μ_cloud, λ_r = nothing) where {M6 <: IceSixthMoment{<:P3Table5D}}
     FT = typeof(ρ)
     lt1 = lookup_table_1(p3)
     lt2 = lookup_table_2(p3)
@@ -1624,13 +1625,12 @@ end
     z_shed_rate = z_shed * rates.shedding * inv_nⁱ
 
     cloud_spl_q, rain_spl_q = split_splintering_mass(rates)
-    μ_c = liu_daum_shape_parameter(p3.cloud.number_concentration)
     z_group2 = initiated_ice_sixth_moment_tendency(rates.nucleation_mass, rates.nucleation_number, zero(FT)) +
                initiated_ice_sixth_moment_tendency(rates.cloud_freezing_mass, rates.cloud_freezing_number, zero(FT)) +
                initiated_ice_sixth_moment_tendency(rates.rain_freezing_mass, rates.rain_freezing_number, zero(FT)) +
                initiated_ice_sixth_moment_tendency(rain_spl_q, rates.splintering_number, zero(FT)) +
                initiated_ice_sixth_moment_tendency(cloud_spl_q, rates.splintering_number, zero(FT)) +
-               initiated_ice_sixth_moment_tendency(rates.cloud_homogeneous_mass, rates.cloud_homogeneous_number, μ_c) +
+               initiated_ice_sixth_moment_tendency(rates.cloud_homogeneous_mass, rates.cloud_homogeneous_number, μ_cloud) +
                initiated_ice_sixth_moment_tendency(rates.rain_homogeneous_mass, rates.rain_homogeneous_number, zero(FT))
 
     # Total Z rate
@@ -1650,8 +1650,8 @@ end
 # Fallback for 2-moment ice (no m6 tables): use simplified proportional Z tendency
 @inline function tabulated_z_tendency(ice::IceProperties,
                                         log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
-                                        prp::ProcessRateParameters, sc_correction, p3, μ, λ_r = nothing)
-    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp)
+                                        prp::ProcessRateParameters, sc_correction, p3, μ, μ_cloud, λ_r = nothing)
+    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp, μ_cloud)
 end
 
 @inline function rain_riming_sixth_moment_tendency(::Nothing, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
@@ -1700,6 +1700,30 @@ end
     FT = typeof(nucleation_number)
     nucleation_mass = nucleation_number * prp.nucleated_ice_mass
     return initiated_ice_sixth_moment_tendency(nucleation_mass, nucleation_number, zero(FT))
+end
+
+"""
+    tendency_ρnᶜˡ(rates, ρ, Nᶜ, qᶜˡ, prp)
+
+Compute cloud-number tendency from P3 process rates.
+
+Activation creates new cloud droplets. Autoconversion, accretion, riming,
+freezing, and above-freezing collection remove cloud droplets in proportion
+to the cloud mass they consume, following the Fortran `nc` budget structure.
+"""
+@inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜ, qᶜˡ, prp::ProcessRateParameters)
+    FT = typeof(ρ)
+    number_per_mass = safe_divide(Nᶜ, qᶜˡ, zero(FT))
+    seed_drop_mass = FT(4π / 3) * prp.liquid_water_density * FT(1e-18)
+    activation_number = rates.ccn_activation / seed_drop_mass
+
+    number_loss = number_per_mass * (rates.autoconversion + rates.accretion) +
+                  rates.cloud_riming_number +
+                  rates.cloud_freezing_number +
+                  rates.cloud_homogeneous_number +
+                  rates.cloud_warm_collection_number
+
+    return ρ * (activation_number - number_loss)
 end
 
 """
@@ -1777,6 +1801,7 @@ end
 
 @inline tendency_ρqᶜˡ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρqʳ(::Nothing, ρ) = zero(ρ)
+@inline tendency_ρnᶜˡ(::Nothing, ρ, Nᶜ, qᶜˡ, prp) = zero(ρ)
 @inline tendency_ρnʳ(::Nothing, ρ, nⁱ, qⁱ, args...) = zero(ρ)
 @inline tendency_ρqⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρnⁱ(::Nothing, ρ) = zero(ρ)

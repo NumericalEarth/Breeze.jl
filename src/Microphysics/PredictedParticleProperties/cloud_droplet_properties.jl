@@ -197,3 +197,38 @@ function Base.show(io::IO, c::CloudDropletProperties)
     print(io, "nᶜˡ=", c.number_concentration, " m⁻³, ")
     print(io, "μᶜ=", round(c.shape_parameter, digits=2), ")")
 end
+
+"""
+    diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+
+Diagnose the cloud PSD state from prognostic cloud liquid and cloud number.
+
+This mirrors the Fortran `get_cloud_dsd2` logic used by P3: convert the
+prognostic specific cloud number `nᶜˡ` [kg⁻¹] to an absolute concentration,
+diagnose `μ_c` via Liu-Daum, apply the lambda bounds, and return the adjusted
+cloud number together with the PSD correction used by immersion freezing.
+"""
+@inline function diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+    FT = typeof(qᶜˡ + nᶜˡ + ρ)
+    qᶜˡ_eff = max(0, qᶜˡ)
+    nᶜˡ_eff = max(0, nᶜˡ)
+    Nᶜ = nᶜˡ_eff * ρ
+
+    μ_c = liu_daum_shape_parameter(Nᶜ)
+    Nᶜ_bounded = bounded_cloud_number(Nᶜ, μ_c, qᶜˡ_eff, ρ)
+    nᶜˡ_bounded = ifelse(iszero(ρ), zero(FT), Nᶜ_bounded / ρ)
+
+    λ_c_uncapped = cbrt(
+        FT(π) * FT(1000) * Nᶜ_bounded * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
+        (FT(6) * max(qᶜˡ_eff * ρ, FT(1e-20)))
+    )
+    λ_min = (μ_c + 1) * FT(2.5e4)
+    λ_max = (μ_c + 1) * FT(1e6)
+    λ_c = clamp(λ_c_uncapped, λ_min, λ_max)
+
+    return (; Nᶜ = Nᶜ_bounded,
+              nᶜˡ = nᶜˡ_bounded,
+              μ_c,
+              λ_c,
+              freezing_psd_correction = psd_correction_spherical_volume(μ_c))
+end

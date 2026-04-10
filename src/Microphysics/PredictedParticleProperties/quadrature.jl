@@ -950,7 +950,83 @@ end
 #   Fl = 0:           0.1892 × (6/(π×917))² × m² × N'(D)
 #   Fl intermediate:  rayleigh_soak_wetice (Maxwell-Garnett mixing)
 #   Fl = 1:           D⁶ × N'(D)  (pure water drops)
-# This implementation uses linear blending for intermediate Fl as an approximation.
+# The mixed-phase branch matches the Fortran Maxwell-Garnett dielectric mixing.
+@inline function ray_complex_water(FT, λ, T_celsius)
+    πFT = FT(π)
+    epsinf = FT(5.27137) + FT(0.02164740) * T_celsius - FT(0.00131198) * T_celsius^2
+    epss = FT(78.54)
+    α = FT(-16.8129) / (T_celsius + FT(273.16)) + FT(0.0609265)
+    λs = FT(0.00033836) * exp(FT(2513.98) / (T_celsius + FT(273.16))) * FT(1e-2)
+    ratio = λs / λ
+    denom = FT(1) + FT(2) * ratio^(FT(1) - α) * sin(α * πFT / FT(2)) + ratio^(FT(2) - FT(2) * α)
+    epsr = epsinf + (epss - epsinf) * (ratio^(FT(1) - α) * sin(α * πFT / FT(2)) + FT(1)) / denom
+    epsi = (epss - epsinf) * ratio^(FT(1) - α) * cos(α * πFT / FT(2)) / denom +
+           λ * FT(1.25664) / FT(1.88496)
+    return sqrt(complex(epsr, -epsi))
+end
+
+@inline function maetzler_complex_ice(FT, λ, T_celsius)
+    c = FT(2.99e8)
+    T_kelvin = T_celsius + FT(273.16)
+    f = c / λ * FT(1e-9)
+    B1 = FT(0.0207)
+    B2 = FT(1.16e-11)
+    b = FT(335)
+    delta_beta = exp(FT(-10.02) + FT(0.0364) * (T_kelvin - FT(273.16)))
+    beta_m = (B1 / T_kelvin) * (exp(b / T_kelvin) / (exp(b / T_kelvin) - FT(1))^2) + B2 * f^2
+    beta = beta_m + delta_beta
+    theta = FT(300) / T_kelvin - FT(1)
+    alpha = (FT(0.00504) + FT(0.0062) * theta) * exp(FT(-22.1) * theta)
+    ε = complex(FT(3.1884) + FT(9.1e-4) * (T_kelvin - FT(273.16)), alpha / f + beta * f)
+    return sqrt(conj(ε))
+end
+
+@inline function maxwell_garnett_refractive_index(m1, m2, m3, vol1, vol2, vol3, inclusion::Symbol)
+    m1_squared = m1^2
+    m2_squared = m2^2
+    m3_squared = m3^2
+
+    if inclusion === :spherical
+        β2 = 3 * m1_squared / (m2_squared + 2 * m1_squared)
+        β3 = 3 * m1_squared / (m3_squared + 2 * m1_squared)
+    else
+        β2 = 2 * m1_squared / (m2_squared - m1_squared) *
+             (m2_squared / (m2_squared - m1_squared) * log(m2_squared / m1_squared) - 1)
+        β3 = 2 * m1_squared / (m3_squared - m1_squared) *
+             (m3_squared / (m3_squared - m1_squared) * log(m3_squared / m1_squared) - 1)
+    end
+
+    return sqrt(((1 - vol2 - vol3) * m1_squared + vol2 * β2 * m2_squared + vol3 * β3 * m3_squared) /
+                (1 - vol2 - vol3 + vol2 * β2 + vol3 * β3))
+end
+
+@inline function wet_ice_rayleigh_factor(D, total_mass, liquid_fraction)
+    FT = typeof(D + total_mass + liquid_fraction)
+    λ_radar = FT(0.10)
+    m_air = complex(one(FT), zero(FT))
+    m_water = ray_complex_water(FT, λ_radar, zero(FT))
+    m_ice = maetzler_complex_ice(FT, λ_radar, zero(FT))
+    K_w = abs((m_water^2 - 1) / (m_water^2 + 2))^2
+
+    mass_water = liquid_fraction * total_mass
+    volume_total = FT(π) / FT(6) * D^3
+    vol_ice = (total_mass - mass_water) / (volume_total * FT(900))
+    vol_water = mass_water / (FT(1000) * volume_total)
+    vol_air = FT(1) - vol_ice - vol_water
+
+    # Rayleigh_soak_wetice: inner mix uses water matrix + ice inclusions
+    # (matrix='water', inclusion='spheroidal'), outer uses icewater matrix + air inclusions
+    # (hostmatrix='icewater', hostinclusion='spheroidal').
+    vol_ice_frac = vol_ice / max(vol_ice + vol_water, FT(1e-10))
+    vol_water_frac = FT(1) - vol_ice_frac
+    # Step 1: ice inclusions in water matrix (Fortran get_m_mix with matrix='water')
+    icewater_mix = maxwell_garnett_refractive_index(m_water, m_air, m_ice, FT(0), FT(0), vol_ice_frac, :spheroidal)
+    # Step 2: air inclusions in icewater matrix (Fortran get_m_mix with matrix='ice' via hostmatrix='icewater')
+    particle_mix = maxwell_garnett_refractive_index(icewater_mix, m_air, 2 * m_air, FT(0), vol_air, FT(0), :spheroidal)
+
+    return abs((particle_mix^2 - 1) / (particle_mix^2 + 2))^2 / K_w * D^6
+end
+
 @inline function integrand(::RayleighReflectivity, D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
     ρ_ice = FT(917.0)
@@ -967,8 +1043,9 @@ end
     # Pure water: D⁶ (equivalent reflectivity for water drops)
     refl_water = D^6 * Np
 
-    # Linear blend (approximation; Fortran uses Maxwell-Garnett for 0 < Fl < 1)
-    return (1 - Fˡ) * refl_ice + Fˡ * refl_water
+    refl_mixed = wet_ice_rayleigh_factor(D, m, Fˡ) * Np
+
+    return ifelse(Fˡ <= zero(FT), refl_ice, ifelse(Fˡ >= one(FT), refl_water, refl_mixed))
 end
 
 # Slope parameter λ - diagnostic, not an integral

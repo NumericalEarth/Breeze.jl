@@ -39,6 +39,8 @@ $(TYPEDFIELDS)
 struct P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
     "Cloud liquid mixing ratio [kg/kg]"
     qᶜˡ :: FT
+    "Cloud number concentration [1/kg]"
+    nᶜˡ :: FT
     "Rain mixing ratio [kg/kg]"
     qʳ  :: FT
     "Rain number concentration [1/kg]"
@@ -66,14 +68,13 @@ $(TYPEDSIGNATURES)
 
 Return prognostic field names for the P3 scheme.
 
-P3 v5.5 with 3-moment ice and predicted liquid fraction has 9 prognostic fields:
-- Cloud: ρqᶜˡ (number is prescribed, not prognostic)
+P3 v5.5 with 3-moment ice and predicted liquid fraction has 10 prognostic fields:
+- Cloud: ρqᶜˡ, ρnᶜˡ
 - Rain: ρqʳ, ρnʳ
 - Ice: ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ
 """
 function AM.prognostic_field_names(::P3)
-    # Cloud number is prescribed (not prognostic) in this implementation
-    cloud_names = (:ρqᶜˡ,)
+    cloud_names = (:ρqᶜˡ, :ρnᶜˡ)
     rain_names = (:ρqʳ, :ρnʳ)
     ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ)
 
@@ -120,7 +121,7 @@ Create prognostic and diagnostic fields for P3 microphysics.
 The P3 scheme requires the following fields on `grid`:
 
 **Prognostic (density-weighted):**
-- `ρqᶜˡ`: Cloud liquid mass density
+- `ρqᶜˡ`, `ρnᶜˡ`: Cloud liquid mass and number densities
 - `ρqʳ`, `ρnʳ`: Rain mass and number densities
 - `ρqⁱ`, `ρnⁱ`: Ice mass and number densities
 - `ρqᶠ`, `ρbᶠ`: Rime mass and volume densities
@@ -133,6 +134,7 @@ The P3 scheme requires the following fields on `grid`:
 function AM.materialize_microphysical_fields(::P3, grid, bcs)
     # Create all prognostic fields
     ρqᶜˡ = CenterField(grid)  # Cloud liquid
+    ρnᶜˡ = CenterField(grid)  # Cloud number
     ρqʳ  = CenterField(grid)  # Rain mass
     ρnʳ  = CenterField(grid)  # Rain number
     ρqⁱ  = CenterField(grid)  # Ice mass
@@ -145,6 +147,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     # Diagnostic mixing ratio / number-concentration fields
     # (updated each step in update_microphysical_auxiliaries!, matching the Kessler pattern)
     qᶜˡ = CenterField(grid)  # Cloud liquid specific humidity [kg/kg]
+    nᶜˡ = CenterField(grid)  # Cloud number concentration [kg⁻¹]
     qʳ  = CenterField(grid)  # Rain specific humidity [kg/kg]
     nʳ  = CenterField(grid)  # Rain number concentration [kg⁻¹]
     qⁱ  = CenterField(grid)  # Ice specific humidity [kg/kg]
@@ -168,6 +171,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     # grid_microphysical_tendency). Storing the microphysics-only contribution avoids 10×
     # redundant compute_p3_process_rates calls — one per prognostic field per grid point.
     cache_ρqᶜˡ = CenterField(grid)
+    cache_ρnᶜˡ = CenterField(grid)
     cache_ρqʳ  = CenterField(grid)
     cache_ρnʳ  = CenterField(grid)
     cache_ρqⁱ  = CenterField(grid)
@@ -178,10 +182,10 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     cache_ρqʷⁱ = CenterField(grid)
     cache_ρqᵛ  = CenterField(grid)
 
-    return (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ,
-              qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, qᵛ,
+    return (; ρqᶜˡ, ρnᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ,
+              qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, qᵛ,
               wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
-              cache_ρqᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
+              cache_ρqᶜˡ, cache_ρnᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
               cache_ρqᶠ, cache_ρbᶠ, cache_ρzⁱ, cache_ρqʷⁱ, cache_ρqᵛ)
 end
 
@@ -201,6 +205,7 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
 """
 @inline function AM.microphysical_state(p3::P3, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
+    nᶜˡ = μ.ρnᶜˡ / ρ
     qʳ  = μ.ρqʳ / ρ
     nʳ  = μ.ρnʳ / ρ
     qⁱ  = μ.ρqⁱ / ρ
@@ -210,7 +215,7 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
     rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ, qʷⁱ)
     qᶠ  = rime_state.qᶠ
     bᶠ  = rime_state.bᶠ
-    return P3MicrophysicalState(qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ)
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ)
 end
 
 # Disambiguation for P3 with Nothing or empty microphysical fields
@@ -231,6 +236,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
 """
 @inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
     props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+    cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     qᶠ = props.qᶠ
     bᶠ = props.bᶠ
     Fᶠ = props.Fᶠ
@@ -238,6 +244,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
 
     @inbounds μ.qᵛ[i, j, k]  = 𝒰.moisture_mass_fractions.vapor
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
+    @inbounds μ.nᶜˡ[i, j, k] = cloud.nᶜˡ
     @inbounds μ.qʳ[i, j, k]  = ℳ.qʳ
     @inbounds μ.nʳ[i, j, k]  = ℳ.nʳ
     @inbounds μ.qⁱ[i, j, k]  = ℳ.qⁱ
@@ -261,6 +268,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     # the 10× redundant compute_p3_process_rates calls (one per P3 prognostic field).
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
     @inbounds μ.cache_ρqᶜˡ[i, j, k] = tendency_ρqᶜˡ(rates, ρ)
+    @inbounds μ.cache_ρnᶜˡ[i, j, k] = tendency_ρnᶜˡ(rates, ρ, cloud.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
     @inbounds μ.cache_ρqʳ[i, j, k]  = tendency_ρqʳ(rates, ρ)
     @inbounds μ.cache_ρnʳ[i, j, k]  = tendency_ρnʳ(rates, ρ, ℳ.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
     @inbounds μ.cache_ρqⁱ[i, j, k]  = tendency_ρqⁱ(rates, ρ)
@@ -307,6 +315,8 @@ end
 
 @inline AM.microphysical_velocities(::P3, μ, name) = nothing  # Default: no sedimentation
 
+@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnᶜˡ}) = nothing
+
 # Rain mass: mass-weighted fall speed
 @inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqʳ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wʳ)
 
@@ -344,6 +354,7 @@ end
 # Helper to compute P3 rates and extract ice properties from ℳ
 @inline function p3_ice_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     FT = typeof(ρ)
+    cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
     qⁱ_total = max(total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ), FT(1e-20))
     Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, ℳ.qʷⁱ)
@@ -354,7 +365,8 @@ end
     transport = air_transport_properties(T, P)
     λ_r = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     return (; qᶠ = rime_state.qᶠ, bᶠ = rime_state.bᶠ, Fᶠ = rime_state.Fᶠ, Fˡ,
-              ρᶠ = rime_state.ρᶠ, qⁱ_total, μ_ice, zⁱ_bounded, transport, λ_r)
+              ρᶠ = rime_state.ρᶠ, qⁱ_total, μ_ice, μ_cloud = cloud.μ_c,
+              zⁱ_bounded, transport, λ_r)
 end
 
 @inline function p3_rates_and_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -364,13 +376,22 @@ end
 end
 
 @inline function p3_ice_sixth_moment_tendency(::Nothing, p3, rates, ρ, ℳ::P3MicrophysicalState, props)
-    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, ℳ.nⁱ, props.zⁱ_bounded, p3.process_rates)
+    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, ℳ.nⁱ, props.zⁱ_bounded, p3.process_rates, props.μ_cloud)
 end
 
 @inline function p3_ice_sixth_moment_tendency(::P3LookupTable1, p3, rates, ρ, ℳ::P3MicrophysicalState, props)
     return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, ℳ.nⁱ, props.zⁱ_bounded,
                         props.Fᶠ, props.Fˡ, props.ρᶠ, p3,
-                        props.transport.nu, props.transport.D_v, props.μ_ice, props.λ_r)
+                        props.transport.nu, props.transport.D_v, props.μ_ice, props.μ_cloud, props.λ_r)
+end
+
+"""
+Cloud number tendency: gains from activation and loses proportionally with cloud sinks.
+"""
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnᶜˡ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
+    return tendency_ρnᶜˡ(rates, ρ, cloud.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
 end
 
 """
@@ -466,6 +487,9 @@ end
 
 @inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqᶜˡ}, ρ, fields, 𝒰, constants, velocities) =
     @inbounds fields.cache_ρqᶜˡ[i, j, k]
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρnᶜˡ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρnᶜˡ[i, j, k]
 
 @inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqʳ}, ρ, fields, 𝒰, constants, velocities) =
     @inbounds fields.cache_ρqʳ[i, j, k]

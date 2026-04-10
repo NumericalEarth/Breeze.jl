@@ -63,6 +63,77 @@ using Breeze.Thermodynamics:
 using Oceananigans: CPU, RectilinearGrid
 using Oceananigans.Fields: interior
 
+const PPP = Breeze.Microphysics.PredictedParticleProperties
+
+function fortran_complex_water_ray(FT, λ, T_celsius)
+    πFT = FT(π)
+    epsinf = FT(5.27137) + FT(0.02164740) * T_celsius - FT(0.00131198) * T_celsius^2
+    ΔT = T_celsius - FT(25)
+    epss = FT(78.54)
+    α = FT(-16.8129) / (T_celsius + FT(273.16)) + FT(0.0609265)
+    λs = FT(0.00033836) * exp(FT(2513.98) / (T_celsius + FT(273.16))) * FT(1e-2)
+    ratio = λs / λ
+    denom = FT(1) + FT(2) * ratio^(FT(1) - α) * sin(α * πFT / FT(2)) + ratio^(FT(2) - FT(2) * α)
+    epsr = epsinf + (epss - epsinf) * (ratio^(FT(1) - α) * sin(α * πFT / FT(2)) + FT(1)) / denom
+    epsi = (epss - epsinf) * (ratio^(FT(1) - α) * cos(α * πFT / FT(2))) / denom +
+           λ * FT(1.25664) / FT(1.88496)
+    return sqrt(complex(epsr, -epsi))
+end
+
+function fortran_complex_ice_maetzler(FT, λ, T_celsius)
+    c = FT(2.99e8)
+    T_k = T_celsius + FT(273.16)
+    f = c / λ * FT(1e-9)
+    B1 = FT(0.0207)
+    B2 = FT(1.16e-11)
+    b = FT(335.0)
+    Δβ = exp(FT(-10.02) + FT(0.0364) * (T_k - FT(273.16)))
+    βm = (B1 / T_k) * (exp(b / T_k) / (exp(b / T_k) - FT(1))^2) + B2 * f^2
+    β = βm + Δβ
+    θ = FT(300) / T_k - FT(1)
+    α = (FT(0.00504) + FT(0.0062) * θ) * exp(FT(-22.1) * θ)
+    ε = complex(FT(3.1884) + FT(9.1e-4) * (T_k - FT(273.16)), α / f + β * f)
+    return sqrt(conj(ε))
+end
+
+@inline function maxwell_garnett_mix(m1, m2, m3, vol1, vol2, vol3, inclusion::Symbol)
+    m1s = m1^2
+    m2s = m2^2
+    m3s = m3^2
+    if inclusion === :spherical
+        β2 = 3 * m1s / (m2s + 2 * m1s)
+        β3 = 3 * m1s / (m3s + 2 * m1s)
+    else
+        β2 = 2 * m1s / (m2s - m1s) * (m2s / (m2s - m1s) * log(m2s / m1s) - 1)
+        β3 = 2 * m1s / (m3s - m1s) * (m3s / (m3s - m1s) * log(m3s / m1s) - 1)
+    end
+    return sqrt(((1 - vol2 - vol3) * m1s + vol2 * β2 * m2s + vol3 * β3 * m3s) /
+                (1 - vol2 - vol3 + vol2 * β2 + vol3 * β3))
+end
+
+function fortran_rayleigh_wet_ice_factor(FT, total_mass, liquid_fraction, D)
+    λ_radar = FT(0.10)
+    m_air = complex(FT(1), FT(0))
+    m_water = fortran_complex_water_ray(FT, λ_radar, FT(0))
+    m_ice = fortran_complex_ice_maetzler(FT, λ_radar, FT(0))
+    K_w = abs((m_water^2 - 1) / (m_water^2 + 2))^2
+
+    mass_water = liquid_fraction * total_mass
+    vg = FT(π) / FT(6) * D^3
+    ρg = total_mass / vg
+    D_large = cbrt(FT(6) / FT(π) * (total_mass / ρg))
+    vol_ice = (total_mass - mass_water) / (vg * FT(900))
+    vol_water = mass_water / (FT(1000) * vg)
+    vol_air = FT(1) - vol_ice - vol_water
+
+    vol_ice_frac = vol_ice / max(vol_ice + vol_water, FT(1e-10))
+    # Step 1: ice inclusions in water matrix (Fortran matrix='water')
+    mixed_icewater = maxwell_garnett_mix(m_water, m_air, m_ice, FT(0), FT(0), vol_ice_frac, :spheroidal)
+    # Step 2: air inclusions in icewater matrix (Fortran hostmatrix='icewater')
+    core = maxwell_garnett_mix(mixed_icewater, m_air, 2 * m_air, FT(0), vol_air, FT(0), :spheroidal)
+    return abs((core^2 - 1) / (core^2 + 2))^2 / K_w * D_large^6
+end
+
 @testset "P3 Integrals" begin
 
     @testset "Smoke tests - type construction" begin
@@ -252,8 +323,9 @@ using Oceananigans.Fields: interior
         p3 = PredictedParticlePropertiesMicrophysics()
         names = prognostic_field_names(p3)
 
-        # With prescribed cloud number (default)
+        # P3 cloud number should be prognostic.
         @test :ρqᶜˡ ∈ names
+        @test :ρnᶜˡ ∈ names
         @test :ρqʳ ∈ names
         @test :ρnʳ ∈ names
         @test :ρqⁱ ∈ names
@@ -262,9 +334,24 @@ using Oceananigans.Fields: interior
         @test :ρbᶠ ∈ names
         @test :ρzⁱ ∈ names
         @test :ρqʷⁱ ∈ names
+    end
 
-        # Cloud number should NOT be in names with prescribed mode
-        @test :ρnᶜˡ ∉ names
+    @testset "Quadrature evaluation - mixed-phase Rayleigh reflectivity" begin
+        mixed_state = IceSizeDistributionState(Float64;
+            intercept = 1e6,
+            shape = 0.0,
+            slope = 1000.0,
+            liquid_fraction = 0.5)
+
+        D = 2e-3
+        thresholds = PPP.regime_thresholds_from_state(Float64, mixed_state)
+        total_mass = PPP.particle_mass(D, mixed_state, thresholds)
+        number_density = size_distribution(D, mixed_state)
+        expected = fortran_rayleigh_wet_ice_factor(Float64, total_mass, mixed_state.liquid_fraction, D) * number_density
+        got = PPP.integrand(RayleighReflectivity(), D, mixed_state, thresholds)
+
+        @test got > 0
+        @test got ≈ expected rtol=1e-6
     end
 
     @testset "Integral type hierarchy" begin

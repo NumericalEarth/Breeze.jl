@@ -1123,6 +1123,7 @@ using Oceananigans.Fields: interior
         ρ = FT(1.0)
         μ = (
             ρqᶜˡ = FT(0),
+            ρnᶜˡ = FT(0),
             ρqʳ = FT(0),
             ρnʳ = FT(0),
             ρqⁱ = ρ * FT(1e-5),
@@ -1177,6 +1178,7 @@ using Oceananigans.Fields: interior
 
         ℳ = P3MicrophysicalState(
             qcl,           # qᶜˡ
+            FT(200e6 / ρ), # nᶜˡ
             qr,            # qʳ
             FT(1e4),       # nʳ
             qi,            # qⁱ
@@ -1214,6 +1216,58 @@ using Oceananigans.Fields: interior
         @test rates.rime_density_new <= 900
     end
 
+    @testset "compute_p3_process_rates uses prognostic cloud number" begin
+        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+
+        ρ = FT(1.0)
+        T = FT(268.15)
+        qv = FT(0.003)
+        qcl = FT(5e-4)
+        qr = FT(1e-4)
+        qi = FT(1e-4)
+        qf = FT(1e-5)
+
+        q = MoistureMassFractions(qv, qcl + qr, qi)
+        P = FT(85000.0)
+        pst = FT(100000.0)
+        θ = T / (P / pst)^FT(0.286)
+        𝒰 = LiquidIcePotentialTemperatureState(θ, q, pst, P)
+
+        ℳ_low_nc = P3MicrophysicalState(
+            qcl,           # qᶜˡ
+            FT(50e6 / ρ),  # nᶜˡ
+            qr,            # qʳ
+            FT(1e4),       # nʳ
+            qi,            # qⁱ
+            FT(1e5),       # nⁱ
+            qf,            # qᶠ
+            FT(qf / 400),  # bᶠ
+            FT(1e-10),     # zⁱ
+            FT(0),         # qʷⁱ
+        )
+
+        ℳ_high_nc = P3MicrophysicalState(
+            qcl,            # qᶜˡ
+            FT(300e6 / ρ),  # nᶜˡ
+            qr,             # qʳ
+            FT(1e4),        # nʳ
+            qi,             # qⁱ
+            FT(1e5),        # nⁱ
+            qf,             # qᶠ
+            FT(qf / 400),   # bᶠ
+            FT(1e-10),      # zⁱ
+            FT(0),          # qʷⁱ
+        )
+
+        rates_low_nc = compute_p3_process_rates(p3, ρ, ℳ_low_nc, 𝒰, constants)
+        rates_high_nc = compute_p3_process_rates(p3, ρ, ℳ_high_nc, 𝒰, constants)
+
+        @test rates_low_nc.autoconversion != rates_high_nc.autoconversion
+        @test rates_low_nc.cloud_riming_number != rates_high_nc.cloud_riming_number
+    end
+
     @testset "compute_p3_process_rates with tabulated scheme" begin
         FT = Float64
         constants = ThermodynamicConstants(FT)
@@ -1238,7 +1292,7 @@ using Oceananigans.Fields: interior
         𝒰 = LiquidIcePotentialTemperatureState(θ, q, pst, P)
 
         ℳ = P3MicrophysicalState(
-            qcl, qr, FT(1e4), qi, FT(1e5), qf,
+            qcl, FT(200e6 / ρ), qr, FT(1e4), qi, FT(1e5), qf,
             FT(qf / 400), FT(1e-10), FT(0))
 
         # Compute rates with tabulated scheme
