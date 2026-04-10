@@ -581,8 +581,8 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             𝒰 = with_temperature(𝒰seed, T[k], constants)
 
             ## Build P3 microphysical state
-            ℳ = P3MicrophysicalState(qc[k], qr[k], nr[k], qi[k], ni[k],
-                                      qf[k], bf[k], zi[k], qwi[k])
+            ℳ = P3MicrophysicalState(qc[k], FT(200e6 / ρk), qr[k], nr[k], qi[k], ni[k],
+                                      qf[k], bf[k], zi[k], qwi[k], FT(0))
 
             ## 5c. Compute process rates (condensation already handled above)
             rates = compute_p3_process_rates(p3, ρk, ℳ, 𝒰, constants)

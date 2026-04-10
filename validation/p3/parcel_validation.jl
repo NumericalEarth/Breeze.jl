@@ -208,7 +208,7 @@ function run_scenario(p3, constants, Rd, name, T0, p0, Δt, N, output_every,
     𝒰, θ_l = make_state(T0, p0, qv0, qcl0, qr0, qi0, constants, FT)
 
     # Report initial rates
-    ℳ0 = P3MicrophysicalState(qcl0, qr0, nr0, qi0, ni0, qf0, bf0, zi0, qwi0)
+    ℳ0 = P3MicrophysicalState(qcl0, FT(200e6 / ρ0), qr0, nr0, qi0, ni0, qf0, bf0, zi0, qwi0, FT(0))
     r0 = compute_p3_process_rates(p3, ρ0, ℳ0, 𝒰, constants)
     @printf("  condensation=%.2e  autoconv=%.2e  deposition=%.2e  aggregation=%.2e\n",
             r0.condensation, r0.autoconversion, r0.deposition, r0.aggregation)
@@ -230,7 +230,7 @@ function run_scenario(p3, constants, Rd, name, T0, p0, Δt, N, output_every,
         T = temperature(𝒰, constants)
         ρ = p0 / (Rd * T)
 
-        ℳ = P3MicrophysicalState(qcl, qr, nr, qi, ni, qf, bf, zi, qwi)
+        ℳ = P3MicrophysicalState(qcl, FT(200e6 / ρ), qr, nr, qi, ni, qf, bf, zi, qwi, FT(0))
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
 
         qi_for_nr = qi
