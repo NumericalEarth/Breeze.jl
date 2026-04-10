@@ -23,9 +23,7 @@ using Oceananigans.TimeSteppers: update_state!, tick_stage!, compute_flux_bc_ten
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
 using Breeze.Thermodynamics: dry_air_gas_constant
-using Breeze.CompressibleEquations: CompressibleEquations,
-                                    VerticallyImplicitTimeStepping, CompressibleDynamics,
-                                    _compute_ℂᵃᶜ²!, VerticalAcousticSolver,
+using Breeze.CompressibleEquations: CompressibleEquations, CompressibleDynamics,
                                     _build_ρθ_tridiagonal!, _back_solve_ρw!,
                                     _copy_field!, _add_field!
 
@@ -166,7 +164,7 @@ end
 ##### fᴵ_ρ  = -V⁻¹ δz(Az ρw)         (vertical density flux)
 #####
 
-using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ, ∂zᶜᶜᶠ
+using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ
 
 ## fᴵ_ρw = -cₚ (ρθ)_face ∂Π'/∂z  (perturbation Exner PGF, small)
 ## Gravity is in the explicit buoyancy b = -(cₚ θᵥ ∂Π₀/∂z + g), not here.

@@ -235,7 +235,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AcousticDampingStrategy, NoDivergenceDamping, ThermodynamicDivergenceDamping,
                               ConservativeProjectionDamping, PressureProjectionDamping,
                               ExplicitTimeStepping,
-                              VerticallyImplicitTimeStepping, vertical_acoustic_implicit_step!
+                              VerticallyImplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel

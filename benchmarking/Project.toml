@@ -17,6 +17,8 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [sources]
 Breeze = {path = ".."}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "main"}
+
 
 [compat]
 ArgParse = "1"
@@ -25,7 +27,7 @@ CloudMicrophysics = "0.31.4, 0.32"
 Dates = "<0.0.1, 1"
 JLD2 = "0.5, 0.6"
 JSON = "1.4.0"
-Oceananigans = "0.106.3"
+Oceananigans = "0.106.4"
 Printf = "1"
 Statistics = "<0.0.1, 1"
 julia = "1.10"

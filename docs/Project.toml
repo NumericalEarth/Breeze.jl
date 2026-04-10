@@ -16,6 +16,8 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [sources]
 Breeze = {path = ".."}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "main"}
+
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
@@ -27,7 +29,7 @@ DocumenterCitations = "1.4"
 InteractiveUtils = "<0.0.1, 1"
 Literate = "2"
 NCDatasets = "0.14"
-Oceananigans = "0.106.3"
+Oceananigans = "0.106.4"
 Pkg = "<0.0.1, 1"
 RRTMGP = "0.21.7"
 Random = "<0.0.1, 1"

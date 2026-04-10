@@ -24,7 +24,7 @@ using KernelAbstractions: @kernel, @index
 
 using Adapt: Adapt, adapt
 
-using Oceananigans: CenterField, Average, Field, architecture, compute!, set!
+using Oceananigans: CenterField, architecture
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ, Δzᶜᶜᶠ, Azᶜᶜᶠ, Vᶜᶜᶜ

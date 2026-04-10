@@ -10,8 +10,7 @@ using DocStringExtensions: TYPEDEF, TYPEDFIELDS, TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans
-using Oceananigans.Architectures: on_architecture
+using Oceananigans: Oceananigans, interior
 using Oceananigans.Grids: Center
 
 include("polar_filter.jl")

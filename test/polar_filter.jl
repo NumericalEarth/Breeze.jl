@@ -1,5 +1,5 @@
 using Breeze
-using Breeze: apply_polar_filter!
+using Breeze.PolarFilters: materialize_polar_filter, apply_polar_filter_field!, apply_polar_filter_intensive!
 using Oceananigans
 using Oceananigans.Grids: φnodes
 using Test
@@ -24,14 +24,19 @@ function build_polar_filter_test_grid(arch; FT=Float64, Nx=36, Ny=34, Nz=4)
 end
 
 #####
-##### Constructor tests
+##### Constructor and materialization tests
 #####
 
 @testset "PolarFilter constructor [$(FT)]" for FT in test_float_types()
     grid = build_polar_filter_test_grid(CPU(); FT)
     φ = φnodes(grid, Center())
 
-    pf = PolarFilter(grid; threshold_latitude=60)
+    pf_skeleton = PolarFilter(threshold_latitude=60)
+    @test pf_skeleton.threshold_latitude == 60.0
+    @test pf_skeleton.filtered_indices === nothing
+    @test pf_skeleton.passes_per_row === nothing
+
+    pf = materialize_polar_filter(grid, pf_skeleton)
 
     ## filtered_indices should cover both hemispheres
     @test length(pf.filtered_indices) > 0
@@ -46,226 +51,179 @@ end
     n_north = count(φ[j] > 0 for j in pf.filtered_indices)
     @test n_south == n_north
 
-    ## Spectral mask has correct shape
-    Nk = grid.Nx ÷ 2 + 1
-    @test size(pf.spectral_mask) == (Nk, length(pf.filtered_indices))
+    ## passes_per_row has the right length
+    @test length(pf.passes_per_row) == length(pf.filtered_indices)
 
-    ## Buffer sizes
-    N_batch = length(pf.filtered_indices) * grid.Nz
-    @test size(pf.buffer_real) == (grid.Nx, N_batch)
-    @test size(pf.buffer_complex) == (Nk, N_batch)
+    ## All passes are non-negative
+    @test all(pf.passes_per_row .>= 0)
 
     ## threshold_latitude stored correctly
     @test pf.threshold_latitude == FT(60)
+
+    ## Grid is stored
+    @test pf.grid === grid
+end
+
+@testset "materialize_polar_filter returns nothing for no filter" begin
+    grid = build_polar_filter_test_grid(CPU())
+    @test materialize_polar_filter(grid, nothing) === nothing
 end
 
 #####
-##### Spectral mask tests
-#####
-
-@testset "Spectral mask: k_max formula [$(FT)]" for FT in test_float_types()
-    grid = build_polar_filter_test_grid(CPU(); FT)
-    φ = φnodes(grid, Center())
-    Nk = grid.Nx ÷ 2 + 1
-
-    pf_sharp = PolarFilter(grid; threshold_latitude=60, filter_mode=SharpTruncation())
-    cos60 = cosd(60)
-
-    for (row, j) in enumerate(pf_sharp.filtered_indices)
-        expected_kmax = max(1, floor(Int, grid.Nx * cosd(abs(φ[j])) / cos60))
-        ## Clamp to Nk since rfft only produces Nk coefficients
-        expected_pass = min(expected_kmax, Nk)
-        ## Count how many wavenumbers pass the sharp filter
-        n_pass = count(pf_sharp.spectral_mask[:, row] .> 0.5)
-        @test n_pass == expected_pass
-    end
-end
-
-@testset "Spectral mask: sharp truncation [$(FT)]" for FT in test_float_types()
-    grid = build_polar_filter_test_grid(CPU(); FT)
-    pf = PolarFilter(grid; threshold_latitude=60, filter_mode=SharpTruncation())
-    Nk = grid.Nx ÷ 2 + 1
-
-    for row in 1:length(pf.filtered_indices)
-        mask = pf.spectral_mask[:, row]
-        ## All values should be exactly 0 or 1
-        @test all(m -> m == 0 || m == 1, mask)
-        ## First element (mean) should always pass
-        @test mask[1] == 1
-    end
-end
-
-@testset "Spectral mask: exponential rolloff [$(FT)]" for FT in test_float_types()
-    grid = build_polar_filter_test_grid(CPU(); FT)
-    φ = φnodes(grid, Center())
-    pf = PolarFilter(grid; threshold_latitude=60, filter_mode=ExponentialRolloff(8))
-    Nk = grid.Nx ÷ 2 + 1
-    cos60 = cosd(60)
-
-    for (row, j) in enumerate(pf.filtered_indices)
-        mask = pf.spectral_mask[:, row]
-        k_max = max(1, floor(Int, grid.Nx * cosd(abs(φ[j])) / cos60))
-        ## Mean (k=1) should always be 1
-        @test mask[1] == 1
-        ## Nyquist should be near machine precision (only when filtering occurs)
-        if k_max < Nk
-            @test mask[end] < 1e-10
-        end
-        ## Mask should be monotonically non-increasing
-        @test all(mask[k] >= mask[k+1] - eps(FT) for k in 1:Nk-1)
-    end
-end
-
-#####
-##### Filtering correctness tests
+##### Smoother tests: low wavenumber preserved
 #####
 
 @testset "Low wavenumber preserved [$(FT)]" for FT in test_float_types()
     grid = build_polar_filter_test_grid(CPU(); FT)
-    pf = PolarFilter(grid; threshold_latitude=60)
+    pf = materialize_polar_filter(grid, PolarFilter(threshold_latitude=60))
 
-    f = CenterField(grid)
-    set!(f, (λ, φ, z) -> cosd(λ))
-    f_orig = deepcopy(interior(f))
+    ## A k=1 zonal wave should be nearly untouched
+    field = CenterField(grid)
+    Nλ = grid.Nx
+    λ_nodes = 2π * (0:Nλ-1) / Nλ
+    for k in 1:grid.Nz, j in 1:grid.Ny, i in 1:Nλ
+        field[i, j, k] = FT(cos(λ_nodes[i]))
+    end
 
-    apply_polar_filter!(pf, f)
+    field_before = deepcopy(interior(field))
+    apply_polar_filter_field!(pf, field)
 
-    @test maximum(abs, interior(f) .- f_orig) < 100 * eps(FT)
+    ## k=1 wave should be preserved: relative error < 5%
+    max_change = maximum(abs, interior(field) .- field_before)
+    max_val = maximum(abs, field_before)
+    @test max_change / max_val < 0.05
 end
+
+#####
+##### Smoother tests: high wavenumber removed at high latitudes
+#####
 
 @testset "High wavenumber removed at high latitudes [$(FT)]" for FT in test_float_types()
     grid = build_polar_filter_test_grid(CPU(); FT)
+    pf = materialize_polar_filter(grid, PolarFilter(threshold_latitude=60))
+
+    ## A high-k wave at filtered latitudes should be heavily damped
+    field = CenterField(grid)
+    Nλ = grid.Nx
+    k_high = Nλ ÷ 2  # Nyquist-like
+    λ_nodes = 2π * (0:Nλ-1) / Nλ
+    for k in 1:grid.Nz, j in 1:grid.Ny, i in 1:Nλ
+        field[i, j, k] = FT(cos(k_high * λ_nodes[i]))
+    end
+
+    field_before = deepcopy(interior(field))
+    apply_polar_filter_field!(pf, field)
+
+    ## At rows with nonzero passes, the high-k wave should be significantly damped
     φ = φnodes(grid, Center())
-
-    ## Sharp truncation should completely zero out k=17 at φ=-82.5° (k_max=9)
-    pf_sharp = PolarFilter(grid; threshold_latitude=60, filter_mode=SharpTruncation())
-    f = CenterField(grid)
-    set!(f, (λ, φ, z) -> cosd(17λ))
-    apply_polar_filter!(pf_sharp, f)
-
-    j_high = pf_sharp.filtered_indices[1]
-    rms_high = sqrt(sum(interior(f)[:, j_high, 1] .^ 2) / grid.Nx)
-    @test rms_high < 100 * eps(FT)
-
-    ## Exponential rolloff should strongly attenuate
-    pf_exp = PolarFilter(grid; threshold_latitude=60, filter_mode=ExponentialRolloff(8))
-    set!(f, (λ, φ, z) -> cosd(17λ))
-    apply_polar_filter!(pf_exp, f)
-
-    rms_exp = sqrt(sum(interior(f)[:, j_high, 1] .^ 2) / grid.Nx)
-    @test rms_exp < 1e-4
+    for j_local in 1:length(pf.filtered_indices)
+        pf.passes_per_row[j_local] == 0 && continue
+        j = pf.filtered_indices[j_local]
+        amplitude_before = maximum(abs, field_before[:, j, 1])
+        amplitude_after = maximum(abs, interior(field)[:, j, 1])
+        @test amplitude_after < 0.5 * amplitude_before
+    end
 end
+
+#####
+##### Equatorial latitudes unchanged
+#####
 
 @testset "Equatorial latitudes unchanged [$(FT)]" for FT in test_float_types()
     grid = build_polar_filter_test_grid(CPU(); FT)
-    pf = PolarFilter(grid; threshold_latitude=60)
+    pf = materialize_polar_filter(grid, PolarFilter(threshold_latitude=60))
 
-    f = CenterField(grid)
-    set!(f, (λ, φ, z) -> cosd(17λ) * cosd(φ))
-    f_orig = deepcopy(interior(f))
+    ## Fill with a high-k wave
+    field = CenterField(grid)
+    Nλ = grid.Nx
+    k_high = Nλ ÷ 2
+    λ_nodes = 2π * (0:Nλ-1) / Nλ
+    for k in 1:grid.Nz, j in 1:grid.Ny, i in 1:Nλ
+        field[i, j, k] = FT(cos(k_high * λ_nodes[i]))
+    end
 
-    apply_polar_filter!(pf, f)
+    field_before = deepcopy(interior(field))
+    apply_polar_filter_field!(pf, field)
 
-    ## Rows below the threshold should be completely untouched
+    ## Equatorial rows (below threshold) should be completely unchanged
     φ = φnodes(grid, Center())
+    filtered_set = Set(pf.filtered_indices)
     for j in 1:grid.Ny
-        if abs(φ[j]) <= 60
-            @test maximum(abs, interior(f)[:, j, :] .- f_orig[:, j, :]) < eps(FT)
+        if !(j in filtered_set)
+            @test interior(field)[:, j, :] == field_before[:, j, :]
         end
     end
 end
 
 #####
-##### Multiple fields (NamedTuple) test
-#####
-
-@testset "Filter applied to multiple fields [$(FT)]" for FT in test_float_types()
-    grid = build_polar_filter_test_grid(CPU(); FT)
-    pf = PolarFilter(grid; threshold_latitude=60, filter_mode=SharpTruncation())
-
-    f1 = CenterField(grid)
-    f2 = CenterField(grid)
-    set!(f1, (λ, φ, z) -> cosd(17λ))
-    set!(f2, (λ, φ, z) -> sind(17λ))
-
-    apply_polar_filter!(pf, (f1, f2))
-
-    j_high = pf.filtered_indices[1]
-    @test sqrt(sum(interior(f1)[:, j_high, 1] .^ 2) / grid.Nx) < 100 * eps(FT)
-    @test sqrt(sum(interior(f2)[:, j_high, 1] .^ 2) / grid.Nx) < 100 * eps(FT)
-end
-
-#####
-##### GPU filtering correctness tests
+##### Architecture test (CPU or GPU)
 #####
 
 @testset "Low wavenumber preserved on $(default_arch) [$(FT)]" for FT in test_float_types()
     grid = build_polar_filter_test_grid(default_arch; FT)
-    pf = PolarFilter(grid; threshold_latitude=60)
+    pf = materialize_polar_filter(grid, PolarFilter(threshold_latitude=60))
 
-    f = CenterField(grid)
-    set!(f, (λ, φ, z) -> cosd(λ))
-    f_orig = deepcopy(Array(interior(f)))
+    field = CenterField(grid)
+    Nλ = grid.Nx
+    λ_nodes = 2π * (0:Nλ-1) / Nλ
+    for k in 1:grid.Nz, j in 1:grid.Ny, i in 1:Nλ
+        field[i, j, k] = FT(cos(λ_nodes[i]))
+    end
 
-    apply_polar_filter!(pf, f)
+    field_before = Array(interior(field))
+    apply_polar_filter_field!(pf, field)
 
-    @test maximum(abs, Array(interior(f)) .- f_orig) < 100 * eps(FT)
+    max_change = maximum(abs, Array(interior(field)) .- field_before)
+    max_val = maximum(abs, field_before)
+    @test max_change / max_val < 0.05
 end
 
 @testset "High wavenumber removed on $(default_arch) [$(FT)]" for FT in test_float_types()
     grid = build_polar_filter_test_grid(default_arch; FT)
+    pf = materialize_polar_filter(grid, PolarFilter(threshold_latitude=60))
 
-    pf = PolarFilter(grid; threshold_latitude=60, filter_mode=SharpTruncation())
-    f = CenterField(grid)
-    set!(f, (λ, φ, z) -> cosd(17λ))
-    apply_polar_filter!(pf, f)
+    field = CenterField(grid)
+    Nλ = grid.Nx
+    k_high = Nλ ÷ 2
+    λ_nodes = 2π * (0:Nλ-1) / Nλ
+    for k in 1:grid.Nz, j in 1:grid.Ny, i in 1:Nλ
+        field[i, j, k] = FT(cos(k_high * λ_nodes[i]))
+    end
 
-    j_high = pf.filtered_indices[1]
-    data = Array(interior(f))
-    rms_high = sqrt(sum(data[:, j_high, 1] .^ 2) / grid.Nx)
-    @test rms_high < 100 * eps(FT)
-end
-
-@testset "Equatorial latitudes unchanged on $(default_arch) [$(FT)]" for FT in test_float_types()
-    grid = build_polar_filter_test_grid(default_arch; FT)
-    pf = PolarFilter(grid; threshold_latitude=60)
-
-    f = CenterField(grid)
-    set!(f, (λ, φ, z) -> cosd(17λ) * cosd(φ))
-    f_orig = deepcopy(Array(interior(f)))
-
-    apply_polar_filter!(pf, f)
+    field_before = Array(interior(field))
+    apply_polar_filter_field!(pf, field)
 
     φ = φnodes(grid, Center())
-    data = Array(interior(f))
-    for j in 1:grid.Ny
-        if abs(φ[j]) <= 60
-            @test maximum(abs, data[:, j, :] .- f_orig[:, j, :]) < eps(FT)
-        end
+    passes = Array(pf.passes_per_row)
+    for j_local in 1:length(pf.filtered_indices)
+        passes[j_local] == 0 && continue
+        j = pf.filtered_indices[j_local]
+        amplitude_before = maximum(abs, field_before[:, j, 1])
+        amplitude_after = maximum(abs, Array(interior(field))[:, j, 1])
+        @test amplitude_after < 0.5 * amplitude_before
     end
 end
 
 #####
-##### Callback integration test
+##### Integration test: full model run
 #####
 
-@testset "add_polar_filter! callback [$(FT)]" for FT in test_float_types()
+@testset "PolarFilter integration [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = build_polar_filter_test_grid(default_arch; FT, Nx=36, Ny=34, Nz=4)
 
+    pf = PolarFilter(threshold_latitude=60)
     dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                     surface_pressure = 100000,
-                                    reference_potential_temperature = 300)
+                                    reference_potential_temperature = 300,
+                                    polar_filter = pf)
     coriolis = HydrostaticSphericalCoriolis()
     model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
     set!(model; θ=300, ρ=1.2)
 
+    @test model.dynamics.polar_filter isa PolarFilter
+
     simulation = Simulation(model; Δt=0.1, stop_iteration=3, verbose=false)
-    filter = add_polar_filter!(simulation; threshold_latitude=60)
-
-    @test filter isa PolarFilter
-    @test length(filter.filtered_indices) > 0
-
     run!(simulation)
 
     @test model.clock.iteration == 3

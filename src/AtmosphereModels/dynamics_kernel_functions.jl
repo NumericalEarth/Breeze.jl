@@ -1,10 +1,5 @@
-using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w
-
-# Monkey patch: define U_dot_∇{u,v,w}_metric locally instead of importing from
-# Oceananigans.Advection. The registry Oceananigans (0.106.3) does not export
-# these symbols — they live in CliMA/Oceananigans.jl#5437 which is not yet merged.
-# Source: verbatim copy of curvature_metric_terms.jl from that PR.
-include("oceananigans_curvature_metric_terms_patch.jl")
+using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w,
+                              U_dot_∇u_metric, U_dot_∇v_metric, U_dot_∇w_metric
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, z_f_cross_U
 using Oceananigans.Utils: sum_of_velocities
 

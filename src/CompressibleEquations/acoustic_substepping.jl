@@ -55,10 +55,9 @@ using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
     ℑxᶠᵃᵃ, ℑxᶜᵃᵃ, ℑyᵃᶠᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
     δxᶜᵃᵃ, δxᶠᵃᵃ, δyᵃᶜᵃ, δyᵃᶠᵃ,
-    δxTᶠᵃᵃ, δyTᵃᶠᵃ, δzᵃᵃᶜ, δzᵃᵃᶠ,
+    δzᵃᵃᶜ, δzᵃᵃᶠ,
     divᶜᶜᶜ, div_xyᶜᶜᶜ,
-    Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ,
-    Δxᶠᶜᶜ, Δyᶜᶠᶜ, Δzᶜᶜᶜ, Δzᶜᶜᶠ,
+    Δzᶜᶜᶜ, Δzᶜᶜᶠ,
     Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
