@@ -94,15 +94,16 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the reference pressure at height `z` that associated with the reference pressure `p₀` and
-potential temperature `θ₀`. The reference pressure is defined as the pressure of dry air at the
-reference pressure and temperature.
+Compute the reference pressure at height `z` that associated with the reference pressure `p₀`,
+potential temperature `θ₀`, and standard pressure `pˢᵗ`. The reference pressure is defined as
+the pressure of dry air at the reference pressure and temperature.
 """
-@inline function adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+@inline function adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     Rᵈ = dry_air_gas_constant(constants)
     g = constants.gravitational_acceleration
-    return p₀ * (1 - g * z / (cᵖᵈ * θ₀))^(cᵖᵈ / Rᵈ)
+    T₀ = θ₀ * (p₀ / pˢᵗ)^(Rᵈ / cᵖᵈ)
+    return p₀ * (1 - g * z / (cᵖᵈ * T₀))^(cᵖᵈ / Rᵈ)
 end
 
 """
@@ -115,7 +116,7 @@ the density of dry air at the reference pressure and temperature.
 @inline function adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
-    pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+    pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
     ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
     return ρ₀ * (pᵣ / p₀)^(1 - Rᵈ / cᵖᵈ)
 end
@@ -255,14 +256,14 @@ end
 
 # Closed-form for constant potential temperature
 hydrostatic_pressure(z, p₀, θ₀::Number, pˢᵗ, constants) =
-    adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+    adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
 
 hydrostatic_density(z, p₀, θ₀::Number, pˢᵗ, constants) =
     adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
 
 function hydrostatic_temperature(z, p₀, θ₀::Number, pˢᵗ, constants)
     κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
-    p = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+    p = adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
     return θ₀ * (p / pˢᵗ)^κ
 end
 
