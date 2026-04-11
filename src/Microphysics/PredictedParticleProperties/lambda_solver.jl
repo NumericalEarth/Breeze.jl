@@ -814,187 +814,6 @@ Matches Fortran `apply_mui_bounds_to_zi` and basic zsmall/zlarge clamps.
     return Z_clamped
 end
 
-# H15: Compute liquid-blended mass-weighted mean density for the 3-moment solver.
-# Returns ρ_mean [kg/m³] so callers can compute mom3 = 6 L_ice / (π ρ_mean).
-# Fortran `solve_mui` uses rhoi from lookup table interpolation for the same purpose.
-@inline function _liquid_blended_density(state, nodes, weights, L_ice, liquid_fraction)
-    FT = typeof(L_ice)
-    ρ_integral = max(evaluate(MeanDensity(), state; n_quadrature=length(nodes)), eps(FT))
-    # Mass-weighted mean density: ρ_mean = ∫ρ(D)m(D)N'(D)dD / ∫m(D)N'(D)dD
-    ρ_mean_dry = ρ_integral / max(L_ice, eps(FT))
-    # Blend with liquid water density (Fortran convention)
-    ρ_mean = (1 - liquid_fraction) * ρ_mean_dry + liquid_fraction * FT(1000)
-    return max(ρ_mean, eps(FT))
-end
-
-"""
-    solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
-                          mass = IceMassPowerLaw(),
-                          closure = ThreeMomentClosure(),
-                          max_iterations = nothing,
-                          tolerance = nothing,
-                          density_quadrature_points = 64)
-
-Solve for shape parameter μ using the selected three-moment closure.
-
-Supported closures:
-- `ThreeMomentClosure()`: Fortran-parity `solve_mui` iteration
-- `ThreeMomentClosureExact()`: full Breeze residual solve
-
-Closure-specific defaults:
-- `ThreeMomentClosure`: `max_iterations = 5`, `tolerance = 0.25`
-- `ThreeMomentClosureExact`: `max_iterations = 50`, `tolerance = 1e-10`
-
-# Arguments
-- `L_ice`: Ice mass concentration [kg/m³]
-- `N_ice`: Ice number concentration [1/m³]
-- `Z_ice`: Ice sixth moment / reflectivity [m⁶/m³]
-- `rime_fraction`: Mass fraction of rime [-]
-- `rime_density`: Density of rime [kg/m³]
-- `liquid_fraction`: Liquid water fraction from partial melting [-] (H15)
-
-# Returns
-- Shape parameter μ
-"""
-function solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
-                               liquid_fraction = zero(typeof(L_ice)),
-                               mass = IceMassPowerLaw(),
-                               closure = ThreeMomentClosure(),
-                               max_iterations = nothing,
-                               tolerance = nothing,
-                               density_quadrature_points = 64,
-                               density_table = nothing)
-    return solve_shape_parameter_with_closure(closure, L_ice, N_ice, Z_ice, rime_fraction, rime_density;
-                                              liquid_fraction, mass, max_iterations, tolerance,
-                                              density_quadrature_points, density_table)
-end
-
-function solve_shape_parameter_with_closure(closure::ThreeMomentClosure,
-                                            L_ice, N_ice, Z_ice, rime_fraction, rime_density;
-                                            liquid_fraction = zero(typeof(L_ice)),
-                                            mass = IceMassPowerLaw(),
-                                            max_iterations = nothing,
-                                            tolerance = nothing,
-                                            density_quadrature_points = 64,
-                                            density_table = nothing)
-    FT = typeof(L_ice)
-    max_iterations = isnothing(max_iterations) ? 5 : max_iterations
-    tolerance = FT(isnothing(tolerance) ? 0.25 : tolerance)
-
-    # Handle edge cases
-    (iszero(N_ice) || iszero(L_ice) || iszero(Z_ice)) && return closure.μmin
-
-    nodes, weights = chebyshev_gauss_nodes_weights(FT, density_quadrature_points)
-    μ_old = clamp(FT(0.5), closure.μmin, closure.μmax)
-    μ = μ_old
-    ρ_bulk = FT(mass.ice_density)  # initial estimate
-
-    # D20: Fortran solve_mui does NOT apply Z bounds inside the iteration.
-    # Z bounding is done after the loop using the final density (apply_mui_bounds_to_zi).
-    for _ in 1:max_iterations
-        logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ_old; mass)
-        λ = exp(logλ)
-        N₀ = intercept_parameter(N_ice, μ_old, logλ)
-
-        # D24: Use Table 1 mean-density lookup when available (matches Fortran
-        # proc_from_LUT_main3mom(12,...)); fall back to quadrature otherwise.
-        ρ_bulk = _solver_density(density_table, L_ice, N_ice, rime_fraction,
-                                 liquid_fraction, rime_density, μ_old,
-                                 N₀, λ, mass, nodes, weights)
-        mom3 = FT(6) * L_ice / (ρ_bulk * FT(π))
-        μ = shape_parameter_from_moments(N_ice, mom3, Z_ice, closure.μmax)
-        μ = clamp(μ, closure.μmin, closure.μmax)
-
-        abs(μ_old - μ) < tolerance && break
-        μ_old = μ
-    end
-
-    # D20: Fortran apply_mui_bounds_to_zi bounds Z at the call site after
-    # solve_mui returns, but does NOT recompute μ from the bounded Z.
-    # The solver returns μ as-is; Z bounding is a state mutation that
-    # affects subsequent prognostic use, not the μ value itself.
-
-    return μ
-end
-
-# D24: Table-based density lookup for Fortran parity in the 3-moment solver.
-@inline function _solver_density(table, L_ice, N_ice, rime_fraction,
-                                 liquid_fraction, rime_density, μ,
-                                 N₀, λ, mass, nodes, weights)
-    FT = typeof(L_ice)
-    log_m = log10(max(L_ice / max(N_ice, eps(FT)), FT(1e-20)))
-    return FT(table(log_m, rime_fraction, liquid_fraction, rime_density, μ))
-end
-
-# Fallback: quadrature when no density table is available.
-@inline function _solver_density(::Nothing, L_ice, N_ice, rime_fraction,
-                                 liquid_fraction, rime_density, μ,
-                                 N₀, λ, mass, nodes, weights)
-    FT = typeof(L_ice)
-    state = IceSizeDistributionState(FT;
-        intercept = N₀, shape = μ, slope = λ,
-        rime_fraction = rime_fraction, rime_density = rime_density,
-        liquid_fraction = liquid_fraction,
-        mass_coefficient = mass.coefficient, mass_exponent = mass.exponent,
-        ice_density = mass.ice_density)
-    return _liquid_blended_density(state, nodes, weights, L_ice, liquid_fraction)
-end
-
-function solve_shape_parameter_with_closure(closure::ThreeMomentClosureExact,
-                                            L_ice, N_ice, Z_ice, rime_fraction, rime_density;
-                                            liquid_fraction = zero(typeof(L_ice)),
-                                            mass = IceMassPowerLaw(),
-                                            max_iterations = nothing,
-                                            tolerance = nothing,
-                                            density_quadrature_points = 64,
-                                            density_table = nothing)
-    FT = typeof(L_ice)
-    max_iterations = isnothing(max_iterations) ? 50 : max_iterations
-    tolerance = FT(isnothing(tolerance) ? 1e-10 : tolerance)
-
-    (iszero(N_ice) || iszero(L_ice) || iszero(Z_ice)) && return closure.μmin
-
-    # M15: enforce Z bounds before solve
-    # Use ice density as a conservative estimate for moment-based Z bounding
-    ρ_estimate = FT(mass.ice_density)
-    Z_ice = enforce_z_bounds(Z_ice, L_ice, N_ice, ρ_estimate, closure.μmin, closure.μmax)
-
-    log_Z_over_N = log(Z_ice) - log(N_ice)
-    log_L_over_N = log(L_ice) - log(N_ice)
-
-    f(μ) = mass_residual_three_moment(mass, rime_fraction, rime_density,
-                                      μ, log_Z_over_N, log_L_over_N)
-
-    μ_lo = closure.μmin
-    μ_hi = closure.μmax
-    f_lo = f(μ_lo)
-    f_hi = f(μ_hi)
-
-    same_sign = f_lo * f_hi > 0
-    is_below = f_lo > 0
-
-    if same_sign
-        return ifelse(is_below, closure.μmax, closure.μmin)
-    end
-
-    for _ in 1:max_iterations
-        μ_mid = (μ_lo + μ_hi) / 2
-        f_mid = f(μ_mid)
-
-        abs(f_mid) < tolerance && return μ_mid
-        (μ_hi - μ_lo) < tolerance * max(μ_mid, one(FT)) && return μ_mid
-
-        if f_lo * f_mid < 0
-            μ_hi = μ_mid
-            f_hi = f_mid
-        else
-            μ_lo = μ_mid
-            f_lo = f_mid
-        end
-    end
-
-    return (μ_lo + μ_hi) / 2
-end
 
 """
     solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
@@ -1432,9 +1251,13 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
         return IceDistributionParameters(N₀, λ, μ)
     end
 
-    # H15: Solve for μ using three-moment constraint with liquid fraction
-    μ = solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
-                              liquid_fraction, mass, closure)
+    # H15: Compute μ from three-moment constraint.
+    # Fortran uses Table 3 (pre-tabulated G(μ) polynomial inversion) at runtime.
+    # Here we evaluate the polynomial directly — same result, no table needed.
+    ρ_bulk = FT(mass.ice_density)
+    mom3 = FT(6) * L_ice / (ρ_bulk * FT(π))
+    μ = shape_parameter_from_moments(N_ice, mom3, Z_ice, closure.μmax)
+    μ = clamp(μ, closure.μmin, closure.μmax)
 
     # Solve for λ at this μ
     logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass)

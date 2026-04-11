@@ -203,7 +203,6 @@ export
     IceDistributionParameters,
     DiameterBounds,
     solve_lambda,
-    solve_shape_parameter,
     distribution_parameters,
     shape_parameter,
     ice_regime_thresholds,

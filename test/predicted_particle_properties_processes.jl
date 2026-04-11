@@ -344,33 +344,6 @@ using Oceananigans.Fields: interior
         @test μ_from_moments(1.0, 1.0, 1.3, 20.0) == 20.0
     end
 
-    @testset "Three-moment μ solver follows Fortran-style fixed point" begin
-        p3_closure = ThreeMomentClosure()
-
-        # D20: Z bounding moved from before to after the μ iteration (Fortran order),
-        # so numerical values changed relative to pre-D20 code.
-        μ_rimed = solve_shape_parameter(1e-4, 1e6, 1e-11, 0.2, 500.0; closure=p3_closure)
-        @test μ_rimed ≈ 0.0
-
-        μ_large = solve_shape_parameter(1e-3, 1e5, 1e-8, 0.5, 700.0; closure=p3_closure)
-        @test μ_large ≈ 0.0
-
-        μ_broad = solve_shape_parameter(1e-4, 1e6, 1e-9, 0.2, 500.0; closure=p3_closure)
-        @test μ_broad ≈ 0.0
-    end
-
-    @testset "Exact three-moment closure solves the full residual" begin
-        p3_closure = ThreeMomentClosure()
-        exact_closure = ThreeMomentClosureExact()
-
-        μ_p3 = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=p3_closure)
-        μ_exact = solve_shape_parameter(1e-5, 1e3, 1e-16, 0.0, 400.0; closure=exact_closure)
-
-        # D20: Z bounding order change affects μ value
-        @test μ_p3 ≈ 17.369421148643028
-        @test μ_exact == 0.0
-        @test μ_p3 != μ_exact
-    end
 
     @testset "Lambda solver - L/N dependence" begin
         # Higher L/N ratio means larger particles, hence smaller λ
