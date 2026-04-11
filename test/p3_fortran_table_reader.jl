@@ -29,7 +29,7 @@ end
 const _fortran_table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
 const _has_fortran_tables = isdir(_fortran_table_dir)
 
-@testset "Read Fortran lookup tables (3momI)" skip=!_has_fortran_tables begin
+_has_fortran_tables && @testset "Read Fortran lookup tables (3momI)" begin
     p3 = read_fortran_lookup_tables(_fortran_table_dir; FT=Float64)
 
     tables = p3.ice.lookup_tables
@@ -59,7 +59,7 @@ const _has_fortran_tables = isdir(_fortran_table_dir)
     @test p3.rain.evaporation isa TabulatedFunction
 end
 
-@testset "Read Fortran lookup tables (2momI)" skip=!_has_fortran_tables begin
+_has_fortran_tables && @testset "Read Fortran lookup tables (2momI)" begin
     p3 = read_fortran_lookup_tables(_fortran_table_dir; three_moment_ice=false)
 
     tables = p3.ice.lookup_tables
@@ -79,7 +79,7 @@ end
     @test p3.ice.sixth_moment.rime === nothing
 end
 
-@testset "Rain tables are computed (not from Fortran)" skip=!_has_fortran_tables begin
+_has_fortran_tables && @testset "Rain tables are computed (not from Fortran)" begin
     p3 = read_fortran_lookup_tables(_fortran_table_dir)
 
     @test p3.rain.velocity_mass isa TabulatedFunction1D
@@ -89,7 +89,7 @@ end
     @test p3.rain.velocity_mass(log_lambda) > 0
 end
 
-@testset "PredictedParticlePropertiesMicrophysics constructor with Fortran tables" skip=!_has_fortran_tables begin
+_has_fortran_tables && @testset "PredictedParticlePropertiesMicrophysics constructor with Fortran tables" begin
     # Test constructor interface
     p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=_fortran_table_dir)
     @test p3 isa PredictedParticlePropertiesMicrophysics
@@ -101,7 +101,7 @@ end
     @test p3_2mom.ice.lookup_tables.table_3 === nothing
 end
 
-@testset "Process rates with Fortran-loaded tables" skip=!_has_fortran_tables begin
+_has_fortran_tables && @testset "Process rates with Fortran-loaded tables" begin
     p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=_fortran_table_dir)
 
     FT = Float64

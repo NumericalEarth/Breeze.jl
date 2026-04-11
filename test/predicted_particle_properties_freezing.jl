@@ -67,7 +67,7 @@ using Oceananigans.Fields: interior
 
     _tab_table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
 
-    @testset "Tabulated sixth-moment melting matches Fortran branch split" skip=!isdir(_tab_table_dir) begin
+    isdir(_tab_table_dir) && @testset "Tabulated sixth-moment melting matches Fortran branch split" begin
         FT = Float64
         p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=_tab_table_dir)
 

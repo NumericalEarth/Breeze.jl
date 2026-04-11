@@ -72,25 +72,35 @@ Skips files that already exist. Total download size is approximately 28 MB
 function download_p3_lookup_tables(destination::AbstractString)
     mkpath(destination)
 
+    # Downloads is a stdlib; load it lazily to avoid adding it as a declared dependency.
+    Downloads = Base.require(Base.PkgId(Base.UUID("f43a241f-c20a-4ad4-852c-f6b1247861c6"), "Downloads"))
+
     for filename in P3_TABLE_FILES
         outpath = joinpath(destination, filename)
         isfile(outpath) && continue
 
         url = "$P3_TABLE_BASE_URL/$filename.gz"
-        gzpath = outpath * ".gz"
+        # Use PID-unique temp paths to avoid races between parallel test workers
+        tmpgz  = outpath * ".download.$(getpid()).gz"
+        tmpout = outpath * ".download.$(getpid())"
 
         @info "Downloading P3 lookup table $filename.gz (this only happens once)..."
-        # Downloads is a stdlib; load it lazily to avoid adding it as a declared dependency.
-        Downloads = Base.require(Base.PkgId(Base.UUID("f43a241f-c20a-4ad4-852c-f6b1247861c6"), "Downloads"))
-        Downloads.download(url, gzpath)
+        Downloads.download(url, tmpgz)
 
-        run(ignorestatus(`gzip -d -k $gzpath`))
-        if !isfile(outpath)
-            # HTTP client may have transparently decompressed the content
-            mv(gzpath, outpath)
+        # Check gzip magic bytes (0x1f 0x8b) to decide whether decompression is needed.
+        # Some HTTP clients transparently decompress, leaving already-decoded ASCII.
+        magic = open(io -> read(io, 2), tmpgz)
+        if magic == UInt8[0x1f, 0x8b]
+            open(tmpout, "w") do io
+                run(pipeline(`gzip -d -c $tmpgz`; stdout=io))
+            end
+            rm(tmpgz; force=true)
         else
-            rm(gzpath; force=true)
+            mv(tmpgz, tmpout; force=true)
         end
+
+        # Atomic rename to final path; another worker may have finished first
+        mv(tmpout, outpath; force=true)
 
         mb = round(filesize(outpath) / 1e6; digits=1)
         @info "  Decompressed $filename ($mb MB)"
