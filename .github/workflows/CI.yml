@@ -136,6 +136,13 @@ jobs:
           # preference file to test directory (the global one will be ignored during the
           # tests).
           cp -v /usr/local/share/julia/environments/breeze/LocalPreferences.toml test/.
+      - name: Instantiate test environment
+        shell: bash
+        run: |
+          julia --project=test --color=yes --check-bounds=${{ matrix.check-bounds }} -e '
+          using Pkg;
+          Pkg.instantiate()
+          '
       - name: Run tests
         shell: bash
         run: |
