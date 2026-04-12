@@ -188,6 +188,54 @@ const IBC = BoundaryCondition{<:Open, Nothing}
 @inline bottom_terminal_velocity(::IBC, wʳ) = zero(wʳ)  # impenetrable boundary condition
 
 #####
+##### Local terminal velocity (plucked from CloudMicrophysics.Microphysics1M for
+##### experimentation with Reactant/XLA correctness).
+#####
+
+import CloudMicrophysics.Parameters as CMP
+import CloudMicrophysics.Utilities as UT
+
+@inline _get_n0((; ν, μ)::CMP.ParticlePDFSnow{FT}, q::FT, ρ::FT) where FT =
+    μ * exp(ν * log(ρ * max(q, UT.ϵ_numerics(FT))))  # explicit exp∘log instead of pow
+@inline _get_n0((; n0)::CMP.ParticlePDFIceRain{FT}, args...) where FT = n0
+
+@inline _get_v0((; C_drag, ρw, grav, r0)::CMP.Blk1MVelTypeRain{FT}, ρ::FT) where FT =
+    sqrt(FT(8 / 3) / C_drag * max(ρw / ρ - 1, zero(FT)) * grav * r0)
+@inline _get_v0((; v0)::CMP.Blk1MVelTypeSnow{FT}, args...) where FT = v0
+
+@inline function _lambda_inverse(
+    pdf::Union{CMP.ParticlePDFIceRain{FT}, CMP.ParticlePDFSnow{FT}},
+    mass::CMP.ParticleMass{FT},
+    q::FT, ρ::FT) where FT
+
+    q_safe = max(q, UT.ϵ_numerics(FT))
+    ρ_safe = max(ρ, UT.ϵ_numerics(FT))
+    n0 = _get_n0(pdf, q_safe, ρ_safe)
+    (; r0, m0, me, Δm, χm, gamma_coeff) = mass
+    λ_inv = (ρ_safe * q_safe * r0^(me + Δm) / (χm * m0 * n0 * gamma_coeff))^(1 / (me + Δm + 1))
+    return max(r0 * FT(1e-5), λ_inv)
+end
+
+"""
+    breeze_terminal_velocity(category, vel, ρ, q)
+
+Branch-free local copy of `CloudMicrophysics.Microphysics1M.terminal_velocity`
+for rain/snow. Uses explicit `exp(ν * log(x))` in `_get_n0` for snow to avoid
+Reactant/XLA `pow` divergence.
+"""
+@inline function breeze_terminal_velocity(
+    (; pdf, mass)::Union{CMP.Rain{FT}, CMP.Snow{FT}},
+    vel::Union{CMP.Blk1MVelTypeRain{FT}, CMP.Blk1MVelTypeSnow{FT}},
+    ρ::FT, q::FT) where FT
+
+    (; χv, ve, Δv, gamma_term) = vel
+    v0 = _get_v0(vel, ρ)
+    (; r0, me, Δm, χm, gamma_coeff) = mass
+    λ_inv = _lambda_inverse(pdf, mass, q, ρ)
+    return χv * v0 * (λ_inv / r0)^(ve + Δv) * gamma_term / gamma_coeff
+end
+
+#####
 ##### Type aliases
 #####
 
@@ -216,6 +264,9 @@ const MPNE1M = MixedPhaseNonEquilibrium1M
 const WarmPhase1M = Union{WP1M, WPNE1M}
 const MixedPhase1M = Union{MP1M, MPNE1M}
 const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
+
+# Snow sedimentation (mixed-phase only)
+@inline AM.microphysical_velocities(bμp::MixedPhase1M, μ, ::Val{:ρqˢ}) = (u=zf, v=zf, w=μ.wˢ)
 const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 
 #####
@@ -304,10 +355,16 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
 
     center_fields = center_field_tuple(grid, center_names...)
 
-    # Rain terminal velocity (negative = downward)
+    # Terminal velocity fields (negative = downward)
     # bottom = nothing ensures the kernel-set value is preserved during fill_halo_regions!
-    wʳ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
-    wʳ = ZFaceField(grid; boundary_conditions=wʳ_bcs)
+    face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+    wʳ = ZFaceField(grid; boundary_conditions=face_bcs)
+
+    # Snow terminal velocity for mixed-phase schemes
+    if bμp isa Union{MP1M, MPNE1M}
+        wˢ = ZFaceField(grid; boundary_conditions=face_bcs)
+        return (; zip(center_names, center_fields)..., wʳ, wˢ)
+    end
 
     return (; zip(center_names, center_fields)..., wʳ)
 end
@@ -335,7 +392,7 @@ end
 
     # Terminal velocity with bottom boundary condition
     categories = bμp.categories
-    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
+    𝕎 = breeze_terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
     wʳ = -𝕎 # negative = downward
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
@@ -358,12 +415,20 @@ end
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
     @inbounds μ.qⁱ[i, j, k] = ℳ.qᶜⁱ + ℳ.qˢ
 
-    # Terminal velocity with bottom boundary condition
+    # Terminal velocities with bottom boundary condition
     categories = bμp.categories
-    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
+
+    # Rain terminal velocity
+    𝕎 = breeze_terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
     wʳ = -𝕎 # negative = downward
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+
+    # Snow terminal velocity
+    𝕎ˢ = breeze_terminal_velocity(categories.snow, categories.hydrometeor_velocities.snow, ρ, ℳ.qˢ)
+    wˢ = -𝕎ˢ # negative = downward
+    wˢ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wˢ)
+    @inbounds μ.wˢ[i, j, k] = ifelse(k == 1, wˢ₀, wˢ)
 
     return nothing
 end
