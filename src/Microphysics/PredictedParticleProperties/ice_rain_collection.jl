@@ -20,26 +20,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct `IceRainCollection` with quadrature-based integrals.
+Construct a placeholder `IceRainCollection` with `nothing` fields.
 
-When ice particles collect rain drops through gravitational sweepout,
-the rain freezes on contact (riming). This transfers mass, number, and
-reflectivity from rain to ice.
-
-**Conservation:**
-- Mass: ``dq_r/dt < 0``, ``dq_i/dt > 0``
-- Number: Rain number decreases as drops are absorbed
-- Sixth moment: Transferred to ice (3-moment scheme)
-
-The collection rate depends on the collision kernel integrating over
-both size distributions. P3 uses a simplified approach with rain
-binned into discrete size categories.
-
-# Integrals
-
-- `mass`: Rate of rain mass transfer to ice
-- `number`: Rate of rain drop removal
-- `sixth_moment`: Rate of Z transfer (3-moment)
+The actual ice-rain collection integrals are double integrals over both
+the ice and rain size distributions, computed in the Fortran lookup tables.
+This placeholder is overwritten when tables are loaded via `read_p3_table`.
 
 # References
 
@@ -47,11 +32,7 @@ binned into discrete size categories.
 [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) for sixth moment.
 """
 function IceRainCollection()
-    return IceRainCollection(
-        IceRainMassCollection(),
-        IceRainNumberCollection(),
-        IceRainSixthMomentCollection()
-    )
+    return IceRainCollection(nothing, nothing, nothing)
 end
 
 Base.summary(::IceRainCollection) = "IceRainCollection"

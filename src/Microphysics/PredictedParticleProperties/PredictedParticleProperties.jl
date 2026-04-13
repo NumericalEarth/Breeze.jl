@@ -150,11 +150,6 @@ export
     RainNumberWeightedVelocityEvaluator,
     RainEvaporationVentilationEvaluator,
 
-    # Integral types (concrete) - Ice-rain collection
-    IceRainMassCollection,
-    IceRainNumberCollection,
-    IceRainSixthMomentCollection,
-
     # Tabulated wrapper
     TabulatedIntegral,
     TabulatedFunction1D,

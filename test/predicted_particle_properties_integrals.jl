@@ -269,9 +269,9 @@ end
 
     @testset "Ice-rain collection" begin
         ir = IceRainCollection()
-        @test ir.mass isa IceRainMassCollection
-        @test ir.number isa IceRainNumberCollection
-        @test ir.sixth_moment isa IceRainSixthMomentCollection
+        @test isnothing(ir.mass)
+        @test isnothing(ir.number)
+        @test isnothing(ir.sixth_moment)
     end
 
     @testset "Rain properties" begin
@@ -579,25 +579,6 @@ end
         i_large = evaluate(MassMomentLambdaLimit(), state)
         @test i_large > 0
         @test isfinite(i_large)
-    end
-
-    @testset "Quadrature evaluation - ice-rain collection integrals" begin
-        state = IceSizeDistributionState(Float64;
-            intercept = 1e6,
-            shape = 0.0,
-            slope = 1000.0)
-
-        q_ir = evaluate(IceRainMassCollection(), state)
-        @test q_ir > 0
-        @test isfinite(q_ir)
-
-        n_ir = evaluate(IceRainNumberCollection(), state)
-        @test n_ir > 0
-        @test isfinite(n_ir)
-
-        z_ir = evaluate(IceRainSixthMomentCollection(), state)
-        @test z_ir > 0
-        @test isfinite(z_ir)
     end
 
     @testset "Quadrature convergence" begin

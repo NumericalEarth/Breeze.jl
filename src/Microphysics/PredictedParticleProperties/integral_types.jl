@@ -455,31 +455,6 @@ Rain evaporation rate integral.
 struct RainEvaporation <: AbstractRainIntegral end
 
 #####
-##### Ice-rain collection integrals (3 per rain size bin)
-#####
-
-"""
-    IceRainMassCollection <: AbstractIceIntegral
-
-Mass collection rate for ice collecting rain.
-"""
-struct IceRainMassCollection <: AbstractIceIntegral end
-
-"""
-    IceRainNumberCollection <: AbstractIceIntegral
-
-Number collection rate for ice collecting rain.
-"""
-struct IceRainNumberCollection <: AbstractIceIntegral end
-
-"""
-    IceRainSixthMomentCollection <: AbstractIceIntegral
-
-Sixth moment collection rate for ice collecting rain (3-moment).
-"""
-struct IceRainSixthMomentCollection <: AbstractIceIntegral end
-
-#####
 ##### Tabulated integral wrapper
 #####
 
