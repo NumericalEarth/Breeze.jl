@@ -1,10 +1,11 @@
 # # Neutral atmospheric boundary layer (ABL)
 #
-# This canonical setup is based on [Moeng1994](@citet) and is also a demonstration
+# This canonical setup is based on the paper by [Moeng1994](@citet) and is also a demonstration
 # case for the NCAR LES subgrid-scale model development [Sullivan1994](@cite).
 # Sometimes, this model configuration is called "conventionally" neutral [Pedersen2014](@cite)
 # or "conditionally" neutral [Berg2020](@cite), which indicate idealized dry
-# shear-driven ABL, capped by a stable inversion layer, with no surface heating.
+# shear-driven atmospheric boundary layer, capped by a stable inversion layer, without
+# any surface heating.
 # Forcings come from a specified geostrophic wind (i.e., a specified background
 # pressure gradient) and Coriolis forces; the temperature lapse rate in the free
 # atmosphere is maintained with a sponge layer.
@@ -55,15 +56,15 @@ reference_state = ReferenceState(grid, constants,
 
 dynamics = AnelasticDynamics(reference_state)
 
-# capping inversion for simulation "S" in [Moeng1994](citet)
-Δz = grid.z.Δᵃᵃᶜ
-zi  = 468  # m
-zi2 = zi + 6Δz  # m
-Δθi = 8 / (6Δz)  # K
-Γᵗᵒᵖ = 0.003 # K / m  == dθ/dz
+# Capping inversion for "S" simulation, as in the paper by [Moeng1994](citet).
+Δz = first(zspacings(grid))
+zi  = 468       # m
+zi₂ = zi + 6Δz  # m
+Δθi = 8 / 6Δz   # K
+Γᵗᵒᵖ = 0.003    # K/m  == dθ/dz
 θᵣ(z) = z < zi  ? θ₀ :
-        z < zi2 ? θ₀ + Δθi * (z - zi) :
-        θ₀ + Δθi * (zi2 - zi) + Γᵗᵒᵖ * (z - zi2)
+        z < zi₂ ? θ₀ + Δθi * (z - zi) :
+        θ₀ + Δθi * (zi₂ - zi) + Γᵗᵒᵖ * (z - zi₂)
 
 # ## Surface momentum flux (drag)
 #
@@ -74,9 +75,9 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{Float32} |> zero
 
 # For testing, we prescribe the surface shear stress. In practice, however,
 # this is not known a priori. A surface layer scheme (i.e., a wall model) will
-# dynamically update u★ based on environmental conditions, including surface
+# dynamically update ``u_★`` based on environmental conditions, including surface
 # roughness and heat fluxes.
-u★ = 0.5  # m/s, _result_ from simulation "S" result from [Moeng1994](@citet)
+u★ = 0.5  # m/s, _result_ from simulation "S" by [Moeng1994](@citet)
 @inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
 @inline ρv_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρv / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
 
@@ -101,9 +102,10 @@ sponge_mask = GaussianMask{:z}(center = last(z), width = sponge_width)
 set!(ρθˡⁱᵣ, z -> θᵣ(z))
 set!(ρθˡⁱᵣ, ρᵣ * ρθˡⁱᵣ)
 ρθˡⁱᵣ_data = interior(ρθˡⁱᵣ, 1, 1, :)
+
 @inline function ρθ_sponge_fun(i, j, k, grid, clock, model_fields, p)
     zᶜ = znode(k, grid, Center())
-    return p.rate * p.mask(0, 0, zᶜ) * (@inbounds p.target[k] - model_fields.ρθ[i, j, k])
+    return @inbounds  p.rate * p.mask(0, 0, zᶜ) * (p.target[k] - model_fields.ρθ[i, j, k])
 end
 
 ρθ_sponge = Forcing(
@@ -115,7 +117,7 @@ end
 
 coriolis = FPlane(f=1e-4)
 
-uᵍ, vᵍ = 15, 0  # m/s, simulation "S" in [Moeng1994](@citet)
+uᵍ, vᵍ = 15, 0  # m/s, simulation "S" by [Moeng1994](@citet)
 geostrophic = geostrophic_forcings(uᵍ, vᵍ)
 
 # ## Assembling all the forcings
@@ -146,8 +148,8 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection, forcing, closure,
 zδ = 400  # m < zi
 
 ϵ() = rand() - 1/2
-uᵢ(x, y, z) = uᵍ + δu * ϵ() * (z < zδ)
-vᵢ(x, y, z) = vᵍ + δv * ϵ() * (z < zδ)
+uᵢ(x, y, z) =   uᵍ  + δu * ϵ() * (z < zδ)
+vᵢ(x, y, z) =   vᵍ  + δv * ϵ() * (z < zδ)
 θᵢ(x, y, z) = θᵣ(z) + δθ * ϵ() * (z < zδ)
 
 set!(model, θ=θᵢ, u=uᵢ, v=vᵢ)
