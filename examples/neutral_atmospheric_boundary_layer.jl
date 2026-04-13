@@ -357,44 +357,38 @@ hideydecorations!(ax1b, grid=false)
 hideydecorations!(ax1c, grid=false)
 
 Legend(fig1[1, 4], ax1a, "Time", framevisible=false)
-save("nabl_mean_profiles.png", fig1)
 fig1
-
-# ![](nabl_mean_profiles.png)
 
 # Next, we plot the velocity variances normalized by ``u_★^2``
 
 fig2 = Figure(size=(800, 400), fontsize=14)
 
-ax2a = Axis(fig2[1, 1], xlabel="⟨u′u′⟩ / u★²", ylabel="z (m)",
+ax2a = Axis(fig2[1, 1], xlabel="⟨u′u′⟩ / u_★²", ylabel="z (m)",
             title="u variance")
 for n in 1:Nt
     lines!(ax2a, uu_var[:, n], zᶜ, color=colors[n], label=labels[n])
 end
 
-ax2b = Axis(fig2[1, 2], xlabel="⟨v′v′⟩ / u★²", ylabel="z (m)",
+ax2b = Axis(fig2[1, 2], xlabel="⟨v′v′⟩ / u_★²", ylabel="z (m)",
             title="v variance")
 for n in 1:Nt
     lines!(ax2b, vv_var[:, n], zᶜ, color=colors[n])
 end
 
-ax2c = Axis(fig2[1, 3], xlabel="⟨w′w′⟩ / u★²", ylabel="z (m)",
+ax2c = Axis(fig2[1, 3], xlabel="⟨w′w′⟩ / u_★²", ylabel="z (m)",
             title="w variance")
 for n in 1:Nt
     lines!(ax2c, ww_var[:, n], zⁿ, color=colors[n])
 end
 
 Legend(fig2[1, 4], ax2a, "Time", framevisible=false)
-save("nabl_velocity_variances.png", fig2)
 fig2
-
-# ![](nabl_velocity_variances.png)
 
 # Last, we plot the resolved and the SGS fluxes.
 
 fig3 = Figure(size=(1200, 450), fontsize=14)
 
-ax3a = Axis(fig3[1, 1], xlabel="τˣ / ρ₀u★²", ylabel="z (m)",
+ax3a = Axis(fig3[1, 1], xlabel="τˣ / ρ₀u_★²", ylabel="z (m)",
             title="x-momentum flux")
 for n in 1:Nt
     lines!(ax3a, uw_res[:, n] .+ uw_sgs[:, n], zᶜ, color=colors[n], label=labels[n])
@@ -403,7 +397,7 @@ for n in 1:Nt
 end
 vlines!(ax3a, 0, color=:grey, linewidth=0.5)
 
-ax3b = Axis(fig3[1, 2], xlabel="τʸ / ρ₀u★²", ylabel="z (m)",
+ax3b = Axis(fig3[1, 2], xlabel="τʸ / ρ₀u_★²", ylabel="z (m)",
             title="y-momentum flux")
 for n in 1:Nt
     lines!(ax3b, vw_res[:, n] .+ vw_sgs[:, n], zᶜ, color=colors[n])
@@ -428,8 +422,4 @@ style_entries = [LineElement(color=:black, linestyle=:solid),
 axislegend(ax3a, style_entries, ["total", "resolved", "SGS"],
            position=:lt, framevisible=false)
 Legend(fig3[1, 4], ax3a, "Time", framevisible=false)
-
-save("nabl_fluxes.png", fig3)
 fig3
-
-# ![](nabl_fluxes.png)
