@@ -86,3 +86,21 @@ using Breeze.Microphysics.PredictedParticleProperties:
         @test N_act > 0
     end
 end
+
+@testset "Prognostic CCN integration with P3" begin
+    using Breeze.Microphysics.PredictedParticleProperties:
+        PredictedParticlePropertiesMicrophysics
+
+    FT = Float64
+
+    # Construct P3 with prognostic CCN
+    p3 = PredictedParticlePropertiesMicrophysics(FT;
+        aerosol = AerosolActivation(AerosolMode(FT)))
+
+    @test !isnothing(p3.aerosol)
+    @test length(p3.aerosol.modes) == 1
+
+    # Construct P3 with prescribed CCN (default)
+    p3_prescribed = PredictedParticlePropertiesMicrophysics(FT)
+    @test isnothing(p3_prescribed.aerosol)
+end
