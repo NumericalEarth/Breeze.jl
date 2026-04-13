@@ -71,7 +71,7 @@ zᵢ₂ = zᵢ₁ + 6Δz  # m
 #
 # A bulk drag parameterization is applied with friction velocity
 
-q₀ = Breeze.Thermodynamics.MoistureMassFractions{Float32} |> zero
+q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
 ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
 
 # For testing, we prescribe the surface shear stress. In practice, however,
@@ -91,7 +91,7 @@ u★ = 0.5  # m/s, _result_ from simulation "S" by Moeng and Sullivan (1994)
 # ## Sponge layer
 #
 # effective `depth ≈ 500 m` at `|z - zᵗᵒᵖ| = 500`, `exp(-0.5 * (500/sponge_width)^2) = 0.04 ~ 0`
-sponge_rate = 0.01  # 1/s -- ad hoc value, stronger (shorter damping timescale) makes no difference; weaker may be OK
+sponge_rate = 0.01  # 1/s -- ad hoc value, stronger (i.e., shorter damping timescale) makes no difference; weaker may be OK
 sponge_width = 200  # m
 sponge_mask = GaussianMask{:z}(center = last(z), width = sponge_width)
 
@@ -106,8 +106,8 @@ set!(ρθˡⁱᵣ, ρᵣ * ρθˡⁱᵣ)
 ρθˡⁱᵣ_data = interior(ρθˡⁱᵣ, 1, 1, :)
 
 @inline function ρθ_sponge_fun(i, j, k, grid, clock, model_fields, p)
-    zᶜ = znode(k, grid, Center())
-    return @inbounds  p.rate * p.mask(0, 0, zᶜ) * (p.target[k] - model_fields.ρθ[i, j, k])
+    zₖ = znode(k, grid, Center())
+    return @inbounds p.rate * p.mask(0, 0, zₖ) * (p.target[k] - model_fields.ρθ[i, j, k])
 end
 
 ρθ_sponge = Forcing(
@@ -134,9 +134,7 @@ nothing #hide
 
 # ## Model setup
 
-#advection = WENO(order=5) # too dissipative
-advection = Centered(order=6)
-
+advection = Centered(order=6)       # WENO(order=5) is too dissipative
 closure = SmagorinskyLilly(C=0.18)  # Sullivan et al. (1994)
 
 model = AtmosphereModel(grid; dynamics, coriolis, advection, forcing, closure,
@@ -203,20 +201,20 @@ simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
 # Output horizontal slices for animation
 # Find the `k`-index closest to z = 100 m
 z = znodes(grid, Center())
-k = searchsortedfirst(z, 100)
-@info "Saving slices at z = $(z[k]) m (k = $k)"
+k₁₀₀ = searchsortedfirst(z, 100)
+@info "Saving slices at z = $(z[k₁₀₀]) m (k = $k₁₀₀)"
 
-# Find the j-index closest to the domain center
-y = Oceananigans.Grids.ynodes(grid, Center())
+# Find the `j`-index closest to the domain center.
+y = ynodes(grid, Center())
 jmid = Ny ÷ 2
 @info "Saving slices at y = $(y[jmid]) m (j = $jmid)"
 
 slice_fields = (; u, v, w, θ)
 slice_outputs = (
-    u_xy = view(u, :, :, k),
-    v_xy = view(v, :, :, k),
-    w_xy = view(w, :, :, k),
-    θ_xy = view(θ, :, :, k),
+    u_xy = view(u, :, :, k₁₀₀),
+    v_xy = view(v, :, :, k₁₀₀),
+    w_xy = view(w, :, :, k₁₀₀),
+    θ_xy = view(θ, :, :, k₁₀₀),
     u_xz = view(u, :, jmid, :),
     θ_xz = view(θ, :, jmid, :),
 )
@@ -250,8 +248,8 @@ Nt = length(times)
 zᶜ = znodes(uts.grid, Center())  # cell centers (Nz)
 zⁿ = znodes(uts.grid, Face())    # face centers (Nz+1)
 
-Nz = grid.Nz
-Δz = zspacings(grid, Center())[:]
+Nz = uts.grid.Nz
+Δz = zspacings(uts.grid, Center())[:]
 
 # Compute diagnostics at each saved time
 WS_mean = zeros(Nz, Nt)
