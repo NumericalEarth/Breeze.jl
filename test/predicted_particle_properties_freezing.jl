@@ -92,11 +92,11 @@ using Oceananigans.Fields: interior
         end, fieldcount(P3ProcessRates))...)
 
         coat_cond_only = P3ProcessRates(ntuple(index -> begin
-            index == 44 ? FT(1e-8) : zero(FT)
+            index == 45 ? FT(1e-8) : zero(FT)
         end, fieldcount(P3ProcessRates))...)
 
         coat_evap_only = P3ProcessRates(ntuple(index -> begin
-            index == 45 ? FT(1e-8) : zero(FT)
+            index == 46 ? FT(1e-8) : zero(FT)
         end, fieldcount(P3ProcessRates))...)
 
         rain_rime_only = P3ProcessRates(ntuple(index -> begin
