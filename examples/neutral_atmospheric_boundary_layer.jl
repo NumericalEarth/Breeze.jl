@@ -360,7 +360,9 @@ hideydecorations!(ax1c, grid=false)
 
 Legend(fig1[1, 4], ax1a, "Time", framevisible=false)
 save("nabl_mean_profiles.png", fig1)
-@info "Saved nabl_mean_profiles.png"
+fig1
+
+# ![](nabl_mean_profiles.png)
 
 ## ============================================================
 ## Figure 2: Velocity variances normalized by u★²
@@ -387,7 +389,9 @@ end
 
 Legend(fig2[1, 4], ax2a, "Time", framevisible=false)
 save("nabl_velocity_variances.png", fig2)
-@info "Saved nabl_velocity_variances.png"
+fig2
+
+# ![](nabl_velocity_variances.png)
 
 ## ============================================================
 ## Figure 3: Resolved and SGS fluxes
@@ -430,4 +434,6 @@ axislegend(ax3a, style_entries, ["total", "resolved", "SGS"],
 Legend(fig3[1, 4], ax3a, "Time", framevisible=false)
 
 save("nabl_fluxes.png", fig3)
-@info "Saved nabl_fluxes.png"
+fig3
+
+# ![](nabl_fluxes.png)
