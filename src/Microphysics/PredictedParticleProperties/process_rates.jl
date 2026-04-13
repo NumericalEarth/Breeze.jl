@@ -505,6 +505,21 @@ for ``r = 1`` μm. The rate is limited by the available supersaturation.
     return ifelse(is_supersaturated, rate, zero(FT))
 end
 
+"""
+Dispatch CCN activation: prescribed (Nothing) or prognostic (AerosolActivation).
+Returns `(; mass, number)` named tuple.
+"""
+@inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+    FT = typeof(qᶜˡ)
+    mass = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+    return (; mass, number = zero(FT))
+end
+
+@inline function compute_ccn_activation(aerosol::AerosolActivation, p3, qᶜˡ, nᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+    result = prognostic_ccn_activation_rate(aerosol, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
+    return (; mass = result.qcnuc, number = result.ncnuc)
+end
+
 #####
 ##### Ice deposition and sublimation
 #####
@@ -821,8 +836,10 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     cond = cloud_condensation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, constants; sˢᵃᵗ=ℳ.sˢᵃᵗ)
 
-    # C5: CCN activation (1-moment, prescribed Nᶜ)
-    ccn_act = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+    # C5: CCN activation (prescribed or prognostic)
+    ccn = compute_ccn_activation(p3.aerosol, p3, qᶜˡ, ℳ.nᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+    ccn_act = ccn.mass
+    ccn_act_n = ccn.number
 
     # =========================================================================
     # Phase 1: Rain processes
@@ -1206,7 +1223,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         # D8: Wet growth shedding → rain
         wg_shed, wg_shed_n,
         # C5/C6: CCN activation and rain condensation
-        ccn_act, zero(FT), rain_cond,
+        ccn_act, ccn_act_n, rain_cond,
         # D1: Coating condensation/evaporation
         coat_cond, coat_evap,
         # H9: Wet growth rime densification
