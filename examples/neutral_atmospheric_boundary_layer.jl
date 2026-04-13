@@ -158,7 +158,7 @@ set!(model, θ=θᵢ, u=uᵢ, v=vᵢ)
 
 # ## Simulation
 #
-# We run the simulation for 6 hours with adaptive time-stepping.
+# We run the simulation for 5 hours with adaptive time-stepping.
 
 simulation = Simulation(model; Δt=0.5, stop_time=5hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
