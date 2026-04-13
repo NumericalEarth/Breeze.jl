@@ -107,6 +107,7 @@ jobs:
         # examples, we don't need them on the website.
         run:
           rm -fv docs/build/literated/*.jld2
+          rm -rfv docs/build/literated/data/P3_LUT
       - name: Instantiate docs environment
         shell: julia --color=yes {0}
         run: |
