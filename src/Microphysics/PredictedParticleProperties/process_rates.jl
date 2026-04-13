@@ -977,7 +977,12 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     nuc_q, nuc_n = deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ)
     cloud_frz_q, cloud_frz_n = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
-    rain_frz_q, rain_frz_n = immersion_freezing_rain_rate(p3, qʳ, nʳ, T)
+    # Fortran P3 v5.5.0: mu_r_constant = 0 (exponential rain PSD).
+    # The diagnostic mu_r from Cao et al. (2008) is available but commented out.
+    # Pass mu_r = 0 for Fortran parity; when diagnostic mu_r is enabled, pass
+    # the actual diagnosed value here.
+    μ_r = zero(FT)
+    rain_frz_q, rain_frz_n = immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μ_r)
 
     # =========================================================================
     # Rime splintering (Hallett-Mossop secondary ice production)

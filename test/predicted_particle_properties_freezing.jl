@@ -424,7 +424,8 @@ using Oceananigans.Fields: interior
         # Rain immersion freezing: same split (PSD correction on mass only).
         qr = 1e-3
         nr = 1e4   # [1/kg]
-        Q_frz_r, N_frz_r = immersion_freezing_rain_rate(p3, qr, nr, T)
+        μ_r = 0.0  # exponential rain PSD (Fortran P3 v5.5.0 mu_r_constant = 0)
+        Q_frz_r, N_frz_r = immersion_freezing_rain_rate(p3, qr, nr, T, μ_r)
         m_mean_r = qr / nr
         @test Q_frz_r / max(N_frz_r, 1e-30) > m_mean_r
         @test Q_frz_r > 0

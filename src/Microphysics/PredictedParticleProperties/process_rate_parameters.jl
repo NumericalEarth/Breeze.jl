@@ -85,8 +85,9 @@ struct ProcessRateParameters{FT}
     splintering_rate :: FT                   # splinters per kg rime
     splintering_crystal_mass :: FT           # mass per HM splinter [kg] (Fortran Dinit_HM = 10 μm)
     splintering_diameter_threshold :: FT     # D_min [m] for HM splintering
+    splintering_cloud_riming_scale :: FT     # 1.0 for nCat=1 (include), 0.0 for nCat>1 (exclude)
     splintering_liquid_fraction_max :: FT    # Fˡ max for HM splintering
-    splintering_surface_temperature_max :: FT # warm-surface shutoff [K]
+    splintering_surface_temperature_max :: FT # warm-surface shutoff [K] (Inf disables)
 
     # Rain terminal velocity (power law v = a D^b)
     rain_fall_speed_coefficient :: FT        # a [m^(1-b)/s]
@@ -294,8 +295,13 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         splintering_rate = 3.5e8,
         # C6: Fortran Dinit_HM = 10e-6 m; mass = π/6 × 900 × (10e-6)³ = 4.712e-13 kg
         splintering_crystal_mass = π/6 * 900 * (10e-6)^3,
+        # Fortran P3 v5.5.0: Dmin_HM = 250e-6 (nCat=1) or 1000e-6 (nCat>1)
         splintering_diameter_threshold = 250e-6,
+        # Cloud-riming splintering scale: 1.0 includes (nCat=1), 0.0 excludes (nCat>1).
+        # Fortran only includes cloud riming HM for nCat == 1.
+        splintering_cloud_riming_scale = 1.0,
         splintering_liquid_fraction_max = 0.1,
+        # Warm-surface shutoff: nCat=1 uses 282 K, nCat>1 sets Inf (no shutoff).
         splintering_surface_temperature_max = 282.0,
 
         # Rain terminal velocity
@@ -431,6 +437,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(splintering_rate),
         FT(splintering_crystal_mass),
         FT(splintering_diameter_threshold),
+        FT(splintering_cloud_riming_scale),
         FT(splintering_liquid_fraction_max),
         FT(splintering_surface_temperature_max),
         FT(rain_fall_speed_coefficient),

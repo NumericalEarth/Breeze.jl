@@ -137,7 +137,7 @@ negligible for small droplets.
 end
 
 """
-    immersion_freezing_rain_rate(p3, qʳ, nʳ, T)
+    immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μ_r)
 
 Compute immersion freezing rate of rain drops.
 
@@ -145,16 +145,21 @@ Rain drops freeze when temperature is below a threshold. Uses
 [Barklie and Gokhale (1959)](@cite BarklieGokhale1959) stochastic freezing
 parameterization, following Fortran P3 v5.5.0.
 
+The PSD correction ``C(\\mu_r) = \\Gamma(\\mu_r+7)\\Gamma(\\mu_r+1)/\\Gamma(\\mu_r+4)^2``
+is computed from the actual rain shape parameter ``\\mu_r`` (Fortran P3 v5.5.0
+uses ``\\mu_r(i,k)`` in `gamma(7.+mu_r)` and `gamma(mu_r+4.)` terms).
+
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `qʳ`: Rain mass fraction [kg/kg]
 - `nʳ`: Rain number concentration [1/kg]
 - `T`: Temperature [K]
+- `μ_r`: Rain PSD shape parameter [-] (0 for exponential)
 
 # Returns
 - Tuple (Q_frz, N_frz): mass rate [kg/kg/s] and number rate [1/kg/s]
 """
-@inline function immersion_freezing_rain_rate(p3, qʳ, nʳ, T)
+@inline function immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μ_r)
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -163,7 +168,10 @@ parameterization, following Fortran P3 v5.5.0.
     T₀ = prp.freezing_temperature
     ρ_water = FT(prp.liquid_water_density)
     bimm = prp.immersion_freezing_nucleation_coefficient
-    psd_correction = prp.freezing_rain_psd_correction
+
+    # Compute PSD correction from actual rain shape parameter (Fortran P3 v5.5.0:
+    # uses diagnosed mu_r(i,k) via gamma(7.+mu_r) and gamma(mu_r+4.) terms).
+    psd_correction = psd_correction_spherical_volume(μ_r)
 
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = clamp_positive(nʳ)
@@ -172,7 +180,6 @@ parameterization, following Fortran P3 v5.5.0.
     freezing_active = (T <= T_max) & (qʳ_eff >= FT(1e-14))
 
     # Barklie-Gokhale (1959) stochastic volume-dependent freezing.
-    # PSD correction for rain (broader PSD than cloud, μ_r ≈ 1-3).
     ΔT = max(T₀ - T, zero(FT))
 
     # Individual rain drop mass and volume (monodisperse assumption)
@@ -378,7 +385,9 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
     cold_branch = clamp((T_high - T) / (T_high - T_peak), zero(FT), one(FT))
     efficiency = ifelse(T <= T_peak, warm_branch, cold_branch)
 
-    cloud_riming_eff = clamp_positive(cloud_riming)
+    # Fortran P3 v5.5.0: cloud riming splintering only for nCat == 1.
+    # For nCat > 1, splintering_cloud_riming_scale = 0 disables it.
+    cloud_riming_eff = clamp_positive(cloud_riming) * FT(prp.splintering_cloud_riming_scale)
     rain_riming_eff = clamp_positive(rain_riming)
     has_rime = qᶠ >= p3.minimum_mass_mixing_ratio
     active = (D_ice ≥ prp.splintering_diameter_threshold) &

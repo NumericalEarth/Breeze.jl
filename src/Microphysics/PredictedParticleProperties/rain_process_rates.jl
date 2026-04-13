@@ -22,8 +22,8 @@ Cloud droplets larger than a threshold undergo collision-coalescence to form rai
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
-    # KK2000 uses cloud liquid directly (no threshold subtraction)
-    qᶜˡ_eff = clamp_positive(qᶜˡ)
+    # Fortran P3 v5.5.0: no autoconversion when in-cloud qc < qsmall_dry1 (1e-8 kg/kg).
+    qᶜˡ_eff = ifelse(qᶜˡ >= prp.autoconversion_threshold, clamp_positive(qᶜˡ), zero(FT))
 
     # D11: Fortran KK2000 uses (nc × rho × 1e-6)^β where nc is per-mass [1/kg].
     # The nc × rho product is a unit conversion to per-volume [1/m³], so no

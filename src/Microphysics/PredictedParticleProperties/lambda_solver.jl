@@ -752,10 +752,8 @@ used by `solve_mui`.
         5.9070e-1 * G²64 - 5.7918 * G64 + 16.919
     elseif G64 >= 1.793
         4.3966 * G²64 - 26.659 * G64 + 45.477
-    elseif G64 >= 1.405
+    elseif G64 >= 1.472
         47.552 * G²64 - 179.58 * G64 + 181.26
-    elseif G64 >= 1.230
-        308.89 * G²64 - 908.54 * G64 + 689.95
     else
         Float64(μmax)
     end
@@ -1251,15 +1249,37 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
         return IceDistributionParameters(N₀, λ, μ)
     end
 
-    # H15: Compute μ from three-moment constraint.
-    # Fortran uses Table 3 (pre-tabulated G(μ) polynomial inversion) at runtime.
-    # Here we evaluate the polynomial directly — same result, no table needed.
-    ρ_bulk = FT(mass.ice_density)
-    mom3 = FT(6) * L_ice / (ρ_bulk * FT(π))
-    μ = shape_parameter_from_moments(N_ice, mom3, Z_ice, closure.μmax)
-    μ = clamp(μ, closure.μmin, closure.μmax)
+    # H15: Compute μ from three-moment constraint with density iteration.
+    # Fortran solve_mui iterates up to 5 times: at each step, the bulk density
+    # ρ_bulk is updated from the lookup table (entry 12), which changes mom3 and
+    # hence μ. Here we compute ρ_bulk analytically from the solved (μ, λ) pair
+    # via ρ_bulk = 6L / (π M₃), where M₃ = N Γ(μ+4) / (Γ(μ+1) λ³).
+    ρ_bulk = FT(mass.ice_density)  # initial guess: pure ice density (900 kg/m³)
+    μ = FT(0)
+    logλ = FT(0)
+    for _ in 1:5
+        mom3 = FT(6) * L_ice / (ρ_bulk * FT(π))
+        μ_new = shape_parameter_from_moments(N_ice, mom3, Z_ice, closure.μmax)
+        μ_new = clamp(μ_new, closure.μmin, closure.μmax)
 
-    # Solve for λ at this μ
+        # Solve for λ using actual piecewise m-D relation
+        logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ_new; mass)
+        λ_iter = exp(logλ)
+
+        # Update bulk density: ρ = 6L Γ(μ+1) λ³ / (π N Γ(μ+4))
+        # This is the effective spherical-equivalent density of the PSD.
+        log_ratio = loggamma(μ_new + 1) - loggamma(μ_new + 4)
+        ρ_bulk_new = FT(6) * L_ice * exp(log_ratio) * λ_iter^3 / (FT(π) * N_ice)
+        ρ_bulk_new = clamp(ρ_bulk_new, FT(50), FT(mass.ice_density))
+
+        # Convergence check (Fortran tolerance: |μ_old - μ_new| < 0.25)
+        converged = abs(μ_new - μ) < FT(0.25)
+        μ = μ_new
+        ρ_bulk = ρ_bulk_new
+        converged && break
+    end
+
+    # Final solve with converged μ
     logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass)
     λ = exp(logλ)
     λ = enforce_diameter_bounds(λ, μ, bounds)
