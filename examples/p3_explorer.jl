@@ -149,11 +149,12 @@ function p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ)
               reflectivity = PredictedParticleProperties.evaluate(PredictedParticleProperties.Reflectivity(), state) / ρ)
 end
 
-function initialize_p3_state(p3, ρ; qᶜˡ = 0, qʳ = 0, nʳ = 0,
+function initialize_p3_state(p3, ρ; qᶜˡ = 0, nᶜˡ = 0, qʳ = 0, nʳ = 0,
                                qⁱ = 0, nⁱ = 0, qᶠ = 0, bᶠ = 0, qʷⁱ = 0)
     reflectivity = p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ).reflectivity
 
     return (; ρqᶜˡ = ρ * qᶜˡ,
+              ρnᶜˡ = ρ * nᶜˡ,
               ρqʳ = ρ * qʳ,
               ρnʳ = ρ * nʳ,
               ρqⁱ = ρ * qⁱ,
@@ -161,7 +162,8 @@ function initialize_p3_state(p3, ρ; qᶜˡ = 0, qʳ = 0, nʳ = 0,
               ρqᶠ = ρ * qᶠ,
               ρbᶠ = ρ * bᶠ,
               ρzⁱ = ρ * reflectivity,
-              ρqʷⁱ = ρ * qʷⁱ)
+              ρqʷⁱ = ρ * qʷⁱ,
+              ρsˢᵃᵗ = zero(ρ))
 end
 
 prognostic_parcel_dynamics() = ParcelDynamics(vertical_velocity_formulation = PrognosticVerticalVelocity())

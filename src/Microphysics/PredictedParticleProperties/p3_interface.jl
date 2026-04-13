@@ -162,6 +162,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     bᶠ  = CenterField(grid)  # Rime volume [m³/kg]
     zⁱ  = CenterField(grid)  # Ice sixth moment [m⁶/kg]
     qʷⁱ = CenterField(grid)  # Liquid water on ice [kg/kg]
+    sˢᵃᵗ = CenterField(grid) # Supersaturation [kg/kg]
 
     # Diagnostic field for vapor
     qᵛ = CenterField(grid)
@@ -190,7 +191,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     cache_ρqᵛ  = CenterField(grid)
 
     return (; ρqᶜˡ, ρnᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ, ρsˢᵃᵗ,
-              qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, qᵛ,
+              qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, qᵛ,
               wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
               cache_ρqᶜˡ, cache_ρnᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
               cache_ρqᶠ, cache_ρbᶠ, cache_ρzⁱ, cache_ρqʷⁱ, cache_ρsˢᵃᵗ, cache_ρqᵛ)
@@ -266,6 +267,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.bᶠ[i, j, k]  = bᶠ
     @inbounds μ.zⁱ[i, j, k]  = props.zⁱ_bounded
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
+    @inbounds μ.sˢᵃᵗ[i, j, k] = ℳ.sˢᵃᵗ
 
     # Pre-compute terminal velocities for sedimentation (stored as negative w)
     @inbounds μ.wʳ[i, j, k]   = -rain_terminal_velocity_mass_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
