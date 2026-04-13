@@ -185,6 +185,10 @@ export
     tabulate_rain_from_quadrature,
     rime_density_index,
 
+    # Aerosol activation (prognostic CCN)
+    AerosolMode,
+    AerosolActivation,
+
     # Lambda solver
     IceMassPowerLaw,
     P3Closure,
@@ -208,7 +212,7 @@ export
     enforce_diameter_bounds
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDFIELDS
-using SpecialFunctions: loggamma, gamma_inc
+using SpecialFunctions: loggamma, gamma_inc, erf
 
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU
@@ -260,6 +264,12 @@ include("transport_properties.jl")
 #####
 
 include("process_rate_parameters.jl")
+
+#####
+##### Aerosol activation (prognostic CCN)
+#####
+
+include("aerosol_activation.jl")
 
 #####
 ##### Main scheme type
