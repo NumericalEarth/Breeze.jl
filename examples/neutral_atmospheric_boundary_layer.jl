@@ -34,7 +34,8 @@ end
 arch = GPU()
 Oceananigans.defaults.FloatType = Float32
 
-# Simulation "S" (shear-driven ABL) domain setup from [Moeng1994](@citet)
+# Simulation "S" (shear-driven ABL) domain setup from [Moeng1994](@citet).
+
 Nx = Ny = Nz = 96
 x = y = (0, 3000)
 z = (0, 1000)
@@ -77,7 +78,7 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{Float32} |> zero
 # this is not known a priori. A surface layer scheme (i.e., a wall model) will
 # dynamically update ``u_★`` based on environmental conditions, including surface
 # roughness and heat fluxes.
-u★ = 0.5  # m/s, _result_ from simulation "S" by [Moeng1994](@citet)
+u★ = 0.5  # m/s, _result_ from simulation "S" by Moeng and Sullivan (1994)
 @inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
 @inline ρv_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρv / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
 
