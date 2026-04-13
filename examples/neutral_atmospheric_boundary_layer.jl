@@ -119,7 +119,7 @@ end
 
 coriolis = FPlane(f=1e-4)
 
-uᵍ, vᵍ = 15, 0  # m/s, simulation "S" by [Moeng1994](@citet)
+uᵍ, vᵍ = 15, 0  # m/s, simulation "S" by Moeng and Sullivan (1994)
 geostrophic = geostrophic_forcings(uᵍ, vᵍ)
 
 # ## Assembling all the forcings
