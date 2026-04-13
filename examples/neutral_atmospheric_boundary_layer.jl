@@ -61,11 +61,11 @@ dynamics = AnelasticDynamics(reference_state)
 Δz  = first(zspacings(grid))
 zᵢ₁ = 468        # m
 zᵢ₂ = zᵢ₁ + 6Δz  # m
-Δθi = 8 / 6Δz    # K
-Γᵗᵒᵖ = 0.003     # K/m, = dθ/dz
+Γᵢ  = 8 / 6Δz    # K/m
+Γᵗᵒᵖ = 0.003     # K/m
 θᵣ(z) = z < zᵢ₁ ? θ₀ :
-        z < zᵢ₂ ? θ₀ + Δθi * (z - zᵢ₁) :
-        θ₀ + Δθi * (zᵢ₂ - zᵢ₁) + Γᵗᵒᵖ * (z - zᵢ₂)
+        z < zᵢ₂ ? θ₀ + Γᵢ * (z - zᵢ₁) :
+        θ₀ + Γᵢ * (zᵢ₂ - zᵢ₁) + Γᵗᵒᵖ * (z - zᵢ₂)
 
 # ## Surface momentum flux (drag)
 #
@@ -158,7 +158,7 @@ set!(model, θ=θᵢ, u=uᵢ, v=vᵢ)
 
 # ## Simulation
 #
-# We run the simulation for 6 hours with adaptive time-stepping.
+# We run the simulation for 5 hours with adaptive time-stepping.
 
 simulation = Simulation(model; Δt=0.5, stop_time=5hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
@@ -201,7 +201,7 @@ simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
                                                   overwrite_existing = true)
 
 # Output horizontal slices for animation
-# Find the k-index closest to z = 100 m
+# Find the `k`-index closest to z = 100 m
 z = znodes(grid, Center())
 k = searchsortedfirst(z, 100)
 @info "Saving slices at z = $(z[k]) m (k = $k)"
