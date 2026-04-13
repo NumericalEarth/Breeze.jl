@@ -98,12 +98,10 @@ sponge_mask = GaussianMask{:z}(center = last(z), width = sponge_width)
 
 # relax to initial temperature profile
 ρᵣ = reference_state.density
-θᵣ = Field{Nothing, Nothing, Center}(grid)
-set!(θᵣ, z -> θᵣ(z))
-
 ρθˡⁱᵣ = Field{Nothing, Nothing, Center}(grid)
 set!(ρθˡⁱᵣ, z -> θᵣ(z))
 set!(ρθˡⁱᵣ, ρᵣ * ρθˡⁱᵣ)
+
 ρθˡⁱᵣ_data = interior(ρθˡⁱᵣ, 1, 1, :)
 
 @inline function ρθ_sponge_fun(i, j, k, grid, clock, model_fields, p)
