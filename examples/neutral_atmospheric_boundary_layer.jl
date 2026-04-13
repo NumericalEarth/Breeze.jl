@@ -226,8 +226,6 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 schedule = TimeInterval(300seconds),
                                                 overwrite_existing = true)
 
-
-
 @info "Running ABL simulation..."
 run!(simulation)
 
