@@ -434,7 +434,8 @@ using Oceananigans.Fields: interior
             FT(0.0),    # wet_growth_rain
             FT(0.0),    # wet_growth_shedding (D8)
             FT(0.0),    # wet_growth_shedding_number (D8)
-            FT(0.0),    # ccn_activation (M9 stub)
+            FT(0.0),    # ccn_activation_mass (M9 stub)
+            FT(0.0),    # ccn_activation_number (M9 stub)
             FT(0.0),    # rain_condensation (M9 stub)
             FT(0.0),    # coating_condensation (M9 stub)
             FT(0.0),    # coating_evaporation (M9 stub)
@@ -495,7 +496,7 @@ using Oceananigans.Fields: interior
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),                        # warm collection + rain_warm_n (M9)
             FT(0.0), FT(0.0),                                         # wet growth
             FT(0.0), FT(0.0),                                         # D8 wet growth shedding
-            FT(0.0), FT(0.0), FT(0.0), FT(0.0),                      # M9 stubs
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),              # M9 stubs (ccn_act_mass, ccn_act_number, rain_cond, coat_cond, coat_evap)
             FT(0.0), FT(0.0),                                         # H9 wet growth densification
             FT(0.0), FT(0.0)                                          # M6 DSD number corrections
         )

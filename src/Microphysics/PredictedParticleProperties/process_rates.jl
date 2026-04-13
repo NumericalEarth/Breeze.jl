@@ -720,7 +720,8 @@ struct P3ProcessRates{FT}
     wet_growth_shedding_number :: FT   # Rain number from wet growth shedding [1/kg/s]
 
     # M9: Warm/mixed-phase budget terms (stubs for Fortran parity)
-    ccn_activation :: FT               # CCN activation (vapor → cloud) [kg/kg/s]
+    ccn_activation_mass :: FT          # CCN activation mass rate (vapor → cloud) [kg/kg/s]
+    ccn_activation_number :: FT        # CCN activation number rate [1/kg/s] (prognostic CCN only)
     rain_condensation :: FT            # Rain condensation (vapor → rain) [kg/kg/s]
     coating_condensation :: FT         # Condensation on ice liquid coating [kg/kg/s]
     coating_evaporation :: FT          # Evaporation from ice liquid coating [kg/kg/s]
@@ -1205,7 +1206,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         # D8: Wet growth shedding → rain
         wg_shed, wg_shed_n,
         # C5/C6: CCN activation and rain condensation
-        ccn_act, rain_cond,
+        ccn_act, zero(FT), rain_cond,
         # D1: Coating condensation/evaporation
         coat_cond, coat_evap,
         # H9: Wet growth rime densification
@@ -1255,7 +1256,7 @@ Cloud liquid is consumed by:
 @inline function tendency_ρqᶜˡ(rates::P3ProcessRates, ρ)
     # Phase 1: condensation (positive = cloud forms)
     # M9: CCN activation (vapor → cloud)
-    gain = rates.condensation + rates.ccn_activation
+    gain = rates.condensation + rates.ccn_activation_mass
     # Phase 1: autoconversion and accretion
     # Phase 2: cloud riming by ice, immersion freezing, homogeneous freezing
     # Above-freezing: cloud collected by melting ice → qʷⁱ
@@ -1800,7 +1801,9 @@ to the cloud mass they consume, following the Fortran `nc` budget structure.
     # matching Fortran's nc/qc → [#/kg/s] when multiplied by mass rates.
     number_per_mass = safe_divide(Nᶜ, ρ * qᶜˡ, zero(FT))
     seed_drop_mass = FT(4π / 3) * prp.liquid_water_density * FT(1e-18)
-    activation_number = rates.ccn_activation / seed_drop_mass
+    activation_number = ifelse(iszero(rates.ccn_activation_number),
+                               rates.ccn_activation_mass / seed_drop_mass,
+                               rates.ccn_activation_number)
 
     number_loss = number_per_mass * (rates.autoconversion + rates.accretion) +
                   rates.cloud_riming_number +
@@ -1873,7 +1876,7 @@ Vapor is produced by:
     # M9: CCN activation, rain condensation, and coating condensation are all vapor sinks;
     #      coating evaporation is a vapor source.
     vapor_loss = rates.condensation + rates.deposition + rates.nucleation_mass +
-                 rates.ccn_activation + rates.rain_condensation + rates.coating_condensation
+                 rates.ccn_activation_mass + rates.rain_condensation + rates.coating_condensation
     vapor_gain = rates.rain_evaporation + rates.coating_evaporation
     return ρ * (vapor_gain - vapor_loss)
 end
@@ -1898,7 +1901,7 @@ When `predict_supersaturation = false`, returns zero tendency.
     # recalculating ssat = qv - qvs(T) at end of step (lines 5058-5067);
     # here the advected sˢᵃᵗ field and bounded adjustment serve the same role.
     vapor_loss = rates.condensation + rates.deposition + rates.nucleation_mass +
-                 rates.ccn_activation + rates.rain_condensation + rates.coating_condensation
+                 rates.ccn_activation_mass + rates.rain_condensation + rates.coating_condensation
     vapor_gain = rates.rain_evaporation + rates.coating_evaporation
     raw = ρ * (vapor_gain - vapor_loss)
     return ifelse(prp.predict_supersaturation, raw, zero(ρ))
