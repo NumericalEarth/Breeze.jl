@@ -40,9 +40,9 @@ Default chemistry is ammonium sulfate (NH₄)₂SO₄.
 - `geometric_std`: Geometric standard deviation [-], default 2.0
 - `vant_hoff_factor`: van't Hoff factor [-], default 3.0
 - `osmotic_potential`: Osmotic potential [-], default 1.0
-- `mass_fraction_soluble`: Mass fraction soluble [-], default 1.0
-- `aerosol_density`: Aerosol density [kg/m³], default 1770.0
-- `molecular_weight_aerosol`: Molecular weight of aerosol [kg/mol], default 0.132141
+- `mass_fraction_soluble`: Mass fraction soluble [-], default 0.9
+- `aerosol_density`: Aerosol density [kg/m³], default 1777.0
+- `molecular_weight_aerosol`: Molecular weight of aerosol [kg/mol], default 0.132
 
 # References
 
@@ -65,10 +65,10 @@ function AerosolMode(FT::Type{<:AbstractFloat} = Float64;
                      geometric_std = 2.0,
                      vant_hoff_factor = 3.0,
                      osmotic_potential = 1.0,
-                     mass_fraction_soluble = 1.0,
-                     aerosol_density = 1770.0,
-                     molecular_weight_aerosol = 0.132141)
-    Mw = FT(0.018016)
+                     mass_fraction_soluble = 0.9,
+                     aerosol_density = 1777.0,
+                     molecular_weight_aerosol = 0.132)
+    Mw = FT(0.018)
     ρw = FT(1000)
     solute_activity = FT(vant_hoff_factor) * FT(osmotic_potential) * FT(mass_fraction_soluble) *
                       Mw * FT(aerosol_density) / (FT(molecular_weight_aerosol) * ρw)
@@ -132,7 +132,7 @@ length(aerosol.modes)
 ```
 """
 function AerosolActivation(mode1::AerosolMode{FT}, rest::AerosolMode{FT}...;
-                           molecular_weight_water = 0.018016,
+                           molecular_weight_water = 0.018,
                            universal_gas_constant = 8.3145,
                            activation_timescale = 1.0) where FT
     modes = (mode1, rest...)

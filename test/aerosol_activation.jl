@@ -12,8 +12,8 @@ using Breeze.Microphysics.PredictedParticleProperties:
 
     @testset "AerosolMode construction" begin
         mode = AerosolMode(FT)
-        # Default ammonium sulfate: βact = 3 * 1 * 1 * 0.018016 * 1770 / (0.132141 * 1000)
-        expected_beta = 3.0 * 0.018016 * 1770.0 / (0.132141 * 1000.0)
+        # Default ammonium sulfate (Fortran P3): βact = vi * osm * epsm * mw * rhoa / (map * rhow)
+        expected_beta = 3.0 * 1.0 * 0.9 * 0.018 * 1777.0 / (0.132 * 1000.0)
         @test mode.solute_activity ≈ expected_beta rtol=1e-10
         @test mode.number_mixing_ratio == 300e6
         @test mode.mean_radius == 0.05e-6
