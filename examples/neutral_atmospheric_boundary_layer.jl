@@ -66,7 +66,11 @@ zᵢ₂ = zᵢ₁ + 6Δz  # m
 θᵣ(z) = z < zᵢ₁ ? θ₀ :
         z < zᵢ₂ ? θ₀ + Δθi * (z - zᵢ₁) :
         θ₀ + Δθi * (zᵢ₂ - zᵢ₁) + Γᵗᵒᵖ * (z - zᵢ₂)
-
+Γᵢ  = 8 / 6Δz    # K/m
+Γᵗᵒᵖ = 0.003     # K/m
+θᵣ(z) = z < zᵢ₁ ? θ₀ :
+        z < zᵢ₂ ? θ₀ + Γᵢ * (z - zᵢ₁) :
+        θ₀ + Γᵢ * (zᵢ₂ - zᵢ₁) + Γᵗᵒᵖ * (z - zᵢ₂)
 # ## Surface momentum flux (drag)
 #
 # A bulk drag parameterization is applied with friction velocity
