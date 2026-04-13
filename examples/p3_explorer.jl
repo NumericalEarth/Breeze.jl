@@ -9,9 +9,9 @@
 #    with the same thermal perturbation and the same initial moisture. This lets
 #    us compare temperature, vertical velocity, and hydrometeor partition without
 #    changing the launch conditions.
-# 2. **P3 feature exploration**: the same sounding and the same total moisture
-#    are reused, but the parcel is seeded with the same ice population and
-#    different cloud/rain partitions. This isolates the P3 idea that one ice
+# 2. **P3 feature exploration**: the parcel now launches from ~6 km, where the
+#    sounding is already subfreezing, and is seeded with the same ice population
+#    but different cloud/rain partitions. This isolates the P3 idea that one ice
 #    category can move smoothly through a continuum of rime fraction, rime
 #    density, size, and fall speed.
 #
@@ -93,11 +93,14 @@ stop_time = 18minutes
 Δt = 1
 record_interval = 1
 
-seeded_ice_mass = 1e-4
-seeded_ice_number = 5e5
-cloud_partition = 8e-4
-rain_partition = 3e-4
-rain_number_partition = 1e5
+## Section 2 parameters — launch from ~6 km where T ≈ 256 K
+cold_launch_height = 6000
+cold_launch_w = 3
+cold_seeded_ice_mass = 1e-4
+cold_seeded_ice_number = 1e5
+cold_cloud_partition = 2e-3
+cold_rain_partition = 1e-3
+cold_rain_number_partition = 1e4
 
 height_profile = collect(range(0, plot_top, length = 400))
 background_T_profile = [Thermodynamics.temperature_from_potential_temperature(θ_background(z),
@@ -130,7 +133,11 @@ function p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ)
     ρᶠ = rime_state.ρᶠ
     Fˡ = qʷⁱ > 0 ? qʷⁱ / (qⁱ + qʷⁱ) : zero(FT)
 
-    params = PredictedParticleProperties.distribution_parameters(ρ * qⁱ, ρ * nⁱ, Fᶠ, ρᶠ)
+    ## The lambda solver needs a nonzero rime density even when rime fraction is
+    ## zero; use the IceSizeDistributionState default (400 kg/m³) in that case.
+    ρᶠ_for_psd = ρᶠ > 0 ? ρᶠ : FT(400)
+
+    params = PredictedParticleProperties.distribution_parameters(ρ * qⁱ, ρ * nⁱ, Fᶠ, ρᶠ_for_psd)
 
     state = PredictedParticleProperties.IceSizeDistributionState(FT;
         intercept = params.N₀,
@@ -138,7 +145,7 @@ function p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ)
         slope = params.λ,
         rime_fraction = Fᶠ,
         liquid_fraction = Fˡ,
-        rime_density = ρᶠ,
+        rime_density = ρᶠ_for_psd,
         air_density = ρ)
 
     return (; Fᶠ,
@@ -279,11 +286,12 @@ function ascending_branch(values, z)
     return values[ascending_indices], z[ascending_indices]
 end
 
-function run_p3_case(; label, color, qᶜˡ = 0, qʳ = 0, nʳ = 0, qⁱ = 0, nⁱ = 0)
+function run_p3_case(; label, color, qᶜˡ = 0, qʳ = 0, nʳ = 0, qⁱ = 0, nⁱ = 0,
+                       launch_z = launch_height, launch_w = initial_vertical_velocity)
     microphysics = PredictedParticlePropertiesMicrophysics()
     model = supercell_parcel_model(microphysics)
 
-    initialize_supercell_parcel!(model)
+    initialize_supercell_parcel!(model; z = launch_z, w = launch_w)
 
     if qᶜˡ > 0 || qʳ > 0 || nʳ > 0 || qⁱ > 0 || nⁱ > 0
         seed_p3_parcel!(model, microphysics; qᶜˡ, qʳ, nʳ, qⁱ, nⁱ)
@@ -459,35 +467,43 @@ axislegend(ax13; position = :rb, labelsize = 11, nbanks = 2, backgroundcolor = (
 
 fig1
 
-# ## Section 2: the P3 continuum with fixed total water
+# ## Section 2: the P3 ice continuum from a cold launch
 #
-# We now reuse the same sounding and parcel launch, but we keep the parcel
-# temperature and total water fixed while repartitioning that water among vapor,
-# cloud, and rain. All three P3 parcels share the same seeded ice distribution.
-# The only change is the initial cloud/rain partition available for riming.
+# Now the parcel launches from ~6 km where the sounding temperature is already
+# about 256 K — well below freezing. Ice seeded at this altitude persists and
+# grows by vapor deposition, while any supercooled liquid enables riming.
+# All three cases share the same seeded ice population; only the liquid
+# partition differs, pushing the ice along different continuous trajectories
+# in (Fᶠ, ρᶠ) space and (D, V) space.
 
 p3_feature_cases = [
     run_p3_case(;
         label = "Deposition only",
         color = :dodgerblue,
-        qⁱ = seeded_ice_mass,
-        nⁱ = seeded_ice_number),
+        qⁱ = cold_seeded_ice_mass,
+        nⁱ = cold_seeded_ice_number,
+        launch_z = cold_launch_height,
+        launch_w = cold_launch_w),
 
     run_p3_case(;
         label = "Cloud riming",
         color = :lime,
-        qᶜˡ = cloud_partition,
-        qⁱ = seeded_ice_mass,
-        nⁱ = seeded_ice_number),
+        qᶜˡ = cold_cloud_partition,
+        qⁱ = cold_seeded_ice_mass,
+        nⁱ = cold_seeded_ice_number,
+        launch_z = cold_launch_height,
+        launch_w = cold_launch_w),
 
     run_p3_case(;
         label = "Cloud + rain riming",
         color = :orangered,
-        qᶜˡ = cloud_partition,
-        qʳ = rain_partition,
-        nʳ = rain_number_partition,
-        qⁱ = seeded_ice_mass,
-        nⁱ = seeded_ice_number),
+        qᶜˡ = cold_cloud_partition,
+        qʳ = cold_rain_partition,
+        nʳ = cold_rain_number_partition,
+        qⁱ = cold_seeded_ice_mass,
+        nⁱ = cold_seeded_ice_number,
+        launch_z = cold_launch_height,
+        launch_w = cold_launch_w),
 ]
 nothing #hide
 
@@ -496,7 +512,7 @@ fig2 = Figure(size = (1250, 950))
 ax21 = Axis(fig2[1, 1];
     xlabel = "Temperature (K)",
     ylabel = "Height (km)",
-    title = "Same launch temperature, different partitions")
+    title = "Cold launch, different liquid partitions")
 
 ax22 = Axis(fig2[1, 2];
     xlabel = "Vertical velocity (m/s)",
@@ -549,10 +565,10 @@ for case in p3_feature_cases
     lines!(ax26, ascending_branch(case.Fᶠ, case.z ./ 1000)...; color = case.color)
 end
 
-ylims!(ax21, 0, plot_top / 1000)
-ylims!(ax22, 0, plot_top / 1000)
-ylims!(ax23, 0, plot_top / 1000)
-ylims!(ax26, 0, plot_top / 1000)
+ylims!(ax21, cold_launch_height / 1000, plot_top / 1000)
+ylims!(ax22, cold_launch_height / 1000, plot_top / 1000)
+ylims!(ax23, cold_launch_height / 1000, plot_top / 1000)
+ylims!(ax26, cold_launch_height / 1000, plot_top / 1000)
 
 axislegend(ax21; position = :lb, labelsize = 12, backgroundcolor = (:white, 0.8))
 axislegend(ax22; position = :lt, labelsize = 12, backgroundcolor = (:white, 0.8))
@@ -569,10 +585,11 @@ fig2
 # - Kessler can only move water between vapor, cloud, and rain. P3 begins from
 #   the same warm-rain launch, but it can also create and evolve ice once the
 #   parcel enters the mixed-phase part of the sounding.
-# - In the second section, all three P3 parcels share the same temperature
-#   perturbation, the same total water, and the same seeded ice. Changing only
-#   the liquid partition pushes that same ice population along different
-#   continuous trajectories in ``(Fᶠ, ρᶠ)`` and ``(D, V)`` space.
+# - In the second section, all three P3 parcels launch from ~6 km where the
+#   sounding is already subfreezing. They share the same seeded ice but differ
+#   in their initial liquid partition. Changing only the liquid available for
+#   riming pushes the ice along different continuous trajectories in
+#   ``(Fᶠ, ρᶠ)`` and ``(D, V)`` space.
 # - That is the main P3 idea: there is no handoff between cloud ice, snow,
 #   graupel, and hail categories. One prognostic ice species changes its bulk
 #   properties continuously as the parcel experiences deposition, riming, and
