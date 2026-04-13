@@ -1,14 +1,13 @@
 # # Neutral atmospheric boundary layer (ABL)
 #
-# This canonical setup is based on the paper by [Moeng1994](@citet) and is also a demonstration
+# This canonical setup is based on the paper by [Moeng1994](@citet), which was a demonstration
 # case for the NCAR LES subgrid-scale model development [Sullivan1994](@cite).
 # Sometimes, this model configuration is called "conventionally" neutral [Pedersen2014](@cite)
-# or "conditionally" neutral [Berg2020](@cite), which indicate idealized dry
-# shear-driven atmospheric boundary layer, capped by a stable inversion layer, without
-# any surface heating.
-# Forcings come from a specified geostrophic wind (i.e., a specified background
-# pressure gradient) and Coriolis forces; the temperature lapse rate in the free
-# atmosphere is maintained with a sponge layer.
+# or "conditionally" neutral [Berg2020](@cite), which indicate an idealized dry, shear-driven
+# atmospheric boundary layer, capped by a stable inversion layer, without any surface heating.
+# Forcings come from a specified constant geostrophic wind (i.e., a specified background
+# pressure gradient) and Coriolis forces; the temperature lapse rate in the free atmosphere
+# is maintained with a sponge layer.
 #
 # In lieu of more sophisticated surface layer modeling in this example, we
 # impose a fixed friction velocity at the bottom boundary.
@@ -28,13 +27,12 @@ end
 
 # ## Domain and grid
 #
-# For this documentation example, we reduce the numerical precision to Float32.
-# This yields a 10x speed up on an NVidia T4 (which is used to build the docs).
+# For faster time to solution, the numerical precision may be reduced to Float32.
 
 arch = GPU()
-Oceananigans.defaults.FloatType = Float64
+Oceananigans.defaults.FloatType = Float64;
 
-# Simulation "S" (shear-driven ABL) domain setup from [Moeng1994](@citet).
+# Simulation "S" (shear-driven ABL) domain setup from [Moeng1994](@citet):
 
 Nx = Ny = Nz = 96
 x = y = (0, 3000)
@@ -57,7 +55,9 @@ reference_state = ReferenceState(grid, constants,
 
 dynamics = AnelasticDynamics(reference_state)
 
-# Capping inversion for "S" simulation, as in the paper by [Moeng1994](@citet).
+# Capping inversion for "S" simulation, as in the paper by [Moeng1994](@citet):
+# The base of the inversion is at 468 m, has a thickness of 6 grid levels, over which the potential
+# temperature increases by 8 K. Above the cap, the lapse rate is 3 K/km.
 Δz  = first(zspacings(grid))
 zᵢ₁ = 468        # m
 zᵢ₂ = zᵢ₁ + 6Δz  # m
@@ -66,20 +66,22 @@ zᵢ₂ = zᵢ₁ + 6Δz  # m
 θᵣ(z) = z < zᵢ₁ ? θ₀ :
         z < zᵢ₂ ? θ₀ + Γᵢ * (z - zᵢ₁) :
         θ₀ + Γᵢ * (zᵢ₂ - zᵢ₁) + Γᵗᵒᵖ * (z - zᵢ₂)
+nothing #hide
 
 # ## Surface momentum flux (drag)
 #
-# A bulk drag parameterization is applied with friction velocity
-
-q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
-ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
-
 # For testing, we prescribe the surface shear stress. In practice, however,
 # this is not known a priori. A surface layer scheme (i.e., a wall model) will
-# dynamically update ``u_★`` based on environmental conditions, including surface
-# roughness and heat fluxes.
+# dynamically update ``u_★`` based on environmental conditions that include
+# surface roughness and heat fluxes.
 
 u★ = 0.5  # m/s, _result_ from simulation "S" by Moeng and Sullivan (1994)
+q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
+ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
+nothing #hide
+
+# A bulk drag parameterization is applied with friction velocity
+
 @inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
 @inline ρv_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρv / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
 
@@ -90,14 +92,21 @@ u★ = 0.5  # m/s, _result_ from simulation "S" by Moeng and Sullivan (1994)
 
 # ## Sponge layer
 #
-# effective `depth ≈ 500 m` at `|z - zᵗᵒᵖ| = 500`, `exp(-0.5 * (500/sponge_width)^2) = 0.04 ~ 0`
-sponge_rate = 0.01  # 1/s -- ad hoc value, stronger (i.e., shorter damping timescale) makes no difference; weaker may be OK
+# To enforce an upper-air temperature gradient, we introduce a sponge layer with Gaussian weighting
+# that corresponds to an effective depth of approximately 500 m. At `|z - zᵗᵒᵖ| = 500`,
+# `exp(-0.5 * (500/sponge_width)^2) = 0.04 ~ 0`. The sponge rate (inverse timescale) is an ad hoc
+# value; a higher sponge rate (shorter damping time scale) made no difference in this case, and a
+# weaker sponge rate may be used.
 sponge_width = 200  # m
+sponge_rate = 0.01  # 1/s
 sponge_mask = GaussianMask{:z}(center = last(z), width = sponge_width)
+
+# We damp out any vertical motions near the top boundary.
 
 ρw_sponge = Relaxation(rate = sponge_rate, mask = sponge_mask) # relax to 0 by default
 
-# relax to initial temperature profile
+# We relax temperature to the initial profile.
+
 ρᵣ = reference_state.density
 ρθˡⁱᵣ = Field{Nothing, Nothing, Center}(grid)
 set!(ρθˡⁱᵣ, z -> θᵣ(z))
@@ -115,14 +124,12 @@ end
     parameters = (rate = sponge_rate, mask = sponge_mask, target = ρθˡⁱᵣ_data)
 )
 
-# ## Background forcings
+# ## Assembling all the forcings
 
 coriolis = FPlane(f=1e-4)
 
 uᵍ, vᵍ = 15, 0  # m/s, simulation "S" by Moeng and Sullivan (1994)
 geostrophic = geostrophic_forcings(uᵍ, vᵍ)
-
-# ## Assembling all the forcings
 
 ρu_forcing = geostrophic.ρu
 ρv_forcing = geostrophic.ρv
@@ -134,7 +141,7 @@ nothing #hide
 
 # ## Model setup
 
-advection = WENO(order=9)           # WENO(order=5), Centered(order=6) are too dissipative
+advection = WENO(order=9)           # WENO(order=5), Centered(order=6) are dissipative
 
 closure = SmagorinskyLilly(C=0.18)  # Sullivan et al. (1994)
 
@@ -143,7 +150,7 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection, forcing, closure,
 
 # ## Initial conditions
 
-# Add velocity and temperature perturbations
+# We add velocity and temperature perturbations to help initiate turbulence.
 δu = δv = 0.01  # m/s
 δθ = 0.1        # K
 zδ = 400        # m, < zᵢ₁
@@ -188,6 +195,7 @@ end
 add_callback!(simulation, progress, IterationInterval(1000))
 
 # Output averaged products for calculating statistics
+
 avg_outputs_varlist = (;
     θ, νₑ,
     uu = u*u, vv = v*v, ww = w*w,
@@ -205,13 +213,16 @@ simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
                                                   schedule = AveragedTimeInterval(avg_output_interval),
                                                   overwrite_existing = true)
 
-# Output horizontal slices for animation
-# Find the `k`-index closest to z = 100 m
+# ## Output horizontal slices for animation
+
+# Find the `k`-index closest to z = 100 m.
+
 z = znodes(grid, Center())
 k₁₀₀ = searchsortedfirst(z, 100)
 @info "Saving slices at z = $(z[k₁₀₀]) m (k = $k₁₀₀)"
 
 # Find the `j`-index closest to the domain center.
+
 y = ynodes(grid, Center())
 jmid = Ny ÷ 2
 @info "Saving slices at y = $(y[jmid]) m (j = $jmid)"
