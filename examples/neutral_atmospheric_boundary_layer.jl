@@ -57,15 +57,15 @@ reference_state = ReferenceState(grid, constants,
 
 dynamics = AnelasticDynamics(reference_state)
 
-# Capping inversion for "S" simulation, as in the paper by [Moeng1994](citet).
-Δz = first(zspacings(grid))
-zi  = 468       # m
-zi₂ = zi + 6Δz  # m
-Δθi = 8 / 6Δz   # K
-Γᵗᵒᵖ = 0.003    # K/m  == dθ/dz
-θᵣ(z) = z < zi  ? θ₀ :
-        z < zi₂ ? θ₀ + Δθi * (z - zi) :
-        θ₀ + Δθi * (zi₂ - zi) + Γᵗᵒᵖ * (z - zi₂)
+# Capping inversion for "S" simulation, as in the paper by [Moeng1994](@citet).
+Δz  = first(zspacings(grid))
+zᵢ₁ = 468        # m
+zᵢ₂ = zᵢ₁ + 6Δz  # m
+Δθi = 8 / 6Δz    # K
+Γᵗᵒᵖ = 0.003     # K/m, = dθ/dz
+θᵣ(z) = z < zᵢ₁ ? θ₀ :
+        z < zᵢ₂ ? θ₀ + Δθi * (z - zᵢ₁) :
+        θ₀ + Δθi * (zᵢ₂ - zᵢ₁) + Γᵗᵒᵖ * (z - zᵢ₂)
 
 # ## Surface momentum flux (drag)
 #
@@ -78,6 +78,7 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{Float32} |> zero
 # this is not known a priori. A surface layer scheme (i.e., a wall model) will
 # dynamically update ``u_★`` based on environmental conditions, including surface
 # roughness and heat fluxes.
+
 u★ = 0.5  # m/s, _result_ from simulation "S" by Moeng and Sullivan (1994)
 @inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
 @inline ρv_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρv / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
@@ -89,8 +90,7 @@ u★ = 0.5  # m/s, _result_ from simulation "S" by Moeng and Sullivan (1994)
 
 # ## Sponge layer
 #
-# effective depth ≈ 500 m
-# at |z - zᵗᵒᵖ| = 500, exp(-0.5*(500/sponge_width)^2) = 0.04 ~ 0
+# effective `depth ≈ 500 m` at `|z - zᵗᵒᵖ| = 500`, `exp(-0.5 * (500/sponge_width)^2) = 0.04 ~ 0`
 sponge_rate = 0.01  # 1/s -- ad hoc value, stronger (shorter damping timescale) makes no difference; weaker may be OK
 sponge_width = 200  # m
 sponge_mask = GaussianMask{:z}(center = last(z), width = sponge_width)
@@ -119,7 +119,7 @@ end
 
 coriolis = FPlane(f=1e-4)
 
-uᵍ, vᵍ = 15, 0  # m/s, simulation "S" by [Moeng1994](@citet)
+uᵍ, vᵍ = 15, 0  # m/s, simulation "S" by Moeng and Sullivan (1994)
 geostrophic = geostrophic_forcings(uᵍ, vᵍ)
 
 # ## Assembling all the forcings
@@ -137,7 +137,7 @@ nothing #hide
 #advection = WENO(order=5) # too dissipative
 advection = Centered(order=6)
 
-closure = SmagorinskyLilly(C=0.18)  # [Sullivan1994](@citet)
+closure = SmagorinskyLilly(C=0.18)  # Sullivan et al. (1994)
 
 model = AtmosphereModel(grid; dynamics, coriolis, advection, forcing, closure,
                         boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs))
@@ -146,8 +146,8 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection, forcing, closure,
 
 # add velocity and temperature perturbations
 δu = δv = 0.01  # m/s
-δθ = 0.1  # K
-zδ = 400  # m < zi
+δθ = 0.1        # K
+zδ = 400        # m, < zᵢ₁
 
 ϵ() = rand() - 1/2
 uᵢ(x, y, z) =   uᵍ  + δu * ϵ() * (z < zδ)
@@ -203,7 +203,7 @@ simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
 # Output horizontal slices for animation
 # Find the k-index closest to z = 100 m
 z = Oceananigans.Grids.znodes(grid, Center())
-k = searchsortedfirst(z, 100.0)
+k = searchsortedfirst(z, 100)
 @info "Saving slices at z = $(z[k]) m (k = $k)"
 
 # Find the j-index closest to the domain center
@@ -226,6 +226,8 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 schedule = TimeInterval(300seconds),
                                                 overwrite_existing = true)
 
+
+
 @info "Running ABL simulation..."
 run!(simulation)
 
@@ -247,16 +249,16 @@ vwts = FieldTimeSeries(avg_filename, "vw")
 
 times = uts.times
 Nt = length(times)
-zᶜ = znodes(uts)  # cell centers (Nz)
-zⁿ = znodes(uts.grid, Center(), Center(), Face())    # face centers (Nz+1)
+zᶜ = znodes(uts.grid, Center())  # cell centers (Nz)
+zⁿ = znodes(uts.grid, Face())    # face centers (Nz+1)
 
-Nz = length(zᶜ)
-Δz = diff(zᶜ)
+Nz = grid.Nz
+Δz = zspacings(grid, Center())[:]
 
 ## ---- Compute diagnostics at each saved time ----
-WS_mean  = zeros(Nz, Nt)
+WS_mean = zeros(Nz, Nt)
 WD_mean = zeros(Nz, Nt)
-θ_mean   = zeros(Nz, Nt)
+θ_mean  = zeros(Nz, Nt)
 
 uu_var = zeros(Nz, Nt)
 vv_var = zeros(Nz, Nt)
@@ -288,9 +290,9 @@ for n in 1:Nt
     w_n  = @views (w_raw[1:end-1] .+ w_raw[2:end]) ./ 2
 
     ## Fig 1: Mean profiles
-    WS_mean[:, n]  .= sqrt.(u_n.^2 .+ v_n.^2)
+    WS_mean[:, n] .= @. sqrt(u_n^2 + v_n^2)
     WD_mean[:, n] .= mod.(270 .- atand.(v_n, u_n), 360)
-    θ_mean[:, n]   .= θ_n
+    θ_mean[:, n]  .= θ_n
 
     ## Fig 2: Velocity variances normalized by u★²
     uu_var[:, n] .= (uu_n .- u_n.^2) ./ u★^2
