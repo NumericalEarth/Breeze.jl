@@ -94,15 +94,16 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the reference pressure at height `z` that associated with the reference pressure `p₀` and
-potential temperature `θ₀`. The reference pressure is defined as the pressure of dry air at the
-reference pressure and temperature.
+Compute the reference pressure at height `z` that associated with the reference pressure `p₀`,
+potential temperature `θ₀`, and standard pressure `pˢᵗ`. The reference pressure is defined as
+the pressure of dry air at the reference pressure and temperature.
 """
-@inline function adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+@inline function adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     Rᵈ = dry_air_gas_constant(constants)
     g = constants.gravitational_acceleration
-    return p₀ * (1 - g * z / (cᵖᵈ * θ₀))^(cᵖᵈ / Rᵈ)
+    T₀ = θ₀ * (p₀ / pˢᵗ)^(Rᵈ / cᵖᵈ)
+    return p₀ * (1 - g * z / (cᵖᵈ * T₀))^(cᵖᵈ / Rᵈ)
 end
 
 """
@@ -115,7 +116,7 @@ the density of dry air at the reference pressure and temperature.
 @inline function adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
-    pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+    pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
     ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
     return ρ₀ * (pᵣ / p₀)^(1 - Rᵈ / cᵖᵈ)
 end
@@ -207,10 +208,10 @@ end
 """
     numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants)
 
-Compute the dry hydrostatic pressure at height `z` by numerically integrating
-`dp/dz = -gρ` from `z=0`, where `ρ = p/(Rᵈ T)` and `T = θ(z) (p/pˢᵗ)^κ`.
+Compute the dry hydrostatic pressure at height ``z`` by numerically integrating
+``∂p/∂z = -g ρ`` from ``z=0``, where ``ρ = p/(Rᵈ T)`` and ``T = θ(z) (p/pˢᵗ)^κ``.
 
-This function handles non-uniform potential temperature profiles `θ(z)` for which
+This function handles non-uniform potential temperature profiles ``θ(z)`` for which
 the closed-form adiabatic solution does not apply.
 Uses 1000 midpoint integration steps.
 """
@@ -255,14 +256,14 @@ end
 
 # Closed-form for constant potential temperature
 hydrostatic_pressure(z, p₀, θ₀::Number, pˢᵗ, constants) =
-    adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+    adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
 
 hydrostatic_density(z, p₀, θ₀::Number, pˢᵗ, constants) =
     adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
 
 function hydrostatic_temperature(z, p₀, θ₀::Number, pˢᵗ, constants)
     κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
-    p = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+    p = adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
     return θ₀ * (p / pˢᵗ)^κ
 end
 
@@ -301,7 +302,7 @@ that includes the hydrostatic reference pressure and reference density.
 The reference state is initialized with a dry adiabatic temperature profile
 and the given moisture profiles (zero by default). The pressure and density
 are then computed by hydrostatic integration using the mixture gas constant
-`Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ` and the ideal gas law `ρ = p / (Rᵐ T)`.
+``Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ`` and the ideal gas law ``ρ = p / (Rᵐ T)``.
 
 Arguments
 =========
@@ -311,11 +312,11 @@ Arguments
 Keyword arguments
 =================
 - `surface_pressure`: By default, 101325.
-- `potential_temperature`: A constant value (default 288) or a function `θ(z)` giving
+- `potential_temperature`: A constant value (default 288) or a function ``θ(z)`` giving
   the potential temperature profile. When a constant is provided, closed-form adiabatic
   hydrostatic profiles are used. When a function is provided, the hydrostatic profiles
-  are computed by numerical integration of `dp/dz = -gρ`.
-- `standard_pressure`: Reference pressure for potential temperature (pˢᵗ). By default, 1e5.
+  are computed by numerical integration of ``∂p/∂z = -g ρ``.
+- `standard_pressure`: Reference pressure for potential temperature (``pˢᵗ``). By default, 1e5.
 - `discrete_hydrostatic_balance`: If `true`, recompute the reference pressure from the
   reference density using discrete integration, so that `∂z(p_ref) + g * ℑz(ρ_ref) = 0`
   exactly at the discrete level. By default, `false`.
@@ -392,7 +393,7 @@ hydrostatic balance
 cᵖᵈ θᵣ^{face} \\frac{π₀[k] - π₀[k-1]}{Δz} = -g
 ```
 
-holds EXACTLY at every interior z-face. This is essential for the Exner pressure
+holds _exactly_ at every interior z-face. This is essential for the Exner pressure
 acoustic substepping formulation, where the vertical pressure gradient is computed
 as ``cᵖᵈ θᵥ ∂π'/∂z`` and the hydrostatic part must cancel to machine precision.
 

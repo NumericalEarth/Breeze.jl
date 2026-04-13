@@ -98,7 +98,7 @@ As with other diagnostics, `RelativeHumidity` may be wrapped in `Field` to store
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
-    └── max=0.214947, min=0.136946, mean=0.172492
+    └── max=0.214949, min=0.137169, mean=0.172626
 ```
 
 We also provide a convenience constructor for the Field:
@@ -114,7 +114,7 @@ We also provide a convenience constructor for the Field:
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
-    └── max=0.214947, min=0.136946, mean=0.172492
+    └── max=0.214949, min=0.137169, mean=0.172626
 ```
 """
 function RelativeHumidity(model)
