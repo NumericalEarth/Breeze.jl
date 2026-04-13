@@ -44,8 +44,8 @@ grid = RectilinearGrid(arch; x, y, z,
 
 # ## Reference state and formulation
 
-p₀ = 1e5
-θ₀ = 300
+p₀ = 1e5   # Pa
+θ₀ = 300   # K
 
 constants = ThermodynamicConstants()
 
