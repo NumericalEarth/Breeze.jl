@@ -229,9 +229,9 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
 @info "Running ABL simulation..."
 run!(simulation)
 
-## ============================================================================
-## ============================================================================
-## ============================================================================
+# ## Load output and visualize
+
+# Let's load the saved output.
 
 uts  = FieldTimeSeries(avg_filename, "u")
 vts  = FieldTimeSeries(avg_filename, "v")
@@ -253,7 +253,7 @@ zⁿ = znodes(uts.grid, Face())    # face centers (Nz+1)
 Nz = grid.Nz
 Δz = zspacings(grid, Center())[:]
 
-## ---- Compute diagnostics at each saved time ----
+# Compute diagnostics at each saved time
 WS_mean = zeros(Nz, Nt)
 WD_mean = zeros(Nz, Nt)
 θ_mean  = zeros(Nz, Nt)
@@ -324,16 +324,16 @@ for n in 1:Nt
     θw_sgs[:, n] .= -νₑ_n ./ closure.Pr .* ∂z_θ
 end
 
-## ---- Color map for time ----
+# Define a colormap for each time.
+
 cmap = cgrad(:viridis)
 colors = [cmap[(n-1)/max(Nt-1, 1)] for n in 1:Nt]
 labels = [n == 1 ? "0–1 hr" : "$(n-1)–$n hr" for n in 1:Nt]
 
-# FINALLY...
+# Finally, we are ready to plot.
 
-## ============================================================
-## Figure 1: Mean profiles (wind speed, wind direction, θ)
-## ============================================================
+# First we plot the mean profiles (wind speed, wind direction, potential temperature).
+
 fig1 = Figure(size=(800, 400), fontsize=14)
 
 ax1a = Axis(fig1[1, 1], xlabel="√(U² + V²) (m/s)", ylabel="z (m)",
@@ -364,9 +364,8 @@ fig1
 
 # ![](nabl_mean_profiles.png)
 
-## ============================================================
-## Figure 2: Velocity variances normalized by u★²
-## ============================================================
+# Next, we plot the velocity variances normalized by ``u_★^2``
+
 fig2 = Figure(size=(800, 400), fontsize=14)
 
 ax2a = Axis(fig2[1, 1], xlabel="⟨u′u′⟩ / u★²", ylabel="z (m)",
@@ -393,9 +392,8 @@ fig2
 
 # ![](nabl_velocity_variances.png)
 
-## ============================================================
-## Figure 3: Resolved and SGS fluxes
-## ============================================================
+# Last, we plot the resolved and the SGS fluxes.
+
 fig3 = Figure(size=(1200, 450), fontsize=14)
 
 ax3a = Axis(fig3[1, 1], xlabel="τˣ / ρ₀u★²", ylabel="z (m)",
