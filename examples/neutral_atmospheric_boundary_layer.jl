@@ -173,11 +173,11 @@ u, v, w = model.velocities
 νₑ = model.closure_fields.νₑ
 
 ## For keeping track of the computational expense
-wall_clock = Ref(time_ns())
+wall_clock = time_ns()
 
 function progress(sim)
     wmax = maximum(abs, sim.model.velocities.w)
-    elapsed = 1e-9 * (time_ns() - wall_clock[])
+    elapsed = 1e-9 * (time_ns() - wall_clock)
     msg = @sprintf("Iter: %d, t: % 12s, Δt: %s, elapsed: %s; max|w|: %.2e m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt), prettytime(elapsed), wmax)
     @info msg
