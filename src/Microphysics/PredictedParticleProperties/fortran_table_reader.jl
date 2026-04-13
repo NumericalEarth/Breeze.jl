@@ -7,6 +7,9 @@
 
 export read_fortran_lookup_tables, download_p3_lookup_tables
 
+using Downloads: Downloads
+using p7zip_jll: p7zip_jll
+
 using Oceananigans.Architectures: CPU, on_architecture
 using Oceananigans.Utils: TabulatedFunction
 
@@ -61,7 +64,7 @@ $(TYPEDSIGNATURES)
 
 Download P3 lookup tables from the official P3-microphysics GitHub repository.
 
-Downloads compressed `.gz` files and decompresses them with system `gzip`.
+Downloads compressed `.gz` files and decompresses them with `p7zip_jll`.
 Skips files that already exist. Total download size is approximately 28 MB
 (compressed); decompressed tables are approximately 140 MB.
 
@@ -71,41 +74,31 @@ Skips files that already exist. Total download size is approximately 28 MB
 """
 function download_p3_lookup_tables(destination::AbstractString)
     mkpath(destination)
-
-    # Downloads is a stdlib; load it lazily to avoid adding it as a declared dependency.
-    Downloads = Base.require(Base.PkgId(Base.UUID("f43a241f-c20a-4ad4-852c-f6b1247861c6"), "Downloads"))
-
     for filename in P3_TABLE_FILES
         outpath = joinpath(destination, filename)
         isfile(outpath) && continue
 
         url = "$P3_TABLE_BASE_URL/$filename.gz"
-        # Use PID-unique temp paths to avoid races between parallel test workers
-        tmpgz  = outpath * ".download.$(getpid()).gz"
-        tmpout = outpath * ".download.$(getpid())"
-
         @info "Downloading P3 lookup table $filename.gz (this only happens once)..."
-        Downloads.download(url, tmpgz)
 
-        # Check gzip magic bytes (0x1f 0x8b) to decide whether decompression is needed.
-        # Some HTTP clients transparently decompress, leaving already-decoded ASCII.
-        magic = open(io -> read(io, 2), tmpgz)
-        if magic == UInt8[0x1f, 0x8b]
-            open(tmpout, "w") do io
-                run(pipeline(`gzip -d -c $tmpgz`; stdout=io))
+        mktempdir() do tmpdir
+            tmpgz  = joinpath(tmpdir, "$filename.gz")
+            tmpout = joinpath(tmpdir, filename)
+
+            Downloads.download(url, tmpgz)
+
+            p7zip_jll.p7zip() do exe
+                open(tmpout, "w") do io
+                    run(pipeline(`$exe e -so $tmpgz`; stdout=io))
+                end
             end
-            rm(tmpgz; force=true)
-        else
-            mv(tmpgz, tmpout; force=true)
-        end
 
-        # Atomic rename to final path; another worker may have finished first
-        mv(tmpout, outpath; force=true)
+            mv(tmpout, outpath; force=true)
+        end
 
         mb = round(filesize(outpath) / 1e6; digits=1)
         @info "  Decompressed $filename ($mb MB)"
     end
-
     return destination
 end
 
