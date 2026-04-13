@@ -28,7 +28,7 @@ struct Example
 end
 
 examples = [
-    Example("Stratified dry thermal bubble", "dry_thermal_bubble", false),
+    Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
     Example("Cloudy thermal bubble", "cloudy_thermal_bubble", false),
     Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", false),
     Example("Shallow cumulus convection (BOMEX)", "bomex", false),
