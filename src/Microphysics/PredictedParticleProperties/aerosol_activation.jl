@@ -148,3 +148,110 @@ function Base.show(io::IO, a::AerosolActivation)
         print(io, prefix, "mode $i: ", mode)
     end
 end
+
+#####
+##### Activation physics (Morrison & Grabowski 2007)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the activated number [kg⁻¹] from a single lognormal aerosol mode
+at temperature `T` [K] and environmental supersaturation `S` [-].
+
+Following [Morrison and Grabowski (2007)](@cite MorrisonGrabowski2007),
+the critical supersaturation for mode activation is
+
+```math
+s_m = 2 \\left(\\frac{1}{\\beta_{\\text{act}}}\\right)^{1/2}
+      \\left(\\frac{A_{\\text{act}}}{3 \\, r_m}\\right)^{3/2}
+```
+
+and the activated fraction is ``N_a / 2 \\, [1 - \\text{erf}(u)]`` where
+``u = 2 \\ln(s_m / S) / (4.242 \\ln \\sigma_g)``.
+"""
+@inline function activated_number(mode::AerosolMode, aerosol::AerosolActivation, T, S)
+    FT = typeof(T)
+
+    # Surface tension of water [N/m] (Fortran: sigvl)
+    σ_v = FT(0.0761) - FT(1.55e-4) * (T - FT(273.15))
+
+    # Kelvin parameter: Aact = 2 Mw σv / (ρw R T)
+    A_act = 2 * aerosol.molecular_weight_water * σ_v /
+            (FT(1000) * aerosol.universal_gas_constant * T)
+
+    # Critical supersaturation: sm = 2 (1/βact)^{1/2} (Aact / (3 rm))^{3/2}
+    s_m = 2 / sqrt(mode.solute_activity) * (A_act / (3 * mode.mean_radius))^FT(1.5)
+
+    # Activated fraction via error function
+    # Guard against S ≤ 0: set uu to large positive value → erf(uu) → 1 → N_act → 0
+    S_safe = max(S, FT(1e-20))
+    uu = 2 * log(s_m / S_safe) / (FT(4.242) * log(mode.geometric_std))
+
+    return mode.number_mixing_ratio * FT(0.5) * (1 - erf(uu))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Total aerosol number mixing ratio [kg⁻¹] across all modes.
+"""
+@inline function sum_aerosol_number(aerosol::AerosolActivation)
+    N_total = zero(aerosol.activation_timescale)
+    for mode in aerosol.modes
+        N_total += mode.number_mixing_ratio
+    end
+    return N_total
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Total activated number [kg⁻¹] summed across all aerosol modes,
+capped at the total aerosol number.
+"""
+@inline function total_activated_number(aerosol::AerosolActivation, T, S)
+    N_act = zero(T)
+    for mode in aerosol.modes
+        N_act += activated_number(mode, aerosol, T, S)
+    end
+    return min(N_act, sum_aerosol_number(aerosol))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute prognostic CCN activation rates from aerosol activation physics.
+
+Returns a named tuple `(; ncnuc, qcnuc)`:
+- `ncnuc`: Cloud number activation rate [kg⁻¹ s⁻¹]
+- `qcnuc`: Cloud mass activation rate [kg/kg/s]
+
+The number rate is a relaxation toward the activated equilibrium:
+``n_{\\text{nuc}} = \\max(0, N_{\\text{act}} - n^{cl}) / \\tau_{\\text{act}}``.
+Mass follows as ``q_{\\text{nuc}} = n_{\\text{nuc}} \\times m_{\\text{seed}}``
+where ``m_{\\text{seed}} = (4\\pi/3) \\rho_w (10^{-6})^3`` is a 1 μm radius droplet.
+"""
+@inline function prognostic_ccn_activation_rate(aerosol::AerosolActivation, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
+    FT = typeof(T)
+
+    # Environmental supersaturation
+    S = (qᵛ - qᵛ⁺ˡ) / max(qᵛ⁺ˡ, FT(1e-20))
+
+    # Total activated number across all modes
+    N_activated = total_activated_number(aerosol, T, S)
+
+    # Relaxation toward equilibrium
+    ncnuc = max(0, N_activated - nᶜˡ) / aerosol.activation_timescale
+
+    # Seed droplet mass (1 μm radius)
+    seed_mass = FT(4π / 3) * FT(1000) * FT(1e-18)
+    qcnuc = ncnuc * seed_mass
+
+    # Only activate when supersaturated (Fortran threshold: sup_cld > 1e-6)
+    is_supersaturated = S > FT(1e-6)
+    ncnuc = ifelse(is_supersaturated, ncnuc, zero(FT))
+    qcnuc = ifelse(is_supersaturated, qcnuc, zero(FT))
+
+    return (; ncnuc, qcnuc)
+end

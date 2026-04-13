@@ -188,6 +188,10 @@ export
     # Aerosol activation (prognostic CCN)
     AerosolMode,
     AerosolActivation,
+    activated_number,
+    total_activated_number,
+    sum_aerosol_number,
+    prognostic_ccn_activation_rate,
 
     # Lambda solver
     IceMassPowerLaw,
