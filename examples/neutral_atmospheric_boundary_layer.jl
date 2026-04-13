@@ -186,16 +186,22 @@ end
 
 add_callback!(simulation, progress, IterationInterval(1000))
 
-# Output averaged products for calculating variances
-outputs = merge(model.velocities, model.tracers, (; θ, νₑ,
-                                                    uu = u*u, vv = v*v, ww = w*w,
-                                                    uw = u*w, vw = v*w, θw = θ*w))
+# Output averaged products for calculating statistics
+avg_outputs_varlist = (;
+    θ, νₑ,
+    uu = u*u, vv = v*v, ww = w*w,
+    uw = u*w, vw = v*w, θw = θ*w,       # second-order moments for fluxes
+    uuw = u*u*w, vvw=v*v*w, www=w*w*w,  # third-order moments for turbulent transport term
+    νₑ³ = νₑ^3,                         # SGS dissipation -- note: |S̄|² = νₑ² / (Cₛ Δ)⁴) with Smagorinsky model
+)
+outputs = merge(model.velocities, model.tracers, avg_outputs_varlist)
 avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 avg_filename = "abl_averages.jld2"
+avg_output_interval = 10minutes
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
                                                   filename = avg_filename,
-                                                  schedule = AveragedTimeInterval(1hour),
+                                                  schedule = AveragedTimeInterval(avg_output_interval),
                                                   overwrite_existing = true)
 
 # Output horizontal slices for animation
@@ -214,8 +220,8 @@ slice_outputs = (
     u_xy = view(u, :, :, k₁₀₀),
     v_xy = view(v, :, :, k₁₀₀),
     w_xy = view(w, :, :, k₁₀₀),
-    θ_xy = view(θ, :, :, k₁₀₀),
     u_xz = view(u, :, jmid, :),
+    w_xz = view(w, :, jmid, :),
     θ_xz = view(θ, :, jmid, :),
 )
 
@@ -332,6 +338,8 @@ labels = [n == 1 ? "0–1 hr" : "$(n-1)–$n hr" for n in 1:Nt]
 
 # Finally, we are ready to plot.
 
+plot_interval = Int(1hour / avg_output_interval)
+
 # First we plot the mean profiles (wind speed, wind direction, potential temperature).
 
 fig1 = Figure(size=(800, 400), fontsize=14)
@@ -340,10 +348,10 @@ ax1a = Axis(fig1[1, 1], xlabel="√(U² + V²) (m/s)", ylabel="z (m)",title="Hor
 ax1b = Axis(fig1[1, 2], xlabel="WD (° from N)", ylabel="z (m)",title="Wind direction")
 ax1c = Axis(fig1[1, 3], xlabel="θ (K)", ylabel="z (m)",title="Potential temperature")
 
-for n in 1:Nt
+for n in 1:plot_interval:Nt
     lines!(ax1a, WS_mean[:, n], zᶜ, color=colors[n], label=labels[n])
     lines!(ax1b, WD_mean[:, n], zᶜ, color=colors[n])
-    lines!(ax1c, θ_mean[:, n], zᶜ, color=colors[n])
+    lines!(ax1c,  θ_mean[:, n], zᶜ, color=colors[n])
 end
 
 linkyaxes!(ax1a, ax1b, ax1c)
@@ -361,7 +369,7 @@ ax2a = Axis(fig2[1, 1], xlabel="⟨u′u′⟩ / u_★²", ylabel="z (m)", title
 ax2b = Axis(fig2[1, 2], xlabel="⟨v′v′⟩ / u_★²", ylabel="z (m)", title="v variance")
 ax2c = Axis(fig2[1, 3], xlabel="⟨w′w′⟩ / u_★²", ylabel="z (m)", title="w variance")
 
-for n in 1:Nt
+for n in 1:plot_interval:Nt
     lines!(ax2a, uu_var[:, n], zᶜ, color=colors[n], label=labels[n])
     lines!(ax2b, vv_var[:, n], zᶜ, color=colors[n])
     lines!(ax2c, ww_var[:, n], zᶠ, color=colors[n])
@@ -382,7 +390,7 @@ ax3a = Axis(fig3[1, 1], xlabel="τˣ / ρ₀u_★²", ylabel="z (m)", title="x-m
 ax3b = Axis(fig3[1, 2], xlabel="τʸ / ρ₀u_★²", ylabel="z (m)", title="y-momentum flux")
 ax3c = Axis(fig3[1, 3], xlabel="Jᶿ (K m/s)", ylabel="z (m)", title="Potential temperature flux")
 
-for n in 1:Nt
+for n in 1:plot_interval:Nt
     lines!(ax3a, uw_res[:, n] .+ uw_sgs[:, n], zᶜ, color=colors[n], label=labels[n])
     lines!(ax3a, uw_res[:, n], zᶜ, color=colors[n], linestyle=:dash)
     lines!(ax3a, uw_sgs[:, n], zᶜ, color=colors[n], linestyle=:dot)
