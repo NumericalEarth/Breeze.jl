@@ -247,7 +247,7 @@ vwts = FieldTimeSeries(avg_filename, "vw")
 times = uts.times
 Nt = length(times)
 zᶜ = znodes(uts.grid, Center())  # cell centers (Nz)
-zⁿ = znodes(uts.grid, Face())    # face centers (Nz+1)
+zᶠ = znodes(uts.grid, Face())    # face centers (Nz+1)
 
 Nz = uts.grid.Nz
 Δz = zspacings(uts.grid, Center())[:]
@@ -336,21 +336,13 @@ labels = [n == 1 ? "0–1 hr" : "$(n-1)–$n hr" for n in 1:Nt]
 
 fig1 = Figure(size=(800, 400), fontsize=14)
 
-ax1a = Axis(fig1[1, 1], xlabel="√(U² + V²) (m/s)", ylabel="z (m)",
-            title="Horizontal wind speed")
+ax1a = Axis(fig1[1, 1], xlabel="√(U² + V²) (m/s)", ylabel="z (m)",title="Horizontal wind speed")
+ax1b = Axis(fig1[1, 2], xlabel="WD (° from N)", ylabel="z (m)",title="Wind direction")
+ax1c = Axis(fig1[1, 3], xlabel="θ (K)", ylabel="z (m)",title="Potential temperature")
+
 for n in 1:Nt
     lines!(ax1a, WS_mean[:, n], zᶜ, color=colors[n], label=labels[n])
-end
-
-ax1b = Axis(fig1[1, 2], xlabel="WD (° from N)", ylabel="z (m)",
-            title="Wind direction")
-for n in 1:Nt
     lines!(ax1b, WD_mean[:, n], zᶜ, color=colors[n])
-end
-
-ax1c = Axis(fig1[1, 3], xlabel="θ (K)", ylabel="z (m)",
-            title="Potential temperature")
-for n in 1:Nt
     lines!(ax1c, θ_mean[:, n], zᶜ, color=colors[n])
 end
 
@@ -365,23 +357,19 @@ fig1
 
 fig2 = Figure(size=(800, 400), fontsize=14)
 
-ax2a = Axis(fig2[1, 1], xlabel="⟨u′u′⟩ / u_★²", ylabel="z (m)",
-            title="u variance")
+ax2a = Axis(fig2[1, 1], xlabel="⟨u′u′⟩ / u_★²", ylabel="z (m)", title="u variance")
+ax2b = Axis(fig2[1, 2], xlabel="⟨v′v′⟩ / u_★²", ylabel="z (m)", title="v variance")
+ax2c = Axis(fig2[1, 3], xlabel="⟨w′w′⟩ / u_★²", ylabel="z (m)", title="w variance")
+
 for n in 1:Nt
     lines!(ax2a, uu_var[:, n], zᶜ, color=colors[n], label=labels[n])
-end
-
-ax2b = Axis(fig2[1, 2], xlabel="⟨v′v′⟩ / u_★²", ylabel="z (m)",
-            title="v variance")
-for n in 1:Nt
     lines!(ax2b, vv_var[:, n], zᶜ, color=colors[n])
+    lines!(ax2c, ww_var[:, n], zᶠ, color=colors[n])
 end
 
-ax2c = Axis(fig2[1, 3], xlabel="⟨w′w′⟩ / u_★²", ylabel="z (m)",
-            title="w variance")
-for n in 1:Nt
-    lines!(ax2c, ww_var[:, n], zⁿ, color=colors[n])
-end
+linkyaxes!(ax2a, ax2b, ax2c)
+hideydecorations!(ax2b, grid=false)
+hideydecorations!(ax2c, grid=false)
 
 Legend(fig2[1, 4], ax2a, "Time", framevisible=false)
 fig2
@@ -390,32 +378,27 @@ fig2
 
 fig3 = Figure(size=(1200, 450), fontsize=14)
 
-ax3a = Axis(fig3[1, 1], xlabel="τˣ / ρ₀u_★²", ylabel="z (m)",
-            title="x-momentum flux")
+ax3a = Axis(fig3[1, 1], xlabel="τˣ / ρ₀u_★²", ylabel="z (m)", title="x-momentum flux")
+ax3b = Axis(fig3[1, 2], xlabel="τʸ / ρ₀u_★²", ylabel="z (m)", title="y-momentum flux")
+ax3c = Axis(fig3[1, 3], xlabel="Jᶿ (K m/s)", ylabel="z (m)", title="Potential temperature flux")
+
 for n in 1:Nt
     lines!(ax3a, uw_res[:, n] .+ uw_sgs[:, n], zᶜ, color=colors[n], label=labels[n])
     lines!(ax3a, uw_res[:, n], zᶜ, color=colors[n], linestyle=:dash)
     lines!(ax3a, uw_sgs[:, n], zᶜ, color=colors[n], linestyle=:dot)
-end
-vlines!(ax3a, 0, color=:grey, linewidth=0.5)
 
-ax3b = Axis(fig3[1, 2], xlabel="τʸ / ρ₀u_★²", ylabel="z (m)",
-            title="y-momentum flux")
-for n in 1:Nt
     lines!(ax3b, vw_res[:, n] .+ vw_sgs[:, n], zᶜ, color=colors[n])
     lines!(ax3b, vw_res[:, n], zᶜ, color=colors[n], linestyle=:dash)
     lines!(ax3b, vw_sgs[:, n], zᶜ, color=colors[n], linestyle=:dot)
-end
-vlines!(ax3b, 0, color=:grey, linewidth=0.5)
 
-ax3c = Axis(fig3[1, 3], xlabel="Jᶿ (K m/s)", ylabel="z (m)",
-            title="Potential temperature flux")
-for n in 1:Nt
     lines!(ax3c, θw_res[:, n] .+ θw_sgs[:, n], zᶜ, color=colors[n])
     lines!(ax3c, θw_res[:, n], zᶜ, color=colors[n], linestyle=:dash)
     lines!(ax3c, θw_sgs[:, n], zᶜ, color=colors[n], linestyle=:dot)
 end
-vlines!(ax3c, 0, color=:grey, linewidth=0.5)
+
+for ax in (ax3a, ax3b, ax3c)
+    vlines!(ax, 0, color=:grey, linewidth=0.5)
+end
 
 ## Legends: line style (inside panel a) and time (right)
 style_entries = [LineElement(color=:black, linestyle=:solid),
@@ -423,5 +406,10 @@ style_entries = [LineElement(color=:black, linestyle=:solid),
                  LineElement(color=:black, linestyle=:dot)]
 axislegend(ax3a, style_entries, ["total", "resolved", "SGS"],
            position=:lt, framevisible=false)
+
+linkyaxes!(ax3a, ax3b, ax3c)
+hideydecorations!(ax3b, grid=false)
+hideydecorations!(ax3c, grid=false)
+
 Legend(fig3[1, 4], ax3a, "Time", framevisible=false)
 fig3
