@@ -144,7 +144,7 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection, forcing, closure,
 
 # ## Initial conditions
 
-# add velocity and temperature perturbations
+# Add velocity and temperature perturbations
 δu = δv = 0.01  # m/s
 δθ = 0.1        # K
 zδ = 400        # m, < zᵢ₁
@@ -202,7 +202,7 @@ simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
 
 # Output horizontal slices for animation
 # Find the k-index closest to z = 100 m
-z = Oceananigans.Grids.znodes(grid, Center())
+z = znodes(grid, Center())
 k = searchsortedfirst(z, 100)
 @info "Saving slices at z = $(z[k]) m (k = $k)"
 
