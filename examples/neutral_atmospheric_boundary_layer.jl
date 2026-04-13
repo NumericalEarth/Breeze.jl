@@ -27,10 +27,9 @@ end
 
 # ## Domain and grid
 #
-# For faster time to solution, the numerical precision may be reduced to Float32.
+# For faster time to solution, the numerical precision may be reduced to Float32; we can change the default float type by redefining `Oceananigans.defaults.FloatType`.
 
 arch = GPU()
-Oceananigans.defaults.FloatType = Float64;
 
 # Simulation "S" (shear-driven ABL) domain setup from [Moeng1994](@citet):
 
