@@ -278,27 +278,28 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 end
 
 """
-    cloud_riming_number_rate(qᶜˡ, Nᶜ, riming_rate)
+    cloud_riming_number_rate(qᶜˡ, Nᶜ, ρ, riming_rate)
 
 Compute cloud droplet number sink from riming.
 
-Returns `(Nᶜ / qᶜˡ) * riming_rate`, which has units [1/m³/s] because Nᶜ
-is in [1/m³] while qᶜˡ and riming_rate are in [kg/kg] and [kg/kg/s].
-Note: this rate is currently computed but unused by the tendency kernel
-(cloud droplet number is prescribed, not predicted, in the P3 scheme).
+Returns `(Nᶜ / (ρ * qᶜˡ)) * riming_rate` [1/kg/s]: the per-mass cloud
+number removal proportional to the rimed cloud mass fraction.
 
 # Arguments
 - `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
 - `Nᶜ`: Cloud droplet number concentration [1/m³]
+- `ρ`: Air density [kg/m³]
 - `riming_rate`: Cloud riming mass rate [kg/kg/s]
 
 # Returns
-- Rate of cloud number loss [1/m³/s] (positive magnitude; sign applied in tendency assembly)
+- Rate of cloud number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-@inline function cloud_riming_number_rate(qᶜˡ, Nᶜ, riming_rate)
+@inline function cloud_riming_number_rate(qᶜˡ, Nᶜ, ρ, riming_rate)
     FT = typeof(qᶜˡ)
 
-    ratio = safe_divide(Nᶜ, qᶜˡ, zero(FT))
+    # Nᶜ [#/m³] / (ρ [kg/m³] × qᶜˡ [kg/kg]) = nᶜˡ/qᶜˡ [#/kg],
+    # matching Fortran nc/qc.
+    ratio = safe_divide(Nᶜ, ρ * qᶜˡ, zero(FT))
 
     return ratio * riming_rate
 end

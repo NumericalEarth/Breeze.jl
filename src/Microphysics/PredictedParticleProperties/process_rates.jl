@@ -871,7 +871,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Phase 2: Riming
     # =========================================================================
     cloud_rim = cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
-    cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜ, cloud_rim)
+    cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜ, ρ, cloud_rim)
 
     # C5: Pass nʳ so rain_riming_rate can apply the rain-DSD cross-section correction.
     rain_rim = rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
@@ -994,10 +994,10 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Above-freezing collection (Milbrandt et al. 2025: qccoll/qrcoll → qʷⁱ)
     # =========================================================================
     cloud_warm_q, cloud_warm_n_raw = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
-    # D19: In the liquid-fraction path, above-freezing cloud collection sends mass
-    # to qʷⁱ (not rain), so no rain number should be created. The ncshdc formula
-    # only exists in Fortran's non-liquid-fraction path.
-    cloud_warm_n = ifelse(prp.liquid_fraction_active, zero(FT), cloud_warm_n_raw)
+    # Cloud number loss always applies (Fortran nccoll is always subtracted
+    # from nc). Rain number creation is suppressed in tendency_ρnʳ when
+    # liquid_fraction_active (collected mass goes to qʷⁱ, not rain).
+    cloud_warm_n = cloud_warm_n_raw
     rain_warm_q = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
     # M9: Rain number loss from above-freezing collection (Fortran nrcoll).
     # Proportional to mass collected: Δnʳ/nʳ = Δqʳ/qʳ
@@ -1331,12 +1331,15 @@ Rain number loses from:
 
     # Gains: shedding produces rain drops
     # M9: cloud_warm_collection_number → new rain drops from above-freezing cloud
-    #      collection (Fortran ncshdc)
+    #      collection (Fortran ncshdc). Only in non-liquid-fraction path;
+    #      when liquid fraction is active, collected mass goes to qʷⁱ, not rain.
     # D8: wet_growth_shedding_number → rain drops from excess wet growth (Fortran nrshdr)
+    cloud_warm_rain_n = ifelse(prp.liquid_fraction_active, zero(FT),
+                               rates.cloud_warm_collection_number)
     n_gain = n_from_autoconv + n_from_melt +
              rates.rain_breakup +
              rates.shedding_number +
-             rates.cloud_warm_collection_number +
+             cloud_warm_rain_n +
              rates.wet_growth_shedding_number
     # Losses (all positive magnitudes, M7)
     # M9: rain_warm_collection_number → rain number sink from above-freezing rain
@@ -1788,7 +1791,9 @@ to the cloud mass they consume, following the Fortran `nc` budget structure.
 """
 @inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜ, qᶜˡ, prp::ProcessRateParameters)
     FT = typeof(ρ)
-    number_per_mass = safe_divide(Nᶜ, qᶜˡ, zero(FT))
+    # Nᶜ is per-volume [#/m³]; dividing by ρ gives per-mass nᶜˡ [#/kg],
+    # matching Fortran's nc/qc → [#/kg/s] when multiplied by mass rates.
+    number_per_mass = safe_divide(Nᶜ, ρ * qᶜˡ, zero(FT))
     seed_drop_mass = FT(4π / 3) * prp.liquid_water_density * FT(1e-18)
     activation_number = rates.ccn_activation / seed_drop_mass
 
