@@ -250,6 +250,7 @@ zⁿ = znodes(uts.grid, Face())    # face centers (Nz+1)
 
 Nz = uts.grid.Nz
 Δz = zspacings(uts.grid, Center())[:]
+nothing #hide
 
 # Compute diagnostics at each saved time
 WS_mean = zeros(Nz, Nt)
