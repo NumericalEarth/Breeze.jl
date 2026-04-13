@@ -131,10 +131,11 @@ length(aerosol.modes)
 2
 ```
 """
-function AerosolActivation(modes::AerosolMode{FT}...;
+function AerosolActivation(mode1::AerosolMode{FT}, rest::AerosolMode{FT}...;
                            molecular_weight_water = 0.018016,
                            universal_gas_constant = 8.3145,
                            activation_timescale = 1.0) where FT
+    modes = (mode1, rest...)
     return AerosolActivation(modes, FT(molecular_weight_water),
                              FT(universal_gas_constant), FT(activation_timescale))
 end
