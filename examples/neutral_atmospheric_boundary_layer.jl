@@ -158,7 +158,7 @@ set!(model, θ=θᵢ, u=uᵢ, v=vᵢ)
 #
 # We run the simulation for 5 hours with adaptive time-stepping.
 
-simulation = Simulation(model; Δt=0.5, stop_time=5hour)
+simulation = Simulation(model; Δt=0.5, stop_time=5hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
@@ -221,10 +221,11 @@ slice_outputs = (
 
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = "abl_slices.jld2",
-                                                schedule = TimeInterval(300seconds),
+                                                schedule = TimeInterval(5minutes),
                                                 overwrite_existing = true)
 
-@info "Running ABL simulation..."
+# Now we are ready to run the simulation.
+
 run!(simulation)
 
 # ## Load output and visualize
@@ -284,7 +285,7 @@ for n in 1:Nt
     νₑ_n   = Array(interior(νₑts[n], 1, 1, :))
 
     ## Interpolate face fields to cell centers
-    w_n  = @views (w_raw[1:end-1] .+ w_raw[2:end]) ./ 2
+    w_n = @views (w_raw[1:end-1] .+ w_raw[2:end]) ./ 2
 
     ## Fig 1: Mean profiles
     WS_mean[:, n] .= @. sqrt(u_n^2 + v_n^2)
@@ -303,14 +304,14 @@ for n in 1:Nt
     ∂z_u[1] = (u_n[2] - u_n[1]) / Δz[1]
     ∂z_v[1] = (v_n[2] - v_n[1]) / Δz[1]
     ∂z_θ[1] = (θ_n[2] - θ_n[1]) / Δz[1]
-    ∂z_u[end] = (u_n[end] - u_n[end-1]) / Δz[end]
-    ∂z_v[end] = (v_n[end] - v_n[end-1]) / Δz[end]
-    ∂z_θ[end] = (θ_n[end] - θ_n[end-1]) / Δz[end]
     for k in 2:Nz-1
         ∂z_u[k] = (u_n[k+1] - u_n[k-1]) / (Δz[k-1] + Δz[k])
         ∂z_v[k] = (v_n[k+1] - v_n[k-1]) / (Δz[k-1] + Δz[k])
         ∂z_θ[k] = (θ_n[k+1] - θ_n[k-1]) / (Δz[k-1] + Δz[k])
     end
+    ∂z_u[end] = (u_n[end] - u_n[end-1]) / Δz[end]
+    ∂z_v[end] = (v_n[end] - v_n[end-1]) / Δz[end]
+    ∂z_θ[end] = (θ_n[end] - θ_n[end-1]) / Δz[end]
 
     ## Fig 3: Resolved fluxes (momentum normalized by ρ₀u★²)
     uw_res[:, n] .= ρᵣ_vec .* (uw_n .- u_n .* w_n) ./ (ρ₀ * u★^2)
