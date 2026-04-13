@@ -10,7 +10,7 @@
 The Predicted Particle Properties (P3) microphysics scheme. See the constructor
 [`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
-struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC}
+struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, AERO}
     # Shared physical constants
     water_density :: FT
     # Top-level thresholds
@@ -24,6 +24,8 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC}
     process_rates :: PRP
     # Boundary condition
     precipitation_boundary_condition :: BC
+    # Aerosol activation (nothing = prescribed CCN, AerosolActivation = prognostic CCN)
+    aerosol :: AERO
 end
 
 """
@@ -86,12 +88,12 @@ The scheme tracks 11 prognostic densities:
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation
   (default `nothing` = open boundary, precipitation exits domain)
 
-# Known limitations
+# Prognostic CCN Activation
 
-- **Cloud droplet number is prescribed**, not prognostic. The Fortran P3 driver
-  carries and advects `Nᶜ` and passes it into `P3_MAIN`. Breeze uses a fixed
-  `CloudDropletProperties.number_concentration`. Implementing prognostic `Nᶜ`
-  requires aerosol activation physics.
+Pass `aerosol = AerosolActivation(AerosolMode())` to enable prognostic cloud
+droplet number from aerosol activation physics (Morrison & Grabowski 2007).
+When `aerosol = nothing` (default), cloud droplet number uses the prescribed
+`CloudDropletProperties.number_concentration`.
 
 # Example
 
@@ -119,9 +121,10 @@ function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Flo
                                                   lookup_tables = "data/P3_LUT",
                                                   three_moment_ice = nothing,
                                                   water_density = 1000,
-                                                  precipitation_boundary_condition = nothing)
+                                                  precipitation_boundary_condition = nothing,
+                                                  aerosol = nothing)
     return read_fortran_lookup_tables(lookup_tables; FT, three_moment_ice,
-                                     water_density, precipitation_boundary_condition)
+                                     water_density, precipitation_boundary_condition, aerosol)
 end
 
 # Shorthand alias
@@ -136,7 +139,8 @@ function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, "├── ice: ", summary(p3.ice), "\n")
     print(io, "├── rain: ", summary(p3.rain), "\n")
     print(io, "├── cloud: ", summary(p3.cloud), "\n")
-    print(io, "└── process_rates: ", summary(p3.process_rates))
+    print(io, "├── process_rates: ", summary(p3.process_rates), "\n")
+    print(io, "└── aerosol: ", isnothing(p3.aerosol) ? "nothing (prescribed CCN)" : summary(p3.aerosol))
 end
 
 # Note: prognostic_field_names is implemented in p3_interface.jl to extend
