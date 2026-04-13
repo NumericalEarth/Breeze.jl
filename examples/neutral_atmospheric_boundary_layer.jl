@@ -32,7 +32,7 @@ end
 # This yields a 10x speed up on an NVidia T4 (which is used to build the docs).
 
 arch = GPU()
-Oceananigans.defaults.FloatType = Float32
+Oceananigans.defaults.FloatType = Float64
 
 # Simulation "S" (shear-driven ABL) domain setup from [Moeng1994](@citet).
 
@@ -41,7 +41,7 @@ x = y = (0, 3000)
 z = (0, 1000)
 
 grid = RectilinearGrid(arch; x, y, z,
-                       size = (Nx, Ny, Nz), halo = (3, 3, 3),
+                       size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
 # ## Reference state and formulation
@@ -134,7 +134,8 @@ nothing #hide
 
 # ## Model setup
 
-advection = Centered(order=6)       # WENO(order=5) is too dissipative
+advection = WENO(order=9)           # WENO(order=5), Centered(order=6) are too dissipative
+
 closure = SmagorinskyLilly(C=0.18)  # Sullivan et al. (1994)
 
 model = AtmosphereModel(grid; dynamics, coriolis, advection, forcing, closure,
