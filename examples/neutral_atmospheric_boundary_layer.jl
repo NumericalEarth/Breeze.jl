@@ -197,8 +197,10 @@ add_callback!(simulation, progress, IterationInterval(1000))
 # ### Horizontal averaging
 #
 # Profiles of horizontally averaged quantities are output every 10 minutes for
-# statistical analysis.
+# statistical analysis. All outputs are at cell centers.
 
+# Note: Higher-order moments are computed at the location of the _first_ field.
+# E.g., u * w results in a BinaryOperation at (Face, Center, Center).
 avg_outputs_varlist = (;
     θ, νₑ,
     uu = u^2, vv = v^2, ww = w^2,
@@ -207,7 +209,11 @@ avg_outputs_varlist = (;
     νₑ³ = νₑ^3,                             # SGS dissipation — note: |S̄|² = νₑ² / (Cₛ Δ)⁴) with Smagorinsky model
 )
 outputs = merge(model.velocities, model.tracers, avg_outputs_varlist)
-avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
+
+# After computing the output quantity and prior to calculating the slab average,
+# staggered quantities are averaged to cell centers
+avg_outputs = NamedTuple(name => Average(@at((Center, Center, Center), outputs[name]), dims=(1, 2))
+                         for name in keys(outputs))
 
 avg_filename = "abl_averages.jld2"
 avg_output_interval = 10minutes
@@ -292,12 +298,12 @@ WD_mean_ts = FieldTimeSeries(loc, grid, times)
 for n in 1:Nt
     u_n = u_ts[n]
     v_n = v_ts[n]
-    w_n = Field(@at loc w_ts[n]) # interpolate to cell centers
+    w_n = w_ts[n]
     θ_n = θ_ts[n]
     νₑ_n = νₑ_ts[n]
     uu_n = uu_ts[n]
     vv_n = vv_ts[n]
-    ww_n = Field(@at loc ww_ts[n]) # interpolate to cell centers
+    ww_n = ww_ts[n]
     uw_n = uw_ts[n]
     vw_n = vw_ts[n]
     θw_n = θw_ts[n]
