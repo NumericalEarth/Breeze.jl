@@ -142,9 +142,9 @@ nothing #hide
 
 # ## Model setup
 
-advection = WENO(order=9)           # WENO(order=5), Centered(order=6) are too dissipative
+advection = WENO(order=9)   # WENO(order=5), Centered(order=6) are too dissipative
 
-closure = SmagorinskyLilly(C=0.18)  # Sullivan et al. (1994)
+closure = SmagorinskyLilly()
 
 model = AtmosphereModel(grid; dynamics, coriolis, advection, forcing, closure,
                         boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs))
@@ -201,9 +201,9 @@ add_callback!(simulation, progress, IterationInterval(1000))
 
 avg_outputs_varlist = (;
     θ, νₑ,
-    uu = u*u, vv = v*v, ww = w*w,
+    uu = u^2, vv = v^2, ww = w^2,
     uw = u*w, vw = v*w, θw = θ*w,           # second-order moments for fluxes
-    uuw = u*u*w, vvw = v*v*w, www = w*w*w,  # third-order moments to calculate turbulent transport
+    uuw = u^2*w, vvw = v^2*w, www = w^3,    # third-order moments to calculate turbulent transport
     νₑ³ = νₑ^3,                             # SGS dissipation — note: |S̄|² = νₑ² / (Cₛ Δ)⁴) with Smagorinsky model
 )
 outputs = merge(model.velocities, model.tracers, avg_outputs_varlist)
@@ -329,6 +329,7 @@ colors = [cmap[(n-1)/max(Nt-1, 1)] for n in 1:Nt]
 # followed by averaged snapshots at the requested output interval.
 smart_label(n) = prettytime(n * avg_output_interval)
 labels = [n == 1 ? "initial condition" : smart_label(n-1) for n in 1:Nt]
+nothing #hide
 
 # Finally, we are ready to plot.
 
