@@ -250,103 +250,76 @@ run!(simulation)
 
 # Let's load the saved output.
 
-uts  = FieldTimeSeries(avg_filename, "u")
-vts  = FieldTimeSeries(avg_filename, "v")
-wts  = FieldTimeSeries(avg_filename, "w")
-θts  = FieldTimeSeries(avg_filename, "θ")
-uuts = FieldTimeSeries(avg_filename, "uu")
-vvts = FieldTimeSeries(avg_filename, "vv")
-wwts = FieldTimeSeries(avg_filename, "ww")
-uwts = FieldTimeSeries(avg_filename, "uw")
-vwts = FieldTimeSeries(avg_filename, "vw")
-θwts = FieldTimeSeries(avg_filename, "θw")
-νₑts = FieldTimeSeries(avg_filename, "νₑ")
+u_ts  = FieldTimeSeries(avg_filename, "u")
+v_ts  = FieldTimeSeries(avg_filename, "v")
+w_ts  = FieldTimeSeries(avg_filename, "w")
+θ_ts  = FieldTimeSeries(avg_filename, "θ")
+uu_ts = FieldTimeSeries(avg_filename, "uu")
+vv_ts = FieldTimeSeries(avg_filename, "vv")
+ww_ts = FieldTimeSeries(avg_filename, "ww")
+uw_ts = FieldTimeSeries(avg_filename, "uw")
+vw_ts = FieldTimeSeries(avg_filename, "vw")
+θw_ts = FieldTimeSeries(avg_filename, "θw")
+νₑ_ts = FieldTimeSeries(avg_filename, "νₑ")
 
-times = uts.times
+grid = u_ts.grid
+times = u_ts.times
 Nt = length(times)
-zᶜ = znodes(uts.grid, Center())  # cell centers (Nz)
-zᶠ = znodes(uts.grid, Face())    # face centers (Nz+1)
 
-Nz = uts.grid.Nz
-Δz = zspacings(uts.grid, Center())[:]
-nothing #hide
+# Compute diagnostics at each saved time. First, we create a few empty timeseries to save the computed diagnostics.
 
-# Compute diagnostics at each saved time
-WS_mean = zeros(Nz, Nt)
-WD_mean = zeros(Nz, Nt)
-θ_mean  = zeros(Nz, Nt)
+loc = (nothing, nothing, Center())
 
-uu_var = zeros(Nz, Nt)
-vv_var = zeros(Nz, Nt)
-ww_var = zeros(Nz+1, Nt)
+WS_mean_ts = FieldTimeSeries(loc, grid, times)
+WD_mean_ts = FieldTimeSeries(loc, grid, times)
+ uu_var_ts = FieldTimeSeries(loc, grid, times)
+ vv_var_ts = FieldTimeSeries(loc, grid, times)
+ ww_var_ts = FieldTimeSeries(loc, grid, times)
+ uw_res_ts = FieldTimeSeries(loc, grid, times)
+ vw_res_ts = FieldTimeSeries(loc, grid, times)
+ θw_res_ts = FieldTimeSeries(loc, grid, times)
+ uw_sgs_ts = FieldTimeSeries(loc, grid, times)
+ vw_sgs_ts = FieldTimeSeries(loc, grid, times)
+ θw_sgs_ts = FieldTimeSeries(loc, grid, times)
 
-uw_res = zeros(Nz, Nt)
-vw_res = zeros(Nz, Nt)
-θw_res = zeros(Nz, Nt)
-uw_sgs = zeros(Nz, Nt)
-vw_sgs = zeros(Nz, Nt)
-θw_sgs = zeros(Nz, Nt)
-
-ρᵣ_vec = Array(interior(ρᵣ, 1, 1, :))
+# and then we loop over all saved fields and compute what we want.
 
 for n in 1:Nt
-    u_n    = Array(interior(uts[n],  1, 1, :))
-    v_n    = Array(interior(vts[n],  1, 1, :))
-    w_raw  = Array(interior(wts[n],  1, 1, :))
-    θ_n    = Array(interior(θts[n],  1, 1, :))
-    uu_n   = Array(interior(uuts[n], 1, 1, :))
-    vv_n   = Array(interior(vvts[n], 1, 1, :))
-    ww_raw = Array(interior(wwts[n], 1, 1, :))
-    uw_n   = Array(interior(uwts[n], 1, 1, :))
-    vw_n   = Array(interior(vwts[n], 1, 1, :))
-    θw_n   = Array(interior(θwts[n], 1, 1, :))
-    νₑ_n   = Array(interior(νₑts[n], 1, 1, :))
+    u_n = u_ts[n]
+    v_n = v_ts[n]
+    w_n = Field(@at loc w_ts[n]) # interpolate to cell centers
+    θ_n = θ_ts[n]
+    νₑ_n = νₑ_ts[n]
+    uu_n = uu_ts[n]
+    vv_n = vv_ts[n]
+    ww_n = Field(@at loc ww_ts[n]) # interpolate to cell centers
+    uw_n = uw_ts[n]
+    vw_n = vw_ts[n]
+    θw_n = θw_ts[n]
 
-    ## Interpolate face fields to cell centers
-    w_n = @views (w_raw[1:end-1] .+ w_raw[2:end]) ./ 2
+    WS_mean_ts[n] .= sqrt(u_n^2 + v_n^2)
+    WD_mean_ts[n].data .= @. mod(270 - atand(v_n.data, u_n.data), 360)
+    uu_var_ts[n] .= (uu_n - u_n^2) / u★^2
+    vv_var_ts[n] .= (vv_n - v_n^2) / u★^2
+    ww_var_ts[n] .= (ww_n - w_n^2) / u★^2
+    uw_res_ts[n] .= ρᵣ * (uw_n - u_n * w_n) / (ρ₀ * u★^2)
+    vw_res_ts[n] .= ρᵣ * (vw_n - v_n * w_n) / (ρ₀ * u★^2)
+    θw_res_ts[n] .= θw_n - θ_n * w_n
 
-    ## Fig 1: Mean profiles
-    WS_mean[:, n] .= @. sqrt(u_n^2 + v_n^2)
-    WD_mean[:, n] .= mod.(270 .- atand.(v_n, u_n), 360)
-    θ_mean[:, n]  .= θ_n
+    ∂z_u = @at loc ∂z(u_n)
+    ∂z_v = @at loc ∂z(v_n)
+    ∂z_θ = @at loc ∂z(θ_n)
 
-    ## Fig 2: Velocity variances normalized by u★²
-    uu_var[:, n] .= (uu_n .- u_n.^2) ./ u★^2
-    vv_var[:, n] .= (vv_n .- v_n.^2) ./ u★^2
-    ww_var[:, n] .= (ww_raw .- w_raw.^2) ./ u★^2
-
-    ## Vertical derivatives for SGS fluxes
-    ∂z_u = similar(u_n)
-    ∂z_v = similar(v_n)
-    ∂z_θ = similar(θ_n)
-    ∂z_u[1] = (u_n[2] - u_n[1]) / Δz[1]
-    ∂z_v[1] = (v_n[2] - v_n[1]) / Δz[1]
-    ∂z_θ[1] = (θ_n[2] - θ_n[1]) / Δz[1]
-    for k in 2:Nz-1
-        ∂z_u[k] = (u_n[k+1] - u_n[k-1]) / (Δz[k-1] + Δz[k])
-        ∂z_v[k] = (v_n[k+1] - v_n[k-1]) / (Δz[k-1] + Δz[k])
-        ∂z_θ[k] = (θ_n[k+1] - θ_n[k-1]) / (Δz[k-1] + Δz[k])
-    end
-    ∂z_u[end] = (u_n[end] - u_n[end-1]) / Δz[end]
-    ∂z_v[end] = (v_n[end] - v_n[end-1]) / Δz[end]
-    ∂z_θ[end] = (θ_n[end] - θ_n[end-1]) / Δz[end]
-
-    ## Fig 3: Resolved fluxes (momentum normalized by ρ₀u★²)
-    uw_res[:, n] .= ρᵣ_vec .* (uw_n .- u_n .* w_n) ./ (ρ₀ * u★^2)
-    vw_res[:, n] .= ρᵣ_vec .* (vw_n .- v_n .* w_n) ./ (ρ₀ * u★^2)
-    θw_res[:, n] .= θw_n .- θ_n .* w_n
-
-    ## Fig 3: SGS modeled fluxes (ρᵣ νₑ dU/dz normalized by ρ₀u★²; (νₑ/Pr_t) dθ/dz)
-    uw_sgs[:, n] .= -ρᵣ_vec .* νₑ_n .* ∂z_u ./ (ρ₀ * u★^2)
-    vw_sgs[:, n] .= -ρᵣ_vec .* νₑ_n .* ∂z_v ./ (ρ₀ * u★^2)
-    θw_sgs[:, n] .= -νₑ_n ./ closure.Pr .* ∂z_θ
+    uw_sgs_ts[n] .= -ρᵣ * νₑ_n * ∂z_u / (ρ₀ * u★^2)
+    vw_sgs_ts[n] .= -ρᵣ * νₑ_n * ∂z_v / (ρ₀ * u★^2)
+    θw_sgs_ts[n] .= -νₑ_n * ∂z_θ / closure.Pr
 end
 
 # Define a colormap for each time.
 
 cmap = cgrad(:viridis)
 colors = [cmap[(n-1)/max(Nt-1, 1)] for n in 1:Nt]
-labels = [n == 1 ? "0–1 hr" : "$(n-1)–$n hr" for n in 1:Nt]
+labels = [n == 1 ? "0–1 hr" : "$(n-1)–$n hr" for n in 1:Nt];
 
 # Finally, we are ready to plot.
 
@@ -361,9 +334,9 @@ ax1b = Axis(fig1[1, 2], xlabel="WD (° from N)", ylabel="z (m)",title="Wind dire
 ax1c = Axis(fig1[1, 3], xlabel="θ (K)", ylabel="z (m)",title="Potential temperature")
 
 for n in 1:plot_interval:Nt
-    lines!(ax1a, WS_mean[:, n], zᶜ, color=colors[n], label=labels[n])
-    lines!(ax1b, WD_mean[:, n], zᶜ, color=colors[n])
-    lines!(ax1c,  θ_mean[:, n], zᶜ, color=colors[n])
+    lines!(ax1a, WS_mean_ts[n], color=colors[n], label=labels[n])
+    lines!(ax1b, WD_mean_ts[n], color=colors[n])
+    lines!(ax1c,  θ_mean_ts[n], color=colors[n])
 end
 
 linkyaxes!(ax1a, ax1b, ax1c)
@@ -382,9 +355,9 @@ ax2b = Axis(fig2[1, 2], xlabel="⟨v′v′⟩ / u_★²", ylabel="z (m)", title
 ax2c = Axis(fig2[1, 3], xlabel="⟨w′w′⟩ / u_★²", ylabel="z (m)", title="w variance")
 
 for n in 1:plot_interval:Nt
-    lines!(ax2a, uu_var[:, n], zᶜ, color=colors[n], label=labels[n])
-    lines!(ax2b, vv_var[:, n], zᶜ, color=colors[n])
-    lines!(ax2c, ww_var[:, n], zᶠ, color=colors[n])
+    lines!(ax2a, uu_var_ts[n], color=colors[n], label=labels[n])
+    lines!(ax2b, vv_var_ts[n], color=colors[n])
+    lines!(ax2c, ww_var_ts[n], color=colors[n])
 end
 
 linkyaxes!(ax2a, ax2b, ax2c)
@@ -403,17 +376,17 @@ ax3b = Axis(fig3[1, 2], xlabel="τʸ / ρ₀u_★²", ylabel="z (m)", title="y-m
 ax3c = Axis(fig3[1, 3], xlabel="Jᶿ (K m/s)", ylabel="z (m)", title="Potential temperature flux")
 
 for n in 1:plot_interval:Nt
-    lines!(ax3a, uw_res[:, n] .+ uw_sgs[:, n], zᶜ, color=colors[n], label=labels[n])
-    lines!(ax3a, uw_res[:, n], zᶜ, color=colors[n], linestyle=:dash)
-    lines!(ax3a, uw_sgs[:, n], zᶜ, color=colors[n], linestyle=:dot)
+    lines!(ax3a, uw_res_ts[n] + uw_sgs_ts[n], color=colors[n], label=labels[n])
+    lines!(ax3a, uw_res_ts[n], color=colors[n], linestyle=:dash)
+    lines!(ax3a, uw_sgs_ts[n], color=colors[n], linestyle=:dot)
 
-    lines!(ax3b, vw_res[:, n] .+ vw_sgs[:, n], zᶜ, color=colors[n])
-    lines!(ax3b, vw_res[:, n], zᶜ, color=colors[n], linestyle=:dash)
-    lines!(ax3b, vw_sgs[:, n], zᶜ, color=colors[n], linestyle=:dot)
+    lines!(ax3b, vw_res_ts[n] + vw_sgs_ts[n], color=colors[n])
+    lines!(ax3b, vw_res_ts[n], color=colors[n], linestyle=:dash)
+    lines!(ax3b, vw_sgs_ts[n], color=colors[n], linestyle=:dot)
 
-    lines!(ax3c, θw_res[:, n] .+ θw_sgs[:, n], zᶜ, color=colors[n])
-    lines!(ax3c, θw_res[:, n], zᶜ, color=colors[n], linestyle=:dash)
-    lines!(ax3c, θw_sgs[:, n], zᶜ, color=colors[n], linestyle=:dot)
+    lines!(ax3c, θw_res_ts[n] + θw_sgs_ts[n], color=colors[n])
+    lines!(ax3c, θw_res_ts[n], color=colors[n], linestyle=:dash)
+    lines!(ax3c, θw_sgs_ts[n], color=colors[n], linestyle=:dot)
 end
 
 for ax in (ax3a, ax3b, ax3c)
