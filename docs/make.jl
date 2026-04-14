@@ -62,7 +62,7 @@ gpu_semaphore = Base.Semaphore(ngpu)
 @time "literate" @sync for example in examples
     script_file = example.basename * ".jl"
     script_path = joinpath(examples_src_dir, script_file)
-    Threads.@spawn :interactive Base.acquire(example.build_always ? gpu_semaphore : cpu_semaphore) do
+    Threads.@spawn :interactive Base.acquire(example.build_always ? cpu_semaphore : gpu_semaphore) do
         run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) $(joinpath(@__DIR__, "literate.jl")) $(script_path) $(literated_dir)`)
     end
 end
