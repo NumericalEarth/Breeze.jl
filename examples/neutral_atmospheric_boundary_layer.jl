@@ -56,8 +56,9 @@ reference_state = ReferenceState(grid, constants,
 dynamics = AnelasticDynamics(reference_state)
 
 # Capping inversion for "S" simulation, as in the paper by [Moeng1994](@citet):
-# The base of the inversion is at 468 m, has a thickness of 6 grid levels, over which the potential
-# temperature increases by 8 K. Above the cap, the lapse rate is 3 K/km.
+# The base of the inversion is at 468 m and has a thickness of 6 grid levels,
+# over which the potential temperature increases by 8 K. Above the cap, the
+# lapse rate is 3 K/km.
 Δz  = first(zspacings(grid))
 zᵢ₁ = 468        # m
 zᵢ₂ = zᵢ₁ + 6Δz  # m
@@ -80,7 +81,7 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
 ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
 nothing #hide
 
-# A bulk drag parameterization is applied with friction velocity
+# A bulk drag parameterization is applied with friction velocity:
 
 @inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
 @inline ρv_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρv / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
@@ -103,16 +104,16 @@ sponge_mask = GaussianMask{:z}(center = last(z), width = sponge_width)
 
 # We damp out any vertical motions near the top boundary.
 
-ρw_sponge = Relaxation(rate = sponge_rate, mask = sponge_mask) # relax to 0 by default
+ρw_sponge = Relaxation(rate = sponge_rate, mask = sponge_mask) # relaxes to 0 by default
 
 # We relax temperature to the initial profile.
 
 ρᵣ = reference_state.density
-ρθˡⁱᵣ = Field{Nothing, Nothing, Center}(grid)
-set!(ρθˡⁱᵣ, z -> θᵣ(z))
-set!(ρθˡⁱᵣ, ρᵣ * ρθˡⁱᵣ)
+ρθᵣ = Field{Nothing, Nothing, Center}(grid)
+set!(ρθᵣ, z -> θᵣ(z))
+set!(ρθᵣ, ρᵣ * ρθᵣ)
 
-ρθˡⁱᵣ_data = interior(ρθˡⁱᵣ, 1, 1, :)
+ρθᵣ_data = interior(ρθᵣ, 1, 1, :)
 
 @inline function ρθ_sponge_fun(i, j, k, grid, clock, model_fields, p)
     zₖ = znode(k, grid, Center())
@@ -121,7 +122,7 @@ end
 
 ρθ_sponge = Forcing(
     ρθ_sponge_fun; discrete_form = true,
-    parameters = (rate = sponge_rate, mask = sponge_mask, target = ρθˡⁱᵣ_data)
+    parameters = (rate = sponge_rate, mask = sponge_mask, target = ρθᵣ_data)
 )
 
 # ## Assembling all the forcings
@@ -141,7 +142,7 @@ nothing #hide
 
 # ## Model setup
 
-advection = WENO(order=9)           # WENO(order=5), Centered(order=6) are dissipative
+advection = WENO(order=9)           # WENO(order=5), Centered(order=6) are too dissipative
 
 closure = SmagorinskyLilly(C=0.18)  # Sullivan et al. (1994)
 
@@ -162,7 +163,7 @@ vᵢ(x, y, z) =   vᵍ  + δv * ϵ() * (z < zδ)
 
 set!(model, θ=θᵢ, u=uᵢ, v=vᵢ)
 
-# ## Simulation
+# ## Simulation and output
 #
 # We run the simulation for 5 hours with adaptive time-stepping.
 
@@ -171,10 +172,9 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
-# ## Output and progress
+# ### Progress monitor
 #
-# We add a progress callback and output the hourly time-averages of the horizontally-averaged
-# profiles for post-processing.
+# We add a progress callback to monitor the simulation.
 
 u, v, w = model.velocities
 θ = liquid_ice_potential_temperature(model)
@@ -194,14 +194,17 @@ end
 
 add_callback!(simulation, progress, IterationInterval(1000))
 
-# Output averaged products for calculating statistics
+# ### Horizontal averaging
+#
+# Profiles of horizontally averaged quantities are output every 10 minutes for
+# statistical analysis.
 
 avg_outputs_varlist = (;
     θ, νₑ,
     uu = u*u, vv = v*v, ww = w*w,
-    uw = u*w, vw = v*w, θw = θ*w,       # second-order moments for fluxes
-    uuw = u*u*w, vvw=v*v*w, www=w*w*w,  # third-order moments for turbulent transport term
-    νₑ³ = νₑ^3,                         # SGS dissipation -- note: |S̄|² = νₑ² / (Cₛ Δ)⁴) with Smagorinsky model
+    uw = u*w, vw = v*w, θw = θ*w,           # second-order moments for fluxes
+    uuw = u*u*w, vvw = v*v*w, www = w*w*w,  # third-order moments to calculate turbulent transport
+    νₑ³ = νₑ^3,                             # SGS dissipation — note: |S̄|² = νₑ² / (Cₛ Δ)⁴) with Smagorinsky model
 )
 outputs = merge(model.velocities, model.tracers, avg_outputs_varlist)
 avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
@@ -213,7 +216,7 @@ simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
                                                   schedule = AveragedTimeInterval(avg_output_interval),
                                                   overwrite_existing = true)
 
-# ## Output horizontal slices for animation
+# ### Instantaneous slices for animation
 
 # Find the `k`-index closest to z = 100 m.
 
@@ -226,6 +229,8 @@ k₁₀₀ = searchsortedfirst(z, 100)
 y = ynodes(grid, Center())
 jmid = Ny ÷ 2
 @info "Saving slices at y = $(y[jmid]) m (j = $jmid)"
+
+# Set up the output writer.
 
 slice_fields = (; u, v, w, θ)
 slice_outputs = (
@@ -242,7 +247,7 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 schedule = TimeInterval(5minutes),
                                                 overwrite_existing = true)
 
-# Now we are ready to run the simulation.
+# ### Go time
 
 run!(simulation)
 
@@ -319,21 +324,27 @@ end
 
 cmap = cgrad(:viridis)
 colors = [cmap[(n-1)/max(Nt-1, 1)] for n in 1:Nt]
-labels = [n == 1 ? "0–1 hr" : "$(n-1)–$n hr" for n in 1:Nt];
+
+# Note that the AveragedTimeInterval schedule outputs the initial snapshot
+# followed by averaged snapshots at the requested output interval.
+smart_label(n) = prettytime(n * avg_output_interval)
+labels = [n == 1 ? "initial condition" : smart_label(n-1) for n in 1:Nt]
 
 # Finally, we are ready to plot.
 
-plot_interval = Int(1hour / avg_output_interval)
+plot_interval = 1hour  # should be a multiple of avg_output_interval
+plot_skip = Int(plot_interval / avg_output_interval)
+nothing #hide
 
 # First we plot the mean profiles (wind speed, wind direction, potential temperature).
 
-fig1 = Figure(size=(800, 400), fontsize=14)
+fig1 = Figure(size=(1000, 500), fontsize=14)
 
-ax1a = Axis(fig1[1, 1], xlabel="√(U² + V²) (m/s)", ylabel="z (m)",title="Horizontal wind speed")
-ax1b = Axis(fig1[1, 2], xlabel="WD (° from N)", ylabel="z (m)",title="Wind direction")
-ax1c = Axis(fig1[1, 3], xlabel="θ (K)", ylabel="z (m)",title="Potential temperature")
+ax1a = Axis(fig1[1, 1], xlabel="√(U² + V²) (m/s)", ylabel="z (m)", title="Horizontal wind speed")
+ax1b = Axis(fig1[1, 2], xlabel="WD (° from N)", ylabel="z (m)", title="Wind direction")
+ax1c = Axis(fig1[1, 3], xlabel="θ (K)", ylabel="z (m)", title="Potential temperature")
 
-for n in 1:plot_interval:Nt
+for n in 1:plot_skip:Nt
     lines!(ax1a, WS_mean_ts[n], color=colors[n], label=labels[n])
     lines!(ax1b, WD_mean_ts[n], color=colors[n])
     lines!(ax1c,  θ_mean_ts[n], color=colors[n])
@@ -348,13 +359,13 @@ fig1
 
 # Next, we plot the velocity variances normalized by ``u_★^2``
 
-fig2 = Figure(size=(800, 400), fontsize=14)
+fig2 = Figure(size=(1000, 500), fontsize=14)
 
 ax2a = Axis(fig2[1, 1], xlabel="⟨u′u′⟩ / u_★²", ylabel="z (m)", title="u variance")
 ax2b = Axis(fig2[1, 2], xlabel="⟨v′v′⟩ / u_★²", ylabel="z (m)", title="v variance")
 ax2c = Axis(fig2[1, 3], xlabel="⟨w′w′⟩ / u_★²", ylabel="z (m)", title="w variance")
 
-for n in 1:plot_interval:Nt
+for n in 1:plot_skip:Nt
     lines!(ax2a, uu_var_ts[n], color=colors[n], label=labels[n])
     lines!(ax2b, vv_var_ts[n], color=colors[n])
     lines!(ax2c, ww_var_ts[n], color=colors[n])
@@ -369,13 +380,13 @@ fig2
 
 # Last, we plot the resolved and the SGS fluxes.
 
-fig3 = Figure(size=(1200, 450), fontsize=14)
+fig3 = Figure(size=(1000, 500), fontsize=14)
 
 ax3a = Axis(fig3[1, 1], xlabel="τˣ / ρ₀u_★²", ylabel="z (m)", title="x-momentum flux")
 ax3b = Axis(fig3[1, 2], xlabel="τʸ / ρ₀u_★²", ylabel="z (m)", title="y-momentum flux")
 ax3c = Axis(fig3[1, 3], xlabel="Jᶿ (K m/s)", ylabel="z (m)", title="Potential temperature flux")
 
-for n in 1:plot_interval:Nt
+for n in 1:plot_skip:Nt
     lines!(ax3a, uw_res_ts[n] + uw_sgs_ts[n], color=colors[n], label=labels[n])
     lines!(ax3a, uw_res_ts[n], color=colors[n], linestyle=:dash)
     lines!(ax3a, uw_sgs_ts[n], color=colors[n], linestyle=:dot)
