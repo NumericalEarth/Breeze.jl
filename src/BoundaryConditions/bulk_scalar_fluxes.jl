@@ -10,6 +10,7 @@ struct BulkSensibleHeatFluxFunction{C, G, T, P, TC, F}
     gustiness :: G
     surface_temperature :: T
     surface_pressure :: P
+    standard_pressure :: P
     thermodynamic_constants :: TC
     formulation :: F
 end
@@ -41,13 +42,14 @@ thermodynamic formulation.
                          Functions are converted to Fields during model construction.
 """
 BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature) =
-    BulkSensibleHeatFluxFunction(coefficient, gustiness, surface_temperature, nothing, nothing, nothing)
+    BulkSensibleHeatFluxFunction(coefficient, gustiness, surface_temperature, nothing, nothing, nothing, nothing)
 
 Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
     BulkSensibleHeatFluxFunction(Adapt.adapt(to, bf.coefficient),
                                  Adapt.adapt(to, bf.gustiness),
                                  Adapt.adapt(to, bf.surface_temperature),
                                  Adapt.adapt(to, bf.surface_pressure),
+                                 Adapt.adapt(to, bf.standard_pressure),
                                  Adapt.adapt(to, bf.thermodynamic_constants),
                                  bf.formulation)
 
@@ -57,15 +59,21 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 
 # Compute the thermodynamic variable difference at the surface.
 # Default to potential temperature flux when formulation is not set (ρθ BCs passed directly).
-@inline bulk_sensible_heat_difference(i, j, grid, ::Nothing, T₀, constants, fields) =
-    bulk_sensible_heat_difference(i, j, grid, PotentialTemperatureFlux(), T₀, constants, fields)
+@inline bulk_sensible_heat_difference(i, j, grid, ::Nothing, T₀, p₀, pˢᵗ, constants, fields) =
+    bulk_sensible_heat_difference(i, j, grid, PotentialTemperatureFlux(), T₀, p₀, pˢᵗ, constants, fields)
 
-@inline function bulk_sensible_heat_difference(i, j, grid, ::PotentialTemperatureFlux, T₀, constants, fields)
+# Convert T₀ (actual surface temperature) to potential temperature θ₀ = T₀ / Π₀
+# using the surface Exner function Π₀ = (p₀ / pˢᵗ)^(Rᵈ / cᵖᵈ).
+@inline function bulk_sensible_heat_difference(i, j, grid, ::PotentialTemperatureFlux, T₀, p₀, pˢᵗ, constants, fields)
+    Rᵈ = dry_air_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    Π₀ = (p₀ / pˢᵗ)^(Rᵈ / cᵖᵈ)
+    θ₀ = T₀ / Π₀
     θ = @inbounds fields.θ[i, j, 1]
-    return θ - T₀
+    return θ - θ₀
 end
 
-@inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, T₀, constants, fields)
+@inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, T₀, p₀, pˢᵗ, constants, fields)
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
     qᵛ = @inbounds fields.qᵛ[i, j, 1]
@@ -84,11 +92,12 @@ end
 
     constants = bf.thermodynamic_constants
     p₀ = bf.surface_pressure
+    pˢᵗ = bf.standard_pressure
     ρ₀ = surface_density(p₀, T₀, constants)
 
     Cᵀ = bulk_coefficient(i, j, grid, bf.coefficient, fields, T₀)
 
-    Δϕ = bulk_sensible_heat_difference(i, j, grid, bf.formulation, T₀, constants, fields)
+    Δϕ = bulk_sensible_heat_difference(i, j, grid, bf.formulation, T₀, p₀, pˢᵗ, constants, fields)
     return - ρ₀ * Cᵀ * Ũ * Δϕ
 end
 
