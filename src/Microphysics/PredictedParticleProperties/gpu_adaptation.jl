@@ -75,13 +75,17 @@ Adapt.adapt_structure(to, x::IceCollection) =
     IceCollection(x.ice_cloud_collection_efficiency,
                   x.ice_rain_collection_efficiency,
                   Adapt.adapt(to, x.aggregation),
-                  Adapt.adapt(to, x.rain_collection))
+                  Adapt.adapt(to, x.rain_collection),
+                  Adapt.adapt(to, x.cloud_aerosol_collection),
+                  Adapt.adapt(to, x.ice_aerosol_collection))
 
 Oceananigans.Architectures.on_architecture(arch, x::IceCollection) =
     IceCollection(x.ice_cloud_collection_efficiency,
                   x.ice_rain_collection_efficiency,
                   on_architecture(arch, x.aggregation),
-                  on_architecture(arch, x.rain_collection))
+                  on_architecture(arch, x.rain_collection),
+                  on_architecture(arch, x.cloud_aerosol_collection),
+                  on_architecture(arch, x.ice_aerosol_collection))
 
 # --- IceSixthMoment ---
 
@@ -244,7 +248,8 @@ Adapt.adapt_structure(to, x::PredictedParticlePropertiesMicrophysics) =
         Adapt.adapt(to, x.rain),
         x.cloud,
         x.process_rates,
-        Adapt.adapt(to, x.precipitation_boundary_condition))
+        Adapt.adapt(to, x.precipitation_boundary_condition),
+        x.aerosol)
 
 Oceananigans.Architectures.on_architecture(arch, x::PredictedParticlePropertiesMicrophysics) =
     PredictedParticlePropertiesMicrophysics(
@@ -255,4 +260,5 @@ Oceananigans.Architectures.on_architecture(arch, x::PredictedParticlePropertiesM
         on_architecture(arch, x.rain),
         x.cloud,
         x.process_rates,
-        on_architecture(arch, x.precipitation_boundary_condition))
+        on_architecture(arch, x.precipitation_boundary_condition),
+        x.aerosol)
