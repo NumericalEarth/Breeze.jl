@@ -36,7 +36,7 @@ jobs:
       statuses: write
     runs-on: aws-linux-nvidia-gpu-l4
     container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.5'
+      image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.6'
       options: --gpus=all
     timeout-minutes: 75
     steps:
