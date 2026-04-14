@@ -17,7 +17,7 @@
 # - Moist boundary layer air entering from below
 #
 # The **divergence correction** option compensates for the non-zero mass flux divergence
-# ``\boldsymbol{\nabla} \cdot (ρ \boldsymbol{u})`` that arises when velocity doesn't vary with the reference density profile.
+# ``\boldsymbol{\nabla} \boldsymbol{\cdot} (ρ \boldsymbol{u})`` that arises when velocity doesn't vary with the reference density profile.
 # This is essential for physically consistent tracer advection in kinematic models.
 
 using Breeze
@@ -48,11 +48,11 @@ reference_state = ReferenceState(grid, constants;
 # The key feature of kinematic models is [`PrescribedDynamics`](@ref), which fixes
 # the density and pressure fields from a reference state. We enable
 # `divergence_correction=true` because our constant vertical velocity doesn't
-# satisfy the anelastic continuity constraint ``\boldsymbol{\nabla} \cdot (ρ \boldsymbol{u}) = 0``.
+# satisfy the anelastic continuity constraint ``\boldsymbol{\nabla} \boldsymbol{\cdot} (ρ \boldsymbol{u}) = 0``.
 #
 # Without this correction, the tracer equation would see spurious sources/sinks
 # from the non-zero velocity divergence. The correction adds a term
-# ``c \boldsymbol{\nabla} \cdot (ρ \boldsymbol{u})`` that compensates for the prescribed
+# ``c \boldsymbol{\nabla} \boldsymbol{\cdot} (ρ \boldsymbol{u})`` that compensates for the prescribed
 # velocity field's divergence.
 
 W₀ = 2 # Vertical velocity (m/s) — a gentle updraft
@@ -109,7 +109,7 @@ cᵖᵈ = constants.dry_air.heat_capacity
 function θ_initial(z)
     θ_troposphere = θ₀ + (θᵗʳ - θ₀) * (z / zᵗʳ)^(5/4)
     θ_stratosphere = θᵗʳ * exp(g / (cᵖᵈ * Tᵗʳ) * (z - zᵗʳ))
-    return ifelse(z <= zᵗʳ, θ_troposphere, θ_stratosphere)
+    return ifelse(z ≤ zᵗʳ, θ_troposphere, θ_stratosphere)
 end
 
 # Moisture profile: high in the boundary layer, decreasing with height

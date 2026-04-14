@@ -107,7 +107,7 @@ coriolis = FPlane(f = 3e-4)
 # ## Surface fluxes
 #
 # Following the paper's bulk formulas (Eqs. 2-4), with drag coefficient
-# Cᴰ = 1.5 × 10⁻³ and gustiness v★ = 1 m/s. The surface wetness parameter β
+# Cᴰ = 1.5 × 10⁻³ and gustiness v_★ = 1 m/s. The surface wetness parameter β
 # scales the moisture flux coefficient.
 
 Cᴰ = Cᵀ = 1.5e-3
@@ -179,10 +179,11 @@ model = AtmosphereModel(grid; dynamics, coriolis, momentum_advection, scalar_adv
 # This approximates the paper's 100-day nonrotating RCE spinup. Small random
 # perturbations in the lowest kilometer trigger convection.
 #
-# **Important:** After `compute_reference_state!`, we must use `set!(model, T=...)` rather than
-# `set!(model, θ=...)`. The `compute_reference_state!` call recomputes the reference pressure,
-# which changes the Exner function used to convert θ → T. Setting θ directly
-# would produce incorrect temperatures in the stratosphere.
+# !!! note "Important"
+#     After `compute_reference_state!`, we must use `set!(model, T=...)` rather than
+#     `set!(model, θ=...)`. The `compute_reference_state!` call recomputes the reference
+#     pressure, which changes the Exner function used to convert θ → T. Setting θ directly
+#     would produce incorrect temperatures in the stratosphere.
 
 δT = 1//2  # K perturbation amplitude
 zδ = 1000  # m perturbation depth

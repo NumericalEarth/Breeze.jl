@@ -292,7 +292,7 @@ add_callback!(simulation, progress, name=:progress, IterationInterval(500))
 # Save vertical velocity and contravariant vertical velocity for post-processing:
 
 w = model.velocities.w
-Ω̃ = model.dynamics.Ω̃
+Ω̃ = model.dynamics.contravariant_vertical_velocity
 
 filename = "mountain_waves"
 outputs = (; w, Ω̃)
