@@ -354,7 +354,7 @@ ax1c = Axis(fig1[1, 3], xlabel="θ (K)", ylabel="z (m)", title="Potential temper
 for n in 1:plot_skip:Nt
     lines!(ax1a, WS_mean_ts[n], color=colors[n], label=labels[n])
     lines!(ax1b, WD_mean_ts[n], color=colors[n])
-    lines!(ax1c,  θ_mean_ts[n], color=colors[n])
+    lines!(ax1c,       θ_ts[n], color=colors[n])
 end
 
 linkyaxes!(ax1a, ax1b, ax1c)
