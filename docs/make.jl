@@ -49,11 +49,20 @@ examples = [
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
-semaphore = Base.Semaphore(Threads.nthreads(:interactive))
+
+# Use a different semaphore for CPU and GPU examples, but will keep the maximum
+# of concurrent tasks running at all time to the number of threads.  This is
+# very heuristic-y, can be refined later: reserve a larger semaphore for CPU
+# jobs, than for the GPU ones.
+tot_threads = Threads.nthreads(:interactive)
+ncpu = (tot_threads * 2) ÷ 3
+ngpu = tot_threads - ncpu
+cpu_semaphore = Base.Semaphore(ncpu)
+gpu_semaphore = Base.Semaphore(ngpu)
 @time "literate" @sync for example in examples
     script_file = example.basename * ".jl"
     script_path = joinpath(examples_src_dir, script_file)
-    Threads.@spawn :interactive Base.acquire(semaphore) do
+    Threads.@spawn :interactive Base.acquire(example.build_always ? gpu_semaphore : cpu_semaphore) do
         run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) $(joinpath(@__DIR__, "literate.jl")) $(script_path) $(literated_dir)`)
     end
 end
