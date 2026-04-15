@@ -179,11 +179,11 @@ const OMCM = OneMomentCloudMicrophysics
 # Rain sedimentation speed: stored as positive magnitude
 @inline AM.sedimentation_speed(bμp::OMCM, μ, ::Val{:ρqʳ}) = μ.wʳ
 
-# Water phase classification
-@inline AM.water_phase(bμp::OMCM, ::Val{:ρqᶜˡ}) = Val(:liquid)
-@inline AM.water_phase(bμp::OMCM, ::Val{:ρqʳ})  = Val(:liquid)
-@inline AM.water_phase(bμp::OMCM, ::Val{:ρqᶜⁱ}) = Val(:ice)
-@inline AM.water_phase(bμp::OMCM, ::Val{:ρqˢ})  = Val(:ice)
+# Moisture phase classification
+@inline AM.moisture_phase(bμp::OMCM, ::Val{:ρqᶜˡ}) = Val(:liquid)
+@inline AM.moisture_phase(bμp::OMCM, ::Val{:ρqʳ})  = Val(:liquid)
+@inline AM.moisture_phase(bμp::OMCM, ::Val{:ρqᶜⁱ}) = Val(:ice)
+@inline AM.moisture_phase(bμp::OMCM, ::Val{:ρqˢ})  = Val(:ice)
 
 # ImpenetrableBoundaryCondition alias
 const IBC = BoundaryCondition{<:Open, Nothing}

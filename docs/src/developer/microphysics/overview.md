@@ -99,10 +99,10 @@ iterative adjustment to partition moisture between vapor and condensate.
 | Function | Arguments | Description |
 |----------|-----------|-------------|
 | `sedimentation_speed` | `(microphysics, microphysical_fields, name)` | **Primary interface**: return positive sedimentation speed field for tracer `name`, or `nothing` |
-| `water_phase` | `(microphysics, name)` | Return `Val(:liquid)`, `Val(:ice)`, or `nothing` for phase classification |
+| `moisture_phase` | `(microphysics, name)` | Return `Val(:liquid)`, `Val(:ice)`, or `nothing` for phase classification |
 | `microphysical_velocities` | `(microphysics, microphysical_fields, name)` | **Generic wrapper** (don't override): converts sedimentation speed to negative velocity tuple via `NegatedField` |
 
-**Design principle**: Schemes implement `sedimentation_speed` and `water_phase`; the generic
+**Design principle**: Schemes implement `sedimentation_speed` and `moisture_phase`; the generic
 `microphysical_velocities` wrapper calls `sedimentation_speed` and constructs a
 `(u=ZeroField(), v=ZeroField(), w=NegatedField(speed))` tuple for the advection operator.
 
@@ -117,9 +117,9 @@ of their sub-components:
 ```
 
 The `(speed_field, humidity_field)` pairs are built generically from `sedimentation_speed`
-and `water_phase`: for each mass tracer in `prognostic_field_names` (names starting with `:ρq`),
-`sedimentation_speed` is called. If non-nothing, `water_phase` classifies the tracer as liquid
-or ice. Number tracers (e.g. `:ρnᶜˡ`) return `nothing` from `water_phase` and are excluded.
+and `moisture_phase`: for each mass tracer in `prognostic_field_names` (names starting with `:ρq`),
+`sedimentation_speed` is called. If non-nothing, `moisture_phase` classifies the tracer as liquid
+or ice. Number tracers (e.g. `:ρnᶜˡ`) return `nothing` from `moisture_phase` and are excluded.
 
 #### Model-level bulk sedimentation velocities
 
@@ -170,7 +170,7 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `materialize_microphysical_fields(microphysics, grid, bcs)` | Create prognostic + auxiliary fields |
 | `update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)` | Update auxiliary fields at grid points |
 | `sedimentation_speed(microphysics, μ_fields, name)` | Positive sedimentation speed per tracer |
-| `water_phase(microphysics, name)` | Phase classification (`:liquid` or `:ice`) |
+| `moisture_phase(microphysics, name)` | Phase classification (`:liquid` or `:ice`) |
 
 **Why these are Eulerian-only**:
 - **Field materialization**: Parcel models don't have fields; they store scalars directly in `ParcelState`.
@@ -189,7 +189,7 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `materialize_microphysical_fields` | — | ✓ | Fields for grid storage |
 | `update_microphysical_auxiliaries!` | — | ✓ | Write to diagnostic fields |
 | `sedimentation_speed` | — | ✓ | Positive sedimentation speed per tracer |
-| `water_phase` | — | ✓ | Phase classification for bulk velocities |
+| `moisture_phase` | — | ✓ | Phase classification for bulk velocities |
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
 | `grid_microphysical_tendency` | — | — | Generic wrapper (don't override) |
 | `microphysical_velocities` | — | — | Generic wrapper (don't override) |

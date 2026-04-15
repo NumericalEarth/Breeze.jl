@@ -1,5 +1,5 @@
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_speed, water_phase
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_speed, moisture_phase
 using CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -182,11 +182,11 @@ end
     fs_cloud_num = sedimentation_speed(microphysics, μ, Val(:ρnᶜˡ))
     @test fs_cloud_num === μ.wᶜˡₙ
 
-    # water_phase classification
-    @test water_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
-    @test water_phase(microphysics, Val(:ρqʳ)) === Val(:liquid)
-    @test water_phase(microphysics, Val(:ρnᶜˡ)) === nothing  # number tracer
-    @test water_phase(microphysics, Val(:ρnʳ)) === nothing    # number tracer
+    # moisture_phase classification
+    @test moisture_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
+    @test moisture_phase(microphysics, Val(:ρqʳ)) === Val(:liquid)
+    @test moisture_phase(microphysics, Val(:ρnᶜˡ)) === nothing  # number tracer
+    @test moisture_phase(microphysics, Val(:ρnʳ)) === nothing    # number tracer
 
     # microphysical_velocities wraps sedimentation_speed with NegatedField
     vel_rain_mass = microphysical_velocities(microphysics, μ, Val(:ρqʳ))

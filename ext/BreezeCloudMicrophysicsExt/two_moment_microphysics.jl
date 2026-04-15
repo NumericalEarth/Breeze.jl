@@ -329,9 +329,9 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 # Default fallback for sedimentation speed
 @inline AtmosphereModels.sedimentation_speed(bμp::TwoMomentCloudMicrophysics, μ, name) = nothing
 
-# Water phase classification
-@inline AtmosphereModels.water_phase(bμp::WPNE2M, ::Val{:ρqᶜˡ}) = Val(:liquid)
-@inline AtmosphereModels.water_phase(bμp::WPNE2M, ::Val{:ρqʳ})  = Val(:liquid)
+# Moisture phase classification
+@inline AtmosphereModels.moisture_phase(bμp::WPNE2M, ::Val{:ρqᶜˡ}) = Val(:liquid)
+@inline AtmosphereModels.moisture_phase(bμp::WPNE2M, ::Val{:ρqʳ})  = Val(:liquid)
 
 #####
 ##### Relaxation timescale for non-equilibrium cloud formation

@@ -1,5 +1,5 @@
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_speed, water_phase
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_speed, moisture_phase
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using GPUArraysCore: @allowscalar
@@ -314,7 +314,7 @@ end
     @test contains(str_ne, "cloud_formation")
 end
 
-@testset "sedimentation_speed, water_phase, and microphysical_velocities [$(FT)]" for FT in test_float_types()
+@testset "sedimentation_speed, moisture_phase, and microphysical_velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -338,9 +338,9 @@ end
     @test fs_cloud !== nothing
     @test fs_cloud === μ.wᶜˡ
 
-    # water_phase classification
-    @test water_phase(microphysics, Val(:ρqʳ)) === Val(:liquid)
-    @test water_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
+    # moisture_phase classification
+    @test moisture_phase(microphysics, Val(:ρqʳ)) === Val(:liquid)
+    @test moisture_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
 
     # microphysical_velocities wraps sedimentation_speed with NegatedField
     vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))

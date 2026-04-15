@@ -548,7 +548,7 @@ end
 #
 # Microphysics schemes implement:
 #   sedimentation_speed(microphysics, microphysical_fields, name) → field or nothing
-#   water_phase(microphysics, name) → Val(:liquid), Val(:ice), or nothing
+#   moisture_phase(microphysics, name) → Val(:liquid), Val(:ice), or nothing
 #
 # The generic microphysical_velocities wrapper calls sedimentation_speed and
 # wraps the result in a NegatedField for the w component.
@@ -567,13 +567,13 @@ Microphysics schemes should extend this function for each sedimenting tracer.
 """
 $(TYPEDSIGNATURES)
 
-Return the water phase (`Val(:liquid)` or `Val(:ice)`) associated with tracer `name`,
+Return the moisture phase (`Val(:liquid)` or `Val(:ice)`) associated with tracer `name`,
 or `nothing` if the tracer has no defined phase.
 
 Microphysics schemes should extend this function.
 """
-@inline water_phase(microphysics, name) = nothing
-@inline water_phase(microphysics::Nothing, name) = nothing
+@inline moisture_phase(microphysics, name) = nothing
+@inline moisture_phase(microphysics::Nothing, name) = nothing
 
 """
     NegatedField{F}
@@ -666,7 +666,7 @@ function sedimentation_constituent(microphysics, μ, names::Tuple{Symbol, Vararg
     rest = sedimentation_constituent(microphysics, μ, Base.tail(names), phase)
     s = string(name)
     is_mass_tracer = length(s) >= 2 && s[1] == 'ρ' && s[nextind(s, 1)] == 'q'
-    if is_mass_tracer && water_phase(microphysics, Val(name)) === phase
+    if is_mass_tracer && moisture_phase(microphysics, Val(name)) === phase
         speed = sedimentation_speed(microphysics, μ, Val(name))
         if !isnothing(speed)
             specific_name = specific_field_name(name)

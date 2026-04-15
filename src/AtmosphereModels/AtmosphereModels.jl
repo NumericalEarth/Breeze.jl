@@ -51,7 +51,7 @@ export
     update_microphysical_auxiliaries!,
     initial_aerosol_number,
     sedimentation_speed,
-    water_phase,
+    moisture_phase,
     microphysical_velocities,
     NegatedField,
     materialize_sedimentation_velocities,
