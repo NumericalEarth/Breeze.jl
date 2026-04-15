@@ -223,6 +223,12 @@ using Oceananigans.Architectures: CPU
 using Breeze.AtmosphereModels: prognostic_field_names
 using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant, vapor_gas_constant
 
+# Precomputed gas constants for GPU compatibility.
+# ThermodynamicConstants() allocates and cannot be called inside GPU kernels,
+# but the gas constants (R/M_d and R/M_v) are universal physical constants.
+const DRY_AIR_GAS_CONSTANT = dry_air_gas_constant(ThermodynamicConstants())
+const VAPOR_GAS_CONSTANT = vapor_gas_constant(ThermodynamicConstants())
+
 #####
 ##### Integral types (must be first - no dependencies)
 #####

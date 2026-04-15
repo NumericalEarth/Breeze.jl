@@ -24,7 +24,7 @@ See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
 # Returns
 - Mass-weighted fall speed [m/s] (positive downward)
 """
-@inline function rain_terminal_velocity_mass_weighted(p3, qʳ, nʳ, ρ)
+function rain_terminal_velocity_mass_weighted(p3, qʳ, nʳ, ρ)
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -76,7 +76,7 @@ Looks up the PSD-integrated number-weighted velocity from a tabulated
 # Returns
 - Number-weighted fall speed [m/s] (positive downward)
 """
-@inline function rain_terminal_velocity_number_weighted(p3, qʳ, nʳ, ρ)
+function rain_terminal_velocity_number_weighted(p3, qʳ, nʳ, ρ)
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -269,7 +269,7 @@ speed framework.
 - `NamedTuple` with fields `mass_weighted`, `number_weighted`, `reflectivity_weighted` [m/s]
   (all positive downward)
 """
-@inline function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)), μ=zero(typeof(qⁱ)))
+function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)), μ=zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     prp = p3.process_rates
     fs = p3.ice.fall_speed

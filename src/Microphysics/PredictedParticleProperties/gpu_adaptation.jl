@@ -9,6 +9,26 @@
 using Adapt: Adapt
 using Oceananigans.Architectures: on_architecture
 
+# --- FortranTabulated wrappers ---
+
+Adapt.adapt_structure(to, x::FortranTabulatedFunction5D) =
+    FortranTabulatedFunction5D(Adapt.adapt(to, x.table))
+
+Adapt.adapt_structure(to, x::FortranTabulatedFunction6D) =
+    FortranTabulatedFunction6D(Adapt.adapt(to, x.table))
+
+Adapt.adapt_structure(to, x::FortranTabulatedFunction3) =
+    FortranTabulatedFunction3(Adapt.adapt(to, x.table))
+
+Oceananigans.Architectures.on_architecture(arch, x::FortranTabulatedFunction5D) =
+    FortranTabulatedFunction5D(on_architecture(arch, x.table))
+
+Oceananigans.Architectures.on_architecture(arch, x::FortranTabulatedFunction6D) =
+    FortranTabulatedFunction6D(on_architecture(arch, x.table))
+
+Oceananigans.Architectures.on_architecture(arch, x::FortranTabulatedFunction3) =
+    FortranTabulatedFunction3(on_architecture(arch, x.table))
+
 # --- IceFallSpeed ---
 
 Adapt.adapt_structure(to, x::IceFallSpeed) =

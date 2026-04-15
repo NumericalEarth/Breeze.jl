@@ -201,8 +201,8 @@ approximation path depending on `p3.rain.evaporation`:
     is_subsaturated = S < 1
 
     # Thermodynamic constants
-    Rᵛ = FT(vapor_gas_constant(ThermodynamicConstants()))
-    Rᵈ = FT(dry_air_gas_constant(ThermodynamicConstants()))
+    Rᵛ = FT(VAPOR_GAS_CONSTANT)
+    Rᵈ = FT(DRY_AIR_GAS_CONSTANT)
     L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
@@ -292,8 +292,8 @@ P3 v5.5.0 semi-analytic framework where ``q_{rcon}`` can be positive.
     is_supersaturated = (S > 1) & (qʳ_eff > FT(1e-14))
 
     # Thermodynamic constants (same as rain evaporation)
-    Rᵛ = FT(vapor_gas_constant(ThermodynamicConstants()))
-    Rᵈ = FT(dry_air_gas_constant(ThermodynamicConstants()))
+    Rᵛ = FT(VAPOR_GAS_CONSTANT)
+    Rᵈ = FT(DRY_AIR_GAS_CONSTANT)
     L_v = FT(2.5e6)
     K_a = transport.K_a
     D_v = transport.D_v

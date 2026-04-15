@@ -54,7 +54,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 # Returns
 - Rate of ice number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-@inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = zero(typeof(qⁱ)))
+function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -141,7 +141,7 @@ factor for the exponential PSD.
 # Returns
 - Rate of cloud → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-@inline function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = zero(typeof(qⁱ)))
+function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
@@ -340,7 +340,7 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
 # Returns
 - Rate of rain → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-@inline function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ)))
+function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -395,7 +395,7 @@ Backward-compatible 8-argument overload of `rain_riming_rate` without rain DSD c
 Passes `nʳ = 0`, which disables the C5 double-PSD cross-section correction.
 Prefer the 9-argument form `rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)`.
 """
-@inline function rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+function rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
     FT = typeof(qʳ)
     return rain_riming_rate(p3, qʳ, zero(FT), qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 end
@@ -423,7 +423,7 @@ independent PSD-integrated number collection rate.
 # Returns
 - Rate of rain number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-@inline function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ)))
+function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -485,7 +485,7 @@ Prefer the 9-argument form `rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T,
 # Returns
 - Rate of rain number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-@inline function rain_riming_number_rate(qʳ, nʳ, riming_rate)
+function rain_riming_number_rate(qʳ, nʳ, riming_rate)
     FT = typeof(qʳ)
 
     ratio = safe_divide(nʳ, qʳ, zero(FT))
@@ -517,7 +517,7 @@ the Fortran fallback value `400 kg m⁻³` is used.
 # Returns
 - Rime density [kg/m³]
 """
-@inline function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
+function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
     FT = typeof(T)
     prp = p3.process_rates
     qsmall = p3.minimum_mass_mixing_ratio
@@ -592,7 +592,7 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 # Returns
 - Rate of liquid → rain shedding [kg/kg/s]
 """
-@inline function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean, μ)
+function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean, μ)
     FT = typeof(qʷⁱ)
 
     qʷⁱ_eff = clamp_positive(qʷⁱ)
@@ -679,7 +679,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 # Returns
 - Wet growth capacity [kg/kg/s] (positive; zero when T ≥ T₀)
 """
-@inline function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ)
+function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -692,15 +692,14 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 
     L_f = fusion_latent_heat(constants, T)
     L_s = sublimation_latent_heat(constants, T)
-    thermodynamic_constants = isnothing(constants) ? ThermodynamicConstants(FT) : constants
-    Rᵛ = FT(vapor_gas_constant(thermodynamic_constants))
+    Rᵛ = FT(vapor_gas_constant(constants))
 
     K_a = transport.K_a
     D_v = transport.D_v
     nu  = transport.nu
 
     # M10: use mixing ratio convention (Fortran: rho*Ls*Dv*(qsat0-Qv))
-    Rᵈ = FT(dry_air_gas_constant(thermodynamic_constants))
+    Rᵈ = FT(dry_air_gas_constant(constants))
     ε = Rᵈ / Rᵛ
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
     q_sat0 = ε * e_s0 / max(P - e_s0, FT(1))
@@ -757,7 +756,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
 # Returns
 - Rate of liquid → ice refreezing [kg/kg/s]
 """
-@inline function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ)
+function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ)
     FT = typeof(qʷⁱ)
     prp = p3.process_rates
 
@@ -772,15 +771,14 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
 
     L_f = fusion_latent_heat(constants, T)
     L_s = sublimation_latent_heat(constants, T)
-    thermodynamic_constants = isnothing(constants) ? ThermodynamicConstants(FT) : constants
-    Rᵛ = FT(vapor_gas_constant(thermodynamic_constants))
+    Rᵛ = FT(vapor_gas_constant(constants))
 
     K_a = transport.K_a
     D_v = transport.D_v
     nu  = transport.nu
 
     # M10: use mixing ratio convention (Fortran: rho*Ls*Dv*(qsat0-Qv))
-    Rᵈ = FT(dry_air_gas_constant(thermodynamic_constants))
+    Rᵈ = FT(dry_air_gas_constant(constants))
     ε = Rᵈ / Rᵛ
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
     q_sat0 = ε * e_s0 / max(P - e_s0, FT(1))

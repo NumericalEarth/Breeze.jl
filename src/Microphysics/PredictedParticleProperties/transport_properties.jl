@@ -52,7 +52,7 @@ Float64
     D_v = FT(8.794e-5) * T_safe^FT(1.81) / P
     mu_air = FT(1.496e-6) * T_safe^FT(1.5) / (T_safe + FT(120))
     K_a = FT(1414) * mu_air
-    Rᵈ = FT(dry_air_gas_constant(ThermodynamicConstants()))
+    Rᵈ = FT(DRY_AIR_GAS_CONSTANT)
     nu = mu_air * Rᵈ * T_safe / P
     return (; D_v, K_a, nu)
 end

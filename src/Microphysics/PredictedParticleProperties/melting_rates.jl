@@ -43,7 +43,7 @@ where:
 # Returns
 - Rate of ice → rain conversion [kg/kg/s]
 """
-@inline function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
                                    constants, transport, μ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
@@ -61,15 +61,14 @@ where:
     # are provided (H1), and Rᵛ follows the same runtime thermodynamic source.
     L_f = fusion_latent_heat(constants, T)
     L_v = vaporization_latent_heat(constants, T)
-    thermodynamic_constants = isnothing(constants) ? ThermodynamicConstants(FT) : constants
-    Rᵛ = FT(vapor_gas_constant(thermodynamic_constants))
+    Rᵛ = FT(vapor_gas_constant(constants))
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
     nu  = transport.nu        # Kinematic viscosity [m²/s]
 
     # M10: use mixing ratio convention (Fortran: rho*Lv*Dv*(Qv-qsat0))
-    Rᵈ = FT(dry_air_gas_constant(thermodynamic_constants))
+    Rᵈ = FT(dry_air_gas_constant(constants))
     ε = Rᵈ / Rᵛ
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
     q_sat0 = ε * e_s0 / max(P - e_s0, FT(1))
