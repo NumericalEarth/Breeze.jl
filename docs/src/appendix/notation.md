@@ -65,12 +65,12 @@ The following table also uses a few conventions that suffuse the source code and
 | ``N^{cl}``                          | `Nᶜˡ`  |                                     | Volumetric cloud droplet number density, ``Nᶜˡ = ρ nᶜˡ`` (1/m³)               |
 | ``N^r``                             | `Nʳ`   |                                     | Volumetric rain drop number density, ``Nʳ = ρ nʳ`` (1/m³)                      |
 | ``N^a``                             | `Nᵃ`   |                                     | Volumetric aerosol number density, ``Nᵃ = ρ nᵃ`` (1/m³)                        |
-| ``\mathbb{W}^{cl}``                 | `𝕎ᶜˡ`  |                                     | Terminal velocity of cloud liquid (scalar, positive downward)                  |
-| ``\mathbb{W}^{ci}``                 | `𝕎ᶜⁱ`  |                                     | Terminal velocity of cloud ice (scalar, positive downward)                     |
-| ``\mathbb{W}^r``                    | `𝕎ʳ`   |                                     | Terminal velocity of rain (scalar, positive downward)                          |
-| ``\mathbb{W}^s``                    | `𝕎ˢ`   |                                     | Terminal velocity of snow (scalar, positive downward)                          |
-| ``\mathbb{W}^{L}``                 | `𝕎ᴸ`  | `AM.sedimentation_velocities.ρqᴸ.w` | Effective total liquid sedimentation velocity (mass-weighted average; negative for downward motion) |
-| ``\mathbb{W}^{I}``                 | `𝕎ᴵ`  | `AM.sedimentation_velocities.ρqᴵ.w` | Effective total ice sedimentation velocity (mass-weighted average; negative for downward motion)    |
+| ``w^{cl}``                           | `wᶜˡ`  |                                     | Cloud liquid sedimentation velocity field (vertical component; negative for downward motion)         |
+| ``w^{ci}``                           | `wᶜⁱ`  |                                     | Cloud ice sedimentation velocity field (vertical component; negative for downward motion)            |
+| ``w^r``                              | `wʳ`   |                                     | Rain sedimentation velocity field (vertical component; negative for downward motion)                 |
+| ``w^s``                              | `wˢ`   |                                     | Snow sedimentation velocity field (vertical component; negative for downward motion)                 |
+| ``w^{L}``                            | `wᴸ`   | `AM.sedimentation_velocities.ρqᴸ.w` | Effective total liquid sedimentation velocity field (mass-weighted average; negative for downward motion) |
+| ``w^{I}``                            | `wᴵ`   | `AM.sedimentation_velocities.ρqᴵ.w` | Effective total ice sedimentation velocity field (mass-weighted average; negative for downward motion)    |
 | ``qᵛ⁺``                             | `qᵛ⁺`  |                                     | Saturation specific humidity over a surface                                    |
 | ``qᵛ⁺ˡ``                            | `qᵛ⁺ˡ` |                                     | Saturation specific humidity over a planar liquid surface                      |
 | ``qᵛ⁺ⁱ``                            | `qᵛ⁺ⁱ` |                                     | Saturation specific humidity over a planar ice surface                         |
