@@ -1,6 +1,8 @@
 module Advection
 
-export div_ρUc
+export div_ρUc,
+       surface_advective_tracer_flux,
+       SurfacePrecipitationFluxKernel
 
 using Oceananigans.Advection:
     _advective_tracer_flux_x,
@@ -12,7 +14,9 @@ using Oceananigans.Advection:
     bounded_tracer_flux_divergence_z
 
 using Oceananigans.Fields: ZeroField
-using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
+using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
+using Oceananigans.Utils: SumOfArrays
+using Adapt: Adapt, adapt
 
 using ..AtmosphereModels: AtmosphereModels, div_ρUc
 
@@ -44,6 +48,55 @@ end
     div_y = bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c)
     div_z = bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, U.w, c)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
+end
+
+#####
+##### Advection-consistent surface flux
+#####
+
+"""
+    surface_advective_tracer_flux(i, j, grid, advection, ρ, w, c)
+
+Compute the downward advective mass flux per unit area at the bottom face (`k = 1`)
+for tracer `c` advected by vertical velocity `w` through density field `ρ`, using the
+given `advection` scheme.
+
+This evaluates the same face flux that [`div_ρUc`](@ref) uses at the bottom boundary,
+ensuring numerical consistency between the diagnosed surface flux and the actual mass
+leaving the domain during time stepping.
+
+Returns a positive value for downward (out-of-domain) flux.
+"""
+@inline function surface_advective_tracer_flux(i, j, grid, advection, ρ, w, c)
+    flux_Az = _advective_tracer_flux_z(i, j, 1, grid, advection, w, c)
+    ρ_face = ℑzᵃᵃᶠ(i, j, 1, grid, ρ)
+    return -ρ_face * flux_Az / Azᶜᶜᶠ(i, j, 1, grid)
+end
+
+"""
+    SurfacePrecipitationFluxKernel(advection)
+
+Kernel for [`KernelFunctionOperation`](@extref Oceananigans.AbstractOperations.KernelFunctionOperation)
+that computes the advection-consistent precipitation flux at the bottom boundary.
+
+The kernel is called as `kernel(i, j, k, grid, ρ, wᵗ, wˢᵉᵈ, c)` where `ρ` is the
+reference density, `wᵗ` is the vertical transport velocity used by tracer advection,
+`wˢᵉᵈ` is the sedimentation velocity, and `c` is the specific tracer (e.g., `qʳ`). Pass
+these four fields as arguments to the `KernelFunctionOperation`:
+
+    kernel = SurfacePrecipitationFluxKernel(model.advection.ρqʳ)
+    op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid, ρ, wᵗ, wʳ, qʳ)
+"""
+struct SurfacePrecipitationFluxKernel{A}
+    advection :: A
+end
+
+Adapt.adapt_structure(to, k::SurfacePrecipitationFluxKernel) =
+    SurfacePrecipitationFluxKernel(adapt(to, k.advection))
+
+@inline function (kernel::SurfacePrecipitationFluxKernel)(i, j, k_idx, grid, ρ, wᵗ, wˢᵉᵈ, c)
+    w_total = SumOfArrays{2}(wᵗ, wˢᵉᵈ)
+    return surface_advective_tracer_flux(i, j, grid, kernel.advection, ρ, w_total, c)
 end
 
 end # module

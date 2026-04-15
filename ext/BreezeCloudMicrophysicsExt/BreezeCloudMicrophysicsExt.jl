@@ -73,6 +73,8 @@ using Oceananigans.Fields: ZFaceField
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, Open
 using Adapt: Adapt, adapt
 
+using Breeze.Advection: SurfacePrecipitationFluxKernel
+
 include("cloud_microphysics_translations.jl")
 include("zero_moment_microphysics.jl")
 include("one_moment_microphysics.jl")

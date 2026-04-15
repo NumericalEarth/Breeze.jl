@@ -792,8 +792,10 @@ $(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
 
-The surface precipitation flux is ``-wʳ ρqʳ`` at the bottom face (`k = 1`), representing
-the rate at which rain mass leaves the domain through the bottom boundary.
+The surface precipitation flux is computed using the same advection scheme that
+transports precipitating tracers during time stepping, evaluated at the bottom
+face (`k = 1`). This ensures numerical consistency between the diagnosed flux and
+the actual mass leaving the domain through the advection operator ``\\nabla \\cdot (\\rho \\boldsymbol{U} c)``.
 
 Units: kg/m²/s (positive = downward flux out of domain)
 

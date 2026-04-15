@@ -15,6 +15,7 @@ using .BreezeCloudMicrophysicsExt:
 
 using Breeze.Microphysics: ConstantRateCondensateFormation
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.Operators: ℑzᵃᵃᶠ
 
 #####
 ##### Two-moment microphysics tests
@@ -147,9 +148,12 @@ end
     @test spf isa Field
     compute!(spf)
 
+    # The surface precipitation flux uses the advection scheme's face reconstruction.
+    # The density is face-interpolated (ℑz) to match the advection operator.
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
-    ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
-    expected_flux = -wʳ * ρqʳ  # wʳ is a vertical velocity vector component
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
+    expected_flux = -ρ_face * wʳ * qʳ
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] ≥ 0

@@ -61,40 +61,23 @@ $(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the precipitation flux at the bottom boundary.
 
-The surface precipitation flux is ``-wʳ ρqʳ`` at `k = 1` (bottom face), representing
-the rate at which rain mass leaves the domain through the bottom boundary.
+The surface precipitation flux is computed using the same advection scheme that
+transports rain during time stepping, evaluated at the bottom face (`k = 1`).
+This ensures numerical consistency between the diagnosed flux and the actual
+mass leaving the domain through the advection operator.
 
 Units: kg/m²/s (positive = downward, out of domain)
-
-Note: The returned value is positive when rain is falling out of the domain
-(`wʳ` is negative for downward sedimentation).
 """
 function AtmosphereModels.surface_precipitation_flux(model, microphysics::OneMomentCloudMicrophysics)
     grid = model.grid
+    ρ = model.dynamics.reference_state.density
+    wᵗ = AtmosphereModels.transport_velocities(model).w
     wʳ = model.microphysical_fields.wʳ
-    ρqʳ = model.microphysical_fields.ρqʳ
-    kernel = SurfacePrecipitationFluxKernel(wʳ, ρqʳ)
-    op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid)
+    qʳ = model.microphysical_fields.qʳ
+    advection = model.advection.ρqʳ
+    kernel = SurfacePrecipitationFluxKernel(advection)
+    op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid, ρ, wᵗ, wʳ, qʳ)
     return Field(op)
-end
-
-struct SurfacePrecipitationFluxKernel{W, R}
-    sedimentation_velocity :: W
-    rain_density :: R
-end
-
-Adapt.adapt_structure(to, k::SurfacePrecipitationFluxKernel) =
-    SurfacePrecipitationFluxKernel(adapt(to, k.sedimentation_velocity),
-                                    adapt(to, k.rain_density))
-
-@inline function (kernel::SurfacePrecipitationFluxKernel)(i, j, k_idx, grid)
-    # Flux at bottom face (k=1), ignore k_idx since this is a 2D field
-    # wʳ < 0 (downward), so -wʳ * ρqʳ > 0 represents flux out of domain
-    @inbounds wʳ = kernel.sedimentation_velocity[i, j, 1]
-    @inbounds ρqʳ = kernel.rain_density[i, j, 1]
-
-    # Return positive flux for rain leaving domain (downward)
-    return -wʳ * ρqʳ
 end
 
 #####

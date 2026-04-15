@@ -11,6 +11,20 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 using Breeze.Microphysics: ConstantRateCondensateFormation
 
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.Fields: ZeroField, ZFaceField
+using Oceananigans.Operators: ℑzᵃᵃᶠ
+
+struct MockSurfaceFluxTransportModel{G, D, V, M, A, W}
+    grid :: G
+    dynamics :: D
+    velocities :: V
+    microphysical_fields :: M
+    advection :: A
+    transport_w :: W
+end
+
+Breeze.AtmosphereModels.transport_velocities(model::MockSurfaceFluxTransportModel) =
+    (; u = ZeroField(), v = ZeroField(), w = model.transport_w)
 
 #####
 ##### One-moment microphysics tests
@@ -217,12 +231,53 @@ end
     @test spf isa Field
     compute!(spf)
 
+    # The surface precipitation flux uses the advection scheme's face reconstruction.
+    # For uniform qʳ with Centered(order=2) advection, the face-reconstructed tracer
+    # equals its cell-center value. The density is face-interpolated (ℑz) to match
+    # the advection operator.
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
-    ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
-    expected_flux = -wʳ * ρqʳ  # wʳ is a vertical velocity vector component
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
+    expected_flux = -ρ_face * wʳ * qʳ
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] > 0
+end
+
+@testset "Surface precipitation flux uses transport velocities [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; dynamics, microphysics)
+
+    set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0.001)
+
+    transport_w = set!(ZFaceField(grid), FT(-1))
+    mock_model = MockSurfaceFluxTransportModel(model.grid,
+                                               model.dynamics,
+                                               model.velocities,
+                                               model.microphysical_fields,
+                                               model.advection,
+                                               transport_w)
+
+    spf = surface_precipitation_flux(mock_model, microphysics)
+    compute!(spf)
+
+    wᵗ = @allowscalar transport_w[1, 1, 1]
+    wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
+
+    expected_flux = -ρ_face * (wᵗ + wʳ) * qʳ
+    sedimentation_only_flux = -ρ_face * wʳ * qʳ
+
+    @test !isapprox(expected_flux, sedimentation_only_flux)
+    @test @allowscalar spf[1, 1] ≈ expected_flux
 end
 
 # Consolidated simulation-based tests (reduced simulation times)
