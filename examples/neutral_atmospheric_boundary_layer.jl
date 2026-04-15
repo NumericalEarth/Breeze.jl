@@ -214,9 +214,13 @@ outputs = merge(model.velocities, model.tracers, avg_outputs_varlist)
 avg_outputs = NamedTuple(name => Average(@at((Center, Center, Center), outputs[name]), dims=(1, 2))
                          for name in keys(outputs))
 
+∂z_outputs = (; ∂z_u=u, ∂z_v=v, ∂z_θ=θ)
+avg_∂z_outputs = NamedTuple(name => Average(@at((Center, Center, Center), ∂z(outputs[name])), dims=(1, 2))
+                            for name in keys(∂z_outputs))
+
 avg_filename = "abl_averages.jld2"
 avg_output_interval = 10minutes
-simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
+simulation.output_writers[:averages] = JLD2Writer(model, merge(avg_outputs, avg_∂z_outputs);
                                                   filename = avg_filename,
                                                   schedule = AveragedTimeInterval(avg_output_interval),
                                                   overwrite_existing = true)
@@ -293,6 +297,9 @@ WD_mean_ts = FieldTimeSeries(loc, grid, times)
  uw_sgs_ts = FieldTimeSeries(loc, grid, times)
  vw_sgs_ts = FieldTimeSeries(loc, grid, times)
  θw_sgs_ts = FieldTimeSeries(loc, grid, times)
+   ∂z_u_ts = FieldTimeSeries(loc, grid, times)
+   ∂z_v_ts = FieldTimeSeries(loc, grid, times)
+   ∂z_θ_ts = FieldTimeSeries(loc, grid, times)
 
 # and then we loop over all saved fields and compute what we want.
 
@@ -308,6 +315,9 @@ for n in 1:Nt
     uw_n = uw_ts[n]
     vw_n = vw_ts[n]
     θw_n = θw_ts[n]
+    ∂z_u_n = ∂z_u_ts[n]
+    ∂z_v_n = ∂z_v_ts[n]
+    ∂z_θ_n = ∂z_θ_ts[n]
 
     WS_mean_ts[n] .= sqrt(u_n^2 + v_n^2)
     interior(WD_mean_ts[n]) .= @. mod(270 - atand($interior(v_n), $interior(u_n)), 360)
@@ -318,13 +328,9 @@ for n in 1:Nt
     vw_res_ts[n] .= ρᵣ * (vw_n - v_n * w_n) / (ρ₀ * u★^2)
     θw_res_ts[n] .= θw_n - θ_n * w_n
 
-    ∂z_u = @at loc ∂z(u_n)
-    ∂z_v = @at loc ∂z(v_n)
-    ∂z_θ = @at loc ∂z(θ_n)
-
-    uw_sgs_ts[n] .= -ρᵣ * νₑ_n * ∂z_u / (ρ₀ * u★^2)
-    vw_sgs_ts[n] .= -ρᵣ * νₑ_n * ∂z_v / (ρ₀ * u★^2)
-    θw_sgs_ts[n] .= -νₑ_n * ∂z_θ / closure.Pr
+    uw_sgs_ts[n] .= -ρᵣ * νₑ_n * ∂z_u_n / (ρ₀ * u★^2)
+    vw_sgs_ts[n] .= -ρᵣ * νₑ_n * ∂z_v_n / (ρ₀ * u★^2)
+    θw_sgs_ts[n] .= -νₑ_n * ∂z_θ_n / closure.Pr
 end
 
 # Define a colormap for each time.
