@@ -210,7 +210,7 @@ avg_outputs_varlist = (;
 outputs = merge(model.velocities, model.tracers, avg_outputs_varlist)
 
 # After computing the output quantity and prior to calculating the slab average,
-# staggered quantities are averaged to cell centers
+# staggered quantities are interpolated to cell centers.
 avg_outputs = NamedTuple(name => Average(@at((Center, Center, Center), outputs[name]), dims=(1, 2))
                          for name in keys(outputs))
 
