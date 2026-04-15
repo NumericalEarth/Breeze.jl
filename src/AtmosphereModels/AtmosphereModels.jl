@@ -85,7 +85,7 @@ export
 
     # Transport interface (for terrain-following coordinates)
     transport_velocities,
-    transport_momentum,
+    advecting_momentum,
 
     # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
     compute_x_momentum_tendency!,
