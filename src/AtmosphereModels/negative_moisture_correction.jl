@@ -260,7 +260,7 @@ end
     # Use ifelse (not if/else) for GPU kernel compatibility.
     # When Nz < 2, clamp indices to 1 so reads are valid but dq_mass = 0.
     k_bot = 1
-    k_top = max(2, Nz)  # safe index: equals 2 when Nz ≥ 2, equals Nz when Nz < 2
+    k_top = min(2, Nz)  # safe index: equals 2 when Nz ≥ 2, equals Nz when Nz < 2
 
     @inbounds ρqᵛ_bot = ρqᵛᵉ[i, j, k_bot]
     @inbounds ρ_bot = ρ₀[i, j, k_bot]
