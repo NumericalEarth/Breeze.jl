@@ -540,29 +540,29 @@ end
 @inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵛ, μ) = MoistureMassFractions(qᵛ)
 
 #####
-##### Sedimentation speed interface
+##### Sedimentation velocity interface
 #####
 #
-# The sedimentation_speed interface returns a **positive magnitude** [m/s].
-# The sign convention (downward = negative w) is handled by NegatedField.
+# The sedimentation_velocity interface returns a vertical velocity component [m/s].
+# Falling hydrometeors have negative w because z is positive upward.
 #
 # Microphysics schemes implement:
-#   sedimentation_speed(microphysics, microphysical_fields, name) → field or nothing
+#   sedimentation_velocity(microphysics, microphysical_fields, name) → field or nothing
 #   moisture_phase(microphysics, name) → Val(:liquid), Val(:ice), or nothing
 #
-# The generic microphysical_velocities wrapper calls sedimentation_speed and
-# wraps the result in a NegatedField for the w component.
+# The generic microphysical_velocities wrapper calls sedimentation_velocity and
+# uses the result as the w component.
 
 """
 $(TYPEDSIGNATURES)
 
-Return the sedimentation speed field (positive magnitude, [m/s]) for
+Return the sedimentation velocity field (vertical component, [m/s]) for
 the prognostic tracer `name`, or `nothing` if the tracer does not sediment.
 
 Microphysics schemes should extend this function for each sedimenting tracer.
 """
-@inline sedimentation_speed(microphysics, microphysical_fields, name) = nothing
-@inline sedimentation_speed(microphysics::Nothing, microphysical_fields, name) = nothing
+@inline sedimentation_velocity(microphysics, microphysical_fields, name) = nothing
+@inline sedimentation_velocity(microphysics::Nothing, microphysical_fields, name) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -579,9 +579,6 @@ Microphysics schemes should extend this function.
     NegatedField{F}
 
 A lightweight wrapper that negates field values on access.
-
-Used to convert positive sedimentation speeds into negative vertical
-velocities (downward).
 """
 struct NegatedField{F}
     field :: F
@@ -600,19 +597,18 @@ Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
 The velocities are added to the bulk flow velocities for advecting the tracer.
 For example, the terminal velocity of falling rain.
 
-The generic implementation calls [`sedimentation_speed`](@ref) and wraps
-the result in a [`NegatedField`](@ref) so that positive speed becomes
-negative (downward) vertical velocity.
+The generic implementation calls [`sedimentation_velocity`](@ref) and uses
+the result as the vertical velocity component.
 """
 @inline microphysical_velocities(microphysics::Nothing, microphysical_fields, name) = nothing
 
 @inline function microphysical_velocities(microphysics, microphysical_fields, name)
-    speed = sedimentation_speed(microphysics, microphysical_fields, name)
-    return sedimentation_velocity_tuple(speed)
+    w = sedimentation_velocity(microphysics, microphysical_fields, name)
+    return sedimentation_velocity_tuple(w)
 end
 
 @inline sedimentation_velocity_tuple(::Nothing) = nothing
-@inline sedimentation_velocity_tuple(speed) = (; u = ZeroField(), v = ZeroField(), w = NegatedField(speed))
+@inline sedimentation_velocity_tuple(w) = (; u = ZeroField(), v = ZeroField(), w)
 
 #####
 ##### Effective sedimentation velocities
@@ -621,10 +617,8 @@ end
 # Precomputed effective sedimentation velocities for total liquid and total ice.
 # These are mass-weighted averages over all sedimenting species within each phase:
 #
-#   𝕎ᴸ = - Σᵢ(wᵢ * qᵢ) / Σᵢ(qᵢ)    for liquid species
-#   𝕎ᴵ = - Σᵢ(wᵢ * qᵢ) / Σᵢ(qᵢ)    for ice species
-#
-# The negative sign converts positive sedimentation speed to downward velocity.
+#   wᴸ = Σᵢ(wᵢ * qᵢ) / Σᵢ(qᵢ)    for liquid species
+#   wᴵ = Σᵢ(wᵢ * qᵢ) / Σᵢ(qᵢ)    for ice species
 
 """
 $(TYPEDSIGNATURES)
@@ -653,10 +647,10 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Build a tuple of `(sedimentation_speed_field, humidity_field)` pairs for prognostic
+Build a tuple of `(sedimentation_velocity_field, humidity_field)` pairs for prognostic
 mass tracers (names starting with "ρq") that match the given `phase` (`:liquid` or `:ice`).
 
-Each pair consists of the sedimentation speed field and the corresponding specific
+Each pair consists of the sedimentation velocity field and the corresponding specific
 humidity field (e.g., `:ρqʳ` maps to `:qʳ`).
 """
 sedimentation_constituent(microphysics, μ, ::Tuple{}, phase) = ()
@@ -667,11 +661,11 @@ function sedimentation_constituent(microphysics, μ, names::Tuple{Symbol, Vararg
     s = string(name)
     is_mass_tracer = length(s) >= 2 && s[1] == 'ρ' && s[nextind(s, 1)] == 'q'
     if is_mass_tracer && moisture_phase(microphysics, Val(name)) === phase
-        speed = sedimentation_speed(microphysics, μ, Val(name))
-        if !isnothing(speed)
+        w = sedimentation_velocity(microphysics, μ, Val(name))
+        if !isnothing(w)
             specific_name = specific_field_name(name)
             q_field = getproperty(μ, specific_name)
-            return ((speed, q_field), rest...)
+            return ((w, q_field), rest...)
         end
     end
     return rest
@@ -709,25 +703,25 @@ end
     i, j, k = @index(Global, NTuple)
 
     # Liquid phase
-    numerator_l = weighted_sedimentation_speed_sum(i, j, k, liquid_components)
+    numerator_l = weighted_sedimentation_velocity_sum(i, j, k, liquid_components)
     denominator_l = humidity_sum(i, j, k, liquid_components)
-    wᴸ_value = ifelse(denominator_l > 0, -numerator_l / denominator_l, zero(grid))
+    wᴸ_value = ifelse(denominator_l > 0, numerator_l / denominator_l, zero(grid))
     @inbounds wᴸ[i, j, k] = wᴸ_value
 
     # Ice phase
-    numerator_i = weighted_sedimentation_speed_sum(i, j, k, ice_components)
+    numerator_i = weighted_sedimentation_velocity_sum(i, j, k, ice_components)
     denominator_i = humidity_sum(i, j, k, ice_components)
-    wᴵ_value = ifelse(denominator_i > 0, -numerator_i / denominator_i, zero(grid))
+    wᴵ_value = ifelse(denominator_i > 0, numerator_i / denominator_i, zero(grid))
     @inbounds wᴵ[i, j, k] = wᴵ_value
 end
 
 # Recursive sum: Σ(wᵢ * qᵢ)
-@inline weighted_sedimentation_speed_sum(i, j, k, ::Tuple{}) = 0
-@inline function weighted_sedimentation_speed_sum(i, j, k, components::Tuple)
-    speed_field, q_field = first(components)
-    @inbounds w_val = speed_field[i, j, k]
+@inline weighted_sedimentation_velocity_sum(i, j, k, ::Tuple{}) = 0
+@inline function weighted_sedimentation_velocity_sum(i, j, k, components::Tuple)
+    w_field, q_field = first(components)
+    @inbounds w_val = w_field[i, j, k]
     @inbounds q_val = q_field[i, j, k]
-    return w_val * max(0, q_val) + weighted_sedimentation_speed_sum(i, j, k, Base.tail(components))
+    return w_val * max(0, q_val) + weighted_sedimentation_velocity_sum(i, j, k, Base.tail(components))
 end
 
 # Recursive sum: Σ qᵢ
@@ -798,7 +792,7 @@ $(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
 
-The surface precipitation flux is ``wʳ ρqʳ`` at the bottom face (`k = 1`), representing
+The surface precipitation flux is ``-wʳ ρqʳ`` at the bottom face (`k = 1`), representing
 the rate at which rain mass leaves the domain through the bottom boundary.
 
 Units: kg/m²/s (positive = downward flux out of domain)

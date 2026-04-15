@@ -92,33 +92,33 @@ iterative adjustment to partition moisture between vapor and condensate.
 | Auxiliary/Diagnostic | `CenterField` | None needed | `qᵛ`, `qˡ`, `qᶜˡ`, `qʳ` |
 | Velocities | `ZFaceField` | `bottom=nothing` | `wʳ`, `wᶜˡ`, `wʳₙ` |
 
-### Sedimentation Speed and Bulk Sedimentation Velocities
+### Sedimentation Velocities and Bulk Sedimentation Velocities
 
-#### The `sedimentation_speed` interface
+#### The `sedimentation_velocity` interface
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `sedimentation_speed` | `(microphysics, microphysical_fields, name)` | **Primary interface**: return positive sedimentation speed field for tracer `name`, or `nothing` |
+| `sedimentation_velocity` | `(microphysics, microphysical_fields, name)` | **Primary interface**: return vertical sedimentation velocity field for tracer `name`, or `nothing` |
 | `moisture_phase` | `(microphysics, name)` | Return `Val(:liquid)`, `Val(:ice)`, or `nothing` for phase classification |
-| `microphysical_velocities` | `(microphysics, microphysical_fields, name)` | **Generic wrapper** (don't override): converts sedimentation speed to negative velocity tuple via `NegatedField` |
+| `microphysical_velocities` | `(microphysics, microphysical_fields, name)` | **Generic wrapper** (don't override): wraps sedimentation velocity in a velocity tuple |
 
-**Design principle**: Schemes implement `sedimentation_speed` and `moisture_phase`; the generic
-`microphysical_velocities` wrapper calls `sedimentation_speed` and constructs a
-`(u=ZeroField(), v=ZeroField(), w=NegatedField(speed))` tuple for the advection operator.
+**Design principle**: Schemes implement `sedimentation_velocity` and `moisture_phase`; the generic
+`microphysical_velocities` wrapper calls `sedimentation_velocity` and constructs a
+`(u=ZeroField(), v=ZeroField(), w=w)` tuple for the advection operator.
 
-#### From individual sedimentation speeds to effective bulk velocities
+#### From individual sedimentation velocities to effective bulk velocities
 
-The effective total liquid and total ice sedimentation speeds are mass-weighted averages
+The effective total liquid and total ice sedimentation velocities are mass-weighted averages
 of their sub-components:
 
 ```math
-\mathbb{W}^{L} = \frac{q^{cl} \, \mathbb{W}^{cl} + q^r \, \mathbb{W}^r}{q^l}, \qquad
-\mathbb{W}^{I} = \frac{q^{ci} \, \mathbb{W}^{ci} + q^s \, \mathbb{W}^s}{q^i}
+w^{L} = \frac{q^{cl} \, w^{cl} + q^r \, w^r}{q^l}, \qquad
+w^{I} = \frac{q^{ci} \, w^{ci} + q^s \, w^s}{q^i}
 ```
 
-The `(speed_field, humidity_field)` pairs are built generically from `sedimentation_speed`
+The `(velocity_field, humidity_field)` pairs are built generically from `sedimentation_velocity`
 and `moisture_phase`: for each mass tracer in `prognostic_field_names` (names starting with `:ρq`),
-`sedimentation_speed` is called. If non-nothing, `moisture_phase` classifies the tracer as liquid
+`sedimentation_velocity` is called. If non-nothing, `moisture_phase` classifies the tracer as liquid
 or ice. Number tracers (e.g. `:ρnᶜˡ`) return `nothing` from `moisture_phase` and are excluded.
 
 #### Model-level bulk sedimentation velocities
@@ -169,13 +169,13 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 |----------|---------|
 | `materialize_microphysical_fields(microphysics, grid, bcs)` | Create prognostic + auxiliary fields |
 | `update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)` | Update auxiliary fields at grid points |
-| `sedimentation_speed(microphysics, μ_fields, name)` | Positive sedimentation speed per tracer |
+| `sedimentation_velocity(microphysics, μ_fields, name)` | Vertical sedimentation velocity per tracer |
 | `moisture_phase(microphysics, name)` | Phase classification (`:liquid` or `:ice`) |
 
 **Why these are Eulerian-only**:
 - **Field materialization**: Parcel models don't have fields; they store scalars directly in `ParcelState`.
 - **Auxiliary updates**: Parcel models recompute derived quantities on-the-fly; they don't store them in fields.
-- **Sedimentation speeds**: Sedimentation is a grid-based concept (advection through space). In parcel models,
+- **Sedimentation velocities**: Sedimentation is a grid-based concept (advection through space). In parcel models,
   sedimentation would be modeled as a mass sink in `microphysical_tendency`, not as spatial transport.
 
 ### Summary Table
@@ -188,7 +188,7 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `prognostic_field_names` | ✓ | ✓ | Required for both |
 | `materialize_microphysical_fields` | — | ✓ | Fields for grid storage |
 | `update_microphysical_auxiliaries!` | — | ✓ | Write to diagnostic fields |
-| `sedimentation_speed` | — | ✓ | Positive sedimentation speed per tracer |
+| `sedimentation_velocity` | — | ✓ | Vertical sedimentation velocity per tracer |
 | `moisture_phase` | — | ✓ | Phase classification for bulk velocities |
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
 | `grid_microphysical_tendency` | — | — | Generic wrapper (don't override) |
@@ -242,6 +242,6 @@ Schemes may define their own state types inheriting from `AbstractMicrophysicalS
 
 5. **Explicit returns**: All mutating functions `return nothing`.
 
-6. **Sedimentation is Eulerian**: Sedimentation speeds (`sedimentation_speed`) are only
+6. **Sedimentation is Eulerian**: Sedimentation velocities (`sedimentation_velocity`) are only
    meaningful for grid-based simulations where tracers advect through space. In parcel models,
    precipitation loss should be modeled as a sink term in `microphysical_tendency`.

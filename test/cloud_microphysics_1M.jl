@@ -1,5 +1,5 @@
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_speed, moisture_phase
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, moisture_phase
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using GPUArraysCore: @allowscalar
@@ -219,7 +219,7 @@ end
 
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
-    expected_flux = wʳ * ρqʳ  # wʳ is positive (sedimentation speed magnitude)
+    expected_flux = -wʳ * ρqʳ  # wʳ is a vertical velocity vector component
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] > 0
@@ -314,7 +314,7 @@ end
     @test contains(str_ne, "cloud_formation")
 end
 
-@testset "sedimentation_speed, moisture_phase, and microphysical_velocities [$(FT)]" for FT in test_float_types()
+@testset "sedimentation_velocity, moisture_phase, and microphysical_velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -328,21 +328,21 @@ end
 
     μ = model.microphysical_fields
 
-    # sedimentation_speed returns positive magnitude fields
-    fs_rain = sedimentation_speed(microphysics, μ, Val(:ρqʳ))
-    @test fs_rain !== nothing
-    @test fs_rain === μ.wʳ
+    # sedimentation_velocity returns vertical velocity component fields
+    w_rain = sedimentation_velocity(microphysics, μ, Val(:ρqʳ))
+    @test w_rain !== nothing
+    @test w_rain === μ.wʳ
 
     # WPNE1M has cloud liquid sedimentation
-    fs_cloud = sedimentation_speed(microphysics, μ, Val(:ρqᶜˡ))
-    @test fs_cloud !== nothing
-    @test fs_cloud === μ.wᶜˡ
+    w_cloud = sedimentation_velocity(microphysics, μ, Val(:ρqᶜˡ))
+    @test w_cloud !== nothing
+    @test w_cloud === μ.wᶜˡ
 
     # moisture_phase classification
     @test moisture_phase(microphysics, Val(:ρqʳ)) === Val(:liquid)
     @test moisture_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
 
-    # microphysical_velocities wraps sedimentation_speed with NegatedField
+    # microphysical_velocities wraps sedimentation_velocity in a velocity tuple
     vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
     @test vel_rain !== nothing
     @test haskey(vel_rain, :w)
@@ -351,9 +351,9 @@ end
     @test vel_cloud !== nothing
     @test haskey(vel_cloud, :w)
 
-    # Sedimentation speed values should be positive
+    # Sedimentation velocity values should be negative downward
     wʳ = @allowscalar μ.wʳ[1, 1, 2]
-    @test wʳ >= 0
+    @test wʳ <= 0
 
     # Effective sedimentation velocities exist on model
     bsv = model.sedimentation_velocities
@@ -371,7 +371,7 @@ end
 
     @test qʳ_val + qᶜˡ_val > 0
     @test wᴸ_val <= 0
-    @test wᴸ_val ≈ -(wʳ_val * qʳ_val + wᶜˡ_val * qᶜˡ_val) / (qʳ_val + qᶜˡ_val)
+    @test wᴸ_val ≈ (wʳ_val * qʳ_val + wᶜˡ_val * qᶜˡ_val) / (qʳ_val + qᶜˡ_val)
 end
 
 @testset "Mixed-phase non-equilibrium snow field materialization [$(FT)]" for FT in test_float_types()

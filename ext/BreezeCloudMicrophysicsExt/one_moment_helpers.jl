@@ -61,13 +61,13 @@ $(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the precipitation flux at the bottom boundary.
 
-The surface precipitation flux is ``wʳ ρqʳ`` at `k = 1` (bottom face), representing
+The surface precipitation flux is ``-wʳ ρqʳ`` at `k = 1` (bottom face), representing
 the rate at which rain mass leaves the domain through the bottom boundary.
 
 Units: kg/m²/s (positive = downward, out of domain)
 
 Note: The returned value is positive when rain is falling out of the domain
-(the sedimentation speed `wʳ` is stored as a positive magnitude).
+(`wʳ` is negative for downward sedimentation).
 """
 function AtmosphereModels.surface_precipitation_flux(model, microphysics::OneMomentCloudMicrophysics)
     grid = model.grid
@@ -79,22 +79,22 @@ function AtmosphereModels.surface_precipitation_flux(model, microphysics::OneMom
 end
 
 struct SurfacePrecipitationFluxKernel{W, R}
-    sedimentation_speed :: W
+    sedimentation_velocity :: W
     rain_density :: R
 end
 
 Adapt.adapt_structure(to, k::SurfacePrecipitationFluxKernel) =
-    SurfacePrecipitationFluxKernel(adapt(to, k.sedimentation_speed),
+    SurfacePrecipitationFluxKernel(adapt(to, k.sedimentation_velocity),
                                     adapt(to, k.rain_density))
 
 @inline function (kernel::SurfacePrecipitationFluxKernel)(i, j, k_idx, grid)
     # Flux at bottom face (k=1), ignore k_idx since this is a 2D field
-    # wʳ > 0 (sedimentation speed magnitude), so wʳ * ρqʳ > 0 represents flux out of domain
-    @inbounds wʳ = kernel.sedimentation_speed[i, j, 1]
+    # wʳ < 0 (downward), so -wʳ * ρqʳ > 0 represents flux out of domain
+    @inbounds wʳ = kernel.sedimentation_velocity[i, j, 1]
     @inbounds ρqʳ = kernel.rain_density[i, j, 1]
 
     # Return positive flux for rain leaving domain (downward)
-    return wʳ * ρqʳ
+    return -wʳ * ρqʳ
 end
 
 #####
