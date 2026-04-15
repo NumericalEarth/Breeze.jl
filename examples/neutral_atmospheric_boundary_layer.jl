@@ -331,6 +331,7 @@ end
 
 cmap = cgrad(:viridis)
 colors = [cmap[(n-1)/max(Nt-1, 1)] for n in 1:Nt]
+nothing #hide
 
 # Note that the AveragedTimeInterval schedule outputs the initial snapshot
 # followed by averaged snapshots at the requested output interval.
