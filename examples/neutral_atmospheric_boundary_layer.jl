@@ -215,7 +215,7 @@ avg_outputs = NamedTuple(name => Average(@at((Center, Center, Center), outputs[n
                          for name in keys(outputs))
 
 ∂z_outputs = (; ∂z_u=u, ∂z_v=v, ∂z_θ=θ)
-avg_∂z_outputs = NamedTuple(name => Average(@at((Center, Center, Center), ∂z(outputs[name])), dims=(1, 2))
+avg_∂z_outputs = NamedTuple(name => Average(@at((Center, Center, Center), ∂z(∂z_outputs[name])), dims=(1, 2))
                             for name in keys(∂z_outputs))
 
 avg_filename = "abl_averages.jld2"
