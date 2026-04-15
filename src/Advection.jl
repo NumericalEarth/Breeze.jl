@@ -8,10 +8,15 @@ using Oceananigans.Advection:
     _advective_tracer_flux_x,
     _advective_tracer_flux_y,
     _advective_tracer_flux_z,
+    _biased_interpolate_zᵃᵃᶠ,
     BoundsPreservingWENO,
+    LeftBias,
+    RightBias,
+    upwind_biased_product,
     bounded_tracer_flux_divergence_x,
     bounded_tracer_flux_divergence_y,
-    bounded_tracer_flux_divergence_z
+    bounded_tracer_flux_divergence_z,
+    _ω̂₁, _ω̂ₙ, _ε₂
 
 using Oceananigans.Fields: ZeroField
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
@@ -71,6 +76,38 @@ Returns a positive value for downward (out-of-domain) flux.
     flux_Az = _advective_tracer_flux_z(i, j, 1, grid, advection, w, c)
     ρ_face = ℑzᵃᵃᶠ(i, j, 1, grid, ρ)
     return -ρ_face * flux_Az / Azᶜᶜᶠ(i, j, 1, grid)
+end
+
+# Bounds-preserving WENO: replicate the bottom face flux from
+# bounded_tracer_flux_divergence_z, which applies a limiting coefficient θ
+# to the inward face reconstructions before computing the upwind flux.
+@inline function surface_advective_tracer_flux(i, j, grid, advection::BoundsPreservingWENO, ρ, w, c)
+    c₊ᴸ = _biased_interpolate_zᵃᵃᶠ(i, j, 2, grid, advection, LeftBias(),  c)
+    c₋ᴸ = _biased_interpolate_zᵃᵃᶠ(i, j, 1, grid, advection, LeftBias(),  c)
+    c₋ᴿ = _biased_interpolate_zᵃᵃᶠ(i, j, 1, grid, advection, RightBias(), c)
+
+    FT = eltype(c)
+    ω̂₁ = convert(FT, _ω̂₁)
+    ω̂ₙ = convert(FT, _ω̂ₙ)
+    ε₂ = convert(FT, _ε₂)
+
+    c_min = @inbounds advection.bounds[1]
+    c_max = @inbounds advection.bounds[2]
+
+    @inbounds cᵢⱼ = c[i, j, 1]
+    p̃ = (cᵢⱼ - ω̂₁ * c₋ᴿ - ω̂ₙ * c₊ᴸ) / (1 - 2ω̂₁)
+    M = max(p̃, c₊ᴸ, c₋ᴿ)
+    m = min(p̃, c₊ᴸ, c₋ᴿ)
+
+    θ_max = abs((c_max - cᵢⱼ) / (M - cᵢⱼ + ε₂))
+    θ_min = abs((c_min - cᵢⱼ) / (m - cᵢⱼ + ε₂))
+    θ = min(θ_max, θ_min, one(grid))
+
+    c₋ᴿ = θ * (c₋ᴿ - cᵢⱼ) + cᵢⱼ
+
+    @inbounds w⁻ = w[i, j, 1]
+    ρ_face = ℑzᵃᵃᶠ(i, j, 1, grid, ρ)
+    return -ρ_face * upwind_biased_product(w⁻, c₋ᴸ, c₋ᴿ)
 end
 
 """
