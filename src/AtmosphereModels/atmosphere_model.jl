@@ -2,15 +2,7 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
                     Centered, fields, prognostic_fields
-using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale
-
-# Oceananigans ≥ 0.106.6 defers WENO weight-computation selection until the backend
-# is known and requires `Advection.materialize_advection` to finalize it.
-# On older versions the function does not exist and schemes are fully specified at
-# construction, so identity is correct.
-_materialize_advection(scheme, grid) =
-    isdefined(Advection, :materialize_advection) ?
-        Advection.materialize_advection(scheme, grid) : scheme
+using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
@@ -261,8 +253,7 @@ function AtmosphereModel(grid;
     scalar_advection_tuple = with_tracers(scalar_names, scalar_advection, default_generator, with_velocities=false)
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
-    adapted_advection = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
-    materialized_advection = NamedTuple(name => _materialize_advection(scheme, grid) for (name, scheme) in pairs(adapted_advection))
+    materialized_advection = NamedTuple(name => materialize_advection(adapt_advection_order(scheme, grid), grid) for (name, scheme) in pairs(advection))
 
     model = AtmosphereModel(arch,
                             grid,
