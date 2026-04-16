@@ -796,7 +796,6 @@ end
 
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
-using Breeze.AtmosphereModels: dynamics_density
 
 @kernel function _p3_compute_and_cache_kernel!(μ, formulation, dynamics, grid, constants, p3, ρ_field)
     i, j, k = @index(Global, NTuple)
