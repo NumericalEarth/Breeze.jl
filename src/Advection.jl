@@ -66,7 +66,7 @@ Compute the downward advective mass flux per unit area at the bottom face (`k = 
 for tracer `c` advected by vertical velocity `w` through density field `ρ`, using the
 given `advection` scheme.
 
-This evaluates the same face flux that [`div_ρUc`](@ref) uses at the bottom boundary,
+This evaluates the same face flux that `div_ρUc` uses at the bottom boundary,
 ensuring numerical consistency between the diagnosed surface flux and the actual mass
 leaving the domain during time stepping.
 
@@ -113,7 +113,7 @@ end
 """
     SurfacePrecipitationFluxKernel(advection)
 
-Kernel for [`KernelFunctionOperation`](@extref Oceananigans.AbstractOperations.KernelFunctionOperation)
+Kernel for [`KernelFunctionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.AbstractOperations.KernelFunctionOperation)
 that computes the advection-consistent precipitation flux at the bottom boundary.
 
 The kernel is called as `kernel(i, j, k, grid, ρ, wᵗ, wˢᵉᵈ, c)` where `ρ` is the
