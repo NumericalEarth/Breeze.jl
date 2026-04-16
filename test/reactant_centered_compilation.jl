@@ -38,6 +38,8 @@ topologies = [
     ("Bounded, Bounded, Flat",       (Bounded,  Bounded,  Flat),     2),
     ("Periodic, Periodic, Periodic", (Periodic, Periodic, Periodic), 3),
     ("Periodic, Bounded, Bounded",   (Periodic, Bounded,  Bounded),  3),
+    ("Bounded, Bounded, Bounded",     (Bounded, Bounded, Bounded),   3),
+    ("Periodic, Periodic, Bounded",     (Bounded, Bounded, Bounded),   3),
 ]
 
 #####
