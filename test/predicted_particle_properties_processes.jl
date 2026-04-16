@@ -33,7 +33,6 @@ using Breeze.Microphysics.PredictedParticleProperties:
     rain_self_collection_rate,
     rain_breakup_rate,
     rain_terminal_velocity_mass_weighted,
-    cloud_condensation_rate,
     ventilation_enhanced_deposition,
     ice_melting_rate,
     ice_melting_rates,
@@ -47,6 +46,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     RainNumberWeightedVelocityEvaluator,
     RainEvaporationVentilationEvaluator,
     tabulated_function_1d,
+    ProcessRateParameters,
     homogeneous_freezing_cloud_rate,
     homogeneous_freezing_rain_rate,
     immersion_freezing_cloud_rate,
@@ -65,6 +65,95 @@ using Breeze.Thermodynamics:
 
 using Oceananigans: CPU, RectilinearGrid
 using Oceananigans.Fields: interior
+
+const PPP = Breeze.Microphysics.PredictedParticleProperties
+
+function p3_with_process_rates(p3, process_rates)
+    return PredictedParticlePropertiesMicrophysics(
+        p3.water_density,
+        p3.minimum_mass_mixing_ratio,
+        p3.minimum_number_mixing_ratio,
+        p3.ice,
+        p3.rain,
+        p3.cloud,
+        process_rates,
+        p3.precipitation_boundary_condition,
+        p3.aerosol)
+end
+
+function expected_fortran_rain_epsilon(p3, qʳ, nʳ, ρ, transport, FT)
+    prp = p3.process_rates
+    qʳ_eff = max(0, qʳ)
+    nʳ_eff = max(max(0, nʳ), FT(1e-16))
+    λ_r = PPP.rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
+    N₀ = nʳ_eff * λ_r
+    I_VD = p3.rain.evaporation(log10(λ_r))
+    I_const = FT(PPP.RAIN_F1R) / λ_r^2
+    Sc_cbrt = cbrt(transport.nu / max(transport.D_v, FT(1e-10)))
+    I_evap = I_const + FT(PPP.RAIN_F2R) * Sc_cbrt / sqrt(max(transport.nu, FT(1e-10))) * I_VD
+    epsilon_r = FT(2π) * N₀ * ρ * transport.D_v * I_evap
+    return ifelse(qʳ_eff >= p3.minimum_mass_mixing_ratio, epsilon_r, zero(FT))
+end
+
+function expected_fortran_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
+    FT = typeof(qⁱ)
+    Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
+    m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
+    ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ_air)
+    C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
+                                      p3.ice.deposition.ventilation_enhanced,
+                                      m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
+                                      transport.nu, transport.D_v, ρ_correction, p3, μ)
+    epsilon_i = FT(2π) * ρ * transport.D_v * max(max(0, nⁱ), FT(1e-16)) * C_fv
+    active = (max(0, qⁱ) >= p3.minimum_mass_mixing_ratio) &
+             (Fˡ < p3.process_rates.liquid_fraction_small)
+    return ifelse(active, epsilon_i, zero(FT))
+end
+
+function expected_reduced_fortran_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+                                              qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                              constants, transport, q, μ)
+    FT = typeof(qᶜˡ)
+    τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
+    Rᵛ = FT(Breeze.Thermodynamics.vapor_gas_constant(constants))
+    L_v = PPP.vaporization_latent_heat(constants, T)
+    L_s = PPP.sublimation_latent_heat(constants, T)
+    cᵖᵈ = constants.dry_air.heat_capacity
+
+    dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * L_v / (Rᵛ * T^2)
+    dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * L_s / (Rᵛ * T^2)
+    ab = 1 + L_v * dqᵛ⁺ˡ_dT / cᵖᵈ
+    abi = 1 + L_s * dqᵛ⁺ⁱ_dT / cᵖᵈ
+
+    epsc = PPP.cloud_condensation_epsilon(p3, qᶜˡ, nᶜˡ, ρ, transport.D_v)
+    epsr = expected_fortran_rain_epsilon(p3, qʳ, nʳ, ρ, transport, FT)
+    epsi = expected_fortran_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                        constants, transport, q, μ)
+
+    ice_liquid_coupling = (1 + L_s * dqᵛ⁺ˡ_dT / cᵖᵈ) / abi
+    xx = max(epsc + epsr + epsi * ice_liquid_coupling, FT(1e-20))
+    transient = (1 - exp(-xx * τ)) / τ
+    ssat_liquid = qᵛ - qᵛ⁺ˡ
+    aaa = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * epsi
+
+    qc_raw = (aaa * epsc / xx + (ssat_liquid - aaa / xx) * epsc / xx * transient) / ab
+    qr_raw = (aaa * epsr / xx + (ssat_liquid - aaa / xx) * epsr / xx * transient) / ab
+    qi_raw = (aaa * epsi / xx + (ssat_liquid - aaa / xx) * epsi / xx * transient) / abi +
+             (qᵛ⁺ˡ - qᵛ⁺ⁱ) * epsi / abi
+
+    condensation = ifelse(qc_raw < 0, zero(FT), min(qc_raw, qᵛ / τ))
+    rain_condensation = ifelse(qr_raw < 0, zero(FT), min(qr_raw, qᵛ / τ))
+    rain_evaporation = ifelse(qr_raw < 0, min(-qr_raw, max(0, qʳ) / τ), zero(FT))
+
+    is_sublimation = qi_raw < 0
+    deposition = ifelse(is_sublimation,
+                        -min(-qi_raw * p3.process_rates.calibration_factor_sublimation,
+                             max(0, qⁱ - qʷⁱ) / τ),
+                        min(qi_raw * p3.process_rates.calibration_factor_deposition, qᵛ / τ))
+
+    return (; condensation, rain_evaporation, rain_condensation, deposition)
+end
 
 @testset "P3 Processes" begin
 
@@ -628,31 +717,96 @@ using Oceananigans.Fields: interior
         @test rate_norain == 0
     end
 
-    @testset "cloud_condensation_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics()
+    @testset "coupled_saturation_adjustment_rates" begin
+        p3_base = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
         FT = Float64
         constants = ThermodynamicConstants(FT)
+        process_rates = ProcessRateParameters(FT; sink_limiting_timescale=FT(10))
+        p3 = p3_with_process_rates(p3_base, process_rates)
 
-        qcl = FT(1e-3)
-        T = FT(288.0)
-        qv_sat = FT(0.012)
+        ρ = FT(1)
+        T = FT(263.15)
+        P = FT(80000)
+        qᶜˡ = FT(1e-3)
+        nᶜˡ = FT(2e8)
+        qʳ = FT(0)
+        nʳ = FT(0)
+        qⁱ = FT(2e-4)
+        qʷⁱ = FT(0)
+        nⁱ = FT(2e4)
+        Fᶠ = FT(0)
+        ρᶠ = FT(400)
+        μ = FT(0)
 
-        q = MoistureMassFractions(FT(0.015), FT(1e-3), FT(0))
+        qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+        qᵛ = qᵛ⁺ˡ + FT(1e-4)
+        q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ + qʷⁱ, qⁱ)
+        transport = air_transport_properties(T, P)
 
-        # Supersaturated: positive condensation
-        qv_super = FT(0.015)
-        rate_super = cloud_condensation_rate(p3, qcl, qv_super, qv_sat, T, q, constants)
-        @test rate_super > 0
+        epsr = PPP.rain_condensation_epsilon(p3, FT(5e-4), FT(1e6), ρ, transport)
+        expected_epsr = expected_fortran_rain_epsilon(p3, FT(5e-4), FT(1e6), ρ, transport, FT)
+        epsi = PPP.ice_deposition_epsilon(p3, qⁱ, qʷⁱ, nⁱ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                          constants, transport, q, μ)
+        expected_epsi = expected_fortran_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                                     constants, transport, q, μ)
 
-        # Subsaturated: negative (evaporation), limited by available cloud
-        qv_sub = FT(0.008)
-        q_sub = MoistureMassFractions(qv_sub, qcl, FT(0))
-        rate_sub = cloud_condensation_rate(p3, qcl, qv_sub, qv_sat, T, q_sub, constants)
-        @test rate_sub < 0
+        rates = PPP.coupled_saturation_adjustment_rates(
+            p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+            qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
+            constants, transport, q, μ)
+        expected_rates = expected_reduced_fortran_vapor_rates(
+            p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+            qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
+            constants, transport, q, μ)
 
-        # Saturated: approximately zero
-        rate_sat = cloud_condensation_rate(p3, qcl, qv_sat, qv_sat, T, q, constants)
-        @test abs(rate_sat) < 1e-10
+        # Bergeron check: with ice present, cloud condensation is smaller than
+        # with no ice, because ice steals vapor through the shared budget.
+        rates_noice = PPP.coupled_saturation_adjustment_rates(
+            p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
+            qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
+            constants, transport, q, μ)
+
+        @test epsr ≈ expected_epsr
+        @test epsi ≈ expected_epsi
+        @test rates.condensation ≈ expected_rates.condensation
+        @test rates.rain_evaporation ≈ expected_rates.rain_evaporation
+        @test rates.rain_condensation ≈ expected_rates.rain_condensation
+        @test rates.deposition ≈ expected_rates.deposition
+        @test rates.deposition > 0
+        @test rates.condensation < rates_noice.condensation
+    end
+
+    @testset "compute_p3_process_rates uses P3 timescale for coupled vapor rates" begin
+        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        process_rates_long = ProcessRateParameters(FT; sink_limiting_timescale=FT(10))
+        p3_long_timescale = p3_with_process_rates(p3, process_rates_long)
+
+        ρ = FT(1)
+        T = FT(263.15)
+        P = FT(80000)
+        pst = FT(100000)
+        qᶜˡ = FT(1e-3)
+        qʳ = FT(0)
+        qⁱ = FT(2e-4)
+        qʷⁱ = FT(0)
+        qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        qᵛ = qᵛ⁺ˡ + FT(1e-4)
+        q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ + qʷⁱ, qⁱ)
+        θ = T / (P / pst)^FT(0.286)
+        𝒰 = LiquidIcePotentialTemperatureState(θ, q, pst, P)
+        ℳ = P3MicrophysicalState(
+            qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(2e4),
+            FT(0), FT(0), FT(1e-10), qʷⁱ, FT(0))
+
+        rates_short = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        rates_long = compute_p3_process_rates(p3_long_timescale, ρ, ℳ, 𝒰, constants)
+
+        @test rates_long.deposition > 0
+        @test rates_long.deposition != rates_short.deposition
+        @test_throws MethodError compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, FT(10))
     end
 
     @testset "ventilation_enhanced_deposition" begin

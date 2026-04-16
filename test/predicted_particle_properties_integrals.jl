@@ -33,7 +33,6 @@ using Breeze.Microphysics.PredictedParticleProperties:
     rain_self_collection_rate,
     rain_breakup_rate,
     rain_terminal_velocity_mass_weighted,
-    cloud_condensation_rate,
     ventilation_enhanced_deposition,
     ice_melting_rate,
     ice_melting_rates,
