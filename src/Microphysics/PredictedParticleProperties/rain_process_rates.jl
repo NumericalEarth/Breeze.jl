@@ -140,9 +140,13 @@ is smaller than the physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
     D_th = prp.rain_breakup_diameter_threshold  # 280 μm: breakup threshold (1/λ_r convention)
     κ_br = prp.rain_breakup_coefficient         # 2300 m⁻¹: exponential coefficient
 
+    # Clamp exp argument to prevent Float32 overflow (exp(88.7) ≈ 3.4e38 = maxfloat).
+    # Without the clamp, LLVM PTX may fuse the ifelse and multiply, producing
+    # (Inf - 1) * 0 = NaN when D_r is large but self_collection ≈ 0.
+    exp_arg = min(κ_br * (D_r - D_th), FT(80))
     dum = ifelse(D_r < D_th,
                   FT(1),
-                  FT(2) - exp(κ_br * (D_r - D_th)))
+                  FT(2) - exp(exp_arg))
 
     # Breakup rate: (1 - dum) × self_collection
     # When D_r < D_th: dum=1 → breakup=0 (no effect)

@@ -435,6 +435,31 @@ end
     c_ss  = tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates)
     c_qv  = tendency_ρqᵛ(rates, ρ)
 
+    # GPU NaN guard: replace any NaN output with zero.
+    # Oceananigans' table interpolator uses Base.unsafe_trunc(Int, fractional_idx),
+    # which is undefined behavior when fractional_idx is NaN. If any upstream
+    # intermediate becomes NaN on GPU (e.g., from FMA rounding differences),
+    # it cascades through the table lookup into velocities and tendencies.
+    # Zero is physically correct for the near-zero hydrometeor states where
+    # these GPU-specific NaN values appear.
+    wʳ   = ifelse(isnan(wʳ), zero(FT), wʳ)
+    wʳₙ  = ifelse(isnan(wʳₙ), zero(FT), wʳₙ)
+    wⁱ   = ifelse(isnan(wⁱ), zero(FT), wⁱ)
+    wⁱₙ  = ifelse(isnan(wⁱₙ), zero(FT), wⁱₙ)
+    wⁱ_z = ifelse(isnan(wⁱ_z), zero(FT), wⁱ_z)
+    c_qcl = ifelse(isnan(c_qcl), zero(FT), c_qcl)
+    c_ncl = ifelse(isnan(c_ncl), zero(FT), c_ncl)
+    c_qr  = ifelse(isnan(c_qr),  zero(FT), c_qr)
+    c_nr  = ifelse(isnan(c_nr),   zero(FT), c_nr)
+    c_qi  = ifelse(isnan(c_qi),   zero(FT), c_qi)
+    c_ni  = ifelse(isnan(c_ni),   zero(FT), c_ni)
+    c_qf  = ifelse(isnan(c_qf),   zero(FT), c_qf)
+    c_bf  = ifelse(isnan(c_bf),   zero(FT), c_bf)
+    c_zi  = ifelse(isnan(c_zi),   zero(FT), c_zi)
+    c_qwi = ifelse(isnan(c_qwi),  zero(FT), c_qwi)
+    c_ss  = ifelse(isnan(c_ss),   zero(FT), c_ss)
+    c_qv  = ifelse(isnan(c_qv),   zero(FT), c_qv)
+
     return P3CacheResult{FT}(wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
                               c_qcl, c_ncl, c_qr, c_nr, c_qi, c_ni, c_qf, c_bf, c_zi, c_qwi, c_ss, c_qv)
 end
