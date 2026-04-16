@@ -37,7 +37,7 @@ end
 topologies = [
     ("Periodic, Bounded, Bounded",  (Periodic, Bounded,  Bounded), 3),
     ("Bounded, Bounded, Bounded",     (Bounded, Bounded, Bounded),   3),
-    ("Periodic, Periodic, Bounded",     (Bounded, Bounded, Bounded),   3),
+    ("Periodic, Periodic, Bounded",     (Periodic, Periodic, Bounded),   3),
 ]
 
 schemes = [
