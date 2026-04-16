@@ -253,7 +253,7 @@ function AtmosphereModel(grid;
     scalar_advection_tuple = with_tracers(scalar_names, scalar_advection, default_generator, with_velocities=false)
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
-    materialized_advection = NamedTuple(name => materialize_advection(adapt_advection_order(scheme, grid), grid) for (name, scheme) in pairs(advection))
+    materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
 
     model = AtmosphereModel(arch,
                             grid,
