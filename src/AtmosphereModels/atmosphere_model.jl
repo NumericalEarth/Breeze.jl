@@ -2,7 +2,7 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
                     Centered, fields, prognostic_fields
-using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale
+using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
@@ -252,7 +252,7 @@ function AtmosphereModel(grid;
     scalar_advection_tuple = with_tracers(scalar_names, scalar_advection, default_generator, with_velocities=false)
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
-    materialized_advection = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
+    materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
 
     # Move microphysics lookup tables to the grid architecture (CPU → GPU)
     microphysics = on_architecture(arch, microphysics)
