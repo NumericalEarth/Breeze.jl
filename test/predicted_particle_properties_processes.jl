@@ -106,9 +106,28 @@ function expected_fortran_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
                                       transport.nu, transport.D_v, ρ_correction, p3, μ)
     epsilon_i = FT(2π) * ρ * transport.D_v * max(max(0, nⁱ), FT(1e-16)) * C_fv
-    active = (max(0, qⁱ) >= p3.minimum_mass_mixing_ratio) &
+    qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
+    active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
              (Fˡ < p3.process_rates.liquid_fraction_small)
     return ifelse(active, epsilon_i, zero(FT))
+end
+
+function expected_fortran_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                          constants, transport, q, μ)
+    FT = typeof(qⁱ)
+    Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
+    m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    ρ_air = Breeze.Thermodynamics.density(T, P, q, constants)
+    ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ_air)
+    C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
+                                      p3.ice.deposition.ventilation_enhanced,
+                                      m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
+                                      transport.nu, transport.D_v, ρ_correction, p3, μ)
+    epsilon_iw = FT(2π) * ρ * transport.D_v * max(max(0, nⁱ), FT(1e-16)) * C_fv
+    qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
+    active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
+             (Fˡ >= p3.process_rates.liquid_fraction_small)
+    return ifelse(active, epsilon_iw, zero(FT))
 end
 
 function expected_reduced_fortran_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
@@ -130,9 +149,11 @@ function expected_reduced_fortran_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ
     epsr = expected_fortran_rain_epsilon(p3, qʳ, nʳ, ρ, transport, FT)
     epsi = expected_fortran_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                         constants, transport, q, μ)
+    epsiw = expected_fortran_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                             constants, transport, q, μ)
 
     ice_liquid_coupling = (1 + L_s * dqᵛ⁺ˡ_dT / cᵖᵈ) / abi
-    xx = max(epsc + epsr + epsi * ice_liquid_coupling, FT(1e-20))
+    xx = max(epsc + epsr + epsi * ice_liquid_coupling + epsiw, FT(1e-20))
     transient = (1 - exp(-xx * τ)) / τ
     ssat_liquid = qᵛ - qᵛ⁺ˡ
     aaa = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * epsi
@@ -141,6 +162,7 @@ function expected_reduced_fortran_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ
     qr_raw = (aaa * epsr / xx + (ssat_liquid - aaa / xx) * epsr / xx * transient) / ab
     qi_raw = (aaa * epsi / xx + (ssat_liquid - aaa / xx) * epsi / xx * transient) / abi +
              (qᵛ⁺ˡ - qᵛ⁺ⁱ) * epsi / abi
+    ql_raw = (aaa * epsiw / xx + (ssat_liquid - aaa / xx) * epsiw / xx * transient) / ab
 
     condensation = ifelse(qc_raw < 0, zero(FT), min(qc_raw, qᵛ / τ))
     rain_condensation = ifelse(qr_raw < 0, zero(FT), min(qr_raw, qᵛ / τ))
@@ -149,10 +171,14 @@ function expected_reduced_fortran_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ
     is_sublimation = qi_raw < 0
     deposition = ifelse(is_sublimation,
                         -min(-qi_raw * p3.process_rates.calibration_factor_sublimation,
-                             max(0, qⁱ - qʷⁱ) / τ),
+                             max(0, qⁱ) / τ),
                         min(qi_raw * p3.process_rates.calibration_factor_deposition, qᵛ / τ))
 
-    return (; condensation, rain_evaporation, rain_condensation, deposition)
+    coating_condensation = ifelse(ql_raw < 0, zero(FT), min(ql_raw, qᵛ / τ))
+    coating_evaporation = ifelse(ql_raw < 0, min(-ql_raw, max(0, qʷⁱ) / τ), zero(FT))
+
+    return (; condensation, rain_evaporation, rain_condensation, deposition,
+              coating_condensation, coating_evaporation)
 end
 
 @testset "P3 Processes" begin
@@ -773,8 +799,69 @@ end
         @test rates.rain_evaporation ≈ expected_rates.rain_evaporation
         @test rates.rain_condensation ≈ expected_rates.rain_condensation
         @test rates.deposition ≈ expected_rates.deposition
+        @test rates.coating_condensation ≈ expected_rates.coating_condensation
+        @test rates.coating_evaporation ≈ expected_rates.coating_evaporation
         @test rates.deposition > 0
+        @test rates.coating_condensation == 0  # dry ice: no coating
+        @test rates.coating_evaporation == 0
         @test rates.condensation < rates_noice.condensation
+    end
+
+    @testset "coupled_saturation_adjustment_rates wet-ice coating" begin
+        p3_base = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        process_rates = ProcessRateParameters(FT; sink_limiting_timescale=FT(10))
+        p3 = p3_with_process_rates(p3_base, process_rates)
+
+        ρ = FT(1)
+        T = FT(272.15)  # just below freezing so mixed ice can exist
+        P = FT(80000)
+        qᶜˡ = FT(1e-3)
+        nᶜˡ = FT(2e8)
+        qʳ = FT(0)
+        nʳ = FT(0)
+        qⁱ = FT(2e-4)
+        qʷⁱ = FT(1e-4)  # ~50% liquid fraction → wet ice
+        nⁱ = FT(2e4)
+        Fᶠ = FT(0)
+        ρᶠ = FT(400)
+        μ = FT(0)
+
+        qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+        qᵛ = qᵛ⁺ˡ + FT(1e-4)
+        q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ + qʷⁱ, qⁱ)
+        transport = air_transport_properties(T, P)
+
+        epsi = PPP.ice_deposition_epsilon(p3, qⁱ, qʷⁱ, nⁱ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                          constants, transport, q, μ)
+        epsiw = PPP.ice_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                        constants, transport, q, μ)
+        expected_epsiw = expected_fortran_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                                         constants, transport, q, μ)
+
+        rates = PPP.coupled_saturation_adjustment_rates(
+            p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+            qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
+            constants, transport, q, μ)
+        expected_rates = expected_reduced_fortran_vapor_rates(
+            p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+            qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
+            constants, transport, q, μ)
+
+        # Mutual exclusivity: only one of epsi / epsiw is nonzero for a single category.
+        @test epsi == 0
+        @test epsiw > 0
+        @test epsiw ≈ expected_epsiw
+
+        # Coupled formula: wet-ice coating condenses (vapor is supersaturated w.r.t. liquid).
+        @test rates.deposition == 0  # dry-ice path inactive
+        @test rates.coating_condensation > 0
+        @test rates.coating_evaporation == 0
+
+        @test rates.coating_condensation ≈ expected_rates.coating_condensation
+        @test rates.condensation ≈ expected_rates.condensation
     end
 
     @testset "compute_p3_process_rates uses P3 timescale for coupled vapor rates" begin
