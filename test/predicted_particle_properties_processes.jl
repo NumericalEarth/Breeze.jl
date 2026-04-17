@@ -864,6 +864,45 @@ end
         @test rates.condensation ≈ expected_rates.condensation
     end
 
+    @testset "limit_vapor_rates rescales all coupled sinks" begin
+        FT = Float64
+        dt_safety = FT(10)
+        qᵛ = FT(1e-4)
+
+        cond = FT(4e-5)
+        ccn_act = FT(1e-5)
+        ccn_act_n = FT(2e3)
+        rain_cond = FT(2e-5)
+        rain_evap = FT(0)
+        dep = FT(3e-5)
+        coat_cond = FT(2e-5)
+        coat_evap = FT(0)
+        nuc_q = FT(1e-5)
+        nuc_n = FT(5e2)
+
+        limited = PPP.limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
+                                        dep, coat_cond, coat_evap, nuc_q, nuc_n, qᵛ, dt_safety)
+
+        vapor_source_total = rain_evap + coat_evap + max(zero(FT), -dep) + max(zero(FT), -cond)
+        vapor_available = max(zero(FT), qᵛ) + vapor_source_total * dt_safety
+        vapor_sink_total = max(zero(FT), limited.cond) +
+                           limited.ccn_act +
+                           limited.rain_cond +
+                           max(zero(FT), limited.dep) +
+                           limited.coat_cond +
+                           limited.nuc_q
+
+        @test limited.cond < cond
+        @test limited.ccn_act < ccn_act
+        @test limited.ccn_act_n < ccn_act_n
+        @test limited.rain_cond < rain_cond
+        @test limited.dep < dep
+        @test limited.coat_cond < coat_cond
+        @test limited.nuc_q < nuc_q
+        @test limited.nuc_n < nuc_n
+        @test vapor_sink_total * dt_safety <= vapor_available + FT(10) * eps(FT)
+    end
+
     @testset "ventilation_enhanced_deposition" begin
         p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
         FT = Float64

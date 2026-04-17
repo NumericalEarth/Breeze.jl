@@ -52,6 +52,41 @@ GPU-compatible: uses `ifelse` instead of branching.
 end
 
 """
+$(TYPEDSIGNATURES)
+
+Proportionally rescale all vapor-consuming rates so that the projected vapor
+sink over `dt_safety` does not exceed the vapor available from `qᵛ` plus
+vapor-producing rates. One-directional sinks (`ccn_act`, `rain_cond`,
+`coat_cond`, `nuc_q`) are scaled directly; bidirectional rates (`cond`, `dep`)
+are scaled only when positive (condensation / deposition). Number rates
+`ccn_act_n` and `nuc_n` are scaled by the same factor as their companion mass
+rates to preserve mean particle mass. Evaporative terms (`rain_evap`,
+`coat_evap`, negative `cond`, negative `dep`) are treated as vapor sources and
+left unchanged.
+
+Returns a NamedTuple of the possibly-rescaled rates.
+"""
+@inline function limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
+                                   dep, coat_cond, coat_evap, nuc_q, nuc_n, qᵛ, dt_safety)
+    vapor_source_total = rain_evap + coat_evap + clamp_positive(-dep) + clamp_positive(-cond)
+    vapor_available = max(0, qᵛ) + vapor_source_total * dt_safety
+    vapor_sink_total = clamp_positive(cond) + ccn_act + rain_cond +
+                       clamp_positive(dep) + coat_cond + nuc_q
+    f_vapor = sink_limiting_factor(vapor_sink_total, vapor_available, dt_safety)
+
+    cond = ifelse(cond > 0, cond * f_vapor, cond)
+    ccn_act = ccn_act * f_vapor
+    ccn_act_n = ccn_act_n * f_vapor
+    rain_cond = rain_cond * f_vapor
+    dep = ifelse(dep > 0, dep * f_vapor, dep)
+    coat_cond = coat_cond * f_vapor
+    nuc_q = nuc_q * f_vapor
+    nuc_n = nuc_n * f_vapor
+
+    return (; cond, ccn_act, ccn_act_n, rain_cond, dep, coat_cond, nuc_q, nuc_n)
+end
+
+"""
     safe_divide(a, b, default)
 
 Safe division returning `default` when b ≈ 0.
@@ -1338,7 +1373,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     dt_safety = prp.sink_limiting_timescale
 
     # --- Cloud liquid sinks ---
-    cloud_source_total = max(0, cond)
+    cloud_source_total = max(0, cond) + ccn_act
     cloud_available = max(0, qᶜˡ) + cloud_source_total * dt_safety
     cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
                        cloud_hom_q + cloud_warm_q + wg_cloud
@@ -1356,7 +1391,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     wg_cloud      = wg_cloud * f_cloud
 
     # --- Rain sinks ---
-    rain_source_total = autoconv + accr + complete_melt + shed + wg_shed
+    rain_source_total = autoconv + accr + complete_melt + shed + wg_shed + rain_cond
     rain_available = max(0, qʳ) + rain_source_total * dt_safety
     rain_sink_total = rain_rim + rain_frz_q + rain_hom_q + rain_warm_q + wg_rain + rain_evap
     f_rain = sink_limiting_factor(rain_sink_total, rain_available, dt_safety)
@@ -1384,14 +1419,16 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     dep           = ifelse(dep < 0, dep * f_ice, dep)
 
     # --- Vapor sinks ---
-    vapor_source_total = rain_evap + clamp_positive(-dep) + clamp_positive(-cond)
-    vapor_available = max(0, qᵛ) + vapor_source_total * dt_safety
-    vapor_sink_total = max(0, cond) + max(0, dep) + nuc_q
-    f_vapor = sink_limiting_factor(vapor_sink_total, vapor_available, dt_safety)
-    cond  = ifelse(cond > 0, cond * f_vapor, cond)
-    dep   = ifelse(dep > 0, dep * f_vapor, dep)
-    nuc_q = nuc_q * f_vapor
-    nuc_n = nuc_n * f_vapor
+    vapor_rates = limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
+                                    dep, coat_cond, coat_evap, nuc_q, nuc_n, qᵛ, dt_safety)
+    cond = vapor_rates.cond
+    ccn_act = vapor_rates.ccn_act
+    ccn_act_n = vapor_rates.ccn_act_n
+    rain_cond = vapor_rates.rain_cond
+    dep = vapor_rates.dep
+    coat_cond = vapor_rates.coat_cond
+    nuc_q = vapor_rates.nuc_q
+    nuc_n = vapor_rates.nuc_n
 
     # D2: Sublimation number loss
     sublim_mag = clamp_positive(-dep)
