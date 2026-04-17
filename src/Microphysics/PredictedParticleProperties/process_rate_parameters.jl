@@ -269,20 +269,20 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         maximum_rime_density = 900.0,
 
         # Shedding
-        shedding_timescale = 30.0,
+        shedding_timescale = 10.0,
         maximum_liquid_fraction = 0.3,
         shed_drop_mass = 1 / 1.923e6,  # m19: Fortran 1 mm drop mass (microphy_p3.f90 1.923e6 drops/kg)
         # C2: Fortran uses 1.928e6 for liquid-fraction shedding (nlshd, line 3350)
         shed_drop_mass_liqfrac = 1 / 1.928e6,
 
         # Refreezing
-        refreezing_timescale = 30.0,
+        refreezing_timescale = 10.0,
 
         # Deposition nucleation
         nucleation_temperature_threshold = 258.15,
         nucleation_supersaturation_threshold = 0.05,
         nucleation_maximum_concentration = 100e3,
-        nucleation_timescale = 30.0,
+        nucleation_timescale = 10.0,
         nucleation_coefficient = 5.0,
 
         # Immersion freezing
@@ -361,7 +361,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         minimum_cloud_drop_mass = 1e-12,
 
         # Rime densification
-        rime_densification_timescale = 30.0,
+        rime_densification_timescale = 10.0,
 
         # Rain DSD bounds (Fortran P3 v5.5.0 get_rain_dsd2: lammin = (mu_r+1)*inv_Drmax)
         # inv_Drmax = 1/0.002 = 500 [1/m]. Note: table generation uses 200, runtime uses 500.
