@@ -19,7 +19,7 @@ Breeze = {path = ".."}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
-CUDA = "5"
+CUDA = "5, 6.0"
 CairoMakie = "0.15"
 CloudMicrophysics = "0.31.4, 0.32"
 Documenter = "1"
