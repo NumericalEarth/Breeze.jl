@@ -1134,7 +1134,7 @@ end
 
     # H9: Wet growth rime densification
     ρ_rimemax = prp.maximum_rime_density
-    τ_densif = prp.sink_limiting_timescale
+    τ_densif = prp.rime_densification_timescale
     qⁱ_safe = clamp_positive(qⁱ)
     bᶠ_safe = max(bᶠ, FT(1e-20))
     wg_densif_active = is_wet_growth & !prp.liquid_fraction_active & (qⁱ_safe > FT(1e-14))

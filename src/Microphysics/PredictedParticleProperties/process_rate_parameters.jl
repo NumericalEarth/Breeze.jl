@@ -137,6 +137,9 @@ struct ProcessRateParameters{FT}
     homogeneous_freezing_timescale :: FT     # τ_hom [s], effective instantaneous
     minimum_cloud_drop_mass :: FT           # mass-number consistency cap for N_hom [kg]
 
+    # Rime densification
+    rime_densification_timescale :: FT       # τ_densif [s]
+
     # Rain size distribution bounds (Fortran P3 v5.5.0: lamr_min, lamr_max)
     rain_lambda_min :: FT                   # λ_r minimum [1/m]
     rain_lambda_max :: FT                   # λ_r maximum [1/m]
@@ -266,7 +269,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         maximum_rime_density = 900.0,
 
         # Shedding
-        shedding_timescale = 60.0,
+        shedding_timescale = 30.0,
         maximum_liquid_fraction = 0.3,
         shed_drop_mass = 1 / 1.923e6,  # m19: Fortran 1 mm drop mass (microphy_p3.f90 1.923e6 drops/kg)
         # C2: Fortran uses 1.928e6 for liquid-fraction shedding (nlshd, line 3350)
@@ -279,7 +282,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         nucleation_temperature_threshold = 258.15,
         nucleation_supersaturation_threshold = 0.05,
         nucleation_maximum_concentration = 100e3,
-        nucleation_timescale = 60.0,
+        nucleation_timescale = 30.0,
         nucleation_coefficient = 5.0,
 
         # Immersion freezing
@@ -352,10 +355,13 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Homogeneous freezing
         homogeneous_freezing_temperature = 233.15,
-        homogeneous_freezing_timescale = 1.0,
+        homogeneous_freezing_timescale = 10.0,
         # Mass-number consistency cap: at most one particle per minimum-size droplet
         # (≈ 6 μm radius cloud droplet → m ≈ 4/3 π ρ_w r³ ≈ 9e-13 kg; use 1e-12 kg)
         minimum_cloud_drop_mass = 1e-12,
+
+        # Rime densification
+        rime_densification_timescale = 30.0,
 
         # Rain DSD bounds (Fortran P3 v5.5.0 get_rain_dsd2: lammin = (mu_r+1)*inv_Drmax)
         # inv_Drmax = 1/0.002 = 500 [1/m]. Note: table generation uses 200, runtime uses 500.
@@ -363,7 +369,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         rain_lambda_max = 100000.0, # lamr_max [1/m] ≈ D_min ~10μm
 
         # Sink-limiting safety timescale
-        sink_limiting_timescale = 1.0, # dt_safety [s]
+        sink_limiting_timescale = 10.0, # dt_safety [s]
 
         # Global ice number limiter (Fortran P3 v5.5.0 impose_max_Ni)
         # Relaxation sink drains nⁱ toward N_max/ρ when nⁱ × ρ > N_max.
@@ -469,6 +475,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(homogeneous_freezing_temperature),
         FT(homogeneous_freezing_timescale),
         FT(minimum_cloud_drop_mass),
+        FT(rime_densification_timescale),
         FT(rain_lambda_min),
         FT(rain_lambda_max),
         FT(sink_limiting_timescale),

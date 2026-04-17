@@ -607,7 +607,7 @@ function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean, μ)
 
     # Bound by available liquid: qlshd ≤ qwi / dt_safety
     rate = clamp_positive(rate)
-    τ_safety = FT(1)  # [s]
+    τ_safety = p3.process_rates.sink_limiting_timescale
     rate = min(rate, qʷⁱ_eff / τ_safety)
 
     return rate
@@ -808,7 +808,7 @@ function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, co
     refrz_rate = nⁱ_eff * dm_dt_refrz
 
     # Limit to available liquid on ice
-    τ_safety = FT(1)  # [s]
+    τ_safety = p3.process_rates.sink_limiting_timescale
     max_refrz = qʷⁱ_eff / τ_safety
     refrz_rate = min(refrz_rate, max_refrz)
 
