@@ -30,10 +30,7 @@ end
     end
 
     @testset "Import via Owner" begin
-        # `OffsetArray` is owned by `OffsetArrays` but we import it via Oceananigans.Grids
-        # (which re-exports it) to avoid adding OffsetArrays as a direct dep.
-        @test ExplicitImports.check_all_explicit_imports_via_owners(Breeze;
-                                                                    ignore = (:OffsetArray,)) === nothing
+        @test ExplicitImports.check_all_explicit_imports_via_owners(Breeze) === nothing
     end
 
     @testset "Stale Explicit Imports" begin

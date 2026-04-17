@@ -247,7 +247,7 @@ end
 # - GPU path (CuDeviceArray): getfield + unsafe_load/unsafe_store! on the raw
 #   LLVMPtr — no method dispatch, no bounds checking, no throw paths
 # - CPU path (Array etc.): delegates to the parent's own 3D indexing
-using Oceananigans.Grids: OffsetArray
+using OffsetArrays: OffsetArray
 @generated function Base.getindex(A::OffsetArray{T, 3, AA}, i::Int, j::Int, k::Int) where {T, AA<:AbstractArray{T, 3}}
     if hasfield(AA, :dims) && hasfield(AA, :ptr)
         # GPU path: getfield + Base.unsafe_load on LLVMPtr — minimal dispatch
