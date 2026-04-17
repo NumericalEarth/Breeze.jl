@@ -113,7 +113,7 @@ end
 """
     SurfacePrecipitationFluxKernel(advection)
 
-Kernel for [`KernelFunctionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.AbstractOperations.KernelFunctionOperation-Union{Tuple{D},%20Tuple{K},%20Tuple{T},%20Tuple{G},%20Tuple{LZ},%20Tuple{LY},%20Tuple{LX},%20Tuple{K,%20G,%20D},%20Tuple{K,%20G,%20D,%20Type{T}}}%20where%20{LX,%20LY,%20LZ,%20G,%20T,%20K,%20D%3C:Tuple})
+Kernel for `KernelFunctionOperation`
 that computes the advection-consistent precipitation flux at the bottom boundary.
 
 The kernel is called as `kernel(i, j, k, grid, ρ, wᵗ, wˢᵉᵈ, c)` where `ρ` is the
