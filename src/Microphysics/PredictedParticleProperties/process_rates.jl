@@ -505,7 +505,13 @@ Returns `(; mass, number)` named tuple.
 """
 @inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
     FT = typeof(qᶜˡ)
-    mass = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+    # Prescribed-Nᶜ path (Fortran `log_predictNc = .false.`, `nc = nccnst_2`):
+    # the activation target is the scheme parameter, not the DSD-diagnosed `Nᶜ`.
+    # When `qᶜˡ` is below the mass threshold, `diagnose_cloud_dsd` clamps the
+    # returned `Nᶜ` toward zero — using that value would collapse `target_qc`
+    # and block any seed mass from forming in a warm-bubble parcel.
+    target_Nᶜ = p3.cloud.number_concentration
+    mass = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, target_Nᶜ, constants)
     return (; mass, number = zero(FT))
 end
 

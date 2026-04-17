@@ -86,6 +86,24 @@ function AM.prognostic_field_names(::P3)
     return tuple(cloud_names..., rain_names..., ice_names..., ssat_names...)
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Effective cloud droplet number concentration [kg⁻¹] seen by P3's process rates.
+
+In the prescribed-Nᶜ path (`p3.aerosol === nothing`, matching Fortran
+`log_predictNc = .false.`), `nc` is always `nccnst_2` at every microphysics call
+and is not advected by the dynamical core. This helper returns the prescribed
+value so that downstream rates (CCN activation, condensation efficiency,
+autoconversion, immersion freezing) use the scheme-level parameter rather than
+the unused, drifting prognostic field.
+
+In the prognostic path (aerosol activation enabled), it returns the advected
+per-mass number `μ.ρnᶜˡ / ρ` as usual.
+"""
+@inline effective_cloud_droplet_number(p3::P3, ρnᶜˡ, ρ) =
+    isnothing(p3.aerosol) ? p3.cloud.number_concentration / ρ : ρnᶜˡ / ρ
+
 #####
 ##### Moisture prognostic name
 #####
@@ -213,7 +231,7 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
 """
 @inline function AM.microphysical_state(p3::P3, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
-    nᶜˡ = μ.ρnᶜˡ / ρ
+    nᶜˡ = effective_cloud_droplet_number(p3, μ.ρnᶜˡ, ρ)
     qʳ  = μ.ρqʳ / ρ
     nʳ  = μ.ρnʳ / ρ
     qⁱ  = μ.ρqⁱ / ρ
@@ -306,7 +324,7 @@ end
 @inline function AM.grid_microphysical_state(i, j, k, grid, p3::P3, μ, ρ, 𝒰, velocities)
     @inbounds begin
         qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
-        nᶜˡ = μ.ρnᶜˡ[i, j, k] / ρ
+        nᶜˡ = effective_cloud_droplet_number(p3, μ.ρnᶜˡ[i, j, k], ρ)
         qʳ  = μ.ρqʳ[i, j, k] / ρ
         nʳ  = μ.ρnʳ[i, j, k] / ρ
         qⁱ  = μ.ρqⁱ[i, j, k] / ρ
@@ -417,7 +435,9 @@ end
 
     # Tendency extraction
     c_qcl = tendency_ρqᶜˡ(rates, ρ)
-    c_ncl = tendency_ρnᶜˡ(rates, ρ, cloud.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
+    # Prescribed-Nᶜ path: nc is a scheme parameter (not advected); tendency = 0.
+    c_ncl = isnothing(p3.aerosol) ? zero(typeof(ρ)) :
+            tendency_ρnᶜˡ(rates, ρ, cloud.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
     c_qr  = tendency_ρqʳ(rates, ρ)
     c_nr  = tendency_ρnʳ(rates, ρ, ℳ.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
     c_qi  = tendency_ρqⁱ(rates, ρ)
@@ -602,8 +622,14 @@ end
 
 """
 Cloud number tendency: gains from activation and loses proportionally with cloud sinks.
+
+In the prescribed-Nᶜ path (`p3.aerosol === nothing`), `nc` is a scheme-level
+parameter (Fortran `nccnst_2`), not a prognostic. The `ρnᶜˡ` field is still
+allocated but carries no physical meaning, so the microphysical tendency is
+zero and the field remains at its initial value.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnᶜˡ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    isnothing(p3.aerosol) && return zero(ρ)
     rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     return tendency_ρnᶜˡ(rates, ρ, cloud.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
