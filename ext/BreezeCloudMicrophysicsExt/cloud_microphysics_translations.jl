@@ -392,8 +392,8 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
     Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(Re)
 
     # Evaporation rates (negative for evaporation)
-    evap_rate_0 = min(zero(FT), 2π * G * 𝒮 * Nʳ_safe * Dʳ * Fv0 / xr_mean_safe)
-    evap_rate_1 = min(zero(FT), 2π * G * 𝒮 * Nʳ_safe * Dʳ * Fv1 / ρ)
+    evap_rate_0 = min(zero(FT), 2 * FT(π) * G * 𝒮 * Nʳ_safe * Dʳ * Fv0 / xr_mean_safe)
+    evap_rate_1 = min(zero(FT), 2 * FT(π) * G * 𝒮 * Nʳ_safe * Dʳ * Fv1 / ρ)
 
     # Handle edge cases where xr_mean approaches zero
     evap_rate_0 = ifelse(xr_mean / x_star < eps(FT), zero(FT), evap_rate_0)
@@ -654,7 +654,7 @@ end
         gᵥ = ap.g1 + ap.g2 * log(mode.stdev)
 
         # η parameter
-        η = max(eps(FT), sqrt(αwG)^3 / (2π * ρᴸ * γ * mode.N))
+        η = max(eps(FT), sqrt(αwG)^3 / (2 * FT(π) * ρᴸ * γ * mode.N))
 
         # Contribution to 1/Sᵐᵃˣ² (Eq. 6 in ARG 2000)
         # All bases of fractional exponents are guaranteed positive by guards above
