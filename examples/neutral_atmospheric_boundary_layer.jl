@@ -277,6 +277,10 @@ vw_ts = FieldTimeSeries(avg_filename, "vw")
 θw_ts = FieldTimeSeries(avg_filename, "θw")
 νₑ_ts = FieldTimeSeries(avg_filename, "νₑ")
 
+∂z_u_ts = FieldTimeSeries(avg_filename, "∂z_u")
+∂z_v_ts = FieldTimeSeries(avg_filename, "∂z_v")
+∂z_θ_ts = FieldTimeSeries(avg_filename, "∂z_θ")
+
 grid = u_ts.grid
 times = u_ts.times
 Nt = length(times)
@@ -298,9 +302,6 @@ WD_mean_ts = FieldTimeSeries(loc, grid, times)
  uw_sgs_ts = FieldTimeSeries(loc, grid, times)
  vw_sgs_ts = FieldTimeSeries(loc, grid, times)
  θw_sgs_ts = FieldTimeSeries(loc, grid, times)
-   ∂z_u_ts = FieldTimeSeries(loc, grid, times)
-   ∂z_v_ts = FieldTimeSeries(loc, grid, times)
-   ∂z_θ_ts = FieldTimeSeries(loc, grid, times)
 
 # and then we loop over all saved fields and compute what we want.
 
@@ -331,7 +332,7 @@ for n in 1:Nt
 
     uw_sgs_ts[n] .= -ρᵣ * νₑ_n * ∂z_u_n / (ρ₀ * u★^2)
     vw_sgs_ts[n] .= -ρᵣ * νₑ_n * ∂z_v_n / (ρ₀ * u★^2)
-    θw_sgs_ts[n] .= -νₑ_n * ∂z_θ_n / closure.Pr
+    θw_sgs_ts[n] .= -νₑ_n * ∂z_θ_n / closure.Pr  # not normalized
 end
 
 # Define a colormap for each time.
