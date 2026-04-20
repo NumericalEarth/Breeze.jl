@@ -32,6 +32,6 @@ using Logging: Warn
             @test file["serialized/grid"] == on_architecture(CPU(), grid)
         end
     finally
-        isfile(writer.filepath) && rm(writer.filepath, force=true)
+        rm(writer.filepath; force=true)
     end
 end
