@@ -12,14 +12,12 @@ using Oceananigans: Oceananigans
 using Oceananigans.AbstractOperations: @binary, BinaryOperation, GridMetric, choose_location
 using Oceananigans.AbstractOperations: apply_op, grid_metric_operation
 
-import Base: atan, atand, mod
-
 # Register two-argument elementary functions useful for atmospheric diagnostics
 # (e.g. wind direction from velocity components, periodic wrapping) so they can
 # be composed with Fields in `BinaryOperation` trees without dropping to
 # `interior(...)` / `@.` escape hatches.
-@binary atan
-@binary atand
-@binary mod
+@binary Base.atan
+@binary Base.atand
+@binary Base.mod
 
 end # module
