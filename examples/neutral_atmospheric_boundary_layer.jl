@@ -95,18 +95,14 @@ nothing #hide
 #
 # To enforce an upper-air temperature gradient, we introduce a sponge layer with Gaussian weighting
 # that corresponds to an effective depth of approximately 500 m. At `|z - zᵗᵒᵖ| = 500`,
-# `exp(-0.5 * (500/sponge_width)^2) = 0.04 ~ 0`. The sponge rate (inverse timescale) is an ad hoc
+# `exp(-0.5 * (500/sponge_width)^2) = 0.04 ~ 0`. The `sponge_rate` (inverse timescale) is an ad hoc
 # value; a higher sponge rate (shorter damping time scale) made no difference in this case, and a
 # weaker sponge rate may be used.
 sponge_width = 200  # m
 sponge_rate = 0.01  # 1/s
 sponge_mask = GaussianMask{:z}(center = last(z), width = sponge_width)
 
-# We damp out any vertical motions near the top boundary.
-
-ρw_sponge = Relaxation(rate = sponge_rate, mask = sponge_mask) # relaxes to 0 by default
-
-# We relax temperature to the initial profile.
+# We relax potential temperature to the initial profile using a discrete forcing.
 
 ρθᵣ = Field{Nothing, Nothing, Center}(grid)
 set!(ρθᵣ, z -> θᵣ(z))
@@ -123,6 +119,10 @@ end
     ρθ_sponge_fun; discrete_form = true,
     parameters = (rate = sponge_rate, mask = sponge_mask, target = ρθᵣ_data)
 )
+
+# We also damp out any vertical motions near the top boundary.
+
+ρw_sponge = Relaxation(rate = sponge_rate, mask = sponge_mask) # relaxes to 0 by default
 
 # ## Assembling all the forcings
 
