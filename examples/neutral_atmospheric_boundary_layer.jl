@@ -83,8 +83,8 @@ nothing #hide
 
 # A bulk drag parameterization is applied with friction velocity:
 
-@inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
-@inline ρv_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρv / max(sqrt(ρu^2 + ρv^2), p.ρ₀ * 1e-6)
+@inline ρu_drag(x, y, t, ρu, ρv, param) = - param.ρ₀ * param.u★^2 * ρu / max(sqrt(ρu^2 + ρv^2), 1e-6)
+@inline ρv_drag(x, y, t, ρu, ρv, param) = - param.ρ₀ * param.u★^2 * ρv / max(sqrt(ρu^2 + ρv^2), 1e-6)
 
 ρu_drag_bc = FluxBoundaryCondition(ρu_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★))
 ρv_drag_bc = FluxBoundaryCondition(ρv_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★))
