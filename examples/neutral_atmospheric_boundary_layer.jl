@@ -276,7 +276,6 @@ uw_ts = FieldTimeSeries(avg_filename, "uw")
 vw_ts = FieldTimeSeries(avg_filename, "vw")
 θw_ts = FieldTimeSeries(avg_filename, "θw")
 νₑ_ts = FieldTimeSeries(avg_filename, "νₑ")
-
 ∂z_u_ts = FieldTimeSeries(avg_filename, "∂z_u")
 ∂z_v_ts = FieldTimeSeries(avg_filename, "∂z_v")
 ∂z_θ_ts = FieldTimeSeries(avg_filename, "∂z_θ")
