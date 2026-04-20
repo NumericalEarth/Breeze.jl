@@ -150,7 +150,10 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection, forcing, closure,
 
 # ## Initial conditions
 
-# We add velocity and temperature perturbations to help initiate turbulence.
+# The velocity field is initialized to the constant geostrophic wind; the
+# potential temperature field is initialized to the profile defined in the
+# reference state section above. We add velocity and temperature perturbations
+# to help initiate turbulence.
 δu = δv = 0.01  # m/s
 δθ = 0.1        # K
 zδ = 400        # m, < zᵢ₁
@@ -164,7 +167,7 @@ set!(model, θ=θᵢ, u=uᵢ, v=vᵢ)
 
 # ## Simulation and output
 #
-# We run the simulation for 5 hours with adaptive time-stepping.
+# We will run the simulation for 5 hours with adaptive time-stepping.
 
 simulation = Simulation(model; Δt=0.5, stop_time=5hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
@@ -173,7 +176,7 @@ Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ### Progress monitor
 #
-# We add a progress callback to monitor the simulation.
+# A progress callback is added to monitor the simulation.
 
 u, v, w = model.velocities
 θ = liquid_ice_potential_temperature(model)
@@ -215,9 +218,13 @@ nothing #hide
 avg_outputs = NamedTuple(name => Average(@at((Center, Center, Center), outputs[name]), dims=(1, 2))
                          for name in keys(outputs))
 
+## Calculate derivatives using an AbstractOperation, `∂z`, to facilitate postprocessing later.
 ∂z_outputs = (; ∂z_u=u, ∂z_v=v, ∂z_θ=θ)
 avg_∂z_outputs = NamedTuple(name => Average(@at((Center, Center, Center), ∂z(∂z_outputs[name])), dims=(1, 2))
                             for name in keys(∂z_outputs))
+nothing #hide
+
+# Set up the output writer.
 
 avg_filename = "abl_averages.jld2"
 avg_output_interval = 10minutes
@@ -228,19 +235,19 @@ simulation.output_writers[:averages] = JLD2Writer(model, merge(avg_outputs, avg_
 
 # ### Instantaneous slices for animation
 
-# Find the `k`-index closest to z = 100 m.
+# Horizontal (`xy`) slices: Find the `k`-index closest to z = 100 m.
 
 z = znodes(grid, Center())
 k₁₀₀ = searchsortedfirst(z, 100)
 @info "Saving slices at z = $(z[k₁₀₀]) m (k = $k₁₀₀)"
 
-# Find the `j`-index closest to the domain center.
+# Vertical (`xz`) slices: Find the `j`-index closest to the domain center.
 
 y = ynodes(grid, Center())
 jmid = Ny ÷ 2
 @info "Saving slices at y = $(y[jmid]) m (j = $jmid)"
 
-# Set up the output writer.
+# Set up another output writer.
 
 slice_fields = (; u, v, w, θ)
 slice_outputs = (
@@ -346,13 +353,13 @@ smart_label(n) = prettytime(n * avg_output_interval)
 labels = [n == 1 ? "initial condition" : smart_label(n-1) for n in 1:Nt]
 nothing #hide
 
-# Finally, we are ready to plot.
+# We are now ready to plot.
 
 plot_interval = 1hour  # should be a multiple of avg_output_interval
 plot_skip = Int(plot_interval / avg_output_interval)
 nothing #hide
 
-# First we plot the mean profiles (wind speed, wind direction, potential temperature).
+# First, we plot the mean profiles (wind speed, wind direction, potential temperature).
 
 fig1 = Figure(size=(1000, 500), fontsize=14)
 
