@@ -208,6 +208,7 @@ avg_outputs_varlist = (;
     νₑ³ = νₑ^3,                             # SGS dissipation — note: |S̄|² = νₑ² / (Cₛ Δ)⁴) with Smagorinsky model
 )
 outputs = merge(model.velocities, model.tracers, avg_outputs_varlist)
+nothing #hide
 
 # After computing the output quantity and prior to calculating the slab average,
 # staggered quantities are interpolated to cell centers.
