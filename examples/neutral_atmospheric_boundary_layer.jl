@@ -328,7 +328,8 @@ for n in 1:Nt
     ∂z_θ_n = ∂z_θ_ts[n]
 
     WS_mean_ts[n] .= sqrt(u_n^2 + v_n^2)
-    interior(WD_mean_ts[n]) .= @. mod(270 - atand($interior(v_n), $interior(u_n)), 360)
+    WD_mean_ts[n] .= mod(270 - atand(v_n, u_n), 360)
+
     uu_var_ts[n] .= (uu_n - u_n^2) / u★^2
     vv_var_ts[n] .= (vv_n - v_n^2) / u★^2
     ww_var_ts[n] .= (ww_n - w_n^2) / u★^2
