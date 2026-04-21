@@ -30,7 +30,8 @@ end
 # For faster time to solution, we reduce the numerical precision to Float32.
 
 arch = GPU()
-Oceananigans.defaults.FloatType = Float32;
+Oceananigans.defaults.FloatType = Float32
+nothing #hide
 
 # Simulation "S" (shear-driven ABL) domain setup from [Moeng1994](@citet):
 
@@ -59,6 +60,7 @@ dynamics = AnelasticDynamics(reference_state)
 # The base of the inversion is at 468 m and has a thickness of 6 grid levels,
 # over which the potential temperature increases by 8 K. Above the cap, the
 # lapse rate is 3 K/km.
+
 Δz  = first(zspacings(grid))
 zᵢ₁ = 468        # m
 zᵢ₂ = zᵢ₁ + 6Δz  # m
@@ -297,21 +299,22 @@ Nt = length(times)
 
 loc = (nothing, nothing, Center())
 
-WS_mean_ts = FieldTimeSeries(loc, grid, times)
-WD_mean_ts = FieldTimeSeries(loc, grid, times)
- uu_var_ts = FieldTimeSeries(loc, grid, times)
- vv_var_ts = FieldTimeSeries(loc, grid, times)
- ww_var_ts = FieldTimeSeries(loc, grid, times)
- uw_res_ts = FieldTimeSeries(loc, grid, times)
- vw_res_ts = FieldTimeSeries(loc, grid, times)
- θw_res_ts = FieldTimeSeries(loc, grid, times)
- uw_sgs_ts = FieldTimeSeries(loc, grid, times)
- vw_sgs_ts = FieldTimeSeries(loc, grid, times)
- θw_sgs_ts = FieldTimeSeries(loc, grid, times)
+wind_speed_ts = FieldTimeSeries(loc, grid, times)
+wind_direction_ts = FieldTimeSeries(loc, grid, times)
+uu_var_ts = FieldTimeSeries(loc, grid, times)
+vv_var_ts = FieldTimeSeries(loc, grid, times)
+ww_var_ts = FieldTimeSeries(loc, grid, times)
+uw_res_ts = FieldTimeSeries(loc, grid, times)
+vw_res_ts = FieldTimeSeries(loc, grid, times)
+θw_res_ts = FieldTimeSeries(loc, grid, times)
+uw_sgs_ts = FieldTimeSeries(loc, grid, times)
+vw_sgs_ts = FieldTimeSeries(loc, grid, times)
+θw_sgs_ts = FieldTimeSeries(loc, grid, times)
 
 # and then we loop over all saved fields and compute what we want.
 
 for n in 1:Nt
+    ## Load saved output
     u_n = u_ts[n]
     v_n = v_ts[n]
     w_n = w_ts[n]
@@ -327,19 +330,21 @@ for n in 1:Nt
     ∂z_v_n = ∂z_v_ts[n]
     ∂z_θ_n = ∂z_θ_ts[n]
 
-    WS_mean_ts[n] .= sqrt(u_n^2 + v_n^2)
-    WD_mean_ts[n] .= mod(270 - atand(v_n, u_n), 360)
+    ## Compute other quantities
+    wind_speed_ts[n] .= sqrt(u_n^2 + v_n^2)
+    wind_direction_ts[n] .= mod(270 - atand(v_n, u_n), 360)
 
     uu_var_ts[n] .= (uu_n - u_n^2) / u★^2
     vv_var_ts[n] .= (vv_n - v_n^2) / u★^2
     ww_var_ts[n] .= (ww_n - w_n^2) / u★^2
+
     uw_res_ts[n] .= ρᵣ * (uw_n - u_n * w_n) / (ρ₀ * u★^2)
     vw_res_ts[n] .= ρᵣ * (vw_n - v_n * w_n) / (ρ₀ * u★^2)
     θw_res_ts[n] .= θw_n - θ_n * w_n
 
     uw_sgs_ts[n] .= -ρᵣ * νₑ_n * ∂z_u_n / (ρ₀ * u★^2)
     vw_sgs_ts[n] .= -ρᵣ * νₑ_n * ∂z_v_n / (ρ₀ * u★^2)
-    θw_sgs_ts[n] .= -νₑ_n * ∂z_θ_n / closure.Pr  # not normalized
+    θw_sgs_ts[n] .= -νₑ_n * ∂z_θ_n / closure.Pr
 end
 
 # Define a colormap for each time.
@@ -356,7 +361,7 @@ nothing #hide
 
 # We are now ready to plot.
 
-plot_interval = 1hour  # should be a multiple of avg_output_interval
+plot_interval = 1hour  # a multiple of avg_output_interval
 plot_skip = Int(plot_interval / avg_output_interval)
 nothing #hide
 
@@ -369,8 +374,8 @@ ax1b = Axis(fig1[1, 2], xlabel="WD (° from N)", ylabel="z (m)", title="Wind dir
 ax1c = Axis(fig1[1, 3], xlabel="θ (K)", ylabel="z (m)", title="Potential temperature")
 
 for n in 1:plot_skip:Nt
-    lines!(ax1a, WS_mean_ts[n], color=colors[n], label=labels[n])
-    lines!(ax1b, WD_mean_ts[n], color=colors[n])
+    lines!(ax1a, wind_speed_ts[n], color=colors[n], label=labels[n])
+    lines!(ax1b, wind_direction_ts[n], color=colors[n])
     lines!(ax1c,       θ_ts[n], color=colors[n])
 end
 
