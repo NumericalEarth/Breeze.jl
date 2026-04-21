@@ -14,7 +14,7 @@
 # The simulation initializes a conditionally unstable atmosphere with a warm bubble perturbation
 # that triggers deep convection. The environment includes:
 # - A realistic tropospheric potential temperature profile with a tropopause at 12 km
-# - Moisture that decreases with height, with relative humidity dropping above the tropopause
+# - Water vapor mixing ratio that decreases with height, falling to one-quarter of the surface value above the tropopause
 # - Wind shear in the lower 5 km to promote storm rotation and supercell development
 #
 # ### Potential temperature profile
@@ -106,6 +106,7 @@ dynamics = AnelasticDynamics(reference_state)
 θᵖ = 343       # K - tropopause potential temperature
 zᵖ = 12000     # m - tropopause height
 Tᵖ = 213       # K - tropopause temperature
+qᵛ⁰ = 0.014    # kg/kg - surface water vapor mixing ratio
 nothing #hide
 
 # Wind shear parameters control the low-level environmental wind profile:
@@ -119,6 +120,7 @@ nothing #hide
 
 g = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
+Rᵈ = dry_air_gas_constant(constants)
 nothing #hide
 
 # Background potential temperature profile (Equation 14 in [KlempEtAl2015](@citet)):
@@ -129,9 +131,21 @@ function θ_background(z)
     return (z ≤ zᵖ) * θᵗ + (z > zᵖ) * θˢ
 end
 
-# Relative humidity profile (decreases with height, 25% above tropopause):
+# Water vapor mixing ratio profile (Equation 18 in [KlempEtAl2015](@citet)),
+# scaled by the surface value ``qᵛ⁰``, reduced to one-quarter above the tropopause,
+# and clipped at the local saturation specific humidity. The local temperature
+# and density are estimated from a hydrostatic Exner profile ``Π(z) = 1 − g z/(cᵖᵈ θ₀)``
+# combined with the actual ``θ(z)``:
 
-ℋ_background(z) = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z ≤ zᵖ) + 1/4 * (z > zᵖ)
+function qᵛ_background(z)
+    qᵛ_klemp = qᵛ⁰ * ((1 - 3/4 * (z / zᵖ)^(5/4)) * (z ≤ zᵖ) + 1/4 * (z > zᵖ))
+    Π = 1 - g * z / (cᵖᵈ * θ₀)
+    T = Π * θ_background(z)
+    p = reference_state.surface_pressure * Π^(cᵖᵈ / Rᵈ)
+    ρ = p / (Rᵈ * T)
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    return min(qᵛ_klemp, qᵛ⁺)
+end
 
 # Zonal wind profile with linear shear below ``zˢ`` and smooth transition (Equations 15-16):
 
@@ -171,11 +185,11 @@ uᵢ(x, y, z) = u_background(z)
 
 # ## Visualization of initial conditions and warm bubble perturbation
 #
-# We visualize the background potential temperature, relative humidity, and wind shear profiles
-# that define the environmental stratification:
+# We visualize the background potential temperature, water vapor mixing ratio, and wind shear
+# profiles that define the environmental stratification:
 
 θ_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> θ_background(z))
-ℋ_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> ℋ_background(z) * 100)
+qᵛ_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> qᵛ_background(z) * 1000)
 u_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> u_background(z))
 
 fig = Figure(size=(1000, 400), fontsize=14)
@@ -184,9 +198,9 @@ axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (km)", title="Potential temper
 lines!(axθ, θ_profile, linewidth=2, color=:magenta)
 hlines!(axθ, [zᵖ / 1000], color=:gray, linestyle=:dash)
 
-axℋ = Axis(fig[1, 2], xlabel="ℋ (%)", ylabel="z (km)", title="Relative humidity")
-lines!(axℋ, ℋ_profile, linewidth=2, color=:dodgerblue)
-hlines!(axℋ, [zᵖ / 1000], color=:gray, linestyle=:dash)
+axqᵛ = Axis(fig[1, 2], xlabel="qᵛ (g/kg)", ylabel="z (km)", title="Water vapor mixing ratio")
+lines!(axqᵛ, qᵛ_profile, linewidth=2, color=:dodgerblue)
+hlines!(axqᵛ, [zᵖ / 1000], color=:gray, linestyle=:dash)
 
 axu = Axis(fig[1, 3], xlabel="u (m/s)", ylabel="z (km)", title="Wind profile")
 lines!(axu, u_profile, linewidth=2, color=:orangered)
@@ -225,9 +239,9 @@ model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_c
 #
 # We initialize the model with the previously described initial conditions, including a warm-bubble perturbation.
 
-ℋᵢ(x, y, z) = ℋ_background(z)
+qᵛᵢ(x, y, z) = qᵛ_background(z)
 
-set!(model, θ=θᵢ, ℋ=ℋᵢ, u=uᵢ)
+set!(model, θ=θᵢ, qᵛ=qᵛᵢ, u=uᵢ)
 
 # ## Simulation
 #
