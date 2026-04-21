@@ -58,6 +58,7 @@
 
 using Breeze
 using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
+using Breeze.Thermodynamics: hydrostatic_density, hydrostatic_temperature
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: znodes
@@ -120,7 +121,6 @@ nothing #hide
 
 g = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
-Rᵈ = dry_air_gas_constant(constants)
 nothing #hide
 
 # Background potential temperature profile (Equation 14 in [KlempEtAl2015](@citet)):
@@ -133,15 +133,15 @@ end
 
 # Relative humidity profile (Equations 11–12 in [KlempEtAl2015](@citet)) combined with
 # a cap on the water vapor mixing ratio at ``qᵛ_max``. The local temperature and density
-# are estimated from a hydrostatic Exner profile ``Π(z) = 1 − g z/(cᵖᵈ θ₀)`` combined
-# with the actual ``θ(z)``:
+# are obtained by numerically integrating the hydrostatic balance with the actual
+# ``θ(z)`` profile:
 
 function qᵛ_background(z)
     ℋ = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z ≤ zᵖ) + 1/4 * (z > zᵖ)
-    Π = 1 - g * z / (cᵖᵈ * θ₀)
-    T = Π * θ_background(z)
-    p = reference_state.surface_pressure * Π^(cᵖᵈ / Rᵈ)
-    ρ = p / (Rᵈ * T)
+    p₀ = reference_state.surface_pressure
+    pˢᵗ = reference_state.standard_pressure
+    T = hydrostatic_temperature(z, p₀, θ_background, pˢᵗ, constants)
+    ρ = hydrostatic_density(z, p₀, θ_background, pˢᵗ, constants)
     qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     return min(ℋ * qᵛ⁺, qᵛ_max)
 end
