@@ -298,7 +298,7 @@ axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
 axqᵛ = Axis(fig[1, 2], xlabel="qᵛ (kg/kg)")
 axℋ = Axis(fig[1, 3], xlabel="ℋ")
 axw² = Axis(fig[1, 4], xlabel="w² (m²/s²)")
-axwθ = Axis(fig[1, 5], xlabel="wθ (m K/s)")
+axwθ = Axis(fig[1, 5], xlabel="wθ (m/s K)")
 axwqᵛ = Axis(fig[1, 6], xlabel="wqᵛ (m/s kg/kg)", ylabel="z (m)", yaxisposition=:right)
 
 default_colours = Makie.wong_colors()
