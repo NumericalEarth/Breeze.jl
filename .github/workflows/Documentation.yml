@@ -36,9 +36,9 @@ jobs:
       statuses: write
     runs-on: aws-linux-nvidia-gpu-l4
     container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.5'
+      image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.6'
       options: --gpus=all
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Set BREEZE_BUILD_ALL_EXAMPLES
@@ -63,10 +63,10 @@ jobs:
           git config --global --add safe.directory ${PWD}
       - name: Build documentation
         shell: bash
-        timeout-minutes: 60
+        timeout-minutes: 75
         run:
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project=docs --threads 1,$(nproc) docs/make.jl
+          julia --color=yes --project=docs --threads 1,$(($(nproc)-1)) docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
