@@ -20,12 +20,12 @@ Breeze = {path = ".."}
 
 [compat]
 ArgParse = "1"
-CUDA = "5"
+CUDA = "5, 6.0"
 CloudMicrophysics = "0.31.4, 0.32"
 Dates = "<0.0.1, 1"
 JLD2 = "0.5, 0.6"
 JSON = "1.4.0"
-Oceananigans = "0.106.3"
+Oceananigans = "0.107"
 Printf = "1"
 Statistics = "<0.0.1, 1"
 julia = "1.10"
