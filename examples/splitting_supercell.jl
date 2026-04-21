@@ -106,7 +106,7 @@ dynamics = AnelasticDynamics(reference_state)
 θᵖ = 343       # K - tropopause potential temperature
 zᵖ = 12000     # m - tropopause height
 Tᵖ = 213       # K - tropopause temperature
-qᵛ⁰ = 0.014    # kg/kg - cap on water vapor mixing ratio
+qᵛ_max = 0.014    # kg/kg - cap on water vapor mixing ratio
 nothing #hide
 
 # Wind shear parameters control the low-level environmental wind profile:
@@ -132,7 +132,7 @@ function θ_background(z)
 end
 
 # Relative humidity profile (Equations 11–12 in [KlempEtAl2015](@citet)) combined with
-# a cap on the water vapor mixing ratio at ``qᵛ⁰``. The local temperature and density
+# a cap on the water vapor mixing ratio at ``qᵛ_max``. The local temperature and density
 # are estimated from a hydrostatic Exner profile ``Π(z) = 1 − g z/(cᵖᵈ θ₀)`` combined
 # with the actual ``θ(z)``:
 
@@ -143,7 +143,7 @@ function qᵛ_background(z)
     p = reference_state.surface_pressure * Π^(cᵖᵈ / Rᵈ)
     ρ = p / (Rᵈ * T)
     qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    return min(ℋ * qᵛ⁺, qᵛ⁰)
+    return min(ℋ * qᵛ⁺, qᵛ_max)
 end
 
 # Zonal wind profile with linear shear below ``zˢ`` and smooth transition (Equations 15-16):
