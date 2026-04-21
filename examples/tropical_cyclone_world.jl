@@ -107,7 +107,7 @@ coriolis = FPlane(f = 3e-4)
 # ## Surface fluxes
 #
 # Following the paper's bulk formulas (Eqs. 2-4), with drag coefficient
-# ``Cᴰ = 1.5 × 10⁻³`` and gustiness ``Uᵍ = 1`` m/s. The surface wetness
+# ``C^D = 1.5 × 10^{-3}`` and gustiness ``U^g = 1`` m/s. The surface wetness
 # parameter ``β`` scales the moisture flux coefficient.
 
 Cᴰ = Cᵀ = 1.5e-3
@@ -130,8 +130,8 @@ nothing #hide
 # ## Radiative forcing
 #
 # The paper (Eq. 1) prescribes a piecewise radiative tendency: constant cooling
-# at ``Ṫ = 1`` K/day for ``T > Tᵗˢ`` (troposphere), and Newtonian relaxation toward ``Tᵗˢ``
-# with timescale ``τᵣ = 20`` days for ``T ≤ Tᵗˢ`` (stratosphere). We apply this as an
+# at ``Ṫ = 1`` K/day for ``T > T^{ts}`` (troposphere), and Newtonian relaxation toward ``T^{ts}``
+# with timescale ``τ_r = 20`` days for ``T ≤ T^{ts}`` (stratosphere). We apply this as an
 # energy forcing on ``ρe``, so that Breeze handles the conversion to ``ρθ`` tendency.
 
 Ṫ  = 1 / day
@@ -175,7 +175,7 @@ model = AtmosphereModel(grid; dynamics, coriolis, momentum_advection, scalar_adv
 # ## Initial conditions
 #
 # We initialize with an equilibrated temperature profile: a dry adiabat in the
-# troposphere transitioning to an isothermal stratosphere at ``Tᵗˢ = 210`` K.
+# troposphere transitioning to an isothermal stratosphere at ``T^{ts} = 210`` K.
 # This approximates the paper's 100-day nonrotating RCE spinup. Small random
 # perturbations in the lowest kilometer trigger convection.
 #
@@ -403,7 +403,7 @@ nothing #hide
 # produces robust moist TC genesis, while ``β = 0`` yields dry TCs.
 #
 # The radiative forcing is a piecewise temperature tendency: constant cooling
-# at 1 K/day in the troposphere (``T > Tᵗˢ``) and Newtonian relaxation toward Tᵗˢ
-# with timescale ``τᵣ = 20`` days in the stratosphere. Surface fluxes use bulk
-# formulas with drag coefficient ``Cᴰ = 1.5 × 10⁻³`` and gustiness 1 m/s.
-# The ``f``-plane Coriolis parameter is ``f₀ = 3 × 10⁻⁴`` s⁻¹.
+# at 1 K/day in the troposphere (``T > T^{ts}``) and Newtonian relaxation toward ``T^{ts}``
+# with timescale ``τ_r = 20`` days in the stratosphere. Surface fluxes use bulk
+# formulas with drag coefficient ``C^D = 1.5 × 10^{-3}`` and gustiness 1 m/s.
+# The ``f``-plane Coriolis parameter is ``f_0 = 3 × 10^{-4}`` s⁻¹.
