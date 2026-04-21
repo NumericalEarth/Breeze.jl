@@ -279,8 +279,9 @@ run!(simulation)
 
 # ## Results: mean profile evolution
 #
-# Evolution of horizontally-averaged potential temperature, vertical velocity variance,
-# and the vertical potential temperature flux.
+# Evolution of horizontally-averaged potential temperature, specific and relative humidity,
+# vertical velocity variance, vertical potential temperature flux, and vertical specific
+# humidity flux.
 
 θt = FieldTimeSeries("tc_world_profiles.jld2", "θ")
 qᵛt = FieldTimeSeries("tc_world_profiles.jld2", "qᵛ")
@@ -307,13 +308,14 @@ linewidth = 3
 alpha = 0.6
 
 for n in 1:Nt
+    color = colors[n]
     label = n == 1 ? "initial" : "t = $(prettytime(times[n]))"
-    lines!(axθ, θt[n], color=colors[n]; label, linewidth, alpha)
-    lines!(axqᵛ, qᵛt[n], color=colors[n]; linewidth, alpha)
-    lines!(axℋ, ℋt[n], color=colors[n]; linewidth, alpha)
-    lines!(axw², w²t[n], color=colors[n]; linewidth, alpha)
-    lines!(axwθ, wθt[n], color=colors[n]; linewidth, alpha)
-    lines!(axwqᵛ, wqᵛt[n], color=colors[n]; linewidth, alpha)
+    lines!(axθ, θt[n]; color, linewidth, alpha, label)
+    lines!(axqᵛ, qᵛt[n]; color, linewidth, alpha)
+    lines!(axℋ, ℋt[n]; color, linewidth, alpha)
+    lines!(axw², w²t[n]; color, linewidth, alpha)
+    lines!(axwθ, wθt[n]; color, linewidth, alpha)
+    lines!(axwqᵛ, wqᵛt[n]; color, linewidth, alpha)
 end
 
 for ax in (axqᵛ, axℋ, axw², axwθ)
@@ -399,7 +401,7 @@ nothing #hide
 #
 # This example demonstrates spontaneous tropical cyclone genesis in a rotating
 # radiative-convective equilibrium setup, following [Cronin2019](@citet).
-# The surface wetness parameter β controls moisture availability: ``β = 1`` (default)
+# The surface wetness parameter ``β`` controls moisture availability: ``β = 1`` (default)
 # produces robust moist TC genesis, while ``β = 0`` yields dry TCs.
 #
 # The radiative forcing is a piecewise temperature tendency: constant cooling
