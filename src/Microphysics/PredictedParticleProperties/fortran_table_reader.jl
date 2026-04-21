@@ -560,8 +560,6 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
     )
 
     deposition = IceDeposition(
-        ice_base.deposition.thermal_conductivity,
-        ice_base.deposition.vapor_diffusivity,
         ice_5d[:ventilation],
         ice_5d[:ventilation_enhanced],
         ice_5d[:small_ice_ventilation_constant],

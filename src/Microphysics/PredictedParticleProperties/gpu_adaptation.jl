@@ -46,9 +46,7 @@ Oceananigans.Architectures.on_architecture(arch, x::IceFallSpeed) =
 # --- IceDeposition ---
 
 Adapt.adapt_structure(to, x::IceDeposition) =
-    IceDeposition(x.thermal_conductivity,
-                  x.vapor_diffusivity,
-                  Adapt.adapt(to, x.ventilation),
+    IceDeposition(Adapt.adapt(to, x.ventilation),
                   Adapt.adapt(to, x.ventilation_enhanced),
                   Adapt.adapt(to, x.small_ice_ventilation_constant),
                   Adapt.adapt(to, x.small_ice_ventilation_reynolds),
@@ -56,9 +54,7 @@ Adapt.adapt_structure(to, x::IceDeposition) =
                   Adapt.adapt(to, x.large_ice_ventilation_reynolds))
 
 Oceananigans.Architectures.on_architecture(arch, x::IceDeposition) =
-    IceDeposition(x.thermal_conductivity,
-                  x.vapor_diffusivity,
-                  on_architecture(arch, x.ventilation),
+    IceDeposition(on_architecture(arch, x.ventilation),
                   on_architecture(arch, x.ventilation_enhanced),
                   on_architecture(arch, x.small_ice_ventilation_constant),
                   on_architecture(arch, x.small_ice_ventilation_reynolds),

@@ -12,9 +12,7 @@
 Vapor deposition/sublimation parameters and ventilation integrals.
 See [`IceDeposition`](@ref) constructor for details.
 """
-struct IceDeposition{FT, V, V1, SC, SR, LC, LR}
-    thermal_conductivity :: FT
-    vapor_diffusivity :: FT
+struct IceDeposition{V, V1, SC, SR, LC, LR}
     ventilation :: V
     ventilation_enhanced :: V1
     small_ice_ventilation_constant :: SC
@@ -26,7 +24,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct `IceDeposition` with parameters and quadrature-based integrals.
+Construct `IceDeposition` with quadrature-based ventilation integrals.
 
 Ice growth/decay by vapor deposition/sublimation follows the diffusion equation
 with ventilation enhancement. The ventilation factor ``fᵛᵉ`` accounts for
@@ -41,6 +39,10 @@ where ``Sc`` is the Schmidt number and ``Re`` is the Reynolds number.
 particles have significantly enhanced vapor exchange compared to stationary
 particles.
 
+Thermal conductivity ``κ`` and vapor diffusivity ``Dᵥ`` are computed at runtime
+from temperature and pressure via `air_transport_properties(T, P)` — they are
+not stored on `IceDeposition`.
+
 **Basic ventilation integrals:**
 - `ventilation`: Integrated over full size spectrum
 - `ventilation_enhanced`: For larger particles (D > 100 μm)
@@ -49,22 +51,13 @@ particles.
 - `small_ice_ventilation_*`: D ≤ Dcrit, meltwater → rain
 - `large_ice_ventilation_*`: D > Dcrit, meltwater → liquid on ice
 
-# Keyword Arguments
-
-- `thermal_conductivity`: κ [W/(m·K)], default 0.024 (~273K)
-- `vapor_diffusivity`: Dᵥ [m²/s], default 2.2×10⁻⁵ (~273K)
-
 # References
 
 [Hall and Pruppacher (1976)](@cite HallPruppacher1976),
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 34.
 """
-function IceDeposition(FT::Type{<:AbstractFloat} = Float64;
-                       thermal_conductivity = 0.024,
-                       vapor_diffusivity = 2.2e-5)
+function IceDeposition(::Type{<:AbstractFloat} = Float64)
     return IceDeposition(
-        FT(thermal_conductivity),
-        FT(vapor_diffusivity),
         Ventilation(),
         VentilationEnhanced(),
         SmallIceVentilationConstant(),
@@ -76,8 +69,4 @@ end
 
 Base.summary(::IceDeposition) = "IceDeposition"
 
-function Base.show(io::IO, d::IceDeposition)
-    print(io, summary(d), "(")
-    print(io, "κ=", d.thermal_conductivity, ", ")
-    print(io, "Dᵥ=", d.vapor_diffusivity, ")")
-end
+Base.show(io::IO, d::IceDeposition) = print(io, summary(d), "()")

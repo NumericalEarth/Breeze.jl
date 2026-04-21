@@ -211,8 +211,6 @@ end
 
     @testset "Ice deposition" begin
         dep = IceDeposition()
-        @test dep.thermal_conductivity ≈ 0.024
-        @test dep.vapor_diffusivity ≈ 2.2e-5
 
         @test dep.ventilation isa Ventilation
         @test dep.ventilation_enhanced isa VentilationEnhanced
