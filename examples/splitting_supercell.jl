@@ -14,7 +14,7 @@
 # The simulation initializes a conditionally unstable atmosphere with a warm bubble perturbation
 # that triggers deep convection. The environment includes:
 # - A realistic tropospheric potential temperature profile with a tropopause at 12 km
-# - Water vapor mixing ratio that decreases with height, falling to one-quarter of the surface value above the tropopause
+# - Relative humidity that decreases with height (25% above the tropopause), with the resulting water vapor mixing ratio capped at a surface value
 # - Wind shear in the lower 5 km to promote storm rotation and supercell development
 #
 # ### Potential temperature profile
@@ -106,7 +106,7 @@ dynamics = AnelasticDynamics(reference_state)
 θᵖ = 343       # K - tropopause potential temperature
 zᵖ = 12000     # m - tropopause height
 Tᵖ = 213       # K - tropopause temperature
-qᵛ⁰ = 0.014    # kg/kg - surface water vapor mixing ratio
+qᵛ⁰ = 0.014    # kg/kg - cap on water vapor mixing ratio
 nothing #hide
 
 # Wind shear parameters control the low-level environmental wind profile:
@@ -131,20 +131,19 @@ function θ_background(z)
     return (z ≤ zᵖ) * θᵗ + (z > zᵖ) * θˢ
 end
 
-# Water vapor mixing ratio profile (Equation 18 in [KlempEtAl2015](@citet)),
-# scaled by the surface value ``qᵛ⁰``, reduced to one-quarter above the tropopause,
-# and clipped at the local saturation specific humidity. The local temperature
-# and density are estimated from a hydrostatic Exner profile ``Π(z) = 1 − g z/(cᵖᵈ θ₀)``
-# combined with the actual ``θ(z)``:
+# Relative humidity profile (Equations 11–12 in [KlempEtAl2015](@citet)) combined with
+# a cap on the water vapor mixing ratio at ``qᵛ⁰``. The local temperature and density
+# are estimated from a hydrostatic Exner profile ``Π(z) = 1 − g z/(cᵖᵈ θ₀)`` combined
+# with the actual ``θ(z)``:
 
 function qᵛ_background(z)
-    qᵛ_klemp = qᵛ⁰ * ((1 - 3/4 * (z / zᵖ)^(5/4)) * (z ≤ zᵖ) + 1/4 * (z > zᵖ))
+    ℋ = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z ≤ zᵖ) + 1/4 * (z > zᵖ)
     Π = 1 - g * z / (cᵖᵈ * θ₀)
     T = Π * θ_background(z)
     p = reference_state.surface_pressure * Π^(cᵖᵈ / Rᵈ)
     ρ = p / (Rᵈ * T)
     qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    return min(qᵛ_klemp, qᵛ⁺)
+    return min(ℋ * qᵛ⁺, qᵛ⁰)
 end
 
 # Zonal wind profile with linear shear below ``zˢ`` and smooth transition (Equations 15-16):
