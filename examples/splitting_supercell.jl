@@ -146,6 +146,12 @@ function qᵛ_background(z)
     return min(ℋ * qᵛ⁺, qᵛ_max)
 end
 
+# Evaluate ``qᵛ`` on a column field so the hydrostatic integration runs only once
+# per vertical level rather than once per horizontal grid point:
+
+qᵛ_column = Field{Nothing, Nothing, Center}(grid)
+set!(qᵛ_column, qᵛ_background)
+
 # Zonal wind profile with linear shear below ``zˢ`` and smooth transition (Equations 15-16):
 
 function u_background(z)
@@ -188,7 +194,7 @@ uᵢ(x, y, z) = u_background(z)
 # profiles that define the environmental stratification:
 
 θ_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> θ_background(z))
-qᵛ_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> qᵛ_background(z) * 1000)
+qᵛ_profile = set!(Field{Nothing, Nothing, Center}(grid), 1000 * qᵛ_column)
 u_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> u_background(z))
 
 fig = Figure(size=(1000, 400), fontsize=14)
@@ -238,9 +244,7 @@ model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_c
 #
 # We initialize the model with the previously described initial conditions, including a warm-bubble perturbation.
 
-qᵛᵢ(x, y, z) = qᵛ_background(z)
-
-set!(model, θ=θᵢ, qᵛ=qᵛᵢ, u=uᵢ)
+set!(model, θ=θᵢ, qᵛ=qᵛ_column, u=uᵢ)
 
 # ## Simulation
 #
