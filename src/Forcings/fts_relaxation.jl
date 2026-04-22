@@ -212,7 +212,7 @@ end
 Adapt.adapt_structure(to, f::FieldTimeSeriesRelaxation) =
     FieldTimeSeriesRelaxation(Adapt.adapt(to, f.reference),
                               Adapt.adapt(to, f.target),
-                              f.clock,
+                              nothing,
                               Adapt.adapt(to, f.density),
                               Adapt.adapt(to, f.current_field),
                               f.time_scale,
