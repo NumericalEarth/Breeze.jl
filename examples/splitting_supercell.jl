@@ -14,8 +14,8 @@
 # The simulation initializes a conditionally unstable atmosphere with a warm bubble perturbation
 # that triggers deep convection. The environment includes:
 # - A realistic tropospheric potential temperature profile with a tropopause at 12 km
-# - Relative humidity that decreases with height, with the resulting water vapor mixing ratio capped at 0.014 kg/kg to
-# approximate a well-mixed boundary layer in the lowest kilometer.
+# - Relative humidity that decreases with height, with the resulting water vapor mixing ratio capped at
+#   0.014 kg/kg "to approximate a well-mixed boundary layer in the lowest kilometer" ([KlempEtAl2015](@citet)).
 # - Wind shear in the lower 5 km to promote storm rotation and supercell development
 #
 # ### Potential temperature profile
@@ -108,7 +108,7 @@ dynamics = AnelasticDynamics(reference_state)
 θᵖ = 343       # K - tropopause potential temperature
 zᵖ = 12000     # m - tropopause height
 Tᵖ = 213       # K - tropopause temperature
-qᵛ_max = 0.014  # kg/kg - cap on water vapor mixing ratio
+qᵛ_max = 0.014 # kg/kg - Equation 13 in Klemp et al. (2015)
 nothing #hide
 
 # Wind shear parameters control the low-level environmental wind profile:
@@ -133,7 +133,7 @@ function θ_background(z)
 end
 
 # Relative humidity profile (Equations 11–12 by [KlempEtAl2015](@citet)) combined with
-# a cap on the water vapor mixing ratio at ``qᵛ_{max}``. The local temperature and density
+# the water vapor cap ``qᵛ_{max}`` from Equation 13. The local temperature and density
 # are obtained by numerically integrating the hydrostatic balance with the actual
 # ``θ(z)`` profile:
 
