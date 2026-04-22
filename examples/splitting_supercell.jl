@@ -133,7 +133,7 @@ function θ_background(z)
 end
 
 # Relative humidity profile (Equations 11–12 by [KlempEtAl2015](@citet)) combined with
-# a cap on the water vapor mixing ratio at ``qᵛ_max``. The local temperature and density
+# a cap on the water vapor mixing ratio at ``qᵛ_{max}``. The local temperature and density
 # are obtained by numerically integrating the hydrostatic balance with the actual
 # ``θ(z)`` profile:
 
