@@ -1,6 +1,7 @@
 using ..Thermodynamics: Thermodynamics, mixture_heat_capacity, mixture_gas_constant
 
-using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
+using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
+                                       update_boundary_conditions!
 using Oceananigans.Grids: Bounded, Periodic, Flat # , topology, halo_size
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
@@ -14,6 +15,7 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
 
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
+    update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
     microphysics_model_update!(model.microphysics, model)
@@ -120,16 +122,13 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
     Gρv = model.timestepper.Gⁿ.ρv
     Gρw = model.timestepper.Gⁿ.ρw
 
-    # Use transport momentum (contravariant for terrain-following grids)
-    advecting_momentum = transport_momentum(model)
-
     momentum_args = (
         dynamics_density(model.dynamics),
         model.advection.momentum,
         model.velocities,
         model.closure,
         model.closure_fields,
-        advecting_momentum,
+        advecting_momentum(model),
         model.coriolis,
         model.clock,
         model_fields)
