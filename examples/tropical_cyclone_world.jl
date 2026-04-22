@@ -71,11 +71,12 @@ grid = RectilinearGrid(arch; size = (Nx, Ny, Nz), halo = (5, 5, 5),
 # in the stratosphere (``T_{ref} ≈ 26`` K vs ``T_{actual} = 210`` K at 28 km), producing
 # catastrophic buoyancy forces.
 
-T₀ = 300
+T₀ = 300     # K
+p₀ = 101325  # Pa
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants;
-                                 surface_pressure = 101325,
+                                 surface_pressure = p₀,
                                  potential_temperature = T₀,
                                  vapor_mass_fraction = 0)
 
@@ -86,13 +87,13 @@ g = constants.gravitational_acceleration
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
 κ = Rᵈ / cᵖᵈ
 pˢᵗ = reference_state.standard_pressure
-Π₀ = (101325 / pˢᵗ)^κ
+Π₀ = (p₀ / pˢᵗ)^κ
 
 # Analytical Exner function for a hydrostatic constant-``θ`` atmosphere
 Π(z) = Π₀ - g * z / (cᵖᵈ * T₀)
 
 β = 1
-q₀ = 15e-3 # surface specific humidity (kg/kg)
+q₀ = 15e-3  # surface specific humidity (kg/kg)
 Hq = 3000   # moisture scale height (m)
 
 Tᵇᵍ(z) = max(Tᵗˢ, T₀ * Π(z))
@@ -300,7 +301,7 @@ axqᵛ = Axis(fig[1, 2], xlabel="qᵛ (kg/kg)")
 axℋ = Axis(fig[1, 3], xlabel="ℋ")
 axw² = Axis(fig[1, 4], xlabel="w² (m²/s²)")
 axwθ = Axis(fig[1, 5], xlabel="wθ (m/s K)")
-axwqᵛ = Axis(fig[1, 6], xlabel="wqᵛ (m/s kg/kg)", ylabel="z (m)", yaxisposition=:right)
+axwqᵛ = Axis(fig[1, 6], xlabel="wqᵛ (10⁻⁵ m/s kg/kg)", ylabel="z (m)", yaxisposition=:right)
 
 default_colours = Makie.wong_colors()
 colors = [default_colours[mod1(n, length(default_colours))] for n in 1:Nt]
@@ -315,7 +316,7 @@ for n in 1:Nt
     lines!(axℋ, ℋt[n]; color, linewidth, alpha)
     lines!(axw², w²t[n]; color, linewidth, alpha)
     lines!(axwθ, wθt[n]; color, linewidth, alpha)
-    lines!(axwqᵛ, wqᵛt[n]; color, linewidth, alpha)
+    lines!(axwqᵛ, 1e5 * wqᵛt[n]; color, linewidth, alpha)
 end
 
 for ax in (axqᵛ, axℋ, axw², axwθ)
