@@ -14,7 +14,7 @@
 # The simulation initializes a conditionally unstable atmosphere with a warm bubble perturbation
 # that triggers deep convection. The environment includes:
 # - A realistic tropospheric potential temperature profile with a tropopause at 12 km
-# - Relative humidity that decreases with height, with the resulting water vapor mixing ratio capped at 14 kg/kg to 
+# - Relative humidity that decreases with height, with the resulting water vapor mixing ratio capped at 14 g/kg to
 # approximate a well-mixed boundary layer in the lowest kilometer.
 # - Wind shear in the lower 5 km to promote storm rotation and supercell development
 #
