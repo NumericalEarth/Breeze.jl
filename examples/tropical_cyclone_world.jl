@@ -162,7 +162,7 @@ nothing #hide
 
 # ## Model
 #
-# We use 5th-order WENO advection and warm-phase saturation adjustment microphysics.
+# We use WENO schemes for advection and warm-phase saturation adjustment microphysics.
 
 momentum_advection = WENO(order=9)
 scalar_advection = (ρθ = WENO(order=5),
