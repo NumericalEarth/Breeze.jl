@@ -108,7 +108,7 @@ dynamics = AnelasticDynamics(reference_state)
 θᵖ = 343       # K - tropopause potential temperature
 zᵖ = 12000     # m - tropopause height
 Tᵖ = 213       # K - tropopause temperature
-qᵛ_max = 0.014    # kg/kg - cap on water vapor mixing ratio
+qᵛ_max = 0.014  # kg/kg - cap on water vapor mixing ratio
 nothing #hide
 
 # Wind shear parameters control the low-level environmental wind profile:
