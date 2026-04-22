@@ -25,36 +25,51 @@ struct Example
     # Whether to always build this example: set it to `false` for long-running examples to
     # be built only on `main` or on-demand in PRS.
     build_always::Bool
+    # Whether the example needs to use the GPU;
+    gpu::Bool
 end
 
+Example(title::String, basename::String; build_always::Bool, gpu::Bool) =
+    Example(title, basename, build_always, gpu)
+
 examples = [
-    Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
-    Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
-    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
-    Example("Shallow cumulus convection (BOMEX)", "bomex", true),
-    Example("Precipitating shallow cumulus (RICO)", "rico", false),
-    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
-    Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave", true),
-    Example("Single column radiation", "single_column_radiation", true),
-    Example("Stationary parcel model", "stationary_parcel_model", true),
-    Example("Rising parcel: adiabatic ascent", "rising_parcels", true),
-    Example("Acoustic wave in shear layer", "acoustic_wave", true),
-    Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
-    Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave", false),
-    Example("Splitting supercell", "splitting_supercell", false),
-    Example("Baroclinic wave on the sphere", "baroclinic_wave", true),
-    Example("Tropical cyclone world", "tropical_cyclone_world", false),
-    Example("Diurnal cycle of radiative convection", "radiative_convection", false),
+    Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
+    Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
+    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz"; build_always=true, gpu=false),
+    Example("Shallow cumulus convection (BOMEX)", "bomex"; build_always=true, gpu=true),
+    Example("Precipitating shallow cumulus (RICO)", "rico"; build_always=false, gpu=false),
+    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature"; build_always=true, gpu=false),
+    Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave"; build_always=true, gpu=false),
+    Example("Neutral atmospheric boundary layer", "neutral_atmospheric_boundary_layer"; build_always=false, gpu=true),
+    Example("Single column radiation", "single_column_radiation"; build_always=true, gpu=false),
+    Example("Stationary parcel model", "stationary_parcel_model"; build_always=true, gpu=false),
+    Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),
+    Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
+    Example("Cloud formation in prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
+    Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),
+    Example("Splitting supercell", "splitting_supercell"; build_always=false, gpu=true),
+    Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=false),
+    Example("Tropical cyclone world", "tropical_cyclone_world"; build_always=false, gpu=true),
+    Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
 ]
 
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
-semaphore = Base.Semaphore(Threads.nthreads(:interactive))
+
+# Use a different semaphore for CPU and GPU examples, but will keep the maximum
+# of concurrent tasks running at all time to the number of threads.  This is
+# very heuristic-y, can be refined later: reserve a larger semaphore for CPU
+# jobs, than for the GPU ones.
+tot_threads = Threads.nthreads(:interactive)
+ncpu = (tot_threads * 2) ÷ 3
+ngpu = tot_threads - ncpu
+cpu_semaphore = Base.Semaphore(ncpu)
+gpu_semaphore = Base.Semaphore(ngpu)
 @time "literate" @sync for example in examples
     script_file = example.basename * ".jl"
     script_path = joinpath(examples_src_dir, script_file)
-    Threads.@spawn :interactive Base.acquire(semaphore) do
+    Threads.@spawn :interactive Base.acquire(example.gpu ? gpu_semaphore : cpu_semaphore) do
         run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) $(joinpath(@__DIR__, "literate.jl")) $(script_path) $(literated_dir)`)
     end
 end

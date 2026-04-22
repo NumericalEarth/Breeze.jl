@@ -297,11 +297,11 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     compute_flux_bc_tendencies!(model)
     acoustic_rk3_substep!(model, Δt, β₃; freeze = :restore)
 
-    step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
-
     # Adjust final time-step
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
+
+    step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₃ * Δt)
