@@ -195,7 +195,7 @@ uᵢ(x, y, z) = u_background(z)
 # profiles that define the environmental stratification:
 
 θ_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> θ_background(z))
-qᵛ_profile = set!(Field{Nothing, Nothing, Center}(grid), 1000 * qᵛ_column)
+qᵛ_profile = set!(Field{Nothing, Nothing, Center}(grid), 1000 * qᵛ_column) # convert kg/kg -> g/kg
 u_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> u_background(z))
 
 fig = Figure(size=(1000, 400), fontsize=14)
