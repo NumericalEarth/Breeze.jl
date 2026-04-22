@@ -137,7 +137,7 @@ end
 # are obtained by numerically integrating the hydrostatic balance with the actual
 # ``θ(z)`` profile:
 
-function qᵛ_background(z)
+function qᵛ_bg(z)
     ℋ = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z ≤ zᵖ) + 1/4 * (z > zᵖ)
     p₀ = reference_state.surface_pressure
     pˢᵗ = reference_state.standard_pressure
@@ -151,7 +151,7 @@ end
 # per vertical level rather than once per horizontal grid point:
 
 qᵛ_column = Field{Nothing, Nothing, Center}(grid)
-set!(qᵛ_column, qᵛ_background)
+set!(qᵛ_column, qᵛ_bg)
 
 # Zonal wind profile with linear shear below ``zˢ`` and smooth transition (Equations 15-16):
 
