@@ -94,8 +94,9 @@ end
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
-    δᵈᵛ = Rᵈ / Rᵛ - 1
-    return pᵛ⁺ / (pᵣ + δᵈᵛ * pᵛ⁺)
+    ϵᵈᵛ = Rᵈ / Rᵛ
+    δᵈᵛ = ϵᵈᵛ - 1
+    return ϵᵈᵛ * pᵛ⁺ / (pᵣ + δᵈᵛ * pᵛ⁺)
 end
 
 #####
