@@ -19,7 +19,7 @@ AtmosphereModels.materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = mater
 @inline AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, bμp::ZMCM, ρ, 𝒰, constants) = update_microphysical_fields!(μ, i, j, k, grid, bμp.cloud_formation, ρ, 𝒰, constants)
 @inline AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵉ, μ) = grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵉ, μ)
 @inline AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::ZMCM, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
-@inline AtmosphereModels.microphysical_velocities(bμp::ZMCM, μ, name) = nothing
+@inline AtmosphereModels.sedimentation_velocity(bμp::ZMCM, μ, name) = nothing
 
 @inline function AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, qᵉ, constants)
     # Initialize moisture state from equilibrium moisture qᵉ (not from stale microphysical fields)

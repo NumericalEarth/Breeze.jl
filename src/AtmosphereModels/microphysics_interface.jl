@@ -14,7 +14,7 @@
 # to the state-based tendency. Schemes needing full grid access can override directly.
 #####
 
-using Oceananigans.Fields: set!
+using Oceananigans.Fields: set!, ZeroField, ZFaceField
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ
 
 using ..Thermodynamics: MoistureMassFractions
@@ -539,6 +539,55 @@ end
 # Fallback for Nothing microphysics (no fields to index)
 @inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵛ, μ) = MoistureMassFractions(qᵛ)
 
+#####
+##### Sedimentation velocity interface
+#####
+#
+# The sedimentation_velocity interface returns a vertical velocity component [m/s].
+# Falling hydrometeors have negative w because z is positive upward.
+#
+# Microphysics schemes implement:
+#   sedimentation_velocity(microphysics, microphysical_fields, name) → field or nothing
+#   moisture_phase(microphysics, name) → Val(:liquid), Val(:ice), or nothing
+#
+# The generic microphysical_velocities wrapper calls sedimentation_velocity and
+# uses the result as the w component.
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the sedimentation velocity field (vertical component, [m/s]) for
+the prognostic tracer `name`, or `nothing` if the tracer does not sediment.
+
+Microphysics schemes should extend this function for each sedimenting tracer.
+"""
+@inline sedimentation_velocity(microphysics, microphysical_fields, name) = nothing
+@inline sedimentation_velocity(microphysics::Nothing, microphysical_fields, name) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the moisture phase (`Val(:liquid)` or `Val(:ice)`) associated with tracer `name`,
+or `nothing` if the tracer has no defined phase.
+
+Microphysics schemes should extend this function.
+"""
+@inline moisture_phase(microphysics, name) = nothing
+@inline moisture_phase(microphysics::Nothing, name) = nothing
+
+"""
+    NegatedField{F}
+
+A lightweight wrapper that negates field values on access.
+"""
+struct NegatedField{F}
+    field :: F
+end
+
+@inline Base.getindex(nf::NegatedField, i, j, k) = -@inbounds nf.field[i, j, k]
+
+Adapt.adapt_structure(to, nf::NegatedField) = NegatedField(adapt(to, nf.field))
+
 """
 $(TYPEDSIGNATURES)
 
@@ -547,11 +596,141 @@ Return the microphysical velocities associated with `microphysics`, `microphysic
 Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
 The velocities are added to the bulk flow velocities for advecting the tracer.
 For example, the terminal velocity of falling rain.
+
+The generic implementation calls [`sedimentation_velocity`](@ref) and uses
+the result as the vertical velocity component.
 """
 @inline microphysical_velocities(microphysics::Nothing, microphysical_fields, name) = nothing
 
-# NOTE: The grid-indexed fallback for Nothing microphysics is defined above (line 159)
-# via the generic fallback mechanism which calls the state-based method.
+@inline function microphysical_velocities(microphysics, microphysical_fields, name)
+    w = sedimentation_velocity(microphysics, microphysical_fields, name)
+    return sedimentation_velocity_tuple(w)
+end
+
+@inline sedimentation_velocity_tuple(::Nothing) = nothing
+@inline sedimentation_velocity_tuple(w) = (; u = ZeroField(), v = ZeroField(), w)
+
+#####
+##### Effective sedimentation velocities
+#####
+#
+# Precomputed effective sedimentation velocities for total liquid and total ice.
+# These are mass-weighted averages over all sedimenting species within each phase:
+#
+#   wᴸ = Σᵢ(wᵢ * qᵢ) / Σᵢ(qᵢ)    for liquid species
+#   wᴵ = Σᵢ(wᵢ * qᵢ) / Σᵢ(qᵢ)    for ice species
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `nothing` when microphysics is disabled.
+"""
+materialize_sedimentation_velocities(::Nothing, microphysical_fields, grid) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Allocate `ZFaceField`s for effective sedimentation velocities and return a NamedTuple
+with keys `ρqᴸ` and `ρqᴵ`, each containing a velocity NamedTuple `(u, v, w)`.
+
+The `w` component of each entry is a `ZFaceField` that will be updated each
+time step with the mass-weighted sedimentation velocity for the corresponding phase.
+"""
+function materialize_sedimentation_velocities(microphysics, microphysical_fields, grid)
+    w_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+    wᴸ = ZFaceField(grid; boundary_conditions=w_bcs)
+    wᴵ = ZFaceField(grid; boundary_conditions=w_bcs)
+    return (; ρqᴸ = (; u = ZeroField(), v = ZeroField(), w = wᴸ),
+              ρqᴵ = (; u = ZeroField(), v = ZeroField(), w = wᴵ))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Build a tuple of `(sedimentation_velocity_field, humidity_field)` pairs for prognostic
+mass tracers (names starting with "ρq") that match the given `phase` (`:liquid` or `:ice`).
+
+Each pair consists of the sedimentation velocity field and the corresponding specific
+humidity field (e.g., `:ρqʳ` maps to `:qʳ`).
+"""
+sedimentation_constituent(microphysics, μ, ::Tuple{}, phase) = ()
+
+function sedimentation_constituent(microphysics, μ, names::Tuple{Symbol, Vararg}, phase)
+    name = first(names)
+    rest = sedimentation_constituent(microphysics, μ, Base.tail(names), phase)
+    s = string(name)
+    is_mass_tracer = length(s) >= 2 && s[1] == 'ρ' && s[nextind(s, 1)] == 'q'
+    if is_mass_tracer && moisture_phase(microphysics, Val(name)) === phase
+        w = sedimentation_velocity(microphysics, μ, Val(name))
+        if !isnothing(w)
+            specific_name = specific_field_name(name)
+            q_field = getproperty(μ, specific_name)
+            return ((w, q_field), rest...)
+        end
+    end
+    return rest
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+No-op when effective sedimentation velocities are disabled.
+"""
+update_sedimentation_velocities!(::Nothing, microphysics, microphysical_fields) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Update the precomputed effective sedimentation velocity fields from the current
+microphysical state. Builds liquid and ice sedimentation constituents and
+launches the kernel to compute mass-weighted averages.
+"""
+function update_sedimentation_velocities!(sedimentation_velocities, microphysics, microphysical_fields)
+    wᴸ = sedimentation_velocities.ρqᴸ.w
+    wᴵ = sedimentation_velocities.ρqᴵ.w
+    grid = wᴸ.grid
+    arch = grid.architecture
+    names = prognostic_field_names(microphysics)
+    liquid_components = sedimentation_constituent(microphysics, microphysical_fields, names, Val(:liquid))
+    ice_components = sedimentation_constituent(microphysics, microphysical_fields, names, Val(:ice))
+    launch!(arch, grid, :xyz,
+            _compute_sedimentation_velocities!,
+            wᴸ, wᴵ, grid, liquid_components, ice_components)
+    return nothing
+end
+
+@kernel function _compute_sedimentation_velocities!(wᴸ, wᴵ, grid, liquid_components, ice_components)
+    i, j, k = @index(Global, NTuple)
+
+    # Liquid phase
+    numerator_l = weighted_sedimentation_velocity_sum(i, j, k, liquid_components)
+    denominator_l = humidity_sum(i, j, k, liquid_components)
+    wᴸ_value = ifelse(denominator_l > 0, numerator_l / denominator_l, zero(grid))
+    @inbounds wᴸ[i, j, k] = wᴸ_value
+
+    # Ice phase
+    numerator_i = weighted_sedimentation_velocity_sum(i, j, k, ice_components)
+    denominator_i = humidity_sum(i, j, k, ice_components)
+    wᴵ_value = ifelse(denominator_i > 0, numerator_i / denominator_i, zero(grid))
+    @inbounds wᴵ[i, j, k] = wᴵ_value
+end
+
+# Recursive sum: Σ(wᵢ * qᵢ)
+@inline weighted_sedimentation_velocity_sum(i, j, k, ::Tuple{}) = 0
+@inline function weighted_sedimentation_velocity_sum(i, j, k, components::Tuple)
+    w_field, q_field = first(components)
+    @inbounds w_val = w_field[i, j, k]
+    @inbounds q_val = q_field[i, j, k]
+    return w_val * max(0, q_val) + weighted_sedimentation_velocity_sum(i, j, k, Base.tail(components))
+end
+
+# Recursive sum: Σ qᵢ
+@inline humidity_sum(i, j, k, ::Tuple{}) = 0
+@inline function humidity_sum(i, j, k, components::Tuple)
+    _, q_field = first(components)
+    @inbounds q_val = q_field[i, j, k]
+    return max(0, q_val) + humidity_sum(i, j, k, Base.tail(components))
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -613,8 +792,10 @@ $(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
 
-The surface precipitation flux is ``wʳ ρqʳ`` at the bottom face (`k = 1`), representing
-the rate at which rain mass leaves the domain through the bottom boundary.
+The surface precipitation flux is computed using the same advection scheme that
+transports precipitating tracers during time stepping, evaluated at the bottom
+face (`k = 1`). This ensures numerical consistency between the diagnosed flux and
+the actual mass leaving the domain through the advection operator ``\\nabla \\cdot (\\rho \\boldsymbol{U} c)``.
 
 Units: kg/m²/s (positive = downward flux out of domain)
 
