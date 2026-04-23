@@ -16,11 +16,10 @@
 #####   - Divergence damping: selectable via the AcousticDampingStrategy interface.
 #####                         Default PressureProjectionDamping(coefficient=0.5)
 #####                         is the literal ERF/CM1/WRF projection form, tuned on
-#####                         the DCMIP2016 baroclinic wave (see
-#####                         docs/src/appendix/bw_dt_sweep_results.md). Other
-#####                         strategies: ThermodynamicDivergenceDamping (MPAS
-#####                         Klemp 2018), ConservativeProjectionDamping
-#####                         (algebraic projection), NoDivergenceDamping.
+#####                         the DCMIP2016 baroclinic wave. Other strategies:
+#####                         ThermodynamicDivergenceDamping (MPAS Klemp 2018),
+#####                         ConservativeProjectionDamping (algebraic projection),
+#####                         NoDivergenceDamping.
 #####   - Boundary semantics: the substep loop uses *both* topology-safe
 #####                         interpolation/difference operators (which return
 #####                         zero on Flat axes and skip out-of-bounds faces) and
@@ -174,11 +173,9 @@ Each substep performs:
 3. **Divergence damping** — selectable via the typed
    [`AcousticDampingStrategy`](@ref) interface. The default is
    [`PressureProjectionDamping`](@ref) at ``\\beta_d = 0.5`` (the literal
-   ERF/CM1/WRF projection form, tuned on the DCMIP2016 baroclinic wave); see
-   `docs/src/appendix/bw_dt_sweep_results.md` for the comparison that
-   selected this default. The MPAS Klemp–Skamarock–Ha 2018 momentum
-   correction is also available as
-   [`ThermodynamicDivergenceDamping`](@ref).
+   ERF/CM1/WRF projection form, tuned on the DCMIP2016 baroclinic wave).
+   The MPAS Klemp–Skamarock–Ha 2018 momentum correction is also available
+   as [`ThermodynamicDivergenceDamping`](@ref).
 
 Fields
 ======
@@ -211,6 +208,7 @@ struct AcousticSubstepper{N, FT, D, AD, CF, FF, XF, YF, GT, ST, TS}
     damping :: D                               # AcousticDampingStrategy
     substep_distribution :: AD                 # ProportionalSubsteps or MonolithicFirstStage
     virtual_potential_temperature :: CF        # Stage-frozen θ_m (MPAS `t`)
+    moist_rθ_ratio :: CF                       # Stage-frozen R_m/R_d at cell centers — Xiao et al. 2015 (JAMES) correction to the acoustic PGF and projection damping so Π = (R_d · (R_m/R_d) · ρθ / p₀)^(R_d/c_v) = (R_m · ρθ / p₀)^(R_d/c_v). = 1 in dry air.
     reference_exner_function :: CF             # π₀ from reference state
     theta_flux_scratch :: CF                   # ts_scratch in column kernel
     mass_flux_scratch :: CF                    # rs_scratch in column kernel
@@ -236,6 +234,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.damping),
                        a.substep_distribution,
                        adapt(to, a.virtual_potential_temperature),
+                       adapt(to, a.moist_rθ_ratio),
                        adapt(to, a.reference_exner_function),
                        adapt(to, a.theta_flux_scratch),
                        adapt(to, a.mass_flux_scratch),
@@ -274,6 +273,10 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     substep_distribution = split_explicit.substep_distribution
 
     virtual_potential_temperature = CenterField(grid)
+    # Xiao et al. 2015 correction: R_m/R_d ≥ 1. Initialize to 1 (dry air). Overwritten
+    # every stage by `_prepare_virtual_theta!` from the current moisture fields.
+    moist_rθ_ratio = CenterField(grid)
+    fill!(parent(moist_rθ_ratio), 1)
     reference_exner_function = CenterField(grid)
     theta_flux_scratch = CenterField(grid)
     mass_flux_scratch = CenterField(grid)
@@ -326,6 +329,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     return AcousticSubstepper(Ns, ω, damping,
                               substep_distribution,
                               virtual_potential_temperature,
+                              moist_rθ_ratio,
                               reference_exner_function,
                               theta_flux_scratch,
                               mass_flux_scratch,
@@ -475,6 +479,7 @@ function prepare_acoustic_cache!(substepper, model)
 
     launch!(arch, grid, :xyz, _prepare_virtual_theta!,
             substepper.virtual_potential_temperature,
+            substepper.moist_rθ_ratio,
             model.dynamics.density,
             model.dynamics.pressure,
             model.temperature,
@@ -489,11 +494,16 @@ function prepare_acoustic_cache!(substepper, model)
     _set_exner_reference!(substepper, model, model.dynamics.reference_state)
 
     fill_halo_regions!(substepper.virtual_potential_temperature)
+    # moist_rθ_ratio is read with i±1/j±1 neighbor access in the horizontal PGF
+    # (function composition `∂xᶠᶜᶜ(i, j, k, grid, _moist_rθ_scaled, ρθ″, ratio)`
+    # walks one cell outside the interior), so its halos must be filled.
+    fill_halo_regions!(substepper.moist_rθ_ratio)
 
     return nothing
 end
 
-@kernel function _prepare_virtual_theta!(θᵥ_field, ρ, p, T, specific_prognostic_moisture, grid,
+@kernel function _prepare_virtual_theta!(θᵥ_field, moist_rθ_ratio_field, ρ, p, T,
+                                          specific_prognostic_moisture, grid,
                                           microphysics, microphysical_fields, constants, pˢᵗ, κ)
     i, j, k = @index(Global, NTuple)
 
@@ -512,13 +522,20 @@ end
     q  = grid_moisture_fractions(i, j, k, grid, microphysics, ρⁱ, qᵛᵉ, microphysical_fields)
     Rᵈ = dry_air_gas_constant(constants)
     Rᵐ = mixture_gas_constant(q, constants)
-    Tᵥ = Tⁱ * (Rᵐ / Rᵈ)
+    Rᵐ_over_Rᵈ = Rᵐ / Rᵈ
+    Tᵥ = Tⁱ * Rᵐ_over_Rᵈ
 
     # Virtual potential temperature θᵥ = Tᵥ / π. We use the dry Exner function
     # π = (p/pˢᵗ)^κ with the dry κ = Rᵈ/cᵖᵈ to be consistent with the reference
     # Exner state Π₀ used by `_set_exner_reference!` and the slow PGF below.
     πⁱ = (pⁱ / pˢᵗ)^κ
-    @inbounds θᵥ_field[i, j, k] = Tᵥ / πⁱ
+    @inbounds begin
+        θᵥ_field[i, j, k] = Tᵥ / πⁱ
+        # Xiao et al. 2015 correction — this is the factor such that, for the
+        # acoustic EOS π = (R_d · ρθ / p₀)^(R_d/c_v), replacing ρθ with
+        # moist_rθ_ratio · ρθ gives the physically correct moist π = (R_m · ρθ / p₀)^(R_d/c_v).
+        moist_rθ_ratio_field[i, j, k] = Rᵐ_over_Rᵈ
+    end
 end
 
 ##### Set the Exner reference state for the acoustic loop.
@@ -673,8 +690,12 @@ end
 # Exner function at a cell center, for interpolation via function composition.
 @inline _exner_from_p(i, j, k, grid, p, pˢᵗ, κ) = (p[i, j, k] / pˢᵗ)^κ
 
+# Moist-scaled ρθ at a center cell — used by the horizontal PGF to differentiate
+# (R_m/R_d)·ρθ rather than ρθ alone. Xiao et al. 2015 (JAMES) correction.
+@inline _moist_rθ(i, j, k, grid, rtheta_pp, ζ) = @inbounds rtheta_pp[i, j, k] * ζ[i, j, k]
+
 @kernel function _mpas_horizontal_forward!(u, v, ru_p, rv_p, grid, Δτ,
-                                            rtheta_pp, pressure, ρ,
+                                            rtheta_pp, moist_rθ_ratio, pressure, ρ,
                                             Gˢu, Gˢv,
                                             cₚ, Rᵈ, pˢᵗ)
     i, j, k = @index(Global, NTuple)
@@ -688,8 +709,11 @@ end
         #   pgrad = c2 * Π_avg * Δ(rtheta_pp) / dcEdge
         #   ru_p += dts * (tend_ru - pgrad)
         # Exner interpolated to faces via function composition (topology-safe).
+        # Xiao et al. 2015 moist correction: differentiate (R_m/R_d)·rtheta_pp so that
+        # ∂π/∂x ∝ ∂(R_m · ρθ)/∂x — the correct moist linearized pressure gradient.
+        # For dry air moist_rθ_ratio ≡ 1 and this reduces to the original form.
         Π_u_face = ℑxᶠᵃᵃ(i, j, k, grid, _exner_from_p, pressure, pˢᵗ, κ)
-        ∂x_ρθ = ∂xᶠᶜᶜ(i, j, k, grid, rtheta_pp)
+        ∂x_ρθ = ∂xᶠᶜᶜ(i, j, k, grid, _moist_rθ, rtheta_pp, moist_rθ_ratio)
         pgrad_u = c2 * Π_u_face * ∂x_ρθ
 
         ρ_u_face = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
@@ -699,7 +723,7 @@ end
         ru_p[i, j, k] += Δτ * (ρ_u_face * Gˢu[i, j, k] - pgrad_u) * not_bdy_x
 
         Π_v_face = ℑyᵃᶠᵃ(i, j, k, grid, _exner_from_p, pressure, pˢᵗ, κ)
-        ∂y_ρθ = ∂yᶜᶠᶜ(i, j, k, grid, rtheta_pp)
+        ∂y_ρθ = ∂yᶜᶠᶜ(i, j, k, grid, _moist_rθ, rtheta_pp, moist_rθ_ratio)
         pgrad_v = c2 * Π_v_face * ∂y_ρθ
 
         ρ_v_face = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
@@ -824,27 +848,36 @@ function apply_pgf_filter!(damping::PressureProjectionDamping, substepper, model
     cv_over_R = FT((cᵖ - Rᵈ) / Rᵈ)
     launch!(arch, grid, :xyz, _pressure_projection_filter!,
             damping.ρθ″_for_pgf, substepper.ρθ″, substepper.previous_rtheta_pp,
-            ρθ_stage, β, FT(Rᵈ), pˢᵗ, rcv, cv_over_R)
+            ρθ_stage, substepper.moist_rθ_ratio,
+            β, FT(Rᵈ), pˢᵗ, rcv, cv_over_R)
     fill_halo_regions!(damping.ρθ″_for_pgf)
     return nothing
 end
 
 @kernel function _pressure_projection_filter!(ρθ_for_pgf, ρθ″, ρθ″_old,
-                                              ρθ_stage, β, R, pˢᵗ, rcv, cv_over_R)
+                                              ρθ_stage, moist_rθ_ratio,
+                                              β, R, pˢᵗ, rcv, cv_over_R)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρθ_st = ρθ_stage[i, j, k]
-        ρθ_st_safe = ifelse(ρθ_st == 0, one(ρθ_st), ρθ_st)
-        # Π_stage = (R · ρθ_stage / pˢᵗ)^(R/cv) — the EOS Π at the WS-RK3 stage start.
-        Π_stage = (R * ρθ_st / pˢᵗ)^rcv
+        # Xiao et al. 2015 moist correction: use R_m · ρθ = R_d · (R_m/R_d) · ρθ in
+        # the EOS so π is consistent with moist air (Π = (R_m · ρθ_stage / p₀)^(R/cv)).
+        # `moist_rθ_ratio = R_m/R_d` is stage-frozen by `_prepare_virtual_theta!`;
+        # in dry air it equals 1 and this reduces to the original dry formula.
+        ζ      = moist_rθ_ratio[i, j, k]
+        ρθ_st  = ρθ_stage[i, j, k]
+        ρθ_stζ = ζ * ρθ_st
+        ρθ_st_safe = ifelse(ρθ_stζ == 0, one(ρθ_stζ), ρθ_stζ)
+        # Π_stage = (R · R_m/R_d · ρθ_stage / pˢᵗ)^(R/cv) — the moist EOS Π at stage start.
+        Π_stage = (R * ρθ_stζ / pˢᵗ)^rcv
         Π_stage_safe = ifelse(Π_stage == 0, one(Π_stage), Π_stage)
         # Total Π at substep start (from accumulated (ρθ)″) and one substep behind.
-        Π_curr = (R * (ρθ_st + ρθ″[i, j, k])     / pˢᵗ)^rcv
-        Π_old  = (R * (ρθ_st + ρθ″_old[i, j, k]) / pˢᵗ)^rcv
+        # Moisture is frozen within the substep loop, so the same ζ scales ρθ″ too.
+        Π_curr = (R * ζ * (ρθ_st + ρθ″[i, j, k])     / pˢᵗ)^rcv
+        Π_old  = (R * ζ * (ρθ_st + ρθ″_old[i, j, k]) / pˢᵗ)^rcv
         π″_curr = Π_curr - Π_stage
         π″_old  = Π_old  - Π_stage
-        # Linearized EOS conversion factor (cv/R) · ρθ_stage / Π_stage,
-        # i.e. the d(ρθ)/dπ at the frozen state.
+        # Linearized EOS conversion factor (cv/R) · (ζ·ρθ_stage) / Π_stage,
+        # i.e. the d(ρθ_m)/dπ at the frozen state.
         conversion = cv_over_R * ρθ_st_safe / Π_stage_safe
         ρθ_for_pgf[i, j, k] = ρθ″[i, j, k] + conversion * β * (π″_curr - π″_old)
     end
@@ -1409,7 +1442,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         ρθ_for_pgf = pgf_source_field(substepper.damping, substepper)
         launch!(arch, grid, :xyz, _mpas_horizontal_forward!,
                 u, v, substepper.ρu″, substepper.ρv″, grid, Δτ,
-                ρθ_for_pgf,
+                ρθ_for_pgf, substepper.moist_rθ_ratio,
                 substepper.frozen_pressure, model.dynamics.density,
                 substepper.slow_tendencies.velocity.u,
                 substepper.slow_tendencies.velocity.v,
@@ -1422,12 +1455,6 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         fill_halo_regions!(substepper.ρv″)
         fill_halo_regions!(u)
         fill_halo_regions!(v)
-
-        # Polar filter: damp unresolvable high-wavenumber zonal modes in u, v
-        # and perturbation momentum ρu″, ρv″ at high latitudes.
-        # This matches WRF's pxft(flag_uv=1) call after the horizontal forward step.
-        _apply_polar_filter_substep!(model.dynamics.polar_filter,
-                                     u, v, substepper.ρu″, substepper.ρv″)
 
         # Save rtheta_pp before substep for divergence damping (δ_τΘ'' computation)
         rtheta_pp_old = substepper.previous_rtheta_pp
@@ -1464,12 +1491,6 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 substepper.theta_flux_scratch, substepper.mass_flux_scratch,
                 grid, Δτᵋ,
                 substepper.virtual_potential_temperature)
-
-        # Polar filter: damp unresolvable high-wavenumber zonal modes in ρθ″, ρ″,
-        # and ρw″ after the acoustic solve. Matches WRF's pxft(flag_t=1, flag_mu=1,
-        # flag_wph=1) for non-hydrostatic mode.
-        _apply_polar_filter_scalar_substep!(model.dynamics.polar_filter,
-                                            substepper.ρθ″, substepper.ρ″, substepper.ρw″)
 
         # Fill rtheta_pp halos before divergence damping reads δx(rtheta_pp_new - rtheta_pp_old).
         # The column kernel updated interior rtheta_pp but not halos; stale halos create
@@ -1509,13 +1530,6 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     # Reconstruct momentum from updated density and velocity
     launch!(arch, grid, :xyz, _recover_momentum!,
             model.momentum, model.dynamics.density, model.velocities, grid)
-
-    # Post-recovery polar filter: filter the recovered velocities and scalars
-    # to close the filter loop across RK3 stages. Direct field filtering
-    # (no intensive-form round-trip) avoids reintroducing high-k content through ρ.
-    _apply_polar_filter_recovered!(model.dynamics.polar_filter,
-                                   u, v, w, model.dynamics.density, ρχ,
-                                   model.momentum)
 
     return nothing
 end

@@ -10,16 +10,12 @@ using Oceananigans.Utils: sum_of_velocities
 @inline div_ρUc(i, j, k, grid, args...) = zero(grid)
 @inline c_div_ρU(i, j, k, grid, args...) = zero(grid)
 
-# Vertically implicit: zero out vertical PGF and buoyancy from explicit tendency
-# (handled by the implicit Helmholtz solve + back-solve instead).
+# Split-explicit substepping zeros the vertical PGF and buoyancy from the explicit
+# tendency; the fast substep loop re-applies them from the linearized perturbation
+# formulas. Other time discretizations (e.g. ExplicitTimeStepping) fall through to
+# the full conservation-form PGF and buoyancy.
 @inline explicit_z_pressure_gradient(i, j, k, grid, dynamics) = z_pressure_gradient(i, j, k, grid, dynamics)
 @inline explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid, args...) = buoyancy_forceᶜᶜᶠ(i, j, k, grid, args...)
-
-# Exner buoyancy: ρ·b where b = -(cₚᵈ θᵥ ∂Π₀/∂z + g).
-# Nonzero ONLY for VerticallyImplicitTimeStepping, which zeros the conservation-form
-# PGF+buoyancy and replaces them with the Exner splitting: slow buoyancy (explicit)
-# and perturbation Exner PGF (implicit). Default returns zero for all other time steppers.
-@inline exner_buoyancy_forceᶜᶜᶠ(i, j, k, grid, args...) = zero(grid)
 
 """
     ∇_dot_Jᶜ(i, j, k, grid, ρ, closure::AbstractTurbulenceClosure, closure_fields,
@@ -120,8 +116,6 @@ end
              - explicit_z_pressure_gradient(i, j, k, grid, dynamics)
              + explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, temperature,
                                            specific_prognostic_moisture, microphysics, microphysical_fields, constants)
-             + exner_buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, temperature,
-                                        specific_prognostic_moisture, microphysics, microphysical_fields, constants)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
              + ρw_forcing(i, j, k, grid, clock, model_fields))

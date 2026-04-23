@@ -14,34 +14,29 @@ Fields
 - `pressure`: Diagnostic pressure field p = ρ Rᵐ T
 - `standard_pressure`: Reference pressure pˢᵗ for potential temperature (default 10⁵ Pa)
 - `surface_pressure`: Mean pressure at the bottom of the atmosphere p₀
-- `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref), [`ExplicitTimeStepping`](@ref), or [`VerticallyImplicitTimeStepping`](@ref))
+- `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref) or [`ExplicitTimeStepping`](@ref))
 - `reference_state`: Fixed hydrostatically-balanced reference state for base-state pressure correction (`nothing` or [`ExnerReferenceState`](@ref))
-- `vertical_acoustic_solver`: [`VerticalAcousticSolver`](@ref) for implicit vertical acoustic correction (`nothing` unless using [`VerticallyImplicitTimeStepping`](@ref))
 - `terrain_metrics`: [`TerrainMetrics`](@ref) for terrain-following coordinates (or `nothing`)
 - `Ω̃`, `ρΩ̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
 - `terrain_reference_pressure`, `terrain_reference_density`: 3D reference pressure / density for the terrain pressure gradient force (or `nothing`)
-- `polar_filter`: [`PolarFilter`](@ref) for damping unresolvable high-wavenumber zonal modes on `LatitudeLongitudeGrid` (or `nothing`)
 
 The `time_discretization` determines how tendencies are computed and which
 time-stepper is used:
 - [`SplitExplicitTimeDiscretization`](@ref): Acoustic substepping with separate slow/fast tendencies
 - [`ExplicitTimeStepping`](@ref): All tendencies computed together (small Δt required)
-- [`VerticallyImplicitTimeStepping`](@ref): Vertical acoustics implicit, horizontal explicit
 """
-struct CompressibleDynamics{TD, D, P, FT, RS, VAS, TM, CV, CM, TRP, TRD, PF}
-    time_discretization :: TD                  # SplitExplicitTimeDiscretization, ExplicitTimeStepping, or VerticallyImplicitTimeStepping
+struct CompressibleDynamics{TD, D, P, FT, RS, TM, CV, CM, TRP, TRD}
+    time_discretization :: TD                  # SplitExplicitTimeDiscretization or ExplicitTimeStepping
     density :: D                               # ρ (prognostic)
     pressure :: P                              # p = ρ R^m T (diagnostic)
     standard_pressure :: FT                    # pˢᵗ (reference pressure for potential temperature)
     surface_pressure :: FT                     # p₀ (mean pressure at the bottom of the atmosphere)
     reference_state :: RS                      # ExnerReferenceState for base-state pressure correction (or Nothing)
-    vertical_acoustic_solver :: VAS            # VerticalAcousticSolver for implicit vertical acoustics (or Nothing)
     terrain_metrics :: TM                      # TerrainMetrics for terrain-following coordinates (or Nothing)
     contravariant_vertical_velocity :: CV      # Ω̃ diagnostic field (or Nothing)
     contravariant_vertical_momentum :: CM      # ρΩ̃ diagnostic field (or Nothing)
     terrain_reference_pressure :: TRP          # 3D reference pressure for terrain PG (or Nothing)
     terrain_reference_density :: TRD           # 3D reference density for terrain buoyancy (or Nothing)
-    polar_filter :: PF                         # PolarFilter for LatitudeLongitudeGrid (or Nothing)
 end
 
 """
@@ -54,8 +49,7 @@ Positional Arguments
 ====================
 
 - `time_discretization`: Time discretization scheme. Default: [`ExplicitTimeStepping`](@ref).
-  Use [`SplitExplicitTimeDiscretization`](@ref) for acoustic substepping or
-  [`VerticallyImplicitTimeStepping`](@ref) for implicit vertical acoustics.
+  Use [`SplitExplicitTimeDiscretization`](@ref) for acoustic substepping.
 
 Keyword Arguments
 =================
@@ -72,8 +66,7 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               surface_pressure = 101325.0,
                               reference_potential_temperature = nothing,
                               reference_temperature = nothing,
-                              terrain_metrics = nothing,
-                              polar_filter = nothing) where TD
+                              terrain_metrics = nothing) where TD
 
     FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
     pˢᵗ = convert(FT, standard_pressure)
@@ -85,12 +78,11 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     else
         reference_potential_temperature
     end
-    # vertical_acoustic_solver, contravariant fields, terrain_reference_pressure,
-    # terrain_reference_density are all built later in materialize_dynamics.
+    # contravariant fields, terrain_reference_pressure, and terrain_reference_density
+    # are built later in materialize_dynamics.
     return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, ref_spec,
-                                nothing, terrain_metrics,
-                                nothing, nothing, nothing, nothing,
-                                polar_filter)
+                                terrain_metrics,
+                                nothing, nothing, nothing, nothing)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
@@ -100,13 +92,11 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          dynamics.standard_pressure,
                          dynamics.surface_pressure,
                          adapt(to, dynamics.reference_state),
-                         adapt(to, dynamics.vertical_acoustic_solver),
                          adapt(to, dynamics.terrain_metrics),
                          adapt(to, dynamics.contravariant_vertical_velocity),
                          adapt(to, dynamics.contravariant_vertical_momentum),
                          adapt(to, dynamics.terrain_reference_pressure),
-                         adapt(to, dynamics.terrain_reference_density),
-                         adapt(to, dynamics.polar_filter))
+                         adapt(to, dynamics.terrain_reference_density))
 
 #####
 ##### Materialization
@@ -143,11 +133,6 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     ref_spec = dynamics.reference_state
     terrain_metrics = dynamics.terrain_metrics
 
-    ## Auto-construct ExnerReferenceState for VITS if not user-specified
-    if ref_spec === nothing && dynamics.time_discretization isa VerticallyImplicitTimeStepping
-        ref_spec = 300  # default reference θ for HEVI
-    end
-
     if ref_spec === nothing || terrain_metrics !== nothing
         reference_state = nothing
     elseif ref_spec isa NamedTuple && haskey(ref_spec, :reference_temperature)
@@ -163,8 +148,6 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
                                               potential_temperature = ref_spec,
                                               standard_pressure)
     end
-
-    vertical_acoustic_solver = materialize_vertical_acoustic_solver(dynamics.time_discretization, grid)
 
     # Create contravariant velocity/momentum fields and terrain reference state
     # if terrain metrics are present.
@@ -197,15 +180,12 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         end
     end
 
-    polar_filter = materialize_polar_filter(grid, dynamics.polar_filter)
-
     return CompressibleDynamics(dynamics.time_discretization, density, pressure,
                                 standard_pressure, surface_pressure, reference_state,
-                                vertical_acoustic_solver, terrain_metrics,
+                                terrain_metrics,
                                 contravariant_vertical_velocity,
                                 contravariant_vertical_momentum,
-                                terrain_reference_pressure, terrain_reference_density,
-                                polar_filter)
+                                terrain_reference_pressure, terrain_reference_density)
 end
 
 #####
@@ -310,7 +290,6 @@ AtmosphereModels.default_timestepper(dynamics::CompressibleDynamics) =
 
 default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticRungeKutta3
 default_timestepper(::ExplicitTimeStepping) = :SSPRungeKutta3
-default_timestepper(::VerticallyImplicitTimeStepping) = :SSPRungeKutta3
 
 #####
 ##### Show methods
@@ -318,7 +297,6 @@ default_timestepper(::VerticallyImplicitTimeStepping) = :SSPRungeKutta3
 
 Base.summary(::SplitExplicitTimeDiscretization) = "SplitExplicitTimeDiscretization"
 Base.summary(::ExplicitTimeStepping) = "ExplicitTimeStepping"
-Base.summary(::VerticallyImplicitTimeStepping) = "VerticallyImplicitTimeStepping"
 
 function Base.summary(dynamics::CompressibleDynamics)
     td = summary(dynamics.time_discretization)

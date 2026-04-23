@@ -28,7 +28,6 @@ export
     ConservativeProjectionDamping,
     PressureProjectionDamping,
     ExplicitTimeStepping,
-    VerticallyImplicitTimeStepping,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -123,8 +122,6 @@ export
     # TimeSteppers
     SSPRungeKutta3,
     AcousticRungeKutta3,
-    IMEXRungeKuttaARS232,
-    IMEXRungeKuttaSSP3332,
     AcousticSubstepper,
 
     # ParcelDynamics
@@ -132,12 +129,7 @@ export
     ParcelModel,
     ParcelState,
     PrescribedVerticalVelocity,
-    PrognosticVerticalVelocity,
-
-    # PolarFilters
-    PolarFilter,
-    Shapiro121,
-    AbstractRolloff
+    PrognosticVerticalVelocity
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
@@ -222,10 +214,6 @@ using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulatio
 include("TerrainFollowingDiscretization/TerrainFollowingDiscretization.jl")
 using .TerrainFollowingDiscretization
 
-# PolarFilters (needed by CompressibleEquations for materialize_polar_filter)
-include("PolarFilters/PolarFilters.jl")
-using .PolarFilters
-
 # Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
 include("AnelasticEquations/AnelasticEquations.jl")
 using .AnelasticEquations: AnelasticDynamics, AnelasticModel
@@ -236,8 +224,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermodynamicDivergenceDamping,
                               ConservativeProjectionDamping, PressureProjectionDamping,
-                              ExplicitTimeStepping,
-                              VerticallyImplicitTimeStepping
+                              ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel

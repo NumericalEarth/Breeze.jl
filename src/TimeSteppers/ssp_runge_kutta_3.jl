@@ -10,7 +10,6 @@ using Oceananigans.TimeSteppers:
     implicit_step!
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
-using Breeze.CompressibleEquations: vertical_acoustic_implicit_step!
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -130,11 +129,7 @@ function ssp_rk3_substep!(model, Δt, α)
                        Δt)
     end
 
-    # Step 3: Acoustic implicit correction on the forward-Euler state
-    # (before blending with u⁰)
-    vertical_acoustic_implicit_step!(model, Δt)
-
-    # Step 4: SSP-RK3 blending with u⁰
+    # Step 3: SSP-RK3 blending with u⁰
     #   u^(m) = (1 - α) * u⁰ + α * u_fe
     for (u, u⁰) in zip(prognostic_fields(model), U⁰)
         launch!(arch, grid, :xyz, _ssp_rk3_blend!, u, u⁰, α)

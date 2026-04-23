@@ -6,6 +6,7 @@
 ##### - ExplicitTimeStepping: Standard explicit time-stepping (small Δt required)
 #####
 
+
 #####
 ##### Acoustic substep distribution across the WS-RK3 stages
 #####
@@ -264,10 +265,10 @@ Fields
 
 - `substeps`: Number of acoustic substeps ``N`` per outer ``Δt``. Default `nothing` adaptively chooses ``N`` from the horizontal acoustic CFL each step. With [`ProportionalSubsteps`](@ref) the substep size is ``Δτ = Δt/N`` in every stage; with [`MonolithicFirstStage`](@ref) stage 1 instead uses one substep of size ``Δt/3``.
 - `forward_weight`: Off-centering parameter ``ω`` for the vertically implicit ``(\\rho w)''``–``(\\rho\\theta)''`` solve. ``ω > 0.5`` damps vertical acoustic modes; the MPAS off-centering is ``ε = 2ω - 1``. Default: 0.6.
-- `damping`: Acoustic divergence damping strategy ([`AcousticDampingStrategy`](@ref)). Default: [`PressureProjectionDamping`](@ref) with `coefficient = 0.5`, the literal ERF/CM1/WRF projection form at the empirically-tuned coefficient that produces a clean BCI lifecycle in the DCMIP2016 baroclinic-wave comparison (`docs/src/appendix/bw_dt_sweep_results.md`). For small-amplitude wave configurations like the Skamarock-Klemp 1994 inertia-gravity wave, this coefficient is more aggressive than necessary; pass `damping = PressureProjectionDamping(coefficient = 0.1)` for a milder filter. Other options: [`ThermodynamicDivergenceDamping`](@ref) (the MPAS Klemp-Skamarock-Ha 2018 form), [`ConservativeProjectionDamping`](@ref) (cheaper algebraic variant of `PressureProjectionDamping`), or [`NoDivergenceDamping`](@ref) to disable damping entirely.
+- `damping`: Acoustic divergence damping strategy ([`AcousticDampingStrategy`](@ref)). Default: [`PressureProjectionDamping`](@ref) with `coefficient = 0.5`, the literal ERF/CM1/WRF projection form at the empirically-tuned coefficient that produces a clean BCI lifecycle in the DCMIP2016 baroclinic-wave comparison. For small-amplitude wave configurations like the Skamarock-Klemp 1994 inertia-gravity wave, this coefficient is more aggressive than necessary; pass `damping = PressureProjectionDamping(coefficient = 0.1)` for a milder filter. Other options: [`ThermodynamicDivergenceDamping`](@ref) (the MPAS Klemp-Skamarock-Ha 2018 form), [`ConservativeProjectionDamping`](@ref) (cheaper algebraic variant of `PressureProjectionDamping`), or [`NoDivergenceDamping`](@ref) to disable damping entirely.
 - `substep_distribution`: How acoustic substeps are distributed across the three WS-RK3 stages. One of [`ProportionalSubsteps`](@ref) (default; constant ``Δτ = Δt/N`` with stage counts ``N/3``, ``N/2``, ``N``) or [`MonolithicFirstStage`](@ref) (single substep of size ``Δt/3`` in stage 1, MPAS-A `config_time_integration_order = 3` form).
 
-See also [`ExplicitTimeStepping`](@ref) and [`VerticallyImplicitTimeStepping`](@ref).
+See also [`ExplicitTimeStepping`](@ref).
 """
 struct SplitExplicitTimeDiscretization{N, FT, D <: AcousticDampingStrategy, AD <: AcousticSubstepDistribution}
     substeps :: N
@@ -311,43 +312,7 @@ All tendencies (including pressure gradient and acoustic modes) are computed
 together and time-stepped explicitly. This requires small time steps limited
 by the acoustic CFL condition (sound speed ~340 m/s).
 
-Use [`SplitExplicitTimeDiscretization`](@ref) or
-[`VerticallyImplicitTimeStepping`](@ref) for more efficient time-stepping with larger Δt.
+Use [`SplitExplicitTimeDiscretization`](@ref) for more efficient time-stepping
+with larger Δt.
 """
 struct ExplicitTimeStepping end
-
-"""
-$(TYPEDEF)
-
-Vertically implicit time discretization for compressible dynamics.
-
-Treats vertical acoustic propagation implicitly by decomposing the vertical
-pressure gradient and vertical ρθ advective flux into linear and nonlinear
-parts. The linear vertical acoustic coupling between ρw and ρθ is solved
-via a tridiagonal system (backward Euler) after each explicit SSP-RK3 stage,
-while all other terms remain explicit.
-
-The tridiagonal equation for the implicit correction is:
-
-```math
-\\left[I - (α Δt)^2 \\partial_z (\\mathbb{C}^{ac2} \\partial_z)\\right] (ρθ)^+ = (ρθ)^*
-```
-
-followed by a back-solve for ``(ρw)^+``. The linearization state (θ and ℂᵃᶜ²)
-comes from the most recent `update_state!` call.
-
-This eliminates the vertical acoustic CFL constraint, allowing time steps limited
-only by the horizontal acoustic CFL and advective CFL — typically ~30x larger
-than [`ExplicitTimeStepping`](@ref) for kilometer-scale vertical grids.
-
-The parameter `β` controls the implicitness of the acoustic coupling:
-  - `β = 0.5` (default): Crank–Nicolson — second-order accurate, moderate acoustic damping
-  - `β = 1`: backward Euler — maximum damping of vertical acoustic modes
-
-See also [`ExplicitTimeStepping`](@ref), [`SplitExplicitTimeDiscretization`](@ref).
-"""
-struct VerticallyImplicitTimeStepping{FT}
-    β :: FT
-end
-
-VerticallyImplicitTimeStepping(; β=0.5) = VerticallyImplicitTimeStepping(β)

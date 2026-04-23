@@ -200,7 +200,6 @@ makedocs(
         ],
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
-            "HEVI IMEX derivation" => "appendix/hevi_imex_derivation.md",
             "Reproducibility of Breeze.jl models" => "reproducibility.md",
         ],
         "References" => "references.md",
