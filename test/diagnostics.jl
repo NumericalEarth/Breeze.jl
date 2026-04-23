@@ -187,7 +187,7 @@ end
 
     θ_field = CenterField(grid)
     set!(θ_field, (x, y, z) -> begin
-        pᵣ_z = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+        pᵣ_z = adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
         T₀ * (pˢᵗ / pᵣ_z)^(Rᵈ / cᵖᵈ)
     end)
 

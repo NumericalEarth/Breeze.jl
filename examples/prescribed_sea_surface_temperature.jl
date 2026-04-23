@@ -152,6 +152,17 @@ Uᵍ = 1e-2  # Gustiness (m/s)
 # for each flux type
 coef = PolynomialCoefficient(roughness_length = 1.5e-4)
 
+# ## Filtered surface velocities
+#
+# At LES resolution, instantaneous surface velocities contain turbulent fluctuations
+# that create spurious correlations in the bulk flux formulas. We use
+# [`FilteredSurfaceVelocities`](@ref) to temporally filter the near-surface
+# wind used in the bulk exchange computation, following [ShinYangHowland2025](@citet)
+# and [NishizawaKitamura2018](@citet). The exponential filter with a 10-minute
+# timescale smooths over the fastest eddies while tracking the evolving mean wind.
+
+filtered_velocities = FilteredSurfaceVelocities(grid; filter_timescale=1hour)
+
 # ## Surface temperature
 #
 # The sea surface temperature enters the bulk formulas for sensible heat,
@@ -171,7 +182,7 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # `PolynomialCoefficient`, since the stability correction depends on the
 # surface virtual potential temperature.
 
-ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
+ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
 
 # ## Sensible heat flux and vapor fluxes
 #
@@ -181,8 +192,8 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # We complete our specification by using the same polynomial coefficient for
 # sensible and latent heat fluxes. The flux type will be automatically inferred:
 
-ρe_surface_flux = BulkSensibleHeatFlux(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
-ρqᵉ_surface_flux = BulkVaporFlux(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
+ρe_surface_flux = BulkSensibleHeatFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
+ρqᵉ_surface_flux = BulkVaporFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
 
 # We can visualize how the neutral drag coefficient varies with wind speed,
 # and the range of stability-corrected values expected in this simulation.
