@@ -228,7 +228,10 @@ vᵢ(x, y, z) = v₀(z)
 
 # For the two-moment scheme, `ρnᵃ` is automatically initialized from
 # the aerosol distribution embedded in the microphysics scheme
-# (100 cm⁻³ maritime aerosol by default).
+# (100 cm⁻³ continental aerosol by default — see `default_aerosol_activation`
+# in `BreezeCloudMicrophysicsExt`). To customize the aerosol population, build
+# a `CloudMicrophysics.Parameters.AerosolActivation` and pass it via the
+# `aerosol_activation` keyword of `TwoMomentCloudMicrophysics`.
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 
 # ## Simulation
