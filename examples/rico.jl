@@ -84,10 +84,10 @@ T₀ = 299.8    # Sea surface temperature (K)
 # currently extends only to constant coefficients (but could expand in the future),
 
 ρe_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
-ρqᵉ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
+ρqᵛ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
 
 ρe_bcs = FieldBoundaryConditions(bottom=ρe_flux)
-ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_flux)
+ρqᵛ_bcs = FieldBoundaryConditions(bottom=ρqᵛ_flux)
 
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
@@ -140,11 +140,11 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # by the large-scale circulation [vanZanten2011](@cite).
 
 ρᵣ = reference_state.density
-∂t_ρqᵉ_large_scale = Field{Nothing, Nothing, Center}(grid)
+∂t_ρqᵛ_large_scale = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Rico_dqtdt(FT)
-set!(∂t_ρqᵉ_large_scale, z -> dqdt_profile(z))
-set!(∂t_ρqᵉ_large_scale, ρᵣ * ∂t_ρqᵉ_large_scale)
-∂t_ρqᵉ_large_scale_forcing = Forcing(∂t_ρqᵉ_large_scale)
+set!(∂t_ρqᵛ_large_scale, z -> dqdt_profile(z))
+set!(∂t_ρqᵛ_large_scale, ρᵣ * ∂t_ρqᵛ_large_scale)
+∂t_ρqᵛ_large_scale_forcing = Forcing(∂t_ρqᵛ_large_scale)
 
 # ## Radiative cooling
 #
@@ -163,11 +163,11 @@ set!(∂t_ρθ_large_scale, ρᵣ * ∂t_θ_large_scale)
 Fρu = (subsidence, geostrophic.ρu)
 Fρv = (subsidence, geostrophic.ρv)
 Fρw = sponge
-Fρqᵉ = (subsidence, ∂t_ρqᵉ_large_scale_forcing)
+Fρqᵛ = (subsidence, ∂t_ρqᵛ_large_scale_forcing)
 Fρθ = (subsidence, ρθ_large_scale_forcing)
 
-forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵉ=Fρqᵉ, ρθ=Fρθ)
-boundary_conditions = (ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
+forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵛ=Fρqᵛ, ρθ=Fρθ)
+boundary_conditions = (ρe=ρe_bcs, ρqᵛ=ρqᵛ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
 # ## Model setup
@@ -185,15 +185,17 @@ microphysics = TwoMomentCloudMicrophysics()
 
 weno = WENO(order=5)
 bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
+# positive definite advection for number concentrations to prevent NaN cascade from negative values
+upwind = UpwindBiased(order=1)
 
 momentum_advection = weno
 scalar_advection = (ρθ = weno,
-                    ρqᵉ = bounds_preserving_weno,
+                    ρqᵛ = bounds_preserving_weno,
                     ρqᶜˡ = bounds_preserving_weno,
                     ρqʳ = bounds_preserving_weno,
-                    ρnᶜˡ = weno,
-                    ρnʳ = weno,
-                    ρnᵃ = weno)
+                    ρnᶜˡ = upwind,
+                    ρnʳ = upwind,
+                    ρnᵃ = upwind)
 
 model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
                         momentum_advection, scalar_advection, forcing, boundary_conditions)
@@ -224,6 +226,9 @@ qᵢ(x, y, z) = qᵗ₀(z)
 uᵢ(x, y, z) = u₀(z)
 vᵢ(x, y, z) = v₀(z)
 
+# For the two-moment scheme, `ρnᵃ` is automatically initialized from 
+# the aerosol distribution embedded in the microphysics scheme 
+# (100 cm⁻³ maritime aerosol by default).
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 
 # ## Simulation
@@ -250,6 +255,7 @@ qʳ = model.microphysical_fields.qʳ    # rain mass fraction (diagnostic)
 ρqʳ = model.microphysical_fields.ρqʳ  # rain mass density (prognostic)
 nᶜˡ = model.microphysical_fields.nᶜˡ  # cloud droplet number per unit mass
 nʳ = model.microphysical_fields.nʳ    # rain drop number per unit mass
+nᵃ = model.microphysical_fields.nᵃ    # aerosol number per unit mass
 
 ## For keeping track of the computational expense
 wall_clock = Ref(time_ns())
@@ -258,15 +264,17 @@ function progress(sim)
     qᶜˡmax = maximum(qᶜˡ)
     qʳmax = maximum(qʳ)
     nᶜˡmax = maximum(nᶜˡ)
-    wmax = maximum(abs, model.velocities.w)
+    nᵃmax  = maximum(nᵃ)
+    wmax   = maximum(abs, model.velocities.w)
+    umax   = maximum(abs, model.velocities.u)
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
-    msg *= @sprintf(", max(qᶜˡ): %.2e, max(qʳ): %.2e, max(nᶜˡ): %.2e",
-                    qᶜˡmax, qʳmax, nᶜˡmax)
+    msg *= @sprintf(", max(qᶜˡ)=%.2e, max(qʳ)=%.2e, max(nᶜˡ)=%.2e, max(nᵃ)=%.2e",
+                    qᶜˡmax, qʳmax, nᶜˡmax, nᵃmax)
 
     @info msg
 
