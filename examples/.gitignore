@@ -1,0 +1,14 @@
+# Experiment outputs
+experiments/
+
+# TC rainband reproduction outputs
+output_tc_*/
+figures_tc_*/
+_legacy_output/
+dev/figures_balance_test/
+
+# Legacy output files (if any exist)
+*.jld2
+*.mp4
+*.png
+tropical_cyclone_checkpoint*
