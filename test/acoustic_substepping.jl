@@ -41,7 +41,7 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
         td = SplitExplicitTimeDiscretization()
         acoustic = AcousticSubstepper(grid, td)
         @test acoustic.substeps === nothing  # adaptive by default
-        @test acoustic.forward_weight ≈ FT(0.6)
+        @test acoustic.forward_weight ≈ FT(0.7)
         # Default damping is PressureProjectionDamping(coefficient = 0.5),
         # the BCI-tuned value from the empirical sweep documented in
         # `docs/src/appendix/bw_dt_sweep_results.md`.
@@ -73,12 +73,12 @@ end
     @testset "1 km grid, Δt=12" begin
         grid = RectilinearGrid(acoustic_test_arch; size=(100, 6, 10), halo=(5, 5, 5),
                                x=(0, 100kilometers), y=(0, 6kilometers), z=(0, 10kilometers))
-        # Δx = 1000 m, ℂᵃᶜ ≈ 347 m/s, safety factor 1.2
-        # N = ceil(1.2 * 12 * 347 / 1000) = ceil(4.99) = 5
+        # Δx = 1000 m, ℂᵃᶜ ≈ 347 m/s, safety factor 2.0 → acoustic CFL ≈ 0.5 (ERF/WRF target)
+        # N = ceil(2.0 * 12 * 347 / 1000) = ceil(8.33) = 9
         N = compute_acoustic_substeps(grid, 12, constants)
         @test N isa Int
         @test N ≥ 1
-        @test N == ceil(Int, 1.2 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
+        @test N == ceil(Int, 2.0 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
     end
 
     @testset "Flat y-topology" begin
@@ -87,7 +87,7 @@ end
                                topology=(Periodic, Flat, Bounded))
         # Should use only Δx, not Δy
         N = compute_acoustic_substeps(grid, 12, constants)
-        N_expected = ceil(Int, 1.2 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
+        N_expected = ceil(Int, 2.0 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
         @test N == N_expected
     end
 end

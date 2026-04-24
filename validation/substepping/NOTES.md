@@ -297,3 +297,70 @@ stress test.
 `PressureProjectionDamping`'s coefficient so that β=0.1 gives a damping
 on the same effective scale as the Klemp 2018 form. This would make the
 two strategies interchangeable at the user-facing coefficient level.
+
+## Root cause isolated: vertical off-centering (2026-04-24)
+
+Running IGW at short horizons (20 min) revealed an acoustic-mode
+amplification that hits even this gentle test case, not just the stiff
+thermal bubble. That moved the suspect list to *shared* components
+(column kernel / tridiagonal / forward weight ω).
+
+### The forward-weight sweep
+
+At constant Δt, substep count, and damping, I swept the off-centering
+parameter ω on IGW:
+
+| ω    | ε = 2ω−1 | IGW result                                    |
+|------|:---------:|-----------------------------------------------|
+| 0.55 | 0.10     | **CRASH @ step 31** — ERF/MPAS canonical value |
+| 0.60 | 0.20     | CRASH @ step 61 — prior Breeze default         |
+| 0.70 | 0.40     | **STABLE**, wmax peaks ~9×10⁻³ then decays     |
+| 0.80 | 0.60     | STABLE, similar profile                        |
+
+Confirmed on the dry thermal bubble too:
+
+| ω    | bubble @ Δt=2 s |
+|------|---|
+| 0.60 | CRASH @ step 18 |
+| 0.70 | **OK through step 100 (200 s sim), wmax → 24 m/s (matches anelastic reference)** |
+| 0.80 | OK through step 100 |
+
+### Interpretation
+
+1. The instability is **in the vertical implicit solve**, not the
+   horizontal divergence damping, not the CFL, not the recovery.
+2. Breeze's prior default `forward_weight = 0.6` (ε = 0.2) is on the
+   edge of stability. It works for smooth BCI-scale problems but fails
+   on both the IGW (tiny-perturbation linearized case) and the
+   thermal bubble (stiff-IC case).
+3. **The canonical ERF/MPAS value `β_s = 0.1` → `ω = 0.55` is unstable
+   in Breeze's implementation.** This strongly suggests a residual
+   sign or scaling error in Breeze's tridiagonal coefficient assembly
+   (`_explicit_ρw″_face_update`, `_tridiag_{a,b,c}_at_face`, or the
+   inline `*_coefficient` helpers) — it's less damped per unit ε than
+   ERF/MPAS's, which is why it needs more off-centering.
+
+### Workaround applied (2026-04-24)
+
+Changed the default `forward_weight` from 0.6 to 0.7 in
+`SplitExplicitTimeDiscretization`. Both the IGW and the thermal bubble
+now run stably under the default. Test suite passes.
+
+### Still to do
+
+- **Find the real bug** in the tridiagonal assembly. The fact that
+  `ω = 0.55` (ERF canonical) is unstable here while it works in ERF
+  means the coefficient formulation differs. Compare line-by-line
+  against ERF's source and the Klemp 2007 derivation. Most likely
+  suspects:
+  - `_tridiag_b_at_face` — the "diagonal" of the tridiagonal. A small
+    sign or weight error in the `1 + ...` assembly would shift the
+    stability envelope.
+  - `_explicit_ρw″_face_update` signs on the `backward_weight` terms
+    (mflux and ρ″_old have `+` while θflux and ρθ″_old have `-` —
+    verify against MPAS `mpas_atm_time_integration.F`).
+  - The `buoyancy_linearization_coefficient` — the `Π/Π_base` ratio
+    could be missing a factor.
+
+- Once the coefficient bug is fixed, drop `forward_weight` back to the
+  ERF canonical 0.55.
