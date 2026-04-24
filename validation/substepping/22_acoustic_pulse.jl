@@ -75,11 +75,9 @@ function run_one(; Ns)
 
     sim = Simulation(model; Δt, stop_time = STOP_T, verbose = false)
     function _progress(sim)
-        @info @sprintf("[Ns=%d] iter=%4d t=%5.1fs max|w|=%.3g  max|θ-300|=%.3g",
-                       Ns, iteration(sim), sim.model.clock.time,
-                       Float64(maximum(abs, interior(sim.model.velocities.w))),
-                       Float64(maximum(abs, interior(model.tracers.ρ) .* 0 .+
-                               interior(PotentialTemperature(model)) .- 300)))
+        wmax = Float64(maximum(abs, interior(sim.model.velocities.w)))
+        @info @sprintf("[Ns=%d] iter=%4d t=%5.1fs max|w|=%.3g", Ns,
+                       iteration(sim), sim.model.clock.time, wmax)
     end
     add_callback!(sim, _progress, IterationInterval(10))
 
