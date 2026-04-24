@@ -226,8 +226,8 @@ qᵢ(x, y, z) = qᵗ₀(z)
 uᵢ(x, y, z) = u₀(z)
 vᵢ(x, y, z) = v₀(z)
 
-# For the two-moment scheme, `ρnᵃ` is automatically initialized from 
-# the aerosol distribution embedded in the microphysics scheme 
+# For the two-moment scheme, `ρnᵃ` is automatically initialized from
+# the aerosol distribution embedded in the microphysics scheme
 # (100 cm⁻³ maritime aerosol by default).
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 
@@ -266,7 +266,6 @@ function progress(sim)
     nᶜˡmax = maximum(nᶜˡ)
     nᵃmax  = maximum(nᵃ)
     wmax   = maximum(abs, model.velocities.w)
-    umax   = maximum(abs, model.velocities.u)
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s",
