@@ -50,6 +50,51 @@ struct ProportionalSubsteps <: AcousticSubstepDistribution end
 """
 $(TYPEDEF)
 
+Abstract supertype for the choice of vertical-face projection (how to
+interpolate a cell-centered quantity to an adjacent z-face inside the
+acoustic substep kernels). MPAS calls this the "interface projection"; it is
+a finite-volume operator choice, not a literal linear interpolation.
+
+On a uniform vertical grid, every subtype collapses to ``\\tfrac{1}{2}(X_k + X_{k-1})``
+and behaves identically to Oceananigans' `ℑzᵃᵃᶠ`. The subtypes only differ on
+stretched vertical grids.
+
+Concrete subtypes:
+
+  - [`LinearInterpolation`](@ref) — `fzm·Xᵏ + fzp·X⁻` with weights
+    `fzm = Δzᶜ(k-1)/total`, `fzp = Δzᶜ(k)/total` (i.e. weight on center `k` is
+    proportional to the *opposite* cell's thickness). Coincides with geometric
+    linear interpolation if cell centers are at cell midpoints. Matches MPAS's
+    default `config_interface_projection = "linear_interpolation"`.
+  - [`ArithmeticMean`](@ref) — simple ``\\tfrac{1}{2}(X_k + X_{k-1})``. Matches
+    Oceananigans' built-in `ℑzᵃᵃᶠ`. On stretched grids this is a weighted
+    average that does *not* correspond to any linear geometry; it is a
+    deliberate simplification elsewhere in Breeze and is offered here for
+    consistency tests.
+"""
+abstract type VerticalFaceProjection end
+
+"""
+$(TYPEDEF)
+
+MPAS-style `fzm/fzp` face projection: linear interpolation between cell
+centers to the intervening z-face. Matches the MPAS
+`config_interface_projection = "linear_interpolation"` default.
+"""
+struct LinearInterpolation <: VerticalFaceProjection end
+
+"""
+$(TYPEDEF)
+
+Arithmetic-mean face projection: ``\\tfrac{1}{2}(X_k + X_{k-1})``. Identical
+to Oceananigans' `ℑzᵃᵃᶠ`. On a uniform grid, indistinguishable from
+[`LinearInterpolation`](@ref).
+"""
+struct ArithmeticMean <: VerticalFaceProjection end
+
+"""
+$(TYPEDEF)
+
 Acoustic substep distribution where stage 1 of WS-RK3 collapses to a single
 substep of size ``Δt/3``, while stages 2 and 3 use the same proportional
 counts as [`ProportionalSubsteps`](@ref) (``N/2`` and ``N`` substeps of size
@@ -267,20 +312,23 @@ Fields
 - `forward_weight`: Off-centering parameter ``ω`` for the vertically implicit ``(\\rho w)''``–``(\\rho\\theta)''`` solve. ``ω > 0.5`` damps vertical acoustic modes; the MPAS off-centering is ``ε = 2ω - 1``. Default: 0.7. (Note: ERF/MPAS canonical ``β_s = 0.1`` corresponds to ``ω = 0.55``, but Breeze's implementation of the tridiagonal coefficients appears to require more off-centering for stability — needs investigation; see `validation/substepping/NOTES.md`.)
 - `damping`: Acoustic divergence damping strategy ([`AcousticDampingStrategy`](@ref)). Default: [`PressureProjectionDamping`](@ref) with `coefficient = 0.5`, the literal ERF/CM1/WRF projection form at the empirically-tuned coefficient that produces a clean BCI lifecycle in the DCMIP2016 baroclinic-wave comparison. For small-amplitude wave configurations like the Skamarock-Klemp 1994 inertia-gravity wave, this coefficient is more aggressive than necessary; pass `damping = PressureProjectionDamping(coefficient = 0.1)` for a milder filter. Other options: [`ThermodynamicDivergenceDamping`](@ref) (the MPAS Klemp-Skamarock-Ha 2018 form), [`ConservativeProjectionDamping`](@ref) (cheaper algebraic variant of `PressureProjectionDamping`), or [`NoDivergenceDamping`](@ref) to disable damping entirely.
 - `substep_distribution`: How acoustic substeps are distributed across the three WS-RK3 stages. One of [`ProportionalSubsteps`](@ref) (default; constant ``Δτ = Δt/N`` with stage counts ``N/3``, ``N/2``, ``N``) or [`MonolithicFirstStage`](@ref) (single substep of size ``Δt/3`` in stage 1, MPAS-A `config_time_integration_order = 3` form).
+- `face_projection`: How to project cell-centered quantities onto adjacent z-faces inside the substep kernels. One of [`LinearInterpolation`](@ref) (default, matches MPAS's `config_interface_projection = "linear_interpolation"`) or [`ArithmeticMean`](@ref) (Oceananigans-style `½·(Xᵏ + X⁻)`). The two are identical on uniform-Δz grids — use a stretched vertical grid to see a difference.
 
 See also [`ExplicitTimeStepping`](@ref).
 """
-struct SplitExplicitTimeDiscretization{N, FT, D <: AcousticDampingStrategy, AD <: AcousticSubstepDistribution}
+struct SplitExplicitTimeDiscretization{N, FT, D <: AcousticDampingStrategy, AD <: AcousticSubstepDistribution, FP <: VerticalFaceProjection}
     substeps :: N
     forward_weight :: FT
     damping :: D
     substep_distribution :: AD
+    face_projection :: FP
 end
 
 function SplitExplicitTimeDiscretization(; substeps = nothing,
                                            forward_weight = 0.7,
                                            damping = PressureProjectionDamping(coefficient = 0.5),
                                            substep_distribution = ProportionalSubsteps(),
+                                           face_projection = LinearInterpolation(),
                                            divergence_damping_coefficient = nothing)
 
     # Backwards-compat: the old `divergence_damping_coefficient` kwarg was
@@ -300,7 +348,8 @@ function SplitExplicitTimeDiscretization(; substeps = nothing,
     return SplitExplicitTimeDiscretization(substeps,
                                            forward_weight,
                                            damping,
-                                           substep_distribution)
+                                           substep_distribution,
+                                           face_projection)
 end
 
 """

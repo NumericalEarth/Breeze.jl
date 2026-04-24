@@ -22,6 +22,9 @@ export
     AcousticSubstepDistribution,
     ProportionalSubsteps,
     MonolithicFirstStage,
+    VerticalFaceProjection,
+    LinearInterpolation,
+    ArithmeticMean,
     AcousticDampingStrategy,
     NoDivergenceDamping,
     ThermodynamicDivergenceDamping,
@@ -222,6 +225,7 @@ include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
                               SplitExplicitTimeDiscretization,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
+                              VerticalFaceProjection, LinearInterpolation, ArithmeticMean,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermodynamicDivergenceDamping,
                               ConservativeProjectionDamping, PressureProjectionDamping,
                               ExplicitTimeStepping

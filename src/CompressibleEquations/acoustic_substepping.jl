@@ -208,11 +208,12 @@ limit; see `validation/substepping/NOTES.md` for the open problem.
 The `cofwz`, `cofwr`, `cofwt`, `coftz` MPAS coefficients are computed inline by
 helper functions inside the column kernel — no separate fields are stored.
 """
-struct AcousticSubstepper{N, FT, D, AD, CF, FF, XF, YF, GT, TS}
+struct AcousticSubstepper{N, FT, D, AD, FP, CF, FF, XF, YF, GT, TS}
     substeps :: N
     forward_weight :: FT                       # Off-centering ω → epssm = 2ω - 1
     damping :: D                               # AcousticDampingStrategy
     substep_distribution :: AD                 # ProportionalSubsteps or MonolithicFirstStage
+    face_projection :: FP                      # VerticalFaceProjection (LinearInterpolation / ArithmeticMean)
     virtual_potential_temperature :: CF        # Stage-frozen θᵥ (MPAS `t`)
     reference_exner_function :: CF             # Π₀ from reference state
     theta_flux_scratch :: CF                   # ts_scratch in column kernel
@@ -234,6 +235,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        a.forward_weight,
                        adapt(to, a.damping),
                        a.substep_distribution,
+                       a.face_projection,
                        adapt(to, a.virtual_potential_temperature),
                        adapt(to, a.reference_exner_function),
                        adapt(to, a.theta_flux_scratch),
@@ -271,6 +273,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     ω = convert(FT, split_explicit.forward_weight)
     damping = materialize_damping(grid, _convert_damping(FT, split_explicit.damping))
     substep_distribution = split_explicit.substep_distribution
+    face_projection = split_explicit.face_projection
 
     virtual_potential_temperature = CenterField(grid)
     reference_exner_function = CenterField(grid)
@@ -326,6 +329,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     return AcousticSubstepper(Ns, ω, damping,
                               substep_distribution,
+                              face_projection,
                               virtual_potential_temperature,
                               reference_exner_function,
                               theta_flux_scratch,
@@ -583,7 +587,8 @@ function convert_slow_tendencies!(substepper, model, U⁰)
             Gⁿ.ρw,
             grid, g,
             U⁰.ρ, substepper.frozen_pressure,
-            pᵣ, ρᵣ)
+            pᵣ, ρᵣ,
+            substepper.face_projection)
     return nothing
 end
 
@@ -613,7 +618,7 @@ end
 end
 
 @kernel function _convert_slow_tendencies!(Gˢρw_total, Gⁿρw, grid, g,
-                                           ρ⁰, p_frozen, pᵣ, ρᵣ)
+                                           ρ⁰, p_frozen, pᵣ, ρᵣ, face_projection)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -633,16 +638,11 @@ end
             Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
             ∂z_p′ = (p′ᵏ - p′⁻) / Δzᶠ
 
-            # Density-perturbation buoyancy force per unit volume, g·ρ′, at centers.
-            # Interpolated to the face with fzm/fzp weights (MPAS convention:
-            # fzm = Δz_below / total, fzp = Δz_above / total).
+            # Density-perturbation buoyancy force per unit volume, g·ρ′, at centers,
+            # projected to the z-face via the selected face_projection.
             gρ′ᵏ = g * (ρ⁰[i, j, k]     - ρᵣ[i, j, k])
             gρ′⁻ = g * (ρ⁰[i, j, k - 1] - ρᵣ[i, j, k - 1])
-            Δzᶜ_above = Δzᶜᶜᶜ(i, j, k, grid)
-            Δzᶜ_below = Δzᶜᶜᶜ(i, j, k - 1, grid)
-            fzm = Δzᶜ_below / (Δzᶜ_above + Δzᶜ_below)
-            fzp = Δzᶜ_above / (Δzᶜ_above + Δzᶜ_below)
-            gρ′ᶜᶜᶠ = fzm * gρ′ᵏ + fzp * gρ′⁻
+            gρ′ᶜᶜᶠ = _project_to_face(face_projection, gρ′ᵏ, gρ′⁻, i, j, k, grid)
 
             # Full vertical slow forcing at the z-face (momentum units):
             #   advection + Coriolis + diffusion + forcing (Gⁿρw) + linearized PGF + buoyancy perturbation
@@ -891,27 +891,32 @@ end
 ##### previously precomputed and cached on the substepper.
 #####
 
-# Vertical-face Δz fraction weights (MPAS fzm, fzp).
-# fzm(k) = Δz_below(k) / [Δz_above(k) + Δz_below(k)] — weight on center k
-# fzp(k) = Δz_above(k) / [Δz_above(k) + Δz_below(k)] — weight on center k-1
-@inline function _face_z_weights(i, j, k, grid)
-    Δzᶜ_above = Δzᶜᶜᶜ(i, j, k, grid)
+# Vertical-face projection of a center-valued scalar from adjacent levels
+# (k-1, k) onto the face at k. Dispatches on a `VerticalFaceProjection`
+# singleton so the substepper can A/B test projection choices on stretched
+# grids. On uniform Δz all methods collapse to ½·(Xᵏ + X⁻).
+#
+#   LinearInterpolation: weight proportional to the opposite cell's thickness
+#                        (MPAS `fzm/fzp` with `config_interface_projection = "linear_interpolation"`)
+#   ArithmeticMean:      plain ½·(Xᵏ + X⁻) (Oceananigans `ℑzᵃᵃᶠ` style)
+@inline function _project_to_face(::LinearInterpolation, Xᵏ, X⁻, i, j, k, grid)
+    Δzᶜ_above = Δzᶜᶜᶜ(i, j, k,     grid)
     Δzᶜ_below = Δzᶜᶜᶜ(i, j, k - 1, grid)
     inv_total = 1 / (Δzᶜ_above + Δzᶜ_below)
-    fzm = Δzᶜ_below * inv_total
-    fzp = Δzᶜ_above * inv_total
-    return fzm, fzp
+    # weight on Xᵏ = Δz of the opposite (below) cell / total
+    return Δzᶜ_below * inv_total * Xᵏ + Δzᶜ_above * inv_total * X⁻
 end
+
+@inline _project_to_face(::ArithmeticMean, Xᵏ, X⁻, i, j, k, grid) = (Xᵏ + X⁻) / 2
 
 # Acoustic PGF coefficient at face k (MPAS cofwz / dtseps):
 #   cofwz(k) = γRᵈ × Δzᶠ⁻¹ × Πᶜᶜᶠ(k)
-# where Πᶜᶜᶠ = fzm Π(k) + fzp Π(k-1).
-@inline function acoustic_pgf_coefficient(i, j, k, grid, pressure, γRᵈ, pˢᵗ, κ)
+# where Πᶜᶜᶠ is the chosen face projection of Π at centers k and k-1.
+@inline function acoustic_pgf_coefficient(i, j, k, grid, pressure, γRᵈ, pˢᵗ, κ, face_projection)
     Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
-    fzm, fzp = _face_z_weights(i, j, k, grid)
-    Πₖ   = (pressure[i, j, k]     / pˢᵗ)^κ
-    Πₖ₋₁ = (pressure[i, j, k - 1] / pˢᵗ)^κ
-    Πᶜᶜᶠ = fzm * Πₖ + fzp * Πₖ₋₁
+    Πₖ  = (pressure[i, j, k]     / pˢᵗ)^κ
+    Π⁻  = (pressure[i, j, k - 1] / pˢᵗ)^κ
+    Πᶜᶜᶠ = _project_to_face(face_projection, Πₖ, Π⁻, i, j, k, grid)
     return γRᵈ / Δzᶠ * Πᶜᶜᶠ
 end
 
@@ -919,16 +924,17 @@ end
 # With zz=1 (no terrain) this collapses to the trivial constant g/2.
 @inline buoyancy_coefficient(g) = g / 2
 
-# θ-flux coefficient at face k (MPAS coftz / dtseps):
-#   coftz(k) = fzm θ(k) + fzp θ(k-1)
+# θ-flux coefficient at face k (MPAS coftz / dtseps): projection of θᵥ from
+# centers k-1 and k onto the z-face at k.
 # Returns 0 at the bottom face (k=1) and the top face (k=Nz+1) so that the
 # kernel can call this helper unconditionally even at boundary indices.
-@inline function theta_flux_coefficient(i, j, k, grid, θᵥ)
+@inline function theta_flux_coefficient(i, j, k, grid, θᵥ, face_projection)
     Nz = size(grid, 3)
     in_interior = (k >= 2) & (k <= Nz)
     k_safe = ifelse(in_interior, k, 2)
-    fzm, fzp = _face_z_weights(i, j, k_safe, grid)
-    val = fzm * θᵥ[i, j, k_safe] + fzp * θᵥ[i, j, k_safe - 1]
+    @inbounds val = _project_to_face(face_projection,
+                                     θᵥ[i, j, k_safe], θᵥ[i, j, k_safe - 1],
+                                     i, j, k_safe, grid)
     return ifelse(in_interior, val, zero(val))
 end
 
@@ -1036,19 +1042,19 @@ import Oceananigans.Solvers: get_coefficient
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagLower, p, ::ZDirection,
                                  pressure, ρ₀, Π₀_field, ρθ_stage, θᵥ,
-                                 γRᵈ, pˢᵗ, κ, rcv, g, Δτᵋ)
+                                 γRᵈ, pˢᵗ, κ, rcv, g, Δτᵋ, face_projection)
     # Lower at face k_face = k + 1
     k_face = k + 1
     Δzᶜ_below = Δzᶜᶜᶜ(i, j, k_face - 1, grid)
     rdzw_below = 1 / Δzᶜ_below
     cofrz⁻ = Δτᵋ * rdzw_below
 
-    pgf_coeffᵏ      = acoustic_pgf_coefficient(i, j, k_face, grid, pressure, γRᵈ, pˢᵗ, κ) * Δτᵋ
+    pgf_coeffᵏ      = acoustic_pgf_coefficient(i, j, k_face, grid, pressure, γRᵈ, pˢᵗ, κ, face_projection) * Δτᵋ
     buoy_coeffᵏ     = buoyancy_coefficient(g) * Δτᵋ
     buoy_lin_coeff⁻ = buoyancy_linearization_coefficient(i, j, k_face - 1, grid,
                                                          pressure, ρ₀, Π₀_field,
                                                          ρθ_stage, pˢᵗ, κ, rcv, g) * Δτᵋ
-    θflux_coeff⁻    = theta_flux_coefficient(i, j, k_face - 1, grid, θᵥ) * Δτᵋ
+    θflux_coeff⁻    = theta_flux_coefficient(i, j, k_face - 1, grid, θᵥ, face_projection) * Δτᵋ
 
     return _tridiag_a_at_face(pgf_coeffᵏ, buoy_coeffᵏ, buoy_lin_coeff⁻,
                               θflux_coeff⁻, cofrz⁻, rdzw_below)
@@ -1056,7 +1062,7 @@ end
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagDiagonal, p, ::ZDirection,
                                  pressure, ρ₀, Π₀_field, ρθ_stage, θᵥ,
-                                 γRᵈ, pˢᵗ, κ, rcv, g, Δτᵋ)
+                                 γRᵈ, pˢᵗ, κ, rcv, g, Δτᵋ, face_projection)
     # Bottom-boundary row: trivial b = 1, paired with f[1] = 0 → ρw″[1] = 0.
     k == 1 && return one(γRᵈ)
 
@@ -1069,7 +1075,7 @@ end
     cofrzᵏ     = Δτᵋ * rdzw_above
     cofrz⁻     = Δτᵋ * rdzw_below
 
-    pgf_coeffᵏ      = acoustic_pgf_coefficient(i, j, k_face, grid, pressure, γRᵈ, pˢᵗ, κ) * Δτᵋ
+    pgf_coeffᵏ      = acoustic_pgf_coefficient(i, j, k_face, grid, pressure, γRᵈ, pˢᵗ, κ, face_projection) * Δτᵋ
     buoy_coeffᵏ     = buoyancy_coefficient(g) * Δτᵋ
     buoy_lin_coeffᵏ = buoyancy_linearization_coefficient(i, j, k_face,     grid,
                                                          pressure, ρ₀, Π₀_field,
@@ -1077,7 +1083,7 @@ end
     buoy_lin_coeff⁻ = buoyancy_linearization_coefficient(i, j, k_face - 1, grid,
                                                          pressure, ρ₀, Π₀_field,
                                                          ρθ_stage, pˢᵗ, κ, rcv, g) * Δτᵋ
-    θflux_coeffᵏ    = theta_flux_coefficient(i, j, k_face, grid, θᵥ) * Δτᵋ
+    θflux_coeffᵏ    = theta_flux_coefficient(i, j, k_face, grid, θᵥ, face_projection) * Δτᵋ
 
     return _tridiag_b_at_face(pgf_coeffᵏ, buoy_coeffᵏ,
                               buoy_lin_coeffᵏ, buoy_lin_coeff⁻,
@@ -1087,7 +1093,7 @@ end
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagUpper, p, ::ZDirection,
                                  pressure, ρ₀, Π₀_field, ρθ_stage, θᵥ,
-                                 γRᵈ, pˢᵗ, κ, rcv, g, Δτᵋ)
+                                 γRᵈ, pˢᵗ, κ, rcv, g, Δτᵋ, face_projection)
     # Bottom-boundary row: c[1] must be 0 so the back-substitution preserves
     # ρw″[1] = 0. (γ_1 = c[1] / β_1 = 0/1 = 0; ρw″[1] -= γ_1 * ρw″[2] = 0.)
     k == 1 && return zero(γRᵈ)
@@ -1098,12 +1104,12 @@ end
     rdzw_above = 1 / Δzᶜ_above
     cofrzᵏ     = Δτᵋ * rdzw_above
 
-    pgf_coeffᵏ      = acoustic_pgf_coefficient(i, j, k_face, grid, pressure, γRᵈ, pˢᵗ, κ) * Δτᵋ
+    pgf_coeffᵏ      = acoustic_pgf_coefficient(i, j, k_face, grid, pressure, γRᵈ, pˢᵗ, κ, face_projection) * Δτᵋ
     buoy_coeffᵏ     = buoyancy_coefficient(g) * Δτᵋ
     buoy_lin_coeffᵏ = buoyancy_linearization_coefficient(i, j, k_face, grid,
                                                          pressure, ρ₀, Π₀_field,
                                                          ρθ_stage, pˢᵗ, κ, rcv, g) * Δτᵋ
-    θflux_coeff⁺    = theta_flux_coefficient(i, j, k_face + 1, grid, θᵥ) * Δτᵋ
+    θflux_coeff⁺    = theta_flux_coefficient(i, j, k_face + 1, grid, θᵥ, face_projection) * Δτᵋ
 
     return _tridiag_c_at_face(pgf_coeffᵏ, buoy_coeffᵏ, buoy_lin_coeffᵏ,
                               θflux_coeff⁺, cofrzᵏ, rdzw_above)
@@ -1124,6 +1130,7 @@ end
                                        θᵥ, ρ,
                                        pressure, ρ₀, Π₀_field, ρθ_stage,
                                        γRᵈ, pˢᵗ, κ, rcv, g,
+                                       face_projection,
                                        is_first_substep)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
@@ -1159,8 +1166,8 @@ end
             mfluxᵏ = ρ″[i, j, k] + Δτ * Gˢρ[i, j, k] + mfluxᵏ -
                      cofrzᵏ * backward_weight * (ρw″⁺ - ρw″ᵏ)
 
-            θflux_coeff⁺ = theta_flux_coefficient(i, j, k + 1, grid, θᵥ)
-            θflux_coeffᵏ = theta_flux_coefficient(i, j, k,     grid, θᵥ)
+            θflux_coeff⁺ = theta_flux_coefficient(i, j, k + 1, grid, θᵥ, face_projection)
+            θflux_coeffᵏ = theta_flux_coefficient(i, j, k,     grid, θᵥ, face_projection)
             θfluxᵏ = ρθ″[i, j, k] + Δτ * Gˢρθ[i, j, k] + θfluxᵏ -
                      backward_weight / Δzᶜ * (θflux_coeff⁺ * Δτᵋ * ρw″⁺ - θflux_coeffᵏ * Δτᵋ * ρw″ᵏ)
 
@@ -1183,7 +1190,7 @@ end
             ρ″_oldᵏ  = ρ″[i, j, k]
             ρ″_old⁻  = ρ″[i, j, k - 1]
 
-            pgf_coeffᵏ      = acoustic_pgf_coefficient(i, j, k, grid, pressure, γRᵈ, pˢᵗ, κ) * Δτᵋ
+            pgf_coeffᵏ      = acoustic_pgf_coefficient(i, j, k, grid, pressure, γRᵈ, pˢᵗ, κ, face_projection) * Δτᵋ
             buoy_coeffᵏ     = buoy_coeff_raw * Δτᵋ
             buoy_lin_coeffᵏ = buoyancy_linearization_coefficient(i, j, k,     grid, pressure, ρ₀, Π₀_field, ρθ_stage, pˢᵗ, κ, rcv, g) * Δτᵋ
             buoy_lin_coeff⁻ = buoyancy_linearization_coefficient(i, j, k - 1, grid, pressure, ρ₀, Π₀_field, ρθ_stage, pˢᵗ, κ, rcv, g) * Δτᵋ
@@ -1206,7 +1213,7 @@ end
 @kernel function _post_acoustic_solve_diagnostics!(ρ″, ρθ″, ρw″,
                                                     θflux_scratch, mflux_scratch,
                                                     grid, Δτᵋ,
-                                                    θᵥ)
+                                                    θᵥ, face_projection)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -1214,8 +1221,8 @@ end
         for k in 1:Nz
             Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
             cofrzᵏ       = Δτᵋ / Δzᶜ
-            θflux_coeff⁺ = theta_flux_coefficient(i, j, k + 1, grid, θᵥ) * Δτᵋ
-            θflux_coeffᵏ = theta_flux_coefficient(i, j, k,     grid, θᵥ) * Δτᵋ
+            θflux_coeff⁺ = theta_flux_coefficient(i, j, k + 1, grid, θᵥ, face_projection) * Δτᵋ
+            θflux_coeffᵏ = theta_flux_coefficient(i, j, k,     grid, θᵥ, face_projection) * Δτᵋ
 
             mfluxᵏ = mflux_scratch[i, j, k]
             θfluxᵏ = θflux_scratch[i, j, k]
@@ -1426,6 +1433,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 substepper.virtual_potential_temperature, model.dynamics.density,
                 substepper.frozen_pressure, ρ₀, Π₀_field, U⁰[5],
                 γRᵈ, pˢᵗ_FT, κ, rcv, FT(g),
+                substepper.face_projection,
                 substep == 1)
 
         # Step 6: BatchedTridiagonalSolver. The coefficients (a, b, c) are
@@ -1437,14 +1445,16 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         solve!(substepper.ρw″, substepper.vertical_solver, substepper.ρw″,
                substepper.frozen_pressure, ρ₀, Π₀_field, U⁰[5],
                substepper.virtual_potential_temperature,
-               γRᵈ, pˢᵗ_FT, κ, rcv, FT(g), Δτᵋ)
+               γRᵈ, pˢᵗ_FT, κ, rcv, FT(g), Δτᵋ,
+               substepper.face_projection)
 
         # Step 8: post-solve diagnostics — recover ρ″ and ρθ″ from the new ρw″.
         launch!(arch, grid, :xy, _post_acoustic_solve_diagnostics!,
                 substepper.ρ″, substepper.ρθ″, substepper.ρw″,
                 substepper.theta_flux_scratch, substepper.mass_flux_scratch,
                 grid, Δτᵋ,
-                substepper.virtual_potential_temperature)
+                substepper.virtual_potential_temperature,
+                substepper.face_projection)
 
         # Fill ρθ″ halos before divergence damping reads δx(ρθ″_new - ρθ″_old).
         # The column kernel updated interior ρθ″ but not halos; stale halos create

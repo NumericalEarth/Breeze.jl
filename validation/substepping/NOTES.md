@@ -364,3 +364,64 @@ now run stably under the default. Test suite passes.
 
 - Once the coefficient bug is fixed, drop `forward_weight` back to the
   ERF canonical 0.55.
+
+## face_projection A/B harness + stretched-grid finding (2026-04-24)
+
+User flagged that Oceananigans uses simple arithmetic mean ``\\tfrac{1}{2}(X_k + X_{k-1})``
+for `ℑzᵃᵃᶠ` while the substepper uses MPAS's fzm/fzp weights. Traced the
+origin to MPAS source: `config_interface_projection` is a namelist option
+(`linear_interpolation` default vs `layer_integral` alternative). Breeze
+previously hard-coded the `linear_interpolation` variant via an anonymous
+helper `_face_z_weights`. The formula is a *projection*, not merely
+interpolation — MPAS exposes it as a user choice because the variant
+affects which discrete conservation identity closes.
+
+Added `VerticalFaceProjection` as a type parameter of
+`SplitExplicitTimeDiscretization`, with two concrete subtypes:
+
+- `LinearInterpolation` — fzm/fzp weighted (MPAS default, matches prior
+  Breeze behavior).
+- `ArithmeticMean` — plain ``\\tfrac{1}{2}(X_k + X_{k-1})`` (Oceananigans
+  `ℑzᵃᵃᶠ` style).
+
+On a uniform Δz grid both collapse to ½·(·+·) and are numerically
+identical. The A/B distinction only shows up on stretched grids.
+
+### Stretched-grid dry thermal bubble results
+
+Δt=2s, `ThermodynamicDivergenceDamping(0.1)`, ω=0.7 (default), 120 steps
+max:
+
+| grid                            | `LinearInterpolation`        | `ArithmeticMean`             |
+| ------------------------------- | ---------------------------- | ---------------------------- |
+| uniform Nz=128                  | CRASH@106, wmax=36.96        | CRASH@106, wmax=36.96 (identical) |
+| stretched α=2.5 (12× ratio)     | CRASH@97,  wmax=43.3         | CRASH@97,  wmax=37.9         |
+| stretched α=3.5 (32× ratio)     | CRASH@89,  wmax=38.1         | CRASH@90,  wmax=35.5         |
+
+### Takeaways
+
+1. On uniform grids the choice doesn't matter (as expected).
+2. On stretched grids the two projections give numerically different
+   trajectories (wmax differs by ~15% at α=2.5), though they crash at
+   roughly the same step. Not a dramatic difference under the default
+   stable ω.
+3. At marginal ω values (0.55–0.60) the two projections diverge more
+   strongly — ArithmeticMean tends to produce larger excursions at
+   α=1.5 (umax=17.3 vs 2.97 at ω=0.55). Suggests LinearInterpolation
+   is marginally more stable, consistent with MPAS's default.
+4. **The bubble still crashes at ~100 steps even on uniform grids with
+   the default stable config** — we haven't fixed the underlying
+   instability; ω=0.7 has delayed it from ~step 18 (ω=0.6) to ~step 106,
+   not removed it. Anelastic runs the same case for 750 steps cleanly.
+5. The stretched grid is now a more sensitive probe for catching
+   projection/coefficient bugs.
+
+### Still open
+
+- Derive the correct face_projection from first principles (Klemp 2007
+  appendix + a careful discrete-conservation check). See the PDF note
+  and the 7 call sites listed above. The current Breeze mix of fzm/fzp
+  + arithmetic mean across sites is still inconsistent; one of the two
+  is "right" per call site by the conservation derivation, and the
+  others are incorrect.
+- Find the root cause of the ~step-106 crash even at ω=0.7.
