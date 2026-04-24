@@ -1318,12 +1318,12 @@ let
         ## ---------------------------------------------------------
         ## Animation — w' at z ≈ 3 km over the heated run
         ## ---------------------------------------------------------
-        #
-        # The quickest way to feel the YD19 response is to watch vertical
-        # velocity evolve. We pick the level closest to z = 3 km, then step
-        # through every hourly snapshot of (heated − control) and record a
-        # frame of the w-difference field on the plan view. The heating's
-        # red/blue ±1 K/h contour is overlaid for reference.
+        ##
+        ## The quickest way to feel the YD19 response is to watch vertical
+        ## velocity evolve. We pick the level closest to z = 3 km, then step
+        ## through every hourly snapshot of (heated − control) and record a
+        ## frame of the w-difference field on the plan view. The heating's
+        ## red/blue ±1 K/h contour is overlaid for reference.
         @info "Producing animation (w' at z ≈ 3 km, heated − control)..."
         k_anim = argmin(abs.(z_centers .- 3_000.0))
         xs_grid = Float32.(xnodes(grid, Center()))
