@@ -11,6 +11,7 @@ using Oceananigans.Units
 using Statistics
 using Printf
 using CairoMakie
+using CloudMicrophysics
 
 # ## Dry thermal bubble
 #
@@ -155,7 +156,12 @@ nothing #hide
 # For pedagogical purposes, we build a new model with warm-phase saturation adjustment microphysics.
 # (We could have also used this model for the dry simulation):
 
-microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
+
+cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+microphysics = OneMomentCloudMicrophysics(; cloud_formation)
+
 moist_model = AtmosphereModel(grid; dynamics, thermodynamic_constants, advection, microphysics)
 
 # ## Moist thermal bubble initial conditions
@@ -269,7 +275,6 @@ nothing #hide
 # Note: The one-moment microphysics requires the CloudMicrophysics.jl package to be loaded,
 # which activates the `BreezeCloudMicrophysicsExt` extension.
 
-using CloudMicrophysics
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
@@ -295,6 +300,7 @@ precip_simulation = Simulation(precip_model; Δt=2, stop_time=60minutes)
 conjure_time_step_wizard!(precip_simulation, cfl=0.7)
 Oceananigans.Diagnostics.erroring_NaNChecker!(precip_simulation)
 
+E_precip = total_energy(precip_model)
 θ_precip = liquid_ice_potential_temperature(precip_model)
 u_p, v_p, w_precip = precip_model.velocities
 qˡ_precip = precip_model.microphysical_fields.qˡ    # Total liquid (cloud + rain)
@@ -306,8 +312,8 @@ function progress_precip(sim)
     qʳmax = maximum(qʳ_precip)
     wmax = maximum(abs, w_precip)
 
-    msg = @sprintf("Iter: %4d, t: %14s, Δt: %14s, max|w|: %.2f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), wmax)
+    msg = @sprintf("Iter: %4d, t: %14s, Δt: %14s, ⟨E⟩: %.8e J, max|w|: %.2f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), mean(E), wmax)
     msg *= @sprintf(", max(qᶜˡ): %.2e, max(qʳ): %.2e", qᶜˡmax, qʳmax)
 
     @info msg
