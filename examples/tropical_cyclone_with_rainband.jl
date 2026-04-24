@@ -1,16 +1,16 @@
 # # [Tropical cyclone with a stationary stratiform rainband](@id tc_rainband_example)
 #
 # This example reproduces the idealized tropical-cyclone rainband experiments
-# of [YuDidlake2019](@citet), who asked a beautifully concrete question: if
+# of [YuDidlake2019](@citet) (hereafter YD19), who asked a beautifully concrete question: if
 # you take a mature hurricane and paint a steady, stationary heating pattern
 # in one of its stratiform rainbands, what happens to the storm?
 #
-# Their answer — obtained from a full-physics WRF simulation — is a quadrupole
+# Their answer — obtained from a full-physics Weather Research and Forecasting (WRF) model simulation — is a quadrupole
 # pattern of secondary-circulation anomalies: rising/sinking pairs that flank
 # the imposed heat source, and an accompanying dipole in the tangential wind
 # of a few m/s. We get the same pattern here with the Breeze anelastic core,
-# a Jordan ([Jordan1958](@cite)) tropical sounding, a Stern–Nolan balanced
-# vortex ([SternNolan2009](@citet)), and the Moon–Nolan ([MoonNolan2010](@cite))
+# a Jordan [Jordan1958](@cite) tropical sounding, a Stern–Nolan balanced
+# vortex [SternNolan2009](@citet), and the Moon–Nolan [MoonNolan2010](@cite)
 # stratiform heating profile that YD19 borrow.
 #
 # ## What this example does
@@ -43,11 +43,11 @@
 # | File                             | Content                                           |
 # |----------------------------------|---------------------------------------------------|
 # | `F01_preflight.png`              | vortex IC sanity check                            |
-# | `F02ab_vortex.png`               | basic-state vortex ([YuDidlake2019](@cite) Fig 2a,b) |
-# | `F02cd_heating.png`              | analytic heating ([YuDidlake2019](@cite) Fig 2c,d)  |
-# | `F03a_axisym_response.png`       | axisymmetric response ([YuDidlake2019](@cite) Fig 3a) |
-# | `F04_plan_response.png`          | plan-view response ([YuDidlake2019](@cite) Fig 4a-c)  |
-# | `F05_cross_sections.png`         | cross sections ([YuDidlake2019](@cite) Fig 5)     |
+# | `F02ab_vortex.png`               | basic-state vortex ([YuDidlake2019](@citet); Fig. 2a,b) |
+# | `F02cd_heating.png`              | analytic heating ([YuDidlake2019](@citet); Fig. 2c,d)  |
+# | `F03a_axisym_response.png`       | axisymmetric response ([YuDidlake2019](@citet); Fig. 3a) |
+# | `F04_plan_response.png`          | plan-view response ([YuDidlake2019](@citet); Fig. 4a-c)  |
+# | `F05_cross_sections.png`         | cross sections ([YuDidlake2019](@citet); Fig. 5)     |
 # | `F06_response_timeseries.png`    | response amplitude vs time (diagnostic)           |
 
 using Breeze
@@ -67,8 +67,8 @@ example_dir = @__DIR__
 
 # ## Jordan (1958) hurricane-season mean sounding
 #
-# The environment is a hydrostatic dry column taken from the Jordan
-# ([Jordan1958](@cite)) Table 5 mean West Indies sounding for the
+# The environment is a hydrostatic dry column taken from Table 5 by
+# [Jordan1958](@citet) mean West Indies sounding for the
 # July–October hurricane season. It's the same climatological profile YD19
 # use (and about a million other idealized tropical-cyclone studies since).
 # Columns are pressure (mb), geopotential height (m), temperature (°C), and
@@ -105,24 +105,24 @@ function _linear_interpolate(xs::AbstractVector, ys::AbstractVector, x::Real)
 end
 
 θ_env(z) = _linear_interpolate(jordan_z_m, jordan_θ_K,           z)
-T_env(z) = _linear_interpolate(jordan_z_m, jordan_T_C .+ 273.15, z)
-p_env(z) = _linear_interpolate(jordan_z_m, jordan_p_mb .* 100.0, z)
+T_env(z) = _linear_interpolate(jordan_z_m, jordan_T_C .+ 273.15, z)    # convert C -> K
+p_env(z) = _linear_interpolate(jordan_z_m, jordan_p_mb .* 100.0, z)    # convert mb -> Pa
 
 # ## YD19 physical parameters
 #
 # The vortex parameters come straight out of [YuDidlake2019](@citet) §3a2:
 # a surface maximum wind of 43 m/s sitting at a radius of 31 km, decaying
-# outward as ``r^{-0.5}`` in the modified-Rankine sense. Above ``z ≈ 16`` km
-# (the outflow level) the tangential wind is zero. The outer cos² taper
+# outward as ``r^{-1/2}`` in the modified-Rankine sense. Above ``z ≈ 16`` km
+# (the outflow level) the tangential wind is zero. The outer ``\cos^2`` taper
 # between 250 and 300 km is *not* in the original paper — YD19 use a huge
 # non-periodic mother domain — but we need it to keep the vortex from
 # wrapping around on our periodic box.
 
-f             = 5.0e-5        # f-plane Coriolis parameter ([YuDidlake2019](@cite) §3a1)
-v_max_surface = 43.0          # initial surface v_max, m/s ([YuDidlake2019](@cite) §3a2)
-a_decay       = 0.5           # modified-Rankine decay exponent ([YuDidlake2019](@cite) Eq. 2)
-rmw_surface   = 31_000.0      # surface radius of maximum wind, m ([MoonNolan2010](@cite) App. A)
-z_vortex_top  = 16_000.0      # outflow reference level, m ([MoonNolan2010](@cite): v = 0 at RMW at z ≈ 15.9 km)
+f             = 5.0e-5        # f-plane Coriolis parameter ([YuDidlake2019](@citet); §3a1)
+v_max_surface = 43.0          # initial surface v_max, m/s ([YuDidlake2019](@citet); §3a2)
+a_decay       = 0.5           # modified-Rankine decay exponent ([YuDidlake2019](@citet); Eq. 2)
+rmw_surface   = 31_000.0      # surface radius of maximum wind, m ([MoonNolan2010](@citet); Appendix A)
+z_vortex_top  = 16_000.0      # outflow reference level, m ([MoonNolan2010](@citet); v = 0 at RMW at z ≈ 15.9 km)
 r_taper_start = 250_000.0     # radial taper start for periodic-domain compatibility (m)
 r_taper_end   = 300_000.0     # radial taper end (m)
 
@@ -145,11 +145,11 @@ mkpath(snapshots_dir); mkpath(figures_dir)
 # 214² cells horizontally and 75 levels vertically (``Δz ≈ 333`` m). The run
 # prefers GPU and falls back to CPU if CUDA isn't functional.
 
-Δx              = 3_000.0
+Δx              = 3kilometers
 Nx = Ny         = 214
 Nz              = 75
 Lx              = Nx * Δx
-Lz              = 25_000.0                    # YD19 §3a1
+Lz              = 25kilometers                 # YD19 §3a1
 Δz              = Lz / Nz
 sponge_rate     = 0.003                       # ≈ WRF damp_opt=2 `dampcoef` (~333 s timescale)
 stage_stop_time = 24hours
@@ -164,7 +164,7 @@ grid = RectilinearGrid(arch;
 # ## Reference state and thermodynamic constants
 #
 # The [`ReferenceState`](@ref Breeze.Thermodynamics.ReferenceState) is
-# constructed from the Jordan θ(z) profile and anchored at the observed
+# constructed from the Jordan ``θ(z)`` profile and anchored at the observed
 # surface pressure, giving us `pᵣ(z)`, `ρᵣ(z)`, `Tᵣ(z)` — the hydrostatic
 # far-field of the anelastic problem. We pull the three columns down to the
 # host once, here, for use by the CPU-side balance iteration below.
@@ -1380,5 +1380,3 @@ let
 end
 
 # ![](output_tc_rainband/figures/response_w_z3km.mp4)
-
-@info "=== Done ==="
