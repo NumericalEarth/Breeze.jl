@@ -7,7 +7,6 @@ using .Diagnostics: SaturationSpecificHumidity
 
 using ..Thermodynamics:
     MoistureMassFractions,
-    mixture_heat_capacity,
     mixture_gas_constant
 
 move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
