@@ -67,7 +67,7 @@ According to [Pauluis2008](@citet), the moist static energy obeys
 ```
 
 with vertical velocity ``w``, buoyancy ``b`` as above, and ``S_e`` including microphysical and external energy sources/sinks.
-The ``-ρᵣ w b`` term is the buoyancy flux that links the energy and momentum budgets in the anelastic limit.
+The ``ρᵣ w b`` term is the buoyancy flux that links the energy and momentum budgets in the anelastic limit.
 
 Thermodynamic closures needed for ``R^m``, ``c^{pm}`` and the Exner function ``Π = (pᵣ / p_0)^{R^m / c^{pm}}`` are given in [Thermodynamics](@ref Thermodynamics-section) section.
 
