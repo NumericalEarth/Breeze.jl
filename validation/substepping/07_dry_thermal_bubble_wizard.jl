@@ -128,7 +128,17 @@ function run_case(label, builder)
     end
     add_callback!(sim, _progress, IterationInterval(100))
 
-    outputs = (; w = model.velocities.w, T = model.temperature)
+    # Save w (velocity), θ (potential temperature diagnostic), and ρ for the
+    # compressible case (prognostic; anelastic's ρ ≡ ρ_ref(z) doesn't vary and
+    # isn't needed). ρw is reconstructed from ρ and w post-hoc.
+    if label == "anelastic"
+        outputs = (; w = model.velocities.w,
+                     θ = PotentialTemperature(model))
+    else
+        outputs = (; w = model.velocities.w,
+                     θ = PotentialTemperature(model),
+                     ρ = dynamics_density(model.dynamics))
+    end
     sim.output_writers[:jld2] = JLD2Writer(model, outputs;
                                            filename = joinpath(OUTDIR, "$(label).jld2"),
                                            schedule = TimeInterval(10seconds),

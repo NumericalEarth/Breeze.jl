@@ -78,7 +78,9 @@ function run_explicit()
     end
     add_callback!(sim, _progress, IterationInterval(500))
 
-    outputs = (; w = model.velocities.w, T = model.temperature)
+    outputs = (; w = model.velocities.w,
+                 θ = PotentialTemperature(model),
+                 ρ = dynamics_density(model.dynamics))
     sim.output_writers[:jld2] = JLD2Writer(model, outputs;
                                            filename = joinpath(OUTDIR, "explicit.jld2"),
                                            schedule = TimeInterval(10seconds),
