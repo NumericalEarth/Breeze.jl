@@ -887,15 +887,16 @@ end
 ##### previously precomputed and cached on the substepper.
 #####
 
-# Vertical-face projection of a center-valued scalar from adjacent levels
-# Acoustic PGF coefficient at face k: γRᵈ · Π_face / Δzᶠ.
-# Π is interpolated from centers k-1 and k via arithmetic mean (matches the
-# rest of Breeze, Oceananigans' `ℑzᵃᵃᶠ`, and ERF's acoustic substep).
+# Exner function at cell center from pressure: Πᶜᶜᶜ = (p/pˢᵗ)^κ.
+@inline _Πᶜᶜᶜ(i, j, k, grid, pressure, pˢᵗ, κ) =
+    @inbounds (pressure[i, j, k] / pˢᵗ)^κ
+
+# Acoustic PGF coefficient at face k: γRᵈ · Πᶠ / Δzᶠ.
+# Πᶠ is the center-to-face interpolation of Π = (p/pˢᵗ)^κ via `ℑzᵃᵃᶠ`
+# (arithmetic mean), matching the rest of Breeze and ERF's acoustic substep.
 @inline function acoustic_pgf_coefficient(i, j, k, grid, pressure, γRᵈ, pˢᵗ, κ)
     Δzᶠ  = Δzᶜᶜᶠ(i, j, k, grid)
-    Πₖ   = (pressure[i, j, k]     / pˢᵗ)^κ
-    Π⁻   = (pressure[i, j, k - 1] / pˢᵗ)^κ
-    Πᶜᶜᶠ = (Πₖ + Π⁻) / 2
+    Πᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, _Πᶜᶜᶜ, pressure, pˢᵗ, κ)
     return γRᵈ / Δzᶠ * Πᶜᶜᶠ
 end
 
