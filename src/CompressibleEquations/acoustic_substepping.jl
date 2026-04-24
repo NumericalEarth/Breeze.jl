@@ -192,8 +192,8 @@ The horizontal acoustic PGF uses the dry-γ linearization
 (Klemp 2007). For a moist atmosphere with Breeze's
 `LiquidIcePotentialTemperatureFormulation` this is consistent only in the dry
 limit; see `validation/substepping/NOTES.md` for the open problem.
-- `theta_flux_scratch`: ``ts`` accumulator in the column kernel (CenterField, MPAS `ts`).
-- `mass_flux_scratch`: ``rs`` accumulator in the column kernel (CenterField, MPAS `rs`).
+- `ρθ″_predictor`: Per-column explicit predictor for ``(\\rho\\theta)''`` at cell centers, assembled inside the column kernel before the implicit vertical solve (CenterField; MPAS `ts`).
+- `ρ″_predictor`: Per-column explicit predictor for ``\\rho''`` at cell centers, assembled inside the column kernel before the implicit vertical solve (CenterField; MPAS `rs`).
 - `previous_ρθ″`: ``(\\rho\\theta)''`` snapshot before the column kernel — used by divergence damping (CenterField).
 - `ρ″`:  acoustic ``\\rho`` perturbation (CenterField, MPAS `rho_pp`).
 - `ρθ″`: acoustic ``(\\rho\\theta)`` perturbation (CenterField, MPAS `rtheta_pp`).
@@ -215,8 +215,8 @@ struct AcousticSubstepper{N, FT, D, AD, CF, FF, XF, YF, GT, TS}
     substep_distribution :: AD                 # ProportionalSubsteps or MonolithicFirstStage
     virtual_potential_temperature :: CF        # Stage-frozen θᵥ (MPAS `t`)
     reference_exner_function :: CF             # Π₀ from reference state
-    theta_flux_scratch :: CF                   # ts_scratch in column kernel
-    mass_flux_scratch :: CF                    # rs_scratch in column kernel
+    ρθ″_predictor :: CF                        # Per-column explicit predictor for ρθ″ (MPAS `ts`)
+    ρ″_predictor :: CF                         # Per-column explicit predictor for ρ″  (MPAS `rs`)
     previous_ρθ″ :: CF                   # (ρθ)″ snapshot for divergence damping
     ρ″  :: CF                                  # MPAS rho_pp     — acoustic ρ perturbation
     ρθ″ :: CF                                  # MPAS rtheta_pp  — acoustic ρθ perturbation
@@ -236,8 +236,8 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        a.substep_distribution,
                        adapt(to, a.virtual_potential_temperature),
                        adapt(to, a.reference_exner_function),
-                       adapt(to, a.theta_flux_scratch),
-                       adapt(to, a.mass_flux_scratch),
+                       adapt(to, a.ρθ″_predictor),
+                       adapt(to, a.ρ″_predictor),
                        adapt(to, a.previous_ρθ″),
                        adapt(to, a.ρ″),
                        adapt(to, a.ρθ″),
@@ -274,8 +274,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     virtual_potential_temperature = CenterField(grid)
     reference_exner_function = CenterField(grid)
-    theta_flux_scratch = CenterField(grid)
-    mass_flux_scratch = CenterField(grid)
+    ρθ″_predictor = CenterField(grid)
+    ρ″_predictor  = CenterField(grid)
     previous_ρθ″ = CenterField(grid)
 
     # Inherit boundary conditions from the prognostic momentum so that
@@ -328,8 +328,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               substep_distribution,
                               virtual_potential_temperature,
                               reference_exner_function,
-                              theta_flux_scratch,
-                              mass_flux_scratch,
+                              ρθ″_predictor,
+                              ρ″_predictor,
                               previous_ρθ″,
                               ρ″, ρθ″, ρw″, ρu″, ρv″,
                               gamma_tri_field,
@@ -902,10 +902,11 @@ end
 # Gravity coefficient at face k (MPAS `cofwr / dtseps`). Collapses to g/2.
 @inline buoyancy_coefficient(g) = g / 2
 
-# θᵥ interpolated to the z-face at k via arithmetic mean.
+# θᵥ interpolated to the z-face at k via arithmetic mean. Multiplied by ρw″
+# gives the vertical θᵥ-flux Jθᵥ at the face (MPAS `coftz` up to the Δτᵋ factor).
 # Returns 0 at the bottom face (k=1) and the top face (k=Nz+1) so the kernel
 # can call this helper unconditionally even at boundary indices.
-@inline function theta_flux_coefficient(i, j, k, grid, θᵥ)
+@inline function θᵥ_at_face(i, j, k, grid, θᵥ)
     Nz = size(grid, 3)
     in_interior = (k >= 2) & (k <= Nz)
     k_safe = ifelse(in_interior, k, 2)
@@ -936,49 +937,53 @@ end
 #   - gravity-density       (buoy_coeff)
 #   - linearized buoyancy    (buoy_lin_coeff)
 # Superscripts ᵏ and ⁻ denote "at face/center k" and "at k-1" respectively.
+# `ρθ″_pred*` and `ρ″_pred*` are the explicit predictors from the preceding
+# Section-4 accumulation (see `_build_acoustic_rhs!`); `ρθ″_old*`, `ρ″_old*`
+# are the values from the previous substep.
 @inline function _explicit_ρw″_face_update(ρw″_oldᵏ,
                                            Δτ, Gˢρwᵏ,
                                            pgf_coeffᵏ, buoy_coeffᵏ,
                                            buoy_lin_coeffᵏ, buoy_lin_coeff⁻,
-                                           θfluxᵏ, θflux⁻,
-                                           mfluxᵏ, mflux⁻,
-                                           ρθ″_oldᵏ, ρθ″_old⁻,
-                                           ρ″_oldᵏ, ρ″_old⁻,
+                                           ρθ″_predᵏ, ρθ″_pred⁻,
+                                           ρ″_predᵏ,  ρ″_pred⁻,
+                                           ρθ″_oldᵏ,  ρθ″_old⁻,
+                                           ρ″_oldᵏ,   ρ″_old⁻,
                                            backward_weight)
     return ρw″_oldᵏ + Δτ * Gˢρwᵏ -
-           pgf_coeffᵏ  * ((θfluxᵏ - θflux⁻) +
+           pgf_coeffᵏ  * ((ρθ″_predᵏ - ρθ″_pred⁻) +
                           backward_weight * (ρθ″_oldᵏ - ρθ″_old⁻)) -
-           buoy_coeffᵏ * ((mfluxᵏ + mflux⁻) +
+           buoy_coeffᵏ * ((ρ″_predᵏ + ρ″_pred⁻) +
                           backward_weight * (ρ″_oldᵏ + ρ″_old⁻)) +
-           buoy_lin_coeffᵏ * (θfluxᵏ + backward_weight * ρθ″_oldᵏ) +
-           buoy_lin_coeff⁻ * (θflux⁻ + backward_weight * ρθ″_old⁻)
+           buoy_lin_coeffᵏ * (ρθ″_predᵏ + backward_weight * ρθ″_oldᵏ) +
+           buoy_lin_coeff⁻ * (ρθ″_pred⁻ + backward_weight * ρθ″_old⁻)
 end
 
 # Tridiagonal coefficients (a, b, c) at face k.
 # Names follow the (a, b, c) Thomas-algorithm convention; see Doc C for the full
 # Schur-complement derivation. Superscripts ᵏ/⁻/⁺ denote levels k/k-1/k+1.
+# `Jθ*` := θᵥ_at_face · Δτᵋ (vertical θᵥ-flux per unit ρw, scaled by Δτᵋ).
 @inline function _tridiag_a_at_face(pgf_coeffᵏ, buoy_coeffᵏ, buoy_lin_coeff⁻,
-                                    θflux_coeff⁻, cofrz⁻, rdzw_below)
-    return -pgf_coeffᵏ * θflux_coeff⁻ * rdzw_below +
+                                    Jθ⁻, cofrz⁻, rdzw_below)
+    return -pgf_coeffᵏ * Jθ⁻ * rdzw_below +
             buoy_coeffᵏ * cofrz⁻ -
-            buoy_lin_coeff⁻ * θflux_coeff⁻ * rdzw_below
+            buoy_lin_coeff⁻ * Jθ⁻ * rdzw_below
 end
 
 @inline function _tridiag_b_at_face(pgf_coeffᵏ, buoy_coeffᵏ,
                                     buoy_lin_coeffᵏ, buoy_lin_coeff⁻,
-                                    θflux_coeffᵏ, cofrzᵏ, cofrz⁻,
+                                    Jθᵏ, cofrzᵏ, cofrz⁻,
                                     rdzw_above, rdzw_below)
     return 1 +
-           pgf_coeffᵏ * (θflux_coeffᵏ * rdzw_above + θflux_coeffᵏ * rdzw_below) -
-           θflux_coeffᵏ * (buoy_lin_coeffᵏ * rdzw_above - buoy_lin_coeff⁻ * rdzw_below) +
+           pgf_coeffᵏ * (Jθᵏ * rdzw_above + Jθᵏ * rdzw_below) -
+           Jθᵏ * (buoy_lin_coeffᵏ * rdzw_above - buoy_lin_coeff⁻ * rdzw_below) +
            buoy_coeffᵏ * (cofrzᵏ - cofrz⁻)
 end
 
 @inline function _tridiag_c_at_face(pgf_coeffᵏ, buoy_coeffᵏ, buoy_lin_coeffᵏ,
-                                    θflux_coeff⁺, cofrzᵏ, rdzw_above)
-    return -pgf_coeffᵏ * θflux_coeff⁺ * rdzw_above -
+                                    Jθ⁺, cofrzᵏ, rdzw_above)
+    return -pgf_coeffᵏ * Jθ⁺ * rdzw_above -
             buoy_coeffᵏ * cofrzᵏ +
-            buoy_lin_coeffᵏ * θflux_coeff⁺ * rdzw_above
+            buoy_lin_coeffᵏ * Jθ⁺ * rdzw_above
 end
 
 #####
@@ -1029,10 +1034,10 @@ import Oceananigans.Solvers: get_coefficient
     buoy_lin_coeff⁻ = buoyancy_linearization_coefficient(i, j, k_face - 1, grid,
                                                          pressure, ρ₀, Π₀_field,
                                                          ρθ_stage, pˢᵗ, κ, rcv, g) * Δτᵋ
-    θflux_coeff⁻    = theta_flux_coefficient(i, j, k_face - 1, grid, θᵥ) * Δτᵋ
+    Jθ⁻    = θᵥ_at_face(i, j, k_face - 1, grid, θᵥ) * Δτᵋ
 
     return _tridiag_a_at_face(pgf_coeffᵏ, buoy_coeffᵏ, buoy_lin_coeff⁻,
-                              θflux_coeff⁻, cofrz⁻, rdzw_below)
+                              Jθ⁻, cofrz⁻, rdzw_below)
 end
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagDiagonal, p, ::ZDirection,
@@ -1058,11 +1063,11 @@ end
     buoy_lin_coeff⁻ = buoyancy_linearization_coefficient(i, j, k_face - 1, grid,
                                                          pressure, ρ₀, Π₀_field,
                                                          ρθ_stage, pˢᵗ, κ, rcv, g) * Δτᵋ
-    θflux_coeffᵏ    = theta_flux_coefficient(i, j, k_face, grid, θᵥ) * Δτᵋ
+    Jθᵏ    = θᵥ_at_face(i, j, k_face, grid, θᵥ) * Δτᵋ
 
     return _tridiag_b_at_face(pgf_coeffᵏ, buoy_coeffᵏ,
                               buoy_lin_coeffᵏ, buoy_lin_coeff⁻,
-                              θflux_coeffᵏ, cofrzᵏ, cofrz⁻,
+                              Jθᵏ, cofrzᵏ, cofrz⁻,
                               rdzw_above, rdzw_below)
 end
 
@@ -1084,21 +1089,22 @@ end
     buoy_lin_coeffᵏ = buoyancy_linearization_coefficient(i, j, k_face, grid,
                                                          pressure, ρ₀, Π₀_field,
                                                          ρθ_stage, pˢᵗ, κ, rcv, g) * Δτᵋ
-    θflux_coeff⁺    = theta_flux_coefficient(i, j, k_face + 1, grid, θᵥ) * Δτᵋ
+    Jθ⁺    = θᵥ_at_face(i, j, k_face + 1, grid, θᵥ) * Δτᵋ
 
     return _tridiag_c_at_face(pgf_coeffᵏ, buoy_coeffᵏ, buoy_lin_coeffᵏ,
-                              θflux_coeff⁺, cofrzᵏ, rdzw_above)
+                              Jθ⁺, cofrzᵏ, rdzw_above)
 end
 
 ##### This kernel does ONE complete substep for ONE column (i,j).
 ##### Launched with :xy worksize. Sequential k-loops match MPAS exactly.
 
 ##### Builds the explicit ρw″ predictor (the right-hand side of the tridiagonal)
-##### in place on ρw″ at faces k = 2..Nz, and writes the θflux/mflux scratches
-##### at all centers k = 1..Nz. Does NOT do the Thomas sweep — that step now
-##### lives in the BatchedTridiagonalSolver call back in the substep loop.
+##### in place on ρw″ at faces k = 2..Nz, and writes the ρ″ / ρθ″ explicit
+##### predictors at all centers k = 1..Nz. Does NOT do the Thomas sweep —
+##### that step lives in the BatchedTridiagonalSolver call back in the
+##### substep loop.
 @kernel function _build_acoustic_rhs!(ρw″, ρ″, ρθ″,
-                                       θflux_scratch, mflux_scratch,
+                                       ρθ″_predictor, ρ″_predictor,
                                        ρu″, ρv″,
                                        grid, Δτ, Δτᵋ, backward_weight, ε,
                                        Gˢρw_total, Gˢρ, Gˢρθ,
@@ -1113,40 +1119,40 @@ end
         ## ── MPAS Section 3: Initialize on first substep ──
         if is_first_substep
             for k in 1:Nz
-                ρ″[i, j, k] = 0
+                ρ″[i, j, k]  = 0
                 ρθ″[i, j, k] = 0
                 ρw″[i, j, k] = 0
             end
             ρw″[i, j, Nz + 1] = 0
         end
 
-        ## ── MPAS Section 4: accumulate θflux and mflux into the column scratch ──
+        ## ── MPAS Section 4: build ρ″ and ρθ″ explicit predictors at cell centers ──
         for k in 1:Nz
             V = Vᶜᶜᶜ(i, j, k, grid)
 
-            mass_flux_div  = div_xyᶜᶜᶜ(i, j, k, grid, ρu″, ρv″)
-            theta_flux_div = (δxᶜᵃᵃ(i, j, k, grid, Axθᵥρu″, θᵥ, ρu″) +
-                              δyᵃᶜᵃ(i, j, k, grid, Ayθᵥρv″, θᵥ, ρv″)) / V
+            # Horizontal flux divergences: mass flux Jρ″ = (ρu″, ρv″),
+            # θᵥ-flux Jθᵥρ″ = (θᵥ_face · ρu″, θᵥ_face · ρv″) area-weighted.
+            div_Jρ″_h   = div_xyᶜᶜᶜ(i, j, k, grid, ρu″, ρv″)
+            div_Jθᵥρ″_h = (δxᶜᵃᵃ(i, j, k, grid, Axθᵥρu″, θᵥ, ρu″) +
+                           δyᵃᶜᵃ(i, j, k, grid, Ayθᵥρv″, θᵥ, ρv″)) / V
 
-            mfluxᵏ = -Δτ * mass_flux_div
-            θfluxᵏ = -Δτ * theta_flux_div
-
-            Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
+            Δzᶜ    = Δzᶜᶜᶜ(i, j, k, grid)
             cofrzᵏ = Δτᵋ / Δzᶜ
+            ρw″⁺   = ρw″[i, j, k + 1]
+            ρw″ᵏ   = ρw″[i, j, k]
 
-            ρw″⁺ = ρw″[i, j, k + 1]
-            ρw″ᵏ = ρw″[i, j, k]
+            # ρ″ predictor: old ρ″ + Δτ · slow tendency − Δτ · ∇ₕ·Jρ″ − backward-weighted vertical divergence.
+            ρ″_predᵏ = ρ″[i, j, k] + Δτ * Gˢρ[i, j, k] - Δτ * div_Jρ″_h -
+                       cofrzᵏ * backward_weight * (ρw″⁺ - ρw″ᵏ)
 
-            mfluxᵏ = ρ″[i, j, k] + Δτ * Gˢρ[i, j, k] + mfluxᵏ -
-                     cofrzᵏ * backward_weight * (ρw″⁺ - ρw″ᵏ)
+            # ρθ″ predictor: same structure with θᵥ-weighted vertical mass-flux.
+            θᵥ_face⁺ = θᵥ_at_face(i, j, k + 1, grid, θᵥ)
+            θᵥ_faceᵏ = θᵥ_at_face(i, j, k,     grid, θᵥ)
+            ρθ″_predᵏ = ρθ″[i, j, k] + Δτ * Gˢρθ[i, j, k] - Δτ * div_Jθᵥρ″_h -
+                        backward_weight / Δzᶜ * (θᵥ_face⁺ * Δτᵋ * ρw″⁺ - θᵥ_faceᵏ * Δτᵋ * ρw″ᵏ)
 
-            θflux_coeff⁺ = theta_flux_coefficient(i, j, k + 1, grid, θᵥ)
-            θflux_coeffᵏ = theta_flux_coefficient(i, j, k,     grid, θᵥ)
-            θfluxᵏ = ρθ″[i, j, k] + Δτ * Gˢρθ[i, j, k] + θfluxᵏ -
-                     backward_weight / Δzᶜ * (θflux_coeff⁺ * Δτᵋ * ρw″⁺ - θflux_coeffᵏ * Δτᵋ * ρw″ᵏ)
-
-            θflux_scratch[i, j, k] = θfluxᵏ
-            mflux_scratch[i, j, k] = mfluxᵏ
+            ρθ″_predictor[i, j, k] = ρθ″_predᵏ
+            ρ″_predictor[i, j, k]  = ρ″_predᵏ
         end
 
         ## ── MPAS Section 5: explicit ρw″ predictor update ──
@@ -1154,10 +1160,10 @@ end
         ## that the BatchedTridiagonalSolver will use as its right-hand side.
         buoy_coeff_raw = buoyancy_coefficient(g)
         for k in 2:Nz
-            θfluxᵏ = θflux_scratch[i, j, k]
-            θflux⁻ = θflux_scratch[i, j, k - 1]
-            mfluxᵏ = mflux_scratch[i, j, k]
-            mflux⁻ = mflux_scratch[i, j, k - 1]
+            ρθ″_predᵏ = ρθ″_predictor[i, j, k]
+            ρθ″_pred⁻ = ρθ″_predictor[i, j, k - 1]
+            ρ″_predᵏ  = ρ″_predictor[i, j, k]
+            ρ″_pred⁻  = ρ″_predictor[i, j, k - 1]
 
             ρθ″_oldᵏ = ρθ″[i, j, k]
             ρθ″_old⁻ = ρθ″[i, j, k - 1]
@@ -1173,8 +1179,8 @@ end
                                                      Δτ, Gˢρw_total[i, j, k],
                                                      pgf_coeffᵏ, buoy_coeffᵏ,
                                                      buoy_lin_coeffᵏ, buoy_lin_coeff⁻,
-                                                     θfluxᵏ, θflux⁻,
-                                                     mfluxᵏ, mflux⁻,
+                                                     ρθ″_predᵏ, ρθ″_pred⁻,
+                                                     ρ″_predᵏ, ρ″_pred⁻,
                                                      ρθ″_oldᵏ, ρθ″_old⁻,
                                                      ρ″_oldᵏ, ρ″_old⁻,
                                                      backward_weight)
@@ -1182,10 +1188,10 @@ end
     end
 end
 
-##### Post-solve diagnostics: substitute the new ρw″ back into the mass and θ
-##### flux equations to recover ρ″ and ρθ″.
+##### Post-solve diagnostics: substitute the new ρw″ into the ρ″ and ρθ″
+##### predictors to recover the new ρ″ and ρθ″ at cell centers.
 @kernel function _post_acoustic_solve_diagnostics!(ρ″, ρθ″, ρw″,
-                                                    θflux_scratch, mflux_scratch,
+                                                    ρθ″_predictor, ρ″_predictor,
                                                     grid, Δτᵋ,
                                                     θᵥ)
     i, j = @index(Global, NTuple)
@@ -1193,17 +1199,17 @@ end
 
     @inbounds begin
         for k in 1:Nz
-            Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
-            cofrzᵏ       = Δτᵋ / Δzᶜ
-            θflux_coeff⁺ = theta_flux_coefficient(i, j, k + 1, grid, θᵥ) * Δτᵋ
-            θflux_coeffᵏ = theta_flux_coefficient(i, j, k,     grid, θᵥ) * Δτᵋ
+            Δzᶜ    = Δzᶜᶜᶜ(i, j, k, grid)
+            cofrzᵏ = Δτᵋ / Δzᶜ
+            Jθ⁺    = θᵥ_at_face(i, j, k + 1, grid, θᵥ) * Δτᵋ
+            Jθᵏ    = θᵥ_at_face(i, j, k,     grid, θᵥ) * Δτᵋ
 
-            mfluxᵏ = mflux_scratch[i, j, k]
-            θfluxᵏ = θflux_scratch[i, j, k]
+            ρ″_predᵏ  = ρ″_predictor[i, j, k]
+            ρθ″_predᵏ = ρθ″_predictor[i, j, k]
 
-            ρ″[i, j, k]  = mfluxᵏ - cofrzᵏ * (ρw″[i, j, k + 1] - ρw″[i, j, k])
-            ρθ″[i, j, k] = θfluxᵏ - (1 / Δzᶜ) * (θflux_coeff⁺ * ρw″[i, j, k + 1] -
-                                                 θflux_coeffᵏ * ρw″[i, j, k])
+            ρ″[i, j, k]  = ρ″_predᵏ  - cofrzᵏ * (ρw″[i, j, k + 1] - ρw″[i, j, k])
+            ρθ″[i, j, k] = ρθ″_predᵏ - (1 / Δzᶜ) * (Jθ⁺ * ρw″[i, j, k + 1] -
+                                                    Jθᵏ * ρw″[i, j, k])
         end
     end
 end
@@ -1316,8 +1322,8 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     # MPAS accumulates across stages (only resets at stage 1), but this requires
     # the accumulated perturbation to be consistent with the velocity reset and
     # slow tendency re-evaluation. Per-stage reset is the standard WS-RK3 approach.
-    fill!(parent(substepper.theta_flux_scratch), 0)
-    fill!(parent(substepper.mass_flux_scratch), 0)
+    fill!(parent(substepper.ρθ″_predictor), 0)
+    fill!(parent(substepper.ρ″_predictor),  0)
     fill!(parent(substepper.previous_ρθ″), 0)
     fill!(parent(substepper.ρ″), 0)
     fill!(parent(substepper.ρθ″), 0)
@@ -1400,7 +1406,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         # remain at the boundary value 0.
         launch!(arch, grid, :xy, _build_acoustic_rhs!,
                 substepper.ρw″, substepper.ρ″, substepper.ρθ″,
-                substepper.theta_flux_scratch, substepper.mass_flux_scratch,
+                substepper.ρθ″_predictor, substepper.ρ″_predictor,
                 substepper.ρu″, substepper.ρv″,
                 grid, FT(Δτ), Δτᵋ, FT(backward_weight), ε,
                 substepper.Gˢρw_total, Gⁿ.ρ, Gˢρθ,
@@ -1423,7 +1429,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         # Step 8: post-solve diagnostics — recover ρ″ and ρθ″ from the new ρw″.
         launch!(arch, grid, :xy, _post_acoustic_solve_diagnostics!,
                 substepper.ρ″, substepper.ρθ″, substepper.ρw″,
-                substepper.theta_flux_scratch, substepper.mass_flux_scratch,
+                substepper.ρθ″_predictor, substepper.ρ″_predictor,
                 grid, Δτᵋ,
                 substepper.virtual_potential_temperature)
 
