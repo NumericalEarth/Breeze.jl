@@ -299,8 +299,7 @@ function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBound
                                    surface_pressure, constants,
                                    microphysical_fields, specific_prognostic_moisture, temperature,
                                    Val(:scalar))
-    pˢᵗ = AtmosphereModels.standard_pressure(dynamics)
-    new_bf = BulkSensibleHeatFluxFunction(coef, bf.gustiness, T₀, surface_pressure, pˢᵗ, constants, bf.formulation)
+    new_bf = BulkSensibleHeatFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants, bf.formulation)
     return BoundaryCondition(Flux(), new_bf)
 end
 
@@ -349,8 +348,8 @@ end
 BulkDragFunction(d, coef::NothingPolynomialCoefficient, g, t) =
     BulkDragFunction(d, fill_polynomial(coef, default_neutral_drag_polynomial, Val(:momentum)), g, t)
 
-BulkSensibleHeatFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, pˢᵗ, c, f) =
-    BulkSensibleHeatFluxFunction(fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)), g, t, p, pˢᵗ, c, f)
+BulkSensibleHeatFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, f) =
+    BulkSensibleHeatFluxFunction(fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)), g, t, p, c, f)
 
 BulkVaporFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, s) =
     BulkVaporFluxFunction(fill_polynomial(coef, default_neutral_latent_heat_polynomial, Val(:scalar)), g, t, p, c, s)
