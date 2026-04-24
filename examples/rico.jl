@@ -262,18 +262,23 @@ wall_clock = Ref(time_ns())
 
 function progress(sim)
     qᶜˡmax = maximum(qᶜˡ)
-    qʳmax = maximum(qʳ)
-    nᶜˡmax = maximum(nᶜˡ)
-    nᵃmax  = maximum(nᵃ)
-    wmax   = maximum(abs, model.velocities.w)
+    qʳmin, qʳmax = extrema(qʳ)
+    nᶜˡmin, nᶜˡmax = extrema(nᶜˡ)
+    nʳmin, nʳmax = extrema(nʳ)
+    nᵃmin, nᵃmax = extrema(nᵃ)
+    wmax = maximum(abs, model.velocities.w)
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
+    ## Log extrema of qʳ and number concentrations so that negative values
+    ## (which can cascade into NaNs via the two-moment scheme) are visible
+    ## in logs before the NaNChecker terminates the run.
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
-    msg *= @sprintf(", max(qᶜˡ)=%.2e, max(qʳ)=%.2e, max(nᶜˡ)=%.2e, max(nᵃ)=%.2e",
-                    qᶜˡmax, qʳmax, nᶜˡmax, nᵃmax)
+    msg *= @sprintf(", max(qᶜˡ)=%.2e, qʳ∈[%.2e, %.2e]", qᶜˡmax, qʳmin, qʳmax)
+    msg *= @sprintf(", nᶜˡ∈[%.2e, %.2e], nʳ∈[%.2e, %.2e], nᵃ∈[%.2e, %.2e]",
+                    nᶜˡmin, nᶜˡmax, nʳmin, nʳmax, nᵃmin, nᵃmax)
 
     @info msg
 
