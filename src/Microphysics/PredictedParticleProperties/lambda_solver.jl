@@ -383,7 +383,7 @@ end
 #####
 
 """
-    regime_threshold(α, β, ρ)
+$(TYPEDSIGNATURES)
 
 Diameter threshold from mass power law: D = (6α / πρ)^(1/(3-β))
 
@@ -419,7 +419,7 @@ Equation 16 in [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterizati
 end
 
 """
-    graupel_density(rime_fraction, rime_density, deposited_density)
+$(TYPEDSIGNATURES)
 
 Bulk density of graupel particles (rime + deposited ice).
 """
@@ -504,7 +504,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Equatio
 end
 
 """
-    ice_mass_coefficients(mass, rime_fraction, rime_density, D)
+$(TYPEDSIGNATURES)
 
 Return (a, b) for ice mass at diameter D: m(D) = a D^b.
 
@@ -560,7 +560,7 @@ function ice_mass_coefficients(mass::IceMassPowerLaw, rime_fraction, rime_densit
 end
 
 """
-    ice_mass(mass, rime_fraction, rime_density, D)
+$(TYPEDSIGNATURES)
 
 Compute ice particle mass at diameter D.
 """
@@ -574,7 +574,7 @@ end
 #####
 
 """
-    log_gamma_moment(μ, logλ; k=0, scale=1)
+$(TYPEDSIGNATURES)
 
 Compute log(scale × ∫₀^∞ D^k G(D) dD) where G(D) = D^μ exp(-λD).
 
@@ -587,7 +587,7 @@ function log_gamma_moment(μ, logλ; k = 0, scale = 1)
 end
 
 """
-    log_gamma_inc_moment(D₁, D₂, μ, logλ; k=0, scale=1)
+$(TYPEDSIGNATURES)
 
 Compute log(scale × ∫_{D₁}^{D₂} D^k G(D) dD) using incomplete gamma functions.
 """
@@ -610,7 +610,7 @@ function log_gamma_inc_moment(D₁, D₂, μ, logλ; k = 0, scale = 1)
 end
 
 """
-    logaddexp(a, b)
+$(TYPEDSIGNATURES)
 
 Compute log(exp(a) + exp(b)) stably.
 """
@@ -622,7 +622,7 @@ function logaddexp(a, b)
 end
 
 """
-    log_mass_moment(mass, rime_fraction, rime_density, μ, logλ; n=0, liquid_fraction=0)
+$(TYPEDSIGNATURES)
 
 Compute log(∫₀^∞ Dⁿ m(D) N'(D) dD / N₀) over the piecewise mass-diameter relationship.
 
@@ -688,7 +688,7 @@ end
 #####
 
 """
-    log_mass_number_ratio(mass, closure, rime_fraction, rime_density, liquid_fraction, logλ, L_ice, N_ice)
+$(TYPEDSIGNATURES)
 
 Compute log(L_ice / N_ice) as a function of logλ for two-moment closure.
 Includes L_ice and N_ice arguments to support the P3Closure D_mvd diagnostic.
@@ -708,7 +708,7 @@ end
 #####
 
 """
-    log_lambda_from_reflectivity(μ, log_Z_over_N)
+$(TYPEDSIGNATURES)
 
 Compute log(λ) from log(Z/N) given shape parameter μ.
 """
@@ -720,7 +720,7 @@ function log_lambda_from_reflectivity(μ, log_Z_over_N)
 end
 
 """
-    shape_parameter_from_moments(mom0, mom3, mom6, μmax)
+$(TYPEDSIGNATURES)
 
 Approximate the three-moment ice shape parameter using the Fortran P3 `G(μ)` fit.
 
@@ -762,7 +762,7 @@ used by `solve_mui`.
 end
 
 """
-    mass_residual_three_moment(mass, rime_fraction, rime_density, μ, log_Z_over_N, log_L_over_N)
+$(TYPEDSIGNATURES)
 
 Compute the full three-moment mass residual for the exact closure.
 """
@@ -778,7 +778,7 @@ function mass_residual_three_moment(mass::IceMassPowerLaw,
 end
 
 """
-    g_of_mu(μ)
+$(TYPEDSIGNATURES)
 
 Compute G(μ) = Γ(μ+7)Γ(μ+1) / Γ(μ+4)² for the three-moment μ-Z constraint.
 Simplifies to (μ+6)(μ+5)(μ+4) / ((μ+3)(μ+2)(μ+1)).
@@ -789,7 +789,7 @@ Matches Fortran `G_of_mu`.
 end
 
 """
-    enforce_z_bounds(Z_ice, L_ice, N_ice, ρ_bulk, μmin, μmax)
+$(TYPEDSIGNATURES)
 
 Bound Z_ice to a physically consistent range based on the μ bounds.
 Matches Fortran `apply_mui_bounds_to_zi` and basic zsmall/zlarge clamps.
@@ -953,7 +953,7 @@ function solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ;
 end
 
 """
-    intercept_parameter(N_ice, μ, logλ)
+$(TYPEDSIGNATURES)
 
 Compute N₀ from the normalization: N = N₀ × ∫ D^μ exp(-λD) dD.
 """
@@ -1033,7 +1033,7 @@ default of 40 mm was too permissive for unrimed ice.
 end
 
 """
-    lambda_bounds_from_diameter(μ, bounds::DiameterBounds)
+$(TYPEDSIGNATURES)
 
 Compute λ bounds from diameter bounds for a given shape parameter μ.
 
@@ -1052,7 +1052,7 @@ Returns (λ_min, λ_max).
 end
 
 """
-    enforce_diameter_bounds(λ, μ, bounds::DiameterBounds)
+$(TYPEDSIGNATURES)
 
 Clamp λ to ensure the mean diameter stays within physical bounds.
 

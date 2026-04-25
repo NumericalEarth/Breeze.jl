@@ -3,7 +3,7 @@
 #####
 
 """
-    rain_autoconversion_rate(p3, qᶜˡ, Nᶜ, ρ)
+$(TYPEDSIGNATURES)
 
 Compute rain autoconversion rate following [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000).
 
@@ -39,7 +39,7 @@ Cloud droplets larger than a threshold undergo collision-coalescence to form rai
 end
 
 """
-    rain_accretion_rate(p3, qᶜˡ, qʳ)
+$(TYPEDSIGNATURES)
 
 Compute rain accretion rate following [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000).
 
@@ -97,7 +97,7 @@ Follows [Seifert and Beheng (2001)](@cite SeifertBeheng2001).
 end
 
 """
-    rain_breakup_rate(p3, qʳ, nʳ, self_collection)
+$(TYPEDSIGNATURES)
 
 Compute rain breakup rate following Fortran P3 v5.5.0.
 
@@ -156,7 +156,7 @@ is smaller than the physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
 end
 
 """
-    rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ)
+$(TYPEDSIGNATURES)
 
 Compute rain evaporation rate using ventilation-enhanced diffusion.
 
@@ -271,7 +271,7 @@ end
 end
 
 """
-    rain_condensation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P, transport)
+$(TYPEDSIGNATURES)
 
 Compute rain condensation rate (vapor → rain) when the air is supersaturated.
 

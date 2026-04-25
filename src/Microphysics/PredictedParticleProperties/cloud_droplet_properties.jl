@@ -26,7 +26,7 @@ struct CloudDropletProperties{FT}
 end
 
 """
-    liu_daum_shape_parameter(Nc)
+$(TYPEDSIGNATURES)
 
 Diagnose the cloud droplet gamma PSD shape parameter μ_c from number concentration.
 
@@ -152,7 +152,7 @@ function CloudDropletProperties(FT = Oceananigans.defaults.FloatType;
 end
 
 """
-    bounded_cloud_number(Nᶜ, μ_c, qᶜˡ, ρ)
+$(TYPEDSIGNATURES)
 
 Return the cloud number concentration [1/m³] adjusted for cloud lambda bounds,
 matching Fortran `get_cloud_dsd2` (lines 10557-10575 of `microphy_p3.f90`).
@@ -199,7 +199,7 @@ function Base.show(io::IO, c::CloudDropletProperties)
 end
 
 """
-    diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+$(TYPEDSIGNATURES)
 
 Diagnose the cloud PSD state from prognostic cloud liquid and cloud number.
 

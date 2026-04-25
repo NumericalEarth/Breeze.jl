@@ -48,7 +48,7 @@ const P3_DAI = 0.8e-6                # Ice-friendly aerosol diameter [m]
 #####
 
 """
-    chebyshev_gauss_nodes_weights(FT, n)
+$(TYPEDSIGNATURES)
 
 Compute Chebyshev-Gauss quadrature nodes and weights for n points.
 
@@ -122,7 +122,7 @@ end
 #####
 
 """
-    transform_to_diameter(x, λ; scale=10)
+$(TYPEDSIGNATURES)
 
 Transform Chebyshev node x ∈ [-1, 1] to diameter D ∈ [0, ∞).
 
@@ -143,7 +143,7 @@ end
 @inline transform_to_diameter(node::MidpointNode, λ; scale=10) = node.D
 
 """
-    jacobian_diameter_transform(x, λ; scale=10)
+$(TYPEDSIGNATURES)
 
 Jacobian dD/dx for the diameter transformation.
 """
@@ -161,7 +161,7 @@ end
 #####
 
 """
-    evaluate(integral, state; n_quadrature=64)
+$(TYPEDSIGNATURES)
 
 Evaluate a P3 integral over the ice size distribution using quadrature.
 
@@ -240,7 +240,7 @@ end
 #####
 
 """
-    terminal_velocity(D, state, thresholds)
+$(TYPEDSIGNATURES)
 
 Terminal velocity V(D) for ice particles following Mitchell and Heymsfield (2005).
 
@@ -285,7 +285,7 @@ end
 end
 
 """
-    ice_fall_speed_mh2005(D, state, m, A)
+$(TYPEDSIGNATURES)
 
 Compute terminal velocity of ice particle using Mitchell & Heymsfield (2005).
 Calculates velocity at reference conditions (P3_REF_T, P3_REF_P).
@@ -334,7 +334,7 @@ Calculates velocity at reference conditions (P3_REF_T, P3_REF_P).
 end
 
 """
-    rain_fall_speed(D, ρ_correction)
+$(TYPEDSIGNATURES)
 
 Compute rain fall speed using piecewise power laws from P3 Fortran.
 """
@@ -356,7 +356,7 @@ Compute rain fall speed using piecewise power laws from P3 Fortran.
 end
 
 """
-    particle_mass_ice_only(D, state, thresholds)
+$(TYPEDSIGNATURES)
 
 Mass of the ice portion of the particle (ignoring liquid water).
 Used for fall speed calculation of the ice component.
@@ -428,7 +428,7 @@ end
 end
 
 """
-    particle_diameter_ice_only(m_ice, state, thresholds)
+$(TYPEDSIGNATURES)
 
 Invert the piecewise ice-only mass-diameter relation to recover diameter from mass.
 
@@ -470,7 +470,7 @@ end
 end
 
 """
-    particle_area_ice_only(D, state, thresholds)
+$(TYPEDSIGNATURES)
 
 Projected area of the ice portion of the particle.
 
@@ -512,7 +512,7 @@ end
 end
 
 """
-    regime_thresholds_from_state(FT, state)
+$(TYPEDSIGNATURES)
 
 Compute ice regime thresholds from the state's mass-diameter parameters.
 Returns a NamedTuple with spherical, graupel, partial_rime thresholds and ρ_graupel.
@@ -594,7 +594,7 @@ end
 #####
 
 """
-    particle_mass(D, state, thresholds)
+$(TYPEDSIGNATURES)
 
 Particle mass m(D) as a function of diameter.
 
@@ -629,7 +629,7 @@ end
 end
 
 """
-    particle_mass_derivative(D, state, thresholds)
+$(TYPEDSIGNATURES)
 
 Derivative dm/dD of the total (ice + liquid) particle mass with respect to diameter.
 
@@ -697,7 +697,7 @@ end
 #####
 
 """
-    ventilation_factor(D, state, constant_term)
+$(TYPEDSIGNATURES)
 
 Ventilation factor f_v for vapor diffusion enhancement following Hall & Pruppacher (1976).
 
@@ -747,7 +747,7 @@ end
 @inline ventilation_factor(D, state; constant_term=true) = ventilation_factor(D, state, constant_term)
 
 """
-    melt_ventilation_factor(D, state, constant_term, thresholds)
+$(TYPEDSIGNATURES)
 
 Fortran P3 melting ventilation factor used for `vdepm*` and `m6mlt*` tables.
 
@@ -850,7 +850,7 @@ end
 end
 
 """
-    capacitance(D, state, thresholds)
+$(TYPEDSIGNATURES)
 
 Capacitance C(D) for vapor diffusion following the P3 Fortran convention.
 
@@ -1064,7 +1064,7 @@ end
 end
 
 """
-    particle_density(D, state, thresholds)
+$(TYPEDSIGNATURES)
 
 Particle effective density ρ(D) as a function of diameter.
 
@@ -1207,7 +1207,7 @@ end
 end
 
 """
-    particle_area(D, state, thresholds)
+$(TYPEDSIGNATURES)
 
 Projected cross-sectional area A(D) for ice particles.
 

@@ -114,7 +114,7 @@ multi_category_ice_field_names(::MultiIceCategory{N}) where N = multi_category_i
 #####
 
 """
-    inter_category_collection(p3, cat1_state, cat2_state, T)
+$(TYPEDSIGNATURES)
 
 Compute ice-ice collection rate between two ice categories.
 

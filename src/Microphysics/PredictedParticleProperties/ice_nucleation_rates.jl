@@ -3,7 +3,7 @@
 #####
 
 """
-    deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ)
+$(TYPEDSIGNATURES)
 
 Compute ice nucleation rate from deposition/condensation freezing.
 
@@ -63,7 +63,7 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
 end
 
 """
-    immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
+$(TYPEDSIGNATURES)
 
 Compute immersion freezing rate of cloud droplets using the
 [Barklie and Gokhale (1959)](@cite BarklieGokhale1959) stochastic volume-dependent
@@ -137,7 +137,7 @@ negligible for small droplets.
 end
 
 """
-    immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μ_r)
+$(TYPEDSIGNATURES)
 
 Compute immersion freezing rate of rain drops.
 
@@ -348,7 +348,7 @@ end
 #####
 
 """
-    rime_splintering_rate(p3, cloud_riming, rain_riming, T, D_ice, Fˡ, surface_T, qᶠ)
+$(TYPEDSIGNATURES)
 
 Compute secondary ice production from rime splintering (Hallett-Mossop effect).
 

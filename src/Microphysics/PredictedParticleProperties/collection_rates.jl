@@ -19,7 +19,7 @@ end
 #####
 
 """
-    ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ)
+$(TYPEDSIGNATURES)
 
 Compute ice self-collection (aggregation) rate using proper collision kernel.
 
@@ -114,7 +114,7 @@ end
 #####
 
 """
-    cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+$(TYPEDSIGNATURES)
 
 Compute cloud droplet collection (riming) by ice particles using the
 continuous collection equation with the collision kernel integrated
@@ -180,7 +180,7 @@ function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷ�
 end
 
 """
-    cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+$(TYPEDSIGNATURES)
 
 Compute above-freezing cloud collection by melting ice (Fortran qcshd/ncshdc pathway).
 
@@ -225,7 +225,7 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
 end
 
 """
-    rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+$(TYPEDSIGNATURES)
 
 Compute above-freezing rain collection by melting ice (Fortran qrcoll pathway).
 
@@ -278,7 +278,7 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 end
 
 """
-    cloud_riming_number_rate(qᶜˡ, Nᶜ, ρ, riming_rate)
+$(TYPEDSIGNATURES)    cloud_riming_number_rate(qᶜˡ, Nᶜ, ρ, riming_rate)
 
 Compute cloud droplet number sink from riming.
 
@@ -305,7 +305,7 @@ number removal proportional to the rimed cloud mass fraction.
 end
 
 """
-    rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+$(TYPEDSIGNATURES)
 
 Compute rain collection (riming) by ice particles using the continuous
 collection equation with collision kernel integrated over the ice PSD,
@@ -389,7 +389,7 @@ end
 end
 
 """
-    rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+$(TYPEDSIGNATURES)
 
 Backward-compatible 8-argument overload of `rain_riming_rate` without rain DSD correction.
 Passes `nʳ = 0`, which disables the C5 double-PSD cross-section correction.
@@ -401,7 +401,7 @@ function rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 end
 
 """
-    rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+$(TYPEDSIGNATURES)
 
 Compute rain number loss from riming using the tabulated number-weighted
 collection kernel (RainCollectionNumber / Fortran f1pr07).
@@ -471,7 +471,7 @@ end
 end
 
 """
-    rain_riming_number_rate(qʳ, nʳ, riming_rate)
+$(TYPEDSIGNATURES)
 
 Backward-compatible fallback: compute rain number loss from riming using the
 monodisperse approximation `(nʳ/qʳ) × mass_rate`.
@@ -494,7 +494,7 @@ function rain_riming_number_rate(qʳ, nʳ, riming_rate)
 end
 
 """
-    rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
+$(TYPEDSIGNATURES)
 
 Compute the density of newly accreted cloud rime using the Fortran P3 Ri fit.
 
@@ -563,7 +563,7 @@ end
 #####
 
 """
-    shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
+$(TYPEDSIGNATURES)
 
 Compute liquid shedding rate from ice particles following
 [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
@@ -614,7 +614,7 @@ function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean, μ)
 end
 
 """
-    shedding_integral(table, m_mean, Fᶠ, Fˡ, ρᶠ, μ)
+$(TYPEDSIGNATURES)
 
 Lookup the PSD-integrated shedding mass for D ≥ 9 mm particles
 from tabulated `TabulatedFunction5D`.
@@ -626,7 +626,7 @@ from tabulated `TabulatedFunction5D`.
 end
 
 """
-    shedding_number_rate(p3, shed_rate)
+$(TYPEDSIGNATURES)
 
 Compute rain number source from shedding.
 
@@ -648,7 +648,7 @@ Shed liquid forms rain drops of approximately 1 mm diameter.
 end
 
 """
-    wet_growth_capacity(p3, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+$(TYPEDSIGNATURES)
 
 Compute the wet growth freezing capacity following
 [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
@@ -725,7 +725,7 @@ function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ
 end
 
 """
-    refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport)
+$(TYPEDSIGNATURES)
 
 Compute refreezing rate of liquid on ice using the heat-balance formula.
 

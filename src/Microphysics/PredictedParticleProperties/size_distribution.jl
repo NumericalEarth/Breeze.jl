@@ -101,7 +101,7 @@ function IceSizeDistributionState(FT::Type{<:AbstractFloat} = Float64;
 end
 
 """
-    size_distribution(D, state::IceSizeDistributionState)
+$(TYPEDSIGNATURES)
 
 Evaluate the ice size distribution ``N'(D)`` at diameter D.
 
@@ -121,7 +121,7 @@ The total number concentration is ``N = ∫_0^∞ N'(D) dD``.
 end
 
 """
-    dry_size_distribution(D, state::IceSizeDistributionState)
+$(TYPEDSIGNATURES)
 
 Evaluate the **dry ice** size distribution ``N_d'(D)`` at diameter D.
 

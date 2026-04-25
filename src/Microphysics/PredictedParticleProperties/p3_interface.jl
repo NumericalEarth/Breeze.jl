@@ -621,6 +621,8 @@ end
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Cloud number tendency: gains from activation and loses proportionally with cloud sinks.
 
 In the prescribed-Nᶜ path (`p3.aerosol === nothing`), `nc` is a scheme-level
@@ -636,6 +638,8 @@ zero and the field remains at its initial value.
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Cloud liquid tendency: loses mass to autoconversion, accretion, and riming.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqᶜˡ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -644,6 +648,8 @@ Cloud liquid tendency: loses mass to autoconversion, accretion, and riming.
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Rain mass tendency: gains from autoconversion, accretion, melting, shedding; loses to evaporation, riming.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqʳ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -652,6 +658,8 @@ Rain mass tendency: gains from autoconversion, accretion, melting, shedding; los
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Rain number tendency: gains from autoconversion, melting, shedding; loses to self-collection, riming.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnʳ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -660,6 +668,8 @@ Rain number tendency: gains from autoconversion, melting, shedding; loses to sel
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Ice mass tendency: gains from deposition, riming, refreezing; loses to melting.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -668,6 +678,8 @@ Ice mass tendency: gains from deposition, riming, refreezing; loses to melting.
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Ice number tendency: loses from melting and aggregation.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -676,6 +688,8 @@ Ice number tendency: loses from melting and aggregation.
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Rime mass tendency: gains from cloud/rain riming, refreezing; loses proportionally with melting.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqᶠ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -684,6 +698,8 @@ Rime mass tendency: gains from cloud/rain riming, refreezing; loses proportional
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Rime volume tendency: gains from new rime; loses with melting.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρbᶠ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -692,6 +708,8 @@ Rime volume tendency: gains from new rime; loses with melting.
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Ice sixth moment tendency: changes with deposition, melting, riming, and nucleation.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρzⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -706,6 +724,8 @@ Ice sixth moment tendency: changes with deposition, melting, riming, and nucleat
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Liquid on ice tendency: loses from shedding and refreezing.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqʷⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -714,6 +734,8 @@ Liquid on ice tendency: loses from shedding and refreezing.
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Supersaturation tendency (H10): zero when predict_supersaturation = false.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρsˢᵃᵗ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -722,6 +744,8 @@ Supersaturation tendency (H10): zero when predict_supersaturation = false.
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Vapor tendency: loses from condensation, deposition, nucleation; gains from evaporation, sublimation.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqᵛ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)

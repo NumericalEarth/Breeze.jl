@@ -6,7 +6,7 @@
 #####
 
 """
-    rain_terminal_velocity_mass_weighted(p3, qʳ, nʳ, ρ)
+$(TYPEDSIGNATURES)
 
 Compute mass-weighted terminal velocity for rain.
 
@@ -60,7 +60,7 @@ end
 end
 
 """
-    rain_terminal_velocity_number_weighted(p3, qʳ, nʳ, ρ)
+$(TYPEDSIGNATURES)
 
 Compute number-weighted terminal velocity for rain.
 
@@ -112,7 +112,7 @@ end
 end
 
 """
-    ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
+$(TYPEDSIGNATURES)
 
 Compute mass-weighted terminal velocity for ice.
 
@@ -160,7 +160,7 @@ end
 end
 
 """
-    ice_terminal_velocity_number_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+$(TYPEDSIGNATURES)
 
 Compute number-weighted terminal velocity for ice.
 
@@ -199,7 +199,7 @@ end
 end
 
 """
-    ice_terminal_velocity_reflectivity_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=0)
+$(TYPEDSIGNATURES)
 
 Compute reflectivity-weighted (Z-weighted) terminal velocity for ice.
 
@@ -242,7 +242,7 @@ end
 end
 
 """
-    ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
+$(TYPEDSIGNATURES)
 
 Compute all three ice terminal velocities (mass-, number-, and reflectivity-weighted)
 in a single call, sharing the mean particle mass and air density correction computation.

@@ -28,14 +28,14 @@ using DocStringExtensions: TYPEDSIGNATURES
 #####
 
 """
-    clamp_positive(x)
+$(TYPEDSIGNATURES)
 
 Return max(0, x) for numerical stability.
 """
 @inline clamp_positive(x) = max(0, x)
 
 """
-    sink_limiting_factor(total_sink, available_mass, dt_safety)
+$(TYPEDSIGNATURES)
 
 Compute proportional rescaling factor for sink rates so that
 `total_sink × dt_safety` does not exceed `available_mass`.
@@ -87,7 +87,7 @@ Returns a NamedTuple of the possibly-rescaled rates.
 end
 
 """
-    safe_divide(a, b, default)
+$(TYPEDSIGNATURES)
 
 Safe division returning `default` when b ≈ 0.
 All arguments must be positional (GPU kernel compatibility).
@@ -131,7 +131,7 @@ end
 end
 
 """
-    consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, qʷⁱ)
+$(TYPEDSIGNATURES)
 
 Apply the Fortran `calc_bulkRhoRime` consistency pass to the prognostic rime
 state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density `ρᶠ`.
@@ -234,7 +234,7 @@ end
 #####
 
 """
-    compute_ice_shape_parameter(p3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ)
+$(TYPEDSIGNATURES)
 
 Compute the ice PSD shape parameter μ from lookup tables.
 
@@ -346,7 +346,7 @@ end
 #####
 
 """
-    ventilation_sc_correction(nu, D_v, ρ_correction)
+$(TYPEDSIGNATURES)
 
 Schmidt number correction factor for ventilation-enhanced table values.
 
@@ -371,7 +371,7 @@ end
 #####
 
 """
-    deposition_ventilation(vent, vent_e, m_mean, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
+$(TYPEDSIGNATURES)
 
 Compute per-particle ventilation integral C(D) × f_v(D) for deposition
 using PSD-integrated lookup tables.
@@ -397,7 +397,7 @@ end
 end
 
 """
-    melting_ventilation(vent, vent_e, m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
+$(TYPEDSIGNATURES)
 
 Compute per-particle ventilation integral C(D) × f_v(D) for melting
 using PSD-integrated lookup tables, blending ice (0.65, 0.44) and rain
@@ -412,7 +412,7 @@ using PSD-integrated lookup tables, blending ice (0.65, 0.44) and rain
 end
 
 """
-    collection_kernel_per_particle(coll, m_mean, Fᶠ, ρᶠ, prp, p3, μ)
+$(TYPEDSIGNATURES)
 
 Compute per-particle collection kernel ⟨A × V⟩ for riming.
 Returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from lookup table.
@@ -431,7 +431,7 @@ end
 end
 
 """
-    aggregation_kernel(coll, m_mean, Fᶠ, ρᶠ, prp, p3, μ)
+$(TYPEDSIGNATURES)
 
 Compute aggregation kernel for self-collection using PSD-integrated
 kernel from lookup table.
@@ -457,7 +457,7 @@ end
 #####
 
 """
-    ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+$(TYPEDSIGNATURES)
 
 Compute CCN activation rate for the 1-moment (prescribed Nᶜ) case.
 
@@ -500,6 +500,8 @@ for ``r = 1`` μm. The rate is limited by the available supersaturation.
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Dispatch CCN activation: prescribed (Nothing) or prognostic (AerosolActivation).
 Returns `(; mass, number)` named tuple.
 """
@@ -525,7 +527,7 @@ end
 #####
 
 """
-    ventilation_enhanced_deposition(p3, qⁱ, qʷⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, constants, transport, q, μ)
+$(TYPEDSIGNATURES)
 
 Compute ventilation-enhanced ice deposition/sublimation rate with latent-heat
 psychrometric correction.
@@ -1253,7 +1255,7 @@ end
 end
 
 """
-    compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+$(TYPEDSIGNATURES)
 
 Compute all P3 process rates (Phase 1 and Phase 2) from a microphysical state.
 
@@ -1533,7 +1535,7 @@ end
 #####
 
 """
-    tendency_ρqᶜˡ(rates)
+$(TYPEDSIGNATURES)
 
 Compute cloud liquid mass tendency from P3 process rates.
 
@@ -1562,7 +1564,7 @@ Cloud liquid is consumed by:
 end
 
 """
-    tendency_ρqʳ(rates)
+$(TYPEDSIGNATURES)
 
 Compute rain mass tendency from P3 process rates.
 
@@ -1596,7 +1598,7 @@ Rain loses from:
 end
 
 """
-    tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, nʳ, qʳ, prp)
+$(TYPEDSIGNATURES)
 
 Compute rain number tendency from P3 process rates.
 
@@ -1656,7 +1658,7 @@ Rain number loses from:
 end
 
 """
-    tendency_ρqⁱ(rates)
+$(TYPEDSIGNATURES)
 
 Compute ice mass tendency from P3 process rates.
 
@@ -1688,7 +1690,7 @@ Ice loses from:
 end
 
 """
-    tendency_ρnⁱ(rates)
+$(TYPEDSIGNATURES)
 
 Compute ice number tendency from P3 process rates.
 
@@ -1716,7 +1718,7 @@ Ice number loses from:
 end
 
 """
-    tendency_ρqᶠ(rates)
+$(TYPEDSIGNATURES)
 
 Compute rime mass tendency from P3 process rates.
 
@@ -1749,7 +1751,7 @@ Rime mass loses from:
 end
 
 """
-    tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, qⁱ, prp)
+$(TYPEDSIGNATURES)
 
 Compute rime volume tendency from P3 process rates.
 
@@ -1804,7 +1806,7 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
 end
 
 """
-    tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ)
+$(TYPEDSIGNATURES)
 
 Compute ice sixth moment tendency from P3 process rates.
 
@@ -1849,7 +1851,7 @@ end
 end
 
 """
-    tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3, nu, D_v, μ)
+$(TYPEDSIGNATURES)
 
 Compute ice sixth moment tendency using tabulated integrals when available.
 
@@ -2081,7 +2083,7 @@ end
 end
 
 """
-    tendency_ρnᶜˡ(rates, ρ, Nᶜ, qᶜˡ, prp)
+$(TYPEDSIGNATURES)
 
 Compute cloud-number tendency from P3 process rates.
 
@@ -2110,7 +2112,7 @@ to the cloud mass they consume, following the Fortran `nc` budget structure.
 end
 
 """
-    tendency_ρqʷⁱ(rates)
+$(TYPEDSIGNATURES)
 
 Compute liquid on ice tendency from P3 process rates.
 
@@ -2148,7 +2150,7 @@ Loses from:
 end
 
 """
-    tendency_ρqᵛ(rates)
+$(TYPEDSIGNATURES)
 
 Compute vapor mass tendency from P3 process rates.
 
@@ -2176,7 +2178,7 @@ Vapor is produced by:
 end
 
 """
-    tendency_ρsˢᵃᵗ(rates, ρ, prp)
+$(TYPEDSIGNATURES)
 
 Compute predicted supersaturation tendency (H10: Grabowski & Morrison 2008).
 

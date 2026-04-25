@@ -167,6 +167,8 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Parse the Fortran Table 1 ASCII file.
 
 Returns two dictionaries:
@@ -285,6 +287,8 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Parse the Fortran Table 3 ASCII file.
 
 Returns a Dict of Symbol => Array{FT,5} for Table 3 fields
@@ -331,6 +335,8 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Parse a single Fortran-formatted data line into a vector of Float64.
 Handles Fortran-style scientific notation (e.g., `0.12345E+06`).
 Integer fields are also parsed as Float64.
@@ -345,6 +351,8 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Build a TabulatedFunction{N} directly from a pre-computed data array and axis ranges.
 """
 function make_fortran_tabulated_function(data::Array{FT, N}, ranges, arch) where {FT, N}
