@@ -14,9 +14,9 @@ Breeze = {path = ".."}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
-CUDA = "5.9.7"
+CUDA = "5.9.7, 6.0"
 CairoMakie = "0.15.8"
-CloudMicrophysics = "0.31.4, 0.32, 0.34"
+CloudMicrophysics = "0.31.4, 0.32, 0.33, 0.34"
 NCDatasets = "0.14"
-Oceananigans = "0.106.3"
+Oceananigans = "0.107.4"
 RRTMGP = "0.21.7"
