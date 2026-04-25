@@ -105,8 +105,8 @@ cold_rain_number_partition = 1e4
 height_profile = collect(range(0, plot_top, length = 400))
 background_T_profile = [Thermodynamics.temperature_from_potential_temperature(θ_background(z),
                                                                               interpolate(z, reference_state.pressure),
-                                                                              constants;
-                                                                              pˢᵗ = reference_state.standard_pressure)
+                                                                              reference_state.standard_pressure,
+                                                                              constants)
                         for z in height_profile]
 nothing #hide
 
@@ -184,8 +184,7 @@ function apply_warm_bubble_perturbation!(model; Δθ = launch_θ_perturbation)
     state = model.dynamics.state
     p = state.𝒰.reference_pressure
     θ = θ_background(state.z) + Δθ
-    T = Thermodynamics.temperature_from_potential_temperature(θ, p, model.thermodynamic_constants;
-                                                              pˢᵗ = model.dynamics.standard_pressure)
+    T = Thermodynamics.temperature_from_potential_temperature(θ, p, model.dynamics.standard_pressure, model.thermodynamic_constants)
 
     state.𝒰 = Thermodynamics.with_temperature(state.𝒰, T, model.thermodynamic_constants)
     state.ℰ = state.𝒰.static_energy
