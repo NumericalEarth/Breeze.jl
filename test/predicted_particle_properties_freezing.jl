@@ -64,11 +64,9 @@ using Oceananigans.Fields: interior
 
 @testset "P3 Tabulated and Freezing" begin
 
-    _tab_table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-
-    isdir(_tab_table_dir) && @testset "Tabulated sixth-moment melting matches Fortran branch split" begin
+    @testset "Tabulated sixth-moment melting matches Fortran branch split" begin
         FT = Float64
-        p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=_tab_table_dir)
+        p3_tab = PredictedParticlePropertiesMicrophysics()
 
         qⁱ = FT(1e-4)
         nⁱ = FT(1e5)
@@ -267,8 +265,7 @@ using Oceananigans.Fields: interior
 
     @testset "rain_evaporation_rate sign with tabulated scheme" begin
         # With tabulated rain, evaporation in subsaturated air should be positive magnitude (M7)
-        table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-        p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3_tab = PredictedParticlePropertiesMicrophysics()
 
         FT = Float64
         qr = FT(1e-3)
@@ -290,8 +287,7 @@ using Oceananigans.Fields: interior
     @testset "tabulated rain evaporation - positive, finite, bounded" begin
         # Verify PSD-integrated rain evaporation from Fortran tables
         # is physically reasonable.
-        table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-        p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3_tab = PredictedParticlePropertiesMicrophysics()
 
         FT = Float64
         qr = FT(1e-3)
@@ -313,8 +309,7 @@ using Oceananigans.Fields: interior
     end
 
     @testset "tabulated rain terminal velocity - positive and monotone" begin
-        table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-        p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3_tab = PredictedParticlePropertiesMicrophysics()
 
         FT = Float64
         ρ = FT(1.0)

@@ -5,10 +5,7 @@
 ##### and constructs Julia table objects for use in PredictedParticlePropertiesMicrophysics.
 #####
 
-export read_fortran_lookup_tables, download_p3_lookup_tables
-
-using Downloads: Downloads
-using p7zip_jll: p7zip_jll
+export read_fortran_lookup_tables
 
 using Oceananigans.Architectures: CPU, on_architecture
 using Oceananigans.Utils: TabulatedFunction
@@ -48,61 +45,6 @@ const LOG_QNORM_MIN = LOG_MASS_MIN
 const LOG_QNORM_MAX = LOG_MASS_MAX
 
 #####
-##### Download helpers
-#####
-
-const P3_TABLE_BASE_URL = "https://github.com/P3-microphysics/P3-microphysics/raw/main/lookup_tables"
-
-const P3_TABLE_FILES = [
-    "p3_lookupTable_1.dat-v6.9-2momI",
-    "p3_lookupTable_1.dat-v6.9-3momI",
-    "p3_lookupTable_3.dat-v1.4",
-]
-
-"""
-$(TYPEDSIGNATURES)
-
-Download P3 lookup tables from the official P3-microphysics GitHub repository.
-
-Downloads compressed `.gz` files and decompresses them with `p7zip_jll`.
-Skips files that already exist. Total download size is approximately 28 MB
-(compressed); decompressed tables are approximately 140 MB.
-
-# Arguments
-
-- `destination`: Directory to store the tables (created if needed)
-"""
-function download_p3_lookup_tables(destination::AbstractString)
-    mkpath(destination)
-    for filename in P3_TABLE_FILES
-        outpath = joinpath(destination, filename)
-        isfile(outpath) && continue
-
-        url = "$P3_TABLE_BASE_URL/$filename.gz"
-        @info "Downloading P3 lookup table $filename.gz (this only happens once)..."
-
-        mktempdir() do tmpdir
-            tmpgz  = joinpath(tmpdir, "$filename.gz")
-            tmpout = joinpath(tmpdir, filename)
-
-            Downloads.download(url, tmpgz)
-
-            p7zip_jll.p7zip() do exe
-                open(tmpout, "w") do io
-                    run(pipeline(`$exe e -so $tmpgz`; stdout=io))
-                end
-            end
-
-            mv(tmpout, outpath; force=true)
-        end
-
-        mb = round(filesize(outpath) / 1e6; digits=1)
-        @info "  Decompressed $filename ($mb MB)"
-    end
-    return destination
-end
-
-#####
 ##### Main entry point
 #####
 
@@ -126,7 +68,7 @@ since they are not included in the Fortran ASCII files.
 
 - `directory`: Path to directory containing Fortran table files
   (`p3_lookupTable_1.dat-v6.9-3momI`, `p3_lookupTable_1.dat-v6.9-2momI`,
-   `p3_lookupTable_3.dat-v1.4`). Created and populated automatically if empty.
+   `p3_lookupTable_3.dat-v1.4`).
 
 # Keyword Arguments
 
@@ -148,18 +90,13 @@ function read_fortran_lookup_tables(directory::AbstractString;
     file_2momI = joinpath(directory, "p3_lookupTable_1.dat-v6.9-2momI")
     file_table3 = joinpath(directory, "p3_lookupTable_3.dat-v1.4")
 
-    # Auto-download if tables are missing
-    if !isfile(file_3momI) && !isfile(file_2momI)
-        download_p3_lookup_tables(directory)
-    end
-
     has_3momI = isfile(file_3momI)
     has_2momI = isfile(file_2momI)
 
-    if isnothing(three_moment_ice)
-        three_moment = has_3momI
+    three_moment = if isnothing(three_moment_ice)
+        has_3momI
     else
-        three_moment = three_moment_ice
+        three_moment_ice
     end
 
     if three_moment && !has_3momI

@@ -4,6 +4,9 @@
 ##### Main type combining ice, rain, and cloud properties.
 #####
 
+using Artifacts: @artifact_str
+using LazyArtifacts: LazyArtifacts
+
 """
     PredictedParticlePropertiesMicrophysics
 
@@ -81,7 +84,7 @@ The scheme tracks 11 prognostic densities:
 # Keyword Arguments
 
 - `lookup_tables`: Path to a directory containing Fortran P3 lookup table files
-  (default `"data/P3_LUT"`). Tables are downloaded automatically on first use.
+  (default to the artifact `P3_lookup_tables` in `Artifacts.toml`).
 - `three_moment_ice`: Force 2-moment (`false`) or 3-moment (`true`) ice, or
   auto-detect from file presence (`nothing`, default).
 - `water_density`: Liquid water density [kg/m³] (default 1000)
@@ -118,13 +121,13 @@ Key papers describing P3:
 See also the [P3 documentation](@ref p3_overview) for detailed physics.
 """
 function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Float64;
-                                                  lookup_tables = "data/P3_LUT",
-                                                  three_moment_ice = nothing,
-                                                  water_density = 1000,
-                                                  precipitation_boundary_condition = nothing,
-                                                  aerosol = nothing)
+                                                 lookup_tables = artifact"P3_lookup_tables",
+                                                 three_moment_ice = nothing,
+                                                 water_density = 1000,
+                                                 precipitation_boundary_condition = nothing,
+                                                 aerosol = nothing)
     return read_fortran_lookup_tables(lookup_tables; FT, three_moment_ice,
-                                     water_density, precipitation_boundary_condition, aerosol)
+                                      water_density, precipitation_boundary_condition, aerosol)
 end
 
 # Shorthand alias

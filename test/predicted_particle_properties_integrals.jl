@@ -163,10 +163,9 @@ end
                                                 surface_pressure = FT(101325),
                                                 potential_temperature = FT(300))
         dynamics = Breeze.AnelasticDynamics(reference_state)
-        table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
         model = Breeze.AtmosphereModel(grid; dynamics,
                                        thermodynamic_constants = constants,
-                                       microphysics = PredictedParticlePropertiesMicrophysics(FT; lookup_tables=table_dir))
+                                       microphysics = PredictedParticlePropertiesMicrophysics(FT))
 
         qᵗ = FT(0.02)
         qᶜˡ = FT(0.005)

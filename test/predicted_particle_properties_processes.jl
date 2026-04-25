@@ -183,8 +183,6 @@ end
 
 @testset "P3 Processes" begin
 
-    table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-
     #####
     ##### Lambda solver tests
     #####
@@ -713,8 +711,7 @@ end
     end
 
     @testset "rain_evaporation_rate" begin
-        table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         qr = FT(1e-3)
@@ -744,7 +741,7 @@ end
     end
 
     @testset "coupled_saturation_adjustment_rates" begin
-        p3_base = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
         process_rates = ProcessRateParameters(FT; sink_limiting_timescale=FT(10))
@@ -808,7 +805,7 @@ end
     end
 
     @testset "coupled_saturation_adjustment_rates wet-ice coating" begin
-        p3_base = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
         process_rates = ProcessRateParameters(FT; sink_limiting_timescale=FT(10))
@@ -904,7 +901,7 @@ end
     end
 
     @testset "ventilation_enhanced_deposition" begin
-        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         qi = FT(1e-4)
@@ -959,7 +956,7 @@ end
     end
 
     @testset "ice_melting_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         qi = FT(1e-4)
@@ -993,7 +990,7 @@ end
     end
 
     @testset "ice_melting_rates partitioning" begin
-        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         qi = FT(1e-4)
@@ -1041,7 +1038,7 @@ end
 
     @testset "wet_growth_capacity keeps sensible term outside 2π/Lf" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
-        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         qi = FT(1e-4)
@@ -1078,7 +1075,7 @@ end
 
     @testset "refreezing_rate keeps sensible term outside 2π/Lf" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
-        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         qwi = FT(1)
@@ -1107,7 +1104,7 @@ end
     end
 
     @testset "ice_aggregation_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         qi = FT(1e-4)
@@ -1144,7 +1141,7 @@ end
     end
 
     @testset "cloud_riming_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         qc = FT(1e-3)
@@ -1179,7 +1176,7 @@ end
     end
 
     @testset "rain_riming_rate" begin
-        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         # Ice must dominate rain for rain riming
@@ -1356,7 +1353,7 @@ end
     end
 
     @testset "compute_p3_process_rates integration" begin
-        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -1421,7 +1418,7 @@ end
     end
 
     @testset "compute_p3_process_rates uses prognostic cloud number" begin
-        p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
@@ -1479,7 +1476,7 @@ end
         constants = ThermodynamicConstants(FT)
 
         # Load Fortran lookup tables
-        p3_tab = PredictedParticlePropertiesMicrophysics(; lookup_tables=table_dir)
+        p3_tab = PredictedParticlePropertiesMicrophysics()
 
         ρ = FT(1.0)
 

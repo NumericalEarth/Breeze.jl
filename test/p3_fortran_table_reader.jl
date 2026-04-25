@@ -1,4 +1,5 @@
 using Test
+using Pkg.Artifacts: ensure_artifact_installed
 using Oceananigans
 using Oceananigans.Utils: TabulatedFunction, TabulatedFunction1D
 using Breeze.Microphysics.PredictedParticleProperties
@@ -26,10 +27,9 @@ using Breeze.Microphysics.PredictedParticleProperties:
     @test wrapped(0.5, 0.5, 0.5, 150.0, 10.0) ≈ 1.5
 end
 
-const _fortran_table_dir = expanduser("~/Aeolus/P3-microphysics/lookup_tables")
-const _has_fortran_tables = isdir(_fortran_table_dir)
+const _fortran_table_dir = ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
 
-_has_fortran_tables && @testset "Read Fortran lookup tables (3momI)" begin
+@testset "Read Fortran lookup tables (3momI)" begin
     p3 = read_fortran_lookup_tables(_fortran_table_dir; FT=Float64)
 
     tables = p3.ice.lookup_tables
@@ -59,7 +59,7 @@ _has_fortran_tables && @testset "Read Fortran lookup tables (3momI)" begin
     @test p3.rain.evaporation isa TabulatedFunction
 end
 
-_has_fortran_tables && @testset "Read Fortran lookup tables (2momI)" begin
+@testset "Read Fortran lookup tables (2momI)" begin
     p3 = read_fortran_lookup_tables(_fortran_table_dir; three_moment_ice=false)
 
     tables = p3.ice.lookup_tables
@@ -79,7 +79,7 @@ _has_fortran_tables && @testset "Read Fortran lookup tables (2momI)" begin
     @test p3.ice.sixth_moment.rime === nothing
 end
 
-_has_fortran_tables && @testset "Rain tables are computed (not from Fortran)" begin
+@testset "Rain tables are computed (not from Fortran)" begin
     p3 = read_fortran_lookup_tables(_fortran_table_dir)
 
     @test p3.rain.velocity_mass isa TabulatedFunction1D
@@ -89,20 +89,20 @@ _has_fortran_tables && @testset "Rain tables are computed (not from Fortran)" be
     @test p3.rain.velocity_mass(log_lambda) > 0
 end
 
-_has_fortran_tables && @testset "PredictedParticlePropertiesMicrophysics constructor with Fortran tables" begin
+@testset "PredictedParticlePropertiesMicrophysics constructor with Fortran tables" begin
     # Test constructor interface
-    p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=_fortran_table_dir)
+    p3 = PredictedParticlePropertiesMicrophysics()
     @test p3 isa PredictedParticlePropertiesMicrophysics
     @test p3.ice.lookup_tables isa P3LookupTables
 
     # Test 2momI override
     p3_2mom = PredictedParticlePropertiesMicrophysics(;
-        lookup_tables=_fortran_table_dir, three_moment_ice=false)
+        three_moment_ice=false)
     @test p3_2mom.ice.lookup_tables.table_3 === nothing
 end
 
-_has_fortran_tables && @testset "Process rates with Fortran-loaded tables" begin
-    p3 = PredictedParticlePropertiesMicrophysics(; lookup_tables=_fortran_table_dir)
+@testset "Process rates with Fortran-loaded tables" begin
+    p3 = PredictedParticlePropertiesMicrophysics()
 
     FT = Float64
     qⁱ = FT(1e-4)    # ice mass mixing ratio
