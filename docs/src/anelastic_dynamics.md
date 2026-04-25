@@ -63,7 +63,7 @@ and
 According to [Pauluis2008](@citet), the moist static energy obeys
 
 ```math
-\partial_t(ρᵣ e) + \boldsymbol{\nabla \cdot}\, (ρᵣ e \boldsymbol{u}) = ρᵣ w b + S_e ,
+\partial_t(ρᵣ e) + \boldsymbol{\nabla \cdot}\, (ρᵣ e \boldsymbol{u}) = - ρᵣ w b + S_e ,
 ```
 
 with vertical velocity ``w``, buoyancy ``b`` as above, and ``S_e`` including microphysical and external energy sources/sinks.
