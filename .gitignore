@@ -31,9 +31,12 @@ Manifest-v*.toml
 # output files
 *.jld2
 *.nc
+*.gif
+*.pdf
 *.png
 *.mp4
 *.svg
+*.zip
 
 # other files we don't want
 *.swp
