@@ -30,9 +30,6 @@ BreezeCloudMicrophysicsExt = ["CloudMicrophysics", "SpecialFunctions"]
 BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
 BreezeReactantExt = "Reactant"
 
-[sources]
-Oceananigans = {path = "../Oceananigans.jl"}
-
 [compat]
 Adapt = "4.3.0"
 ClimaComms = "0.6"
