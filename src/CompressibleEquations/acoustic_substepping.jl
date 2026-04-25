@@ -637,8 +637,11 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     Δτ_FT = FT(Δτ)
     ω = substepper.forward_weight
 
-    Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
-    g  = model.thermodynamic_constants.gravitational_acceleration
+    Rᵈ  = dry_air_gas_constant(model.thermodynamic_constants)
+    cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
+    γ   = cᵖᵈ / (cᵖᵈ - Rᵈ)              # = cp/cv for dry air ≈ 1.4
+    γRᵈ = γ * Rᵈ                         # PGF prefactor: ∂p/∂(ρθ) = γRᵈ Π
+    g   = model.thermodynamic_constants.gravitational_acceleration
 
     # Slow tendencies.
     Gⁿ = model.timestepper.Gⁿ
@@ -675,7 +678,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         launch!(arch, grid, :xyz, _horizontal_forward!,
                 substepper.ρu, substepper.ρv, grid, Δτ_FT,
                 ρθ″_for_pgf, substepper.reference_exner_function,
-                Gρu, Gρv, FT(Rᵈ))
+                Gρu, Gρv, FT(γRᵈ))
         fill_halo_regions!(substepper.ρu)
         fill_halo_regions!(substepper.ρv)
 
@@ -693,14 +696,14 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 substepper.ρw, substepper.σ, substepper.η,
                 substepper.σ_pred, substepper.η_pred,
                 grid, Δτ_FT, FT(ω), Gρw,
-                substepper.reference_exner_function, FT(Rᵈ), FT(g))
+                substepper.reference_exner_function, FT(γRᵈ), FT(g))
 
         # 4. Tridiagonal solve: ρw at faces.
         solve!(substepper.ρw, substepper.vertical_solver, substepper.ρw,
                substepper.reference_exner_function,
                substepper.reference_ρθ,
                substepper.reference_density,
-               Δτ_FT, FT(Rᵈ), FT(g), FT(ω))
+               Δτ_FT, FT(γRᵈ), FT(g), FT(ω))
 
         # 5. Update σ, η using new ρw.
         launch!(arch, grid, :xyz, _post_solve_update!,
