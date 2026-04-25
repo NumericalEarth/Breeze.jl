@@ -2,6 +2,7 @@ using Breeze
 using RRTMGP, CloudMicrophysics # to load Breeze extensions
 using Documenter
 using DocumenterCitations
+using Pkg.Artifacts: ensure_artifact_installed
 
 using CairoMakie
 CairoMakie.activate!(type = "png")
@@ -56,6 +57,11 @@ examples = [
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
+
+# Install artifacts before running the tests, to avoid spurious failures to
+# concurrent downloads, or doctests not liking the extra messages printed to
+# screen during the download.
+ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
 
 # Use a different semaphore for CPU and GPU examples, but will keep the maximum
 # of concurrent tasks running at all time to the number of threads.  This is
