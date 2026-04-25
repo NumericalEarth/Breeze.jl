@@ -8,4 +8,3 @@ RICO precipitating shallow cumulus, 128×128×100, Δt=2.0s, stop=1200s (shorten
 | compressible | 32.43s | 100 | 200.0s | NaN | NaN | yes | ✓ |
 
 **Slowdown factor (compressible/anelastic): 0.91×**
-

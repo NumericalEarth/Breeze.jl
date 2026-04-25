@@ -8,4 +8,3 @@
 | compressible | 502.33s | 2385 | 1500.0s | 49.7 | 23.2 | no | ✓ |
 
 **Slowdown factor (compressible/anelastic): 3.44×**
-

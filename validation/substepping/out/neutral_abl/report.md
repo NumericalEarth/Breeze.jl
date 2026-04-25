@@ -8,4 +8,3 @@ Moeng-Sullivan shear-driven neutral ABL, 96³, Δt=0.5s, stop=600s (shortened fr
 | compressible | 37.51s | 100 | 50.0s | NaN | NaN | yes | ✓ |
 
 **Slowdown factor (compressible/anelastic): 1.02×**
-

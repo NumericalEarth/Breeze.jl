@@ -8,4 +8,3 @@ BOMEX shallow cumulus, 64×64×75, Δt=10.0s, stop=1800s (shortened from 6h), GP
 | compressible | 39.44s | 100 | 1000.0s | NaN | NaN | yes | ✓ |
 
 **Slowdown factor (compressible/anelastic): 1.58×**
-

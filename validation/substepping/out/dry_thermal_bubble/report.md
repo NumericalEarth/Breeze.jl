@@ -10,4 +10,3 @@
 **Compressible run crashed:** DomainError with -12247.067050979173:
 Exponentiation yielding a complex result requires a complex argument.
 Replace x^y with (x+0im)^y, Complex(x)^y, or similar.
-
