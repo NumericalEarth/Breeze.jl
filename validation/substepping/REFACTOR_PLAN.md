@@ -92,6 +92,67 @@ The user's framing: "frozen always means PER STAGE (over substeps), not across s
 4. Phase 4 (damping adjustments) — hopefully minimal because the existing damping kernels are already structured around Δτᵋ-time differences.
 5. Phase 5 (notation cleanup) — done in passing as we touch each file, plus a final sweep.
 
+## Progress notes (2026-04-25)
+
+**Done — single targeted change made the scheme consistent in `Ns`:**
+
+`freeze_outer_step_state!` now snapshots `model.dynamics.reference_state.pressure`
+(time-independent hydrostatic reference) instead of `model.dynamics.pressure`
+(prognostic, snapshotted at outer-step start). This moves the substepper's
+linearization point to the time-independent reference state — the property
+Baldauf 2010's analysis assumes. Concrete result on the 25_centered_ns_sweep
+diagnostic:
+
+  Ns=12  wmax=13.090
+  Ns=24  wmax=13.084
+  Ns=48  wmax=13.081
+  Ns=96  wmax=13.078
+
+All Ns now converge to the same answer (<0.1% spread, vs. previously >60% spread
+between Ns=12 and Ns=96). Per Baldauf eq (14) the scheme converges as `n_s → ∞`
+at second order in `ΔT` — that's now actually happening.
+
+**Still to do — the converged answer is biased high (~13 vs. anelastic 8 vs.
+explicit fully-compressible 8.7). Sources of the bias, in expected order of impact:**
+
+1. The substepper's perturbation `ρθ″`, `ρ″` are seeded to zero at each stage
+   start, so the perturbation PGF and perturbation buoyancy only "engage" once
+   the perturbation has had time to accumulate. The bubble's static buoyancy is
+   currently fed in via `convert_slow_tendencies!` as a slow forcing — but this
+   bypasses the linearized PGF/buoyancy cancellation and over-accelerates the
+   bubble. The fix is to seed `ρ″ = ρ - ρᵣ` and `ρθ″ = ρθ - ρθᵣ` at stage
+   start, drop `convert_slow_tendencies!`, and let the substepper integrate the
+   full linearized acoustic system from substep 1.
+
+2. Recovery formula needs to change from `ρ_new = U⁰.ρ + ρ″` to
+   `ρ_new = ρᵣ + ρ″` (with `ρθ_new` similarly), and momentum recovery from
+   `ρu_new = U⁰.ρu + ρu″` to `ρu_new = ρu″` (since `ρuᵣ = 0`).
+
+3. `add_horizontal_pgf!` is still active. The slow horizontal PGF goes in
+   via stage-1 snapshot. With the bubble's PGF properly captured by the
+   substepper's seeded perturbations (item 1), this snapshot is no longer
+   needed and produces double counting. Drop it.
+
+4. The buoyancy linearization coefficient currently uses `ρθ_stage` (per-stage
+   prognostic) for the denominator, but should use `ρθᵣ` (time-independent)
+   for consistency with the linearization-at-reference choice we made.
+
+5. Once items 1-4 are in: the snapshot/restore machinery in
+   `acoustic_substep_helpers.jl` and the `slow_tendency_snapshot` field on the
+   `AcousticRungeKutta3` timestepper are dead code. Remove them.
+
+**Scope of remaining work** — items 1-2 require: adding a `ρθ_reference` field
+to `AcousticSubstepper`, populating it once at construction from
+`ref.density × ref.temperature / ref.exner_function`, replacing the eight
+`fill!(parent(...), 0)` lines in `acoustic_rk3_substep_loop!` with field copies
+that compute `(prognostic - reference)`, and updating two recovery kernels to
+use reference state instead of `U⁰`. Item 3 is one line in the driver. Item 4
+is one line in `buoyancy_linearization_coefficient`. Item 5 is mechanical
+deletion. Total: probably 80-150 lines of changes across 3 files. Not
+attempted in this session because the code is heavily coupled to `Gˢρw_total`
+and the perturbation-from-stage form, making partial changes likely to break
+the build.
+
 ## Notes / open questions
 
 - The Schur tridiagonal in MPAS/ERF style implicitly couples ρw and ρθ for stability. We retain that — the implicit solve is the "fast vertical acoustic" treatment that lets `Δτ` exceed the vertical acoustic CFL. The change is what state the linearization uses (reference, not frozen prognostic).
