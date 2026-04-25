@@ -31,7 +31,7 @@ BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
 BreezeReactantExt = "Reactant"
 
 [sources]
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "main"}
+Oceananigans = {path = "../Oceananigans.jl"}
 
 [compat]
 Adapt = "4.3.0"

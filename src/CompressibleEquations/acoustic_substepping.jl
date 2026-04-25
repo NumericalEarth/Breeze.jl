@@ -226,7 +226,8 @@ struct AcousticSubstepper{N, FT, D, AD, CF, FF, XF, YF, GT, TS}
     gamma_tri :: GT                            # LU decomp scratch (z-face, default BCs)
     Gˢρw_total :: GT                           # Stage-frozen vertical slow momentum tendency (ERF-style, z-face, default BCs)
     vertical_solver :: TS                      # BatchedTridiagonalSolver for implicit ρw″ update
-    frozen_pressure :: CF                      # Snapshot of model.dynamics.pressure at outer-step start
+    frozen_pressure :: CF                      # Time-independent reference pressure pᵣ (used for tridiag linearization)
+    outer_step_pressure :: CF                  # Snapshot of model.dynamics.pressure at outer-step start (used by slow PGF)
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -247,7 +248,8 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.gamma_tri),
                        adapt(to, a.Gˢρw_total),
                        adapt(to, a.vertical_solver),
-                       adapt(to, a.frozen_pressure))
+                       adapt(to, a.frozen_pressure),
+                       adapt(to, a.outer_step_pressure))
 
 """
 $(TYPEDSIGNATURES)
@@ -322,7 +324,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                                                scratch,
                                                tridiagonal_direction = ZDirection())
 
-    frozen_pressure = CenterField(grid)
+    frozen_pressure     = CenterField(grid)
+    outer_step_pressure = CenterField(grid)
 
     return AcousticSubstepper(Ns, ω, damping,
                               substep_distribution,
@@ -335,7 +338,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               gamma_tri_field,
                               Gˢρw_total,
                               vertical_solver,
-                              frozen_pressure)
+                              frozen_pressure,
+                              outer_step_pressure)
 end
 
 # Promote damping strategy fields to the grid's float type so the substepper's
@@ -397,13 +401,17 @@ to work.
 """
 function freeze_outer_step_state!(substepper::AcousticSubstepper, model)
     ref = model.dynamics.reference_state
+    # `frozen_pressure` is the linearization point for the tridiagonal Schur
+    # coefficients — set to the time-independent reference pressure (Baldauf).
     if ref === nothing
-        # No reference state available — fall back to the prognostic pressure.
-        # This path is only used by no-reference-state setups (rare).
         parent(substepper.frozen_pressure) .= parent(model.dynamics.pressure)
     else
         parent(substepper.frozen_pressure) .= parent(ref.pressure)
     end
+    # `outer_step_pressure` is the snapshot used by the slow vertical PGF —
+    # frozen at outer-step start so the slow forcing doesn't have a per-stage
+    # feedback channel from the wave evolution within the substep loop.
+    parent(substepper.outer_step_pressure) .= parent(model.dynamics.pressure)
     return nothing
 end
 
@@ -590,11 +598,17 @@ function convert_slow_tendencies!(substepper, model, U⁰)
     ρᵣ = ref isa Nothing ? model.dynamics.density  : ref.density
     pᵣ = ref isa Nothing ? model.dynamics.pressure : ref.pressure
 
+    # The slow vertical PGF reads `outer_step_pressure` — snapshotted at
+    # outer-step start (frozen across stages). This captures the static
+    # (ρθ)′ contribution to the vertical PGF without opening a per-stage
+    # feedback channel where the substepper's wave evolution gets re-fed
+    # in through `model.dynamics.pressure` recomputed by `update_state!`.
+    # The tridiagonal linearization uses `substepper.frozen_pressure` (= pᵣ).
     launch!(arch, grid, :xyz, _convert_slow_tendencies!,
             substepper.Gˢρw_total,
             Gⁿ.ρw,
             grid, g,
-            U⁰.ρ, substepper.frozen_pressure,
+            U⁰.ρ, substepper.outer_step_pressure,
             pᵣ, ρᵣ)
     return nothing
 end
