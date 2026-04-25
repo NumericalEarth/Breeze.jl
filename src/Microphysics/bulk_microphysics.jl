@@ -41,39 +41,39 @@ AtmosphereModels.negative_moisture_correction(bμp::BulkMicrophysics) = bμp.neg
 
 Base.summary(::BulkMicrophysics) = "BulkMicrophysics"
 
+"""
+    NonEquilibriumCloudFormation(liquid, ice=nothing)
+
+A cloud formation scheme where cloud liquid and ice are prognostic variables
+that evolve via condensation/evaporation and deposition/sublimation tendencies,
+rather than being diagnosed instantaneously via saturation adjustment.
+
+The condensation/evaporation and deposition/sublimation tendencies are commonly modeled as **relaxation toward
+saturation** with timescale `τ_relax`, including a latent-heat (psychrometric/thermal) correction factor; see
+[Morrison and Grabowski (2008)](@cite Morrison2008novel), Appendix Eq. (A3), and standard cloud microphysics
+texts such as [Pruppacher and Klett (2010)](@cite pruppacher2010microphysics) or
+[Rogers and Yau (1989)](@cite rogers1989short).
+
+For some bulk schemes (e.g. the CloudMicrophysics 1M extension), `liquid` and `ice` may be set to `nothing`
+and used purely as **phase indicators** (warm-phase vs mixed-phase), with any relaxation timescales sourced
+from the scheme's precipitation/category parameters instead.
+
+# Fields
+- `liquid`: Parameters for cloud liquid (contains relaxation timescale `τ_relax`)
+- `ice`: Parameters for cloud ice (contains relaxation timescale `τ_relax`), or `nothing` for warm-phase only
+
+# References
+
+* Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
+    microphysics in models: Description and tests using a kinematic framework.
+    J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
+* Pruppacher, H. R. and Klett, J. D. (2010). Microphysics of Clouds and Precipitation (2nd ed.).
+* Rogers, R. R. and Yau, M. K. (1989). A Short Course in Cloud Physics (3rd ed.).
+"""
 struct NonEquilibriumCloudFormation{L, I}
     liquid :: L
     ice :: I
 
-    @doc"""
-        NonEquilibriumCloudFormation(liquid, ice=nothing)
-
-    A cloud formation scheme where cloud liquid and ice are prognostic variables
-    that evolve via condensation/evaporation and deposition/sublimation tendencies,
-    rather than being diagnosed instantaneously via saturation adjustment.
-
-    The condensation/evaporation and deposition/sublimation tendencies are commonly modeled as **relaxation toward
-    saturation** with timescale `τ_relax`, including a latent-heat (psychrometric/thermal) correction factor; see
-    [Morrison and Grabowski (2008)](@cite Morrison2008novel), Appendix Eq. (A3), and standard cloud microphysics
-    texts such as [Pruppacher and Klett (2010)](@cite pruppacher2010microphysics) or
-    [Rogers and Yau (1989)](@cite rogers1989short).
-
-    For some bulk schemes (e.g. the CloudMicrophysics 1M extension), `liquid` and `ice` may be set to `nothing`
-    and used purely as **phase indicators** (warm-phase vs mixed-phase), with any relaxation timescales sourced
-    from the scheme's precipitation/category parameters instead.
-
-    # Fields
-    - `liquid`: Parameters for cloud liquid (contains relaxation timescale `τ_relax`)
-    - `ice`: Parameters for cloud ice (contains relaxation timescale `τ_relax`), or `nothing` for warm-phase only
-
-    # References
-
-    * Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
-        microphysics in models: Description and tests using a kinematic framework.
-        J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
-    * Pruppacher, H. R. and Klett, J. D. (2010). Microphysics of Clouds and Precipitation (2nd ed.).
-    * Rogers, R. R. and Yau, M. K. (1989). A Short Course in Cloud Physics (3rd ed.).
-    """
     function NonEquilibriumCloudFormation(liquid, ice=nothing)
         return new{typeof(liquid), typeof(ice)}(liquid, ice)
     end
@@ -146,10 +146,11 @@ condensation; negative values indicate evaporation. Evaporation is limited by th
 """
 @inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
-    Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / (Γˡ * τᶜˡ)
+    timescale = Γˡ * τᶜˡ
+    Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / timescale
 
     # Limit evaporation to available cloud liquid
-    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
+    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / timescale
     return max(Sᶜᵒⁿᵈ, Sᶜᵒⁿᵈ_min)
 end
 
@@ -163,10 +164,11 @@ deposition; negative values indicate sublimation. Sublimation is limited by the 
 """
 @inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
     Γⁱ = ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
-    Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ * τᶜⁱ)
+    timescale = Γⁱ * τᶜⁱ
+    Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / timescale
 
     # Limit sublimation to available cloud ice
-    Sᵈᵉᵖ_min = -max(0, qᶜⁱ) / τᶜⁱ
+    Sᵈᵉᵖ_min = -max(0, qᶜⁱ) / timescale
     return max(Sᵈᵉᵖ, Sᵈᵉᵖ_min)
 end
 

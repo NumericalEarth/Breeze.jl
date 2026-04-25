@@ -74,7 +74,7 @@ end
         # N = ceil(1.2 * 12 * 347 / 1000) = ceil(4.99) = 5
         N = compute_acoustic_substeps(grid, 12, constants)
         @test N isa Int
-        @test N >= 1
+        @test N ≥ 1
         @test N == ceil(Int, 1.2 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
     end
 

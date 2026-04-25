@@ -181,7 +181,7 @@ The two packages share a common philosophy: fast, flexible, GPU-native Julia cod
 To learn these foundational components of Breeze, please see the [Oceananigans documentation](https://clima.github.io/OceananigansDocumentation/stable/).
 
 If you're familiar with Oceananigans, you'll feel right at home with Breeze.
-If you're new to both, Breeze is a great entry point—and the skills you develop transfer directly to ocean and climate modeling with Oceananigans and [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl).
+If you're new to both, Breeze is a great entry point—and the skills you develop transfer directly to ocean and climate modeling with Oceananigans and [NumericalEarth.jl](https://github.com/NumericalEarth/NumericalEarth.jl).
 
 ## Citing
 

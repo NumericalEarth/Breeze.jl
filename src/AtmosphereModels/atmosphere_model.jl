@@ -2,7 +2,7 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
                     Centered, fields, prognostic_fields
-using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale
+using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
@@ -176,8 +176,8 @@ function AtmosphereModel(grid;
     # provides the specific_prognostic_moisture reference needed by VirtualPotentialTemperature.
     specific_moisture_field = haskey(preliminary_microphysical_fields, :qᵛ) ? preliminary_microphysical_fields.qᵛ : CenterField(grid)
     boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                          dynamics, microphysics, p₀, thermodynamic_constants,
-                                                                          preliminary_microphysical_fields, specific_moisture_field, temperature)
+                                                                           dynamics, microphysics, p₀, thermodynamic_constants,
+                                                                           preliminary_microphysical_fields, specific_moisture_field, temperature)
 
     # Re-regularize after materialization (materialization may modify boundary conditions)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
@@ -251,7 +251,7 @@ function AtmosphereModel(grid;
     scalar_advection_tuple = with_tracers(scalar_names, scalar_advection, default_generator, with_velocities=false)
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
-    materialized_advection = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
+    materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
 
     model = AtmosphereModel(arch,
                             grid,
@@ -461,4 +461,4 @@ function OceananigansDiagnostics.default_nan_checker(model::AtmosphereModel)
 end
 
 # For compatibility with Oceananigans JLD2Writer
-Oceananigans.OutputWriters.default_included_properties(::AtmosphereModel) = [:grid, :thermodynamic_constants]
+Oceananigans.OutputWriters.default_included_properties(::AtmosphereModel) = [:thermodynamic_constants]
