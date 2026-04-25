@@ -148,10 +148,36 @@ to `AcousticSubstepper`, populating it once at construction from
 that compute `(prognostic - reference)`, and updating two recovery kernels to
 use reference state instead of `U⁰`. Item 3 is one line in the driver. Item 4
 is one line in `buoyancy_linearization_coefficient`. Item 5 is mechanical
-deletion. Total: probably 80-150 lines of changes across 3 files. Not
-attempted in this session because the code is heavily coupled to `Gˢρw_total`
-and the perturbation-from-stage form, making partial changes likely to break
-the build.
+deletion. Total: probably 80-150 lines of changes across 3 files.
+
+**Attempted Phase 3 (2026-04-25, reverted)**: Implemented the full refactor —
+removed `Gˢρw_total`, `convert_slow_tendencies!`, snapshot/restore machinery,
+`slow_tendency_snapshot` field; added `reference_ρθ` and `reference_pressure`
+fields populated from the reference state via `pᵣ / (Rᵈ Πᵣ)`; seeded
+perturbations from `U⁰ − reference` at stage start; updated recovery kernels
+to use `ρᵣ + ρ″`. The code compiled and ran but the substepper **over-accelerated
+and blew up** at all `Ns` (max\|w\| at t=20s grew with Ns: Ns=12→3.27, Ns=24→6.18,
+Ns=48→11.1, Ns=96→15.9; NaN by t=40s for Ns≥24).
+
+Diagnosis: the substep kernels (`_build_acoustic_rhs!`, `_explicit_ρw″_face_update`,
+`_post_acoustic_solve_diagnostics!`) carry implicit assumptions that the
+perturbations are small (start near zero, accumulate small substep increments).
+With seeded perturbations of size O(bubble's Δθ × ρ₀), the formula's `(ρθ″_pred
+- ρθ″_pred⁻)` and `(ρ″_pred + ρ″_pred⁻)` terms become large from substep 1, and
+the off-centered Schur tridiagonal — built for stability of the LINEARIZED
+acoustic mode around small perturbations — amplifies them rather than damping.
+
+To do this cleanly the substep kernels themselves need to be redesigned around
+the Baldauf "perturbation from time-independent reference" semantics. That is
+a bigger refactor than 80-150 lines: it touches the discrete formulas in
+`_explicit_ρw″_face_update` (the `(pred − pred⁻)` PGF gradient operator
+specifically), the `_post_acoustic_solve_diagnostics!` kernel, and the
+implicit-Schur tridiagonal `b`-coefficient (which encodes the linearized
+small-perturbation stability).
+
+Reverted to the prior commit (`2242217`) which keeps `Ns` consistency
+(<0.1% spread Ns=12-96). The remaining +60% bias vs. anelastic is left as
+a follow-up.
 
 ## Notes / open questions
 
