@@ -104,11 +104,9 @@ jobs:
           path: docs/build
       - name: Remove extra files
         # There may be JLD2 files generated during execution of Literate
-        # examples, we don't need them on the website. P3 lookup tables
-        # are also downloaded during @example blocks in docs pages.
-        run: |
+        # examples, we don't need them on the website.
+        run:
           rm -fv docs/build/literated/*.jld2
-          find docs/build -path '*/data/P3_LUT' -type d -exec rm -rfv {} +
       - name: Instantiate docs environment
         shell: julia --color=yes {0}
         run: |
