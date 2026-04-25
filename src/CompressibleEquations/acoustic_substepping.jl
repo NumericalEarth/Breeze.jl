@@ -382,16 +382,28 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Snapshot `model.dynamics.pressure` into `substepper.frozen_pressure`. Called once
-per outer time step to freeze the linearization point used by the substepper's
-`acoustic_pgf_coefficient` and `buoyancy_linearization_coefficient` helpers, so
-that the implicit Schur coefficients seen by the substep loop are identical at
-every WS-RK3 stage. This matches MPAS, where `diag%exner` is only recomputed at
-`rk_step==3` (end of outer step) and the substepper sees the same `exner` at
-every stage of an outer step.
+Set `substepper.frozen_pressure` to the time-independent hydrostatic reference
+pressure `ref.pressure`. The substepper's `acoustic_pgf_coefficient` and
+`buoyancy_linearization_coefficient` linearize about this state. Per Baldauf
+2010 the fast operator (PGF + buoyancy + damping) should be linearized about a
+time-independent reference; that's what we do here. Unlike the previous MPAS-
+style snapshot of the prognostic pressure (which was frozen-across-stages and
+inconsistent — see `validation/substepping/REFACTOR_PLAN.md`), this snapshot is
+taken once at simulation init and reused for every outer step.
+
+The function is still called every outer step for now (cheap field copy) so
+that downstream code that expects `frozen_pressure` to be populated continues
+to work.
 """
 function freeze_outer_step_state!(substepper::AcousticSubstepper, model)
-    parent(substepper.frozen_pressure) .= parent(model.dynamics.pressure)
+    ref = model.dynamics.reference_state
+    if ref === nothing
+        # No reference state available — fall back to the prognostic pressure.
+        # This path is only used by no-reference-state setups (rare).
+        parent(substepper.frozen_pressure) .= parent(model.dynamics.pressure)
+    else
+        parent(substepper.frozen_pressure) .= parent(ref.pressure)
+    end
     return nothing
 end
 
