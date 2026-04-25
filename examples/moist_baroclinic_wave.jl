@@ -305,6 +305,7 @@ set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density, qᵛ=specifi
 stop_time = 15days
 
 simulation = Simulation(model; Δt, stop_time)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # Progress callback:
 
