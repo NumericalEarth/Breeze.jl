@@ -115,9 +115,10 @@ AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, :
 
 function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Union{Val{:θ}, Val{:θˡⁱ}}, value)
     set!(model.formulation.potential_temperature, value)
-    ρ = dynamics_density(model.dynamics)
+    ρ   = dynamics_density(model.dynamics)
     θˡⁱ = model.formulation.potential_temperature
-    set!(model.formulation.potential_temperature_density, ρ * θˡⁱ)
+    ρθ  = model.formulation.potential_temperature_density
+    parent(ρθ) .= parent(ρ) .* parent(θˡⁱ) # To avoid calling set! See https://github.com/NumericalEarth/Breeze.jl/pull/566
     return nothing
 end
 
