@@ -179,6 +179,61 @@ Reverted to the prior commit (`2242217`) which keeps `Ns` consistency
 (<0.1% spread Ns=12-96). The remaining +60% bias vs. anelastic is left as
 a follow-up.
 
+## Pure-acoustic test diagnoses bookkeeping bug (2026-04-25)
+
+A pure-acoustic plane-wave test (`30_pure_acoustic_pulse.jl`,
+`31_acoustic_wave_2d.jl`) with g=0 confirms:
+
+- The substepper's acoustic core is correct: centered CN (ω=0.5) with
+  no damping handles a Gaussian (ρθ)′ pulse perfectly. wmax stays
+  proportional to the IC amplitude with no growth.
+- A horizontal plane wave (ρθ)′ = Δθ cos(kx) propagates correctly.
+- A vertical plane wave (ρθ)′ = Δθ cos(kz) is **frozen**: u and w both
+  stay at zero. The substepper does literally nothing in the vertical
+  for a static (ρθ)′ perturbation.
+
+**Root cause**: the substepper has asymmetric horizontal/vertical PGF
+paths.
+- Horizontal: `add_horizontal_pgf!` snapshots `−∂x(p)` from the full
+  prognostic pressure → static `(ρθ)′` enters from substep 1.
+- Vertical: split between `tend_w_euler` (= 0 with my linearization-at-
+  reference fix and g=0) and the column kernel using `ρθ″` (= 0 each
+  stage). Static `(ρθ)′` never enters the vertical PGF.
+
+**Fix options** (in order of cleanliness):
+
+1. **Seed `ρθ″` from `(ρθ) − (ρθ)_ref` at stage start** — Baldauf form;
+   what my from-scratch rewrite was attempting. Drops both
+   `add_horizontal_pgf!` and `tend_w_euler`; the substepper's perturbation
+   PGF handles everything from substep 1.
+
+2. **Add a vertical PGF snapshot** analogous to `add_horizontal_pgf!` —
+   compute `−∂z(p_prog)` once at stage 1 and add to `Gⁿ.ρw`. Symmetric
+   with the horizontal.
+
+3. **Revert `frozen_pressure` to prognostic pressure** — restores static
+   `(ρθ)′` to vertical PGF via `−∂z(p_prog − p_ref)` ≠ 0. Reintroduces
+   cross-stage inconsistency.
+
+## Off-centering: separate β_sound, β_buoy
+
+Per Baldauf 2010 §2c, the sound-term off-centering and the buoyancy
+off-centering can be chosen independently:
+
+- **β_sound = 0.5** — centered Crank–Nicholson; neutral (zero-dissipation)
+  for the acoustic mode (Baldauf 2010 §2c sound terms: "for a pure
+  Crank–Nicholson variant `β₂^s = β₄^s = ½`, it is neutral for all `S_z`
+  and `|S_x| ≤ 1`").
+- **β_buoy = 0.7** — slightly off-centered; damps the gravity-wave
+  high-frequency tail without over-damping the resolved gravity waves.
+
+Currently Breeze's substepper uses one `ω = forward_weight` for everything
+(typically 0.7 or 0.8). Splitting it into `(β_sound, β_buoy) = (0.5, 0.7)`
+in the discrete equations gives lower acoustic dissipation while
+preserving buoyancy stability. The Schur tridiagonal couplings then
+involve `β_sound²` (PGF–η chain) and `β_sound · β_buoy` (buoyancy–σ
+chain), instead of a single `ω²`.
+
 ## Notes / open questions
 
 - The Schur tridiagonal in MPAS/ERF style implicitly couples ρw and ρθ for stability. We retain that — the implicit solve is the "fast vertical acoustic" treatment that lets `Δτ` exceed the vertical acoustic CFL. The change is what state the linearization uses (reference, not frozen prognostic).
