@@ -20,15 +20,15 @@ Breeze = {path = ".."}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
-CUDA = "5"
+CUDA = "5, 6.0"
 CairoMakie = "0.15"
-CloudMicrophysics = "0.31.4, 0.32"
+CloudMicrophysics = "0.31.4, 0.32, 0.33, 0.34, 0.35"
 Documenter = "1"
 DocumenterCitations = "1.4"
 InteractiveUtils = "<0.0.1, 1"
 Literate = "2"
 NCDatasets = "0.14"
-Oceananigans = "0.106.3"
+Oceananigans = "0.107.4"
 Pkg = "<0.0.1, 1"
 RRTMGP = "0.21.7"
 Random = "<0.0.1, 1"
