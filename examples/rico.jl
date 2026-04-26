@@ -14,9 +14,12 @@
 #
 # Initial and boundary conditions for this case are provided by the wonderfully useful
 # package [AtmosphericProfilesLibrary.jl](https://github.com/CliMA/AtmosphericProfilesLibrary.jl).
-# For precipitation we use the 1-moment scheme from
-# [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl), which provides
-# prognostic rain mass with autoconversion and accretion processes.
+# For precipitation we use the 2-moment scheme from
+# [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl), which tracks
+# both mass and number concentration for cloud liquid and rain following
+# [SeifertBeheng2006](@citet). Cloud droplets form via aerosol activation when the
+# air becomes supersaturated, and the evolving droplet size distribution controls
+# autoconversion rates — connecting aerosol properties to precipitation formation.
 
 using Breeze
 using Oceananigans: Oceananigans
@@ -81,10 +84,10 @@ T₀ = 299.8    # Sea surface temperature (K)
 # currently extends only to constant coefficients (but could expand in the future),
 
 ρe_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
-ρqᵉ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
+ρqᵛ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
 
 ρe_bcs = FieldBoundaryConditions(bottom=ρe_flux)
-ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_flux)
+ρqᵛ_bcs = FieldBoundaryConditions(bottom=ρqᵛ_flux)
 
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
@@ -137,11 +140,11 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # by the large-scale circulation [vanZanten2011](@cite).
 
 ρᵣ = reference_state.density
-∂t_ρqᵉ_large_scale = Field{Nothing, Nothing, Center}(grid)
+∂t_ρqᵛ_large_scale = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Rico_dqtdt(FT)
-set!(∂t_ρqᵉ_large_scale, z -> dqdt_profile(z))
-set!(∂t_ρqᵉ_large_scale, ρᵣ * ∂t_ρqᵉ_large_scale)
-∂t_ρqᵉ_large_scale_forcing = Forcing(∂t_ρqᵉ_large_scale)
+set!(∂t_ρqᵛ_large_scale, z -> dqdt_profile(z))
+set!(∂t_ρqᵛ_large_scale, ρᵣ * ∂t_ρqᵛ_large_scale)
+∂t_ρqᵛ_large_scale_forcing = Forcing(∂t_ρqᵛ_large_scale)
 
 # ## Radiative cooling
 #
@@ -160,35 +163,39 @@ set!(∂t_ρθ_large_scale, ρᵣ * ∂t_θ_large_scale)
 Fρu = (subsidence, geostrophic.ρu)
 Fρv = (subsidence, geostrophic.ρv)
 Fρw = sponge
-Fρqᵉ = (subsidence, ∂t_ρqᵉ_large_scale_forcing)
+Fρqᵛ = (subsidence, ∂t_ρqᵛ_large_scale_forcing)
 Fρθ = (subsidence, ρθ_large_scale_forcing)
 
-forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵉ=Fρqᵉ, ρθ=Fρθ)
-boundary_conditions = (ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
+forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵛ=Fρqᵛ, ρθ=Fρθ)
+boundary_conditions = (ρe=ρe_bcs, ρqᵛ=ρqᵛ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
 # ## Model setup
 #
-# We use one-moment bulk microphysics from [CloudMicrophysics](https://clima.github.io/CloudMicrophysics.jl/dev/)
-# with cloud formatiom modeled with warm-phase saturationa adjustment and 5th-order WENO advection.
-# The one-moment scheme prognoses rain density `ρqʳ` includes autoconversion (cloud liquid → rain)
-# and accretion (cloud liquid swept up by falling rain) processes. This is a more physically-realistic
-# representation of warm-rain precipitation than the zero-moment scheme.
+# We use two-moment bulk microphysics from [CloudMicrophysics](https://clima.github.io/CloudMicrophysics.jl/dev/)
+# with non-equilibrium cloud formation and 5th-order WENO advection.
+# The [SeifertBeheng2006](@citet) two-moment scheme tracks both mass and number concentration
+# for cloud liquid and rain, enabling physically realistic autoconversion rates that depend
+# on droplet size. Cloud droplets form via aerosol activation when the air becomes supersaturated.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
-using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
+using .BreezeCloudMicrophysicsExt: TwoMomentCloudMicrophysics
 
-cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
-microphysics = OneMomentCloudMicrophysics(; cloud_formation)
+microphysics = TwoMomentCloudMicrophysics()
 
 weno = WENO(order=5)
 bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
+# positive definite advection for number concentrations to prevent NaN cascade from negative values
+upwind = UpwindBiased(order=1)
 
 momentum_advection = weno
 scalar_advection = (ρθ = weno,
-                    ρqᵉ = bounds_preserving_weno,
+                    ρqᵛ = bounds_preserving_weno,
                     ρqᶜˡ = bounds_preserving_weno,
-                    ρqʳ = bounds_preserving_weno)
+                    ρqʳ = bounds_preserving_weno,
+                    ρnᶜˡ = upwind,
+                    ρnʳ = upwind,
+                    ρnᵃ = upwind)
 
 model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
                         momentum_advection, scalar_advection, forcing, boundary_conditions)
@@ -219,6 +226,12 @@ qᵢ(x, y, z) = qᵗ₀(z)
 uᵢ(x, y, z) = u₀(z)
 vᵢ(x, y, z) = v₀(z)
 
+# For the two-moment scheme, `ρnᵃ` is automatically initialized from
+# the aerosol distribution embedded in the microphysics scheme
+# (100 cm⁻³ continental aerosol by default — see `default_aerosol_activation`
+# in `BreezeCloudMicrophysicsExt`). To customize the aerosol population, build
+# a `CloudMicrophysics.Parameters.AerosolActivation` and pass it via the
+# `aerosol_activation` keyword of `TwoMomentCloudMicrophysics`.
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 
 # ## Simulation
@@ -242,25 +255,33 @@ qˡ = model.microphysical_fields.qˡ    # total liquid (cloud + rain)
 qᶜˡ = model.microphysical_fields.qᶜˡ  # cloud liquid only
 qᵛ = model.microphysical_fields.qᵛ
 qʳ = model.microphysical_fields.qʳ    # rain mass fraction (diagnostic)
-ρqʳ = model.microphysical_fields.ρqʳ
 ρqʳ = model.microphysical_fields.ρqʳ  # rain mass density (prognostic)
+nᶜˡ = model.microphysical_fields.nᶜˡ  # cloud droplet number per unit mass
+nʳ = model.microphysical_fields.nʳ    # rain drop number per unit mass
+nᵃ = model.microphysical_fields.nᵃ    # aerosol number per unit mass
 
 ## For keeping track of the computational expense
 wall_clock = Ref(time_ns())
 
 function progress(sim)
     qᶜˡmax = maximum(qᶜˡ)
-    qʳmax = maximum(qʳ)
-    qʳmin = minimum(qʳ)
+    qʳmin, qʳmax = extrema(qʳ)
+    nᶜˡmin, nᶜˡmax = extrema(nᶜˡ)
+    nʳmin, nʳmax = extrema(nʳ)
+    nᵃmin, nᵃmax = extrema(nᵃ)
     wmax = maximum(abs, model.velocities.w)
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
+    ## Log extrema of qʳ and number concentrations so that negative values
+    ## (which can cascade into NaNs via the two-moment scheme) are visible
+    ## in logs before the NaNChecker terminates the run.
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
-    msg *= @sprintf(", max(qᶜˡ): %.2e, extrema(qʳ): (%.2e, %.2e)",
-                    qᶜˡmax, qʳmin, qʳmax)
+    msg *= @sprintf(", max(qᶜˡ)=%.2e, qʳ∈[%.2e, %.2e]", qᶜˡmax, qʳmin, qʳmax)
+    msg *= @sprintf(", nᶜˡ∈[%.2e, %.2e], nʳ∈[%.2e, %.2e], nᵃ∈[%.2e, %.2e]",
+                    nᶜˡmin, nᶜˡmax, nʳmin, nʳmax, nᵃmin, nᵃmax)
 
     @info msg
 
@@ -273,13 +294,13 @@ add_callback!(simulation, progress, IterationInterval(1000))
 # liquid water mass fraction (cloud and rain separately), specific humidity,
 # and liquid-ice potential temperature,
 
-## Precipitation rate diagnostic from one-moment microphysics
+## Precipitation rate diagnostic from two-moment microphysics
 ## Integrals of precipitation rate
 P = precipitation_rate(model, :liquid)
 ∫Pdz = Field(Integral(P, dims=3))
 
 u, v, w = model.velocities
-outputs = merge(model.velocities, (; θ, qᶜˡ, qʳ, qᵛ, w² = w^2, uw = u*w, vw = v*w))
+outputs = merge(model.velocities, (; θ, qᶜˡ, qʳ, qᵛ, nᶜˡ, nʳ, w² = w^2))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = "rico.jld2"
@@ -325,11 +346,11 @@ averages_filename = "rico.jld2"
 qᵛts = FieldTimeSeries(averages_filename, "qᵛ")
 qᶜˡts = FieldTimeSeries(averages_filename, "qᶜˡ")
 qʳts = FieldTimeSeries(averages_filename, "qʳ")
+nᶜˡts = FieldTimeSeries(averages_filename, "nᶜˡ")
+nʳts = FieldTimeSeries(averages_filename, "nʳ")
 uts = FieldTimeSeries(averages_filename, "u")
 vts = FieldTimeSeries(averages_filename, "v")
 w²ts = FieldTimeSeries(averages_filename, "w²")
-uwts = FieldTimeSeries(averages_filename, "uw")
-vwts = FieldTimeSeries(averages_filename, "vw")
 
 fig = Figure(size=(1100, 700), fontsize=14)
 
@@ -338,10 +359,10 @@ axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
 axqᵛ = Axis(fig[1, 2], xlabel="qᵛ (kg/kg)", ylabel="z (m)")
 axqˡ = Axis(fig[1, 3], xlabel="qᶜˡ, qʳ (kg/kg)", ylabel="z (m)")
 
-## Bottom row: u/v, w², uw/vw
-axuv = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
-axw² = Axis(fig[2, 2], xlabel="w² (m²/s²)", ylabel="z (m)")
-axuw = Axis(fig[2, 3], xlabel="uw, vw (m²/s²)", ylabel="z (m)")
+## Bottom row: nᶜˡ/nʳ, u/v, w²
+axn = Axis(fig[2, 1], xlabel="nᶜˡ, nʳ (1/kg)", ylabel="z (m)")
+axuv = Axis(fig[2, 2], xlabel="u, v (m/s)", ylabel="z (m)")
+axw² = Axis(fig[2, 3], xlabel="w² (m²/s²)", ylabel="z (m)")
 
 times = θts.times
 Nt = length(times)
@@ -358,16 +379,16 @@ for n in 1:Nt
     lines!(axqˡ, qᶜˡts[n], color=colors[n], linestyle=:solid)
     lines!(axqˡ, qʳts[n], color=colors[n], linestyle=:dash)
 
-    ## Bottom row
+    ## Bottom row: number concentrations and dynamics
+    lines!(axn, nᶜˡts[n], color=colors[n], linestyle=:solid)
+    lines!(axn, nʳts[n], color=colors[n], linestyle=:dash)
     lines!(axuv, uts[n], color=colors[n], linestyle=:solid)
     lines!(axuv, vts[n], color=colors[n], linestyle=:dash)
     lines!(axw², w²ts[n], color=colors[n])
-    lines!(axuw, uwts[n], color=colors[n], linestyle=:solid)
-    lines!(axuw, vwts[n], color=colors[n], linestyle=:dash)
 end
 
 # Set axis limits to focus on the boundary layer
-for ax in (axθ, axqᵛ, axqˡ, axuv, axw², axuw)
+for ax in (axθ, axqᵛ, axqˡ, axn, axuv, axw²)
     ylims!(ax, -100, 3500)
 end
 
@@ -380,9 +401,9 @@ xlims!(axuv, -12, 2)
 axislegend(axθ, position=:rb)
 text!(axuv, -10, 2500, text="solid: u\ndashed: v", fontsize=14)
 text!(axqˡ, 1e-6, 2500, text="solid: qᶜˡ\ndashed: qʳ", fontsize=14)
-text!(axuw, 0.01, 2500, text="solid: uw\ndashed: vw", fontsize=14)
+text!(axn, 0, 2500, text="solid: nᶜˡ\ndashed: nʳ", fontsize=14)
 
-fig[0, :] = Label(fig, "RICO: Horizontally-averaged profiles", fontsize=18, tellwidth=false)
+fig[0, :] = Label(fig, "RICO: Horizontally-averaged profiles (2M microphysics)", fontsize=18, tellwidth=false)
 
 save("rico_profiles.png", fig) #src
 fig
@@ -392,6 +413,7 @@ fig
 # - Higher moisture content supporting warm-rain processes
 # - Trade-wind flow with stronger westerlies
 # - Distinct profiles of cloud liquid (qᶜˡ) and rain (qʳ) as in [vanZanten2011](@citet)
+# - Evolving droplet number concentrations (nᶜˡ, nʳ) from the two-moment scheme
 
 # ## Animation: cloud structure and dynamics
 #
@@ -409,9 +431,9 @@ qʳxy_ts = FieldTimeSeries("rico_slices.jld2", "qʳxy")
 times = wxy_ts.times
 Nt = length(times)
 
-qᶜˡlim = maximum(qᶜˡxz_ts) / 4
-qʳlim = maximum(qʳxz_ts) / 4
-wlim = maximum(abs, wxy_ts) / 2
+qᶜˡlim = max(maximum(qᶜˡxz_ts), FT(1e-8)) / 4
+qʳlim = max(maximum(qʳxz_ts), FT(1e-8)) / 4
+wlim = max(maximum(abs, wxy_ts), FT(1e-4)) / 2
 
 # Now let's plot the slices and animate them.
 
