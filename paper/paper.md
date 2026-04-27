@@ -112,7 +112,7 @@ Modern codes may offer improved usability but sometimes lack either the physical
 
 Breeze.jl addresses these challenges by combining high performance with accessibility. Key design principles include:
 
-1. **GPU-first architecture**: Breeze.jl is designed from the ground up for GPU computing. Leveraging KernelAbstractions.jl [@Churavy_KernelAbstractions_jl], the same code runs efficiently on both CPUs and GPUs, enabling researchers to utilize modern accelerated hardware without code modifications. This approach follows the successful model demonstrated by Oceananigans.jl [@OceananigansArxiv], which showed that high-level Julia code can achieve excellent performance across heterogeneous architectures.
+1. **GPU-first architecture**: Breeze.jl is designed from the ground up for GPU computing. Leveraging KernelAbstractions.jl [@Churavy_KernelAbstractions_jl], the same code runs efficiently on both CPUs and multiple families of GPUs (Nvidia, AMD, Intel, Metal), enabling researchers to utilize modern accelerated hardware without code modifications[^1]. This approach follows the successful model demonstrated by Oceananigans.jl [@OceananigansArxiv], which showed that high-level Julia code can achieve excellent performance across heterogeneous architectures.
 
 2. **Julia scripting paradigm**: Written entirely in Julia [@Bezanson2017], Breeze.jl offers a scripting-based workflow where simulations are configured through human-readable Julia scripts rather than configuration files or compiled executables. This design accelerates the research cycle by enabling rapid prototyping, inline visualization, and interactive exploration of results. The same scripts serve as self-documenting examples for education.
 
@@ -169,3 +169,5 @@ Breeze.jl includes documented examples demonstrating its capabilities:
 We acknowledge contributions from the Climate Modeling Alliance (CliMA) and the broader Julia community. N.C.C. and M.G.R. are supported by the Australian Research Council Center of Excellence for the Weather of the 21st Century CE230100012. N.C.C. was further supported by the Australian Reasearch Council Discovery Project DP240101274.
 
 # References
+
+[^1]: Some features are not available on all GPUs: FFT-based solvers are available only on Nvidia and AMD GPUs, and the Metal backend does not support double precision floating-point numbers (this is a hardware limitation).
