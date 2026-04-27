@@ -60,10 +60,7 @@ using CairoMakie
 using CUDA
 
 Oceananigans.defaults.FloatType = Float64
-
 Random.seed!(42)
-
-example_dir = @__DIR__
 
 # ## Jordan (1958) hurricane-season mean sounding
 #
@@ -133,14 +130,14 @@ r_taper_end   = 300_000.0     # radial taper end (m)
 #   - `snapshots/` — hourly JLD2 snapshot files for each stage
 #   - `figures/`   — F01-F06 PNGs (paper-reproduction outputs)
 
-output_dir    = joinpath(example_dir, "output_tc_rainband")
+output_dir    = joinpath(@__DIR__, "output_tc_rainband")
 snapshots_dir = joinpath(output_dir, "snapshots")
 figures_dir   = joinpath(output_dir, "figures")
 mkpath(snapshots_dir); mkpath(figures_dir)
 
 # ## Grid and architecture
 #
-# [YuDidlake2019](@citet) §3a1 uses a 3 km inner-nest resolution with a
+# [YuDidlake2019](@citet) §3a1 use a 3 km inner-nest resolution with a
 # 25 km deep domain. We match that on a 642 km × 642 km periodic-in-x,y box:
 # 214² cells horizontally and 75 levels vertically (``Δz ≈ 333`` m). The run
 # prefers GPU and falls back to CPU if CUDA isn't functional.
