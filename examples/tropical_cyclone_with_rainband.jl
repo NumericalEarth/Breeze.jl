@@ -145,16 +145,14 @@ mkpath(snapshots_dir); mkpath(figures_dir)
 # 214² cells horizontally and 75 levels vertically (``Δz ≈ 333`` m). The run
 # prefers GPU and falls back to CPU if CUDA isn't functional.
 
-## SMOKE TEST overrides (step0_review_comments): half-resolution, short stages.
-## Restore Δx=3km, Nx=214, Nz=75, stage_stop_time=24hours for paper fidelity.
-Δx              = 6kilometers
-Nx = Ny         = 108
-Nz              = 50
+Δx              = 3kilometers
+Nx = Ny         = 214
+Nz              = 75
 Lx              = Nx * Δx
 Lz              = 25kilometers                 # YD19 §3a1
 Δz              = Lz / Nz
 sponge_rate     = 0.003                       # ≈ WRF damp_opt=2 `dampcoef` (~333 s timescale)
-stage_stop_time = 4hours                       # smoke test: 3 stages × 4 h = 12 h total
+stage_stop_time = 24hours
 
 arch = CUDA.functional() ? GPU() : CPU()
 
@@ -554,10 +552,11 @@ sponge_ρe = Forcing(sponge_ρe_fn; discrete_form=true, parameters=sponge_ρe_pa
 
 # ## Surface fluxes (Emanuel 1986 bulk aerodynamic formulation)
 #
-# Step 1 addition: turn on the air-sea exchange that nrb171's PR #440 had wired up
-# but PR #657 dropped. Coefficients from [Emanuel1986](@cite); SST T₀ = 300 K matches
-# YD19 §3a1. We omit the moisture flux here — Step 2 (moist physics) adds that on
-# the ρqᵉ field once the model carries moisture.
+# Bulk aerodynamic surface boundary conditions for momentum drag (Cᴰ) and sensible
+# heat (Cᵀ) over a fixed sea surface temperature T₀ = 300 K, matching YD19 §3a1.
+# Coefficients from [Emanuel1986](@cite). The moisture flux is omitted here; when
+# the model carries moisture, a corresponding `BulkVaporFlux` on the moisture
+# field can be wired in alongside these.
 
 Cᴰ_surf = 1.229e-3   # momentum drag coefficient
 Cᵀ_surf = 1.094e-3   # sensible heat transfer coefficient
