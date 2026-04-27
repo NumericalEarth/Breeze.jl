@@ -3,9 +3,9 @@ using Oceananigans.BuoyancyFormulations: BuoyancyFormulations as OceanBuoyancyFo
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 
 """
-    AtmosphereModelBuoyancy{D, F, T}
+$(TYPEDEF)
 
-Wrapper struct for computing buoyancy for AtmosphereModel
+Wrapper struct for computing buoyancy for [`AtmosphereModel`](@ref)
 in the context of a turbulence closure. Used to interface with Oceananigans
 turbulence closures that require buoyancy gradients.
 """
@@ -33,9 +33,10 @@ OceanTurbulenceClosures.buoyancy_force(model::AtmosphereModel) =
 # TODO: make this microphysics-aware, and also saturation/condensate-aware
 function OceanTurbulenceClosures.buoyancy_tracers(model::AtmosphereModel)
     # Diagnostic fields for buoyancy gradient calculation
-    buoyancy_tracers = (; T = model.temperature, qᵗ = model.specific_moisture)
+    buoyancy_tracers = (; T = model.temperature, qᵛ = specific_humidity(model))
     # Prognostic tracer fields for diffusivity computation
-    prognostic_tracers = merge(prognostic_fields(model.formulation), (; ρqᵗ = model.moisture_density))
+    moist_name = moisture_prognostic_name(model.microphysics)
+    prognostic_tracers = merge(prognostic_fields(model.formulation), NamedTuple{(moist_name,)}((model.moisture_density,)))
     # Merge with user tracers
     all_prognostic = merge(prognostic_tracers, model.tracers)
     # Final merge - buoyancy tracers at end for named access in ∂z_b
@@ -44,18 +45,24 @@ end
 
 @inline function OceanBuoyancyFormulations.∂z_b(i, j, k, grid, b::AtmosphereModelBuoyancy, tracers)
     g = b.thermodynamic_constants.gravitational_acceleration
-    ∂z_ϑ = ∂zᶜᶜᶠ(i, j, k, grid, virtual_potential_temperature, b.thermodynamic_constants, b.dynamics, tracers.T, tracers.qᵗ)
-    ϑ = virtual_potential_temperature(i, j, k, grid, b.thermodynamic_constants, b.dynamics, tracers.T, tracers.qᵗ)
-    return g * ∂z_ϑ / ϑ
+    # Use ∂z(log ϑ) = ∂z(ϑ)/ϑ to keep the derivative and denominator at consistent grid locations
+    ∂z_log_ϑ = ∂zᶜᶜᶠ(i, j, k, grid, log_virtual_potential_temperature,
+                     b.thermodynamic_constants, b.dynamics, tracers.T, tracers.qᵛ)
+    return g * ∂z_log_ϑ
 end
 
-@inline function virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵗ)
+@inline function log_virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵛ)
+    ϑ = virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵛ)
+    return log(ϑ)
+end
+
+@inline function virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵛ)
     pᵣ_field = dynamics_pressure(dynamics)
     @inbounds pᵣ = pᵣ_field[i, j, k]
     pˢᵗ = standard_pressure(dynamics)
-    q = @inbounds MoistureMassFractions(qᵗ[i, j, k])
+    q = @inbounds MoistureMassFractions(qᵛ[i, j, k])
     Rᵐ = mixture_gas_constant(q, constants)
     Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    return @inbounds Rᵐ / Rᵈ * T[i, j, k] * (pˢᵗ / pᵣ)^(Rᵐ / cᵖᵐ)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    return @inbounds Rᵐ / Rᵈ * T[i, j, k] * (pˢᵗ / pᵣ)^(Rᵈ / cᵖᵈ)
 end

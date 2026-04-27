@@ -2,7 +2,7 @@ using Test
 using Breeze
 using Oceananigans
 
-@testset "Pressure solver matches NonhydrostaticModel with ρᵣ == 1 [$FT]" for FT in (Float32, Float64)
+@testset "Pressure solver matches NonhydrostaticModel with ρᵣ == 1 [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nx = Ny = Nz = 32
     z = 0:(1/Nz):1
@@ -14,7 +14,7 @@ using Oceananigans
     parent(dynamics.reference_state.density) .= 1
 
     anelastic = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-    boussinesq = NonhydrostaticModel(; grid)
+    boussinesq = NonhydrostaticModel(grid)
 
     uᵢ = rand(size(grid)...)
     vᵢ = rand(size(grid)...)

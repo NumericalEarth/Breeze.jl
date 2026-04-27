@@ -8,9 +8,10 @@ using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
 using Oceananigans.Grids: AbstractGrid, Center, Face
 using Oceananigans.Fields: ConstantField
 
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity, BackgroundAtmosphere, ClearSkyOptics
+using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity,
+                               BackgroundAtmosphere, materialize_background_atmosphere,
+                               ClearSkyOptics, RadiativeTransferModel
 using Breeze.Thermodynamics: ThermodynamicConstants
-import Breeze.AtmosphereModels: RadiativeTransferModel
 
 using Dates: AbstractDateTime, Millisecond
 using KernelAbstractions: @kernel, @index
@@ -33,10 +34,12 @@ This constructor requires that `NCDatasets` is loadable in the user environment 
 RRTMGP loads lookup tables from netCDF via an extension.
 
 # Keyword Arguments
-- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere{FT}()`).
+- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere()`).
+  O₃ can be a Number or Function of `z`; other gases are global mean constants.
 - `surface_temperature`: Surface temperature in Kelvin (required).
-- `coordinate`: Tuple of (longitude, latitude) in degrees. If `nothing` (default), 
-                extracted from grid coordinates.
+- `coordinate`: Solar geometry specification. Can be:
+  - `nothing` (default): extracts location from grid coordinates for time-varying zenith angle
+  - `(longitude, latitude)` tuple in degrees: uses DateTime clock for time-varying zenith angle
 - `epoch`: Optional epoch for computing time with floating-point clocks.
 - `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
 - `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
@@ -45,18 +48,19 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
-function RadiativeTransferModel(grid::AbstractGrid,
-                                ::ClearSkyOptics,
-                                constants::ThermodynamicConstants;
-                                background_atmosphere = BackgroundAtmosphere{eltype(grid)}(),
-                                surface_temperature,
-                                coordinate = nothing,
-                                epoch = nothing,
-                                surface_emissivity = 0.98,
-                                direct_surface_albedo = nothing,
-                                diffuse_surface_albedo = nothing,
-                                surface_albedo = nothing,
-                                solar_constant = 1361)
+function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
+                                                 ::ClearSkyOptics,
+                                                 constants::ThermodynamicConstants;
+                                                 background_atmosphere = BackgroundAtmosphere(),
+                                                 surface_temperature,
+                                                 coordinate = nothing,
+                                                 epoch = nothing,
+                                                 surface_emissivity = 0.98,
+                                                 direct_surface_albedo = nothing,
+                                                 diffuse_surface_albedo = nothing,
+                                                 surface_albedo = nothing,
+                                                 solar_constant = 1361,
+                                                 schedule = IterationInterval(1))
 
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)
@@ -65,6 +69,9 @@ function RadiativeTransferModel(grid::AbstractGrid,
                  direct_surface_albedo and diffuse_surface_albedo"
 
     coordinate = maybe_infer_coordinate(coordinate, grid)
+
+    # Materialize background atmosphere (converts O₃ functions to fields)
+    background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 
     if !isnothing(surface_albedo)
         if !isnothing(direct_surface_albedo) || !isnothing(diffuse_surface_albedo)
@@ -88,7 +95,7 @@ function RadiativeTransferModel(grid::AbstractGrid,
 
     # RRTMGP grid + context
     context = rrtmgp_context(arch)
-    DA = ClimaComms.array_type(context.device)
+    ArrayType = ClimaComms.array_type(context.device)
     grid_params = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
 
     # Lookup tables (requires NCDatasets extension for RRTMGP)
@@ -108,34 +115,34 @@ function RadiativeTransferModel(grid::AbstractGrid,
         end
     end
 
-    nbnd_lw = luts.lu_kwargs.nbnd_lw
-    nbnd_sw = luts.lu_kwargs.nbnd_sw
-    ngas = luts.lu_kwargs.ngas_sw
+    Nband_lw = luts.lu_kwargs.nbnd_lw
+    Nband_sw = luts.lu_kwargs.nbnd_sw
+    Ngas = luts.lu_kwargs.ngas_sw
 
     # Atmospheric state arrays
-    rrtmgp_λ = DA{FT}(undef, Nc)
-    rrtmgp_φ = DA{FT}(undef, Nc)
-    rrtmgp_layerdata = DA{FT}(undef, 4, Nz, Nc)
-    rrtmgp_pᶠ = DA{FT}(undef, Nz+1, Nc)
-    rrtmgp_Tᶠ = DA{FT}(undef, Nz+1, Nc)
-    rrtmgp_T₀ = DA{FT}(undef, Nc)
+    rrtmgp_λ = ArrayType{FT}(undef, Nc)
+    rrtmgp_φ = ArrayType{FT}(undef, Nc)
+    rrtmgp_layerdata = ArrayType{FT}(undef, 4, Nz, Nc)
+    rrtmgp_pᶠ = ArrayType{FT}(undef, Nz+1, Nc)
+    rrtmgp_Tᶠ = ArrayType{FT}(undef, Nz+1, Nc)
+    rrtmgp_T₀ = ArrayType{FT}(undef, Nc)
 
     set_longitude!(rrtmgp_λ, coordinate, grid)
     set_latitude!(rrtmgp_φ, coordinate, grid)
 
-    vmr = init_vmr(ngas, Nz, Nc, FT, DA; gm=true)
+    vmr = init_vmr(Ngas, Nz, Nc, FT, ArrayType; gm=true)
     set_global_mean_gases!(vmr, luts.lookups.idx_gases_sw, background_atmosphere)
 
     atmospheric_state = AtmosphericState(rrtmgp_λ, rrtmgp_φ, rrtmgp_layerdata, rrtmgp_pᶠ, rrtmgp_Tᶠ, rrtmgp_T₀, vmr, nothing, nothing)
 
     # Boundary conditions (bandwise emissivity/albedo; incident fluxes are unused here)
-    cos_zenith = DA{FT}(undef, Nc)
-    rrtmgp_ℐ₀ = DA{FT}(undef, Nc)
+    cos_zenith = ArrayType{FT}(undef, Nc)
+    rrtmgp_ℐ₀ = ArrayType{FT}(undef, Nc)
     rrtmgp_ℐ₀ .= convert(FT, solar_constant)
 
-    rrtmgp_ε₀ = DA{FT}(undef, nbnd_lw, Nc)
-    rrtmgp_αb₀ = DA{FT}(undef, nbnd_sw, Nc)
-    rrtmgp_αw₀ = DA{FT}(undef, nbnd_sw, Nc)
+    rrtmgp_ε₀ = ArrayType{FT}(undef, Nband_lw, Nc)
+    rrtmgp_αb₀ = ArrayType{FT}(undef, Nband_sw, Nc)
+    rrtmgp_αw₀ = ArrayType{FT}(undef, Nband_sw, Nc)
 
     if surface_emissivity isa Number
         surface_emissivity = ConstantField(convert(FT, surface_emissivity))
@@ -166,6 +173,7 @@ function RadiativeTransferModel(grid::AbstractGrid,
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
     downwelling_shortwave_flux = ZFaceField(grid)
+    flux_divergence = CenterField(grid)
 
     surface_properties = SurfaceRadiativeProperties(surface_temperature,
                                                     surface_emissivity,
@@ -182,7 +190,11 @@ function RadiativeTransferModel(grid::AbstractGrid,
                                   nothing,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
-                                  downwelling_shortwave_flux)
+                                  downwelling_shortwave_flux,
+                                  flux_divergence,
+                                  nothing,  # liquid_effective_radius = nothing for clear-sky
+                                  nothing,  # ice_effective_radius = nothing for clear-sky
+                                  schedule)
 end
 
 # Mapping from RRTMGP's internal gas names to BackgroundAtmosphere field names
@@ -207,12 +219,15 @@ const RRTMGP_GAS_NAME_MAP = Dict{String, Symbol}(
     "hfc32"   => :HFC₃₂,
 )
 
-@inline function set_global_mean_gases!(vmr, idx_gases_sw, atm::BackgroundAtmosphere)
+@inline function set_global_mean_gases!(vmr, gas_indices, atm::BackgroundAtmosphere)
     FT = eltype(vmr.vmr)
-    ngas = length(vmr.vmr)
-    host = zeros(FT, ngas)
+    Ngas = length(vmr.vmr)
+    host = zeros(FT, Ngas)
 
-    for (name, ig) in idx_gases_sw
+    # All gases except O₃ are stored as numbers in BackgroundAtmosphere
+    # O₃ is handled per-layer in the kernel via vmr_o3
+    for (name, ig) in gas_indices
+        name == "o3" && continue  # O₃ handled per-layer in kernel
         sym = get(RRTMGP_GAS_NAME_MAP, name, nothing)
         if !isnothing(sym) && hasproperty(atm, sym)
             host[ig] = getproperty(atm, sym)
@@ -230,6 +245,18 @@ end
     return nothing
 end
 
+# When coordinate is a Number (fixed cos zenith), we don't need real lon/lat
+# Fill with zeros since RRTMGP still needs valid arrays
+@inline function set_longitude!(rrtmgp_λ, ::Number, grid)
+    rrtmgp_λ .= 0
+    return nothing
+end
+
+@inline function set_latitude!(rrtmgp_φ, ::Number, grid)
+    rrtmgp_φ .= 0
+    return nothing
+end
+
 function set_longitude!(rrtmgp_λ, ::Nothing, grid)
     arch = grid.architecture
     launch!(arch, grid, :xy, _set_longitude_from_grid!, rrtmgp_λ, grid)
@@ -239,8 +266,8 @@ end
 @kernel function _set_longitude_from_grid!(rrtmgp_λ, grid)
     i, j = @index(Global, NTuple)
     λ = xnode(i, j, 1, grid, Center(), Center(), Center())
-    col = rrtmgp_column_index(i, j, grid.Nx)
-    @inbounds rrtmgp_λ[col] = λ
+    c = rrtmgp_column_index(i, j, grid.Nx)
+    @inbounds rrtmgp_λ[c] = λ
 end
 
 """
@@ -248,13 +275,13 @@ $(TYPEDSIGNATURES)
 
 Update the clear-sky full-spectrum radiative fluxes from the current model state.
 """
-function AtmosphereModels.update_radiation!(rtm::ClearSkyRadiativeTransferModel, model)
+function AtmosphereModels._update_radiation!(rtm::ClearSkyRadiativeTransferModel, model)
     grid = model.grid
     clock = model.clock
     solver = rtm.longwave_solver
 
     # Update atmospheric state
-    update_rrtmgp_clear_sky_state!(solver.as, model, rtm.surface_properties.surface_temperature, rtm.background_atmosphere, solver.params)
+    update_rrtmgp_gas_state!(solver.as, model, rtm.surface_properties.surface_temperature, rtm.background_atmosphere, solver.params)
 
     # Update solar zenith angle
     datetime = compute_datetime(clock.time, rtm.epoch)
@@ -268,122 +295,10 @@ function AtmosphereModels.update_radiation!(rtm::ClearSkyRadiativeTransferModel,
     set_flux_to_zero!(solver.sws.flux)
     update_sw_fluxes!(solver)
 
-    copy_clear_sky_fluxes_to_fields!(rtm, solver, grid)
-    return nothing
-end
+    copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
 
-function update_rrtmgp_clear_sky_state!(as::AtmosphericState, model, surface_temperature, background_atmosphere::BackgroundAtmosphere, params)
-    grid = model.grid
-    arch = architecture(grid)
-
-    pᵣ = model.dynamics.reference_state.pressure
-    T = model.temperature
-    qᵛ = specific_humidity(model)
-
-    g = params.grav
-    mᵈ = params.molmass_dryair
-    mᵛ = params.molmass_water
-    ℕᴬ = params.avogad
-    O₃ = background_atmosphere.O₃
-
-    launch!(arch, grid, :xyz, _update_rrtmgp_clear_sky_state!, as, grid, pᵣ, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
-    return nothing
-end
-
-@kernel function _update_rrtmgp_clear_sky_state!(as, grid, pᵣ, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
-    i, j, k = @index(Global, NTuple)
-
-    Nz = size(grid, 3)
-    col = rrtmgp_column_index(i, j, grid.Nx)
-
-    layerdata = as.layerdata
-    pᶠ = as.p_lev
-    Tᶠ = as.t_lev
-    T₀ = as.t_sfc
-
-    vmr_h2o = as.vmr.vmr_h2o
-    vmr_o3 = as.vmr.vmr_o3
-
-    @inbounds begin
-        # Layer (cell-centered) values
-        pᶜ = pᵣ[i, j, k]
-        Tᶜ = T[i, j, k]
-        qᵛₖ = max(qᵛ[i, j, k], zero(eltype(qᵛ)))
-
-        # Face values at k and k+1 (needed for column dry air mass)
-        pᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, pᵣ)
-        Tᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, T)
-        pᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, pᵣ)
-
-        # RRTMGP Planck/source lookup tables are defined over a finite temperature range.
-        # Clamp temperatures to avoid extrapolation that can yield tiny negative source values
-        # and trigger DomainErrors in geometric means.
-        # TODO: This clamping should ideally be done internally in RRTMGP.jl.
-        Tmin = 160
-        Tmax = 355
-        Tᶜ = clamp(Tᶜ, Tmin, Tmax)
-        Tᶠₖ = clamp(Tᶠₖ, Tmin, Tmax)
-
-        # Store level values
-        pᶠ[k, col] = pᶠₖ
-        Tᶠ[k, col] = Tᶠₖ
-
-        # Topmost level (once)
-        if k == 1
-            pᶠ[Nz+1, col] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, pᵣ)
-            Tᴺ⁺¹ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
-            Tᶠ[Nz+1, col] = clamp(Tᴺ⁺¹, Tmin, Tmax)
-            T₀[col] = clamp(surface_temperature[i, j, 1], Tmin, Tmax)
-        end
-
-        # Column dry air mass: molecules / cm² of dry air
-        Δp = max(pᶠₖ - pᶠₖ₊₁, zero(pᶠₖ))
-        dry_mass_fraction = 1 - qᵛₖ
-        dry_mass_per_area = (Δp / g) * dry_mass_fraction
-        m⁻²_to_cm⁻² = convert(eltype(pᶜ), 1e4)
-        col_dry = dry_mass_per_area / mᵈ * ℕᴬ / m⁻²_to_cm⁻² # (molecules / m²) -> (molecules / cm²)
-
-        # Populate layerdata: (col_dry, pᶜ, Tᶜ, relative_humidity)
-        layerdata[1, k, col] = col_dry
-        layerdata[2, k, col] = pᶜ
-        layerdata[3, k, col] = Tᶜ
-        layerdata[4, k, col] = zero(eltype(Tᶜ))
-
-        # H₂O volume mixing ratio from specific humidity
-        r = qᵛₖ / dry_mass_fraction
-        vmr_h2o[k, col] = r * (mᵈ / mᵛ)
-        vmr_o3[k, col] = O₃
-    end
-end
-
-function copy_clear_sky_fluxes_to_fields!(rtm::ClearSkyRadiativeTransferModel, solver, grid)
-    arch = architecture(grid)
-    Nz = size(grid, 3)
-
-    lw_flux_up = solver.lws.flux.flux_up
-    lw_flux_dn = solver.lws.flux.flux_dn
-    sw_flux_dn = solver.sws.flux.flux_dn  # Total SW (direct + diffuse)
-
-    ℐ_lw_up = rtm.upwelling_longwave_flux
-    ℐ_lw_dn = rtm.downwelling_longwave_flux
-    ℐ_sw_dn = rtm.downwelling_shortwave_flux
-
-    Nx, Ny, Nz = size(grid)
-    launch!(arch, grid, (Nx, Ny, Nz+1), _copy_clear_sky_fluxes!,
-            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn, grid)
+    # Compute radiation flux divergence
+    compute_radiation_flux_divergence!(rtm, grid)
 
     return nothing
-end
-
-@kernel function _copy_clear_sky_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
-                                        lw_flux_up, lw_flux_dn, sw_flux_dn, grid)
-    i, j, k = @index(Global, NTuple)
-
-    col = rrtmgp_column_index(i, j, grid.Nx)
-
-    @inbounds begin
-        ℐ_lw_up[i, j, k] = lw_flux_up[k, col]
-        ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, col]
-        ℐ_sw_dn[i, j, k] = -sw_flux_dn[k, col]
-    end
 end

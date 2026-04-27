@@ -1,19 +1,19 @@
 # Diagnostics
 
 Breeze.jl provides a variety of diagnostic fields for analyzing atmospheric simulations.
-These diagnostics can be computed as [`KernelFunctionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.AbstractOperations.KernelFunctionOperation)s,
-which allows them to be evaluated lazily or wrapped in [`Field`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Fields.Field)s for storage and output.
+These diagnostics can be computed as [`KernelFunctionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.AbstractOperations.KernelFunctionOperation-Union{Tuple{D},%20Tuple{K},%20Tuple{T},%20Tuple{G},%20Tuple{LZ},%20Tuple{LY},%20Tuple{LX},%20Tuple{K,%20G,%20D},%20Tuple{K,%20G,%20D,%20Type{T}}}%20where%20{LX,%20LY,%20LZ,%20G,%20T,%20K,%20D%3C:Tuple})s,
+which allows them to be evaluated lazily or wrapped in [`Field`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Fields.Field-Union{Tuple{Oceananigans.Grids.AbstractGrid},%20Tuple{LZ},%20Tuple{LY},%20Tuple{LX},%20Tuple{Oceananigans.Grids.AbstractGrid,%20DataType}}%20where%20{LX,%20LY,%20LZ})s for storage and output.
 
 ## Naming conventions
 
 Diagnostic functions follow a naming convention that indicates their return type:
 
 - **`TitleCase` names** (e.g., `VirtualPotentialTemperature`, `StaticEnergy`): These functions
-  *always* return a [`KernelFunctionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.AbstractOperations.KernelFunctionOperation).
+  *always* return a [`KernelFunctionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.AbstractOperations.KernelFunctionOperation-Union{Tuple{D},%20Tuple{K},%20Tuple{T},%20Tuple{G},%20Tuple{LZ},%20Tuple{LY},%20Tuple{LX},%20Tuple{K,%20G,%20D},%20Tuple{K,%20G,%20D,%20Type{T}}}%20where%20{LX,%20LY,%20LZ,%20G,%20T,%20K,%20D%3C:Tuple}).
   These are "pure diagnostics" that are computed on-the-fly from the model state.
 
 - **`snake_case` names** (e.g., `temperature`, `density`): These functions may return either
-  a [`Field`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Fields.Field) or a `KernelFunctionOperation`, depending on
+  a [`Field`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Fields.Field-Union{Tuple{Oceananigans.Grids.AbstractGrid},%20Tuple{LZ},%20Tuple{LY},%20Tuple{LX},%20Tuple{Oceananigans.Grids.AbstractGrid,%20DataType}}%20where%20{LX,%20LY,%20LZ}) or a `KernelFunctionOperation`, depending on
   the model formulation. When a quantity is directly stored or computed by a particular
   [`AtmosphereModel`](@ref) formulation, it is returned as a `Field`. Otherwise, it is
   computed on-the-fly as a `KernelFunctionOperation`.

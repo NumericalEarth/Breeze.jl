@@ -1,24 +1,28 @@
-using ..Thermodynamics:
-    Thermodynamics,
-    mixture_heat_capacity,
-    mixture_gas_constant
+using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
-using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
-using Oceananigans.Grids: Bounded, Periodic, Flat, topology, halo_size
+using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
+                                       update_boundary_conditions!
+using Oceananigans.Grids: Bounded, Periodic, Flat # , topology, halo_size
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
-using Oceananigans.TurbulenceClosures: compute_diffusivities!
-using Oceananigans.Utils: launch!, KernelParameters
+using Oceananigans.TurbulenceClosures: compute_closure_fields!
+using Oceananigans.Utils: launch! # , KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
+    fix_negative_moisture!(model)  # fix negative moisture from advection
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
+
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
+    update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
+    microphysics_model_update!(model.microphysics, model)
     compute_tendencies && compute_tendencies!(model)
+
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
+
     return nothing
 end
 
@@ -27,11 +31,11 @@ end
 #####
 
 """
-    compute_forcings!(model)
+$(TYPEDSIGNATURES)
 
 Compute forcing-specific quantities needed before tendency calculation.
-For example, `SubsidenceForcing` requires horizontal averages of the
-fields being advected.
+For example, [`SubsidenceForcing`](@ref Breeze.Forcings.SubsidenceForcing)
+requires horizontal averages of the fields being advected.
 """
 function compute_forcings!(model)
     for forcing in model.forcing
@@ -60,8 +64,94 @@ function tracer_specific_to_density!(tracers, density)
 end
 
 diagnostic_indices(::Bounded, N, H) = 1:N+1
-diagnostic_indices(::Periodic, N, H) = -H+1:N+H
+# For Periodic, start at -H+2 because face-interpolation (ℑxᶠᵃᵃ) accesses i-1.
+# Starting at -H+1 would require accessing index -H which is out of bounds.
+diagnostic_indices(::Periodic, N, H) = -H+2:N+H
 diagnostic_indices(::Flat, N, H) = 1:N
+
+#####
+##### Velocity and momentum computation
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute velocities from momentum: `u = ρu / ρ` for each velocity component.
+"""
+function compute_velocities!(model::AtmosphereModel)
+    grid = model.grid
+    arch = grid.architecture
+
+    #TODO: Better support OffsetStaticSize in KernalAbstractions
+    # For now, just use :xyz instead of KernelParameters
+    # See: https://github.com/NumericalEarth/Breeze.jl/issues/433
+
+    # TX, TY, TZ = topology(grid)
+    # Nx, Ny, Nz = size(grid)
+    # Hx, Hy, Hz = halo_size(grid)
+
+    # ii = diagnostic_indices(TX(), Nx, Hx)
+    # jj = diagnostic_indices(TY(), Ny, Hy)
+    # kk = diagnostic_indices(TZ(), Nz, Hz)
+
+    # kp = KernelParameters(ii, jj, kk)
+
+    # Ensure halos are filled before velocity computation
+    # (prognostic field halo fill in update_state! is async)
+    density = dynamics_density(model.dynamics)
+    fill_halo_regions!(density)
+    fill_halo_regions!(model.momentum)
+
+    launch!(arch, grid, :xyz,
+            _compute_velocities!,
+            model.velocities,
+            grid,
+            model.dynamics,
+            model.momentum)
+
+    foreach(mask_immersed_field!, model.velocities)
+    fill_halo_regions!(model.velocities)
+
+    return nothing
+end
+
+function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
+    grid = model.grid
+    arch = grid.architecture
+    Gρu = model.timestepper.Gⁿ.ρu
+    Gρv = model.timestepper.Gⁿ.ρv
+    Gρw = model.timestepper.Gⁿ.ρw
+
+    momentum_args = (
+        dynamics_density(model.dynamics),
+        model.advection.momentum,
+        model.velocities,
+        model.closure,
+        model.closure_fields,
+        advecting_momentum(model),
+        model.coriolis,
+        model.clock,
+        model_fields)
+
+    u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
+    v_args = tuple(momentum_args..., model.forcing.ρv, model.dynamics)
+
+    # Extra arguments for vertical velocity are required to compute buoyancy
+    w_args = tuple(momentum_args..., model.forcing.ρw,
+                   model.dynamics,
+                   model.formulation,
+                   model.temperature,
+                   specific_prognostic_moisture(model),
+                   model.microphysics,
+                   model.microphysical_fields,
+                   model.thermodynamic_constants)
+
+    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
+    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
+    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
+
+    return nothing
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -76,34 +166,8 @@ Compute auxiliary model variables:
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
 """
 function compute_auxiliary_variables!(model)
-    grid = model.grid
-    arch = grid.architecture
-
-    TX, TY, TZ = topology(grid)
-    Nx, Ny, Nz = size(grid)
-    Hx, Hy, Hz = halo_size(grid)
-
-    ii = diagnostic_indices(TX(), Nx, Hx)
-    jj = diagnostic_indices(TY(), Ny, Hy)
-    kk = diagnostic_indices(TZ(), Nz, Hz)
-
-    kp = KernelParameters(ii, jj, kk)
-
-    # Ensure halos are filled before velocity computation
-    # (prognostic field halo fill in update_state! is async)
-    density = dynamics_density(model.dynamics)
-    fill_halo_regions!(density)
-    fill_halo_regions!(model.momentum)
-
-    launch!(arch, grid, kp,
-            _compute_velocities!,
-            model.velocities,
-            grid,
-            model.dynamics,
-            model.momentum)
-
-    foreach(mask_immersed_field!, model.velocities)
-    fill_halo_regions!(model.velocities)
+    # Compute velocities from momentum (skip for kinematic dynamics with prescribed velocities)
+    compute_velocities!(model)
 
     # Dispatch on thermodynamic formulation type
     compute_auxiliary_thermodynamic_variables!(model)
@@ -112,7 +176,7 @@ function compute_auxiliary_variables!(model)
     compute_auxiliary_dynamics_variables!(model)
 
     # Compute diffusivities
-    compute_diffusivities!(model.closure_fields, model.closure, model)
+    compute_closure_fields!(model.closure_fields, model.closure, model)
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
@@ -126,7 +190,7 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
-            model.specific_moisture,
+            specific_prognostic_moisture(model),
             model.formulation,
             model.dynamics,
             grid,
@@ -136,7 +200,6 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.specific_moisture)
     fill_halo_regions!(model.microphysical_fields)
     fill_halo_regions!(model.formulation)
 
@@ -164,7 +227,7 @@ end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
-                                                             specific_moisture,
+                                                             specific_prognostic_moisture,
                                                              formulation,
                                                              dynamics,
                                                              grid,
@@ -179,23 +242,23 @@ end
     ρ_field = dynamics_density(dynamics)
     @inbounds begin
         ρ = ρ_field[i, j, k]
-        ρqᵗ = moisture_density[i, j, k]
-        qᵗ = ρqᵗ / ρ
-        specific_moisture[i, j, k] = qᵗ
+        ρqᵛᵉ = moisture_density[i, j, k]
+        # qᵛᵉ: vapor specific humidity (non-equilibrium) or equilibrium moisture (saturation adjustment)
+        qᵛᵉ = ρqᵛᵉ / ρ
+        specific_prognostic_moisture[i, j, k] = qᵛᵉ
     end
 
     # Compute moisture fractions first (needed by diagnose_thermodynamic_state)
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
 
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, microphysics, ρ, microphysical_fields, qᵗ, constants)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛᵉ, constants)
 
-    update_microphysical_fields!(microphysical_fields, microphysics,
-                                 i, j, k, grid,
-                                 ρ, 𝒰₁, constants)
+    update_microphysical_fields!(microphysical_fields, i, j, k, grid,
+                                 microphysics, ρ, 𝒰₁, constants)
 
     T = Thermodynamics.temperature(𝒰₁, constants)
     @inbounds temperature[i, j, k] = T
@@ -204,52 +267,25 @@ end
 function compute_tendencies!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
-    Gρu = model.timestepper.Gⁿ.ρu
-    Gρv = model.timestepper.Gⁿ.ρv
-    Gρw = model.timestepper.Gⁿ.ρw
 
     model_fields = fields(model)
 
     #####
-    ##### Momentum tendencies
+    ##### Momentum tendencies (skip for kinematic dynamics)
     #####
 
-    momentum_args = (
-        dynamics_density(model.dynamics),
-        model.advection.momentum,
-        model.velocities,
-        model.closure,
-        model.closure_fields,
-        model.momentum,
-        model.coriolis,
-        model.clock,
-        model_fields)
+    compute_momentum_tendencies!(model, model_fields)
 
-    u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
-    v_args = tuple(momentum_args..., model.forcing.ρv, model.dynamics)
-
-    # Extra arguments for vertical velocity are required to compute
-    # buoyancy:
-    w_args = tuple(momentum_args..., model.forcing.ρw,
-                   model.dynamics,
-                   model.formulation,
-                   model.temperature,
-                   model.specific_moisture,
-                   model.microphysics,
-                   model.microphysical_fields,
-                   model.thermodynamic_constants)
-
-    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
-    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
-    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
+    # Use transport velocities (contravariant for terrain-following grids)
+    advecting_velocities = transport_velocities(model)
 
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
-        model.specific_moisture,
-        model.velocities,
+        specific_prognostic_moisture(model),
+        advecting_velocities,
         model.microphysics,
         model.microphysical_fields,
         model.closure,
@@ -267,22 +303,25 @@ function compute_tendencies!(model::AtmosphereModel)
     ##### Moisture density tendency
     #####
 
+    moist_name = moisture_prognostic_name(model.microphysics)
     ρq_args = (
-        model.specific_moisture,
+        specific_prognostic_moisture(model),
         Val(2),
-        Val(:ρqᵗ),
-        model.forcing.ρqᵗ,
-        model.advection.ρqᵗ,
+        Val(moist_name),
+        model.forcing[moist_name],
+        model.advection[moist_name],
         common_args...)
 
-    Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
+    Gρqᵛᵉ = getproperty(model.timestepper.Gⁿ, moist_name)
+    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵛᵉ, grid, ρq_args)
 
     #####
     ##### Tracer density tendencies
     #####
 
-    prognostic_microphysical_fields = NamedTuple(name => model.microphysical_fields[name]
+    # Pass specific (per-mass) fields for scalar advection: div_ρUc computes ∇·(ρ₀uq),
+    # so passing density-weighted ρ₀q would double-count ρ₀.
+    prognostic_microphysical_fields = NamedTuple(name => model.microphysical_fields[specific_field_name(name)]
                                                  for name in prognostic_field_names(model.microphysics))
 
     scalars = merge(prognostic_microphysical_fields, model.tracers)
@@ -341,7 +380,6 @@ Apply boundary conditions by adding flux divergences to the right-hand-side.
 """
 function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
 
-    Gⁿ = model.timestepper.Gⁿ
     arch  = model.architecture
 
     # Compute boundary flux contributions

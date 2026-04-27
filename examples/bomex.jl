@@ -24,6 +24,9 @@ using Printf
 using Random
 
 Random.seed!(938)
+if CUDA.functional()
+    CUDA.seed!(938)
+end
 
 # ## Domain and grid
 #
@@ -78,10 +81,10 @@ FT = eltype(grid)
 p₀ = reference_state.surface_pressure
 θ₀ = reference_state.potential_temperature
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
+ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
 
 ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′θ′))
-ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′qᵗ′))
+ρqᵉ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′qᵗ′))
 
 # ## Surface momentum flux (drag)
 #
@@ -152,7 +155,7 @@ drying = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
 set!(drying, z -> dqdt_profile(z))
 set!(drying, ρᵣ * drying)
-ρqᵗ_drying_forcing = Forcing(drying)
+ρqᵉ_drying_forcing = Forcing(drying)
 
 # ## Radiative cooling
 #
@@ -188,12 +191,12 @@ set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
 
 ρu_forcing = (subsidence, geostrophic.ρu)
 ρv_forcing = (subsidence, geostrophic.ρv)
-ρqᵗ_forcing = (subsidence, ρqᵗ_drying_forcing)
+ρqᵉ_forcing = (subsidence, ρqᵉ_drying_forcing)
 ρθ_forcing = subsidence
 ρe_forcing = ρe_radiation_forcing
 
 forcing = (; ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_forcing,
-             ρe=ρe_forcing, ρqᵗ=ρqᵗ_forcing)
+             ρe=ρe_forcing, ρqᵉ=ρqᵉ_forcing)
 nothing #hide
 
 # ## Model setup
@@ -204,7 +207,7 @@ microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 advection = WENO(order=9)
 
 model = AtmosphereModel(grid; dynamics, coriolis, microphysics, advection, forcing,
-                        boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
+                        boundary_conditions = (ρθ=ρθ_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # ## Initial conditions
 #
@@ -251,6 +254,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
 simulation = Simulation(model; Δt=10, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Output and progress
 #
@@ -263,10 +267,10 @@ qᵛ = model.microphysical_fields.qᵛ
 
 function progress(sim)
     qˡmax = maximum(qˡ)
-    qᵗmax = maximum(sim.model.specific_moisture)
+    qᵛmax = maximum(specific_humidity(sim.model))
     wmax = maximum(abs, sim.model.velocities.w)
-    msg = @sprintf("Iter: %d, t: % 12s, Δt: %s, max|w|: %.2e m/s, max(qᵗ): %.2e, max(qˡ): %.2e",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), wmax, qᵗmax, qˡmax)
+    msg = @sprintf("Iter: %d, t: % 12s, Δt: %s, max|w|: %.2e m/s, max(qᵛ): %.2e, max(qˡ): %.2e",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), wmax, qᵛmax, qˡmax)
     @info msg
     return nothing
 end

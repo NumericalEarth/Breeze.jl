@@ -6,7 +6,7 @@ abstract type AbstractThermodynamicState{FT} end
     pᵣ = 𝒰.reference_pressure
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    return density(pᵣ, T, q, constants)
+    return density(T, pᵣ, q, constants)
 end
 
 @inline function saturation_specific_humidity(𝒰::AbstractThermodynamicState, constants, equil)
@@ -54,8 +54,77 @@ end
     qˡ = q.liquid
     qⁱ = q.ice
 
-    return Π * θ + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ 
+    return Π * θ + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute temperature from potential temperature and pressure.
+
+This is a convenience function that constructs a `LiquidIcePotentialTemperatureState`
+with no condensate and computes temperature using the standard thermodynamic relations.
+
+# Arguments
+- `θ`: Potential temperature [K]
+- `p`: Pressure [Pa]
+- `constants`: Thermodynamic constants
+
+# Additional Arguments
+- `pˢᵗ`: Standard pressure for potential temperature definition [Pa]
+- `qᵛ`: Specific humidity [kg/kg]
+"""
+@inline function temperature_from_potential_temperature(θ, p, pˢᵗ, constants, qᵛ)
+    FT = promote_type(typeof(θ), typeof(p), typeof(qᵛ))
+    θ = convert(FT, θ)
+    p = convert(FT, p)
+    pˢᵗ = convert(FT, pˢᵗ)
+    qᵛ = convert(FT, qᵛ)
+    q = MoistureMassFractions(qᵛ)  # vapor only, no condensate
+    𝒰 = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, p)
+    return temperature(𝒰, constants)
+end
+
+@inline temperature_from_potential_temperature(θ, p, pˢᵗ, constants) =
+    temperature_from_potential_temperature(θ, p, pˢᵗ, constants, zero(θ))
+
+@inline temperature_from_potential_temperature(θ, p, constants) =
+    temperature_from_potential_temperature(θ, p, 1e5, constants)
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute potential temperature from temperature and pressure.
+
+This is a convenience function that constructs a `LiquidIcePotentialTemperatureState`
+with no condensate and computes potential temperature using the standard thermodynamic relations.
+
+# Arguments
+- `T`: Temperature [K]
+- `p`: Pressure [Pa]
+- `constants`: Thermodynamic constants
+
+# Additional Arguments
+- `pˢᵗ`: Standard pressure for potential temperature definition [Pa]
+- `qᵛ`: Specific humidity [kg/kg]
+"""
+@inline function potential_temperature_from_temperature(T, p, pˢᵗ, constants, qᵛ)
+    FT = promote_type(typeof(T), typeof(p), typeof(qᵛ))
+    T = convert(FT, T)
+    p = convert(FT, p)
+    pˢᵗ = convert(FT, pˢᵗ)
+    qᵛ = convert(FT, qᵛ)
+    q = MoistureMassFractions(qᵛ)  # vapor only, no condensate
+    𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, p)
+    𝒰₁ = with_temperature(𝒰₀, T, constants)
+    return 𝒰₁.potential_temperature
+end
+
+@inline potential_temperature_from_temperature(T, p, pˢᵗ, constants) =
+    potential_temperature_from_temperature(T, p, pˢᵗ, constants, zero(T))
+
+@inline potential_temperature_from_temperature(T, p, constants) =
+    potential_temperature_from_temperature(T, p, 1e5, constants)
 
 @inline function with_temperature(𝒰::LiquidIcePotentialTemperatureState, T, constants)
     Π = exner_function(𝒰, constants)
@@ -75,7 +144,7 @@ end
     pᵣ = 𝒰.reference_pressure
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    return density(pᵣ, T, q, constants)
+    return density(T, pᵣ, q, constants)
 end
 
 #####

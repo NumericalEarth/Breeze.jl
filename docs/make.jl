@@ -25,31 +25,50 @@ struct Example
     # Whether to always build this example: set it to `false` for long-running examples to
     # be built only on `main` or on-demand in PRS.
     build_always::Bool
+    # Whether the example needs to use the GPU;
+    gpu::Bool
 end
 
+Example(title::String, basename::String; build_always::Bool, gpu::Bool) =
+    Example(title, basename, build_always, gpu)
+
 examples = [
-    Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
-    Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
-    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
-    Example("Shallow cumulus convection (BOMEX)", "bomex", true),
-    Example("Precipitating shallow cumulus (RICO)", "rico", false),
-    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
-    Example("Inertia gravity wave", "inertia_gravity_wave", true),
-    Example("Single column radiation", "single_column_radiation", true),
-    Example("Stationary parcel model", "stationary_parcel_model", true),
-    Example("Acoustic wave in shear layer", "acoustic_wave", true),
+    Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
+    Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
+    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz"; build_always=true, gpu=false),
+    Example("Shallow cumulus convection (BOMEX)", "bomex"; build_always=true, gpu=true),
+    Example("Precipitating shallow cumulus (RICO)", "rico"; build_always=false, gpu=false),
+    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature"; build_always=true, gpu=false),
+    Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave"; build_always=true, gpu=false),
+    Example("Neutral atmospheric boundary layer", "neutral_atmospheric_boundary_layer"; build_always=false, gpu=true),
+    Example("Single column radiation", "single_column_radiation"; build_always=true, gpu=false),
+    Example("Stationary parcel model", "stationary_parcel_model"; build_always=true, gpu=false),
+    Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),
+    Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
+    Example("Cloud formation in prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
+    Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),
+    Example("Splitting supercell", "splitting_supercell"; build_always=false, gpu=true),
+    Example("Tropical cyclone world", "tropical_cyclone_world"; build_always=false, gpu=true),
+    Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
 ]
 
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
-
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
 
-semaphore = Base.Semaphore(Threads.nthreads(:interactive))
+# Use a different semaphore for CPU and GPU examples, but will keep the maximum
+# of concurrent tasks running at all time to the number of threads.  This is
+# very heuristic-y, can be refined later: reserve a larger semaphore for CPU
+# jobs, than for the GPU ones.
+tot_threads = Threads.nthreads(:interactive)
+ncpu = (tot_threads * 2) ÷ 3
+ngpu = tot_threads - ncpu
+cpu_semaphore = Base.Semaphore(ncpu)
+gpu_semaphore = Base.Semaphore(ngpu)
 @time "literate" @sync for example in examples
     script_file = example.basename * ".jl"
     script_path = joinpath(examples_src_dir, script_file)
-    Threads.@spawn :interactive Base.acquire(semaphore) do
+    Threads.@spawn :interactive Base.acquire(example.gpu ? gpu_semaphore : cpu_semaphore) do
         run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) $(joinpath(@__DIR__, "literate.jl")) $(script_path) $(literated_dir)`)
     end
 end
@@ -63,6 +82,84 @@ for m in [Breeze, BreezeRRTMGPExt, BreezeCloudMicrophysicsExt]
         push!(modules, m)
     end
 end
+
+# Automatically generate file with docstrings for all modules
+
+function walk_submodules!(result, visited, mod::Module)
+    for name in sort(names(mod; all=true, imported=false))
+        isdefined(mod, name) || continue
+        value = getproperty(mod, name)
+        if value isa Module &&
+            parentmodule(value) === mod &&
+            !(value in visited) &&
+            value !== mod
+
+            push!(visited, value)
+            push!(result, value)
+            walk_submodules!(result, visited, value)
+        end
+    end
+end
+
+function get_submodules(mod::Module)
+    result = Module[]
+    visited = Set{Module}()
+
+    walk_submodules!(result, visited, mod)
+    return result
+end
+
+function write_api_md()
+    modules = get_submodules(Breeze)
+    append!(modules, [BreezeRRTMGPExt, BreezeCloudMicrophysicsExt])
+    io = IOBuffer()
+
+    println(io, """
+            # API Documentation
+
+            ## Public API
+
+            ```@autodocs
+            Modules = [Breeze]
+            Private = false
+            ```
+            """)
+    for mod in modules
+        println(io, """
+                ### $(chopprefix(string(mod), "Breeze."))
+
+                ```@autodocs
+                Modules = [$(mod)]
+                Private = false
+                ```
+                """)
+    end
+    println(io, """
+            ## Private API
+
+            ```@autodocs
+            Modules = [Breeze]
+            Public = false
+            ```
+            """)
+    for mod in modules
+        println(io, """
+                ### $(chopprefix(string(mod), "Breeze."))
+
+                ```@autodocs
+                Modules = [$(mod)]
+                Public = false
+                ```
+                """)
+    end
+
+    # Remove multiple trailing whitespaces, but keep the final one.
+    write(joinpath(@__DIR__, "src", "api.md"), strip(String(take!(io))) * "\n")
+end
+
+write_api_md()
+
+# Let's build the docs!
 
 makedocs(
     ;
@@ -88,11 +185,18 @@ makedocs(
         ],
         "Developers" => Any[
             "Microphysics" => Any[
-                "Microphysics Interface" => "developer/microphysics_interface.md",
+                "Overview" => "developer/microphysics/overview.md",
+                "Example implementation" => "developer/microphysics/example.md",
+                "Future improvements" => "developer/microphysics/future_improvements.md",
             ],
         ],
         "Radiative Transfer" => "radiative_transfer.md",
-        "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
+        "Dynamics" => Any[
+            "Governing equations" => "dycore_equations_algorithms.md",
+            "Anelastic dynamics" => "anelastic_dynamics.md",
+            "Compressible dynamics" => "compressible_dynamics.md",
+            "Terrain-following coordinates" => "terrain_following_coordinates.md",
+        ],
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
             "Reproducibility of Breeze.jl models" => "reproducibility.md",
@@ -103,5 +207,5 @@ makedocs(
     ],
     linkcheck = true,
     draft = false,
-    doctest = true
+    doctest = true,
 )

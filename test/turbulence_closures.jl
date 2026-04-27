@@ -4,7 +4,7 @@ using Test
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
-@testset "Time stepping with TurbulenceClosures [$(FT)]" for FT in (Float32, Float64)
+@testset "Time stepping with TurbulenceClosures [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 100), y=(0, 100), z=(0, 100))
     vitd = VerticallyImplicitTimeDiscretization()
@@ -13,12 +13,13 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         ScalarDiffusivity(ν=1, κ=2),
         ScalarDiffusivity(vitd, ν=1),
         SmagorinskyLilly(),
-        AnisotropicMinimumDissipation()
+        DynamicSmagorinsky(),
+        AnisotropicMinimumDissipation(),
     )
 
     for closure in closures
         @testset let closure=closure
-            model = @test_logs match_mode=:any AtmosphereModel(grid; closure)
+            model = AtmosphereModel(grid; closure)
             time_step!(model, 1)
             @test true
         end
@@ -34,7 +35,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
         @testset "Implicit diffusion solver with ScalarDiffusivity [$formulation, $(FT), $(typeof(disc))]" for disc in discretizations
             closure = ScalarDiffusivity(disc, ν=1, κ=1)
-            model = @test_logs match_mode=:any AtmosphereModel(grid; dynamics, formulation, closure, tracers=:ρc)
+            model = AtmosphereModel(grid; dynamics, formulation, closure, tracers=:ρc)
             # Set uniform specific energy for no diffusion
             θ₀ = model.dynamics.reference_state.potential_temperature
             cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
@@ -61,6 +62,28 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             set!(model; θ=θ₀, ρu = (x, y, z) -> z / 100)
             Breeze.AtmosphereModels.update_state!(model)
             @test maximum(abs, model.closure_fields.νₑ) > 0
+        end
+
+        @testset "DynamicSmagorinsky with velocity gradients [$formulation, $(FT)]" begin
+            model = AtmosphereModel(grid; dynamics, formulation, closure=DynamicSmagorinsky())
+            θ₀ = model.dynamics.reference_state.potential_temperature
+            # Mean shear plus a triad wave in (x,y) so the test filter sees
+            # horizontal structure. Without xy variation Lᵢⱼ vanishes and
+            # 𝒥ᴸᴹ sits at the minimum_numerator floor regardless of whether
+            # `step_closure_prognostics!` runs.
+            ρuᵢ(x, y, z) = z / 100 + 0.1 * sin(2π * x / 100) * cos(2π * y / 100)
+            set!(model; θ=θ₀, ρu=ρuᵢ)
+            # `initialize_closure_fields!` seeds 𝒥ᴸᴹ with a spatial mean
+            # uniform across the domain. A successful call to
+            # `step_closure_prognostics!` during the time step must advance
+            # 𝒥ᴸᴹ with per-cell local values, making it spatially varying.
+            # If the hook is called at the wrong clock stage, Oceananigans's
+            # LASD kernel gates it out and 𝒥ᴸᴹ stays at its seed.
+            𝒥ᴸᴹ_seed = Array(interior(model.closure_fields.𝒥ᴸᴹ)) |> copy
+            time_step!(model, 1)
+            𝒥ᴸᴹ_after = Array(interior(model.closure_fields.𝒥ᴸᴹ))
+            @test maximum(abs, model.closure_fields.νₑ) > 0
+            @test 𝒥ᴸᴹ_after != 𝒥ᴸᴹ_seed
         end
 
         @testset "AnisotropicMinimumDissipation with velocity gradients [$formulation, $(FT)]" begin
@@ -91,20 +114,20 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
             # Store initial scalar fields (using copy of data to avoid reference issues)
             ρe₀ = static_energy_density(model) |> Field |> interior |> Array
-            ρqᵗ₀ = model.moisture_density |> interior |> Array
+            ρqᵛ₀ = model.moisture_density |> interior |> Array
             ρc₀ = model.tracers.ρc |> interior |> Array
 
             # Take a time step
             time_step!(model, 1)
 
             ρe₁ = static_energy_density(model) |> Field |> interior |> Array
-            ρqᵗ₁ = model.moisture_density |> interior |> Array
+            ρqᵛ₁ = model.moisture_density |> interior |> Array
             ρc₁ = model.tracers.ρc |> interior |> Array
 
             # Scalars should change due to diffusion (not advection since advection=nothing)
             # Use explicit maximum difference check instead of ≈ to handle Float32
             @test maximum(abs, ρe₁ - ρe₀) > 0
-            @test maximum(abs, ρqᵗ₁ - ρqᵗ₀) > 0
+            @test maximum(abs, ρqᵛ₁ - ρqᵛ₀) > 0
             @test maximum(abs, ρc₁ - ρc₀) > 0
         end
     end

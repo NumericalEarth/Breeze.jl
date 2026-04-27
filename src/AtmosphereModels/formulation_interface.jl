@@ -12,7 +12,7 @@
 """
     materialize_formulation(formulation, dynamics, grid, boundary_conditions)
 
-Materialize a thermodynamic formulation from a Symbol (or formulation struct) into a
+Materialize a thermodynamic formulation from a `Symbol` (or formulation struct) into a
 complete formulation with all required fields.
 
 Valid symbols:
@@ -32,7 +32,7 @@ materialize_formulation(formulation_name::Symbol, args...) =
     prognostic_thermodynamic_field_names(formulation)
 
 Return a tuple of prognostic field names for the given thermodynamic formulation.
-Accepts a Symbol, Val(Symbol), or formulation struct.
+Accepts a `Symbol`, `Val(Symbol)`, or formulation struct.
 """
 function prognostic_thermodynamic_field_names end
 
@@ -43,7 +43,7 @@ prognostic_thermodynamic_field_names(formulation_name::Symbol) =
     additional_thermodynamic_field_names(formulation)
 
 Return a tuple of additional (diagnostic) field names for the given thermodynamic formulation.
-Accepts a Symbol, Val(Symbol), or formulation struct.
+Accepts a `Symbol`, `Val(Symbol)`, or formulation struct.
 """
 function additional_thermodynamic_field_names end
 
@@ -54,7 +54,7 @@ additional_thermodynamic_field_names(formulation_name::Symbol) =
     thermodynamic_density_name(formulation)
 
 Return the name of the thermodynamic density field (e.g., `:ρθ`, `:ρe`, `:ρE`).
-Accepts a Symbol, Val(Symbol), or formulation struct.
+Accepts a `Symbol`, `Val(Symbol)`, or formulation struct.
 """
 function thermodynamic_density_name end
 
@@ -86,7 +86,7 @@ function collect_prognostic_fields end
 """
     compute_auxiliary_thermodynamic_variables!(formulation, dynamics, i, j, k, grid)
 
-Compute auxiliary thermodynamic variables from prognostic fields at grid point (i, j, k).
+Compute auxiliary thermodynamic variables from prognostic fields at grid point `(i, j, k)`.
 """
 function compute_auxiliary_thermodynamic_variables! end
 
@@ -96,8 +96,10 @@ function compute_auxiliary_thermodynamic_variables! end
 Diagnose the thermodynamic state at grid point `(i, j, k)` from the given `formulation`,
 `dynamics`, and pre-computed moisture mass fractions `q`.
 
-Note: This function does NOT compute moisture fractions internally to avoid circular dependencies.
-The caller is responsible for computing `q = compute_moisture_fractions(...)` before calling.
+!!! warning "Moisture mass fractions computation"
+    This function does _not_ compute moisture fractions internally to avoid circular dependencies.
+    The caller is responsible for computing [`q = grid_moisture_fractions(...)`](@ref grid_moisture_fractions)
+    before passing `q` to this function.
 """
 function diagnose_thermodynamic_state end
 
@@ -139,6 +141,12 @@ function static_energy end
     static_energy_density(model)
 
 Return the static energy density field for the given model.
+
+For `LiquidIcePotentialTemperatureFormulation`, returns a `Field` with boundary conditions
+that convert potential temperature fluxes to energy fluxes. This allows users to use
+`BoundaryConditionOperation` to extract energy flux values from the model.
+
+For `StaticEnergyFormulation`, returns the prognostic energy density field directly.
 """
 function static_energy_density end
 

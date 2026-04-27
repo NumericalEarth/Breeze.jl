@@ -260,7 +260,7 @@ the "[dry adiabatic lapse rate](https://en.wikipedia.org/wiki/Lapse_rate)".
 ### An example of a dry reference state in Breeze
 
 We can visualise a hydrostatic reference profile evaluating Breeze's reference-state
-utilities (which assume a dry reference state) on a one-dimensional [`RectilinearGrid`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Grids.RectilinearGrid).
+utilities (which assume a dry reference state) on a one-dimensional [`RectilinearGrid`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Grids.RectilinearGrid).
 In the following code, the superscript ``d`` denotes dry air, e.g., an ideal gas
 with ``Rᵈ = 286.71 \; \mathrm{J} \, \mathrm{K}^{-1}``:
 
@@ -526,11 +526,15 @@ thermo = ThermodynamicConstants()
 T = collect(200:0.1:320)
 pᵛˡ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.liquid) for Tⁱ in T]
 pᵛⁱ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.ice) for Tⁱ in T]
-pᵛⁱ⁺[T .> thermo.triple_point_temperature] .= NaN
 
 # Mixed-phase surface with 50% liquid, 50% ice
 mixed_surface = PlanarMixedPhaseSurface(0.5)
 pᵛᵐ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, mixed_surface) for Tⁱ in T]
+
+# Mask ice and mixed-phase pressures above the freezing point
+freezing_temperature = 273.15
+pᵛⁱ⁺[T .> freezing_temperature] .= NaN
+pᵛᵐ⁺[T .> 273.15] .= NaN
 
 using CairoMakie
 
@@ -546,6 +550,98 @@ fig
 
 The mixed-phase saturation vapor pressure lies between the liquid and ice curves,
 providing a smooth interpolation between the two pure phases.
+
+### The Tetens formula for saturation vapor pressure
+
+In addition to the first-principles [`ClausiusClapeyron`](@ref Breeze.Thermodynamics.ClausiusClapeyron),
+Breeze also supports the empirical [`TetensFormula`](@ref Breeze.Thermodynamics.TetensFormula),
+which was used in early atmosphere models due to its simplicity. We include `TetensFormula` solely
+for the purpose of model intercomparisons.
+
+The Tetens formula approximates saturation vapor pressure as:
+
+```math
+pᵛ⁺(T) = pᵛ⁺_r \exp \left( a \frac{T - T_r}{T - δT} \right) ,
+```
+
+where ``Tᵣ`` is a reference temperature, ``δT`` is a temperature offset, and
+the coefficients ``a`` and ``δT`` differ for liquid and ice surfaces.
+Default values for liquid are from [MonteithUnsworth2014](@citet), and for ice
+from [Murray1967](@citet).
+
+Let's compare the two formulations over atmospheric temperatures. We use the
+Clausius-Clapeyron formulation for liquid, ice, and mixed-phase surfaces, and
+compare with the Tetens formula for liquid and ice:
+
+```@example
+using Breeze
+using Breeze.Thermodynamics: saturation_vapor_pressure,
+                             PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
+                             TetensFormula
+
+using CairoMakie
+
+clausius_clapeyron = ThermodynamicConstants()
+tetens = ThermodynamicConstants(saturation_vapor_pressure=TetensFormula())
+liquid, ice = PlanarLiquidSurface(), PlanarIceSurface()
+
+T = collect(220:0.5:320)
+
+# Clausius-Clapeyron: liquid, ice, and mixed-phase (λ=0.5)
+pᵛˡ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, liquid) for Tⁱ in T]
+pᵛⁱ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, ice) for Tⁱ in T]
+
+# Tetens formula: liquid and ice
+pᵛˡ⁺_tf = [saturation_vapor_pressure(Tⁱ, tetens, liquid) for Tⁱ in T]
+pᵛⁱ⁺_tf = [saturation_vapor_pressure(Tⁱ, tetens, ice) for Tⁱ in T]
+
+# Mask ice above triple point for clarity
+Tᵗʳ = clausius_clapeyron.triple_point_temperature
+pᵛⁱ⁺_cc[T .> Tᵗʳ] .= NaN
+pᵛⁱ⁺_tf[T .> Tᵗʳ] .= NaN
+
+# Phase colors: dark blue for liquid, orange for ice, green for mixed
+c_liquid = :darkblue
+c_ice = :darkorange
+c_mixed = :green
+
+fig = Figure(size=(1000, 400))
+
+# Saturation vapor pressure comparison
+ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressure (Pa)",
+           yscale=log10, title="Saturation vapor pressure comparison")
+
+# Clausius-Clapeyron
+lines!(ax1, T, pᵛˡ⁺_cc, linewidth=4, color=(c_liquid, 0.6), label="C-C liquid")
+lines!(ax1, T, pᵛⁱ⁺_cc, linewidth=4, color=(c_ice, 0.6), label="C-C ice")
+
+# Tetens formula
+lines!(ax1, T, pᵛˡ⁺_tf, linewidth=2, color=c_liquid, linestyle=:dash, label="Tetens liquid")
+lines!(ax1, T, pᵛⁱ⁺_tf, linewidth=2, color=c_ice, linestyle=:dash, label="Tetens ice")
+
+axislegend(ax1, position=:rb)
+
+# Relative difference (Tetens - C-C) / C-C
+ax2 = Axis(fig[1, 2], xlabel="Temperature (K)", ylabel="Relative difference (%)",
+           title="(Tetens - C-C) / C-C × 100")
+
+rel_diff_liquid = @. 100 * (pᵛˡ⁺_tf - pᵛˡ⁺_cc) / pᵛˡ⁺_cc
+rel_diff_ice = @. 100 * (pᵛⁱ⁺_tf - pᵛⁱ⁺_cc) / pᵛⁱ⁺_cc
+
+lines!(ax2, T, rel_diff_liquid, linewidth=2, color=c_liquid, label="liquid")
+lines!(ax2, T, rel_diff_ice, linewidth=2, color=c_ice, label="ice")
+hlines!(ax2, [0], color=:gray, linestyle=:dot)
+
+axislegend(ax2, position=:rb)
+
+fig
+```
+
+The Tetens formula agrees well with the Clausius-Clapeyron relation over typical
+atmospheric temperatures (roughly 230–320 K), with relative differences typically
+less than 1%. The Tetens formula is calibrated for this range and may diverge
+at extreme temperatures. For most atmospheric applications, either formulation
+is suitable.
 
 ## Saturation specific humidity
 

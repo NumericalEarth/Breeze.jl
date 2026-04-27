@@ -2,7 +2,7 @@ module BreezeRRTMGPExt
 
 using Breeze
 
-using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics
+using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 
@@ -11,19 +11,18 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 # Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU, GPU
-using Oceananigans.Fields: ZFaceField
+using Oceananigans.Fields: ZFaceField, CenterField
 
 # RRTMGP imports (external types - cannot modify)
 #   GrayAtmosphericState: atmospheric state arrays (t_lay, p_lay, t_lev, p_lev, z_lev, t_sfc)
-#   NoScatLWRTE, NoScatSWRTE: longwave/shortwave RTE solvers  
+#   NoScatLWRTE, NoScatSWRTE: longwave/shortwave RTE solvers
 #   FluxLW, FluxSW: flux storage (flux_up, flux_dn, flux_net, flux_dn_dir)
 #   RRTMGPParameters: physical constants for RRTMGP
 
 using RRTMGP: RRTMGPGridParams
+using RRTMGP.Parameters: Parameters, RRTMGPParameters
 using RRTMGP.RTE: NoScatLWRTE, NoScatSWRTE
 using RRTMGP.RTESolver: solve_lw!, solve_sw!
-
-import RRTMGP.Parameters: RRTMGPParameters
 
 using ClimaComms: ClimaComms
 
@@ -37,13 +36,13 @@ const DateTimeClock = Clock{DateTime}
 
 Construct `RRTMGPParameters` from Breeze's `ThermodynamicConstants`.
 """
-function RRTMGPParameters(constants::ThermodynamicConstants{FT};
-                          stefan_bolzmann_constant = 5.670374419e-8,  # W m⁻² K⁻⁴
-                          avogadro_number = 6.02214076e23) where FT  # mol⁻¹
+function Parameters.RRTMGPParameters(constants::ThermodynamicConstants{FT};
+                                     stefan_bolzmann_constant = 5.670374419e-8,  # W m⁻² K⁻⁴
+                                     avogadro_number = 6.02214076e23) where FT  # mol⁻¹
 
     ϰᵈ = constants.dry_air.heat_capacity / constants.dry_air.molar_mass
 
-    return RRTMGPParameters(
+    return Parameters.RRTMGPParameters(
         grav           = convert(FT, constants.gravitational_acceleration),
         molmass_dryair = convert(FT, constants.dry_air.molar_mass),
         molmass_water  = convert(FT, constants.vapor.molar_mass),
@@ -70,9 +69,14 @@ end
 
 compute_datetime(dt::AbstractDateTime, epoch) = dt
 compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round(Int, 1000t))
+# When epoch is nothing and time is numeric, we can't compute datetime (used for fixed zenith angle)
+compute_datetime(t::Number, epoch::Nothing) = nothing
+
+using Oceananigans.Utils: IterationInterval
 
 include("gray_radiative_transfer_model.jl")
+include("rrtmgp_shared_utilities.jl")
 include("clear_sky_radiative_transfer_model.jl")
+include("all_sky_radiative_transfer_model.jl")
 
 end # module
-

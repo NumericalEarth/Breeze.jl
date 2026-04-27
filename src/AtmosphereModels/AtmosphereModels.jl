@@ -11,9 +11,11 @@ export
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
-    # Thermodynamic formulations
-    StaticEnergyFormulation,
-    LiquidIcePotentialTemperatureFormulation,
+    SlowTendencyMode,
+    HorizontalSlowMode,
+    compute_pressure_correction!,
+    make_pressure_correction!,
+    # Thermodynamic formulation interface (formulation types exported by their respective modules)
     thermodynamic_density_name,
     thermodynamic_density,
     # Helpers
@@ -25,17 +27,45 @@ export
     precipitation_rate,
     surface_precipitation_flux,
     specific_humidity,
+    moisture_prognostic_name,
+    moisture_specific_name,
+    specific_prognostic_moisture,
+
+    # Negative moisture correction types
+    AbstractNegativeMoistureCorrection,
+    VerticalBorrowing,
+    SpeciesBorrowing,
+    AbstractNumberConcentrationCategories,
+
+    # Microphysics interface
+    AbstractMicrophysicalState,
+    NothingMicrophysicalState,
+    WarmRainState,
+    microphysical_state,
+    microphysical_tendency,
+    grid_microphysical_tendency,
+    moisture_fractions,
+    grid_moisture_fractions,
+    specific_prognostic_moisture_from_total,
+    update_microphysical_fields!,
+    update_microphysical_auxiliaries!,
+    initial_aerosol_number,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
-    regularize_atmosphere_model_boundary_conditions,
+    materialize_atmosphere_model_boundary_conditions,
     materialize_atmosphere_model_forcing,
     compute_forcing!,
 
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
     BackgroundAtmosphere,
+    materialize_background_atmosphere,
     GrayOptics,
     ClearSkyOptics,
+    AllSkyOptics,
+
+    # Cloud effective radius
+    ConstantRadiusParticles,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
@@ -44,16 +74,26 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
-    compute_hydrostatic_pressure!
+    compute_hydrostatic_pressure!,
+    set_to_mean!,
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+    # Transport interface (for terrain-following coordinates)
+    transport_velocities,
+    advecting_momentum,
+
+    # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
+    compute_x_momentum_tendency!,
+    compute_y_momentum_tendency!,
+    compute_z_momentum_tendency!
+
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, fields
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶠ
+using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
@@ -72,7 +112,6 @@ include("formulation_interface.jl")
 #####
 
 include("atmosphere_model.jl")
-include("set_atmosphere_model.jl")
 
 #####
 ##### Remaining AtmosphereModel components
@@ -81,6 +120,7 @@ include("set_atmosphere_model.jl")
 include("atmosphere_model_buoyancy.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
+include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
 
@@ -91,17 +131,8 @@ include("compute_hydrostatic_pressure.jl")
 include("Diagnostics/Diagnostics.jl")
 using .Diagnostics
 
-#####
-##### Thermodynamic formulation submodules
-#####
-
-include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
-using .StaticEnergyFormulations:
-    StaticEnergyFormulation
-
-include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
-using .PotentialTemperatureFormulations:
-    LiquidIcePotentialTemperatureFormulation
-
+# set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
+include("set_atmosphere_model.jl")
+include("set_to_mean.jl")
 
 end

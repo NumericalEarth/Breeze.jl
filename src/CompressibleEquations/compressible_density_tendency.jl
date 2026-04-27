@@ -15,10 +15,27 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 #####
 ##### Pressure gradient for compressible dynamics
 #####
+##### When a reference state exists, the vertical pressure gradient subtracts the
+##### reference pressure gradient ∂z(p_ref). Combined with the reference-subtracted
+##### buoyancy -g(ρ - ρ_ref), this eliminates the O(Δz²) hydrostatic truncation error.
+##### The reference pressure is in discrete hydrostatic balance with the reference
+##### density, so ∂z(p_ref) + g*ℑz(ρ_ref) = 0 exactly at the discrete level.
+#####
+##### Horizontal pressure gradients are unaffected because the reference state
+##### is a column (varies only in z).
+#####
 
-@inline x_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
-@inline y_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
-@inline z_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂zᶜᶜᶠ(i, j, k, grid, d.pressure)
+@inline AtmosphereModels.x_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
+@inline AtmosphereModels.y_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
+
+@inline function AtmosphereModels.z_pressure_gradient(i, j, k, grid, d::CompressibleDynamics)
+    ∂z_p = ∂zᶜᶜᶠ(i, j, k, grid, d.pressure)
+    ∂z_pᵣ = ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, d.reference_state)
+    return ∂z_p - ∂z_pᵣ
+end
+
+@inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ::Nothing) = false
+@inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ref::ExnerReferenceState) = ∂zᶜᶜᶠ(i, j, k, grid, ref.pressure)
 
 #####
 ##### Density tendency from continuity equation
@@ -31,12 +48,12 @@ Compute the density tendency for compressible dynamics using the continuity equa
 
 The density evolves according to:
 ```math
-\\frac{\\partial \\rho}{\\partial t} = -\\nabla \\cdot (\\rho \\mathbf{u})
+\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot \\,} (\\rho \\boldsymbol{u})
 ```
 
 Since momentum `ρu` is already available, this is simply the negative divergence of momentum.
 """
-function compute_dynamics_tendency!(model::CompressibleModel)
+function AtmosphereModels.compute_dynamics_tendency!(model::CompressibleModel)
     grid = model.grid
     arch = grid.architecture
     Gρ = model.timestepper.Gⁿ.ρ

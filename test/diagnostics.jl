@@ -5,7 +5,7 @@ using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using GPUArraysCore: @allowscalar
 
-@testset "Potential temperature diagnostics [$(FT)]" for FT in (Float32, Float64)
+@testset "Potential temperature diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
     model = AtmosphereModel(grid)
@@ -67,9 +67,9 @@ using GPUArraysCore: @allowscalar
     @test θᵇ isa Oceananigans.AbstractOperations.KernelFunctionOperation
     θᵇ_field = Field(θᵇ)
     @test all(isfinite.(interior(θᵇ_field)))
-    # Stability-equivalent potential temperature should be >= equivalent
+    # Stability-equivalent potential temperature should be ≥ equivalent
     # (equal when no liquid water is present, i.e., qˡ = 0)
-    @test all(interior(θᵇ_field) .>= interior(θᵉ_field))
+    @test all(interior(θᵇ_field) .≥ interior(θᵉ_field))
 
     # Test density flavor
     θᵇ_density = StabilityEquivalentPotentialTemperature(model, :density)
@@ -78,7 +78,7 @@ using GPUArraysCore: @allowscalar
     @test all(interior(θᵇ_density_field) .> 0)
 end
 
-@testset "Static energy diagnostics [$(FT)]" for FT in (Float32, Float64)
+@testset "Static energy diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
     model = AtmosphereModel(grid)
@@ -98,7 +98,7 @@ end
     @test all(interior(e_density_field) .> 0)
 end
 
-@testset "Relative humidity diagnostics [$(FT)]" for FT in (Float32, Float64)
+@testset "Relative humidity diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
     microphysics = SaturationAdjustment()
@@ -111,8 +111,8 @@ end
     RH_field = Field(RH)
     @test all(isfinite.(interior(RH_field)))
     # Relative humidity should be between 0 and 1 for subsaturated conditions
-    @test all(interior(RH_field) .>= 0)
-    @test all(interior(RH_field) .<= 1)
+    @test all(interior(RH_field) .≥ 0)
+    @test all(interior(RH_field) .≤ 1)
 
     # With low moisture, should be subsaturated (RH < 1)
     @test all(interior(RH_field) .< 1)
@@ -132,7 +132,41 @@ end
     end
 end
 
-@testset "Hydrostatic pressure computation [$(FT)]" for FT in (Float32, Float64)
+@testset "Dewpoint temperature diagnostics [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
+    microphysics = SaturationAdjustment()
+    model = AtmosphereModel(grid; microphysics)
+
+    # Test with subsaturated conditions (low moisture)
+    set!(model, θ=300, qᵗ=0.005)
+    T⁺ = DewpointTemperature(model)
+    @test T⁺ isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    T⁺_field = Field(T⁺)
+    @test all(isfinite.(interior(T⁺_field)))
+    # Dewpoint should be less than or equal to temperature
+    @test all(interior(T⁺_field) .≤ interior(model.temperature))
+    # Dewpoint should be in a reasonable range (above 200K)
+    @test all(interior(T⁺_field) .> 200)
+
+    # With low moisture, dewpoint should be less than temperature
+    @test all(interior(T⁺_field) .< interior(model.temperature))
+
+    # Test with saturated conditions (high moisture)
+    set!(model, θ=300, qᵗ=0.03)  # High moisture to ensure saturation
+    T⁺_sat = DewpointTemperatureField(model)
+    # For saturated conditions, dewpoint should equal temperature where there is condensate
+    qˡ = model.microphysical_fields.qˡ
+    @allowscalar begin
+        for k in 1:8
+            if qˡ[1, 1, k] > 0  # If there's condensate, should be saturated
+                @test T⁺_sat[1, 1, k] ≈ model.temperature[1, 1, k] rtol=FT(1e-3)
+            end
+        end
+    end
+end
+
+@testset "Hydrostatic pressure computation [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 20), x=(0, 1000), y=(0, 1000), z=(0, 10000))
     constants = ThermodynamicConstants()
@@ -153,7 +187,7 @@ end
 
     θ_field = CenterField(grid)
     set!(θ_field, (x, y, z) -> begin
-        pᵣ_z = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+        pᵣ_z = adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
         T₀ * (pˢᵗ / pᵣ_z)^(Rᵈ / cᵖᵈ)
     end)
 
@@ -184,4 +218,3 @@ end
 
     @test ph ≈ p_expected
 end
-

@@ -142,8 +142,8 @@ set!(Fθ_field, z -> dTdt_bomex(1, z))
 θ_radiation_forcing = Forcing(Fθ_field)
 θ_forcing = (θ_radiation_forcing, θ_subsidence_forcing)
 
-model = NonhydrostaticModel(; grid, buoyancy, coriolis,
-                            advection = WENO(order=5), 
+model = NonhydrostaticModel(grid; buoyancy, coriolis,
+                            advection = WENO(order=5),
                             tracers = (:θ, :qᵗ),
                             forcing = (; qᵗ=qᵗ_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
                             boundary_conditions = (θ=θ_bcs, qᵗ=qᵗ_bcs, u=u_bcs, v=v_bcs))
@@ -159,6 +159,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
 simulation = Simulation(model; Δt=1, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # Write a callback to compute *_avg_f
 u_avg = Field(Average(model.velocities.u, dims=(1, 2)))

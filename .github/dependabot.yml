@@ -11,13 +11,19 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/" # Location of package manifests
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     labels:
       - "dependencies 🖇️"
-  - package-ecosystem: "julia" # See documentation for possible values
+    cooldown:
+      default-days: 15
+  - package-ecosystem: "julia"
     # Location of Julia projects
     directories:
       - "/"
+      - "/benchmarking"
+      - "/docs"
+      - "/examples"
+      - "/test"
     schedule:
       interval: "weekly"
     ignore:
@@ -26,12 +32,5 @@ updates:
     labels:
       - "dependencies 🖇️"
     groups:
-      julia-major-updates:
-        update-types:
-          - "major"
-      julia-minor-updates:
-        update-types:
-          - "minor"
-      julia-patch-updates:
-        update-types:
-          - "patch"
+      per-dependency:
+        group-by: dependency-name

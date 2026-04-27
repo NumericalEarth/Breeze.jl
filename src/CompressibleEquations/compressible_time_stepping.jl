@@ -7,7 +7,7 @@
 #####
 
 # No default initialization for compressible models
-initialize_model_thermodynamics!(model::CompressibleModel) = nothing
+AtmosphereModels.initialize_model_thermodynamics!(::CompressibleModel) = nothing
 
 #####
 ##### Pressure correction (no-op for compressible dynamics)
@@ -18,25 +18,25 @@ $(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - pressure is computed diagnostically from the equation of state.
 """
-TimeSteppers.compute_pressure_correction!(model::CompressibleModel, Δt) = nothing
+AtmosphereModels.compute_pressure_correction!(::CompressibleModel, Δt) = nothing
 
 """
 $(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - no pressure projection is needed.
 """
-TimeSteppers.make_pressure_correction!(model::CompressibleModel, Δt) = nothing
+AtmosphereModels.make_pressure_correction!(::CompressibleModel, Δt) = nothing
 
 #####
 ##### Pressure solver (no-op)
 #####
 
 """
-    solve_for_pressure!(model::CompressibleModel)
+$(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - pressure is computed from the equation of state, not solved.
 """
-solve_for_pressure!(model::CompressibleModel) = nothing
+solve_for_pressure!(::CompressibleModel) = nothing
 
 #####
 ##### Auxiliary dynamics variables (temperature and pressure for compressible)
@@ -67,7 +67,7 @@ This joint computation is necessary because, unlike anelastic dynamics where pre
 comes from a reference state, compressible dynamics requires solving for both
 temperature and pressure simultaneously.
 """
-function compute_auxiliary_dynamics_variables!(model::CompressibleModel)
+function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::CompressibleModel)
     grid = model.grid
     arch = grid.architecture
     dynamics = model.dynamics
@@ -84,7 +84,7 @@ function compute_auxiliary_dynamics_variables!(model::CompressibleModel)
             dynamics.density,
             model.formulation,
             dynamics,
-            model.specific_moisture,
+            specific_prognostic_moisture(model),
             grid,
             model.microphysics,
             model.microphysical_fields,
@@ -98,17 +98,17 @@ end
 
 @kernel function _compute_temperature_and_pressure!(temperature_field, pressure_field,
                                                     density, formulation, dynamics,
-                                                    specific_moisture, grid, microphysics,
+                                                    specific_prognostic_moisture, grid, microphysics,
                                                     microphysical_fields, constants)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         ρ = density[i, j, k]
-        qᵗ = specific_moisture[i, j, k]
+        qᵛᵉ = specific_prognostic_moisture[i, j, k]
     end
 
     # Compute moisture fractions
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     cᵛᵐ = cᵖᵐ - Rᵐ
@@ -150,4 +150,3 @@ end
 
     return T, p
 end
-

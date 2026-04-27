@@ -54,7 +54,7 @@ using RRTMGP
         @test_throws ArgumentError RadiativeTransferModel(grid, ClearSkyOptics(), constants;
                                                           surface_temperature = 300)
     end
-    @testset "Single column grid [$(FT)]" for FT in (Float32, Float64)
+    @testset "Single column grid [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
 
         Nz = 8
@@ -92,9 +92,9 @@ using RRTMGP
 
         # Allow small numerical tolerance (wider for Float32)
         ε = FT == Float32 ? FT(1e-2) : FT(1e-6)
-        @test all(interior(ℐ_lw_up) .>= -ε)
-        @test all(interior(ℐ_lw_dn) .<= ε)
-        @test all(interior(ℐ_sw_dn) .<= ε)
+        @test all(interior(ℐ_lw_up) .≥ -ε)
+        @test all(interior(ℐ_lw_dn) .≤ ε)
+        @test all(interior(ℐ_sw_dn) .≤ ε)
 
         # Surface upwelling LW should be significant
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100

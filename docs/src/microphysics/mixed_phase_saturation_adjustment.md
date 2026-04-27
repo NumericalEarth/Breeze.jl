@@ -5,8 +5,8 @@ ice nucleation temperature and the freezing point, where condensate may exist as
 
 We assume instantaneous adjustment to an equilibrium in which vapor is at or below the saturation specific
 humidity over a temperature-dependent mixed surface. The mixed surface is parameterized by a liquid fraction
-λ that varies linearly with temperature between the homogeneous ice nucleation temperature `Tʰ` and the
-freezing temperature `Tᶠ`.
+``λ`` that varies linearly with temperature between the homogeneous ice nucleation temperature ``T^h`` and the
+freezing temperature ``T^f``.
 
 ## Equilibrium surface model
 
@@ -47,7 +47,7 @@ We can compute the saturation specific humidity across the entire range from hom
 ice nucleation up to freezing using the equilibrium model above:
 
 ```@example mixed_phase
-using Breeze.Microphysics: equilibrium_saturation_specific_humidity
+using Breeze: equilibrium_saturation_specific_humidity
 
 p = 101325.0
 qᵗ = 0.012
@@ -74,7 +74,7 @@ fig
 
 Under mixed-phase saturation adjustment, excess total moisture is partitioned between liquid and ice
 according to the temperature-dependent liquid fraction ``λ(T)`` implied by the equilibrium surface.
-Given total moisture `qᵗ` and saturation specific humidity `qᵛ⁺(T)`, the condensate amount is
+Given total moisture ``qᵗ`` and saturation specific humidity ``qᵛ⁺(T)``, the condensate amount is
 
 ```math
 q^{\mathrm{cond}} = \max(0, q^t - q^{v+}) , \qquad
@@ -101,7 +101,7 @@ fig
 
 ## Notes
 
-- Warm-phase saturation adjustment is recovered for `T ≥ Tᶠ` (``λ = 1``, all liquid) and ice-phase saturation for
+- Warm-phase saturation adjustment is recovered for ``T ≥ T^r`` (``λ = 1``, all liquid) and ice-phase saturation for
   `T ≤ Tʰ` (``λ = 0``, all ice).
 - The moist static energy in Breeze includes both liquid and ice latent heats in mixed-phase conditions:
   ```math
