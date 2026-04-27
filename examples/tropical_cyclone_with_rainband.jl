@@ -145,14 +145,16 @@ mkpath(snapshots_dir); mkpath(figures_dir)
 # 214² cells horizontally and 75 levels vertically (``Δz ≈ 333`` m). The run
 # prefers GPU and falls back to CPU if CUDA isn't functional.
 
-Δx              = 3kilometers
-Nx = Ny         = 214
-Nz              = 75
+## SMOKE TEST overrides (step0_review_comments): half-resolution, short stages.
+## Restore Δx=3km, Nx=214, Nz=75, stage_stop_time=24hours for paper fidelity.
+Δx              = 6kilometers
+Nx = Ny         = 108
+Nz              = 50
 Lx              = Nx * Δx
 Lz              = 25kilometers                 # YD19 §3a1
 Δz              = Lz / Nz
 sponge_rate     = 0.003                       # ≈ WRF damp_opt=2 `dampcoef` (~333 s timescale)
-stage_stop_time = 24hours
+stage_stop_time = 4hours                       # smoke test: 3 stages × 4 h = 12 h total
 
 arch = CUDA.functional() ? GPU() : CPU()
 
@@ -550,6 +552,24 @@ sponge_ρv = Forcing(sponge_ρv_fn; discrete_form=true, parameters=sponge_vel_pa
 sponge_ρw = Forcing(sponge_ρw_fn; discrete_form=true, parameters=sponge_vel_params)
 sponge_ρe = Forcing(sponge_ρe_fn; discrete_form=true, parameters=sponge_ρe_params)
 
+# ## Surface fluxes (Emanuel 1986 bulk aerodynamic formulation)
+#
+# Step 1 addition: turn on the air-sea exchange that nrb171's PR #440 had wired up
+# but PR #657 dropped. Coefficients from [Emanuel1986](@cite); SST T₀ = 300 K matches
+# YD19 §3a1. We omit the moisture flux here — Step 2 (moist physics) adds that on
+# the ρqᵉ field once the model carries moisture.
+
+Cᴰ_surf = 1.229e-3   # momentum drag coefficient
+Cᵀ_surf = 1.094e-3   # sensible heat transfer coefficient
+T₀_surf = 300.0      # SST (K)
+
+ρu_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ_surf))
+ρv_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ_surf))
+ρe_bcs = FieldBoundaryConditions(bottom = BulkSensibleHeatFlux(coefficient = Cᵀ_surf,
+                                                               surface_temperature = T₀_surf))
+
+surface_boundary_conditions = (ρu = ρu_bcs, ρv = ρv_bcs, ρe = ρe_bcs)
+
 # ## Model builder
 
 function build_model(; with_heating::Bool)
@@ -562,6 +582,7 @@ function build_model(; with_heating::Bool)
               (ρu=sponge_ρu, ρv=sponge_ρv, ρw=sponge_ρw, ρe=sponge_ρe)
 
     return AtmosphereModel(grid; dynamics, coriolis, advection, forcing,
+                           boundary_conditions = surface_boundary_conditions,
                            formulation=:StaticEnergy)
 end
 
