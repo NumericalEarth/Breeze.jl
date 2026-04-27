@@ -1366,7 +1366,11 @@ let
         end
         w_lim = max(0.3f0, Float32(maximum(abs, w_frames)))
 
-        fig = Figure(size=(720, 640))
+        ## Smaller figure + higher compression to keep the docs-build HTML page
+        ## a sensible size (the prior 720×640, default-CRF mp4 inflated the
+        ## generated `tropical_cyclone_with_rainband.md` page well past
+        ## Documenter's size_threshold).
+        fig = Figure(size=(480, 360))
         ax  = Axis(fig[1, 1]; xlabel = "x (km)", ylabel = "y (km)",
                    aspect = DataAspect(),
                    limits = (-120, 120, -120, 120))
@@ -1374,7 +1378,7 @@ let
         w_n = @lift @view(w_frames[:, :, $n])
         title_t = @lift @sprintf("w' response at z = %.1f km — t = %.1f h after heating onset",
                                   z_anim/1e3, heat_times[$n] / hour)
-        fig[0, :] = Label(fig, title_t; fontsize=16, tellwidth=false)
+        fig[0, :] = Label(fig, title_t; fontsize=12, tellwidth=false)
         hm = heatmap!(ax, xs_grid ./ 1e3, ys_grid ./ 1e3, w_n;
                       colormap = :balance, colorrange = (-w_lim, w_lim))
         contour!(ax, xs_grid ./ 1e3, ys_grid ./ 1e3, Q_anim;
@@ -1384,7 +1388,8 @@ let
         Colorbar(fig[1, 2], hm; label = "w' (m s⁻¹)")
 
         anim_path = joinpath(figures_dir, "response_w_z3km.mp4")
-        CairoMakie.record(fig, anim_path, 1:Nt_anim; framerate = 4) do nn
+        CairoMakie.record(fig, anim_path, 1:Nt_anim;
+                          framerate = 2, compression = 30) do nn
             n[] = nn
         end
         @info "Saved animation" anim_path
