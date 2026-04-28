@@ -33,7 +33,7 @@ if isdefined(CUDA, :CUDACore)
 else
     const CUDACore = CUDA
 end
-
+using AMDGPU: AMDGPU, ROCBackend
 
 # Base functionalities
 include("metadata.jl")
