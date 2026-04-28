@@ -61,6 +61,10 @@ using CUDA
 Oceananigans.defaults.FloatType = Float64
 Random.seed!(42)
 
+if CUDA.functional()
+    CUDA.seed(42)
+end
+
 # ## Jordan (1958) hurricane-season mean sounding
 #
 # The environment is a hydrostatic dry column taken from Table 5 by
