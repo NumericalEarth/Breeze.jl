@@ -118,13 +118,13 @@ p_env(z) = _linear_interpolate(jordan_z_m, jordan_p_mb .* 100.0, z)    # convert
 # non-periodic mother domain — but we need it to keep the vortex from
 # wrapping around on our periodic box.
 
-f = 5.0e-5                 # f-plane Coriolis parameter ([YuDidlake2019](@citet); §3a1)
-v_max_surface = 43.0       # initial surface v_max, m/s ([YuDidlake2019](@citet); §3a2)
-a_decay = 0.5              # modified-Rankine decay exponent ([YuDidlake2019](@citet); Eq. 2)
-rmw_surface = 31_000.0     # surface radius of maximum wind, m ([MoonNolan2010](@citet); Appendix A)
-z_vortex_top = 16_000.0    # outflow reference level, m ([MoonNolan2010](@citet); v = 0 at RMW at z ≈ 15.9 km)
-r_taper_start = 250_000.0  # radial taper start for periodic-domain compatibility (m)
-r_taper_end = 300_000.0    # radial taper end (m)
+f = 5.0e-5                     # f-plane Coriolis parameter, 1/s ([YuDidlake2019](@citet); §3a1)
+v_max_surface = 43.0           # initial surface v_max, m/s ([YuDidlake2019](@citet); §3a2)
+a_decay = 0.5                  # modified-Rankine decay exponent ([YuDidlake2019](@citet); Eq. 2)
+rmw_surface = 31kilometers     # surface radius of maximum wind, m ([MoonNolan2010](@citet); Appendix A)
+z_vortex_top = 16kilometers    # outflow reference level, m ([MoonNolan2010](@citet); v = 0 at RMW at z ≈ 15.9 km)
+r_taper_start = 250kilometers  # radial taper start for periodic-domain compatibility, m
+r_taper_end = 300kilometers    # radial taper end, m
 
 # ## Output layout
 #
@@ -156,18 +156,16 @@ stage_stop_time = 24hours
 
 arch = CUDA.functional() ? GPU() : CPU()
 
-grid = RectilinearGrid(
-    arch;
-    size = (Nx, Ny, Nz), halo = (5, 5, 5),
-    x = (-Lx / 2, Lx / 2), y = (-Lx / 2, Lx / 2), z = (0, Lz),
-    topology = (Periodic, Periodic, Bounded)
-)
+grid = RectilinearGrid(arch;
+                       size = (Nx, Ny, Nz), halo = (5, 5, 5),
+                       x = (-Lx / 2, Lx / 2), y = (-Lx / 2, Lx / 2), z = (0, Lz),
+                       topology = (Periodic, Periodic, Bounded))
 
 # ## Reference state and thermodynamic constants
 #
 # The [`ReferenceState`](@ref Breeze.Thermodynamics.ReferenceState) is
 # constructed from the Jordan ``θ(z)`` profile and anchored at the observed
-# surface pressure, giving us `pᵣ(z)`, `ρᵣ(z)`, `Tᵣ(z)` — the hydrostatic
+# surface pressure, giving us ``pᵣ(z)``, `ρᵣ(z)`, `Tᵣ(z)` — the hydrostatic
 # far-field of the anelastic problem. We pull the three columns down to the
 # host once, here, for use by the CPU-side balance iteration below.
 
@@ -248,11 +246,11 @@ function rmw_analytic(z; ΔT_floor = ΔT_floor_default)
 end
 
 function tangential_wind(r, z; ΔT_floor = ΔT_floor_default)
-    r >= r_taper_end  && return 0.0
-    z >= z_vortex_top && return 0.0
+    r ≥ r_taper_end  && return 0.0
+    z ≥ z_vortex_top && return 0.0
     rmw_z = rmw_analytic(z; ΔT_floor)
     v_adj = rmw_surface / rmw_z
-    vt = r <= rmw_z ?
+    vt = r ≤ rmw_z ?
         v_max_surface * v_adj * r / rmw_z :
         v_max_surface * v_adj * (rmw_z / r)^a_decay
     if r > r_taper_start
@@ -310,6 +308,7 @@ function solve_balanced_vortex_iterative(
         α = 0.5, max_iter = 200, tol = 1.0e-3,
         r_safe_min = 100.0, verbose = true
     )
+
     Nr = length(r_grid)
     Nz = length(z_centers)
     Δr = r_grid[2] - r_grid[1]
@@ -450,10 +449,10 @@ Tᵢ(x, y, z) = _lookup_rz(vortex.T, sqrt(x^2 + y^2), z)
 # what we pass to `Forcing`. The
 # deviation is second order in ``p'/p`` and irrelevant inside the rainband.
 
-Q_max = 4.24 / 3600     # YD19 Eq. 3 Q_max = 4.24 K/h (stored in K/s)
-z_bs = 4_000.0
-σ_r = 6_000.0
-σ_zs = 2_000.0
+Q_max = 4.24 / hour     # YD19 Eq. 3 Q_max = 4.24 K/h (stored in K/s)
+z_bs = 4kilometers
+σ_r = 6kilometers
+σ_zs = 2kilometers
 t_full = 1hour          # 1 h ramp to avoid instantaneous onset
 
 ρᵣ_device = arch isa GPU ? CuArray(ρᵣ) : ρᵣ
@@ -506,7 +505,7 @@ end
 #
 # The top of the domain needs a Rayleigh-damping layer to absorb outgoing
 # gravity waves that would otherwise reflect off the rigid lid and
-# contaminate the interior. We match WRF's `damp_opt=2` shape: a sin² ramp
+# contaminate the interior. We match WRF's `damp_opt = 2` shape: a sin² ramp
 # from zero at ``z = 20`` km to a max rate of ``3 \times 10^{-3}`` s⁻¹
 # at ``z = 25`` km. Momentum components relax to zero; energy density
 # relaxes to its reference profile
@@ -520,11 +519,11 @@ end
 # and the vortex fails to spin down, defeating YD19's stated 43 → 40 m/s
 # decay over 24 h (§3a2).
 
-sponge_z_bottom = 20_000.0
-sponge_z_top = 25_000.0
+sponge_z_bottom = 20kilometers
+sponge_z_top = 25kilometers
 
 ## Reference dry-static-energy density profile (J/m³):
-##   ρeᵣ(z) = ρᵣ(z) · (cᵖᵈ·Tᵣ(z) + g·z)
+##   ρeᵣ(z) = ρᵣ(z) (cᵖᵈ Tᵣ(z) + g z)
 ρeᵣ = [ρᵣ[k] * (cᵖᵈ * Tᵣ[k] + g * z_centers[k]) for k in 1:Nz]
 ρeᵣ_device = arch isa GPU ? CuArray(ρeᵣ) : ρeᵣ
 
@@ -704,7 +703,7 @@ function plot_preflight()
         fig[1, 1]; xlabel = "RMW (km)", ylabel = "Height (km)",
         title = "RMW(z) [Stern-Nolan 2009 Eq. 4.4]", limits = (0, 200, 0, 22)
     )
-    lines!(ax1, rmw_profile ./ 1e3, z_centers ./ 1e3; color = :black, linewidth = 2)
+    lines!(ax1, rmw_profile ./ kilometer, z_centers ./ kilometer; color = :black, linewidth = 2)
     hlines!(ax1, [z_vortex_top / 1e3]; color = :gray, linestyle = :dash)
 
     ax2 = Axis(
@@ -712,18 +711,18 @@ function plot_preflight()
         title = "v_max(z) at RMW", limits = (0, 50, 0, 22)
     )
     vmax_z = [tangential_wind(rmw_analytic(z), z) for z in z_centers]
-    lines!(ax2, vmax_z, z_centers ./ 1e3; color = :black, linewidth = 2)
+    lines!(ax2, vmax_z, z_centers ./ kilometer; color = :black, linewidth = 2)
 
     ax3 = Axis(
         fig[2, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",
         title = "Warm-core θ' (t = 0)", limits = (0, 200, 0, 22)
     )
     hm = heatmap!(
-        ax3, r_pre ./ 1e3, z_centers ./ 1e3, θ_anom;
+        ax3, r_pre ./ kilometer, z_centers ./ kilometer, θ_anom;
         colormap = :balance, colorrange = (-14, 14)
     )
     contour!(
-        ax3, r_pre ./ 1e3, z_centers ./ 1e3, θ_anom;
+        ax3, r_pre ./ kilometer, z_centers ./ kilometer, θ_anom;
         levels = -14:1:14, color = :black, linewidth = 0.4
     )
     Colorbar(fig[2, 1][1, 2], hm; label = "θ' (K)")
@@ -732,7 +731,7 @@ function plot_preflight()
         fig[2, 2]; xlabel = "Radius (km)", ylabel = "δp (hPa)",
         title = "Surface pressure deficit", limits = (0, 300, -60, 5)
     )
-    lines!(ax4, r_pre ./ 1e3, δp_sfc; color = :black, linewidth = 2)
+    lines!(ax4, r_pre ./ kilometer, δp_sfc; color = :black, linewidth = 2)
     hlines!(ax4, [0.0]; color = :gray, linestyle = :dot)
     δp_min = minimum(δp_sfc)
     text!(
@@ -803,22 +802,24 @@ let
     ## Reused across every figure so peak RSS during analysis is ~4 × Nx × Ny × Nz
     ## × 4 bytes, not Nt × 4 × Nx × Ny × Nz × 8 bytes as the prior InMemory /
     ## Float64 pattern was.
-    u_sc = Array{Float32}(undef, Nx, Ny, Nz); v_sc = similar(u_sc)
-    w_sc = similar(u_sc);                      T_sc = similar(u_sc)
+    u_sc = Array{Float32}(undef, Nx, Ny, Nz)
+    v_sc = similar(u_sc)
+    w_sc = similar(u_sc)
+    T_sc = similar(u_sc)
 
     ## In-place centered interpolation (Arakawa C-grid → Centers).
     function _center_u!(out::AbstractArray{Float32, 3}, src)
         Nxs, Nys, Nzs = size(out)
         return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
             ip = i == Nxs ? 1 : i + 1
-            out[i, j, k] = 0.5f0 * (Float32(src[i, j, k]) + Float32(src[ip, j, k]))
+            out[i, j, k] = Float32((src[i, j, k] + src[ip, j, k])/2)
         end
     end
     function _center_v!(out::AbstractArray{Float32, 3}, src)
         Nxs, Nys, Nzs = size(out)
         return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
             jp = j == Nys ? 1 : j + 1
-            out[i, j, k] = 0.5f0 * (Float32(src[i, j, k]) + Float32(src[i, jp, k]))
+            out[i, j, k] = Float32((src[i, j, k] + src[i, jp, k])/2)
         end
     end
     function _center_w!(out::AbstractArray{Float32, 3}, src)
@@ -826,7 +827,7 @@ let
         ## faces to get cell-centered values with size (Nx, Ny, Nz).
         Nxs, Nys, Nzs = size(out)
         return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
-            out[i, j, k] = 0.5f0 * (Float32(src[i, j, k]) + Float32(src[i, j, k + 1]))
+            out[i, j, k] = Float32((src[i, j, k] + src[i, j, k + 1])/2)
         end
     end
     function _copy_f32!(out::AbstractArray{Float32, 3}, src)
@@ -857,15 +858,17 @@ let
         )
     end
 
-    r_bin_edges = collect(range(0.0, 150_000.0, step = Δx))
+    r_bin_edges = collect(range(0.0, 150kilometers, step = Δx))
     Nr_bin = length(r_bin_edges) - 1
     r_bin_centers = 0.5 .* (r_bin_edges[1:(end - 1)] .+ r_bin_edges[2:end])
     xs_center = Float32.(xnodes(grid, Center()))
     ys_center = Float32.(ynodes(grid, Center()))
 
     ## Reusable azimuthal-mean workspace
-    vθ_ws = zeros(Float32, Nr_bin, Nz); vr_ws = similar(vθ_ws)
-    w_ws = similar(vθ_ws);              T_ws = similar(vθ_ws)
+    vθ_ws = zeros(Float32, Nr_bin, Nz)
+    vr_ws = similar(vθ_ws)
+    w_ws = similar(vθ_ws)
+    T_ws = similar(vθ_ws)
     ct_ws = zeros(Int32, Nr_bin, Nz)
     r_last = Float32(last(r_bin_edges))
 
@@ -874,15 +877,17 @@ let
         Nxs, Nys, Nzs = size(u)
         @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
             x = xs_center[i]; y = ys_center[j]
-            r = sqrt(x * x + y * y)
-            r >= r_last && continue
+            r = sqrt(x^2 + y^2)
+            r ≥ r_last && continue
             ib = searchsortedlast(r_bin_edges, Float64(r))
             ib = clamp(ib, 1, Nr_bin)
             rs = max(r, 1.0f0)
-            xh = x / rs; yh = y / rs
-            uij = u[i, j, k]; vij = v[i, j, k]
+            xh = x / rs
+            yh = y / rs
+            uij = u[i, j, k]
+            vij = v[i, j, k]
             vθ[ib, k] += -yh * uij + xh * vij
-            vr[ib, k] += xh * uij + yh * vij
+            vr[ib, k] +=  xh * uij + yh * vij
             ww[ib, k] += w[i, j, k]
             TT[ib, k] += T[i, j, k]
             ct[ib, k] += 1
@@ -890,8 +895,10 @@ let
         return @inbounds for k in 1:Nzs, ib in 1:Nr_bin
             if ct[ib, k] > 0
                 inv = 1.0f0 / ct[ib, k]
-                vθ[ib, k] *= inv; vr[ib, k] *= inv
-                ww[ib, k] *= inv; TT[ib, k] *= inv
+                vθ[ib, k] *= inv
+                vr[ib, k] *= inv
+                ww[ib, k] *= inv
+                TT[ib, k] *= inv
             end
         end
     end
@@ -903,10 +910,16 @@ let
         fill!(uavg, 0.0f0); fill!(vavg, 0.0f0); fill!(wavg, 0.0f0); fill!(Tavg, 0.0f0)
         for n in ns
             load_snapshot!(u_sc, v_sc, w_sc, T_sc, ts.u, ts.v, ts.w, ts.T, n)
-            uavg .+= u_sc; vavg .+= v_sc; wavg .+= w_sc; Tavg .+= T_sc
+            uavg .+= u_sc
+            vavg .+= v_sc
+            wavg .+= w_sc
+            Tavg .+= T_sc
         end
         N = Float32(length(ns))
-        uavg ./= N; vavg ./= N; wavg ./= N; Tavg ./= N
+        uavg ./= N
+        vavg ./= N
+        wavg ./= N
+        Tavg ./= N
         return nothing
     end
 
@@ -944,11 +957,11 @@ let
         )
         v_cr_hi = 50
         hm_v = heatmap!(
-            ax_v, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, vθ_ws;
+            ax_v, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_ws;
             colormap = :inferno, colorrange = (0, v_cr_hi)
         )
         contour!(
-            ax_v, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, vθ_ws;
+            ax_v, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_ws;
             levels = 5:5:v_cr_hi, color = :white, linewidth = 0.8
         )
         Colorbar(fig[1, 2], hm_v; label = "v̄ (m s⁻¹)")
@@ -960,11 +973,11 @@ let
         )
         θ_span = max(15.0, ceil(maximum(abs, θ_anom)))
         hm_θ = heatmap!(
-            ax_θ, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, θ_anom;
+            ax_θ, r_bin_centers ./ kilometer, z_centers ./ kilometer, θ_anom;
             colormap = :balance, colorrange = (-θ_span, θ_span)
         )
         contour!(
-            ax_θ, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, θ_anom;
+            ax_θ, r_bin_centers ./ kilometer, z_centers ./ kilometer, θ_anom;
             levels = -θ_span:1.69:θ_span, color = :black, linewidth = 0.5
         )
         Colorbar(fig[1, 4], hm_θ; label = "θ̄' (K)")
@@ -973,21 +986,21 @@ let
             fig[0, :],
             @sprintf(
                 "F02ab — Basic-state vortex at t = %.1f h spin-up (YD19 Fig 2a,b, %.0f km box)",
-                t_final / hour, Lx / 1.0e3
+                t_final / hour, Lx / kilometers
             );
             fontsize = 17
         )
 
         v_peak_sfc = maximum(@view vθ_ws[:, 1])
-        r_peak_sfc = r_bin_centers[argmax(@view vθ_ws[:, 1])] / 1.0e3
+        r_peak_sfc = r_bin_centers[argmax(@view vθ_ws[:, 1])] / kilometers
         v_peak_all = maximum(vθ_ws)
         idx_all = argmax(vθ_ws)
-        r_peak_all = r_bin_centers[idx_all[1]] / 1.0e3
-        z_peak_all = z_centers[idx_all[2]] / 1.0e3
+        r_peak_all = r_bin_centers[idx_all[1]] / kilometers
+        z_peak_all = z_centers[idx_all[2]] / kilometers
         θ_peak = maximum(θ_anom)
         idx_θ = argmax(θ_anom)
-        r_θ_peak = r_bin_centers[idx_θ[1]] / 1.0e3
-        z_θ_peak = z_centers[idx_θ[2]] / 1.0e3
+        r_θ_peak = r_bin_centers[idx_θ[1]] / kilometers
+        z_θ_peak = z_centers[idx_θ[2]] / kilometers
         @info @sprintf(
             "F02a: surface v̄_peak = %.2f m/s at r = %.1f km (YD19 target ≈ 40 m/s)",
             v_peak_sfc, r_peak_sfc
@@ -1013,14 +1026,14 @@ let
     ## F02cd — analytic heating field (YD19 Fig 2c,d)
     ## ---------------------------------------------------------
     @info "Producing F02cd (heating field)..."
-    r_cs = collect(range(0.0, 150_000.0, length = 151))
-    z_cs = collect(range(0.0, 12_000.0, length = 61))
+    r_cs = collect(range(0.0, 150kilometers, length = 151))
+    z_cs = collect(range(0.0, 12kilometers, length = 61))
     λ_mid = -π / 4
     Q_cs = [heating_rate_K_per_hour(r, λ_mid, z) for r in r_cs, z in z_cs]
 
     x_pv = collect(range(-Lx / 2, Lx / 2, length = 300))
     y_pv = copy(x_pv)
-    z_level = 4_600.0
+    z_level = 4.6kilometers
     Q_pv = zeros(length(x_pv), length(y_pv))
     for j in eachindex(y_pv), i in eachindex(x_pv)
         r = sqrt(x_pv[i]^2 + y_pv[j]^2)
@@ -1037,11 +1050,11 @@ let
         limits = (0, 150, 0, 12)
     )
     hm_c = heatmap!(
-        ax_c, r_cs ./ 1.0e3, z_cs ./ 1.0e3, Q_cs;
+        ax_c, r_cs ./ kilometer, z_cs ./ kilometer, Q_cs;
         colormap = :balance, colorrange = (-Q_lim, Q_lim)
     )
     contour!(
-        ax_c, r_cs ./ 1.0e3, z_cs ./ 1.0e3, Q_cs;
+        ax_c, r_cs ./ kilometer, z_cs ./ kilometer, Q_cs;
         levels = -4:1:4, color = :black, linewidth = 0.6
     )
     Colorbar(fig[1, 2], hm_c; label = "Q (K h⁻¹)")
@@ -1052,11 +1065,11 @@ let
         aspect = DataAspect(), limits = (-120, 120, -120, 120)
     )
     hm_d = heatmap!(
-        ax_d, x_pv ./ 1.0e3, y_pv ./ 1.0e3, Q_pv;
+        ax_d, x_pv ./ kilometer, y_pv ./ kilometer, Q_pv;
         colormap = :balance, colorrange = (-Q_lim, Q_lim)
     )
     contour!(
-        ax_d, x_pv ./ 1.0e3, y_pv ./ 1.0e3, Q_pv;
+        ax_d, x_pv ./ kilometer, y_pv ./ kilometer, Q_pv;
         levels = -4:0.5:4, color = :black, linewidth = 0.4
     )
     Colorbar(fig[1, 4], hm_d; label = "Q (K h⁻¹)")
@@ -1234,26 +1247,26 @@ let
             limits = (xlim_lo, xlim_hi, zlim_lo, zlim_hi)
         )
         hm = heatmap!(
-            ax, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, vθ_resp;
+            ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_resp;
             colormap = :balance, colorrange = (-v_lim, v_lim)
         )
         contour!(
-            ax, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, vθ_resp;
+            ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_resp;
             levels = -v_lim:0.5:v_lim, color = :black, linewidth = 0.5
         )
         contour!(
-            ax, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, Q_bar;
+            ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, Q_bar;
             levels = [0.15], color = :red, linewidth = 2.0
         )
         contour!(
-            ax, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, Q_bar;
+            ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, Q_bar;
             levels = [-0.15], color = :blue, linewidth = 2.0
         )
         Colorbar(fig[1, 2], hm; label = "v̄' (m s⁻¹)")
 
         let stride_r = 2, stride_z = 3
-            rsub = r_bin_centers[1:stride_r:end] ./ 1.0e3
-            zsub = z_centers[1:stride_z:end] ./ 1.0e3
+            rsub = r_bin_centers[1:stride_r:end] ./ kilometer
+            zsub = z_centers[1:stride_z:end] ./ kilometer
             vsub = vr_resp[1:stride_r:end, 1:stride_z:end]
             wsub = w_resp_rz[1:stride_r:end, 1:stride_z:end] .* 10
             pts = Point2f[]; vecs = Vec2f[]
@@ -1343,21 +1356,21 @@ let
                 limits = (-120, 120, -120, 120)
             )
             local hm = heatmap!(
-                ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, w_s;
+                ax, xs_grid ./ kilometer, ys_grid ./ kilometer, w_s;
                 colormap = :balance, colorrange = (-w_panel_lim, w_panel_lim)
             )
             contour!(
-                ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_warm;
+                ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_warm;
                 levels = [1.0], color = :red, linewidth = 2.0
             )
             contour!(
-                ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_cool;
+                ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_cool;
                 levels = [-1.0], color = :blue, linewidth = 2.0
             )
 
             ss = 10
-            xa = xs_grid[1:ss:end] ./ 1.0e3
-            ya = ys_grid[1:ss:end] ./ 1.0e3
+            xa = xs_grid[1:ss:end] ./ kilometer
+            ya = ys_grid[1:ss:end] ./ kilometer
             ua = u_s[1:ss:end, 1:ss:end]
             va = v_s[1:ss:end, 1:ss:end]
             local pts = [Point2f(xa[i], ya[j]) for i in eachindex(xa), j in eachindex(ya)][:]
@@ -1438,15 +1451,15 @@ let
             limits = (-120, 120, -120, 120)
         )
         hm_pv = heatmap!(
-            ax_pv, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, w_22;
+            ax_pv, xs_grid ./ kilometer, ys_grid ./ kilometer, w_22;
             colormap = :balance, colorrange = (-w22_lim, w22_lim)
         )
         contour!(
-            ax_pv, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_warm;
+            ax_pv, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_warm;
             levels = [1.0], color = :red, linewidth = 2.0
         )
         contour!(
-            ax_pv, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_cool;
+            ax_pv, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_cool;
             levels = [-1.0], color = :blue, linewidth = 2.0
         )
         ## Azimuthal convention (YD19 §3b1):
@@ -1466,26 +1479,26 @@ let
         cs_v_lim = 3.0
         function draw_cross!(ax, cs, λ_cs, label)
             hm = heatmap!(
-                ax, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, cs.vθ;
+                ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, cs.vθ;
                 colormap = :balance, colorrange = (-cs_v_lim, cs_v_lim)
             )
             contour!(
-                ax, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, cs.vθ;
+                ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, cs.vθ;
                 levels = -cs_v_lim:0.5:cs_v_lim, color = :black, linewidth = 0.4
             )
             Q_cs2 = [heating_rate_K_per_hour(r, λ_cs, z) for r in r_bin_centers, z in z_centers]
             contour!(
-                ax, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, Q_cs2;
+                ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, Q_cs2;
                 levels = [1.0], color = :red, linewidth = 2.0
             )
             contour!(
-                ax, r_bin_centers ./ 1.0e3, z_centers ./ 1.0e3, Q_cs2;
+                ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, Q_cs2;
                 levels = [-1.0], color = :blue, linewidth = 2.0
             )
 
             stride_r = 2; stride_z = 3
-            rsub = r_bin_centers[1:stride_r:end] ./ 1.0e3
-            zsub = z_centers[1:stride_z:end] ./ 1.0e3
+            rsub = r_bin_centers[1:stride_r:end] ./ kilometer
+            zsub = z_centers[1:stride_z:end] ./ kilometer
             vsub = cs.vr[1:stride_r:end, 1:stride_z:end]
             wsub = cs.w[1:stride_r:end, 1:stride_z:end] .* 10
             pts = Point2f[]; vecs = Vec2f[]
@@ -1593,15 +1606,15 @@ let
         )
         fig[0, :] = Label(fig, title_t; fontsize = 12, tellwidth = false)
         hm = heatmap!(
-            ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, w_n;
+            ax, xs_grid ./ kilometer, ys_grid ./ kilometer, w_n;
             colormap = :balance, colorrange = (-w_lim, w_lim)
         )
         contour!(
-            ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_anim_warm;
+            ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_anim_warm;
             levels = [1.0], color = :red, linewidth = 1.5
         )
         contour!(
-            ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_anim_cool;
+            ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_anim_cool;
             levels = [-1.0], color = :blue, linewidth = 1.5
         )
         Colorbar(fig[1, 2], hm; label = "w' (m s⁻¹)")
