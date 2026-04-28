@@ -3,6 +3,15 @@
 ##### Benchmark utilities
 #####
 
+function memory_reclaim(arch)
+    # Reclaim memory, so that next benchmarks will start from a clean state.
+    if arch isa GPU{CUDABackend}
+        CUDA.reclaim()
+    elseif arch isa GPU{ROCBackend}
+        AMDGPU.reclaim()
+    end
+end
+
 """
     benchmark_time_stepping(model;
                             time_steps = 100,
@@ -72,7 +81,7 @@ function benchmark_time_stepping(model;
     steps_per_second = time_steps / total_time_seconds
     grid_points_per_second = total_points / time_per_step_seconds
 
-    gpu_memory_used = arch isa GPU ? CUDACore.MemoryInfo().pool_used_bytes : 0
+    gpu_memory_used = arch isa GPU{CUDABackend} ? CUDACore.MemoryInfo().pool_used_bytes : 0
     metadata = BenchmarkMetadata(arch)
 
     result = BenchmarkResult(
@@ -98,15 +107,12 @@ function benchmark_time_stepping(model;
         @info "    Total time: $(@sprintf("%.3f", total_time_seconds)) s"
         @info "    Time per step: $(@sprintf("%.6f", time_per_step_seconds)) s"
         @info "    Grid points/s: $(@sprintf("%.2e", grid_points_per_second))"
-        if arch isa GPU
+        if arch isa GPU{CUDABackend}
             @info "    GPU memory usage: $(Base.format_bytes(gpu_memory_used))"
         end
     end
 
-    if arch isa GPU
-        # Reclaim memory, so that next benchmarks will start from a clean state.
-        CUDA.reclaim()
-    end
+    memory_reclaim(arch)
 
     return result
 end
@@ -264,7 +270,7 @@ function run_benchmark_simulation(model;
     steps_per_second = time_steps / wall_time_seconds
     grid_points_per_second = total_points / time_per_step_seconds
 
-    gpu_memory_used = arch isa GPU ? CUDACore.MemoryInfo().pool_used_bytes : 0
+    gpu_memory_used = arch isa GPU{CUDABackend} ? CUDACore.MemoryInfo().pool_used_bytes : 0
     metadata = BenchmarkMetadata(arch)
 
     result = SimulationResult(
@@ -300,10 +306,7 @@ function run_benchmark_simulation(model;
         end
     end
 
-    if arch isa GPU
-        # Reclaim memory, so that next simulations will start from a clean state.
-        CUDA.reclaim()
-    end
+    memory_reclaim(arch)
 
     return result
 end
@@ -314,7 +317,12 @@ end
 
 synchronize_device(::Oceananigans.Architectures.CPU) = nothing
 
-function synchronize_device(::Oceananigans.Architectures.GPU)
+function synchronize_device(::Oceananigans.Architectures.GPU{CUDABackend})
     CUDA.synchronize()
+    return nothing
+end
+
+function synchronize_device(::Oceananigans.Architectures.GPU{ROCBackend})
+    AMDGPU.synchronize()
     return nothing
 end
