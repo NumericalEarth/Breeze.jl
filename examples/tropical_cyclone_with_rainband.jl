@@ -53,7 +53,6 @@
 using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.Units
-using Oceananigans.Fields: interior
 using Printf
 using Random
 using CairoMakie
@@ -119,13 +118,13 @@ p_env(z) = _linear_interpolate(jordan_z_m, jordan_p_mb .* 100.0, z)    # convert
 # non-periodic mother domain — but we need it to keep the vortex from
 # wrapping around on our periodic box.
 
-f = 5.0e-5        # f-plane Coriolis parameter ([YuDidlake2019](@citet); §3a1)
-v_max_surface = 43.0          # initial surface v_max, m/s ([YuDidlake2019](@citet); §3a2)
-a_decay = 0.5           # modified-Rankine decay exponent ([YuDidlake2019](@citet); Eq. 2)
-rmw_surface = 31_000.0      # surface radius of maximum wind, m ([MoonNolan2010](@citet); Appendix A)
-z_vortex_top = 16_000.0      # outflow reference level, m ([MoonNolan2010](@citet); v = 0 at RMW at z ≈ 15.9 km)
-r_taper_start = 250_000.0     # radial taper start for periodic-domain compatibility (m)
-r_taper_end = 300_000.0     # radial taper end (m)
+f = 5.0e-5                 # f-plane Coriolis parameter ([YuDidlake2019](@citet); §3a1)
+v_max_surface = 43.0       # initial surface v_max, m/s ([YuDidlake2019](@citet); §3a2)
+a_decay = 0.5              # modified-Rankine decay exponent ([YuDidlake2019](@citet); Eq. 2)
+rmw_surface = 31_000.0     # surface radius of maximum wind, m ([MoonNolan2010](@citet); Appendix A)
+z_vortex_top = 16_000.0    # outflow reference level, m ([MoonNolan2010](@citet); v = 0 at RMW at z ≈ 15.9 km)
+r_taper_start = 250_000.0  # radial taper start for periodic-domain compatibility (m)
+r_taper_end = 300_000.0    # radial taper end (m)
 
 # ## Output layout
 #
