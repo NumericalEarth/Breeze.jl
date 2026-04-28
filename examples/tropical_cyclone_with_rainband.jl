@@ -152,7 +152,7 @@ Nz = 75
 Lx = Nx * Δx
 Lz = 25kilometers                 # YD19 §3a1
 Δz = Lz / Nz
-sponge_rate = 0.003                       # ≈ WRF damp_opt=2 `dampcoef` (~333 s timescale)
+sponge_rate = 0.003               # ≈ WRF damp_opt=2 `dampcoef` (~333 s timescale)
 stage_stop_time = 24hours
 
 arch = CUDA.functional() ? GPU() : CPU()
@@ -207,7 +207,7 @@ z_centers = collect(range(Δz / 2, step = Δz, length = Nz))
 # The vortex has two shapes to specify: how the radius of maximum wind
 # slopes outward with height, and how the tangential wind decays with
 # radius. For the first, we follow [SternNolan2009](@citet) Eq. 4.4
-# (ultimately due to [Emanuel1986](@cite) Eqs. 51 & 56), which gives
+# (ultimately due to Eqs. 51 & 56 by [Emanuel1986](@citet)), which gives
 #
 # ```math
 # \text{RMW}(z) = \text{RMW}_\text{sfc} \sqrt{\frac{T(0) - T_\text{out}}{T(z) - T_\text{out}}}
@@ -226,7 +226,7 @@ z_centers = collect(range(Δz / 2, step = Δz, length = Nz))
 # ```math
 # v(r, z) = \begin{cases}
 #   v_\text{max}(z) \, \dfrac{r}{\text{RMW}(z)} & r \le \text{RMW}(z) \\[8pt]
-#   v_\text{max}(z) \left( \dfrac{\text{RMW}(z)}{r} \right)^{a} & r > \text{RMW}(z)
+#   v_\text{max}(z) \left[ \dfrac{\text{RMW}(z)}{r} \right]^{a} & r > \text{RMW}(z)
 # \end{cases}
 # ```
 #
@@ -430,18 +430,18 @@ Tᵢ(x, y, z) = _lookup_rz(vortex.T, sqrt(x^2 + y^2), z)
 #
 # ```math
 # Q(r, \lambda, z, t) = Q_\text{max} \,
-#   \exp\!\left[-\frac{(r - r_\text{bs}(\lambda, z))^2}{2 \sigma_r^2}\right] \,
+#   \exp\!\left\{-\frac{[r - r_\text{bs}(\lambda, z)]^2}{2 \sigma_r^2}\right\} \,
 #   V_z(z) \, A_\lambda(\lambda) \, R(t)
 # ```
 #
 # where the radial centerline is
-# ``r_\text{bs}(\lambda, z) = [60 - 10(\lambda/(\pi/4))]\,\text{km} + z``
+# ``r_\text{bs}(\lambda, z) = [60 - 10\lambda/(\pi/4)]\,\text{km} + z``
 # (a spiral with 60 km at the downwind east edge ``\lambda = 0`` and 80 km
 # at the upwind south edge ``\lambda = -\pi/2``; the ``+z`` gives outward
 # tilt with height), the vertical shape
-# ``V_z(z) = \sin(\pi (z - z_\text{bs})/\sigma_{zs})`` is active for
+# ``V_z(z) = \sin[\pi (z - z_\text{bs})/\sigma_{zs}]`` is active for
 # ``|z - z_\text{bs}| < \sigma_{zs}`` and zero elsewhere, the azimuthal
-# window ``A_\lambda(\lambda) = \exp[-(\lambda_c/(\pi/4))^8]`` is a
+# window ``A_\lambda(\lambda) = \exp\{-[\lambda_c/(\pi/4)]^8\}`` is a
 # super-Gaussian centered at ``\lambda = -\pi/4``, and the time ramp
 # ``R(t)`` is a 1-hour linear ramp from zero to full strength to avoid an
 # instantaneous shock.
@@ -455,7 +455,7 @@ Q_max = 4.24 / 3600     # YD19 Eq. 3 Q_max = 4.24 K/h (stored in K/s)
 z_bs = 4_000.0
 σ_r = 6_000.0
 σ_zs = 2_000.0
-t_full = 1hour           # 1 h ramp to avoid instantaneous onset
+t_full = 1hour          # 1 h ramp to avoid instantaneous onset
 
 ρᵣ_device = arch isa GPU ? CuArray(ρᵣ) : ρᵣ
 
@@ -469,7 +469,7 @@ t_full = 1hour           # 1 h ramp to avoid instantaneous onset
     r = sqrt(x^2 + y^2)
     λ = atan(y, x)
     r_bs = (60.0 - 10.0 * (λ / (π / 4))) * 1000.0 + z
-    G_r = exp(-(r - r_bs)^2 / (2 * p.σ_r^2))
+    G_r = exp(-(r - r_bs)^2 / 2p.σ_r^2)
 
     z_rel = (z - p.z_bs) / p.σ_zs
     V_z = ifelse(abs(z_rel) < 1, sin(π * z_rel), 0.0)
@@ -478,7 +478,7 @@ t_full = 1hour           # 1 h ramp to avoid instantaneous onset
     A_λ = exp(-(λ_c / (π / 4))^8)
 
     Q = p.Q_max * G_r * V_z * A_λ * ramp
-    ## Anelastic heating source is ρᵣ · cᵖᵈ · Q (K/s). WRF uses full ρ;
+    ## Anelastic heating source is ρᵣ cᵖᵈ Q (K/s). WRF uses full ρ;
     ## within the anelastic approximation ρ ≈ ρᵣ(z), so this deviation
     ## is second order in the heating region where p'/p ≪ 1.
     ρᵣ_k = @inbounds p.ρᵣ[k]
@@ -495,7 +495,7 @@ heating_forcing = Forcing(rainband_heating; discrete_form = true, parameters = h
 ## Analytic heating rate at full strength (K/h) — for figure contours.
 function heating_rate_K_per_hour(r, λ, z)
     r_bs = (60.0 - 10.0 * (λ / (π / 4))) * 1000.0 + z
-    G_r = exp(-(r - r_bs)^2 / (2 * σ_r^2))
+    G_r = exp(-(r - r_bs)^2 / 2σ_r^2)
     z_rel = (z - z_bs) / σ_zs
     V_z = abs(z_rel) < 1 ? sin(π * z_rel) : 0.0
     λ_c = mod(λ - (-π / 4) + π, 2π) - π
@@ -575,7 +575,7 @@ sponge_ρe = Forcing(sponge_ρe_fn; discrete_form = true, parameters = sponge_ρ
 #
 # Bulk aerodynamic surface boundary conditions for momentum drag (Cᴰ) and sensible
 # heat (Cᵀ) over a fixed sea surface temperature T₀ = 300 K, matching YD19 §3a1.
-# Coefficients from [Emanuel1986](@cite). The moisture flux is omitted here; when
+# Coefficients from [Emanuel1986](@citet). The moisture flux is omitted here; when
 # the model carries moisture, a corresponding `BulkVaporFlux` on the moisture
 # field can be wired in alongside these.
 
@@ -617,8 +617,8 @@ end
 # Each stage (spinup, control, heated) builds a fresh `AtmosphereModel`, sets
 # its initial prognostic state (u, v, T) from either functions or cached host
 # Arrays, runs for `stop_time`, and returns the post-stage state as host
-# Arrays. Anelastic diagnoses w and p' from the elliptic constraint, so u, v,
-# T is the complete prognostic record we need to hand off between stages.
+# Arrays. Anelastic diagnoses ``w`` and ``p'`` from the elliptic constraint,
+# so ``u``, ``v``, ``T`` is the complete prognostic record we need to hand off between stages.
 
 function build_and_run_stage!(
         stage_label::String;
@@ -697,7 +697,7 @@ function plot_preflight()
     for k in 1:Nz, i in 1:Nr_pre
         θ_anom[i, k] = vortex.θ[i, k] - θ_env(z_centers[k])
     end
-    δp_sfc = [(vortex.p[i, 1] - p_env(z_centers[1])) / 100.0 for i in 1:Nr_pre]
+    δp_sfc = [(vortex.p[i, 1] - p_env(z_centers[1])) / 100 for i in 1:Nr_pre]
 
     fig = Figure(size = (1200, 900))
 
@@ -705,26 +705,26 @@ function plot_preflight()
         fig[1, 1]; xlabel = "RMW (km)", ylabel = "Height (km)",
         title = "RMW(z) [Stern-Nolan 2009 Eq. 4.4]", limits = (0, 200, 0, 22)
     )
-    lines!(ax1, rmw_profile ./ 1.0e3, z_centers ./ 1.0e3; color = :black, linewidth = 2)
-    hlines!(ax1, [z_vortex_top / 1.0e3]; color = :gray, linestyle = :dash)
+    lines!(ax1, rmw_profile ./ 1e3, z_centers ./ 1e3; color = :black, linewidth = 2)
+    hlines!(ax1, [z_vortex_top / 1e3]; color = :gray, linestyle = :dash)
 
     ax2 = Axis(
         fig[1, 2]; xlabel = "v_max (m s⁻¹)", ylabel = "Height (km)",
         title = "v_max(z) at RMW", limits = (0, 50, 0, 22)
     )
     vmax_z = [tangential_wind(rmw_analytic(z), z) for z in z_centers]
-    lines!(ax2, vmax_z, z_centers ./ 1.0e3; color = :black, linewidth = 2)
+    lines!(ax2, vmax_z, z_centers ./ 1e3; color = :black, linewidth = 2)
 
     ax3 = Axis(
         fig[2, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",
         title = "Warm-core θ' (t = 0)", limits = (0, 200, 0, 22)
     )
     hm = heatmap!(
-        ax3, r_pre ./ 1.0e3, z_centers ./ 1.0e3, θ_anom;
+        ax3, r_pre ./ 1e3, z_centers ./ 1e3, θ_anom;
         colormap = :balance, colorrange = (-14, 14)
     )
     contour!(
-        ax3, r_pre ./ 1.0e3, z_centers ./ 1.0e3, θ_anom;
+        ax3, r_pre ./ 1e3, z_centers ./ 1e3, θ_anom;
         levels = -14:1:14, color = :black, linewidth = 0.4
     )
     Colorbar(fig[2, 1][1, 2], hm; label = "θ' (K)")
@@ -733,7 +733,7 @@ function plot_preflight()
         fig[2, 2]; xlabel = "Radius (km)", ylabel = "δp (hPa)",
         title = "Surface pressure deficit", limits = (0, 300, -60, 5)
     )
-    lines!(ax4, r_pre ./ 1.0e3, δp_sfc; color = :black, linewidth = 2)
+    lines!(ax4, r_pre ./ 1e3, δp_sfc; color = :black, linewidth = 2)
     hlines!(ax4, [0.0]; color = :gray, linestyle = :dot)
     δp_min = minimum(δp_sfc)
     text!(
