@@ -30,14 +30,16 @@ export
     CompressibleModel,
     AcousticSubstepper,
     SplitExplicitTimeDiscretization,
+    AcousticOuterScheme,
+    WickerSkamarock3,
+    stage_fractions,
     AcousticSubstepDistribution,
     ProportionalSubsteps,
     MonolithicFirstStage,
     AcousticDampingStrategy,
     NoDivergenceDamping,
+    KlempDivergenceDamping,
     ThermodynamicDivergenceDamping,
-    ConservativeProjectionDamping,
-    PressureProjectionDamping,
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
     freeze_outer_step_state!,
@@ -55,9 +57,9 @@ using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity, dry_air_gas_constant,
-                             ExnerReferenceState
+                             vapor_gas_constant, ExnerReferenceState
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density, standard_pressure, thermodynamic_density, specific_prognostic_moisture
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density, standard_pressure, thermodynamic_density, thermodynamic_density_name, specific_prognostic_moisture
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
 include("time_discretizations.jl")
