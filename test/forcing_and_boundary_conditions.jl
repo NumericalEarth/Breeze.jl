@@ -1,6 +1,7 @@
 using Breeze
-using Breeze.AtmosphereModels: thermodynamic_density
-using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition
+using Breeze.AtmosphereModels: thermodynamic_density, surface_pressure, standard_pressure
+using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities
+using Breeze.Thermodynamics: potential_temperature_from_temperature
 using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
@@ -114,6 +115,63 @@ end
         set!(model; θ=θ₀)
         time_step!(model, 1e-6)
         @test true
+    end
+
+    @testset "BulkSensibleHeatFlux uses surface-equivalent θ [$FT]" begin
+        using Oceananigans.Models: BoundaryConditionOperation
+
+        grid_1 = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 100))
+        bc = BulkSensibleHeatFlux(surface_temperature=FT(T₀), coefficient=FT(Cᴰ), gustiness=FT(gustiness))
+        ρθ_bcs = FieldBoundaryConditions(bottom=bc)
+        model = AtmosphereModel(grid_1; boundary_conditions=(; ρθ=ρθ_bcs))
+
+        constants = model.thermodynamic_constants
+        p₀ = surface_pressure(model.dynamics)
+        pˢᵗ = standard_pressure(model.dynamics)
+        θ_surface = potential_temperature_from_temperature(FT(T₀), p₀, pˢᵗ, constants)
+
+        @test p₀ != pˢᵗ
+        @test abs(θ_surface - FT(T₀)) > increment_tolerance(FT)
+
+        set!(model; θ=θ_surface, u=FT(5))
+
+        ρθ = thermodynamic_density(model.formulation)
+        Jᶿ_op = BoundaryConditionOperation(ρθ, :bottom, model)
+        Jᶿ_field = Field(Jᶿ_op)
+        compute!(Jᶿ_field)
+
+        @test all(abs.(interior(Jᶿ_field)) .<= increment_tolerance(FT))
+    end
+
+    @testset "BulkSensibleHeatFlux uses surface-equivalent filtered θ [$FT]" begin
+        using Oceananigans.Models: BoundaryConditionOperation
+
+        grid_1 = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 100))
+        fv = FilteredSurfaceVelocities(grid_1; filter_timescale=FT(3600))
+        bc = BulkSensibleHeatFlux(surface_temperature = FT(T₀),
+                                  coefficient = FT(Cᴰ),
+                                  gustiness = FT(gustiness),
+                                  filtered_velocities = fv)
+        ρθ_bcs = FieldBoundaryConditions(bottom=bc)
+        model = AtmosphereModel(grid_1; boundary_conditions=(; ρθ=ρθ_bcs))
+
+        constants = model.thermodynamic_constants
+        p₀ = surface_pressure(model.dynamics)
+        pˢᵗ = standard_pressure(model.dynamics)
+        θ_surface = potential_temperature_from_temperature(FT(T₀), p₀, pˢᵗ, constants)
+
+        set!(model; θ=θ_surface, u=FT(5))
+        Oceananigans.initialize!(model)
+
+        ρθ = thermodynamic_density(model.formulation)
+        bc_condition = Oceananigans.boundary_conditions(ρθ).bottom.condition
+        @test bc_condition.filtered_scalar !== nothing
+
+        Jᶿ_op = BoundaryConditionOperation(ρθ, :bottom, model)
+        Jᶿ_field = Field(Jᶿ_op)
+        compute!(Jᶿ_field)
+
+        @test all(abs.(interior(Jᶿ_field)) .<= increment_tolerance(FT))
     end
 
     @testset "BulkSensibleHeatFlux with StaticEnergyFormulation [$FT]" begin

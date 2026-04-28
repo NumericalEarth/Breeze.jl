@@ -25,10 +25,11 @@ export BulkDragFunction,
        default_neutral_sensible_heat_polynomial,
        default_neutral_latent_heat_polynomial
 
-using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density
+using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density, standard_pressure
 using ..AtmosphereModels.Diagnostics: VirtualPotentialTemperature, saturation_total_specific_moisture
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
-                        mixture_heat_capacity, dry_air_gas_constant, vapor_gas_constant
+                        mixture_heat_capacity, dry_air_gas_constant, vapor_gas_constant,
+                        potential_temperature_from_temperature
 
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: Architectures
@@ -321,18 +322,18 @@ function materialize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux,
                                  microphysical_fields, specific_prognostic_moisture, temperature)
 end
 
-# Materialize BulkSensibleHeatFlux: populate surface_pressure, thermodynamic_constants, preserve formulation
+# Materialize BulkSensibleHeatFlux: populate pressure data, thermodynamic_constants, preserve formulation
 function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBoundaryCondition,
                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
                                                   microphysical_fields, specific_prognostic_moisture, temperature)
 
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
+    pˢᵗ = standard_pressure(dynamics)
     coef = materialize_coefficient(bf.coefficient, grid, dynamics, microphysics,
                                    surface_pressure, constants,
                                    microphysical_fields, specific_prognostic_moisture, temperature,
                                    Val(:scalar))
-
     # Auto-create FilteredSurfaceScalar if filtered_velocities is provided
     fs = if isnothing(bf.filtered_velocities)
         nothing
@@ -341,9 +342,8 @@ function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBound
                               filter_timescale=bf.filtered_velocities.filter_timescale)
     end
 
-    new_bf = BulkSensibleHeatFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants,
+    new_bf = BulkSensibleHeatFluxFunction(coef, bf.gustiness, T₀, surface_pressure, pˢᵗ, constants,
                                           bf.formulation, bf.filtered_velocities, fs)
-
     return BoundaryCondition(Flux(), new_bf)
 end
 
@@ -404,8 +404,12 @@ end
 BulkDragFunction(d, coef::NothingPolynomialCoefficient, g, t, fv) =
     BulkDragFunction(d, fill_polynomial(coef, default_neutral_drag_polynomial, Val(:momentum)), g, t, fv)
 
-BulkSensibleHeatFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, f, fv, fs) =
-    BulkSensibleHeatFluxFunction(fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)), g, t, p, c, f, fv, fs)
+BulkSensibleHeatFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, s, c, f) =
+    BulkSensibleHeatFluxFunction(fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)),
+                                 g, t, p, s, c, f, nothing, nothing)
+BulkSensibleHeatFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, s, c, f, fv, fs) =
+    BulkSensibleHeatFluxFunction(fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)),
+                                 g, t, p, s, c, f, fv, fs)
 
 BulkVaporFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, s, fv, fs) =
     BulkVaporFluxFunction(fill_polynomial(coef, default_neutral_latent_heat_polynomial, Val(:scalar)), g, t, p, c, s, fv, fs)

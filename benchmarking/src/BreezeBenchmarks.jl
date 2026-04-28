@@ -27,6 +27,13 @@ using Oceananigans.Simulations: SpecifiedTimes
 using Breeze
 
 using CUDA: CUDA, CUDABackend
+# Compatibility for CUDA v5 and v6
+if isdefined(CUDA, :CUDACore)
+    using CUDA: CUDACore
+else
+    const CUDACore = CUDA
+end
+using AMDGPU: AMDGPU, ROCBackend
 
 # Base functionalities
 include("metadata.jl")
