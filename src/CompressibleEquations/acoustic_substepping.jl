@@ -71,8 +71,7 @@ using Oceananigans.Operators:
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
-using Oceananigans.Grids: Periodic, Bounded, Flat,
-                          AbstractUnderlyingGrid,
+using Oceananigans.Grids: Bounded, Flat, AbstractUnderlyingGrid,
                           topology,
                           minimum_xspacing, minimum_yspacing
 
