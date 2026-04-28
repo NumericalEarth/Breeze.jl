@@ -19,14 +19,15 @@ export
     CompressibleDynamics,
     CompressibleModel,
     SplitExplicitTimeDiscretization,
+    AcousticOuterScheme,
+    WickerSkamarock3,
     AcousticSubstepDistribution,
     ProportionalSubsteps,
     MonolithicFirstStage,
     AcousticDampingStrategy,
     NoDivergenceDamping,
+    KlempDivergenceDamping,
     ThermodynamicDivergenceDamping,
-    ConservativeProjectionDamping,
-    PressureProjectionDamping,
     ExplicitTimeStepping,
     PrescribedDensity,
     PrescribedDynamics,
@@ -221,9 +222,10 @@ using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
                               SplitExplicitTimeDiscretization,
+                              AcousticOuterScheme, WickerSkamarock3,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
-                              AcousticDampingStrategy, NoDivergenceDamping, ThermodynamicDivergenceDamping,
-                              ConservativeProjectionDamping, PressureProjectionDamping,
+                              AcousticDampingStrategy, NoDivergenceDamping, KlempDivergenceDamping,
+                              ThermodynamicDivergenceDamping,
                               ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")

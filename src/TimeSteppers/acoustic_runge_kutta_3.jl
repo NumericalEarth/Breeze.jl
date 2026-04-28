@@ -16,6 +16,8 @@ using Breeze.AtmosphereModels: AtmosphereModel
 using Breeze.CompressibleEquations:
     CompressibleDynamics,
     AcousticSubstepper,
+    WickerSkamarock3,
+    stage_fractions,
     acoustic_rk3_substep_loop!,
     prepare_acoustic_cache!,
     freeze_outer_step_state!
@@ -23,60 +25,38 @@ using Breeze.CompressibleEquations:
 """
 $(TYPEDEF)
 
-Wicker-Skamarock third-order Runge-Kutta time stepper with acoustic
-substepping for fully compressible dynamics. Implements the **CM1-style**
-variant in which all three stages use the same constant substep size
-``Δτ = Δt/N`` and the substep counts scale with the stage fraction:
+Wicker–Skamarock third-order Runge–Kutta time stepper with linearized
+acoustic substepping for fully compressible dynamics. Stage fractions
+``β = (1/3, 1/2, 1)``. Each stage:
 
-Unlike [`AcousticSSPRungeKutta3`](@ref) which uses convex combinations,
-this scheme uses stage fractions ``Δt/3``, ``Δt/2``, and ``Δt``:
+  1. Re-evaluates slow tendencies (advection + Coriolis + closure +
+     forcing only — PGF and buoyancy are handled inside the substep
+     loop in linearized form).
+  2. Runs an inner substep loop that evolves linearized acoustic
+     perturbations from the outer-step-start state.
 
-- Stage 1: ``U^* = U^n + (Δt/3) \\, R(U^n)``       — ``N/3`` substeps
-- Stage 2: ``U^{**} = U^n + (Δt/2) \\, R(U^*)``    — ``N/2`` substeps
-- Stage 3: ``U^{n+1} = U^n + Δt \\, R(U^{**})``    — ``N`` substeps
-
-Each stage evaluates the RHS, ``R``, at the current stage state, then resets to ``U^n``
-and advances by ``β Δt``. The absence of convex combinations makes this scheme
-compatible with split-explicit acoustic substepping, allowing the full pressure
-gradient and buoyancy to be included in the slow tendency.
-
-This differs from the two MPAS-A variants:
-
-| variant | β₁  | stage-1 substeps | stage-1 Δτ |
-|---------|-----|------------------|------------|
-| MPAS order=2 (default) | 1/2 | ``N/2`` | ``Δt/N`` |
-| MPAS order=3           | 1/3 | ``1``   | ``Δt/3`` |
-| **CM1 (this)**         | 1/3 | ``N/3`` | ``Δt/N`` |
-
-Like MPAS order=3 we are formally third-order accurate (the β fractions are
-the canonical Wicker–Skamarock 1/3, 1/2, 1), but unlike MPAS order=3 the
-stage-1 substep size is the same ``Δτ = Δt/N`` as the other stages — so the
-horizontal acoustic CFL is set by ``Δτ``, not by the much larger ``Δt/3``
-single-substep imposed by MPAS order=3.
-
-The substepper rounds ``N`` up to a multiple of 6 so that ``N/3`` and ``N/2``
-are both integers.
+The acoustic substep loop is in
+[`acoustic_rk3_substep_loop!`](@ref); see
+[`AcousticSubstepper`](@ref) for the substepper's storage and
+parameters.
 
 Fields
 ======
 
-- `β₁, β₂, β₃`: Stage fractions (1/3, 1/2, 1)
-- `U⁰`: Storage for state at beginning of time step
-- `Gⁿ`: Tendency fields at current stage
-- `implicit_solver`: Optional implicit solver for diffusion
-- `substepper`: AcousticSubstepper for acoustic substepping infrastructure
+- `β₁, β₂, β₃`: Stage fractions (1/3, 1/2, 1).
+- `U⁰`: Storage for state at the beginning of the outer time-step.
+- `Gⁿ`: Slow-tendency fields, recomputed each stage.
+- `implicit_solver`: Optional implicit solver for diffusion.
+- `substepper`: [`AcousticSubstepper`](@ref) for the linearized acoustic
+  substep loop.
 
 References
 ==========
 
-Wicker, L.J. and Skamarock, W.C. (2002). Time-Splitting Methods for Elastic Models
-    Using Forward Time Schemes. Monthly Weather Review, 130, 2088-2097.
-
-Klemp, J.B., Skamarock, W.C. and Dudhia, J. (2007). Conservative Split-Explicit
-    Time Integration Methods for the Compressible Nonhydrostatic Equations.
-    Monthly Weather Review, 135, 2897-2913.
+Wicker, L. J. & Skamarock, W. C. (2002). *Time-splitting methods for
+elastic models using forward time schemes.* MWR 130, 2088–2097.
 """
-struct AcousticRungeKutta3{FT, U0, TG, TI, AS, SS} <: AbstractTimeStepper
+struct AcousticRungeKutta3{FT, U0, TG, TI, AS} <: AbstractTimeStepper
     β₁ :: FT
     β₂ :: FT
     β₃ :: FT
@@ -84,7 +64,6 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS, SS} <: AbstractTimeStepper
     Gⁿ :: TG
     implicit_solver :: TI
     substepper :: AS
-    slow_tendency_snapshot :: SS
 end
 
 """
@@ -94,13 +73,6 @@ end
                         Gⁿ = map(similar, prognostic_fields))
 
 Construct an `AcousticRungeKutta3` time stepper for fully compressible dynamics.
-
-Keyword Arguments
-=================
-
-- `dynamics`: The [`CompressibleDynamics`](@ref) object containing the `time_discretization`.
-- `implicit_solver`: Optional implicit solver for diffusion. Default: `nothing`
-- `Gⁿ`: Tendency fields at current stage. Default: similar to `prognostic_fields`
 """
 function AcousticRungeKutta3(grid, prognostic_fields;
                              dynamics,
@@ -109,11 +81,14 @@ function AcousticRungeKutta3(grid, prognostic_fields;
 
     FT = eltype(grid)
 
-    # Wicker-Skamarock RK3 stage fractions, CM1-style: canonical (1/3, 1/2, 1)
-    # with N/3, N/2, N substeps per stage at constant Δτ = Δt/N.
-    β₁ = FT(1//3)
-    β₂ = FT(1//2)
-    β₃ = FT(1)
+    # Stage fractions come from the outer-scheme interface. Today the only
+    # supported subtype is WickerSkamarock3 with canonical (1/3, 1/2, 1);
+    # a future MIS outer scheme would extend AcousticOuterScheme and provide
+    # its own stage_fractions method.
+    β = stage_fractions(WickerSkamarock3())
+    β₁ = FT(β[1])
+    β₂ = FT(β[2])
+    β₃ = FT(β[3])
 
     U⁰ = map(similar, prognostic_fields)
     U0 = typeof(U⁰)
@@ -124,77 +99,40 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                                                             ρw = prognostic_fields.ρw))
     AS = typeof(substepper)
 
-    # Snapshot storage for the slow tendencies that are frozen across stages.
-    # Populated at stage 1 from the outer-step-start state and restored at
-    # stages 2 and 3 to mimic MPAS's freeze-tend_rho-at-rk_step==1 and
-    # freeze-tend_u_euler-at-rk_step==1 behavior. We freeze the density
-    # tendency (`ρ`) and the horizontal PGF (stored on the `ρu` / `ρv`
-    # buffers, populated by `snapshot_horizontal_pgf!`). The thermodynamic
-    # tendency `Gⁿ.ρθ` is intentionally **not** snapshotted — see the
-    # freeze-policy comment in `acoustic_substep_helpers.jl`. Tracer entries
-    # are also not stored: they are recomputed per stage by
-    # `compute_thermodynamic_tendency!`.
-    slow_tendency_snapshot = (ρ  = similar(Gⁿ.ρ),
-                              ρu = similar(Gⁿ.ρu),
-                              ρv = similar(Gⁿ.ρv))
-    SS = typeof(slow_tendency_snapshot)
-
-    return AcousticRungeKutta3{FT, U0, TG, TI, AS, SS}(β₁, β₂, β₃, U⁰, Gⁿ,
-                                                       implicit_solver, substepper,
-                                                       slow_tendency_snapshot)
+    return AcousticRungeKutta3{FT, U0, TG, TI, AS}(β₁, β₂, β₃, U⁰, Gⁿ,
+                                                    implicit_solver, substepper)
 end
 
 #####
-##### WS-RK3 substep with acoustic substepping
+##### Per-stage substep wrapper
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-Apply a Wicker-Skamarock RK3 substep with acoustic substepping.
-
-The acoustic substep loop handles momentum, density, and the thermodynamic
-variable (``ρθ`` or ``ρe``). The substep size is constant ``Δτ = Δt / N`` across all
-stages, with the substep count varying as ``N_τ = \\mathrm{round}(β N)``.
-Remaining scalars (tracers) are updated with standard RK3.
-
-The `freeze` keyword controls the [slow-tendency freeze
-policy](@ref `snapshot_slow_tendencies!`):
-
-- `:snapshot` — snapshot ``G^n.\\rho`` and the horizontal PGF at this stage
-  (use at outer-step stage 1). ``G^n.\\rho\\theta`` is **not** snapshotted —
-  it must be recomputed every stage so that microphysics latent heat sees
-  the per-stage state.
-- `:restore`  — restore the snapshotted ``G^n.\\rho`` after the per-stage
-  `compute_slow_*_tendencies!` calls (use at stages 2, 3).
-- `:none`     — neither snapshot nor restore.
+Run one Wicker–Skamarock RK3 stage: compute slow tendencies, then
+execute the linearized-acoustic substep loop, then update remaining
+scalars.
 """
-function acoustic_rk3_substep!(model, Δt, β; freeze::Symbol = :none)
+function acoustic_rk3_substep!(model, Δt, β)
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = ts.U⁰
-    snap = ts.slow_tendency_snapshot
 
-    # Prepare stage-frozen reference state (needed by slow tendency computation)
+    # Per-stage cache prep (currently a no-op — the linearization is
+    # fixed at outer-step start).
     prepare_acoustic_cache!(substepper, model)
 
-    # Compute slow momentum tendencies (advection, Coriolis, diffusion — PGF/buoyancy
-    # handled by the acoustic loop via tend_w_euler in convert_slow_tendencies!).
+    # Slow tendencies (advection + Coriolis + diffusion; PGF and buoyancy
+    # are excluded — those are handled inside the substep loop in
+    # linearized form about the outer-step-start state).
     compute_slow_momentum_tendencies!(model)
-
-    # Compute slow density and thermodynamic tendencies
     compute_slow_scalar_tendencies!(model)
 
-    # Slow-tendency freeze policy. See `snapshot_slow_tendencies!` for the
-    # MPAS-equivalence rationale.
-    freeze === :snapshot && snapshot_slow_tendencies!(snap, model)
-    freeze === :restore  && restore_slow_tendencies!(snap, model)
-    add_horizontal_pgf!(ts.Gⁿ.ρu, ts.Gⁿ.ρv, snap.ρu, snap.ρv, model)
-
-    # Execute acoustic substep loop: constant Δτ = Δt/N, varying Nτ = round(β*N)
+    # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰)
 
-    # Update remaining scalars (tracers) using WS-RK3
+    # Update remaining scalars (tracers) using WS-RK3.
     scalar_rk3_substep!(model, β * Δt)
 
     return nothing
@@ -209,10 +147,7 @@ scalar_rk3_substep!(model, Δt_stage) =
 
 @kernel function _rk3_substep!(u, u⁰, G, Δt_stage)
     i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        # Wicker-Skamarock RK3: u = u⁰ + β * Δt * G
-        u[i, j, k] = u⁰[i, j, k] + Δt_stage * G[i, j, k]
-    end
+    @inbounds u[i, j, k] = u⁰[i, j, k] + Δt_stage * G[i, j, k]
 end
 
 #####
@@ -222,23 +157,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Step forward `model` one time step `Δt` with Wicker-Skamarock RK3 and acoustic substepping.
-
-The algorithm follows [Wicker and Skamarock (2002)](@cite WickerSkamarock2002),
-in the CM1-style configuration:
-- Outer loop: canonical 3-stage RK3 with stage fractions ``Δt/3``, ``Δt/2``, ``Δt``
-- Inner loop: Acoustic substeps for fast (pressure) tendencies, with constant
-  substep size ``Δτ = Δt/N`` across all stages (``N/3``, ``N/2``, ``N`` substeps in
-  stages 1, 2, 3 respectively)
-
-Each RK stage:
-1. Compute slow tendencies (advection, Coriolis, diffusion only — PGF/buoyancy in acoustic loop)
-2. Execute acoustic substep loop for momentum and density (full PGF + buoyancy)
-3. Update scalars using standard RK update with time-averaged velocities
+Step forward `model` one time step `Δt` with Wicker–Skamarock RK3 and
+linearized acoustic substepping.
 """
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:AcousticRungeKutta3}, Δt; callbacks=[])
 
-    # Be paranoid and prepare at iteration 0, in case run! is not used:
     maybe_prepare_first_time_step!(model, callbacks)
 
     ts = model.timestepper
@@ -246,58 +169,34 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     β₂ = ts.β₂
     β₃ = ts.β₃
 
-    # Compute the next time step a priori
     tⁿ⁺¹ = model.clock.time + Δt
 
-    # Store u⁰ for use in all stages
+    # Snapshot outer-step-start state into U⁰ for use in all stages,
+    # and into the substepper's outer-step fields as the linearization
+    # point.
     store_initial_state!(model)
-
-    # Snapshot pressure into the substepper's frozen_pressure field. This is the
-    # linearization point for cofwz/cofwt and stays the same across all WS-RK3
-    # stages of this outer step. MPAS does the equivalent: its diag%exner is only
-    # recomputed at rk_step==3, so the substepper sees the same exner at every
-    # stage of an outer step.
     freeze_outer_step_state!(ts.substepper, model)
 
-    #
     # Stage 1: U* = Uⁿ + (Δt/3) R(Uⁿ)
-    #
-    # We compute the slow tendencies at stage 1 from the outer-step-start state
-    # and SNAPSHOT Gⁿ.ρ and the horizontal PGF. At stages 2 and 3 those frozen
-    # values are restored after compute_slow_*_tendencies! has run, so the
-    # substep loop sees the same density and horizontal PGF tendencies as stage 1
-    # (MPAS computes tend_rho and tend_u_euler only at rk_step==1 and freezes
-    # them for the rest of the outer step). Gⁿ.ρθ is intentionally recomputed
-    # every stage so microphysics latent heat picks up the per-stage state —
-    # see the freeze-policy comment in acoustic_substep_helpers.jl. Tracer
-    # tendencies are also recomputed per stage by compute_thermodynamic_tendency!.
-
     compute_flux_bc_tendencies!(model)
-    acoustic_rk3_substep!(model, Δt, β₁; freeze = :snapshot)
+    acoustic_rk3_substep!(model, Δt, β₁)
 
     tick_stage!(model.clock, β₁ * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₁ * Δt)
 
-    #
     # Stage 2: U** = Uⁿ + (Δt/2) R(U*)
-    #
-
     compute_flux_bc_tendencies!(model)
-    acoustic_rk3_substep!(model, Δt, β₂; freeze = :restore)
+    acoustic_rk3_substep!(model, Δt, β₂)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₂ * Δt)
 
-    #
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**)
-    #
-
     compute_flux_bc_tendencies!(model)
-    acoustic_rk3_substep!(model, Δt, β₃; freeze = :restore)
+    acoustic_rk3_substep!(model, Δt, β₃)
 
-    # Adjust final time-step
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
 

@@ -196,6 +196,20 @@ For compressible dynamics, this may be a constant or computed value.
 function surface_pressure end
 
 """
+    bcs_reference_state(dynamics, grid, thermodynamic_constants)
+
+Return a reference state with `pressure`, `density`, and `standard_pressure` fields
+suitable for constructing boundary-condition diagnostics (e.g. virtual potential
+temperature for stability-dependent bulk fluxes).
+
+Boundary conditions are materialized before `materialize_dynamics` runs, so this
+hook lets each dynamics type decide what to expose at that point. The default
+returns `dynamics.reference_state`, which works for dynamics where the user
+constructs a fully-built reference state up front (e.g. `AnelasticDynamics`).
+"""
+bcs_reference_state(dynamics, grid, thermodynamic_constants) = dynamics.reference_state
+
+"""
     standard_pressure(dynamics)
 
 Return the standard pressure used for potential temperature calculations.

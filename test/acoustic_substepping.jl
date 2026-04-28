@@ -41,23 +41,23 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
         td = SplitExplicitTimeDiscretization()
         acoustic = AcousticSubstepper(grid, td)
         @test acoustic.substeps === nothing  # adaptive by default
-        @test acoustic.forward_weight ≈ FT(0.7)
-        # Default damping is PressureProjectionDamping(coefficient = 0.5),
-        # the BCI-tuned value from the empirical sweep documented in
-        # `docs/src/appendix/bw_dt_sweep_results.md`.
-        @test acoustic.damping isa PressureProjectionDamping
-        @test acoustic.damping.coefficient ≈ FT(0.5)
-        @test acoustic.virtual_potential_temperature isa Oceananigans.Fields.Field
+        @test acoustic.forward_weight ≈ FT(0.65)  # off-centered CN, ε = 2ω - 1 = 0.3
+        # Default damping is KlempDivergenceDamping(0.1) (Klemp/Skamarock/Ha 2018
+        # with Baldauf 2010 anisotropic scaling); required for stability of the
+        # WS-RK3 + substepper coupling at production Δt.
+        @test acoustic.damping isa KlempDivergenceDamping
+        @test acoustic.damping.coefficient ≈ FT(0.1)
+        @test acoustic.outer_step_potential_temperature isa Oceananigans.Fields.Field
     end
 
     @testset "Custom parameters" begin
         td = SplitExplicitTimeDiscretization(substeps=10,
                                               forward_weight=0.55,
-                                              damping=ThermodynamicDivergenceDamping(coefficient=0.2))
+                                              damping=KlempDivergenceDamping(coefficient=0.2))
         acoustic = AcousticSubstepper(grid, td)
         @test acoustic.substeps == 10
         @test acoustic.forward_weight ≈ FT(0.55)
-        @test acoustic.damping isa ThermodynamicDivergenceDamping
+        @test acoustic.damping isa KlempDivergenceDamping
         @test acoustic.damping.coefficient ≈ FT(0.2)
     end
 end

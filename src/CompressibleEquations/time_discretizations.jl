@@ -1,11 +1,58 @@
 #####
 ##### Time discretization types for CompressibleDynamics
 #####
-##### These types determine how the compressible equations are time-stepped:
-##### - SplitExplicitTimeDiscretization: Acoustic substepping (Wicker-Skamarock scheme)
-##### - ExplicitTimeStepping: Standard explicit time-stepping (small Δt required)
+##### Two top-level choices:
+#####   - SplitExplicitTimeDiscretization — Wicker-Skamarock RK3 outer loop
+#####     with an inner substep that evolves linearized acoustic perturbations
+#####     about the outer-step-start state. The default is classic centered
+#####     Crank-Nicolson with no divergence damping; off-centering and Klemp
+#####     2018 damping are available for production runs.
+#####   - ExplicitTimeStepping — fully explicit time-stepping. Tendencies
+#####     (advection + PGF + buoyancy) are computed together; the time-step
+#####     is bounded by the acoustic CFL.
 #####
 
+#####
+##### Outer scheme interface
+#####
+
+"""
+$(TYPEDEF)
+
+Abstract supertype for the outer Runge–Kutta scheme that drives the acoustic
+substep loop. The current implementation supports a single concrete subtype:
+
+  - [`WickerSkamarock3`](@ref) — three-stage Wicker–Skamarock RK3 with stage
+    fractions ``β = (1/3, 1/2, 1)``. This is the only outer scheme supported
+    today and the default for [`SplitExplicitTimeDiscretization`](@ref).
+
+The interface exists to make the outer-scheme commitment explicit in the
+type system and to provide a clean extension point for a future Multirate
+Infinitesimal Step (MIS) outer scheme. A concrete subtype is expected to
+provide a [`stage_fractions`](@ref) method returning its stage-fraction tuple.
+"""
+abstract type AcousticOuterScheme end
+
+"""
+$(TYPEDEF)
+
+Three-stage Wicker–Skamarock RK3 outer scheme
+([Wicker and Skamarock 2002](@cite WickerSkamarock2002)) with canonical stage
+fractions ``β = (1/3, 1/2, 1)``. Each stage resets the prognostic state to
+``U^n`` and applies a fraction ``β_k Δt`` of the slow tendency evaluated at
+the previous-stage state, while the acoustic substep loop advances
+linearized perturbations about the outer-step-start state.
+"""
+struct WickerSkamarock3 <: AcousticOuterScheme end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the stage-fraction tuple ``(β_1, β_2, β_3)`` for the outer Runge–Kutta
+scheme. For [`WickerSkamarock3`](@ref) this is the canonical
+``(1/3, 1/2, 1)`` of [Wicker and Skamarock (2002)](@cite WickerSkamarock2002).
+"""
+stage_fractions(::WickerSkamarock3) = (1//3, 1//2, 1//1)
 
 #####
 ##### Acoustic substep distribution across the WS-RK3 stages
@@ -22,11 +69,10 @@ Concrete subtypes:
   - [`ProportionalSubsteps`](@ref) — every stage uses the same substep size
     ``Δτ = Δt/N``, with stage-dependent substep counts ``Nτ = \\max(1, \\mathrm{round}(β N))``
     (so for the canonical β = (1/3, 1/2, 1) this is N/3, N/2, N substeps in
-    stages 1, 2, 3). This is the default and matches CM1.
+    stages 1, 2, 3). This is the default.
 
   - [`MonolithicFirstStage`](@ref) — stage 1 collapses to a single substep of
-    size ``Δt/3``; stages 2 and 3 are the same as `ProportionalSubsteps`. This
-    matches MPAS-A with `config_time_integration_order = 3`.
+    size ``Δt/3``; stages 2 and 3 are the same as `ProportionalSubsteps`.
 """
 abstract type AcousticSubstepDistribution end
 
@@ -39,29 +85,17 @@ Acoustic substep distribution where every stage uses the same substep size
 β = (1/3, 1/2, 1) this gives ``N/3``, ``N/2``, ``N`` substeps in stages 1,
 2, 3 respectively.
 
-The horizontal acoustic CFL constraint is set by ``Δτ = Δt/N`` — the same in
-every stage — so no individual stage imposes a tighter Δt ceiling than the
-others.
-
-This is Breeze's default and matches CM1 ([Bryan and Fritsch (2002)](@cite Bryan2002)).
+This is the default.
 """
 struct ProportionalSubsteps <: AcousticSubstepDistribution end
 
 """
 $(TYPEDEF)
 
-Acoustic substep distribution where stage 1 of WS-RK3 collapses to a single
-substep of size ``Δt/3``, while stages 2 and 3 use the same proportional
-counts as [`ProportionalSubsteps`](@ref) (``N/2`` and ``N`` substeps of size
-``Δt/N``).
-
-Because stage 1 uses a substep of size ``Δt/3`` (rather than the per-substep
-``Δt/N`` of stages 2 and 3), the stage-1 horizontal acoustic CFL becomes
-``Δt/3 < Δx_\\mathrm{min}/c_s``, which is ``N/3`` times tighter than the
-[`ProportionalSubsteps`](@ref) form. This is the dispatch used by MPAS-A
-when `config_time_integration_order = 3` (see `mpas_atm_time_integration.F`),
-and is provided here for bit-compatible comparisons against MPAS reference
-output.
+Acoustic substep distribution where stage 1 collapses to a single substep
+of size ``Δt/3``; stages 2 and 3 are the same as
+[`ProportionalSubsteps`](@ref) (``N/2`` and ``N`` substeps of size
+``Δτ = Δt/N``).
 """
 struct MonolithicFirstStage <: AcousticSubstepDistribution end
 
@@ -72,201 +106,156 @@ struct MonolithicFirstStage <: AcousticSubstepDistribution end
 """
 $(TYPEDEF)
 
-Abstract supertype for the choice of acoustic divergence damping applied
-inside the substep loop.
+Abstract supertype for divergence damping applied inside the substep loop.
 
 Concrete subtypes:
 
-  - [`NoDivergenceDamping`](@ref) — no damping. Useful as a baseline for
-    "is divergence damping the bottleneck?" experiments.
-  - [`ThermodynamicDivergenceDamping`](@ref) — MPAS Klemp–Skamarock–Ha 2018
-    momentum correction using the discrete ``(\\rho\\theta)''`` tendency as
-    the divergence proxy. This is Breeze's default and matches MPAS-A's
-    `atm_divergence_damping_3d`.
-  - [`PressureProjectionDamping`](@ref) — literal ERF/CM1/WRF form (Klemp
-    2007): forward-extrapolate the diagnosed Exner perturbation, convert
-    back to ``(\\rho\\theta)''`` via the linearized EOS.
-  - [`ConservativeProjectionDamping`](@ref) — algebraic conservative-variable
-    variant of the above; equivalent at the linearized level but skips the
-    EOS evaluation.
+  - [`NoDivergenceDamping`](@ref) — no damping (the default).
+  - [`KlempDivergenceDamping`](@ref) — [Klemp, Skamarock & Ha (2018)](@cite KlempSkamarockHa2018)
+    momentum correction using the discrete ``δ_τ(ρθ)`` tendency as the
+    divergence proxy. Used for production runs to filter grid-scale
+    acoustic divergence over long integrations; not intended as a
+    stabilizer for canonical cases.
 """
 abstract type AcousticDampingStrategy end
 
 """
 $(TYPEDEF)
 
-No acoustic divergence damping. The substep loop advances the perturbation
-fields without applying any post-substep momentum correction.
+No acoustic divergence damping. The substep loop advances perturbation
+fields without applying any post-substep momentum correction. **Default.**
 """
 struct NoDivergenceDamping <: AcousticDampingStrategy end
 
 """
 $(TYPEDEF)
 
-MPAS-A Klemp–Skamarock–Ha 2018 acoustic divergence damping
-([Klemp et al. 2018](@cite KlempSkamarockHa2018)).
+3-D acoustic divergence damping per
+[Klemp, Skamarock & Ha (2018)](@cite KlempSkamarockHa2018) /
+[Skamarock & Klemp (1992)](@cite SkamarockKlemp1992) /
+[Baldauf (2010)](@cite Baldauf2010). After each acoustic substep, all
+three momentum perturbation components ``(ρu)′, (ρv)′, (ρw)′`` pick up
+a correction proportional to the gradient of
+``D \\equiv ((ρθ)′ - (ρθ)′_\\mathrm{old})/θ⁰``, which is a discrete
+proxy for ``-Δτ \\nabla\\cdot(ρu)′``. The vertical component is the
+piece that damps vertical acoustic modes and is REQUIRED for
+stability at production ``\\Delta t``: without it, the column tridiag's
+anti-symmetric buoyancy off-diagonals and asymmetric (under
+stratified ``\\bar\\theta(z)``) PGF off-diagonals make the substep
+operator non-normal with ``\\|U\\|_2 \\gg 1``, and a rest atmosphere
+amplifies ~1.8× per outer step.
 
-After each acoustic substep, the horizontal momentum perturbations are
-corrected by
+Per-substep momentum correction (Baldauf 2010 §2.d, anisotropic):
 
 ```math
-Δ(\\rho u)'' = \\mathrm{coef}\\,\\partial_x(δ_τ(\\rho\\theta)'') / (2 θ_{m,\\mathrm{edge}})
+Δ(ρu)′ = -α_x · ∂_x D , \\quad
+Δ(ρv)′ = -α_y · ∂_y D , \\quad
+Δ(ρw)′ = -α_z · ∂_z D
 ```
 
-(and similarly in ``y``), where ``δ_τ(\\rho\\theta)'' = (\\rho\\theta)''_\\mathrm{new} - (\\rho\\theta)''_\\mathrm{old}``
-is the discrete acoustic ``(\\rho\\theta)''`` tendency, ``\\mathrm{coef} = 2\\,
-\\mathrm{smdiv}\\,\\ell_\\mathrm{disp}/Δτ``, and ``\\mathrm{smdiv}`` is the
-strategy's `coefficient` field. Using the discrete pressure-tendency proxy
-ensures the damping preserves gravity-wave frequencies while filtering
-grid-scale acoustic divergence.
+with per-direction damping diffusivities
+``α_x = β_d Δx²/Δτ``, ``α_y = β_d Δy²/Δτ``, ``α_z = β_d Δz²/Δτ`` —
+giving a constant explicit-time Courant number ``β_d`` per direction
+that's invariant under Δτ and grid spacing. The combined 3-D
+stability bound is ``2 β_d ≤ 1/2 → β_d ≤ 0.25``; the default
+``β_d = 0.1`` sits well below the bound. Combined with the
+`SplitExplicitTimeDiscretization` default ``\\omega = 0.65``, this
+keeps both the rest atmosphere at machine ε at Δt = 20 s and the
+DCMIP-2016 dry / moist baroclinic waves stable at their production
+``\\Delta t``.
 
 Fields
 ======
 
-- `coefficient`: MPAS `config_smdiv`. Default `0.1`.
-- `length_scale`: Optional override for the dispersion length ``\\ell_\\mathrm{disp}`` (MPAS `config_len_disp`). Default `nothing` (Breeze auto-derives ``\\min(Δx, Δy)`` over non-Flat horizontal axes). The `LS` type parameter is either `Nothing` (auto-derive) or the same float type as `coefficient`, so the struct is fully concretely typed and GPU-isbits.
+- `coefficient`: Dimensionless damping coefficient ``β_d``. Default `0.1`.
+- `length_scale`: Optional override for the dispersion length
+  ``ℓ_\\mathrm{disp}``. Default `nothing` (auto = anisotropic
+  per-direction grid spacing). Setting `length_scale = ℓ` forces an
+  isotropic ``ν = β_d ℓ² / Δτ``.
+- `reference_temperature`: Reference temperature for
+  ``c_s = \\sqrt{γ^d R^d T_\\mathrm{ref}}``. Default `300` K. The
+  damping is a wavenumber-controlled filter; only the dimensional
+  scale of ``ν`` depends on this — small variations don't matter.
 """
-struct ThermodynamicDivergenceDamping{FT, LS} <: AcousticDampingStrategy
+struct KlempDivergenceDamping{FT, LS} <: AcousticDampingStrategy
     coefficient :: FT
     length_scale :: LS
+    reference_temperature :: FT
 end
 
-function ThermodynamicDivergenceDamping(; coefficient = 0.1, length_scale = nothing)
+function KlempDivergenceDamping(; coefficient = 0.1, length_scale = nothing,
+                                  reference_temperature = 300.0)
     if length_scale === nothing
-        FT = typeof(coefficient)
-        coef_FT = convert(FT, coefficient)
-        return ThermodynamicDivergenceDamping{FT, Nothing}(coef_FT, nothing)
+        FT = promote_type(typeof(coefficient), typeof(reference_temperature))
+        return KlempDivergenceDamping{FT, Nothing}(convert(FT, coefficient), nothing,
+                                                    convert(FT, reference_temperature))
     else
-        FT = promote_type(typeof(coefficient), typeof(length_scale))
-        coef_FT = convert(FT, coefficient)
-        len_FT  = convert(FT, length_scale)
-        return ThermodynamicDivergenceDamping{FT, FT}(coef_FT, len_FT)
+        FT = promote_type(typeof(coefficient), typeof(length_scale), typeof(reference_temperature))
+        return KlempDivergenceDamping{FT, FT}(convert(FT, coefficient),
+                                               convert(FT, length_scale),
+                                               convert(FT, reference_temperature))
     end
 end
 
-"""
-$(TYPEDEF)
+# Backward-compatibility alias for examples that still reference the old
+# name. The new name `KlempDivergenceDamping` is preferred and
+# self-explanatory; this alias will be removed once examples are
+# updated.
+const ThermodynamicDivergenceDamping = KlempDivergenceDamping
 
-Conservative pressure-projection damping. Forward-extrapolates the
-prognostic ``(\\rho\\theta)''`` perturbation by one substep's worth of
-change before it is read by the next substep's horizontal pressure
-gradient kernel:
-
-```math
-(\\rho\\widetilde{\\theta})''_\\mathrm{for\\ pgf}
-    = (\\rho\\theta)'' + \\beta_d \\bigl((\\rho\\theta)'' - (\\rho\\theta)''_\\mathrm{prev}\\bigr)
-```
-
-where ``(\\rho\\theta)''_\\mathrm{prev}`` is the value at the start of the
-previous substep (already maintained by the substepper as
-`previous_rtheta_pp` for the MPAS damping path) and ``\\beta_d`` is the
-strategy's `coefficient`.
-
-This is a conservative-variable (algebraic) approximation to the literal
-ERF/CM1/WRF [`PressureProjectionDamping`](@ref) — at the strict linearized
-level (perturbations small relative to the reference state, EOS map
-approximated by its tangent at the reference) the two are equivalent. They
-diverge at second order in the perturbations and at the discretization
-level.
-
-Fields
-======
-
-- `coefficient`: forward-projection weight ``\\beta_d``. Default `0.1`.
-- `ρθ″_for_pgf`: scratch `CenterField` written by `apply_pgf_filter!` and read by the next substep's `_mpas_horizontal_forward!`. `nothing` in the user-facing skeleton; allocated by the substepper constructor.
-"""
-struct ConservativeProjectionDamping{FT, F} <: AcousticDampingStrategy
-    coefficient :: FT
-    ρθ″_for_pgf :: F
-end
-
-function ConservativeProjectionDamping(; coefficient = 0.1)
-    FT = typeof(coefficient)
-    return ConservativeProjectionDamping{FT, Nothing}(convert(FT, coefficient), nothing)
-end
+#####
+##### Split-explicit time discretization
+#####
 
 """
 $(TYPEDEF)
 
-Pressure-projection damping in the literal ERF/CM1/WRF form (Klemp et
-al. 2007). Each substep diagnoses the Exner perturbation from the
-prognostic ``(\\rho\\theta)''``, forward-extrapolates it as
-``\\tilde{\\pi}'' = \\pi'' + \\beta_d (\\pi'' - \\pi''_\\mathrm{old})``, and
-converts the projected ``\\tilde{\\pi}''`` back into a projected
-``(\\rho\\widetilde{\\theta})''_\\mathrm{for\\ pgf}`` via the linearized EOS
-so that the existing horizontal pressure gradient kernel
-(``-c^2\\,\\Pi_\\mathrm{face}\\,\\partial_x(\\rho\\theta)''``) reads the
-filtered field without any kernel-signature change.
-
-The linearized EOS conversion at a cell center is
-
-```math
-(\\rho\\widetilde{\\theta})''_\\mathrm{for\\ pgf}
-    = (\\rho\\theta)'' + \\frac{c_v}{R}\\,\\frac{(\\rho\\theta)_\\mathrm{stage}}{\\Pi_\\mathrm{stage}}\\,\\beta_d\\,(\\pi'' - \\pi''_\\mathrm{old}),
-```
-
-with both the diagnosed ``\\pi''`` (from the current ``(\\rho\\theta)''``)
-and the previous-substep ``\\pi''_\\mathrm{old}`` (from the substepper's
-`previous_rtheta_pp` field, which is already maintained by the MPAS
-divergence-damping path) computed via
-``\\pi(\\rho\\theta) = (R\\,\\rho\\theta/p^{st})^{R/c_v}``.
-
-This is the closer-to-ERF / CM1 form of the projection. The cheaper
-[`ConservativeProjectionDamping`](@ref) variant is mathematically
-equivalent at the linearized level but skips the per-cell EOS
-evaluation.
-
-Fields
-======
-
-- `coefficient`: forward-projection weight ``\\beta_d``. Default `0.1`.
-- `ρθ″_for_pgf`: scratch `CenterField` written by `apply_pgf_filter!` and read by the next substep's `_mpas_horizontal_forward!`. `nothing` in the user-facing skeleton; allocated by the substepper constructor.
-"""
-struct PressureProjectionDamping{FT, F} <: AcousticDampingStrategy
-    coefficient :: FT
-    ρθ″_for_pgf :: F
-end
-
-function PressureProjectionDamping(; coefficient = 0.1)
-    FT = typeof(coefficient)
-    return PressureProjectionDamping{FT, Nothing}(convert(FT, coefficient), nothing)
-end
-
-"""
-$(TYPEDEF)
-
-Split-explicit acoustic substepping for compressible dynamics using the
-MPAS-A conservative-perturbation formulation.
-
-The fast prognostic variables — advanced inside the substep loop — are the
-horizontal and vertical momentum perturbations ``(\\rho u)''``, ``(\\rho v)''``,
-``(\\rho w)''``, the density perturbation ``\\rho''``, and the
-``(\\rho\\theta)''`` perturbation. The same family is used by MPAS-A
-([Skamarock et al. 2012](@cite Skamarock2012)) and by ERF.
+Split-explicit time discretization for compressible dynamics.
 
 Outer integration is the Wicker–Skamarock RK3 scheme
-([Wicker and Skamarock 2002](@cite WickerSkamarock2002)) with stage fractions
-``β = (1/3, 1/2, 1)``. The substep distribution across stages is selectable
-via the [`AcousticSubstepDistribution`](@ref) interface
-([`ProportionalSubsteps`](@ref) or [`MonolithicFirstStage`](@ref)).
+([Wicker and Skamarock 2002](@cite WickerSkamarock2002)) with stage
+fractions ``β = (1/3, 1/2, 1)``. Within each stage, an inner substep loop
+evolves linearized acoustic perturbations about the outer-step-start
+state. The vertically implicit solve uses an off-centered Crank-Nicolson
+scheme with off-centering parameter ``\\omega`` (default 0.5 = classic
+centered CN).
 
-The vertically implicit ``(\\rho w)''``–``(\\rho\\theta)''`` coupling is solved
-by a Schur-complement tridiagonal sweep at each substep, eliminating the
-vertical acoustic CFL constraint. Divergence damping is applied each substep
-following the MPAS Klemp–Skamarock–Ha 2018 momentum correction
-(see [`acoustic_substepping.jl`](https://github.com/CliMA/Breeze.jl/blob/main/src/CompressibleEquations/acoustic_substepping.jl)).
-
-This allows the outer time step to be set by the advective CFL rather than
-the acoustic CFL, typically enabling ~6× larger ``Δt`` than fully explicit
-compressible time-stepping.
+The substep distribution across stages is selectable via the
+[`AcousticSubstepDistribution`](@ref) interface.
 
 Fields
 ======
 
-- `substeps`: Number of acoustic substeps ``N`` per outer ``Δt``. Default `nothing` adaptively chooses ``N`` from the horizontal acoustic CFL each step. With [`ProportionalSubsteps`](@ref) the substep size is ``Δτ = Δt/N`` in every stage; with [`MonolithicFirstStage`](@ref) stage 1 instead uses one substep of size ``Δt/3``.
-- `forward_weight`: Off-centering parameter ``ω`` for the vertically implicit ``(\\rho w)''``–``(\\rho\\theta)''`` solve. ``ω > 0.5`` damps vertical acoustic modes; the MPAS off-centering is ``ε = 2ω - 1``. Default: 0.7. (Note: ERF/MPAS canonical ``β_s = 0.1`` corresponds to ``ω = 0.55``, but Breeze's implementation of the tridiagonal coefficients appears to require more off-centering for stability — needs investigation; see `validation/substepping/NOTES.md`.)
-- `damping`: Acoustic divergence damping strategy ([`AcousticDampingStrategy`](@ref)). Default: [`PressureProjectionDamping`](@ref) with `coefficient = 0.5`, the literal ERF/CM1/WRF projection form at the empirically-tuned coefficient that produces a clean BCI lifecycle in the DCMIP2016 baroclinic-wave comparison. For small-amplitude wave configurations like the Skamarock-Klemp 1994 inertia-gravity wave, this coefficient is more aggressive than necessary; pass `damping = PressureProjectionDamping(coefficient = 0.1)` for a milder filter. Other options: [`ThermodynamicDivergenceDamping`](@ref) (the MPAS Klemp-Skamarock-Ha 2018 form), [`ConservativeProjectionDamping`](@ref) (cheaper algebraic variant of `PressureProjectionDamping`), or [`NoDivergenceDamping`](@ref) to disable damping entirely.
-- `substep_distribution`: How acoustic substeps are distributed across the three WS-RK3 stages. One of [`ProportionalSubsteps`](@ref) (default; constant ``Δτ = Δt/N`` with stage counts ``N/3``, ``N/2``, ``N``) or [`MonolithicFirstStage`](@ref) (single substep of size ``Δt/3`` in stage 1, MPAS-A `config_time_integration_order = 3` form).
+- `substeps`: Number of acoustic substeps ``N`` per outer ``Δt``. Default
+  `nothing` adaptively chooses ``N`` from the horizontal acoustic CFL each
+  step.
+- `forward_weight`: Off-centering parameter ``\\omega`` for the vertically
+  implicit solve. ``\\omega = 0.5`` is classic centered Crank-Nicolson;
+  the default ``\\omega = 0.65`` adds modest off-centering
+  (``\\varepsilon = 2\\omega - 1 = 0.3``). Combined with the default
+  divergence damping, it keeps a rest atmosphere at machine ε at
+  production ``\\Delta t = 20`` s and survives the DCMIP-2016 dry/moist
+  baroclinic-wave smoke tests at production grid.
+
+  **Note on residual non-normality** (Phase 4 of
+  `validation/substepping/PRISTINE_SUBSTEPPER_PLAN.md`): the column
+  tridiag has anti-symmetric buoyancy off-diagonals (gravity-wave
+  physics) and asymmetric PGF off-diagonals on a stratified ``\\bar\\theta(z)``,
+  so the substep operator ``U`` has spectral radius ``\\rho(U) = 1``
+  but operator norm ``\\|U\\|_2 \\gg 1`` (≈ 44 at ``\\Delta t = 20`` s,
+  ``\\omega = 0.55``, no damping). Distributed FP-noise excites the
+  non-normal transient-amplification subspace, leading to a
+  rest-atmosphere blow-up at default ``\\omega = 0.55``. Klemp 3-D
+  divergence damping shrinks ``\\|U^k\\|`` over enough ``k`` and breaks
+  the soft outer-step CFL — it is REQUIRED for stability at production
+  ``\\Delta t``.
+- `damping`: Acoustic divergence damping strategy. Default:
+  [`KlempDivergenceDamping`](@ref) with coefficient 0.1. Required for
+  stability at production ``\\Delta t``; passing
+  [`NoDivergenceDamping`](@ref) will cause the rest atmosphere to
+  amplify ~1.8× per outer step at ``\\Delta t = 20`` s.
+- `substep_distribution`: How acoustic substeps are distributed across the
+  three WS-RK3 stages.
 
 See also [`ExplicitTimeStepping`](@ref).
 """
@@ -278,24 +267,9 @@ struct SplitExplicitTimeDiscretization{N, FT, D <: AcousticDampingStrategy, AD <
 end
 
 function SplitExplicitTimeDiscretization(; substeps = nothing,
-                                           forward_weight = 0.7,
-                                           damping = PressureProjectionDamping(coefficient = 0.5),
-                                           substep_distribution = ProportionalSubsteps(),
-                                           divergence_damping_coefficient = nothing)
-
-    # Backwards-compat: the old `divergence_damping_coefficient` kwarg was
-    # silently dropped at runtime in prior releases (the substepper used a
-    # hardcoded `smdiv = 0.1`). Map it to a ThermodynamicDivergenceDamping
-    # when no explicit `damping` was passed and warn loudly so users know to
-    # migrate to the new API.
-    if divergence_damping_coefficient !== nothing
-        Base.depwarn("`divergence_damping_coefficient` is deprecated. " *
-                     "Pass `damping = ThermodynamicDivergenceDamping(coefficient = $(divergence_damping_coefficient))` " *
-                     "instead. (Note: in prior releases this kwarg was silently ignored at runtime; " *
-                     "the substepper used a hardcoded `smdiv = 0.1`.)",
-                     :SplitExplicitTimeDiscretization)
-        damping = ThermodynamicDivergenceDamping(coefficient = divergence_damping_coefficient)
-    end
+                                           forward_weight = 0.65,
+                                           damping = KlempDivergenceDamping(coefficient = 0.1),
+                                           substep_distribution = ProportionalSubsteps())
 
     return SplitExplicitTimeDiscretization(substeps,
                                            forward_weight,

@@ -180,6 +180,20 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         end
     end
 
+    # Seed the diagnostic pressure with the reference profile (or surface pressure if
+    # no reference state is built). Without this, the very first `update_state!` runs
+    # sat-adjust against an uninitialized (zero) pressure field, which produces NaN
+    # temperatures because the Exner function `(p/pˢᵗ)^κ` collapses to zero.
+    # `compute_auxiliary_dynamics_variables!` overwrites pressure properly on every
+    # subsequent call.
+    if reference_state isa ExnerReferenceState
+        Oceananigans.set!(pressure, reference_state.pressure)
+    elseif terrain_reference_pressure !== nothing
+        Oceananigans.set!(pressure, terrain_reference_pressure)
+    else
+        Oceananigans.set!(pressure, surface_pressure)
+    end
+
     return CompressibleDynamics(dynamics.time_discretization, density, pressure,
                                 standard_pressure, surface_pressure, reference_state,
                                 terrain_metrics,
@@ -264,6 +278,40 @@ $(TYPEDSIGNATURES)
 Return the standard pressure for potential temperature calculations.
 """
 AtmosphereModels.standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a reference state suitable for boundary-condition diagnostics.
+
+Boundary conditions are materialized before `materialize_dynamics` runs, so the
+stub `CompressibleDynamics.reference_state` field still holds the user's raw
+`reference_potential_temperature` spec (a constant, function, or NamedTuple)
+rather than an `ExnerReferenceState`. When called on the stub, this method
+builds the `ExnerReferenceState` on demand using the same logic as
+`materialize_dynamics`. When the dynamics has already been materialized (or has
+no reference state), the existing field is returned.
+"""
+function AtmosphereModels.bcs_reference_state(dynamics::CompressibleDynamics, grid, thermodynamic_constants)
+    ref_spec = dynamics.reference_state
+    ref_spec === nothing && return nothing
+    ref_spec isa ExnerReferenceState && return ref_spec
+
+    standard_pressure = dynamics.standard_pressure
+    surface_pressure = dynamics.surface_pressure
+
+    if ref_spec isa NamedTuple && haskey(ref_spec, :reference_temperature)
+        return ExnerReferenceState(grid, thermodynamic_constants;
+                                   surface_pressure,
+                                   reference_temperature = ref_spec.reference_temperature,
+                                   standard_pressure)
+    else
+        return ExnerReferenceState(grid, thermodynamic_constants;
+                                   surface_pressure,
+                                   potential_temperature = ref_spec,
+                                   standard_pressure)
+    end
+end
 
 #####
 ##### Pressure solver (none needed for compressible dynamics)
