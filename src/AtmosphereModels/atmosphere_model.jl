@@ -4,6 +4,7 @@ using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Fie
                     Centered, fields, prognostic_fields
 using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection
 using Oceananigans.AbstractOperations: @at
+using Oceananigans.Architectures: Architectures
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
@@ -313,6 +314,10 @@ function atmosphere_model_forcing_summary(model::AtmosphereModel)
     summary_tuple = Tuple(string(name, "=>", nameof(typeof(forcing[name]))) for name in names)
     return join(summary_tuple, ", ")
 end
+
+# AtmosphereModel has a grid, so we can use grid-based implementations
+Base.eltype(model::AtmosphereModel) = eltype(model.grid)
+Architectures.architecture(model::AtmosphereModel) = model.grid.architecture
 
 function Base.show(io::IO, model::AtmosphereModel)
     TS = nameof(typeof(model.timestepper))
