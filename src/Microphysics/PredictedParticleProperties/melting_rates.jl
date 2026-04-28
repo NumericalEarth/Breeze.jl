@@ -11,7 +11,7 @@ Morrison & Milbrandt (2015a) Eq. 44.
 The melting rate is determined by the heat flux to the particle:
 
 ```math
-\\frac{dm}{dt} = -\\frac{2π \\, \\text{capm}}{L_f} × [K_a(T-T_0) + ρ L_v D_v(q_v - q_{sat0})] × f_v
+\\frac{dm}{dt} = -\\frac{2π \\, \\text{capm}}{L_f} × [K_a(T-T_0) + ρ ℒˡ D_v(q_v - q_{sat0})] × f_v
 ```
 
 where capm = cap × D is the P3 Fortran capacitance convention (2× physical C).
@@ -21,7 +21,7 @@ where:
 - L_f is the latent heat of fusion
 - K_a is thermal conductivity of air
 - T_0 is the freezing temperature
-- L_v is latent heat of vaporization
+- ℒˡ is latent heat of vaporization
 - D_v is diffusivity of water vapor
 - q_v, q_sat0 are vapor mixing ratio and saturation mixing ratio at T₀
 - f_v is the ventilation factor
@@ -57,10 +57,10 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     ΔT = T - T₀
     is_melting = ΔT > 0
 
-    # Thermodynamic constants: L_f and L_v are T-dependent when constants
+    # Thermodynamic constants: L_f and ℒˡ are T-dependent when constants
     # are provided (H1), and Rᵛ follows the same runtime thermodynamic source.
     L_f = fusion_latent_heat(constants, T)
-    L_v = vaporization_latent_heat(constants, T)
+    ℒˡ = vaporization_latent_heat(constants, T)
     Rᵛ = FT(vapor_gas_constant(constants))
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
@@ -99,9 +99,9 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     # Sensible heat: K_a × (T - T₀)
     Q_sensible = K_a * ΔT
 
-    # Latent heat: L_v × D_v × ρ × (qᵛ - q_sat0)
+    # Latent heat: ℒˡ × D_v × ρ × (qᵛ - q_sat0)
     # When subsaturated, this is negative and opposes melting
-    Q_latent = L_v * D_v * ρ * (qᵛ - q_sat0)
+    Q_latent = ℒˡ * D_v * ρ * (qᵛ - q_sat0)
 
     # Total heat flux
     Q_total = Q_sensible + Q_latent

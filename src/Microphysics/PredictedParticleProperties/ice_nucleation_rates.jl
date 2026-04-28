@@ -92,7 +92,7 @@ negligible for small droplets.
     T_max = prp.immersion_freezing_temperature_max
     aimm = prp.immersion_freezing_coefficient
     T₀ = prp.freezing_temperature
-    ρ_water = FT(prp.liquid_water_density)
+    ρᴸ = FT(prp.liquid_water_density)
     bimm = prp.immersion_freezing_nucleation_coefficient
 
     # H2: Compute μ_c dynamically from local Nᶜ (already [1/m³]) via Liu-Daum (2000),
@@ -117,7 +117,7 @@ negligible for small droplets.
     # Nᶜ is [1/m³]; convert to per-kg: nᶜ = Nᶜ/ρ [1/kg]
     nᶜ = max(Nᶜ / ρ, FT(1))
     m_drop = qᶜˡ_eff / nᶜ                     # [kg]
-    V_drop = m_drop / ρ_water                   # [m³]
+    V_drop = m_drop / ρᴸ                   # [m³]
 
     # H1: Per-drop freezing probability per second (NO psd_correction).
     # The PSD correction applies only to the mass (6th moment) rate,
@@ -166,7 +166,7 @@ uses ``\\mu_r(i,k)`` in `gamma(7.+mu_r)` and `gamma(mu_r+4.)` terms).
     T_max = prp.immersion_freezing_temperature_max
     aimm = prp.immersion_freezing_coefficient
     T₀ = prp.freezing_temperature
-    ρ_water = FT(prp.liquid_water_density)
+    ρᴸ = FT(prp.liquid_water_density)
     bimm = prp.immersion_freezing_nucleation_coefficient
 
     # Compute PSD correction from actual rain shape parameter (Fortran P3 v5.5.0:
@@ -185,7 +185,7 @@ uses ``\\mu_r(i,k)`` in `gamma(7.+mu_r)` and `gamma(mu_r+4.)` terms).
     # Individual rain drop mass and volume (monodisperse assumption)
     nʳ_safe = max(nʳ_eff, FT(1))
     m_drop = qʳ_eff / nʳ_safe          # [kg]
-    V_drop = m_drop / ρ_water            # [m³]
+    V_drop = m_drop / ρᴸ            # [m³]
 
     # H1: Per-drop freezing probability per second (NO psd_correction).
     # The PSD correction applies only to the mass (6th moment) rate,

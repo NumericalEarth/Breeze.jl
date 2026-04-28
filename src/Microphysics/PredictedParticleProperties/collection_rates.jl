@@ -526,14 +526,14 @@ function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
     ρ_rim_min = prp.minimum_rime_density
     ρ_rim_max = prp.maximum_rime_density
     T₀ = prp.freezing_temperature
-    ρ_water = prp.liquid_water_density
+    ρᴸ = prp.liquid_water_density
 
     qᶜˡ_abs = clamp_positive(qᶜˡ) * ρ
     μ_air = transport.nu * ρ
     g = constants.gravitational_acceleration
 
     # Fortran get_cloud_dsd2 / p3_main: bcn = 2 and Γ(μ+6)/Γ(μ+4) = (μ+5)(μ+4).
-    a_cn = g * ρ_water / (FT(18) * max(μ_air, FT(1e-20)))
+    a_cn = g * ρᴸ / (FT(18) * max(μ_air, FT(1e-20)))
     Vt_qc = a_cn * (μ_c + 5) * (μ_c + 4) / λ_c^2
     D_c = (μ_c + 4) / λ_c
     inverse_supercooling = inv(min(FT(-0.001), T - T₀))
@@ -557,10 +557,10 @@ function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
     FT = typeof(T)
     μ_c = p3.cloud.shape_parameter
     Nᶜ = p3.cloud.number_concentration
-    ρ_water = p3.process_rates.liquid_water_density
+    ρᴸ = p3.process_rates.liquid_water_density
     qᶜˡ_abs = clamp_positive(qᶜˡ) * ρ
     λ_c_uncapped = cbrt(
-        FT(π) * ρ_water * Nᶜ * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
+        FT(π) * ρᴸ * Nᶜ * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
         (FT(6) * max(qᶜˡ_abs, FT(1e-20)))
     )
     λ_c = clamp(λ_c_uncapped, (μ_c + 1) * FT(2.5e4), (μ_c + 1) * FT(1e6))
@@ -666,7 +666,7 @@ The wet growth capacity is the maximum rate at which collected
 hydrometeors can be frozen, determined by the ventilated heat balance:
 
 ```math
-q_{wgrth} = C f_v \\left[K_a(T_0-T) + \\frac{2π}{L_f} L_s D_v(ρ_{vs}-ρ_v)\\right] × N_i
+q_{wgrth} = C f_v \\left[K_a(T_0-T) + \\frac{2π}{L_f} ℒⁱ D_v(ρ_{vs}-ρ_v)\\right] × N_i
 ```
 
 When the collection rate (cloud + rain riming) exceeds this capacity,
@@ -700,7 +700,7 @@ function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ
     below_freezing = T < T₀
 
     L_f = fusion_latent_heat(constants, T)
-    L_s = sublimation_latent_heat(constants, T)
+    ℒⁱ = sublimation_latent_heat(constants, T)
     Rᵛ = FT(vapor_gas_constant(constants))
 
     K_a = transport.K_a
@@ -724,7 +724,7 @@ function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ
 
     # Heat balance: sensible + latent
     Q_sensible = K_a * (T₀ - T)
-    Q_latent = L_s * D_v * ρ * (q_sat0 - qᵛ)
+    Q_latent = ℒⁱ * D_v * ρ * (q_sat0 - qᵛ)
 
     # Fortran applies 2π/Lf only to the latent term; the sensible-conduction
     # term uses the capm convention directly.
@@ -742,7 +742,7 @@ Below freezing, liquid coating on ice particles refreezes. The rate is
 determined by the heat flux at the particle surface:
 
 ```math
-\\frac{dm}{dt} = C f_v \\left[K_a(T_0-T) + \\frac{2π}{L_f} ρ L_s D_v (q_{sat0} - q_v)\\right]
+\\frac{dm}{dt} = C f_v \\left[K_a(T_0-T) + \\frac{2π}{L_f} ρ ℒⁱ D_v (q_{sat0} - q_v)\\right]
 ```
 
 This mirrors the melting formula with reversed temperature gradient.
@@ -779,7 +779,7 @@ function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, co
     ΔT = T₀ - T  # positive when below freezing
 
     L_f = fusion_latent_heat(constants, T)
-    L_s = sublimation_latent_heat(constants, T)
+    ℒⁱ = sublimation_latent_heat(constants, T)
     Rᵛ = FT(vapor_gas_constant(constants))
 
     K_a = transport.K_a
@@ -805,10 +805,10 @@ function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, co
     # Conductive: K_a × (T₀ - T) removes heat from liquid → promotes freezing
     Q_sensible = K_a * ΔT
 
-    # Vapor: L_s × D_v × ρ × (q_sat0 - qᵛ)
+    # Vapor: ℒⁱ × D_v × ρ × (q_sat0 - qᵛ)
     # Subsaturated (q_sat0 > qᵛ): evaporation cools particle → promotes freezing
     # Supersaturated (q_sat0 < qᵛ): condensation warms particle → opposes freezing
-    Q_latent = L_s * D_v * ρ * (q_sat0 - qᵛ)
+    Q_latent = ℒⁱ * D_v * ρ * (q_sat0 - qᵛ)
 
     # Only refreeze when net heat balance favors it. As in the Fortran wet-growth
     # and refreezing paths, 2π/Lf multiplies only the latent-diffusion term.

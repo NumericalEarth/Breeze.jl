@@ -234,13 +234,14 @@ end
 
     # 1. Compute graupel density (rho_g)
     # Fortran convention: for Fr=0, cgp = crp = ρ_rime × π/6, so the effective
-    # density used in D_mvd is ρ_rime (not ρ_ice).  This matches the Fortran's
+    # density used in D_mvd is ρ_rime (not ρⁱ).  This matches the Fortran's
     # diagnostic_mui / diagnostic_mui_Fl shape parameter diagnostic.
     ρ_dep = deposited_ice_density(mass, rime_fraction, rime_density)
     ρ_g_rimed = graupel_density(rime_fraction, rime_density, ρ_dep)
     ρ_g_dry = ifelse(iszero(rime_fraction), rime_density, ρ_g_rimed)
     # M12: blend liquid water density into bulk density (Fortran diagnostic_mui_Fl)
-    ρ_g = (1 - liquid_fraction) * ρ_g_dry + liquid_fraction * FT(1000)
+    ρᴸ = FT(1000)
+    ρ_g = (1 - liquid_fraction) * ρ_g_dry + liquid_fraction * ρᴸ
 
     # 2. Compute D_mvd (Mean Volume Diameter)
     # D30: Fortran diagnostic_mui uses mean mass per particle q = qi_tot/ni_tot,
@@ -627,7 +628,7 @@ $(TYPEDSIGNATURES)
 Compute log(∫₀^∞ Dⁿ m(D) N'(D) dD / N₀) over the piecewise mass-diameter relationship.
 
 When `liquid_fraction` Fˡ > 0, the total mass includes a liquid coating term:
-`m(D) = (1 - Fˡ) × m_ice(D) + Fˡ × ρ_water × π/6 × D³`,
+`m(D) = (1 - Fˡ) × m_ice(D) + Fˡ × ρᴸ × π/6 × D³`,
 matching the Fortran convention in `create_p3_lookupTable_1.f90`.
 """
 function log_mass_moment(mass::IceMassPowerLaw, rime_fraction, rime_density, μ, logλ;
@@ -669,11 +670,11 @@ function log_mass_moment(mass::IceMassPowerLaw, rime_fraction, rime_density, μ,
     # Select ice-only mass moment based on whether ice is rimed
     log_M_ice = ifelse(iszero(Fᶠ), unrimed_result, rimed_result)
 
-    # Add liquid mass contribution: Fˡ × ρ_water × π/6 × D³
-    # Total mass = (1 - Fˡ) × m_ice(D) + Fˡ × ρ_water × π/6 × D³
+    # Add liquid mass contribution: Fˡ × ρᴸ × π/6 × D³
+    # Total mass = (1 - Fˡ) × m_ice(D) + Fˡ × ρᴸ × π/6 × D³
     # In log-space: logaddexp(log(1-Fˡ) + log_M_ice, log(Fˡ) + log_M_liquid)
-    ρ_water = FT(1000)
-    a_liquid = ρ_water * FT(π) / 6
+    ρᴸ = FT(1000)
+    a_liquid = ρᴸ * FT(π) / 6
     log_M_liquid = log_gamma_moment(μ, logλ; k = 3 + n, scale = a_liquid)
 
     Fˡ_safe = clamp(Fˡ, eps(FT), 1 - eps(FT))

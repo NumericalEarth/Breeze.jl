@@ -905,9 +905,9 @@ end
 ##### Bulk property integrals
 #####
 
-# Effective radius (Fortran convention): eff = 3 ∫m N'dD / (4 ρ_ice ∫A N'dD)
+# Effective radius (Fortran convention): eff = 3 ∫m N'dD / (4 ρⁱ ∫A N'dD)
 # Integrand computes the numerator: m(D) N'(D)
-# Normalization in tabulation.jl divides by area integral × (4/3) ρ_ice
+# Normalization in tabulation.jl divides by area integral × (4/3) ρⁱ
 @inline function integrand(::EffectiveRadius, D, state::IceSizeDistributionState, thresholds)
     m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
@@ -930,12 +930,12 @@ end
 end
 
 # Reflectivity (Fortran `refl` / sum5 convention):
-# refl = ∫ (6/(π ρ_ice))² × m(D)² × N'(D) dD
+# refl = ∫ (6/(π ρⁱ))² × m(D)² × N'(D) dD
 # No Rayleigh prefactor — matches Fortran Table 1 `refl` (sum5).
 @inline function integrand(::Reflectivity, D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
-    ρ_ice = FT(917.0)
-    K_refl = (6 / (FT(π) * ρ_ice))^2
+    ρⁱ = FT(917.0)
+    K_refl = (6 / (FT(π) * ρⁱ))^2
     m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
     return K_refl * m^2 * Np
@@ -1026,15 +1026,15 @@ end
 
 @inline function integrand(::RayleighReflectivity, D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
-    ρ_ice = FT(917.0)
+    ρⁱ = FT(917.0)
     Fˡ = state.liquid_fraction
 
     m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
 
-    # Dry ice: |K_w|² × (6/(π ρ_ice))² × m²
+    # Dry ice: |K_w|² × (6/(π ρⁱ))² × m²
     K_w_sq = FT(0.1892)
-    K_refl = (6 / (FT(π) * ρ_ice))^2
+    K_refl = (6 / (FT(π) * ρⁱ))^2
     refl_ice = K_w_sq * K_refl * m^2 * Np
 
     # Pure water: D⁶ (equivalent reflectivity for water drops)

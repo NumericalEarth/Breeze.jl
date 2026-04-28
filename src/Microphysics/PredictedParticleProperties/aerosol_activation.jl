@@ -68,10 +68,10 @@ function AerosolMode(FT::Type{<:AbstractFloat} = Float64;
                      mass_fraction_soluble = 0.9,
                      aerosol_density = 1777.0,
                      molecular_weight_aerosol = 0.132)
-    Mw = FT(0.018)
-    ρw = FT(1000)
+    mᵛ = FT(0.018)
+    ρᴸ = FT(1000)
     solute_activity = FT(vant_hoff_factor) * FT(osmotic_potential) * FT(mass_fraction_soluble) *
-                      Mw * FT(aerosol_density) / (FT(molecular_weight_aerosol) * ρw)
+                      mᵛ * FT(aerosol_density) / (FT(molecular_weight_aerosol) * ρᴸ)
     return AerosolMode(FT(number_mixing_ratio), FT(mean_radius), FT(geometric_std),
                        FT(vant_hoff_factor), FT(osmotic_potential), FT(mass_fraction_soluble),
                        FT(aerosol_density), FT(molecular_weight_aerosol), solute_activity)
@@ -177,7 +177,7 @@ and the activated fraction is ``N_a / 2 \\, [1 - \\text{erf}(u)]`` where
     # Surface tension of water [N/m] (Fortran: sigvl)
     σ_v = FT(0.0761) - FT(1.55e-4) * (T - FT(273.15))
 
-    # Kelvin parameter: Aact = 2 Mw σv / (ρw R T)
+    # Kelvin parameter: Aact = 2 Mw σv / (ρᴸ R T)
     A_act = 2 * aerosol.molecular_weight_water * σ_v /
             (FT(1000) * aerosol.universal_gas_constant * T)
 

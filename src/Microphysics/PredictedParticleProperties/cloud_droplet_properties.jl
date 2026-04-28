@@ -155,14 +155,13 @@ the clamped lambda to maintain mass-DSD consistency. This function reproduces th
 adjustment so that downstream rates (autoconversion, immersion freezing) see a
 physically consistent cloud number.
 """
-@inline function bounded_cloud_number(Nᶜ, μ_c, qᶜˡ, ρ)
+@inline function bounded_cloud_number(Nᶜ, μ_c, qᶜˡ, ρ, ρᴸ)
     FT = typeof(qᶜˡ)
-    ρ_water = FT(1000)
     qᶜˡ_abs = max(qᶜˡ * ρ, FT(1e-20))  # absolute cloud content [kg/m³]
 
     # Compute unclamped lambda from mass and number
     λ_c_uncapped = cbrt(
-        FT(π) * ρ_water * Nᶜ * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
+        FT(π) * ρᴸ * Nᶜ * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
         (FT(6) * qᶜˡ_abs)
     )
 
@@ -175,7 +174,7 @@ physically consistent cloud number.
     # mass consistency: N = qᶜˡ_abs × λ^(μ+1) × 6 / (π ρ_w Γ(μ+4)/Γ(μ+1))
     # Since Γ(μ+4)/Γ(μ+1) = (μ+3)(μ+2)(μ+1), the result simplifies to:
     Nᶜ_bounded = qᶜˡ_abs * FT(6) * λ_c^3 /
-                 (FT(π) * ρ_water * (μ_c + 3) * (μ_c + 2) * (μ_c + 1))
+                 (FT(π) * ρᴸ * (μ_c + 3) * (μ_c + 2) * (μ_c + 1))
 
     # Only adjust when clamping was needed; use per-volume [1/m³] convention
     needs_adjustment = (λ_c_uncapped < λ_min) | (λ_c_uncapped > λ_max)
@@ -205,13 +204,14 @@ cloud number together with the PSD correction used by immersion freezing.
     qᶜˡ_eff = max(0, qᶜˡ)
     nᶜˡ_eff = max(1e-16, nᶜˡ)
     Nᶜ = nᶜˡ_eff * ρ
+    ρᴸ = p3.process_rates.liquid_water_density
 
     μ_c = liu_daum_shape_parameter(Nᶜ)
-    Nᶜ_bounded = bounded_cloud_number(Nᶜ, μ_c, qᶜˡ_eff, ρ)
+    Nᶜ_bounded = bounded_cloud_number(Nᶜ, μ_c, qᶜˡ_eff, ρ, ρᴸ)
     nᶜˡ_bounded = ifelse(iszero(ρ), zero(FT), Nᶜ_bounded / ρ)
 
     λ_c_uncapped = cbrt(
-        FT(π) * FT(1000) * Nᶜ_bounded * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
+        FT(π) * ρᴸ * Nᶜ_bounded * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
         (FT(6) * max(qᶜˡ_eff * ρ, FT(1e-20)))
     )
     λ_min = (μ_c + 1) * FT(2.5e4)

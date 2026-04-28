@@ -132,9 +132,9 @@ is smaller than the physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
 
     # Fortran P3 convention: D_r = (qr / (π ρ_w nr))^(1/3) = 1/λ_r
     # (no factor of 6; this is the exponential-DSD mean diameter at μ=0)
-    ρ_water = prp.liquid_water_density
+    ρᴸ = prp.liquid_water_density
     mean_mass = safe_divide(qʳ_eff, nʳ_eff, FT(1e-10))
-    D_r = cbrt(mean_mass / (FT(π) * ρ_water))
+    D_r = cbrt(mean_mass / (FT(π) * ρᴸ))
 
     # Two-piece breakup function (Fortran P3 v5.5.0)
     D_th = prp.rain_breakup_diameter_threshold  # 280 μm: breakup threshold (1/λ_r convention)
@@ -175,7 +175,7 @@ approximation path depending on `p3.rain.evaporation`:
     rain fall-speed law as the tabulated path.
 
 ```math
-\\frac{dm}{dt} = \\frac{4\\pi C f_v (S - 1)}{\\frac{L_v}{K_a T}(\\frac{L_v}{R_v T} - 1)
+\\frac{dm}{dt} = \\frac{4\\pi C f_v (S - 1)}{\\frac{ℒˡ}{K_a T}(\\frac{ℒˡ}{R_v T} - 1)
                + \\frac{R_v T}{e_s D_v}},\\quad C = D/2
 ```
 
@@ -207,7 +207,7 @@ approximation path depending on `p3.rain.evaporation`:
     # Thermodynamic constants
     Rᵛ = FT(VAPOR_GAS_CONSTANT)
     Rᵈ = FT(DRY_AIR_GAS_CONSTANT)
-    L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
+    ℒˡ = vaporization_latent_heat(nothing, T)  # Latent heat of vaporization [J/kg]
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
@@ -220,7 +220,7 @@ approximation path depending on `p3.rain.evaporation`:
     e_s = P * qᵛ⁺ˡ_safe / (ε + qᵛ⁺ˡ_safe * (1 - ε))
 
     # Thermodynamic resistance (Mason 1971)
-    A = L_v / (K_a * T) * (L_v / (Rᵛ * T) - 1)
+    A = ℒˡ / (K_a * T) * (ℒˡ / (Rᵛ * T) - 1)
     B = Rᵛ * T / (e_s * D_v)
     thermodynamic_factor = max(A + B, FT(1e-10))
 
@@ -240,12 +240,12 @@ end
 # Tabulated path: use PSD-integrated ventilation integral I_evap(λ_r)
 @inline function rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
                                         thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
-    ρ_water = p3.water_density
+    ρᴸ = p3.water_density
 
     # Diagnose λ_r from (q_r, N_r) for exponential DSD (μ_r = 0):
     #   q_r = N_r * <m> = N_r * π ρ_w / λ_r³  ⟹  λ_r = (π ρ_w / m̄)^(1/3)
     m_mean = safe_divide(qʳ, nʳ, FT(1e-12))
-    λ_r = cbrt(FT(π) * ρ_water / max(m_mean, FT(1e-15)))
+    λ_r = cbrt(FT(π) * ρᴸ / max(m_mean, FT(1e-15)))
     # H6: Clamp λ_r to Fortran P3 bounds
     λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
 
@@ -298,7 +298,7 @@ P3 v5.5.0 semi-analytic framework where ``q_{rcon}`` can be positive.
     # Thermodynamic constants (same as rain evaporation)
     Rᵛ = FT(VAPOR_GAS_CONSTANT)
     Rᵈ = FT(DRY_AIR_GAS_CONSTANT)
-    L_v = FT(2.5e6)
+    ℒˡ = vaporization_latent_heat(nothing, T)
     K_a = transport.K_a
     D_v = transport.D_v
     nu  = transport.nu
@@ -308,7 +308,7 @@ P3 v5.5.0 semi-analytic framework where ``q_{rcon}`` can be positive.
     e_s = P * qᵛ⁺ˡ_safe / (ε + qᵛ⁺ˡ_safe * (1 - ε))
 
     # Thermodynamic resistance (Mason 1971)
-    A = L_v / (K_a * T) * (L_v / (Rᵛ * T) - 1)
+    A = ℒˡ / (K_a * T) * (ℒˡ / (Rᵛ * T) - 1)
     B = Rᵛ * T / (e_s * D_v)
     thermodynamic_factor = max(A + B, FT(1e-10))
 
