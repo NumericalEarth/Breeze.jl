@@ -12,10 +12,6 @@ Ice collision-coalescence efficiencies and collection integrals.
 See [`IceCollection`](@ref) constructor for details.
 """
 struct IceCollection{FT, AG, RW, WA, IA}
-    # Deprecated: unused by the runtime riming path, which reads
-    # ProcessRateParameters.cloud_ice_collection_efficiency instead.
-    # Retained for backward compatibility with the tabulation path.
-    ice_cloud_collection_efficiency :: FT
     ice_rain_collection_efficiency :: FT
     aggregation :: AG
     rain_collection :: RW
@@ -43,7 +39,6 @@ collection (handled separately in the scheme).
 
 # Keyword Arguments
 
-- `ice_cloud_collection_efficiency`: Eⁱᶜ [-], default 0.5 (matches Fortran `eci`; deprecated — runtime uses `ProcessRateParameters.cloud_ice_collection_efficiency`)
 - `ice_rain_collection_efficiency`: Eⁱʳ [-], default 1.0
 
 # References
@@ -52,10 +47,8 @@ collection (handled separately in the scheme).
 [Milbrandt and Yau (2005)](@cite MilbrandtYau2005).
 """
 function IceCollection(FT::Type{<:AbstractFloat} = Float64;
-                       ice_cloud_collection_efficiency = 0.5,
                        ice_rain_collection_efficiency = 1.0)
     return IceCollection(
-        FT(ice_cloud_collection_efficiency),
         FT(ice_rain_collection_efficiency),
         AggregationNumber(),
         RainCollectionNumber(),
@@ -67,7 +60,5 @@ end
 Base.summary(::IceCollection) = "IceCollection"
 
 function Base.show(io::IO, c::IceCollection)
-    print(io, summary(c), "(")
-    print(io, "Eⁱᶜ=", c.ice_cloud_collection_efficiency, ", ")
-    print(io, "Eⁱʳ=", c.ice_rain_collection_efficiency, ")")
+    print(io, summary(c), "(Eⁱʳ=", c.ice_rain_collection_efficiency, ")")
 end

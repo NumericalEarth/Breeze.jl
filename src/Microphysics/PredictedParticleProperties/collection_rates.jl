@@ -754,7 +754,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 44.
 - `qⁱ`: Ice mass fraction [kg/kg]
 - `nⁱ`: Ice number concentration [1/kg]
 - `T`: Temperature [K]
-- `P`: Pressure [Pa] (unused; reserved for future transport recomputation)
+- `P`: Pressure [Pa]
 - `qᵛ`: Vapor mass fraction [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]

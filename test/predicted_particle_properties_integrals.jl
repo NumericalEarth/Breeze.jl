@@ -237,7 +237,6 @@ end
 
     @testset "Ice collection" begin
         col = IceCollection()
-        @test col.ice_cloud_collection_efficiency ≈ 0.5
         @test col.ice_rain_collection_efficiency ≈ 1.0
 
         @test col.aggregation isa AggregationNumber
@@ -285,7 +284,6 @@ end
     @testset "Cloud droplet properties" begin
         cloud = CloudDropletProperties()
         @test cloud.number_concentration ≈ 200e6
-        @test cloud.autoconversion_threshold ≈ 25e-6
         @test cloud.condensation_timescale ≈ 1.0
 
         # μ_c is diagnosed from Nc via Liu-Daum (2000) by default.

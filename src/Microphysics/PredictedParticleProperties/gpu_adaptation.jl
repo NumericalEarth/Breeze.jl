@@ -88,16 +88,14 @@ Oceananigans.Architectures.on_architecture(arch, x::IceBulkProperties) =
 # --- IceCollection ---
 
 Adapt.adapt_structure(to, x::IceCollection) =
-    IceCollection(x.ice_cloud_collection_efficiency,
-                  x.ice_rain_collection_efficiency,
+    IceCollection(x.ice_rain_collection_efficiency,
                   Adapt.adapt(to, x.aggregation),
                   Adapt.adapt(to, x.rain_collection),
                   Adapt.adapt(to, x.cloud_aerosol_collection),
                   Adapt.adapt(to, x.ice_aerosol_collection))
 
 Oceananigans.Architectures.on_architecture(arch, x::IceCollection) =
-    IceCollection(x.ice_cloud_collection_efficiency,
-                  x.ice_rain_collection_efficiency,
+    IceCollection(x.ice_rain_collection_efficiency,
                   on_architecture(arch, x.aggregation),
                   on_architecture(arch, x.rain_collection),
                   on_architecture(arch, x.cloud_aerosol_collection),

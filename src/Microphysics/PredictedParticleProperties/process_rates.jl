@@ -1021,7 +1021,7 @@ struct P3ProcessRates{FT}
     wet_growth_shedding :: FT          # Excess collection → rain mass [kg/kg/s]
     wet_growth_shedding_number :: FT   # Rain number from wet growth shedding [1/kg/s]
 
-    # M9: Warm/mixed-phase budget terms (stubs for Fortran parity)
+    # M9: Warm/mixed-phase budget terms
     ccn_activation_mass :: FT          # CCN activation mass rate (vapor → cloud) [kg/kg/s]
     ccn_activation_number :: FT        # CCN activation number rate [1/kg/s] (prognostic CCN only)
     rain_condensation :: FT            # Rain condensation (vapor → rain) [kg/kg/s]

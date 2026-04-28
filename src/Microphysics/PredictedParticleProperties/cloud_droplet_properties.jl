@@ -12,9 +12,6 @@ See [`CloudDropletProperties`](@ref) constructor for details.
 """
 struct CloudDropletProperties{FT}
     number_concentration :: FT
-    # DEPRECATED: Not used by rain_autoconversion_rate (KK2000 is threshold-free).
-    # Retained for API stability. Will be removed in a future breaking release.
-    autoconversion_threshold :: FT
     condensation_timescale :: FT
     # Cloud gamma PSD shape parameter μ_c ∈ [2, 15].
     # Diagnosed from Nc via the Liu-Daum (2000) relation in the constructor
@@ -101,13 +98,10 @@ at construction time and used in `immersion_freezing_cloud_rate`.
 **Autoconversion:**
 Cloud droplets are converted to rain via collision-coalescence following
 [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000).
-Note: `autoconversion_threshold` is **unused** — KK2000 is threshold-free.
-Retained for API stability.
 
 # Keyword Arguments
 
 - `number_concentration`: Nc [1/m³], default 200×10⁶ (Fortran nccnst_2)
-- `autoconversion_threshold`: Conversion diameter [m], default 25 μm
 - `condensation_timescale`: Saturation relaxation [s], default 1.0
 - `shape_parameter`: μ_c for cloud gamma PSD [-], default `nothing` (diagnosed
   from Nc via Liu-Daum relation). Pass an explicit value to override.
@@ -131,7 +125,6 @@ round(cloud.shape_parameter, digits=1)  # μ_c diagnosed from Nc = 200×10⁶ m�
 """
 function CloudDropletProperties(FT = Oceananigans.defaults.FloatType;
                                 number_concentration = 200e6,
-                                autoconversion_threshold = 25e-6,
                                 condensation_timescale = 1,
                                 shape_parameter = nothing)
     # Diagnose μ_c from Nc via the Liu-Daum (2000) relation by default.
@@ -144,7 +137,6 @@ function CloudDropletProperties(FT = Oceananigans.defaults.FloatType;
     freezing_psd_correction = psd_correction_spherical_volume(FT(μ_c))
     return CloudDropletProperties(
         FT(number_concentration),
-        FT(autoconversion_threshold),
         FT(condensation_timescale),
         FT(μ_c),
         FT(freezing_psd_correction)

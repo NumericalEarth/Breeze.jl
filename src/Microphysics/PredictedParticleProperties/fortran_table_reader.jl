@@ -581,7 +581,6 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
     )
 
     collection = IceCollection(
-        ice_base.collection.ice_cloud_collection_efficiency,
         ice_base.collection.ice_rain_collection_efficiency,
         ice_5d[:aggregation],
         ice_5d[:rain_collection],
