@@ -517,7 +517,8 @@ the Fortran fallback value `400 kg m⁻³` is used.
 # Returns
 - Rime density [kg/m³]
 """
-function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
+function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
+                      μ_c, λ_c)
     FT = typeof(T)
     prp = p3.process_rates
     qsmall = p3.minimum_mass_mixing_ratio
@@ -526,18 +527,10 @@ function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
     ρ_rim_max = prp.maximum_rime_density
     T₀ = prp.freezing_temperature
     ρ_water = prp.liquid_water_density
-    μ_c = p3.cloud.shape_parameter
-    Nᶜ = p3.cloud.number_concentration
 
     qᶜˡ_abs = clamp_positive(qᶜˡ) * ρ
     μ_air = transport.nu * ρ
     g = constants.gravitational_acceleration
-
-    λ_c_uncapped = cbrt(
-        FT(π) * ρ_water * Nᶜ * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
-        (FT(6) * max(qᶜˡ_abs, FT(1e-20)))
-    )
-    λ_c = clamp(λ_c_uncapped, (μ_c + 1) * FT(2.5e4), (μ_c + 1) * FT(1e6))
 
     # Fortran get_cloud_dsd2 / p3_main: bcn = 2 and Γ(μ+6)/Γ(μ+4) = (μ+5)(μ+4).
     a_cn = g * ρ_water / (FT(18) * max(μ_air, FT(1e-20)))
@@ -556,6 +549,22 @@ function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
     ρᶠ = ifelse(active_cloud_riming, ρ_rime_Ri, FT(400))
 
     return clamp(ρᶠ, ρ_rim_min, ρ_rim_max)
+end
+
+# Backward-compatible 8-arg method: uses prescribed cloud DSD (μ_c, Nᶜ from p3.cloud).
+# The full 10-arg form takes locally diagnosed (μ_c, λ_c) per Fortran p3_main parity.
+function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
+    FT = typeof(T)
+    μ_c = p3.cloud.shape_parameter
+    Nᶜ = p3.cloud.number_concentration
+    ρ_water = p3.process_rates.liquid_water_density
+    qᶜˡ_abs = clamp_positive(qᶜˡ) * ρ
+    λ_c_uncapped = cbrt(
+        FT(π) * ρ_water * Nᶜ * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
+        (FT(6) * max(qᶜˡ_abs, FT(1e-20)))
+    )
+    λ_c = clamp(λ_c_uncapped, (μ_c + 1) * FT(2.5e4), (μ_c + 1) * FT(1e6))
+    return rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport, μ_c, λ_c)
 end
 
 #####

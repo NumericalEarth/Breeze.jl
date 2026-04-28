@@ -398,6 +398,10 @@ struct P3IceProps{FT}
     Fˡ :: FT
     ρᶠ :: FT
     qⁱ_total :: FT
+    # D10 impose_max_Ni cap mirrored from compute_p3_process_rates so the PSD
+    # (μ_ice, zⁱ_bounded) and the tabulated Z tendency use the same nⁱ that the
+    # rate = N × m_table × env decomposition inside the process rates was built with.
+    nⁱ :: FT
     μ_ice :: FT
     μ_cloud :: FT
     zⁱ_bounded :: FT
@@ -426,9 +430,16 @@ end
     # Terminal velocities (individual calls avoid NamedTuple from ice_terminal_velocities)
     wʳ   = rain_terminal_velocity_mass_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     wʳₙ  = rain_terminal_velocity_number_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
-    wⁱ   = ice_terminal_velocity_mass_weighted(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
-    wⁱₙ  = ice_terminal_velocity_number_weighted(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
-    wⁱ_z = ice_terminal_velocity_reflectivity_weighted(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
+    # Fortran parity: after impose_max_Ni (microphy_p3.f90:2812/4390/4937) the nitot
+    # array is capped in place, so all downstream math — process rates, terminal
+    # velocities, Z tendency, reflectivity — sees the same value. Mirror that here by
+    # using props.nⁱ (= min(ℳ.nⁱ, max_Ni/ρ)) wherever Fortran would see capped nitot.
+    # Fortran indexes the ice fall-speed lookup with qitot (= dry + liquid-on-ice);
+    # the table's q-norm axis is total ice mass per particle.
+    qⁱ_total = total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ)
+    wⁱ   = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, props.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
+    wⁱₙ  = ice_terminal_velocity_number_weighted(p3, qⁱ_total, props.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
+    wⁱ_z = ice_terminal_velocity_reflectivity_weighted(p3, qⁱ_total, props.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
 
     # Process rates (heavy, @noinline — compiled as a separate GPU function)
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
@@ -439,7 +450,7 @@ end
     c_ncl = isnothing(p3.aerosol) ? zero(typeof(ρ)) :
             tendency_ρnᶜˡ(rates, ρ, cloud.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
     c_qr  = tendency_ρqʳ(rates, ρ)
-    c_nr  = tendency_ρnʳ(rates, ρ, ℳ.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
+    c_nr  = tendency_ρnʳ(rates, ρ, props.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
     c_qi  = tendency_ρqⁱ(rates, ρ)
     c_ni  = tendency_ρnⁱ(rates, ρ)
     c_qf  = tendency_ρqᶠ(rates, ρ, Fᶠ)
@@ -449,8 +460,8 @@ end
     tendency_ρz_phys = p3_ice_sixth_moment_tendency(lookup_table_1(p3), p3, rates, ρ, ℳ, props)
     z_phys = props.zⁱ_bounded
     FT = typeof(ρ)
-    z̃ = sqrt(max(z_phys * ℳ.nⁱ, FT(1e-30)))
-    c_zi = (ℳ.nⁱ * tendency_ρz_phys + z_phys * c_ni) / (2 * z̃)
+    z̃ = sqrt(max(z_phys * props.nⁱ, FT(1e-30)))
+    c_zi = (props.nⁱ * tendency_ρz_phys + z_phys * c_ni) / (2 * z̃)
     c_qwi = tendency_ρqʷⁱ(rates, ρ)
     c_ss  = tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates)
     c_qv  = tendency_ρqᵛ(rates, ρ)
@@ -589,18 +600,19 @@ end
 # Helper to compute P3 rates and extract ice properties from ℳ
 @inline function p3_ice_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     FT = typeof(ρ)
+    nⁱ = min(ℳ.nⁱ, p3.process_rates.maximum_ice_number_density / ρ)
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
     qⁱ_total = max(total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ), FT(1e-20))
     Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, ℳ.qʷⁱ)
-    μ_ice = compute_ice_shape_parameter(p3, qⁱ_total, ℳ.nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
-    zⁱ_bounded = bound_ice_sixth_moment(p3, qⁱ_total, ℳ.nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ, μ_ice)
+    μ_ice = compute_ice_shape_parameter(p3, qⁱ_total, nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
+    zⁱ_bounded = bound_ice_sixth_moment(p3, qⁱ_total, nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ, μ_ice)
     T = temperature(𝒰, constants)
     P = 𝒰.reference_pressure
     transport = air_transport_properties(T, P)
     λ_r = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     return P3IceProps{FT}(rime_state.qᶠ, rime_state.bᶠ, rime_state.Fᶠ, Fˡ,
-                          rime_state.ρᶠ, qⁱ_total, μ_ice, cloud.μ_c,
+                          rime_state.ρᶠ, qⁱ_total, nⁱ, μ_ice, cloud.μ_c,
                           zⁱ_bounded, transport.D_v, transport.nu, λ_r)
 end
 
@@ -611,11 +623,11 @@ end
 end
 
 @inline function p3_ice_sixth_moment_tendency(::Nothing, p3, rates, ρ, ℳ::P3MicrophysicalState, props::P3IceProps)
-    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, ℳ.nⁱ, props.zⁱ_bounded, p3.process_rates, props.μ_cloud)
+    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, props.nⁱ, props.zⁱ_bounded, p3.process_rates, props.μ_cloud)
 end
 
 @inline function p3_ice_sixth_moment_tendency(::P3LookupTable1, p3, rates, ρ, ℳ::P3MicrophysicalState, props::P3IceProps)
-    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, ℳ.nⁱ, props.zⁱ_bounded,
+    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, props.nⁱ, props.zⁱ_bounded,
                         props.Fᶠ, props.Fˡ, props.ρᶠ, p3,
                         props.nu, props.D_v, props.μ_ice, props.μ_cloud, props.λ_r)
 end
@@ -663,8 +675,8 @@ $(TYPEDSIGNATURES)
 Rain number tendency: gains from autoconversion, melting, shedding; loses to self-collection, riming.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnʳ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρnʳ(rates, ρ, ℳ.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
+    rates, props = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    return tendency_ρnʳ(rates, ρ, props.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
 end
 
 """
@@ -719,8 +731,8 @@ Ice sixth moment tendency: changes with deposition, melting, riming, and nucleat
     tendency_ρz_phys = p3_ice_sixth_moment_tendency(lookup_table_1(p3), p3, rates, ρ, ℳ, props)
     tendency_ρn = tendency_ρnⁱ(rates, ρ)
     z_phys = props.zⁱ_bounded
-    z̃ = sqrt(max(z_phys * ℳ.nⁱ, FT(1e-30)))
-    return (ℳ.nⁱ * tendency_ρz_phys + z_phys * tendency_ρn) / (2 * z̃)
+    z̃ = sqrt(max(z_phys * props.nⁱ, FT(1e-30)))
+    return (props.nⁱ * tendency_ρz_phys + z_phys * tendency_ρn) / (2 * z̃)
 end
 
 """

@@ -854,6 +854,8 @@ struct P3DerivedState{FT, Q}
     Fˡ_mu :: FT     # liquid fraction for μ lookup
     Nᶜ :: FT        # effective cloud droplet number concentration
     nᶜˡ :: FT       # DSD-bounded cloud number (for correction)
+    μ_c :: FT       # local cloud DSD shape parameter (Fortran mu_c)
+    λ_c :: FT       # local cloud DSD slope parameter (Fortran lamc)
     # Thermodynamic state
     T :: FT         # temperature [K]
     P :: FT         # pressure [Pa]
@@ -1123,6 +1125,8 @@ end
     μ_ice = state.μ_ice
     Fˡ_mu = state.Fˡ_mu
     Nᶜ = state.Nᶜ
+    μ_c = state.μ_c
+    λ_c = state.λ_c
     nⁱ = state.nⁱ
     nʳ = state.nʳ
     transport = (; D_v = state.D_v, K_a = state.K_a, nu = state.nu)
@@ -1137,9 +1141,12 @@ end
     # =========================================================================
     agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
 
-    # C3: Global ice number limiter
+    # C3: Global ice number limiter — Fortran impose_max_Ni hard-clamps the prognostic
+    # nitot at multiple driver points (microphy_p3.f90:2812, 4390, 4937). Mirror that as
+    # a tendency by using the *raw* prognostic ℳ.nⁱ rather than the locally pre-capped
+    # `state.nⁱ`, which would always be ≤ N_max/ρ and make this limiter dead.
     N_max = prp.maximum_ice_number_density
-    ni_lim = clamp_positive(nⁱ - N_max / ρ) / prp.sink_limiting_timescale
+    ni_lim = clamp_positive(ℳ.nⁱ - N_max / ρ) / prp.sink_limiting_timescale
 
     # =========================================================================
     # Riming
@@ -1150,8 +1157,14 @@ end
     rain_rim_n = rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
 
     # Rime density
-    vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=Fˡ_mu, μ=μ_ice)
-    ρᶠ_new = rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
+    # Fortran p3_main indexes the rime density formula with the locally diagnosed
+    # cloud DSD (mu_c, lamc from get_cloud_dsd2 — microphy_p3.f90:2801, 3380-3388),
+    # not prescribed cloud parameters. Pass μ_c and λ_c from `diagnose_cloud_dsd`
+    # through to match Fortran's Cober-List rime density when Nᶜ is prognostic.
+    # Use total ice mass for terminal velocity to match the table-axis convention.
+    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
+    vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=Fˡ_mu, μ=μ_ice)
+    ρᶠ_new = rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport, μ_c, λ_c)
 
     # =========================================================================
     # Wet growth capacity and collection rerouting
@@ -1238,8 +1251,15 @@ end
     # Above-freezing collection
     cloud_warm_q, cloud_warm_n_raw = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
     cloud_warm_n = cloud_warm_n_raw
-    rain_warm_q = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
-    rain_warm_n = safe_divide(nʳ * rain_warm_q, qʳ, zero(FT))
+    rain_warm_q_full = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
+    # Number sink from above-freezing rain collection fires in both branches
+    # (Fortran nrcoll for liquid-fraction, nrcol for non-liquid-fraction).
+    rain_warm_n = safe_divide(nʳ * rain_warm_q_full, qʳ, zero(FT))
+    # Mass transfer of collected rain into qʷⁱ only happens in the liquid-fraction
+    # branch (Fortran qrcoll). The non-liquid path explicitly leaves rain mass alone
+    # — see microphy_p3.f90:3055-3066, "collection of rain above freezing does not
+    # impact total rain mass" — so zero out rain_warm_q in that case.
+    rain_warm_q = ifelse(prp.liquid_fraction_active, rain_warm_q_full, zero(FT))
 
     return P3Phase2Rates{FT}(
         agg, ni_lim,
@@ -1318,6 +1338,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # jl_f_throw_methoderror in @noinline GPU compilation)
     state = P3DerivedState{FT, typeof(q)}(nⁱ, nʳ, qᶠ, bᶠ, Fᶠ, ρᶠ,
                                           μ_ice, Fˡ_mu, Nᶜ, cloud.nᶜˡ,
+                                          cloud.μ_c, cloud.λ_c,
                                           T, P, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, q,
                                           transport.D_v, transport.K_a, transport.nu)
 
@@ -1590,6 +1611,9 @@ Rain loses from:
     # Rain warm collection is a rain SINK (collected by ice → qʷⁱ).
     # M9: rain condensation (vapor → rain)
     # D8: wet_growth_shedding — excess collection beyond freezing capacity goes to rain.
+    # Note: rain_warm_collection is zeroed at rate-assembly time in the non-liquid-
+    # fraction branch (Fortran microphy_p3.f90:3055-3066) so it can safely be added
+    # here unconditionally.
     gain = rates.autoconversion + rates.accretion + rates.complete_melting +
            rates.shedding + rates.rain_condensation + rates.wet_growth_shedding
     loss = rates.rain_evaporation + rates.rain_riming + rates.rain_freezing_mass +
@@ -2138,6 +2162,9 @@ Loses from:
 @inline function tendency_ρqʷⁱ(rates::P3ProcessRates, ρ)
     # D1: Include coating condensation/evaporation (Fortran qlcon/qlevp)
     # D8: wet_growth_shedding diverts excess wet growth mass from qʷⁱ to rain.
+    # Note: rain_warm_collection is zeroed at rate-assembly time in the non-liquid-
+    # fraction branch (Fortran does not transfer rain mass to qʷⁱ in that path), so
+    # it can safely be added here unconditionally.
     gain = rates.partial_melting +
            rates.cloud_warm_collection +
            rates.rain_warm_collection +
