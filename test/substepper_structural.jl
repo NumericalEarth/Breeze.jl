@@ -12,9 +12,8 @@
 ##### offending operator or boundary row is identified directly.
 #####
 ##### These tests sit alongside the rest-atmosphere envelope tests in
-##### `test/substepper_rest_state.jl` and the column-spectrum
-##### diagnostic in `test/substepper_eigenvalue_scan.jl`. The three
-##### files together form Phase 0 of the pristine-substepper program.
+##### `test/substepper_rest_state.jl` as Phase 0 of the
+##### pristine-substepper program.
 #####
 
 using Breeze
@@ -34,7 +33,6 @@ using Oceananigans.Solvers: get_coefficient
 using Oceananigans.TimeSteppers: update_state!
 
 using GPUArraysCore: @allowscalar
-using LinearAlgebra: eigvals, norm, I as I_matrix
 using Printf
 using Test
 
