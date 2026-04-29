@@ -40,7 +40,7 @@
 #####   (ρu)′ ↔ kernel arg `ρu′`    (momentum_perturbation_u)
 #####   (ρv)′ ↔ kernel arg `ρv′`    (momentum_perturbation_v)
 #####   (ρw)′ ↔ kernel arg `ρw′`    (momentum_perturbation_w)
-##### Predictors carry a `_pred` suffix: `ρ′_pred`, `ρθ′_pred`.
+##### Predictors carry a `★` suffix: `ρ′★`, `ρθ′★`.
 #####
 ##### See `validation/substepping/derivation_phase1.md` for the full
 ##### derivation from the continuous equations through the column tridiag.
@@ -124,7 +124,7 @@ Perturbation prognostics (advanced inside the substep loop):
 
 Per-column scratch (column kernel only):
 
-- `density_predictor`, `density_potential_temperature_predictor`: explicit
+- `density★ictor`, `density_potential_temperature★ictor`: explicit
   predictors built before the implicit vertical solve.
 - `previous_density_potential_temperature_perturbation`: ``η`` from the
   previous substep, used by Klemp 2018 damping.
@@ -189,8 +189,8 @@ struct AcousticSubstepper{N, FT, D, AD, CF, FF, XF, YF, GT, TS}
     momentum_perturbation_u :: XF
     momentum_perturbation_v :: YF
 
-    density_predictor :: CF
-    density_potential_temperature_predictor :: CF
+    density★ictor :: CF
+    density_potential_temperature★ictor :: CF
     previous_density_potential_temperature_perturbation :: CF
 
     slow_vertical_momentum_tendency :: GT
@@ -220,8 +220,8 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.momentum_perturbation_w),
                        adapt(to, a.momentum_perturbation_u),
                        adapt(to, a.momentum_perturbation_v),
-                       adapt(to, a.density_predictor),
-                       adapt(to, a.density_potential_temperature_predictor),
+                       adapt(to, a.density★ictor),
+                       adapt(to, a.density_potential_temperature★ictor),
                        adapt(to, a.previous_density_potential_temperature_perturbation),
                        adapt(to, a.slow_vertical_momentum_tendency),
                        adapt(to, a.vertical_solver))
@@ -288,8 +288,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     momentum_perturbation_u                       = _xface(grid, bcs_ρu)
     momentum_perturbation_v                       = _yface(grid, bcs_ρv)
 
-    density_predictor                                = CenterField(grid)
-    density_potential_temperature_predictor          = CenterField(grid)
+    density★ictor                                = CenterField(grid)
+    density_potential_temperature★ictor          = CenterField(grid)
     previous_density_potential_temperature_perturbation = CenterField(grid)
 
     slow_vertical_momentum_tendency = ZFaceField(grid)
@@ -323,8 +323,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               momentum_perturbation_w,
                               momentum_perturbation_u,
                               momentum_perturbation_v,
-                              density_predictor,
-                              density_potential_temperature_predictor,
+                              density★ictor,
+                              density_potential_temperature★ictor,
                               previous_density_potential_temperature_perturbation,
                               slow_vertical_momentum_tendency,
                               vertical_solver)
@@ -647,8 +647,8 @@ end
 # with ωᵐ⁺ = (1+ε)/2, ωˢ⁻ = (1-ε)/2 (ε=0 is centered CN).
 #
 # The post-solve substitution (matching the column kernel):
-#   ρ′_n(k)    = ρ′_pred(k)  - δτᵐ⁺ × ((ρw)′_n(k+1) - (ρw)′_n(k)) / Δz_c(k)
-#   (ρθ)′_n(k) = ρθ′_pred(k) - δτᵐ⁺ × (θ⁰_face(k+1) (ρw)′_n(k+1)
+#   ρ′_n(k)    = ρ′★(k)  - δτᵐ⁺ × ((ρw)′_n(k+1) - (ρw)′_n(k)) / Δz_c(k)
+#   (ρθ)′_n(k) = ρθ′★(k) - δτᵐ⁺ × (θ⁰_face(k+1) (ρw)′_n(k+1)
 #                                        - θ⁰_face(k)   (ρw)′_n(k)) / Δz_c(k)
 # where δτᵐ⁺ = ωᵐ⁺ Δτ.
 #
@@ -684,7 +684,7 @@ end
 #   A[k,k-1] += -dᵐ⁺ × rdz_c(k-1) / Δzᶠ(k)
 #
 # The matching `(1−ω) β_d Δz² ∂z² (ρw)′_o` term is added to the predictor's
-# right-hand side in `_build_predictors_and_vertical_rhs!`. The constant-Courant
+# right-hand side in `_build★ictors_and_vertical_rhs!`. The constant-Courant
 # scaling `α_z = β_d Δz² / Δτ` makes `dᵐ⁺` and the RHS prefactor independent
 # of Δτ; only `β_d`, `ω`, and the global vertical spacing `grid.z.Δᵃᵃᶜ` enter.
 # When `vertical_implicit = false` (or for `NoDivergenceDamping`), the
@@ -835,8 +835,8 @@ function reset_perturbations!(substepper, grid, arch)
     fill!(parent(substepper.momentum_perturbation_u), 0)
     fill!(parent(substepper.momentum_perturbation_v), 0)
     fill!(parent(substepper.momentum_perturbation_w), 0)
-    fill!(parent(substepper.density_predictor), 0)
-    fill!(parent(substepper.density_potential_temperature_predictor), 0)
+    fill!(parent(substepper.density★ictor), 0)
+    fill!(parent(substepper.density_potential_temperature★ictor), 0)
     return nothing
 end
 
@@ -888,7 +888,7 @@ const BY_grid = AbstractUnderlyingGrid{FT, <:Any, Bounded}                      
 @inline on_x_boundary(i, j, k, grid::BX_grid) = (i == 1) | (i == grid.Nx + 1)
 @inline on_y_boundary(i, j, k, grid::BY_grid) = (j == 1) | (j == grid.Ny + 1)
 
-# Build per-column predictors `ρ′_pred`, `ρθ′_pred` (cell centers) AND
+# Build per-column predictors `ρ′★`, `ρθ′★` (cell centers) AND
 # the explicit RHS for the tridiagonal `(ρw)′ᵐ⁺` solve at z-faces.
 #
 # Off-centered Crank–Nicolson with new-side weight ω = forward_weight
@@ -898,27 +898,30 @@ const BY_grid = AbstractUnderlyingGrid{FT, <:Any, Bounded}                      
 # weights δτˢ⁻ and δτᵐ⁺ respectively. See derivation in
 # `validation/substepping/derivation_phase1.md` (eqns. 5, 7, 15).
 @kernel function _build_predictors_and_vertical_rhs!(ρw′_rhs,
-                                                      ρ′_pred, ρθ′_pred,
-                                                      ρ′, ρθ′, ρw′, ρu′, ρv′,
-                                                      grid, Δτ, δτᵐ⁺, δτˢ⁻,
-                                                      Gˢρ, Gˢρθ, Gˢρw,
-                                                      θ⁰, Π⁰,
-                                                      γRᵐ⁰, g, dˢ⁻)
+                                                     ρ′★, ρθ′★,
+                                                     ρ′, ρθ′, ρw′, ρu′, ρv′,
+                                                     grid, Δτ, δτᵐ⁺, δτˢ⁻,
+                                                     Gˢρ, Gˢρθ, Gˢρw,
+                                                     θ⁰, Π⁰,
+                                                     γRᵐ⁰, g, dˢ⁻)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
     @inbounds begin
-        # Cell-centred predictors `ρ′_pred`, `ρθ′_pred`.
+        # Cell-centred predictors `ρ′★`, `ρθ′★`.
         for k in 1:Nz
             V = Vᶜᶜᶜ(i, j, k, grid)
 
             ∇ʰ_M  = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
             ∇ʰ_θM = (δxᶜᵃᵃ(i, j, k, grid, _theta_face_x_flux, θ⁰, ρu′) +
-                       δyᵃᶜᵃ(i, j, k, grid, _theta_face_y_flux, θ⁰, ρv′)) / V
+                     δyᵃᶜᵃ(i, j, k, grid, _theta_face_y_flux, θ⁰, ρv′)) / V
 
-            ρ′_pred[i, j, k]  = ρ′[i, j, k]  + Δτ * Gˢρ[i, j, k]  - Δτ * ∇ʰ_M  -
+            ρ′★[i, j, k]  = ρ′[i, j, k] +
+                                Δτ * (Gˢρ[i, j, k] - ∇ʰ_M) -
                                 δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, ρw′)
-            ρθ′_pred[i, j, k] = ρθ′[i, j, k] + Δτ * Gˢρθ[i, j, k] - Δτ * ∇ʰ_θM -
+
+            ρθ′★[i, j, k] = ρθ′[i, j, k] +
+                                Δτ * (Gˢρθ[i, j, k] - ∇ʰ_θM) -
                                 δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, _theta_face_z_flux, θ⁰, ρw′)
         end
 
@@ -931,15 +934,14 @@ const BY_grid = AbstractUnderlyingGrid{FT, <:Any, Bounded}                      
             Πᶜᶜᶠ    = ℑzᵃᵃᶠ(i, j, k, grid, Π⁰)
             γRᵐ⁰ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, γRᵐ⁰)
 
-            ∂z_ρθ′_pred = ρθ′_pred[i, j, k] - ρθ′_pred[i, j, k - 1]
-            ∂z_ρθ′ˢ⁻    = ρθ′[i, j, k]      - ρθ′[i, j, k - 1]
+            ∂z_ρθ′★ = ρθ′★[i, j, k] - ρθ′★[i, j, k - 1]
+            ∂z_ρθ′ˢ⁻ = ρθ′[i, j, k] - ρθ′[i, j, k - 1]
 
-            sound_force = γRᵐ⁰ᶜᶜᶠ * Πᶜᶜᶠ / Δzᶠ *
-                          (δτˢ⁻ * ∂z_ρθ′ˢ⁻ + δτᵐ⁺ * ∂z_ρθ′_pred)
+            sound_force = γRᵐ⁰ᶜᶜᶠ * Πᶜᶜᶠ / Δzᶠ * (δτˢ⁻ * ∂z_ρθ′ˢ⁻ + δτᵐ⁺ * ∂z_ρθ′★)
 
-            ρ′ᶜᶜᶠ_pred = ℑzᵃᵃᶠ(i, j, k, grid, ρ′_pred)
-            ρ′ᶜᶜᶠˢ⁻    = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)
-            buoy_force = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ_pred)
+            ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
+            ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)
+            buoy_force = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★)
 
             # Explicit (old-step) half of the vertical damping
             # `(1−ω) β_d Δz² ∂z²(ρw)′ˢ⁻`, evaluated at face k. The face-coupling
@@ -976,21 +978,21 @@ end
 @inline ℑb_wθ(i, j, k, w, θ) = @inbounds w[i, j, k] * ℑbzᵃᵃᶠ(i, j, k, grid, θ⁰)
 
 # Post-solve recovery: substitute the tridiag-solved `(ρw)′ᵐ⁺` back
-# into the `ρ′_pred`, `ρθ′_pred` predictors to get `ρ′ᵐ⁺`, `ρθ′ᵐ⁺`
+# into the `ρ′★`, `ρθ′★` predictors to get `ρ′ᵐ⁺`, `ρθ′ᵐ⁺`
 # (the IMPLICIT half of CN).
 #
-#   ρ′_n(k)    = ρ′_pred(k)  - (δτᵐ⁺ / Δz_c(k)) · ((ρw)′_n(k+1) - (ρw)′_n(k))
-#   (ρθ)′_n(k) = ρθ′_pred(k) - (δτᵐ⁺ / Δz_c(k)) · (θ⁰_face(k+1) (ρw)′_n(k+1)
+#   ρ′_n(k)    = ρ′★(k)  - (δτᵐ⁺ / Δz_c(k)) · ((ρw)′_n(k+1) - (ρw)′_n(k))
+#   (ρθ)′_n(k) = ρθ′★(k) - (δτᵐ⁺ / Δz_c(k)) · (θ⁰_face(k+1) (ρw)′_n(k+1)
 #                                                    - θ⁰_face(k)   (ρw)′_n(k))
-@kernel function _post_solve_recovery!(ρ′, ρθ′, ρw′, ρ′_pred, ρθ′_pred,
+@kernel function _post_solve_recovery!(ρ′, ρθ′, ρw′, ρ′★, ρθ′★,
                                         grid, δτᵐ⁺, θ⁰)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
     @inbounds begin
         for k in 1:Nz
-            ρ′[i, j, k] = ρ′_pred[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, ρw′)
-            ρθ′[i, j, k] = ρθ′_pred[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, ℑb_wθ, ρw′, θ⁰)
+            ρ′[i, j, k] = ρ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, ρw′)
+            ρθ′[i, j, k] = ρθ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, ℑb_wθ, ρw′, θ⁰)
         end
     end
 end
@@ -1126,12 +1128,12 @@ end
         m.ρv[i, j, k] = ρvᵐ⁺
         m.ρw[i, j, k] = ρwᵐ⁺
 
-        ρ_x = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
-        ρ_y = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
-        ρ_z = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-        ρ_x_safe = ifelse(ρ_x == 0, one(ρ_x), ρ_x)
-        ρ_y_safe = ifelse(ρ_y == 0, one(ρ_y), ρ_y)
-        ρ_z_safe = ifelse(ρ_z == 0, one(ρ_z), ρ_z)
+        ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
+        ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
+        ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+        ρ_x_safe = ifelse(ρᶠᶜᶜ == 0, one(ρᶠᶜᶜ), ρᶠᶜᶜ)
+        ρ_y_safe = ifelse(ρᶜᶠᶜ == 0, one(ρᶜᶠᶜ), ρᶜᶠᶜ)
+        ρ_z_safe = ifelse(ρᶜᶜᶠ == 0, one(ρᶜᶜᶠ), ρᶜᶜᶠ)
 
         vel.u[i, j, k] = ρuᵐ⁺ / ρ_x_safe * !on_x_boundary(i, j, k, grid)
         vel.v[i, j, k] = ρvᵐ⁺ / ρ_y_safe * !on_y_boundary(i, j, k, grid)
@@ -1217,11 +1219,11 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         # `vertical_implicit=false`.
         dᵐ⁺, dˢ⁻ = _implicit_damping_factors(substepper.damping, ω, one_minus_ω, grid, FT)
 
-        # Step B: build predictors `ρ′_pred`, `ρθ′_pred` and the tridiag RHS for (ρw)′ᵐ⁺
+        # Step B: build predictors `ρ′★`, `ρθ′★` and the tridiag RHS for (ρw)′ᵐ⁺
         launch!(arch, grid, :xy, _build_predictors_and_vertical_rhs!,
                 substepper.momentum_perturbation_w,
                 substepper.density_predictor,
-                substepper.density_potential_temperature_predictor,
+                substepper.density_potential_temperature★ictor,
                 substepper.density_perturbation,
                 substepper.density_potential_temperature_perturbation,
                 substepper.momentum_perturbation_w,
@@ -1243,8 +1245,8 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 substepper.density_perturbation,
                 substepper.density_potential_temperature_perturbation,
                 substepper.momentum_perturbation_w,
-                substepper.density_predictor,
-                substepper.density_potential_temperature_predictor,
+                substepper.density★ictor,
+                substepper.density_potential_temperature★ictor,
                 grid, δτᵐ⁺,
                 substepper.outer_step_potential_temperature)
 

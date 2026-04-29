@@ -217,11 +217,6 @@ function ThermalDivergenceDamping(; coefficient = 0.1,
     end
 end
 
-# Backward-compatibility alias for older user scripts that still
-# reference `ThermodynamicDivergenceDamping`. Will be removed in a
-# future release; new code should use `ThermalDivergenceDamping`.
-const ThermodynamicDivergenceDamping = ThermalDivergenceDamping
-
 #####
 ##### Split-explicit time discretization
 #####
