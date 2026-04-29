@@ -220,3 +220,52 @@ end
     @test occursin("microphysics_schedule", s)
     @test occursin("IterationInterval", s)
 end
+
+# SaturationAdjustment always produces zero tendencies (microphysical_tendency returns
+# zero(ρ) for all names), so checking cache content across non-firing iterations is
+# trivially true — both snapshots are zero. Instead we test last_fire_iteration, which
+# is the authoritative record of whether the schedule fired.
+@testset "Cache held constant between firings" begin
+    using Breeze.Microphysics: SaturationAdjustment
+
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), extent=(1000, 1000, 1000))
+    μ = SaturationAdjustment()
+    model = AtmosphereModel(grid; microphysics = μ, microphysics_schedule = IterationInterval(5))
+    set!(model, ρθ = 300, ρqᵉ = 1e-3)
+
+    sim = Simulation(model, Δt = 1.0, stop_iteration = 1, verbose = false)
+    run!(sim)
+    # iter 0 fires on warmup; iter 1 does not (IterationInterval(5) fires at 0, 5, 10, ...)
+    @test model.microphysics_state.last_fire_iteration == 0
+
+    sim.stop_iteration = 4
+    run!(sim)
+    # iter 2, 3, 4 do not fire
+    @test model.microphysics_state.last_fire_iteration == 0
+
+    sim.stop_iteration = 5
+    run!(sim)
+    # iter 5 fires
+    @test model.microphysics_state.last_fire_iteration == 5
+end
+
+@testset "Mass conservation under super-stepping" begin
+    using Breeze.Microphysics: SaturationAdjustment
+
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 1000), y=(0, 1000), z=(0, 1000),
+                           topology=(Periodic, Periodic, Bounded))
+    μ = SaturationAdjustment()
+    model = AtmosphereModel(grid; microphysics = μ, microphysics_schedule = IterationInterval(5))
+    set!(model, ρθ = 300, ρqᵉ = 1e-3)
+
+    total_qt(m) = @allowscalar sum(parent(m.moisture_density))
+
+    initial = total_qt(model)
+    sim = Simulation(model, Δt = 0.5, stop_iteration = 25, verbose = false)
+    run!(sim)
+    final = total_qt(model)
+
+    rel_err = abs(final - initial) / abs(initial)
+    # SatAdj has no precipitation flux, so moisture mass is conserved up to roundoff
+    @test rel_err < 1e-6
+end
