@@ -5,7 +5,8 @@ using Oceananigans.Utils: TabulatedFunction,
                           TabulatedFunction3D,
                           TabulatedFunction4D,
                           TabulatedFunction5D,
-                          interpolator
+                          interpolator,
+                          _interpolate
 
 const TabulatedFunction6D = TabulatedFunction{6}
 
@@ -232,3 +233,68 @@ end
 # Union aliases for dispatch: accept either Julia-generated or Fortran-loaded tables
 const P3Table5D = Union{TabulatedFunction5D, FortranTabulatedFunction5D}
 const P3Table6D = Union{TabulatedFunction6D, FortranTabulatedFunction6D}
+
+#####
+##### Prepared 5D interpolation indices
+#####
+##### When several distinct 5D tables are queried at the *same* coordinates
+##### (a common pattern in P3 — see `tabulated_z_tendency` where ~16 tables share
+##### `(log_m, Fᶠ, Fˡ, ρᶠ, μ)`), the per-axis clamps, fractional-index multiplies,
+##### `interpolator` calls, and boundary-min checks are redundantly recomputed for
+##### each table. Prepare them once and reuse across tables that share `range`,
+##### `inverse_Δ`, and shape.
+##### All P3 Fortran Table 1 entries share the same axes by construction, so
+##### a single `Prepared5DInterpolation` is valid for any of them.
+#####
+
+struct Prepared5DInterpolation{FT}
+    ix :: Tuple{Int, Int, FT}
+    iy :: Tuple{Int, Int, FT}
+    iz :: Tuple{Int, Int, FT}
+    iw :: Tuple{Int, Int, FT}
+    iv :: Tuple{Int, Int, FT}
+end
+
+@inline function prepare_5d(f::TabulatedFunction5D, x₁, x₂, x₃, x₄, x₅)
+    a₁, b₁ = f.range[1]
+    a₂, b₂ = f.range[2]
+    a₃, b₃ = f.range[3]
+    a₄, b₄ = f.range[4]
+    a₅, b₅ = f.range[5]
+
+    c₁ = clamp(x₁, a₁, b₁)
+    c₂ = clamp(x₂, a₂, b₂)
+    c₃ = clamp(x₃, a₃, b₃)
+    c₄ = clamp(x₄, a₄, b₄)
+    c₅ = clamp(x₅, a₅, b₅)
+
+    frac_i = (c₁ - a₁) * f.inverse_Δ[1]
+    frac_j = (c₂ - a₂) * f.inverse_Δ[2]
+    frac_k = (c₃ - a₃) * f.inverse_Δ[3]
+    frac_l = (c₄ - a₄) * f.inverse_Δ[4]
+    frac_m = (c₅ - a₅) * f.inverse_Δ[5]
+
+    i⁻, i⁺, ξ = interpolator(frac_i)
+    j⁻, j⁺, η = interpolator(frac_j)
+    k⁻, k⁺, ζ = interpolator(frac_k)
+    l⁻, l⁺, θ = interpolator(frac_l)
+    m⁻, m⁺, ψ = interpolator(frac_m)
+
+    n₁, n₂, n₃, n₄, n₅ = size(f.table)
+
+    return Prepared5DInterpolation{typeof(ξ)}((i⁻ + 1, min(i⁺ + 1, n₁), ξ),
+                                              (j⁻ + 1, min(j⁺ + 1, n₂), η),
+                                              (k⁻ + 1, min(k⁺ + 1, n₃), ζ),
+                                              (l⁻ + 1, min(l⁺ + 1, n₄), θ),
+                                              (m⁻ + 1, min(m⁺ + 1, n₅), ψ))
+end
+
+@inline function prepare_5d(f::FortranTabulatedFunction5D, log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    return prepare_5d(f.table, log_m, Fᶠ, Fˡ, rime_density_index(ρᶠ), μ)
+end
+
+@inline evaluate_at(f::TabulatedFunction5D, p::Prepared5DInterpolation) =
+    _interpolate(f.table, p.ix, p.iy, p.iz, p.iw, p.iv)
+
+@inline evaluate_at(f::FortranTabulatedFunction5D, p::Prepared5DInterpolation) =
+    evaluate_at(f.table, p)

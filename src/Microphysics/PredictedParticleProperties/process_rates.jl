@@ -1950,6 +1950,11 @@ end
 
     inv_nⁱ = safe_divide(one(FT), nⁱ, eps(FT))
 
+    # All Fortran Table 1 entries (deposition.* and sixth_moment.*) share the same
+    # 5D axes, so we compute interpolation indices/weights once at this cell's
+    # (log_m, Fᶠ, Fˡ, ρᶠ, μ) and reuse them for every table read below.
+    prep = prepare_5d(dep.ventilation, log_m, Fᶠ, Fˡ, ρᶠ, μ)
+
     # --- Deposition / Sublimation ---
     # Z tables store raw dG/dt. Extract env factor from mass_rate / (mass_table × Nⁱ).
     # Fortran: epsiz = (m6dep + S_c×m6dep1) × 2πρDv
@@ -1957,14 +1962,14 @@ end
     # where S_c = Sc^(1/3) × √ρ_fac / √ν.
     # Deposition (c=2) and sublimation (c=1) use different dG normalization,
     # but the SAME mass integrals (vdep/vdep1). Separate via sign of rates.deposition.
-    mass_dep_combined = dep.ventilation(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
-                        sc_correction * dep.ventilation_enhanced(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    mass_dep_combined = evaluate_at(dep.ventilation, prep) +
+                        sc_correction * evaluate_at(dep.ventilation_enhanced, prep)
     env_dep = safe_divide(abs(rates.deposition), max(nⁱ * mass_dep_combined, eps(FT)), zero(FT))
 
-    z_dep_combined = sixth.deposition(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
-                     sc_correction * sixth.deposition1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
-    z_sub_combined = sixth.sublimation(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
-                     sc_correction * sixth.sublimation1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    z_dep_combined = evaluate_at(sixth.deposition, prep) +
+                     sc_correction * evaluate_at(sixth.deposition1, prep)
+    z_sub_combined = evaluate_at(sixth.sublimation, prep) +
+                     sc_correction * evaluate_at(sixth.sublimation1, prep)
 
     is_deposition = rates.deposition > zero(FT)
     z_dep_sub_rate = ifelse(is_deposition, z_dep_combined, -z_sub_combined) * env_dep
@@ -1976,8 +1981,8 @@ end
     # --- Melting ---
     # Fortran: zimlt = (vdepm1×m6mlt1 + vdepm2×m6mlt2×S_c) × thermo
     # Z is the mass-weighted combination of Z tables. Extract thermo from mass_rate / (mass_combined × Nⁱ).
-    mass_melt_const = dep.small_ice_ventilation_constant(log_m, Fᶠ, Fˡ, ρᶠ, μ)
-    mass_melt_enh   = dep.small_ice_ventilation_reynolds(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    mass_melt_const = evaluate_at(dep.small_ice_ventilation_constant, prep)
+    mass_melt_enh   = evaluate_at(dep.small_ice_ventilation_reynolds, prep)
     mass_melt_combined = mass_melt_const + sc_correction * mass_melt_enh
     complete_melting = rates.complete_melting
     env_melt = safe_divide(complete_melting, max(nⁱ * mass_melt_combined, eps(FT)), zero(FT))
@@ -1987,17 +1992,17 @@ end
     # deposition tables and is gated by log_full3mom=.false. (dead code in P3 v5.5.0).
     # Julia provides all-D melt integrands for completeness via melt_all1/melt_all2.
     z_melt1 = ifelse(prp.liquid_fraction_active,
-                     sixth.melt1(log_m, Fᶠ, Fˡ, ρᶠ, μ),
-                     sixth.melt_all1(log_m, Fᶠ, Fˡ, ρᶠ, μ))
+                     evaluate_at(sixth.melt1, prep),
+                     evaluate_at(sixth.melt_all1, prep))
     z_melt2 = ifelse(prp.liquid_fraction_active,
-                     sixth.melt2(log_m, Fᶠ, Fˡ, ρᶠ, μ),
-                     sixth.melt_all2(log_m, Fᶠ, Fˡ, ρᶠ, μ))
+                     evaluate_at(sixth.melt2, prep),
+                     evaluate_at(sixth.melt_all2, prep))
     # Mass-weighted Z: each term multiplied by its own mass table (Fortran convention)
     z_melt_numerator = mass_melt_const * z_melt1 + sc_correction * mass_melt_enh * z_melt2
     z_melt_rate = z_melt_numerator * env_melt
 
     # --- Riming ---
-    z_cloud_rime = sixth.rime(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    z_cloud_rime = evaluate_at(sixth.rime, prep)
     z_cloud_rime_rate = z_cloud_rime * rates.cloud_riming * inv_nⁱ
     z_rain_rime_rate = rain_riming_sixth_moment_tendency(rain_ice_table, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
                                                           rates.rain_riming, inv_nⁱ, z_cloud_rime)
@@ -2022,11 +2027,11 @@ end
                        (z_wg_cloud_rate + z_wg_rain_rate) * (1 - shed_frac))
 
     # --- Aggregation (single term): z_table = dG/nagg ---
-    z_agg = sixth.aggregation(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    z_agg = evaluate_at(sixth.aggregation, prep)
     z_agg_rate = z_agg * rates.aggregation * inv_nⁱ
 
     # --- Shedding (single term): z_table = dG_kernel/M3 ---
-    z_shed = sixth.shedding(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    z_shed = evaluate_at(sixth.shedding, prep)
     z_shed_rate = z_shed * rates.shedding * inv_nⁱ
 
     cloud_spl_q, rain_spl_q = split_splintering_mass(rates)
