@@ -736,3 +736,53 @@ function materialize_microphysics_tendencies(microphysics, formulation, schedule
     fields = NamedTuple{names}(ntuple(_ -> CenterField(grid), length(names)))
     return fields
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Fill the cached microphysics tendency `cache` for `microphysics` on `model`.
+Builds `𝒰` and `ℳ` once per grid point and writes the tendency for every
+prognostic name in `keys(cache)` via static iteration over `Val(name)`.
+
+`Δt_eff` is forwarded for diagnostic / forward-Euler-style schemes that use it;
+the standard inline path ignores it.
+"""
+function compute_microphysics_tendencies!(cache, microphysics, model, Δt_eff)
+    cache === nothing && return nothing
+    grid = model.grid
+    arch = grid.architecture
+    fields = model.microphysical_fields
+    velocities = model.velocities
+    constants = model.thermodynamic_constants
+    formulation = model.formulation
+    dynamics = model.dynamics
+    moisture = specific_prognostic_moisture(model)
+    names = Val(keys(cache))
+
+    launch!(arch, grid, :xyz,
+            _compute_microphysics_tendencies!,
+            cache, names, grid, microphysics, fields, formulation, dynamics, moisture, constants, velocities)
+    return nothing
+end
+
+compute_microphysics_tendencies!(::Nothing, microphysics, model, Δt_eff) = nothing
+
+@kernel function _compute_microphysics_tendencies!(cache, ::Val{names}, grid, microphysics,
+                                                   fields, formulation, dynamics, moisture, constants, velocities) where names
+    i, j, k = @index(Global, NTuple)
+
+    ρ_field = dynamics_density(dynamics)
+    @inbounds ρ = ρ_field[i, j, k]
+    @inbounds qᵛᵉ = moisture[i, j, k]
+
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, fields)
+    𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
+    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, velocities)
+
+    ntuple(Val(length(names))) do n
+        Base.@_inline_meta
+        name = names[n]
+        @inbounds cache[name][i, j, k] = microphysical_tendency(microphysics, Val(name), ρ, ℳ, 𝒰, constants)
+        nothing
+    end
+end

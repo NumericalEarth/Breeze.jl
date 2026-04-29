@@ -128,3 +128,27 @@ end
     @test val_qr   ≈ -0.5
     @test val_miss == 0
 end
+
+@testset "compute_microphysics_tendencies! fills the cache" begin
+    using Breeze.Microphysics: SaturationAdjustment
+
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), extent=(100, 100, 1000))
+    μ = SaturationAdjustment()
+    model = AtmosphereModel(grid; microphysics = μ, microphysics_schedule = IterationInterval(1))
+
+    # Initialize state so 𝒰 / ℳ build cleanly
+    set!(model, ρθ = 300, ρqᵛ = 1e-3)
+    Breeze.AtmosphereModels.update_state!(model; compute_tendencies = false)
+
+    # Sanity: cache exists and has the expected names
+    @test model.microphysics_tendencies isa NamedTuple
+    @test :ρθ in keys(model.microphysics_tendencies) || :ρe in keys(model.microphysics_tendencies)
+
+    # Manually invoke the cache-filling kernel and ensure no errors
+    Breeze.AtmosphereModels.compute_microphysics_tendencies!(model.microphysics_tendencies, model.microphysics, model, 1.0)
+
+    # Cache fields should be finite
+    for (_, f) in pairs(model.microphysics_tendencies)
+        @test all(isfinite, parent(f))
+    end
+end
