@@ -556,13 +556,17 @@ For example, the terminal velocity of falling rain.
 """
 $(TYPEDSIGNATURES)
 
-Apply microphysics model update for the given `microphysics` scheme.
+Apply the operator-split microphysics state update for `microphysics` on `model`.
+The `Δt_eff` argument is the effective integration window — for unscheduled
+microphysics it equals `model.clock.last_Δt`; for scheduled microphysics it is
+the wall-clock interval since the last firing.
 
-This function is called during `update_state!` to apply microphysics processes
-that operate on the full model state (not the tendency fields).
-Specific microphysics schemes should extend this function.
+Specific microphysics schemes extend the 3-argument form. The 2-argument shim
+forwards `model.clock.last_Δt` so existing call sites keep working.
 """
-microphysics_model_update!(microphysics::Nothing, model) = nothing
+microphysics_model_update!(microphysics, model) = microphysics_model_update!(microphysics, model, model.clock.last_Δt)
+
+microphysics_model_update!(::Nothing, model, Δt_eff) = nothing
 
 """
 $(TYPEDSIGNATURES)

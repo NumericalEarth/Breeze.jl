@@ -422,11 +422,11 @@ This function launches a kernel that processes each column independently, with r
 The kernel handles conversion between mass fractions and mixing ratios
 internally for efficiency. Water vapor is diagnosed from ``q^v = q^t - q^{cl} - q^r``.
 """
-function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model)
+function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model, Δt_eff)
     grid = model.grid
     arch = architecture(grid)
     Nz = grid.Nz
-    Δt = model.clock.last_Δt
+    Δt = Δt_eff
 
     # Skip microphysics update if timestep is zero, infinite, or invalid
     # (e.g., during model construction before any time step has been taken)
@@ -857,8 +857,8 @@ For a Lagrangian parcel, the microphysics processes are:
 Note: Rain sedimentation is not applicable to a Lagrangian parcel since
 the parcel is a closed system (rain does not fall out of the parcel).
 """
-function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model::ParcelModel)
-    Δt = model.clock.last_Δt
+function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model::ParcelModel, Δt_eff)
+    Δt = Δt_eff
 
     # Skip microphysics update if timestep is zero, infinite, or invalid
     (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
