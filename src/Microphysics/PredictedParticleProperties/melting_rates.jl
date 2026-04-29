@@ -87,13 +87,15 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     # for melting. The total Ventilation/VentilationEnhanced tables use wet-ice PSD
     # and are not appropriate for melting (they are not flagged as melting integrals
     # during table generation, so they don't use the dry-ice PSD from the M5 fix).
+    # All 4 tables share Table-1 axes so the interpolation indices are computed once.
     dep = p3.ice.deposition
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
     sc_corr = ventilation_sc_correction(nu, D_v, ρ_correction)
-    C_fv = (dep.small_ice_ventilation_constant(log_m, Fᶠ, Fl, ρᶠ, μ) +
-            sc_corr * dep.small_ice_ventilation_reynolds(log_m, Fᶠ, Fl, ρᶠ, μ)) +
-           (dep.large_ice_ventilation_constant(log_m, Fᶠ, Fl, ρᶠ, μ) +
-            sc_corr * dep.large_ice_ventilation_reynolds(log_m, Fᶠ, Fl, ρᶠ, μ))
+    prep = prepare_5d(dep.small_ice_ventilation_constant, log_m, Fᶠ, Fl, ρᶠ, μ)
+    C_fv = (evaluate_at(dep.small_ice_ventilation_constant, prep) +
+            sc_corr * evaluate_at(dep.small_ice_ventilation_reynolds, prep)) +
+           (evaluate_at(dep.large_ice_ventilation_constant, prep) +
+            sc_corr * evaluate_at(dep.large_ice_ventilation_reynolds, prep))
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: K_a × (T - T₀)

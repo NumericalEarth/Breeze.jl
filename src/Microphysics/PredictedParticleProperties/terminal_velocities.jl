@@ -159,6 +159,12 @@ end
     return vₜ_norm * ρ_correction
 end
 
+# Prepared-index variant: reuse precomputed interpolation indices and skip the log/clamp setup.
+@inline function tabulated_mass_weighted_fall_speed(table::P3Table5D,
+                                                    prep::Prepared5DInterpolation, ρ_correction)
+    return evaluate_at(table, prep) * ρ_correction
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -196,6 +202,11 @@ end
     log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
     return vₜ_norm * ρ_correction
+end
+
+@inline function tabulated_number_weighted_fall_speed(table::P3Table5D,
+                                                      prep::Prepared5DInterpolation, ρ_correction)
+    return evaluate_at(table, prep) * ρ_correction
 end
 
 """
@@ -241,6 +252,11 @@ end
     return vₜ_norm * ρ_correction
 end
 
+@inline function tabulated_reflectivity_weighted_fall_speed(table::P3Table5D,
+                                                            prep::Prepared5DInterpolation, ρ_correction)
+    return evaluate_at(table, prep) * ρ_correction
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -269,6 +285,13 @@ speed framework.
 - `NamedTuple` with fields `mass_weighted`, `number_weighted`, `reflectivity_weighted` [m/s]
   (all positive downward)
 """
+# GPU-safe concrete struct (NamedTuple complicates the GPU compiler's NoInline boundaries).
+struct IceTerminalVelocities{FT}
+    mass_weighted :: FT
+    number_weighted :: FT
+    reflectivity_weighted :: FT
+end
+
 function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)), μ=zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     prp = p3.process_rates
@@ -284,18 +307,31 @@ function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeo
     # Density correction factor (Heymsfield et al. 2006, exponent 0.54 for ice)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
-    # --- Tabulated PSD-integrated fall speed lookups ---
-    # m9: Fortran applies no velocity clamping; table bounds are sufficient.
-    vₜ_mass = tabulated_mass_weighted_fall_speed(
-        fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    return _fused_fall_speeds(fs.mass_weighted, fs.number_weighted, fs.reflectivity_weighted,
+                              m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+end
 
-    vₜ_number = tabulated_number_weighted_fall_speed(
-        fs.number_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+# Fast path: all three tables are 5D (the supported P3 configuration with loaded tables).
+# Interpolation indices for (log_m, Fᶠ, Fˡ, ρᶠ, μ) are shared across the three reads.
+@inline function _fused_fall_speeds(mass_table::P3Table5D, number_table::P3Table5D, refl_table::P3Table5D,
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    FT = typeof(m̄)
+    log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
+    prep = prepare_5d(mass_table, log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
+    return IceTerminalVelocities{FT}(
+        tabulated_mass_weighted_fall_speed(mass_table, prep, ρ_correction),
+        tabulated_number_weighted_fall_speed(number_table, prep, ρ_correction),
+        tabulated_reflectivity_weighted_fall_speed(refl_table, prep, ρ_correction),
+    )
+end
 
-    vₜ_refl = tabulated_reflectivity_weighted_fall_speed(
-        fs.reflectivity_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
-
-    return (mass_weighted         = vₜ_mass,
-            number_weighted       = vₜ_number,
-            reflectivity_weighted = vₜ_refl)
+# Fallback for non-5D fall speed tables (quadrature path, mixed types).
+@inline function _fused_fall_speeds(mass_table, number_table, refl_table,
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    FT = typeof(m̄)
+    return IceTerminalVelocities{FT}(
+        tabulated_mass_weighted_fall_speed(mass_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ),
+        tabulated_number_weighted_fall_speed(number_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ),
+        tabulated_reflectivity_weighted_fall_speed(refl_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ),
+    )
 end

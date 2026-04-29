@@ -427,7 +427,7 @@ end
     Fᶠ = props.Fᶠ
     ρᶠ = props.ρᶠ
 
-    # Terminal velocities (individual calls avoid NamedTuple from ice_terminal_velocities)
+    # Rain terminal velocities (separate functions — the rain fall-speed table is 1D)
     wʳ   = rain_terminal_velocity_mass_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     wʳₙ  = rain_terminal_velocity_number_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     # Fortran parity: after impose_max_Ni (microphy_p3.f90:2812/4390/4937) the nitot
@@ -437,9 +437,10 @@ end
     # Fortran indexes the ice fall-speed lookup with qitot (= dry + liquid-on-ice);
     # the table's q-norm axis is total ice mass per particle.
     qⁱ_total = total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ)
-    wⁱ   = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, props.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
-    wⁱₙ  = ice_terminal_velocity_number_weighted(p3, qⁱ_total, props.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
-    wⁱ_z = ice_terminal_velocity_reflectivity_weighted(p3, qⁱ_total, props.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
+    # Fused call: shares m̄, ρ_correction, log(m̄), and the 5D interpolation indices
+    # across mass-, number-, and reflectivity-weighted fall speeds.
+    vᵢ = ice_terminal_velocities(p3, qⁱ_total, props.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
+    wⁱ, wⁱₙ, wⁱ_z = vᵢ.mass_weighted, vᵢ.number_weighted, vᵢ.reflectivity_weighted
 
     # Process rates (heavy, @noinline — compiled as a separate GPU function)
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
