@@ -24,7 +24,10 @@ using Test
         @test :ρθ in keys(model.microphysics_tendencies)
         @test :ρqᵛ in keys(model.microphysics_tendencies)
         @test model.microphysics_state isa Breeze.AtmosphereModels.MicrophysicsScheduleState{FT}
-        @test model.microphysics_state.last_fire_iteration == -1
+        # Construction calls set!(model, θ=θ₀) → update_state! → update_microphysics!, which
+        # fires at iteration 0 (IterationInterval(5) returns true at 0). So last_fire_iteration
+        # is 0 after construction, not -1.
+        @test model.microphysics_state.last_fire_iteration == 0
     end
 end
 
@@ -151,4 +154,37 @@ end
     for (_, f) in pairs(model.microphysics_tendencies)
         @test all(isfinite, parent(f))
     end
+end
+
+@testset "update_microphysics! honors the schedule" begin
+    using Breeze.Microphysics: SaturationAdjustment
+
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), extent=(100, 100, 100))
+    μ = SaturationAdjustment()
+    model = AtmosphereModel(grid; microphysics = μ, microphysics_schedule = IterationInterval(3))
+    set!(model, ρθ = 300, ρqᵛ = 1e-3)
+
+    # First iteration always fires
+    @allowscalar model.clock.iteration = 0
+    @allowscalar model.clock.time = 0
+    @allowscalar model.clock.last_Δt = 1.0
+    Breeze.AtmosphereModels.update_microphysics!(model)
+    @test model.microphysics_state.last_fire_iteration == 0
+
+    # Iterations 1, 2 should NOT fire
+    @allowscalar model.clock.iteration = 1
+    @allowscalar model.clock.time = 1
+    Breeze.AtmosphereModels.update_microphysics!(model)
+    @test model.microphysics_state.last_fire_iteration == 0
+
+    @allowscalar model.clock.iteration = 2
+    @allowscalar model.clock.time = 2
+    Breeze.AtmosphereModels.update_microphysics!(model)
+    @test model.microphysics_state.last_fire_iteration == 0
+
+    # Iteration 3 should fire (IterationInterval(3))
+    @allowscalar model.clock.iteration = 3
+    @allowscalar model.clock.time = 3
+    Breeze.AtmosphereModels.update_microphysics!(model)
+    @test model.microphysics_state.last_fire_iteration == 3
 end

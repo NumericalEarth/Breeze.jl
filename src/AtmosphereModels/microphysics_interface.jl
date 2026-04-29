@@ -786,3 +786,39 @@ compute_microphysics_tendencies!(::Nothing, microphysics, model, Δt_eff) = noth
         nothing
     end
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Drive microphysics for one `update_state!` cycle. When `model.microphysics_schedule`
+is `nothing`, falls back to per-step behavior identical to the previous code path.
+
+When a schedule is set, the operator-split state update and the cache refill are
+both gated by `schedule(model)` (with a forced firing on the first iteration).
+On firing, both receive `Δt_eff = clock.time − last_fire_time`.
+"""
+function update_microphysics!(model)
+    return update_microphysics!(model.microphysics, model.microphysics_schedule, model)
+end
+
+# Unscheduled path: behaves as before.
+function update_microphysics!(microphysics, ::Nothing, model)
+    microphysics_model_update!(microphysics, model, model.clock.last_Δt)
+    return nothing
+end
+
+# Scheduled path.
+function update_microphysics!(microphysics, schedule, model)
+    state = model.microphysics_state
+    clock = model.clock
+    first = clock.iteration == 0 && state.last_fire_iteration < 0
+
+    if first || schedule(model)
+        Δt_eff = first ? clock.last_Δt : (clock.time - state.last_fire_time)
+        microphysics_model_update!(microphysics, model, Δt_eff)
+        compute_microphysics_tendencies!(model.microphysics_tendencies, microphysics, model, Δt_eff)
+        state.last_fire_time = clock.time
+        state.last_fire_iteration = clock.iteration
+    end
+    return nothing
+end
