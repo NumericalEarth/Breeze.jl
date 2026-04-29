@@ -151,7 +151,7 @@ struct BulkVaporFluxFunction{C, G, T, F, TC, S, FV, FS}
 end
 
 """
-    BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature)
+    BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
 
 Create a bulk vapor flux function for computing surface moisture fluxes.
 The flux is computed as:
@@ -169,6 +169,7 @@ specific humidity, and `qᵛ₀` is the saturation specific humidity at the surf
 - `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
 - `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Used to compute saturation specific humidity at the surface.
+- `filtered_velocities`: Either `nothing` (default) or [`FilteredSurfaceVelocities`](@ref).
 """
 function BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
     return BulkVaporFluxFunction(coefficient, gustiness, surface_temperature,
@@ -185,9 +186,14 @@ Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
                           Adapt.adapt(to, bf.filtered_velocities),
                           Adapt.adapt(to, bf.filtered_scalar))
 
-Base.summary(bf::BulkVaporFluxFunction) =
-    string("BulkVaporFluxFunction(coefficient=", bf.coefficient,
-           ", gustiness=", bf.gustiness, ")")
+function Base.summary(bf::BulkVaporFluxFunction)
+    summary_str = string("BulkVaporFluxFunction(coefficient=", prettysummary(bf.coefficient),
+                     ", gustiness=", prettysummary(bf.gustiness), ")")
+    if bf.filtered_velocities != nothing || bf.filtered_scalar != nothing
+        summary_str *= ", with filtering"
+    end
+    return summary_str
+end
 
 # getbc for BulkVaporFluxFunction
 @inline function OceananigansBC.getbc(bf::BulkVaporFluxFunction, i::Integer, j::Integer,
