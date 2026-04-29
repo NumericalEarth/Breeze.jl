@@ -857,17 +857,17 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        Π⁰_x    = ℑxᶠᵃᵃ(i, j, k, grid, Π⁰)
-        γRᵐ⁰_x  = ℑxᶠᵃᵃ(i, j, k, grid, γRᵐ⁰)
-        ∂x_ρθ′  = ∂xᶠᶜᶜ(i, j, k, grid, ρθ′)
-        ∂x_p′   = ∂xᶠᶜᶜ(i, j, k, grid, p′)
-        ∂x_p    = ∂x_p′ + γRᵐ⁰_x * Π⁰_x * ∂x_ρθ′
+        Π⁰_x   = ℑxᶠᵃᵃ(i, j, k, grid, Π⁰)
+        γRᵐ⁰_x = ℑxᶠᵃᵃ(i, j, k, grid, γRᵐ⁰)
+        ∂x_ρθ′ = ∂xᶠᶜᶜ(i, j, k, grid, ρθ′)
+        ∂x_p′  = ∂xᶠᶜᶜ(i, j, k, grid, p′)
+        ∂x_p   = ∂x_p′ + γRᵐ⁰_x * Π⁰_x * ∂x_ρθ′
 
-        Π⁰_y    = ℑyᵃᶠᵃ(i, j, k, grid, Π⁰)
-        γRᵐ⁰_y  = ℑyᵃᶠᵃ(i, j, k, grid, γRᵐ⁰)
-        ∂y_ρθ′  = ∂yᶜᶠᶜ(i, j, k, grid, ρθ′)
-        ∂y_p′   = ∂yᶜᶠᶜ(i, j, k, grid, p′)
-        ∂y_p    = ∂y_p′ + γRᵐ⁰_y * Π⁰_y * ∂y_ρθ′
+        Π⁰_y   = ℑyᵃᶠᵃ(i, j, k, grid, Π⁰)
+        γRᵐ⁰_y = ℑyᵃᶠᵃ(i, j, k, grid, γRᵐ⁰)
+        ∂y_ρθ′ = ∂yᶜᶠᶜ(i, j, k, grid, ρθ′)
+        ∂y_p′  = ∂yᶜᶠᶜ(i, j, k, grid, p′)
+        ∂y_p   = ∂y_p′ + γRᵐ⁰_y * Π⁰_y * ∂y_ρθ′
 
         not_bdy_x = !on_x_boundary(i, j, k, grid)
         not_bdy_y = !on_y_boundary(i, j, k, grid)
@@ -932,7 +932,7 @@ const BY_grid = AbstractUnderlyingGrid{FT, <:Any, Bounded}                      
             γRᵐ⁰ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, γRᵐ⁰)
 
             ∂z_ρθ′_pred = ρθ′_pred[i, j, k] - ρθ′_pred[i, j, k - 1]
-            ∂z_ρθ′ˢ⁻  = ρθ′[i, j, k]      - ρθ′[i, j, k - 1]
+            ∂z_ρθ′ˢ⁻    = ρθ′[i, j, k]      - ρθ′[i, j, k - 1]
 
             sound_force = γRᵐ⁰ᶜᶜᶠ * Πᶜᶜᶠ / Δzᶠ *
                           (δτˢ⁻ * ∂z_ρθ′ˢ⁻ + δτᵐ⁺ * ∂z_ρθ′_pred)
@@ -962,16 +962,18 @@ end
 # θ⁰ · (ρu)′ at an x-face. Used in the area-weighted horizontal
 # divergence of the perturbation θ-flux.
 @inline _theta_face_x_flux(i, j, k, grid, θ⁰, ρu′) =
-    Axᶠᶜᶜ(i, j, k, grid) * ℑxᶠᵃᵃ(i, j, k, grid, θ⁰) * ρu′[i, j, k]
+    @inbounds Axᶠᶜᶜ(i, j, k, grid) * ℑxᶠᵃᵃ(i, j, k, grid, θ⁰) * ρu′[i, j, k]
 
 @inline _theta_face_y_flux(i, j, k, grid, θ⁰, ρv′) =
-    Ayᶜᶠᶜ(i, j, k, grid) * ℑyᵃᶠᵃ(i, j, k, grid, θ⁰) * ρv′[i, j, k]
+    @inbounds Ayᶜᶠᶜ(i, j, k, grid) * ℑyᵃᶠᵃ(i, j, k, grid, θ⁰) * ρv′[i, j, k]
 
 # θ⁰ · (ρw)′ at a z-face. Used in the vertical part of the perturbation
 # θ-flux divergence; passed to `∂zᶜᶜᶜ` so the divergence is computed at
 # cell centers from the face-located product.
 @inline _theta_face_z_flux(i, j, k, grid, θ⁰, ρw′) =
     @inbounds ℑbzᵃᵃᶠ(i, j, k, grid, θ⁰) * ρw′[i, j, k]
+
+@inline ℑb_wθ(i, j, k, w, θ) = @inbounds w[i, j, k] * ℑbzᵃᵃᶠ(i, j, k, grid, θ⁰)
 
 # Post-solve recovery: substitute the tridiag-solved `(ρw)′ᵐ⁺` back
 # into the `ρ′_pred`, `ρθ′_pred` predictors to get `ρ′ᵐ⁺`, `ρθ′ᵐ⁺`
@@ -987,15 +989,8 @@ end
 
     @inbounds begin
         for k in 1:Nz
-            Δz_c = Δzᶜᶜᶜ(i, j, k, grid)
-            θᶜᶜᶠᵏ⁺ = ℑbzᵃᵃᶠ(i, j, k + 1, grid, θ⁰)
-            θᶜᶜᶠᵏ  = ℑbzᵃᵃᶠ(i, j, k,     grid, θ⁰)
-
-            ρ′[i, j, k] = ρ′_pred[i, j, k] -
-                          (δτᵐ⁺ / Δz_c) * (ρw′[i, j, k + 1] - ρw′[i, j, k])
-            ρθ′[i, j, k] = ρθ′_pred[i, j, k] -
-                           (δτᵐ⁺ / Δz_c) * (θᶜᶜᶠᵏ⁺ * ρw′[i, j, k + 1] -
-                                               θᶜᶜᶠᵏ  * ρw′[i, j, k])
+            ρ′[i, j, k] = ρ′_pred[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, ρw′)
+            ρθ′[i, j, k] = ρθ′_pred[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, ℑb_wθ, ρw′, θ⁰)
         end
     end
 end
@@ -1089,8 +1084,7 @@ end
 # The vertical component is the missing piece that damps the vertical
 # acoustic modes responsible for the rest-atmosphere blow-up at
 # (Δt = 20 s, ω = 0.55) without divergence damping.
-@kernel function _thermal_divergence_damping!(ρu′, ρv′, ρθ′, ρθ′ˢ⁻, θ⁰, grid,
-                                               αx, αy)
+@kernel function _thermal_divergence_damping!(ρu′, ρv′, ρθ′, ρθ′ˢ⁻, θ⁰, grid, αx, αy)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -1099,7 +1093,6 @@ end
 
         ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, _dρθ′_over_θ, ρθ′, ρθ′ˢ⁻, θ⁰)
         ρv′[i, j, k] -= αy * ∂y_div * !on_y_boundary(i, j, k, grid)
-        # Vertical damping is folded into the column tridiag; nothing to do here.
     end
 end
 
@@ -1115,12 +1108,12 @@ end
 #   ρuᵐ⁺ = ρu⁰ + (ρu)′, etc.
 # Velocities are then diagnosed: u = ρu/ρ, etc.
 @kernel function _recover_full_state!(ρ, ρθ, m, vel,
-                                       ρ′, ρθ′, ρu′, ρv′, ρw′,
-                                       ρ⁰, ρu⁰, ρv⁰, ρw⁰, ρθ⁰,
-                                       grid)
+                                      ρ′, ρθ′, ρu′, ρv′, ρw′,
+                                      ρ⁰, ρu⁰, ρv⁰, ρw⁰, ρθ⁰,
+                                      grid)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρᵐ⁺  = ρ⁰[i, j, k] + ρ′[i, j, k]
+        ρᵐ⁺  = ρ⁰[i, j, k]  + ρ′[i, j, k]
         ρθᵐ⁺ = ρθ⁰[i, j, k] + ρθ′[i, j, k]
         ρuᵐ⁺ = ρu⁰[i, j, k] + ρu′[i, j, k]
         ρvᵐ⁺ = ρv⁰[i, j, k] + ρv′[i, j, k]
