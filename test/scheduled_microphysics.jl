@@ -188,3 +188,27 @@ end
     Breeze.AtmosphereModels.update_microphysics!(model)
     @test model.microphysics_state.last_fire_iteration == 3
 end
+
+@testset "Cache path matches inline path at IterationInterval(1)" begin
+    using Breeze.Microphysics: SaturationAdjustment
+    using Breeze.AtmosphereModels: moisture_prognostic_name
+
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), extent=(1000, 1000, 1000))
+    μ = SaturationAdjustment()
+
+    function build_and_step(; schedule)
+        model = AtmosphereModel(grid; microphysics = μ, microphysics_schedule = schedule)
+        set!(model, ρθ = 300, ρqᵉ = 1e-3)
+        sim = Simulation(model, Δt = 1.0, stop_iteration = 1, verbose = false)
+        run!(sim)
+        moist_name = moisture_prognostic_name(model.microphysics)
+        return (ρθ   = copy(parent(model.timestepper.Gⁿ.ρθ)),
+                ρqᵉ  = copy(parent(model.timestepper.Gⁿ[moist_name])))
+    end
+
+    inline_G = build_and_step(schedule = nothing)
+    cached_G = build_and_step(schedule = IterationInterval(1))
+
+    @test inline_G.ρθ  ≈ cached_G.ρθ  atol = 1e-12 rtol = 1e-12
+    @test inline_G.ρqᵉ ≈ cached_G.ρqᵉ atol = 1e-12 rtol = 1e-12
+end

@@ -293,6 +293,7 @@ function compute_tendencies!(model::AtmosphereModel)
         advecting_velocities,
         model.microphysics,
         model.microphysical_fields,
+        model.microphysics_tendencies,
         model.closure,
         model.closure_fields,
         model.clock,
