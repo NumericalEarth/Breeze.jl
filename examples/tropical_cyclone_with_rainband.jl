@@ -151,7 +151,7 @@ Nz = 75
 Lx = Nx * Δx
 Lz = 25kilometers                 # YD19 §3a1
 Δz = Lz / Nz
-sponge_rate = 0.003               # ≈ WRF damp_opt=2 `dampcoef` (~333 s timescale)
+sponge_rate = 1/333seconds # ≈ WRF damp_opt=2 `dampcoef`
 stage_stop_time = 24hours
 
 arch = CUDA.functional() ? GPU() : CPU()
