@@ -273,7 +273,7 @@ below the bound and is the verified pairing for the default ``ω = 0.65``.
 
 For very anisotropic grids (e.g. ``Δz / Δx ≪ 1``) the per-direction scaling produces a
 weak vertical damping. Passing a `length_scale = ℓ` keyword to
-[`KlempDivergenceDamping`](@ref Breeze.CompressibleEquations.KlempDivergenceDamping)
+[`ThermalDivergenceDamping`](@ref Breeze.CompressibleEquations.ThermalDivergenceDamping)
 overrides the anisotropic form with an isotropic ``ν = β_d ℓ^2 / Δτ`` applied uniformly to
 all three components — useful when a uniform damping coefficient across a stretched grid is
 preferred.
@@ -371,7 +371,7 @@ The default split-explicit configuration is
 ```julia
 SplitExplicitTimeDiscretization(
     forward_weight = 0.65,
-    damping = KlempDivergenceDamping(coefficient = 0.1),
+    damping = ThermalDivergenceDamping(coefficient = 0.1),
     substep_distribution = ProportionalSubsteps(),
 )
 ```

@@ -131,7 +131,7 @@ adaptive_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
 # empirical comparison that motivated the new default.
 ssp_time_discretization = SplitExplicitTimeDiscretization(;
     substeps = Ns,
-    damping  = ThermodynamicDivergenceDamping(coefficient = 0.05))
+    damping  = ThermalDivergenceDamping(coefficient = 0.05))
 ssp_dynamics = CompressibleDynamics(ssp_time_discretization;
                                     surface_pressure,
                                     reference_potential_temperature = θᵇᵍ)
@@ -142,7 +142,7 @@ ssp_dynamics = CompressibleDynamics(ssp_time_discretization;
 # strengthening the MPAS-style damping.
 ws_time_discretization = SplitExplicitTimeDiscretization(;
     substeps = Ns,
-    damping  = ThermodynamicDivergenceDamping(coefficient = 0.10))
+    damping  = ThermalDivergenceDamping(coefficient = 0.10))
 ws_dynamics = CompressibleDynamics(ws_time_discretization;
                                      surface_pressure,
                                      reference_potential_temperature=θᵇᵍ)

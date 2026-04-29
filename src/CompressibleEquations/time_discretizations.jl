@@ -111,7 +111,7 @@ Abstract supertype for divergence damping applied inside the substep loop.
 Concrete subtypes:
 
   - [`NoDivergenceDamping`](@ref) — no damping (the default).
-  - [`KlempDivergenceDamping`](@ref) — [Klemp, Skamarock & Ha (2018)](@cite KlempSkamarockHa2018)
+  - [`ThermalDivergenceDamping`](@ref) — [Klemp, Skamarock & Ha (2018)](@cite KlempSkamarockHa2018)
     momentum correction using the discrete ``δ_τ(ρθ)`` tendency as the
     divergence proxy. Used for production runs to filter grid-scale
     acoustic divergence over long integrations; not intended as a
@@ -130,14 +130,28 @@ struct NoDivergenceDamping <: AcousticDampingStrategy end
 """
 $(TYPEDEF)
 
-3-D acoustic divergence damping per
+3-D acoustic divergence damping that uses the **(ρθ)′ tendency as a
+discrete proxy for the momentum divergence**. From the linearized
+ρθ-continuity equation
+``\\partial_t (ρθ)' + \\nabla\\cdot(ρθ^0 u') = 0``, the per-substep
+quantity
+
+```math
+D \\equiv \\frac{(ρθ)' - (ρθ)'_\\mathrm{old}}{θ^0}
+       \\approx -Δτ \\, \\nabla\\cdot(ρu)'
+```
+
+is what would otherwise require an extra divergence operator and an
+extra kernel pass. Building the correction from `D` reuses the
+substep's already-resident `(ρθ)′` snapshots — that's the algorithmic
+choice this damping is named for.
+
+Used by
 [Klemp, Skamarock & Ha (2018)](@cite KlempSkamarockHa2018) /
 [Skamarock & Klemp (1992)](@cite SkamarockKlemp1992) /
 [Baldauf (2010)](@cite Baldauf2010). After each acoustic substep, all
 three momentum perturbation components ``(ρu)′, (ρv)′, (ρw)′`` pick up
-a correction proportional to the gradient of
-``D \\equiv ((ρθ)′ - (ρθ)′_\\mathrm{old})/θ⁰``, which is a discrete
-proxy for ``-Δτ \\nabla\\cdot(ρu)′``. The vertical component is the
+a correction proportional to ``\\nabla D``. The vertical component is the
 piece that damps vertical acoustic modes and is REQUIRED for
 stability at production ``\\Delta t``: without it, the column tridiag's
 anti-symmetric buoyancy off-diagonals and asymmetric (under
@@ -168,6 +182,11 @@ Fields
 ======
 
 - `coefficient`: Dimensionless damping coefficient ``β_d``. Default `0.1`.
+  The vertical part is folded into the column tridiag and is
+  unconditionally stable, so this coefficient may be raised above the
+  explicit-time bound `β_d ≤ 0.25` to suppress non-normal transient
+  amplification of the vertical acoustic mode. The horizontal part
+  remains explicit and obeys the usual `2β_d ≤ 1/2` per-direction CFL.
 - `length_scale`: Optional override for the dispersion length
   ``ℓ_\\mathrm{disp}``. Default `nothing` (auto = anisotropic
   per-direction grid spacing). Setting `length_scale = ℓ` forces an
@@ -177,31 +196,31 @@ Fields
   damping is a wavenumber-controlled filter; only the dimensional
   scale of ``ν`` depends on this — small variations don't matter.
 """
-struct KlempDivergenceDamping{FT, LS} <: AcousticDampingStrategy
+struct ThermalDivergenceDamping{FT, LS} <: AcousticDampingStrategy
     coefficient :: FT
     length_scale :: LS
     reference_temperature :: FT
 end
 
-function KlempDivergenceDamping(; coefficient = 0.1, length_scale = nothing,
-                                  reference_temperature = 300.0)
+function ThermalDivergenceDamping(; coefficient = 0.1,
+                                    length_scale = nothing,
+                                    reference_temperature = 300.0)
     if length_scale === nothing
         FT = promote_type(typeof(coefficient), typeof(reference_temperature))
-        return KlempDivergenceDamping{FT, Nothing}(convert(FT, coefficient), nothing,
-                                                    convert(FT, reference_temperature))
+        return ThermalDivergenceDamping{FT, Nothing}(convert(FT, coefficient), nothing,
+                                                     convert(FT, reference_temperature))
     else
         FT = promote_type(typeof(coefficient), typeof(length_scale), typeof(reference_temperature))
-        return KlempDivergenceDamping{FT, FT}(convert(FT, coefficient),
-                                               convert(FT, length_scale),
-                                               convert(FT, reference_temperature))
+        return ThermalDivergenceDamping{FT, FT}(convert(FT, coefficient),
+                                                convert(FT, length_scale),
+                                                convert(FT, reference_temperature))
     end
 end
 
-# Backward-compatibility alias for examples that still reference the old
-# name. The new name `KlempDivergenceDamping` is preferred and
-# self-explanatory; this alias will be removed once examples are
-# updated.
-const ThermodynamicDivergenceDamping = KlempDivergenceDamping
+# Backward-compatibility alias for older user scripts that still
+# reference `ThermodynamicDivergenceDamping`. Will be removed in a
+# future release; new code should use `ThermalDivergenceDamping`.
+const ThermodynamicDivergenceDamping = ThermalDivergenceDamping
 
 #####
 ##### Split-explicit time discretization
@@ -250,7 +269,7 @@ Fields
   the soft outer-step CFL — it is REQUIRED for stability at production
   ``\\Delta t``.
 - `damping`: Acoustic divergence damping strategy. Default:
-  [`KlempDivergenceDamping`](@ref) with coefficient 0.1. Required for
+  [`ThermalDivergenceDamping`](@ref) with coefficient 0.1. Required for
   stability at production ``\\Delta t``; passing
   [`NoDivergenceDamping`](@ref) will cause the rest atmosphere to
   amplify ~1.8× per outer step at ``\\Delta t = 20`` s.
@@ -268,7 +287,7 @@ end
 
 function SplitExplicitTimeDiscretization(; substeps = nothing,
                                            forward_weight = 0.65,
-                                           damping = KlempDivergenceDamping(coefficient = 0.1),
+                                           damping = ThermalDivergenceDamping(coefficient = 0.1),
                                            substep_distribution = ProportionalSubsteps())
 
     return SplitExplicitTimeDiscretization(substeps,

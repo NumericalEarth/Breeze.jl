@@ -26,7 +26,7 @@ export
     MonolithicFirstStage,
     AcousticDampingStrategy,
     NoDivergenceDamping,
-    KlempDivergenceDamping,
+    ThermalDivergenceDamping,
     ThermodynamicDivergenceDamping,
     ExplicitTimeStepping,
     PrescribedDensity,
@@ -224,7 +224,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               SplitExplicitTimeDiscretization,
                               AcousticOuterScheme, WickerSkamarock3,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
-                              AcousticDampingStrategy, NoDivergenceDamping, KlempDivergenceDamping,
+                              AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping,
                               ThermodynamicDivergenceDamping,
                               ExplicitTimeStepping
 

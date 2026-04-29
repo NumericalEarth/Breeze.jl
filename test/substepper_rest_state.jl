@@ -71,7 +71,7 @@ function _build_rest_model(arch; substeps = nothing,
     grid = _build_rest_grid(arch; grid_kwargs...)
     constants = ThermodynamicConstants(eltype(grid))
     # Pass `nothing` to defer to the SplitExplicit defaults (forward_weight
-    # = 0.6, KlempDivergenceDamping coef = 0.1) — that is the production
+    # = 0.6, ThermalDivergenceDamping coef = 0.1) — that is the production
     # configuration and the one Phase 4 stabilizes.
     td_kwargs = (; substeps)
     forward_weight === nothing || (td_kwargs = (; td_kwargs..., forward_weight))
@@ -277,7 +277,7 @@ end
     # configuration (default forward_weight, default Klemp damping) must
     # keep `max|w|` near machine ε across many outer steps for the full
     # range of Δt up to the documented production value (20 s).
-    # Phase 4 fix (`KlempDivergenceDamping` 3-D + `forward_weight = 0.6`):
+    # Phase 4 fix (`ThermalDivergenceDamping` 3-D + `forward_weight = 0.6`):
     # both Δt cases now pass at the 1e-10 m/s bound. The legacy "broken"
     # configuration `forward_weight = 0.55, NoDivergenceDamping()` still
     # blows up at Δt = 20 s — `@test_broken` documents that, so anyone

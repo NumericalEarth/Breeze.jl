@@ -42,10 +42,11 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
         acoustic = AcousticSubstepper(grid, td)
         @test acoustic.substeps === nothing  # adaptive by default
         @test acoustic.forward_weight ≈ FT(0.65)  # off-centered CN, ε = 2ω - 1 = 0.3
-        # Default damping is KlempDivergenceDamping(0.1) (Klemp/Skamarock/Ha 2018
-        # with Baldauf 2010 anisotropic scaling); required for stability of the
-        # WS-RK3 + substepper coupling at production Δt.
-        @test acoustic.damping isa KlempDivergenceDamping
+        # Default damping is ThermalDivergenceDamping(0.1) (Klemp/Skamarock/Ha 2018
+        # with Baldauf 2010 anisotropic scaling, vertical part folded into the
+        # column tridiag); required for stability of the WS-RK3 + substepper
+        # coupling at production Δt.
+        @test acoustic.damping isa ThermalDivergenceDamping
         @test acoustic.damping.coefficient ≈ FT(0.1)
         @test acoustic.outer_step_potential_temperature isa Oceananigans.Fields.Field
     end
@@ -53,11 +54,11 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
     @testset "Custom parameters" begin
         td = SplitExplicitTimeDiscretization(substeps=10,
                                               forward_weight=0.55,
-                                              damping=KlempDivergenceDamping(coefficient=0.2))
+                                              damping=ThermalDivergenceDamping(coefficient=0.2))
         acoustic = AcousticSubstepper(grid, td)
         @test acoustic.substeps == 10
         @test acoustic.forward_weight ≈ FT(0.55)
-        @test acoustic.damping isa KlempDivergenceDamping
+        @test acoustic.damping isa ThermalDivergenceDamping
         @test acoustic.damping.coefficient ≈ FT(0.2)
     end
 end
@@ -184,7 +185,7 @@ function build_igw_model(; timestepper=:AcousticRungeKutta3, Ns=8, κᵈ=0.05)
     θᵢ(x, y, z) = θᵇᵍ(z) + Δθ * sin(π * z / Lz) / (1 + (x - x₀)^2 / a^2)
 
     td = SplitExplicitTimeDiscretization(substeps=Ns,
-                                         damping=ThermodynamicDivergenceDamping(coefficient=κᵈ))
+                                         damping=ThermalDivergenceDamping(coefficient=κᵈ))
     dynamics = CompressibleDynamics(td; surface_pressure=p₀,
                                       reference_potential_temperature=θᵇᵍ)
 
@@ -380,7 +381,7 @@ end
 
     # Exercise the divergence-damping path with the typed AcousticDampingStrategy.
     td = SplitExplicitTimeDiscretization(substeps=8,
-                                         damping=ThermodynamicDivergenceDamping(coefficient=FT(0.5)))
+                                         damping=ThermalDivergenceDamping(coefficient=FT(0.5)))
     dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
     model = AtmosphereModel(grid; advection=WENO(), dynamics,
                             timestepper=:AcousticRungeKutta3)

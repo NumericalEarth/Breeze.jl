@@ -38,7 +38,7 @@ export
     MonolithicFirstStage,
     AcousticDampingStrategy,
     NoDivergenceDamping,
-    KlempDivergenceDamping,
+    ThermalDivergenceDamping,
     ThermodynamicDivergenceDamping,
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
@@ -51,7 +51,8 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, ZFaceField, prognostic_fields
 using Oceananigans.Grids: rnode, znode
-using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
+using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
+                                ∂zᶜᶜᶜ, ∂zᶜᶜᶠ
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
