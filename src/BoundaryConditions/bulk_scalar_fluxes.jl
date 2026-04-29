@@ -169,7 +169,9 @@ specific humidity, and `qᵛ₀` is the saturation specific humidity at the surf
 - `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
 - `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Used to compute saturation specific humidity at the surface.
-- `filtered_velocities`: Either `nothing` (default) or [`FilteredSurfaceVelocities`](@ref).
+- `filtered_velocities`: Either `nothing` (default) or [`FilteredSurfaceVelocities`](@ref). Note
+                         that when `filtered_velocities` is not `nothing`, then automatically
+                         there is filtering in the scalar fields via [`FilteredSurfaceScalar`](@ref).
 """
 function BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
     return BulkVaporFluxFunction(coefficient, gustiness, surface_temperature,
