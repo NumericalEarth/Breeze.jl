@@ -593,8 +593,8 @@ This matches MPAS init_atm_cases.F lines 813-817 exactly.
 
 Arguments
 =========
-- `grid`: The grid
-- `constants`: Thermodynamic constants (default: `ThermodynamicConstants(eltype(grid))`)
+- Tᵣ`: The grid
+- Tᵣtants`: Thermodynamic constants (default: `ThermodynamicConstants(eltype(grid))`)
 
 Keyword Arguments
 =================
@@ -617,9 +617,9 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     κ = Rᵈ / cᵖᵈ
-    g = constants.gravitational_acceleration
-    Nz = size(grid, 3)
-
+    g Tᵣstants.gravitational_acceleration
+    NzTᵣze(grid, 3)
+Tᵣ
     if reference_temperature !== nothing
         # ── Isothermal base state (MPAS baroclinic wave convention) ──
         # Analytic solution: p(z) = p₀ exp(-gz/(Rᵈ T₀)), Π = (p/pˢᵗ)^κ,

@@ -152,7 +152,7 @@ end
 ##### to compute (∂p/∂x)_ζ, then multiply the slope inside the interpolation.
 #####
 ##### When a terrain reference pressure p_ref(z_physical) is available, the PG is
-##### computed using perturbation pressure p' = p - p_ref. Since p_ref depends only
+##### computed using perturbation pressure p' = p - p_ref. Since pᵣdepends only
 ##### on physical height z, its true horizontal gradient (∂p_ref/∂x)_z = 0 exactly.
 ##### The perturbation terms are much smaller than the full pressure terms, which
 ##### reduces the truncation error from the near-cancellation of the two large terms.
@@ -322,10 +322,10 @@ end
 ##### -∂p/∂z - gρ, where both terms are O(ρg) ≈ 12 Pa/m and nearly cancel.
 ##### The O(Δz²) truncation error from this cancellation can dominate the
 ##### physical mountain wave signal. The terrain reference state provides
-##### p_ref and ρ_ref in approximate discrete hydrostatic balance, allowing
+##### pᵣand ρᵣin approximate discrete hydrostatic balance, allowing
 ##### the vertical PG and buoyancy to be computed in perturbation form:
 #####   -(∂p'/∂z) - g ρ'
-##### where p' = p - p_ref and ρ' = ρ - ρ_ref are small perturbations.
+##### where p' = p - pᵣand ρ' = ρ - ρᵣare small perturbations.
 #####
 
 @inline function AtmosphereModels.z_pressure_gradient(i, j, k, grid, d::TerrainCompressibleDynamics)

@@ -860,7 +860,7 @@ using GPUArraysCore: @allowscalar
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
-        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        θ₀ᵣ= model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀_ref, u=5)
         Oceananigans.initialize!(model)
         @test fv.u[2, 2, 1] ≈ 5.0

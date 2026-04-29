@@ -102,10 +102,10 @@ function set_rest_state!(model)
     ref = model.dynamics.reference_state
     Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
 
-    # ρ ← ρ_ref (the model's prognostic density field).
+    # ρ ← ρᵣ(the model's prognostic density field).
     parent(model.dynamics.density) .= parent(ref.density)
 
-    # ρθ ← p_ref / (Rᵈ Π_ref). Equivalent to ρ_ref · θ̄_ref with
+    # ρθ ← pᵣ/ (Rᵈ Π_ref). Equivalent to ρᵣ· θ̄_ref with
     # θ̄_ref = T₀/Π_ref, but avoids any continuous-formula intermediate.
     ρθ_field = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
     parent(ρθ_field) .= parent(ref.pressure) ./ (Rᵈ .* parent(ref.exner_function))

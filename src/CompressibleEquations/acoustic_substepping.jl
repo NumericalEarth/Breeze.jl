@@ -178,7 +178,7 @@ struct AcousticSubstepper{N, FT, D, AD, CF, FF, XF, YF, GT, TS}
     outer_step_gamma_R_mixture :: CF
     outer_step_virtual_density_factor :: CF
 
-    # Reference-subtracted pressure perturbation, p − p_ref (= p when no
+    # Reference-subtracted pressure perturbation, p − pᵣ(= p when no
     # reference). Refreshed each stage along with outer_step_pressure.
     pressure_imbalance :: CF
 
@@ -400,7 +400,7 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
             pˢᵗ, κ)
 
     # Reference-subtracted pressure perturbation. For ExnerReferenceState
-    # the reference depends only on z, so ∂x p_ref = ∂y p_ref = 0; the
+    # the reference depends only on z, so ∂x pᵣ= ∂y pᵣ= 0; the
     # horizontal force is then ∂x(p − p_ref) = ∂x p. Reference
     # subtraction in z guarantees a hydrostatic rest atmosphere has zero
     # vertical drive, free of FP-rounding noise.

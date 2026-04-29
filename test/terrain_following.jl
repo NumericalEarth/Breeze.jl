@@ -228,9 +228,9 @@ using Test
         model = AtmosphereModel(grid; dynamics)
         constants = model.thermodynamic_constants
 
-        p_ref = model.dynamics.terrain_reference_pressure
+        pᵣ= model.dynamics.terrain_reference_pressure
 
-        # At each grid point, p_ref should match the continuous profile
+        # At each grid point, pᵣshould match the continuous profile
         # to within the discretization error of the Exner integration (O(Δz²))
         for i in 1:Nx, k in 1:Nz
             z_phys = znode(i, 1, k, grid, Center(), Center(), Center())
@@ -240,7 +240,7 @@ using Test
             @test p_ref[i, 1, k] ≈ p_exact rtol=1e-2
         end
 
-        # Critical check: at a given k-level, p_ref must NOT be constant across
+        # Critical check: at a given k-level, pᵣmust NOT be constant across
         # columns (it should vary because physical heights differ). But at the
         # SAME physical height, values from different columns should agree closely.
         # Compare the flat column (i at domain edge) vs the mountain-top column.
@@ -249,7 +249,7 @@ using Test
         z_flat_1 = znode(i_flat, 1, 1, grid, Center(), Center(), Center())
         z_peak_1 = znode(i_peak, 1, 1, grid, Center(), Center(), Center())
 
-        # Physical heights differ, so p_ref at k=1 should differ
+        # Physical heights differ, so pᵣat k=1 should differ
         @test z_peak_1 > z_flat_1 + 100  # mountain is at least 100 m higher
         @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]  # higher altitude → lower pressure
     end
@@ -283,9 +283,9 @@ using Test
         model = AtmosphereModel(grid; dynamics)
         constants = model.thermodynamic_constants
 
-        p_ref = model.dynamics.terrain_reference_pressure
+        pᵣ= model.dynamics.terrain_reference_pressure
 
-        # At each grid point, p_ref should match the continuous profile
+        # At each grid point, pᵣshould match the continuous profile
         for i in 1:Nx, k in 1:Nz
             z_phys = znode(i, 1, k, grid, Center(), Center(), Center())
             p_exact = hydrostatic_pressure(z_phys, p₀, θ_of_z, pˢᵗ, constants)
@@ -293,7 +293,7 @@ using Test
             @test p_ref[i, 1, k] ≈ p_exact rtol=5e-3
         end
 
-        # Mountain-top column should have lower p_ref at k=1 than flat column
+        # Mountain-top column should have lower pᵣat k=1 than flat column
         i_flat = 1
         i_peak = Nx÷2
         @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]

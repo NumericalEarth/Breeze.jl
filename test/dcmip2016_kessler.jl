@@ -331,12 +331,12 @@ end
     qᵗ_init = qᵛ_init .+ qᶜˡ_init .+ qʳ_init
 
     # Run reference implementation
-    T_ref = copy(T_prof)
+    Tᵣ = copy(T_prof)
     qᵛ_ref = copy(qᵛ_init)
     qᶜˡ_ref = copy(qᶜˡ_init)
     qʳ_ref = copy(qʳ_init)
 
-    dcmip2016_klemp_wilhelmson_kessler!(T_ref, qᵛ_ref, qᶜˡ_ref, qʳ_ref, ρ_prof, p_prof, Δt, z_centers, constants, microphysics)
+    dcmip2016_klemp_wilhelmson_kessler!(Tᵣ, qᵛ_ref, qᶜˡ_ref, qʳ_ref, ρ_prof, p_prof, Δt, z_centers, constants, microphysics)
 
     # Run Breeze implementation
     ref_state = ReferenceState(grid, constants; surface_pressure=p₀)
@@ -389,7 +389,7 @@ end
         T_breeze[k] = Π * θˡⁱ_val + ℒˡᵣ * (qᶜˡ_breeze[k] + qʳ_breeze[k]) / cᵖᵐ
     end
 
-    @test T_breeze ≈ T_ref rtol=1e-12
+    @test T_breeze ≈ Tᵣ rtol=1e-12
     @test qᵛ_breeze ≈ qᵛ_ref rtol=1e-12
     @test qᶜˡ_breeze ≈ qᶜˡ_ref rtol=1e-12
     @test qʳ_breeze ≈ qʳ_ref rtol=1e-12

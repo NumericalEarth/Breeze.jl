@@ -337,15 +337,15 @@ end
 
     # Test at reference temperature (273.15 K): should return reference pressure
     Tᵣ = FT(273.15)
-    pᵛ⁺_ref = saturation_vapor_pressure(Tᵣ, thermo, PlanarLiquidSurface())
-    @test pᵛ⁺_ref ≈ FT(610) rtol=rtol
+    pᵛ⁺ᵣ= saturation_vapor_pressure(Tᵣ, thermo, PlanarLiquidSurface())
+    @test pᵛ⁺ᵣ≈ FT(610) rtol=rtol
 
     # Test monotonicity: pressure increases with temperature (liquid)
     T_warm = FT(300)
     T_cold = FT(250)
     pᵛ⁺_warm = saturation_vapor_pressure(T_warm, thermo, PlanarLiquidSurface())
     pᵛ⁺_cold = saturation_vapor_pressure(T_cold, thermo, PlanarLiquidSurface())
-    @test pᵛ⁺_warm > pᵛ⁺_ref > pᵛ⁺_cold
+    @test pᵛ⁺_warm > pᵛ⁺ᵣ> pᵛ⁺_cold
 
     # Test ice surface at reference temperature
     pⁱ_ref = saturation_vapor_pressure(Tᵣ, thermo, PlanarIceSurface())

@@ -373,15 +373,15 @@ end
     ref   = model.dynamics.reference_state
     Rᵈ    = Float64(Breeze.dry_air_gas_constant(model.thermodynamic_constants))
 
-    p_ref = Array(interior(ref.pressure))
+    pᵣ= Array(interior(ref.pressure))
     ρ_ref = Array(interior(ref.density))
     Π_ref = Array(interior(ref.exner_function))
     cᵖᵈ   = Float64(model.thermodynamic_constants.dry_air.heat_capacity)
     κ     = Rᵈ / cᵖᵈ
     pˢᵗ   = Float64(model.dynamics.standard_pressure)
 
-    # Π_ref = (p_ref / pˢᵗ)^κ must hold to ulp by construction.
-    ΔΠ = maximum(abs, Π_ref .- (p_ref ./ pˢᵗ).^κ)
+    # Π_ref = (pᵣ/ pˢᵗ)^κ must hold to ulp by construction.
+    ΔΠ = maximum(abs, Π_ref .- (pᵣ./ pˢᵗ).^κ)
     @info @sprintf("[S7] max|Π_ref − (p_ref/pˢᵗ)^κ| = %.3e", ΔΠ)
     @test ΔΠ <= 100 * eps(Float64)
 

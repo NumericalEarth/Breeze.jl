@@ -265,7 +265,7 @@ end
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
-        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        θ₀ᵣ= model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀_ref, u=FT(5), qᵗ=FT(0.01))
         time_step!(model, 1e-6)
         @test true
@@ -282,7 +282,7 @@ end
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
-        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        θ₀ᵣ= model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀_ref, u=FT(5), qᵗ=FT(0.01))
         time_step!(model, 1e-6)
         @test true
@@ -340,7 +340,7 @@ end
         ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
         model = AtmosphereModel(grid_1; boundary_conditions=(; ρe=ρe_bcs))
 
-        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        θ₀ᵣ= model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
 
         q = MoistureMassFractions(qᵗ₀)
@@ -369,7 +369,7 @@ end
         ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬₀))
         model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
 
-        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        θ₀ᵣ= model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
 
         ρe = static_energy_density(model)
@@ -422,7 +422,7 @@ end
         ρe_bcs = FieldBoundaryConditions(west=FluxBoundaryCondition(𝒬_west))
         model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
 
-        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        θ₀ᵣ= model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀_ref, qᵗ=qᵗ₀)
 
         ρe = static_energy_density(model)
