@@ -234,13 +234,33 @@ this method directly without using `microphysical_state`.
 # Arguments
 - `velocities`: NamedTuple of velocity components `(; u, v, w)` [m/s].
 """
-@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
+# Default (no cache): build microphysical state and dispatch to microphysical_tendency.
+@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ::Nothing,
+                                             ρ, fields, 𝒰, constants, velocities)
     ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, velocities)
     return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 end
 
-# Explicit Nothing fallback (for backward compatibility)
-@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
+# Cache hit: read precomputed tendency. Val{N}+haskey compile-time => cache misses are branch-free zero.
+@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, ::Val{N},
+                                             cache::NamedTuple,
+                                             ρ, fields, 𝒰, constants, velocities) where N
+    return haskey(cache, N) ? @inbounds(cache[N][i, j, k]) : zero(eltype(grid))
+end
+
+# Nothing microphysics — always zero, regardless of cache type.
+@inline grid_microphysical_tendency(i, j, k, grid, ::Nothing, name, ::Nothing,
+                                    ρ, μ, 𝒰, constants, velocities) = zero(eltype(grid))
+@inline grid_microphysical_tendency(i, j, k, grid, ::Nothing, ::Val{N}, cache::NamedTuple,
+                                    ρ, μ, 𝒰, constants, velocities) where N =
+    haskey(cache, N) ? @inbounds(cache[N][i, j, k]) : zero(eltype(grid))
+
+# Transitional forwarders: callers passing no cache argument route to the no-cache method.
+# (To be removed in Task 6 once all call sites pass an explicit cache argument.)
+@inline grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities) =
+    grid_microphysical_tendency(i, j, k, grid, microphysics, name, nothing, ρ, fields, 𝒰, constants, velocities)
+@inline grid_microphysical_tendency(i, j, k, grid, ::Nothing, name, ρ, μ, 𝒰, constants, velocities) =
+    zero(eltype(grid))
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics

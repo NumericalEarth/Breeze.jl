@@ -3,6 +3,7 @@ using Oceananigans
 using Oceananigans.Utils: IterationInterval
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
 using Breeze.Thermodynamics: TetensFormula, dry_air_gas_constant
+using GPUArraysCore: @allowscalar
 using Test
 
 @testset "Scheduled microphysics: construction [$(FT)]" for FT in test_float_types()
@@ -104,4 +105,25 @@ end
     nonzero = findall(>(1e-9), abs.(Δa))
     @test !isempty(nonzero)
     @test all(@. abs(Δb[nonzero] / Δa[nonzero] - 2) < 0.5)
+end
+
+@testset "grid_microphysical_tendency cache overload" begin
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), extent=(100, 100, 100))
+    cache = (ρqᶜˡ = CenterField(grid), ρqʳ = CenterField(grid))
+    @allowscalar fill!(parent(cache.ρqᶜˡ), 0.25)
+    @allowscalar fill!(parent(cache.ρqʳ), -0.5)
+
+    # Stand-in args (microphysics = nothing, ρ = 1, fields, 𝒰, constants, velocities)
+    constants = ThermodynamicConstants()
+    fields = (;)
+    𝒰 = nothing
+    velocities = nothing
+
+    val_qcl = Breeze.AtmosphereModels.grid_microphysical_tendency(2, 2, 2, grid, nothing, Val(:ρqᶜˡ), cache, 1.0, fields, 𝒰, constants, velocities)
+    val_qr  = Breeze.AtmosphereModels.grid_microphysical_tendency(2, 2, 2, grid, nothing, Val(:ρqʳ),  cache, 1.0, fields, 𝒰, constants, velocities)
+    val_miss = Breeze.AtmosphereModels.grid_microphysical_tendency(2, 2, 2, grid, nothing, Val(:ρθ), cache, 1.0, fields, 𝒰, constants, velocities)
+
+    @test @allowscalar(val_qcl) ≈ 0.25
+    @test @allowscalar(val_qr)  ≈ -0.5
+    @test @allowscalar(val_miss) == 0
 end
