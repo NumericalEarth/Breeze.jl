@@ -119,11 +119,12 @@ end
     𝒰 = nothing
     velocities = nothing
 
-    val_qcl = Breeze.AtmosphereModels.grid_microphysical_tendency(2, 2, 2, grid, nothing, Val(:ρqᶜˡ), cache, 1.0, fields, 𝒰, constants, velocities)
-    val_qr  = Breeze.AtmosphereModels.grid_microphysical_tendency(2, 2, 2, grid, nothing, Val(:ρqʳ),  cache, 1.0, fields, 𝒰, constants, velocities)
-    val_miss = Breeze.AtmosphereModels.grid_microphysical_tendency(2, 2, 2, grid, nothing, Val(:ρθ), cache, 1.0, fields, 𝒰, constants, velocities)
+    FT = eltype(grid)
+    val_qcl  = @allowscalar Breeze.AtmosphereModels.grid_microphysical_tendency(2, 2, 2, grid, nothing, Val(:ρqᶜˡ), cache, one(FT), fields, 𝒰, constants, velocities)
+    val_qr   = @allowscalar Breeze.AtmosphereModels.grid_microphysical_tendency(2, 2, 2, grid, nothing, Val(:ρqʳ),  cache, one(FT), fields, 𝒰, constants, velocities)
+    val_miss = @allowscalar Breeze.AtmosphereModels.grid_microphysical_tendency(2, 2, 2, grid, nothing, Val(:ρθ),   cache, one(FT), fields, 𝒰, constants, velocities)
 
-    @test @allowscalar(val_qcl) ≈ 0.25
-    @test @allowscalar(val_qr)  ≈ -0.5
-    @test @allowscalar(val_miss) == 0
+    @test val_qcl  ≈ 0.25
+    @test val_qr   ≈ -0.5
+    @test val_miss == 0
 end
