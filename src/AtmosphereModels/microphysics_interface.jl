@@ -255,13 +255,6 @@ end
                                     ρ, μ, 𝒰, constants, velocities) where N =
     haskey(cache, N) ? @inbounds(cache[N][i, j, k]) : zero(eltype(grid))
 
-# Transitional forwarders: callers passing no cache argument route to the no-cache method.
-# (To be removed in Task 6 once all call sites pass an explicit cache argument.)
-@inline grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities) =
-    grid_microphysical_tendency(i, j, k, grid, microphysics, name, nothing, ρ, fields, 𝒰, constants, velocities)
-@inline grid_microphysical_tendency(i, j, k, grid, ::Nothing, name, ρ, μ, 𝒰, constants, velocities) =
-    zero(eltype(grid))
-
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
 #####
