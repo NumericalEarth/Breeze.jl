@@ -97,8 +97,8 @@ using Test
             p_exact = p₀ * exp(-g * z / (Rᵈ * T₀))
             ρ_exact = p_exact / (Rᵈ * T₀)
 
-            pᵣ= @allowscalar ref.pressure[1, 1, k]
-            ρᵣ= @allowscalar ref.density[1, 1, k]
+            p_ref = @allowscalar ref.pressure[1, 1, k]
+            ρ_ref = @allowscalar ref.density[1, 1, k]
             T_ref = @allowscalar ref.temperature[1, 1, k]
 
             @test T_ref ≈ T₀
@@ -131,8 +131,8 @@ using Test
             p_exact = p₀ * exp(-g * z / (Rᵐ * T₀))
             ρ_exact = p_exact / (Rᵐ * T₀)
 
-            pᵣ= @allowscalar ref.pressure[1, 1, k]
-            ρᵣ= @allowscalar ref.density[1, 1, k]
+            p_ref = @allowscalar ref.pressure[1, 1, k]
+            ρ_ref = @allowscalar ref.density[1, 1, k]
 
             @test isapprox(p_ref, p_exact; rtol=FT(1e-4))
             @test isapprox(ρ_ref, ρ_exact; rtol=FT(1e-4))
@@ -175,9 +175,9 @@ using Test
         # Ideal gas consistency: ρ = p / (Rᵐ T)
         Rᵐ = (1 - qᵛ - qˡ - qⁱ) * Rᵈ + qᵛ * Rᵛ
         for k in 1:grid.Nz
-            pᵣ= @allowscalar ref.pressure[1, 1, k]
-            ρᵣ= @allowscalar ref.density[1, 1, k]
-            @test isapprox(ρ_ref, pᵣ/ (Rᵐ * T₀); rtol=FT(1e-5))
+            p_ref = @allowscalar ref.pressure[1, 1, k]
+            ρ_ref = @allowscalar ref.density[1, 1, k]
+            @test isapprox(ρ_ref, p_ref / (Rᵐ * T₀); rtol=FT(1e-5))
         end
     end
 
@@ -417,10 +417,10 @@ end
         @test isapprox(qᵛ_ref, FT(0.01); rtol=FT(0.1))
 
         # Pressure and density should be physically reasonable
-        pᵣ= @allowscalar reference_state.pressure[1, 1, 1]
-        ρᵣ= @allowscalar reference_state.density[1, 1, 1]
-        @test pᵣ> 0
-        @test ρᵣ> 0
+        p_ref = @allowscalar reference_state.pressure[1, 1, 1]
+        ρ_ref = @allowscalar reference_state.density[1, 1, 1]
+        @test p_ref > 0
+        @test ρ_ref > 0
     end
 
     #####

@@ -236,7 +236,7 @@ model = AtmosphereModel(grid; dynamics, advection=WENO(order=5), forcing=(; ρw=
 # balance. Because we passed `reference_potential_temperature` to `CompressibleDynamics`,
 # the model has already computed this discrete reference state for us in `terrain_reference_density`!
 
-ρᵣ= model.dynamics.terrain_reference_density
+ρ_ref = model.dynamics.terrain_reference_density
 ρ = model.dynamics.density
 ρθ = model.formulation.potential_temperature_density
 

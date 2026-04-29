@@ -211,19 +211,19 @@ end
 # explicit solver requires for the same grid.
 #
 # We use a hydrostatically-balanced isothermal reference state at
-# `T₀ᵣ= 250 K` (matching the MPAS convention) so that the substepper's
+# `T₀_ref = 250 K` (matching the MPAS convention) so that the substepper's
 # slow tendencies see only perturbations from the background.
 # `HydrostaticSphericalCoriolis` retains the traditional ``f = 2Ω \sin φ``
 # Coriolis terms.
 
 coriolis = HydrostaticSphericalCoriolis(rotation_rate=Ω)
 
-T₀ᵣ= 250.0
-θᵣ(z) = T₀ᵣ* exp(g * z / (cᵖᵈ * T₀_ref))
+T₀_ref = 250.0
+θ_ref(z) = T₀_ref * exp(g * z / (cᵖᵈ * T₀_ref))
 
 dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                 surface_pressure = p₀,
-                                reference_potential_temperature = θᵣ)
+                                reference_potential_temperature = θ_ref)
 
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
