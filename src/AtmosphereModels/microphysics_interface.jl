@@ -671,3 +671,37 @@ based on cloud properties.
 """
 @inline cloud_ice_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
     effective_radius_model.radius
+
+"""
+    MicrophysicsScheduleState{FT}
+
+Mutable state held by `AtmosphereModel` when scheduled microphysics is active.
+Tracks the time and iteration of the last microphysics firing so the driver
+can compute `Δt_eff = clock.time - last_fire_time`.
+"""
+mutable struct MicrophysicsScheduleState{FT}
+    last_fire_time      :: FT
+    last_fire_iteration :: Int
+end
+
+MicrophysicsScheduleState(FT::DataType) = MicrophysicsScheduleState{FT}(zero(FT), -1)
+
+"""
+$(TYPEDSIGNATURES)
+
+Allocate the cached microphysics tendency NamedTuple for `microphysics` on `grid`,
+keyed by the prognostic names microphysics contributes to (the thermodynamic
+prognostic name, the moisture prognostic, and `prognostic_field_names(microphysics)`).
+
+Returns `nothing` when `schedule === nothing` (the default — no caching).
+"""
+materialize_microphysics_tendencies(microphysics, formulation, ::Nothing, grid) = nothing
+
+function materialize_microphysics_tendencies(microphysics, formulation, schedule, grid)
+    thermo_name   = thermodynamic_density_name(formulation)
+    moisture_name = moisture_prognostic_name(microphysics)
+    micro_names   = prognostic_field_names(microphysics)
+    names = (thermo_name, moisture_name, micro_names...)
+    fields = NamedTuple{names}(ntuple(_ -> CenterField(grid), length(names)))
+    return fields
+end

@@ -27,7 +27,8 @@ function validate_tracers(tracers::Tuple)
 end
 
 mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
-                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
+                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad,
+                               Msc, Mtd, Mss} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -50,6 +51,9 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
     closure :: Cls
     closure_fields :: Cfs
     radiation :: Rad
+    microphysics_schedule :: Msc
+    microphysics_tendencies :: Mtd
+    microphysics_state :: Mss
 end
 
 """
@@ -121,7 +125,8 @@ function AtmosphereModel(grid;
                          microphysics = nothing,
                          timestepper = nothing,
                          timestepper_kwargs = NamedTuple(),
-                         radiation = nothing)
+                         radiation = nothing,
+                         microphysics_schedule = nothing)
 
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
@@ -253,6 +258,10 @@ function AtmosphereModel(grid;
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
 
+    FT = eltype(grid)
+    microphysics_tendencies = materialize_microphysics_tendencies(microphysics, formulation, microphysics_schedule, grid)
+    microphysics_state = isnothing(microphysics_schedule) ? nothing : MicrophysicsScheduleState(FT)
+
     model = AtmosphereModel(arch,
                             grid,
                             clock,
@@ -274,7 +283,10 @@ function AtmosphereModel(grid;
                             timestepper,
                             closure,
                             closure_fields,
-                            radiation)
+                            radiation,
+                            microphysics_schedule,
+                            microphysics_tendencies,
+                            microphysics_state)
 
     # Initialize thermodynamics (dynamics-specific)
     initialize_model_thermodynamics!(model)
