@@ -703,7 +703,7 @@ end
                                   ρ_correction, p3, μ)
 
     # Fortran P3 computes the raw inverse relaxation coefficient here. The
-    # psychrometric correction is applied later through the coupled `ab` / `abi` factor.
+    # psychrometric correction is applied later through the coupled `ξˡ` / `ξⁱ` factor.
     return FT(2π) * ρ * D_v * nⁱ_eff * C_fv
 end
 
@@ -757,48 +757,49 @@ separately.
 
     dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
     dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * ℒⁱ / (Rᵛ * T^2)
-    ab = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
-    abi = 1 + ℒⁱ * dqᵛ⁺ⁱ_dT / cᵖᵈ
+    # Psychrometric correction factors over liquid (ξˡ) and ice (ξⁱ) surfaces.
+    ξˡ = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
+    ξⁱ = 1 + ℒⁱ * dqᵛ⁺ⁱ_dT / cᵖᵈ
 
-    epsc = cloud_condensation_epsilon(p3, qᶜˡ, nᶜˡ, ρ, transport.D_v)
-    epsr = rain_condensation_epsilon(p3, qʳ, nʳ, ρ, transport)
-    epsi = ice_deposition_epsilon(p3, qⁱ, qʷⁱ, nⁱ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                  constants, transport, q, μ)
-    # Fortran `epsiw_tot`: wet-ice surface condenses vapor as liquid, so it
-    # couples through `ab` (like cloud), not through the Bergeron coupling.
-    epsiw = ice_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+    εᶜˡ = cloud_condensation_epsilon(p3, qᶜˡ, nᶜˡ, ρ, transport.D_v)
+    εʳ = rain_condensation_epsilon(p3, qʳ, nʳ, ρ, transport)
+    εⁱ = ice_deposition_epsilon(p3, qⁱ, qʷⁱ, nⁱ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                 constants, transport, q, μ)
+    # Fortran `epsiw_tot`: wet-ice surface condenses vapor as liquid, so it
+    # couples through `ξˡ` (like cloud), not through the Bergeron coupling.
+    εⁱʷ = ice_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                              constants, transport, q, μ)
 
-    ice_liquid_coupling = (1 + ℒⁱ * dqᵛ⁺ˡ_dT / cᵖᵈ) / abi
-    ε_total = max(epsc + epsr + epsi * ice_liquid_coupling + epsiw, FT(1e-20))
+    ice_liquid_coupling = (1 + ℒⁱ * dqᵛ⁺ˡ_dT / cᵖᵈ) / ξⁱ
+    ε_total = max(εᶜˡ + εʳ + εⁱ * ice_liquid_coupling + εⁱʷ, FT(1e-20))
     transient = (1 - exp(-ε_total * τ)) / τ
     ssat_liquid = qᵛ - qᵛ⁺ˡ
-    bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * epsi
+    bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * εⁱ
 
-    qc_raw = (bergeron_driver * epsc / ε_total + (ssat_liquid - bergeron_driver / ε_total) * epsc / ε_total * transient) / ab
-    qr_raw = (bergeron_driver * epsr / ε_total + (ssat_liquid - bergeron_driver / ε_total) * epsr / ε_total * transient) / ab
-    qi_raw = (bergeron_driver * epsi / ε_total + (ssat_liquid - bergeron_driver / ε_total) * epsi / ε_total * transient) / abi +
-             (qᵛ⁺ˡ - qᵛ⁺ⁱ) * epsi / abi
-    # Liquid-on-ice coating uses `ab` (like cloud) since the surface condenses
+    qc_raw = (bergeron_driver * εᶜˡ / ε_total + (ssat_liquid - bergeron_driver / ε_total) * εᶜˡ / ε_total * transient) / ξˡ
+    qr_raw = (bergeron_driver * εʳ / ε_total + (ssat_liquid - bergeron_driver / ε_total) * εʳ / ε_total * transient) / ξˡ
+    qi_raw = (bergeron_driver * εⁱ / ε_total + (ssat_liquid - bergeron_driver / ε_total) * εⁱ / ε_total * transient) / ξⁱ +
+             (qᵛ⁺ˡ - qᵛ⁺ⁱ) * εⁱ / ξⁱ
+    # Liquid-on-ice coating uses `ξˡ` (like cloud) since the surface condenses
     # vapor as liquid; no Bergeron contribution because the surface is already
     # at liquid saturation.
-    ql_raw = (bergeron_driver * epsiw / ε_total + (ssat_liquid - bergeron_driver / ε_total) * epsiw / ε_total * transient) / ab
+    ql_raw = (bergeron_driver * εⁱʷ / ε_total + (ssat_liquid - bergeron_driver / ε_total) * εⁱʷ / ε_total * transient) / ξˡ
 
-    sup_liquid = ssat_liquid / max(qᵛ⁺ˡ, FT(1e-30))
-    sup_ice = qᵛ / max(qᵛ⁺ⁱ, FT(1e-30)) - 1
+    𝒮ˡ = ssat_liquid / max(qᵛ⁺ˡ, FT(1e-30))
+    𝒮ⁱ = qᵛ / max(qᵛ⁺ⁱ, FT(1e-30)) - 1
     # Fortran tiny-mass clauses (3684-3685, 3715-3719, 3753-3756) all gate on
     # total hydrometeor mass. `qⁱ` is the dry ice mass in Julia — equivalent to
     # Fortran's `qitot - qiliq` — so `qⁱ + qʷⁱ` maps to Fortran `qitot`.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    qc_raw = ifelse((sup_liquid < FT(-0.001)) & (qᶜˡ < FT(1e-12)), -qᶜˡ / τ, qc_raw)
-    qr_raw = ifelse((sup_liquid < FT(-0.001)) & (qʳ < FT(1e-12)), -qʳ / τ, qr_raw)
-    qi_raw = ifelse((sup_ice < FT(-0.001)) & (qⁱ_total < FT(1e-12)) &
+    qc_raw = ifelse((𝒮ˡ < FT(-0.001)) & (qᶜˡ < FT(1e-12)), -qᶜˡ / τ, qc_raw)
+    qr_raw = ifelse((𝒮ˡ < FT(-0.001)) & (qʳ < FT(1e-12)), -qʳ / τ, qr_raw)
+    qi_raw = ifelse((𝒮ⁱ < FT(-0.001)) & (qⁱ_total < FT(1e-12)) &
                     (Fˡ < p3.process_rates.liquid_fraction_small),
                     -clamp_positive(qⁱ) / τ,
                     qi_raw)
     # Wet-ice tiny-mass instant evaporation of the liquid coating (Fortran 3753-3756).
-    ql_raw = ifelse((sup_ice < FT(-0.001)) & (qⁱ_total < FT(1e-12)) &
+    ql_raw = ifelse((𝒮ⁱ < FT(-0.001)) & (qⁱ_total < FT(1e-12)) &
                     (Fˡ >= p3.process_rates.liquid_fraction_small),
                     -clamp_positive(qʷⁱ) / τ,
                     ql_raw)
@@ -1465,7 +1466,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
 
     # D1: Wet-ice coating condensation/evaporation comes from the coupled
     # saturation adjustment (P3CoupledVaporRates). The dry/wet exclusivity is
-    # enforced inside that formula via epsi / epsiw activation.
+    # enforced inside that formula via εⁱ / εⁱʷ activation.
 
     # D17: Total ice sink limiting
     total_ice_source_total = max(0, dep) + cloud_rim + rain_rim +

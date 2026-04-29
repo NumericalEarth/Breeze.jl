@@ -729,16 +729,16 @@ This matches `compute_mu_3mom_1` in the reference P3 Fortran code:
 it forms ``G = M₀ M₆ / M₃²`` and applies the piecewise polynomial inversion
 used by `solve_mui`.
 """
-@inline function shape_parameter_from_moments(mom0, mom3, mom6, μmax)
-    FT = promote_type(typeof(mom0), typeof(mom3), typeof(mom6), typeof(μmax))
-    eps_m3 = FT(1e-20)
+@inline function shape_parameter_from_moments(M₀, M₃, M₆, μmax)
+    FT = promote_type(typeof(M₀), typeof(M₃), typeof(M₆), typeof(μmax))
+    M₃_min = FT(1e-20)
 
-    mom3 <= eps_m3 && return FT(μmax)
+    M₃ <= M₃_min && return FT(μmax)
 
     # D21: Promote to Float64 for piecewise polynomial evaluation (Fortran uses
     # double precision). Near breakpoints, Float32 rounding assigns G to the
     # wrong segment, producing incorrect μ.
-    G64 = Float64(mom0 / mom3) * Float64(mom6 / mom3)
+    G64 = Float64(M₀ / M₃) * Float64(M₆ / M₃)
     G²64 = G64 * G64
 
     μ64 = if G64 >= 20.0
@@ -800,15 +800,15 @@ Matches Fortran `apply_mui_bounds_to_zi` and basic zsmall/zlarge clamps.
     # Basic magnitude bounds (Fortran zsmall/zlarge)
     Z_clamped = clamp(Z_ice, FT(1e-35), FT(1))
 
-    # Moment-based bounds: G(μ_max) × mom3²/N ≤ Z ≤ G(μ_min) × mom3²/N
-    mom3 = FT(6) * L_ice / (FT(π) * max(ρ_bulk, eps(FT)))
-    mom3_squared_over_N = mom3^2 / max(N_ice, eps(FT))
+    # Moment-based bounds: G(μ_max) × M₃²/N ≤ Z ≤ G(μ_min) × M₃²/N
+    M₃ = FT(6) * L_ice / (FT(π) * max(ρ_bulk, eps(FT)))
+    M₃²_over_N = M₃^2 / max(N_ice, eps(FT))
 
     G_min = g_of_mu(μmin)  # upper Z bound (wide distribution)
     G_max = g_of_mu(μmax)  # lower Z bound (narrow distribution)
 
-    Z_clamped = min(Z_clamped, G_min * mom3_squared_over_N)
-    Z_clamped = max(Z_clamped, G_max * mom3_squared_over_N)
+    Z_clamped = min(Z_clamped, G_min * M₃²_over_N)
+    Z_clamped = max(Z_clamped, G_max * M₃²_over_N)
 
     return Z_clamped
 end
@@ -1252,15 +1252,15 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
 
     # H15: Compute μ from three-moment constraint with density iteration.
     # Fortran solve_mui iterates up to 5 times: at each step, the bulk density
-    # ρ_bulk is updated from the lookup table (entry 12), which changes mom3 and
+    # ρ_bulk is updated from the lookup table (entry 12), which changes M₃ and
     # hence μ. Here we compute ρ_bulk analytically from the solved (μ, λ) pair
     # via ρ_bulk = 6L / (π M₃), where M₃ = N Γ(μ+4) / (Γ(μ+1) λ³).
     ρ_bulk = FT(mass.ice_density)  # initial guess: pure ice density (900 kg/m³)
     μ = FT(0)
     logλ = FT(0)
     for _ in 1:5
-        mom3 = FT(6) * L_ice / (ρ_bulk * FT(π))
-        μ_new = shape_parameter_from_moments(N_ice, mom3, Z_ice, closure.μmax)
+        M₃ = FT(6) * L_ice / (ρ_bulk * FT(π))
+        μ_new = shape_parameter_from_moments(N_ice, M₃, Z_ice, closure.μmax)
         μ_new = clamp(μ_new, closure.μmin, closure.μmax)
 
         # Solve for λ using actual piecewise m-D relation
