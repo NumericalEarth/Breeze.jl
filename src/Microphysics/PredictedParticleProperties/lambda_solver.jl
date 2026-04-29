@@ -247,8 +247,8 @@ end
     # D30: Fortran diagnostic_mui uses mean mass per particle q = qi_tot/ni_tot,
     # then D_mvd = (q / (π/6 × ρ_g))^(1/3). L_ice alone is total mass, not per-particle.
     mean_mass = L_ice / max(N_ice, eps(FT))
-    val = mean_mass / (FT(π)/6 * ρ_g)
-    D_mvd = ifelse(val <= 0, FT(0), val^(1/3))
+    D_mvd_cubed = mean_mass / (FT(π)/6 * ρ_g)
+    D_mvd = ifelse(D_mvd_cubed <= 0, FT(0), D_mvd_cubed^(1/3))
 
     # 3. Compute both regimes, select based on D_mvd
     # Small regime: Heymsfield 2003
@@ -802,13 +802,13 @@ Matches Fortran `apply_mui_bounds_to_zi` and basic zsmall/zlarge clamps.
 
     # Moment-based bounds: G(μ_max) × mom3²/N ≤ Z ≤ G(μ_min) × mom3²/N
     mom3 = FT(6) * L_ice / (FT(π) * max(ρ_bulk, eps(FT)))
-    tmp = mom3^2 / max(N_ice, eps(FT))
+    mom3_squared_over_N = mom3^2 / max(N_ice, eps(FT))
 
     G_min = g_of_mu(μmin)  # upper Z bound (wide distribution)
     G_max = g_of_mu(μmax)  # lower Z bound (narrow distribution)
 
-    Z_clamped = min(Z_clamped, G_min * tmp)
-    Z_clamped = max(Z_clamped, G_max * tmp)
+    Z_clamped = min(Z_clamped, G_min * mom3_squared_over_N)
+    Z_clamped = max(Z_clamped, G_max * mom3_squared_over_N)
 
     return Z_clamped
 end

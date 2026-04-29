@@ -106,10 +106,10 @@ a number source that counterbalances self-collection. Uses a two-piece
 function of ``D_r = (q_r / (π ρ_w n_r))^{1/3} = 1/λ_r`` (Fortran convention,
 no factor of 6; this equals the mean-mass diameter for an exponential DSD):
 
-1. ``D_r < D_{th}``: No breakup effect (``dum = 1``, breakup = 0)
-2. ``D_r ≥ D_{th}``: ``dum = 2 - \\exp(κ_{br} (D_r - D_{th}))``, breakup > 0
+1. ``D_r < D_{th}``: No breakup effect (modifier = 1, breakup = 0)
+2. ``D_r ≥ D_{th}``: ``\\text{modifier} = 2 - \\exp(κ_{br} (D_r - D_{th}))``, breakup > 0
 
-The breakup rate is ``(1 - dum) \\times`` self-collection rate.
+The breakup rate is ``(1 - \\text{modifier}) \\times`` self-collection rate.
 
 Note: ``D_r`` here uses the Fortran 1/λ_r convention (no factor of 6), which
 is smaller than the physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
@@ -144,15 +144,15 @@ is smaller than the physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
     # Without the clamp, LLVM PTX may fuse the ifelse and multiply, producing
     # (Inf - 1) * 0 = NaN when D_r is large but self_collection ≈ 0.
     exp_arg = min(κ_br * (D_r - D_th), FT(80))
-    dum = ifelse(D_r < D_th,
-                  FT(1),
-                  FT(2) - exp(exp_arg))
+    breakup_modifier = ifelse(D_r < D_th,
+                              FT(1),
+                              FT(2) - exp(exp_arg))
 
-    # Breakup rate: (1 - dum) × self_collection
-    # When D_r < D_th: dum=1 → breakup=0 (no effect)
-    # When D_r ≥ D_th: dum < 1 → breakup > 0 (number source)
+    # Breakup rate: (1 - breakup_modifier) × self_collection
+    # When D_r < D_th: modifier = 1 → breakup = 0 (no effect)
+    # When D_r ≥ D_th: modifier < 1 → breakup > 0 (number source)
     # self_collection is positive magnitude (M7); breakup is positive (number source).
-    return (FT(1) - dum) * self_collection
+    return (FT(1) - breakup_modifier) * self_collection
 end
 
 """

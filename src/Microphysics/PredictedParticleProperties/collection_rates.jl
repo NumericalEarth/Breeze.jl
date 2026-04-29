@@ -1,4 +1,4 @@
-@inline function ice_rain_collection_lookup(table::P3LookupTable2, m̄, λr, Fᶠ, Fˡ, ρᶠ, μ = zero(typeof(m̄)))
+@inline function ice_rain_collection_lookup(table::P3RainIceCollectionTable, m̄, λr, Fᶠ, Fˡ, ρᶠ, μ = zero(typeof(m̄)))
     FT = typeof(m̄)
     log_m = log10(m̄)
     log_λ = log10(λr)
@@ -266,7 +266,7 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
     # Diagnose rain lambda for Table 2 lookup
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
 
-    mass_kernel = _rain_riming_mass_kernel(lookup_table_2(p3),
+    mass_kernel = _rain_riming_mass_kernel(rain_ice_collection_table(p3),
         m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
     # Fortran convention: qrcoll = 10^(f1pr08 + logn0r) × ni × env.
@@ -371,7 +371,7 @@ function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zer
     # Fortran convention: qrcol = 10^(f1pr08 + logn0r) × ni × ρ × rhofaci × E
     # The table stores the double-PSD integral with N0r factored out.
     # N0r = nr × λr (for μr=0 used in table generation).
-    mass_kernel = _rain_riming_mass_kernel(lookup_table_2(p3),
+    mass_kernel = _rain_riming_mass_kernel(rain_ice_collection_table(p3),
         m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
     N0r = nʳ_eff * λ_r
@@ -380,11 +380,11 @@ function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zer
     return ifelse(active, rate, zero(FT))
 end
 
-# H6: Table 2 path — use the dedicated ice-rain mass collection table (Fortran f1pr07).
-@inline function _rain_riming_mass_kernel(table2::P3LookupTable2,
+# H6: Rain-ice collection table path — uses the dedicated ice-rain mass collection table (Fortran f1pr07).
+@inline function _rain_riming_mass_kernel(rain_ice_table::P3RainIceCollectionTable,
                                            m_mean, λ_r, nʳ, Fᶠ, Fˡ, ρᶠ, prp, p3,
                                            μ = zero(typeof(m_mean)))
-    mass_kernel, _, _ = ice_rain_collection_lookup(table2, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, μ)
+    mass_kernel, _, _ = ice_rain_collection_lookup(rain_ice_table, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, μ)
     return mass_kernel
 end
 
@@ -453,7 +453,7 @@ function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, �
     # H6: Use Table 2 (number-weighted kernel) for ice-rain number collection.
     # Fortran convention: nrcol = 10^(f1pr07 + logn0r) × ni × ρ × rhofaci × E
     # N0r = nr × λr (for μr=0).
-    number_kernel = _rain_riming_number_kernel(lookup_table_2(p3),
+    number_kernel = _rain_riming_number_kernel(rain_ice_collection_table(p3),
         m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
     N0r = nʳ_eff * λ_r
@@ -462,11 +462,11 @@ function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, �
     return ifelse(active, rate, zero(FT))
 end
 
-# H6: Table 2 path — use the dedicated ice-rain number collection table (Fortran f1pr08).
-@inline function _rain_riming_number_kernel(table2::P3LookupTable2,
+# H6: Rain-ice collection table path — uses the dedicated ice-rain number collection table (Fortran f1pr08).
+@inline function _rain_riming_number_kernel(rain_ice_table::P3RainIceCollectionTable,
                                              m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3,
                                              μ = zero(typeof(m_mean)))
-    _, number_kernel, _ = ice_rain_collection_lookup(table2, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, μ)
+    _, number_kernel, _ = ice_rain_collection_lookup(rain_ice_table, m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, μ)
     return number_kernel
 end
 

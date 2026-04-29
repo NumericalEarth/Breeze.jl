@@ -103,20 +103,20 @@ using Oceananigans.Fields: interior
         @test tendency_ρzⁱ(partial_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, zero(FT)) ≈ 0
         @test tendency_ρzⁱ(complete_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, zero(FT)) != 0
 
-        lt1 = Breeze.Microphysics.PredictedParticleProperties.lookup_table_1(p3_tab)
-        lt2 = Breeze.Microphysics.PredictedParticleProperties.lookup_table_2(p3_tab)
+        ice_table = Breeze.Microphysics.PredictedParticleProperties.ice_integrals_table(p3_tab)
+        rain_ice_table = Breeze.Microphysics.PredictedParticleProperties.rain_ice_collection_table(p3_tab)
         log_m = log10(qⁱ / nⁱ)
         ρ_correction = Breeze.Microphysics.PredictedParticleProperties.ice_air_density_correction(
             p3_tab.ice.fall_speed.reference_air_density, ρ)
         sc_correction = Breeze.Microphysics.PredictedParticleProperties.ventilation_sc_correction(
             ν, D_v, ρ_correction)
 
-        mass_dep_combined = lt1.deposition.ventilation(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
-                            sc_correction * lt1.deposition.ventilation_enhanced(log_m, Fᶠ, Fˡ, ρᶠ, μ)
-        z_dep_combined = lt1.sixth_moment.deposition(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
-                         sc_correction * lt1.sixth_moment.deposition1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
-        z_sub_combined = lt1.sixth_moment.sublimation(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
-                         sc_correction * lt1.sixth_moment.sublimation1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+        mass_dep_combined = ice_table.deposition.ventilation(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
+                            sc_correction * ice_table.deposition.ventilation_enhanced(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+        z_dep_combined = ice_table.sixth_moment.deposition(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
+                         sc_correction * ice_table.sixth_moment.deposition1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+        z_sub_combined = ice_table.sixth_moment.sublimation(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
+                         sc_correction * ice_table.sixth_moment.sublimation1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
         expected_coat_cond = ρ * z_dep_combined * FT(1e-8) / (nⁱ * mass_dep_combined)
         expected_coat_evap = -ρ * z_sub_combined * FT(1e-8) / (nⁱ * mass_dep_combined)
 
@@ -126,9 +126,9 @@ using Oceananigans.Fields: interior
         # Rain riming Z uses Table 2 sixth_moment divided by the mass kernel (Fortran convention:
         # zqrcol = N0r × m6collr × env, while qrcol = N0r × 10^f1pr08 × Ni × env).
         log_λ_r = log10(λ_r)
-        rain_mass_kernel = exp10(lt2.mass(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ))
-        expected_rain_rime = ρ * lt2.sixth_moment(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ) * FT(1e-7) / (nⁱ * rain_mass_kernel)
-        fallback_cloud_rime = ρ * lt1.sixth_moment.rime(log_m, Fᶠ, Fˡ, ρᶠ, μ) * FT(1e-7) / nⁱ
+        rain_mass_kernel = exp10(rain_ice_table.mass(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ))
+        expected_rain_rime = ρ * rain_ice_table.sixth_moment(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ) * FT(1e-7) / (nⁱ * rain_mass_kernel)
+        fallback_cloud_rime = ρ * ice_table.sixth_moment.rime(log_m, Fᶠ, Fˡ, ρᶠ, μ) * FT(1e-7) / nⁱ
         rain_rime_tendency = tendency_ρzⁱ(rain_rime_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, zero(FT), λ_r)
 
         @test rain_rime_tendency ≈ expected_rain_rime

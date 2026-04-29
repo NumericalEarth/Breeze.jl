@@ -73,9 +73,9 @@ export
     IceSixthMoment,
     IceLambdaLimiter,
     IceRainCollection,
-    P3LookupTable1,
-    P3LookupTable2,
-    P3LookupTable3,
+    P3IceIntegralsTable,
+    P3RainIceCollectionTable,
+    P3ThreeMomentShapeTable,
     P3LookupTables,
 
     # Rain and cloud droplet properties

@@ -132,14 +132,14 @@ function read_fortran_lookup_tables(directory::AbstractString;
         nothing
     end
 
-    # Assemble P3LookupTable structs
-    table_1, table_2, table_3 = assemble_lookup_tables(
+    # Assemble P3 lookup table structs
+    ice_integrals_tab, rain_ice_collection_tab, three_moment_shape_tab = assemble_lookup_tables(
         ice_tables_5d, rain_ice_tables, table3_objs, three_moment)
 
     # Build IceProperties with tabulated fields
     ice = build_ice_properties_from_tables(
         ice_tables_5d, rain_ice_tables, table3_objs,
-        table_1, table_2, table_3, three_moment, FT)
+        ice_integrals_tab, rain_ice_collection_tab, three_moment_shape_tab, three_moment, FT)
 
     # Generate rain 1D tables from Julia quadrature
     rain_base = RainProperties(FT)
@@ -452,11 +452,11 @@ function build_table_3_functions(table3_fields::Dict, FT::Type, arch)
 end
 
 #####
-##### Assemble P3LookupTable structs
+##### Assemble P3 lookup table structs
 #####
 
 function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
-    # P3LookupTable1: groups of ice integrals
+    # P3IceIntegralsTable: groups of ice integrals
     fall_speed = (
         number_weighted = ice_5d[:number_weighted],
         mass_weighted = ice_5d[:mass_weighted],
@@ -519,17 +519,17 @@ function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
         sixth_moment = three_moment ? rain_ice[:rain_sixth_moment] : nothing
     )
 
-    table_1 = P3LookupTable1(fall_speed, deposition, bulk_properties,
-                              collection, sixth_moment, lambda_limiter, ice_rain)
+    ice_integrals_tab = P3IceIntegralsTable(fall_speed, deposition, bulk_properties,
+                                              collection, sixth_moment, lambda_limiter, ice_rain)
 
-    table_2 = P3LookupTable2(
+    rain_ice_collection_tab = P3RainIceCollectionTable(
         rain_ice[:rain_mass],
         rain_ice[:rain_number],
         three_moment ? rain_ice[:rain_sixth_moment] : nothing
     )
 
-    table_3 = if !isnothing(table3_objs)
-        P3LookupTable3(
+    three_moment_shape_tab = if !isnothing(table3_objs)
+        P3ThreeMomentShapeTable(
             table3_objs[:shape],
             nothing,  # slope is not in Table 3 file
             table3_objs[:mean_density]
@@ -538,7 +538,7 @@ function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
         nothing
     end
 
-    return table_1, table_2, table_3
+    return ice_integrals_tab, rain_ice_collection_tab, three_moment_shape_tab
 end
 
 #####
@@ -546,7 +546,7 @@ end
 #####
 
 function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
-                                          table_1, table_2, table_3,
+                                          ice_integrals_tab, rain_ice_collection_tab, three_moment_shape_tab,
                                           three_moment, FT)
     # Start from default IceProperties for physical constants
     ice_base = IceProperties(FT)
@@ -621,7 +621,7 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
         three_moment ? rain_ice[:rain_sixth_moment] : nothing
     )
 
-    lookup_tables = P3LookupTables(table_1, table_2, table_3)
+    lookup_tables = P3LookupTables(ice_integrals_tab, rain_ice_collection_tab, three_moment_shape_tab)
 
     return IceProperties(
         ice_base.minimum_rime_density,

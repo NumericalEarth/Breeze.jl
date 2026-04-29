@@ -455,9 +455,9 @@ end
     c_ni  = tendency_ρnⁱ(rates, ρ)
     c_qf  = tendency_ρqᶠ(rates, ρ, Fᶠ)
     c_bf  = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, ℳ.qⁱ, p3.process_rates)
-    # Sixth moment tendency: use tabulated path when table_1 exists, analytic otherwise.
-    # Direct call avoids dynamic dispatch on lookup_table_1(p3) return type in @noinline.
-    tendency_ρz_phys = p3_ice_sixth_moment_tendency(lookup_table_1(p3), p3, rates, ρ, ℳ, props)
+    # Sixth moment tendency: use tabulated path when ice_integrals table exists, analytic otherwise.
+    # Direct call avoids dynamic dispatch on ice_integrals_table(p3) return type in @noinline.
+    tendency_ρz_phys = p3_ice_sixth_moment_tendency(ice_integrals_table(p3), p3, rates, ρ, ℳ, props)
     z_phys = props.zⁱ_bounded
     FT = typeof(ρ)
     z̃ = sqrt(max(z_phys * props.nⁱ, FT(1e-30)))
@@ -626,7 +626,7 @@ end
     return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, props.nⁱ, props.zⁱ_bounded, p3.process_rates, props.μ_cloud)
 end
 
-@inline function p3_ice_sixth_moment_tendency(::P3LookupTable1, p3, rates, ρ, ℳ::P3MicrophysicalState, props::P3IceProps)
+@inline function p3_ice_sixth_moment_tendency(::P3IceIntegralsTable, p3, rates, ρ, ℳ::P3MicrophysicalState, props::P3IceProps)
     return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, props.nⁱ, props.zⁱ_bounded,
                         props.Fᶠ, props.Fˡ, props.ρᶠ, p3,
                         props.nu, props.D_v, props.μ_ice, props.μ_cloud, props.λ_r)
@@ -728,7 +728,7 @@ Ice sixth moment tendency: changes with deposition, melting, riming, and nucleat
     rates, props = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     # M13: Convert physical z tendency to advected z̃ = √(z·N) tendency
     FT = typeof(ρ)
-    tendency_ρz_phys = p3_ice_sixth_moment_tendency(lookup_table_1(p3), p3, rates, ρ, ℳ, props)
+    tendency_ρz_phys = p3_ice_sixth_moment_tendency(ice_integrals_table(p3), p3, rates, ρ, ℳ, props)
     tendency_ρn = tendency_ρnⁱ(rates, ρ)
     z_phys = props.zⁱ_bounded
     z̃ = sqrt(max(z_phys * props.nⁱ, FT(1e-30)))

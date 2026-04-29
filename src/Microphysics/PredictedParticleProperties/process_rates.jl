@@ -172,13 +172,13 @@ state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density 
     return (; qᶠ = qᶠ_consistent, bᶠ = bᶠ_consistent, Fᶠ, ρᶠ)
 end
 
-@inline lookup_table_1(p3) = _lookup_field(p3.ice.lookup_tables, Val(:table_1))
-@inline lookup_table_2(p3) = _lookup_field(p3.ice.lookup_tables, Val(:table_2))
-@inline lookup_table_3(p3) = _lookup_field(p3.ice.lookup_tables, Val(:table_3))
+@inline ice_integrals_table(p3) = _lookup_field(p3.ice.lookup_tables, Val(:ice_integrals))
+@inline rain_ice_collection_table(p3) = _lookup_field(p3.ice.lookup_tables, Val(:rain_ice_collection))
+@inline three_moment_shape_table(p3) = _lookup_field(p3.ice.lookup_tables, Val(:three_moment_shape))
 
-@inline _lookup_field(tables::P3LookupTables, ::Val{:table_1}) = tables.table_1
-@inline _lookup_field(tables::P3LookupTables, ::Val{:table_2}) = tables.table_2
-@inline _lookup_field(tables::P3LookupTables, ::Val{:table_3}) = tables.table_3
+@inline _lookup_field(tables::P3LookupTables, ::Val{:ice_integrals}) = tables.ice_integrals
+@inline _lookup_field(tables::P3LookupTables, ::Val{:rain_ice_collection}) = tables.rain_ice_collection
+@inline _lookup_field(tables::P3LookupTables, ::Val{:three_moment_shape}) = tables.three_moment_shape
 @inline _lookup_field(::Nothing, ::Val) = nothing
 
 @inline total_ice_mass(qⁱ, qʷⁱ) = clamp_positive(qⁱ) + clamp_positive(qʷⁱ)
@@ -204,17 +204,17 @@ end
     return clamp(cbrt(λ_r_cubed), prp.rain_lambda_min, prp.rain_lambda_max)
 end
 
-@inline function ice_mean_density_for_bounds(table1::P3LookupTable1, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+@inline function ice_mean_density_for_bounds(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
     FT = typeof(qⁱ_total)
     m̄ = safe_divide(max(qⁱ_total, FT(1e-20)), max(nⁱ, FT(1e-16)), FT(1e-20))
     log_mean_mass = log10(max(m̄, FT(1e-20)))
-    return table1.bulk_properties.mean_density(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
+    return ice_table.bulk_properties.mean_density(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
 end
 
-@inline function bound_ice_sixth_moment(table1::P3LookupTable1, qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+@inline function bound_ice_sixth_moment(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
     FT = typeof(qⁱ_total)
     has_ice = (qⁱ_total > FT(1e-20)) & (nⁱ > FT(1e-16))
-    ρ_bulk = ice_mean_density_for_bounds(table1, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+    ρ_bulk = ice_mean_density_for_bounds(ice_table, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
     μ_bounds = ThreeMomentClosure(FT)
     z_bounded = enforce_z_bounds(clamp_positive(zⁱ), qⁱ_total, nⁱ, ρ_bulk, μ_bounds.μmin, μ_bounds.μmax)
     return ifelse(has_ice, z_bounded, zero(FT))
@@ -223,7 +223,7 @@ end
 @inline bound_ice_sixth_moment(::Nothing, qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ) = clamp_positive(zⁱ)
 
 @inline function bound_ice_sixth_moment(p3, qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
-    return bound_ice_sixth_moment(lookup_table_1(p3), qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+    return bound_ice_sixth_moment(ice_integrals_table(p3), qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
 end
 
 #####
@@ -247,18 +247,18 @@ during Fortran table generation.
 """
 @inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ)
-    table3 = lookup_table_3(p3)
-    return _ice_shape_parameter(table3, p3.ice.bulk_properties.shape,
+    shape_table_3mom = three_moment_shape_table(p3)
+    return _ice_shape_parameter(shape_table_3mom, p3.ice.bulk_properties.shape,
                                 qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
 end
 
 # 3-moment: diagnose μ from Table 3 (independent of mu axis)
-@inline function _ice_shape_parameter(table3::P3LookupTable3, shape_table,
+@inline function _ice_shape_parameter(shape_table_3mom::P3ThreeMomentShapeTable, shape_table,
                                       qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
     qⁱ_safe = max(qⁱ, eps(FT))
     nⁱ_safe = max(nⁱ, eps(FT))
     zⁱ_safe = max(zⁱ, eps(FT))
-    return shape_parameter_lookup(table3, qⁱ_safe, nⁱ_safe, zⁱ_safe, Fᶠ, Fˡ, ρᶠ)
+    return shape_parameter_lookup(shape_table_3mom, qⁱ_safe, nⁱ_safe, zⁱ_safe, Fᶠ, Fˡ, ρᶠ)
 end
 
 # 2-moment with tables: look up μ from Table 1 (mu_i_save)
@@ -770,19 +770,19 @@ separately.
                                 constants, transport, q, μ)
 
     ice_liquid_coupling = (1 + ℒⁱ * dqᵛ⁺ˡ_dT / cᵖᵈ) / abi
-    xx = max(epsc + epsr + epsi * ice_liquid_coupling + epsiw, FT(1e-20))
-    transient = (1 - exp(-xx * τ)) / τ
+    ε_total = max(epsc + epsr + epsi * ice_liquid_coupling + epsiw, FT(1e-20))
+    transient = (1 - exp(-ε_total * τ)) / τ
     ssat_liquid = qᵛ - qᵛ⁺ˡ
-    aaa = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * epsi
+    bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * epsi
 
-    qc_raw = (aaa * epsc / xx + (ssat_liquid - aaa / xx) * epsc / xx * transient) / ab
-    qr_raw = (aaa * epsr / xx + (ssat_liquid - aaa / xx) * epsr / xx * transient) / ab
-    qi_raw = (aaa * epsi / xx + (ssat_liquid - aaa / xx) * epsi / xx * transient) / abi +
+    qc_raw = (bergeron_driver * epsc / ε_total + (ssat_liquid - bergeron_driver / ε_total) * epsc / ε_total * transient) / ab
+    qr_raw = (bergeron_driver * epsr / ε_total + (ssat_liquid - bergeron_driver / ε_total) * epsr / ε_total * transient) / ab
+    qi_raw = (bergeron_driver * epsi / ε_total + (ssat_liquid - bergeron_driver / ε_total) * epsi / ε_total * transient) / abi +
              (qᵛ⁺ˡ - qᵛ⁺ⁱ) * epsi / abi
     # Liquid-on-ice coating uses `ab` (like cloud) since the surface condenses
     # vapor as liquid; no Bergeron contribution because the surface is already
     # at liquid saturation.
-    ql_raw = (aaa * epsiw / xx + (ssat_liquid - aaa / xx) * epsiw / xx * transient) / ab
+    ql_raw = (bergeron_driver * epsiw / ε_total + (ssat_liquid - bergeron_driver / ε_total) * epsiw / ε_total * transient) / ab
 
     sup_liquid = ssat_liquid / max(qᵛ⁺ˡ, FT(1e-30))
     sup_ice = qᵛ / max(qᵛ⁺ⁱ, FT(1e-30)) - 1
@@ -1942,10 +1942,10 @@ end
                                         log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
                                         prp::ProcessRateParameters, sc_correction, p3, μ, μ_cloud, λ_r = nothing) where {M6 <: IceSixthMoment{<:P3Table5D}}
     FT = typeof(ρ)
-    lt1 = lookup_table_1(p3)
-    lt2 = lookup_table_2(p3)
-    sixth = lt1.sixth_moment
-    dep = lt1.deposition
+    ice_table = ice_integrals_table(p3)
+    rain_ice_table = rain_ice_collection_table(p3)
+    sixth = ice_table.sixth_moment
+    dep = ice_table.deposition
 
     inv_nⁱ = safe_divide(one(FT), nⁱ, eps(FT))
 
@@ -1998,7 +1998,7 @@ end
     # --- Riming ---
     z_cloud_rime = sixth.rime(log_m, Fᶠ, Fˡ, ρᶠ, μ)
     z_cloud_rime_rate = z_cloud_rime * rates.cloud_riming * inv_nⁱ
-    z_rain_rime_rate = rain_riming_sixth_moment_tendency(lt2, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
+    z_rain_rime_rate = rain_riming_sixth_moment_tendency(rain_ice_table, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
                                                           rates.rain_riming, inv_nⁱ, z_cloud_rime)
 
     # D31: Wet growth Z contribution.
@@ -2012,7 +2012,7 @@ end
     # - log_LiquidFrac=.FALSE. (lines 3269-3280): zqccol/zqrcol reduced by shedding
     #   fraction (1 - shed/total_collection)
     z_wg_cloud_rate = z_cloud_rime * rates.wet_growth_cloud * inv_nⁱ
-    z_wg_rain_rate = rain_riming_sixth_moment_tendency(lt2, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
+    z_wg_rain_rate = rain_riming_sixth_moment_tendency(rain_ice_table, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
                                                         rates.wet_growth_rain, inv_nⁱ, z_cloud_rime)
     wg_total = rates.wet_growth_cloud + rates.wet_growth_rain
     shed_frac = safe_divide(rates.wet_growth_shedding, max(wg_total, eps(FT)), zero(FT))
@@ -2063,20 +2063,20 @@ end
     return z_cloud_rime * rain_riming * inv_nⁱ
 end
 
-@inline function rain_riming_sixth_moment_tendency(table2::P3LookupTable2, log_m, Fᶠ, Fˡ, ρᶠ, μ,
+@inline function rain_riming_sixth_moment_tendency(rain_ice_table::P3RainIceCollectionTable, log_m, Fᶠ, Fˡ, ρᶠ, μ,
                                                    ::Nothing, rain_riming, inv_nⁱ, z_cloud_rime)
     return z_cloud_rime * rain_riming * inv_nⁱ
 end
 
-@inline function rain_riming_sixth_moment_tendency(table2::P3LookupTable2, log_m, Fᶠ, Fˡ, ρᶠ, μ,
+@inline function rain_riming_sixth_moment_tendency(rain_ice_table::P3RainIceCollectionTable, log_m, Fᶠ, Fˡ, ρᶠ, μ,
                                                    λ_r, rain_riming, inv_nⁱ, z_cloud_rime)
     FT = typeof(log_m)
     log_λ_r = log10(max(FT(λ_r), FT(1e-20)))
-    z_rain_rime = table2.sixth_moment(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)
+    z_rain_rime = rain_ice_table.sixth_moment(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)
     # Fortran convention: zqrcol = N0r × m6collr × env (no 10^f1pr08 factor).
     # Since rain_riming = N0r × ni × env × 10^f1pr08 (mass kernel),
     # divide by the mass kernel to recover: z = m6collr × rain_riming / (ni × mass_kernel).
-    mass_kernel = exp10(table2.mass(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ))
+    mass_kernel = exp10(rain_ice_table.mass(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ))
     inv_mass_kernel = safe_divide(one(FT), mass_kernel, zero(FT))
     return z_rain_rime * rain_riming * inv_nⁱ * inv_mass_kernel
 end

@@ -185,11 +185,11 @@ and the activated fraction is ``N_a / 2 \\, [1 - \\text{erf}(u)]`` where
     s_m = 2 / sqrt(mode.solute_activity) * (A_act / (3 * mode.mean_radius))^FT(1.5)
 
     # Activated fraction via error function
-    # Guard against S ≤ 0: set uu to large positive value → erf(uu) → 1 → N_act → 0
+    # Guard against S ≤ 0: argument → large positive → erf → 1 → N_act → 0
     S_safe = max(S, FT(1e-20))
-    uu = 2 * log(s_m / S_safe) / (FT(4.242) * log(mode.geometric_std))
+    erf_argument = 2 * log(s_m / S_safe) / (FT(4.242) * log(mode.geometric_std))
 
-    return mode.number_mixing_ratio * FT(0.5) * (1 - erf(uu))
+    return mode.number_mixing_ratio * FT(0.5) * (1 - erf(erf_argument))
 end
 
 """

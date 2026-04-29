@@ -1,6 +1,6 @@
-export P3LookupTable1, P3LookupTable2, P3LookupTable3, P3LookupTables
+export P3IceIntegralsTable, P3RainIceCollectionTable, P3ThreeMomentShapeTable, P3LookupTables
 
-struct P3LookupTable1{FS, DP, BP, CL, M6, LL, IR}
+struct P3IceIntegralsTable{FS, DP, BP, CL, M6, LL, IR}
     fall_speed :: FS
     deposition :: DP
     bulk_properties :: BP
@@ -10,20 +10,20 @@ struct P3LookupTable1{FS, DP, BP, CL, M6, LL, IR}
     ice_rain :: IR
 end
 
-struct P3LookupTable2{M, N, Z}
+struct P3RainIceCollectionTable{M, N, Z}
     mass :: M
     number :: N
     sixth_moment :: Z
 end
 
-struct P3LookupTable3{MU, LAM, RHOM}
+struct P3ThreeMomentShapeTable{MU, LAM, RHOM}
     shape :: MU
     slope :: LAM
     mean_density :: RHOM
 end
 
 struct P3LookupTables{LT1, LT2, LT3}
-    table_1 :: LT1
-    table_2 :: LT2
-    table_3 :: LT3
+    ice_integrals :: LT1
+    rain_ice_collection :: LT2
+    three_moment_shape :: LT3
 end
