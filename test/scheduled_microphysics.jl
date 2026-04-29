@@ -212,3 +212,11 @@ end
     @test inline_G.ρθ  ≈ cached_G.ρθ  atol = 1e-12 rtol = 1e-12
     @test inline_G.ρqᵉ ≈ cached_G.ρqᵉ atol = 1e-12 rtol = 1e-12
 end
+
+@testset "show includes microphysics_schedule" begin
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), extent=(100, 100, 100))
+    model = AtmosphereModel(grid; microphysics_schedule = IterationInterval(7))
+    s = sprint(show, model)
+    @test occursin("microphysics_schedule", s)
+    @test occursin("IterationInterval", s)
+end

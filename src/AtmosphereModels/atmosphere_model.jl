@@ -77,6 +77,13 @@ Arguments
      schemes may be provided. `scalar_advection` may be a `NamedTuple` with
      a different scheme for each respective scalar, identified by name.
 
+   * `microphysics_schedule`: optional schedule controlling how often microphysics
+     fires (e.g. `IterationInterval(N)`, `TimeInterval(Δt)`). Defaults to `nothing`
+     (microphysics fires every step). When set, the model allocates cached
+     tendency fields read by the dycore tendency kernels in between firings;
+     on each firing both the operator-split state update and the cache refill
+     see `Δt_eff = clock.time - last_fire_time`.
+
 Example
 =======
 
@@ -347,8 +354,13 @@ function Base.show(io::IO, model::AtmosphereModel)
 
     print(io, "├── forcing: ", forcing_summary, "\n",
               "├── tracers: ", tracernames, "\n",
-              "├── coriolis: ", summary(model.coriolis), "\n",
-              "└── microphysics: ", Mic)
+              "├── coriolis: ", summary(model.coriolis))
+
+    if !isnothing(model.microphysics_schedule)
+        print(io, "\n├── microphysics_schedule: ", model.microphysics_schedule)
+    end
+
+    print(io, "\n└── microphysics: ", Mic)
 end
 
 Advection.cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)
