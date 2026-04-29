@@ -2,7 +2,7 @@ using Breeze
 using Oceananigans
 using Oceananigans.Utils: IterationInterval
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
-using Breeze.Thermodynamics: TetensFormula
+using Breeze.Thermodynamics: TetensFormula, dry_air_gas_constant
 using Test
 
 @testset "Scheduled microphysics: construction [$(FT)]" for FT in test_float_types()
@@ -60,8 +60,8 @@ end
     set!(model.dynamics.reference_state.density, reshape(ρ_prof, 1, 1, Nz))
     set!(model.dynamics.reference_state.pressure, reshape(p_prof, 1, 1, Nz))
 
-    # Supersaturated vapor (ρqᵛ = 0.02 >> saturation ≈ 0.009 at T=288K, p=90kPa),
-    # large cloud water (ρqᶜˡ = 0.01 >> autoconversion threshold 0.001), no rain.
+    # ρqᵛ = 0.02 is initialized well above saturation at the parcel's actual
+    # temperature, and ρqᶜˡ = 0.01 >> autoconversion threshold 0.001, with no rain.
     # In this regime saturation adjustment drives condensation (Δrˢᵃᵗ > 0) so
     # evaporation is suppressed, and the net cloud→rain rate is dominated by
     # autoconversion which is linear in Δt. Rain production therefore scales as 2×
@@ -72,9 +72,13 @@ end
     set!(model.microphysical_fields.ρqʳ,  reshape(zeros(FT, Nz), 1, 1, Nz))
     set!(model.moisture_density, reshape(ρqᵛ_init, 1, 1, Nz))
 
-    # Set θˡⁱ consistent with T ≈ 288 K
+    # Set θˡⁱ consistent with T = 288 K at the reference pressure level.
+    # Π = (p/p₀)^(Rᵈ/cᵖᵈ), θ = T/Π. Use project constants so this tracks
+    # if they change.
     T_init = FT(288)
-    Π = (p_prof[1] / p₀)^(FT(287) / FT(1003))
+    Rᵈ = FT(dry_air_gas_constant(constants))
+    cᵖᵈ = FT(constants.dry_air.heat_capacity)
+    Π = (p_prof[1] / p₀)^(Rᵈ / cᵖᵈ)
     θ_init = T_init / Π
     ρθ_init = fill(FT(1.0) * θ_init, Nz)
     set!(model.formulation.potential_temperature_density, reshape(ρθ_init, 1, 1, Nz))

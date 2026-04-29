@@ -554,7 +554,8 @@ For example, the terminal velocity of falling rain.
 # via the generic fallback mechanism which calls the state-based method.
 
 """
-$(TYPEDSIGNATURES)
+    microphysics_model_update!(microphysics, model::AtmosphereModel)
+    microphysics_model_update!(microphysics, model, Δt_eff)
 
 Apply the operator-split microphysics state update for `microphysics` on `model`.
 The `Δt_eff` argument is the effective integration window — for unscheduled
@@ -563,8 +564,14 @@ the wall-clock interval since the last firing.
 
 Specific microphysics schemes extend the 3-argument form. The 2-argument shim
 forwards `model.clock.last_Δt` so existing call sites keep working.
+
+!!! warning
+    Scheme implementations MUST extend the 3-argument form
+    `microphysics_model_update!(microphysics, model, Δt_eff)`.
+    Do NOT add a 2-argument overload — it would shadow this shim and break
+    scheduled-microphysics call sites that pass an explicit `Δt_eff`.
 """
-microphysics_model_update!(microphysics, model) = microphysics_model_update!(microphysics, model, model.clock.last_Δt)
+function microphysics_model_update! end
 
 microphysics_model_update!(::Nothing, model, Δt_eff) = nothing
 

@@ -9,6 +9,11 @@ using Oceananigans.TurbulenceClosures: compute_closure_fields!
 using Oceananigans.Utils: launch! # , KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
+# 2-argument shim: forwards model.clock.last_Δt so existing call sites keep working.
+# Defined here (after AtmosphereModel) so the ::AtmosphereModel annotation is in scope.
+microphysics_model_update!(microphysics, model::AtmosphereModel) =
+    microphysics_model_update!(microphysics, model, model.clock.last_Δt)
+
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     fix_negative_moisture!(model)  # fix negative moisture from advection
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
