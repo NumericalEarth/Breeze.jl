@@ -26,15 +26,15 @@ A bulk sensible heat flux function. The flux is computed as:
 J = - ρ₀ Cᵀ |U| Δϕ
 ```
 
-where `Cᵀ` is the transfer coefficient, `|U|` is the wind speed, and `Δϕ` is the
+where ``Cᵀ`` is the transfer coefficient, ``|U|`` is the wind speed, and ``Δϕ`` is the
 difference between the near-surface atmospheric value and the surface value of the
 thermodynamic variable appropriate to the formulation:
 
-- For `LiquidIcePotentialTemperatureFormulation`: `Δϕ = θ - θ₀`, where
-  `θ₀ = T₀ / Π₀` and `Π₀ = (p₀ / pˢᵗ)^(Rᵈ / cᵖᵈ)` (potential temperature flux)
-- For `StaticEnergyFormulation`: `Δϕ = e - cᵖᵈ T₀` (static energy flux)
+- For `LiquidIcePotentialTemperatureFormulation`: ``Δϕ = θ - θ₀``, where
+  ``θ₀ = T₀ / Π₀`` and ``Π₀ = (p₀ / pˢᵗ)^(Rᵈ / cᵖᵈ)`` (potential temperature flux)
+- For `StaticEnergyFormulation`: ``Δϕ = e - cᵖᵈ T₀`` (static energy flux)
 
-Here `p₀` is the actual surface pressure, while `pˢᵗ` is the fixed reference pressure
+Here ``p₀`` is the actual surface pressure, while ``pˢᵗ`` is the fixed reference pressure
 used to define potential temperature.
 
 The `formulation` is set automatically during model construction based on the
@@ -46,6 +46,10 @@ thermodynamic formulation.
 - `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
 - `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Functions are converted to Fields during model construction.
+- `filtered_velocities`: Either `nothing` (default) or [`FilteredSurfaceVelocities`](@ref). Note
+                         that when `filtered_velocities` is not `nothing`, then automatically
+                         there is filtering in the scalar fields via [`FilteredSurfaceScalar`](@ref)
+                         with the same parameters (e.g., `height`, `timescale`) as `filtered_velocities`.
 """
 function BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
     return BulkSensibleHeatFluxFunction(coefficient, gustiness, surface_temperature,
@@ -171,7 +175,8 @@ specific humidity, and `qᵛ₀` is the saturation specific humidity at the surf
                          Used to compute saturation specific humidity at the surface.
 - `filtered_velocities`: Either `nothing` (default) or [`FilteredSurfaceVelocities`](@ref). Note
                          that when `filtered_velocities` is not `nothing`, then automatically
-                         there is filtering in the scalar fields via [`FilteredSurfaceScalar`](@ref).
+                         there is filtering in the scalar fields via [`FilteredSurfaceScalar`](@ref)
+                         with the same parameters (e.g., `height`, `timescale`) as `filtered_velocities`.
 """
 function BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
     return BulkVaporFluxFunction(coefficient, gustiness, surface_temperature,
