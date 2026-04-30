@@ -111,7 +111,7 @@ grid = LatitudeLongitudeGrid(GPU();
 ## Temperature profile parameters
 Tᴱ = 310.0   # K — equatorial surface temperature
 Tᴾ = 240.0   # K — polar surface temperature
-Tₘ = (Tᴱ + Tᴾ) / 2
+Tᴹ = (Tᴱ + Tᴾ) / 2
 Γ  = 0.005    # K/m — lapse rate
 K  = 3        # jet width parameter
 b  = 2        # vertical half-width parameter
@@ -124,16 +124,16 @@ b  = 2        # vertical half-width parameter
 
 ## Vertical structure functions (shallow atmosphere, X = 1)
 function τ_and_integrals(z)
-    Hₛ = Rᵈ * Tₘ / g
+    Hₛ = Rᵈ * Tᴹ / g
     η  = z / (b * Hₛ)
     e  = exp(-η^2)
 
-    A = (Tₘ - Tᴾ) / (Tₘ * Tᴾ)
+    A = (Tᴹ - Tᴾ) / (Tᴹ * Tᴾ)
     C = (K + 2) / 2 * (Tᴱ - Tᴾ) / (Tᴱ * Tᴾ)
 
-    τ₁  = exp(Γ * z / Tₘ) / Tₘ + A * (1 - 2η^2) * e
+    τ₁  = exp(Γ * z / Tᴹ) / Tᴹ + A * (1 - 2η^2) * e
     τ₂  = C * (1 - 2η^2) * e
-    ∫τ₁ = (exp(Γ * z / Tₘ) - 1) / Γ + A * z * e
+    ∫τ₁ = (exp(Γ * z / Tᴹ) - 1) / Γ + A * z * e
     ∫τ₂ = C * z * e
 
     return τ₁, τ₂, ∫τ₁, ∫τ₂
@@ -268,8 +268,9 @@ add_callback!(simulation, progress, IterationInterval(50))
 
 # ## Output
 #
-# We save the velocities and the potential-temperature perturbation
-# ``θ′ = θ - θ^{\rm bg}`` for visualization.
+# We save the velocities, the full potential temperature ``θ`` (used to
+# diagnose surface warm/cold sectors during cyclogenesis), and the
+# potential-temperature perturbation ``θ′ = θ - θ^{\rm bg}``.
 
 θ = PotentialTemperature(model)
 
@@ -277,7 +278,7 @@ add_callback!(simulation, progress, IterationInterval(50))
 set!(θ_bg, potential_temperature)
 θ′ = θ - θ_bg
 
-outputs = merge(model.velocities, (; θ′))
+outputs = merge(model.velocities, (; θ, θ′))
 
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
                                               filename = "baroclinic_wave",
@@ -290,22 +291,29 @@ run!(simulation)
 
 # ## Visualization
 #
-# We plot the potential-temperature perturbation ``θ'`` (departure from the
-# equatorial background ``θ^{\rm bg}(z)``) and the zonal wind on the sphere.
+# We plot the potential-temperature perturbation ``θ′`` (departure from the
+# equatorial background ``θ^{\rm bg}(z)``) and the zonal wind at mid-level,
+# and the **surface potential temperature** ``θ_{\rm sfc}`` — the latter is
+# the classic synoptic diagnostic for the cold/warm sectors that develop
+# as the baroclinic wave matures.
 
+θ_ts  = FieldTimeSeries("baroclinic_wave.jld2", "θ")
 θ′_ts = FieldTimeSeries("baroclinic_wave.jld2", "θ′")
 u_ts  = FieldTimeSeries("baroclinic_wave.jld2", "u")
 w_ts  = FieldTimeSeries("baroclinic_wave.jld2", "w")
 times = θ′_ts.times
 Nt = length(times)
 
-# Select the mid-level index for horizontal slices:
+# Select the mid-level index for horizontal slices and the surface level:
 k_mid = Nz ÷ 2
 z_mid = znode(k_mid, grid, Center())
 
+k_sfc = 1
+z_sfc = znode(k_sfc, grid, Center())
+
 # ### Final snapshot on the sphere
 
-fig = Figure(size = (1200, 600))
+fig = Figure(size = (1800, 600))
 sphere_kw = (elevation = π/6, azimuth = -π/2, aspect = :data)
 
 ax1 = Axis3(fig[1, 1];
@@ -318,7 +326,12 @@ ax2 = Axis3(fig[1, 3];
 hm2 = surface!(ax2, view(u_ts[Nt], :, :, k_mid); colormap = :speed, shading = NoShading)
 Colorbar(fig[1, 4], hm2; label = "u (m/s)")
 
-for ax in (ax1, ax2)
+ax3 = Axis3(fig[1, 5];
+            title = "θ at surface, t = $(prettytime(times[Nt]))", sphere_kw...)
+hm3 = surface!(ax3, view(θ_ts[Nt], :, :, k_sfc); colormap = :magenta, shading = NoShading)
+Colorbar(fig[1, 6], hm3; label = "θ (K)")
+
+for ax in (ax1, ax2, ax3)
     hidedecorations!(ax)
     hidespines!(ax)
 end
@@ -327,29 +340,35 @@ current_figure()
 
 # ### Animation
 #
-# Animate the potential-temperature perturbation and the vertical velocity
-# on the sphere over the full simulation:
+# Animate the potential-temperature perturbation and vertical velocity at
+# mid-level alongside the surface potential temperature, over the full
+# simulation:
 
 n = Observable(1)
-θ′n = @lift view(θ′_ts[$n], :, :, k_mid)
-wn  = @lift view(w_ts[$n],  :, :, k_mid)
+θ′n  = @lift view(θ′_ts[$n], :, :, k_mid)
+wn   = @lift view(w_ts[$n],  :, :, k_mid)
+θsfc = @lift view(θ_ts[$n],  :, :, k_sfc)
 
-fig = Figure(size = (1200, 600))
+fig = Figure(size = (1800, 600))
 sphere_kw = (elevation = π/6, azimuth = -π/2, aspect = :data)
 
-title = @lift "z = $(z_mid/1e3) km, t = $(prettytime(times[$n]))"
+title = @lift "t = $(prettytime(times[$n]))"
 
-ax1 = Axis3(fig[1, 1]; title = "θ′", sphere_kw...)
+ax1 = Axis3(fig[1, 1]; title = "θ′ at z = $(z_mid/1e3) km", sphere_kw...)
 hm1 = surface!(ax1, θ′n; colormap = :balance, colorrange = (-2, 2), shading = NoShading)
 Colorbar(fig[1, 2], hm1; label = "θ′ (K)")
 
-ax2 = Axis3(fig[1, 3]; title = "w", sphere_kw...)
+ax2 = Axis3(fig[1, 3]; title = "w at z = $(z_mid/1e3) km", sphere_kw...)
 hm2 = surface!(ax2, wn; colormap = :balance, colorrange = (-1, 1), shading = NoShading)
 Colorbar(fig[1, 4], hm2; label = "w (m/s)")
 
+ax3 = Axis3(fig[1, 5]; title = "θ at surface", sphere_kw...)
+hm3 = surface!(ax3, θsfc; colormap = :magenta, colorrange = (240, 305), shading = NoShading)
+Colorbar(fig[1, 6], hm3; label = "θ (K)")
+
 fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
-for ax in (ax1, ax2)
+for ax in (ax1, ax2, ax3)
     hidedecorations!(ax)
     hidespines!(ax)
 end
