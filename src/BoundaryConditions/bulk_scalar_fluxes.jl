@@ -31,7 +31,7 @@ difference between the near-surface atmospheric value and the surface value of t
 thermodynamic variable appropriate to the formulation:
 
 - For `LiquidIcePotentialTemperatureFormulation`: ``Δϕ = θ - θ₀``, where
-  ``θ₀ = T₀ / Π₀`` and ``Π₀ = (p₀ / pˢᵗ)^(Rᵈ / cᵖᵈ)`` (potential temperature flux)
+  ``θ₀ = T₀ / Π₀`` and ``Π₀ = (p₀ / pˢᵗ)^{Rᵈ / cᵖᵈ}`` (potential temperature flux)
 - For `StaticEnergyFormulation`: ``Δϕ = e - cᵖᵈ T₀`` (static energy flux)
 
 Here ``p₀`` is the actual surface pressure, while ``pˢᵗ`` is the fixed reference pressure
