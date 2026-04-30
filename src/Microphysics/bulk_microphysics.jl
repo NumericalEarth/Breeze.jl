@@ -34,8 +34,8 @@ end
 # use the standard tendency interface, so the model-wide microphysics update is a no-op.
 # We forward to the cloud_formation / saturation-adjustment component to allow specialized
 # cloud formation schemes to hook into the update cycle.
-AtmosphereModels.microphysics_model_update!(bμp::BulkMicrophysics, model) =
-    AtmosphereModels.microphysics_model_update!(bμp.cloud_formation, model)
+AtmosphereModels.microphysics_model_update!(bμp::BulkMicrophysics, model, Δt_eff) =
+    AtmosphereModels.microphysics_model_update!(bμp.cloud_formation, model, Δt_eff)
 
 AtmosphereModels.negative_moisture_correction(bμp::BulkMicrophysics) = bμp.negative_moisture_correction
 
@@ -83,7 +83,7 @@ Base.summary(::NonEquilibriumCloudFormation) = "NonEquilibriumCloudFormation"
 
 # NonEquilibriumCloudFormation uses the standard tendency interface,
 # so the model-wide microphysics update is a no-op.
-AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, model) = nothing
+AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, model, Δt_eff) = nothing
 #####
 ##### Condensate formation models (for non-equilibrium schemes)
 #####
