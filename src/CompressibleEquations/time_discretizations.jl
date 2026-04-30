@@ -159,63 +159,173 @@ stratified ``\\bar\\theta(z)``) PGF off-diagonals make the substep
 operator non-normal with ``\\|U\\|_2 \\gg 1``, and a rest atmosphere
 amplifies ~1.8× per outer step.
 
-Per-substep momentum correction (Baldauf 2010 §2.d, anisotropic):
+Per-substep momentum correction (Klemp, Skamarock & Ha 2018 eq. 36, MPAS form):
 
 ```math
-Δ(ρu)′ = -α_x · ∂_x D , \\quad
-Δ(ρv)′ = -α_y · ∂_y D , \\quad
-Δ(ρw)′ = -α_z · ∂_z D
+Δ(ρu)′ = -γ · ∂_x D , \\quad
+Δ(ρv)′ = -γ · ∂_y D , \\quad
+Δ(ρw)′ = -γ_z · ∂_z D
 ```
 
-with per-direction damping diffusivities
-``α_x = β_d Δx²/Δτ``, ``α_y = β_d Δy²/Δτ``, ``α_z = β_d Δz²/Δτ`` —
-giving a constant explicit-time Courant number ``β_d`` per direction
-that's invariant under Δτ and grid spacing. The combined 3-D
-stability bound is ``2 β_d ≤ 1/2 → β_d ≤ 0.25``; the default
-``β_d = 0.1`` sits well below the bound. Combined with the
-`SplitExplicitTimeDiscretization` default ``\\omega = 0.65``, this
-keeps both the rest atmosphere at machine ε at Δt = 20 s and the
-DCMIP-2016 dry / moist baroclinic waves stable at their production
-``\\Delta t``.
+with a single isotropic horizontal damping diffusivity (mirroring
+MPAS's `coef_divdamp = 2·smdiv·config_len_disp/Δτ`):
+
+```math
+γ = α \\, d^2 / Δτ , \\qquad d^2 \\equiv Δx · Δy ,
+\\qquad γ_z = α \\, Δz² / Δτ .
+```
+
+``α`` is the dimensionless Klemp 2018 coefficient (= MPAS
+`config_smdiv`, default `0.1`). The combined 2-D horizontal
+explicit-time stability bound is ``8α ≤ 2 → α ≤ 0.25``; the default
+sits well below it. Combined with the `SplitExplicitTimeDiscretization`
+default ``\\omega = 0.65``, this keeps both the rest atmosphere at
+machine ε at Δt = 20 s and the DCMIP-2016 dry / moist baroclinic
+waves stable at their production ``\\Delta t``.
 
 Fields
 ======
 
-- `coefficient`: Dimensionless damping coefficient ``β_d``. Default `0.1`.
-  The vertical part is folded into the column tridiag and is
-  unconditionally stable, so this coefficient may be raised above the
-  explicit-time bound `β_d ≤ 0.25` to suppress non-normal transient
-  amplification of the vertical acoustic mode. The horizontal part
-  remains explicit and obeys the usual `2β_d ≤ 1/2` per-direction CFL.
-- `length_scale`: Optional override for the dispersion length
-  ``ℓ_\\mathrm{disp}``. Default `nothing` (auto = anisotropic
-  per-direction grid spacing). Setting `length_scale = ℓ` forces an
-  isotropic ``ν = β_d ℓ² / Δτ``.
-- `reference_temperature`: Reference temperature for
-  ``c_s = \\sqrt{γ^d R^d T_\\mathrm{ref}}``. Default `300` K. The
-  damping is a wavenumber-controlled filter; only the dimensional
-  scale of ``ν`` depends on this — small variations don't matter.
+- `coefficient`: Dimensionless damping coefficient ``α`` (Klemp 2018 /
+  MPAS `config_smdiv`). Default `0.1`. The vertical part is folded into
+  the column tridiag and is unconditionally stable, so this coefficient
+  may be raised above the explicit-time bound `α ≤ 0.25` to suppress
+  non-normal transient amplification of the vertical acoustic mode.
+  The horizontal part remains explicit and obeys the usual `8α ≤ 2`
+  2-D combined CFL.
+- `length_scale`: Optional override for the dispersion length ``d``.
+  Default `nothing` (auto: ``d² = Δx · Δy``). Setting `length_scale = ℓ`
+  forces ``γ = α \\, ℓ² / Δτ``.
+- `damp_vertical`: If `true`, the vertical part of the divergence
+  damping is folded into the column tridiag (a Laplacian on `(ρw)′`).
+  If `false` (default), no extra vertical damping is applied — the
+  vertical acoustic modes are damped solely by the off-centering of the
+  implicit pressure-gradient solve (``\\omega > 0.5``), which Klemp et
+  al. 2018 eq. (32) shows is algebraically equivalent to a vertical
+  divergence damping with diffusivity ``γ_y = c² Δτ s/2`` where
+  ``s = 2\\omega - 1``.
 """
 struct ThermalDivergenceDamping{FT, LS} <: AcousticDampingStrategy
     coefficient :: FT
     length_scale :: LS
-    reference_temperature :: FT
+    damp_vertical :: Bool
 end
 
 function ThermalDivergenceDamping(; coefficient = 0.1,
                                     length_scale = nothing,
-                                    reference_temperature = 300.0)
+                                    damp_vertical = false)
     if length_scale === nothing
-        FT = promote_type(typeof(coefficient), typeof(reference_temperature))
-        return ThermalDivergenceDamping{FT, Nothing}(convert(FT, coefficient), nothing,
-                                                     convert(FT, reference_temperature))
+        FT = typeof(coefficient)
+        return ThermalDivergenceDamping{FT, Nothing}(coefficient, nothing, damp_vertical)
     else
-        FT = promote_type(typeof(coefficient), typeof(length_scale), typeof(reference_temperature))
+        FT = promote_type(typeof(coefficient), typeof(length_scale))
         return ThermalDivergenceDamping{FT, FT}(convert(FT, coefficient),
                                                 convert(FT, length_scale),
-                                                convert(FT, reference_temperature))
+                                                damp_vertical)
     end
 end
+
+"""
+$(TYPEDEF)
+
+4th-order *hyperdiffusive* horizontal divergence damping. Identical in
+structure to [`ThermalDivergenceDamping`](@ref) — the per-substep
+momentum correction is the gradient of a (ρθ)′-tendency proxy divided
+by `θ⁰` at the face — but the proxy is replaced by the **horizontal
+Laplacian** of the (ρθ)′ tendency:
+
+```math
+Δ(ρu)' = +γ · ∂x[\\nabla_h^2 ((ρθ)' - (ρθ)'^{s-})] / θ^0_face
+Δ(ρv)' = +γ · ∂y[\\nabla_h^2 ((ρθ)' - (ρθ)'^{s-})] / θ^0_face
+```
+
+The Laplacian inside makes the operator 4th-order in horizontal
+wavenumber, so its damping rate scales as ``k^4`` rather than the
+``k^2`` of the standard 2nd-order Klemp form. The practical effect is
+that grid-scale noise (`k Δx ≈ π`) is hit ~10× harder while resolved
+features (`k Δx ≈ 0.05`) are barely touched. This is the right tool
+when you want to suppress acoustic noise without polluting the BCI /
+gravity-wave signal at the resolved scales.
+
+The vertical-component handling is the same as `ThermalDivergenceDamping`:
+folded into the column tridiag if `damp_vertical = true`, off otherwise
+(then off-centering supplies vertical damping per Klemp eq. 32).
+
+Fields
+======
+
+- `coefficient`: Dimensionless damping coefficient ``α``. Defined so
+  the actual hyperdiffusivity used in the kernel is
+  ``γ = α · d^4 / Δτ`` with ``d² ≡ Δx · Δy`` — i.e. one extra factor
+  of ``d²`` compared to the 2nd-order Klemp form. With this scaling
+  the per-substep diffusion CFL ``γ Δτ k^4 ≤ 2`` collapses to
+  ``α π^4 ≤ 2``, giving the explicit-stability bound
+  ``α ≤ 2/π^4 ≈ 0.02``. The safe default is therefore an order of
+  magnitude smaller than `ThermalDivergenceDamping`'s ``α = 0.1``.
+  Default `0.001`.
+- `length_scale`: Optional override for the dispersion length;
+  enters as ``γ = α · ℓ^4 / Δτ``.
+- `damp_vertical`: Whether to apply the vertical Laplacian piece in
+  the column tridiag. Default `false`.
+"""
+struct HyperdiffusiveDivergenceDamping{FT, LS} <: AcousticDampingStrategy
+    coefficient :: FT
+    length_scale :: LS
+    damp_vertical :: Bool
+end
+
+function HyperdiffusiveDivergenceDamping(; coefficient = 0.001,
+                                           length_scale = nothing,
+                                           damp_vertical = false)
+    if length_scale === nothing
+        FT = typeof(coefficient)
+        return HyperdiffusiveDivergenceDamping{FT, Nothing}(coefficient, nothing, damp_vertical)
+    else
+        FT = promote_type(typeof(coefficient), typeof(length_scale))
+        return HyperdiffusiveDivergenceDamping{FT, FT}(convert(FT, coefficient),
+                                                        convert(FT, length_scale),
+                                                        damp_vertical)
+    end
+end
+
+"""
+$(TYPEDEF)
+
+Pressure-extrapolation divergence damping (WRF / ERF form). Following
+[Klemp, Skamarock & Ha (2018)](@cite KlempSkamarockHa2018), WRF
+(`smdiv`, `module_small_step_em.F`), and ERF (`beta_d`,
+`ERF_Substep_T.cpp`), this damping does **not** add a post-substep
+correction to horizontal momentum. Instead, it forward-biases the
+``(ρθ)'`` used in the **horizontal** acoustic pressure-gradient force
+of each substep:
+
+```math
+(ρθ)'_\\mathrm{pgf} \\;=\\; (ρθ)' \\;+\\; α \\, ((ρθ)' - (ρθ)'_\\mathrm{lagged})
+```
+
+where ``(ρθ)'_\\mathrm{lagged}`` is the value at the **end of the
+previous substep** (zero at the first substep of an RK stage). For
+acoustic modes oscillating with period ``\\sim 2 Δτ`` the bias is
+large and damps the mode; for slow rotational/balanced modes where
+``(ρθ)'`` barely changes between substeps it's a no-op.
+
+The vertical acoustic tridiag is **not** biased — only the explicit
+horizontal PGF in `_explicit_horizontal_step!` reads the biased field.
+This matches ERF's `theta_extrap`-only-in-horizontal usage; vertical
+damping comes from off-centering (``ω > 1/2``).
+
+Field
+=====
+
+- `coefficient`: dimensionless damping coefficient ``α``. Default `0.1`,
+  matching WRF's `smdiv` and ERF's `beta_d`.
+"""
+struct PressureExtrapolationDamping{FT} <: AcousticDampingStrategy
+    coefficient :: FT
+end
+
+PressureExtrapolationDamping(; coefficient = 0.1) =
+    PressureExtrapolationDamping{typeof(coefficient)}(coefficient)
 
 #####
 ##### Split-explicit time discretization

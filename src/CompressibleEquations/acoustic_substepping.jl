@@ -193,6 +193,14 @@ struct AcousticSubstepper{N, FT, D, AD, CF, FF, XF, YF, GT, TS}
     density_potential_temperature★ictor :: CF
     previous_density_potential_temperature_perturbation :: CF
 
+    # WRF/ERF-style pressure extrapolation damping (Klemp 2018, MPAS smdiv form):
+    # `lagged_*` stores (ρθ)′ at the END of the previous substep (zero at stage start);
+    # `pgf_*` is the forward-biased (ρθ)′ used in the explicit horizontal PGF of
+    # the next substep. For dampings other than `PressureExtrapolationDamping`,
+    # `pgf_*` is just a copy of `(ρθ)′` and `lagged_*` is unused.
+    lagged_density_potential_temperature_perturbation :: CF
+    pgf_density_potential_temperature_perturbation :: CF
+
     slow_vertical_momentum_tendency :: GT
     vertical_solver :: TS
 end
@@ -223,6 +231,8 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.density★ictor),
                        adapt(to, a.density_potential_temperature★ictor),
                        adapt(to, a.previous_density_potential_temperature_perturbation),
+                       adapt(to, a.lagged_density_potential_temperature_perturbation),
+                       adapt(to, a.pgf_density_potential_temperature_perturbation),
                        adapt(to, a.slow_vertical_momentum_tendency),
                        adapt(to, a.vertical_solver))
 
@@ -291,6 +301,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     density★ictor                                = CenterField(grid)
     density_potential_temperature★ictor          = CenterField(grid)
     previous_density_potential_temperature_perturbation = CenterField(grid)
+    lagged_density_potential_temperature_perturbation   = CenterField(grid)
+    pgf_density_potential_temperature_perturbation      = CenterField(grid)
 
     slow_vertical_momentum_tendency = ZFaceField(grid)
 
@@ -326,6 +338,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               density★ictor,
                               density_potential_temperature★ictor,
                               previous_density_potential_temperature_perturbation,
+                              lagged_density_potential_temperature_perturbation,
+                              pgf_density_potential_temperature_perturbation,
                               slow_vertical_momentum_tendency,
                               vertical_solver)
 end
@@ -491,8 +505,8 @@ end
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         Π[i, j, k] = (p[i, j, k] / pˢᵗ)^κ
-        ρ_safe = ifelse(ρ[i, j, k] == 0, one(eltype(ρ)), ρ[i, j, k])
-        θ[i, j, k] = ρθ[i, j, k] / ρ_safe
+        ρ̂ = ifelse(ρ[i, j, k] == 0, one(eltype(ρ)), ρ[i, j, k])
+        θ[i, j, k] = ρθ[i, j, k] / ρ̂
     end
 end
 
@@ -672,21 +686,21 @@ end
 # -------------------------
 # When `damping isa ThermalDivergenceDamping` with `vertical_implicit = true`,
 # the vertical part of the divergence damping is folded into the same tridiag.
-# Reformulating the kernel correction `Δ(ρw)′ = -α_z ∂z D` via the linearized
+# Reformulating the kernel correction `Δ(ρw)′ = -γ_z ∂z D` via the linearized
 # (ρθ)′ continuity equation gives a discrete vertical Laplacian on `(ρw)′`:
 #
-#   (ρw)′_n − ω β_d Δz² ∂z² (ρw)′_n = (ρw)′_o + (1−ω) β_d Δz² ∂z² (ρw)′_o
+#   (ρw)′_n − ω α Δz² ∂z² (ρw)′_n = (ρw)′_o + (1−ω) α Δz² ∂z² (ρw)′_o
 #
-# At face k the −∂z² stencil contributes (with `dᵐ⁺ ≡ ω β_d Δz²`):
+# At face k the −∂z² stencil contributes (with `dᵐ⁺ ≡ ω α Δz²`):
 #
 #   A[k,k+1] += -dᵐ⁺ × rdz_c(k)   / Δzᶠ(k)
 #   A[k,k]   += +dᵐ⁺ × (rdz_c(k) + rdz_c(k-1)) / Δzᶠ(k)
 #   A[k,k-1] += -dᵐ⁺ × rdz_c(k-1) / Δzᶠ(k)
 #
-# The matching `(1−ω) β_d Δz² ∂z² (ρw)′_o` term is added to the predictor's
+# The matching `(1−ω) α Δz² ∂z² (ρw)′_o` term is added to the predictor's
 # right-hand side in `_build★ictors_and_vertical_rhs!`. The constant-Courant
-# scaling `α_z = β_d Δz² / Δτ` makes `dᵐ⁺` and the RHS prefactor independent
-# of Δτ; only `β_d`, `ω`, and the global vertical spacing `grid.z.Δᵃᵃᶜ` enter.
+# scaling `γ_z = α Δz² / Δτ` makes `dᵐ⁺` and the RHS prefactor independent
+# of Δτ; only `α`, `ω`, and the global vertical spacing `grid.z.Δᵃᵃᶜ` enter.
 # When `vertical_implicit = false` (or for `NoDivergenceDamping`), the
 # damping factor passed in is zero and the tridiag reduces to the pure
 # off-centered CN acoustic system above.
@@ -832,6 +846,8 @@ function reset_perturbations!(substepper, grid, arch)
     fill!(parent(substepper.density_perturbation), 0)
     fill!(parent(substepper.density_potential_temperature_perturbation), 0)
     fill!(parent(substepper.previous_density_potential_temperature_perturbation), 0)
+    fill!(parent(substepper.lagged_density_potential_temperature_perturbation), 0)
+    fill!(parent(substepper.pgf_density_potential_temperature_perturbation), 0)
     fill!(parent(substepper.momentum_perturbation_u), 0)
     fill!(parent(substepper.momentum_perturbation_v), 0)
     fill!(parent(substepper.momentum_perturbation_w), 0)
@@ -927,7 +943,7 @@ const BY_grid = AbstractUnderlyingGrid{FT, <:Any, Bounded}                      
 
         # Face-level RHS for `(ρw)′ᵐ⁺` tridiag — split weights for the
         # predictor and old-step contributions per derivation (15).
-        # `dˢ⁻ = (1−ω) β_d Δz²` adds the explicit half of the implicit
+        # `dˢ⁻ = (1−ω) α Δz²` adds the explicit half of the implicit
         # vertical damping (zero when damping is off or vertical_implicit=false).
         for k in 2:Nz
             Δzᶠ   = Δzᶜᶜᶠ(i, j, k, grid)
@@ -944,7 +960,7 @@ const BY_grid = AbstractUnderlyingGrid{FT, <:Any, Bounded}                      
             buoy_force = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★)
 
             # Explicit (old-step) half of the vertical damping
-            # `(1−ω) β_d Δz² ∂z²(ρw)′ˢ⁻`, evaluated at face k. The face-coupling
+            # `(1−ω) α Δz² ∂z²(ρw)′ˢ⁻`, evaluated at face k. The face-coupling
             # stencil matches the implicit half folded into the tridiag in
             # `get_coefficient`.
             ∂z²_ρw′ˢ⁻  = ∂zᶜᶜᶠ(i, j, k, grid, ∂zᶜᶜᶜ, ρw′)
@@ -972,10 +988,8 @@ end
 # θ⁰ · (ρw)′ at a z-face. Used in the vertical part of the perturbation
 # θ-flux divergence; passed to `∂zᶜᶜᶜ` so the divergence is computed at
 # cell centers from the face-located product.
-@inline _theta_face_z_flux(i, j, k, grid, θ⁰, ρw′) =
-    @inbounds ℑbzᵃᵃᶠ(i, j, k, grid, θ⁰) * ρw′[i, j, k]
-
-@inline ℑb_wθ(i, j, k, w, θ) = @inbounds w[i, j, k] * ℑbzᵃᵃᶠ(i, j, k, grid, θ⁰)
+@inline _theta_face_z_flux(i, j, k, grid, θ⁰, ρw′) = @inbounds ℑbzᵃᵃᶠ(i, j, k, grid, θ⁰) * ρw′[i, j, k]
+@inline ℑb_wθ(i, j, k, grid, w, θ) = @inbounds w[i, j, k] * ℑbzᵃᵃᶠ(i, j, k, grid, θ)
 
 # Post-solve recovery: substitute the tridiag-solved `(ρw)′ᵐ⁺` back
 # into the `ρ′★`, `ρθ′★` predictors to get `ρ′ᵐ⁺`, `ρθ′ᵐ⁺`
@@ -984,17 +998,10 @@ end
 #   ρ′_n(k)    = ρ′★(k)  - (δτᵐ⁺ / Δz_c(k)) · ((ρw)′_n(k+1) - (ρw)′_n(k))
 #   (ρθ)′_n(k) = ρθ′★(k) - (δτᵐ⁺ / Δz_c(k)) · (θ⁰_face(k+1) (ρw)′_n(k+1)
 #                                                    - θ⁰_face(k)   (ρw)′_n(k))
-@kernel function _post_solve_recovery!(ρ′, ρθ′, ρw′, ρ′★, ρθ′★,
-                                        grid, δτᵐ⁺, θ⁰)
-    i, j = @index(Global, NTuple)
-    Nz = size(grid, 3)
-
-    @inbounds begin
-        for k in 1:Nz
-            ρ′[i, j, k] = ρ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, ρw′)
-            ρθ′[i, j, k] = ρθ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, ℑb_wθ, ρw′, θ⁰)
-        end
-    end
+@kernel function _post_solve_recovery!(ρ′, ρθ′, ρw′, ρ′★, ρθ′★, grid, δτᵐ⁺, θ⁰)
+    i, j, k = @index(Global, NTuple)
+    ρ′[i, j, k] = ρ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, ρw′)
+    ρθ′[i, j, k] = ρθ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, ℑb_wθ, ρw′, θ⁰)
 end
 
 #####
@@ -1002,100 +1009,207 @@ end
 #####
 
 # No-op default
-@inline apply_divergence_damping!(::NoDivergenceDamping, substepper, grid, Δτ,
-                                  thermodynamic_constants) = nothing
+@inline apply_divergence_damping!(::NoDivergenceDamping, args...) = nothing
 
 # Implicit-vertical-damping prefactors threaded into the column tridiag and
-# its RHS. Returns `(dᵐ⁺, dˢ⁻) = (ω, 1−ω) · β_d · Δz²` for
-# `ThermalDivergenceDamping`, and `(0, 0)` for `NoDivergenceDamping` —
-# which makes the tridiag and predictor-RHS additions vanish, recovering
-# the pure off-centered CN acoustic system.
+# its RHS. Returns `(dᵐ⁺, dˢ⁻) = (ω, 1−ω) · α · Δz²` for
+# `ThermalDivergenceDamping` with `damp_vertical = true`, and `(0, 0)` for
+# `NoDivergenceDamping` or when the user opts out via `damp_vertical = false`
+# — which makes the tridiag and predictor-RHS additions vanish, recovering
+# the pure off-centered CN acoustic system. In the latter case the off-
+# centering itself supplies the vertical damping (Klemp et al. 2018 eq. 32).
 @inline _implicit_damping_factors(::AcousticDampingStrategy, ω, one_minus_ω, grid, FT) =
     (zero(FT), zero(FT))
 
-@inline function _implicit_damping_factors(damping::ThermalDivergenceDamping,
-                                           ω, one_minus_ω, grid, FT)
-    β_d = convert(FT, damping.coefficient)
-    Δz  = convert(FT, minimum_zspacing(grid))
-    base = β_d * Δz^2
+@inline function _implicit_damping_factors(damping::ThermalDivergenceDamping, ω, one_minus_ω, grid, FT)
+    damping.damp_vertical || return (zero(FT), zero(FT))
+    α    = convert(FT, damping.coefficient)
+    Δz   = convert(FT, minimum_zspacing(grid))
+    base = α * Δz^2
     return (convert(FT, ω) * base, convert(FT, one_minus_ω) * base)
 end
 
-# Klemp-Skamarock-Ha (2018) / Skamarock-Klemp (1992) / Baldauf (2010)
-# 3-D acoustic divergence damping. In the linearized acoustic mode,
+# `HyperdiffusiveDivergenceDamping` reuses the same vertical-tridiag
+# Laplacian as the 2nd-order Klemp form when `damp_vertical = true`.
+@inline function _implicit_damping_factors(damping::HyperdiffusiveDivergenceDamping, ω, one_minus_ω, grid, FT)
+    damping.damp_vertical || return (zero(FT), zero(FT))
+    α    = convert(FT, damping.coefficient)
+    Δz   = convert(FT, minimum_zspacing(grid))
+    base = α * Δz^2
+    return (convert(FT, ω) * base, convert(FT, one_minus_ω) * base)
+end
+
+# Klemp, Skamarock & Ha (2018) 3-D acoustic divergence damping (MPAS form).
+# In the linearized acoustic mode,
 #   (ρθ)′ − (ρθ)′ˢ⁻ ≈ −Δτ · θ⁰ · ∇·((ρu)′, (ρv)′, (ρw)′)
-# so D ≡ ((ρθ)′ − (ρθ)′ˢ⁻) / θ⁰ is a discrete proxy for
-# −Δτ · ∇·(ρu)′. The per-substep momentum correction is
-#   Δ(ρu)′ = −α_x · ∂x D , Δ(ρv)′ = −α_y · ∂y D , Δ(ρw)′ = −α_z · ∂z D
-# with **anisotropic** damping diffusivities (Baldauf 2010 §2.d):
-#   α_x = β_d · Δx² / Δτ ,  α_y = β_d · Δy² / Δτ ,  α_z = β_d · Δz² / Δτ
-# This gives a constant explicit-time Courant number `β_d` per
-# direction, independent of Δτ and grid spacing — the right scaling
-# across the wide Δτ ranges Breeze users hit (Δτ ~ 1 s for small Δt,
-# ~ 40 s for production lat-lon). Linear stability of the explicit
-# forward-Euler step gives an amplification factor
-#   A(k) = 1 − 4 β_d × Σᵢ sin²(kᵢ Δxᵢ / 2)
-# whose worst case (Nyquist excited in all three directions) is
-# `12 β_d ≤ 2 → β_d ≤ 1/6 ≈ 0.167`. The 2-D bound (worst case excited
-# in only two directions, e.g., lat-lon with Δz ≪ Δx so vertical
-# Nyquist is suppressed) is `8 β_d ≤ 2 → β_d ≤ 1/4`. We default to
-# `β_d = 0.1` for margin against the strict 3-D bound.
-# The vertical component is essential: without it the rest atmosphere
-# amplifies at (Δt = 20 s, ω = 0.55) because the column tridiag's
-# buoyancy off-diagonals are anti-symmetric.
-function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, Δτ,
-                                   thermodynamic_constants)
+# so D ≡ ((ρθ)′ − (ρθ)′ˢ⁻) / θ⁰ is a discrete proxy for −Δτ · ∇·(ρu)′.
+# The per-substep momentum correction is
+#   Δ(ρu)′ = −γ · ∂x D , Δ(ρv)′ = −γ · ∂y D , Δ(ρw)′ = −γ_z · ∂z D
+# with a single isotropic horizontal diffusivity (mirroring MPAS's
+# `coef_divdamp = 2·smdiv·config_len_disp/Δτ`):
+#   γ = α · d² / Δτ ,    d² ≡ Δx · Δy
+#   γ_z = α · Δz² / Δτ   (folded into the column tridiag)
+# `α` is the dimensionless Klemp 2018 coefficient (`config_smdiv` in MPAS,
+# default 0.1). Linear stability of the explicit forward-Euler horizontal
+# step gives `A(k) = 1 − 4α · Σᵢ sin²(kᵢ Δxᵢ/2)`; worst case (2-D Nyquist)
+# is `8α ≤ 2 → α ≤ 0.25`; we default to 0.1 for margin. The vertical
+# component is essential — without it the rest atmosphere amplifies at
+# (Δt = 20 s, ω = 0.55) because the column tridiag's buoyancy off-diagonals
+# are anti-symmetric.
+function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
     FT    = eltype(grid)
     arch  = architecture(grid)
-    β_d   = convert(FT, damping.coefficient)
+    α     = convert(FT, damping.coefficient)
     Δτ_FT = convert(FT, Δτ)
 
     TX, TY, _ = topology(grid)
     Δx = TX === Flat ? zero(FT) : convert(FT, minimum_xspacing(grid))
     Δy = TY === Flat ? zero(FT) : convert(FT, minimum_yspacing(grid))
 
-    # Horizontal damping coefficients only — the vertical part is folded
-    # into the column tridiag and its RHS via `_implicit_damping_factors`.
-    if damping.length_scale === nothing
-        αx = β_d * Δx^2 / Δτ_FT
-        αy = β_d * Δy^2 / Δτ_FT
-    else
-        ℓ = convert(FT, damping.length_scale)
-        ν = β_d * ℓ^2 / Δτ_FT
-        αx = TX === Flat ? zero(FT) : ν
-        αy = TY === Flat ? zero(FT) : ν
-    end
+    # Single isotropic horizontal diffusivity, MPAS-style. Vertical part
+    # is folded into the column tridiag via `_implicit_damping_factors`.
+    d² = damping.length_scale === nothing ? Δx * Δy : convert(FT, damping.length_scale)^2
+    γ  = (TX === Flat && TY === Flat) ? zero(FT) : α * d² / Δτ_FT
 
     launch!(arch, grid, :xyz, _thermal_divergence_damping!,
-            substepper.momentum_perturbation_u, substepper.momentum_perturbation_v,
+            substepper.momentum_perturbation_u,
+            substepper.momentum_perturbation_v,
             substepper.density_potential_temperature_perturbation,
             substepper.previous_density_potential_temperature_perturbation,
             substepper.outer_step_potential_temperature,
-            grid, αx, αy)
+            grid, γ)
+
     return nothing
 end
 
-@inline _dρθ′_over_θ(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θ⁰) =
+# Hyperdiffusive (4th-order) variant. Same isotropic-horizontal scaling as
+# the 2nd-order form but with one extra factor of d²:
+#   γ = α · d⁴ / Δτ ,    d² ≡ Δx · Δy
+# Stability bound is tighter (~`α ≤ 2/π⁴ ≈ 0.02`) since the explicit forward-
+# Euler bound on `α k⁴` Nyquist is `α · π⁴ · 2 ≤ 2`.
+function apply_divergence_damping!(damping::HyperdiffusiveDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)                                  
+    FT    = eltype(grid)
+    arch  = architecture(grid)
+    α     = convert(FT, damping.coefficient)
+    Δτ_FT = convert(FT, Δτ)
+
+    TX, TY, _ = topology(grid)
+    Δx = TX === Flat ? zero(FT) : convert(FT, minimum_xspacing(grid))
+    Δy = TY === Flat ? zero(FT) : convert(FT, minimum_yspacing(grid))
+
+    d² = damping.length_scale === nothing ? Δx * Δy : convert(FT, damping.length_scale)^2
+    γ  = (TX === Flat && TY === Flat) ? zero(FT) : α * d²^2 / Δτ_FT
+
+    launch!(arch, grid, :xyz, _hyperdiffusive_divergence_damping!,
+            substepper.momentum_perturbation_u,
+            substepper.momentum_perturbation_v,
+            substepper.density_potential_temperature_perturbation,
+            substepper.previous_density_potential_temperature_perturbation,
+            substepper.outer_step_potential_temperature,
+            grid, γ)
+
+    return nothing
+end
+
+@inline dρθ′_over_θ(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θ⁰) =
     @inbounds (ρθ′[i, j, k] - ρθ′ˢ⁻[i, j, k]) / θ⁰[i, j, k]
 
-# 3-D anisotropic Klemp / Skamarock-Klemp 1992 / Baldauf 2010 divergence
-# damping. Per-substep momentum correction:
-#   Δ(ρu)′ = −α_x · ∂x[((ρθ)′ − (ρθ)′ˢ⁻) / θ⁰]
-#   Δ(ρv)′ = −α_y · ∂y[((ρθ)′ − (ρθ)′ˢ⁻) / θ⁰]
-#   Δ(ρw)′ = −α_z · ∂z[((ρθ)′ − (ρθ)′ˢ⁻) / θ⁰]
-# The vertical component is the missing piece that damps the vertical
-# acoustic modes responsible for the rest-atmosphere blow-up at
-# (Δt = 20 s, ω = 0.55) without divergence damping.
-@kernel function _thermal_divergence_damping!(ρu′, ρv′, ρθ′, ρθ′ˢ⁻, θ⁰, grid, αx, αy)
+@inline dρθ′(i, j, k, grid, ρθ′, ρθ′ˢ⁻) = @inbounds ρθ′[i, j, k] - ρθ′ˢ⁻[i, j, k]
+
+
+# Horizontal divergence damping in the form of Klemp, Skamarock & Ha (2018)
+# eq. (36): per-substep momentum correction is the gradient of the (ρθ)′
+# tendency, divided by θ⁰ at the face,
+#   Δ(ρu)′ = −γ · ∂x[(ρθ)′ − (ρθ)′ˢ⁻] / ℑxᶠᵃᵃ(θ⁰)
+#   Δ(ρv)′ = −γ · ∂y[(ρθ)′ − (ρθ)′ˢ⁻] / ℑyᵃᶠᵃ(θ⁰)
+# The vertical component lives in the column tridiag (it's a Laplacian on
+# (ρw)′ folded into the implicit acoustic solve), not here.
+@kernel function _thermal_divergence_damping!(ρu′, ρv′, ρθ′, ρθ′ˢ⁻, θ⁰, grid, γ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, _dρθ′_over_θ, ρθ′, ρθ′ˢ⁻, θ⁰)
-        ρu′[i, j, k] -= αx * ∂x_div * !on_x_boundary(i, j, k, grid)
+        ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
+        θ⁰ᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θ⁰)
+        ρu′[i, j, k] -= γ * ∂x_div / θ⁰ᶠᶜᶜ * !on_x_boundary(i, j, k, grid)
 
-        ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, _dρθ′_over_θ, ρθ′, ρθ′ˢ⁻, θ⁰)
-        ρv′[i, j, k] -= αy * ∂y_div * !on_y_boundary(i, j, k, grid)
+        ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
+        θ⁰ᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θ⁰)
+        ρv′[i, j, k] -= γ * ∂y_div / θ⁰ᶜᶠᶜ * !on_y_boundary(i, j, k, grid)
     end
+end
+
+# Hyperdiffusive (4th-order) horizontal divergence damping. Same structure
+# as the 2nd-order Klemp form above, but the proxy is the *horizontal
+# Laplacian* of the (ρθ)′ tendency:
+#   Δ(ρu)′ = +γ · ∂x[∇_h²((ρθ)′ − (ρθ)′ˢ⁻)] / ℑxᶠᵃᵃ(θ⁰)
+#   Δ(ρv)′ = +γ · ∂y[∇_h²((ρθ)′ − (ρθ)′ˢ⁻)] / ℑyᵃᶠᵃ(θ⁰)
+# Note the sign: ∇_h² introduces a `−k²` for plane waves, flipping the
+# overall sign relative to the 2nd-order Klemp form (which has `−γ ∂x[…]`).
+# With the `+γ` here, the spectral form `Δ(ρu)′ ∝ −γ k² (k_x² + k_y²) (ρu)′`
+# is *negative-definite* — i.e. damping. Damping rate ∝ k⁴ instead of k²,
+# so grid-scale modes are hit much harder than resolved scales.
+@kernel function _hyperdiffusive_divergence_damping!(ρu′, ρv′, ρθ′, ρθ′ˢ⁻, θ⁰, grid, γ)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        ∂x_lap = ∂xᶠᶜᶜ(i, j, k, grid, ∇²h_dρθ′, ρθ′, ρθ′ˢ⁻)
+        θ⁰ᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θ⁰)
+        ρu′[i, j, k] += γ * ∂x_lap / θ⁰ᶠᶜᶜ * !on_x_boundary(i, j, k, grid)
+
+        ∂y_lap = ∂yᶜᶠᶜ(i, j, k, grid, ∇²h_dρθ′, ρθ′, ρθ′ˢ⁻)
+        θ⁰ᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θ⁰)
+        ρv′[i, j, k] += γ * ∂y_lap / θ⁰ᶜᶠᶜ * !on_y_boundary(i, j, k, grid)
+    end
+end
+
+@inline ∇²h_dρθ′(i, j, k, grid, ρθ′, ρθ′ˢ⁻) =
+    ∇²hᶜᶜᶜ(i, j, k, grid, ρθ′) - ∇²hᶜᶜᶜ(i, j, k, grid, ρθ′ˢ⁻)
+
+# Pressure-extrapolation damping (WRF/ERF). The post-substep momentum
+# correction is a no-op; the damping enters by forward-biasing the
+# (ρθ)′ used in the explicit horizontal PGF (`prepare_pgf_rhotheta!`).
+@inline apply_divergence_damping!(::PressureExtrapolationDamping, substepper, grid, Δτ,
+                                  thermodynamic_constants) = nothing
+
+# Default: the PGF reads the un-biased (ρθ)′. Implemented as a copy so
+# the explicit-horizontal-step kernel can always read from the same
+# `pgf_*` field regardless of damping strategy.
+@inline function prepare_pgf_rhotheta!(::AcousticDampingStrategy, substepper, grid, FT)
+    parent(substepper.pgf_density_potential_temperature_perturbation) .=
+        parent(substepper.density_potential_temperature_perturbation)
+    return nothing
+end
+
+# WRF/ERF pre-substep PGF bias:
+#   (ρθ)′_pgf = (ρθ)′ + α · ((ρθ)′ - (ρθ)′_lagged)
+# `(ρθ)′_lagged` is the value at the END of the previous substep; zero
+# at the first substep of an RK stage (set by `reset_perturbations!`).
+function prepare_pgf_rhotheta!(damping::PressureExtrapolationDamping, substepper, grid, FT)
+    α = convert(FT, damping.coefficient)
+    arch = architecture(grid)
+    launch!(arch, grid, :xyz, _bias_pgf_rhotheta!,
+            substepper.pgf_density_potential_temperature_perturbation,
+            substepper.density_potential_temperature_perturbation,
+            substepper.lagged_density_potential_temperature_perturbation,
+            α)
+    fill_halo_regions!(substepper.pgf_density_potential_temperature_perturbation)
+    return nothing
+end
+
+@kernel function _bias_pgf_rhotheta!(ρθ_pgf, ρθ′, ρθ_lagged, α)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ρθ_pgf[i, j, k] = ρθ′[i, j, k] + α * (ρθ′[i, j, k] - ρθ_lagged[i, j, k])
+end
+
+# Snapshot (ρθ)′ at the END of a substep so the next substep's
+# `prepare_pgf_rhotheta!` sees it as the lagged value. No-op for
+# damping strategies that don't use the lagged snapshot.
+@inline update_lagged_rhotheta!(::AcousticDampingStrategy, substepper) = nothing
+
+@inline function update_lagged_rhotheta!(::PressureExtrapolationDamping, substepper)
+    parent(substepper.lagged_density_potential_temperature_perturbation) .=
+        parent(substepper.density_potential_temperature_perturbation)
+    return nothing
 end
 
 #####
@@ -1131,13 +1245,13 @@ end
         ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
         ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
         ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-        ρ_x_safe = ifelse(ρᶠᶜᶜ == 0, one(ρᶠᶜᶜ), ρᶠᶜᶜ)
-        ρ_y_safe = ifelse(ρᶜᶠᶜ == 0, one(ρᶜᶠᶜ), ρᶜᶠᶜ)
-        ρ_z_safe = ifelse(ρᶜᶜᶠ == 0, one(ρᶜᶜᶠ), ρᶜᶜᶠ)
+        ρ̂ᶠᶜᶜ = ifelse(ρᶠᶜᶜ == 0, one(ρᶠᶜᶜ), ρᶠᶜᶜ)
+        ρ̂ᶜᶠᶜ = ifelse(ρᶜᶠᶜ == 0, one(ρᶜᶠᶜ), ρᶜᶠᶜ)
+        ρ̂ᶜᶜᶠ = ifelse(ρᶜᶜᶠ == 0, one(ρᶜᶜᶠ), ρᶜᶜᶠ)
 
-        vel.u[i, j, k] = ρuᵐ⁺ / ρ_x_safe * !on_x_boundary(i, j, k, grid)
-        vel.v[i, j, k] = ρvᵐ⁺ / ρ_y_safe * !on_y_boundary(i, j, k, grid)
-        vel.w[i, j, k] = ρwᵐ⁺ / ρ_z_safe * (k > 1)
+        vel.u[i, j, k] = ρuᵐ⁺ / ρ̂ᶠᶜᶜ * !on_x_boundary(i, j, k, grid)
+        vel.v[i, j, k] = ρvᵐ⁺ / ρ̂ᶜᶠᶜ * !on_y_boundary(i, j, k, grid)
+        vel.w[i, j, k] = ρwᵐ⁺ / ρ̂ᶜᶜᶠ * (k > 1)
     end
 end
 
@@ -1186,11 +1300,19 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
 
     # Substep loop
     for substep in 1:Nτ
-        # Step A: explicit horizontal forward of (ρu)′, (ρv)′ using current (ρθ)′
+        # Step A.0: build the (ρθ)′ used in the explicit horizontal PGF.
+        # For `PressureExtrapolationDamping` (WRF/ERF form), this is the
+        # forward-biased (ρθ)′ = (ρθ)′ + α·((ρθ)′ - (ρθ)′_lagged); for all
+        # other damping strategies it's just a copy of (ρθ)′.
+        prepare_pgf_rhotheta!(substepper.damping, substepper, grid, FT)
+
+        # Step A: explicit horizontal forward of (ρu)′, (ρv)′ using the
+        # PGF (ρθ)′ (biased or not).
         launch!(arch, grid, :xyz, _explicit_horizontal_step!,
-                substepper.momentum_perturbation_u, substepper.momentum_perturbation_v,
+                substepper.momentum_perturbation_u,
+                substepper.momentum_perturbation_v,
                 grid, FT(Δτ),
-                substepper.density_potential_temperature_perturbation,
+                substepper.pgf_density_potential_temperature_perturbation,
                 substepper.outer_step_exner,
                 substepper.pressure_perturbation,
                 Gⁿ.ρu, Gⁿ.ρv, substepper.outer_step_gamma_R_mixture)
@@ -1213,8 +1335,8 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         # Implicit-vertical-damping prefactors. When the damping strategy
         # is `ThermalDivergenceDamping(vertical_implicit=true)`, the
         # vertical part of the divergence damping is folded into the
-        # tridiag with `dᵐ⁺ = ω·β_d·Δz²` on the LHS and
-        # `dˢ⁻ = (1−ω)·β_d·Δz²` on the predictor RHS. Both reduce to
+        # tridiag with `dᵐ⁺ = ω·α·Δz²` on the LHS and
+        # `dˢ⁻ = (1−ω)·α·Δz²` on the predictor RHS. Both reduce to
         # zero for `NoDivergenceDamping` or when the user opts out via
         # `vertical_implicit=false`.
         dᵐ⁺, dˢ⁻ = _implicit_damping_factors(substepper.damping, ω, one_minus_ω, grid, FT)
@@ -1222,7 +1344,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         # Step B: build predictors `ρ′★`, `ρθ′★` and the tridiag RHS for (ρw)′ᵐ⁺
         launch!(arch, grid, :xy, _build_predictors_and_vertical_rhs!,
                 substepper.momentum_perturbation_w,
-                substepper.density_predictor,
+                substepper.density★ictor,
                 substepper.density_potential_temperature★ictor,
                 substepper.density_perturbation,
                 substepper.density_potential_temperature_perturbation,
@@ -1241,7 +1363,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                substepper.outer_step_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺)
 
         # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′
-        launch!(arch, grid, :xy, _post_solve_recovery!,
+        launch!(arch, grid, :xyz, _post_solve_recovery!,
                 substepper.density_perturbation,
                 substepper.density_potential_temperature_perturbation,
                 substepper.momentum_perturbation_w,
@@ -1253,14 +1375,17 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         fill_halo_regions!(substepper.density_perturbation)
         fill_halo_regions!(substepper.density_potential_temperature_perturbation)
 
-        # Step E: optional Klemp 2018 damping
+        # Step E: optional Klemp 2018 post-substep damping (no-op for
+        # `PressureExtrapolationDamping`, which damps via the PGF bias instead).
         apply_divergence_damping!(substepper.damping, substepper, grid, FT(Δτ),
                                   model.thermodynamic_constants)
 
-        fill_halo_regions!(substepper.density_potential_temperature_perturbation)
-        fill_halo_regions!(substepper.density_perturbation)
         fill_halo_regions!(substepper.momentum_perturbation_u)
         fill_halo_regions!(substepper.momentum_perturbation_v)
+
+        # Step F: snapshot end-of-substep (ρθ)′ for the WRF/ERF PGF bias of
+        # the next substep. No-op when the damping doesn't use it.
+        update_lagged_rhotheta!(substepper.damping, substepper)
     end
 
     # Stage-end: recover the full prognostic state for use in the next

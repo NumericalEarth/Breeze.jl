@@ -27,7 +27,8 @@ export
     AcousticDampingStrategy,
     NoDivergenceDamping,
     ThermalDivergenceDamping,
-    ThermodynamicDivergenceDamping,
+    HyperdiffusiveDivergenceDamping,
+    PressureExtrapolationDamping,
     ExplicitTimeStepping,
     PrescribedDensity,
     PrescribedDynamics,
@@ -225,7 +226,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AcousticOuterScheme, WickerSkamarock3,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping,
-                              ThermodynamicDivergenceDamping,
+                              HyperdiffusiveDivergenceDamping, PressureExtrapolationDamping,
                               ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")
