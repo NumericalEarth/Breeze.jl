@@ -124,7 +124,7 @@ Perturbation prognostics (advanced inside the substep loop):
 
 Per-column scratch (column kernel only):
 
-- `density_predictor`, `density_potential_temperaturepredictor`: explicit
+- `density_predictor`, `density_potential_temperature_predictor`: explicit
   predictors built before the implicit vertical solve.
 - `previous_density_potential_temperature_perturbation`: ``η`` from the
   previous substep, used by Klemp 2018 damping.
@@ -142,42 +142,34 @@ struct AcousticSubstepper{N, FT, D, AD, CF, FF, XF, YF, GT, TS}
     damping :: D
     substep_distribution :: AD
 
-    # Recovery base — FROZEN at outer-step start. Used by
-    # `_recover_full_state!` to compute Uᵐ⁺ = U_recovery + (ρ′, (ρθ)′, (ρu)′, (ρv)′, (ρw)′).
-    # Required by Wicker–Skamarock RK3 which integrates each stage from
-    # the SAME outer-step-start Uᴸ.
-    recovery_density :: CF
-    recovery_density_potential_temperature :: CF
-
-    # Linearization basic state — REFRESHED at each WS-RK3 stage from the
-    # current model state ``U^{(k-1)}``. This keeps the linearized
-    # operators (γRᵐ Π ∂(ρθ)′, g·ρ′, ∂x(p − pᵣ)) consistent with the slow
-    # tendency `Gⁿ` (also evaluated at U^{(k-1)}) and breaks the soft
-    # outer-step CFL limit Δt ≲ Δx/cs.
+    # Linearization basic state ``Uᴸ`` — used by the substep kernels for
+    # PGF coefficients, the (ρθ)' flux divergence in the column kernel,
+    # and the buoyancy split in the slow vertical-momentum tendency.
+    # `linearization_density`, `linearization_density_potential_temperature`,
+    # and `linearization_pressure` snapshot the state these are derived
+    # from; they also serve as the **recovery base** for ρ and ρθ in
+    # `_recover_full_state!`. Momentum recovery uses `model.momentum.*`
+    # at stage entry directly (no snapshot needed since momentum doesn't
+    # enter the substep equations as a reference state). Refreshing all
+    # of these at each WS-RK3 stage is the SK08-faithful design;
+    # currently they're frozen at outer-step start (refresh is wired in
+    # but disabled — see `prepare_acoustic_cache!`).
     linearization_density :: CF
     linearization_density_potential_temperature :: CF
     linearization_pressure :: CF
     linearization_exner :: CF
     linearization_potential_temperature :: CF
 
-    # Moist basic state — snapshotted at outer-step start. Used by the
-    # moist-aware linearization (Phase 3 of PRISTINE_SUBSTEPPER_PLAN.md
-    # §A3/B1/B2) to evaluate ``Rᵐᴸ, γᵐᴸ, μᵥᴸ`` per cell. For dry runs the
-    # three mass-fraction fields are zero; γᵐRᵐᴸ collapses to γᵈRᵈ and
-    # μᵥᴸ collapses to 1 — the linearization reduces exactly to the dry case.
+    # Moist linearization state — snapshotted along with the dry fields.
+    # For dry runs the three mass-fraction fields are zero; γᵐRᵐᴸ
+    # collapses to γᵈRᵈ — the linearization reduces exactly to the dry case.
     linearization_vapor_mass_fraction :: CF
     linearization_liquid_mass_fraction :: CF
     linearization_ice_mass_fraction :: CF
 
-    # Derived from the moist mass fractions:
-    # `linearization_gamma_R_mixture[i,j,k] = γᵐ(i,j,k) · Rᵐ(i,j,k)` enters the
-    # linearised PGF (`γᵈRᵈ → γᵐRᵐᴸ`) — Phase 2A of the moist substepper.
-    # `linearization_virtual_density_factor[i,j,k] = μᵥᴸ(i,j,k)` is precomputed
-    # for use by future moist refinements but is *not* used in the buoyancy
-    # term: the conservation-form momentum equation has `g·ρ` (total density),
-    # so a virtual-density multiplier on `g·ρ` would be incorrect.
+    # `linearization_gamma_R_mixture[i,j,k] = γᵐ(i,j,k) · Rᵐ(i,j,k)` enters
+    # the linearised PGF (`γᵈRᵈ → γᵐRᵐᴸ`) — Phase 2A of the moist substepper.
     linearization_gamma_R_mixture :: CF
-    linearization_virtual_density_factor :: CF
 
     # Reference-subtracted pressure perturbation, p − pᵣ (= p when no
     # reference). Refreshed each stage along with linearization_pressure.
@@ -190,7 +182,7 @@ struct AcousticSubstepper{N, FT, D, AD, CF, FF, XF, YF, GT, TS}
     momentum_perturbation_v :: YF
 
     density_predictor :: CF
-    density_potential_temperaturepredictor :: CF
+    density_potential_temperature_predictor :: CF
     previous_density_potential_temperature_perturbation :: CF
 
     # WRF/ERF-style pressure extrapolation damping (Klemp 2018, MPAS smdiv form):
@@ -215,8 +207,6 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        a.forward_weight,
                        adapt(to, a.damping),
                        a.substep_distribution,
-                       adapt(to, a.recovery_density),
-                       adapt(to, a.recovery_density_potential_temperature),
                        adapt(to, a.linearization_density),
                        adapt(to, a.linearization_density_potential_temperature),
                        adapt(to, a.linearization_pressure),
@@ -226,7 +216,6 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.linearization_liquid_mass_fraction),
                        adapt(to, a.linearization_ice_mass_fraction),
                        adapt(to, a.linearization_gamma_R_mixture),
-                       adapt(to, a.linearization_virtual_density_factor),
                        adapt(to, a.pressure_perturbation),
                        adapt(to, a.density_perturbation),
                        adapt(to, a.density_potential_temperature_perturbation),
@@ -234,7 +223,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.momentum_perturbation_u),
                        adapt(to, a.momentum_perturbation_v),
                        adapt(to, a.density_predictor),
-                       adapt(to, a.density_potential_temperaturepredictor),
+                       adapt(to, a.density_potential_temperature_predictor),
                        adapt(to, a.previous_density_potential_temperature_perturbation),
                        adapt(to, a.lagged_density_potential_temperature_perturbation),
                        adapt(to, a.pgf_density_potential_temperature_perturbation),
@@ -267,23 +256,18 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     damping = split_explicit.damping
     substep_distribution = split_explicit.substep_distribution
 
-    # Recovery base — frozen at outer-step start.
-    recovery_density                           = CenterField(grid)
-    recovery_density_potential_temperature     = CenterField(grid)
-
-    # Linearization basic state — refreshed each RK stage.
+    # Linearization basic state — also serves as recovery base for ρ and ρθ.
     linearization_density                         = CenterField(grid)
     linearization_density_potential_temperature   = CenterField(grid)
     linearization_pressure                        = CenterField(grid)
     linearization_exner                           = CenterField(grid)
     linearization_potential_temperature           = CenterField(grid)
 
-    # Moist basic state — snapshotted at outer-step start. Phase 3.
+    # Moist linearization state.
     linearization_vapor_mass_fraction             = CenterField(grid)
     linearization_liquid_mass_fraction            = CenterField(grid)
     linearization_ice_mass_fraction               = CenterField(grid)
     linearization_gamma_R_mixture                 = CenterField(grid)
-    linearization_virtual_density_factor          = CenterField(grid)
 
     # Reference-subtracted pressure perturbation (p − pᵣ).
     pressure_perturbation                         = CenterField(grid)
@@ -305,7 +289,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     momentum_perturbation_v                       = _yface(grid, bcs_ρv)
 
     density_predictor                                = CenterField(grid)
-    density_potential_temperaturepredictor          = CenterField(grid)
+    density_potential_temperature_predictor          = CenterField(grid)
     previous_density_potential_temperature_perturbation = CenterField(grid)
     lagged_density_potential_temperature_perturbation   = CenterField(grid)
     pgf_density_potential_temperature_perturbation      = CenterField(grid)
@@ -324,8 +308,6 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                                                tridiagonal_direction = ZDirection())
 
     return AcousticSubstepper(Ns, ω, damping, substep_distribution,
-                              recovery_density,
-                              recovery_density_potential_temperature,
                               linearization_density,
                               linearization_density_potential_temperature,
                               linearization_pressure,
@@ -335,7 +317,6 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               linearization_liquid_mass_fraction,
                               linearization_ice_mass_fraction,
                               linearization_gamma_R_mixture,
-                              linearization_virtual_density_factor,
                               pressure_perturbation,
                               density_perturbation,
                               density_potential_temperature_perturbation,
@@ -343,7 +324,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               momentum_perturbation_u,
                               momentum_perturbation_v,
                               density_predictor,
-                              density_potential_temperaturepredictor,
+                              density_potential_temperature_predictor,
                               previous_density_potential_temperature_perturbation,
                               lagged_density_potential_temperature_perturbation,
                               pgf_density_potential_temperature_perturbation,
@@ -371,20 +352,7 @@ After this call:
   - `linearization_potential_temperature` = θᴸ = ρθᴸ/ρᴸ
 """
 function freeze_linearization_state!(substepper::AcousticSubstepper, model)
-    ρθ_field = thermodynamic_density(model.formulation)
-
-    # Snapshot the RECOVERY BASE (frozen across all 3 stages). Used by
-    # `_recover_full_state!` so that Uᵐ⁺ = U⁰_outer + (ρ′, (ρθ)′, (ρu)′, (ρv)′, (ρw)′) — the
-    # WS-RK3 invariant that each stage starts from Uᴸ.
-    parent(substepper.recovery_density)                       .= parent(model.dynamics.density)
-    parent(substepper.recovery_density_potential_temperature) .= parent(ρθ_field)
-
-    # Then prime the linearization basic state to Uᴸ for stage 1.
     refresh_linearization_basic_state!(substepper, model)
-
-    fill_halo_regions!(substepper.recovery_density)
-    fill_halo_regions!(substepper.recovery_density_potential_temperature)
-
     return nothing
 end
 
@@ -443,13 +411,10 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
     snapshot_moist_basic_state!(substepper, model)
 
     # γᵐRᵐᴸ and μᵥᴸ derived from the snapshotted mass fractions. γᵐRᵐᴸ enters
-    # the substepper's PGF (γᵈRᵈ → γᵐRᵐᴸ); μᵥᴸ is precomputed for diagnostics
-    # / future formulation work but is NOT applied to the buoyancy term — see
-    # the field's docstring above for why. For dry runs (qᵛᴸ = qˡᴸ = qⁱᴸ = 0):
-    # γᵐRᵐᴸ → γᵈRᵈ bit-identically and μᵥᴸ → 1.
+    # the substepper's PGF (γᵈRᵈ → γᵐRᵐᴸ). For dry runs
+    # (qᵛᴸ = qˡᴸ = qⁱᴸ = 0): γᵐRᵐᴸ → γᵈRᵈ bit-identically.
     launch!(arch, grid, :xyz, _compute_linearization_mixture_eos!,
             substepper.linearization_gamma_R_mixture,
-            substepper.linearization_virtual_density_factor,
             substepper.linearization_vapor_mass_fraction,
             substepper.linearization_liquid_mass_fraction,
             substepper.linearization_ice_mass_fraction,
@@ -464,7 +429,6 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
     fill_halo_regions!(substepper.linearization_liquid_mass_fraction)
     fill_halo_regions!(substepper.linearization_ice_mass_fraction)
     fill_halo_regions!(substepper.linearization_gamma_R_mixture)
-    fill_halo_regions!(substepper.linearization_virtual_density_factor)
     fill_halo_regions!(substepper.pressure_perturbation)
 
     return nothing
@@ -526,7 +490,7 @@ end
 #   μᵥᴸ = 1 + (Rᵛ/Rᵈ − 1) qᵛ − qˡ − qⁱ          (virtual-density factor)
 # with qᵈ = 1 − qᵛ − qˡ − qⁱ. For dry inputs (qᵛ = qˡ = qⁱ = 0) these reduce
 # to γᵈRᵈ and 1 exactly.
-@kernel function _compute_linearization_mixture_eos!(γRᵐ, μᵥ, qᵛ, qˡ, qⁱ,
+@kernel function _compute_linearization_mixture_eos!(γRᵐ, qᵛ, qˡ, qⁱ,
                                                   Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, cˡ, cⁱ)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
@@ -542,28 +506,23 @@ end
         # Operation order matches the dry-only path's `cᵖᵈ * Rᵈ / (cᵖᵈ - Rᵈ)`
         # so qᵛ = qˡ = qⁱ = 0 reproduces the dry γᵈRᵈ to bit-identical precision.
         γRᵐ[i, j, k] = cᵖᵐ * Rᵐ / cᵛᵐ
-        μᵥ[i, j, k]  = 1 + (Rᵛ / Rᵈ - 1) * qᵛᵢ - qˡᵢ - qⁱᵢ
     end
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Stage-start cache preparation. Currently a no-op: the linearization
-basic state is fixed at the outer-step start. Per-stage refresh has
-been tried twice and *empirically NaNs the rest atmosphere at
-Δt = 20 s* (T4 of the substepper rest-state test, even though Δt = 0.5 s
-passes at machine ε). The mechanism is a recovery-vs-linearization
-inconsistency: with refresh on, `linearization_density` ≠
-`recovery_density` after stage 1, so the substepper's perturbation
-ρ′ = ρ − linearization_ρ doesn't reconcile with `_recover_full_state!`
-which reconstructs ρ = recovery_ρ + ρ′. The error is order Δt and
-grows stage-to-stage. An SK08-faithful design would need to either
-refresh the recovery base too (breaking the WS-RK3 invariant) or
-re-derive the perturbations against the refreshed base before each
-substep loop.
+Stage-start cache preparation. Refreshes the linearization basic state
+``Uᴸ`` to the **most recent RK3 predictor** (start-of-stage state, per
+[Skamarock & Klemp 2008](@cite SkamarockKlemp2008) above eq. 16). This
+re-evaluates the `linearization_*` snapshots from `model.dynamics.*` at
+stage entry. The rewind-perturbation initialization
+(`initialize_stage_perturbations!`, called next) handles the WS-RK3
+invariant by setting ``(ρ)′_\\mathrm{init} = Uᴸ_\\mathrm{outer} − Uᴸ``
+(zero for stage 1; nonzero for stages 2 and 3).
 """
-prepare_acoustic_cache!(::AcousticSubstepper, model) = nothing
+prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
+    refresh_linearization_basic_state!(substepper, model)
 
 #####
 ##### Section 4 — Adaptive substep computation (acoustic CFL)
@@ -850,24 +809,67 @@ end
 ##### Section 8 — Substep kernels
 #####
 
-# Reset perturbation prognostics to zero at the start of each WS-RK3
-# stage. The substep loop integrates from
-# `(ρ′, (ρθ)′, (ρu)′, (ρv)′, (ρw)′) = 0`; the bubble's IC pressure
-# imbalance is provided through the slow vertical-momentum tendency's
-# reference subtraction (`assemble_slow_vertical_momentum_tendency!`).
-function reset_perturbations!(substepper, grid, arch)
-    fill!(parent(substepper.density_perturbation), 0)
-    fill!(parent(substepper.density_potential_temperature_perturbation), 0)
+# Initialize perturbation prognostics at the start of each WS-RK3 stage.
+# Per Skamarock & Klemp 2008 (above eq. 16), the substep variables are
+# deviations from the **most recent RK3 predictor** (= linearization base
+# Uᴸ, refreshed by `prepare_acoustic_cache!` immediately before this).
+# But the WS-RK3 invariant ``U^{(k)} = U(t) + β_k Δt R(U^{(k-1)})``
+# requires each stage to integrate from U(t) (= the outer-step-start
+# state held in `model.timestepper.U⁰` ≡ `Uᴸ_outer`). The standard trick
+# (WRF `small_step_prep`, MPAS) is to initialize the perturbations to
+# the **rewind term** ``(U_\\mathrm{outer} − Uᴸ)`` so that the substep's
+# starting full state ``Uᴸ + (U_\\mathrm{outer} − Uᴸ) = U_\\mathrm{outer}``
+# regardless of where Uᴸ was refreshed to. For stage 1 the rewind is
+# zero (Uᴸ = U_\\mathrm{outer}); for stages 2 and 3 the rewind picks up
+# the previous-stage update. Recovery from `_recover_full_state!` then
+# uses the per-stage Uᴸ as the recovery base, and the algebra collapses
+# back to ``U_\\mathrm{outer} + Δevolved`` — preserving the WS-RK3 invariant.
+#
+# Auxiliary perturbation/workspace fields (predictors, divergence
+# workspace, K18 / WRF damping snapshots) reset to zero — they don't
+# carry stage-to-stage history.
+function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
+    grid = model.grid
+    arch = architecture(grid)
+
+    # Auxiliary workspaces: zero.
     fill!(parent(substepper.previous_density_potential_temperature_perturbation), 0)
     fill!(parent(substepper.lagged_density_potential_temperature_perturbation), 0)
     fill!(parent(substepper.pgf_density_potential_temperature_perturbation), 0)
     fill!(parent(substepper.horizontal_momentum_divergence), 0)
-    fill!(parent(substepper.momentum_perturbation_u), 0)
-    fill!(parent(substepper.momentum_perturbation_v), 0)
-    fill!(parent(substepper.momentum_perturbation_w), 0)
     fill!(parent(substepper.density_predictor), 0)
-    fill!(parent(substepper.density_potential_temperaturepredictor), 0)
+    fill!(parent(substepper.density_potential_temperature_predictor), 0)
+
+    # Prognostic perturbations: rewind init.
+    χ_name = thermodynamic_density_name(model.formulation)
+    launch!(arch, grid, :xyz, _initialize_perturbation_with_rewind!,
+            substepper.density_perturbation,
+            Uᴸ_outer.ρ, substepper.linearization_density)
+    launch!(arch, grid, :xyz, _initialize_perturbation_with_rewind!,
+            substepper.density_potential_temperature_perturbation,
+            Uᴸ_outer[χ_name], substepper.linearization_density_potential_temperature)
+    launch!(arch, grid, :xyz, _initialize_perturbation_with_rewind!,
+            substepper.momentum_perturbation_u,
+            Uᴸ_outer.ρu, model.momentum.ρu)
+    launch!(arch, grid, :xyz, _initialize_perturbation_with_rewind!,
+            substepper.momentum_perturbation_v,
+            Uᴸ_outer.ρv, model.momentum.ρv)
+    launch!(arch, grid, :xyz, _initialize_perturbation_with_rewind!,
+            substepper.momentum_perturbation_w,
+            Uᴸ_outer.ρw, model.momentum.ρw)
+
+    fill_halo_regions!(substepper.density_perturbation)
+    fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+    fill_halo_regions!(substepper.momentum_perturbation_u)
+    fill_halo_regions!(substepper.momentum_perturbation_v)
+    fill_halo_regions!(substepper.momentum_perturbation_w)
+
     return nothing
+end
+
+@kernel function _initialize_perturbation_with_rewind!(perturbation, Uᴸ_outer, Uᴸ_stage)
+    i, j, k = @index(Global, NTuple)
+    @inbounds perturbation[i, j, k] = Uᴸ_outer[i, j, k] - Uᴸ_stage[i, j, k]
 end
 
 # Explicit forward step for horizontal momentum perturbations (ρu)′, (ρv)′.
@@ -1378,8 +1380,9 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
     # contribution needs to be added.)
     assemble_slow_vertical_momentum_tendency!(substepper, model)
 
-    # Reset perturbations to zero at stage start
-    reset_perturbations!(substepper, grid, arch)
+    # Initialize perturbations with the SK08 rewind term so the substep
+    # effectively starts from U(t) = Uᴸ (the outer-step-start state).
+    initialize_stage_perturbations!(substepper, model, Uᴸ)
 
     Gⁿ = model.timestepper.Gⁿ
     χ_name = thermodynamic_density_name(model.formulation)
@@ -1432,7 +1435,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
         launch!(arch, grid, :xy, _build_predictors_and_vertical_rhs!,
                 substepper.momentum_perturbation_w,
                 substepper.density_predictor,
-                substepper.density_potential_temperaturepredictor,
+                substepper.density_potential_temperature_predictor,
                 substepper.density_perturbation,
                 substepper.density_potential_temperature_perturbation,
                 substepper.momentum_perturbation_w,
@@ -1455,7 +1458,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
                 substepper.density_potential_temperature_perturbation,
                 substepper.momentum_perturbation_w,
                 substepper.density_predictor,
-                substepper.density_potential_temperaturepredictor,
+                substepper.density_potential_temperature_predictor,
                 grid, δτᵐ⁺,
                 substepper.linearization_potential_temperature)
 
@@ -1476,9 +1479,15 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
     end
 
     # Stage-end: recover the full prognostic state for use in the next
-    # stage's slow tendency evaluation. ρ′, (ρθ)′ are stage-local
-    # perturbations; the recovery base is U⁰_outer (frozen at outer-step
-    # start) so the WS-RK3 invariant U^(k) = U⁰_outer + β_k Δt G holds.
+    # stage's slow tendency evaluation. With the SK08 rewind, perturbations
+    # are integrated against the per-stage linearization base Uᴸ (= the
+    # most recent RK3 predictor); recovery uses Uᴸ as the base, and the
+    # rewind built into the perturbation initial condition guarantees the
+    # WS-RK3 invariant U^(k) = Uᴸ_outer + β_k Δt R(U^(k-1)) algebraically.
+    # For ρ and ρθ, Uᴸ is held in `linearization_*`. For momentum, the
+    # current `model.momentum.*` IS the predictor at stage entry — the
+    # substep loop only modifies `momentum_perturbation_*`, not the model's
+    # momentum, so we read the stage-entry momentum directly here.
     χ_field = thermodynamic_density(model.formulation)
     launch!(arch, grid, :xyz, _recover_full_state!,
             model.dynamics.density, χ_field,
@@ -1488,9 +1497,9 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
             substepper.momentum_perturbation_u,
             substepper.momentum_perturbation_v,
             substepper.momentum_perturbation_w,
-            substepper.recovery_density,
-            Uᴸ[2], Uᴸ[3], Uᴸ[4],
-            substepper.recovery_density_potential_temperature,
+            substepper.linearization_density,
+            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
+            substepper.linearization_density_potential_temperature,
             grid)
 
     return nothing

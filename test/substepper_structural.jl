@@ -101,12 +101,13 @@ end
     θ⁰ = sub.linearization_potential_temperature
     δτ_new = 0.5  # arbitrary
 
+    dᵐ⁺ = 0.0   # implicit-vertical-damping factor; zero for this test
     b₁ = @allowscalar get_coefficient(1, 1, 1, grid, AcousticTridiagDiagonal(),
                                       nothing, ZDirection(),
-                                      Π⁰, θ⁰, γRᵈ, g, δτ_new)
+                                      Π⁰, θ⁰, γRᵈ, g, δτ_new, dᵐ⁺)
     c₁ = @allowscalar get_coefficient(1, 1, 1, grid, AcousticTridiagUpper(),
                                       nothing, ZDirection(),
-                                      Π⁰, θ⁰, γRᵈ, g, δτ_new)
+                                      Π⁰, θ⁰, γRᵈ, g, δτ_new, dᵐ⁺)
 
     @info @sprintf("[S1] b[1] = %.6f, c[1] = %.6e (must be 1.0 and 0.0)", b₁, c₁)
     @test b₁ == 1.0
@@ -463,12 +464,10 @@ end
 
     # Pass criterion: a true rest atmosphere should NOT exceed
     # `eps × cs × small_factor` ≈ 1e-10 m/s within 30 outer steps.
-    # The observed envelope after 30 steps is ~1e-6 m/s, indicating
-    # exponential amplification at ~1.77× per outer step (Phase 4
-    # residual feedback — see audit B3 / WS-RK3 stage-substepper
-    # consistency). Kept `@test_broken` so a future Phase 4 fix
-    # surfaces as an unexpected pass.
-    @test_broken final <= 1e-10
+    # **Fixed by SK08-faithful per-stage refresh** (`prepare_acoustic_cache!`
+    # + `initialize_stage_perturbations!`): the rewind term in the
+    # perturbation initial condition keeps the rest atmosphere at machine ε.
+    @test final <= 1e-10
 end
 
 #####
@@ -526,8 +525,9 @@ end
     after = residual_max(model)
     @info @sprintf("[S9] after 30 outer steps (Δt=20s)        = %.3e N/m³", after)
 
-    # `@test_broken` so a Phase 4 fix surfaces as an unexpected pass.
-    @test_broken after <= 1e-9
+    # **Fixed by SK08-faithful per-stage refresh**: the rewind term keeps
+    # the discrete hydrostatic balance preserved across stages.
+    @test after <= 1e-9
 end
 
 end  # outer "Substepper structural correctness"

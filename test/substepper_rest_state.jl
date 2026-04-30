@@ -299,10 +299,12 @@ end
         @test result.envelope <= bound
     end
 
-    # Document the legacy regression: forward_weight = 0.55 + no damping
-    # (the previous default) still blows up at Δt = 20 s. The
-    # @test_broken markers turn into surprise-passes if a real
-    # symmetric-matrix fix lands without needing damping.
+    # Previously a regression: `forward_weight = 0.55, NoDivergenceDamping()`
+    # NaN'd at Δt = 20 s. Fixed by SK08-faithful per-stage refresh
+    # (`prepare_acoustic_cache!` + `initialize_stage_perturbations!`):
+    # the rewind term in the perturbation initial condition keeps the
+    # rest atmosphere at machine ε independent of the linearization
+    # base's exact value.
     let Δt = 20.0
         model = _build_rest_model(default_arch;
                                   Nx = 8, Ny = 8, Nz = 32, Lz = 10e3,
@@ -312,8 +314,8 @@ end
                                               sample_every = 10)
         @info @sprintf("[T4 legacy ω=0.55 noDD] Δt = %.2f s, envelope = %.3e m/s, nans = %s",
                        Δt, result.envelope, result.nans)
-        @test_broken !result.nans
-        @test_broken result.envelope <= bound
+        @test !result.nans
+        @test result.envelope <= bound
     end
 end
 
