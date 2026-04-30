@@ -114,6 +114,17 @@ end
 
 const EnergyFluxBCType = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction}
 
+# Propagate BC regularization into the inner condition of EnergyFluxBoundaryConditionFunction.
+# This is needed because Oceananigans wraps user functions in ContinuousBoundaryFunction{Nothing,Nothing,Nothing}
+# at construction time, and regularization (which sets the correct LX/LY/LZ type parameters) must be
+# forwarded through the EnergyFluxBoundaryConditionFunction wrapper.
+function OceananigansBC.regularize_boundary_condition(ef::EnergyFluxBoundaryConditionFunction,
+                                                      grid, args...)
+    inner = OceananigansBC.regularize_boundary_condition(ef.condition, grid, args...)
+    return EnergyFluxBoundaryConditionFunction(inner, ef.side, ef.microphysics,
+                                               ef.thermodynamic_constants, ef.density)
+end
+
 """
     EnergyFluxBoundaryCondition(flux)
 
@@ -234,6 +245,14 @@ end
 end
 
 const ThetaFluxBCType = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction}
+
+# Same regularization forwarding for ThetaFluxBoundaryConditionFunction.
+function OceananigansBC.regularize_boundary_condition(tf::ThetaFluxBoundaryConditionFunction,
+                                                      grid, args...)
+    inner = OceananigansBC.regularize_boundary_condition(tf.condition, grid, args...)
+    return ThetaFluxBoundaryConditionFunction(inner, tf.side, tf.microphysics,
+                                              tf.thermodynamic_constants, tf.density)
+end
 
 """
     ThetaFluxBoundaryCondition(flux)
