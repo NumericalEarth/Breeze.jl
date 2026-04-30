@@ -1,8 +1,9 @@
-using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
+using Oceananigans: Oceananigans, Center, CenterField, Field, set!, fill_halo_regions!
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 using Oceananigans.Fields: ZeroField
 using Oceananigans.Grids: znode
+using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ
 using Oceananigans.Utils: launch!
 
@@ -291,7 +292,10 @@ If `profile` is a `Function`, calls `profile(z)`.
 @inline evaluate_profile(value::Number, z) = value
 @inline evaluate_profile(f::Function, z) = f(z)
 
-_surface_value(x) = evaluate_profile(x, 0)
+# Surface value extraction. For 3-arg functions (lat, lon, z) used by the
+# LatitudeLongitudeGrid reference state path, evaluate at the equator surface.
+_surface_value(x::Number) = x
+_surface_value(f::Function) = _nargs(f) == 1 ? f(0) : f(0, 0, 0)
 
 """
 $(TYPEDSIGNATURES)
@@ -440,28 +444,133 @@ end
 
 Base.show(io::IO, ref::ExnerReferenceState) = print(io, summary(ref))
 
+@kernel function _compute_isothermal_reference!(π₀, pᵣ, ρᵣ, θᵣ, grid, Nz, p₀, pˢᵗ, κ, Rᵈ, g, T₀)
+    _ = @index(Global)
+
+    # Discrete-balance recurrence (Standard S3, audit E2). Enforces
+    #
+    #   (p[k] − p[k − 1]) / Δz_face[k] + g · (ρ[k] + ρ[k − 1]) / 2 = 0
+    #
+    # exactly, where ρ[k] = p[k] / (Rᵈ T₀), so the substepper's slow
+    # vertical-momentum tendency is zero on a rest atmosphere to
+    # floating-point precision. The previous MPAS-form analytic
+    # solution `p(z) = p₀ exp(-g z / (Rᵈ T₀))` satisfies the
+    # *continuous* hydrostatic equation but leaves a discrete-operator
+    # residual ~1e-3 N/m³, which seeds a factor-2 acoustic instability
+    # at production Δt (see test/substepper_validation/REPORT.md).
+    #
+    # For constant T₀, the recurrence has the closed form
+    #   p[k] = p[k − 1] · (1 − a) / (1 + a),  a = g Δz_face / (2 Rᵈ T₀).
+
+    # Anchor at the first cell center via the continuous analytic
+    # solution `p(z) = p₀ exp(-gz / (Rᵈ T₀))`. Face k = 1 is a
+    # boundary face (μw[1] = 0 by impenetrability) and the substepper
+    # does NOT apply the discrete-balance check there, so we are free
+    # to anchor however we like; the continuous formula keeps
+    # `surface_pressure = p₀` semantics intact and matches what users
+    # set with `θ = θᵇᵍ(z)`.
+    z₁ = znode(1, 1, 1, grid, Center(), Center(), Center())
+    p¹ = p₀ * exp(-g * z₁ / (Rᵈ * T₀))
+    ρ¹ = p¹ / (Rᵈ * T₀)
+    Π¹ = (p¹ / pˢᵗ)^κ
+    @inbounds begin
+        pᵣ[1, 1, 1] = p¹
+        π₀[1, 1, 1] = Π¹
+        ρᵣ[1, 1, 1] = ρ¹
+        θᵣ[1, 1, 1] = T₀ / Π¹
+    end
+    p⁻ = p¹
+    ρ⁻ = ρ¹
+
+    # Discrete-balance recurrence for k = 2..Nz. Each iteration gives
+    # `(p[k] − p[k − 1]) / Δz_face[k] + g · (ρ[k] + ρ[k − 1]) / 2 = 0`
+    # at machine precision, so the substepper's slow vertical-momentum
+    # tendency is zero on a rest atmosphere to ulp.
+    for k in 2:Nz
+        Δz_face = Δzᶜᶜᶠ(1, 1, k, grid)
+        a = g * Δz_face / (2 * Rᵈ * T₀)
+        pᵏ = (p⁻ - g * Δz_face * ρ⁻ / 2) / (1 + a)
+        ρᵏ = pᵏ / (Rᵈ * T₀)
+        Πᵏ = (pᵏ / pˢᵗ)^κ
+        @inbounds begin
+            pᵣ[1, 1, k] = pᵏ
+            π₀[1, 1, k] = Πᵏ
+            ρᵣ[1, 1, k] = ρᵏ
+            θᵣ[1, 1, k] = T₀ / Πᵏ
+        end
+        p⁻ = pᵏ
+        ρ⁻ = ρᵏ
+    end
+end
+
 @kernel function _compute_exner_reference!(π₀, pᵣ, ρᵣ, θ₀, grid, Nz, π₀_surface, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
     _ = @index(Global)
 
-    # Initialize π₀ at the bottom from the surface pressure
-    @inbounds π₀[1, 1, 1] = π₀_surface
+    # Discrete-balance reference for prescribed θ̄(z) (Standard S3, audit
+    # E2). Enforces
+    #   (p[k] − p[k − 1]) / Δz_face[k] + g · (ρ[k] + ρ[k − 1]) / 2 = 0
+    # at every interior face k = 2..Nz, with ρ[k] = p[k] / (Rᵈ T[k]) and
+    # T[k] = θ̄[k] · Π[k] = θ̄[k] · (p[k]/pˢᵗ)^κ. Substituting gives a
+    # nonlinear equation in p[k] solved by Newton iteration.
+    #
+    # The previous implementation (MPAS-style up-then-down Π integration
+    # using `ΔΠ = -g Δz_face / (cᵖᵈ θ_face)`) satisfies the *continuous*
+    # hydrostatic equation but not the substepper's discrete operator,
+    # leaving a residual ~1e-3 N/m³ that seeds a factor-2 acoustic
+    # instability at production Δt. See test/substepper_validation/REPORT.md
+    # and test/substepper_rest_state.jl::T1.
 
-    # Integrate upward: π₀[k] = π₀[k-1] - g Δz / (cᵖᵈ avg(θᵣ))
+    # Anchor at first cell center via the continuous Π recurrence (one
+    # half-step from surface). Face k = 1 is the impenetrability
+    # boundary face — no discrete-balance constraint applies — so the
+    # anchor is free.
+    @inbounds begin
+        Δzᶜ₁ = Δzᶜᶜᶜ(1, 1, 1, grid)
+        Π¹ = π₀_surface - g * Δzᶜ₁ / (2 * cᵖᵈ * θ₀[1, 1, 1])
+        T¹ = θ₀[1, 1, 1] * Π¹
+        p¹ = pˢᵗ * Π¹^(1/κ)
+        ρ¹ = p¹ / (Rᵈ * T¹)
+
+        π₀[1, 1, 1] = Π¹
+        pᵣ[1, 1, 1] = p¹
+        ρᵣ[1, 1, 1] = ρ¹
+    end
+    p⁻ = pᵣ[1, 1, 1]
+    ρ⁻ = ρᵣ[1, 1, 1]
+
+    # Discrete-balance recurrence for k = 2..Nz. The residual
+    #   F(p) = (p − p⁻) / Δz_face + g · (ρ(p) + ρ⁻) / 2
+    # with ρ(p) = p^(1−κ) · pˢᵗ^κ / (Rᵈ θ̄[k]) is monotone increasing
+    # in p, so Newton converges in O(few) iterations from the
+    # continuous-formula initial guess.
     for k in 2:Nz
         Δz_face = Δzᶜᶜᶠ(1, 1, k, grid)
-        @inbounds θ₀_face = (θ₀[1, 1, k] + θ₀[1, 1, k-1]) / 2
-        @inbounds π₀[1, 1, k] = π₀[1, 1, k-1] - g * Δz_face / (cᵖᵈ * θ₀_face)
-    end
+        @inbounds θᵏ = θ₀[1, 1, k]
 
-    # Derive pressure and density from π₀
-    for k in 1:Nz
-        @inbounds begin
-            πᵏ = π₀[1, 1, k]
-            pᵏ = pˢᵗ * πᵏ^(1/κ)
-            Tᵏ = θ₀[1, 1, k] * πᵏ
-            pᵣ[1, 1, k] = pᵏ
-            ρᵣ[1, 1, k] = pᵏ / (Rᵈ * Tᵏ)
+        # Initial guess: continuous Π integration (one face step).
+        @inbounds θ_face = (θ₀[1, 1, k] + θ₀[1, 1, k - 1]) / 2
+        Πᵏ_init = π₀[1, 1, k - 1] - g * Δz_face / (cᵖᵈ * θ_face)
+        pᵏ = pˢᵗ * Πᵏ_init^(1/κ)
+
+        Aᵏ = g * pˢᵗ^κ / (2 * Rᵈ * θᵏ)
+        Cᵏ = p⁻ / Δz_face - g * ρ⁻ / 2
+        # Newton iterations on F(p) = p / Δz_face + Aᵏ · p^(1−κ) − Cᵏ.
+        for _ in 1:5
+            ρp = pᵏ^(-κ)               # = p^(1-κ) / p
+            f  = pᵏ / Δz_face + Aᵏ * pᵏ * ρp - Cᵏ
+            f′ = 1 / Δz_face + Aᵏ * (1 - κ) * ρp
+            pᵏ = pᵏ - f / f′
         end
+        Πᵏ = (pᵏ / pˢᵗ)^κ
+        Tᵏ = θᵏ * Πᵏ
+        ρᵏ = pᵏ / (Rᵈ * Tᵏ)
+        @inbounds begin
+            π₀[1, 1, k] = Πᵏ
+            pᵣ[1, 1, k] = pᵏ
+            ρᵣ[1, 1, k] = ρᵏ
+        end
+        p⁻ = pᵏ
+        ρ⁻ = ρᵏ
     end
 end
 
@@ -470,17 +579,17 @@ $(TYPEDSIGNATURES)
 
 Construct an `ExnerReferenceState` by discrete Exner integration on `grid`.
 
-The Exner function π₀ is built by integrating upward from the surface:
-```math
-π₀[k] = π₀[k-1] - \\frac{g \\, Δz}{cᵖᵈ \\, θᵣ^{face}[k]}
-```
-where ``θᵣ^{face}`` is the face-averaged reference potential temperature.
-This ensures the discrete Exner hydrostatic balance is exact.
+Two modes are supported, controlled by which keyword is provided:
 
-Pressure and density are then derived from π₀:
-- ``p₀ = pˢᵗ \\, π₀^{cᵖᵈ/Rᵈ}``
-- ``T₀ = θᵣ \\, π₀``
-- ``ρ₀ = p₀ / (Rᵈ \\, T₀)``
+**Isentropic** (`potential_temperature`): Constant or z-dependent θ₀.
+The Exner function is built by MPAS-style up-then-down integration using
+``ΔΠ = -g Δz / (cᵖᵈ θ₀^{face})``. Density: ``ρ₀ = p₀ / (Rᵈ θ₀ Π₀)``.
+
+**Isothermal** (`reference_temperature`): Constant T₀ (MPAS baroclinic wave
+convention). Uses the analytic isothermal solution:
+``p₀(z) = pˢ \\exp(-g z / (Rᵈ T₀))``, ``Π₀ = (p₀/pˢᵗ)^κ``,
+``ρ₀ = p₀/(Rᵈ T₀)``, ``θ₀ = T₀/Π₀``.
+This matches MPAS init_atm_cases.F lines 813-817 exactly.
 
 Arguments
 =========
@@ -490,12 +599,15 @@ Arguments
 Keyword Arguments
 =================
 - `surface_pressure`: Pressure at z=0 (default: 101325 Pa)
-- `potential_temperature`: Constant value or function `θᵣ(z)` for reference potential temperature (default: 288 K)
+- `potential_temperature`: Constant value or function `θᵣ(z)` for isentropic reference (default: 288 K)
+- `reference_temperature`: Constant T₀ for isothermal reference (default: `nothing`).
+  When provided, overrides `potential_temperature`.
 - `standard_pressure`: pˢᵗ for potential temperature definition (default: 1e5 Pa)
 """
 function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
                              surface_pressure = 101325,
                              potential_temperature = 288,
+                             reference_temperature = nothing,
                              standard_pressure = 1e5)
 
     FT = eltype(grid)
@@ -507,34 +619,128 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     κ = Rᵈ / cᵖᵈ
     g = constants.gravitational_acceleration
     Nz = size(grid, 3)
-    loc = (nothing, nothing, Center())
 
-    # Build θᵣ field (temporary, used only during construction)
-    θᵣ = Field{Nothing, Nothing, Center}(grid)
-    set!(θᵣ, potential_temperature)
+    if reference_temperature !== nothing
+        # ── Isothermal base state (MPAS baroclinic wave convention) ──
+        # Analytic solution: p(z) = p₀ exp(-gz/(Rᵈ T₀)), Π = (p/pˢᵗ)^κ,
+        # ρ = p/(Rᵈ T₀), θ = T₀/Π.  (MPAS init_atm_cases.F lines 813-817)
+        T₀ = convert(FT, reference_temperature)
+        loc = (nothing, nothing, Center())
+
+        θᵣ = Field{Nothing, Nothing, Center}(grid)
+        πᵣ = Field{Nothing, Nothing, Center}(grid)
+        pᵣ = Field{Nothing, Nothing, Center}(grid)
+        ρ₀_surface = p₀ / (Rᵈ * T₀)
+        p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
+        pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
+        ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀_surface))
+        ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+
+        launch!(arch, grid, tuple(1), _compute_isothermal_reference!,
+                πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, p₀, pˢᵗ, κ, Rᵈ, g, T₀)
+    else
+        # ── Isentropic base state (constant or z-dependent θ₀) ──
+        # Detect whether θ₀ depends on horizontal coordinates (3D reference).
+        needs_3d = _needs_3d_reference(potential_temperature)
+
+        if needs_3d
+            # 3D reference: per-column integration for latitude-dependent θ₀(φ,z)
+            θᵣ = CenterField(grid)
+            set!(θᵣ, potential_temperature)
+            fill_halo_regions!(θᵣ)
+
+            πᵣ = CenterField(grid)
+            pᵣ = CenterField(grid)
+            ρᵣ = CenterField(grid)
+
+            launch!(arch, grid, :xy, _compute_exner_reference_3d!,
+                    πᵣ, pᵣ, ρᵣ, θᵣ, grid, p₀, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+        else
+            # 1D reference: single column, broadcast to all (i,j)
+            loc = (nothing, nothing, Center())
+            θᵣ = Field{Nothing, Nothing, Center}(grid)
+            set!(θᵣ, potential_temperature)
+            fill_halo_regions!(θᵣ)
+
+            πᵣ = Field{Nothing, Nothing, Center}(grid)
+            π₀_surface = (p₀ / pˢᵗ)^κ
+            θ₀_surface = convert(FT, _surface_value(potential_temperature))
+            ρ₀_surface = p₀ / (Rᵈ * θ₀_surface * π₀_surface)
+
+            p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
+            pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
+            ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀_surface))
+            ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+
+            launch!(arch, grid, tuple(1), _compute_exner_reference!,
+                    πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, π₀_surface, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+        end
+    end
+
     fill_halo_regions!(θᵣ)
-
-    # Surface values for boundary conditions and display
-    θ₀ = convert(FT, _surface_value(potential_temperature))
-    π₀ = (p₀ / pˢᵗ)^κ
-    ρ₀ = p₀ / (Rᵈ * θ₀ * π₀)
-
-    # Allocate output fields
-    πᵣ = Field{Nothing, Nothing, Center}(grid)
-    p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
-    pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
-    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
-    ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
-
-    # Build π₀ by discrete upward integration, then derive p₀ and ρ₀
-    launch!(arch, grid, tuple(1), _compute_exner_reference!,
-            πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, π₀, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
-
     fill_halo_regions!(πᵣ)
     fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
 
-    return ExnerReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ, πᵣ)
+    # Surface θ₀ for the struct: for isothermal, θ_surface = T₀/Π_surface = T₀
+    θ₀_val = if reference_temperature !== nothing
+        convert(FT, reference_temperature)  # T₀ (at surface Π≈1, θ≈T)
+    else
+        convert(FT, _surface_value(potential_temperature))
+    end
+
+    return ExnerReferenceState(p₀, θ₀_val, pˢᵗ, pᵣ, ρᵣ, πᵣ)
+end
+
+# Detect if θ₀ needs a 3D (per-column) reference.
+# Functions with ≥2 methods or ≥2 arguments → 3D.
+_needs_3d_reference(::Number) = false
+_needs_3d_reference(f::Function) = _nargs(f) > 1
+_nargs(f) = maximum(m.nargs for m in methods(f)) - 1  # subtract 1 for the function itself
+
+@kernel function _compute_exner_reference_3d!(π₀, pᵣ, ρᵣ, θ₀, grid, p₀, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    # MPAS-style up-then-down integration (same logic as 1D kernel).
+    π₀_surface = (p₀ / pˢᵗ)^κ
+
+    @inbounds begin
+        # Step 1: UP — surface → center 1 → ... → center Nz → top
+        Δzᶜ₁ = Δzᶜᶜᶜ(i, j, 1, grid)
+        pi_top = π₀_surface - g * Δzᶜ₁ / (2 * cᵖᵈ * θ₀[i, j, 1])
+    end
+
+    for k in 2:Nz
+        Δzᶠₖ = Δzᶜᶜᶠ(i, j, k, grid)
+        @inbounds θ_face = (θ₀[i, j, k] + θ₀[i, j, k - 1]) / 2
+        pi_top = pi_top - g * Δzᶠₖ / (cᵖᵈ * θ_face)
+    end
+
+    @inbounds begin
+        Δzᶜₙ = Δzᶜᶜᶜ(i, j, Nz, grid)
+        pi_top = pi_top - g * Δzᶜₙ / (2 * cᵖᵈ * θ₀[i, j, Nz])
+    end
+
+    # Step 2: DOWN — top → center Nz → ... → center 1
+    @inbounds π₀[i, j, Nz] = pi_top + g * Δzᶜₙ / (2 * cᵖᵈ * θ₀[i, j, Nz])
+
+    for k in (Nz - 1):-1:1
+        Δzᶠₖ₊₁ = Δzᶜᶜᶠ(i, j, k + 1, grid)
+        @inbounds θ_face = (θ₀[i, j, k] + θ₀[i, j, k + 1]) / 2
+        @inbounds π₀[i, j, k] = π₀[i, j, k + 1] + g * Δzᶠₖ₊₁ / (cᵖᵈ * θ_face)
+    end
+
+    # Step 3: Derive p, ρ from π₀
+    for k in 1:Nz
+        @inbounds begin
+            πᵏ = π₀[i, j, k]
+            pᵏ = pˢᵗ * πᵏ^(1/κ)
+            Tᵏ = θ₀[i, j, k] * πᵏ
+            pᵣ[i, j, k] = pᵏ
+            ρᵣ[i, j, k] = pᵏ / (Rᵈ * Tᵏ)
+        end
+    end
 end
 
 # ExnerReferenceState has the same surface_density interface as ReferenceState
@@ -631,5 +837,135 @@ Convenience method that assumes all moisture is vapor (no condensate in the
 reference state). Equivalent to `compute_reference_state!(reference_state, T̄, q̄ᵗ, 0, 0, constants)`.
 """
 function compute_reference_state!(ref::ReferenceState, T̄, q̄ᵗ, constants)
+    compute_reference_state!(ref, T̄, q̄ᵗ, 0, 0, constants)
+end
+
+@kernel function _compute_exner_hydrostatic_reference!(πᵣ, pᵣ, ρᵣ, T, qᵛ, qˡ, qⁱ,
+                                                       grid, Nz, p₀, pˢᵗ, κ, Rᵈ, Rᵛ, g)
+    _ = @index(Global)
+
+    # Discrete-balance recurrence: enforce
+    #   (p[k] − p[k − 1]) / Δz_face[k] + g · (ρ[k] + ρ[k − 1]) / 2 = 0
+    # with ρ[k] = p[k] / (Rᵐ[k] T[k]). This is exactly the operator the
+    # substepper uses to compute the slow vertical-momentum tendency, so
+    # the slow tendency is zero on a rest atmosphere to floating-point
+    # precision (Standard S3, audit E2).
+    #
+    # The previous implementation used `d(ln p)/dz = -g / (Rᵐ T)` with
+    # exponential-trapezoidal integration, which satisfies the
+    # *continuous* hydrostatic equation but leaves a discrete-operator
+    # residual ~1e-3 N/m³. That residual seeded a factor-2-per-outer-step
+    # acoustic instability at production Δt; see the empirical
+    # characterization in `test/substepper_validation/REPORT.md`
+    # (sweeps I, K, L) and the rest-state test
+    # `test/substepper_rest_state.jl::T1`.
+
+    # Anchor: p at the first cell center matches surface_pressure.
+    # The boundary-row of the substepper's tridiag enforces μw[1] = 0
+    # by impenetrability, so no discrete-balance constraint is applied
+    # at the bottom face k = 1; we are free to choose the anchor here.
+    @inbounds begin
+        T¹  = T[1, 1, 1]
+        qᵛ¹ = qᵛ[1, 1, 1]
+        qˡ¹ = qˡ[1, 1, 1]
+        qⁱ¹ = qⁱ[1, 1, 1]
+    end
+    qᵈ¹ = 1 - qᵛ¹ - qˡ¹ - qⁱ¹
+    Rᵐ¹ = qᵈ¹ * Rᵈ + qᵛ¹ * Rᵛ
+
+    p⁻ = p₀
+    ρ⁻ = p₀ / (Rᵐ¹ * T¹)
+
+    @inbounds begin
+        pᵣ[1, 1, 1] = p⁻
+        ρᵣ[1, 1, 1] = ρ⁻
+        πᵣ[1, 1, 1] = (p⁻ / pˢᵗ)^κ
+    end
+
+    # Discrete-balance recurrence for k = 2..Nz.
+    #   p[k] · (1/Δz_face[k] + g / (2 Rᵐ[k] T[k]))
+    #     = p[k − 1] / Δz_face[k] − g · ρ[k − 1] / 2
+    for k in 2:Nz
+        Δz_face = Δzᶜᶜᶠ(1, 1, k, grid)
+
+        @inbounds begin
+            Tᵏ  = T[1, 1, k]
+            qᵛᵏ = qᵛ[1, 1, k]
+            qˡᵏ = qˡ[1, 1, k]
+            qⁱᵏ = qⁱ[1, 1, k]
+        end
+        qᵈᵏ  = 1 - qᵛᵏ - qˡᵏ - qⁱᵏ
+        Rᵐᵏ  = qᵈᵏ * Rᵈ + qᵛᵏ * Rᵛ
+        RᵐTᵏ = Rᵐᵏ * Tᵏ
+
+        a = 1 / Δz_face + g / (2 * RᵐTᵏ)
+        b = p⁻ / Δz_face - g * ρ⁻ / 2
+        pᵏ = b / a
+        ρᵏ = pᵏ / RᵐTᵏ
+
+        @inbounds begin
+            pᵣ[1, 1, k] = pᵏ
+            ρᵣ[1, 1, k] = ρᵏ
+            πᵣ[1, 1, k] = (pᵏ / pˢᵗ)^κ
+        end
+
+        p⁻ = pᵏ
+        ρ⁻ = ρᵏ
+    end
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Recompute the reference pressure, density, and Exner-function profiles of an
+[`ExnerReferenceState`](@ref) from a new mean temperature `T̄` and moisture
+mass fractions `q̄ᵛ`, `q̄ˡ`, `q̄ⁱ`.
+
+Integrates the hydrostatic equation `d(ln p)/dz = -g / (Rᵐ T)` upward from the
+existing surface pressure using the moist mixture gas constant
+`Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ`, then derives `ρ = p / (Rᵐ T)` and the Exner function
+`Π = (p / pˢᵗ)^κ` with `κ = Rᵈ / cᵖᵈ`.
+
+`T̄`, `q̄ᵛ`, `q̄ˡ`, `q̄ⁱ` can be `Number`s, `Function(z)`s, or `Field`s.
+"""
+function compute_reference_state!(ref::ExnerReferenceState, T̄, q̄ᵛ, q̄ˡ, q̄ⁱ, constants)
+    grid = ref.pressure.grid
+    arch = architecture(grid)
+    Nz = grid.Nz
+
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    κ = Rᵈ / cᵖᵈ
+    g = constants.gravitational_acceleration
+    p₀ = ref.surface_pressure
+    pˢᵗ = ref.standard_pressure
+
+    # Materialize T̄, q̄ as 1D scratch fields (Number / Function(z) / Field).
+    T_field = Field{Nothing, Nothing, Center}(grid)
+    set_reference_field!(T_field, T̄)
+    qᵛ_field = reference_moisture_field(q̄ᵛ, grid)
+    qˡ_field = reference_moisture_field(q̄ˡ, grid)
+    qⁱ_field = reference_moisture_field(q̄ⁱ, grid)
+
+    launch!(arch, grid, tuple(1),
+            _compute_exner_hydrostatic_reference!,
+            ref.exner_function, ref.pressure, ref.density,
+            T_field, qᵛ_field, qˡ_field, qⁱ_field,
+            grid, Nz, p₀, pˢᵗ, κ, Rᵈ, Rᵛ, g)
+
+    fill_halo_regions!(ref.pressure)
+    fill_halo_regions!(ref.density)
+    fill_halo_regions!(ref.exner_function)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Convenience method that assumes all moisture is vapor.
+Equivalent to `compute_reference_state!(reference_state, T̄, q̄ᵗ, 0, 0, constants)`.
+"""
+function compute_reference_state!(ref::ExnerReferenceState, T̄, q̄ᵗ, constants)
     compute_reference_state!(ref, T̄, q̄ᵗ, 0, 0, constants)
 end

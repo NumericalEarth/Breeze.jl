@@ -38,9 +38,14 @@
 # 1. **Anelastic**: Filters acoustic waves via the anelastic approximation
 # 2. **Compressible (explicit)**: Fully compressible with explicit time stepping (small Δt)
 # 3. **Boussinesq**: Anelastic with constant reference density
-# 4. **Split-explicit (adaptive SSP-RK3)**: Acoustic substepping with adaptive substep count at advective Δt
-# 5. **Split-explicit SSP-RK3**: Acoustic substepping with SSP-RK3 outer loop at Δt = 12 s
-# 6. **Split-explicit WS-RK3**: Acoustic substepping with Wicker-Skamarock RK3 outer loop at Δt = 12 s
+# 4. **Split-explicit (adaptive substeps)**: WS-RK3 acoustic substepping at advective Δt with the
+#    Breeze default damping ([`PressureProjectionDamping`](@ref) at ``β_d = 0.5``, the
+#    BW-tuned literal ERF/CM1/WRF projection form) and an
+#    auto-computed substep count
+# 5. **Split-explicit (Thermodynamic damping, smdiv = 0.05)**: WS-RK3 with the MPAS Klemp 2018
+#    momentum-correction damping at the lower coefficient ``\mathrm{smdiv} = 0.05``
+# 6. **Split-explicit (Thermodynamic damping, smdiv = 0.10)**: WS-RK3 with the MPAS Klemp 2018
+#    momentum-correction damping at the MPAS default coefficient ``\mathrm{smdiv} = 0.10``
 
 using Breeze
 using Oceananigans: Oceananigans
@@ -109,27 +114,35 @@ constant_density_reference_state = ReferenceState(grid, constants; surface_press
 set!(constant_density_reference_state.density, ρ₀)
 boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
 
-# #### Case 4: Split-explicit with adaptive substeps at the advective time step.
-# The number of acoustic substeps is computed automatically from the CFL condition
-# each time step: `N = ceil(safety_factor · Δt · ℂᵃᶜ / Δx_min)`.
-# We use SSP-RK3 because it is stable at larger advective CFL than WS-RK3.
+# Case 4: Split-explicit with adaptive substeps at the advective time step.
+# The number of acoustic substeps is computed automatically from the horizontal
+# acoustic CFL condition each step: `N = ceil(safety_factor · Δt · ℂᵃᶜ / Δx_min)`.
+# Defaults to the Breeze divergence damping ([`PressureProjectionDamping`](@ref) at
+# ``β_d = 0.5``, tuned on the DCMIP2016 baroclinic wave) and the WS-RK3 outer loop
+# ([`AcousticRungeKutta3`](@ref)).
 adaptive_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                           surface_pressure,
                                           reference_potential_temperature=θᵇᵍ)
 
-# #### Case 5: Split-explicit with SSP-RK3 outer loop
-# Uses acoustic substepping with Exner pressure variables (velocity + π') and
-# vertically implicit w-π' coupling. The reference potential temperature enables
-# base-state subtraction for accurate perturbation pressure.
-ssp_time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.05)
+# Case 5: Split-explicit with the MPAS Klemp 2018 thermodynamic divergence damping at
+# the lower coefficient ``\mathrm{smdiv} = 0.05``. Same WS-RK3 acoustic substepping as
+# Case 4, but with a fixed substep count and the MPAS-style momentum-correction damping
+# instead of the new pressure-projection default. See `bw_dt_sweep_results.md` for the
+# empirical comparison that motivated the new default.
+ssp_time_discretization = SplitExplicitTimeDiscretization(;
+    substeps = Ns,
+    damping  = ThermalDivergenceDamping(coefficient = 0.05))
 ssp_dynamics = CompressibleDynamics(ssp_time_discretization;
                                     surface_pressure,
                                     reference_potential_temperature = θᵇᵍ)
 
-# #### Case 6: Split-explicit with Wicker-Skamarock RK3 outer loop
-# Same acoustic substepping as SSP-RK3, but with WS-RK3 stage fractions (Δt/3, Δt/2, Δt)
-# instead of SSP convex combinations.
-ws_time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.10)
+# Case 6: Split-explicit with the MPAS Klemp 2018 thermodynamic divergence damping at
+# the MPAS default coefficient ``\mathrm{smdiv} = 0.10``. Identical to Case 5 except for
+# the divergence-damping coefficient — included so the example shows the effect of
+# strengthening the MPAS-style damping.
+ws_time_discretization = SplitExplicitTimeDiscretization(;
+    substeps = Ns,
+    damping  = ThermalDivergenceDamping(coefficient = 0.10))
 ws_dynamics = CompressibleDynamics(ws_time_discretization;
                                      surface_pressure,
                                      reference_potential_temperature=θᵇᵍ)
@@ -191,9 +204,9 @@ case_names = Dict(
     :boussinesq     => "Boussinesq",
     :anelastic      => "Anelastic",
     :compressible   => "Compressible (explicit)",
-    :ws_rk3         => "Split-explicit (WS-RK3)",
-    :ssp_rk3        => "Split-explicit (SSP-RK3)",
-    :adaptive       => "Split-explicit (adaptive SSP-RK3)",
+    :ws_rk3         => "Split-explicit (Thermo damping, smdiv=0.10)",
+    :ssp_rk3        => "Split-explicit (Thermo damping, smdiv=0.05)",
+    :adaptive       => "Split-explicit (adaptive, default damping)",
 )
 
 # Background θ field for computing perturbation

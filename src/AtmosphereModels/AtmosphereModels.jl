@@ -84,7 +84,10 @@ export
     # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
-    compute_z_momentum_tendency!
+    compute_z_momentum_tendency!,
+
+    # Closures
+    area_scaled_biharmonic_divergence_damping
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
@@ -112,6 +115,7 @@ include("formulation_interface.jl")
 #####
 
 include("atmosphere_model.jl")
+include("closures.jl")
 
 #####
 ##### Remaining AtmosphereModel components

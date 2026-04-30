@@ -19,11 +19,23 @@ export
     CompressibleDynamics,
     CompressibleModel,
     SplitExplicitTimeDiscretization,
+    AcousticOuterScheme,
+    WickerSkamarock3,
+    AcousticSubstepDistribution,
+    ProportionalSubsteps,
+    MonolithicFirstStage,
+    AcousticDampingStrategy,
+    NoDivergenceDamping,
+    ThermalDivergenceDamping,
+    HyperdiffusiveDivergenceDamping,
+    PressureExtrapolationDamping,
+    DivergenceDamping,
     ExplicitTimeStepping,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
     AtmosphereModel,
+    area_scaled_biharmonic_divergence_damping,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
@@ -85,6 +97,7 @@ export
     initial_aerosol_number,
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
+    ConstantRateCondensateFormation,
 
     # BoundaryConditions
     BulkDrag,
@@ -112,7 +125,6 @@ export
 
     # TimeSteppers
     SSPRungeKutta3,
-    AcousticSSPRungeKutta3,
     AcousticRungeKutta3,
     AcousticSubstepper,
 
@@ -131,12 +143,15 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     FieldDataset, FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing,
                     Relaxation, GaussianMask, GPU,
                     GradientBoundaryCondition, GridFittedBottom,
+                    HydrostaticSphericalCoriolis,
                     ImmersedBoundaryCondition, ImmersedBoundaryGrid, InMemory,
                     Integral, IterationInterval, JLD2Writer,
-                    KernelFunctionOperation, LagrangianParticles, NetCDFWriter,
+                    KernelFunctionOperation, LagrangianParticles,
+                    LatitudeLongitudeGrid, NetCDFWriter,
                     NonTraditionalBetaPlane, OnDisk, OpenBoundaryCondition,
                     PartialCellBottom, Partition, Periodic,
                     PerturbationAdvection, RectilinearGrid, Simulation,
+                    SphericalCoriolis,
                     SmagorinskyLilly, SpecifiedTimes, TimeInterval,
                     UpwindBiased, ValueBoundaryCondition, WENO, FluxFormAdvection,
                     WallTimeInterval, XFaceField, YFaceField, ZFaceField,
@@ -152,7 +167,7 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid, ExponentialDiscretization, PiecewiseStretchedDiscretization, MutableVerticalDiscretization, Clock,
+    RectilinearGrid, LatitudeLongitudeGrid, ExponentialDiscretization, PiecewiseStretchedDiscretization, MutableVerticalDiscretization, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
@@ -168,6 +183,7 @@ export
     BackgroundField, interior, set!, compute!, regrid!,
     Forcing, Relaxation, GaussianMask,
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
+    SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
     LagrangianParticles,
     conjure_time_step_wizard!,
@@ -208,7 +224,12 @@ using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 
 include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
-                              SplitExplicitTimeDiscretization, ExplicitTimeStepping
+                              SplitExplicitTimeDiscretization,
+                              AcousticOuterScheme, WickerSkamarock3,
+                              AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
+                              AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping,
+                              HyperdiffusiveDivergenceDamping, PressureExtrapolationDamping,
+                              DivergenceDamping, ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel

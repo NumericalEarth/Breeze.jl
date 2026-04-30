@@ -287,7 +287,6 @@ end
 # Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
 _timestepper_uses_dynamics(::Val) = false
 _timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
-_timestepper_uses_dynamics(::Val{:AcousticSSPRungeKutta3}) = true
 _timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
 _timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
 

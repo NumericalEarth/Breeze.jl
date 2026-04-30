@@ -16,6 +16,9 @@ Fields
 - `surface_pressure`: Mean pressure at the bottom of the atmosphere p₀
 - `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref) or [`ExplicitTimeStepping`](@ref))
 - `reference_state`: Fixed hydrostatically-balanced reference state for base-state pressure correction (`nothing` or [`ExnerReferenceState`](@ref))
+- `terrain_metrics`: [`TerrainMetrics`](@ref) for terrain-following coordinates (or `nothing`)
+- `Ω̃`, `ρΩ̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
+- `terrain_reference_pressure`, `terrain_reference_density`: 3D reference pressure / density for the terrain pressure gradient force (or `nothing`)
 
 The `time_discretization` determines how tendencies are computed and which
 time-stepper is used:
@@ -62,15 +65,23 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               standard_pressure = 1e5,
                               surface_pressure = 101325.0,
                               reference_potential_temperature = nothing,
+                              reference_temperature = nothing,
                               terrain_metrics = nothing) where TD
 
     FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
     pˢᵗ = convert(FT, standard_pressure)
     p₀ = convert(FT, surface_pressure)
-    # Store reference_potential_temperature temporarily; ExnerReferenceState is built in materialize_dynamics
-    # terrain_metrics is passed through and stored; contravariant fields are created during materialization
-    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀,
-                                reference_potential_temperature, terrain_metrics,
+    # Store reference spec temporarily; ExnerReferenceState is built in materialize_dynamics.
+    # If reference_temperature is given, store it as a NamedTuple to distinguish from θ₀.
+    ref_spec = if reference_temperature !== nothing
+        (; reference_temperature)
+    else
+        reference_potential_temperature
+    end
+    # contravariant fields, terrain_reference_pressure, and terrain_reference_density
+    # are built later in materialize_dynamics.
+    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, ref_spec,
+                                terrain_metrics,
                                 nothing, nothing, nothing, nothing)
 end
 
@@ -110,7 +121,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     standard_pressure = convert(FT, dynamics.standard_pressure)
     surface_pressure = convert(FT, dynamics.surface_pressure)
 
-    # Build reference state if reference_potential_temperature was provided.
+    # Build reference state from the stored spec (θ₀, T₀ NamedTuple, or nothing).
     # ExnerReferenceState builds the Exner function π₀ by discrete integration,
     # ensuring exact discrete Exner hydrostatic balance. This is used for both
     # split-explicit (acoustic substepping) and explicit time stepping.
@@ -119,19 +130,27 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     # because Δz varies per column. The column-1 reference creates a mismatch at
     # other columns that generates spurious vertical accelerations. Instead, terrain
     # grids use only the 3D terrain_reference_pressure for the horizontal PG.
-    θ₀ = dynamics.reference_state  # temporarily stored θ₀ (or nothing)
+    ref_spec = dynamics.reference_state
     terrain_metrics = dynamics.terrain_metrics
 
-    if θ₀ === nothing || terrain_metrics !== nothing
+    if ref_spec === nothing || terrain_metrics !== nothing
         reference_state = nothing
-    else
+    elseif ref_spec isa NamedTuple && haskey(ref_spec, :reference_temperature)
+        # Isothermal base state (MPAS baroclinic wave convention)
         reference_state = ExnerReferenceState(grid, thermodynamic_constants;
                                               surface_pressure,
-                                              potential_temperature = θ₀,
+                                              reference_temperature = ref_spec.reference_temperature,
+                                              standard_pressure)
+    else
+        # Isentropic base state (constant or z-dependent θ₀)
+        reference_state = ExnerReferenceState(grid, thermodynamic_constants;
+                                              surface_pressure,
+                                              potential_temperature = ref_spec,
                                               standard_pressure)
     end
 
-    # Create contravariant velocity/momentum fields if terrain metrics are present
+    # Create contravariant velocity/momentum fields and terrain reference state
+    # if terrain metrics are present.
     if terrain_metrics === nothing
         contravariant_vertical_velocity = nothing
         contravariant_vertical_momentum = nothing
@@ -148,7 +167,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         # the truncation error from the near-cancellation of ∂p/∂z and -gρ in
         # the vertical momentum equation. The reference pressure is also used for
         # the perturbation horizontal PG to reduce terrain-following PGF errors.
-        if θ₀ === nothing
+        if ref_spec === nothing
             terrain_reference_pressure = nothing
             terrain_reference_density = nothing
         else
@@ -156,9 +175,23 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
             terrain_reference_density = CenterField(grid)
             compute_terrain_reference_state!(terrain_reference_pressure,
                                              terrain_reference_density,
-                                             grid, surface_pressure, θ₀,
+                                             grid, surface_pressure, ref_spec,
                                              standard_pressure, thermodynamic_constants)
         end
+    end
+
+    # Seed the diagnostic pressure with the reference profile (or surface pressure if
+    # no reference state is built). Without this, the very first `update_state!` runs
+    # sat-adjust against an uninitialized (zero) pressure field, which produces NaN
+    # temperatures because the Exner function `(p/pˢᵗ)^κ` collapses to zero.
+    # `compute_auxiliary_dynamics_variables!` overwrites pressure properly on every
+    # subsequent call.
+    if reference_state isa ExnerReferenceState
+        Oceananigans.set!(pressure, reference_state.pressure)
+    elseif terrain_reference_pressure !== nothing
+        Oceananigans.set!(pressure, terrain_reference_pressure)
+    else
+        Oceananigans.set!(pressure, surface_pressure)
     end
 
     return CompressibleDynamics(dynamics.time_discretization, density, pressure,
@@ -166,8 +199,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
                                 terrain_metrics,
                                 contravariant_vertical_velocity,
                                 contravariant_vertical_momentum,
-                                terrain_reference_pressure,
-                                terrain_reference_density)
+                                terrain_reference_pressure, terrain_reference_density)
 end
 
 #####
@@ -247,6 +279,40 @@ Return the standard pressure for potential temperature calculations.
 """
 AtmosphereModels.standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
 
+"""
+$(TYPEDSIGNATURES)
+
+Return a reference state suitable for boundary-condition diagnostics.
+
+Boundary conditions are materialized before `materialize_dynamics` runs, so the
+stub `CompressibleDynamics.reference_state` field still holds the user's raw
+`reference_potential_temperature` spec (a constant, function, or NamedTuple)
+rather than an `ExnerReferenceState`. When called on the stub, this method
+builds the `ExnerReferenceState` on demand using the same logic as
+`materialize_dynamics`. When the dynamics has already been materialized (or has
+no reference state), the existing field is returned.
+"""
+function AtmosphereModels.bcs_reference_state(dynamics::CompressibleDynamics, grid, thermodynamic_constants)
+    ref_spec = dynamics.reference_state
+    ref_spec === nothing && return nothing
+    ref_spec isa ExnerReferenceState && return ref_spec
+
+    standard_pressure = dynamics.standard_pressure
+    surface_pressure = dynamics.surface_pressure
+
+    if ref_spec isa NamedTuple && haskey(ref_spec, :reference_temperature)
+        return ExnerReferenceState(grid, thermodynamic_constants;
+                                   surface_pressure,
+                                   reference_temperature = ref_spec.reference_temperature,
+                                   standard_pressure)
+    else
+        return ExnerReferenceState(grid, thermodynamic_constants;
+                                   surface_pressure,
+                                   potential_temperature = ref_spec,
+                                   standard_pressure)
+    end
+end
+
 #####
 ##### Pressure solver (none needed for compressible dynamics)
 #####
@@ -264,13 +330,13 @@ $(TYPEDSIGNATURES)
 
 Return the default timestepper for `CompressibleDynamics` based on its `time_discretization`.
 
-- [`SplitExplicitTimeDiscretization`](@ref): Returns `:AcousticSSPRungeKutta3` for acoustic substepping
+- [`SplitExplicitTimeDiscretization`](@ref): Returns `:AcousticRungeKutta3` for acoustic substepping
 - [`ExplicitTimeStepping`](@ref): Returns `:SSPRungeKutta3` for standard explicit time-stepping
 """
 AtmosphereModels.default_timestepper(dynamics::CompressibleDynamics) =
     default_timestepper(dynamics.time_discretization)
 
-default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticSSPRungeKutta3
+default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticRungeKutta3
 default_timestepper(::ExplicitTimeStepping) = :SSPRungeKutta3
 
 #####

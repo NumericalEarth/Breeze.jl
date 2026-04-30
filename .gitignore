@@ -31,9 +31,12 @@ Manifest-v*.toml
 # output files
 *.jld2
 *.nc
+*.gif
+*.pdf
 *.png
 *.mp4
 *.svg
+*.zip
 
 # other files we don't want
 *.swp
@@ -43,6 +46,7 @@ Manifest-v*.toml
 # Claude Code — ignore user-specific settings, track shared rules/skills
 .claude/settings.local.json
 .claude/debug/
+.claude/*.lock
 
 # Paper references (kept locally only)
 examples/tropical_cyclone_world.md

@@ -1,7 +1,7 @@
 #####
 ##### Tests for acoustic substepping in CompressibleDynamics
 #####
-##### These tests verify that the AcousticSSPRungeKutta3 and AcousticRungeKutta3
+##### These tests verify that the AcousticRungeKutta3 (WS-RK3)
 ##### time steppers produce stable, correct results with the Exner pressure
 ##### acoustic substepping formulation.
 #####
@@ -41,21 +41,25 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
         td = SplitExplicitTimeDiscretization()
         acoustic = AcousticSubstepper(grid, td)
         @test acoustic.substeps === nothing  # adaptive by default
-        @test acoustic.forward_weight ≈ FT(0.6)
-        @test acoustic.divergence_damping_coefficient ≈ FT(0.10)
-        @test acoustic.exner_perturbation isa Oceananigans.Fields.Field
-        @test acoustic.virtual_potential_temperature isa Oceananigans.Fields.Field
-        @test acoustic.acoustic_compression isa Oceananigans.Fields.Field
+        @test acoustic.forward_weight ≈ FT(0.65)  # off-centered CN, ε = 2ω - 1 = 0.3
+        # Default damping is ThermalDivergenceDamping(0.1) (Klemp/Skamarock/Ha 2018
+        # with Baldauf 2010 anisotropic scaling, vertical part folded into the
+        # column tridiag); required for stability of the WS-RK3 + substepper
+        # coupling at production Δt.
+        @test acoustic.damping isa ThermalDivergenceDamping
+        @test acoustic.damping.coefficient ≈ FT(0.1)
+        @test acoustic.linearization_potential_temperature isa Oceananigans.Fields.Field
     end
 
     @testset "Custom parameters" begin
         td = SplitExplicitTimeDiscretization(substeps=10,
                                               forward_weight=0.55,
-                                              divergence_damping_coefficient=0.2)
+                                              damping=ThermalDivergenceDamping(coefficient=0.2))
         acoustic = AcousticSubstepper(grid, td)
         @test acoustic.substeps == 10
         @test acoustic.forward_weight ≈ FT(0.55)
-        @test acoustic.divergence_damping_coefficient ≈ FT(0.2)
+        @test acoustic.damping isa ThermalDivergenceDamping
+        @test acoustic.damping.coefficient ≈ FT(0.2)
     end
 end
 
@@ -70,12 +74,12 @@ end
     @testset "1 km grid, Δt=12" begin
         grid = RectilinearGrid(acoustic_test_arch; size=(100, 6, 10), halo=(5, 5, 5),
                                x=(0, 100kilometers), y=(0, 6kilometers), z=(0, 10kilometers))
-        # Δx = 1000 m, ℂᵃᶜ ≈ 347 m/s, safety factor 1.2
-        # N = ceil(1.2 * 12 * 347 / 1000) = ceil(4.99) = 5
+        # Δx = 1000 m, ℂᵃᶜ ≈ 347 m/s, safety factor 2.0 → acoustic CFL ≈ 0.5 (ERF/WRF target)
+        # N = ceil(2.0 * 12 * 347 / 1000) = ceil(8.33) = 9
         N = compute_acoustic_substeps(grid, 12, constants)
         @test N isa Int
         @test N ≥ 1
-        @test N == ceil(Int, 1.2 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
+        @test N == ceil(Int, 2.0 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
     end
 
     @testset "Flat y-topology" begin
@@ -84,7 +88,7 @@ end
                                topology=(Periodic, Flat, Bounded))
         # Should use only Δx, not Δy
         N = compute_acoustic_substeps(grid, 12, constants)
-        N_expected = ceil(Int, 1.2 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
+        N_expected = ceil(Int, 2.0 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
         @test N == N_expected
     end
 end
@@ -92,22 +96,6 @@ end
 #####
 ##### Test time stepper construction
 #####
-
-@testset "AcousticSSPRungeKutta3 construction [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(acoustic_test_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
-
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
-    model = AtmosphereModel(grid;
-                            dynamics,
-                            timestepper=:AcousticSSPRungeKutta3)
-
-    @test model.timestepper isa AcousticSSPRungeKutta3
-    @test model.timestepper.substepper isa AcousticSubstepper
-    @test model.timestepper.α¹ ≈ FT(1)
-    @test model.timestepper.α² ≈ FT(1//4)
-    @test model.timestepper.α³ ≈ FT(2//3)
-end
 
 @testset "AcousticRungeKutta3 construction [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -126,7 +114,7 @@ end
 end
 
 #####
-##### Test that default time stepper for split-explicit is SSP-RK3
+##### Test that default time stepper for split-explicit is AcousticRungeKutta3 (WS-RK3)
 #####
 
 @testset "Default time stepper for SplitExplicitTimeDiscretization [$(FT)]" for FT in test_float_types()
@@ -136,36 +124,12 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
     model = AtmosphereModel(grid; dynamics)
 
-    @test model.timestepper isa AcousticSSPRungeKutta3
+    @test model.timestepper isa AcousticRungeKutta3
 end
 
 #####
 ##### Test that models with acoustic substepping run without NaN
 #####
-
-@testset "SSP-RK3 model runs without NaN [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(acoustic_test_arch; size=(8, 8, 8), halo=(5, 5, 5),
-                           x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
-
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                   reference_potential_temperature=300)
-    model = AtmosphereModel(grid;
-                            advection=WENO(),
-                            dynamics,
-                            timestepper=:AcousticSSPRungeKutta3)
-
-    ref = model.dynamics.reference_state
-    set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
-
-    simulation = Simulation(model; Δt=6, stop_iteration=5, verbose=false)
-    run!(simulation)
-
-    @test model.clock.iteration == 5
-    @test !any(isnan, parent(model.momentum.ρu))
-    @test !any(isnan, parent(model.momentum.ρw))
-    @test !any(isnan, parent(model.dynamics.density))
-end
 
 @testset "WS-RK3 model runs without NaN [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -198,7 +162,7 @@ end
 ##### at advection-limited Δt=12 to verify the acoustic substepping is stable.
 #####
 
-function build_igw_model(; timestepper=:AcousticSSPRungeKutta3, Ns=8, κᵈ=0.05)
+function build_igw_model(; timestepper=:AcousticRungeKutta3, Ns=8, κᵈ=0.05)
     Nx, Ny, Nz = 100, 6, 10
     Lx, Ly, Lz = 100kilometers, 6kilometers, 10kilometers
 
@@ -220,7 +184,8 @@ function build_igw_model(; timestepper=:AcousticSSPRungeKutta3, Ns=8, κᵈ=0.05
     x₀ = Lx / 3
     θᵢ(x, y, z) = θᵇᵍ(z) + Δθ * sin(π * z / Lz) / (1 + (x - x₀)^2 / a^2)
 
-    td = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=κᵈ)
+    td = SplitExplicitTimeDiscretization(substeps=Ns,
+                                         damping=ThermalDivergenceDamping(coefficient=κᵈ))
     dynamics = CompressibleDynamics(td; surface_pressure=p₀,
                                       reference_potential_temperature=θᵇᵍ)
 
@@ -230,27 +195,6 @@ function build_igw_model(; timestepper=:AcousticSSPRungeKutta3, Ns=8, κᵈ=0.05
     set!(model; θ=θᵢ, u=U, qᵗ=0, ρ=ref.density)
 
     return model
-end
-
-@testset "IGW stability: SSP-RK3 (Δt=12, Ns=8) [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-
-    model = build_igw_model(timestepper=:AcousticSSPRungeKutta3, Ns=8, κᵈ=0.05)
-
-    simulation = Simulation(model; Δt=12, stop_iteration=20, verbose=false)
-    run!(simulation)
-
-    @test model.clock.iteration == 20
-    @test !any(isnan, parent(model.dynamics.density))
-    @test !any(isnan, parent(model.momentum.ρw))
-
-    # max|w| should remain bounded (the IGW problem has max|w| ~ 0.003 at t=3000s)
-    w_max = @allowscalar maximum(abs, interior(model.velocities.w))
-    @test w_max < 1.0  # Should be O(0.001), definitely < 1 m/s
-
-    # Density should remain physical
-    ρ_min = @allowscalar minimum(interior(model.dynamics.density))
-    @test ρ_min > 0
 end
 
 @testset "IGW stability: WS-RK3 (Δt=12, Ns=8) [$(FT)]" for FT in test_float_types()
@@ -272,6 +216,128 @@ end
     # Density should remain physical
     ρ_min = @allowscalar minimum(interior(model.dynamics.density))
     @test ρ_min > 0
+end
+
+#####
+##### Dry thermal bubble: split-explicit / explicit / anelastic consistency
+#####
+##### This is a small wiring regression, not a benchmark. The documented
+##### examples cover longer physical integrations. Here we only check that
+##### the split-explicit path produces the same short-time buoyant response
+##### scale as explicit compressible dynamics and the anelastic model.
+#####
+
+function build_tiny_dry_bubble_model(kind)
+    grid = RectilinearGrid(acoustic_test_arch;
+                           size = (16, 16),
+                           halo = (5, 5),
+                           x = (-8kilometers, 8kilometers),
+                           z = (0, 8kilometers),
+                           topology = (Periodic, Flat, Bounded))
+
+    constants = ThermodynamicConstants()
+    g = constants.gravitational_acceleration
+    Rᵈ = dry_air_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    κ = Rᵈ / cᵖᵈ
+    surface_pressure = 100000
+    standard_pressure = 100000
+    θ₀ = 300
+    N² = 0
+    θ_background(z) = θ₀ * exp(N² * z / g)
+    reference_exner(z) = (surface_pressure / standard_pressure)^κ - g * z / (cᵖᵈ * θ₀)
+    reference_pressure(z) = standard_pressure * reference_exner(z)^(1 / κ)
+
+    if kind === :anelastic
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure,
+                                         potential_temperature = θ_background)
+        dynamics = AnelasticDynamics(reference_state)
+        timestepper = :SSPRungeKutta3
+    elseif kind === :explicit
+        dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                        surface_pressure,
+                                        standard_pressure,
+                                        reference_potential_temperature = θ_background)
+        timestepper = :SSPRungeKutta3
+    elseif kind === :split_explicit
+        time_discretization = SplitExplicitTimeDiscretization(; substeps = 6)
+        dynamics = CompressibleDynamics(time_discretization;
+                                        surface_pressure,
+                                        standard_pressure,
+                                        reference_potential_temperature = θ_background)
+        timestepper = :AcousticRungeKutta3
+    else
+        error("Unknown tiny bubble model kind: $kind")
+    end
+
+    model = AtmosphereModel(grid; advection = WENO(), dynamics, timestepper)
+
+    Δθ = 10
+    radius = 2kilometers
+    xᵇ = 0
+    zᵇ = 3kilometers
+    θ_initial(x, z) = θ_background(z) + Δθ * max(0, 1 - sqrt((x - xᵇ)^2 + (z - zᵇ)^2) / radius)
+    ρ_initial(x, z) = reference_pressure(z) / (Rᵈ * θ_initial(x, z) * reference_exner(z))
+
+    if kind === :anelastic
+        set!(model; θ = θ_initial, qᵗ = 0)
+    else
+        set!(model; θ = θ_initial, ρ = ρ_initial, qᵗ = 0)
+    end
+
+    return model
+end
+
+function tiny_bubble_diagnostics(model)
+    w = Array(interior(model.velocities.w))
+    positive_w = max.(0, w)
+    max_w = maximum(positive_w)
+    total_positive_w = sum(positive_w)
+
+    grid = model.grid
+    z_faces = [znode(1, 1, k, grid, Center(), Center(), Face()) for k in axes(w, 3)]
+    zᵂ = sum(sum(view(positive_w, :, :, k)) * z_faces[k] for k in axes(w, 3)) / total_positive_w
+
+    return (; max_w, zᵂ)
+end
+
+@testset "Tiny dry thermal bubble consistency [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    anelastic_model = build_tiny_dry_bubble_model(:anelastic)
+    explicit_model = build_tiny_dry_bubble_model(:explicit)
+    split_model = build_tiny_dry_bubble_model(:split_explicit)
+
+    simulations = (
+        Simulation(anelastic_model; Δt = 0.5, stop_time = 0.5, verbose = false),
+        Simulation(explicit_model; Δt = 0.25, stop_time = 0.5, verbose = false),
+        Simulation(split_model; Δt = 0.5, stop_time = 0.5, verbose = false),
+    )
+
+    run!.(simulations)
+
+    anelastic = tiny_bubble_diagnostics(anelastic_model)
+    explicit = tiny_bubble_diagnostics(explicit_model)
+    split = tiny_bubble_diagnostics(split_model)
+
+    for model in (anelastic_model, explicit_model, split_model)
+        @test !any(isnan, parent(model.velocities.w))
+        @test !any(isinf, parent(model.velocities.w))
+    end
+
+    @test anelastic.max_w > 0
+    @test explicit.max_w > 0
+    @test split.max_w > 0
+
+    @test isapprox(split.max_w, explicit.max_w; rtol = 0.25)
+    # Anelastic dynamics filters acoustic adjustment, so only require the
+    # same short-time buoyant response scale and centroid.
+    @test isapprox(split.max_w, anelastic.max_w; rtol = 1.25)
+
+    Δz = anelastic_model.grid.Lz / anelastic_model.grid.Nz
+    @test abs(split.zᵂ - explicit.zᵂ) ≤ Δz
+    @test abs(split.zᵂ - anelastic.zᵂ) ≤ 2Δz
 end
 
 #####
@@ -313,8 +379,9 @@ end
     grid = RectilinearGrid(acoustic_test_arch; size=(8, 8, 8), halo=(5, 5, 5),
                            x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
 
-    # Use nonzero acoustic_damping_coefficient to exercise _acoustic_divergence_damping! kernel
-    td = SplitExplicitTimeDiscretization(substeps=8, acoustic_damping_coefficient=FT(0.5))
+    # Exercise the divergence-damping path with the typed AcousticDampingStrategy.
+    td = SplitExplicitTimeDiscretization(substeps=8,
+                                         damping=ThermalDivergenceDamping(coefficient=FT(0.5)))
     dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
     model = AtmosphereModel(grid; advection=WENO(), dynamics,
                             timestepper=:AcousticRungeKutta3)
