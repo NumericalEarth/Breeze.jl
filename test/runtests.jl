@@ -1,6 +1,6 @@
 import Breeze
 using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests
-using Test
+using Pkg.Artifacts: ensure_artifact_installed
 
 # Start with autodiscovered tests
 testsuite = find_tests(@__DIR__)
@@ -42,5 +42,10 @@ const init_code = quote
     # Returns both Float32 and Float64 for tests that need both precision levels
     all_float_types() = (Float32, Float64)
 end
+
+# Install artifacts before running the tests, to avoid spurious failures to
+# concurrent downloads, or doctests not liking the extra messages printed to
+# screen during the download.
+ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
 
 runtests(Breeze, args; testsuite, init_code)

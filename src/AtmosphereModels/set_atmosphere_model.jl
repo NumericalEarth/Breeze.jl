@@ -153,6 +153,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
     names = collect(keys(kw))
     prioritized = prioritize_names(names)
+    total_moisture_was_set = false
 
     for name in prioritized
         value = kw[name]
@@ -165,7 +166,14 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             c = getproperty(model.tracers, name)
             set!(c, value)
 
-        elseif name ∈ (:ρqᵗ, :ρqᵛ, :ρqᵉ)
+        elseif name == :ρqᵗ
+            set!(model.moisture_density, value)
+            ρ = dynamics_density(model.dynamics)
+            qᵛᵉ = specific_prognostic_moisture(model)
+            set!(qᵛᵉ, model.moisture_density / ρ)
+            total_moisture_was_set = true
+
+        elseif name ∈ (:ρqᵛ, :ρqᵉ)
             set!(model.moisture_density, value)
             ρ = dynamics_density(model.dynamics)
             qᵛᵉ = specific_prognostic_moisture(model)
@@ -183,7 +191,14 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             ρ = dynamics_density(model.dynamics)
             set!(ρμ, ρ * ρμ)
 
-        elseif name ∈ (:qᵗ, :qᵛ, :qᵉ)
+        elseif name == :qᵗ
+            qᵛᵉ = specific_prognostic_moisture(model)
+            set!(qᵛᵉ, value)
+            ρ = dynamics_density(model.dynamics)
+            set!(model.moisture_density, ρ * qᵛᵉ)
+            total_moisture_was_set = true
+
+        elseif name ∈ (:qᵛ, :qᵉ)
             qᵛᵉ = specific_prognostic_moisture(model)
             set!(qᵛᵉ, value)
             ρ = dynamics_density(model.dynamics)
@@ -237,6 +252,19 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
                        - specific microphysical variables: $specific_microphysical"
 
             throw(ArgumentError(msg))
+        end
+    end
+
+    if total_moisture_was_set
+        ρ = dynamics_density(model.dynamics)
+        qᵗ = model.moisture_density / ρ
+
+        if !isnothing(model.microphysics) &&
+           hasmethod(specific_prognostic_moisture_from_total,
+                     Tuple{typeof(model.microphysics), typeof(qᵗ), typeof(model.microphysical_fields), typeof(ρ)})
+            qᵛᵉ = specific_prognostic_moisture(model)
+            set!(qᵛᵉ, specific_prognostic_moisture_from_total(model.microphysics, qᵗ, model.microphysical_fields, ρ))
+            set!(model.moisture_density, ρ * qᵛᵉ)
         end
     end
 

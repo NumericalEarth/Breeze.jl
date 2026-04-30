@@ -1,0 +1,477 @@
+#####
+##### P3 Integral Types
+#####
+##### This file defines abstract and concrete types for the 29 ice integrals
+##### plus rain integrals used in the P3 microphysics scheme.
+#####
+##### Each integral type can be evaluated via quadrature or tabulated for efficiency.
+##### The type hierarchy groups integrals by physical concept.
+#####
+##### References:
+##### - Fall speed integrals: Morrison & Milbrandt (2015a) Table 3
+##### - Deposition/ventilation integrals: Morrison & Milbrandt (2015a) Eqs. 30-32
+##### - Collection integrals: Morrison & Milbrandt (2015a) Eqs. 36-42
+##### - Sixth moment integrals: Milbrandt et al. (2021) Table 1, Morrison et al. (2025)
+##### - Lambda limiter integrals: Morrison & Milbrandt (2015a) Section 2b
+##### - Rain integrals: Morrison & Milbrandt (2015a) Eqs. 46-47
+#####
+
+#####
+##### Abstract hierarchy
+#####
+
+"""
+    AbstractP3Integral
+
+Abstract supertype for all P3 scheme integrals over particle size distributions.
+"""
+abstract type AbstractP3Integral end
+
+"""
+    AbstractIceIntegral <: AbstractP3Integral
+
+Abstract supertype for ice particle integrals.
+"""
+abstract type AbstractIceIntegral <: AbstractP3Integral end
+
+"""
+    AbstractRainIntegral <: AbstractP3Integral
+
+Abstract supertype for rain particle integrals.
+"""
+abstract type AbstractRainIntegral <: AbstractP3Integral end
+
+#####
+##### Ice integral categories (29 total)
+#####
+
+# Fall speed integrals (3)
+abstract type AbstractFallSpeedIntegral <: AbstractIceIntegral end
+
+# Deposition/ventilation integrals (6)
+abstract type AbstractDepositionIntegral <: AbstractIceIntegral end
+
+# Bulk property integrals (7)
+abstract type AbstractBulkPropertyIntegral <: AbstractIceIntegral end
+
+# Collection integrals (2)
+abstract type AbstractCollectionIntegral <: AbstractIceIntegral end
+
+# Sixth moment integrals (9)
+abstract type AbstractSixthMomentIntegral <: AbstractIceIntegral end
+
+# Lambda limiter integrals (2)
+abstract type AbstractLambdaLimiterIntegral <: AbstractIceIntegral end
+
+#####
+##### Fall speed integrals (3)
+#####
+##### uns, ums, uzs in Fortran
+#####
+
+"""
+    NumberWeightedFallSpeed <: AbstractFallSpeedIntegral
+
+Number-weighted mean fall speed:
+
+```math
+V_n = \\frac{\\int_0^\\infty V(D) N'(D) \\, dD}{\\int_0^\\infty N'(D) \\, dD}
+```
+
+Corresponds to `uns` in P3 Fortran code.
+"""
+struct NumberWeightedFallSpeed <: AbstractFallSpeedIntegral end
+
+"""
+    MassWeightedFallSpeed <: AbstractFallSpeedIntegral
+
+Mass-weighted mean fall speed:
+
+```math
+V_m = \\frac{\\int_0^\\infty V(D) m(D) N'(D) \\, dD}{\\int_0^\\infty m(D) N'(D) \\, dD}
+```
+
+Corresponds to `ums` in P3 Fortran code.
+"""
+struct MassWeightedFallSpeed <: AbstractFallSpeedIntegral end
+
+"""
+    ReflectivityWeightedFallSpeed <: AbstractFallSpeedIntegral
+
+Reflectivity-weighted (6th moment) mean fall speed for 3-moment ice:
+
+```math
+V_z = \\frac{\\int_0^\\infty V(D) D^6 N'(D) \\, dD}{\\int_0^\\infty D^6 N'(D) \\, dD}
+```
+
+Corresponds to `uzs` in P3 Fortran code.
+"""
+struct ReflectivityWeightedFallSpeed <: AbstractFallSpeedIntegral end
+
+#####
+##### Deposition/ventilation integrals (6)
+#####
+##### vdep, vdep1, vdepm1, vdepm2, vdepm3, vdepm4 in Fortran
+#####
+
+"""
+    Ventilation <: AbstractDepositionIntegral
+
+Basic ventilation factor for vapor diffusion.
+Corresponds to `vdep` in P3 Fortran code.
+"""
+struct Ventilation <: AbstractDepositionIntegral end
+
+"""
+    VentilationEnhanced <: AbstractDepositionIntegral
+
+Enhanced ventilation factor for particles > 100 μm.
+Corresponds to `vdep1` in P3 Fortran code.
+"""
+struct VentilationEnhanced <: AbstractDepositionIntegral end
+
+"""
+    SmallIceVentilationConstant <: AbstractDepositionIntegral
+
+Ventilation for small ice (D ≤ D_crit), constant term.
+Melted water from these particles transfers to rain.
+Corresponds to `vdepm1` in P3 Fortran code.
+"""
+struct SmallIceVentilationConstant <: AbstractDepositionIntegral end
+
+"""
+    SmallIceVentilationReynolds <: AbstractDepositionIntegral
+
+Ventilation for small ice (D ≤ D_crit), Reynolds-dependent term.
+Melted water from these particles transfers to rain.
+Corresponds to `vdepm2` in P3 Fortran code.
+"""
+struct SmallIceVentilationReynolds <: AbstractDepositionIntegral end
+
+"""
+    LargeIceVentilationConstant <: AbstractDepositionIntegral
+
+Ventilation for large ice (D > D_crit), constant term.
+Melted water from these particles accumulates as liquid on ice.
+Corresponds to `vdepm3` in P3 Fortran code.
+"""
+struct LargeIceVentilationConstant <: AbstractDepositionIntegral end
+
+"""
+    LargeIceVentilationReynolds <: AbstractDepositionIntegral
+
+Ventilation for large ice (D > D_crit), Reynolds-dependent term.
+Melted water from these particles accumulates as liquid on ice.
+Corresponds to `vdepm4` in P3 Fortran code.
+"""
+struct LargeIceVentilationReynolds <: AbstractDepositionIntegral end
+
+#####
+##### Bulk property integrals (7)
+#####
+##### eff, dmm, rhomm, refl, lambda_i, mu_i_save, qshed in Fortran
+#####
+
+"""
+    EffectiveRadius <: AbstractBulkPropertyIntegral
+
+Effective radius for radiative calculations.
+Corresponds to `eff` in P3 Fortran code.
+"""
+struct EffectiveRadius <: AbstractBulkPropertyIntegral end
+
+"""
+    MeanDiameter <: AbstractBulkPropertyIntegral
+
+Mass-weighted mean diameter.
+Corresponds to `dmm` in P3 Fortran code.
+"""
+struct MeanDiameter <: AbstractBulkPropertyIntegral end
+
+"""
+    MeanDensity <: AbstractBulkPropertyIntegral
+
+Mass-weighted mean particle density.
+Corresponds to `rhomm` in P3 Fortran code.
+"""
+struct MeanDensity <: AbstractBulkPropertyIntegral end
+
+"""
+    Reflectivity <: AbstractBulkPropertyIntegral
+
+Radar reflectivity factor (6th moment of size distribution).
+Corresponds to `refl` in P3 Fortran code (sum5 convention, no Rayleigh prefactor).
+"""
+struct Reflectivity <: AbstractBulkPropertyIntegral end
+
+"""
+    RayleighReflectivity <: AbstractBulkPropertyIntegral
+
+Rayleigh-scattering radar reflectivity including the dielectric factor ``|K_w|^2``.
+Corresponds to `refl2` in P3 Fortran code (create_p3_lookupTable_1.f90, lines 1227-1268).
+
+For dry ice (Fl = 0): uses ``0.1892 × (6/(π ρ_i))^2 × m^2`` where ``0.1892 ≈ |K_w|^2``
+is the dielectric factor for liquid water at 10 cm wavelength.
+
+For pure liquid (Fl = 1): uses ``D^6`` (equivalent radar reflectivity for water drops).
+
+For intermediate Fl: linearly blends the dry-ice and pure-liquid formulas.
+The Fortran uses full Maxwell-Garnett dielectric mixing via `rayleigh_soak_wetice`
+for intermediate Fl — this is a linear approximation.
+"""
+struct RayleighReflectivity <: AbstractBulkPropertyIntegral end
+
+"""
+    SlopeParameter <: AbstractBulkPropertyIntegral
+
+Slope parameter λ of the gamma size distribution.
+Corresponds to `lambda_i` in P3 Fortran code.
+"""
+struct SlopeParameter <: AbstractBulkPropertyIntegral end
+
+"""
+    ShapeParameter <: AbstractBulkPropertyIntegral
+
+Shape parameter μ of the gamma size distribution.
+Corresponds to `mu_i_save` in P3 Fortran code.
+"""
+struct ShapeParameter <: AbstractBulkPropertyIntegral end
+
+"""
+    SheddingRate <: AbstractBulkPropertyIntegral
+
+Rate of meltwater shedding from ice particles.
+Corresponds to `qshed` in P3 Fortran code.
+"""
+struct SheddingRate <: AbstractBulkPropertyIntegral end
+
+#####
+##### Collection integrals (2)
+#####
+##### nagg, nrwat in Fortran
+#####
+
+"""
+    AggregationNumber <: AbstractCollectionIntegral
+
+Number tendency from ice-ice aggregation.
+Corresponds to `nagg` in P3 Fortran code.
+"""
+struct AggregationNumber <: AbstractCollectionIntegral end
+
+"""
+    RainCollectionNumber <: AbstractCollectionIntegral
+
+Number tendency from rain collection by ice.
+Corresponds to `nrwat` in P3 Fortran code.
+"""
+struct RainCollectionNumber <: AbstractCollectionIntegral end
+
+"""
+    CloudAerosolCollection <: AbstractCollectionIntegral
+
+Slinn (1983) cloud/water aerosol collection integral (Fortran nawcol).
+Integrates projected area times fall speed over the ice PSD.
+"""
+struct CloudAerosolCollection <: AbstractCollectionIntegral end
+
+"""
+    IceAerosolCollection <: AbstractCollectionIntegral
+
+Slinn (1983) ice aerosol collection integral (Fortran naicol).
+Integrates projected area times fall speed over the ice PSD.
+"""
+struct IceAerosolCollection <: AbstractCollectionIntegral end
+
+#####
+##### Sixth moment integrals (11)
+#####
+##### m6rime, m6dep, m6dep1, m6mlt1, m6mlt2, m6mlt_all1, m6mlt_all2, m6agg, m6shd, m6sub, m6sub1 in Fortran
+#####
+##### M7 NORMALIZATION NOTE (Fortran create_p3_lookupTable_1.f90, lines 2127-2134):
+##### Fortran normalizes M6 integrals as:
+#####   value = 1/mom3² × sum_M6 - K × mom6/mom3³ × sum_M3
+##### where K differs by process:
+#####   K = 2: deposition, riming, shedding, rain collection (dM0/dt = 0)
+#####   K = 1: sublimation, melting (dM0/dt ≠ 0, includes number change contribution)
+##### The integrands below compute the raw sum_M6 terms; the K factor and mom3/mom6
+##### normalization are applied during tabulation or at runtime.
+##### When Julia generates its own tables, the tabulation code must apply the correct K.
+#####
+
+"""
+    SixthMomentRime <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from riming.
+Corresponds to `m6rime` in P3 Fortran code.
+"""
+struct SixthMomentRime <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentDeposition <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from vapor deposition.
+Corresponds to `m6dep` in P3 Fortran code.
+M7: Normalization uses K = 2 (deposition does not change particle number).
+"""
+struct SixthMomentDeposition <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentDeposition1 <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from vapor deposition (enhanced ventilation).
+Corresponds to `m6dep1` in P3 Fortran code.
+"""
+struct SixthMomentDeposition1 <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentMelt1 <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from melting (term 1).
+Corresponds to `m6mlt1` in P3 Fortran code.
+M7: Normalization uses K = 1 (melting changes particle number).
+"""
+struct SixthMomentMelt1 <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentMelt2 <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from melting (term 2).
+Corresponds to `m6mlt2` in P3 Fortran code.
+"""
+struct SixthMomentMelt2 <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentMeltAll1 <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from melting (term 1, all D).
+Unlike `SixthMomentMelt1` which restricts to D ≤ D_crit, this integrates
+over all particle diameters. Used in the non-liquid-fraction path.
+Note: Fortran P3 v5.5.0 non-liqfrac zimlt reuses deposition tables (f1pr30/f1pr31)
+and is gated by `log_full3mom=.false.` (dead code). This Julia integrand provides
+a proper all-D melt Z integral for completeness.
+"""
+struct SixthMomentMeltAll1 <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentMeltAll2 <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from melting (term 2, all D).
+Unlike `SixthMomentMelt2` which restricts to D ≤ D_crit, this integrates
+over all particle diameters. Used in the non-liquid-fraction path.
+See `SixthMomentMeltAll1` for Fortran context.
+"""
+struct SixthMomentMeltAll2 <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentAggregation <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from aggregation.
+Corresponds to `m6agg` in P3 Fortran code.
+"""
+struct SixthMomentAggregation <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentShedding <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from meltwater shedding.
+Corresponds to `m6shd` in P3 Fortran code.
+"""
+struct SixthMomentShedding <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentSublimation <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from sublimation.
+Corresponds to `m6sub` in P3 Fortran code.
+M7: Normalization uses K = 1 (sublimation changes particle number via complete removal).
+"""
+struct SixthMomentSublimation <: AbstractSixthMomentIntegral end
+
+"""
+    SixthMomentSublimation1 <: AbstractSixthMomentIntegral
+
+Sixth moment tendency from sublimation (enhanced ventilation).
+Corresponds to `m6sub1` in P3 Fortran code.
+"""
+struct SixthMomentSublimation1 <: AbstractSixthMomentIntegral end
+
+#####
+##### Lambda limiter integrals (2)
+#####
+##### i_qsmall, i_qlarge in Fortran
+#####
+
+"""
+    NumberMomentLambdaLimit <: AbstractLambdaLimiterIntegral
+
+Number moment integral for lambda limiting: ``∫ N'(D) \\, dD``.
+
+Used to constrain ``λ`` when ice mass mixing ratio is small.
+Corresponds to `i_qsmall` in P3 Fortran code.
+"""
+struct NumberMomentLambdaLimit <: AbstractLambdaLimiterIntegral end
+
+"""
+    MassMomentLambdaLimit <: AbstractLambdaLimiterIntegral
+
+Mass moment integral for lambda limiting: ``∫ m(D) N'(D) \\, dD``.
+
+Used to constrain ``λ`` when ice mass mixing ratio is large.
+Corresponds to `i_qlarge` in P3 Fortran code.
+"""
+struct MassMomentLambdaLimit <: AbstractLambdaLimiterIntegral end
+
+#####
+##### Rain integrals
+#####
+
+"""
+    RainShapeParameter <: AbstractRainIntegral
+
+Shape parameter μ_r for rain gamma distribution.
+"""
+struct RainShapeParameter <: AbstractRainIntegral end
+
+"""
+    RainVelocityNumber <: AbstractRainIntegral
+
+Number-weighted rain fall speed.
+"""
+struct RainVelocityNumber <: AbstractRainIntegral end
+
+"""
+    RainVelocityMass <: AbstractRainIntegral
+
+Mass-weighted rain fall speed.
+"""
+struct RainVelocityMass <: AbstractRainIntegral end
+
+"""
+    RainEvaporation <: AbstractRainIntegral
+
+Rain evaporation rate integral.
+"""
+struct RainEvaporation <: AbstractRainIntegral end
+
+#####
+##### Tabulated integral wrapper
+#####
+
+"""
+    TabulatedIntegral{A}
+
+A tabulated (precomputed) version of an integral stored as an array.
+Used for efficient lookup during simulation.
+
+# Fields
+- `data`: Array containing tabulated integral values indexed by
+  normalized ice mass, rime fraction, and liquid fraction.
+"""
+struct TabulatedIntegral{A}
+    data :: A
+end
+
+# Allow indexing into tabulated integrals
+Base.getindex(t::TabulatedIntegral, args...) = getindex(t.data, args...)
+Base.size(t::TabulatedIntegral) = size(t.data)
