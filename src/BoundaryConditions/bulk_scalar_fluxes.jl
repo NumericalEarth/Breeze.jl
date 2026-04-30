@@ -164,8 +164,8 @@ The flux is computed as:
 Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀)
 ```
 
-where `Cᵛ` is the transfer coefficient, `|U|` is the wind speed, `qᵗ` is the atmospheric
-specific humidity, and `qᵛ₀` is the saturation specific humidity at the surface.
+where ``Cᵛ`` is the transfer coefficient, ``|U|`` is the wind speed, ``qᵗ`` is the atmospheric
+specific humidity, and ``qᵛ₀`` is the saturation specific humidity at the surface.
 
 # Keyword Arguments
 
