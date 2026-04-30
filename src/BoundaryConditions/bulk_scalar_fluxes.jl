@@ -190,7 +190,7 @@ Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
 
 function Base.summary(bf::BulkVaporFluxFunction)
     summary_str = string("BulkVaporFluxFunction(coefficient=", prettysummary(bf.coefficient),
-                     ", gustiness=", prettysummary(bf.gustiness), ")")
+                         ", gustiness=", prettysummary(bf.gustiness), ")")
     if bf.filtered_velocities != nothing || bf.filtered_scalar != nothing
         summary_str *= ", with filtering"
     end
