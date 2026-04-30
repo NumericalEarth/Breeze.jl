@@ -20,7 +20,7 @@ using Breeze.CompressibleEquations:
     stage_fractions,
     acoustic_rk3_substep_loop!,
     prepare_acoustic_cache!,
-    freeze_outer_step_state!
+    freeze_linearization_state!
 
 """
 $(TYPEDEF)
@@ -175,7 +175,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     # and into the substepper's outer-step fields as the linearization
     # point.
     store_initial_state!(model)
-    freeze_outer_step_state!(ts.substepper, model)
+    freeze_linearization_state!(ts.substepper, model)
 
     # Stage 1: U* = Uⁿ + (Δt/3) R(Uⁿ)
     compute_flux_bc_tendencies!(model)

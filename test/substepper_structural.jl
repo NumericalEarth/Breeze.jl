@@ -21,7 +21,7 @@ using Breeze.CompressibleEquations: AcousticSubstepper,
                                     AcousticTridiagLower,
                                     AcousticTridiagDiagonal,
                                     AcousticTridiagUpper,
-                                    freeze_outer_step_state!,
+                                    freeze_linearization_state!,
                                     assemble_slow_vertical_momentum_tendency!
 using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
                            compute_slow_scalar_tendencies!
@@ -89,7 +89,7 @@ end
     model = _build_str_model(default_arch)
     sub   = model.timestepper.substepper
     _set_str_rest!(model)
-    freeze_outer_step_state!(sub, model)
+    freeze_linearization_state!(sub, model)
 
     grid = model.grid
     Rᵈ   = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
@@ -97,8 +97,8 @@ end
     γRᵈ  = cᵖᵈ * Rᵈ / (cᵖᵈ - Rᵈ)
     g    = model.thermodynamic_constants.gravitational_acceleration
 
-    Π⁰ = sub.outer_step_exner
-    θ⁰ = sub.outer_step_potential_temperature
+    Π⁰ = sub.linearization_exner
+    θ⁰ = sub.linearization_potential_temperature
     δτ_new = 0.5  # arbitrary
 
     b₁ = @allowscalar get_coefficient(1, 1, 1, grid, AcousticTridiagDiagonal(),
@@ -285,7 +285,7 @@ end
         end
         update_state!(model)
 
-        freeze_outer_step_state!(sub, model)
+        freeze_linearization_state!(sub, model)
         compute_slow_momentum_tendencies!(model)
         compute_slow_scalar_tendencies!(model)
         assemble_slow_vertical_momentum_tendency!(sub, model)
@@ -336,7 +336,7 @@ end
         end
         update_state!(model)
 
-        freeze_outer_step_state!(sub, model)
+        freeze_linearization_state!(sub, model)
         compute_slow_momentum_tendencies!(model)
         compute_slow_scalar_tendencies!(model)
         assemble_slow_vertical_momentum_tendency!(sub, model)

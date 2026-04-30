@@ -231,7 +231,7 @@ $(TYPEDEF)
 4th-order *hyperdiffusive* horizontal divergence damping. Identical in
 structure to [`ThermalDivergenceDamping`](@ref) — the per-substep
 momentum correction is the gradient of a (ρθ)′-tendency proxy divided
-by `θ⁰` at the face — but the proxy is replaced by the **horizontal
+by `θᴸ` at the face — but the proxy is replaced by the **horizontal
 Laplacian** of the (ρθ)′ tendency:
 
 ```math
@@ -326,6 +326,75 @@ end
 
 PressureExtrapolationDamping(; coefficient = 0.1) =
     PressureExtrapolationDamping{typeof(coefficient)}(coefficient)
+
+"""
+$(TYPEDEF)
+
+Direct divergence damping. Unlike [`ThermalDivergenceDamping`](@ref), which
+estimates the momentum divergence via the
+``(ρθ)' - (ρθ)'_\\mathrm{old}`` proxy à la
+[Klemp, Skamarock & Ha (2018)](@cite KlempSkamarockHa2018), this strategy
+computes the horizontal divergence ``D = ∂_x (ρu)' + ∂_y (ρv)'`` directly
+at cell centers and applies the damping:
+
+```math
+Δ(ρu)' = +γ_m \\, ∂_x D , \\qquad
+Δ(ρv)' = +γ_m \\, ∂_y D
+```
+
+with ``γ_m = α_m \\, d^2`` (units m², a per-substep diffusion length
+squared) and ``d^2 = Δx · Δy``. The 2-D combined explicit-Euler
+stability bound is ``α_m ≤ 0.25`` (same as `ThermalDivergenceDamping`).
+Note the *absence* of the ``/Δτ`` in `γ_m`: K18's ``γ = α · d^2 / Δτ``
+has the ``/Δτ`` only because the proxy ``(ρθ)' - (ρθ)'_\\mathrm{old} \\approx
+-Δτ \\, θ̄ \\, ∇\\!·m`` already carries an extra ``Δτ`` that cancels.
+
+Direct divergence avoids the proxy's approximations:
+
+- No linearization of the (ρθ) flux.
+- No contamination by the slow tendency ``Δτ \\, G^s_{ρθ}`` (which
+  carries WENO-advection grid-scale dispersive errors into the proxy).
+- No vertical-acoustic leakage from ``∂_z(θᴸ ρw')``: only horizontal
+  divergence enters.
+
+# Optional (ρθ)′ smoothing
+
+Setting ``α_θ > 0`` adds a Laplacian smoothing on the thermodynamic
+perturbation,
+[Skamarock & Klemp (1992)](@cite SkamarockKlemp1992)-style:
+
+```math
+Δ(ρθ)' = +γ_θ \\, ∇_h^2 (ρθ)'
+```
+
+with ``γ_θ = α_θ \\, d^2`` (same dimensional logic as ``γ_m`` above).
+This damps the **PE half-cycle** of the
+acoustic mode that momentum-only damping leaves alone, the (ρθ)/p oscillation
+that re-excites momentum each acoustic period. It's a numerical
+hyperviscosity on (ρθ)' — no enthalpy source/sink, just spatial smoothing
+of the perturbation. Resolved baroclinic gradients see some smoothing too,
+but with grid-scale e-folding ~minutes and 4-grid-cell e-folding ~days,
+the resolved physics is barely touched.
+
+Default ``α_θ = 0`` recovers the K18 / MPAS / WRF / ERF behavior of
+damping momentum only.
+
+# Fields
+
+- `momentum_coefficient`: ``α_m``, dimensionless. Default `0.1`.
+- `rhotheta_coefficient`: ``α_θ``, dimensionless. Default `0` (off).
+"""
+struct DivergenceDamping{FT} <: AcousticDampingStrategy
+    momentum_coefficient :: FT
+    rhotheta_coefficient :: FT
+end
+
+function DivergenceDamping(; momentum_coefficient = 0.1,
+                             rhotheta_coefficient = 0)
+    FT = promote_type(typeof(momentum_coefficient), typeof(rhotheta_coefficient))
+    return DivergenceDamping{FT}(convert(FT, momentum_coefficient),
+                                  convert(FT, rhotheta_coefficient))
+end
 
 #####
 ##### Split-explicit time discretization

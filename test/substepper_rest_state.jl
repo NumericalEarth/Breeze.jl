@@ -25,7 +25,7 @@
 using Breeze
 using Breeze: dynamics_density
 using Breeze.CompressibleEquations: AcousticSubstepper,
-                                    freeze_outer_step_state!,
+                                    freeze_linearization_state!,
                                     assemble_slow_vertical_momentum_tendency!
 using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
                            compute_slow_scalar_tendencies!
@@ -210,7 +210,7 @@ end
     set_rest_state!(model)
 
     sub = model.timestepper.substepper
-    freeze_outer_step_state!(sub, model)
+    freeze_linearization_state!(sub, model)
     compute_slow_momentum_tendencies!(model)
     compute_slow_scalar_tendencies!(model)
     assemble_slow_vertical_momentum_tendency!(sub, model)

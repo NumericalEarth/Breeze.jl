@@ -48,7 +48,7 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
         # coupling at production Δt.
         @test acoustic.damping isa ThermalDivergenceDamping
         @test acoustic.damping.coefficient ≈ FT(0.1)
-        @test acoustic.outer_step_potential_temperature isa Oceananigans.Fields.Field
+        @test acoustic.linearization_potential_temperature isa Oceananigans.Fields.Field
     end
 
     @testset "Custom parameters" begin

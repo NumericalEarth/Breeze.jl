@@ -16,7 +16,7 @@ end
 
 # For SplitExplicitTimeDiscretization: zero ONLY the vertical PGF and buoyancy.
 # These are computed from the linearized pp formula (§5-7) in _convert_slow_tendencies!,
-# using U⁰ values frozen across all RK stages (matching MPAS tend_w_euler at rk_step=1).
+# using Uᴸ values frozen across all RK stages (matching MPAS tend_w_euler at rk_step=1).
 #
 # The HORIZONTAL PGF is NOT zeroed — it flows through from the dynamics kernel
 # using the current state's pressure, matching MPAS which recomputes pp (and thus

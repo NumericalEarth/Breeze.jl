@@ -29,11 +29,13 @@ export
     ThermalDivergenceDamping,
     HyperdiffusiveDivergenceDamping,
     PressureExtrapolationDamping,
+    DivergenceDamping,
     ExplicitTimeStepping,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
     AtmosphereModel,
+    area_scaled_biharmonic_divergence_damping,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
@@ -227,7 +229,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping,
                               HyperdiffusiveDivergenceDamping, PressureExtrapolationDamping,
-                              ExplicitTimeStepping
+                              DivergenceDamping, ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel

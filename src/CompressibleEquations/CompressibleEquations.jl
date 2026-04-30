@@ -41,10 +41,11 @@ export
     ThermalDivergenceDamping,
     HyperdiffusiveDivergenceDamping,
     PressureExtrapolationDamping,
+    DivergenceDamping,
     ThermodynamicDivergenceDamping,
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
-    freeze_outer_step_state!,
+    freeze_linearization_state!,
     acoustic_rk3_substep_loop!
 
 using DocStringExtensions: TYPEDEF, TYPEDSIGNATURES
