@@ -244,9 +244,13 @@ const BulkVaporFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkVaporFlux
 
 Create a `FluxBoundaryCondition` for surface sensible heat flux.
 
-The bulk formula computes `J = -ρ₀ Cᵀ |U| Δϕ`, where `Δϕ` depends on the thermodynamic
-formulation: `Δθ` for potential temperature or `Δe` for static energy. The formulation
-is set automatically during model construction.
+The bulk formula computes
+```math
+J = -ρ₀ Cᵀ |U| Δϕ
+```
+where ``Δϕ`` depends on the thermodynamic formulation: ``Δθ`` for potential
+temperature or ``Δe`` for static energy. The formulation is set automatically
+during model construction.
 
 See [`BulkSensibleHeatFluxFunction`](@ref) for details.
 
