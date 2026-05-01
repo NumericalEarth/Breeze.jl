@@ -238,8 +238,9 @@ fig
 
 microphysics = DCMIP2016KesslerMicrophysics()
 advection = WENO(order=9)
+closure = ScalarDiffusivity(ν=500, κ=1500)
 
-model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
+model = AtmosphereModel(grid; dynamics, microphysics, advection, closure, thermodynamic_constants=constants)
 
 # ## Model initialization
 #
