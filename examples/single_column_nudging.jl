@@ -12,16 +12,28 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Units
+using Oceananigans.Fields: interpolate!
 using Oceananigans.TurbulenceClosures
 using Oceananigans.OutputReaders: Time
 using NumericalEarth
-using NumericalEarth.DataWrangling: BoundingBox, download_dataset
+using NumericalEarth.DataWrangling: download_dataset
 using NumericalEarth.DataWrangling.ERA5
 using CDSAPI # for ERA5 download
 using Dates
 using Printf
 using Statistics: mean
 using CairoMakie
+using ColorSchemes
+
+# ## HI-SCALE September 10 case
+#
+# A case day from the Holistic Interactions of Shallow Clouds, Aerosols and
+# Land Ecosystems (HI-SCALE) campaign at the U.S. Department of Energy's
+# Atmospheric Radiation Measurement (ARM) Climate Research Facility's Southern
+# Great Plains (SGP) site. Features clear skies with periods of cirrus.
+
+start_date = DateTime(2016, 09, 10, 12)
+end_date   = DateTime(2016, 09, 11)
 
 # ## Grid
 #
@@ -34,7 +46,7 @@ grid = RectilinearGrid(size = Nz,
                        z = (0, 4kilometers),
                        topology = (Flat, Flat, Bounded))
 
-ref_loc = (latitude=18.0, longitude=-61.5)
+ref_lat, ref_lon = 36.605, -97.485  # ARM SGP Central Facility at Lamont, OK
 
 # ## Dynamics and reference state
 
@@ -49,25 +61,23 @@ ref_state = ReferenceState(grid, constants;
 dynamics = AnelasticDynamics(ref_state)
 
 # ## Pre-download ERA5 data (optional)
-
-start_date = DateTime(2004, 12, 16)
-#end_date = DateTime(2005, 01, 09)
-end_date = DateTime(2004, 12, 20) # quicker demo
-dates = start_date:Hour(1):end_date
-
-# bounding box should enclose ref_loc
-bounding_box = BoundingBox(latitude=(17, 18.5), longitude=(-62.5, -61))
-
-vars_on_pressure_levels = [:geopotential, # to calculate geopotential height
-                           :temperature,
-                           :eastward_velocity,
-                           :northward_velocity]
+#
+# Download all pressure-level variables at all dates to save time
+vars_on_pressure_levels = [
+    :temperature,
+    :eastward_velocity,
+    :northward_velocity,
+    :geopotential, # to calculate geopotential height
+]
 
 selected_levels = filter(≥(250hPa), ERA5_all_pressure_levels) # select all levels below 250 hPa
 dataset = ERA5HourlyPressureLevels(pressure_levels=selected_levels)
 
-# Pre-download all pressure-level variables at all dates to save time
-download_dataset(vars_on_pressure_levels, dataset, dates; bounding_box)
+dates = start_date:Hour(1):end_date
+
+region = Column(ref_lon, ref_lat)
+
+download_dataset(vars_on_pressure_levels, dataset, dates; region)
 
 # ## Nudging FTS
 #
@@ -78,32 +88,32 @@ download_dataset(vars_on_pressure_levels, dataset, dates; bounding_box)
 # We downloaded a subset of the ERA5, defined by bounding_box. Because this data grid is not
 # coincident with the simulation grid, we need to perform a mapping to the reference lat, lon.
 
-temp = Field(Metadatum(:temperature; dataset, date=first(dates), bounding_box))
-Δλ = temp.grid.Δλᶜᵃᵃ
-Δφ = temp.grid.Δφᵃᶜᵃ
-
-xn = [ref_loc.longitude - Δλ/2, ref_loc.longitude + Δλ/2]
-yn = [ref_loc.latitude  - Δφ/2, ref_loc.latitude  + Δφ/2]
-zn = znodes(grid, Nothing(), Nothing(), Face(); with_halos=false)
-
-# interpolate to a single column
-column_grid = RectilinearGrid(size=(1, 1, Nz),
-                              x=xn, y=yn, z=zn)
-
 # reference fields to nudge toward
-uᵣ = FieldTimeSeries(Metadata(:eastward_velocity;  dataset, dates, bounding_box), column_grid)
-vᵣ = FieldTimeSeries(Metadata(:northward_velocity; dataset, dates, bounding_box), column_grid)
-Tᵣ = FieldTimeSeries(Metadata(:temperature;        dataset, dates, bounding_box), column_grid)
+u_meta = Metadata(:eastward_velocity;  dataset, dates, region)
+v_meta = Metadata(:northward_velocity; dataset, dates, region)
+T_meta = Metadata(:temperature;        dataset, dates, region)
+U_era5 = FieldTimeSeries(u_meta)
+V_era5 = FieldTimeSeries(v_meta)
+T_era5 = FieldTimeSeries(T_meta)
 
-# convert to potential temperature
+# for potential temperature conversion
 pᵣ  = ref_state.pressure
 pˢᵗ = ref_state.standard_pressure
 Rᵈ  = dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
-θᵣ  = FieldTimeSeries{Nothing, Nothing, Center}(column_grid, Tᵣ.times)
-Tᵣn = Field{Nothing,Nothing,Center}(pᵣ.grid) # temporary Field to force grid agreement for set!
-for n in eachindex(Tᵣ.times)
-    set!(Tᵣn, Tᵣ[n])
+
+uᵣ  = FieldTimeSeries{Nothing, Nothing, Center}(grid, U_era5.times)
+vᵣ  = FieldTimeSeries{Nothing, Nothing, Center}(grid, V_era5.times)
+θᵣ  = FieldTimeSeries{Nothing, Nothing, Center}(grid, T_era5.times)
+
+Tᵣn = Field{Nothing,Nothing,Center}(grid) # temporary Field
+for n in eachindex(T_era5.times)
+    # interpolate from ERA5 field to Breeze field (coarse → fine)
+    interpolate!(uᵣ[n], U_era5[n])
+    interpolate!(vᵣ[n], V_era5[n])
+    interpolate!(Tᵣn,   T_era5[n])
+
+    # convert to potential temperature
     set!(θᵣ[n], Tᵣn * (pˢᵗ / pᵣ)^(Rᵈ/cᵖᵈ))
 end
 
@@ -114,11 +124,12 @@ end
 # is compared to the reference column, and nudging is applied only above
 # `z_bottom = 1500` m with a 1-hour relaxation time scale.
 
-τ_nudging = 6hours
+τ_nudging = 2hours
+z_bottom  = 1500  # (m), height above which nudging occurs
 
-u_nudging = FieldTimeSeriesRelaxation(uᵣ; time_scale=τ_nudging, z_bottom=1500)
-v_nudging = FieldTimeSeriesRelaxation(vᵣ; time_scale=τ_nudging, z_bottom=1500)
-θ_nudging = FieldTimeSeriesRelaxation(θᵣ; time_scale=τ_nudging, z_bottom=1500)
+u_nudging = FieldTimeSeriesRelaxation(uᵣ; time_scale=τ_nudging, z_bottom)
+v_nudging = FieldTimeSeriesRelaxation(vᵣ; time_scale=τ_nudging, z_bottom)
+θ_nudging = FieldTimeSeriesRelaxation(θᵣ; time_scale=τ_nudging, z_bottom)
 
 forcing = (; ρu = u_nudging, ρv = v_nudging, ρθ = θ_nudging)
 
@@ -135,11 +146,11 @@ model = AtmosphereModel(grid; dynamics, forcing, closure)
 
 # ## Initial conditions
 
-set!(model; θ = θ₀)
+set!(model; θ = θᵣ[1], u = uᵣ[1], v = vᵣ[1])
 
 # ## Simulation
 
-simulation = Simulation(model; Δt = 60seconds, stop_time = Tᵣ.times[end])
+simulation = Simulation(model; Δt = 60seconds, stop_time = θᵣ.times[end])
 
 # Progress reporting
 function progress(sim)
@@ -153,9 +164,11 @@ simulation.callbacks[:progress] = Callback(progress, IterationInterval(60))
 
 # Output
 outfile = "single_column_nudging.jld2"
-simulation.output_writers[:fields] = JLD2Writer(model, merge(model.velocities, (; θ=model.temperature));
+output_interval = 600seconds
+θ_field = model.formulation.potential_temperature
+simulation.output_writers[:fields] = JLD2Writer(model, merge(model.velocities, (; θ=θ_field));
                                                 filename = outfile,
-                                                schedule = TimeInterval(600seconds),
+                                                schedule = TimeInterval(output_interval),
                                                 overwrite_existing = true)
 
 run!(simulation)
@@ -166,6 +179,22 @@ u_ts = FieldTimeSeries(outfile, "u")
 v_ts = FieldTimeSeries(outfile, "v")
 θ_ts = FieldTimeSeries(outfile, "θ")
 
+# Build Nz × Nt data matrices
+u_data  = interior(u_ts,  1, 1, :, :)
+v_data  = interior(v_ts,  1, 1, :, :)
+θ_data  = interior(θ_ts,  1, 1, :, :)
+
+# Temperature anomaly
+θᵣ_on_ts = FieldTimeSeries{Nothing, Nothing, Center}(grid, θ_ts.times)
+interpolate!(θᵣ_on_ts, θᵣ)
+θᵣ_data = interior(θᵣ_on_ts, 1, 1, :, :)
+θ′_data = θ_data - θᵣ_data
+
+# Color limits
+ulim = max(maximum(abs, u_data), 1e-6)
+vlim = max(maximum(abs, v_data), 1e-6)
+θlim = max(maximum(abs, θ′_data), 1e-6)
+
 # Coordinates
 z = znodes(u_ts.grid, Center()) ./ 1e3  # [km]
 simtimes = start_date .+ Second.(round.(Int, u_ts.times))
@@ -173,45 +202,65 @@ simtimes = start_date .+ Second.(round.(Int, u_ts.times))
 Nt = length(simtimes)
 Nz = length(z)
 
-# Build Nz × Nt data matrices
-u_data = interior(u_ts, 1, 1, :, :)
-v_data = interior(v_ts, 1, 1, :, :)
-θ_data = interior(θ_ts, 1, 1, :, :)
-
-# Color limits
-ulim = max(maximum(abs, u_data), 1e-6)
-vlim = max(maximum(abs, v_data), 1e-6)
-θmin, θmax = extrema(θ_data)
-
 # Figure
-fig = Figure(size = (1000, 900))
+fig1 = Figure(size = (1000, 900))
 
-ax_θ = Axis(fig[1, 1], ylabel = "z (km)", title = "Potential temperature")
-ax_u = Axis(fig[2, 1], ylabel = "z (km)", title = "Zonal wind")
-ax_v = Axis(fig[3, 1], ylabel = "z (km)", title = "Meridional wind", xlabel = "Date")
+ax_θ = Axis(fig1[1, 1], ylabel = "z (km)", title = "Potential temperature anomaly")
+ax_u = Axis(fig1[2, 1], ylabel = "z (km)", title = "Zonal wind")
+ax_v = Axis(fig1[3, 1], ylabel = "z (km)", title = "Meridional wind", xlabel = "Starting from $(start_date)")
 
 # Use numeric x-axis, then set ticks to dates
 t_num = Float64.(1:Nt)  # use integer indices as x
 
 # Need to transpose to get Nt x Nz
-hm_θ = heatmap!(ax_θ, t_num, z, θ_data'; colormap = :magma, colorrange = (θmin, θmax))
-hm_u = heatmap!(ax_u, t_num, z, u_data'; colormap = Reverse(:RdBu), colorrange = (-ulim, ulim))
-hm_v = heatmap!(ax_v, t_num, z, v_data'; colormap = Reverse(:RdBu), colorrange = (-vlim, vlim))
+hm_θ = heatmap!(ax_θ, t_num, z, θ′_data'; colormap = :magma,         colorrange = (-θlim, θlim))
+hm_u = heatmap!(ax_u, t_num, z, u_data';  colormap = Reverse(:RdBu), colorrange = (-ulim, ulim))
+hm_v = heatmap!(ax_v, t_num, z, v_data';  colormap = Reverse(:RdBu), colorrange = (-vlim, vlim))
 
-Colorbar(fig[1, 2], hm_θ, label = "θ (K)")
-Colorbar(fig[2, 2], hm_u, label = "u (m s⁻¹)")
-Colorbar(fig[3, 2], hm_v, label = "v (m s⁻¹)")
+Colorbar(fig1[1, 2], hm_θ, label = "θ - θᵢ (K)")
+Colorbar(fig1[2, 2], hm_u, label = "u (m s⁻¹)")
+Colorbar(fig1[3, 2], hm_v, label = "v (m s⁻¹)")
 
-# Date ticks: pick ~6 evenly spaced indices
-tick_indices = round.(Int, range(1, Nt, length=min(6, Nt)))
-tick_labels  = Dates.format.(simtimes[tick_indices], "dd-u")
+# Date ticks
+tick_interval = Int(2hours / output_interval)
+tick_indices = 1:tick_interval:Nt
+tick_labels  = Dates.format.(simtimes[tick_indices], "HH:MM")
 tick_values  = Float64.(tick_indices)
 
 for ax in (ax_θ, ax_u, ax_v)
     ax.xticks = (tick_values, tick_labels)
 end
-hidexdecorations!(ax_θ, grid=false)
-hidexdecorations!(ax_u, grid=false)
+linkxaxes!(ax_θ, ax_u, ax_v)
+hidexdecorations!(ax_θ)
+hidexdecorations!(ax_u)
 
-save("single_column_nudging.png", fig)
-display(fig)
+fig1
+
+# ERA5 state vs Breeze SCM
+#
+fig2 = Figure(size = (800, 600))
+
+ax_θ = Axis(fig2[1, 1], xlabel = "θ [K]",   ylabel = "z (km)", title = "Potential temperature")
+ax_u = Axis(fig2[1, 2], xlabel = "u [m/s]", ylabel = "z (km)", title = "Zonal wind")
+ax_v = Axis(fig2[1, 3], xlabel = "v [m/s]", ylabel = "z (km)", title = "Meridional wind")
+
+linkyaxes!(ax_θ, ax_u, ax_v)
+hideydecorations!(ax_u, grid=false)
+hideydecorations!(ax_v, grid=false)
+
+cmap = ColorSchemes.viridis
+for n in eachindex(T_era5.times)
+    frac = (n-1) / (length(T_era5.times)-1)
+    color = get(cmap, frac)
+
+    lines!(ax_θ, θᵣ[n]; color, linestyle=:dash)
+    lines!(ax_u, uᵣ[n]; color, linestyle=:dash)
+    lines!(ax_v, vᵣ[n]; color, linestyle=:dash)
+
+    ti = T_era5.times[n]
+    lines!(ax_θ, θ_ts[Time(ti)]; color)
+    lines!(ax_u, u_ts[Time(ti)]; color)
+    lines!(ax_v, v_ts[Time(ti)]; color)
+end
+
+fig2
