@@ -1,6 +1,8 @@
 using Test
 using Breeze
-using Breeze.Thermodynamics: dry_air_gas_constant, adiabatic_hydrostatic_pressure
+using Breeze.Thermodynamics: dry_air_gas_constant, adiabatic_hydrostatic_pressure,
+                             mixture_gas_constant, MoistureMassFractions
+using Breeze.AtmosphereModels: standard_pressure
 using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using GPUArraysCore: @allowscalar
@@ -76,6 +78,50 @@ using GPUArraysCore: @allowscalar
     θᵇ_density_field = Field(θᵇ_density)
     @test all(isfinite.(interior(θᵇ_density_field)))
     @test all(interior(θᵇ_density_field) .> 0)
+end
+
+# Regression test for #659 / PR #656: the buoyancy-side virtual potential temperature
+# kernel must use the dry-air Poisson exponent Rᵈ/cᵖᵈ — i.e., the standard meteorological
+# definition (Emanuel 1994, "Atmospheric Convection") — and not the mixture exponent Rᵐ/cᵖᵐ.
+@testset "Virtual potential temperature buoyancy formulation [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    # Use a tall column so reference pressure at the top differs significantly from
+    # standard pressure, making the dry- vs moist-exponent formulations measurably distinct.
+    Nz = 8
+    grid = RectilinearGrid(default_arch; size=(2, 2, Nz), x=(0, 1_000), y=(0, 1_000), z=(0, 5_000))
+
+    constants = ThermodynamicConstants()
+    p₀ = FT(101325)
+    θ₀ = FT(300)
+    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    dynamics = AnelasticDynamics(reference_state)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+
+    set!(model; θ=θ₀, qᵗ=FT(0.01))
+
+    Rᵈ = dry_air_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    pˢᵗ = standard_pressure(dynamics)
+
+    qᵛ_field = specific_humidity(model)
+    T_field = model.temperature
+    pᵣ_field = dynamics.reference_state.pressure
+
+    @allowscalar for k in 1:Nz
+        T_k  = T_field[1, 1, k]
+        qᵛ_k = qᵛ_field[1, 1, k]
+        pᵣ_k = pᵣ_field[1, 1, k]
+        Rᵐ_k = mixture_gas_constant(MoistureMassFractions(qᵛ_k), constants)
+
+        # θᵥ = T (Rᵐ / Rᵈ) (pˢᵗ / pᵣ)^(Rᵈ / cᵖᵈ) — dry exponent
+        θᵥ_expected = T_k * (Rᵐ_k / Rᵈ) * (pˢᵗ / pᵣ_k)^(Rᵈ / cᵖᵈ)
+
+        θᵥ_kernel = Breeze.AtmosphereModels.virtual_potential_temperature(
+            1, 1, k, grid, constants, dynamics, T_field, qᵛ_field)
+
+        @test θᵥ_kernel ≈ θᵥ_expected rtol = 100eps(FT)
+    end
 end
 
 @testset "Static energy diagnostics [$(FT)]" for FT in test_float_types()
