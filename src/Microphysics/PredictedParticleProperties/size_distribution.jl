@@ -65,7 +65,7 @@ For P3, these are determined from prognostic moments using the
 - `rime_density`: ρᶠ [kg/m³], default 400
 - `mass_coefficient`: α in m = α D^β [kg/m^β], default 0.0121
 - `mass_exponent`: β in m = α D^β [-], default 1.9
-- `ice_density`: Pure ice density [kg/m³], default 917
+- `ice_density`: Pure ice density [kg/m³], default 900
 - `reference_air_density`: ρ₀ for fall speed correction [kg/m³], default ≈0.825 (P3 reference)
 - `air_density`: Local air density [kg/m³], default ≈0.825 (P3 reference)
 

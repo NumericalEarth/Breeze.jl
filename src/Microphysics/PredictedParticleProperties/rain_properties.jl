@@ -50,7 +50,7 @@ Default coefficients give fall speeds in m/s for D in meters.
 
 # Keyword Arguments
 
-- `maximum_mean_diameter`: Upper Dm limit [m], default 6×10⁻³ (6 mm)
+- `maximum_mean_diameter`: Upper Dm limit [m], default 2×10⁻³ (2 mm, Fortran `inv_Drmax = 1/0.002`)
 - `fall_speed_coefficient`: aᵥ [m^{1-b}/s], default 841.99667
 - `fall_speed_exponent`: bᵥ [-], default 0.8
 
@@ -61,7 +61,7 @@ Default coefficients give fall speeds in m/s for D in meters.
 [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
 """
 function RainProperties(FT::Type{<:AbstractFloat} = Float64;
-                        maximum_mean_diameter = 6e-3,
+                        maximum_mean_diameter = 2e-3,
                         fall_speed_coefficient = 841.99667,
                         fall_speed_exponent = 0.8)
     return RainProperties(

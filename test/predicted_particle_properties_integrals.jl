@@ -271,7 +271,7 @@ end
 
     @testset "Rain properties" begin
         rain = RainProperties()
-        @test rain.maximum_mean_diameter ≈ 6e-3
+        @test rain.maximum_mean_diameter ≈ 2e-3
         @test rain.fall_speed_coefficient ≈ 841.99667
         @test rain.fall_speed_exponent ≈ 0.8
 
