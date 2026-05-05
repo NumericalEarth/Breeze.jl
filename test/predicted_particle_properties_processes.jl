@@ -59,6 +59,7 @@ using Breeze.Thermodynamics:
     ThermodynamicConstants,
     MoistureMassFractions,
     LiquidIcePotentialTemperatureState,
+    adjustment_saturation_specific_humidity,
     saturation_specific_humidity,
     PlanarLiquidSurface,
     PlanarIceSurface
@@ -861,10 +862,15 @@ end
         @test rates.condensation ≈ expected_rates.condensation
     end
 
-    @testset "limit_vapor_rates rescales all coupled sinks" begin
+    @testset "limit_vapor_rates caps coupled sinks against satadj budget" begin
         FT = Float64
+        constants = ThermodynamicConstants(FT)
         dt_safety = FT(10)
-        qᵛ = FT(1e-4)
+        P = FT(8e4)
+        T = FT(253.15)
+        qᵗ = FT(3.0e-3)
+        qᵛ⁺ˡ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants, PlanarLiquidSurface())
+        qᵛ = qᵛ⁺ˡ + FT(1e-4)
 
         cond = FT(4e-5)
         ccn_act = FT(1e-5)
@@ -878,26 +884,102 @@ end
         nuc_n = FT(5e2)
 
         limited = PPP.limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
-                                        dep, coat_cond, coat_evap, nuc_q, nuc_n, qᵛ, dt_safety)
-
-        vapor_source_total = rain_evap + coat_evap + max(zero(FT), -dep) + max(zero(FT), -cond)
-        vapor_available = max(zero(FT), qᵛ) + vapor_source_total * dt_safety
-        vapor_sink_total = max(zero(FT), limited.cond) +
-                           limited.ccn_act +
-                           limited.rain_cond +
-                           max(zero(FT), limited.dep) +
-                           limited.coat_cond +
-                           limited.nuc_q
+                                        dep, coat_cond, coat_evap, nuc_q, nuc_n,
+                                        qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety)
 
         @test limited.cond < cond
         @test limited.ccn_act < ccn_act
         @test limited.ccn_act_n < ccn_act_n
         @test limited.rain_cond < rain_cond
-        @test limited.dep < dep
         @test limited.coat_cond < coat_cond
+        @test limited.dep < dep
         @test limited.nuc_q < nuc_q
         @test limited.nuc_n < nuc_n
-        @test vapor_sink_total * dt_safety <= vapor_available + FT(10) * eps(FT)
+
+        Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
+        ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
+        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+
+        # Liquid satadj cap: cond + ccn_act + rain_cond + coat_cond ≤ qcon_cap/dt_safety
+        qcon_cap = max(zero(FT), qᵛ - qᵛ⁺ˡ) / ξˡ
+        cond_sink_total = max(zero(FT), limited.cond) + limited.ccn_act +
+                          limited.rain_cond + limited.coat_cond
+        @test cond_sink_total * dt_safety <= qcon_cap + FT(10) * eps(FT)
+
+        # Ice satadj cap: dep + nuc_q ≤ qdep_cap/dt_safety, evaluated against
+        # the post-liquid thermodynamic state (Fortran qv_tmp / t_tmp).
+        net_liquid = max(zero(FT), limited.cond) + limited.ccn_act +
+                     limited.rain_cond + limited.coat_cond -
+                     rain_evap - coat_evap - max(zero(FT), -limited.cond)
+        qᵛ_after = qᵛ - net_liquid * dt_safety
+        T_after = T + net_liquid * ℒˡ * dt_safety / constants.dry_air.heat_capacity
+        qᵛ⁺ⁱ_after = adjustment_saturation_specific_humidity(T_after, P, qᵗ, constants, PlanarIceSurface())
+        ℒⁱ_after = Breeze.Thermodynamics.ice_latent_heat(T_after, constants)
+        ξⁱ_after = PPP.ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, Rᵛ, T_after)
+        qdep_cap = max(zero(FT), qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after
+        dep_sink_total = max(zero(FT), limited.dep) + limited.nuc_q
+        @test dep_sink_total * dt_safety <= qdep_cap + FT(10) * eps(FT)
+    end
+
+    @testset "limit_vapor_rates caps evaporation when subsaturated" begin
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        dt_safety = FT(10)
+        P = FT(8e4)
+        T = FT(263.15)
+        qᵗ = FT(3.0e-3)
+        qᵛ⁺ˡ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants, PlanarLiquidSurface())
+        # Subsaturated over both liquid and ice
+        qᵛ = qᵛ⁺ˡ - FT(1e-4)
+
+        # Negative cond → cloud evaporation; rain_evap and coat_evap > 0
+        cond = FT(-2e-5)
+        ccn_act = FT(0)
+        ccn_act_n = FT(0)
+        rain_cond = FT(0)
+        rain_evap = FT(5e-5)
+        dep = FT(-1e-5)  # sublimation
+        coat_cond = FT(0)
+        coat_evap = FT(3e-5)
+        nuc_q = FT(0)
+        nuc_n = FT(0)
+
+        limited = PPP.limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
+                                        dep, coat_cond, coat_evap, nuc_q, nuc_n,
+                                        qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety)
+
+        # Evaporation rates should all be reduced (scaled toward the cap).
+        @test limited.rain_evap < rain_evap
+        @test limited.coat_evap < coat_evap
+        @test limited.cond > cond  # less negative → smaller magnitude
+        @test limited.dep > dep    # sublimation reduced
+
+        # Verify the liquid evaporation cap: |cond_neg| + rain_evap + coat_evap ≤ qevp_cap/dt_safety
+        Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
+        ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
+        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+        qevp_cap = max(zero(FT), -(qᵛ - qᵛ⁺ˡ) / ξˡ)
+        evp_total = max(zero(FT), -limited.cond) + limited.rain_evap + limited.coat_evap
+        @test evp_total * dt_safety <= qevp_cap + FT(10) * eps(FT)
+    end
+
+    @testset "limit_vapor_rates zeroes evaporation when supersaturated" begin
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        dt_safety = FT(10)
+        P = FT(8e4)
+        T = FT(263.15)
+        qᵗ = FT(3.0e-3)
+        qᵛ⁺ˡ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants, PlanarLiquidSurface())
+        qᵛ = qᵛ⁺ˡ + FT(1e-4)  # supersaturated
+
+        # Pathological evaporation rates in supersaturated air should be zeroed.
+        limited = PPP.limit_vapor_rates(FT(0), FT(0), FT(0), FT(0), FT(5e-5),
+                                        FT(0), FT(0), FT(3e-5), FT(0), FT(0),
+                                        qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety)
+
+        @test limited.rain_evap == 0
+        @test limited.coat_evap == 0
     end
 
     @testset "ventilation_enhanced_deposition" begin

@@ -11,6 +11,7 @@
 using Oceananigans: Oceananigans
 
 using Breeze.Thermodynamics: temperature,
+                             adjustment_saturation_specific_humidity,
                              saturation_specific_humidity,
                              saturation_vapor_pressure,
                              PlanarLiquidSurface,
@@ -20,7 +21,8 @@ using Breeze.Thermodynamics: temperature,
                              ice_latent_heat,
                              mixture_heat_capacity,
                              vapor_gas_constant,
-                             MoistureMassFractions
+                             MoistureMassFractions,
+                             ThermodynamicConstants
 using DocStringExtensions: TYPEDSIGNATURES
 
 #####
@@ -54,36 +56,101 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Proportionally rescale all vapor-consuming rates so that the projected vapor
-sink over `dt_safety` does not exceed the vapor available from `qᵛ` plus
-vapor-producing rates. One-directional sinks (`ccn_act`, `rain_cond`,
-`coat_cond`, `nuc_q`) are scaled directly; bidirectional rates (`cond`, `dep`)
-are scaled only when positive (condensation / deposition). Number rates
-`ccn_act_n` and `nuc_n` are scaled by the same factor as their companion mass
-rates to preserve mean particle mass. Evaporative terms (`rain_evap`,
-`coat_evap`, negative `cond`, negative `dep`) are treated as vapor sources and
-left unchanged.
+Cap vapor sinks and sources against the moist-adiabatic saturation-adjustment
+budget, matching Fortran P3 v5.5.0 `qcon_satadj` / `qevp_satadj` /
+`qdep_satadj` (`microphy_p3.f90:3990-4055`).
+
+Defining `qsatadj_ℓ = (qᵛ - qᵛ⁺ˡ) / ξˡ` with the moist-static feedback
+factor `ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T²)`:
+
+- Liquid-phase condensation sinks (`cond > 0`, `ccn_act`, `rain_cond`,
+  `coat_cond`) cannot exceed `max(0, qsatadj_ℓ)` (Fortran 3997-4012).
+- Liquid-phase evaporation sources (`cond < 0`, `rain_evap`, `coat_evap`)
+  cannot exceed `max(0, -qsatadj_ℓ)` (Fortran 4014-4028).
+
+The rescaled liquid tendencies are then carried into a post-liquid state
+`(qᵛ_after, T_after)` (Fortran's `qv_tmp` / `t_tmp`), and `qᵛ⁺ⁱ_after`
+is recomputed at `T_after` to evaluate
+`ξⁱ_after = 1 + ℒⁱ_after² qᵛ⁺ⁱ_after / (cᵖᵈ Rᵛ T_after²)`. With
+`qsatadj_ᵢ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after`:
+
+- Ice-phase deposition sinks (`dep > 0`, `nuc_q`) cannot exceed
+  `max(0, qsatadj_ᵢ)` (Fortran 4037-4049).
+- Ice-phase sublimation sources (`dep < 0`) cannot exceed
+  `max(0, -qsatadj_ᵢ)` (Fortran 4050-4055).
+
+Number rates `ccn_act_n` and `nuc_n` are scaled by the same factor as their
+companion mass rates to preserve mean particle mass.
 
 Returns a NamedTuple of the possibly-rescaled rates.
 """
 @inline function limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
-                                   dep, coat_cond, coat_evap, nuc_q, nuc_n, qᵛ, dt_safety)
-    vapor_source_total = rain_evap + coat_evap + clamp_positive(-dep) + clamp_positive(-cond)
-    vapor_available = max(0, qᵛ) + vapor_source_total * dt_safety
-    vapor_sink_total = clamp_positive(cond) + ccn_act + rain_cond +
-                       clamp_positive(dep) + coat_cond + nuc_q
-    f_vapor = sink_limiting_factor(vapor_sink_total, vapor_available, dt_safety)
+                                   dep, coat_cond, coat_evap, nuc_q, nuc_n,
+                                   qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety)
+    FT = typeof(qᵛ)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    ℒˡ = vaporization_latent_heat(constants, T)
+    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
 
-    cond = ifelse(cond > 0, cond * f_vapor, cond)
-    ccn_act = ccn_act * f_vapor
-    ccn_act_n = ccn_act_n * f_vapor
-    rain_cond = rain_cond * f_vapor
-    dep = ifelse(dep > 0, dep * f_vapor, dep)
-    coat_cond = coat_cond * f_vapor
-    nuc_q = nuc_q * f_vapor
-    nuc_n = nuc_n * f_vapor
+    # Liquid-phase saturation-adjustment caps (Fortran 3991-4028). In the
+    # SCF=1 limit `qcon_satadj` and `qevp_satadj` collapse to the same signed
+    # value `qsatadj_ℓ`; condensation sees the positive part, evaporation the
+    # negative part.
+    qsatadj_ℓ = (qᵛ - qᵛ⁺ˡ) / ξˡ
+    qcon_cap = max(0, qsatadj_ℓ)
+    qevp_cap = max(0, -qsatadj_ℓ)
 
-    return (; cond, ccn_act, ccn_act_n, rain_cond, dep, coat_cond, nuc_q, nuc_n)
+    # Condensation cap (Fortran 3997-4012)
+    cond_sink_total = clamp_positive(cond) + ccn_act + rain_cond + coat_cond
+    f_cond = sink_limiting_factor(cond_sink_total, qcon_cap, dt_safety)
+
+    cond_pos_scaled = ifelse(cond > 0, cond * f_cond, cond)
+    ccn_act = ccn_act * f_cond
+    ccn_act_n = ccn_act_n * f_cond
+    rain_cond = rain_cond * f_cond
+    coat_cond = coat_cond * f_cond
+
+    # Evaporation cap (Fortran 4014-4028): zero when supersaturated, otherwise
+    # rescale the lumped evaporation rates to fit within `qevp_cap`.
+    evp_total = clamp_positive(-cond) + rain_evap + coat_evap
+    f_evp = sink_limiting_factor(evp_total, qevp_cap, dt_safety)
+
+    cond = ifelse(cond < 0, cond * f_evp, cond_pos_scaled)
+    rain_evap = rain_evap * f_evp
+    coat_evap = coat_evap * f_evp
+
+    # Ice-phase cap, after netting the rescaled liquid tendencies into qᵛ and T
+    # (Fortran 4031-4035 `qv_tmp` / `t_tmp`).
+    net_liquid = clamp_positive(cond) + ccn_act + rain_cond + coat_cond -
+                 rain_evap - coat_evap - clamp_positive(-cond)
+    qᵛ_after = qᵛ - net_liquid * dt_safety
+    T_after = T + net_liquid * ℒˡ * dt_safety / cᵖᵈ
+    qᵛ⁺ⁱ_after = adjustment_saturation_specific_humidity(T_after, P, qᵗ, constants, PlanarIceSurface())
+    ℒⁱ_after = sublimation_latent_heat(constants, T_after)
+    ξⁱ_after = ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, Rᵛ, T_after)
+
+    # Ice-phase deposition / sublimation caps (Fortran 4037-4055).
+    qsatadj_ᵢ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after
+    qdep_cap = max(0, qsatadj_ᵢ)
+    qsub_cap = max(0, -qsatadj_ᵢ)
+
+    # Deposition cap (Fortran 4037-4049)
+    dep_sink_total = clamp_positive(dep) + nuc_q
+    f_dep = sink_limiting_factor(dep_sink_total, qdep_cap, dt_safety)
+
+    dep_pos_scaled = ifelse(dep > 0, dep * f_dep, dep)
+    nuc_q = nuc_q * f_dep
+    nuc_n = nuc_n * f_dep
+
+    # Sublimation cap (Fortran 4050-4055)
+    sub_total = clamp_positive(-dep)
+    f_sub = sink_limiting_factor(sub_total, qsub_cap, dt_safety)
+
+    dep = ifelse(dep < 0, dep * f_sub, dep_pos_scaled)
+
+    return (; cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
+              dep, coat_cond, coat_evap, nuc_q, nuc_n)
 end
 
 """
@@ -302,12 +369,19 @@ using Breeze.Thermodynamics: Thermodynamics
 @inline fusion_latent_heat(constants, T) = sublimation_latent_heat(constants, T) - vaporization_latent_heat(constants, T)
 
 #####
-##### Ice psychrometric correction Γⁱ
+##### Psychrometric corrections ξˡ, ξⁱ
 #####
-##### Accounts for the latent-heat feedback that reduces the effective
-##### supersaturation drive during ice deposition (Fortran P3 "abi" factor).
-##### Γⁱ = 1 + Lₛ² qᵛ⁺ⁱ / (Rᵛ T² cᵖᵈ)
+##### Account for the latent-heat feedback that reduces the effective
+##### supersaturation drive during condensation (ξˡ, Fortran "ab") and ice
+##### deposition (ξⁱ, Fortran "abi"). Both share the form
+##### ξ = 1 + ℒ² qᵛ⁺ / (cᵖᵈ Rᵛ T²) with the appropriate latent heat.
 #####
+
+@inline function liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+    FT = typeof(T)
+    cₚᵈ = p3_dry_air_heat_capacity(constants, FT)
+    return 1 + ℒˡ^2 * qᵛ⁺ˡ / (Rᵛ * T^2 * cₚᵈ)
+end
 
 @inline function ice_psychrometric_correction(constants, ℒⁱ, qᵛ⁺ⁱ, Rᵛ, T)
     FT = typeof(T)
@@ -1442,14 +1516,18 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     dep           = ifelse(dep < 0, dep * f_ice, dep)
 
     # --- Vapor sinks ---
+    qᵗ = q.vapor + q.liquid + q.ice
     vapor_rates = limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
-                                    dep, coat_cond, coat_evap, nuc_q, nuc_n, qᵛ, dt_safety)
+                                    dep, coat_cond, coat_evap, nuc_q, nuc_n,
+                                    qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety)
     cond = vapor_rates.cond
     ccn_act = vapor_rates.ccn_act
     ccn_act_n = vapor_rates.ccn_act_n
     rain_cond = vapor_rates.rain_cond
+    rain_evap = vapor_rates.rain_evap
     dep = vapor_rates.dep
     coat_cond = vapor_rates.coat_cond
+    coat_evap = vapor_rates.coat_evap
     nuc_q = vapor_rates.nuc_q
     nuc_n = vapor_rates.nuc_n
 
