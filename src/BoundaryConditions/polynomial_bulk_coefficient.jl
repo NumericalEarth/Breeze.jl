@@ -167,8 +167,8 @@ end
                             stability_function_parameters = StabilityFunctionParameters(typeof(scalar_roughness_length)))
 
 Stability correction based on Monin-Obukhov similarity theory using the
-Li et al. (2010) analytical mapping from bulk Richardson number to the
-stability parameter ``ζ = z/L``.
+[Li et al. (2010)](@cite Li2010) analytical mapping from bulk Richardson
+number to the stability parameter ``ζ = z/L``.
 
 Uses [Hogström (1996)](@cite hogstrom1996review) integrated stability functions
 for unstable conditions and [Beljaars & Holtslag (1991)](@cite beljaars1991flux)

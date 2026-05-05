@@ -26,6 +26,7 @@ using Oceananigans.Units
 
 using Breeze: DCMIP2016KesslerMicrophysics, PrognosticVerticalVelocity,
               TetensFormula, ThermodynamicConstants
+using Breeze.Thermodynamics: hydrostatic_density, hydrostatic_temperature
 
 const AtmosphereModels = Breeze.AtmosphereModels
 const PredictedParticleProperties = Breeze.Microphysics.PredictedParticleProperties
@@ -50,6 +51,7 @@ reference_state = ReferenceState(grid, constants;
 θᵖ = 343
 zᵖ = 12kilometers
 Tᵖ = 213
+qᵛ_max = 0.014 # kg/kg — well-mixed boundary-layer cap from Klemp et al. (2015)
 
 zˢ = 5kilometers
 uˢ = 30
@@ -59,29 +61,28 @@ g = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
 
 function θ_background(z)
-    if z <= zᵖ
-        return θ₀ + (θᵖ - θ₀) * (z / zᵖ)^(5 / 4)
-    else
-        return θᵖ * exp(g / (cᵖᵈ * Tᵖ) * (z - zᵖ))
-    end
+    θᵗ = θ₀ + (θᵖ - θ₀) * (z / zᵖ)^(5/4)
+    θˢ = θᵖ * exp(g / (cᵖᵈ * Tᵖ) * (z - zᵖ))
+    return (z ≤ zᵖ) * θᵗ + (z > zᵖ) * θˢ
 end
 
-function ℋ_background(z)
-    if z <= zᵖ
-        return 1 - 3 / 4 * (z / zᵖ)^(5 / 4)
-    else
-        return 1 / 4
-    end
+function qᵛ_background(z)
+    ℋ = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z ≤ zᵖ) + 1/4 * (z > zᵖ)
+    p₀ = reference_state.surface_pressure
+    pˢᵗ = reference_state.standard_pressure
+    T = hydrostatic_temperature(z, p₀, θ_background, pˢᵗ, constants)
+    ρ = hydrostatic_density(z, p₀, θ_background, pˢᵗ, constants)
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    return min(ℋ * qᵛ⁺, qᵛ_max)
 end
 
 function u_background(z)
-    if z < zˢ - 1000
-        return uˢ * (z / zˢ) - uᶜ
-    elseif abs(z - zˢ) <= 1000
-        return (-4 / 5 + 3 * (z / zˢ) - 5 / 4 * (z / zˢ)^2) * uˢ - uᶜ
-    else
-        return uˢ - uᶜ
-    end
+    uˡ = uˢ * (z / zˢ) - uᶜ
+    uᵗ = (-4/5 + 3 * (z / zˢ) - 5/4 * (z / zˢ)^2) * uˢ - uᶜ
+    uᵘ = uˢ - uᶜ
+    return (z < (zˢ - 1000)) * uˡ +
+           (abs(z - zˢ) ≤ 1000) * uᵗ +
+           (z > (zˢ + 1000)) * uᵘ
 end
 
 launch_height = 1500
@@ -217,7 +218,7 @@ end
 function initialize_supercell_parcel!(model; z = launch_height, w = initial_vertical_velocity)
     set!(model,
          θ = θ_background,
-         ℋ = ℋ_background,
+         qᵛ = qᵛ_background,
          p = reference_state.pressure,
          ρ = reference_state.density,
          u = u_background,

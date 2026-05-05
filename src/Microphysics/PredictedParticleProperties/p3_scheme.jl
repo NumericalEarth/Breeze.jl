@@ -64,8 +64,9 @@ P3 v5.5 carries three prognostic moments for ice particles:
 3. **Reflectivity** (``zⁱ``): Sixth moment of size distribution
 
 The third moment improves representation of precipitation-sized particles
-and enables better simulation of radar reflectivity. The default three-moment
-runtime path uses `lookupTable_3` for distribution parameter closure.
+and enables better simulation of radar reflectivity. The default runtime
+path is 2-moment ice; pass `three_moment_ice = true` to enable the
+3-moment path, which uses `lookupTable_3` for distribution parameter closure.
 
 # Prognostic Variables
 
@@ -85,8 +86,9 @@ The scheme tracks 11 prognostic densities:
 
 - `lookup_tables`: Path to a directory containing Fortran P3 lookup table files
   (default to the artifact `P3_lookup_tables` in `Artifacts.toml`).
-- `three_moment_ice`: Force 2-moment (`false`) or 3-moment (`true`) ice, or
-  auto-detect from file presence (`nothing`, default).
+- `three_moment_ice`: 2-moment (`false`, default) or 3-moment (`true`) ice.
+  Pass `nothing` to auto-detect from file presence (prefers 3-moment if
+  available).
 - `water_density`: Liquid water density [kg/m³] (default 1000)
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation
   (default `nothing` = open boundary, precipitation exits domain)
@@ -122,7 +124,7 @@ See also the [P3 documentation](@ref p3_overview) for detailed physics.
 """
 function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Float64;
                                                  lookup_tables = artifact"P3_lookup_tables",
-                                                 three_moment_ice = nothing,
+                                                 three_moment_ice = false,
                                                  water_density = 1000,
                                                  precipitation_boundary_condition = nothing,
                                                  aerosol = nothing,
