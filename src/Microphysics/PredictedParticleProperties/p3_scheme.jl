@@ -125,9 +125,11 @@ function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Flo
                                                  three_moment_ice = nothing,
                                                  water_density = 1000,
                                                  precipitation_boundary_condition = nothing,
-                                                 aerosol = nothing)
+                                                 aerosol = nothing,
+                                                 cloud = nothing)
     return read_fortran_lookup_tables(lookup_tables; FT, three_moment_ice,
-                                      water_density, precipitation_boundary_condition, aerosol)
+                                      water_density, precipitation_boundary_condition,
+                                      aerosol, cloud)
 end
 
 # Shorthand alias

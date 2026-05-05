@@ -83,7 +83,8 @@ function read_fortran_lookup_tables(directory::AbstractString;
                                     three_moment_ice::Union{Bool, Nothing} = nothing,
                                     water_density = 1000,
                                     precipitation_boundary_condition = nothing,
-                                    aerosol = nothing)
+                                    aerosol = nothing,
+                                    cloud = nothing)
 
     # Auto-detect 2momI vs 3momI from file presence
     file_3momI = joinpath(directory, "p3_lookupTable_1.dat-v6.9-3momI")
@@ -146,7 +147,7 @@ function read_fortran_lookup_tables(directory::AbstractString;
     rain = tabulate_rain_from_quadrature(rain_base, arch, FT)
 
     # Construct full scheme
-    cloud = CloudDropletProperties(FT)
+    cloud = isnothing(cloud) ? CloudDropletProperties(FT) : cloud
     process_rates = ProcessRateParameters(FT)
 
     return PredictedParticlePropertiesMicrophysics(

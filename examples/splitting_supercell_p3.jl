@@ -236,10 +236,29 @@ fig
 # The P3 scheme includes prognostic cloud water, rain water, and ice with autoconversion,
 # accretion, rain evaporation, and sedimentation processes.
 
-microphysics = PredictedParticlePropertiesMicrophysics(Oceananigans.defaults.FloatType)
-advection = WENO(order=9, minimum_buffer_upwind_order=3)
+microphysics = PredictedParticlePropertiesMicrophysics(Oceananigans.defaults.FloatType;
+                                                       three_moment_ice = false)
 
-model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
+# WENO advection of the sharply-peaked microphysical tendencies (e.g., the
+# ice-nucleation spike at the tropopause) introduces small negative oscillations
+# in number concentrations that break downstream rate calculations. We therefore
+# use a 1st-order upwind scheme for the hydrometeor fields and keep high-order
+# WENO for momentum, ``θ``, and water vapor.
+weno = WENO(order=9, minimum_buffer_upwind_order=3)
+upwind = UpwindBiased(order=1)
+momentum_advection = weno
+scalar_advection = (ρθ   = weno,
+                    ρqᵛ  = weno,
+                    ρqᶜˡ = upwind, ρnᶜˡ = upwind,
+                    ρqʳ  = upwind, ρnʳ  = upwind,
+                    ρqⁱ  = upwind, ρnⁱ  = upwind,
+                    ρqᶠ  = upwind, ρbᶠ  = upwind,
+                    ρzⁱ  = upwind, ρqʷⁱ = upwind,
+                    ρsˢᵃᵗ = upwind)
+
+model = AtmosphereModel(grid; dynamics, microphysics,
+                        momentum_advection, scalar_advection,
+                        thermodynamic_constants=constants)
 
 # ## Model initialization
 #
@@ -268,6 +287,14 @@ qⁱ  = model.microphysical_fields.qⁱ
 qᵛ  = model.microphysical_fields.qᵛ
 u, v, w = model.velocities
 
+# Column indices used by the progress callback to expose the vertical structure of
+# cloud water and ice. The 8 km level sits well above the freezing level and the
+# 11 km level lies in the homogeneous-freezing regime (T ≲ -40 °C), so a sustained
+# `max(qᶜˡ)` there confirms that lifted parcels are actually reaching the cold cloud.
+z = znodes(grid, Center())
+k_8km  = searchsortedfirst(z, 8000)
+k_11km = searchsortedfirst(z, 11000)
+
 wall_clock = Ref(time_ns())
 
 function progress(sim)
@@ -277,8 +304,12 @@ function progress(sim)
                    iteration(sim), prettytime(sim), prettytime(sim.Δt), prettytime(elapsed),
                    maximum(abs, u), maximum(w), minimum(w))
 
-    msg *= @sprintf(", max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(qʳ): %.2e",
-                    maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ))
+    msg *= @sprintf(", max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(qʳ): %.2e, max(qⁱ): %.2e",
+                    maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ), maximum(qⁱ))
+    msg *= @sprintf(", max(qᶜˡ@8km): %.2e, max(qᶜˡ@11km): %.2e, max(qⁱ@11km): %.2e",
+                    maximum(view(qᶜˡ, :, :, k_8km)),
+                    maximum(view(qᶜˡ, :, :, k_11km)),
+                    maximum(view(qⁱ, :, :, k_11km)))
     @info msg
 
     return nothing
@@ -299,17 +330,52 @@ end
 
 add_callback!(simulation, collect_max_w, TimeInterval(1minutes))
 
-# Save horizontal slices at z ≈ 5 km for animation:
+# Collect the domain-integrated mass of each hydrometeor species. We build
+# `Integral` fields over ``ρᵣ q`` once and recompute them inside the callback
+# rather than saving 3D snapshots.
 
-z = znodes(grid, Center())
+ρᵣ = reference_state.density
+∫ρqᶜˡ = Field(Integral(ρᵣ * qᶜˡ))
+∫ρqʳ  = Field(Integral(ρᵣ * qʳ))
+∫ρqⁱ  = Field(Integral(ρᵣ * qⁱ))
+
+total_qᶜˡ_ts = []
+total_qʳ_ts  = []
+total_qⁱ_ts  = []
+total_mass_times = []
+
+function collect_total_hydrometeors(sim)
+    compute!(∫ρqᶜˡ)
+    compute!(∫ρqʳ)
+    compute!(∫ρqⁱ)
+    push!(total_mass_times, time(sim))
+    push!(total_qᶜˡ_ts, sum(∫ρqᶜˡ))
+    push!(total_qʳ_ts,  sum(∫ρqʳ))
+    push!(total_qⁱ_ts,  sum(∫ρqⁱ))
+    return nothing
+end
+
+add_callback!(simulation, collect_total_hydrometeors, TimeInterval(1minutes))
+
+# Save horizontal slices at z ≈ 5 km and a vertical slice through the bubble center
+# for animation. The vertical slice is essential for diagnosing whether cloud water
+# reaches the homogeneous-freezing altitudes (T < -40 °C, z ≳ 9 km).
+
 k_5km = searchsortedfirst(z, 5000)
+j_center = Ny ÷ 2
 @info "Saving xy slices at z = $(z[k_5km]) m (k = $k_5km)"
+@info "Saving xz slices at y = $((j_center - 0.5) * Ly / Ny) m (j = $j_center)"
 
 slice_outputs = (
     wxy = view(w, :, :, k_5km),
     qʳxy = view(qʳ, :, :, k_5km),
     qᶜˡxy = view(qᶜˡ, :, :, k_5km),
     qⁱxy = view(qⁱ, :, :, k_5km),
+    wxz = view(w, :, j_center, :),
+    qᵛxz = view(qᵛ, :, j_center, :),
+    qᶜˡxz = view(qᶜˡ, :, j_center, :),
+    qʳxz = view(qʳ, :, j_center, :),
+    qⁱxz = view(qⁱ, :, j_center, :),
 )
 
 slices_filename = "splitting_supercell_p3_slices.jld2"
@@ -394,4 +460,24 @@ ax = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Maximum w (m/s)", title="Maximum
 lines!(ax, max_w_times, max_w_ts, linewidth=2)
 
 save("supercell_p3_max_w.png", fig) #src
+fig
+
+# ## Results: domain-integrated hydrometeor mass
+#
+# Tracking the total mass of each hydrometeor species over time gives a
+# concise picture of the storm's water budget. Cloud water rises first as
+# the warm bubble lifts moist air past saturation, rain follows once
+# autoconversion and accretion build up larger drops, and ice forms aloft
+# once updrafts pierce the freezing level.
+
+fig = Figure(size=(700, 400), fontsize=14)
+ax = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Total mass (kg)",
+          title="Domain-integrated hydrometeor mass",
+          xticks=0:1800:7200)
+lines!(ax, total_mass_times, total_qᶜˡ_ts, linewidth=2, color=:lime,       label="qᶜˡ (cloud)")
+lines!(ax, total_mass_times, total_qʳ_ts,  linewidth=2, color=:orangered,  label="qʳ (rain)")
+lines!(ax, total_mass_times, total_qⁱ_ts,  linewidth=2, color=:dodgerblue, label="qⁱ (ice)")
+axislegend(ax, position=:lt)
+
+save("supercell_p3_hydrometeor_mass.png", fig) #src
 fig
