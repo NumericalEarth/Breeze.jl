@@ -181,8 +181,12 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # The `BulkDrag` boundary condition requires `surface_temperature` when using
 # `PolynomialCoefficient`, since the stability correction depends on the
 # surface virtual potential temperature.
+# By providing a non-trivial `filtered_velocities` the `BulkDrag` automatically
+# applies the filtering also to all surface scalars with the same parameters
+# (e.g., height, timescale) as inferred from the `filtered_velocities`.
 
-ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
+ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=coef;
+                                             gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
 
 # ## Sensible heat flux and vapor fluxes
 #
@@ -204,15 +208,15 @@ using Breeze.BoundaryConditions: neutral_coefficient_10m, bulk_richardson_number
                                  default_neutral_drag_polynomial
 
 h = grid.Lz / grid.Nz / 2  # first cell center height
-U_min = 0.1
+U_min = 0.1                # m s⁻¹
 ℓ = coef.roughness_length
 sf = coef.stability_function
 α = log(h / ℓ)
 β = log(ℓ / sf.scalar_roughness_length)
 
-ΔT_line = 10  # K, temperature difference for stability lines
-T_warm = θ₀ + ΔT / 2      # warm SST in this simulation
-T_cold = θ₀ - ΔT / 2      # cold SST in this simulation
+ΔT_line = 10               # K, temperature difference for stability lines
+T_warm = θ₀ + ΔT / 2       # warm SST in this simulation
+T_cold = θ₀ - ΔT / 2       # cold SST in this simulation
 T_unstable = θ₀ + ΔT_line  # strongly unstable
 T_stable   = θ₀ - ΔT_line  # strongly stable
 
@@ -261,7 +265,7 @@ fig
 # ## Model construction
 #
 # We assemble the AtmosphereModel with all the components defined above.
-# The model will solve the anelastic equations with the specified advection
+# The model solves the anelastic equations with the specified advection
 # schemes, microphysics, and boundary conditions.
 
 model = AtmosphereModel(grid; momentum_advection, scalar_advection, microphysics, dynamics,
@@ -271,8 +275,8 @@ model = AtmosphereModel(grid; momentum_advection, scalar_advection, microphysics
 #
 # We initialize the model with a uniform potential temperature equal to the
 # reference value, creating a neutrally stratified atmosphere. A small
-# background wind (1 m/s) in the x-direction provides initial momentum
-# for the bulk flux calculations and helps break symmetry.
+# background wind (1 m/s) in the ``x``-direction provides initial momentum
+# for the bulk flux calculations and helps break the symmetry.
 
 set!(model, θ=reference_state.potential_temperature, u=1)
 
@@ -280,20 +284,20 @@ set!(model, θ=reference_state.potential_temperature, u=1)
 #
 # We configure the simulation to run for 4 hours with adaptive time stepping.
 # The CFL condition limits the time step to maintain numerical stability,
-# with a target CFL number of 0.7 providing a good balance between efficiency
+# with a target CFL number of 0.7, providing a good balance between efficiency
 # and accuracy.
 
-simulation = Simulation(model, Δt=10, stop_time=4hours)
+simulation = Simulation(model, Δt=10seconds, stop_time=4hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Diagnostic fields
 #
 # We define several diagnostic quantities for analysis and visualization:
-# - Temperature T: the actual temperature field
-# - Potential temperature θ: conserved in dry adiabatic processes
-# - Liquid water content qˡ: mass fraction of cloud liquid water
-# - Saturation specific humidity qᵛ⁺: maximum water vapor the air can hold
+# - Temperature ``T``: the actual temperature field
+# - Potential temperature ``θ``: conserved in dry adiabatic processes
+# - Liquid water content ``qˡ``: mass fraction of cloud liquid water
+# - Saturation specific humidity ``qᵛ⁺``: maximum water vapor the air can hold
 
 T = model.temperature
 θ = liquid_ice_potential_temperature(model)
@@ -308,16 +312,16 @@ qᵛ = specific_humidity(model)
 #
 # We use Oceananigans' [`BoundaryConditionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Models.BoundaryConditionOperation-Tuple{Field,%20Symbol,%20Oceananigans.AbstractModel})
 # to extract the surface flux values from the boundary conditions. These 1D fields
-# (varying only in x) represent the actual flux values applied at the
+# (varying only in ``x``) represent the actual flux values applied at the
 # ocean-atmosphere interface.
 #
 # The surface fluxes are:
 #
 # - ``τˣ``: momentum flux (stress), in kg m⁻¹ s⁻²
-# - ``𝒬ᵀ``: sensible heat flux = cᵖᵐ Jᵀ, in W m⁻²
-# - ``𝒬ᵛ``: latent heat flux = ℒˡ Jᵛ, in W m⁻²
+# - ``𝒬ᵀ``: sensible heat flux ``= cᵖᵐ Jᵀ``, in W m⁻²
+# - ``𝒬ᵛ``: latent heat flux ``= ℒˡ Jᵛ``, in W m⁻²
 #
-# where Jᵀ is the temperature density flux and Jᵛ is the moisture density flux.
+# where ``Jᵀ`` is the temperature density flux and ``Jᵛ`` is the moisture density flux.
 
 ## Surface momentum flux
 τˣ = BoundaryConditionOperation(ρu, :bottom, model)
@@ -326,7 +330,7 @@ qᵛ = specific_humidity(model)
 ρe = static_energy_density(model)
 𝒬ᵀ = BoundaryConditionOperation(ρe, :bottom, model)
 
-## Latent heat flux: 𝒬ᵛ = ℒˡ Jᵛ (using reference θ₀ for latent heat)
+## Latent heat flux: ``𝒬ᵛ = ℒˡ Jᵛ`` (using reference ``θ₀`` for latent heat)
 ρqᵉ = model.moisture_density
 ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(θ₀, constants)
 Jᵛ = BoundaryConditionOperation(ρqᵉ, :bottom, model)
