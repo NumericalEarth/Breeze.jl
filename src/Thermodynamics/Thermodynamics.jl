@@ -15,7 +15,8 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        dewpoint_temperature,
        vapor_pressure, relative_humidity,
        adiabatic_hydrostatic_pressure, adiabatic_hydrostatic_density, surface_density,
-       temperature_from_potential_temperature, temperature, with_temperature, with_moisture,
+       temperature_from_potential_temperature, potential_temperature_from_temperature,
+       temperature, with_temperature, with_moisture,
        PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
        # Phase equilibrium types
        AbstractPhaseEquilibrium, WarmPhaseEquilibrium, MixedPhaseEquilibrium,

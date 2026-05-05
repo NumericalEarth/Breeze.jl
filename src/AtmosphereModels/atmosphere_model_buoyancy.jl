@@ -63,6 +63,6 @@ end
     q = @inbounds MoistureMassFractions(qᵛ[i, j, k])
     Rᵐ = mixture_gas_constant(q, constants)
     Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    return @inbounds Rᵐ / Rᵈ * T[i, j, k] * (pˢᵗ / pᵣ)^(Rᵐ / cᵖᵐ)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    return @inbounds Rᵐ / Rᵈ * T[i, j, k] * (pˢᵗ / pᵣ)^(Rᵈ / cᵖᵈ)
 end

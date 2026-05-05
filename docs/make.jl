@@ -40,6 +40,7 @@ examples = [
     Example("Precipitating shallow cumulus (RICO)", "rico"; build_always=false, gpu=false),
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature"; build_always=true, gpu=false),
     Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave"; build_always=true, gpu=false),
+    Example("Neutral atmospheric boundary layer", "neutral_atmospheric_boundary_layer"; build_always=false, gpu=true),
     Example("Single column radiation", "single_column_radiation"; build_always=true, gpu=false),
     Example("Stationary parcel model", "stationary_parcel_model"; build_always=true, gpu=false),
     Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),

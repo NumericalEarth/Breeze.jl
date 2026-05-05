@@ -424,7 +424,7 @@ end
         θₖ = θ_field[i, j, k]
         pₖ = p_field[i, j, k]
     end
-    @inbounds T_field[i, j, k] = @inline temperature_from_potential_temperature(θₖ, pₖ, constants; pˢᵗ)
+    @inbounds T_field[i, j, k] = @inline temperature_from_potential_temperature(θₖ, pₖ, pˢᵗ, constants)
 end
 
 """
