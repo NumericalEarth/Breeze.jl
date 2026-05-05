@@ -61,6 +61,7 @@ using Breeze.Thermodynamics:
     LiquidIcePotentialTemperatureState,
     adjustment_saturation_specific_humidity,
     saturation_specific_humidity,
+    with_temperature,
     PlanarLiquidSurface,
     PlanarIceSurface
 
@@ -1497,6 +1498,48 @@ end
         # Rime density should be physical
         @test rates.rime_density_new >= 50
         @test rates.rime_density_new <= 900
+    end
+
+    @testset "compute_p3_process_rates vapor-limits cloud evaporation before cloud budget" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+
+        ρ = FT(1)
+        T = FT(268.15)
+        P = FT(85000)
+        pˢᵗ = FT(100000)
+        qᶜˡ = FT(1e-8)
+        qʳ = FT(1e-4)
+        qⁱ = FT(1e-4)
+        qᶠ = FT(1e-5)
+        qʷⁱ = FT(0)
+        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-10)
+        q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ + qʷⁱ, qⁱ)
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+
+        ℳ = P3MicrophysicalState(
+            qᶜˡ,
+            FT(200e6),
+            qʳ,
+            FT(1e4),
+            qⁱ,
+            FT(1e5),
+            qᶠ,
+            qᶠ / FT(400),
+            FT(1e-10),
+            qʷⁱ,
+            FT(0),
+        )
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        cloud_sink_total = rates.autoconversion + rates.accretion + rates.cloud_riming +
+                           rates.cloud_freezing_mass + rates.cloud_homogeneous_mass +
+                           rates.cloud_warm_collection + rates.wet_growth_cloud +
+                           max(zero(FT), -rates.condensation)
+
+        @test rates.condensation == 0
+        @test cloud_sink_total ≈ FT(4.055896466237224e-12) rtol=FT(1e-12)
     end
 
     @testset "compute_p3_process_rates uses prognostic cloud number" begin

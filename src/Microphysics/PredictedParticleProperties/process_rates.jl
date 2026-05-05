@@ -1469,11 +1469,36 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # === SINK LIMITING ===
     dt_safety = prp.sink_limiting_timescale
 
+    # --- Vapor sinks ---
+    # Fortran applies the saturation-adjustment caps before the per-species
+    # conservation budgets (microphy_p3.f90:3990-4055, then 4061 onward), so
+    # cloud/rain/ice budgets below must see the final vapor-limited rates.
+    qᵗ = q.vapor + q.liquid + q.ice
+    vapor_rates = limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
+                                    dep, coat_cond, coat_evap, nuc_q, nuc_n,
+                                    qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety)
+    cond = vapor_rates.cond
+    ccn_act = vapor_rates.ccn_act
+    ccn_act_n = vapor_rates.ccn_act_n
+    rain_cond = vapor_rates.rain_cond
+    rain_evap = vapor_rates.rain_evap
+    dep = vapor_rates.dep
+    coat_cond = vapor_rates.coat_cond
+    coat_evap = vapor_rates.coat_evap
+    nuc_q = vapor_rates.nuc_q
+    nuc_n = vapor_rates.nuc_n
+
     # --- Cloud liquid sinks ---
-    cloud_source_total = max(0, cond) + ccn_act
+    # Match Fortran's per-species conservation budget (microphy_p3.f90:4060-4083),
+    # which splits signed `qccon` into non-negative `qccon` (source) and `qcevp`
+    # (sink) and includes `qcevp` in the cloud sink total. Track the negative
+    # part of `cond` as a sink magnitude here so it gets rescaled alongside the
+    # other cloud sinks when the budget would over-deplete `qᶜˡ`.
+    cloud_evap = clamp_positive(-cond)
+    cloud_source_total = clamp_positive(cond) + ccn_act
     cloud_available = max(0, qᶜˡ) + cloud_source_total * dt_safety
     cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
-                       cloud_hom_q + cloud_warm_q + wg_cloud
+                       cloud_hom_q + cloud_warm_q + wg_cloud + cloud_evap
     f_cloud = sink_limiting_factor(cloud_sink_total, cloud_available, dt_safety)
     autoconv      = autoconv * f_cloud
     accr          = accr * f_cloud
@@ -1486,6 +1511,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     cloud_warm_q  = cloud_warm_q * f_cloud
     cloud_warm_n  = cloud_warm_n * f_cloud
     wg_cloud      = wg_cloud * f_cloud
+    cond          = ifelse(cond < 0, cond * f_cloud, cond)
 
     # --- Rain sinks ---
     rain_source_total = autoconv + accr + complete_melt + shed + wg_shed + rain_cond
@@ -1514,22 +1540,6 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     complete_melt = complete_melt * f_ice
     melt_n        = melt_n * f_ice
     dep           = ifelse(dep < 0, dep * f_ice, dep)
-
-    # --- Vapor sinks ---
-    qᵗ = q.vapor + q.liquid + q.ice
-    vapor_rates = limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
-                                    dep, coat_cond, coat_evap, nuc_q, nuc_n,
-                                    qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety)
-    cond = vapor_rates.cond
-    ccn_act = vapor_rates.ccn_act
-    ccn_act_n = vapor_rates.ccn_act_n
-    rain_cond = vapor_rates.rain_cond
-    rain_evap = vapor_rates.rain_evap
-    dep = vapor_rates.dep
-    coat_cond = vapor_rates.coat_cond
-    coat_evap = vapor_rates.coat_evap
-    nuc_q = vapor_rates.nuc_q
-    nuc_n = vapor_rates.nuc_n
 
     # D2: Sublimation number loss
     sublim_mag = clamp_positive(-dep)
