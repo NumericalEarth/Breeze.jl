@@ -257,6 +257,14 @@ end
     return evaluate_at(table, prep) * ρ_correction
 end
 
+# 2-moment ice closure: reflectivity table is `nothing` because Z_i is not a
+# prognostic moment. Return zero so callers (e.g. `ρzⁱ` advection velocity)
+# stay well-defined without forcing them to branch on the closure mode.
+@inline tabulated_reflectivity_weighted_fall_speed(::Nothing, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ) =
+    zero(typeof(m̄))
+@inline tabulated_reflectivity_weighted_fall_speed(::Nothing, prep::Prepared5DInterpolation, ρ_correction) =
+    zero(typeof(ρ_correction))
+
 """
 $(TYPEDSIGNATURES)
 
@@ -322,6 +330,20 @@ end
         tabulated_mass_weighted_fall_speed(mass_table, prep, ρ_correction),
         tabulated_number_weighted_fall_speed(number_table, prep, ρ_correction),
         tabulated_reflectivity_weighted_fall_speed(refl_table, prep, ρ_correction),
+    )
+end
+
+# 2-moment fast path: reflectivity table is unused, so skip its lookup entirely
+# but still share the (log_m, Fᶠ, Fˡ, ρᶠ, μ) prep across the mass/number tables.
+@inline function _fused_fall_speeds(mass_table::P3Table5D, number_table::P3Table5D, refl_table::Nothing,
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    FT = typeof(m̄)
+    log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
+    prep = prepare_5d(mass_table, log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
+    return IceTerminalVelocities{FT}(
+        tabulated_mass_weighted_fall_speed(mass_table, prep, ρ_correction),
+        tabulated_number_weighted_fall_speed(number_table, prep, ρ_correction),
+        zero(FT),
     )
 end
 
