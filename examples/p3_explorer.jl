@@ -2,13 +2,13 @@
 #
 # This example tells the P3 parcel story in two steps, both using the
 # idealized supercell sounding of [Klemp et al. (2015)](@cite KlempEtAl2015)
-# and a buoyancy-driven parcel model.
+# and a parcel model rising at a fixed updraft of 1 m/s.
 #
-# 1. **P3 fidelity check**: the same warm-bubble parcel is launched with
-#    either P3 or Kessler microphysics. The parcel starts from the same sounding,
-#    with the same thermal perturbation and the same initial moisture. This lets
-#    us compare temperature, vertical velocity, and hydrometeor partition without
-#    changing the launch conditions.
+# 1. **P3 fidelity check**: identical parcels are launched with either P3 or
+#    Kessler microphysics. The parcel starts from the same sounding with the
+#    same initial moisture and ascends at the same prescribed 1 m/s. This lets
+#    us compare temperature and hydrometeor partition without confounding
+#    differences in updraft strength.
 # 2. **P3 feature exploration**: the parcel now launches from ~6 km, where the
 #    sounding is already subfreezing, and is seeded with the same ice population
 #    but different cloud/rain partitions. This isolates the P3 idea that one ice
@@ -24,7 +24,7 @@ using Oceananigans
 using Oceananigans: interpolate
 using Oceananigans.Units
 
-using Breeze: DCMIP2016KesslerMicrophysics, PrognosticVerticalVelocity,
+using Breeze: DCMIP2016KesslerMicrophysics,
               TetensFormula, ThermodynamicConstants
 using Breeze.Thermodynamics: hydrostatic_density, hydrostatic_temperature
 
@@ -34,10 +34,10 @@ const Thermodynamics = Breeze.Thermodynamics
 
 # ## Idealized supercell sounding
 #
-# We borrow the background potential-temperature, relative-humidity, and wind
-# profiles from the splitting-supercell example. The parcel launch uses the same
-# 0.5 K warm perturbation at 1.5 km, but here the vertical motion is carried by
-# the parcel itself via `PrognosticVerticalVelocity`.
+# We borrow the background potential-temperature and relative-humidity profiles
+# from the splitting-supercell example. The parcel launches from the prescribed
+# height and rises at a fixed 1 m/s updraft, so any thermodynamic evolution
+# along the trajectory is set entirely by the microphysics.
 
 grid = RectilinearGrid(size = 15000, z = (0, 15kilometers), topology = (Flat, Flat, Bounded))
 
@@ -52,10 +52,6 @@ reference_state = ReferenceState(grid, constants;
 zᵖ = 12kilometers
 Tᵖ = 213
 qᵛ_max = 0.014 # kg/kg — well-mixed boundary-layer cap from Klemp et al. (2015)
-
-zˢ = 5kilometers
-uˢ = 30
-uᶜ = 15
 
 g = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
@@ -76,27 +72,16 @@ function qᵛ_background(z)
     return min(ℋ * qᵛ⁺, qᵛ_max)
 end
 
-function u_background(z)
-    uˡ = uˢ * (z / zˢ) - uᶜ
-    uᵗ = (-4/5 + 3 * (z / zˢ) - 5/4 * (z / zˢ)^2) * uˢ - uᶜ
-    uᵘ = uˢ - uᶜ
-    return (z < (zˢ - 1000)) * uˡ +
-           (abs(z - zˢ) ≤ 1000) * uᵗ +
-           (z > (zˢ + 1000)) * uᵘ
-end
-
 launch_height = 1500
-launch_θ_perturbation = 0.5
-initial_vertical_velocity = 5
+fixed_updraft = 1
 
 plot_top = 10kilometers
-stop_time = 18minutes
+stop_time = 180minutes
 Δt = 1
 record_interval = 1
 
 ## Section 2 parameters — launch from ~6 km where T ≈ 256 K
 cold_launch_height = 6000
-cold_launch_w = 3
 cold_seeded_ice_mass = 1e-4
 cold_seeded_ice_number = 1e5
 cold_cloud_partition = 2e-3
@@ -113,9 +98,9 @@ nothing #hide
 
 # ## Helper functions
 #
-# The helpers below set up the buoyant parcel launch, seed optional
-# microphysics partitions, and convert the P3 moments into the continuous ice
-# diagnostics that we want to visualize.
+# The helpers below set up the parcel launch, seed optional microphysics
+# partitions, and convert the P3 moments into the continuous ice diagnostics
+# that we want to visualize.
 
 function p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ)
     FT = typeof(ρ)
@@ -174,25 +159,10 @@ function initialize_p3_state(p3, ρ; qᶜˡ = 0, nᶜˡ = 0, qʳ = 0, nʳ = 0,
               ρsˢᵃᵗ = zero(ρ))
 end
 
-prognostic_parcel_dynamics() = ParcelDynamics(vertical_velocity_formulation = PrognosticVerticalVelocity())
-
 supercell_parcel_model(microphysics) = AtmosphereModel(grid;
-                                                       dynamics = prognostic_parcel_dynamics(),
+                                                       dynamics = ParcelDynamics(),
                                                        microphysics = microphysics,
                                                        thermodynamic_constants = constants)
-
-function apply_warm_bubble_perturbation!(model; Δθ = launch_θ_perturbation)
-    state = model.dynamics.state
-    p = state.𝒰.reference_pressure
-    θ = θ_background(state.z) + Δθ
-    T = Thermodynamics.temperature_from_potential_temperature(θ, p, model.dynamics.standard_pressure, model.thermodynamic_constants)
-
-    state.𝒰 = Thermodynamics.with_temperature(state.𝒰, T, model.thermodynamic_constants)
-    state.ℰ = state.𝒰.static_energy
-    state.ρℰ = state.ρ * state.ℰ
-
-    return nothing
-end
 
 function rebuild_parcel_thermodynamics!(model; temperature_target = nothing)
     state = model.dynamics.state
@@ -215,17 +185,14 @@ function rebuild_parcel_thermodynamics!(model; temperature_target = nothing)
     return nothing
 end
 
-function initialize_supercell_parcel!(model; z = launch_height, w = initial_vertical_velocity)
+function initialize_supercell_parcel!(model; z = launch_height)
     set!(model,
          θ = θ_background,
          qᵗ = qᵛ_background,
          p = reference_state.pressure,
          ρ = reference_state.density,
-         u = u_background,
-         z = z,
-         w_parcel = w)
-
-    apply_warm_bubble_perturbation!(model)
+         w = fixed_updraft,
+         z = z)
 
     return nothing
 end
@@ -287,11 +254,11 @@ function ascending_branch(values, z)
 end
 
 function run_p3_case(; label, color, qᶜˡ = 0, qʳ = 0, nʳ = 0, qⁱ = 0, nⁱ = 0,
-                       launch_z = launch_height, launch_w = initial_vertical_velocity)
+                       launch_z = launch_height)
     microphysics = PredictedParticlePropertiesMicrophysics()
     model = supercell_parcel_model(microphysics)
 
-    initialize_supercell_parcel!(model; z = launch_z, w = launch_w)
+    initialize_supercell_parcel!(model; z = launch_z)
 
     if qᶜˡ > 0 || qʳ > 0 || nʳ > 0 || qⁱ > 0 || nⁱ > 0
         seed_p3_parcel!(model, microphysics; qᶜˡ, qʳ, nʳ, qⁱ, nⁱ)
@@ -302,7 +269,6 @@ function run_p3_case(; label, color, qᶜˡ = 0, qʳ = 0, nʳ = 0, qⁱ = 0, n�
     stop_at_plot_top!(simulation)
 
     z = Float64[]
-    w = Float64[]
     T = Float64[]
     qᶜˡ_ts = Float64[]
     qʳ_ts = Float64[]
@@ -325,7 +291,6 @@ function run_p3_case(; label, color, qᶜˡ = 0, qʳ = 0, nʳ = 0, qⁱ = 0, n�
         diagnostics = p3_ice_diagnostics(microphysics, state.ρ, qⁱₙ, nⁱₙ, qᶠₙ, bᶠₙ, qʷⁱₙ)
 
         push!(z, state.z)
-        push!(w, state.w)
         push!(T, temperature(state.𝒰, sim.model.thermodynamic_constants))
         push!(qᶜˡ_ts, μ.ρqᶜˡ / state.ρ)
         push!(qʳ_ts, μ.ρqʳ / state.ρ)
@@ -345,7 +310,6 @@ function run_p3_case(; label, color, qᶜˡ = 0, qʳ = 0, nʳ = 0, qⁱ = 0, n�
     return (; label,
               color,
               z,
-              w,
               T,
               qᶜˡ = qᶜˡ_ts,
               qʳ = qʳ_ts,
@@ -371,7 +335,6 @@ function run_kessler_case(; label, color, qᶜˡ = 0, qʳ = 0)
     stop_at_plot_top!(simulation)
 
     z = Float64[]
-    w = Float64[]
     T = Float64[]
     qᶜˡ_ts = Float64[]
     qʳ_ts = Float64[]
@@ -381,7 +344,6 @@ function run_kessler_case(; label, color, qᶜˡ = 0, qʳ = 0)
         μ = state.μ
 
         push!(z, state.z)
-        push!(w, state.w)
         push!(T, temperature(state.𝒰, sim.model.thermodynamic_constants))
         push!(qᶜˡ_ts, μ.ρqᶜˡ / state.ρ)
         push!(qʳ_ts, μ.ρqʳ / state.ρ)
@@ -396,7 +358,6 @@ function run_kessler_case(; label, color, qᶜˡ = 0, qʳ = 0)
     return (; label,
               color,
               z,
-              w,
               T,
               qᶜˡ = qᶜˡ_ts,
               qʳ = qʳ_ts)
@@ -404,10 +365,9 @@ end
 
 # ## Section 1: P3 vs. Kessler parcels
 #
-# Both parcels are launched from the same sounding,
-# same 0.5 K thermal perturbation, same initial vertical velocity, and no seeded
-# condensate. Differences aloft therefore come from the microphysics, not the
-# initialization.
+# Both parcels are launched from the same sounding, ascend at the same fixed
+# 1 m/s, and start with no seeded condensate. Differences aloft therefore come
+# from the microphysics, not the initialization.
 
 p3_reference = run_p3_case(label = "P3", color = :dodgerblue)
 kessler_reference = run_kessler_case(label = "Kessler", color = :black)
@@ -415,7 +375,7 @@ nothing #hide
 
 set_theme!(fontsize = 16, linewidth = 2.5)
 
-fig1 = Figure(size = (1250, 450))
+fig1 = Figure(size = (900, 450))
 
 ax11 = Axis(fig1[1, 1];
     xlabel = "Temperature (K)",
@@ -423,11 +383,6 @@ ax11 = Axis(fig1[1, 1];
     title = "Same launch, different microphysics")
 
 ax12 = Axis(fig1[1, 2];
-    xlabel = "Vertical velocity (m/s)",
-    ylabel = "Height (km)",
-    title = "Buoyancy-driven updraft")
-
-ax13 = Axis(fig1[1, 3];
     xlabel = "Mixing ratio (kg/kg)",
     ylabel = "Height (km)",
     title = "Hydrometeor partition")
@@ -439,31 +394,23 @@ lines!(ax11, ascending_branch(p3_reference.T, p3_reference.z ./ 1000)...;
 lines!(ax11, ascending_branch(kessler_reference.T, kessler_reference.z ./ 1000)...;
        color = :black, linestyle = :dash, label = kessler_reference.label)
 
-vlines!(ax12, [0]; color = :gray40, linestyle = :dot)
-lines!(ax12, ascending_branch(p3_reference.w, p3_reference.z ./ 1000)...;
-       color = p3_reference.color, label = p3_reference.label)
-lines!(ax12, ascending_branch(kessler_reference.w, kessler_reference.z ./ 1000)...;
-       color = kessler_reference.color, linestyle = :dash, label = kessler_reference.label)
-
-lines!(ax13, ascending_branch(p3_reference.qᶜˡ, p3_reference.z ./ 1000)...;
+lines!(ax12, ascending_branch(p3_reference.qᶜˡ, p3_reference.z ./ 1000)...;
        color = :lime, label = "P3 qᶜˡ")
-lines!(ax13, ascending_branch(p3_reference.qʳ, p3_reference.z ./ 1000)...;
+lines!(ax12, ascending_branch(p3_reference.qʳ, p3_reference.z ./ 1000)...;
        color = :orangered, label = "P3 qʳ")
-lines!(ax13, ascending_branch(p3_reference.qⁱ, p3_reference.z ./ 1000)...;
+lines!(ax12, ascending_branch(p3_reference.qⁱ, p3_reference.z ./ 1000)...;
        color = :dodgerblue, label = "P3 qⁱ")
 
-lines!(ax13, ascending_branch(kessler_reference.qᶜˡ, kessler_reference.z ./ 1000)...;
+lines!(ax12, ascending_branch(kessler_reference.qᶜˡ, kessler_reference.z ./ 1000)...;
        color = :lime, linestyle = :dash, label = "Kessler qᶜˡ")
-lines!(ax13, ascending_branch(kessler_reference.qʳ, kessler_reference.z ./ 1000)...;
+lines!(ax12, ascending_branch(kessler_reference.qʳ, kessler_reference.z ./ 1000)...;
        color = :orangered, linestyle = :dash, label = "Kessler qʳ")
 
 ylims!(ax11, 0, plot_top / 1000)
 ylims!(ax12, 0, plot_top / 1000)
-ylims!(ax13, 0, plot_top / 1000)
 
 axislegend(ax11; position = :lb, labelsize = 12, backgroundcolor = (:white, 0.8))
-axislegend(ax12; position = :lt, labelsize = 12, backgroundcolor = (:white, 0.8))
-axislegend(ax13; position = :rb, labelsize = 11, nbanks = 2, backgroundcolor = (:white, 0.8))
+axislegend(ax12; position = :rb, labelsize = 11, nbanks = 2, backgroundcolor = (:white, 0.8))
 
 fig1
 
@@ -482,8 +429,7 @@ p3_feature_cases = [
         color = :dodgerblue,
         qⁱ = cold_seeded_ice_mass,
         nⁱ = cold_seeded_ice_number,
-        launch_z = cold_launch_height,
-        launch_w = cold_launch_w),
+        launch_z = cold_launch_height),
 
     run_p3_case(;
         label = "Cloud riming",
@@ -491,8 +437,7 @@ p3_feature_cases = [
         qᶜˡ = cold_cloud_partition,
         qⁱ = cold_seeded_ice_mass,
         nⁱ = cold_seeded_ice_number,
-        launch_z = cold_launch_height,
-        launch_w = cold_launch_w),
+        launch_z = cold_launch_height),
 
     run_p3_case(;
         label = "Cloud + rain riming",
@@ -502,8 +447,7 @@ p3_feature_cases = [
         nʳ = cold_rain_number_partition,
         qⁱ = cold_seeded_ice_mass,
         nⁱ = cold_seeded_ice_number,
-        launch_z = cold_launch_height,
-        launch_w = cold_launch_w),
+        launch_z = cold_launch_height),
 ]
 nothing #hide
 
@@ -515,14 +459,14 @@ ax21 = Axis(fig2[1, 1];
     title = "Cold launch, different liquid partitions")
 
 ax22 = Axis(fig2[1, 2];
-    xlabel = "Vertical velocity (m/s)",
-    ylabel = "Height (km)",
-    title = "Updraft responds to latent heating")
-
-ax23 = Axis(fig2[1, 3];
     xlabel = "Ice mixing ratio (kg/kg)",
     ylabel = "Height (km)",
     title = "Liquid availability changes ice growth")
+
+ax23 = Axis(fig2[1, 3];
+    xlabel = "Rime fraction Fᶠ",
+    ylabel = "Height (km)",
+    title = "Riming turns on smoothly")
 
 ax24 = Axis(fig2[2, 1];
     xlabel = "Rime fraction Fᶠ",
@@ -536,19 +480,13 @@ ax25 = Axis(fig2[2, 2];
     yscale = log10,
     title = "Bulk fall speed evolves continuously")
 
-ax26 = Axis(fig2[2, 3];
-    xlabel = "Rime fraction Fᶠ",
-    ylabel = "Height (km)",
-    title = "Riming turns on smoothly")
-
 lines!(ax21, background_T_profile, height_profile ./ 1000;
        color = :gray40, linestyle = :dot, label = "Environment")
-vlines!(ax22, [0]; color = :gray40, linestyle = :dot)
 
 for case in p3_feature_cases
     lines!(ax21, ascending_branch(case.T, case.z ./ 1000)...; color = case.color, label = case.label)
-    lines!(ax22, ascending_branch(case.w, case.z ./ 1000)...; color = case.color, label = case.label)
-    lines!(ax23, ascending_branch(case.qⁱ, case.z ./ 1000)...; color = case.color, label = case.label)
+    lines!(ax22, ascending_branch(case.qⁱ, case.z ./ 1000)...; color = case.color, label = case.label)
+    lines!(ax23, ascending_branch(case.Fᶠ, case.z ./ 1000)...; color = case.color)
 
     lines!(ax24, case.Fᶠ, case.ρᶠ; color = case.color, label = case.label)
     scatter!(ax24, [first(case.Fᶠ)], [first(case.ρᶠ)];
@@ -561,18 +499,14 @@ for case in p3_feature_cases
              color = case.color, marker = :circle, markersize = 10)
     scatter!(ax25, [last(case.mean_diameter)], [last(case.fall_speed)];
              color = case.color, marker = :utriangle, markersize = 12)
-
-    lines!(ax26, ascending_branch(case.Fᶠ, case.z ./ 1000)...; color = case.color)
 end
 
 ylims!(ax21, cold_launch_height / 1000, plot_top / 1000)
 ylims!(ax22, cold_launch_height / 1000, plot_top / 1000)
 ylims!(ax23, cold_launch_height / 1000, plot_top / 1000)
-ylims!(ax26, cold_launch_height / 1000, plot_top / 1000)
 
 axislegend(ax21; position = :lb, labelsize = 12, backgroundcolor = (:white, 0.8))
-axislegend(ax22; position = :lt, labelsize = 12, backgroundcolor = (:white, 0.8))
-axislegend(ax23; position = :rb, labelsize = 12, backgroundcolor = (:white, 0.8))
+axislegend(ax22; position = :rb, labelsize = 12, backgroundcolor = (:white, 0.8))
 axislegend(ax24; position = :lt, labelsize = 12, backgroundcolor = (:white, 0.8))
 
 fig2
@@ -580,8 +514,8 @@ fig2
 # ## Discussion
 #
 # - In the first section, the P3 and Kessler parcels start from the same
-#   sounding, the same 0.5 K warm-bubble perturbation, and the same prognostic
-#   updraft. Any separation aloft therefore comes from the microphysics.
+#   sounding and ascend at the same fixed 1 m/s updraft. Any separation aloft
+#   therefore comes from the microphysics, not the thermodynamics of buoyancy.
 # - Kessler can only move water between vapor, cloud, and rain. P3 begins from
 #   the same warm-rain launch, but it can also create and evolve ice once the
 #   parcel enters the mixed-phase part of the sounding.
