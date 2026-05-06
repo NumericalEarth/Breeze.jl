@@ -247,7 +247,7 @@ end
 #####
 
 """
-    compute_microphysical_tendencies!(model)
+$(TYPEDSIGNATURES)
 
 Add microphysics tendency contributions to the model's `Gⁿ` fields in a single fused pass.
 
