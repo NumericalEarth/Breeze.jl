@@ -83,7 +83,7 @@ end
 # Regression test for #659 / PR #656: the definition of virtual potential temperature.
 @testset "Virtual potential temperature buoyancy formulation [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    
+
     Nz = 8
     grid = RectilinearGrid(default_arch; size=(2, 2, Nz), x=(0, 1_000), y=(0, 1_000), z=(0, 5_000))
 
