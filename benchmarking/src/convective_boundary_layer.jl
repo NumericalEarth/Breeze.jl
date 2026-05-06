@@ -39,6 +39,8 @@ from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 - `advection`: Advection scheme (default: `WENO(order=5)`)
 - `closure`: Turbulence closure (default: `nothing`)
 - `microphysics`: Microphysics (default: `nothing`)
+- `topology`: Grid topology tuple (default: `(Periodic, Periodic, Bounded)`).
+  Pass `(Periodic, Bounded, Bounded)` for a PBB grid.
 
 # Physical parameters (from Sauer & Munoz-Esparza 2020, Section 4.2)
 - Domain: 12 km × 12 km × 3 km
@@ -56,6 +58,7 @@ function convective_boundary_layer(arch = CPU();
                                    advection = WENO(order=5),
                                    closure = nothing,
                                    microphysics = nothing,
+                                   topology = (Periodic, Periodic, Bounded),
                                    )
 
     # Set floating point precision
@@ -72,7 +75,7 @@ function convective_boundary_layer(arch = CPU();
         y = (0, Ly),
         z = (0, Lz),
         halo = (5, 5, 5),
-        topology = (Periodic, Periodic, Bounded)
+        topology = topology
     )
 
     # Reference state

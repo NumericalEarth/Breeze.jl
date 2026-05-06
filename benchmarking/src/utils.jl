@@ -23,10 +23,15 @@ end
                             closure::AbstractString = "",
                             dynamics::AbstractString = "",
                             microphysics::AbstractString = "",
+                            backend::AbstractString = "vanilla",
                             )
 
 Run a benchmark by executing `time_steps` time steps of the given model.
-Uses `many_time_steps!` to avoid Simulation overhead.
+
+If the model lives on a `ReactantState` architecture, `time_step!` is compiled
+once with `Reactant.@compile sync=true` (compile time recorded separately) and
+the compiled function is then called in the timed loop. Otherwise the eager
+`time_step!` is called directly via `many_time_steps!`.
 
 Returns a `BenchmarkResult` containing timing information and system metadata.
 """
@@ -40,6 +45,7 @@ function benchmark_time_stepping(model;
                                  closure::AbstractString = "",
                                  dynamics::AbstractString = "",
                                  microphysics::AbstractString = "",
+                                 backend::AbstractString = "vanilla",
                                  )
 
     grid = model.grid
@@ -47,10 +53,12 @@ function benchmark_time_stepping(model;
     FT = eltype(grid)
     Nx, Ny, Nz = size(grid)
     total_points = Nx * Ny * Nz
+    is_reactant = arch isa ReactantState
 
     if verbose
         @info "Benchmark: $name"
         @info "  Architecture: $arch"
+        @info "  Backend: $backend"
         @info "  Float type: $FT"
         @info "  Grid size: $Nx × $Ny × $Nz ($total_points points)"
         @info "  Time step: $Δt s"
@@ -58,11 +66,30 @@ function benchmark_time_stepping(model;
         @info "  Benchmark steps: $time_steps"
     end
 
+    # Compile time_step! up front for Reactant; eager backends compile on first call.
+    compile_time_seconds = 0.0
+    compiled_step! = nothing
+    if is_reactant
+        if verbose
+            @info "  Compiling time_step! with Reactant..."
+        end
+        compile_start = time_ns()
+        compiled_step! = Reactant.@compile sync=true time_step!(model, Δt)
+        compile_time_seconds = (time_ns() - compile_start) / 1e9
+        if verbose
+            @info "    Compile time: $(@sprintf("%.3f", compile_time_seconds)) s"
+        end
+    end
+
     # Warmup phase
     if verbose
         @info "  Running warmup..."
     end
-    many_time_steps!(model, Δt, warmup_steps)
+    if is_reactant
+        many_compiled_time_steps!(compiled_step!, model, Δt, warmup_steps)
+    else
+        many_time_steps!(model, Δt, warmup_steps)
+    end
 
     # Synchronize device before timing
     synchronize_device(arch)
@@ -72,7 +99,11 @@ function benchmark_time_stepping(model;
         @info "  Running benchmark..."
     end
     start_time = time_ns()
-    many_time_steps!(model, Δt, time_steps)
+    if is_reactant
+        many_compiled_time_steps!(compiled_step!, model, Δt, time_steps)
+    else
+        many_time_steps!(model, Δt, time_steps)
+    end
     synchronize_device(arch)
     end_time = time_ns()
 
@@ -91,6 +122,7 @@ function benchmark_time_stepping(model;
         String(closure),
         String(dynamics),
         String(microphysics),
+        String(backend),
         (Nx, Ny, Nz),
         time_steps,
         Δt,
@@ -98,6 +130,7 @@ function benchmark_time_stepping(model;
         time_per_step_seconds,
         steps_per_second,
         grid_points_per_second,
+        compile_time_seconds,
         gpu_memory_used,
         metadata,
     )
@@ -107,6 +140,9 @@ function benchmark_time_stepping(model;
         @info "    Total time: $(@sprintf("%.3f", total_time_seconds)) s"
         @info "    Time per step: $(@sprintf("%.6f", time_per_step_seconds)) s"
         @info "    Grid points/s: $(@sprintf("%.2e", grid_points_per_second))"
+        if is_reactant
+            @info "    Compile time: $(@sprintf("%.3f", compile_time_seconds)) s"
+        end
         if arch isa GPU{CUDABackend}
             @info "    GPU memory usage: $(Base.format_bytes(gpu_memory_used))"
         end
@@ -326,3 +362,7 @@ function synchronize_device(::Oceananigans.Architectures.GPU{ROCBackend})
     AMDGPU.synchronize()
     return nothing
 end
+
+# Reactant compiled functions invoked via @compile sync=true block until
+# completion on the underlying device, so no extra sync is required here.
+synchronize_device(::ReactantState) = nothing

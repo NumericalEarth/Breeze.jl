@@ -9,6 +9,7 @@ struct BenchmarkResult
     closure::String
     dynamics::String
     microphysics::String
+    backend::String
     grid_size::Tuple{Int, Int, Int}
     time_steps::Int
     Δt::Float64
@@ -16,6 +17,7 @@ struct BenchmarkResult
     time_per_step_seconds::Float64
     steps_per_second::Float64
     grid_points_per_second::Float64
+    compile_time_seconds::Float64
     gpu_memory_used::Int64
     metadata::BenchmarkMetadata
 end
@@ -32,6 +34,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::BenchmarkResult)
     println(io, "├── closure: ", r.closure)
     println(io, "├── dynamics: ", r.dynamics)
     println(io, "├── microphysics: ", r.microphysics)
+    println(io, "├── backend: ", r.backend)
     println(io, "├── grid_size: ", r.grid_size)
     println(io, "├── time_steps: ", r.time_steps)
     println(io, "├── Δt: ", r.Δt)
@@ -39,6 +42,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::BenchmarkResult)
     println(io, "├── time_per_step: ", @sprintf("%.6f s", r.time_per_step_seconds))
     println(io, "├── steps_per_second: ", @sprintf("%.6f/s", r.steps_per_second))
     println(io, "├── grid_points_per_second: ", @sprintf("%.2e", r.grid_points_per_second))
+    println(io, "├── compile_time: ", @sprintf("%.3f s", r.compile_time_seconds))
     println(io, "├── gpu_memory_used: ", Base.format_bytes(r.gpu_memory_used))
     print(io,   "└── metadata: ", r.metadata.architecture, " @ ", r.metadata.timestamp)
 end

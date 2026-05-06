@@ -20,7 +20,7 @@
 #####
 
 using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
-using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation
+using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation, BenchmarkResult
 using JSON: JSON
 using Oceananigans
 using Oceananigans.TurbulenceClosures: SmagorinskyLilly, DynamicSmagorinsky
@@ -31,6 +31,8 @@ using Breeze.Microphysics: NonEquilibriumCloudFormation
 
 using CUDA: CUDABackend
 using AMDGPU: ROCBackend
+using Oceananigans.Architectures: ReactantState
+using Reactant: Reactant
 
 # Load CloudMicrophysics extension for OneMomentCloudMicrophysics
 using CloudMicrophysics: CloudMicrophysics
@@ -105,6 +107,18 @@ function parse_commandline()
                    "Multiple closures can be specified as comma-separated list."
             arg_type = String
             default = "nothing"
+
+        "--backend"
+            help = "Execution backend: vanilla (eager KA / CUDA) or reactant (compiled via Reactant). " *
+                   "Multiple backends can be specified as comma-separated list."
+            arg_type = String
+            default = "vanilla"
+
+        "--topology"
+            help = "Grid topology: PPB (Periodic, Periodic, Bounded) or PBB (Periodic, Bounded, Bounded). " *
+                   "Multiple topologies can be specified as comma-separated list."
+            arg_type = String
+            default = "PPB"
 
         "--time_steps"
             help = "Number of time steps (benchmark mode only)"
@@ -188,6 +202,40 @@ end
 make_architecture(name) = eval(Meta.parse(name))()
 make_float_type(name) = @eval $(Symbol(name))
 
+"""
+    make_backend_arch(backend, device)
+
+Return the architecture instance to build the model on, given a backend name
+("vanilla" or "reactant") and a device name ("CPU" or "GPU"). For Reactant we
+also set the default backend so XLA targets the requested device.
+"""
+function make_backend_arch(backend, device)
+    if backend == "vanilla"
+        return make_architecture(device)
+    elseif backend == "reactant"
+        Reactant.set_default_backend(device == "GPU" ? "gpu" : "cpu")
+        return ReactantState()
+    else
+        error("Unknown backend: $backend. Use 'vanilla' or 'reactant'.")
+    end
+end
+
+"""
+    make_topology(name)
+
+Map a short topology label to an Oceananigans topology tuple.
+"PPB" -> (Periodic, Periodic, Bounded); "PBB" -> (Periodic, Bounded, Bounded).
+"""
+function make_topology(name)
+    if name == "PPB"
+        return (Periodic, Periodic, Bounded)
+    elseif name == "PBB"
+        return (Periodic, Bounded, Bounded)
+    else
+        error("Unknown topology: $name. Use 'PPB' or 'PBB'.")
+    end
+end
+
 # Advection: parse "WENO5" -> WENO(FT; order=5), "Centered2" -> Centered(FT; order=2)
 function make_advection(name, FT)
     name == "nothing" && return nothing
@@ -258,7 +306,7 @@ end
 
 function run_benchmarks(args)
     mode = args["mode"]
-    arch = make_architecture(args["device"])
+    device = args["device"]
     configuration = args["configuration"]
 
     # Parse lists from arguments
@@ -268,6 +316,8 @@ function run_benchmarks(args)
     advections = parse_list(args["advection"])
     closures = parse_list(args["closure"])
     microphysics_schemes = parse_list(args["microphysics"])
+    backends = parse_list(args["backend"])
+    topologies = parse_list(args["topology"])
 
     # Mode-specific parameters
     Δt = args["dt"]
@@ -284,7 +334,9 @@ function run_benchmarks(args)
     println("=" ^ 95)
     println("Date: ", now(UTC))
     println("Mode: ", mode)
-    println("Architecture: ", arch)
+    println("Device: ", device)
+    println("Backends: ", backends)
+    println("Topologies: ", topologies)
     println("Sizes: ", sizes)
     println("Float types: ", float_types)
     println("Dynamics: ", dynamics_names)
@@ -302,8 +354,8 @@ function run_benchmarks(args)
     println()
 
     # Loop over all combinations using Iterators.product
-    for ((Nx, Ny, Nz), FT, dyn_name, adv_name, cls_name, micro_name) in
-            Iterators.product(sizes, float_types, dynamics_names, advections, closures, microphysics_schemes)
+    for (backend_name, topo_name, (Nx, Ny, Nz), FT, dyn_name, adv_name, cls_name, micro_name) in
+            Iterators.product(backends, topologies, sizes, float_types, dynamics_names, advections, closures, microphysics_schemes)
 
         # Set floating point precision so constructors pick up the right default
         Oceananigans.defaults.FloatType = FT
@@ -311,13 +363,15 @@ function run_benchmarks(args)
         # Build benchmark name
         size_str = "$(Nx)x$(Ny)x$(Nz)"
         ft_str = FT == Float32 ? "F32" : "F64"
-        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)_$(adv_name)_$(cls_name)_$(micro_name)"
+        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)_$(backend_name)"
 
         println("\n", "-" ^ 70)
         println("Running: $name")
         println("-" ^ 70)
 
-        # Create schemes
+        # Create arch (backend-aware) and schemes
+        arch = make_backend_arch(backend_name, device)
+        topology = make_topology(topo_name)
         dynamics = make_dynamics(dyn_name)
         advection = make_advection(adv_name, FT)
         closure = make_closure(cls_name, FT)
@@ -332,6 +386,7 @@ function run_benchmarks(args)
                                       advection,
                                       closure,
                                       microphysics,
+                                      topology,
                                       )
         else
             error("Unknown configuration: $configuration")
@@ -349,6 +404,7 @@ function run_benchmarks(args)
                                     closure=cls_name,
                                     dynamics=dyn_name,
                                     microphysics=micro_name,
+                                    backend=backend_name,
                                     )
         elseif mode == "simulate"
             run_benchmark_simulation(model;
@@ -389,14 +445,17 @@ function main()
     println("=" ^ 105)
     println()
 
-    @printf("%-50s %8s %12s %12s %10s %15s\n", "Benchmark", "Float", "Grid", "Time/Step", "Steps/s", "Points/s")
-    println("-" ^ 105)
+    @printf("%-60s %8s %10s %14s %12s %10s %15s\n",
+            "Benchmark", "Float", "Backend", "Grid", "Time/Step", "Steps/s", "Points/s")
+    println("-" ^ 130)
 
     for r in results
         grid_str = "$(r.grid_size[1])×$(r.grid_size[2])×$(r.grid_size[3])"
-        @printf("%-50s %8s %12s %10.4f ms %10.2f %15.2e\n",
+        backend_str = r isa BenchmarkResult ? r.backend : ""
+        @printf("%-60s %8s %10s %14s %10.4f ms %10.2f %15.2e\n",
             r.name,
             r.float_type,
+            backend_str,
             grid_str,
             r.time_per_step_seconds * 1000,
             r.steps_per_second,
@@ -404,7 +463,7 @@ function main()
         )
     end
 
-    println("=" ^ 105)
+    println("=" ^ 130)
 
     #####
     ##### Save results to JSON
@@ -475,21 +534,25 @@ function generate_markdown_report(filename, entries)
 
         println(io, "## Results")
         println(io)
-        println(io, "| Benchmark | Float | Grid | Time/Step (ms) | Steps/s | Points/s | Timestamp |")
-        println(io, "|-----------|-------|------|----------------|---------|----------|-----------|")
+        println(io, "| Benchmark | Float | Backend | Grid | Time/Step (ms) | Steps/s | Points/s | Compile (s) | Timestamp |")
+        println(io, "|-----------|-------|---------|------|----------------|---------|----------|-------------|-----------|")
 
         for entry in entries
             grid = entry["grid_size"]
             grid_str = "$(grid[1])×$(grid[2])×$(grid[3])"
             timestamp = entry["metadata"]["timestamp"]
+            backend = get(entry, "backend", "")
+            compile_time = get(entry, "compile_time_seconds", 0.0)
 
-            @printf(io, "| `%s` | %s | %s | %.2f | %.2f | %.2e | %s |\n",
+            @printf(io, "| `%s` | %s | %s | %s | %.2f | %.2f | %.2e | %.3f | %s |\n",
                     entry["name"],
                     entry["float_type"],
+                    backend,
                     grid_str,
                     entry["time_per_step_seconds"] * 1000,
                     entry["steps_per_second"],
                     entry["grid_points_per_second"],
+                    compile_time,
                     timestamp)
         end
     end

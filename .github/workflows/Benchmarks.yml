@@ -25,7 +25,7 @@ env:
 
 jobs:
   run-benchmarks:
-    name: "Run benchmarks - dynamics ${{ matrix.dynamics }} - microphysics ${{ matrix.microphysics }} - grid ${{ matrix.grid }} - advection ${{ matrix.advection }}"
+    name: "Run benchmarks - dynamics ${{ matrix.dynamics }} - microphysics ${{ matrix.microphysics }} - grid ${{ matrix.grid }} - advection ${{ matrix.advection }} - backend ${{ matrix.backend }} - topology ${{ matrix.topology }}"
     permissions:
       actions: write
       contents: write
@@ -40,14 +40,28 @@ jobs:
             microphysics: 'nothing'
             grid: '256x256x128, 512x512x256, 768x768x256'
             advection: 'WENO5, WENO9'
+            backend: 'vanilla'
+            topology: 'PPB'
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '512x512x256'
             advection: 'WENO5'
+            backend: 'vanilla'
+            topology: 'PPB'
           - dynamics: 'anelastic'
             microphysics: 'MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium'
             grid: '512x512x256'
             advection: 'WENO5'
+            backend: 'vanilla'
+            topology: 'PPB'
+          # Reactant vs vanilla — compressible_explicit + WENO5 + 1M mixed-phase
+          # non-eq microphysics with ice on a PBB grid, swept across realistic grids.
+          - dynamics: 'compressible_explicit'
+            microphysics: '1M_MixedNonEquilibrium'
+            grid: '128x128x64, 256x256x128, 384x384x192'
+            advection: 'WENO5'
+            backend: 'vanilla, reactant'
+            topology: 'PBB'
     defaults:
       run:
         shell: bash
@@ -67,10 +81,10 @@ jobs:
         timeout-minutes: 45
         run: |
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --warmup_steps 8 --time_steps 80
+          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}'
+          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
           path: benchmarking/benchmark_results.*
           retention-days: 90
           overwrite: false

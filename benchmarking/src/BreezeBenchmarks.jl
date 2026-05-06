@@ -18,7 +18,7 @@ using Printf
 using Statistics
 
 using Oceananigans
-using Oceananigans.Architectures: GPU
+using Oceananigans.Architectures: GPU, ReactantState
 using Oceananigans.Units
 using Oceananigans.TimeSteppers: time_step!
 using Oceananigans.OutputWriters: JLD2Writer, IterationInterval, TimeInterval, write_output!
@@ -34,6 +34,7 @@ else
     const CUDACore = CUDA
 end
 using AMDGPU: AMDGPU, ROCBackend
+using Reactant: Reactant
 
 # Base functionalities
 include("metadata.jl")
