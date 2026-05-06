@@ -122,6 +122,12 @@ function parse_commandline()
             arg_type = String
             default = "PPB"
 
+        "--simplified"
+            help = "Omit the geostrophic body forcing and field-dependent surface drag BCs " *
+                   "from the convective_boundary_layer case. Required for Reactant runs since " *
+                   "those forcings do not currently materialize on ReactantState."
+            action = :store_true
+
         "--time_steps"
             help = "Number of time steps (benchmark mode only)"
             arg_type = Int
@@ -389,6 +395,7 @@ function run_benchmarks(args)
                                       closure,
                                       microphysics,
                                       topology,
+                                      simplified = args["simplified"],
                                       )
         else
             error("Unknown configuration: $configuration")
