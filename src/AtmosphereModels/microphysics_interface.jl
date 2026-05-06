@@ -243,6 +243,32 @@ end
 @inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
 
 #####
+##### Fused multi-output microphysical tendency interface
+#####
+
+"""
+    compute_microphysical_tendencies!(model)
+
+Add microphysics tendency contributions to the model's `Gⁿ` fields in a single fused pass.
+
+The default is a no-op: the per-tracer scalar-tendency kernels already include the
+microphysics contribution via [`grid_microphysical_tendency`](@ref). Schemes whose
+tendencies bundle many expensive process rates feeding multiple prognostics (e.g.
+mixed-phase non-equilibrium 1M, where ~14 process rates feed 5 prognostic tendencies)
+override this method to compute the bundle once per cell. Such schemes must also override
+[`grid_microphysical_tendency`](@ref) to return zero so the per-tracer kernels do not
+recompute the same bundle.
+
+Dispatch goes through `model.microphysics`; concrete implementations add methods on the
+two-argument helper `compute_microphysical_tendencies!(microphysics, model)`.
+"""
+compute_microphysical_tendencies!(model) =
+    compute_microphysical_tendencies!(model.microphysics, model)
+
+# Default: no-op (microphysics term stays inside the per-tracer scalar-tendency kernel).
+compute_microphysical_tendencies!(microphysics, model) = nothing
+
+#####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
 #####
 

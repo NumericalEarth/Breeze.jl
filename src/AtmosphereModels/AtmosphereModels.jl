@@ -44,6 +44,7 @@ export
     microphysical_state,
     microphysical_tendency,
     grid_microphysical_tendency,
+    compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,
     specific_prognostic_moisture_from_total,
