@@ -1529,18 +1529,6 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     wg_rain       = wg_rain * f_rain
     rain_evap     = rain_evap * f_rain
 
-    # --- Dry-ice sinks ---
-    ice_source_total = max(0, dep) + cloud_rim + rain_rim + refrz +
-                       nuc_q + cloud_frz_q + rain_frz_q +
-                       cloud_hom_q + rain_hom_q
-    ice_available = max(0, qⁱ) + ice_source_total * dt_safety
-    ice_sink_total = partial_melt + complete_melt + clamp_positive(-dep)
-    f_ice = sink_limiting_factor(ice_sink_total, ice_available, dt_safety)
-    partial_melt  = partial_melt * f_ice
-    complete_melt = complete_melt * f_ice
-    melt_n        = melt_n * f_ice
-    dep           = ifelse(dep < 0, dep * f_ice, dep)
-
     # D2: Sublimation number loss
     sublim_mag = clamp_positive(-dep)
     sublim_n = sublim_mag * safe_divide(clamp_positive(nⁱ), max(clamp_positive(qⁱ), FT(1e-20)), zero(FT))
@@ -1549,7 +1537,13 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # saturation adjustment (P3CoupledVaporRates). The dry/wet exclusivity is
     # enforced inside that formula via εⁱ / εⁱʷ activation.
 
-    # D17: Total ice sink limiting
+    # --- Total-ice (qⁱ + qʷⁱ) sink limiting ---
+    # Matches Fortran's single qitot budget at microphy_p3.f90:4106-4136. The
+    # paired qʷⁱ-only budget below mirrors Fortran's qiliq budget at 4138-4170,
+    # so `shed` / `coat_evap` are deliberately scaled in both stages (`qlshd`
+    # / `qlevp` are sinks of both qitot and qiliq in Fortran). `partial_melt`
+    # is not scaled here because `qimlt` is invisible to qitot in Fortran (it
+    # transfers mass dry → coating without changing the total).
     total_ice_source_total = max(0, dep) + cloud_rim + rain_rim +
                              nuc_q + cloud_frz_q + rain_frz_q +
                              cloud_hom_q + rain_hom_q +
