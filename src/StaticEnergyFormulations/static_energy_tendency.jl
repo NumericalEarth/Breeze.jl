@@ -56,12 +56,6 @@ end
 
     specific_energy = formulation.specific_energy
     ρ_field = dynamics_density(dynamics)
-    @inbounds ρ = ρ_field[i, j, k]
-    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
-
-    # Compute moisture fractions first
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
-    𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Compute the buoyancy flux term, ρᵣ w b
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, w_buoyancy_forceᶜᶜᶠ,
@@ -73,7 +67,6 @@ end
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
-             + grid_microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), ρ, microphysical_fields, 𝒰, constants, velocities)
              + ρe_forcing(i, j, k, grid, clock, model_fields)
              + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
 end

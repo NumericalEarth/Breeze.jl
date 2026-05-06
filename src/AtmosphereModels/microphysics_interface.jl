@@ -6,12 +6,20 @@
 # The key abstraction is the MicrophysicalState (ℳ), which enables the same tendency
 # functions to work for any dynamics (grid-based LES, parcel models, etc.).
 #
-# The workflow is:
-#   ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
-#   tendency = microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
+# Schemes plug in by extending one of two methods:
 #
-# The grid-indexed interface provides a default fallback that builds ℳ and dispatches
-# to the state-based tendency. Schemes needing full grid access can override directly.
+# 1. `microphysical_tendency(microphysics, Val(name), ρ, ℳ, 𝒰, constants)` for schemes
+#    whose tendencies factor naturally per-name. The default
+#    `compute_microphysical_tendencies!` builds ℳ once per cell and `+=`s the result
+#    into each prognostic G field.
+#
+# 2. `compute_microphysical_tendencies!(microphysics, model)` for schemes whose
+#    tendencies bundle many process rates feeding multiple prognostics
+#    (e.g. mixed-phase non-equilibrium 1M, two-moment non-equilibrium). These
+#    schemes write a fused kernel that computes the bundle once per cell.
+#
+# The model never calls `microphysical_tendency` directly during tendency assembly —
+# `compute_microphysical_tendencies!` is the only entry point.
 #####
 
 using Oceananigans.Fields: set!
@@ -216,57 +224,89 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 @inline microphysical_tendency(microphysics::Nothing, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 #####
-##### Grid-indexed tendency interface (default fallback)
+##### Fused microphysical tendency interface
 #####
-
-"""
-    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
-
-Compute the tendency for microphysical variable `name` at grid point `(i, j, k)`.
-
-This is the **grid-indexed** interface used by the tendency kernels. The default
-implementation builds the microphysical state `ℳ` via [`microphysical_state`](@ref)
-and dispatches to the state-based [`microphysical_tendency`](@ref).
-
-Schemes that need full grid access (e.g., for non-local operations) can override
-this method directly without using `microphysical_state`.
-
-# Arguments
-- `velocities`: NamedTuple of velocity components `(; u, v, w)` [m/s].
-"""
-@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
-    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, velocities)
-    return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
-end
-
-# Explicit Nothing fallback (for backward compatibility)
-@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
-
-#####
-##### Fused multi-output microphysical tendency interface
-#####
+#
+# `compute_microphysical_tendencies!` is the single entry point through which the
+# atmosphere model invokes microphysics during tendency assembly. The model calls it
+# *after* the per-tracer dynamics kernels have written advection + diffusion + forcing
+# into `Gⁿ`; microphysics contributions are added on top via `+=`.
 
 """
 $(TYPEDSIGNATURES)
 
-Add microphysics tendency contributions to the model's `Gⁿ` fields in a single fused pass.
+Add microphysics tendency contributions to the model's `Gⁿ` fields.
 
-The default is a no-op: the per-tracer scalar-tendency kernels already include the
-microphysics contribution via [`grid_microphysical_tendency`](@ref). Schemes whose
-tendencies bundle many expensive process rates feeding multiple prognostics (e.g.
+This is the only entry point through which `compute_tendencies!` invokes microphysics.
+Concrete implementations add methods on the two-argument helper
+`compute_microphysical_tendencies!(microphysics, model)`.
+
+The default implementation launches a single fused kernel that builds the microphysical
+state `ℳ` and thermodynamic state `𝒰` once per cell, then `+=`s the result of
+[`microphysical_tendency`](@ref) for each prognostic name into the corresponding `G`
+field. Schemes whose tendencies factor naturally per-name only need to extend
+[`microphysical_tendency`](@ref).
+
+Schemes whose tendencies bundle many process rates feeding multiple prognostics (e.g.
 mixed-phase non-equilibrium 1M, where ~14 process rates feed 5 prognostic tendencies)
-override this method to compute the bundle once per cell. Such schemes must also override
-[`grid_microphysical_tendency`](@ref) to return zero so the per-tracer kernels do not
-recompute the same bundle.
-
-Dispatch goes through `model.microphysics`; concrete implementations add methods on the
-two-argument helper `compute_microphysical_tendencies!(microphysics, model)`.
+override this method directly to compute the bundle once per cell.
 """
 compute_microphysical_tendencies!(model) =
     compute_microphysical_tendencies!(model.microphysics, model)
 
-# Default: no-op (microphysics term stays inside the per-tracer scalar-tendency kernel).
-compute_microphysical_tendencies!(microphysics, model) = nothing
+# No microphysics: nothing to add.
+compute_microphysical_tendencies!(::Nothing, model) = nothing
+
+# Default fused per-tracer kernel: ℳ and 𝒰 built once per cell, contributions
+# accumulated into each G field via `+=`.
+function compute_microphysical_tendencies!(microphysics, model)
+    grid = model.grid
+    arch = grid.architecture
+    G = model.timestepper.Gⁿ
+
+    moist_name = moisture_prognostic_name(microphysics)
+    prog_names = prognostic_field_names(microphysics)
+    all_names = (moist_name, prog_names...)
+    G_tuple = map(n -> getproperty(G, n), all_names)
+    name_tuple = map(Val, all_names)
+
+    launch!(arch, grid, :xyz, _default_microphysical_tendencies_kernel!,
+            G_tuple, name_tuple, grid, microphysics, model.dynamics, model.formulation,
+            model.thermodynamic_constants, specific_prognostic_moisture(model),
+            model.microphysical_fields, transport_velocities(model))
+
+    return nothing
+end
+
+@kernel function _default_microphysical_tendencies_kernel!(G_tuple, name_tuple, grid,
+                                                            microphysics, dynamics, formulation,
+                                                            constants, specific_prognostic_moisture,
+                                                            microphysical_fields, velocities)
+    i, j, k = @index(Global, NTuple)
+
+    ρ_field = dynamics_density(dynamics)
+    @inbounds ρ = ρ_field[i, j, k]
+    @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
+
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
+    𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
+    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, microphysical_fields, ρ, 𝒰, velocities)
+
+    _accumulate_microphysical_tendencies!(G_tuple, name_tuple, microphysics, i, j, k, ρ, ℳ, 𝒰, constants)
+end
+
+# Recursive Tuple iteration: type-stable and statically unrolled because the
+# tuples carry their length and element types in their Tuple{...} type.
+@inline _accumulate_microphysical_tendencies!(::Tuple{}, ::Tuple{}, microphysics, i, j, k, ρ, ℳ, 𝒰, constants) = nothing
+
+@inline function _accumulate_microphysical_tendencies!(G_tuple::Tuple, name_tuple::Tuple,
+                                                       microphysics, i, j, k, ρ, ℳ, 𝒰, constants)
+    G = first(G_tuple)
+    name = first(name_tuple)
+    @inbounds G[i, j, k] += microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
+    return _accumulate_microphysical_tendencies!(Base.tail(G_tuple), Base.tail(name_tuple),
+                                                 microphysics, i, j, k, ρ, ℳ, 𝒰, constants)
+end
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics

@@ -34,12 +34,27 @@ Arguments:
 | Function | Arguments | Description |
 |----------|-----------|-------------|
 | `microphysical_tendency` | `(microphysics, name, ρ, ℳ, 𝒰, constants)` | **State-based**. Compute tendency for variable `name`. |
-| `grid_microphysical_tendency` | `(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)` | **Generic wrapper**. Builds `ℳ` and dispatches to state-based version. |
+| `compute_microphysical_tendencies!` | `(microphysics, model)` | **Model entry point**. Adds microphysics contributions to `Gⁿ`. |
 
-**Design principle**: Schemes implement the state-based version; grid-indexed is generic.
-All velocity components are interpolated from cell faces to cell centers and passed as a NamedTuple `(; u, v, w)` to the microphysical state for aerosol activation and other velocity-dependent processes.
+**Design principle**: `compute_microphysical_tendencies!` is the only call the atmosphere model
+makes into microphysics during tendency assembly — it runs *after* the per-tracer dynamics
+kernels (advection + diffusion + forcing) have written `Gⁿ`, and adds microphysics on top via `+=`.
+
+Schemes plug in by extending one of two methods:
+
+- **Per-name (typical)** — extend `microphysical_tendency(microphysics, Val(name), ρ, ℳ, 𝒰, constants)`.
+  The default `compute_microphysical_tendencies!` launches a single fused kernel that builds `ℳ`
+  and `𝒰` once per cell and `+=`s `microphysical_tendency` for each prognostic name into the
+  corresponding `G` field. This is the right extension point when the per-name tendencies don't
+  share intermediate work.
+- **Fused (bundle schemes)** — override `compute_microphysical_tendencies!(microphysics, model)`
+  directly. Use this when a single bundle of process rates (e.g. ~14 rates in mixed-phase 1M)
+  feeds multiple prognostic tendencies; computing the bundle once per cell rather than once per
+  prognostic is a substantial GPU win.
 
 The `name` argument is a `Val` type (e.g., `Val(:ρqᶜˡ)`) that dispatches to the appropriate tendency.
+Velocity components are interpolated from cell faces to cell centers and passed as a NamedTuple
+`(; u, v, w)` to the microphysical state for aerosol activation and other velocity-dependent processes.
 
 ### Moisture Fraction Computation
 
@@ -147,7 +162,7 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `update_microphysical_auxiliaries!` | — | ✓ | Write to diagnostic fields |
 | `microphysical_velocities` | — | ✓ | Sedimentation advection |
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
-| `grid_microphysical_tendency` | — | — | Generic wrapper (don't override) |
+| `compute_microphysical_tendencies!` | — | ✓* | Override for fused bundle schemes |
 | `grid_moisture_fractions` | — | ✓* | Override for saturation adjustment |
 | `maybe_adjust_thermodynamic_state` | — | ✓* | Override for saturation adjustment |
 

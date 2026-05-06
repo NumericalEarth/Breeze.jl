@@ -919,13 +919,9 @@ end
 ##### Fused microphysics tendency for WPNE2M
 #####
 #
-# All 6 tendencies are computed together in `wpne2m_tendencies` to avoid redundant work.
-# Per-tracer terms are zeroed out so the fused kernel via `compute_microphysical_tendencies!`
-# handles everything.
-
-# Skip the per-tracer microphysics term: handled by the fused kernel below.
-@inline AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, microphysics::WPNE2M,
-                                                     name, ρ, fields, 𝒰, constants, velocities) = zero(grid)
+# All 6 tendencies are computed together in `wpne2m_tendencies`. We override
+# `compute_microphysical_tendencies!` to compute the bundle once per cell and
+# write to all 6 G fields in a single kernel.
 
 @kernel function _compute_wpne2m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnᶜˡ, Gρnʳ, Gρnᵃ,
                                              grid, microphysics, dynamics, formulation,

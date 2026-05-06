@@ -36,7 +36,6 @@ using Breeze.AtmosphereModels: AtmosphereModels,
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
-    density,
     with_moisture,
     temperature,
     PlanarLiquidSurface,

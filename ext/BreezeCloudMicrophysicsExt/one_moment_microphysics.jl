@@ -935,13 +935,9 @@ end
 ##### Fused microphysics tendency for MPNE1M
 #####
 #
-# `mpne1m_tendencies` bundles all 5 prognostic tendencies in one call. To avoid
-# recomputing process rates 5 times per cell, we (1) zero out the per-tracer term
-# and (2) apply all tendencies in a single fused kernel below.
-
-# Skip the per-tracer microphysics term: handled by the fused kernel below.
-@inline AM.grid_microphysical_tendency(i, j, k, grid, microphysics::MPNE1M,
-                                       name, ρ, fields, 𝒰, constants, velocities) = zero(grid)
+# `mpne1m_tendencies` bundles all 5 prognostic tendencies in one call. We override
+# `compute_microphysical_tendencies!` to compute the bundle once per cell and
+# write to all 5 G fields in a single kernel.
 
 @kernel function _compute_mpne1m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢ,
                                              grid, microphysics, dynamics, formulation,
