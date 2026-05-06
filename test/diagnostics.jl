@@ -80,14 +80,10 @@ using GPUArraysCore: @allowscalar
     @test all(interior(θᵇ_density_field) .> 0)
 end
 
-# Regression test for #659 / PR #656: the buoyancy-side virtual potential temperature
-# kernel must use the dry-air Poisson exponent Rᵈ/cᵖᵈ — i.e., the standard meteorological
-# definition (Emanuel 1994, "Atmospheric Convection") — and not the mixture exponent Rᵐ/cᵖᵐ.
+# Regression test for #659 / PR #656: the definition of virtual potential temperature.
 @testset "Virtual potential temperature buoyancy formulation [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-
-    # Use a tall column so reference pressure at the top differs significantly from
-    # standard pressure, making the dry- vs moist-exponent formulations measurably distinct.
+    
     Nz = 8
     grid = RectilinearGrid(default_arch; size=(2, 2, Nz), x=(0, 1_000), y=(0, 1_000), z=(0, 5_000))
 
