@@ -34,7 +34,7 @@ else
     const CUDACore = CUDA
 end
 using AMDGPU: AMDGPU, ROCBackend
-using Reactant: Reactant
+using Reactant: Reactant, @trace
 
 # Base functionalities
 include("metadata.jl")

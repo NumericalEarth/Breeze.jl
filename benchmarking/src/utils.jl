@@ -28,10 +28,12 @@ end
 
 Run a benchmark by executing `time_steps` time steps of the given model.
 
-If the model lives on a `ReactantState` architecture, `time_step!` is compiled
-once with `Reactant.@compile sync=true` (compile time recorded separately) and
-the compiled function is then called in the timed loop. Otherwise the eager
-`time_step!` is called directly via `many_time_steps!`.
+If the model lives on a `ReactantState` architecture, the whole stepping loop
+is traced with `Reactant.@trace` (see `step_loop!`) and compiled as a single
+program with `Reactant.@compile raise=true raise_first=true sync=true` —
+compile time is recorded separately. The compiled program is then executed
+once for warmup and once timed. The vanilla path drives `many_time_steps!`
+directly through eager `time_step!`.
 
 Returns a `BenchmarkResult` containing timing information and system metadata.
 """
@@ -66,27 +68,30 @@ function benchmark_time_stepping(model;
         @info "  Benchmark steps: $time_steps"
     end
 
-    # Compile time_step! up front for Reactant; eager backends compile on first call.
+    # Compile the full stepping loop up front for Reactant; eager backends
+    # compile on first call.
     compile_time_seconds = 0.0
-    compiled_step! = nothing
+    compiled_loop! = nothing
     if is_reactant
         if verbose
-            @info "  Compiling time_step! with Reactant..."
+            @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
         end
         compile_start = time_ns()
-        compiled_step! = Reactant.@compile sync=true time_step!(model, Δt)
+        compiled_loop! = Reactant.@compile raise=true raise_first=true sync=true step_loop!(model, Δt, time_steps)
         compile_time_seconds = (time_ns() - compile_start) / 1e9
         if verbose
             @info "    Compile time: $(@sprintf("%.3f", compile_time_seconds)) s"
         end
     end
 
-    # Warmup phase
+    # Warmup phase. For Reactant we run one full execution of the compiled
+    # loop (which already encodes `time_steps` iterations); `warmup_steps`
+    # only affects the vanilla path's eager loop.
     if verbose
         @info "  Running warmup..."
     end
     if is_reactant
-        many_compiled_time_steps!(compiled_step!, model, Δt, warmup_steps)
+        compiled_loop!(model, Δt, time_steps)
     else
         many_time_steps!(model, Δt, warmup_steps)
     end
@@ -100,7 +105,7 @@ function benchmark_time_stepping(model;
     end
     start_time = time_ns()
     if is_reactant
-        many_compiled_time_steps!(compiled_step!, model, Δt, time_steps)
+        compiled_loop!(model, Δt, time_steps)
     else
         many_time_steps!(model, Δt, time_steps)
     end

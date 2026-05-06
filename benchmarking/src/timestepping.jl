@@ -16,14 +16,16 @@ function many_time_steps!(model, Δt, N=100)
 end
 
 """
-    many_compiled_time_steps!(compiled_step!, model, Δt, N=100)
+    step_loop!(model, Δt, Nsteps)
 
-Execute `N` time steps of `model` by calling a precompiled time-stepping
-function (e.g. produced by `Reactant.@compile sync=true time_step!(model, Δt)`).
+Drive `Nsteps` time steps of `model` inside a `Reactant.@trace` loop so that
+`Reactant.@compile` lowers the entire stepping loop into a single XLA program.
+On non-Reactant backends `@trace` is a no-op decorator and this is equivalent
+to `many_time_steps!`.
 """
-function many_compiled_time_steps!(compiled_step!, model, Δt, N=100)
-    for _ in 1:N
-        compiled_step!(model, Δt)
+function step_loop!(model, Δt, Nsteps)
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
+        time_step!(model, Δt)
     end
     return nothing
 end
