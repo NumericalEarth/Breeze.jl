@@ -26,6 +26,9 @@ using Oceananigans.Simulations: SpecifiedTimes
 
 using Breeze
 
+# Reactant must be loaded before CUDA so that ReactantCUDAExt activates with
+# CUDA's kernel compilation hooks correctly registered.
+using Reactant: Reactant, @trace
 using CUDA: CUDA, CUDABackend
 # Compatibility for CUDA v5 and v6
 if isdefined(CUDA, :CUDACore)
@@ -34,7 +37,6 @@ else
     const CUDACore = CUDA
 end
 using AMDGPU: AMDGPU, ROCBackend
-using Reactant: Reactant, @trace
 
 # Base functionalities
 include("metadata.jl")
