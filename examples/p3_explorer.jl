@@ -218,7 +218,7 @@ end
 function initialize_supercell_parcel!(model; z = launch_height, w = initial_vertical_velocity)
     set!(model,
          θ = θ_background,
-         qᵛ = qᵛ_background,
+         qᵗ = qᵛ_background,
          p = reference_state.pressure,
          ρ = reference_state.density,
          u = u_background,
