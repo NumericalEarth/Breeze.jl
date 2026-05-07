@@ -1,4 +1,4 @@
-using ..Thermodynamics: Thermodynamics, mixture_heat_capacity, mixture_gas_constant
+using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!

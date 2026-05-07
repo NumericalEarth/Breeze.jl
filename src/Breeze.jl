@@ -228,9 +228,6 @@ using .TurbulenceClosures
 include("Advection.jl")
 using .Advection
 
-include("AbstractOperations.jl")
-using .AbstractOperations
-
 include("CelestialMechanics/CelestialMechanics.jl")
 using .CelestialMechanics
 

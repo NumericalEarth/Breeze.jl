@@ -29,6 +29,9 @@ using Breeze
 using Breeze: CompressibleDynamics, SplitExplicitTimeDiscretization, ExplicitTimeStepping
 using Breeze.Microphysics: NonEquilibriumCloudFormation
 
+using CUDA: CUDABackend
+using AMDGPU: ROCBackend
+
 # Load CloudMicrophysics extension for OneMomentCloudMicrophysics
 using CloudMicrophysics: CloudMicrophysics
 const CMExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
@@ -182,7 +185,7 @@ end
 #####
 
 # Simple constructors: "CPU" -> CPU(), "Float32" -> Float32
-make_architecture(name) = (@eval $(Symbol(name)))()
+make_architecture(name) = eval(Meta.parse(name))()
 make_float_type(name) = @eval $(Symbol(name))
 
 # Advection: parse "WENO5" -> WENO(FT; order=5), "Centered2" -> Centered(FT; order=2)
@@ -202,13 +205,13 @@ end
 make_closure(name, FT) = name == "nothing" ? nothing : (@eval $(Symbol(name)))(FT)
 
 # Dynamics: "anelastic", "compressible_explicit", "compressible_splitexplicit"
-function make_dynamics(name)
+function make_dynamics(name::AbstractString, FT::Type)
     if name == "anelastic"
         return nothing  # sentinel; convective_boundary_layer handles anelastic by default
     elseif name == "compressible_explicit"
         return CompressibleDynamics(ExplicitTimeStepping())
     elseif name == "compressible_splitexplicit"
-        return CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=12))
+        return CompressibleDynamics(SplitExplicitTimeDiscretization(FT; substeps=12))
     else
         error("Unknown dynamics: $name. Use anelastic, compressible_explicit, or compressible_splitexplicit.")
     end
@@ -315,7 +318,7 @@ function run_benchmarks(args)
         println("-" ^ 70)
 
         # Create schemes
-        dynamics = make_dynamics(dyn_name)
+        dynamics = make_dynamics(dyn_name, FT)
         advection = make_advection(adv_name, FT)
         closure = make_closure(cls_name, FT)
         microphysics = make_microphysics(micro_name, FT)
