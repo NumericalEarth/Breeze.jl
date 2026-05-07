@@ -77,7 +77,7 @@ jobs:
           # and per-step memory bounded.
           - dynamics: 'compressible_explicit'
             microphysics: 'nothing'
-            grid: '128x128x64'
+            grid: '64x64x32'
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
