@@ -61,14 +61,15 @@ jobs:
           # non-eq microphysics with ice on a PBB grid, swept across realistic
           # grids. Uses --simplified to drop the geostrophic forcing and
           # field-dependent surface drag BCs (which do not currently
-          # materialize on ReactantState).
+          # materialize on ReactantState). Runs in Float64 because Reactant's
+          # @trace loop trips on the Float32-grid / Float64-clock mismatch.
           - dynamics: 'compressible_explicit'
             microphysics: '1M_MixedNonEquilibrium'
             grid: '128x128x64, 256x256x128, 384x384x192'
             advection: 'WENO5'
             backend: 'vanilla, reactant'
             topology: 'PBB'
-            extra_flags: '--simplified'
+            extra_flags: '--simplified --float_type=Float64'
     defaults:
       run:
         shell: bash
