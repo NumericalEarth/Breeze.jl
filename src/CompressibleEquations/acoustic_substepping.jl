@@ -901,10 +901,11 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         end
 
         # Step 4: Apply ϰᵈⁱ forward-extrapolation + accumulate velocity averages
+        FT = eltype(grid)
         launch!(arch, grid, :xyz, _update_pressure_and_average!,
                 substepper.exner_perturbation, substepper.filtered_exner_perturbation, substepper.previous_exner_perturbation,
                 u, v, w, ū,
-                grid, ϰᵈⁱ, 1 / Nτ)
+                grid, ϰᵈⁱ, 1 / FT(Nτ))
     end
 
     # Recovery: convert acoustic variables back to Breeze prognostic fields.
@@ -1107,10 +1108,11 @@ function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
                     substepper.virtual_potential_temperature, grid, ϰᵃᶜ, cᵖ)
         end
 
+        FT = eltype(grid)
         launch!(arch, grid, :xyz, _update_pressure_and_average!,
                 substepper.exner_perturbation, substepper.filtered_exner_perturbation, substepper.previous_exner_perturbation,
                 u, v, w, ū,
-                grid, ϰᵈⁱ, 1 / Nτ)
+                grid, ϰᵈⁱ, 1 / FT(Nτ))
     end
 
     # Recovery uses π'_final: convert back to prognostic fields
