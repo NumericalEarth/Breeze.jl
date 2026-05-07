@@ -58,18 +58,30 @@ jobs:
             topology: 'PPB'
             extra_flags: ''
           # Reactant vs vanilla — compressible_explicit + WENO5 + 1M mixed-phase
-          # non-eq microphysics with ice on a PBB grid, swept across realistic
-          # grids. Uses --simplified to drop the geostrophic forcing and
-          # field-dependent surface drag BCs (which do not currently
-          # materialize on ReactantState). Runs in Float64 because Reactant's
-          # @trace loop trips on the Float32-grid / Float64-clock mismatch.
+          # non-eq microphysics with ice on a PBB grid. Uses --simplified to
+          # drop the geostrophic forcing and field-dependent surface drag BCs
+          # (which do not currently materialize on ReactantState). Runs in
+          # Float64 because Reactant's @trace loop trips on the Float32-grid
+          # / Float64-clock mismatch.
           - dynamics: 'compressible_explicit'
             microphysics: '1M_MixedNonEquilibrium'
-            grid: '128x128x64, 256x256x128, 384x384x192'
+            grid: '384x384x192'
             advection: 'WENO5'
             backend: 'vanilla, reactant'
             topology: 'PBB'
             extra_flags: '--simplified --float_type=Float64'
+          # AD: forward+backward via Enzyme reverse-mode through the same
+          # @trace checkpointed loop. Reactant-only by construction. No
+          # microphysics in v1 (Enzyme correctness through the 1M scheme is
+          # untested), small grid + small Nsteps to keep the gradient compile
+          # and per-step memory bounded.
+          - dynamics: 'compressible_explicit'
+            microphysics: 'nothing'
+            grid: '128x128x64'
+            advection: 'WENO5'
+            backend: 'reactant'
+            topology: 'PBB'
+            extra_flags: '--ad --simplified --float_type=Float64 --warmup_steps 1 --time_steps 16'
     defaults:
       run:
         shell: bash
@@ -144,11 +156,25 @@ jobs:
               ft = d['float_type']
               microphysics = d['microphysics']
               backend = d.get('backend', 'vanilla')
+              mode = d.get('mode', 'forward')
 
               gpu = d['metadata']['gpu_name']
 
               grid = d['grid_size']
               grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
+
+              # AD (forward+backward via Enzyme) entries get their own chart.
+              # Skip the forward-only clauses below so an AD point doesn't
+              # also land on a forward chart that happens to match its config.
+              if mode == 'ad':
+                  level_1 = f'{base_name}; AD; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
+                  level_2 = f'Advection: {advection}'
+                  level_3 = f'{gpu}'
+                  level_4 = f'{grid_str}'
+
+                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  continue
 
               # We want to group benchmarks in different ways. NOTE:
               # the same benchmark may appear in multiple groups

@@ -48,6 +48,7 @@ function benchmark_time_stepping(model;
                                  dynamics::AbstractString = "",
                                  microphysics::AbstractString = "",
                                  backend::AbstractString = "vanilla",
+                                 ad::Bool = false,
                                  )
 
     grid = model.grid
@@ -57,11 +58,15 @@ function benchmark_time_stepping(model;
     Nx, Ny, Nz = size(grid)
     total_points = Nx * Ny * Nz
     is_reactant = arch isa ReactantState
+    mode = ad ? "ad" : "forward"
+
+    ad && !is_reactant && error("AD benchmark requires a Reactant backend (got $backend)")
 
     if verbose
         @info "Benchmark: $name"
         @info "  Architecture: $arch"
         @info "  Backend: $backend"
+        @info "  Mode: $mode"
         @info "  Float type: $FT"
         @info "  Grid size: $Nx × $Ny × $Nz ($total_points points)"
         @info "  Time step: $(Δt_FT) s"
@@ -69,30 +74,47 @@ function benchmark_time_stepping(model;
         @info "  Benchmark steps: $time_steps"
     end
 
-    # Compile the full stepping loop up front for Reactant; eager backends
-    # compile on first call.
+    # Compile the stepping loop (or its forward+backward AD wrapper) up
+    # front for Reactant; eager backends compile on first call. For AD we
+    # build θ_init / dθ_init on the same grid as `model` and run reverse
+    # mode through `loss` — see `grad_loss!` in timestepping.jl.
     compile_time_seconds = 0.0
-    compiled_loop! = nothing
+    invoke! = nothing
     if is_reactant
-        if verbose
-            @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
+        if ad
+            θ_init  = CenterField(grid); set!(θ_init,  (args...) -> FT(300.0))
+            dθ_init = CenterField(grid); set!(dθ_init, 0)
+            dmodel  = Enzyme.make_zero(model)
+            if verbose
+                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps)) with Reactant (raise=true)..."
+            end
+            compile_start = time_ns()
+            compiled_grad! = Reactant.@compile raise=true raise_first=true sync=true grad_loss!(
+                model, dmodel, θ_init, dθ_init, Δt, time_steps)
+            compile_time_seconds = (time_ns() - compile_start) / 1e9
+            invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt, time_steps)
+        else
+            if verbose
+                @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
+            end
+            compile_start = time_ns()
+            compiled_loop! = Reactant.@compile raise=true raise_first=true sync=true step_loop!(model, Δt, time_steps)
+            compile_time_seconds = (time_ns() - compile_start) / 1e9
+            invoke! = () -> compiled_loop!(model, Δt, time_steps)
         end
-        compile_start = time_ns()
-        compiled_loop! = Reactant.@compile raise=true raise_first=true sync=true step_loop!(model, Δt, time_steps)
-        compile_time_seconds = (time_ns() - compile_start) / 1e9
         if verbose
             @info "    Compile time: $(@sprintf("%.3f", compile_time_seconds)) s"
         end
     end
 
     # Warmup phase. For Reactant we run one full execution of the compiled
-    # loop (which already encodes `time_steps` iterations); `warmup_steps`
+    # program (which already encodes `time_steps` iterations); `warmup_steps`
     # only affects the vanilla path's eager loop.
     if verbose
         @info "  Running warmup..."
     end
     if is_reactant
-        compiled_loop!(model, Δt, time_steps)
+        invoke!()
     else
         many_time_steps!(model, Δt, warmup_steps)
     end
@@ -106,7 +128,7 @@ function benchmark_time_stepping(model;
     end
     start_time = time_ns()
     if is_reactant
-        compiled_loop!(model, Δt, time_steps)
+        invoke!()
     else
         many_time_steps!(model, Δt, time_steps)
     end
@@ -129,6 +151,7 @@ function benchmark_time_stepping(model;
         String(dynamics),
         String(microphysics),
         String(backend),
+        mode,
         (Nx, Ny, Nz),
         time_steps,
         Δt_FT,

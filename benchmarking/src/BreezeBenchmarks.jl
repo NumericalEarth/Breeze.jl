@@ -29,6 +29,7 @@ using Breeze
 # Reactant must be loaded before CUDA so that ReactantCUDAExt activates with
 # CUDA's kernel compilation hooks correctly registered.
 using Reactant: Reactant, @trace
+using Enzyme: Enzyme
 using CUDA: CUDA, CUDABackend
 # Compatibility for CUDA v5 and v6
 if isdefined(CUDA, :CUDACore)

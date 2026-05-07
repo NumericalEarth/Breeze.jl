@@ -29,3 +29,32 @@ function step_loop!(model, Δt, Nsteps)
     end
     return nothing
 end
+
+#####
+##### Forward+backward loop for AD benchmarks (Reactant + Enzyme reverse mode).
+#####
+##### Mirrors the test/reactant_*_compilation.jl pattern: `loss` runs the
+##### checkpointed step loop and reduces to a scalar; `grad_loss!` calls
+##### Enzyme reverse-mode AD over `loss`. Both are compiled together via
+##### `Reactant.@compile raise=true`.
+#####
+
+function loss(model, θ_init, Δt, Nsteps)
+    set!(model; θ=θ_init, ρ=1.0)
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
+        time_step!(model, Δt)
+    end
+    return mean(interior(model.temperature) .^ 2)
+end
+
+function grad_loss!(model, dmodel, θ_init, dθ_init, Δt, Nsteps)
+    parent(dθ_init) .= 0
+    _, loss_value = Enzyme.autodiff(
+        Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
+        loss, Enzyme.Active,
+        Enzyme.Duplicated(model, dmodel),
+        Enzyme.Duplicated(θ_init, dθ_init),
+        Enzyme.Const(Δt),
+        Enzyme.Const(Nsteps))
+    return loss_value
+end

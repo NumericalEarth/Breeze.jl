@@ -10,6 +10,7 @@ struct BenchmarkResult
     dynamics::String
     microphysics::String
     backend::String
+    mode::String  # "forward" (forward stepping only) or "ad" (forward+backward via Enzyme)
     grid_size::Tuple{Int, Int, Int}
     time_steps::Int
     Δt::Float64
@@ -35,6 +36,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::BenchmarkResult)
     println(io, "├── dynamics: ", r.dynamics)
     println(io, "├── microphysics: ", r.microphysics)
     println(io, "├── backend: ", r.backend)
+    println(io, "├── mode: ", r.mode)
     println(io, "├── grid_size: ", r.grid_size)
     println(io, "├── time_steps: ", r.time_steps)
     println(io, "├── Δt: ", r.Δt)

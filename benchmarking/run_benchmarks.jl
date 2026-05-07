@@ -128,6 +128,11 @@ function parse_commandline()
                    "those forcings do not currently materialize on ReactantState."
             action = :store_true
 
+        "--ad"
+            help = "Benchmark the forward+backward (Enzyme reverse-mode) pass through the " *
+                   "stepping loop instead of forward only. Reactant backend only."
+            action = :store_true
+
         "--time_steps"
             help = "Number of time steps (benchmark mode only)"
             arg_type = Int
@@ -371,7 +376,8 @@ function run_benchmarks(args)
         # Build benchmark name
         size_str = "$(Nx)x$(Ny)x$(Nz)"
         ft_str = FT == Float32 ? "F32" : "F64"
-        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)_$(backend_name)"
+        mode_suffix = args["ad"] ? "_AD" : ""
+        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)_$(backend_name)$(mode_suffix)"
 
         println("\n", "-" ^ 70)
         println("Running: $name")
@@ -414,6 +420,7 @@ function run_benchmarks(args)
                                     dynamics=dyn_name,
                                     microphysics=micro_name,
                                     backend=backend_name,
+                                    ad=args["ad"],
                                     )
         elseif mode == "simulate"
             run_benchmark_simulation(model;
