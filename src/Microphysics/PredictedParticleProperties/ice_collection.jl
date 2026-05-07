@@ -48,13 +48,7 @@ collection (handled separately in the scheme).
 """
 function IceCollection(FT::Type{<:AbstractFloat} = Float64;
                        ice_rain_collection_efficiency = 1.0)
-    return IceCollection(
-        FT(ice_rain_collection_efficiency),
-        AggregationNumber(),
-        RainCollectionNumber(),
-        CloudAerosolCollection(),
-        IceAerosolCollection()
-    )
+    return IceCollection(FT(ice_rain_collection_efficiency), nothing, nothing, nothing, nothing)
 end
 
 Base.summary(::IceCollection) = "IceCollection"

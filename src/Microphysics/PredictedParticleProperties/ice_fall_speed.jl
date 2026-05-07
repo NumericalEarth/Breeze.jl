@@ -46,12 +46,7 @@ Three weighted fall speeds are computed by integrating over the size distributio
 """
 function IceFallSpeed(FT::Type{<:AbstractFloat} = Float64;
                       reference_air_density = 60000 / (dry_air_gas_constant(ThermodynamicConstants()) * 253.15))
-    return IceFallSpeed(
-        FT(reference_air_density),
-        NumberWeightedFallSpeed(),
-        MassWeightedFallSpeed(),
-        ReflectivityWeightedFallSpeed()
-    )
+    return IceFallSpeed(FT(reference_air_density), nothing, nothing, nothing)
 end
 
 Base.summary(::IceFallSpeed) = "IceFallSpeed"

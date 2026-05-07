@@ -68,10 +68,7 @@ function RainProperties(FT::Type{<:AbstractFloat} = Float64;
         FT(maximum_mean_diameter),
         FT(fall_speed_coefficient),
         FT(fall_speed_exponent),
-        RainShapeParameter(),
-        RainVelocityNumber(),
-        RainVelocityMass(),
-        RainEvaporation()
+        nothing, nothing, nothing, nothing,
     )
 end
 

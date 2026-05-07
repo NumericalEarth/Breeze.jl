@@ -23,6 +23,7 @@ using CairoMakie
 using Oceananigans
 using Oceananigans: interpolate
 using Oceananigans.Units
+using SpecialFunctions: gamma
 
 using Breeze: DCMIP2016KesslerMicrophysics,
               TetensFormula, ThermodynamicConstants
@@ -106,12 +107,7 @@ function p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ)
     FT = typeof(ρ)
 
     if qⁱ <= p3.minimum_mass_mixing_ratio || nⁱ <= p3.minimum_number_mixing_ratio
-        return (; Fᶠ = zero(FT),
-                  ρᶠ = zero(FT),
-                  Fˡ = zero(FT),
-                  mean_diameter = zero(FT),
-                  fall_speed = zero(FT),
-                  reflectivity = zero(FT))
+        return (; Fᶠ = zero(FT), ρᶠ = zero(FT), Fˡ = zero(FT), reflectivity = zero(FT))
     end
 
     rime_state = PredictedParticleProperties.consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, FT(0))
@@ -125,21 +121,11 @@ function p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ)
 
     params = PredictedParticleProperties.distribution_parameters(ρ * qⁱ, ρ * nⁱ, Fᶠ, ρᶠ_for_psd)
 
-    state = PredictedParticleProperties.IceSizeDistributionState(FT;
-        intercept = params.N₀,
-        shape = params.μ,
-        slope = params.λ,
-        rime_fraction = Fᶠ,
-        liquid_fraction = Fˡ,
-        rime_density = ρᶠ_for_psd,
-        air_density = ρ)
+    ## Sixth moment of the gamma PSD: Z = N₀ Γ(7+μ) / λ^(7+μ).
+    ## Convert from per-volume (m⁶/m³) to per-mass (m⁶/kg) for storage in ρzⁱ.
+    Z_per_volume = params.N₀ * gamma(7 + params.μ) / params.λ^(7 + params.μ)
 
-    return (; Fᶠ,
-              ρᶠ,
-              Fˡ,
-              mean_diameter = PredictedParticleProperties.evaluate(PredictedParticleProperties.MeanDiameter(), state),
-              fall_speed = PredictedParticleProperties.evaluate(PredictedParticleProperties.MassWeightedFallSpeed(), state),
-              reflectivity = PredictedParticleProperties.evaluate(PredictedParticleProperties.Reflectivity(), state) / ρ)
+    return (; Fᶠ, ρᶠ, Fˡ, reflectivity = Z_per_volume / ρ)
 end
 
 function initialize_p3_state(p3, ρ; qᶜˡ = 0, nᶜˡ = 0, qʳ = 0, nʳ = 0,
@@ -275,8 +261,6 @@ function run_p3_case(; label, color, qᶜˡ = 0, qʳ = 0, nʳ = 0, qⁱ = 0, n�
     qⁱ_ts = Float64[]
     Fᶠ_ts = Float64[]
     ρᶠ_ts = Float64[]
-    mean_diameter_ts = Float64[]
-    fall_speed_ts = Float64[]
 
     function record_state(sim)
         state = sim.model.dynamics.state
@@ -297,8 +281,6 @@ function run_p3_case(; label, color, qᶜˡ = 0, qʳ = 0, nʳ = 0, qⁱ = 0, n�
         push!(qⁱ_ts, qⁱₙ)
         push!(Fᶠ_ts, diagnostics.Fᶠ)
         push!(ρᶠ_ts, diagnostics.ρᶠ)
-        push!(mean_diameter_ts, diagnostics.mean_diameter)
-        push!(fall_speed_ts, diagnostics.fall_speed)
 
         return nothing
     end
@@ -315,9 +297,7 @@ function run_p3_case(; label, color, qᶜˡ = 0, qʳ = 0, nʳ = 0, qⁱ = 0, n�
               qʳ = qʳ_ts,
               qⁱ = qⁱ_ts,
               Fᶠ = Fᶠ_ts,
-              ρᶠ = ρᶠ_ts,
-              mean_diameter = mean_diameter_ts,
-              fall_speed = fall_speed_ts)
+              ρᶠ = ρᶠ_ts)
 end
 
 function run_kessler_case(; label, color, qᶜˡ = 0, qʳ = 0)
@@ -473,13 +453,6 @@ ax24 = Axis(fig2[2, 1];
     ylabel = "Rime density ρᶠ [kg/m³]",
     title = "P3 moves through a continuum")
 
-ax25 = Axis(fig2[2, 2];
-    xlabel = "Mean diameter [m]",
-    ylabel = "Mass-weighted fall speed [m/s]",
-    xscale = log10,
-    yscale = log10,
-    title = "Bulk fall speed evolves continuously")
-
 lines!(ax21, background_T_profile, height_profile ./ 1000;
        color = :gray40, linestyle = :dot, label = "Environment")
 
@@ -492,12 +465,6 @@ for case in p3_feature_cases
     scatter!(ax24, [first(case.Fᶠ)], [first(case.ρᶠ)];
              color = case.color, marker = :circle, markersize = 10)
     scatter!(ax24, [last(case.Fᶠ)], [last(case.ρᶠ)];
-             color = case.color, marker = :utriangle, markersize = 12)
-
-    lines!(ax25, case.mean_diameter, case.fall_speed; color = case.color)
-    scatter!(ax25, [first(case.mean_diameter)], [first(case.fall_speed)];
-             color = case.color, marker = :circle, markersize = 10)
-    scatter!(ax25, [last(case.mean_diameter)], [last(case.fall_speed)];
              color = case.color, marker = :utriangle, markersize = 12)
 end
 

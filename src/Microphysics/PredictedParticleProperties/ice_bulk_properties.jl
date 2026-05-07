@@ -61,13 +61,7 @@ function IceBulkProperties(FT::Type{<:AbstractFloat} = Float64)
     return IceBulkProperties(
         FT(20e-3),
         FT(2e-6),
-        EffectiveRadius(),
-        MeanDiameter(),
-        MeanDensity(),
-        Reflectivity(),
-        SlopeParameter(),
-        ShapeParameter(),
-        SheddingRate())
+        nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
 Base.summary(::IceBulkProperties) = "IceBulkProperties"

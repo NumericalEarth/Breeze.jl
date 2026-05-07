@@ -57,14 +57,7 @@ not stored on `IceDeposition`.
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 34.
 """
 function IceDeposition(::Type{<:AbstractFloat} = Float64)
-    return IceDeposition(
-        Ventilation(),
-        VentilationEnhanced(),
-        SmallIceVentilationConstant(),
-        SmallIceVentilationReynolds(),
-        LargeIceVentilationConstant(),
-        LargeIceVentilationReynolds()
-    )
+    return IceDeposition(nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
 Base.summary(::IceDeposition) = "IceDeposition"

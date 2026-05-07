@@ -6,7 +6,6 @@ using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
 
 using Breeze.Microphysics.PredictedParticleProperties:
     IceSizeDistributionState,
-    evaluate,
     chebyshev_gauss_nodes_weights,
     size_distribution,
     TabulatedFunction3D,

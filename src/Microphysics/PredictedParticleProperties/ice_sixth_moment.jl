@@ -59,19 +59,8 @@ Each microphysical process that affects ice mass also affects M₆:
 [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024) refined the approach.
 """
 function IceSixthMoment()
-    return IceSixthMoment(
-        SixthMomentRime(),
-        SixthMomentDeposition(),
-        SixthMomentDeposition1(),
-        SixthMomentMelt1(),
-        SixthMomentMelt2(),
-        SixthMomentMeltAll1(),
-        SixthMomentMeltAll2(),
-        SixthMomentShedding(),
-        SixthMomentAggregation(),
-        SixthMomentSublimation(),
-        SixthMomentSublimation1()
-    )
+    return IceSixthMoment(nothing, nothing, nothing, nothing, nothing, nothing,
+                          nothing, nothing, nothing, nothing, nothing)
 end
 
 Base.summary(::IceSixthMoment) = "IceSixthMoment"

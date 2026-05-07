@@ -82,76 +82,12 @@ export
     RainProperties,
     CloudDropletProperties,
 
-    # Integral types (abstract)
-    AbstractP3Integral,
-    AbstractIceIntegral,
-    AbstractRainIntegral,
-    AbstractFallSpeedIntegral,
-    AbstractDepositionIntegral,
-    AbstractBulkPropertyIntegral,
-    AbstractCollectionIntegral,
-    AbstractSixthMomentIntegral,
-    AbstractLambdaLimiterIntegral,
-
-    # Integral types (concrete) - Fall speed
-    NumberWeightedFallSpeed,
-    MassWeightedFallSpeed,
-    ReflectivityWeightedFallSpeed,
-
-    # Integral types (concrete) - Deposition
-    Ventilation,
-    VentilationEnhanced,
-    SmallIceVentilationConstant,
-    SmallIceVentilationReynolds,
-    LargeIceVentilationConstant,
-    LargeIceVentilationReynolds,
-
-    # Integral types (concrete) - Bulk properties
-    EffectiveRadius,
-    MeanDiameter,
-    MeanDensity,
-    Reflectivity,
-    RayleighReflectivity,
-    SlopeParameter,
-    ShapeParameter,
-    SheddingRate,
-
-    # Integral types (concrete) - Collection
-    AggregationNumber,
-    RainCollectionNumber,
-    CloudAerosolCollection,
-    IceAerosolCollection,
-
-    # Integral types (concrete) - Sixth moment
-    SixthMomentRime,
-    SixthMomentDeposition,
-    SixthMomentDeposition1,
-    SixthMomentMelt1,
-    SixthMomentMelt2,
-    SixthMomentMeltAll1,
-    SixthMomentMeltAll2,
-    SixthMomentAggregation,
-    SixthMomentShedding,
-    SixthMomentSublimation,
-    SixthMomentSublimation1,
-
-    # Integral types (concrete) - Lambda limiter
-    NumberMomentLambdaLimit,
-    MassMomentLambdaLimit,
-
-    # Integral types (concrete) - Rain
-    RainShapeParameter,
-    RainVelocityNumber,
-    RainVelocityMass,
-    RainEvaporation,
-
     # Rain PSD quadrature evaluators
     RainMassWeightedVelocityEvaluator,
     RainNumberWeightedVelocityEvaluator,
     RainEvaporationVentilationEvaluator,
 
     # Tabulated wrapper
-    TabulatedIntegral,
     TabulatedFunction1D,
     TabulatedFunction2D,
     TabulatedFunction3D,
@@ -175,8 +111,7 @@ export
     # Interface functions
     prognostic_field_names,
 
-    # Quadrature
-    evaluate,
+    # Size distribution and quadrature helpers
     IceSizeDistributionState,
     chebyshev_gauss_nodes_weights,
 
@@ -228,12 +163,6 @@ using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant, vapor
 # but the gas constants (R/M_d and R/M_v) are universal physical constants.
 const DRY_AIR_GAS_CONSTANT = dry_air_gas_constant(ThermodynamicConstants())
 const VAPOR_GAS_CONSTANT = vapor_gas_constant(ThermodynamicConstants())
-
-#####
-##### Integral types (must be first - no dependencies)
-#####
-
-include("integral_types.jl")
 
 #####
 ##### Ice concept containers

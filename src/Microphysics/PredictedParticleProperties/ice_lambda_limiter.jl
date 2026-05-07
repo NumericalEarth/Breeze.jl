@@ -42,10 +42,7 @@ sensible even when the prognostic constraints become degenerate.
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Section 2b.
 """
 function IceLambdaLimiter()
-    return IceLambdaLimiter(
-        NumberMomentLambdaLimit(),
-        MassMomentLambdaLimit()
-    )
+    return IceLambdaLimiter(nothing, nothing)
 end
 
 Base.summary(::IceLambdaLimiter) = "IceLambdaLimiter"
