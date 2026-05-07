@@ -45,7 +45,7 @@ struct SplitExplicitTimeDiscretization{N, FT}
     acoustic_damping_coefficient :: FT
 end
 
-function SplitExplicitTimeDiscretization(FT=Float64;
+function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          substeps=nothing,
                                          forward_weight=FT(0.6),
                                          divergence_damping_coefficient=FT(0.10),
