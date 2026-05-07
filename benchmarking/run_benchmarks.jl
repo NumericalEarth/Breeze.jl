@@ -380,7 +380,7 @@ function run_benchmarks(args)
         # Create arch (backend-aware) and schemes
         arch = make_backend_arch(backend_name, device)
         topology = make_topology(topo_name)
-        dynamics = make_dynamics(dyn_name)
+        dynamics = make_dynamics(dyn_name, FT)
         advection = make_advection(adv_name, FT)
         closure = make_closure(cls_name, FT)
         microphysics = make_microphysics(micro_name, FT)
