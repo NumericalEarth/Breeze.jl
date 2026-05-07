@@ -821,8 +821,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     N = acoustic_substeps(substepper.substeps, grid, Δt, model.thermodynamic_constants)
 
     # Constant acoustic substep size across all stages
-    FT = eltype(grid)
-    Δτ = FT(Δt) / N
+    Δτ = Δt / N
 
     # Substep count varies per stage: Nτ ≈ β * N
     Nτ = max(round(Int, β_stage * N), 1)
@@ -902,6 +901,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         end
 
         # Step 4: Apply ϰᵈⁱ forward-extrapolation + accumulate velocity averages
+        FT = eltype(grid)
         launch!(arch, grid, :xyz, _update_pressure_and_average!,
                 substepper.exner_perturbation, substepper.filtered_exner_perturbation, substepper.previous_exner_perturbation,
                 u, v, w, ū,
@@ -1062,12 +1062,9 @@ function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
     arch = architecture(grid)
     cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
 
-    FT = eltype(grid)
-    Δt_FT = FT(Δt)
-
     # For SSP-RK3, all stages use Ns substeps (adaptive when substeps === nothing)
-    Ns = acoustic_substeps(substepper.substeps, grid, Δt_FT, model.thermodynamic_constants)
-    Δτ = Δt_FT / Ns
+    Ns = acoustic_substeps(substepper.substeps, grid, Δt, model.thermodynamic_constants)
+    Δτ = Δt / Ns
     Nτ = Ns
 
     # Convert slow tendencies
@@ -1111,6 +1108,7 @@ function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
                     substepper.virtual_potential_temperature, grid, ϰᵃᶜ, cᵖ)
         end
 
+        FT = eltype(grid)
         launch!(arch, grid, :xyz, _update_pressure_and_average!,
                 substepper.exner_perturbation, substepper.filtered_exner_perturbation, substepper.previous_exner_perturbation,
                 u, v, w, ū,
@@ -1119,7 +1117,7 @@ function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
 
     # Recovery uses π'_final: convert back to prognostic fields
     # with SSP convex combination (uses SSP coefficient, not forward_weight)
-    recover_full_fields_ssp!(model, substepper, α_ssp, U⁰, Δt_FT)
+    recover_full_fields_ssp!(model, substepper, α_ssp, U⁰, Δt)
 
     return nothing
 end
@@ -1159,7 +1157,7 @@ function recover_full_fields_ssp!(model, substepper, α, U⁰, Δt)
             model.dynamics.density, ρχ,
             substepper.exner_perturbation, substepper.reference_exner_function, substepper.virtual_potential_temperature,
             Gˢρχ, Gⁿ.ρ,
-            pˢᵗ, Rᵈ, κ, eltype(grid)(Δt))
+            pˢᵗ, Rᵈ, κ, Δt)
 
     # Reconstruct momentum from acoustic velocity and recovered density
     launch!(arch, grid, :xyz, _recover_momentum!,

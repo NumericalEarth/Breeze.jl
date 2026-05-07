@@ -111,11 +111,9 @@ function ssp_rk3_substep!(model, Δt, α)
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
-    FT = eltype(grid)
-    Δt_FT = FT(Δt)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic_fields(model), U⁰, Gⁿ))
-        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt_FT, α)
+        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
 
         # Field index for implicit solver:
         # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
@@ -130,7 +128,7 @@ function ssp_rk3_substep!(model, Δt, α)
                        field_index,
                        model.clock,
                        fields(model),
-                       α * Δt_FT)
+                       α * Δt)
     end
 
     return nothing

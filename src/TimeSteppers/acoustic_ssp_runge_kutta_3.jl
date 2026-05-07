@@ -298,11 +298,8 @@ function acoustic_scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     return nothing
 end
 
-function scalar_ssp_rk3_substep!(model, Δt, α)
-    FT = eltype(model.grid)
-    Δt_FT = FT(Δt)
-    acoustic_scalar_substep!(model, _ssp_rk3_substep!, α * Δt_FT, Δt_FT, α)
-end
+scalar_ssp_rk3_substep!(model, Δt, α) =
+    acoustic_scalar_substep!(model, _ssp_rk3_substep!, α * Δt, Δt, α)
 
 #####
 ##### Time stepping (main entry point)
