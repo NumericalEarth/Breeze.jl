@@ -104,6 +104,8 @@ end
     T_field = model.temperature
     pᵣ_field = dynamics.reference_state.pressure
 
+    θᵥ_diagnostic = Field(VirtualPotentialTemperature(model))
+
     @allowscalar for k in 1:Nz
         T_k  = T_field[1, 1, k]
         qᵛ_k = qᵛ_field[1, 1, k]
@@ -117,6 +119,7 @@ end
             1, 1, k, grid, constants, dynamics, T_field, qᵛ_field)
 
         @test θᵥ_kernel ≈ θᵥ_expected rtol = 100eps(FT)
+        @test θᵥ_diagnostic[1, 1, k] ≈ θᵥ_expected rtol = 100eps(FT)
     end
 end
 
