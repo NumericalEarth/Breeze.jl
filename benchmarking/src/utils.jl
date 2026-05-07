@@ -45,6 +45,7 @@ function benchmark_time_stepping(model;
     grid = model.grid
     arch = Oceananigans.Architectures.architecture(grid)
     FT = eltype(grid)
+    Δt_FT = FT(Δt)
     Nx, Ny, Nz = size(grid)
     total_points = Nx * Ny * Nz
 
@@ -53,7 +54,7 @@ function benchmark_time_stepping(model;
         @info "  Architecture: $arch"
         @info "  Float type: $FT"
         @info "  Grid size: $Nx × $Ny × $Nz ($total_points points)"
-        @info "  Time step: $Δt s"
+        @info "  Time step: $(Δt_FT) s"
         @info "  Warmup steps: $warmup_steps"
         @info "  Benchmark steps: $time_steps"
     end
@@ -62,7 +63,7 @@ function benchmark_time_stepping(model;
     if verbose
         @info "  Running warmup..."
     end
-    many_time_steps!(model, Δt, warmup_steps)
+    many_time_steps!(model, Δt_FT, warmup_steps)
 
     # Synchronize device before timing
     synchronize_device(arch)
@@ -72,7 +73,7 @@ function benchmark_time_stepping(model;
         @info "  Running benchmark..."
     end
     start_time = time_ns()
-    many_time_steps!(model, Δt, time_steps)
+    many_time_steps!(model, Δt_FT, time_steps)
     synchronize_device(arch)
     end_time = time_ns()
 
@@ -93,7 +94,7 @@ function benchmark_time_stepping(model;
         String(microphysics),
         (Nx, Ny, Nz),
         time_steps,
-        Δt,
+        Δt_FT,
         total_time_seconds,
         time_per_step_seconds,
         steps_per_second,
@@ -281,9 +282,9 @@ function run_benchmark_simulation(model;
         String(dynamics),
         String(microphysics),
         (Nx, Ny, Nz),
-        Float64(stop_time),
+        FT(stop_time),
         time_steps,
-        Float64(Δt),
+        FT(Δt),
         wall_time_seconds,
         time_per_step_seconds,
         steps_per_second,
