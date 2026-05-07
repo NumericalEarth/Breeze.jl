@@ -261,13 +261,13 @@ end
 make_closure(name, FT) = name == "nothing" ? nothing : (@eval $(Symbol(name)))(FT)
 
 # Dynamics: "anelastic", "compressible_explicit", "compressible_splitexplicit"
-function make_dynamics(name)
+function make_dynamics(name::AbstractString, FT::Type)
     if name == "anelastic"
         return nothing  # sentinel; convective_boundary_layer handles anelastic by default
     elseif name == "compressible_explicit"
         return CompressibleDynamics(ExplicitTimeStepping())
     elseif name == "compressible_splitexplicit"
-        return CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=12))
+        return CompressibleDynamics(SplitExplicitTimeDiscretization(FT; substeps=12))
     else
         error("Unknown dynamics: $name. Use anelastic, compressible_explicit, or compressible_splitexplicit.")
     end
