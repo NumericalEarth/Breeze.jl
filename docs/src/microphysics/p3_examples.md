@@ -6,7 +6,6 @@ through visualization and analysis.
 The examples illustrate key concepts from the P3 papers:
 - Mass-diameter relationships from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization)
 - Size distribution from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) and [Heymsfield (2003)](@cite Heymsfield2003)
-- Fall speed integrals from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Table 3
 - μ-λ relationship from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 27
 
 ## Ice Particle Property Explorer
@@ -153,100 +152,6 @@ fig
 
 Higher ``μ`` produces a narrower distribution with a more pronounced mode.
 
-## Fall Speed Analysis
-
-### Weighted Fall Speeds vs Slope Parameter
-
-```@example p3_examples
-fig = Figure(size=(700, 500))
-ax = Axis(fig[1, 1],
-    xlabel = "Slope parameter λ [m⁻¹]",
-    ylabel = "Fall speed integral [m/s]",
-    xscale = log10,
-    title = "Fall Speed Integrals vs λ\n(larger λ → smaller particles)")
-
-λ_values = 10 .^ range(2.5, 5, length=30)
-
-V_n = Float64[]
-V_m = Float64[]
-V_z = Float64[]
-
-for λ in λ_values
-    state = IceSizeDistributionState(Float64; intercept=1e6, shape=0.0, slope=λ)
-    push!(V_n, evaluate(NumberWeightedFallSpeed(), state))
-    push!(V_m, evaluate(MassWeightedFallSpeed(), state))
-    push!(V_z, evaluate(ReflectivityWeightedFallSpeed(), state))
-end
-
-lines!(ax, λ_values, V_n, linewidth=2, label="Vₙ (number-weighted)")
-lines!(ax, λ_values, V_m, linewidth=2, label="Vₘ (mass-weighted)")
-lines!(ax, λ_values, V_z, linewidth=2, label="Vᵤ (reflectivity-weighted)")
-
-axislegend(ax, position=:rt)
-fig
-```
-
-Larger particles (smaller ``λ``) fall faster, and the reflectivity-weighted velocity
-(emphasizing large particles) exceeds the mass-weighted velocity, which in turn
-exceeds the number-weighted velocity.
-
-### Effect of Riming on Fall Speed
-
-```@example p3_examples
-fig = Figure(size=(700, 500))
-ax = Axis(fig[1, 1],
-    xlabel = "Rime fraction Fᶠ",
-    ylabel = "Mass-weighted fall speed [m/s]",
-    title = "Effect of Riming on Ice Fall Speed")
-
-Ff_range = range(0, 0.9, length=20)
-λ = 1000.0
-
-V_m_values = Float64[]
-
-for Ff in Ff_range
-    state = IceSizeDistributionState(Float64;
-        intercept=1e6, shape=0.0, slope=λ,
-        rime_fraction=Ff, rime_density=500.0)
-    push!(V_m_values, evaluate(MassWeightedFallSpeed(), state))
-end
-
-lines!(ax, Ff_range, V_m_values, linewidth=3, color=:blue)
-scatter!(ax, Ff_range, V_m_values, markersize=8, color=:blue)
-
-fig
-```
-
-Rimed particles fall faster due to higher density.
-
-## Integral Comparison
-
-### All Fall Speed Components
-
-```@example p3_examples
-# Compare different integral types at a fixed state
-state = IceSizeDistributionState(Float64;
-    intercept=1e6, shape=2.0, slope=1500.0,
-    rime_fraction=0.3, rime_density=500.0)
-
-integrals = [
-    ("NumberWeightedFallSpeed", evaluate(NumberWeightedFallSpeed(), state)),
-    ("MassWeightedFallSpeed", evaluate(MassWeightedFallSpeed(), state)),
-    ("ReflectivityWeightedFallSpeed", evaluate(ReflectivityWeightedFallSpeed(), state)),
-    ("Ventilation", evaluate(Ventilation(), state)),
-    ("EffectiveRadius [μm]", evaluate(EffectiveRadius(), state) * 1e6),
-    ("MeanDiameter [mm]", evaluate(MeanDiameter(), state) * 1e3),
-    ("MeanDensity [kg/m³]", evaluate(MeanDensity(), state)),
-]
-
-println("Integral values for state:")
-println("  N₀ = 10⁶, μ = 2, λ = 1500 m⁻¹, Fᶠ = 0.3")
-println()
-for (name, value) in integrals
-    println("  $name = $(round(value, sigdigits=4))")
-end
-```
-
 ## Lambda Solver Demonstration
 
 ### Convergence Visualization
@@ -283,41 +188,6 @@ fig
 At the same L/N ratio, rimed particles have larger ``λ`` (smaller characteristic size)
 because their higher mass-per-particle requires smaller particles to match the ratio.
 
-## Quadrature Accuracy
-
-### Convergence with Number of Points
-
-```@example p3_examples
-state = IceSizeDistributionState(Float64;
-    intercept=1e6, shape=0.0, slope=1000.0)
-
-n_points = [8, 16, 32, 64, 128, 256]
-V_values = Float64[]
-reference = evaluate(NumberWeightedFallSpeed(), state; n_quadrature=512)
-
-for n in n_points
-    V = evaluate(NumberWeightedFallSpeed(), state; n_quadrature=n)
-    push!(V_values, V)
-end
-
-fig = Figure(size=(600, 400))
-ax = Axis(fig[1, 1],
-    xlabel = "Number of quadrature points",
-    ylabel = "Relative error",
-    xscale = log10,
-    yscale = log10,
-    title = "Quadrature Convergence")
-
-errors = abs.(V_values .- reference) ./ reference
-lines!(ax, n_points, errors, linewidth=2)
-scatter!(ax, n_points, errors, markersize=10)
-
-fig
-```
-
-The Chebyshev-Gauss quadrature converges rapidly, with 64 points typically
-sufficient for double precision.
-
 ## Summary Visualization
 
 ```@example p3_examples
@@ -351,23 +221,8 @@ end
 ylims!(ax2, 1e3, 1e13)
 axislegend(ax2, position=:rt, fontsize=10)
 
-# Fall speed vs λ (bottom left)
-ax3 = Axis(fig[2, 1],
-    xlabel = "λ [m⁻¹]", ylabel = "Fall speed",
-    xscale = log10, title = "Fall Speed Integrals")
-
-λ_vals = 10 .^ range(2.5, 4.5, length=30)
-V_n = [evaluate(NumberWeightedFallSpeed(),
-       IceSizeDistributionState(Float64; intercept=1e6, shape=0.0, slope=λ)) for λ in λ_vals]
-V_m = [evaluate(MassWeightedFallSpeed(),
-       IceSizeDistributionState(Float64; intercept=1e6, shape=0.0, slope=λ)) for λ in λ_vals]
-
-lines!(ax3, λ_vals, V_n, label="Vₙ")
-lines!(ax3, λ_vals, V_m, label="Vₘ")
-axislegend(ax3, position=:rt)
-
-# μ-λ relationship (bottom right)
-ax4 = Axis(fig[2, 2],
+# μ-λ relationship (bottom)
+ax4 = Axis(fig[2, 1:2],
     xlabel = "λ [m⁻¹]", ylabel = "μ",
     xscale = log10, title = "μ-λ Relationship")
 
@@ -384,5 +239,4 @@ fig
 This figure summarizes the key relationships in P3:
 1. **Top left**: Mass increases with size and riming
 2. **Top right**: Size distribution shifts with mass content
-3. **Bottom left**: Fall speed decreases with λ (smaller particles)
-4. **Bottom right**: Shape parameter μ increases with λ up to a maximum
+3. **Bottom**: Shape parameter μ increases with λ up to a maximum

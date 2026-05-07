@@ -25,7 +25,7 @@ Construct `IceFallSpeed` with parameters and quadrature-based integrals.
 
 Ice particle terminal velocity uses the [Mitchell and Heymsfield (2005)](@cite MitchellHeymsfield2005)
 Best-number formulation with air density correction exponent 0.54 from
-[Heymsfield et al. (2006)](@cite HeymsfieldEtAl2006). The reference density
+[Heymsfield et al. (2007)](@cite HeymsfieldEtAl2007). The reference density
 ``ρ_0`` matches the reference conditions (T=253.15 K, P=600 hPa) at which
 the P3 lookup tables are computed.
 

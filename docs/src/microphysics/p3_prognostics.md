@@ -1,15 +1,21 @@
 # [Prognostic Variables and Tendencies](@id p3_prognostics)
 
 P3 tracks 9 prognostic variables that together describe the complete microphysical
-state of the atmosphere. This section documents each variable, its physical meaning,
-and the tendency equations governing its evolution.
+state of the atmosphere. This section documents each variable, its physical
+meaning, and the source-term assembly used in `tendency_ρ*` (`process_rates.jl`)
+to build the microphysical tendency for each prognostic field.
 
 The prognostic variable formulation has evolved through the P3 papers:
-- [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization): Original 4 ice variables
-- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Added ``ρz^i`` for 3-moment ice
-- [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction): Added ``ρq^{wi}`` for liquid fraction
 
-Our implementation follows P3 v5.5 with all 6 ice prognostic variables.
+- [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization): Original 4 ice variables.
+- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Added ``ρz^i`` for 3-moment ice.
+- [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction): Added ``ρq^{wi}`` for liquid fraction.
+
+Our implementation follows P3 v5.5 with all 6 ice prognostic variables. Sign
+convention used throughout the per-field tendencies: rate functions return
+*positive magnitudes*, and the tendency assembly takes ``\text{gain} - \text{loss}``.
+Bidirectional rates (condensation, deposition) keep their natural sign and
+appear as gains; their negative branches contribute as losses elsewhere.
 
 ## Variable Definitions
 
@@ -19,8 +25,10 @@ Our implementation follows P3 v5.5 with all 6 ice prognostic variables.
 |--------|------|-------|-------------|
 | ``ρq^{cl}`` | Cloud liquid mass density | kg/m³ | Mass of cloud droplets per unit volume |
 
-Cloud droplet **number** is prescribed (not prognostic) in the standard P3 configuration,
-typically set to continental (100 cm⁻³) or marine (50 cm⁻³) values.
+Cloud droplet **number** can either be prescribed (typical continental
+``\sim 100`` cm⁻³ or marine ``\sim 50`` cm⁻³ values) or made prognostic
+through the optional aerosol-activation path (`AerosolActivation` in
+`aerosol_activation.jl`).
 
 ### Rain
 
@@ -29,13 +37,14 @@ typically set to continental (100 cm⁻³) or marine (50 cm⁻³) values.
 | ``ρq^r`` | Rain mass density | kg/m³ | Mass of raindrops per unit volume |
 | ``ρn^r`` | Rain number density | m⁻³ | Number of raindrops per unit volume |
 
-Rain follows a gamma size distribution with parameters diagnosed from the mass/number ratio.
+Rain follows a gamma size distribution with parameters diagnosed from the
+mass / number ratio. Both Fortran and Breeze run with ``μ_r = 0`` at runtime.
 
 ### Ice
 
 | Symbol | Name | Units | Description |
 |--------|------|-------|-------------|
-| ``ρq^i`` | Total ice mass density | kg/m³ | Total ice mass (all forms) |
+| ``ρq^i`` | Total ice mass density | kg/m³ | Total ice mass (ice + liquid coating) |
 | ``ρn^i`` | Ice number density | m⁻³ | Number of ice particles |
 | ``ρq^f`` | Rime mass density | kg/m³ | Mass of rime (frost) on ice |
 | ``ρb^f`` | Rime volume density | m³/m³ | Volume of rime per unit volume |
@@ -46,24 +55,28 @@ Rain follows a gamma size distribution with parameters diagnosed from the mass/n
 
 From the prognostic variables, key diagnostic properties are computed:
 
-**Rime fraction** (mass fraction of rime):
+**Rime fraction** (mass fraction of rime, *of dry ice*):
+
 ```math
-F^f = \frac{ρq^f}{ρq^i}
+F^f = \frac{ρq^f}{ρq^i - ρq^{wi}}.
 ```
 
-**Rime density** (density of the rime layer):
+**Rime density**:
+
 ```math
-ρ^f = \frac{ρq^f}{ρb^f}
+ρ^f = \frac{ρq^f}{ρb^f}.
 ```
 
-**Liquid fraction** (mass fraction of liquid coating):
+**Liquid fraction** (mass fraction of liquid coating, *of total ice mass*):
+
 ```math
-F^l = \frac{ρq^{wi}}{ρq^i}
+F^l = \frac{ρq^{wi}}{ρq^i}.
 ```
 
 **Mean particle mass**:
+
 ```math
-\bar{m} = \frac{ρq^i}{ρn^i}
+\bar{m} = \frac{ρq^i}{ρn^i}.
 ```
 
 ## Tendency Equations
@@ -71,119 +84,187 @@ F^l = \frac{ρq^{wi}}{ρq^i}
 Each prognostic variable evolves according to:
 
 ```math
-\frac{\partial (ρX)}{\partial t} = \text{ADV} + \text{TURB} + \text{SED} + \text{SRC}
+\frac{\partial (ρX)}{\partial t} = \text{ADV} + \text{TURB} + \text{SED} + \text{SRC},
 ```
 
 where:
-- **ADV**: Advection by resolved flow
-- **TURB**: Subgrid turbulent transport
-- **SED**: Sedimentation (gravitational settling)
-- **SRC**: Microphysical source/sink terms
+
+- **ADV**: Advection by resolved flow.
+- **TURB**: Subgrid turbulent transport.
+- **SED**: Sedimentation (gravitational settling at the field-specific tabulated velocity).
+- **SRC**: Microphysical source/sink terms.
+
+The microphysical source assembly below mirrors the per-field
+``\rho \cdot (\text{gain} - \text{loss})`` calls in `process_rates.jl`.
 
 ### Cloud Liquid Tendency
 
 ```math
-\frac{\partial ρq^{cl}}{\partial t}\bigg|_{src} = \underbrace{COND}_{\text{condensation/evaporation}}
-- \underbrace{AUTO}_{\text{autoconversion}}
-- \underbrace{ACCR}_{\text{accretion by rain}}
-- \underbrace{RIM}_{\text{riming by ice}}
-- \underbrace{IMMF}_{\text{immersion freezing}}
+\partial_t (ρq^{cl})\big|_\text{src}
+=\rho\big[\text{COND} + \text{CCN}_q
+- \text{AUTO} - \text{ACCR} - \text{RIM}_c
+- \text{IMMF}_c - \text{HOM}_c
+- \text{COL}_{c,\text{warm}} - \text{WG}_c \big].
 ```
 
-Note: `COND` is a single signed rate (positive for condensation, negative for evaporation).
+| Term | Meaning |
+|------|--------|
+| COND | Condensation (positive) / evaporation (negative) — bidirectional. |
+| CCN``_q`` | CCN-activation mass source (when prognostic ``N_c`` enabled). |
+| AUTO | Autoconversion to rain. |
+| ACCR | Accretion by rain. |
+| RIM``_c`` | Cloud riming by ice. |
+| IMMF``_c`` | Immersion freezing of cloud droplets. |
+| HOM``_c`` | Homogeneous freezing (``T < -40°``C). |
+| COL``_{c,\text{warm}}`` | Cloud collection by ice above ``T_0`` (routes to ``q^{wi}`` or shedding). |
+| WG``_c`` | Wet-growth re-routing of cloud collection (excess into ``q^{wi}``). |
 
 ### Rain Mass Tendency
 
 ```math
-\frac{\partial ρq^r}{\partial t}\bigg|_{src} = \underbrace{AUTO}_{\text{autoconversion}}
-+ \underbrace{ACCR}_{\text{accretion}}
-+ \underbrace{SHED}_{\text{shedding from ice}}
-+ \underbrace{MELT}_{\text{complete melting}}
-- \underbrace{EVAP}_{\text{rain evaporation}}
-- \underbrace{RIM_{rain}}_{\text{rain riming by ice}}
-- \underbrace{FREZ}_{\text{rain freezing}}
+\partial_t (ρq^r)\big|_\text{src}
+=\rho\big[\text{AUTO} + \text{ACCR} + \text{RAIN-COND} + \text{MELT}_\text{full}
++ \text{SHED} + \text{WG}_\text{shed}
+- \text{REVP} - \text{RIM}_r - \text{IMMF}_r - \text{HOM}_r
+- \text{COL}_{r,\text{warm}} - \text{WG}_r \big].
 ```
+
+| Term | Meaning |
+|------|--------|
+| RAIN-COND | Coupled rain condensation (bidirectional). |
+| MELT``_\text{full}`` | "Complete" melting flux from ice → rain. |
+| SHED | Liquid coating shed from ice. |
+| WG``_\text{shed}`` | Wet-growth shedding (Fortran `nrshdr`). |
+| REVP | Rain evaporation. |
+| RIM``_r`` | Rain riming by ice. |
+| IMMF``_r`` | Immersion freezing of rain. |
+| HOM``_r`` | Homogeneous freezing of rain. |
+| COL``_{r,\text{warm}}`` | Rain collection by ice above ``T_0`` (routes to ``q^{wi}`` when liquid fraction is on). |
+| WG``_r`` | Wet-growth re-routing of rain collection. |
 
 ### Rain Number Tendency
 
 ```math
-\frac{\partial ρn^r}{\partial t}\bigg|_{src} = \underbrace{AUTO_n}_{\text{autoconversion}}
-+ \underbrace{SHED_n}_{\text{shedding}}
-+ \underbrace{MELT_n}_{\text{melting}}
-- \underbrace{EVAP_n}_{\text{evaporation}}
-- \underbrace{RIM_n}_{\text{rain riming}}
-- \underbrace{SCBK}_{\text{self-collection/breakup}}
-- \underbrace{FREZ_n}_{\text{rain freezing}}
+\partial_t (ρn^r)\big|_\text{src}
+=\rho\big[\text{AUTO}_n + \text{MELT}_n + \text{BR}
++ \text{SHED}_n + \text{COL}_{c,\text{warm},n}\, [F^l\!=\!0]
++ \text{WG}_{\text{shed},n}
+- \text{REVP}_n - \text{SCBK} - \text{RIM}_{r,n}
+- \text{IMMF}_{r,n} - \text{HOM}_{r,n} - \text{COL}_{r,\text{warm},n}\big]
++ \text{N-CORR}.
 ```
+
+- ``\text{AUTO}_n = \text{AUTO} / m_\text{drop,init}`` (drops produced from autoconversion).
+- ``\text{MELT}_n = (n^i / q^i) \cdot \text{MELT}_\text{full}`` (drops produced from melting).
+- ``\text{BR}`` is the rain-breakup number source.
+- ``\text{SHED}_n \approx 1.928 \times 10^6 \cdot \text{SHED}`` (1 mm shed drops).
+- ``\text{COL}_{c,\text{warm},n}`` only contributes when liquid fraction is *off*
+  (above-freezing collected cloud is then shed as rain rather than added to ``q^{wi}``).
+- ``\text{REVP}_n = (n^r / q^r) \cdot \text{REVP}`` (proportional removal).
+- ``\text{SCBK}`` is the rain self-collection magnitude.
+- ``\text{N-CORR}`` is the diagnosed PSD ``λ``-bound number correction
+  (Fortran `get_rain_dsd2` writes back a clipped ``n_r``; Breeze adds a
+  matching tendency rather than mutating the prognostic state).
 
 ### Ice Mass Tendency
 
 ```math
-\frac{\partial ρq^i}{\partial t}\bigg|_{src} = \underbrace{NUC}_{\text{nucleation}}
-+ \underbrace{DEP}_{\text{deposition/sublimation}}
-+ \underbrace{RIM}_{\text{cloud riming}}
-+ \underbrace{RIM_{rain}}_{\text{rain riming}}
-+ \underbrace{IMMF_{cl}}_{\text{cloud freezing}}
-+ \underbrace{IMMF_{rain}}_{\text{rain freezing}}
-+ \underbrace{SEC}_{\text{splintering mass}}
-- \underbrace{MELT_{part}}_{\text{partial melting}}
-- \underbrace{MELT_{comp}}_{\text{complete melting}}
+\partial_t (ρq^i)\big|_\text{src}
+=\rho\big[\text{DEP} + \text{RIM}_c + \text{RIM}_r + \text{REFR}
++ \text{NUC} + \text{IMMF}_c + \text{IMMF}_r + \text{HOM}_c + \text{HOM}_r
+- \text{MELT}_\text{partial} - \text{MELT}_\text{full}\big].
 ```
+
+Splintering does *not* appear in the ice mass tendency:
+splinters are fragments of existing rime mass, so the splintered mass
+is internally subtracted from rime in `tendency_ρqᶠ` and added back as
+splinter mass — netting to zero in ``q^i``. The deposition term is
+bidirectional; sublimation is its negative branch.
 
 ### Ice Number Tendency
 
 ```math
-\frac{\partial ρn^i}{\partial t}\bigg|_{src} = \underbrace{NUC_n}_{\text{nucleation}}
-+ \underbrace{IMMF_{cl,n}}_{\text{cloud freezing}}
-+ \underbrace{IMMF_{rain,n}}_{\text{rain freezing}}
-+ \underbrace{SEC_n}_{\text{splintering}}
-+ \underbrace{MELT_n}_{\text{melting number}}
-+ \underbrace{AGG_n}_{\text{aggregation}}
+\partial_t (ρn^i)\big|_\text{src}
+=\rho\big[\text{NUC}_n + \text{IMMF}_{c,n} + \text{IMMF}_{r,n} + \text{HOM}_{c,n} + \text{HOM}_{r,n}
++ \text{HM}_n
+- \text{MELT}_n - \text{SUB}_n - \text{AGG}_n - \text{NLIM}\big].
 ```
 
-Note: `AGG_n` and `MELT_n` are negative (signed loss terms).
+- ``\text{HM}_n`` is the Hallett–Mossop number source.
+- ``\text{SUB}_n`` is the sublimation number sink.
+- ``\text{AGG}_n`` is the aggregation magnitude.
+- ``\text{NLIM}`` is the soft-relaxation analog of Fortran's `impose_max_Ni`
+  hard cap. When ``n^i`` exceeds ``N_{i,\max}/ρ``, a 10 s relaxation sink is
+  added to push it back toward the cap.
 
 ### Rime Mass Tendency
 
 ```math
-\frac{\partial ρq^f}{\partial t}\bigg|_{src} = \underbrace{RIM}_{\text{cloud riming}}
-+ \underbrace{RIM_{rain}}_{\text{rain riming}}
-+ \underbrace{REFR}_{\text{refreezing}}
-+ \underbrace{IMMF_{cl}}_{\text{cloud freezing}}
-+ \underbrace{IMMF_{rain}}_{\text{rain freezing}}
-- \underbrace{F^f \cdot MELT}_{\text{rime fraction × melting}}
-- \underbrace{SEC}_{\text{splintering mass}}
+\partial_t (ρq^f)\big|_\text{src}
+=\rho\big[\text{RIM}_c + \text{RIM}_r + \text{REFR}
++ \text{IMMF}_c + \text{IMMF}_r + \text{HOM}_c + \text{HOM}_r
++ \text{WG-DENS}_q
+- F^f\,(\text{MELT}_\text{partial} + \text{MELT}_\text{full} + \text{SUB})\big].
 ```
+
+``\text{WG-DENS}_q`` is the wet-growth densification mass term: when wet-growth
+shedding fires (without active liquid fraction), the rime is set to its
+maximum density. ``\text{SUB}`` is the sublimation mass magnitude
+(``\text{SUB} = \max(0, -\text{DEP})``).
 
 ### Rime Volume Tendency
 
 ```math
-\frac{\partial ρb^f}{\partial t}\bigg|_{src} = \frac{RIM + RIM_{rain}}{ρ^f_{new}}
-+ \frac{REFR}{ρ^f}
-+ \frac{IMMF}{ρ^w}
-- \frac{F^f \cdot MELT}{ρ^f}
+\partial_t (ρb^f)\big|_\text{src}
+=\rho\!\Bigg[\frac{\text{RIM}_c}{ρ^f_\text{new}}
++ \frac{\text{RIM}_r + \text{REFR} + \text{IMMF}_c + \text{IMMF}_r + \text{HOM}_c + \text{HOM}_r}{ρ_{r,\max}}
++ \text{WG-DENS}_b
+- \frac{F^f\,(\text{MELT}_\text{total} + \text{SUB})}{ρ^f}
+- \mathcal{D}\Bigg].
 ```
 
-Note: different density denominators for different source terms.
+The various rime-density denominators reflect the Fortran convention:
+fresh cloud rime uses the Cober–List density ``ρ^f_\text{new}``; rain
+riming, refreezing, immersion freezing, and homogeneous freezing all
+deposit at the maximum rime density ``ρ_{r,\max} = 900`` kg/m³. ``\mathcal{D}``
+is the melt-densification correction that drives the remaining rime
+toward solid ice density (917 kg/m³) when ``ρ^f < 917`` and liquid
+fraction is *not* active.
 
 ### Reflectivity Tendency (3-moment)
 
-The simplified (non-tabulated) path uses proportional scaling:
+The simplified path used by `tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ)` follows
+the active hybrid path (see the sixth-moment update in [Microphysical Processes](@ref p3_processes)):
 
 ```math
-\frac{\partial ρz^i}{\partial t}\bigg|_{src} \approx \frac{z^i}{q^i} \sum_p \frac{dq^i}{dt}\bigg|_p
+\partial_t (ρz^i)\big|_\text{src}
+=\rho\Big[\frac{z^i}{q^i}\,\dot{q}^{i}_\text{group1}
++ \sum_{p\in\text{group2}} G(μ_\text{src,p})\,\frac{(ΔM_3)_p^2}{Δn_p}\Big],
 ```
 
-The tabulated path uses per-process Z integrals from the lookup tables for
-deposition, riming, aggregation, sublimation, melting, and shedding.
+with the group-1 mass change including deposition (signed), riming (cloud +
+rain), refreezing, partial+complete melting, and ``q^{wi}`` condensation /
+evaporation; and the group-2 sum running over deposition nucleation,
+immersion freezing of cloud / rain, splintering, and homogeneous freezing
+of cloud / rain.
+
+The fully tabulated `tendency_ρzⁱ(rates, ρ, ..., p3, nu, D_v, μ, μ_cloud)`
+overload exists for completeness but corresponds to Fortran's *inactive*
+`log_full3mom` branch.
 
 ### Liquid on Ice Tendency
 
 ```math
-\frac{\partial ρq^{wi}}{\partial t}\bigg|_{src} = \underbrace{MELT_{part}}_{\text{partial melting}}
-- \underbrace{SHED}_{\text{shedding}}
-- \underbrace{REFR}_{\text{refreezing}}
+\partial_t (ρq^{wi})\big|_\text{src}
+=\rho\big[\text{MELT}_\text{partial} + \text{COL}_{c,\text{warm}} + \text{COL}_{r,\text{warm}}
++ \text{WG}_c + \text{WG}_r + \text{COAT-COND}
+- \text{SHED} - \text{REFR} - \text{COAT-EVAP}\big],
 ```
+
+valid in the active liquid-fraction branch (``F^l \ge 0.01``). Above-freezing
+collection of cloud and rain feeds the liquid coating; below-freezing
+wet-growth excess does too. ``\text{COAT-COND}`` and ``\text{COAT-EVAP}``
+are the coupled liquid-coated-ice condensation / evaporation rates.
 
 ## Sedimentation
 
@@ -200,77 +281,82 @@ Each quantity sediments at its characteristic velocity:
 | ``ρz^i`` | ``V_z^i`` | ``F_z^i = -V_z^i ρz^i`` |
 | ``ρq^{wi}`` | ``V_m^i`` | ``F_q^{wi} = -V_m^i ρq^{wi}`` |
 
-The sedimentation tendency is:
+The sedimentation tendency is
 
 ```math
-\frac{\partial ρX}{\partial t}\bigg|_{sed} = -\frac{\partial F_X}{\partial z}
+\frac{\partial ρX}{\partial t}\bigg|_\text{sed} = -\frac{\partial F_X}{\partial z}.
 ```
+
+Breeze does not subcycle sedimentation inside P3 (Fortran's `dt_left` loop is
+not ported); Oceananigans is responsible for stability in transport.
 
 ## Coupling to AtmosphereModel
 
-In Breeze, P3 microphysics couples to `AtmosphereModel` through the microphysics interface:
+In Breeze, P3 microphysics couples to `AtmosphereModel` through the
+microphysics interface in `p3_interface.jl`. Under the hood,
+``\_p3\_scalar\_compute`` returns a `P3CacheResult` that the field-by-field
+`microphysical_tendency` overloads consume:
 
 ```julia
 # Prognostic field names
 names = prognostic_field_names(microphysics)
-# Returns (:ρqᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ)
+# (:ρqᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ)
 ```
 
-The microphysics scheme provides:
-1. **`microphysical_tendency`**: Computes source terms for all prognostic variables
-2. **`compute_moisture_fractions`**: Converts prognostic densities to mixing ratios
-3. **`update_microphysical_fields!`**: Updates diagnostic fields after state update
+Three host-facing entry points:
+
+1. **`microphysical_tendency`**: Computes source terms for all prognostic variables.
+2. **`compute_moisture_fractions`**: Converts prognostic densities to mixing ratios.
+3. **`update_microphysical_fields!`**: Refreshes diagnostic fields after a state update.
+
+The tendency-only architecture is described in
+[Architectural choice: Breeze P3 is tendency-only](@ref p3_overview).
 
 ## Conservation Properties
 
-P3 conserves:
+P3 conserves total water in a closed system:
 
-**Total water**:
 ```math
-\frac{d}{dt}\left( q_v + q^{cl} + q^r + q^i \right) = 0 \quad \text{(closed system)}
+\frac{d}{dt}\left( q_v + q^{cl} + q^r + q^i + q^{wi} \right) = 0.
 ```
 
-**Ice number** (modulo nucleation, aggregation, melting):
-```math
-\frac{dN^i}{dt} = NUC_n + SEC - AGG_n - MELT_n
-```
+(The liquid coating ``q^{wi}`` is included because shedding moves it to rain,
+and refreezing converts it to rime — both internal to the ice mass.)
 
-**Energy** (through latent heat coupling):
-```math
-\frac{dθ}{dt} = \frac{1}{c_p Π}\left( L_v \dot{q}^{cl} + L_s \dot{q}^i + L_f \dot{q}^f \right)
-```
+Within P3, the limiter `limit_vapor_rates` enforces the saturation-adjustment
+caps (see the saturation adjustment limits in [Microphysical Processes](@ref p3_processes)) and the
+phase-conservation caps in `phase2_conservation_limit!` ensure that
+sources do not exceed the available reservoir over the host time step.
+
+Energy conservation is delegated to the host: the Anelastic and
+compressible formulations carry latent heating implicitly through their
+prognostic thermodynamic variable. P3 itself does not assemble a ``θ``
+tendency.
 
 ## Numerical Considerations
 
 ### Positivity
 
-All prognostic variables must remain non-negative. Limiters ensure:
-
-```math
-ρX^{n+1} = \max(0, ρX^n + Δt \cdot \text{tendency})
-```
+All prognostic variables remain non-negative through the saturation-adjustment
+caps and per-species sink-limiting factors in `process_rates.jl`. Breeze does
+not implement a Fortran-style post-step "return small mass to vapor" cleanup
+because that requires state mutation with a paired ``θ`` correction.
 
 ### Consistency
 
-The rime fraction must satisfy ``0 ≤ F^f ≤ 1``:
-
-```math
-ρq^f ≤ ρq^i
-```
-
-Similarly for liquid fraction:
-
-```math
-ρq^{wi} ≤ ρq^i
-```
+The rime fraction must satisfy ``0 \le F^f \le 1`` (so ``ρq^f \le ρq^i - ρq^{wi}``)
+and the liquid fraction ``0 \le F^l \le 1`` (so ``ρq^{wi} \le ρq^i``). When
+the diagnosed fractions exceed bounds, the read-time interface caps them and
+flags the state for special handling (see `p3_interface.jl`).
 
 ### Threshold Handling
 
-Small values below numerical thresholds are set to zero:
+Small values below numerical thresholds are treated as zero in the source
+assembly:
 
 ```julia
-q_min = microphysics.minimum_mass_mixing_ratio  # Default: 1e-14 kg/kg
-n_min = microphysics.minimum_number_mixing_ratio  # Default: 1e-16 1/kg
+q_min = microphysics.minimum_mass_mixing_ratio  # default: 1e-14 kg/kg
+n_min = microphysics.minimum_number_mixing_ratio  # default: 1e-16 1/kg
 ```
 
 ## Code Example
@@ -297,8 +383,8 @@ println("  Minimum number mixing ratio: ", p3.minimum_number_mixing_ratio, " 1/k
 
 ## References for This Section
 
-- [Morrison2015parameterization](@cite): Original prognostic variables and tendencies (Section 2)
-- [MilbrandtEtAl2021](@cite): Sixth moment prognostic (``ρz^i``) for three-moment ice
-- [MilbrandtEtAl2025liquidfraction](@cite): Liquid fraction prognostic (``ρq^{wi}``)
-- [Morrison2025complete3moment](@cite): Complete tendency equations with all six ice variables
-- [MilbrandtYau2005](@cite): Multi-moment microphysics and sedimentation
+- [Morrison2015parameterization](@cite): Original prognostic variables and tendencies (Section 2).
+- [MilbrandtEtAl2021](@cite): Sixth moment prognostic (``ρz^i``) for three-moment ice.
+- [MilbrandtEtAl2025liquidfraction](@cite): Liquid fraction prognostic (``ρq^{wi}``).
+- [Morrison2025complete3moment](@cite): Complete tendency equations with all six ice variables.
+- [MilbrandtYau2005](@cite): Multi-moment microphysics and sedimentation.

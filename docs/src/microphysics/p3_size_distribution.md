@@ -6,7 +6,7 @@ determined from prognostic moments and empirical closure relations.
 ## Gamma Size Distribution
 
 The number concentration of ice particles per unit volume, as a function of
-maximum dimension ``D``, follows ([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 19):
+maximum dimension ``D``, follows ([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 2):
 
 ```math
 N'(D) = N₀ D^μ e^{-λD}
@@ -62,21 +62,22 @@ Z ∝ M_6 = N₀ \frac{Γ(μ + 7)}{λ^{μ+7}}
 
 ## Shape-Slope (μ-λ) Relationship
 
-In the officail P3 code, ``μ`` is diagnosed rather than set by a
-single global power law. Define the mean-volume diameter estimate (in mm)
+In both Breeze and the official P3 code, the two-moment ``μ`` is diagnosed
+rather than set by a single global power law. Define the mean-volume diameter
+estimate (in mm) from the mean per-particle mass ``L/N``:
 
 ```math
-D_{mvd} = 10^3 \left(\frac{L}{c_{gp}}\right)^{1/3},
+D_{mvd} = 10^3 \left(\frac{L/N}{c_{gp}}\right)^{1/3},
 ```
 
-where ``c_{gp}`` is the coefficient in the fully rimed mass law ``m(D) = c_{gp} D^3``.
-Then:
+where ``c_{gp} = (π/6) ρ_g`` is the coefficient in the fully rimed mass law
+``m(D) = c_{gp} D^3``. Then:
 
 ```math
 μ =
 \begin{cases}
 \text{clamp}\left(0.076 (0.01 λ)^{0.8} - 2,\ 0,\ 6\right), & D_{mvd} \le 0.2\,\text{mm} \\
-\text{clamp}\left(0.25 (D_{mvd} - 0.2)\, f_ρ\, Fᶠ,\ 0,\ μ_{max}\right), & D_{mvd} > 0.2\,\text{mm}
+\text{clamp}\left(0.25 (D_{mvd} - 0.2)\, f_ρ\, F^f,\ 0,\ μ_{max}\right), & D_{mvd} > 0.2\,\text{mm}
 \end{cases}
 ```
 
@@ -88,10 +89,11 @@ f_ρ = \max\left(1,\ 1 + 0.00842(\bar{ρ}-400)\right),
 \quad μ_{max} = 20.
 ```
 
-The first branch corresponds to the Heymsfield (2003) μ–λ fit (Eq. 27 in
-[Morrison2015parameterization](@cite)), written with λ in m⁻¹ (the factor 0.01
-converts to cm⁻¹). The second branch increases ``μ`` with particle size and riming
-in the Fortran lookup-table generator.
+The first branch corresponds to the Heymsfield (2003) μ–λ fit (Eq. 3 in
+[Morrison2015parameterization](@cite), `μ = 0.00191 λ^{0.8} - 2` with ``λ`` in
+m⁻¹; the doc form is identical after the cm⁻¹↔m⁻¹ unit conversion since
+``0.076 \cdot 0.01^{0.8} ≈ 0.00191``). The second branch increases ``μ``
+with particle size and riming in the Fortran lookup-table generator.
 
 !!! note "Breeze helper closure"
     Breeze implements the `P3Closure` which matches the official P3 Fortran logic.
@@ -100,10 +102,12 @@ in the Fortran lookup-table generator.
     and rime density to account for riming effects. This ensures consistency with the lookup tables.
 
 !!! note "Three-Moment Mode"
-    In the officail P3 code, ``μ`` (and the bulk ice density used in rates) are obtained
-    from lookup table 3 (`p3_lookupTable_3.dat-v1.4`) by interpolation in the Z/Q space,
-    rime fraction, liquid fraction, and rime density. The analytic moment relations
-    provide the conceptual basis for the table but are not solved directly at runtime.
+    In the official P3 code, ``μ`` (and the bulk ice density used in rates) are obtained
+    from lookup table 3 (`p3_lookupTable_3.dat-v1.4`) by interpolation in the ``Z/Q`` space,
+    rime fraction, liquid fraction, and rime density. Breeze loads the same table file
+    and interpolates the same way; ``μ`` for the active hybrid 3-moment update path
+    (`tendency_ρzⁱ`) comes directly from this table. Analytic ``G(μ) = M_6 N_T / M_3^2``
+    relations are used in the group-2 initiation increments.
 
 ```@example p3_psd
 using Breeze.Microphysics.PredictedParticleProperties
@@ -130,7 +134,7 @@ fig
 ## Determining Distribution Parameters
 
 Given prognostic moments ``L`` (mass concentration) and ``N`` (number concentration),
-plus predicted rime properties ``Fᶠ`` and ``ρᶠ``, we solve for the distribution
+plus predicted rime properties ``F^f`` and ``ρ^f``, we solve for the distribution
 parameters ``(N₀, λ, μ)``.
 
 In the official P3 lookup tables, rime and liquid fractions are tabulated on
@@ -253,7 +257,7 @@ fig
 ## Mass Integrals with Piecewise m(D)
 
 The challenge in P3 is that the mass-diameter relationship is piecewise
-(see [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eqs. 1-4):
+(see [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eqs. 6, 7, 12, and 13):
 
 ```math
 \int_0^∞ m(D) N'(D)\, dD = \sum_{i=1}^{4} \int_{D_{i-1}}^{D_i} a_i D^{b_i} N'(D)\, dD
@@ -318,7 +322,7 @@ Both two-moment and three-moment solvers are implemented:
 The P3 size distribution closure proceeds as:
 
 1. **Prognostic moments**: ``L``, ``N`` (and optionally ``Z``) are carried by the model
-2. **Rime properties**: ``Fᶠ`` and ``ρᶠ`` determine the mass-diameter relationship
+2. **Rime properties**: ``F^f`` and ``ρ^f`` determine the mass-diameter relationship
 3. **Lambda solver**: ``λ`` is tabulated by scanning L/N in the reference Fortran (Breeze uses a secant solver in the helper)
 4. **μ diagnosis**: Piecewise diagnostic for 2-moment, or lookup-table inversion for 3-moment
 5. **Normalization**: Intercept ``N₀`` from number conservation

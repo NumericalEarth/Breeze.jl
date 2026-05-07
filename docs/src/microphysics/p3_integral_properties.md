@@ -26,7 +26,10 @@ where ``X(D)`` is the quantity of interest and ``W(D)`` is a weighting function
 
 Terminal velocity determines sedimentation rates. P3 computes three weighted fall speeds,
 corresponding to `uns`, `ums`, `uzs` in the Fortran lookup tables
-([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Table 3).
+(see [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Section 2b for
+the underlying ``V(D)`` formulation; the integrated fall speeds are stored in
+`p3_lookupTable_1.dat-v*` and described in
+[Morrison et al. (2025)](@cite Morrison2025complete3moment)).
 
 ### Terminal Velocity Formulation
 
@@ -34,7 +37,7 @@ Individual particle fall speed follows the [Mitchell and Heymsfield (2005)](@cit
 Best number formulation, which relates fall speed to particle mass, projected area, and air properties.
 The formulation accounts for the transition from Stokes to turbulent flow regimes and includes
 surface roughness effects. A density correction factor ``(ρ₀/ρ)^{0.54}`` is applied following
-[Heymsfield et al. (2006)](@cite HeymsfieldEtAl2006).
+[Heymsfield et al. (2007)](@cite HeymsfieldEtAl2007).
 
 For mixed-phase particles (with liquid fraction ``F^l``), the fall speed is linearly interpolated
 between the ice fall speed and the rain fall speed:
@@ -78,26 +81,6 @@ For 3-moment ice, the 6th moment flux uses:
 V_z = \frac{\int_0^∞ V(D) D^6 N'(D)\, dD}{\int_0^∞ D^6 N'(D)\, dD}
 ```
 
-```@example p3_integrals
-using Breeze.Microphysics.PredictedParticleProperties
-
-# Create a size distribution state
-state = IceSizeDistributionState(Float64;
-    intercept = 1e6,
-    shape = 0.0,
-    slope = 1000.0)
-
-# Evaluate fall speed integrals
-V_n = evaluate(NumberWeightedFallSpeed(), state)
-V_m = evaluate(MassWeightedFallSpeed(), state)
-V_z = evaluate(ReflectivityWeightedFallSpeed(), state)
-
-println("Fall speed integrals:")
-println("  V_n (number-weighted) = $(round(V_n, digits=3))")
-println("  V_m (mass-weighted)   = $(round(V_m, digits=3))")
-println("  V_z (reflectivity)    = $(round(V_z, digits=3))")
-```
-
 ## Deposition/Sublimation Integrals
 
 Vapor diffusion to/from ice particles is enhanced by air flow around falling particles.
@@ -127,16 +110,6 @@ P3 computes six ventilation-related integrals for different size regimes:
 | `LargeIceVentilationReynolds` | Re-dependent term for large ice | D ≥ 100 μm |
 | `Ventilation` | Total ventilation integral | All sizes |
 | `VentilationEnhanced` | Enhanced ventilation (large ice only) | D ≥ 100 μm |
-
-```@example p3_integrals
-# Ventilation integrals
-v_basic = evaluate(Ventilation(), state)
-v_enhanced = evaluate(VentilationEnhanced(), state)
-
-println("Ventilation integrals:")
-println("  Basic ventilation     = $(round(v_basic, sigdigits=3))")
-println("  Enhanced (large ice)  = $(round(v_enhanced, sigdigits=3))")
-```
 
 ## Bulk Property Integrals
 
@@ -174,19 +147,6 @@ Radar reflectivity factor (proportional to 6th moment):
 Z = \int_0^∞ D^6 N'(D)\, dD = N₀ \frac{Γ(μ + 7)}{λ^{μ+7}}
 ```
 
-```@example p3_integrals
-r_eff = evaluate(EffectiveRadius(), state)
-D_m = evaluate(MeanDiameter(), state)
-ρ_m = evaluate(MeanDensity(), state)
-Z = evaluate(Reflectivity(), state)
-
-println("Bulk properties:")
-println("  Effective radius = $(round(r_eff * 1e6, digits=1)) μm")
-println("  Mean diameter    = $(round(D_m * 1e3, digits=2)) mm")
-println("  Mean density     = $(round(ρ_m, digits=1)) kg/m³")
-println("  Reflectivity Z   = $(round(Z * 1e18, sigdigits=3)) mm⁶/m³")
-```
-
 ## Collection Integrals
 
 Collection processes (aggregation, riming) require integrals over collision kernels.
@@ -217,15 +177,6 @@ I_{agg} = \int_0^∞ \int_0^∞ K_{agg}(D_1, D_2) N'(D_1) N'(D_2)\, dD_1 dD_2
 I_{ir} = \int_0^∞ A(D) V(D) N'(D)\, dD
 ```
 
-```@example p3_integrals
-n_agg = evaluate(AggregationNumber(), state)
-n_rain = evaluate(RainCollectionNumber(), state)
-
-println("Collection integrals:")
-println("  Aggregation number   = $(round(n_agg, sigdigits=3))")
-println("  Rain collection      = $(round(n_rain, sigdigits=3))")
-```
-
 ## Sixth Moment Integrals
 
 For 3-moment ice ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
@@ -244,24 +195,6 @@ in the 3-moment lookup table (`p3_lookupTable_1.dat-v*_3momI`).
 | Shedding | `SixthMomentShedding` | Z change from liquid shedding |
 | Sublimation | `SixthMomentSublimation` | Z change from sublimation |
 
-```@example p3_integrals
-# Sixth moment integrals (with nonzero liquid fraction for shedding)
-state_wet = IceSizeDistributionState(Float64;
-    intercept = 1e6, shape = 0.0, slope = 1000.0,
-    liquid_fraction = 0.1)
-
-z_rime = evaluate(SixthMomentRime(), state_wet)
-z_dep = evaluate(SixthMomentDeposition(), state_wet)
-z_agg = evaluate(SixthMomentAggregation(), state_wet)
-z_shed = evaluate(SixthMomentShedding(), state_wet)
-
-println("Sixth moment integrals:")
-println("  Rime         = $(round(z_rime, sigdigits=3))")
-println("  Deposition   = $(round(z_dep, sigdigits=3))")
-println("  Aggregation  = $(round(z_agg, sigdigits=3))")
-println("  Shedding     = $(round(z_shed, sigdigits=3))")
-```
-
 ## Lambda Limiter Integrals
 
 To prevent unphysical size distributions, P3 limits the slope parameter ``λ``
@@ -271,61 +204,6 @@ based on physical constraints.
 |----------|---------|
 | `SmallQLambdaLimit` | Lower bound on λ (prevents unrealistically large particles) |
 | `LargeQLambdaLimit` | Upper bound on λ (prevents unrealistically small particles) |
-
-## Dependence on Distribution Parameters
-
-Integral values depend strongly on the size distribution parameters:
-
-```@example p3_integrals
-using CairoMakie
-
-# Vary slope parameter
-λ_values = 10 .^ range(2.5, 4.5, length=20)
-V_n_values = Float64[]
-V_m_values = Float64[]
-V_z_values = Float64[]
-
-for λ in λ_values
-    state = IceSizeDistributionState(Float64; intercept=1e6, shape=0.0, slope=λ)
-    push!(V_n_values, evaluate(NumberWeightedFallSpeed(), state))
-    push!(V_m_values, evaluate(MassWeightedFallSpeed(), state))
-    push!(V_z_values, evaluate(ReflectivityWeightedFallSpeed(), state))
-end
-
-fig = Figure(size=(600, 400))
-ax = Axis(fig[1, 1],
-    xlabel = "Slope parameter λ [m⁻¹]",
-    ylabel = "Fall speed integral",
-    xscale = log10,
-    title = "Fall Speed Integrals vs λ")
-
-lines!(ax, λ_values, V_n_values, label="Vₙ (number)")
-lines!(ax, λ_values, V_m_values, label="Vₘ (mass)")
-lines!(ax, λ_values, V_z_values, label="Vᵤ (reflectivity)")
-
-axislegend(ax, position=:rt)
-fig
-```
-
-## Numerical Integration and Tabulation
-
-The official P3 lookup tables are generated using fixed-bin numerical integration
-(40,000 diameter bins for single-particle integrals and 1,500 for collection integrals),
-with constant bin widths in diameter space.
-
-Breeze evaluates integrals directly using Chebyshev-Gauss quadrature with
-a change of variables to map ``[0, ∞)`` to a bounded interval:
-
-```@example p3_integrals
-# The evaluate function uses 64 quadrature points by default
-V_n_64 = evaluate(NumberWeightedFallSpeed(), state; n_quadrature=64)
-V_n_128 = evaluate(NumberWeightedFallSpeed(), state; n_quadrature=128)
-
-println("Quadrature convergence:")
-println("  64 points:  $(V_n_64)")
-println("  128 points: $(V_n_128)")
-println("  Difference: $(abs(V_n_128 - V_n_64))")
-```
 
 ## Tabulation
 
@@ -338,7 +216,7 @@ For efficiency in simulations, integrals are organized into three Breeze lookup-
 ```@example p3_integrals
 using Logging: NullLogger, with_logger
 
-# The default constructor reads Fortran ASCII lookup tables
+# The default constructor reads the Fortran ASCII lookup tables
 # (downloaded automatically on first use).
 p3 = with_logger(NullLogger()) do
     PredictedParticlePropertiesMicrophysics()
@@ -363,12 +241,13 @@ P3 uses 29+ integral properties organized by concept:
 | Sixth moment | 9 | 3-moment closure |
 | Lambda limiter | 2 | Distribution bounds |
 
-All integrals use the same infrastructure: define the integrand, then call
-`evaluate(integral_type, state)` with optional quadrature settings.
+At runtime each integral is read from the corresponding Fortran ASCII lookup
+table; the rain 1D tables are tabulated at startup from Chebyshev–Gauss
+quadrature evaluators.
 
 ## References for This Section
 
-- [Morrison2015parameterization](@cite): Fall speed, ventilation, collection integrals (Table 3, Section 2)
+- [Morrison2015parameterization](@cite): Fall speed, ventilation, collection integrals (Section 2b and Appendix C)
 - [HallPruppacher1976](@cite): Ventilation factor coefficients
 - [MilbrandtEtAl2021](@cite): Sixth moment integrals for three-moment ice (Table 1)
 - [MilbrandtEtAl2024](@cite): Updated three-moment formulation

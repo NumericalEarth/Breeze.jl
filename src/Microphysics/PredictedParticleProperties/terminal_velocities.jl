@@ -145,7 +145,7 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # Mean ice particle mass
     m̄ = qⁱ_eff / nⁱ_eff
 
-    # Density correction factor (Heymsfield et al. 2006)
+    # Density correction factor (Heymsfield et al. 2007)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # m9: Fortran applies no velocity clamping; table bounds are sufficient.
@@ -276,7 +276,7 @@ This is a performance convenience wrapper over the individual
 `ice_terminal_velocity_reflectivity_weighted` functions. The individual functions
 remain available for cases where only one velocity is needed.
 
-See [Heymsfield et al. (2006)](@cite HeymsfieldEtAl2006) for the density correction exponent
+See [Heymsfield et al. (2007)](@cite HeymsfieldEtAl2007) for the density correction exponent
 and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) for the P3 fall
 speed framework.
 
@@ -312,7 +312,7 @@ function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeo
     nⁱ_eff = max(nⁱ, FT(1e-16))
     m̄ = qⁱ_eff / nⁱ_eff
 
-    # Density correction factor (Heymsfield et al. 2006, exponent 0.54 for ice)
+    # Density correction factor (Heymsfield et al. 2007, exponent 0.54 for ice)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     return _fused_fall_speeds(fs.mass_weighted, fs.number_weighted, fs.reflectivity_weighted,

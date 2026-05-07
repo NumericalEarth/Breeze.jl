@@ -5,13 +5,13 @@ The mass-diameter and area-diameter relationships vary across this spectrum, dep
 particle size and riming state.
 
 The foundational particle property relationships are from
-[Morrison & Milbrandt (2015a])(@citet), Section 2.
+[Morrison & Milbrandt (2015a)](@citet Morrison2015parameterization), Section 2.
 
 ## Mass-Diameter Relationship
 
 The particle mass ``m(D)`` follows a piecewise power law that depends on maximum dimension ``D``,
-rime fraction ``Fᶠ``, and rime density ``ρᶠ``. This formulation is given in
-[Morrison2015parameterization](@citet) Equations 1-5.
+rime fraction ``F^f``, and rime density ``ρ^f``. This formulation is given in
+[Morrison2015parameterization](@citet) Eqs. 6, 7, 12, and 13.
 
 ### The Four Regimes
 
@@ -19,20 +19,21 @@ P3 defines four diameter regimes with distinct mass-diameter relationships:
 
 **Regime 1: Small Spherical Ice** (``D < D_{th}``)
 
-Small ice particles are assumed spherical with pure ice density
-([Morrison2015parameterization](@citet) Eq. 1):
+Small ice particles are assumed spherical with bulk ice density
+([Morrison2015parameterization](@citet) Eq. 6):
 
 ```math
 m(D) = \frac{π}{6} ρᵢ D³
 ```
 
-where ``ρᵢ = 917`` kg/m³ (pure ice density). The Fortran P3 uses 900 kg/m³ for
-small spherical ice; Breeze uses the standard pure ice density 917 kg/m³.
+where ``ρᵢ = 900`` kg/m³ (bulk ice density), matching the Fortran P3 runtime
+convention. The slightly higher pure-ice value 917 kg/m³ is reserved for the
+radar reflectivity diagnostic.
 
 **Regime 2: Vapor-Grown Aggregates** (``D_{th} ≤ D < D_{gr}`` or unrimed)
 
 Larger particles follow an empirical power law based on aircraft observations
-of ice crystals and aggregates ([Morrison2015parameterization](@citet) Eq. 2):
+of ice crystals and aggregates ([Morrison2015parameterization](@citet) Eq. 7):
 
 ```math
 m(D) = α D^β
@@ -45,17 +46,17 @@ This relationship captures the fractal nature of aggregated crystals.
 **Regime 3: Graupel** (``D_{gr} ≤ D < D_{cr}``)
 
 When particles acquire sufficient rime, they become compact graupel
-with density ``ρ_g`` ([Morrison2015parameterization](@cite) Eq. 3):
+with density ``ρ_g`` ([Morrison2015parameterization](@cite) Eq. 13):
 
 ```math
 m(D) = \frac{π}{6} ρ_g D³
 ```
 
 The graupel density ``ρ_g`` depends on the rime fraction and rime density
-([Morrison2015parameterization](@citet) Eq. 17):
+([Morrison2015parameterization](@citet) Eq. 16):
 
 ```math
-ρ_g = Fᶠ ρᶠ + (1 - Fᶠ) ρ_d
+ρ_g = F^f ρ^f + (1 - F^f) ρ_d
 ```
 
 where ``ρ_d`` is the density of the deposited (vapor-grown) ice component.
@@ -63,18 +64,18 @@ where ``ρ_d`` is the density of the deposited (vapor-grown) ice component.
 **Regime 4: Partially Rimed** (``D ≥ D_{cr}``)
 
 The largest particles have a rimed core with unrimed aggregate extensions
-([Morrison2015parameterization](@citet) Eq. 4):
+([Morrison2015parameterization](@citet) Eq. 12):
 
 ```math
-m(D) = \frac{α}{1 - Fᶠ} D^β
+m(D) = \frac{α}{1 - F^f} D^β
 ```
 
 ### Threshold Diameters
 
 The transitions between regimes occur at critical diameters determined by
-equating masses ([Morrison2015parameterization](@citet) Eqs. 12-14):
+equating masses ([Morrison2015parameterization](@citet) Eqs. 8, 14, and 15):
 
-**Spherical-Aggregate Threshold** ``D_{th}``:
+**Spherical-Aggregate Threshold** ``D_{th}`` (Eq. 8):
 
 The diameter where spherical mass equals aggregate mass:
 
@@ -82,7 +83,7 @@ The diameter where spherical mass equals aggregate mass:
 D_{th} = \left( \frac{6α}{π ρᵢ} \right)^{1/(3-β)}
 ```
 
-**Aggregate-Graupel Threshold** ``D_{gr}``:
+**Aggregate-Graupel Threshold** ``D_{gr}`` (Eq. 15):
 
 The diameter where aggregate mass equals graupel mass:
 
@@ -90,25 +91,28 @@ The diameter where aggregate mass equals graupel mass:
 D_{gr} = \left( \frac{6α}{π ρ_g} \right)^{1/(3-β)}
 ```
 
-**Graupel-Partial Threshold** ``D_{cr}``:
+**Graupel-Partial Threshold** ``D_{cr}`` (Eq. 14):
 
 The diameter where graupel mass equals partially rimed mass:
 
 ```math
-D_{cr} = \left( \frac{6α}{π ρ_g (1 - Fᶠ)} \right)^{1/(3-β)}
+D_{cr} = \left( \frac{6α}{π ρ_g (1 - F^f)} \right)^{1/(3-β)}
 ```
 
 ### Deposited Ice Density
 
 The density of the vapor-deposited (unrimed) component ``ρ_d`` is derived from
-the constraint that total mass equals rime mass plus deposited mass.
-From [Morrison2015parameterization](@citet) Equation 16:
+the constraint that total mass equals rime mass plus deposited mass. The form
+below is algebraically equivalent to [Morrison2015parameterization](@citet)
+Eq. 17 (which expresses ``ρ_d`` directly in terms of the threshold diameters
+``D_{cr}`` and ``D_{gr}``), rewritten here as a closed-form expression in
+``F^f`` and ``ρ^f``:
 
 ```math
-ρ_d = \frac{Fᶠ ρᶠ}{(β - 2) \frac{k - 1}{(1 - Fᶠ)k - 1} - (1 - Fᶠ)}
+ρ_d = \frac{F^f ρ^f}{(β - 2) \frac{k - 1}{(1 - F^f)k - 1} - (1 - F^f)}
 ```
 
-where ``k = (1 - Fᶠ)^{-1/(3-β)}``.
+where ``k = (1 - F^f)^{-1/(3-β)}``.
 
 ## Code Example: Mass-Diameter Relationship
 
@@ -169,8 +173,8 @@ println("  ρ_g (graupel)    = $(round(thresholds.ρ_graupel, digits=1)) kg/m³"
 ## Area-Diameter Relationship
 
 The projected cross-sectional area ``A(D)`` determines collection rates and fall speed.
-These relationships are from [Morrison2015parameterization](@citet)
-Equations 6-8.
+These relationships are described in [Morrison2015parameterization](@citet) Section 2b
+(area-diameter forms are not numbered as equations in the paper).
 
 **Small Spherical Ice** (``D < D_{th}``):
 
@@ -185,7 +189,9 @@ A(D) = γ D^σ
 ```
 
 where ``γ`` and ``σ`` are empirical coefficients from
-[Mitchell1996powerlaws](@citet) (see [Morrison2015parameterization](@citet) Table 1).
+[Mitchell1996powerlaws](@citet) for aggregates of side planes, bullets, and columns
+and assemblages of planar polycrystals, as adopted by
+[Morrison2015parameterization](@citet).
 
 **Graupel**:
 
@@ -214,7 +220,7 @@ The official P3 code computes terminal velocity using the
 [Mitchell and Heymsfield (2005)](@cite MitchellHeymsfield2005) Best-number drag formulation with the
 regime-dependent ``m(D)`` and ``A(D)`` relationships. The resulting fall speeds
 are stored in lookup tables and include the air-density correction
-``(ρ₀/ρ)^{0.54}`` following [Heymsfield et al. (2006)](@cite HeymsfieldEtAl2006).
+``(ρ₀/ρ)^{0.54}`` following [Heymsfield et al. (2007)](@cite HeymsfieldEtAl2007).
 
 Breeze implements this full Best-number formulation directly in the quadrature routines,
 ensuring consistency with the lookup tables. For mixed-phase particles, the velocity
@@ -256,7 +262,7 @@ fig
 
 Riming dramatically affects particle properties. This is the key insight of P3 that enables
 continuous evolution without discrete category conversions
-([Morrison2015parameterization](@citet) Section 2d):
+([Morrison2015parameterization](@citet) Section 2b):
 
 | Property | Unrimed Aggregate | Heavily Rimed Graupel |
 |----------|-------------------|----------------------|
@@ -290,13 +296,13 @@ fig
 
 ## Rime Density Parameterization
 
-The rime density ``ρᶠ`` depends on the collection conditions during riming. The
+The rime density ``ρ^f`` depends on the collection conditions during riming. The
 parameterization follows [Cober and List (1993)](@cite CoberList1993) as implemented in
 [Morrison2015parameterization](@citet). The rime density is computed as a function of
 the impact parameter ``R_i``, which depends on droplet size, impact velocity, and temperature:
 
 ```math
-ρᶠ = \begin{cases}
+ρ^f = \begin{cases}
 (0.051 + 0.114 R_i - 0.0055 R_i^2) \times 1000 & R_i \le 8 \\
 611 + 72.25 (R_i - 8) & R_i > 8
 \end{cases}
@@ -312,8 +318,8 @@ As particles rime more heavily, they become denser and more spherical.
 !!! note "Official P3 implementation details"
     The Fortran scheme clamps ``R_i`` to [1, 12] before applying the Cober–List fit;
     the linear branch for ``R_i > 8`` is extended to ``R_i = 12`` so that
-    ``ρᶠ = 900`` kg/m³. When riming is inactive, ``ρᶠ`` defaults to 400 kg/m³.
-    The lookup tables discretize ``ρᶠ`` on an uneven grid (50, 250, 450, 650, 900 kg/m³)
+    ``ρ^f = 900`` kg/m³. When riming is inactive, ``ρ^f`` defaults to 400 kg/m³.
+    The lookup tables discretize ``ρ^f`` on an uneven grid (50, 250, 450, 650, 900 kg/m³)
     and interpolate between bins.
 
 ## Summary
