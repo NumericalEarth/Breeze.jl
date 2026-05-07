@@ -45,14 +45,17 @@ struct SplitExplicitTimeDiscretization{N, FT}
     acoustic_damping_coefficient :: FT
 end
 
-function SplitExplicitTimeDiscretization(; substeps=nothing,
-                                           forward_weight=0.6,
-                                           divergence_damping_coefficient=0.10,
-                                           acoustic_damping_coefficient=0.0)
-    return SplitExplicitTimeDiscretization(substeps,
-                                           forward_weight,
-                                           divergence_damping_coefficient,
-                                           acoustic_damping_coefficient)
+function SplitExplicitTimeDiscretization(FT=Float64;
+                                         substeps=nothing,
+                                         forward_weight=FT(0.6),
+                                         divergence_damping_coefficient=FT(0.10),
+                                         acoustic_damping_coefficient=FT(0.0))
+    return SplitExplicitTimeDiscretization(
+        substeps,
+        FT(forward_weight),
+        FT(divergence_damping_coefficient),
+        FT(acoustic_damping_coefficient),
+    )
 end
 
 """
