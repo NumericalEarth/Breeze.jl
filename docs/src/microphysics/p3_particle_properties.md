@@ -132,6 +132,9 @@ m_unrimed = [ice_mass(mass, 0.0, 400.0, d) for d in D]
 # Moderately rimed (50% rime fraction)
 m_rimed = [ice_mass(mass, 0.5, 500.0, d) for d in D]
 
+# Heavily rimed (75% rime fraction)
+m_heavily_rimed = [ice_mass(mass, 0.75, 500.0, d) for d in D]
+
 # Fully rimed graupel at the maximum rime density, used below for ρᵢ(D)
 m_fully_rimed = [ice_mass(mass, 1.0, 900.0, d) for d in D]
 
@@ -146,6 +149,7 @@ ax = Axis(fig[1, 1],
 
 lines!(ax, D, m_unrimed, label="Unrimed (Fᶠ = 0)")
 lines!(ax, D, m_rimed, label="Rimed (Fᶠ = 0.5)")
+lines!(ax, D, m_heavily_rimed, label="Rimed (Fᶠ = 0.75)")
 lines!(ax, D, m_fully_rimed, label="Rimed (Fᶠ = 1.0)")
 
 # Add reference lines for spherical ice
@@ -248,6 +252,7 @@ and connects directly to the mass-diameter relationship.
 # Compute effective density across sizes
 ρ_unrimed = @. m_unrimed / (π/6 * D^3)
 ρ_rimed = @. m_rimed / (π/6 * D^3)
+ρ_heavily_rimed = @. m_heavily_rimed / (π/6 * D^3)
 ρᵢ_fully_rimed = @. m_fully_rimed / (π/6 * D^3)
 
 fig = Figure(size=(600, 400))
@@ -261,6 +266,7 @@ hlines!(ax, [900], linestyle=:dash, color=:gray, label="ρᵢ = 900 (runtime)")
 hlines!(ax, [917], linestyle=:dot, color=:gray, label="ρᵢ = 917 (radar)")
 lines!(ax, D, ρ_unrimed, label="Unrimed (Fᶠ = 0)")
 lines!(ax, D, ρ_rimed, label="Rimed (Fᶠ = 0.5)")
+lines!(ax, D, ρ_heavily_rimed, label="Rimed (Fᶠ = 0.75)")
 
 axislegend(ax, position=:rt)
 fig
