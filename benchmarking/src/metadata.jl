@@ -34,6 +34,9 @@ function BenchmarkMetadata(arch)
             gpu_name = "Unknown GPU"
         end
         cuda_version = "unknown"
+    elseif arch isa GPU{MetalBackend}
+        gpu_name = string(Metal.device().name)
+        cuda_version = "unknown"
     end
 
     # Get CPU model
