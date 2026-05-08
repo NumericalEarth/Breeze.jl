@@ -41,7 +41,10 @@ end
 
 function loss(model, θ_init, Δt, Nsteps)
     set!(model; θ=θ_init, ρ=1.0)
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
+    # NOTE: forward step_loop! uses mincut=true, but the min-cut planner
+    # blows host RAM during AD compile (graph algorithm over the dataflow
+    # graph of one body iteration). Run AD without mincut.
+    @trace checkpointing=true track_numbers=false for _ in 1:Nsteps
         time_step!(model, Δt)
     end
     return mean(interior(model.temperature) .^ 2)
