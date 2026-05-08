@@ -37,15 +37,15 @@ P3 solves these problems by tracking the **physical properties** of ice particle
 These properties evolve continuously through microphysical processes, and particle
 characteristics (mass, fall speed, collection efficiency) are diagnosed from them.
 
-## Architectural choice: Breeze P3 is tendency-only
+## Architectural choice: Breeze P3 updates tendencies, instead of prognostic variables
 
-The Fortran reference is structured as a subcycle module that updates prognostic arrays
+The Fortran reference is structured as a subcycle module that updates prognostic variables
 in place over its internal Δt: it can hard-clamp ``N_i ≤ N_{i,\max}`` after each step,
 zero out small-mass species and add a compensating ``θ`` correction, and use ``1/Δt``
 relaxation rates for nucleation and saturation adjustment.
 
 Breeze's P3 (`_p3_scalar_compute` in `p3_interface.jl`) returns a `P3CacheResult`
-of *tendencies*, which Oceananigans sums with advection and diffusion before
+of *tendencies*, which Breeze sums with advection and diffusion before
 time-stepping. P3 has no write access to the prognostic state and no awareness
 of host Δt. This produces several deliberate, documented differences from
 Fortran:
@@ -56,12 +56,9 @@ Fortran:
 - **Per-Δt depletion rates use a fixed timescale.** Cooper nucleation,
   immersion/homogeneous freezing, and CCN activation use a 10 s relaxation
   in place of Fortran's ``1/Δt``.
-- **Post-step "return small mass to vapor" cleanups are not implemented.**
-  These require state mutation with a paired ``θ`` correction; the closest
-  tendency-form analog would have to live in the host coupling layer.
-- **Latent heating is delegated to the host formulation.** The Anelastic
+- **Latent heating is delegated to the thermodynamics formulation.** The Anelastic
   and compressible formulations carry energy through their prognostic
-  thermodynamic variable; P3 does not assemble a ``θ`` tendency.
+  thermodynamic variable ``θ_{li}``.
 
 These choices are noted in context throughout the documentation.
 
@@ -122,7 +119,7 @@ track liquid water on ice particles. This is crucial for:
 - **Refreezing**: Coating that freezes into rime.
 
 Breeze implements liquid-fraction wet growth, refreezing, and shedding.
-Shedding uses the Fortran-style PSD integral over particles
+Shedding uses the PSD integral over particles
 with ``D \ge 9`` mm (tabulated as `f1pr28`); see
 [Microphysical Processes](@ref p3_processes) for details.
 
@@ -159,7 +156,7 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
     not ported.
 
 !!! note "Adaptive sedimentation substepping"
-    Sedimentation is routed through Oceananigans transport rather than the
+    Sedimentation is routed through tracer transport rather than the
     Fortran's adaptive `dt_left` substepping based on the maximum Courant
     number. Tabulated reflectivity-weighted fall speed ``V_Z`` is
     computed but not used to set a Courant constraint inside P3.
@@ -212,10 +209,10 @@ P3 evolves eleven prognostic densities:
 
 **Saturation diagnostic** (1 variable):
 
-- ``ρs^{sat}``: Predicted-supersaturation slot from H10 [kg/m³]. The H10
-  prediction path is hard-disabled at runtime in both Breeze and the Fortran
-  reference (`log_predictSsat = .false.`); the field is allocated for API
-  compatibility and recomputed diagnostically from ``ρq^v`` and ``T``.
+- ``ρs^{sat}``: Supersaturation [kg/m³], diagnosed from ``ρq^v`` and ``T``.
+  P3 also defines an optional prognostic-supersaturation path
+  (Grabowski and Morrison 2008), but it is disabled at runtime in both
+  Breeze and the Fortran reference (`log_predictSsat = .false.`).
 
 From these, diagnostic properties are computed:
 
