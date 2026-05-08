@@ -33,7 +33,7 @@ Three weighted fall speeds are computed by integrating over the size distributio
 
 - **Number-weighted** ``V_n``: For number flux (sedimentation of particle count)
 - **Mass-weighted** ``V_m``: For mass flux (precipitation rate)
-- **Reflectivity-weighted** ``V_z``: For 3-moment scheme (6th moment flux)
+- **Reflectivity-weighted** ``V_z``: For triple-moment scheme (6th moment flux)
 
 # Keyword Arguments
 

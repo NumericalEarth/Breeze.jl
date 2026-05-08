@@ -12,8 +12,8 @@ fall speeds, evaporation ventilation) are tabulated at startup inside Breeze
 from Chebyshev–Gauss quadrature evaluators in `rain_quadrature.jl`. The
 integral formulations are from:
 - [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization): Fall speed, ventilation, collection
-- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Sixth moment integrals for 3-moment ice
-- [Morrison et al. (2025)](@cite Morrison2025complete3moment): Complete 3-moment lookup tables
+- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Sixth moment integrals for triple-moment ice
+- [Morrison et al. (2025)](@cite Morrison2025complete3moment): Complete triple-moment lookup tables
 
 ## General Form
 
@@ -79,7 +79,7 @@ F_L = -V_m \cdot L
 
 ### Reflectivity-Weighted Fall Speed
 
-For 3-moment ice, the 6th moment flux uses:
+For triple-moment ice, the 6th moment flux uses:
 
 ```math
 V_z = \frac{\int_0^∞ V(D) D^6 N'(D)\, dD}{\int_0^∞ D^6 N'(D)\, dD}
@@ -198,12 +198,12 @@ I_{ir} = \int_0^∞ A(D) V(D) N'(D)\, dD
 
 ## Sixth Moment Integrals
 
-For 3-moment ice ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
+For triple-moment ice ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
 [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024)),
 P3 tracks the 6th moment ``Z`` which requires additional integrals
 for each process affecting reflectivity. These are documented in
 [Morrison et al. (2025)](@cite Morrison2025complete3moment) and stored
-in the 3-moment lookup table (`p3_lookupTable_1.dat-v*_3momI`).
+in the triple-moment lookup table (`p3_lookupTable_1.dat-v*_3momI`).
 
 | Process | Integral(s) | Physical Meaning |
 |---------|-------------|------------------|
@@ -230,8 +230,8 @@ For efficiency in simulations, integrals are organized into three Breeze lookup-
 
 - `lookupTable_1`: fall speed, ventilation, bulk, collection, sixth-moment, and lambda-limiter integrals
 - `lookupTable_2`: ice-rain and inter-category collection families
-- `lookupTable_3`: three-moment diagnostic lookup for `μᶦ` and a companion mean
-  density / third-moment column. (The slope ``λ^i`` is *not* in Table 3 — it is
+- `lookupTable_3`: triple-moment diagnostic lookup for `μᶦ` and a companion mean
+  density / triple-moment column. (The slope ``λ^i`` is *not* in Table 3 — it is
   recovered at runtime from Table 1 using the diagnosed ``μ^i``.)
 
 ```@example p3_integrals
@@ -254,10 +254,10 @@ println("  Mass-weighted:   $(typeof(fs.mass_weighted))")
 
 P3 organises its integral properties by concept; the actual column counts in
 the Fortran tables are 21 in the 2-moment ice file (`p3_lookupTable_1.dat-v*`)
-and 31 in the 3-moment ice file (`*_3momI`). Sixth-moment integrals
+and 31 in the triple-moment ice file (`*_3momI`). Sixth-moment integrals
 (`m6rime, m6dep, m6dep1, m6mlt1, m6mlt2, m6agg, m6shd, m6sub, m6sub1`) and the
 ice–rain collection family (`m6collr`, plus `qrcol`/`nrcol` 4-D tables) make
-up the bulk of the extra columns in the 3-moment file.
+up the bulk of the extra columns in the triple-moment file.
 
 At runtime each ice-side integral is read from the corresponding Fortran
 ASCII lookup table; the rain 1D tables are tabulated at startup inside
@@ -270,6 +270,6 @@ sums of the integrand on those nodes.
 
 - [Morrison2015parameterization](@cite): Fall speed, ventilation, collection integrals (Section 2b and Appendix C)
 - [HallPruppacher1976](@cite): Ventilation factor coefficients
-- [MilbrandtEtAl2021](@cite): Sixth moment integrals for three-moment ice (Table 1)
-- [MilbrandtEtAl2024](@cite): Updated three-moment formulation
-- [Morrison2025complete3moment](@cite): Complete three-moment lookup table (29 quantities)
+- [MilbrandtEtAl2021](@cite): Sixth moment integrals for triple-moment ice (Table 1)
+- [MilbrandtEtAl2024](@cite): Updated triple-moment formulation
+- [Morrison2025complete3moment](@cite): Complete triple-moment lookup table (29 quantities)

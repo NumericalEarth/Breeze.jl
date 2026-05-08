@@ -10,7 +10,7 @@ rather than multiple discrete ice categories.
 # Key Features
 
 - Single ice category with predicted properties
-- Two-moment ice by default; three-moment ice (mass, number, reflectivity/6th moment) opt-in via `three_moment_ice = true`
+- Two-moment ice by default; triple-moment ice (mass, number, reflectivity/6th moment) opt-in via `triple_moment_ice = true`
 - Predicted liquid fraction on ice particles
 - Rime fraction and rime density evolution
 - Ice-side integrals are read from the Fortran ASCII lookup tables; rain 1D
@@ -29,7 +29,7 @@ This implementation is based on the following P3 papers:
 3. **Milbrandt & Morrison (2016)** - Part III: Multiple ice categories (NOT implemented)
    [Milbrandt and Morrison (2016)](@cite MilbrandtMorrison2016)
 
-4. **Milbrandt et al. (2021)** - Three-moment ice: Z as prognostic, size sorting
+4. **Milbrandt et al. (2021)** - Triple-moment ice: Z as prognostic, size sorting
    [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021)
 
 5. **Milbrandt et al. (2024)** - Updated triple-moment formulation
@@ -38,7 +38,7 @@ This implementation is based on the following P3 papers:
 6. **Milbrandt et al. (2025)** - Predicted liquid fraction: shedding, refreezing
    [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction)
 
-7. **Morrison et al. (2025)** - Complete three-moment implementation
+7. **Morrison et al. (2025)** - Complete triple-moment implementation
    [Morrison et al. (2025)](@cite Morrison2025complete3moment)
 
 # Source Code
@@ -76,7 +76,7 @@ export
     IceRainCollection,
     P3IceIntegralsTable,
     P3RainIceCollectionTable,
-    P3ThreeMomentShapeTable,
+    P3TripleMomentShapeTable,
     P3LookupTables,
 
     # Rain and cloud droplet properties
@@ -133,9 +133,9 @@ export
     IceMassPowerLaw,
     P3Closure,
     TwoMomentClosure,
-    ThreeMomentClosure,
-    ThreeMomentClosureExact,
-    ThreeMomentLookupClosure,
+    TripleMomentClosure,
+    TripleMomentClosureExact,
+    TripleMomentLookupClosure,
     FixedShapeParameter,
     ShapeParameterRelation,  # alias for TwoMomentClosure
     IceRegimeThresholds,

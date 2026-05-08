@@ -181,25 +181,25 @@ Oceananigans.Architectures.on_architecture(arch, x::P3RainIceCollectionTable) =
                              on_architecture(arch, x.number),
                              on_architecture(arch, x.sixth_moment))
 
-Adapt.adapt_structure(to, x::P3ThreeMomentShapeTable) =
-    P3ThreeMomentShapeTable(Adapt.adapt(to, x.shape),
+Adapt.adapt_structure(to, x::P3TripleMomentShapeTable) =
+    P3TripleMomentShapeTable(Adapt.adapt(to, x.shape),
                             Adapt.adapt(to, x.slope),
                             Adapt.adapt(to, x.mean_density))
 
-Oceananigans.Architectures.on_architecture(arch, x::P3ThreeMomentShapeTable) =
-    P3ThreeMomentShapeTable(on_architecture(arch, x.shape),
+Oceananigans.Architectures.on_architecture(arch, x::P3TripleMomentShapeTable) =
+    P3TripleMomentShapeTable(on_architecture(arch, x.shape),
                             on_architecture(arch, x.slope),
                             on_architecture(arch, x.mean_density))
 
 Adapt.adapt_structure(to, x::P3LookupTables) =
     P3LookupTables(Adapt.adapt(to, x.ice_integrals),
                    Adapt.adapt(to, x.rain_ice_collection),
-                   Adapt.adapt(to, x.three_moment_shape))
+                   Adapt.adapt(to, x.triple_moment_shape))
 
 Oceananigans.Architectures.on_architecture(arch, x::P3LookupTables) =
     P3LookupTables(on_architecture(arch, x.ice_integrals),
                    on_architecture(arch, x.rain_ice_collection),
-                   on_architecture(arch, x.three_moment_shape))
+                   on_architecture(arch, x.triple_moment_shape))
 
 # --- IceProperties ---
 

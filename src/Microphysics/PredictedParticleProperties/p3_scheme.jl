@@ -56,17 +56,17 @@ Each transition requires ad-hoc conversion parameters. P3 instead tracks:
 From these, particle characteristics (mass, fall speed, collection efficiency)
 are diagnosed continuously.
 
-# Three-Moment Ice
+# Triple-Moment Ice
 
 P3 v5.5 carries three prognostic moments for ice particles:
 1. **Mass** (``qⁱ``): Total ice mass
 2. **Number** (``nⁱ``): Ice particle number concentration
 3. **Reflectivity** (``zⁱ``): Sixth moment of size distribution
 
-The third moment improves representation of precipitation-sized particles
+The triple moment improves representation of precipitation-sized particles
 and enables better simulation of radar reflectivity. The default runtime
-path is 2-moment ice; pass `three_moment_ice = true` to enable the
-3-moment path, which uses `lookupTable_3` for distribution parameter closure.
+path is 2-moment ice; pass `triple_moment_ice = true` to enable the
+triple-moment path, which uses `lookupTable_3` for distribution parameter closure.
 
 # Prognostic Variables
 
@@ -86,8 +86,8 @@ The scheme tracks 11 prognostic densities:
 
 - `lookup_tables`: Path to a directory containing Fortran P3 lookup table files
   (default to the artifact `P3_lookup_tables` in `Artifacts.toml`).
-- `three_moment_ice`: 2-moment (`false`, default) or 3-moment (`true`) ice.
-  Pass `nothing` to auto-detect from file presence (prefers 3-moment if
+- `triple_moment_ice`: 2-moment (`false`, default) or triple-moment (`true`) ice.
+  Pass `nothing` to auto-detect from file presence (prefers triple-moment if
   available).
 - `water_density`: Liquid water density [kg/m³] (default 1000)
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation
@@ -116,7 +116,7 @@ This implementation follows P3 v5.5 from the
 
 Key papers describing P3:
 - [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization): Original scheme
-- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Three-moment ice
+- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Triple-moment ice
 - [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction): Predicted liquid fraction
 - [Morrison et al. (2025)](@cite Morrison2025complete3moment): Complete implementation
 
@@ -124,12 +124,12 @@ See also the [P3 documentation](@ref p3_overview) for detailed physics.
 """
 function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Float64;
                                                  lookup_tables = artifact"P3_lookup_tables",
-                                                 three_moment_ice = false,
+                                                 triple_moment_ice = false,
                                                  water_density = 1000,
                                                  precipitation_boundary_condition = nothing,
                                                  aerosol = nothing,
                                                  cloud = nothing)
-    return read_fortran_lookup_tables(lookup_tables; FT, three_moment_ice,
+    return read_fortran_lookup_tables(lookup_tables; FT, triple_moment_ice,
                                       water_density, precipitation_boundary_condition,
                                       aerosol, cloud)
 end

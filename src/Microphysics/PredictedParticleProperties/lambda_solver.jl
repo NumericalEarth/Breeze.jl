@@ -9,7 +9,7 @@
 #####
 ##### Two closures are available:
 ##### 1. Two-moment: Uses μ-λ relationship from Field et al. (2007)
-##### 2. Three-moment: Uses sixth moment Z to determine μ independently
+##### 2. Triple-moment: Uses sixth moment Z to determine μ independently
 #####
 
 #####
@@ -268,28 +268,28 @@ end
 end
 
 #####
-##### Three-moment closure: Z/N constraint
+##### Triple-moment closure: Z/N constraint
 #####
 
-abstract type AbstractThreeMomentClosure end
+abstract type AbstractTripleMomentClosure end
 
 """
-    ThreeMomentLookupClosure
+    TripleMomentLookupClosure
 
-Three-moment closure that uses lookup tables for shape parameter μ and slope
-parameter λ. See [`ThreeMomentLookupClosure()`](@ref) constructor.
+Triple-moment closure that uses lookup tables for shape parameter μ and slope
+parameter λ. See [`TripleMomentLookupClosure()`](@ref) constructor.
 """
-struct ThreeMomentLookupClosure{TABLE} <: AbstractThreeMomentClosure
+struct TripleMomentLookupClosure{TABLE} <: AbstractTripleMomentClosure
     table :: TABLE
 end
 
 """
-    ThreeMomentClosure
+    TripleMomentClosure
 
-Fortran-parity three-moment closure using the upstream P3 `solve_mui` approximation.
-See [`ThreeMomentClosure()`](@ref) constructor.
+Fortran-parity triple-moment closure using the upstream P3 `solve_mui` approximation.
+See [`TripleMomentClosure()`](@ref) constructor.
 """
-struct ThreeMomentClosure{FT} <: AbstractThreeMomentClosure
+struct TripleMomentClosure{FT} <: AbstractTripleMomentClosure
     μmin :: FT
     μmax :: FT
 end
@@ -297,7 +297,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct the Fortran-parity three-moment closure for gamma size distribution.
+Construct the Fortran-parity triple-moment closure for gamma size distribution.
 
 This closure follows the current upstream P3 implementation: it iterates on bulk
 ice density, approximates the third diameter moment as spherical, and applies the
@@ -315,19 +315,19 @@ Use this closure when Fortran parity is the priority.
 [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
 [Morrison et al. (2025)](@cite Morrison2025complete3moment).
 """
-function ThreeMomentClosure(FT = Oceananigans.defaults.FloatType;
+function TripleMomentClosure(FT = Oceananigans.defaults.FloatType;
                             μmin = 0,
                             μmax = 20)
-    return ThreeMomentClosure(FT(μmin), FT(μmax))
+    return TripleMomentClosure(FT(μmin), FT(μmax))
 end
 
 """
-    ThreeMomentClosureExact
+    TripleMomentClosureExact
 
-Three-moment closure that solves the full Breeze moment constraints against the
-piecewise mass-diameter relation. See [`ThreeMomentClosureExact()`](@ref) constructor.
+Triple-moment closure that solves the full Breeze moment constraints against the
+piecewise mass-diameter relation. See [`TripleMomentClosureExact()`](@ref) constructor.
 """
-struct ThreeMomentClosureExact{FT} <: AbstractThreeMomentClosure
+struct TripleMomentClosureExact{FT} <: AbstractTripleMomentClosure
     μmin :: FT
     μmax :: FT
 end
@@ -335,14 +335,14 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct the exact three-moment closure for gamma size distribution.
+Construct the exact triple-moment closure for gamma size distribution.
 
 With three prognostic moments (mass L, number N, and reflectivity Z), the shape
 parameter μ is diagnosed by solving the full Breeze mass and reflectivity
 constraints using the same piecewise mass-diameter relation employed elsewhere
 in the P3 implementation.
 
-# Three-Moment Approach
+# Triple-Moment Approach
 
 For a gamma distribution ``N'(D) = N₀ D^μ e^{-λD}``, the moments are:
 - ``M_0 = N = N₀ Γ(μ+1) / λ^{μ+1}``
@@ -372,13 +372,13 @@ unknowns (μ, λ), eliminating the need for the empirical μ-λ closure.
 
 # References
 
-[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) introduced three-moment ice,
+[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) introduced triple-moment ice,
 [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024) refined the implementation.
 """
-function ThreeMomentClosureExact(FT = Oceananigans.defaults.FloatType;
+function TripleMomentClosureExact(FT = Oceananigans.defaults.FloatType;
                                  μmin = 0,
                                  μmax = 20)
-    return ThreeMomentClosureExact(FT(μmin), FT(μmax))
+    return TripleMomentClosureExact(FT(μmin), FT(μmax))
 end
 
 #####
@@ -707,7 +707,7 @@ function log_mass_number_ratio(mass::IceMassPowerLaw,
 end
 
 #####
-##### Lambda solver (three-moment)
+##### Lambda solver (triple-moment)
 #####
 
 """
@@ -725,7 +725,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Approximate the three-moment ice shape parameter using the Fortran P3 `G(μ)` fit.
+Approximate the triple-moment ice shape parameter using the Fortran P3 `G(μ)` fit.
 
 This matches `compute_mu_3mom_1` in the reference P3 Fortran code:
 it forms ``G = M₀ M₆ / M₃²`` and applies the piecewise polynomial inversion
@@ -767,9 +767,9 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the full three-moment mass residual for the exact closure.
+Compute the full triple-moment mass residual for the exact closure.
 """
-function mass_residual_three_moment(mass::IceMassPowerLaw,
+function mass_residual_triple_moment(mass::IceMassPowerLaw,
                                     rime_fraction, rime_density,
                                     μ, log_Z_over_N, log_L_over_N)
     logλ = log_lambda_from_reflectivity(μ, log_Z_over_N)
@@ -783,7 +783,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute G(μ) = Γ(μ+7)Γ(μ+1) / Γ(μ+4)² for the three-moment μ-Z constraint.
+Compute G(μ) = Γ(μ+7)Γ(μ+1) / Γ(μ+4)² for the triple-moment μ-Z constraint.
 Simplifies to (μ+6)(μ+5)(μ+4) / ((μ+3)(μ+2)(μ+1)).
 Matches Fortran `G_of_mu`.
 """
@@ -890,9 +890,9 @@ end
                  max_iterations = 50,
                  tolerance = 1e-10)
 
-Solve for slope parameter λ given a fixed shape parameter μ (three-moment).
+Solve for slope parameter λ given a fixed shape parameter μ (triple-moment).
 
-For three-moment ice, μ is determined from the Z/N constraint, so this
+For triple-moment ice, μ is determined from the Z/N constraint, so this
 function finds λ that satisfies the L/N constraint at that μ.
 
 # Arguments
@@ -901,7 +901,7 @@ function finds λ that satisfies the L/N constraint at that μ.
 - `Z_ice`: Ice sixth moment [m⁶/m³] (used for initial guess)
 - `rime_fraction`: Mass fraction of rime [-]
 - `rime_density`: Density of rime [kg/m³]
-- `μ`: Shape parameter (determined from three-moment solver)
+- `μ`: Shape parameter (determined from triple-moment solver)
 
 # Returns
 - `logλ`: Log of slope parameter
@@ -1177,7 +1177,7 @@ $(TYPEDSIGNATURES)
 
 Solve for gamma size distribution parameters from three prognostic moments (L, N, Z).
 
-This is the three-moment solver for P3: given the prognostic ice mass ``L``,
+This is the triple-moment solver for P3: given the prognostic ice mass ``L``,
 number ``N``, and sixth moment ``Z`` concentrations, compute the complete
 gamma distribution without needing an empirical μ-λ closure:
 
@@ -1190,7 +1190,7 @@ The solution uses:
 2. **L/N constraint**: Used to solve for the correct μ
 3. **Normalization**: N₀ from the number integral
 
-# Advantages of Three-Moment
+# Advantages of Triple-Moment
 
 - Shape parameter μ evolves physically based on actual size distribution
 - Better representation of size sorting during sedimentation
@@ -1208,7 +1208,7 @@ The solution uses:
 # Keyword Arguments
 
 - `mass`: Power law parameters (default: `IceMassPowerLaw()`)
-- `closure`: Three-moment closure (default: `ThreeMomentClosure()`)
+- `closure`: Triple-moment closure (default: `TripleMomentClosure()`)
 
 # Returns
 
@@ -1230,13 +1230,13 @@ params = distribution_parameters(L_ice, N_ice, Z_ice, 0.0, 400.0)
 
 # References
 
-[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) introduced three-moment ice,
+[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) introduced triple-moment ice,
 [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024) refined the approach.
 """
 function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
                                   liquid_fraction = zero(typeof(L_ice)),
                                   mass = IceMassPowerLaw(),
-                                  closure = ThreeMomentClosure(),
+                                  closure = TripleMomentClosure(),
                                   diameter_bounds = nothing)
 
     FT = typeof(L_ice)
@@ -1264,7 +1264,7 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
         return IceDistributionParameters(N₀, λ, μ)
     end
 
-    # H15: Compute μ from three-moment constraint with density iteration.
+    # H15: Compute μ from triple-moment constraint with density iteration.
     # Fortran solve_mui iterates up to 5 times: at each step, the bulk density
     # ρ_bulk is updated from the lookup table (entry 12), which changes M₃ and
     # hence μ. Here we compute ρ_bulk analytically from the solved (μ, λ) pair

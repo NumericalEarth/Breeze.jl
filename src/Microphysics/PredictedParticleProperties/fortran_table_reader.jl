@@ -58,8 +58,8 @@ If the table files are not found in `directory`, they are automatically
 downloaded from the P3-microphysics GitHub repository (approximately 28 MB
 compressed). This only happens once; subsequent calls read from disk.
 
-Auto-detects 2-moment vs 3-moment ice from file presence in `directory`.
-When `three_moment_ice=nothing` (default), prefers 3-moment if available.
+Auto-detects 2-moment vs triple-moment ice from file presence in `directory`.
+When `triple_moment_ice=nothing` (default), prefers triple-moment if available.
 
 Rain 1D tables (velocity, evaporation) are generated from Julia quadrature
 since they are not included in the Fortran ASCII files.
@@ -74,13 +74,13 @@ since they are not included in the Fortran ASCII files.
 
 - `FT`: Float type (default `Float64`)
 - `arch`: Architecture for GPU transfer (default `CPU()`)
-- `three_moment_ice`: Force 2-moment (`false`) or 3-moment (`true`),
+- `triple_moment_ice`: Force 2-moment (`false`) or triple-moment (`true`),
   or auto-detect (`nothing`)
 """
 function read_fortran_lookup_tables(directory::AbstractString;
                                     FT::Type{<:AbstractFloat} = Float64,
                                     arch = CPU(),
-                                    three_moment_ice::Union{Bool, Nothing} = nothing,
+                                    triple_moment_ice::Union{Bool, Nothing} = nothing,
                                     water_density = 1000,
                                     precipitation_boundary_condition = nothing,
                                     aerosol = nothing,
@@ -94,39 +94,39 @@ function read_fortran_lookup_tables(directory::AbstractString;
     has_3momI = isfile(file_3momI)
     has_2momI = isfile(file_2momI)
 
-    three_moment = if isnothing(three_moment_ice)
+    triple_moment = if isnothing(triple_moment_ice)
         has_3momI
     else
-        three_moment_ice
+        triple_moment_ice
     end
 
-    if three_moment && !has_3momI
+    if triple_moment && !has_3momI
         error("3momI table not found: $file_3momI")
     end
-    if !three_moment && !has_2momI
+    if !triple_moment && !has_2momI
         error("2momI table not found: $file_2momI")
     end
 
-    table1_file = three_moment ? file_3momI : file_2momI
+    table1_file = triple_moment ? file_3momI : file_2momI
 
     # Parse Table 1 (ice integrals + embedded rain-ice collection)
-    table1_fields, table2_fields = parse_fortran_table_1(table1_file, three_moment, FT)
+    table1_fields, table2_fields = parse_fortran_table_1(table1_file, triple_moment, FT)
 
     # Parse Table 3 (3momI only)
-    table3_fields = if three_moment && isfile(file_table3)
+    table3_fields = if triple_moment && isfile(file_table3)
         parse_fortran_table_3(file_table3, FT)
     else
-        # D26: Fortran hard-stops when Table 3 is missing in 3-moment mode.
+        # D26: Fortran hard-stops when Table 3 is missing in triple-moment mode.
         # Match that behavior — a silent fallback to 2-moment μ lookup would give
-        # different results than the 3-moment μ diagnostic.
-        three_moment && error("3-moment mode requested but Table 3 file not found: $file_table3. " *
+        # different results than the triple-moment μ diagnostic.
+        triple_moment && error("triple-moment mode requested but Table 3 file not found: $file_table3. " *
                               "Ensure the file is present and unzipped.")
         nothing
     end
 
     # Build TabulatedFunction objects
-    ice_tables_5d = build_table_1_functions(table1_fields, three_moment, FT, arch)
-    rain_ice_tables = build_table_2_functions(table2_fields, three_moment, FT, arch)
+    ice_tables_5d = build_table_1_functions(table1_fields, triple_moment, FT, arch)
+    rain_ice_tables = build_table_2_functions(table2_fields, triple_moment, FT, arch)
     table3_objs = if !isnothing(table3_fields)
         build_table_3_functions(table3_fields, FT, arch)
     else
@@ -134,13 +134,13 @@ function read_fortran_lookup_tables(directory::AbstractString;
     end
 
     # Assemble P3 lookup table structs
-    ice_integrals_tab, rain_ice_collection_tab, three_moment_shape_tab = assemble_lookup_tables(
-        ice_tables_5d, rain_ice_tables, table3_objs, three_moment)
+    ice_integrals_tab, rain_ice_collection_tab, triple_moment_shape_tab = assemble_lookup_tables(
+        ice_tables_5d, rain_ice_tables, table3_objs, triple_moment)
 
     # Build IceProperties with tabulated fields
     ice = build_ice_properties_from_tables(
         ice_tables_5d, rain_ice_tables, table3_objs,
-        ice_integrals_tab, rain_ice_collection_tab, three_moment_shape_tab, three_moment, FT)
+        ice_integrals_tab, rain_ice_collection_tab, triple_moment_shape_tab, triple_moment, FT)
 
     # Generate rain 1D tables from Julia quadrature
     rain_base = RainProperties(FT)
@@ -178,11 +178,11 @@ Returns two dictionaries:
 - `table2_fields`: Dict of Symbol => Array{FT,6} for rain-ice collection
   with axes (i_Qnorm, i_Drscale_reversed, i_Fr, i_Fl, i_rhor, i_Znorm)
 """
-function parse_fortran_table_1(filepath::AbstractString, three_moment::Bool, FT::Type)
+function parse_fortran_table_1(filepath::AbstractString, triple_moment::Bool, FT::Type)
     lines = readlines(filepath)
 
     # Number of shape parameter points (mu axis)
-    n_mu = three_moment ? FORTRAN_N_ZNORM : 1
+    n_mu = triple_moment ? FORTRAN_N_ZNORM : 1
     n_q = FORTRAN_N_QNORM
     n_fr = FORTRAN_N_FR
     n_fl = FORTRAN_N_FL
@@ -215,7 +215,7 @@ function parse_fortran_table_1(filepath::AbstractString, three_moment::Bool, FT:
         :cloud_aerosol_collection, :ice_aerosol_collection
     ]
 
-    col_names = three_moment ? col_names_3momI : col_names_2momI
+    col_names = triple_moment ? col_names_3momI : col_names_2momI
 
     # Allocate arrays for ice integrals: (Qnorm, Fr, Fl, rhor, mu)
     table1_fields = Dict{Symbol, Array{FT, 5}}()
@@ -226,7 +226,7 @@ function parse_fortran_table_1(filepath::AbstractString, three_moment::Bool, FT:
     # Allocate arrays for rain-ice collection: (Qnorm, Drscale, Fr, Fl, rhor, mu)
     rain_names_3momI = [:rain_number, :rain_mass, :rain_sixth_moment]
     rain_names_2momI = [:rain_number, :rain_mass]
-    rain_names = three_moment ? rain_names_3momI : rain_names_2momI
+    rain_names = triple_moment ? rain_names_3momI : rain_names_2momI
 
     table2_fields = Dict{Symbol, Array{FT, 6}}()
     for name in rain_names
@@ -235,7 +235,7 @@ function parse_fortran_table_1(filepath::AbstractString, three_moment::Bool, FT:
 
     # Parse data lines (skip header line 1 and blank line 2)
     line_idx = 3  # 1-indexed; line 3 is first data line
-    n_ice_idx = three_moment ? 5 : 4
+    n_ice_idx = triple_moment ? 5 : 4
     n_rain_idx = 4
 
     # Loop nesting order:
@@ -384,7 +384,7 @@ function fortran_table_1_ranges(FT)
     )
 end
 
-function build_table_1_functions(table1_fields::Dict, three_moment::Bool,
+function build_table_1_functions(table1_fields::Dict, triple_moment::Bool,
                                  FT::Type, arch)
     ranges = fortran_table_1_ranges(FT)
 
@@ -414,7 +414,7 @@ function fortran_table_2_ranges(FT)
     )
 end
 
-function build_table_2_functions(table2_fields::Dict, three_moment::Bool,
+function build_table_2_functions(table2_fields::Dict, triple_moment::Bool,
                                  FT::Type, arch)
     ranges = fortran_table_2_ranges(FT)
 
@@ -456,12 +456,12 @@ end
 ##### Assemble P3 lookup table structs
 #####
 
-function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
+function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, triple_moment)
     # P3IceIntegralsTable: groups of ice integrals
     fall_speed = (
         number_weighted = ice_5d[:number_weighted],
         mass_weighted = ice_5d[:mass_weighted],
-        reflectivity_weighted = three_moment ? ice_5d[:reflectivity_weighted] : nothing
+        reflectivity_weighted = triple_moment ? ice_5d[:reflectivity_weighted] : nothing
     )
 
     deposition = (
@@ -488,7 +488,7 @@ function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
         ice_aerosol_collection = ice_5d[:ice_aerosol_collection],
     )
 
-    sixth_moment = if three_moment
+    sixth_moment = if triple_moment
         # D32: The Fortran table file stores D ≤ D_crit filtered melt Z integrals
         # (f1pr32/f1pr33) in the m6_melt1/m6_melt2 columns. The non-liquid-fraction
         # zimlt path in Fortran reuses deposition tables and is dead code (log_full3mom
@@ -517,7 +517,7 @@ function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
     ice_rain = (
         number = rain_ice[:rain_number],
         mass = rain_ice[:rain_mass],
-        sixth_moment = three_moment ? rain_ice[:rain_sixth_moment] : nothing
+        sixth_moment = triple_moment ? rain_ice[:rain_sixth_moment] : nothing
     )
 
     ice_integrals_tab = P3IceIntegralsTable(fall_speed, deposition, bulk_properties,
@@ -526,11 +526,11 @@ function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
     rain_ice_collection_tab = P3RainIceCollectionTable(
         rain_ice[:rain_mass],
         rain_ice[:rain_number],
-        three_moment ? rain_ice[:rain_sixth_moment] : nothing
+        triple_moment ? rain_ice[:rain_sixth_moment] : nothing
     )
 
-    three_moment_shape_tab = if !isnothing(table3_objs)
-        P3ThreeMomentShapeTable(
+    triple_moment_shape_tab = if !isnothing(table3_objs)
+        P3TripleMomentShapeTable(
             table3_objs[:shape],
             nothing,  # slope is not in Table 3 file
             table3_objs[:mean_density]
@@ -539,7 +539,7 @@ function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
         nothing
     end
 
-    return ice_integrals_tab, rain_ice_collection_tab, three_moment_shape_tab
+    return ice_integrals_tab, rain_ice_collection_tab, triple_moment_shape_tab
 end
 
 #####
@@ -547,8 +547,8 @@ end
 #####
 
 function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
-                                          ice_integrals_tab, rain_ice_collection_tab, three_moment_shape_tab,
-                                          three_moment, FT)
+                                          ice_integrals_tab, rain_ice_collection_tab, triple_moment_shape_tab,
+                                          triple_moment, FT)
     # Start from default IceProperties for physical constants
     ice_base = IceProperties(FT)
 
@@ -557,7 +557,7 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
         ice_base.fall_speed.reference_air_density,
         ice_5d[:number_weighted],
         ice_5d[:mass_weighted],
-        three_moment ? ice_5d[:reflectivity_weighted] : nothing
+        triple_moment ? ice_5d[:reflectivity_weighted] : nothing
     )
 
     deposition = IceDeposition(
@@ -589,7 +589,7 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
         ice_5d[:ice_aerosol_collection]
     )
 
-    sixth_moment = if three_moment
+    sixth_moment = if triple_moment
         # D32: Fortran file stores D ≤ D_crit melt integrals (f1pr32/f1pr33).
         # Set melt_all1/melt_all2 to the same values (all-D distinction is Julia-native only).
         IceSixthMoment(
@@ -619,10 +619,10 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
     ice_rain_coll = IceRainCollection(
         rain_ice[:rain_mass],
         rain_ice[:rain_number],
-        three_moment ? rain_ice[:rain_sixth_moment] : nothing
+        triple_moment ? rain_ice[:rain_sixth_moment] : nothing
     )
 
-    lookup_tables = P3LookupTables(ice_integrals_tab, rain_ice_collection_tab, three_moment_shape_tab)
+    lookup_tables = P3LookupTables(ice_integrals_tab, rain_ice_collection_tab, triple_moment_shape_tab)
 
     return IceProperties(
         ice_base.minimum_rime_density,

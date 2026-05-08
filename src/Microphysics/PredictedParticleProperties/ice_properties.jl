@@ -71,7 +71,7 @@ This container organizes all ice-related computations:
 - **Deposition**: Ventilation integrals for vapor diffusion growth
 - **Bulk properties**: Population-averaged diameter, density, reflectivity
 - **Collection**: Integrals for aggregation and riming rates
-- **Sixth moment**: Z-tendency integrals for three-moment ice
+- **Sixth moment**: Z-tendency integrals for triple-moment ice
 - **Lambda limiter**: Constraints on size distribution slope
 
 # Keyword Arguments

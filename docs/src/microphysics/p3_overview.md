@@ -37,15 +37,15 @@ P3 solves these problems by tracking the **physical properties** of ice particle
 These properties evolve continuously through microphysical processes, and particle
 characteristics (mass, fall speed, collection efficiency) are diagnosed from them.
 
-## Architectural choice: Breeze P3 is tendency-only
+## Architectural choice: Breeze P3 updates tendencies, instead of prognostic variables
 
-The Fortran reference is structured as a subcycle module that updates prognostic arrays
+The Fortran reference is structured as a subcycle module that updates prognostic variables
 in place over its internal Δt: it can hard-clamp ``N_i ≤ N_{i,\max}`` after each step,
 zero out small-mass species and add a compensating ``θ`` correction, and use ``1/Δt``
 relaxation rates for nucleation and saturation adjustment.
 
 Breeze's P3 (`_p3_scalar_compute` in `p3_interface.jl`) returns a `P3CacheResult`
-of *tendencies*, which Oceananigans sums with advection and diffusion before
+of *tendencies*, which Breeze sums with advection and diffusion before
 time-stepping. P3 has no write access to the prognostic state and no awareness
 of host Δt. This produces several deliberate, documented differences from
 Fortran:
@@ -56,12 +56,9 @@ Fortran:
 - **Per-Δt depletion rates use a fixed timescale.** Cooper nucleation,
   immersion/homogeneous freezing, and CCN activation use a 10 s relaxation
   in place of Fortran's ``1/Δt``.
-- **Post-step "return small mass to vapor" cleanups are not implemented.**
-  These require state mutation with a paired ``θ`` correction; the closest
-  tendency-form analog would have to live in the host coupling layer.
-- **Latent heating is delegated to the host formulation.** The Anelastic
+- **Latent heating is delegated to the dynamics formulation.** The Anelastic
   and compressible formulations carry energy through their prognostic
-  thermodynamic variable; P3 does not assemble a ``θ`` tendency.
+  thermodynamic variable ``θ_{li}``.
 
 These choices are noted in context throughout the documentation.
 
@@ -83,10 +80,10 @@ for the four-regime piecewise ``m(D)`` and ``A(D)`` laws and
 [Size Distribution](@ref p3_size_distribution) for the closure that determines
 ``(N_0, λ, μ)`` from prognostic moments.
 
-### Two- and Three-Moment Ice
+### Two- and Triple-Moment Ice
 
-P3 v5.5 supports both two-moment and three-moment ice. Breeze defaults to the
-**two-moment** path; three-moment ice is opt-in (`three_moment_ice = true` in
+P3 v5.5 supports both two-moment and triple-moment ice. Breeze defaults to the
+**two-moment** path; triple-moment ice is opt-in (`triple_moment_ice = true` in
 the Breeze constructor).
 
 Two-moment ice tracks:
@@ -94,18 +91,18 @@ Two-moment ice tracks:
 1. **Mass** (``ρq^i``): Ice mass concentration (dry component; see prognostic table below).
 2. **Number** (``ρn^i``): Ice particle number concentration.
 
-Three-moment ice additionally tracks:
+Triple-moment ice additionally tracks:
 
 3. **Reflectivity** (``ρz^i``): Sixth moment, proportional to radar reflectivity.
 
-The third moment provides additional constraint on the size distribution, improving
+The triple moment provides additional constraint on the size distribution, improving
 representation of precipitation-sized particles
 ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
 [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024),
 [Morrison et al. (2025)](@cite Morrison2025complete3moment)).
 
-When three-moment ice is enabled, Breeze uses the active "hybrid" ``Z_i`` update
-path: between processes, the shape parameter ``μ_i`` and the third moment ``M_3``
+When triple-moment ice is enabled, Breeze uses the active "hybrid" ``Z_i`` update
+path: between processes, the shape parameter ``μ_i`` and the triple moment ``M_3``
 are recomputed from updated ``q_i`` and the bulk ice density, then ``Z_i`` is
 reconstructed via ``G(μ_i)\, M_3^2 / N_i``. Initiation processes (nucleation,
 immersion freezing, splintering, homogeneous freezing) add explicit ``Z_i``
@@ -122,7 +119,7 @@ track liquid water on ice particles. This is crucial for:
 - **Refreezing**: Coating that freezes into rime.
 
 Breeze implements liquid-fraction wet growth, refreezing, and shedding.
-Shedding uses the Fortran-style PSD integral over particles
+Shedding uses the PSD integral over particles
 with ``D \ge 9`` mm (tabulated as `f1pr28`); see
 [Microphysical Processes](@ref p3_processes) for details.
 
@@ -159,7 +156,7 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
     not ported.
 
 !!! note "Adaptive sedimentation substepping"
-    Sedimentation is routed through Oceananigans transport rather than the
+    Sedimentation is routed through tracer transport rather than the
     Fortran's adaptive `dt_left` substepping based on the maximum Courant
     number. Tabulated reflectivity-weighted fall speed ``V_Z`` is
     computed but not used to set a Courant constraint inside P3.
@@ -207,15 +204,15 @@ P3 evolves eleven prognostic densities:
 - ``ρn^i``: Ice particle number concentration [1/m³].
 - ``ρq^f``: Rime mass concentration [kg/m³].
 - ``ρb^f``: Rime volume concentration [m³/m³].
-- ``ρz^i``: Ice 6th moment (reflectivity proxy) [m⁶/m³] (only updated when `three_moment_ice = true`).
+- ``ρz^i``: Ice 6th moment (reflectivity proxy) [m⁶/m³] (only updated when `triple_moment_ice = true`).
 - ``ρq^{wi}``: Liquid water on ice [kg/m³].
 
 **Saturation diagnostic** (1 variable):
 
-- ``ρs^{sat}``: Predicted-supersaturation slot from H10 [kg/m³]. The H10
-  prediction path is hard-disabled at runtime in both Breeze and the Fortran
-  reference (`log_predictSsat = .false.`); the field is allocated for API
-  compatibility and recomputed diagnostically from ``ρq^v`` and ``T``.
+- ``ρs^{sat}``: Supersaturation [kg/m³], diagnosed from ``ρq^v`` and ``T``.
+  P3 also defines an optional prognostic-supersaturation path
+  (Grabowski and Morrison 2008), but it is disabled at runtime in both
+  Breeze and the Fortran reference (`log_predictSsat = .false.`).
 
 From these, diagnostic properties are computed:
 
@@ -262,10 +259,10 @@ The following sections provide detailed documentation of the P3 scheme:
 - [Morrison2015parameterization](@citet): Original P3 formulation with predicted rime (Part I).
 - [Morrison2015part2](@citet): Case study comparisons with observations (Part II).
 - [MilbrandtMorrison2016](@citet): Extension to multiple free ice categories (Part III).
-- [MilbrandtEtAl2021](@citet): Original three-moment ice in JAS.
+- [MilbrandtEtAl2021](@citet): Original triple-moment ice in JAS.
 - [MilbrandtEtAl2024](@citet): Updated triple-moment formulation in JAMES.
 - [MilbrandtEtAl2025liquidfraction](@citet): Predicted liquid fraction on ice.
-- [Morrison2025complete3moment](@citet): Complete three-moment implementation.
+- [Morrison2025complete3moment](@citet): Complete triple-moment implementation.
 
 ### Related Papers
 

@@ -211,16 +211,16 @@ end
         @test μ ≤ relation.μmax
     end
 
-    @testset "Three-moment closure construction" begin
-        p3_closure = ThreeMomentClosure()
-        exact_closure = ThreeMomentClosureExact()
-        compat_closure = ThreeMomentClosure()
+    @testset "Triple-moment closure construction" begin
+        p3_closure = TripleMomentClosure()
+        exact_closure = TripleMomentClosureExact()
+        compat_closure = TripleMomentClosure()
 
         @test p3_closure.μmin ≈ 0.0
         @test p3_closure.μmax ≈ 20.0
         @test exact_closure.μmin ≈ 0.0
         @test exact_closure.μmax ≈ 20.0
-        @test compat_closure isa ThreeMomentClosure
+        @test compat_closure isa TripleMomentClosure
     end
 
     @testset "Ice regime thresholds" begin
@@ -446,7 +446,7 @@ end
         @test ρ_dep_tiny_rime > 0
     end
 
-    @testset "Three-moment μ polynomial matches Fortran fit" begin
+    @testset "Triple-moment μ polynomial matches Fortran fit" begin
         μ_from_moments = Breeze.Microphysics.PredictedParticleProperties.shape_parameter_from_moments
 
         @test μ_from_moments(1.0, 1.0, 21.0, 20.0) == 0.0
