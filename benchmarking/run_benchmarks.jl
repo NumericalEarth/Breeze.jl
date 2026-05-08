@@ -35,6 +35,7 @@ using Reactant: Reactant
 using Oceananigans.Architectures: ReactantState
 using CUDA: CUDABackend
 using AMDGPU: ROCBackend
+using Metal: MetalBackend
 
 # Load CloudMicrophysics extension for OneMomentCloudMicrophysics
 using CloudMicrophysics: CloudMicrophysics
@@ -47,6 +48,11 @@ using Dates: DateTime, now, UTC
 #####
 ##### Argument parsing
 #####
+
+# Helper functions to refer to the various GPU backends
+CUDAGPU() = GPU(CUDABackend())
+MetalGPU() = GPU(MetalBackend())
+ROCGPU() = GPU(ROCBackend())
 
 function parse_commandline()
     s = ArgParseSettings(

@@ -38,6 +38,7 @@ else
     const CUDACore = CUDA
 end
 using AMDGPU: AMDGPU, ROCBackend
+using Metal: Metal, MetalBackend
 
 # Base functionalities
 include("metadata.jl")

@@ -392,6 +392,11 @@ function synchronize_device(::Oceananigans.Architectures.GPU{ROCBackend})
     return nothing
 end
 
+function synchronize_device(::Oceananigans.Architectures.GPU{MetalBackend})
+    Metal.synchronize()
+    return nothing
+end
+
 # Reactant compiled functions invoked via @compile sync=true block until
 # completion on the underlying device, so no extra sync is required here.
 synchronize_device(::ReactantState) = nothing
