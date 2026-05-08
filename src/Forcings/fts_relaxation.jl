@@ -12,7 +12,7 @@ using Adapt: Adapt
 ##### FieldTimeSeriesRelaxation struct
 #####
 
-struct FieldTimeSeriesRelaxation{R, TF, Cl, D, F, RC, TS, ZB}
+struct FieldTimeSeriesRelaxation{R, TF, Cl, D, F, RC, TS, ZB, ZT}
     reference        :: R    # FieldTimeSeries of the specific variable ϕᵣ
     target           :: TF   # Field of ϕᵣ interpolated to current time, horizontally averaged to a single column in profile mode
     clock            :: Cl   # Model Clock
@@ -21,6 +21,7 @@ struct FieldTimeSeriesRelaxation{R, TF, Cl, D, F, RC, TS, ZB}
     time_scale       :: TS   # Relaxation time scale (seconds)
     reference_column :: RC   # Nothing (3D mode) or NTuple{2,Int} (profile mode)
     z_bottom         :: ZB   # Height below which no nudging is applied (meters)
+    z_top            :: ZT   # Height above which full nudging is applied (meters)
 end
 
 """
@@ -30,13 +31,19 @@ Forcing that represents Newtonian relaxation (nudging) of a prognostic field
 toward a reference [`FieldTimeSeries`](@ref):
 
 ```math
-F_{ρ ϕ} = -\\frac{ρ_r \\left(\\bar{ϕ} - ϕ_r\\right)}{τ} \\, \\mathbf{1}_{z \\geq z_b}
+F_{ρ ϕ} = -\\frac{ρ_r \\left(\\bar{ϕ} - ϕ_r\\right)}{τ} \\, w(z)
 ```
 
 where ``\\bar{ϕ}`` is either the local field value (3D mode) or its horizontal
 average (profile mode), ``ϕ_r`` is the time-interpolated reference value,
-``ρ_r`` is the reference density, ``τ`` is the relaxation time scale, and
-``z_b`` is the cutoff height below which no nudging is applied.
+``ρ_r`` is the reference density, and ``τ`` is the relaxation time scale.
+``w(z)`` is a cosine ramp that smoothly increases the relaxation strength
+from 0 at ``z_b`` (no nudging) to 1 at ``z_t`` (full nudging):
+
+```math
+w(z) = \\frac{1}{2}\\left(1 - \\cos\\left(\\pi \\, r(z)\\right)\\right),
+\\qquad r(z) = \\mathrm{clamp}\\!\\left(\\frac{z - z_b}{z_t - z_b},\\ 0,\\ 1\\right)
+```
 
 The `reference` [`FieldTimeSeries`](@ref) must contain the specific variable
 (e.g. ``u``, ``v``, ``θ``, ``q^t``), not the density-weighted form. The user is
@@ -49,6 +56,8 @@ onto the simulation's vertical grid.
 
 - `time_scale`: Relaxation time scale in seconds.
 - `z_bottom`: Height in meters below which nudging is not applied. Default: 1500 m.
+- `z_top`: Height in meters above which nudging is at full strength. The cosine
+  ramp transitions between `z_bottom` and `z_top`. Default: `z_bottom + 1000`.
 - `reference_position`: Optional `(latitude=..., longitude=...)` `NamedTuple`
   specifying the column to extract from a 3D `reference` for profile nudging.
 
@@ -76,9 +85,11 @@ nudging.z_bottom
 1500
 ```
 """
-function FieldTimeSeriesRelaxation(reference; time_scale, z_bottom=1500, reference_position=nothing)
+function FieldTimeSeriesRelaxation(reference; time_scale, z_bottom=1500,
+                                   z_top=z_bottom+1000, reference_position=nothing)
+    z_top > z_bottom || throw(ArgumentError("FieldTimeSeriesRelaxation requires z_top > z_bottom; got z_bottom=$z_bottom, z_top=$z_top"))
     return FieldTimeSeriesRelaxation(reference, nothing, nothing, nothing, nothing,
-                                     time_scale, reference_position, z_bottom)
+                                     time_scale, reference_position, z_bottom, z_top)
 end
 
 #####
@@ -150,7 +161,7 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::FieldTim
 
     return FieldTimeSeriesRelaxation(forcing.reference, target, context.clock, context.density,
                                      current_field, forcing.time_scale, reference_column,
-                                     forcing.z_bottom)
+                                     forcing.z_bottom, forcing.z_top)
 end
 
 #####
@@ -185,14 +196,20 @@ end
 ##### Kernel callables
 #####
 
+# Cosine ramp from 0 at z_bottom to 1 at z_top. Hard 0 below z_bottom, hard 1 above z_top.
+@inline function nudging_weight(z, z_bottom, z_top)
+    r = clamp((z - z_bottom) / (z_top - z_bottom), 0, 1)
+    return (1 - cos(π * r)) / 2
+end
+
 # 3D mode (reference_column = Nothing): compare local value to 3D reference
 @inline function (f::FieldTimeSeriesRelaxation{<:Any, <:Any, <:Any, <:Any, <:Any, Nothing})(i, j, k, grid, clock, fields)
     z  = znode(i, j, k, grid, Center(), Center(), Center())
     ϕ  = @inbounds f.current_field[i, j, k]
     ϕᵣ = @inbounds f.target[i, j, k]
     ρ  = @inbounds f.density[1, 1, k]
-    tendency = -ρ * (ϕ - ϕᵣ) / f.time_scale
-    return ifelse(z < f.z_bottom, 0, tendency)
+    w  = nudging_weight(z, f.z_bottom, f.z_top)
+    return -w * ρ * (ϕ - ϕᵣ) / f.time_scale
 end
 
 # Profile mode (reference_column = NTuple{2,Int}): compare horizontal average to reference column
@@ -201,8 +218,8 @@ end
     ϕ̄  = @inbounds f.current_field[1, 1, k]
     ϕᵣ = @inbounds f.target[1, 1, k]
     ρ  = @inbounds f.density[i, j, k]
-    tendency = -ρ * (ϕ̄ - ϕᵣ) / f.time_scale
-    return ifelse(z < f.z_bottom, 0, tendency)
+    w  = nudging_weight(z, f.z_bottom, f.z_top)
+    return -w * ρ * (ϕ̄ - ϕᵣ) / f.time_scale
 end
 
 #####
@@ -217,7 +234,8 @@ Adapt.adapt_structure(to, f::FieldTimeSeriesRelaxation) =
                               Adapt.adapt(to, f.current_field),
                               f.time_scale,
                               f.reference_column,
-                              f.z_bottom)
+                              f.z_bottom,
+                              f.z_top)
 
 #####
 ##### Show
@@ -233,6 +251,7 @@ function Base.show(io::IO, f::FieldTimeSeriesRelaxation)
     print(io, summary(f), "\n")
     print(io, "├── time_scale: ", prettysummary(f.time_scale), " seconds\n")
     print(io, "├── z_bottom: ", prettysummary(f.z_bottom), " m\n")
+    print(io, "├── z_top: ", prettysummary(f.z_top), " m\n")
     if isnothing(f.target)
         print(io, "└── reference: ", prettysummary(f.reference))
     else

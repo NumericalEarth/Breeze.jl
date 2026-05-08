@@ -19,6 +19,7 @@ using Test
     @test nudging.reference === fts
     @test nudging.time_scale == FT(3600)
     @test nudging.z_bottom == 1500
+    @test nudging.z_top == 2500   # default = z_bottom + 1000
     @test isnothing(nudging.target)
     @test isnothing(nudging.clock)
     @test isnothing(nudging.density)
@@ -48,6 +49,7 @@ end
     @test mat.reference_column == (1, 1)   # profile mode
     @test mat.time_scale == FT(3600)
     @test mat.z_bottom == 1500
+    @test mat.z_top == 2500
 end
 
 #####
@@ -92,7 +94,8 @@ end
         parent(fts[n]) .= θ_ref
     end
 
-    nudging = FieldTimeSeriesRelaxation(fts; time_scale=τ, z_bottom=FT(0))
+    # Place the ramp entirely below the domain so every interior cell sees full nudging.
+    nudging = FieldTimeSeriesRelaxation(fts; time_scale=τ, z_bottom=FT(-1000), z_top=FT(0))
     model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature,
                             forcing=(; ρθ=nudging))
 
@@ -152,4 +155,48 @@ end
             @test Gρθ[1, 1, k] < 0   # negative: nudging θ=310 toward θ=300
         end
     end
+end
+
+#####
+##### Cosine ramp weight function
+#####
+
+@testset "nudging_weight cosine ramp" begin
+    w = Breeze.Forcings.nudging_weight
+
+    z_b, z_t = 1500.0, 2500.0
+
+    # Endpoints and clamping behavior
+    @test w(z_b - 100, z_b, z_t) == 0
+    @test w(z_b,        z_b, z_t) == 0
+    @test w(z_t,        z_b, z_t) ≈ 1
+    @test w(z_t + 100,  z_b, z_t) == 1
+
+    # Midpoint of the ramp evaluates to exactly 1/2
+    @test w((z_b + z_t)/2, z_b, z_t) ≈ 0.5
+
+    # Quarter and three-quarter points are mirror-symmetric about 1/2
+    r₁ = w(z_b + 0.25*(z_t - z_b), z_b, z_t)
+    r₃ = w(z_b + 0.75*(z_t - z_b), z_b, z_t)
+    @test r₁ + r₃ ≈ 1
+    @test 0 < r₁ < 0.5 < r₃ < 1
+
+    # Monotone increasing across the transition
+    zs = range(z_b, z_t, length=11)
+    weights = [w(z, z_b, z_t) for z in zs]
+    @test all(diff(weights) .> 0)
+end
+
+#####
+##### Constructor argument validation
+#####
+
+@testset "FieldTimeSeriesRelaxation argument validation" begin
+    grid = RectilinearGrid(default_arch; size=(1, 1, 8), x=(0, 100), y=(0, 100), z=(0, 3000))
+    fts  = FieldTimeSeries{Center, Center, Center}(grid, [0.0, 3600.0])
+
+    @test_throws ArgumentError FieldTimeSeriesRelaxation(fts; time_scale=3600.0,
+                                                         z_bottom=2000, z_top=2000)
+    @test_throws ArgumentError FieldTimeSeriesRelaxation(fts; time_scale=3600.0,
+                                                         z_bottom=2000, z_top=1500)
 end
