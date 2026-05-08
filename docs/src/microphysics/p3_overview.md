@@ -104,12 +104,12 @@ representation of precipitation-sized particles
 [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024),
 [Morrison et al. (2025)](@cite Morrison2025complete3moment)).
 
-When three-moment ice is enabled, Breeze uses the active "hybrid" ``Z_i`` update 
-path: between processes, the shape parameter ``μ_i`` and the third moment ``M_3`` 
-are recomputed from updated ``q_i`` and the bulk ice density, then ``Z_i`` is 
-reconstructed via ``G(μ_i)\, M_3^2 / N_i``. Initiation processes (nucleation, 
-immersion freezing, splintering, homogeneous freezing) add explicit ``Z_i`` 
-increments using the source PSD's ``μ`` (``μ_c`` for cloud water, ``μ_r`` for 
+When three-moment ice is enabled, Breeze uses the active "hybrid" ``Z_i`` update
+path: between processes, the shape parameter ``μ_i`` and the third moment ``M_3``
+are recomputed from updated ``q_i`` and the bulk ice density, then ``Z_i`` is
+reconstructed via ``G(μ_i)\, M_3^2 / N_i``. Initiation processes (nucleation,
+immersion freezing, splintering, homogeneous freezing) add explicit ``Z_i``
+increments using the source PSD's ``μ`` (``μ_c`` for cloud water, ``μ_r`` for
 rain — held at 0 at runtime — and 0 for all other source types).
 
 ### Predicted Liquid Fraction
@@ -121,7 +121,7 @@ track liquid water on ice particles. This is crucial for:
 - **Shedding**: Liquid water dripping from large ice.
 - **Refreezing**: Coating that freezes into rime.
 
-Breeze implements liquid-fraction wet growth, refreezing, and shedding. 
+Breeze implements liquid-fraction wet growth, refreezing, and shedding.
 Shedding uses the Fortran-style PSD integral over particles
 with ``D \ge 9`` mm (tabulated as `f1pr28`); see
 [Microphysical Processes](@ref p3_processes) for details.
