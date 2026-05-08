@@ -90,17 +90,17 @@ function benchmark_time_stepping(model;
             end
             compile_start = time_ns()
             compiled_grad! = Reactant.@compile raise=true raise_first=true sync=true grad_loss!(
-                model, dmodel, θ_init, dθ_init, Δt, time_steps)
+                model, dmodel, θ_init, dθ_init, Δt_FT, time_steps)
             compile_time_seconds = (time_ns() - compile_start) / 1e9
-            invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt, time_steps)
+            invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps)
         else
             if verbose
                 @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
             end
             compile_start = time_ns()
-            compiled_loop! = Reactant.@compile raise=true raise_first=true sync=true step_loop!(model, Δt, time_steps)
+            compiled_loop! = Reactant.@compile raise=true raise_first=true sync=true step_loop!(model, Δt_FT, time_steps)
             compile_time_seconds = (time_ns() - compile_start) / 1e9
-            invoke! = () -> compiled_loop!(model, Δt, time_steps)
+            invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
         end
         if verbose
             @info "    Compile time: $(@sprintf("%.3f", compile_time_seconds)) s"
@@ -116,7 +116,7 @@ function benchmark_time_stepping(model;
     if is_reactant
         invoke!()
     else
-        many_time_steps!(model, Δt, warmup_steps)
+        many_time_steps!(model, Δt_FT, warmup_steps)
     end
 
     # Synchronize device before timing
@@ -130,7 +130,7 @@ function benchmark_time_stepping(model;
     if is_reactant
         invoke!()
     else
-        many_time_steps!(model, Δt, time_steps)
+        many_time_steps!(model, Δt_FT, time_steps)
     end
     synchronize_device(arch)
     end_time = time_ns()
