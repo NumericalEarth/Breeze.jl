@@ -16,7 +16,6 @@ using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Oceananigans.Grids: Periodic, Bounded
 using Reactant
-using Random
 using Printf: @printf
 using Test
 using CUDA
@@ -74,7 +73,6 @@ function build_model_pair(topology)
     vmodel = AtmosphereModel(vgrid; model_kw...)
     rmodel = AtmosphereModel(rgrid; model_kw...)
 
-    Random.seed!(98765)
     Nx, Ny, Nz = size(vgrid)
     u_init = 0.1 .* randn(size(vmodel.velocities.u)...)
     v_init = 0.1 .* randn(size(vmodel.velocities.v)...)
