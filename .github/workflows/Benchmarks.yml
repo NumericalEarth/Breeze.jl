@@ -65,7 +65,7 @@ jobs:
           # / Float64-clock mismatch.
           - dynamics: 'compressible_explicit'
             microphysics: '1M_MixedNonEquilibrium'
-            grid: '384x384x192'
+            grid: '256x256x128'
             advection: 'WENO5'
             backend: 'vanilla, reactant'
             topology: 'PBB'
