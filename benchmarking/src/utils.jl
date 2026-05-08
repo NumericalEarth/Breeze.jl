@@ -327,3 +327,8 @@ function synchronize_device(::Oceananigans.Architectures.GPU{ROCBackend})
     AMDGPU.synchronize()
     return nothing
 end
+
+function synchronize_device(::Oceananigans.Architectures.GPU{MetalBackend})
+    Metal.synchronize()
+    return nothing
+end
