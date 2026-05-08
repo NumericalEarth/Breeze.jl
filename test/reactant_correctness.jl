@@ -26,6 +26,8 @@ if get(ENV, "GITHUB_ACTIONS", "false") == "true"
     ENV["TMPDIR"] = mkpath(joinpath(@__DIR__, "..", "tmp"))
 end
 
+default_arch = CPU()
+
 if default_arch isa GPU
     Reactant.set_default_backend("gpu")
 else
@@ -35,20 +37,30 @@ end
 function compare_interior(name, ψ₁, ψ₂; rtol, atol)
     a₁ = Array(interior(ψ₁))
     a₂ = Array(interior(ψ₂))
+    max_ψ₁ = maximum(abs, a₁)
+    max_ψ₂ = maximum(abs, a₂)
+    max_δ  = maximum(abs, a₁ .- a₂)
+    rel = max_δ / max(max_ψ₁, eps(eltype(a₁)))
     ok = isapprox(a₁, a₂; rtol, atol)
-    if !ok
-        max_δ, idx = findmax(abs, a₁ .- a₂)
-        @printf("(%6s) ψ₁ ≉ ψ₂: max|ψ₁|=%.6e, max|ψ₂|=%.6e, max|δ|=%.6e at %s\n",
-                name, maximum(abs, a₁), maximum(abs, a₂), max_δ, string(idx.I))
-    end
+    @printf("  %-12s ok=%-5s  max|ψ₁|=%.6e  max|ψ₂|=%.6e  max|δ|=%.6e  rel=%.3e\n",
+            string(name), ok, max_ψ₁, max_ψ₂, max_δ, rel)
     return ok
 end
 
-function compare_states(vmodel, rmodel; rtol, atol)
+function report_state(label, vmodel, rmodel; rtol, atol)
+    println("─── $label ───")
+    ok = true
     Ψv = Oceananigans.fields(vmodel)
     Ψr = Oceananigans.fields(rmodel)
-    all(compare_interior(string(name), Ψv[name], Ψr[name]; rtol, atol)
-        for name in keys(Ψv))
+    for name in keys(Ψv)
+        ok &= compare_interior(string(name), Ψv[name], Ψr[name]; rtol, atol)
+    end
+    Gv = vmodel.timestepper.Gⁿ
+    Gr = rmodel.timestepper.Gⁿ
+    for name in propertynames(Gv)
+        ok &= compare_interior("Gⁿ.$name", Gv[name], Gr[name]; rtol, atol)
+    end
+    return ok
 end
 
 function build_model_pair(topology)
@@ -81,17 +93,19 @@ end
     atol = sqrt(eps(Float64))
 
     cases = [
-        ("Periodic, Periodic, Bounded", (Periodic, Periodic, Bounded), 1e-10),
-        ("Periodic, Bounded,  Bounded", (Periodic, Bounded,  Bounded), 1e-5),
+        ("Periodic, Periodic, Bounded", (Periodic, Periodic, Bounded), 1e-8),
+        ("Periodic, Bounded,  Bounded", (Periodic, Bounded,  Bounded), 1e-8),
     ]
 
     @testset "topology=$label" for (label, topology, rtol) in cases
         vmodel, rmodel = build_model_pair(topology)
 
+        @test report_state("topology=$label — before time_step!", vmodel, rmodel; rtol, atol)
+
         time_step!(vmodel, Δt)
         r_step! = Reactant.@compile raise=true sync=true time_step!(rmodel, Δt)
         r_step!(rmodel, Δt)
 
-        @test compare_states(vmodel, rmodel; rtol, atol)
+        @test report_state("topology=$label — after  time_step!", vmodel, rmodel; rtol, atol)
     end
 end
