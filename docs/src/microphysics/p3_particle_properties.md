@@ -263,29 +263,10 @@ ax = Axis(fig[1, 1],
     title = "Ice Particle Density vs Diameter")
 
 hlines!(ax, [900], linestyle=:dash, color=:gray, label="ρᵢ = 900 (runtime)")
-hlines!(ax, [917], linestyle=:dot, color=:gray, label="ρᵢ = 917 (radar)")
 lines!(ax, D, ρ_unrimed, label="Unrimed (Fᶠ = 0)")
 lines!(ax, D, ρ_rimed, label="Rimed (Fᶠ = 0.5)")
 lines!(ax, D, ρ_heavily_rimed, label="Rimed (Fᶠ = 0.75)")
-
-axislegend(ax, position=:rt)
-fig
-```
-
-For a fully rimed particle, ``ρ_i(D)`` is the effective particle density
-computed from the same mass-diameter relation with ``F^f = 1``:
-
-```@example p3_particles
-fig = Figure(size=(600, 400))
-ax = Axis(fig[1, 1],
-    xlabel = "Diameter D [m]",
-    ylabel = "ρᵢ(D) [kg/m³]",
-    xscale = log10,
-    title = "Fully Rimed Ice Density")
-
-hlines!(ax, [900], linestyle=:dash, color=:gray, label="ρᵢ = 900")
-lines!(ax, D, ρᵢ_fully_rimed, linewidth=3, label="Fᶠ = 1.0, ρᶠ = 900 kg/m³")
-ylims!(ax, 850, 930)
+lines!(ax, D, ρᵢ_fully_rimed, label="Fully rimed (Fᶠ = 1.0, ρᶠ = 900 kg/m³)")
 
 axislegend(ax, position=:rt)
 fig

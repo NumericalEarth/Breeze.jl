@@ -8,7 +8,7 @@
 ##### from Morrison & Milbrandt (2015a) Equations 1-5.
 #####
 ##### Two closures are available:
-##### 1. Two-moment: Uses μ-λ relationship from Field et al. (2007)
+##### 1. Two-moment: Uses the P3Closure μ-λ relationship (Heymsfield 2003)
 ##### 2. Three-moment: Uses sixth moment Z to determine μ independently
 #####
 
@@ -73,67 +73,6 @@ end
 #####
 
 """
-    TwoMomentClosure
-
-μ-λ closure for two-moment PSD. See [`TwoMomentClosure()`](@ref) constructor.
-"""
-struct TwoMomentClosure{FT}
-    a :: FT
-    b :: FT
-    c :: FT
-    μmax :: FT
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Construct the μ-λ relationship for gamma size distribution closure.
-
-With only two prognostic moments (mass and number), we need a closure
-to determine the three-parameter gamma distribution (N₀, μ, λ). P3 uses
-an empirical power-law relating shape parameter μ to slope parameter λ:
-
-```math
-μ = \\text{clamp}(a λ^b - c, 0, μ_{max})
-```
-
-This relationship is the [Heymsfield (2003)](@cite Heymsfield2003) μ–λ
-fit (the same form is also documented in
-[Field et al. (2007)](@cite FieldEtAl2007)).
-
-# Physical Interpretation
-
-- **Small λ** (large particles): μ → 0, giving an exponential distribution
-- **Large λ** (small particles): μ increases, narrowing the distribution
-
-The clamping to [0, μmax] ensures physical distributions with non-negative
-shape parameter and prevents unrealistically narrow distributions.
-
-# Keyword Arguments
-
-- `a`: Coefficient in μ = a λ^b - c, default 0.076 × 0.01^0.8
-- `b`: Exponent in μ = a λ^b - c, default 0.8
-- `c`: Offset in μ = a λ^b - c, default 2
-- `μmax`: Maximum shape parameter, default 6
-
-# References
-
-From [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 27,
-based on [Heymsfield (2003)](@cite Heymsfield2003) observations (also
-[Field et al. (2007)](@cite FieldEtAl2007)).
-"""
-function TwoMomentClosure(FT = Oceananigans.defaults.FloatType;
-                          a = 0.076 * 0.01^0.8,
-                          b = 0.8,
-                          c = 2,
-                          μmax = 6)
-    return TwoMomentClosure(FT(a), FT(b), FT(c), FT(μmax))
-end
-
-# Backwards compatibility alias
-const ShapeParameterRelation = TwoMomentClosure
-
-"""
     FixedShapeParameter
 
 Fixed shape parameter closure: always returns a constant μ regardless of λ.
@@ -173,7 +112,7 @@ Updated μ-λ closure for P3, including the large-particle diagnostic.
 See [`P3Closure()`](@ref) constructor.
 """
 struct P3Closure{FT}
-    # Constants for small particle regime (Field et al. 2007)
+    # Constants for small particle regime (Heymsfield 2003)
     a :: FT
     b :: FT
     c :: FT
@@ -189,22 +128,22 @@ $(TYPEDSIGNATURES)
 Construct the P3 μ-λ closure which includes a diagnostic for large rimed particles.
 
 This closure matches the logic in the official P3 Fortran code (lookup table generation).
-It uses the Field et al. (2007) relation for small particles, but switches to
-a diagnostic based on mean volume diameter (D_mvd) for large particles to account
-for riming effects.
+It uses the [Heymsfield (2003)](@cite Heymsfield2003) μ–λ fit for small particles,
+but switches to a diagnostic based on mean volume diameter (D_mvd) for large
+particles to account for riming effects.
 
 # Logic
 
 1. Compute mean volume diameter ``D_{mvd} = ((L/N) / (\\frac{\\pi}{6} \\rho_g))^{1/3}``
 2. If ``D_{mvd} \\le 0.2`` mm:
-   Use Field et al. (2007) relation: ``\\mu = 0.076 \\lambda^{0.8} - 2`` (clamped [0, 6])
+   Use Heymsfield (2003) relation: ``\\mu = 0.076 (0.01 \\lambda)^{0.8} - 2`` (clamped [0, 6])
 3. If ``D_{mvd} > 0.2`` mm:
    ``\\mu = 0.25 (D_{mvd} - 0.2) f_\\rho F^f`` (clamped [0, 20])
    where ``f_\\rho = \\max(1, 1 + 0.00842(\\rho_g - 400))``
 
 # Keyword Arguments
 
-- `a`, `b`, `c`: Constants for small regime (same as TwoMomentClosure)
+- `a`, `b`, `c`: Constants for the small-particle Heymsfield (2003) branch
 - `μmax_small`: Max μ for small regime (default 6)
 - `μmax_large`: Max μ for large regime (default 20)
 - `D_threshold`: Threshold D_mvd [m] (default 2e-4)
@@ -224,12 +163,6 @@ end
 
 Compute shape parameter μ.
 """
-@inline function shape_parameter(closure::TwoMomentClosure, logλ, args...)
-    λ = exp(logλ)
-    μ = closure.a * λ^closure.b - closure.c
-    return clamp(μ, 0, closure.μmax)
-end
-
 @inline function shape_parameter(closure::P3Closure, logλ, L_ice, N_ice, rime_fraction, rime_density, liquid_fraction, mass::IceMassPowerLaw)
     FT = typeof(closure.a)
     λ = exp(logλ)

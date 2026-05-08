@@ -226,12 +226,19 @@ ax4 = Axis(fig[2, 1:2],
     xlabel = "λ [m⁻¹]", ylabel = "μ",
     xscale = log10, title = "μ-λ Relationship")
 
-relation = ShapeParameterRelation()
-λ_range = 10 .^ range(2, 5, length=100)
-μ_vals = [shape_parameter(relation, log(λ)) for λ in λ_range]
-
-lines!(ax4, λ_range, μ_vals, linewidth=2, color=:blue)
-hlines!(ax4, [relation.μmax], linestyle=:dash, color=:gray)
+L_range = 10 .^ range(-7, -2, length=80)
+for (Fᶠ, label, color) in [(0.0, "Fᶠ = 0", :blue),
+                            (0.5, "Fᶠ = 0.5", :orange)]
+    λs = Float64[]
+    μs = Float64[]
+    for L in L_range
+        params = distribution_parameters(L, 1e5, Fᶠ, 500.0)
+        push!(λs, params.λ)
+        push!(μs, params.μ)
+    end
+    lines!(ax4, λs, μs, linewidth=2, color=color, label=label)
+end
+axislegend(ax4, position=:rt)
 
 fig
 ```

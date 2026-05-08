@@ -198,17 +198,20 @@ end
         @test mass32.coefficient isa Float32
     end
 
-    @testset "ShapeParameterRelation construction" begin
-        relation = ShapeParameterRelation()
-        @test relation.a ≈ 0.076 * 0.01^0.8
-        @test relation.b ≈ 0.8
-        @test relation.c ≈ 2.0
-        @test relation.μmax ≈ 6.0
+    @testset "P3Closure construction" begin
+        closure = P3Closure()
+        @test closure.a ≈ 0.076 * 0.01^0.8
+        @test closure.b ≈ 0.8
+        @test closure.c ≈ 2.0
+        @test closure.μmax_small ≈ 6.0
+        @test closure.μmax_large ≈ 20.0
+        @test closure.D_threshold ≈ 2e-4
 
-        # Test shape parameter computation
-        μ = shape_parameter(relation, log(1000.0))
+        # Small-particle (unrimed) branch: Heymsfield 2003 fit
+        mass = IceMassPowerLaw()
+        μ = shape_parameter(closure, log(1e4), 1e-5, 1e5, 0.0, 400.0, 0.0, mass)
         @test μ ≥ 0
-        @test μ ≤ relation.μmax
+        @test μ ≤ closure.μmax_small
     end
 
     @testset "Three-moment closure construction" begin
@@ -400,7 +403,7 @@ end
         rime_density = 400.0
 
         mass = IceMassPowerLaw()
-        closure = ShapeParameterRelation()
+        closure = P3Closure()
 
         params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
                                           mass, closure)

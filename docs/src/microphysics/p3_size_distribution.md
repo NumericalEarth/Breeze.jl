@@ -62,7 +62,7 @@ Z ∝ M_6 = N₀ \frac{Γ(μ + 7)}{λ^{μ+7}}
 
 ## Shape-Slope (μ-λ) Relationship
 
-In both Breeze and the official P3 code, the two-moment ``μ`` is diagnosed
+In two-moment P3, ``μ`` is diagnosed
 rather than set by a single global power law. Define the mean-volume diameter
 estimate (in mm) from the mean per-particle mass ``L/N``:
 
@@ -89,11 +89,9 @@ f_ρ = \max\left(1,\ 1 + 0.00842(\bar{ρ}-400)\right),
 \quad μ_{max} = 20.
 ```
 
-The first branch corresponds to the [Heymsfield (2003)](@cite Heymsfield2003)
-μ–λ fit (the Fortran reference cites Heymsfield 2003 directly; the same
-relation is also documented in [Field et al. (2007)](@cite FieldEtAl2007),
-`μ = 0.00191 λ^{0.8} - 2` with ``λ`` in m⁻¹; the doc form is identical
-after the cm⁻¹↔m⁻¹ unit conversion since ``0.076 \cdot 0.01^{0.8} ≈ 0.00191``).
+The first branch is the [Heymsfield (2003)](@cite Heymsfield2003) μ–λ fit
+; the prefactor ``0.076 \cdot (0.01\, λ)^{0.8}``
+embeds the cm⁻¹↔m⁻¹ unit conversion of the original form.
 The second branch increases ``μ`` with particle size and riming in the
 Fortran lookup-table generator.
 
@@ -113,10 +111,6 @@ because the partially-rimed regime has zero mass at that point.
     For small particles (``D_{mvd} \le 0.2`` mm), it uses the Heymsfield (2003) power-law relation.
     For large particles (``D_{mvd} > 0.2`` mm), it uses the diagnostic based on mean volume diameter
     and rime density to account for riming effects. This ensures consistency with the lookup tables.
-    A simpler closure `TwoMomentClosure` (aliased as `ShapeParameterRelation`,
-    used by the demo plot below) keeps only the small-particle branch and
-    a single ``μ_{max}`` cap; it does not include the riming/density branch
-    of `P3Closure`.
 
 !!! note "Three-Moment Mode"
     In the official P3 code, ``μ`` (and the bulk ice density used in rates) are obtained
@@ -130,21 +124,34 @@ because the partially-rimed regime has zero mass at that point.
 using Breeze.Microphysics.PredictedParticleProperties
 using CairoMakie
 
-# Compute μ vs λ
-relation = ShapeParameterRelation()
-λ_values = 10 .^ range(2, 5, length=100)
-μ_values = [shape_parameter(relation, log(λ)) for λ in λ_values]
+# Sweep ice mass concentration to trace out the μ-λ closure for
+# unrimed and rimed regimes.  Number concentration and rime density
+# are held fixed; (λ, μ) come from the full P3Closure via
+# distribution_parameters.
+N_ice = 1e5
+L_values = 10 .^ range(-7, -2, length=80)
 
 fig = Figure(size=(500, 350))
 ax = Axis(fig[1, 1],
     xlabel = "Slope parameter λ [m⁻¹]",
     ylabel = "Shape parameter μ",
     xscale = log10,
-    title = "μ-λ Relationship (Morrison & Milbrandt 2015a)")
+    title = "μ-λ Relationship (P3Closure)")
 
-lines!(ax, λ_values, μ_values, linewidth=2)
-hlines!(ax, [relation.μmax], linestyle=:dash, color=:gray, label="μmax")
+for (Fᶠ, label, color) in [(0.0, "Fᶠ = 0 (unrimed)", :blue),
+                            (0.5, "Fᶠ = 0.5", :orange),
+                            (1.0, "Fᶠ = 1.0 (fully rimed)", :red)]
+    λs = Float64[]
+    μs = Float64[]
+    for L in L_values
+        params = distribution_parameters(L, N_ice, Fᶠ, 500.0)
+        push!(λs, params.λ)
+        push!(μs, params.μ)
+    end
+    lines!(ax, λs, μs, linewidth=2, color=color, label=label)
+end
 
+axislegend(ax, position=:rt)
 fig
 ```
 
@@ -338,7 +345,7 @@ The benefit of three-moment ice is improved representation of:
 
 Both two-moment and three-moment solvers are implemented:
 
-- **Two-moment**: Use `distribution_parameters(L, N, Fᶠ, ρᶠ)` with `TwoMomentClosure`
+- **Two-moment**: Use `distribution_parameters(L, N, Fᶠ, ρᶠ)` with `P3Closure`
 - **Three-moment**: Use `distribution_parameters(L, N, Z, Fᶠ, ρᶠ)` with either
   `ThreeMomentClosure` (Original P3 solver)
   or `ThreeMomentClosureExact` (Breeze residual solver)
@@ -360,7 +367,6 @@ This provides the complete size distribution needed for computing microphysical 
 - [Morrison2015parameterization](@cite): PSD formulation and μ-λ relationship (Sec. 2b)
 - [MilbrandtYau2005](@cite): Multimoment bulk microphysics and shape parameter analysis
 - [Heymsfield2003](@cite): Ice size distribution observations used for μ-λ fit
-- [FieldEtAl2007](@cite): Refined snow-PSD observations consistent with the same μ-λ closure
 - [Cholette2019parameterization](@cite): Predicted-liquid-fraction extension and dry-PSD branch for melting/deposition
 - [MilbrandtEtAl2021](@cite): Three-moment ice with Z as prognostic
 - [MilbrandtEtAl2024](@cite): Updated three-moment formulation
