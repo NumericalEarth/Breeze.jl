@@ -65,7 +65,7 @@ using Oceananigans.Fields: interior
 
     @testset "Tabulated sixth-moment melting matches Fortran branch split" begin
         FT = Float64
-        p3_tab = PredictedParticlePropertiesMicrophysics(; triple_moment_ice = true)
+        p3_tab = PredictedParticlePropertiesMicrophysics(; three_moment_ice = true)
 
         qⁱ = FT(1e-4)
         nⁱ = FT(1e5)

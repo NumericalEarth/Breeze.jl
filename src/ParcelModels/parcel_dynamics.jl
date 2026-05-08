@@ -683,7 +683,7 @@ zero_microphysics_prognostic_tendencies(μ::NamedTuple{names, T}) where {names, 
     NamedTuple{names}(ntuple(_ -> zero(eltype(T)), length(names)))
 
 # Fortran P3 v5.5.0 cleanup: where (qitot < qsmall) zitot = 0.
-# The triple-moment Z tables store derivative-normalized integrals (d(G)/d(env))
+# The 3-moment Z tables store derivative-normalized integrals (d(G)/d(env))
 # that can drive Z negative for newly nucleated ice. This hard clamp after
 # each substep matches the Fortran's post-process cleanup.
 clamp_ice_sixth_moment(microphysics, μ, ρ) = μ
@@ -872,7 +872,7 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     state.μ = ssp_rk3_microphysics_substep(U⁰.μ, state.μ, tendencies.Gμ, Δt, α)
 
     # P3 cleanup: zero Z when ice mass < qsmall (Fortran P3 v5.5.0 convention).
-    # The triple-moment Z tables store d(G)/d(env) derivatives that can drive Z negative
+    # The 3-moment Z tables store d(G)/d(env) derivatives that can drive Z negative
     # for newly nucleated ice; this hard clamp matches the Fortran post-process step.
     state.μ = clamp_ice_sixth_moment(model.microphysics, state.μ, state.ρ)
 

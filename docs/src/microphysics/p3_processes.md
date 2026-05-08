@@ -605,9 +605,9 @@ tendency. The relevant latent heats at standard conditions are:
 ### Core P3 Process References
 - [Morrison2015parameterization](@cite): Primary process formulations (Section 2).
 - [Morrison2015part2](@cite): Process validation against observations.
-- [MilbrandtEtAl2021](@cite): ``Z``-tendencies for triple-moment ice.
+- [MilbrandtEtAl2021](@cite): ``Z``-tendencies for three-moment ice.
 - [MilbrandtEtAl2025liquidfraction](@cite): Liquid-fraction processes (shedding, refreezing).
-- [Morrison2025complete3moment](@cite): Complete triple-moment process rates.
+- [Morrison2025complete3moment](@cite): Complete three-moment process rates.
 
 ### Related References
 - [KhairoutdinovKogan2000](@cite): Warm rain autoconversion.

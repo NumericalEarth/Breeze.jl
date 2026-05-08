@@ -8,7 +8,7 @@ to build the microphysical tendency for each prognostic field.
 The prognostic variable formulation has evolved through the P3 papers:
 
 - [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization): Original 4 ice variables.
-- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Added ``ρz^i`` for triple-moment ice.
+- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Added ``ρz^i`` for 3-moment ice.
 - [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction): Added ``ρq^{wi}`` for liquid fraction.
 
 Our implementation follows P3 v5.5 with all 6 ice prognostic variables. Sign
@@ -57,7 +57,7 @@ mass / number ratio. Both Fortran and Breeze run with ``μ_r = 0`` at runtime.
 | ``ρn^i`` | Ice number density | m⁻³ | Number of ice particles |
 | ``ρq^f`` | Rime mass density | kg/m³ | Mass of rime (frost) on ice |
 | ``ρb^f`` | Rime volume density | m³/m³ | Volume of rime per unit volume |
-| ``ρz^i`` | Ice reflectivity | m⁶/m³ | 6th moment of size distribution (only updated when `triple_moment_ice = true`) |
+| ``ρz^i`` | Ice reflectivity | m⁶/m³ | 6th moment of size distribution (only updated when `three_moment_ice = true`) |
 | ``ρq^{wi}`` | Water on ice | kg/m³ | Liquid water coating ice particles |
 
 ### Vapor and Saturation Diagnostic
@@ -253,7 +253,7 @@ is the melt-densification correction that drives the remaining rime
 toward solid ice density (917 kg/m³) when ``ρ^f < 917`` and liquid
 fraction is *not* active.
 
-### Reflectivity Tendency (triple-moment)
+### Reflectivity Tendency (3-moment)
 
 The simplified path used by `tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ)` follows
 the active hybrid path (see the sixth-moment update in [Microphysical Processes](@ref p3_processes)):
@@ -406,7 +406,7 @@ println("  Minimum number mixing ratio: ", p3.minimum_number_mixing_ratio, " 1/k
 ## References for This Section
 
 - [Morrison2015parameterization](@cite): Original prognostic variables and tendencies (Section 2).
-- [MilbrandtEtAl2021](@cite): Sixth moment prognostic (``ρz^i``) for triple-moment ice.
+- [MilbrandtEtAl2021](@cite): Sixth moment prognostic (``ρz^i``) for three-moment ice.
 - [MilbrandtEtAl2025liquidfraction](@cite): Liquid fraction prognostic (``ρq^{wi}``).
 - [Morrison2025complete3moment](@cite): Complete tendency equations with all six ice variables.
 - [MilbrandtYau2005](@cite): Multi-moment microphysics and sedimentation.

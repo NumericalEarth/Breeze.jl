@@ -53,7 +53,7 @@ N = M_0 = N₀ \frac{Γ(μ + 1)}{λ^{μ+1}}
 \bar{D} = \frac{M_1}{M_0} = \frac{μ + 1}{λ}
 ```
 
-**Reflectivity** (6th moment) — this is the third prognostic variable in triple-moment P3
+**Reflectivity** (6th moment) — this is the third prognostic variable in three-moment P3
 ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021)):
 
 ```math
@@ -118,11 +118,11 @@ because the partially-rimed regime has zero mass at that point.
     a single ``μ_{max}`` cap; it does not include the riming/density branch
     of `P3Closure`.
 
-!!! note "Triple-Moment Mode"
+!!! note "Three-Moment Mode"
     In the official P3 code, ``μ`` (and the bulk ice density used in rates) are obtained
     from lookup table 3 (`p3_lookupTable_3.dat-v1.4`) by interpolation in the ``Z/Q`` space,
     rime fraction, liquid fraction, and rime density. Breeze loads the same table file
-    and interpolates the same way; ``μ`` for the active hybrid triple-moment update path
+    and interpolates the same way; ``μ`` for the active hybrid 3-moment update path
     (`tendency_ρzⁱ`) comes directly from this table. Analytic ``G(μ) = M_6 N_T / M_3^2``
     relations are used in the group-2 initiation increments.
 
@@ -314,9 +314,9 @@ All computations are performed in **log space** for numerical stability:
 
 where ``q_i = Γ(k+1, λD_i) / Γ(k+1)`` is the regularized incomplete gamma function.
 
-## Triple-Moment Extension
+## Three-Moment Extension
 
-With triple-moment ice ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
+With three-moment ice ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
 [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024),
 [Morrison et al. (2025)](@cite Morrison2025complete3moment)),
 the 6th moment ``Z`` provides an additional constraint.
@@ -331,17 +331,17 @@ In the official P3 code, these constraints are used to build a lookup table that
 returns ``μ`` (and bulk density) by interpolation; ``λ`` is then obtained from
 the main table using the diagnosed ``μ``.
 
-The benefit of triple-moment ice is improved representation of:
+The benefit of three-moment ice is improved representation of:
 - **Size sorting**: Large particles fall faster and separate from small ones
 - **Hail formation**: Accurate simulation of heavily rimed particles
 - **Radar reflectivity**: Direct prognostic variable rather than diagnosed
 
-Both two-moment and triple-moment solvers are implemented:
+Both two-moment and three-moment solvers are implemented:
 
 - **Two-moment**: Use `distribution_parameters(L, N, Fᶠ, ρᶠ)` with `TwoMomentClosure`
-- **Triple-moment**: Use `distribution_parameters(L, N, Z, Fᶠ, ρᶠ)` with either
-  `TripleMomentClosure` (Original P3 solver)
-  or `TripleMomentClosureExact` (Breeze residual solver)
+- **Three-moment**: Use `distribution_parameters(L, N, Z, Fᶠ, ρᶠ)` with either
+  `ThreeMomentClosure` (Original P3 solver)
+  or `ThreeMomentClosureExact` (Breeze residual solver)
 
 ## Summary
 
@@ -350,7 +350,7 @@ The P3 size distribution closure proceeds as:
 1. **Prognostic moments**: ``L``, ``N`` (and optionally ``Z``) are carried by the model
 2. **Rime properties**: ``F^f`` and ``ρ^f`` determine the mass-diameter relationship
 3. **Lambda solver**: ``λ`` is tabulated by scanning L/N in the reference Fortran (Breeze uses a secant solver in the helper)
-4. **μ diagnosis**: Piecewise diagnostic for 2-moment, or lookup-table inversion for triple-moment
+4. **μ diagnosis**: Piecewise diagnostic for 2-moment, or lookup-table inversion for 3-moment
 5. **Normalization**: Intercept ``N₀`` from number conservation
 
 This provides the complete size distribution needed for computing microphysical rates.
@@ -362,6 +362,6 @@ This provides the complete size distribution needed for computing microphysical 
 - [Heymsfield2003](@cite): Ice size distribution observations used for μ-λ fit
 - [FieldEtAl2007](@cite): Refined snow-PSD observations consistent with the same μ-λ closure
 - [Cholette2019parameterization](@cite): Predicted-liquid-fraction extension and dry-PSD branch for melting/deposition
-- [MilbrandtEtAl2021](@cite): Triple-moment ice with Z as prognostic
-- [MilbrandtEtAl2024](@cite): Updated triple-moment formulation
-- [Morrison2025complete3moment](@cite): Complete triple-moment implementation
+- [MilbrandtEtAl2021](@cite): Three-moment ice with Z as prognostic
+- [MilbrandtEtAl2024](@cite): Updated three-moment formulation
+- [Morrison2025complete3moment](@cite): Complete three-moment implementation

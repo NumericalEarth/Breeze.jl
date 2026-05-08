@@ -237,7 +237,7 @@ fig
 # accretion, rain evaporation, and sedimentation processes.
 
 microphysics = PredictedParticlePropertiesMicrophysics(Oceananigans.defaults.FloatType;
-                                                       triple_moment_ice = false)
+                                                       three_moment_ice = false)
 
 # WENO advection of the sharply-peaked microphysical tendencies (e.g., the
 # ice-nucleation spike at the tropopause) introduces small negative oscillations

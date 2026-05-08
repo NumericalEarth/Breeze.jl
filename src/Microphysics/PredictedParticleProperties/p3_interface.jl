@@ -70,7 +70,7 @@ $(TYPEDSIGNATURES)
 
 Return prognostic field names for the P3 scheme.
 
-P3 v5.5 with triple-moment ice and predicted liquid fraction has 11 prognostic fields:
+P3 v5.5 with 3-moment ice and predicted liquid fraction has 11 prognostic fields:
 - Cloud: ρqᶜˡ, ρnᶜˡ
 - Rain: ρqʳ, ρnʳ
 - Ice: ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ

@@ -241,11 +241,11 @@ end
 
 @inline ice_integrals_table(p3) = _lookup_field(p3.ice.lookup_tables, Val(:ice_integrals))
 @inline rain_ice_collection_table(p3) = _lookup_field(p3.ice.lookup_tables, Val(:rain_ice_collection))
-@inline triple_moment_shape_table(p3) = _lookup_field(p3.ice.lookup_tables, Val(:triple_moment_shape))
+@inline three_moment_shape_table(p3) = _lookup_field(p3.ice.lookup_tables, Val(:three_moment_shape))
 
 @inline _lookup_field(tables::P3LookupTables, ::Val{:ice_integrals}) = tables.ice_integrals
 @inline _lookup_field(tables::P3LookupTables, ::Val{:rain_ice_collection}) = tables.rain_ice_collection
-@inline _lookup_field(tables::P3LookupTables, ::Val{:triple_moment_shape}) = tables.triple_moment_shape
+@inline _lookup_field(tables::P3LookupTables, ::Val{:three_moment_shape}) = tables.three_moment_shape
 @inline _lookup_field(::Nothing, ::Val) = nothing
 
 @inline total_ice_mass(qⁱ, qʷⁱ) = clamp_positive(qⁱ) + clamp_positive(qʷⁱ)
@@ -282,7 +282,7 @@ end
     FT = typeof(qⁱ_total)
     has_ice = (qⁱ_total > FT(1e-20)) & (nⁱ > FT(1e-16))
     ρ_bulk = ice_mean_density_for_bounds(ice_table, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
-    μ_bounds = TripleMomentClosure(FT)
+    μ_bounds = ThreeMomentClosure(FT)
     z_bounded = enforce_z_bounds(clamp_positive(zⁱ), qⁱ_total, nⁱ, ρ_bulk, μ_bounds.μmin, μ_bounds.μmax)
     return ifelse(has_ice, z_bounded, zero(FT))
 end
@@ -296,7 +296,7 @@ end
 #####
 ##### Ice shape parameter (μ) from Table 3
 #####
-##### For triple-moment P3, μ is diagnosed from (qⁱ, nⁱ, zⁱ) via Table 3.
+##### For 3-moment P3, μ is diagnosed from (qⁱ, nⁱ, zⁱ) via Table 3.
 ##### For 2-moment P3, μ is looked up from Table 1 (mu_i_save column).
 #####
 
@@ -305,7 +305,7 @@ $(TYPEDSIGNATURES)
 
 Compute the ice PSD shape parameter μ from lookup tables.
 
-For triple-moment P3, μ is diagnosed from the ratio Z/L (sixth moment to mass)
+For 3-moment P3, μ is diagnosed from the ratio Z/L (sixth moment to mass)
 using the pre-tabulated closure in Table 3.
 
 For 2-moment P3 (Table 3 absent), μ is looked up directly from Table 1
@@ -314,18 +314,18 @@ during Fortran table generation.
 """
 @inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ)
-    shape_table_triple_moment = triple_moment_shape_table(p3)
-    return _ice_shape_parameter(shape_table_triple_moment, p3.ice.bulk_properties.shape,
+    shape_table_3mom = three_moment_shape_table(p3)
+    return _ice_shape_parameter(shape_table_3mom, p3.ice.bulk_properties.shape,
                                 qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
 end
 
-# triple-moment: diagnose μ from Table 3 (independent of mu axis)
-@inline function _ice_shape_parameter(shape_table_triple_moment::P3TripleMomentShapeTable, shape_table,
+# 3-moment: diagnose μ from Table 3 (independent of mu axis)
+@inline function _ice_shape_parameter(shape_table_3mom::P3ThreeMomentShapeTable, shape_table,
                                       qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
     qⁱ_safe = max(qⁱ, eps(FT))
     nⁱ_safe = max(nⁱ, eps(FT))
     zⁱ_safe = max(zⁱ, eps(FT))
-    return shape_parameter_lookup(shape_table_triple_moment, qⁱ_safe, nⁱ_safe, zⁱ_safe, Fᶠ, Fˡ, ρᶠ)
+    return shape_parameter_lookup(shape_table_3mom, qⁱ_safe, nⁱ_safe, zⁱ_safe, Fᶠ, Fˡ, ρᶠ)
 end
 
 # 2-moment with tables: look up μ from Table 1 (mu_i_save)
@@ -1918,7 +1918,7 @@ The sixth moment (reflectivity) changes with:
 - Aggregation (redistribution) (Phase 2)
 
 This simplified version uses proportional scaling (Z/q ratio).
-For more accurate triple-moment treatment, use the version that accepts
+For more accurate 3-moment treatment, use the version that accepts
 the p3 scheme to access tabulated sixth moment integrals.
 """
 @inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, prp::ProcessRateParameters, μ_cloud = zero(typeof(ρ)))

@@ -36,13 +36,13 @@ const _fortran_table_dir = ensure_artifact_installed("P3_lookup_tables", joinpat
     @test tables isa P3LookupTables
     @test tables.ice_integrals isa P3IceIntegralsTable
     @test tables.rain_ice_collection isa P3RainIceCollectionTable
-    @test tables.triple_moment_shape isa P3TripleMomentShapeTable
+    @test tables.three_moment_shape isa P3ThreeMomentShapeTable
 
     @test p3.ice.fall_speed.mass_weighted isa FortranTabulatedFunction5D
     @test p3.ice.deposition.ventilation isa FortranTabulatedFunction5D
     @test tables.rain_ice_collection.mass isa FortranTabulatedFunction6D
-    @test tables.triple_moment_shape.shape isa FortranTabulatedFunction3
-    @test tables.triple_moment_shape.slope === nothing
+    @test tables.three_moment_shape.shape isa FortranTabulatedFunction3
+    @test tables.three_moment_shape.slope === nothing
 
     # Spot-check first data row of 3momI Table 1
     # At first grid point: log_m ≈ LOG_MASS_MIN, Fr=0, Fl=0, rho=50, mu=0
@@ -60,12 +60,12 @@ const _fortran_table_dir = ensure_artifact_installed("P3_lookup_tables", joinpat
 end
 
 @testset "Read Fortran lookup tables (2momI)" begin
-    p3 = read_fortran_lookup_tables(_fortran_table_dir; triple_moment_ice=false)
+    p3 = read_fortran_lookup_tables(_fortran_table_dir; three_moment_ice=false)
 
     tables = p3.ice.lookup_tables
     @test tables.ice_integrals isa P3IceIntegralsTable
     @test tables.rain_ice_collection isa P3RainIceCollectionTable
-    @test tables.triple_moment_shape === nothing
+    @test tables.three_moment_shape === nothing
 
     # Spot-check first row of 2momI: i_rhor=1, i_Fr=1, i_Fl=1, i_Qnorm=1
     # uns = 0.15624E-03, ums = 0.35587E-03
@@ -97,8 +97,8 @@ end
 
     # Test 2momI override
     p3_2mom = PredictedParticlePropertiesMicrophysics(;
-        triple_moment_ice=false)
-    @test p3_2mom.ice.lookup_tables.triple_moment_shape === nothing
+        three_moment_ice=false)
+    @test p3_2mom.ice.lookup_tables.three_moment_shape === nothing
 end
 
 @testset "Process rates with Fortran-loaded tables" begin

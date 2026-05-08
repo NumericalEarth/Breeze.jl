@@ -14,7 +14,7 @@ Container for multiple ice categories in P3-MC (multi-category P3).
 
 Following [Milbrandt and Morrison (2016)](@cite MilbrandtMorrison2016), each
 ice category evolves independently with its own rime fraction, rime density,
-liquid fraction, and triple-moment ice state. Categories interact through
+liquid fraction, and 3-moment ice state. Categories interact through
 ice-ice collection (aggregation between categories).
 
 # Type Parameters

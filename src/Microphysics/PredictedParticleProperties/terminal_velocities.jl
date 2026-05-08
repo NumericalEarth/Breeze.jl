@@ -214,7 +214,7 @@ $(TYPEDSIGNATURES)
 
 Compute reflectivity-weighted (Z-weighted) terminal velocity for ice.
 
-Needed for the sixth moment (reflectivity) sedimentation in triple-moment P3.
+Needed for the sixth moment (reflectivity) sedimentation in 3-moment P3.
 Uses pre-computed lookup tables for accurate PSD integration.
 
 # Arguments
