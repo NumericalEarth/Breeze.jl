@@ -124,13 +124,16 @@ using CairoMakie
 mass = IceMassPowerLaw()
 
 # Compute mass for different particle sizes
-D = 10 .^ range(-5, -2, length=100)  # 10 μm to 1 cm
+D = 10 .^ range(-5, log10(2e-2), length=100)  # 10 μm to 2 cm
 
 # Unrimed ice
 m_unrimed = [ice_mass(mass, 0.0, 400.0, d) for d in D]
 
 # Moderately rimed (50% rime fraction)
 m_rimed = [ice_mass(mass, 0.5, 500.0, d) for d in D]
+
+# Fully rimed graupel at the maximum rime density, used below for ρᵢ(D)
+m_fully_rimed = [ice_mass(mass, 1.0, 900.0, d) for d in D]
 
 # Plot
 fig = Figure(size=(600, 400))
@@ -143,6 +146,7 @@ ax = Axis(fig[1, 1],
 
 lines!(ax, D, m_unrimed, label="Unrimed (Fᶠ = 0)")
 lines!(ax, D, m_rimed, label="Rimed (Fᶠ = 0.5)")
+lines!(ax, D, m_fully_rimed, label="Rimed (Fᶠ = 1.0)")
 
 # Add reference lines for spherical ice
 m_sphere = @. mass.ice_density * π / 6 * D^3
@@ -244,6 +248,7 @@ and connects directly to the mass-diameter relationship.
 # Compute effective density across sizes
 ρ_unrimed = @. m_unrimed / (π/6 * D^3)
 ρ_rimed = @. m_rimed / (π/6 * D^3)
+ρᵢ_fully_rimed = @. m_fully_rimed / (π/6 * D^3)
 
 fig = Figure(size=(600, 400))
 ax = Axis(fig[1, 1],
@@ -252,10 +257,29 @@ ax = Axis(fig[1, 1],
     xscale = log10,
     title = "Ice Particle Density vs Diameter")
 
-lines!(ax, D, ρ_unrimed, label="Unrimed (Fᶠ = 0)")
-lines!(ax, D, ρ_rimed, label="Rimed (Fᶠ = 0.5)")
 hlines!(ax, [900], linestyle=:dash, color=:gray, label="ρᵢ = 900 (runtime)")
 hlines!(ax, [917], linestyle=:dot, color=:gray, label="ρᵢ = 917 (radar)")
+lines!(ax, D, ρ_unrimed, label="Unrimed (Fᶠ = 0)")
+lines!(ax, D, ρ_rimed, label="Rimed (Fᶠ = 0.5)")
+
+axislegend(ax, position=:rt)
+fig
+```
+
+For a fully rimed particle, ``ρ_i(D)`` is the effective particle density
+computed from the same mass-diameter relation with ``F^f = 1``:
+
+```@example p3_particles
+fig = Figure(size=(600, 400))
+ax = Axis(fig[1, 1],
+    xlabel = "Diameter D [m]",
+    ylabel = "ρᵢ(D) [kg/m³]",
+    xscale = log10,
+    title = "Fully Rimed Ice Density")
+
+hlines!(ax, [900], linestyle=:dash, color=:gray, label="ρᵢ = 900")
+lines!(ax, D, ρᵢ_fully_rimed, linewidth=3, label="Fᶠ = 1.0, ρᶠ = 900 kg/m³")
+ylims!(ax, 850, 930)
 
 axislegend(ax, position=:rt)
 fig
