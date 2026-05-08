@@ -235,6 +235,7 @@ For efficiency in simulations, integrals are organized into three Breeze lookup-
   recovered at runtime from Table 1 using the diagnosed ``μ^i``.)
 
 ```@example p3_integrals
+using Breeze
 using Logging: NullLogger, with_logger
 
 # The default constructor reads the Fortran ASCII lookup tables

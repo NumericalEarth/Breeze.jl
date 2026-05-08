@@ -5,7 +5,7 @@ The mass-diameter and area-diameter relationships vary across this spectrum, dep
 particle size and riming state.
 
 The foundational particle property relationships are from
-[Morrison & Milbrandt (2015a)](@citet Morrison2015parameterization), Section 2.
+[Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization), Section 2.
 
 ## Mass-Diameter Relationship
 
