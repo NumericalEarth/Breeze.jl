@@ -188,10 +188,12 @@ A(D) = \frac{π}{4} D²
 A(D) = γ D^σ
 ```
 
-where ``γ`` and ``σ`` are empirical coefficients from
-[Mitchell1996powerlaws](@citet) for aggregates of side planes, bullets, and columns
-and assemblages of planar polycrystals, as adopted by
-[Morrison2015parameterization](@citet).
+where ``σ = 1.88`` and ``γ ≈ 0.1318`` m^{2-σ} are the empirical coefficients
+from [Mitchell1996powerlaws](@citet) for aggregates of side planes, bullets,
+and columns and assemblages of planar polycrystals, as adopted by
+[Morrison2015parameterization](@citet). The Mitchell (1996) values are quoted
+in cgs (``γ_{cgs} = 0.2285`` cm^{2-σ}); the Fortran reference and Breeze both
+convert in place via ``γ_{mks} = γ_{cgs} \cdot 100^{σ-2}``.
 
 **Graupel**:
 
@@ -252,7 +254,8 @@ ax = Axis(fig[1, 1],
 
 lines!(ax, D, ρ_unrimed, label="Unrimed (Fᶠ = 0)")
 lines!(ax, D, ρ_rimed, label="Rimed (Fᶠ = 0.5)")
-hlines!(ax, [917], linestyle=:dash, color=:gray, label="Pure ice")
+hlines!(ax, [900], linestyle=:dash, color=:gray, label="ρᵢ = 900 (runtime)")
+hlines!(ax, [917], linestyle=:dot, color=:gray, label="ρᵢ = 917 (radar)")
 
 axislegend(ax, position=:rt)
 fig

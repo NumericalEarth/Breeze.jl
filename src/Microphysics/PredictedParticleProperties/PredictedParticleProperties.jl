@@ -10,10 +10,11 @@ rather than multiple discrete ice categories.
 # Key Features
 
 - Single ice category with predicted properties
-- 3-moment ice (mass, number, reflectivity/6th moment)
+- Two-moment ice by default; three-moment ice (mass, number, reflectivity/6th moment) opt-in via `three_moment_ice = true`
 - Predicted liquid fraction on ice particles
 - Rime fraction and rime density evolution
-- Compatible with both quadrature and lookup table evaluation
+- Ice-side integrals are read from the Fortran ASCII lookup tables; rain 1D
+  integrals are tabulated at startup using Chebyshev–Gauss quadrature
 
 # Complete Reference List
 

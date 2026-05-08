@@ -1,6 +1,6 @@
 # [Prognostic Variables and Tendencies](@id p3_prognostics)
 
-P3 tracks 9 prognostic variables that together describe the complete microphysical
+P3 tracks 11 prognostic densities that together describe the complete microphysical
 state of the atmosphere. This section documents each variable, its physical
 meaning, and the source-term assembly used in `tendency_ρ*` (`process_rates.jl`)
 to build the microphysical tendency for each prognostic field.
@@ -17,6 +17,13 @@ convention used throughout the per-field tendencies: rate functions return
 Bidirectional rates (condensation, deposition) keep their natural sign and
 appear as gains; their negative branches contribute as losses elsewhere.
 
+!!! note "Convention: prognostic ``ρq^i`` is dry ice"
+    In Breeze the prognostic ice-mass density ``ρq^i`` stores **dry ice only**
+    (rime + deposited mass; excludes ``ρq^{wi}``). The Fortran reference uses
+    the opposite convention: `qitot` is the *total* (ice + liquid coating)
+    and the dry-ice mass is recovered as `qitot - qiliq`. The two formulations
+    are equivalent — Breeze's ``ρq^i + ρq^{wi}`` equals Fortran's `qitot`.
+
 ## Variable Definitions
 
 ### Cloud Liquid
@@ -24,11 +31,13 @@ appear as gains; their negative branches contribute as losses elsewhere.
 | Symbol | Name | Units | Description |
 |--------|------|-------|-------------|
 | ``ρq^{cl}`` | Cloud liquid mass density | kg/m³ | Mass of cloud droplets per unit volume |
+| ``ρn^{cl}`` | Cloud droplet number density | m⁻³ | Number of cloud droplets per unit volume |
 
-Cloud droplet **number** can either be prescribed (typical continental
-``\sim 100`` cm⁻³ or marine ``\sim 50`` cm⁻³ values) or made prognostic
-through the optional aerosol-activation path (`AerosolActivation` in
-`aerosol_activation.jl`).
+Breeze always carries ``ρn^{cl}`` as a prognostic field. When the optional
+aerosol-activation path (`AerosolActivation` in `aerosol_activation.jl`) is
+enabled, CCN-activation source terms drive ``ρn^{cl}``. Otherwise the field
+is held at the configured constant cloud-droplet number (typical continental
+``\sim 100`` cm⁻³ or marine ``\sim 50`` cm⁻³).
 
 ### Rain
 
@@ -44,12 +53,19 @@ mass / number ratio. Both Fortran and Breeze run with ``μ_r = 0`` at runtime.
 
 | Symbol | Name | Units | Description |
 |--------|------|-------|-------------|
-| ``ρq^i`` | Total ice mass density | kg/m³ | Total ice mass (ice + liquid coating) |
+| ``ρq^i`` | Dry ice mass density | kg/m³ | Rime + deposited ice mass (excludes ``ρq^{wi}``) |
 | ``ρn^i`` | Ice number density | m⁻³ | Number of ice particles |
 | ``ρq^f`` | Rime mass density | kg/m³ | Mass of rime (frost) on ice |
 | ``ρb^f`` | Rime volume density | m³/m³ | Volume of rime per unit volume |
-| ``ρz^i`` | Ice reflectivity | m⁶/m³ | 6th moment of size distribution |
+| ``ρz^i`` | Ice reflectivity | m⁶/m³ | 6th moment of size distribution (only updated when `three_moment_ice = true`) |
 | ``ρq^{wi}`` | Water on ice | kg/m³ | Liquid water coating ice particles |
+
+### Vapor and Saturation Diagnostic
+
+| Symbol | Name | Units | Description |
+|--------|------|-------|-------------|
+| ``ρq^v`` | Water vapor density | kg/m³ | The host-coupled moisture variable |
+| ``ρs^{sat}`` | Predicted-supersaturation slot | kg/m³ | H10 prediction path; hard-disabled at runtime in both Breeze and Fortran (`log_predictSsat = .false.`). The field is allocated for API compatibility and recomputed diagnostically from ``ρq^v`` and ``T``. |
 
 ## Derived Quantities
 
@@ -58,8 +74,11 @@ From the prognostic variables, key diagnostic properties are computed:
 **Rime fraction** (mass fraction of rime, *of dry ice*):
 
 ```math
-F^f = \frac{ρq^f}{ρq^i - ρq^{wi}}.
+F^f = \frac{ρq^f}{ρq^i}.
 ```
+
+The denominator is the prognostic dry-ice mass — equivalent to Fortran's
+`qirim / (qitot - qiliq)`.
 
 **Rime density**:
 
@@ -70,13 +89,16 @@ F^f = \frac{ρq^f}{ρq^i - ρq^{wi}}.
 **Liquid fraction** (mass fraction of liquid coating, *of total ice mass*):
 
 ```math
-F^l = \frac{ρq^{wi}}{ρq^i}.
+F^l = \frac{ρq^{wi}}{ρq^i + ρq^{wi}}.
 ```
 
-**Mean particle mass**:
+The denominator is the total ice mass — equivalent to Fortran's
+`qiliq / qitot`.
+
+**Mean particle mass** (per total ice mass):
 
 ```math
-\bar{m} = \frac{ρq^i}{ρn^i}.
+\bar{m} = \frac{ρq^i + ρq^{wi}}{ρn^i}.
 ```
 
 ## Tendency Equations
@@ -300,7 +322,7 @@ microphysics interface in `p3_interface.jl`. Under the hood,
 ```julia
 # Prognostic field names
 names = prognostic_field_names(microphysics)
-# (:ρqᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ)
+# (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ, :ρsˢᵃᵗ)
 ```
 
 Three host-facing entry points:
@@ -344,10 +366,10 @@ because that requires state mutation with a paired ``θ`` correction.
 
 ### Consistency
 
-The rime fraction must satisfy ``0 \le F^f \le 1`` (so ``ρq^f \le ρq^i - ρq^{wi}``)
-and the liquid fraction ``0 \le F^l \le 1`` (so ``ρq^{wi} \le ρq^i``). When
-the diagnosed fractions exceed bounds, the read-time interface caps them and
-flags the state for special handling (see `p3_interface.jl`).
+The rime fraction must satisfy ``0 \le F^f \le 1`` (so ``ρq^f \le ρq^i``) and
+the liquid fraction ``0 \le F^l \le 1``. When the diagnosed fractions exceed
+bounds, the read-time interface caps them and flags the state for special
+handling (see `p3_interface.jl`).
 
 ### Threshold Handling
 

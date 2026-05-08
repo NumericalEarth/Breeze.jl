@@ -32,7 +32,8 @@ struct ProcessRateParameters{FT}
     accretion_coefficient :: FT              # k₂ [s⁻¹]
     accretion_exponent :: FT                 # α [-]
 
-    # Rain self-collection and breakup (Seifert-Beheng 2001; Fortran P3 v5.5.0 breakup)
+    # Rain self-collection and breakup (KK2000 self-collection rate combined with
+    # Verlinde-Cotton 1993 breakup multiplier; matches Fortran P3 v5.5.0 autoAccr_param=2)
     self_collection_coefficient :: FT        # k_rr [-]
     rain_breakup_diameter_threshold :: FT    # D_th threshold for breakup [m] (1/λ_r convention)
     rain_breakup_coefficient :: FT           # κ_br [1/m]

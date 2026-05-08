@@ -89,17 +89,34 @@ f_ρ = \max\left(1,\ 1 + 0.00842(\bar{ρ}-400)\right),
 \quad μ_{max} = 20.
 ```
 
-The first branch corresponds to the Heymsfield (2003) μ–λ fit (Eq. 3 in
-[Morrison2015parameterization](@cite), `μ = 0.00191 λ^{0.8} - 2` with ``λ`` in
-m⁻¹; the doc form is identical after the cm⁻¹↔m⁻¹ unit conversion since
-``0.076 \cdot 0.01^{0.8} ≈ 0.00191``). The second branch increases ``μ``
-with particle size and riming in the Fortran lookup-table generator.
+The first branch corresponds to the [Heymsfield (2003)](@cite Heymsfield2003)
+μ–λ fit (the Fortran reference cites Heymsfield 2003 directly; the same
+relation is also documented in [Field et al. (2007)](@cite FieldEtAl2007),
+`μ = 0.00191 λ^{0.8} - 2` with ``λ`` in m⁻¹; the doc form is identical
+after the cm⁻¹↔m⁻¹ unit conversion since ``0.076 \cdot 0.01^{0.8} ≈ 0.00191``).
+The second branch increases ``μ`` with particle size and riming in the
+Fortran lookup-table generator.
+
+When liquid fraction is active (``F^l > 0``), the bulk density used in
+``D_{mvd}`` and ``f_ρ`` is blended with the liquid density:
+
+```math
+ρ_g = (1 - F^l)\, ρ_{g,\text{dry}} + F^l\, 1000\,\text{kg/m}^3.
+```
+
+When ``F^f = 0`` the lookup-table generator additionally substitutes
+``ρ_{g,\text{dry}} \to ρ_\text{rime}`` (the rime-density axis of the table)
+because the partially-rimed regime has zero mass at that point.
 
 !!! note "Breeze helper closure"
     Breeze implements the `P3Closure` which matches the official P3 Fortran logic.
     For small particles (``D_{mvd} \le 0.2`` mm), it uses the Heymsfield (2003) power-law relation.
     For large particles (``D_{mvd} > 0.2`` mm), it uses the diagnostic based on mean volume diameter
     and rime density to account for riming effects. This ensures consistency with the lookup tables.
+    A simpler closure `TwoMomentClosure` (aliased as `ShapeParameterRelation`,
+    used by the demo plot below) keeps only the small-particle branch and
+    a single ``μ_{max}`` cap; it does not include the riming/density branch
+    of `P3Closure`.
 
 !!! note "Three-Moment Mode"
     In the official P3 code, ``μ`` (and the bulk ice density used in rates) are obtained
@@ -130,6 +147,15 @@ hlines!(ax, [relation.μmax], linestyle=:dash, color=:gray, label="μmax")
 
 fig
 ```
+
+## Dry Size Distribution (Liquid-Fraction Active)
+
+When ``F^l > 0``, the official P3 generator solves a separate **dry** PSD
+``(λ_d, μ_{i,d}, N_{0,d})`` from the dry-only ice mass ``q^i`` for the
+melting and deposition/sublimation processes (see [Cholette et al. (2019)](@cite Cholette2019parameterization)
+for the rationale). Breeze's `dry_size_distribution` reproduces this branch:
+melting and deposition integrals operate on the dry PSD while collection,
+sedimentation, and reflectivity use the wet PSD.
 
 ## Determining Distribution Parameters
 
@@ -334,6 +360,8 @@ This provides the complete size distribution needed for computing microphysical 
 - [Morrison2015parameterization](@cite): PSD formulation and μ-λ relationship (Sec. 2b)
 - [MilbrandtYau2005](@cite): Multimoment bulk microphysics and shape parameter analysis
 - [Heymsfield2003](@cite): Ice size distribution observations used for μ-λ fit
+- [FieldEtAl2007](@cite): Refined snow-PSD observations consistent with the same μ-λ closure
+- [Cholette2019parameterization](@cite): Predicted-liquid-fraction extension and dry-PSD branch for melting/deposition
 - [MilbrandtEtAl2021](@cite): Three-moment ice with Z as prognostic
 - [MilbrandtEtAl2024](@cite): Updated three-moment formulation
 - [Morrison2025complete3moment](@cite): Complete three-moment implementation

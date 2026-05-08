@@ -7,7 +7,7 @@ naturally as particles grow, rime, and melt.
 
 This implementation tracks Fortran [P3-microphysics v5.5.0](https://github.com/P3-microphysics/P3-microphysics)
 ([Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization),
-[Cholette et al. (2019)](@cite MilbrandtEtAl2025liquidfraction) — the predicted-liquid-fraction extension —
+[Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) — the predicted-liquid-fraction extension —
 and [Morrison et al. (2025)](@cite Morrison2025complete3moment) for full triple moment).
 
 ## Motivation
@@ -83,12 +83,19 @@ for the four-regime piecewise ``m(D)`` and ``A(D)`` laws and
 [Size Distribution](@ref p3_size_distribution) for the closure that determines
 ``(N_0, λ, μ)`` from prognostic moments.
 
-### Three-Moment Ice
+### Two- and Three-Moment Ice
 
-P3 v5.5 uses three prognostic moments for ice:
+P3 v5.5 supports both two-moment and three-moment ice. Breeze defaults to the
+**two-moment** path; three-moment ice is opt-in (`three_moment_ice = true` in
+the Breeze constructor).
 
-1. **Mass** (``ρq^i``): Total ice mass concentration.
+Two-moment ice tracks:
+
+1. **Mass** (``ρq^i``): Ice mass concentration (dry component; see prognostic table below).
 2. **Number** (``ρn^i``): Ice particle number concentration.
+
+Three-moment ice additionally tracks:
+
 3. **Reflectivity** (``ρz^i``): Sixth moment, proportional to radar reflectivity.
 
 The third moment provides additional constraint on the size distribution, improving
@@ -97,13 +104,13 @@ representation of precipitation-sized particles
 [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024),
 [Morrison et al. (2025)](@cite Morrison2025complete3moment)).
 
-Both Breeze and Fortran v5.5.0 use the same active "hybrid" ``Z_i`` update path:
-between processes, the shape parameter ``μ_i`` and the third moment
-``M_3`` are recomputed from updated ``q_i`` and the bulk ice density, then
-``Z_i`` is reconstructed via ``G(μ_i)\, M_3^2 / N_i``. Initiation processes
-(nucleation, immersion freezing, splintering, homogeneous freezing) add explicit
-``Z_i`` increments using the source PSD's ``μ`` (``μ_c`` for cloud water,
-``μ_r`` for rain — held at 0 at runtime — and 0 for all other source types).
+When three-moment ice is enabled, Breeze uses the active "hybrid" ``Z_i`` update 
+path: between processes, the shape parameter ``μ_i`` and the third moment ``M_3`` 
+are recomputed from updated ``q_i`` and the bulk ice density, then ``Z_i`` is 
+reconstructed via ``G(μ_i)\, M_3^2 / N_i``. Initiation processes (nucleation, 
+immersion freezing, splintering, homogeneous freezing) add explicit ``Z_i`` 
+increments using the source PSD's ``μ`` (``μ_c`` for cloud water, ``μ_r`` for 
+rain — held at 0 at runtime — and 0 for all other source types).
 
 ### Predicted Liquid Fraction
 
@@ -114,10 +121,10 @@ track liquid water on ice particles. This is crucial for:
 - **Shedding**: Liquid water dripping from large ice.
 - **Refreezing**: Coating that freezes into rime.
 
-Breeze implements liquid-fraction wet growth and refreezing matching Fortran.
-**Shedding diverges**: Fortran tabulates the contribution from particles with
-``D \ge 9`` mm, while Breeze evaluates a bulk relaxation toward an upper
-threshold liquid fraction. See [Microphysical Processes](@ref p3_processes) for details.
+Breeze implements liquid-fraction wet growth, refreezing, and shedding. 
+Shedding uses the Fortran-style PSD integral over particles
+with ``D \ge 9`` mm (tabulated as `f1pr28`); see
+[Microphysical Processes](@ref p3_processes) for details.
 
 ## What is implemented
 
@@ -132,7 +139,7 @@ threshold liquid fraction. See [Microphysical Processes](@ref p3_processes) for 
 | Active hybrid ``Z_i`` update via ``G(μ_i)\, M_3^2/N_i`` after the continuous "group 1" processes, plus explicit increments for the initiation "group 2" processes via ``G(μ)\, ΔM_3^2/ΔN`` | [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021), [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024), [Morrison et al. (2025)](@cite Morrison2025complete3moment) |
 | Liquid fraction prognostic variable (``ρq^{wi}``) | [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) |
 | Wet growth and refreezing | [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) |
-| Bulk-relaxation form of shedding (diverges from the Fortran tabulated, size-thresholded formulation) | [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) |
+| Tabulated, size-thresholded (``D \ge 9`` mm) shedding | [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) |
 
 ## What is *not* implemented
 
@@ -180,11 +187,14 @@ threshold liquid fraction. See [Microphysical Processes](@ref p3_processes) for 
 
 ## Prognostic Variables
 
-P3 evolves nine prognostic fields:
+P3 evolves eleven prognostic densities:
 
-**Cloud liquid** (1 variable):
+**Cloud liquid** (2 variables):
 
 - ``ρq^{cl}``: Cloud droplet mass concentration [kg/m³].
+- ``ρn^{cl}``: Cloud droplet number concentration [1/m³] (always carried; values are taken
+  from aerosol activation when prognostic activation is enabled, or held at the
+  configured ``N_c`` constant otherwise).
 
 **Rain** (2 variables):
 
@@ -193,19 +203,27 @@ P3 evolves nine prognostic fields:
 
 **Ice** (6 variables):
 
-- ``ρq^i``: Total ice mass concentration [kg/m³].
+- ``ρq^i``: Dry ice mass concentration [kg/m³] (rime + deposited mass; excludes ``ρq^{wi}``).
 - ``ρn^i``: Ice particle number concentration [1/m³].
 - ``ρq^f``: Rime mass concentration [kg/m³].
 - ``ρb^f``: Rime volume concentration [m³/m³].
-- ``ρz^i``: Ice 6th moment (reflectivity proxy) [m⁶/m³].
+- ``ρz^i``: Ice 6th moment (reflectivity proxy) [m⁶/m³] (only updated when `three_moment_ice = true`).
 - ``ρq^{wi}``: Liquid water on ice [kg/m³].
+
+**Saturation diagnostic** (1 variable):
+
+- ``ρs^{sat}``: Predicted-supersaturation slot from H10 [kg/m³]. The H10
+  prediction path is hard-disabled at runtime in both Breeze and the Fortran
+  reference (`log_predictSsat = .false.`); the field is allocated for API
+  compatibility and recomputed diagnostically from ``ρq^v`` and ``T``.
 
 From these, diagnostic properties are computed:
 
-- **Rime fraction**: ``F^f = ρq^f / (ρq^i - ρq^{wi})`` (the dry-ice mass is the divisor,
-  matching Fortran).
+- **Rime fraction**: ``F^f = ρq^f / ρq^i`` (the prognostic ``ρq^i`` is dry ice,
+  matching Fortran's ``Fr = qirim / (qitot - qiliq)``).
 - **Rime density**: ``ρ^f = ρq^f / ρb^f``.
-- **Liquid fraction**: ``F^l = ρq^{wi} / ρq^i``.
+- **Liquid fraction**: ``F^l = ρq^{wi} / (ρq^i + ρq^{wi})`` (denominator is total
+  ice mass, matching Fortran's ``Fl = qiliq / qitot``).
 
 ## Quick Start
 

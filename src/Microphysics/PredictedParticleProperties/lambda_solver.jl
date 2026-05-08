@@ -97,8 +97,9 @@ an empirical power-law relating shape parameter μ to slope parameter λ:
 μ = \\text{clamp}(a λ^b - c, 0, μ_{max})
 ```
 
-This relationship was fitted to aircraft observations of ice particle
-size distributions by [Field et al. (2007)](@cite FieldEtAl2007).
+This relationship is the [Heymsfield (2003)](@cite Heymsfield2003) μ–λ
+fit (the same form is also documented in
+[Field et al. (2007)](@cite FieldEtAl2007)).
 
 # Physical Interpretation
 
@@ -118,7 +119,8 @@ shape parameter and prevents unrealistically narrow distributions.
 # References
 
 From [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 27,
-based on [Field et al. (2007)](@cite FieldEtAl2007) observations.
+based on [Heymsfield (2003)](@cite Heymsfield2003) observations (also
+[Field et al. (2007)](@cite FieldEtAl2007)).
 """
 function TwoMomentClosure(FT = Oceananigans.defaults.FloatType;
                           a = 0.076 * 0.01^0.8,

@@ -4,9 +4,13 @@ Bulk microphysical rates require population-averaged quantities computed by inte
 over the particle size distribution. P3 defines numerous integral properties organized
 by physical concept.
 
-These integrals are pre-computed and stored in lookup tables in the Fortran P3 code
-(see `create_p3_lookupTable_1.f90` in the [P3-microphysics repository](https://github.com/P3-microphysics/P3-microphysics)).
-The integral formulations are from:
+Most ice-side integrals are pre-computed offline and stored in the Fortran
+ASCII lookup tables (see `create_p3_lookupTable_1.f90` and `create_p3_lookupTable_3.f90`
+in the [P3-microphysics repository](https://github.com/P3-microphysics/P3-microphysics));
+Breeze loads the same files. The 1D rain integrals (mass- and number-weighted
+fall speeds, evaporation ventilation) are tabulated at startup inside Breeze
+from Chebyshev–Gauss quadrature evaluators in `rain_quadrature.jl`. The
+integral formulations are from:
 - [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization): Fall speed, ventilation, collection
 - [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Sixth moment integrals for 3-moment ice
 - [Morrison et al. (2025)](@cite Morrison2025complete3moment): Complete 3-moment lookup tables
@@ -117,11 +121,18 @@ Population-averaged properties for radiation, radar, and diagnostics.
 
 ### Effective Radius
 
-Important for radiation parameterizations:
+Important for radiation parameterizations. Following the
+Francis et al. (1994) / Fu (1996, Eq. 3.11 in *J. Climate*) definition:
 
 ```math
-r_{eff} = \frac{\int_0^∞ D^3 N'(D)\, dD}{2 \int_0^∞ D^2 N'(D)\, dD} = \frac{M_3}{2 M_2}
+r_\text{eff} = \frac{3}{4\, ρ_i^*}
+               \frac{\int_0^∞ m(D)\, N'(D)\, dD}{\int_0^∞ A(D)\, N'(D)\, dD},
 ```
+
+with ``ρ_i^* = 916.7`` kg/m³. With liquid fraction active the integrands
+include the ``F^l``-blended mass and projected area (i.e.
+``m = (1-F^l) m_\text{ice} + F^l\, (π/6)\, ρ_w D^3`` and
+``A = (1-F^l) A_\text{ice} + F^l\, (π/4) D^2``).
 
 ### Mean Diameter
 
@@ -141,11 +152,19 @@ Mass-weighted particle density:
 
 ### Reflectivity
 
-Radar reflectivity factor (proportional to 6th moment):
+Radar reflectivity factor. The pure ``D^6`` closed form
 
 ```math
-Z = \int_0^∞ D^6 N'(D)\, dD = N₀ \frac{Γ(μ + 7)}{λ^{μ+7}}
+Z_\text{mono} = \int_0^∞ D^6 N'(D)\, dD = N₀ \frac{Γ(μ + 7)}{λ^{μ+7}}
 ```
+
+applies only to a single power-law mass regime. In P3 the tabulated
+reflectivity column integrates the equal-volume ``D_\text{eq}^6`` over the
+full piecewise ``m(D)`` (i.e. ``(6/(π\, ρ_i^*))^2 m(D)^2`` per particle,
+with ``ρ_i^* = 917`` kg/m³); for partially melted particles it switches to
+a Rayleigh–Mie wet-ice mixing rule. The
+runtime ``Z_i`` is recomputed via the active hybrid path
+``Z_i = G(μ_i)\, M_3^2 / N_i`` rather than from this monomial closed form.
 
 ## Collection Integrals
 
@@ -186,14 +205,14 @@ for each process affecting reflectivity. These are documented in
 [Morrison et al. (2025)](@cite Morrison2025complete3moment) and stored
 in the 3-moment lookup table (`p3_lookupTable_1.dat-v*_3momI`).
 
-| Process | Integral | Physical Meaning |
-|---------|----------|------------------|
-| Riming | `SixthMomentRime` | Z change from rime accretion |
-| Deposition | `SixthMomentDeposition` | Z change from vapor growth |
-| Melting | `SixthMomentMelt1`, `SixthMomentMelt2` | Z change from melting |
-| Aggregation | `SixthMomentAggregation` | Z change from aggregation |
-| Shedding | `SixthMomentShedding` | Z change from liquid shedding |
-| Sublimation | `SixthMomentSublimation` | Z change from sublimation |
+| Process | Integral(s) | Physical Meaning |
+|---------|-------------|------------------|
+| Riming | `rime` | Z change from rime accretion |
+| Deposition | `deposition`, `deposition1` | Z change from vapor growth (split by ``D < 100`` μm vs ``D \ge 100`` μm ventilation pieces, matching Fortran `m6dep` / `m6dep1`) |
+| Melting | `melt1`, `melt2`, `melt_all1`, `melt_all2` | Melt-to-rain piece (``D \le D_\text{th}``) and ``q^{wi}``-routed piece for the liquid-fraction path |
+| Aggregation | `aggregation` | Z change from aggregation |
+| Shedding | `shedding` | Z change from liquid shedding |
+| Sublimation | `sublimation`, `sublimation1` | Same two-piece split as deposition, with sign and a ``\dot{N}_0`` contribution |
 
 ## Lambda Limiter Integrals
 
@@ -211,7 +230,9 @@ For efficiency in simulations, integrals are organized into three Breeze lookup-
 
 - `lookupTable_1`: fall speed, ventilation, bulk, collection, sixth-moment, and lambda-limiter integrals
 - `lookupTable_2`: ice-rain and inter-category collection families
-- `lookupTable_3`: three-moment diagnostic lookup for `μᶦ`, `λᶦ`, and companion fields
+- `lookupTable_3`: three-moment diagnostic lookup for `μᶦ` and a companion mean
+  density / third-moment column. (The slope ``λ^i`` is *not* in Table 3 — it is
+  recovered at runtime from Table 1 using the diagnosed ``μ^i``.)
 
 ```@example p3_integrals
 using Logging: NullLogger, with_logger
@@ -230,20 +251,19 @@ println("  Mass-weighted:   $(typeof(fs.mass_weighted))")
 
 ## Summary
 
-P3 uses 29+ integral properties organized by concept:
+P3 organises its integral properties by concept; the actual column counts in
+the Fortran tables are 21 in the 2-moment ice file (`p3_lookupTable_1.dat-v*`)
+and 31 in the 3-moment ice file (`*_3momI`). Sixth-moment integrals
+(`m6rime, m6dep, m6dep1, m6mlt1, m6mlt2, m6agg, m6shd, m6sub, m6sub1`) and the
+ice–rain collection family (`m6collr`, plus `qrcol`/`nrcol` 4-D tables) make
+up the bulk of the extra columns in the 3-moment file.
 
-| Category | Count | Purpose |
-|----------|-------|---------|
-| Fall speed | 3 | Sedimentation fluxes |
-| Deposition | 6 | Vapor diffusion rates |
-| Bulk properties | 7 | Radiation, diagnostics |
-| Collection | 2 | Aggregation, riming |
-| Sixth moment | 9 | 3-moment closure |
-| Lambda limiter | 2 | Distribution bounds |
-
-At runtime each integral is read from the corresponding Fortran ASCII lookup
-table; the rain 1D tables are tabulated at startup from Chebyshev–Gauss
-quadrature evaluators.
+At runtime each ice-side integral is read from the corresponding Fortran
+ASCII lookup table; the rain 1D tables are tabulated at startup inside
+Breeze using Chebyshev–Gauss quadrature in `rain_quadrature.jl`. The
+quadrature evaluators in `quadrature.jl::chebyshev_gauss_nodes_weights`
+provide the nodes and weights; integrals are evaluated as compensated
+sums of the integrand on those nodes.
 
 ## References for This Section
 

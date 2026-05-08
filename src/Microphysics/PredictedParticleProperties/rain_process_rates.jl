@@ -72,7 +72,11 @@ end
 Compute rain self-collection rate (number tendency only).
 
 Large rain drops collect smaller ones, reducing number but conserving mass.
-Follows [Seifert and Beheng (2001)](@cite SeifertBeheng2001).
+The runtime form combines the KK2000 self-collection rate with a
+Verlinde and Cotton (1993)-style breakup multiplier (matching the Fortran
+P3 v5.5.0 `autoAccr_param = 2` path); see also
+[Seifert and Beheng (2001)](@cite SeifertBeheng2001) for the alternative SB
+self-collection rate that is not used here.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
