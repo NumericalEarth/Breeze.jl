@@ -13,9 +13,10 @@ const REACTANT_COMPAT = VERSION < v"1.13-" && Base.JLOptions().check_bounds != 1
 if filter_tests!(testsuite, args)
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
     # limitation).
-    if !REACTANT_COMPAT
-        delete!(testsuite, "reactant_centered_compilation")
-        delete!(testsuite, "reactant_weno_compilation")
+    for key in keys(testsuite)
+        if startswith(key, "reactant/") && !REACTANT_COMPAT
+            delete!(testsuite, key)
+        end
     end
 end
 
