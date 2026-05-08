@@ -230,8 +230,8 @@ For efficiency in simulations, integrals are organized into three Breeze lookup-
 
 - `lookupTable_1`: fall speed, ventilation, bulk, collection, sixth-moment, and lambda-limiter integrals
 - `lookupTable_2`: ice-rain and inter-category collection families
-- `lookupTable_3`: three-moment diagnostic lookup for `μᶦ` and a companion mean
-  density / third-moment column. (The slope ``λ^i`` is *not* in Table 3 — it is
+- `lookupTable_3`: three-moment diagnostic lookup for `μᶦ` and a companion
+  mean-density column. (The slope ``λ^i`` is *not* in Table 3 — it is
   recovered at runtime from Table 1 using the diagnosed ``μ^i``.)
 
 ```@example p3_integrals

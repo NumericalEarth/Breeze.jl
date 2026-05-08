@@ -95,16 +95,20 @@ Three-moment ice additionally tracks:
 
 3. **Reflectivity** (``ρz^i``): Sixth moment, proportional to radar reflectivity.
 
-The third moment provides additional constraint on the size distribution, improving
+The three-moment scheme provides additional constraint on the size distribution, improving
 representation of precipitation-sized particles
 ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
 [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024),
 [Morrison et al. (2025)](@cite Morrison2025complete3moment)).
 
 When three-moment ice is enabled, Breeze uses the active "hybrid" ``Z_i`` update
-path: between processes, the shape parameter ``μ_i`` and the third moment ``M_3``
-are recomputed from updated ``q_i`` and the bulk ice density, then ``Z_i`` is
-reconstructed via ``G(μ_i)\, M_3^2 / N_i``. Initiation processes (nucleation,
+path: between processes, the shape parameter ``μ_i`` and the third statistical
+moment of the PSD ``M_3 = ∫ D^3 N'(D) \, dD`` are recomputed from updated
+``q_i`` and the bulk ice density (using ``q_i ≈ ρ̄_i \, (π/6) \, M_3`` for
+spherical particles), then ``Z_i`` is reconstructed via ``G(μ_i)\, M_3^2 / N_i``.
+Note that ``M_3`` is the third statistical moment of the size distribution
+(mass-related), *not* the third prognostic moment of the scheme, which is
+``ρz^i ∝ M_6``. Initiation processes (nucleation,
 immersion freezing, splintering, homogeneous freezing) add explicit ``Z_i``
 increments using the source PSD's ``μ`` (``μ_c`` for cloud water, ``μ_r`` for
 rain — held at 0 at runtime — and 0 for all other source types).

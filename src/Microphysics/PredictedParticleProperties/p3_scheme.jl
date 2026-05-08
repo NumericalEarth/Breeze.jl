@@ -63,9 +63,9 @@ P3 v5.5 carries three prognostic moments for ice particles:
 2. **Number** (``nⁱ``): Ice particle number concentration
 3. **Reflectivity** (``zⁱ``): Sixth moment of size distribution
 
-The third moment improves representation of precipitation-sized particles
-and enables better simulation of radar reflectivity. The default runtime
-path is 2-moment ice; pass `three_moment_ice = true` to enable the
+The three-moment scheme improves representation of precipitation-sized
+particles and enables better simulation of radar reflectivity. The default
+runtime path is 2-moment ice; pass `three_moment_ice = true` to enable the
 3-moment path, which uses `lookupTable_3` for distribution parameter closure.
 
 # Prognostic Variables

@@ -32,9 +32,10 @@ $(TYPEDSIGNATURES)
 Construct `IceSixthMoment` with quadrature-based integrals.
 
 The sixth moment ``M_6 = ∫ D^6 N'(D) dD`` is proportional to radar
-reflectivity Z. Prognosing M₆ (or equivalently Z) as a third moment
-provides an independent constraint on the shape of the size distribution,
-improving representation of differential fall speeds and collection.
+reflectivity Z. Prognosing M₆ (or equivalently Z) as the third prognostic
+moment (in addition to mass and number) provides an independent constraint
+on the shape of the size distribution, improving representation of
+differential fall speeds and collection.
 
 Each microphysical process that affects ice mass also affects M₆:
 
