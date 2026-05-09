@@ -22,7 +22,7 @@ using Statistics: mean
 using Test
 using Metal: Metal, MetalBackend
 
-const arches = Metal.functional() ? (default_arch, GPU(MetalBackend())) : (default_arch,)
+const arches = (Metal.functional() || get(ENV, "BREEZE_FORCE_METAL_FUNCTIONAL", "false") == "true") ? (default_arch, GPU(MetalBackend())) : (default_arch,)
 
 as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float_types()
 
