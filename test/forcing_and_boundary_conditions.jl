@@ -6,6 +6,7 @@ using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 using Oceananigans.Fields: location
+using Oceananigans.TimeSteppers: compute_flux_bc_tendencies!, update_state!
 using Test
 
 function setup_forcing_model(grid, forcing)
@@ -58,6 +59,48 @@ end
 #####
 ##### Bulk boundary condition tests
 #####
+
+@testset "Boundary-condition field dependencies align with model fields [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch;
+                           size = (8, 8, 8), halo = (5, 5, 5),
+                           x = (0, 1), y = (0, 1), z = (0, 1),
+                           topology = (Periodic, Periodic, Bounded))
+
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 2,
+                                                                    damping = NoDivergenceDamping());
+                                    reference_potential_temperature = FT(300),
+                                    surface_pressure = FT(1e5),
+                                    standard_pressure = FT(1e5))
+
+    @inline first_dependency(x, y, t, a, b, p) = a
+    @inline second_dependency(x, y, t, a, b, p) = b
+
+    function bottom_flux_tendency(dependencies, dependency_index)
+        condition = dependency_index == 1 ? first_dependency : second_dependency
+        ρv_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(condition,
+                                                                        field_dependencies = dependencies,
+                                                                        parameters = (;)))
+        model = AtmosphereModel(grid; dynamics,
+                                      boundary_conditions = (; ρv = ρv_bcs),
+                                      timestepper = :AcousticRungeKutta3)
+
+        set!(model, ρ = (x, y, z) -> FT(1),
+                    θ = (x, y, z) -> FT(300),
+                    u = (x, y, z) -> FT(-8.75),
+                    v = (x, y, z) -> FT(0))
+        update_state!(model; compute_tendencies = false)
+        fill!(parent(model.timestepper.Gⁿ.ρv), 0)
+        compute_flux_bc_tendencies!(model)
+        return Array(interior(model.timestepper.Gⁿ.ρv, :, :, 1))
+    end
+
+    Δz = FT(1 / 8)
+    @test all(bottom_flux_tendency((:u, :v), 1) .≈ FT(-8.75) / Δz)
+    @test all(bottom_flux_tendency((:u, :v), 2) .== 0)
+    @test all(bottom_flux_tendency((:ρu, :ρv), 1) .≈ FT(-8.75) / Δz)
+    @test all(bottom_flux_tendency((:ρu, :ρv), 2) .== 0)
+end
 
 @testset "Bulk boundary conditions [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT

@@ -28,6 +28,39 @@ using Test
     @test minimum(model.momentum.ρv) < 0
 end
 
+@testset "GeostrophicForcing uses live compressible density [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch;
+                           size = (8, 8, 8), halo = (5, 5, 5),
+                           x = (0, 100), y = (0, 100), z = (0, 100),
+                           topology = (Periodic, Periodic, Bounded))
+
+    uᵍ(z) = FT(-10)
+    vᵍ(z) = FT(0)
+    geostrophic = geostrophic_forcings(uᵍ, vᵍ)
+    coriolis = FPlane(f = FT(1e-4))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 2,
+                                                                    damping = NoDivergenceDamping());
+                                    reference_potential_temperature = FT(300),
+                                    surface_pressure = FT(1e5),
+                                    standard_pressure = FT(1e5))
+
+    model = AtmosphereModel(grid; dynamics, coriolis, forcing = geostrophic)
+
+    set!(model, ρ = (x, y, z) -> FT(1),
+                θ = (x, y, z) -> FT(300),
+                u = (x, y, z) -> FT(-8),
+                v = (x, y, z) -> FT(0))
+
+    Δt = FT(1e-6)
+    time_step!(model, Δt)
+
+    # u - uᵍ = 2 m/s, so the geostrophic adjustment tendency for v is negative.
+    # If geostrophic momentum is materialized before compressible ρ is set, this
+    # sign flips because the geostrophic contribution is silently zero.
+    @test sum(model.momentum.ρv) < 0
+end
+
 @testset "SubsidenceForcing smoke test [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))

@@ -842,7 +842,7 @@ end
                      qᶜˡ, qʳ, ρ)
 
     # Ice → snow autoconversion
-    Sᵃᶜⁿᵛⁱˢ = conv_q_icl_to_q_sno_no_supersat(categories.snow.acnv1M, qᶜⁱ, true)
+    Sᵃᶜⁿᵛⁱˢ = conv_q_icl_to_q_sno_no_supersat(categories.snow.acnv1M, qᶜⁱ, false)
 
     # Accretion: cloud liquid + snow
     Sᵃᶜᶜˡˢ = accretion(categories.cloud_liquid, categories.snow,

@@ -133,6 +133,16 @@ function AtmosphereModel(grid;
     # Validate that velocity boundary conditions are only provided for dynamics that support them
     validate_velocity_boundary_conditions(dynamics, boundary_conditions)
 
+    # Reject the `HydrostaticSphericalCoriolis` form, which drops the `2Ω cos(φ)`
+    # u-w cross-terms. Breeze always evolves prognostic ρw, so the non-hydrostatic
+    # `SphericalCoriolis()` is the only self-consistent choice on a sphere.
+    if coriolis isa Oceananigans.Coriolis.HydrostaticSphericalCoriolis
+        error("AtmosphereModel: `HydrostaticSphericalCoriolis` is incompatible with " *
+              "Breeze's non-hydrostatic dynamics — it drops the 2Ω cos(φ) Coriolis " *
+              "cross-terms that couple horizontal momentum to w. " *
+              "Use `SphericalCoriolis(rotation_rate=Ω)` (non-hydrostatic) instead.")
+    end
+
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
         scalar_advection = momentum_advection = advection
@@ -287,7 +297,6 @@ end
 # Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
 _timestepper_uses_dynamics(::Val) = false
 _timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
-_timestepper_uses_dynamics(::Val{:AcousticSSPRungeKutta3}) = true
 _timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
 _timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
 
@@ -348,19 +357,20 @@ Advection.cell_advection_timescale(model::AtmosphereModel) = cell_advection_time
 
 # Prognostic field names from dynamics + thermodynamic formulation + microphysics + tracers
 function prognostic_field_names(dynamics, formulation, microphysics, tracer_names)
+    dynamics_names = prognostic_dynamics_field_names(dynamics)
     momentum_names = prognostic_momentum_field_names(dynamics)
     formulation_names = prognostic_thermodynamic_field_names(formulation)
     microphysical_names = prognostic_field_names(microphysics)
     moist_name = moisture_prognostic_name(microphysics)
-    return tuple(momentum_names..., moist_name, formulation_names..., microphysical_names..., tracer_names...)
+    return tuple(dynamics_names..., momentum_names..., formulation_names..., moist_name, microphysical_names..., tracer_names...)
 end
 
 function field_names(dynamics, formulation, microphysics, tracer_names)
     prog_names = prognostic_field_names(dynamics, formulation, microphysics, tracer_names)
     moist_specific = moisture_specific_name(microphysics)
-    default_additional_names = (:u, :v, :w, :T, moist_specific)
     formulation_additional_names = additional_thermodynamic_field_names(formulation)
-    return tuple(prog_names..., default_additional_names..., formulation_additional_names...)
+    default_additional_names = (:u, :v, :w, :T, moist_specific)
+    return tuple(prog_names..., formulation_additional_names..., default_additional_names...)
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,

@@ -18,7 +18,6 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
-    microphysics_model_update!(model.microphysics, model)
     compute_tendencies && compute_tendencies!(model)
 
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
