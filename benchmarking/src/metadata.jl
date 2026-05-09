@@ -19,7 +19,9 @@ function BenchmarkMetadata(arch)
     gpu_name = nothing
     cuda_version = nothing
 
-    if arch isa GPU{CUDABackend}
+    # ReactantState targeting a CUDA GPU records the device the same way
+    # as a direct CUDA backend.
+    if arch isa GPU{CUDABackend} || (arch isa ReactantState && CUDA.functional())
         try
             gpu_name = CUDA.name(CUDA.device())
             cuda_version = string(CUDA.runtime_version())
