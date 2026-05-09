@@ -25,32 +25,35 @@ env:
 
 jobs:
   run-benchmarks:
-    name: "Run benchmarks - dynamics ${{ matrix.dynamics }} - microphysics ${{ matrix.microphysics }} - grid ${{ matrix.grid }} - advection ${{ matrix.advection }} - backend ${{ matrix.backend }} - topology ${{ matrix.topology }}"
+    name: "Run benchmarks - device ${{ matrix.device }} - dynamics ${{ matrix.dynamics }} - microphysics ${{ matrix.microphysics }} - grid ${{ matrix.grid }} - advection ${{ matrix.advection }} - backend ${{ matrix.backend }} - topology ${{ matrix.topology }}"
     permissions:
       actions: write
       contents: write
       pull-requests: read
       statuses: write
-    runs-on: aws-linux-nvidia-gpu-l4
+    runs-on: ${{ matrix.device == 'MetalGPU' && 'macOS-latest' || 'aws-linux-nvidia-gpu-l4' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - dynamics: 'anelastic'
+          - device: 'CUDAGPU'
+            dynamics: 'anelastic'
             microphysics: 'nothing'
             grid: '256x256x128, 512x512x256, 768x768x256'
             advection: 'WENO5, WENO9'
             backend: 'vanilla'
             topology: 'PPB'
             extra_flags: ''
-          - dynamics: 'compressible_splitexplicit'
+          - device: 'CUDAGPU'
+            dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '512x512x256'
             advection: 'WENO5'
             backend: 'vanilla'
             topology: 'PPB'
             extra_flags: ''
-          - dynamics: 'anelastic'
+          - device: 'CUDAGPU'
+            dynamics: 'anelastic'
             microphysics: 'MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium'
             grid: '512x512x256'
             advection: 'WENO5'
@@ -63,7 +66,8 @@ jobs:
           # (which do not currently materialize on ReactantState). Runs in
           # Float64 because Reactant's @trace loop trips on the Float32-grid
           # / Float64-clock mismatch.
-          - dynamics: 'compressible_explicit'
+          - device: 'CUDAGPU'
+            dynamics: 'compressible_explicit'
             microphysics: '1M_MixedNonEquilibrium'
             grid: '256x256x128'
             advection: 'WENO5'
@@ -75,23 +79,41 @@ jobs:
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
           # untested), small grid + small Nsteps to keep the gradient compile
           # and per-step memory bounded.
-          - dynamics: 'compressible_explicit'
+          - device: 'CUDAGPU'
+            dynamics: 'compressible_explicit'
             microphysics: 'nothing'
             grid: '64x64x32'
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
             extra_flags: '--ad --simplified --float_type=Float64 --warmup_steps 1 --time_steps 1'
+          - device: 'MetalGPU'
+            dynamics: 'compressible_explicit'
+            microphysics: 'nothing'
+            grid: '512x512x256'
+            advection: 'WENO5'
+            backend: 'vanilla'
+            topology: 'PPB'
+            extra_flags: '--warmup_steps 2 --time_steps 10'
     defaults:
       run:
         shell: bash
         working-directory: ./benchmarking
     container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.6'
+      image: ${{ matrix.device == 'CUDAGPU' && 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.6' || ''}}
       options: --gpus=all
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: "Check out repository"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: "Install Julia"
+        uses: julia-actions/setup-julia@4c0cb0fce8556fdb04a90347310e5db8b1f98fb9 # v2.7.0
+        if: ${{ runner.os == 'macOS' }}
+        with:
+          version: '1.12.6'
+      - name: "Cache depot"
+        uses: julia-actions/cache@9a93c5fb3e9c1c20b60fc80a478cae53e38618a4 # v3.0.2
+        if: ${{ runner.os == 'macOS' }}
       - name: Instantiate benchmarking environment
         shell: julia --color=yes --project {0}
         run: |
@@ -100,11 +122,14 @@ jobs:
       - name: Run benchmarks
         timeout-minutes: 45
         run: |
-          earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          if [[ ${{ runner.os }} == 'Linux' ]]; then
+              earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
+          fi
+          julia --color=yes --project run_benchmarks.jl --device "${{ matrix.device }}" --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
+      - name: "Upload benchmark results as artifacts"
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
+          name: 'benchmarks-device_${{ matrix.devie }}-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
           path: benchmarking/benchmark_results.*
           retention-days: 90
           overwrite: false
@@ -124,7 +149,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: "Download benchmark results"
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: benchmarks-*
       - name: Merge results and create JSON for github-action-benchmark
@@ -221,7 +247,8 @@ jobs:
 
           with open('github-action-benchmark.json', 'w') as f:
               json.dump(data, f)
-      - uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+      - name: "Generate token"
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
         if: ${{ ! github.event.pull_request.head.repo.fork }}
         id: generate_token
         with:
@@ -247,7 +274,8 @@ jobs:
           git add .
           git commit -m'Save benchmark results for commit ${{ github.sha }}'
           git push -u origin main
-      - uses: benchmark-action/github-action-benchmark@a60cea5bc7b49e15c1f58f411161f99e0df48372 # v1.22.0
+      - name: "Publish benchmark results"
+        uses: benchmark-action/github-action-benchmark@a60cea5bc7b49e15c1f58f411161f99e0df48372 # v1.22.0
         with:
           name: Breeze.jl Benchmarks
           tool: "customBiggerIsBetter"
