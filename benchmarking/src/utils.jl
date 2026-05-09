@@ -23,10 +23,17 @@ end
                             closure::AbstractString = "",
                             dynamics::AbstractString = "",
                             microphysics::AbstractString = "",
+                            backend::AbstractString = "vanilla",
                             )
 
 Run a benchmark by executing `time_steps` time steps of the given model.
-Uses `many_time_steps!` to avoid Simulation overhead.
+
+If the model lives on a `ReactantState` architecture, the whole stepping loop
+is traced with `Reactant.@trace` (see `step_loop!`) and compiled as a single
+program with `Reactant.@compile raise=true raise_first=true sync=true` —
+compile time is recorded separately. The compiled program is then executed
+once for warmup and once timed. The vanilla path drives `many_time_steps!`
+directly through eager `time_step!`.
 
 Returns a `BenchmarkResult` containing timing information and system metadata.
 """
@@ -40,6 +47,8 @@ function benchmark_time_stepping(model;
                                  closure::AbstractString = "",
                                  dynamics::AbstractString = "",
                                  microphysics::AbstractString = "",
+                                 backend::AbstractString = "vanilla",
+                                 ad::Bool = false,
                                  )
 
     grid = model.grid
@@ -48,10 +57,16 @@ function benchmark_time_stepping(model;
     Δt_FT = FT(Δt)
     Nx, Ny, Nz = size(grid)
     total_points = Nx * Ny * Nz
+    is_reactant = arch isa ReactantState
+    mode = ad ? "ad" : "forward"
+
+    ad && !is_reactant && error("AD benchmark requires a Reactant backend (got $backend)")
 
     if verbose
         @info "Benchmark: $name"
         @info "  Architecture: $arch"
+        @info "  Backend: $backend"
+        @info "  Mode: $mode"
         @info "  Float type: $FT"
         @info "  Grid size: $Nx × $Ny × $Nz ($total_points points)"
         @info "  Time step: $(Δt_FT) s"
@@ -59,11 +74,50 @@ function benchmark_time_stepping(model;
         @info "  Benchmark steps: $time_steps"
     end
 
-    # Warmup phase
+    # Compile the stepping loop (or its forward+backward AD wrapper) up
+    # front for Reactant; eager backends compile on first call. For AD we
+    # build θ_init / dθ_init on the same grid as `model` and run reverse
+    # mode through `loss` — see `grad_loss!` in timestepping.jl.
+    compile_time_seconds = 0.0
+    invoke! = nothing
+    if is_reactant
+        if ad
+            θ_init  = CenterField(grid); set!(θ_init,  (args...) -> FT(300.0))
+            dθ_init = CenterField(grid); set!(dθ_init, 0)
+            dmodel  = Enzyme.make_zero(model)
+            if verbose
+                @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps)) with Reactant (raise=true)..."
+            end
+            compile_start = time_ns()
+            compiled_grad! = Reactant.@compile raise=true raise_first=true sync=true grad_loss!(
+                model, dmodel, θ_init, dθ_init, Δt_FT, time_steps)
+            compile_time_seconds = (time_ns() - compile_start) / 1e9
+            invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps)
+        else
+            if verbose
+                @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
+            end
+            compile_start = time_ns()
+            compiled_loop! = Reactant.@compile raise=true raise_first=true sync=true step_loop!(model, Δt_FT, time_steps)
+            compile_time_seconds = (time_ns() - compile_start) / 1e9
+            invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
+        end
+        if verbose
+            @info "    Compile time: $(@sprintf("%.3f", compile_time_seconds)) s"
+        end
+    end
+
+    # Warmup phase. For Reactant we run one full execution of the compiled
+    # program (which already encodes `time_steps` iterations); `warmup_steps`
+    # only affects the vanilla path's eager loop.
     if verbose
         @info "  Running warmup..."
     end
-    many_time_steps!(model, Δt_FT, warmup_steps)
+    if is_reactant
+        invoke!()
+    else
+        many_time_steps!(model, Δt_FT, warmup_steps)
+    end
 
     # Synchronize device before timing
     synchronize_device(arch)
@@ -73,7 +127,11 @@ function benchmark_time_stepping(model;
         @info "  Running benchmark..."
     end
     start_time = time_ns()
-    many_time_steps!(model, Δt_FT, time_steps)
+    if is_reactant
+        invoke!()
+    else
+        many_time_steps!(model, Δt_FT, time_steps)
+    end
     synchronize_device(arch)
     end_time = time_ns()
 
@@ -92,6 +150,8 @@ function benchmark_time_stepping(model;
         String(closure),
         String(dynamics),
         String(microphysics),
+        String(backend),
+        mode,
         (Nx, Ny, Nz),
         time_steps,
         Δt_FT,
@@ -99,6 +159,7 @@ function benchmark_time_stepping(model;
         time_per_step_seconds,
         steps_per_second,
         grid_points_per_second,
+        compile_time_seconds,
         gpu_memory_used,
         metadata,
     )
@@ -108,6 +169,9 @@ function benchmark_time_stepping(model;
         @info "    Total time: $(@sprintf("%.3f", total_time_seconds)) s"
         @info "    Time per step: $(@sprintf("%.6f", time_per_step_seconds)) s"
         @info "    Grid points/s: $(@sprintf("%.2e", grid_points_per_second))"
+        if is_reactant
+            @info "    Compile time: $(@sprintf("%.3f", compile_time_seconds)) s"
+        end
         if arch isa GPU{CUDABackend}
             @info "    GPU memory usage: $(Base.format_bytes(gpu_memory_used))"
         end
@@ -332,3 +396,7 @@ function synchronize_device(::Oceananigans.Architectures.GPU{MetalBackend})
     Metal.synchronize()
     return nothing
 end
+
+# Reactant compiled functions invoked via @compile sync=true block until
+# completion on the underlying device, so no extra sync is required here.
+synchronize_device(::ReactantState) = nothing
