@@ -198,8 +198,8 @@ end
         @test mass32.coefficient isa Float32
     end
 
-    @testset "P3Closure construction" begin
-        closure = P3Closure()
+    @testset "TwoMomentClosure construction" begin
+        closure = TwoMomentClosure()
         @test closure.a ≈ 0.076 * 0.01^0.8
         @test closure.b ≈ 0.8
         @test closure.c ≈ 2.0
@@ -216,14 +216,9 @@ end
 
     @testset "Three-moment closure construction" begin
         p3_closure = ThreeMomentClosure()
-        exact_closure = ThreeMomentClosureExact()
-        compat_closure = ThreeMomentClosure()
 
         @test p3_closure.μmin ≈ 0.0
         @test p3_closure.μmax ≈ 20.0
-        @test exact_closure.μmin ≈ 0.0
-        @test exact_closure.μmax ≈ 20.0
-        @test compat_closure isa ThreeMomentClosure
     end
 
     @testset "Ice regime thresholds" begin
@@ -403,7 +398,7 @@ end
         rime_density = 400.0
 
         mass = IceMassPowerLaw()
-        closure = P3Closure()
+        closure = TwoMomentClosure()
 
         params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
                                           mass, closure)

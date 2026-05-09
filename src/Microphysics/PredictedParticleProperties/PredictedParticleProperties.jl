@@ -131,10 +131,8 @@ export
 
     # Lambda solver
     IceMassPowerLaw,
-    P3Closure,
+    TwoMomentClosure,
     ThreeMomentClosure,
-    ThreeMomentClosureExact,
-    ThreeMomentLookupClosure,
     FixedShapeParameter,
     IceRegimeThresholds,
     IceDistributionParameters,

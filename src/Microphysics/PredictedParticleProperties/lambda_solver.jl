@@ -8,7 +8,7 @@
 ##### from Morrison & Milbrandt (2015a) Equations 1-5.
 #####
 ##### Two closures are available:
-##### 1. Two-moment: Uses the P3Closure μ-λ relationship (Heymsfield 2003)
+##### 1. Two-moment: Uses the μ-λ relationship (Heymsfield 2003)
 ##### 2. Three-moment: Uses sixth moment Z to determine μ independently
 #####
 
@@ -106,12 +106,12 @@ end
 end
 
 """
-    P3Closure
+    TwoMomentClosure
 
 Updated μ-λ closure for P3, including the large-particle diagnostic.
-See [`P3Closure()`](@ref) constructor.
+See [`TwoMomentClosure()`](@ref) constructor.
 """
-struct P3Closure{FT}
+struct TwoMomentClosure{FT}
     # Constants for small particle regime (Heymsfield 2003)
     a :: FT
     b :: FT
@@ -148,14 +148,14 @@ particles to account for riming effects.
 - `μmax_large`: Max μ for large regime (default 20)
 - `D_threshold`: Threshold D_mvd [m] (default 2e-4)
 """
-function P3Closure(FT = Oceananigans.defaults.FloatType;
+function TwoMomentClosure(FT = Oceananigans.defaults.FloatType;
                    a = 0.076 * 0.01^0.8,
                    b = 0.8,
                    c = 2,
                    μmax_small = 6,
                    μmax_large = 20,
                    D_threshold = 2e-4)
-    return P3Closure(FT(a), FT(b), FT(c), FT(μmax_small), FT(μmax_large), FT(D_threshold))
+    return TwoMomentClosure(FT(a), FT(b), FT(c), FT(μmax_small), FT(μmax_large), FT(D_threshold))
 end
 
 """
@@ -163,7 +163,7 @@ end
 
 Compute shape parameter μ.
 """
-@inline function shape_parameter(closure::P3Closure, logλ, L_ice, N_ice, rime_fraction, rime_density, liquid_fraction, mass::IceMassPowerLaw)
+@inline function shape_parameter(closure::TwoMomentClosure, logλ, L_ice, N_ice, rime_fraction, rime_density, liquid_fraction, mass::IceMassPowerLaw)
     FT = typeof(closure.a)
     λ = exp(logλ)
 
@@ -204,25 +204,13 @@ end
 ##### Three-moment closure: Z/N constraint
 #####
 
-abstract type AbstractThreeMomentClosure end
-
-"""
-    ThreeMomentLookupClosure
-
-Three-moment closure that uses lookup tables for shape parameter μ and slope
-parameter λ. See [`ThreeMomentLookupClosure()`](@ref) constructor.
-"""
-struct ThreeMomentLookupClosure{TABLE} <: AbstractThreeMomentClosure
-    table :: TABLE
-end
-
 """
     ThreeMomentClosure
 
 Fortran-parity three-moment closure using the upstream P3 `solve_mui` approximation.
 See [`ThreeMomentClosure()`](@ref) constructor.
 """
-struct ThreeMomentClosure{FT} <: AbstractThreeMomentClosure
+struct ThreeMomentClosure{FT}
     μmin :: FT
     μmax :: FT
 end
@@ -252,66 +240,6 @@ function ThreeMomentClosure(FT = Oceananigans.defaults.FloatType;
                             μmin = 0,
                             μmax = 20)
     return ThreeMomentClosure(FT(μmin), FT(μmax))
-end
-
-"""
-    ThreeMomentClosureExact
-
-Three-moment closure that solves the full Breeze moment constraints against the
-piecewise mass-diameter relation. See [`ThreeMomentClosureExact()`](@ref) constructor.
-"""
-struct ThreeMomentClosureExact{FT} <: AbstractThreeMomentClosure
-    μmin :: FT
-    μmax :: FT
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Construct the exact three-moment closure for gamma size distribution.
-
-With three prognostic moments (mass L, number N, and reflectivity Z), the shape
-parameter μ is diagnosed by solving the full Breeze mass and reflectivity
-constraints using the same piecewise mass-diameter relation employed elsewhere
-in the P3 implementation.
-
-# Three-Moment Approach
-
-For a gamma distribution ``N'(D) = N₀ D^μ e^{-λD}``, the moments are:
-- ``M_0 = N = N₀ Γ(μ+1) / λ^{μ+1}``
-- ``M_6 = Z = N₀ Γ(μ+7) / λ^{μ+7}``
-
-The sixth-to-zeroth moment ratio gives:
-
-```math
-Z/N = Γ(μ+7) / (Γ(μ+1) λ^6)
-```
-
-Combined with the mass constraint, this provides two equations for two
-unknowns (μ, λ), eliminating the need for the empirical μ-λ closure.
-
-# Advantages
-
-- **Physical basis**: μ evolves based on actual size distribution changes
-- **Better representation of size sorting**: Differential sedimentation
-  can narrow or broaden distributions independently of total mass/number
-- **Improved hail simulation**: Crucial for representing the distinct
-  size distributions of large, heavily rimed particles
-
-# Keyword Arguments
-
-- `μmin`: Minimum shape parameter, default 0 (exponential distribution)
-- `μmax`: Maximum shape parameter, default 20
-
-# References
-
-[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) introduced three-moment ice,
-[Milbrandt et al. (2024)](@cite MilbrandtEtAl2024) refined the implementation.
-"""
-function ThreeMomentClosureExact(FT = Oceananigans.defaults.FloatType;
-                                 μmin = 0,
-                                 μmax = 20)
-    return ThreeMomentClosureExact(FT(μmin), FT(μmax))
 end
 
 #####
@@ -627,7 +555,7 @@ end
 $(TYPEDSIGNATURES)
 
 Compute log(L_ice / N_ice) as a function of logλ for two-moment closure.
-Includes L_ice and N_ice arguments to support the P3Closure D_mvd diagnostic.
+Includes L_ice and N_ice arguments to support the TwoMomentClosure D_mvd diagnostic.
 """
 function log_mass_number_ratio(mass::IceMassPowerLaw,
                                closure,
@@ -753,7 +681,7 @@ end
     solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
                  liquid_fraction = zero(typeof(L_ice)),
                  mass = IceMassPowerLaw(),
-                 closure = P3Closure(),
+                 closure = TwoMomentClosure(),
                  logλ_bounds = (log(10), log(P3_LAMBDA_MAX)),
                  max_iterations = 50,
                  tolerance = 1e-10)
@@ -773,7 +701,7 @@ matches the observed ratio. This is the two-moment solver using the
 # Keyword Arguments
 - `liquid_fraction`: Liquid water fraction [-] (default 0)
 - `mass`: Power law parameters (default: `IceMassPowerLaw()`)
-- `closure`: Two-moment closure (default: `P3Closure()`)
+- `closure`: Two-moment closure (default: `TwoMomentClosure()`)
 
 # Returns
 - `logλ`: Log of slope parameter
@@ -781,7 +709,7 @@ matches the observed ratio. This is the two-moment solver using the
 function solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
                       liquid_fraction = zero(typeof(L_ice)),
                       mass = IceMassPowerLaw(),
-                      closure = P3Closure(),
+                      closure = TwoMomentClosure(),
                       logλ_bounds = (log(10), log(P3_LAMBDA_MAX)),
                       max_iterations = 50,
                       tolerance = 1e-10)
@@ -1052,7 +980,7 @@ The solution proceeds in three steps:
 # Keyword Arguments
 
 - `mass`: Power law parameters (default: `IceMassPowerLaw()`)
-- `closure`: Two-moment closure (default: `P3Closure()`)
+- `closure`: Two-moment closure (default: `TwoMomentClosure()`)
 
 # Returns
 
@@ -1078,7 +1006,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Section
 function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
                                   liquid_fraction = zero(typeof(L_ice)),
                                   mass = IceMassPowerLaw(),
-                                  closure = P3Closure(),
+                                  closure = TwoMomentClosure(),
                                   diameter_bounds = nothing)
     FT = typeof(L_ice)
 

@@ -106,12 +106,6 @@ When ``F^f = 0`` the lookup-table generator additionally substitutes
 ``ρ_{g,\text{dry}} \to ρ_\text{rime}`` (the rime-density axis of the table)
 because the partially-rimed regime has zero mass at that point.
 
-!!! note "Breeze helper closure"
-    Breeze implements the `P3Closure` which matches the official P3 Fortran logic.
-    For small particles (``D_{mvd} \le 0.2`` mm), it uses the Heymsfield (2003) power-law relation.
-    For large particles (``D_{mvd} > 0.2`` mm), it uses the diagnostic based on mean volume diameter
-    and rime density to account for riming effects. This ensures consistency with the lookup tables.
-
 !!! note "Three-Moment Mode"
     In the official P3 code, ``μ`` (and the bulk ice density used in rates) are obtained
     from lookup table 3 (`p3_lookupTable_3.dat-v1.4`) by interpolation in the ``Z/Q`` space,
@@ -126,7 +120,7 @@ using CairoMakie
 
 # Sweep ice mass concentration to trace out the μ-λ closure for
 # unrimed and rimed regimes.  Number concentration and rime density
-# are held fixed; (λ, μ) come from the full P3Closure via
+# are held fixed; (λ, μ) come from the full TwoMomentClosure via
 # distribution_parameters.
 N_ice = 1e5
 L_values = 10 .^ range(-7, -2, length=80)
@@ -136,7 +130,7 @@ ax = Axis(fig[1, 1],
     xlabel = "Slope parameter λ [m⁻¹]",
     ylabel = "Shape parameter μ",
     xscale = log10,
-    title = "μ-λ Relationship (P3Closure)")
+    title = "μ-λ Relationship (TwoMomentClosure)")
 
 for (Fᶠ, label, color) in [(0.0, "Fᶠ = 0 (unrimed)", :blue),
                             (0.5, "Fᶠ = 0.5", :orange),
@@ -170,8 +164,9 @@ Given prognostic moments ``L`` (mass concentration) and ``N`` (number concentrat
 plus predicted rime properties ``F^f`` and ``ρ^f``, we solve for the distribution
 parameters ``(N₀, λ, μ)``.
 
-In the official P3 lookup tables, rime and liquid fractions are tabulated on
-discrete bins (0, 1/3, 2/3, 1) and interpolated during lookup.
+In the official P3 lookup tables, rime fraction ``F^f`` and liquid fraction ``F^l``
+are each tabulated on 4 discrete nodes (``\{0, 1/3, 2/3, 1\}``) and interpolated
+during lookup.
 
 ### The Mass-Number Ratio
 
@@ -199,11 +194,10 @@ Finding ``λ`` requires solving:
 \log\left(\frac{L}{N}\right) = \log\left(\frac{\int_0^∞ m(D) N'(D)\, dD}{\int_0^∞ N'(D)\, dD}\right)
 ```
 
-This is a nonlinear equation in ``λ`` (since ``μ = μ(λ)``). In the official P3
+This is a nonlinear equation in ``λ``, since ``μ = μ(λ)``. In the official P3
 code, ``λ`` is determined during lookup-table generation by scanning over a
 fixed range (roughly 10–10⁷ m⁻¹) and selecting the value that best matches L/N
-for the current ``μ`` and piecewise ``m(D)``. The runtime then interpolates ``λ``
-from the tables. The `distribution_parameters` helper in Breeze instead uses a
+for the current ``μ`` and piecewise ``m(D)``. The `distribution_parameters` helper in Breeze instead uses a
 secant solver for direct evaluation.
 
 ```@example p3_psd
@@ -246,11 +240,12 @@ D_mm = range(0.01, 5, length=200)
 D_m = D_mm .* 1e-3
 
 N_ice = 1e5
-for (L, label, color) in [(1e-5, "L = 10⁻⁵ kg/m³", :blue),
-                           (1e-4, "L = 10⁻⁴ kg/m³", :green),
-                           (1e-3, "L = 10⁻³ kg/m³", :red)]
+for (L, L_label, color) in [(1e-5, "L = 10⁻⁵ kg/m³", :blue),
+                             (1e-4, "L = 10⁻⁴ kg/m³", :green),
+                             (1e-3, "L = 10⁻³ kg/m³", :red)]
     params = distribution_parameters(L, N_ice, 0.0, 400.0)
     N_D = @. params.N₀ * D_m^params.μ * exp(-params.λ * D_m)
+    label = L_label * "  (μ = $(round(params.μ, digits=2)))"
     lines!(ax, D_mm, N_D, label=label, color=color)
 end
 
@@ -274,11 +269,12 @@ ax = Axis(fig[1, 1],
 L_ice = 1e-4
 N_ice = 1e5
 
-for (Ff, label, color) in [(0.0, "Fᶠ = 0 (unrimed)", :blue),
-                            (0.3, "Fᶠ = 0.3", :green),
-                            (0.6, "Fᶠ = 0.6", :orange)]
+for (Ff, Ff_label, color) in [(0.0, "Fᶠ = 0 (unrimed)", :blue),
+                               (0.3, "Fᶠ = 0.3", :green),
+                               (0.6, "Fᶠ = 0.6", :orange)]
     params = distribution_parameters(L_ice, N_ice, Ff, 500.0)
     N_D = @. params.N₀ * D_m^params.μ * exp(-params.λ * D_m)
+    label = Ff_label * "  (μ = $(round(params.μ, digits=2)))"
     lines!(ax, D_mm, N_D, label=label, color=color)
 end
 
@@ -335,7 +331,7 @@ This allows independent determination of ``μ`` rather than using the μ-λ rela
 
 Combined with the L/N ratio, this gives two equations for two unknowns (``μ`` and ``λ``).
 In the official P3 code, these constraints are used to build a lookup table that
-returns ``μ`` (and bulk density) by interpolation; ``λ`` is then obtained from
+returns ``μ`` (and bulk density); ``λ`` is then obtained from
 the main table using the diagnosed ``μ``.
 
 The benefit of three-moment ice is improved representation of:
@@ -345,10 +341,8 @@ The benefit of three-moment ice is improved representation of:
 
 Both two-moment and three-moment solvers are implemented:
 
-- **Two-moment**: Use `distribution_parameters(L, N, Fᶠ, ρᶠ)` with `P3Closure`
-- **Three-moment**: Use `distribution_parameters(L, N, Z, Fᶠ, ρᶠ)` with either
-  `ThreeMomentClosure` (Original P3 solver)
-  or `ThreeMomentClosureExact` (Breeze residual solver)
+- **Two-moment**: Use `distribution_parameters(L, N, Fᶠ, ρᶠ)` with `TwoMomentClosure`
+- **Three-moment**: Use `distribution_parameters(L, N, Z, Fᶠ, ρᶠ)` with `ThreeMomentClosure`
 
 ## Summary
 
