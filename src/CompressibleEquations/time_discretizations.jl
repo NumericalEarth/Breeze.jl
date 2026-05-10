@@ -205,7 +205,7 @@ Fields
   vertical acoustic modes are damped solely by the off-centering of the
   implicit pressure-gradient solve (``\\omega > 0.5``), which Klemp et
   al. 2018 eq. (32) shows is algebraically equivalent to a vertical
-  divergence damping with diffusivity ``γ_y = c² Δτ s/2`` where
+  divergence damping with diffusivity ``γ_z = c² Δτ s/2`` where
   ``s = 2\\omega - 1``.
 """
 struct ThermalDivergenceDamping{FT, LS} <: AcousticDampingStrategy
