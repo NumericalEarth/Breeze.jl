@@ -485,8 +485,8 @@ end
 
 function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          substeps = nothing,
-                                         forward_weight = 0.65,
-                                         damping = ThermalDivergenceDamping(coefficient = 0.1),
+                                         forward_weight = FT(0.65),
+                                         damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
                                          substep_distribution = ProportionalSubsteps())
 
@@ -496,11 +496,13 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
     sponge isa Union{Nothing, UpperSponge} ||
         throw(ArgumentError("`sponge` must be `nothing` or an `UpperSponge`"))
 
-    return SplitExplicitTimeDiscretization(substeps,
-                                           convert(FT, forward_weight),
-                                           convert_acoustic_parameter(FT, damping),
-                                           convert_acoustic_parameter(FT, sponge),
-                                           substep_distribution)
+    return SplitExplicitTimeDiscretization(
+        substeps,
+        convert(FT, forward_weight),
+        convert_acoustic_parameter(FT, damping),
+        convert_acoustic_parameter(FT, sponge),
+        substep_distribution,
+    )
 end
 
 """
