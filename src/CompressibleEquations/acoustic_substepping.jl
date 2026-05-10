@@ -25,12 +25,15 @@
 ##### where Cᴸ = γᵐRᵐᴸΠᴸ. The discrete PGF uses the gradient of the
 ##### cell-centered product Cᴸ(ρθ)′.
 #####
-##### Time discretization: horizontal momentum updates are forward-Euler;
-##### the vertical ((ρw)′, (ρθ)′, ρ′) coupling is solved implicitly with
-##### an off-centered Crank-Nicolson scheme — `forward_weight = 0.5` is
-##### classic centered CN (neutrally stable for the linearized inviscid
-##### system), `forward_weight > 0.5` adds dissipation. The implicit step
-##### reduces to a tridiagonal Schur system in (ρw)′ at z-faces.
+##### Time discretization: horizontal momentum updates are forward-Euler
+##### with MPAS-style first-small-step sequencing (the first substep of a
+##### multi-substep stage uses slow tendency only; acoustic horizontal PGF
+##### enters on later substeps). The vertical ((ρw)′, (ρθ)′, ρ′) coupling is
+##### solved implicitly with an off-centered Crank-Nicolson scheme —
+##### `forward_weight = 0.5` is classic centered CN (neutrally stable for
+##### the linearized inviscid system), `forward_weight > 0.5` adds
+##### dissipation. The implicit step reduces to a tridiagonal Schur system
+##### in (ρw)′ at z-faces.
 #####
 ##### After each stage's substep loop, the full prognostic state is
 ##### recovered: ρ = ρᴸ + ρ′, ρθ = ρθᴸ + (ρθ)′, ρu = ρuᴸ + (ρu)′, etc.,
@@ -876,7 +879,7 @@ end
 # (ρu)′^{τ+Δτ} = (ρu)′^τ + Δτ · (Gⁿρu − ∂x pᴸ − ∂x(Cᴸ (ρθ)′))
 # (ρv)′^{τ+Δτ} = (ρv)′^τ + Δτ · (Gⁿρv − ∂y pᴸ − ∂y(Cᴸ (ρθ)′))
 @kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, Δτ, ρθ′, Πᴸ, p,
-                                            Gⁿρu, Gⁿρv, γRᵐᴸ)
+                                            Gⁿρu, Gⁿρv, γRᵐᴸ, apply_pressure_gradient)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -891,8 +894,10 @@ end
         not_bdy_x = !on_x_boundary(i, j, k, grid)
         not_bdy_y = !on_y_boundary(i, j, k, grid)
 
-        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - ∂x_p) * not_bdy_x
-        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - ∂y_p) * not_bdy_y
+        pressure_gradient_factor = ifelse(apply_pressure_gradient, one(Δτ), zero(Δτ))
+
+        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - pressure_gradient_factor * ∂x_p) * not_bdy_x
+        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - pressure_gradient_factor * ∂y_p) * not_bdy_y
     end
 end
 
@@ -909,6 +914,9 @@ const BY_grid = AbstractUnderlyingGrid{FT, <:Any, Bounded}                      
 
 @inline on_x_boundary(i, j, k, grid::BX_grid) = (i == 1) | (i == grid.Nx + 1)
 @inline on_y_boundary(i, j, k, grid::BY_grid) = (j == 1) | (j == grid.Ny + 1)
+
+@inline apply_horizontal_pressure_gradient_substep(substep, Nτ) =
+    (substep != 1) | (Nτ == 1)
 
 # Build per-column predictors `ρ′★`, `ρθ′★` (cell centers) AND
 # the explicit RHS for the tridiagonal `(ρw)′ᵐ⁺` solve at z-faces.
@@ -1381,8 +1389,15 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
 
     # Substep loop
     for substep in 1:Nτ
-        # Step A: explicit horizontal forward of (ρu)′, (ρv)′ using the
-        # current (ρθ)′ in the linearized PGF.
+        # Step A: explicit horizontal forward of (ρu)′, (ρv)′. Following the
+        # MPAS forward-backward acoustic sequence, the first small step in a
+        # multi-step stage seeds horizontal perturbation momentum from the
+        # slow tendency only; acoustic pressure gradients enter on subsequent
+        # small steps after the mass/thermodynamic perturbations have been
+        # advanced once. For degenerate one-substep stages, apply the pressure
+        # gradient immediately so the stage still contains the fast force.
+        apply_pressure_gradient = apply_horizontal_pressure_gradient_substep(substep, Nτ)
+
         launch!(arch, grid, :xyz, _explicit_horizontal_step!,
                 substepper.momentum_perturbation.u,
                 substepper.momentum_perturbation.v,
@@ -1390,7 +1405,8 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
                 substepper.density_potential_temperature_perturbation,
                 substepper.linearization_exner,
                 model.dynamics.pressure,
-                Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture)
+                Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture,
+                apply_pressure_gradient)
 
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)

@@ -10,7 +10,8 @@ using Breeze
 using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
                                     compute_acoustic_substeps,
-                                    sponge_term_diag, sponge_rhs
+                                    sponge_term_diag, sponge_rhs,
+                                    apply_horizontal_pressure_gradient_substep
 using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, dynamics_density
@@ -26,6 +27,14 @@ using Metal: Metal, MetalBackend
 const arches = (Metal.functional() || get(ENV, "BREEZE_FORCE_METAL_FUNCTIONAL", "false") == "true") ? (default_arch, GPU(MetalBackend())) : (default_arch,)
 
 as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float_types()
+
+@testset "MPAS first-small-step pressure-gradient sequencing" begin
+    @test apply_horizontal_pressure_gradient_substep(1, 1)
+    @test !apply_horizontal_pressure_gradient_substep(1, 2)
+    @test apply_horizontal_pressure_gradient_substep(2, 2)
+    @test !apply_horizontal_pressure_gradient_substep(1, 6)
+    @test apply_horizontal_pressure_gradient_substep(6, 6)
+end
 
 #####
 ##### Test AcousticSubstepper construction

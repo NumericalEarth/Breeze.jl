@@ -188,6 +188,20 @@ Within each substep of size ``Δτ``, the perturbation update has two phases.
 \end{aligned}
 ```
 
+For the first substep of a multi-substep RK stage, Breeze follows the MPAS
+forward-backward sequence and seeds ``(ρu)'`` and ``(ρv)'`` from the slow
+tendencies only:
+
+```math
+(ρu)'_{τ+Δτ} = (ρu)'_τ + Δτ G^s_{ρu}, \qquad
+(ρv)'_{τ+Δτ} = (ρv)'_τ + Δτ G^s_{ρv}.
+```
+
+The acoustic horizontal pressure-gradient term is applied on subsequent
+substeps, after the mass and thermodynamic perturbations have been advanced
+once. If a stage has only one acoustic substep, the pressure gradient is
+applied immediately so the stage still includes the fast force.
+
 **Vertical implicit solve — column tridiag in ``(ρw)'``.** The vertical-momentum, density,
 and ``ρθ`` perturbations are coupled through the vertical pressure gradient, the vertical
 divergence in the mass and ``ρθ`` equations, and the buoyancy term. To remove the
