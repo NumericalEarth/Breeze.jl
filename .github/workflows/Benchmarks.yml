@@ -25,7 +25,7 @@ env:
 
 jobs:
   run-benchmarks:
-    name: "Run benchmarks - dynamics ${{ matrix.dynamics }} - microphysics ${{ matrix.microphysics }} - grid ${{ matrix.grid }} - advection ${{ matrix.advection }}"
+    name: "Run benchmarks - dynamics ${{ matrix.dynamics }} - microphysics ${{ matrix.microphysics }} - grid ${{ matrix.grid }} - advection ${{ matrix.advection }} - backend ${{ matrix.backend }} - topology ${{ matrix.topology }}"
     permissions:
       actions: write
       contents: write
@@ -40,14 +40,48 @@ jobs:
             microphysics: 'nothing'
             grid: '256x256x128, 512x512x256, 768x768x256'
             advection: 'WENO5, WENO9'
+            backend: 'vanilla'
+            topology: 'PPB'
+            extra_flags: ''
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '512x512x256'
             advection: 'WENO5'
+            backend: 'vanilla'
+            topology: 'PPB'
+            extra_flags: ''
           - dynamics: 'anelastic'
             microphysics: 'MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium'
             grid: '512x512x256'
             advection: 'WENO5'
+            backend: 'vanilla'
+            topology: 'PPB'
+            extra_flags: ''
+          # Reactant vs vanilla — compressible_explicit + WENO5 + 1M mixed-phase
+          # non-eq microphysics with ice on a PBB grid. Uses --simplified to
+          # drop the geostrophic forcing and field-dependent surface drag BCs
+          # (which do not currently materialize on ReactantState). Runs in
+          # Float64 because Reactant's @trace loop trips on the Float32-grid
+          # / Float64-clock mismatch.
+          - dynamics: 'compressible_explicit'
+            microphysics: '1M_MixedNonEquilibrium'
+            grid: '256x256x128'
+            advection: 'WENO5'
+            backend: 'vanilla, reactant'
+            topology: 'PBB'
+            extra_flags: '--simplified --float_type=Float64'
+          # AD: forward+backward via Enzyme reverse-mode through the same
+          # @trace checkpointed loop. Reactant-only by construction. No
+          # microphysics in v1 (Enzyme correctness through the 1M scheme is
+          # untested), small grid + small Nsteps to keep the gradient compile
+          # and per-step memory bounded.
+          - dynamics: 'compressible_explicit'
+            microphysics: 'nothing'
+            grid: '64x64x32'
+            advection: 'WENO5'
+            backend: 'reactant'
+            topology: 'PBB'
+            extra_flags: '--ad --simplified --float_type=Float64 --warmup_steps 1 --time_steps 1'
     defaults:
       run:
         shell: bash
@@ -67,10 +101,10 @@ jobs:
         timeout-minutes: 45
         run: |
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --warmup_steps 8 --time_steps 80
+          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}'
+          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
           path: benchmarking/benchmark_results.*
           retention-days: 90
           overwrite: false
@@ -121,11 +155,26 @@ jobs:
               dynamics = d['dynamics']
               ft = d['float_type']
               microphysics = d['microphysics']
+              backend = d.get('backend', 'vanilla')
+              mode = d.get('mode', 'forward')
 
               gpu = d['metadata']['gpu_name']
 
               grid = d['grid_size']
               grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
+
+              # AD (forward+backward via Enzyme) entries get their own chart.
+              # Skip the forward-only clauses below so an AD point doesn't
+              # also land on a forward chart that happens to match its config.
+              if mode == 'ad':
+                  level_1 = f'{base_name}; AD; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
+                  level_2 = f'Advection: {advection}'
+                  level_3 = f'{gpu}'
+                  level_4 = f'{grid_str}'
+
+                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  continue
 
               # We want to group benchmarks in different ways. NOTE:
               # the same benchmark may appear in multiple groups
@@ -154,6 +203,18 @@ jobs:
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
                   level_4 = f'{grid_str}'
+
+                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+
+              # Reactant vs vanilla sweep: compare backends across grid sizes
+              # for a fixed compressible_explicit + WENO5 + 1M mixed-phase
+              # non-eq microphysics configuration.
+              if dynamics == 'compressible_explicit' and microphysics == '1M_MixedNonEquilibrium' and advection == 'WENO5':
+                  level_1 = f'{base_name}; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
+                  level_2 = f'Compare backends'
+                  level_3 = f'{gpu}'
+                  level_4 = f'{backend} {grid_str}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
