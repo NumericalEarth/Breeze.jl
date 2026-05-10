@@ -437,13 +437,13 @@ for arch in arches
 
         bottom_diag = sponge_term_diag(1, 1, 1, grid, sponge, δτᵐ⁺)
         lid_diag = sponge_term_diag(1, 1, grid.Nz + 1, grid, sponge, δτᵐ⁺)
-        lid_rhs = sponge_rhs(1, 1, grid.Nz + 1, grid, sponge, δτˢ⁻, old_ρw)
+        lid_rhs = @allowscalar sponge_rhs(1, 1, grid.Nz + 1, grid, sponge, δτˢ⁻, old_ρw)
 
         @test bottom_diag == 0
         @test lid_diag ≈ δτᵐ⁺ * damping_rate
         @test lid_rhs ≈ δτˢ⁻ * damping_rate * FT(4)
         @test sponge_term_diag(1, 1, grid.Nz + 1, grid, nothing, δτᵐ⁺) == 0
-        @test sponge_rhs(1, 1, grid.Nz + 1, grid, nothing, δτˢ⁻, old_ρw) == 0
+        @test @allowscalar sponge_rhs(1, 1, grid.Nz + 1, grid, nothing, δτˢ⁻, old_ρw) == 0
     end
 
     #####
