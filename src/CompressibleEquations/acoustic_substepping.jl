@@ -1349,8 +1349,8 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
     grid = model.grid
     arch = architecture(grid)
 
-    g   = convert(eltype(grid), model.thermodynamic_constants.gravitational_acceleration)
     FT  = eltype(grid)
+    g   = convert(FT, model.thermodynamic_constants.gravitational_acceleration)
 
     ω = FT(substepper.forward_weight)            # CN weight on the new side
     one_minus_ω = FT(1) - ω                       # CN weight on the old side
