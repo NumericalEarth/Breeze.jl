@@ -378,8 +378,13 @@ Two CFL-like constraints govern the choice of ``Δt`` and the substep count ``N`
    Δt ≤ \frac{\min(Δx, Δy, Δz)}{|\boldsymbol{u}|} .
    ```
 
-   The split-explicit treatment decouples the acoustic dynamics from the outer integrator,
-   so the outer step is bounded primarily by the advective CFL.
+   The split-explicit treatment decouples the fastest acoustic propagation from the outer
+   integrator, so the advective CFL is the first outer-step constraint to check. It is not
+   the only practical constraint, however: moist cases with strong initial acoustic
+   adjustment can still require a smaller outer-step cap than the advective CFL alone
+   would choose. In reduced RICO validation with one-moment microphysics, uncapped adaptive
+   stepping became unstable when the outer step grew to roughly ``30\,``s, while
+   ``max_Δt = 20\,``s completed a 6-hour compact run.
 
 The default `substeps = nothing` adaptively chooses ``N`` from the horizontal acoustic CFL
 each step. For benchmarks this is normally what one wants; setting an explicit integer pins
