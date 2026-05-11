@@ -88,8 +88,26 @@ end
 # SaturationAdjustment extends this in Microphysics to return μ.equilibrium
 @inline microphysics_phase_equilibrium(μ) = WarmPhaseEquilibrium()
 
-# Compute saturation specific humidity for :total_moisture flavor
-# This is the saturation specific humidity when qᵗ = qᵛ⁺ (all moisture is vapor)
+"""
+$(TYPEDSIGNATURES)
+
+Compute the *saturation total specific moisture* under the assumption that all moisture is vapor at saturation, 
+``qᵗ = qᵛ⁺``. With this assumption, the equation of state for moist air can be solved in closed form, yielding an
+expression for the saturation specific humidity in terms of temperature `T` and reference pressure `pᵣ` alone:
+
+```math
+qᵛ⁺ = \\frac{ϵᵈᵛ \\, pᵛ⁺(T)}{pᵣ + δᵈᵛ \\, pᵛ⁺(T)} ,
+```
+
+where ``ϵᵈᵛ ≡ Rᵈ / Rᵛ ≈ 0.622`` and ``δᵈᵛ ≡ ϵᵈᵛ - 1 ≈ -0.378``.
+
+The resulting expression coincides with the saturation specific humidity used in the COARE 3.6 [Edson (2013)](@cite Edson2013) 
+and Large-Yeager [(2004)](@cite LargeYeager2004) ocean bulk-flux algorithms, where the air-side specific humidity at the surface 
+is unknown a priori and [`saturation_specific_humidity`](@ref Breeze.Thermodynamics.saturation_specific_humidity) cannot be 
+evaluated directly.
+
+See the [Atmosphere Thermodynamics](@ref Thermodynamics-section) section of the documentation for a derivation.
+"""
 @inline function saturation_total_specific_moisture(T, pᵣ, constants, surface)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     Rᵈ = dry_air_gas_constant(constants)

@@ -717,6 +717,38 @@ This figure shows how the liquid fraction ``λ`` smoothly interpolates between p
 phases are more pronounced. The mixed-phase model allows for realistic representation of
 conditions near the freezing point where both liquid and ice may coexist.
 
+### Saturation specific humidity from temperature and pressure alone
+
+The expression ``qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)`` is _circular_: the density ``ρ`` depends on the moisture content of the air, which is itself what we are trying to compute. Recall the mixture gas constant ``Rᵐ`` introduced earlier,
+
+```math
+Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ , \qquad \text{so} \qquad ρ = \frac{p}{Rᵐ T} .
+```
+
+Computing ``qᵛ⁺`` therefore requires knowing ``qᵛ`` in advance. We can break the circularity by making an assumption about the moisture state of the air. There are two useful assumptions, each yielding a closed-form expression in ``T`` and ``p`` alone.
+
+#### "Total moisture" assumption: all moisture is vapor at saturation
+
+If we assume the air is saturated and contains _no condensate_ (``qˡ = qⁱ = 0``, hence ``qᵗ = qᵛ = qᵛ⁺``), the mixture gas constant becomes ``Rᵐ = (1 - qᵛ⁺) Rᵈ + qᵛ⁺ Rᵛ``. Substituting into the ideal-gas relation and into ``qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)`` and solving for ``qᵛ⁺``,
+
+```math
+qᵛ⁺ = \frac{ϵᵈᵛ \, pᵛ⁺(T)}{p + δᵈᵛ \, pᵛ⁺(T)} ,
+```
+
+where ``ϵᵈᵛ ≡ Rᵈ / Rᵛ ≈ 0.622`` is the dry-air-to-vapor molar mass ratio and ``δᵈᵛ ≡ ϵᵈᵛ - 1 ≈ -0.378``. This is what [`saturation_total_specific_moisture`](@ref Breeze.AtmosphereModels.Diagnostics.saturation_total_specific_moisture) computes.
+
+This expression uses density via the ideal gas law, but resolves the circular dependency between density and specific humidity by assuming saturation. The resulting formula coincides with the saturation specific humidity used in the COARE 3.6 [Edson2013](@citet) and Large–Yeager [LargeYeager2004](@citet) ocean bulk-flux algorithms, where it is preferred over an iterative density-based formula because the air-side specific humidity at the surface is unknown a priori.
+
+#### "Equilibrium" assumption: condensate may be present
+
+If the air is in thermodynamic equilibrium with possibly some condensate (``qˡ`` and ``qⁱ`` not necessarily zero, ``qᵗ ≥ qᵛ⁺``, ``qᵛ = qᵛ⁺``), the mixture gas constant is ``Rᵐ = (1 - qᵗ) Rᵈ + qᵛ⁺ Rᵛ`` and ``qᵗ`` is taken as a known input. Solving as above,
+
+```math
+qᵛ⁺ = \frac{ϵᵈᵛ \, (1 - qᵗ) \, pᵛ⁺(T)}{p - pᵛ⁺(T)} ,
+```
+
+which is equation (37) of [Pressel2015](@citet) and the saturated branch of [`equilibrium_saturation_specific_humidity`](@ref Breeze.Thermodynamics equilibrium_saturation_specific_humidity). When the air is unsaturated (``qᵗ < qᵛ⁺``), `equilibrium_saturation_specific_humidity` falls back to the original density-based formula with ``ρ`` computed using ``Rᵐ = (1 - qᵗ) Rᵈ + qᵗ Rᵛ``.
+
 ## Moist static energy
 
 For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE),

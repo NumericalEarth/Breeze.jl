@@ -187,20 +187,31 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the *equilibrium saturation specific humidity* ``qᵛ⁺`` for air at
-temperature `T`, reference pressure `pᵣ`, and total specific moisture `qᵗ`,
-over a given `surface`.
+Compute the *equilibrium saturation specific humidity* ``qᵛ⁺`` for air at temperature `T`, reference pressure `p`, 
+and total specific moisture `qᵗ`, over a given `surface`. The function returns the correct saturation specific humidity 
+in both saturated and unsaturated conditions:
 
-This function returns the correct saturation specific humidity in both saturated
-and unsaturated conditions:
+- In **saturated conditions** (``qᵗ ≥ qᵛ⁺``), condensate is present and ``qᵛ = qᵛ⁺``. The dry-air mass fraction 
+  is fixed by ``qᵗ`` (since ``qᵈ = 1 - qᵗ``), and the equation of state can be solved in closed form or ``qᵛ⁺``, 
+  yielding equation (37) of [Pressel et al. (2015)](@cite Pressel2015):
 
-- In **unsaturated conditions** (``qᵗ < qᵛ⁺``), all moisture is vapor and the
-  density is computed assuming ``qᵛ = qᵗ``.
+  ```math
+  qᵛ⁺ = \\frac{ϵᵈᵛ \\, (1 - qᵗ) \\, pᵛ⁺(T)}{p - pᵛ⁺(T)} ,
+  ```
 
-- In **saturated conditions** (``qᵗ ≥ qᵛ⁺``), the vapor specific humidity equals
-  the saturation value and the density is computed assuming ``qᵛ = qᵛ⁺``.
+  where ``ϵᵈᵛ ≡ Rᵈ / Rᵛ ≈ 0.622``.
 
-The saturated formula corresponds to equation (37) in [Pressel et al. (2015)](@cite Pressel2015).
+- In **unsaturated conditions** (``qᵗ < qᵛ⁺``), all moisture is vapor and ``qᵛ = qᵗ``. The density is then 
+  ``ρ = p / (Rᵐ T)`` with mixture gas constant ``Rᵐ = (1 - qᵗ) Rᵈ + qᵗ Rᵛ``, and
+
+  ```math
+  qᵛ⁺ = \\frac{pᵛ⁺(T)}{ρ \\, Rᵛ \\, T} .
+  ```
+
+The function selects the branch by computing the unsaturated ``qᵛ⁺`` and comparing with `qᵗ`. See also
+[`saturation_total_specific_moisture`](@ref Breeze.AtmosphereModels.Diagnostics.saturation_total_specific_moisture),
+which is the special case ``qᵗ = qᵛ⁺``, and the [Atmosphere Thermodynamics](@ref Thermodynamics-section) section of
+the documentation for a derivation.
 """
 @inline function equilibrium_saturation_specific_humidity(T, p, qᵗ, constants, surface)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
