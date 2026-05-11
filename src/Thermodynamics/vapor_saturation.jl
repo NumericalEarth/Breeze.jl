@@ -191,8 +191,8 @@ Compute the *equilibrium saturation specific humidity* ``qᵛ⁺`` for air at te
 and total specific moisture `qᵗ`, over a given `surface`. The function returns the correct saturation specific humidity
 in both saturated and unsaturated conditions:
 
-- In **saturated conditions** (``qᵗ ≥ qᵛ⁺``), condensate is present and ``qᵛ = qᵛ⁺``. The dry-air mass fraction 
-  is fixed by ``qᵗ`` (since ``qᵈ = 1 - qᵗ``), and the equation of state can be solved in closed form or ``qᵛ⁺``, 
+- In **saturated conditions** (``qᵗ ≥ qᵛ⁺``), condensate is present and ``qᵛ = qᵛ⁺``. The dry-air mass fraction
+  is fixed by ``qᵗ`` (since ``qᵈ = 1 - qᵗ``), and the equation of state can be solved in closed form or ``qᵛ⁺``,
   yielding equation (37) of [Pressel et al. (2015)](@cite Pressel2015):
 
   ```math
