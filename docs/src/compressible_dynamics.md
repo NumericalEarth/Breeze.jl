@@ -386,6 +386,14 @@ Two CFL-like constraints govern the choice of ``Δt`` and the substep count ``N`
    stepping became unstable when the outer step grew to roughly ``30\,``s, while
    ``max_Δt = 20\,``s completed a 6-hour compact run.
 
+For LES cases translated from anelastic dynamics, the advective CFL is therefore a
+performance knob rather than a complete stability criterion. Compact BOMEX and RICO
+validation runs can reach ``\mathrm{CFL} = 1.4`` for 1 simulated hour, but this does not
+guarantee a faster end-to-end run: the split-explicit acoustic loop can dominate the cost,
+and RICO still requires an outer-step cap for longer integrations. Benchmark both the
+accepted ``Δt`` and the acoustic substep count ``N`` when comparing with anelastic runs,
+which commonly use ``\mathrm{CFL} \approx 0.7``.
+
 The default `substeps = nothing` adaptively chooses ``N`` from the horizontal acoustic CFL
 each step. For benchmarks this is normally what one wants; setting an explicit integer pins
 ``Δτ = Δt / N`` for reproducibility.
