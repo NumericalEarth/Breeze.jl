@@ -737,7 +737,7 @@ qᵛ⁺ = \frac{ϵᵈᵛ \, pᵛ⁺(T)}{p + δᵈᵛ \, pᵛ⁺(T)} ,
 
 where ``ϵᵈᵛ ≡ Rᵈ / Rᵛ ≈ 0.622`` is the dry-air-to-vapor molar mass ratio and ``δᵈᵛ ≡ ϵᵈᵛ - 1 ≈ -0.378``. This is what [`saturation_total_specific_moisture`](@ref Breeze.AtmosphereModels.Diagnostics.saturation_total_specific_moisture) computes.
 
-This expression uses density via the ideal gas law, but resolves the circular dependency between density and specific humidity by assuming saturation. The resulting formula coincides with the saturation specific humidity used in the COARE 3.6 [Edson2013](@citet) and Large–Yeager [LargeYeager2004](@citet) ocean bulk-flux algorithms, where it is preferred over an iterative density-based formula because the air-side specific humidity at the surface is unknown a priori.
+This expression uses density via the ideal gas law, but resolves the circular dependency between density and specific humidity by assuming saturation. The resulting formula coincides with the saturation specific humidity used in the COARE 3.6 [Edson2013](@citet) air-sea bulk-flux algorithm.
 
 #### "Equilibrium" assumption: condensate may be present
 
