@@ -102,8 +102,8 @@ qᵛ⁺ = \\frac{ϵᵈᵛ \\, pᵛ⁺(T)}{pᵣ + δᵈᵛ \\, pᵛ⁺(T)} ,
 where ``ϵᵈᵛ ≡ Rᵈ / Rᵛ ≈ 0.622`` and ``δᵈᵛ ≡ ϵᵈᵛ - 1 ≈ -0.378``.
 
 The resulting expression coincides with the saturation specific humidity used in the COARE 3.6 [Edson (2013)](@cite Edson2013) 
-and Large-Yeager [(2004)](@cite LargeYeager2004) ocean bulk-flux algorithms, where the air-side specific humidity at the surface 
-is unknown a priori and [`saturation_specific_humidity`](@ref Breeze.Thermodynamics.saturation_specific_humidity) cannot be 
+air-sea bulk-flux algorithms, where the air-side specific humidity at the surface is unknown a priori and
+[`saturation_specific_humidity`](@ref Breeze.Thermodynamics.saturation_specific_humidity) cannot be
 evaluated directly.
 
 See the [Atmosphere Thermodynamics](@ref Thermodynamics-section) section of the documentation for a derivation.
