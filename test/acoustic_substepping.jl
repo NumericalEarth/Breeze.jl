@@ -70,16 +70,34 @@ for arch in arches
         end
 
         @testset "Custom parameters" begin
+            length_scale = Float64(250)
+            sponge_rate = Float64(0.3)
+            sponge_depth = Float64(1200)
             td = SplitExplicitTimeDiscretization(substeps=10,
                                                  forward_weight=0.55,
-                                                 damping=ThermalDivergenceDamping(coefficient=0.2))
+                                                 damping=(ThermalDivergenceDamping(coefficient=0.2,
+                                                                                   length_scale=length_scale),
+                                                          VorticityDamping(coefficient=0.03)),
+                                                 sponge=UpperSponge(damping_rate=sponge_rate,
+                                                                    depth=sponge_depth))
             @test td.forward_weight isa FT
-            @test td.damping.coefficient isa FT
+            @test td.damping[1].coefficient isa FT
+            @test td.damping[1].length_scale isa FT
+            @test td.damping[2].coefficient isa FT
+            @test td.sponge.damping_rate isa FT
+            @test td.sponge.depth isa FT
             acoustic = AcousticSubstepper(grid, td)
             @test acoustic.substeps == 10
             @test acoustic.forward_weight ≈ FT(0.55)
-            @test acoustic.damping isa ThermalDivergenceDamping
-            @test acoustic.damping.coefficient ≈ FT(0.2)
+            @test acoustic.damping isa Tuple
+            @test acoustic.damping[1] isa ThermalDivergenceDamping
+            @test acoustic.damping[1].coefficient ≈ FT(0.2)
+            @test acoustic.damping[1].length_scale ≈ FT(length_scale)
+            @test acoustic.damping[2] isa VorticityDamping
+            @test acoustic.damping[2].coefficient ≈ FT(0.03)
+            @test acoustic.sponge isa UpperSponge
+            @test acoustic.sponge.damping_rate ≈ FT(sponge_rate)
+            @test acoustic.sponge.depth ≈ FT(sponge_depth)
         end
     end
 
