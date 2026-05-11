@@ -387,12 +387,12 @@ Two CFL-like constraints govern the choice of ``Δt`` and the substep count ``N`
    ``max_Δt = 20\,``s completed a 6-hour compact run.
 
 For LES cases translated from anelastic dynamics, the advective CFL is therefore a
-performance knob rather than a complete stability criterion. Compact BOMEX and RICO
-validation runs can reach ``\mathrm{CFL} = 1.4`` for 1 simulated hour, but this does not
-guarantee a faster end-to-end run: the split-explicit acoustic loop can dominate the cost,
-and RICO still requires an outer-step cap for longer integrations. Benchmark both the
-accepted ``Δt`` and the acoustic substep count ``N`` when comparing with anelastic runs,
-which commonly use ``\mathrm{CFL} \approx 0.7``.
+performance knob rather than a complete stability criterion. Same-resolution BOMEX and
+RICO pilot runs with compressible substepping completed 6 simulated hours at
+``\mathrm{CFL} = 1.4``, but this did not guarantee a faster end-to-end run: the
+split-explicit acoustic loop can dominate the cost. In the same RICO harness the anelastic
+run failed at ``\mathrm{CFL} = 1.4`` and completed at ``\mathrm{CFL} = 0.7``. Benchmark
+both the accepted ``Δt`` and the acoustic substep count ``N`` when comparing formulations.
 
 The default `substeps = nothing` adaptively chooses ``N`` from the horizontal acoustic CFL
 each step. For benchmarks this is normally what one wants; setting an explicit integer pins
@@ -418,10 +418,12 @@ The pairing ``ω = 0.65, α = 0.1`` is verified by:
 | DCMIP-2016 dry baroclinic wave           | Stable for 12 simulated h × ``Δt = 225\,``s on ``360 × 160 × 64`` lat-lon grid |
 | DCMIP-2016 moist baroclinic wave         | Stable for 1 simulated h × ``Δt = 20\,``s on ``360 × 160 × 64`` lat-lon grid with one-moment microphysics |
 
-Removing the damping (``α = 0`` or `NoDivergenceDamping()`) restores the
-``≈ 1.8×``-per-outer-step rest-atmosphere blow-up at ``Δt = 20\,``s; lowering the
-off-centering to ``ω = 0.55`` requires correspondingly larger ``α`` to remain stable on
-the same tests.
+The exact discrete rest atmosphere is also covered with
+`NoDivergenceDamping()` and ``ω = 0.55`` in `test/substepper_rest_state.jl`; the
+stage-rewind formulation keeps that state bounded at ``Δt = 20\,``s. This should not be
+interpreted as a recommendation to remove damping in production: noisy baroclinic-wave and
+LES cases still use the default horizontal Klemp damping to control grid-scale divergent
+acoustic modes.
 
 ## Comparison with anelastic dynamics
 

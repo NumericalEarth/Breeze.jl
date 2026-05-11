@@ -270,17 +270,17 @@ Fields
   physics) and asymmetric PGF off-diagonals on a stratified ``\\bar\\theta(z)``,
   so the substep operator ``U`` has spectral radius ``\\rho(U) = 1``
   but operator norm ``\\|U\\|_2 \\gg 1`` (≈ 44 at ``\\Delta t = 20`` s,
-  ``\\omega = 0.55``, no damping). Distributed FP-noise excites the
-  non-normal transient-amplification subspace, leading to a
-  rest-atmosphere blow-up in the undamped ``\\omega = 0.55`` diagnostic.
-  The default off-centering plus Klemp horizontal divergence damping
-  shrinks ``\\|U^k\\|`` over enough ``k`` and breaks the soft outer-step
-  CFL — this damping is REQUIRED for stability at production ``\\Delta t``.
+  ``\\omega = 0.55``, no damping). Distributed FP-noise can excite the
+  non-normal transient-amplification subspace. The stage-rewind
+  formulation keeps the exact discrete rest atmosphere bounded even
+  without divergence damping, but the default off-centering plus Klemp
+  horizontal divergence damping shrinks ``\\|U^k\\|`` over enough ``k``
+  and damps acoustic noise in production baroclinic-wave and LES runs.
 - `damping`: Acoustic divergence damping strategy. Default:
-  [`ThermalDivergenceDamping`](@ref) with coefficient 0.1. Required for
-  stability at production ``\\Delta t``; passing
-  [`NoDivergenceDamping`](@ref) will cause the rest atmosphere to
-  amplify ~1.8× per outer step at ``\\Delta t = 20`` s.
+  [`ThermalDivergenceDamping`](@ref) with coefficient 0.1. The exact
+  discrete rest atmosphere is covered by `test/substepper_rest_state.jl`
+  even with [`NoDivergenceDamping`](@ref), but noisy acoustic production
+  cases still need damping to control grid-scale divergent modes.
 - `sponge`: Optional [`UpperSponge`](@ref) that applies implicit
   Rayleigh damping to ``(ρw)′`` inside the substep loop's column tridiag,
   absorbing acoustic / gravity-wave energy in a layer below the rigid

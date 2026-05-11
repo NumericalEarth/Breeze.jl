@@ -68,7 +68,7 @@ function _build_rest_model(arch; substeps = nothing,
     grid = _build_rest_grid(arch; grid_kwargs...)
     constants = ThermodynamicConstants(eltype(grid))
     # Pass `nothing` to defer to the SplitExplicit defaults (forward_weight
-    # = 0.6, ThermalDivergenceDamping coef = 0.1) — that is the production
+    # = 0.65, ThermalDivergenceDamping coef = 0.1) — that is the production
     # configuration and the one Phase 4 stabilizes.
     td_kwargs = (; substeps)
     forward_weight === nothing || (td_kwargs = (; td_kwargs..., forward_weight))
@@ -218,7 +218,7 @@ end
 ##### (≈ 1e-13 m/s for Float64) over arbitrarily many outer steps. The
 ##### envelope must stay below 1e-10 m/s — five orders of magnitude
 ##### slack — for every Δt in the sweep, at the default
-##### `forward_weight = 0.55` with `NoDivergenceDamping`.
+##### `forward_weight = 0.65` with horizontal Klemp damping.
 #####
 ##### This is the rest-atmosphere drift reproducer for the historical
 ##### factor-2-per-outer-step instability; anyone who breaks the
@@ -264,11 +264,9 @@ end
     # range of Δt up to the documented production value (20 s).
     # Phase 4 fix (stage-entry refresh + rewind initialization, with the
     # default `forward_weight = 0.65` and horizontal Klemp damping):
-    # both Δt cases now pass at the 1e-10 m/s bound. The legacy "broken"
-    # configuration `forward_weight = 0.55, NoDivergenceDamping()` still
-    # blows up at Δt = 20 s — `@test_broken` documents that, so anyone
-    # who claims to fix it without addressing the matrix asymmetry
-    # (Phase 4 P4.5+) sees their improvement become a real `@test`.
+    # both Δt cases now pass at the 1e-10 m/s bound. The historically
+    # fragile `forward_weight = 0.55, NoDivergenceDamping()` rest case is
+    # checked below as a separate exact-rest contract.
     Δt_cases = (0.5, 20.0)
 
     n_steps = 200
@@ -284,11 +282,11 @@ end
     end
 
     # Previously a regression: `forward_weight = 0.55, NoDivergenceDamping()`
-    # NaN'd at Δt = 20 s. Fixed by SK08-faithful per-stage refresh
+    # NaN'd at Δt = 20 s. Fixed by stage-entry refresh and rewind
     # (`prepare_acoustic_cache!` + `initialize_stage_perturbations!`):
-    # the rewind term in the perturbation initial condition keeps the
-    # rest atmosphere at machine ε independent of the linearization
-    # base's exact value.
+    # the rewind term keeps the exact discrete rest atmosphere at machine
+    # ε even without divergence damping. Production noisy-flow cases still
+    # use damping to control acoustic grid-scale modes.
     let Δt = 20.0
         model = _build_rest_model(default_arch;
                                   Nx = 8, Ny = 8, Nz = 32, Lz = 10e3,
