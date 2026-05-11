@@ -201,7 +201,7 @@ in both saturated and unsaturated conditions:
 
   where ``ϵᵈᵛ ≡ Rᵈ / Rᵛ ≈ 0.622``.
 
-- In **unsaturated conditions** (``qᵗ < qᵛ⁺``), all moisture is vapor and ``qᵛ = qᵗ``. The density is then 
+- In **unsaturated conditions** (``qᵗ < qᵛ⁺``), all moisture is vapor and ``qᵛ = qᵗ``. The density is then
   ``ρ = p / (Rᵐ T)`` with mixture gas constant ``Rᵐ = (1 - qᵗ) Rᵈ + qᵗ Rᵛ``, and
 
   ```math
