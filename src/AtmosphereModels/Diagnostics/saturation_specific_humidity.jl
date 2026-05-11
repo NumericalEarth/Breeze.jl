@@ -91,7 +91,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the *saturation total specific moisture* under the assumption that all moisture is vapor at saturation, 
+Compute the *saturation total specific moisture* under the assumption that all moisture is vapor at saturation,
 ``qᵗ = qᵛ⁺``. With this assumption, the equation of state for moist air can be solved in closed form, yielding an
 expression for the saturation specific humidity in terms of temperature `T` and reference pressure `pᵣ` alone:
 
