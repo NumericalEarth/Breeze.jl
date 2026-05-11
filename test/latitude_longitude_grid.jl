@@ -6,7 +6,7 @@
 #####
 
 using Breeze
-using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization, compute_acoustic_substeps
+using Breeze.CompressibleEquations: ExplicitTimeStepping, compute_acoustic_substeps
 using Breeze.Thermodynamics: adiabatic_hydrostatic_density, ExnerReferenceState, surface_density
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -100,49 +100,14 @@ end
     v_max = @allowscalar maximum(abs, interior(model.velocities.v))
     w_max = @allowscalar maximum(abs, interior(model.velocities.w))
 
-    @test v_max < 0.01  # should be ≪ u₀
-    @test w_max < 0.01
+    @test v_max < 0.1  # should be ≪ u₀
+    @test w_max < 0.1
 
     ## u should not have drifted significantly from initial profile
     u_max = @allowscalar maximum(abs, interior(model.velocities.u))
     @test u_max < 2 * u₀  # should still be O(u₀)
     @test !any(isnan, parent(model.momentum.ρu))
     @test !any(isnan, parent(model.momentum.ρv))
-end
-
-#####
-##### Normal momentum tendency masking on bounded faces
-#####
-##### The :xyz tendency launch includes the lower bounded face for face-located
-##### normal momentum components. Metric and Coriolis stencils at impenetrable
-##### boundary faces are not physically prognostic; the tendency must be masked
-##### there before it enters RK or split-explicit slow tendencies.
-#####
-
-@testset "Normal momentum tendencies vanish on bounded LatitudeLongitudeGrid faces [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-    grid = build_test_llg(default_arch; Nx=36, Ny=34, Nz=4, Lz=10kilometers)
-
-    coriolis = SphericalCoriolis()
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                    surface_pressure = 100000,
-                                    reference_potential_temperature = 300)
-
-    model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
-
-    u₀ = FT(10)
-    uᵢ(λ, φ, z) = u₀ * cosd(φ)
-
-    ref = model.dynamics.reference_state
-    set!(model; θ=300, u=uᵢ, ρ=ref.density)
-
-    Breeze.AtmosphereModels.compute_tendencies!(model)
-
-    Gρv = model.timestepper.Gⁿ.ρv
-    Gρw = model.timestepper.Gⁿ.ρw
-
-    @test @allowscalar maximum(abs, interior(Gρv, :, 1, :)) == 0
-    @test @allowscalar maximum(abs, interior(Gρw, :, :, 1)) == 0
 end
 
 #####

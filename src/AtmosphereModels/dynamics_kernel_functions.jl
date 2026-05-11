@@ -1,7 +1,6 @@
 using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w,
                               U_dot_∇u_metric, U_dot_∇v_metric, U_dot_∇w_metric
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, z_f_cross_U
-using Oceananigans.Grids: AbstractUnderlyingGrid, Bounded
 using Oceananigans.Utils: sum_of_velocities
 
 # Fallback kernel functions
@@ -17,23 +16,6 @@ using Oceananigans.Utils: sum_of_velocities
 # the full conservation-form PGF and buoyancy.
 @inline explicit_z_pressure_gradient(i, j, k, grid, dynamics) = z_pressure_gradient(i, j, k, grid, dynamics)
 @inline explicit_buoyancy_forceᶜᶜᶠ(i, j, k, grid, args...) = buoyancy_forceᶜᶜᶠ(i, j, k, grid, args...)
-
-# Normal momentum components vanish on bounded faces. The tendency kernels are
-# launched over :xyz for every component, so they include the lower bounded face
-# for face-located normal momentum. Masking here keeps metric/Coriolis terms at
-# impenetrable faces out of the prognostic update, consistent with the acoustic
-# substepper's boundary masks.
-@inline on_x_boundary(i, j, k, grid) = false
-@inline on_y_boundary(i, j, k, grid) = false
-@inline on_z_boundary(i, j, k, grid) = false
-
-const BX_grid = AbstractUnderlyingGrid{FT, Bounded} where FT
-const BY_grid = AbstractUnderlyingGrid{FT, <:Any, Bounded} where FT
-const BZ_grid = AbstractUnderlyingGrid{FT, <:Any, <:Any, Bounded} where FT
-
-@inline on_x_boundary(i, j, k, grid::BX_grid) = (i == 1) | (i == grid.Nx + 1)
-@inline on_y_boundary(i, j, k, grid::BY_grid) = (j == 1) | (j == grid.Ny + 1)
-@inline on_z_boundary(i, j, k, grid::BZ_grid) = (k == 1) | (k == grid.Nz + 1)
 
 """
     ∇_dot_Jᶜ(i, j, k, grid, ρ, closure::AbstractTurbulenceClosure, closure_fields,
@@ -85,7 +67,7 @@ end
              - x_pressure_gradient(i, j, k, grid, dynamics)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
-             + ρu_forcing(i, j, k, grid, clock, model_fields)) * !on_x_boundary(i, j, k, grid)
+             + ρu_forcing(i, j, k, grid, clock, model_fields))
 end
 
 # Default: flux-form `∇·(ρ𝐯⊗u)` plus the explicit curvilinear metric correction.
@@ -116,7 +98,7 @@ end
              - y_pressure_gradient(i, j, k, grid, dynamics)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
-             + ρv_forcing(i, j, k, grid, clock, model_fields)) * !on_y_boundary(i, j, k, grid)
+             + ρv_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function z_momentum_tendency(i, j, k, grid,
@@ -144,7 +126,7 @@ end
                                            specific_prognostic_moisture, microphysics, microphysical_fields, constants)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
-             + ρw_forcing(i, j, k, grid, clock, model_fields)) * !on_z_boundary(i, j, k, grid)
+             + ρw_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function scalar_tendency(i, j, k, grid,
