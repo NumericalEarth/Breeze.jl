@@ -187,8 +187,8 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the *equilibrium saturation specific humidity* ``qᵛ⁺`` for air at temperature `T`, reference pressure `p`, 
-and total specific moisture `qᵗ`, over a given `surface`. The function returns the correct saturation specific humidity 
+Compute the *equilibrium saturation specific humidity* ``qᵛ⁺`` for air at temperature `T`, reference pressure `p`,
+and total specific moisture `qᵗ`, over a given `surface`. The function returns the correct saturation specific humidity
 in both saturated and unsaturated conditions:
 
 - In **saturated conditions** (``qᵗ ≥ qᵛ⁺``), condensate is present and ``qᵛ = qᵛ⁺``. The dry-air mass fraction 
