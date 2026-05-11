@@ -47,6 +47,7 @@
 # | `F02cd_heating.png`              | analytic heating ([YuDidlake2019](@citet); Fig. 2c,d)  |
 # | `F03a_axisym_response.png`       | axisymmetric response ([YuDidlake2019](@citet); Fig. 3a) |
 # | `F04_plan_response.png`          | plan-view response ([YuDidlake2019](@citet); Fig. 4a-c)  |
+# | `F04b_plan_w_raw.png`            | plan-view *raw* vertical velocity in the heated run     |
 # | `F05_cross_sections.png`         | cross sections ([YuDidlake2019](@citet); Fig. 5)     |
 # | `F06_response_timeseries.png`    | response amplitude vs time (diagnostic)           |
 
@@ -62,7 +63,7 @@ Oceananigans.defaults.FloatType = Float64
 Random.seed!(42)
 
 if CUDA.functional()
-    CUDA.seed(42)
+    CUDA.seed!(42)
 end
 
 # ## Jordan (1958) hurricane-season mean sounding
@@ -149,10 +150,10 @@ mkpath(snapshots_dir); mkpath(figures_dir)
 # 214² cells horizontally and 75 levels vertically (``Δz ≈ 333`` m). The run
 # prefers GPU and falls back to CPU if CUDA isn't functional.
 
-Δx = 3kilometers
-Nx = Ny = 214
+Δx = 500meters
+Lx = 650kilometers
+Nx = Ny = ceil(Int, Lx / Δx)
 Nz = 75
-Lx = Nx * Δx
 Lz = 25kilometers                 # YD19 §3a1
 Δz = Lz / Nz
 sponge_rate = 1/333seconds # ≈ WRF damp_opt=2 `dampcoef`
@@ -675,9 +676,11 @@ end
 ## we can skip the spinup run and restart control/heated from the last hourly
 ## snapshot.
 function load_last_snapshot(path)
-    ts_u = FieldTimeSeries(path, "u")
-    ts_v = FieldTimeSeries(path, "v")
-    ts_T = FieldTimeSeries(path, "T")
+    ## OnDisk backend so we don't pull every hourly snapshot into RAM —
+    ## indexing `ts[n]` reads only that one slice from disk.
+    ts_u = FieldTimeSeries(path, "u"; backend = Oceananigans.OnDisk())
+    ts_v = FieldTimeSeries(path, "v"; backend = Oceananigans.OnDisk())
+    ts_T = FieldTimeSeries(path, "T"; backend = Oceananigans.OnDisk())
     n = length(ts_u.times)
     return (
         u = Array(interior(ts_u[n])),
@@ -751,42 +754,57 @@ function plot_preflight()
     return fig
 end
 
-# ## Stage 1 — Spinup
+# ## Stages 1-3 — Spinup, Control, Heated
+#
+# Each stage is idempotent: if its snapshot file already exists on disk we
+# reuse it instead of redoing the 24 h simulation. This makes re-running the
+# script for plotting tweaks cheap. The F01 preflight diagnostic still runs
+# either way (it's a function of the vortex IC, not the simulated state).
 
-@info "=== Stage 1: $(prettytime(stage_stop_time)) spinup ==="
 plot_preflight()
 nothing # hide
-post_spinup = build_and_run_stage!(
-    "spinup";
-    with_heating = false,
-    init = (u = uᵢ, v = vᵢ, T = Tᵢ),
-    stop_time = stage_stop_time,
-    outfile = spinup_file
-)
+
+post_spinup = if isfile(spinup_file)
+    @info "=== Stage 1: reusing existing $spinup_file ==="
+    load_last_snapshot(spinup_file)
+else
+    @info "=== Stage 1: $(prettytime(stage_stop_time)) spinup ==="
+    build_and_run_stage!(
+        "spinup";
+        with_heating = false,
+        init = (u = uᵢ, v = vᵢ, T = Tᵢ),
+        stop_time = stage_stop_time,
+        outfile = spinup_file
+    )
+end
 nothing # hide
 
-# ## Stage 2 — Control
-
-@info "=== Stage 2: $(prettytime(stage_stop_time)) control ==="
-build_and_run_stage!(
-    "control";
-    with_heating = false,
-    init = post_spinup,
-    stop_time = stage_stop_time,
-    outfile = control_file
-)
+if isfile(control_file)
+    @info "=== Stage 2: reusing existing $control_file ==="
+else
+    @info "=== Stage 2: $(prettytime(stage_stop_time)) control ==="
+    build_and_run_stage!(
+        "control";
+        with_heating = false,
+        init = post_spinup,
+        stop_time = stage_stop_time,
+        outfile = control_file
+    )
+end
 nothing # hide
 
-# ## Stage 3 — Heated
-
-@info "=== Stage 3: $(prettytime(stage_stop_time)) heated (MN10 stratiform) ==="
-build_and_run_stage!(
-    "heated";
-    with_heating = true,
-    init = post_spinup,
-    stop_time = stage_stop_time,
-    outfile = heated_file
-)
+if isfile(heated_file)
+    @info "=== Stage 3: reusing existing $heated_file ==="
+else
+    @info "=== Stage 3: $(prettytime(stage_stop_time)) heated (MN10 stratiform) ==="
+    build_and_run_stage!(
+        "heated";
+        with_heating = true,
+        init = post_spinup,
+        stop_time = stage_stop_time,
+        outfile = heated_file
+    )
+end
 nothing # hide
 
 # ## Stage 4 — Analysis and figure production
@@ -1149,6 +1167,70 @@ let
         vr_resp = vr_heat .- vr_ctrl
         w_resp_rz = w_heat_az .- w_ctrl_az
 
+        ## --- F04b — raw vertical velocity plan views (heated run) ---
+        ## Companion to F04. F04 shows the *response* (heated − control); this
+        ## one shows the raw, time-averaged `w` field in the heated run so the
+        ## gravity-wave activity and convective-scale ascent / descent are
+        ## visible in absolute terms rather than only as anomalies. Produced
+        ## BEFORE the in-place subtraction below so the heated array is still
+        ## the raw field.
+        @info "Producing F04b (raw vertical velocity plan views)..."
+        let
+            xs_grid_pv = Array(xnodes(grid, Center()))
+            ys_grid_pv = Array(ynodes(grid, Center()))
+            panels = [
+                (6_000.0, "(a) z = 6 km"),
+                (3_600.0, "(b) z = 3.6 km"),
+                (2_000.0, "(c) z = 2 km"),
+            ]
+            w_lim_raw = 4.0   # matches F04 colorbar
+            fig = Figure(size = (1500, 560))
+            for (pi_, (z_slice, label)) in enumerate(panels)
+                k_s = argmin(abs.(z_centers .- z_slice))
+                w_s = w_heat[:, :, k_s]
+                ax = Axis(
+                    fig[1, pi_]; xlabel = "x (km)", ylabel = "y (km)",
+                    title = label, aspect = DataAspect(),
+                    limits = (-120, 120, -120, 120)
+                )
+                hm = heatmap!(
+                    ax, xs_grid_pv ./ 1.0e3, ys_grid_pv ./ 1.0e3, w_s;
+                    colormap = :balance, colorrange = (-w_lim_raw, w_lim_raw)
+                )
+                ## Local heating contour overlay at this altitude only.
+                Q_panel = [heating_rate_K_per_hour(sqrt(xs_grid_pv[i]^2 + ys_grid_pv[j]^2),
+                                                   atan(ys_grid_pv[j], xs_grid_pv[i]), z_slice)
+                           for i in 1:Nx, j in 1:Ny]
+                if maximum(Q_panel) > 0.999
+                    contour!(
+                        ax, xs_grid_pv ./ 1.0e3, ys_grid_pv ./ 1.0e3, Q_panel;
+                        levels = [1.0], color = :red, linewidth = 2.0
+                    )
+                end
+                if minimum(Q_panel) < -0.999
+                    contour!(
+                        ax, xs_grid_pv ./ 1.0e3, ys_grid_pv ./ 1.0e3, Q_panel;
+                        levels = [-1.0], color = :blue, linewidth = 2.0
+                    )
+                end
+                if pi_ == 3
+                    Colorbar(fig[1, 4], hm; label = "w (m s⁻¹)")
+                end
+            end
+            Label(
+                fig[0, :],
+                @sprintf(
+                    "F04b — Plan-view raw vertical velocity in heated run (%.0f-%.0f h, %.0f km box)",
+                    target_s[1] / hour, target_s[end] / hour, Lx / 1.0e3
+                );
+                fontsize = 17
+            )
+            path = joinpath(figures_dir, "F04b_plan_w_raw.png")
+            save(path, fig)
+            @info "Saved F04b" path
+        end
+        GC.gc()
+
         ## In-place: overwrite heated 3D arrays with (heated − control), free control.
         u_heat .-= u_ctrl; v_heat .-= v_ctrl; w_heat .-= w_ctrl
         u_ctrl = v_ctrl = w_ctrl = T_ctrl = T_heat = nothing
@@ -1304,12 +1386,11 @@ let
         @info "Producing F04..."
         xs_grid = Array(xnodes(grid, Center()))
         ys_grid = Array(ynodes(grid, Center()))
-        ## Each panel slices `w'` at one altitude. For the heating contour overlay
-        ## we always evaluate Q at the heating peak (z_bs+σ_zs/2 = 5 km, red) and
-        ## the cooling peak (z_bs-σ_zs/2 = 3 km, blue) so both spiral lobes of the
-        ## rainband are visible regardless of which `w'` slice is being shown —
-        ## otherwise panels in the cooling lobe (e.g. z=3.6 km) only render the
-        ## blue contour and panels in the heating lobe only render the red.
+        ## Each panel slices `w'` at one altitude. The heating contour overlay
+        ## on each panel is the analytic heating field *at that panel's altitude*
+        ## — at z > z_bs (4 km) only the heating lobe (+1 K/h, red) is present;
+        ## at z < z_bs only the cooling lobe (-1 K/h, blue); at z = z_bs the
+        ## field is identically zero so neither contour draws.
         z_heating_peak = z_bs + σ_zs / 2          # 5 km
         z_cooling_peak = z_bs - σ_zs / 2          # 3 km
         panels = [
@@ -1332,19 +1413,20 @@ let
             return vals[ceil(Int, 0.95 * length(vals))]
         end
         w_scales = [_w_scale(w_resp3, argmin(abs.(z_centers .- zp[1]))) for zp in panels]
-        w_panel_lim = max(0.3, ceil(maximum(w_scales) * 4) / 4)
+        ## Fixed colorbar range covers the full IG-wave dynamic range; the
+        ## 95th-percentile diagnostic is kept for logging but no longer used
+        ## to size the colorbar.
+        w_panel_lim = 4.0
 
-        ## Heating-peak Q field (positive, red contour) and cooling-peak Q field
-        ## (negative, blue contour). Same fields reused on all three panels so
-        ## both spiral lobes are visible even when a panel slices outside the
-        ## heating column itself.
-        Q_warm = zeros(Nx, Ny)
-        Q_cool = zeros(Nx, Ny)
-        for j in 1:Ny, i in 1:Nx
-            r = sqrt(xs_grid[i]^2 + ys_grid[j]^2)
-            λ = atan(ys_grid[j], xs_grid[i])
-            Q_warm[i, j] = heating_rate_K_per_hour(r, λ, z_heating_peak)
-            Q_cool[i, j] = heating_rate_K_per_hour(r, λ, z_cooling_peak)
+        ## Heating field at each panel altitude (computed inside the panel loop).
+        function _Q_at(z_slice)
+            Q = zeros(Nx, Ny)
+            for j in 1:Ny, i in 1:Nx
+                r = sqrt(xs_grid[i]^2 + ys_grid[j]^2)
+                λ = atan(ys_grid[j], xs_grid[i])
+                Q[i, j] = heating_rate_K_per_hour(r, λ, z_slice)
+            end
+            return Q
         end
 
         fig = Figure(size = (1500, 560))
@@ -1364,11 +1446,11 @@ let
                 colormap = :balance, colorrange = (-w_panel_lim, w_panel_lim)
             )
             contour!(
-                ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_warm;
+                ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_warm;
                 levels = [1.0], color = :red, linewidth = 2.0
             )
             contour!(
-                ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_cool;
+                ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_cool;
                 levels = [-1.0], color = :blue, linewidth = 2.0
             )
 
@@ -1409,15 +1491,30 @@ let
         @info "Producing F05..."
         k_22 = argmin(abs.(z_centers .- 2_200.0))
         w_22 = w_resp3[:, :, k_22]
-        ## Reuse Q_warm/Q_cool (heating-peak / cooling-peak fields) from F04 so
-        ## both spiral lobes overlay the panel-(a) plan view at z ≈ 2 km.
+        z_slice_pv = z_centers[k_22]
         w22_lim = max(0.3, ceil(maximum(abs, w_22) * 2) / 2)
 
-        function cross_section(λ_cs)
+        ## Heating field at the slice altitude. The vertical shape factor
+        ## V_z(z) = sin(π·(z-z_bs)/σ_zs) is strictly negative for z < z_bs
+        ## (cooling) and strictly positive for z > z_bs (heating). At
+        ## z ≈ 2.2 km we are in the cooling lobe only, so the red +1 K/h
+        ## contour wouldn't draw anything — only blue does.
+        Q_at_slice = zeros(Nx, Ny)
+        for j in 1:Ny, i in 1:Nx
+            r = sqrt(xs_grid[i]^2 + ys_grid[j]^2)
+            λ = atan(ys_grid[j], xs_grid[i])
+            Q_at_slice[i, j] = heating_rate_K_per_hour(r, λ, z_slice_pv)
+        end
+        q_slice_min = minimum(Q_at_slice); q_slice_max = maximum(Q_at_slice)
+
+        ## Band-averaged cross-sections. The rainband spans λ ∈ [-π/2, 0];
+        ## we split that range into 5 equal-width bands of width π/10 and
+        ## plot the 1st (upwind), 3rd (middle), and 5th (downwind). Within
+        ## each band we sample `n_az` constant-λ radial cross-sections and
+        ## average them, killing most of the grid-scale gravity-wave noise
+        ## that single radial slices captured.
+        function cross_section_at!(vθ, vr, w, λ_cs)
             xh = cos(λ_cs); yh = sin(λ_cs)
-            vθ_cs_loc = zeros(length(r_bin_centers), Nz)
-            vr_cs_loc = zeros(length(r_bin_centers), Nz)
-            w_cs_loc = zeros(length(r_bin_centers), Nz)
             for k in 1:Nz, i in eachindex(r_bin_centers)
                 xp = r_bin_centers[i] * xh
                 yp = r_bin_centers[i] * yh
@@ -1432,24 +1529,180 @@ let
                     (1 - fx) * fy * A[ix - 1, iy, k] +
                     fx * fy * A[ix, iy, k]
                 u_p = bil(u_resp3); v_p = bil(v_resp3); w_p = bil(w_resp3)
-                vr_cs_loc[i, k] = xh * u_p + yh * v_p
-                vθ_cs_loc[i, k] = -yh * u_p + xh * v_p
-                w_cs_loc[i, k] = w_p
+                vr[i, k] += xh * u_p + yh * v_p
+                vθ[i, k] += -yh * u_p + xh * v_p
+                w[i, k] += w_p
             end
-            return (vθ = vθ_cs_loc, vr = vr_cs_loc, w = w_cs_loc)
+            return nothing
         end
 
-        cs_up = cross_section(0.0)
-        cs_md = cross_section(-π / 4)
-        cs_dn = cross_section(-π / 2)
+        function cross_section_band(λ_lo, λ_hi; n_az = 11)
+            vθ = zeros(length(r_bin_centers), Nz)
+            vr = zeros(length(r_bin_centers), Nz)
+            w = zeros(length(r_bin_centers), Nz)
+            for q in 1:n_az
+                λ = λ_lo + (λ_hi - λ_lo) * (q - 0.5) / n_az
+                cross_section_at!(vθ, vr, w, λ)
+            end
+            vθ ./= n_az; vr ./= n_az; w ./= n_az
+            return (vθ = vθ, vr = vr, w = w)
+        end
 
-        fig = Figure(size = (1400, 950))
+        Δλ_band = (π / 2) / 5
+        band_edges(k) = (-π / 2 + (k - 1) * Δλ_band, -π / 2 + k * Δλ_band)
+        λ_lo_up, λ_hi_up = band_edges(1)             # upwind  (1st band)
+        λ_lo_md, λ_hi_md = band_edges(3)             # middle  (3rd, centered at -π/4)
+        λ_lo_dn, λ_hi_dn = band_edges(5)             # downwind (5th band)
+        λ_c_up = (λ_lo_up + λ_hi_up) / 2
+        λ_c_md = (λ_lo_md + λ_hi_md) / 2
+        λ_c_dn = (λ_lo_dn + λ_hi_dn) / 2
+        @info @sprintf(
+            "Bands (deg): upwind [%.1f, %.1f], middle [%.1f, %.1f], downwind [%.1f, %.1f]",
+            rad2deg(λ_lo_up), rad2deg(λ_hi_up),
+            rad2deg(λ_lo_md), rad2deg(λ_hi_md),
+            rad2deg(λ_lo_dn), rad2deg(λ_hi_dn)
+        )
+
+        cs_up = cross_section_band(λ_lo_up, λ_hi_up)
+        cs_md = cross_section_band(λ_lo_md, λ_hi_md)
+        cs_dn = cross_section_band(λ_lo_dn, λ_hi_dn)
+
+        ## Wind-barb glyph for the (r, z) cross-section panels.
+        ## Speed → glyph mapping (m/s):
+        ##   half barb = 0.25, full barb = 0.5, pennant = 2.5
+        ## Calm winds (< 0.05 m/s) are drawn as an open circle.
+        ## `screen_aspect` is the panel's display px-per-km-z over px-per-km-r.
+        ## We *only* use it to size the staff in z-axis-km (so the staff has the
+        ## same visual length regardless of orientation): staff_z = staff_r/sa.
+        ## The unit direction is computed directly from (vr, w) so the staff
+        ## visually points where (vr, w) treats both components symmetrically —
+        ## i.e., a (1 m/s, 1 m/s) vector renders at 45° on screen.
+        function draw_wind_barbs!(
+                ax, pts, vecs;
+                panel_r_span,
+                screen_aspect = 4.8,
+                staff_frac = 0.025,
+                barb_frac = 0.45,
+                gap_frac = 0.20,
+                u_half = 0.25, u_full = 0.5, u_pennant = 2.5,
+                calm_threshold = 0.05,
+                color = :gray20,
+                linewidth = 0.9,
+            )
+            staff_r = staff_frac * panel_r_span
+            staff_z = staff_r / screen_aspect
+            barb_r = barb_frac * staff_r
+            barb_z = barb_frac * staff_z
+
+            staff_lines = Tuple{Point2f, Point2f}[]
+            barb_lines = Tuple{Point2f, Point2f}[]
+            pennants = NTuple{3, Point2f}[]
+            calm_pts = Point2f[]
+
+            for (p, v) in zip(pts, vecs)
+                vr_w, w_w = v[1], v[2]
+                speed = hypot(vr_w, w_w)
+                if speed < calm_threshold
+                    push!(calm_pts, Point2f(p))
+                    continue
+                end
+                ## Unit direction is the (vr, w) unit vector — no aspect
+                ## weighting here. The aspect correction is applied via
+                ## staff_z = staff_r/sa and barb_z = barb_r/sa, which makes
+                ## the *visual* (screen-space) staff length and barb-tick
+                ## length identical regardless of the staff's angle.
+                ##
+                ## Meteorological wind-barb convention: the staff points
+                ## UPSTREAM (the direction the wind is coming *from*), with
+                ## the barbs at the upstream end. Wind blows along the
+                ## staff from barbs toward the observation point. So we
+                ## negate the (vr, w) direction when laying down the staff.
+                s = hypot(vr_w, w_w)
+                ex = -vr_w / s; ez = -w_w / s
+                sx = ex * staff_r; sz = ez * staff_z
+                perp_x = -ez * barb_r; perp_z = ex * barb_z
+                tip = Point2f(p[1] + sx, p[2] + sz)
+                push!(staff_lines, (Point2f(p), tip))
+
+                rem = speed
+                npenn = floor(Int, rem / u_pennant); rem -= npenn * u_pennant
+                nfull = floor(Int, rem / u_full); rem -= nfull * u_full
+                nhalf = rem ≥ u_half ? 1 : 0
+
+                pos = 0.0
+                for _ in 1:npenn
+                    base1 = Point2f(p[1] + sx * (1 - pos), p[2] + sz * (1 - pos))
+                    base2 = Point2f(
+                        p[1] + sx * (1 - (pos + gap_frac)),
+                        p[2] + sz * (1 - (pos + gap_frac)),
+                    )
+                    mid_x = (base1[1] + base2[1]) / 2
+                    mid_z = (base1[2] + base2[2]) / 2
+                    ptip = Point2f(mid_x + perp_x, mid_z + perp_z)
+                    push!(pennants, (base1, base2, ptip))
+                    pos += gap_frac
+                end
+                if npenn > 0 && (nfull + nhalf) > 0
+                    pos += gap_frac * 0.5
+                end
+                for _ in 1:nfull
+                    base = Point2f(p[1] + sx * (1 - pos), p[2] + sz * (1 - pos))
+                    tip_b = Point2f(base[1] + perp_x, base[2] + perp_z)
+                    push!(barb_lines, (base, tip_b))
+                    pos += gap_frac
+                end
+                if nhalf == 1
+                    pos_h = nfull == 0 && npenn == 0 ? pos + gap_frac / 2 : pos
+                    base = Point2f(p[1] + sx * (1 - pos_h), p[2] + sz * (1 - pos_h))
+                    tip_b = Point2f(base[1] + 0.5 * perp_x, base[2] + 0.5 * perp_z)
+                    push!(barb_lines, (base, tip_b))
+                end
+            end
+
+            if !isempty(staff_lines)
+                linesegments!(
+                    ax,
+                    reduce(vcat, [[a, b] for (a, b) in staff_lines]);
+                    color = color, linewidth = linewidth,
+                )
+            end
+            if !isempty(barb_lines)
+                linesegments!(
+                    ax,
+                    reduce(vcat, [[a, b] for (a, b) in barb_lines]);
+                    color = color, linewidth = linewidth,
+                )
+            end
+            for tri in pennants
+                poly!(ax, [tri[1], tri[2], tri[3]]; color = color, strokewidth = 0)
+            end
+            if !isempty(calm_pts)
+                scatter!(
+                    ax, calm_pts;
+                    color = (:white, 0.0), strokecolor = color,
+                    strokewidth = linewidth, markersize = 6,
+                )
+            end
+            return nothing
+        end
+
+        ## Panel-(b/c/d) display geometry.
+        panel_r_lo, panel_r_hi = 35.0, 120.0
+        panel_z_lo, panel_z_hi = 0.0, 12.0
+        panel_r_span = panel_r_hi - panel_r_lo
+        barbs_screen_aspect = 4.8
+        barbs_staff_frac = 0.025
+        barbs_calm_threshold = 0.05
+        barbs_stride_r = 5
+        barbs_stride_z = 2
+
+        fig = Figure(size = (1400, 1080))
 
         ax_pv = Axis(
             fig[1, 1:3]; xlabel = "x (km)", ylabel = "y (km)",
             title = @sprintf(
                 "(a) Vertical-velocity response at z = %.1f km",
-                z_centers[k_22] / 1.0e3
+                z_slice_pv / 1.0e3
             ),
             aspect = DataAspect(),
             limits = (-120, 120, -120, 120)
@@ -1459,11 +1712,11 @@ let
             colormap = :balance, colorrange = (-w22_lim, w22_lim)
         )
         contour!(
-            ax_pv, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_warm;
+            ax_pv, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_warm;
             levels = [1.0], color = :red, linewidth = 2.0
         )
         contour!(
-            ax_pv, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_cool;
+            ax_pv, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_cool;
             levels = [-1.0], color = :blue, linewidth = 2.0
         )
         ## Azimuthal convention (YD19 §3b1):
@@ -1481,7 +1734,9 @@ let
         Colorbar(fig[1, 4], hm_pv; label = "w' (m s⁻¹)")
 
         cs_v_lim = 3.0
-        function draw_cross!(ax, cs, λ_cs, label)
+        ## Heating-contour overlay is averaged over the same band the velocity
+        ## field is, for consistency. `λ_band` here is a `(λ_lo, λ_hi)` tuple.
+        function draw_cross!(ax, cs, λ_band, label; n_az = 11)
             hm = heatmap!(
                 ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, cs.vθ;
                 colormap = :balance, colorrange = (-cs_v_lim, cs_v_lim)
@@ -1490,7 +1745,14 @@ let
                 ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, cs.vθ;
                 levels = -cs_v_lim:0.5:cs_v_lim, color = :black, linewidth = 0.4
             )
-            Q_cs2 = [heating_rate_K_per_hour(r, λ_cs, z) for r in r_bin_centers, z in z_centers]
+            λ_lo_b, λ_hi_b = λ_band
+            Q_cs2 = zeros(length(r_bin_centers), Nz)
+            for q in 1:n_az
+                λ = λ_lo_b + (λ_hi_b - λ_lo_b) * (q - 0.5) / n_az
+                Q_cs2 .+= [heating_rate_K_per_hour(r, λ, z)
+                           for r in r_bin_centers, z in z_centers]
+            end
+            Q_cs2 ./= n_az
             contour!(
                 ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, Q_cs2;
                 levels = [1.0], color = :red, linewidth = 2.0
@@ -1501,34 +1763,90 @@ let
             )
 
             stride_r = 2; stride_z = 3
-            rsub = r_bin_centers[1:stride_r:end] ./ kilometer
-            zsub = z_centers[1:stride_z:end] ./ kilometer
+            rsub = r_bin_centers[1:stride_r:end] ./ 1.0e3
+            zsub = z_centers[1:stride_z:end] ./ 1.0e3
             vsub = cs.vr[1:stride_r:end, 1:stride_z:end]
             wsub = cs.w[1:stride_r:end, 1:stride_z:end] .* 10
             pts = Point2f[]; vecs = Vec2f[]
             for j in eachindex(zsub), i in eachindex(rsub)
-                if 35 <= rsub[i] <= 120 && zsub[j] <= 12
+                if panel_r_lo <= rsub[i] <= panel_r_hi && panel_z_lo <= zsub[j] <= panel_z_hi
                     push!(pts, Point2f(rsub[i], zsub[j]))
                     push!(vecs, Vec2f(vsub[i, j], wsub[i, j]))
                 end
             end
-            arrows2d!(
-                ax, pts, vecs; lengthscale = 1.0, color = :gray20,
-                tiplength = 4, tipwidth = 3
+            draw_wind_barbs!(
+                ax, pts, vecs;
+                panel_r_span = panel_r_span,
+                screen_aspect = barbs_screen_aspect,
+                staff_frac = barbs_staff_frac,
+                calm_threshold = barbs_calm_threshold,
             )
+
             ax.title = label
             ax.xlabel = "Radius (km)"
             ax.ylabel = "Height (km)"
             return hm
         end
 
-        ax_up = Axis(fig[2, 1]; limits = (35, 120, 0, 12))
-        draw_cross!(ax_up, cs_dn, -π / 2, "(b) upwind end (λ = -π/2)")
-        ax_md = Axis(fig[2, 2]; limits = (35, 120, 0, 12))
-        draw_cross!(ax_md, cs_md, -π / 4, "(c) middle (λ = -π/4)")
-        ax_dn = Axis(fig[2, 3]; limits = (35, 120, 0, 12))
-        hm_dn = draw_cross!(ax_dn, cs_up, 0.0, "(d) downwind end (λ = 0)")
+        ax_up = Axis(fig[2, 1]; limits = (panel_r_lo, panel_r_hi, panel_z_lo, panel_z_hi))
+        draw_cross!(
+            ax_up, cs_up, (λ_lo_up, λ_hi_up),
+            @sprintf("(b) upwind band 1/5 (λ ∈ [%.0f°, %.0f°])",
+                     rad2deg(λ_lo_up), rad2deg(λ_hi_up)),
+        )
+        ax_md = Axis(fig[2, 2]; limits = (panel_r_lo, panel_r_hi, panel_z_lo, panel_z_hi))
+        draw_cross!(
+            ax_md, cs_md, (λ_lo_md, λ_hi_md),
+            @sprintf("(c) middle band 3/5 (λ ∈ [%.0f°, %.0f°])",
+                     rad2deg(λ_lo_md), rad2deg(λ_hi_md)),
+        )
+        ax_dn = Axis(fig[2, 3]; limits = (panel_r_lo, panel_r_hi, panel_z_lo, panel_z_hi))
+        hm_dn = draw_cross!(
+            ax_dn, cs_dn, (λ_lo_dn, λ_hi_dn),
+            @sprintf("(d) downwind band 5/5 (λ ∈ [%.0f°, %.0f°])",
+                     rad2deg(λ_lo_dn), rad2deg(λ_hi_dn)),
+        )
         Colorbar(fig[2, 4], hm_dn; label = "v̄' (m s⁻¹)")
+
+        ## Speed-key legend row. Reuses `draw_wind_barbs!` so the glyph
+        ## semantics are identical to the data panels. The legend axis is
+        ## short and wide, so its `screen_aspect` (px/km-y over px/km-x) is
+        ## much smaller than the data panels' — we choose `screen_aspect = 0.17`
+        ## and `staff_frac = 0.06` empirically so the barb ticks read at a
+        ## visible size in this row.
+        key_ax = Axis(fig[3, 1:3]; limits = (0, 1, 0, 1))
+        let
+            ## Only show glyphs that actually appear in the data — the response
+            ## winds are O(1 m/s), so pennants (2.5 m/s+) never get drawn.
+            samples = [
+                (0.0,  "calm"),
+                (0.25, "0.25 m s⁻¹"),
+                (0.5,  "0.5 m s⁻¹"),
+                (1.0,  "1.0 m s⁻¹"),
+                (1.5,  "1.5 m s⁻¹"),
+                (2.0,  "2.0 m s⁻¹"),
+            ]
+            n = length(samples)
+            pts = Point2f[]; vecs = Vec2f[]
+            for (i, (sp, _)) in enumerate(samples)
+                x = (i - 0.5) / n
+                push!(pts, Point2f(x, 0.6))
+                push!(vecs, Vec2f(sp, 0.0))
+            end
+            draw_wind_barbs!(
+                key_ax, pts, vecs;
+                panel_r_span = 1.0,
+                screen_aspect = 0.17,
+                staff_frac = 0.06,
+                calm_threshold = barbs_calm_threshold,
+            )
+            for (i, (_, lbl)) in enumerate(samples)
+                x = (i - 0.5) / n
+                text!(key_ax, x, 0.25; text = lbl, align = (:center, :center), fontsize = 11)
+            end
+        end
+        hidedecorations!(key_ax); hidespines!(key_ax)
+        rowsize!(fig.layout, 3, Relative(0.10))
 
         Label(
             fig[0, :],
@@ -1558,29 +1876,22 @@ let
         xs_grid = Float32.(xnodes(grid, Center()))
         ys_grid = Float32.(ynodes(grid, Center()))
 
-        ## Heating-peak Q (red, +1 K/h) and cooling-peak Q (blue, -1 K/h) — both
-        ## visible regardless of z_anim, mirroring F04 / F05.
+        ## Heating field evaluated at the *animation* slice altitude (≈ 2.8 km).
+        ## At this height V_z(z) = sin(π·(z-z_bs)/σ_zs) is strictly negative, so
+        ## only the blue −1 K/h contour will draw — no spurious red lobe.
         z_anim = z_centers[k_anim]
-        Q_anim_warm = [
+        Q_anim_at = [
             heating_rate_K_per_hour(
                     sqrt(xs_grid[i]^2 + ys_grid[j]^2),
                     atan(ys_grid[j], xs_grid[i]),
-                    z_heating_peak
+                    z_anim
                 )
                 for i in 1:Nx, j in 1:Ny
         ]
-        Q_anim_cool = [
-            heating_rate_K_per_hour(
-                    sqrt(xs_grid[i]^2 + ys_grid[j]^2),
-                    atan(ys_grid[j], xs_grid[i]),
-                    z_cooling_peak
-                )
-                for i in 1:Nx, j in 1:Ny
-        ]
+        q_anim_min = minimum(Q_anim_at); q_anim_max = maximum(Q_anim_at)
 
         ## Preload all frames as a time-indexed 3D array (Nx, Ny, Nt) of
-        ## Float32. This is small enough to keep in memory: Nx·Ny·Nt ≈
-        ## 214² × 25 × 4 B ≈ 4.6 MB. For each hour n we compute
+        ## Float32. For each hour n we compute
         ## w_h(·, ·, k_anim) − w_c(·, ·, k_anim).
         Nt_anim = min(length(ctrl_times), length(heat_times))
         w_frames = zeros(Float32, Nx, Ny, Nt_anim)
@@ -1590,13 +1901,27 @@ let
             _center_w!(w_sc, interior(ts_heat.w[n]))
             @views w_frames[:, :, n] .+= w_sc[:, :, k_anim]
         end
-        w_lim = max(0.3f0, Float32(maximum(abs, w_frames)))
+        ## Robust color limit: 95th-percentile of |w'| restricted to the rainband
+        ## quadrant (x ≥ 0 ∧ y ≤ 0, the SE corner where the response lives). Using
+        ## the global maximum saturates the colormap with gravity-wave spikes and
+        ## squashes the actual ±1 m/s response to near-white.
+        w_lim = let vals = Float32[]
+            for n in 1:Nt_anim, j in 1:Ny, i in 1:Nx
+                if xs_grid[i] >= 0 && ys_grid[j] <= 0
+                    push!(vals, abs(w_frames[i, j, n]))
+                end
+            end
+            sort!(vals)
+            v = vals[ceil(Int, 0.95 * length(vals))]
+            max(0.3f0, Float32(ceil(v * 2) / 2))
+        end
+        @info @sprintf("Animation w_lim = ±%.2f m/s (95th percentile in SE quadrant)", w_lim)
 
-        ## Smaller figure + higher compression to keep the docs-build HTML page
-        ## a sensible size (the prior 720×640, default-CRF mp4 inflated the
-        ## generated `tropical_cyclone_with_rainband.md` page well past
-        ## Documenter's size_threshold).
-        fig = Figure(size = (480, 360))
+        ## Figure is wider/taller than before so the spiral structure is legible.
+        ## Compression stays at 30 — that combined with the bigger frame still
+        ## comes in under Documenter's size_threshold based on the prior page
+        ## size budget.
+        fig = Figure(size = (720, 560))
         ax = Axis(
             fig[1, 1]; xlabel = "x (km)", ylabel = "y (km)",
             aspect = DataAspect(),
@@ -1614,11 +1939,11 @@ let
             colormap = :balance, colorrange = (-w_lim, w_lim)
         )
         contour!(
-            ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_anim_warm;
+            ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_anim_warm;
             levels = [1.0], color = :red, linewidth = 1.5
         )
         contour!(
-            ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_anim_cool;
+            ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_anim_cool;
             levels = [-1.0], color = :blue, linewidth = 1.5
         )
         Colorbar(fig[1, 2], hm; label = "w' (m s⁻¹)")
