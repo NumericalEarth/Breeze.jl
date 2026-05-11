@@ -747,7 +747,7 @@ If the air is in thermodynamic equilibrium with possibly some condensate (``qˡ`
 qᵛ⁺ = \frac{ϵᵈᵛ \, (1 - qᵗ) \, pᵛ⁺(T)}{p - pᵛ⁺(T)} ,
 ```
 
-which is equation (37) of [Pressel2015](@citet) and the saturated branch of [`equilibrium_saturation_specific_humidity`](@ref Breeze.Thermodynamics equilibrium_saturation_specific_humidity). When the air is unsaturated (``qᵗ < qᵛ⁺``), `equilibrium_saturation_specific_humidity` falls back to the original density-based formula with ``ρ`` computed using ``Rᵐ = (1 - qᵗ) Rᵈ + qᵗ Rᵛ``.
+which is equation (37) of [Pressel2015](@citet) and the saturated branch of [`equilibrium_saturation_specific_humidity`](@ref Breeze.Thermodynamics.equilibrium_saturation_specific_humidity). When the air is unsaturated (``qᵗ < qᵛ⁺``), `equilibrium_saturation_specific_humidity` falls back to the original density-based formula with ``ρ`` computed using ``Rᵐ = (1 - qᵗ) Rᵈ + qᵗ Rᵛ``.
 
 ## Moist static energy
 
