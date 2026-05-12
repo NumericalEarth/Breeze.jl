@@ -291,8 +291,14 @@ end
                                            solar_position = ApparentSolarPosition())
 
         clock = Clock(time = 0.0)  # numeric, no epoch
-        model = AtmosphereModel(grid; clock, dynamics,
-                                formulation = :LiquidIcePotentialTemperature, radiation)
-        @test_throws ArgumentError set!(model; θ = 300, qᵗ = 0)
+
+        # The first radiation update fires during AtmosphereModel construction
+        # (iteration 0 always triggers an update), so the throw lands there
+        # rather than inside `set!`. Wrap both calls so whichever raises is caught.
+        @test_throws ArgumentError begin
+            model = AtmosphereModel(grid; clock, dynamics,
+                                    formulation = :LiquidIcePotentialTemperature, radiation)
+            set!(model; θ = 300, qᵗ = 0)
+        end
     end
 end
