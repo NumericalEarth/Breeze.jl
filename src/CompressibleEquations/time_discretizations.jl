@@ -10,7 +10,7 @@
 $(TYPEDEF)
 
 Split-explicit time discretization for compressible dynamics using the
-Exner pressure formulation following CM1 (Bryan 2002).
+Exner pressure formulation following CM1 ([Bryan and Fritsch 2002](@cite BryanFritsch2002)).
 
 Uses acoustic substepping following [Wicker and Skamarock (2002)](@cite WickerSkamarock2002):
 - Outer loop: WS-RK3 for slow tendencies (advection, Coriolis, diffusion)
@@ -32,6 +32,11 @@ Fields
 - `acoustic_damping_coefficient`: Klemp (2018) divergence damping ``ϰ^{ac}``. Post-implicit-solve velocity correction: ``u -= ϰ^{ac} c_p θ_v ∂Δπ'/∂x``. Provides constant damping per outer Δt regardless of substep count. Needed by WS-RK3 at large Δt. Default: 0.0
 
 See also [`ExplicitTimeStepping`](@ref).
+
+References
+==========
+* Bryan, G. H., & Fritsch, J. M. (2002). A benchmark simulation for moist nonhydrostatic numerical
+    models. Monthly Weather Review, 130(12), 2917-2928.
 """
 struct SplitExplicitTimeDiscretization{N, FT}
     substeps :: N
@@ -40,14 +45,17 @@ struct SplitExplicitTimeDiscretization{N, FT}
     acoustic_damping_coefficient :: FT
 end
 
-function SplitExplicitTimeDiscretization(; substeps=nothing,
-                                           forward_weight=0.6,
-                                           divergence_damping_coefficient=0.10,
-                                           acoustic_damping_coefficient=0.0)
-    return SplitExplicitTimeDiscretization(substeps,
-                                           forward_weight,
-                                           divergence_damping_coefficient,
-                                           acoustic_damping_coefficient)
+function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
+                                         substeps=nothing,
+                                         forward_weight=FT(0.6),
+                                         divergence_damping_coefficient=FT(0.10),
+                                         acoustic_damping_coefficient=FT(0.0))
+    return SplitExplicitTimeDiscretization(
+        substeps,
+        FT(forward_weight),
+        FT(divergence_damping_coefficient),
+        FT(acoustic_damping_coefficient),
+    )
 end
 
 """
@@ -59,6 +67,7 @@ All tendencies (including pressure gradient and acoustic modes) are computed
 together and time-stepped explicitly. This requires small time steps limited
 by the acoustic CFL condition (sound speed ~340 m/s).
 
-Use [`SplitExplicitTimeDiscretization`](@ref) for more efficient time-stepping with larger Δt.
+Use [`SplitExplicitTimeDiscretization`](@ref) for more efficient time-stepping
+with larger ``Δt``.
 """
 struct ExplicitTimeStepping end

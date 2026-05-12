@@ -13,7 +13,7 @@ using ..Thermodynamics:
 using ..AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
-    surface_pressure
+    standard_pressure
 
 using ..ParcelModels: ParcelModel
 
@@ -31,7 +31,7 @@ using KernelAbstractions: @index, @kernel
 """
     struct DCMIP2016KesslerMicrophysics{FT}
 
-DCMIP2016 implementation of the Kessler (1969) warm-rain bulk microphysics scheme.
+DCMIP2016 implementation of the [Kessler (1969)](@cite Kessler1969) warm-rain bulk microphysics scheme.
 See the constructor [`DCMIP2016KesslerMicrophysics`](@ref) for full documentation.
 """
 struct DCMIP2016KesslerMicrophysics{FT}
@@ -67,10 +67,10 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct a DCMIP2016 implementation of the Kessler (1969) warm-rain bulk microphysics scheme.
+Construct a DCMIP2016 implementation of the [Kessler (1969)](@cite Kessler1969) warm-rain bulk microphysics scheme.
 
 This implementation follows the DCMIP2016 test case specification, which is based on
-Klemp and Wilhelmson (1978).
+[Klemp and Wilhelmson (1978)](@cite Klemp1978).
 
 # Positional Arguments
 - `FT`: Floating-point type for all parameters (default: `Oceananigans.defaults.FloatType`).
@@ -79,7 +79,7 @@ Klemp and Wilhelmson (1978).
 - Zarzycki, C. M., et al. (2019). DCMIP2016: the splitting supercell test case. Geoscientific Model Development, 12, 879–892.
 - Kessler, E. (1969). On the Distribution and Continuity of Water Substance in Atmospheric Circulations.
   Meteorological Monographs, 10(32).
-- Klemp, J. B., & Wilhelmson, R. B. (1978). The Simulation of Three-Dimensional Convective Storm Dynamics.
+- Klemp, J. B., & Wilhelmson, R. B. (1978). The simulation of three-dimensional convective storm dynamics.
   Journal of the Atmospheric Sciences, 35(6), 1070-1096.
 - DCMIP2016 Fortran implementation (`kessler.f90` in [DOI: 10.5281/zenodo.1298671](https://doi.org/10.5281/zenodo.1298671))
 
@@ -114,7 +114,7 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
 The "saturation adjustment coefficient" `f₅` is then computed as
 
 ```math
-f₅ = a × T_DCMIP2016 × ℒˡᵣ / cᵖᵈ
+f₅ = a T_DCMIP2016 ℒˡᵣ / cᵖᵈ
 ```
 
 where `a` is the liquid_coefficient for Tetens' saturation vapor pressure formula,
@@ -190,8 +190,8 @@ $(TYPEDSIGNATURES)
 Return the names of prognostic microphysical fields for the Kessler scheme.
 
 # Fields
-- `:ρqᶜˡ`: Density-weighted cloud liquid mass fraction (\$kg/m^3\$).
-- `:ρqʳ`: Density-weighted rain mass fraction (\$kg/m^3\$).
+- `:ρqᶜˡ`: Density-weighted cloud liquid mass fraction (kg/m³).
+- `:ρqʳ`: Density-weighted rain mass fraction (kg/m³).
 """
 AtmosphereModels.prognostic_field_names(::DCMIP2016KM) = (:ρqᶜˡ, :ρqʳ)
 
@@ -224,11 +224,12 @@ Create and return the microphysical fields for the Kessler scheme.
 - `ρqʳ`: Density-weighted rain mass fraction.
 
 # Diagnostic Fields (Mass Fractions)
-- `qᵛ`: Water vapor mass fraction, diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
-- `qᶜˡ`: Cloud liquid mass fraction (\$kg/kg\$).
-- `qʳ`: Rain mass fraction (\$kg/kg\$).
-- `precipitation_rate`: Surface precipitation rate (\$m/s\$), defined as \$q^r \times v^t_{rain}\$ to match one-moment microphysics.
-- `𝕎ʳ`: Rain terminal velocity (\$m/s\$).
+- `qᵛ`: Water vapor mass fraction, diagnosed as ``q^v = q^t - q^{cl} - q^r``.
+- `qᶜˡ`: Cloud liquid mass fraction (kg/kg).
+- `qʳ`: Rain mass fraction (kg/kg).
+- `precipitation_rate`: Surface precipitation rate (m/s), defined as ``q^r  v^t_{rain}``
+  to match one-moment microphysics.
+- `𝕎ʳ`: Rain terminal velocity (m/s).
 """
 function AtmosphereModels.materialize_microphysical_fields(::DCMIP2016KM, grid, boundary_conditions)
     # Prognostic fields (density-weighted)
@@ -310,7 +311,7 @@ $(TYPEDSIGNATURES)
 Return the liquid precipitation rate field for the DCMIP2016 Kessler microphysics scheme.
 
 The precipitation rate is computed internally by the Kessler kernel and stored in
-`μ.precipitation_rate`. It is defined as \$q^r \times v^t_{rain}\$ (rain mass fraction
+`μ.precipitation_rate`. It is defined as ``q^r v^t_{rain}`` (rain mass fraction
 times terminal velocity), matching the one-moment microphysics definition. Units are m/s.
 
 This implements the Breeze `precipitation_rate(model, phase)` interface, allowing
@@ -326,7 +327,7 @@ $(TYPEDSIGNATURES)
 
 Return the surface precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
 
-The surface precipitation flux is \$\rho q^r v^t_{rain}\$ at the surface, matching the
+The surface precipitation flux is ``ρ q^r v^t_{rain}`` at the surface, matching the
 one-moment microphysics definition. Units are kg/m²/s.
 
 This implements the Breeze `surface_precipitation_flux(model)` interface.
@@ -366,11 +367,11 @@ Compute rain terminal velocity (m/s) following Klemp and Wilhelmson (1978) eq. 2
 
 The terminal velocity is computed as:
 ```math
-𝕎ʳ = a^𝕎 × (ρ × rʳ × Cᵨ)^{β^𝕎} × \\sqrt{ρ₀/ρ}
+𝕎ʳ = a^𝕎 (ρ rʳ Cᵨ)^{β^𝕎} \\sqrt{ρ₀/ρ}
 ```
 
-where `a^𝕎` is `terminal_velocity_coefficient`, `Cᵨ` is `density_scale`,
-and `β^𝕎` is `terminal_velocity_exponent`.
+where ``a^𝕎`` is the `terminal_velocity_coefficient`, ``Cᵨ`` is the `density_scale`,
+and ``β^𝕎`` is the `terminal_velocity_exponent`.
 """
 @inline function kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
     a𝕎 = microphysics.terminal_velocity_coefficient
@@ -382,13 +383,18 @@ end
 """
     cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
 
-Compute cloud-to-rain production rate from autoconversion and accretion (Klemp & Wilhelmson 1978, eq. 2.13).
+Compute cloud-to-rain production rate from autoconversion and accretion
+([Klemp and Wilhelmson 1978](@cite Klemp1978), eq. 2.13).
 
 This implements the combined effect of:
 - **Autoconversion**: Cloud water spontaneously converting to rain when `rᶜˡ > rᶜˡ★`
 - **Accretion**: Rain collecting cloud water as it falls
 
 The formula uses an implicit time integration for numerical stability.
+
+# References
+- Klemp, J. B., & Wilhelmson, R. B. (1978). The simulation of three-dimensional convective storm dynamics.
+  Journal of the Atmospheric Sciences, 35(6), 1070-1096.
 """
 @inline function cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
     k₁   = microphysics.autoconversion_rate
@@ -396,7 +402,7 @@ The formula uses an implicit time integration for numerical stability.
     k₂   = microphysics.accretion_rate
     βᵃᶜᶜ = microphysics.accretion_exponent
 
-    Aʳ = max(0, k₁ * (rᶜˡ - rᶜˡ★))    # Autoconversion rate
+    Aʳ = max(0, k₁ * (rᶜˡ - rᶜˡ★))      # Autoconversion rate
     denom = 1 + Δt * k₂ * rʳ^βᵃᶜᶜ       # Implicit accretion factor
     Δrᴾ = rᶜˡ - (rᶜˡ - Δt * Aʳ) / denom
     return Δrᴾ
@@ -414,7 +420,7 @@ Apply the Kessler microphysics to the model.
 This function launches a kernel that processes each column independently, with rain sedimentation subcycling.
 
 The kernel handles conversion between mass fractions and mixing ratios
-internally for efficiency. Water vapor is diagnosed from \$q^v = q^t - q^{cl} - q^r\$.
+internally for efficiency. Water vapor is diagnosed from ``q^v = q^t - q^{cl} - q^r``.
 """
 function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model)
     grid = model.grid
@@ -430,8 +436,8 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     ρ = dynamics_density(model.dynamics)
     p = dynamics_pressure(model.dynamics)
 
-    # Surface pressure for Exner function
-    p₀ = surface_pressure(model.dynamics)
+    # Standard pressure (reference pressure for the Exner function, pˢᵗ)
+    pˢᵗ = standard_pressure(model.dynamics)
 
     # Thermodynamic constants for liquid-ice potential temperature conversion
     constants = model.thermodynamic_constants
@@ -447,7 +453,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     μ = model.microphysical_fields
 
     launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, Δt, ρ, p, p₀, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+            microphysics, grid, Nz, Δt, ρ, p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     return nothing
 end
@@ -575,7 +581,7 @@ end
 #   T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
 
 @kernel function _microphysical_update!(microphysics, grid, Nz, Δt,
-                                        density, pressure, p₀, constants,
+                                        density, pressure, pˢᵗ, constants,
                                         θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
@@ -680,7 +686,7 @@ end
                 Rᵐ  = mixture_gas_constant(r, constants)
                 q = MoistureMassFractions(r)
                 qˡ = q.liquid
-                Π = (p / p₀)^(Rᵐ / cᵖᵐ)
+                Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
                 Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
 
                 # Rain sedimentation flux (upstream differencing)
@@ -712,7 +718,7 @@ end
                 Rᵐ  = mixture_gas_constant(r, constants)
                 q = MoistureMassFractions(r)
                 qˡ = q.liquid
-                Π = (p / p₀)^(Rᵐ / cᵖᵐ)
+                Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
                 θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
 
                 θˡⁱ[i, j, k]  = θˡⁱ_new
@@ -737,7 +743,7 @@ end
             Rᵐ  = mixture_gas_constant(r, constants)
             q = MoistureMassFractions(r)
             qˡ = q.liquid
-            Π = (p / p₀)^(Rᵐ / cᵖᵐ)
+            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
             Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
 
             # Rain sedimentation flux at top boundary
@@ -765,7 +771,7 @@ end
             Rᵐ  = mixture_gas_constant(r, constants)
             q = MoistureMassFractions(r)
             qˡ = q.liquid
-            Π = (p / p₀)^(Rᵐ / cᵖᵐ)
+            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
             θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
 
             θˡⁱ[i, j, k]  = θˡⁱ_new

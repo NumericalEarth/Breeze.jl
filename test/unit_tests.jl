@@ -210,7 +210,9 @@ using Breeze.Thermodynamics:
     MoistureMassFractions,
     StaticEnergyState,
     temperature,
-    mixture_heat_capacity
+    mixture_heat_capacity,
+    temperature_from_potential_temperature,
+    potential_temperature_from_temperature
 
 @testset "Thermodynamics" begin
     thermo = ThermodynamicConstants()
@@ -245,6 +247,25 @@ end
         T★ = temperature(𝒰, thermo)
         @test T★ ≈ T
     end
+end
+
+@testset "Potential temperature convenience functions [$(FT)]" for FT in test_float_types()
+    thermo = ThermodynamicConstants(FT)
+    p = FT(101325)
+    pˢᵗ = FT(1e5)
+    T = FT(290)
+
+    θ = potential_temperature_from_temperature(T, p, pˢᵗ, thermo)
+    θ_default = potential_temperature_from_temperature(T, p, thermo)
+    θ_integer_temperature = potential_temperature_from_temperature(290, p, pˢᵗ, thermo)
+
+    @test θ != T
+    @test temperature_from_potential_temperature(θ, p, pˢᵗ, thermo) ≈ T
+    @test θ_default isa FT
+    @test temperature_from_potential_temperature(θ_default, p, thermo) isa FT
+    @test temperature_from_potential_temperature(θ_default, p, thermo) ≈ T
+    @test θ_integer_temperature isa FT
+    @test θ_integer_temperature ≈ θ
 end
 
 #####

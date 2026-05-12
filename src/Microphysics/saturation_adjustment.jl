@@ -185,7 +185,7 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
 
     equilibrium = microphysics.equilibrium
     qᵛ⁺₁ = saturation_specific_humidity(𝒰₁, constants, equilibrium)
-    qᵗ <= qᵛ⁺₁ && return 𝒰₁
+    qᵗ ≤ qᵛ⁺₁ && return 𝒰₁
 
     # If we made it here, the state is saturated.
     # So, we re-initialize our first guess assuming saturation
