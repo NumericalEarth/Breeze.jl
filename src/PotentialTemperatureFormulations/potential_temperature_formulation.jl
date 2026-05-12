@@ -11,7 +11,7 @@ as the prognostic thermodynamic variable.
 Liquid-ice potential temperature is a conserved quantity in moist adiabatic processes and is defined as:
 
 ```math
-θˡⁱ = T \\left( \\frac{p^{st}}{p} \\right)^{Rᵐ/cᵖᵐ} \\exp\\left( \\frac{ℒˡᵣ qˡ + ℒⁱᵣ qⁱ}{cᵖᵐ T} \\right)
+θˡⁱ = T \\left( \\frac{p^{st}}{p} \\right)^{Rᵐ/cᵖᵐ} \\exp\\left( -\\frac{ℒˡᵣ qˡ + ℒⁱᵣ qⁱ}{cᵖᵐ T} \\right)
 ```
 """
 struct LiquidIcePotentialTemperatureFormulation{F, T}

@@ -69,7 +69,7 @@ end
 function slot_name(ci, slot)
     if slot isa Core.SlotNumber
         idx = Int(slot.id)
-        if 1 <= idx <= length(ci.slotnames)
+        if 1 ≤ idx ≤ length(ci.slotnames)
             return string(ci.slotnames[idx])
         end
     end

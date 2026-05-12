@@ -43,7 +43,7 @@ jobs:
       matrix:
         version:
           - "min"
-          - "1.12.5"
+          - "1.12.6"
         os:
           - ubuntu-latest
           - macOS-latest
@@ -58,7 +58,7 @@ jobs:
         include:
           # `--check-bounds=auto` is necessary for testing Reactant workloads
           # until https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
-          - version: "1.12.5"
+          - version: "1.12.6"
             os: aws-linux-nvidia-gpu-l4
             arch: "default"
             check-bounds: "auto"
@@ -67,8 +67,10 @@ jobs:
             arch: "default"
             check-bounds: "auto"
     steps:
-      - uses: actions/checkout@v6
-      - uses: julia-actions/setup-julia@v2
+      - name: "Check out repository"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: "Install Julia"
+        uses: julia-actions/setup-julia@4c0cb0fce8556fdb04a90347310e5db8b1f98fb9 # v2.7.0
         # On the self-hosted GPU runners we use a Docker image with Julia pre-installed.
         if: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         with:
@@ -78,7 +80,8 @@ jobs:
         if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         run: |
           julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
-      - uses: julia-actions/cache@v3
+      - name: "Cache Julia depot"
+        uses: julia-actions/cache@9a93c5fb3e9c1c20b60fc80a478cae53e38618a4 # v3.0.2
         with:
           # On self-hosted runners we use the prebuilt Docker container, which already
           # caches pkgimages and such, so we don't need to cache here most things.  Only
@@ -107,12 +110,15 @@ jobs:
           fi
 
           if [[ ${{ runner.os }} == "macOS" ]]; then
+              # On macOS runners, `Metal.functional()` returns `false` because the GPU is
+              # virtualised, but we should be able to actually use it anyway.
+              echo "BREEZE_FORCE_METAL_FUNCTIONAL=true" >> "${GITHUB_ENV}"
               # Encourage ParallelTestRunner to use multiple jobs on macOS, rather
               # than the single one it'd use by default.
-              TEST_ARGS+=(--jobs=3)
+              TEST_ARGS+=(--jobs=2)
               # ...but also set a more conservative limit to memory usage before
-              # reciclying a worker, to avoid out-of-memory issues.
-              JULIA_TEST_MAXRSS_MB=2500
+              # reciclying a worker, to avoid trashing memory or out-of-memory errors.
+              JULIA_TEST_MAXRSS_MB=1800
               echo "JULIA_TEST_MAXRSS_MB=${JULIA_TEST_MAXRSS_MB}" | tee -a "${GITHUB_ENV}"
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" | tee -a "${GITHUB_ENV}"
@@ -136,6 +142,13 @@ jobs:
           # preference file to test directory (the global one will be ignored during the
           # tests).
           cp -v /usr/local/share/julia/environments/breeze/LocalPreferences.toml test/.
+      - name: Instantiate test environment
+        shell: bash
+        run: |
+          julia --project=test --color=yes --check-bounds=${{ matrix.check-bounds }} -e '
+          using Pkg;
+          Pkg.instantiate()
+          '
       - name: Run tests
         shell: bash
         run: |
@@ -144,8 +157,18 @@ jobs:
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
           julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
-      - uses: julia-actions/julia-processcoverage@v1
-      - uses: codecov/codecov-action@v5
+      - name: "Upload Reactant MLIR dumps as artifacts"
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: mlir-dumps-${{ matrix.version }}-${{ matrix.os }}
+          path: tmp/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: "Process Julia coverage files"
+        uses: julia-actions/julia-processcoverage@03114f09f119417c3242a9fb6e0b722676aedf38 # v1.2.2
+      - name: "Upload coverage data to CodeCov"
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info

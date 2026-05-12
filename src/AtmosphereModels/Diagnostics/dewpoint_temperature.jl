@@ -76,7 +76,7 @@ T⁺_field = Field(T⁺)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=289.062, min=287.475, mean=288.27
+    └── max=289.056, min=287.474, mean=288.266
 ```
 """
 function DewpointTemperature(model; tolerance=1e-4, maxiter=10)

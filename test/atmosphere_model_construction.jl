@@ -2,6 +2,7 @@ using Breeze
 using Breeze.Thermodynamics: TetensFormula
 using GPUArraysCore: @allowscalar
 using Oceananigans
+using Oceananigans.Architectures: architecture
 using Oceananigans.Diagnostics: erroring_NaNChecker!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Test
@@ -23,11 +24,13 @@ function run_nan_checker_test(arch; erroring)
     return nothing
 end
 
-@testset "AtmosphereModel [$(FT)]" for FT in test_float_types()
+@testset "AtmosphereModel [$(FT)]" for FT in all_float_types()
     Oceananigans.defaults.FloatType = FT
     Nx = Ny = 3
     grid = RectilinearGrid(default_arch; size=(Nx, Ny, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     model = AtmosphereModel(grid)
+    @test eltype(model) == FT
+    @test architecture(model) == default_arch
     @test model.grid === grid
 
     @testset "show includes forcing and thermodynamic constants" begin
