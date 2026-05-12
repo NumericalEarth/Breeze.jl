@@ -447,7 +447,7 @@ Base.show(io::IO, ref::ExnerReferenceState) = print(io, summary(ref))
 @kernel function _compute_isothermal_reference!(π₀, pᵣ, ρᵣ, θᵣ, grid, Nz, p₀, pˢᵗ, κ, Rᵈ, g, T₀)
     _ = @index(Global)
 
-    # Discrete-balance recurrence (Standard S3, audit E2). Enforces
+    # Discrete-balance recurrence. Enforces
     #
     #   (p[k] − p[k − 1]) / Δz_face[k] + g · (ρ[k] + ρ[k − 1]) / 2 = 0
     #
@@ -456,15 +456,15 @@ Base.show(io::IO, ref::ExnerReferenceState) = print(io, summary(ref))
     # floating-point precision. The previous MPAS-form analytic
     # solution `p(z) = p₀ exp(-g z / (Rᵈ T₀))` satisfies the
     # *continuous* hydrostatic equation but leaves a discrete-operator
-    # residual ~1e-3 N/m³, which seeds a factor-2 acoustic instability
-    # at production Δt (see test/substepper_validation/REPORT.md).
+    # residual ~1e-3 N/m³, which seeds an acoustic instability at
+    # production Δt.
     #
     # For constant T₀, the recurrence has the closed form
     #   p[k] = p[k − 1] · (1 − a) / (1 + a),  a = g Δz_face / (2 Rᵈ T₀).
 
     # Anchor at the first cell center via the continuous analytic
     # solution `p(z) = p₀ exp(-gz / (Rᵈ T₀))`. Face k = 1 is a
-    # boundary face (μw[1] = 0 by impenetrability) and the substepper
+    # boundary face (ρw[1] = 0 by impenetrability) and the substepper
     # does NOT apply the discrete-balance check there, so we are free
     # to anchor however we like; the continuous formula keeps
     # `surface_pressure = p₀` semantics intact and matches what users
@@ -506,8 +506,7 @@ end
 @kernel function _compute_exner_reference!(π₀, pᵣ, ρᵣ, θ₀, grid, Nz, π₀_surface, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
     _ = @index(Global)
 
-    # Discrete-balance reference for prescribed θ̄(z) (Standard S3, audit
-    # E2). Enforces
+    # Discrete-balance reference for prescribed θ̄(z). Enforces
     #   (p[k] − p[k − 1]) / Δz_face[k] + g · (ρ[k] + ρ[k − 1]) / 2 = 0
     # at every interior face k = 2..Nz, with ρ[k] = p[k] / (Rᵈ T[k]) and
     # T[k] = θ̄[k] · Π[k] = θ̄[k] · (p[k]/pˢᵗ)^κ. Substituting gives a
@@ -516,9 +515,8 @@ end
     # The previous implementation (MPAS-style up-then-down Π integration
     # using `ΔΠ = -g Δz_face / (cᵖᵈ θ_face)`) satisfies the *continuous*
     # hydrostatic equation but not the substepper's discrete operator,
-    # leaving a residual ~1e-3 N/m³ that seeds a factor-2 acoustic
-    # instability at production Δt. See test/substepper_validation/REPORT.md
-    # and test/substepper_rest_state.jl::T1.
+    # leaving a residual ~1e-3 N/m³ that seeds an acoustic instability
+    # at production Δt.
 
     # Anchor at first cell center via the continuous Π recurrence (one
     # half-step from surface). Face k = 1 is the impenetrability
@@ -849,19 +847,16 @@ end
     # with ρ[k] = p[k] / (Rᵐ[k] T[k]). This is exactly the operator the
     # substepper uses to compute the slow vertical-momentum tendency, so
     # the slow tendency is zero on a rest atmosphere to floating-point
-    # precision (Standard S3, audit E2).
+    # precision.
     #
     # The previous implementation used `d(ln p)/dz = -g / (Rᵐ T)` with
     # exponential-trapezoidal integration, which satisfies the
     # *continuous* hydrostatic equation but leaves a discrete-operator
-    # residual ~1e-3 N/m³. That residual seeded a factor-2-per-outer-step
-    # acoustic instability at production Δt; see the empirical
-    # characterization in `test/substepper_validation/REPORT.md`
-    # (sweeps I, K, L) and the rest-state test
-    # `test/substepper_rest_state.jl::T1`.
+    # residual ~1e-3 N/m³. That residual seeded an acoustic instability
+    # at production Δt.
 
     # Anchor: p at the first cell center matches surface_pressure.
-    # The boundary-row of the substepper's tridiag enforces μw[1] = 0
+    # The boundary-row of the substepper's tridiag enforces ρw[1] = 0
     # by impenetrability, so no discrete-balance constraint is applied
     # at the bottom face k = 1; we are free to choose the anchor here.
     @inbounds begin

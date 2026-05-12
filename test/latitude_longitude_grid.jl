@@ -47,14 +47,12 @@ end
     @test N isa Int
     @test N >= 1
 
-    # On a LatitudeLongitudeGrid, the smallest Δx is at the highest latitude.
-    # At 85°, Δx ≈ R cos(85°) Δλ ≈ 6371e3 * cos(85°*π/180) * (360/36)*π/180 ≈ 61 km
-    # Needs more substeps than at the equator.
-    Δx_equator = 6371e3 * (360 / 36) * π / 180  # ≈ 1113 km
-    Δx_85 = Δx_equator * cos(85 * π / 180) # ≈ 97 km
+    wider_grid = build_test_llg(default_arch; Ny = 10)
+    N_wider = compute_acoustic_substeps(wider_grid, 12, constants)
 
-    # Should need more substeps for the high-latitude grid since Δx is smaller
-    @test N >= 1
+    # More poleward latitudes have smaller zonal spacing and should not need
+    # fewer acoustic substeps.
+    @test N >= N_wider
 end
 
 #####

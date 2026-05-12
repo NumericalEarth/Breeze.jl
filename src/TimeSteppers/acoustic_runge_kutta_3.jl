@@ -152,7 +152,7 @@ end
 #####
 
 scalar_rk3_substep!(model, Δt_stage) =
-    acoustic_scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_stage)
+    scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_stage)
 
 @kernel function _rk3_substep!(u, u⁰, G, Δt_stage)
     i, j, k = @index(Global, NTuple)
@@ -208,9 +208,8 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    # Operator-split microphysics: applied once per time step on the post-RK state
-    # (rather than once per stage from update_state!), so that the full Δt of
-    # autoconversion / accretion / condensation / sedimentation is applied exactly once.
+    # Call the microphysics update hook once per outer time step on the post-RK state.
+    # Some schemes use this for a full-Δt process update; for others it is a no-op.
     microphysics_model_update!(model.microphysics, model)
 
     update_state!(model, callbacks; compute_tendencies = true)

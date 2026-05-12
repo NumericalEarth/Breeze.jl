@@ -79,7 +79,7 @@ end
 ##### S1 — Boundary-row of the column tridiag is trivial
 #####
 ##### Solver row k = 1 must have b[1] = 1, c[1] = 0 so that the
-##### post-solve gives μw[1] = 0 (impenetrability at the rigid
+##### post-solve gives ρw[1] = 0 (impenetrability at the rigid
 ##### bottom). If the kernels return anything else there, the
 ##### bottom-boundary face will pick up nonzero values.
 #####
@@ -111,14 +111,14 @@ end
 end
 
 #####
-##### S2 — Discrete adjoint: ⟨μ, δz_f(Q)/Δz_f⟩ + ⟨δz_c(μ)/Δz_c, Q⟩ = boundary terms
+##### S2 — Discrete adjoint: ⟨ρw, δz_f(Q)/Δz_f⟩ + ⟨δz_c(ρw)/Δz_c, Q⟩ = boundary terms
 #####
-##### The mass-flux divergence operator δz_c(μ)/Δz_c (face → center) is
+##### The mass-flux divergence operator δz_c(ρw)/Δz_c (face → center) is
 ##### supposed to be the negative-adjoint of the vertical pressure
 ##### derivative δz_f(Q)/Δz_f (center → face) — up to BOUNDARY terms.
 ##### Specifically (uniform Δz, periodic in horizontal, Bounded z):
 #####
-#####   Σ_centers Q[k] · δz_c(μ)[k] = − Σ_faces μ[k] · δz_f(Q)[k]
+#####   Σ_centers Q[k] · δz_c(ρw)[k] = − Σ_faces ρw[k] · δz_f(Q)[k]
 #####                                 + boundary
 #####
 ##### where the boundary terms come from face-end values. This is the
@@ -131,18 +131,18 @@ end
     Nz = 16
     Δz = 100.0
     # Random center-located scalar Q[k] for k=1..Nz, and face-located
-    # μ[k] for k=1..Nz+1 with μ[1] = μ[Nz+1] = 0 (impenetrability).
+    # vertical flux for k=1..Nz+1 with zero boundary values.
     Q = randn(Nz)
-    μ = zeros(Nz + 1)
-    μ[2:Nz] .= randn(Nz - 1)
+    vertical_flux = zeros(Nz + 1)
+    vertical_flux[2:Nz] .= randn(Nz - 1)
 
-    # ⟨Q, δz_c(μ)/Δz_c⟩_center = Σ_k Q[k] · (μ[k+1] − μ[k]) / Δz
-    lhs = sum(Q[k] * (μ[k + 1] - μ[k]) / Δz for k in 1:Nz)
+    # ⟨Q, δz_c(ρw)/Δz_c⟩_center = Σ_k Q[k] · (ρw[k+1] − ρw[k]) / Δz
+    lhs = sum(Q[k] * (vertical_flux[k + 1] - vertical_flux[k]) / Δz for k in 1:Nz)
 
-    # −⟨μ, δz_f(Q)/Δz_f⟩_face (over interior faces 2..Nz, the only
-    # ones where δz_f(Q) is defined; μ[1] = μ[Nz+1] = 0 so boundary
+    # −⟨ρw, δz_f(Q)/Δz_f⟩_face (over interior faces 2..Nz, the only
+    # ones where δz_f(Q) is defined; boundary values are zero so boundary
     # faces contribute nothing).
-    rhs = -sum(μ[k] * (Q[k] - Q[k - 1]) / Δz for k in 2:Nz)
+    rhs = -sum(vertical_flux[k] * (Q[k] - Q[k - 1]) / Δz for k in 2:Nz)
 
     @test isapprox(lhs, rhs; atol = 1e-12 * max(1, abs(lhs)))
 end
@@ -153,11 +153,11 @@ end
 ##### The buoyancy term `g · ℑ_f(ρ′)` at face k_f and the implicit
 ##### substitution use:
 #####   ℑ_f(ρ′_n)[k_f] = ½(ρ′_n[k_f] + ρ′_n[k_f − 1])
-##### with ρ′_n[k_c] = ρ̃[k_c] − δτ_n · δz_c(μ_n)[k_c] / Δz_c[k_c].
-##### After substitution, the implicit-on-μ_n contribution to face k_f is
-#####   ½ · {δz_c(μ_n)[k_f] / Δz_c[k_f] + δz_c(μ_n)[k_f − 1] / Δz_c[k_f − 1]}
+##### with ρ′_n[k_c] = ρ̃[k_c] − δτ_n · δz_c(ρw_n)[k_c] / Δz_c[k_c].
+##### After substitution, the implicit-on-ρw_n contribution to face k_f is
+#####   ½ · {δz_c(ρw_n)[k_f] / Δz_c[k_f] + δz_c(ρw_n)[k_f − 1] / Δz_c[k_f − 1]}
 ##### Test that this matches the matrix-coefficient buoyancy entries
-##### for a known μ pattern.
+##### for a known vertical-flux pattern.
 #####
 
 @testset "S3 — Buoyancy operator matches manual ℑ_f∘δz_c construction" begin
@@ -165,34 +165,36 @@ end
     Δz = 100.0
     g  = 9.80665
 
-    # Probe vector: place a unit μ at face k_f = 4, zeros elsewhere.
-    μ = zeros(Nz + 1)
-    μ[4] = 1.0
+    # Probe vector: place a unit vertical flux at face k_f = 4.
+    vertical_flux = zeros(Nz + 1)
+    vertical_flux[4] = 1.0
 
-    # The substepper LHS matrix is `(I + δτ_n² · M) μ_n = RHS` and
+    # The substepper LHS matrix is `(I + δτ_n² · M) ρw_n = RHS` and
     # the substitution from the buoyancy term gives
-    #   M_buoy(μ)[k_f] = − g · ℑ_f(δz_c(μ) / Δz_c)[k_f]
+    #   M_buoy(ρw)[k_f] = − g · ℑ_f(δz_c(ρw) / Δz_c)[k_f]
     # i.e. the SIGN is negative (the buoyancy on the new step is
     # subtracted from the (ρw)_n side, then brought to LHS).
-    Lμ = zeros(Nz + 1)
+    manual_buoyancy = zeros(Nz + 1)
     for k_f in 2:Nz
-        d_above = (μ[k_f + 1] - μ[k_f]) / Δz
-        d_below = (μ[k_f] - μ[k_f - 1]) / Δz
-        Lμ[k_f] = -g / 2 * (d_above + d_below)   # ← negative sign
+        d_above = (vertical_flux[k_f + 1] - vertical_flux[k_f]) / Δz
+        d_below = (vertical_flux[k_f] - vertical_flux[k_f - 1]) / Δz
+        manual_buoyancy[k_f] = -g / 2 * (d_above + d_below)
     end
 
     # Independently apply the matrix-coefficient buoyancy entries
     # (PGF set to zero so we isolate buoyancy):
-    Mμ = zeros(Nz + 1)
+    matrix_buoyancy = zeros(Nz + 1)
     rdz = 1 / Δz
     for k_f in 2:Nz
         sub_buoy = +g * rdz / 2          # A[k_f, k_f − 1]
         diag_buoy = g * (rdz - rdz) / 2  # = 0 on uniform Δz
         sup_buoy = -g * rdz / 2          # A[k_f, k_f + 1]
-        Mμ[k_f] = sub_buoy * μ[k_f - 1] + diag_buoy * μ[k_f] + sup_buoy * μ[k_f + 1]
+        matrix_buoyancy[k_f] = (sub_buoy * vertical_flux[k_f - 1]
+                              + diag_buoy * vertical_flux[k_f]
+                              + sup_buoy * vertical_flux[k_f + 1])
     end
 
-    Δ = maximum(abs.(Lμ[2:Nz] - Mμ[2:Nz]))
+    Δ = maximum(abs.(manual_buoyancy[2:Nz] - matrix_buoyancy[2:Nz]))
     @test Δ <= 1e-12
 end
 
@@ -223,16 +225,16 @@ end
 end
 
 #####
-##### S5 — Top-boundary face μw[Nz+1] = 0 after one outer step at rest
+##### S5 — Top-boundary face ρw[Nz+1] = 0 after one outer step at rest
 #####
-##### Impenetrability at the rigid lid means μw at the top face must be
+##### Impenetrability at the rigid lid means ρw at the top face must be
 ##### identically zero. The solver only handles face indices 1..Nz, so
-##### μw[Nz+1] is supposed to be set to 0 externally
+##### ρw[Nz+1] is supposed to be set to 0 externally
 ##### (in `_build_predictors_and_vertical_rhs!`). If the substepper
-##### ever lets `μw[Nz+1]` drift, mass conservation breaks at the lid.
+##### ever lets `ρw[Nz+1]` drift, mass conservation breaks at the lid.
 #####
 
-@testset "S5 — Top-face μw[Nz+1] = 0 after stepping" begin
+@testset "S5 — Top-face ρw[Nz+1] = 0 after stepping" begin
     model = _build_str_model(default_arch)
     _set_str_rest!(model)
 

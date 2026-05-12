@@ -50,6 +50,17 @@ Used for the buoyancy flux term in the energy equation.
     return @inbounds ρ_b * w[i, j, k]
 end
 
+# Default: flux-form `∇·(ρ𝐯⊗u)` plus the explicit curvilinear metric correction.
+@inline x_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics) =
+    div_𝐯u(i, j, k, grid, advection, momentum, velocities.u) +
+    U_dot_∇u_metric(i, j, k, grid, advection, momentum, velocities)
+@inline y_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics) =
+    div_𝐯v(i, j, k, grid, advection, momentum, velocities.v) +
+    U_dot_∇v_metric(i, j, k, grid, advection, momentum, velocities)
+@inline z_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics) =
+    div_𝐯w(i, j, k, grid, advection, momentum, velocities.w) +
+    U_dot_∇w_metric(i, j, k, grid, advection, momentum, velocities)
+
 @inline function x_momentum_tendency(i, j, k, grid,
                                      reference_density,
                                      advection,
@@ -69,17 +80,6 @@ end
              - ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
              + ρu_forcing(i, j, k, grid, clock, model_fields))
 end
-
-# Default: flux-form `∇·(ρ𝐯⊗u)` plus the explicit curvilinear metric correction.
-@inline x_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics) =
-    div_𝐯u(i, j, k, grid, advection, momentum, velocities.u) +
-    U_dot_∇u_metric(i, j, k, grid, advection, momentum, velocities)
-@inline y_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics) =
-    div_𝐯v(i, j, k, grid, advection, momentum, velocities.v) +
-    U_dot_∇v_metric(i, j, k, grid, advection, momentum, velocities)
-@inline z_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities, dynamics) =
-    div_𝐯w(i, j, k, grid, advection, momentum, velocities.w) +
-    U_dot_∇w_metric(i, j, k, grid, advection, momentum, velocities)
 
 @inline function y_momentum_tendency(i, j, k, grid,
                                      reference_density,

@@ -127,7 +127,7 @@ Update non-acoustic scalar fields (moisture, tracers) using the given
 kernel. Iterates over prognostic fields, skipping the first 5
 (``ρ, ρu, ρv, ρw, ρθ``) which are handled by the acoustic substep loop.
 """
-function acoustic_scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
+function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     grid = model.grid
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
