@@ -97,8 +97,8 @@ function AcousticRungeKutta3(grid, prognostic_fields;
 
     substepper = AcousticSubstepper(grid, dynamics.time_discretization;
                                     prognostic_momentum = (ρu = prognostic_fields.ρu,
-                                                            ρv = prognostic_fields.ρv,
-                                                            ρw = prognostic_fields.ρw))
+                                                           ρv = prognostic_fields.ρv,
+                                                           ρw = prognostic_fields.ρw))
     AS = typeof(substepper)
 
     return AcousticRungeKutta3{FT, U0, TG, TI, AS}(β₁, β₂, β₃, U⁰, Gⁿ,
