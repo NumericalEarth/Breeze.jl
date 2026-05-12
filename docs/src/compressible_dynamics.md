@@ -1,7 +1,7 @@
 # [Compressible dynamics](@id Compressible-section)
 
 [`CompressibleDynamics`](@ref) solves the fully compressible Euler equations with prognostic
-density ``ρ``. The formulation retains acoustic waves and is suitable for problems where full
+total density ``ρ`` (including dry air, vapor, and condensate). The formulation retains acoustic waves and is suitable for problems where full
 compressibility is important — global atmospheric flows, baroclinic-wave benchmarks, and
 acoustic-mode validation.
 
