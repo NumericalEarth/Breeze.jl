@@ -91,22 +91,20 @@ end
     freeze_linearization_state!(sub, model)
 
     grid = model.grid
-    Rᵈ   = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
-    cᵖᵈ  = model.thermodynamic_constants.dry_air.heat_capacity
-    γRᵈ  = cᵖᵈ * Rᵈ / (cᵖᵈ - Rᵈ)
     g    = model.thermodynamic_constants.gravitational_acceleration
 
     Π⁰ = sub.linearization_exner
     θ⁰ = sub.linearization_potential_temperature
+    γRᵐ⁰ = sub.linearization_gamma_R_mixture
     δτ_new = 0.5  # arbitrary
 
     dᵐ⁺ = 0.0   # implicit-vertical-damping factor; zero for this test
     b₁ = @allowscalar get_coefficient(1, 1, 1, grid, AcousticTridiagDiagonal(),
-                                      nothing, ZDirection(),
-                                      Π⁰, θ⁰, γRᵈ, g, δτ_new, dᵐ⁺, nothing)
+                                       nothing, ZDirection(),
+                                       Π⁰, θ⁰, γRᵐ⁰, g, δτ_new, dᵐ⁺, nothing)
     c₁ = @allowscalar get_coefficient(1, 1, 1, grid, AcousticTridiagUpper(),
-                                      nothing, ZDirection(),
-                                      Π⁰, θ⁰, γRᵈ, g, δτ_new, dᵐ⁺, nothing)
+                                       nothing, ZDirection(),
+                                       Π⁰, θ⁰, γRᵐ⁰, g, δτ_new, dᵐ⁺, nothing)
 
     @test b₁ == 1.0
     @test c₁ == 0.0
