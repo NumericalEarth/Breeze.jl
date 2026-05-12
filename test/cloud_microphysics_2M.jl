@@ -152,7 +152,7 @@ end
     expected_flux = -wʳ * ρqʳ
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
-    @test @allowscalar spf[1, 1] >= 0
+    @test @allowscalar spf[1, 1] ≥ 0
 end
 
 @testset "TwoMomentCloudMicrophysics velocities and terminal velocities [$FT]" for FT in test_float_types()
@@ -190,7 +190,7 @@ end
     wᶜˡ = @allowscalar μ.wᶜˡ[1, 1, 2]
     wʳ = @allowscalar μ.wʳ[1, 1, 2]
 
-    @test wᶜˡ <= 0
+    @test wᶜˡ ≤ 0
     @test wʳ < 0
     @test abs(wʳ) > abs(wᶜˡ)
 end

@@ -42,7 +42,7 @@ from the triple point pressure and temperature ``(pᵗʳ, Tᵗʳ)`` to pressure 
 and temperature ``T``, we obtain
 
 ```math
-\\log(pᵛ⁺ / pᵗʳ) = - ℒᵝ₀ / (Rᵛ T) + ℒᵝ₀ / (Rᵛ Tᵗʳ) + \\log \\left[ (Δcᵝ / Rᵛ) (T / Tᵗʳ) \\right] ,
+\\log(pᵛ⁺ / pᵗʳ) = - ℒᵝ₀ / (Rᵛ T) + ℒᵝ₀ / (Rᵛ Tᵗʳ) + (Δcᵝ / Rᵛ) \\log(T / Tᵗʳ) ,
 ```
 
 which then becomes

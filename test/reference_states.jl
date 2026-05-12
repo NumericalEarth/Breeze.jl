@@ -7,6 +7,7 @@ using Breeze.Thermodynamics:
     compute_reference_state!,
     compute_hydrostatic_reference!,
     dry_air_gas_constant,
+    hydrostatic_pressure,
     vapor_gas_constant,
     saturation_specific_humidity,
     PlanarLiquidSurface
@@ -265,6 +266,26 @@ using Test
         ρ₀ = surface_density(ref)
         @test ρ₀ > 0
         @test ρ₀ isa FT
+    end
+
+    @testset "Closed-form hydrostatic pressure respects standard pressure" begin
+        p₀ = FT(101325)
+        pˢᵗ = FT(100000)
+        θ₀ = FT(288)
+        cᵖᵈ = constants.dry_air.heat_capacity
+        κ = Rᵈ / cᵖᵈ
+        T₀ = θ₀ * (p₀ / pˢᵗ)^κ
+
+        @test hydrostatic_pressure(FT(0), p₀, θ₀, pˢᵗ, constants) == p₀
+
+        for z in (FT(1000), FT(5000), FT(20000))
+            p_closed = hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
+            p_expected = p₀ * (1 - g * z / (cᵖᵈ * T₀))^(cᵖᵈ / Rᵈ)
+            p_incorrect = p₀ * (1 - g * z / (cᵖᵈ * θ₀))^(cᵖᵈ / Rᵈ)
+
+            @test isapprox(p_closed, p_expected; rtol=sqrt(eps(FT)))
+            @test !isapprox(p_closed, p_incorrect; rtol=FT(1e-4))
+        end
     end
 
     #####

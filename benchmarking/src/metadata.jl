@@ -19,7 +19,9 @@ function BenchmarkMetadata(arch)
     gpu_name = nothing
     cuda_version = nothing
 
-    if arch isa Oceananigans.Architectures.GPU{CUDABackend}
+    # ReactantState targeting a CUDA GPU records the device the same way
+    # as a direct CUDA backend.
+    if arch isa GPU{CUDABackend} || (arch isa ReactantState && CUDA.functional())
         try
             gpu_name = CUDA.name(CUDA.device())
             cuda_version = string(CUDA.runtime_version())
@@ -27,6 +29,16 @@ function BenchmarkMetadata(arch)
             gpu_name = "Unknown GPU"
             cuda_version = "Unknown"
         end
+    elseif arch isa GPU{ROCBackend}
+        try
+            gpu_name = unsafe_string(pointer(UInt8.(collect(AMDGPU.HIP.properties(AMDGPU.device()).name))))
+        catch
+            gpu_name = "Unknown GPU"
+        end
+        cuda_version = "unknown"
+    elseif arch isa GPU{MetalBackend}
+        gpu_name = string(Metal.device().name)
+        cuda_version = "unknown"
     end
 
     # Get CPU model

@@ -33,6 +33,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\alpha``                          | `α`    |                                     | Specific volume, ``α = 1/ρ``                                                   |
 | ``\boldsymbol{u} = (u,v,w)``        | `u, v, w` | `AM.velocities`                  | Velocity components in (x, y, z) or (east, north, up)                          |
 | ``\boldsymbol{ρu} = (ρu, ρv, ρw)``  | `ρu, ρv, ρw` | `AM.momentum`                 | Momentum components                                                            |
+| ``\tilde{\Omega}``                  | `Ω̃`    | `AM.dynamics.contravariant_vertical_velocity` | Contravariant vertical velocity (grid-relative, normal to ``ζ``-surfaces) |
+| ``\rho \tilde{\Omega}``             | `ρΩ̃`   | `AM.dynamics.contravariant_vertical_momentum` | Contravariant vertical momentum                                          |
 | ``ρ e``                             | `ρe`   | `AM.energy_density`                 | Energy density                                                                 |
 | ``T``                               | `T`    | `AM.temperature`                    | Temperature                                                                    |
 | ``T⁺``                              | `T⁺`   | `DewpointTemperature(model)`        | Dewpoint temperature                                                           |

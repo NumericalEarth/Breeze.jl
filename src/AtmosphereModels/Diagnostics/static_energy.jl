@@ -66,7 +66,7 @@ Field(e)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=3.03055e5, min=3.02663e5, mean=3.02859e5
+    └── max=3.03019e5, min=302661.0, mean=3.0284e5
 ```
 """
 function StaticEnergy(model, flavor_symbol=:specific)
@@ -110,7 +110,7 @@ function (d::StaticEnergyKernelFunction)(i, j, k, grid)
     qⁱ = q.ice
 
     # Moist static energy
-    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ
+    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
     if d.flavor isa Specific
         return e

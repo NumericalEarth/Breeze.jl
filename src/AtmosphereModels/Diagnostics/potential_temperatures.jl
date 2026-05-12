@@ -231,12 +231,11 @@ Tᵛ = T \\frac{Rᵐ}{Rᵈ} = T \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)
 The virtual potential temperature is defined analogously,
 
 ```math
-θᵛ = θ \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)
+θᵛ = T \\left( \\frac{pˢᵗ}{p} \\right)^{Rᵈ/cᵖᵈ} \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right) .
 ```
 
-where ``θ`` is potential temperature. Note that
-``Rᵛ / Rᵈ ≈ 1.608`` for water vapor and a dry air mixture typical to Earth's atmosphere,
-and that ``δᵛ ≈ 0.608``.
+Note that ``Rᵛ / Rᵈ ≈ 1.608`` for water vapor and a dry air mixture typical to Earth's
+atmosphere, and that ``δᵛ ≈ 0.608``.
 
 ```jldoctest
 using Breeze
@@ -256,7 +255,7 @@ Field(θᵛ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=301.824, min=301.824, mean=301.824
+    └── max=301.82, min=301.8, mean=301.81
 ```
 """
 function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
@@ -416,7 +415,7 @@ Field(θᵉ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=326.162, min=325.849, mean=326.005
+    └── max=326.162, min=325.851, mean=326.006
 ```
 
 # References
@@ -498,7 +497,7 @@ Field(θᵇ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=326.162, min=325.849, mean=326.005
+    └── max=326.162, min=325.851, mean=326.006
 ```
 
 # References
@@ -573,8 +572,11 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         θ * (1 - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / (cᵖᵐ * T))
 
     elseif d.flavor isa AbstractVirtualFlavor
+        # Virtual potential temperature
+        cᵖᵈ = constants.dry_air.heat_capacity
+        Πᵈ = (p / pˢᵗ)^(Rᵈ / cᵖᵈ)
         δ = Rᵛ / Rᵈ - 1
-        θ * (1 + δ * qᵛ - qˡ - qⁱ)
+        (T / Πᵈ) * (1 + δ * qᵛ - qˡ - qⁱ)
 
     elseif d.flavor isa AbstractEquivalentFlavor
         # Saturation specific humidity over a liquid surface

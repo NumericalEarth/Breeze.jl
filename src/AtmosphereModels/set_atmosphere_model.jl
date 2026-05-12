@@ -1,12 +1,12 @@
 using Oceananigans.Fields: Fields, set!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: update_state!
+using Oceananigans.TurbulenceClosures: initialize_closure_fields!
 
 using .Diagnostics: SaturationSpecificHumidity
 
 using ..Thermodynamics:
     MoistureMassFractions,
-    mixture_heat_capacity,
     mixture_gas_constant
 
 move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
@@ -251,6 +251,8 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         make_pressure_correction!(model, Δt)
         update_state!(model, compute_tendencies=false)
     end
+
+    initialize_closure_fields!(model.closure_fields, model.closure, model)
 
     return nothing
 end

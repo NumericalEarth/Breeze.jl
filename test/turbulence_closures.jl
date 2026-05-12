@@ -13,7 +13,8 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         ScalarDiffusivity(ν=1, κ=2),
         ScalarDiffusivity(vitd, ν=1),
         SmagorinskyLilly(),
-        AnisotropicMinimumDissipation()
+        DynamicSmagorinsky(),
+        AnisotropicMinimumDissipation(),
     )
 
     for closure in closures
@@ -61,6 +62,28 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             set!(model; θ=θ₀, ρu = (x, y, z) -> z / 100)
             Breeze.AtmosphereModels.update_state!(model)
             @test maximum(abs, model.closure_fields.νₑ) > 0
+        end
+
+        @testset "DynamicSmagorinsky with velocity gradients [$formulation, $(FT)]" begin
+            model = AtmosphereModel(grid; dynamics, formulation, closure=DynamicSmagorinsky())
+            θ₀ = model.dynamics.reference_state.potential_temperature
+            # Mean shear plus a triad wave in (x,y) so the test filter sees
+            # horizontal structure. Without xy variation Lᵢⱼ vanishes and
+            # 𝒥ᴸᴹ sits at the minimum_numerator floor regardless of whether
+            # `step_closure_prognostics!` runs.
+            ρuᵢ(x, y, z) = z / 100 + 0.1 * sin(2π * x / 100) * cos(2π * y / 100)
+            set!(model; θ=θ₀, ρu=ρuᵢ)
+            # `initialize_closure_fields!` seeds 𝒥ᴸᴹ with a spatial mean
+            # uniform across the domain. A successful call to
+            # `step_closure_prognostics!` during the time step must advance
+            # 𝒥ᴸᴹ with per-cell local values, making it spatially varying.
+            # If the hook is called at the wrong clock stage, Oceananigans's
+            # LASD kernel gates it out and 𝒥ᴸᴹ stays at its seed.
+            𝒥ᴸᴹ_seed = Array(interior(model.closure_fields.𝒥ᴸᴹ)) |> copy
+            time_step!(model, 1)
+            𝒥ᴸᴹ_after = Array(interior(model.closure_fields.𝒥ᴸᴹ))
+            @test maximum(abs, model.closure_fields.νₑ) > 0
+            @test 𝒥ᴸᴹ_after != 𝒥ᴸᴹ_seed
         end
 
         @testset "AnisotropicMinimumDissipation with velocity gradients [$formulation, $(FT)]" begin

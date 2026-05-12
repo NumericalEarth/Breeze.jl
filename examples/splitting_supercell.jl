@@ -14,7 +14,8 @@
 # The simulation initializes a conditionally unstable atmosphere with a warm bubble perturbation
 # that triggers deep convection. The environment includes:
 # - A realistic tropospheric potential temperature profile with a tropopause at 12 km
-# - Moisture that decreases with height, with relative humidity dropping above the tropopause
+# - Relative humidity that decreases with height, with the resulting water vapor mixing ratio capped at
+#   0.014 kg/kg "to approximate a well-mixed boundary layer in the lowest kilometer" ([KlempEtAl2015](@citet)).
 # - Wind shear in the lower 5 km to promote storm rotation and supercell development
 #
 # ### Potential temperature profile
@@ -24,8 +25,8 @@
 #
 # ```math
 # θ(z) = \begin{cases}
-#     θ_0 + (θ_{\rm tr} - θ_0) \left(\frac{z}{z_{\rm tr}}\right)^{5/4} & z \leq z_{\rm tr} \\
-#     θ_{\rm tr} \exp\left(\frac{g}{c_p^d T_{\rm tr}} (z - z_{\rm tr})\right) & z > z_{\rm tr}
+#     θ_0 + (θ_{\rm tr} - θ_0) \left(\dfrac{z}{z_{\rm tr}}\right)^{5/4} & z \leq z_{\rm tr} \\
+#     θ_{\rm tr} \exp\left[\dfrac{g}{c_p^d T_{\rm tr}} (z - z_{\rm tr})\right] & z > z_{\rm tr}
 # \end{cases}
 # ```
 #
@@ -40,12 +41,12 @@
 #
 # ```math
 # θ'(x, y, z) = \begin{cases}
-#     Δθ \cos^2\left(\frac{\pi}{2} R\right) & R < 1 \\
+#     Δθ \cos^2\left(π R / 2 \right) & R < 1 \\
 #     0 & R \geq 1
 # \end{cases}
 # ```
 #
-# where ``R = \sqrt{(r/r_h)^2 + ((z-z_c)/r_z)^2}`` is the normalized radius,
+# where ``R = \sqrt{(r/r_h)^2 + [(z-z_c)/r_z]^2}`` is the normalized radius,
 # ``r = \sqrt{(x-x_c)^2 + (y-y_c)^2}`` is the horizontal distance from the bubble center,
 # ``Δθ = 3 \, {\rm K}`` is the perturbation amplitude, ``r_h = 10 \, {\rm km}`` is the
 # horizontal radius, and ``r_z = 1.5 \, {\rm km}`` is the vertical radius.
@@ -58,6 +59,7 @@
 
 using Breeze
 using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
+using Breeze.Thermodynamics: hydrostatic_density, hydrostatic_temperature
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: znodes
@@ -106,6 +108,7 @@ dynamics = AnelasticDynamics(reference_state)
 θᵖ = 343       # K - tropopause potential temperature
 zᵖ = 12000     # m - tropopause height
 Tᵖ = 213       # K - tropopause temperature
+qᵛ_max = 0.014 # kg/kg - cap on water vapor mixing ratio from Klemp et al. (2015)
 nothing #hide
 
 # Wind shear parameters control the low-level environmental wind profile:
@@ -126,12 +129,29 @@ nothing #hide
 function θ_background(z)
     θᵗ = θ₀ + (θᵖ - θ₀) * (z / zᵖ)^(5/4)
     θˢ = θᵖ * exp(g / (cᵖᵈ * Tᵖ) * (z - zᵖ))
-    return (z <= zᵖ) * θᵗ + (z > zᵖ) * θˢ
+    return (z ≤ zᵖ) * θᵗ + (z > zᵖ) * θˢ
 end
 
-# Relative humidity profile (decreases with height, 25% above tropopause):
+# Relative humidity profile (Equations 11–12 by [KlempEtAl2015](@citet)) combined with
+# the water vapor cap ``qᵛ_{max}``. The local temperature and density
+# are obtained by numerically integrating the hydrostatic balance with the actual
+# ``θ(z)`` profile:
 
-ℋ_background(z) = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z <= zᵖ) + 1/4 * (z > zᵖ)
+function qᵛ_bg(z)
+    ℋ = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z ≤ zᵖ) + 1/4 * (z > zᵖ)
+    p₀ = reference_state.surface_pressure
+    pˢᵗ = reference_state.standard_pressure
+    T = hydrostatic_temperature(z, p₀, θ_background, pˢᵗ, constants)
+    ρ = hydrostatic_density(z, p₀, θ_background, pˢᵗ, constants)
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    return min(ℋ * qᵛ⁺, qᵛ_max)
+end
+
+# Evaluate ``qᵛ`` on a column field so the hydrostatic integration runs only once
+# per vertical level rather than once per horizontal grid point:
+
+qᵛ_column = Field{Nothing, Nothing, Center}(grid)
+set!(qᵛ_column, qᵛ_bg)
 
 # Zonal wind profile with linear shear below ``zˢ`` and smooth transition (Equations 15-16):
 
@@ -140,7 +160,7 @@ function u_background(z)
     uᵗ = (-4/5 + 3 * (z / zˢ) - 5/4 * (z / zˢ)^2) * uˢ - uᶜ
     uᵘ = uˢ - uᶜ
     return (z < (zˢ - 1000)) * uˡ +
-           (abs(z - zˢ) <= 1000) * uᵗ +
+           (abs(z - zˢ) ≤ 1000) * uᵗ +
            (z > (zˢ + 1000)) * uᵘ
 end
 
@@ -163,7 +183,7 @@ function θᵢ(x, y, z)
     θ̄ = θ_background(z)
     r = sqrt((x - xᵇ)^2 + (y - yᵇ)^2)
     R = sqrt((r / rᵇʰ)^2 + ((z - zᵇ) / rᵇᵛ)^2)
-    θ′ = ifelse(R < 1, Δθ * cos((π / 2) * R)^2, 0.0)
+    θ′ = ifelse(R < 1, Δθ * cos(π * R / 2)^2, 0.0)
     return θ̄ + θ′
 end
 
@@ -171,11 +191,11 @@ uᵢ(x, y, z) = u_background(z)
 
 # ## Visualization of initial conditions and warm bubble perturbation
 #
-# We visualize the background potential temperature, relative humidity, and wind shear profiles
-# that define the environmental stratification:
+# We visualize the background potential temperature, water vapor mixing ratio, and wind shear
+# profiles that define the environmental stratification:
 
 θ_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> θ_background(z))
-ℋ_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> ℋ_background(z) * 100)
+qᵛ_profile = set!(Field{Nothing, Nothing, Center}(grid), 1000 * qᵛ_column) # convert kg/kg -> g/kg
 u_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> u_background(z))
 
 fig = Figure(size=(1000, 400), fontsize=14)
@@ -184,9 +204,9 @@ axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (km)", title="Potential temper
 lines!(axθ, θ_profile, linewidth=2, color=:magenta)
 hlines!(axθ, [zᵖ / 1000], color=:gray, linestyle=:dash)
 
-axℋ = Axis(fig[1, 2], xlabel="ℋ (%)", ylabel="z (km)", title="Relative humidity")
-lines!(axℋ, ℋ_profile, linewidth=2, color=:dodgerblue)
-hlines!(axℋ, [zᵖ / 1000], color=:gray, linestyle=:dash)
+axqᵛ = Axis(fig[1, 2], xlabel="qᵛ (g/kg)", ylabel="z (km)", title="Water vapor mixing ratio")
+lines!(axqᵛ, qᵛ_profile, linewidth=2, color=:dodgerblue)
+hlines!(axqᵛ, [zᵖ / 1000], color=:gray, linestyle=:dash)
 
 axu = Axis(fig[1, 3], xlabel="u (m/s)", ylabel="z (km)", title="Wind profile")
 lines!(axu, u_profile, linewidth=2, color=:orangered)
@@ -217,18 +237,15 @@ fig
 # accretion, rain evaporation, and sedimentation processes.
 
 microphysics = DCMIP2016KesslerMicrophysics()
-advection = WENO(order=9, minimum_buffer_upwind_order=3)
+advection = WENO(order=9)
 
 model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
 
 # ## Model initialization
 #
 # We initialize the model with the previously described initial conditions, including a warm-bubble perturbation.
-# We precompute the RH field to ensure GPU compatibility.
 
-ℋᵢ = set!(CenterField(grid), (x, y, z) -> ℋ_background(z))
-
-set!(model, θ=θᵢ, ℋ=ℋᵢ, u=uᵢ)
+set!(model, θ=θᵢ, qᵛ=qᵛ_column, u=uᵢ)
 
 # ## Simulation
 #
