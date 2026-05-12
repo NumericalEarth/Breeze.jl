@@ -187,11 +187,11 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     # `compute_auxiliary_dynamics_variables!` overwrites pressure properly on every
     # subsequent call.
     if reference_state isa ExnerReferenceState
-        Oceananigans.set!(pressure, reference_state.pressure)
+        seed_pressure!(pressure, grid, reference_state.pressure)
     elseif terrain_reference_pressure !== nothing
-        Oceananigans.set!(pressure, terrain_reference_pressure)
+        seed_pressure!(pressure, grid, terrain_reference_pressure)
     else
-        Oceananigans.set!(pressure, surface_pressure)
+        seed_pressure!(pressure, grid, surface_pressure)
     end
 
     return CompressibleDynamics(dynamics.time_discretization, density, pressure,
@@ -200,6 +200,30 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
                                 contravariant_vertical_velocity,
                                 contravariant_vertical_momentum,
                                 terrain_reference_pressure, terrain_reference_density)
+end
+
+function seed_pressure!(pressure, grid, pressure_reference)
+    arch = grid.architecture
+    launch!(arch, grid, :xyz, _seed_pressure_from_field!, pressure, pressure_reference)
+    fill_halo_regions!(pressure)
+    return nothing
+end
+
+function seed_pressure!(pressure, grid, pressure_value::Number)
+    arch = grid.architecture
+    launch!(arch, grid, :xyz, _seed_pressure_from_value!, pressure, pressure_value)
+    fill_halo_regions!(pressure)
+    return nothing
+end
+
+@kernel function _seed_pressure_from_field!(pressure, pressure_reference)
+    i, j, k = @index(Global, NTuple)
+    @inbounds pressure[i, j, k] = pressure_reference[i, j, k]
+end
+
+@kernel function _seed_pressure_from_value!(pressure, pressure_value)
+    i, j, k = @index(Global, NTuple)
+    @inbounds pressure[i, j, k] = pressure_value
 end
 
 #####
