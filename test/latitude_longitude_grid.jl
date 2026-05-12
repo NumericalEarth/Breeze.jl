@@ -84,6 +84,7 @@ end
     set!(model; θ=300, u=uᵢ, ρ=ref.density)
 
     ## Record initial max|v| and max|w| (should be ~0)
+    u_init = @allowscalar maximum(abs, interior(model.velocities.u))
     v_init = @allowscalar maximum(abs, interior(model.velocities.v))
     w_init = @allowscalar maximum(abs, interior(model.velocities.w))
 
@@ -100,12 +101,12 @@ end
     v_max = @allowscalar maximum(abs, interior(model.velocities.v))
     w_max = @allowscalar maximum(abs, interior(model.velocities.w))
 
-    @test v_max < 0.1  # should be ≪ u₀
-    @test w_max < 0.1
+    @test v_max < 1e-2  # should be ≪ u₀
+    @test w_max < 1e-2
 
     ## u should not have drifted significantly from initial profile
     u_max = @allowscalar maximum(abs, interior(model.velocities.u))
-    @test u_max < 2 * u₀  # should still be O(u₀)
+    @test abs(u_max - u_init) < 5e-2
     @test !any(isnan, parent(model.momentum.ρu))
     @test !any(isnan, parent(model.momentum.ρv))
 end
