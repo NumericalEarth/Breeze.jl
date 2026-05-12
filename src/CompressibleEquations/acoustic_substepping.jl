@@ -1395,10 +1395,10 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
     for substep in 1:Nτ
         # Step A: explicit horizontal forward of (ρu)′, (ρv)′. Following the
         # MPAS forward-backward acoustic sequence, the first small step in a
-        # multi-step stage seeds horizontal perturbation momentum from the
-        # slow tendency only; acoustic pressure gradients enter on subsequent
-        # small steps after the mass/thermodynamic perturbations have been
-        # advanced once. For degenerate one-substep stages, apply the pressure
+        # multi-step stage includes the frozen large-step pressure gradient
+        # but skips the acoustic perturbation pressure gradient until
+        # mass/thermodynamic perturbations have been advanced once. For
+        # degenerate one-substep stages, apply the perturbation pressure
         # gradient immediately so the stage still contains the fast force.
         apply_pressure_gradient = apply_horizontal_pressure_gradient_substep(substep, Nτ)
 
