@@ -210,7 +210,7 @@ nothing #hide
 
 # ---
 #
-# # Part II — A differentiable workflow
+# # A differentiable workflow
 #
 # The forward simulation above gives us the physics; the rest of the example
 # treats that same forward model as a *function* and takes its gradient.  This
@@ -245,6 +245,7 @@ nothing #hide
 using CUDA       # required for Reactant extension loading
 using Reactant
 using Enzyme
+using Statistics: mean
 using Oceananigans.Architectures: ReactantState
 using Reactant: @trace
 
@@ -298,18 +299,17 @@ Nsteps = (isqrt(Nt - 1) + 1)^2
 
 # ### Defining the objective
 #
-# We integrate the squared acoustic density anomaly along the entire bottom of
+# We measure the mean squared acoustic density anomaly along the bottom of
 # the domain:
 #
 # ```math
-# J \;=\; \sum_{i}\bigl(\rho(x_i, z_1) - \bar\rho(x_i, z_1)\bigr)^2
+# J \;=\; \frac{1}{N_x}\sum_{i}\bigl(\rho(x_i, z_1) - \bar\rho(x_i, z_1)\bigr)^2
 # ```
 #
 # This is a global measure of how much acoustic energy ends up trapped near
-# the surface.  Summing along the whole bottom row (instead of measuring at a
-# single point) gives a sensitivity field that lights up wherever the wind
-# affects *any* part of the surface response — much richer than a point
-# probe, and far better suited to seeing the ducting pattern.
+# the surface.  Averaging along the whole bottom row gives a sensitivity field
+# that lights up wherever the wind affects *any* part of the surface response,
+# making the ducting pattern visible across the entire domain.
 #
 # The `set!` inside `loss` is what re-initializes the model from the current
 # wind field on every backward evaluation.  Without it, AD would differentiate
@@ -322,7 +322,7 @@ function loss(model, u₀, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
     end
     ρ_surf  = interior(model.dynamics.density)[:, :, 1]
     ρᵇ_surf = interior(ρᵇᵍ)[:, :, 1]
-    return sum((ρ_surf .- ρᵇ_surf) .^ 2)
+    return mean((ρ_surf .- ρᵇ_surf) .^ 2)
 end
 
 # ### The gradient wrapper
@@ -367,7 +367,7 @@ du, J = compiled_grad(
 xs_u = xnodes(grid_ad, Face())
 zs   = znodes(grid_ad, Center())
 
-@info @sprintf("Surface-integrated (ρ - ρ̄)² = %.6e after %d steps",
+@info @sprintf("Surface-mean (ρ - ρ̄)² = %.6e after %d steps",
                Float64(only(J)), Nsteps)
 
 # ### Sensitivity visualization
@@ -383,7 +383,7 @@ abs_max     = maximum(abs, sensitivity)
 
 fig_sens = Figure(size = (800, 350), fontsize = 12)
 Label(fig_sens[0, :],
-      @sprintf("∂J / ∂u₀  (J = ∫_surface (ρ - ρ̄)² dx,  t=%d Δt)", Nsteps),
+      @sprintf("∂J / ∂u₀  (J = ⟨(ρ - ρ̄)²⟩ at surface,  t=%d Δt)", Nsteps),
       fontsize = 14, tellwidth = false)
 ax_sens = Axis(fig_sens[1, 1]; xlabel = "x (m)", ylabel = "z (m)")
 hm = heatmap!(ax_sens, xs_u, zs, sensitivity; colormap = :balance,
