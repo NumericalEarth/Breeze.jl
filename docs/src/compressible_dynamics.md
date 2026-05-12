@@ -281,8 +281,8 @@ explicit correction
 
 ```math
 \begin{aligned}
-Δ(ρu)' &= - γ_h \, ∂_x D_τ , \\
-Δ(ρv)' &= - γ_h \, ∂_y D_τ .
+Δ(ρu)' &= - γ_x \, ∂_x D_τ , \\
+Δ(ρv)' &= - γ_y \, ∂_y D_τ .
 \end{aligned}
 ```
 
