@@ -104,11 +104,18 @@ end
 ##### show methods
 #####
 
+# Use `prettysummary` so Float32 values display without the `f0` suffix
+# (consistent with Oceananigans' show output, and stable across precision).
+_show_coordinate(::Nothing) = "<from grid>"
+_show_coordinate(coord::Tuple) = "(" * prettysummary(coord[1]) * ", " * prettysummary(coord[2]) * ")"
+
+_show_epoch(::Nothing) = "<from clock>"
+_show_epoch(epoch) = string(epoch)
+
 function Base.show(io::IO, sp::ApparentSolarPosition)
-    coord = isnothing(sp.coordinate) ? "<from grid>" : sp.coordinate
-    epoch = isnothing(sp.epoch) ? "<from clock>" : sp.epoch
-    print(io, "ApparentSolarPosition(coordinate=", coord, ", epoch=", epoch, ")")
+    print(io, "ApparentSolarPosition(coordinate=", _show_coordinate(sp.coordinate),
+              ", epoch=", _show_epoch(sp.epoch), ")")
 end
 
 Base.show(io::IO, sp::FixedCosineZenith) =
-    print(io, "FixedCosineZenith(cos_zenith = ", sp.cos_zenith, ")")
+    print(io, "FixedCosineZenith(cos_zenith = ", prettysummary(sp.cos_zenith), ")")
