@@ -10,8 +10,6 @@ using GPUArraysCore: @allowscalar
 using Enzyme
 using Test
 
-default_arch = CPU()
-
 if default_arch isa GPU
     Reactant.set_default_backend("gpu")
 else
