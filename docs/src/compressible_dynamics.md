@@ -242,9 +242,9 @@ recovered by back-substitution.
 The off-centering parameter ``ω = 1/2`` is classical centered Crank–Nicolson — neutrally
 stable for the linearized inviscid system but susceptible to amplification of distributed
 floating-point noise through the non-normal substep operator (see
-[Stability analysis](@ref stability-analysis)). The default ``ω = 0.65`` adds modest
-dissipation; the dimensionless parameter ``ε = 2ω - 1 = 0.3`` quantifies the deviation from
-centered.
+[Stability analysis](@ref stability-analysis)).
+A fully implicit backward Euler scheme is obtained with ``ω = 1`` and offers the most dissipation.
+The default ``ω = 0.65`` adds modest dissipation; the dimensionless parameter ``ε = 2ω - 1 = 0.3`` quantifies the deviation from centered.
 
 ### Recovery
 
