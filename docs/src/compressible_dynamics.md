@@ -286,7 +286,7 @@ explicit correction
 \end{aligned}
 ```
 
-Breeze can also fold the vertical component into the column tridiag by setting
+This horizontal divergence damping is applied by default. Breeze can also fold the vertical component into the column tridiag by setting
 `damp_vertical = true` on [`ThermalDivergenceDamping`](@ref
 Breeze.CompressibleEquations.ThermalDivergenceDamping). The default leaves this explicit
 vertical divergence-damping term off; vertical acoustic damping comes from the off-centered
