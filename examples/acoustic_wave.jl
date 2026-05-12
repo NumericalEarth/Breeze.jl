@@ -1,25 +1,37 @@
-# # Acoustic wave refraction by wind shear
+# # Acoustic refraction in wind shear — a differentiable example
 #
-# This example simulates an acoustic pulse propagating through a wind shear layer
-# using the fully compressible [Euler equations](https://en.wikipedia.org/wiki/Euler_equations_(fluid_dynamics)).
-# When wind speed increases with height, sound waves are refracted: waves traveling **with**
-# the wind bend **downward** (trapped near the surface), while waves traveling **against**
-# the wind bend **upward**.
-#
-# The effective propagation speed for a wave traveling in direction ``\hat{\boldsymbol{n}}`` is
+# This example does two things on top of the same compressible forward model.
+# **First**, we simulate an acoustic pulse propagating through a wind shear
+# layer using the fully compressible [Euler
+# equations](https://en.wikipedia.org/wiki/Euler_equations_(fluid_dynamics)),
+# and observe how the shear refracts the wave: waves traveling **with** the
+# wind bend **downward** (trapped near the surface), while waves traveling
+# **against** the wind bend **upward**.  The effective propagation speed for
+# a wave in direction ``\hat{\boldsymbol{n}}`` is
 # ```math
 # \mathbb{C}^{ac} + \boldsymbol{u} \cdot \hat{\boldsymbol{n}}
 # ```
-# where ``ℂᵃᶜ`` is the acoustic sound speed and ``\boldsymbol{u}`` is the wind velocity.
-# This causes wavefronts to tilt toward regions of lower effective propagation speed.
-#
-# This phenomenon explains why distant sounds are often heard more clearly downwind
-# of a source, as sound energy is "ducted" along the surface. For more on this topic, see
+# where ``ℂᵃᶜ`` is the acoustic sound speed and ``\boldsymbol{u}`` is the wind
+# velocity.  Wavefronts tilt toward regions of lower effective propagation
+# speed, "ducting" sound energy along the surface — which is why distant
+# sounds are often heard more clearly downwind. For more on this topic, see
 #
 # ```@bibliography
 # ostashev2015acoustics
 # pierce2019acoustics
 # ```
+#
+# **Second**, we use this setup as a minimal introduction to *differentiable*
+# atmospheric simulation in Breeze.  After running the forward problem, we
+# take a gradient through the entire compressible time-stepping — asking
+# *which parts of the wind profile control how much acoustic energy ends up
+# trapped near the surface?* — using
+# [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) for reverse-mode
+# automatic differentiation and [Reactant.jl](https://github.com/EnzymeAD/Reactant.jl)
+# to compile the model down to
+# [XLA](https://en.wikipedia.org/wiki/Accelerated_Linear_Algebra).  The result
+# is a 2D sensitivity field obtained in a single backward pass; the same
+# answer via finite differences would cost one model rerun per grid cell.
 #
 # We use stable stratification to suppress [Kelvin-Helmholtz instability](https://en.wikipedia.org/wiki/Kelvin%E2%80%93Helmholtz_instability)
 # and a logarithmic wind profile consistent with the atmospheric surface layer.
@@ -79,10 +91,10 @@ Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
 gaussian(x, z) = exp(-(x^2 + z^2) / 2σ^2)
 ρ₀ = interior(reference.density, 1, 1, 1)[]
 
-ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
+ρ_init(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
 uᵢ(x, z) = Uᵢ(z) #+ (ℂᵃᶜ / ρ₀) * δρ * gaussian(x, z)
 
-set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
+set!(model, ρ=ρ_init, θ=θ₀, u=uᵢ)
 
 
 # ## Simulation setup
@@ -92,7 +104,7 @@ set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
 
 Δx, Δz = Lx / Nx, Lz / Nz
 Δt = 0.5 * min(Δx, Δz) / (ℂᵃᶜ + Uᵢ(Lz))
-stop_time = 1  # seconds
+stop_time = 0.5 # seconds — long enough for the wave to traverse the domain and for refraction to bend rays visibly
 
 simulation = Simulation(model; Δt, stop_time)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
@@ -196,29 +208,39 @@ nothing #hide
 
 # ![](acoustic_wave.mp4)
 
-# ## Differentiability: sensitivity to the initial perturbation
+# ---
 #
-# A natural follow-up question is: *how sensitive is the acoustic field at some distant
-# observation point to the shape of the initial density pulse?* Answering this with [finite
-# differences](https://en.wikipedia.org/wiki/Finite_difference) (FD) would require
-# re-running the simulation once per grid cell. [Automatic
-# differentiation](https://en.wikipedia.org/wiki/Automatic_differentiation) (AD) gives us
-# the full sensitivity field in a single backward pass.
+# # Part II — A differentiable workflow
 #
-# We use [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) for reverse-mode AD and
-# [Reactant.jl](https://github.com/EnzymeAD/Reactant.jl) to compile the model to
-# [XLA](https://en.wikipedia.org/wiki/Accelerated_Linear_Algebra) so that we can target
-# multiple accelerators (GPU, TPU, etc...) and differentiate through it with Enzyme.
+# The forward simulation above gives us the physics; the rest of the example
+# treats that same forward model as a *function* and takes its gradient.  This
+# is the minimal pattern you'd reach for whenever you want to do
+# data-assimilation, parameter calibration, or sensitivity analysis with a
+# Breeze atmosphere — wrap the time-stepping in a scalar-valued `loss`,
+# compile it with `Reactant.@compile`, and differentiate it with
+# `Enzyme.autodiff`.
+#
+# The pattern is:
+#
+#   1. Rebuild the model on a `ReactantState` grid so all arrays are XLA buffers.
+#   2. Choose a differentiated input (here, the initial wind field).
+#   3. Define a scalar `loss` that re-initializes the model from that input,
+#      runs `nsteps` of `time_step!` inside a `@trace` loop, and reduces to a
+#      scalar diagnostic.
+#   4. Wrap `loss` in a `grad_loss` that calls `Enzyme.autodiff(...)` with the
+#      input as `Duplicated` and everything else as `Const`.
+#   5. Compile once with `Reactant.@compile raise=true raise_first=true`; run
+#      many times.
 #
 # ### Why Reactant?
 #
-# Reactant traces Julia code into an intermediate representation (StableHLO) that XLA can
-# optimize and Enzyme can differentiate.  The key requirement is that the model lives on
+# Reactant traces Julia code into an intermediate representation (StableHLO)
+# that XLA can optimize and Enzyme can differentiate.  The key requirement is
+# that the model lives on
 # [`ReactantState`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Architectures.ReactantState)
-# — Reactant's architecture in Oceananigans — so that all arrays are XLA buffers.  We
-# therefore rebuild the *same* physical setup on a new grid whose architecture is
-# `ReactantState()`.  Everything else — domain, resolution, thermodynamic constants, wind
-# profile, perturbation shape — is identical.
+# — Reactant's architecture in Oceananigans — so that all arrays are XLA
+# buffers.  We therefore rebuild the *same* physical setup on a new grid whose
+# architecture is `ReactantState()`.
 
 using CUDA       # required for Reactant extension loading
 using Reactant
@@ -236,97 +258,93 @@ grid_ad = RectilinearGrid(ReactantState(); size = (Nx, Nz),
 
 model_ad = AtmosphereModel(grid_ad; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
 
-# ### Background fields
+# ### Fixed and varying fields
 #
-# The hydrostatic background density and the log-layer wind profile do not
-# change between evaluations of the objective, so we precompute them once.
-# These are *not* recomputed inside the loss function.
+# In this experiment the initial density pulse and hydrostatic background are
+# held fixed; only the wind profile varies.  We therefore precompute the total
+# initial density once (background + Gaussian pulse) and use it as a `Const`.
+# We also keep the standalone background ``\bar\rho(z)`` around so the loss can
+# subtract it from the model density to isolate the acoustic perturbation.
 
 ρᵇᵍ = CenterField(grid_ad)
-uᵇᵍ = XFaceField(grid_ad)
 set!(ρᵇᵍ, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
-set!(uᵇᵍ, (x, z) -> Uᵢ(z))
 
-# The initial density perturbation is the quantity we differentiate with respect
-# to.  We also allocate its adjoint (shadow) field, which Enzyme will fill with
-# the gradient ``\partial J / \partial \rho'_0``.
+ρ_total = CenterField(grid_ad)
+set!(ρ_total, ρ_init)
 
-δρᵢ  = CenterField(grid_ad)
-dδρᵢ = CenterField(grid_ad)
-set!(δρᵢ, (x, z) -> δρ * gaussian(x, z))
-set!(dδρᵢ, 0)
+# The initial wind field is the quantity we differentiate with respect to.
+# Enzyme accumulates ``\partial J / \partial u_0`` into the shadow buffer
+# ``du_0``.
 
-# A scratch field for the total initial density (background + perturbation).
-# It is mutated inside `loss` as the bridge between `δρᵢ` and the model, so it
-# must be `Duplicated` — Enzyme needs a shadow buffer to propagate the adjoint
-# from `set!(model; ρ = ρᵗ, …)` back through `parent(ρᵗ) .= …` to `dδρᵢ`.
-
-ρᵗ  = CenterField(grid_ad)
-dρᵗ = CenterField(grid_ad)
+u₀  = XFaceField(grid_ad)
+du₀ = XFaceField(grid_ad)
+set!(u₀, (x, z) -> Uᵢ(z))
+set!(du₀, 0)
 
 # The shadow model stores accumulated adjoints for every prognostic field.
 
 dmodel_ad = Enzyme.make_zero(model_ad)
 
-# ### Time step and observation point
+# ### Time step and integration length
 #
 # We reuse the CFL-based time step and the exact number of iterations from the
 # forward simulation above.  The `Simulation` API is not used here because
-# Reactant compiles a fixed-length traced loop instead.  Gradient checkpointing
-# requires a perfect-square step count, so we round up to the next perfect square.
+# Reactant compiles a fixed-length traced loop instead.  Gradient
+# checkpointing requires a perfect-square step count, so we round up to the
+# next perfect square.
 
 Nt = simulation.model.clock.iteration
 Nsteps = (isqrt(Nt - 1) + 1)^2
-target_i = round(Int, 0.75Nx)
-target_k = round(Int, 0.35Nz)
 
 # ### Defining the objective
 #
-# The loss function must contain `set!` so that the model is re-initialized from
-# the current perturbation field on every evaluation. Without this, the backward
-# pass would differentiate a stale trajectory.
+# We integrate the squared acoustic density anomaly along the entire bottom of
+# the domain:
 #
-# Only two things are recomputed each call:
+# ```math
+# J \;=\; \sum_{i}\bigl(\rho(x_i, z_1) - \bar\rho(x_i, z_1)\bigr)^2
+# ```
 #
-# 1. The total initial density ``\rho_0 = \bar\rho(z) + \rho'_0(x,z)`` — because
-#    the perturbation field is the input we vary.
-# 2. The forward trajectory — because time stepping mutates the model in place.
+# This is a global measure of how much acoustic energy ends up trapped near
+# the surface.  Summing along the whole bottom row (instead of measuring at a
+# single point) gives a sensitivity field that lights up wherever the wind
+# affects *any* part of the surface response — much richer than a point
+# probe, and far better suited to seeing the ducting pattern.
 #
-# Everything else (grid, background fields, constants, compiled artifacts) is
-# allocated once and reused.
+# The `set!` inside `loss` is what re-initializes the model from the current
+# wind field on every backward evaluation.  Without it, AD would differentiate
+# a stale trajectory.
 
-function loss(model, δρᵢ, ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
-    parent(ρᵗ) .= parent(ρᵇᵍ) .+ parent(δρᵢ)
-    set!(model; ρ = ρᵗ, θ = θ₀, u = uᵇᵍ)
+function loss(model, u₀, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
+    set!(model; ρ = ρ_total, θ = θ₀, u = u₀)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
-    return @allowscalar interior(model.dynamics.density)[it, 1, kt]^2
+    ρ_surf  = interior(model.dynamics.density)[:, :, 1]
+    ρᵇ_surf = interior(ρᵇᵍ)[:, :, 1]
+    return sum((ρ_surf .- ρᵇ_surf) .^ 2)
 end
 
 # ### The gradient wrapper
 #
 # `grad_loss` zeroes the adjoint buffer and calls `Enzyme.autodiff` in reverse
-# mode.  The model, the perturbation field, and the scratch total-density buffer
-# are `Duplicated` (primal + shadow); everything else is `Const`.
+# mode.  The model and the initial wind are `Duplicated` (primal + shadow);
+# everything else is `Const`.
 
-function grad_loss(model, dmodel, δρᵢ, dδρᵢ,
-                   ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, nsteps, it, kt)
-    parent(dδρᵢ) .= 0
+function grad_loss(model, dmodel, u₀, du₀,
+                   ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
+    parent(du₀) .= 0
     _, J = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
         Enzyme.Duplicated(model, dmodel),
-        Enzyme.Duplicated(δρᵢ, dδρᵢ),
-        Enzyme.Const(ρᵗ),
+        Enzyme.Duplicated(u₀, du₀),
+        Enzyme.Const(ρ_total),
         Enzyme.Const(ρᵇᵍ),
-        Enzyme.Const(uᵇᵍ),
         Enzyme.Const(θ₀),
         Enzyme.Const(Δt),
-        Enzyme.Const(nsteps),
-        Enzyme.Const(it),
-        Enzyme.Const(kt))
-    return dδρᵢ, J
+        Enzyme.Const(nsteps))
+    return du₀, J
 end
 
 # ### Compilation and execution
@@ -338,40 +356,39 @@ end
 
 @info "Compiling differentiated model — this may take a minute..."
 compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-    model_ad, dmodel_ad, δρᵢ, dδρᵢ,
-    ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
+    model_ad, dmodel_ad, u₀, du₀,
+    ρ_total, ρᵇᵍ, θ₀, Δt, Nsteps)
 
 @info "Running gradient..."
-dδρ, J = compiled_grad(
-    model_ad, dmodel_ad, δρᵢ, dδρᵢ,
-    ρᵗ, ρᵇᵍ, uᵇᵍ, θ₀, Δt, Nsteps, target_i, target_k)
+du, J = compiled_grad(
+    model_ad, dmodel_ad, u₀, du₀,
+    ρ_total, ρᵇᵍ, θ₀, Δt, Nsteps)
 
-xs = xnodes(grid_ad, Center())
-zs = znodes(grid_ad, Center())
-x_target = xs[target_i]
-z_target = zs[target_k]
+xs_u = xnodes(grid_ad, Face())
+zs   = znodes(grid_ad, Center())
 
-@info @sprintf("Receiver density J = %.6e  at (x=%.1f m, z=%.1f m) after %d steps",
-               Float64(only(J)), x_target, z_target, Nsteps)
+@info @sprintf("Surface-integrated (ρ - ρ̄)² = %.6e after %d steps",
+               Float64(only(J)), Nsteps)
 
 # ### Sensitivity visualization
+#
+# The heatmap shows ``\partial J / \partial u_0(x,z)``: positive values are
+# wind perturbations that would *increase* surface acoustic energy, negative
+# values would decrease it.  Because ``J`` integrates along the entire bottom,
+# the pattern reveals which parts of the wind profile feed energy into the
+# surface duct from anywhere along it.
 
-sensitivity = Array(interior(dδρ, :, 1, :))
-sens_min, sens_max = minimum(sensitivity), maximum(sensitivity)
-@info @sprintf("Sensitivity stats: min=%+.4e  max=%+.4e  at corners: (1,1)=%+.4e  (Nx,Nz)=%+.4e",
-               sens_min, sens_max, sensitivity[1,1], sensitivity[Nx, Nz])
+sensitivity = Array(interior(du, :, 1, :))
+abs_max     = maximum(abs, sensitivity)
 
 fig_sens = Figure(size = (800, 350), fontsize = 12)
 Label(fig_sens[0, :],
-      @sprintf("∂ρ / ∂ρ′₀  (receiver at x=%.0f m, z=%.0f m, t=%d Δt)",
-               x_target, z_target, Nsteps),
+      @sprintf("∂J / ∂u₀  (J = ∫_surface (ρ - ρ̄)² dx,  t=%d Δt)", Nsteps),
       fontsize = 14, tellwidth = false)
 ax_sens = Axis(fig_sens[1, 1]; xlabel = "x (m)", ylabel = "z (m)")
-hm = heatmap!(ax_sens, xs, zs, sensitivity; colormap = :balance, colorrange = (sens_min, sens_max))
-scatter!(ax_sens, [x_target], [z_target]; color = :black, marker = :star5,
-         markersize = 14, label = "receiver")
-axislegend(ax_sens; position = :rt)
-Colorbar(fig_sens[1, 2], hm; label = "∂J/∂ρ′₀")
+hm = heatmap!(ax_sens, xs_u, zs, sensitivity; colormap = :balance,
+              colorrange = (-abs_max, abs_max))
+Colorbar(fig_sens[1, 2], hm; label = "∂J / ∂u₀")
 
-save("acoustic_wave_sensitivity.png", fig_sens; px_per_unit = 2) #src
+save("acoustic_wave_wind_sensitivity.png", fig_sens; px_per_unit = 2) #src
 fig_sens
