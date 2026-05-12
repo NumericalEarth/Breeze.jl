@@ -182,3 +182,117 @@ end
         @test all(interior(ℐ_sw_dn) .≤ 0)  # Downwelling should be negative
     end
 end
+
+@testset "GrayRadiativeTransferModel solar_position" begin
+    @testset "Type construction" begin
+        @test ApparentSolarPosition() isa AbstractSolarPosition
+        @test ApparentSolarPosition() isa ApparentSolarPosition
+        @test FixedCosineZenith(0.5) isa AbstractSolarPosition
+        @test FixedCosineZenith(0.5) isa FixedCosineZenith
+
+        sp = ApparentSolarPosition(coordinate = (-70.9, 42.5), epoch = DateTime(2024, 1, 1))
+        @test sp.coordinate == (-70.9, 42.5)
+        @test sp.epoch == DateTime(2024, 1, 1)
+
+        @test FixedCosineZenith(0.5).cos_zenith == 0.5
+    end
+
+    @testset "FixedCosineZenith: numeric clock, no epoch [$(FT)]" for FT in test_float_types()
+        Oceananigans.defaults.FloatType = FT
+        Nz = 16
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+                               topology=(Flat, Flat, Bounded))
+
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = 101325,
+                                         potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        # The motivating case: a numeric clock with a fixed cos(θ_z).
+        # Used to crash because `update_solar_zenith_angle!` had no path for
+        # numeric clock + epoch=nothing. Now this works via FixedCosineZenith.
+        cos_θz = convert(FT, 0.5)
+        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+                                           surface_temperature = 300,
+                                           surface_albedo = 0.1,
+                                           solar_constant = 1361,
+                                           solar_position = FixedCosineZenith(cos_θz))
+
+        @test radiation.solar_position isa FixedCosineZenith
+        @test radiation.solar_position.cos_zenith == cos_θz
+
+        # cos_zenith BC array is filled at construction.
+        @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] == cos_θz
+
+        # Numeric clock — no epoch required.
+        clock = Clock(time = zero(FT))
+        model = AtmosphereModel(grid; clock, dynamics,
+                                formulation = :LiquidIcePotentialTemperature, radiation)
+        set!(model; θ = 300, qᵗ = 0)
+
+        # cos_zenith stays at the fixed value across the radiation update.
+        @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] == cos_θz
+
+        # TOA downwelling SW magnitude is solar_constant * cos_zenith.
+        # Sign convention: downwelling is negative.
+        @allowscalar begin
+            ℐ_sw_toa = radiation.downwelling_shortwave_flux[1, 1, Nz + 1]
+            @test ℐ_sw_toa < 0
+            @test abs(ℐ_sw_toa) ≈ 1361 * cos_θz rtol = 1e-3
+        end
+    end
+
+    @testset "ApparentSolarPosition with epoch + numeric clock" begin
+        Nz = 16
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+                               topology=(Flat, Flat, Bounded))
+
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = 101325,
+                                         potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        # A numeric clock works with apparent sun when an epoch is supplied.
+        epoch = DateTime(2024, 6, 21, 12, 0, 0)  # solstice noon
+        solar_position = ApparentSolarPosition(epoch = epoch)
+        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+                                           surface_temperature = 300,
+                                           surface_albedo = 0.1,
+                                           solar_position = solar_position)
+
+        clock = Clock(time = 0.0)
+        model = AtmosphereModel(grid; clock, dynamics,
+                                formulation = :LiquidIcePotentialTemperature, radiation)
+        set!(model; θ = 300, qᵗ = 0)
+
+        # cos_zenith should be populated and positive (sun above horizon at solstice noon, 45N).
+        @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] > 0
+    end
+
+    @testset "ApparentSolarPosition + numeric clock without epoch → ArgumentError" begin
+        Nz = 16
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+                               topology=(Flat, Flat, Bounded))
+
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = 101325,
+                                         potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        # The combination that previously crashed silently: ApparentSolarPosition
+        # (default epoch=nothing) combined with a floating-point clock. We now
+        # raise an actionable ArgumentError on the first radiation update.
+        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+                                           surface_temperature = 300,
+                                           surface_albedo = 0.1,
+                                           solar_position = ApparentSolarPosition())
+
+        clock = Clock(time = 0.0)  # numeric, no epoch
+        model = AtmosphereModel(grid; clock, dynamics,
+                                formulation = :LiquidIcePotentialTemperature, radiation)
+        @test_throws ArgumentError set!(model; θ = 300, qᵗ = 0)
+    end
+end
