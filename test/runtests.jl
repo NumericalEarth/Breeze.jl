@@ -16,6 +16,7 @@ if filter_tests!(testsuite, args)
     if !REACTANT_COMPAT
         delete!(testsuite, "reactant_centered_compilation")
         delete!(testsuite, "reactant_weno_compilation")
+        delete!(testsuite, "advection_diffusion_ad")
     end
 end
 
