@@ -27,8 +27,9 @@
 #####
 ##### Time discretization: horizontal momentum updates are forward-Euler
 ##### with MPAS-style first-small-step sequencing (the first substep of a
-##### multi-substep stage uses slow tendency only; acoustic horizontal PGF
-##### enters on later substeps). The vertical ((ρw)′, (ρθ)′, ρ′) coupling is
+##### multi-substep stage includes the frozen ∇pᴸ force but skips the
+##### perturbation acoustic horizontal PGF, which enters on later substeps).
+##### The vertical ((ρw)′, (ρθ)′, ρ′) coupling is
 ##### solved implicitly with an off-centered Crank-Nicolson scheme —
 ##### `forward_weight = 0.5` is classic centered CN (neutrally stable for
 ##### the linearized inviscid system), `forward_weight > 0.5` adds
@@ -878,6 +879,10 @@ end
 #
 # (ρu)′^{τ+Δτ} = (ρu)′^τ + Δτ · (Gⁿρu − ∂x pᴸ − ∂x(Cᴸ (ρθ)′))
 # (ρv)′^{τ+Δτ} = (ρv)′^τ + Δτ · (Gⁿρv − ∂y pᴸ − ∂y(Cᴸ (ρθ)′))
+# The MPAS forward-backward first-small-step sequencing skips only the
+# acoustic perturbation PGF, not the frozen large-step PGF. MPAS carries that
+# frozen PGF in `tend_u_euler`; here we add it explicitly because
+# `SlowTendencyMode` zeros pressure gradients in `Gⁿρu/Gⁿρv`.
 @kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, Δτ, ρθ′, Πᴸ, p,
                                             Gⁿρu, Gⁿρv, γRᵐᴸ, apply_pressure_gradient)
     i, j, k = @index(Global, NTuple)
@@ -885,19 +890,18 @@ end
     @inbounds begin
         ∂x_pᴸ  = ∂xᶠᶜᶜ(i, j, k, grid, p)
         ∂x_p′  = ∂xᶠᶜᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
-        ∂x_p   = ∂x_pᴸ + ∂x_p′
-
         ∂y_pᴸ  = ∂yᶜᶠᶜ(i, j, k, grid, p)
         ∂y_p′  = ∂yᶜᶠᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
-        ∂y_p   = ∂y_pᴸ + ∂y_p′
 
         not_bdy_x = !on_x_boundary(i, j, k, grid)
         not_bdy_y = !on_y_boundary(i, j, k, grid)
 
-        pressure_gradient_factor = ifelse(apply_pressure_gradient, one(Δτ), zero(Δτ))
+        perturbation_pressure_gradient_factor = ifelse(apply_pressure_gradient, one(Δτ), zero(Δτ))
+        ∂x_p = ∂x_pᴸ + perturbation_pressure_gradient_factor * ∂x_p′
+        ∂y_p = ∂y_pᴸ + perturbation_pressure_gradient_factor * ∂y_p′
 
-        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - pressure_gradient_factor * ∂x_p) * not_bdy_x
-        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - pressure_gradient_factor * ∂y_p) * not_bdy_y
+        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - ∂x_p) * not_bdy_x
+        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - ∂y_p) * not_bdy_y
     end
 end
 

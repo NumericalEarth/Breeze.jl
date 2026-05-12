@@ -244,9 +244,9 @@ evolves linearized acoustic perturbations about each RK stage-entry
 state. The vertically implicit solve uses an off-centered Crank-Nicolson
 scheme with off-centering parameter ``\\omega`` (default 0.65; ``\\omega = 0.5``
 is classic centered CN). In multi-substep stages, the first acoustic
-substep seeds horizontal momentum from slow tendencies only; acoustic
-horizontal pressure gradients are applied on subsequent substeps, following
-the MPAS forward-backward sequencing.
+substep includes the frozen stage-entry horizontal pressure gradient but
+skips the acoustic perturbation pressure gradient, which is applied on
+subsequent substeps following the MPAS forward-backward sequencing.
 
 The substep distribution across stages is selectable via the
 [`AcousticSubstepDistribution`](@ref) interface.

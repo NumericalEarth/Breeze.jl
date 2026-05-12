@@ -14,6 +14,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     apply_horizontal_pressure_gradient_substep,
                                     AcousticTridiagLower, AcousticTridiagDiagonal,
                                     AcousticTridiagUpper
+using Breeze.CompressibleEquations: _explicit_horizontal_step!
 using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, dynamics_density
@@ -25,6 +26,7 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: get_coefficient
 using Oceananigans.Units
+using Oceananigans.Utils: launch!
 using Statistics: mean
 using Test
 using Metal: Metal, MetalBackend
@@ -39,6 +41,42 @@ as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float
     @test apply_horizontal_pressure_gradient_substep(2, 2)
     @test !apply_horizontal_pressure_gradient_substep(1, 6)
     @test apply_horizontal_pressure_gradient_substep(6, 6)
+end
+
+@testset "First acoustic substep retains frozen horizontal pressure gradient" begin
+    FT = Float64
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(CPU();
+                           size = (4, 4, 4),
+                           halo = (3, 3, 3),
+                           x = (0, 4),
+                           y = (0, 4),
+                           z = (0, 4),
+                           topology = (Periodic, Periodic, Bounded))
+
+    ρu′ = XFaceField(grid)
+    ρv′ = YFaceField(grid)
+    ρθ′ = CenterField(grid)
+    Πᴸ = CenterField(grid)
+    pᴸ = CenterField(grid)
+    Gρu = XFaceField(grid)
+    Gρv = YFaceField(grid)
+    γRᵐᴸ = CenterField(grid)
+
+    set!(Πᴸ, 1)
+    set!(γRᵐᴸ, 1)
+    set!(pᴸ, (x, y, z) -> 2x + 3y)
+    set!(ρθ′, 0)
+    fill!(Gρu, 0)
+    fill!(Gρv, 0)
+    fill!(ρu′, 0)
+    fill!(ρv′, 0)
+
+    launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
+            ρu′, ρv′, grid, FT(0.5), ρθ′, Πᴸ, pᴸ, Gρu, Gρv, γRᵐᴸ, false)
+
+    @test @allowscalar(ρu′[2, 2, 2]) == -1
+    @test @allowscalar(ρv′[2, 2, 2]) == -1.5
 end
 
 @testset "Acoustic vertical tridiagonal coefficients" begin
