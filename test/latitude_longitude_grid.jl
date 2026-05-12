@@ -58,6 +58,21 @@ end
 end
 
 #####
+##### Spherical Coriolis formulation choices
+#####
+
+@testset "Spherical Coriolis formulations on LatitudeLongitudeGrid [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = build_test_llg(default_arch; Nx=12, Ny=10, Nz=4, Lz=10kilometers)
+
+    for coriolis in (SphericalCoriolis(), HydrostaticSphericalCoriolis())
+        dynamics = CompressibleDynamics(ExplicitTimeStepping())
+        model = AtmosphereModel(grid; dynamics, coriolis, advection=Centered(order=2))
+        @test model.coriolis === coriolis
+    end
+end
+
+#####
 ##### Solid body rotation on LatitudeLongitudeGrid
 #####
 ##### Solid body rotation u = u₀ cos(φ), v = 0 is an exact steady-state solution

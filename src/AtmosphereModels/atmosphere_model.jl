@@ -133,16 +133,6 @@ function AtmosphereModel(grid;
     # Validate that velocity boundary conditions are only provided for dynamics that support them
     validate_velocity_boundary_conditions(dynamics, boundary_conditions)
 
-    # Reject the `HydrostaticSphericalCoriolis` form, which drops the `2Ω cos(φ)`
-    # u-w cross-terms. Breeze always evolves prognostic ρw, so the non-hydrostatic
-    # `SphericalCoriolis()` is the only self-consistent choice on a sphere.
-    if coriolis isa Oceananigans.Coriolis.HydrostaticSphericalCoriolis
-        error("AtmosphereModel: `HydrostaticSphericalCoriolis` is incompatible with " *
-              "Breeze's non-hydrostatic dynamics — it drops the 2Ω cos(φ) Coriolis " *
-              "cross-terms that couple horizontal momentum to w. " *
-              "Use `SphericalCoriolis(rotation_rate=Ω)` (non-hydrostatic) instead.")
-    end
-
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
         scalar_advection = momentum_advection = advection

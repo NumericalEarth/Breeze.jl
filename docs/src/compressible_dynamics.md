@@ -61,6 +61,13 @@ prescription of [Klemp, Skamarock, and Ha (2018)](@cite KlempSkamarockHa2018), w
 outer/inner coupling stability argument from
 [Knoth and Wensch (2014)](@cite KnothWensch2014).
 
+On spherical grids, Breeze can use either the full nontraditional spherical Coriolis
+operator or the traditional approximation. `SphericalCoriolis()` includes the horizontal
+component of planetary rotation and therefore the ``2Ω cosφ`` coupling between zonal and
+vertical momentum. `HydrostaticSphericalCoriolis()` omits that coupling. This choice is
+independent of whether the dynamics evolve prognostic vertical momentum: nonhydrostatic
+models may still use the traditional approximation when the benchmark or forcing assumes it.
+
 ### Slow/fast decomposition and linearization point
 
 Let ``U = (ρ, ρ\boldsymbol{u}, ρθ, ρq^t, …)`` be the prognostic state vector. The right-hand
