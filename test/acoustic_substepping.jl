@@ -11,7 +11,9 @@ using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
                                     compute_acoustic_substeps,
                                     sponge_term_diag, sponge_rhs,
-                                    apply_horizontal_pressure_gradient_substep
+                                    apply_horizontal_pressure_gradient_substep,
+                                    AcousticTridiagLower, AcousticTridiagDiagonal,
+                                    AcousticTridiagUpper
 using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, dynamics_density
@@ -19,6 +21,9 @@ using Breeze.Thermodynamics: adiabatic_hydrostatic_density, ExnerReferenceState,
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Architectures: architecture
+using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.Grids: ZDirection
+using Oceananigans.Solvers: get_coefficient
 using Oceananigans.Units
 using Statistics: mean
 using Test
@@ -34,6 +39,78 @@ as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float
     @test apply_horizontal_pressure_gradient_substep(2, 2)
     @test !apply_horizontal_pressure_gradient_substep(1, 6)
     @test apply_horizontal_pressure_gradient_substep(6, 6)
+end
+
+@testset "Acoustic vertical tridiagonal coefficients" begin
+    FT = Float64
+    Oceananigans.defaults.FloatType = FT
+    Nz = 5
+    Lz = FT(1000)
+    grid = RectilinearGrid(CPU();
+                           size = (4, 4, Nz),
+                           halo = (3, 3, 3),
+                           x = (0, 1),
+                           y = (0, 1),
+                           z = (0, Lz),
+                           topology = (Periodic, Periodic, Bounded))
+
+    Πᴸ = CenterField(grid)
+    θᴸ = CenterField(grid)
+    γRᵐᴸ = CenterField(grid)
+
+    @allowscalar begin
+        for k in 1:Nz
+            Πᴸ[2, 2, k] = FT(0.90 + 0.02k)
+            θᴸ[2, 2, k] = FT(280 + 3k)
+            γRᵐᴸ[2, 2, k] = FT(390 + 5k)
+        end
+    end
+
+    fill_halo_regions!(Πᴸ, θᴸ, γRᵐᴸ)
+
+    δτᵐ⁺ = FT(0.7)
+    dᵐ⁺ = FT(0.03)
+    g = FT(9.81)
+    Δz = Lz / Nz
+
+    C(k) = @allowscalar γRᵐᴸ[2, 2, k] * Πᴸ[2, 2, k]
+    θ_face(k) = ifelse(k == 1,
+                       @allowscalar(θᴸ[2, 2, 1]),
+                       ifelse(k == Nz + 1,
+                              @allowscalar(θᴸ[2, 2, Nz]),
+                              (@allowscalar(θᴸ[2, 2, k]) + @allowscalar(θᴸ[2, 2, k - 1])) / 2))
+
+    direction = ZDirection()
+
+    code_diag(k) = get_coefficient(2, 2, k, grid, AcousticTridiagDiagonal(), nothing, direction,
+                                   Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+    code_upper(k) = get_coefficient(2, 2, k, grid, AcousticTridiagUpper(), nothing, direction,
+                                    Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+    # Oceananigans' Press-indexed tridiagonal solver asks the lower
+    # diagonal for row k as `a[k - 1]`.
+    code_lower_for_row(k) = get_coefficient(2, 2, k - 1, grid, AcousticTridiagLower(), nothing, direction,
+                                            Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+
+    expected_lower(k) = - δτᵐ⁺^2 * C(k - 1) * θ_face(k - 1) / Δz^2 +
+                         δτᵐ⁺^2 * g / (2Δz) -
+                         dᵐ⁺ / Δz^2
+    expected_diag(k) = 1 + δτᵐ⁺^2 * θ_face(k) * (C(k) + C(k - 1)) / Δz^2 +
+                           2dᵐ⁺ / Δz^2
+    expected_upper(k) = - δτᵐ⁺^2 * C(k) * θ_face(k + 1) / Δz^2 -
+                         δτᵐ⁺^2 * g / (2Δz) -
+                         dᵐ⁺ / Δz^2
+
+    @test code_diag(1) == 1
+    @test code_upper(1) == 0
+
+    for k in 2:Nz
+        @test code_lower_for_row(k) ≈ expected_lower(k)
+        @test code_diag(k) ≈ expected_diag(k)
+    end
+
+    for k in 2:Nz-1
+        @test code_upper(k) ≈ expected_upper(k)
+    end
 end
 
 #####
