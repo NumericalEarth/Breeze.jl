@@ -1,6 +1,7 @@
-using ..Thermodynamics: Thermodynamics, mixture_heat_capacity, mixture_gas_constant
+using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
-using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
+using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
+                                       update_boundary_conditions!
 using Oceananigans.Grids: Bounded, Periodic, Flat # , topology, halo_size
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
@@ -9,10 +10,12 @@ using Oceananigans.Utils: launch! # , KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
+    fix_negative_moisture!(model)  # fix negative moisture from advection
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
+    update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
     microphysics_model_update!(model.microphysics, model)
@@ -125,7 +128,7 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
         model.velocities,
         model.closure,
         model.closure_fields,
-        model.momentum,
+        advecting_momentum(model),
         model.coriolis,
         model.clock,
         model_fields)
@@ -138,7 +141,7 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
                    model.dynamics,
                    model.formulation,
                    model.temperature,
-                   model.specific_moisture,
+                   specific_prognostic_moisture(model),
                    model.microphysics,
                    model.microphysical_fields,
                    model.thermodynamic_constants)
@@ -187,7 +190,7 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
-            model.specific_moisture,
+            specific_prognostic_moisture(model),
             model.formulation,
             model.dynamics,
             grid,
@@ -197,7 +200,6 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.specific_moisture)
     fill_halo_regions!(model.microphysical_fields)
     fill_halo_regions!(model.formulation)
 
@@ -225,7 +227,7 @@ end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
-                                                             specific_moisture,
+                                                             specific_prognostic_moisture,
                                                              formulation,
                                                              dynamics,
                                                              grid,
@@ -240,19 +242,20 @@ end
     ρ_field = dynamics_density(dynamics)
     @inbounds begin
         ρ = ρ_field[i, j, k]
-        ρqᵗ = moisture_density[i, j, k]
-        qᵗ = ρqᵗ / ρ
-        specific_moisture[i, j, k] = qᵗ
+        ρqᵛᵉ = moisture_density[i, j, k]
+        # qᵛᵉ: vapor specific humidity (non-equilibrium) or equilibrium moisture (saturation adjustment)
+        qᵛᵉ = ρqᵛᵉ / ρ
+        specific_prognostic_moisture[i, j, k] = qᵛᵉ
     end
 
     # Compute moisture fractions first (needed by diagnose_thermodynamic_state)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
 
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵗ, constants)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛᵉ, constants)
 
     update_microphysical_fields!(microphysical_fields, i, j, k, grid,
                                  microphysics, ρ, 𝒰₁, constants)
@@ -273,13 +276,16 @@ function compute_tendencies!(model::AtmosphereModel)
 
     compute_momentum_tendencies!(model, model_fields)
 
+    # Use transport velocities (contravariant for terrain-following grids)
+    advecting_velocities = transport_velocities(model)
+
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
-        model.specific_moisture,
-        model.velocities,
+        specific_prognostic_moisture(model),
+        advecting_velocities,
         model.microphysics,
         model.microphysical_fields,
         model.closure,
@@ -297,22 +303,25 @@ function compute_tendencies!(model::AtmosphereModel)
     ##### Moisture density tendency
     #####
 
+    moist_name = moisture_prognostic_name(model.microphysics)
     ρq_args = (
-        model.specific_moisture,
+        specific_prognostic_moisture(model),
         Val(2),
-        Val(:ρqᵗ),
-        model.forcing.ρqᵗ,
-        model.advection.ρqᵗ,
+        Val(moist_name),
+        model.forcing[moist_name],
+        model.advection[moist_name],
         common_args...)
 
-    Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
+    Gρqᵛᵉ = getproperty(model.timestepper.Gⁿ, moist_name)
+    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵛᵉ, grid, ρq_args)
 
     #####
     ##### Tracer density tendencies
     #####
 
-    prognostic_microphysical_fields = NamedTuple(name => model.microphysical_fields[name]
+    # Pass specific (per-mass) fields for scalar advection: div_ρUc computes ∇·(ρ₀uq),
+    # so passing density-weighted ρ₀q would double-count ρ₀.
+    prognostic_microphysical_fields = NamedTuple(name => model.microphysical_fields[specific_field_name(name)]
                                                  for name in prognostic_field_names(model.microphysics))
 
     scalars = merge(prognostic_microphysical_fields, model.tracers)

@@ -187,7 +187,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     pᵣ = 𝒰₀.reference_pressure
     ρ₁ = density(T₁, pᵣ, q₁, constants)
     qᵛ⁺₁ = saturation_specific_humidity(T₁, ρ₁, constants, constants.liquid)
-    qᵗ <= qᵛ⁺₁ && return T₁
+    qᵗ ≤ qᵛ⁺₁ && return T₁
 
     # If we made it this far, the state is saturated.
     # T₁ then provides a lower bound, and our state 𝒰₁
@@ -348,7 +348,7 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
     q = MoistureMassFractions(qᵗᵢ)
     𝒰 = LiquidIcePotentialTemperatureState(Tᵢ, q, pˢᵗ, pᵣ)
     Π = exner_function(𝒰, mb.thermodynamic_constants)
-    Tᵢ <= Π * θᵢ + 10 * eps(Tᵢ) && return zero(qᵗᵢ)
+    Tᵢ ≤ Π * θᵢ + 10 * eps(Tᵢ) && return zero(qᵗᵢ)
 
     # Next assume a saturation value
     constants = mb.thermodynamic_constants

@@ -11,10 +11,12 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/" # Location of package manifests
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     labels:
       - "dependencies 🖇️"
-  - package-ecosystem: "julia" # See documentation for possible values
+    cooldown:
+      default-days: 15
+  - package-ecosystem: "julia"
     # Location of Julia projects
     directories:
       - "/"

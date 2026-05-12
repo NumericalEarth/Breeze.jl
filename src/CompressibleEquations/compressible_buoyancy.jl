@@ -24,7 +24,7 @@ Without a reference state, the full gravitational force ``-gρ`` is used.
 @inline function AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid,
                                                     dynamics::CompressibleDynamics,
                                                     temperature,
-                                                    specific_moisture,
+                                                    specific_prognostic_moisture,
                                                     microphysics,
                                                     microphysical_fields,
                                                     constants)
@@ -37,5 +37,5 @@ Without a reference state, the full gravitational force ``-gρ`` is used.
     return -g * (ρ - ρᵣ)
 end
 
-@inline reference_densityᶜᶜᶜ(i, j, k, grid, ::Nothing) = 0
+@inline reference_densityᶜᶜᶜ(i, j, k, grid, ::Nothing) = false
 @inline reference_densityᶜᶜᶜ(i, j, k, grid, ref::ExnerReferenceState) = @inbounds ref.density[i, j, k]

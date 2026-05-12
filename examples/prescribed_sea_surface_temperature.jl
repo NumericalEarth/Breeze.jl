@@ -152,6 +152,17 @@ Uᵍ = 1e-2  # Gustiness (m/s)
 # for each flux type
 coef = PolynomialCoefficient(roughness_length = 1.5e-4)
 
+# ## Filtered surface velocities
+#
+# At LES resolution, instantaneous surface velocities contain turbulent fluctuations
+# that create spurious correlations in the bulk flux formulas. We use
+# [`FilteredSurfaceVelocities`](@ref) to temporally filter the near-surface
+# wind used in the bulk exchange computation, following [ShinYangHowland2025](@citet)
+# and [NishizawaKitamura2018](@citet). The exponential filter with a 10-minute
+# timescale smooths over the fastest eddies while tracking the evolving mean wind.
+
+filtered_velocities = FilteredSurfaceVelocities(grid; filter_timescale=1hour)
+
 # ## Surface temperature
 #
 # The sea surface temperature enters the bulk formulas for sensible heat,
@@ -170,8 +181,12 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # The `BulkDrag` boundary condition requires `surface_temperature` when using
 # `PolynomialCoefficient`, since the stability correction depends on the
 # surface virtual potential temperature.
+# By providing a non-trivial `filtered_velocities` the `BulkDrag` automatically
+# applies the filtering also to all surface scalars with the same parameters
+# (e.g., height, timescale) as inferred from the `filtered_velocities`.
 
-ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
+ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=coef;
+                                             gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
 
 # ## Sensible heat flux and vapor fluxes
 #
@@ -181,8 +196,8 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # We complete our specification by using the same polynomial coefficient for
 # sensible and latent heat fluxes. The flux type will be automatically inferred:
 
-ρe_surface_flux = BulkSensibleHeatFlux(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
-ρqᵗ_surface_flux = BulkVaporFlux(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
+ρe_surface_flux = BulkSensibleHeatFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
+ρqᵉ_surface_flux = BulkVaporFlux(coefficient=coef; gustiness=Uᵍ, surface_temperature=T₀, filtered_velocities)
 
 # We can visualize how the neutral drag coefficient varies with wind speed,
 # and the range of stability-corrected values expected in this simulation.
@@ -193,15 +208,15 @@ using Breeze.BoundaryConditions: neutral_coefficient_10m, bulk_richardson_number
                                  default_neutral_drag_polynomial
 
 h = grid.Lz / grid.Nz / 2  # first cell center height
-U_min = 0.1
+U_min = 0.1                # m s⁻¹
 ℓ = coef.roughness_length
 sf = coef.stability_function
 α = log(h / ℓ)
 β = log(ℓ / sf.scalar_roughness_length)
 
-ΔT_line = 10  # K, temperature difference for stability lines
-T_warm = θ₀ + ΔT / 2      # warm SST in this simulation
-T_cold = θ₀ - ΔT / 2      # cold SST in this simulation
+ΔT_line = 10               # K, temperature difference for stability lines
+T_warm = θ₀ + ΔT / 2       # warm SST in this simulation
+T_cold = θ₀ - ΔT / 2       # cold SST in this simulation
 T_unstable = θ₀ + ΔT_line  # strongly unstable
 T_stable   = θ₀ - ΔT_line  # strongly stable
 
@@ -245,23 +260,23 @@ fig
 ρu_bcs = FieldBoundaryConditions(bottom=ρu_surface_flux)
 ρv_bcs = FieldBoundaryConditions(bottom=ρv_surface_flux)
 ρe_bcs = FieldBoundaryConditions(bottom=ρe_surface_flux)
-ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_surface_flux)
+ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_surface_flux)
 
 # ## Model construction
 #
 # We assemble the AtmosphereModel with all the components defined above.
-# The model will solve the anelastic equations with the specified advection
+# The model solves the anelastic equations with the specified advection
 # schemes, microphysics, and boundary conditions.
 
 model = AtmosphereModel(grid; momentum_advection, scalar_advection, microphysics, dynamics,
-                        boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs))
+                        boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs))
 
 # ## Initial conditions
 #
 # We initialize the model with a uniform potential temperature equal to the
 # reference value, creating a neutrally stratified atmosphere. A small
-# background wind (1 m/s) in the x-direction provides initial momentum
-# for the bulk flux calculations and helps break symmetry.
+# background wind (1 m/s) in the ``x``-direction provides initial momentum
+# for the bulk flux calculations and helps break the symmetry.
 
 set!(model, θ=reference_state.potential_temperature, u=1)
 
@@ -269,19 +284,20 @@ set!(model, θ=reference_state.potential_temperature, u=1)
 #
 # We configure the simulation to run for 4 hours with adaptive time stepping.
 # The CFL condition limits the time step to maintain numerical stability,
-# with a target CFL number of 0.7 providing a good balance between efficiency
+# with a target CFL number of 0.7, providing a good balance between efficiency
 # and accuracy.
 
-simulation = Simulation(model, Δt=10, stop_time=4hours)
+simulation = Simulation(model, Δt=10seconds, stop_time=4hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Diagnostic fields
 #
 # We define several diagnostic quantities for analysis and visualization:
-# - Temperature T: the actual temperature field
-# - Potential temperature θ: conserved in dry adiabatic processes
-# - Liquid water content qˡ: mass fraction of cloud liquid water
-# - Saturation specific humidity qᵛ⁺: maximum water vapor the air can hold
+# - Temperature ``T``: the actual temperature field
+# - Potential temperature ``θ``: conserved in dry adiabatic processes
+# - Liquid water content ``qˡ``: mass fraction of cloud liquid water
+# - Saturation specific humidity ``qᵛ⁺``: maximum water vapor the air can hold
 
 T = model.temperature
 θ = liquid_ice_potential_temperature(model)
@@ -290,22 +306,22 @@ qᵛ⁺ = Breeze.Microphysics.SaturationSpecificHumidity(model)
 
 ρu, ρv, ρw = model.momentum
 u, v, w = model.velocities
-qᵗ = model.specific_moisture
+qᵛ = specific_humidity(model)
 
 # ## Surface flux diagnostics
 #
 # We use Oceananigans' [`BoundaryConditionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Models.BoundaryConditionOperation-Tuple{Field,%20Symbol,%20Oceananigans.AbstractModel})
 # to extract the surface flux values from the boundary conditions. These 1D fields
-# (varying only in x) represent the actual flux values applied at the
+# (varying only in ``x``) represent the actual flux values applied at the
 # ocean-atmosphere interface.
 #
 # The surface fluxes are:
 #
 # - ``τˣ``: momentum flux (stress), in kg m⁻¹ s⁻²
-# - ``𝒬ᵀ``: sensible heat flux = cᵖᵐ Jᵀ, in W m⁻²
-# - ``𝒬ᵛ``: latent heat flux = ℒˡ Jᵛ, in W m⁻²
+# - ``𝒬ᵀ``: sensible heat flux ``= cᵖᵐ Jᵀ``, in W m⁻²
+# - ``𝒬ᵛ``: latent heat flux ``= ℒˡ Jᵛ``, in W m⁻²
 #
-# where Jᵀ is the temperature density flux and Jᵛ is the moisture density flux.
+# where ``Jᵀ`` is the temperature density flux and ``Jᵛ`` is the moisture density flux.
 
 ## Surface momentum flux
 τˣ = BoundaryConditionOperation(ρu, :bottom, model)
@@ -314,10 +330,10 @@ qᵗ = model.specific_moisture
 ρe = static_energy_density(model)
 𝒬ᵀ = BoundaryConditionOperation(ρe, :bottom, model)
 
-## Latent heat flux: 𝒬ᵛ = ℒˡ Jᵛ (using reference θ₀ for latent heat)
-ρqᵗ = model.moisture_density
+## Latent heat flux: ``𝒬ᵛ = ℒˡ Jᵛ`` (using reference ``θ₀`` for latent heat)
+ρqᵉ = model.moisture_density
 ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(θ₀, constants)
-Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
+Jᵛ = BoundaryConditionOperation(ρqᵉ, :bottom, model)
 𝒬ᵛ = ℒˡ * Jᵛ
 
 # ## Progress callback
@@ -326,15 +342,15 @@ Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
 # helping monitor the simulation's progress and detect any numerical issues.
 
 function progress(sim)
-    qᵗ = sim.model.specific_moisture
+    qᵛ = specific_humidity(sim.model)
     u, v, w = sim.model.velocities
 
     umax = maximum(abs, u)
     vmax = maximum(abs, v)
     wmax = maximum(abs, w)
 
-    qᵗmin = minimum(qᵗ)
-    qᵗmax = maximum(qᵗ)
+    qᵛmin = minimum(qᵛ)
+    qᵛmax = maximum(qᵛ)
     qˡmax = maximum(qˡ)
 
     θmin = minimum(θ)
@@ -343,8 +359,8 @@ function progress(sim)
     msg = @sprintf("Iter: %d, t = %s, max|u|: (%.2e, %.2e, %.2e)",
                     iteration(sim), prettytime(sim), umax, vmax, wmax)
 
-    msg *= @sprintf(", extrema(qᵗ): (%.2e, %.2e), max(qˡ): %.2e, extrema(θ): (%.2e, %.2e)",
-                     qᵗmin, qᵗmax, qˡmax, θmin, θmax)
+    msg *= @sprintf(", extrema(qᵛ): (%.2e, %.2e), max(qˡ): %.2e, extrema(θ): (%.2e, %.2e)",
+                     qᵛmin, qᵛmax, qˡmax, θmin, θmax)
 
     @info msg
 
@@ -361,11 +377,11 @@ add_callback!(simulation, progress, IterationInterval(100))
 # The JLD2 format provides efficient storage with full Julia type preservation.
 
 output_filename = "prescribed_sea_surface_temperature_convection.jld2"
-qᵗ = model.specific_moisture
+qᵛ = specific_humidity(model)
 u, v, w, = model.velocities
 s = sqrt(u^2 + w^2) # speed
 ξ = ∂z(u) - ∂x(w)   # cross-stream vorticity
-outputs = (; s, ξ, T, θ, qˡ, qᵛ⁺, qᵗ, τˣ, 𝒬ᵀ, 𝒬ᵛ, Σ𝒬=𝒬ᵀ+𝒬ᵛ)
+outputs = (; s, ξ, T, θ, qˡ, qᵛ⁺, qᵛ, τˣ, 𝒬ᵀ, 𝒬ᵛ, Σ𝒬=𝒬ᵀ+𝒬ᵛ)
 
 ow = JLD2Writer(model, outputs;
                 filename = output_filename,
@@ -383,7 +399,7 @@ run!(simulation)
 #
 # We create animations showing the evolution of the flow fields. The figure
 # displays velocity components (u, w), thermodynamic fields (θ, T),
-# moisture fields (qᵗ, qˡ), and surface fluxes (momentum and heat).
+# moisture fields (qᵛ, qˡ), and surface fluxes (momentum and heat).
 
 @assert isfile(output_filename) "Output file $(output_filename) not found."
 
@@ -391,7 +407,7 @@ s_ts = FieldTimeSeries(output_filename, "s")
 ξ_ts = FieldTimeSeries(output_filename, "ξ")
 θ_ts = FieldTimeSeries(output_filename, "θ")
 T_ts = FieldTimeSeries(output_filename, "T")
-qᵗ_ts = FieldTimeSeries(output_filename, "qᵗ")
+qᵛ_ts = FieldTimeSeries(output_filename, "qᵛ")
 qˡ_ts = FieldTimeSeries(output_filename, "qˡ")
 τˣ_ts = FieldTimeSeries(output_filename, "τˣ")
 𝒬ᵀ_ts = FieldTimeSeries(output_filename, "𝒬ᵀ")
@@ -406,7 +422,7 @@ n = Observable(Nt)
 sn = @lift s_ts[$n]
 ξn = @lift ξ_ts[$n]
 θn = @lift θ_ts[$n]
-qᵗn = @lift qᵗ_ts[$n]
+qᵛn = @lift qᵛ_ts[$n]
 Tn = @lift T_ts[$n]
 qˡn = @lift qˡ_ts[$n]
 τˣn = @lift τˣ_ts[$n]
@@ -440,7 +456,7 @@ s_limits = (0, maximum(s_ts))
 ξ_lim = 0.8 * maximum(abs, ξ_ts)
 ξ_limits = (-ξ_lim, +ξ_lim)
 
-qᵗ_max = maximum(qᵗ_ts)
+qᵛ_max = maximum(qᵛ_ts)
 qˡ_max = maximum(qˡ_ts)
 
 # Flux limits
@@ -451,7 +467,7 @@ qˡ_max = maximum(qˡ_ts)
 hms = heatmap!(axs, sn, colorrange=s_limits, colormap=:speed)
 hmξ = heatmap!(axξ, ξn, colorrange=ξ_limits, colormap=:balance)
 hmθ = heatmap!(axθ, θn, colorrange=θ_limits, colormap=:thermal)
-hmq = heatmap!(axq, qᵗn, colorrange=(0, qᵗ_max), colormap=Reverse(:Purples_4))
+hmq = heatmap!(axq, qᵛn, colorrange=(0, qᵛ_max), colormap=Reverse(:Purples_4))
 hmT = heatmap!(axT, Tn, colorrange=T_limits)
 hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡ_max), colormap=Reverse(:Blues_4))
 
@@ -479,7 +495,7 @@ ylims!(ax𝒬, 𝒬_min, 𝒬_max)
 Colorbar(fig[1, 0], hms, label="√(u² + w²) (m/s)", flipaxis=false)
 Colorbar(fig[1, 3], hmξ, label="∂u/∂z - ∂w/∂x (s⁻¹)")
 Colorbar(fig[2, 0], hmθ, label="θ (K)", flipaxis=false)
-Colorbar(fig[2, 3], hmq, label="qᵗ (kg/kg)")
+Colorbar(fig[2, 3], hmq, label="qᵛ (kg/kg)")
 Colorbar(fig[3, 0], hmT, label="T (K)", flipaxis=false)
 Colorbar(fig[3, 3], hmqˡ, label="qˡ (kg/kg)")
 

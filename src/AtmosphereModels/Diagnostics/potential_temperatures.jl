@@ -69,7 +69,7 @@ struct MoistPotentialTemperatureKernelFunction{F, P, D, FT, μ, M, MF, TMP, TH}
     standard_pressure :: FT
     microphysics :: μ
     microphysical_fields :: M
-    specific_moisture :: MF
+    specific_prognostic_moisture :: MF
     temperature :: TMP
     thermodynamic_constants :: TH
 end
@@ -81,7 +81,7 @@ Adapt.adapt_structure(to, k::MoistPotentialTemperatureKernelFunction) =
                                             k.standard_pressure,
                                             adapt(to, k.microphysics),
                                             adapt(to, k.microphysical_fields),
-                                            adapt(to, k.specific_moisture),
+                                            adapt(to, k.specific_prognostic_moisture),
                                             adapt(to, k.temperature),
                                             adapt(to, k.thermodynamic_constants))
 
@@ -199,7 +199,7 @@ function PotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
                                                    p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
-                                                   model.specific_moisture,
+                                                   specific_prognostic_moisture(model),
                                                    model.temperature,
                                                    model.thermodynamic_constants)
 
@@ -231,12 +231,11 @@ Tᵛ = T \\frac{Rᵐ}{Rᵈ} = T \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)
 The virtual potential temperature is defined analogously,
 
 ```math
-θᵛ = θ \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)
+θᵛ = T \\left( \\frac{pˢᵗ}{p} \\right)^{Rᵈ/cᵖᵈ} \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right) .
 ```
 
-where ``θ`` is potential temperature. Note that
-``Rᵛ / Rᵈ ≈ 1.608`` for water vapor and a dry air mixture typical to Earth's atmosphere,
-and that ``δᵛ ≈ 0.608``.
+Note that ``Rᵛ / Rᵈ ≈ 1.608`` for water vapor and a dry air mixture typical to Earth's
+atmosphere, and that ``δᵛ ≈ 0.608``.
 
 ```jldoctest
 using Breeze
@@ -256,7 +255,7 @@ Field(θᵛ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=301.824, min=301.824, mean=301.824
+    └── max=301.82, min=301.8, mean=301.81
 ```
 """
 function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
@@ -278,7 +277,7 @@ function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:spec
                                                    p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
-                                                   model.specific_moisture,
+                                                   specific_prognostic_moisture(model),
                                                    model.temperature,
                                                    model.thermodynamic_constants)
 
@@ -289,7 +288,7 @@ function VirtualPotentialTemperature(grid;
                                      reference_state,
                                      microphysics,
                                      microphysical_fields,
-                                     specific_moisture,
+                                     specific_prognostic_moisture,
                                      temperature,
                                      thermodynamic_constants)
 
@@ -299,7 +298,7 @@ function VirtualPotentialTemperature(grid;
                                                    reference_state.standard_pressure,
                                                    microphysics,
                                                    microphysical_fields,
-                                                   specific_moisture,
+                                                   specific_prognostic_moisture,
                                                    temperature,
                                                    thermodynamic_constants)
 
@@ -368,7 +367,7 @@ function LiquidIcePotentialTemperature(model::AtmosphereModel, flavor_symbol=:sp
                                                    p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
-                                                   model.specific_moisture,
+                                                   specific_prognostic_moisture(model),
                                                    model.temperature,
                                                    model.thermodynamic_constants)
 
@@ -416,7 +415,7 @@ Field(θᵉ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=326.162, min=325.849, mean=326.005
+    └── max=326.162, min=325.851, mean=326.006
 ```
 
 # References
@@ -442,7 +441,7 @@ function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:s
                                                    p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
-                                                   model.specific_moisture,
+                                                   specific_prognostic_moisture(model),
                                                    model.temperature,
                                                    model.thermodynamic_constants)
 
@@ -498,7 +497,7 @@ Field(θᵇ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=326.162, min=325.849, mean=326.005
+    └── max=326.162, min=325.851, mean=326.006
 ```
 
 # References
@@ -525,7 +524,7 @@ function StabilityEquivalentPotentialTemperature(model::AtmosphereModel, flavor_
                                                    p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
-                                                   model.specific_moisture,
+                                                   specific_prognostic_moisture(model),
                                                    model.temperature,
                                                    model.thermodynamic_constants)
 
@@ -540,13 +539,13 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
         p = d.pressure[i, j, k]
         ρ = d.density[i, j, k]
-        qᵗ = d.specific_moisture[i, j, k]
+        qᵛᵉ = d.specific_prognostic_moisture[i, j, k]
         pˢᵗ = d.standard_pressure
         T = d.temperature[i, j, k]
     end
 
     constants = d.thermodynamic_constants
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρ, qᵗ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρ, qᵛᵉ, d.microphysical_fields)
     qᵛ = q.vapor
     qˡ = q.liquid
     qⁱ = q.ice
@@ -573,8 +572,11 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         θ * (1 - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / (cᵖᵐ * T))
 
     elseif d.flavor isa AbstractVirtualFlavor
+        # Virtual potential temperature
+        cᵖᵈ = constants.dry_air.heat_capacity
+        Πᵈ = (p / pˢᵗ)^(Rᵈ / cᵖᵈ)
         δ = Rᵛ / Rᵈ - 1
-        θ * (1 + δ * qᵛ - qˡ - qⁱ)
+        (T / Πᵈ) * (1 + δ * qᵛ - qˡ - qⁱ)
 
     elseif d.flavor isa AbstractEquivalentFlavor
         # Saturation specific humidity over a liquid surface

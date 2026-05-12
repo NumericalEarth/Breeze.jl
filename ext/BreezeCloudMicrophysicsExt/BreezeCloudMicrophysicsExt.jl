@@ -6,6 +6,7 @@ using CloudMicrophysics.Parameters: Blk1MVelType, Blk1MVelTypeRain, Blk1MVelType
 using CloudMicrophysics.Parameters: AirProperties
 # Two-moment parameters
 using CloudMicrophysics.Parameters: SB2006, StokesRegimeVelType, SB2006VelType, Chen2022VelTypeRain
+using CloudMicrophysics.Parameters: TerminalVelocityParams
 # Aerosol activation parameters
 using CloudMicrophysics.Parameters: AerosolActivationParameters
 using CloudMicrophysics: AerosolModel as CMAM
@@ -16,13 +17,19 @@ using CloudMicrophysics.Microphysics0M: remove_precipitation
 
 using CloudMicrophysics.Microphysics1M:
     conv_q_lcl_to_q_rai,
+    conv_q_icl_to_q_sno_no_supersat,
     accretion,
+    accretion_rain_sink,
+    accretion_snow_rain,
     terminal_velocity
 
 # Two-moment microphysics
 using CloudMicrophysics: Microphysics2M as CM2
+# Non-equilibrium cloud condensate terminal velocities
+using CloudMicrophysics: MicrophysicsNonEq as CMNonEq
 
 using Breeze.AtmosphereModels: AtmosphereModels,
+    AbstractNumberConcentrationCategories,
     materialize_microphysical_fields,
     update_microphysical_fields!,
     grid_moisture_fractions

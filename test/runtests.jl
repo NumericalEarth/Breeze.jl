@@ -1,11 +1,23 @@
 import Breeze
 using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests
+using Test
 
 # Start with autodiscovered tests
 testsuite = find_tests(@__DIR__)
 
 # Parse arguments
 args = parse_args(ARGS)
+
+const REACTANT_COMPAT = VERSION < v"1.13-" && Base.JLOptions().check_bounds != 1
+
+if filter_tests!(testsuite, args)
+    # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
+    # limitation).
+    if !REACTANT_COMPAT
+        delete!(testsuite, "reactant_centered_compilation")
+        delete!(testsuite, "reactant_weno_compilation")
+    end
+end
 
 const init_code = quote
     import CUDA

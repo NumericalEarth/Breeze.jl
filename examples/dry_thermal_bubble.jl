@@ -4,6 +4,7 @@
 # region of warm air) rising through a stably-stratified background.
 
 using Breeze
+using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Statistics
 using Printf
@@ -67,6 +68,7 @@ fig
 
 simulation = Simulation(model; Δt=2, stop_time=25minutes)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 function progress(sim)
     ρe = static_energy_density(sim.model)

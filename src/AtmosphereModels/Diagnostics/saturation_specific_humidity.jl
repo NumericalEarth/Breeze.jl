@@ -4,7 +4,7 @@ struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     flavor :: FL
     microphysics :: μ
     microphysical_fields :: M
-    specific_moisture :: MF
+    specific_prognostic_moisture :: MF
     temperature :: T
     reference_state :: R
     thermodynamic_constants :: TH
@@ -16,7 +16,7 @@ Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
     SaturationSpecificHumidityKernelFunction(adapt(to, k.flavor),
                                              adapt(to, k.microphysics),
                                              adapt(to, k.microphysical_fields),
-                                             adapt(to, k.specific_moisture),
+                                             adapt(to, k.specific_prognostic_moisture),
                                              adapt(to, k.temperature),
                                              adapt(to, k.reference_state),
                                              adapt(to, k.thermodynamic_constants))
@@ -45,9 +45,9 @@ of *saturation specific humidity* ``qᵛ⁺``.
 * `:equilibrium`
 
   Return the *saturation specific humidity* in potentially-saturated conditions, using the
-  `model.specific_moisture`. This is equivalent to the `:total_moisture` flavor
-  under saturated conditions with no condensate; or in other words, if `model.specific_moisture` happens
-  to be equal to the saturation specific humidity.
+  model's specific moisture field. This is equivalent to the `:total_moisture` flavor
+  under saturated conditions with no condensate; or in other words, if the specific moisture
+  happens to be equal to the saturation specific humidity.
 
 * `:total_moisture`
 
@@ -71,7 +71,7 @@ function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
     func = SaturationSpecificHumidityKernelFunction(flavor,
                                                     model.microphysics,
                                                     model.microphysical_fields,
-                                                    model.specific_moisture,
+                                                    specific_prognostic_moisture(model),
                                                     model.temperature,
                                                     model.dynamics.reference_state,
                                                     model.thermodynamic_constants)
@@ -88,14 +88,33 @@ end
 # SaturationAdjustment extends this in Microphysics to return μ.equilibrium
 @inline microphysics_phase_equilibrium(μ) = WarmPhaseEquilibrium()
 
-# Compute saturation specific humidity for :total_moisture flavor
-# This is the saturation specific humidity when qᵗ = qᵛ⁺ (all moisture is vapor)
+"""
+$(TYPEDSIGNATURES)
+
+Compute the *saturation total specific moisture* under the assumption that all moisture is vapor at saturation,
+``qᵗ = qᵛ⁺``. With this assumption, the equation of state for moist air can be solved in closed form, yielding an
+expression for the saturation specific humidity in terms of temperature `T` and reference pressure `pᵣ` alone:
+
+```math
+qᵛ⁺ = \\frac{ϵᵈᵛ \\, pᵛ⁺(T)}{pᵣ + δᵈᵛ \\, pᵛ⁺(T)} ,
+```
+
+where ``ϵᵈᵛ ≡ Rᵈ / Rᵛ ≈ 0.622`` and ``δᵈᵛ ≡ ϵᵈᵛ - 1 ≈ -0.378``.
+
+The resulting expression coincides with the saturation specific humidity used in the COARE 3.6 [Edson (2013)](@cite Edson2013)
+air-sea bulk-flux algorithms, where the air-side specific humidity at the surface is unknown a priori and
+[`saturation_specific_humidity`](@ref Breeze.Thermodynamics.saturation_specific_humidity) cannot be
+evaluated directly.
+
+See the [Atmosphere Thermodynamics](@ref Thermodynamics-section) section of the documentation for a derivation.
+"""
 @inline function saturation_total_specific_moisture(T, pᵣ, constants, surface)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
-    δᵈᵛ = Rᵈ / Rᵛ - 1
-    return pᵛ⁺ / (pᵣ + δᵈᵛ * pᵛ⁺)
+    ϵᵈᵛ = Rᵈ / Rᵛ
+    δᵈᵛ = ϵᵈᵛ - 1
+    return ϵᵈᵛ * pᵛ⁺ / (pᵣ + δᵈᵛ * pᵛ⁺)
 end
 
 #####
@@ -114,14 +133,14 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
     surface = equilibrated_surface(equilibrium, T)
 
     if d.flavor isa PrognosticFlavor
-        qᵗ = @inbounds d.specific_moisture[i, j, k]
-        q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+        qᵛᵉ = @inbounds d.specific_prognostic_moisture[i, j, k]
+        q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛᵉ, d.microphysical_fields)
         ρ = density(T, pᵣ, q, constants)
         return saturation_specific_humidity(T, ρ, constants, surface)
 
     elseif d.flavor isa EquilibriumFlavor
-        qᵗ = @inbounds d.specific_moisture[i, j, k]
-        return equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
+        qᵛᵉ = @inbounds d.specific_prognostic_moisture[i, j, k]
+        return equilibrium_saturation_specific_humidity(T, pᵣ, qᵛᵉ, constants, surface)
 
     elseif d.flavor isa TotalMoistureFlavor
         return saturation_total_specific_moisture(T, pᵣ, constants, surface)

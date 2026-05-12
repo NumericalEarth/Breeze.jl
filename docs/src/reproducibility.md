@@ -26,7 +26,8 @@ Here are some of them:
   Of course this may not always be possible, especially when it comes to hardware variations, but in general you can't expect to be able to reproduce on CPU a simulation run on GPU, and viceversa, as the code generation for these targets is extremely different.
   Similarly, when targeting different CPU architectures (e.g. `x86-64` vs `aarch64`) small numerical differences are unavoidable due to Julia's `Base` numerical functions
 *  when running simulations on different CPUs of the same architecture, using lower optimization levels (e.g. `-O0`) can reduce numerical differences and increase reproducibility, but it also generates very slow code, so this may not always be a practical solution
-* if using randomly generated numbers, setting the seed (e.g. [`Random.seed!`](https://docs.julialang.org/en/v1/stdlib/Random/#Random.seed!) for CPU code, and `CUDA.seed!` for CUDA code) at the beginning of the simulation should help reproducibility
+* if using randomly generated numbers, setting the seed at the beginning of the simulation should help reproducibility.
+  Note: the CPU and GPU code have independent RNGs, so they have to be seeded separately (e.g. using [`Random.seed!`](https://docs.julialang.org/en/v1/stdlib/Random/#Random.seed!) for CPU code, and `CUDA.seed!` for code running on Nvidia GPUs), but using the same seed number for the two devices (CPU and GPU) won't produce the same stream of numbers, as the RNGS are entirely unrelated
 * running CPU code on a single thread reduces variations due to different scheduling.
   Also in this case, the code will be running slower than if multi-threaded and so this may not necessarily a practical solution, but it could be an option if comparing results between different runs is important
 * if your model is using FFT-based solvers from Oceananigans, passing the `FFTW.ESTIMATE` flag should help reproducibility

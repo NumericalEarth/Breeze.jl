@@ -8,10 +8,14 @@ export
     ParcelTendencies,
     ParcelTimestepper,
     ParcelInitialState,
+    PrescribedVerticalVelocity,
+    PrognosticVerticalVelocity,
 
     # Functions
     adjust_adiabatically,
+    parcel_buoyancy,
     compute_parcel_tendencies!,
+    compute_vertical_velocity_tendencies!,
     step_parcel_state!,
     compute_microphysics_prognostic_tendencies,
     apply_microphysical_tendencies,
