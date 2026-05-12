@@ -419,8 +419,10 @@ The damping is applied **inside the column tridiag** as a CN-weighted
 contribution (paralleling the existing implicit divergence-damping
 treatment): ``δτᵐ⁺ × \\text{rate} × \\text{ramp}(z)`` on the LHS diagonal,
 ``δτˢ⁻ × \\text{rate} × \\text{ramp}(z)`` on the explicit-half RHS. This
-is the canonical Klemp, Dudhia & Hassiotis (2008) absorbing-layer
-treatment used by WRF (`damp_opt=3`) and MPAS-Atmosphere.
+matches the Rayleigh-layer form of the Klemp, Dudhia & Hassiotis (2008)
+absorbing treatment used in WRF (`damp_opt=3`) and MPAS-Atmosphere. The
+profile shape is controlled by `ramp`; use [`Sin2Ramp`](@ref) for the
+classic ``\\sin^2`` profile.
 
 # Keyword arguments
 

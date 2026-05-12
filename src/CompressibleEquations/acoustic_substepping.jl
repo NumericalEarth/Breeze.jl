@@ -635,7 +635,7 @@ end
 # Implicit upper Rayleigh sponge contribution to the column tridiag's
 # diagonal. Klemp, Dudhia & Hassiotis (2008): a layer of thickness `depth`
 # below the lid where ``(ρw)′`` is damped at peak rate `damping_rate` (1/s)
-# scaled by a smooth ``\\sin^2`` ramp. CN-weighted: `δτᵐ⁺ × rate × ramp`
+# scaled by the configured ramp shape. CN-weighted: `δτᵐ⁺ × rate × ramp`
 # on the LHS diagonal, matched by `δτˢ⁻ × rate × ramp × ρw_old` subtracted
 # on the RHS in `_build_predictors_and_vertical_rhs!`. Local in z, so no
 # off-diagonal coupling.
