@@ -28,7 +28,7 @@
 # heating (YD19 Eq. 4). Everything else — slow vortex drift, residual
 # gravity-wave activity, sponge interactions — cancels out.
 #
-# ## What the simulation teaches
+# ## What this simulation teaches
 #
 # - How to build a balanced-vortex initial condition via Picard iteration
 #   (the Nolan 2001 / WRF `em_tropical_cyclone` procedure).
@@ -71,7 +71,7 @@ end
 # The environment is a hydrostatic dry column taken from Table 5 by
 # [Jordan1958](@citet) mean West Indies sounding for the
 # July–October hurricane season. It's the same climatological profile YD19
-# use (and about a million other idealized tropical-cyclone studies since).
+# use (and about a million other idealized tropical cyclone studies since).
 # Columns are pressure (mb), geopotential height (m), temperature (°C), and
 # potential temperature (K).
 
@@ -100,7 +100,7 @@ jordan_θ_K = Float64[
     364.0, 386.0, 418.0, 468.0, 500.0, 542.0, 597.0,
 ]
 
-function _linear_interpolate(xs::AbstractVector, ys::AbstractVector, x::Real)
+function linear_interpolate(xs::AbstractVector, ys::AbstractVector, x::Real)
     x_c = clamp(x, first(xs), last(xs))
     i = searchsortedfirst(xs, x_c)
     i = clamp(i, 2, length(xs))
@@ -109,19 +109,18 @@ function _linear_interpolate(xs::AbstractVector, ys::AbstractVector, x::Real)
     return y0 + (y1 - y0) * (x_c - x0) / (x1 - x0)
 end
 
-θ_env(z) = _linear_interpolate(jordan_z_m, jordan_θ_K, z)
-T_env(z) = _linear_interpolate(jordan_z_m, jordan_T_C .+ 273.15, z)    # convert C -> K
-p_env(z) = _linear_interpolate(jordan_z_m, jordan_p_mb .* 100.0, z)    # convert mb -> Pa
+θ_env(z) = linear_interpolate(jordan_z_m, jordan_θ_K, z)
+T_env(z) = linear_interpolate(jordan_z_m, jordan_T_C .+ 273.15, z)    # convert C -> K
+p_env(z) = linear_interpolate(jordan_z_m, jordan_p_mb .* 100.0, z)    # convert mb -> Pa
 
 # ## YD19 physical parameters
 #
-# The vortex parameters come straight out of [YuDidlake2019](@citet) §3a2:
-# a surface maximum wind of 43 m/s sitting at a radius of 31 km, decaying
+# The vortex parameters utilize classic modified-Rankine vortex structure, following the parameters used in [YuDidlake2019](@citet) §3a2:
+# a surface maximum wind of 43 m/s with a radius of maximum wind set at 31 km, decaying
 # outward as ``r^{-1/2}`` in the modified-Rankine sense. Above ``z ≈ 16`` km
-# (the outflow level) the tangential wind is zero. The outer ``\cos^2`` taper
-# between 250 and 300 km is *not* in the original paper — YD19 use a huge
-# non-periodic mother domain — but we need it to keep the vortex from
-# wrapping around on our periodic box.
+# (the outflow level) the tangential wind is zero. The outer ``\cos^2()`` taper
+# between 250 and 300 km is *not* in the original paper. Since our domain is periodic, 
+# we need to impose this to limit unrealistic stress at the domain boundaries.
 
 f = 5.0e-5                     # f-plane Coriolis parameter, 1/s ([YuDidlake2019](@citet); §3a1)
 v_max_surface = 43.0           # initial surface v_max, m/s ([YuDidlake2019](@citet); §3a2)
@@ -146,13 +145,13 @@ mkpath(snapshots_dir); mkpath(figures_dir)
 # ## Grid and architecture
 #
 # [YuDidlake2019](@citet) §3a1 use a 3 km inner-nest resolution with a
-# 25 km deep domain. We match that on a 642 km × 642 km periodic-in-x,y box:
+# 25 km deep domain. We match that on a ~ 642 km × 642 km periodic-in-x,y box:
 # 214² cells horizontally and 75 levels vertically (``Δz ≈ 333`` m). The run
 # prefers GPU and falls back to CPU if CUDA isn't functional.
 
-Δx = 500meters
-Lx = 650kilometers
-Nx = Ny = ceil(Int, Lx / Δx)
+Δx = 3000meters
+Lx = 642kilometers
+Nx = Ny = Int(Lx / Δx)
 Nz = 75
 Lz = 25kilometers                 # YD19 §3a1
 Δz = Lz / Nz
@@ -169,7 +168,7 @@ grid = RectilinearGrid(arch;
 # ## Reference state and thermodynamic constants
 #
 # The [`ReferenceState`](@ref Breeze.Thermodynamics.ReferenceState) is
-# constructed from the Jordan ``θ(z)`` profile and anchored at the observed
+# the Jordan ``θ(z)`` profile, at the observed
 # surface pressure, giving us ``pᵣ(z)``, `ρᵣ(z)`, `Tᵣ(z)` — the hydrostatic
 # far-field of the anelastic problem. We pull the three columns down to the
 # host once, here, for use by the CPU-side balance iteration below.
@@ -200,7 +199,7 @@ z_centers = collect(range(Δz / 2, step = Δz, length = Nz))
     Nx, Ny, Nz, Δx / 1.0e3, Lz / 1.0e3, Δz
 )
 @info @sprintf(
-    "Sponge: WRF damp_opt=2 analog, sin² ramp from z = %.1f to %.1f km, rate %.3f s⁻¹ (ρu, ρv, ρw → 0; ρe → ρᵣ·[cᵖᵈ Tᵣ + g z])",
+    "Sponge: WRF damp_opt=2 analog, sin²() ramp from z = %.1f to %.1f km, rate %.3f s⁻¹ (ρu, ρv, ρw → 0; ρe → ρᵣ·[cᵖᵈ Tᵣ + g z])",
     20.0, 25.0, sponge_rate
 )
 
@@ -236,7 +235,7 @@ z_centers = collect(range(Δz / 2, step = Δz, length = Nz))
 # ``v_\text{max}(z)`` itself scales as ``\text{RMW}_\text{sfc}/\text{RMW}(z)``
 # to conserve angular momentum up the vortex column.
 #
-# The outer cos² taper between ``r_\text{taper start}`` and ``r_\text{taper end}``
+# The outer cos²() taper between ``r_\text{taper start}`` and ``r_\text{taper end}``
 # is our only departure from YD19: their non-periodic outer domain makes
 # the taper unnecessary, but we need it so the vortex doesn't wrap around
 # on the periodic box and collide with itself.
@@ -297,7 +296,7 @@ end
 # Pa/m — a 10⁴× collapse over the one-shot linearized baseline where
 # ``\rho`` is fixed to the environment and not allowed to adjust.
 
-function _dpdz_centered(p, k, i, z_centers, Nz)
+function dpdz_centered(p, k, i, z_centers, Nz)
     if k == 1
         return (p[i, 2] - p[i, 1]) / (z_centers[2] - z_centers[1])
     elseif k == Nz
@@ -336,7 +335,7 @@ function solve_balanced_vortex_iterative(
         T_new = similar(T)
         for i in 1:Nr
             for k in 1:(Nz - 1)
-                dp_dz = _dpdz_centered(p, k, i, z_centers, Nz)
+                dp_dz = dpdz_centered(p, k, i, z_centers, Nz)
                 ρ_hyd = max(-dp_dz / g, 1.0e-3)
                 T_new[i, k] = p[i, k] / (Rᵈ * ρ_hyd)
             end
@@ -405,7 +404,7 @@ let res = balance_residuals(r_pre, z_centers, v2d, bal.p, bal.T; Rᵈ, g)
     )
 end
 
-@inline function _lookup_rz(table, r::Real, z::Real)
+@inline function lookup_rz(table, r::Real, z::Real)
     r_c = clamp(r, first(r_pre), last(r_pre))
     z_c = clamp(z, first(z_centers), last(z_centers))
     ir = searchsortedfirst(r_pre, r_c); ir = clamp(ir, 2, length(r_pre))
@@ -420,9 +419,9 @@ end
         (1 - fr) * fz * v01 + fr * fz * v11
 end
 
-uᵢ(x, y, z) = (r = sqrt(x^2 + y^2); r < 1.0 ? 0.0 : -(y / r) * _lookup_rz(vortex.v, r, z))
-vᵢ(x, y, z) = (r = sqrt(x^2 + y^2); r < 1.0 ? 0.0 : (x / r) * _lookup_rz(vortex.v, r, z))
-Tᵢ(x, y, z) = _lookup_rz(vortex.T, sqrt(x^2 + y^2), z)
+uᵢ(x, y, z) = (r = sqrt(x^2 + y^2); r < 1.0 ? 0.0 : -(y / r) * lookup_rz(vortex.v, r, z))
+vᵢ(x, y, z) = (r = sqrt(x^2 + y^2); r < 1.0 ? 0.0 : (x / r) * lookup_rz(vortex.v, r, z))
+Tᵢ(x, y, z) = lookup_rz(vortex.T, sqrt(x^2 + y^2), z)
 
 # ## Rainband heating — stationary, spiral, outward-tilted
 #
@@ -510,7 +509,7 @@ end
 #
 # The top of the domain needs a Rayleigh-damping layer to absorb outgoing
 # gravity waves that would otherwise reflect off the rigid lid and
-# contaminate the interior. We match WRF's `damp_opt = 2` shape: a sin² ramp
+# destabilize the interior. We match WRF's `damp_opt = 2` shape: a sin²() ramp
 # from zero at ``z = 20`` km to a max rate of ``3 \times 10^{-3}`` s⁻¹
 # at ``z = 25`` km. Momentum components relax to zero; energy density
 # relaxes to its reference profile
@@ -521,8 +520,7 @@ end
 #
 # (dry static energy density). Both the momentum and energy components
 # are needed: without the energy term, upper-level ``θ'`` anomalies persist
-# and the vortex fails to spin down, defeating YD19's stated 43 → 40 m/s
-# decay over 24 h (§3a2).
+# and the vortex fails to spin down.
 
 sponge_z_bottom = 20kilometers
 sponge_z_top = 25kilometers
@@ -538,33 +536,33 @@ sponge_ρe_params = (
     ρe_bg = ρeᵣ_device,
 )
 
-## WRF `damp_opt=2` analog: zero below z_bot, sin² ramp to max at z_top.
-@inline function _sponge_mask(z, z_bot, z_top)
+## WRF `damp_opt=2` analog: zero below z_bot, sin²() ramp to max at z_top.
+@inline function sponge_mask(z, z_bot, z_top)
     ξ = (z - z_bot) / (z_top - z_bot)
     return ifelse(ξ ≤ 0, zero(ξ), sin(π / 2 * ξ)^2)
 end
 
 @inline function sponge_ρu_fn(i, j, k, grid, clock, fields, p)
     z = Oceananigans.Grids.znode(i, j, k, grid, Face(), Center(), Center())
-    mask = _sponge_mask(z, p.z_bot, p.z_top)
+    mask = sponge_mask(z, p.z_bot, p.z_top)
     return -p.rate * mask * @inbounds fields.ρu[i, j, k]
 end
 
 @inline function sponge_ρv_fn(i, j, k, grid, clock, fields, p)
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Face(), Center())
-    mask = _sponge_mask(z, p.z_bot, p.z_top)
+    mask = sponge_mask(z, p.z_bot, p.z_top)
     return -p.rate * mask * @inbounds fields.ρv[i, j, k]
 end
 
 @inline function sponge_ρw_fn(i, j, k, grid, clock, fields, p)
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Face())
-    mask = _sponge_mask(z, p.z_bot, p.z_top)
+    mask = sponge_mask(z, p.z_bot, p.z_top)
     return -p.rate * mask * @inbounds fields.ρw[i, j, k]
 end
 
 @inline function sponge_ρe_fn(i, j, k, grid, clock, fields, p)
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Center())
-    mask = _sponge_mask(z, p.z_bot, p.z_top)
+    mask = sponge_mask(z, p.z_bot, p.z_top)
     ρe_tgt = @inbounds p.ρe_bg[k]
     return -p.rate * mask * (@inbounds fields.ρe[i, j, k] - ρe_tgt)
 end
@@ -580,7 +578,7 @@ sponge_ρe = Forcing(sponge_ρe_fn; discrete_form = true, parameters = sponge_ρ
 # heat (Cᵀ) over a fixed sea surface temperature T₀ = 300 K, matching YD19 §3a1.
 # Coefficients from [Emanuel1986](@citet). The moisture flux is omitted here; when
 # the model carries moisture, a corresponding `BulkVaporFlux` on the moisture
-# field can be wired in alongside these.
+# field can be wired up alongside these.
 
 Cᴰ_surf = 1.229e-3   # momentum drag coefficient
 Cᵀ_surf = 1.094e-3   # sensible heat transfer coefficient
@@ -830,21 +828,21 @@ let
     T_sc = similar(u_sc)
 
     ## In-place centered interpolation (Arakawa C-grid → Centers).
-    function _center_u!(out::AbstractArray{Float32, 3}, src)
+    function center_u!(out::AbstractArray{Float32, 3}, src)
         Nxs, Nys, Nzs = size(out)
         return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
             ip = i == Nxs ? 1 : i + 1
             out[i, j, k] = Float32((src[i, j, k] + src[ip, j, k])/2)
         end
     end
-    function _center_v!(out::AbstractArray{Float32, 3}, src)
+    function center_v!(out::AbstractArray{Float32, 3}, src)
         Nxs, Nys, Nzs = size(out)
         return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
             jp = j == Nys ? 1 : j + 1
             out[i, j, k] = Float32((src[i, j, k] + src[i, jp, k])/2)
         end
     end
-    function _center_w!(out::AbstractArray{Float32, 3}, src)
+    function center_w!(out::AbstractArray{Float32, 3}, src)
         ## w lives on z-Face (size Nz+1 in the vertical). Average adjacent
         ## faces to get cell-centered values with size (Nx, Ny, Nz).
         Nxs, Nys, Nzs = size(out)
@@ -852,7 +850,7 @@ let
             out[i, j, k] = Float32((src[i, j, k] + src[i, j, k + 1])/2)
         end
     end
-    function _copy_f32!(out::AbstractArray{Float32, 3}, src)
+    function copy_f32!(out::AbstractArray{Float32, 3}, src)
         return @inbounds for I in eachindex(out)
             out[I] = Float32(src[I])
         end
@@ -861,10 +859,10 @@ let
     ## Load one snapshot (index n) from four OnDisk-backed FieldTimeSeries
     ## into the scratch buffers. Returns nothing.
     function load_snapshot!(u, v, w, T, u_ts, v_ts, w_ts, T_ts, n::Int)
-        _center_u!(u, interior(u_ts[n]))
-        _center_v!(v, interior(v_ts[n]))
-        _center_w!(w, interior(w_ts[n]))
-        _copy_f32!(T, interior(T_ts[n]))
+        center_u!(u, interior(u_ts[n]))
+        center_v!(v, interior(v_ts[n]))
+        center_w!(w, interior(w_ts[n]))
+        copy_f32!(T, interior(T_ts[n]))
         return nothing
     end
 
@@ -1401,7 +1399,7 @@ let
         ## Use 95th-percentile of |w'| (restricted to the rainband quadrant and
         ## r ≤ 120 km) for color range — avoids letting inner-core IG noise
         ## saturate the colormap while the actual signal is drowned out.
-        function _w_scale(w3d, k_s)
+        function w_scale(w3d, k_s)
             w_s = w3d[:, :, k_s]
             vals = Float64[]
             for j in 1:Ny, i in 1:Nx
@@ -1412,14 +1410,14 @@ let
             sort!(vals)
             return vals[ceil(Int, 0.95 * length(vals))]
         end
-        w_scales = [_w_scale(w_resp3, argmin(abs.(z_centers .- zp[1]))) for zp in panels]
+        w_scales = [w_scale(w_resp3, argmin(abs.(z_centers .- zp[1]))) for zp in panels]
         ## Fixed colorbar range covers the full IG-wave dynamic range; the
         ## 95th-percentile diagnostic is kept for logging but no longer used
         ## to size the colorbar.
         w_panel_lim = 4.0
 
         ## Heating field at each panel altitude (computed inside the panel loop).
-        function _Q_at(z_slice)
+        function Q_at(z_slice)
             Q = zeros(Nx, Ny)
             for j in 1:Ny, i in 1:Nx
                 r = sqrt(xs_grid[i]^2 + ys_grid[j]^2)
@@ -1896,9 +1894,9 @@ let
         Nt_anim = min(length(ctrl_times), length(heat_times))
         w_frames = zeros(Float32, Nx, Ny, Nt_anim)
         for n in 1:Nt_anim
-            _center_w!(w_sc, interior(ts_ctrl.w[n]))
+            center_w!(w_sc, interior(ts_ctrl.w[n]))
             @views w_frames[:, :, n] .= -w_sc[:, :, k_anim]
-            _center_w!(w_sc, interior(ts_heat.w[n]))
+            center_w!(w_sc, interior(ts_heat.w[n]))
             @views w_frames[:, :, n] .+= w_sc[:, :, k_anim]
         end
         ## Robust color limit: 95th-percentile of |w'| restricted to the rainband
