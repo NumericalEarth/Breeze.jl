@@ -65,7 +65,7 @@ $(TYPEDSIGNATURES)
 
 Return the default timestepper symbol for the given dynamics.
 
-For anelastic dynamics, returns `:SSPRungeKutta3`.
+For anelastic dynamics or compressible dynamics with explicit timestepping, returns `:SSPRungeKutta3`.
 For compressible dynamics, returns `:AcousticRungeKutta3` (acoustic substepping).
 """
 default_timestepper(dynamics) = :SSPRungeKutta3
