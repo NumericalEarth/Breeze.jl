@@ -383,7 +383,7 @@ Two CFL-like constraints govern the choice of ``Δt`` and the substep count ``N`
    ```
 
    The speed of sound ``c_s = \sqrt{\gamma^d R^d T_r}``, where the reference temperature is chosen to be ``T_r = 300\,``K.
-   
+
    The vertical implicit solve removes the vertical acoustic CFL constraint entirely.
 
 2. **Advective CFL for the outer step**:
