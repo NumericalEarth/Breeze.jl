@@ -35,7 +35,7 @@ The shared portions of the implementation — the struct, prognostic field names
 materialization, the state type, and `microphysical_state` — are unchanged from the per-name
 walkthrough. We list them here so the page is self-contained:
 
-```@example fused_microphysics_example
+```julia
 using Breeze
 using Oceananigans: CenterField
 using Breeze.AtmosphereModels: AbstractMicrophysicalState
