@@ -11,7 +11,8 @@ using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
 using Oceananigans.Grids: AbstractGrid, RectilinearGrid, Center, Face, Flat, Bounded
 using Oceananigans.Fields: ConstantField
 using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, RadiativeTransferModel,
-                               AbstractSolarPosition, ApparentSolarPosition, FixedCosineZenith
+                               AbstractSolarPosition, ApparentSolarPosition,
+                               DiurnalSolarPosition, FixedCosineZenith
 
 using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
 using KernelAbstractions: @kernel, @index
@@ -216,6 +217,13 @@ set_latitude!(rrtmgp_latitude, sp::ApparentSolarPosition{<:Tuple}, grid) =
 set_latitude!(rrtmgp_latitude, sp::ApparentSolarPosition{Nothing}, grid) =
     _set_latitude_from_grid!(rrtmgp_latitude, grid)
 
+# Diurnal cycle: latitude is part of the solar-position spec; broadcast it
+# directly to every column so gray τ uses the same φ as cos(θ_z).
+function set_latitude!(rrtmgp_latitude, sp::DiurnalSolarPosition, grid)
+    rrtmgp_latitude .= convert(eltype(rrtmgp_latitude), sp.latitude)
+    return nothing
+end
+
 # Fixed zenith: gray τ_e/τ_p still depend on latitude — fall back to grid coords.
 set_latitude!(rrtmgp_latitude, ::FixedCosineZenith, grid) =
     _set_latitude_from_grid!(rrtmgp_latitude, grid)
@@ -243,9 +251,10 @@ end
 ##### cos(θ_z) BC initialization at construction
 #####
 
-# Apparent sun: no need to pre-fill — `update_solar_zenith_angle!` will populate
-# it on the first radiation update (iteration 0 always triggers an update).
+# Apparent sun and diurnal cycle: no need to pre-fill — `update_solar_zenith_angle!`
+# populates the array on the first radiation update (iteration 0 always triggers).
 initialize_cos_zenith!(cos_zenith_array, ::ApparentSolarPosition) = nothing
+initialize_cos_zenith!(cos_zenith_array, ::DiurnalSolarPosition) = nothing
 
 # Fixed zenith: write the user-supplied value once. After this the array is
 # never touched, since `update_solar_zenith_angle!` is a no-op for this case.
@@ -469,6 +478,29 @@ function update_solar_zenith_angle!(sw_solver, sp::ApparentSolarPosition, grid, 
     _validate_datetime(sp, datetime)
     _update_apparent_zenith!(sw_solver, sp.coordinate, grid, datetime)
     return nothing
+end
+
+# Idealized diurnal cycle: pure analytical hour angle, no calendar / orbit.
+# Requires a numeric clock (seconds since the start of the simulation).
+function update_solar_zenith_angle!(sw_solver, sp::DiurnalSolarPosition, grid, clock)
+    _validate_diurnal_clock(sp, clock.time)
+    t = clock.time
+    # cos is periodic, so no `mod` is required — the math handles wrapping itself.
+    ω = (2π / sp.day_length) * (t - sp.noon_offset)
+    φ = deg2rad(sp.latitude)
+    δ = deg2rad(sp.declination)
+    cos_θz = sin(φ) * sin(δ) + cos(φ) * cos(δ) * cos(ω)
+    sw_solver.bcs.cos_zenith .= max(cos_θz, 0)
+    return nothing
+end
+
+@noinline _validate_diurnal_clock(::DiurnalSolarPosition, ::Number) = nothing
+@noinline function _validate_diurnal_clock(::DiurnalSolarPosition, t)
+    throw(ArgumentError(
+        "DiurnalSolarPosition requires a numeric model clock (seconds since the start " *
+        "of the simulation), but `model.clock.time` is a $(typeof(t)). For an idealized " *
+        "diurnal cycle there is no calendar — construct the model with " *
+        "`Clock(time = 0.0)` (or another numeric Clock) instead of a DateTime clock."))
 end
 
 # Helpful actionable error when the user uses a numeric clock without an epoch.

@@ -33,6 +33,7 @@ export
     AllSkyOptics,
     AbstractSolarPosition,
     ApparentSolarPosition,
+    DiurnalSolarPosition,
     FixedCosineZenith,
     ConstantRadiusParticles,
     TemperatureField,

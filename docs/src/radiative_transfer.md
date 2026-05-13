@@ -99,7 +99,8 @@ cases:
 
 | Subtype | Behavior | Typical use |
 |---|---|---|
-| [`ApparentSolarPosition`](@ref) (default) | Time-varying. ``\cos(θ_z)`` is recomputed each update from the model clock and observer ``(λ, φ)`` via [`Breeze.CelestialMechanics.cos_solar_zenith_angle`](@ref). | Real-world simulations, diurnal cycles, seasonal forcing. |
+| [`ApparentSolarPosition`](@ref) (default) | Real-Earth time-varying. ``\cos(θ_z)`` is recomputed each update from the model clock and observer ``(λ, φ)`` via [`Breeze.CelestialMechanics.cos_solar_zenith_angle`](@ref) — includes orbital declination, equation of time, etc. | Real-world simulations driven by a calendar date. |
+| [`DiurnalSolarPosition`](@ref) | Idealized diurnal cycle at a fixed latitude and declination. ``\cos(θ_z)`` follows the analytical hour-angle formula without any calendar dependence. Requires a numeric clock. | Idealized diurnal-cycle studies, perpetual equinox or solstice runs, non-Earth rotators. |
 | [`FixedCosineZenith`](@ref) | Constant ``\cos(θ_z)``. The clock has no effect on the sun position. | Idealized radiative-convective equilibrium (RCE), forcing-shape studies. |
 
 ### Time-varying apparent sun
@@ -131,6 +132,65 @@ solar_position = ApparentSolarPosition(coordinate = (-70.9, 42.5),
     cannot resolve a `DateTime`. The radiation update will throw an
     `ArgumentError` with instructions: switch to a `DateTime` clock, supply an
     `epoch`, or use [`FixedCosineZenith`](@ref).
+
+### Idealized diurnal cycle
+
+For idealized studies where you want a clean 24-hour cycle (or any rotation
+period) without orbital mechanics, calendar dates, or equation-of-time
+corrections, use [`DiurnalSolarPosition`](@ref):
+
+```julia
+# Perpetual equinox at 30°N — 24-hour day, noon at t = 0
+solar_position = DiurnalSolarPosition(latitude = 30)
+
+# Perpetual June solstice analog at 45°N
+solar_position = DiurnalSolarPosition(latitude = 45, declination = 23.5)
+
+# Non-Earth rotator with a 10-hour day; the simulation starts at sunrise
+solar_position = DiurnalSolarPosition(latitude = 0,
+                                      day_length  = 10 * 3600,
+                                      noon_offset = 5  * 3600)
+```
+
+The cosine of the solar zenith angle is computed analytically each radiation
+update from the model clock:
+
+```math
+\cos(θ_z) = \sin(φ) \sin(δ) + \cos(φ) \cos(δ) \cos(ω),
+\qquad
+ω = \frac{2π}{T_d} (t - t_{\text{noon}}),
+```
+
+where ``φ`` is the (fixed) latitude, ``δ`` is the (fixed) declination,
+``T_d`` is the day length, and ``t_{\text{noon}}`` is the simulation time
+at which local noon occurs. There is no annual cycle, no equation of time,
+and no longitude — by design.
+
+#### Required: numeric clock
+
+`DiurnalSolarPosition` reads `model.clock.time` as "seconds since the start
+of the simulation" and computes the hour angle from it. A `DateTime` clock
+is rejected with an actionable error, because pairing one with this
+idealized cycle would be semantically ambiguous (the calendar would be
+ignored). Use `Clock(time = 0.0)` (or any numeric `Clock`) when constructing
+the `AtmosphereModel`.
+
+#### Choosing `noon_offset`
+
+The default `noon_offset = 0` places local noon at `t = 0` — the sun is
+overhead at the start of the simulation. To start at sunrise instead, set
+`noon_offset = day_length / 4`; to start at midnight, set
+`noon_offset = day_length / 2`. The cosine function is naturally periodic,
+so no mod is required and the cycle simply repeats every `day_length`
+seconds.
+
+#### Gray-optics latitude
+
+Unlike [`FixedCosineZenith`](@ref) — where latitude for the gray τ comes
+from the grid — `DiurnalSolarPosition` carries its own `latitude` and uses
+it for *both* the diurnal cos(θ_z) calculation *and* the gray-optics
+latitude-dependent τ. This keeps the two consistent in idealized
+single-column setups where the grid's `y` might be a placeholder.
 
 ### Constant cos(θ_z)
 

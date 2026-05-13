@@ -11,7 +11,8 @@ using Oceananigans.Fields: ConstantField
 using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity,
                                BackgroundAtmosphere, materialize_background_atmosphere,
                                ClearSkyOptics, RadiativeTransferModel,
-                               AbstractSolarPosition, ApparentSolarPosition, FixedCosineZenith
+                               AbstractSolarPosition, ApparentSolarPosition,
+                               DiurnalSolarPosition, FixedCosineZenith
 using Breeze.Thermodynamics: ThermodynamicConstants
 
 using Dates: AbstractDateTime, Millisecond
@@ -250,8 +251,10 @@ set_longitude!(rrtmgp_λ, sp::ApparentSolarPosition{<:Tuple}, grid) =
 set_longitude!(rrtmgp_λ, ::ApparentSolarPosition{Nothing}, grid) =
     _set_longitude_from_grid!(rrtmgp_λ, grid)
 
-# Fixed zenith: longitude is irrelevant for cos(θ_z) (it's frozen), but RRTMGP
-# still wants column λ values for gas-state setup. Use grid coords.
+# Diurnal cycle and fixed zenith: longitude is irrelevant for cos(θ_z), but
+# RRTMGP still wants column λ values for the gas-state setup. Use grid coords.
+set_longitude!(rrtmgp_λ, ::DiurnalSolarPosition, grid) =
+    _set_longitude_from_grid!(rrtmgp_λ, grid)
 set_longitude!(rrtmgp_λ, ::FixedCosineZenith, grid) =
     _set_longitude_from_grid!(rrtmgp_λ, grid)
 

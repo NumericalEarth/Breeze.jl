@@ -271,6 +271,125 @@ end
         @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] > 0
     end
 
+    @testset "DiurnalSolarPosition: construction and defaults" begin
+        # Integer inputs are promoted to floats so physical quantities behave sensibly
+        sp = DiurnalSolarPosition(latitude = 30)
+        @test sp isa AbstractSolarPosition
+        @test sp isa DiurnalSolarPosition
+        @test sp.latitude    == 30.0
+        @test sp.declination == 0.0
+        @test sp.day_length  == 86400.0
+        @test sp.noon_offset == 0.0
+        @test typeof(sp.latitude) === Float64
+
+        # Float32 inputs preserved
+        sp32 = DiurnalSolarPosition(latitude = Float32(30))
+        @test typeof(sp32.latitude) === Float32
+        @test typeof(sp32.day_length) === Float32
+
+        # Mixed inputs promote to a common type
+        sp_mix = DiurnalSolarPosition(latitude = 45, declination = 23.5)
+        @test sp_mix.latitude == 45.0
+        @test sp_mix.declination == 23.5
+    end
+
+    @testset "DiurnalSolarPosition: diurnal cycle physics" begin
+        Nz = 16
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+                               topology=(Flat, Flat, Bounded))
+
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = 101325,
+                                         potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        # Perpetual equinox at 30°N, noon at t = 0
+        latitude = 30
+        sp = DiurnalSolarPosition(latitude = latitude)
+        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+                                           surface_temperature = 300,
+                                           surface_albedo = 0.1,
+                                           solar_position = sp)
+
+        clock = Clock(time = 0.0)
+        model = AtmosphereModel(grid; clock, dynamics,
+                                formulation = :LiquidIcePotentialTemperature, radiation)
+        set!(model; θ = 300, qᵗ = 0)
+
+        # At t = 0 (noon), cos(θ_z) = cos(latitude) for δ = 0
+        @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] ≈ cos(deg2rad(latitude))
+
+        # Step clock to midnight (t = day/2) and re-update — cos(θ_z) clamped to 0
+        model.clock.time = 43200.0  # 12 h
+        model.clock.iteration = 1
+        ext = Base.get_extension(Breeze, :BreezeRRTMGPExt)
+        ext.update_solar_zenith_angle!(radiation.shortwave_solver, sp, grid, model.clock)
+        @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] == 0
+
+        # Step to t = day (back to noon) — should match the initial value
+        model.clock.time = 86400.0
+        ext.update_solar_zenith_angle!(radiation.shortwave_solver, sp, grid, model.clock)
+        @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] ≈ cos(deg2rad(latitude))
+    end
+
+    @testset "DiurnalSolarPosition: perpetual solstice declination" begin
+        Nz = 16
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+                               topology=(Flat, Flat, Bounded))
+
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = 101325,
+                                         potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        # Perpetual June-solstice analog: 23.5° declination
+        latitude = 45.0
+        declination = 23.5
+        sp = DiurnalSolarPosition(latitude = latitude, declination = declination)
+        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+                                           surface_temperature = 300,
+                                           surface_albedo = 0.1,
+                                           solar_position = sp)
+
+        clock = Clock(time = 0.0)
+        model = AtmosphereModel(grid; clock, dynamics,
+                                formulation = :LiquidIcePotentialTemperature, radiation)
+        set!(model; θ = 300, qᵗ = 0)
+
+        # At noon with non-zero declination:
+        #   cos(θ_z) = sin(φ) sin(δ) + cos(φ) cos(δ)
+        expected_noon = sin(deg2rad(latitude)) * sin(deg2rad(declination)) +
+                        cos(deg2rad(latitude)) * cos(deg2rad(declination))
+        @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] ≈ expected_noon
+    end
+
+    @testset "DiurnalSolarPosition + DateTime clock → ArgumentError" begin
+        Nz = 16
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+                               topology=(Flat, Flat, Bounded))
+
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = 101325,
+                                         potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+                                           surface_temperature = 300,
+                                           surface_albedo = 0.1,
+                                           solar_position = DiurnalSolarPosition(latitude = 30))
+
+        # DateTime clock is incompatible with the idealized diurnal cycle.
+        clock = Clock(time = DateTime(2024, 6, 21, 12, 0, 0))
+        @test_throws ArgumentError begin
+            model = AtmosphereModel(grid; clock, dynamics,
+                                    formulation = :LiquidIcePotentialTemperature, radiation)
+            set!(model; θ = 300, qᵗ = 0)
+        end
+    end
+
     @testset "ApparentSolarPosition + numeric clock without epoch → ArgumentError" begin
         Nz = 16
         grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),

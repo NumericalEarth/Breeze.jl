@@ -22,8 +22,10 @@ Abstract supertype for solar-position specifications passed to
 [`RadiativeTransferModel`](@ref). Concrete subtypes determine how cos(θ_z)
 is computed on each radiation update:
 
-- [`ApparentSolarPosition`](@ref) — time-varying, computed from the model
-  clock and grid (or explicit) longitude/latitude.
+- [`ApparentSolarPosition`](@ref) — real-Earth time-varying, computed from
+  the model clock and grid (or explicit) longitude/latitude.
+- [`DiurnalSolarPosition`](@ref) — idealized diurnal cycle at a fixed
+  latitude and declination, no calendar dependence.
 - [`FixedCosineZenith`](@ref) — constant cos(θ_z), clock-independent.
 """
 abstract type AbstractSolarPosition end
@@ -95,9 +97,90 @@ julia> FixedCosineZenith(0.5)
 FixedCosineZenith(cos_zenith = 0.5)
 ```
 """
-struct FixedCosineZenith{FT<:Number} <: AbstractSolarPosition
+struct FixedCosineZenith{FT} <: AbstractSolarPosition
     "Cosine of the solar zenith angle. Should satisfy ``0 ≤ \\cos(θ_z) ≤ 1`` for the sun above the horizon."
     cos_zenith :: FT
+end
+
+"""
+$(TYPEDEF)
+
+Idealized diurnal cycle with no annual variation and no calendar dependence.
+cos(θ_z) is computed analytically on each radiation update from the model
+clock (which must be numeric — seconds since the start of the run) as
+
+```math
+\\cos(θ_z) = \\sin(φ) \\sin(δ) + \\cos(φ) \\cos(δ) \\cos(ω),
+\\qquad
+ω = \\frac{2π}{T_d} (t - t_{\\text{noon}})
+```
+
+where ``φ`` is the (fixed) observer latitude, ``δ`` is the (fixed) solar
+declination, ``T_d`` is the day length, and ``t_{\\text{noon}}`` is the
+simulation time at which local noon occurs. ``ω = 0`` at noon and ``ω = ±π``
+at local midnight. The result is clamped to be non-negative.
+
+# Fields
+$(TYPEDFIELDS)
+
+# Examples
+
+Perpetual equinox at 30°N (default: 24-hour day, noon at ``t = 0``):
+
+```jldoctest
+julia> using Breeze
+
+julia> DiurnalSolarPosition(latitude = 30)
+DiurnalSolarPosition(latitude = 30.0°, declination = 0.0°, day_length = 86400.0 s, noon_offset = 0.0 s)
+```
+
+Perpetual June solstice at 45°N:
+
+```jldoctest
+julia> using Breeze
+
+julia> DiurnalSolarPosition(latitude = 45, declination = 23.5)
+DiurnalSolarPosition(latitude = 45.0°, declination = 23.5°, day_length = 86400.0 s, noon_offset = 0.0 s)
+```
+
+Fast rotator with a 10-hour day, sun overhead, starting at sunrise:
+
+```jldoctest
+julia> using Breeze
+
+julia> DiurnalSolarPosition(latitude = 0, day_length = 10 * 3600, noon_offset = 5 * 3600)
+DiurnalSolarPosition(latitude = 0.0°, declination = 0.0°, day_length = 36000.0 s, noon_offset = 18000.0 s)
+```
+"""
+struct DiurnalSolarPosition{FT} <: AbstractSolarPosition
+    "Observer latitude (degrees)."
+    latitude :: FT
+    "Solar declination (degrees). Zero is perpetual equinox; ±23.5 is perpetual solstice."
+    declination :: FT
+    "Rotation period (seconds). Default `86400` is the Earth day."
+    day_length :: FT
+    "Simulation time (seconds) at which local noon occurs. Default `0`."
+    noon_offset :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct a [`DiurnalSolarPosition`](@ref) with sensible defaults: perpetual
+equinox (`declination = 0`), 24-hour day (`day_length = 86400` s), and noon
+at the start of the simulation (`noon_offset = 0`).
+
+Integer inputs are promoted to floating point (via `float`) so that values
+like `latitude = 30` behave like physical quantities rather than integer
+counts; all four fields are then promoted to a common type so mixed inputs
+(e.g. `latitude = 30, day_length = 86400.0`) work without surprises.
+"""
+function DiurnalSolarPosition(; latitude,
+                                declination = 0,
+                                day_length = 86400,
+                                noon_offset = 0)
+    floats = (float(latitude), float(declination), float(day_length), float(noon_offset))
+    return DiurnalSolarPosition(promote(floats...)...)
 end
 
 #####
@@ -119,3 +202,11 @@ end
 
 Base.show(io::IO, sp::FixedCosineZenith) =
     print(io, "FixedCosineZenith(cos_zenith = ", prettysummary(sp.cos_zenith), ")")
+
+function Base.show(io::IO, sp::DiurnalSolarPosition)
+    print(io, "DiurnalSolarPosition(",
+              "latitude = ",    prettysummary(sp.latitude),    "°, ",
+              "declination = ", prettysummary(sp.declination), "°, ",
+              "day_length = ",  prettysummary(sp.day_length),  " s, ",
+              "noon_offset = ", prettysummary(sp.noon_offset), " s)")
+end

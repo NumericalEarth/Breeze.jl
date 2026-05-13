@@ -67,6 +67,7 @@ export
     # Solar position specifications
     AbstractSolarPosition,
     ApparentSolarPosition,
+    DiurnalSolarPosition,
     FixedCosineZenith,
 
     # Cloud effective radius
