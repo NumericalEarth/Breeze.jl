@@ -271,6 +271,25 @@ end
         @allowscalar @test radiation.shortwave_solver.bcs.cos_zenith[1] > 0
     end
 
+    @testset "AbstractSolarPosition show" begin
+        # Default ApparentSolarPosition — exercises _show_coordinate(::Nothing) and _show_epoch(::Nothing)
+        @test repr(ApparentSolarPosition()) ==
+            "ApparentSolarPosition(coordinate=<from grid>, epoch=<from clock>)"
+
+        # Explicit coordinate — exercises _show_coordinate(::Tuple) and prettysummary on its elements
+        @test repr(ApparentSolarPosition(coordinate = (-70.9, 42.5))) ==
+            "ApparentSolarPosition(coordinate=(-70.9, 42.5), epoch=<from clock>)"
+
+        # Explicit epoch — exercises _show_epoch(epoch::DateTime)
+        @test repr(ApparentSolarPosition(epoch = DateTime(2024, 1, 1))) ==
+            "ApparentSolarPosition(coordinate=<from grid>, epoch=2024-01-01T00:00:00)"
+
+        @test repr(FixedCosineZenith(0.5)) == "FixedCosineZenith(cos_zenith = 0.5)"
+
+        @test repr(DiurnalSolarPosition(latitude = 30)) ==
+            "DiurnalSolarPosition(latitude = 30.0°, declination = 0.0°, day_length = 86400.0 s, noon_offset = 0.0 s)"
+    end
+
     @testset "DiurnalSolarPosition: construction and defaults" begin
         # Integer inputs are promoted to floats so physical quantities behave sensibly
         sp = DiurnalSolarPosition(latitude = 30)
