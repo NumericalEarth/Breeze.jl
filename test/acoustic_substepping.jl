@@ -569,8 +569,7 @@ for arch in arches
 
         # With no perturbation and balanced reference state, w should be near zero
         w_max = @allowscalar maximum(abs, interior(model.velocities.w))
-        w_max_ref = FT == Float64 ? 1e-6 : 1f-4
-        @test w_max < w_max_ref  # Should be at machine precision level
+        @test w_max < sqrt(eps(FT))  # Should be at machine precision level
     end
 
     #####
