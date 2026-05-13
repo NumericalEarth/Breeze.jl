@@ -170,17 +170,21 @@ Construct a [`DiurnalSolarPosition`](@ref) with sensible defaults: perpetual
 equinox (`declination = 0`), 24-hour day (`day_length = 86400` s), and noon
 at the start of the simulation (`noon_offset = 0`).
 
-Integer inputs are promoted to floating point (via `float`) so that values
-like `latitude = 30` behave like physical quantities rather than integer
-counts; all four fields are then promoted to a common type so mixed inputs
-(e.g. `latitude = 30, day_length = 86400.0`) work without surprises.
+The precision is taken from `typeof(latitude)` via `float(typeof(latitude))`,
+and the remaining fields are converted to that type. Integer `latitude`
+yields a `Float64` struct; passing `latitude = Float32(30)` yields a
+`Float32` struct (and the defaults adapt to match). Mixed-precision inputs
+are converted to the latitude-derived type.
 """
 function DiurnalSolarPosition(; latitude,
-                                declination = 0,
-                                day_length = 86400,
-                                noon_offset = 0)
-    floats = (float(latitude), float(declination), float(day_length), float(noon_offset))
-    return DiurnalSolarPosition(promote(floats...)...)
+                                declination = nothing,
+                                day_length = nothing,
+                                noon_offset = nothing)
+    FT = float(typeof(latitude))
+    return DiurnalSolarPosition(convert(FT, latitude),
+                                isnothing(declination) ? zero(FT)         : convert(FT, declination),
+                                isnothing(day_length)  ? convert(FT, 86400) : convert(FT, day_length),
+                                isnothing(noon_offset) ? zero(FT)         : convert(FT, noon_offset))
 end
 
 #####
