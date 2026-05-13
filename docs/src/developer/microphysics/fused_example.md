@@ -126,7 +126,7 @@ extracting the prognostic moisture, reconstructing the thermodynamic state ``�
 the microphysical state ``ℳ`` — and then for `+=`ing the bundled tendencies into all
 `Gⁿ` fields:
 
-```@example fused_microphysics_example
+```julia
 using KernelAbstractions: @kernel, @index
 
 @kernel function _compute_explicit_microphysics_tendencies!(Gρqᵛ, Gρqˡ, Gρqⁱ,
