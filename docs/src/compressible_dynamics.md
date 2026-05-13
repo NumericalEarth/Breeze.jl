@@ -261,13 +261,13 @@ already advances the same prognostic variables as the outer scheme. The slow ten
 
 ## [Klemp divergence damping](@id klemp-damping)
 
-A bare split-explicit scheme amplifies floating-point noise on a rest atmosphere even when
-all the discrete operators are formally consistent (see [Stability analysis](@ref stability-analysis)
-for why). [Klemp, Skamarock, and Ha (2018)](@cite KlempSkamarockHa2018) prescribe a per-substep
-divergence-damping correction that targets the offending acoustic divergence modes
-without affecting balanced flow, building on
+[Klemp, Skamarock, and Ha (2018)](@cite KlempSkamarockHa2018) prescribe a per-substep
+divergence-damping correction that targets acoustic divergence modes while leaving
+discrete rest states and balanced flow essentially unchanged, building on
 [Skamarock and Klemp (1992)](@cite SkamarockKlemp1992) and the linear stability analysis of
-[Baldauf (2010)](@cite Baldauf2010).
+[Baldauf (2010)](@cite Baldauf2010). Breeze applies the horizontal part by default as a
+practical acoustic filter for production runs; it is not intended as an explanation for every
+resolved high-wavenumber feature in baroclinic-wave diagnostics.
 
 The discrete divergence proxy is the per-substep change in ``(ρθ)'``, normalized by the
 stage-entry ``θ^L`` cache used by the acoustic transport equation:
@@ -322,8 +322,8 @@ If `damp_vertical = true`, the vertical part is represented implicitly as a Lapl
 
 ## [Stability analysis](@id stability-analysis)
 
-The split-explicit scheme has two distinct sources of instability that interact. Both are
-addressed by the same divergence-damping correction.
+The split-explicit scheme has two sources of acoustic-mode amplification that can interact.
+Off-centering and divergence damping are the available controls.
 
 ### 1 — Substep-operator non-normality
 
@@ -338,10 +338,11 @@ column tridiag has *anti-symmetric* buoyancy off-diagonals (gravity-wave physics
 ```
 
 i.e. the spectral radius is exactly unity. But the operator is **non-normal**:
-``\mathcal{U}\mathcal{U}^* ≠ \mathcal{U}^*\mathcal{U}``. The norm gap means distributed
-floating-point noise can excite transient-amplification subspaces even when every
-individual eigenmode is neutrally stable. Off-centering and divergence damping reduce this
-amplification.
+``\mathcal{U}\mathcal{U}^* ≠ \mathcal{U}^*\mathcal{U}``. The norm gap means perturbations
+can transiently project onto amplified subspaces even when every individual eigenmode is
+neutrally stable. The stage-rewind formulation preserves the exact discrete rest state in
+`test/substepper_rest_state.jl`; off-centering and divergence damping reduce amplification
+of noisy divergent acoustic components in production runs.
 
 ### 2 — Outer/inner coupling
 
@@ -354,23 +355,22 @@ stage through the slow-tendency evaluation; for centered CN this re-injection ha
 dissipative channel, so the coupled amplification factor exceeds unity for a non-empty
 range of acoustic CFL.
 
-This means damping is not an artifact of an imperfect substep discretization that could be
-removed by a better scheme: it is a *structural* feature of the WS-RK3 + substepper
-combination. The same conclusion follows from the analysis in
+This means damping is not only a patch for one implementation error; it is a standard
+control for the WS-RK3 + substepper coupling. The same practical conclusion follows from
+the analysis in
 [Skamarock and Klemp (1992)](@cite SkamarockKlemp1992),
 [Baldauf (2010)](@cite Baldauf2010), and
 [Klemp, Skamarock, and Ha (2018)](@cite KlempSkamarockHa2018), which all prescribe
-divergence damping as a **required** filter rather than an optional stabilizer.
+divergence damping as a robust acoustic filter for practical integrations.
 
 ### 3 — Damping as a filter
 
 The Klemp damping acts as a wavenumber-controlled filter that targets the divergent
 acoustic component while leaving balanced (non-divergent) modes essentially untouched. The
-divergence proxy ``D_τ ≈ -Δτ ∇·(ρ\boldsymbol{u})'`` vanishes for any flow that is in
-discrete mass balance, so the correction is zero for the rest atmosphere, zero for
-hydrostatic balance, and zero for purely solenoidal large-scale flow. Only the divergent
-acoustic perturbations — the modes responsible for both the non-normal transient
-amplification and the K&W coupling instability — pick up dissipation.
+divergence proxy ``D_τ ≈ -Δτ ∇·(ρ\boldsymbol{u})'`` vanishes for a discrete rest state and
+for purely solenoidal flow. Divergent acoustic perturbations pick up dissipation; resolved
+balanced modes with nonzero divergence should be assessed with convergence and benchmark
+diagnostics rather than attributed to the filter alone.
 
 ## Stability constraints and practical guidance
 

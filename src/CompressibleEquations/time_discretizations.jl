@@ -181,11 +181,10 @@ mesh length is more appropriate. The optional vertical tridiag contribution uses
 `config_smdiv`, default `0.1`). The combined 2-D horizontal
 explicit-time stability bound is ``8α ≤ 2 → α ≤ 0.25``; the default
 sits well below it. Combined with the `SplitExplicitTimeDiscretization`
-default ``\\omega = 0.65``, this keeps the rest atmosphere at machine ε
-at Δt = 20 s and provides acoustic-mode damping in the DCMIP-2016
-dry / moist baroclinic-wave smoke tests. It should not be read as a
-guarantee that every grid-scale balanced-mode growth diagnostic is
-physically correct.
+default ``\\omega = 0.65``, this preserves the exact discrete rest
+atmosphere at Δt = 20 s and damps divergent acoustic noise in production
+runs. It should not be read as a guarantee that every grid-scale
+balanced-mode growth diagnostic is physically correct.
 
 Fields
 ======
@@ -270,17 +269,17 @@ Fields
   physics) and asymmetric PGF off-diagonals on a stratified ``\\bar\\theta(z)``,
   so the substep operator ``U`` has spectral radius ``\\rho(U) = 1``
   but operator norm ``\\|U\\|_2 \\gg 1`` (≈ 44 at ``\\Delta t = 20`` s,
-  ``\\omega = 0.55``, no damping). Distributed FP-noise can excite the
-  non-normal transient-amplification subspace. The stage-rewind
-  formulation keeps the exact discrete rest atmosphere bounded even
-  without divergence damping, but the default off-centering plus Klemp
-  horizontal divergence damping shrinks ``\\|U^k\\|`` over enough ``k``
-  and damps acoustic noise in production baroclinic-wave and LES runs.
+  ``\\omega = 0.55``, no damping). Perturbations can transiently project
+  onto the non-normal amplified subspace. The stage-rewind formulation
+  keeps the exact discrete rest atmosphere bounded even without divergence
+  damping, while the default off-centering plus Klemp horizontal
+  divergence damping damps acoustic noise in production baroclinic-wave
+  and LES runs.
 - `damping`: Acoustic divergence damping strategy. Default:
   [`ThermalDivergenceDamping`](@ref) with coefficient 0.1. The exact
   discrete rest atmosphere is covered by `test/substepper_rest_state.jl`
   even with [`NoDivergenceDamping`](@ref), but noisy acoustic production
-  cases still need damping to control grid-scale divergent modes.
+  cases use damping to control grid-scale divergent modes.
 - `sponge`: Optional [`UpperSponge`](@ref) that applies implicit
   Rayleigh damping to ``(ρw)′`` inside the substep loop's column tridiag,
   absorbing acoustic / gravity-wave energy in a layer below the rigid
