@@ -68,17 +68,16 @@ function _build_rest_model(arch; substeps = nothing,
     grid = _build_rest_grid(arch; grid_kwargs...)
     constants = ThermodynamicConstants(eltype(grid))
     # Pass `nothing` to defer to the SplitExplicit defaults (forward_weight
-    # = 0.65, ThermalDivergenceDamping coef = 0.1) — that is the production
-    # configuration and the one Phase 4 stabilizes.
+    # = 0.65, ThermalDivergenceDamping coef = 0.1), which is the production
+    # configuration these rest-state tests cover.
     td_kwargs = (; substeps)
     forward_weight === nothing || (td_kwargs = (; td_kwargs..., forward_weight))
     damping        === nothing || (td_kwargs = (; td_kwargs..., damping))
     td = SplitExplicitTimeDiscretization(; td_kwargs...)
-    # Use isentropic θ̄(z) reference path (`_compute_exner_reference!`),
-    # which the moist baroclinic wave example uses. The Phase-2 fix
-    # gives discrete hydrostatic balance to ulp via Newton iteration
-    # in `_compute_exner_reference!`. Align surface_pressure with
-    # standard_pressure so Π_surface = 1 and tests are bit-identical
+    # Use the isentropic θ̄(z) reference path (`_compute_exner_reference!`),
+    # which the moist baroclinic wave example uses and which gives discrete
+    # hydrostatic balance to ulp via Newton iteration. Align surface_pressure
+    # with standard_pressure so Π_surface = 1 and tests are bit-identical
     # against an analytic isothermal reference.
     dyn = CompressibleDynamics(td;
                                reference_potential_temperature = θ_isothermal_ref,
@@ -91,10 +90,9 @@ end
 
 # Set the model state to the discrete-balanced reference EXACTLY.
 # Bypasses `set!(model; θ, ρ)` (which uses a continuous-formula θ that
-# only agrees with the discrete θ̄_ref to O((αΔz)³)). This is what
-# Phase 0 tests need to validate "true rest" — the user-facing pattern
-# of setting θ from a continuous profile is a separate concern (audit
-# E3 / Phase 6).
+# only agrees with the discrete θ̄_ref to O((αΔz)³)). These tests need
+# a true discrete rest state; the user-facing pattern of setting θ from
+# a continuous profile is a separate validation concern.
 function set_rest_state!(model)
     ref = model.dynamics.reference_state
     Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
@@ -262,11 +260,10 @@ end
     # (default forward_weight, default Klemp damping) must
     # keep `max|w|` near machine ε across many outer steps for the full
     # range of Δt up to the documented production value (20 s).
-    # Phase 4 fix (stage-entry refresh + rewind initialization, with the
-    # default `forward_weight = 0.65` and horizontal Klemp damping):
-    # both Δt cases now pass at the 1e-10 m/s bound. The historically
-    # fragile `forward_weight = 0.55, NoDivergenceDamping()` rest case is
-    # checked below as a separate exact-rest contract.
+    # With stage-entry refresh and rewind initialization, both Δt cases pass
+    # at the 1e-10 m/s bound. The historically fragile `forward_weight = 0.55,
+    # NoDivergenceDamping()` rest case is checked below as a separate
+    # exact-rest contract.
     Δt_cases = (0.5, 20.0)
 
     n_steps = 200

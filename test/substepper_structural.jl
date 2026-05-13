@@ -12,8 +12,7 @@
 ##### offending operator or boundary row is identified directly.
 #####
 ##### These tests sit alongside the rest-atmosphere envelope tests in
-##### `test/substepper_rest_state.jl` as Phase 0 of the
-##### pristine-substepper program.
+##### `test/substepper_rest_state.jl`.
 #####
 
 using Breeze

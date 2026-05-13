@@ -179,7 +179,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
     linearization_potential_temperature :: CF
 
     # `linearization_gamma_R_mixture[i,j,k] = γᵐ(i,j,k) · Rᵐ(i,j,k)` enters
-    # the linearised PGF (`γᵈRᵈ → γᵐRᵐᴸ`) — Phase 2A of the moist substepper.
+    # the linearised PGF (`γᵈRᵈ → γᵐRᵐᴸ`) for moist thermodynamics.
     # Recomputed from the live moisture state (vapor, liquid, ice mass
     # fractions read from `specific_prognostic_moisture(model)` and
     # `model.microphysical_fields`) at each per-stage refresh; for dry runs
