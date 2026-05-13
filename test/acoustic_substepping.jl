@@ -489,39 +489,57 @@ for arch in arches
     @testset "Tiny dry thermal bubble consistency [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         Oceananigans.defaults.FloatType = FT
 
-        anelastic_model = build_tiny_dry_bubble_model(:anelastic)
+        # Note: anelastic models aren't currently supported by the Metal backend because
+        # they require FFTs.  This may change in the future when Metal.jl will support FFTs.
+
+        if !(arch isa GPU{MetalBackend})
+            anelastic_model = build_tiny_dry_bubble_model(:anelastic)
+        end
         explicit_model = build_tiny_dry_bubble_model(:explicit)
         split_model = build_tiny_dry_bubble_model(:split_explicit)
 
-        simulations = (
-            Simulation(anelastic_model; Δt = 0.5, stop_time = 0.5, verbose = false),
+        simulations = [
             Simulation(explicit_model; Δt = 0.25, stop_time = 0.5, verbose = false),
             Simulation(split_model; Δt = 0.5, stop_time = 0.5, verbose = false),
-        )
+        ]
+        if !(arch isa GPU{MetalBackend})
+            push!(simulations, Simulation(anelastic_model; Δt = 0.5, stop_time = 0.5, verbose = false))
+        end
 
         run!.(simulations)
 
-        anelastic = tiny_bubble_diagnostics(anelastic_model)
+        if !(arch isa GPU{MetalBackend})
+            anelastic = tiny_bubble_diagnostics(anelastic_model)
+        end
         explicit = tiny_bubble_diagnostics(explicit_model)
         split = tiny_bubble_diagnostics(split_model)
 
-        for model in (anelastic_model, explicit_model, split_model)
+        models = AtmosphereModel[explicit_model, split_model]
+        if !(arch isa GPU{MetalBackend})
+            push!(models, anelastic_model)
+        end
+
+        for model in models
             @test !any(isnan, parent(model.velocities.w))
             @test !any(isinf, parent(model.velocities.w))
         end
 
-        @test anelastic.max_w > 0
+        if !(arch isa GPU{MetalBackend})
+            @test anelastic.max_w > 0
+        end
         @test explicit.max_w > 0
         @test split.max_w > 0
 
         @test isapprox(split.max_w, explicit.max_w; rtol = 0.25)
-        # Anelastic dynamics filters acoustic adjustment, so only require the
-        # same short-time buoyant response scale and centroid.
-        @test isapprox(split.max_w, anelastic.max_w; rtol = 1.25)
+        if !(arch isa GPU{MetalBackend})
+            # Anelastic dynamics filters acoustic adjustment, so only require the
+            # same short-time buoyant response scale and centroid.
+            @test isapprox(split.max_w, anelastic.max_w; rtol = 1.25)
 
-        Δz = anelastic_model.grid.Lz / anelastic_model.grid.Nz
-        @test abs(split.zᵂ - explicit.zᵂ) ≤ Δz
-        @test abs(split.zᵂ - anelastic.zᵂ) ≤ 2Δz
+            Δz = anelastic_model.grid.Lz / anelastic_model.grid.Nz
+            @test abs(split.zᵂ - explicit.zᵂ) ≤ Δz
+            @test abs(split.zᵂ - anelastic.zᵂ) ≤ 2Δz
+        end
     end
 
     #####
