@@ -33,9 +33,19 @@ using Breeze.Microphysics: NonEquilibriumCloudFormation
 # CUDA's kernel compilation hooks correctly registered.
 using Reactant: Reactant
 using Oceananigans.Architectures: ReactantState
-using CUDA: CUDABackend
-using AMDGPU: ROCBackend
-using Metal: MetalBackend
+# Load GPU packages, and define helper functions to refer to the various
+# backends.  Don't load them on platforms where they aren't possibly available.
+if !Sys.isapple()
+    using CUDA: CUDABackend
+    using AMDGPU: ROCBackend
+
+    CUDAGPU() = GPU(CUDABackend())
+    ROCGPU() = GPU(ROCBackend())
+else
+    using Metal: MetalBackend
+
+    MetalGPU() = GPU(MetalBackend())
+end
 
 # Load CloudMicrophysics extension for OneMomentCloudMicrophysics
 using CloudMicrophysics: CloudMicrophysics
@@ -48,11 +58,6 @@ using Dates: DateTime, now, UTC
 #####
 ##### Argument parsing
 #####
-
-# Helper functions to refer to the various GPU backends
-CUDAGPU() = GPU(CUDABackend())
-MetalGPU() = GPU(MetalBackend())
-ROCGPU() = GPU(ROCBackend())
 
 function parse_commandline()
     s = ArgParseSettings(
