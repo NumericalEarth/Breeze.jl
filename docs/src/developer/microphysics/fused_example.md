@@ -175,7 +175,7 @@ Two points worth highlighting:
 
 The override threads the model fields the kernel needs and launches it:
 
-```@example fused_microphysics_example
+```julia
 using Oceananigans.Utils: launch!
 import Breeze.AtmosphereModels: compute_microphysical_tendencies!
 
