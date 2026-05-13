@@ -49,6 +49,7 @@ export
     specific_prognostic_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
+    update_microphysics!,
     initial_aerosol_number,
 
     # Interface functions (extended by BoundaryConditions and Forcings)

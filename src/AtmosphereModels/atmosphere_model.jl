@@ -28,7 +28,8 @@ function validate_tracers(tracers::Tuple)
 end
 
 mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
-                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
+                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad,
+                               Msc, Mtd, Mss} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -51,6 +52,9 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
     closure :: Cls
     closure_fields :: Cfs
     radiation :: Rad
+    microphysics_schedule :: Msc
+    microphysics_tendencies :: Mtd
+    microphysics_state :: Mss
 end
 
 """
@@ -73,6 +77,13 @@ Arguments
    * Alternatively, specific `momentum_advection` and `scalar_advection`
      schemes may be provided. `scalar_advection` may be a `NamedTuple` with
      a different scheme for each respective scalar, identified by name.
+
+   * `microphysics_schedule`: optional schedule controlling how often microphysics
+     fires (e.g. `IterationInterval(N)`, `TimeInterval(Δt)`). Defaults to `nothing`
+     (microphysics fires every step). When set, the model allocates cached
+     tendency fields read by the dycore tendency kernels in between firings;
+     on each firing both the operator-split state update and the cache refill
+     see `Δt_eff = clock.time - last_fire_time`.
 
 Example
 =======
@@ -122,7 +133,8 @@ function AtmosphereModel(grid;
                          microphysics = nothing,
                          timestepper = nothing,
                          timestepper_kwargs = NamedTuple(),
-                         radiation = nothing)
+                         radiation = nothing,
+                         microphysics_schedule = nothing)
 
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
@@ -254,6 +266,10 @@ function AtmosphereModel(grid;
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
 
+    FT = eltype(grid)
+    microphysics_tendencies = materialize_microphysics_tendencies(microphysics, formulation, microphysics_schedule, grid)
+    microphysics_state = isnothing(microphysics_schedule) ? nothing : MicrophysicsScheduleState(FT)
+
     model = AtmosphereModel(arch,
                             grid,
                             clock,
@@ -275,7 +291,10 @@ function AtmosphereModel(grid;
                             timestepper,
                             closure,
                             closure_fields,
-                            radiation)
+                            radiation,
+                            microphysics_schedule,
+                            microphysics_tendencies,
+                            microphysics_state)
 
     # Initialize thermodynamics (dynamics-specific)
     initialize_model_thermodynamics!(model)
@@ -340,8 +359,13 @@ function Base.show(io::IO, model::AtmosphereModel)
 
     print(io, "├── forcing: ", forcing_summary, "\n",
               "├── tracers: ", tracernames, "\n",
-              "├── coriolis: ", summary(model.coriolis), "\n",
-              "└── microphysics: ", Mic)
+              "├── coriolis: ", summary(model.coriolis))
+
+    if !isnothing(model.microphysics_schedule)
+        print(io, "\n├── microphysics_schedule: ", model.microphysics_schedule)
+    end
+
+    print(io, "\n└── microphysics: ", Mic)
 end
 
 Advection.cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)

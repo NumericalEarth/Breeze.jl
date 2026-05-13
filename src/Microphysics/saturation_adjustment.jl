@@ -56,7 +56,7 @@ end
 
 # SaturationAdjustment operates through the thermodynamic state adjustment pathway,
 # so no explicit model update is needed.
-AtmosphereModels.microphysics_model_update!(::SaturationAdjustment, model) = nothing
+AtmosphereModels.microphysics_model_update!(::SaturationAdjustment, model, Δt_eff) = nothing
 
 #####
 ##### Warm-phase equilibrium moisture fractions

@@ -234,13 +234,26 @@ this method directly without using `microphysical_state`.
 # Arguments
 - `velocities`: NamedTuple of velocity components `(; u, v, w)` [m/s].
 """
-@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
+# Default (no cache): build microphysical state and dispatch to microphysical_tendency.
+@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ::Nothing,
+                                             ρ, fields, 𝒰, constants, velocities)
     ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, velocities)
     return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 end
 
-# Explicit Nothing fallback (for backward compatibility)
-@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
+# Cache hit: read precomputed tendency. Val{N}+haskey compile-time => cache misses are branch-free zero.
+@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, ::Val{N},
+                                             cache::NamedTuple,
+                                             ρ, fields, 𝒰, constants, velocities) where N
+    return haskey(cache, N) ? @inbounds(cache[N][i, j, k]) : zero(eltype(grid))
+end
+
+# Nothing microphysics — always zero, regardless of cache type.
+@inline grid_microphysical_tendency(i, j, k, grid, ::Nothing, name, ::Nothing,
+                                    ρ, μ, 𝒰, constants, velocities) = zero(eltype(grid))
+@inline grid_microphysical_tendency(i, j, k, grid, ::Nothing, ::Val{N}, cache::NamedTuple,
+                                    ρ, μ, 𝒰, constants, velocities) where N =
+    haskey(cache, N) ? @inbounds(cache[N][i, j, k]) : zero(eltype(grid))
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
@@ -554,15 +567,26 @@ For example, the terminal velocity of falling rain.
 # via the generic fallback mechanism which calls the state-based method.
 
 """
-$(TYPEDSIGNATURES)
+    microphysics_model_update!(microphysics, model::AtmosphereModel)
+    microphysics_model_update!(microphysics, model, Δt_eff)
 
-Apply microphysics model update for the given `microphysics` scheme.
+Apply the operator-split microphysics state update for `microphysics` on `model`.
+The `Δt_eff` argument is the effective integration window — for unscheduled
+microphysics it equals `model.clock.last_Δt`; for scheduled microphysics it is
+the wall-clock interval since the last firing.
 
-This function is called during `update_state!` to apply microphysics processes
-that operate on the full model state (not the tendency fields).
-Specific microphysics schemes should extend this function.
+Specific microphysics schemes extend the 3-argument form. The 2-argument shim
+forwards `model.clock.last_Δt` so existing call sites keep working.
+
+!!! warning
+    Scheme implementations MUST extend the 3-argument form
+    `microphysics_model_update!(microphysics, model, Δt_eff)`.
+    Do NOT add a 2-argument overload — it would shadow this shim and break
+    scheduled-microphysics call sites that pass an explicit `Δt_eff`.
 """
-microphysics_model_update!(microphysics::Nothing, model) = nothing
+function microphysics_model_update! end
+
+microphysics_model_update!(::Nothing, model, Δt_eff) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -671,3 +695,123 @@ based on cloud properties.
 """
 @inline cloud_ice_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
     effective_radius_model.radius
+
+"""
+    MicrophysicsScheduleState{FT}
+
+Mutable state held by `AtmosphereModel` when scheduled microphysics is active.
+Tracks the time and iteration of the last microphysics firing so the driver
+can compute `Δt_eff = clock.time - last_fire_time`.
+"""
+mutable struct MicrophysicsScheduleState{FT}
+    last_fire_time      :: FT
+    last_fire_iteration :: Int
+end
+
+MicrophysicsScheduleState(FT::DataType) = MicrophysicsScheduleState{FT}(zero(FT), -1)
+
+"""
+$(TYPEDSIGNATURES)
+
+Allocate the cached microphysics tendency NamedTuple for `microphysics` on `grid`,
+keyed by the prognostic names microphysics contributes to (the thermodynamic
+prognostic name, the moisture prognostic, and `prognostic_field_names(microphysics)`).
+
+Returns `nothing` when `schedule === nothing` (the default — no caching).
+"""
+materialize_microphysics_tendencies(microphysics, formulation, ::Nothing, grid) = nothing
+
+function materialize_microphysics_tendencies(microphysics, formulation, schedule, grid)
+    thermo_name   = thermodynamic_density_name(formulation)
+    moisture_name = moisture_prognostic_name(microphysics)
+    micro_names   = prognostic_field_names(microphysics)
+    names = (thermo_name, moisture_name, micro_names...)
+    fields = NamedTuple{names}(ntuple(_ -> CenterField(grid), length(names)))
+    return fields
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Fill the cached microphysics tendency `cache` for `microphysics` on `model`.
+Builds `𝒰` and `ℳ` once per grid point and writes the tendency for every
+prognostic name in `keys(cache)` via static iteration over `Val(name)`.
+
+`Δt_eff` is forwarded for diagnostic / forward-Euler-style schemes that use it;
+the standard inline path ignores it.
+"""
+function compute_microphysics_tendencies!(cache, microphysics, model, Δt_eff)
+    cache === nothing && return nothing
+    grid = model.grid
+    arch = grid.architecture
+    fields = model.microphysical_fields
+    velocities = model.velocities
+    constants = model.thermodynamic_constants
+    formulation = model.formulation
+    dynamics = model.dynamics
+    moisture = specific_prognostic_moisture(model)
+    names = Val(keys(cache))
+
+    launch!(arch, grid, :xyz,
+            _compute_microphysics_tendencies!,
+            cache, names, grid, microphysics, fields, formulation, dynamics, moisture, constants, velocities)
+    return nothing
+end
+
+compute_microphysics_tendencies!(::Nothing, microphysics, model, Δt_eff) = nothing
+
+@kernel function _compute_microphysics_tendencies!(cache, ::Val{names}, grid, microphysics,
+                                                   fields, formulation, dynamics, moisture, constants, velocities) where names
+    i, j, k = @index(Global, NTuple)
+
+    ρ_field = dynamics_density(dynamics)
+    @inbounds ρ = ρ_field[i, j, k]
+    @inbounds qᵛᵉ = moisture[i, j, k]
+
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, fields)
+    𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
+    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, velocities)
+
+    ntuple(Val(length(names))) do n
+        Base.@_inline_meta
+        name = names[n]
+        @inbounds cache[name][i, j, k] = microphysical_tendency(microphysics, Val(name), ρ, ℳ, 𝒰, constants)
+        nothing
+    end
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Drive microphysics for one `update_state!` cycle. When `model.microphysics_schedule`
+is `nothing`, falls back to per-step behavior identical to the previous code path.
+
+When a schedule is set, the operator-split state update and the cache refill are
+both gated by `schedule(model)` (with a forced firing on the first iteration).
+On firing, both receive `Δt_eff = clock.time − last_fire_time`.
+"""
+function update_microphysics!(model)
+    return update_microphysics!(model.microphysics, model.microphysics_schedule, model)
+end
+
+# Unscheduled path: behaves as before.
+function update_microphysics!(microphysics, ::Nothing, model)
+    microphysics_model_update!(microphysics, model, model.clock.last_Δt)
+    return nothing
+end
+
+# Scheduled path.
+function update_microphysics!(microphysics, schedule, model)
+    state = model.microphysics_state
+    clock = model.clock
+    first = clock.iteration == 0 && state.last_fire_iteration < 0
+
+    if first || schedule(model)
+        Δt_eff = first ? clock.last_Δt : (clock.time - state.last_fire_time)
+        microphysics_model_update!(microphysics, model, Δt_eff)
+        compute_microphysics_tendencies!(model.microphysics_tendencies, microphysics, model, Δt_eff)
+        state.last_fire_time = clock.time
+        state.last_fire_iteration = clock.iteration
+    end
+    return nothing
+end
