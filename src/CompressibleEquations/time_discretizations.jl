@@ -131,11 +131,11 @@ $(TYPEDEF)
 Acoustic divergence damping that uses the **(ρθ)′ tendency as a
 discrete proxy for the momentum divergence**. From the linearized
 ρθ-continuity equation
-``\\partial_t (ρθ)' + \\nabla\\cdot(ρθ^0 u') = 0``, the per-substep
+``\\partial_t (ρθ)' + \\nabla\\cdot(ρθ^L u') = 0``, the per-substep
 quantity
 
 ```math
-D \\equiv \\frac{(ρθ)' - (ρθ)'_\\mathrm{old}}{θ^0}
+D \\equiv \\frac{(ρθ)' - (ρθ)'_\\mathrm{old}}{θ^L}
        \\approx -Δτ \\, \\nabla\\cdot(ρu)'
 ```
 
