@@ -10,7 +10,6 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
-using Oceananigans.Grids: Periodic
 using Reactant
 using Reactant: @trace
 using Enzyme
@@ -63,8 +62,14 @@ function make_init_fields(grid)
     return θ_init, dθ_init
 end
 
+function initial_density(model)
+    FT = eltype(model.grid)
+    ref = model.dynamics.reference_state
+    return isnothing(ref) ? one(FT) : ref.density
+end
+
 function loss(model, θ_init, Δt, Nsteps)
-    set!(model; θ=θ_init, ρ=1.0)
+    set!(model; θ=θ_init, ρ=initial_density(model))
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
         time_step!(model, Δt)
     end
