@@ -255,7 +255,14 @@ Fields
 
 - `substeps`: Number of acoustic substeps ``N`` per outer ``Δt``. Default
   `nothing` adaptively chooses ``N`` from the horizontal acoustic CFL each
-  step.
+  step (see `acoustic_cfl`).
+- `acoustic_cfl`: Target horizontal acoustic Courant number used by the
+  adaptive substep count when `substeps === nothing`. The substep count
+  is ``N \\approx \\lceil \\Delta t \\, \\mathbb{C}^{ac} /
+  (\\mathrm{acoustic\\_cfl} \\cdot \\Delta x_\\min) \\rceil``, so smaller
+  values give more substeps. Default `0.5` (the ERF/WRF target —
+  equivalent to the conventional safety factor of `2`). Ignored when
+  `substeps` is set explicitly.
 - `forward_weight`: Off-centering parameter ``\\omega`` for the vertically
   implicit solve. ``\\omega = 0.5`` is classic centered Crank-Nicolson;
   the default ``\\omega = 0.65`` adds modest off-centering
@@ -432,6 +439,7 @@ convert_acoustic_parameter(::Type{FT}, sponge::UpperSponge) where FT =
 
 struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistribution}
     substeps :: N
+    acoustic_cfl :: FT
     forward_weight :: FT
     damping :: D
     sponge :: US
@@ -440,6 +448,7 @@ end
 
 function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          substeps = nothing,
+                                         acoustic_cfl = FT(0.5),
                                          forward_weight = FT(0.65),
                                          damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
@@ -451,8 +460,12 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
     sponge isa Union{Nothing, UpperSponge} ||
         throw(ArgumentError("`sponge` must be `nothing` or an `UpperSponge`"))
 
+    acoustic_cfl > 0 ||
+        throw(ArgumentError("`acoustic_cfl` must be positive (got $(acoustic_cfl))"))
+
     return SplitExplicitTimeDiscretization(
         substeps,
+        convert(FT, acoustic_cfl),
         convert(FT, forward_weight),
         convert_acoustic_parameter(FT, damping),
         convert_acoustic_parameter(FT, sponge),

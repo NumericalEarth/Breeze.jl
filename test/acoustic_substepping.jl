@@ -221,16 +221,17 @@ for arch in arches
     @testset "compute_acoustic_substeps [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         Oceananigans.defaults.FloatType = FT
         constants = ThermodynamicConstants()
+        ν = 0.5  # default `acoustic_cfl` (ERF/WRF target)
 
         @testset "1 km grid, Δt=12" begin
             grid = RectilinearGrid(arch; size=(100, 6, 10), halo=(5, 5, 5),
                                    x=(0, 100kilometers), y=(0, 6kilometers), z=(0, 10kilometers))
-            # Δx = 1000 m, ℂᵃᶜ ≈ 347 m/s, safety factor 2.0 → acoustic CFL ≈ 0.5 (ERF/WRF target)
-            # N = ceil(2.0 * 12 * 347 / 1000) = ceil(8.33) = 9
-            N = compute_acoustic_substeps(grid, 12, constants)
+            # Δx = 1000 m, ℂᵃᶜ ≈ 347 m/s, acoustic_cfl = 0.5 (ERF/WRF target)
+            # N = ceil(12 * 347 / (0.5 * 1000)) = ceil(8.33) = 9
+            N = compute_acoustic_substeps(grid, 12, constants, ν)
             @test N isa Int
             @test N ≥ 1
-            @test N == ceil(Int, 2.0 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
+            @test N == ceil(Int, 12 * sqrt(1.4 * 287.0 * 300) / (ν * 1000))
         end
 
         @testset "Flat y-topology" begin
@@ -238,10 +239,42 @@ for arch in arches
                                    x=(0, 100kilometers), z=(0, 10kilometers),
                                    topology=(Periodic, Flat, Bounded))
             # Should use only Δx, not Δy
-            N = compute_acoustic_substeps(grid, 12, constants)
-            N_expected = ceil(Int, 2.0 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
+            N = compute_acoustic_substeps(grid, 12, constants, ν)
+            N_expected = ceil(Int, 12 * sqrt(1.4 * 287.0 * 300) / (ν * 1000))
             @test N == N_expected
         end
+
+        @testset "acoustic_cfl scales N as 1/ν" begin
+            grid = RectilinearGrid(arch; size=(100, 6, 10), halo=(5, 5, 5),
+                                   x=(0, 100kilometers), y=(0, 6kilometers), z=(0, 10kilometers))
+            N_default = compute_acoustic_substeps(grid, 12, constants, 0.5)
+            N_strict  = compute_acoustic_substeps(grid, 12, constants, 0.25)
+            N_loose   = compute_acoustic_substeps(grid, 12, constants, 1.0)
+            # Halving ν doubles the substep count; doubling ν halves it
+            # (within ceil rounding).
+            @test N_strict == ceil(Int, 12 * sqrt(1.4 * 287.0 * 300) / (0.25 * 1000))
+            @test N_loose  == ceil(Int, 12 * sqrt(1.4 * 287.0 * 300) / (1.0  * 1000))
+            @test N_strict > N_default > N_loose
+        end
+    end
+
+    @testset "acoustic_cfl plumbed to AcousticSubstepper [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+        td_default = SplitExplicitTimeDiscretization()
+        td_strict  = SplitExplicitTimeDiscretization(; acoustic_cfl = 0.25)
+        @test td_default.acoustic_cfl == FT(0.5)
+        @test td_strict.acoustic_cfl  == FT(0.25)
+
+        # Rejects nonpositive values.
+        @test_throws ArgumentError SplitExplicitTimeDiscretization(; acoustic_cfl = 0)
+        @test_throws ArgumentError SplitExplicitTimeDiscretization(; acoustic_cfl = -0.1)
+
+        # Round-trips through the substepper.
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 1), y=(0, 1), z=(0, 1),
+                               topology=(Periodic, Periodic, Bounded))
+        sub = AcousticSubstepper(grid, td_strict)
+        @test sub.acoustic_cfl == FT(0.25)
     end
 
     #####

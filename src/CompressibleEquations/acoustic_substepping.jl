@@ -75,8 +75,8 @@ using Oceananigans.Operators:
     δxᶜᵃᵃ, δyᵃᶜᵃ,
     div_xyᶜᶜᶜ,
     Δzᶜᶜᶜ, Δzᶜᶜᶠ,
-    Δxᶠᶜᶜ, Δxᶜᶠᶜ,
-    Δyᶜᶠᶜ, Δyᶠᶜᶜ,
+    Δxᶠᶜᶜ,
+    Δyᶜᶠᶜ,
     Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
@@ -114,7 +114,9 @@ Fields
 ======
 
 - `substeps`: Number of acoustic substeps ``N`` per outer ``Δt`` (or
-  `nothing` for adaptive).
+  `nothing` for adaptive — see `acoustic_cfl`).
+- `acoustic_cfl`: Target horizontal acoustic Courant number used by the
+  adaptive substep count when `substeps === nothing`. Default `0.5`.
 - `forward_weight`: Off-centering parameter ``\\omega``. ``\\omega = 0.5``
   is classic centered CN; the default is 0.65.
 - `damping`: Acoustic divergence damping strategy.
@@ -165,6 +167,7 @@ Vertical solve:
 """
 struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
     substeps :: N
+    acoustic_cfl :: FT
     forward_weight :: FT
     damping :: D
     substep_distribution :: AD
@@ -217,6 +220,7 @@ end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
     AcousticSubstepper(a.substeps,
+                       a.acoustic_cfl,
                        a.forward_weight,
                        adapt(to, a.damping),
                        a.substep_distribution,
@@ -260,6 +264,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     Ns = split_explicit.substeps
     FT = eltype(grid)
     ω  = convert(FT, split_explicit.forward_weight)
+    acoustic_cfl = convert(FT, split_explicit.acoustic_cfl)
     damping = split_explicit.damping
     sponge = split_explicit.sponge
     substep_distribution = split_explicit.substep_distribution
@@ -311,7 +316,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                                                scratch,
                                                tridiagonal_direction = ZDirection())
 
-    return AcousticSubstepper(Ns, ω, damping, substep_distribution,
+    return AcousticSubstepper(Ns, acoustic_cfl, ω, damping, substep_distribution,
                               sponge,
                               linearization_exner,
                               linearization_potential_temperature,
@@ -480,17 +485,25 @@ prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
 $(TYPEDSIGNATURES)
 
 Compute the number of acoustic substeps ``N`` from the horizontal
-acoustic CFL: ``N \\approx \\lceil 2 \\Delta t \\, c_s / \\Delta x_\\min \\rceil``,
-with ``c_s = \\sqrt{\\gamma^d R^d T_r}`` for a nominal
-``T_r = 300\\,\\mathrm{K}``. The factor of 2 is the standard
-ERF/WRF safety factor.
+acoustic CFL:
+
+```math
+N \\approx
+\\left\\lceil \\frac{\\Delta t \\, \\mathbb{C}^{ac}}{\\nu \\, \\Delta x_\\min} \\right\\rceil ,
+```
+
+with ``\\mathbb{C}^{ac} = \\sqrt{γ^d R^d T_r}`` for a nominal reference
+temperature ``T_r = 300\\,\\mathrm{K}`` and ``ν`` the target acoustic
+Courant number `acoustic_cfl` (default `0.5`, the ERF/WRF target —
+equivalent to the conventional safety factor of `2`).
 """
-function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
-    FT  = eltype(grid)
-    Rᵈ  = convert(FT, dry_air_gas_constant(thermodynamic_constants))
-    cᵖᵈ = convert(FT, thermodynamic_constants.dry_air.heat_capacity)
-    γᵈ  = cᵖᵈ / (cᵖᵈ - Rᵈ)
-    cs  = sqrt(γᵈ * Rᵈ * FT(300))
+function compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_cfl)
+    FT   = eltype(grid)
+    Rᵈ   = convert(FT, dry_air_gas_constant(thermodynamic_constants))
+    cᵖᵈ  = convert(FT, thermodynamic_constants.dry_air.heat_capacity)
+    γᵈ   = cᵖᵈ / (cᵖᵈ - Rᵈ)
+    ℂᵃᶜ  = sqrt(γᵈ * Rᵈ * FT(300))
+    ν    = convert(FT, acoustic_cfl)
 
     Δx_min = let
         TX, TY, _ = topology(grid)
@@ -499,11 +512,12 @@ function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
         min(Δx, Δy)
     end
 
-    return max(1, ceil(Int, 2 * FT(Δt) * cs / Δx_min))
+    return max(1, ceil(Int, FT(Δt) * ℂᵃᶜ / (ν * Δx_min)))
 end
 
-@inline acoustic_substeps(N::Int, grid, Δt, constants) = N
-@inline acoustic_substeps(::Nothing, grid, Δt, constants) = compute_acoustic_substeps(grid, Δt, constants)
+@inline acoustic_substeps(N::Int, grid, Δt, constants, acoustic_cfl) = N
+@inline acoustic_substeps(::Nothing, grid, Δt, constants, acoustic_cfl) =
+    compute_acoustic_substeps(grid, Δt, constants, acoustic_cfl)
 
 #####
 ##### Section 5 — Stage substep distribution
@@ -1287,7 +1301,8 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
     # Floor of 6 ensures sane behavior even for very small Δt where the
     # acoustic-CFL substep count would round to 0 or 1.
     Δt_FT = FT(Δt)
-    N_raw = acoustic_substeps(substepper.substeps, grid, Δt_FT, model.thermodynamic_constants)
+    N_raw = acoustic_substeps(substepper.substeps, grid, Δt_FT,
+                              model.thermodynamic_constants, substepper.acoustic_cfl)
     N = max(6, 6 * cld(N_raw, 6))
     Nτ, Δτ = stage_substep_count_and_size(substepper.substep_distribution, β_stage, Δt_FT, N)
 

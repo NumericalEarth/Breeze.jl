@@ -43,12 +43,13 @@ end
     grid = build_test_llg(default_arch)
     constants = ThermodynamicConstants()
 
-    N = compute_acoustic_substeps(grid, 12, constants)
+    ν = 0.5  # default `acoustic_cfl`
+    N = compute_acoustic_substeps(grid, 12, constants, ν)
     @test N isa Int
     @test N >= 1
 
     wider_grid = build_test_llg(default_arch; Ny = 10)
-    N_wider = compute_acoustic_substeps(wider_grid, 12, constants)
+    N_wider = compute_acoustic_substeps(wider_grid, 12, constants, ν)
 
     # More poleward latitudes have smaller zonal spacing and should not need
     # fewer acoustic substeps.

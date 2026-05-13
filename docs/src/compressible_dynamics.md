@@ -409,8 +409,19 @@ run failed at ``\mathrm{CFL} = 1.4`` and completed at ``\mathrm{CFL} = 0.7``. Be
 both the accepted ``Δt`` and the acoustic substep count ``N`` when comparing formulations.
 
 The default `substeps = nothing` adaptively chooses ``N`` from the horizontal acoustic CFL
-each step. For benchmarks this is normally what one wants; setting an explicit integer pins
-``Δτ = Δt / N`` for reproducibility.
+each step:
+
+```math
+N \approx
+\left\lceil \frac{Δt \, \mathbb{C}^{ac}}{ν \, Δx_\min} \right\rceil ,
+```
+
+with ``\mathbb{C}^{ac} = \sqrt{γ^d R^d T_r}`` evaluated at a nominal reference temperature ``T_r = 300\,``K and
+``ν = `` `acoustic_cfl` (default ``0.5``, the ERF/WRF target — equivalent to the
+conventional safety factor of ``2``). Lower ``ν`` produces more substeps and a shorter
+``Δτ``; raise it (closer to the linear stability bound of ``1``) only after verifying that
+the resulting acoustic noise level remains acceptable. The setting is ignored when
+`substeps` is given an explicit integer, which pins ``Δτ = Δt / N`` for reproducibility.
 
 ## Defaults and verification
 
