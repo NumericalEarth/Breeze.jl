@@ -170,21 +170,23 @@ Construct a [`DiurnalSolarPosition`](@ref) with sensible defaults: perpetual
 equinox (`declination = 0`), 24-hour day (`day_length = 86400` s), and noon
 at the start of the simulation (`noon_offset = 0`).
 
-The precision is taken from `typeof(latitude)` via `float(typeof(latitude))`,
-and the remaining fields are converted to that type. Integer `latitude`
-yields a `Float64` struct; passing `latitude = Float32(30)` yields a
-`Float32` struct (and the defaults adapt to match). Mixed-precision inputs
-are converted to the latitude-derived type.
+The positional argument `FT` controls the precision of the stored fields and
+defaults to `Oceananigans.defaults.FloatType`. Pass `FT = Float32` (or set
+`Oceananigans.defaults.FloatType = Float32`) to run in Float32:
+
+```julia
+DiurnalSolarPosition(Float32, latitude = 30)
+```
 """
-function DiurnalSolarPosition(; latitude,
-                                declination = nothing,
-                                day_length = nothing,
-                                noon_offset = nothing)
-    FT = float(typeof(latitude))
-    return DiurnalSolarPosition(convert(FT, latitude),
-                                isnothing(declination) ? zero(FT)         : convert(FT, declination),
-                                isnothing(day_length)  ? convert(FT, 86400) : convert(FT, day_length),
-                                isnothing(noon_offset) ? zero(FT)         : convert(FT, noon_offset))
+function DiurnalSolarPosition(FT::DataType = Oceananigans.defaults.FloatType;
+                              latitude,
+                              declination = 0,
+                              day_length = 86400,
+                              noon_offset = 0)
+    return DiurnalSolarPosition{FT}(convert(FT, latitude),
+                                    convert(FT, declination),
+                                    convert(FT, day_length),
+                                    convert(FT, noon_offset))
 end
 
 #####

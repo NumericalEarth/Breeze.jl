@@ -290,26 +290,25 @@ end
             "DiurnalSolarPosition(latitude = 30.0°, declination = 0.0°, day_length = 86400.0 s, noon_offset = 0.0 s)"
     end
 
-    @testset "DiurnalSolarPosition: construction and defaults" begin
-        # Integer inputs are promoted to floats so physical quantities behave sensibly
+    @testset "DiurnalSolarPosition: construction and defaults [$(FT)]" for FT in test_float_types()
+        Oceananigans.defaults.FloatType = FT
+        # Default FT comes from Oceananigans.defaults.FloatType
         sp = DiurnalSolarPosition(latitude = 30)
         @test sp isa AbstractSolarPosition
         @test sp isa DiurnalSolarPosition
-        @test sp.latitude    == 30.0
-        @test sp.declination == 0.0
-        @test sp.day_length  == 86400.0
-        @test sp.noon_offset == 0.0
-        @test typeof(sp.latitude) === Float64
+        @test sp.latitude    == FT(30)
+        @test sp.declination == FT(0)
+        @test sp.day_length  == FT(86400)
+        @test sp.noon_offset == FT(0)
+        @test typeof(sp.latitude)    === FT
+        @test typeof(sp.day_length)  === FT
 
-        # Float32 inputs preserved
-        sp32 = DiurnalSolarPosition(latitude = Float32(30))
-        @test typeof(sp32.latitude) === Float32
-        @test typeof(sp32.day_length) === Float32
-
-        # Mixed inputs promote to a common type
-        sp_mix = DiurnalSolarPosition(latitude = 45, declination = 23.5)
-        @test sp_mix.latitude == 45.0
-        @test sp_mix.declination == 23.5
+        # Positional FT override forces the precision regardless of input types
+        sp_f32 = DiurnalSolarPosition(Float32, latitude = 30, declination = 23.5)
+        @test typeof(sp_f32.latitude)    === Float32
+        @test typeof(sp_f32.declination) === Float32
+        @test sp_f32.latitude    ≈ 30
+        @test sp_f32.declination ≈ Float32(23.5)
     end
 
     @testset "DiurnalSolarPosition: diurnal cycle physics" begin
