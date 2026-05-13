@@ -9,7 +9,8 @@ using Oceananigans.TimeSteppers:
     step_lagrangian_particles!,
     implicit_step!
 
-using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
+using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
+                                microphysics_model_update!
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -235,6 +236,14 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     tick_stage!(model.clock, corrected_Δt, Δt)
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
+
+    # Operator-split microphysics: applied once per time step on the post-RK
+    # state (rather than once per stage from `update_state!`), so that the
+    # full Δt of autoconversion / accretion / condensation / sedimentation
+    # is applied exactly once. Required for `DCMIP2016KesslerMicrophysics`,
+    # which bypasses the standard tendency interface and updates state via
+    # this hook.
+    microphysics_model_update!(model.microphysics, model)
 
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, α³ * Δt)
