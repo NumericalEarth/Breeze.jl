@@ -481,8 +481,8 @@ $(TYPEDSIGNATURES)
 
 Compute the number of acoustic substeps ``N`` from the horizontal
 acoustic CFL: ``N \\approx \\lceil 2 \\Delta t \\, c_s / \\Delta x_\\min \\rceil``,
-with ``c_s = \\sqrt{\\gamma^d R^d \\theta_0}`` for a nominal
-``\\theta_0 = 300\\,\\mathrm{K}``. The factor of 2 is the standard
+with ``c_s = \\sqrt{\\gamma^d R^d T_r}`` for a nominal
+``T_r = 300\\,\\mathrm{K}``. The factor of 2 is the standard
 ERF/WRF safety factor.
 """
 function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
