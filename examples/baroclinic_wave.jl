@@ -8,7 +8,8 @@
 # gradient is seeded with a localized zonal-wind perturbation that triggers
 # baroclinic instability, producing growing Rossby waves over roughly ten days.
 #
-# This example exercises `CompressibleDynamics` with `SplitExplicitTimeDiscretization`
+# This example exercises `CompressibleDynamics` with
+# [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization)
 # (acoustic substepping via [`AcousticRungeKutta3`](@ref)) and
 # `SphericalCoriolis` (non-hydrostatic) on a 1° latitude-longitude grid spanning
 # 75° S to 75° N. Acoustic substepping lets the outer time step be set by
@@ -203,7 +204,8 @@ end
 # ## Model configuration
 #
 # We use fully compressible dynamics with **acoustic substepping** via
-# [`SplitExplicitTimeDiscretization`](@ref) and the [`AcousticRungeKutta3`](@ref)
+# [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization)
+# and the [`AcousticRungeKutta3`](@ref)
 # (Wicker–Skamarock RK3) outer loop. Acoustic substepping handles the
 # fast acoustic-mode pressure gradient and buoyancy via a vertically-implicit
 # inner loop, so the outer time step is limited only by the *advective*
@@ -358,4 +360,4 @@ CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 12) do nn
 end
 nothing #hide
 
-# ![](baroclinic_wave4.mp4)
+# ![](baroclinic_wave.mp4)
