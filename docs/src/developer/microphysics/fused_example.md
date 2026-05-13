@@ -84,7 +84,7 @@ each new prognostic adds another redundant pass through the same intermediates.
 The override path begins by defining a single helper that returns all three tendencies as
 a NamedTuple, with the shared intermediates computed exactly once:
 
-```@example fused_microphysics_example
+```julia
 using Breeze.Thermodynamics: temperature, saturation_specific_humidity,
                               PlanarLiquidSurface, PlanarIceSurface
 
