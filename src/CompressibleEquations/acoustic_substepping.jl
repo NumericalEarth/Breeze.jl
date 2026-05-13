@@ -82,8 +82,7 @@ using Oceananigans.Operators:
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
-using Oceananigans.Grids: Bounded, Flat, AbstractUnderlyingGrid,
-                          Center, peripheral_node,
+using Oceananigans.Grids: Flat, Center, peripheral_node,
                           topology,
                           minimum_xspacing, minimum_yspacing, minimum_zspacing
 
@@ -892,31 +891,17 @@ end
         ∂y_pᴸ  = ∂yᶜᶠᶜ(i, j, k, grid, p)
         ∂y_p′  = ∂yᶜᶠᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
 
-        not_bdy_x = !on_x_boundary(i, j, k, grid)
-        not_bdy_y = !on_y_boundary(i, j, k, grid)
-
         perturbation_pressure_gradient_factor = ifelse(apply_pressure_gradient, one(Δτ), zero(Δτ))
         ∂x_p = ∂x_pᴸ + perturbation_pressure_gradient_factor * ∂x_p′
         ∂y_p = ∂y_pᴸ + perturbation_pressure_gradient_factor * ∂y_p′
 
-        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - ∂x_p) * not_bdy_x
-        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - ∂y_p) * not_bdy_y
+        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - ∂x_p)
+        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - ∂y_p)
     end
 end
 
 @inline linearized_pressure_perturbation(i, j, k, grid, ρθ′, Πᴸ, γRᵐᴸ) =
     @inbounds γRᵐᴸ[i, j, k] * Πᴸ[i, j, k] * ρθ′[i, j, k]
-
-# Boundary-detection helpers — return false on Periodic / Flat, true at
-# the Bounded face indices where velocity must vanish.
-@inline on_x_boundary(i, j, k, grid) = false
-@inline on_y_boundary(i, j, k, grid) = false
-
-const BX_grid = AbstractUnderlyingGrid{FT, Bounded}                                  where FT
-const BY_grid = AbstractUnderlyingGrid{FT, <:Any, Bounded}                           where FT
-
-@inline on_x_boundary(i, j, k, grid::BX_grid) = (i == 1) | (i == grid.Nx + 1)
-@inline on_y_boundary(i, j, k, grid::BY_grid) = (j == 1) | (j == grid.Ny + 1)
 
 @inline apply_horizontal_pressure_gradient_substep(substep, Nτ) =
     (substep != 1) | (Nτ == 1)
@@ -1150,12 +1135,12 @@ end
         ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
         θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
         γˣ = x_damping_diffusivity(i, j, k, grid, x_damping_scale)
-        ρu′[i, j, k] -= γˣ * ∂x_div / θᴸᶠᶜᶜ * !on_x_boundary(i, j, k, grid)
+        ρu′[i, j, k] -= γˣ * ∂x_div / θᴸᶠᶜᶜ
 
         ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
         θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
         γʸ = y_damping_diffusivity(i, j, k, grid, y_damping_scale)
-        ρv′[i, j, k] -= γʸ * ∂y_div / θᴸᶜᶠᶜ * !on_y_boundary(i, j, k, grid)
+        ρv′[i, j, k] -= γʸ * ∂y_div / θᴸᶜᶠᶜ
     end
 end
 
@@ -1232,8 +1217,8 @@ end
         ρ̂ᶜᶠᶜ = ifelse(ρᶜᶠᶜ == 0, one(ρᶜᶠᶜ), ρᶜᶠᶜ)
         ρ̂ᶜᶜᶠ = ifelse(ρᶜᶜᶠ == 0, one(ρᶜᶜᶠ), ρᶜᶜᶠ)
 
-        u_avg[i, j, k] = ρu_total / ρ̂ᶠᶜᶜ * !on_x_boundary(i, j, k, grid)
-        v_avg[i, j, k] = ρv_total / ρ̂ᶜᶠᶜ * !on_y_boundary(i, j, k, grid)
+        u_avg[i, j, k] = ρu_total / ρ̂ᶠᶜᶜ
+        v_avg[i, j, k] = ρv_total / ρ̂ᶜᶠᶜ
         w_avg[i, j, k] = ρw_total / ρ̂ᶜᶜᶠ * (k > 1)
     end
 end
