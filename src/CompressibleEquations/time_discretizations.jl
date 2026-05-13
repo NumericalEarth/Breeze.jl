@@ -437,6 +437,19 @@ convert_acoustic_parameter(::Type{FT}, sponge::UpperSponge) where FT =
                                         convert(FT, sponge.depth),
                                         sponge.ramp)
 
+"""
+$(TYPEDEF)
+
+Time discretization for fully compressible dynamics that integrates slow
+terms with a Wicker-Skamarock RK3 outer loop and acoustic terms with
+split-explicit inner substeps.
+
+The constructor accepts `substeps` or an `acoustic_cfl` for choosing the
+number of acoustic substeps, a `forward_weight` for off-centering the acoustic
+solve, an acoustic `damping` strategy such as
+[`ThermalDivergenceDamping`](@ref), an optional [`UpperSponge`](@ref), and a
+`substep_distribution` such as [`ProportionalSubsteps`](@ref).
+"""
 struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistribution}
     substeps :: N
     acoustic_cfl :: FT
