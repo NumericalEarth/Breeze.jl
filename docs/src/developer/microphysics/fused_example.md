@@ -38,19 +38,16 @@ walkthrough. We list them here so the page is self-contained:
 ```julia
 using Breeze
 using Oceananigans: CenterField
-using Breeze.AtmosphereModels: AbstractMicrophysicalState
-import Breeze.AtmosphereModels: prognostic_field_names,
-                                 materialize_microphysical_fields,
-                                 microphysical_state
+using Breeze.AtmosphereModels: AtmosphereModels, AbstractMicrophysicalState
 
 struct ExplicitMicrophysics{FT}
     vapor_to_liquid :: FT
     vapor_to_ice :: FT
 end
 
-prognostic_field_names(::ExplicitMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
+AtmosphereModels.prognostic_field_names(::ExplicitMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
 
-function materialize_microphysical_fields(::ExplicitMicrophysics, grid, boundary_conditions)
+function AtmosphereModels.materialize_microphysical_fields(::ExplicitMicrophysics, grid, boundary_conditions)
     ρqᵛ = CenterField(grid; boundary_conditions=boundary_conditions.ρqᵛ)
     ρqˡ = CenterField(grid; boundary_conditions=boundary_conditions.ρqˡ)
     ρqⁱ = CenterField(grid; boundary_conditions=boundary_conditions.ρqⁱ)
@@ -64,7 +61,7 @@ struct ExplicitMicrophysicsState{FT} <: AbstractMicrophysicalState{FT}
     qⁱ :: FT
 end
 
-function microphysical_state(::ExplicitMicrophysics, ρ, μ::NamedTuple, 𝒰, velocities)
+function AtmosphereModels.microphysical_state(::ExplicitMicrophysics, ρ, μ::NamedTuple, 𝒰, velocities)
     qᵛ = μ.ρqᵛ / ρ
     qˡ = μ.ρqˡ / ρ
     qⁱ = μ.ρqⁱ / ρ
@@ -105,13 +102,13 @@ The helper is gridless: it works equally well in a parcel model context. If a pa
 needs the per-name interface, the helper can also be wrapped:
 
 ```julia
-import Breeze.AtmosphereModels: microphysical_tendency
+using Breeze.AtmosphereModels: AtmosphereModels
 
-@inline microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqᵛ}, ρ, ℳ, 𝒰, c) =
+@inline AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqᵛ}, ρ, ℳ, 𝒰, c) =
     explicit_microphysics_tendencies(em, ρ, ℳ, 𝒰, c).ρqᵛ
-@inline microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqˡ}, ρ, ℳ, 𝒰, c) =
+@inline AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqˡ}, ρ, ℳ, 𝒰, c) =
     explicit_microphysics_tendencies(em, ρ, ℳ, 𝒰, c).ρqˡ
-@inline microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqⁱ}, ρ, ℳ, 𝒰, c) =
+@inline AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqⁱ}, ρ, ℳ, 𝒰, c) =
     explicit_microphysics_tendencies(em, ρ, ℳ, 𝒰, c).ρqⁱ
 ```
 
@@ -177,9 +174,9 @@ The override threads the model fields the kernel needs and launches it:
 
 ```julia
 using Oceananigans.Utils: launch!
-import Breeze.AtmosphereModels: compute_microphysical_tendencies!
+using Breeze.AtmosphereModels: AtmosphereModels
 
-function compute_microphysical_tendencies!(microphysics::ExplicitMicrophysics, model)
+function AtmosphereModels.compute_microphysical_tendencies!(microphysics::ExplicitMicrophysics, model)
     grid = model.grid
     arch = grid.architecture
     G = model.timestepper.Gⁿ
@@ -207,23 +204,21 @@ the implementations from the [per-name walkthrough](example.md) carry over verba
 
 ```julia
 using Breeze.Thermodynamics: MoistureMassFractions
-import Breeze.AtmosphereModels: update_microphysical_auxiliaries!,
-                                 moisture_fractions,
-                                 maybe_adjust_thermodynamic_state
+using Breeze.AtmosphereModels: AtmosphereModels
 
-@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid,
-                                                    ::ExplicitMicrophysics,
-                                                    ℳ::ExplicitMicrophysicsState,
-                                                    ρ, 𝒰, constants)
+@inline function AtmosphereModels.update_microphysical_auxiliaries!(μ, i, j, k, grid,
+                                                                    ::ExplicitMicrophysics,
+                                                                    ℳ::ExplicitMicrophysicsState,
+                                                                    ρ, 𝒰, constants)
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     return nothing
 end
 
-@inline function moisture_fractions(::ExplicitMicrophysics, ℳ::ExplicitMicrophysicsState, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(::ExplicitMicrophysics, ℳ::ExplicitMicrophysicsState, qᵗ)
     return MoistureMassFractions(ℳ.qᵛ, ℳ.qˡ, ℳ.qⁱ)
 end
 
-@inline maybe_adjust_thermodynamic_state(𝒰, ::ExplicitMicrophysics, qᵗ, constants) = 𝒰
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::ExplicitMicrophysics, qᵗ, constants) = 𝒰
 ```
 
 ## Which path should I pick?
