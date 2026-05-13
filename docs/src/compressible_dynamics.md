@@ -1,413 +1,461 @@
 # [Compressible dynamics](@id Compressible-section)
 
-[`CompressibleDynamics`](@ref) solves the fully compressible Euler equations with prognostic density ``ρ``.
-This formulation retains acoustic waves and is suitable for problems where full compressibility is important.
+[`CompressibleDynamics`](@ref) solves the fully compressible Euler equations with prognostic
+total density ``ρ`` (including dry air, vapor, and condensate). The formulation retains acoustic waves and is suitable for problems where full
+compressibility is important — global atmospheric flows, baroclinic-wave benchmarks, and
+acoustic-mode validation.
 
 ## Prognostic equations
 
-The compressible formulation advances density ``ρ``, momentum ``ρ \boldsymbol{u}``, a thermodynamic variable ``χ`` (see [Governing equations](@ref Dycore-section)), total moisture ``ρ q^t``, and tracers:
+The compressible formulation advances density ``ρ``, momentum ``ρ \boldsymbol{u}``, a
+thermodynamic variable ``χ`` (see [Governing equations](@ref Dycore-section)), total moisture
+``ρ q^t``, and tracers in flux form:
 
 ```math
 \begin{aligned}
-&\text{Mass:} && \partial_t ρ + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u}) = 0 ,\\
-&\text{Momentum:} && \partial_t(ρ \boldsymbol{u}) + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u}) + \boldsymbol{\nabla} p = - ρ g \hat{\boldsymbol{z}} + ρ \boldsymbol{f} + \boldsymbol{\nabla \cdot}\, \boldsymbol{\mathcal{T}} ,\\
-&\text{Thermodynamic:} && \partial_t χ + \boldsymbol{\nabla \cdot}\, (χ \boldsymbol{u}) = Π \, \boldsymbol{\nabla \cdot \, u} + S_χ ,\\
-&\text{Moisture:} && \partial_t(ρ q^t) + \boldsymbol{\nabla \cdot}\, (ρ q^t \boldsymbol{u}) = S_q .
+&\text{Mass:} && ∂_t ρ + ∇·(ρ \boldsymbol{u}) = 0 ,\\
+&\text{Momentum:} && ∂_t(ρ \boldsymbol{u}) + ∇·(ρ \boldsymbol{u} \boldsymbol{u}) + ∇ p = - ρ g \hat{\boldsymbol{z}} + ρ \boldsymbol{f} + ∇·\boldsymbol{\mathcal{T}} ,\\
+&\text{Thermodynamic:} && ∂_t χ + ∇·(χ \boldsymbol{u}) = Π \, ∇·\boldsymbol{u} + S_χ ,\\
+&\text{Moisture:} && ∂_t(ρ q^t) + ∇·(ρ q^t \boldsymbol{u}) = S_q .
 \end{aligned}
 ```
 
-Pressure is computed from the ideal gas law:
+Pressure is closed by the moist ideal gas law
 
 ```math
-p = ρ R^m T .
+p = ρ R^m T ,
 ```
+
+where ``R^m`` is the mixture gas constant. For the potential-temperature thermodynamics the
+prognostic is ``χ = ρ θ`` and ``Π = 0``; for static-energy thermodynamics ``χ = ρ e`` and ``Π``
+encodes pressure work.
 
 ## Time integration options
 
-`CompressibleDynamics` supports two time discretization strategies controlled by the `time_discretization` keyword:
+`CompressibleDynamics` accepts a `time_discretization` keyword that selects between two
+strategies:
 
-- [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization): Acoustic substepping with separate slow/fast tendency splitting. This allows advective CFL time steps (~10-20 m/s) instead of acoustic CFL time steps (~340 m/s).
+- [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization):
+  Wicker–Skamarock RK3 outer integration with an inner acoustic substep loop. The outer step
+  is bounded by the **advective** CFL (``Δt \sim Δx / U``); the inner substep is bounded by the
+  **horizontal acoustic** CFL (``Δτ \sim Δx / c_s``). This is the recommended choice and the
+  rest of this page describes its design.
 
-- [`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping): All tendencies computed together. The time step is limited by the acoustic CFL condition: ``Δt < Δx / c_s``.
+- [`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping): All
+  tendencies (advection, pressure gradient, buoyancy) computed together. The time step is
+  bounded by the full 3-D acoustic CFL ``Δt < \min(Δx, Δy, Δz)/c_s``.
 
 ## Split-explicit time integration
 
-The split-explicit scheme separates acoustic wave dynamics from slower dynamical processes,
-allowing the outer time step to be set by the advective CFL condition
-(``Δt \sim Δx / U``, where ``U \sim 10\text{--}20\,``m/s) rather than the acoustic CFL condition
-(``Δτ \sim Δx / c_s``, where ``c_s \sim 340\,``m/s).
-The basic strategy---subcycling fast pressure and gravity-wave dynamics within each stage of an
-outer Runge-Kutta integration---was introduced by [Klemp and Wilhelmson (1978)](@cite Klemp1978)
-and has been widely adopted in production models including
-WRF ([Skamarock and Klemp 1994](@cite SkamarockKlemp1994);
+Subcycling fast pressure and gravity-wave dynamics inside an outer Runge–Kutta integration is
+the strategy introduced by [Klemp and Wilhelmson (1978)](@cite Klemp1978) and refined for
+production models including WRF
+([Skamarock and Klemp 1994](@cite SkamarockKlemp1994);
 [Wicker and Skamarock 2002](@cite WickerSkamarock2002);
 [Klemp, Skamarock, and Dudhia 2007](@cite KlempSkamarockDudhia2007)),
 MPAS-Atmosphere ([Skamarock et al. 2012](@cite SkamarockEtAl2012)),
 COSMO ([Baldauf et al. 2011](@cite BaldaufEtAl2011)),
-and CM1 ([Bryan and Fritsch 2002](@cite BryanFritsch2002)).
+and CM1 ([Bryan and Fritsch 2002](@cite BryanFritsch2002)). The presentation here follows the
+linear stability analysis of [Baldauf (2010)](@cite Baldauf2010) and the divergence-damping
+prescription of [Klemp, Skamarock, and Ha (2018)](@cite KlempSkamarockHa2018), with the
+outer/inner coupling stability argument from
+[Knoth and Wensch (2014)](@cite KnothWensch2014).
 
-### Slow-fast decomposition
+On spherical grids, Breeze can use either the full nontraditional spherical Coriolis
+operator or the traditional approximation. `SphericalCoriolis()` includes the horizontal
+component of planetary rotation and therefore the ``2Ω cosφ`` coupling between zonal and
+vertical momentum. `HydrostaticSphericalCoriolis()` omits that coupling. This choice is
+independent of whether the dynamics evolve prognostic vertical momentum: nonhydrostatic
+models may still use the traditional approximation when the benchmark or forcing assumes it.
 
-Starting from the compressible equations for density ``ρ``, momentum
-``\boldsymbol{m} = ρ \boldsymbol{u}``, and a conservative thermodynamic variable ``χ``
-(e.g., ``χ = ρθ`` for the potential temperature formulation), we decompose the right-hand side
-into slow and fast components:
+### Slow/fast decomposition and linearization point
 
-```math
-\partial_t U = \underbrace{G^{\text{slow}}(U)}_{\text{evaluated once per RK stage}}
-             + \underbrace{G^{\text{fast}}(U; \bar{U})}_{\text{subcycled acoustically}}
-```
-
-The **slow operator** ``G^{\text{slow}}`` is evaluated once per outer Runge-Kutta stage from
-the current state and held fixed during the acoustic substeps. It includes:
-
-- Advective flux divergences in momentum, density, and thermodynamic variable
-- Coriolis and other body forces
-- Subgrid stresses and turbulent diffusion
-- Microphysics sources and external forcing
-- The full pressure gradient and buoyancy evaluated at the stage state
-
-The **fast operator** ``G^{\text{fast}}`` resolves acoustic wave propagation within each stage
-via a forward-backward substep loop. It contains:
-
-- A *linearized* pressure gradient that couples perturbation momentum to the perturbation
-  thermodynamic variable (see [Exner function linearization](@ref exner-linearization) below)
-- Mass flux divergence of the perturbation momentum in the continuity and thermodynamic equations
-
-The linearization around a stage-frozen reference state ``\bar{U}`` makes the fast dynamics
-*linear* in the perturbation variables, allowing stable integration via a forward-backward
-scheme regardless of the outer time step size.
-
-### Outer Runge-Kutta integration
-
-Two outer Runge-Kutta loop variants are available, both three-stage.
-
-#### Wicker-Skamarock RK3
-
-The [`AcousticRungeKutta3`](@ref) time stepper
-([Wicker and Skamarock 2002](@cite WickerSkamarock2002)) uses stage fractions
-``β = 1/3, 1/2, 1``:
+Let ``U = (ρ, ρ\boldsymbol{u}, ρθ, ρq^t, …)`` be the prognostic state vector. The right-hand
+side is decomposed into
 
 ```math
-\begin{aligned}
-U^{(1)} &= U^n + \tfrac{Δt}{3} \, R(U^n) \\
-U^{(2)} &= U^n + \tfrac{Δt}{2} \, R(U^{(1)}) \\
-U^{n+1} &= U^n + Δt \, R(U^{(2)})
-\end{aligned}
+∂_t U = G^{\text{slow}}(U) + G^{\text{fast}}(U; U^L) ,
 ```
 
-Each stage resets to the initial state ``U^n`` and advances by ``β \, Δt``. The acoustic
-substep size is **constant** across all stages: ``Δτ = Δt / N_s``, while the substep count
-varies: ``N_τ = \max(\mathrm{round}(β N_s), 1)``. This ensures the acoustic CFL number is
-the same regardless of stage fraction.
+where the **slow operator** ``G^{\text{slow}}`` is evaluated once per outer RK stage from the
+current RK predictor state and held fixed during that stage's substep loop. It contains
+advective flux divergences, Coriolis and other body forces, subgrid stresses, microphysics,
+radiation, and boundary flux tendencies. The ordinary momentum-tendency kernels run in a
+mode that excludes pressure-gradient and buoyancy forces; those forces are reintroduced in
+the acoustic substep loop as a stage-entry background contribution plus a linearized
+perturbation contribution.
 
-#### SSP RK3 (default)
+The **fast operator** ``G^{\text{fast}}`` is the linearization of the acoustic and buoyancy
+dynamics about the **RK stage-entry state** ``U^L``. The cached background fields are
+refreshed before every RK stage:
 
-The default [`AcousticSSPRungeKutta3`](@ref) time stepper uses the strong-stability-preserving (SSP) RK3
-scheme in Shu-Osher form ([Shu and Osher 1988](@cite Shu1988Efficient)):
+```math
+ρ^L, \quad (ρθ)^L, \quad p^L, \quad
+Π^L = (p^L / p^{st})^κ, \quad θ^L = (ρθ)^L/ρ^L, \quad γ^m R^m\big|_L .
+```
+
+The outer-step-start state ``U^n`` is also stored. Stages 2 and 3 initialize perturbations
+with the rewind term ``U^n - U^L`` so that the full state at the beginning of every
+substep loop is still ``U^n`` while the linearized coefficients come from the current RK
+predictor. This is Breeze's current stage-rewind formulation for preserving the
+Wicker-Skamarock RK3 invariant. It should not be read as identical to every production
+small-step implementation: for example, MPAS-Atmosphere stores stage-state increments
+with different bookkeeping rather than literally initializing these Breeze perturbation
+fields to ``U^n - U^L``.
+
+### Outer scheme: Wicker–Skamarock RK3
+
+The [`AcousticRungeKutta3`](@ref) time stepper is the three-stage Wicker–Skamarock RK3
+([Wicker and Skamarock 2002](@cite WickerSkamarock2002)) with stage fractions
+``β = (1/3, 1/2, 1)``:
 
 ```math
 \begin{aligned}
-U^{(1)} &= \Phi(U^n; \, Δt) \\
-U^{(2)} &= \tfrac{3}{4} U^n + \tfrac{1}{4} \Phi(U^{(1)}; \, Δt) \\
-U^{n+1} &= \tfrac{1}{3} U^n + \tfrac{2}{3} \Phi(U^{(2)}; \, Δt)
+U^{(1)} &= U^n + β_1 \, Δt \, R(U^n) , \\
+U^{(2)} &= U^n + β_2 \, Δt \, R(U^{(1)}) , \\
+U^{n+1} &= U^n + β_3 \, Δt \, R(U^{(2)}) .
 \end{aligned}
 ```
 
-where ``\Phi`` denotes the forward Euler + acoustic subcycling stage operator.
-The convex combination mixes fields from different acoustic states.
-The SSP property guarantees monotonicity preservation for advected scalars.
+Each stage applies a fraction ``β_k Δt`` of the slow tendency evaluated at the
+previous-stage state. The acoustic substep loop is invoked inside ``R(\cdot)`` to advance
+perturbations about the current stage-entry state, initialized with the rewind term
+described above.
 
-### Acoustic variables: velocity and Exner pressure
-
-The acoustic substep loop advances **velocity** ``(u, v, w)`` and the **Exner pressure
-perturbation** ``\pi' = \pi - \pi_0`` as prognostic variables, following
-CM1 ([Bryan and Fritsch 2002](@cite BryanFritsch2002)).
-This is a velocity-pressure formulation, distinct from the momentum-perturbation approach
-used by MPAS and earlier versions of this code.
-
-The Exner pressure is defined as
+The acoustic substep size is **constant** across all stages,
 
 ```math
-\pi = \left( \frac{p}{p^{st}} \right)^{\!\kappa}, \qquad \kappa = R^d / c_p^d ,
+Δτ = Δt / N ,
 ```
 
-and is related to temperature by ``T = \theta_v \, \pi``, where ``\theta_v`` is the
-virtual potential temperature. The reference Exner profile ``\pi_0(z)`` satisfies
-discrete hydrostatic balance to machine precision, ensuring no spurious vertical
-pressure gradient from the reference state.
+while the substep count varies by stage:
 
-At the start of each Runge-Kutta stage, the following **stage-frozen** quantities are
-computed from the current (evaluation) state and held fixed during the acoustic substeps:
+```math
+N_τ = \max(\mathrm{round}(β_k N), \, 1) ,
+```
 
-- ``\theta_v``: virtual potential temperature
-- ``\pi_0``: reference Exner pressure (from the ExnerReferenceState)
-- ``S = (\gamma - 1) \pi``: Exner pressure tendency coefficient, where
-  ``\gamma = c_p^m / c_v^m`` is the mixture heat capacity ratio
+so the canonical Wicker–Skamarock distribution is ``N/3, N/2, N`` substeps in stages 1, 2, 3
+respectively. This keeps the acoustic CFL number identical at every stage. The substep
+distribution is selectable via the `substep_distribution` keyword
+([`AcousticSubstepDistribution`](@ref Breeze.CompressibleEquations.AcousticSubstepDistribution));
+[`MonolithicFirstStage`](@ref Breeze.CompressibleEquations.MonolithicFirstStage) is also
+available as an alternative that collapses stage 1 to a single substep of size ``Δt/3``.
 
-The acoustic loop also requires **slow tendencies** converted to velocity and pressure form
-(see [Slow tendency conversion](@ref slow-tendency-conversion) below).
+### Linearized perturbation equations
 
-### Forward-backward acoustic substep loop
-
-Within each RK stage, the acoustic substep loop iterates ``N_\tau`` times with a
-**constant substep size** ``\Delta\tau = \Delta t / N_s`` for both time steppers.
-For Wicker-Skamarock RK3, the substep count varies per stage:
-``N_\tau = \max(\mathrm{round}(\beta N_s), 1)``, keeping ``\Delta\tau`` constant.
-For SSP RK3, ``N_\tau = N_s`` at every stage.
-
-Each substep consists of three phases:
-
-**(A) Forward step --- horizontal velocity update:**
+Let primes denote perturbations about ``U^L``: ``ρ' = ρ - ρ^L``, ``(ρθ)' = ρθ - (ρθ)^L``, and
+``(ρu)' = ρu - (ρu)^L`` (likewise for ``v, w``). The linearized perturbation system advanced
+inside the substep loop is
 
 ```math
 \begin{aligned}
-u^{\tau + \Delta\tau} &= u^\tau + \Delta\tau \left( \dot{u}^s - c_p^d \, \bar{\theta}_v \, \frac{\partial \tilde{\pi}'}{\partial x} \right) \\
-v^{\tau + \Delta\tau} &= v^\tau + \Delta\tau \left( \dot{v}^s - c_p^d \, \bar{\theta}_v \, \frac{\partial \tilde{\pi}'}{\partial y} \right)
+∂_τ ρ'    &+ ∇·(ρ\boldsymbol{u})' = G^s_ρ , \\
+∂_τ (ρθ)' &+ ∇·\!\left(θ^L (ρ\boldsymbol{u})'\right) = G^s_{ρθ} , \\
+∂_τ (ρu)' &+ ∂_x p^L + ∂_x \left(C^L (ρθ)'\right) = G^s_{ρu} , \\
+∂_τ (ρv)' &+ ∂_y p^L + ∂_y \left(C^L (ρθ)'\right) = G^s_{ρv} , \\
+∂_τ (ρw)' &+             ∂_z \left(C^L (ρθ)'\right) + g\, ρ' = G^s_{ρw} .
 \end{aligned}
 ```
 
-where ``\dot{u}^s`` and ``\dot{v}^s`` are the slow velocity tendencies (advection, Coriolis,
-diffusion, and the full pressure gradient from the stage state, divided by density), and
-``\tilde{\pi}'`` is the forward-extrapolation-filtered Exner perturbation
-(see [Forward-extrapolation filter](@ref forward-extrapolation-filter) below).
+Each ``G^s`` is the slow tendency for that variable, held constant across the ``N_τ``
+substeps of a given RK stage. For vertical momentum, ``G^s_{ρw}`` is assembled by adding the
+stage-entry vertical pressure-gradient and buoyancy imbalance,
+``-∂_z(p^L - p_r) - g(ρ^L - ρ_r)``, to the slow non-pressure tendency. The acoustic
+linearized pressure coefficient
+``C^L = γ^m R^m\big|_L Π^L`` and the temperature-flux factor ``θ^L`` are cached for the
+stage, which is what makes each stage's substep system linear.
 
-**(B) Vertically implicit ``w``-``\pi'`` solve:**
+### [Reference state and discrete hydrostatic balance](@id reference-state)
 
-The vertical velocity ``w`` and Exner pressure perturbation ``\pi'`` are coupled through the
-vertical pressure gradient and vertical divergence. To avoid the severe ``\Delta\tau < \Delta z / c_s``
-constraint on vertically refined grids, this coupling is treated implicitly via a tridiagonal
-system each substep.
+The slow vertical PGF ``-∂_z p^L - ρ^L g`` is the difference between two large numbers,
+each ``\mathcal{O}(10^4)`` in SI units, whose true value is small everywhere and exactly zero
+in a rest atmosphere. To preserve this cancellation at the discrete level,
+`CompressibleDynamics` accepts a `reference_state` keyword that builds a
+[`ExnerReferenceState`](@ref) ``(ρ_r, p_r)`` satisfying
 
-Using off-centering parameter ``\alpha`` (default 0.6), the update is split into explicit
-(weight ``\beta = 1 - \alpha``) and implicit (weight ``\alpha``) parts:
+```math
+\frac{p_{r,k+1/2} - p_{r,k-1/2}}{Δz_{k}^f} + g \, \overline{ρ_r}^z\big|_{k+1/2} = 0
+```
+
+at every face — a discrete hydrostatic balance to machine precision. The slow vertical
+momentum tendency uses the *imbalance* ``-∂_z(p^L - p_r) - (ρ^L - ρ_r) g`` so that a column
+in exact discrete balance contributes zero buoyancy forcing, no matter how steeply
+``ρ_r(z)`` and ``p_r(z)`` vary.
+
+### Time discretization of the substep loop
+
+Within each substep of size ``Δτ``, the perturbation update has two phases.
+
+**Forward step — horizontal momenta.**
 
 ```math
 \begin{aligned}
-w^{\tau + \Delta\tau} &= w^\tau + \Delta\tau \, \dot{w}^s
-    - \Delta\tau \, c_p^d \bar{\theta}_v \left( \beta \frac{\partial \pi'^{\,\tau}}{\partial z} + \alpha \frac{\partial \pi'^{\,\tau+\Delta\tau}}{\partial z} \right) \\
-\pi'^{\,\tau+\Delta\tau} &= \pi'^{\,\tau} + \Delta\tau \, \dot{\pi}^s
-    + \Delta\tau \, S \left( \boldsymbol{\nabla}_h \boldsymbol{\cdot} \boldsymbol{u}^{\tau+\Delta\tau}
-    + \beta \frac{\partial w^\tau}{\partial z} + \alpha \frac{\partial w^{\tau+\Delta\tau}}{\partial z} \right)
+(ρu)'_{τ+Δτ} &= (ρu)'_τ + Δτ \! \left[ G^s_{ρu} - ∂_x p^L - ∂_x \left(C^L (ρθ)'_τ\right) \right] , \\
+(ρv)'_{τ+Δτ} &= (ρv)'_τ + Δτ \! \left[ G^s_{ρv} - ∂_y p^L - ∂_y \left(C^L (ρθ)'_τ\right) \right] .
 \end{aligned}
 ```
 
-Substituting the ``w`` equation into the ``\pi'`` equation and rearranging yields a
-tridiagonal system for ``\pi'^{\,\tau+\Delta\tau}`` with coupling coefficient
-``\alpha^2 \Delta\tau^2 \, c_p^d \, \bar{\theta}_v \, S / \Delta z^2 = \alpha^2 \Delta\tau^2 c_s^2 / \Delta z^2``.
-After solving for ``\pi'``, the vertical velocity is recovered via the ``w`` equation.
-
-**(C) Filter and accumulate:**
-
-After each substep, apply the forward-extrapolation filter to ``\pi'`` (see below) and
-accumulate time-averaged velocities for scalar transport:
+For the first substep of a multi-substep RK stage, Breeze follows the MPAS
+forward-backward sequence and omits only the *acoustic perturbation* pressure
+gradient:
 
 ```math
-\bar{\boldsymbol{u}} = \frac{1}{N_\tau} \sum_{n=1}^{N_\tau} \boldsymbol{u}^{(n)}
+(ρu)'_{τ+Δτ} = (ρu)'_τ + Δτ \left[ G^s_{ρu} - ∂_x p^L \right], \qquad
+(ρv)'_{τ+Δτ} = (ρv)'_τ + Δτ \left[ G^s_{ρv} - ∂_y p^L \right].
 ```
 
-### Recovery: converting acoustic variables back to prognostic fields
+The perturbation pressure-gradient term ``∇(C^L (ρθ)')`` is applied on subsequent
+substeps, after the mass and thermodynamic perturbations have been advanced
+once. If a stage has only one acoustic substep, the perturbation pressure
+gradient is applied immediately so the stage still includes the fast force.
+The frozen ``∇p^L`` term is applied on every substep because the slow tendency
+mode excludes pressure gradients. This matches MPAS's split: the first small
+step skips the perturbation pressure gradient inside `atm_advance_acoustic_step`,
+while the large-step pressure-gradient tendency is already present in
+`tend_u_euler`.
 
-After the acoustic substep loop, the velocity fields ``(u, v, w)`` and Exner perturbation
-``\pi'`` must be converted back to Breeze's prognostic variables ``(\rho, \rho\boldsymbol{u},
-\rho\theta)``.
-
-The recovery differs between the two time steppers:
-
-#### SSP RK3 recovery
-
-Each SSP stage computes a forward Euler step from the evaluation state ``U^*`` over a full
-``\Delta t``, then blends with ``U^0`` via a convex combination. The recovery is:
+**Vertical implicit solve — column tridiag in ``(ρw)'``.** The vertical-momentum, density,
+and ``ρθ`` perturbations are coupled through the vertical pressure gradient, the vertical
+divergence in the mass and ``ρθ`` equations, and the buoyancy term. To remove the
+``Δτ < Δz / c_s`` constraint that an explicit treatment would impose on vertically refined
+grids, the vertical block is treated implicitly. Using the off-centering parameter
+``ω`` (default `0.65`), the vertical update is split into explicit weight ``1 - ω`` and
+implicit weight ``ω``:
 
 ```math
 \begin{aligned}
-\rho\theta_{\text{new}} &= \frac{p^{st}}{R^d} \, \pi_{\text{new}}^{\,c_v / R} \\
-\theta_{\text{new}} &= \bar{\theta}_v + \Delta t \, \dot{\theta}^s \\
-\rho_{\text{new}} &= \rho\theta_{\text{new}} \, / \, \theta_{\text{new}}
+(ρw)'_{τ+Δτ} &= (ρw)'_τ + Δτ \, G^s_{ρw} - g\, Δτ \! \left[ (1-ω) ρ'_τ + ω\, ρ'_{τ+Δτ}\right] \\
+&\quad - Δτ \! \left[ (1-ω) ∂_z \left(C^L (ρθ)'_τ\right) + ω\, ∂_z \left(C^L (ρθ)'_{τ+Δτ}\right) \right] .
 \end{aligned}
 ```
 
-where ``\pi_{\text{new}} = \pi_0 + \pi'`` is the total Exner pressure after the acoustic loop,
-``\bar{\theta}_v`` is the evaluation state's virtual potential temperature, and
-``\dot{\theta}^s = (G^s_{\rho\theta} - \bar{\theta}_v G^s_\rho) / \bar{\rho}`` is the slow
-potential temperature tendency. The first line converts Exner pressure to ``\rho\theta`` via
-the equation of state; the remaining lines diagnose density from the slowly-evolved ``\theta``.
+The horizontal divergence in the mass and ``ρθ`` equations is taken from the just-updated
+horizontal momenta ``(ρu)'_{τ+Δτ}, (ρv)'_{τ+Δτ}`` (forward–backward coupling). Substituting
+the discrete updates of ``ρ'`` and ``(ρθ)'`` into the ``(ρw)'`` equation yields a
+tridiagonal Schur system for ``(ρw)'`` at z-faces, with diagonals proportional to
+``ω^2 Δτ^2`` and the local ``C^L = γ R^m Π^L`` and ``g`` coefficients. Importantly, the
+pressure perturbation is ``p' = C^L (ρθ)'`` at cell centers, so the discrete pressure
+gradient is the gradient of this product, not ``C^L`` interpolated to a face times
+``∂(ρθ)'``. After the tridiag is solved the perturbations of ``ρ'`` and ``(ρθ)'`` are
+recovered by back-substitution.
 
-#### Wicker-Skamarock RK3 recovery
+The off-centering parameter ``ω = 1/2`` is classical centered Crank–Nicolson — neutrally
+stable for the linearized inviscid system but susceptible to amplification of distributed
+floating-point noise through the non-normal substep operator (see
+[Stability analysis](@ref stability-analysis)).
+A fully implicit backward Euler scheme is obtained with ``ω = 1`` and offers the most dissipation.
+The default ``ω = 0.65`` adds modest dissipation; the dimensionless parameter ``ε = 2ω - 1 = 0.3`` quantifies the deviation from centered.
 
-WS-RK3 computes each stage as ``U_{\text{new}} = U^n + \beta \Delta t \, R(U^*)``, where
-``U^n`` is the initial state and ``R(U^*)`` is evaluated at the current stage state. The
-recovery applies the acoustic perturbation to the **initial** state:
+### Recovery
+
+After ``N_τ`` substeps, the full prognostic state is recovered by addition:
+
+```math
+ρ = ρ^L + ρ' , \qquad ρθ = (ρθ)^L + (ρθ)' , \qquad ρ\boldsymbol{u} = (ρ\boldsymbol{u})^L + (ρ\boldsymbol{u})' .
+```
+
+There is no Exner-to-``ρθ`` conversion and no convex blend, because the perturbation system
+already advances the same prognostic variables as the outer scheme. The slow tendencies
+``G^s`` are applied through the substep loop, so the WS-RK3 stage update
+``U^{(k)} = U^n + β_k Δt R(U^{(k-1)})`` falls out of the same loop.
+
+## [Klemp divergence damping](@id klemp-damping)
+
+[Klemp, Skamarock, and Ha (2018)](@cite KlempSkamarockHa2018) prescribe a per-substep
+divergence-damping correction that targets acoustic divergence modes while leaving
+discrete rest states and balanced flow essentially unchanged, building on
+[Skamarock and Klemp (1992)](@cite SkamarockKlemp1992) and the linear stability analysis of
+[Baldauf (2010)](@cite Baldauf2010). Breeze applies the horizontal part by default as a
+practical acoustic filter for production runs; it is not intended as an explanation for every
+resolved high-wavenumber feature in baroclinic-wave diagnostics.
+
+The discrete divergence proxy is the per-substep change in ``(ρθ)'``, normalized by the
+stage-entry ``θ^L`` cache used by the acoustic transport equation:
+
+```math
+D_τ \equiv \frac{(ρθ)'_τ - (ρθ)'_{τ-Δτ}}{θ^L} \;≈\; -\, Δτ \, ∇·(ρ\boldsymbol{u})' .
+```
+
+After the implicit Schur solve, the horizontal momentum perturbation components pick up the
+explicit correction
 
 ```math
 \begin{aligned}
-\pi^n &= \left[ \frac{R^d \, (\rho\theta)^n}{p^{st}} \right]^{R/c_v} \\
-\pi_{\text{new}} &= \pi^n + \Delta\pi', \qquad \Delta\pi' = \pi'_{\text{final}} - \pi'_{\text{initial}} \\
-\rho\theta_{\text{new}} &= \frac{p^{st}}{R^d} \, \pi_{\text{new}}^{\,c_v / R} \\
-\theta_{\text{new}} &= \theta^n + \beta \, \Delta t \, \dot{\theta}^s \\
-\rho_{\text{new}} &= \rho\theta_{\text{new}} \, / \, \theta_{\text{new}}
+Δ(ρu)' &= - γ_x \, ∂_x D_τ , \\
+Δ(ρv)' &= - γ_y \, ∂_y D_τ .
 \end{aligned}
 ```
 
-where ``\pi'_{\text{initial}}`` and ``\pi'_{\text{final}}`` are the Exner perturbation at the
-start and end of the acoustic loop, and ``\theta^n = (\rho\theta)^n / \rho^n`` comes from the
-stored initial state ``U^0``.
+This horizontal divergence damping is applied by default. Breeze can also fold the vertical component into the column tridiag by setting
+`damp_vertical = true` on [`ThermalDivergenceDamping`](@ref
+Breeze.CompressibleEquations.ThermalDivergenceDamping). The default leaves this explicit
+vertical divergence-damping term off; vertical acoustic damping comes from the off-centered
+implicit solve. This distinction matters when comparing the equations below to the code:
+there is no default post-substep ``(ρw)'`` correction kernel.
 
-!!! warning "WS-RK3: consistent initial state in the acoustic loop"
-    The acoustic loop must start from a **consistent** ``U^n`` state: both velocity and ``\pi'``
-    must come from the initial state. If ``\pi'`` is initialized from the evaluation state
-    ``U^*`` while velocities are reset to ``U^n``, the resulting velocity-pressure mismatch
-    destabilizes the acoustic loop at advective time steps. This is because the horizontal
-    pressure gradient seen by the initial velocities is inconsistent with the pressure field,
-    generating spurious acoustic oscillations that grow over multiple time steps.
+### Horizontal scaling
 
-!!! warning "WS-RK3: use θⁿ as the base for θ evolution"
-    The slow ``\theta`` tendency must be applied to ``\theta^n`` from ``U^0``, **not** to
-    ``\bar{\theta}_v`` from the evaluation state. Using the evaluation state's ``\theta``
-    double-counts the ``\theta`` change from earlier stages (since ``\theta(U^*) = \theta^n +
-    \beta_1 \Delta t \, \dot{\theta}^s`` already includes the stage 1 contribution), producing
-    an ``O(\Delta t)`` error per time step that causes instability at larger ``\Delta t``.
-
-### [Slow tendency conversion](@id slow-tendency-conversion)
-
-The outer Runge-Kutta loop computes slow tendencies in **conservative** (momentum/density)
-form: ``G^s_{\rho u}``, ``G^s_{\rho w}``, ``G^s_\rho``, ``G^s_{\rho\theta}``. Before entering
-the acoustic substep loop, these are converted to the velocity and pressure form used by the
-acoustic variables.
-
-#### Velocity tendencies
-
-The slow momentum tendencies are converted to velocity tendencies by dividing by the
-stage-frozen density:
+The implemented default uses local per-direction horizontal diffusivities
 
 ```math
-\dot{u}^s = G^s_{\rho u} / \bar{\rho}, \qquad \dot{w}^s = G^s_{\rho w} / \bar{\rho} + B
+γ_x = α \, \frac{Δx^2}{Δτ}, \qquad γ_y = α \, \frac{Δy^2}{Δτ},
 ```
 
-where ``B = -c_p^d \bar{\theta}_v \, \partial\pi_0 / \partial z - g`` is the buoyancy term
-arising from the mismatch between the reference state and the actual hydrostatic balance.
-
-!!! note "Density correction in velocity tendencies"
-    The exact conversion from momentum to velocity tendency is
-    ``\dot{u} = (G^s_{\rho u} - u \, G^s_\rho) / \bar{\rho}``. However, the density correction
-    term ``-u \, G^s_\rho / \bar{\rho}`` can cause slow secular growth at long integration
-    times. The simpler form ``\dot{u} = G^s_{\rho u} / \bar{\rho}`` avoids this issue and
-    produces accurate results for the SK94 benchmark.
-
-#### Exner pressure tendency
-
-The slow Exner pressure tendency represents the advective transport of ``\pi``:
+where ``α`` is the dimensionless Klemp/MPAS divergence-damping coefficient. On a uniform
+square grid this is the finite-difference analogue of the MPAS small-step coefficient
+`coef_divdamp = 2 * smdiv * config_len_disp / dts`. On anisotropic or latitude-longitude
+grids the local spacings keep the nondimensional explicit damping strength approximately
+uniform across the mesh. Passing a `length_scale = ℓ` keyword overrides the automatic
+local scale with a fixed ``γ = α ℓ^2 / Δτ`` in both horizontal directions.
+The combined 2-D explicit-time stability bound for the horizontal correction is
 
 ```math
-\dot{\pi}^s = -\boldsymbol{u} \boldsymbol{\cdot} \boldsymbol{\nabla} \pi
+8α ≤ 2 \;⟹\; α ≤ 0.25 ,
 ```
 
-This is computed using centered differences (not WENO) to maintain consistency with the
-centered-difference divergence operator in the acoustic loop.
+so the empirical safe range is ``α ∈ [0.05, 0.20]``. The default ``α = 0.1`` sits well below
+the bound and is the verified pairing for the default ``ω = 0.65``.
 
-!!! warning "No R/cᵥ factor in dot-π"
-    The chain rule for ``\pi = f(\rho\theta)`` gives
-    ``\boldsymbol{u} \boldsymbol{\cdot} \boldsymbol{\nabla} \pi = (R/c_v)(\pi / \rho\theta) \, \boldsymbol{u} \boldsymbol{\cdot} \boldsymbol{\nabla} (\rho\theta)``,
-    so the ``R/c_v`` factor is already embedded in the advection of ``\pi``.
-    Writing ``\dot{\pi}^s = -(R/c_v) \, \boldsymbol{u} \boldsymbol{\cdot} \boldsymbol{\nabla}\pi`` would double-count
-    this factor and reduce the perturbation amplitude by a factor of ``\sim 2.5``.
+If `damp_vertical = true`, the vertical part is represented implicitly as a Laplacian on
+``(ρw)'`` inside the tridiagonal solve, with CN-split factors proportional to
+``ω α Δz_{\min}^2`` and ``(1-ω) α Δz_{\min}^2`` on the implicit and explicit sides.
 
-### [Forward-extrapolation filter](@id forward-extrapolation-filter)
+## [Stability analysis](@id stability-analysis)
 
-A forward-extrapolation filter suppresses spurious computational-mode oscillations in the
-forward-backward substep scheme. After each substep's implicit solve, the filtered Exner
-perturbation used in the *next* substep's pressure gradient is
+The split-explicit scheme has two sources of acoustic-mode amplification that can interact.
+Off-centering and divergence damping are the available controls.
+
+### 1 — Substep-operator non-normality
+
+Define the substep operator ``\mathcal{U}: U'_τ ↦ U'_{τ+Δτ}`` that advances the perturbation
+through one substep at fixed slow tendency. For a stratified ``\bar{θ}(z)`` reference, the
+column tridiag has *anti-symmetric* buoyancy off-diagonals (gravity-wave physics — these
+*cannot* be symmetrized without breaking the physics) and *asymmetric* PGF off-diagonals
+(stratified ``Π^0_z``). The eigenvalues of ``\mathcal{U}`` lie on the unit circle, so
 
 ```math
-\tilde{\pi}'^{\,\tau+\Delta\tau} = \pi'^{\,\tau+\Delta\tau} + \kappa^d \left( \pi'^{\,\tau+\Delta\tau} - \pi'^{\,\tau} \right)
+ρ(\mathcal{U}) = 1 ,
 ```
 
-where ``\kappa^d`` is the divergence damping coefficient (typically 0.05--0.10). The
-**unfiltered** ``\pi'`` is used for the actual field update and recovery; only the filtered
-``\tilde{\pi}'`` enters the next forward step's pressure gradient. This acts as a forward-in-time
-extrapolation that damps the ``2\Delta\tau`` computational mode inherent in the forward-backward
-scheme, following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007).
+i.e. the spectral radius is exactly unity. But the operator is **non-normal**:
+``\mathcal{U}\mathcal{U}^* ≠ \mathcal{U}^*\mathcal{U}``. The norm gap means perturbations
+can transiently project onto amplified subspaces even when every individual eigenmode is
+neutrally stable. The stage-rewind formulation preserves the exact discrete rest state in
+`test/substepper_rest_state.jl`; off-centering and divergence damping reduce amplification
+of noisy divergent acoustic components in production runs.
 
-### [Why the Exner linearization is necessary](@id exner-linearization)
+### 2 — Outer/inner coupling
 
-In a ``ρ``-based formulation where the perturbation pressure gradient takes the form
-``{\mathbb{C}^{ac}}^2 \, \boldsymbol{\nabla} ρ''``, the sound speed coefficient ``{\mathbb{C}^{ac}}^2 = γ R^d T`` must
-be recomputed from the equation of state at each Runge-Kutta stage. This recomputation couples
-acoustic-amplitude density perturbations ``ρ''`` back into the pressure field used by the
-next stage's slow tendency evaluation, effectively imposing an **acoustic CFL constraint on
-the outer time step**.
+[Knoth and Wensch (2014)](@cite KnothWensch2014) analyze the coupled stability of an
+outer Runge–Kutta scheme with an inner forward-backward substep and show that the
+WS-RK3 + substepper combination is **conditionally unstable** for centered Crank–Nicolson
+*regardless of how the substep operator itself is constructed*. The mechanism is that any
+acoustic perturbation generated inside the substep loop is re-injected on the next outer
+stage through the slow-tendency evaluation; for centered CN this re-injection has no
+dissipative channel, so the coupled amplification factor exceeds unity for a non-empty
+range of acoustic CFL.
 
-[Skamarock and Klemp (1992)](@cite SkamarockKlemp1992) analyzed the stability of time-split
-methods and showed that the amplification factor of the outer Runge-Kutta integrator, when
-applied to the acoustic modes, limits the outer Courant number. For the Wicker-Skamarock RK3
-this bound is approximately
+This means damping is not only a patch for one implementation error; it is a standard
+control for the WS-RK3 + substepper coupling. The same practical conclusion follows from
+the analysis in
+[Skamarock and Klemp (1992)](@cite SkamarockKlemp1992),
+[Baldauf (2010)](@cite Baldauf2010), and
+[Klemp, Skamarock, and Ha (2018)](@cite KlempSkamarockHa2018), which all prescribe
+divergence damping as a robust acoustic filter for practical integrations.
 
-```math
-\frac{c_s \, Δt}{Δz} \lesssim \frac{\sqrt{3}}{2} \approx 0.87
-```
+### 3 — Damping as a filter
 
-With ``c_s \approx 347\,``m/s and ``Δz = 1000\,``m, this restricts
-``Δt \lesssim 2.5\,``s---only marginally better than the unsplit acoustic CFL and far
-short of what the advective CFL would allow.
+The Klemp damping acts as a wavenumber-controlled filter that targets the divergent
+acoustic component while leaving balanced (non-divergent) modes essentially untouched. The
+divergence proxy ``D_τ ≈ -Δτ ∇·(ρ\boldsymbol{u})'`` vanishes for a discrete rest state and
+for purely solenoidal flow. Divergent acoustic perturbations pick up dissipation; resolved
+balanced modes with nonzero divergence should be assessed with convergence and benchmark
+diagnostics rather than attributed to the filter alone.
 
-The Exner pressure formulation resolves this by evolving ``\pi'`` as the acoustic prognostic
-variable. Since the acoustic pressure gradient ``c_p^d \bar{\theta}_v \boldsymbol{\nabla} \pi'`` uses
-stage-frozen ``\bar{\theta}_v``, the acoustic dynamics are decoupled from the outer
-Runge-Kutta integration. The equation of state is still re-evaluated between stages (providing
-an accurate state for the next stage's slow tendencies), but this re-evaluation does not feed
-back into the acoustic substep dynamics.
+## Stability constraints and practical guidance
 
-### Stability constraints and practical guidance
+Two CFL-like constraints govern the choice of ``Δt`` and the substep count ``N``:
 
-The split-explicit scheme involves two CFL-like constraints:
-
-1. **Acoustic substep CFL**: Each substep must resolve horizontal acoustic wave propagation:
+1. **Acoustic substep CFL** (horizontal):
 
    ```math
-   Δτ < \frac{Δx}{c_s + |\boldsymbol{u}|}
+   Δτ ≤ \frac{\min(Δx, Δy)}{c_s + |\boldsymbol{u}|} .
    ```
 
-   The vertically implicit solver removes the vertical acoustic CFL constraint entirely.
+   The speed of sound ``c_s = \sqrt{\gamma^d R^d T_r}``, where the reference temperature is chosen to be ``T_r = 300\,``K.
 
-2. **Advective CFL for the outer step**: The outer time step ``Δt`` must remain stable for
-   the advective dynamics resolved by the outer Runge-Kutta integration. The Exner pressure
-   formulation decouples the acoustic modes from the outer integrator, so the outer time step
-   is limited only by the advective CFL.
+   The vertical implicit solve removes the vertical acoustic CFL constraint entirely.
 
-These constraints determine the required number of substeps ``N_s``. For the default
-Wicker-Skamarock RK3, the acoustic substep size is constant at ``Δτ = Δt / N_s``
-while the substep count varies per stage (``N_\tau = \mathrm{round}(\beta N_s)``).
+2. **Advective CFL for the outer step**:
 
-For the SK94 inertia-gravity wave benchmark (``\Delta x = \Delta z = 1\,``km, ``U = 20\,``m/s),
-``N_s = 8`` with ``\Delta t = 12\,``s gives ``\Delta\tau = 1.5\,``s and an acoustic CFL of
-``\approx 0.52``.
+   ```math
+   Δt ≤ \frac{\min(Δx, Δy, Δz)}{|\boldsymbol{u}|} .
+   ```
 
-### Summary of the algorithm
+   The split-explicit treatment decouples the fastest acoustic propagation from the outer
+   integrator, so the advective CFL is the first outer-step constraint to check. It is not
+   the only practical constraint, however: moist cases with strong initial acoustic
+   adjustment can still require a smaller outer-step cap than the advective CFL alone
+   would choose. In reduced RICO validation with one-moment microphysics, uncapped adaptive
+   stepping became unstable when the outer step grew to roughly ``30\,``s, while
+   ``max_Δt = 20\,``s completed a 6-hour compact run.
 
-The complete algorithm for one Wicker-Skamarock RK3 time step is:
+For LES cases translated from anelastic dynamics, the advective CFL is therefore a
+performance knob rather than a complete stability criterion. Same-resolution BOMEX and
+RICO pilot runs with compressible substepping completed 6 simulated hours at
+``\mathrm{CFL} = 1.4``, but this did not guarantee a faster end-to-end run: the
+split-explicit acoustic loop can dominate the cost. In the same RICO harness the anelastic
+run failed at ``\mathrm{CFL} = 1.4`` and completed at ``\mathrm{CFL} = 0.7``. Benchmark
+both the accepted ``Δt`` and the acoustic substep count ``N`` when comparing formulations.
 
-1. **Store initial state**: ``U^0 = U^n``
-2. **For each RK stage** ``k = 1, 2, 3`` with fractions ``β_k = 1/3, 1/2, 1``:
-   1. Compute slow tendencies ``G^s`` from the current evaluation state
-   2. Convert slow tendencies to velocity/pressure form: ``\dot{u}^s``, ``\dot{w}^s``, ``\dot{\pi}^s``
-   3. Freeze stage quantities: ``\bar{\theta}_v``, ``S``, ``\pi_0``
-   4. Initialize ``\pi' = \pi(U^n) - \pi_0`` (consistent with velocity reset to ``U^n``)
-   5. Reset velocities ``(u, v, w)`` to ``U^n``
-   6. **Acoustic substep loop** (``N_\tau`` iterations with ``\Delta\tau = \Delta t / N_s``):
-      - Forward: update ``u, v`` from ``\dot{u}^s`` and ``c_p^d \bar{\theta}_v \boldsymbol{\nabla} \tilde{\pi}'``
-      - Implicit: solve tridiagonal for ``\pi'`` and recover ``w``
-      - Filter: apply forward-extrapolation to ``\pi'``
-      - Accumulate time-averaged velocities
-   7. **Recover** ``(\rho\theta, \rho)`` from ``\pi'`` via the equation of state
-   8. Reconstruct momentum: ``\rho\boldsymbol{u} = \rho \, \boldsymbol{u}``
-   9. Update state: compute ``p``, ``T``, ``\theta_v`` from the equation of state
+The default `substeps = nothing` adaptively chooses ``N`` from the horizontal acoustic CFL
+each step:
+
+```math
+N \approx
+\left\lceil \frac{Δt \, \mathbb{C}^{ac}}{ν \, Δx_\min} \right\rceil ,
+```
+
+with ``\mathbb{C}^{ac} = \sqrt{γ^d R^d T_r}`` evaluated at a nominal reference temperature ``T_r = 300\,``K and
+``ν = `` `acoustic_cfl` (default ``0.5``, the ERF/WRF target — equivalent to the
+conventional safety factor of ``2``). Lower ``ν`` produces more substeps and a shorter
+``Δτ``; raise it (closer to the linear stability bound of ``1``) only after verifying that
+the resulting acoustic noise level remains acceptable. The setting is ignored when
+`substeps` is given an explicit integer, which pins ``Δτ = Δt / N`` for reproducibility.
+
+## Defaults and verification
+
+The default split-explicit configuration is
+
+```julia
+SplitExplicitTimeDiscretization(
+    forward_weight = 0.65,
+    damping = ThermalDivergenceDamping(coefficient = 0.1),
+    substep_distribution = ProportionalSubsteps(),
+)
+```
+
+The pairing ``ω = 0.65, α = 0.1`` is verified by:
+
+| Test                                     | Result                                          |
+|------------------------------------------|-------------------------------------------------|
+| `test/substepper_rest_state.jl`          | Rest atmosphere at machine ``ε`` over 200 outer steps × ``Δt = 20\,``s |
+| DCMIP-2016 dry baroclinic wave           | Stable for 12 simulated h × ``Δt = 225\,``s on ``360 × 160 × 64`` lat-lon grid |
+| DCMIP-2016 moist baroclinic wave         | Stable for 1 simulated h × ``Δt = 20\,``s on ``360 × 160 × 64`` lat-lon grid with one-moment microphysics |
+
+The exact discrete rest atmosphere is also covered with
+`NoDivergenceDamping()` and ``ω = 0.55`` in `test/substepper_rest_state.jl`; the
+stage-rewind formulation keeps that state bounded at ``Δt = 20\,``s. This should not be
+interpreted as a recommendation to remove damping in production: noisy baroclinic-wave and
+LES cases still use the default horizontal Klemp damping to control grid-scale divergent
+acoustic modes.
 
 ## Comparison with anelastic dynamics
 
-| Property | [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics) | [`CompressibleDynamics`](@ref) |
-|----------|-------------------|----------------------|
-| Acoustic waves | Filtered | Resolved |
-| Density | Reference ``ρᵣ(z)`` only | Prognostic ``ρ(x,y,z,t)`` |
-| Pressure | Solved from Poisson equation | Computed from equation of state |
-| Time step | Limited by advective CFL | Advective CFL (split-explicit) or acoustic CFL (explicit) |
-| Typical applications | LES, mesoscale | Acoustic studies, validation |
+| Property             | [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics) | [`CompressibleDynamics`](@ref) |
+|----------------------|-------------------|----------------------|
+| Acoustic waves       | Filtered          | Resolved             |
+| Density              | Reference ``ρ_r(z)`` only | Prognostic ``ρ(x,y,z,t)`` |
+| Pressure             | Solved from Poisson equation | Computed from equation of state |
+| Time step            | Limited by advective CFL | Advective CFL (split-explicit) or full acoustic CFL (explicit) |
+| Typical applications | LES, mesoscale    | Global flows, baroclinic waves, acoustic studies, validation |
