@@ -74,7 +74,6 @@ using Oceananigans.Operators:
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
     δxᶜᵃᵃ, δyᵃᶜᵃ,
     div_xyᶜᶜᶜ,
-    ζ₃ᶠᶠᶜ,
     Δzᶜᶜᶜ, Δzᶜᶜᶠ,
     Δxᶠᶜᶜ, Δxᶜᶠᶜ,
     Δyᶜᶠᶜ, Δyᶠᶜᶜ,
@@ -1035,12 +1034,6 @@ end
 # No-op default
 @inline apply_divergence_damping!(::NoDivergenceDamping, args...) = nothing
 
-# Tuple of damping strategies: apply each in order. Each strategy ADDS its
-# correction to `substepper.momentum_perturbation`, so the per-substep net
-# correction is the sum of all strategies' corrections.
-@inline apply_divergence_damping!(damping::Tuple, args...) =
-    foreach(d -> apply_divergence_damping!(d, args...), damping)
-
 # Implicit-vertical-damping prefactors threaded into the column tridiag and
 # its RHS. Returns `(dᵐ⁺, dˢ⁻) = (ω, 1−ω) · α · Δz²` for
 # `ThermalDivergenceDamping` with `damp_vertical = true`, and `(0, 0)` for
@@ -1050,17 +1043,6 @@ end
 # centering itself supplies the vertical damping (Klemp et al. 2018 eq. 32).
 @inline implicit_damping_factors(::AcousticDampingStrategy, ω, one_minus_ω, grid, FT) =
     (zero(FT), zero(FT))
-
-# Tuple of damping strategies: sum their implicit-vertical contributions
-# into the column tridiag and predictor RHS.
-@inline function implicit_damping_factors(damping::Tuple, ω, one_minus_ω, grid, FT)
-    dᵐ⁺ = zero(FT); dˢ⁻ = zero(FT)
-    for d in damping
-        a, b = implicit_damping_factors(d, ω, one_minus_ω, grid, FT)
-        dᵐ⁺ += a; dˢ⁻ += b
-    end
-    return (dᵐ⁺, dˢ⁻)
-end
 
 @inline function implicit_damping_factors(damping::ThermalDivergenceDamping, ω, one_minus_ω, grid, FT)
     damping.damp_vertical || return (zero(FT), zero(FT))
@@ -1176,59 +1158,6 @@ end
         ρv′[i, j, k] -= γʸ * ∂y_div / θᴸᶜᶠᶜ * !on_y_boundary(i, j, k, grid)
     end
 end
-
-# FV3-style 2nd-order vorticity damping (Lin & Harris 2016, "Explicit
-# Diffusion in GFDL FV³"). Acts on the rotational component of momentum
-# only, complementary to the divergence damping above. ζ′ at FFC corners
-# is computed via Oceananigans' `ζ₃ᶠᶠᶜ`; the gradient of ζ′ is then taken
-# from FFC to FCC (for ρu update) and FFC to CFC (for ρv update).
-#
-# Continuous form:
-#   ∂(ρu)/∂t |damp = +ν ∂ζ/∂y      ∂(ρv)/∂t |damp = -ν ∂ζ/∂x
-# Discrete:
-#   ρu′[i,j,k] += ν · (ζ′[i,j+1] - ζ′[i,j]) / Δyᶠᶜᶜ
-#   ρv′[i,j,k] -= ν · (ζ′[i+1,j] - ζ′[i,j]) / Δxᶜᶠᶜ
-@kernel function _vorticity_damping_2nd!(ρu′, ρv′, grid, ν)
-    i, j, k = @index(Global, NTuple)
-
-    @inbounds begin
-        ζ_ij  = ζ₃ᶠᶠᶜ(i,   j,   k, grid, ρu′, ρv′)
-        ζ_jp1 = ζ₃ᶠᶠᶜ(i,   j+1, k, grid, ρu′, ρv′)
-        ζ_ip1 = ζ₃ᶠᶠᶜ(i+1, j,   k, grid, ρu′, ρv′)
-
-        ∂y_ζ = (ζ_jp1 - ζ_ij) / Δyᶠᶜᶜ(i, j, k, grid)
-        ρu′[i, j, k] += ν * ∂y_ζ * !on_x_boundary(i, j, k, grid)
-
-        ∂x_ζ = (ζ_ip1 - ζ_ij) / Δxᶜᶠᶜ(i, j, k, grid)
-        ρv′[i, j, k] -= ν * ∂x_ζ * !on_y_boundary(i, j, k, grid)
-    end
-end
-
-# `ν = α · ΔAₘᵢₙ / Δτ` per Lin & Harris (2016) eq. (5) for 2nd-order
-# damping (their N=0). For higher-order biharmonic vorticity damping
-# (FV3 nord=1, 2), iterate the Laplacian — not yet implemented.
-function apply_divergence_damping!(damping::VorticityDamping, substepper, grid, Δτ, thermodynamic_constants)
-    FT    = eltype(grid)
-    arch  = architecture(grid)
-    α     = convert(FT, damping.coefficient)
-    Δτ_FT = convert(FT, Δτ)
-
-    TX, TY, _ = topology(grid)
-    Δx_min = TX === Flat ? zero(FT) : convert(FT, minimum_xspacing(grid))
-    Δy_min = TY === Flat ? zero(FT) : convert(FT, minimum_yspacing(grid))
-    ν = (TX === Flat && TY === Flat) ? zero(FT) : α * Δx_min * Δy_min / Δτ_FT
-
-    launch!(arch, grid, :xyz, _vorticity_damping_2nd!,
-            substepper.momentum_perturbation.u,
-            substepper.momentum_perturbation.v,
-            grid, ν)
-
-    return nothing
-end
-
-# Vorticity damping is explicit — no implicit-vertical contribution.
-@inline implicit_damping_factors(::VorticityDamping, ω, one_minus_ω, grid, FT) =
-    (zero(FT), zero(FT))
 
 #####
 ##### Section 10 — Time-averaged velocity for non-acoustic scalar transport

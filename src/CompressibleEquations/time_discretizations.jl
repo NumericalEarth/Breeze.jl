@@ -291,49 +291,6 @@ Fields
 
 See also [`ExplicitTimeStepping`](@ref).
 """
-# `damping` may be a single `AcousticDampingStrategy` or a `Tuple` of them.
-# When it's a tuple, each strategy is applied in order at every substep:
-# explicit corrections accumulate (each adds to `momentum_perturbation`),
-# and implicit-vertical-damping factors sum into the column tridiag. Useful
-# for combining divergence damping with upper sponge or vorticity damping.
-"""
-$(TYPEDEF)
-
-FV3-style 2nd-order vorticity damping inside the substepper inner loop.
-Damps the perturbation vertical vorticity ``ζ′ = ∂(ρv)′/∂x − ∂(ρu)′/∂y``
-at the FFC corners, then updates ``(ρu)′``, ``(ρv)′`` via the gradient
-of ``ζ′``:
-
-```math
-(ρu)′ ← (ρu)′ + ν \\, ∂ζ′/∂y, \\quad (ρv)′ ← (ρv)′ − ν \\, ∂ζ′/∂x
-```
-
-with ``ν = α · ΔA_{\\min} / Δτ``. Acts on the rotational component of the
-horizontal momentum only — complementary to
-[`ThermalDivergenceDamping`](@ref) which damps the divergent component.
-
-Per Lin & Harris (2016, "Explicit Diffusion in GFDL FV³"), this damping is
-*"beneficial when using a non-monotonic advection scheme, which lacks the
-implicit diffusion of monotonic advection."* Breeze defaults to WENO
-advection, which is non-monotonic — making `VorticityDamping` the natural
-analogue of FV3's vorticity damping (`vtdm4` namelist parameter).
-
-# Keyword arguments
-
-- `coefficient`: nondimensional, FV3's `vtdm4`. Default `0.05`. Should be
-  significantly smaller than the divergence-damping coefficient — even
-  in non-monotonic advection schemes the upstream numerics still has some
-  implicit diffusion, whereas vorticity is not explicitly advected.
-"""
-struct VorticityDamping{FT} <: AcousticDampingStrategy
-    coefficient :: FT
-end
-
-function VorticityDamping(; coefficient = 0.05)
-    FT = Oceananigans.defaults.FloatType
-    return VorticityDamping{FT}(convert(FT, coefficient))
-end
-
 convert_acoustic_parameter(::Type{FT}, damping::NoDivergenceDamping) where FT = damping
 
 function convert_acoustic_parameter(::Type{FT}, damping::ThermalDivergenceDamping) where FT
@@ -343,12 +300,6 @@ function convert_acoustic_parameter(::Type{FT}, damping::ThermalDivergenceDampin
                                            length_scale,
                                            damping.damp_vertical)
 end
-
-convert_acoustic_parameter(::Type{FT}, damping::VorticityDamping) where FT =
-    VorticityDamping{FT}(convert(FT, damping.coefficient))
-
-convert_acoustic_parameter(::Type{FT}, damping::Tuple) where FT =
-    map(d -> convert_acoustic_parameter(FT, d), damping)
 
 """
 Abstract supertype for upper-sponge ramp shapes. A concrete `AbstractRamp`

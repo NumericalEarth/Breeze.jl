@@ -27,14 +27,12 @@ export
     AcousticDampingStrategy,
     NoDivergenceDamping,
     ThermalDivergenceDamping,
-    VorticityDamping,
     UpperSponge,
     AbstractRamp,
     LinearRamp,
     CubicRamp,
     Sin2Ramp,
     ExplicitTimeStepping,
-    CompressibleVectorInvariant,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -231,11 +229,9 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AcousticOuterScheme, WickerSkamarock3,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping,
-                              VorticityDamping,
                               UpperSponge,
                               AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
-                              ExplicitTimeStepping,
-                              CompressibleVectorInvariant
+                              ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
