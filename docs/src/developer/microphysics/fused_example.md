@@ -205,7 +205,7 @@ The remaining interface — `update_microphysical_auxiliaries!`, `moisture_fract
 `maybe_adjust_thermodynamic_state` — is independent of how tendencies are dispatched, and
 the implementations from the [per-name walkthrough](example.md) carry over verbatim:
 
-```@example fused_microphysics_example
+```julia
 using Breeze.Thermodynamics: MoistureMassFractions
 import Breeze.AtmosphereModels: update_microphysical_auxiliaries!,
                                  moisture_fractions,
