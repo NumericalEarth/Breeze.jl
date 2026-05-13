@@ -446,8 +446,8 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          sponge = nothing,
                                          substep_distribution = ProportionalSubsteps())
 
-    damping isa Union{AcousticDampingStrategy, Tuple} ||
-        throw(ArgumentError("`damping` must be an `AcousticDampingStrategy` or a tuple of them"))
+    damping isa AcousticDampingStrategy ||
+        throw(ArgumentError("`damping` must be an `AcousticDampingStrategy`"))
 
     sponge isa Union{Nothing, UpperSponge} ||
         throw(ArgumentError("`sponge` must be `nothing` or an `UpperSponge`"))

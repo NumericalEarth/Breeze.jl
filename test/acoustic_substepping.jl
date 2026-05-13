@@ -207,6 +207,11 @@ for arch in arches
             @test acoustic.sponge.damping_rate ≈ FT(sponge_rate)
             @test acoustic.sponge.depth ≈ FT(sponge_depth)
         end
+
+        @testset "Invalid damping parameters" begin
+            @test_throws ArgumentError SplitExplicitTimeDiscretization(
+                damping=(ThermalDivergenceDamping(), NoDivergenceDamping()))
+        end
     end
 
     #####
