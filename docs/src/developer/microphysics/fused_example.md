@@ -104,7 +104,7 @@ end
 The helper is gridless: it works equally well in a parcel model context. If a parcel model
 needs the per-name interface, the helper can also be wrapped:
 
-```@example fused_microphysics_example
+```julia
 import Breeze.AtmosphereModels: microphysical_tendency
 
 @inline microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqᵛ}, ρ, ℳ, 𝒰, c) =
