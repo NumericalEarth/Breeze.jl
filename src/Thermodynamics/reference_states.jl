@@ -547,7 +547,7 @@ end
 
         # Initial guess: continuous Π integration (one face step).
         @inbounds θ_face = (θ₀[1, 1, k] + θ₀[1, 1, k - 1]) / 2
-        Πᵏ_init = π₀[1, 1, k - 1] - g * Δz_face / (cᵖᵈ * θ_face)
+        @inbounds Πᵏ_init = π₀[1, 1, k - 1] - g * Δz_face / (cᵖᵈ * θ_face)
         pᵏ = pˢᵗ * Πᵏ_init^(1/κ)
 
         Aᵏ = g * pˢᵗ^κ / (2 * Rᵈ * θᵏ)
