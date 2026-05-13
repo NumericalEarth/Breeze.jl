@@ -16,11 +16,11 @@
 #####
 ##### The linearized perturbation equations integrated by the substep loop:
 #####
-#####   ∂t ρ′    +     ∇·((ρu)′, (ρv)′, (ρw)′)       = Gˢρ
+#####   ∂t ρ′    +     ∇·((ρu)′, (ρv)′, (ρw)′)        = Gˢρ
 #####   ∂t (ρθ)′ +     ∇·(θᴸ · ((ρu)′, (ρv)′, (ρw)′)) = Gˢρθ
-#####   ∂t (ρu)′ + ∂x pᴸ + ∂x(Cᴸ (ρθ)′)             = Gˢρu
-#####   ∂t (ρv)′ + ∂y pᴸ + ∂y(Cᴸ (ρθ)′)             = Gˢρv
-#####   ∂t (ρw)′ +          ∂z(Cᴸ (ρθ)′) + g · ρ′   = Gˢρw
+#####   ∂t (ρu)′ + ∂x pᴸ + ∂x(Cᴸ (ρθ)′)               = Gˢρu
+#####   ∂t (ρv)′ + ∂y pᴸ + ∂y(Cᴸ (ρθ)′)               = Gˢρv
+#####   ∂t (ρw)′ +         ∂z(Cᴸ (ρθ)′) + g · ρ′      = Gˢρw
 #####
 ##### where Cᴸ = γᵐRᵐᴸΠᴸ. The discrete PGF uses the gradient of the
 ##### cell-centered product Cᴸ(ρθ)′.
