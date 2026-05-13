@@ -533,8 +533,8 @@ end
         pᵣ[1, 1, 1] = p¹
         ρᵣ[1, 1, 1] = ρ¹
     end
-    p⁻ = pᵣ[1, 1, 1]
-    ρ⁻ = ρᵣ[1, 1, 1]
+    p⁻ = p¹
+    ρ⁻ = ρ¹
 
     # Discrete-balance recurrence for k = 2..Nz. The residual
     #   F(p) = (p − p⁻) / Δz_face + g · (ρ(p) + ρ⁻) / 2
