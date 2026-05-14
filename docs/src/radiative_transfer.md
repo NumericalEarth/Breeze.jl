@@ -44,7 +44,7 @@ clock = Clock(time=DateTime(2024, 9, 27, 16, 0, 0))
 model = AtmosphereModel(grid; clock, dynamics, radiation)
 ```
 
-When a `DateTime` clock is used, the solar zenith angle is computed automatically from the time and grid location (longitude and latitude).
+When a `DateTime` clock is used, the cosine of the solar zenith angle is computed automatically from the time and grid location (longitude and latitude). See [Solar zenith angle](@ref) below for the full set of options.
 
 ### Gray Radiation Model
 
@@ -88,16 +88,174 @@ After running [`set!`](@ref), the radiative fluxes are available from the radiat
     the direct beam flux is computed. There is no diffuse shortwave or upwelling
     shortwave in this model.
 
-### Solar Zenith Angle
+## Solar zenith angle
 
-When using a `DateTime` clock, the solar zenith angle is computed from:
-- Grid location (longitude from `x`, latitude from `y` for single-column grids)
-- Date and time from `model.clock.time`
+The cosine of the solar zenith angle ``\cos(θ_z)`` controls the magnitude of the
+top-of-atmosphere shortwave flux and the slant-path optical depth through the
+column. Breeze provides one keyword — `solar_position` — that selects how
+``\cos(θ_z)`` is determined on each radiation update. It takes any subtype of
+[`AbstractSolarPosition`](@ref). The two concrete subtypes cover the common
+cases:
 
-The calculation accounts for:
-- Day of year (for solar declination)
-- Hour angle (based on solar time)
-- Latitude (for observer position)
+| Subtype | Behavior | Typical use |
+|---|---|---|
+| [`ApparentSolarPosition`](@ref) (default) | Real-Earth time-varying. ``\cos(θ_z)`` is recomputed each update from the model clock and observer ``(λ, φ)`` via [`Breeze.CelestialMechanics.cos_solar_zenith_angle`](@ref) — includes orbital declination, equation of time, etc. | Real-world simulations driven by a calendar date. |
+| [`DiurnalSolarPosition`](@ref) | Idealized diurnal cycle at a fixed latitude and declination. ``\cos(θ_z)`` follows the analytical hour-angle formula without any calendar dependence. Requires a numeric clock. | Idealized diurnal-cycle studies, perpetual equinox or solstice runs, non-Earth rotators. |
+| [`FixedCosineZenith`](@ref) | Constant ``\cos(θ_z)``. The clock has no effect on the sun position. | Idealized radiative-convective equilibrium (RCE), forcing-shape studies. |
+
+### Time-varying apparent sun
+
+[`ApparentSolarPosition`](@ref) accepts two optional keyword arguments:
+
+- `coordinate`: an explicit `(longitude, latitude)` tuple in degrees, or
+  `nothing` (the default) to read ``(λ, φ)`` from the grid's coordinates.
+  For single-column grids the grid's `(x, y)` is interpreted as `(λ, φ)`.
+- `epoch`: a `DateTime` anchor for floating-point model clocks. The model time
+  in seconds is added to `epoch` to obtain the absolute `DateTime`. With a
+  `DateTime` clock, `epoch` is ignored.
+
+```julia
+# Today's default: DateTime clock, λ/φ inferred from the grid.
+solar_position = ApparentSolarPosition()
+
+# Float clock + epoch — useful on lat–lon / curvilinear grids where clock
+# precision matters but you want full per-column zenith.
+solar_position = ApparentSolarPosition(epoch = DateTime(2024, 1, 1))
+
+# Pin a 3D simulation to a specific observer (overrides per-column lat/lon).
+solar_position = ApparentSolarPosition(coordinate = (-70.9, 42.5),
+                                       epoch      = DateTime(2024, 1, 1))
+```
+
+!!! warning "Numeric clock + `epoch = nothing`"
+    `ApparentSolarPosition(epoch = nothing)` with a floating-point model clock
+    cannot resolve a `DateTime`. The radiation update will throw an
+    `ArgumentError` with instructions: switch to a `DateTime` clock, supply an
+    `epoch`, or use [`FixedCosineZenith`](@ref).
+
+### Idealized diurnal cycle
+
+For idealized studies where you want a clean 24-hour cycle (or any rotation
+period) without orbital mechanics, calendar dates, or equation-of-time
+corrections, use [`DiurnalSolarPosition`](@ref):
+
+```julia
+# Perpetual equinox at 30°N — 24-hour day, noon at t = 0
+solar_position = DiurnalSolarPosition(latitude = 30)
+
+# Perpetual June solstice analog at 45°N
+solar_position = DiurnalSolarPosition(latitude = 45, declination = 23.5)
+
+# Non-Earth rotator with a 10-hour day; the simulation starts at sunrise
+solar_position = DiurnalSolarPosition(latitude = 0,
+                                      day_length  = 10 * 3600,
+                                      noon_offset = 5  * 3600)
+```
+
+The cosine of the solar zenith angle is computed analytically each radiation
+update from the model clock:
+
+```math
+\cos(θ_z) = \sin(φ) \sin(δ) + \cos(φ) \cos(δ) \cos(ω),
+\qquad
+ω = \frac{2π}{T_d} (t - t_{\text{noon}}),
+```
+
+where ``φ`` is the (fixed) latitude, ``δ`` is the (fixed) declination,
+``T_d`` is the day length, and ``t_{\text{noon}}`` is the simulation time
+at which local noon occurs. There is no annual cycle, no equation of time,
+and no longitude — by design.
+
+#### Required: numeric clock
+
+`DiurnalSolarPosition` reads `model.clock.time` as "seconds since the start
+of the simulation" and computes the hour angle from it. A `DateTime` clock
+is rejected with an actionable error, because pairing one with this
+idealized cycle would be semantically ambiguous (the calendar would be
+ignored). Use `Clock(time = 0.0)` (or any numeric `Clock`) when constructing
+the `AtmosphereModel`.
+
+#### Choosing `noon_offset`
+
+The default `noon_offset = 0` places local noon at `t = 0` — the sun is
+overhead at the start of the simulation. To start at sunrise instead, set
+`noon_offset = day_length / 4`; to start at midnight, set
+`noon_offset = day_length / 2`. The cosine function is naturally periodic,
+so no mod is required and the cycle simply repeats every `day_length`
+seconds.
+
+#### Gray-optics latitude
+
+Unlike [`FixedCosineZenith`](@ref) — where latitude for the gray τ comes
+from the grid — `DiurnalSolarPosition` carries its own `latitude` and uses
+it for *both* the diurnal cos(θ_z) calculation *and* the gray-optics
+latitude-dependent τ. This keeps the two consistent in idealized
+single-column setups where the grid's `y` might be a placeholder.
+
+### Constant cos(θ_z)
+
+For idealized studies where you want a single, time-independent solar geometry
+— typical in RCE intercomparisons — use [`FixedCosineZenith`](@ref):
+
+```julia
+radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+                                   surface_temperature  = 300,
+                                   surface_albedo       = 0.1,
+                                   solar_constant       = 1361,    # W/m²
+                                   solar_position       = FixedCosineZenith(0.5))
+
+# A floating-point clock works fine — no epoch is required.
+clock = Clock(time = 0.0)
+model = AtmosphereModel(grid; clock, dynamics, radiation)
+```
+
+The cosine of the zenith angle is written into the RRTMGP boundary-condition
+array once at construction and never recomputed; the per-step
+`update_solar_zenith_angle!` call becomes a no-op.
+
+#### Choosing a value
+
+Common choices for ``\cos(θ_z)`` in idealized work:
+
+| Setup | ``\cos(θ_z)`` | Notes |
+|---|---|---|
+| Diurnal mean at the equator | ``\approx 0.5`` | A common RCE default. |
+| Global annual mean | ``\approx 0.41`` | Matches the planet's spherical insolation when paired with ``S_0 / 4``. |
+| Overhead sun | ``1`` | No slant-path effect. |
+
+#### Interaction with `solar_constant`
+
+The top-of-atmosphere downward shortwave flux is `solar_constant * cos_zenith`,
+so `solar_constant` and `FixedCosineZenith` together control both:
+
+- the **TOA SW magnitude** (their product), and
+- the **slant-path absorption** (which depends on ``\cos(θ_z)`` *alone*, through
+  ``\exp(-τ/\cos(θ_z))``).
+
+Note that scaling `solar_constant` and scaling `cos_zenith` are **not**
+equivalent for the shortwave heating profile. The TOA flux changes the same
+way, but the shape of the absorption with height does not. If your study cares
+about the vertical structure of SW heating (it usually does), pick
+``\cos(θ_z)`` to match the slant path you actually want, then choose
+`solar_constant` to set the magnitude.
+
+For example, to model diurnal-mean conditions with the full solar constant
+spread over the day's path:
+
+```julia
+solar_position = FixedCosineZenith(0.5)
+solar_constant = 1361 / 2      # because TOA SW = solar_constant * cos_zenith
+```
+
+#### Latitude for gray optics
+
+The gray-optics longitudinal-mean optical thickness depends on latitude through
+``τ_e`` and ``τ_p``. With [`FixedCosineZenith`](@ref) you specify only
+``\cos(θ_z)`` — Breeze still reads the latitude needed for the gray τ from the
+grid's coordinates (or from `coordinate`, in 3D setups where you pass an
+explicit position via `ApparentSolarPosition`). This means it's fine to combine
+a fixed zenith with a single-column grid located at a particular latitude:
+`τ_e/τ_p` will reflect that latitude, while the zenith stays pinned.
 
 ## Clear-sky Full-spectrum Radiation
 
@@ -118,6 +276,9 @@ radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
 ```
 
 The [`BackgroundAtmosphere`](@ref) struct specifies volume mixing ratios for radiatively active gases (CO₂, CH₄, N₂O, O₃, etc.). Water vapor is computed from the model's prognostic moisture field.
+
+Clear-sky and all-sky models accept the same `solar_position` keyword as
+gray-optics; the three optics flavors share the solar-position machinery.
 
 ## Surface Properties
 

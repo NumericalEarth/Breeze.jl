@@ -46,11 +46,12 @@ examples = [
     Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),
     Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
     Example("Cloud formation in prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
-    # Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),
-    # Example("Splitting supercell", "splitting_supercell"; build_always=false, gpu=true),
-    # Example("Tropical cyclone world", "tropical_cyclone_world"; build_always=false, gpu=true),
+    Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),
+    Example("Splitting supercell", "splitting_supercell"; build_always=false, gpu=true),
+    Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=false),
+    Example("Tropical cyclone world", "tropical_cyclone_world"; build_always=false, gpu=true),
     Example("Tropical cyclone with stratiform rainband heating (YD19)", "tropical_cyclone_with_rainband"; build_always=false, gpu=true),
-    # Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
+    Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
 ]
 
 # Filter out long-running example if necessary
@@ -62,8 +63,8 @@ example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex i
 # very heuristic-y, can be refined later: reserve a larger semaphore for CPU
 # jobs, than for the GPU ones.
 tot_threads = Threads.nthreads(:interactive)
-ncpu = (tot_threads * 2) ÷ 3
-ngpu = tot_threads - ncpu
+ncpu = max(1, (tot_threads * 2) ÷ 3)
+ngpu = max(1, tot_threads - ncpu)
 cpu_semaphore = Base.Semaphore(ncpu)
 gpu_semaphore = Base.Semaphore(ngpu)
 @time "literate" @sync for example in examples

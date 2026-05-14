@@ -20,7 +20,10 @@ using Breeze.AtmosphereModels:
     cloud_ice_effective_radius,
     grid_moisture_fractions,
     specific_prognostic_moisture,
-    RadiativeTransferModel
+    RadiativeTransferModel,
+    AbstractSolarPosition,
+    ApparentSolarPosition,
+    FixedCosineZenith
 
 using Breeze.Thermodynamics: ThermodynamicConstants
 
@@ -36,7 +39,7 @@ using RRTMGP.Vmrs: init_vmr
 # Dispatch on AtmosphericState having CloudState (not Nothing) for all-sky radiation
 # AtmosphericState{FTA1D, FTA1DN, FTA2D, D, VMR, CLD, AER} where CLD is the 6th type parameter
 const AllSkyAtmosphericState = AtmosphericState{<:Any, <:Any, <:Any, <:Any, <:Any, <:CloudState}
-const AllSkyRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:AllSkyAtmosphericState}
+const AllSkyRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:AllSkyAtmosphericState}
 
 #####
 ##### Constructor
@@ -55,10 +58,9 @@ RRTMGP loads lookup tables from netCDF via an extension.
   O₃ can be a Number or Function of `z`; other gases are global mean constants.
   O₃ can be a Number, Function, or Field; other gases are global mean constants.
 - `surface_temperature`: Surface temperature in Kelvin (required).
-- `coordinate`: Solar geometry specification. Can be:
-  - `nothing` (default): extracts location from grid coordinates for time-varying zenith angle
-  - `(longitude, latitude)` tuple in degrees: uses DateTime clock for time-varying zenith angle
-- `epoch`: Optional epoch for computing time with floating-point clocks.
+- `solar_position`: Specification of the solar zenith angle. See [`AbstractSolarPosition`](@ref) and its subtypes:
+  - [`ApparentSolarPosition`](@ref) (default) — time-varying, computed from the model clock and grid (or explicit) longitude/latitude.
+  - [`FixedCosineZenith`](@ref) — constant cos(θ_z), independent of the clock.
 - `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
 - `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
                     Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
@@ -74,8 +76,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  constants::ThermodynamicConstants;
                                                  background_atmosphere = BackgroundAtmosphere(),
                                                  surface_temperature,
-                                                 coordinate = nothing,
-                                                 epoch = nothing,
+                                                 solar_position::AbstractSolarPosition = ApparentSolarPosition(),
                                                  surface_emissivity = 0.98,
                                                  direct_surface_albedo = nothing,
                                                  diffuse_surface_albedo = nothing,
@@ -92,7 +93,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     error_msg = "Must either provide surface_albedo or *both* of
                  direct_surface_albedo and diffuse_surface_albedo"
 
-    coordinate = maybe_infer_coordinate(coordinate, grid)
+    solar_position = maybe_infer_solar_position(solar_position, grid)
 
     # Materialize background atmosphere (converts O₃ functions to fields)
     background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
@@ -152,8 +153,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     rrtmgp_Tᶠ = ArrayType{FT}(undef, Nz+1, Nc)
     rrtmgp_T₀ = ArrayType{FT}(undef, Nc)
 
-    set_longitude!(rrtmgp_λ, coordinate, grid)
-    set_latitude!(rrtmgp_φ, coordinate, grid)
+    set_longitude!(rrtmgp_λ, solar_position, grid)
+    set_latitude!(rrtmgp_φ, solar_position, grid)
 
     vmr = init_vmr(Ngas, Nz, Nc, FT, ArrayType; gm=true)
     set_global_mean_gases!(vmr, luts.lookups.idx_gases_sw, background_atmosphere)
@@ -190,6 +191,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     # Boundary conditions (bandwise emissivity/albedo; incident fluxes are unused here)
     cos_zenith = ArrayType{FT}(undef, Nc)
+    initialize_cos_zenith!(cos_zenith, solar_position)
     rrtmgp_ℐ₀ = ArrayType{FT}(undef, Nc)
     rrtmgp_ℐ₀ .= convert(FT, solar_constant)
 
@@ -243,8 +245,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                      ice_effective_radius
 
     return RadiativeTransferModel(convert(FT, solar_constant),
-                                  coordinate,
-                                  epoch,
+                                  solar_position,
                                   surface_properties,
                                   background_atmosphere,
                                   atmospheric_state,
@@ -282,9 +283,8 @@ function AtmosphereModels._update_radiation!(rtm::AllSkyRadiativeTransferModel, 
                                rtm.liquid_effective_radius,
                                rtm.ice_effective_radius)
 
-    # Update solar zenith angle
-    datetime = compute_datetime(clock.time, rtm.epoch)
-    update_solar_zenith_angle!(solver.sws, rtm.coordinate, grid, datetime)
+    # Update solar zenith angle from the solar_position specification
+    update_solar_zenith_angle!(solver.sws, rtm.solar_position, grid, clock)
 
     # Longwave
     update_lw_fluxes!(solver)

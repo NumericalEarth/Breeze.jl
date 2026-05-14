@@ -39,6 +39,12 @@ from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 - `advection`: Advection scheme (default: `WENO(order=5)`)
 - `closure`: Turbulence closure (default: `nothing`)
 - `microphysics`: Microphysics (default: `nothing`)
+- `topology`: Grid topology tuple (default: `(Periodic, Periodic, Bounded)`).
+  Pass `(Periodic, Bounded, Bounded)` for a PBB grid.
+- `simplified`: When `true`, omit the geostrophic body forcing and the
+  field-dependent surface-drag boundary conditions (default `false`). These
+  currently do not materialize on `ReactantState`, so set this `true` for a
+  Reactant-vs-vanilla benchmark to keep the same physics on both backends.
 
 # Physical parameters (from Sauer & Munoz-Esparza 2020, Section 4.2)
 - Domain: 12 km × 12 km × 3 km
@@ -56,6 +62,8 @@ function convective_boundary_layer(arch = CPU();
                                    advection = WENO(order=5),
                                    closure = nothing,
                                    microphysics = nothing,
+                                   topology = (Periodic, Periodic, Bounded),
+                                   simplified = false,
                                    )
 
     # Set floating point precision
@@ -72,7 +80,7 @@ function convective_boundary_layer(arch = CPU();
         y = (0, Ly),
         z = (0, Lz),
         halo = (5, 5, 5),
-        topology = (Periodic, Periodic, Bounded)
+        topology = topology
     )
 
     # Reference state
@@ -109,45 +117,55 @@ function convective_boundary_layer(arch = CPU();
     # Geostrophic wind: (Uᵍ, Vᵍ) = (9, 0) m/s
     Uᵍ = 9.0  # m/s
     Vᵍ = 0.0  # m/s
-    geostrophic = geostrophic_forcings(z -> Uᵍ, z -> Vᵍ)
 
-    # Surface fluxes
-    # Surface heat flux: 0.35 K⋅m/s (kinematic)
-    # Convert to mass flux: multiply by surface density
+    # Surface heat flux: 0.35 K⋅m/s (kinematic). Always applied — it's a
+    # constant flux BC with no field dependencies.
     FT = eltype(grid)
     q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
     ρ₀ = Breeze.Thermodynamics.density(FT(θ₀), FT(p₀), q₀, constants)
-
-    w′θ′ = FT(0.35)  # K⋅m/s (kinematic heat flux)
+    w′θ′ = FT(0.35)
     ρθ_flux = ρ₀ * w′θ′
     ρθ_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(ρθ_flux))
 
-    # Surface momentum flux (drag)
-    # Using bulk drag with roughness length z₀ = 0.05 m
-    # For simplicity, use a friction velocity approach similar to BOMEX
-    u★ = FT(0.4)  # m/s (estimated from typical CBL conditions)
-    ϵ = FT(1e-10)  # small number to avoid division by zero
-    @inline ρu_drag(x, y, t, ρu, ρv, p) = -p.ρ₀ * p.u★^2 * ρu / sqrt(ρu^2 + ρv^2 + p.ϵ)
-    @inline ρv_drag(x, y, t, ρu, ρv, p) = -p.ρ₀ * p.u★^2 * ρv / sqrt(ρu^2 + ρv^2 + p.ϵ)
+    # The geostrophic body forcing and the field-dependent surface drag BCs
+    # currently fail to materialize on `ReactantState` (see
+    # `materialize_atmosphere_model_forcing` upstream). Skip them when the
+    # caller asks for a simplified setup so the same physics is run on both
+    # backends and the comparison stays apples-to-apples.
+    if simplified
+        model = AtmosphereModel(grid;
+            dynamics,
+            advection,
+            closure,
+            coriolis,
+            microphysics,
+            boundary_conditions = (ρθ = ρθ_bcs,)
+        )
+    else
+        geostrophic = geostrophic_forcings(z -> Uᵍ, z -> Vᵍ)
 
-    ρu_drag_bc = FluxBoundaryCondition(ρu_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★, ϵ))
-    ρv_drag_bc = FluxBoundaryCondition(ρv_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★, ϵ))
-    ρu_bcs = FieldBoundaryConditions(bottom = ρu_drag_bc)
-    ρv_bcs = FieldBoundaryConditions(bottom = ρv_drag_bc)
+        u★ = FT(0.4)
+        ϵ = FT(1e-10)
+        @inline ρu_drag(x, y, t, ρu, ρv, p) = -p.ρ₀ * p.u★^2 * ρu / sqrt(ρu^2 + ρv^2 + p.ϵ)
+        @inline ρv_drag(x, y, t, ρu, ρv, p) = -p.ρ₀ * p.u★^2 * ρv / sqrt(ρu^2 + ρv^2 + p.ϵ)
 
-    # Forcings
-    forcing = (; ρu = geostrophic.ρu, ρv = geostrophic.ρv)
+        ρu_drag_bc = FluxBoundaryCondition(ρu_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★, ϵ))
+        ρv_drag_bc = FluxBoundaryCondition(ρv_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★, ϵ))
+        ρu_bcs = FieldBoundaryConditions(bottom = ρu_drag_bc)
+        ρv_bcs = FieldBoundaryConditions(bottom = ρv_drag_bc)
 
-    # Build the model
-    model = AtmosphereModel(grid;
-        dynamics,
-        advection,
-        closure,
-        coriolis,
-        forcing,
-        microphysics,
-        boundary_conditions = (ρθ = ρθ_bcs, ρu = ρu_bcs, ρv = ρv_bcs)
-    )
+        forcing = (; ρu = geostrophic.ρu, ρv = geostrophic.ρv)
+
+        model = AtmosphereModel(grid;
+            dynamics,
+            advection,
+            closure,
+            coriolis,
+            forcing,
+            microphysics,
+            boundary_conditions = (ρθ = ρθ_bcs, ρu = ρu_bcs, ρv = ρv_bcs)
+        )
+    end
 
     # Set initial conditions
     # Potential temperature profile:
