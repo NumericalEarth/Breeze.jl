@@ -92,7 +92,7 @@ end
 @inline function OceananigansBC.getbc(df::XDirectionBulkDragFunction, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields)
     T₀ = surface_value(i, j, df.surface_temperature)
-    u  = surface_velocity_at_face(i, j, fields, df.filtered_velocities, XDirection())
+    u  = near_surface_velocity(i, j, fields, df.filtered_velocities, XDirection())
     U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields, df.filtered_velocities)
     Ũ  = sqrt(U² + df.gustiness^2)
     ρ₀ = surface_density(df.surface_pressure, T₀, df.thermodynamic_constants)

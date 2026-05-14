@@ -130,15 +130,10 @@ end
 ##### the filtered surface velocity. These mirror the wind-speed dispatch.
 #####
 
-@inline surface_velocity_at_face(i, j, fields, ::Nothing, ::XDirection) =
-    @inbounds fields.u[i, j, 1]
-@inline surface_velocity_at_face(i, j, fields, ::Nothing, ::YDirection) =
-    @inbounds fields.v[i, j, 1]
-
-@inline surface_velocity_at_face(i, j, fields, fv::FilteredSurfaceVelocities, ::XDirection) =
-    @inbounds fv.u[i, j, 1]
-@inline surface_velocity_at_face(i, j, fields, fv::FilteredSurfaceVelocities, ::YDirection) =
-    @inbounds fv.v[i, j, 1]
+@inline near_surface_velocity(i, j, fields, ::Nothing, ::XDirection) = @inbounds fields.u[i, j, 1]
+@inline near_surface_velocity(i, j, fields, ::Nothing, ::YDirection) = @inbounds fields.v[i, j, 1]
+@inline near_surface_velocity(i, j, fields, fv::FilteredSurfaceVelocities, ::XDirection) = @inbounds fv.u[i, j, 1]
+@inline near_surface_velocity(i, j, fields, fv::FilteredSurfaceVelocities, ::YDirection) = @inbounds fv.v[i, j, 1]
 
 #####
 ##### AtmosphereModel boundary condition regularization
