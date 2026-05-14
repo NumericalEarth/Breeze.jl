@@ -200,6 +200,23 @@ Built-in state types that schemes can use or extend:
 
 Schemes may define their own state types inheriting from `AbstractMicrophysicalState{FT}`.
 
+## Which Path Should I Pick?
+
+| Question | Per-name path | Bundled-rate path |
+|----------|:-------------:|:-----------------:|
+| Do per-name tendencies share intermediate work? | No | Yes |
+| Used from a `ParcelModel` or per-name unit tests? | Required | Optional wrappers |
+| Do you want to own the launch and kernel? | No | Yes |
+| Number of prognostic tendencies | Any | Most useful when ``≥ 3`` |
+
+**Start with the per-name path** in [Per-name Implementation](@ref). The default
+`compute_microphysical_tendencies!` already builds ``ℳ`` and ``𝒰`` once per cell, so the
+per-name interface is not paying for redundant state.
+Move to the [bundled-rate path](@ref "Fused-kernel Microphysics Implementation") only when
+profiling shows redundant intermediates *within* the tendencies dominate — the canonical
+cases are `MPNE1M` and `WPNE2M`, where ~14 process rates collectively determine 5 prognostic
+tendencies and computing the bundle once per cell is a substantial GPU win.
+
 ## Design Principles
 
 1. **Gridless core**: Tendency and moisture fraction computations are gridless (state-based).

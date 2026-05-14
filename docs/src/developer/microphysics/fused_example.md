@@ -5,23 +5,6 @@ This page covers the **bundled-rate** alternative to the per-name extension poin
 `compute_microphysical_tendencies!` directly so it can compute one bundle of process
 rates per cell and write all its ``G`` fields in a single kernel pass.
 
-## Which Path Should I Pick?
-
-| Question | Per-name path | Bundled-rate path |
-|----------|:-------------:|:-----------------:|
-| Do per-name tendencies share intermediate work? | No | Yes |
-| Used from a `ParcelModel` or per-name unit tests? | Required | Optional wrappers |
-| Do you want to own the launch and kernel? | No | Yes |
-| Number of prognostic tendencies | Any | Most useful when ``≥ 3`` |
-
-**Start with the per-name path** in [Per-name Implementation](@ref). The
-default `compute_microphysical_tendencies!` already builds ``ℳ`` and ``𝒰`` once per cell,
-so the per-name interface is not paying for redundant state. Move to the bundled-rate
-path only when profiling shows redundant intermediates *within* the tendencies dominate —
-the canonical cases are `MPNE1M` and `WPNE2M`, where ~14 process rates collectively
-determine 5 prognostic tendencies and computing the bundle once per cell is a substantial
-GPU win.
-
 ## Running Example
 
 We re-implement the `ExplicitMicrophysics` scheme from the
