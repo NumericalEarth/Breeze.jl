@@ -125,7 +125,7 @@ end
 ## Computing Moisture Fractions
 
 The `moisture_fractions` function partitions the scheme-dependent specific moisture
-``qᵛᵉ`` (see [Overview](overview.md)) into vapor / liquid / ice components:
+``qᵛᵉ`` (see [Microphysics Interface Overview](@ref)) into vapor / liquid / ice components:
 
 ```@example microphysics_example
 using Breeze.Thermodynamics: MoistureMassFractions
@@ -161,4 +161,4 @@ To implement a new microphysics scheme, we need to:
 For schemes with sedimentation, you would also implement velocity fields and the
 `microphysical_velocities` function. For bundle schemes where many process rates feed
 multiple prognostic tendencies, see
-[Fused-kernel Microphysics Implementation](fused_example.md).
+[Fused-kernel Microphysics Implementation](@ref).
