@@ -36,6 +36,23 @@ virtual potential temperature `θᵥ` used in stability — is read from the fil
 state. The surface density `ρ₀` is computed from the (slowly varying) surface
 temperature and pressure and is not filtered.
 
+# Monin–Obukhov consistency
+
+`ρ₀` is computed from surface quantities (`surface_pressure` and `surface_temperature`)
+via the ideal gas law, so it is a *true surface* density — independent of the
+vertical grid resolution. Using the prognostic density at the first cell would
+introduce a grid-dependent ρ₀ (the first-cell height ½Δz shifts the value as the
+grid is refined), which is inconsistent with the bulk-flux closure derived from
+Monin–Obukhov similarity.
+
+# Default surface temperature
+
+If the user does not supply `surface_temperature`, materialization calls
+`default_drag_surface_temperature(dynamics, …)`. The default exists for
+`AnelasticDynamics` (recovered from the reference state via Exner) but raises
+for `CompressibleDynamics`, which has no equivalent reference profile — pass
+`surface_temperature` explicitly in that case.
+
 # Keyword Arguments
 
 - `direction`: The direction of the momentum component (`XDirection()` or `YDirection()`).
@@ -103,7 +120,7 @@ end
 @inline function OceananigansBC.getbc(df::YDirectionBulkDragFunction, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields)
     T₀ = surface_value(i, j, df.surface_temperature)
-    v  = surface_velocity_at_face(i, j, fields, df.filtered_velocities, YDirection())
+    v  = near_surface_velocity(i, j, fields, df.filtered_velocities, YDirection())
     U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields, df.filtered_velocities)
     Ũ  = sqrt(U² + df.gustiness^2)
     ρ₀ = surface_density(df.surface_pressure, T₀, df.thermodynamic_constants)

@@ -26,7 +26,8 @@ export BulkDragFunction,
        default_neutral_latent_heat_polynomial
 
 using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density,
-                          standard_pressure, boundary_conditions_reference_state
+                          standard_pressure, boundary_conditions_reference_state,
+                          default_drag_surface_temperature
 using ..AtmosphereModels.Diagnostics: VirtualPotentialTemperature, saturation_total_specific_moisture
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity, dry_air_gas_constant, vapor_gas_constant,
@@ -306,17 +307,6 @@ function materialize_bulk_drag(df, grid, dynamics, microphysics, surface_pressur
     new_df = BulkDragFunction(df.direction, coef, df.gustiness, T₀, df.filtered_velocities,
                               surface_pressure, constants)
     return BoundaryCondition(Flux(), new_df)
-end
-
-# Reference-state surface temperature: T₀ = Π₀ θ₀ with Π₀ = (p₀/pˢᵗ)^{Rᵈ/cᵖᵈ}.
-# Used as a sensible default when `BulkDrag` is constructed without an explicit
-# surface_temperature (e.g. with a constant `coefficient`).
-function default_drag_surface_temperature(dynamics, grid, constants)
-    ref = boundary_conditions_reference_state(dynamics, grid, constants)
-    Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    Π₀ = (ref.surface_pressure / ref.standard_pressure)^(Rᵈ / cᵖᵈ)
-    return Π₀ * ref.potential_temperature
 end
 
 # BulkDrag with no direction: infer direction from field location, then materialize

@@ -129,6 +129,16 @@ end
         # Test that BulkDrag on a scalar field throws an error
         ρθ_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
         @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
+
+        # CompressibleDynamics has no default surface temperature for BulkDrag;
+        # constructing a model without an explicit surface_temperature must error.
+        compressible_dyn = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=2);
+                                                reference_potential_temperature = FT(300),
+                                                surface_pressure = FT(1e5),
+                                                standard_pressure = FT(1e5))
+        ρu_bcs_no_T₀ = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
+        @test_throws ArgumentError AtmosphereModel(grid; dynamics=compressible_dyn,
+                                                          boundary_conditions=(; ρu=ρu_bcs_no_T₀))
     end
 
     @testset "BulkSensibleHeatFlux construction and application [$FT]" begin
