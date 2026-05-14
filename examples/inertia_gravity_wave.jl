@@ -33,14 +33,14 @@
 #
 # ## Comparison of dynamical formulations
 #
-# We compare six dynamical formulations:
+# We compare four dynamical formulations:
 #
 # 1. **Anelastic**: Filters acoustic waves via the anelastic approximation
-# 2. **Compressible (explicit)**: Fully compressible with explicit time stepping (small Δt)
-# 3. **Boussinesq**: Anelastic with constant reference density
-# 4. **Split-explicit (adaptive SSP-RK3)**: Acoustic substepping with adaptive substep count at advective Δt
-# 5. **Split-explicit SSP-RK3**: Acoustic substepping with SSP-RK3 outer loop at Δt = 12 s
-# 6. **Split-explicit WS-RK3**: Acoustic substepping with Wicker-Skamarock RK3 outer loop at Δt = 12 s
+# 2. **Boussinesq**: Anelastic with constant reference density
+# 3. **Compressible (explicit)**: Fully compressible with explicit time stepping (small Δt)
+# 4. **Compressible (split-explicit / substepper)**: Wicker–Skamarock RK3 with acoustic
+#    substepping — uses the advective ``Δt`` for the outer step and absorbs acoustic
+#    modes in an inner loop with an auto-computed substep count.
 
 using Breeze
 using Oceananigans: Oceananigans
@@ -85,10 +85,9 @@ pˢᵗ = 1e5
 θᵢ(x, z) = θᵇᵍ(z) + Δθ * sin(π * z / Lz) / (1 + (x - x₀)^2 / a^2)
 ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
 
-# ## Build all six models
+# ## Build all four models
 
 advection = WENO()
-Ns = 8 # acoustic substeps for fixed-substep cases
 surface_pressure = p₀
 potential_temperature = θ₀
 
@@ -97,52 +96,35 @@ potential_temperature = θ₀
 reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature)
 anelastic_dynamics = AnelasticDynamics(reference_state)
 
-# #### Case 2: Compressible (fully explicit, no substepping)
-compressible_dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                              surface_pressure,
-                                              reference_potential_temperature=θᵇᵍ)
+# #### Case 2: Boussinesq (constant reference density)
 
-# #### Case 3: Boussinesq (constant reference density)
 constant_density_reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature)
-
 ρ₀ = adiabatic_hydrostatic_density(0, p₀, θ₀, pˢᵗ, constants)
 set!(constant_density_reference_state.density, ρ₀)
 boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
 
-# #### Case 4: Split-explicit with adaptive substeps at the advective time step.
-# The number of acoustic substeps is computed automatically from the CFL condition
-# each time step: `N = ceil(safety_factor · Δt · ℂᵃᶜ / Δx_min)`.
-# We use SSP-RK3 because it is stable at larger advective CFL than WS-RK3.
-adaptive_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                          surface_pressure,
-                                          reference_potential_temperature=θᵇᵍ)
+# #### Case 3: Compressible (fully explicit, no substepping)
 
-# #### Case 5: Split-explicit with SSP-RK3 outer loop
-# Uses acoustic substepping with Exner pressure variables (velocity + π') and
-# vertically implicit w-π' coupling. The reference potential temperature enables
-# base-state subtraction for accurate perturbation pressure.
-ssp_time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.05)
-ssp_dynamics = CompressibleDynamics(ssp_time_discretization;
-                                    surface_pressure,
-                                    reference_potential_temperature = θᵇᵍ)
+compressible_dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                             surface_pressure,
+                                             reference_potential_temperature = θᵇᵍ)
 
-# #### Case 6: Split-explicit with Wicker-Skamarock RK3 outer loop
-# Same acoustic substepping as SSP-RK3, but with WS-RK3 stage fractions (Δt/3, Δt/2, Δt)
-# instead of SSP convex combinations.
-ws_time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.10)
-ws_dynamics = CompressibleDynamics(ws_time_discretization;
-                                     surface_pressure,
-                                     reference_potential_temperature=θᵇᵍ)
+# #### Case 4: Compressible split-explicit (substepper)
+#
+# Wicker–Skamarock RK3 acoustic substepping with the default
+# [`ThermalDivergenceDamping`](@ref) (coefficient ``0.1``) and an
+# auto-computed substep count chosen from the horizontal acoustic CFL each step.
+
+substepper_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                           surface_pressure,
+                                           reference_potential_temperature = θᵇᵍ)
 
 # Build all models:
 models = Dict(
-    :anelastic      => AtmosphereModel(grid; advection, dynamics=anelastic_dynamics),
-    :compressible   => AtmosphereModel(grid; advection, dynamics=compressible_dynamics),
-    :boussinesq     => AtmosphereModel(grid; advection, dynamics=boussinesq_dynamics),
-    :adaptive       => AtmosphereModel(grid; advection, dynamics=adaptive_dynamics),
-    :ssp_rk3        => AtmosphereModel(grid; advection, dynamics=ssp_dynamics),
-    :ws_rk3         => AtmosphereModel(grid; advection, dynamics=ws_dynamics,
-                                       timestepper=:AcousticRungeKutta3),
+    :anelastic    => AtmosphereModel(grid; advection, dynamics=anelastic_dynamics),
+    :boussinesq   => AtmosphereModel(grid; advection, dynamics=boussinesq_dynamics),
+    :compressible => AtmosphereModel(grid; advection, dynamics=compressible_dynamics),
+    :substepper   => AtmosphereModel(grid; advection, dynamics=substepper_dynamics),
 )
 nothing #hide
 
@@ -152,7 +134,7 @@ for name in (:anelastic, :boussinesq)
     set!(models[name]; θ=θᵢ, u=U)
 end
 
-for name in (:compressible, :adaptive, :ssp_rk3, :ws_rk3)
+for name in (:compressible, :substepper)
     ref = models[name].dynamics.reference_state
     set!(models[name]; θ=θᵢ, u=U, qᵗ=0, ρ=ref.density)
 end
@@ -170,30 +152,25 @@ cᵖᵈ = constants.dry_air.heat_capacity
 cfl = 0.5
 Δt_advective    = cfl * min(Δx, Δz) / U
 Δt_compressible = cfl * min(Δx, Δz) / (ℂᵃᶜ + U)
-Δt_split        = 12
 
 time_steps = Dict(
-    :anelastic      => Δt_advective,
-    :compressible   => Δt_compressible,
-    :boussinesq     => Δt_advective,
-    :adaptive       => Δt_advective,
-    :ssp_rk3        => Δt_split,
-    :ws_rk3         => Δt_split,
+    :anelastic    => Δt_advective,
+    :boussinesq   => Δt_advective,
+    :compressible => Δt_compressible,
+    :substepper   => Δt_advective,
 )
 
-@info "Time steps" Δt_advective Δt_compressible Δt_split
+@info "Time steps" Δt_advective Δt_compressible
 
 # ## Run all simulations
 
 stop_time = 3000 # seconds
 
 case_names = Dict(
-    :boussinesq     => "Boussinesq",
-    :anelastic      => "Anelastic",
-    :compressible   => "Compressible (explicit)",
-    :ws_rk3         => "Split-explicit (WS-RK3)",
-    :ssp_rk3        => "Split-explicit (SSP-RK3)",
-    :adaptive       => "Split-explicit (adaptive SSP-RK3)",
+    :anelastic    => "Anelastic",
+    :boussinesq   => "Boussinesq",
+    :compressible => "Compressible (explicit)",
+    :substepper   => "Compressible (substepper)",
 )
 
 # Background θ field for computing perturbation
@@ -218,7 +195,7 @@ for (key, model) in models
         return nothing
     end
 
-    callback_interval = key ∈ (:compressible,) ? IterationInterval(500) : IterationInterval(100)
+    callback_interval = key === :compressible ? IterationInterval(500) : IterationInterval(100)
     add_callback!(sim, progress, callback_interval)
 
     ## Output
@@ -241,7 +218,7 @@ end
 # formulations. This comparison reveals how well each formulation captures
 # inertia-gravity wave propagation.
 
-cases = [:anelastic, :compressible, :boussinesq, :adaptive, :ssp_rk3, :ws_rk3]
+cases = [:anelastic, :boussinesq, :compressible, :substepper]
 titles = [case_names[k] for k in cases]
 
 θ′ts = Dict(k => FieldTimeSeries("igw_$(k).jld2", "θ′") for k in cases)
@@ -255,10 +232,10 @@ levels = range(-Δθ / 2, stop=Δθ / 2, length=21)
 
 # ## Contour comparison
 
-fig = Figure(size=(1400, 900))
+fig = Figure(size=(1200, 700))
 
-## 3×2 layout: [boussinesq, anelastic, compressible, ssprk3, wsrk3, adaptive ssprk3],
-axes_layout = [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 3)]
+## 2×2 layout
+axes_layout = [(1, 1), (1, 2), (2, 1), (2, 2)]
 axes = [Axis(fig[r, c]; title=titles[i],
              ylabel = c == 1 ? "z (km)" : "",
              xlabel = r == 2 ? "x (km)" : "")
@@ -270,12 +247,12 @@ for ax in axes; if ax.ylabel[] == ""; hideydecorations!(ax, grid=false); end; en
 cfs = [contourf!(axes[i], x_km, z_km, θ′_final[k]; colormap=:balance, levels)
        for (i, k) in enumerate(cases)]
 
-Colorbar(fig[1:2, 4], first(cfs); label="θ′ (K)")
+Colorbar(fig[1:2, 3], first(cfs); label="θ′ (K)")
 fig[0, :] = Label(fig, "Inertia-gravity waves: θ′ at t = $(prettytime(times[Nt]))", fontsize=20)
 
 n = Observable(1)
 
-fig_anim = Figure(size=(1400, 900))
+fig_anim = Figure(size=(1200, 700))
 anim_axes = [Axis(fig_anim[r, c]; title=titles[i],
                    ylabel = c == 1 ? "z (km)" : "",
                    xlabel = r == 2 ? "x (km)" : "")
@@ -288,7 +265,7 @@ hm_anims = [contourf!(anim_axes[i], @lift(θ′ts[k][$n]);
                       colormap=:balance, levels, extendhigh=:auto, extendlow=:auto)
             for (i, k) in enumerate(cases)]
 
-Colorbar(fig_anim[1:2, 4], last(hm_anims); label="θ′ (K)")
+Colorbar(fig_anim[1:2, 3], last(hm_anims); label="θ′ (K)")
 anim_title = @lift "Inertia-gravity waves: θ′ at t = $(prettytime(times[$n]))"
 fig_anim[0, :] = Label(fig_anim, anim_title, fontsize=20, tellwidth=false)
 
@@ -304,7 +281,7 @@ nothing #hide
 # A vertical cross-section at mid-height shows the wave phase and amplitude differences:
 
 z_mid = Nz ÷ 2
-linestyles = [:solid, :dash, :dot, :dashdot, :dashdotdot, :solid]
+linestyles = [:solid, :dash, :dot, :dashdot]
 colors = Makie.wong_colors()
 
 fig_cross = Figure(size=(900, 400))

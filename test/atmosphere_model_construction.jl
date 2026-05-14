@@ -55,7 +55,6 @@ end
     end
 
     @testset "NaN Checker" begin
-        @info "  Testing NaN Checker..."
         run_nan_checker_test(default_arch, erroring=true)
         run_nan_checker_test(default_arch, erroring=false)
     end

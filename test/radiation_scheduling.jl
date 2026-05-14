@@ -93,8 +93,8 @@ using RRTMGP
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,
-                                           coordinate = (FT(0), FT(45)),
-                                           epoch = DateTime(2024, 6, 21, 16, 0, 0),
+                                           solar_position = ApparentSolarPosition(coordinate = (FT(0), FT(45)),
+                                                                                  epoch      = DateTime(2024, 6, 21, 16, 0, 0)),
                                            schedule = TimeInterval(10))
 
         clock = Clock(time=FT(0))
@@ -171,7 +171,7 @@ using RRTMGP
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,
-                                           coordinate = (FT(0), FT(45)))
+                                           solar_position = ApparentSolarPosition(coordinate = (FT(0), FT(45))))
 
         clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))
         model = AtmosphereModel(grid; clock, dynamics,

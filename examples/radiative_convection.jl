@@ -131,8 +131,8 @@ radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
                                    surface_emissivity = 0.95,
                                    solar_constant = 1361,
                                    background_atmosphere,
-                                   coordinate = (0, latitude),
-                                   epoch = DateTime(2020, 3, 20, 0, 0, 0),
+                                   solar_position = ApparentSolarPosition(coordinate = (0, latitude),
+                                                                          epoch      = DateTime(2020, 3, 20, 0, 0, 0)),
                                    schedule = TimeInterval(5minutes),
                                    liquid_effective_radius = ConstantRadiusParticles(10e-6),
                                    ice_effective_radius = ConstantRadiusParticles(30e-6))
