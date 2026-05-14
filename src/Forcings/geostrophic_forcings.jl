@@ -1,6 +1,7 @@
 using ..AtmosphereModels: AtmosphereModels
 using Oceananigans: Field, set!, compute!
 using Oceananigans.Grids: Center, XDirection, YDirection
+using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ
 using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
 
@@ -8,18 +9,20 @@ using Adapt: Adapt
 ##### Geostrophic forcing types
 #####
 
-struct GeostrophicForcing{S, V, F}
-    geostrophic_momentum :: V
+struct GeostrophicForcing{S, V, R, F}
+    geostrophic_velocity :: V
+    density :: R
     direction :: S  # +1 for v-forcing, -1 for u-forcing
     coriolis_parameter :: F
 end
 
 Adapt.adapt_structure(to,gf::GeostrophicForcing) =
-    GeostrophicForcing(Adapt.adapt(to, gf.geostrophic_momentum),
+    GeostrophicForcing(Adapt.adapt(to, gf.geostrophic_velocity),
+                       Adapt.adapt(to, gf.density),
                        Adapt.adapt(to, gf.direction),
                        Adapt.adapt(to, gf.coriolis_parameter))
 
-GeostrophicForcing(u, dir) = GeostrophicForcing(u, dir, nothing)
+GeostrophicForcing(u, dir) = GeostrophicForcing(u, nothing, dir, nothing)
 
 const XGeostrophicForcing = GeostrophicForcing{XDirection}
 const YGeostrophicForcing = GeostrophicForcing{YDirection}
@@ -41,7 +44,7 @@ end
 function Base.show(io::IO, forcing::GeostrophicForcing)
     print(io, summary(forcing))
     print(io, '\n')
-    print(io, "└── geostrophic_momentum: ", prettysummary(forcing.geostrophic_momentum))
+    print(io, "└── geostrophic_velocity: ", prettysummary(forcing.geostrophic_velocity))
 end
 
 const GeostrophicForcingTuple = Tuple{GeostrophicForcing, Vararg{GeostrophicForcing}}
@@ -56,24 +59,26 @@ function Base.show(io::IO, ft::NamedGeostrophicForcingTuple)
     for name in names[1:end-1]
         forcing = ft[name]
         print(io, "├── $name: ", summary(forcing), "\n")
-        print(io, "│   └── geostrophic_momentum: ", prettysummary(forcing.geostrophic_momentum), "\n")
+        print(io, "│   └── geostrophic_velocity: ", prettysummary(forcing.geostrophic_velocity), "\n")
     end
 
     name = names[end]
     forcing = ft[name]
     print(io, "└── $name: ", summary(forcing), "\n")
-    print(io, "    └── geostrophic_momentum: ", prettysummary(forcing.geostrophic_momentum))
+    print(io, "    └── geostrophic_velocity: ", prettysummary(forcing.geostrophic_velocity))
 end
+
+@inline geostrophic_momentum(i, j, k, grid, ρ, uᵍ) = @inbounds ρ[i, j, k] * uᵍ[i, j, k]
 
 @inline function (forcing::XGeostrophicForcing)(i, j, k, grid, clock, fields)
     f = forcing.coriolis_parameter
-    ρvᵍ = @inbounds forcing.geostrophic_momentum[i, j, k]
+    ρvᵍ = ℑxᶠᵃᵃ(i, j, k, grid, geostrophic_momentum, forcing.density, forcing.geostrophic_velocity)
     return - f * ρvᵍ
 end
 
 @inline function (forcing::YGeostrophicForcing)(i, j, k, grid, clock, fields)
     f = forcing.coriolis_parameter
-    ρuᵍ = @inbounds forcing.geostrophic_momentum[i, j, k]
+    ρuᵍ = ℑyᵃᶠᵃ(i, j, k, grid, geostrophic_momentum, forcing.density, forcing.geostrophic_velocity)
     return + f * ρuᵍ
 end
 
@@ -83,7 +88,9 @@ $(TYPEDSIGNATURES)
 Create a pair of geostrophic forcings for the x- and y-momentum equations.
 
 The Coriolis parameter is extracted from the model's `coriolis` during
-model construction.
+model construction. The geostrophic velocity is stored separately from the
+model density, so compressible models form ``ρ uᵍ`` from the live prognostic
+density after initialization.
 
 Arguments
 =========
@@ -109,9 +116,9 @@ forcing = geostrophic_forcings(uᵍ, vᵍ)
 # output
 NamedTuple with 2 GeostrophicForcings:
 ├── ρu: GeostrophicForcing{XDirection}
-│   └── geostrophic_momentum: vᵍ (generic function with 1 method)
+│   └── geostrophic_velocity: vᵍ (generic function with 1 method)
 └── ρv: GeostrophicForcing{YDirection}
-    └── geostrophic_momentum: uᵍ (generic function with 1 method)
+    └── geostrophic_velocity: uᵍ (generic function with 1 method)
 ```
 """
 function geostrophic_forcings(uᵍ, vᵍ)
@@ -127,7 +134,7 @@ end
 function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::GeostrophicForcing, field, name, model_field_names, context)
     grid = field.grid
 
-    forcing_uᵍ = forcing.geostrophic_momentum
+    forcing_uᵍ = forcing.geostrophic_velocity
 
     uᵍ = if forcing_uᵍ isa Field
         forcing_uᵍ
@@ -136,12 +143,9 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Geostrop
         set!(uᵍ, forcing_uᵍ)
     end
 
-    # Compute the geostrophic momentum density field ρ * vᵍ
-    ρ = context.density
-    set!(uᵍ, ρ * uᵍ)
-
     FT = eltype(grid)
     f = context.coriolis.f |> FT
+    ρ = context.density
 
-    return GeostrophicForcing(uᵍ, forcing.direction, f)
+    return GeostrophicForcing(uᵍ, ρ, forcing.direction, f)
 end

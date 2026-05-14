@@ -44,10 +44,9 @@ radiation_flux_divergence(radiation) = radiation.flux_divergence
 @inline radiation_flux_divergence(i, j, k, grid, ::Nothing) = zero(eltype(grid))
 @inline radiation_flux_divergence(i, j, k, grid, flux_divergence) = @inbounds flux_divergence[i, j, k]
 
-struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F, H, LER, IER, S}
+struct RadiativeTransferModel{FT<:Number, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, S}
     solar_constant :: FT # Scalar
-    coordinate :: C # coordinates (for RectilinearGrid) for computing the solar zenith angle
-    epoch :: E # optional epoch for computing time with floating-point clocks
+    solar_position :: SOP # AbstractSolarPosition: how to obtain cos(θ_z) on each update
     surface_properties :: SP
     background_atmosphere :: BA # BackgroundAtmosphere or Nothing (for gray)
     atmospheric_state :: AS
@@ -110,6 +109,17 @@ Valid optics types are:
 
 The `constants` argument provides physical constants for the radiative transfer solver.
 
+# Solar position
+
+The `solar_position` keyword controls how the cosine of the solar zenith angle is
+obtained on each radiation update. See [`AbstractSolarPosition`](@ref) and its subtypes:
+
+- [`ApparentSolarPosition`](@ref) (default) — time-varying, computed from the model
+  clock and grid (or explicit) longitude/latitude. Supports `DateTime` clocks and
+  floating-point clocks resolved against an `epoch`.
+- [`FixedCosineZenith`](@ref) — constant cos(θ_z), clock-independent. Appropriate
+  for idealized radiative-convective equilibrium studies.
+
 # Example
 
 ```jldoctest
@@ -123,6 +133,19 @@ julia> RadiativeTransferModel(grid, GrayOptics(), ThermodynamicConstants();
                               surface_albedo = 0.1)
 RadiativeTransferModel
 ├── solar_constant: 1361.0 W m⁻²
+├── solar_position: ApparentSolarPosition(coordinate=(0.0, 45.0), epoch=<from clock>)
+├── surface_temperature: ConstantField(300.0) K
+├── surface_emissivity: ConstantField(0.98)
+├── direct_surface_albedo: ConstantField(0.1)
+└── diffuse_surface_albedo: ConstantField(0.1)
+
+julia> RadiativeTransferModel(grid, GrayOptics(), ThermodynamicConstants();
+                              surface_temperature = 300,
+                              surface_albedo = 0.1,
+                              solar_position = FixedCosineZenith(0.5))
+RadiativeTransferModel
+├── solar_constant: 1361.0 W m⁻²
+├── solar_position: FixedCosineZenith(cos_zenith = 0.5)
 ├── surface_temperature: ConstantField(300.0) K
 ├── surface_emissivity: ConstantField(0.98)
 ├── direct_surface_albedo: ConstantField(0.1)
@@ -134,6 +157,7 @@ julia> RadiativeTransferModel(grid, ClearSkyOptics(), ThermodynamicConstants();
                               background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6))
 RadiativeTransferModel
 ├── solar_constant: 1361.0 W m⁻²
+├── solar_position: ApparentSolarPosition(coordinate=(0.0, 45.0), epoch=<from clock>)
 ├── surface_temperature: ConstantField(300.0) K
 ├── surface_emissivity: ConstantField(0.98)
 ├── direct_surface_albedo: ConstantField(0.1)
@@ -358,7 +382,8 @@ Base.summary(::RadiativeTransferModel) = "RadiativeTransferModel"
 
 function Base.show(io::IO, radiation::RadiativeTransferModel)
     print(io, summary(radiation), "\n",
-          "├── solar_constant: ", prettysummary(radiation.solar_constant), " W m⁻²\n")
+          "├── solar_constant: ", prettysummary(radiation.solar_constant), " W m⁻²\n",
+          "├── solar_position: ", radiation.solar_position, "\n")
 
     if radiation.surface_properties.surface_temperature isa ConstantField
         print(io, "├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",)
