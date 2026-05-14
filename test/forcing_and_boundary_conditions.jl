@@ -51,7 +51,9 @@ increment_tolerance(::Type{Float64}) = 1e-10
     end
 
     @testset "Forcing on non-existing field errors" begin
-        bad = (; u=forcings[1])
+        # `:u` is the specific alias of `:ρu`, so it's a valid key. Use a name that is
+        # neither a prognostic ρ-name nor a known specific alias.
+        bad = (; bogus=forcings[1])
         @test_throws ArgumentError AtmosphereModel(grid; forcing=bad)
     end
 end
