@@ -396,10 +396,17 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     forcing_names = keys(forcing_fields)
 
+    # Build a specific→density name map for any prognostic name that starts with `ρ`.
+    # For example, :ρθ contributes :θ => :ρθ. Users may supply forcings under either key,
+    # and the dispatch routes specific-keyed values through wrap_specific_forcing.
+    specific_to_density = NamedTuple(_specific_to_density_pairs(forcing_names))
+    valid_specific_names = keys(specific_to_density)
+
     for name in user_forcing_names
-        if name ∉ forcing_names
+        if name ∉ forcing_names && name ∉ valid_specific_names
             msg = string("Invalid forcing: forcing contains an entry for $name, but $name is not a prognostic field!", '\n',
-                         "The forcing fields are ", forcing_names)
+                         "The forcing fields are ", forcing_names,
+                         "; specific-key aliases are ", valid_specific_names, '.')
             throw(ArgumentError(msg))
         end
     end
@@ -415,16 +422,49 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     forcing_context = (; coriolis, density, specific_fields)
 
     materialized = Tuple(
-        n in keys(user_forcings) ?
-            materialize_atmosphere_model_forcing(user_forcings[n], f, n, model_names, forcing_context) :
-            Returns(zero(eltype(f)))
-            for (n, f) in pairs(forcing_fields)
+        let density_name = n,
+            specific_name = startswith(string(n), "ρ") ? Symbol(string(n)[nextind(string(n), 1):end]) : nothing
+            ρ_value    = density_name in user_forcing_names ? user_forcings[density_name] : nothing
+            spec_raw   = (specific_name !== nothing && specific_name in user_forcing_names) ?
+                         user_forcings[specific_name] : nothing
+            spec_value = spec_raw === nothing ? nothing :
+                         wrap_specific_forcing(spec_raw, density_name)
+            combined   = _combine_forcing_values(ρ_value, spec_value)
+            combined === nothing ?
+                Returns(zero(eltype(f))) :
+                materialize_atmosphere_model_forcing(combined, f, density_name, model_names, forcing_context)
+        end
+        for (n, f) in pairs(forcing_fields)
     )
 
     forcings = NamedTuple{forcing_names}(materialized)
 
     return forcings
 end
+
+# Build (specific_name => density_name) pairs from a tuple of prognostic ρ-names.
+function _specific_to_density_pairs(forcing_names)
+    pairs = Pair{Symbol, Symbol}[]
+    for name in forcing_names
+        s = string(name)
+        if startswith(s, "ρ")
+            push!(pairs, Symbol(s[nextind(s, 1):end]) => name)
+        end
+    end
+    return Tuple(pairs)
+end
+
+# Combine a density-keyed forcing value with the specific-keyed forcing value supplied
+# for the same prognostic. `nothing` denotes "user did not supply this side". The two
+# sides are flattened into a single tuple so the existing tuple-materialization path
+# wraps them in MultipleForcings.
+_combine_forcing_values(::Nothing, ::Nothing) = nothing
+_combine_forcing_values(a, ::Nothing) = a
+_combine_forcing_values(::Nothing, b) = b
+_combine_forcing_values(a, b) = (a, b)
+_combine_forcing_values(a::Tuple, b) = (a..., b)
+_combine_forcing_values(a, b::Tuple) = (a, b...)
+_combine_forcing_values(a::Tuple, b::Tuple) = (a..., b...)
 
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)
