@@ -175,3 +175,9 @@ To implement a new microphysics scheme, we need to:
 
 For schemes with sedimentation, you would also implement velocity fields and the
 `microphysical_velocities` function.
+
+Schemes whose per-name tendencies share substantial intermediate work — typically bundle
+schemes where many process rates feed multiple prognostic tendencies — should instead
+override `compute_microphysical_tendencies!` directly. See
+[Fused-kernel Microphysics Implementation](fused_example.md) for a worked example built
+on the same `ExplicitMicrophysics` scheme.
