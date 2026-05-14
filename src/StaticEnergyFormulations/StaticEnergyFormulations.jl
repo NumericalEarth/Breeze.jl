@@ -20,11 +20,11 @@ using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
 using Oceananigans.Operators: ℑzᵃᵃᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
-using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
+using Breeze.AtmosphereModels: AtmosphereModels,
     dynamics_density, dynamics_pressure, standard_pressure, dynamics_prognostic_fields,
     grid_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
     c_div_ρU, ∇_dot_Jᶜ, w_buoyancy_forceᶜᶜᶠ,
-    AtmosphereModelBuoyancy, grid_microphysical_tendency,
+    AtmosphereModelBuoyancy,
     radiation_flux_divergence
 
 using Breeze.Thermodynamics: StaticEnergyState, LiquidIcePotentialTemperatureState, with_temperature
