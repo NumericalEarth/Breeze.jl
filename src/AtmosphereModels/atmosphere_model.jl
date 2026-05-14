@@ -459,12 +459,14 @@ end
 # sides are flattened into a single tuple so the existing tuple-materialization path
 # wraps them in MultipleForcings.
 _combine_forcing_values(::Nothing, ::Nothing) = nothing
+_combine_forcing_values(a::Tuple, ::Nothing) = a
+_combine_forcing_values(::Nothing, b::Tuple) = b
 _combine_forcing_values(a, ::Nothing) = a
 _combine_forcing_values(::Nothing, b) = b
-_combine_forcing_values(a, b) = (a, b)
+_combine_forcing_values(a::Tuple, b::Tuple) = (a..., b...)
 _combine_forcing_values(a::Tuple, b) = (a..., b)
 _combine_forcing_values(a, b::Tuple) = (a, b...)
-_combine_forcing_values(a::Tuple, b::Tuple) = (a..., b...)
+_combine_forcing_values(a, b) = (a, b)
 
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)
