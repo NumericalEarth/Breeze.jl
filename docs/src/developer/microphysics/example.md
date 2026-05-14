@@ -42,14 +42,10 @@ diagnostic fields needed:
 using Oceananigans: CenterField
 
 function AtmosphereModels.materialize_microphysical_fields(::ExplicitMicrophysics, grid, boundary_conditions)
-    # Prognostic fields (density-weighted)
     ρqᵛ = CenterField(grid; boundary_conditions=boundary_conditions.ρqᵛ)
     ρqˡ = CenterField(grid; boundary_conditions=boundary_conditions.ρqˡ)
     ρqⁱ = CenterField(grid; boundary_conditions=boundary_conditions.ρqⁱ)
-
-    # Diagnostic field (specific humidity)
     qᵛ = CenterField(grid)
-
     return (; ρqᵛ, ρqˡ, ρqⁱ, qᵛ)
 end
 ```
@@ -71,8 +67,7 @@ struct ExplicitMicrophysicsState{FT} <: AbstractMicrophysicalState{FT}
 end
 
 function AtmosphereModels.microphysical_state(::ExplicitMicrophysics, ρ, μ::NamedTuple, 𝒰, velocities)
-    # Convert density-weighted prognostics to specific quantities
-    # velocities is required for interface compatibility (used by some schemes for aerosol activation)
+    # `velocities` is part of the interface for schemes that need aerosol activation; unused here
     qᵛ = μ.ρqᵛ / ρ
     qˡ = μ.ρqˡ / ρ
     qⁱ = μ.ρqⁱ / ρ
@@ -89,25 +84,23 @@ tendency method:
 using Breeze.Thermodynamics: temperature, saturation_specific_humidity,
                               PlanarLiquidSurface, PlanarIceSurface
 
-# Tendency for liquid water density
+# Relaxation toward liquid saturation
 @inline function AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqˡ}, ρ, ℳ, 𝒰, constants)
     T = temperature(𝒰, constants)
     q⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     τᵛˡ = em.vapor_to_liquid
-    # Relaxation toward liquid saturation
     return ρ * (ℳ.qᵛ - q⁺ˡ) / τᵛˡ
 end
 
-# Tendency for ice density
+# Relaxation toward ice saturation
 @inline function AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqⁱ}, ρ, ℳ, 𝒰, constants)
     T = temperature(𝒰, constants)
     q⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
     τᵛⁱ = em.vapor_to_ice
-    # Relaxation toward ice saturation
     return ρ * (ℳ.qᵛ - q⁺ⁱ) / τᵛⁱ
 end
 
-# Tendency for vapor density (conservation: what's lost to liquid/ice)
+# Vapor closes by conservation
 @inline function AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqᵛ}, ρ, ℳ, 𝒰, constants)
     Sˡ = AtmosphereModels.microphysical_tendency(em, Val(:ρqˡ), ρ, ℳ, 𝒰, constants)
     Sⁱ = AtmosphereModels.microphysical_tendency(em, Val(:ρqⁱ), ρ, ℳ, 𝒰, constants)
@@ -131,7 +124,8 @@ end
 
 ## Computing Moisture Fractions
 
-The `moisture_fractions` function partitions total moisture:
+The `moisture_fractions` function partitions the scheme-dependent specific moisture
+``qᵛᵉ`` (see [Overview](overview.md)) into vapor / liquid / ice components:
 
 ```@example microphysics_example
 using Breeze.Thermodynamics: MoistureMassFractions
@@ -165,10 +159,6 @@ To implement a new microphysics scheme, we need to:
 9. **Implement `maybe_adjust_thermodynamic_state`** (trivial for non-equilibrium schemes)
 
 For schemes with sedimentation, you would also implement velocity fields and the
-`microphysical_velocities` function.
-
-Schemes whose per-name tendencies share substantial intermediate work — typically bundle
-schemes where many process rates feed multiple prognostic tendencies — should instead
-override `compute_microphysical_tendencies!` directly. See
-[Fused-kernel Microphysics Implementation](fused_example.md) for a worked example built
-on the same `ExplicitMicrophysics` scheme.
+`microphysical_velocities` function. For bundle schemes where many process rates feed
+multiple prognostic tendencies, see
+[Fused-kernel Microphysics Implementation](fused_example.md).
