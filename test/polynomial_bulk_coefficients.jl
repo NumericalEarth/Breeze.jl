@@ -334,7 +334,9 @@ using GPUArraysCore: @allowscalar
         @test fv.filter_timescale == Inf
         @test size(fv.u) == (4, 4, 1)
         @test size(fv.v) == (4, 4, 1)
+        @test size(fv.θᵥ) == (4, 4, 1)
         @test fv.last_update[] == (0, 0)
+        @test fv.last_θᵥ_update[] == (0, 0)
 
         # With explicit height and timescale
         fv2 = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
@@ -395,6 +397,24 @@ using GPUArraysCore: @allowscalar
         ε = 2.0 / 20.0
         expected = (0.0 + ε * 300.0) / (1 + ε)
         @test fs.field[1, 1, 1] ≈ expected atol=1e-10
+    end
+
+    @testset "FilteredSurfaceVelocities θᵥ update!" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=20.0)
+
+        # θᵥ source is a 3D field-like; here just use a CenterField at constant value.
+        θᵥ_source = CenterField(grid)
+        set!(θᵥ_source, 305.0)
+
+        Breeze.BoundaryConditions.update_θᵥ!(fv, θᵥ_source, grid, 2.0)
+        ε = 2.0 / 20.0
+        expected = (0.0 + ε * 305.0) / (1 + ε)
+        @test fv.θᵥ[1, 1, 1] ≈ expected atol=1e-10
+
+        # Initialize sets the field directly from the source (no time integration)
+        Breeze.BoundaryConditions.initialize_θᵥ!(fv, θᵥ_source, grid)
+        @test fv.θᵥ[1, 1, 1] ≈ 305.0 atol=1e-10
     end
 
     @testset "BulkDrag with filtered_velocities" begin
@@ -784,6 +804,8 @@ using GPUArraysCore: @allowscalar
 
     @testset "Drag flux uses filtered velocity, not instantaneous" begin
         using Oceananigans.Models: BoundaryConditionOperation
+        using Breeze.AtmosphereModels: surface_pressure as model_surface_pressure
+        using Breeze.Thermodynamics: surface_density
 
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
         Cᴰ = 1e-3
@@ -792,7 +814,9 @@ using GPUArraysCore: @allowscalar
 
         fv = FilteredSurfaceVelocities(grid; filter_timescale=τ_filter)
 
-        # Build model with constant coefficient and filtered velocities
+        # Build model with constant coefficient and filtered velocities. No
+        # `surface_temperature` is supplied; `materialize_bulk_drag` fills it from
+        # the reference-state surface temperature so ρ₀ can be evaluated.
         ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
                                                                  filtered_velocities=fv))
         ρv_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
@@ -816,16 +840,17 @@ using GPUArraysCore: @allowscalar
         τˣ_field = Field(τˣ_op)
         compute!(τˣ_field)
 
-        # Expected flux using FILTERED velocity:
-        # τ = -Cᴰ * (U_f² + g²) * ρu / U_f
-        # where U_f = 20 (filtered), not u₀ = 5 (instantaneous)
-        ρu_sfc = ρu[2, 2, 1]
-        Ũ² = U_f^2 + FT(gustiness)^2
-        expected_filtered = -Cᴰ * Ũ² * ρu_sfc / U_f
+        # New formula: τ = -ρ₀ * Cᴰ * Ũ * u, with `u` and `Ũ` read from filtered fields.
+        p₀ = model_surface_pressure(model.dynamics)
+        T₀_default = Breeze.BoundaryConditions.default_drag_surface_temperature(model.dynamics,
+                                                                                  grid,
+                                                                                  model.thermodynamic_constants)
+        ρ₀ = surface_density(p₀, T₀_default, model.thermodynamic_constants)
+        Ũ_filtered   = sqrt(U_f^2 + FT(gustiness)^2)
+        expected_filtered   = - ρ₀ * Cᴰ * Ũ_filtered * U_f
 
-        # What the flux WOULD be with instantaneous velocity (u₀ = 5):
-        Ũ²_inst = u₀^2 + FT(gustiness)^2
-        expected_unfiltered = -Cᴰ * Ũ²_inst * ρu_sfc / u₀
+        Ũ_unfiltered = sqrt(u₀^2 + FT(gustiness)^2)
+        expected_unfiltered = - ρ₀ * Cᴰ * Ũ_unfiltered * u₀
 
         # The actual flux should match the filtered prediction, not the instantaneous
         @test τˣ_field[2, 2, 1] ≈ expected_filtered
