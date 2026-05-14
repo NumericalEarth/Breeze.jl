@@ -46,7 +46,7 @@ Schemes plug in by extending one of two methods:
   The default `compute_microphysical_tendencies!` launches a single fused kernel that builds `ℳ`
   and `𝒰` once per cell and `+=`s `microphysical_tendency` for each prognostic name into the
   corresponding `G` field. This is the right extension point when the per-name tendencies don't
-  share intermediate work. See [Example Microphysics Implementation](@ref) for a worked
+  share intermediate work. See [Per-name Implementation](@ref) for a worked
   example.
 - **Fused (bundle schemes)** — override `compute_microphysical_tendencies!(microphysics, model)`
   directly. Use this when a single bundle of process rates (e.g. ~14 rates in mixed-phase 1M)

@@ -1,7 +1,7 @@
 # Fused-kernel Microphysics Implementation
 
 This page covers the **bundled-rate** alternative to the per-name extension point in
-[Example Microphysics Implementation](@ref): a scheme overrides
+[Per-name Implementation](@ref): a scheme overrides
 `compute_microphysical_tendencies!` directly so it can compute one bundle of process
 rates per cell and write all its ``G`` fields in a single kernel pass.
 
@@ -14,7 +14,7 @@ rates per cell and write all its ``G`` fields in a single kernel pass.
 | Do you want to own the launch and kernel? | No | Yes |
 | Number of prognostic tendencies | Any | Most useful when ``≥ 3`` |
 
-**Start with the per-name path** in [Example Microphysics Implementation](@ref). The
+**Start with the per-name path** in [Per-name Implementation](@ref). The
 default `compute_microphysical_tendencies!` already builds ``ℳ`` and ``𝒰`` once per cell,
 so the per-name interface is not paying for redundant state. Move to the bundled-rate
 path only when profiling shows redundant intermediates *within* the tendencies dominate —
@@ -25,10 +25,10 @@ GPU win.
 ## Running Example
 
 We re-implement the `ExplicitMicrophysics` scheme from the
-[per-name walkthrough](example.md) via the bundled-rate path. The struct,
+[Per-name Implementation](@ref) via the bundled-rate path. The struct,
 `prognostic_field_names`, `materialize_microphysical_fields`, `ExplicitMicrophysicsState`,
 and `microphysical_state` are unchanged — copy them straight from
-[Example Microphysics Implementation](@ref). Only `microphysical_tendency` and
+[Per-name Implementation](@ref). Only `microphysical_tendency` and
 `compute_microphysical_tendencies!` change.
 
 ```@setup fused_microphysics_example
@@ -199,7 +199,7 @@ dispatch on `::ExplicitMicrophysics` takes priority when the model carries this 
 
 `update_microphysical_auxiliaries!`, `moisture_fractions`, and
 `maybe_adjust_thermodynamic_state` are unchanged from the
-[per-name walkthrough](example.md) — copy them over verbatim.
+[Per-name Implementation](@ref) — copy them over verbatim.
 
 ## Exercising the Scheme
 

@@ -1,4 +1,4 @@
-# Example Microphysics Implementation
+# Per-name Implementation
 
 This page walks through the implementation of a simple microphysics scheme to illustrate the developer interface.
 We implement a scheme that represents droplet and ice particle nucleation with constant-rate
