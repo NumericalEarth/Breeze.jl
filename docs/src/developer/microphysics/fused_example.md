@@ -31,6 +31,55 @@ and `microphysical_state` are unchanged — copy them straight from
 [Example Microphysics Implementation](@ref). Only `microphysical_tendency` and
 `compute_microphysical_tendencies!` change.
 
+```@setup fused_microphysics_example
+using Breeze
+using Oceananigans: CenterField
+using Breeze.AtmosphereModels: AtmosphereModels, AbstractMicrophysicalState
+using Breeze.Thermodynamics: MoistureMassFractions
+
+struct ExplicitMicrophysics{FT}
+    vapor_to_liquid :: FT
+    vapor_to_ice :: FT
+end
+
+AtmosphereModels.prognostic_field_names(::ExplicitMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
+
+function AtmosphereModels.materialize_microphysical_fields(::ExplicitMicrophysics, grid, boundary_conditions)
+    ρqᵛ = CenterField(grid; boundary_conditions=boundary_conditions.ρqᵛ)
+    ρqˡ = CenterField(grid; boundary_conditions=boundary_conditions.ρqˡ)
+    ρqⁱ = CenterField(grid; boundary_conditions=boundary_conditions.ρqⁱ)
+    qᵛ = CenterField(grid)
+    return (; ρqᵛ, ρqˡ, ρqⁱ, qᵛ)
+end
+
+struct ExplicitMicrophysicsState{FT} <: AbstractMicrophysicalState{FT}
+    qᵛ :: FT
+    qˡ :: FT
+    qⁱ :: FT
+end
+
+function AtmosphereModels.microphysical_state(::ExplicitMicrophysics, ρ, μ::NamedTuple, 𝒰, velocities)
+    qᵛ = μ.ρqᵛ / ρ
+    qˡ = μ.ρqˡ / ρ
+    qⁱ = μ.ρqⁱ / ρ
+    return ExplicitMicrophysicsState(qᵛ, qˡ, qⁱ)
+end
+
+@inline function AtmosphereModels.update_microphysical_auxiliaries!(μ, i, j, k, grid,
+                                                                    ::ExplicitMicrophysics,
+                                                                    ℳ::ExplicitMicrophysicsState,
+                                                                    ρ, 𝒰, constants)
+    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    return nothing
+end
+
+@inline function AtmosphereModels.moisture_fractions(::ExplicitMicrophysics, ℳ::ExplicitMicrophysicsState, qᵛᵉ)
+    return MoistureMassFractions(ℳ.qᵛ, ℳ.qˡ, ℳ.qⁱ)
+end
+
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::ExplicitMicrophysics, qᵛᵉ, constants) = 𝒰
+```
+
 ## Bundling Tendencies
 
 In the per-name walkthrough each prognostic gets its own `microphysical_tendency`
@@ -43,7 +92,7 @@ another redundant pass.
 In the bundled-rate path we package all three tendencies into one gridless helper, with
 the shared intermediates computed exactly once:
 
-```julia
+```@example fused_microphysics_example
 using Breeze.Thermodynamics: temperature, saturation_specific_humidity,
                               PlanarLiquidSurface, PlanarIceSurface
 
@@ -66,7 +115,7 @@ end
 If a parcel model or state-based unit tests need the per-name interface, wrap the
 helper:
 
-```julia
+```@example fused_microphysics_example
 using Breeze.AtmosphereModels: AtmosphereModels
 
 @inline AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqᵛ}, ρ, ℳ, 𝒰, c) =
@@ -89,7 +138,7 @@ Otherwise the override below is sufficient for `AtmosphereModel`.
 The kernel does what the default kernel does — read density, build ``ℳ`` and ``𝒰`` —
 then `+=`s the bundled tendencies into every ``G`` field:
 
-```julia
+```@example fused_microphysics_example
 using KernelAbstractions: @kernel, @index
 
 @kernel function _compute_explicit_microphysics_tendencies!(Gρqᵛ, Gρqˡ, Gρqⁱ,
@@ -125,7 +174,7 @@ override below.
 
 ## Overriding `compute_microphysical_tendencies!`
 
-```julia
+```@example fused_microphysics_example
 using Oceananigans.Utils: launch!
 using Breeze.AtmosphereModels: AtmosphereModels
 
@@ -151,3 +200,31 @@ dispatch on `::ExplicitMicrophysics` takes priority when the model carries this 
 `update_microphysical_auxiliaries!`, `moisture_fractions`, and
 `maybe_adjust_thermodynamic_state` are unchanged from the
 [per-name walkthrough](example.md) — copy them over verbatim.
+
+## Exercising the Scheme
+
+The gridless `explicit_microphysics_tendencies` helper is the workhorse used by both the
+fused kernel and any per-name wrappers. We can confirm it runs by handing it a
+saturated near-surface parcel:
+
+```@example fused_microphysics_example
+using Breeze.Thermodynamics: ThermodynamicConstants, LiquidIcePotentialTemperatureState,
+                              MoistureMassFractions
+
+constants = ThermodynamicConstants(Float64)
+
+qᵛ = 0.012
+q = MoistureMassFractions(qᵛ, 0.0, 0.0)
+𝒰 = LiquidIcePotentialTemperatureState(290.0, q, 1.0e5, 1.0e5)
+
+em = ExplicitMicrophysics(60.0, 60.0)
+ρ = 1.2
+ℳ = ExplicitMicrophysicsState(qᵛ, 0.0, 0.0)
+
+explicit_microphysics_tendencies(em, ρ, ℳ, 𝒰, constants)
+```
+
+The kernel and override are end-to-end exercised by the GPU regression tests for
+`MPNE1M`, whose override in
+`ext/BreezeCloudMicrophysicsExt/one_moment_microphysics.jl` follows the same
+structure.
