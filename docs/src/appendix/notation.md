@@ -137,13 +137,17 @@ The following table also uses a few conventions that suffuse the source code and
 | ``N_A``                             | `ℕᴬ`   |                                     | Avogadro's number, molecules per mole                                          |
 | ``\mathcal{U}``                     | `𝒰`    |                                     | Thermodynamic state struct (e.g., `StaticEnergyState`)                         |
 | ``\mathcal{M}``                     | `ℳ`    |                                     | Microphysical state struct (e.g., `WarmPhaseOneMomentState`)                   |
-| ``\psi``                            | `ψ`    | `AcousticSubstepper.pressure_coefficient` | Pressure coefficient for acoustic substepping, ``ψ = Rᵐ T``             |
-| ``{\mathbb{C}^{ac}}^2``             | `ℂᵃᶜ²` |                                           | Acoustic sound speed squared, ``ℂᵃᶜ² = γᵐ ψ = γᵐ Rᵐ T``                 |
+| ``Π^L``                             | `Πᴸ`   | `AcousticSubstepper.linearization_exner` | Stage-entry Exner function, ``Π^L = (p^L / p^{st})^κ``                  |
+| ``θ^L``                             | `θᴸ`   | `AcousticSubstepper.linearization_potential_temperature` | Stage-entry potential temperature, ``θ^L = (ρθ)^L / ρ^L`` |
+| ``γ^m R^m\vert_L``                  | `γRᵐᴸ` | `AcousticSubstepper.linearization_gamma_R_mixture` | Stage-entry equation-of-state coefficient in ``p' = γ^m R^m\vert_L Π^L (ρθ)'`` |
+| ``C^L``                             | `Cᴸ`   |                                     | Linearized pressure coefficient, ``C^L = γ^m R^m\vert_L Π^L``                 |
 | ``G^n``                             | `Gⁿ`   |                                     | Tendency fields at time step ``n``                                             |
 | ``G^s``                             | `Gˢ`   |                                     | Slow tendencies (excludes fast pressure gradient and buoyancy)                 |
-| ``N_s``                             | `Ns`   | `AcousticSubstepper.Ns`             | Number of acoustic substeps per full time step                                 |
-| ``\Delta \tau``                     | `Δτ`   |                                     | Acoustic substep time step, ``Δτ = Δt / Ns``                                   |
-| ``\kappa^d``                        | `κᵈ`   | `AcousticSubstepper.κᵈ`             | Divergence damping coefficient for acoustic substepping                        |
-| ``\rho_r``                          | `ρᵣ`   | `AcousticSubstepper.ρᵣ`             | Reference density for divergence damping (start of acoustic loop)              |
-| ``w^{avg}``                         | `averaging_weight` |                              | Time-averaging weight for velocity fields in acoustic substepping              |
-| ``\bar{u}, \bar{v}, \bar{w}``       | `ū, v̄, w̄` |                                 | Time-averaged velocities for scalar advection                                  |
+| ``N``                               | `N`    | `AcousticSubstepper.substeps`       | Acoustic substeps per outer time step, or adaptive substep count before stage partitioning |
+| ``N_τ``                             | `Nτ`   |                                     | Acoustic substeps in one Runge-Kutta stage                                     |
+| ``\Delta \tau``                     | `Δτ`   |                                     | Acoustic substep size, ``Δτ = Δt / N`` for proportional substep distribution   |
+| ``ρ'``                              | `ρ′`   | `AcousticSubstepper.density_perturbation` | Density perturbation about the stage-entry state                       |
+| ``(ρθ)'``                           | `ρθ′`  | `AcousticSubstepper.density_potential_temperature_perturbation` | Thermodynamic-density perturbation about the stage-entry state |
+| ``(ρu)', (ρv)', (ρw)'``             | `ρu′, ρv′, ρw′` | `AcousticSubstepper.momentum_perturbation` | Momentum perturbations about the stage-entry state              |
+| ``D_τ``                             | `Dτ`   |                                     | Klemp-Skamarock-Ha divergence-damping proxy, ``D_τ = ((ρθ)'_τ - (ρθ)'_{τ-\Delta τ}) / θ^L`` |
+| ``\bar{u}, \bar{v}, \bar{w}``       | `ū, v̄, w̄` | `AcousticSubstepper.time_averaged_velocities` | Time-averaged velocities for non-acoustic scalar advection |

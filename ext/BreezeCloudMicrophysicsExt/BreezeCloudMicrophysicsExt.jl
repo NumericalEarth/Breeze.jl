@@ -36,7 +36,6 @@ using Breeze.AtmosphereModels: AtmosphereModels,
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
-    density,
     with_moisture,
     temperature,
     PlanarLiquidSurface,
@@ -71,6 +70,8 @@ using Oceananigans: Center, Face, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: ZFaceField
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, Open
+using Oceananigans.Utils: launch!
+using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
 
 using Breeze.Advection: SurfacePrecipitationFluxKernel

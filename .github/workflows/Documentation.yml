@@ -26,6 +26,8 @@ env:
   # Don't make Reactant occupy all the GPU memory
   XLA_REACTANT_GPU_PREALLOCATE: 'false'
   JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
+  # Silence most messages coming from XLA
+  TF_CPP_MIN_LOG_LEVEL: '3'
 
 jobs:
   build-docs:

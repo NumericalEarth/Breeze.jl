@@ -18,8 +18,8 @@ AtmosphereModels.prognostic_field_names(::ZMCM) = tuple()
 AtmosphereModels.materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)
 @inline AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, bμp::ZMCM, ρ, 𝒰, constants) = update_microphysical_fields!(μ, i, j, k, grid, bμp.cloud_formation, ρ, 𝒰, constants)
 @inline AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵉ, μ) = grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵉ, μ)
-@inline AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::ZMCM, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
 @inline AtmosphereModels.sedimentation_velocity(bμp::ZMCM, μ, name) = nothing
+
 
 @inline function AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, qᵉ, constants)
     # Initialize moisture state from equilibrium moisture qᵉ (not from stale microphysical fields)
@@ -28,18 +28,15 @@ AtmosphereModels.materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = mater
     return adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants)
 end
 
-@inline function AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵉ}, ρ, μ, 𝒰, constants, velocities)
-    # Get cloud liquid water from microphysical fields
+@inline function AtmosphereModels.microphysical_tendency(bμp::ZMCM, ::Val{:ρqᵉ}, ρ, ℳ, 𝒰, constants)
+    # Get cloud liquid water from the (saturation-adjusted) moisture state.
     q = 𝒰.moisture_mass_fractions
     qˡ = q.liquid
     qⁱ = q.ice
 
-    # remove_precipitation returns -dqᵉ/dt (rate of moisture removal)
-    # Multiply by density to get the tendency for ρqᵉ
-    # TODO: pass density into microphysical_tendency
-    ρ = density(𝒰, constants)
+    # remove_precipitation returns -dqᵉ/dt (rate of moisture removal); multiply by
+    # density to get the tendency for ρqᵉ.
     parameters_0M = bμp.categories
-
     return ρ * remove_precipitation(parameters_0M, qˡ, qⁱ)
 end
 
