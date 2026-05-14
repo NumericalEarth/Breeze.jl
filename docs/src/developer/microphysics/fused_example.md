@@ -225,7 +225,7 @@ end
 using Breeze.Thermodynamics: MoistureMassFractions
 using Breeze.AtmosphereModels: AtmosphereModels
 
-@inline function AtmosphereModels.moisture_fractions(::ExplicitMicrophysics, ℳ::ExplicitMicrophysicsState, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(::ExplicitMicrophysics, ℳ::ExplicitMicrophysicsState, qᵛᵉ)
     return MoistureMassFractions(ℳ.qᵛ, ℳ.qˡ, ℳ.qⁱ)
 end
 ```
@@ -235,7 +235,7 @@ end
 ```julia
 using Breeze.AtmosphereModels: AtmosphereModels
 
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::ExplicitMicrophysics, qᵗ, constants) = 𝒰
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::ExplicitMicrophysics, qᵛᵉ, constants) = 𝒰
 ```
 
 ## Summary

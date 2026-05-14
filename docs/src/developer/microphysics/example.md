@@ -10,6 +10,7 @@ First, we define a struct to hold the scheme parameters:
 
 ```@example microphysics_example
 using Breeze
+using Breeze.AtmosphereModels: AtmosphereModels
 
 struct ExplicitMicrophysics{FT}
     vapor_to_liquid :: FT
@@ -23,9 +24,7 @@ This scheme is fully prognostic, meaning we carry vapor, liquid, and ice density
 variables:
 
 ```@example microphysics_example
-import Breeze.AtmosphereModels: prognostic_field_names
-
-prognostic_field_names(::ExplicitMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
+AtmosphereModels.prognostic_field_names(::ExplicitMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
 ```
 
 !!! note "Field naming conventions"
@@ -41,9 +40,8 @@ diagnostic fields needed:
 
 ```@example microphysics_example
 using Oceananigans: CenterField
-import Breeze.AtmosphereModels: materialize_microphysical_fields
 
-function materialize_microphysical_fields(::ExplicitMicrophysics, grid, boundary_conditions)
+function AtmosphereModels.materialize_microphysical_fields(::ExplicitMicrophysics, grid, boundary_conditions)
     # Prognostic fields (density-weighted)
     ρqᵛ = CenterField(grid; boundary_conditions=boundary_conditions.ρqᵛ)
     ρqˡ = CenterField(grid; boundary_conditions=boundary_conditions.ρqˡ)
@@ -65,7 +63,6 @@ The microphysical state encapsulates local values for tendency computation:
 
 ```@example microphysics_example
 using Breeze.AtmosphereModels: AbstractMicrophysicalState
-import Breeze.AtmosphereModels: microphysical_state
 
 struct ExplicitMicrophysicsState{FT} <: AbstractMicrophysicalState{FT}
     qᵛ :: FT
@@ -73,7 +70,7 @@ struct ExplicitMicrophysicsState{FT} <: AbstractMicrophysicalState{FT}
     qⁱ :: FT
 end
 
-function microphysical_state(::ExplicitMicrophysics, ρ, μ::NamedTuple, 𝒰, velocities)
+function AtmosphereModels.microphysical_state(::ExplicitMicrophysics, ρ, μ::NamedTuple, 𝒰, velocities)
     # Convert density-weighted prognostics to specific quantities
     # velocities is required for interface compatibility (used by some schemes for aerosol activation)
     qᵛ = μ.ρqᵛ / ρ
@@ -89,12 +86,11 @@ Tendencies are computed from the microphysical state. Each prognostic variable n
 tendency method:
 
 ```@example microphysics_example
-import Breeze.AtmosphereModels: microphysical_tendency
 using Breeze.Thermodynamics: temperature, saturation_specific_humidity,
                               PlanarLiquidSurface, PlanarIceSurface
 
 # Tendency for liquid water density
-@inline function microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqˡ}, ρ, ℳ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqˡ}, ρ, ℳ, 𝒰, constants)
     T = temperature(𝒰, constants)
     q⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     τᵛˡ = em.vapor_to_liquid
@@ -103,7 +99,7 @@ using Breeze.Thermodynamics: temperature, saturation_specific_humidity,
 end
 
 # Tendency for ice density
-@inline function microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqⁱ}, ρ, ℳ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqⁱ}, ρ, ℳ, 𝒰, constants)
     T = temperature(𝒰, constants)
     q⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
     τᵛⁱ = em.vapor_to_ice
@@ -112,9 +108,9 @@ end
 end
 
 # Tendency for vapor density (conservation: what's lost to liquid/ice)
-@inline function microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqᵛ}, ρ, ℳ, 𝒰, constants)
-    Sˡ = microphysical_tendency(em, Val(:ρqˡ), ρ, ℳ, 𝒰, constants)
-    Sⁱ = microphysical_tendency(em, Val(:ρqⁱ), ρ, ℳ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(em::ExplicitMicrophysics, ::Val{:ρqᵛ}, ρ, ℳ, 𝒰, constants)
+    Sˡ = AtmosphereModels.microphysical_tendency(em, Val(:ρqˡ), ρ, ℳ, 𝒰, constants)
+    Sⁱ = AtmosphereModels.microphysical_tendency(em, Val(:ρqⁱ), ρ, ℳ, 𝒰, constants)
     return -Sˡ - Sⁱ
 end
 ```
@@ -124,12 +120,10 @@ end
 The `update_microphysical_auxiliaries!` function writes diagnostic fields:
 
 ```@example microphysics_example
-import Breeze.AtmosphereModels: update_microphysical_auxiliaries!
-
-@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid,
-                                                    ::ExplicitMicrophysics,
-                                                    ℳ::ExplicitMicrophysicsState,
-                                                    ρ, 𝒰, constants)
+@inline function AtmosphereModels.update_microphysical_auxiliaries!(μ, i, j, k, grid,
+                                                                    ::ExplicitMicrophysics,
+                                                                    ℳ::ExplicitMicrophysicsState,
+                                                                    ρ, 𝒰, constants)
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     return nothing
 end
@@ -141,9 +135,8 @@ The `moisture_fractions` function partitions total moisture:
 
 ```@example microphysics_example
 using Breeze.Thermodynamics: MoistureMassFractions
-import Breeze.AtmosphereModels: moisture_fractions
 
-@inline function moisture_fractions(::ExplicitMicrophysics, ℳ::ExplicitMicrophysicsState, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(::ExplicitMicrophysics, ℳ::ExplicitMicrophysicsState, qᵛᵉ)
     return MoistureMassFractions(ℳ.qᵛ, ℳ.qˡ, ℳ.qⁱ)
 end
 ```
@@ -154,9 +147,7 @@ This is a fully prognostic scheme with no saturation adjustment, so we simply re
 the state unchanged:
 
 ```@example microphysics_example
-import Breeze.AtmosphereModels: maybe_adjust_thermodynamic_state
-
-@inline maybe_adjust_thermodynamic_state(𝒰, ::ExplicitMicrophysics, qᵗ, constants) = 𝒰
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::ExplicitMicrophysics, qᵛᵉ, constants) = 𝒰
 ```
 
 ## Summary

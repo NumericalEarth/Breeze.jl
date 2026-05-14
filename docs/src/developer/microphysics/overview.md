@@ -62,8 +62,12 @@ Velocity components are interpolated from cell faces to cell centers and passed 
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `moisture_fractions` | `(microphysics, ℳ, qᵗ)` | **State-based**. Partition moisture into vapor, liquid, ice. |
-| `grid_moisture_fractions` | `(i, j, k, grid, microphysics, ρ, qᵗ, μ_fields)` | **Generic wrapper**. Builds state and dispatches. |
+| `moisture_fractions` | `(microphysics, ℳ, qᵛᵉ)` | **State-based**. Partition moisture into vapor, liquid, ice. |
+| `grid_moisture_fractions` | `(i, j, k, grid, microphysics, ρ, qᵛᵉ, μ_fields)` | **Generic wrapper**. Builds state and dispatches. |
+
+The argument `qᵛᵉ` is the scheme-dependent specific moisture: vapor (``qᵛ``) for
+non-equilibrium schemes, or equilibrium moisture (``qᵉ = qᵛ + qᶜˡ``) for saturation
+adjustment schemes.
 
 **Note**: Non-equilibrium schemes don't need `𝒰` to build their state (they use prognostic fields).
 Saturation adjustment schemes override `grid_moisture_fractions` directly since they read cloud
@@ -73,7 +77,7 @@ condensate from diagnostic fields.
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `maybe_adjust_thermodynamic_state` | `(𝒰, microphysics, qᵗ, constants)` | Apply saturation adjustment if scheme uses it. |
+| `maybe_adjust_thermodynamic_state` | `(𝒰, microphysics, qᵛᵉ, constants)` | Apply saturation adjustment if scheme uses it. |
 
 This function is fully gridless—it takes only scalar thermodynamic arguments.
 Non-equilibrium schemes simply return `𝒰` unchanged. Saturation adjustment schemes perform
@@ -129,7 +133,7 @@ These functions are sufficient to use a microphysics scheme with [`ParcelModel`]
 |----------|---------|
 | `microphysical_state(microphysics, ρ, μ, 𝒰, velocities)` | Build state from prognostics |
 | `microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)` | Compute tendencies |
-| `moisture_fractions(microphysics, ℳ, qᵗ)` | Partition moisture (if generic doesn't work) |
+| `moisture_fractions(microphysics, ℳ, qᵛᵉ)` | Partition moisture (if generic doesn't work) |
 | `prognostic_field_names(microphysics)` | List prognostic variables |
 
 **Why this works**: Parcel models operate on scalar states at a single point.
@@ -162,13 +166,16 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `prognostic_field_names` | ✓ | ✓ | Required for both |
 | `materialize_microphysical_fields` | — | ✓ | Fields for grid storage |
 | `update_microphysical_auxiliaries!` | — | ✓ | Write to diagnostic fields |
-| `microphysical_velocities` | — | ✓ | Sedimentation advection |
+| `microphysical_velocities` | — | ✓§ | Sedimentation advection |
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
-| `compute_microphysical_tendencies!` | — | ✓* | Override for fused bundle schemes |
-| `grid_moisture_fractions` | — | ✓* | Override for saturation adjustment |
-| `maybe_adjust_thermodynamic_state` | — | ✓* | Override for saturation adjustment |
+| `compute_microphysical_tendencies!` | — | ✓† | Override for fused bundle schemes |
+| `grid_moisture_fractions` | — | ✓‡ | Override for saturation adjustment |
+| `maybe_adjust_thermodynamic_state` | — | ✓‡ | Override for saturation adjustment |
 
-*Only needed for saturation adjustment schemes.
+† Only needed for bundle/fused-kernel schemes (e.g. mixed-phase 1M).
+‡ Only needed for saturation adjustment schemes.
+§ Only needed when one or more prognostic species sediments; non-sedimenting schemes can
+return `nothing` for every name.
 
 ### Saturation Adjustment Schemes
 
