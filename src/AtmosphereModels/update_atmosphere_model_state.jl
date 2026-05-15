@@ -341,6 +341,12 @@ function compute_tendencies!(model::AtmosphereModel)
     end
 
     #####
+    ##### Fused microphysics tendencies (no-op by default; schemes opt in)
+    #####
+
+    compute_microphysical_tendencies!(model)
+
+    #####
     ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
     #####
 
