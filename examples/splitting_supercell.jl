@@ -317,9 +317,8 @@ const j_center = Ny ÷ 2 + 1
 function run_simulation(model, label)
     @info "=== Running case: $label ==="
 
-    θ          = liquid_ice_potential_temperature(model)
-    θ_snapshot = deepcopy(θ)            ## snapshot of the initial state on the GPU
-    θ′         = Field(θ - θ_snapshot)  ## lazy field, recomputed each output
+    θ  = liquid_ice_potential_temperature(model)
+    θ′ = Field(θ - deepcopy(θ))  ## lazy field, recomputed each output
 
     qᶜˡ = model.microphysical_fields.qᶜˡ
     qʳ  = model.microphysical_fields.qʳ
