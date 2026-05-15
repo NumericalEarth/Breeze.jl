@@ -229,7 +229,7 @@ define a DSD-based number concentration (e.g., `SaturationAdjustment`).
 
 The return shape is therefore polymorphic — a lazy `KernelFunctionOperation` for
 1-mom and a stored `Field` for 2-mom — so the function is snake-cased rather
-than PascalCased. Use [`NumberConcentrationField`](@ref) when you want a
+than PascalCased. Use [`number_concentration_field`](@ref) when you want a
 uniformly Field-typed handle.
 """
 number_concentration(model, species::Symbol) =
@@ -251,7 +251,7 @@ allocates a `Field` shell around the lazy `KernelFunctionOperation` (use
 directly. Returns `nothing` when the requested species is not carried by the
 model.
 """
-function NumberConcentrationField(model, species::Symbol)
+function number_concentration_field(model, species::Symbol)
     result = number_concentration(model, species)
     result === nothing && return nothing
     result isa Field && return result

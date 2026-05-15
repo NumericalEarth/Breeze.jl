@@ -44,8 +44,8 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
 
     @test @allowscalar isapprox(ρnʳ[1, 1, 1], expected, rtol=100eps(FT))
 
-    # NumberConcentrationField convenience wrapper.
-    ρnʳ_field = NumberConcentrationField(model, :rain)
+    # number_concentration_field convenience wrapper.
+    ρnʳ_field = number_concentration_field(model, :rain)
     @test ρnʳ_field isa Field
     compute!(ρnʳ_field)
     @test @allowscalar isapprox(ρnʳ_field[1, 1, 1], expected, rtol=100eps(FT))
@@ -100,7 +100,7 @@ end
     @test number_concentration(model, :hail) === nothing
     @test number_concentration(model, :graupel) === nothing
     @test number_concentration(model, :snow) === nothing
-    @test NumberConcentrationField(model, :hail) === nothing
+    @test number_concentration_field(model, :hail) === nothing
 end
 
 @testset "NumberConcentration: two-moment returns prognostic field [$FT]" for FT in test_float_types()
@@ -129,5 +129,5 @@ end
     model = AtmosphereModel(grid; microphysics)
 
     @test_throws ErrorException number_concentration(model, :rain)
-    @test_throws ErrorException NumberConcentrationField(model, :rain)
+    @test_throws ErrorException number_concentration_field(model, :rain)
 end

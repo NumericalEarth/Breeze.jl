@@ -22,7 +22,7 @@ export
     RelativeHumidity,
     RelativeHumidityField,
     number_concentration,
-    NumberConcentrationField
+    number_concentration_field
 
 using ..AtmosphereModels: AtmosphereModels, moisture_fractions, grid_moisture_fractions,
     materialize_microphysical_fields, update_microphysical_fields!,
