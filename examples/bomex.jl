@@ -173,29 +173,26 @@ e_radiation_forcing = Forcing(radiative_cooling)
 
 # ## Assembling all the forcings
 #
-# Forcings on the same prognostic field can be supplied either under the
-# density-weighted key (e.g. `ρθ`) or under the specific key (e.g. `θ`); Breeze
-# applies the ``ρ`` factor automatically in the latter case. When both keys are
-# present for the same field, Breeze sums the contributions. Here we keep
-# `subsidence` and `geostrophic` under density-weighted keys because they
-# already produce ``F_{ρϕ}`` internally, and supply the prescribed drying and
-# radiative-cooling tendencies under their specific keys.
+# Forcings are keyed under specific prognostic names (`u`, `v`, `θ`, `qᵉ`, `e`);
+# Breeze applies the density factor ``ρ`` automatically at kernel time. When
+# multiple forcings act on the same prognostic field — e.g. subsidence and the
+# geostrophic adjustment on the horizontal velocity — they are combined as a
+# tuple, and Breeze sums their contributions.
 #
-# Forcings on `ρe` and `ρθ` both contribute to the tendency of `ρθ` in different
+# Forcings on `e` and `θ` both contribute to the tendency of `ρθ` in different
 # ways. The tendency for `ρθ` is written
 #
 # ```math
-# ∂_t (ρ θ) = - \boldsymbol{\nabla \cdot} \, ( ρ \boldsymbol{u} θ ) + F_{ρθ} + \frac{1}{cᵖᵐ Π} F_{ρ e} + \cdots
+# ∂_t (ρ θ) = - \boldsymbol{\nabla \cdot} \, ( ρ \boldsymbol{u} θ ) + ρ F_θ + \frac{ρ F_e}{cᵖᵐ Π} + \cdots
 # ```
 #
-# where ``F_{ρ e}`` denotes the forcing on `ρe` (energy density), ``F_{ρθ}`` denotes
-# the forcing on `ρθ`, and the ``\cdots`` denote additional terms.
+# where ``F_e`` denotes the specific energy forcing supplied under `e` and
+# ``F_θ`` denotes the specific potential-temperature forcing supplied under `θ`.
 
-forcing = (; ρu = (subsidence, geostrophic.ρu),
-             ρv = (subsidence, geostrophic.ρv),
-             ρθ = subsidence,
-             ρqᵉ = subsidence,
-             qᵉ = qᵉ_drying_forcing,
+forcing = (; u = (subsidence, geostrophic.u),
+             v = (subsidence, geostrophic.v),
+             θ = subsidence,
+             qᵉ = (subsidence, qᵉ_drying_forcing),
              e = e_radiation_forcing)
 nothing #hide
 
