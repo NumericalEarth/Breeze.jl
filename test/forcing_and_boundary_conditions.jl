@@ -138,7 +138,7 @@ end
                                                 standard_pressure = FT(1e5))
         ρu_bcs_no_T₀ = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         @test_throws ArgumentError AtmosphereModel(grid; dynamics=compressible_dyn,
-                                                          boundary_conditions=(; ρu=ρu_bcs_no_T₀))
+                                                         boundary_conditions=(; ρu=ρu_bcs_no_T₀))
     end
 
     @testset "BulkSensibleHeatFlux construction and application [$FT]" begin
