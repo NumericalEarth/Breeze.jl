@@ -50,6 +50,8 @@ end
 ##### return specific tendencies and so are accepted here directly.
 #####
 
+AtmosphereModels.wrap_specific_forcing(::Nothing, density_name) = nothing
+
 function AtmosphereModels.wrap_specific_forcing(value, density_name)
     if is_density_tendency_forcing(value)
         msg = string("Forcing of type ", nameof(typeof(value)),

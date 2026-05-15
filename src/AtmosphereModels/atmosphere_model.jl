@@ -422,18 +422,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     forcing_context = (; coriolis, density, specific_fields)
 
     materialized = Tuple(
-        let density_name = n,
-            specific_name = startswith(string(n), "ρ") ? Symbol(string(n)[nextind(string(n), 1):end]) : nothing
-            ρ_value    = density_name in user_forcing_names ? user_forcings[density_name] : nothing
-            spec_raw   = (specific_name !== nothing && specific_name in user_forcing_names) ?
-                         user_forcings[specific_name] : nothing
-            spec_value = spec_raw === nothing ? nothing :
-                         wrap_specific_forcing(spec_raw, density_name)
-            combined   = combine_forcing_values(ρ_value, spec_value)
-            combined === nothing ?
-                Returns(zero(eltype(f))) :
-                materialize_atmosphere_model_forcing(combined, f, density_name, model_names, forcing_context)
-        end
+        assemble_field_forcing(n, f, user_forcings, model_names, forcing_context)
         for (n, f) in pairs(forcing_fields)
     )
 
@@ -442,14 +431,39 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     return forcings
 end
 
+# Assemble the materialized forcing for one prognostic field, combining any user-supplied
+# ρ-keyed entry with any specific-keyed entry on the same prognostic.
+function assemble_field_forcing(density_name, target_field, user_forcings, model_names, context)
+    specific_name = specific_name_of(density_name)
+    raw_specific_forcing = isnothing(specific_name) ? nothing :
+                           get(user_forcings, specific_name, nothing)
+    wrapped_specific_forcing = wrap_specific_forcing(raw_specific_forcing, density_name)
+    raw_density_forcing = get(user_forcings, density_name, nothing)
+    combined = combine_forcing_values(raw_density_forcing, wrapped_specific_forcing)
+    return materialize_or_default(combined, target_field, density_name, model_names, context)
+end
+
+# Strip the `ρ` prefix from a density-weighted prognostic name; returns `nothing` for
+# any name that is not ρ-prefixed.
+function specific_name_of(density_name)
+    s = string(density_name)
+    return startswith(s, "ρ") ? Symbol(s[nextind(s, 1):end]) : nothing
+end
+
+# Default forcing for fields the user did not supply: a Returns that yields zero at every
+# grid point. Dispatch on Nothing keeps the assemble path branch-free.
+materialize_or_default(::Nothing, target_field, density_name, model_names, context) =
+    Returns(zero(target_field.grid))
+
+materialize_or_default(forcing, target_field, density_name, model_names, context) =
+    materialize_atmosphere_model_forcing(forcing, target_field, density_name, model_names, context)
+
 # Build (specific_name => density_name) pairs from a tuple of prognostic ρ-names.
 function specific_to_density_pairs(forcing_names)
     pairs = Pair{Symbol, Symbol}[]
     for name in forcing_names
-        s = string(name)
-        if startswith(s, "ρ")
-            push!(pairs, Symbol(s[nextind(s, 1):end]) => name)
-        end
+        specific_name = specific_name_of(name)
+        isnothing(specific_name) || push!(pairs, specific_name => name)
     end
     return Tuple(pairs)
 end
