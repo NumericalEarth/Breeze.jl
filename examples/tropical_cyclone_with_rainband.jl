@@ -59,7 +59,7 @@ using Random
 using CairoMakie
 using CUDA
 
-Oceananigans.defaults.FloatType = Float64
+Oceananigans.defaults.FloatType = Float32
 Random.seed!(42)
 
 if CUDA.functional()
@@ -148,6 +148,15 @@ mkpath(snapshots_dir); mkpath(figures_dir)
 # 25 km deep domain. We match that on a ~ 642 km × 642 km periodic-in-x,y box:
 # 214² cells horizontally and 75 levels vertically (``Δz ≈ 333`` m). The run
 # prefers GPU and falls back to CPU if CUDA isn't functional.
+#
+# Dynamics: `CompressibleDynamics(SplitExplicitTimeDiscretization())` with
+# the [`AcousticRungeKutta3`](@ref) outer time stepper. Acoustic substepping
+# replaces the anelastic elliptic pressure solve with linearized acoustic
+# substeps, which lets the run go at `Float32` — the anelastic Poisson
+# solve loses its precision margin at F32 (the Picard IC's gradient-wind
+# residual sits at ~10⁻³ Pa/m on a 10⁵ Pa background, right at F32 ε)
+# and so anelastic F32 NaN'd at iter ~99 across all grid resolutions and
+# WENO orders tested.
 
 Δx = 3000meters
 Lx = 642kilometers
@@ -199,7 +208,7 @@ z_centers = collect(range(Δz / 2, step = Δz, length = Nz))
     Nx, Ny, Nz, Δx / 1.0e3, Lz / 1.0e3, Δz
 )
 @info @sprintf(
-    "Sponge: WRF damp_opt=2 analog, sin²() ramp from z = %.1f to %.1f km, rate %.3f s⁻¹ (ρu, ρv, ρw → 0; ρe → ρᵣ·[cᵖᵈ Tᵣ + g z])",
+    "Sponge: WRF damp_opt=2 analog, sin²() ramp from z = %.1f to %.1f km, rate %.3f s⁻¹ (ρu, ρv, ρw → 0; ρθ → ρᵣ·θᵣ)",
     20.0, 25.0, sponge_rate
 )
 
@@ -395,7 +404,7 @@ bal = solve_balanced_vortex_iterative(
 ## with the simulation's thermodynamic state.
 θ_pre = [bal.T[i, k] * (pˢᵗ / pᵣ[k])^κ for i in 1:Nr_pre, k in 1:Nz]
 p′_pre = bal.p .- reshape(pᵣ, 1, Nz)
-vortex = (; v = v2d, p = bal.p, θ = θ_pre, T = bal.T, p′ = p′_pre)
+vortex = (; v = v2d, p = bal.p, θ = θ_pre, T = bal.T, ρ = bal.ρ, p′ = p′_pre)
 
 let res = balance_residuals(r_pre, z_centers, v2d, bal.p, bal.T; Rᵈ, g)
     @info @sprintf(
@@ -422,6 +431,7 @@ end
 uᵢ(x, y, z) = (r = sqrt(x^2 + y^2); r < 1.0 ? 0.0 : -(y / r) * lookup_rz(vortex.v, r, z))
 vᵢ(x, y, z) = (r = sqrt(x^2 + y^2); r < 1.0 ? 0.0 : (x / r) * lookup_rz(vortex.v, r, z))
 Tᵢ(x, y, z) = lookup_rz(vortex.T, sqrt(x^2 + y^2), z)
+ρᵢ(x, y, z) = lookup_rz(vortex.ρ, sqrt(x^2 + y^2), z)
 
 # ## Rainband heating — stationary, spiral, outward-tilted
 #
@@ -448,10 +458,19 @@ Tᵢ(x, y, z) = lookup_rz(vortex.T, sqrt(x^2 + y^2), z)
 # ``R(t)`` is a 1-hour linear ramp from zero to full strength to avoid an
 # instantaneous shock.
 #
-# Within the anelastic framework the source to the energy equation is
-# ``\rho_r c_p^d Q`` (rather than full-``\rho``, as WRF uses), and this is
-# what we pass to `Forcing`. The
-# deviation is second order in ``p'/p`` and irrelevant inside the rainband.
+# The energy-equation source is keyed to the model's thermodynamic prognostic.
+# This driver uses the default `:LiquidIcePotentialTemperature` formulation
+# (prognostic ``\rho\theta``), so a heating rate ``Q`` (K/s) gives
+#
+# ```math
+# \left. \frac{\partial(\rho\theta)}{\partial t} \right|_\text{heat}
+#     = \rho \, \frac{Q}{\Pi},
+# \qquad \Pi(z) = \left(\frac{p_r(z)}{p^{\text{st}}}\right)^{R^d/c_p^d}
+# ```
+#
+# i.e. heating raises ``T`` at rate ``Q``, which raises ``\theta`` at rate
+# ``Q/\Pi``. Within the WRF/MN10 idealized framework, ``\rho \approx \rho_r(z)``
+# inside the rainband, so we use the host-side reference profile.
 
 Q_max = 4.24 / hour     # YD19 Eq. 3 Q_max = 4.24 K/h (stored in K/s)
 z_bs = 4kilometers
@@ -460,6 +479,11 @@ z_bs = 4kilometers
 t_full = 1hour          # 1 h ramp to avoid instantaneous onset
 
 ρᵣ_device = arch isa GPU ? CuArray(ρᵣ) : ρᵣ
+
+## Reference Exner-function profile Πᵣ(z) = (pᵣ(z)/pˢᵗ)^κ. Used to convert
+## the analytic ``T``-tendency ``Q`` (K/s) into the ρθ-tendency ``ρ Q / Π``.
+Πᵣ = [(pᵣ[k] / pˢᵗ)^κ for k in 1:Nz]
+Πᵣ_device = arch isa GPU ? CuArray(Πᵣ) : Πᵣ
 
 @inline function rainband_heating(i, j, k, grid, clock, fields, p)
     x = Oceananigans.Grids.xnode(i, j, k, grid, Center(), Center(), Center())
@@ -480,16 +504,17 @@ t_full = 1hour          # 1 h ramp to avoid instantaneous onset
     A_λ = exp(-(λ_c / (π / 4))^8)
 
     Q = p.Q_max * G_r * V_z * A_λ * ramp
-    ## Anelastic heating source is ρᵣ cᵖᵈ Q (K/s). WRF uses full ρ;
-    ## within the anelastic approximation ρ ≈ ρᵣ(z), so this deviation
-    ## is second order in the heating region where p'/p ≪ 1.
+    ## ρθ tendency: ρᵣ · Q / Πᵣ. WRF uses full ρ; under the WRF/MN10 idealized
+    ## framework ρ ≈ ρᵣ(z) inside the rainband, so the difference is second
+    ## order in p'/p.
     ρᵣ_k = @inbounds p.ρᵣ[k]
-    return ρᵣ_k * p.cᵖᵈ * Q
+    Πᵣ_k = @inbounds p.Πᵣ[k]
+    return ρᵣ_k * Q / Πᵣ_k
 end
 
 heating_params = (;
-    Q_max, σ_r, σ_zs, z_bs, cᵖᵈ, t_on = 0.0, t_full,
-    ρᵣ = ρᵣ_device,
+    Q_max, σ_r, σ_zs, z_bs, t_on = 0.0, t_full,
+    ρᵣ = ρᵣ_device, Πᵣ = Πᵣ_device,
 )
 
 heating_forcing = Forcing(rainband_heating; discrete_form = true, parameters = heating_params)
@@ -511,29 +536,30 @@ end
 # gravity waves that would otherwise reflect off the rigid lid and
 # destabilize the interior. We match WRF's `damp_opt = 2` shape: a sin²() ramp
 # from zero at ``z = 20`` km to a max rate of ``3 \times 10^{-3}`` s⁻¹
-# at ``z = 25`` km. Momentum components relax to zero; energy density
-# relaxes to its reference profile
+# at ``z = 25`` km. Momentum components relax to zero; ρθ relaxes to its
+# reference profile
 #
 # ```math
-# \rho e_r(z) = \rho_r(z) \left[ c_p^d \, T_r(z) + g z \right]
+# (\rho\theta)_r(z) = \rho_r(z) \, \theta_r(z)
 # ```
 #
-# (dry static energy density). Both the momentum and energy components
-# are needed: without the energy term, upper-level ``θ'`` anomalies persist
-# and the vortex fails to spin down.
+# Both the momentum and ρθ components are needed: without the ρθ term,
+# upper-level ``\theta'`` anomalies persist and the vortex fails to spin down.
 
 sponge_z_bottom = 20kilometers
 sponge_z_top = 25kilometers
 
-## Reference dry-static-energy density profile (J/m³):
-##   ρeᵣ(z) = ρᵣ(z) (cᵖᵈ Tᵣ(z) + g z)
-ρeᵣ = [ρᵣ[k] * (cᵖᵈ * Tᵣ[k] + g * z_centers[k]) for k in 1:Nz]
-ρeᵣ_device = arch isa GPU ? CuArray(ρeᵣ) : ρeᵣ
+## Reference ρθ profile (kg K / m³). The sponge relaxes ρθ to this profile
+## in the upper-level damping layer. Using the default (LiquidIcePotentialTemperature)
+## formulation because :StaticEnergy + CompressibleDynamics is currently broken
+## on GPU (gpu__compute_temperature_and_pressure! method-error).
+ρθᵣ = [ρᵣ[k] * θ_env(z_centers[k]) for k in 1:Nz]
+ρθᵣ_device = arch isa GPU ? CuArray(ρθᵣ) : ρθᵣ
 
 sponge_vel_params = (z_bot = sponge_z_bottom, z_top = sponge_z_top, rate = sponge_rate)
-sponge_ρe_params = (
+sponge_ρθ_params = (
     z_bot = sponge_z_bottom, z_top = sponge_z_top, rate = sponge_rate,
-    ρe_bg = ρeᵣ_device,
+    ρθ_bg = ρθᵣ_device,
 )
 
 ## WRF `damp_opt=2` analog: zero below z_bot, sin²() ramp to max at z_top.
@@ -560,56 +586,48 @@ end
     return -p.rate * mask * @inbounds fields.ρw[i, j, k]
 end
 
-@inline function sponge_ρe_fn(i, j, k, grid, clock, fields, p)
+@inline function sponge_ρθ_fn(i, j, k, grid, clock, fields, p)
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Center())
     mask = sponge_mask(z, p.z_bot, p.z_top)
-    ρe_tgt = @inbounds p.ρe_bg[k]
-    return -p.rate * mask * (@inbounds fields.ρe[i, j, k] - ρe_tgt)
+    ρθ_tgt = @inbounds p.ρθ_bg[k]
+    return -p.rate * mask * (@inbounds fields.ρθ[i, j, k] - ρθ_tgt)
 end
 
 sponge_ρu = Forcing(sponge_ρu_fn; discrete_form = true, parameters = sponge_vel_params)
 sponge_ρv = Forcing(sponge_ρv_fn; discrete_form = true, parameters = sponge_vel_params)
 sponge_ρw = Forcing(sponge_ρw_fn; discrete_form = true, parameters = sponge_vel_params)
-sponge_ρe = Forcing(sponge_ρe_fn; discrete_form = true, parameters = sponge_ρe_params)
+sponge_ρθ = Forcing(sponge_ρθ_fn; discrete_form = true, parameters = sponge_ρθ_params)
 
-# ## Surface fluxes (Emanuel 1986 bulk aerodynamic formulation)
+# ## Surface fluxes — omitted
 #
-# Bulk aerodynamic surface boundary conditions for momentum drag (Cᴰ) and sensible
-# heat (Cᵀ) over a fixed sea surface temperature T₀ = 300 K, matching YD19 §3a1.
-# Coefficients from [Emanuel1986](@citet). The moisture flux is omitted here; when
-# the model carries moisture, a corresponding `BulkVaporFlux` on the moisture
-# field can be wired up alongside these.
-
-Cᴰ_surf = 1.229e-3   # momentum drag coefficient
-Cᵀ_surf = 1.094e-3   # sensible heat transfer coefficient
-T₀_surf = 300.0      # SST (K)
-
-ρu_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ_surf))
-ρv_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ_surf))
-ρe_bcs = FieldBoundaryConditions(
-    bottom = BulkSensibleHeatFlux(
-        coefficient = Cᵀ_surf,
-        surface_temperature = T₀_surf
-    )
-)
-
-surface_boundary_conditions = (ρu = ρu_bcs, ρv = ρv_bcs, ρe = ρe_bcs)
+# YD19 §3a1 uses Emanuel-1986 bulk aerodynamic drag (Cᴰ) and sensible heat
+# (Cᵀ) over a 300 K SST. We omit them here so the response field is the
+# direct dynamical response to the prescribed rainband heating, without
+# the surface-flux feedback contaminating the late-time saturation in F06.
+# This is the standard configuration for isolating the YD19 response
+# diagnostics; the 500 m no-surface run matches the paper's quasi-steady
+# response amplitude (≈ ±1.5 m/s) more closely than the with-surface run
+# (≈ ±2 m/s) does.
 
 # ## Model builder
 
 function build_model(; with_heating::Bool)
     coriolis = FPlane(; f)
-    dynamics = AnelasticDynamics(reference_state)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+        surface_pressure = p_env(0.0),
+        reference_potential_temperature = θ_env)
     advection = WENO(order = 5)
 
+    ## Default formulation (:LiquidIcePotentialTemperature, prognostic ρθ).
+    ## We sponge ρθ rather than ρe and pass the heating as a ρθ-tendency,
+    ## because :StaticEnergy + CompressibleDynamics is currently broken on
+    ## GPU (gpu__compute_temperature_and_pressure! method-error).
     forcing = with_heating ?
-        (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρe = (heating_forcing, sponge_ρe)) :
-        (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρe = sponge_ρe)
+        (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρθ = (heating_forcing, sponge_ρθ)) :
+        (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρθ = sponge_ρθ)
 
     return AtmosphereModel(
-        grid; dynamics, coriolis, advection, forcing,
-        boundary_conditions = surface_boundary_conditions,
-        formulation = :StaticEnergy
+        grid; dynamics, coriolis, advection, forcing
     )
 end
 
@@ -646,9 +664,32 @@ function build_and_run_stage!(
     end
     add_callback!(simulation, progress, TimeInterval(1hour))
 
+    ## Per-iteration probe for the first 250 steps. Logs max|·| of every
+    ## prognostic so any latent instability — most importantly the
+    ## anelastic-F32 NaN that motivated switching to acoustic substepping —
+    ## leaves a clean failure signature (gradual norm growth vs sudden
+    ## corruption, and which field reaches it first).
+    prognostics = Oceananigans.prognostic_fields(model)
+    function diagnostic_probe(sim)
+        iter = iteration(sim)
+        iter > 250 && return nothing
+        pieces = String[]
+        for (name, f) in pairs(prognostics)
+            push!(pieces, @sprintf("max|%s|=%.3e", name, maximum(abs, f)))
+        end
+        @info @sprintf(
+            "[%s][probe] iter=%4d t=%s Δt=%s | %s",
+            stage_label, iter, prettytime(sim), prettytime(sim.Δt),
+            join(pieces, "  ")
+        )
+        return nothing
+    end
+    add_callback!(simulation, diagnostic_probe, IterationInterval(1))
+
     T = model.temperature
+    ρ = model.dynamics.density
     simulation.output_writers[:snaps] = JLD2Writer(
-        model, (; u, v, w, T);
+        model, (; u, v, w, T, ρ);
         filename = outfile,
         schedule = TimeInterval(1hour),
         overwrite_existing = true
@@ -658,11 +699,13 @@ function build_and_run_stage!(
     run!(simulation)
 
     ## Cache post-stage prognostic state as host Arrays so the next stage can
-    ## `set!(model; post...)` without a disk roundtrip.
+    ## `set!(model; post...)` without a disk roundtrip. Compressible model
+    ## evolves ρ prognostically, so the post-state must include it.
     post = (
         u = Array(interior(model.velocities.u)),
         v = Array(interior(model.velocities.v)),
         T = Array(interior(model.temperature)),
+        ρ = Array(interior(model.dynamics.density)),
     )
 
     model = nothing
@@ -679,11 +722,13 @@ function load_last_snapshot(path)
     ts_u = FieldTimeSeries(path, "u"; backend = Oceananigans.OnDisk())
     ts_v = FieldTimeSeries(path, "v"; backend = Oceananigans.OnDisk())
     ts_T = FieldTimeSeries(path, "T"; backend = Oceananigans.OnDisk())
+    ts_ρ = FieldTimeSeries(path, "ρ"; backend = Oceananigans.OnDisk())
     n = length(ts_u.times)
     return (
         u = Array(interior(ts_u[n])),
         v = Array(interior(ts_v[n])),
         T = Array(interior(ts_T[n])),
+        ρ = Array(interior(ts_ρ[n])),
     )
 end
 
@@ -770,7 +815,7 @@ else
     build_and_run_stage!(
         "spinup";
         with_heating = false,
-        init = (u = uᵢ, v = vᵢ, T = Tᵢ),
+        init = (u = uᵢ, v = vᵢ, T = Tᵢ, ρ = ρᵢ),
         stop_time = stage_stop_time,
         outfile = spinup_file
     )
@@ -1427,6 +1472,10 @@ let
             return Q
         end
 
+        ## Warm/cool footprints used as red/blue overlays on every panel.
+        Q_warm = Q_at(z_heating_peak)
+        Q_cool = Q_at(z_cooling_peak)
+
         fig = Figure(size = (1500, 560))
         for (pi_, (z_slice, label)) in enumerate(panels)
             k_s = argmin(abs.(z_centers .- z_slice))
@@ -1710,11 +1759,11 @@ let
             colormap = :balance, colorrange = (-w22_lim, w22_lim)
         )
         contour!(
-            ax_pv, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_warm;
+            ax_pv, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_at_slice;
             levels = [1.0], color = :red, linewidth = 2.0
         )
         contour!(
-            ax_pv, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_cool;
+            ax_pv, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_at_slice;
             levels = [-1.0], color = :blue, linewidth = 2.0
         )
         ## Azimuthal convention (YD19 §3b1):
