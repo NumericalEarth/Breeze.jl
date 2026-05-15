@@ -229,8 +229,8 @@ define a DSD-based number concentration (e.g., `SaturationAdjustment`).
 
 The return shape is therefore polymorphic — a lazy `KernelFunctionOperation` for
 1-mom and a stored `Field` for 2-mom — so the function is snake-cased rather
-than PascalCased. Use `NumberConcentrationField` when you want a uniformly
-Field-typed handle.
+than PascalCased. Use [`NumberConcentrationField`](@ref) when you want a
+uniformly Field-typed handle.
 """
 number_concentration(model, species::Symbol) =
     number_concentration(model, model.microphysics, Val(species))
@@ -245,7 +245,7 @@ number_concentration(model, microphysics, ::Val{species}) where {species} =
 """
 $(TYPEDSIGNATURES)
 
-Field-typed handle for the `number_concentration` diagnostic. For 1-mom,
+Field-typed handle for the [`number_concentration`](@ref) diagnostic. For 1-mom,
 allocates a `Field` shell around the lazy `KernelFunctionOperation` (use
 `compute!` to populate it). For 2-mom, returns the prognostic ``ρnˣ`` field
 directly. Returns `nothing` when the requested species is not carried by the

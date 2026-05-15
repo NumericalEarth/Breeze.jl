@@ -108,13 +108,6 @@ end
 # per Kaul et al. (2015), so this dispatch goes through the scheme's
 # `pdf` and `mass` to stay consistent with the model's actual DSD.
 
-"""
-$(TYPEDSIGNATURES)
-
-Build a lazy `number_concentration` for rain under
-`OneMomentCloudMicrophysics`. The returned `KernelFunctionOperation`
-computes `n₀ · λ⁻¹` from the scheme's rain pdf and mass parameters.
-"""
 function Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val{:rain})
     haskey(model.microphysical_fields, :ρqʳ) || return nothing
     pdf = microphysics.categories.rain.pdf
@@ -123,13 +116,6 @@ function Microphysics.number_concentration(model, microphysics::OneMomentLiquidR
     return build_number_concentration_op(model, pdf, mass, ρq)
 end
 
-"""
-$(TYPEDSIGNATURES)
-
-Build a lazy `number_concentration` for snow under
-`OneMomentCloudMicrophysics`. Snow's intercept `n₀` depends on `(q, ρ)` per
-Kaul et al. (2015), so a closed-form rain-style expression cannot substitute.
-"""
 function Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val{:snow})
     haskey(model.microphysical_fields, :ρqˢ) || return nothing
     pdf = microphysics.categories.snow.pdf
