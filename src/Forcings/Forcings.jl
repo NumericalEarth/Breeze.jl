@@ -67,7 +67,8 @@ function AtmosphereModels.wrap_specific_forcing(value, density_name)
     return SpecificForcing(value)
 end
 
-AtmosphereModels.wrap_specific_forcing(values::Tuple, density_name) =
-    map(v -> wrap_specific_forcing(v, density_name), values)
+function AtmosphereModels.wrap_specific_forcing(values::Tuple, density_name)
+    return map(v -> wrap_specific_forcing(v, density_name), values)
+end
 
 end

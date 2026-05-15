@@ -1,5 +1,5 @@
 using ..AtmosphereModels: AtmosphereModels
-using Oceananigans.Fields: location
+using Oceananigans.Fields: instantiated_location
 using Oceananigans.Forcings: materialize_forcing
 using Oceananigans.Grids: Center, Face
 using Oceananigans.Operators: ℑzᵃᵃᶠ
@@ -73,8 +73,8 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Specific
                                                                context::NamedTuple)
     inner = materialize_forcing(forcing.forcing, field, name, model_field_names)
     ρ = context.density
-    _, _, LZ = location(field)
-    return SpecificForcing(inner, ρ, LZ())
+    LZ = instantiated_location(field)[3]
+    return SpecificForcing(inner, ρ, LZ)
 end
 
 #####
