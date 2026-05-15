@@ -930,3 +930,56 @@ end
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqˢ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     return mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqˢ
 end
+
+#####
+##### Fused microphysics tendency for MPNE1M
+#####
+#
+# `mpne1m_tendencies` bundles all 5 prognostic tendencies in one call. We override
+# `compute_microphysical_tendencies!` to compute the bundle once per cell and
+# write to all 5 G fields in a single kernel.
+
+@kernel function _compute_mpne1m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢ,
+                                             grid, microphysics, dynamics, formulation,
+                                             constants, specific_prognostic_moisture,
+                                             microphysical_fields)
+    i, j, k = @index(Global, NTuple)
+
+    ρ_field = AM.dynamics_density(dynamics)
+    @inbounds ρ = ρ_field[i, j, k]
+    @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
+
+    # Reconstruct moisture fractions and thermodynamic state at this cell.
+    q = AM.grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
+    𝒰 = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
+
+    # Build the microphysical state directly to avoid the velocity interpolation
+    # in `grid_microphysical_state` (MPNE1M's `microphysical_state` does not use it).
+    @inbounds qᶜˡ = microphysical_fields.ρqᶜˡ[i, j, k] / ρ
+    @inbounds qᶜⁱ = microphysical_fields.ρqᶜⁱ[i, j, k] / ρ
+    @inbounds qʳ  = microphysical_fields.ρqʳ[i, j, k]  / ρ
+    @inbounds qˢ  = microphysical_fields.ρqˢ[i, j, k]  / ρ
+    ℳ = MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢ)
+
+    G = mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
+
+    @inbounds Gρqᵛ[i, j, k]  += G.ρqᵛ
+    @inbounds Gρqᶜˡ[i, j, k] += G.ρqᶜˡ
+    @inbounds Gρqᶜⁱ[i, j, k] += G.ρqᶜⁱ
+    @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
+    @inbounds Gρqˢ[i, j, k]  += G.ρqˢ
+end
+
+function AM.compute_microphysical_tendencies!(microphysics::MPNE1M, model)
+    grid = model.grid
+    arch = grid.architecture
+    G = model.timestepper.Gⁿ
+
+    launch!(arch, grid, :xyz, _compute_mpne1m_tendencies!,
+            G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢ,
+            grid, microphysics, model.dynamics, model.formulation,
+            model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
+            model.microphysical_fields)
+
+    return nothing
+end

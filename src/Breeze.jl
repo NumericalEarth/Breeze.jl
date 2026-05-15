@@ -44,6 +44,10 @@ export
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
+    AbstractSolarPosition,
+    ApparentSolarPosition,
+    DiurnalSolarPosition,
+    FixedCosineZenith,
     ConstantRadiusParticles,
     TemperatureField,
     IdealGas,
@@ -80,6 +84,7 @@ export
     saturation_specific_humidity,
     adiabatic_hydrostatic_density,
     dry_air_gas_constant,
+    vapor_gas_constant,
     PlanarLiquidSurface,
     PlanarIceSurface,
 
