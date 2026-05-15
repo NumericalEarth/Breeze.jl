@@ -399,7 +399,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     # Build a specific→density name map for any prognostic name that starts with `ρ`.
     # For example, :ρθ contributes :θ => :ρθ. Users may supply forcings under either key,
     # and the dispatch routes specific-keyed values through wrap_specific_forcing.
-    specific_to_density = NamedTuple(_specific_to_density_pairs(forcing_names))
+    specific_to_density = NamedTuple(specific_to_density_pairs(forcing_names))
     valid_specific_names = keys(specific_to_density)
 
     for name in user_forcing_names
@@ -429,7 +429,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
                          user_forcings[specific_name] : nothing
             spec_value = spec_raw === nothing ? nothing :
                          wrap_specific_forcing(spec_raw, density_name)
-            combined   = _combine_forcing_values(ρ_value, spec_value)
+            combined   = combine_forcing_values(ρ_value, spec_value)
             combined === nothing ?
                 Returns(zero(eltype(f))) :
                 materialize_atmosphere_model_forcing(combined, f, density_name, model_names, forcing_context)
@@ -443,7 +443,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 end
 
 # Build (specific_name => density_name) pairs from a tuple of prognostic ρ-names.
-function _specific_to_density_pairs(forcing_names)
+function specific_to_density_pairs(forcing_names)
     pairs = Pair{Symbol, Symbol}[]
     for name in forcing_names
         s = string(name)
@@ -458,15 +458,15 @@ end
 # for the same prognostic. `nothing` denotes "user did not supply this side". The two
 # sides are flattened into a single tuple so the existing tuple-materialization path
 # wraps them in MultipleForcings.
-_combine_forcing_values(::Nothing, ::Nothing) = nothing
-_combine_forcing_values(a::Tuple, ::Nothing) = a
-_combine_forcing_values(::Nothing, b::Tuple) = b
-_combine_forcing_values(a, ::Nothing) = a
-_combine_forcing_values(::Nothing, b) = b
-_combine_forcing_values(a::Tuple, b::Tuple) = (a..., b...)
-_combine_forcing_values(a::Tuple, b) = (a..., b)
-_combine_forcing_values(a, b::Tuple) = (a, b...)
-_combine_forcing_values(a, b) = (a, b)
+combine_forcing_values(::Nothing, ::Nothing) = nothing
+combine_forcing_values(a::Tuple, ::Nothing) = a
+combine_forcing_values(::Nothing, b::Tuple) = b
+combine_forcing_values(a, ::Nothing) = a
+combine_forcing_values(::Nothing, b) = b
+combine_forcing_values(a::Tuple, b::Tuple) = (a..., b...)
+combine_forcing_values(a::Tuple, b) = (a..., b)
+combine_forcing_values(a, b::Tuple) = (a, b...)
+combine_forcing_values(a, b) = (a, b)
 
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)
