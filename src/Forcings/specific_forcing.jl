@@ -2,7 +2,7 @@ using ..AtmosphereModels: AtmosphereModels
 using Oceananigans: instantiated_location
 using Oceananigans.Forcings: materialize_forcing
 using Oceananigans.Grids: Center, Face
-using Oceananigans.Operators: ℑzᵃᵃᶠ
+using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
 
@@ -10,10 +10,10 @@ using Adapt: Adapt
 ##### SpecificForcing
 #####
 
-struct SpecificForcing{F, D, LZ}
-    forcing :: F            # materialized inner forcing (kernel callable)
-    density :: D            # ρᵣ(z) for anelastic, ρ(x, y, z, t) for compressible
-    target_z_location :: LZ # Center for u, v, scalars; Face for w
+struct SpecificForcing{F, D, L}
+    forcing :: F          # materialized inner forcing (kernel callable)
+    density :: D          # ρᵣ(z) for anelastic, ρ(x, y, z, t) for compressible
+    target_location :: L  # (LX, LY, LZ) tuple of instances for the target prognostic field
 end
 
 """
@@ -27,8 +27,9 @@ kernel callable returns
 ρ(i, j, k) \\, F_ϕ(i, j, k, t)
 ```
 
-for fields located at `Center`, and interpolates ``ρ`` to the target vertical face via
-``ℑzᵃᵃᶠ`` for forcings on `w` (or any `Face`-located target). `ρ` is `ρᵣ(z)` under
+interpolating ``ρ`` to the appropriate cell face for fields whose target prognostic
+lives at `Face` in any direction (e.g. ``ρ`` is interpolated to x-Face for `u`-forcings
+via ``ℑxᶠᵃᵃ``, to z-Face for `w` via ``ℑzᵃᵃᶠ``). `ρ` is `ρᵣ(z)` under
 [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics) and the prognostic
 `ρ(x, y, z, t)` under [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics);
 the same wrapper handles both.
@@ -38,34 +39,43 @@ Users typically supply specific forcings directly through specific-named keys
 [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel), and the dispatch wraps each entry in `SpecificForcing`
 automatically. The wrapper can also be constructed directly when finer control is needed.
 
-The inner `forcing` can be anything accepted by Oceananigans' `materialize_forcing`:
-a function `(x, y, z, t)`, a `Returns` callable, a `Field`, an
-`Oceananigans.Forcing`, or a tuple of these.
+The inner `forcing` can be anything accepted by Breeze's
+`materialize_atmosphere_model_forcing`: a function `(x, y, z, t)`, a `Returns`
+callable, a `Field`, an `Oceananigans.Forcing`, a Breeze forcing type like
+[`SubsidenceForcing`](@ref Breeze.Forcings.SubsidenceForcing) or
+[`GeostrophicForcing`](@ref Breeze.Forcings.GeostrophicForcing), or a tuple of these.
 """
 SpecificForcing(forcing) = SpecificForcing(forcing, nothing, nothing)
 
 Adapt.adapt_structure(to, sf::SpecificForcing) =
     SpecificForcing(Adapt.adapt(to, sf.forcing),
                     Adapt.adapt(to, sf.density),
-                    sf.target_z_location)
+                    sf.target_location)
 
 #####
-##### Kernel callables: dispatch on vertical location of target field
+##### Density at the target prognostic location: dispatch on (LX, LY, LZ).
+##### Only the four staggered locations that appear in the Breeze prognostic state are
+##### handled (Center,Center,Center for scalars; Face,Center,Center for u;
+##### Center,Face,Center for v; Center,Center,Face for w).
 #####
 
-@inline function (sf::SpecificForcing{<:Any, <:Any, <:Center})(i, j, k, grid, clock, fields)
+@inline density_at_target(::Tuple{Center, Center, Center}, ρ, i, j, k, grid) = @inbounds ρ[i, j, k]
+@inline density_at_target(::Tuple{Face,   Center, Center}, ρ, i, j, k, grid) = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
+@inline density_at_target(::Tuple{Center, Face,   Center}, ρ, i, j, k, grid) = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
+@inline density_at_target(::Tuple{Center, Center, Face},   ρ, i, j, k, grid) = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+
+#####
+##### Kernel callable
+#####
+
+@inline function (sf::SpecificForcing)(i, j, k, grid, clock, fields)
     Fϕ = sf.forcing(i, j, k, grid, clock, fields)
-    return @inbounds sf.density[i, j, k] * Fϕ
+    ρ = density_at_target(sf.target_location, sf.density, i, j, k, grid)
+    return ρ * Fϕ
 end
 
-@inline function (sf::SpecificForcing{<:Any, <:Any, <:Face})(i, j, k, grid, clock, fields)
-    ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, sf.density)
-    Fϕ = sf.forcing(i, j, k, grid, clock, fields)
-    return ρᶠ * Fϕ
-end
-
 #####
-##### Materialization: resolve density and vertical location from context + target field
+##### Materialization: resolve density and target field location from context + target field
 #####
 
 function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SpecificForcing,
@@ -73,8 +83,8 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Specific
                                                                context::NamedTuple)
     inner = materialize_forcing(forcing.forcing, field, name, model_field_names)
     ρ = context.density
-    LZ = instantiated_location(field)[3]
-    return SpecificForcing(inner, ρ, LZ)
+    target_location = instantiated_location(field)
+    return SpecificForcing(inner, ρ, target_location)
 end
 
 #####
