@@ -843,8 +843,8 @@ using GPUArraysCore: @allowscalar
         # New formula: τ = -ρ₀ * Cᴰ * Ũ * u, with `u` and `Ũ` read from filtered fields.
         p₀ = model_surface_pressure(model.dynamics)
         T₀_default = Breeze.AtmosphereModels.default_drag_surface_temperature(model.dynamics,
-                                                                                grid,
-                                                                                model.thermodynamic_constants)
+                                                                              grid,
+                                                                              model.thermodynamic_constants)
         ρ₀ = surface_density(p₀, T₀_default, model.thermodynamic_constants)
         Ũ_filtered = sqrt(U_f^2 + FT(gustiness)^2)
         expected_filtered = - ρ₀ * Cᴰ * Ũ_filtered * U_f
