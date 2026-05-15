@@ -155,18 +155,15 @@ qᵉ_large_scale_forcing = Forcing(∂t_qᵉ_large_scale)
 
 # ## Assembling forcing and boundary conditions
 #
-# `subsidence` and `geostrophic` are keyed by their density-weighted prognostic
-# names because they already produce ``F_{ρϕ}`` internally. The prescribed
-# moisture and θ tendencies are keyed under their specific names, and Breeze
-# combines all entries on the same prognostic field via `MultipleForcings`.
+# Forcings are keyed under specific prognostic names (`u`, `v`, `w`, `θ`, `qᵉ`);
+# Breeze applies the density factor ``ρ`` automatically at kernel time. The
+# Oceananigans `Relaxation` sponge damps the vertical velocity `w` toward zero.
 
-forcing = (; ρu = (subsidence, geostrophic.ρu),
-             ρv = (subsidence, geostrophic.ρv),
-             ρw = sponge,
-             ρqᵉ = subsidence,
-             ρθ = subsidence,
-             qᵉ = qᵉ_large_scale_forcing,
-             θ = θ_large_scale_forcing)
+forcing = (; u = (subsidence, geostrophic.u),
+             v = (subsidence, geostrophic.v),
+             w = sponge,
+             qᵉ = (subsidence, qᵉ_large_scale_forcing),
+             θ = (subsidence, θ_large_scale_forcing))
 boundary_conditions = (ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
