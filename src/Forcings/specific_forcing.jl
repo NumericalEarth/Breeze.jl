@@ -35,11 +35,11 @@ the same wrapper handles both.
 
 Users typically supply specific forcings directly through specific-named keys
 (`u`, `v`, `w`, `θ`, `e`, `qᵉ`, `qᵛ`, …) in the `forcing` `NamedTuple` passed to
-[`AtmosphereModel`](@ref), and the dispatch wraps each entry in `SpecificForcing`
+[`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel), and the dispatch wraps each entry in `SpecificForcing`
 automatically. The wrapper can also be constructed directly when finer control is needed.
 
 The inner `forcing` can be anything accepted by Oceananigans' `materialize_forcing`:
-a function `(x, y, z, t)`, a [`Returns`](@ref) callable, a `Field`, an
+a function `(x, y, z, t)`, a `Returns` callable, a `Field`, an
 `Oceananigans.Forcing`, or a tuple of these.
 """
 SpecificForcing(forcing) = SpecificForcing(forcing, nothing, nothing)
