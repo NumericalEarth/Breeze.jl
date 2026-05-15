@@ -1,4 +1,4 @@
-# # Baroclinic wave on the sphere
+# # Dry and moist baroclinic waves on the sphere
 #
 # This example simulates the growth of a baroclinic wave on a near-global
 # `LatitudeLongitudeGrid` following the DCMIP2016 specification
@@ -8,20 +8,24 @@
 # gradient is seeded with a localized zonal-wind perturbation that triggers
 # baroclinic instability, producing growing Rossby waves over roughly ten days.
 #
-# This example exercises `CompressibleDynamics` with
+# We run the test case in **two configurations**:
+#
+# 1. **Dry** — the original DCMIP2016 §4.1 setup: no moisture, no microphysics,
+#    no surface fluxes. The instability grows from gradient-wind balance only.
+# 2. **Moist** — DCMIP2016 §1.1 with mixed-phase saturation-adjustment
+#    microphysics (diagnostic cloud liquid ``q^\ell`` and cloud ice
+#    ``q^{i}``, no precipitation). No surface fluxes — the wave evolves
+#    from the initial moisture only. Latent heat release sharpens the
+#    moist fronts and intensifies cyclogenesis compared to the dry case.
+#
+# Both configurations exercise `CompressibleDynamics` with
 # [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization)
 # (acoustic substepping via [`AcousticRungeKutta3`](@ref)) and
-# `SphericalCoriolis` (non-hydrostatic) on a 1° latitude-longitude grid spanning
-# 75° S to 75° N. Acoustic substepping lets the outer time step be set by
-# the *advective* CFL rather than the much-tighter acoustic CFL — here a
-# time-step wizard floats Δt at advective CFL ≈ 1.4 against the polar
-# `Δx_min ≈ 28.8 km`, capped at 12 min.
-#
-# A future moist version (one-moment mixed-phase microphysics + bulk surface
-# fluxes) will be added once the moist substepper supports the larger ``Δt``
-# needed for a tractable runtime. The dry case here runs for 30 days and
-# captures the full BCI life cycle: visible perturbations by day 4,
-# explosive cyclogenesis around day 8, and saturation afterward.
+# `SphericalCoriolis` (non-hydrostatic) on a coarse latitude-longitude grid
+# (Δλ ≈ 1.4°, Δφ ≈ 1.2°) spanning 75° S to 75° N. Acoustic substepping lets
+# the outer time step be set by the *advective* CFL rather than the much-
+# tighter acoustic CFL — here a time-step wizard floats Δt at advective
+# CFL ≈ 1.4 against the polar `Δx_min ≈ 40.5 km`, capped at 12 min.
 #
 # ## Physical setup
 #
@@ -35,7 +39,11 @@
 #
 # where ``τ_1`` and ``τ_2`` encode the vertical structure and
 # ``F(φ) = \cos^K φ - \frac{K}{K+2} \cos^{K+2} φ`` is the meridional shape
-# with jet-width parameter ``K = 3``. In the dry case, ``T = T_v``.
+# with jet-width parameter ``K = 3``.
+# In the dry case ``T = T_v``; in the moist case the actual temperature is
+# colder, ``T = T_v / (1 + \epsilon q^v)`` with ``\epsilon = R_v/R_d - 1
+# \approx 0.608``. Density uses ``T_v`` in the ideal gas law in both cases,
+# so the analytic pressure-gradient force is preserved.
 #
 # ### Balanced zonal jet
 #
@@ -56,6 +64,20 @@
 #
 # where ``d`` is the great-circle distance, ``r_p = 0.1\,a``, ``u_p = 1`` m/s,
 # and ``\mathcal{T}(z) = 1 - 3(z/z_p)^2 + 2(z/z_p)^3`` for ``z < z_p``.
+#
+# ### Initial moisture (moist run only)
+#
+# Specific humidity peaks at the surface near the equator and decays
+# with both latitude and altitude:
+#
+# ```math
+# q^v(φ, z) = q_0 \exp\!\left[-\left(\frac{φ}{φ_w}\right)^4\right]
+#                 \exp\!\left[-\left(\frac{(η - 1)\, p_0}{p_w}\right)^2\right]
+# ```
+#
+# where ``η = p / p_0`` is the pressure coordinate, ``q_0 = 0.018`` kg/kg,
+# ``φ_w = 40°``, and ``p_w = 340`` hPa. Above the tropopause (``η < 0.1``),
+# moisture is set to a trace value.
 
 using Breeze
 using Oceananigans
@@ -92,13 +114,14 @@ a   = Oceananigans.defaults.planet_radius
 
 # ## Domain and grid
 #
-# We use a 1° latitude-longitude grid spanning 75° S to 75° N. Capping the
-# domain at ±75° (rather than the poles) keeps the polar `Δx_min` manageable:
-# `a · cos 75° · 2π/Nλ ≈ 28.8 km`. The domain extends from the surface to
-# 30 km with 32 vertical levels (Δz ≈ 940 m).
+# A coarse 256×128 lat-lon grid (Δλ ≈ 1.4°, Δφ ≈ 1.2°) spanning 75° S to
+# 75° N. Capping the domain at ±75° keeps the polar `Δx_min` manageable:
+# `a · cos 75° · 2π/Nλ ≈ 40.5 km`. The domain extends from the surface to
+# 30 km with 32 vertical levels (Δz ≈ 940 m). The same grid is shared by
+# the dry and moist runs.
 
-Nλ = 360
-Nφ = 150
+Nλ = 256
+Nφ = 128
 Nz = 32
 H  = 30kilometers
 
@@ -110,18 +133,22 @@ grid = LatitudeLongitudeGrid(GPU();
                              z = (0, H))
 
 ## Temperature profile parameters
-Tᴱ = 310     # K — equatorial surface temperature
-Tᴾ = 240     # K — polar surface temperature
-Tᴹ = (Tᴱ + Tᴾ) / 2
-Γ  = 0.005    # K/m — lapse rate
-K  = 3        # jet width parameter
-b  = 2        # vertical half-width parameter
+Tᴱ  = 310     # K — equatorial surface temperature
+Tᴾ  = 240     # K — polar surface temperature
+Tᴹ  = (Tᴱ + Tᴾ) / 2
+Γ   = 0.005   # K/m — lapse rate
+K   = 3       # jet width parameter
+b   = 2       # vertical half-width parameter
+εᵥ  = 0.608   # virtual-temperature factor R_v/R_d − 1
 
 # ## Analytic initial conditions
 #
 # The DCMIP2016 balanced state is given in *virtual* temperature ``T_v``.
-# We define the IC in terms of ``T_v`` so a future moist version (where
-# ``T = T_v / (1 + \epsilon q^v)``) can reuse the same functions.
+# We define a single set of pointwise functions usable for both dry and
+# moist cases. In the dry case ``T = T_v``; in the moist case the actual
+# temperature ``T = T_v / (1 + \epsilon q^v)`` is colder than ``T_v``.
+# Density always uses ``T_v`` in the ideal gas law so the analytic
+# pressure-gradient force is preserved.
 
 ## Vertical structure functions (shallow atmosphere, X = 1)
 function τ_and_integrals(z)
@@ -157,11 +184,37 @@ function pressure(λ, φ, z)
     return p₀ * exp(-g / Rᵈ * (∫τ₁ - ∫τ₂ * F(φ)))
 end
 
-## Density (uses Tᵥ in the ideal gas law; in the dry case, T = Tᵥ).
+## Density (uses Tᵥ in the ideal gas law; in the dry case T = Tᵥ).
 density(λ, φ, z) = pressure(λ, φ, z) / (Rᵈ * virtual_temperature(λ, φ, z))
 
-## Potential temperature: θ = Tᵥ (p₀/p)^κ in the dry case.
-potential_temperature(λ, φ, z) = virtual_temperature(λ, φ, z) * (p₀ / pressure(λ, φ, z))^κ
+## DCMIP2016 §1.1 specific humidity profile (used by the moist run).
+function initial_specific_humidity(λ, φ, z)
+    q₀ = 0.018    # kg/kg — surface maximum
+    qₜ = 1e-12    # kg/kg — stratospheric trace value
+    φʷ = 2π / 9   # rad — meridional e-folding width (≈ 40°)
+    pʷ = 34000    # Pa — vertical e-folding pressure width
+
+    p  = pressure(λ, φ, z)
+    η  = p / p₀
+    φʳ = deg2rad(φ)
+
+    q_troposphere = q₀ * exp(-(φʳ / φʷ)^4) * exp(-((η - 1) * p₀ / pʷ)^2)
+
+    return ifelse(η > 0.1, q_troposphere, qₜ)
+end
+
+## Dry potential temperature: θ = Tᵥ (p₀/p)^κ.
+dry_potential_temperature(λ, φ, z) =
+    virtual_temperature(λ, φ, z) * (p₀ / pressure(λ, φ, z))^κ
+
+## Moist potential temperature: θ = T (p₀/p)^κ with T = Tᵥ / (1 + εᵥ qᵛ).
+function moist_potential_temperature(λ, φ, z)
+    Tᵥ = virtual_temperature(λ, φ, z)
+    p  = pressure(λ, φ, z)
+    qᵛ = initial_specific_humidity(λ, φ, z)
+    T  = Tᵥ / (1 + εᵥ * qᵛ)
+    return T * (p₀ / p)^κ
+end
 
 # ### Balanced zonal wind
 #
@@ -201,20 +254,20 @@ function zonal_velocity(λ, φ, z)
     return u_balanced + u_perturbation
 end
 
-# ## Model configuration
+# ## Shared model configuration
 #
-# We use fully compressible dynamics with **acoustic substepping** via
-# [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization)
-# and the [`AcousticRungeKutta3`](@ref)
-# (Wicker–Skamarock RK3) outer loop. Acoustic substepping handles the
-# fast acoustic-mode pressure gradient and buoyancy via a vertically-implicit
-# inner loop, so the outer time step is limited only by the *advective*
-# CFL — about 100× larger than the acoustic-CFL-limited Δt the fully
-# explicit solver requires for the same grid.
+# Both runs use fully compressible dynamics with **acoustic substepping**
+# via [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization)
+# and the [`AcousticRungeKutta3`](@ref) (Wicker–Skamarock RK3) outer loop.
+# The substepper handles the fast acoustic-mode pressure gradient and
+# buoyancy via a vertically-implicit inner loop, so the outer time step is
+# limited only by the *advective* CFL — about 100× larger than the
+# acoustic-CFL-limited Δt the fully explicit solver requires for the same
+# grid.
 #
 # We use a hydrostatically-balanced isothermal reference state at
-# `T₀ᵣ = 250 K` (matching the MPAS convention) so that the substepper's
-# slow tendencies see only perturbations from the background.
+# `T₀ᵣ = 250 K` (matching the MPAS convention) so the substepper's slow
+# tendencies see only perturbations from the background.
 # `SphericalCoriolis` is the non-hydrostatic spherical form, which retains
 # both the traditional ``f = 2Ω \sin φ`` and the non-traditional
 # ``2Ω \cos φ`` cross-terms that couple horizontal momentum to ``w``. Breeze
@@ -230,112 +283,166 @@ dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
-model = AtmosphereModel(grid; dynamics, coriolis,
-                        thermodynamic_constants = constants,
-                        advection = WENO())
-
-# ## Set initial conditions
-
-set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
-
-# ## Time-stepping
+# # Run 1: Dry baroclinic wave
 #
-# Substepping eliminates the acoustic CFL constraint on the outer Δt; only
-# the advective CFL remains. A time-step wizard targets advective CFL ≈ 1.4
-# against the polar `Δx_min ≈ 28.8 km`, capped at Δt = 12 min:
-#
-# ```math
-# Δt = \min\!\left(1.4 \cdot Δx_{\min} / U_{\max},\ 720 \text{ s}\right).
-# ```
-#
-# This is many times larger than the acoustic-CFL-limited Δt a fully
-# explicit solver would require. We run for 30 days to capture the full
-# BCI life cycle.
+# No microphysics and no surface fluxes — the canonical DCMIP2016 §4.1 case.
+# A time-step wizard targets advective CFL ≈ 1.4 against the polar
+# `Δx_min ≈ 40.5 km`, capped at Δt = 12 min. We run for 30 days to capture
+# the full BCI life cycle: visible perturbations by day 4, explosive
+# cyclogenesis around day 8, and saturation afterward.
 
-Δt = 12minutes
-stop_time = 30days
+dry_model = AtmosphereModel(grid; dynamics, coriolis,
+                            thermodynamic_constants = constants,
+                            advection = WENO())
 
-simulation = Simulation(model; Δt, stop_time)
-conjure_time_step_wizard!(simulation; cfl=1.4, max_Δt=12minutes)
-Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
+set!(dry_model, θ=dry_potential_temperature, u=zonal_velocity, ρ=density)
 
-# ## Progress callback
+dry_simulation = Simulation(dry_model; Δt=12minutes, stop_time=30days)
+conjure_time_step_wizard!(dry_simulation; cfl=1.4, max_Δt=12minutes)
+Oceananigans.Diagnostics.erroring_NaNChecker!(dry_simulation)
 
-function progress(sim)
+function dry_progress(sim)
     u, v, w = sim.model.velocities
-    @info @sprintf("Iter %5d | t = %s | Δt = %s | max|u| = %.1f m/s | max|w| = %.4f m/s",
+    @info @sprintf("[dry] Iter %5d | t = %s | Δt = %s | max|u| = %.1f m/s | max|w| = %.4f m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    maximum(abs, u), maximum(abs, w))
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(50))
+add_callback!(dry_simulation, dry_progress, IterationInterval(200))
 
-# ## Output
-#
-# We save the velocities, the full potential temperature ``θ`` (the
-# classic surface synoptic diagnostic for the cold/warm sectors during
-# cyclogenesis), and the vertical vorticity ``ζ``, sliced at two levels:
-# k = 1 (surface) and k = 16 (mid-troposphere, ~5 km).
+# Output the velocities, full potential temperature ``θ`` (the classic
+# surface synoptic diagnostic for cold/warm sectors), and the vertical
+# vorticity ``ζ``, sliced at two levels: ``k = 1`` (surface) and ``k = 16``
+# (mid-troposphere, ~5 km).
 
 using Oceananigans.Operators: ζ₃ᶠᶠᶜ
-u, v, w = model.velocities
-ζ = KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, model.grid, u, v)
-
-θ = PotentialTemperature(model)
-
-outputs = merge(model.velocities, (; ζ, θ))
+dry_u, dry_v, dry_w = dry_model.velocities
+dry_ζ = KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, dry_model.grid, dry_u, dry_v)
+dry_θ = PotentialTemperature(dry_model)
+dry_outputs = merge(dry_model.velocities, (; ζ = dry_ζ, θ = dry_θ))
 
 for k in (1, 16)
-    filename = "baroclinic_wave_k$k"
-    ow = JLD2Writer(model, outputs; filename,
-                    indices = (:, :, k),
-                    schedule = TimeInterval(6hours),
-                    overwrite_existing = true)
-
-    simulation.output_writers[Symbol(filename)] = ow
+    filename = "baroclinic_wave_dry_k$k"
+    dry_simulation.output_writers[Symbol(filename)] = JLD2Writer(dry_model, dry_outputs;
+                                                                 filename,
+                                                                 indices = (:, :, k),
+                                                                 schedule = TimeInterval(6hours),
+                                                                 overwrite_existing = true)
 end
 
-# ## Run
+run!(dry_simulation)
 
-run!(simulation)
-
-# ## Visualization
+# # Run 2: Moist baroclinic wave
 #
-# We plot three diagnostics on the sphere: the **surface potential temperature**
-# ``θ_{\rm sfc}`` (the classic synoptic diagnostic for the cold/warm sectors),
-# the **surface vertical vorticity** ``ζ`` (which reveals the cyclones and
-# anticyclones), and the **mid-level vertical velocity** ``w`` (which highlights
-# the warm conveyor belt and the wave's vertical structure).
+# We add two ingredients to the dry setup:
+#
+# 1. an initial vapor-specific-humidity field (DCMIP2016 §1.1), and
+# 2. **mixed-phase saturation-adjustment** microphysics
+#    ([`SaturationAdjustment`](@ref) with [`MixedPhaseEquilibrium`](@ref)),
+#    which instantaneously partitions any super-saturated vapor into
+#    diagnostic cloud liquid ``q^\ell`` and cloud ice ``q^{i}`` and
+#    releases the corresponding latent heat into ``θ``.
+#
+# Saturation adjustment has no relaxation timescale — equilibrium is
+# instantaneous — so unlike a one-moment scheme there is no microphysics
+# stiffness limit on Δt. The moist run uses the same advective-CFL wizard
+# and 12-min Δt cap as the dry run.
 
-θ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "θ")
-ζ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "ζ")
-w_ts = FieldTimeSeries("baroclinic_wave_k16.jld2", "w")
-times = θ_ts.times
-Nt = length(times)
+microphysics = SaturationAdjustment(equilibrium=MixedPhaseEquilibrium())
+
+# WENO with `bounds=(0, 1)` forbids the spurious negative or super-unity
+# overshoots that vanilla WENO can produce on a sharp tropopause moisture
+# jump, which would otherwise drive an unphysical saturation adjustment at
+# a single grid point. Momentum and ``ρθ`` use the standard WENO since
+# they have no ``[0, 1]`` bound.
+
+momentum_advection = WENO()
+scalar_advection = (ρθ = WENO(), ρqᵉ = WENO(order=5, bounds=(0, 1)))
+
+moist_model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
+                              thermodynamic_constants = constants,
+                              momentum_advection,
+                              scalar_advection)
+
+set!(moist_model, θ=moist_potential_temperature, u=zonal_velocity, ρ=density,
+                  qᵛ=initial_specific_humidity)
+
+moist_simulation = Simulation(moist_model; Δt=12minutes, stop_time=30days)
+conjure_time_step_wizard!(moist_simulation; cfl=1.4, max_Δt=12minutes)
+Oceananigans.Diagnostics.erroring_NaNChecker!(moist_simulation)
+
+function moist_progress(sim)
+    u, v, w = sim.model.velocities
+    @info @sprintf("[moist] Iter %5d | t = %s | Δt = %s | max|u| = %.1f m/s | max|w| = %.4f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt),
+                   maximum(abs, u), maximum(abs, w))
+    return nothing
+end
+
+add_callback!(moist_simulation, moist_progress, IterationInterval(200))
+
+# Output the velocities, ``θ``, ``ζ``, and the diagnostic cloud liquid
+# water ``q^\ell`` (which traces ascending saturated air along the moist
+# fronts), sliced at the surface and mid-troposphere.
+
+moist_u, moist_v, moist_w = moist_model.velocities
+moist_ζ = KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, moist_model.grid, moist_u, moist_v)
+moist_θ = PotentialTemperature(moist_model)
+qˡ = moist_model.microphysical_fields.qˡ
+moist_outputs = merge(moist_model.velocities, (; ζ = moist_ζ, θ = moist_θ, qˡ))
+
+for k in (1, 16)
+    filename = "baroclinic_wave_moist_k$k"
+    moist_simulation.output_writers[Symbol(filename)] = JLD2Writer(moist_model, moist_outputs;
+                                                                   filename,
+                                                                   indices = (:, :, k),
+                                                                   schedule = TimeInterval(6hours),
+                                                                   overwrite_existing = true)
+end
+
+run!(moist_simulation)
+
+# # Visualization
+#
+# We make two animations on the sphere — one per run. The **dry** view
+# plots the surface potential temperature ``θ_{\rm sfc}`` (the classic
+# synoptic diagnostic for the cold/warm sectors), the surface vertical
+# vorticity ``ζ`` (which reveals the cyclones and anticyclones), and the
+# mid-level vertical velocity ``w`` (which highlights the warm conveyor
+# belt and the wave's vertical structure). The **moist** view replaces
+# ``w`` with the diagnostic cloud liquid water ``q^\ell``, which traces
+# condensation along the frontal bands.
 
 k_sfc = 1
 k_mid = 16
 
-# Sphere view: rotate so the developing wave faces the camera.
 sphere_kw = (elevation = π/6, azimuth = π/2, aspect = :data)
 ζlim = 1e-4
 wlim = 0.06
+qˡlim = 1e-4
 
-θ_kw = (colormap = :thermal, colorrange = (260, 310))
-ζ_kw = (colormap = :balance, colorrange = (-ζlim, ζlim))
-w_kw = (colormap = :balance, colorrange = (-wlim, wlim))
+θ_kw  = (colormap = :thermal, colorrange = (260, 310))
+ζ_kw  = (colormap = :balance, colorrange = (-ζlim, ζlim))
+w_kw  = (colormap = :balance, colorrange = (-wlim, wlim))
+qˡ_kw = (colormap = Reverse(:grays), colorrange = (0, qˡlim))
 
-# ### Animation
+# ### Dry animation
+
+dry_θ_ts = FieldTimeSeries("baroclinic_wave_dry_k1.jld2",  "θ")
+dry_ζ_ts = FieldTimeSeries("baroclinic_wave_dry_k1.jld2",  "ζ")
+dry_w_ts = FieldTimeSeries("baroclinic_wave_dry_k16.jld2", "w")
+dry_times = dry_θ_ts.times
+Nt_dry = length(dry_times)
 
 n = Observable(1)
-θn = @lift view(θ_ts[$n], :, :, k_sfc)
-ζn = @lift view(ζ_ts[$n], :, :, k_sfc)
-wn = @lift view(w_ts[$n], :, :, k_mid)
+θn = @lift view(dry_θ_ts[$n], :, :, k_sfc)
+ζn = @lift view(dry_ζ_ts[$n], :, :, k_sfc)
+wn = @lift view(dry_w_ts[$n], :, :, k_mid)
 
 fig = Figure(size = (1800, 700))
 
-title = @lift "t = $(prettytime(times[$n]))"
+title = @lift "dry, t = $(prettytime(dry_times[$n]))"
 fig[0, 1:6] = Label(fig, title, fontsize=22, tellwidth=false)
 
 ax1 = Axis3(fig[1, 1]; title = "θ at surface", sphere_kw...)
@@ -355,9 +462,51 @@ for ax in (ax1, ax2, ax3)
     hidespines!(ax)
 end
 
-CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 12) do nn
+CairoMakie.record(fig, "baroclinic_wave_dry.mp4", 1:Nt_dry; framerate = 12) do nn
     n[] = nn
 end
 nothing #hide
 
-# ![](baroclinic_wave.mp4)
+# ![](baroclinic_wave_dry.mp4)
+
+# ### Moist animation
+
+moist_θ_ts  = FieldTimeSeries("baroclinic_wave_moist_k1.jld2",  "θ")
+moist_ζ_ts  = FieldTimeSeries("baroclinic_wave_moist_k1.jld2",  "ζ")
+moist_qˡ_ts = FieldTimeSeries("baroclinic_wave_moist_k16.jld2", "qˡ")
+moist_times = moist_θ_ts.times
+Nt_moist = length(moist_times)
+
+n = Observable(1)
+θn  = @lift view(moist_θ_ts[$n],  :, :, k_sfc)
+ζn  = @lift view(moist_ζ_ts[$n],  :, :, k_sfc)
+qˡn = @lift view(moist_qˡ_ts[$n], :, :, k_mid)
+
+fig = Figure(size = (1800, 700))
+
+title = @lift "moist, t = $(prettytime(moist_times[$n]))"
+fig[0, 1:6] = Label(fig, title, fontsize=22, tellwidth=false)
+
+ax1 = Axis3(fig[1, 1]; title = "θ at surface", sphere_kw...)
+hm1 = surface!(ax1, θn; shading = NoShading, θ_kw...)
+Colorbar(fig[1, 2], hm1; label = "θ (K)", height=Relative(0.5))
+
+ax2 = Axis3(fig[1, 3]; title = "ζ at surface", sphere_kw...)
+hm2 = surface!(ax2, ζn; shading = NoShading, ζ_kw...)
+Colorbar(fig[1, 4], hm2; label = "ζ (1/s)", height=Relative(0.5))
+
+ax3 = Axis3(fig[1, 5]; title = "qˡ at mid-level", sphere_kw...)
+hm3 = surface!(ax3, qˡn; shading = NoShading, qˡ_kw...)
+Colorbar(fig[1, 6], hm3; label = "qˡ (kg/kg)", height=Relative(0.5))
+
+for ax in (ax1, ax2, ax3)
+    hidedecorations!(ax)
+    hidespines!(ax)
+end
+
+CairoMakie.record(fig, "baroclinic_wave_moist.mp4", 1:Nt_moist; framerate = 12) do nn
+    n[] = nn
+end
+nothing #hide
+
+# ![](baroclinic_wave_moist.mp4)
