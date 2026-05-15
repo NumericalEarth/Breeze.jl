@@ -99,6 +99,81 @@ Adapt.adapt_structure(to, k::SurfacePrecipitationFluxKernel) =
 end
 
 #####
+##### Number concentration diagnostic (1-moment)
+#####
+#
+# For 1-mom rain and snow, the total number concentration is reconstructed
+# from the prognostic mass density ρqˣ and the scheme's assumed size
+# distribution as ρnˣ = n₀ · λ⁻¹. Snow's intercept n₀ depends on (q, ρ)
+# per Kaul et al. (2015), so this dispatch goes through the scheme's
+# `pdf` and `mass` to stay consistent with the model's actual DSD.
+
+"""
+$(TYPEDSIGNATURES)
+
+Build a lazy [`NumberConcentration`](@ref) for rain under
+`OneMomentCloudMicrophysics`.
+
+```jldoctest n
+using Breeze
+using CloudMicrophysics  # loads BreezeCloudMicrophysicsExt
+grid = RectilinearGrid(size=(1, 1, 4), extent=(1e3, 1e3, 1e3))
+microphysics = OneMomentCloudMicrophysics()
+model = AtmosphereModel(grid; microphysics)
+set!(model, θ=300, qᵗ=0.02, qʳ=1e-3)
+ρnʳ = NumberConcentration(model, :rain)
+
+# output
+KernelFunctionOperation at (Center, Center, Center)
+├── grid: 1×1×4 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
+├── kernel_function: NumberConcentrationKernelFunction
+└── arguments: ()
+```
+"""
+function Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val{:rain})
+    haskey(model.microphysical_fields, :ρqʳ) || return nothing
+    pdf = microphysics.categories.rain.pdf
+    mass = microphysics.categories.rain.mass
+    ρq = model.microphysical_fields.ρqʳ
+    return build_number_concentration_op(model, pdf, mass, ρq)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Build a lazy [`NumberConcentration`](@ref) for snow under
+`OneMomentCloudMicrophysics`. Snow's intercept `n₀` depends on `(q, ρ)` per
+Kaul et al. (2015), so a closed-form rain-style expression cannot substitute.
+"""
+function Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val{:snow})
+    haskey(model.microphysical_fields, :ρqˢ) || return nothing
+    pdf = microphysics.categories.snow.pdf
+    mass = microphysics.categories.snow.mass
+    ρq = model.microphysical_fields.ρqˢ
+    return build_number_concentration_op(model, pdf, mass, ρq)
+end
+
+# Species not carried by the 1-mom scheme (e.g. :hail, :graupel, :cloud_liquid).
+Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val) = nothing
+
+function build_number_concentration_op(model, pdf, mass, ρq)
+    ρ = dynamics_density(model.dynamics)
+    func = NumberConcentrationKernelFunction(pdf, mass, ρq, ρ)
+    return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
+end
+
+@inline function (k::NumberConcentrationKernelFunction)(i, j, k_idx, grid)
+    @inbounds begin
+        ρq = max(k.ρq[i, j, k_idx], zero(eltype(k.ρq)))
+        ρ  = k.reference_density[i, j, k_idx]
+    end
+    q   = ρq / ρ
+    n0  = get_n0(k.pdf, q, ρ)
+    λ⁻¹ = lambda_inverse(k.pdf, k.mass, q, ρ)
+    return n0 * λ⁻¹
+end
+
+#####
 ##### show methods
 #####
 

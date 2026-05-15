@@ -20,7 +20,9 @@ export
     kessler_terminal_velocity,
     saturation_adjustment_coefficient,
     RelativeHumidity,
-    RelativeHumidityField
+    RelativeHumidityField,
+    NumberConcentration,
+    NumberConcentrationField
 
 using ..AtmosphereModels: AtmosphereModels, moisture_fractions, grid_moisture_fractions,
     materialize_microphysical_fields, update_microphysical_fields!,

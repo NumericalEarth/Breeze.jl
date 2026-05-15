@@ -171,3 +171,83 @@ end
 
 const RelativeHumidityField = Field{C, C, C, <:RelativeHumidityOp}
 RelativeHumidityField(model) = Field(RelativeHumidity(model))
+
+#####
+##### Number Concentration
+#####
+
+"""
+    NumberConcentrationKernelFunction{P, M, Q, R}
+
+Kernel callable for the lazy total number concentration ``ρnˣ`` (m⁻³) of a
+one-moment microphysics species, computed from the prognostic mass density
+``ρqˣ`` and the species' assumed Marshall–Palmer size distribution as
+``ρnˣ = n_0 \\, λ^{-1}``.
+
+# Fields
+- `pdf`: size distribution (`ParticlePDFIceRain` or `ParticlePDFSnow`)
+- `mass`: mass(radius) parameters (`ParticleMass`)
+- `ρq`: prognostic mass density field for the species [kg/m³]
+- `reference_density`: air density field [kg/m³]
+"""
+struct NumberConcentrationKernelFunction{P, M, Q, R}
+    pdf :: P
+    mass :: M
+    ρq :: Q
+    reference_density :: R
+end
+
+Utils.prettysummary(::NumberConcentrationKernelFunction) = "NumberConcentrationKernelFunction"
+
+Adapt.adapt_structure(to, k::NumberConcentrationKernelFunction) =
+    NumberConcentrationKernelFunction(adapt(to, k.pdf),
+                                      adapt(to, k.mass),
+                                      adapt(to, k.ρq),
+                                      adapt(to, k.reference_density))
+
+const NumberConcentrationOp = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:NumberConcentrationKernelFunction}
+
+"""
+$(TYPEDSIGNATURES)
+
+Lazy diagnostic returning the total number concentration ``ρnˣ`` (m⁻³) for the
+requested `species`.
+
+For `OneMomentCloudMicrophysics`, `species ∈ (:rain, :snow)` returns a
+`KernelFunctionOperation` that computes ``n_0 \\, λ^{-1}`` from the prognostic
+``ρqˣ`` and the scheme's size distribution. Snow's intercept ``n_0`` depends on
+``(q, ρ)`` per [Kaul et al. (2015)](@cite Kaul2015) — so this diagnostic stays
+consistent with the scheme's actual DSD without re-encoding species-specific
+physics at every call site.
+
+For `TwoMomentCloudMicrophysics`, returns the prognostic ``ρnˣ`` field directly
+(e.g., `:rain` → `ρnʳ`, `:cloud_liquid` → `ρnᶜˡ`).
+
+Returns `nothing` if the species is not carried by the model (e.g., `:hail` for
+a 1-mom scheme without hail). Errors for microphysics schemes that do not
+define a DSD-based number concentration (e.g., `SaturationAdjustment`).
+
+See [`NumberConcentrationField`](@ref) for a convenience constructor that
+wraps the result in a `Field`.
+"""
+NumberConcentration(model, species::Symbol) =
+    number_concentration(model, model.microphysics, Val(species))
+
+# Default fallback: unsupported microphysics scheme.
+number_concentration(model, microphysics, ::Val{species}) where {species} =
+    error("NumberConcentration is not defined for microphysics scheme of type ",
+          typeof(microphysics), " (species = :", species, "). ",
+          "Supported schemes: OneMomentCloudMicrophysics (species ∈ (:rain, :snow)) ",
+          "and TwoMomentCloudMicrophysics.")
+
+"""
+$(TYPEDSIGNATURES)
+
+Convenience constructor that wraps [`NumberConcentration`](@ref) in a `Field`.
+Returns `nothing` when the requested species is not carried by the model.
+"""
+function NumberConcentrationField(model, species::Symbol)
+    op = NumberConcentration(model, species)
+    op === nothing && return nothing
+    return Field(op)
+end
