@@ -213,10 +213,21 @@ P3 evolves eleven prognostic densities:
 
 **Saturation diagnostic** (1 variable):
 
-- ``ρs^{sat}``: Supersaturation [kg/m³], diagnosed from ``ρq^v`` and ``T``.
-  P3 also defines an optional prognostic-supersaturation path
-  (Grabowski and Morrison 2008), but it is disabled at runtime in both
-  Breeze and the Fortran reference (`log_predictSsat = .false.`).
+- ``ρs^{sat}``: Predicted supersaturation [kg/m³]
+  ([Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008)).
+  Breeze exposes a `predict_supersaturation` flag on `ProcessRateParameters`,
+  defaulting to `false`. When `false`, the prognostic field is inactive and
+  has zero microphysical tendency; diagnostics that need local saturation use
+  ``q^v - q^{v,s}(T)`` directly. When `true`, the bounded G&M (2008)
+  adjustment fires before the M&G rates, shifting the local ``q^v``,
+  ``q^{cl}``, and ``T`` (and thus ``q^{v,s}(T)``) so that
+  ``q^v - q^{v,s}`` matches the advected ``s^{sat}``. The M&G semi-analytic
+  rates then run on this post-G&M state — the "diagnostic supersaturation"
+  they see is ``q^v_{\text{post-GM}} - q^{v,s}(T_{\text{post-GM}})``, not the
+  host's ``s^{sat}`` field. The G&M adjustment and the end-of-step
+  ``s^{sat}`` reset both relax over `sink_limiting_timescale`, so they land
+  exactly when the host integrates with
+  ``\Delta t = \text{sink\_limiting\_timescale}``.
 
 From these, diagnostic properties are computed:
 

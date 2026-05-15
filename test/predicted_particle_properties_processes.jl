@@ -25,6 +25,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     tendency_ρbᶠ,
     tendency_ρzⁱ,
     tendency_ρqʷⁱ,
+    tendency_ρsˢᵃᵗ,
     tendency_ρqᵛ,
     rain_autoconversion_rate,
     rain_accretion_rate,
@@ -180,6 +181,62 @@ function expected_reduced_fortran_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ
 
     return (; condensation, rain_evaporation, rain_condensation, deposition,
               coating_condensation, coating_evaporation)
+end
+
+function expected_fortran_predicted_ssat_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sˢᵃᵗ, T, constants)
+    FT = typeof(qᶜˡ)
+    τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
+    Rᵛ = FT(Breeze.Thermodynamics.vapor_gas_constant(constants))
+    ℒˡ = PPP.vaporization_latent_heat(constants, T)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
+    ξˡ = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
+    ε = (qᵛ - qᵛ⁺ˡ - sˢᵃᵗ) / ξˡ
+    ε = max(ε, -qᶜˡ)
+    ε = ifelse(sˢᵃᵗ < 0, min(0, ε), ε)
+    ε = ifelse(abs(ε) < 100 * eps(FT) * max(qᵛ⁺ˡ, qᵛ), zero(FT), ε)
+    ε = ifelse(p3.process_rates.predict_supersaturation, ε, zero(FT))
+    return (; ε, rate = ε / τ)
+end
+
+function expected_final_ssat_tendency_from_rates(p3, rates, qᵛ₀, sˢᵃᵗ₀, T₀, ρ, constants)
+    FT = typeof(qᵛ₀)
+    τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
+    cᵖᵈ = constants.dry_air.heat_capacity
+    εᴳᴹ = rates.predicted_ssat_adjustment * τ
+    Tᴳᴹ = T₀ + εᴳᴹ * PPP.vaporization_latent_heat(constants, T₀) / cᵖᵈ
+    qᵛᴳᴹ = qᵛ₀ - εᴳᴹ
+    ℒˡ = PPP.vaporization_latent_heat(constants, Tᴳᴹ)
+    ℒⁱ = PPP.sublimation_latent_heat(constants, Tᴳᴹ)
+    ℒᶠ = PPP.fusion_latent_heat(constants, Tᴳᴹ)
+
+    vapor_to_liquid = (rates.condensation - rates.predicted_ssat_adjustment) +
+                      rates.ccn_activation_mass +
+                      rates.rain_condensation + rates.coating_condensation -
+                      rates.rain_evaporation - rates.coating_evaporation
+    vapor_to_ice = rates.deposition + rates.nucleation_mass
+    liquid_to_ice = rates.cloud_riming + rates.rain_riming +
+                    rates.cloud_freezing_mass + rates.rain_freezing_mass +
+                    rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass +
+                    rates.refreezing -
+                    rates.complete_melting - rates.partial_melting
+
+    qᵛ₁ = qᵛᴳᴹ - (vapor_to_liquid + vapor_to_ice) * τ
+    T₁ = Tᴳᴹ + (ℒˡ * vapor_to_liquid + ℒⁱ * vapor_to_ice + ℒᶠ * liquid_to_ice) * τ / cᵖᵈ
+    qᵛ⁺ˡ₁ = saturation_specific_humidity(T₁, ρ, constants, PlanarLiquidSurface())
+
+    return (qᵛ₁ - qᵛ⁺ˡ₁ - sˢᵃᵗ₀) / τ
+end
+
+function documented_predict_supersaturation_disabled_semantics()
+    overview = read(joinpath(@__DIR__, "..", "docs", "src", "microphysics", "p3_overview.md"), String)
+    prognostics = read(joinpath(@__DIR__, "..", "docs", "src", "microphysics", "p3_prognostics.md"), String)
+    forbidden = "When `false`, the field is recomputed diagnostically"
+    required = "When `false`, the prognostic field is inactive"
+    return !occursin(forbidden, overview) &&
+           !occursin(forbidden, prognostics) &&
+           occursin(required, overview) &&
+           occursin(required, prognostics)
 end
 
 @testset "P3 Processes" begin
@@ -555,6 +612,8 @@ end
             FT(0.0),    # wet_growth_densification_volume (H9)
             FT(0.0),    # cloud_number_correction (M6)
             FT(0.0),    # rain_number_correction (M6)
+            FT(0.0),    # predicted_ssat_adjustment
+            FT(0.0),    # predicted_ssat_tendency
         )
 
         # Test each tendency function returns a finite number
@@ -610,7 +669,8 @@ end
             FT(0.0), FT(0.0),                                         # D8 wet growth shedding
             FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),              # M9 stubs (ccn_act_mass, ccn_act_number, rain_cond, coat_cond, coat_evap)
             FT(0.0), FT(0.0),                                         # H9 wet growth densification
-            FT(0.0), FT(0.0)                                          # M6 DSD number corrections
+            FT(0.0), FT(0.0),                                         # M6 DSD number corrections
+            FT(0.0), FT(0.0),                                         # predicted supersaturation adjustment and tendency
         )
 
         source_z(mass, number, μ_new) = begin
@@ -773,6 +833,9 @@ end
         expected_epsi = expected_fortran_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                                      constants, transport, q, μ)
 
+        # predict_supersaturation defaults to false, so this M&G call sees
+        # the host state directly and the G&M ε is gated to zero by
+        # `compute_p3_process_rates` (not this function).
         rates = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
@@ -1537,6 +1600,122 @@ end
 
         @test rates.condensation == 0
         @test cloud_sink_total ≈ FT(4.055896466237224e-12) rtol=FT(1e-12)
+    end
+
+    @testset "predict_supersaturation applies G&M before M&G process rates" begin
+        p3_base = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        process_rates = ProcessRateParameters(FT;
+                                              sink_limiting_timescale = FT(10),
+                                              predict_supersaturation = true)
+        p3 = p3_with_process_rates(p3_base, process_rates)
+
+        ρ = FT(1)
+        T = FT(268.15)
+        P = FT(85000)
+        pˢᵗ = FT(100000)
+        qᶜˡ = FT(1e-3)
+        nᶜˡ = FT(2e8)
+        qʳ = FT(0)
+        nʳ = FT(0)
+        qⁱ = FT(0)
+        nⁱ = FT(0)
+        qᶠ = FT(0)
+        qʷⁱ = FT(0)
+        sˢᵃᵗ = FT(0)
+
+        qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+        qᵛ = qᵛ⁺ˡ + FT(1e-4)
+        q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, FT(0), FT(0), qʷⁱ, sˢᵃᵗ)
+
+        gm = expected_fortran_predicted_ssat_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sˢᵃᵗ, T, constants)
+        Tᴳᴹ = T + gm.ε * PPP.vaporization_latent_heat(constants, T) / constants.dry_air.heat_capacity
+        qᵛᴳᴹ = qᵛ - gm.ε
+        qᶜˡᴳᴹ = qᶜˡ + gm.ε
+        qᵛ⁺ˡᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρ, constants, PlanarLiquidSurface())
+        qᵛ⁺ⁱᴳᴹ = saturation_specific_humidity(Tᴳᴹ, ρ, constants, PlanarIceSurface())
+        qᴳᴹ = MoistureMassFractions(qᵛᴳᴹ, qᶜˡᴳᴹ, qⁱ)
+        transportᴳᴹ = air_transport_properties(Tᴳᴹ, P)
+        expected_process = expected_reduced_fortran_vapor_rates(
+            p3, qᶜˡᴳᴹ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+            qᵛᴳᴹ, qᵛ⁺ˡᴳᴹ, qᵛ⁺ⁱᴳᴹ, FT(0), FT(400), Tᴳᴹ, P, ρ,
+            constants, transportᴳᴹ, qᴳᴹ, FT(0))
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+
+        @test rates.predicted_ssat_adjustment ≈ gm.rate
+        @test rates.condensation ≈ gm.rate + expected_process.condensation rtol=FT(1e-10) atol=FT(1e-14)
+    end
+
+    @testset "predict_supersaturation tendency matches Fortran final recompute" begin
+        p3_base = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        process_rates = ProcessRateParameters(FT;
+                                              sink_limiting_timescale = FT(10),
+                                              predict_supersaturation = true)
+        p3 = p3_with_process_rates(p3_base, process_rates)
+
+        ρ = FT(1)
+        T = FT(268.15)
+        P = FT(85000)
+        pˢᵗ = FT(100000)
+        qᶜˡ = FT(1e-3)
+        qʳ = FT(0)
+        qⁱ = FT(0)
+        qᶠ = FT(0)
+        qʷⁱ = FT(0)
+        sˢᵃᵗ = FT(0)
+        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
+        q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0), qᶠ, FT(0), FT(0), qʷⁱ, sˢᵃᵗ)
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        expected = expected_final_ssat_tendency_from_rates(p3, rates, qᵛ, sˢᵃᵗ, T, ρ, constants)
+
+        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ ≈ expected rtol=FT(1e-10) atol=FT(1e-14)
+    end
+
+    @testset "predict_supersaturation final recompute excludes splintering latent heat" begin
+        p3_base = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        process_rates = ProcessRateParameters(FT;
+                                              sink_limiting_timescale = FT(10),
+                                              predict_supersaturation = true)
+        p3 = p3_with_process_rates(p3_base, process_rates)
+
+        ρ = FT(1)
+        T = process_rates.splintering_temperature_peak
+        P = FT(85000)
+        pˢᵗ = FT(100000)
+        qᶜˡ = FT(5e-4)
+        qʳ = FT(0)
+        qⁱ = FT(1e-4)
+        nⁱ = FT(1e3)
+        qᶠ = FT(5e-5)
+        qʷⁱ = FT(0)
+        sˢᵃᵗ = FT(0)
+        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-5)
+        q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ + qʷⁱ, qⁱ)
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, nⁱ,
+                                 qᶠ, qᶠ / FT(400), FT(1e-10), qʷⁱ, sˢᵃᵗ)
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        expected = expected_final_ssat_tendency_from_rates(p3, rates, qᵛ, sˢᵃᵗ, T, ρ, constants)
+
+        @test rates.splintering_mass > 0
+        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ ≈ expected rtol=FT(1e-10) atol=FT(1e-15)
+    end
+
+    @testset "predict_supersaturation disabled docs match inactive field semantics" begin
+        @test documented_predict_supersaturation_disabled_semantics()
     end
 
     @testset "compute_p3_process_rates uses prognostic cloud number" begin

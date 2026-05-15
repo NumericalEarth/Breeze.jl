@@ -73,7 +73,7 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
     q_sat0 = ε * e_s0 / max(P - e_s0, FT(1))
 
-    # H10: Liquid fraction for Fl-blended ventilation.
+    # Liquid fraction for Fl-blended ventilation.
     # Fl = qʷⁱ / (qⁱ + qʷⁱ): fraction of ice-particle mass that is liquid.
     qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(1e-20))
     Fl = clamp_positive(qʷⁱ) / qⁱ_total
@@ -164,7 +164,7 @@ Requires tabulated small/large ice ventilation integrals.
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
-    # Get total melting rate (H10: pass qʷⁱ for Fl-blended ventilation)
+    # Get total melting rate; pass qʷⁱ for Fl-blended ventilation.
     total_melt = ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport, μ)
 
     # H9: PSD-resolved melting partitioning using tabulated small/large ice

@@ -724,6 +724,54 @@ struct P3CoupledVaporRates{FT}
     coating_evaporation :: FT
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Bounded Grabowski–Morrison saturation adjustment applied before the
+Morrison–Gettelman semi-analytic rates. Mirrors Fortran `microphy_p3.f90`'s
+ssat alignment block (~3940–3989) which runs in-place on `qv`, `qc`, `T`,
+`qvs`, and `qvi` before the per-species rate equations.
+
+Given the advected supersaturation ``sˢᵃᵗ``, the diagnostic local
+``qᵛ - qᵛ⁺ˡ``, and the liquid-side psychrometric factor
+``ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T²)``, compute the cloud-water increment
+
+```math
+ε = (qᵛ - qᵛ⁺ˡ - sˢᵃᵗ) / ξˡ
+```
+
+clamped to physical limits: ``ε`` cannot evaporate more cloud than is locally
+available (``ε ≥ -qᶜˡ``), and when the advected ``sˢᵃᵗ`` is negative
+``ε ≤ 0`` (no spurious condensation). The returned ``rate = ε / τ`` is
+sized to `sink_limiting_timescale`, so one host step with
+``dt = sink_limiting_timescale`` reproduces the one-shot ``ε`` exactly. If
+the host integrates with ``dt ≠ τ`` the supersaturation alignment relaxes over multiple
+steps rather than landing in one.
+
+When `predict_supersaturation = false`, ``ε`` is gated to zero so the local
+state passes through unchanged.
+"""
+@inline function predicted_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sˢᵃᵗ, T, constants)
+    FT = typeof(qᶜˡ)
+    τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
+    Rᵛ = FT(vapor_gas_constant(constants))
+    ℒˡ = vaporization_latent_heat(constants, T)
+    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
+    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+
+    ε = (qᵛ - qᵛ⁺ˡ - sˢᵃᵗ) / ξˡ
+    ε = max(ε, -clamp_positive(qᶜˡ))
+    ε = ifelse(sˢᵃᵗ < 0, min(ε, zero(FT)), ε)
+    ε = ifelse(abs(ε) < 100 * eps(FT) * max(qᵛ⁺ˡ, qᵛ), zero(FT), ε)
+    ε = ifelse(p3.process_rates.predict_supersaturation, ε, zero(FT))
+
+    return (; ε,
+              rate = ε / τ,
+              qᶜˡ = qᶜˡ + ε,
+              qᵛ = qᵛ - ε,
+              T = T + ε * ℒˡ / cᵖᵈ)
+end
+
 @inline function cloud_condensation_epsilon(p3, qᶜˡ, nᶜˡ, ρ, D_v)
     FT = typeof(qᶜˡ)
     cloud = diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
@@ -840,6 +888,10 @@ separately.
     ice_liquid_coupling = (1 + ℒⁱ * dqᵛ⁺ˡ_dT / cᵖᵈ) / ξⁱ
     ε_total = max(εᶜˡ + εʳ + εⁱ * ice_liquid_coupling + εⁱʷ, FT(1e-20))
     transient = (1 - exp(-ε_total * τ)) / τ
+    # `qᵛ`, `qᵛ⁺ˡ`, `qᵛ⁺ⁱ` arrive already adjusted by the G&M step in
+    # `compute_p3_process_rates` (Fortran `microphy_p3.f90` ssat block ~3940–3989),
+    # so the local diagnostic supersaturation here is the post-G&M value, not the
+    # host-advected `sˢᵃᵗ`.
     ssat_liquid = qᵛ - qᵛ⁺ˡ
     bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * εⁱ
 
@@ -1107,6 +1159,17 @@ struct P3ProcessRates{FT}
     # the correction as a relaxation rate over dt_safety.
     cloud_number_correction :: FT  # (nᶜˡ_bounded - nᶜˡ) / τ [1/kg/s]
     rain_number_correction :: FT   # (nʳ_bounded - nʳ) / τ [1/kg/s]
+
+    # G&M (2008) bounded supersaturation adjustment, also folded into
+    # `condensation` so vapor and cloud tendencies include it automatically.
+    # Carried separately so callers/tests can inspect the G&M contribution.
+    # Sized as `ε / sink_limiting_timescale`, so dt = sink_limiting_timescale
+    # integrates the one-shot adjustment exactly (see
+    # `predicted_supersaturation_adjustment`).
+    predicted_ssat_adjustment :: FT
+    # End-of-step ssat recompute: (qᵛ_final - qᵛ⁺ˡ(T_final) - sˢᵃᵗ_initial) / τ.
+    # Tied to the same dt = τ assumption.
+    predicted_ssat_tendency :: FT
 end
 
 @noinline function _p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState)
@@ -1392,15 +1455,25 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     μ_ice = compute_ice_shape_parameter(p3, qⁱ_total_mu, nⁱ, ℳ.zⁱ, Fᶠ, Fˡ_mu, ρᶠ)
 
     T = temperature(𝒰, constants)
-    qᵛ = 𝒰.moisture_mass_fractions.vapor
+    q_base = 𝒰.moisture_mass_fractions
+    qᵛ_base = q_base.vapor
+    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    P = 𝒰.reference_pressure
+
+    ssat_adjustment = predicted_supersaturation_adjustment(p3, qᶜˡ, qᵛ_base, qᵛ⁺ˡ, ℳ.sˢᵃᵗ, T, constants)
+    cond_GM = ssat_adjustment.rate
+    qᶜˡ = ssat_adjustment.qᶜˡ
+    qᵛ = ssat_adjustment.qᵛ
+    T = ssat_adjustment.T
+    q = MoistureMassFractions(qᵛ, q_base.liquid + ssat_adjustment.ε, q_base.ice)
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
-    q = 𝒰.moisture_mass_fractions
-    P = 𝒰.reference_pressure
     transport = air_transport_properties(T, P)
 
     cloud = diagnose_cloud_dsd(p3, qᶜˡ, ℳ.nᶜˡ, ρ)
     Nᶜ = cloud.Nᶜ
+    ℳ_adjusted = P3MicrophysicalState(qᶜˡ, ℳ.nᶜˡ, qʳ, ℳ.nʳ, qⁱ, ℳ.nⁱ,
+                                      qᶠ, bᶠ, ℳ.zⁱ, qʷⁱ, qᵛ - qᵛ⁺ˡ)
 
     # Build derived state struct (explicit type parameters to avoid
     # jl_f_throw_methoderror in @noinline GPU compilation)
@@ -1411,8 +1484,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
                                           transport.D_v, transport.K_a, transport.nu)
 
     # === PHASE 1 & 2 RATES (delegated to @noinline sub-functions) ===
-    ph1 = _p3_phase1_rates(p3, ρ, ℳ, constants, state)
-    ph2 = _p3_phase2_rates(p3, ρ, ℳ, constants, state, ph1)
+    ph1 = _p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state)
+    ph2 = _p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, ph1)
 
     # === EXTRACT RATES INTO LOCAL VARIABLES FOR SINK LIMITING ===
     # Phase 1
@@ -1588,8 +1661,41 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
     nr_correction = (nʳ - ℳ.nʳ) / dt_safety
 
+    # Fortran's `microphy_p3.f90:5053-5063` recomputes ssat = qv - qvs(T)
+    # at the end of the substep. Reconstruct that final diagnostic from the
+    # locally adjusted (post-G&M) state and the sink-limited M&G rates. `cond`
+    # here is the M&G part only; the one-shot G&M alignment is in `qᵛ`, `T`,
+    # and `qᶜˡ` (already shifted by ε) and is folded into `cond_total` below.
+    #
+    # The `/ dt_safety` denominator (`sink_limiting_timescale`) ties this
+    # tendency to the same time-step assumption as `cond_GM`: when the host
+    # integrates with dt = sink_limiting_timescale the prognostic `ρsˢᵃᵗ`
+    # lands exactly at `ρ(qᵛ_final - qᵛ⁺ˡ(T_final))`. For dt ≠ τ the alignment
+    # relaxes over multiple steps.
+    ℒˡ = vaporization_latent_heat(constants, T)
+    ℒⁱ = sublimation_latent_heat(constants, T)
+    ℒᶠ = fusion_latent_heat(constants, T)
+    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
+    vapor_to_liquid = cond + ccn_act + rain_cond + coat_cond - rain_evap - coat_evap
+    vapor_to_ice = dep + nuc_q
+    liquid_to_ice = cloud_rim + rain_rim + cloud_frz_q + rain_frz_q +
+                    cloud_hom_q + rain_hom_q + refrz -
+                    complete_melt - partial_melt
+    qᵛ_final = qᵛ - (vapor_to_liquid + vapor_to_ice) * dt_safety
+    T_final = T + (ℒˡ * vapor_to_liquid + ℒⁱ * vapor_to_ice + ℒᶠ * liquid_to_ice) *
+              dt_safety / cᵖᵈ
+    qᵛ⁺ˡ_final = saturation_specific_humidity(T_final, ρ, constants, PlanarLiquidSurface())
+    ssat_tendency = (qᵛ_final - qᵛ⁺ˡ_final - ℳ.sˢᵃᵗ) / dt_safety
+    ssat_tendency = ifelse(prp.predict_supersaturation, ssat_tendency, zero(FT))
+    # `cond_GM` is intentionally NOT rescaled by the cloud sink limiter: the
+    # G&M alignment is its own one-shot saturation adjustment with a local
+    # `ε ≥ -qᶜˡ` cap, and the cloud budget at the limiter sees `qᶜˡ_adjusted`
+    # (= qᶜˡ + ε) as its starting state — so ε is absorbed into
+    # `cloud_available`, not the source/sink list.
+    cond_total = cond + cond_GM
+
     return P3ProcessRates{FT}(
-        cond,
+        cond_total,
         autoconv, accr, rain_evap, rain_self, rain_br,
         dep, partial_melt, complete_melt, melt_n,
         sublim_n,
@@ -1605,7 +1711,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         ccn_act, ccn_act_n, rain_cond,
         coat_cond, coat_evap,
         wg_densif_mass, wg_densif_vol,
-        ncl_correction, nr_correction
+        ncl_correction, nr_correction,
+        cond_GM, ssat_tendency,
     )
 end
 
@@ -2271,6 +2378,11 @@ Vapor is produced by:
 - Cloud evaporation (negative condensation)
 - Rain evaporation
 - Sublimation (negative deposition)
+
+When `predict_supersaturation = true`, the G&M one-shot alignment is
+folded into `rates.condensation` (= M&G `cond` + `cond_GM`), so vapor and
+cloud tendencies pick it up automatically when integrated with
+`dt = sink_limiting_timescale`. See `predicted_supersaturation_adjustment`.
 """
 @inline function tendency_ρqᵛ(rates::P3ProcessRates, ρ)
     # Condensation: positive = vapor loss (cond), negative = vapor gain (cloud evap)
@@ -2288,26 +2400,19 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute predicted supersaturation tendency (H10: Grabowski & Morrison 2008).
+Compute predicted supersaturation tendency from Grabowski & Morrison (2008).
 
 When `predict_supersaturation = true`, supersaturation ``sˢᵃᵗ = qᵛ - q_{vs}``
 is a prognostic variable advected by the dynamical core. The microphysical
-tendency resets it toward the diagnosed value by mirroring the vapor tendency:
-all processes that consume or produce vapor change supersaturation accordingly.
+tendency reproduces Fortran's post-step recompute ``sˢᵃᵗ = qᵛ - q_{vs}(T)``
+(`microphy_p3.f90:5053-5063`). `compute_p3_process_rates` precomputes that
+diagnostic tendency from the final local ``qᵛ`` and ``T`` implied by the
+Fortran-ordered process rates.
 
 When `predict_supersaturation = false`, returns zero tendency.
 """
 @inline function tendency_ρsˢᵃᵗ(rates::P3ProcessRates, ρ, prp)
-    # Supersaturation tendency mirrors vapor tendency: sˢᵃᵗ = qᵛ - qᵛ⁺ˡ, so
-    # dsˢᵃᵗ/dt = dqᵛ/dt - dqᵛ⁺ˡ/dT × dT/dt. This approximation captures
-    # dqᵛ/dt from microphysical sources/sinks but omits the qᵛ⁺ˡ adjustment
-    # from latent-heat-driven temperature changes. Fortran compensates by
-    # recalculating ssat = qv - qvs(T) at end of step (lines 5058-5067);
-    # here the advected sˢᵃᵗ field and bounded adjustment serve the same role.
-    vapor_loss = rates.condensation + rates.deposition + rates.nucleation_mass +
-                 rates.ccn_activation_mass + rates.rain_condensation + rates.coating_condensation
-    vapor_gain = rates.rain_evaporation + rates.coating_evaporation
-    raw = ρ * (vapor_gain - vapor_loss)
+    raw = ρ * rates.predicted_ssat_tendency
     return ifelse(prp.predict_supersaturation, raw, zero(ρ))
 end
 

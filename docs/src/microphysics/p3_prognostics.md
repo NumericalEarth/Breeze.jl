@@ -65,7 +65,7 @@ mass / number ratio. Both Fortran and Breeze run with ``μ_r = 0`` at runtime.
 | Symbol | Name | Units | Description |
 |--------|------|-------|-------------|
 | ``ρq^v`` | Water vapor density | kg/m³ | The host-coupled moisture variable |
-| ``ρs^{sat}`` | Predicted-supersaturation slot | kg/m³ | H10 prediction path; hard-disabled at runtime in both Breeze and Fortran (`log_predictSsat = .false.`). The field is allocated for API compatibility and recomputed diagnostically from ``ρq^v`` and ``T``. |
+| ``ρs^{sat}`` | Predicted supersaturation | kg/m³ | Predicted-supersaturation path. Fortran v5.5 hard-codes `log_predictSsat = .false.`; Breeze's `predict_supersaturation` flag defaults to `false` to match. When `false`, the prognostic field is inactive and has zero microphysical tendency; diagnostics use ``q^v - q^{v,s}(T)`` directly. When `true`, the bounded G&M (2008) adjustment is active. |
 
 ## Derived Quantities
 

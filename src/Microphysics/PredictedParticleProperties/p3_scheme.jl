@@ -80,7 +80,7 @@ The scheme tracks 11 prognostic densities:
 | ``ρqᶠ``, ``ρbᶠ`` | Rime mass and volume |
 | ``ρzⁱ`` | Ice 6th moment (reflectivity) |
 | ``ρqʷⁱ`` | Liquid water on ice |
-| ``ρsˢᵃᵗ`` | Predicted supersaturation (H10, off by default) |
+| ``ρsˢᵃᵗ`` | Predicted supersaturation (off by default) |
 
 # Keyword Arguments
 

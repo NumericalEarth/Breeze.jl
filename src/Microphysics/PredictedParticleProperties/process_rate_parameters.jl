@@ -168,7 +168,7 @@ struct ProcessRateParameters{FT}
     # explicitly in qʷⁱ), and melt-densification is skipped.
     liquid_fraction_active :: Bool
 
-    # H10: Predicted supersaturation mode (Fortran log_predictSsat).
+    # Predicted supersaturation mode (Fortran log_predictSsat).
     # When true, carry supersaturation as a prognostic variable and use
     # bounded Grabowski-Morrison (2008) adjustment for condensation.
     # When false (default), use relaxation-to-saturation.
@@ -387,7 +387,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Liquid fraction mode (Fortran log_LiquidFrac)
         liquid_fraction_active = true,
 
-        # H10: Predicted supersaturation (Fortran log_predictSsat, default .false.)
+        # Predicted supersaturation (Fortran log_predictSsat, default .false.)
         predict_supersaturation = false,
 
         # Deposition/sublimation calibration factors (Fortran clbfact_dep, clbfact_sub)

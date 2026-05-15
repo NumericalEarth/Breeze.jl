@@ -57,7 +57,7 @@ struct P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
     zⁱ  :: FT
     "Liquid water on ice mixing ratio [kg/kg]"
     qʷⁱ :: FT
-    "Predicted supersaturation [kg/kg] (H10: Grabowski & Morrison 2008)"
+    "Predicted supersaturation [kg/kg] (Grabowski & Morrison 2008)"
     sˢᵃᵗ :: FT
 end
 
@@ -74,13 +74,13 @@ P3 v5.5 with 3-moment ice and predicted liquid fraction has 11 prognostic fields
 - Cloud: ρqᶜˡ, ρnᶜˡ
 - Rain: ρqʳ, ρnʳ
 - Ice: ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ
-- Supersaturation: ρsˢᵃᵗ (H10: Grabowski & Morrison 2008, inactive by default)
+- Supersaturation: ρsˢᵃᵗ (Grabowski & Morrison 2008, inactive by default)
 """
 function AM.prognostic_field_names(::P3)
     cloud_names = (:ρqᶜˡ, :ρnᶜˡ)
     rain_names = (:ρqʳ, :ρnʳ)
     ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ)
-    # H10: supersaturation (always allocated; tendency = 0 when predict_supersaturation = false)
+    # Supersaturation is always allocated; tendency = 0 when predict_supersaturation = false.
     ssat_names = (:ρsˢᵃᵗ,)
 
     return tuple(cloud_names..., rain_names..., ice_names..., ssat_names...)
@@ -166,7 +166,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     ρbᶠ  = CenterField(grid)  # Rime volume
     ρzⁱ  = CenterField(grid)  # Ice 6th moment
     ρqʷⁱ = CenterField(grid)  # Liquid on ice
-    ρsˢᵃᵗ = CenterField(grid) # Predicted supersaturation (H10)
+    ρsˢᵃᵗ = CenterField(grid) # Predicted supersaturation
 
     # Diagnostic mixing ratio / number-concentration fields
     # (updated each step in update_microphysical_auxiliaries!, matching the Kessler pattern)
@@ -749,7 +749,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Supersaturation tendency (H10): zero when predict_supersaturation = false.
+Supersaturation tendency: zero when predict_supersaturation = false.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρsˢᵃᵗ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
