@@ -846,8 +846,8 @@ using GPUArraysCore: @allowscalar
                                                                                 grid,
                                                                                 model.thermodynamic_constants)
         ρ₀ = surface_density(p₀, T₀_default, model.thermodynamic_constants)
-        Ũ_filtered   = sqrt(U_f^2 + FT(gustiness)^2)
-        expected_filtered   = - ρ₀ * Cᴰ * Ũ_filtered * U_f
+        Ũ_filtered = sqrt(U_f^2 + FT(gustiness)^2)
+        expected_filtered = - ρ₀ * Cᴰ * Ũ_filtered * U_f
 
         Ũ_unfiltered = sqrt(u₀^2 + FT(gustiness)^2)
         expected_unfiltered = - ρ₀ * Cᴰ * Ũ_unfiltered * u₀
