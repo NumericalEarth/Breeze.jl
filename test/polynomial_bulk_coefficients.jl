@@ -817,8 +817,7 @@ using GPUArraysCore: @allowscalar
         # Build model with constant coefficient and filtered velocities. No
         # `surface_temperature` is supplied; `materialize_bulk_drag` fills it from
         # the reference-state surface temperature so ρ₀ can be evaluated.
-        ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
-                                                                 filtered_velocities=fv))
+ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness, filtered_velocities=fv))
         ρv_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
                                                                  filtered_velocities=fv))
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs)
