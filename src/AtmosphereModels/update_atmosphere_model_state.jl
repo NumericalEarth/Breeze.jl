@@ -1,4 +1,4 @@
-using ..Thermodynamics: Thermodynamics, mixture_heat_capacity, mixture_gas_constant
+using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
@@ -339,6 +339,12 @@ function compute_tendencies!(model::AtmosphereModel)
         Gρc = getproperty(model.timestepper.Gⁿ, name)
         launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρc, grid, scalar_args)
     end
+
+    #####
+    ##### Fused microphysics tendencies (no-op by default; schemes opt in)
+    #####
+
+    compute_microphysical_tendencies!(model)
 
     #####
     ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)

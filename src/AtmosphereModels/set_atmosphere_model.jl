@@ -7,7 +7,6 @@ using .Diagnostics: SaturationSpecificHumidity
 
 using ..Thermodynamics:
     MoistureMassFractions,
-    mixture_heat_capacity,
     mixture_gas_constant
 
 move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
@@ -132,10 +131,10 @@ Variables are set via keyword arguments. Supported variables include:
   an error since the saturation adjustment would immediately reduce it to 1.
 
 **Specific microphysical variables** (automatically converted to density-weighted):
-- `qᶜˡ`: specific cloud liquid (sets `ρqᶜˡ = ρᵣ * qᶜˡ`)
-- `qʳ`: specific rain (sets `ρqʳ = ρᵣ * qʳ`)
-- `nᶜˡ`: specific cloud liquid number [1/kg] (sets `ρnᶜˡ = ρᵣ * nᶜˡ`)
-- `nʳ`: specific rain number [1/kg] (sets `ρnʳ = ρᵣ * nʳ`)
+- `qᶜˡ`: specific cloud liquid, sets `ρqᶜˡ = ρᵣ * qᶜˡ`
+- `qʳ`: specific rain, sets `ρqʳ = ρᵣ * qʳ`
+- `nᶜˡ`: specific cloud liquid number [1/kg], sets `ρnᶜˡ = ρᵣ * nᶜˡ`
+- `nʳ`: specific rain number [1/kg], sets `ρnʳ = ρᵣ * nʳ`
 - Other prognostic microphysical variables with the `ρ` prefix removed
 
 !!! note "The meaning of `θ`"

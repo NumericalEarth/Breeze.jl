@@ -26,15 +26,15 @@ A bulk sensible heat flux function. The flux is computed as:
 J = - ρ₀ Cᵀ |U| Δϕ
 ```
 
-where `Cᵀ` is the transfer coefficient, `|U|` is the wind speed, and `Δϕ` is the
+where ``Cᵀ`` is the transfer coefficient, ``|U|`` is the wind speed, and ``Δϕ`` is the
 difference between the near-surface atmospheric value and the surface value of the
 thermodynamic variable appropriate to the formulation:
 
-- For `LiquidIcePotentialTemperatureFormulation`: `Δϕ = θ - θ₀`, where
-  `θ₀ = T₀ / Π₀` and `Π₀ = (p₀ / pˢᵗ)^(Rᵈ / cᵖᵈ)` (potential temperature flux)
-- For `StaticEnergyFormulation`: `Δϕ = e - cᵖᵈ T₀` (static energy flux)
+- For `LiquidIcePotentialTemperatureFormulation`: ``Δϕ = θ - θ₀``, where
+  ``θ₀ = T₀ / Π₀`` and ``Π₀ = (p₀ / pˢᵗ)^{Rᵈ / cᵖᵈ}`` (potential temperature flux)
+- For `StaticEnergyFormulation`: ``Δϕ = e - cᵖᵈ T₀`` (static energy flux)
 
-Here `p₀` is the actual surface pressure, while `pˢᵗ` is the fixed reference pressure
+Here ``p₀`` is the actual surface pressure, while ``pˢᵗ`` is the fixed reference pressure
 used to define potential temperature.
 
 The `formulation` is set automatically during model construction based on the
@@ -46,6 +46,10 @@ thermodynamic formulation.
 - `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
 - `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Functions are converted to Fields during model construction.
+- `filtered_velocities`: Either `nothing` (default) or [`FilteredSurfaceVelocities`](@ref). Note
+                         that when `filtered_velocities` is not `nothing`, then automatically
+                         there is filtering in the scalar fields via [`FilteredSurfaceScalar`](@ref)
+                         with the same parameters (e.g., `height`, `timescale`) as `filtered_velocities`.
 """
 function BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
     return BulkSensibleHeatFluxFunction(coefficient, gustiness, surface_temperature,
@@ -151,7 +155,7 @@ struct BulkVaporFluxFunction{C, G, T, F, TC, S, FV, FS}
 end
 
 """
-    BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature)
+    BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
 
 Create a bulk vapor flux function for computing surface moisture fluxes.
 The flux is computed as:
@@ -160,8 +164,8 @@ The flux is computed as:
 Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀)
 ```
 
-where `Cᵛ` is the transfer coefficient, `|U|` is the wind speed, `qᵗ` is the atmospheric
-specific humidity, and `qᵛ₀` is the saturation specific humidity at the surface.
+where ``Cᵛ`` is the transfer coefficient, ``|U|`` is the wind speed, ``qᵗ`` is the atmospheric
+specific humidity, and ``qᵛ₀`` is the saturation specific humidity at the surface.
 
 # Keyword Arguments
 
@@ -169,6 +173,10 @@ specific humidity, and `qᵛ₀` is the saturation specific humidity at the surf
 - `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
 - `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Used to compute saturation specific humidity at the surface.
+- `filtered_velocities`: Either `nothing` (default) or [`FilteredSurfaceVelocities`](@ref). Note
+                         that when `filtered_velocities` is not `nothing`, then automatically
+                         there is filtering in the scalar fields via [`FilteredSurfaceScalar`](@ref)
+                         with the same parameters (e.g., `height`, `timescale`) as `filtered_velocities`.
 """
 function BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
     return BulkVaporFluxFunction(coefficient, gustiness, surface_temperature,
@@ -185,9 +193,14 @@ Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
                           Adapt.adapt(to, bf.filtered_velocities),
                           Adapt.adapt(to, bf.filtered_scalar))
 
-Base.summary(bf::BulkVaporFluxFunction) =
-    string("BulkVaporFluxFunction(coefficient=", bf.coefficient,
-           ", gustiness=", bf.gustiness, ")")
+function Base.summary(bf::BulkVaporFluxFunction)
+    summary_str = string("BulkVaporFluxFunction(coefficient=", prettysummary(bf.coefficient),
+                         ", gustiness=", prettysummary(bf.gustiness), ")")
+    if bf.filtered_velocities != nothing || bf.filtered_scalar != nothing
+        summary_str *= ", with filtering"
+    end
+    return summary_str
+end
 
 # getbc for BulkVaporFluxFunction
 @inline function OceananigansBC.getbc(bf::BulkVaporFluxFunction, i::Integer, j::Integer,
@@ -231,9 +244,13 @@ const BulkVaporFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkVaporFlux
 
 Create a `FluxBoundaryCondition` for surface sensible heat flux.
 
-The bulk formula computes `J = -ρ₀ Cᵀ |U| Δϕ`, where `Δϕ` depends on the thermodynamic
-formulation: `Δθ` for potential temperature or `Δe` for static energy. The formulation
-is set automatically during model construction.
+The bulk formula computes
+```math
+J = -ρ₀ Cᵀ |U| Δϕ
+```
+where ``Δϕ`` depends on the thermodynamic formulation: ``Δθ`` for potential
+temperature or ``Δe`` for static energy. The formulation is set automatically
+during model construction.
 
 See [`BulkSensibleHeatFluxFunction`](@ref) for details.
 

@@ -14,9 +14,11 @@ if filter_tests!(testsuite, args)
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
     # limitation).
     if !REACTANT_COMPAT
-        delete!(testsuite, "reactant_centered_compilation")
-        delete!(testsuite, "reactant_weno_compilation")
-        delete!(testsuite, "reactant_1m_microphysics_compilation")
+        for key in keys(testsuite)
+            if startswith(key, "reactant/") && !REACTANT_COMPAT
+                delete!(testsuite, key)
+            end
+        end
     end
 end
 

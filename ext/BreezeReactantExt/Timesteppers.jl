@@ -1,5 +1,5 @@
 using Oceananigans: ReactantState, initialize!
-using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_step!, update_state!
+using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!
 using Breeze.TimeSteppers: SSPRungeKutta3
 
 function OceananigansTimeSteppers.first_time_step!(model::AtmosphereModel{<:Any, <:Any, <:ReactantState, <:SSPRungeKutta3}, Δt)

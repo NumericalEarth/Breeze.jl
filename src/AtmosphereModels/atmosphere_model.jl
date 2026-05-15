@@ -4,6 +4,7 @@ using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Fie
                     Centered, fields, prognostic_fields
 using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection
 using Oceananigans.AbstractOperations: @at
+using Oceananigans.Architectures: Architectures
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
@@ -286,7 +287,6 @@ end
 # Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
 _timestepper_uses_dynamics(::Val) = false
 _timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
-_timestepper_uses_dynamics(::Val{:AcousticSSPRungeKutta3}) = true
 _timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
 _timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
 
@@ -309,6 +309,10 @@ function atmosphere_model_forcing_summary(model::AtmosphereModel)
     summary_tuple = Tuple(string(name, "=>", nameof(typeof(forcing[name]))) for name in names)
     return join(summary_tuple, ", ")
 end
+
+# AtmosphereModel has a grid, so we can use grid-based implementations
+Base.eltype(model::AtmosphereModel) = eltype(model.grid)
+Architectures.architecture(model::AtmosphereModel) = model.grid.architecture
 
 function Base.show(io::IO, model::AtmosphereModel)
     TS = nameof(typeof(model.timestepper))
@@ -343,19 +347,20 @@ Advection.cell_advection_timescale(model::AtmosphereModel) = cell_advection_time
 
 # Prognostic field names from dynamics + thermodynamic formulation + microphysics + tracers
 function prognostic_field_names(dynamics, formulation, microphysics, tracer_names)
+    dynamics_names = prognostic_dynamics_field_names(dynamics)
     momentum_names = prognostic_momentum_field_names(dynamics)
     formulation_names = prognostic_thermodynamic_field_names(formulation)
     microphysical_names = prognostic_field_names(microphysics)
     moist_name = moisture_prognostic_name(microphysics)
-    return tuple(momentum_names..., moist_name, formulation_names..., microphysical_names..., tracer_names...)
+    return tuple(dynamics_names..., momentum_names..., formulation_names..., moist_name, microphysical_names..., tracer_names...)
 end
 
 function field_names(dynamics, formulation, microphysics, tracer_names)
     prog_names = prognostic_field_names(dynamics, formulation, microphysics, tracer_names)
     moist_specific = moisture_specific_name(microphysics)
-    default_additional_names = (:u, :v, :w, :T, moist_specific)
     formulation_additional_names = additional_thermodynamic_field_names(formulation)
-    return tuple(prog_names..., default_additional_names..., formulation_additional_names...)
+    default_additional_names = (:u, :v, :w, :T, moist_specific)
+    return tuple(prog_names..., formulation_additional_names..., default_additional_names...)
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,

@@ -13,7 +13,7 @@ using ..Thermodynamics:
 using ..AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
-    surface_pressure
+    standard_pressure
 
 using ..ParcelModels: ParcelModel
 
@@ -436,8 +436,8 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     ρ = dynamics_density(model.dynamics)
     p = dynamics_pressure(model.dynamics)
 
-    # Surface pressure for Exner function
-    p₀ = surface_pressure(model.dynamics)
+    # Standard pressure (reference pressure for the Exner function, pˢᵗ)
+    pˢᵗ = standard_pressure(model.dynamics)
 
     # Thermodynamic constants for liquid-ice potential temperature conversion
     constants = model.thermodynamic_constants
@@ -453,7 +453,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     μ = model.microphysical_fields
 
     launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, Δt, ρ, p, p₀, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+            microphysics, grid, Nz, Δt, ρ, p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     return nothing
 end
@@ -581,7 +581,7 @@ end
 #   T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
 
 @kernel function _microphysical_update!(microphysics, grid, Nz, Δt,
-                                        density, pressure, p₀, constants,
+                                        density, pressure, pˢᵗ, constants,
                                         θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
@@ -686,7 +686,7 @@ end
                 Rᵐ  = mixture_gas_constant(r, constants)
                 q = MoistureMassFractions(r)
                 qˡ = q.liquid
-                Π = (p / p₀)^(Rᵐ / cᵖᵐ)
+                Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
                 Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
 
                 # Rain sedimentation flux (upstream differencing)
@@ -718,7 +718,7 @@ end
                 Rᵐ  = mixture_gas_constant(r, constants)
                 q = MoistureMassFractions(r)
                 qˡ = q.liquid
-                Π = (p / p₀)^(Rᵐ / cᵖᵐ)
+                Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
                 θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
 
                 θˡⁱ[i, j, k]  = θˡⁱ_new
@@ -743,7 +743,7 @@ end
             Rᵐ  = mixture_gas_constant(r, constants)
             q = MoistureMassFractions(r)
             qˡ = q.liquid
-            Π = (p / p₀)^(Rᵐ / cᵖᵐ)
+            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
             Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
 
             # Rain sedimentation flux at top boundary
@@ -771,7 +771,7 @@ end
             Rᵐ  = mixture_gas_constant(r, constants)
             q = MoistureMassFractions(r)
             qˡ = q.liquid
-            Π = (p / p₀)^(Rᵐ / cᵖᵐ)
+            Π = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
             θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
 
             θˡⁱ[i, j, k]  = θˡⁱ_new
