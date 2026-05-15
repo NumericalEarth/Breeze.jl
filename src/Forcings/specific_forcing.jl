@@ -1,6 +1,5 @@
-using ..AtmosphereModels: AtmosphereModels
+using ..AtmosphereModels: AtmosphereModels, materialize_atmosphere_model_forcing
 using Oceananigans: instantiated_location
-using Oceananigans.Forcings: materialize_forcing
 using Oceananigans.Grids: Center, Face
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 using Oceananigans.Utils: prettysummary
@@ -81,7 +80,14 @@ end
 function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SpecificForcing,
                                                                field, name, model_field_names,
                                                                context::NamedTuple)
-    inner = materialize_forcing(forcing.forcing, field, name, model_field_names)
+    # SpecificForcing wraps a forcing that produces a specific tendency, so propagate
+    # the specific (un-prefixed) prognostic name to the inner materializer — Breeze
+    # forcing types like SubsidenceForcing and GeostrophicForcing expect the specific
+    # name to look up the field they advect or apply at.
+    specific_name = startswith(string(name), "ρ") ?
+                    Symbol(string(name)[nextind(string(name), 1):end]) : name
+    inner = materialize_atmosphere_model_forcing(forcing.forcing, field, specific_name,
+                                                 model_field_names, context)
     ρ = context.density
     target_location = instantiated_location(field)
     return SpecificForcing(inner, ρ, target_location)
