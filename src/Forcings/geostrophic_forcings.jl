@@ -1,28 +1,25 @@
 using ..AtmosphereModels: AtmosphereModels
 using Oceananigans: Field, set!, compute!
 using Oceananigans.Grids: Center, XDirection, YDirection
-using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ
 using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
 
 #####
-##### Geostrophic forcing types
+##### Geostrophic forcing
 #####
 
-struct GeostrophicForcing{S, V, R, F}
+struct GeostrophicForcing{S, V, F}
     geostrophic_velocity :: V
-    density :: R
-    direction :: S  # +1 for v-forcing, -1 for u-forcing
+    direction :: S  # XDirection for u-forcing, YDirection for v-forcing
     coriolis_parameter :: F
 end
 
-Adapt.adapt_structure(to,gf::GeostrophicForcing) =
+Adapt.adapt_structure(to, gf::GeostrophicForcing) =
     GeostrophicForcing(Adapt.adapt(to, gf.geostrophic_velocity),
-                       Adapt.adapt(to, gf.density),
                        Adapt.adapt(to, gf.direction),
                        Adapt.adapt(to, gf.coriolis_parameter))
 
-GeostrophicForcing(u, dir) = GeostrophicForcing(u, nothing, dir, nothing)
+GeostrophicForcing(u, dir) = GeostrophicForcing(u, dir, nothing)
 
 const XGeostrophicForcing = GeostrophicForcing{XDirection}
 const YGeostrophicForcing = GeostrophicForcing{YDirection}
@@ -68,29 +65,36 @@ function Base.show(io::IO, ft::NamedGeostrophicForcingTuple)
     print(io, "    └── geostrophic_velocity: ", prettysummary(forcing.geostrophic_velocity))
 end
 
-@inline geostrophic_momentum(i, j, k, grid, ρ, uᵍ) = @inbounds ρ[i, j, k] * uᵍ[i, j, k]
+#####
+##### Kernel: returns the specific geostrophic-adjustment tendency
+##### (the ρ-multiply and horizontal interpolation happen in SpecificForcing).
+##### The 1×1×Center storage is horizontally uniform, so [i, j, k] is well-defined.
+#####
 
 @inline function (forcing::XGeostrophicForcing)(i, j, k, grid, clock, fields)
     f = forcing.coriolis_parameter
-    ρvᵍ = ℑxᶠᵃᵃ(i, j, k, grid, geostrophic_momentum, forcing.density, forcing.geostrophic_velocity)
-    return - f * ρvᵍ
+    vᵍ = @inbounds forcing.geostrophic_velocity[i, j, k]
+    return - f * vᵍ
 end
 
 @inline function (forcing::YGeostrophicForcing)(i, j, k, grid, clock, fields)
     f = forcing.coriolis_parameter
-    ρuᵍ = ℑyᵃᶠᵃ(i, j, k, grid, geostrophic_momentum, forcing.density, forcing.geostrophic_velocity)
-    return + f * ρuᵍ
+    uᵍ = @inbounds forcing.geostrophic_velocity[i, j, k]
+    return + f * uᵍ
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Create a pair of geostrophic forcings for the x- and y-momentum equations.
+Create a pair of geostrophic forcings for the x- and y-momentum equations,
+keyed under specific names `u` and `v`. Each [`GeostrophicForcing`](@ref)
+returns a specific tendency; the model's density factor `ρ` is applied
+automatically via [`SpecificForcing`](@ref) when the forcing is dispatched
+under a specific key, with the correct horizontal interpolation of ρ to
+the appropriate cell face.
 
 The Coriolis parameter is extracted from the model's `coriolis` during
-model construction. The geostrophic velocity is stored separately from the
-model density, so compressible models form ``ρ uᵍ`` from the live prognostic
-density after initialization.
+model construction.
 
 Arguments
 =========
@@ -98,7 +102,7 @@ Arguments
 - `uᵍ`: Function of `z` specifying the x-component of the geostrophic velocity.
 - `vᵍ`: Function of `z` specifying the y-component of the geostrophic velocity.
 
-Returns a `NamedTuple` with `ρu` and `ρv` forcing entries that can be merged
+Returns a `NamedTuple` with `u` and `v` forcing entries that can be merged
 into the model forcing.
 
 Example
@@ -115,23 +119,33 @@ forcing = geostrophic_forcings(uᵍ, vᵍ)
 
 # output
 NamedTuple with 2 GeostrophicForcings:
-├── ρu: GeostrophicForcing{XDirection}
+├── u: GeostrophicForcing{XDirection}
 │   └── geostrophic_velocity: vᵍ (generic function with 1 method)
-└── ρv: GeostrophicForcing{YDirection}
+└── v: GeostrophicForcing{YDirection}
     └── geostrophic_velocity: uᵍ (generic function with 1 method)
 ```
 """
 function geostrophic_forcings(uᵍ, vᵍ)
-    Fρu = GeostrophicForcing(vᵍ, XDirection())
-    Fρv = GeostrophicForcing(uᵍ, YDirection())
-    return (; ρu=Fρu, ρv=Fρv)
+    Fu = GeostrophicForcing(vᵍ, XDirection())
+    Fv = GeostrophicForcing(uᵍ, YDirection())
+    return (; u=Fu, v=Fv)
 end
 
 #####
-##### Materialization functions for geostrophic forcings
+##### Materialization: store geostrophic velocity profile and the Coriolis parameter
 #####
 
-function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::GeostrophicForcing, field, name, model_field_names, context)
+function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::GeostrophicForcing,
+                                                               field, name, model_field_names,
+                                                               context::NamedTuple)
+    if startswith(string(name), "ρ")
+        msg = string("GeostrophicForcing now returns a specific tendency (e.g. -f vᵍ for u) and ",
+                     "must be supplied under the specific prognostic name (`u` or `v`). ",
+                     "Use `geostrophic_forcings(uᵍ, vᵍ)` to build the `(; u, v)` pair; ",
+                     "Breeze applies the density factor ρ automatically via SpecificForcing.")
+        throw(ArgumentError(msg))
+    end
+
     grid = field.grid
 
     forcing_uᵍ = forcing.geostrophic_velocity
@@ -145,7 +159,6 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Geostrop
 
     FT = eltype(grid)
     f = context.coriolis.f |> FT
-    ρ = context.density
 
-    return GeostrophicForcing(uᵍ, ρ, forcing.direction, f)
+    return GeostrophicForcing(uᵍ, forcing.direction, f)
 end

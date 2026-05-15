@@ -184,26 +184,43 @@ end
 ##### Error paths
 #####
 
-@testset "Density-tendency forcing under specific key errors" begin
+# A user-defined density-tendency forcing — Breeze should reject it under a specific key.
+struct ExampleDensityTendency end
+@inline (::ExampleDensityTendency)(i, j, k, grid, clock, fields) = zero(grid)
+Breeze.AtmosphereModels.is_density_tendency_forcing(::ExampleDensityTendency) = true
+
+@testset "User-defined density-tendency forcing under specific key errors" begin
+    Oceananigans.defaults.FloatType = Float64
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    bad = ExampleDensityTendency()
+    @test is_density_tendency_forcing(bad)
+    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; θ=bad))
+    # Same check inside a tuple
+    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; θ=(bad, Returns(0.0))))
+end
+
+@testset "Built-in Breeze forcings are not density-tendency forcings" begin
+    # After the refactor SubsidenceForcing and GeostrophicForcing both return specific
+    # tendencies (the ρ multiply happens in SpecificForcing), so the trait must be false.
+    subsidence = SubsidenceForcing(z -> -0.01)
+    geostrophic_u = geostrophic_forcings(z -> -10.0, z -> 0.0).u
+    @test !is_density_tendency_forcing(subsidence)
+    @test !is_density_tendency_forcing(geostrophic_u)
+    @test !is_density_tendency_forcing(Returns(0.0))
+end
+
+@testset "Built-in Breeze forcings under ρ-key error with migration message" begin
     Oceananigans.defaults.FloatType = Float64
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     subsidence = SubsidenceForcing(z -> -0.01)
-    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; θ=subsidence))
+    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; ρθ=subsidence))
 
-    # Same check inside a tuple
-    @test_throws ArgumentError AtmosphereModel(grid; forcing=(; θ=(subsidence, Returns(0.0))))
-
-    # GeostrophicForcing too
-    geostrophic = geostrophic_forcings(z -> -10.0, z -> 0.0).ρu
+    geostrophic_u = geostrophic_forcings(z -> -10.0, z -> 0.0).u
     @test_throws ArgumentError AtmosphereModel(grid;
                                                coriolis=FPlane(f=1e-4),
-                                               forcing=(; u=geostrophic))
-
-    # Trait sanity
-    @test is_density_tendency_forcing(subsidence)
-    @test is_density_tendency_forcing(geostrophic)
-    @test !is_density_tendency_forcing(Returns(0.0))
+                                               forcing=(; ρu=geostrophic_u))
 end
 
 @testset "Unknown specific key errors" begin

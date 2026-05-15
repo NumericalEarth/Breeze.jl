@@ -1,5 +1,6 @@
 using Breeze
-using Breeze: ReferenceState, AnelasticDynamics, LiquidIcePotentialTemperatureFormulation, GeostrophicForcing
+using Breeze: ReferenceState, AnelasticDynamics, LiquidIcePotentialTemperatureFormulation,
+              GeostrophicForcing, SpecificForcing
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Fields: interior
 using Oceananigans.Grids: znodes, Center
@@ -13,13 +14,20 @@ using Test
     uᵍ(z) = -10
     vᵍ(z) = 0
     geostrophic = geostrophic_forcings(uᵍ, vᵍ)
+    @test haskey(geostrophic, :u)
+    @test haskey(geostrophic, :v)
+
     coriolis = FPlane(f=1e-4)
     model = AtmosphereModel(grid; coriolis, forcing=geostrophic)
 
+    # Geostrophic forcings are now keyed under specific names; the dispatch wraps each
+    # in SpecificForcing and stores it under the corresponding ρ-key.
     @test haskey(model.forcing, :ρu)
     @test haskey(model.forcing, :ρv)
-    @test model.forcing.ρu isa GeostrophicForcing
-    @test model.forcing.ρv isa GeostrophicForcing
+    @test model.forcing.ρu isa SpecificForcing
+    @test model.forcing.ρv isa SpecificForcing
+    @test model.forcing.ρu.forcing isa GeostrophicForcing
+    @test model.forcing.ρv.forcing isa GeostrophicForcing
 
     Δt = 1e-6
     time_step!(model, Δt)
@@ -68,11 +76,12 @@ end
     wˢ(z) = -0.01
     subsidence = SubsidenceForcing(wˢ)
 
-    model = AtmosphereModel(grid; forcing=(; ρθ=subsidence))
+    model = AtmosphereModel(grid; forcing=(; θ=subsidence))
 
     @test haskey(model.forcing, :ρθ)
-    @test model.forcing.ρθ isa SubsidenceForcing
-    @test !isnothing(model.forcing.ρθ.subsidence_vertical_velocity)
+    @test model.forcing.ρθ isa SpecificForcing
+    @test model.forcing.ρθ.forcing isa SubsidenceForcing
+    @test !isnothing(model.forcing.ρθ.forcing.subsidence_vertical_velocity)
 
     Δt = 1e-6
     time_step!(model, Δt)
@@ -90,7 +99,7 @@ end
 
     reference_state = ReferenceState(grid)
     dynamics = AnelasticDynamics(reference_state)
-    model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature, forcing=(; ρqᵛ=subsidence))
+    model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature, forcing=(; qᵛ=subsidence))
 
     θ₀ = model.dynamics.reference_state.potential_temperature
 
@@ -100,7 +109,8 @@ end
     set!(model, θ=θ₀, qᵗ=qᵗ_profile)
 
     @test haskey(model.forcing, :ρqᵛ)
-    @test model.forcing.ρqᵛ isa SubsidenceForcing
+    @test model.forcing.ρqᵛ isa SpecificForcing
+    @test model.forcing.ρqᵛ.forcing isa SubsidenceForcing
 
     ρqᵛ_initial = sum(model.moisture_density)
 
@@ -145,11 +155,10 @@ end
     subsidence = SubsidenceForcing(wˢ)
 
     forcing = (;
-        ρu = (subsidence, geostrophic.ρu),
-        ρv = (subsidence, geostrophic.ρv)
+        u = (subsidence, geostrophic.u),
+        v = (subsidence, geostrophic.v)
     )
 
-    coriolis = FPlane(f=1e-4)
     model = AtmosphereModel(grid; coriolis, forcing)
 
     @test haskey(model.forcing, :ρu)
@@ -178,10 +187,11 @@ end
     Δϕ = - Δt * wˢ * Γ |> FT
     subsidence = SubsidenceForcing(FT(wˢ))
 
-    # Test a representative subset of fields (reduced from 5 to 3)
-    @testset "Subsidence forcing with constant gradient [$name, $FT]" for name in (:ρu, :ρθ, :ρqᵛ)
-        # Test solo configuration only (combined is tested above)
-        forcing = (; name => subsidence)
+    # Test a representative subset of fields. The specific name keys the forcing
+    # (e.g. `:θ`), while the ρ-prefixed name keys the prognostic field used to
+    # check the predicted tendency.
+    @testset "Subsidence forcing with constant gradient [$specific_name, $FT]" for (specific_name, density_name) in ((:u, :ρu), (:θ, :ρθ), (:qᵛ, :ρqᵛ))
+        forcing = (; specific_name => subsidence)
 
         kw = (; advection=nothing, dynamics, formulation=:LiquidIcePotentialTemperature, forcing)
         model = AtmosphereModel(grid; tracers=:ρc, kw...)
@@ -192,14 +202,14 @@ end
         set!(ρϕ, ϕᵢ)
         set!(ρϕ, ρᵣ * ρϕ)
 
-        kw = (; name => ρϕ)
-        if name == :ρθ
+        kw = (; density_name => ρϕ)
+        if density_name == :ρθ
             set!(model; kw...)
         else
             set!(model; θ=θ₀, kw...)
         end
 
-        ρϕ = prognostic_fields(model)[name]
+        ρϕ = prognostic_fields(model)[density_name]
         ρϕ₀ = interior(ρϕ) |> Array
         time_step!(model, Δt)
         ρϕ₁ = interior(ρϕ) |> Array

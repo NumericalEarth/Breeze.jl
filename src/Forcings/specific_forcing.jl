@@ -77,6 +77,13 @@ end
 ##### Materialization: resolve density and target field location from context + target field
 #####
 
+#####
+##### compute_forcing! recurses into the inner so wrapped forcings (e.g. SubsidenceForcing,
+##### which precomputes a horizontal average each step) refresh their auxiliary fields.
+#####
+
+AtmosphereModels.compute_forcing!(sf::SpecificForcing) = AtmosphereModels.compute_forcing!(sf.forcing)
+
 function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SpecificForcing,
                                                                field, name, model_field_names,
                                                                context::NamedTuple)

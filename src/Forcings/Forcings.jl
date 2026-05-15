@@ -43,16 +43,11 @@ function AtmosphereModels.compute_forcing!(mf::MultipleForcings)
 end
 
 #####
-##### Density-tendency forcing trait: identifies Breeze forcings that already produce F_{ρϕ}
-##### so the atmosphere-model dispatch can reject misuse under specific keys.
-#####
-
-AtmosphereModels.is_density_tendency_forcing(::SubsidenceForcing) = true
-AtmosphereModels.is_density_tendency_forcing(::GeostrophicForcing) = true
-
-#####
 ##### Specific-key wrapping: build a SpecificForcing for a user value supplied under a
-##### specific name (`θ`, `u`, ...). Tuples recurse; density-tendency forcings error.
+##### specific name (`θ`, `u`, ...). Tuples recurse; user-defined density-tendency
+##### forcings (i.e., those whose kernels already include the ρ factor) error to
+##### prevent double-counting. Breeze's own SubsidenceForcing and GeostrophicForcing
+##### return specific tendencies and so are accepted here directly.
 #####
 
 function AtmosphereModels.wrap_specific_forcing(value, density_name)
