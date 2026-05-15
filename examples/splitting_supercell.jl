@@ -74,7 +74,6 @@ using Oceananigans.Units
 using Oceananigans.Grids: znodes
 
 using CairoMakie
-using CUDA
 using Printf
 
 # ## Domain and grid
@@ -369,11 +368,8 @@ function run_simulation(model, label)
     simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
         filename=slices_filename, schedule=TimeInterval(2minutes), overwrite_existing=true)
 
-    CUDA.synchronize()
-    t0 = time_ns()
     run!(simulation)
-    CUDA.synchronize()
-    wall_seconds = 1e-9 * (time_ns() - t0)
+    wall_seconds = simulation.run_wall_time
     @info @sprintf("[%s] DONE. wall time = %.1f s (%.2f min) over %d iterations",
                    label, wall_seconds, wall_seconds / 60, iteration(simulation))
 
