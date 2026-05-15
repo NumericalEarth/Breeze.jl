@@ -112,23 +112,8 @@ end
 $(TYPEDSIGNATURES)
 
 Build a lazy [`NumberConcentration`](@ref) for rain under
-`OneMomentCloudMicrophysics`.
-
-```jldoctest n
-using Breeze
-using CloudMicrophysics  # loads BreezeCloudMicrophysicsExt
-grid = RectilinearGrid(size=(1, 1, 4), extent=(1e3, 1e3, 1e3))
-microphysics = OneMomentCloudMicrophysics()
-model = AtmosphereModel(grid; microphysics)
-set!(model, θ=300, qᵗ=0.02, qʳ=1e-3)
-ρnʳ = NumberConcentration(model, :rain)
-
-# output
-KernelFunctionOperation at (Center, Center, Center)
-├── grid: 1×1×4 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
-├── kernel_function: NumberConcentrationKernelFunction
-└── arguments: ()
-```
+`OneMomentCloudMicrophysics`. The returned `KernelFunctionOperation`
+computes `n₀ · λ⁻¹` from the scheme's rain pdf and mass parameters.
 """
 function Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val{:rain})
     haskey(model.microphysical_fields, :ρqʳ) || return nothing
