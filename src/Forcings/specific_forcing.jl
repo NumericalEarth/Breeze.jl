@@ -1,5 +1,5 @@
 using ..AtmosphereModels: AtmosphereModels
-using Oceananigans.Fields: instantiated_location
+using Oceananigans: instantiated_location
 using Oceananigans.Forcings: materialize_forcing
 using Oceananigans.Grids: Center, Face
 using Oceananigans.Operators: ℑzᵃᵃᶠ
