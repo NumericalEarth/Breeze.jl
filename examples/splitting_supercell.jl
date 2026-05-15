@@ -408,7 +408,7 @@ model_compressible = AtmosphereModel(grid; dynamics = dynamics_compressible,
 
 # Initial density. Naively setting `ρ` to the reference density while perturbing
 # `θ` would change `ρθ` and seed a spurious acoustic pulse from the warm bubble.
-# Instead we rescale the reference density via [`pressure_balanced_density`](@ref)
+# Instead we rescale the reference density via [`pressure_balanced_density`](@ref Breeze.Thermodynamics.pressure_balanced_density)
 # so that `ρθ` (and therefore the equation-of-state pressure) is unchanged at
 # `t = 0`:
 
