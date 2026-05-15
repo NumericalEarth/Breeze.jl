@@ -92,6 +92,45 @@ end
     @test Gρw[1, 1, 2] ≈ ρ_face_2 * F_w rtol=10 * eps(FT)
 end
 
+@testset "Specific-key path matches manual ρᵣ * field under ρ-key [$(FT)]" for FT in test_float_types()
+    # Verifies that the new ergonomic
+    #     forcing = (; θ = Forcing(field))
+    # produces bit-identical model evolution to the old pattern
+    #     set!(field, ρᵣ * field); forcing = (; ρθ = Forcing(field)).
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    # A nontrivial height-varying specific tendency (K/s).
+    F_specific_profile(z) = FT(-1e-5) * (1 + z / 100)
+
+    # Path A: manual ρᵣ multiply, supplied under :ρθ (the pre-change idiom)
+    model_A = AtmosphereModel(grid; forcing = (; ρθ = (x, y, z, t) -> 0))  # placeholder
+    ρᵣ = model_A.dynamics.reference_state.density
+    F_density_field = Field{Nothing, Nothing, Center}(grid)
+    set!(F_density_field, z -> F_specific_profile(z))
+    set!(F_density_field, ρᵣ * F_density_field)
+    model_A = AtmosphereModel(grid; forcing = (; ρθ = Forcing(F_density_field)))
+
+    # Path B: specific tendency supplied under :θ
+    F_specific_field = Field{Nothing, Nothing, Center}(grid)
+    set!(F_specific_field, z -> F_specific_profile(z))
+    model_B = AtmosphereModel(grid; forcing = (; θ = Forcing(F_specific_field)))
+
+    θ₀ = model_A.dynamics.reference_state.potential_temperature
+    set!(model_A; θ=θ₀)
+    set!(model_B; θ=θ₀)
+
+    Δt = FT(1)
+    for _ in 1:5
+        time_step!(model_A, Δt)
+        time_step!(model_B, Δt)
+    end
+
+    ρθ_A = interior(prognostic_fields(model_A).ρθ) |> Array
+    ρθ_B = interior(prognostic_fields(model_B).ρθ) |> Array
+    @test maximum(abs.(ρθ_A .- ρθ_B)) < eps(FT) * 1000 * maximum(abs.(ρθ_A))
+end
+
 @testset "Mixed θ + ρθ contributions sum [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
