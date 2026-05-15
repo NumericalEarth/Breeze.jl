@@ -404,17 +404,18 @@ using GPUArraysCore: @allowscalar
         fv = FilteredSurfaceVelocities(grid; filter_timescale=20.0)
 
         # θᵥ source is a 3D field-like; here just use a CenterField at constant value.
+        θᵢ = 305
         θᵥ_source = CenterField(grid)
-        set!(θᵥ_source, 305.0)
+        set!(θᵥ_source, θᵢ)
 
         Breeze.BoundaryConditions.update_θᵥ!(fv, θᵥ_source, grid, 2.0)
         ε = 2.0 / 20.0
-        expected = (0.0 + ε * 305.0) / (1 + ε)
+        expected = (0.0 + ε * θᵢ) / (1 + ε)
         @test fv.θᵥ[1, 1, 1] ≈ expected atol=1e-10
 
         # Initialize sets the field directly from the source (no time integration)
         Breeze.BoundaryConditions.initialize_θᵥ!(fv, θᵥ_source, grid)
-        @test fv.θᵥ[1, 1, 1] ≈ 305.0 atol=1e-10
+        @test fv.θᵥ[1, 1, 1] ≈ θᵢ atol=1e-10
     end
 
     @testset "BulkDrag with filtered_velocities" begin
