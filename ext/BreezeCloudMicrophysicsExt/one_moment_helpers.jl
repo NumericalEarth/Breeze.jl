@@ -111,7 +111,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Build a lazy [`NumberConcentration`](@ref) for rain under
+Build a lazy [`number_concentration`](@ref) for rain under
 `OneMomentCloudMicrophysics`. The returned `KernelFunctionOperation`
 computes `n₀ · λ⁻¹` from the scheme's rain pdf and mass parameters.
 """
@@ -126,7 +126,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Build a lazy [`NumberConcentration`](@ref) for snow under
+Build a lazy [`number_concentration`](@ref) for snow under
 `OneMomentCloudMicrophysics`. Snow's intercept `n₀` depends on `(q, ρ)` per
 Kaul et al. (2015), so a closed-form rain-style expression cannot substitute.
 """

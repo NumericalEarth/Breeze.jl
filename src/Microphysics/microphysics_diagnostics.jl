@@ -227,15 +227,17 @@ Returns `nothing` if the species is not carried by the model (e.g., `:hail` for
 a 1-mom scheme without hail). Errors for microphysics schemes that do not
 define a DSD-based number concentration (e.g., `SaturationAdjustment`).
 
-See [`NumberConcentrationField`](@ref) for a convenience constructor that
-wraps the result in a `Field`.
+The return shape is therefore polymorphic — a lazy `KernelFunctionOperation` for
+1-mom and a stored `Field` for 2-mom — so the function is snake-cased rather
+than PascalCased. Use [`NumberConcentrationField`](@ref) when you want a
+uniformly Field-typed handle.
 """
-NumberConcentration(model, species::Symbol) =
+number_concentration(model, species::Symbol) =
     number_concentration(model, model.microphysics, Val(species))
 
 # Default fallback: unsupported microphysics scheme.
 number_concentration(model, microphysics, ::Val{species}) where {species} =
-    error("NumberConcentration is not defined for microphysics scheme of type ",
+    error("number_concentration is not defined for microphysics scheme of type ",
           typeof(microphysics), " (species = :", species, "). ",
           "Supported schemes: OneMomentCloudMicrophysics (species ∈ (:rain, :snow)) ",
           "and TwoMomentCloudMicrophysics.")
@@ -243,11 +245,15 @@ number_concentration(model, microphysics, ::Val{species}) where {species} =
 """
 $(TYPEDSIGNATURES)
 
-Convenience constructor that wraps [`NumberConcentration`](@ref) in a `Field`.
-Returns `nothing` when the requested species is not carried by the model.
+Field-typed handle for the [`number_concentration`](@ref) diagnostic. For 1-mom,
+allocates a `Field` shell around the lazy `KernelFunctionOperation` (use
+`compute!` to populate it). For 2-mom, returns the prognostic ``ρnˣ`` field
+directly. Returns `nothing` when the requested species is not carried by the
+model.
 """
 function NumberConcentrationField(model, species::Symbol)
-    op = NumberConcentration(model, species)
-    op === nothing && return nothing
-    return Field(op)
+    result = number_concentration(model, species)
+    result === nothing && return nothing
+    result isa Field && return result
+    return Field(result)
 end

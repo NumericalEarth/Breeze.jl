@@ -99,7 +99,7 @@ export
     equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
-    NumberConcentration,
+    number_concentration,
     NumberConcentrationField,
     BulkMicrophysics,
     initial_aerosol_number,

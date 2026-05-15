@@ -21,7 +21,7 @@ export
     saturation_adjustment_coefficient,
     RelativeHumidity,
     RelativeHumidityField,
-    NumberConcentration,
+    number_concentration,
     NumberConcentrationField
 
 using ..AtmosphereModels: AtmosphereModels, moisture_fractions, grid_moisture_fractions,

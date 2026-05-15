@@ -27,7 +27,7 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     qʳ_value = FT(1e-3)
     set!(model; θ=300, qᵗ=FT(0.020), qᶜˡ=FT(0), qʳ=qʳ_value)
 
-    op = NumberConcentration(model, :rain)
+    op = number_concentration(model, :rain)
     @test op isa Oceananigans.AbstractOperations.KernelFunctionOperation
 
     ρnʳ = Field(op)
@@ -66,7 +66,7 @@ end
     qˢ_value = FT(5e-4)
     set!(model; θ=260, qᵗ=FT(0.005), qˢ=qˢ_value)
 
-    op = NumberConcentration(model, :snow)
+    op = number_concentration(model, :snow)
     @test op isa Oceananigans.AbstractOperations.KernelFunctionOperation
 
     ρnˢ = Field(op)
@@ -97,9 +97,9 @@ end
     microphysics = OneMomentCloudMicrophysics()
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants, microphysics)
 
-    @test NumberConcentration(model, :hail) === nothing
-    @test NumberConcentration(model, :graupel) === nothing
-    @test NumberConcentration(model, :snow) === nothing
+    @test number_concentration(model, :hail) === nothing
+    @test number_concentration(model, :graupel) === nothing
+    @test number_concentration(model, :snow) === nothing
     @test NumberConcentrationField(model, :hail) === nothing
 end
 
@@ -116,9 +116,9 @@ end
 
     set!(model; θ=300, qᵗ=FT(0.015))
 
-    @test NumberConcentration(model, :rain) === model.microphysical_fields.ρnʳ
-    @test NumberConcentration(model, :cloud_liquid) === model.microphysical_fields.ρnᶜˡ
-    @test NumberConcentration(model, :snow) === nothing
+    @test number_concentration(model, :rain) === model.microphysical_fields.ρnʳ
+    @test number_concentration(model, :cloud_liquid) === model.microphysical_fields.ρnᶜˡ
+    @test number_concentration(model, :snow) === nothing
 end
 
 @testset "NumberConcentration: SaturationAdjustment errors [$FT]" for FT in test_float_types()
@@ -128,6 +128,6 @@ end
     microphysics = SaturationAdjustment()
     model = AtmosphereModel(grid; microphysics)
 
-    @test_throws ErrorException NumberConcentration(model, :rain)
+    @test_throws ErrorException number_concentration(model, :rain)
     @test_throws ErrorException NumberConcentrationField(model, :rain)
 end
