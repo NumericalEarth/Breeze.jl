@@ -74,6 +74,7 @@ using Oceananigans.Units
 using Oceananigans.Grids: znodes
 
 using CairoMakie
+using CUDA
 using Printf
 
 # ## Domain and grid
