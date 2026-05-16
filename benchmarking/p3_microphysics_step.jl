@@ -17,13 +17,7 @@ using Oceananigans: Oceananigans, RectilinearGrid, CPU, GPU, Periodic, Bounded
 using Oceananigans.Architectures: architecture
 using Printf
 using Statistics
-
-const HAS_CUDA = try
-    using CUDA
-    CUDA.functional()
-catch
-    false
-end
+using CUDA: CUDA
 
 # ----------------------------------------------------------------------
 # Background atmosphere helpers (mirrors examples/splitting_supercell_p3.jl)
@@ -162,7 +156,7 @@ function main()
     println("Grid: $Nx × $Ny × $Nz ($(ncells) cells)\n")
 
     archs = Tuple{Any, String}[(CPU(), "CPU")]
-    if HAS_CUDA
+    if CUDA.functional()
         push!(archs, (GPU(), "GPU"))
     else
         @info "CUDA not functional — skipping GPU benchmark"
