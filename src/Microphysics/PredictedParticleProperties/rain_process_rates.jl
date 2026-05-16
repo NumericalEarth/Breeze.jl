@@ -271,7 +271,7 @@ end
     #   dm/dt per drop = 4π × C × f_v × (S-1)/Φ,  C = D/2 (spherical capacitance)
     #   dq^r/dt = N_0 × ∫ 4π × (D/2) × f_v × exp(-λD) dD × (S-1)/Φ
     #           = 2π × N_0 × I_evap × (S-1) / Φ,  I_evap = ∫ D × f_v × exp(-λD) dD
-    return FT(2π) * N_0 * I_evap * (S - 1) / thermodynamic_factor
+    return 2 * FT(π) * N_0 * I_evap * (S - 1) / thermodynamic_factor
 end
 
 """

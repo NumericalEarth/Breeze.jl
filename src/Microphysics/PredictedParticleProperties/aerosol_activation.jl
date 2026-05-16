@@ -246,7 +246,7 @@ where ``m_{\\text{seed}} = (4\\pi/3) \\rho_w (10^{-6})^3`` is a 1 μm radius dro
     ncnuc = max(0, N_activated - nᶜˡ) / aerosol.activation_timescale
 
     # Seed droplet mass (1 μm radius)
-    seed_mass = FT(4π / 3) * FT(1000) * FT(1e-18)
+    seed_mass = 4 * FT(π) / 3 * FT(1000) * FT(1e-18)
     qcnuc = ncnuc * seed_mass
 
     # Only activate when supersaturated (Fortran threshold: sup_cld > 1e-6)

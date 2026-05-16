@@ -728,7 +728,7 @@ function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ
 
     # Fortran applies 2π/Lf only to the latent term; the sensible-conduction
     # term uses the capm convention directly.
-    qwgrth = C_fv * (Q_sensible + FT(2π) * Q_latent / L_f) * nⁱ_eff
+    qwgrth = C_fv * (Q_sensible + 2 * FT(π) * Q_latent / L_f) * nⁱ_eff
 
     return ifelse(below_freezing, clamp_positive(qwgrth), zero(FT))
 end
@@ -813,7 +813,7 @@ function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, co
 
     # Only refreeze when net heat balance favors it. As in the Fortran wet-growth
     # and refreezing paths, 2π/Lf multiplies only the latent-diffusion term.
-    dm_dt_refrz = clamp_positive(C_fv * (Q_sensible + FT(2π) * Q_latent / L_f))
+    dm_dt_refrz = clamp_positive(C_fv * (Q_sensible + 2 * FT(π) * Q_latent / L_f))
 
     refrz_rate = nⁱ_eff * dm_dt_refrz
 

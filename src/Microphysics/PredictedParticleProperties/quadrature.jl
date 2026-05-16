@@ -31,11 +31,11 @@ function chebyshev_gauss_nodes_weights(FT::Type{<:AbstractFloat}, n::Int)
     weights = zeros(FT, n)
 
     for i in 1:n
-        x = cos(FT((2i - 1) * π / (2n)))
+        x = cos(FT((2i - 1) * FT(π) / (2n)))
         nodes[i] = x
         # Chebyshev–Gauss type 1 computes ∫ f(x)/√(1-x²) dx with weight π/n.
         # For regular integrals ∫ f(x) dx, multiply by √(1-x²).
-        weights[i] = FT(π / n) * sqrt(1 - x^2)
+        weights[i] = FT(π) / n * sqrt(1 - x^2)
     end
 
     return nodes, weights

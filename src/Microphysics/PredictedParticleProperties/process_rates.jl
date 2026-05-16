@@ -542,7 +542,7 @@ for ``r = 1`` μm. The rate is limited by the available supersaturation.
     prp = p3.process_rates
 
     # Mass of a newly formed cloud droplet (Fortran cons7: radius 1 μm)
-    cons7 = FT(4π / 3 * 1000 * (1e-6)^3)
+    cons7 = FT(4 * FT(π) / 3 * 1000 * (1e-6)^3)
 
     # Target cloud mass for prescribed droplet concentration
     target_qc = Nᶜ / ρ * cons7
@@ -692,7 +692,7 @@ function ventilation_enhanced_deposition(p3, qⁱ, qʷⁱ, nⁱ, qᵛ, qᵛ⁺�
     # Uses 2π (not 4π) because the ventilation integral stores capm = cap × D
     # (P3 Fortran convention), which is 2× the physical capacitance C = D/2.
     # The product 2π × capm = 2π × 2C = 4πC is physically correct.
-    dm_dt = FT(2π) * C_fv * (S_i - 1) / (Γⁱ * thermodynamic_factor)
+    dm_dt = 2 * FT(π) * C_fv * (S_i - 1) / (Γⁱ * thermodynamic_factor)
 
     # Scale by number concentration
     dep_rate = nⁱ_eff * dm_dt
@@ -777,7 +777,7 @@ end
     cloud = diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
     cdist = cloud.nᶜˡ * (cloud.μ_c + 1) / max(cloud.λ_c, FT(1e-30))
     active = qᶜˡ >= p3.minimum_mass_mixing_ratio
-    return ifelse(active, FT(2π) * ρ * D_v * cdist, zero(FT))
+    return ifelse(active, 2 * FT(π) * ρ * D_v * cdist, zero(FT))
 end
 
 @inline function rain_condensation_epsilon(p3, qʳ, nʳ, ρ, transport)
@@ -794,7 +794,7 @@ end
     Sc_cbrt = cbrt(transport.nu / max(transport.D_v, FT(1e-10)))
     inv_sqrt_nu = 1 / sqrt(max(transport.nu, FT(1e-10)))
     I_evap = I_const + FT(RAIN_F2R) * Sc_cbrt * inv_sqrt_nu * I_VD
-    epsilon_r = FT(2π) * N₀ * ρ * transport.D_v * I_evap
+    epsilon_r = 2 * FT(π) * N₀ * ρ * transport.D_v * I_evap
 
     return ifelse(active, epsilon_r, zero(FT))
 end
@@ -819,7 +819,7 @@ end
 
     # Fortran P3 computes the raw inverse relaxation coefficient here. The
     # psychrometric correction is applied later through the coupled `ξˡ` / `ξⁱ` factor.
-    return FT(2π) * ρ * D_v * nⁱ_eff * C_fv
+    return 2 * FT(π) * ρ * D_v * nⁱ_eff * C_fv
 end
 
 # Dry-ice relaxation coefficient (Fortran `epsi(iice)`): active only when liquid
@@ -2374,7 +2374,7 @@ to the cloud mass they consume, following the Fortran `nc` budget structure.
     # Nᶜ is per-volume [#/m³]; dividing by ρ gives per-mass nᶜˡ [#/kg],
     # matching Fortran's nc/qc → [#/kg/s] when multiplied by mass rates.
     number_per_mass = safe_divide(Nᶜ, ρ * qᶜˡ, zero(FT))
-    seed_drop_mass = FT(4π / 3) * prp.liquid_water_density * FT(1e-18)
+    seed_drop_mass = 4 * FT(π) / 3 * prp.liquid_water_density * FT(1e-18)
     activation_number = ifelse(iszero(rates.ccn_activation_number),
                                rates.ccn_activation_mass / seed_drop_mass,
                                rates.ccn_activation_number)

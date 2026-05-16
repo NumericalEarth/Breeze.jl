@@ -111,7 +111,7 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     # Melting rate per particle (negative dm/dt → positive melt rate)
     # Uses 2π (not 4π) because ventilation integral stores capm = cap × D
     # (P3 Fortran convention), which is 2× the physical capacitance.
-    dm_dt_melt = FT(2π) * C_fv * Q_total / L_f
+    dm_dt_melt = 2 * FT(π) * C_fv * Q_total / L_f
 
     # Clamp to positive (only melting, not refreezing here)
     dm_dt_melt = clamp_positive(dm_dt_melt)

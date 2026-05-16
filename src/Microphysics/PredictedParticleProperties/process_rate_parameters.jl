@@ -226,7 +226,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Reference density for rain fall speed correction (P=1000 hPa, T=0°C)
         # computed from Breeze's internal dry-air gas constant.
         reference_air_density = 100000 / (dry_air_gas_constant(ThermodynamicConstants()) * 273.15),
-        nucleated_ice_mass = 4π/3 * 900 * (1e-6)^3,  # Fortran mi0: sphere of radius 1 μm, ρ=900 kg/m³ [kg]
+        nucleated_ice_mass = 4 * FT(π) / 3 * 900 * (1e-6)^3,  # Fortran mi0: sphere of radius 1 μm, ρ=900 kg/m³ [kg]
         freezing_temperature = 273.15,
 
         # Rain autoconversion
@@ -298,7 +298,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # (Fortran: 35.e+4 * 1000. — the ×1000 kg→g conversion is baked in)
         splintering_rate = 3.5e8,
         # C6: Fortran Dinit_HM = 10e-6 m; mass = π/6 × 900 × (10e-6)³ = 4.712e-13 kg
-        splintering_crystal_mass = π/6 * 900 * (10e-6)^3,
+        splintering_crystal_mass = FT(π) / 6 * 900 * (10e-6)^3,
         # Fortran P3 v5.5.0: Dmin_HM = 250e-6 (nCat=1) or 1000e-6 (nCat>1)
         splintering_diameter_threshold = 250e-6,
         # Cloud-riming splintering scale: 1.0 includes (nCat=1), 0.0 excludes (nCat>1).
@@ -339,7 +339,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         velocity_ratio_reflectivity_to_mass = 1.2,
 
         # Initial rain drop
-        initial_rain_drop_mass = 4π/3 * 1000 * (25e-6)^3,  # Fortran P3 v5.5.0: 25 μm radius drop [kg]
+        initial_rain_drop_mass = 4 * FT(π) / 3 * 1000 * (25e-6)^3,  # Fortran P3 v5.5.0: 25 μm radius drop [kg]
 
         # Barklie-Gokhale nucleation coefficient
         immersion_freezing_nucleation_coefficient = 2.0,
