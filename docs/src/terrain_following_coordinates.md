@@ -76,11 +76,11 @@ and reviewed in [Durran (2010)](@cite Durran2010):
 ### Contravariant vertical velocity
 
 Vertical transport through ``\zeta``-surfaces is governed by the **contravariant vertical
-velocity** ``\tilde{\Omega}``, not the Cartesian vertical velocity ``w``. The contravariant
+velocity** ``\tilde{w}``, not the Cartesian vertical velocity ``w``. The contravariant
 velocity is the component of motion normal to the (tilted) coordinate surfaces:
 
 ```math
-\tilde{\Omega} = w
+\tilde{w} = w
     - \left(\frac{\partial z}{\partial x}\right)_\zeta u
     - \left(\frac{\partial z}{\partial y}\right)_\zeta v .
 ```
@@ -98,7 +98,7 @@ The slopes decay linearly from their surface values to zero at the model top. Si
 the contravariant vertical momentum is
 
 ```math
-\rho \tilde{\Omega} = \rho w
+\rho \tilde{w} = \rho w
     - \left(\frac{\partial z}{\partial x}\right)_\zeta \rho u
     - \left(\frac{\partial z}{\partial y}\right)_\zeta \rho v .
 ```
@@ -121,12 +121,12 @@ be explicitly subtracted.
 ### Continuity equation
 
 The continuity equation in terrain-following coordinates replaces the Cartesian vertical
-momentum ``\rho w`` with the contravariant vertical momentum ``\rho \tilde{\Omega}``:
+momentum ``\rho w`` with the contravariant vertical momentum ``\rho \tilde{w}``:
 
 ```math
 \partial_t \rho + \frac{\partial (\rho u)}{\partial x}
                 + \frac{\partial (\rho v)}{\partial y}
-                + \frac{\partial (\rho \tilde{\Omega})}{\partial \zeta} = 0 .
+                + \frac{\partial (\rho \tilde{w})}{\partial \zeta} = 0 .
 ```
 
 The Jacobian of the coordinate transformation enters implicitly through the modified
@@ -141,7 +141,7 @@ for vertical transport:
 \partial_t (\rho c) + \boldsymbol{\nabla}_\zeta \boldsymbol{\cdot} (\rho c \, \tilde{\boldsymbol{U}}) = S_c ,
 ```
 
-where ``\tilde{\boldsymbol{U}} = (u, v, \tilde{\Omega})``. This is handled automatically
+where ``\tilde{\boldsymbol{U}} = (u, v, \tilde{w})``. This is handled automatically
 by the transport dispatch mechanism described below.
 
 ## Implementation
@@ -182,9 +182,9 @@ model.dynamics.terrain_metrics
 
 When `terrain_metrics` is present, the model automatically:
 
-- Computes ``\tilde{\Omega}`` and ``\rho \tilde{\Omega}`` as auxiliary fields
+- Computes ``\tilde{w}`` and ``\rho \tilde{w}`` as auxiliary fields
   during each state update.
-- Uses ``\tilde{\Omega}`` in place of ``w`` for vertical transport of momentum,
+- Uses ``\tilde{w}`` in place of ``w`` for vertical transport of momentum,
   scalars, and density (via the `transport_velocities` / `advecting_momentum`
   dispatch mechanism).
 - Corrects horizontal pressure gradients with the terrain slope terms.
@@ -197,9 +197,9 @@ The terrain corrections are injected into the existing tendency machinery throug
 overloadable functions:
 
 - `transport_velocities(model)`: Returns `(u, v, w)` for standard models or
-  `(u, v, Ω̃)` for terrain-following models.
+  `(u, v, w̃)` for terrain-following models.
 - `advecting_momentum(model)`: Returns `(ρu, ρv, ρw)` for z-coordinate models or
-  `(ρu, ρv, ρΩ̃)` for terrain-following models, where `ρΩ̃` is the contravariant
+  `(ρu, ρv, ρw̃)` for terrain-following models, where `ρw̃` is the contravariant
   vertical momentum.
 
 The momentum and scalar tendency kernels use these transport tuples for advective fluxes,

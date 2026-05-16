@@ -8,7 +8,7 @@ using Oceananigans.Utils: prettysummary
 #####   (∂z/∂x)_ζ = (∂h/∂x) * (1 - ζ / z_top)
 #####
 ##### These metric terms are needed for:
-##### 1. Computing the contravariant vertical velocity Ω̃
+##### 1. Computing the contravariant vertical velocity w̃
 ##### 2. Correcting horizontal pressure gradients
 #####
 
@@ -78,21 +78,27 @@ Fields
 - `z_top`: Height of the model top (top of the reference coordinate)
 - `pressure_gradient_stencil`: Stencil type for the terrain-corrected horizontal
   pressure gradient ([`SlopeOutsideInterpolation`](@ref) or [`SlopeInsideInterpolation`](@ref))
+- `flat`: `Val(true)` when the supplied topography is identically zero.
 """
-struct TerrainMetrics{H, SX, SY, FT, PG}
+struct TerrainMetrics{H, SX, SY, FT, PG, F}
     topography :: H
     ∂x_h :: SX
     ∂y_h :: SY
     z_top :: FT
     pressure_gradient_stencil :: PG
+    flat :: F
 end
+
+TerrainMetrics(topography, ∂x_h, ∂y_h, z_top, pressure_gradient_stencil) =
+    TerrainMetrics(topography, ∂x_h, ∂y_h, z_top, pressure_gradient_stencil, Val(false))
 
 Adapt.adapt_structure(to, m::TerrainMetrics) =
     TerrainMetrics(adapt(to, m.topography),
                    adapt(to, m.∂x_h),
                    adapt(to, m.∂y_h),
                    m.z_top,
-                   m.pressure_gradient_stencil)
+                   m.pressure_gradient_stencil,
+                   m.flat)
 
 Base.summary(tf::TerrainMetrics) = "TerrainMetrics for $(summary(tf.topography)) using $(summary(tf.pressure_gradient_stencil))"
 
@@ -102,7 +108,8 @@ function Base.show(io::IO, tm::TerrainMetrics)
     print(io, "├── ∂x_h: ", prettysummary(tm.∂x_h), '\n')
     print(io, "├── ∂y_h: ", prettysummary(tm.∂y_h), '\n')
     print(io, "├── z_top: ", prettysummary(tm.z_top), '\n')
-    print(io, "└── pressure_gradient_stencil: ", prettysummary(tm.pressure_gradient_stencil))
+    print(io, "├── pressure_gradient_stencil: ", prettysummary(tm.pressure_gradient_stencil), '\n')
+    print(io, "└── flat: ", tm.flat isa Val{true})
 end
 
 """

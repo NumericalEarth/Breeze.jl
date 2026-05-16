@@ -12,6 +12,7 @@ using Oceananigans.TimeSteppers:
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, microphysics_model_update!
+using Breeze.TerrainFollowingDiscretization: TerrainMetrics
 
 using Breeze.CompressibleEquations:
     CompressibleDynamics,
@@ -21,6 +22,8 @@ using Breeze.CompressibleEquations:
     acoustic_rk3_substep_loop!,
     prepare_acoustic_cache!,
     freeze_linearization_state!
+
+const FlatTerrainMetrics = TerrainMetrics{<:Any, <:Any, <:Any, <:Any, <:Any, Val{true}}
 
 """
 $(TYPEDEF)
@@ -242,6 +245,22 @@ end
 #####
 
 function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
+                                                                      <:Any, <:Any, <:AcousticRungeKutta3})
+    sub = model.timestepper.substepper
+    return (u = sub.time_averaged_velocities.u,
+            v = sub.time_averaged_velocities.v,
+            w = sub.time_averaged_velocities.w)
+end
+
+function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics},
+                                                                      <:Any, <:Any, <:AcousticRungeKutta3})
+    sub = model.timestepper.substepper
+    return (u = sub.time_averaged_velocities.u,
+            v = sub.time_averaged_velocities.v,
+            w = sub.time_averaged_velocities.w)
+end
+
+function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:FlatTerrainMetrics},
                                                                       <:Any, <:Any, <:AcousticRungeKutta3})
     sub = model.timestepper.substepper
     return (u = sub.time_averaged_velocities.u,

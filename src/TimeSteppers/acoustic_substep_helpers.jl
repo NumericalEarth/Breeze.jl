@@ -7,13 +7,23 @@ using Oceananigans.TimeSteppers: implicit_step!
 
 using Breeze.AtmosphereModels:
     AtmosphereModels,
+    AtmosphereModel,
     SlowTendencyMode,
+    advecting_momentum,
     dynamics_density,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
     compute_dynamics_tendency!,
     specific_prognostic_moisture
+
+using Breeze.CompressibleEquations: CompressibleDynamics
+using Breeze.TerrainFollowingDiscretization: TerrainMetrics
+
+const NonFlatTerrainMetrics = TerrainMetrics{<:Any, <:Any, <:Any, <:Any, <:Any, Val{false}}
+
+const NonFlatTerrainCompressibleAcousticModel =
+    AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:NonFlatTerrainMetrics}}
 
 #####
 ##### Slow momentum tendencies
@@ -23,6 +33,12 @@ using Breeze.AtmosphereModels:
 ##### linearized form inside the substep loop, so the slow tendency carries
 ##### only advection, Coriolis, closure, and forcing.
 #####
+
+slow_momentum_advection_momentum(model) = model.momentum
+
+function slow_momentum_advection_momentum(model::NonFlatTerrainCompressibleAcousticModel)
+    return advecting_momentum(model)
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -45,7 +61,7 @@ function compute_slow_momentum_tendencies!(model)
         model.velocities,
         model.closure,
         model.closure_fields,
-        model.momentum,
+        slow_momentum_advection_momentum(model),
         model.coriolis,
         model.clock,
         model_fields)
@@ -75,6 +91,15 @@ end
 ##### Slow scalar tendencies (density and thermodynamic variable)
 #####
 
+slow_thermodynamic_velocities(model) = model.velocities
+
+function slow_thermodynamic_velocities(model::NonFlatTerrainCompressibleAcousticModel)
+    u = model.velocities.u
+    v = model.velocities.v
+    w̃ = model.dynamics.contravariant_vertical_velocity
+    return (; u, v, w=w̃)
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -93,17 +118,19 @@ function compute_slow_scalar_tendencies!(model)
     # substepper's time-averaged velocity here creates a closed feedback
     # loop (Gⁿ.ρθ → ρθ′ → PGF → (ρu)′ → time-averaged velocity →
     # next stage's Gⁿ.ρθ) that destabilizes the rest atmosphere; T4
-    # blows up at production Δt. The dynamics-transport split applies
-    # only to **moisture, tracers, chemistry, TKE** — those tendencies
-    # are computed in `update_state!`'s `compute_tendencies!` via
-    # `transport_velocities(model)`, which the `AcousticRungeKutta3`
-    # override routes to the substepper's time-averaged velocity.
+    # blows up at production Δt. For nonflat terrain, the same current
+    # predictor is used horizontally while vertical scalar transport uses
+    # the current terrain-following `w̃`. The dynamics-transport split applies
+    # only to **moisture, tracers, chemistry, TKE** — those tendencies are
+    # computed in `update_state!`'s `compute_tendencies!` via
+    # `transport_velocities(model)`, which the `AcousticRungeKutta3` override
+    # routes to the substepper's time-averaged velocity.
     common_args = (
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
         specific_prognostic_moisture(model),
-        model.velocities,
+        slow_thermodynamic_velocities(model),
         model.microphysics,
         model.microphysical_fields,
         model.closure,

@@ -151,9 +151,11 @@ Used by
 horizontal momentum perturbation components ``(ρu)′`` and ``(ρv)′`` pick
 up an explicit correction proportional to the horizontal gradient of
 ``D``. If `damp_vertical = true`, the vertical component is folded
-implicitly into the column tridiag as a Laplacian on ``(ρw)′``. By
-default, `damp_vertical = false` and vertical acoustic damping comes from
-the off-centered implicit solve.
+implicitly into the column tridiag as a Laplacian on the acoustic vertical
+momentum perturbation: ``(ρw)′`` for height-coordinate dynamics and
+``(ρ\tilde{w})′`` for terrain-following dynamics. By default,
+`damp_vertical = false` and vertical acoustic damping comes from the
+off-centered implicit solve.
 
 Per-substep momentum correction (Klemp, Skamarock & Ha 2018 eq. 36, MPAS form):
 
@@ -199,7 +201,8 @@ Fields
   ``γ_y = α Δy^2 / Δτ``). Setting `length_scale = ℓ` forces a fixed
   ``γ = α \\, ℓ² / Δτ`` in both horizontal directions.
 - `damp_vertical`: If `true`, the vertical part of the divergence
-  damping is folded into the column tridiag (a Laplacian on `(ρw)′`).
+  damping is folded into the column tridiag (a Laplacian on `(ρw)′` in
+  height coordinates or `(ρw̃)′` in terrain-following coordinates).
   If `false` (default), no extra vertical damping is applied — the
   vertical acoustic modes are damped solely by the off-centering of the
   implicit pressure-gradient solve (``\\omega > 0.5``), which Klemp et
@@ -368,9 +371,12 @@ end
 """
 $(TYPEDEF)
 
-Implicit upper Rayleigh sponge for the substepper inner loop. Damps ``(ρw)′``
-toward zero inside a layer of thickness `depth` below the model lid, with
-peak damping rate `damping_rate` (in 1/s) at the lid scaled by `ramp(z)`.
+Implicit upper Rayleigh sponge for the substepper inner loop. Damps the
+acoustic vertical momentum perturbation toward zero inside a layer of thickness
+`depth` below the model lid, with peak damping rate `damping_rate` (in 1/s) at
+the lid scaled by `ramp(z)`. The damped variable is ``(ρw)′`` for
+height-coordinate dynamics and ``(ρ\tilde{w})′`` for terrain-following
+dynamics.
 
 The damping is applied **inside the column tridiag** as a CN-weighted
 contribution (paralleling the existing implicit divergence-damping
@@ -400,7 +406,8 @@ classic ``\\sin^2`` profile.
     just below the sponge, prefer ``\\text{rate} ≈ 0.1`` and a deeper
     layer.
 
-- `depth`: sponge-layer thickness below the lid, in metres. Default `5e3`.
+- `depth`: sponge-layer thickness below the lid, in metres along the
+  reference vertical coordinate. Default `5e3`.
 
   Should span at least ~10 grid cells in the vertical to give the smooth
   profile room to absorb without aliasing; for ``Δz ≈ 1\\,\\text{km}`` the
@@ -412,8 +419,9 @@ classic ``\\sin^2`` profile.
   [`LinearRamp()`](@ref). Custom shapes are supported by subtyping
   `AbstractRamp` and defining `(::MyRamp)(z, sponge_top, depth)`.
 
-The ramp is z-only (no horizontal variation), so the sponge does not
-break zonal symmetry.
+The ramp depends only on the reference vertical coordinate (no horizontal
+variation), so the sponge does not break zonal symmetry and remains uniform
+over terrain-following grids.
 """
 struct UpperSponge{FT, R <: AbstractRamp}
     damping_rate :: FT

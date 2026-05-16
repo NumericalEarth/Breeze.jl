@@ -1,6 +1,18 @@
 using Breeze
+using Breeze.AtmosphereModels: transport_velocities, x_pressure_gradient
+using Breeze.CompressibleEquations: assemble_slow_vertical_momentum_tendency!,
+                                    compute_acoustic_substeps,
+                                    compute_contravariant_velocity!,
+                                    freeze_linearization_state!,
+                                    outer_step_start_transport_velocities,
+                                    sponge_rhs,
+                                    sponge_term_diag
+using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
+                           compute_slow_scalar_tendencies!
 using Oceananigans
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: MutableVerticalDiscretization, rnode, xnode, znode
+using Oceananigans.Operators: divᶜᶜᶜ
 using Breeze.Thermodynamics: hydrostatic_pressure
 using Test
 
@@ -184,20 +196,656 @@ using Test
         U₀ = 10.0
         set!(model, ρ=ρᵢ, θ=θ₀, u=U₀)
 
-        # Take one step to trigger computation of Ω̃
+        # Take one step to trigger computation of w̃
         time_step!(model, 0.1)
 
-        # Ω̃ should be nonzero near the mountain (terrain slopes are nonzero)
+        # w̃ should be nonzero near the mountain (terrain slopes are nonzero)
         # and near zero far from the mountain (terrain slopes ≈ 0)
-        Ω̃ = model.dynamics.contravariant_vertical_velocity
-        @test maximum(abs, Ω̃) > 0
+        w̃ = model.dynamics.contravariant_vertical_velocity
+        @test maximum(abs, w̃) > 0
 
-        # At the model top (k = Nz+1), terrain slopes decay to zero so Ω̃ ≈ w
+        # At the model top (k = Nz+1), terrain slopes decay to zero so w̃ ≈ w
         # (the decay factor is 1 - ζ/z_top = 0 at the top)
         w = model.velocities.w
         for i in 1:Nx
-            @test Ω̃[i, 1, Nz+1] ≈ w[i, 1, Nz+1] atol=1e-10
+            @test w̃[i, 1, Nz+1] ≈ w[i, 1, Nz+1] atol=1e-10
         end
+    end
+
+    @testset "Zero terrain recovers Cartesian vertical transport" begin
+        Nx, Nz = 8, 6
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        metrics = follow_terrain!(grid, (x, y) -> 0)
+        @test metrics.flat isa Val{true}
+
+        dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+        model = AtmosphereModel(grid; dynamics)
+
+        constants = model.thermodynamic_constants
+        θ₀ = 300.0
+        p₀ = 101325.0
+        pˢᵗ = 1e5
+        ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
+
+        set!(model, ρ=ρᵢ, θ=θ₀, u=10, w=1)
+        compute_contravariant_velocity!(model)
+
+        w̃ = model.dynamics.contravariant_vertical_velocity
+        ρw̃ = model.dynamics.contravariant_vertical_momentum
+
+        @test maximum(abs, interior(w̃) .- interior(model.velocities.w)) == 0
+        @test maximum(abs, interior(ρw̃) .- interior(model.momentum.ρw)) == 0
+        @test transport_velocities(model) === model.velocities
+        @test outer_step_start_transport_velocities(model) === model.velocities
+    end
+
+    @testset "Split-explicit zero terrain matches height coordinates" begin
+        Nx, Nz = 8, 6
+        Lx, Lz = 10000.0, 5000.0
+
+        function flat_split_explicit_model(terrain; damping=NoDivergenceDamping())
+            z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+            grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+                                   x=(-Lx/2, Lx/2), z=z_faces,
+                                   topology=(Periodic, Flat, Bounded))
+            metrics = terrain ? follow_terrain!(grid, (x, y) -> 0) : nothing
+            time_discretization = SplitExplicitTimeDiscretization(substeps=6,
+                                                                  damping=damping)
+            dynamics = metrics === nothing ?
+                       CompressibleDynamics(time_discretization) :
+                       CompressibleDynamics(time_discretization; terrain_metrics=metrics)
+            model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+            set!(model,
+                 ρ=1,
+                 θ=300,
+                 u=(x, z) -> 0.1 * sin(2π * x / Lx),
+                 w=(x, z) -> 0.01 * sin(π * z / Lz))
+            return model
+        end
+
+        height_substeps = compute_acoustic_substeps(flat_split_explicit_model(false).grid,
+                                                    0.01, ThermodynamicConstants(), 0.5)
+        terrain_substeps = compute_acoustic_substeps(flat_split_explicit_model(true).grid,
+                                                     0.01, ThermodynamicConstants(), 0.5)
+        @test height_substeps == terrain_substeps
+
+        function assert_matching_prognostics(height_model, terrain_model)
+            height_ρθ = Breeze.AtmosphereModels.thermodynamic_density(height_model.formulation)
+            terrain_ρθ = Breeze.AtmosphereModels.thermodynamic_density(terrain_model.formulation)
+
+            @test maximum(abs, interior(height_model.dynamics.density) .-
+                               interior(terrain_model.dynamics.density)) == 0
+            @test maximum(abs, interior(height_ρθ) .- interior(terrain_ρθ)) == 0
+            @test maximum(abs, interior(height_model.momentum.ρu) .-
+                               interior(terrain_model.momentum.ρu)) == 0
+            @test maximum(abs, interior(height_model.momentum.ρv) .-
+                               interior(terrain_model.momentum.ρv)) == 0
+            @test maximum(abs, interior(height_model.momentum.ρw) .-
+                               interior(terrain_model.momentum.ρw)) == 0
+        end
+
+        # One-step increment equivalence.
+        height_model = flat_split_explicit_model(false)
+        terrain_model = flat_split_explicit_model(true)
+        time_step!(height_model, 0.01)
+        time_step!(terrain_model, 0.01)
+        assert_matching_prognostics(height_model, terrain_model)
+
+        # Ten-step trajectory equivalence.
+        height_model = flat_split_explicit_model(false)
+        terrain_model = flat_split_explicit_model(true)
+        for _ in 1:10
+            time_step!(height_model, 0.01)
+            time_step!(terrain_model, 0.01)
+        end
+        assert_matching_prognostics(height_model, terrain_model)
+
+        # The vertical divergence damping path modifies the implicit column
+        # coefficients; it should still reduce exactly to height coordinates
+        # when the terrain is flat.
+        damping = ThermalDivergenceDamping(coefficient=0.05, damp_vertical=true)
+        height_model = flat_split_explicit_model(false; damping)
+        terrain_model = flat_split_explicit_model(true; damping)
+        time_step!(height_model, 0.01)
+        time_step!(terrain_model, 0.01)
+        assert_matching_prognostics(height_model, terrain_model)
+    end
+
+    @testset "Terrain metric identities for constant fields" begin
+        Nx, Nz = 16, 8
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        h(x, y) = 200 * exp(-x^2 / 2000^2)
+        metrics = follow_terrain!(grid, h)
+        dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+        model = AtmosphereModel(grid; dynamics)
+
+        set!(model, ρ=1, θ=300, u=1, w=0)
+        compute_contravariant_velocity!(model)
+
+        maximum_interior_divergence = 0.0
+        for i in 1:Nx, k in 2:Nz
+            divergence = divᶜᶜᶜ(i, 1, k, grid,
+                                 model.momentum.ρu,
+                                 model.momentum.ρv,
+                                 model.dynamics.contravariant_vertical_momentum)
+            maximum_interior_divergence = max(maximum_interior_divergence, abs(divergence))
+        end
+        @test maximum_interior_divergence <= 1e-12
+
+        fill!(parent(model.dynamics.pressure), 100000)
+        maximum_pressure_gradient = 0.0
+        for i in 1:Nx, k in 1:Nz
+            pressure_gradient = x_pressure_gradient(i, 1, k, grid, model.dynamics)
+            maximum_pressure_gradient = max(maximum_pressure_gradient, abs(pressure_gradient))
+        end
+        @test maximum_pressure_gradient == 0
+
+        function terrain_pressure_gradient_error(pressure_function, expected_gradient, stencil)
+            z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+            grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                                   x=(-Lx/2, Lx/2), z=z_faces,
+                                   topology=(Periodic, Flat, Bounded))
+            metrics = follow_terrain!(grid, h; pressure_gradient_stencil=stencil)
+            dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+            model = AtmosphereModel(grid; dynamics)
+
+            for i in 1:Nx, k in 1:Nz
+                x = xnode(i, grid, Center())
+                z = znode(i, 1, k, grid, Center(), Center(), Center())
+                model.dynamics.pressure[i, 1, k] = pressure_function(x, z)
+            end
+
+            maximum_error = 0.0
+            for i in 2:Nx-1, k in 2:Nz-1
+                pressure_gradient = x_pressure_gradient(i, 1, k, grid, model.dynamics)
+                maximum_error = max(maximum_error, abs(pressure_gradient - expected_gradient))
+            end
+
+            return maximum_error
+        end
+
+        for stencil in (SlopeOutsideInterpolation(), SlopeInsideInterpolation())
+            @test terrain_pressure_gradient_error((x, z) -> x, 1, stencil) == 0
+        end
+
+        # For p = z, the physical horizontal pressure gradient at constant z is zero.
+        # The outside-interpolation stencil delegates to Oceananigans' generalized
+        # derivative and cancels this manufactured metric term to roundoff.
+        @test terrain_pressure_gradient_error((x, z) -> z, 0,
+                                              SlopeOutsideInterpolation()) <= 1e-12
+
+        function slope_inside_metric_cancellation_error(Nx, Nz)
+            Lx, Lz = 10000.0, 5000.0
+            z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+            grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                                   x=(-Lx/2, Lx/2), z=z_faces,
+                                   topology=(Periodic, Flat, Bounded))
+
+            h(x, y) = 200 * exp(-x^2 / 2000^2)
+            metrics = follow_terrain!(grid, h;
+                                      pressure_gradient_stencil = SlopeInsideInterpolation())
+            dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+            model = AtmosphereModel(grid; dynamics)
+
+            for i in 1:Nx, k in 1:Nz
+                z = znode(i, 1, k, grid, Center(), Center(), Center())
+                model.dynamics.pressure[i, 1, k] = z
+            end
+
+            maximum_error = 0.0
+            for i in 3:Nx-2, k in 3:Nz-2
+                pressure_gradient = x_pressure_gradient(i, 1, k, grid, model.dynamics)
+                maximum_error = max(maximum_error, abs(pressure_gradient))
+            end
+
+            return maximum_error
+        end
+
+        coarse_error = slope_inside_metric_cancellation_error(16, 8)
+        medium_error = slope_inside_metric_cancellation_error(32, 16)
+        fine_error = slope_inside_metric_cancellation_error(64, 32)
+
+        @test medium_error < coarse_error / 2
+        @test fine_error < medium_error / 2
+
+        function terrain_divergence_error(Nx, Nz)
+            Lx, Lz = 10000.0, 5000.0
+            h₀ = 200.0
+            a = 2000.0
+
+            h(x) = h₀ * exp(-x^2 / a^2)
+            ∂x_h(x) = -2 * x / a^2 * h(x)
+            σ(x) = (Lz - h(x)) / Lz
+            ∂x_σ(x) = -∂x_h(x) / Lz
+
+            z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+            grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                                   x=(-Lx/2, Lx/2), z=z_faces,
+                                   topology=(Periodic, Flat, Bounded))
+            follow_terrain!(grid, (x, y) -> h(x))
+
+            ρu = XFaceField(grid)
+            ρv = YFaceField(grid)
+            ρw̃ = ZFaceField(grid)
+
+            for i in 1:Nx+1, k in 1:Nz
+                x = xnode(i, grid, Face())
+                ρu[i, 1, k] = sin(2π * x / Lx)
+            end
+
+            for i in 1:Nx, k in 1:Nz+1
+                ζ = rnode(k, grid, Face())
+                ρw̃[i, 1, k] = cos(π * ζ / Lz)
+            end
+
+            set!(ρv, 0)
+
+            maximum_error = 0.0
+            for i in 3:Nx-2, k in 2:Nz-1
+                x = xnode(i, grid, Center())
+                ζ = rnode(k, grid, Center())
+
+                horizontal_flux = sin(2π * x / Lx)
+                horizontal_flux_gradient = (2π / Lx) * cos(2π * x / Lx)
+                vertical_flux_gradient = -(π / Lz) * sin(π * ζ / Lz)
+                expected_divergence = (∂x_σ(x) * horizontal_flux +
+                                       σ(x) * horizontal_flux_gradient +
+                                       vertical_flux_gradient) / σ(x)
+
+                divergence = divᶜᶜᶜ(i, 1, k, grid, ρu, ρv, ρw̃)
+                maximum_error = max(maximum_error, abs(divergence - expected_divergence))
+            end
+
+            return maximum_error
+        end
+
+        coarse_divergence_error = terrain_divergence_error(16, 8)
+        medium_divergence_error = terrain_divergence_error(32, 16)
+        fine_divergence_error = terrain_divergence_error(64, 32)
+
+        @test medium_divergence_error < coarse_divergence_error / 2
+        @test fine_divergence_error < medium_divergence_error / 2
+    end
+
+    @testset "Split-explicit terrain transport uses w̃" begin
+        Nx, Nz = 8, 6
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        h(x, y) = 100 * exp(-x^2 / 2000^2)
+        metrics = follow_terrain!(grid, h)
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
+                                        terrain_metrics=metrics,
+                                        reference_potential_temperature=300)
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+        set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
+
+        @test model.timestepper isa AcousticRungeKutta3
+        @test transport_velocities(model).w === model.timestepper.substepper.time_averaged_velocities.w
+
+        substepper = model.timestepper.substepper
+        freeze_linearization_state!(substepper, model)
+        compute_slow_momentum_tendencies!(model)
+        compute_slow_scalar_tendencies!(model)
+        assemble_slow_vertical_momentum_tendency!(substepper, model)
+        @test maximum(abs, interior(substepper.slow_vertical_momentum_tendency)) <= 1e-12
+
+        initial_mass = sum(interior(model.dynamics.density))
+        time_step!(model, 0.1)
+        final_mass = sum(interior(model.dynamics.density))
+
+        w̃ = model.dynamics.contravariant_vertical_velocity
+        ρw̃ = model.dynamics.contravariant_vertical_momentum
+        w̃_transport = transport_velocities(model).w
+
+        @test isfinite(maximum(abs, model.velocities.w))
+        @test isfinite(maximum(abs, w̃))
+        @test isfinite(maximum(abs, ρw̃))
+        @test isfinite(maximum(abs, w̃_transport))
+        @test maximum(abs, interior(model.velocities.w)) <= 1e-12
+        @test maximum(abs, interior(w̃)) <= 1e-12
+        @test abs(final_mass - initial_mass) / initial_mass <= 1e-13
+
+        for i in 1:Nx
+            @test w̃[i, 1, 1] == 0
+            @test ρw̃[i, 1, 1] == 0
+            @test w̃_transport[i, 1, 1] == 0
+        end
+
+        bottom_w̃ = [w̃[i, 1, 1] for i in 1:Nx]
+        bottom_ρw̃ = [ρw̃[i, 1, 1] for i in 1:Nx]
+        fill_halo_regions!(w̃, ρw̃, w̃_transport)
+        compute_contravariant_velocity!(model)
+
+        @test sum(abs, [ρw̃[i, 1, 1] for i in 1:Nx]) / initial_mass <= 1e-13
+        @test [w̃[i, 1, 1] for i in 1:Nx] == bottom_w̃
+        @test [ρw̃[i, 1, 1] for i in 1:Nx] == bottom_ρw̃
+    end
+
+    @testset "Adaptive acoustic substeps with terrain metrics" begin
+        Nx, Nz = 8, 6
+        Lx, Lz = 10000.0, 5000.0
+
+        function adaptive_grid(terrain)
+            z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+            grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+                                   x=(-Lx/2, Lx/2), z=z_faces,
+                                   topology=(Periodic, Flat, Bounded))
+            terrain && follow_terrain!(grid, (x, y) -> 100 * exp(-x^2 / 2000^2))
+            return grid
+        end
+
+        height_grid = adaptive_grid(false)
+        terrain_grid = adaptive_grid(true)
+        constants = ThermodynamicConstants()
+        Δt = 0.1
+        acoustic_cfl = 0.5
+
+        height_substeps = compute_acoustic_substeps(height_grid, Δt, constants, acoustic_cfl)
+        terrain_substeps = compute_acoustic_substeps(terrain_grid, Δt, constants, acoustic_cfl)
+        @test terrain_substeps == height_substeps
+        @test terrain_substeps ≥ 1
+
+        model_grid = adaptive_grid(false)
+        metrics = follow_terrain!(model_grid, (x, y) -> 100 * exp(-x^2 / 2000^2))
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
+                                        terrain_metrics=metrics,
+                                        reference_potential_temperature=300)
+        model = AtmosphereModel(model_grid; dynamics, timestepper=:AcousticRungeKutta3)
+        set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
+
+        @test model.timestepper.substepper.substeps === nothing
+        time_step!(model, Δt)
+        @test model.clock.iteration == 1
+        @test isfinite(maximum(abs, interior(model.velocities.w)))
+        @test maximum(abs, interior(model.velocities.w)) <= 1e-12
+    end
+
+    @testset "Split-explicit terrain acoustic stability diagnostics" begin
+        Nx, Nz = 8, 6
+        Lx, Lz = 10000.0, 5000.0
+        Δt = 2.0
+        acoustic_cfl = 0.5
+        constants = ThermodynamicConstants()
+        Rᵈ = Breeze.dry_air_gas_constant(constants)
+        cᵖᵈ = constants.dry_air.heat_capacity
+        γᵈ = cᵖᵈ / (cᵖᵈ - Rᵈ)
+        sound_speed = sqrt(γᵈ * Rᵈ * 300)
+
+        for h₀ in (0.0, 100.0, 300.0)
+            z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+            grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+                                   x=(-Lx/2, Lx/2), z=z_faces,
+                                   topology=(Periodic, Flat, Bounded))
+            metrics = follow_terrain!(grid, (x, y) -> h₀ * exp(-x^2 / 2000^2))
+
+            dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
+                                            terrain_metrics=metrics,
+                                            reference_potential_temperature=300)
+            model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+            set!(model,
+                 θ=300,
+                 ρ=model.dynamics.terrain_reference_density,
+                 u=(x, z) -> 1 + 0.1 * sin(2π * x / Lx),
+                 w=0)
+
+            Nτ = compute_acoustic_substeps(grid, Δt, constants, acoustic_cfl)
+            acoustic_CFL = (Δt / Nτ) * sound_speed / (Lx / Nx)
+            @test acoustic_CFL <= acoustic_cfl
+
+            maximum_advective_CFL = 0.0
+            maximum_contravariant_CFL = 0.0
+
+            for _ in 1:3
+                time_step!(model, Δt)
+                w̃ = model.dynamics.contravariant_vertical_velocity
+
+                advective_CFL = Δt * maximum(abs, interior(model.velocities.u)) / (Lx / Nx)
+                contravariant_CFL = Δt * maximum(abs, interior(w̃)) / (Lz / Nz)
+                maximum_advective_CFL = max(maximum_advective_CFL, advective_CFL)
+                maximum_contravariant_CFL = max(maximum_contravariant_CFL, contravariant_CFL)
+
+                @test isfinite(maximum(abs, interior(model.dynamics.density)))
+                @test isfinite(maximum(abs, interior(model.momentum.ρu)))
+                @test isfinite(maximum(abs, interior(model.momentum.ρw)))
+                @test isfinite(maximum(abs, interior(w̃)))
+            end
+
+            @test maximum_advective_CFL < acoustic_cfl
+            @test maximum_contravariant_CFL < acoustic_cfl
+        end
+    end
+
+    @testset "Cheap bell mountain-wave response smoke" begin
+        Nx, Nz = 8, 4
+        Lx, Lz = 100e3, 15e3
+        Δt = 2.0
+        U = 20.0
+        N = 0.01
+        h₀ = 1.0
+        a = 10e3
+        θ₀ = 300.0
+        p₀ = 100000.0
+        pˢᵗ = 1e5
+
+        constants = ThermodynamicConstants(Float64)
+        g = constants.gravitational_acceleration
+        cᵖᵈ = constants.dry_air.heat_capacity
+        Rᵈ = Breeze.dry_air_gas_constant(constants)
+        β = g / (Rᵈ * θ₀)
+        N² = N^2
+        k★ = sqrt(max(0, N² / U^2 - β^2 / 4))
+        horizontal_wavelength = 2π / k★
+
+        θ_of_z(z) = θ₀ * exp(N² * z / g)
+        hill(x, y) = h₀ / (1 + (x / a)^2)
+        ĥ(k) = π * a * h₀ * exp(-a * abs(k))
+        m²(k) = N² / U^2 - β^2 / 4 - k^2
+
+        function w_linear(x, z; nk = 64)
+            k_max = max(10 / a, 10 * k★)
+            k = range(0, k_max, length = nk)
+            Δk = step(k)
+
+            integral = zero(Float64)
+            for n in eachindex(k)
+                kⁿ = k[n]
+                weight = (n == firstindex(k) || n == lastindex(k)) ? 0.5 : 1.0
+                m²ⁿ = m²(kⁿ)
+                m_abs = sqrt(abs(m²ⁿ))
+                phase = ifelse(m²ⁿ >= 0,
+                               sin(m_abs * z + kⁿ * x),
+                               exp(-m_abs * z) * sin(kⁿ * x))
+                integral += weight * kⁿ * ĥ(kⁿ) * phase
+            end
+
+            return -(U / π) * exp(β * z / 2) * Δk * integral
+        end
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+        metrics = follow_terrain!(grid, hill;
+                                  pressure_gradient_stencil = SlopeInsideInterpolation())
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=0.5,
+                                                                        sponge=UpperSponge(damping_rate=0.1,
+                                                                                           depth=Lz/3));
+                                        terrain_metrics=metrics,
+                                        reference_potential_temperature=θ_of_z,
+                                        surface_pressure=p₀,
+                                        standard_pressure=pˢᵗ)
+        model = AtmosphereModel(grid; dynamics,
+                                thermodynamic_constants=constants,
+                                timestepper=:AcousticRungeKutta3)
+
+        ρ = model.dynamics.density
+        ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
+        parent(ρ) .= parent(model.dynamics.terrain_reference_density)
+        set!(ρθ, (x, z) -> θ_of_z(z))
+        parent(ρθ) .*= parent(ρ)
+        set!(model, u=U, v=0, w=0)
+
+        time_step!(model, Δt)
+
+        squared_error = 0.0
+        squared_reference = 0.0
+        maximum_w = 0.0
+        maximum_reference_w = 0.0
+        maximum_w_x = 0.0
+        maximum_reference_w_x = 0.0
+
+        for i in 1:Nx, k in 2:Nz
+            z = znode(i, 1, k, grid, Center(), Center(), Face())
+            z > 0.75Lz && continue
+            x = xnode(i, grid, Center())
+            simulated_w = model.velocities.w[i, 1, k]
+            reference_w = w_linear(x, z)
+
+            squared_error += (simulated_w - reference_w)^2
+            squared_reference += reference_w^2
+
+            if abs(simulated_w) > maximum_w
+                maximum_w = abs(simulated_w)
+                maximum_w_x = x
+            end
+
+            if abs(reference_w) > maximum_reference_w
+                maximum_reference_w = abs(reference_w)
+                maximum_reference_w_x = x
+            end
+        end
+
+        normalized_rmse = sqrt(squared_error / max(eps(), squared_reference))
+        amplitude_error = abs(maximum_w - maximum_reference_w) / max(eps(), maximum_reference_w)
+        phase_error_wavelengths = abs(maximum_w_x - maximum_reference_w_x) / horizontal_wavelength
+
+        @test isfinite(normalized_rmse)
+        @test isfinite(amplitude_error)
+        @test isfinite(phase_error_wavelengths)
+        @test maximum_w > 0
+        @test maximum_reference_w > 0
+        @test normalized_rmse < 1.2
+        @test amplitude_error < 1.0
+        @test phase_error_wavelengths < 1.0
+    end
+
+    @testset "UpperSponge uses terrain-following vertical coordinate" begin
+        Nx, Nz = 16, 8
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        h(x, y) = 500 * exp(-x^2 / 1000^2)
+        metrics = follow_terrain!(grid, h)
+
+        sponge = UpperSponge(damping_rate=0.2, depth=2000, ramp=LinearRamp())
+        δτᵐ⁺ = 3.0
+        δτˢ⁻ = 2.0
+        k = Nz
+        i_flat = 1
+        i_peak = Nx ÷ 2
+        old_ρw = ZFaceField(grid)
+        set!(old_ρw, 4)
+
+        reference_z = rnode(k, grid, Face())
+        expected_diag = δτᵐ⁺ * sponge.damping_rate *
+                        sponge.ramp(reference_z, grid.Lz, sponge.depth)
+        expected_rhs = δτˢ⁻ * sponge.damping_rate *
+                       sponge.ramp(reference_z, grid.Lz, sponge.depth) * 4
+
+        @test znode(i_flat, 1, k, grid, Center(), Center(), Face()) !=
+              znode(i_peak, 1, k, grid, Center(), Center(), Face())
+        @test sponge_term_diag(i_flat, 1, k, grid, sponge, δτᵐ⁺) ≈ expected_diag
+        @test sponge_term_diag(i_peak, 1, k, grid, sponge, δτᵐ⁺) ≈ expected_diag
+        @test sponge_rhs(i_flat, 1, k, grid, sponge, δτˢ⁻, old_ρw) ≈ expected_rhs
+        @test sponge_rhs(i_peak, 1, k, grid, sponge, δτˢ⁻, old_ρw) ≈ expected_rhs
+    end
+
+    @testset "Terrain acoustic substepper supports vertical divergence damping" begin
+        Nx, Nz = 8, 6
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+        metrics = follow_terrain!(grid, (x, y) -> 100 * exp(-x^2 / 2000^2);
+                                  pressure_gradient_stencil = SlopeInsideInterpolation())
+
+        damping = ThermalDivergenceDamping(coefficient=0.05, damp_vertical=true)
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=4,
+                                                                        damping=damping);
+                                        terrain_metrics=metrics,
+                                        reference_potential_temperature=300)
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+        set!(model,
+             θ=300,
+             ρ=model.dynamics.terrain_reference_density,
+             u=(x, z) -> 1 + 1e-3 * sin(2π * x / Lx),
+             v=0,
+             w=0)
+
+        time_step!(model, 0.1)
+        compute_contravariant_velocity!(model)
+
+        @test isfinite(maximum(abs, model.velocities.u))
+        @test isfinite(maximum(abs, model.velocities.w))
+        @test isfinite(maximum(abs, model.dynamics.contravariant_vertical_velocity))
+
+        for i in 1:Nx
+            @test model.dynamics.contravariant_vertical_velocity[i, 1, 1] == 0
+            @test model.dynamics.contravariant_vertical_momentum[i, 1, 1] == 0
+        end
+    end
+
+    @testset "Split-explicit terrain supports slope-inside pressure-gradient stencil" begin
+        Nx, Nz = 8, 6
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+        metrics = follow_terrain!(grid, (x, y) -> 100 * exp(-x^2 / 2000^2);
+                                  pressure_gradient_stencil = SlopeInsideInterpolation())
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
+                                        terrain_metrics=metrics,
+                                        reference_potential_temperature=300)
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+        set!(model,
+             θ=300,
+             ρ=model.dynamics.terrain_reference_density,
+             u=(x, z) -> 0.1 * sin(2π * x / Lx),
+             w=0)
+
+        @test model.dynamics.terrain_metrics.pressure_gradient_stencil isa SlopeInsideInterpolation
+        time_step!(model, 0.01)
+        @test model.clock.iteration == 1
+        @test isfinite(maximum(abs, interior(model.momentum.ρu)))
+        @test isfinite(maximum(abs, interior(model.dynamics.density)))
     end
 
     @testset "Terrain reference state matches continuous hydrostatic profile" begin

@@ -70,7 +70,7 @@ function follow_terrain!(grid, topography, ::BasicTerrainFollowing, pressure_gra
     h_field = CenterField(grid, indices=(:, :, 1))
 
     # Set topography values and fill halos
-    set_topography!(h_field, grid, topography)
+    is_flat = set_topography!(h_field, grid, topography)
     fill_halo_regions!(h_field)
 
     # Compute sigma and eta on the grid
@@ -87,7 +87,7 @@ function follow_terrain!(grid, topography, ::BasicTerrainFollowing, pressure_gra
 
     launch!(arch, grid, kp, _compute_terrain_slopes!, ∂x_h, ∂y_h, grid, h_field)
 
-    return TerrainMetrics(h_field, ∂x_h, ∂y_h, z_top, pressure_gradient_stencil)
+    return TerrainMetrics(h_field, ∂x_h, ∂y_h, z_top, pressure_gradient_stencil, Val(is_flat))
 end
 
 # Set topography from a function: always evaluate on CPU, then copy to device.
@@ -101,7 +101,7 @@ function set_topography!(h_field, grid, topography::Function)
     cpu_h = [topography(xnode(i, grid, Center()), ynode(j, grid, Center()))
               for i in 1:Nx, j in 1:Ny]
     copyto!(interior(h_field, :, :, 1), cpu_h)
-    return nothing
+    return all(iszero, cpu_h)
 end
 
 @kernel function _set_btf_sigma!(grid, h_field, z_top)
