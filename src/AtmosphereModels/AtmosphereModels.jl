@@ -43,7 +43,7 @@ export
     WarmRainState,
     microphysical_state,
     microphysical_tendency,
-    grid_microphysical_tendency,
+    compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,
     specific_prognostic_moisture_from_total,
@@ -63,6 +63,12 @@ export
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
+
+    # Solar position specifications
+    AbstractSolarPosition,
+    ApparentSolarPosition,
+    DiurnalSolarPosition,
+    FixedCosineZenith,
 
     # Cloud effective radius
     ConstantRadiusParticles,
@@ -121,6 +127,7 @@ include("atmosphere_model.jl")
 #####
 
 include("atmosphere_model_buoyancy.jl")
+include("solar_position.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
 include("negative_moisture_correction.jl")

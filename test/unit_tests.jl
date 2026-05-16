@@ -100,6 +100,15 @@ using Breeze: CompressibleDynamics
         @test dynamics_density(dynamics) === dynamics.density
         @test dynamics_pressure(dynamics) === dynamics.pressure
     end
+
+    @testset "materialize_dynamics seeds pressure" begin
+        surface_pressure = FT(100000)
+        dynamics_stub = CompressibleDynamics(; surface_pressure)
+        constants = ThermodynamicConstants(FT)
+        dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
+
+        @test all(Array(interior(dynamics.pressure)) .== surface_pressure)
+    end
 end
 
 #####

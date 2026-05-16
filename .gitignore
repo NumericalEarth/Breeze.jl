@@ -32,11 +32,15 @@ Manifest-v*.toml
 data/P3_LUT/*.dat*
 
 # output files
+validation_output/
 *.jld2
 *.nc
+*.gif
+*.pdf
 *.png
 *.mp4
 *.svg
+*.zip
 
 # other files we don't want
 *.swp
@@ -48,6 +52,7 @@ data/P3_LUT/*.dat*
 # Claude Code — ignore user-specific settings, track shared rules/skills
 .claude/settings.local.json
 .claude/debug/
+.claude/*.lock
 
 # Paper references (kept locally only)
 examples/tropical_cyclone_world.md
