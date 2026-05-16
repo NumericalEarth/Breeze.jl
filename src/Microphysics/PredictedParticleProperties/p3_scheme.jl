@@ -78,7 +78,7 @@ The scheme tracks 11 prognostic densities:
 | ``ρqʳ``, ``ρnʳ`` | Rain mass and number |
 | ``ρqⁱ``, ``ρnⁱ`` | Ice mass and number |
 | ``ρqᶠ``, ``ρbᶠ`` | Rime mass and volume |
-| ``ρzⁱ`` | Ice 6th moment (reflectivity) |
+| ``ρz̃ⁱ`` | Advected square-root ice sixth moment, ``ρ sqrt(zⁱ nⁱ)`` |
 | ``ρqʷⁱ`` | Liquid water on ice |
 | ``ρsˢᵃᵗ`` | Predicted supersaturation (off by default) |
 

@@ -258,7 +258,7 @@ end
 end
 
 # 2-moment ice closure: reflectivity table is `nothing` because Z_i is not a
-# prognostic moment. Return zero so callers (e.g. `ρzⁱ` advection velocity)
+# prognostic moment. Return zero so callers (e.g. `ρz̃ⁱ` advection velocity)
 # stay well-defined without forcing them to branch on the closure mode.
 @inline tabulated_reflectivity_weighted_fall_speed(::Nothing, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ) =
     zero(typeof(m̄))

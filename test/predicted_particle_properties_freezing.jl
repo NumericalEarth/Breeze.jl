@@ -116,6 +116,8 @@ using Oceananigans.Fields: interior
                          sc_correction * ice_table.sixth_moment.deposition1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
         z_sub_combined = ice_table.sixth_moment.sublimation(log_m, Fᶠ, Fˡ, ρᶠ, μ) +
                          sc_correction * ice_table.sixth_moment.sublimation1(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+        z_dep_combined = max(0, z_dep_combined)
+        z_sub_combined = max(0, z_sub_combined)
         expected_coat_cond = ρ * z_dep_combined * FT(1e-8) / (nⁱ * mass_dep_combined)
         expected_coat_evap = -ρ * z_sub_combined * FT(1e-8) / (nⁱ * mass_dep_combined)
 
@@ -426,6 +428,48 @@ using Oceananigans.Fields: interior
         Q_warm, N_warm = immersion_freezing_cloud_rate(p3, qcl, Nc, 280.0, ρ)
         @test Q_warm == 0
         @test N_warm == 0
+
+        # In the non-saturated regime, Barklie-Gokhale freezing is the Fortran
+        # linear per-second rate. The safety cap only applies when the projected
+        # sink would consume all available droplets.
+        T_moderate = 230.0
+        prp = p3.process_rates
+        nᶜ = Nc / ρ
+        V_drop = (qcl / nᶜ) / prp.liquid_water_density
+        linear_rate = prp.immersion_freezing_nucleation_coefficient *
+                      V_drop *
+                      exp(prp.immersion_freezing_coefficient *
+                          (prp.freezing_temperature - T_moderate))
+        _, N_moderate = immersion_freezing_cloud_rate(p3, qcl, Nc, T_moderate, ρ)
+        @test linear_rate * prp.sink_limiting_timescale < 1
+        @test N_moderate ≈ nᶜ * linear_rate
+
+        # Very cold supercell states make the Barklie-Gokhale exponential
+        # effectively instantaneous. Rates should approach freezing all
+        # available drops over the safety timescale, not overflow.
+        FT = Float32
+        p3_32 = PredictedParticlePropertiesMicrophysics(FT)
+        τ = p3_32.process_rates.sink_limiting_timescale
+        T_very_cold = FT(136.18727)
+        ρ_cold = FT(0.12194309)
+
+        qcl_trace = FT(4.8146696e-8)
+        Q_cold, N_cold = immersion_freezing_cloud_rate(p3_32, qcl_trace,
+                                                       p3_32.cloud.number_concentration,
+                                                       T_very_cold, ρ_cold)
+        @test isfinite(Q_cold)
+        @test isfinite(N_cold)
+        @test 0 <= Q_cold <= qcl_trace / τ
+        @test 0 <= N_cold <= (p3_32.cloud.number_concentration / ρ_cold) / τ
+
+        qr_trace = FT(8.707481e-11)
+        nr_trace = FT(130.94022)
+        Q_rain_cold, N_rain_cold = immersion_freezing_rain_rate(p3_32, qr_trace,
+                                                                nr_trace, T_very_cold, FT(0))
+        @test isfinite(Q_rain_cold)
+        @test isfinite(N_rain_cold)
+        @test 0 <= Q_rain_cold <= qr_trace / τ
+        @test 0 <= N_rain_cold <= nr_trace / τ
     end
 
     #####

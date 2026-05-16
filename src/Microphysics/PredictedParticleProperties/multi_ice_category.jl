@@ -34,7 +34,7 @@ For a simulation with N ice categories, the prognostic fields are:
 | `ρnⁱ_n` | Ice number for category n |
 | `ρqᶠ_n` | Rime mass for category n |
 | `ρbᶠ_n` | Rime volume for category n |
-| `ρzⁱ_n` | Ice 6th moment for category n |
+| `ρz̃ⁱ_n` | Advected square-root ice sixth moment for category n |
 | `ρqʷⁱ_n` | Liquid on ice for category n |
 
 where n = 1, 2, ..., N.
@@ -101,7 +101,7 @@ function multi_category_ice_field_names(n_categories::Int)
         push!(names, Symbol("ρnⁱ_$i"))   # Ice number
         push!(names, Symbol("ρqᶠ_$i"))   # Rime mass
         push!(names, Symbol("ρbᶠ_$i"))   # Rime volume
-        push!(names, Symbol("ρzⁱ_$i"))   # Sixth moment
+        push!(names, Symbol("ρz̃ⁱ_$i"))  # Advected square-root sixth moment
         push!(names, Symbol("ρqʷⁱ_$i"))  # Liquid on ice
     end
     return Tuple(names)

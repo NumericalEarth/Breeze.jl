@@ -690,12 +690,12 @@ clamp_ice_sixth_moment(microphysics, μ, ρ) = μ
 clamp_ice_sixth_moment(microphysics, μ::Nothing, ρ) = nothing
 
 function clamp_ice_sixth_moment(microphysics, μ::NamedTuple, ρ)
-    haskey(μ, :ρzⁱ) || return μ
+    haskey(μ, :ρz̃ⁱ) || return μ
     haskey(μ, :ρqⁱ) || return μ
     qⁱ = μ.ρqⁱ / ρ
     qsmall = microphysics.minimum_mass_mixing_ratio
-    ρzⁱ_clamped = ifelse(qⁱ < qsmall, zero(μ.ρzⁱ), max(μ.ρzⁱ, zero(μ.ρzⁱ)))
-    return merge(μ, (; ρzⁱ = ρzⁱ_clamped))
+    ρz̃ⁱ_clamped = ifelse(qⁱ < qsmall, zero(μ.ρz̃ⁱ), max(μ.ρz̃ⁱ, zero(μ.ρz̃ⁱ)))
+    return merge(μ, (; ρz̃ⁱ = ρz̃ⁱ_clamped))
 end
 
 # Apply tendencies to update microphysics prognostic variables

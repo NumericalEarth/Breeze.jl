@@ -62,6 +62,13 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
     return Q_nuc, N_nuc
 end
 
+@inline function immersion_freezing_rate_coefficient(bimm, V_drop, aimm, ΔT, τ)
+    FT = typeof(bimm + V_drop + aimm + ΔT + τ)
+    log_rate = log(max(bimm * V_drop, FT(1e-30))) + aimm * ΔT
+    maximum_rate = one(FT) / max(τ, eps(FT))
+    return exp(min(log_rate, log(maximum_rate)))
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -119,16 +126,20 @@ negligible for small droplets.
     m_drop = qᶜˡ_eff / nᶜ                     # [kg]
     V_drop = m_drop / ρᴸ                   # [m³]
 
-    # H1: Per-drop freezing probability per second (NO psd_correction).
+    # H1: Fortran's per-drop freezing coefficient (NO psd_correction) is a
+    # linear per-second rate. The log form avoids overflow at very low
+    # temperatures; the safety cap is the same all-available-drops limit that
+    # the later species budget limiter would impose.
     # The PSD correction applies only to the mass (6th moment) rate,
     # not the number (3rd moment) rate, matching Fortran P3 v5.5.0.
-    prob_per_s = bimm * V_drop * exp(aimm * ΔT)
+    τ = prp.sink_limiting_timescale
+    freezing_rate = immersion_freezing_rate_coefficient(bimm, V_drop, aimm, ΔT, τ)
 
     # Mass freezing rate [kg/kg/s]: boosted by PSD correction (large drops freeze first)
-    Q_frz = qᶜˡ_eff * psd_correction * prob_per_s
+    Q_frz = min(qᶜˡ_eff * psd_correction * freezing_rate, qᶜˡ_eff / τ)
 
     # Number freezing rate [1/kg/s]: no PSD correction (C_N = 1)
-    N_frz = nᶜ * prob_per_s
+    N_frz = min(nᶜ * freezing_rate, nᶜ / τ)
 
     Q_frz = ifelse(freezing_active, Q_frz, zero(FT))
     N_frz = ifelse(freezing_active, N_frz, zero(FT))
@@ -187,16 +198,20 @@ uses ``\\mu_r(i,k)`` in `gamma(7.+mu_r)` and `gamma(mu_r+4.)` terms).
     m_drop = qʳ_eff / nʳ_safe          # [kg]
     V_drop = m_drop / ρᴸ            # [m³]
 
-    # H1: Per-drop freezing probability per second (NO psd_correction).
+    # H1: Fortran's per-drop freezing coefficient (NO psd_correction) is a
+    # linear per-second rate. The log form avoids overflow at very low
+    # temperatures; the safety cap is the same all-available-drops limit that
+    # the later species budget limiter would impose.
     # The PSD correction applies only to the mass (6th moment) rate,
     # not the number (3rd moment) rate, matching Fortran P3 v5.5.0.
-    prob_per_s = bimm * V_drop * exp(aimm * ΔT)
+    τ = prp.sink_limiting_timescale
+    freezing_rate = immersion_freezing_rate_coefficient(bimm, V_drop, aimm, ΔT, τ)
 
     # Mass freezing rate: boosted by PSD correction (large drops freeze first)
-    Q_frz = qʳ_eff * psd_correction * prob_per_s
+    Q_frz = min(qʳ_eff * psd_correction * freezing_rate, qʳ_eff / τ)
 
     # Number freezing rate: no PSD correction (C_N = 1)
-    N_frz = nʳ_eff * prob_per_s
+    N_frz = min(nʳ_eff * freezing_rate, nʳ_eff / τ)
 
     Q_frz = ifelse(freezing_active, Q_frz, zero(FT))
     N_frz = ifelse(freezing_active, N_frz, zero(FT))

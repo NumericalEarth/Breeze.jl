@@ -256,7 +256,8 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test :ρnⁱ ∈ names
         @test :ρqᶠ ∈ names
         @test :ρbᶠ ∈ names
-        @test :ρzⁱ ∈ names
+        @test :ρz̃ⁱ ∈ names
+        @test :ρzⁱ ∉ names
         @test :ρqʷⁱ ∈ names
     end
 

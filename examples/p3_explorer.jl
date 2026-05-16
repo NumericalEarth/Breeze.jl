@@ -122,7 +122,8 @@ function p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ)
     params = PredictedParticleProperties.distribution_parameters(ρ * qⁱ, ρ * nⁱ, Fᶠ, ρᶠ_for_psd)
 
     ## Sixth moment of the gamma PSD: Z = N₀ Γ(7+μ) / λ^(7+μ).
-    ## Convert from per-volume (m⁶/m³) to per-mass (m⁶/kg) for storage in ρzⁱ.
+    ## Convert from per-volume (m⁶/m³) to per-mass (m⁶/kg); P3 stores
+    ## the dynamics variable z̃ⁱ = √(zⁱ nⁱ) in the prognostic ρz̃ⁱ field.
     Z_per_volume = params.N₀ * gamma(7 + params.μ) / params.λ^(7 + params.μ)
 
     return (; Fᶠ, ρᶠ, Fˡ, reflectivity = Z_per_volume / ρ)
@@ -131,6 +132,7 @@ end
 function initialize_p3_state(p3, ρ; qᶜˡ = 0, nᶜˡ = 0, qʳ = 0, nʳ = 0,
                                qⁱ = 0, nⁱ = 0, qᶠ = 0, bᶠ = 0, qʷⁱ = 0)
     reflectivity = p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ).reflectivity
+    z̃ⁱ = sqrt(max(0, reflectivity * nⁱ))
 
     return (; ρqᶜˡ = ρ * qᶜˡ,
               ρnᶜˡ = ρ * nᶜˡ,
@@ -140,7 +142,7 @@ function initialize_p3_state(p3, ρ; qᶜˡ = 0, nᶜˡ = 0, qʳ = 0, nʳ = 0,
               ρnⁱ = ρ * nⁱ,
               ρqᶠ = ρ * qᶠ,
               ρbᶠ = ρ * bᶠ,
-              ρzⁱ = ρ * reflectivity,
+              ρz̃ⁱ = ρ * z̃ⁱ,
               ρqʷⁱ = ρ * qʷⁱ,
               ρsˢᵃᵗ = zero(ρ))
 end

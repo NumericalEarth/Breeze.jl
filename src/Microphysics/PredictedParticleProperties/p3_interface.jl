@@ -73,14 +73,14 @@ Return prognostic field names for the P3 scheme.
 P3 v5.5 with 3-moment ice and predicted liquid fraction has 11 prognostic fields:
 - Cloud: ρqᶜˡ, ρnᶜˡ
 - Rain: ρqʳ, ρnʳ
-- Ice: ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ
-- Supersaturation: ρsˢᵃᵗ (Grabowski & Morrison 2008, inactive by default)
+- Ice: ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρz̃ⁱ, ρqʷⁱ
+- Supersaturation: ρsˢᵃᵗ (H10: Grabowski & Morrison 2008, inactive by default)
 """
 function AM.prognostic_field_names(::P3)
     cloud_names = (:ρqᶜˡ, :ρnᶜˡ)
     rain_names = (:ρqʳ, :ρnʳ)
-    ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ)
-    # Supersaturation is always allocated; tendency = 0 when predict_supersaturation = false.
+    ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρz̃ⁱ, :ρqʷⁱ)
+    # H10: supersaturation (always allocated; tendency = 0 when predict_supersaturation = false)
     ssat_names = (:ρsˢᵃᵗ,)
 
     return tuple(cloud_names..., rain_names..., ice_names..., ssat_names...)
@@ -148,7 +148,7 @@ The P3 scheme requires the following fields on `grid`:
 - `ρqʳ`, `ρnʳ`: Rain mass and number densities
 - `ρqⁱ`, `ρnⁱ`: Ice mass and number densities
 - `ρqᶠ`, `ρbᶠ`: Rime mass and volume densities
-- `ρzⁱ`: Ice sixth moment (reflectivity) density
+- `ρz̃ⁱ`: Advected square-root sixth moment density, where `z̃ⁱ = sqrt(zⁱ nⁱ)`
 - `ρqʷⁱ`: Liquid water on ice mass density
 
 **Diagnostic:**
@@ -164,7 +164,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     ρnⁱ  = CenterField(grid)  # Ice number
     ρqᶠ  = CenterField(grid)  # Rime mass
     ρbᶠ  = CenterField(grid)  # Rime volume
-    ρzⁱ  = CenterField(grid)  # Ice 6th moment
+    ρz̃ⁱ = CenterField(grid)  # Advected square-root sixth moment
     ρqʷⁱ = CenterField(grid)  # Liquid on ice
     ρsˢᵃᵗ = CenterField(grid) # Predicted supersaturation
 
@@ -179,6 +179,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     qᶠ  = CenterField(grid)  # Rime mass mixing ratio [kg/kg]
     bᶠ  = CenterField(grid)  # Rime volume [m³/kg]
     zⁱ  = CenterField(grid)  # Ice sixth moment [m⁶/kg]
+    z̃ⁱ  = CenterField(grid)  # Advected square-root sixth moment √(zⁱ nⁱ)
     qʷⁱ = CenterField(grid)  # Liquid water on ice [kg/kg]
     sˢᵃᵗ = CenterField(grid) # Supersaturation [kg/kg]
 
@@ -203,16 +204,16 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     cache_ρnⁱ  = CenterField(grid)
     cache_ρqᶠ  = CenterField(grid)
     cache_ρbᶠ  = CenterField(grid)
-    cache_ρzⁱ  = CenterField(grid)
+    cache_ρz̃ⁱ = CenterField(grid)
     cache_ρqʷⁱ = CenterField(grid)
     cache_ρsˢᵃᵗ = CenterField(grid)
     cache_ρqᵛ  = CenterField(grid)
 
-    return (; ρqᶜˡ, ρnᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ, ρsˢᵃᵗ,
-              qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, qᵛ,
+    return (; ρqᶜˡ, ρnᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρz̃ⁱ, ρqʷⁱ, ρsˢᵃᵗ,
+              qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, z̃ⁱ, qʷⁱ, sˢᵃᵗ, qᵛ,
               wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
               cache_ρqᶜˡ, cache_ρnᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
-              cache_ρqᶠ, cache_ρbᶠ, cache_ρzⁱ, cache_ρqʷⁱ, cache_ρsˢᵃᵗ, cache_ρqᵛ)
+              cache_ρqᶠ, cache_ρbᶠ, cache_ρz̃ⁱ, cache_ρqʷⁱ, cache_ρsˢᵃᵗ, cache_ρqᵛ)
 end
 
 #####
@@ -238,9 +239,9 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
     nⁱ  = μ.ρnⁱ / ρ
     # M13: Fortran advects z̃ = √(z·N) and converts to physical z at microphysics entry:
     #   where (nitot > 0) zitot = zitot**2 / nitot; elsewhere zitot = 0
-    # ρzⁱ stores the advected variable z̃; convert to physical z = z̃²/N for internal use.
+    # ρz̃ⁱ stores the advected variable z̃; convert to physical z = z̃²/N for internal use.
     FT = typeof(ρ)
-    z̃ⁱ  = μ.ρzⁱ / ρ
+    z̃ⁱ  = μ.ρz̃ⁱ / ρ
     zⁱ  = ifelse(nⁱ > FT(1e-20), z̃ⁱ^2 / nⁱ, zero(FT))
     qʷⁱ = μ.ρqʷⁱ / ρ
     rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ, qʷⁱ)
@@ -330,7 +331,7 @@ end
         qⁱ  = μ.ρqⁱ[i, j, k] / ρ
         nⁱ  = μ.ρnⁱ[i, j, k] / ρ
         FT = typeof(ρ)
-        z̃ⁱ  = μ.ρzⁱ[i, j, k] / ρ
+        z̃ⁱ  = μ.ρz̃ⁱ[i, j, k] / ρ
         zⁱ  = ifelse(nⁱ > FT(1e-20), z̃ⁱ^2 / nⁱ, zero(FT))
         qʷⁱ = μ.ρqʷⁱ[i, j, k] / ρ
     end
@@ -384,6 +385,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.qᶠ[i, j, k]  = rime_state.qᶠ
     @inbounds μ.bᶠ[i, j, k]  = rime_state.bᶠ
     @inbounds μ.zⁱ[i, j, k]  = ℳ.zⁱ
+    @inbounds μ.z̃ⁱ[i, j, k]  = μ.ρz̃ⁱ[i, j, k] / ρ
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
     @inbounds μ.sˢᵃᵗ[i, j, k] = ℳ.sˢᵃᵗ
 
@@ -416,6 +418,33 @@ struct P3CacheResult{FT}
     c_qcl :: FT; c_ncl :: FT; c_qr :: FT; c_nr :: FT
     c_qi :: FT; c_ni :: FT; c_qf :: FT; c_bf :: FT
     c_zi :: FT; c_qwi :: FT; c_ss :: FT; c_qv :: FT
+end
+
+@inline function z̃ⁱ_tendency(nⁱ, zⁱ, tendency_ρz_phys, tendency_ρn)
+    FT = typeof(nⁱ + zⁱ + tendency_ρz_phys + tendency_ρn)
+    z_times_n = zⁱ * nⁱ
+    existing_distribution = (zⁱ > 0) & (nⁱ > 0) & (z_times_n > 0)
+
+    regularized_z_times_n = max(z_times_n, eps(FT)^2)
+    z̃ = sqrt(regularized_z_times_n)
+    existing_tendency = (nⁱ * tendency_ρz_phys + zⁱ * tendency_ρn) / (2 * z̃)
+
+    # At ice initiation z=n=0, d(sqrt(zn))/dt is sqrt(dz/dt * dn/dt).
+    # This is the one-sided limit for simultaneous positive Z and N sources.
+    source_z_tendency = max(0, tendency_ρz_phys)
+    source_n_tendency = max(0, tendency_ρn)
+    source_tendency = sqrt(source_z_tendency * source_n_tendency)
+
+    tendency = ifelse(existing_distribution, existing_tendency, source_tendency)
+    return ifelse(isnan(z_times_n), z_times_n, tendency)
+end
+
+@inline function z̃ⁱ_tendency(nⁱ, zⁱ, tendency_ρz_phys, tendency_ρn,
+                              ρz̃ⁱ, sink_limiting_timescale)
+    raw_tendency = z̃ⁱ_tendency(nⁱ, zⁱ, tendency_ρz_phys, tendency_ρn)
+    available_ρz̃ = max(0, ρz̃ⁱ)
+    maximum_sink = available_ρz̃ / sink_limiting_timescale
+    return max(raw_tendency, -maximum_sink)
 end
 
 # All P3 physics in a single @noinline function returning a concrete struct.
@@ -459,39 +488,14 @@ end
     # Sixth moment tendency: use tabulated path when ice_integrals table exists, analytic otherwise.
     # Direct call avoids dynamic dispatch on ice_integrals_table(p3) return type in @noinline.
     tendency_ρz_phys = p3_ice_sixth_moment_tendency(ice_integrals_table(p3), p3, rates, ρ, ℳ, props)
-    z_phys = props.zⁱ_bounded
-    FT = typeof(ρ)
-    z̃ = sqrt(max(z_phys * props.nⁱ, FT(1e-30)))
-    c_zi = (props.nⁱ * tendency_ρz_phys + z_phys * c_ni) / (2 * z̃)
+    ρz̃ⁱ = ρ * sqrt(max(0, ℳ.zⁱ * props.nⁱ))
+    c_zi = z̃ⁱ_tendency(props.nⁱ, props.zⁱ_bounded, tendency_ρz_phys, c_ni,
+                        ρz̃ⁱ, p3.process_rates.sink_limiting_timescale)
     c_qwi = tendency_ρqʷⁱ(rates, ρ)
     c_ss  = tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates)
     c_qv  = tendency_ρqᵛ(rates, ρ)
 
-    # GPU NaN guard: replace any NaN output with zero.
-    # Oceananigans' table interpolator uses Base.unsafe_trunc(Int, fractional_idx),
-    # which is undefined behavior when fractional_idx is NaN. If any upstream
-    # intermediate becomes NaN on GPU (e.g., from FMA rounding differences),
-    # it cascades through the table lookup into velocities and tendencies.
-    # Zero is physically correct for the near-zero hydrometeor states where
-    # these GPU-specific NaN values appear.
-    wʳ   = ifelse(isnan(wʳ), zero(FT), wʳ)
-    wʳₙ  = ifelse(isnan(wʳₙ), zero(FT), wʳₙ)
-    wⁱ   = ifelse(isnan(wⁱ), zero(FT), wⁱ)
-    wⁱₙ  = ifelse(isnan(wⁱₙ), zero(FT), wⁱₙ)
-    wⁱ_z = ifelse(isnan(wⁱ_z), zero(FT), wⁱ_z)
-    c_qcl = ifelse(isnan(c_qcl), zero(FT), c_qcl)
-    c_ncl = ifelse(isnan(c_ncl), zero(FT), c_ncl)
-    c_qr  = ifelse(isnan(c_qr),  zero(FT), c_qr)
-    c_nr  = ifelse(isnan(c_nr),   zero(FT), c_nr)
-    c_qi  = ifelse(isnan(c_qi),   zero(FT), c_qi)
-    c_ni  = ifelse(isnan(c_ni),   zero(FT), c_ni)
-    c_qf  = ifelse(isnan(c_qf),   zero(FT), c_qf)
-    c_bf  = ifelse(isnan(c_bf),   zero(FT), c_bf)
-    c_zi  = ifelse(isnan(c_zi),   zero(FT), c_zi)
-    c_qwi = ifelse(isnan(c_qwi),  zero(FT), c_qwi)
-    c_ss  = ifelse(isnan(c_ss),   zero(FT), c_ss)
-    c_qv  = ifelse(isnan(c_qv),   zero(FT), c_qv)
-
+    FT = typeof(ρ)
     return P3CacheResult{FT}(wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
                               c_qcl, c_ncl, c_qr, c_nr, c_qi, c_ni, c_qf, c_bf, c_zi, c_qwi, c_ss, c_qv)
 end
@@ -520,7 +524,7 @@ end
         μ.cache_ρnⁱ[i, j, k]  = r.c_ni
         μ.cache_ρqᶠ[i, j, k]  = r.c_qf
         μ.cache_ρbᶠ[i, j, k]  = r.c_bf
-        μ.cache_ρzⁱ[i, j, k]  = r.c_zi
+        μ.cache_ρz̃ⁱ[i, j, k] = r.c_zi
         μ.cache_ρqʷⁱ[i, j, k] = r.c_qwi
         μ.cache_ρsˢᵃᵗ[i, j, k] = r.c_ss
         μ.cache_ρqᵛ[i, j, k]  = r.c_qv
@@ -582,8 +586,8 @@ end
 # Rime volume: same as ice mass
 @inline AM.microphysical_velocities(::P3, μ, ::Val{:ρbᶠ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
 
-# Ice reflectivity: reflectivity-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρzⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ_z)
+# Ice square-root sixth moment: reflectivity-weighted fall speed
+@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρz̃ⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ_z)
 
 # Liquid on ice: same as ice mass
 @inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqʷⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
@@ -601,10 +605,13 @@ end
 # Helper to compute P3 rates and extract ice properties from ℳ
 @inline function p3_ice_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     FT = typeof(ρ)
-    nⁱ = min(ℳ.nⁱ, p3.process_rates.maximum_ice_number_density / ρ)
+    qⁱ_raw = total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ)
+    has_ice_mass = qⁱ_raw > FT(1e-20)
+    nⁱ_raw = min(ℳ.nⁱ, p3.process_rates.maximum_ice_number_density / ρ)
+    nⁱ = ifelse(has_ice_mass | isnan(qⁱ_raw), nⁱ_raw, FT(0))
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
-    qⁱ_total = max(total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ), FT(1e-20))
+    qⁱ_total = max(qⁱ_raw, FT(1e-20))
     Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, ℳ.qʷⁱ)
     μ_ice = compute_ice_shape_parameter(p3, qⁱ_total, nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
     zⁱ_bounded = bound_ice_sixth_moment(p3, qⁱ_total, nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ, μ_ice)
@@ -624,13 +631,19 @@ end
 end
 
 @inline function p3_ice_sixth_moment_tendency(::Nothing, p3, rates, ρ, ℳ::P3MicrophysicalState, props::P3IceProps)
-    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, props.nⁱ, props.zⁱ_bounded, p3.process_rates, props.μ_cloud)
+    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, props.nⁱ, props.zⁱ_bounded, p3.process_rates)
 end
 
-@inline function p3_ice_sixth_moment_tendency(::P3IceIntegralsTable, p3, rates, ρ, ℳ::P3MicrophysicalState, props::P3IceProps)
-    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, props.nⁱ, props.zⁱ_bounded,
-                        props.Fᶠ, props.Fˡ, props.ρᶠ, p3,
-                        props.nu, props.D_v, props.μ_ice, props.μ_cloud, props.λ_r)
+@inline function p3_ice_sixth_moment_tendency(ice_table::P3IceIntegralsTable, p3, rates, ρ, ℳ::P3MicrophysicalState, props::P3IceProps)
+    # The fully tabulated Z-tendency overload represents Fortran's dormant
+    # log_full3mom branch. Runtime P3 v5.5 uses the active hybrid path: group-1
+    # processes reconstruct Z with fixed μ over the same safety timescale used
+    # by process-rate limiting, while group-2 sources initialize new ice moments
+    # analytically.
+    return active_ice_sixth_moment_tendency(ice_table, p3, rates, ρ,
+                                            ℳ.qⁱ, ℳ.qʷⁱ, props.nⁱ, props.qᶠ,
+                                            props.bᶠ, props.zⁱ_bounded,
+                                            props.μ_ice, zero(typeof(ρ)))
 end
 
 """
@@ -725,15 +738,14 @@ $(TYPEDSIGNATURES)
 
 Ice sixth moment tendency: changes with deposition, melting, riming, and nucleation.
 """
-@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρzⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρz̃ⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, props = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     # M13: Convert physical z tendency to advected z̃ = √(z·N) tendency
-    FT = typeof(ρ)
     tendency_ρz_phys = p3_ice_sixth_moment_tendency(ice_integrals_table(p3), p3, rates, ρ, ℳ, props)
     tendency_ρn = tendency_ρnⁱ(rates, ρ)
-    z_phys = props.zⁱ_bounded
-    z̃ = sqrt(max(z_phys * props.nⁱ, FT(1e-30)))
-    return (props.nⁱ * tendency_ρz_phys + z_phys * tendency_ρn) / (2 * z̃)
+    ρz̃ⁱ = ρ * sqrt(max(0, ℳ.zⁱ * props.nⁱ))
+    return z̃ⁱ_tendency(props.nⁱ, props.zⁱ_bounded, tendency_ρz_phys, tendency_ρn,
+                        ρz̃ⁱ, p3.process_rates.sink_limiting_timescale)
 end
 
 """
@@ -801,8 +813,8 @@ end
 @inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρbᶠ}, ρ, fields, 𝒰, constants, velocities) =
     @inbounds fields.cache_ρbᶠ[i, j, k]
 
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρzⁱ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρzⁱ[i, j, k]
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρz̃ⁱ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρz̃ⁱ[i, j, k]
 
 @inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqʷⁱ}, ρ, fields, 𝒰, constants, velocities) =
     @inbounds fields.cache_ρqʷⁱ[i, j, k]

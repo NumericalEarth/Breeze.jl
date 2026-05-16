@@ -8,7 +8,9 @@ to build the microphysical tendency for each prognostic field.
 The prognostic variable formulation has evolved through the P3 papers:
 
 - [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization): Original 4 ice variables.
-- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Added ``ρz^i`` for 3-moment ice.
+- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Added the transformed
+  sixth-moment prognostic ``ρ\tilde z^i`` for 3-moment ice, where
+  ``\tilde z^i = \sqrt{z^i n^i}``.
 - [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction): Added ``ρq^{wi}`` for liquid fraction.
 
 Our implementation follows P3 v5.5 with all 6 ice prognostic variables. Sign
@@ -57,7 +59,7 @@ mass / number ratio. Both Fortran and Breeze run with ``μ_r = 0`` at runtime.
 | ``ρn^i`` | Ice number density | m⁻³ | Number of ice particles |
 | ``ρq^f`` | Rime mass density | kg/m³ | Mass of rime (frost) on ice |
 | ``ρb^f`` | Rime volume density | m³/m³ | Volume of rime per unit volume |
-| ``ρz^i`` | Ice reflectivity | m⁶/m³ | 6th moment of size distribution (only updated when `three_moment_ice = true`) |
+| ``ρ\tilde z^i`` | Advected ice reflectivity variable | kg/m³ × m³/kg | Square-root sixth moment ``ρ\sqrt{z^i n^i}`` (only updated when `three_moment_ice = true`) |
 | ``ρq^{wi}`` | Water on ice | kg/m³ | Liquid water coating ice particles |
 
 ### Vapor and Saturation Diagnostic
@@ -259,7 +261,7 @@ The simplified path used by `tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ)` follo
 the active hybrid path (see the sixth-moment update in [Microphysical Processes](@ref p3_processes)):
 
 ```math
-\partial_t (ρz^i)\big|_\text{src}
+\partial_t (ρz^i_\text{physical})\big|_\text{src}
 =\rho\Big[\frac{z^i}{q^i}\,\dot{q}^{i}_\text{group1}
 + \sum_{p\in\text{group2}} G(μ_\text{src,p})\,\frac{(ΔM_3)_p^2}{Δn_p}\Big],
 ```
@@ -270,9 +272,11 @@ evaporation; and the group-2 sum running over deposition nucleation,
 immersion freezing of cloud / rain, splintering, and homogeneous freezing
 of cloud / rain.
 
-The fully tabulated `tendency_ρzⁱ(rates, ρ, ..., p3, nu, D_v, μ, μ_cloud)`
-overload exists for completeness but corresponds to Fortran's *inactive*
-`log_full3mom` branch.
+The prognostic field stores ``ρ\tilde z^i``, so Breeze converts this physical
+sixth-moment source to a ``ρ\tilde z^i`` source before coupling it to the
+dynamical core. The fully tabulated `tendency_ρzⁱ(rates, ρ, ..., p3, nu, D_v,
+μ, μ_cloud)` overload exists for completeness but corresponds to Fortran's
+*inactive* `log_full3mom` branch.
 
 ### Liquid on Ice Tendency
 
@@ -300,7 +304,7 @@ Each quantity sediments at its characteristic velocity:
 | ``ρn^i`` | ``V_n^i`` | ``F_n^i = -V_n^i ρn^i`` |
 | ``ρq^f`` | ``V_m^i`` | ``F_q^f = -V_m^i ρq^f`` |
 | ``ρb^f`` | ``V_m^i`` | ``F_b^f = -V_m^i ρb^f`` |
-| ``ρz^i`` | ``V_z^i`` | ``F_z^i = -V_z^i ρz^i`` |
+| ``ρ\tilde z^i`` | ``V_z^i`` | ``F_z^i = -V_z^i ρ\tilde z^i`` |
 | ``ρq^{wi}`` | ``V_m^i`` | ``F_q^{wi} = -V_m^i ρq^{wi}`` |
 
 The sedimentation tendency is
@@ -322,7 +326,7 @@ microphysics interface in `p3_interface.jl`. Under the hood,
 ```julia
 # Prognostic field names
 names = prognostic_field_names(microphysics)
-# (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ, :ρsˢᵃᵗ)
+# (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρz̃ⁱ, :ρqʷⁱ, :ρsˢᵃᵗ)
 ```
 
 Three host-facing entry points:
@@ -406,7 +410,8 @@ println("  Minimum number mixing ratio: ", p3.minimum_number_mixing_ratio, " 1/k
 ## References for This Section
 
 - [Morrison2015parameterization](@cite): Original prognostic variables and tendencies (Section 2).
-- [MilbrandtEtAl2021](@cite): Sixth moment prognostic (``ρz^i``) for three-moment ice.
+- [MilbrandtEtAl2021](@cite): Transformed sixth-moment prognostic
+  (``ρ\tilde z^i``) for three-moment ice.
 - [MilbrandtEtAl2025liquidfraction](@cite): Liquid fraction prognostic (``ρq^{wi}``).
 - [Morrison2025complete3moment](@cite): Complete tendency equations with all six ice variables.
 - [MilbrandtYau2005](@cite): Multi-moment microphysics and sedimentation.

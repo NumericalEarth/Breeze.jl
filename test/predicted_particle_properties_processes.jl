@@ -659,7 +659,7 @@ end
             FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # condensation + 5 rain
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),                     # deposition, partial_melt, complete_melt, melt_n
             FT(0.0),                                                  # sublimation_number (D2)
-            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # agg, ni_limit (C3), 5 riming
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(1e-8), FT(0.0), FT(0.0),  # agg, ni_limit (C3), 5 riming
             FT(0.0), FT(0.0), FT(0.0),                              # shedding, shedding_n, refreezing
             FT(1e-9), FT(10.0), FT(5e-9), FT(100.0), FT(3e-9), FT(50.0),  # nucleation + immersion freezing
             FT(1e-10), FT(1.0),                                        # splintering
@@ -695,6 +695,287 @@ end
 
         @test tendency_ρzⁱ(rates, ρ, FT(0.0), FT(0.0), FT(0.0), prp) ≈ expected
         @test tendency_ρzⁱ(rates, ρ, FT(0.0), FT(0.0), FT(0.0), prp) > 0
+    end
+
+    @testset "z̃ⁱ_tendency initializes from new ice sources" begin
+        FT = Float32
+        ρ = FT(1)
+        prp = ProcessRateParameters(FT)
+
+        rates = P3ProcessRates(
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0),
+            FT(0.0),
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0), FT(0.0),
+            FT(1e-9), FT(10.0), FT(5e-9), FT(100.0), FT(3e-9), FT(50.0),
+            FT(1e-10), FT(1.0),
+            FT(2e-9), FT(20.0), FT(4e-9), FT(40.0),
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0)
+        )
+
+        tendency_ρz_phys = tendency_ρzⁱ(rates, ρ, FT(0), FT(0), FT(0), prp)
+        tendency_ρn = tendency_ρnⁱ(rates, ρ)
+        tendency_ρz̃ = PPP.z̃ⁱ_tendency(FT(0), FT(0),
+                                        tendency_ρz_phys,
+                                        tendency_ρn)
+
+        @test tendency_ρz̃ ≈ sqrt(tendency_ρz_phys * tendency_ρn)
+        @test tendency_ρz̃ > 0
+    end
+
+    @testset "z̃ⁱ_tendency sinks are availability-limited" begin
+        FT = Float32
+        prp = ProcessRateParameters(FT)
+        τ = prp.sink_limiting_timescale
+
+        no_existing_tendency = PPP.z̃ⁱ_tendency(FT(0), FT(0),
+                                                FT(-1), FT(0),
+                                                FT(0), τ)
+        @test no_existing_tendency == 0
+
+        limited_tendency = PPP.z̃ⁱ_tendency(FT(1), FT(4),
+                                            FT(-4), FT(0),
+                                            FT(2), τ)
+        @test limited_tendency == -FT(2) / τ
+    end
+
+    @testset "P3 advects the square-root sixth moment" begin
+        FT = Float32
+        p3 = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)
+        grid = RectilinearGrid(CPU(), size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+        μ = Breeze.AtmosphereModels.materialize_microphysical_fields(p3, grid, NamedTuple())
+        names = prognostic_field_names(p3)
+
+        @test :z̃ⁱ ∈ keys(μ)
+        @test :ρz̃ⁱ ∈ names
+        @test :ρzⁱ ∉ names
+        @test Breeze.AtmosphereModels.specific_field_name(:ρz̃ⁱ) == :z̃ⁱ
+        @test Breeze.AtmosphereModels.specific_field_name(:ρqⁱ) == :qⁱ
+    end
+
+    @testset "Tabulated deposition does not destroy the sixth moment" begin
+        FT = Float32
+        p3 = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)
+        rate_names = fieldnames(P3ProcessRates)
+        rates = P3ProcessRates(ntuple(i -> rate_names[i] === :deposition ? FT(1.3548665e-10) : zero(FT),
+                                      fieldcount(P3ProcessRates))...)
+
+        ρ = FT(0.44707614)
+        qⁱ = FT(1.8551212e-10)
+        nⁱ = FT(49208.62)
+        zⁱ = FT(6.298704e-29)
+        Fᶠ = FT(0)
+        Fˡ = FT(0)
+        ρᶠ = FT(0)
+        ν = FT(8.0e-5)
+        D_v = FT(5.0e-5)
+        μ = FT(0)
+        μ_cloud = FT(0)
+
+        tendency = tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3, ν, D_v, μ, μ_cloud)
+        @test tendency >= 0
+    end
+
+    @testset "P3 runtime sixth moment tendency uses fixed-shape reconstruction" begin
+        FT = Float32
+        base_p3 = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)
+        reconstruction_timescale = FT(2)
+        process_rates = ProcessRateParameters(FT; sink_limiting_timescale = reconstruction_timescale)
+        p3 = p3_with_process_rates(base_p3, process_rates)
+        constants = ThermodynamicConstants(FT)
+        ρ = FT(0.7)
+        q = MoistureMassFractions(FT(1e-3))
+        𝒰 = LiquidIcePotentialTemperatureState(FT(265), q, FT(1e5), FT(8e4))
+        ℳ = P3MicrophysicalState(FT(1e-5), FT(1e8), FT(1e-6), FT(1e6),
+                                  FT(1e-4), FT(1e5), FT(1e-5), FT(1e-8),
+                                  FT(1e-12), FT(0), FT(0))
+
+        rate_names = fieldnames(P3ProcessRates)
+        rates = P3ProcessRates(ntuple(i -> rate_names[i] === :deposition ? FT(1e-8) : zero(FT),
+                                      fieldcount(P3ProcessRates))...)
+
+        props = PPP.p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+        runtime_tendency = PPP.p3_ice_sixth_moment_tendency(PPP.ice_integrals_table(p3),
+                                                            p3, rates, ρ, ℳ, props)
+        τ = p3.process_rates.sink_limiting_timescale
+        @test τ == reconstruction_timescale
+        qⁱ_new = max(0, ℳ.qⁱ + rates.deposition * τ)
+        qⁱ_total_new = PPP.total_ice_mass(qⁱ_new, ℳ.qʷⁱ)
+        rime_state_new = PPP.consistent_rime_state(p3, qⁱ_new, props.qᶠ, props.bᶠ, ℳ.qʷⁱ)
+        Fˡ_new = PPP.liquid_fraction_on_ice(qⁱ_new, ℳ.qʷⁱ)
+        ρ_bulk_new = PPP.ice_mean_density_for_bounds(PPP.ice_integrals_table(p3),
+                                                     qⁱ_total_new, props.nⁱ,
+                                                     rime_state_new.Fᶠ, Fˡ_new,
+                                                     rime_state_new.ρᶠ,
+                                                     props.μ_ice)
+        M₃_new = FT(6) * qⁱ_total_new / (FT(π) * max(ρ_bulk_new, eps(FT)))
+        zⁱ_new = PPP.g_of_mu(props.μ_ice) * M₃_new^2 / max(props.nⁱ, eps(FT))
+        expected_tendency = ρ * (zⁱ_new - props.zⁱ_bounded) / τ
+        proportional_tendency = ρ * props.zⁱ_bounded / props.qⁱ_total * rates.deposition
+
+        @test isapprox(runtime_tendency, expected_tendency; rtol=FT(1e-5))
+        @test !isapprox(runtime_tendency, proportional_tendency; rtol=FT(1e-5))
+    end
+
+    @testset "P3 active sixth moment keeps splintered mass out of group 1" begin
+        FT = Float32
+        base_p3 = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)
+        τ = FT(2)
+        process_rates = ProcessRateParameters(FT; sink_limiting_timescale = τ)
+        p3 = p3_with_process_rates(base_p3, process_rates)
+
+        ρ = FT(0.8)
+        qⁱ = FT(1e-7)
+        qʷⁱ = FT(0)
+        nⁱ = FT(1e5)
+        qᶠ = FT(2e-8)
+        bᶠ = FT(5e-11)
+        zⁱ = FT(1e-18)
+        μ_ice = FT(0)
+        μ_r = FT(0)
+        rain_riming = FT(1e-7)
+        splintering_mass = FT(8e-8)
+        splintering_number = FT(20)
+
+        rate_names = fieldnames(P3ProcessRates)
+        rates = P3ProcessRates(ntuple(i -> begin
+            name = rate_names[i]
+            name === :rain_riming ? rain_riming :
+            name === :rime_density_new ? FT(400) :
+            name === :splintering_mass ? splintering_mass :
+            name === :splintering_number ? splintering_number :
+            zero(FT)
+        end, fieldcount(P3ProcessRates))...)
+
+        tendency = PPP.active_ice_sixth_moment_tendency(PPP.ice_integrals_table(p3),
+                                                        p3, rates, ρ,
+                                                        qⁱ, qʷⁱ, nⁱ, qᶠ, bᶠ, zⁱ,
+                                                        μ_ice, μ_r)
+
+        rain_riming_group1 = rain_riming - splintering_mass
+        qⁱ_new = max(0, qⁱ + τ * rain_riming_group1)
+        qᶠ_new = max(0, qᶠ + τ * rain_riming_group1)
+        bᶠ_new = max(0, bᶠ + τ * rain_riming_group1 / p3.process_rates.maximum_rime_density)
+        rime_state_new = PPP.consistent_rime_state(p3, qⁱ_new, qᶠ_new, bᶠ_new, qʷⁱ)
+        Fˡ_new = PPP.liquid_fraction_on_ice(qⁱ_new, qʷⁱ)
+        ρ_bulk_new = PPP.ice_mean_density_for_bounds(PPP.ice_integrals_table(p3),
+                                                     qⁱ_new, nⁱ,
+                                                     rime_state_new.Fᶠ, Fˡ_new,
+                                                     rime_state_new.ρᶠ, μ_ice)
+        M₃_new = FT(6) * qⁱ_new / (FT(π) * max(ρ_bulk_new, eps(FT)))
+        zⁱ_new = PPP.g_of_mu(μ_ice) * M₃_new^2 / nⁱ
+        z_group1 = (zⁱ_new - zⁱ) / τ
+        z_group2 = PPP.initiated_ice_sixth_moment_tendency(splintering_mass, splintering_number, μ_r)
+        expected = ρ * (z_group1 + z_group2)
+
+        @test isapprox(tendency, expected; rtol=FT(1e-5))
+    end
+
+    @testset "P3 active sixth moment uses rain μ for group-2 sources" begin
+        FT = Float32
+        prp = ProcessRateParameters(FT)
+        μ_r = FT(2)
+        rate_names = fieldnames(P3ProcessRates)
+        nucleation_mass = FT(1e-10)
+        nucleation_number = FT(10)
+        cloud_freezing_mass = FT(2e-10)
+        cloud_freezing_number = FT(20)
+        rain_freezing_mass = FT(3e-10)
+        rain_freezing_number = FT(30)
+        cloud_riming = FT(1e-7)
+        rain_riming = FT(3e-7)
+        splintering_mass = FT(4e-10)
+        splintering_number = FT(100)
+        cloud_homogeneous_mass = FT(5e-10)
+        cloud_homogeneous_number = FT(50)
+        rain_homogeneous_mass = FT(6e-10)
+        rain_homogeneous_number = FT(60)
+        rates = P3ProcessRates(ntuple(i -> begin
+            name = rate_names[i]
+            name === :nucleation_mass ? nucleation_mass :
+            name === :nucleation_number ? nucleation_number :
+            name === :cloud_freezing_mass ? cloud_freezing_mass :
+            name === :cloud_freezing_number ? cloud_freezing_number :
+            name === :rain_freezing_mass ? rain_freezing_mass :
+            name === :rain_freezing_number ? rain_freezing_number :
+            name === :cloud_riming ? cloud_riming :
+            name === :rain_riming ? rain_riming :
+            name === :splintering_mass ? splintering_mass :
+            name === :splintering_number ? splintering_number :
+            name === :cloud_homogeneous_mass ? cloud_homogeneous_mass :
+            name === :cloud_homogeneous_number ? cloud_homogeneous_number :
+            name === :rain_homogeneous_mass ? rain_homogeneous_mass :
+            name === :rain_homogeneous_number ? rain_homogeneous_number :
+            zero(FT)
+        end, fieldcount(P3ProcessRates))...)
+
+        cloud_splintering_mass, rain_splintering_mass = PPP.split_splintering_mass(rates, prp)
+        expected = PPP.initiated_ice_sixth_moment_tendency(nucleation_mass, nucleation_number, μ_r) +
+                   PPP.initiated_ice_sixth_moment_tendency(cloud_freezing_mass, cloud_freezing_number, μ_r) +
+                   PPP.initiated_ice_sixth_moment_tendency(rain_freezing_mass, rain_freezing_number, μ_r) +
+                   PPP.initiated_ice_sixth_moment_tendency(rain_splintering_mass, splintering_number, μ_r) +
+                   PPP.initiated_ice_sixth_moment_tendency(cloud_splintering_mass, splintering_number, μ_r) +
+                   PPP.initiated_ice_sixth_moment_tendency(cloud_homogeneous_mass, cloud_homogeneous_number, μ_r) +
+                   PPP.initiated_ice_sixth_moment_tendency(rain_homogeneous_mass, rain_homogeneous_number, μ_r)
+
+        @test PPP.group2_ice_sixth_moment_tendency(rates, prp, μ_r) ≈ expected
+    end
+
+    @testset "split_splintering_mass honors splintering_cloud_riming_scale" begin
+        FT = Float32
+        rate_names = fieldnames(P3ProcessRates)
+        cloud_riming = FT(2e-7)
+        rain_riming = FT(1e-7)
+        splintering_mass = FT(5e-10)
+        rates = P3ProcessRates(ntuple(i -> begin
+            name = rate_names[i]
+            name === :cloud_riming ? cloud_riming :
+            name === :rain_riming ? rain_riming :
+            name === :splintering_mass ? splintering_mass :
+            zero(FT)
+        end, fieldcount(P3ProcessRates))...)
+
+        # nCat=1 default: cloud branch active, split mirrors riming fractions exactly.
+        prp_nCat1 = ProcessRateParameters(FT; splintering_cloud_riming_scale = 1)
+        c1, r1 = PPP.split_splintering_mass(rates, prp_nCat1)
+        @test c1 ≈ splintering_mass * cloud_riming / (cloud_riming + rain_riming)
+        @test r1 ≈ splintering_mass * rain_riming / (cloud_riming + rain_riming)
+        @test c1 + r1 ≈ splintering_mass
+
+        # nCat>1: cloud splintering disabled — all splinter mass must go to rain.
+        prp_nCat2 = ProcessRateParameters(FT; splintering_cloud_riming_scale = 0)
+        c0, r0 = PPP.split_splintering_mass(rates, prp_nCat2)
+        @test c0 == 0
+        @test r0 ≈ splintering_mass
+    end
+
+    @testset "Number-only ice residue has no sixth-moment tendency" begin
+        FT = Float32
+        p3 = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)
+        constants = ThermodynamicConstants(FT)
+        ρ = FT(0.7)
+        q = MoistureMassFractions(FT(1e-3))
+        𝒰 = LiquidIcePotentialTemperatureState(FT(300), q, FT(1e5), FT(8e4))
+        ℳ = P3MicrophysicalState(FT(0), FT(0), FT(0), FT(0),
+                                  FT(0), FT(1e-41), FT(0), FT(0),
+                                  FT(0), FT(0), FT(0))
+        rates = P3ProcessRates(ntuple(_ -> zero(FT), fieldcount(P3ProcessRates))...)
+
+        props = PPP.p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+        tendency_ρz_phys = PPP.p3_ice_sixth_moment_tendency(PPP.ice_integrals_table(p3),
+                                                            p3, rates, ρ, ℳ, props)
+        tendency_ρz̃ = PPP.z̃ⁱ_tendency(props.nⁱ, props.zⁱ_bounded,
+                                        tendency_ρz_phys, zero(FT))
+
+        @test props.nⁱ == 0
+        @test tendency_ρz_phys == 0
+        @test tendency_ρz̃ == 0
     end
 
     @testset "Tendency functions - Float32 type stability" begin
@@ -1463,16 +1744,18 @@ end
         @test liquid_rime.Fᶠ ≈ FT(0.8)  # = qᶠ / qⁱ_dry = 8e-5 / 1e-4
 
         ρ = FT(1.0)
+        zⁱ = FT(1e-10)
+        nⁱ = FT(1e5)
         μ = (
             ρqᶜˡ = FT(0),
             ρnᶜˡ = FT(0),
             ρqʳ = FT(0),
             ρnʳ = FT(0),
             ρqⁱ = ρ * FT(1e-5),
-            ρnⁱ = ρ * FT(1e5),
+            ρnⁱ = ρ * nⁱ,
             ρqᶠ = ρ * FT(2e-5),
             ρbᶠ = ρ * FT(5e-8),
-            ρzⁱ = ρ * FT(1e-10),
+            ρz̃ⁱ = ρ * sqrt(zⁱ * nⁱ),
             ρqʷⁱ = FT(0),
             ρsˢᵃᵗ = FT(0),
         )
