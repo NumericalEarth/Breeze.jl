@@ -19,6 +19,8 @@ using Breeze.AtmosphereModels: AbstractMicrophysicalState
 
 using Breeze.Thermodynamics: MoistureMassFractions
 
+using Breeze: Microphysics
+
 const P3 = PredictedParticlePropertiesMicrophysics
 
 #####
@@ -781,50 +783,6 @@ end
 @inline AM.microphysical_tendency(::P3, name, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) = zero(ρ)
 
 #####
-##### Grid-indexed tendency overrides (fast path for AtmosphereModel)
-#####
-#
-# These overrides read from the tendency cache populated by update_microphysical_auxiliaries!,
-# bypassing recomputation of compute_p3_process_rates for each P3 prognostic field.
-# The microphysical_tendency methods above remain the gridless fallback for ParcelModels.
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqᶜˡ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρqᶜˡ[i, j, k]
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρnᶜˡ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρnᶜˡ[i, j, k]
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqʳ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρqʳ[i, j, k]
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρnʳ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρnʳ[i, j, k]
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqⁱ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρqⁱ[i, j, k]
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρnⁱ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρnⁱ[i, j, k]
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqᶠ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρqᶠ[i, j, k]
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρbᶠ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρbᶠ[i, j, k]
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρz̃ⁱ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρz̃ⁱ[i, j, k]
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqʷⁱ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρqʷⁱ[i, j, k]
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρsˢᵃᵗ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρsˢᵃᵗ[i, j, k]
-
-@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqᵛ}, ρ, fields, 𝒰, constants, velocities) =
-    @inbounds fields.cache_ρqᵛ[i, j, k]
-
-#####
 ##### Thermodynamic state adjustment
 #####
 
@@ -886,3 +844,67 @@ using KernelAbstractions: @kernel, @index
 
     _p3_compute_and_cache!(μ, i, j, k, grid, p3, ρ, 𝒰, constants)
 end
+
+#####
+##### Fused tendency override (fast path for AtmosphereModel)
+#####
+#
+# `microphysics_model_update!` already wrote every cell's microphysics contribution
+# into the `cache_ρ*` fields. The fused override simply `+=`s those cached values
+# into `Gⁿ` in a single kernel launch after the dynamics tendency kernels run.
+# The state-based `microphysical_tendency` methods above remain the gridless
+# fallback used by ParcelModels.
+
+@kernel function _add_p3_tendencies_kernel!(Gρqᵛ, Gρqᶜˡ, Gρnᶜˡ, Gρqʳ, Gρnʳ,
+                                            Gρqⁱ, Gρnⁱ, Gρqᶠ, Gρbᶠ, Gρz̃ⁱ,
+                                            Gρqʷⁱ, Gρsˢᵃᵗ, μ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        Gρqᵛ[i, j, k]   += μ.cache_ρqᵛ[i, j, k]
+        Gρqᶜˡ[i, j, k]  += μ.cache_ρqᶜˡ[i, j, k]
+        Gρnᶜˡ[i, j, k]  += μ.cache_ρnᶜˡ[i, j, k]
+        Gρqʳ[i, j, k]   += μ.cache_ρqʳ[i, j, k]
+        Gρnʳ[i, j, k]   += μ.cache_ρnʳ[i, j, k]
+        Gρqⁱ[i, j, k]   += μ.cache_ρqⁱ[i, j, k]
+        Gρnⁱ[i, j, k]   += μ.cache_ρnⁱ[i, j, k]
+        Gρqᶠ[i, j, k]   += μ.cache_ρqᶠ[i, j, k]
+        Gρbᶠ[i, j, k]   += μ.cache_ρbᶠ[i, j, k]
+        Gρz̃ⁱ[i, j, k]   += μ.cache_ρz̃ⁱ[i, j, k]
+        Gρqʷⁱ[i, j, k]  += μ.cache_ρqʷⁱ[i, j, k]
+        Gρsˢᵃᵗ[i, j, k] += μ.cache_ρsˢᵃᵗ[i, j, k]
+    end
+end
+
+function AM.compute_microphysical_tendencies!(p3::P3, model)
+    grid = model.grid
+    arch = grid.architecture
+    G = model.timestepper.Gⁿ
+    μ = model.microphysical_fields
+
+    launch!(arch, grid, :xyz, _add_p3_tendencies_kernel!,
+            G.ρqᵛ, G.ρqᶜˡ, G.ρnᶜˡ, G.ρqʳ, G.ρnʳ,
+            G.ρqⁱ, G.ρnⁱ, G.ρqᶠ, G.ρbᶠ, G.ρz̃ⁱ,
+            G.ρqʷⁱ, G.ρsˢᵃᵗ, μ)
+
+    return nothing
+end
+
+#####
+##### Number concentration diagnostic
+#####
+#
+# P3 carries prognostic number-density fields for cloud liquid, rain, and ice,
+# so `number_concentration` just hands the requested field back. This keeps the
+# diagnostic interface uniform with `OneMomentCloudMicrophysics` and
+# `TwoMomentCloudMicrophysics`.
+
+Microphysics.number_concentration(model, ::P3, ::Val{:rain}) =
+    get(model.microphysical_fields, :ρnʳ, nothing)
+
+Microphysics.number_concentration(model, ::P3, ::Val{:cloud_liquid}) =
+    get(model.microphysical_fields, :ρnᶜˡ, nothing)
+
+Microphysics.number_concentration(model, ::P3, ::Val{:ice}) =
+    get(model.microphysical_fields, :ρnⁱ, nothing)
+
+Microphysics.number_concentration(model, ::P3, ::Val) = nothing
