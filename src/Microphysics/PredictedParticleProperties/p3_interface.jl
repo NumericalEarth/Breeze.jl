@@ -435,8 +435,7 @@ end
     source_n_tendency = max(0, tendency_ρn)
     source_tendency = sqrt(source_z_tendency * source_n_tendency)
 
-    tendency = ifelse(existing_distribution, existing_tendency, source_tendency)
-    return ifelse(isnan(z_times_n), z_times_n, tendency)
+    return ifelse(existing_distribution, existing_tendency, source_tendency)
 end
 
 @inline function z̃ⁱ_tendency(nⁱ, zⁱ, tendency_ρz_phys, tendency_ρn,
@@ -608,7 +607,7 @@ end
     qⁱ_raw = total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ)
     has_ice_mass = qⁱ_raw > FT(1e-20)
     nⁱ_raw = min(ℳ.nⁱ, p3.process_rates.maximum_ice_number_density / ρ)
-    nⁱ = ifelse(has_ice_mass | isnan(qⁱ_raw), nⁱ_raw, FT(0))
+    nⁱ = ifelse(has_ice_mass, nⁱ_raw, FT(0))
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
     qⁱ_total = max(qⁱ_raw, FT(1e-20))
