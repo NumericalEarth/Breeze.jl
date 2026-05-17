@@ -502,7 +502,6 @@ end
 
 Base.summary(coef::PolynomialCoefficient) =
     string("PolynomialCoefficient(", coef.polynomial, ")")
-Base.summary(::Nothing) = "Nothing"
 
 #####
 ##### Neutral coefficient computation (Large & Yeager 2009 form)
