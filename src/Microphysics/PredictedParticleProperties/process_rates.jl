@@ -913,14 +913,19 @@ separately.
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     qc_raw = ifelse((𝒮ˡ < FT(-0.001)) & (qᶜˡ < FT(1e-12)), -qᶜˡ / τ, qc_raw)
     qr_raw = ifelse((𝒮ˡ < FT(-0.001)) & (qʳ < FT(1e-12)), -qʳ / τ, qr_raw)
+    # Match the cloud/rain branches above: do NOT clamp_positive the prognostic
+    # before the sign flip. When advection leaves qⁱ or qʷⁱ slightly negative,
+    # the override should produce a positive deposition/coating-condensation
+    # rate so the downstream cap (lines 943 / 946) can pull mass back from
+    # vapor and restore the field. The qᵛ/τ caps still bound the magnitude.
     qi_raw = ifelse((𝒮ⁱ < FT(-0.001)) & (qⁱ_total < FT(1e-12)) &
                     (Fˡ < p3.process_rates.liquid_fraction_small),
-                    -clamp_positive(qⁱ) / τ,
+                    -qⁱ / τ,
                     qi_raw)
     # Wet-ice tiny-mass instant evaporation of the liquid coating (Fortran 3753-3756).
     ql_raw = ifelse((𝒮ⁱ < FT(-0.001)) & (qⁱ_total < FT(1e-12)) &
                     (Fˡ >= p3.process_rates.liquid_fraction_small),
-                    -clamp_positive(qʷⁱ) / τ,
+                    -qʷⁱ / τ,
                     ql_raw)
 
     condensation = ifelse(qc_raw < 0,
