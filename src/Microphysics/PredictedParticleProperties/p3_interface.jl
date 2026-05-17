@@ -93,8 +93,8 @@ reflectivity/sixth moment `ρz̃ⁱ`).
 # `tendency_ρsˢᵃᵗ` when the flag is off, so the only cost of always carrying it
 # is one advected/integrated tracer.
 
-@inline _z̃_prognostic_names(::Nothing) = ()
-@inline _z̃_prognostic_names(_) = (:ρz̃ⁱ,)
+@inline z̃_prognostic_names(::Nothing) = ()
+@inline z̃_prognostic_names(_) = (:ρz̃ⁱ,)
 
 """
 $(TYPEDSIGNATURES)
@@ -113,7 +113,7 @@ The 2-moment ice path advects 10 fields; enabling 3-moment ice adds `ρz̃ⁱ`:
     cloud_names = (:ρqᶜˡ, :ρnᶜˡ)
     rain_names = (:ρqʳ, :ρnʳ)
     ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρqʷⁱ)
-    z_names = _z̃_prognostic_names(three_moment_shape_table(p3))
+    z_names = z̃_prognostic_names(three_moment_shape_table(p3))
     ssat_names = (:ρsˢᵃᵗ,)
 
     return tuple(cloud_names..., rain_names..., ice_names..., z_names..., ssat_names...)
@@ -266,7 +266,7 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
 # Compile-time NamedTuple field lookup with a default — used so that the gridless
 # `microphysical_state` path works whether or not `μ` carries the optional `ρz̃ⁱ`
 # (3-moment ice) and `ρsˢᵃᵗ` (predicted supersaturation) fields.
-@generated function _nt_get(μ::NamedTuple{names}, ::Val{key}, default) where {names, key}
+@generated function get_or_default(μ::NamedTuple{names}, ::Val{key}, default) where {names, key}
     return key in names ? :(μ.$key) : :(default)
 end
 
@@ -282,14 +282,14 @@ end
     # ρz̃ⁱ stores the advected variable z̃; convert to physical z = z̃²/N for internal use.
     # In 2-moment mode ρz̃ⁱ is absent from `μ`; treat it as 0 (zⁱ then collapses to 0).
     FT = typeof(ρ)
-    z̃ⁱ  = _nt_get(μ, Val(:ρz̃ⁱ), zero(FT)) / ρ
+    z̃ⁱ  = get_or_default(μ, Val(:ρz̃ⁱ), zero(FT)) / ρ
     zⁱ  = ifelse(nⁱ > FT(1e-20), z̃ⁱ^2 / nⁱ, zero(FT))
     qʷⁱ = μ.ρqʷⁱ / ρ
     rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ, qʷⁱ)
     qᶠ  = rime_state.qᶠ
     bᶠ  = rime_state.bᶠ
     # ρsˢᵃᵗ is absent unless predicted supersaturation is enabled; default to 0.
-    sˢᵃᵗ = _nt_get(μ, Val(:ρsˢᵃᵗ), zero(FT)) / ρ
+    sˢᵃᵗ = get_or_default(μ, Val(:ρsˢᵃᵗ), zero(FT)) / ρ
     return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ)
 end
 
