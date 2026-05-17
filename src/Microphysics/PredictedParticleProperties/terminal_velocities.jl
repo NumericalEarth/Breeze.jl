@@ -111,6 +111,44 @@ end
     return vₜ_ref * ρ_correction
 end
 
+# GPU-safe concrete struct (NamedTuple complicates the GPU compiler's NoInline boundaries).
+struct RainTerminalVelocities{FT}
+    mass_weighted :: FT
+    number_weighted :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute mass- and number-weighted rain terminal velocities together, sharing the
+slope-parameter, ρ-correction, and `log10(λ_r)` computations between the two
+table lookups. The result is equivalent to calling `rain_terminal_velocity_mass_weighted`
+and `rain_terminal_velocity_number_weighted` separately.
+
+# Returns
+- `RainTerminalVelocities` with fields `mass_weighted`, `number_weighted` [m/s] (positive downward)
+"""
+@inline function rain_terminal_velocities(p3, qʳ, nʳ, ρ)
+    FT = typeof(qʳ)
+    prp = p3.process_rates
+    ρ₀ = prp.reference_air_density
+    ρʷ = prp.liquid_water_density
+
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = max(nʳ, FT(1e-16))
+    ρ_correction = (ρ₀ / ρ)^FT(0.54)
+
+    m̄  = qʳ_eff / nʳ_eff
+    λ_r = cbrt(FT(π) * ρʷ / max(m̄, FT(1e-15)))
+    λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
+    log_λ = log10(λ_r)
+
+    vₘ = p3.rain.velocity_mass(log_λ) * ρ_correction
+    vₙ = p3.rain.velocity_number(log_λ) * ρ_correction
+
+    return RainTerminalVelocities{FT}(vₘ, vₙ)
+end
+
 """
 $(TYPEDSIGNATURES)
 

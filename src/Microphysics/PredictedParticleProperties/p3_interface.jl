@@ -448,6 +448,7 @@ struct P3IceProps{FT}
     nⁱ :: FT
     μ_ice :: FT
     μ_cloud :: FT
+    Nᶜ :: FT
     zⁱ_bounded :: FT
     D_v :: FT
     nu :: FT
@@ -493,13 +494,14 @@ end
 # All operations are scalar — no array access.
 @noinline function _p3_scalar_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
-    cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     Fᶠ = props.Fᶠ
     ρᶠ = props.ρᶠ
 
-    # Rain terminal velocities (separate functions — the rain fall-speed table is 1D)
-    wʳ   = rain_terminal_velocity_mass_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
-    wʳₙ  = rain_terminal_velocity_number_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
+    # Rain terminal velocities — fused call shares λ_r, ρ_correction, log10(λ_r)
+    # across the two 1D table lookups (mass- and number-weighted).
+    vᵣ = rain_terminal_velocities(p3, ℳ.qʳ, ℳ.nʳ, ρ)
+    wʳ   = vᵣ.mass_weighted
+    wʳₙ  = vᵣ.number_weighted
     # Fortran parity: after impose_max_Ni (microphy_p3.f90:2812/4390/4937) the nitot
     # array is capped in place, so all downstream math — process rates, terminal
     # velocities, Z tendency, reflectivity — sees the same value. Mirror that here by
@@ -512,14 +514,16 @@ end
     vᵢ = ice_terminal_velocities(p3, qⁱ_total, props.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
     wⁱ, wⁱₙ, wⁱ_z = vᵢ.mass_weighted, vᵢ.number_weighted, vᵢ.reflectivity_weighted
 
-    # Process rates (heavy, @noinline — compiled as a separate GPU function)
-    rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+    # Process rates (heavy, @noinline — compiled as a separate GPU function).
+    # Passing `props` lets compute_p3_process_rates skip the redundant
+    # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation.
+    rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, props)
 
     # Tendency extraction
     c_qcl = tendency_ρqᶜˡ(rates, ρ)
     # Prescribed-Nᶜ path: nc is a scheme parameter (not advected); tendency = 0.
     c_ncl = isnothing(p3.aerosol) ? zero(typeof(ρ)) :
-            tendency_ρnᶜˡ(rates, ρ, cloud.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
+            tendency_ρnᶜˡ(rates, ρ, props.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
     c_qr  = tendency_ρqʳ(rates, ρ)
     c_nr  = tendency_ρnʳ(rates, ρ, props.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
     c_qi  = tendency_ρqⁱ(rates, ρ)
@@ -661,14 +665,17 @@ end
     transport = air_transport_properties(T, P)
     λ_r = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     return P3IceProps{FT}(rime_state.qᶠ, rime_state.bᶠ, rime_state.Fᶠ, Fˡ,
-                          rime_state.ρᶠ, qⁱ_total, nⁱ, μ_ice, cloud.μ_c,
+                          rime_state.ρᶠ, qⁱ_total, nⁱ, μ_ice, cloud.μ_c, cloud.Nᶜ,
                           zⁱ_bounded, transport.D_v, transport.nu, λ_r)
 end
 
 @inline function p3_rates_and_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    # Compute all process rates from microphysical state ℳ and thermodynamic state 𝒰
-    rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
-    return rates, p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+    # Build ice properties first, then reuse them when computing rates to avoid
+    # the redundant rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ
+    # calls inside compute_p3_process_rates.
+    props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+    rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, props)
+    return rates, props
 end
 
 @inline function p3_ice_sixth_moment_tendency(::Nothing, p3, rates, ρ, ℳ::P3MicrophysicalState, props::P3IceProps)
@@ -699,9 +706,8 @@ zero and the field remains at its initial value.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnᶜˡ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     isnothing(p3.aerosol) && return zero(ρ)
-    rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
-    return tendency_ρnᶜˡ(rates, ρ, cloud.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
+    rates, props = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    return tendency_ρnᶜˡ(rates, ρ, props.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
 end
 
 """

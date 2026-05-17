@@ -1428,7 +1428,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
 # Returns
 - `P3ProcessRates` containing all computed rates
 """
-@noinline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+@noinline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants,
+                                            props = nothing)
     FT = typeof(ρ)
     prp = p3.process_rates
     T₀ = prp.freezing_temperature
@@ -1445,18 +1446,26 @@ suitable for use in GPU kernels where grid indexing is handled externally.
 
     rain_active = (qʳ > FT(1e-14)) & (nʳ > FT(1e-16))
     qʳ_pos = clamp_positive(qʳ)
-    nʳ_pos = clamp_positive(nʳ)
-    λ_r = rain_slope_parameter(qʳ_pos, nʳ_pos, prp)
+    # rain_slope_parameter and consistent_rime_state are pure functions of (ℳ, prp);
+    # when props is supplied (hot path from _p3_scalar_compute / p3_rates_and_properties)
+    # we reuse the values already computed in p3_ice_properties.
+    λ_r = isnothing(props) ? rain_slope_parameter(qʳ_pos, clamp_positive(nʳ), prp) : props.λ_r
     nʳ = ifelse(rain_active, qʳ_pos * λ_r^3 / (FT(π) * prp.liquid_water_density), nʳ)
 
-    rime_state = consistent_rime_state(p3, qⁱ, ℳ.qᶠ, ℳ.bᶠ, qʷⁱ)
-    qᶠ = rime_state.qᶠ
-    bᶠ = rime_state.bᶠ
-    Fᶠ = rime_state.Fᶠ
-    ρᶠ = rime_state.ρᶠ
+    qᶠ, bᶠ, Fᶠ, ρᶠ = if isnothing(props)
+        rs = consistent_rime_state(p3, qⁱ, ℳ.qᶠ, ℳ.bᶠ, qʷⁱ)
+        rs.qᶠ, rs.bᶠ, rs.Fᶠ, rs.ρᶠ
+    else
+        props.qᶠ, props.bᶠ, props.Fᶠ, props.ρᶠ
+    end
 
-    qⁱ_total_mu = max(clamp_positive(qⁱ) + clamp_positive(qʷⁱ), FT(1e-20))
-    Fˡ_mu = clamp_positive(qʷⁱ) / qⁱ_total_mu
+    qⁱ_total_mu = isnothing(props) ?
+                  max(clamp_positive(qⁱ) + clamp_positive(qʷⁱ), FT(1e-20)) :
+                  props.qⁱ_total
+    Fˡ_mu = isnothing(props) ? (clamp_positive(qʷⁱ) / qⁱ_total_mu) : props.Fˡ
+    # μ_ice is still recomputed here because props.μ_ice uses props.nⁱ which is
+    # zeroed in the no-ice case, whereas the local nⁱ above is just clamp-capped.
+    # The two values agree in cells with ice (the cells that matter for rates).
     μ_ice = compute_ice_shape_parameter(p3, qⁱ_total_mu, nⁱ, ℳ.zⁱ, Fᶠ, Fˡ_mu, ρᶠ)
 
     T = temperature(𝒰, constants)
