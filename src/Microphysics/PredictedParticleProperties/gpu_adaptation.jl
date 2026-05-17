@@ -9,6 +9,15 @@
 using Adapt: Adapt
 using Oceananigans.Architectures: on_architecture
 
+# --- TabulatedFunction6D (Breeze-owned 6D variant) ---
+
+# Drop `func` on adapt, matching Oceananigans' own TabulatedFunction adapter.
+Adapt.adapt_structure(to, x::TabulatedFunction6D) =
+    TabulatedFunction6D(nothing, Adapt.adapt(to, x.table), x.range, x.inverse_Δ)
+
+Oceananigans.Architectures.on_architecture(arch, x::TabulatedFunction6D) =
+    TabulatedFunction6D(x.func, on_architecture(arch, x.table), x.range, x.inverse_Δ)
+
 # --- FortranTabulated wrappers ---
 
 Adapt.adapt_structure(to, x::FortranTabulatedFunction5D) =

@@ -8,7 +8,14 @@ using Oceananigans.Utils: TabulatedFunction,
                           interpolator,
                           _interpolate
 
-const TabulatedFunction6D = TabulatedFunction{6}
+# Oceananigans' TabulatedFunction only supports 1D–5D, so we own the 6D variant
+# outright (defining methods on TabulatedFunction{6} would be type piracy).
+struct TabulatedFunction6D{F, T, R, D}
+    func :: F
+    table :: T
+    range :: R
+    inverse_Δ :: D
+end
 
 # Trivial tuple constructor used by lookup_table_2.jl (6D) and lookup_table_3.jl (5D)
 @inline table_range(ranges...) = ranges
@@ -81,7 +88,7 @@ end
         inverse_spacing(axis_range[1], axis_range[2], axis_points, FT)
     end
 
-    return TabulatedFunction{6, typeof(func), typeof(table), typeof(range), typeof(inverse_Δ)}(
+    return TabulatedFunction6D{typeof(func), typeof(table), typeof(range), typeof(inverse_Δ)}(
         func, table, range, inverse_Δ)
 end
 
@@ -107,7 +114,7 @@ end
 ##### 6D interpolation
 #####
 
-@inline function (f::TabulatedFunction{6})(x₁, x₂, x₃, x₄, x₅, x₆)
+@inline function (f::TabulatedFunction6D)(x₁, x₂, x₃, x₄, x₅, x₆)
     a₁, b₁ = f.range[1]
     a₂, b₂ = f.range[2]
     a₃, b₃ = f.range[3]
