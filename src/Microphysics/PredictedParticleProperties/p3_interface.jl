@@ -64,28 +64,59 @@ struct P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
 end
 
 #####
+##### Configuration probes
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Whether `p3` is configured to run the 3-moment ice path (carries the
+reflectivity/sixth moment `ρz̃ⁱ`).
+"""
+@inline is_three_moment_ice(p3::P3) = !isnothing(three_moment_shape_table(p3))
+
+#####
 ##### Prognostic field names
 #####
+
+# The 3-moment ice switch must be resolvable to a constant tuple at compile time,
+# otherwise the resulting Union return type forces the generic GPU
+# `extract_microphysical_prognostics` recursion to allocate.
+#
+# We dispatch on the *type* of `three_moment_shape_table(p3)` — it is `Nothing` in
+# 2-moment mode and a concrete table type in 3-moment mode, so the compiler folds
+# the helper down to a static tuple per concrete P3 type.
+#
+# The `predict_supersaturation` flag is value-only (a Bool field of
+# `ProcessRateParameters`) and is not type-dispatchable without restructuring,
+# so `ρsˢᵃᵗ` stays in the prognostic list. Its tendency is gated to zero in
+# `tendency_ρsˢᵃᵗ` when the flag is off, so the only cost of always carrying it
+# is one advected/integrated tracer.
+
+@inline _z̃_prognostic_names(::Nothing) = ()
+@inline _z̃_prognostic_names(_) = (:ρz̃ⁱ,)
 
 """
 $(TYPEDSIGNATURES)
 
 Return prognostic field names for the P3 scheme.
 
-P3 v5.5 with 3-moment ice and predicted liquid fraction has 11 prognostic fields:
+The 2-moment ice path advects 10 fields; enabling 3-moment ice adds `ρz̃ⁱ`:
+
 - Cloud: ρqᶜˡ, ρnᶜˡ
 - Rain: ρqʳ, ρnʳ
-- Ice: ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρz̃ⁱ, ρqʷⁱ
-- Supersaturation: ρsˢᵃᵗ (H10: Grabowski & Morrison 2008, inactive by default)
+- Ice (always): ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ
+- Ice (3-moment only): ρz̃ⁱ
+- Supersaturation: ρsˢᵃᵗ (tendency = 0 when `predict_supersaturation = false`)
 """
-function AM.prognostic_field_names(::P3)
+@inline function AM.prognostic_field_names(p3::P3)
     cloud_names = (:ρqᶜˡ, :ρnᶜˡ)
     rain_names = (:ρqʳ, :ρnʳ)
-    ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρz̃ⁱ, :ρqʷⁱ)
-    # H10: supersaturation (always allocated; tendency = 0 when predict_supersaturation = false)
+    ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρqʷⁱ)
+    z_names = _z̃_prognostic_names(three_moment_shape_table(p3))
     ssat_names = (:ρsˢᵃᵗ,)
 
-    return tuple(cloud_names..., rain_names..., ice_names..., ssat_names...)
+    return tuple(cloud_names..., rain_names..., ice_names..., z_names..., ssat_names...)
 end
 
 """
@@ -232,6 +263,13 @@ Build a [`P3MicrophysicalState`](@ref) from density-weighted prognostic variable
 P3 is a non-equilibrium scheme, so all cloud and precipitation variables come
 from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
 """
+# Compile-time NamedTuple field lookup with a default — used so that the gridless
+# `microphysical_state` path works whether or not `μ` carries the optional `ρz̃ⁱ`
+# (3-moment ice) and `ρsˢᵃᵗ` (predicted supersaturation) fields.
+@generated function _nt_get(μ::NamedTuple{names}, ::Val{key}, default) where {names, key}
+    return key in names ? :(μ.$key) : :(default)
+end
+
 @inline function AM.microphysical_state(p3::P3, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
     nᶜˡ = effective_cloud_droplet_number(p3, μ.ρnᶜˡ, ρ)
@@ -242,14 +280,16 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
     # M13: Fortran advects z̃ = √(z·N) and converts to physical z at microphysics entry:
     #   where (nitot > 0) zitot = zitot**2 / nitot; elsewhere zitot = 0
     # ρz̃ⁱ stores the advected variable z̃; convert to physical z = z̃²/N for internal use.
+    # In 2-moment mode ρz̃ⁱ is absent from `μ`; treat it as 0 (zⁱ then collapses to 0).
     FT = typeof(ρ)
-    z̃ⁱ  = μ.ρz̃ⁱ / ρ
+    z̃ⁱ  = _nt_get(μ, Val(:ρz̃ⁱ), zero(FT)) / ρ
     zⁱ  = ifelse(nⁱ > FT(1e-20), z̃ⁱ^2 / nⁱ, zero(FT))
     qʷⁱ = μ.ρqʷⁱ / ρ
     rime_state = consistent_rime_state(p3, qⁱ, μ.ρqᶠ / ρ, μ.ρbᶠ / ρ, qʷⁱ)
     qᶠ  = rime_state.qᶠ
     bᶠ  = rime_state.bᶠ
-    sˢᵃᵗ = μ.ρsˢᵃᵗ / ρ
+    # ρsˢᵃᵗ is absent unless predicted supersaturation is enabled; default to 0.
+    sˢᵃᵗ = _nt_get(μ, Val(:ρsˢᵃᵗ), zero(FT)) / ρ
     return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ)
 end
 
@@ -855,9 +895,9 @@ end
 # The state-based `microphysical_tendency` methods above remain the gridless
 # fallback used by ParcelModels.
 
-@kernel function _add_p3_tendencies_kernel!(Gρqᵛ, Gρqᶜˡ, Gρnᶜˡ, Gρqʳ, Gρnʳ,
-                                            Gρqⁱ, Gρnⁱ, Gρqᶠ, Gρbᶠ, Gρz̃ⁱ,
-                                            Gρqʷⁱ, Gρsˢᵃᵗ, μ)
+@kernel function _add_p3_base_tendencies_kernel!(Gρqᵛ, Gρqᶜˡ, Gρnᶜˡ, Gρqʳ, Gρnʳ,
+                                                 Gρqⁱ, Gρnⁱ, Gρqᶠ, Gρbᶠ,
+                                                 Gρqʷⁱ, Gρsˢᵃᵗ, μ)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         Gρqᵛ[i, j, k]   += μ.cache_ρqᵛ[i, j, k]
@@ -869,10 +909,14 @@ end
         Gρnⁱ[i, j, k]   += μ.cache_ρnⁱ[i, j, k]
         Gρqᶠ[i, j, k]   += μ.cache_ρqᶠ[i, j, k]
         Gρbᶠ[i, j, k]   += μ.cache_ρbᶠ[i, j, k]
-        Gρz̃ⁱ[i, j, k]   += μ.cache_ρz̃ⁱ[i, j, k]
         Gρqʷⁱ[i, j, k]  += μ.cache_ρqʷⁱ[i, j, k]
         Gρsˢᵃᵗ[i, j, k] += μ.cache_ρsˢᵃᵗ[i, j, k]
     end
+end
+
+@kernel function _add_p3_z̃ⁱ_tendency_kernel!(Gρz̃ⁱ, cache_ρz̃ⁱ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gρz̃ⁱ[i, j, k] += cache_ρz̃ⁱ[i, j, k]
 end
 
 function AM.compute_microphysical_tendencies!(p3::P3, model)
@@ -881,10 +925,13 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
     G = model.timestepper.Gⁿ
     μ = model.microphysical_fields
 
-    launch!(arch, grid, :xyz, _add_p3_tendencies_kernel!,
+    launch!(arch, grid, :xyz, _add_p3_base_tendencies_kernel!,
             G.ρqᵛ, G.ρqᶜˡ, G.ρnᶜˡ, G.ρqʳ, G.ρnʳ,
-            G.ρqⁱ, G.ρnⁱ, G.ρqᶠ, G.ρbᶠ, G.ρz̃ⁱ,
-            G.ρqʷⁱ, G.ρsˢᵃᵗ, μ)
+            G.ρqⁱ, G.ρnⁱ, G.ρqᶠ, G.ρbᶠ, G.ρqʷⁱ, G.ρsˢᵃᵗ, μ)
+
+    if is_three_moment_ice(p3)
+        launch!(arch, grid, :xyz, _add_p3_z̃ⁱ_tendency_kernel!, G.ρz̃ⁱ, μ.cache_ρz̃ⁱ)
+    end
 
     return nothing
 end
