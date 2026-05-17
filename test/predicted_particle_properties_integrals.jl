@@ -244,10 +244,10 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Prognostic field names" begin
+        # 2-moment ice (default): ρz̃ⁱ is not advected.
         p3 = PredictedParticlePropertiesMicrophysics()
         names = prognostic_field_names(p3)
 
-        # P3 cloud number should be prognostic.
         @test :ρqᶜˡ ∈ names
         @test :ρnᶜˡ ∈ names
         @test :ρqʳ ∈ names
@@ -256,9 +256,15 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test :ρnⁱ ∈ names
         @test :ρqᶠ ∈ names
         @test :ρbᶠ ∈ names
-        @test :ρz̃ⁱ ∈ names
+        @test :ρz̃ⁱ ∉ names
         @test :ρzⁱ ∉ names
         @test :ρqʷⁱ ∈ names
+
+        # 3-moment ice adds ρz̃ⁱ (the advected √(z·N) variable).
+        p3_3mom = PredictedParticlePropertiesMicrophysics(; three_moment_ice=true)
+        names_3mom = prognostic_field_names(p3_3mom)
+        @test :ρz̃ⁱ ∈ names_3mom
+        @test :ρzⁱ ∉ names_3mom
     end
 
     @testset "Show methods" begin
