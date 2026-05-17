@@ -36,7 +36,8 @@ function walk_submodules!(result, visited, mod::Module)
         end
     end
 end
-function get_submodules(mod::Module)
+function get_submodules(mod::Module; self=true)
+    result = self ? Module[mod] : Module[]
     result = Module[]
     visited = Set{Module}()
 
