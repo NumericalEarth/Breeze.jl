@@ -116,7 +116,7 @@ function read_fortran_lookup_tables(directory::AbstractString;
     table3_fields = if three_moment && isfile(file_table3)
         parse_fortran_table_3(file_table3, FT)
     else
-        # D26: Fortran hard-stops when Table 3 is missing in 3-moment mode.
+        # Fortran hard-stops when Table 3 is missing in 3-moment mode.
         # Match that behavior — a silent fallback to 2-moment μ lookup would give
         # different results than the 3-moment μ diagnostic.
         three_moment && error("3-moment mode requested but Table 3 file not found: $file_table3. " *
@@ -503,7 +503,7 @@ function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
     )
 
     sixth_moment = if three_moment
-        # D32: The Fortran table file stores D ≤ D_crit filtered melt Z integrals
+        # The Fortran table file stores D ≤ D_crit filtered melt Z integrals
         # (f1pr32/f1pr33) in the m6_melt1/m6_melt2 columns. The non-liquid-fraction
         # zimlt path in Fortran reuses deposition tables and is dead code (log_full3mom
         # = .false.). We set melt_all1/melt_all2 to the same file values; the all-D
@@ -604,7 +604,7 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
     )
 
     sixth_moment = if three_moment
-        # D32: Fortran file stores D ≤ D_crit melt integrals (f1pr32/f1pr33).
+        # Fortran file stores D ≤ D_crit melt integrals (f1pr32/f1pr33).
         # Set melt_all1/melt_all2 to the same values (all-D distinction is Julia-native only).
         IceSixthMoment(
             ice_5d[:m6_rime],

@@ -49,7 +49,7 @@ end
     m̄  = qʳ / nʳ
     # For exponential PSD (μ_r=0): <m> = π ρ_w / λ³, so λ = (π ρ_w / m̄)^(1/3)
     λ_r = cbrt(FT(π) * ρʷ / max(m̄, FT(1e-15)))
-    # H6: Clamp λ_r to Fortran P3 bounds (prevents unphysical lookup).
+    # Clamp λ_r to Fortran P3 bounds (prevents unphysical lookup).
     # m10: Fortran get_rain_dsd2 also recomputes nr when λ is clamped;
     # that adjustment is done in compute_p3_process_rates (H4) and does not
     # affect the velocity lookup which depends only on λ_r.
@@ -103,7 +103,7 @@ end
     m̄  = qʳ / nʳ
     # For exponential PSD (μ_r=0): <m> = π ρ_w / λ³, so λ = (π ρ_w / m̄)^(1/3)
     λ_r = cbrt(FT(π) * ρʷ / max(m̄, FT(1e-15)))
-    # H6: Clamp λ_r to Fortran P3 bounds.
+    # Clamp λ_r to Fortran P3 bounds.
     # m10: nr adjustment handled by H4 in compute_p3_process_rates.
     λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
     log_λ = log10(λ_r)

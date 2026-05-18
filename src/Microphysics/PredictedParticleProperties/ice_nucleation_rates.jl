@@ -102,7 +102,7 @@ negligible for small droplets.
     ρᴸ = FT(prp.liquid_water_density)
     bimm = prp.immersion_freezing_nucleation_coefficient
 
-    # H2: Compute μ_c dynamically from local Nᶜ (already [1/m³]) via Liu-Daum (2000),
+    # Compute μ_c dynamically from local Nᶜ (already [1/m³]) via Liu-Daum (2000),
     # then derive the PSD correction C(μ_c) = Γ(μ+7)Γ(μ+1)/Γ(μ+4)².
     # This replaces the precomputed construction-time value, allowing the correction
     # to vary spatially with the local droplet population.
@@ -126,7 +126,7 @@ negligible for small droplets.
     m_drop = qᶜˡ_eff / nᶜ                     # [kg]
     V_drop = m_drop / ρᴸ                   # [m³]
 
-    # H1: Fortran's per-drop freezing coefficient (NO psd_correction) is a
+    # Fortran's per-drop freezing coefficient (NO psd_correction) is a
     # linear per-second rate. The log form avoids overflow at very low
     # temperatures; the safety cap is the same all-available-drops limit that
     # the later species budget limiter would impose.
@@ -198,7 +198,7 @@ uses ``\\mu_r(i,k)`` in `gamma(7.+mu_r)` and `gamma(mu_r+4.)` terms).
     m_drop = qʳ_eff / nʳ_safe          # [kg]
     V_drop = m_drop / ρᴸ            # [m³]
 
-    # H1: Fortran's per-drop freezing coefficient (NO psd_correction) is a
+    # Fortran's per-drop freezing coefficient (NO psd_correction) is a
     # linear per-second rate. The log form avoids overflow at very low
     # temperatures; the safety cap is the same all-available-drops limit that
     # the later species budget limiter would impose.
@@ -289,7 +289,7 @@ Float64
     # Number rate: Nᶜ is [1/m³] → divide by ρ for [1/kg]
     N_hom = Nᶜ / ρ / τ_hom
 
-    # D25: Fortran has no mass-number consistency cap — it transfers all nc to ice
+    # Fortran has no mass-number consistency cap — it transfers all nc to ice
     # instantaneously below the homogeneous freezing threshold.
     Q_hom = ifelse(freezing_active, Q_hom, zero(FT))
     N_hom = ifelse(freezing_active, N_hom, zero(FT))
@@ -392,7 +392,7 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
     T_high = prp.splintering_temperature_high
     T_peak = prp.splintering_temperature_peak
     c_splinter = prp.splintering_rate
-    # C6: Use Hallett-Mossop splinter crystal mass (Fortran Dinit_HM = 10 μm),
+    # Use Hallett-Mossop splinter crystal mass (Fortran Dinit_HM = 10 μm),
     # NOT the nucleated ice mass mi0 (D = 2 μm). Splinters are 125× heavier.
     mᵢ₀ = prp.splintering_crystal_mass
 

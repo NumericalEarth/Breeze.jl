@@ -67,7 +67,7 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
     nu  = transport.nu        # Kinematic viscosity [m²/s]
 
-    # M10: use mixing ratio convention (Fortran: rho*Lv*Dv*(Qv-qsat0))
+    # use mixing ratio convention (Fortran: rho*Lv*Dv*(Qv-qsat0))
     Rᵈ = FT(dry_air_gas_constant(constants))
     ε = Rᵈ / Rᵛ
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
@@ -78,12 +78,12 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(1e-20))
     Fl = clamp_positive(qʷⁱ) / qⁱ_total
 
-    # M8: Table lookup uses total mass per particle (Fortran qitot/nitot),
+    # Table lookup uses total mass per particle (Fortran qitot/nitot),
     # not dry-only mass, because tables are indexed by total mass.
     m_mean = safe_divide(qⁱ_total, nⁱ_eff, FT(1e-12))
     ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
 
-    # M9: Use dry-ice PSD ventilation tables (small + large, Fortran f1pr24-f1pr27)
+    # Use dry-ice PSD ventilation tables (small + large, Fortran f1pr24-f1pr27)
     # for melting. The total Ventilation/VentilationEnhanced tables use wet-ice PSD
     # and are not appropriate for melting (they are not flagged as melting integrals
     # during table generation, so they don't use the dry-ice PSD from the M5 fix).
@@ -167,12 +167,12 @@ Requires tabulated small/large ice ventilation integrals.
     # Get total melting rate; pass qʷⁱ for Fl-blended ventilation.
     total_melt = ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport, μ)
 
-    # H9: PSD-resolved melting partitioning using tabulated small/large ice
+    # PSD-resolved melting partitioning using tabulated small/large ice
     # ventilation integrals (Fortran f1pr24-f1pr27).
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
     qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(1e-20))
-    # M8: Table lookup uses total mass per particle (Fortran qitot/nitot).
+    # Table lookup uses total mass per particle (Fortran qitot/nitot).
     m_mean = safe_divide(qⁱ_total, nⁱ_eff, FT(1e-12))
     Fl = clamp_positive(qʷⁱ) / qⁱ_total
     ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
@@ -192,7 +192,7 @@ Requires tabulated small/large ice ventilation integrals.
     return (partial_melting = partial, complete_melting = complete)
 end
 
-# H9: Tabulated path — use PSD-integrated small/large ice ventilation integrals
+# Tabulated path — use PSD-integrated small/large ice ventilation integrals
 # to compute the fraction of melting that goes to rain (small particles, D ≤ D_crit).
 # Fortran: qrmlt uses f1pr24/f1pr25, qiliqcol uses f1pr26/f1pr27.
 @inline function psd_melting_rain_fraction(sc::P3Table5D, sr::P3Table5D,

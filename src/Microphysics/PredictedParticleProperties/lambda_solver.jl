@@ -174,12 +174,12 @@ Compute shape parameter μ.
     ρ_dep = deposited_ice_density(mass, rime_fraction, rime_density)
     ρ_g_rimed = graupel_density(rime_fraction, rime_density, ρ_dep)
     ρ_g_dry = ifelse(iszero(rime_fraction), rime_density, ρ_g_rimed)
-    # M12: blend liquid water density into bulk density (Fortran diagnostic_mui_Fl)
+    # blend liquid water density into bulk density (Fortran diagnostic_mui_Fl)
     ρᴸ = FT(1000)
     ρ_g = (1 - liquid_fraction) * ρ_g_dry + liquid_fraction * ρᴸ
 
     # 2. Compute D_mvd (Mean Volume Diameter)
-    # D30: Fortran diagnostic_mui uses mean mass per particle q = qi_tot/ni_tot,
+    # Fortran diagnostic_mui uses mean mass per particle q = qi_tot/ni_tot,
     # then D_mvd = (q / (π/6 × ρ_g))^(1/3). L_ice alone is total mass, not per-particle.
     mean_mass = L_ice / max(N_ice, eps(FT))
     D_mvd_cubed = mean_mass / (FT(π)/6 * ρ_g)
@@ -598,7 +598,7 @@ used by `solve_mui`.
 
     M₃ <= M₃_min && return FT(μmax)
 
-    # D21: Promote to Float64 for piecewise polynomial evaluation (Fortran uses
+    # Promote to Float64 for piecewise polynomial evaluation (Fortran uses
     # double precision). Near breakpoints, Float32 rounding assigns G to the
     # wrong segment, producing incorrect μ.
     G64 = Float64(M₀ / M₃) * Float64(M₆ / M₃)
@@ -1014,7 +1014,7 @@ function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
     λ = exp(logλ)
     μ = shape_parameter(closure, logλ, L_ice, N_ice, rime_fraction, rime_density, liquid_fraction, mass)
 
-    # D9: Fortran always applies Fr-dependent diameter bounds (D_max = 5mm + 20mm×Fr²).
+    # Fortran always applies Fr-dependent diameter bounds (D_max = 5mm + 20mm×Fr²).
     # Default to DiameterBounds(FT, rime_fraction) when not explicitly specified.
     bounds = isnothing(diameter_bounds) ? DiameterBounds(FT, rime_fraction) : diameter_bounds
     λ = enforce_diameter_bounds(λ, μ, bounds)
@@ -1107,7 +1107,7 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
         return IceDistributionParameters(zero(FT), zero(FT), zero(FT))
     end
 
-    # D9: Fortran always applies Fr-dependent diameter bounds.
+    # Fortran always applies Fr-dependent diameter bounds.
     bounds = isnothing(diameter_bounds) ? DiameterBounds(FT, rime_fraction) : diameter_bounds
 
     # If Z is zero or negative, fall back to two-moment with μ at lower bound
@@ -1117,7 +1117,7 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
         λ = exp(logλ)
         λ = enforce_diameter_bounds(λ, μ, bounds)
 
-        # M11: Use mass-constrained N₀ (matching two-moment path and Fortran).
+        # Use mass-constrained N₀ (matching two-moment path and Fortran).
         logλ_final = log(λ)
         log_M_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ_final;
                                          liquid_fraction)
@@ -1125,7 +1125,7 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
         return IceDistributionParameters(N₀, λ, μ)
     end
 
-    # H15: Compute μ from three-moment constraint with density iteration.
+    # Compute μ from three-moment constraint with density iteration.
     # Fortran solve_mui iterates up to 5 times: at each step, the bulk density
     # ρ_bulk is updated from the lookup table (entry 12), which changes M₃ and
     # hence μ. Here we compute ρ_bulk analytically from the solved (μ, λ) pair
@@ -1160,7 +1160,7 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
     λ = exp(logλ)
     λ = enforce_diameter_bounds(λ, μ, bounds)
 
-    # M11: Use mass-constrained N₀ (matching two-moment path and Fortran).
+    # Use mass-constrained N₀ (matching two-moment path and Fortran).
     # After λ clamping, number-normalized N₀ = N × λ^(μ+1)/Γ(μ+1) violates
     # the mass constraint. Mass-constrained N₀ ensures L = N₀ × ∫m(D)D^μ e^{-λD}dD.
     logλ_final = log(λ)

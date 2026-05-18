@@ -29,11 +29,6 @@ using DocStringExtensions: TYPEDSIGNATURES
 ##### Utility functions
 #####
 
-"""
-$(TYPEDSIGNATURES)
-
-Return max(0, x) for numerical stability.
-"""
 @inline clamp_positive(x) = max(0, x)
 
 """
@@ -153,17 +148,10 @@ Returns a NamedTuple of the possibly-rescaled rates.
               dep, coat_cond, coat_evap, nuc_q, nuc_n)
 end
 
-"""
-$(TYPEDSIGNATURES)
-
-Safe division returning `default` when b ≈ 0.
-All arguments must be positional (GPU kernel compatibility).
-"""
 @inline function safe_divide(a, b, default)
     return ifelse(iszero(b), default, a / b)
 end
 
-# Convenience overload for common case
 @inline safe_divide(a, b) = safe_divide(a, b, zero(a))
 
 @inline function ice_air_density_correction(reference_air_density, air_density)
@@ -208,7 +196,7 @@ state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density 
     prp = p3.process_rates
 
     qⁱ_available = clamp_positive(qⁱ)
-    # D14: Julia's qⁱ is already dry ice (= Fortran qitot - qiliq), so
+    # Julia's qⁱ is already dry ice (= Fortran qitot - qiliq), so
     # qⁱ_dry = qⁱ_available (no need to subtract qʷⁱ again).
     qⁱ_dry = qⁱ_available
     qᶠ_raw = clamp_positive(qᶠ)
@@ -228,7 +216,7 @@ state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density 
     qᶠ_after_small = ifelse(rime_not_small, qᶠ_after_volume, zero(FT))
     bᶠ_after_small = ifelse(rime_not_small, bᶠ_after_volume, zero(FT))
 
-    # M5: bound rime mass by dry ice mass, not total ice mass
+    # bound rime mass by dry ice mass, not total ice mass
     exceeds_dry_ice = (qᶠ_after_small > qⁱ_dry) & (ρᶠ > zero(FT))
     qᶠ_consistent = ifelse(exceeds_dry_ice, qⁱ_dry, qᶠ_after_small)
     bᶠ_consistent = ifelse(exceeds_dry_ice,
@@ -1096,7 +1084,7 @@ struct P3ProcessRates{FT}
     # Phase 2: Ice aggregation (positive magnitude)
     aggregation :: FT              # Ice number loss magnitude from self-collection [1/kg/s]
 
-    # C3: Global ice number limiter — Fortran impose_max_Ni (positive magnitude)
+    # Global ice number limiter — Fortran impose_max_Ni (positive magnitude)
     ni_limit :: FT                 # Ice number excess removal rate [1/kg/s]
 
     # Phase 2: Riming (all positive magnitudes)
@@ -1141,24 +1129,24 @@ struct P3ProcessRates{FT}
     wet_growth_cloud :: FT             # Cloud collection redirected to qʷⁱ [kg/kg/s]
     wet_growth_rain :: FT              # Rain collection redirected to qʷⁱ [kg/kg/s]
 
-    # D8: Wet growth shedding — excess collection beyond freezing capacity goes to rain
+    # Wet growth shedding — excess collection beyond freezing capacity goes to rain
     # (Fortran nrshdr/qcshd: mass that can't freeze sheds as 1 mm rain drops)
     wet_growth_shedding :: FT          # Excess collection → rain mass [kg/kg/s]
     wet_growth_shedding_number :: FT   # Rain number from wet growth shedding [1/kg/s]
 
-    # M9: Warm/mixed-phase budget terms
+    # Warm/mixed-phase budget terms
     ccn_activation_mass :: FT          # CCN activation mass rate (vapor → cloud) [kg/kg/s]
     ccn_activation_number :: FT        # CCN activation number rate [1/kg/s] (prognostic CCN only)
     rain_condensation :: FT            # Rain condensation (vapor → rain) [kg/kg/s]
     coating_condensation :: FT         # Condensation on ice liquid coating [kg/kg/s]
     coating_evaporation :: FT          # Evaporation from ice liquid coating [kg/kg/s]
 
-    # H9: Wet growth rime densification (Fortran lines 4303-4307)
+    # Wet growth rime densification (Fortran lines 4303-4307)
     # During wet growth, assume total soaking: qᶠ → qⁱ, bᶠ → qⁱ/ρ_rimeMax.
     wet_growth_densification_mass :: FT   # Rime mass source: (qⁱ - qᶠ)/τ [kg/kg/s]
     wet_growth_densification_volume :: FT # Rime volume change: (qⁱ/ρ_max - bᶠ)/τ [m³/kg/s]
 
-    # M6: DSD number correction feedback (Fortran get_cloud_dsd2/get_rain_dsd2)
+    # DSD number correction feedback (Fortran get_cloud_dsd2/get_rain_dsd2)
     # After lambda bounding, the DSD-consistent number may differ from the prognostic
     # number. Fortran writes the bounded value back instantaneously; here we express
     # the correction as a relaxation rate over dt_safety.
@@ -1278,7 +1266,7 @@ end
     # =========================================================================
     agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
 
-    # C3: Global ice number limiter — Fortran impose_max_Ni hard-clamps the prognostic
+    # Global ice number limiter — Fortran impose_max_Ni hard-clamps the prognostic
     # nitot at multiple driver points (microphy_p3.f90:2812, 4390, 4937). Mirror that as
     # a tendency by using the *raw* prognostic ℳ.nⁱ rather than the locally pre-capped
     # `state.nⁱ`, which would always be ≤ N_max/ρ and make this limiter dead.
@@ -1320,12 +1308,12 @@ end
     rain_rim    = ifelse(is_wet_growth, zero(FT), rain_rim)
     rain_rim_n  = ifelse(is_wet_growth, zero(FT), rain_rim_n)
 
-    # D8: Wet growth shedding
+    # Wet growth shedding
     shed_active = !prp.liquid_fraction_active & is_wet_growth
     wg_shed   = ifelse(shed_active, clamp_positive(total_collection - qwgrth), zero(FT))
     wg_shed_n = wg_shed / prp.shed_drop_mass
 
-    # H9: Wet growth rime densification
+    # Wet growth rime densification
     ρ_rimemax = prp.maximum_rime_density
     τ_densif = prp.rime_densification_timescale
     qⁱ_safe = clamp_positive(qⁱ)
@@ -1357,7 +1345,7 @@ end
     refrz = ifelse(clip_freeze, refrz + qʷⁱ_eff / τ_clip, refrz)
     shed = ifelse(clip_melt, shed + qʷⁱ_eff / τ_clip, shed)
 
-    # M8: Filiq > 0.99 safety clipping
+    # Filiq > 0.99 safety clipping
     qⁱ_dry = clamp_positive(qⁱ)
     clip_high_fl = (Fˡ > FT(0.99)) & (qⁱ_dry > 0)
     complete_melt = phase1.complete_melting  # start from Phase 1 value
@@ -1617,11 +1605,11 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     wg_rain       = wg_rain * f_rain
     rain_evap     = rain_evap * f_rain
 
-    # D2: Sublimation number loss
+    # Sublimation number loss
     sublim_mag = clamp_positive(-dep)
     sublim_n = sublim_mag * safe_divide(clamp_positive(nⁱ), max(clamp_positive(qⁱ), FT(1e-20)), zero(FT))
 
-    # D1: Wet-ice coating condensation/evaporation comes from the coupled
+    # Wet-ice coating condensation/evaporation comes from the coupled
     # saturation adjustment (P3CoupledVaporRates). The dry/wet exclusivity is
     # enforced inside that formula via εⁱ / εⁱʷ activation.
 
@@ -1672,7 +1660,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     rain_spl_q = min(rain_spl_q, clamp_positive(rain_rim))
     spl_q = cloud_spl_q + rain_spl_q
 
-    # M6: DSD number correction feedback
+    # DSD number correction feedback
     ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
     nr_correction = (nʳ - ℳ.nʳ) / dt_safety
 
@@ -1770,7 +1758,7 @@ Cloud liquid is consumed by:
 """
 @inline function tendency_ρqᶜˡ(rates::P3ProcessRates, ρ)
     # Phase 1: condensation (positive = cloud forms)
-    # M9: CCN activation (vapor → cloud)
+    # CCN activation (vapor → cloud)
     gain = rates.condensation + rates.ccn_activation_mass
     # Phase 1: autoconversion and accretion
     # Phase 2: cloud riming by ice, immersion freezing, homogeneous freezing
@@ -1807,8 +1795,8 @@ Rain loses from:
     # Phase 2: gains from shedding; loses from riming, freezing, homogeneous freezing
     # Milbrandt et al. (2025): above-freezing collection and wet growth go to qʷⁱ, NOT rain.
     # Rain warm collection is a rain SINK (collected by ice → qʷⁱ).
-    # M9: rain condensation (vapor → rain)
-    # D8: wet_growth_shedding — excess collection beyond freezing capacity goes to rain.
+    # rain condensation (vapor → rain)
+    # wet_growth_shedding — excess collection beyond freezing capacity goes to rain.
     # Note: rain_warm_collection is zeroed at rate-assembly time in the non-liquid-
     # fraction branch (Fortran microphy_p3.f90:3055-3066) so it can safely be added
     # here unconditionally.
@@ -1854,10 +1842,10 @@ Rain number loses from:
     n_from_evap = safe_divide(nʳ * rates.rain_evaporation, qʳ, zero(FT))
 
     # Gains: shedding produces rain drops
-    # M9: cloud_warm_collection_number → new rain drops from above-freezing cloud
+    # cloud_warm_collection_number → new rain drops from above-freezing cloud
     #      collection (Fortran ncshdc). Only in non-liquid-fraction path;
     #      when liquid fraction is active, collected mass goes to qʷⁱ, not rain.
-    # D8: wet_growth_shedding_number → rain drops from excess wet growth (Fortran nrshdr)
+    # wet_growth_shedding_number → rain drops from excess wet growth (Fortran nrshdr)
     cloud_warm_rain_n = ifelse(prp.liquid_fraction_active, zero(FT),
                                rates.cloud_warm_collection_number)
     n_gain = n_from_autoconv + n_from_melt +
@@ -1866,7 +1854,7 @@ Rain number loses from:
              cloud_warm_rain_n +
              rates.wet_growth_shedding_number
     # Losses (all positive magnitudes, M7)
-    # M9: rain_warm_collection_number → rain number sink from above-freezing rain
+    # rain_warm_collection_number → rain number sink from above-freezing rain
     #      collection (Fortran nrcoll)
     n_loss = n_from_evap +
              rates.rain_self_collection +
@@ -1875,7 +1863,7 @@ Rain number loses from:
              rates.rain_homogeneous_number +
              rates.rain_warm_collection_number
 
-    # M6: DSD number correction feedback (Fortran get_rain_dsd2 writes back bounded nr)
+    # DSD number correction feedback (Fortran get_rain_dsd2 writes back bounded nr)
     return ρ * (n_gain - n_loss + rates.rain_number_correction)
 end
 
@@ -1933,7 +1921,7 @@ Ice number loses from:
            rates.rain_freezing_number + rates.splintering_number +
            rates.cloud_homogeneous_number + rates.rain_homogeneous_number
     # Losses (all positive magnitudes, M7)
-    # D2: sublimation_number — ice number loss from sublimation (Fortran nisub)
+    # sublimation_number — ice number loss from sublimation (Fortran nisub)
     # ni_limit: C3 global Nᵢ cap (impose_max_Ni); relaxation sink above N_max/ρ.
     loss = rates.melting_number + rates.sublimation_number + rates.aggregation + rates.ni_limit
     return ρ * (gain - loss)
@@ -1963,7 +1951,7 @@ Rime mass loses from:
            rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass +
            rates.wet_growth_densification_mass
     # Phase 1: melts and sublimates proportionally with ice mass
-    # M8: sublimation (negative deposition) also removes rime proportionally
+    # sublimation (negative deposition) also removes rime proportionally
     sublimation = clamp_positive(-rates.deposition)
     # Splintering (nCat=1): Fortran subtracts splintering from riming then adds it back
     # as qcmul/qrmul, netting to zero effect on rime. Since cloud_riming and rain_riming
@@ -1990,7 +1978,7 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
 
     # Fortran P3 v5.5.0: rho_rimeMax = 900 for rain rime and freezing
     ρ_rimemax = prp.maximum_rime_density
-    # D6: Fortran uses rho_rimeMax (900) for homogeneous freezing rime volume, not 917
+    # Fortran uses rho_rimeMax (900) for homogeneous freezing rime volume, not 917
     ρ_rim_hom = prp.maximum_rime_density
 
     # Phase 2: Volume gain from new rime
@@ -2005,12 +1993,12 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
                    rates.wet_growth_densification_volume
 
     # Phase 1: Volume loss from melting and sublimation (proportional to rime fraction)
-    # M8: sublimation (negative deposition) also removes rime volume proportionally
+    # sublimation (negative deposition) also removes rime volume proportionally
     sublimation = clamp_positive(-rates.deposition)
     total_melting = rates.partial_melting + rates.complete_melting
     volume_loss = Fᶠ * (total_melting + sublimation) / ρᶠ_safe
 
-    # M3: Melt-densification (Fortran P3 v5.5.0 lines 4309-4313)
+    # Melt-densification (Fortran P3 v5.5.0 lines 4309-4313)
     # Low-density rime portions melt first → remaining ice approaches 917 kg/m³.
     # In tendency form: additional volume reduction = bᶠ × (917 - ρᶠ) × |melt| / (ρᶠ × qⁱ)
     # Fortran guards with `.not. log_LiquidFrac`: when liquid fraction is active,
@@ -2252,7 +2240,7 @@ end
     complete_melting = rates.complete_melting
     env_melt = safe_divide(complete_melting, max(nⁱ * mass_melt_combined, eps(FT)), zero(FT))
 
-    # D32: Fortran uses D ≤ D_crit filtered tables (f1pr32/f1pr33) for Z melting when
+    # Fortran uses D ≤ D_crit filtered tables (f1pr32/f1pr33) for Z melting when
     # liquid fraction is active. The non-liquid-fraction zimlt path in Fortran reuses
     # deposition tables and is gated by log_full3mom=.false. (dead code in P3 v5.5.0).
     # Julia provides all-D melt integrands for completeness via melt_all1/melt_all2.
@@ -2275,7 +2263,7 @@ end
                                                           inv_nⁱ, z_cloud_rime)
     z_rain_rime_rate = z_rain_rime_factor * rates.rain_riming
 
-    # D31: Wet growth Z contribution.
+    # Wet growth Z contribution.
     # During wet growth, rates.cloud_riming and rates.rain_riming are zeroed (redirected
     # to wet_growth_cloud/wet_growth_rain), so z_cloud_rime_rate and z_rain_rime_rate
     # are zero. The Z contribution must come from the wet growth rates instead.
@@ -2402,7 +2390,7 @@ to the cloud mass they consume, following the Fortran `nc` budget structure.
                   rates.cloud_homogeneous_number +
                   rates.cloud_warm_collection_number
 
-    # M6: DSD number correction feedback (Fortran get_cloud_dsd2 writes back bounded nc)
+    # DSD number correction feedback (Fortran get_cloud_dsd2 writes back bounded nc)
     return ρ * (activation_number - number_loss + rates.cloud_number_correction)
 end
 
@@ -2431,8 +2419,8 @@ Loses from:
 - Refreezing (liquid refreezes to rime)
 """
 @inline function tendency_ρqʷⁱ(rates::P3ProcessRates, ρ)
-    # D1: Include coating condensation/evaporation (Fortran qlcon/qlevp)
-    # D8: wet_growth_shedding diverts excess wet growth mass from qʷⁱ to rain.
+    # Include coating condensation/evaporation (Fortran qlcon/qlevp)
+    # wet_growth_shedding diverts excess wet growth mass from qʷⁱ to rain.
     # Note: rain_warm_collection is zeroed at rate-assembly time in the non-liquid-
     # fraction branch (Fortran does not transfer rain mass to qʷⁱ in that path), so
     # it can safely be added here unconditionally.
@@ -2472,7 +2460,7 @@ cloud tendencies pick it up automatically when integrated with
     # Deposition:   positive = vapor loss (dep),  negative = vapor gain (sublimation)
     # Rain evaporation: positive magnitude (M7) = vapor gain
     # Nucleation: always positive = vapor loss
-    # M9: CCN activation, rain condensation, and coating condensation are all vapor sinks;
+    # CCN activation, rain condensation, and coating condensation are all vapor sinks;
     #      coating evaporation is a vapor source.
     vapor_loss = rates.condensation + rates.deposition + rates.nucleation_mass +
                  rates.ccn_activation_mass + rates.rain_condensation + rates.coating_condensation

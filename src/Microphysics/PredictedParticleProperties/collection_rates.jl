@@ -155,7 +155,7 @@ function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷ�
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
-    # D3: Fortran uses T <= trplpt for below-freezing riming
+    # Fortran uses T <= trplpt for below-freezing riming
     below_freezing = T <= T₀
     active = below_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_total > q_threshold) & (nⁱ_eff > n_threshold)
 
@@ -205,7 +205,7 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
-    # D3: Fortran uses T > trplpt for above-freezing collection
+    # Fortran uses T > trplpt for above-freezing collection
     above_freezing = T > T₀
     active = above_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_total > q_threshold) & (nⁱ_eff > n_threshold)
 
@@ -252,11 +252,11 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
-    # D3: Fortran uses T > trplpt for above-freezing collection
+    # Fortran uses T > trplpt for above-freezing collection
     above_freezing = T > T₀
     active = above_freezing & (qʳ_eff > q_threshold) & (qⁱ_total > q_threshold) & (nⁱ_eff > n_threshold)
 
-    # D5: Use Table 2 (double-PSD kernel) for above-freezing rain-ice collection,
+    # Use Table 2 (double-PSD kernel) for above-freezing rain-ice collection,
     # matching the below-freezing rain_riming_rate path and Fortran P3 convention.
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
@@ -355,7 +355,7 @@ function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zer
 
     q_threshold = FT(1e-14)
     n_threshold = FT(1)
-    # D3: Fortran uses T <= trplpt for below-freezing riming
+    # Fortran uses T <= trplpt for below-freezing riming
     below_freezing = T <= T₀
     active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_total > q_threshold) & (nⁱ_eff > n_threshold)
 
@@ -367,7 +367,7 @@ function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zer
     # Diagnose rain DSD slope parameter
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
 
-    # H6: Use Table 2 (double-PSD kernel) for ice-rain mass collection.
+    # Use Table 2 (double-PSD kernel) for ice-rain mass collection.
     # Fortran convention: qrcol = 10^(f1pr08 + logn0r) × ni × ρ × rhofaci × E
     # The table stores the double-PSD integral with N0r factored out.
     # N0r = nr × λr (for μr=0 used in table generation).
@@ -380,7 +380,7 @@ function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zer
     return ifelse(active, rate, zero(FT))
 end
 
-# H6: Rain-ice collection table path — uses the dedicated ice-rain mass collection table (Fortran f1pr07).
+# Rain-ice collection table path — uses the dedicated ice-rain mass collection table (Fortran f1pr07).
 @inline function rain_riming_mass_kernel(rain_ice_table::P3RainIceCollectionTable,
                                            m_mean, λ_r, nʳ, Fᶠ, Fˡ, ρᶠ, prp, p3,
                                            μ = zero(typeof(m_mean)))
@@ -450,7 +450,7 @@ function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, �
     # Diagnose rain DSD slope parameter
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
 
-    # H6: Use Table 2 (number-weighted kernel) for ice-rain number collection.
+    # Use Table 2 (number-weighted kernel) for ice-rain number collection.
     # Fortran convention: nrcol = 10^(f1pr07 + logn0r) × ni × ρ × rhofaci × E
     # N0r = nr × λr (for μr=0).
     number_kernel = rain_riming_number_kernel(rain_ice_collection_table(p3),
@@ -462,7 +462,7 @@ function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, �
     return ifelse(active, rate, zero(FT))
 end
 
-# H6: Rain-ice collection table path — uses the dedicated ice-rain number collection table (Fortran f1pr08).
+# Rain-ice collection table path — uses the dedicated ice-rain number collection table (Fortran f1pr08).
 @inline function rain_riming_number_kernel(rain_ice_table::P3RainIceCollectionTable,
                                              m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3,
                                              μ = zero(typeof(m_mean)))
@@ -707,7 +707,7 @@ function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ
     D_v = transport.D_v
     nu  = transport.nu
 
-    # M10: use mixing ratio convention (Fortran: rho*Ls*Dv*(qsat0-Qv))
+    # use mixing ratio convention (Fortran: rho*Ls*Dv*(qsat0-Qv))
     Rᵈ = FT(dry_air_gas_constant(constants))
     ε = Rᵈ / Rᵛ
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
@@ -787,7 +787,7 @@ function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, co
     D_v = transport.D_v
     nu  = transport.nu
 
-    # M10: use mixing ratio convention (Fortran: rho*Ls*Dv*(qsat0-Qv))
+    # use mixing ratio convention (Fortran: rho*Ls*Dv*(qsat0-Qv))
     Rᵈ = FT(dry_air_gas_constant(constants))
     ε = Rᵈ / Rᵛ
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)

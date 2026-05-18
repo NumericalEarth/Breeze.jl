@@ -277,7 +277,7 @@ end
     nʳ  = μ.ρnʳ / ρ
     qⁱ  = μ.ρqⁱ / ρ
     nⁱ  = μ.ρnⁱ / ρ
-    # M13: Fortran advects z̃ = √(z·N) and converts to physical z at microphysics entry:
+    # Fortran advects z̃ = √(z·N) and converts to physical z at microphysics entry:
     #   where (nitot > 0) zitot = zitot**2 / nitot; elsewhere zitot = 0
     # ρz̃ⁱ stores the advected variable z̃; convert to physical z = z̃²/N for internal use.
     # In 2-moment mode ρz̃ⁱ is absent from `μ`; treat it as 0 (zⁱ then collapses to 0).
@@ -718,7 +718,7 @@ Ice sixth moment tendency: changes with deposition, melting, riming, and nucleat
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρz̃ⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, props = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    # M13: Convert physical z tendency to advected z̃ = √(z·N) tendency
+    # Convert physical z tendency to advected z̃ = √(z·N) tendency
     tendency_ρz_phys = p3_ice_sixth_moment_tendency(ice_integrals_table(p3), p3, rates, ρ, ℳ, props)
     tendency_ρn = tendency_ρnⁱ(rates, ρ)
     ρz̃ⁱ = ρ * sqrt(max(0, ℳ.zⁱ * props.nⁱ))

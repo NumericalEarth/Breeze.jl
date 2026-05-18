@@ -277,7 +277,7 @@ and Schmidt number (Sc^(1/3)) contributions are applied at runtime (M18).
         D = transform_to_diameter(x, λ_r)
         J = jacobian_diameter_transform(x, λ_r)
 
-        # M18: Use piecewise Gunn-Kinzer/Beard fall speed (Fortran fallr1).
+        # Use piecewise Gunn-Kinzer/Beard fall speed (Fortran fallr1).
         # ν is NOT baked in; 1/√ν applied at runtime from T,P-dependent transport.
         V = rain_fall_speed(D, one(FT))
         VD_sqrt = sqrt(max(V * D, zero(FT)))

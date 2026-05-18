@@ -25,7 +25,7 @@ Cloud droplets larger than a threshold undergo collision-coalescence to form rai
     # Fortran P3 v5.5.0: no autoconversion when in-cloud qc < qsmall_dry1 (1e-8 kg/kg).
     qᶜˡ_eff = ifelse(qᶜˡ >= prp.autoconversion_threshold, clamp_positive(qᶜˡ), zero(FT))
 
-    # D11: Fortran KK2000 uses (nc × rho × 1e-6)^β where nc is per-mass [1/kg].
+    # Fortran KK2000 uses (nc × rho × 1e-6)^β where nc is per-mass [1/kg].
     # The nc × rho product is a unit conversion to per-volume [1/m³], so no
     # reference-density normalization is needed — Julia's Nᶜ is already per-volume.
     Nᶜ_scaled = Nᶜ / prp.autoconversion_reference_concentration
@@ -250,7 +250,7 @@ end
     #   q_r = N_r * <m> = N_r * π ρ_w / λ_r³  ⟹  λ_r = (π ρ_w / m̄)^(1/3)
     m_mean = safe_divide(qʳ, nʳ, FT(1e-12))
     λ_r = cbrt(FT(π) * ρᴸ / max(m_mean, FT(1e-15)))
-    # H6: Clamp λ_r to Fortran P3 bounds
+    # Clamp λ_r to Fortran P3 bounds
     λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
 
     # Intercept N_0 = N_r * λ_r  (for exponential DSD N'(D) = N_0 exp(-λ D))
@@ -259,7 +259,7 @@ end
     log_λ = log10(λ_r)
     I_VD = table(log_λ)
 
-    # M18: Combine constant + velocity-diameter terms with T,P-dependent transport.
+    # Combine constant + velocity-diameter terms with T,P-dependent transport.
     # Constant term: f1r × ∫ D × exp(-λD) dD = f1r / λ² (analytical for μ_r=0)
     I_const = FT(RAIN_F1R) / (λ_r * λ_r)
     # Table stores ∫ D √(V×D) exp(-λD) dD (no ν); apply 1/√ν at runtime.

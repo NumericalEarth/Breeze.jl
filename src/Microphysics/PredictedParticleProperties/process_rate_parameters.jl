@@ -273,7 +273,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         shedding_timescale = 10.0,
         maximum_liquid_fraction = 0.3,
         shed_drop_mass = 1 / 1.923e6,  # m19: Fortran 1 mm drop mass (microphy_p3.f90 1.923e6 drops/kg)
-        # C2: Fortran uses 1.928e6 for liquid-fraction shedding (nlshd, line 3350)
+        # Fortran uses 1.928e6 for liquid-fraction shedding (nlshd, line 3350)
         shed_drop_mass_liqfrac = 1 / 1.928e6,
 
         # Refreezing
@@ -297,7 +297,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Hallett-Mossop: 3.5e5 splinters/g × 1000 g/kg = 3.5e8 splinters/kg
         # (Fortran: 35.e+4 * 1000. — the ×1000 kg→g conversion is baked in)
         splintering_rate = 3.5e8,
-        # C6: Fortran Dinit_HM = 10e-6 m; mass = π/6 × 900 × (10e-6)³ = 4.712e-13 kg
+        # Fortran Dinit_HM = 10e-6 m; mass = π/6 × 900 × (10e-6)³ = 4.712e-13 kg
         splintering_crystal_mass = FT(π) / 6 * 900 * (10e-6)^3,
         # Fortran P3 v5.5.0: Dmin_HM = 250e-6 (nCat=1) or 1000e-6 (nCat>1)
         splintering_diameter_threshold = 250e-6,
