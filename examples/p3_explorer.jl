@@ -131,10 +131,7 @@ end
 
 function initialize_p3_state(p3, ρ; qᶜˡ = 0, nᶜˡ = 0, qʳ = 0, nʳ = 0,
                                qⁱ = 0, nⁱ = 0, qᶠ = 0, bᶠ = 0, qʷⁱ = 0)
-    reflectivity = p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ).reflectivity
-    z̃ⁱ = sqrt(max(0, reflectivity * nⁱ))
-
-    return (; ρqᶜˡ = ρ * qᶜˡ,
+    base = (; ρqᶜˡ = ρ * qᶜˡ,
               ρnᶜˡ = ρ * nᶜˡ,
               ρqʳ = ρ * qʳ,
               ρnʳ = ρ * nʳ,
@@ -142,9 +139,14 @@ function initialize_p3_state(p3, ρ; qᶜˡ = 0, nᶜˡ = 0, qʳ = 0, nʳ = 0,
               ρnⁱ = ρ * nⁱ,
               ρqᶠ = ρ * qᶠ,
               ρbᶠ = ρ * bᶠ,
-              ρz̃ⁱ = ρ * z̃ⁱ,
               ρqʷⁱ = ρ * qʷⁱ,
               ρsˢᵃᵗ = zero(ρ))
+
+    PredictedParticleProperties.is_three_moment_ice(p3) || return base
+
+    reflectivity = p3_ice_diagnostics(p3, ρ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ).reflectivity
+    z̃ⁱ = sqrt(max(0, reflectivity * nⁱ))
+    return merge(base, (; ρz̃ⁱ = ρ * z̃ⁱ))
 end
 
 supercell_parcel_model(microphysics) = AtmosphereModel(grid;
