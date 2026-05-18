@@ -66,6 +66,16 @@ include:
 These are not yet implemented in Breeze but can be added by defining new smoothing types
 that set ``\sigma`` and ``\eta`` accordingly.
 
+!!! note "Coordinate choice and metric decay"
+    Breeze's current terrain metric kernels use the analytic decay
+    ``1 - \zeta / z_{top}``, which is exact for the basic Gal-Chen and
+    Somerville coordinate implemented by [`BasicTerrainFollowing`](@ref).
+    This analytic form should not be interpreted as a general
+    terrain-following metric representation. SLEVE and hybrid coordinates
+    have nonlinear vertical decay and require metric terms computed from the
+    actual mapping, for example from a numerical ``\partial z / \partial
+    \zeta`` and the corresponding horizontal derivatives.
+
 ## Metric corrections for the equations of motion
 
 When the computational grid is not aligned with the Cartesian coordinate system, derivative

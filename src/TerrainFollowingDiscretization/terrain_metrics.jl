@@ -123,6 +123,10 @@ For basic terrain-following coordinates:
 \\left(\\frac{∂z}{∂x}\\right)_\\zeta
     = \\frac{∂h}{∂x} \\left(1 - \\frac{\\zeta}{z_{top}}\\right)
 ```
+
+This analytic decay is specific to the basic Gal-Chen and Somerville
+coordinate. SLEVE or hybrid terrain-following coordinates require metric terms
+derived from the actual vertical mapping rather than this linear factor.
 """
 @inline function terrain_slope_x(i, j, k, grid, metrics, ℓz)
     ζ = rnode(k, grid, ℓz)
@@ -137,7 +141,8 @@ $(TYPEDSIGNATURES)
 Compute ``(∂z/∂y)_\\zeta`` at horizontal location `(Center, Face)`
 and vertical location `ℓz` (either `Center()` or `Face()`).
 
-See also [`terrain_slope_x`](@ref).
+See also [`terrain_slope_x`](@ref). The same basic-coordinate limitation of
+the analytic ``1 - ζ / z_{top}`` decay applies here.
 """
 @inline function terrain_slope_y(i, j, k, grid, metrics, ℓz)
     ζ = rnode(k, grid, ℓz)
