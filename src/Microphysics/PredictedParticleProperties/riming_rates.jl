@@ -155,13 +155,14 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
     # Diagnose rain lambda for Table 2 lookup
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
+    nʳ_bounded = rain_number_from_slope(qʳ_eff, λ_r, prp)
 
     mass_kernel = rain_riming_mass_kernel(rain_ice_collection_table(p3),
-        m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
+        m_mean, λ_r, nʳ_bounded, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
     # Fortran convention: qrcoll = 10^(f1pr08 + logn0r) × ni × env.
     # N0r = nr × λr (for μr=0).
-    N0r = nʳ_eff * λ_r
+    N0r = nʳ_bounded * λ_r
     rate = Eʳⁱ * N0r * nⁱ_eff * ρ * rhofaci * mass_kernel
 
     return ifelse(active, rate, zero(FT))
@@ -256,15 +257,16 @@ function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zer
 
     # Diagnose rain DSD slope parameter
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
+    nʳ_bounded = rain_number_from_slope(qʳ_eff, λ_r, prp)
 
     # Use Table 2 (double-PSD kernel) for ice-rain mass collection.
     # Fortran convention: qrcol = 10^(f1pr08 + logn0r) × ni × ρ × rhofaci × E
     # The table stores the double-PSD integral with N0r factored out.
     # N0r = nr × λr (for μr=0 used in table generation).
     mass_kernel = rain_riming_mass_kernel(rain_ice_collection_table(p3),
-        m_mean, λ_r, nʳ_eff, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
+        m_mean, λ_r, nʳ_bounded, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
-    N0r = nʳ_eff * λ_r
+    N0r = nʳ_bounded * λ_r
     rate = Eʳⁱ * N0r * nⁱ_eff * ρ * rhofaci * mass_kernel
 
     return ifelse(active, rate, zero(FT))
@@ -339,6 +341,7 @@ function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, �
 
     # Diagnose rain DSD slope parameter
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
+    nʳ_bounded = rain_number_from_slope(qʳ_eff, λ_r, prp)
 
     # Use Table 2 (number-weighted kernel) for ice-rain number collection.
     # Fortran convention: nrcol = 10^(f1pr07 + logn0r) × ni × ρ × rhofaci × E
@@ -346,7 +349,7 @@ function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, �
     number_kernel = rain_riming_number_kernel(rain_ice_collection_table(p3),
         m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
-    N0r = nʳ_eff * λ_r
+    N0r = nʳ_bounded * λ_r
     rate = Eʳⁱ * N0r * nⁱ_eff * ρ * rhofaci * number_kernel
 
     return ifelse(active, rate, zero(FT))

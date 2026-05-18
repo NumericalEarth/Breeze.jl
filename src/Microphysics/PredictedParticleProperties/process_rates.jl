@@ -519,7 +519,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # when props is supplied (hot path from _p3_scalar_compute / p3_rates_and_properties)
     # we reuse the values already computed in p3_ice_properties.
     λ_r = isnothing(props) ? rain_slope_parameter(qʳ_pos, clamp_positive(nʳ), prp) : props.λ_r
-    nʳ = ifelse(rain_active, qʳ_pos * λ_r^3 / (FT(π) * prp.liquid_water_density), nʳ)
+    nʳ = ifelse(rain_active, rain_number_from_slope(qʳ_pos, λ_r, prp), nʳ)
 
     qᶠ, bᶠ, Fᶠ, ρᶠ = if isnothing(props)
         rs = consistent_rime_state(p3, qⁱ, ℳ.qᶠ, ℳ.bᶠ, qʷⁱ)

@@ -91,7 +91,7 @@ self-collection rate that is not used here.
     prp = p3.process_rates
 
     qʳ_eff = clamp_positive(qʳ)
-    nʳ_eff = clamp_positive(nʳ)
+    nʳ_eff = bounded_rain_number(nʳ, qʳ_eff, prp)
 
     # |∂nʳ/∂t| = k_rr × ρ × qʳ × nʳ (positive magnitude)
     # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
@@ -132,13 +132,12 @@ is smaller than the physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
     prp = p3.process_rates
 
     qʳ_eff = clamp_positive(qʳ)
-    nʳ_eff = clamp_positive(nʳ)
+    nʳ_eff = bounded_rain_number(nʳ, qʳ_eff, prp)
 
-    # Fortran P3 convention: D_r = (qr / (π ρ_w nr))^(1/3) = 1/λ_r
-    # (no factor of 6; this is the exponential-DSD mean diameter at μ=0)
-    ρᴸ = prp.liquid_water_density
-    mean_mass = safe_divide(qʳ_eff, nʳ_eff, FT(1e-10))
-    D_r = cbrt(mean_mass / (FT(π) * ρᴸ))
+    # Fortran P3 convention: D_r = 1/λ_r after `get_rain_dsd2` applies
+    # the rain lambda limiter and recomputes the DSD-consistent number.
+    λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
+    D_r = 1 / λ_r
 
     # Two-piece breakup function (Fortran P3 v5.5.0)
     D_th = prp.rain_breakup_diameter_threshold  # 280 μm: breakup threshold (1/λ_r convention)
@@ -244,17 +243,13 @@ end
 # Tabulated path: use PSD-integrated ventilation integral I_evap(λ_r)
 @inline function rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
                                         thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
-    ρᴸ = p3.water_density
-
     # Diagnose λ_r from (q_r, N_r) for exponential DSD (μ_r = 0):
     #   q_r = N_r * <m> = N_r * π ρ_w / λ_r³  ⟹  λ_r = (π ρ_w / m̄)^(1/3)
-    m_mean = safe_divide(qʳ, nʳ, FT(1e-12))
-    λ_r = cbrt(FT(π) * ρᴸ / max(m_mean, FT(1e-15)))
-    # Clamp λ_r to Fortran P3 bounds
-    λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
+    λ_r = rain_slope_parameter(qʳ, nʳ, prp)
+    nʳ_bounded = rain_number_from_slope(qʳ, λ_r, prp)
 
     # Intercept N_0 = N_r * λ_r  (for exponential DSD N'(D) = N_0 exp(-λ D))
-    N_0 = nʳ * λ_r
+    N_0 = nʳ_bounded * λ_r
 
     log_λ = log10(λ_r)
     I_VD = table(log_λ)

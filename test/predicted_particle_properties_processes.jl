@@ -88,7 +88,8 @@ function expected_fortran_rain_epsilon(p3, qʳ, nʳ, ρ, transport, FT)
     qʳ_eff = max(0, qʳ)
     nʳ_eff = max(max(0, nʳ), FT(1e-16))
     λ_r = PPP.rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
-    N₀ = nʳ_eff * λ_r
+    nʳ_bounded = qʳ_eff * λ_r^3 / (FT(π) * prp.liquid_water_density)
+    N₀ = nʳ_bounded * λ_r
     I_VD = p3.rain.evaporation(log10(λ_r))
     I_const = FT(PPP.RAIN_F1R) / λ_r^2
     Sc_cbrt = cbrt(transport.nu / max(transport.D_v, FT(1e-10)))
@@ -538,6 +539,34 @@ end
         @test rates.autoconversion == 0.0
         @test rates.partial_melting == 0.0
         @test rates.complete_melting == 0.0
+    end
+
+    @testset "rain DSD lambda limiter recomputes number" begin
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        prp = p3.process_rates
+        qʳ = FT(1e-3)
+        nʳ = FT(1e-5)
+        S = FT(0.99)
+        thermodynamic_factor = FT(1e8)
+        ν = FT(1.5e-5)
+        D_v = FT(2.2e-5)
+        ρ = FT(1)
+
+        λ_r = PPP.rain_slope_parameter(qʳ, nʳ, prp)
+        nʳ_bounded = qʳ * λ_r^3 / (FT(π) * prp.liquid_water_density)
+
+        @test λ_r == prp.rain_lambda_min
+        @test nʳ_bounded > nʳ
+
+        raw_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, qʳ, nʳ, S,
+                                             thermodynamic_factor, p3, prp,
+                                             ν, D_v, ρ, FT)
+        bounded_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, qʳ, nʳ_bounded, S,
+                                                 thermodynamic_factor, p3, prp,
+                                                 ν, D_v, ρ, FT)
+
+        @test raw_rate ≈ bounded_rate
     end
 
     @testset "Tendency functions - smoke tests" begin

@@ -9,11 +9,15 @@ Compute ice nucleation rate from deposition/condensation freezing.
 
 New ice crystals nucleate when temperature is below a threshold and the air
 is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
+Fortran P3 gates this process on cloud-side ice supersaturation, `supi_cld`.
+Breeze currently runs the P3 LES path with `SCF = 1`, so the local vapor input
+is the cloud-side value. If a subgrid cloud-fraction path is added, pass the
+cloud-side vapor state here rather than a grid-mean vapor state.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `T`: Temperature [K]
-- `qᵛ`: Vapor mass fraction [kg/kg]
+- `qᵛ`: Cloud-side/local vapor mass fraction [kg/kg]
 - `qᵛ⁺ⁱ`: Saturation vapor mass fraction over ice [kg/kg]
 - `nⁱ`: Current ice number concentration [1/kg]
 - `ρ`: Air density [kg/m³]
@@ -33,7 +37,8 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
     mᵢ₀ = prp.nucleated_ice_mass
     c_nuc = prp.nucleation_coefficient
 
-    # Ice supersaturation
+    # Ice supersaturation. Fortran uses cloud-side `supi_cld`; with the current
+    # LES-only `SCF = 1` formulation, `qᵛ` is that local/cloud-side value.
     Sⁱ = (qᵛ - qᵛ⁺ⁱ) / max(qᵛ⁺ⁱ, FT(1e-10))
 
     # Conditions for nucleation

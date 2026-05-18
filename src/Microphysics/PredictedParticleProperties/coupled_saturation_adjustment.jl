@@ -101,7 +101,8 @@ end
     prp = p3.process_rates
 
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
-    N₀ = nʳ_eff * λ_r
+    nʳ_bounded = rain_number_from_slope(qʳ_eff, λ_r, prp)
+    N₀ = nʳ_bounded * λ_r
     I_VD = p3.rain.evaporation(log10(λ_r))
     I_const = FT(RAIN_F1R) / λ_r^2
     Sc_cbrt = cbrt(transport.nu / max(transport.D_v, FT(1e-10)))

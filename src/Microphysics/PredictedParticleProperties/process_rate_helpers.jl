@@ -252,11 +252,29 @@ end
 end
 
 @inline function rain_slope_parameter(qʳ, nʳ, prp)
-    FT = typeof(qʳ)
+    FT = typeof(qʳ + nʳ)
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = clamp_positive(nʳ)
     λ_r_cubed = FT(π) * prp.liquid_water_density * nʳ_eff / max(qʳ_eff, FT(1e-20))
     return clamp(cbrt(λ_r_cubed), prp.rain_lambda_min, prp.rain_lambda_max)
+end
+
+@inline function rain_number_from_slope(qʳ, λ_r, prp)
+    FT = typeof(qʳ + λ_r)
+    qʳ_eff = clamp_positive(qʳ)
+    return qʳ_eff * λ_r^3 / (FT(π) * prp.liquid_water_density)
+end
+
+@inline function bounded_rain_number(nʳ, qʳ, prp)
+    FT = typeof(qʳ + nʳ)
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = clamp_positive(nʳ)
+    λ_r_uncapped = cbrt(FT(π) * prp.liquid_water_density * nʳ_eff /
+                        max(qʳ_eff, FT(1e-20)))
+    λ_r = clamp(λ_r_uncapped, prp.rain_lambda_min, prp.rain_lambda_max)
+    nʳ_bounded = rain_number_from_slope(qʳ_eff, λ_r, prp)
+    needs_adjustment = (λ_r_uncapped < prp.rain_lambda_min) | (λ_r_uncapped > prp.rain_lambda_max)
+    return ifelse(needs_adjustment, nʳ_bounded, nʳ_eff)
 end
 
 @inline function ice_mean_density_for_bounds(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
