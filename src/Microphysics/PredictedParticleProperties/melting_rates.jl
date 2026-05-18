@@ -202,8 +202,11 @@ end
     log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
     sc_corr = ventilation_sc_correction(nu, D_v, ρ_correction)
 
-    small = sc(log_m, Fᶠ, Fl, ρᶠ, μ) + sc_corr * sr(log_m, Fᶠ, Fl, ρᶠ, μ)
-    large = lc(log_m, Fᶠ, Fl, ρᶠ, μ) + sc_corr * lr(log_m, Fᶠ, Fl, ρᶠ, μ)
+    # All 4 tables share Table-1 axes by construction, so prepare interpolation
+    # indices once and reuse across tables (mirrors `ice_melting_rate` above).
+    prep = prepare_5d(sc, log_m, Fᶠ, Fl, ρᶠ, μ)
+    small = evaluate_at(sc, prep) + sc_corr * evaluate_at(sr, prep)
+    large = evaluate_at(lc, prep) + sc_corr * evaluate_at(lr, prep)
     total = small + large
 
     return ifelse(total > eps(FT), clamp(small / total, FT(0), FT(1)), FT(0.5))

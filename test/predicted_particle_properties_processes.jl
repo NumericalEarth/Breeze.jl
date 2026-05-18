@@ -147,7 +147,8 @@ function expected_reduced_fortran_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ
     ab = 1 + L_v * dqᵛ⁺ˡ_dT / cᵖᵈ
     abi = 1 + L_s * dqᵛ⁺ⁱ_dT / cᵖᵈ
 
-    epsc = PPP.cloud_condensation_epsilon(p3, qᶜˡ, nᶜˡ, ρ, transport.D_v)
+    cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+    epsc = PPP.cloud_condensation_epsilon(p3, qᶜˡ, ρ, transport.D_v, cloud.μ_c, cloud.λ_c, cloud.nᶜˡ)
     epsr = expected_fortran_rain_epsilon(p3, qʳ, nʳ, ρ, transport, FT)
     epsi = expected_fortran_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                         constants, transport, q, μ)
@@ -1115,13 +1116,15 @@ end
         expected_epsi = expected_fortran_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                                      constants, transport, q, μ)
 
+        cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
         # predict_supersaturation defaults to false, so this M&G call sees
         # the host state directly and the G&M ε is gated to zero by
         # `compute_p3_process_rates` (not this function).
         rates = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-            constants, transport, q, μ)
+            constants, transport, q, μ,
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ)
         expected_rates = expected_reduced_fortran_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
@@ -1132,7 +1135,8 @@ end
         rates_noice = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-            constants, transport, q, μ)
+            constants, transport, q, μ,
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ)
 
         @test epsr ≈ expected_epsr
         @test epsi ≈ expected_epsi
@@ -1182,10 +1186,12 @@ end
         expected_epsiw = expected_fortran_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                                          constants, transport, q, μ)
 
+        cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
         rates = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-            constants, transport, q, μ)
+            constants, transport, q, μ,
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ)
         expected_rates = expected_reduced_fortran_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,

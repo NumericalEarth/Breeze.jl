@@ -348,8 +348,6 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
 # via a SEPARATE kernel launch, avoiding GPU compilation failure from force-inlining
 # ~1000 lines of P3 physics into the thermodynamic kernel.
 @inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
-    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
-
     @inbounds μ.qᵛ[i, j, k]  = 𝒰.moisture_mass_fractions.vapor
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
     @inbounds μ.nᶜˡ[i, j, k] = ℳ.nᶜˡ
@@ -357,8 +355,8 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.nʳ[i, j, k]  = ℳ.nʳ
     @inbounds μ.qⁱ[i, j, k]  = ℳ.qⁱ
     @inbounds μ.nⁱ[i, j, k]  = ℳ.nⁱ
-    @inbounds μ.qᶠ[i, j, k]  = rime_state.qᶠ
-    @inbounds μ.bᶠ[i, j, k]  = rime_state.bᶠ
+    @inbounds μ.qᶠ[i, j, k]  = ℳ.qᶠ
+    @inbounds μ.bᶠ[i, j, k]  = ℳ.bᶠ
     @inbounds μ.zⁱ[i, j, k]  = ℳ.zⁱ
     @inbounds μ.z̃ⁱ[i, j, k]  = μ.ρz̃ⁱ[i, j, k] / ρ
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ

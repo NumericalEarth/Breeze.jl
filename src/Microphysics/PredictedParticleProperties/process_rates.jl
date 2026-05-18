@@ -772,10 +772,9 @@ state passes through unchanged.
               T = T + ε * ℒˡ / cᵖᵈ)
 end
 
-@inline function cloud_condensation_epsilon(p3, qᶜˡ, nᶜˡ, ρ, D_v)
+@inline function cloud_condensation_epsilon(p3, qᶜˡ, ρ, D_v, μ_c, λ_c, nᶜˡ_bounded)
     FT = typeof(qᶜˡ)
-    cloud = diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-    cdist = cloud.nᶜˡ * (cloud.μ_c + 1) / max(cloud.λ_c, FT(1e-30))
+    cdist = nᶜˡ_bounded * (μ_c + 1) / max(λ_c, FT(1e-30))
     active = qᶜˡ >= p3.minimum_mass_mixing_ratio
     return ifelse(active, 2 * FT(π) * ρ * D_v * cdist, zero(FT))
 end
@@ -862,7 +861,8 @@ separately.
 """
 @inline function coupled_saturation_adjustment_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
                                                      qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                                     constants, transport, q, μ)
+                                                     constants, transport, q, μ,
+                                                     μ_c, λ_c, nᶜˡ_bounded)
     FT = typeof(qᶜˡ)
     τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
     Rᵛ = FT(vapor_gas_constant(constants))
@@ -876,7 +876,7 @@ separately.
     ξˡ = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
     ξⁱ = 1 + ℒⁱ * dqᵛ⁺ⁱ_dT / cᵖᵈ
 
-    εᶜˡ = cloud_condensation_epsilon(p3, qᶜˡ, nᶜˡ, ρ, transport.D_v)
+    εᶜˡ = cloud_condensation_epsilon(p3, qᶜˡ, ρ, transport.D_v, μ_c, λ_c, nᶜˡ_bounded)
     εʳ = rain_condensation_epsilon(p3, qʳ, nʳ, ρ, transport)
     εⁱ = ice_deposition_epsilon(p3, qⁱ, qʷⁱ, nⁱ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                 constants, transport, q, μ)
@@ -1204,7 +1204,8 @@ end
     vapor_rates = coupled_saturation_adjustment_rates(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, nʳ,
                                                       ℳ.qⁱ, ℳ.qʷⁱ, nⁱ, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ,
                                                       Fᶠ, ρᶠ, T, P, ρ, constants,
-                                                      transport, q, μ_ice)
+                                                      transport, q, μ_ice,
+                                                      state.μ_c, state.λ_c, state.nᶜˡ)
     cond = vapor_rates.condensation
 
     # CCN activation (prescribed or prognostic)
@@ -2268,8 +2269,11 @@ end
     # --- Riming ---
     z_cloud_rime = evaluate_at(sixth.rime, prep)
     z_cloud_rime_rate = z_cloud_rime * rates.cloud_riming * inv_nⁱ
-    z_rain_rime_rate = rain_riming_sixth_moment_tendency(rain_ice_table, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
-                                                          rates.rain_riming, inv_nⁱ, z_cloud_rime)
+    # Per-unit-rain-riming sixth-moment factor — identical 6D-table inputs across
+    # the standard and wet-growth rain-riming paths, so compute once and reuse.
+    z_rain_rime_factor = rain_riming_sixth_moment_factor(rain_ice_table, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
+                                                          inv_nⁱ, z_cloud_rime)
+    z_rain_rime_rate = z_rain_rime_factor * rates.rain_riming
 
     # D31: Wet growth Z contribution.
     # During wet growth, rates.cloud_riming and rates.rain_riming are zeroed (redirected
@@ -2282,8 +2286,7 @@ end
     # - log_LiquidFrac=.FALSE. (lines 3269-3280): zqccol/zqrcol reduced by shedding
     #   fraction (1 - shed/total_collection)
     z_wg_cloud_rate = z_cloud_rime * rates.wet_growth_cloud * inv_nⁱ
-    z_wg_rain_rate = rain_riming_sixth_moment_tendency(rain_ice_table, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
-                                                        rates.wet_growth_rain, inv_nⁱ, z_cloud_rime)
+    z_wg_rain_rate = z_rain_rime_factor * rates.wet_growth_rain
     wg_total = rates.wet_growth_cloud + rates.wet_growth_rain
     shed_frac = safe_divide(rates.wet_growth_shedding, max(wg_total, eps(FT)), zero(FT))
     z_wg_rate = ifelse(prp.liquid_fraction_active,
@@ -2321,18 +2324,18 @@ end
     return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp)
 end
 
-@inline function rain_riming_sixth_moment_tendency(::Nothing, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
-                                                   rain_riming, inv_nⁱ, z_cloud_rime)
-    return z_cloud_rime * rain_riming * inv_nⁱ
+@inline function rain_riming_sixth_moment_factor(::Nothing, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
+                                                  inv_nⁱ, z_cloud_rime)
+    return z_cloud_rime * inv_nⁱ
 end
 
-@inline function rain_riming_sixth_moment_tendency(rain_ice_table::P3RainIceCollectionTable, log_m, Fᶠ, Fˡ, ρᶠ, μ,
-                                                   ::Nothing, rain_riming, inv_nⁱ, z_cloud_rime)
-    return z_cloud_rime * rain_riming * inv_nⁱ
+@inline function rain_riming_sixth_moment_factor(rain_ice_table::P3RainIceCollectionTable, log_m, Fᶠ, Fˡ, ρᶠ, μ,
+                                                  ::Nothing, inv_nⁱ, z_cloud_rime)
+    return z_cloud_rime * inv_nⁱ
 end
 
-@inline function rain_riming_sixth_moment_tendency(rain_ice_table::P3RainIceCollectionTable, log_m, Fᶠ, Fˡ, ρᶠ, μ,
-                                                   λ_r, rain_riming, inv_nⁱ, z_cloud_rime)
+@inline function rain_riming_sixth_moment_factor(rain_ice_table::P3RainIceCollectionTable, log_m, Fᶠ, Fˡ, ρᶠ, μ,
+                                                  λ_r, inv_nⁱ, z_cloud_rime)
     FT = typeof(log_m)
     log_λ_r = log10(max(FT(λ_r), FT(1e-20)))
     z_rain_rime = rain_ice_table.sixth_moment(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)
@@ -2341,7 +2344,7 @@ end
     # divide by the mass kernel to recover: z = m6collr × rain_riming / (ni × mass_kernel).
     mass_kernel = exp10(rain_ice_table.mass(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ))
     inv_mass_kernel = safe_divide(one(FT), mass_kernel, zero(FT))
-    return z_rain_rime * rain_riming * inv_nⁱ * inv_mass_kernel
+    return z_rain_rime * inv_nⁱ * inv_mass_kernel
 end
 
 @inline function split_splintering_mass(rates::P3ProcessRates, prp::ProcessRateParameters)
