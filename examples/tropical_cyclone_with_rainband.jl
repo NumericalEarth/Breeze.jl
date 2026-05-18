@@ -132,15 +132,15 @@ r_taper_end = 300kilometers    # radial taper end, m
 
 # ## Output layout
 #
-# Run outputs live under `examples/output_tc_rainband/`:
-#
-#   - `snapshots/` — hourly JLD2 snapshot files for each stage
-#   - `figures/`   — F01-F06 PNGs (paper-reproduction outputs)
+# Run outputs live under `examples/output_tc_rainband/figures/` — F01-F06
+# PNGs (paper-reproduction outputs). Hourly state snapshots stay in host RAM
+# during the run (~6.6 GB per stage of host memory; fits comfortably on a
+# 128 GB host) and are released after stage 4's analysis, so the on-disk
+# footprint is only the figures themselves.
 
 output_dir = joinpath(@__DIR__, "output_tc_rainband")
-snapshots_dir = joinpath(output_dir, "snapshots")
 figures_dir = joinpath(output_dir, "figures")
-mkpath(snapshots_dir); mkpath(figures_dir)
+mkpath(figures_dir)
 
 # ## Grid and architecture
 #
@@ -639,10 +639,24 @@ end
 # Arrays. Anelastic diagnoses ``w`` and ``p'`` from the elliptic constraint,
 # so ``u``, ``v``, ``T`` is the complete prognostic record we need to hand off between stages.
 
+## A `FieldTimeSeries`-shaped wrapper that holds in-memory host arrays.
+## The analysis section indexes `ts.u.times` and `ts.u[n]` (and similarly for
+## v, w, T). Since this example produces substantial output files, this saves 
+## us from writing and reading JLD2 files between stages and keeps the creation of 
+## this page small. Look at other examples for more information on saving and 
+## loading time series with JLD2.
+## them directly without any further `interior(...)` indirection.
+struct InMemoryFTS
+    times :: Vector{Float64}
+    data  :: Vector{Array{Float32, 3}}
+end
+InMemoryFTS() = InMemoryFTS(Float64[], Array{Float32, 3}[])
+Base.getindex(s::InMemoryFTS, n::Int) = s.data[n]
+Base.length(s::InMemoryFTS) = length(s.data)
+
 function build_and_run_stage!(
         stage_label::String;
-        with_heating::Bool, init, stop_time,
-        outfile::String
+        with_heating::Bool, init, stop_time
     )
     model = build_model(; with_heating)
     set!(model; init...)
@@ -686,16 +700,26 @@ function build_and_run_stage!(
     end
     add_callback!(simulation, diagnostic_probe, IterationInterval(1))
 
-    T = model.temperature
-    ρ = model.dynamics.density
-    simulation.output_writers[:snaps] = JLD2Writer(
-        model, (; u, v, w, T, ρ);
-        filename = outfile,
-        schedule = TimeInterval(1hour),
-        overwrite_existing = true
+    ## In-memory captures, hourly. Each push is ~55 MB × 5 fields = 275 MB,
+    ## × 24 hourly steps = ~6.6 GB per stage on host RAM — fits comfortably
+    ## on a 128 GB host. Replaces the prior JLD2Writer; stage 4 reads
+    ## directly from these captures instead of opening hourly JLD2 files.
+    captures = (
+        u = InMemoryFTS(), v = InMemoryFTS(), w = InMemoryFTS(),
+        T = InMemoryFTS(), ρ = InMemoryFTS(),
     )
+    function capture_state!(sim)
+        t = sim.model.clock.time
+        push!(captures.u.times, t); push!(captures.u.data, Array(interior(sim.model.velocities.u)))
+        push!(captures.v.times, t); push!(captures.v.data, Array(interior(sim.model.velocities.v)))
+        push!(captures.w.times, t); push!(captures.w.data, Array(interior(sim.model.velocities.w)))
+        push!(captures.T.times, t); push!(captures.T.data, Array(interior(sim.model.temperature)))
+        push!(captures.ρ.times, t); push!(captures.ρ.data, Array(interior(sim.model.dynamics.density)))
+        return nothing
+    end
+    add_callback!(simulation, capture_state!, TimeInterval(1hour))
 
-    @info "Running $stage_label stage for $(prettytime(stop_time)) → $outfile"
+    @info "Running $stage_label stage for $(prettytime(stop_time))"
     run!(simulation)
 
     ## Cache post-stage prognostic state as host Arrays so the next stage can
@@ -710,33 +734,8 @@ function build_and_run_stage!(
 
     model = nothing
     GC.gc(); CUDA.reclaim()
-    return post
+    return (post = post, captures = captures)
 end
-
-## Re-entry helper: if an earlier stage already wrote `spinup_snapshots.jld2`,
-## we can skip the spinup run and restart control/heated from the last hourly
-## snapshot.
-function load_last_snapshot(path)
-    ## OnDisk backend so we don't pull every hourly snapshot into RAM —
-    ## indexing `ts[n]` reads only that one slice from disk.
-    ts_u = FieldTimeSeries(path, "u"; backend = Oceananigans.OnDisk())
-    ts_v = FieldTimeSeries(path, "v"; backend = Oceananigans.OnDisk())
-    ts_T = FieldTimeSeries(path, "T"; backend = Oceananigans.OnDisk())
-    ts_ρ = FieldTimeSeries(path, "ρ"; backend = Oceananigans.OnDisk())
-    n = length(ts_u.times)
-    return (
-        u = Array(interior(ts_u[n])),
-        v = Array(interior(ts_v[n])),
-        T = Array(interior(ts_T[n])),
-        ρ = Array(interior(ts_ρ[n])),
-    )
-end
-
-# ## File paths
-
-spinup_file = joinpath(snapshots_dir, "spinup_snapshots.jld2")
-control_file = joinpath(snapshots_dir, "control_snapshots.jld2")
-heated_file = joinpath(snapshots_dir, "heated_snapshots.jld2")
 
 # ## F01 — vortex IC preflight (fast sanity check; always runs in spinup)
 
@@ -807,58 +806,44 @@ end
 plot_preflight()
 nothing # hide
 
-post_spinup = if isfile(spinup_file)
-    @info "=== Stage 1: reusing existing $spinup_file ==="
-    load_last_snapshot(spinup_file)
-else
-    @info "=== Stage 1: $(prettytime(stage_stop_time)) spinup ==="
-    build_and_run_stage!(
-        "spinup";
-        with_heating = false,
-        init = (u = uᵢ, v = vᵢ, T = Tᵢ, ρ = ρᵢ),
-        stop_time = stage_stop_time,
-        outfile = spinup_file
-    )
-end
+@info "=== Stage 1: $(prettytime(stage_stop_time)) spinup ==="
+spinup_result = build_and_run_stage!(
+    "spinup";
+    with_heating = false,
+    init = (u = uᵢ, v = vᵢ, T = Tᵢ, ρ = ρᵢ),
+    stop_time = stage_stop_time,
+)
+post_spinup = spinup_result.post
 nothing # hide
 
-if isfile(control_file)
-    @info "=== Stage 2: reusing existing $control_file ==="
-else
-    @info "=== Stage 2: $(prettytime(stage_stop_time)) control ==="
-    build_and_run_stage!(
-        "control";
-        with_heating = false,
-        init = post_spinup,
-        stop_time = stage_stop_time,
-        outfile = control_file
-    )
-end
+@info "=== Stage 2: $(prettytime(stage_stop_time)) control ==="
+control_result = build_and_run_stage!(
+    "control";
+    with_heating = false,
+    init = post_spinup,
+    stop_time = stage_stop_time,
+)
+ts_ctrl = control_result.captures
 nothing # hide
 
-if isfile(heated_file)
-    @info "=== Stage 3: reusing existing $heated_file ==="
-else
-    @info "=== Stage 3: $(prettytime(stage_stop_time)) heated (MN10 stratiform) ==="
-    build_and_run_stage!(
-        "heated";
-        with_heating = true,
-        init = post_spinup,
-        stop_time = stage_stop_time,
-        outfile = heated_file
-    )
-end
+@info "=== Stage 3: $(prettytime(stage_stop_time)) heated (MN10 stratiform) ==="
+heated_result = build_and_run_stage!(
+    "heated";
+    with_heating = true,
+    init = post_spinup,
+    stop_time = stage_stop_time,
+)
+ts_heat = heated_result.captures
 nothing # hide
 
 # ## Stage 4 — Analysis and figure production
 #
-# Everything below reads from the hourly JLD2 snapshots. To keep peak
-# resident memory bounded by a handful of 3D fields regardless of how
-# many snapshots we wrote, we open each `FieldTimeSeries` with the
-# `OnDisk()` backend — so snapshots stream from disk on demand — and
-# we copy snapshots into preallocated Float32 scratch buffers instead
-# of allocating per iteration. `GC.gc()` at the boundary between
-# sub-figures keeps the high-water mark low.
+# Everything below reads from the in-memory captures produced by stages 1-3
+# (see `InMemoryFTS` above). The captures hold cell-face host arrays with
+# halos already stripped, so the centering kernels below act on them
+# directly. Snapshots are copied into preallocated Float32 scratch buffers
+# instead of allocating per iteration, and `GC.gc()` at sub-figure
+# boundaries keeps the high-water mark low.
 
 let
     @info "=== Stage 4: Analysis ==="
@@ -901,26 +886,16 @@ let
         end
     end
 
-    ## Load one snapshot (index n) from four OnDisk-backed FieldTimeSeries
-    ## into the scratch buffers. Returns nothing.
+    ## Load one captured snapshot (index n) into the scratch buffers.
+    ## In-memory captures store host arrays with halos already stripped
+    ## (via `Array(interior(field))`), so we pass them straight to the
+    ## centering kernels.
     function load_snapshot!(u, v, w, T, u_ts, v_ts, w_ts, T_ts, n::Int)
-        center_u!(u, interior(u_ts[n]))
-        center_v!(v, interior(v_ts[n]))
-        center_w!(w, interior(w_ts[n]))
-        copy_f32!(T, interior(T_ts[n]))
+        center_u!(u, u_ts[n])
+        center_v!(v, v_ts[n])
+        center_w!(w, w_ts[n])
+        copy_f32!(T, T_ts[n])
         return nothing
-    end
-
-    ## Open FieldTimeSeries files with the streaming backend. Indexing
-    ## `ts[n]` reads only snapshot n from disk; memory does not grow
-    ## with Nt.
-    function open_ts(path::String)
-        return (
-            u = FieldTimeSeries(path, "u"; backend = Oceananigans.OnDisk()),
-            v = FieldTimeSeries(path, "v"; backend = Oceananigans.OnDisk()),
-            w = FieldTimeSeries(path, "w"; backend = Oceananigans.OnDisk()),
-            T = FieldTimeSeries(path, "T"; backend = Oceananigans.OnDisk()),
-        )
     end
 
     r_bin_edges = collect(range(0.0, 150kilometers, step = Δx))
@@ -993,9 +968,9 @@ let
     ## ---------------------------------------------------------
     ## F02ab — basic-state vortex (YD19 Fig 2a,b)
     ## ---------------------------------------------------------
-    if isfile(spinup_file)
+    let
         @info "Producing F02ab (basic-state vortex)..."
-        ts_spin = open_ts(spinup_file)
+        ts_spin = spinup_result.captures
         n_final = length(ts_spin.u.times)
         t_final = ts_spin.u.times[n_final]
         @info @sprintf(
@@ -1083,8 +1058,6 @@ let
         save(path, fig)
         @info "Saved F02ab" path
         GC.gc()
-    else
-        @warn "Missing $spinup_file — skipping F02ab"
     end
 
     ## ---------------------------------------------------------
@@ -1160,11 +1133,11 @@ let
     ## ---------------------------------------------------------
     ## F03a, F04, F05 — require control + heated snapshots
     ## ---------------------------------------------------------
-    if isfile(control_file) && isfile(heated_file)
-        @info "Loading heated and control snapshots (streaming, OnDisk backend)..."
+    let
+        @info "Reading heated and control captures (in-memory)..."
 
-        ts_ctrl = open_ts(control_file)
-        ts_heat = open_ts(heated_file)
+        ts_ctrl = control_result.captures
+        ts_heat = heated_result.captures
         ctrl_times = ts_ctrl.u.times
         heat_times = ts_heat.u.times
         ## Analysis window: t = 5-7 h — the pre-saturation window in which
@@ -1943,9 +1916,9 @@ let
         Nt_anim = min(length(ctrl_times), length(heat_times))
         w_frames = zeros(Float32, Nx, Ny, Nt_anim)
         for n in 1:Nt_anim
-            center_w!(w_sc, interior(ts_ctrl.w[n]))
+            center_w!(w_sc, ts_ctrl.w[n])
             @views w_frames[:, :, n] .= -w_sc[:, :, k_anim]
-            center_w!(w_sc, interior(ts_heat.w[n]))
+            center_w!(w_sc, ts_heat.w[n])
             @views w_frames[:, :, n] .+= w_sc[:, :, k_anim]
         end
         ## Robust color limit: 95th-percentile of |w'| restricted to the rainband
@@ -1985,12 +1958,16 @@ let
             ax, xs_grid ./ kilometer, ys_grid ./ kilometer, w_n;
             colormap = :balance, colorrange = (-w_lim, w_lim)
         )
+        ## Single Q field, both contour levels (red +1 K/h, blue −1 K/h).
+        ## At z_anim ≈ 2.8 km, V_z(z) is strictly negative so only the blue
+        ## contour draws in practice; we still pass both levels for safety
+        ## in case the slice altitude is bumped above z_bs in future tweaks.
         contour!(
-            ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_anim_warm;
+            ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_anim_at;
             levels = [1.0], color = :red, linewidth = 1.5
         )
         contour!(
-            ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_anim_cool;
+            ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_anim_at;
             levels = [-1.0], color = :blue, linewidth = 1.5
         )
         Colorbar(fig[1, 2], hm; label = "w' (m s⁻¹)")
@@ -2004,8 +1981,6 @@ let
         end
         @info "Saved animation" anim_path
         nothing #hide
-    else
-        @warn "Missing control and/or heated snapshots — skipping F03a, F04, F05, animation"
     end
 
     @info "=== Analysis complete ==="
