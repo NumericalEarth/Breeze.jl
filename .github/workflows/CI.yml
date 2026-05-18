@@ -38,6 +38,9 @@ jobs:
     container:
       image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && format('ghcr.io/numericalearth/breeze-docker-images:test-julia_{0}', matrix.version) ) || '' }}
       options: --gpus=all
+      volumes:
+        # Mount host `/usr/local` so that we can delete some stuff afterwards
+        - /usr/local:/host-usr-local
     strategy:
       fail-fast: false
       matrix:
@@ -67,6 +70,19 @@ jobs:
             arch: "default"
             check-bounds: "auto"
     steps:
+      - name: df before cleanup
+        if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+        run: |
+          df -hT
+      - name: Clean up old CUDA toolkits
+        if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+        # Save storage by deleting old CUDA toolkits, we'll use v13
+        run: |
+          rm -rf /host-usr-local/cuda-12.*
+      - name: df after cleanup
+        if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+        run: |
+          df -hT
       - name: "Check out repository"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: "Install Julia"
