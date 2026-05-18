@@ -89,10 +89,23 @@ jobs:
     container:
       image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.6'
       options: --gpus=all
+      volumes:
+        # Mount host `/usr/local` so that we can delete some stuff afterwards
+        - /usr/local:/host-usr-local
     timeout-minutes: 30
     steps:
       - name: "Check out repository"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: df before cleanup
+        run: |
+          df -hT
+      - name: Clean up old CUDA toolkits
+        # Save storage by deleting old CUDA toolkits, we'll use v13
+        run: |
+          rm -rf /host-usr-local/cuda-12.*
+      - name: df after cleanup
+        run: |
+          df -hT
       - name: Instantiate benchmarking environment
         shell: julia --color=yes --project {0}
         run: |
