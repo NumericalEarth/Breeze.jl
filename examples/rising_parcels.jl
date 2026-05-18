@@ -60,6 +60,7 @@ set!(model, qᵗ = qᵗ, z = 0, w = 1,
      ρ = reference_state.density)
 
 simulation = Simulation(model; Δt=1, stop_time=30minutes)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # Store parcel snapshots: (time, height, thermodynamic state, density)
 dry_snapshots = []
@@ -111,6 +112,7 @@ set!(cloudy_model, qᵗ = qᵗ, z = 0, w = 1,
      ρ = reference_state.density)
 
 cloudy_simulation = Simulation(cloudy_model; Δt=1, stop_time=90minutes)
+Oceananigans.Diagnostics.erroring_NaNChecker!(cloudy_simulation)
 
 # Store cloudy parcel snapshots
 cloudy_snapshots = []
@@ -173,6 +175,7 @@ set!(kessler_model, qᵗ = qᵗ, z = 0, w = 1,
      ρ = kessler_reference_state.density)
 
 kessler_simulation = Simulation(kessler_model; Δt=1, stop_time=90minutes)
+Oceananigans.Diagnostics.erroring_NaNChecker!(kessler_simulation)
 
 # Store Kessler parcel snapshots
 kessler_snapshots = []
@@ -225,6 +228,7 @@ set!(twom_model, qᵗ = qᵗ, z = 0, w = 1,
      ρ = reference_state.density)
 
 twom_simulation = Simulation(twom_model; Δt=1, stop_time=90minutes)
+Oceananigans.Diagnostics.erroring_NaNChecker!(twom_simulation)
 
 # Store two-moment parcel snapshots
 twom_snapshots = []
@@ -280,6 +284,7 @@ set!(buoyant_model, qᵗ = qᵗ, z = 0, w_parcel = 1.0,
      ρ = reference_state.density)
 
 buoyant_simulation = Simulation(buoyant_model; Δt=1, stop_time=5minutes)
+Oceananigans.Diagnostics.erroring_NaNChecker!(buoyant_simulation)
 
 buoyant_snapshots = []
 
