@@ -47,7 +47,6 @@ examples = [
     Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),
     Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
     Example("Cloud formation in prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
-    Example("P3 ice particle explorer", "p3_explorer"; build_always=true, gpu=false),
     Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),
     Example("Splitting supercell", "splitting_supercell"; build_always=false, gpu=true),
     Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=false),
