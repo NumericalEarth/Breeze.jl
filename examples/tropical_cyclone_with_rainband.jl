@@ -119,7 +119,7 @@ p_env(z) = linear_interpolate(jordan_z_m, jordan_p_mb .* 100.0, z)    # convert 
 # a surface maximum wind of 43 m/s with a radius of maximum wind set at 31 km, decaying
 # outward as ``r^{-1/2}`` in the modified-Rankine sense. Above ``z ≈ 16`` km
 # (the outflow level) the tangential wind is zero. The outer ``\cos^2()`` taper
-# between 250 and 300 km is *not* in the original paper. Since our domain is periodic, 
+# between 250 and 300 km is *not* in the original paper. Since our domain is periodic,
 # we need to impose this to limit unrealistic stress at the domain boundaries.
 
 f = 5.0e-5                     # f-plane Coriolis parameter, 1/s ([YuDidlake2019](@citet); §3a1)
