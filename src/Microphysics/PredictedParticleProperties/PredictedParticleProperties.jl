@@ -221,9 +221,13 @@ include("size_distribution.jl")
 include("quadrature.jl")
 
 #####
-##### Lambda solver (depends on mass-diameter relationship)
+##### Ice mass-diameter relation, shape closures, gamma-moment integrals,
+##### and the lambda solver
 #####
 
+include("ice_mass_relation.jl")
+include("ice_shape_closures.jl")
+include("gamma_moments.jl")
 include("lambda_solver.jl")
 
 #####
@@ -233,6 +237,7 @@ include("lambda_solver.jl")
 include("table_generation_common.jl")
 include("lookup_table_3.jl")
 include("tabulated_function_adapters.jl")
+include("fortran_table_format.jl")
 include("fortran_table_reader.jl")
 
 #####
@@ -248,15 +253,34 @@ include("rain_quadrature.jl")
 include("gpu_adaptation.jl")
 
 #####
-##### Process rates
+##### Process-rate helpers, tabulated kernels, CCN activation,
+##### and the coupled saturation-adjustment solver
+#####
+
+include("process_rate_helpers.jl")
+include("tabulated_kernels.jl")
+include("ccn_activation_rates.jl")
+include("coupled_saturation_adjustment.jl")
+
+#####
+##### P3ProcessRates struct + constructor and the per-process rate calculations
 #####
 
 include("process_rates.jl")
 include("rain_process_rates.jl")
 include("melting_rates.jl")
 include("ice_nucleation_rates.jl")
-include("collection_rates.jl")
+include("ice_aggregation_rates.jl")
+include("riming_rates.jl")
+include("wet_ice_processes.jl")
 include("terminal_velocities.jl")
+
+#####
+##### Prognostic tendency functions (operate on the P3ProcessRates struct)
+#####
+
+include("prognostic_tendencies.jl")
+include("sixth_moment_tendencies.jl")
 
 #####
 ##### Multi-ice category support
@@ -268,6 +292,8 @@ include("multi_ice_category.jl")
 ##### AtmosphereModel interface (must be last - depends on all types)
 #####
 
-include("p3_interface.jl")
+include("p3_microphysical_state.jl")
+include("p3_microphysical_tendencies.jl")
+include("p3_driver.jl")
 
 end # module PredictedParticleProperties
