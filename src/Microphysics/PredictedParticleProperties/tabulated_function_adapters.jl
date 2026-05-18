@@ -157,12 +157,12 @@ end
     n⁻ = n⁻ + 1
     n⁺ = min(n⁺ + 1, n₆)
 
-    return _interpolate_6d(f.table,
+    return interpolate_6d(f.table,
                            (i⁻, i⁺, ξ), (j⁻, j⁺, η), (k⁻, k⁺, ζ),
                            (l⁻, l⁺, θ), (m⁻, m⁺, ψ), (n⁻, n⁺, χ))
 end
 
-@inline function _interpolate_6d(data, ix, iy, iz, iw, iv, iu)
+@inline function interpolate_6d(data, ix, iy, iz, iw, iv, iu)
     i⁻, i⁺, ξ = ix
     j⁻, j⁺, η = iy
     k⁻, k⁺, ζ = iz

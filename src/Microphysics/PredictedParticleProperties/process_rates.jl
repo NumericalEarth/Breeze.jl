@@ -239,14 +239,14 @@ state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density 
     return (; qᶠ = qᶠ_consistent, bᶠ = bᶠ_consistent, Fᶠ, ρᶠ)
 end
 
-@inline ice_integrals_table(p3) = _lookup_field(p3.ice.lookup_tables, Val(:ice_integrals))
-@inline rain_ice_collection_table(p3) = _lookup_field(p3.ice.lookup_tables, Val(:rain_ice_collection))
-@inline three_moment_shape_table(p3) = _lookup_field(p3.ice.lookup_tables, Val(:three_moment_shape))
+@inline ice_integrals_table(p3) = lookup_field(p3.ice.lookup_tables, Val(:ice_integrals))
+@inline rain_ice_collection_table(p3) = lookup_field(p3.ice.lookup_tables, Val(:rain_ice_collection))
+@inline three_moment_shape_table(p3) = lookup_field(p3.ice.lookup_tables, Val(:three_moment_shape))
 
-@inline _lookup_field(tables::P3LookupTables, ::Val{:ice_integrals}) = tables.ice_integrals
-@inline _lookup_field(tables::P3LookupTables, ::Val{:rain_ice_collection}) = tables.rain_ice_collection
-@inline _lookup_field(tables::P3LookupTables, ::Val{:three_moment_shape}) = tables.three_moment_shape
-@inline _lookup_field(::Nothing, ::Val) = nothing
+@inline lookup_field(tables::P3LookupTables, ::Val{:ice_integrals}) = tables.ice_integrals
+@inline lookup_field(tables::P3LookupTables, ::Val{:rain_ice_collection}) = tables.rain_ice_collection
+@inline lookup_field(tables::P3LookupTables, ::Val{:three_moment_shape}) = tables.three_moment_shape
+@inline lookup_field(::Nothing, ::Val) = nothing
 
 @inline total_ice_mass(qⁱ, qʷⁱ) = clamp_positive(qⁱ) + clamp_positive(qʷⁱ)
 
@@ -315,12 +315,12 @@ during Fortran table generation.
 @inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ)
     shape_table_3mom = three_moment_shape_table(p3)
-    return _ice_shape_parameter(shape_table_3mom, p3.ice.bulk_properties.shape,
+    return ice_shape_parameter(shape_table_3mom, p3.ice.bulk_properties.shape,
                                 qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
 end
 
 # 3-moment: diagnose μ from Table 3 (independent of mu axis)
-@inline function _ice_shape_parameter(shape_table_3mom::P3ThreeMomentShapeTable, shape_table,
+@inline function ice_shape_parameter(shape_table_3mom::P3ThreeMomentShapeTable, shape_table,
                                       qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
     qⁱ_safe = max(qⁱ, eps(FT))
     nⁱ_safe = max(nⁱ, eps(FT))
@@ -329,7 +329,7 @@ end
 end
 
 # 2-moment with tables: look up μ from Table 1 (mu_i_save)
-@inline function _ice_shape_parameter(::Nothing, shape_table::P3Table5D,
+@inline function ice_shape_parameter(::Nothing, shape_table::P3Table5D,
                                       qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
     log_m = log10(max(qⁱ / max(nⁱ, eps(FT)), eps(FT)))
     return shape_table(log_m, Fᶠ, Fˡ, ρᶠ, zero(FT))
@@ -799,7 +799,7 @@ end
     return ifelse(active, epsilon_r, zero(FT))
 end
 
-@inline function _ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+@inline function ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                          constants, transport, q, μ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
@@ -832,7 +832,7 @@ end
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) & (Fˡ < prp.liquid_fraction_small)
-    epsilon_i = _ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+    epsilon_i = ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                         constants, transport, q, μ)
     return ifelse(active, epsilon_i, zero(FT))
 end
@@ -847,7 +847,7 @@ end
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) & (Fˡ >= prp.liquid_fraction_small)
-    epsilon_iw = _ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+    epsilon_iw = ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                          constants, transport, q, μ)
     return ifelse(active, epsilon_iw, zero(FT))
 end

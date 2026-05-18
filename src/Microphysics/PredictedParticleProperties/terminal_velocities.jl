@@ -353,13 +353,13 @@ function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeo
     # Density correction factor (Heymsfield et al. 2007, exponent 0.54 for ice)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
-    return _fused_fall_speeds(fs.mass_weighted, fs.number_weighted, fs.reflectivity_weighted,
+    return fused_fall_speeds(fs.mass_weighted, fs.number_weighted, fs.reflectivity_weighted,
                               m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
 end
 
 # Fast path: all three tables are 5D (the supported P3 configuration with loaded tables).
 # Interpolation indices for (log_m, Fᶠ, Fˡ, ρᶠ, μ) are shared across the three reads.
-@inline function _fused_fall_speeds(mass_table::P3Table5D, number_table::P3Table5D, refl_table::P3Table5D,
+@inline function fused_fall_speeds(mass_table::P3Table5D, number_table::P3Table5D, refl_table::P3Table5D,
                                     m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
     FT = typeof(m̄)
     log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
@@ -373,7 +373,7 @@ end
 
 # 2-moment fast path: reflectivity table is unused, so skip its lookup entirely
 # but still share the (log_m, Fᶠ, Fˡ, ρᶠ, μ) prep across the mass/number tables.
-@inline function _fused_fall_speeds(mass_table::P3Table5D, number_table::P3Table5D, refl_table::Nothing,
+@inline function fused_fall_speeds(mass_table::P3Table5D, number_table::P3Table5D, refl_table::Nothing,
                                     m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
     FT = typeof(m̄)
     log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
@@ -386,7 +386,7 @@ end
 end
 
 # Fallback for non-5D fall speed tables (quadrature path, mixed types).
-@inline function _fused_fall_speeds(mass_table, number_table, refl_table,
+@inline function fused_fall_speeds(mass_table, number_table, refl_table,
                                     m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
     FT = typeof(m̄)
     return IceTerminalVelocities{FT}(

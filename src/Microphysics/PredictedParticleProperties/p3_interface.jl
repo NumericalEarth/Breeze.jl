@@ -481,7 +481,7 @@ end
 # Kernel entry point: reads OffsetArrays → calls @noinline scalar compute → writes OffsetArrays.
 # Keeping array access in the kernel (inlined) and physics in @noinline (separate compilation)
 # prevents the GPU compiler from seeing the full P3 physics + OffsetArray access together.
-@inline function _p3_compute_and_cache!(μ, i, j, k, grid, p3::P3, ρ, 𝒰, constants)
+@inline function p3_compute_and_cache!(μ, i, j, k, grid, p3::P3, ρ, 𝒰, constants)
     @inbounds begin
         ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, (; u=zero(ρ), v=zero(ρ), w=zero(ρ)))
     end
@@ -821,7 +821,7 @@ using KernelAbstractions: @kernel, @index
     𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
     𝒰 = AM.maybe_adjust_thermodynamic_state(𝒰₀, p3, qᵛᵉ, constants)
 
-    _p3_compute_and_cache!(μ, i, j, k, grid, p3, ρ, 𝒰, constants)
+    p3_compute_and_cache!(μ, i, j, k, grid, p3, ρ, 𝒰, constants)
 end
 
 #####
