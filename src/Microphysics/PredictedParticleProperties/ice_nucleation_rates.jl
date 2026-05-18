@@ -238,15 +238,8 @@ The frozen mass deposits as dense rime at ``ρ_{\\text{rim}} = 900`` kg/m³
 (solid ice sphere), following the Fortran P3 v5.5.0 treatment of
 [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization).
 
-The number rate ``N_{\\text{hom}}`` is capped by a mass-number consistency bound:
-at most one ice particle per minimum-size cloud droplet
-(`ProcessRateParameters.minimum_cloud_drop_mass`) can form from the frozen mass.
-This prevents an ni explosion when `Nᶜ` is prescribed (continental aerosol loading)
-and `qᶜˡ` is trace at ``T < -40°\\text{C}``.
-
-**Fortran parity note:** This cap is not present in the Fortran P3 v5.5.0 reference,
-where `Nᶜ` is prognostic and naturally depletes with cloud consumption. When
-prognostic `Nᶜ` is implemented in Breeze, this cap can be removed.
+All cloud droplets are transferred to ice; the number rate is
+``N_{\\text{hom}} = N_c / (ρ τ_{\\text{hom}})``, matching the Fortran reference.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -258,7 +251,7 @@ prognostic `Nᶜ` is implemented in Breeze, this cap can be removed.
 # Returns
 - Tuple (Q_hom, N_hom):
   - `Q_hom`: Mass rate cloud → ice [kg/kg/s]
-  - `N_hom`: Number rate cloud → ice [1/kg/s], capped by mass-number consistency
+  - `N_hom`: Number rate cloud → ice [1/kg/s]
 
 # Example
 
