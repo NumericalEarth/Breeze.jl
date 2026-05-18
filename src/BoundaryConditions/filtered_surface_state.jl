@@ -37,6 +37,11 @@ end
 
 Two-dimensional fields storing temporally filtered near-surface velocities
 and virtual potential temperature for use in bulk flux boundary conditions.
+Filtering the matching velocity mitigates log-layer mismatch in wall-modeled
+large-eddy simulations by removing the spurious correlation between the
+instantaneous friction velocity and matching-velocity fluctuations
+([Nishizawa & Kitamura (2018)](@cite NishizawaKitamura2018);
+[Shin, Yang & Howland (2025)](@cite ShinYangHowland2025)).
 
 The filtered velocities `ū`, `v̄` (and `θ̄ᵥ` when a stability-dependent bulk
 coefficient is attached) are updated each time step via an exponential

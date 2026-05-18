@@ -34,7 +34,12 @@ When a [`FilteredSurfaceVelocities`](@ref) is supplied via `filtered_velocities`
 *every* field entering the formula — the wind speed `|U|`, the velocity `u`, and the
 virtual potential temperature `θᵥ` used in stability — is read from the filtered
 state. The surface density `ρ₀` is computed from the (slowly varying) surface
-temperature and pressure and is not filtered.
+temperature and pressure and is not filtered. Temporal filtering of the matching
+velocity is used to mitigate log-layer mismatch in wall-modeled large-eddy
+simulations, where the spurious correlation between the instantaneous friction
+velocity and matching-velocity fluctuations otherwise biases the surface stress
+([Nishizawa & Kitamura (2018)](@cite NishizawaKitamura2018);
+[Shin, Yang & Howland (2025)](@cite ShinYangHowland2025)).
 
 # Monin–Obukhov consistency
 
