@@ -362,9 +362,23 @@ function make_fortran_tabulated_function(data::Array{FT, N}, ranges, arch) where
         ifelse(n == 1, zero(FT), FT(1) / ((FT(hi) - FT(lo)) / (n - 1)))
     end
     gpu_data = on_architecture(arch, data)
+    return _make_tabulated_function(Val(N), gpu_data, ranges, inv_delta)
+end
+
+# 1D–5D fall through to Oceananigans' parametric TabulatedFunction, which owns the
+# corresponding call methods. 6D is Breeze-owned (commit 1f0234a moved off
+# TabulatedFunction{6} to eliminate type piracy), so the 6D path must construct
+# our owned struct — otherwise the resulting object has no call method and the
+# GPU compiler emits jl_f_throw_methoderror deep inside the rain-ice collection
+# lookup chain.
+@inline function _make_tabulated_function(::Val{N}, gpu_data, ranges, inv_delta) where {N}
     return TabulatedFunction{N, Nothing, typeof(gpu_data), typeof(ranges), typeof(inv_delta)}(
         nothing, gpu_data, ranges, inv_delta)
 end
+
+@inline _make_tabulated_function(::Val{6}, gpu_data, ranges, inv_delta) =
+    TabulatedFunction6D{Nothing, typeof(gpu_data), typeof(ranges), typeof(inv_delta)}(
+        nothing, gpu_data, ranges, inv_delta)
 
 #####
 ##### Build Table 1 (5D) TabulatedFunction objects
