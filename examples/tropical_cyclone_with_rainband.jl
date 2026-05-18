@@ -641,9 +641,9 @@ end
 
 ## A `FieldTimeSeries`-shaped wrapper that holds in-memory host arrays.
 ## The analysis section indexes `ts.u.times` and `ts.u[n]` (and similarly for
-## v, w, T). Since this example produces substantial output files, this saves 
-## us from writing and reading JLD2 files between stages and keeps the creation of 
-## this page small. Look at other examples for more information on saving and 
+## v, w, T). Since this example produces substantial output files, this saves
+## us from writing and reading JLD2 files between stages and keeps the creation of
+## this page small. Look at other examples for more information on saving and
 ## loading time series with JLD2.
 ## them directly without any further `interior(...)` indirection.
 struct InMemoryFTS
