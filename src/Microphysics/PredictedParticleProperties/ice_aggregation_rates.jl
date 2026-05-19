@@ -2,17 +2,20 @@
     FT = typeof(m̄)
     log_m = log10(m̄)
     log_λ = log10(λr)
-    z_val = ice_rain_sixth_moment_lookup(table.sixth_moment, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ, FT)
+    # All three rain-ice tables share `(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ)` axes
+    # by construction, so prep indices once and reuse across evaluations.
+    prep = prepare_6d(table.mass, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ)
+    z_val = ice_rain_sixth_moment_lookup(table.sixth_moment, prep, FT)
     # Fortran table stores rain-ice mass and number kernels as log10;
     # exponentiate to recover physical values (Fortran runtime: 10.**proc).
     # Sixth moment (m6collr) is NOT log10.
-    return exp10(table.mass(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ)),
-           exp10(table.number(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ)),
+    return exp10(evaluate_at(table.mass, prep)),
+           exp10(evaluate_at(table.number, prep)),
            z_val
 end
 
-@inline ice_rain_sixth_moment_lookup(table, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ, FT) = table(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ)
-@inline ice_rain_sixth_moment_lookup(::Nothing, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ, FT) = zero(FT)
+@inline ice_rain_sixth_moment_lookup(table, prep::Prepared6DInterpolation, FT) = evaluate_at(table, prep)
+@inline ice_rain_sixth_moment_lookup(::Nothing, prep::Prepared6DInterpolation, FT) = zero(FT)
 
 #####
 ##### Phase 2: Ice aggregation

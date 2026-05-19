@@ -336,11 +336,13 @@ end
                                                   λ_r, inv_nⁱ, z_cloud_rime)
     FT = typeof(log_m)
     log_λ_r = log10(max(FT(λ_r), FT(1e-20)))
-    z_rain_rime = rain_ice_table.sixth_moment(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)
+    # `sixth_moment` and `mass` share axes; prep once and reuse.
+    prep = prepare_6d(rain_ice_table.mass, log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)
+    z_rain_rime = evaluate_at(rain_ice_table.sixth_moment, prep)
     # Fortran convention: zqrcol = N0r × m6collr × env (no 10^f1pr08 factor).
     # Since rain_riming = N0r × ni × env × 10^f1pr08 (mass kernel),
     # divide by the mass kernel to recover: z = m6collr × rain_riming / (ni × mass_kernel).
-    mass_kernel = exp10(rain_ice_table.mass(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ))
+    mass_kernel = exp10(evaluate_at(rain_ice_table.mass, prep))
     inv_mass_kernel = safe_divide(one(FT), mass_kernel, zero(FT))
     return z_rain_rime * inv_nⁱ * inv_mass_kernel
 end

@@ -209,8 +209,11 @@ end
 ##### coordinate transform that the Fortran runtime uses.
 #####
 
-@inline rime_density_index(ρᶠ) = ifelse(ρᶠ ≤ 650, (ρᶠ - 50) * 0.005 + 1,
-                                                     (ρᶠ - 650) * 0.004 + 4)
+@inline function rime_density_index(ρᶠ::FT) where FT
+    return ifelse(ρᶠ ≤ FT(650),
+                  (ρᶠ - FT(50))  * FT(0.005) + FT(1),
+                  (ρᶠ - FT(650)) * FT(0.004) + FT(4))
+end
 
 struct FortranTabulatedFunction5D{T}
     table :: T
@@ -304,4 +307,73 @@ end
     _interpolate(f.table, p.ix, p.iy, p.iz, p.iw, p.iv)
 
 @inline evaluate_at(f::FortranTabulatedFunction5D, p::Prepared5DInterpolation) =
+    evaluate_at(f.table, p)
+
+#####
+##### Prepared 6D interpolation indices
+#####
+##### Mirrors `Prepared5DInterpolation` for the 6-D ice-rain collection tables
+##### (`sixth_moment`, `mass`, `number`). All three are queried at identical
+##### `(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)` per cell, so prepping once and
+##### reusing across the trio eliminates redundant clamps / frac-index work.
+##### All P3 Fortran Table 2 entries share the same axes by construction, so
+##### a single `Prepared6DInterpolation` is valid for any of them.
+#####
+
+struct Prepared6DInterpolation{FT}
+    ix :: Tuple{Int, Int, FT}
+    iy :: Tuple{Int, Int, FT}
+    iz :: Tuple{Int, Int, FT}
+    iw :: Tuple{Int, Int, FT}
+    iv :: Tuple{Int, Int, FT}
+    iu :: Tuple{Int, Int, FT}
+end
+
+@inline function prepare_6d(f::TabulatedFunction6D, x₁, x₂, x₃, x₄, x₅, x₆)
+    a₁, b₁ = f.range[1]
+    a₂, b₂ = f.range[2]
+    a₃, b₃ = f.range[3]
+    a₄, b₄ = f.range[4]
+    a₅, b₅ = f.range[5]
+    a₆, b₆ = f.range[6]
+
+    c₁ = clamp(x₁, a₁, b₁)
+    c₂ = clamp(x₂, a₂, b₂)
+    c₃ = clamp(x₃, a₃, b₃)
+    c₄ = clamp(x₄, a₄, b₄)
+    c₅ = clamp(x₅, a₅, b₅)
+    c₆ = clamp(x₆, a₆, b₆)
+
+    frac_i = (c₁ - a₁) * f.inverse_Δ[1]
+    frac_j = (c₂ - a₂) * f.inverse_Δ[2]
+    frac_k = (c₃ - a₃) * f.inverse_Δ[3]
+    frac_l = (c₄ - a₄) * f.inverse_Δ[4]
+    frac_m = (c₅ - a₅) * f.inverse_Δ[5]
+    frac_n = (c₆ - a₆) * f.inverse_Δ[6]
+
+    i⁻, i⁺, ξ = interpolator(frac_i)
+    j⁻, j⁺, η = interpolator(frac_j)
+    k⁻, k⁺, ζ = interpolator(frac_k)
+    l⁻, l⁺, θ = interpolator(frac_l)
+    m⁻, m⁺, ψ = interpolator(frac_m)
+    n⁻, n⁺, χ = interpolator(frac_n)
+
+    n₁, n₂, n₃, n₄, n₅, n₆ = size(f.table)
+
+    return Prepared6DInterpolation{typeof(ξ)}((i⁻ + 1, min(i⁺ + 1, n₁), ξ),
+                                              (j⁻ + 1, min(j⁺ + 1, n₂), η),
+                                              (k⁻ + 1, min(k⁺ + 1, n₃), ζ),
+                                              (l⁻ + 1, min(l⁺ + 1, n₄), θ),
+                                              (m⁻ + 1, min(m⁺ + 1, n₅), ψ),
+                                              (n⁻ + 1, min(n⁺ + 1, n₆), χ))
+end
+
+@inline function prepare_6d(f::FortranTabulatedFunction6D, log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)
+    return prepare_6d(f.table, log_m, log_λ_r, Fᶠ, Fˡ, rime_density_index(ρᶠ), μ)
+end
+
+@inline evaluate_at(f::TabulatedFunction6D, p::Prepared6DInterpolation) =
+    interpolate_6d(f.table, p.ix, p.iy, p.iz, p.iw, p.iv, p.iu)
+
+@inline evaluate_at(f::FortranTabulatedFunction6D, p::Prepared6DInterpolation) =
     evaluate_at(f.table, p)
