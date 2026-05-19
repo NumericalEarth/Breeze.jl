@@ -489,7 +489,7 @@ acoustic CFL:
 
 ```math
 N \\approx
-\\left\\lceil \\frac{\\Delta t \\, \\mathbb{C}^{ac}}{\\nu \\, \\Delta x_\\min} \\right\\rceil ,
+\\left\\lceil \\frac{|\\Delta t| \\, \\mathbb{C}^{ac}}{\\nu \\, \\Delta x_\\min} \\right\\rceil ,
 ```
 
 with ``\\mathbb{C}^{ac} = \\sqrt{γ^d R^d T_r}`` for a nominal reference
@@ -512,7 +512,7 @@ function compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_
         min(Δx, Δy)
     end
 
-    return max(1, ceil(Int, FT(Δt) * ℂᵃᶜ / (ν * Δx_min)))
+    return max(1, ceil(Int, abs(FT(Δt)) * ℂᵃᶜ / (ν * Δx_min)))
 end
 
 @inline acoustic_substeps(N::Int, grid, Δt, constants, acoustic_cfl) = N
@@ -647,15 +647,22 @@ end
 # Implicit upper Rayleigh sponge contribution to the column tridiag's
 # diagonal. Klemp, Dudhia & Hassiotis (2008): a layer of thickness `depth`
 # below the lid where ``(ρw)′`` is damped at peak rate `damping_rate` (1/s)
-# scaled by the configured ramp shape. CN-weighted: `δτᵐ⁺ × rate × ramp`
-# on the LHS diagonal, matched by `δτˢ⁻ × rate × ramp × ρw_old` subtracted
+# scaled by the configured ramp shape. CN-weighted: `|δτᵐ⁺| × rate × ramp`
+# on the LHS diagonal, matched by `|δτˢ⁻| × rate × ramp × ρw_old` subtracted
 # on the RHS in `_build_predictors_and_vertical_rhs!`. Local in z, so no
 # off-diagonal coupling.
+#
+# `|δτ|` rather than `δτ` so the sponge acts as a one-sided dissipative
+# regularizer in either integration direction (Δt > 0 or Δt < 0). The
+# tradeoff: backward integration through a sponge layer does not exactly
+# invert the forward integration there, since the sponge is intentionally
+# irreversible. Outside the sponge layer the ramp vanishes and the column
+# tridiag is unaffected.
 @inline sponge_term_diag(i, j, k, grid, ::Nothing, δτᵐ⁺) = zero(grid)
 
 @inline function sponge_term_diag(i, j, k, grid, sponge::UpperSponge, δτᵐ⁺)
     z = znode(i, j, k, grid, Center(), Center(), Face())
-    return δτᵐ⁺ * sponge.damping_rate *
+    return abs(δτᵐ⁺) * sponge.damping_rate *
            sponge.ramp(z, grid.Lz, sponge.depth)
 end
 
@@ -663,7 +670,7 @@ end
 
 @inline function sponge_rhs(i, j, k, grid, sponge::UpperSponge, δτˢ⁻, ρw_old)
     z = znode(i, j, k, grid, Center(), Center(), Face())
-    @inbounds return δτˢ⁻ * sponge.damping_rate *
+    @inbounds return abs(δτˢ⁻) * sponge.damping_rate *
                      sponge.ramp(z, grid.Lz, sponge.depth) * ρw_old[i, j, k]
 end
 
