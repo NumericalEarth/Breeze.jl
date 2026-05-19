@@ -394,14 +394,16 @@ for arch in arches
             @test !any(isinf, parent(field))
         end
 
-        # "Random notion of error" — generous bounds; the round-trip is
-        # not exact but must stay bounded for the small perturbation.
+        # Round-trip is dissipative but tight: residuals are orders of
+        # magnitude smaller than the disturbance produced by the forward step.
+        # Use a relative tolerance for ρ (which has a meaningful baseline)
+        # and an absolute tolerance for ρu, ρw (which start from rest).
         ρ_final  = Array(parent(model.dynamics.density))
         ρu_final = Array(parent(model.momentum.ρu))
         ρw_final = Array(parent(model.momentum.ρw))
-        @test maximum(abs, ρ_final  .- ρ_init)  < 1
-        @test maximum(abs, ρu_final .- ρu_init) < 1
-        @test maximum(abs, ρw_final .- ρw_init) < 1
+        @test isapprox(ρ_final,  ρ_init;  rtol=1e-3)
+        @test isapprox(ρu_final, ρu_init; atol=1e-3)
+        @test isapprox(ρw_final, ρw_init; atol=1e-3)
     end
 
     #####
