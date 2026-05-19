@@ -1,5 +1,6 @@
 using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
+using Oceananigans: UpdateStateCallsite, TendencyCallsite
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
 using Oceananigans: Face
@@ -21,7 +22,12 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
     microphysics_model_update!(model.microphysics, model)
-    compute_tendencies && compute_tendencies!(model)
+
+    for callback in callbacks
+        callback.callsite isa UpdateStateCallsite && callback(model)
+    end
+
+    compute_tendencies && compute_tendencies!(model, callbacks)
 
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
 
@@ -246,7 +252,7 @@ end
     @inbounds temperature[i, j, k] = T
 end
 
-function compute_tendencies!(model::AtmosphereModel)
+function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     grid = model.grid
     arch = grid.architecture
 
@@ -333,6 +339,10 @@ function compute_tendencies!(model::AtmosphereModel)
     #####
 
     compute_dynamics_tendency!(model)
+
+    for callback in callbacks
+        callback.callsite isa TendencyCallsite && callback(model)
+    end
 
     return nothing
 end
