@@ -1,5 +1,15 @@
 using Breeze
 using Breeze.AtmosphereModels: transport_velocities, x_pressure_gradient
+using Oceananigans.Architectures: CPU
+
+# Run under `default_arch` when the test runner provides it (which routes to
+# GPU when CUDA is functional, matching project convention); otherwise fall
+# back to CPU() so this file can also be included directly with
+# `julia --project=. test/terrain_following.jl` during development.
+@isdefined(default_arch) || (default_arch = CPU())
+
+using CUDA: @allowscalar
+
 using Breeze.CompressibleEquations: assemble_slow_vertical_momentum_tendency!,
                                     compute_acoustic_substeps,
                                     compute_contravariant_velocity!,
@@ -16,13 +26,14 @@ using Oceananigans.Operators: divᶜᶜᶜ
 using Breeze.Thermodynamics: hydrostatic_pressure
 using Test
 
+@allowscalar begin
 @testset "TerrainFollowingDiscretization" begin
     @testset "follow_terrain! with function topography" begin
         Nx, Nz = 32, 10
         Lx, Lz = 100000.0, 5000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -84,7 +95,7 @@ using Test
         Lx, Lz = 100000.0, 5000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -112,7 +123,7 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -141,7 +152,7 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -175,7 +186,7 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -217,7 +228,7 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -251,7 +262,7 @@ using Test
 
         function flat_split_explicit_model(terrain; damping=NoDivergenceDamping())
             z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-            grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+            grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
             metrics = terrain ? follow_terrain!(grid, (x, y) -> 0) : nothing
@@ -278,16 +289,18 @@ using Test
         function assert_matching_prognostics(height_model, terrain_model)
             height_ρθ = Breeze.AtmosphereModels.thermodynamic_density(height_model.formulation)
             terrain_ρθ = Breeze.AtmosphereModels.thermodynamic_density(terrain_model.formulation)
+            zero_terrain_tolerance = 1e-24
 
             @test maximum(abs, interior(height_model.dynamics.density) .-
-                               interior(terrain_model.dynamics.density)) == 0
-            @test maximum(abs, interior(height_ρθ) .- interior(terrain_ρθ)) == 0
+                               interior(terrain_model.dynamics.density)) <= zero_terrain_tolerance
+            @test maximum(abs, interior(height_ρθ) .-
+                               interior(terrain_ρθ)) <= zero_terrain_tolerance
             @test maximum(abs, interior(height_model.momentum.ρu) .-
-                               interior(terrain_model.momentum.ρu)) == 0
+                               interior(terrain_model.momentum.ρu)) <= zero_terrain_tolerance
             @test maximum(abs, interior(height_model.momentum.ρv) .-
-                               interior(terrain_model.momentum.ρv)) == 0
+                               interior(terrain_model.momentum.ρv)) <= zero_terrain_tolerance
             @test maximum(abs, interior(height_model.momentum.ρw) .-
-                               interior(terrain_model.momentum.ρw)) == 0
+                               interior(terrain_model.momentum.ρw)) <= zero_terrain_tolerance
         end
 
         # One-step increment equivalence.
@@ -322,7 +335,7 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -354,7 +367,7 @@ using Test
 
         function terrain_pressure_gradient_error(pressure_function, expected_gradient, stencil)
             z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-            grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+            grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
             metrics = follow_terrain!(grid, h; pressure_gradient_stencil=stencil)
@@ -389,7 +402,7 @@ using Test
         function slope_inside_metric_cancellation_error(Nx, Nz)
             Lx, Lz = 10000.0, 5000.0
             z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-            grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+            grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
 
@@ -431,7 +444,7 @@ using Test
             ∂x_σ(x) = -∂x_h(x) / Lz
 
             z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-            grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+            grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
             follow_terrain!(grid, (x, y) -> h(x))
@@ -484,7 +497,7 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -545,7 +558,7 @@ using Test
 
         function adaptive_grid(terrain)
             z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-            grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+            grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
             terrain && follow_terrain!(grid, (x, y) -> 100 * exp(-x^2 / 2000^2))
@@ -591,7 +604,7 @@ using Test
 
         for h₀ in (0.0, 100.0, 300.0)
             z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-            grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+            grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
             metrics = follow_terrain!(grid, (x, y) -> h₀ * exp(-x^2 / 2000^2))
@@ -680,7 +693,7 @@ using Test
         end
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
         metrics = follow_terrain!(grid, hill;
@@ -753,7 +766,7 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -788,7 +801,7 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
         metrics = follow_terrain!(grid, (x, y) -> 100 * exp(-x^2 / 2000^2);
@@ -825,7 +838,7 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz), halo=(5, 5),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
         metrics = follow_terrain!(grid, (x, y) -> 100 * exp(-x^2 / 2000^2);
@@ -857,7 +870,7 @@ using Test
         Lx, Lz = 100000.0, 10000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -909,7 +922,7 @@ using Test
         Lx, Lz = 100000.0, 10000.0
 
         z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -946,4 +959,5 @@ using Test
         i_peak = Nx÷2
         @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
     end
+end
 end
