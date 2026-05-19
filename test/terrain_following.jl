@@ -250,8 +250,8 @@ using Test
         w̃ = model.dynamics.contravariant_vertical_velocity
         ρw̃ = model.dynamics.contravariant_vertical_momentum
 
-        @test maximum(abs, interior(w̃) .- interior(model.velocities.w)) == 0
-        @test maximum(abs, interior(ρw̃) .- interior(model.momentum.ρw)) == 0
+        @test interior(w̃) == interior(model.velocities.w)
+        @test interior(ρw̃) == interior(model.momentum.ρw)
         @test transport_velocities(model) === model.velocities
         @test outer_step_start_transport_velocities(model) === model.velocities
     end
@@ -291,16 +291,21 @@ using Test
             terrain_ρθ = Breeze.AtmosphereModels.thermodynamic_density(terrain_model.formulation)
             zero_terrain_tolerance = 1e-24
 
-            @test maximum(abs, interior(height_model.dynamics.density) .-
-                               interior(terrain_model.dynamics.density)) <= zero_terrain_tolerance
-            @test maximum(abs, interior(height_ρθ) .-
-                               interior(terrain_ρθ)) <= zero_terrain_tolerance
-            @test maximum(abs, interior(height_model.momentum.ρu) .-
-                               interior(terrain_model.momentum.ρu)) <= zero_terrain_tolerance
-            @test maximum(abs, interior(height_model.momentum.ρv) .-
-                               interior(terrain_model.momentum.ρv)) <= zero_terrain_tolerance
-            @test maximum(abs, interior(height_model.momentum.ρw) .-
-                               interior(terrain_model.momentum.ρw)) <= zero_terrain_tolerance
+            @test isapprox(interior(height_model.dynamics.density),
+                           interior(terrain_model.dynamics.density);
+                           atol=zero_terrain_tolerance)
+            @test isapprox(interior(height_ρθ),
+                           interior(terrain_ρθ);
+                           atol=zero_terrain_tolerance)
+            @test isapprox(interior(height_model.momentum.ρu),
+                           interior(terrain_model.momentum.ρu);
+                           atol=zero_terrain_tolerance)
+            @test isapprox(interior(height_model.momentum.ρv),
+                           interior(terrain_model.momentum.ρv);
+                           atol=zero_terrain_tolerance)
+            @test isapprox(interior(height_model.momentum.ρw),
+                           interior(terrain_model.momentum.ρw);
+                           atol=zero_terrain_tolerance)
         end
 
         # One-step increment equivalence.
