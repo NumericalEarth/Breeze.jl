@@ -256,6 +256,15 @@ for arch in arches
             @test N_loose  == ceil(Int, 12 * sqrt(1.4 * 287.0 * 300) / (1.0  * 1000))
             @test N_strict > N_default > N_loose
         end
+
+        @testset "Backward Δt yields same substep count" begin
+            grid = RectilinearGrid(arch; size=(100, 6, 10), halo=(5, 5, 5),
+                                   x=(0, 100kilometers), y=(0, 6kilometers), z=(0, 10kilometers))
+            N_fwd = compute_acoustic_substeps(grid, +12, constants, ν)
+            N_bwd = compute_acoustic_substeps(grid, -12, constants, ν)
+            @test N_fwd ≥ 1
+            @test N_bwd == N_fwd
+        end
     end
 
     @testset "acoustic_cfl plumbed to AcousticSubstepper [$(arch), $(FT)]" for FT in as_test_float_types(arch)
@@ -337,6 +346,62 @@ for arch in arches
         @test !any(isnan, parent(model.momentum.ρu))
         @test !any(isnan, parent(model.momentum.ρw))
         @test !any(isnan, parent(model.dynamics.density))
+    end
+
+    #####
+    ##### Backward integration: one step forward, one step back
+    #####
+    ##### A coarse sanity test that `time_step!(model, -Δt)` does not blow
+    ##### up and produces a state close to the initial one. Exact
+    ##### reversibility is not expected: off-centered Crank–Nicolson, the
+    ##### Klemp 2018 horizontal divergence damping, and WENO upwinding in
+    ##### the slow tendency all introduce one-sided dissipation. We only
+    ##### check that the round-trip stays bounded and finite.
+    #####
+
+    @testset "Backward integration: one step forward and back [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=300)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics,
+                                timestepper=:AcousticRungeKutta3)
+
+        ref = model.dynamics.reference_state
+        # Small smooth θ anomaly so the forward step produces non-trivial
+        # dynamics; the reverse step is what the new code path exercises.
+        Lz = grid.Lz
+        θ₀(x, y, z) = FT(300) + FT(0.1) * sin(π * z / Lz)
+        set!(model; θ=θ₀, u=0, qᵗ=0, ρ=ref.density)
+
+        ρ_init  = Array(parent(model.dynamics.density))
+        ρu_init = Array(parent(model.momentum.ρu))
+        ρw_init = Array(parent(model.momentum.ρw))
+
+        Δt = FT(6)
+        time_step!(model, +Δt)
+        time_step!(model, -Δt)
+
+        # Clock counts both steps but net time returns to zero.
+        @test model.clock.iteration == 2
+        @test model.clock.time ≈ 0 atol=sqrt(eps(FT))
+
+        # Doesn't blow up.
+        for field in (model.dynamics.density, model.momentum.ρu, model.momentum.ρw)
+            @test !any(isnan, parent(field))
+            @test !any(isinf, parent(field))
+        end
+
+        # "Random notion of error" — generous bounds; the round-trip is
+        # not exact but must stay bounded for the small perturbation.
+        ρ_final  = Array(parent(model.dynamics.density))
+        ρu_final = Array(parent(model.momentum.ρu))
+        ρw_final = Array(parent(model.momentum.ρw))
+        @test maximum(abs, ρ_final  .- ρ_init)  < 1
+        @test maximum(abs, ρu_final .- ρu_init) < 1
+        @test maximum(abs, ρw_final .- ρw_init) < 1
     end
 
     #####
