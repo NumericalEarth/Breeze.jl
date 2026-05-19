@@ -42,7 +42,7 @@ jobs:
             advection: 'WENO5, WENO9'
             backend: 'vanilla'
             topology: 'PPB'
-            extra_flags: '--warmup_steps 5 --time_steps 100'
+            extra_flags: '--warmup_steps 5 --time_steps 160'
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '512x512x256'
