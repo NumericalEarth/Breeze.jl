@@ -61,13 +61,11 @@ end
     @testset "FTS embedded in a forcing slot is reachable via the model walk" begin
         # Verify that `(fields(model), model.forcing)` — the tuple our extension walks —
         # carries an embedded `FieldTimeSeries` through `extract_field_time_series` so the
-        # update function will reach it. Avoid OpenBoundaryCondition-on-prognostic-momentum
-        # here: AnelasticDynamics' `initialize_model_thermodynamics!` calls `set!`, which
-        # triggers `compute_velocities!`-driven halo fill without a `clock` argument, and
-        # FTS-backed OBCs fall through to the generic `getbc(::AbstractArray, ...)` path
-        # that does not exist for the time dimension. That's a separate pre-existing bug
-        # in `compute_velocities!` (`fill_halo_regions!(model.momentum)` should pass
-        # `model.clock, fields(model)`), out of scope for #719.
+        # update function will reach it. Avoid `OpenBoundaryCondition(fts)` on prognostic
+        # momentum here: it surfaces #717 (`compute_velocities!` discards `clock`/`fields`
+        # when refilling momentum halos, so FTS-backed OBCs fall through to the
+        # `getbc(::AbstractArray, ...)` fallback and bounds-error on `condition[i, j]`).
+        # Same root cause as the continuous-callable failure reported in #717.
         times = collect(FT(0):FT(1):FT(3))
         fts = FieldTimeSeries{Nothing, Center, Center}(grid, times)
         model = AtmosphereModel(grid)
