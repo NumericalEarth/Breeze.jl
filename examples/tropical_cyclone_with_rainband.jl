@@ -75,26 +75,26 @@ end
 # Columns are pressure (mb), geopotential height (m), temperature (°C), and
 # potential temperature (K).
 
-jordan_p_mb = Float64[
+const jordan_p_mb = Float32[
     1015.1, 1000.0, 950.0, 900.0, 850.0, 800.0, 750.0, 700.0, 650.0, 600.0,
     550.0, 500.0, 450.0, 400.0, 350.0, 300.0, 250.0, 200.0, 175.0, 150.0,
     125.0, 100.0, 80.0, 60.0, 50.0, 40.0, 30.0,
 ]
 
-jordan_z_m = Float64[
+const jordan_z_m = Float32[
     0.0, 132.0, 583.0, 1054.0, 1547.0, 2063.0, 2609.0, 3182.0,
     3792.0, 4442.0, 5138.0, 5888.0, 6703.0, 7595.0, 8581.0, 9682.0,
     10935.0, 12396.0, 13236.0, 14177.0, 15260.0, 16568.0, 17883.0, 19620.0,
     20743.0, 22139.0, 23971.0,
 ]
 
-jordan_T_C = Float64[
+const jordan_T_C = Float32[
     26.3, 26.0, 23.0, 19.8, 17.3, 14.6, 11.8, 8.6, 5.1, 1.4,
     -2.5, -6.9, -11.9, -17.7, -24.8, -33.2, -43.3, -55.2, -61.5, -67.6,
     -72.2, -73.5, -69.8, -63.9, -60.6, -57.3, -54.0,
 ]
 
-jordan_θ_K = Float64[
+const jordan_θ_K = Float32[
     298.0, 299.0, 300.0, 302.0, 304.0, 307.0, 309.0, 312.0, 315.0, 318.0,
     321.0, 324.0, 328.0, 332.0, 335.0, 338.0, 342.0, 345.0, 348.0, 354.0,
     364.0, 386.0, 418.0, 468.0, 500.0, 542.0, 597.0,
@@ -109,9 +109,15 @@ function linear_interpolate(xs::AbstractVector, ys::AbstractVector, x::Real)
     return y0 + (y1 - y0) * (x_c - x0) / (x1 - x0)
 end
 
+## Precompute the K- and Pa-converted soundings so `T_env`/`p_env` don't
+## allocate a fresh broadcasted array on every call, and so the type
+## propagates through interpolation as Float32.
+const jordan_T_K = jordan_T_C .+ 273.15f0
+const jordan_p_Pa = jordan_p_mb .* 100f0
+
 θ_env(z) = linear_interpolate(jordan_z_m, jordan_θ_K, z)
-T_env(z) = linear_interpolate(jordan_z_m, jordan_T_C .+ 273.15, z)    # convert C -> K
-p_env(z) = linear_interpolate(jordan_z_m, jordan_p_mb .* 100.0, z)    # convert mb -> Pa
+T_env(z) = linear_interpolate(jordan_z_m, jordan_T_K, z)
+p_env(z) = linear_interpolate(jordan_z_m, jordan_p_Pa, z)
 
 # ## YD19 physical parameters
 #
@@ -141,6 +147,7 @@ r_taper_end = 300kilometers    # radial taper end, m
 output_dir = joinpath(@__DIR__, "output_tc_rainband")
 figures_dir = joinpath(output_dir, "figures")
 mkpath(figures_dir)
+nothing #hide
 
 # ## Grid and architecture
 #
@@ -164,7 +171,7 @@ Nx = Ny = Int(Lx / Δx)
 Nz = 75
 Lz = 25kilometers                 # YD19 §3a1
 Δz = Lz / Nz
-sponge_rate = 1/333seconds # ≈ WRF damp_opt=2 `dampcoef`
+sponge_rate = 1f0 / Float32(333seconds) # ≈ WRF damp_opt=2 `dampcoef`
 stage_stop_time = 24hours
 
 arch = CUDA.functional() ? GPU() : CPU()
@@ -395,7 +402,7 @@ v2d = [tangential_wind(r_pre[i], z_centers[k]) for i in 1:Nr_pre, k in 1:Nz]
 bal = solve_balanced_vortex_iterative(
     r_pre, z_centers, v2d,
     pᵣ, Tᵣ, ρᵣ;
-    Rᵈ, g, verbose = true
+    Rᵈ, g, verbose = false
 )
 
 ## Anelastic convention (matches Breeze's internal `liquid_ice_potential_temperature`
@@ -472,18 +479,27 @@ Tᵢ(x, y, z) = lookup_rz(vortex.T, sqrt(x^2 + y^2), z)
 # ``Q/\Pi``. Within the WRF/MN10 idealized framework, ``\rho \approx \rho_r(z)``
 # inside the rainband, so we use the host-side reference profile.
 
-Q_max = 4.24 / hour     # YD19 Eq. 3 Q_max = 4.24 K/h (stored in K/s)
-z_bs = 4kilometers
-σ_r = 6kilometers
-σ_zs = 2kilometers
-t_full = 1hour          # 1 h ramp to avoid instantaneous onset
+Q_max = 4.24f0 / Float32(hour)     # YD19 Eq. 3 Q_max = 4.24 K/h (stored in K/s)
+z_bs = Float32(4kilometers)
+σ_r = Float32(6kilometers)
+σ_zs = Float32(2kilometers)
+t_full = Float32(1hour)            # 1 h ramp to avoid instantaneous onset
 
 ρᵣ_device = arch isa GPU ? CuArray(ρᵣ) : ρᵣ
 
 ## Reference Exner-function profile Πᵣ(z) = (pᵣ(z)/pˢᵗ)^κ. Used to convert
 ## the analytic ``T``-tendency ``Q`` (K/s) into the ρθ-tendency ``ρ Q / Π``.
-Πᵣ = [(pᵣ[k] / pˢᵗ)^κ for k in 1:Nz]
+Πᵣ = Float32[(pᵣ[k] / pˢᵗ)^κ for k in 1:Nz]
 Πᵣ_device = arch isa GPU ? CuArray(Πᵣ) : Πᵣ
+
+## Float32 π-multiples used inside the heating and sponge kernels. The
+## standalone expressions `π/4`, `π/2`, `2π`, and `π` evaluate to Float64
+## (Irrational arithmetic), which would promote the kernels to Float64.
+## Precompute once at module load.
+const π_F32 = Float32(π)
+const π_4_F32 = Float32(π / 4)
+const π_2_F32 = Float32(π / 2)
+const twoπ_F32 = Float32(2π)
 
 @inline function rainband_heating(i, j, k, grid, clock, fields, p)
     x = Oceananigans.Grids.xnode(i, j, k, grid, Center(), Center(), Center())
@@ -491,17 +507,17 @@ t_full = 1hour          # 1 h ramp to avoid instantaneous onset
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Center())
     t = clock.time
 
-    ramp = clamp((t - p.t_on) / (p.t_full - p.t_on), 0.0, 1.0)
+    ramp = clamp((t - p.t_on) / (p.t_full - p.t_on), 0, 1)
     r = sqrt(x^2 + y^2)
     λ = atan(y, x)
-    r_bs = (60.0 - 10.0 * (λ / (π / 4))) * 1000.0 + z
+    r_bs = (60 - 10 * (λ / π_4_F32)) * 1000 + z
     G_r = exp(-(r - r_bs)^2 / 2p.σ_r^2)
 
     z_rel = (z - p.z_bs) / p.σ_zs
-    V_z = ifelse(abs(z_rel) < 1, sin(π * z_rel), 0.0)
+    V_z = ifelse(abs(z_rel) < 1, sin(π_F32 * z_rel), 0f0)
 
-    λ_c = mod(λ - (-π / 4) + π, 2π) - π
-    A_λ = exp(-(λ_c / (π / 4))^8)
+    λ_c = mod(λ + π_4_F32 + π_F32, twoπ_F32) - π_F32
+    A_λ = exp(-(λ_c / π_4_F32)^8)
 
     Q = p.Q_max * G_r * V_z * A_λ * ramp
     ## ρθ tendency: ρᵣ · Q / Πᵣ. WRF uses full ρ; under the WRF/MN10 idealized
@@ -513,7 +529,7 @@ t_full = 1hour          # 1 h ramp to avoid instantaneous onset
 end
 
 heating_params = (;
-    Q_max, σ_r, σ_zs, z_bs, t_on = 0.0, t_full,
+    Q_max, σ_r, σ_zs, z_bs, t_on = 0f0, t_full,
     ρᵣ = ρᵣ_device, Πᵣ = Πᵣ_device,
 )
 
@@ -546,14 +562,14 @@ end
 # Both the momentum and ρθ components are needed: without the ρθ term,
 # upper-level ``\theta'`` anomalies persist and the vortex fails to spin down.
 
-sponge_z_bottom = 20kilometers
-sponge_z_top = 25kilometers
+sponge_z_bottom = Float32(20kilometers)
+sponge_z_top = Float32(25kilometers)
 
 ## Reference ρθ profile (kg K / m³). The sponge relaxes ρθ to this profile
 ## in the upper-level damping layer. Using the default (LiquidIcePotentialTemperature)
 ## formulation because :StaticEnergy + CompressibleDynamics is currently broken
 ## on GPU (gpu__compute_temperature_and_pressure! method-error).
-ρθᵣ = [ρᵣ[k] * θ_env(z_centers[k]) for k in 1:Nz]
+ρθᵣ = Float32[ρᵣ[k] * θ_env(z_centers[k]) for k in 1:Nz]
 ρθᵣ_device = arch isa GPU ? CuArray(ρθᵣ) : ρθᵣ
 
 sponge_vel_params = (z_bot = sponge_z_bottom, z_top = sponge_z_top, rate = sponge_rate)
@@ -565,7 +581,7 @@ sponge_ρθ_params = (
 ## WRF `damp_opt=2` analog: zero below z_bot, sin²() ramp to max at z_top.
 @inline function sponge_mask(z, z_bot, z_top)
     ξ = (z - z_bot) / (z_top - z_bot)
-    return ifelse(ξ ≤ 0, zero(ξ), sin(π / 2 * ξ)^2)
+    return ifelse(ξ ≤ 0, zero(ξ), sin(π_2_F32 * ξ)^2)
 end
 
 @inline function sponge_ρu_fn(i, j, k, grid, clock, fields, p)
@@ -1213,17 +1229,21 @@ let
                     ax, xs_grid_pv ./ 1.0e3, ys_grid_pv ./ 1.0e3, w_s;
                     colormap = :balance, colorrange = (-w_lim_raw, w_lim_raw)
                 )
-                ## Local heating contour overlay at this altitude only.
+                ## Heating overlay at the grid-aligned slice altitude
+                ## (`z_centers[k_s]`). Fixed ±1 K/h level so the drawn extent
+                ## scales with the heating amplitude at this panel's altitude
+                ## — same pattern as F04.
+                z_actual = z_centers[k_s]
                 Q_panel = [heating_rate_K_per_hour(sqrt(xs_grid_pv[i]^2 + ys_grid_pv[j]^2),
-                                                   atan(ys_grid_pv[j], xs_grid_pv[i]), z_slice)
+                                                   atan(ys_grid_pv[j], xs_grid_pv[i]), z_actual)
                            for i in 1:Nx, j in 1:Ny]
-                if maximum(Q_panel) > 0.999
+                if maximum(Q_panel) > 1.0
                     contour!(
                         ax, xs_grid_pv ./ 1.0e3, ys_grid_pv ./ 1.0e3, Q_panel;
                         levels = [1.0], color = :red, linewidth = 2.0
                     )
                 end
-                if minimum(Q_panel) < -0.999
+                if minimum(Q_panel) < -1.0
                     contour!(
                         ax, xs_grid_pv ./ 1.0e3, ys_grid_pv ./ 1.0e3, Q_panel;
                         levels = [-1.0], color = :blue, linewidth = 2.0
@@ -1407,8 +1427,6 @@ let
         ## — at z > z_bs (4 km) only the heating lobe (+1 K/h, red) is present;
         ## at z < z_bs only the cooling lobe (-1 K/h, blue); at z = z_bs the
         ## field is identically zero so neither contour draws.
-        z_heating_peak = z_bs + σ_zs / 2          # 5 km
-        z_cooling_peak = z_bs - σ_zs / 2          # 3 km
         panels = [
             (6_000.0, "(a) z = 6 km"),
             (3_600.0, "(b) z = 3.6 km"),
@@ -1434,21 +1452,6 @@ let
         ## to size the colorbar.
         w_panel_lim = 4.0
 
-        ## Heating field at each panel altitude (computed inside the panel loop).
-        function Q_at(z_slice)
-            Q = zeros(Nx, Ny)
-            for j in 1:Ny, i in 1:Nx
-                r = sqrt(xs_grid[i]^2 + ys_grid[j]^2)
-                λ = atan(ys_grid[j], xs_grid[i])
-                Q[i, j] = heating_rate_K_per_hour(r, λ, z_slice)
-            end
-            return Q
-        end
-
-        ## Warm/cool footprints used as red/blue overlays on every panel.
-        Q_warm = Q_at(z_heating_peak)
-        Q_cool = Q_at(z_cooling_peak)
-
         fig = Figure(size = (1500, 560))
         for (pi_, (z_slice, label)) in enumerate(panels)
             k_s = argmin(abs.(z_centers .- z_slice))
@@ -1465,14 +1468,33 @@ let
                 ax, xs_grid ./ kilometer, ys_grid ./ kilometer, w_s;
                 colormap = :balance, colorrange = (-w_panel_lim, w_panel_lim)
             )
-            contour!(
-                ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_warm;
-                levels = [1.0], color = :red, linewidth = 2.0
-            )
-            contour!(
-                ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_cool;
-                levels = [-1.0], color = :blue, linewidth = 2.0
-            )
+
+            ## Heating overlay at the grid-aligned slice altitude
+            ## (`z_centers[k_s]`, not the requested `z_slice` literal —
+            ## those differ by up to Δz/2 ≈ 167 m, which matters near the
+            ## envelope edges where V_z(z) → 0). V_z flips sign at z = z_bs
+            ## = 4 km, so panels above 4 km show only the warm (+1 K/h, red)
+            ## contour, panels below only the cool (-1 K/h, blue). The
+            ## contour is drawn at a fixed ±1 K/h level so its visible extent
+            ## scales naturally with the heating amplitude at this panel's
+            ## altitude: wide near the heating peak (z ≈ 5 km or 3 km),
+            ## thin or absent near the envelope edges (z ≈ 6 km or 2 km).
+            z_actual = z_centers[k_s]
+            Q_panel = [heating_rate_K_per_hour(sqrt(xs_grid[i]^2 + ys_grid[j]^2),
+                                               atan(ys_grid[j], xs_grid[i]), z_actual)
+                       for i in 1:Nx, j in 1:Ny]
+            if maximum(Q_panel) > 1.0
+                contour!(
+                    ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_panel;
+                    levels = [1.0], color = :red, linewidth = 2.0
+                )
+            end
+            if minimum(Q_panel) < -1.0
+                contour!(
+                    ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_panel;
+                    levels = [-1.0], color = :blue, linewidth = 2.0
+                )
+            end
 
             ss = 10
             xa = xs_grid[1:ss:end] ./ kilometer
