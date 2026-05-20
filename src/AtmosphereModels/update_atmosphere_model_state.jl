@@ -2,7 +2,6 @@ using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans.Grids: Bounded, Periodic, Flat, topology # , halo_size
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
@@ -63,12 +62,6 @@ function tracer_specific_to_density!(tracers, density)
     return nothing
 end
 
-diagnostic_indices(::Bounded, N, H) = 1:N+1
-# For Periodic, start at -H+2 because face-interpolation (ℑxᶠᵃᵃ) accesses i-1.
-# Starting at -H+1 would require accessing index -H which is out of bounds.
-diagnostic_indices(::Periodic, N, H) = -H+2:N+H
-diagnostic_indices(::Flat, N, H) = 1:N
-
 #####
 ##### Velocity and momentum computation
 #####
@@ -88,21 +81,17 @@ function compute_velocities!(model::AtmosphereModel)
     fill_halo_regions!(density)
     fill_halo_regions!(model.momentum)
 
-    # Extend the launch to include boundary faces (i=Nx+1, j=Ny+1, k=Nz+1) in
-    # `Bounded` directions so `model.velocities` stays consistent with
-    # `model.momentum` at the wall. See `velocity_boundary_conditions_from_momentum`.
+    # Launch over (1:Nx+1, 1:Ny+1, 1:Nz+1) regardless of topology — for `Bounded`
+    # directions, the N+1 face is the boundary face and needs the kernel-computed
+    # value to stay consistent with momentum at the wall; for `Periodic` directions,
+    # the N+1 index writes to a halo cell that gets refilled by the trailing
+    # `fill_halo_regions!(model.velocities)` call below.
     Nx, Ny, Nz = size(grid)
-    TX, TY, TZ = topology(grid)
-    ix_u = TX === Bounded ? (1:Nx+1) : (1:Nx)
-    jy_v = TY === Bounded ? (1:Ny+1) : (1:Ny)
-    kz_w = TZ === Bounded ? (1:Nz+1) : (1:Nz)
-
-    launch!(arch, grid, KernelParameters(ix_u, 1:Ny, 1:Nz),
-            _compute_u!, model.velocities.u, grid, model.dynamics, model.momentum.ρu)
-    launch!(arch, grid, KernelParameters(1:Nx, jy_v, 1:Nz),
-            _compute_v!, model.velocities.v, grid, model.dynamics, model.momentum.ρv)
-    launch!(arch, grid, KernelParameters(1:Nx, 1:Ny, kz_w),
-            _compute_w!, model.velocities.w, grid, model.dynamics, model.momentum.ρw)
+    launch!(arch, grid, KernelParameters(1:Nx+1, 1:Ny+1, 1:Nz+1),
+            _compute_velocities!,
+            model.velocities.u, model.velocities.v, model.velocities.w,
+            model.momentum.ρu,   model.momentum.ρv,   model.momentum.ρw,
+            grid, model.dynamics)
 
     foreach(mask_immersed_field!, model.velocities)
     fill_halo_regions!(model.velocities)
@@ -201,21 +190,11 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     return nothing
 end
 
-@kernel function _compute_u!(u, grid, dynamics, ρu)
+@kernel function _compute_velocities!(u, v, w, ρu, ρv, ρw, grid, dynamics)
     i, j, k = @index(Global, NTuple)
     ρ = dynamics_density(dynamics)
     @inbounds u[i, j, k] = ρu[i, j, k] / ℑxᶠᵃᵃ(i, j, k, grid, ρ)
-end
-
-@kernel function _compute_v!(v, grid, dynamics, ρv)
-    i, j, k = @index(Global, NTuple)
-    ρ = dynamics_density(dynamics)
     @inbounds v[i, j, k] = ρv[i, j, k] / ℑyᵃᶠᵃ(i, j, k, grid, ρ)
-end
-
-@kernel function _compute_w!(w, grid, dynamics, ρw)
-    i, j, k = @index(Global, NTuple)
-    ρ = dynamics_density(dynamics)
     @inbounds w[i, j, k] = ρw[i, j, k] / ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 end
 

@@ -21,10 +21,11 @@ using Breeze.Thermodynamics: ReferenceState
 # drove a wall-mode instability that NaN'd the run within ~100 iters.
 #
 # After the fix:
-#   • velocity has `nothing` on the normal-component face of each Bounded direction,
-#     so `fill_halo_regions!` cannot clobber the boundary face
-#   • compute_velocities! covers the full Face range incl. boundary faces, so the
-#     kernel writes `u = ρu/ρ` at the wall each step
+#   • velocities are constructed via `XFaceField(grid)` etc. with no `boundary_conditions=`
+#     kwarg, picking up the *auxiliary* defaults (`nothing` on Bounded-Face sides,
+#     Periodic on Periodic sides). `fill_halo_regions!` cannot clobber the boundary face.
+#   • compute_velocities! launches a fused kernel over (1:Nx+1, 1:Ny+1, 1:Nz+1), so the
+#     kernel writes `u = ρu/ρ` at the wall each step.
 
 @testset "OBC on momentum propagates to derived velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -163,8 +164,9 @@ using Breeze.Thermodynamics: ReferenceState
     end
 
     @testset "Periodic direction → velocity gets PeriodicBoundaryCondition (not nothing)" begin
-        # Critical regression: the narrow Bounded-only override must not strip periodic
-        # halo filling on tangential components in Periodic directions.
+        # Confirms the auxiliary defaults still install PeriodicBoundaryCondition on
+        # Periodic sides (vs `nothing` on Bounded-Face sides). Periodic halo filling
+        # must continue to work on tangential and normal components alike.
         reference_state = ReferenceState(grid_bpb; surface_pressure=FT(101325),
                                                     potential_temperature=FT(300))
         dynamics = AnelasticDynamics(reference_state)

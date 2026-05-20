@@ -399,17 +399,14 @@ function AtmosphereModels.materialize_momentum_and_velocities(::CompressibleDyna
     ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)
     momentum = (; ρu, ρv, ρw)
 
-    # Velocity is diagnostic (u = ρu/ρ via compute_velocities!). On the normal-component
-    # face in a `Bounded` direction we use `nothing` so `fill_halo_regions!(velocities)`
-    # does not overwrite the kernel-computed boundary face — momentum carries the wall BC.
-    TX, TY, TZ = topology(grid)
-    u_bcs = TX === Bounded ? FieldBoundaryConditions(west=nothing,   east=nothing)  : FieldBoundaryConditions()
-    v_bcs = TY === Bounded ? FieldBoundaryConditions(south=nothing,  north=nothing) : FieldBoundaryConditions()
-    w_bcs = TZ === Bounded ? FieldBoundaryConditions(bottom=nothing, top=nothing)   : FieldBoundaryConditions()
-    velocity_bcs = regularize_field_boundary_conditions((u=u_bcs, v=v_bcs, w=w_bcs), grid, (:u, :v, :w))
-    u = XFaceField(grid, boundary_conditions=velocity_bcs.u)
-    v = YFaceField(grid, boundary_conditions=velocity_bcs.v)
-    w = ZFaceField(grid, boundary_conditions=velocity_bcs.w)
+    # Velocity is diagnostic (u = ρu/ρ via compute_velocities!). Use the auxiliary-field
+    # default BCs (`nothing` on Bounded-Face sides, Periodic on Periodic sides), which
+    # is what XFaceField gives us when constructed with no `boundary_conditions=` kwarg.
+    # `nothing` on Bounded-Face prevents `fill_halo_regions!(velocities)` from clobbering
+    # the kernel-computed boundary face — momentum carries the wall BC.
+    u = XFaceField(grid)
+    v = YFaceField(grid)
+    w = ZFaceField(grid)
     velocities = (; u, v, w)
 
     return momentum, velocities
