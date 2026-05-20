@@ -45,7 +45,7 @@ using CairoMakie
 # ## Grid and model setup
 
 Nx, Nz = 128, 64
-Lx, Lz = 1000, 200  # meters
+Lx, Lz = 1000, 200  # (m)
 
 grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
                        topology = (Periodic, Flat, Bounded))
@@ -104,7 +104,7 @@ set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
 
 Δx, Δz = Lx / Nx, Lz / Nz
 Δt = 0.5 * min(Δx, Δz) / (ℂᵃᶜ + Uᵢ(Lz))
-stop_time = 0.5 # seconds — long enough for the wave to traverse the domain and for refraction to bend rays visibly
+stop_time = 0.5 # (s) — long enough for the wave to traverse the domain and for refraction to bend rays visibly
 
 simulation = Simulation(model; Δt, stop_time)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
@@ -242,8 +242,7 @@ nothing #hide
 # buffers.  We therefore rebuild the *same* physical setup on a new grid whose
 # architecture is `ReactantState()`.
 
-using CUDA       # required for Reactant extension loading
-using Reactant
+using Reactant, CUDA    # CUDA is required for loading the Reactant extension
 using Enzyme
 using Statistics: mean
 using Oceananigans.Architectures: ReactantState
@@ -366,8 +365,7 @@ du, J = compiled_grad(
 xs_u = xnodes(grid_ad, Face())
 zs   = znodes(grid_ad, Center())
 
-@info @sprintf("Surface-mean (ρ - ρ̄)² = %.6e after %d steps",
-               Float64(only(J)), Nsteps)
+@info @sprintf("Surface-mean (ρ - ρ̄)² = %.6e after %d steps", Float64(only(J)), Nsteps)
 
 # ### Sensitivity visualization
 #
