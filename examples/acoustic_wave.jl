@@ -320,9 +320,9 @@ function loss(model, u₀, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
-    ρ_surf  = interior(model.dynamics.density)[:, :, 1]
-    ρᵇ_surf = interior(ρᵇᵍ)[:, :, 1]
-    return mean((ρ_surf .- ρᵇ_surf) .^ 2)
+    ρ₀  = interior(model.dynamics.density, :, :, 1)
+    ρᵇ₀ = interior(ρᵇᵍ, :, :, 1)
+    return mean((ρ₀ .- ρᵇ₀) .^ 2)
 end
 
 # ### The gradient wrapper
