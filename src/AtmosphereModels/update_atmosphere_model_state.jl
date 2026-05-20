@@ -2,11 +2,11 @@ using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans.Grids: Bounded, Periodic, Flat # , topology, halo_size
+using Oceananigans.Grids: Bounded, Periodic, Flat, topology # , halo_size
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
-using Oceananigans.Utils: launch! # , KernelParameters
+using Oceananigans.Utils: launch!, KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
@@ -82,32 +82,27 @@ function compute_velocities!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
-    #TODO: Better support OffsetStaticSize in KernalAbstractions
-    # For now, just use :xyz instead of KernelParameters
-    # See: https://github.com/NumericalEarth/Breeze.jl/issues/433
-
-    # TX, TY, TZ = topology(grid)
-    # Nx, Ny, Nz = size(grid)
-    # Hx, Hy, Hz = halo_size(grid)
-
-    # ii = diagnostic_indices(TX(), Nx, Hx)
-    # jj = diagnostic_indices(TY(), Ny, Hy)
-    # kk = diagnostic_indices(TZ(), Nz, Hz)
-
-    # kp = KernelParameters(ii, jj, kk)
-
     # Ensure halos are filled before velocity computation
     # (prognostic field halo fill in update_state! is async)
     density = dynamics_density(model.dynamics)
     fill_halo_regions!(density)
     fill_halo_regions!(model.momentum)
 
-    launch!(arch, grid, :xyz,
-            _compute_velocities!,
-            model.velocities,
-            grid,
-            model.dynamics,
-            model.momentum)
+    # Extend the launch to include boundary faces (i=Nx+1, j=Ny+1, k=Nz+1) in
+    # `Bounded` directions so `model.velocities` stays consistent with
+    # `model.momentum` at the wall. See `velocity_boundary_conditions_from_momentum`.
+    Nx, Ny, Nz = size(grid)
+    TX, TY, TZ = topology(grid)
+    ix_u = TX === Bounded ? (1:Nx+1) : (1:Nx)
+    jy_v = TY === Bounded ? (1:Ny+1) : (1:Ny)
+    kz_w = TZ === Bounded ? (1:Nz+1) : (1:Nz)
+
+    launch!(arch, grid, KernelParameters(ix_u, 1:Ny, 1:Nz),
+            _compute_u!, model.velocities.u, grid, model.dynamics, model.momentum.ρu)
+    launch!(arch, grid, KernelParameters(1:Nx, jy_v, 1:Nz),
+            _compute_v!, model.velocities.v, grid, model.dynamics, model.momentum.ρv)
+    launch!(arch, grid, KernelParameters(1:Nx, 1:Ny, kz_w),
+            _compute_w!, model.velocities.w, grid, model.dynamics, model.momentum.ρw)
 
     foreach(mask_immersed_field!, model.velocities)
     fill_halo_regions!(model.velocities)
@@ -206,24 +201,22 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     return nothing
 end
 
-@kernel function _compute_velocities!(velocities, grid, dynamics, momentum)
+@kernel function _compute_u!(u, grid, dynamics, ρu)
     i, j, k = @index(Global, NTuple)
-
     ρ = dynamics_density(dynamics)
+    @inbounds u[i, j, k] = ρu[i, j, k] / ℑxᶠᵃᵃ(i, j, k, grid, ρ)
+end
 
-    @inbounds begin
-        ρu = momentum.ρu[i, j, k]
-        ρv = momentum.ρv[i, j, k]
-        ρw = momentum.ρw[i, j, k]
+@kernel function _compute_v!(v, grid, dynamics, ρv)
+    i, j, k = @index(Global, NTuple)
+    ρ = dynamics_density(dynamics)
+    @inbounds v[i, j, k] = ρv[i, j, k] / ℑyᵃᶠᵃ(i, j, k, grid, ρ)
+end
 
-        ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
-        ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
-        ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-
-        velocities.u[i, j, k] = ρu / ρᶠᶜᶜ
-        velocities.v[i, j, k] = ρv / ρᶜᶠᶜ
-        velocities.w[i, j, k] = ρw / ρᶜᶜᶠ
-    end
+@kernel function _compute_w!(w, grid, dynamics, ρw)
+    i, j, k = @index(Global, NTuple)
+    ρ = dynamics_density(dynamics)
+    @inbounds w[i, j, k] = ρw[i, j, k] / ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
