@@ -382,7 +382,7 @@ abs_max     = maximum(abs, sensitivity)
 
 fig_sens = Figure(size = (800, 350), fontsize = 12)
 Label(fig_sens[0, :],
-      @sprintf("∂J / ∂u₀  (J = ⟨(ρ - ρ̄)²⟩ at surface,  t=%1.2f)", Nsteps * Δt),
+      "∂J / ∂u₀  (J = ⟨(ρ - ρ̄)²⟩ at surface,  t=$(prettytime(Nsteps * Δt))",
       fontsize = 14, tellwidth = false)
 ax_sens = Axis(fig_sens[1, 1]; xlabel = "x (m)", ylabel = "z (m)")
 hm = heatmap!(ax_sens, xs_u, zs, sensitivity; colormap = :balance,
