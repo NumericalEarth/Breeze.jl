@@ -56,7 +56,6 @@ export
     materialize_atmosphere_model_forcing,
     compute_forcing!,
     is_density_tendency_forcing,
-    wrap_specific_forcing,
 
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
