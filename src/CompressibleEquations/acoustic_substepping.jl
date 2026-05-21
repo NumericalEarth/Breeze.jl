@@ -80,8 +80,7 @@ using Oceananigans.Operators:
     Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
-using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, Open,
-                                       FieldBoundaryConditions
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 
 using Oceananigans.Grids: Flat, Center, peripheral_node,
                           topology,
@@ -247,48 +246,25 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
 ##### Section 2 — Constructor
 #####
 
-# A condition on an `OpenBoundaryCondition` is "passive" when inheriting it
-# onto the perturbation field would leave the halo at zero: `nothing` (halo
-# fill is a no-op) or a numerically-zero scalar. Arrays, functions, and
-# time-series conditions are treated conservatively as nonzero. Module-level
-# rather than nested in the constructor because multi-method local closures
-# get boxed by Julia 1.12 (caught by the `No Core.Box` quality test).
-is_passive_open_value(::Nothing) = true
-is_passive_open_value(x::Number) = iszero(x)
-is_passive_open_value(_) = false
-
-strip_nonzero_open(bc) = bc
-strip_nonzero_open(bc::BoundaryCondition{<:Open}) =
-    is_passive_open_value(bc.condition) ? bc : nothing
-
-strip_nonzero_open_bcs(::Nothing) = nothing
-strip_nonzero_open_bcs(bcs) =
-    FieldBoundaryConditions(west   = strip_nonzero_open(bcs.west),
-                            east   = strip_nonzero_open(bcs.east),
-                            south  = strip_nonzero_open(bcs.south),
-                            north  = strip_nonzero_open(bcs.north),
-                            bottom = strip_nonzero_open(bcs.bottom),
-                            top    = strip_nonzero_open(bcs.top))
-
 """
 $(TYPEDSIGNATURES)
 
 Construct an `AcousticSubstepper` for the linearized-perturbation
 acoustic substep loop.
 
-The optional `prognostic_momentum` keyword carries the prognostic
-``ρu``, ``ρv``, ``ρw`` fields whose boundary conditions are inherited by
-the substepper's perturbation face fields ``(ρu)′``, ``(ρv)′``, ``(ρw)′``. This is
-essential on grids with `Bounded` horizontal topology so that
-`fill_halo_regions!` enforces impenetrability on the perturbation
-momenta.
+The substepper's perturbation face fields ``(ρu)′``, ``(ρv)′``, ``(ρw)′`` and
+the substep-averaged velocities for scalar transport are built with
+topology-derived defaults — periodic wrap on `Periodic` dims, impenetrability
+on `Bounded` dims. The prognostic momentum's own boundary conditions are not
+inherited: doing so silently imprints the full-state wall target onto the
+perturbation halo when the user supplies a nonzero
+`OpenBoundaryCondition` (issue \\#716), and propagates dimensionally
+inconsistent BCs (momentum BCs on velocity face fields) for the time-averaged
+velocities. The wall target re-enters the prognostic state through the
+prognostic momentum's own BC after `accumulate_momentum_perturbations!`.
 
-Sides carrying a nonzero `OpenBoundaryCondition` on the prognostic momentum
-are stripped to `nothing` on the perturbation field: the perturbation halo
-must not be imprinted with the full-state wall target, which would otherwise
-appear to the linearized acoustic dynamics as a real perturbation (issue
-\\#716). The wall target re-enters the prognostic state through the prognostic
-momentum's own BC after `accumulate_momentum_perturbations!`.
+The `prognostic_momentum` keyword is retained for backwards compatibility but
+is no longer consulted.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
                             prognostic_momentum = nothing)
@@ -308,35 +284,20 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     # refresh from the live moisture state.
     linearization_gamma_R_mixture                 = CenterField(grid)
 
-    # Perturbation prognostics. Inherit BCs from the prognostic momenta so
-    # impenetrability propagates onto the perturbation momenta, but strip any
-    # side carrying a nonzero `OpenBoundaryCondition` to `nothing` so that
-    # `fill_halo_regions!` cannot imprint a full-state wall target onto the
-    # perturbation halo (issue #716).
-    bcs_ρu = strip_nonzero_open_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρu.boundary_conditions)
-    bcs_ρv = strip_nonzero_open_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρv.boundary_conditions)
-    bcs_ρw = strip_nonzero_open_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρw.boundary_conditions)
-
-    xface(grid, bcs) = bcs === nothing ? XFaceField(grid) : XFaceField(grid; boundary_conditions = bcs)
-    yface(grid, bcs) = bcs === nothing ? YFaceField(grid) : YFaceField(grid; boundary_conditions = bcs)
-    zface(grid, bcs) = bcs === nothing ? ZFaceField(grid) : ZFaceField(grid; boundary_conditions = bcs)
-
     density_perturbation                          = CenterField(grid)
     density_potential_temperature_perturbation    = CenterField(grid)
-    momentum_perturbation = (u = xface(grid, bcs_ρu),
-                             v = yface(grid, bcs_ρv),
-                             w = zface(grid, bcs_ρw))
+    momentum_perturbation = (u = XFaceField(grid),
+                             v = YFaceField(grid),
+                             w = ZFaceField(grid))
 
     density_predictor                                = CenterField(grid)
     density_potential_temperature_predictor          = CenterField(grid)
     previous_density_potential_temperature_perturbation = CenterField(grid)
 
-    # Time-averaged velocities for scalar transport. Inherit BCs from the
-    # prognostic momenta so impenetrability is enforced when these are used
-    # for advection at boundaries.
-    time_averaged_velocities = (u = xface(grid, bcs_ρu),
-                                v = yface(grid, bcs_ρv),
-                                w = zface(grid, bcs_ρw))
+    # Substep-averaged velocities for scalar transport.
+    time_averaged_velocities = (u = XFaceField(grid),
+                                v = YFaceField(grid),
+                                w = ZFaceField(grid))
 
     slow_vertical_momentum_tendency = ZFaceField(grid)
 

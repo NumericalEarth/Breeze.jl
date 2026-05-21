@@ -216,14 +216,15 @@ for arch in arches
 
     #####
     ##### Regression for issue #716: nonzero OBC on prognostic momentum must
-    ##### not bleed onto the perturbation halo via inherited BCs. Build a
-    ##### model with `Bounded` x-topology and `OpenBoundaryCondition(ρ·U)` on
-    ##### `ρu`, then confirm that (1) the substepper's perturbation BCs are
-    ##### stripped on those sides, and (2) a forward step does not produce a
-    ##### `DomainError` from runaway-acoustic amplification at the wall.
+    ##### not bleed onto the perturbation halo. Build a model with `Bounded`
+    ##### x-topology and `OpenBoundaryCondition(ρ·U)` on `ρu`, then confirm
+    ##### that (1) the substepper's perturbation field uses topology defaults
+    ##### on the open sides (not the inherited OBC), and (2) a forward step
+    ##### does not produce a `DomainError` from runaway-acoustic amplification
+    ##### at the wall.
     #####
 
-    @testset "Nonzero momentum OBC: stripped on perturbation, stable step [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+    @testset "Nonzero momentum OBC: defaults on perturbation, stable step [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
                                x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
@@ -246,8 +247,9 @@ for arch in arches
                                 timestepper = :AcousticRungeKutta3,
                                 boundary_conditions)
 
-        # The substepper inherits BCs from the prognostic momentum, then strips
-        # nonzero open sides on the perturbation field.
+        # The perturbation field uses topology defaults — west/east sides on
+        # a Bounded XFaceField default to `nothing`, so the prognostic's
+        # `OpenBoundaryCondition(ρU)` is not propagated.
         substepper = model.timestepper.substepper
         ρu_pert_bcs = substepper.momentum_perturbation.u.boundary_conditions
         @test ρu_pert_bcs.west === nothing
