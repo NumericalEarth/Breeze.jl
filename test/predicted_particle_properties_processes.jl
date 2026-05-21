@@ -68,7 +68,9 @@ using Breeze.Thermodynamics:
     PlanarIceSurface
 
 using Oceananigans: CPU, RectilinearGrid
-using Oceananigans.Fields: interior
+using Oceananigans.Fields: interior, ZeroField
+using Oceananigans.Fields: CenterField, ZFaceField, set!
+using Oceananigans.Grids: Periodic, Bounded
 
 const PPP = Breeze.Microphysics.PredictedParticleProperties
 
@@ -881,6 +883,28 @@ end
         velocities = (u = FT(0), v = FT(0), w = FT(4.2))
         ℳ = Breeze.AtmosphereModels.microphysical_state(p3, ρ, μ, nothing, velocities)
         @test ℳ.w == FT(4.2)
+    end
+
+    @testset "grid_microphysical_state plumbs interpolated w into ℳ.w (LES path)" begin
+        FT = Float64
+        grid = RectilinearGrid(CPU(), FT;
+                               size = (1, 1, 4), x = (0, 1), y = (0, 1), z = (0, 4),
+                               topology = (Periodic, Periodic, Bounded))
+        p3 = PredictedParticlePropertiesMicrophysics()
+
+        μ = (; ρqᶜˡ = CenterField(grid), ρnᶜˡ = CenterField(grid),
+               ρqʳ  = CenterField(grid), ρnʳ  = CenterField(grid),
+               ρqⁱ  = CenterField(grid), ρnⁱ  = CenterField(grid),
+               ρqᶠ  = CenterField(grid), ρbᶠ  = CenterField(grid),
+               ρz̃ⁱ = CenterField(grid), ρqʷⁱ = CenterField(grid),
+               ρsˢᵃᵗ = CenterField(grid), ρnᵃ = CenterField(grid))
+
+        w_face = ZFaceField(grid)
+        set!(w_face, (x, y, z) -> 2.0)
+        velocities = (; u = ZeroField(), v = ZeroField(), w = w_face)
+        ρ = FT(1)
+        ℳ = Breeze.AtmosphereModels.grid_microphysical_state(1, 1, 2, grid, p3, μ, ρ, nothing, velocities)
+        @test ℳ.w == FT(2.0)
     end
 
     @testset "P3 active sixth moment keeps splintered mass out of group 1" begin

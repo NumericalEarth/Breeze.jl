@@ -1,5 +1,6 @@
 using Oceananigans: CenterField
 using Oceananigans.Fields: ZeroField
+using Oceananigans.Operators: ℑzᵃᵃᶜ
 using DocStringExtensions: TYPEDSIGNATURES
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
@@ -297,6 +298,12 @@ end
 @inline vertical_velocity(velocities, FT) = FT(velocities.w)
 @inline vertical_velocity(::Nothing, FT) = zero(FT)
 
+# Interpolate a face-located w field to a cell center.
+# The Number method handles the hardcoded zero-velocity tuples used at call sites
+# where velocities.w is a scalar (Task 4 will replace those with proper fields).
+@inline interpolate_w_to_center(grid, i, j, k, w_field, FT) = FT(ℑzᵃᵃᶜ(i, j, k, grid, w_field))
+@inline interpolate_w_to_center(grid, i, j, k, w_scalar::Number, FT) = FT(w_scalar)
+
 @inline function AM.microphysical_state(p3::P3, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
     nᶜˡ = effective_cloud_droplet_number(p3, μ.ρnᶜˡ, ρ)
@@ -344,7 +351,8 @@ end
     bᶠ  = rime_state.bᶠ
     sˢᵃᵗ = @inbounds μ.ρsˢᵃᵗ[i, j, k] / ρ
     nᵃ   = @inbounds μ.ρnᵃ[i, j, k] / ρ
-    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, nᵃ)
+    w = interpolate_w_to_center(grid, i, j, k, velocities.w, FT)
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, nᵃ, w)
 end
 
 # GPU-compatible update_microphysical_fields! for P3.
