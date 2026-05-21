@@ -260,7 +260,7 @@ for arch in arches
 
         # One forward step must not throw DomainError (the failure mode of #716)
         # nor produce NaNs.
-        simulation = Simulation(model; Δt=FT(1), stop_iteration=1, verbose=false)
+        simulation = Simulation(model; Δt=1, stop_iteration=1, verbose=false)
         run!(simulation)
 
         @test model.clock.iteration == 1
