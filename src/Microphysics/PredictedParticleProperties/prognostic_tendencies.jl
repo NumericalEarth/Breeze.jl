@@ -457,6 +457,16 @@ When `predict_supersaturation = false`, returns zero tendency.
     return ifelse(prp.predict_supersaturation, raw, zero(ρ))
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Aerosol-pool tendency: each activated cloud droplet removes one unit from the
+unactivated reservoir, so ``∂ρn^a/∂t = -ρ \\, n_{\\text{nuc}}`` with
+``n_{\\text{nuc}}`` the same activation rate that sources ``ρn^{cl}``. In the
+prescribed-Nᶜ path `rates.ccn_activation_number` is zero, so this returns 0.
+"""
+@inline tendency_ρnᵃ(rates::P3ProcessRates, ρ) = -ρ * rates.ccn_activation_number
+
 #####
 ##### Fallback methods for Nothing rates
 #####
@@ -476,3 +486,4 @@ end
 @inline tendency_ρqʷⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρsˢᵃᵗ(::Nothing, ρ, prp) = zero(ρ)
 @inline tendency_ρqᵛ(::Nothing, ρ) = zero(ρ)
+@inline tendency_ρnᵃ(::Nothing, ρ) = zero(ρ)

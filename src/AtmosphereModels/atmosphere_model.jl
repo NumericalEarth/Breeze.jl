@@ -200,7 +200,7 @@ function AtmosphereModel(grid;
     end
 
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
-    initialize_model_microphysical_fields!(microphysical_fields, microphysics)
+    initialize_model_microphysical_fields!(microphysical_fields, microphysics, dynamics_density(dynamics))
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 

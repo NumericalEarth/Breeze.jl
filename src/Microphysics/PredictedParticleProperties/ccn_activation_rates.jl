@@ -78,7 +78,7 @@ $(TYPEDSIGNATURES)
 Dispatch CCN activation: prescribed (Nothing) or prognostic (AerosolActivation).
 Returns `(; mass, number)` named tuple.
 """
-@inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+@inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
     FT = typeof(qᶜˡ)
     # Prescribed-Nᶜ path (Fortran `log_predictNc = .false.`, `nc = nccnst_2`):
     # the activation target is the scheme parameter, not the DSD-diagnosed `Nᶜ`.
@@ -90,8 +90,8 @@ Returns `(; mass, number)` named tuple.
     return (; mass, number = zero(FT))
 end
 
-@inline function compute_ccn_activation(aerosol::AerosolActivation, p3, qᶜˡ, nᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
-    result = prognostic_ccn_activation_rate(aerosol, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
+@inline function compute_ccn_activation(aerosol::AerosolActivation, p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+    result = prognostic_ccn_activation_rate(aerosol, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T)
     return (; mass = result.qcnuc, number = result.ncnuc)
 end
 

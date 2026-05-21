@@ -276,8 +276,8 @@ end
                                                       state.μ_c, state.λ_c, state.nᶜˡ)
     cond = vapor_rates.condensation
 
-    # CCN activation (prescribed or prognostic)
-    ccn = compute_ccn_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+    # CCN activation (prescribed or prognostic; depletes ℳ.nᵃ when prognostic)
+    ccn = compute_ccn_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
     ccn_act = ccn.mass
     ccn_act_n = ccn.number
 
@@ -556,7 +556,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     cloud = diagnose_cloud_dsd(p3, qᶜˡ, ℳ.nᶜˡ, ρ)
     Nᶜ = cloud.Nᶜ
     ℳ_adjusted = P3MicrophysicalState(qᶜˡ, ℳ.nᶜˡ, qʳ, ℳ.nʳ, qⁱ, ℳ.nⁱ,
-                                      qᶠ, bᶠ, ℳ.zⁱ, qʷⁱ, qᵛ - qᵛ⁺ˡ)
+                                      qᶠ, bᶠ, ℳ.zⁱ, qʷⁱ, qᵛ - qᵛ⁺ˡ, ℳ.nᵃ)
 
     # Build derived state struct (explicit type parameters to avoid
     # jl_f_throw_methoderror in @noinline GPU compilation)

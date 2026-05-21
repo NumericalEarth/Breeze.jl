@@ -98,6 +98,18 @@ end
 
 settable_specific_microphysical_names(::Nothing) = ()
 
+function initialize_density_weighted_aerosol_number!(model::AtmosphereModel)
+    μ = model.microphysical_fields
+    (:ρnᵃ ∈ keys(μ)) || return nothing
+
+    Nᵃ₀ = initial_aerosol_number(model.microphysics)
+    iszero(Nᵃ₀) && return nothing
+
+    ρ = dynamics_density(model.dynamics)
+    set!(μ.ρnᵃ, ρ * Nᵃ₀)
+    return nothing
+end
+
 """
     set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
@@ -216,6 +228,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set!(ρ, value)
             # Fill halos immediately - needed for velocity→momentum conversion
             fill_halo_regions!(ρ)
+            initialize_density_weighted_aerosol_number!(model)
 
         elseif name == :ℋ
             # Call update_state! to ensure temperature is computed from thermodynamic variables

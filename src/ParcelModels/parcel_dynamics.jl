@@ -243,11 +243,11 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
     e_default = cᵖᵐ * T_default + g * z_default
     𝒰 = StaticEnergyState(e_default, q, z_default, p₀)
 
-    # Microphysics prognostic variables based on the microphysics scheme
-    μ = materialize_parcel_microphysics_prognostics(FT, microphysics)
-
     # Initialize state with default values
     ρ_default = FT(1.2)
+    # Microphysics prognostic variables based on the microphysics scheme
+    μ = materialize_parcel_microphysics_prognostics(FT, microphysics, ρ_default)
+
     w_default = zero(FT)
     qᵗ_default = zero(FT)
     ρqᵗ_default = ρ_default * qᵗ_default
@@ -275,10 +275,10 @@ density-weighted scalars for schemes with prognostic microphysics.
 The prognostic variables use the same ρ-weighted names as the grid-based model
 (e.g., `:ρqᶜˡ`, `:ρqʳ`) from `prognostic_field_names(microphysics)`.
 """
-function materialize_parcel_microphysics_prognostics(FT, microphysics)
+function materialize_parcel_microphysics_prognostics(FT, microphysics, ρ = one(FT))
     names = AtmosphereModels.prognostic_field_names(microphysics)
     length(names) == 0 && return nothing
-    Nᵃ₀ = FT(AtmosphereModels.initial_aerosol_number(microphysics))
+    Nᵃ₀ = FT(ρ) * FT(AtmosphereModels.initial_aerosol_number(microphysics))
     return NamedTuple{names}(ntuple(i -> names[i] == :ρnᵃ ? Nᵃ₀ : zero(FT), length(names)))
 end
 

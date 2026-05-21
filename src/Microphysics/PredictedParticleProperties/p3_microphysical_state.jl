@@ -49,6 +49,14 @@ struct P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
     qʷⁱ :: FT
     "Predicted supersaturation [kg/kg] (Grabowski & Morrison 2008)"
     sˢᵃᵗ :: FT
+    "Unactivated aerosol number concentration [1/kg] (zero when no aerosol prognostic)"
+    nᵃ  :: FT
+end
+
+@inline function P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
+                                      qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ)
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
+                                qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, zero(typeof(sˢᵃᵗ)))
 end
 
 #####
@@ -62,6 +70,15 @@ Whether `p3` is configured to run the 3-moment ice path (carries the
 reflectivity/sixth moment `ρz̃ⁱ`).
 """
 @inline is_three_moment_ice(p3::P3) = !isnothing(three_moment_shape_table(p3))
+
+# Initial aerosol number for the prognostic-ρnᵃ path. Returns the total per-mass
+# aerosol count from the AerosolMode parameters; the host (parcel set!,
+# AtmosphereModel set_microphysical_initial_state!) is responsible for scaling
+# by air density when assigning to `ρnᵃ` if a per-volume value is required.
+# The prescribed-Nᶜ path returns 0, matching the framework default.
+@inline AM.initial_aerosol_number(p3::P3) = _initial_aerosol_number(p3.aerosol)
+@inline _initial_aerosol_number(::Nothing) = 0
+@inline _initial_aerosol_number(aerosol::AerosolActivation) = sum_aerosol_number(aerosol)
 
 #####
 ##### Prognostic field names
@@ -84,18 +101,22 @@ reflectivity/sixth moment `ρz̃ⁱ`).
 @inline z̃_prognostic_names(::Nothing) = ()
 @inline z̃_prognostic_names(_) = (:ρz̃ⁱ,)
 
+# Aerosol depletion is enabled (and `ρnᵃ` advected) iff `p3.aerosol` is a
+# concrete `AerosolActivation`; in the prescribed-Nᶜ path no aerosol field is needed.
+@inline aerosol_prognostic_names(::Nothing) = ()
+@inline aerosol_prognostic_names(_) = (:ρnᵃ,)
+
 """
 $(TYPEDSIGNATURES)
 
 Return prognostic field names for the P3 scheme.
-
-The 2-moment ice path advects 10 fields; enabling 3-moment ice adds `ρz̃ⁱ`:
 
 - Cloud: ρqᶜˡ, ρnᶜˡ
 - Rain: ρqʳ, ρnʳ
 - Ice (always): ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρqʷⁱ
 - Ice (3-moment only): ρz̃ⁱ
 - Supersaturation: ρsˢᵃᵗ (tendency = 0 when `predict_supersaturation = false`)
+- Aerosol (only when `aerosol::AerosolActivation` is set): ρnᵃ
 """
 @inline function AM.prognostic_field_names(p3::P3)
     cloud_names = (:ρqᶜˡ, :ρnᶜˡ)
@@ -103,8 +124,10 @@ The 2-moment ice path advects 10 fields; enabling 3-moment ice adds `ρz̃ⁱ`:
     ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρqʷⁱ)
     z_names = z̃_prognostic_names(three_moment_shape_table(p3))
     ssat_names = (:ρsˢᵃᵗ,)
+    aero_names = aerosol_prognostic_names(p3.aerosol)
 
-    return tuple(cloud_names..., rain_names..., ice_names..., z_names..., ssat_names...)
+    return tuple(cloud_names..., rain_names..., ice_names...,
+                 z_names..., ssat_names..., aero_names...)
 end
 
 """
@@ -188,6 +211,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     ρz̃ⁱ = CenterField(grid)  # Advected square-root sixth moment
     ρqʷⁱ = CenterField(grid)  # Liquid on ice
     ρsˢᵃᵗ = CenterField(grid) # Predicted supersaturation
+    ρnᵃ  = CenterField(grid)  # Unactivated aerosol number density [1/m³]
 
     # Diagnostic mixing ratio / number-concentration fields
     # (updated each step in update_microphysical_auxiliaries!, matching the Kessler pattern)
@@ -203,6 +227,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     z̃ⁱ  = CenterField(grid)  # Advected square-root sixth moment √(zⁱ nⁱ)
     qʷⁱ = CenterField(grid)  # Liquid water on ice [kg/kg]
     sˢᵃᵗ = CenterField(grid) # Supersaturation [kg/kg]
+    nᵃ   = CenterField(grid) # Unactivated aerosol [kg⁻¹]
 
     # Diagnostic field for vapor
     qᵛ = CenterField(grid)
@@ -229,12 +254,13 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     cache_ρqʷⁱ = CenterField(grid)
     cache_ρsˢᵃᵗ = CenterField(grid)
     cache_ρqᵛ  = CenterField(grid)
+    cache_ρnᵃ  = CenterField(grid)
 
-    return (; ρqᶜˡ, ρnᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρz̃ⁱ, ρqʷⁱ, ρsˢᵃᵗ,
-              qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, z̃ⁱ, qʷⁱ, sˢᵃᵗ, qᵛ,
+    return (; ρqᶜˡ, ρnᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρz̃ⁱ, ρqʷⁱ, ρsˢᵃᵗ, ρnᵃ,
+              qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, z̃ⁱ, qʷⁱ, sˢᵃᵗ, nᵃ, qᵛ,
               wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
               cache_ρqᶜˡ, cache_ρnᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
-              cache_ρqᶠ, cache_ρbᶠ, cache_ρz̃ⁱ, cache_ρqʷⁱ, cache_ρsˢᵃᵗ, cache_ρqᵛ)
+              cache_ρqᶠ, cache_ρbᶠ, cache_ρz̃ⁱ, cache_ρqʷⁱ, cache_ρsˢᵃᵗ, cache_ρqᵛ, cache_ρnᵃ)
 end
 
 #####
@@ -278,7 +304,9 @@ end
     bᶠ  = rime_state.bᶠ
     # ρsˢᵃᵗ is absent unless predicted supersaturation is enabled; default to 0.
     sˢᵃᵗ = get_or_default(μ, Val(:ρsˢᵃᵗ), zero(FT)) / ρ
-    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ)
+    # ρnᵃ is absent unless prognostic-aerosol path is enabled; default to 0.
+    nᵃ = get_or_default(μ, Val(:ρnᵃ), zero(FT)) / ρ
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, nᵃ)
 end
 
 # Disambiguation for P3 with Nothing or empty microphysical fields
@@ -302,7 +330,8 @@ end
     qᶠ  = rime_state.qᶠ
     bᶠ  = rime_state.bᶠ
     sˢᵃᵗ = @inbounds μ.ρsˢᵃᵗ[i, j, k] / ρ
-    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ)
+    nᵃ   = @inbounds μ.ρnᵃ[i, j, k] / ρ
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, nᵃ)
 end
 
 # GPU-compatible update_microphysical_fields! for P3.
@@ -349,6 +378,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.z̃ⁱ[i, j, k]  = μ.ρz̃ⁱ[i, j, k] / ρ
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
     @inbounds μ.sˢᵃᵗ[i, j, k] = ℳ.sˢᵃᵗ
+    @inbounds μ.nᵃ[i, j, k]   = ℳ.nᵃ
 
     return nothing
 end
@@ -380,6 +410,7 @@ struct P3CacheResult{FT}
     c_qcl :: FT; c_ncl :: FT; c_qr :: FT; c_nr :: FT
     c_qi :: FT; c_ni :: FT; c_qf :: FT; c_bf :: FT
     c_zi :: FT; c_qwi :: FT; c_ss :: FT; c_qv :: FT
+    c_na :: FT
 end
 
 @inline function z̃ⁱ_tendency(nⁱ, zⁱ, tendency_ρz_phys, tendency_ρn)
@@ -458,10 +489,13 @@ end
     c_qwi = tendency_ρqʷⁱ(rates, ρ)
     c_ss  = tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates)
     c_qv  = tendency_ρqᵛ(rates, ρ)
+    # Aerosol depletion: every activated cloud droplet removes one from ρnᵃ.
+    # Zero in the prescribed-Nᶜ path (rates.ccn_activation_number is 0 there).
+    c_na  = tendency_ρnᵃ(rates, ρ)
 
     FT = typeof(ρ)
     return P3CacheResult{FT}(wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
-                              c_qcl, c_ncl, c_qr, c_nr, c_qi, c_ni, c_qf, c_bf, c_zi, c_qwi, c_ss, c_qv)
+                              c_qcl, c_ncl, c_qr, c_nr, c_qi, c_ni, c_qf, c_bf, c_zi, c_qwi, c_ss, c_qv, c_na)
 end
 
 # Kernel entry point: reads OffsetArrays → calls @noinline scalar compute → writes OffsetArrays.
@@ -492,6 +526,7 @@ end
         μ.cache_ρqʷⁱ[i, j, k] = r.c_qwi
         μ.cache_ρsˢᵃᵗ[i, j, k] = r.c_ss
         μ.cache_ρqᵛ[i, j, k]  = r.c_qv
+        μ.cache_ρnᵃ[i, j, k]  = r.c_na
     end
 
     return nothing

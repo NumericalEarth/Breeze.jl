@@ -222,28 +222,49 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute prognostic CCN activation rates from aerosol activation physics.
+Compute prognostic CCN activation rates from aerosol activation physics with
+aerosol-pool depletion.
 
 Returns a named tuple `(; ncnuc, qcnuc)`:
-- `ncnuc`: Cloud number activation rate [kg⁻¹ s⁻¹]
+- `ncnuc`: Cloud number activation rate [kg⁻¹ s⁻¹] (also the depletion rate
+  of the unactivated aerosol pool — `ρnᵃ` decreases at exactly the same rate).
 - `qcnuc`: Cloud mass activation rate [kg/kg/s]
 
-The number rate is a relaxation toward the activated equilibrium:
-``n_{\\text{nuc}} = \\max(0, N_{\\text{act}} - n^{cl}) / \\tau_{\\text{act}}``.
+Following Morrison & Grabowski (2007) augmented with explicit aerosol-pool
+tracking (matching the two-moment Seifert–Beheng convention used elsewhere in
+this codebase), the equilibrium number of activated droplets at supersaturation
+``S`` is ``N_{\\text{act}}(S)``, but the number that can *actually* be activated
+in one step is capped by the unactivated pool ``n^a``:
+
+```math
+n_{\\text{nuc}} = \\frac{\\max(0,\\; \\min(N_{\\text{act}}(S), n^{cl} + n^a) - n^{cl})}
+                       {\\tau_{\\text{act}}}.
+```
+
+This prevents the spurious re-activation that occurs when ``S`` rebounds after
+autoconversion or partial cloud evaporation drains ``n^{cl}`` — without an
+aerosol-pool sink, the diagnostic ``N_{\\text{act}}(S)`` keeps generating new
+droplets as if the reservoir were inexhaustible. With the cap, each activated
+droplet permanently removes one unit from ``n^a``.
+
 Mass follows as ``q_{\\text{nuc}} = n_{\\text{nuc}} \\times m_{\\text{seed}}``
 where ``m_{\\text{seed}} = (4\\pi/3) \\rho_w (10^{-6})^3`` is a 1 μm radius droplet.
 """
-@inline function prognostic_ccn_activation_rate(aerosol::AerosolActivation, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
+@inline function prognostic_ccn_activation_rate(aerosol::AerosolActivation, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T)
     FT = typeof(T)
 
     # Environmental supersaturation
     S = (qᵛ - qᵛ⁺ˡ) / max(qᵛ⁺ˡ, FT(1e-20))
 
-    # Total activated number across all modes
+    # Diagnostic equilibrium activation count from M&G2007.
     N_activated = total_activated_number(aerosol, T, S)
 
-    # Relaxation toward equilibrium
-    ncnuc = max(0, N_activated - nᶜˡ) / aerosol.activation_timescale
+    # Cap by available pool: at most n^a more aerosols can ever activate.
+    nᵃ_available = max(0, nᵃ)
+    N_target = min(N_activated, nᶜˡ + nᵃ_available)
+
+    # Relaxation toward the (capped) equilibrium
+    ncnuc = max(0, N_target - nᶜˡ) / aerosol.activation_timescale
 
     # Seed droplet mass (1 μm radius)
     seed_mass = 4 * FT(π) / 3 * FT(1000) * FT(1e-18)
@@ -255,4 +276,8 @@ where ``m_{\\text{seed}} = (4\\pi/3) \\rho_w (10^{-6})^3`` is a 1 μm radius dro
     qcnuc = ifelse(is_supersaturated, qcnuc, zero(FT))
 
     return (; ncnuc, qcnuc)
+end
+
+@inline function prognostic_ccn_activation_rate(aerosol::AerosolActivation, nᶜˡ, qᵛ, qᵛ⁺ˡ, T)
+    return prognostic_ccn_activation_rate(aerosol, nᶜˡ, sum_aerosol_number(aerosol), qᵛ, qᵛ⁺ˡ, T)
 end

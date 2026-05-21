@@ -59,6 +59,7 @@ using KernelAbstractions: @kernel, @index
     p3_compute_and_cache!(μ, i, j, k, grid, p3, ρ, 𝒰, constants)
 end
 
+
 #####
 ##### Fused tendency override (fast path for AtmosphereModel)
 #####
@@ -93,6 +94,11 @@ end
     @inbounds Gρz̃ⁱ[i, j, k] += cache_ρz̃ⁱ[i, j, k]
 end
 
+@kernel function _add_p3_aerosol_tendency_kernel!(Gρnᵃ, cache_ρnᵃ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gρnᵃ[i, j, k] += cache_ρnᵃ[i, j, k]
+end
+
 function AM.compute_microphysical_tendencies!(p3::P3, model)
     grid = model.grid
     arch = grid.architecture
@@ -105,6 +111,10 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
 
     if is_three_moment_ice(p3)
         launch!(arch, grid, :xyz, _add_p3_z̃ⁱ_tendency_kernel!, G.ρz̃ⁱ, μ.cache_ρz̃ⁱ)
+    end
+
+    if !isnothing(p3.aerosol)
+        launch!(arch, grid, :xyz, _add_p3_aerosol_tendency_kernel!, G.ρnᵃ, μ.cache_ρnᵃ)
     end
 
     return nothing

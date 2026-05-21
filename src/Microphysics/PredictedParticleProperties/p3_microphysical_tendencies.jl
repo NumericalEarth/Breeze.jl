@@ -142,6 +142,17 @@ Vapor tendency: loses from condensation, deposition, nucleation; gains from evap
     return tendency_ρqᵛ(rates, ρ)
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Aerosol number tendency: depletion equal to the cloud-droplet activation rate.
+Zero in the prescribed-Nᶜ path.
+"""
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnᵃ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    return tendency_ρnᵃ(rates, ρ)
+end
+
 # Fallback for any unhandled field names - return zero tendency
 @inline AM.microphysical_tendency(::P3, name, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) = zero(ρ)
 
