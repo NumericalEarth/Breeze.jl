@@ -2,11 +2,12 @@ using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans.Grids: Bounded, Periodic, Flat # , topology, halo_size
+using Oceananigans: Face
+using Oceananigans.Grids: topology
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
-using Oceananigans.Utils: launch! # , KernelParameters
+using Oceananigans.Utils: launch!, KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
@@ -63,12 +64,6 @@ function tracer_specific_to_density!(tracers, density)
     return nothing
 end
 
-diagnostic_indices(::Bounded, N, H) = 1:N+1
-# For Periodic, start at -H+2 because face-interpolation (ℑxᶠᵃᵃ) accesses i-1.
-# Starting at -H+1 would require accessing index -H which is out of bounds.
-diagnostic_indices(::Periodic, N, H) = -H+2:N+H
-diagnostic_indices(::Flat, N, H) = 1:N
-
 #####
 ##### Velocity and momentum computation
 #####
@@ -82,32 +77,24 @@ function compute_velocities!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
-    #TODO: Better support OffsetStaticSize in KernalAbstractions
-    # For now, just use :xyz instead of KernelParameters
-    # See: https://github.com/NumericalEarth/Breeze.jl/issues/433
-
-    # TX, TY, TZ = topology(grid)
-    # Nx, Ny, Nz = size(grid)
-    # Hx, Hy, Hz = halo_size(grid)
-
-    # ii = diagnostic_indices(TX(), Nx, Hx)
-    # jj = diagnostic_indices(TY(), Ny, Hy)
-    # kk = diagnostic_indices(TZ(), Nz, Hz)
-
-    # kp = KernelParameters(ii, jj, kk)
-
     # Ensure halos are filled before velocity computation
     # (prognostic field halo fill in update_state! is async)
     density = dynamics_density(model.dynamics)
     fill_halo_regions!(density)
     fill_halo_regions!(model.momentum)
 
-    launch!(arch, grid, :xyz,
+    # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
+    # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by
+    # the trailing `fill_halo_regions!(model.velocities)`), N for Flat.
+    Nx, Ny, Nz = size(grid)
+    TX, TY, TZ = topology(grid)
+    launch!(arch, grid, KernelParameters(1:length(Face(), TX(), Nx),
+                                         1:length(Face(), TY(), Ny),
+                                         1:length(Face(), TZ(), Nz)),
             _compute_velocities!,
-            model.velocities,
-            grid,
-            model.dynamics,
-            model.momentum)
+            model.velocities.u, model.velocities.v, model.velocities.w,
+            model.momentum.ρu,   model.momentum.ρv,   model.momentum.ρw,
+            grid, model.dynamics)
 
     foreach(mask_immersed_field!, model.velocities)
     fill_halo_regions!(model.velocities)
@@ -206,24 +193,12 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     return nothing
 end
 
-@kernel function _compute_velocities!(velocities, grid, dynamics, momentum)
+@kernel function _compute_velocities!(u, v, w, ρu, ρv, ρw, grid, dynamics)
     i, j, k = @index(Global, NTuple)
-
     ρ = dynamics_density(dynamics)
-
-    @inbounds begin
-        ρu = momentum.ρu[i, j, k]
-        ρv = momentum.ρv[i, j, k]
-        ρw = momentum.ρw[i, j, k]
-
-        ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
-        ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
-        ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-
-        velocities.u[i, j, k] = ρu / ρᶠᶜᶜ
-        velocities.v[i, j, k] = ρv / ρᶜᶠᶜ
-        velocities.w[i, j, k] = ρw / ρᶜᶜᶠ
-    end
+    @inbounds u[i, j, k] = ρu[i, j, k] / ℑxᶠᵃᵃ(i, j, k, grid, ρ)
+    @inbounds v[i, j, k] = ρv[i, j, k] / ℑyᵃᶠᵃ(i, j, k, grid, ρ)
+    @inbounds w[i, j, k] = ρw[i, j, k] / ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
