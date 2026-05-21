@@ -230,8 +230,12 @@ function AtmosphereModel(grid;
 
     moisture_specific = moisture_specific_name(microphysics)
     specific_prognostic_moisture = microphysical_fields[moisture_specific]
-    model_fields = merge(prognostic_model_fields, velocities, microphysical_fields,
-                         (; T=temperature))
+    # Build `model_fields` with the same key order as Oceananigans.fields(model::AtmosphereModel)
+    # below. ContinuousForcing resolves `field_dependencies` to positional indices at
+    # materialize time and looks them up positionally at runtime; the two tuples must
+    # agree on ordering, or forcings will read the wrong field.
+    model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
+                         (; T=temperature), microphysical_fields)
     density = dynamics_density(dynamics)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, density,
