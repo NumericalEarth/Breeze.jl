@@ -299,10 +299,8 @@ end
 @inline vertical_velocity(::Nothing, FT) = zero(FT)
 
 # Interpolate a face-located w field to a cell center.
-# The Number method handles the hardcoded zero-velocity tuples used at call sites
-# where velocities.w is a scalar (Task 4 will replace those with proper fields).
+# All call sites pass face fields (or ZeroField placeholders); no scalar fallback needed.
 @inline interpolate_w_to_center(grid, i, j, k, w_field, FT) = FT(ℑzᵃᵃᶜ(i, j, k, grid, w_field))
-@inline interpolate_w_to_center(grid, i, j, k, w_scalar::Number, FT) = FT(w_scalar)
 
 @inline function AM.microphysical_state(p3::P3, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
@@ -362,7 +360,11 @@ end
 # update_microphysical_auxiliaries!.
 @inline function AM.update_microphysical_fields!(μ, i, j, k, grid, p3::P3, ρ, 𝒰, constants)
     @inbounds begin
-        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, (; u=zero(ρ), v=zero(ρ), w=zero(ρ)))
+        # TODO: thread real velocities here once AM.update_microphysical_fields!
+        # signature carries them. ℳ.w == 0 is acceptable in this auxiliary path
+        # because downstream update_microphysical_auxiliaries! does not consume w.
+        velocities = (u = ZeroField(), v = ZeroField(), w = ZeroField())
+        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
         AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3, ℳ, ρ, 𝒰, constants)
     end
     return nothing
@@ -522,9 +524,9 @@ end
 # Kernel entry point: reads OffsetArrays → calls @noinline scalar compute → writes OffsetArrays.
 # Keeping array access in the kernel (inlined) and physics in @noinline (separate compilation)
 # prevents the GPU compiler from seeing the full P3 physics + OffsetArray access together.
-@inline function p3_compute_and_cache!(μ, i, j, k, grid, p3::P3, ρ, 𝒰, constants)
+@inline function p3_compute_and_cache!(μ, i, j, k, grid, p3::P3, ρ, 𝒰, constants, velocities)
     @inbounds begin
-        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, (; u=zero(ρ), v=zero(ρ), w=zero(ρ)))
+        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
     end
 
     r = _p3_scalar_compute(p3, ρ, ℳ, 𝒰, constants)

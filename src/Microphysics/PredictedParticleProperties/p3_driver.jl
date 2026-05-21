@@ -32,10 +32,11 @@ function AM.microphysics_model_update!(p3::P3, model)
     μ = model.microphysical_fields
     ρ_field = AM.dynamics_density(model.dynamics)
     constants = model.thermodynamic_constants
+    velocities = model.velocities
 
     launch!(arch, grid, :xyz,
             _p3_compute_and_cache_kernel!,
-            μ, model.formulation, model.dynamics, grid, constants, p3, ρ_field)
+            μ, model.formulation, model.dynamics, grid, constants, p3, ρ_field, velocities)
 
     return nothing
 end
@@ -43,7 +44,7 @@ end
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
 
-@kernel function _p3_compute_and_cache_kernel!(μ, formulation, dynamics, grid, constants, p3, ρ_field)
+@kernel function _p3_compute_and_cache_kernel!(μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
     i, j, k = @index(Global, NTuple)
 
     @inbounds ρ = ρ_field[i, j, k]
@@ -52,11 +53,11 @@ using KernelAbstractions: @kernel, @index
     ρqᵛᵉ = μ.qᵛ[i, j, k] * ρ  # qᵛ was already written by update_microphysical_auxiliaries!
     qᵛᵉ = μ.qᵛ[i, j, k]
     q = AM.moisture_fractions(p3, AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ,
-            nothing, (; u=zero(ρ), v=zero(ρ), w=zero(ρ))), qᵛᵉ)
+            nothing, velocities), qᵛᵉ)
     𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
     𝒰 = AM.maybe_adjust_thermodynamic_state(𝒰₀, p3, qᵛᵉ, constants)
 
-    p3_compute_and_cache!(μ, i, j, k, grid, p3, ρ, 𝒰, constants)
+    p3_compute_and_cache!(μ, i, j, k, grid, p3, ρ, 𝒰, constants, velocities)
 end
 
 
