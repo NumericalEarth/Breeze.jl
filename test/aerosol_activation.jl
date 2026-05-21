@@ -1,5 +1,4 @@
 using Test
-import Breeze
 using Breeze.Microphysics.PredictedParticleProperties:
     AerosolMode,
     AerosolActivation,
@@ -8,9 +7,6 @@ using Breeze.Microphysics.PredictedParticleProperties:
     total_activated_number,
     sum_aerosol_number,
     prognostic_ccn_activation_rate
-
-using Oceananigans: CPU, RectilinearGrid, CenterField
-using Oceananigans.Fields: interior, set!
 
 @testset "Aerosol Activation" begin
     FT = Float64
@@ -108,28 +104,6 @@ end
     # Construct P3 with prescribed CCN (default)
     p3_prescribed = PredictedParticlePropertiesMicrophysics(FT)
     @test isnothing(p3_prescribed.aerosol)
-
-    @testset "Aerosol reservoir initialization is density weighted" begin
-        grid = RectilinearGrid(CPU(), size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
-        ρ = CenterField(grid)
-        set!(ρ, FT(0.8))
-
-        μ = Breeze.AtmosphereModels.materialize_microphysical_fields(p3, grid, NamedTuple())
-        Breeze.AtmosphereModels.initialize_model_microphysical_fields!(μ, p3, ρ)
-
-        @test only(interior(μ.ρnᵃ)) ≈ FT(0.8) * sum_aerosol_number(p3.aerosol)
-    end
-
-    @testset "Aerosol reservoir follows density set after compressible construction" begin
-        grid = RectilinearGrid(CPU(), size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
-        model = Breeze.AtmosphereModel(grid;
-                                       dynamics = Breeze.CompressibleDynamics(Breeze.ExplicitTimeStepping()),
-                                       microphysics = p3)
-
-        set!(model; ρ = FT(0.8), θ = FT(300), qᵛ = FT(0), enforce_mass_conservation = false)
-
-        @test only(interior(model.microphysical_fields.ρnᵃ)) ≈ FT(0.8) * sum_aerosol_number(p3.aerosol)
-    end
 
     @testset "P3MicrophysicalState defaults missing aerosol to zero" begin
         state = P3MicrophysicalState(ntuple(_ -> zero(FT), 11)...)

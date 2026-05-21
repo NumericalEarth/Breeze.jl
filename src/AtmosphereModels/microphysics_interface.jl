@@ -395,13 +395,12 @@ materialize_microphysical_fields(microphysics::Nothing, grid, boundary_condition
 """
 $(TYPEDSIGNATURES)
 
-Return the total initial aerosol number mixing ratio [kg⁻¹] for a microphysics scheme.
+Return the total initial aerosol number concentration [m⁻³] for a microphysics scheme.
 
 This is used by [`initialize_model_microphysical_fields!`](@ref) and parcel model
-construction to set a physically meaningful default for the prognostic aerosol
-number density `ρnᵃ = ρ nᵃ`. The value is derived from the aerosol size
-distribution stored in the microphysics scheme, so it stays consistent with the
-activation parameters.
+construction to set a physically meaningful default for the prognostic aerosol number
+density `ρnᵃ`. The value is derived from the aerosol size distribution stored in the
+microphysics scheme, so it stays consistent with the activation parameters.
 
 Returns `0` by default; extensions override this for schemes with prognostic aerosol.
 """
@@ -412,15 +411,15 @@ $(TYPEDSIGNATURES)
 
 Initialize default values for microphysical fields after materialization.
 
-Sets `ρnᵃ` (aerosol number density) to `density * initial_aerosol_number(microphysics)`
+Sets `ρnᵃ` (aerosol number density) to [`initial_aerosol_number(microphysics)`](@ref)
 if the field exists. All other microphysical fields remain at zero.
 Users can override with `set!`.
 """
-initialize_model_microphysical_fields!(fields, ::Nothing, density) = nothing
+initialize_model_microphysical_fields!(fields, ::Nothing) = nothing
 
-function initialize_model_microphysical_fields!(fields, microphysics, density)
+function initialize_model_microphysical_fields!(fields, microphysics)
     if :ρnᵃ ∈ keys(fields)
-        set!(fields.ρnᵃ, density * initial_aerosol_number(microphysics))
+        set!(fields.ρnᵃ, initial_aerosol_number(microphysics))
     end
     return nothing
 end
