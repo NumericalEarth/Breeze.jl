@@ -74,6 +74,26 @@ end
     @test maximum(abs.(Gρθ .- expected)) < eps(FT) * 100
 end
 
+@testset "Unprefixed-tracer forcing wraps in SpecificForcing [$(FT)]" for FT in test_float_types()
+    # A user tracer named `:c` (no `ρ` prefix) is itself in specific form, so any forcing
+    # supplied under that name is wrapped in SpecificForcing and Breeze applies ρᵣ at
+    # kernel time — same convention as the specific alias of a ρ-prefixed prognostic.
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    F = FT(1e-5)
+    model = AtmosphereModel(grid; tracers=:c, forcing=(; c=Returns(F)))
+    @test model.forcing.c isa SpecificForcing
+
+    θ₀ = model.dynamics.reference_state.potential_temperature
+    set!(model; θ=θ₀)
+    update_state!(model)
+
+    Gρc = interior(model.timestepper.Gⁿ.c) |> Array
+    ρᵣ = interior(model.dynamics.reference_state.density) |> Array
+    @test maximum(abs.(Gρc .- ρᵣ .* F)) < eps(FT) * 100
+end
+
 @testset "Specific w forcing interpolates ρᵣ to Face [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
