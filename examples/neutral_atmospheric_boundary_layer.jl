@@ -133,12 +133,7 @@ coriolis = FPlane(f=1e-4)
 uᵍ, vᵍ = 15, 0  # m/s, simulation "S" by Moeng and Sullivan (1994)
 geostrophic = geostrophic_forcings(uᵍ, vᵍ)
 
-ρu_forcing = geostrophic.ρu
-ρv_forcing = geostrophic.ρv
-ρw_forcing = ρw_sponge
-ρθ_forcing = ρθ_sponge
-
-forcing = (; ρu=ρu_forcing, ρv=ρv_forcing, ρw=ρw_forcing, ρθ=ρθ_forcing)
+forcing = (; u=geostrophic.u, v=geostrophic.v, ρw=ρw_sponge, ρθ=ρθ_sponge)
 nothing #hide
 
 # ## Model setup
