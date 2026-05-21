@@ -73,7 +73,7 @@ end
     fill!(ρv′, 0)
 
     launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
-            ρu′, ρv′, grid, FT(0.5), ρθ′, Πᴸ, pᴸ, Gρu, Gρv, γRᵐᴸ, false)
+            false, ρu′, ρv′, grid, FT(0.5), ρθ′, Πᴸ, pᴸ, Gρu, Gρv, γRᵐᴸ)
 
     @test @allowscalar(ρu′[2, 2, 2]) == -1
     @test @allowscalar(ρv′[2, 2, 2]) == -1.5
