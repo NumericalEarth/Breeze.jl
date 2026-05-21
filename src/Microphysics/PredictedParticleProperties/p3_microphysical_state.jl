@@ -294,6 +294,9 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
     return key in names ? :(μ.$key) : :(default)
 end
 
+@inline vertical_velocity(velocities, FT) = FT(velocities.w)
+@inline vertical_velocity(::Nothing, FT) = zero(FT)
+
 @inline function AM.microphysical_state(p3::P3, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
     nᶜˡ = effective_cloud_droplet_number(p3, μ.ρnᶜˡ, ρ)
@@ -316,7 +319,7 @@ end
     sˢᵃᵗ = get_or_default(μ, Val(:ρsˢᵃᵗ), zero(FT)) / ρ
     # ρnᵃ is absent unless prognostic-aerosol path is enabled; default to 0.
     nᵃ = get_or_default(μ, Val(:ρnᵃ), zero(FT)) / ρ
-    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, nᵃ)
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, nᵃ, vertical_velocity(velocities, FT))
 end
 
 # Disambiguation for P3 with Nothing or empty microphysical fields

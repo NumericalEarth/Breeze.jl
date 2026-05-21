@@ -871,6 +871,18 @@ end
         @test ℳ_11.w == zero(FT)
     end
 
+    @testset "microphysical_state plumbs velocities.w into ℳ.w (parcel path)" begin
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics()
+        ρ = FT(1)
+        μ = (ρqᶜˡ = FT(0), ρnᶜˡ = FT(0), ρqʳ = FT(0), ρnʳ = FT(0),
+             ρqⁱ = FT(0), ρnⁱ = FT(0), ρqᶠ = FT(0), ρbᶠ = FT(0),
+             ρqʷⁱ = FT(0))
+        velocities = (u = FT(0), v = FT(0), w = FT(4.2))
+        ℳ = Breeze.AtmosphereModels.microphysical_state(p3, ρ, μ, nothing, velocities)
+        @test ℳ.w == FT(4.2)
+    end
+
     @testset "P3 active sixth moment keeps splintered mass out of group 1" begin
         FT = Float32
         base_p3 = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)
