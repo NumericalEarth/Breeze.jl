@@ -908,6 +908,33 @@ end
         @test ℳ.w == FT(2.0)
     end
 
+    @testset "compute_p3_process_rates uses ℳ.w dynamic supersaturation forcing" begin
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        p3 = PredictedParticlePropertiesMicrophysics()
+
+        ρ = FT(1)
+        T = FT(280)
+        P = FT(85000)
+        pˢᵗ = FT(100000)
+        qᶜˡ = FT(1e-4)
+        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-5)
+        q = MoistureMassFractions(qᵛ, qᶜˡ, zero(FT))
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+
+        ℳ_still = P3MicrophysicalState(qᶜˡ, FT(2e8), zero(FT), zero(FT),
+                                       zero(FT), zero(FT), zero(FT), zero(FT),
+                                       zero(FT), zero(FT), zero(FT), zero(FT), zero(FT))
+        ℳ_updraft = P3MicrophysicalState(qᶜˡ, FT(2e8), zero(FT), zero(FT),
+                                         zero(FT), zero(FT), zero(FT), zero(FT),
+                                         zero(FT), zero(FT), zero(FT), zero(FT), FT(1))
+
+        rates_still = compute_p3_process_rates(p3, ρ, ℳ_still, 𝒰, constants)
+        rates_updraft = compute_p3_process_rates(p3, ρ, ℳ_updraft, 𝒰, constants)
+
+        @test rates_updraft.condensation > rates_still.condensation
+    end
+
     @testset "P3 active sixth moment keeps splintered mass out of group 1" begin
         FT = Float32
         base_p3 = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)

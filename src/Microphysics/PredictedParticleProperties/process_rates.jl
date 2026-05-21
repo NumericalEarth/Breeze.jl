@@ -568,7 +568,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     cloud = diagnose_cloud_dsd(p3, qᶜˡ, ℳ.nᶜˡ, ρ)
     Nᶜ = cloud.Nᶜ
     ℳ_adjusted = P3MicrophysicalState(qᶜˡ, ℳ.nᶜˡ, qʳ, ℳ.nʳ, qⁱ, ℳ.nⁱ,
-                                      qᶠ, bᶠ, ℳ.zⁱ, qʷⁱ, qᵛ - qᵛ⁺ˡ, ℳ.nᵃ)
+                                      qᶠ, bᶠ, ℳ.zⁱ, qʷⁱ, qᵛ - qᵛ⁺ˡ, ℳ.nᵃ, ℳ.w)
 
     # Hoist cᵖₘ once; shared by coupled_saturation_adjustment_rates and ccn_activation_rate.
     cᵖₘ = mixture_heat_capacity(q, constants)
