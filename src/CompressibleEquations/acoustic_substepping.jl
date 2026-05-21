@@ -80,7 +80,8 @@ using Oceananigans.Operators:
     Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
-using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, Open,
+                                       FieldBoundaryConditions
 
 using Oceananigans.Grids: Flat, Center, peripheral_node,
                           topology,
@@ -258,6 +259,13 @@ the substepper's perturbation face fields ``(ρu)′``, ``(ρv)′``, ``(ρw)′
 essential on grids with `Bounded` horizontal topology so that
 `fill_halo_regions!` enforces impenetrability on the perturbation
 momenta.
+
+Sides carrying a nonzero `OpenBoundaryCondition` on the prognostic momentum
+are stripped to `nothing` on the perturbation field: the perturbation halo
+must not be imprinted with the full-state wall target, which would otherwise
+appear to the linearized acoustic dynamics as a real perturbation (issue
+\\#716). The wall target re-enters the prognostic state through the prognostic
+momentum's own BC after `accumulate_momentum_perturbations!`.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
                             prognostic_momentum = nothing)
@@ -277,11 +285,32 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     # refresh from the live moisture state.
     linearization_gamma_R_mixture                 = CenterField(grid)
 
-    # Perturbation prognostics. Inherit BCs from the prognostic momenta
-    # so impenetrability propagates onto the perturbation momenta.
-    bcs_ρu = prognostic_momentum === nothing ? nothing : prognostic_momentum.ρu.boundary_conditions
-    bcs_ρv = prognostic_momentum === nothing ? nothing : prognostic_momentum.ρv.boundary_conditions
-    bcs_ρw = prognostic_momentum === nothing ? nothing : prognostic_momentum.ρw.boundary_conditions
+    # Perturbation prognostics. Inherit BCs from the prognostic momenta so
+    # impenetrability propagates onto the perturbation momenta, but strip any
+    # side carrying a nonzero `OpenBoundaryCondition` to `nothing` so that
+    # `fill_halo_regions!` cannot imprint a full-state wall target onto the
+    # perturbation halo (issue #716). A condition is "passive" — leaves the
+    # halo at zero — when it is `nothing` or a numerically-zero scalar; arrays,
+    # functions, and time-series conditions are treated conservatively as
+    # nonzero.
+    is_passive(::Nothing) = true
+    is_passive(x::Number) = iszero(x)
+    is_passive(_) = false
+
+    strip_open(bc) = bc
+    strip_open(bc::BoundaryCondition{<:Open}) = is_passive(bc.condition) ? bc : nothing
+
+    strip_bcs(::Nothing) = nothing
+    strip_bcs(bcs) = FieldBoundaryConditions(west   = strip_open(bcs.west),
+                                             east   = strip_open(bcs.east),
+                                             south  = strip_open(bcs.south),
+                                             north  = strip_open(bcs.north),
+                                             bottom = strip_open(bcs.bottom),
+                                             top    = strip_open(bcs.top))
+
+    bcs_ρu = strip_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρu.boundary_conditions)
+    bcs_ρv = strip_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρv.boundary_conditions)
+    bcs_ρw = strip_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρw.boundary_conditions)
 
     xface(grid, bcs) = bcs === nothing ? XFaceField(grid) : XFaceField(grid; boundary_conditions = bcs)
     yface(grid, bcs) = bcs === nothing ? YFaceField(grid) : YFaceField(grid; boundary_conditions = bcs)

@@ -215,6 +215,59 @@ for arch in arches
     end
 
     #####
+    ##### Regression for issue #716: nonzero OBC on prognostic momentum must
+    ##### not bleed onto the perturbation halo via inherited BCs. Build a
+    ##### model with `Bounded` x-topology and `OpenBoundaryCondition(ρ·U)` on
+    ##### `ρu`, then confirm that (1) the substepper's perturbation BCs are
+    ##### stripped on those sides, and (2) a forward step does not produce a
+    ##### `DomainError` from runaway-acoustic amplification at the wall.
+    #####
+
+    @testset "Nonzero momentum OBC: stripped on perturbation, stable step [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
+                               topology=(Bounded, Periodic, Bounded))
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=300)
+
+        # Representative low-altitude ρ·U; exact value is irrelevant — the test
+        # just needs a nonzero scalar `OpenBoundaryCondition` value.
+        ρU = FT(6)
+
+        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρU),
+                                         east = OpenBoundaryCondition(ρU))
+        boundary_conditions = (; ρu = ρu_bcs)
+
+        model = AtmosphereModel(grid;
+                                advection = WENO(),
+                                dynamics,
+                                timestepper = :AcousticRungeKutta3,
+                                boundary_conditions)
+
+        # The substepper inherits BCs from the prognostic momentum, then strips
+        # nonzero open sides on the perturbation field.
+        substepper = model.timestepper.substepper
+        ρu_pert_bcs = substepper.momentum_perturbation.u.boundary_conditions
+        @test ρu_pert_bcs.west === nothing
+        @test ρu_pert_bcs.east === nothing
+
+        ref = model.dynamics.reference_state
+        set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
+
+        # One forward step must not throw DomainError (the failure mode of #716)
+        # nor produce NaNs.
+        simulation = Simulation(model; Δt=FT(1), stop_iteration=1, verbose=false)
+        run!(simulation)
+
+        @test model.clock.iteration == 1
+        @test !any(isnan, parent(model.momentum.ρu))
+        @test !any(isnan, parent(model.momentum.ρw))
+        @test !any(isnan, parent(model.dynamics.density))
+    end
+
+    #####
     ##### Test adaptive substep computation
     #####
 
