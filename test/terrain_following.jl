@@ -90,6 +90,30 @@ using Test
         end
     end
 
+    @testset "FaceSampledTerrain shifts topography by half an x-cell" begin
+        Nx, Nz = 8, 4
+        Lx, Lz = 8000.0, 4000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        h(x, y) = x
+        Δx = Lx / Nx
+        metrics = follow_terrain!(grid, h; terrain_interpretation = FaceSampledTerrain())
+
+        for i in 1:Nx
+            x = xnode(i, grid, Center())
+            h_expected = x + Δx / 2
+            σ_expected = (Lz - h_expected) / Lz
+
+            @test metrics.topography[i, 1, 1] ≈ h_expected
+            @test grid.z.ηⁿ[i, 1, 1] ≈ h_expected
+            @test grid.z.σᶜᶜⁿ[i, 1, 1] ≈ σ_expected
+        end
+    end
+
     @testset "follow_terrain! terrain slopes" begin
         Nx, Nz = 64, 10
         Lx, Lz = 100000.0, 5000.0

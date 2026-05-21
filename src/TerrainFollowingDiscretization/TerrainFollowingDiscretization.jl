@@ -21,6 +21,7 @@ ported to Oceananigans.
 module TerrainFollowingDiscretization
 
 export follow_terrain!, TerrainMetrics, BasicTerrainFollowing,
+       GridFittedTerrain, FaceSampledTerrain,
        SlopeOutsideInterpolation, SlopeInsideInterpolation
 
 using Adapt: Adapt, adapt

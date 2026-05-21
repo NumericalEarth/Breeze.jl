@@ -65,6 +65,32 @@ Present:
 
 Schema status: `complete` for the completed Schar production Breeze runs.
 
+## Schar Low-Amplitude Linear Wave 6 h 400x200
+
+Checked files:
+
+- `linear_mountain_wave_production_400x200_6h_gpu/linear_mountain_wave_state_metrics.csv`
+- `linear_mountain_wave_production_400x200_6h_gpu/linear_mountain_wave_scalar_metrics.csv`
+- `linear_mountain_wave_production_400x200_6h_gpu/terrain_schar_mountain_wave_energy_timeseries.csv`
+- `linear_mountain_wave_explicit_production_400x200_6h_gpu/linear_mountain_wave_state_metrics.csv`
+- `linear_mountain_wave_explicit_production_400x200_6h_gpu/linear_mountain_wave_scalar_metrics.csv`
+- `linear_mountain_wave_explicit_production_400x200_6h_gpu/terrain_schar_mountain_wave_energy_timeseries.csv`
+- `linear_mountain_wave_substepper_vs_explicit_400x200_6h_gpu/schar_substepper_vs_explicit_state_metrics.csv`
+
+Present:
+
+- analytical comparison rows for `below_sponge` and `full_domain`;
+- wave metrics: `relative_l2_error`, `relative_linf_error`,
+  `normalized_rmse`, `pattern_correlation`, `maximum_amplitude_error`,
+  `projection_amplitude_error`, `best_shift_projection_amplitude_error`,
+  `best_shift_cells`, and `phase_error_wavelengths`;
+- robustness row with finite-value counts, stable timestep, mass drift,
+  high-k near-terrain energy, bottom-normal velocity, and CFL values;
+- final-state human-inspectable PPM plots for explicit and substepper runs.
+
+Schema status: `complete` for the low-amplitude linear-wave production
+artifacts. Accuracy status is `fail`; see the production gate report.
+
 ## Complex Mountain 6 h 120x120x150
 
 Checked files:
@@ -155,6 +181,14 @@ Missing or not named as required:
 
 Schema status: `blocked/incomplete`.
 
+This is not just a column-name cleanup. A field-comparable Askervein
+production artifact still needs production setup capability that is not present
+in the current validation scripts: precursor or recycling inflow, rough-wall /
+MOST-compatible surface treatment, declared spin-up, and declared averaging
+windows. Until that workflow exists, any Askervein file with the required
+metric names would still be diagnostic rather than production-validation
+evidence.
+
 ## Comparison Metric Coverage
 
 The comparison CSVs for Schar, complex mountain, and Askervein generally
@@ -196,6 +230,16 @@ Schar has below-sponge, full-domain, and near-terrain metric files for both
 production comparison pairs; complex mountain has `below_sponge`,
 `full_domain`, `near_terrain`, `centerline_slice`, `lee_side_box`, and
 `hilltop_box` rows in both production comparison CSVs.
+
+Additional Schar Tier-1 discriminator coverage now exists in
+`schar_substepper_vs_explicit_tier1_6h_no_damping_no_upper_sponge_grid_schema_refresh_coordcheck/`.
+That comparator output includes below-sponge and full-domain field rows with
+the plan-required L2, L∞, bias, max-normalized RMSE, pattern-correlation,
+amplitude, phase-shift, projection-amplitude, and best-shift projection
+metrics. It also emits coordinate-parity rows for `coordinate_x` and
+`coordinate_z` and refuses to compare state slices whose physical coordinates
+do not match. This discriminator is schema-complete for the Tier-1 Schar
+question, but it still fails the 1% accuracy gate.
 
 ## Conclusion
 

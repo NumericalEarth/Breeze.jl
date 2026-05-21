@@ -208,6 +208,43 @@ for arch in arches
             @test acoustic.sponge.depth ≈ FT(sponge_depth)
         end
 
+        @testset "Pressure-increment diagnostics" begin
+            td = SplitExplicitTimeDiscretization(diagnostics =
+                Breeze.CompressibleEquations.HorizontalPressureIncrementDiagnostics())
+            acoustic = AcousticSubstepper(grid, td)
+            @test acoustic.diagnostics isa
+                  Breeze.CompressibleEquations.MaterializedHorizontalPressureIncrementDiagnostics
+            @test acoustic.diagnostics.momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.momentum_increment.v isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.frozen_momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.perturbation_momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.horizontal_momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.terrain_momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.frozen_horizontal_momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.frozen_terrain_momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.perturbation_horizontal_momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.perturbation_terrain_momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.ungated_horizontal_momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.ungated_terrain_momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.slow_momentum_increment.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.initial_momentum_perturbation.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.final_momentum_perturbation.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.exner_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.frozen_exner_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.perturbation_exner_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.horizontal_exner_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.terrain_exner_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.frozen_horizontal_exner_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.frozen_terrain_exner_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.perturbation_horizontal_exner_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.perturbation_terrain_exner_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.ungated_horizontal_exner_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.ungated_terrain_exner_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.nonlinear_pressure_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.nonlinear_horizontal_pressure_acceleration.u isa Oceananigans.Fields.Field
+            @test acoustic.diagnostics.nonlinear_terrain_pressure_acceleration.u isa Oceananigans.Fields.Field
+        end
+
         @testset "Invalid damping parameters" begin
             @test_throws ArgumentError SplitExplicitTimeDiscretization(
                 damping=(ThermalDivergenceDamping(), NoDivergenceDamping()))

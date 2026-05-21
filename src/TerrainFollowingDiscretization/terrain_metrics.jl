@@ -77,7 +77,8 @@ Fields
 - `∂y_h`: 2D field storing ``\\partial h / \\partial y`` at `(Center, Face)`
 - `z_top`: Height of the model top (top of the reference coordinate)
 - `pressure_gradient_stencil`: Stencil type for the terrain-corrected horizontal
-  pressure gradient ([`SlopeOutsideInterpolation`](@ref) or [`SlopeInsideInterpolation`](@ref))
+  pressure gradient ([`SlopeOutsideInterpolation`](@ref) or
+  [`SlopeInsideInterpolation`](@ref))
 - `flat`: `Val(true)` when the supplied topography is identically zero.
 """
 struct TerrainMetrics{H, SX, SY, FT, PG, F}

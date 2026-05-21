@@ -5,7 +5,7 @@ Status: quantitative validation generated; acceptance incomplete.
 Latest gate:
 
 ```text
-production validation gate: pass=16 present=16 fail=14 missing=0 blocked=5
+production validation gate: pass=16 present=21 fail=21 missing=0 blocked=5
 ```
 
 Gate report:
@@ -42,6 +42,16 @@ Primary failures:
   - `w_normalized_rmse = 0.029339205804194135`
   - `w_pattern_correlation = 0.9754128236898442`
   - `mountain_drag_relative_error = 0.6269783052655318`
+- matched `dt = 0.35 s`, no-damping, no-upper-sponge
+  substepper-vs-explicit discriminator:
+  - `w_relative_l2_error = 0.12321649479560344`
+  - `w_relative_linf_error = 0.07458038498963351`
+  - `w_normalized_rmse = 0.015968489820710877`
+  - `w_pattern_correlation = 0.9923917588419416`
+  - `w_projection_amplitude_error = 0.01798208545593083`
+  - `pressure_relative_l2_error = 0.6617009969437023`
+  - `mountain_drag_relative_error = 0.4057695816160268`
+  - coordinate parity passes exactly, but the 1% Tier-1 gate still fails.
 - projection-amplitude gates:
   - explicit-vs-CM1 below-sponge `projection_amplitude_error = 0.17606602967141627`
   - substepper-vs-explicit below-sponge `projection_amplitude_error = 0.09475538706521736`

@@ -179,6 +179,21 @@ h(x, y) = 500 * exp(-x^2 / 5000^2)
 metrics = follow_terrain!(grid, h)
 ```
 
+By default, function-valued topography is interpreted as a function of the
+physical cell-center coordinates reported by the Oceananigans grid. This is the
+[`GridFittedTerrain`](@ref) interpretation. For cross-model validation against
+setups that define analytic terrain on grid-index nodes or cell faces, pass
+[`FaceSampledTerrain`](@ref):
+
+```@example terrain
+face_sampled_metrics = follow_terrain!(grid, h; terrain_interpretation = FaceSampledTerrain())
+```
+
+This evaluates `h` at the upper horizontal face of each cell, equivalent to a
+half-cell shift in each non-flat horizontal direction. It is useful for
+reproducing reference models whose terrain apex is placed on an integer-indexed
+node rather than between two cell centers.
+
 ### Connecting terrain to dynamics
 
 Pass the [`TerrainMetrics`](@ref) to [`CompressibleDynamics`](@ref) via the
@@ -218,5 +233,6 @@ so all vertical transport automatically uses the contravariant velocity when ter
 ## API reference
 
 See the full API documentation for [`follow_terrain!`](@ref), [`TerrainMetrics`](@ref),
+[`GridFittedTerrain`](@ref), [`FaceSampledTerrain`](@ref),
 [`BasicTerrainFollowing`](@ref), [`SlopeOutsideInterpolation`](@ref), and
 [`SlopeInsideInterpolation`](@ref).

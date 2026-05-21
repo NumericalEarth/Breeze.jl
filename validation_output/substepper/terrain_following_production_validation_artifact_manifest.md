@@ -11,6 +11,12 @@ Git commit:
   artifact. Earlier Schar and complex-mountain artifacts were produced before
   this test-only commit; their artifact paths and gate evidence remain
   unchanged.
+- `3ea9984` is the current local HEAD at the latest audit update. The
+  additional source-facing change since `9b00422` is the
+  `FaceSampledTerrain()` / `GridFittedTerrain()` terrain-interpretation
+  interface plus removal of the failed experimental Lin finite-volume PGF
+  public surface. Existing production artifacts predate this local source
+  update unless explicitly noted.
 
 Latest gate:
 
@@ -21,7 +27,7 @@ julia --project=. --color=no validation_output/substepper/terrain_following_prod
 Latest result:
 
 ```text
-production validation gate: pass=16 present=16 fail=14 missing=0 blocked=5
+production validation gate: pass=16 present=21 fail=21 missing=0 blocked=5
 ```
 
 Smoke and diagnostic artifacts are excluded from completion. Rows marked
@@ -171,6 +177,192 @@ direct fields as validation evidence; the smoke artifacts remain diagnostic.
   `validation_output/substepper/terrain_schar_6h_400x200_production_substepper/terrain_schar_mountain_wave_w_comparison.ppm`
 - Status: `pass` for artifact presence.
 
+### Breeze Acoustic Substepper Matched Outer-Dt Discriminator
+
+- Artifact class: `production_validation`.
+- Purpose: production-length Schär Tier-1 discriminator with the substepper
+  outer step matched to the explicit `dt = 0.35 s`, plus grid terrain, no
+  divergence damping, and no acoustic upper sponge.
+- Command source:
+  `validation_output/substepper/run_schar_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid.batch`
+- Run log:
+  `validation_output/substepper/schar_sub_dt0p35_grid_nodamp_nosponge-1089.log`
+- Backend/machine: Breeze GPU production run on `gpu-dev`.
+- Grid/runtime: `Nx = 400`, `Nz = 200`, `dt = 0.35 s`, `6 h`.
+- Metrics:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_metrics.csv`
+- Summary:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_summary.txt`
+- State slice:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_state_slice.csv`
+- Time series:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_energy_timeseries.csv`
+- Tier-1 comparison metrics:
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_state_metrics.csv`
+- Tier-1 comparison summary:
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_summary.txt`
+- Status: `fail` for 1% Tier-1 accuracy. Coordinate parity is exact, but
+  below-sponge `w_relative_linf_error = 0.0745803850`,
+  `w_relative_l2_error = 0.1232164948`, `w_normalized_rmse = 0.0159684898`,
+  pressure relative L2 is `0.6617009969`, and mountain-drag relative error is
+  `0.4057695816`.
+
+### Breeze Low-Amplitude Linear Mountain Wave
+
+- Artifact class: `production_validation`.
+- Purpose: CM1-free low-amplitude Schär mountain-wave comparison against the
+  built-in analytical linear-wave reference, plus a low-amplitude
+  substepper-vs-explicit Tier-1 comparison.
+- Command:
+  `LINEAR_MOUNTAIN_OUTPUT_DIR=validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu SCHAR_ARCH=gpu SCHAR_NX=400 SCHAR_NZ=200 SCHAR_STOP_SECONDS=21600 SCHAR_DT=2 SCHAR_H0=25 SCHAR_TERRAIN_INTERPRETATION=grid SCHAR_PRESSURE_GRADIENT_STENCIL=inside SCHAR_WRITE_ENERGY_TIMESERIES=true SCHAR_ENERGY_INTERVAL_SECONDS=600 SCHAR_MAKE_MOVIE=false julia --project=examples --color=no validation_output/substepper/linear_mountain_wave_validation.jl`
+- Backend/machine: Breeze GPU production run on visible `NVIDIA H100 80GB HBM3`.
+- Grid/runtime: `Nx = 400`, `Nz = 200`, `dt = 2.0 s`, `6 h`, `h0 = 25 m`.
+- Metrics:
+  `validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu/linear_mountain_wave_state_metrics.csv`
+- Scalar metrics:
+  `validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu/linear_mountain_wave_scalar_metrics.csv`
+- Summary:
+  `validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu/linear_mountain_wave_summary.md`
+- Final-state plot:
+  `validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu/linear_mountain_wave_w_comparison.ppm`
+- State slice:
+  `validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu/terrain_schar_mountain_wave_state_slice.csv`
+- Time series:
+  `validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu/terrain_schar_mountain_wave_energy_timeseries.csv`
+- Status: `fail` for analytical `w` accuracy. The run is stable
+  (`nan_count = 0`, `inf_count = 0`), but below-sponge `w`, excluding boundary
+  faces, has relative L2 `1.6310697784`, relative L∞ `0.4566711505`,
+  normalized RMSE `0.0971352861`, pattern correlation `0.4962314148`,
+  maximum-amplitude error `0.0634351093`, projection amplitude error
+  `0.0687402754`, best-shift projection amplitude error `0.0687402754`, and
+  best shift `0` cells.
+- Explicit-control artifact:
+  `validation_output/substepper/linear_mountain_wave_explicit_production_400x200_6h_gpu/`
+- Explicit-control command:
+  `SCHAR_OUTPUT_DIR=validation_output/substepper/linear_mountain_wave_explicit_production_400x200_6h_gpu SCHAR_ARCH=gpu SCHAR_NX=400 SCHAR_NZ=200 SCHAR_STOP_SECONDS=21600 SCHAR_DT=0.35 SCHAR_H0=25 SCHAR_TERRAIN_INTERPRETATION=grid SCHAR_PRESSURE_GRADIENT_STENCIL=inside SCHAR_WRITE_ENERGY_TIMESERIES=true SCHAR_ENERGY_INTERVAL_SECONDS=600 SCHAR_MAKE_MOVIE=false julia --project=examples --color=no validation_output/substepper/terrain_schar_mountain_wave_explicit_validation.jl`
+- Explicit-control metrics:
+  `validation_output/substepper/linear_mountain_wave_explicit_production_400x200_6h_gpu/linear_mountain_wave_state_metrics.csv`
+- Explicit-control final-state plot:
+  `validation_output/substepper/linear_mountain_wave_explicit_production_400x200_6h_gpu/linear_mountain_wave_w_comparison.ppm`
+- Explicit-control status: `fail` for analytical `w` accuracy. The run is
+  stable (`nan_count = 0`, `inf_count = 0`), but below-sponge `w`, excluding
+  boundary faces, has relative L2 `1.8079439240`, relative L∞ `0.5198932319`,
+  normalized RMSE `0.1076686924`, pattern correlation `0.4605970664`,
+  maximum-amplitude error `0.0658505614`, projection amplitude error
+  `0.0634816092`, best-shift projection amplitude error `0.0634816092`, and
+  best shift `0` cells.
+- Substepper-vs-explicit metrics:
+  `validation_output/substepper/linear_mountain_wave_substepper_vs_explicit_400x200_6h_gpu/schar_substepper_vs_explicit_state_metrics.csv`
+- Substepper-vs-explicit summary:
+  `validation_output/substepper/linear_mountain_wave_substepper_vs_explicit_400x200_6h_gpu/schar_substepper_vs_explicit_summary.txt`
+- Convention audit:
+  `validation_output/substepper/linear_mountain_wave_convention_audit.md`
+  records that excluding boundary faces removes a misleading analytical
+  `relative_linf_error = 1.0`, and that an approximate contravariant `w̃`
+  comparison improves but does not rescue the analytical gate.
+- Substepper-vs-explicit status: `fail`. Coordinate parity is exact, but
+  below-sponge `w` has relative L∞ `0.1583762049`, relative L2
+  `0.2267029486`, normalized RMSE `0.0309254096`, pattern correlation
+  `0.9757036753`, projection amplitude error `0.1004766690`, and
+  mountain-drag relative error `0.6306652106`.
+
+#### Exact-`w̃` Substepper Rerun
+
+- Artifact class: `production_validation`.
+- Purpose: production-length low-amplitude Schär substepper rerun with exact
+  `w_tilde`, `w_tilde_linear`, and `w_tilde_error` columns in the final
+  `w_slice`.
+- Command:
+  `LINEAR_MOUNTAIN_OUTPUT_DIR=validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu_wtilde SCHAR_OUTPUT_DIR=validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu_wtilde SCHAR_ARCH=gpu SCHAR_NX=400 SCHAR_NZ=200 SCHAR_STOP_SECONDS=21600 SCHAR_DT=2 SCHAR_H0=25 SCHAR_TERRAIN_INTERPRETATION=grid SCHAR_PRESSURE_GRADIENT_STENCIL=inside SCHAR_WRITE_ENERGY_TIMESERIES=true SCHAR_ENERGY_INTERVAL_SECONDS=600 SCHAR_MAKE_MOVIE=false JULIA_NUM_THREADS=1 julia --project=examples --color=no validation_output/substepper/linear_mountain_wave_validation.jl`
+- Metrics:
+  `validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu_wtilde/linear_mountain_wave_state_metrics.csv`
+- State slice:
+  `validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu_wtilde/terrain_schar_mountain_wave_w_slice.csv`
+- Final-state plot:
+  `validation_output/substepper/linear_mountain_wave_production_400x200_6h_gpu_wtilde/linear_mountain_wave_w_comparison.ppm`
+- Status: stable (`nan_count = 0`, `inf_count = 0`) but fails analytical
+  exact-`w̃` accuracy. Below-sponge `w_tilde` relative L2 `0.8352048912`,
+  relative L∞ `0.3833304476`, normalized RMSE `0.0821621241`, pattern
+  correlation `0.7344266758`, projection amplitude error `0.1033396488`, and
+  best shift `0` cells.
+
+#### Exact-`w̃` Explicit-Control Rerun
+
+- Artifact class: `production_validation`.
+- Purpose: production-length low-amplitude Schär explicit-control rerun with
+  exact `w_tilde`, `w_tilde_linear`, and `w_tilde_error` columns in the final
+  `w_slice`.
+- Command:
+  `SCHAR_OUTPUT_DIR=validation_output/substepper/linear_mountain_wave_explicit_production_400x200_6h_gpu_wtilde SCHAR_ARCH=gpu SCHAR_NX=400 SCHAR_NZ=200 SCHAR_STOP_SECONDS=21600 SCHAR_DT=0.35 SCHAR_H0=25 SCHAR_TERRAIN_INTERPRETATION=grid SCHAR_PRESSURE_GRADIENT_STENCIL=inside SCHAR_WRITE_ENERGY_TIMESERIES=true SCHAR_ENERGY_INTERVAL_SECONDS=600 SCHAR_MAKE_MOVIE=false JULIA_NUM_THREADS=1 julia --project=examples --color=no validation_output/substepper/terrain_schar_mountain_wave_explicit_validation.jl`
+- Postprocessing command:
+  `LINEAR_MOUNTAIN_REUSE_OUTPUT=true LINEAR_MOUNTAIN_OUTPUT_DIR=validation_output/substepper/linear_mountain_wave_explicit_production_400x200_6h_gpu_wtilde SCHAR_OUTPUT_DIR=validation_output/substepper/linear_mountain_wave_explicit_production_400x200_6h_gpu_wtilde SCHAR_ARCH=gpu SCHAR_NX=400 SCHAR_NZ=200 SCHAR_STOP_SECONDS=21600 SCHAR_DT=0.35 SCHAR_H0=25 LINEAR_MOUNTAIN_MODEL_LABEL=breeze_explicit JULIA_NUM_THREADS=1 julia --project=examples --color=no validation_output/substepper/linear_mountain_wave_validation.jl`
+- Metrics:
+  `validation_output/substepper/linear_mountain_wave_explicit_production_400x200_6h_gpu_wtilde/linear_mountain_wave_state_metrics.csv`
+- State slice:
+  `validation_output/substepper/linear_mountain_wave_explicit_production_400x200_6h_gpu_wtilde/terrain_schar_mountain_wave_w_slice.csv`
+- Final-state plot:
+  `validation_output/substepper/linear_mountain_wave_explicit_production_400x200_6h_gpu_wtilde/linear_mountain_wave_w_comparison.ppm`
+- Status: stable (`nan_count = 0`, `inf_count = 0`) but fails analytical
+  exact-`w̃` accuracy. Below-sponge `w_tilde` relative L2 `0.9243801650`,
+  relative L∞ `0.4364041061`, normalized RMSE `0.0909346181`, pattern
+  correlation `0.6997871856`, projection amplitude error `0.1009619580`, and
+  best shift `0` cells.
+
+### Schär Early-Time Operator-Budget Diagnostics
+
+- Artifact class: `diagnostic`.
+- Purpose: localize the Schär production-validation blocker before launching
+  more 6 h production reruns.
+- Summary:
+  `validation_output/substepper/schar_2s_operator_budget_blocker_summary.md`
+- Machine-readable rows:
+  `validation_output/substepper/schar_2s_operator_budget_blocker_summary.csv`
+- CM1 PGF formula validation:
+  `validation_output/substepper/schar_cm1_pgrad_budget_source_audit.md`,
+  `validation_output/substepper/schar_2s_cm1_pgrad_formula_validation.md`
+  `validation_output/substepper/schar_2s_cm1_pgrad_time_centering_diagnosis.md`
+  and `validation_output/substepper/schar_600s_cm1_pgrad_formula_validation.md`
+- CM1 u-budget closure:
+  `validation_output/substepper/schar_2s_cm1_budget_closure_summary.md`
+  and
+  `validation_output/substepper/schar_2s_cm1_budget_closure_summary.csv`
+- Breeze acoustic-increment diagnostic:
+  `validation_output/substepper/schar_2s_breeze_acoustic_increment_vs_cm1_ub_pgrad_summary.md`
+  and
+  `validation_output/substepper/schar_2s_breeze_acoustic_increment_vs_cm1_ub_pgrad_summary.csv`
+- Breeze stable-explicit face-u increment diagnostic:
+  `validation_output/substepper/schar_2s_breeze_dt0p1_cm1_u_increment_closure_summary.md`
+  and
+  `validation_output/substepper/schar_2s_breeze_dt0p1_cm1_u_increment_closure_summary.csv`
+- Breeze stable-explicit face-u increment diagnostics with CM1 terrain/constants:
+  `validation_output/substepper/schar_2s_breeze_dt0p1_cm1terrain_cm1_u_increment_closure_summary.md`,
+  `validation_output/substepper/schar_2s_breeze_dt0p1_cm1terrain_cm1_u_increment_closure_summary.csv`,
+  `validation_output/substepper/schar_2s_breeze_dt0p1_cm1terrain_cm1constants_cm1_u_increment_closure_summary.md`,
+  and
+  `validation_output/substepper/schar_2s_breeze_dt0p1_cm1terrain_cm1constants_cm1_u_increment_closure_summary.csv`
+- Status: the `2 s`, `400 x 200`, below-sponge budget comparison fails the
+  1% target by large margins. Current blocker rows include `ub_pgrad`
+  relative L2 `1.352884684`, `wb_pgrad` relative L2 `1.566359834`,
+  `wb_buoy` relative L2 `759.0814827`, centered `ub_vadv` relative L2
+  `114.2449497`, and best tested velocity-form `ub_vadv` relative L2
+  `14.14802568`. The postprocessed CM1 horizontal PGF formula validates at
+  `600 s` but not at the `2 s` blocker time. A simple midpoint test does not
+  fix the `2 s` pattern mismatch. Source inspection shows CM1's emitted
+  `ub_pgrad` is an acoustic-step velocity increment budget, so `2 s` PGF
+  implementation experiments should compare to CM1's emitted budget field or
+  reproduce that increment convention. CM1's own emitted u-budget closes
+  against its saved state increment at relative L2 `2.582710086e-8`, and
+  reconstructs emitted `ub_pgrad` by residual at relative L2 `2.582295417e-8`.
+  A first Breeze outer-step
+  acoustic-increment diagnostic still fails against CM1 `ub_pgrad` with
+  relative L2 `1.181135702` and pattern correlation `0.7197870843`, so the
+  exact CM1 in-step budget convention remains unresolved. A stable explicit
+  Breeze `dt = 0.1 s` face-`u` increment diagnostic also fails against CM1's
+  actual face-`u` increment with relative L2 `1.324056471` and pattern
+  correlation `0.6295060182`. Rerunning with CM1 terrain interpretation and
+  CM1 dry constants does not improve it: relative L2 `1.339791739` and pattern
+  correlation `0.6172172957`.
+
 ### Breeze Acoustic Substepper Field-Snapshot Rerun
 
 - Artifact class: `production_validation`.
@@ -235,6 +427,12 @@ direct fields as validation evidence; the smoke artifacts remain diagnostic.
   `validation_output/substepper/schar_6h_400x200_explicit_vs_cm1_400x200_periodic_theta300_near_terrain_production_1pct_metrics_state_metrics.csv`
 - Substepper vs explicit near-terrain diagnostic metrics:
   `validation_output/substepper/schar_6h_400x200_substepper_vs_explicit_near_terrain_production_1pct_metrics_state_metrics.csv`
+- Substepper vs explicit TEST E/F production discriminator:
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_no_damping_no_upper_sponge_grid_schema_refresh_coordcheck/schar_substepper_vs_explicit_state_metrics.csv`
+- Substepper vs explicit TEST E/F production discriminator summary:
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_no_damping_no_upper_sponge_grid_schema_refresh_coordcheck/schar_substepper_vs_explicit_summary.txt`
+- TEST E/F production substepper artifact:
+  `validation_output/substepper/terrain_schar_6h_400x200_production_substepper_no_damping_no_upper_sponge_grid/`
 - Saved-time CM1-vs-Breeze raw-error frame metrics:
   `validation_output/substepper/schar_cm1_periodic_theta300_vs_breeze_substepper_raw_error_movie/frame_pairs.csv`
 - Saved-time CM1-vs-Breeze `w` and pressure frame error metrics:
@@ -245,6 +443,10 @@ direct fields as validation evidence; the smoke artifacts remain diagnostic.
   `validation_output/substepper/schar_cm1_periodic_theta300_vs_breeze_substepper_field_error_movie/schar_cm1_vs_breeze_substepper_field_error.mp4`
 - Three-resolution campaign:
   `validation_output/substepper/terrain_schar_6h_substepper_convergence_production/`
+- Failed Lin finite-volume PGF diagnostic:
+  `validation_output/substepper/terrain_schar_2s_400x200_explicit_weno9_lin_pgf_operator_budget_diagnostic/`
+- Failed Lin finite-volume PGF operator-budget summary:
+  `validation_output/substepper/schar_2s_weno9_lin_pgf_operator_budget_vs_cm1_summary.md`
 - Status: `fail`.
 - Evidence:
   - explicit-vs-CM1 below-sponge `u_relative_l2_error = 0.026636791805590348`
@@ -257,6 +459,15 @@ direct fields as validation evidence; the smoke artifacts remain diagnostic.
   - substepper-vs-explicit `mountain_drag_relative_error = 0.6269783052655318`
   - near-terrain explicit-vs-CM1 `w_relative_l2_error = 1.1949691854558966`
   - near-terrain substepper-vs-explicit `w_relative_l2_error = 0.13382617379916242`
+  - TEST E/F no-damping/no-upper-sponge production discriminator has matched
+    grid coordinates (`maximum |Δx| = 0`, `maximum |Δz| = 0`) and is stable
+    (`nan_count = 0`, `inf_count = 0`), but still fails:
+    below-sponge `w_relative_linf_error = 0.1244488499`,
+    `w_relative_l2_error = 0.1970133428`,
+    `w_normalized_rmse = 0.0255323410`,
+    `w_pattern_correlation = 0.9808452322`,
+    `w_projection_amplitude_error = 0.0546232719`, and
+    `mountain_drag_relative_error = 0.5949801384`.
   - explicit-vs-CM1 below-sponge `projection_amplitude_error = 0.17606602967141627`
   - substepper-vs-explicit below-sponge `projection_amplitude_error = 0.09475538706521736`
   - explicit-vs-CM1 near-terrain `projection_amplitude_error = 0.17505443644277563`
@@ -279,6 +490,12 @@ direct fields as validation evidence; the smoke artifacts remain diagnostic.
   - saved-time explicit-vs-CM1 metrics have `74` rows over `37` matched
     frames and two fields; all rows fail the 1% gate, with worst
     `relative_l2_error = 2.3224117e11` for pressure at `0 s`.
+  - the Lin finite-volume PGF discriminator is diagnostic-only and failed:
+    the `2 s`, `400 x 200`, WENO-9 run produced `nan_count = 372392`, while
+    operator-budget comparison still reported `ub_pgrad` relative L2
+    `1.575561862` and `wb_pgrad` relative L2 `1.529498472`. The public
+    `LinFiniteVolume` API was removed rather than retained as unused broken
+    source.
 
 ## Complex Mountain: CM1 Doernbrack Itern=3
 
@@ -591,3 +808,80 @@ Current status:
   status for a declared explicit-feasible production window.
 
 Smoke and diagnostic artifacts are explicitly excluded from completion.
+
+## Additional Schär 2 s Diagnostic Evidence
+
+- Artifact:
+  `validation_output/substepper/terrain_schar_2s_400x200_explicit_dt0p1_cm1terrain_cm1constants_rk_split_conservative_diagnostic_cpu/`
+- Command class: explicit Schär, `400 x 200`, `2 s`, `dt = 0.1 s`, CM1 terrain
+  interpretation, CM1 dry constants, CPU backend, RK split-increment diagnostic
+  enabled.
+- Metrics:
+  `validation_output/substepper/schar_2s_breeze_cm1_rk_split_conservative_increment_budget_summary.csv`
+- Summary:
+  `validation_output/substepper/schar_2s_breeze_cm1_rk_split_conservative_increment_budget_summary.md`
+- Status: diagnostic-only, not pass.
+- Evidence:
+  - RK split total vs Breeze actual face-`u` increment relative L2:
+    `1.850618453e-13`;
+  - RK pressure split vs CM1 `ub_pgrad` relative L2: `1.339146674`;
+  - Breeze actual face-`u` increment vs CM1 face-`u` increment remains
+    `1.339791739`.
+- Interpretation: the conservative split diagnostic closes Breeze's own update
+  to roundoff and is internally interpretable, but it still fails the CM1
+  comparison by order one.
+- Outside-stencil control:
+  `validation_output/substepper/schar_2s_breeze_cm1_rk_split_conservative_outside_pgf_increment_budget_summary.md`
+  also closes Breeze's own update to roundoff but gives pressure relative L2
+  `1.341576719` against CM1 `ub_pgrad`, slightly worse than the inside-stencil
+  diagnostic.
+- CM1 instrumentation specification:
+  `validation_output/substepper/cm1_schar_acoustic_pgrad_instrumentation_plan.md`
+  specifies the active `psolver=3` CM1 source path, acoustic `ppd`
+  accumulation formula, output CSV schema, and self-validation criteria for
+  reproducing emitted `ub_pgrad`.
+- Completed postprocessor:
+  `validation_output/substepper/compare_cm1_schar_acoustic_pgrad_increment.jl`
+  validates the instrumented CM1 CSV against emitted `ub_pgrad`.
+- Patch and compile check:
+  `validation_output/substepper/cm1_schar_acoustic_pgrad_instrumentation.patch`
+  applies to the CM1 `src/` tree with `patch -p1`; the temporary compile check
+  in `cm1_schar_acoustic_pgrad_patch_compile_check.md` passed with
+  `NETCDF=/shared/home/kai/software/netcdf make -j2`.
+- Completed instrumented CM1 acoustic PGF run:
+  `validation_output/substepper/cm1_schar_400x200_periodic_theta300_budget_2s_acoustic_pgrad_instrumented/`
+  emits `cm1_schar_acoustic_pgrad_increment.csv`; validation metrics are in
+  `cm1_schar_acoustic_pgrad_increment_validation.csv` and summary in
+  `cm1_schar_acoustic_pgrad_increment_validation.md`.
+- Status: diagnostic-only, not pass. Accumulated acoustic PGF total vs emitted
+  `ub_pgrad` has relative L2 `9.707927905e-6`, normalized RMSE
+  `1.538444792e-7`, and pattern correlation `0.999999999953`; this misses the
+  predeclared strict `1e-6` relative-L2 self-validation threshold but leaves
+  only a max absolute residual of `8.614479157e-7`. This is sufficient to
+  proceed with the short diagnostic discriminator chain, but it remains
+  diagnostic-only and does not satisfy production validation.
+- Direct Breeze pressure split vs CM1 acoustic-channel comparison:
+  `validation_output/substepper/schar_2s_breeze_rk_pressure_vs_cm1_acoustic_components_summary.md`
+  and
+  `validation_output/substepper/schar_2s_breeze_rk_pressure_vs_cm1_acoustic_components_summary.csv`.
+  Breeze RK pressure vs CM1 acoustic `ppd` has relative L2 `1.339147038`,
+  normalized RMSE `0.02122175634`, and pattern correlation `0.6162401561`;
+  the same Breeze pressure contribution vs CM1 emitted `ub_pgrad` has relative
+  L2 `1.339146674`. The CM1 terrain-modification channel is only
+  `1.521296963e-5` max abs and is too small to explain the blocker.
+- Active Breeze acoustic-substepper pressure diagnostic:
+  `validation_output/substepper/terrain_schar_2s_400x200_substepper_fw0p60_nodamp_cm1terrain_cm1constants_acoustic_pressure_budget_cpu/`
+  writes
+  `terrain_schar_mountain_wave_acoustic_substep_pressure_budget.csv`; comparison
+  metrics are in
+  `validation_output/substepper/schar_2s_breeze_substep_pressure_vs_cm1_acoustic_components_summary.md`
+  and
+  `validation_output/substepper/schar_2s_breeze_substep_pressure_vs_cm1_acoustic_components_summary.csv`.
+  This is a `2 s`, `400 x 200`, CM1-terrain/CM1-constants diagnostic with
+  `forward_weight = 0.60` and divergence damping disabled. Breeze final-stage
+  substepper pressure vs CM1 acoustic `ppd` has relative L2 `1.315442204`,
+  normalized RMSE `0.02084610066`, and pattern correlation `0.6215743620`.
+  Frozen pressure alone vs CM1 acoustic `ppd` has relative L2 `1.355279402`;
+  perturbation pressure alone has relative L2 `1.143469936` and pattern
+  correlation `-0.7212579097`.
+  Status: diagnostic-only, not production validation.

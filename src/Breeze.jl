@@ -121,6 +121,8 @@ export
     follow_terrain!,
     TerrainMetrics,
     BasicTerrainFollowing,
+    GridFittedTerrain,
+    FaceSampledTerrain,
     SlopeOutsideInterpolation,
     SlopeInsideInterpolation,
 

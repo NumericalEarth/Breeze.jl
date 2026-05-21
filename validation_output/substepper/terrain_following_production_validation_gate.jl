@@ -200,6 +200,407 @@ function saved_time_field_metrics_evidence(path)
            "worst_$error_key=$(worst_row[error_key])"
 end
 
+function tier1_discriminator_rows(path)
+    table = read_metrics_csv(path)
+    isnothing(table) && return nothing
+    rows_by_key = Dict{Tuple{String, String}, Dict{String, String}}()
+
+    for row in table.rows
+        rows_by_key[(get(row, "region", ""), get(row, "field", ""))] = row
+    end
+
+    required_keys = [
+        ("below_sponge", "w_center"),
+        ("below_sponge", "pressure_perturbation"),
+        ("below_sponge", "u"),
+        ("below_sponge", "theta_perturbation"),
+        ("full_domain", "mountain_drag"),
+        ("full_domain", "coordinate_x"),
+        ("full_domain", "coordinate_z"),
+    ]
+
+    all(key -> haskey(rows_by_key, key), required_keys) || return nothing
+    return rows_by_key
+end
+
+function tier1_discriminator_pass(path)
+    rows = tier1_discriminator_rows(path)
+    isnothing(rows) && return false
+
+    required_keys = [
+        ("below_sponge", "w_center"),
+        ("below_sponge", "pressure_perturbation"),
+        ("below_sponge", "u"),
+        ("below_sponge", "theta_perturbation"),
+        ("full_domain", "mountain_drag"),
+        ("full_domain", "coordinate_x"),
+        ("full_domain", "coordinate_z"),
+    ]
+
+    return all(key -> parse_bool(rows[key]["one_percent_pass"]), required_keys)
+end
+
+function tier1_discriminator_evidence(path)
+    rows = tier1_discriminator_rows(path)
+    isnothing(rows) && return "$path: metrics file missing, empty, or missing required rows"
+
+    w = rows[("below_sponge", "w_center")]
+    pressure = rows[("below_sponge", "pressure_perturbation")]
+    drag = rows[("full_domain", "mountain_drag")]
+    coordinate_x = rows[("full_domain", "coordinate_x")]
+    coordinate_z = rows[("full_domain", "coordinate_z")]
+
+    entries = [
+        "w_l2=$(w["relative_l2_error"])",
+        "w_linf=$(w["relative_linf_error"])",
+        "w_rmse=$(w["normalized_rmse"])",
+        "w_corr=$(w["pattern_correlation"])",
+        "w_projection=$(w["projection_amplitude_error"])",
+        "pressure_l2=$(pressure["relative_l2_error"])",
+        "pressure_linf=$(pressure["relative_linf_error"])",
+        "drag=$(drag["relative_l2_error"])",
+        "max_dx=$(coordinate_x["relative_l2_error"])",
+        "max_dz=$(coordinate_z["relative_l2_error"])",
+        "w_pass=$(w["one_percent_pass"])",
+        "pressure_pass=$(pressure["one_percent_pass"])",
+        "drag_pass=$(drag["one_percent_pass"])",
+        "coordinate_x_pass=$(coordinate_x["one_percent_pass"])",
+        "coordinate_z_pass=$(coordinate_z["one_percent_pass"])",
+    ]
+
+    return "$path: " * join(entries, "; ")
+end
+
+function linear_wave_rows(path)
+    table = read_metrics_csv(path)
+    isnothing(table) && return nothing
+    rows_by_key = Dict{Tuple{String, String}, Dict{String, String}}()
+
+    for row in table.rows
+        rows_by_key[(get(row, "region", ""), get(row, "field", ""))] = row
+    end
+
+    haskey(rows_by_key, ("below_sponge", "w")) || return nothing
+    haskey(rows_by_key, ("full_run", "robustness")) || return nothing
+    return rows_by_key
+end
+
+function linear_wave_pass(path)
+    rows = linear_wave_rows(path)
+    isnothing(rows) && return false
+    w = rows[("below_sponge", "w")]
+    robustness = rows[("full_run", "robustness")]
+    return parse_bool(w["one_percent_pass"]) &&
+           parse_bool(robustness["one_percent_pass"])
+end
+
+function linear_wave_field_pass(path, field)
+    rows = linear_wave_rows(path)
+    isnothing(rows) && return false
+    key = ("below_sponge", field)
+    haskey(rows, key) || return false
+    row = rows[key]
+    robustness = rows[("full_run", "robustness")]
+    return parse_bool(row["one_percent_pass"]) &&
+           parse_bool(robustness["one_percent_pass"])
+end
+
+function linear_wave_evidence(path)
+    rows = linear_wave_rows(path)
+    isnothing(rows) && return "$path: metrics file missing, empty, or missing required rows"
+
+    return linear_wave_field_evidence(path, "w")
+end
+
+function linear_wave_field_evidence(path, field)
+    rows = linear_wave_rows(path)
+    isnothing(rows) && return "$path: metrics file missing, empty, or missing required rows"
+
+    key = ("below_sponge", field)
+    haskey(rows, key) || return "$path: missing below_sponge/$field row"
+    w = rows[key]
+    robustness = rows[("full_run", "robustness")]
+    entries = [
+        "$(field)_l2=$(w["relative_l2_error"])",
+        "$(field)_linf=$(w["relative_linf_error"])",
+        "$(field)_rmse=$(w["normalized_rmse"])",
+        "$(field)_corr=$(w["pattern_correlation"])",
+        "$(field)_amp=$(w["maximum_amplitude_error"])",
+        "$(field)_projection=$(w["projection_amplitude_error"])",
+        "$(field)_best_shift_projection=$(w["best_shift_projection_amplitude_error"])",
+        "$(field)_best_shift=$(w["best_shift_cells"])",
+        "$(field)_phase=$(w["phase_error_wavelengths"])",
+        "$(field)_pass=$(w["one_percent_pass"])",
+        "nan_count=$(robustness["projection_amplitude_error"])",
+        "inf_count=$(robustness["best_shift_projection_amplitude_error"])",
+        "stable_dt=$(robustness["best_shift_cells"])",
+        "robustness_pass=$(robustness["one_percent_pass"])",
+    ]
+
+    return "$path: " * join(entries, "; ")
+end
+
+const REQUIRED_SCHAR_OPERATOR_BUDGET_TERMS =
+    ("ub_pgrad", "wb_pgrad", "wb_buoy", "ub_vadv", "ub_vadv_velocity_form")
+
+function schar_operator_budget_baseline_present(path)
+    table = read_metrics_csv(path)
+    isnothing(table) && return false
+    terms = Set(get(row, "term", "") for row in table.rows)
+    return all(term -> term in terms, REQUIRED_SCHAR_OPERATOR_BUDGET_TERMS)
+end
+
+function schar_operator_budget_baseline_evidence(path)
+    table = read_metrics_csv(path)
+    isnothing(table) && return "$path: missing or unreadable"
+
+    rows_by_term = Dict{String, Dict{String, String}}()
+    for row in table.rows
+        term = get(row, "term", "")
+        haskey(rows_by_term, term) || (rows_by_term[term] = row)
+    end
+    missing_terms = [term for term in REQUIRED_SCHAR_OPERATOR_BUDGET_TERMS
+                     if !haskey(rows_by_term, term)]
+    !isempty(missing_terms) &&
+        return "$path: missing terms=$(join(missing_terms, "|"))"
+
+    entries = String[]
+    for term in REQUIRED_SCHAR_OPERATOR_BUDGET_TERMS
+        row = rows_by_term[term]
+        push!(entries, "$(term)_l2=$(row["relative_l2_error"])")
+    end
+
+    acoustic_path =
+        joinpath(dirname(path),
+                 "schar_2s_breeze_acoustic_increment_vs_cm1_ub_pgrad_summary.csv")
+    acoustic_table = read_metrics_csv(acoustic_path)
+    if !isnothing(acoustic_table)
+        acoustic_rows =
+            Dict(get(row, "term", "") => row for row in acoustic_table.rows)
+        term = "ub_acoustic_increment_velocity"
+        if haskey(acoustic_rows, term)
+            row = acoustic_rows[term]
+            push!(entries, "acoustic_increment_l2=$(row["relative_l2_error"])")
+            push!(entries, "acoustic_increment_corr=$(row["pattern_correlation"])")
+        end
+    end
+
+    closure_path = joinpath(dirname(path), "schar_2s_cm1_budget_closure_summary.csv")
+    closure_table = read_metrics_csv(closure_path)
+    if !isnothing(closure_table)
+        closure_rows =
+            Dict(get(row, "comparison", "") => row for row in closure_table.rows)
+        for comparison in ("sum_ubudgets_vs_u_increment",
+                           "inferred_pgrad_vs_emitted_ub_pgrad")
+            if haskey(closure_rows, comparison)
+                row = closure_rows[comparison]
+                push!(entries, "$(comparison)_l2=$(row["relative_l2_error"])")
+            end
+        end
+    end
+
+    increment_path =
+        joinpath(dirname(path), "schar_2s_breeze_dt0p1_cm1_u_increment_closure_summary.csv")
+    increment_table = read_metrics_csv(increment_path)
+    if !isnothing(increment_table)
+        increment_rows =
+            Dict(get(row, "comparison", "") => row for row in increment_table.rows)
+        comparison = "breeze_u_increment_vs_cm1_u_increment"
+        if haskey(increment_rows, comparison)
+            row = increment_rows[comparison]
+            push!(entries, "breeze_dt0p1_u_increment_vs_cm1_l2=$(row["relative_l2_error"])")
+            push!(entries, "breeze_dt0p1_u_increment_vs_cm1_corr=$(row["pattern_correlation"])")
+        end
+    end
+
+    aligned_increment_path =
+        joinpath(dirname(path),
+                 "schar_2s_breeze_dt0p1_cm1terrain_cm1constants_cm1_u_increment_closure_summary.csv")
+    aligned_increment_table = read_metrics_csv(aligned_increment_path)
+    if !isnothing(aligned_increment_table)
+        aligned_increment_rows =
+            Dict(get(row, "comparison", "") => row for row in aligned_increment_table.rows)
+        comparison = "breeze_u_increment_vs_cm1_u_increment"
+        if haskey(aligned_increment_rows, comparison)
+            row = aligned_increment_rows[comparison]
+            push!(entries, "breeze_dt0p1_cm1terrain_cm1constants_u_increment_vs_cm1_l2=$(row["relative_l2_error"])")
+            push!(entries, "breeze_dt0p1_cm1terrain_cm1constants_u_increment_vs_cm1_corr=$(row["pattern_correlation"])")
+        end
+    end
+
+    rk_split_path =
+        first_existing((joinpath(dirname(path), "schar_2s_breeze_cm1_rk_split_conservative_increment_budget_summary.csv"),
+                        joinpath(dirname(path), "schar_2s_breeze_cm1_rk_split_increment_budget_summary.csv")))
+    rk_split_table = read_metrics_csv(rk_split_path)
+    if !isnothing(rk_split_table)
+        rk_split_rows =
+            Dict(get(row, "comparison", "") => row for row in rk_split_table.rows)
+        for comparison in ("breeze_rk_pressure_vs_cm1_ub_pgrad",
+                           "breeze_rk_total_vs_breeze_u_increment")
+            if haskey(rk_split_rows, comparison)
+                row = rk_split_rows[comparison]
+                push!(entries, "$(comparison)_l2=$(row["relative_l2_error"])")
+                push!(entries, "$(comparison)_corr=$(row["pattern_correlation"])")
+            end
+        end
+    end
+
+    outside_rk_split_path =
+        joinpath(dirname(path),
+                 "schar_2s_breeze_cm1_rk_split_conservative_outside_pgf_increment_budget_summary.csv")
+    outside_rk_split_table = read_metrics_csv(outside_rk_split_path)
+    if !isnothing(outside_rk_split_table)
+        outside_rk_split_rows =
+            Dict(get(row, "comparison", "") => row for row in outside_rk_split_table.rows)
+        comparison = "breeze_rk_pressure_vs_cm1_ub_pgrad"
+        if haskey(outside_rk_split_rows, comparison)
+            row = outside_rk_split_rows[comparison]
+            push!(entries, "outside_pgf_$(comparison)_l2=$(row["relative_l2_error"])")
+            push!(entries, "outside_pgf_$(comparison)_corr=$(row["pattern_correlation"])")
+        end
+    end
+
+    acoustic_pgrad_path =
+        joinpath(dirname(path), "cm1_schar_acoustic_pgrad_increment_validation.csv")
+    acoustic_pgrad_table = read_metrics_csv(acoustic_pgrad_path)
+    if !isnothing(acoustic_pgrad_table)
+        acoustic_pgrad_rows =
+            Dict(get(row, "comparison", "") => row for row in acoustic_pgrad_table.rows)
+        comparison = "accumulated_total_vs_instrumented_emitted"
+        if haskey(acoustic_pgrad_rows, comparison)
+            row = acoustic_pgrad_rows[comparison]
+            push!(entries, "cm1_acoustic_ppd_reconstruction_l2=$(row["relative_l2_error"])")
+            push!(entries, "cm1_acoustic_ppd_reconstruction_corr=$(row["pattern_correlation"])")
+        end
+    end
+
+    acoustic_component_path =
+        joinpath(dirname(path),
+                 "schar_2s_breeze_rk_pressure_vs_cm1_acoustic_components_summary.csv")
+    acoustic_component_table = read_metrics_csv(acoustic_component_path)
+    if !isnothing(acoustic_component_table)
+        acoustic_component_rows =
+            Dict(get(row, "comparison", "") => row for row in acoustic_component_table.rows)
+        for comparison in ("breeze_rk_pressure_vs_cm1_acoustic_ppd",
+                           "breeze_rk_pressure_vs_cm1_accumulated_total",
+                           "breeze_rk_pressure_vs_cm1_emitted_ub_pgrad")
+            if haskey(acoustic_component_rows, comparison)
+                row = acoustic_component_rows[comparison]
+                push!(entries, "$(comparison)_l2=$(row["relative_l2_error"])")
+                push!(entries, "$(comparison)_corr=$(row["pattern_correlation"])")
+            end
+        end
+    end
+
+    substep_pressure_path =
+        joinpath(dirname(path),
+                 "schar_2s_breeze_substep_pressure_vs_cm1_acoustic_components_summary.csv")
+    substep_pressure_table = read_metrics_csv(substep_pressure_path)
+    if !isnothing(substep_pressure_table)
+        substep_pressure_rows =
+            Dict(get(row, "comparison", "") => row for row in substep_pressure_table.rows)
+        for comparison in ("breeze_substep_pressure_plus_slow_vs_final_minus_initial",
+                           "breeze_substep_frozen_plus_perturbation_vs_pressure",
+                           "breeze_substep_pressure_vs_cm1_acoustic_ppd",
+                           "breeze_substep_frozen_pressure_vs_cm1_acoustic_ppd",
+                           "breeze_substep_perturbation_pressure_vs_cm1_acoustic_ppd",
+                           "breeze_substep_cm1_exner_vs_cm1_acoustic_ppd",
+                           "breeze_substep_frozen_cm1_exner_vs_cm1_acoustic_ppd",
+                           "breeze_substep_perturbation_cm1_exner_vs_cm1_acoustic_ppd")
+            if haskey(substep_pressure_rows, comparison)
+                row = substep_pressure_rows[comparison]
+                push!(entries, "$(comparison)_l2=$(row["relative_l2_error"])")
+                push!(entries, "$(comparison)_corr=$(row["pattern_correlation"])")
+            end
+        end
+    end
+
+    substep_pressure_split_path =
+        joinpath(dirname(path),
+                 "schar_2s_breeze_substep_pressure_vs_cm1_acoustic_split_components_summary.csv")
+    substep_pressure_split_table = read_metrics_csv(substep_pressure_split_path)
+    if !isnothing(substep_pressure_split_table)
+        substep_pressure_split_rows =
+            Dict(get(row, "comparison", "") => row for row in substep_pressure_split_table.rows)
+        for comparison in ("breeze_substep_pressure_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_substep_frozen_pressure_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_substep_cm1_exner_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_substep_frozen_cm1_exner_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_substep_pressure_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_substep_perturbation_pressure_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_substep_perturbation_cm1_exner_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_frozen_pressure_plus_cm1_acoustic_terrain_vs_cm1_acoustic_ppd",
+                           "cm1_acoustic_horizontal_plus_breeze_perturbation_pressure_vs_cm1_acoustic_ppd",
+                           "breeze_frozen_cm1_exner_plus_cm1_acoustic_terrain_vs_cm1_acoustic_ppd",
+                           "cm1_acoustic_horizontal_plus_breeze_perturbation_cm1_exner_vs_cm1_acoustic_ppd",
+                           "breeze_post_recovery_pressure_vs_cm1_acoustic_ppd",
+                           "breeze_post_recovery_horizontal_pressure_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_post_recovery_terrain_pressure_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_nonlinear_pressure_vs_cm1_acoustic_ppd",
+                           "breeze_nonlinear_horizontal_pressure_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_nonlinear_terrain_pressure_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_horizontal_pressure_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_horizontal_pressure_shift_m1_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_horizontal_pressure_shift_p1_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_horizontal_pressure_signflip_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_ungated_horizontal_pressure_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_frozen_horizontal_pressure_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_perturbation_horizontal_pressure_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_terrain_pressure_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_frozen_terrain_pressure_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_perturbation_terrain_pressure_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_ungated_terrain_pressure_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_horizontal_cm1_exner_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_horizontal_cm1_exner_shift_m1_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_horizontal_cm1_exner_shift_p1_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_horizontal_cm1_exner_signflip_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_ungated_horizontal_cm1_exner_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_frozen_horizontal_cm1_exner_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_perturbation_horizontal_cm1_exner_vs_cm1_acoustic_horizontal_ppd",
+                           "breeze_terrain_cm1_exner_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_frozen_terrain_cm1_exner_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_perturbation_terrain_cm1_exner_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_ungated_terrain_cm1_exner_vs_cm1_acoustic_terrain_ppd",
+                           "breeze_horizontal_pressure_vs_breeze_horizontal_cm1_exner",
+                           "breeze_terrain_pressure_vs_breeze_terrain_cm1_exner",
+                           "breeze_frozen_horizontal_pressure_vs_breeze_frozen_horizontal_cm1_exner",
+                           "breeze_frozen_terrain_pressure_vs_breeze_frozen_terrain_cm1_exner",
+                           "breeze_perturbation_horizontal_pressure_vs_breeze_perturbation_horizontal_cm1_exner",
+                           "breeze_perturbation_terrain_pressure_vs_breeze_perturbation_terrain_cm1_exner",
+                           "breeze_horizontal_plus_terrain_pressure_vs_pressure",
+                           "breeze_horizontal_plus_terrain_cm1_exner_vs_cm1_exner",
+                           "cm1_acoustic_horizontal_plus_terrain_vs_cm1_acoustic_ppd")
+            if haskey(substep_pressure_split_rows, comparison)
+                row = substep_pressure_split_rows[comparison]
+                push!(entries, "$(comparison)_l2=$(row["relative_l2_error"])")
+                push!(entries, "$(comparison)_corr=$(row["pattern_correlation"])")
+            end
+        end
+    end
+
+    output_exner_history_path =
+        joinpath(dirname(path),
+                 "schar_2s_cm1_output_exner_vs_acoustic_history_summary.csv")
+    output_exner_history_table = read_metrics_csv(output_exner_history_path)
+    if !isnothing(output_exner_history_table)
+        output_exner_history_rows =
+            Dict(get(row, "comparison", "") => row for row in output_exner_history_table.rows)
+        for comparison in ("cm1_output_0s_exner_vs_cm1_acoustic_ppd",
+                           "cm1_output_2s_exner_vs_cm1_acoustic_ppd",
+                           "cm1_output_avg_exner_vs_cm1_acoustic_ppd",
+                           "breeze_substep_cm1_exner_vs_cm1_output_2s_exner",
+                           "breeze_substep_cm1_exner_vs_cm1_output_avg_exner")
+            if haskey(output_exner_history_rows, comparison)
+                row = output_exner_history_rows[comparison]
+                push!(entries, "$(comparison)_l2=$(row["relative_l2_error"])")
+                push!(entries, "$(comparison)_corr=$(row["pattern_correlation"])")
+            end
+        end
+    end
+
+    return "$path: " * join(entries, "; ")
+end
+
 function frame_pair_evidence(path)
     table = read_metrics_csv(path)
     isnothing(table) && return "$path: frame-pair file missing or empty"
@@ -302,6 +703,14 @@ function timeseries_cadence_status_and_evidence()
          joinpath(ROOT, "terrain_schar_6h_400x200_production_substepper",
                   "terrain_schar_mountain_wave_energy_timeseries.csv"),
          21600.0, 600.0, 5.0),
+        ("Schar linear explicit",
+         joinpath(ROOT, "linear_mountain_wave_explicit_production_400x200_6h_gpu",
+                  "terrain_schar_mountain_wave_energy_timeseries.csv"),
+         21600.0, 600.0, 5.0),
+        ("Schar linear substepper",
+         joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu",
+                  "terrain_schar_mountain_wave_energy_timeseries.csv"),
+         21600.0, 600.0, 5.0),
         ("Complex explicit",
          joinpath(ROOT, "complex_mountain_production_explicit",
                   "complex_mountain_timeseries.csv"),
@@ -363,6 +772,14 @@ function production_timeseries_metric_contract_status_and_evidence()
          ["mountain_drag"]),
         ("Schar substepper",
          joinpath(ROOT, "terrain_schar_6h_400x200_production_substepper",
+                  "terrain_schar_mountain_wave_energy_timeseries.csv"),
+         ["mountain_drag"]),
+        ("Schar linear explicit",
+         joinpath(ROOT, "linear_mountain_wave_explicit_production_400x200_6h_gpu",
+                  "terrain_schar_mountain_wave_energy_timeseries.csv"),
+         ["mountain_drag"]),
+        ("Schar linear substepper",
+         joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu",
                   "terrain_schar_mountain_wave_energy_timeseries.csv"),
          ["mountain_drag"]),
         ("Complex explicit",
@@ -488,6 +905,16 @@ function direct_robustness_schema_status_and_evidence()
                   "terrain_schar_mountain_wave_metrics.csv"),
          joinpath(ROOT, "terrain_schar_6h_400x200_production_substepper",
                   "terrain_schar_mountain_wave_energy_timeseries.csv")),
+        ("Schar linear explicit",
+         joinpath(ROOT, "linear_mountain_wave_explicit_production_400x200_6h_gpu",
+                  "terrain_schar_mountain_wave_metrics.csv"),
+         joinpath(ROOT, "linear_mountain_wave_explicit_production_400x200_6h_gpu",
+                  "terrain_schar_mountain_wave_energy_timeseries.csv")),
+        ("Schar linear substepper",
+         joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu",
+                  "terrain_schar_mountain_wave_metrics.csv"),
+         joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu",
+                  "terrain_schar_mountain_wave_energy_timeseries.csv")),
         ("Complex explicit",
          joinpath(ROOT, "complex_mountain_production_explicit",
                   "complex_mountain_metrics.csv"),
@@ -537,6 +964,12 @@ function finite_bottom_robustness_status_and_evidence()
                   "terrain_schar_mountain_wave_energy_timeseries.csv")),
         ("Schar substepper",
          joinpath(ROOT, "terrain_schar_6h_400x200_production_substepper",
+                  "terrain_schar_mountain_wave_energy_timeseries.csv")),
+        ("Schar linear explicit",
+         joinpath(ROOT, "linear_mountain_wave_explicit_production_400x200_6h_gpu",
+                  "terrain_schar_mountain_wave_energy_timeseries.csv")),
+        ("Schar linear substepper",
+         joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu",
                   "terrain_schar_mountain_wave_energy_timeseries.csv")),
         ("Complex explicit",
          joinpath(ROOT, "complex_mountain_production_explicit",
@@ -1058,6 +1491,132 @@ function build_checks()
                         "Near-terrain substepper-vs-explicit diagnostic metrics are present",
                         isnothing(near_terrain_substepper_row) ? "missing" : "present",
                         "$(schar_near_terrain_substepper_metrics): $(schar_metric_evidence(near_terrain_substepper_row))"))
+
+    schar_no_damping_no_sponge_discriminator =
+        joinpath(ROOT, "schar_substepper_vs_explicit_tier1_6h_no_damping_no_upper_sponge_grid_schema_refresh_coordcheck",
+                 "schar_substepper_vs_explicit_state_metrics.csv")
+    push!(checks, Check("Schär",
+                        "TEST E/F no-damping/no-upper-sponge production discriminator satisfies coordinate-matched 1% Tier-1 gates",
+                        !isfile(schar_no_damping_no_sponge_discriminator) ? "missing" :
+                        tier1_discriminator_pass(schar_no_damping_no_sponge_discriminator) ? "pass" : "fail",
+                        tier1_discriminator_evidence(schar_no_damping_no_sponge_discriminator)))
+
+    schar_matched_dt_discriminator =
+        joinpath(ROOT, "schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid",
+                 "schar_substepper_vs_explicit_state_metrics.csv")
+    push!(checks, Check("Schär",
+                        "Matched outer-dt no-damping/no-upper-sponge production discriminator satisfies coordinate-matched 1% Tier-1 gates",
+                        !isfile(schar_matched_dt_discriminator) ? "missing" :
+                        tier1_discriminator_pass(schar_matched_dt_discriminator) ? "pass" : "fail",
+                        tier1_discriminator_evidence(schar_matched_dt_discriminator)))
+
+    linear_substepper_metrics =
+        joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu",
+                 "linear_mountain_wave_state_metrics.csv")
+    linear_explicit_metrics =
+        joinpath(ROOT, "linear_mountain_wave_explicit_production_400x200_6h_gpu",
+                 "linear_mountain_wave_state_metrics.csv")
+    linear_substepper_plot =
+        joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu",
+                 "linear_mountain_wave_w_comparison.ppm")
+    linear_explicit_plot =
+        joinpath(ROOT, "linear_mountain_wave_explicit_production_400x200_6h_gpu",
+                 "linear_mountain_wave_w_comparison.ppm")
+    linear_tier1_metrics =
+        joinpath(ROOT, "linear_mountain_wave_substepper_vs_explicit_400x200_6h_gpu",
+                 "schar_substepper_vs_explicit_state_metrics.csv")
+    linear_substepper_wtilde_metrics =
+        joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu_wtilde",
+                 "linear_mountain_wave_state_metrics.csv")
+    linear_substepper_wtilde_slice =
+        joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu_wtilde",
+                 "terrain_schar_mountain_wave_w_slice.csv")
+    linear_substepper_wtilde_plot =
+        joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu_wtilde",
+                 "linear_mountain_wave_w_comparison.ppm")
+    linear_explicit_wtilde_metrics =
+        joinpath(ROOT, "linear_mountain_wave_explicit_production_400x200_6h_gpu_wtilde",
+                 "linear_mountain_wave_state_metrics.csv")
+    linear_explicit_wtilde_slice =
+        joinpath(ROOT, "linear_mountain_wave_explicit_production_400x200_6h_gpu_wtilde",
+                 "terrain_schar_mountain_wave_w_slice.csv")
+    linear_explicit_wtilde_plot =
+        joinpath(ROOT, "linear_mountain_wave_explicit_production_400x200_6h_gpu_wtilde",
+                 "linear_mountain_wave_w_comparison.ppm")
+
+    push!(checks, Check("Schär linear",
+                        "Low-amplitude substepper-vs-linear-theory production artifact has metrics and plot",
+                        status_from_files([linear_substepper_metrics,
+                                           linear_substepper_plot]) == "pass" ?
+                        "present" : "missing",
+                        file_evidence([linear_substepper_metrics,
+                                       linear_substepper_plot])))
+
+    push!(checks, Check("Schär linear",
+                        "Low-amplitude substepper satisfies analytical linear-wave 1% gates",
+                        !isfile(linear_substepper_metrics) ? "missing" :
+                        linear_wave_pass(linear_substepper_metrics) ? "pass" : "fail",
+                        linear_wave_evidence(linear_substepper_metrics)))
+
+    push!(checks, Check("Schär linear",
+                        "Low-amplitude explicit-control production artifact has metrics and plot",
+                        status_from_files([linear_explicit_metrics,
+                                           linear_explicit_plot]) == "pass" ?
+                        "present" : "missing",
+                        file_evidence([linear_explicit_metrics,
+                                       linear_explicit_plot])))
+
+    push!(checks, Check("Schär linear",
+                        "Low-amplitude explicit control satisfies analytical linear-wave 1% gates",
+                        !isfile(linear_explicit_metrics) ? "missing" :
+                        linear_wave_pass(linear_explicit_metrics) ? "pass" : "fail",
+                        linear_wave_evidence(linear_explicit_metrics)))
+
+    push!(checks, Check("Schär linear",
+                        "Low-amplitude substepper vs explicit satisfies coordinate-matched 1% Tier-1 gates",
+                        !isfile(linear_tier1_metrics) ? "missing" :
+                        tier1_discriminator_pass(linear_tier1_metrics) ? "pass" : "fail",
+                        tier1_discriminator_evidence(linear_tier1_metrics)))
+
+    push!(checks, Check("Schär linear",
+                        "Low-amplitude exact-wtilde substepper production artifact has metrics, slice, and plot",
+                        status_from_files([linear_substepper_wtilde_metrics,
+                                           linear_substepper_wtilde_slice,
+                                           linear_substepper_wtilde_plot]) == "pass" ?
+                        "present" : "missing",
+                        file_evidence([linear_substepper_wtilde_metrics,
+                                       linear_substepper_wtilde_slice,
+                                       linear_substepper_wtilde_plot])))
+
+    push!(checks, Check("Schär linear",
+                        "Low-amplitude exact-wtilde substepper satisfies analytical w_tilde 1% gates",
+                        !isfile(linear_substepper_wtilde_metrics) ? "missing" :
+                        linear_wave_field_pass(linear_substepper_wtilde_metrics, "w_tilde") ? "pass" : "fail",
+                        linear_wave_field_evidence(linear_substepper_wtilde_metrics, "w_tilde")))
+
+    push!(checks, Check("Schär linear",
+                        "Low-amplitude exact-wtilde explicit-control production artifact has metrics, slice, and plot",
+                        status_from_files([linear_explicit_wtilde_metrics,
+                                           linear_explicit_wtilde_slice,
+                                           linear_explicit_wtilde_plot]) == "pass" ?
+                        "present" : "missing",
+                        file_evidence([linear_explicit_wtilde_metrics,
+                                       linear_explicit_wtilde_slice,
+                                       linear_explicit_wtilde_plot])))
+
+    push!(checks, Check("Schär linear",
+                        "Low-amplitude exact-wtilde explicit control satisfies analytical w_tilde 1% gates",
+                        !isfile(linear_explicit_wtilde_metrics) ? "missing" :
+                        linear_wave_field_pass(linear_explicit_wtilde_metrics, "w_tilde") ? "pass" : "fail",
+                        linear_wave_field_evidence(linear_explicit_wtilde_metrics, "w_tilde")))
+
+    schar_operator_budget_baseline =
+        joinpath(ROOT, "schar_2s_operator_budget_blocker_summary.csv")
+    push!(checks, Check("Schär",
+                        "Early-time 2 s operator-budget blocker baseline is present",
+                        schar_operator_budget_baseline_present(schar_operator_budget_baseline) ?
+                        "present" : "missing",
+                        schar_operator_budget_baseline_evidence(schar_operator_budget_baseline)))
 
     schar_timeseries_comparison =
         joinpath(ROOT, "schar_6h_400x200_substepper_vs_explicit_timeseries_metrics.csv")
