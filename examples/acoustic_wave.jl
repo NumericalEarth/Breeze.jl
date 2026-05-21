@@ -273,7 +273,7 @@ set!(ρᵇᵍ, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, c
 set!(ρ_total, ρᵢ)
 
 # The initial wind field is the quantity we differentiate with respect to.
-# Enzyme accumulates ``∂J / ∂u_0`` into the shadow buffer
+# Enzyme accumulates ``∂J / ∂u_i`` into the shadow buffer
 # ``du_0``.
 
 u₀  = XFaceField(grid_ad)
@@ -369,7 +369,7 @@ zs   = znodes(grid_ad, Center())
 
 # ### Sensitivity visualization
 #
-# The heatmap shows ``\partial J / \partial u_0(x,z)``: positive values are
+# The heatmap shows ``\partial J / \partial u_i(x,z)``: positive values are
 # wind perturbations that would *increase* surface acoustic energy, negative
 # values would decrease it.  Because ``J`` integrates along the entire bottom,
 # the pattern reveals which parts of the wind profile feed energy into the
