@@ -31,6 +31,7 @@ export
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
+    RadiativeHeatingOptics,
     ConstantRadiusParticles,
     TemperatureField,
     IdealGas,

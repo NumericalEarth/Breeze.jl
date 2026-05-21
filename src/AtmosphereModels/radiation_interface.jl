@@ -99,6 +99,19 @@ cloud water path, cloud fraction, and effective radius inputs from the microphys
 struct AllSkyOptics <: AbstractOptics end
 
 """
+$(TYPEDEF)
+
+Type representing radiation through `Lightflux.jl`.
+
+The concrete implementation is provided by `BreezeLightfluxExt` when
+`Lightflux` is loaded. The extension exposes component-level
+column state, optical-property, flux, and heating-rate functions so host models
+can reuse optimized kernels without giving up their own solvers or vertical
+integrals.
+"""
+struct RadiativeHeatingOptics <: AbstractOptics end
+
+"""
 $(TYPEDSIGNATURES)
 
 Construct a `RadiativeTransferModel` on `grid` using the specified `optics`.

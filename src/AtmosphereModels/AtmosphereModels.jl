@@ -63,6 +63,7 @@ export
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
+    RadiativeHeatingOptics,
 
     # Cloud effective radius
     ConstantRadiusParticles,
