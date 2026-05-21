@@ -431,16 +431,35 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     return forcings
 end
 
-# Assemble the materialized forcing for one prognostic field, combining any user-supplied
-# ρ-keyed entry with any specific-keyed entry on the same prognostic.
+# Assemble the materialized forcing for one prognostic field. Dispatch on the result of
+# `specific_name_of(density_name)`: a `Symbol` is the specific alias of a ρ-prefixed
+# prognostic; `Nothing` means the prognostic name is already in specific form (e.g. a
+# user tracer like `:c`) and has no separate density alias.
 function assemble_field_forcing(density_name, target_field, user_forcings, model_names, context)
-    specific_name = specific_name_of(density_name)
-    raw_specific_forcing = isnothing(specific_name) ? nothing :
-                           get(user_forcings, specific_name, nothing)
+    return assemble_field_forcing(density_name, specific_name_of(density_name),
+                                  target_field, user_forcings, model_names, context)
+end
+
+# ρ-prefixed prognostic: combine any user-supplied ρ-keyed entry with any specific-keyed
+# entry on the same prognostic, wrapping the specific-keyed entry in SpecificForcing.
+function assemble_field_forcing(density_name, specific_name::Symbol, target_field,
+                                user_forcings, model_names, context)
+    raw_specific_forcing = get(user_forcings, specific_name, nothing)
     wrapped_specific_forcing = wrap_specific_forcing(raw_specific_forcing, density_name)
     raw_density_forcing = get(user_forcings, density_name, nothing)
     combined = combine_forcing_values(raw_density_forcing, wrapped_specific_forcing)
     return materialize_or_default(combined, target_field, density_name, model_names, context)
+end
+
+# Unprefixed prognostic (a user tracer like `:c`): the prognostic name *is* in specific
+# form, so any forcing supplied under that name is a specific tendency and gets wrapped
+# in SpecificForcing — the ρ factor is then applied at kernel time, matching the
+# convention used for ρ-prefixed prognostics' specific aliases.
+function assemble_field_forcing(density_name, ::Nothing, target_field,
+                                user_forcings, model_names, context)
+    raw_forcing = get(user_forcings, density_name, nothing)
+    wrapped_forcing = wrap_specific_forcing(raw_forcing, density_name)
+    return materialize_or_default(wrapped_forcing, target_field, density_name, model_names, context)
 end
 
 # Strip the `ρ` prefix from a density-weighted prognostic name; returns `nothing` for
