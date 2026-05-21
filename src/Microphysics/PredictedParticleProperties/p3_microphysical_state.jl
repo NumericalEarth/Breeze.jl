@@ -51,12 +51,22 @@ struct P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
     sˢᵃᵗ :: FT
     "Unactivated aerosol number concentration [1/kg] (zero when no aerosol prognostic)"
     nᵃ  :: FT
+    "Cell-center vertical velocity [m/s] — drives the dynamic supersaturation forcing A_w in `coupled_saturation_adjustment_rates`"
+    w   :: FT
 end
 
 @inline function P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
                                       qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ)
+    FT = typeof(sˢᵃᵗ)
     return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
-                                qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, zero(typeof(sˢᵃᵗ)))
+                                qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, zero(FT), zero(FT))
+end
+
+@inline function P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
+                                      qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, nᵃ)
+    FT = typeof(sˢᵃᵗ)
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
+                                qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, nᵃ, zero(FT))
 end
 
 #####

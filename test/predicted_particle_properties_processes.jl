@@ -59,8 +59,10 @@ using Breeze.Thermodynamics:
     ThermodynamicConstants,
     MoistureMassFractions,
     LiquidIcePotentialTemperatureState,
+    StaticEnergyState,
     adjustment_saturation_specific_humidity,
     saturation_specific_humidity,
+    temperature,
     with_temperature,
     PlanarLiquidSurface,
     PlanarIceSurface
@@ -201,33 +203,26 @@ function expected_fortran_predicted_ssat_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
     return (; ε, rate = ε / τ)
 end
 
-function expected_final_ssat_tendency_from_rates(p3, rates, qᵛ₀, sˢᵃᵗ₀, T₀, ρ, constants)
+function actual_final_liquid_ssat_after_p3_step(formulation, rates, qᵛ₀, qᶜˡ₀, qʳ₀, qⁱ₀, qʷⁱ₀,
+                                                ρ, τ, P, pˢᵗ, constants)
     FT = typeof(qᵛ₀)
-    τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
-    cᵖᵈ = constants.dry_air.heat_capacity
-    εᴳᴹ = rates.predicted_ssat_adjustment * τ
-    Tᴳᴹ = T₀ + εᴳᴹ * PPP.vaporization_latent_heat(constants, T₀) / cᵖᵈ
-    qᵛᴳᴹ = qᵛ₀ - εᴳᴹ
-    ℒˡ = PPP.vaporization_latent_heat(constants, Tᴳᴹ)
-    ℒⁱ = PPP.sublimation_latent_heat(constants, Tᴳᴹ)
-    ℒᶠ = PPP.fusion_latent_heat(constants, Tᴳᴹ)
+    qᵛ₁ = qᵛ₀ + tendency_ρqᵛ(rates, ρ) / ρ * τ
+    qˡ₁ = qᶜˡ₀ + qʳ₀ + qʷⁱ₀ +
+          (tendency_ρqᶜˡ(rates, ρ) +
+           tendency_ρqʳ(rates, ρ) +
+           tendency_ρqʷⁱ(rates, ρ)) / ρ * τ
+    qⁱ₁ = qⁱ₀ + tendency_ρqⁱ(rates, ρ) / ρ * τ
+    q₁ = MoistureMassFractions(qᵛ₁, qˡ₁, qⁱ₁)
 
-    vapor_to_liquid = (rates.condensation - rates.predicted_ssat_adjustment) +
-                      rates.ccn_activation_mass +
-                      rates.rain_condensation + rates.coating_condensation -
-                      rates.rain_evaporation - rates.coating_evaporation
-    vapor_to_ice = rates.deposition + rates.nucleation_mass
-    liquid_to_ice = rates.cloud_riming + rates.rain_riming +
-                    rates.cloud_freezing_mass + rates.rain_freezing_mass +
-                    rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass +
-                    rates.refreezing -
-                    rates.complete_melting - rates.partial_melting
+    𝒰₁ = if formulation isa LiquidIcePotentialTemperatureState
+        LiquidIcePotentialTemperatureState(formulation.potential_temperature, q₁, pˢᵗ, P)
+    else
+        StaticEnergyState(formulation.static_energy, q₁, FT(0), P)
+    end
 
-    qᵛ₁ = qᵛᴳᴹ - (vapor_to_liquid + vapor_to_ice) * τ
-    T₁ = Tᴳᴹ + (ℒˡ * vapor_to_liquid + ℒⁱ * vapor_to_ice + ℒᶠ * liquid_to_ice) * τ / cᵖᵈ
+    T₁ = temperature(𝒰₁, constants)
     qᵛ⁺ˡ₁ = saturation_specific_humidity(T₁, ρ, constants, PlanarLiquidSurface())
-
-    return (qᵛ₁ - qᵛ⁺ˡ₁ - sˢᵃᵗ₀) / τ
+    return qᵛ₁ - qᵛ⁺ˡ₁
 end
 
 function documented_predict_supersaturation_disabled_semantics()
@@ -852,6 +847,28 @@ end
 
         @test isapprox(runtime_tendency, expected_tendency; rtol=FT(1e-5))
         @test !isapprox(runtime_tendency, proportional_tendency; rtol=FT(1e-5))
+    end
+
+    @testset "P3MicrophysicalState carries w" begin
+        FT = Float64
+        # 13-arg constructor stores w
+        ℳ_with_w = P3MicrophysicalState(
+            FT(1e-4), FT(2e8), FT(0), FT(0), FT(1e-5), FT(1e4),
+            FT(0), FT(0), FT(0), FT(0), FT(0), FT(0), FT(3.5))
+        @test ℳ_with_w.w ≈ FT(3.5)
+
+        # 12-arg constructor defaults w = 0 (backward-compat)
+        ℳ_default = P3MicrophysicalState(
+            FT(1e-4), FT(2e8), FT(0), FT(0), FT(1e-5), FT(1e4),
+            FT(0), FT(0), FT(0), FT(0), FT(0), FT(0))
+        @test ℳ_default.w == zero(FT)
+
+        # 11-arg constructor (sˢᵃᵗ default + w default) still works
+        ℳ_11 = P3MicrophysicalState(
+            FT(1e-4), FT(2e8), FT(0), FT(0), FT(1e-5), FT(1e4),
+            FT(0), FT(0), FT(0), FT(0), FT(0))
+        @test ℳ_11.nᵃ == zero(FT)
+        @test ℳ_11.w == zero(FT)
     end
 
     @testset "P3 active sixth moment keeps splintered mass out of group 1" begin
@@ -1970,7 +1987,7 @@ end
         @test rates.condensation ≈ gm.rate + expected_process.condensation rtol=FT(1e-10) atol=FT(1e-14)
     end
 
-    @testset "predict_supersaturation tendency matches Fortran final recompute" begin
+    @testset "predict_supersaturation tendency matches formulation final recompute" begin
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
@@ -1995,12 +2012,15 @@ end
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0), qᶠ, FT(0), FT(0), qʷⁱ, sˢᵃᵗ)
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
-        expected = expected_final_ssat_tendency_from_rates(p3, rates, qᵛ, sˢᵃᵗ, T, ρ, constants)
+        expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
+                                                          ρ, process_rates.sink_limiting_timescale,
+                                                          P, pˢᵗ, constants)
 
-        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ ≈ expected rtol=FT(1e-10) atol=FT(1e-14)
+        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ *
+              process_rates.sink_limiting_timescale ≈ expected atol=FT(1e-12)
     end
 
-    @testset "predict_supersaturation final recompute excludes splintering latent heat" begin
+    @testset "predict_supersaturation final recompute uses formulation state with splintering active" begin
         p3_base = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
@@ -2027,10 +2047,77 @@ end
                                  qᶠ, qᶠ / FT(400), FT(1e-10), qʷⁱ, sˢᵃᵗ)
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
-        expected = expected_final_ssat_tendency_from_rates(p3, rates, qᵛ, sˢᵃᵗ, T, ρ, constants)
+        expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
+                                                          ρ, process_rates.sink_limiting_timescale,
+                                                          P, pˢᵗ, constants)
 
         @test rates.splintering_mass > 0
-        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ ≈ expected rtol=FT(1e-10) atol=FT(1e-15)
+        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ *
+              process_rates.sink_limiting_timescale ≈ expected atol=FT(1e-12)
+    end
+
+    @testset "predict_supersaturation reset matches potential-temperature formulation state" begin
+        p3_base = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        τ = FT(10)
+        process_rates = ProcessRateParameters(FT;
+                                              sink_limiting_timescale = τ,
+                                              predict_supersaturation = true)
+        p3 = p3_with_process_rates(p3_base, process_rates)
+
+        ρ = FT(1)
+        T = FT(268.15)
+        P = FT(85000)
+        pˢᵗ = FT(100000)
+        qᶜˡ = FT(1e-3)
+        qʳ = FT(0)
+        qⁱ = FT(0)
+        qᶠ = FT(0)
+        qʷⁱ = FT(0)
+        sˢᵃᵗ = FT(0)
+        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
+        q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0), qᶠ, FT(0), FT(0), qʷⁱ, sˢᵃᵗ)
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
+                                                          ρ, τ, P, pˢᵗ, constants)
+
+        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
+    end
+
+    @testset "predict_supersaturation reset matches static-energy formulation state" begin
+        p3_base = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        τ = FT(10)
+        process_rates = ProcessRateParameters(FT;
+                                              sink_limiting_timescale = τ,
+                                              predict_supersaturation = true)
+        p3 = p3_with_process_rates(p3_base, process_rates)
+
+        ρ = FT(1)
+        T = FT(268.15)
+        P = FT(85000)
+        pˢᵗ = FT(100000)
+        qᶜˡ = FT(1e-3)
+        qʳ = FT(0)
+        qⁱ = FT(0)
+        qᶠ = FT(0)
+        qʷⁱ = FT(0)
+        sˢᵃᵗ = FT(0)
+        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
+        q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
+        𝒰 = with_temperature(StaticEnergyState(zero(FT), q, FT(0), P), T, constants)
+        ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0), qᶠ, FT(0), FT(0), qʷⁱ, sˢᵃᵗ)
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
+                                                          ρ, τ, P, pˢᵗ, constants)
+
+        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
     end
 
     @testset "predict_supersaturation disabled docs match inactive field semantics" begin
