@@ -273,13 +273,12 @@ set!(ρᵇᵍ, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, c
 set!(ρ_total, ρᵢ)
 
 # The initial wind field is the quantity we differentiate with respect to.
-# Enzyme accumulates ``∂J / ∂u_i`` into the shadow buffer
-# ``du_0``.
+# Enzyme accumulates ``∂J / ∂u_i`` into the shadow buffer ``du_i``.
 
-u₀  = XFaceField(grid_ad)
-du₀ = XFaceField(grid_ad)
-set!(u₀, (x, z) -> Uᵢ(z))
-set!(du₀, 0)
+uᵢ  = XFaceField(grid_ad)
+duᵢ = XFaceField(grid_ad)
+set!(uᵢ, (x, z) -> Uᵢ(z))
+set!(duᵢ, 0)
 
 # The shadow model stores accumulated adjoints for every prognostic field.
 
@@ -314,8 +313,8 @@ Nsteps = (isqrt(Nt - 1) + 1)^2
 # wind field on every backward evaluation.  Without it, AD would differentiate
 # a stale trajectory.
 
-function loss(model, u₀, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
-    set!(model; ρ = ρ_total, θ = θ₀, u = u₀)
+function loss(model, uᵢ, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
+    set!(model; ρ = ρ_total, θ = θ₀, u = uᵢ)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
@@ -330,19 +329,19 @@ end
 # mode.  The model and the initial wind are `Duplicated` (primal + shadow);
 # everything else is `Const`.
 
-function grad_loss(model, dmodel, u₀, du₀, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
-    parent(du₀) .= 0
+function grad_loss(model, dmodel, uᵢ, duᵢ, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
+    parent(duᵢ) .= 0
     _, J = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
         Enzyme.Duplicated(model, dmodel),
-        Enzyme.Duplicated(u₀, du₀),
+        Enzyme.Duplicated(uᵢ, duᵢ),
         Enzyme.Const(ρ_total),
         Enzyme.Const(ρᵇᵍ),
         Enzyme.Const(θ₀),
         Enzyme.Const(Δt),
         Enzyme.Const(nsteps))
-    return du₀, J
+    return duᵢ, J
 end
 
 # ### Compilation and execution
@@ -354,13 +353,11 @@ end
 
 @info "Compiling differentiated model — this may take a minute..."
 compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-    model_ad, dmodel_ad, u₀, du₀,
+    model_ad, dmodel_ad, uᵢ, duᵢ,
     ρ_total, ρᵇᵍ, θ₀, Δt, Nsteps)
 
 @info "Running gradient..."
-du, J = compiled_grad(
-    model_ad, dmodel_ad, u₀, du₀,
-    ρ_total, ρᵇᵍ, θ₀, Δt, Nsteps)
+du, J = compiled_grad(model_ad, dmodel_ad, uᵢ, duᵢ, ρ_total, ρᵇᵍ, θ₀, Δt, Nsteps)
 
 xs_u = xnodes(grid_ad, Face())
 zs   = znodes(grid_ad, Center())
@@ -369,7 +366,7 @@ zs   = znodes(grid_ad, Center())
 
 # ### Sensitivity visualization
 #
-# The heatmap shows ``\partial J / \partial u_i(x,z)``: positive values are
+# The heatmap shows ``\partial J / \partial u_i(x, z)``: positive values are
 # wind perturbations that would *increase* surface acoustic energy, negative
 # values would decrease it.  Because ``J`` integrates along the entire bottom,
 # the pattern reveals which parts of the wind profile feed energy into the
@@ -380,12 +377,12 @@ abs_max     = maximum(abs, sensitivity)
 
 fig_sens = Figure(size = (800, 350), fontsize = 12)
 Label(fig_sens[0, :],
-      "∂J / ∂u₀  (J = ⟨(ρ - ρ̄)²⟩ at surface,  t=$(prettytime(Nsteps * Δt))",
+      "∂J / ∂uᵢ  (J = ⟨(ρ - ρ̄)²⟩ at surface,  t=$(prettytime(Nsteps * Δt))",
       fontsize = 14, tellwidth = false)
 ax_sens = Axis(fig_sens[1, 1]; xlabel = "x (m)", ylabel = "z (m)")
 hm = heatmap!(ax_sens, xs_u, zs, sensitivity; colormap = :balance,
               colorrange = (-abs_max, abs_max))
-Colorbar(fig_sens[1, 2], hm; label = "∂J / ∂u₀")
+Colorbar(fig_sens[1, 2], hm; label = "∂J / ∂uᵢ")
 
 save("acoustic_wave_wind_sensitivity.png", fig_sens; px_per_unit = 2) #src
 fig_sens
