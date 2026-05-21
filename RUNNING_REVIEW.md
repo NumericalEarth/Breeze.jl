@@ -360,3 +360,72 @@ Remaining findings:
   signature update. The serial no-fill loop needs at least one small
   `time_step!` / `acoustic_rk3_substep_loop!` execution test before more
   refactoring.
+
+### 2026-05-21 post-commit review of `1eb70b6`
+
+Progress:
+
+- The first serial implementation is now committed as
+  `1eb70b6 Phase 1: serial no-fill acoustic substepping`.
+- `git diff --check main...HEAD` is clean.
+- The committed source diff does remove the acoustic substep-loop
+  `fill_halo_regions!` calls and preconfigures the repeated kernels with
+  device-converted argument tuples inside `GC.@preserve`.
+- The `H == 0` connected-topology range issue has been fixed.
+
+Findings:
+
+1. `RUNNING_REVIEW.md` and `acoustic_substepping_no_fill_plan_review.md` are
+   included in the commit. I would keep `acoustic_substepping_no_fill_plan.md`
+   if the PR is meant to carry the plan, but the live review and review
+   scratch file should probably not be part of the implementation PR.
+
+2. Test coverage is still the biggest correctness risk. The only committed
+   test change I see is updating the direct `_explicit_horizontal_step!`
+   unit-test call signature. Existing `time_step!` tests may catch gross
+   failures, but this PR should add a targeted no-fill regression that
+   exercises the configured-kernel loop, fused `ρθ′ˢ⁻` snapshot, no-op damping
+   setup path, and removed perturbation halo fills.
+
+3. Please add at least two tiny CPU runs before opening the PR:
+   - `(Periodic, Periodic, Bounded)` with
+     `SplitExplicitTimeDiscretization(substeps = 6)` and default
+     `ThermalDivergenceDamping()`;
+   - `(Bounded, Periodic, Bounded)` with
+     `SplitExplicitTimeDiscretization(substeps = 6,
+                                      damping = NoDivergenceDamping())`.
+   These should call `time_step!` or `acoustic_rk3_substep_loop!`, not only the
+   individual kernels.
+
+4. `acoustic_operators.jl` still defines function-form derivatives as
+   `f::Function`. The Oceananigans topology-aware operators do not require that
+   annotation. Dropping it keeps these wrappers compatible with callable
+   structs and avoids an avoidable dispatch restriction inside kernels.
+
+5. The Oceananigans source does use a `filled_halos` selector for the free
+   surface implementation. This PR intentionally skips that path, which is
+   fine, but the lack of a filled-halo/no-fill A/B switch makes the targeted
+   loop-level tests above more important.
+
+### 2026-05-21 poll 18
+
+Progress:
+
+- A new no-fill topology smoke test was added to
+  `test/acoustic_substepping.jl`.
+- It covers the configured-kernel loop with `substeps = 6` for
+  `(Periodic, Periodic, Bounded)`, `(Bounded, Periodic, Bounded)`, and
+  `(Bounded, Bounded, Bounded)`, and it includes both default thermal damping
+  and `NoDivergenceDamping()`.
+
+Finding:
+
+- This is useful smoke coverage, but it is still a rest-state test:
+  `θ = 300`, `u = 0`, `qᵗ = 0`, and `ρ = ref.density`. That means the
+  topology-aware horizontal operators and the damping gradient mostly see
+  zeros, so the test proves the new loop runs but does not really stress the
+  no-fill algorithm. Please add at least one nonzero horizontal perturbation,
+  for example a small smooth `θ` or `ρ` perturbation with horizontal structure,
+  or a small interior velocity perturbation. The key is to make `(ρθ)′`,
+  pressure gradients, and/or momentum divergence nonzero so the topology-aware
+  stencils at periodic and bounded edges are actually exercised.
