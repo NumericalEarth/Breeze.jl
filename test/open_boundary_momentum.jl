@@ -27,6 +27,11 @@ using Breeze.Thermodynamics: ReferenceState
 #   • compute_velocities! launches a fused kernel over (1:Nx+1, 1:Ny+1, 1:Nz+1), so the
 #     kernel writes `u = ρu/ρ` at the wall each step.
 
+# Wrap `interior(...)` views in `Array(...)` so boundary-face slice reductions like
+# `all(f, ...)` run on CPU. On GPU, `all(f, ::CuArray)` runs as a `mapreduce` that can't
+# infer the boolean element type from a closure predicate; pulling to CPU avoids it.
+boundary_slice(field, args...) = Array(interior(field, args...))
+
 @testset "OBC on momentum propagates to derived velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
@@ -72,8 +77,8 @@ using Breeze.Thermodynamics: ReferenceState
 
         # u at west/east boundary face should equal ρu_value / ρ_face ≈ U_bg
         # (column ρ varies <1% over Lz=100m, so 10% rtol is comfortable).
-        u_west = @allowscalar interior(model.velocities.u, 1, :, :)
-        u_east = @allowscalar interior(model.velocities.u, Nx+1, :, :)
+        u_west = boundary_slice(model.velocities.u, 1,    :, :)
+        u_east = boundary_slice(model.velocities.u, Nx+1, :, :)
         @test all(u -> isapprox(u, U_bg; rtol=FT(0.1)), u_west)
         @test all(u -> isapprox(u, U_bg; rtol=FT(0.1)), u_east)
     end
@@ -100,8 +105,8 @@ using Breeze.Thermodynamics: ReferenceState
         fill_halo_regions!(model.momentum, model.clock, fields(model))
         compute_velocities!(model)
 
-        v_south = @allowscalar interior(model.velocities.v, :, 1, :)
-        v_north = @allowscalar interior(model.velocities.v, :, Ny+1, :)
+        v_south = boundary_slice(model.velocities.v, :, 1,    :)
+        v_north = boundary_slice(model.velocities.v, :, Ny+1, :)
         @test all(v -> isapprox(v, V_bg; rtol=FT(0.1)), v_south)
         @test all(v -> isapprox(v, V_bg; rtol=FT(0.1)), v_north)
     end
@@ -128,8 +133,8 @@ using Breeze.Thermodynamics: ReferenceState
         fill_halo_regions!(model.momentum, model.clock, fields(model))
         compute_velocities!(model)
 
-        w_bottom = @allowscalar interior(model.velocities.w, :, :, 1)
-        w_top    = @allowscalar interior(model.velocities.w, :, :, Nz+1)
+        w_bottom = boundary_slice(model.velocities.w, :, :, 1)
+        w_top    = boundary_slice(model.velocities.w, :, :, Nz+1)
         @test all(w -> isapprox(w, W_bg; rtol=FT(0.1)), w_bottom)
         @test all(w -> isapprox(w, W_bg; rtol=FT(0.1)), w_top)
     end
@@ -157,8 +162,8 @@ using Breeze.Thermodynamics: ReferenceState
         fill_halo_regions!(model.momentum, model.clock, fields(model))
         compute_velocities!(model)
 
-        u_west = @allowscalar interior(model.velocities.u, 1, :, :)
-        u_east = @allowscalar interior(model.velocities.u, Nx+1, :, :)
+        u_west = boundary_slice(model.velocities.u, 1,    :, :)
+        u_east = boundary_slice(model.velocities.u, Nx+1, :, :)
         @test all(u -> isapprox(u, U_bg; rtol=FT(0.1)), u_west)
         @test all(u -> isapprox(u, U_bg; rtol=FT(0.1)), u_east)
     end
@@ -206,13 +211,13 @@ using Breeze.Thermodynamics: ReferenceState
         fill_halo_regions!(model.momentum, model.clock, fields(model))
         compute_velocities!(model)
 
-        u_west_before = @allowscalar copy(interior(model.velocities.u, 1, :, :))
-        u_east_before = @allowscalar copy(interior(model.velocities.u, Nx+1, :, :))
+        u_west_before = boundary_slice(model.velocities.u, 1,    :, :)
+        u_east_before = boundary_slice(model.velocities.u, Nx+1, :, :)
 
         fill_halo_regions!(model.velocities)
 
-        u_west_after = @allowscalar interior(model.velocities.u, 1, :, :)
-        u_east_after = @allowscalar interior(model.velocities.u, Nx+1, :, :)
+        u_west_after = boundary_slice(model.velocities.u, 1,    :, :)
+        u_east_after = boundary_slice(model.velocities.u, Nx+1, :, :)
         @test u_west_before == u_west_after
         @test u_east_before == u_east_after
         # And both are still close to U_bg (sanity, in case both got clobbered identically).
@@ -236,8 +241,8 @@ using Breeze.Thermodynamics: ReferenceState
         fill_halo_regions!(model.momentum, model.clock, fields(model))
         compute_velocities!(model)
 
-        u_west = @allowscalar interior(model.velocities.u, 1, :, :)
-        u_east = @allowscalar interior(model.velocities.u, Nx+1, :, :)
+        u_west = boundary_slice(model.velocities.u, 1,    :, :)
+        u_east = boundary_slice(model.velocities.u, Nx+1, :, :)
         @test all(==(zero(FT)), u_west)
         @test all(==(zero(FT)), u_east)
     end
