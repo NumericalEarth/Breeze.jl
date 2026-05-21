@@ -1206,7 +1206,7 @@ end
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ)
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0))
         expected_rates = expected_reduced_fortran_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
@@ -1218,7 +1218,7 @@ end
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ)
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0))
 
         @test epsr ≈ expected_epsr
         @test epsi ≈ expected_epsi
@@ -1232,6 +1232,63 @@ end
         @test rates.coating_condensation == 0  # dry ice: no coating
         @test rates.coating_evaporation == 0
         @test rates.condensation < rates_noice.condensation
+
+        # A_w bitwise equivalence: w = 0 reproduces the Bergeron-only behavior.
+        rates_w0 = PPP.coupled_saturation_adjustment_rates(
+            p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+            qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
+            constants, transport, q, μ,
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0))
+        @test rates_w0.condensation === rates.condensation
+        @test rates_w0.deposition === rates.deposition
+        @test rates_w0.rain_evaporation === rates.rain_evaporation
+        @test rates_w0.rain_condensation === rates.rain_condensation
+        @test rates_w0.coating_condensation === rates.coating_condensation
+        @test rates_w0.coating_evaporation === rates.coating_evaporation
+
+        # Pure adiabatic forcing: saturated, no ice, w > 0 → positive condensation.
+        let
+            T_ad = FT(280.0)
+            qᵛ⁺ˡ_ad = saturation_specific_humidity(T_ad, ρ, constants, PlanarLiquidSurface())
+            qᵛ⁺ⁱ_ad = saturation_specific_humidity(T_ad, ρ, constants, PlanarIceSurface())
+            qᵛ_ad = qᵛ⁺ˡ_ad  # exactly saturated → ssat_liquid = 0
+            w_ad = FT(1.0)
+            q_ad = MoistureMassFractions(qᵛ_ad, qᶜˡ + qʳ + qʷⁱ, zero(FT))
+            transport_ad = air_transport_properties(T_ad, P)
+            cloud_ad = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+            rates_w = PPP.coupled_saturation_adjustment_rates(
+                p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
+                qᵛ_ad, qᵛ⁺ˡ_ad, qᵛ⁺ⁱ_ad, Fᶠ, ρᶠ, T_ad, P, ρ,
+                constants, transport_ad, q_ad, μ,
+                cloud_ad.μ_c, cloud_ad.λ_c, cloud_ad.nᶜˡ, w_ad)
+            @test rates_w.condensation > 0
+            @test rates_w.deposition == 0  # no ice present
+        end
+
+        # Sign symmetry: at exactly saturated state, w > 0 generates condensation,
+        # w < 0 routes the same magnitude into evaporation. We use a soft check
+        # because the clamps in coupled_saturation_adjustment_rates may route the
+        # mass through different fields.
+        let
+            T_s = FT(280.0)
+            qᵛ⁺ˡ_s = saturation_specific_humidity(T_s, ρ, constants, PlanarLiquidSurface())
+            qᵛ⁺ⁱ_s = saturation_specific_humidity(T_s, ρ, constants, PlanarIceSurface())
+            qᵛ_s = qᵛ⁺ˡ_s
+            q_s = MoistureMassFractions(qᵛ_s, qᶜˡ + qʳ + qʷⁱ, zero(FT))
+            transport_s = air_transport_properties(T_s, P)
+            cloud_s = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+            common = (p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
+                      qᵛ_s, qᵛ⁺ˡ_s, qᵛ⁺ⁱ_s, Fᶠ, ρᶠ, T_s, P, ρ,
+                      constants, transport_s, q_s, μ,
+                      cloud_s.μ_c, cloud_s.λ_c, cloud_s.nᶜˡ)
+            rates_up   = PPP.coupled_saturation_adjustment_rates(common..., FT(+1.0))
+            rates_down = PPP.coupled_saturation_adjustment_rates(common..., FT(-1.0))
+            @test rates_up.condensation > 0
+            # Descending air evaporates the cloud reservoir: with cloud present
+            # and A_w < 0 the `condensation` channel goes negative (cloud → vapor),
+            # mirroring the sign flip in the production routine.
+            @test rates_down.condensation < 0
+        end
     end
 
     @testset "coupled_saturation_adjustment_rates wet-ice coating" begin
@@ -1273,7 +1330,7 @@ end
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ)
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0))
         expected_rates = expected_reduced_fortran_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,

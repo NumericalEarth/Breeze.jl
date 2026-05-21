@@ -177,7 +177,7 @@ separately.
 @inline function coupled_saturation_adjustment_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
                                                      qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                                      constants, transport, q, μ,
-                                                     μ_c, λ_c, nᶜˡ_bounded)
+                                                     μ_c, λ_c, nᶜˡ_bounded, w)
     FT = typeof(qᶜˡ)
     τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
     Rᵛ = FT(vapor_gas_constant(constants))
@@ -209,15 +209,25 @@ separately.
     # host-advected `sˢᵃᵗ`.
     ssat_liquid = qᵛ - qᵛ⁺ˡ
     bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * εⁱ
+    # A_w: adiabatic supersaturation forcing from vertical motion.
+    # Fortran reference: `aaa = ... - dqsdT*(-dum*g*i_cp) ...` with
+    # dum = -cp/g · dT/dt, i.e. dT/dt|_dynamics ≈ -g/cᵖₘ · w. Here cᵖₘ is the
+    # moist heat capacity of the local gas mixture, matching Fortran's `i_cp`.
+    # We omit the (qᵛ - qᵛ_old)/dt contribution to Fortran's `aaa` because the
+    # host does not carry qᵛ_old.
+    cᵖₘ = mixture_heat_capacity(q, constants)
+    g = constants.gravitational_acceleration
+    A_w = (g / cᵖₘ) * dqᵛ⁺ˡ_dT * w
+    A_total = A_w + bergeron_driver
 
-    qc_raw = (bergeron_driver * εᶜˡ / ε_total + (ssat_liquid - bergeron_driver / ε_total) * εᶜˡ / ε_total * transient) / ξˡ
-    qr_raw = (bergeron_driver * εʳ / ε_total + (ssat_liquid - bergeron_driver / ε_total) * εʳ / ε_total * transient) / ξˡ
-    qi_raw = (bergeron_driver * εⁱ / ε_total + (ssat_liquid - bergeron_driver / ε_total) * εⁱ / ε_total * transient) / ξⁱ +
+    qc_raw = (A_total * εᶜˡ / ε_total + (ssat_liquid - A_total / ε_total) * εᶜˡ / ε_total * transient) / ξˡ
+    qr_raw = (A_total * εʳ / ε_total + (ssat_liquid - A_total / ε_total) * εʳ / ε_total * transient) / ξˡ
+    qi_raw = (A_total * εⁱ / ε_total + (ssat_liquid - A_total / ε_total) * εⁱ / ε_total * transient) / ξⁱ +
              (qᵛ⁺ˡ - qᵛ⁺ⁱ) * εⁱ / ξⁱ
     # Liquid-on-ice coating uses `ξˡ` (like cloud) since the surface condenses
     # vapor as liquid; no Bergeron contribution because the surface is already
     # at liquid saturation.
-    ql_raw = (bergeron_driver * εⁱʷ / ε_total + (ssat_liquid - bergeron_driver / ε_total) * εⁱʷ / ε_total * transient) / ξˡ
+    ql_raw = (A_total * εⁱʷ / ε_total + (ssat_liquid - A_total / ε_total) * εⁱʷ / ε_total * transient) / ξˡ
 
     𝒮ˡ = ssat_liquid / max(qᵛ⁺ˡ, FT(1e-30))
     𝒮ⁱ = qᵛ / max(qᵛ⁺ⁱ, FT(1e-30)) - 1

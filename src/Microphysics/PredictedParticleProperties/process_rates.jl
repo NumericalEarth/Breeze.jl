@@ -11,6 +11,7 @@
 using Oceananigans: Oceananigans
 
 using Breeze.Thermodynamics: temperature,
+                             with_moisture,
                              adjustment_saturation_specific_humidity,
                              saturation_specific_humidity,
                              saturation_vapor_pressure,
@@ -60,6 +61,14 @@ struct P3DerivedState{FT, Q}
     D_v :: FT       # water vapor diffusivity [m²/s]
     K_a :: FT       # thermal conductivity of air [W/m/K]
     nu :: FT        # kinematic viscosity [m²/s]
+end
+
+@inline function liquid_supersaturation_after_moisture_update(𝒰, qᵛ, qˡ, qⁱ, ρ, constants)
+    q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
+    𝒰₁ = with_moisture(𝒰, q)
+    T = temperature(𝒰₁, constants)
+    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    return qᵛ - qᵛ⁺ˡ
 end
 
 """
@@ -273,7 +282,7 @@ end
                                                       ℳ.qⁱ, ℳ.qʷⁱ, nⁱ, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ,
                                                       Fᶠ, ρᶠ, T, P, ρ, constants,
                                                       transport, q, μ_ice,
-                                                      state.μ_c, state.λ_c, state.nᶜˡ)
+                                                      state.μ_c, state.λ_c, state.nᶜˡ, ℳ.w)
     cond = vapor_rates.condensation
 
     # CCN activation (prescribed or prognostic; depletes ℳ.nᵃ when prognostic)
@@ -745,30 +754,20 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     nr_correction = (nʳ - ℳ.nʳ) / dt_safety
 
     # Fortran's `microphy_p3.f90:5053-5063` recomputes ssat = qv - qvs(T)
-    # at the end of the substep. Reconstruct that final diagnostic from the
-    # locally adjusted (post-G&M) state and the sink-limited M&G rates. `cond`
-    # here is the M&G part only; the one-shot G&M alignment is in `qᵛ`, `T`,
-    # and `qᶜˡ` (already shifted by ε) and is folded into `cond_total` below.
-    #
-    # The `/ dt_safety` denominator (`sink_limiting_timescale`) ties this
-    # tendency to the same time-step assumption as `cond_GM`: when the host
-    # integrates with dt = sink_limiting_timescale the prognostic `ρsˢᵃᵗ`
-    # lands exactly at `ρ(qᵛ_final - qᵛ⁺ˡ(T_final))`. For dt ≠ τ the alignment
-    # relaxes over multiple steps.
-    ℒˡ = vaporization_latent_heat(constants, T)
-    ℒⁱ = sublimation_latent_heat(constants, T)
-    ℒᶠ = fusion_latent_heat(constants, T)
-    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
+    # at the end of the substep. Breeze must diagnose that final T from the
+    # same conserved thermodynamic variable (`ρθ` or `ρe`) that the host model
+    # advances, not from a standalone cᵖᵈ latent-heating estimate.
     vapor_to_liquid = cond + ccn_act + rain_cond + coat_cond - rain_evap - coat_evap
     vapor_to_ice = dep + nuc_q
     liquid_to_ice = cloud_rim + rain_rim + cloud_frz_q + rain_frz_q +
                     cloud_hom_q + rain_hom_q + refrz -
                     complete_melt - partial_melt
     qᵛ_final = qᵛ - (vapor_to_liquid + vapor_to_ice) * dt_safety
-    T_final = T + (ℒˡ * vapor_to_liquid + ℒⁱ * vapor_to_ice + ℒᶠ * liquid_to_ice) *
-              dt_safety / cᵖᵈ
-    qᵛ⁺ˡ_final = saturation_specific_humidity(T_final, ρ, constants, PlanarLiquidSurface())
-    ssat_tendency = (qᵛ_final - qᵛ⁺ˡ_final - ℳ.sˢᵃᵗ) / dt_safety
+    qˡ_final = q.liquid + (vapor_to_liquid - liquid_to_ice) * dt_safety
+    qⁱ_final = q.ice + (vapor_to_ice + liquid_to_ice) * dt_safety
+    ssat_final = liquid_supersaturation_after_moisture_update(𝒰, qᵛ_final, qˡ_final,
+                                                              qⁱ_final, ρ, constants)
+    ssat_tendency = (ssat_final - ℳ.sˢᵃᵗ) / dt_safety
     ssat_tendency = ifelse(prp.predict_supersaturation, ssat_tendency, zero(FT))
     # `cond_GM` is intentionally NOT rescaled by the cloud sink limiter: the
     # G&M alignment is its own one-shot saturation adjustment with a local
