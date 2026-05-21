@@ -19,7 +19,6 @@ using Breeze.Thermodynamics: temperature,
                              density,
                              liquid_latent_heat,
                              ice_latent_heat,
-                             mixture_heat_capacity,
                              vapor_gas_constant,
                              MoistureMassFractions,
                              ThermodynamicConstants
@@ -177,7 +176,7 @@ separately.
 @inline function coupled_saturation_adjustment_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
                                                      qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                                      constants, transport, q, μ,
-                                                     μ_c, λ_c, nᶜˡ_bounded, w)
+                                                     μ_c, λ_c, nᶜˡ_bounded, w, cᵖₘ)
     FT = typeof(qᶜˡ)
     τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
     Rᵛ = FT(vapor_gas_constant(constants))
@@ -215,7 +214,6 @@ separately.
     # moist heat capacity of the local gas mixture, matching Fortran's `i_cp`.
     # We omit the (qᵛ - qᵛ_old)/dt contribution to Fortran's `aaa` because the
     # host does not carry qᵛ_old.
-    cᵖₘ = mixture_heat_capacity(q, constants)
     g = constants.gravitational_acceleration
     A_w = (g / cᵖₘ) * dqᵛ⁺ˡ_dT * w
     A_total = A_w + bergeron_driver

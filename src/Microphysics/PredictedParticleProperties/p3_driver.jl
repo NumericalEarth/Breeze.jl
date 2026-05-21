@@ -52,8 +52,10 @@ using KernelAbstractions: @kernel, @index
     # Reconstruct thermodynamic state (same as in the thermodynamic kernel)
     ρqᵛᵉ = μ.qᵛ[i, j, k] * ρ  # qᵛ was already written by update_microphysical_auxiliaries!
     qᵛᵉ = μ.qᵛ[i, j, k]
+    # moisture_fractions does not read ℳ.w; pass ZeroField placeholders to skip the
+    # ℑzᵃᵃᶜ interpolation here. The real velocities are forwarded to p3_compute_and_cache!.
     q = AM.moisture_fractions(p3, AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ,
-            nothing, velocities), qᵛᵉ)
+            nothing, (u = ZeroField(), v = ZeroField(), w = ZeroField())), qᵛᵉ)
     𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
     𝒰 = AM.maybe_adjust_thermodynamic_state(𝒰₀, p3, qᵛᵉ, constants)
 

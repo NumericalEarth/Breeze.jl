@@ -296,7 +296,6 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
 end
 
 @inline vertical_velocity(velocities, FT) = FT(velocities.w)
-@inline vertical_velocity(::Nothing, FT) = zero(FT)
 
 # Interpolate a face-located w field to a cell center.
 # All call sites pass face fields (or ZeroField placeholders); no scalar fallback needed.
