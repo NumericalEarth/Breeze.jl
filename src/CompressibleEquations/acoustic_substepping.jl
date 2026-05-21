@@ -247,6 +247,29 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
 ##### Section 2 — Constructor
 #####
 
+# A condition on an `OpenBoundaryCondition` is "passive" when inheriting it
+# onto the perturbation field would leave the halo at zero: `nothing` (halo
+# fill is a no-op) or a numerically-zero scalar. Arrays, functions, and
+# time-series conditions are treated conservatively as nonzero. Module-level
+# rather than nested in the constructor because multi-method local closures
+# get boxed by Julia 1.12 (caught by the `No Core.Box` quality test).
+is_passive_open_value(::Nothing) = true
+is_passive_open_value(x::Number) = iszero(x)
+is_passive_open_value(_) = false
+
+strip_nonzero_open(bc) = bc
+strip_nonzero_open(bc::BoundaryCondition{<:Open}) =
+    is_passive_open_value(bc.condition) ? bc : nothing
+
+strip_nonzero_open_bcs(::Nothing) = nothing
+strip_nonzero_open_bcs(bcs) =
+    FieldBoundaryConditions(west   = strip_nonzero_open(bcs.west),
+                            east   = strip_nonzero_open(bcs.east),
+                            south  = strip_nonzero_open(bcs.south),
+                            north  = strip_nonzero_open(bcs.north),
+                            bottom = strip_nonzero_open(bcs.bottom),
+                            top    = strip_nonzero_open(bcs.top))
+
 """
 $(TYPEDSIGNATURES)
 
@@ -289,28 +312,10 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     # impenetrability propagates onto the perturbation momenta, but strip any
     # side carrying a nonzero `OpenBoundaryCondition` to `nothing` so that
     # `fill_halo_regions!` cannot imprint a full-state wall target onto the
-    # perturbation halo (issue #716). A condition is "passive" — leaves the
-    # halo at zero — when it is `nothing` or a numerically-zero scalar; arrays,
-    # functions, and time-series conditions are treated conservatively as
-    # nonzero.
-    is_passive(::Nothing) = true
-    is_passive(x::Number) = iszero(x)
-    is_passive(_) = false
-
-    strip_open(bc) = bc
-    strip_open(bc::BoundaryCondition{<:Open}) = is_passive(bc.condition) ? bc : nothing
-
-    strip_bcs(::Nothing) = nothing
-    strip_bcs(bcs) = FieldBoundaryConditions(west   = strip_open(bcs.west),
-                                             east   = strip_open(bcs.east),
-                                             south  = strip_open(bcs.south),
-                                             north  = strip_open(bcs.north),
-                                             bottom = strip_open(bcs.bottom),
-                                             top    = strip_open(bcs.top))
-
-    bcs_ρu = strip_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρu.boundary_conditions)
-    bcs_ρv = strip_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρv.boundary_conditions)
-    bcs_ρw = strip_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρw.boundary_conditions)
+    # perturbation halo (issue #716).
+    bcs_ρu = strip_nonzero_open_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρu.boundary_conditions)
+    bcs_ρv = strip_nonzero_open_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρv.boundary_conditions)
+    bcs_ρw = strip_nonzero_open_bcs(prognostic_momentum === nothing ? nothing : prognostic_momentum.ρw.boundary_conditions)
 
     xface(grid, bcs) = bcs === nothing ? XFaceField(grid) : XFaceField(grid; boundary_conditions = bcs)
     yface(grid, bcs) = bcs === nothing ? YFaceField(grid) : YFaceField(grid; boundary_conditions = bcs)
