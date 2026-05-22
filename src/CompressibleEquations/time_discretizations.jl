@@ -125,21 +125,6 @@ fields without applying any post-substep momentum correction.
 """
 struct NoDivergenceDamping <: AcousticDampingStrategy end
 
-abstract type AcousticSubstepperDiagnostics end
-
-struct NoAcousticSubstepperDiagnostics <: AcousticSubstepperDiagnostics end
-
-struct HorizontalPressureIncrementDiagnostics <: AcousticSubstepperDiagnostics end
-
-struct BottomPressureModalDiagnostics{M, L} <: AcousticSubstepperDiagnostics
-    modes :: M
-    levels :: L
-end
-
-BottomPressureModalDiagnostics(; modes = (49, 52, 56, 58),
-                                 levels = (1, 8, 16)) =
-    BottomPressureModalDiagnostics(tuple(modes...), tuple(levels...))
-
 """
 $(TYPEDEF)
 
@@ -473,7 +458,7 @@ solve, an acoustic `damping` strategy such as
 [`ThermalDivergenceDamping`](@ref), an optional [`UpperSponge`](@ref), and a
 `substep_distribution` such as [`ProportionalSubsteps`](@ref).
 """
-struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistribution, DIAG}
+struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistribution}
     substeps :: N
     acoustic_cfl :: FT
     forward_weight :: FT
@@ -485,7 +470,6 @@ struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistri
     damping :: D
     sponge :: US
     substep_distribution :: AD
-    diagnostics :: DIAG
 end
 
 function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
@@ -499,17 +483,13 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          apply_first_substep_pressure_gradient = false,
                                          damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
-                                         substep_distribution = ProportionalSubsteps(),
-                                         diagnostics = NoAcousticSubstepperDiagnostics())
+                                         substep_distribution = ProportionalSubsteps())
 
     damping isa AcousticDampingStrategy ||
         throw(ArgumentError("`damping` must be an `AcousticDampingStrategy`"))
 
     sponge isa Union{Nothing, UpperSponge} ||
         throw(ArgumentError("`sponge` must be `nothing` or an `UpperSponge`"))
-
-    diagnostics isa AcousticSubstepperDiagnostics ||
-        throw(ArgumentError("`diagnostics` must be an `AcousticSubstepperDiagnostics`"))
 
     acoustic_cfl > 0 ||
         throw(ArgumentError("`acoustic_cfl` must be positive (got $(acoustic_cfl))"))
@@ -526,7 +506,6 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
         convert_acoustic_parameter(FT, damping),
         convert_acoustic_parameter(FT, sponge),
         substep_distribution,
-        diagnostics,
     )
 end
 
