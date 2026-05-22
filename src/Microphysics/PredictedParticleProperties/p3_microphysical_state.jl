@@ -352,6 +352,32 @@ end
     return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ, sˢᵃᵗ, nᵃ, w)
 end
 
+# Clamp the prognostic `ρz̃ⁱ` to its physically consistent maximum
+# (Fortran-parity `apply_mui_bounds_to_zi`). Without this writeback, sources
+# accumulate ρz̃ⁱ above the physical bound while tendency math sees only the
+# bounded zⁱ — there is no restoring force and the prognostic drifts.
+# 2-moment (no `three_moment_shape_table`) is a compile-time no-op.
+@inline clamp_ice_sixth_moment!(μ, i, j, k, p3::P3, ρ, ℳ) =
+    clamp_ice_sixth_moment_dispatch(three_moment_shape_table(p3), μ, i, j, k, p3, ρ, ℳ)
+
+@inline clamp_ice_sixth_moment_dispatch(::Nothing, μ, i, j, k, p3::P3, ρ, ℳ) = ℳ
+
+@inline function clamp_ice_sixth_moment_dispatch(::P3ThreeMomentShapeTable,
+                                                   μ, i, j, k, p3::P3, ρ, ℳ)
+    FT = typeof(ρ)
+    qⁱ_total = total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ)
+    qⁱ_safe = max(qⁱ_total, FT(1e-20))
+    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, ℳ.qʷⁱ)
+    μ_ice = compute_ice_shape_parameter(p3, qⁱ_safe, ℳ.nⁱ, ℳ.zⁱ,
+                                         rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
+    zⁱ_bounded = bound_ice_sixth_moment(p3, qⁱ_safe, ℳ.nⁱ, ℳ.zⁱ,
+                                         rime_state.Fᶠ, Fˡ, rime_state.ρᶠ, μ_ice)
+    @inbounds μ.ρz̃ⁱ[i, j, k] = ρ * sqrt(max(0, zⁱ_bounded * ℳ.nⁱ))
+    return P3MicrophysicalState(ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, ℳ.nʳ, ℳ.qⁱ, ℳ.nⁱ,
+                                 ℳ.qᶠ, ℳ.bᶠ, zⁱ_bounded, ℳ.qʷⁱ, ℳ.sˢᵃᵗ, ℳ.nᵃ, ℳ.w)
+end
+
 # GPU-compatible update_microphysical_fields! for P3.
 # Bypasses the generic extract_microphysical_prognostics which uses runtime Symbol
 # dispatch that GPU compilers cannot resolve. Instead, directly constructs
@@ -363,7 +389,8 @@ end
         # signature carries them. ℳ.w == 0 is acceptable in this auxiliary path
         # because downstream update_microphysical_auxiliaries! does not consume w.
         velocities = (u = ZeroField(), v = ZeroField(), w = ZeroField())
-        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
+        ℳ_raw = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
+        ℳ = clamp_ice_sixth_moment!(μ, i, j, k, p3, ρ, ℳ_raw)
         AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3, ℳ, ρ, 𝒰, constants)
     end
     return nothing
