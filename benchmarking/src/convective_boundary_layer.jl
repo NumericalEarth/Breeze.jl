@@ -154,7 +154,7 @@ function convective_boundary_layer(arch = CPU();
         ρu_bcs = FieldBoundaryConditions(bottom = ρu_drag_bc)
         ρv_bcs = FieldBoundaryConditions(bottom = ρv_drag_bc)
 
-        forcing = (; ρu = geostrophic.ρu, ρv = geostrophic.ρv)
+        forcing = (; u = geostrophic.u, v = geostrophic.v)
 
         model = AtmosphereModel(grid;
             dynamics,

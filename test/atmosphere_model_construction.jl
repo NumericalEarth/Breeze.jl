@@ -46,7 +46,7 @@ end
         forced_model = AtmosphereModel(grid; coriolis, forcing=geostrophic_forcings(uᵍ, vᵍ))
         shown_forced_model = sprint(show, forced_model)
 
-        @test occursin("forcing: ρu=>GeostrophicForcing, ρv=>GeostrophicForcing", shown_forced_model)
+        @test occursin("forcing: ρu=>SpecificForcing, ρv=>SpecificForcing", shown_forced_model)
     end
 
     @testset "Basic tests for set!" begin
@@ -55,7 +55,6 @@ end
     end
 
     @testset "NaN Checker" begin
-        @info "  Testing NaN Checker..."
         run_nan_checker_test(default_arch, erroring=true)
         run_nan_checker_test(default_arch, erroring=false)
     end

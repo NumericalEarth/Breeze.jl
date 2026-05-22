@@ -30,10 +30,24 @@ export
     CompressibleModel,
     AcousticSubstepper,
     SplitExplicitTimeDiscretization,
+    AcousticOuterScheme,
+    WickerSkamarock3,
+    stage_fractions,
+    AcousticSubstepDistribution,
+    ProportionalSubsteps,
+    MonolithicFirstStage,
+    AcousticDampingStrategy,
+    NoDivergenceDamping,
+    ThermalDivergenceDamping,
+    UpperSponge,
+    AbstractRamp,
+    LinearRamp,
+    CubicRamp,
+    Sin2Ramp,
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
-    acoustic_rk3_substep_loop!,
-    acoustic_substep_loop!
+    freeze_linearization_state!,
+    acoustic_rk3_substep_loop!
 
 using DocStringExtensions: TYPEDEF, TYPEDSIGNATURES
 using Adapt: Adapt, adapt
@@ -41,15 +55,16 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, ZFaceField, prognostic_fields
 using Oceananigans.Grids: rnode, znode
-using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
+using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
+                                ∂zᶜᶜᶜ, ∂zᶜᶜᶠ
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity, dry_air_gas_constant,
-                             ExnerReferenceState
+                             vapor_gas_constant, ExnerReferenceState
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density, standard_pressure, thermodynamic_density, specific_prognostic_moisture
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density, standard_pressure, thermodynamic_density, thermodynamic_density_name, specific_prognostic_moisture
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
 include("time_discretizations.jl")

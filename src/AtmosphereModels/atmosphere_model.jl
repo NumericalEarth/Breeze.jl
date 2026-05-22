@@ -230,8 +230,12 @@ function AtmosphereModel(grid;
 
     moisture_specific = moisture_specific_name(microphysics)
     specific_prognostic_moisture = microphysical_fields[moisture_specific]
-    model_fields = merge(prognostic_model_fields, velocities, microphysical_fields,
-                         (; T=temperature))
+    # Build `model_fields` with the same key order as Oceananigans.fields(model::AtmosphereModel)
+    # below. ContinuousForcing resolves `field_dependencies` to positional indices at
+    # materialize time and looks them up positionally at runtime; the two tuples must
+    # agree on ordering, or forcings will read the wrong field.
+    model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
+                         (; T=temperature), microphysical_fields)
     density = dynamics_density(dynamics)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, density,
@@ -287,7 +291,6 @@ end
 # Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
 _timestepper_uses_dynamics(::Val) = false
 _timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
-_timestepper_uses_dynamics(::Val{:AcousticSSPRungeKutta3}) = true
 _timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
 _timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
 
@@ -348,19 +351,20 @@ Advection.cell_advection_timescale(model::AtmosphereModel) = cell_advection_time
 
 # Prognostic field names from dynamics + thermodynamic formulation + microphysics + tracers
 function prognostic_field_names(dynamics, formulation, microphysics, tracer_names)
+    dynamics_names = prognostic_dynamics_field_names(dynamics)
     momentum_names = prognostic_momentum_field_names(dynamics)
     formulation_names = prognostic_thermodynamic_field_names(formulation)
     microphysical_names = prognostic_field_names(microphysics)
     moist_name = moisture_prognostic_name(microphysics)
-    return tuple(momentum_names..., moist_name, formulation_names..., microphysical_names..., tracer_names...)
+    return tuple(dynamics_names..., momentum_names..., formulation_names..., moist_name, microphysical_names..., tracer_names...)
 end
 
 function field_names(dynamics, formulation, microphysics, tracer_names)
     prog_names = prognostic_field_names(dynamics, formulation, microphysics, tracer_names)
     moist_specific = moisture_specific_name(microphysics)
-    default_additional_names = (:u, :v, :w, :T, moist_specific)
     formulation_additional_names = additional_thermodynamic_field_names(formulation)
-    return tuple(prog_names..., default_additional_names..., formulation_additional_names...)
+    default_additional_names = (:u, :v, :w, :T, moist_specific)
+    return tuple(prog_names..., formulation_additional_names..., default_additional_names...)
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
@@ -396,10 +400,17 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     forcing_names = keys(forcing_fields)
 
+    # Build a specific→density name map for any prognostic name that starts with `ρ`.
+    # For example, :ρθ contributes :θ => :ρθ. Users may supply forcings under either key,
+    # and the dispatch routes specific-keyed values through wrap_specific_forcing.
+    specific_to_density = NamedTuple(specific_to_density_pairs(forcing_names))
+    valid_specific_names = keys(specific_to_density)
+
     for name in user_forcing_names
-        if name ∉ forcing_names
+        if name ∉ forcing_names && name ∉ valid_specific_names
             msg = string("Invalid forcing: forcing contains an entry for $name, but $name is not a prognostic field!", '\n',
-                         "The forcing fields are ", forcing_names)
+                         "The forcing fields are ", forcing_names,
+                         "; specific-key aliases are ", valid_specific_names, '.')
             throw(ArgumentError(msg))
         end
     end
@@ -415,16 +426,84 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     forcing_context = (; coriolis, density, specific_fields)
 
     materialized = Tuple(
-        n in keys(user_forcings) ?
-            materialize_atmosphere_model_forcing(user_forcings[n], f, n, model_names, forcing_context) :
-            Returns(zero(eltype(f)))
-            for (n, f) in pairs(forcing_fields)
+        assemble_field_forcing(n, f, user_forcings, model_names, forcing_context)
+        for (n, f) in pairs(forcing_fields)
     )
 
     forcings = NamedTuple{forcing_names}(materialized)
 
     return forcings
 end
+
+# Assemble the materialized forcing for one prognostic field. Dispatch on the result of
+# `specific_name_of(prognostic_name)`: a `Symbol` is the specific alias of a ρ-prefixed
+# prognostic; `Nothing` means the prognostic name is already in specific form (e.g. a
+# user tracer like `:c`) and has no separate density alias.
+function assemble_field_forcing(prognostic_name, target_field, user_forcings, model_names, context)
+    return assemble_field_forcing(prognostic_name, specific_name_of(prognostic_name),
+                                  target_field, user_forcings, model_names, context)
+end
+
+# ρ-prefixed prognostic: combine any user-supplied ρ-keyed entry with any specific-keyed
+# entry on the same prognostic, wrapping the specific-keyed entry in SpecificForcing.
+function assemble_field_forcing(density_name, specific_name::Symbol, target_field,
+                                user_forcings, model_names, context)
+    raw_specific_forcing = get(user_forcings, specific_name, nothing)
+    wrapped_specific_forcing = wrap_specific_forcing(raw_specific_forcing, density_name)
+    raw_density_forcing = get(user_forcings, density_name, nothing)
+    combined = combine_forcing_values(raw_density_forcing, wrapped_specific_forcing)
+    return materialize_or_default(combined, target_field, density_name, model_names, context)
+end
+
+# Unprefixed prognostic (a user tracer like `:c`): the prognostic name *is* in specific
+# form, so any forcing supplied under that name is a specific tendency and gets wrapped
+# in SpecificForcing — the ρ factor is then applied at kernel time, matching the
+# convention used for ρ-prefixed prognostics' specific aliases.
+function assemble_field_forcing(tracer_name, ::Nothing, target_field,
+                                user_forcings, model_names, context)
+    raw_forcing = get(user_forcings, tracer_name, nothing)
+    wrapped_forcing = wrap_specific_forcing(raw_forcing, tracer_name)
+    return materialize_or_default(wrapped_forcing, target_field, tracer_name, model_names, context)
+end
+
+# Strip the `ρ` prefix from a density-weighted prognostic name; returns `nothing` for
+# any name that is not ρ-prefixed.
+function specific_name_of(density_name)
+    s = string(density_name)
+    return startswith(s, "ρ") ? Symbol(s[nextind(s, 1):end]) : nothing
+end
+
+# Default forcing for fields the user did not supply: a Returns that yields zero at every
+# grid point. Dispatch on Nothing keeps the assemble path branch-free.
+materialize_or_default(::Nothing, target_field, density_name, model_names, context) =
+    Returns(zero(target_field.grid))
+
+materialize_or_default(forcing, target_field, density_name, model_names, context) =
+    materialize_atmosphere_model_forcing(forcing, target_field, density_name, model_names, context)
+
+# Build (specific_name => density_name) pairs from a tuple of prognostic ρ-names.
+function specific_to_density_pairs(forcing_names)
+    pairs = Pair{Symbol, Symbol}[]
+    for name in forcing_names
+        specific_name = specific_name_of(name)
+        isnothing(specific_name) || push!(pairs, specific_name => name)
+    end
+    return Tuple(pairs)
+end
+
+# Combine a density-keyed forcing value with the specific-keyed forcing value supplied
+# for the same prognostic. `nothing` denotes "user did not supply this side". The two
+# sides are flattened into a single tuple so the existing tuple-materialization path
+# wraps them in MultipleForcings.
+combine_forcing_values(::Nothing, ::Nothing) = nothing
+combine_forcing_values(a::Tuple, ::Nothing) = a
+combine_forcing_values(::Nothing, b::Tuple) = b
+combine_forcing_values(a, ::Nothing) = a
+combine_forcing_values(::Nothing, b) = b
+combine_forcing_values(a::Tuple, b::Tuple) = (a..., b...)
+combine_forcing_values(a::Tuple, b) = (a..., b)
+combine_forcing_values(a, b::Tuple) = (a, b...)
+combine_forcing_values(a, b) = (a, b)
 
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)

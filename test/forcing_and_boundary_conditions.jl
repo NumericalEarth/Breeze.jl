@@ -6,6 +6,7 @@ using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 using Oceananigans.Fields: location
+using Oceananigans.TimeSteppers: compute_flux_bc_tendencies!, update_state!
 using Test
 
 function setup_forcing_model(grid, forcing)
@@ -50,14 +51,80 @@ increment_tolerance(::Type{Float64}) = 1e-10
     end
 
     @testset "Forcing on non-existing field errors" begin
-        bad = (; u=forcings[1])
+        # `:u` is the specific alias of `:ρu`, so it's a valid key. Use a name that is
+        # neither a prognostic ρ-name nor a known specific alias.
+        bad = (; bogus=forcings[1])
         @test_throws ArgumentError AtmosphereModel(grid; forcing=bad)
     end
+end
+
+@testset "Forcing field_dependencies resolve consistently at materialize and runtime [$FT]" for FT in test_float_types()
+    # ContinuousForcing resolves `field_dependencies` to positional indices into the
+    # materialize-time `model_fields`, then dereferences those positions against the
+    # runtime `fields(model)` tuple. The two orderings must agree, or a forcing reads
+    # the wrong field. This test catches the order drift via a forcing that returns
+    # its `:u` dependency: under a misaligned ordering Gρθ would equal `θ` instead.
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    @inline u_dep(x, y, z, t, u) = u
+    u_forcing = Forcing(u_dep, field_dependencies=(:u,))
+    model = AtmosphereModel(grid; forcing=(; ρθ=u_forcing))
+
+    θ₀ = model.dynamics.reference_state.potential_temperature
+    u_value = 13
+    set!(model; θ=θ₀, u=u_value)
+    update_state!(model)
+
+    Gρθ = interior(model.timestepper.Gⁿ.ρθ) |> Array
+    @test all(isapprox.(Gρθ, u_value))
 end
 
 #####
 ##### Bulk boundary condition tests
 #####
+
+@testset "Boundary-condition field dependencies align with model fields [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch;
+                           size = (8, 8, 8), halo = (5, 5, 5),
+                           x = (0, 1), y = (0, 1), z = (0, 1),
+                           topology = (Periodic, Periodic, Bounded))
+
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 2,
+                                                                    damping = NoDivergenceDamping());
+                                    reference_potential_temperature = FT(300),
+                                    surface_pressure = FT(1e5),
+                                    standard_pressure = FT(1e5))
+
+    @inline first_dependency(x, y, t, a, b, p) = a
+    @inline second_dependency(x, y, t, a, b, p) = b
+
+    function bottom_flux_tendency(dependencies, dependency_index)
+        condition = dependency_index == 1 ? first_dependency : second_dependency
+        ρv_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(condition,
+                                                                        field_dependencies = dependencies,
+                                                                        parameters = (;)))
+        model = AtmosphereModel(grid; dynamics,
+                                      boundary_conditions = (; ρv = ρv_bcs),
+                                      timestepper = :AcousticRungeKutta3)
+
+        set!(model, ρ = (x, y, z) -> FT(1),
+                    θ = (x, y, z) -> FT(300),
+                    u = (x, y, z) -> FT(-8.75),
+                    v = (x, y, z) -> FT(0))
+        update_state!(model; compute_tendencies = false)
+        fill!(parent(model.timestepper.Gⁿ.ρv), 0)
+        compute_flux_bc_tendencies!(model)
+        return Array(interior(model.timestepper.Gⁿ.ρv, :, :, 1))
+    end
+
+    Δz = FT(1 / 8)
+    @test all(bottom_flux_tendency((:u, :v), 1) .≈ FT(-8.75) / Δz)
+    @test all(bottom_flux_tendency((:u, :v), 2) .== 0)
+    @test all(bottom_flux_tendency((:ρu, :ρv), 1) .≈ FT(-8.75) / Δz)
+    @test all(bottom_flux_tendency((:ρu, :ρv), 2) .== 0)
+end
 
 @testset "Bulk boundary conditions [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
