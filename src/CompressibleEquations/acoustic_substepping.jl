@@ -938,8 +938,7 @@ end
                                                      Gˢρ, Gˢρθ, Gˢρw,
                                                      θᴸ, Πᴸ,
                                                      γRᵐᴸ, g, dˢ⁻, sponge)
-    i, j = @index(Global, NTuple)
-    Nz = size(grid, 3)
+    i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         # Cell-centred predictors `ρ′★`, `ρθ′★`.
