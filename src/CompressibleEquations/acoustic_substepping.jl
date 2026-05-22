@@ -1090,6 +1090,8 @@ end
 
 @inline dρθ′(i, j, k, grid, ρθ′, ρθ′ˢ⁻) = @inbounds ρθ′[i, j, k] - ρθ′ˢ⁻[i, j, k]
 
+struct NoHorizontalDampingScale end
+
 struct LocalHorizontalDampingScale{FT}
     coefficient_over_Δτ :: FT
 end
@@ -1105,6 +1107,9 @@ end
     ℓ = convert(typeof(α), damping.length_scale)
     return FixedHorizontalDampingScale(α * ℓ^2 / Δτ)
 end
+
+@inline x_damping_diffusivity(i, j, k, grid, ::NoHorizontalDampingScale) = zero(grid)
+@inline y_damping_diffusivity(i, j, k, grid, ::NoHorizontalDampingScale) = zero(grid)
 
 @inline x_damping_diffusivity(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
 @inline y_damping_diffusivity(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
