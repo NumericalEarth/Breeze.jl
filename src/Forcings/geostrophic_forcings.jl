@@ -87,11 +87,11 @@ end
 $(TYPEDSIGNATURES)
 
 Create a pair of geostrophic forcings for the x- and y-momentum equations,
-keyed under specific names `u` and `v`. Each [`GeostrophicForcing`](@ref)
-returns a specific tendency; the model's density factor `ρ` is applied
-automatically via [`SpecificForcing`](@ref) when the forcing is dispatched
-under a specific key, with the correct horizontal interpolation of ρ to
-the appropriate cell face.
+keyed under specific names `u` and `v`. Each `GeostrophicForcing` returns a
+specific tendency; the model's density factor `ρ` is applied automatically via
+[`SpecificForcing`](@ref Breeze.Forcings.SpecificForcing) when the forcing is
+dispatched under a specific key, with the correct horizontal interpolation of
+ρ to the appropriate cell face.
 
 The Coriolis parameter is extracted from the model's `coriolis` during
 model construction.

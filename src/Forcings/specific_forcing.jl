@@ -40,9 +40,9 @@ automatically. The wrapper can also be constructed directly when finer control i
 
 The inner `forcing` can be anything accepted by Breeze's
 `materialize_atmosphere_model_forcing`: a function `(x, y, z, t)`, a `Returns`
-callable, a `Field`, an `Oceananigans.Forcing`, a Breeze forcing type like
-[`SubsidenceForcing`](@ref Breeze.Forcings.SubsidenceForcing) or
-[`GeostrophicForcing`](@ref Breeze.Forcings.GeostrophicForcing), or a tuple of these.
+callable, a `Field`, an `Oceananigans.Forcing`, a Breeze forcing such as
+[`SubsidenceForcing`](@ref Breeze.Forcings.SubsidenceForcing) or one produced by
+[`geostrophic_forcings`](@ref Breeze.Forcings.geostrophic_forcings), or a tuple of these.
 """
 SpecificForcing(forcing) = SpecificForcing(forcing, nothing, nothing)
 
