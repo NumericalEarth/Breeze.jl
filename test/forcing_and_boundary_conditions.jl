@@ -51,9 +51,33 @@ increment_tolerance(::Type{Float64}) = 1e-10
     end
 
     @testset "Forcing on non-existing field errors" begin
-        bad = (; u=forcings[1])
+        # `:u` is the specific alias of `:ρu`, so it's a valid key. Use a name that is
+        # neither a prognostic ρ-name nor a known specific alias.
+        bad = (; bogus=forcings[1])
         @test_throws ArgumentError AtmosphereModel(grid; forcing=bad)
     end
+end
+
+@testset "Forcing field_dependencies resolve consistently at materialize and runtime [$FT]" for FT in test_float_types()
+    # ContinuousForcing resolves `field_dependencies` to positional indices into the
+    # materialize-time `model_fields`, then dereferences those positions against the
+    # runtime `fields(model)` tuple. The two orderings must agree, or a forcing reads
+    # the wrong field. This test catches the order drift via a forcing that returns
+    # its `:u` dependency: under a misaligned ordering Gρθ would equal `θ` instead.
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    @inline u_dep(x, y, z, t, u) = u
+    u_forcing = Forcing(u_dep, field_dependencies=(:u,))
+    model = AtmosphereModel(grid; forcing=(; ρθ=u_forcing))
+
+    θ₀ = model.dynamics.reference_state.potential_temperature
+    u_value = 13
+    set!(model; θ=θ₀, u=u_value)
+    update_state!(model)
+
+    Gρθ = interior(model.timestepper.Gⁿ.ρθ) |> Array
+    @test all(isapprox.(Gρθ, u_value))
 end
 
 #####

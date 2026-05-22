@@ -3,7 +3,8 @@ module Forcings
 export
     geostrophic_forcings,
     SubsidenceForcing,
-    GeostrophicForcing
+    GeostrophicForcing,
+    SpecificForcing
 
 using DocStringExtensions: TYPEDSIGNATURES
 
@@ -11,10 +12,12 @@ using Oceananigans: Average, Field, set!, compute!
 using Oceananigans.Grids: Center, Face
 using Oceananigans.Forcings: materialize_forcing, MultipleForcings
 
-using ..AtmosphereModels: AtmosphereModels, materialize_atmosphere_model_forcing, compute_forcing!
+using ..AtmosphereModels: AtmosphereModels, materialize_atmosphere_model_forcing,
+                          compute_forcing!, is_density_tendency_forcing, wrap_specific_forcing
 
 include("geostrophic_forcings.jl")
 include("subsidence_forcing.jl")
+include("specific_forcing.jl")
 
 #####
 ##### Extension of materialize_forcing with context argument
@@ -37,6 +40,32 @@ function AtmosphereModels.compute_forcing!(mf::MultipleForcings)
         compute_forcing!(forcing)
     end
     return nothing
+end
+
+#####
+##### Specific-key wrapping: build a SpecificForcing for a user value supplied under a
+##### specific name (`θ`, `u`, ...). Tuples recurse; user-defined density-tendency
+##### forcings (i.e., those whose kernels already include the ρ factor) error to
+##### prevent double-counting. Breeze's own SubsidenceForcing and GeostrophicForcing
+##### return specific tendencies and so are accepted here directly.
+#####
+
+AtmosphereModels.wrap_specific_forcing(::Nothing, density_name) = nothing
+
+function AtmosphereModels.wrap_specific_forcing(value, density_name)
+    if is_density_tendency_forcing(value)
+        msg = string("Forcing of type ", nameof(typeof(value)),
+                     " produces a density-weighted tendency F_{ρϕ}; ",
+                     "supply it under the density-weighted key `", density_name,
+                     "` rather than its specific counterpart. ",
+                     "Auto-wrapping it in SpecificForcing would multiply by ρ a second time.")
+        throw(ArgumentError(msg))
+    end
+    return SpecificForcing(value)
+end
+
+function AtmosphereModels.wrap_specific_forcing(values::Tuple, density_name)
+    return map(v -> wrap_specific_forcing(v, density_name), values)
 end
 
 end
