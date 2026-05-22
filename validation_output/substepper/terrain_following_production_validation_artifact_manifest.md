@@ -27,7 +27,7 @@ julia --project=. --color=no validation_output/substepper/terrain_following_prod
 Latest result:
 
 ```text
-production validation gate: pass=16 present=21 fail=21 missing=0 blocked=5
+production validation gate: pass=16 present=23 fail=23 missing=0 blocked=5
 ```
 
 Smoke and diagnostic artifacts are excluded from completion. Rows marked
@@ -187,25 +187,59 @@ direct fields as validation evidence; the smoke artifacts remain diagnostic.
   `validation_output/substepper/run_schar_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid.batch`
 - Run log:
   `validation_output/substepper/schar_sub_dt0p35_grid_nodamp_nosponge-1089.log`
-- Backend/machine: Breeze GPU production run on `gpu-dev`.
+- Current-branch refresh log:
+  `validation_output/substepper/schar_sub_dt0p35_grid_nodamp_nosponge-1133.log`
+- Backend/machine: Breeze GPU production run on `gpu-dev`; current-branch
+  refresh on `gpu-prod`.
 - Grid/runtime: `Nx = 400`, `Nz = 200`, `dt = 0.35 s`, `6 h`.
 - Metrics:
-  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_metrics.csv`
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/terrain_schar_mountain_wave_metrics.csv`
 - Summary:
-  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_summary.txt`
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/terrain_schar_mountain_wave_summary.txt`
 - State slice:
-  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_state_slice.csv`
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/terrain_schar_mountain_wave_state_slice.csv`
 - Time series:
-  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_energy_timeseries.csv`
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/terrain_schar_mountain_wave_energy_timeseries.csv`
 - Tier-1 comparison metrics:
-  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_state_metrics.csv`
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/schar_substepper_vs_explicit_state_metrics.csv`
 - Tier-1 comparison summary:
-  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_summary.txt`
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/schar_substepper_vs_explicit_summary.txt`
 - Status: `fail` for 1% Tier-1 accuracy. Coordinate parity is exact, but
   below-sponge `w_relative_linf_error = 0.0745803850`,
   `w_relative_l2_error = 0.1232164948`, `w_normalized_rmse = 0.0159684898`,
   pressure relative L2 is `0.6617009969`, and mountain-drag relative error is
   `0.4057695816`.
+
+### Breeze Acoustic Substepper Previous-Horizontal-Divergence Discriminator
+
+- Artifact class: `production_validation`.
+- Purpose: production-length Schär Tier-1 discriminator for the short-window
+  previous-horizontal-divergence timing candidate.
+- Command source:
+  `validation_output/substepper/run_schar_400x200_substepper_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid.batch`
+- Run log:
+  `validation_output/substepper/schar_prev_hdiv_dt035-1185.log`
+- Backend/machine: Breeze GPU production run on `gpu-dev-st-gpu-dev-1`.
+- Grid/runtime: `Nx = 400`, `Nz = 200`, `dt = 0.35 s`, `6 h`.
+- Timing: `SCHAR_HORIZONTAL_DIVERGENCE_TIMING=previous`.
+- Metrics:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_metrics.csv`
+- Summary:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_summary.txt`
+- State slice:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_state_slice.csv`
+- Time series:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid/terrain_schar_mountain_wave_energy_timeseries.csv`
+- Tier-1 comparison metrics:
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_state_metrics.csv`
+- Tier-1 comparison summary:
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_summary.txt`
+- Status: `fail` for 1% Tier-1 accuracy. Coordinate parity is exact, but
+  below-sponge `w_relative_linf_error = 0.0745803849951862`,
+  `w_relative_l2_error = 0.12321649479541662`,
+  `w_normalized_rmse = 0.01596848982068666`, pressure relative L2 is
+  `0.6617009969440094`, and mountain-drag relative error is
+  `0.4057695816151736`.
 
 ### Breeze Low-Amplitude Linear Mountain Wave
 
@@ -733,6 +767,145 @@ direct fields as validation evidence; the smoke artifacts remain diagnostic.
   on the existing Askervein plot for the idealized LES artifact and requires a
   future production LES movie or plot sequence from coordinate-faithful output.
 
+### Pressure-Gradient Askervein Diagnostics
+
+- Artifact class: `diagnostic`.
+- Reason excluded from completion: these runs probe the forcing/stability
+  envelope for a coordinate-faithful Askervein LES, but they do not yet define
+  an accepted production spin-up, averaging window, reference-comparison path,
+  or explicit-feasible production window.
+- Script:
+  `validation_output/substepper/askervein_neutral_les_case.jl`
+- Completed high bracket command source:
+  `validation_output/substepper/run_askervein_pressure_gradient_bracket_gpu.batch`
+- Completed high bracket artifacts:
+  - `validation_output/substepper/askervein_pressure_gradient_bracket_cuda_192x192x64_300s_a0p04/`
+  - `validation_output/substepper/askervein_pressure_gradient_bracket_cuda_192x192x64_300s_a0p06/`
+  - `validation_output/substepper/askervein_pressure_gradient_bracket_cuda_192x192x64_300s_a0p08/`
+- Completed high bracket status: fail/diagnostic only. Accelerations `0.04`,
+  `0.06`, and `0.08 m s^-2` all produced `NaN` model RS mast speed and `NaN`
+  maximum fractional-speed-up error at `192 x 192 x 64`, `300 s`.
+- Completed lower-bracket point:
+  `validation_output/substepper/askervein_pressure_gradient_low_bracket_cuda_192x192x64_300s_a0p025/`
+- Completed lower-bracket point status: fail/diagnostic only.
+  `a = 0.025 m s^-2` also produced `NaN` model RS mast speed and `NaN`
+  maximum fractional-speed-up error with `19` samples over `300 s`.
+- Completed lower-bracket point:
+  `validation_output/substepper/askervein_pressure_gradient_low_bracket_cuda_192x192x64_300s_a0p03/`
+- Completed lower-bracket point status: fail/diagnostic only.
+  `a = 0.03 m s^-2` also produced `NaN` model RS mast speed and `NaN`
+  maximum fractional-speed-up error with `19` samples over `300 s`.
+- Completed lower-bracket point:
+  `validation_output/substepper/askervein_pressure_gradient_low_bracket_cuda_192x192x64_300s_a0p035/`
+- Completed lower-bracket point status: fail/diagnostic only.
+  `a = 0.035 m s^-2` also produced `NaN` model RS mast speed and `NaN`
+  maximum fractional-speed-up error with `19` samples over `300 s`.
+- Active lower bracket command source:
+  `validation_output/substepper/run_askervein_pressure_gradient_low_bracket_gpu.batch`
+- Active long finite-response command source:
+  `validation_output/substepper/run_askervein_pressure_gradient_finite_long_gpu_prod.batch`
+- Completed long finite-response point:
+  `validation_output/substepper/askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p02/`
+- Completed long finite-response status: fail/diagnostic only.
+  The uncapped `a = 0.02 m s^-2` attempt at `256 x 256 x 96`, `2400 s`,
+  wrote `24` full-size `w_tilde_xz` frames but still produced `NaN` model RS
+  mast speed and `NaN` maximum fractional-speed-up error after `26` samples.
+- Capped long finite-response retry command source:
+  `validation_output/substepper/run_askervein_pressure_gradient_finite_long_gpu_prod.batch`
+- Completed capped long finite-response point:
+  `validation_output/substepper/askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p02/`
+- Completed capped long finite-response status: fail/diagnostic only.
+  Job `1165` completed the capped `a = 0.02 m s^-2` point at
+  `256 x 256 x 96`, `2400 s`, after adding `ASKER_CASE_MAX_DT=0.05`,
+  `ASKER_CASE_DT_UPDATE_INTERVAL=10`, and `ASKER_CASE_SLICE_LIMIT=0.75`.
+  It wrote `121` full-size `w_tilde_xz` frames and finite mast metrics
+  (`reference_speed_model = 2.256985683648537`,
+  `max_abs_fsr_error = 6.555834500603011`, `samples = 220`,
+  `average_seconds = 2201.512515079789`), proving the cap fixes the long
+  NaN-mast failure mode but does not produce an accepted reference comparison.
+- Completed capped long finite-response point:
+  `validation_output/substepper/askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p025/`
+- Completed capped long finite-response status:
+  fail/diagnostic only. Job `1165` completed the capped
+  `a = 0.025 m s^-2` point at `256 x 256 x 96`, `2400 s`. It wrote `121`
+  full-size `w_tilde_xz` frames and finite mast metrics
+  (`reference_speed_model = 2.5369400008976233`,
+  `max_abs_fsr_error = 6.69566015642208`, `samples = 220`,
+  `average_seconds = 2201.512515079789`), but the reference comparison is
+  still far outside acceptance.
+- Completed capped long finite-response point:
+  `validation_output/substepper/askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p100/`
+- Completed capped long finite-response status:
+  fail/diagnostic only. Job `1186` ran on `gpu-prod-st-gpu-prod-1` and tested
+  `a = 0.10 m s^-2` at `256 x 256 x 96`, `2400 s`, with
+  `ASKER_CASE_MAX_DT=0.05`. It wrote `121` full-size `w_tilde_xz` frames and
+  finite mast metrics (`reference_speed_model = 5.253831533722133`,
+  `max_abs_fsr_error = 10.139617785288996`, `max_abs_tke_error =
+  733.4619859674443`, `samples = 220`, `average_seconds =
+  2201.512515079789`), showing that higher PG improves one RS speed but
+  worsens the production-resolution mast field.
+- Short capped low-grid retry command source:
+  `validation_output/substepper/run_askervein_pressure_gradient_capped_low_gpu_dev.batch`
+- Completed short capped low-grid retry:
+  `validation_output/substepper/askervein_pressure_gradient_capped_low_cuda_192x192x64_300s_a0p02/`
+- Completed short capped low-grid retry status:
+  fail/diagnostic only. Job `1166` completed `a = 0.02 m s^-2` at
+  `192 x 192 x 64`, `300 s`, with `ASKER_CASE_MAX_DT=0.05`. It produced
+  finite mast metrics (`reference_speed_model = 4.643822590370479`,
+  `max_abs_fsr_error = 1.409831851518315`, `samples = 118`) but remains
+  inaccurate and not accepted validation. The planned `a = 0.025 m s^-2`
+  second leg was cancelled after this summary because job `1169` already
+  completed the same capped configuration.
+- Completed parallel single-leg capped low-grid retry:
+  `validation_output/substepper/askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p025/`
+- Completed parallel single-leg capped low-grid retry status:
+  fail/diagnostic only. Job `1169` ran on `gpu-prod-st-gpu-prod-2` and tested
+  only `a = 0.025 m s^-2` at `192 x 192 x 64`, `300 s`, with
+  `ASKER_CASE_MAX_DT=0.05`. It produced finite mast metrics
+  (`reference_speed_model = 4.935863244558616`,
+  `max_abs_fsr_error = 1.4516840207284545`, `samples = 118`), proving the
+  cap fixes the low-grid NaN-mast failure mode for this point, but it is still
+  not accepted validation (`production_validation = false`,
+  `production_average = false`, fringe forcing). Job `1168` was an equivalent
+  dynamic-`gpu-dev` submission but was cancelled after staying in
+  `CONFIGURING` with no log output.
+- Completed capped `a = 0.045 m s^-2` low-grid retry:
+  `validation_output/substepper/askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p045/`
+- Completed capped `a = 0.045 m s^-2` low-grid retry status:
+  fail/diagnostic only. Job `1172` ran on `gpu-prod-st-gpu-prod-2` at
+  `192 x 192 x 64`, `300 s`, with `ASKER_CASE_MAX_DT=0.05`. It stayed finite
+  (`reference_speed_model = 5.989918904395469`,
+  `max_abs_fsr_error = 1.5342592003584854`, `samples = 118`) but remains far
+  outside the reference-comparison target and is not accepted validation.
+- Completed capped `a = 0.10 m s^-2` low-grid retry:
+  `validation_output/substepper/askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p100/`
+- Completed capped `a = 0.10 m s^-2` low-grid retry status:
+  fail/diagnostic only. Job `1174` ran on `gpu-prod-st-gpu-prod-2` at
+  `192 x 192 x 64`, `300 s`, with `ASKER_CASE_MAX_DT=0.05`. It nearly matches
+  the single RS reference speed (`reference_speed_model = 8.30920752092283`
+  versus `reference_speed_observed = 8.895`) but still has order-one spatial
+  errors (`max_abs_fsr_error = 1.3397411630772242`,
+  `max_abs_tke_error = 125.94100845453049`) and is not accepted validation.
+- Failed long finite-response attempt: job `1159` failed in diagnostic
+  movie-frame writing before metrics were emitted because a non-finite slice
+  value reached `UInt8(NaN)`.
+- Diagnostic script patch: `color_triplet` now maps non-finite values to
+  magenta, and frame color limits ignore non-finite values.
+- Diagnostic status as of `2026-05-22T07:25Z`: lower bracket job `1158`
+  completed on `gpu-dev`; all lower-bracket points from `0.025` to
+  `0.035 m s^-2` have non-finite mast metrics. Uncapped long finite-response
+  job `1164` completed the `0.02 m s^-2` point with non-finite mast metrics
+  and was cancelled before finishing `0.025 m s^-2`. Capped long retry `1165`
+  completed the `0.02 m s^-2` point with finite but underdriven diagnostic
+  mast/reference metrics. Capped long retry `1165` also completed the
+  `0.025 m s^-2` point with finite but still inaccurate diagnostic
+  mast/reference metrics. Capped low-grid retry `1166` (`a = 0.02`) and
+  single-leg capped retries `1169` (`a = 0.025`), `1172` (`a = 0.045`), and
+  `1174` (`a = 0.10`) completed with finite but inaccurate diagnostic
+  mast/reference metrics. Long capped retry `1186` (`a = 0.10`) also completed
+  with finite but worse diagnostic mast/reference metrics. No accepted
+  pressure-gradient validation metrics are recorded yet.
+
 ### WEMEP Reference Data
 
 - Source: https://wemep.readthedocs.io/en/latest/windconditions/benchmarks/askervein.html
@@ -792,7 +965,11 @@ observational reference.
 Current status:
 
 - Schar: manifest coverage is complete for the production artifacts and the
-  field-snapshot movie rerun. Older CPU production runs are tied to the global
+  field-snapshot movie rerun. The latest field-snapshot movie refresh is job
+  `1163`, completed on `gpu-prod` at `2026-05-22T02:02Z` in
+  `validation_output/substepper/terrain_schar_fine_6h_movie_gpu/`, with
+  `400 x 200`, `6 h`, `dt = 2 s`, `nan_count = 0`, `inf_count = 0`, and
+  `38` raw `w` snapshots. Older CPU production runs are tied to the global
   artifact commit and command-source batch files rather than per-run inline
   command strings.
 - Complex mountain: manifest coverage is complete for the completed production

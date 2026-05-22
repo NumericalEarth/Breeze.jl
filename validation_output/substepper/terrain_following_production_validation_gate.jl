@@ -1333,6 +1333,73 @@ function askervein_metrics_pass(path)
                table.rows)
 end
 
+function metric_value(path, key)
+    table = read_metrics_csv(path)
+    isnothing(table) && return "missing"
+
+    index = findfirst(row -> get(row, "metric", "") == key, table.rows)
+    isnothing(index) && return "missing"
+    return get(table.rows[index], "value", "missing")
+end
+
+function metric_float_value(path, key)
+    value = metric_value(path, key)
+    value == "missing" && return NaN
+    return parse(Float64, value)
+end
+
+function all_pressure_gradient_metrics_finite(paths)
+    all(isfile, paths) || return false
+
+    required_keys = (
+        "pressure_gradient_acceleration",
+        "reference_speed_model",
+        "max_abs_fsr_error",
+        "max_abs_tke_error",
+        "dt_mean_observed",
+    )
+
+    return all(paths) do path
+        all(key -> isfinite(metric_float_value(path, key)), required_keys)
+    end
+end
+
+function pressure_gradient_evidence(paths)
+    entries = String[]
+
+    for path in paths
+        if !isfile(path)
+            push!(entries, "$path: missing")
+            continue
+        end
+
+        push!(entries,
+              "$path: " *
+              "a=$(metric_value(path, "pressure_gradient_acceleration")); " *
+              "production_validation=$(metric_value(path, "production_validation")); " *
+              "production_average=$(metric_value(path, "production_average")); " *
+              "steps=$(metric_value(path, "steps")); " *
+              "samples=$(metric_value(path, "samples")); " *
+              "dt_mean=$(metric_value(path, "dt_mean_observed")); " *
+              "reference_speed_model=$(metric_value(path, "reference_speed_model")); " *
+              "max_abs_fsr_error=$(metric_value(path, "max_abs_fsr_error")); " *
+              "max_abs_tke_error=$(metric_value(path, "max_abs_tke_error"))")
+    end
+
+    return join(entries, "; ")
+end
+
+function pressure_gradient_acceptance_pass(paths)
+    all_pressure_gradient_metrics_finite(paths) || return false
+
+    return all(paths) do path
+        parse_bool(metric_value(path, "production_validation")) &&
+        parse_bool(metric_value(path, "production_average")) &&
+        metric_float_value(path, "max_abs_fsr_error") <= ONE_PERCENT &&
+        metric_float_value(path, "max_abs_tke_error") <= ONE_PERCENT
+    end
+end
+
 function complex_comparison_pass(metrics_path, summary_path)
     table = read_metrics_csv(metrics_path)
     isnothing(table) && return false
@@ -1502,13 +1569,26 @@ function build_checks()
                         tier1_discriminator_evidence(schar_no_damping_no_sponge_discriminator)))
 
     schar_matched_dt_discriminator =
-        joinpath(ROOT, "schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid",
-                 "schar_substepper_vs_explicit_state_metrics.csv")
+        first_existing([
+            joinpath(ROOT, "schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133",
+                     "schar_substepper_vs_explicit_state_metrics.csv"),
+            joinpath(ROOT, "schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid",
+                     "schar_substepper_vs_explicit_state_metrics.csv"),
+        ])
     push!(checks, Check("Schär",
                         "Matched outer-dt no-damping/no-upper-sponge production discriminator satisfies coordinate-matched 1% Tier-1 gates",
                         !isfile(schar_matched_dt_discriminator) ? "missing" :
                         tier1_discriminator_pass(schar_matched_dt_discriminator) ? "pass" : "fail",
                         tier1_discriminator_evidence(schar_matched_dt_discriminator)))
+
+    schar_previous_hdiv_discriminator =
+        joinpath(ROOT, "schar_substepper_vs_explicit_tier1_6h_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid",
+                 "schar_substepper_vs_explicit_state_metrics.csv")
+    push!(checks, Check("Schär",
+                        "Previous-horizontal-divergence matched-dt production discriminator satisfies coordinate-matched 1% Tier-1 gates",
+                        !isfile(schar_previous_hdiv_discriminator) ? "missing" :
+                        tier1_discriminator_pass(schar_previous_hdiv_discriminator) ? "pass" : "fail",
+                        tier1_discriminator_evidence(schar_previous_hdiv_discriminator)))
 
     linear_substepper_metrics =
         joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu",
@@ -1998,10 +2078,58 @@ function build_checks()
                         status_from_files(askervein_wemep_reference) == "pass" ? "present" : "missing",
                         file_evidence(askervein_wemep_reference)))
 
+    askervein_low_pressure_gradient_metrics = [
+        joinpath(ROOT, "askervein_pressure_gradient_capped_low_cuda_192x192x64_300s_a0p02",
+                 "askervein_neutral_les_metrics.csv"),
+        joinpath(ROOT, "askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p025",
+                 "askervein_neutral_les_metrics.csv"),
+        joinpath(ROOT, "askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p045",
+                 "askervein_neutral_les_metrics.csv"),
+        joinpath(ROOT, "askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p100",
+                 "askervein_neutral_les_metrics.csv"),
+    ]
+    askervein_low_pressure_gradient_status =
+        all_pressure_gradient_metrics_finite(askervein_low_pressure_gradient_metrics) ?
+        "present" : "missing"
+    push!(checks, Check("Askervein",
+                        "Diagnostic capped pressure-gradient low-grid bracket has finite metrics",
+                        askervein_low_pressure_gradient_status,
+                        pressure_gradient_evidence(askervein_low_pressure_gradient_metrics)))
+
+    askervein_long_pressure_gradient_metrics = [
+        joinpath(ROOT, "askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p02",
+                 "askervein_neutral_les_metrics.csv"),
+        joinpath(ROOT, "askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p025",
+                 "askervein_neutral_les_metrics.csv"),
+        joinpath(ROOT, "askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p100",
+                 "askervein_neutral_les_metrics.csv"),
+    ]
+    askervein_long_pressure_gradient_status =
+        all_pressure_gradient_metrics_finite(askervein_long_pressure_gradient_metrics) ?
+        "present" : "missing"
+    push!(checks, Check("Askervein",
+                        "Diagnostic capped pressure-gradient long-window bracket has finite metrics",
+                        askervein_long_pressure_gradient_status,
+                        pressure_gradient_evidence(askervein_long_pressure_gradient_metrics)))
+
+    askervein_pressure_gradient_acceptance_paths =
+        vcat(askervein_low_pressure_gradient_metrics,
+             askervein_long_pressure_gradient_metrics)
+    askervein_pressure_gradient_acceptance_status =
+        !all_pressure_gradient_metrics_finite(askervein_pressure_gradient_acceptance_paths) ?
+        "missing" :
+        pressure_gradient_acceptance_pass(askervein_pressure_gradient_acceptance_paths) ?
+        "pass" : "fail"
+    push!(checks, Check("Askervein",
+                        "Pressure-gradient forcing recovers accepted Askervein mast/transect validation",
+                        askervein_pressure_gradient_acceptance_status,
+                        pressure_gradient_evidence(askervein_pressure_gradient_acceptance_paths) *
+                        "; low-grid a=0.10 nearly matches the RS mast speed but keeps order-one spatial FSR/TKE errors; long 256x256x96 points remain diagnostic artifacts, and long a=0.10 worsens spatial FSR/TKE errors despite increasing RS speed"))
+
     push!(checks, Check("Askervein",
                         "Production grid, explicit stable window, spin-up, averaging window, and accepted reference are specified",
                         "blocked",
-                        "local ERF Askervein setup is available at /shared/home/greg/ERF/Exec/CanonicalTests/Real_Terrain/Askervein; WEMEP reference files, named-mast diagnostic comparison, askervein_coordinate_faithful_production_manifest.md, and diagnostic ERF-terrain/WEMEP-mast plumbing smokes including 96x72x32 LES and GPU explicit-vs-substepper brackets are present; strict 1% pass holds through 1.2 s and fails by 1.25 s due to w_tilde relative_linf; production boundary conditions, declared spin-up/averaging, runtime, and accepted explicit-feasible window remain unresolved"))
+                        "local ERF Askervein setup is available at /shared/home/greg/ERF/Exec/CanonicalTests/Real_Terrain/Askervein; WEMEP reference files, named-mast diagnostic comparison, askervein_coordinate_faithful_production_manifest.md, and diagnostic ERF-terrain/WEMEP-mast plumbing smokes including 96x72x32 LES and GPU explicit-vs-substepper brackets are present; strict 1% pass holds through 1.2 s and fails by 1.25 s due to w_tilde relative_linf; capped pressure-gradient retries restore finite mast diagnostics but fail feasibility and remain diagnostic-only; production boundary conditions, declared spin-up/averaging, runtime, and accepted explicit-feasible window remain unresolved"))
 
     askervein_contract_status, askervein_contract_evidence =
         askervein_output_contract_status_and_evidence()

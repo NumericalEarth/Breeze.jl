@@ -7,7 +7,7 @@ been generated for Askervein. The active 1% accuracy contract is not satisfied.
 Latest gate:
 
 ```text
-production validation gate: pass=16 present=21 fail=21 missing=0 blocked=5
+production validation gate: pass=16 present=23 fail=23 missing=0 blocked=5
 ```
 
 ## Contract

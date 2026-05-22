@@ -7334,6 +7334,185 @@ turbulent fluctuations while maintaining the target inflow speed.
 
 ---
 
+## Askervein higher-resolution pressure-gradient run (2026-05-21T18:03Z)
+
+I ran a higher-resolution CUDA case with the non-damping
+pressure-gradient forcing:
+
+Run directory:
+
+`/shared/home/greg/Projects/Breeze.jl/validation_output/substepper/askervein_pressure_gradient_cuda_320x320x128_300s_w_xz_movie/`
+
+Movie artifact:
+
+`/shared/home/greg/Projects/Breeze.jl/validation_output/substepper/askervein_pressure_gradient_cuda_320x320x128_300s_w_xz_movie/askervein_w_xz_slice_pressure_gradient_320x320x128_300s.mp4`
+
+Configuration:
+
+| setting | value |
+|---|---:|
+| architecture | `gpu` |
+| domain | `10000 m × 10000 m × 2400 m` |
+| grid | `320 × 320 × 128` |
+| simulated time | `300 s` |
+| averaging window | `150 s` |
+| pressure-gradient acceleration | `0.04 m/s²` |
+| mean-wind relaxation | disabled |
+| fringe | enabled, width `2000 m`, rate `0.05 s⁻¹` |
+| slice | `w`, `xz`, `j = 160`, `±0.75 m/s` |
+| frames | `301` |
+
+The run completed on the H100. It was runtime-limited rather than
+memory-limited: timestepping held about `99-100%` GPU utilization while
+using roughly `6.2 GiB` of the 80 GiB H100 memory. Driver wall time was
+`4331.89 s`.
+
+Diagnostics:
+
+| run | forcing | RS speed | max `|FSR error|` | max `|TKE error|` |
+|---|---|---:|---:|---:|
+| 192×192×64, 300 s | fringe only | `2.281 m/s` | `5.040` | `44.116` |
+| 192×192×64, 300 s | pressure-gradient `0.02 m/s²` | `4.072 m/s` | `2.593` | `74.958` |
+| 320×320×128, 300 s | pressure-gradient `0.04 m/s²` | `2.533 m/s` | `3.983` | `120.189` |
+
+Higher resolution alone did not improve the validation metrics. The
+flow is clearly no longer laminar, but the fixed pressure-gradient
+forcing does not maintain the RS inflow speed and the TKE field is
+spatially uneven/too energetic at several stations. This reinforces
+the prior conclusion: the next useful implementation is not just a
+larger grid, but a mean-only momentum controller that dynamically
+adjusts the pressure-gradient acceleration to hold the target inflow
+speed while preserving pointwise turbulent fluctuations.
+
+---
+
+## Askervein adaptive outer CFL and WENO update (2026-05-21T23:42Z)
+
+I updated `validation_output/substepper/askervein_neutral_les_case.jl`
+so future Askervein runs use:
+
+| setting | default |
+|---|---:|
+| acoustic CFL | `0.5` |
+| adaptive outer timestep | `true` |
+| outer advective CFL target | `1.4` |
+| advection | `WENO(order=5)` |
+
+New controls:
+
+```bash
+ASKER_CASE_ADAPTIVE_DT=true
+ASKER_CASE_OUTER_CFL=1.4
+ASKER_CASE_ACOUSTIC_CFL=0.5
+ASKER_CASE_ADVECTION=weno
+ASKER_CASE_WENO_ORDER=5
+ASKER_CASE_STOP_TIME=<seconds>
+ASKER_CASE_MAX_DT=<seconds or Inf>
+ASKER_CASE_MIN_DT=0
+ASKER_CASE_DT_UPDATE_INTERVAL=10
+```
+
+The driver still accepts `ASKER_CASE_STEPS`, but now treats it as a
+maximum step cap. `ASKER_CASE_STOP_TIME` controls the target simulated
+time, defaulting to `ASKER_CASE_STEPS * ASKER_CASE_DT` for backward
+compatibility.
+
+CUDA smoke test:
+
+`/shared/home/greg/Projects/Breeze.jl/validation_output/substepper/askervein_adaptive_weno_cuda_smoke/`
+
+Smoke metrics:
+
+| metric | value |
+|---|---:|
+| architecture | `gpu` |
+| advection | `weno` |
+| WENO order | `5` |
+| acoustic CFL | `0.5` |
+| outer CFL | `1.4` |
+| adaptive dt | `true` |
+| observed dt min/mean/max | `0.022 / 0.0231 / 0.0242 s` |
+
+This verifies the new path compiles and runs on CUDA. The next
+production run should use `ASKER_CASE_STOP_TIME` explicitly instead of
+thinking in fixed step counts, because the outer timestep is now
+adaptive.
+
+---
+
+## Askervein longer adaptive WENO run (2026-05-22T01:35Z)
+
+I attempted the requested longer run with the new adaptive-WENO setup.
+
+First attempt:
+
+`/shared/home/greg/Projects/Breeze.jl/validation_output/substepper/askervein_pressure_gradient_adaptive_weno_cuda_320x320x128_1800s_w_xz_movie/`
+
+Configuration was `320×320×128`, WENO5, acoustic CFL `0.5`,
+outer CFL `1.4`, `STOP_TIME=1800 s`, `initial_dt=0.5 s`,
+`max_dt=2.0 s`. It failed on the first timestep because the
+time-step wizard produced a non-finite proposed timestep on this
+large GPU/WENO/terrain path, which reached the acoustic substep count
+as `Int64(NaN)`.
+
+I added a guard so adaptive updates only accept finite positive
+timesteps, then retried:
+
+`/shared/home/greg/Projects/Breeze.jl/validation_output/substepper/askervein_pressure_gradient_adaptive_weno_cuda_320x320x128_1800s_dt05_w_xz_movie/`
+
+Configuration was the same grid and target time but with
+`initial_dt=0.2 s` and `max_dt=0.5 s`. This also failed early: the
+first movie checkpoint contained `NaN` in the `w` slice, so the flow
+was already non-finite. Conclusion: WENO5 with this terrain/forcing
+setup is not stable at `dt=0.2-0.5 s` on the 320×320×128 case.
+
+Completed longer run:
+
+`/shared/home/greg/Projects/Breeze.jl/validation_output/substepper/askervein_pressure_gradient_adaptive_weno_cuda_256x256x96_900s_dt005_w_xz_movie/`
+
+Movie artifact:
+
+`/shared/home/greg/Projects/Breeze.jl/validation_output/substepper/askervein_pressure_gradient_adaptive_weno_cuda_256x256x96_900s_dt005_w_xz_movie/askervein_w_xz_slice_adaptive_weno_256x256x96_900s.mp4`
+
+Configuration:
+
+| setting | value |
+|---|---:|
+| architecture | `gpu` |
+| grid | `256 × 256 × 96` |
+| domain | `10000 m × 10000 m × 2400 m` |
+| advection | `WENO(order=5)` |
+| acoustic CFL | `0.5` |
+| outer CFL target | `1.4` |
+| initial dt | `0.02 s` |
+| max dt | `0.05 s` |
+| stop time | `900 s` |
+| executed steps | `18031` |
+| averaging window | `701.5 s` |
+| pressure-gradient acceleration | `0.02 m/s²` |
+| frames | `46` |
+
+Diagnostics:
+
+| metric | value |
+|---|---:|
+| observed dt min/mean/max | `0.0125 / 0.0499 / 0.05 s` |
+| wall clock | `2777.85 s` |
+| model RS speed | `2.317 m/s` |
+| observed RS speed | `8.895 m/s` |
+| max `|FSR error|` | `4.135` |
+| max `|TKE error|` | `26.473` |
+
+The longer WENO run is stable under the conservative `0.05 s` cap, and
+it is clearly turbulent, but it still does not maintain the inflow
+momentum. The fixed pressure-gradient acceleration remains too weak,
+and simply running longer does not correct the RS speed deficit. The
+next implementation step should be a mean-only momentum controller
+that dynamically adjusts the pressure-gradient forcing instead of a
+fixed acceleration.
+
+---
+
 ## Nonlinear pressure replay decisively worse — linearization is not the bug (2026-05-21T05:18Z)
 
 The implementing agent's "nonlinear/full acoustic-state pressure
@@ -9128,25 +9307,1711 @@ trajectory/history, while the iteration-8 local stage increments under-shoot
 explicit by about `50-60%`. This remains a diagnostic artifact, not production
 validation completion.
 
-## Meta-observation: Step-B increment oscillation matches the 14:10Z drag oscillation (2026-05-21T22:05Z)
+## 2026-05-21T22:38Z Long production jobs still running
 
-The Step-B vertical-RHS increment diagnostic at `21:38Z` shows the substepper
-increment is **too large at iter 7** but **too small at iter 8** at the same
-`k=8` modes — an alternation across adjacent outer iterations, not a fixed
-scalar error.
+The remaining distributed Schär jobs are still active and have not emitted
+final production artifacts yet:
 
-This matches my earlier
-[drag-onset oscillation observation](#meta-observation-drag-onset-is-oscillatory-not-monotonic-2026-05-21t1410z):
-raw drag at integer-second snapshots went `0.5 % → 3.4 % → 1.5 % → 9.8 %`
-while `w` rel L∞ grew monotonically. That diagnostic suggested a
-sub-outer-step oscillation aliased against integer-second sampling. The
-Step-B increment diagnostic now provides the underlying mechanism: per-stage
-vertical-RHS increments alternate too-large/too-small across adjacent outer
-iterations, so the accumulated trajectory carries a small phase offset that
-aliases into the snapshot drag.
+| job | partition | elapsed | live process |
+|---:|---|---:|---|
+| `1129` | `cpu-large` | `~30 min` | CPU explicit `dt = 0.35 s`, `julia --project=.` on `cpu-large-dy-cpu-large-1` |
+| `1130` | `gpu-dev` | `~29 min` | CM1-terrain/prognostic-sponge explicit, `julia --project=examples` on `gpu-dev-dy-gpu-dev-1` |
+| `1133` | `gpu-prod` | `~30 min` | current Schär Tier-1 6 h substepper candidate, `julia --project=examples` on `gpu-prod-st-gpu-prod-2` |
 
-Implication: a candidate fix should be evaluated by whether it flattens the
-*envelope* of Step-B vertical-RHS increments across adjacent outer
-iterations, not by whether it reduces the magnitude at one stage — flat
-magnitude scaling (the earlier `0.93` final-stage and the half/full
-slow-tendency sweeps) cannot fix a trajectory-phase error.
+No new production comparison metrics are available yet; postprocessing remains
+blocked on these final outputs.
+
+## 2026-05-21T22:39Z CPU explicit refresh completed
+
+Job `1129` completed successfully and refreshed the CPU Schär explicit
+production artifact:
+
+```text
+validation_output/substepper/terrain_schar_6h_400x200_production_explicit/
+```
+
+The run reached `6 h` at `400 x 200`, `dt = 0.35 s`, grid terrain, and rewrote
+the metrics, state slice, time series, summary, and PPM at `2026-05-21T22:37Z`
+to `22:38Z`. The batch also reran the default explicit-vs-CM1 and
+substepper-vs-explicit metrics plus the production gate. Gate result remains:
+
+```text
+production validation gate: pass=16 present=21 fail=21 missing=0 blocked=5
+```
+
+Refreshed explicit-vs-CM1 below-sponge result is unchanged in substance:
+
+| metric | value |
+|---|---:|
+| `u_relative_l2_error` | `0.02663679181` |
+| `w_relative_l2_error` | `1.754953969` |
+| `w_normalized_rmse` | `0.1120434886` |
+| `w_pattern_correlation` | `0.4310007389` |
+| `p_relative_l2_error` | `4.040412997` |
+| `mountain_drag_relative_error` | `3.359778953` |
+
+The default substepper-vs-explicit row still uses the existing production
+substepper artifact, not the current `1133` candidate, and still fails:
+
+| metric | value |
+|---|---:|
+| `u_relative_linf_error` | `0.01541675253` |
+| `w_relative_l2_error` | `0.2263879766` |
+| `w_normalized_rmse` | `0.02933920580` |
+| `w_pattern_correlation` | `0.9754128237` |
+| `p_relative_l2_error` | `0.9198464428` |
+| `mountain_drag_relative_error` | `0.6269783053` |
+
+Jobs `1130` and `1133` are still running; `1133` is the one needed for the
+current dt0.35/no-damping/no-upper-sponge production comparison refresh.
+
+Runtime note for `1133`: the earlier equivalent matched-outer-dt Schär
+production run (`1089`) took `2.129 h` wall clock on `gpu-dev`, with the first
+time step taking `44.9 s`. The current job being live at roughly `37 min` is
+therefore slow but not abnormal; wait for final artifacts before judging it.
+
+## 2026-05-21T22:45Z CM1-terrain/prognostic-sponge explicit refresh completed
+
+Job `1130` completed its explicit half and is now running the paired
+substepper half. Refreshed explicit artifact:
+
+```text
+validation_output/substepper/terrain_schar_6h_400x200_explicit_cm1_terrain_prognostic_sponge_candidate/
+```
+
+Configuration:
+
+- `400 x 200`, `6 h`, `dt = 0.35 s`
+- `SCHAR_TERRAIN_INTERPRETATION=cm1`
+- prognostic sponge on with rate `1/300 s⁻¹`
+- acoustic/diagnostic sponge rate `0`
+- GPU backend
+
+Key refreshed scalar metrics:
+
+| metric | value |
+|---|---:|
+| `normalized_rmse` | `1.169186350` |
+| `amplitude_error` | `0.04727583996` |
+| `maximum_w` | `1.608243640` |
+| `mountain_drag` | `2164.888954` |
+| `maximum_cfl` | `0.01113714873` |
+| `nan_count`, `inf_count` | `0`, `0` |
+| `wall_clock_seconds` | `1504.526006` |
+
+This is an artifact refresh only so far; explicit-vs-CM1 and
+substepper-vs-explicit candidate metrics will be rerun after the paired
+substepper half completes.
+
+## 2026-05-22T00:52Z Parallel validation jobs completed; no duplicate reruns queued
+
+The distributed Schär validation jobs from the previous batch are complete.
+Current Slurm state has no active Breeze validation job; the only visible job
+is unrelated:
+
+```text
+1148 gpu-dev gb25-ocean-compare RUNNING
+```
+
+Job `1130` completed the paired CM1-terrain/prognostic-sponge candidate:
+
+```text
+validation_output/substepper/terrain_schar_6h_400x200_explicit_cm1_terrain_prognostic_sponge_candidate/
+validation_output/substepper/terrain_schar_6h_400x200_substepper_cm1_terrain_prognostic_sponge_candidate/
+```
+
+Candidate explicit-vs-CM1 below-sponge metrics still fail the 1% contract:
+
+| metric | value |
+|---|---:|
+| `u_relative_l2_error` | `0.005390174407` |
+| `u_relative_linf_error` | `0.04621928388` |
+| `w_relative_l2_error` | `1.088193044` |
+| `w_normalized_rmse` | `0.05753429306` |
+| `w_pattern_correlation` | `0.6383547138` |
+| `p_relative_l2_error` | `0.9877399439` |
+| `mountain_drag_relative_error` | `1.721840766` |
+
+Candidate substepper-vs-explicit improves some field rows but still fails:
+
+| metric | value |
+|---|---:|
+| `u_relative_l2_error` | `0.0008602379329` |
+| `w_relative_l2_error` | `0.09752908177` |
+| `w_relative_linf_error` | `0.04567917504` |
+| `w_normalized_rmse` | `0.009093622115` |
+| `w_pattern_correlation` | `0.9962135056` |
+| `p_relative_l2_error` | `0.4031520614` |
+| `mountain_drag_relative_error` | `0.1011601771` |
+
+Job `1133` completed the current-branch matched-dt Schär Tier-1 production
+refresh on `gpu-prod`:
+
+```text
+validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/
+validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/
+```
+
+Configuration: `400 x 200`, `6 h`, `dt = 0.35 s`, grid terrain, no divergence
+damping, no upper sponge, GPU backend. Coordinate parity with the explicit
+reference is exact (`max |Δx| = 0`, `max |Δz| = 0`), but the 1% Tier-1 gate
+still fails:
+
+| metric | value |
+|---|---:|
+| `w_relative_l2_error` | `0.1232164948` |
+| `w_relative_linf_error` | `0.0745803850` |
+| `w_normalized_rmse` | `0.0159684898` |
+| `w_pattern_correlation` | `0.9923917588` |
+| `w_projection_amplitude_error` | `0.01798208546` |
+| `pressure_relative_l2_error` | `0.6617009969` |
+| `mountain_drag_relative_error` | `0.4057695816` |
+
+The result reproduces the existing matched-dt failure on the current branch and
+does not satisfy completion. I have asked the two watcher agents to split the
+next-step review:
+
+- Schär/formal validation docs and whether the gate should point at the
+  current `1133` artifact instead of the older equivalent path.
+- Askervein blockers and whether there is an independent long diagnostic or
+  production job worth launching on CPU, `gpu-dev`, or `gpu-prod`.
+
+No duplicate long rerun is queued at this point. The available partitions
+should be used for the next specific discriminator or missing production
+artifact, not for repeating already-failing production artifacts with the same
+configuration.
+
+## 2026-05-22T00:58Z New distributed jobs launched
+
+Queued independent work across the available CPU/GPU partitions:
+
+| job | partition | script | purpose | initial state |
+|---:|---|---|---|---|
+| `1149` | `gpu-prod` | `run_schar_400x200_gpu_cm1_terrain_prognostic_sponge_outside_pgf_explicit_candidate.batch` | current-branch 6 h Schär explicit CM1-terrain/prognostic-sponge outside-PGF discriminator | `RUNNING` |
+| `1150` | `cpu-large` | `run_askervein_explicit_substepper_production_window.batch` | refresh Askervein 60 s explicit-vs-substepper production-window artifact | `CONFIGURING` |
+| `1151` | `gpu-dev` | `run_askervein_erf_terrain_300x300x18_1p2s_explicit_window_diagnostic.batch` | refresh coordinate-faithful ERF-terrain GPU diagnostic at `300 x 300 x 18` for Askervein plumbing | `CONFIGURING` |
+
+Important classification: job `1151` is diagnostic only and cannot satisfy the
+long-production validation goal. It is useful for keeping the GPU ERF-terrain
+path exercised while the CPU production-window and Schär discriminator run.
+
+## 2026-05-22T00:59Z Gate now points at current Schär matched-dt refresh
+
+Updated the formal production gate and artifact docs so the matched outer-dt
+Schär discriminator prefers the current-branch `1133` artifact:
+
+```text
+validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/schar_substepper_vs_explicit_state_metrics.csv
+```
+
+Regenerated:
+
+```text
+validation_output/substepper/terrain_following_production_validation_gate_report.csv
+validation_output/substepper/terrain_following_production_validation_gate_report.md
+```
+
+Gate result remains incomplete:
+
+```text
+production validation gate: pass=16 present=21 fail=21 missing=0 blocked=5
+```
+
+The current matched-dt row still fails with below-sponge
+`w_relative_l2_error = 0.1232164948`, `w_relative_linf_error = 0.0745803850`,
+`w_normalized_rmse = 0.0159684898`, pressure relative L2
+`0.6617009969`, and mountain-drag relative error `0.4057695816`.
+
+## 2026-05-22T01:02Z Askervein pressure-gradient bracket launched
+
+Added and submitted a diagnostic-only Askervein pressure-gradient bracket:
+
+```text
+validation_output/substepper/run_askervein_pressure_gradient_bracket_gpu.batch
+```
+
+Slurm job:
+
+```text
+1152 gpu-prod asker-pg-bracket FAILED during startup
+1153 gpu-prod asker-pg-bracket FAILED during startup
+1154 gpu-prod asker-pg-bracket RUNNING gpu-prod-st-gpu-prod-2
+```
+
+The job runs the existing `askervein_neutral_les_case.jl` driver at
+`192 x 192 x 64`, `300 s`, GPU, WENO5, fringe enabled, no slice frames, and
+constant pressure-gradient accelerations `0.04`, `0.06`, and `0.08 m s^-2`.
+Output directories:
+
+```text
+validation_output/substepper/askervein_pressure_gradient_bracket_cuda_192x192x64_300s_a0p04/
+validation_output/substepper/askervein_pressure_gradient_bracket_cuda_192x192x64_300s_a0p06/
+validation_output/substepper/askervein_pressure_gradient_bracket_cuda_192x192x64_300s_a0p08/
+```
+
+This remains diagnostic evidence only. It tests whether a non-damping momentum
+source can hold the inflow/mast speeds closer to the TU03-B target before
+spending effort on a longer coordinate-faithful Askervein LES setup.
+
+Startup correction: attempt `1152` used `julia --project=.` and failed because
+`CUDA` is not available in that environment. The wrapper now uses
+`julia --project=examples`, matching the other GPU validation scripts. Attempt
+`1153` then failed on a Julia native-code cache CPU-target mismatch on
+`gpu-prod`, so the wrapper now also passes `--pkgimages=no` and was resubmitted
+as job `1154`.
+
+## 2026-05-22T01:07Z Askervein 60 s CPU explicit-window refresh failed
+
+Slurm job `1150` attempted to refresh the existing
+`askervein_explicit_substepper_compare_production/` artifact at `96 x 72 x 32`,
+`60 s`, explicit/substepper, CPU. It failed in the explicit half at step `134`,
+`t = 6.7 s`, before writing refreshed metrics:
+
+```text
+DomainError with -6.07014451755909e-5:
+Exponentiation yielding a complex result requires a complex argument.
+temperature_and_pressure
+src/CompressibleEquations/compressible_time_stepping.jl:145
+```
+
+The files in
+`validation_output/substepper/askervein_explicit_substepper_compare_production/`
+therefore remain the old `2026-05-17` `1 s` artifact and must not be treated
+as a refreshed 60 s production-window result. This reinforces the current
+Askervein blocker: the explicit-feasible comparison window is not yet
+established for the accepted validation setup.
+
+Follow-up diagnostic: submitted job `1155` on `gpu-dev` with the same
+`96 x 72 x 32`, `60 s` explicit-vs-substepper comparison but a smaller
+explicit timestep, `dt = 0.01 s`, and `ASKER_COMPARE_ARCH=gpu`:
+
+```text
+validation_output/substepper/run_askervein_explicit_substepper_60s_dt0p01_gpu_diagnostic.batch
+validation_output/substepper/askervein_explicit_substepper_compare_96x72x32_60s_dt0p01_gpu_diagnostic/
+```
+
+It is intentionally labeled `diagnostic` until it proves that a stable,
+accepted explicit-feasible window exists.
+
+## 2026-05-22T01:05Z Active distributed job status
+
+Current queue:
+
+| job | partition | status | purpose |
+|---:|---|---|---|
+| `1149` | `gpu-prod` | `RUNNING` | 6 h Schär explicit CM1-terrain/prognostic-sponge outside-PGF discriminator |
+| `1151` | `gpu-dev` | `RUNNING` | Askervein `300 x 300 x 18`, `1.2 s` ERF-terrain GPU diagnostic refresh |
+| `1154` | `gpu-prod` | `RUNNING` | Askervein pressure-gradient bracket diagnostic after wrapper fixes |
+| `1155` | `gpu-dev` | `CONFIGURING` | Askervein `96 x 72 x 32`, `60 s`, `dt = 0.01 s` explicit-feasibility diagnostic |
+
+No new final metrics have been emitted by these jobs yet. `git diff --check`
+is clean after the audit/gate/doc updates.
+
+Process-level check: each validation job has a live Julia process despite
+buffered stdout:
+
+| job | node | live process |
+|---:|---|---|
+| `1149` | `gpu-prod-st-gpu-prod-1` | `julia --project=examples ... terrain_schar_mountain_wave_explicit_validation.jl` |
+| `1151` | `gpu-dev-dy-gpu-dev-1` | `julia --project=examples ... askervein_explicit_substepper_compare.jl` |
+| `1154` | `gpu-prod-st-gpu-prod-2` | `julia --project=examples --pkgimages=no ... askervein_neutral_les_case.jl` |
+| `1155` | `gpu-dev-dy-gpu-dev-2` | `julia --project=examples --pkgimages=no ... askervein_explicit_substepper_compare.jl` |
+
+Thus the lack of new CSVs is pending runtime/precompile, not a silent Slurm
+startup failure.
+
+GPU-utilization spot check at `2026-05-22T01:10Z`:
+
+| job | GPU | utilization | memory |
+|---:|---|---:|---:|
+| `1149` | H100 | `100%` | `4605 MiB` |
+| `1154` | H100 | `0%` | `1679 MiB` |
+| `1151` | T4 | `0%` | `1715 MiB` |
+| `1155` | T4 | `0%` | `339 MiB` |
+
+`1149` is actively computing. The Askervein GPU diagnostics have loaded GPU
+contexts but appear to still be in CPU-side compilation/startup or a
+non-GPU-heavy phase.
+
+Follow-up: `1154` failed after startup/precompile because the adaptive 300 s
+run ended before `ASKER_CASE_SPINUP_STEPS=3000`, so no averaging samples were
+collected:
+
+```text
+No averaging samples were collected; reduce ASKER_CASE_SPINUP_STEPS or ASKER_CASE_SAMPLE_INTERVAL.
+```
+
+This is a batch-configuration failure, not a pressure-gradient physics result.
+Updated `run_askervein_pressure_gradient_bracket_gpu.batch` to use
+`ASKER_CASE_SPINUP_STEPS=100` and `ASKER_CASE_SAMPLE_INTERVAL=50` for the
+300 s diagnostic bracket, then resubmitted as job `1156` on `gpu-prod`.
+
+## 2026-05-22T01:16Z Active validation jobs still running
+
+Queue after another polling interval:
+
+| job | partition | elapsed | status |
+|---:|---|---:|---|
+| `1149` | `gpu-prod` | `~21 min` | Schär outside-PGF explicit discriminator still running; H100 utilization `99%` |
+| `1151` | `gpu-dev` | `~17 min` | Askervein `300 x 300 x 18` ERF diagnostic still running; T4 utilization sampled at `12%` |
+| `1155` | `gpu-dev` | `~9 min` | Askervein `60 s`, `dt = 0.01 s` explicit feasibility diagnostic still running; T4 utilization `97%` |
+| `1156` | `gpu-prod` | `~3 min` | resubmitted Askervein pressure-gradient bracket still running; H100 utilization `15%` |
+
+No fresh metric files have appeared yet in the target output directories. Logs
+remain buffered after the initial headers/precompile messages.
+
+## 2026-05-22T01:18Z Askervein smaller-dt 60 s explicit-feasibility diagnostic completed
+
+Job `1155` completed successfully:
+
+```text
+validation_output/substepper/askervein_explicit_substepper_compare_96x72x32_60s_dt0p01_gpu_diagnostic/
+```
+
+Configuration:
+
+- `ASKER_COMPARE_ARCH=gpu`
+- `artifact_class = diagnostic`
+- Gaussian terrain source
+- `96 x 72 x 32`
+- `dt = 0.01 s`, `6000` steps, `60 s`
+- `acoustic_cfl = 0.25`
+
+It establishes that the explicit path can reach `60 s` for this diagnostic
+grid when `dt` is reduced from `0.05 s` to `0.01 s`. This does **not** close
+Askervein production validation because the artifact is diagnostic and uses
+the Gaussian comparison setup, not the accepted coordinate-faithful WEMEP/ERF
+LES setup.
+
+Key substepper-vs-explicit rows:
+
+| region | field | rel L2 | rel L∞ | normalized RMSE | corr | 1% pass |
+|---|---|---:|---:|---:|---:|---|
+| full | `u` | `0.00215` | `0.00834` | `0.00163` | `0.99847` | true |
+| full | `v` | `0.00258` | `0.00998` | `0.00192` | `0.99764` | true |
+| full | `w` | `0.17003` | `0.10250` | `0.021998` | `0.98559` | false |
+| full | `w_tilde` | `0.28331` | `0.23681` | `0.050888` | `0.96056` | false |
+| near terrain | `w` | `0.09942` | `0.08777` | `0.021086` | `0.99505` | false |
+| hilltop | `w` | `0.03747` | `0.05957` | `0.016110` | `0.99933` | false |
+
+Worst vertical-velocity point:
+
+```text
+w at i=37, j=5, k=20: explicit 0.0673979815, substepper -0.1808996790, absolute error 0.2482976605
+w_tilde at same point: explicit 0.1879027807, substepper -0.0604024922, absolute error 0.2483052728
+```
+
+Interpretation: smaller explicit `dt` gives a stable 60 s diagnostic window,
+but the Askervein vertical-velocity split remains far outside the 1% contract.
+
+## 2026-05-22T01:20Z Askervein 300x300x18 ERF-terrain diagnostic refreshed
+
+Job `1151` completed successfully and refreshed:
+
+```text
+validation_output/substepper/askervein_erf_terrain_explicit_substepper_300x300x18_1p2s_gpu_diagnostic/
+```
+
+Configuration:
+
+- `ASKER_COMPARE_ARCH=gpu`
+- `terrain source = erf`
+- ERF terrain file:
+  `/shared/home/greg/ERF/Exec/CanonicalTests/Real_Terrain/Askervein/askervein.txt`
+- `300 x 300 x 18`
+- `dt = 0.01 s`, `120` steps, `1.2 s`
+- `artifact_class = diagnostic`
+
+The result is consistent with the prior target-grid diagnostic: most velocity
+rows pass, but strict vertical rows still fail:
+
+| region | field | rel L2 | rel L∞ | normalized RMSE | corr | 1% pass |
+|---|---|---:|---:|---:|---:|---|
+| full | `w` | `0.010377` | `0.009760` | `0.000470` | `0.999950` | false |
+| full | `w_tilde` | `0.011571` | `0.012351` | `0.000572` | `0.999939` | false |
+| near terrain | `w` | `0.005830` | `0.008441` | `0.000412` | `0.999983` | true |
+| near terrain | `w_tilde` | `0.008085` | `0.010603` | `0.000503` | `0.999969` | false |
+| hilltop | `w` | `0.005111` | `0.008441` | `0.001829` | `0.999987` | true |
+| hilltop | `w_tilde` | `0.007974` | `0.010603` | `0.002247` | `0.999971` | false |
+
+This remains diagnostic only because it is a 1.2 s explicit window, not the
+production LES/spin-up/averaging artifact. It does, however, confirm that the
+coordinate-faithful ERF terrain path runs at target horizontal resolution and
+that the remaining early-time strict failure is concentrated in vertical
+velocity/contravariant velocity.
+
+## 2026-05-22T01:23Z Additional Askervein diagnostics launched
+
+Submitted a coordinate-faithful ERF-terrain 60 s explicit-feasibility
+diagnostic using the stable `dt = 0.01 s` found by job `1155`:
+
+```text
+1157 gpu-dev asker-erf-60s RUNNING
+validation_output/substepper/run_askervein_erf_explicit_substepper_96x72x32_60s_dt0p01_gpu_diagnostic.batch
+validation_output/substepper/askervein_erf_terrain_explicit_substepper_96x72x32_60s_dt0p01_gpu_diagnostic/
+```
+
+This tests whether the 60 s explicit-feasible window survives when switching
+from the Gaussian diagnostic terrain to the ERF Askervein terrain.
+
+The first high pressure-gradient bracket member from `1156` completed at
+`0.04 m s^-2`, but produced NaN mast speeds:
+
+```text
+reference_speed_model = NaN
+max_abs_fsr_error = NaN
+```
+
+This indicates the useful pressure-gradient range is below `0.04 m s^-2`.
+Submitted a lower bracket on `gpu-dev`:
+
+```text
+1158 gpu-dev asker-pg-low RUNNING
+validation_output/substepper/run_askervein_pressure_gradient_low_bracket_gpu.batch
+```
+
+The lower bracket tests `0.025`, `0.03`, and `0.035 m s^-2` at the same
+`192 x 192 x 64`, `300 s` diagnostic setup.
+
+## 2026-05-22T01:33Z Askervein ERF-terrain 60 s explicit-feasibility diagnostic completed
+
+Job `1157` completed successfully:
+
+```text
+validation_output/substepper/askervein_erf_terrain_explicit_substepper_96x72x32_60s_dt0p01_gpu_diagnostic/
+```
+
+Configuration:
+
+- `ASKER_COMPARE_ARCH=gpu`
+- `ASKER_COMPARE_TERRAIN_SOURCE=erf`
+- ERF terrain file:
+  `/shared/home/greg/ERF/Exec/CanonicalTests/Real_Terrain/Askervein/askervein.txt`
+- `96 x 72 x 32`
+- `dt = 0.01 s`, `6000` steps, `60 s`
+- `artifact_class = diagnostic`
+
+This confirms that the 60 s explicit-feasible window survives when switching
+from the Gaussian comparison setup to ERF Askervein terrain. It still does not
+close Askervein validation because it is reduced-grid/diagnostic and fails the
+vertical metrics:
+
+| region | field | rel L2 | rel L∞ | normalized RMSE | corr | 1% pass |
+|---|---|---:|---:|---:|---:|---|
+| full | `u` | `0.00179` | `0.00712` | `0.00122` | `0.99691` | true |
+| full | `v` | `0.00250` | `0.00802` | `0.00153` | `0.99639` | true |
+| full | `w` | `0.19931` | `0.04756` | `0.00992` | `0.98047` | false |
+| full | `w_tilde` | `0.27501` | `0.09622` | `0.02006` | `0.96260` | false |
+| near terrain | `w` | `0.12165` | `0.04594` | `0.01010` | `0.99275` | false |
+| hilltop | `w` | `0.02568` | `0.02839` | `0.01065` | `0.99979` | false |
+
+Worst vertical-velocity point:
+
+```text
+w at i=54, j=46, k=21: explicit -0.1840170185, substepper -0.00159169765, absolute error 0.1824253208
+w_tilde at same point: explicit -0.3729695510, substepper -0.1902839495, absolute error 0.1826856015
+```
+
+Interpretation: explicit stability at `60 s` is no longer the immediate
+blocker for this reduced ERF terrain comparison; the blocker is the
+substepper-vs-explicit vertical-velocity mismatch.
+
+## 2026-05-22T01:27Z Active diagnostics still running
+
+No new metric files were emitted during the latest polling interval. Active
+queue:
+
+| job | partition | elapsed | note |
+|---:|---|---:|---|
+| `1149` | `gpu-prod` | `~32 min` | Schär outside-PGF still running; H100 utilization sampled at `99%` |
+| `1156` | `gpu-prod` | `~14 min` | high Askervein pressure-gradient bracket still running after `0.04` produced NaN mast speeds |
+| `1157` | `gpu-dev` | `~5 min` | ERF-terrain 60 s explicit-feasibility diagnostic running |
+| `1158` | `gpu-dev` | `~3 min` | lower Askervein pressure-gradient bracket running |
+
+No artifacts from `1157`, `1158`, or the later `1156` bracket members should
+be counted until their CSVs and summaries appear.
+
+## 2026-05-22T01:30Z Schär outside-PGF 6 h discriminator refreshed
+
+Job `1149` completed successfully and refreshed the 6 h explicit
+CM1-terrain/prognostic-sponge/outside-PGF candidate:
+
+```text
+validation_output/substepper/terrain_schar_6h_400x200_explicit_cm1_terrain_prognostic_sponge_outside_pgf_candidate/
+validation_output/substepper/schar_6h_400x200_explicit_cm1_terrain_prognostic_sponge_outside_pgf_candidate_vs_cm1_periodic_theta300_state_metrics.csv
+validation_output/substepper/schar_6h_400x200_explicit_outside_pgf_vs_inside_pgf_cm1_terrain_prognostic_sponge_candidate_state_metrics.csv
+```
+
+Configuration:
+
+- `400 x 200`, `6 h`, explicit `dt = 0.35 s`
+- `SCHAR_TERRAIN_INTERPRETATION=cm1`
+- prognostic sponge on, rate `1/300 s^-1`
+- acoustic sponge off
+- `SCHAR_PRESSURE_GRADIENT_STENCIL=outside`
+- GPU backend
+
+Explicit outside-PGF vs CM1 still fails the 1% production hooks:
+
+| metric | value |
+|---|---:|
+| `u_relative_l2_error` | `0.005400442842` |
+| `u_relative_linf_error` | `0.04599577105` |
+| `w_relative_l2_error` | `1.085535602` |
+| `w_relative_linf_error` | `0.5785946605` |
+| `w_normalized_rmse` | `0.05739379042` |
+| `w_pattern_correlation` | `0.6390117184` |
+| `p_relative_l2_error` | `0.9876719330` |
+| `mountain_drag_relative_error` | `1.720912066` |
+
+Outside-PGF vs inside-PGF Breeze explicit is small by comparison:
+
+| metric | value |
+|---|---:|
+| `u_relative_l2_error` | `0.0001825001` |
+| `u_relative_linf_error` | `0.0033511649` |
+| `w_relative_l2_error` | `0.01539643305` |
+| `w_relative_linf_error` | `0.02142391383` |
+| `w_normalized_rmse` | `0.00143556508` |
+| `p_relative_l2_error` | `0.003254700596` |
+| `mountain_drag_best_convention_relative_error` | `0.001286571244` |
+
+Interpretation: the pressure-gradient stencil choice is not the Schär
+explicit-vs-CM1 closure path. It perturbs Breeze modestly and leaves the
+cross-model wave/pressure/drag failures essentially intact.
+
+## 2026-05-22T01:06Z Meta: legacy vs matched-dt rows decompose outer-dt scaling vs scheme bias
+
+With the 00:59Z gate update, the Schär substepper-vs-explicit comparison now
+appears in the report as two rows that test different things and should not be
+read as redundant:
+
+| row | substepper | explicit | sponge | w_l2 below-sponge |
+|---|---|---|---|---:|
+| legacy "production" | `terrain_schar_6h_400x200_production_substepper` Δt = 2.0 s | `terrain_schar_6h_400x200_production_explicit` Δt = 0.35 s | both `sponge_rate = 0.1` | `0.226` |
+| matched-outer-dt 1133 | `…dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133` Δt = 0.35 s | matched Δt = 0.35 s | both `sponge_rate = 0.0` | `0.123` |
+
+Configs match on sponge inside each row; they differ across rows in outer Δt
+(5.7×) and in whether the upper sponge is active.
+
+The ratio is informative. A formal outer RK3 would shrink dt-error by
+`(2.0 / 0.35)^2 ≈ 33×` going from `Δt = 2 s` to `Δt = 0.35 s`. The observed
+drop is `0.226 / 0.123 ≈ 1.84×`. That argues the matched-dt `0.123` is a
+near-floor: dropping outer Δt below `0.35 s` on the substepper cannot push
+`w_l2` much past this and will not reach the `1%` gate.
+
+Reading the two rows together:
+
+- The matched-dt row isolates the structural substepper-vs-explicit scheme
+  defect at the cleanest available config — the target of the Step-B
+  trajectory/history work described in the corrected `2026-05-21T22:47Z`
+  meta-observation below.
+- The legacy operational row inflates the absolute gap with outer-dt scaling
+  but, given the small reduction at matched dt, does not change the conclusion
+  that the `1%` gate is unreachable by outer-dt tightening alone.
+
+This does not change the existing next-step priorities (Step-B
+trajectory/history, prognostic-sponge / CM1-terrain candidate sweep,
+outside-PGF discriminator `1149`); it just makes explicit why both rows can
+coexist in the gate without one rendering the other obsolete.
+
+## 2026-05-22T01:17Z Meta: PG bracket `1154` failed config-side; `1156` is the same script and will repeat the failure
+
+Job `1154` exited at the start of its first case (`a = 0.04`) immediately
+after precompile, before any simulation steps, with
+
+```text
+ERROR: LoadError: No averaging samples were collected; reduce ASKER_CASE_SPINUP_STEPS or ASKER_CASE_SAMPLE_INTERVAL.
+```
+
+from `validation_output/substepper/askervein_neutral_les_case.jl:486`. The
+bracket output directories
+`validation_output/substepper/askervein_pressure_gradient_bracket_cuda_192x192x64_300s_a0p0{4,6,8}/`
+contain no files. The 01:16Z status block above lists `1156` as "still
+running" but does not flag that it shares this failure mode.
+
+Root cause is in the batch script, not the driver. The driver's first sample
+fires only at the first outer step satisfying
+`step > spinup_steps && (step - spinup_steps) % sample_interval == 0`, and the
+batch sets:
+
+| env var | value |
+|---|---:|
+| `ASKER_CASE_STOP_TIME` | `300 s` |
+| `ASKER_CASE_STEPS` | `20000` |
+| `ASKER_CASE_SPINUP_STEPS` | `100` |
+| `ASKER_CASE_SAMPLE_INTERVAL` | `50` |
+| `ASKER_CASE_ADAPTIVE_DT` | `true` |
+| `ASKER_CASE_OUTER_CFL` | `1.4` |
+
+With `OUTER_CFL = 1.4` and Askervein-scale `dx ≈ 52 m`, `U ≈ 10 m s^-1`, the
+adaptive outer Δt grows toward `~7 s` once the flow settles, so
+`STOP_TIME = 300 s` allows roughly `40` outer steps — well below
+`spinup_steps = 100` — and the loop exits before the first sample, tripping
+the assertion. Either `spinup_steps` must be much smaller (e.g. `5`) or
+`MAX_DT` / `OUTER_CFL` must be tightened so `STOP_TIME / dt > spinup_steps +
+sample_interval`.
+
+`git diff` against the working tree shows no edits to
+`validation_output/substepper/run_askervein_pressure_gradient_bracket_gpu.batch`
+between `1154` (exit at `~01:04Z`) and `1156` (submit at `~01:13Z`), so
+`1156` is running the identical configuration that just failed and will repeat
+the same error on case `a = 0.04`. The `gpu-prod-st-gpu-prod-2` slot is being
+held for ~3-6 hours of precompile + per-case startup that will produce zero
+bracket data unless the batch is edited or the job cancelled.
+
+## 2026-05-22T01:19Z Meta: `1155` rules out CFL for the `1150` CPU failure; substepper w-defect appears on Askervein too
+
+Jobs `1155` (Gaussian Askervein) and `1151` (ERF Askervein) finished. The two
+results together change the interpretation of the `1150` CPU explicit failure
+and connect the Askervein substepper-vs-explicit gap to the matched-dt Schär
+gap.
+
+### `1155` — CFL is not the `1150` failure mechanism
+
+`askervein_explicit_substepper_compare_96x72x32_60s_dt0p01_gpu_diagnostic/askervein_explicit_substepper_summary.txt`
+reports the **explicit** robustness at `Δt = 0.01 s`:
+
+| quantity | value |
+|---|---:|
+| explicit max horizontal CFL | `5.69e-3` |
+| explicit max contravariant vertical CFL | `3.73e-4` |
+| explicit wall clock seconds | `7.08e+1` |
+
+Scaling linearly to the `1150` configuration (`Δt = 0.05 s`) gives explicit
+horizontal CFL `~2.85e-2` and vertical CFL `~1.86e-3` — both two orders of
+magnitude below the standard stability ceiling. The `1150` failure at
+`temperature_and_pressure` with `DomainError(-6.07e-5)` therefore was **not**
+a CFL violation; it is a CPU-only thermodynamic-state pathology that the
+`gpu-dev` rerun at `dt = 0.01 s` silently sidestepped because GPU was the
+substituted axis, not the smaller `dt`. The proposed next-step
+"explicit-feasibility window" is established for `gpu` only; the CPU
+explicit-feasibility blocker for the production-window driver is unchanged
+and must still be debugged at full `Δt = 0.05 s` on CPU.
+
+### `1155` and `1151` — substepper w-defect is geometry-independent and grows in time
+
+The matched-dt substepper-vs-explicit relative L2 errors:
+
+| job | terrain | grid | simulated_seconds | w relative L2 | w_tilde relative L2 | u, v, speed |
+|---|---|---|---:|---:|---:|---|
+| `1151` | ERF Askervein | `300×300×18` | `1.2` | `1.04e-2` | `1.16e-2` | all `<2e-4` (pass) |
+| `1155` | Gaussian Askervein | `96×72×32` | `60.0` | `1.70e-1` | `2.83e-1` | all `<3e-3` (pass) |
+| Schär `1133` | Schär ridge | `400×200` | `21600.0` | `1.23e-1` | n/a | u pass at matched dt |
+
+The pattern is consistent across Schär and both Askervein geometries:
+horizontal momentum and speed track explicit to better than `1%` at matched
+outer-dt, but the vertical components carry a structural defect that fails
+the `1%` gate. The Schär matched-dt floor (`12.3%`) and the Gaussian
+Askervein 60 s result (`17%`) sit in the same order; the ERF 1.2 s result
+(`1.04%`) is barely above the gate, consistent with the defect being
+roughly linear in simulated time — about `17× / 50× ≈ 0.34` per decade of
+runtime, matching what the trajectory/history target from the
+`2026-05-21T22:47Z` corrected meta below would predict for an accumulating
+per-step bias rather than a one-shot geometry error.
+
+### Implication for next-step priorities
+
+- The `1150` CPU failure should be re-diagnosed at `Δt = 0.05 s` on CPU with
+  thermodynamic-state instrumentation; the `dt = 0.01 s` `gpu` diagnostic
+  cannot speak to the CPU pathology.
+- The substepper w-defect surfaced on Schär is not a Schär-geometry artifact
+  and the matched-dt Askervein comparisons can serve as faster discriminators
+  for the trajectory/history target than 6 h Schär production reruns.
+- Substepper wall clock at matched fine `Δt = 0.01 s` is `3.5×` to `4.6×`
+  slower than explicit on these Askervein cases. This is matched-dt overhead
+  and is not the operational regime; it shows the substepper has no
+  performance reason to be compared at matched dt outside of validation
+  context.
+
+## Correction to 2026-05-22T01:17Z meta on PG bracket `1156` (issued 2026-05-22T01:21Z)
+
+My 01:17Z prediction that `1156` "will repeat the same configuration error on
+case `a = 0.04` and produce no bracket data" is wrong. The first case
+finished and wrote artifacts at
+`validation_output/substepper/askervein_pressure_gradient_bracket_cuda_192x192x64_300s_a0p04/`:
+
+```text
+askervein_neutral_les_summary.txt:
+  steps = 1056/20000, spinup_steps = 100, samples = 19
+  observed dt min/mean/max = 2.200000e-02 / 2.840909e-01 / 3.489880e-01 s
+  simulated_seconds = 3.000000e+02 s
+```
+
+The driver ran `1056` outer steps — well above `spinup_steps = 100` — and
+collected `19` samples. My CFL projection assumed steady-state outer
+`Δt ≈ OUTER_CFL × dx / U ≈ 7 s`, but the actual mean is `0.28 s`: the
+acoustic CFL ceiling and adaptive-step clamp hold outer Δt well below the
+advective bound on this configuration. So the assertion that "`STOP_TIME /
+dt > spinup_steps + sample_interval`" does in fact hold for the default
+configuration, and `1156` is not config-dead on first-case startup as I
+claimed.
+
+Two further corrections:
+
+- The `git diff` check in the 01:17Z meta was meaningless:
+  `run_askervein_pressure_gradient_bracket_gpu.batch` is **not tracked by
+  git** (`git ls-files` returns empty). The file mtime changed to `01:13:00`
+  when `1156` was submitted, so the agent may or may not have edited the
+  script; `git diff` could not have detected it either way. Future
+  "did the wrapper change?" diagnostics on untracked scripts must cache the
+  prior content explicitly.
+- The `1156` `a = 0.04` artifact diagnostics are nevertheless all `NaN`:
+  `model RS speed = NaN`, `max |FSR error| = NaN`, every mast row's
+  `u_mean`, `v_mean`, `speed_mean` is `NaN`. The driver did not abort; the
+  `NaN`s propagated through the averaging. So the bracket cannot answer the
+  question it was launched for through this case, but the failure mode is
+  numerical corruption (likely an unstable pressure-gradient transient with
+  no upper-sponge / fringe overrun) rather than the line-486 assertion.
+  The next two cases (`a = 0.06`, `a = 0.08`) may either produce useful
+  values or the same `NaN` collapse, and that information is itself
+  diagnostic — the cancellation argument in the 01:17Z meta no longer
+  applies.
+
+The substantive part of the 01:17Z meta (a configuration where
+`spinup_steps + sample_interval` exceeds available outer steps would trip
+the line-486 assertion) remains valid as a latent wrapper fragility for
+shorter `STOP_TIME` or higher `OUTER_CFL` future variants; it just was not
+the cause of either `1154` or `1156`'s observed behavior.
+
+## 2026-05-22T01:29Z Meta: `1156` `a = 0.04` and `a = 0.06` are bit-identical — PG forcing is not being applied
+
+The second member of bracket `1156` (`a = 0.06`) wrote artifacts to
+`validation_output/substepper/askervein_pressure_gradient_bracket_cuda_192x192x64_300s_a0p06/`.
+`diff` against the `a = 0.04` summary and metric files reports only:
+
+```text
+summary.txt:
+< pressure_gradient_forcing = true, acceleration = 4.000000e-02 m/s^2
+> pressure_gradient_forcing = true, acceleration = 6.000000e-02 m/s^2
+
+metrics.csv:
+< pressure_gradient_acceleration,0.04
+< wall_clock_seconds,127.98970560400001
+> pressure_gradient_acceleration,0.06
+> wall_clock_seconds,128.40178481700002
+```
+
+— plus the obvious file-path renames. Every other quantity matches **bit for
+bit**: `observed dt min/mean/max = 2.200000e-02 / 2.840909e-01 /
+3.489880e-01`, `steps = 1056`, `samples = 19`, `u_star = 6.124828e-01`,
+`Cd = 7.673611e-03`, mast `u_mean = v_mean = speed_mean = NaN` at every
+station, identical `tke_time` values, identical `w_tilde_final = 0`. The
+50 % bump in `acceleration` produced **no detectable change in flow
+state**, dt history, or any diagnostic. The remaining `wall_clock_seconds`
+delta of `0.41 s` is `0.3 %` of total wall and matches normal node noise.
+
+This is much stronger evidence than the `a = 0.04` `NaN` alone. Either:
+
+- the pressure-gradient forcing acceleration is being read into metadata but
+  never added to the momentum tendencies in the driver / kernel; or
+- the `NaN` collapses the flow before the PG accumulator has any effect,
+  but if so the collapse must also be insensitive to the PG amplitude — i.e.
+  the failure is upstream of PG.
+
+Either way the bracket is **not a PG-magnitude scan**. The 1158 lower
+bracket (`a = 0.025, 0.03, 0.035`) on `gpu-dev` will, on this evidence,
+produce three more bit-identical NaN copies and no information about a
+"useful PG range". It should be cancelled or repurposed once the agent
+confirms the input-pathway bug.
+
+A quick check that distinguishes the two hypotheses: diff `a = 0.06`
+against an `a = 0` run from the same driver. If still identical, the
+acceleration value is being silently dropped on the path between env-var
+parse and tendency kernel. If `a = 0` differs, the `NaN` collapse is
+PG-triggered but saturated by `a = 0.04`.
+
+## 2026-05-22T01:32Z Meta: `1149` outside-PGF discriminator is a definitive null — PGF location does not explain Breeze-vs-CM1 gap
+
+Job `1149` completed and wrote the Schär explicit CM1-terrain /
+prognostic-sponge **outside-PGF** candidate at
+`terrain_schar_6h_400x200_explicit_cm1_terrain_prognostic_sponge_outside_pgf_candidate/`
+plus two comparison summaries:
+
+```text
+schar_6h_400x200_explicit_cm1_terrain_prognostic_sponge_outside_pgf_candidate_vs_cm1_periodic_theta300_state_summary.txt
+schar_6h_400x200_explicit_outside_pgf_vs_inside_pgf_cm1_terrain_prognostic_sponge_candidate_state_summary.txt
+```
+
+Below-sponge Breeze-explicit-vs-CM1 for the prior inside-PGF candidate
+(`1130`, recorded at `00:52Z`) and the new outside-PGF candidate (`1149`):
+
+| metric | inside-PGF | outside-PGF | delta |
+|---|---:|---:|---:|
+| `u_relative_l2_error` | `5.390e-3` | `5.400e-3` | `+0.01 %` |
+| `w_relative_l2_error` | `1.088` | `1.086` | `-0.2 %` |
+| `w_pattern_correlation` | `0.638` | `0.639` | `+0.001` |
+| `θ'_relative_l2_error` | `0.267` | `0.266` | `-0.1 %` |
+| `p'_relative_l2_error` | `0.988` | `0.988` | `0.0 %` |
+| `mountain_drag_relative_error` | `1.722` | `1.721` | `-0.1 %` |
+
+The outside-vs-inside Breeze self-comparison (how much PGF location moves
+Breeze in isolation):
+
+| metric | outside-PGF vs inside-PGF | 1% pass |
+|---|---:|---|
+| `u_relative_l2_error` | `1.83e-4` | true |
+| `w_relative_l2_error` | `1.54e-2` | false (close) |
+| `θ'_relative_l2_error` | `6.68e-3` | false (close) |
+| `p'_relative_l2_error` | `3.25e-3` | true |
+| `mountain_drag_relative_error` | `1.29e-3` | true |
+
+PGF location moves the Breeze candidate by `~1.5 %` in `w` and `< 0.5 %`
+elsewhere, but moves Breeze-vs-CM1 by less than `0.3 %` on every field.
+The Breeze-vs-CM1 gap remains `~109 %` in `w_l2`, `~99 %` in `p'_l2`, and
+`~172 %` in `mountain_drag`. The discriminator is a clean null: **PGF
+inside-vs-outside cells does not explain any meaningful fraction of the
+Breeze-explicit CM1-terrain / prognostic-sponge vs CM1 gap**.
+
+Interpretation and where to search next:
+
+- A `1.72×` drag-error and `~1×` `p'_l2` are large-amplitude not
+  subtle-bias behavior. They are more consistent with a sign-convention,
+  orientation, or normalization mismatch in the CM1-terrain Breeze branch
+  than with a discretization-quality issue.
+- The substepper-vs-explicit Schär gap analyzed in the `01:06Z` and
+  `22:47Z` metas is a `~12 %` w-defect at matched dt — a scheme-bias
+  problem on top of an already-broken Breeze-explicit-vs-CM1 reference.
+  The two are independent failure modes; closing one will not close the
+  other.
+- Candidates for the next Breeze-explicit-vs-CM1 discriminator are
+  terrain-metric Jacobian orientation, surface-stress / surface-pressure
+  formulation, and `cm1` vs `grid` terrain interpretation as separate
+  axes. Each is expected to move the gap by order-`1` if it is the cause;
+  the `0.3 %` motion from PGF location says this hypothesis is now off the
+  list.
+
+## 2026-05-22T01:35Z Combined update: `1157` confirms geometry-independent w-defect; correction to `01:29Z` PG-bracket interpretation
+
+### `1157` (ERF Askervein, 60 s, `dt = 0.01 s`) — w-defect carries to realistic terrain
+
+`askervein_erf_terrain_explicit_substepper_96x72x32_60s_dt0p01_gpu_diagnostic/`
+finished. Matched-dt substepper-vs-explicit relative L2 below-sponge:
+
+| job | terrain | `simulated_seconds` | `w_l2` | `w_tilde_l2` | u, v, speed |
+|---|---|---:|---:|---:|---|
+| `1151` | ERF Askervein | `1.2` | `1.04e-2` | `1.16e-2` | all `< 2e-4` |
+| `1155` | Gaussian Askervein | `60.0` | `1.70e-1` | `2.83e-1` | all `< 3e-3` |
+| `1157` | ERF Askervein | `60.0` | `1.99e-1` | `2.75e-1` | all `< 3e-3` |
+| Schär `1133` | Schär ridge | `21600.0` | `1.23e-1` | n/a | u pass at matched dt |
+
+`1157` is the direct ERF-vs-Gaussian comparison at the same `60 s`,
+`dt = 0.01 s`, `96 x 72 x 32` configuration as `1155`. The substepper
+`w_l2` is `~17 % → 20 %` going from Gaussian to ERF terrain — the same
+order, slightly worse on the realistic terrain. This confirms the
+`01:19Z` claim that the substepper w-defect is geometry-independent.
+Substepper wall clock is also nearly identical (`329 s` vs `328 s`), so
+matched-dt overhead is geometry-insensitive too.
+
+### Correction to `2026-05-22T01:29Z` — PG forcing **is** being applied; `1156` shows NaN saturation, not a forcing pathway bug
+
+The Askervein PG run at `256 x 256 x 96`, `a = 0.02 m s^-2`, `900 s`,
+`dt = 0.05 s` (the long-running foreground process whose artifacts just
+landed in `askervein_pressure_gradient_adaptive_weno_cuda_256x256x96_900s_dt005_w_xz_movie/`)
+reports **finite** `model RS speed = 2.317 m/s` with `35` samples averaged
+over `701 s`. The pressure-gradient forcing therefore reaches the flow
+and produces a measurable RS-mast response when the acceleration is small
+enough.
+
+That means the `01:29Z` interpretation — "PG forcing is not being applied"
+— is wrong. The bit-identical `1156` `a = 0.04` and `a = 0.06` summaries
+are better explained as **NaN saturation**: above some threshold in
+`(0.02, 0.04)`, the PG transient drives the flow into `NaN` within the
+first few outer steps, after which the integration is `NaN`-stuck and
+every diagnostic (means, dt history, sample count, `u_star`, `Cd`)
+becomes either `NaN` or a fixed function of the initial state. The
+diagnostic appears the same regardless of forcing magnitude because the
+amplitude differences cannot accumulate past the saturation point.
+
+Implication for `1158`: the lower bracket (`a = 0.025, 0.03, 0.035 m s^-2`)
+on `gpu-dev` is **the correct experiment**, not a wasted-compute one as
+the `01:29Z` meta suggested. It directly maps where the stability
+threshold sits between the working `a = 0.02` (256³ adaptive run) and the
+saturating `a ≥ 0.04` (`1156`). The cancellation argument in `01:29Z` is
+withdrawn; let `1158` finish.
+
+The `256³` PG-forced result is also informative on its own terms: at
+`a = 0.02` the model produces RS speed `2.32 m s^-1` against an observed
+`8.90 m s^-1` — a factor `~3.8` undershoot. That is consistent with the
+earlier session-summary observation that the Askervein driver appears
+**drag-saturated** at production resolutions; this is the first
+non-`NaN` data point at finer `256³` and confirms the under-speed
+persists at higher resolution rather than being a coarse-grid artifact.
+
+## Corrected meta-observation: Step-B trajectory/history, not simple oscillatory scaling (2026-05-21T22:05Z, corrected 22:47Z)
+
+The first Step-B vertical-RHS increment postprocess used the wrong explicit
+increment baseline (`stage_entry -> stage_exit`) and suggested the substepper
+increment was **too large at iter 7** but **too small at iter 8**. That
+interpretation is superseded.
+
+The corrected comparison uses explicit outer-start `stage1_entry -> stage_exit`
+to match the Wicker-Skamarock formula `U_stage = U_outer + β Δt G(stage_entry)`.
+With that baseline, the largest absolute `k=8`, modes `49/52` discrepancies
+are iteration-8 stages, and the local substepper increments are **too small**
+by about `50-60%`:
+
+| iter | stage | mode | substepper increment | explicit increment | rel diff |
+|---:|---:|---:|---:|---:|---:|
+| `8` | `3` | `52` | `4.7713e-3` | `1.1481e-2` | `0.584` |
+| `8` | `3` | `49` | `4.7717e-3` | `1.1449e-2` | `0.583` |
+| `8` | `2` | `52` | `2.2341e-3` | `5.4007e-3` | `0.586` |
+| `8` | `2` | `49` | `2.2317e-3` | `5.3702e-3` | `0.584` |
+
+The earlier drag-onset oscillation remains a useful symptom, but the actionable
+target is not "flatten alternating too-large/too-small increments." The
+candidate fix should explain why the late absolute `w_tilde` state is high
+from prior trajectory/history while the current iteration-8 stage-local
+increments under-shoot explicit. Flat magnitude scaling remains ruled out.
+## 2026-05-22T01:41Z Distributed validation jobs across `gpu-dev`, `gpu-prod`, and `cpu`
+
+Per request, the active validation work is now split across the available
+instances/partitions instead of concentrating on one queue:
+
+- `gpu-dev`: job `1158`, `asker-pg-low`, continues the low Askervein
+  pressure-gradient bracket (`a = 0.025, 0.03, 0.035 m s^-2`) at
+  `192 x 192 x 64`, `300 s`.
+- `gpu-prod`: job `1159`, `asker-pg-long`, launched a longer finite-response
+  Askervein diagnostic at `256 x 256 x 96`, `2400 s`, `a = 0.02` then
+  `0.025 m s^-2`, with slice frames enabled. This targets the non-NaN
+  regime found by the earlier `a = 0.02`, `900 s` run and is intentionally
+  not another high-acceleration saturation test.
+- `gpu-prod`: job `1163`, `fine-6h-schar-movie`, queued on the second
+  `gpu-prod` node as an independent production-length Schär movie/snapshot
+  refresh. It writes to `terrain_schar_fine_6h_movie_gpu/` and does not
+  overwrite the matched-dt discriminator artifacts.
+- `cpu`: job `1162`, `tf-gate-refresh`, launched the lightweight production
+  gate refresh. The first CPU submission asked for too many CPUs/memory for
+  the `cpu` partition; the accepted wrapper uses one task and no explicit
+  memory request.
+
+Follow-up: `1162` remained in `CONFIGURING` with no log output, so it was
+cancelled and the gate was run locally instead. The current gate remains
+unchanged: `pass=16 present=21 fail=21 missing=0 blocked=5`. The validation
+goal is therefore still incomplete; the active GPU jobs are evidence-gathering
+jobs, not completion evidence yet.
+
+The completed high bracket `1156` on `gpu-prod` is now interpreted as a
+saturation threshold result, not as a forcing-path failure: all tested
+accelerations (`0.04`, `0.06`, `0.08 m s^-2`) produced `NaN` RS mast speeds
+and `NaN` max FSR errors at `192 x 192 x 64`, `300 s`.
+
+## 2026-05-22T01:50Z Askervein low pressure-gradient bracket first point also saturates
+
+Job `1158` completed the `a = 0.025 m s^-2` point at `192 x 192 x 64`,
+`300 s`. It is also a saturation result, not a usable validation point:
+
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_low_bracket_cuda_192x192x64_300s_a0p025/`
+- `reference_speed_model = NaN`
+- `max_abs_fsr_error = NaN`
+- `samples = 19`, `simulated_seconds = 300`
+- mast-average `u_mean`, `v_mean`, `speed_mean`, and `fsr` are `NaN` at the
+  named masts checked.
+
+The low bracket is continuing with `a = 0.03 m s^-2`, but the useful finite
+regime at this grid is now below `0.025 m s^-2` or requires a different
+forcing/spin-up strategy.
+
+## 2026-05-22T02:01Z Long Askervein finite-response diagnostic rerun after NaN-safe frame patch
+
+Job `1159` failed before writing metrics in diagnostic movie-frame output:
+`color_triplet` attempted `UInt8(NaN)` while writing `w_tilde_xz` frame 1 for
+the `256 x 256 x 96`, `2400 s`, `a = 0.02 m s^-2` run. This is a diagnostic
+artifact-writing failure, not a new model metric.
+
+Applied a local validation-script fix in
+`validation_output/substepper/askervein_neutral_les_case.jl`:
+
+- NaN/non-finite frame values render as magenta pixels.
+- color limits now ignore non-finite values instead of letting
+  `maximum(abs, slice)` become `NaN`.
+- Parse check passed with:
+  `julia --project=examples --color=no --pkgimages=no -e 'Meta.parseall(read("validation_output/substepper/askervein_neutral_les_case.jl", String)); println("parse ok")'`.
+
+Resubmitted the long finite-response diagnostic as job `1164` on `gpu-prod`.
+It is pending behind the Schär `1163` job.
+
+## 2026-05-22T02:03Z Schär production-length movie/snapshot refresh completed
+
+Job `1163` completed the independent `gpu-prod` Schär 6 h movie/snapshot
+refresh in
+`validation_output/substepper/terrain_schar_fine_6h_movie_gpu/`.
+
+Configuration and runtime:
+
+- `400 x 200`, `6 h`, `dt = 2 s`, grid terrain interpretation.
+- Wall clock: `456.752238246 s`.
+- Wall-clock seconds per simulated hour: `76.125373041`.
+- Snapshots: `38` raw `w_snapshot_*.csv` files, through
+  `w_snapshot_0037.csv`.
+
+Key metrics:
+
+- `nan_count = 0`, `inf_count = 0`.
+- `maximum_cfl = 0.08668531223`, `maximum_acoustic_cfl = 0.5`.
+- `bottom_normal_velocity_max_abs = 0.0`.
+- `mass_relative_drift = -9.500028903e-10`.
+- `high_k_energy_fraction_near_terrain = 6.551352267e-4`.
+- `mountain_drag = 2640.44032317749`.
+
+This refresh is production-length visual/diagnostic evidence only; it does not
+change the production gate status because the relevant 1% comparison gates are
+still failing.
+
+## 2026-05-22T02:20Z Askervein low pressure-gradient bracket `a = 0.03` also saturates
+
+Job `1158` completed the `a = 0.03 m s^-2` point at `192 x 192 x 64`,
+`300 s`. It matches the `0.025` result:
+
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_low_bracket_cuda_192x192x64_300s_a0p03/`
+- `reference_speed_model = NaN`
+- `max_abs_fsr_error = NaN`
+- `samples = 19`, `simulated_seconds = 300`
+- `wall_clock_seconds = 1217.974573204`
+
+The low bracket is continuing with `a = 0.035 m s^-2`. The finite-response
+threshold for this `192 x 192 x 64`, `300 s` setup is now confirmed below
+`0.025 m s^-2`; `0.025` and `0.03` are both saturation diagnostics.
+
+The resubmitted long finite-response job `1164` has passed the previous
+`UInt8(NaN)` frame-writing point. It is writing full-size `w_tilde_xz` frames
+(`frame_00001.ppm` through at least `frame_00004.ppm`, each `74510` bytes),
+so the NaN-safe frame patch fixed the artifact-writing failure in `1159`.
+
+## 2026-05-22T02:40Z Long Askervein `a = 0.02` diagnostic completed but still NaN
+
+Job `1164` completed the first long finite-response point:
+
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p02/`
+- grid/runtime: `256 x 256 x 96`, `2400 s`, adaptive `dt`
+- pressure-gradient acceleration: `0.02 m s^-2`
+- steps: `9322`
+- samples: `26`
+- averaging window: `1395.3524460927438 s`
+- slice frames: `24` full-size `w_tilde_xz` frames
+- `reference_speed_model = NaN`
+- `max_abs_fsr_error = NaN`
+- `wall_clock_seconds = 1407.371538545`
+
+The NaN-safe frame patch succeeded as instrumentation, but the model state or
+mast averaging remains non-finite. This invalidates the previous hope that the
+earlier `a = 0.02`, `900 s`, `256 x 256 x 96` finite RS speed would extend to
+a longer `2400 s` diagnostic. Job `1164` is continuing with `a = 0.025`, but
+the production-relevant conclusion so far is that pressure-gradient forcing
+does not yet provide an accepted Askervein validation path.
+
+## 2026-05-22T01:57Z Meta: `1159` crashed in slice-frame writer; missing `MAX_DT` cap broke parity with the working 256³ precedent
+
+Job `1159` (`asker-pg-long`, `gpu-prod`, `256 x 256 x 96`, `2400 s`,
+`a = 0.02`) exited at the first slice-frame write with
+
+```text
+ERROR: LoadError: InexactError: UInt8(NaN)
+  ...
+  [6] color_triplet(value::Float64, limit::Float64)
+      @ Main ~/Projects/Breeze.jl/validation_output/substepper/askervein_neutral_les_case.jl:344
+  [7] write_slice_frame! ... :406
+```
+
+— the colour quantiser was handed a `NaN` from the `w_tilde` slice plane.
+That means the same `a = 0.02` configuration that the earlier
+`askervein_pressure_gradient_adaptive_weno_cuda_256x256x96_900s_dt005_w_xz_movie/`
+run completed cleanly (`model RS speed = 2.317 m/s`, `35` samples) goes
+`NaN` in `1159`. The two runs differ in exactly one safety-relevant
+parameter:
+
+| env var | earlier successful 256³ at `a = 0.02` | `1159` `a = 0.02` |
+|---|---|---|
+| `ASKER_CASE_MAX_DT` | `0.05` | not set |
+| `ASKER_CASE_DT_UPDATE_INTERVAL` | `10` | not set (driver default) |
+| `ASKER_CASE_STOP_TIME` | `900` | `2400` |
+| `ASKER_CASE_SLICE_FIELD` | `w` | `w_tilde` |
+| `ASKER_CASE_SLICE_LIMIT` | `0.75` | not set (driver default) |
+
+The earlier run reported `observed dt min/mean/max = 1.25e-2 /
+4.99e-2 / 5.00e-2 s`, i.e. it stayed clamped at the `MAX_DT = 0.05`
+ceiling. The `1156` `192 x 192 x 64` runs without `MAX_DT` ran at
+`mean dt = 0.28 s`, `max dt = 0.35 s` — about `7×` larger. `1159` is on
+the same code path as `1156` for adaptive dt, so without `MAX_DT` it can
+relax to a similar `O(0.3 s)` outer step on `256 x 256 x 96`, which is
+likely above the stable acoustic / advective bound for this configuration
+and induces the `NaN` that crashes the slice writer.
+
+`SLICE_FIELD = w_tilde` may have also contributed by colour-quantising at
+the bottom face where `w_tilde ≡ 0` if the driver default `SLICE_LIMIT`
+is `0`, but `1156` produces `NaN` in the velocity fields independent of
+slicing, so the bigger issue is the missing dt cap.
+
+Recommendation for a retry: copy the safety envelope of the known-working
+configuration onto `1159` — explicitly set
+`ASKER_CASE_MAX_DT=0.05`, `ASKER_CASE_DT_UPDATE_INTERVAL=10`, and
+`ASKER_CASE_SLICE_LIMIT=0.75`. If the goal is the longer `2400 s` window
+specifically, those three env vars are the minimum delta that needs to
+move from the precedent to the new run; the rest of the differences
+(`STOP_TIME`, `SLICE_FIELD`) are intentional and not the cause.
+
+Until those caps are added, the `1159` slot is unproductive; `1158`
+(low bracket) is unaffected because it inherits its caps from the working
+`1156` template.
+
+### Addendum 2026-05-22T02:03Z: `1164` retry inherits the open question
+
+The 02:01Z entry above resubmits as job `1164` after patching
+`color_triplet` and the limit-computation in `askervein_neutral_les_case.jl`
+to render non-finite values as magenta and skip them when computing
+colour limits. That fix is correct as a writer hardening but addresses
+only one of the two candidate root causes for the `1159` failure. The
+batch script `run_askervein_pressure_gradient_finite_long_gpu_prod.batch`
+still does **not** set `ASKER_CASE_MAX_DT`, `ASKER_CASE_DT_UPDATE_INTERVAL`,
+or `ASKER_CASE_SLICE_LIMIT`. So `1164` runs the same dt-uncapped adaptive
+schedule that `1156` runs at `192³`, where mean dt was `0.28 s` against
+the `0.05 s` of the precedent.
+
+`1164` therefore distinguishes the two hypotheses cleanly:
+
+- if `1164` finishes with **finite** RS / FSR mast values, then `1159`'s
+  failure was an aesthetic writer bug only and the dt-cap concern from
+  this 01:57Z meta is overstated;
+- if `1164` finishes with **NaN** mast values (matching `1156`), then the
+  flow itself went `NaN` because of the missing dt cap and the writer
+  patch only hides the symptom — the retry needs the env-var caps from
+  the precedent before it can produce usable data.
+
+The final mast block in
+`askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p02/askervein_neutral_les_summary.txt`
+is the diagnostic to watch when `1164` completes.
+
+### Resolution 2026-05-22T02:39Z: `1164` `a = 0.02` confirms the dt-driven NaN hypothesis
+
+`1164`'s first case has finished. From its summary:
+
+```text
+steps = 9322/60000, samples = 26
+observed dt min/mean/max = 2.200000e-02 / 2.574555e-01 / 2.621999e-01 s
+simulated_seconds = 2.400000e+03 s
+pressure_gradient_forcing = true, acceleration = 2.000000e-02 m/s^2
+
+model RS speed = NaN m/s
+max |FSR error| = NaN
+```
+
+Every mast row in
+`askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p02/askervein_neutral_les_mast_averages.csv`
+has `u_mean = v_mean = speed_mean = NaN`. This is the **NaN-mast** branch
+of the 02:03Z disjunction:
+
+- the simulation reached `STOP_TIME = 2400 s` without crashing (the
+  `color_triplet` NaN-safe patch worked as advertised on the writer side),
+- `26` samples were collected after `4000` spinup steps,
+- but the flow itself went `NaN` early enough that none of the running
+  means accumulated to finite values.
+
+The mean outer dt landed at `0.257 s` — `~5×` larger than the
+`MAX_DT = 0.05 s` precedent — exactly where the missing-cap hypothesis
+predicted. The same `a = 0.02 m s^-2` that the precedent ran cleanly to
+`RS speed = 2.317 m s^-1` saturates here because of dt, not because of PG
+amplitude. So:
+
+- The agent's NaN-safe writer patch is **necessary** (otherwise the run
+  crashes before `mast_averages.csv` exists), but **not sufficient** —
+  it lets corrupted runs complete and write `NaN` artifacts that look like
+  honest data on first glance.
+- The `1158` low bracket and the `1156` high bracket are now both
+  understood as the same dt-saturated configuration with PG-amplitude
+  varied as a red herring; PG is not the threshold knob.
+- The actionable retry for the `256³ 2400 s` finite-response goal is:
+  re-edit `run_askervein_pressure_gradient_finite_long_gpu_prod.batch` to
+  include `ASKER_CASE_MAX_DT=0.05`,
+  `ASKER_CASE_DT_UPDATE_INTERVAL=10`, and `ASKER_CASE_SLICE_LIMIT=0.75`,
+  then resubmit. The second case in `1164` (`a = 0.025`) will also be NaN
+  on the current batch and is best cancelled if it has not started.
+
+### Follow-up 2026-05-22T02:43Z: uncapped `1164` cancelled, capped retry queued
+
+Cancelled the uncapped `1164` before spending more GPU time on its
+`a = 0.025` case. Updated
+`run_askervein_pressure_gradient_finite_long_gpu_prod.batch` with:
+
+- `ASKER_CASE_MAX_DT=0.05`
+- `ASKER_CASE_DT_UPDATE_INTERVAL=10`
+- `ASKER_CASE_SLICE_LIMIT=0.75`
+
+Submitted the capped retry as job `1165` on `gpu-prod`.
+
+### Follow-up 2026-05-22T02:41Z: low bracket completed, all NaN
+
+Job `1158` completed the full lower pressure-gradient bracket at
+`192 x 192 x 64`, `300 s`. All three points collected `19` samples and
+reported non-finite mast metrics:
+
+| acceleration (`m s^-2`) | model RS speed | max FSR error |
+|---:|---:|---:|
+| `0.025` | `NaN` | `NaN` |
+| `0.03` | `NaN` | `NaN` |
+| `0.035` | `NaN` | `NaN` |
+
+The final point wrote
+`askervein_pressure_gradient_low_bracket_cuda_192x192x64_300s_a0p035/`
+with `wall_clock_seconds = 1219.814361677`.
+
+### Follow-up 2026-05-22T03:32Z: short capped low-grid diagnostic launched on `gpu-dev`
+
+`1165` is intentionally long because `MAX_DT=0.05` increases the step count.
+To get a faster discriminator for the timestep-cap hypothesis, launched
+`1166` on `gpu-dev`:
+
+- command source:
+  `validation_output/substepper/run_askervein_pressure_gradient_capped_low_gpu_dev.batch`
+- grid/runtime: `192 x 192 x 64`, `300 s`
+- accelerations: `0.02` then `0.025 m s^-2`
+- cap: `ASKER_CASE_MAX_DT=0.05`
+- frame writing: disabled
+
+This is a diagnostic-only short check. It should indicate whether the
+uncapped low-bracket NaNs were primarily a timestep-cap problem before the
+long `1165` finishes.
+
+### Follow-up 2026-05-22T03:55Z: parallel capped single-leg diagnostic launched
+
+`1166` is still in its first `a = 0.02` leg and has not written metrics yet.
+To use the available GPU capacity without duplicating the first leg, first
+launched job `1168` on a dynamic `gpu-dev` node. It stayed in `CONFIGURING`
+with no log output, so it was cancelled and relaunched as job `1169` on the
+idle `gpu-prod-st-gpu-prod-2` node:
+
+- partition/node target: `gpu-prod-st-gpu-prod-2`
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p025/`
+- grid/runtime: `192 x 192 x 64`, `300 s`
+- acceleration: `0.025 m s^-2`
+- cap: `ASKER_CASE_MAX_DT=0.05`,
+  `ASKER_CASE_DT_UPDATE_INTERVAL=10`
+- frame writing: disabled
+
+### Result 2026-05-22T04:43Z: capped `a = 0.10` nearly matches RS speed but fails spatial metrics
+
+Job `1174` finished:
+
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p100/`
+- steps/samples: `6031` steps, `118` samples
+- observed dt min/mean/max:
+  `0.0125150798 / 0.0497429945 / 0.05 s`
+- model RS speed: `8.309207521 m s^-1`
+- observed RS speed: `8.895 m s^-1`
+- max absolute FSR error: `1.339741163`
+- max absolute TKE error: `125.94100845` over `20` valid rows
+
+Interpretation: capped pressure-gradient amplitude can tune the single RS
+reference speed close to the observed value on this low-grid diagnostic, but
+the mast field remains badly wrong. The worst FSR error is still order one,
+and TKE error worsens. This is useful calibration evidence only; it is not an
+accepted Askervein validation path.
+
+### Result 2026-05-22T04:51Z: long capped `256 x 256 x 96`, `a = 0.02` is finite but underdriven
+
+Job `1165` completed its first long case and continued to `a = 0.025`:
+
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p02/`
+- grid/runtime: `256 x 256 x 96`, `2400 s`
+- cap: `ASKER_CASE_MAX_DT=0.05`,
+  `ASKER_CASE_DT_UPDATE_INTERVAL=10`
+- steps/samples: `48031` steps, `220` samples
+- averaging window: `2201.512515079789 s`
+- observed dt min/mean/max:
+  `0.0125150798 / 0.0499677292 / 0.05 s`
+- slice frames: `121` full-size `w_tilde_xz` frames
+- model RS speed: `2.256985684 m s^-1`
+- observed RS speed: `8.895 m s^-1`
+- max absolute FSR error: `6.555834501`
+- max absolute TKE error: `62.14612379` over `20` valid rows
+
+Interpretation: the dt cap fixes the full-window NaN-mast failure: the
+`2400 s`, `256 x 256 x 96` run reaches the stop time and writes finite
+diagnostics. It remains far too weak and is still diagnostic-only
+(`production_validation = false`, fringe forcing instead of accepted turbulent
+inflow). The contrast with the capped `192 x 192 x 64` pressure-gradient
+bracket indicates the high-resolution long run needs either a different forcing
+calibration or the accepted Askervein inflow/boundary setup before it can serve
+as production validation evidence.
+
+This is diagnostic-only. If it finishes before the two-leg `1166`, it should
+answer whether the previously uncapped `a = 0.025` low-grid NaN result is
+primarily a timestep-cap artifact.
+
+### Result 2026-05-22T04:11Z: capped single-leg `a = 0.025` is finite but not accurate
+
+Job `1169` finished:
+
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p025/`
+- grid/runtime: `192 x 192 x 64`, `300 s`
+- cap: `ASKER_CASE_MAX_DT=0.05`,
+  `ASKER_CASE_DT_UPDATE_INTERVAL=10`
+- steps/samples: `6031` steps, `118` samples
+- observed dt min/mean/max:
+  `0.0125150798 / 0.0497429945 / 0.05 s`
+- model RS speed: `4.935863245 m s^-1`
+- observed RS speed: `8.895 m s^-1`
+- max absolute FSR error: `1.451684021`
+- max absolute TKE error: `52.89931480` over `20` valid rows
+
+Interpretation: the timestep cap fixes the low-grid `a = 0.025` NaN-mast
+failure mode, so the earlier uncapped low-bracket result was at least partly a
+time-step artifact. It does **not** produce an accepted Askervein validation
+case: the run is still diagnostic-only (`production_validation = false`,
+`production_average = false`, fringe forcing instead of accepted turbulent
+inflow), and the reference comparison is far outside any production acceptance
+threshold. Keep `1166` running for the capped `a = 0.02` result and keep `1165`
+running for the long `256 x 256 x 96`, `2400 s` capped result.
+
+## 2026-05-22T04:13Z Meta: `1169` confirms the dt-cap hypothesis — capped `a = 0.025` at 192³ is finite, not NaN
+
+Job `1169` (`asker-pg-capped-single`, `gpu-prod-st-gpu-prod-2`) finished
+its capped `a = 0.025`, `192 x 192 x 64`, `300 s` leg with **finite**
+mast averages, where the uncapped `1158` `a = 0.025` leg from `01:50Z`
+produced NaN at the same grid, runtime, and acceleration:
+
+| run | `MAX_DT` | observed dt mean | samples | `model RS speed` | `max |FSR error|` |
+|---|---:|---:|---:|---:|---:|
+| `1158` `a = 0.025` (uncapped) | not set | `0.2841 s` | `19` | `NaN` | `NaN` |
+| `1169` `a = 0.025` (capped) | `0.05 s` | `0.0497 s` | `118` | `4.94 m s^-1` | `1.45` |
+
+The only configuration delta between the two is the `MAX_DT` cap (and
+`DT_UPDATE_INTERVAL` / `SLICE_LIMIT`, which are diagnostic-only). All
+other inputs match: grid, terrain, fringe, acceleration, spinup, OUTER_CFL,
+ACOUSTIC_CFL. So the saturation in the entire prior `1156` high-bracket
+(`a = 0.04, 0.06, 0.08`) and `1158` low-bracket (`a = 0.025, 0.03,
+0.035`) was an outer-dt artifact, not a PG-amplitude artifact and not a
+production-resolution artifact. The bit-identicality across PG values in
+`1156` was, as the `01:35Z` correction argued, NaN saturation downstream
+of the dt-driven instability.
+
+Status of the threads opened by the earlier metas:
+
+- `01:57Z` and `02:03Z` (missing `MAX_DT` on `1159`/`1164`): confirmed by
+  `1169` and previewed by the still-running `1165` (which has been writing
+  non-magenta frames for over an hour, consistent with a stable run).
+- `02:39Z` resolution (the agent's NaN-safe writer patch is necessary but
+  not sufficient; the batch needed the dt cap): confirmed.
+- `01:35Z` and `01:50Z` (PG-amplitude bracketing as the diagnostic axis):
+  superseded. PG amplitude is not the operating-window axis at this grid;
+  outer-dt cap is. PG can now be bracketed cleanly at capped `dt` if the
+  goal is to find the highest amplitude that still produces an unsaturated
+  flow.
+- The Askervein PG-forced driver at `192 x 192 x 64` is now demonstrated
+  to admit at least `a = 0.025 m s^-2` with `MAX_DT = 0.05 s`, and the
+  256³ precedent demonstrated `a = 0.02 m s^-2` with the same cap. The
+  long `1165` run will say whether the longer `2400 s` window holds the
+  flow at the higher resolution.
+
+The 256³ undershoot of RS speed (precedent: `2.32 m s^-1` against
+observed `8.90 m s^-1`) and the 192³ `1169` undershoot (`4.94 m s^-1`
+against `8.90 m s^-1`) are still the open Askervein question. They are
+real, comparable measurements; the prior NaN data was not.
+
+### Follow-up 2026-05-22T04:15Z: launched capped `a = 0.045` single-leg H100 diagnostic
+
+The capped `a = 0.025` single leg underdrives the RS speed (`4.94 m s^-1`
+vs. observed `8.895 m s^-1`). Assuming a roughly linear response to pressure
+gradient over this diagnostic range, the next useful value is near
+`0.045 m s^-2`.
+
+Submitted job `1172` on `gpu-prod-st-gpu-prod-2`:
+
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p045/`
+- grid/runtime: `192 x 192 x 64`, `300 s`
+- acceleration: `0.045 m s^-2`
+- cap: `ASKER_CASE_MAX_DT=0.05`,
+  `ASKER_CASE_DT_UPDATE_INTERVAL=10`
+- frame writing: disabled
+
+This uses the H100 freed by `1169` and avoids spending another full 6h Schär
+cycle. Expected wall time is on the order of the `1169` run
+(`~442 s` solver wall plus process startup), unless the higher acceleration
+forces more timestep reductions.
+
+### Result 2026-05-22T04:28Z: capped `a = 0.045` is finite but still underdriven
+
+Job `1172` finished:
+
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p045/`
+- steps/samples: `6031` steps, `118` samples
+- observed dt min/mean/max:
+  `0.0125150798 / 0.0497429945 / 0.05 s`
+- model RS speed: `5.989918904 m s^-1`
+- observed RS speed: `8.895 m s^-1`
+- max absolute FSR error: `1.534259200`
+- max absolute TKE error: `67.62159944` over `20` valid rows
+
+The run remains finite with the cap, but the response is much weaker than a
+naive linear extrapolation from `a = 0.025`. It improves RS speed by only
+`~1.05 m s^-1` while increasing the worst FSR error. To bracket the pressure
+gradient response faster, submitted job `1174` on the same freed H100:
+
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_capped_single_cuda_192x192x64_300s_a0p100/`
+- grid/runtime: `192 x 192 x 64`, `300 s`
+- acceleration: `0.10 m s^-2`
+- cap: `ASKER_CASE_MAX_DT=0.05`,
+  `ASKER_CASE_DT_UPDATE_INTERVAL=10`
+- frame writing: disabled
+
+## 2026-05-22T04:55Z Meta: PG-vs-RS calibration is grid-dependent; 256³ FSR error is `4×` worse than 192³
+
+The long capped `1165` finished and now overwrites the previous-broken
+`a = 0.02` artifact in
+`askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p02/`.
+The new summary reports `production_average = true`, `samples = 220`,
+`average_seconds = 2201 s`, `mean dt = 0.04997 s` (clamped). The dt-cap
+works at scale and over the longer averaging window. The two `256³`
+`a = 0.02` runs agree:
+
+| run | grid | runtime | samples | `model RS` | `max |FSR err|` |
+|---|---|---:|---:|---:|---:|
+| earlier `900 s` precedent | `256 x 256 x 96` | `701 s` avg | `35` | `2.32` | `4.14` |
+| `1165` `2400 s` | `256 x 256 x 96` | `2201 s` avg | `220` | `2.26` | `6.56` |
+
+So the `256³` flow at `a = 0.02` is in statistical steady-state at
+`RS ≈ 2.3 m s^-1`, far below the observed `8.90 m s^-1`. The longer
+averaging window did not reduce the FSR error; instead `max |FSR error|`
+grew from `4.14` to `6.56` as more masts crossed the field-wide errors
+that don't average out.
+
+Cross-referencing with the `192³` capped bracket above (RS values at
+matched dt cap):
+
+| grid | `a [m s^-2]` | runtime | `model RS` | `max |FSR err|` |
+|---|---:|---:|---:|---:|
+| `256³` | `0.020` | `2400 s` | `2.26` | `6.56` |
+| `192³` | `0.025` | `300 s` | `4.94` | `1.45` |
+| `192³` | `0.045` | `300 s` | `5.99` | `1.53` |
+| `192³` | `0.100` | `300 s` | `8.31` | `1.34` |
+
+Two things stand out:
+
+- The same `a ≈ 0.02 m s^-2` produces `RS ≈ 2.3 m s^-1` at `256³` but
+  extrapolation from the `192³` bracket gives roughly `~4 m s^-1` at the
+  same PG. So **RS-vs-PG calibration is strongly grid-dependent** — a
+  `192³` PG bracket cannot be used to predict the `256³` operating point.
+  This is consistent with subgrid-stress / wall-drag absorbing more
+  near-surface momentum as the grid is refined.
+- The `max |FSR error|` is `~4×` worse at `256³` (`6.56`) than at `192³`
+  (`1.34 - 1.53`). The mast field — the actual Askervein validation
+  quantity — **deteriorates at higher resolution** under PG forcing, even
+  though the dt cap removes the saturation artifact. So the `192³`
+  `a = 0.10` "RS within `7%`" result from the `04:43Z` entry above is a
+  low-grid single-point match that does not survive resolution refinement
+  and is not on the production-validation path.
+
+Putting the night together: the dt-cap fix turned `NaN` data into real
+data on every PG amplitude tested (`01:57Z → 04:13Z`), but the real data
+then shows that PG bracketing is a single-point calibration knob, not a
+field-validation knob, and that the calibration itself is
+resolution-dependent. The accepted Askervein WEMEP validation path
+remains open and cannot be closed by tuning PG at any single resolution.
+The next discriminator would have to be either a different forcing class
+(e.g. inflow precursor turbulence, not constant PG) or a separate
+diagnosis of why subgrid-stress / wall-drag absorbs more momentum at
+higher grid resolution.
+
+### Addendum 2026-05-22T05:29Z: precise apples-to-apples `a = 0.02` from `1166`
+
+`1166` leg 1 (`192 x 192 x 64`, `300 s`, `a = 0.02`, capped) just
+finished at
+`askervein_pressure_gradient_capped_low_cuda_192x192x64_300s_a0p02/`,
+reporting `model RS speed = 4.644 m s^-1`, `max |FSR error| = 1.410`,
+`118` samples, mean dt `0.0497 s`. The earlier table used `a = 0.025` as
+proxy for the `192³` side because no exact `a = 0.02` data was available;
+the table is now fillable directly at matched PG:
+
+| grid | `a [m s^-2]` | runtime | `model RS [m s^-1]` | `max |FSR err|` |
+|---|---:|---:|---:|---:|
+| `192³` | `0.020` | `300 s` | `4.644` | `1.410` |
+| `256³` | `0.020` | `2400 s` | `2.257` | `6.556` |
+
+At identical `a = 0.02`, going from `192³` to `256³` halves the model RS
+speed (`0.49×`) and increases the worst FSR error by `4.65×`. So the
+"grid-dependent calibration" claim of the parent meta is now an exact
+factor-of-two RS bias and a factor-of-four-plus FSR worsening at fixed
+PG, not just a directional statement. Closing the Askervein gap at `256³`
+by raising PG to recover the `192³` RS would land at roughly `a ≈ 0.04
+m s^-2` extrapolated linearly — but the `192³` bracket showed FSR error
+stays in `[1.34, 1.53]` across `a ∈ [0.025, 0.10]`, so a comparable
+extrapolation at `256³` is unlikely to drag the FSR error back below
+`6.56`. This sharpens the conclusion: the `256³` field-quality problem
+is not PG-amplitude-recoverable.
+
+The second `1166` leg (`a = 0.025`) was cancelled after the `a = 0.02`
+summary was harvested because job `1169` already completed the same capped
+`192 x 192 x 64`, `300 s`, `a = 0.025` configuration with finite metrics.
+
+### Result 2026-05-22T07:01Z: long capped `256 x 256 x 96`, `a = 0.025` is finite but still fails
+
+Job `1165` completed its second long case:
+
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p025/`
+- grid/runtime: `256 x 256 x 96`, `2400 s`
+- cap: `ASKER_CASE_MAX_DT=0.05`,
+  `ASKER_CASE_DT_UPDATE_INTERVAL=10`
+- steps/samples: `48031` steps, `220` samples
+- averaging window: `2201.512515079789 s`
+- observed dt min/mean/max:
+  `0.0125150798 / 0.0499677292 / 0.05 s`
+- slice frames: `121` full-size `w_tilde_xz` frames
+- model RS speed: `2.536940001 m s^-1`
+- observed RS speed: `8.895 m s^-1`
+- max absolute FSR error: `6.695660156`
+- max absolute TKE error: `79.20465786` over `20` valid rows
+
+Interpretation: increasing the long `256³` pressure-gradient acceleration from
+`0.02` to `0.025 m s^-2` raises RS speed only from `2.257` to `2.537 m s^-1`
+and worsens the worst FSR error from `6.556` to `6.696`. This closes the
+current PG-amplitude diagnostic: at production-like resolution and full
+`2400 s` averaging, tuning constant pressure-gradient forcing is not recovering
+the Askervein mast field. The run remains diagnostic-only and does not satisfy
+the Askervein production-validation contract.
+
+### Orchestration 2026-05-22T07:25Z: validation work spread across `gpu-dev`, `gpu-prod`, and `cpu`
+
+Three independent jobs are now active or submitted:
+
+- `1185` on `gpu-dev`: Schar `400 x 200`, `6 h`, matched `dt = 0.35 s`,
+  no damping/no upper sponge, `SCHAR_HORIZONTAL_DIVERGENCE_TIMING=previous`.
+  This is the first long discriminator for the short-run improvement seen in
+  the previous-horizontal-divergence timing test.
+- `1186` on `gpu-prod`: Askervein `256 x 256 x 96`, `2400 s`,
+  capped `MAX_DT=0.05`, pressure-gradient acceleration `a = 0.10 m s^-2`.
+  This checks whether the low-grid `a = 0.10` RS-speed match survives at the
+  longer production-like resolution/window; it remains diagnostic-only.
+- `1187` on `cpu`: gate-report refresh. A local preflight gate run succeeded
+  and intentionally exited nonzero because the gate is incomplete. The
+  refreshed count is now `pass=16 present=23 fail=23 missing=0 blocked=5`.
+
+The machine-readable gate now includes the completed pressure-gradient
+diagnostics as explicit Askervein rows:
+
+- low-grid capped bracket `a = 0.02, 0.025, 0.045, 0.10`: `present`
+  diagnostic coverage with finite metrics;
+- long `256 x 256 x 96`, `2400 s` bracket `a = 0.02, 0.025`: `present`
+  diagnostic coverage with finite metrics;
+- pressure-gradient forcing as an accepted Askervein validation route: `fail`,
+  because all artifacts are diagnostic and spatial FSR/TKE errors remain
+  order-one to order-six even when a low-grid single mast speed is close.
+
+### Result 2026-05-22T09:25Z: long capped `256 x 256 x 96`, `a = 0.10` worsens the mast field
+
+Job `1186` completed the high-amplitude long pressure-gradient discriminator:
+
+- artifact:
+  `validation_output/substepper/askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p100/`
+- grid/runtime: `256 x 256 x 96`, `2400 s`
+- cap: `ASKER_CASE_MAX_DT=0.05`,
+  `ASKER_CASE_DT_UPDATE_INTERVAL=10`
+- steps/samples: `48031` steps, `220` samples
+- averaging window: `2201.512515079789 s`
+- observed dt min/mean/max:
+  `0.0125150798 / 0.0499677292 / 0.05 s`
+- slice frames: `121` full-size `w_tilde_xz` frames
+- model RS speed: `5.253831534 m s^-1`
+- observed RS speed: `8.895 m s^-1`
+- max absolute FSR error: `10.139617785`
+- max absolute TKE error: `733.461985967` over `20` valid rows
+
+Interpretation: increasing the long `256³` pressure-gradient acceleration to
+`0.10 m s^-2` raises RS speed from the `a = 0.025` value (`2.537 m s^-1`) to
+`5.254 m s^-1`, but the spatial validation field gets much worse:
+`max |FSR error|` grows from `6.696` to `10.140`, and `max |TKE error|` grows
+from `79.2` to `733.5`. This closes the pressure-gradient-amplitude
+discriminator as a validation path: constant pressure-gradient forcing can
+alter one reference speed, but it does not recover the accepted Askervein
+mast/transect field at production-like resolution and averaging.
+
+## 2026-05-22T09:25Z Meta: `1186` (256³ `a = 0.10`) — FSR error scales **with** PG at high resolution
+
+Job `1186` completed the `256 x 256 x 96`, `2400 s`, capped, `a = 0.10`
+long diagnostic at
+`askervein_pressure_gradient_finite_long_cuda_256x256x96_2400s_a0p100/`:
+
+```text
+samples = 220
+average_seconds = 2201 s
+observed dt mean = 0.04997 s
+model RS speed = 5.254 m s^-1
+max |FSR error| = 10.140
+```
+
+The cross-grid PG-sensitivity table is now fillable at three matched PG
+points (`a = 0.02, 0.025, 0.10`):
+
+| grid | `a` | `model RS` | `max |FSR err|` |
+|---|---:|---:|---:|
+| `192³` | `0.020` | `4.644` | `1.410` |
+| `192³` | `0.025` | `4.940` | `1.450` |
+| `192³` | `0.045` | `5.990` | `1.530` |
+| `192³` | `0.100` | `8.310` | `1.340` |
+| `256³` | `0.020` | `2.260` | `6.560` |
+| `256³` | `0.025` | `2.540` | `6.700` |
+| `256³` | `0.100` | `5.254` | `10.140` |
+
+The two grids are in **qualitatively different field-error regimes**:
+
+- at `192³`, `max |FSR error|` stays in `[1.34, 1.53]` — essentially flat —
+  across `a ∈ [0.02, 0.10]`, a factor-`5` range in PG;
+- at `256³`, `max |FSR error|` grows monotonically `6.56 → 6.70 → 10.14`
+  over the same PG range, ending up `~10×` worse than the `192³`
+  field error at the same `a = 0.10`.
+
+So PG amplitude is not just less effective at `256³`; **it actively
+makes the spatial mast field worse**. RS speed at `256³ a = 0.10` reaches
+only `5.25 m s^-1` vs `8.31 m s^-1` at `192³ a = 0.10` (`63%`), and the
+attempt to recover that gap by raising PG further (`a > 0.10`) is
+predicted to amplify the field-error trend rather than close the
+single-point gap.
+
+The 04:55Z and 05:29Z framings ("PG calibration is grid-dependent",
+"256³ field-quality not PG-recoverable") are now strongly confirmed and
+sharpened to a directional statement: **at `256³`, the PG bracket has
+the wrong sign for field quality**. The accepted Askervein WEMEP path
+through PG forcing is closed at this resolution; the next-step search
+must move to a different forcing class (precursor inflow) or a separate
+diagnosis of subgrid-stress / wall-drag behavior at high resolution, as
+the 04:55Z meta proposed.
+
+### Result 2026-05-22T09:30Z: previous-horizontal-divergence Schar production run matches the baseline failure
+
+Job `1185` completed the long Schar discriminator:
+
+- artifact:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid/`
+- comparison:
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid/`
+- grid/runtime: `400 x 200`, `6 h`
+- terrain: `SCHAR_TERRAIN_INTERPRETATION=grid`
+- timestep/timing: `SCHAR_DT=0.35`,
+  `SCHAR_HORIZONTAL_DIVERGENCE_TIMING=previous`
+- coordinate parity: max `|Δx| = 0`, max `|Δz| = 0`
+
+Below-sponge metrics:
+
+| metric | value |
+|---|---:|
+| `w` relative L∞ | `0.074580384995` |
+| `w` relative L2 | `0.123216494795` |
+| `w` RMSE / max\|w_exp\| | `0.015968489821` |
+| `w` pattern correlation | `0.992391758842` |
+| `w` projection amplitude error | `0.017982085455` |
+| pressure relative L2 | `0.661700996944` |
+| mountain-drag relative error | `0.405769581615` |
+
+Interpretation: the long previous-horizontal-divergence candidate is
+numerically indistinguishable from the matched-`dt` baseline. The short
+previous-HDIV improvement did not survive the `6 h` production discriminator,
+so this is not a Schar closure path.
