@@ -2,12 +2,10 @@ using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans: Face
-using Oceananigans.Grids: topology
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
-using Oceananigans.Utils: launch!, KernelParameters
+using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
@@ -83,14 +81,7 @@ function compute_velocities!(model::AtmosphereModel)
     fill_halo_regions!(density)
     fill_halo_regions!(model.momentum)
 
-    # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
-    # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by
-    # the trailing `fill_halo_regions!(model.velocities)`), N for Flat.
-    Nx, Ny, Nz = size(grid)
-    TX, TY, TZ = topology(grid)
-    launch!(arch, grid, KernelParameters(1:length(Face(), TX(), Nx),
-                                         1:length(Face(), TY(), Ny),
-                                         1:length(Face(), TZ(), Nz)),
+    launch!(arch, grid, :xyz,
             _compute_velocities!,
             model.velocities.u, model.velocities.v, model.velocities.w,
             model.momentum.ρu,   model.momentum.ρv,   model.momentum.ρw,
