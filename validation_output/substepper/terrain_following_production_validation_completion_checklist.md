@@ -9,7 +9,7 @@ Authoritative plan:
 Authoritative gate:
 
 - command: `julia --project=. --color=no validation_output/substepper/terrain_following_production_validation_gate.jl`
-- latest result: `pass=16 present=23 fail=23 missing=0 blocked=5`
+- latest result: `pass=16 present=23 fail=26 missing=0 blocked=5`
 - report: `validation_output/substepper/terrain_following_production_validation_gate_report.md`
 - csv: `validation_output/substepper/terrain_following_production_validation_gate_report.csv`
 
@@ -51,6 +51,9 @@ The required accuracy targets are:
 | Schär matched outer-`dt` production discriminator exists and is coordinate-matched | Completed Slurm job `1089` produced the original `terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid/` artifact; current-branch Slurm job `1133` refreshed it at `terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/` and `schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/`. The current comparison summary reports `Maximum |Δx|: 0.0`, `Maximum |Δz|: 0.0`, `53200` below-sponge points, and `80000` full-domain points. | present |
 | Schär matched outer-`dt` production discriminator closes the 1% substepper-vs-explicit gap | `schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/schar_substepper_vs_explicit_state_metrics.csv` reports below-sponge `w_relative_linf_error=0.0745803850`, `w_relative_l2_error=0.1232164948`, `w_normalized_rmse=0.0159684898`, `w_pattern_correlation=0.9923917588`, `w_projection_amplitude_error=0.0179820855`, pressure relative L2 `0.6617009969`, and mountain-drag relative error `0.4057695816`; pass remains false. | fail |
 | Schär previous-horizontal-divergence matched-`dt` production discriminator closes the 1% substepper-vs-explicit gap | `schar_substepper_vs_explicit_tier1_6h_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_state_metrics.csv` reports exact coordinate parity but below-sponge `w_relative_linf_error=0.0745803849951862`, `w_relative_l2_error=0.12321649479541662`, `w_normalized_rmse=0.01596848982068666`, `w_pattern_correlation=0.9923917588419646`, `w_projection_amplitude_error=0.01798208545535651`, pressure relative L2 `0.6617009969440094`, and mountain-drag relative error `0.4057695816151736`; pass remains false and the result matches the matched-`dt` baseline. | fail |
+| Schär forward-weight 0.60 matched-`dt` production discriminator closes the 1% substepper-vs-explicit gap | `schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_forward0p6_grid/schar_substepper_vs_explicit_state_metrics.csv` reports exact coordinate parity but below-sponge `w_relative_linf_error=0.07021769106471422`, `w_relative_l2_error=0.1150234361357348`, `w_normalized_rmse=0.014906693881558191`, `w_pattern_correlation=0.9933650234561142`, `w_projection_amplitude_error=0.014951846662962565`, pressure relative L2 `0.6416904610778428`, and mountain-drag relative error `0.3984645180251729`; pass remains false. | fail |
+| Schär first-substep-PGF matched-`dt` production discriminator closes the 1% substepper-vs-explicit gap | `schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_state_metrics.csv` reports exact coordinate parity but below-sponge `w_relative_linf_error=0.06057553130893131`, `w_relative_l2_error=0.0994969833538295`, `w_normalized_rmse=0.012894511960534663`, `w_pattern_correlation=0.9950837531073307`, `w_projection_amplitude_error=0.018036852913514867`, pressure relative L2 `0.39806713459847487`, and mountain-drag relative error `0.12327601804709179`; pass remains false. | fail |
+| Schär first-substep-PGF plus forward-weight 0.60 matched-`dt` production discriminator closes the 1% substepper-vs-explicit gap | `schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_forward0p6_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_state_metrics.csv` reports exact coordinate parity and the best Schär production discriminator so far, but below-sponge `w_relative_linf_error=0.05385009410824209`, `w_relative_l2_error=0.086302493892431`, `w_normalized_rmse=0.01118454552297831`, `w_pattern_correlation=0.9963036281082229`, `w_projection_amplitude_error=0.01504397990572448`, pressure relative L2 `0.3343898584973857`, and mountain-drag relative error `0.09062794054993754`; pass remains false. | fail |
 | Schär invalid terrain-coordinate comparisons are rejected | `terrain_schar_substepper_vs_explicit.jl` now validates coordinate parity before computing metrics. The known invalid explicit-grid vs face-sampled substepper artifact fails fast with `state slices have different z coordinates; max |Δz| = 48.76914624945607`. | pass |
 | Schär low-amplitude linear-wave substepper artifact exists | `linear_mountain_wave_production_400x200_6h_gpu/linear_mountain_wave_state_metrics.csv` and `linear_mountain_wave_w_comparison.ppm` exist from a `400 x 200`, `6 h`, GPU, `h0 = 25 m` production run. | present |
 | Schär low-amplitude substepper satisfies analytical linear-wave 1% gates | `linear_mountain_wave_production_400x200_6h_gpu/linear_mountain_wave_state_metrics.csv` reports below-sponge, boundary-face-excluded `w_relative_l2_error=1.6310697784`, `w_relative_linf_error=0.4566711505`, `w_normalized_rmse=0.0971352861`, `w_pattern_correlation=0.4962314148`, `projection_amplitude_error=0.0687402754`, best shift `0`, `nan_count=0`, and `inf_count=0`; pass remains false. | fail |
@@ -98,11 +101,11 @@ The validation goal is not complete.
 
 - Schär has long matched `400x200` production artifacts and a matched CM1
   reference, but final-state and saved-time required 1% comparisons still
-  fail. The matched outer-`dt = 0.35 s` production discriminator completed and
-  improves the Tier-1 metrics, but still fails: below-sponge `w` L∞ is
-  `0.0745803850`, `w` L2 is `0.1232164948`, `w` RMSE/max is `0.0159684898`,
-  pressure relative L2 is `0.6617009969`, and drag relative error is
-  `0.4057695816`.
+  fail. The best matched outer-`dt = 0.35 s` production discriminator combines
+  first-substep PGF with `forward_weight = 0.60` and improves the Tier-1
+  metrics, but still fails: below-sponge `w` L∞ is `0.0538500941`, `w` L2 is
+  `0.0863024939`, `w` RMSE/max is `0.0111845455`, pressure relative L2 is
+  `0.3343898585`, and drag relative error is `0.0906279405`.
 - Complex mountain has complete production artifacts, comparisons, and a
   regenerated movie, but final-state and saved-time required 1% comparisons
   still fail.

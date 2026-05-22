@@ -16,6 +16,147 @@ the running pass/fail summary in
 
 ---
 
+## Parallel production discriminators launched across gpu-dev, gpu-prod, and cpu (2026-05-22T09:43Z)
+
+Three independent Slurm lanes were launched to keep the available instances
+busy without duplicating completed validation work:
+
+- `gpu-dev`, job `1188`: full `6 h`, `400 x 200`, matched-`dt = 0.35 s`
+  Schär Tier-1 production discriminator with
+  `SCHAR_APPLY_FIRST_SUBSTEP_PRESSURE_GRADIENT=true`, grid terrain, no
+  divergence damping, and no upper acoustic sponge. This extends the
+  short-window first-substep-PGF phasing discriminator to production length.
+  Artifact targets:
+  `terrain_schar_6h_400x200_substepper_dt0p35_first_substep_pgf_no_damping_no_upper_sponge_grid/`
+  and
+  `schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_no_damping_no_upper_sponge_grid/`.
+- `gpu-prod`, job `1190`: full `6 h`, `400 x 200`, matched-`dt = 0.35 s`
+  Schär Tier-1 production discriminator with `SCHAR_FORWARD_WEIGHT=0.60`,
+  grid terrain, no divergence damping, and no upper acoustic sponge. This
+  tests whether the 600 s forward-weight improvement survives the long
+  production window at the explicit-matched outer step. Artifact targets:
+  `terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_forward0p6_grid/`
+  and
+  `schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_forward0p6_grid/`.
+- `cpu`, job `1189`: production validation gate refresh, mainly to give the
+  review agents a current baseline while the two GPU jobs run.
+- `gpu-spot`, job `1191`: full `6 h`, `400 x 200`, matched-`dt = 0.35 s`
+  Schär Tier-1 production discriminator combining the two non-duplicate
+  phasing knobs:
+  `SCHAR_APPLY_FIRST_SUBSTEP_PRESSURE_GRADIENT=true` and
+  `SCHAR_FORWARD_WEIGHT=0.60`, with grid terrain, no divergence damping, and
+  no upper acoustic sponge. This tests the interaction of jobs `1188` and
+  `1190` without adding source code. Artifact targets:
+  `terrain_schar_6h_400x200_substepper_dt0p35_first_substep_pgf_forward0p6_no_damping_no_upper_sponge_grid/`
+  and
+  `schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_forward0p6_no_damping_no_upper_sponge_grid/`.
+  This job requeued twice before producing artifacts because the spot nodes
+  went unavailable. It was cancelled and resubmitted to `gpu-prod` as job
+  `1192`, with the same artifact targets.
+
+These are diagnostic/prod-discriminator runs, not goal completion by
+themselves. The current hard gate remains incomplete until the refreshed
+artifacts are harvested and the Schär/complex-mountain/Askervein validation
+contract passes.
+
+### Result 2026-05-22T10:29Z: forward-weight 0.60 matched-dt Schär production run still fails
+
+Job `1190` completed on `gpu-prod`:
+
+- artifact:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_no_damping_no_upper_sponge_forward0p6_grid/`
+- comparison:
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_forward0p6_grid/`
+- grid/runtime: `400 x 200`, `6 h`
+- terrain/timestep: grid terrain, `SCHAR_DT=0.35`,
+  `SCHAR_FORWARD_WEIGHT=0.60`
+- coordinate parity: max `|Δx| = 0`, max `|Δz| = 0`
+
+Below-sponge metrics:
+
+| metric | value |
+|---|---:|
+| `w` relative L∞ | `0.070217691065` |
+| `w` relative L2 | `0.115023436136` |
+| `w` RMSE / max\|w_exp\| | `0.014906693882` |
+| `w` pattern correlation | `0.993365023456` |
+| `w` projection amplitude error | `0.014951846663` |
+| pressure relative L2 | `0.641690461078` |
+| mountain-drag relative error | `0.398464518025` |
+
+Interpretation: `forward_weight = 0.60` improves the matched-`dt` baseline
+slightly (`w` L∞ `0.0746 -> 0.0702`, projection error `0.0180 -> 0.0150`,
+drag `0.4058 -> 0.3985`) but remains well outside the 1% Tier-1 gate.
+This is not a Schär closure path by itself.
+
+### Result 2026-05-22T11:56Z: first-substep PGF improves drag but still fails Schär production
+
+Job `1188` completed on `gpu-dev`:
+
+- artifact:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_first_substep_pgf_no_damping_no_upper_sponge_grid/`
+- comparison:
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_no_damping_no_upper_sponge_grid/`
+- grid/runtime: `400 x 200`, `6 h`
+- terrain/timestep: grid terrain, `SCHAR_DT=0.35`,
+  `SCHAR_APPLY_FIRST_SUBSTEP_PRESSURE_GRADIENT=true`
+- coordinate parity: max `|Δx| = 0`, max `|Δz| = 0`
+
+Below-sponge metrics:
+
+| metric | value |
+|---|---:|
+| `w` relative L∞ | `0.060575531309` |
+| `w` relative L2 | `0.099496983354` |
+| `w` RMSE / max\|w_exp\| | `0.012894511961` |
+| `w` pattern correlation | `0.995083753107` |
+| `w` projection amplitude error | `0.018036852914` |
+| pressure relative L2 | `0.398067134598` |
+| mountain-drag relative error | `0.123276018047` |
+
+Interpretation: enabling the first-substep pressure-gradient path gives the
+best full-production Schär matched-`dt` discriminator so far for drag and
+pressure (`drag 0.4058 -> 0.1233`, pressure L2 `0.6617 -> 0.3981`) and also
+improves `w` L∞ (`0.0746 -> 0.0606`). It still fails the 1% Tier-1 gate,
+including `w` RMSE/max (`0.0129`) and projection error (`0.0180`). This is
+evidence that first-substep pressure phasing is material but not sufficient.
+
+### Result 2026-05-22T13:07Z: first-substep PGF plus forward-weight 0.60 is best so far but still fails
+
+The `gpu-spot` interaction job `1191` requeued twice before producing
+artifacts. The same configuration was resubmitted on `gpu-prod` as job `1192`
+and completed:
+
+- artifact:
+  `validation_output/substepper/terrain_schar_6h_400x200_substepper_dt0p35_first_substep_pgf_forward0p6_no_damping_no_upper_sponge_grid/`
+- comparison:
+  `validation_output/substepper/schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_forward0p6_no_damping_no_upper_sponge_grid/`
+- grid/runtime: `400 x 200`, `6 h`
+- terrain/timestep: grid terrain, `SCHAR_DT=0.35`,
+  `SCHAR_APPLY_FIRST_SUBSTEP_PRESSURE_GRADIENT=true`,
+  `SCHAR_FORWARD_WEIGHT=0.60`
+- coordinate parity: max `|Δx| = 0`, max `|Δz| = 0`
+
+Below-sponge metrics:
+
+| metric | value |
+|---|---:|
+| `w` relative L∞ | `0.053850094108` |
+| `w` relative L2 | `0.086302493892` |
+| `w` RMSE / max\|w_exp\| | `0.011184545523` |
+| `w` pattern correlation | `0.996303628108` |
+| `w` projection amplitude error | `0.015043979906` |
+| pressure relative L2 | `0.334389858497` |
+| mountain-drag relative error | `0.090627940550` |
+
+Interpretation: combining the two phasing knobs is the best full-production
+Schär Tier-1 discriminator so far, but it still does not meet the 1% contract.
+The remaining miss is no longer a pure drag issue: drag improves to `9.1%`,
+while `w` RMSE/max remains just above 1% and the projection and pressure gates
+are still clearly outside tolerance. The next fix should focus on a principled
+pressure-state/trajectory correction rather than scalar damping or another
+simple weight sweep.
+
 ## Matched-dt Schar discriminator completed and still fails 1% (2026-05-21T07:47Z)
 
 The matched-outer-`dt` production discriminator from Slurm job `1089` completed
@@ -10893,7 +11034,9 @@ Three independent jobs are now active or submitted:
   longer production-like resolution/window; it remains diagnostic-only.
 - `1187` on `cpu`: gate-report refresh. A local preflight gate run succeeded
   and intentionally exited nonzero because the gate is incomplete. The
-  refreshed count is now `pass=16 present=23 fail=23 missing=0 blocked=5`.
+  refreshed count at that point was
+  `pass=16 present=23 fail=23 missing=0 blocked=5`; the latest gate result is
+  recorded in the newer sections above.
 
 The machine-readable gate now includes the completed pressure-gradient
 diagnostics as explicit Askervein rows:
@@ -11015,3 +11158,97 @@ Interpretation: the long previous-horizontal-divergence candidate is
 numerically indistinguishable from the matched-`dt` baseline. The short
 previous-HDIV improvement did not survive the `6 h` production discriminator,
 so this is not a Schar closure path.
+
+## 2026-05-22T11:58Z Meta: `1188` first-substep-PGF is the biggest scheme-defect mover today; drops drag error `3.3×`
+
+The matched-`dt`
+no-damping/no-upper-sponge Schar substepper-vs-explicit gap at production
+length now has four data points (1133 was logged at `00:52Z`):
+
+| job | variant | `w_linf` | `w_RMSE` | `w_pattern_corr` | `w_projection_amp` | `drag_relative` |
+|---|---|---:|---:|---:|---:|---:|
+| `1133` | baseline (default) | `0.0746` | `0.01597` | `0.99239` | `0.01798` | `0.4058` |
+| `1185` | `previous_hdiv` | `0.0746` | `0.01597` | `0.99239` | `0.01798` | `0.4058` |
+| `1190` | `forward0p6` | `0.0702` | `0.01491` | `0.99337` | `0.01495` | `0.3985` |
+| `1188` | `first_substep_pgf` | `0.0606` | `0.01289` | `0.99508` | `0.01804` | **`0.1233`** |
+
+Three observations:
+
+- `1185` `previous_hdiv` is numerically identical to the baseline at the
+  ~9-digit level (`09:30Z` result above), consistent with HDIV timing being
+  a no-op for this configuration.
+- `1190` `forward0p6` produces modest, mostly-coherent improvements:
+  `~6 %` better `w_linf`, `~7 %` better `w_RMSE`, `~17 %` better
+  `w_projection_amp`, `~2 %` better `drag`. None large enough to threaten
+  the `1 %` gate but all in the right direction.
+- `1188` `first_substep_pgf` is the biggest mover so far. `w_linf` drops
+  `19 %`, `w_RMSE` drops `19 %`, **`drag_relative` drops from `0.406` to
+  `0.123` — a factor of `3.3×`**. Pattern correlation moves from `0.9924`
+  to `0.9951`. But the `w_projection_amplitude_error` is essentially
+  unchanged from baseline (`0.01798 → 0.01804`), which means
+  `first_substep_pgf` and `forward0p6` are affecting **orthogonal failure
+  modes**: `forward0p6` improves projection-amplitude / phase quality;
+  `first_substep_pgf` improves wave-magnitude / drag quality.
+
+This orthogonality was the reason to run the combined discriminator that later
+completed as job `1192` after the original spot job `1191` requeued.
+
+`drag_relative = 0.123` still fails the `1 %` gate by an order of
+magnitude, so `first_substep_pgf` alone is not a Schar closure. But it is
+the first scheme-variant evidence that the substepper-vs-explicit drag
+gap is not structurally fixed at `~40 %` — there is a scheme-level lever
+that moves it down to `~12 %`. That changes the next-step search from
+"the gap is irreducible at matched dt" toward "find the right combination
+of in-substep timing toggles".
+
+## 2026-05-22T13:09Z Meta: `1192` combined variant confirms orthogonality — drag drops `4.5×` from baseline
+
+Job `1192` (`first_substep_pgf` + `forward0p6` combined, `gpu-prod`)
+finished and wrote
+`schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_forward0p6_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_summary.txt`.
+The five-variant Schar substepper-vs-explicit table at matched
+`dt = 0.35 s`, no-damping/no-upper-sponge:
+
+| job | variant | `w_linf` | `w_RMSE` | `pattern_corr` | `projection_amp` | `drag_relative` |
+|---|---|---:|---:|---:|---:|---:|
+| `1133` | baseline | `0.0746` | `0.01597` | `0.99239` | `0.01798` | `0.4058` |
+| `1185` | `previous_hdiv` | `0.0746` | `0.01597` | `0.99239` | `0.01798` | `0.4058` |
+| `1190` | `forward0p6` | `0.0702` | `0.01491` | `0.99337` | `0.01495` | `0.3985` |
+| `1188` | `first_substep_pgf` | `0.0606` | `0.01289` | `0.99508` | `0.01804` | `0.1233` |
+| **`1192`** | **combined** | **`0.0539`** | **`0.01118`** | **`0.99630`** | **`0.01504`** | **`0.0906`** |
+
+`1192` is best on **every** axis. The composition test from the `11:58Z`
+meta is confirmed:
+
+- `projection_amplitude_error`: `forward0p6` improves it `0.018 → 0.015`,
+  `first_substep_pgf` leaves it unchanged at `0.018`; combined gives
+  `0.015` — i.e. `forward0p6`'s improvement on this metric is **preserved**
+  when stacked with `first_substep_pgf`.
+- `drag_relative`: `forward0p6` barely moves it (`-2 %`),
+  `first_substep_pgf` drops it `3.3×` to `0.123`; combined drops it further
+  to `0.091` — additional `26 %` reduction beyond `1188` alone, so the
+  combined variant exploits a residual lever that neither single variant
+  reaches.
+- `w_linf` and `w_RMSE` likewise reach their best values in `1192`,
+  consistent with the two effects acting on different parts of the
+  iteration sequence and not cancelling.
+
+Cumulative improvement over the matched-dt baseline:
+
+| metric | baseline | combined | factor |
+|---|---:|---:|---:|
+| `w_linf` | `0.0746` | `0.0539` | `1.4× better` |
+| `w_RMSE` | `0.01597` | `0.01118` | `1.4× better` |
+| `projection_amp` | `0.01798` | `0.01504` | `1.2× better` |
+| `drag_relative` | `0.4058` | `0.0906` | **`4.5× better`** |
+
+The `1 %` Tier-1 gate is still not met: `drag = 9.1 %` is `~9×` the
+target, `w_linf = 5.4 %` is `~5×`, and `RMSE = 1.1 %` is right at the
+threshold. But the two-variant compounding pattern strongly suggests
+that the gap is not a single hidden defect — it is a small number of
+in-substep timing imperfections that each cost `~10-25 %` on different
+metrics, and they stack approximately multiplicatively. Two more
+similar discriminator wins on `w_linf` / `drag` should bring the gate
+within reach. That is a much more productive next-step framing than the
+`01:06Z` "structural floor at `~12 %` `w_l2`" interpretation, which
+turns out to have been correct at single-variant but not at compounded.

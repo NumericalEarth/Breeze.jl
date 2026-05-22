@@ -5,7 +5,7 @@ Status: quantitative validation generated; acceptance incomplete.
 Latest gate:
 
 ```text
-production validation gate: pass=16 present=23 fail=23 missing=0 blocked=5
+production validation gate: pass=16 present=23 fail=26 missing=0 blocked=5
 ```
 
 Gate report:
@@ -65,6 +65,41 @@ Primary failures:
   - `mountain_drag_relative_error = 0.4057695816151736`
   - coordinate parity passes exactly, but the result is effectively identical
     to the matched-`dt` baseline and fails the 1% Tier-1 gate.
+- forward-weight `0.60` matched `dt = 0.35 s`, no-damping, no-upper-sponge
+  discriminator in
+  `schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_forward0p6_grid/`:
+  - `w_relative_l2_error = 0.1150234361357348`
+  - `w_relative_linf_error = 0.07021769106471422`
+  - `w_normalized_rmse = 0.014906693881558191`
+  - `w_pattern_correlation = 0.9933650234561142`
+  - `w_projection_amplitude_error = 0.014951846662962565`
+  - `pressure_relative_l2_error = 0.6416904610778428`
+  - `mountain_drag_relative_error = 0.3984645180251729`
+  - coordinate parity passes exactly, but the 1% Tier-1 gate still fails.
+- first-substep-PGF matched `dt = 0.35 s`, no-damping, no-upper-sponge
+  discriminator in
+  `schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_no_damping_no_upper_sponge_grid/`:
+  - `w_relative_l2_error = 0.0994969833538295`
+  - `w_relative_linf_error = 0.06057553130893131`
+  - `w_normalized_rmse = 0.012894511960534663`
+  - `w_pattern_correlation = 0.9950837531073307`
+  - `w_projection_amplitude_error = 0.018036852913514867`
+  - `pressure_relative_l2_error = 0.39806713459847487`
+  - `mountain_drag_relative_error = 0.12327601804709179`
+  - coordinate parity passes exactly, and pressure/drag improve materially,
+    but the 1% Tier-1 gate still fails.
+- first-substep-PGF plus forward-weight `0.60` matched `dt = 0.35 s`,
+  no-damping, no-upper-sponge discriminator in
+  `schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_forward0p6_no_damping_no_upper_sponge_grid/`:
+  - `w_relative_l2_error = 0.086302493892431`
+  - `w_relative_linf_error = 0.05385009410824209`
+  - `w_normalized_rmse = 0.01118454552297831`
+  - `w_pattern_correlation = 0.9963036281082229`
+  - `w_projection_amplitude_error = 0.01504397990572448`
+  - `pressure_relative_l2_error = 0.3343898584973857`
+  - `mountain_drag_relative_error = 0.09062794054993754`
+  - coordinate parity passes exactly, and this is the best Schär production
+    discriminator so far, but the 1% Tier-1 gate still fails.
 - projection-amplitude gates:
   - explicit-vs-CM1 below-sponge `projection_amplitude_error = 0.17606602967141627`
   - substepper-vs-explicit below-sponge `projection_amplitude_error = 0.09475538706521736`

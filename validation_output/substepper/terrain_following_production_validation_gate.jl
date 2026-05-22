@@ -1590,6 +1590,33 @@ function build_checks()
                         tier1_discriminator_pass(schar_previous_hdiv_discriminator) ? "pass" : "fail",
                         tier1_discriminator_evidence(schar_previous_hdiv_discriminator)))
 
+    schar_first_substep_pgf_discriminator =
+        joinpath(ROOT, "schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_no_damping_no_upper_sponge_grid",
+                 "schar_substepper_vs_explicit_state_metrics.csv")
+    push!(checks, Check("Schär",
+                        "First-substep-PGF matched-dt production discriminator satisfies coordinate-matched 1% Tier-1 gates",
+                        !isfile(schar_first_substep_pgf_discriminator) ? "missing" :
+                        tier1_discriminator_pass(schar_first_substep_pgf_discriminator) ? "pass" : "fail",
+                        tier1_discriminator_evidence(schar_first_substep_pgf_discriminator)))
+
+    schar_forward0p6_discriminator =
+        joinpath(ROOT, "schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_forward0p6_grid",
+                 "schar_substepper_vs_explicit_state_metrics.csv")
+    push!(checks, Check("Schär",
+                        "Forward-weight 0.60 matched-dt production discriminator satisfies coordinate-matched 1% Tier-1 gates",
+                        !isfile(schar_forward0p6_discriminator) ? "missing" :
+                        tier1_discriminator_pass(schar_forward0p6_discriminator) ? "pass" : "fail",
+                        tier1_discriminator_evidence(schar_forward0p6_discriminator)))
+
+    schar_first_substep_pgf_forward0p6_discriminator =
+        joinpath(ROOT, "schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_forward0p6_no_damping_no_upper_sponge_grid",
+                 "schar_substepper_vs_explicit_state_metrics.csv")
+    push!(checks, Check("Schär",
+                        "First-substep-PGF plus forward-weight 0.60 matched-dt production discriminator satisfies coordinate-matched 1% Tier-1 gates",
+                        !isfile(schar_first_substep_pgf_forward0p6_discriminator) ? "missing" :
+                        tier1_discriminator_pass(schar_first_substep_pgf_forward0p6_discriminator) ? "pass" : "fail",
+                        tier1_discriminator_evidence(schar_first_substep_pgf_forward0p6_discriminator)))
+
     linear_substepper_metrics =
         joinpath(ROOT, "linear_mountain_wave_production_400x200_6h_gpu",
                  "linear_mountain_wave_state_metrics.csv")

@@ -1,7 +1,7 @@
 # Terrain-Following Production Validation Completion Audit
 
 Status: incomplete as of 2026-05-22. Latest production gate:
-`pass=16 present=23 fail=23 missing=0 blocked=5`.
+`pass=16 present=23 fail=26 missing=0 blocked=5`.
 
 Objective:
 
@@ -28,6 +28,9 @@ Objective:
 | Schar low-amplitude exact-wtilde explicit-control metrics | `linear_mountain_wave_explicit_production_400x200_6h_gpu_wtilde/linear_mountain_wave_state_metrics.csv`; stable, but below-sponge `w_tilde_relative_l2_error = 0.9243801650`, `w_tilde_relative_linf_error = 0.4364041061`, and `w_tilde_pattern_correlation = 0.6997871856` | fail |
 | Schar matched outer-dt production discriminator | Current-branch refresh `schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_grid_current_gpu_prod_1133/schar_substepper_vs_explicit_state_metrics.csv`; exact coordinate parity, improved relative to the `dt = 2 s` no-damping/no-sponge candidate, but below-sponge `w_relative_l2_error = 0.1232164948`, `w_relative_linf_error = 0.0745803850`, `w_normalized_rmse = 0.0159684898`, pressure relative L2 `0.6617009969`, and drag relative error `0.4057695816` still fail 1% | fail |
 | Schar previous-horizontal-divergence matched-dt production discriminator | `schar_substepper_vs_explicit_tier1_6h_dt0p35_previous_hdiv_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_state_metrics.csv`; exact coordinate parity, but below-sponge `w_relative_l2_error = 0.1232164948`, `w_relative_linf_error = 0.0745803850`, `w_normalized_rmse = 0.0159684898`, pressure relative L2 `0.6617009969`, and drag relative error `0.4057695816` still fail 1% and match the baseline failure | fail |
+| Schar forward-weight 0.60 matched-dt production discriminator | `schar_substepper_vs_explicit_tier1_6h_dt0p35_no_damping_no_upper_sponge_forward0p6_grid/schar_substepper_vs_explicit_state_metrics.csv`; exact coordinate parity, but below-sponge `w_relative_l2_error = 0.1150234361`, `w_relative_linf_error = 0.0702176911`, `w_normalized_rmse = 0.0149066939`, pressure relative L2 `0.6416904611`, and drag relative error `0.3984645180` still fail 1% | fail |
+| Schar first-substep-PGF matched-dt production discriminator | `schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_state_metrics.csv`; exact coordinate parity, but below-sponge `w_relative_l2_error = 0.0994969834`, `w_relative_linf_error = 0.0605755313`, `w_normalized_rmse = 0.0128945120`, pressure relative L2 `0.3980671346`, and drag relative error `0.1232760180` still fail 1% | fail |
+| Schar first-substep-PGF plus forward-weight 0.60 matched-dt production discriminator | `schar_substepper_vs_explicit_tier1_6h_dt0p35_first_substep_pgf_forward0p6_no_damping_no_upper_sponge_grid/schar_substepper_vs_explicit_state_metrics.csv`; exact coordinate parity and best Schar production discriminator so far, but below-sponge `w_relative_l2_error = 0.0863024939`, `w_relative_linf_error = 0.0538500941`, `w_normalized_rmse = 0.0111845455`, pressure relative L2 `0.3343898585`, and drag relative error `0.0906279405` still fail 1% | fail |
 | Schar 2 s operator-budget blocker baseline | `schar_2s_operator_budget_blocker_summary.csv` consolidates the early-time PGF, buoyancy, and advection blocker rows. `schar_2s_cm1_budget_closure_summary.csv` verifies CM1's own emitted u-budget closes to `(u₂-u₀)/Δt` at relative L2 `2.582710086e-8`, while `schar_2s_breeze_acoustic_increment_vs_cm1_ub_pgrad_summary.csv` shows Breeze's simple outer-step acoustic increment still fails against CM1 `ub_pgrad` at relative L2 `1.181135702`. Stable explicit Breeze `dt = 0.1 s` face-`u` increment also fails against CM1 face-`u` increment at relative L2 `1.324056471`; the CM1-terrain/CM1-constants rerun remains at relative L2 `1.339791739`. Active substepper pressure diagnostics self-close to roundoff but still fail against CM1 acoustic `ppd`; the horizontal channel dominates (`relative_l2 = 1.317131151`), pressure-vs-Exner, one-face shifts, sign flip, ungated first-substep pressure, post-recovery pressure replay, and nonlinear acoustic-state pressure reconstruction are ruled out. The post-recovery replay improves only to `relative_l2 = 1.174397371` against total CM1 acoustic `ppd`; nonlinear pressure follows the bad ungated branch (`relative_l2 = 1.363666148`) and remains diagnostic evidence only. | present |
 | Complex mountain production manifest | `complex_mountain_doernbrack_production_manifest.md` declares 120x120x150 Doernbrack, 6 h, matched CM1/Breeze grid | pass |
 | Complex mountain Breeze substepper production artifact | `complex_mountain_production_substepper/complex_mountain_state_slice.csv` and metrics/summary/time series | pass |
@@ -187,7 +190,7 @@ earlier gate result: pass=16 present=16 fail=15 missing=0 blocked=5
 ```
 
 The gate remains incomplete. This historical count is superseded by the latest
-gate result recorded above: `pass=16 present=23 fail=23 missing=0 blocked=5`.
+gate result recorded above: `pass=16 present=23 fail=26 missing=0 blocked=5`.
 
 CM1 source inspection identifies the next Schar operator mismatch. In the
 official NCAR/CM1 source, `psolver = 3` applies `kdiv` by first updating pressure
@@ -478,14 +481,15 @@ julia --project=. --color=no validation_output/substepper/terrain_following_prod
 Latest result:
 
 ```text
-production validation gate: pass=16 present=23 fail=23 missing=0 blocked=5
+production validation gate: pass=16 present=23 fail=26 missing=0 blocked=5
 ```
 
 The gate remains incomplete. Completion is blocked by:
 
 - measured 1% accuracy failures in Schar and complex mountain;
-- the matched outer-`dt = 0.35 s` Schar production discriminator improves but
-  still fails the Schar Tier-1 gates;
+- the best matched outer-`dt = 0.35 s` Schar production discriminator now
+  combines first-substep PGF with `forward_weight = 0.60`; it improves the
+  Schar Tier-1 metrics but still fails the 1% gates;
 - measured analytical and substepper-vs-explicit 1% failures in the
   low-amplitude Schar linear-wave production control;
 - Askervein's missing coordinate-faithful production definition;

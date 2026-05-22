@@ -7,7 +7,7 @@ been generated for Askervein. The active 1% accuracy contract is not satisfied.
 Latest gate:
 
 ```text
-production validation gate: pass=16 present=23 fail=23 missing=0 blocked=5
+production validation gate: pass=16 present=23 fail=26 missing=0 blocked=5
 ```
 
 ## Contract
@@ -75,6 +75,25 @@ three-resolution convergence.
   `w_normalized_rmse = 0.0159684898`,
   `w_projection_amplitude_error = 0.0179820855`, pressure relative L2
   `0.6617009969`, and mountain-drag relative error `0.4057695816`.
+- forward-weight `0.60` matched outer-`dt` discriminator: fail.
+  Below-sponge `w_relative_linf_error = 0.0702176911`,
+  `w_relative_l2_error = 0.1150234361`,
+  `w_normalized_rmse = 0.0149066939`,
+  `w_projection_amplitude_error = 0.0149518467`, pressure relative L2
+  `0.6416904611`, and mountain-drag relative error `0.3984645180`.
+- first-substep-PGF matched outer-`dt` discriminator: fail.
+  Below-sponge `w_relative_linf_error = 0.0605755313`,
+  `w_relative_l2_error = 0.0994969834`,
+  `w_normalized_rmse = 0.0128945120`,
+  `w_projection_amplitude_error = 0.0180368529`, pressure relative L2
+  `0.3980671346`, and mountain-drag relative error `0.1232760180`.
+- first-substep-PGF plus forward-weight `0.60` matched outer-`dt`
+  discriminator: fail, but best so far. Below-sponge
+  `w_relative_linf_error = 0.0538500941`,
+  `w_relative_l2_error = 0.0863024939`,
+  `w_normalized_rmse = 0.0111845455`,
+  `w_projection_amplitude_error = 0.0150439799`, pressure relative L2
+  `0.3343898585`, and mountain-drag relative error `0.0906279405`.
 
 ## Schar Low-Amplitude Linear Wave 6 h 400x200
 
