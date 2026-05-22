@@ -385,14 +385,14 @@ using Breeze.Thermodynamics: Thermodynamics
 
 @inline function liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
     FT = typeof(T)
-    cₚᵈ = p3_dry_air_heat_capacity(constants, FT)
-    return 1 + ℒˡ^2 * qᵛ⁺ˡ / (Rᵛ * T^2 * cₚᵈ)
+    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
+    return 1 + ℒˡ^2 * qᵛ⁺ˡ / (Rᵛ * T^2 * cᵖᵈ)
 end
 
 @inline function ice_psychrometric_correction(constants, ℒⁱ, qᵛ⁺ⁱ, Rᵛ, T)
     FT = typeof(T)
-    cₚᵈ = p3_dry_air_heat_capacity(constants, FT)
-    return 1 + ℒⁱ^2 * qᵛ⁺ⁱ / (Rᵛ * T^2 * cₚᵈ)
+    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
+    return 1 + ℒⁱ^2 * qᵛ⁺ⁱ / (Rᵛ * T^2 * cᵖᵈ)
 end
 
 #####

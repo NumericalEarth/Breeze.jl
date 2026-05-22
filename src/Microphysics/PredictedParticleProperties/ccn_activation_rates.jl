@@ -42,7 +42,7 @@ for ``r = 1`` μm. The rate is limited by the available supersaturation.
 # Returns
 - Rate of vapor → cloud liquid conversion from CCN activation [kg/kg/s]
 """
-@inline function ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖₘ)
+@inline function ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖᵐ)
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
@@ -59,7 +59,7 @@ for ``r = 1`` μm. The rate is limited by the available supersaturation.
     ℒˡ = liquid_latent_heat(T, constants)
     Rᵛ = vapor_gas_constant(constants)
     dqᵛ⁺_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
-    Γˡ = 1 + (ℒˡ / cᵖₘ) * dqᵛ⁺_dT
+    Γˡ = 1 + (ℒˡ / cᵖᵐ) * dqᵛ⁺_dT
 
     # Limit by available supersaturation (Fortran: min(tmp1, (Qv_cld-dumqvs)/ab))
     max_from_ss = clamp_positive((qᵛ - qᵛ⁺ˡ) / Γˡ)
@@ -76,7 +76,7 @@ $(TYPEDSIGNATURES)
 Dispatch CCN activation: prescribed (Nothing) or prognostic (AerosolActivation).
 Returns `(; mass, number)` named tuple.
 """
-@inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖₘ)
+@inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖᵐ)
     FT = typeof(qᶜˡ)
     # Prescribed-Nᶜ path (Fortran `log_predictNc = .false.`, `nc = nccnst_2`):
     # the activation target is the scheme parameter, not the DSD-diagnosed `Nᶜ`.
@@ -84,11 +84,11 @@ Returns `(; mass, number)` named tuple.
     # returned `Nᶜ` toward zero — using that value would collapse `target_qc`
     # and block any seed mass from forming in a warm-bubble parcel.
     target_Nᶜ = p3.cloud.number_concentration
-    mass = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, target_Nᶜ, constants, cᵖₘ)
+    mass = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, target_Nᶜ, constants, cᵖᵐ)
     return (; mass, number = zero(FT))
 end
 
-@inline function compute_ccn_activation(aerosol::AerosolActivation, p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖₘ)
+@inline function compute_ccn_activation(aerosol::AerosolActivation, p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖᵐ)
     result = prognostic_ccn_activation_rate(aerosol, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T)
     return (; mass = result.qcnuc, number = result.ncnuc)
 end

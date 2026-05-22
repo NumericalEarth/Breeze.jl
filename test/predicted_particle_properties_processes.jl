@@ -1227,7 +1227,7 @@ end
                                                      constants, transport, q, μ)
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-        cᵖₘ = mixture_heat_capacity(q, constants)
+        cᵖᵐ = mixture_heat_capacity(q, constants)
         # predict_supersaturation defaults to false, so this M&G call sees
         # the host state directly and the G&M ε is gated to zero by
         # `compute_p3_process_rates` (not this function).
@@ -1235,7 +1235,7 @@ end
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖₘ)
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖᵐ)
         expected_rates = expected_reduced_fortran_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
@@ -1247,7 +1247,7 @@ end
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖₘ)
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖᵐ)
 
         @test epsr ≈ expected_epsr
         @test epsi ≈ expected_epsi
@@ -1267,7 +1267,7 @@ end
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖₘ)
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖᵐ)
         @test rates_w0.condensation === rates.condensation
         @test rates_w0.deposition === rates.deposition
         @test rates_w0.rain_evaporation === rates.rain_evaporation
@@ -1285,12 +1285,12 @@ end
             q_ad = MoistureMassFractions(qᵛ_ad, qᶜˡ + qʳ + qʷⁱ, zero(FT))
             transport_ad = air_transport_properties(T_ad, P)
             cloud_ad = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-            cᵖₘ_ad = mixture_heat_capacity(q_ad, constants)
+            cᵖᵐ_ad = mixture_heat_capacity(q_ad, constants)
             rates_w = PPP.coupled_saturation_adjustment_rates(
                 p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
                 qᵛ_ad, qᵛ⁺ˡ_ad, qᵛ⁺ⁱ_ad, Fᶠ, ρᶠ, T_ad, P, ρ,
                 constants, transport_ad, q_ad, μ,
-                cloud_ad.μ_c, cloud_ad.λ_c, cloud_ad.nᶜˡ, w_ad, cᵖₘ_ad)
+                cloud_ad.μ_c, cloud_ad.λ_c, cloud_ad.nᶜˡ, w_ad, cᵖᵐ_ad)
             @test rates_w.condensation > 0
             @test rates_w.deposition == 0  # no ice present
         end
@@ -1307,13 +1307,13 @@ end
             q_s = MoistureMassFractions(qᵛ_s, qᶜˡ + qʳ + qʷⁱ, zero(FT))
             transport_s = air_transport_properties(T_s, P)
             cloud_s = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-            cᵖₘ_s = mixture_heat_capacity(q_s, constants)
+            cᵖᵐ_s = mixture_heat_capacity(q_s, constants)
             common = (p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
                       qᵛ_s, qᵛ⁺ˡ_s, qᵛ⁺ⁱ_s, Fᶠ, ρᶠ, T_s, P, ρ,
                       constants, transport_s, q_s, μ,
                       cloud_s.μ_c, cloud_s.λ_c, cloud_s.nᶜˡ)
-            rates_up   = PPP.coupled_saturation_adjustment_rates(common..., FT(+1.0), cᵖₘ_s)
-            rates_down = PPP.coupled_saturation_adjustment_rates(common..., FT(-1.0), cᵖₘ_s)
+            rates_up   = PPP.coupled_saturation_adjustment_rates(common..., FT(+1.0), cᵖᵐ_s)
+            rates_down = PPP.coupled_saturation_adjustment_rates(common..., FT(-1.0), cᵖᵐ_s)
             @test rates_up.condensation > 0
             # Descending air evaporates the cloud reservoir: with cloud present
             # and A_w < 0 the `condensation` channel goes negative (cloud → vapor),
@@ -1357,12 +1357,12 @@ end
                                                          constants, transport, q, μ)
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-        cᵖₘ = mixture_heat_capacity(q, constants)
+        cᵖᵐ = mixture_heat_capacity(q, constants)
         rates = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖₘ)
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖᵐ)
         expected_rates = expected_reduced_fortran_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,

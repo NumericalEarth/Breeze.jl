@@ -62,7 +62,7 @@ struct P3DerivedState{FT, Q}
     K_a :: FT       # thermal conductivity of air [W/m/K]
     nu :: FT        # kinematic viscosity [m²/s]
     # Mixture heat capacity (hoisted to avoid recomputation in phase-1 sub-functions)
-    cᵖₘ :: FT       # moist mixture heat capacity [J/kg/K]
+    cᵖᵐ :: FT       # moist mixture heat capacity [J/kg/K]
 end
 
 @inline function liquid_supersaturation_after_moisture_update(𝒰, qᵛ, qˡ, qⁱ, ρ, constants)
@@ -276,7 +276,7 @@ end
 
     # Transport properties (reconstructed as NamedTuple for existing function signatures)
     transport = (; D_v = state.D_v, K_a = state.K_a, nu = state.nu)
-    cᵖₘ = state.cᵖₘ
+    cᵖᵐ = state.cᵖᵐ
 
     # =========================================================================
     # Coupled cloud/rain/ice vapor growth and decay
@@ -285,11 +285,11 @@ end
                                                       ℳ.qⁱ, ℳ.qʷⁱ, nⁱ, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ,
                                                       Fᶠ, ρᶠ, T, P, ρ, constants,
                                                       transport, q, μ_ice,
-                                                      state.μ_c, state.λ_c, state.nᶜˡ, ℳ.w, cᵖₘ)
+                                                      state.μ_c, state.λ_c, state.nᶜˡ, ℳ.w, cᵖᵐ)
     cond = vapor_rates.condensation
 
     # CCN activation (prescribed or prognostic; depletes ℳ.nᵃ when prognostic)
-    ccn = compute_ccn_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖₘ)
+    ccn = compute_ccn_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖᵐ)
     ccn_act = ccn.mass
     ccn_act_n = ccn.number
 
@@ -570,8 +570,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     ℳ_adjusted = P3MicrophysicalState(qᶜˡ, ℳ.nᶜˡ, qʳ, ℳ.nʳ, qⁱ, ℳ.nⁱ,
                                       qᶠ, bᶠ, ℳ.zⁱ, qʷⁱ, qᵛ - qᵛ⁺ˡ, ℳ.nᵃ, ℳ.w)
 
-    # Hoist cᵖₘ once; shared by coupled_saturation_adjustment_rates and ccn_activation_rate.
-    cᵖₘ = mixture_heat_capacity(q, constants)
+    # Hoist cᵖᵐ once; shared by coupled_saturation_adjustment_rates and ccn_activation_rate.
+    cᵖᵐ = mixture_heat_capacity(q, constants)
 
     # Build derived state struct (explicit type parameters to avoid
     # jl_f_throw_methoderror in @noinline GPU compilation)
@@ -579,7 +579,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
                                           μ_ice, Fˡ_mu, Nᶜ, cloud.nᶜˡ,
                                           cloud.μ_c, cloud.λ_c,
                                           T, P, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, q,
-                                          transport.D_v, transport.K_a, transport.nu, cᵖₘ)
+                                          transport.D_v, transport.K_a, transport.nu, cᵖᵐ)
 
     # === PHASE 1 & 2 RATES (delegated to @noinline sub-functions) ===
     ph1 = _p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state)
