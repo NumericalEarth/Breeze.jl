@@ -85,6 +85,14 @@ jobs:
           julia --color=yes --project=docs --threads 1,$(($(nproc)-1)) docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: "Upload Manifest"
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: manifest
+          path: '**/Manifest*.toml'
+          retention-days: 90
       - name: "Upload docs build as artifact"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
