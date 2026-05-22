@@ -943,61 +943,52 @@ end
 
     @inbounds begin
         # Cell-centred predictors `ρ′★`, `ρθ′★`.
-        for k in 1:Nz
-            V = Vᶜᶜᶜ(i, j, k, grid)
+        V = Vᶜᶜᶜ(i, j, k, grid)
 
-            ∇ʰ_M  = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
-            ∇ʰ_θM = (δxᶜᵃᵃ(i, j, k, grid, theta_face_x_flux, θᴸ, ρu′) +
-                     δyᵃᶜᵃ(i, j, k, grid, theta_face_y_flux, θᴸ, ρv′)) / V
+        ∇ʰ_M  = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
+        ∇ʰ_θM = (δxᶜᵃᵃ(i, j, k, grid, theta_face_x_flux, θᴸ, ρu′) +
+                    δyᵃᶜᵃ(i, j, k, grid, theta_face_y_flux, θᴸ, ρv′)) / V
 
-            ρ′★[i, j, k]  = ρ′[i, j, k] +
-                                Δτ * (Gˢρ[i, j, k] - ∇ʰ_M) -
-                                δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, ρw′)
+        ρ′★[i, j, k]  = ρ′[i, j, k] +
+                            Δτ * (Gˢρ[i, j, k] - ∇ʰ_M) -
+                            δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, ρw′)
 
-            ρθ′★[i, j, k] = ρθ′[i, j, k] +
-                                Δτ * (Gˢρθ[i, j, k] - ∇ʰ_θM) -
-                                δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, theta_face_z_flux, θᴸ, ρw′)
-        end
+        ρθ′★[i, j, k] = ρθ′[i, j, k] +
+                            Δτ * (Gˢρθ[i, j, k] - ∇ʰ_θM) -
+                            δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, theta_face_z_flux, θᴸ, ρw′)
 
         # Face-level RHS for `(ρw)′ᵐ⁺` tridiag — split weights for the
         # predictor and old-step contributions per derivation (15).
         # `dˢ⁻ = (1−ω) α Δz²` adds the explicit half of the implicit
         # vertical damping (zero when damping is off or damp_vertical=false).
-        for k in 2:Nz
-            Δzᶠ   = Δzᶜᶜᶠ(i, j, k, grid)
-            Cᵏ⁺ = γRᵐᴸ[i, j, k]     * Πᴸ[i, j, k]
-            Cᵏ⁻ = γRᵐᴸ[i, j, k - 1] * Πᴸ[i, j, k - 1]
+        Δzᶠ   = Δzᶜᶜᶠ(i, j, k, grid)
+        Cᵏ⁺ = γRᵐᴸ[i, j, k]     * Πᴸ[i, j, k]
+        Cᵏ⁻ = γRᵐᴸ[i, j, k - 1] * Πᴸ[i, j, k - 1]
 
-            ∂z_p′★  = Cᵏ⁺ * ρθ′★[i, j, k] - Cᵏ⁻ * ρθ′★[i, j, k - 1]
-            ∂z_p′ˢ⁻ = Cᵏ⁺ * ρθ′[i, j, k]  - Cᵏ⁻ * ρθ′[i, j, k - 1]
+        ∂z_p′★  = Cᵏ⁺ * ρθ′★[i, j, k] - Cᵏ⁻ * ρθ′★[i, j, k - 1]
+        ∂z_p′ˢ⁻ = Cᵏ⁺ * ρθ′[i, j, k]  - Cᵏ⁻ * ρθ′[i, j, k - 1]
 
-            sound_force = (δτˢ⁻ * ∂z_p′ˢ⁻ + δτᵐ⁺ * ∂z_p′★) / Δzᶠ
+        sound_force = (δτˢ⁻ * ∂z_p′ˢ⁻ + δτᵐ⁺ * ∂z_p′★) / Δzᶠ
 
-            ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
-            ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)
-            buoy_force = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★)
+        ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
+        ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)
+        buoy_force = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★)
 
-            # Explicit (old-step) half of the vertical damping
-            # `(1−ω) α Δz² ∂z²(ρw)′ˢ⁻`, evaluated at face k. The face-coupling
-            # stencil matches the implicit half folded into the tridiag in
-            # `get_coefficient`.
-            ∂z²_ρw′ˢ⁻  = ∂zᶜᶜᶠ(i, j, k, grid, ∂zᶜᶜᶜ, ρw′)
-            damp_force = - dˢ⁻ * ∂z²_ρw′ˢ⁻
+        # Explicit (old-step) half of the vertical damping
+        # `(1−ω) α Δz² ∂z²(ρw)′ˢ⁻`, evaluated at face k. The face-coupling
+        # stencil matches the implicit half folded into the tridiag in
+        # `get_coefficient`.
+        ∂z²_ρw′ˢ⁻  = ∂zᶜᶜᶠ(i, j, k, grid, ∂zᶜᶜᶜ, ρw′)
+        damp_force = - dˢ⁻ * ∂z²_ρw′ˢ⁻
 
-            # Explicit (old-step) half of the upper Rayleigh sponge:
-            # `(1−ω) Δτ × rate × ramp(z) × (ρw)′ˢ⁻` = `δτˢ⁻ × rate × ramp(z) × (ρw)′ˢ⁻`.
-            # The matching implicit half on the LHS lives in `get_coefficient`'s
-            # diagonal contribution. Local in z, so face-only.
-            sponge_force = sponge_rhs(i, j, k, grid, sponge, δτˢ⁻, ρw′)
+        # Explicit (old-step) half of the upper Rayleigh sponge:
+        # `(1−ω) Δτ × rate × ramp(z) × (ρw)′ˢ⁻` = `δτˢ⁻ × rate × ramp(z) × (ρw)′ˢ⁻`.
+        # The matching implicit half on the LHS lives in `get_coefficient`'s
+        # diagonal contribution. Local in z, so face-only.
+        sponge_force = sponge_rhs(i, j, k, grid, sponge, δτˢ⁻, ρw′)
 
-            ρw′_rhs[i, j, k] = ρw′[i, j, k] + Δτ * Gˢρw[i, j, k] -
-                               sound_force - buoy_force - damp_force - sponge_force
-        end
-
-        # Boundary-row RHS values: f[1] = 0 (matches diagonal b[1] = 1 → (ρw)′[1] = 0).
-        ρw′_rhs[i, j, 1] = 0
-        # Top face (Nz+1) lives outside the solver; impenetrability w(top) = 0.
-        ρw′_rhs[i, j, Nz + 1] = 0
+        ρw′_rhs[i, j, k] = (ρw′[i, j, k] + Δτ * Gˢρw[i, j, k] -
+                            sound_force - buoy_force - damp_force - sponge_force) * (k > 1)
     end
 end
 
@@ -1100,7 +1091,6 @@ end
 
 @inline dρθ′(i, j, k, grid, ρθ′, ρθ′ˢ⁻) = @inbounds ρθ′[i, j, k] - ρθ′ˢ⁻[i, j, k]
 
-struct NoHorizontalDampingScale end
 struct LocalHorizontalDampingScale{FT}
     coefficient_over_Δτ :: FT
 end
@@ -1117,14 +1107,8 @@ end
     return FixedHorizontalDampingScale(α * ℓ^2 / Δτ)
 end
 
-@inline x_damping_diffusivity(i, j, k, grid, ::NoHorizontalDampingScale) = zero(grid)
-@inline y_damping_diffusivity(i, j, k, grid, ::NoHorizontalDampingScale) = zero(grid)
-
-@inline x_damping_diffusivity(i, j, k, grid, scale::FixedHorizontalDampingScale) =
-    scale.diffusivity
-
-@inline y_damping_diffusivity(i, j, k, grid, scale::FixedHorizontalDampingScale) =
-    scale.diffusivity
+@inline x_damping_diffusivity(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
+@inline y_damping_diffusivity(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
 
 @inline x_damping_diffusivity(i, j, k, grid, scale::LocalHorizontalDampingScale) =
     scale.coefficient_over_Δτ * Δxᶠᶜᶜ(i, j, k, grid)^2
@@ -1368,7 +1352,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
         dᵐ⁺, dˢ⁻ = implicit_damping_factors(substepper.damping, ω, one_minus_ω, grid, FT)
 
         # Step B: build predictors `ρ′★`, `ρθ′★` and the tridiag RHS for (ρw)′ᵐ⁺
-        launch!(arch, grid, :xy, _build_predictors_and_vertical_rhs!,
+        launch!(arch, grid, :xyz, _build_predictors_and_vertical_rhs!,
                 substepper.momentum_perturbation.w,
                 substepper.density_predictor,
                 substepper.density_potential_temperature_predictor,
