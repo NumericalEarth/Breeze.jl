@@ -91,10 +91,10 @@ Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
 gaussian(x, z) = exp(-(x^2 + z^2) / 2σ^2)
 ρ₀ = interior(reference.density, 1, 1, 1)[]
 
-ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
-uᵢ(x, z) = Uᵢ(z) # + (ℂᵃᶜ / ρ₀) * δρ * gaussian(x, z)
+ρᵢ_func(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
+uᵢ_func(x, z) = Uᵢ(z) # + (ℂᵃᶜ / ρ₀) * δρ * gaussian(x, z)
 
-set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
+set!(model, ρ=ρᵢ_func, θ=θ₀, u=uᵢ_func)
 
 
 # ## Simulation setup
@@ -270,7 +270,7 @@ model_ad = AtmosphereModel(grid_ad; dynamics = CompressibleDynamics(ExplicitTime
 set!(ρᵇᵍ, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
 
 ρ_total = CenterField(grid_ad)
-set!(ρ_total, ρᵢ)
+set!(ρ_total, ρᵢ_func)
 
 # The initial wind field is the quantity we differentiate with respect to.
 # Enzyme accumulates ``∂J / ∂u_i`` into the shadow buffer ``du_i``.
