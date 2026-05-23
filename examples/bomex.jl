@@ -148,55 +148,52 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 #
 # A prescribed large-scale drying tendency removes moisture above the cloud layer
 # ([Siebesma2003](@citet); Appendix B, Eq. B4). This represents the effects of
-# advection by the large-scale circulation.
+# advection by the large-scale circulation. We supply this tendency in specific form
+# (per unit mass); Breeze multiplies by ``ρ`` automatically at kernel time when the
+# forcing is keyed under the specific variable name `qᵉ`.
 
-ρᵣ = reference_state.density
 drying = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
 set!(drying, z -> dqdt_profile(z))
-set!(drying, ρᵣ * drying)
-ρqᵉ_drying_forcing = Forcing(drying)
+qᵉ_drying_forcing = Forcing(drying)
 
 # ## Radiative cooling
 #
 # A prescribed radiative cooling profile is applied to the thermodynamic equation
 # ([Siebesma2003](@citet); Appendix B, Eq. B3). Below the inversion, radiative cooling
-# of about 2 K/day counteracts the surface heating. We use an energy forcing for radiation
-# to ensure that it is applied to the potential temperature conservation equation
-# consistently (see below for some elaboration about that).
+# of about 2 K/day counteracts the surface heating. We supply the cooling as a specific
+# energy tendency `e` (J/kg/s) so it is consistently applied to the potential temperature
+# equation (see below).
 
-Fρe_field = Field{Nothing, Nothing, Center}(grid)
+radiative_cooling = Field{Nothing, Nothing, Center}(grid)
 cᵖᵈ = constants.dry_air.heat_capacity
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
-set!(Fρe_field, z -> dTdt_bomex(1, z))
-set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
-ρe_radiation_forcing = Forcing(Fρe_field)
+set!(radiative_cooling, z -> cᵖᵈ * dTdt_bomex(1, z))
+e_radiation_forcing = Forcing(radiative_cooling)
 
 # ## Assembling all the forcings
 #
-# We build tuples of forcings for all the variables. Note that forcing functions
-# are provided for both `ρθ` and `ρe`, which both contribute to the tendency of `ρθ`
-# in different ways. In particular, the tendency for `ρθ` is written
+# Forcings are keyed under specific prognostic names (`u`, `v`, `θ`, `qᵉ`, `e`);
+# Breeze applies the density factor ``ρ`` automatically at kernel time. When
+# multiple forcings act on the same prognostic field — e.g. subsidence and the
+# geostrophic adjustment on the horizontal velocity — they are combined as a
+# tuple, and Breeze sums their contributions.
+#
+# Forcings on `e` and `θ` both contribute to the tendency of `ρθ` in different
+# ways. The tendency for `ρθ` is written
 #
 # ```math
-# ∂_t (ρ θ) = - \boldsymbol{\nabla \cdot} \, ( ρ \boldsymbol{u} θ ) + F_{ρθ} + \frac{1}{cᵖᵐ Π} F_{ρ e} + \cdots
+# ∂_t (ρ θ) = - \boldsymbol{\nabla \cdot} \, ( ρ \boldsymbol{u} θ ) + ρ F_θ + \frac{ρ F_e}{cᵖᵐ Π} + \cdots
 # ```
 #
-# where ``F_{ρ e}`` denotes the forcing function provided for `ρe` (e.g. for "energy density"),
-# ``F_{ρθ}`` denotes the forcing function provided for `ρθ`, and the ``\cdots`` denote
-# additional terms.
-#
-# The geostrophic forcing provides both `ρu` and `ρv` components, which we merge with
-# the subsidence forcing.
+# where ``F_e`` denotes the specific energy forcing supplied under `e` and
+# ``F_θ`` denotes the specific potential-temperature forcing supplied under `θ`.
 
-ρu_forcing = (subsidence, geostrophic.ρu)
-ρv_forcing = (subsidence, geostrophic.ρv)
-ρqᵉ_forcing = (subsidence, ρqᵉ_drying_forcing)
-ρθ_forcing = subsidence
-ρe_forcing = ρe_radiation_forcing
-
-forcing = (; ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_forcing,
-             ρe=ρe_forcing, ρqᵉ=ρqᵉ_forcing)
+forcing = (; u = (subsidence, geostrophic.u),
+             v = (subsidence, geostrophic.v),
+             θ = subsidence,
+             qᵉ = (subsidence, qᵉ_drying_forcing),
+             e = e_radiation_forcing)
 nothing #hide
 
 # ## Model setup

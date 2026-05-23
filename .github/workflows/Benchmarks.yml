@@ -42,7 +42,7 @@ jobs:
             advection: 'WENO5, WENO9'
             backend: 'vanilla'
             topology: 'PPB'
-            extra_flags: ''
+            extra_flags: '--warmup_steps 5 --time_steps 150'
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '512x512x256'
@@ -89,10 +89,23 @@ jobs:
     container:
       image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.6'
       options: --gpus=all
+      volumes:
+        # Mount host `/usr/local` so that we can delete some stuff afterwards
+        - /usr/local:/host-usr-local
     timeout-minutes: 30
     steps:
       - name: "Check out repository"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: df before cleanup
+        run: |
+          df -hT
+      - name: Clean up old CUDA toolkits
+        # Save storage by deleting old CUDA toolkits, we'll use v13
+        run: |
+          rm -rf /host-usr-local/cuda-12.*
+      - name: df after cleanup
+        run: |
+          df -hT
       - name: Instantiate benchmarking environment
         shell: julia --color=yes --project {0}
         run: |
@@ -100,6 +113,8 @@ jobs:
           Pkg.instantiate()
       - name: Run benchmarks
         timeout-minutes: 45
+        env:
+          XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
@@ -108,6 +123,15 @@ jobs:
         with:
           name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
           path: benchmarking/benchmark_results.*
+          retention-days: 90
+          overwrite: false
+      - name: "Upload Manifest"
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: 'manifest-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
+          path: '**/Manifest*.toml'
           retention-days: 90
           overwrite: false
       - name: Create job summary
@@ -267,5 +291,5 @@ jobs:
           fail-on-alert: false
           # auto-push: true
           auto-push: ${{ github.event_name == 'push' }}
-          max-items-in-chart: 50
+          max-items-in-chart: 1000
           comment-on-alert: true

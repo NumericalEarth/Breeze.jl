@@ -252,12 +252,19 @@ $(TYPEDSIGNATURES)
 Construct an `AcousticSubstepper` for the linearized-perturbation
 acoustic substep loop.
 
-The optional `prognostic_momentum` keyword carries the prognostic
-``ρu``, ``ρv``, ``ρw`` fields whose boundary conditions are inherited by
-the substepper's perturbation face fields ``(ρu)′``, ``(ρv)′``, ``(ρw)′``. This is
-essential on grids with `Bounded` horizontal topology so that
-`fill_halo_regions!` enforces impenetrability on the perturbation
-momenta.
+The substepper's perturbation face fields ``(ρu)′``, ``(ρv)′``, ``(ρw)′`` and
+the substep-averaged velocities for scalar transport are built with
+topology-derived defaults — periodic wrap on `Periodic` dims, impenetrability
+on `Bounded` dims. The prognostic momentum's own boundary conditions are not
+inherited: doing so silently imprints the full-state wall target onto the
+perturbation halo when the user supplies a nonzero
+`OpenBoundaryCondition` (issue \\#716), and propagates dimensionally
+inconsistent BCs (momentum BCs on velocity face fields) for the time-averaged
+velocities. The wall target re-enters the prognostic state through the
+prognostic momentum's own BC after `accumulate_momentum_perturbations!`.
+
+The `prognostic_momentum` keyword is retained for backwards compatibility but
+is no longer consulted.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
                             prognostic_momentum = nothing)
@@ -277,32 +284,20 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     # refresh from the live moisture state.
     linearization_gamma_R_mixture                 = CenterField(grid)
 
-    # Perturbation prognostics. Inherit BCs from the prognostic momenta
-    # so impenetrability propagates onto the perturbation momenta.
-    bcs_ρu = prognostic_momentum === nothing ? nothing : prognostic_momentum.ρu.boundary_conditions
-    bcs_ρv = prognostic_momentum === nothing ? nothing : prognostic_momentum.ρv.boundary_conditions
-    bcs_ρw = prognostic_momentum === nothing ? nothing : prognostic_momentum.ρw.boundary_conditions
-
-    xface(grid, bcs) = bcs === nothing ? XFaceField(grid) : XFaceField(grid; boundary_conditions = bcs)
-    yface(grid, bcs) = bcs === nothing ? YFaceField(grid) : YFaceField(grid; boundary_conditions = bcs)
-    zface(grid, bcs) = bcs === nothing ? ZFaceField(grid) : ZFaceField(grid; boundary_conditions = bcs)
-
     density_perturbation                          = CenterField(grid)
     density_potential_temperature_perturbation    = CenterField(grid)
-    momentum_perturbation = (u = xface(grid, bcs_ρu),
-                             v = yface(grid, bcs_ρv),
-                             w = zface(grid, bcs_ρw))
+    momentum_perturbation = (u = XFaceField(grid),
+                             v = YFaceField(grid),
+                             w = ZFaceField(grid))
 
     density_predictor                                = CenterField(grid)
     density_potential_temperature_predictor          = CenterField(grid)
     previous_density_potential_temperature_perturbation = CenterField(grid)
 
-    # Time-averaged velocities for scalar transport. Inherit BCs from the
-    # prognostic momenta so impenetrability is enforced when these are used
-    # for advection at boundaries.
-    time_averaged_velocities = (u = xface(grid, bcs_ρu),
-                                v = yface(grid, bcs_ρv),
-                                w = zface(grid, bcs_ρw))
+    # Substep-averaged velocities for scalar transport.
+    time_averaged_velocities = (u = XFaceField(grid),
+                                v = YFaceField(grid),
+                                w = ZFaceField(grid))
 
     slow_vertical_momentum_tendency = ZFaceField(grid)
 
@@ -489,7 +484,7 @@ acoustic CFL:
 
 ```math
 N \\approx
-\\left\\lceil \\frac{\\Delta t \\, \\mathbb{C}^{ac}}{\\nu \\, \\Delta x_\\min} \\right\\rceil ,
+\\left\\lceil \\frac{|\\Delta t| \\, \\mathbb{C}^{ac}}{\\nu \\, \\Delta x_\\min} \\right\\rceil ,
 ```
 
 with ``\\mathbb{C}^{ac} = \\sqrt{γ^d R^d T_r}`` for a nominal reference
@@ -512,7 +507,7 @@ function compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_
         min(Δx, Δy)
     end
 
-    return max(1, ceil(Int, FT(Δt) * ℂᵃᶜ / (ν * Δx_min)))
+    return max(1, ceil(Int, abs(FT(Δt)) * ℂᵃᶜ / (ν * Δx_min)))
 end
 
 @inline acoustic_substeps(N::Int, grid, Δt, constants, acoustic_cfl) = N
@@ -647,15 +642,22 @@ end
 # Implicit upper Rayleigh sponge contribution to the column tridiag's
 # diagonal. Klemp, Dudhia & Hassiotis (2008): a layer of thickness `depth`
 # below the lid where ``(ρw)′`` is damped at peak rate `damping_rate` (1/s)
-# scaled by the configured ramp shape. CN-weighted: `δτᵐ⁺ × rate × ramp`
-# on the LHS diagonal, matched by `δτˢ⁻ × rate × ramp × ρw_old` subtracted
+# scaled by the configured ramp shape. CN-weighted: `|δτᵐ⁺| × rate × ramp`
+# on the LHS diagonal, matched by `|δτˢ⁻| × rate × ramp × ρw_old` subtracted
 # on the RHS in `_build_predictors_and_vertical_rhs!`. Local in z, so no
 # off-diagonal coupling.
+#
+# `|δτ|` rather than `δτ` so the sponge acts as a one-sided dissipative
+# regularizer in either integration direction (Δt > 0 or Δt < 0). The
+# tradeoff: backward integration through a sponge layer does not exactly
+# invert the forward integration there, since the sponge is intentionally
+# irreversible. Outside the sponge layer the ramp vanishes and the column
+# tridiag is unaffected.
 @inline sponge_term_diag(i, j, k, grid, ::Nothing, δτᵐ⁺) = zero(grid)
 
 @inline function sponge_term_diag(i, j, k, grid, sponge::UpperSponge, δτᵐ⁺)
     z = znode(i, j, k, grid, Center(), Center(), Face())
-    return δτᵐ⁺ * sponge.damping_rate *
+    return abs(δτᵐ⁺) * sponge.damping_rate *
            sponge.ramp(z, grid.Lz, sponge.depth)
 end
 
@@ -663,7 +665,7 @@ end
 
 @inline function sponge_rhs(i, j, k, grid, sponge::UpperSponge, δτˢ⁻, ρw_old)
     z = znode(i, j, k, grid, Center(), Center(), Face())
-    @inbounds return δτˢ⁻ * sponge.damping_rate *
+    @inbounds return abs(δτˢ⁻) * sponge.damping_rate *
                      sponge.ramp(z, grid.Lz, sponge.depth) * ρw_old[i, j, k]
 end
 

@@ -67,7 +67,9 @@ and interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 - **Files**: snake_case — `atmosphere_model.jl`
 - **Types/Constructors**: PascalCase — `AtmosphereModel`
 - **Functions**: snake_case — `compute_pressure!`
-- **Kernels**: may prefix with underscore — `_kernel_function`
+- **Kernels**: may prefix with underscore — `_kernel_function`. The underscore
+  prefix is **reserved** for kernel functions; do not use it to mark plain
+  helpers as "internal" (we do not follow the Python convention).
 - **Variables**: English long name or unicode from `notation.md`. Add new variables to that table.
 - **Avoid abbreviations**: `latitude` not `lat`, `temperature` not `temp`
 
@@ -111,6 +113,9 @@ Planned: fully compressible formulation, `EntropyThermodynamics` (prognostic `ρ
     in the root `Project.toml` unless the task absolutely requires it. Dependency changes have
     wide-reaching consequences — they affect CI, load time, and downstream compatibility.
     Only touch `[compat]` bounds when explicitly asked.
+11. **Underscore-prefixed helpers**: an underscore prefix on a function name
+    signals "kernel" in this codebase. Plain helper functions stay snake_case
+    with no leading underscore.
 
 ## Git Workflow & Whitespace
 
