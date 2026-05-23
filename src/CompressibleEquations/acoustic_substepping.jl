@@ -165,7 +165,7 @@ Vertical solve:
   with PGF and buoyancy excluded — those live in the fast operator).
 - `vertical_solver`: `BatchedTridiagonalSolver` for the implicit ``(ρw)′`` update.
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, FF, MP, TAV, GT, TS}
     substeps :: N
     acoustic_cfl :: FT
     forward_weight :: FT
@@ -195,6 +195,12 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
 
     density_predictor :: CF
     density_potential_temperature_predictor :: CF
+    # Scratch (ρw)′ tridiag RHS — distinct from `momentum_perturbation.w`
+    # so the build-RHS kernel can run race-free at `:xyz` (writes here,
+    # reads ρw′ from `momentum_perturbation.w`). Bottom-face row k=1 and
+    # top-face row k=Nz+1 are held at zero so the impenetrability/Dirichlet
+    # rows of the tridiag come out exact; the kernel writes only k=1..Nz.
+    momentum_perturbation_w_rhs :: FF
     previous_density_potential_temperature_perturbation :: CF
 
     # Time-averaged velocities for non-acoustic scalar advection (WRF/MPAS
@@ -235,6 +241,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                         w = adapt(to, a.momentum_perturbation.w)),
                        adapt(to, a.density_predictor),
                        adapt(to, a.density_potential_temperature_predictor),
+                       adapt(to, a.momentum_perturbation_w_rhs),
                        adapt(to, a.previous_density_potential_temperature_perturbation),
                        (u = adapt(to, a.time_averaged_velocities.u),
                         v = adapt(to, a.time_averaged_velocities.v),
@@ -292,6 +299,9 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     density_predictor                                = CenterField(grid)
     density_potential_temperature_predictor          = CenterField(grid)
+    # Scratch (ρw)′ tridiag RHS; allocated zero, only k=1..Nz are written
+    # by `_build_vertical_momentum_rhs!`, so the k=Nz+1 row stays at zero.
+    momentum_perturbation_w_rhs                      = ZFaceField(grid)
     previous_density_potential_temperature_perturbation = CenterField(grid)
 
     # Substep-averaged velocities for scalar transport.
@@ -321,6 +331,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               momentum_perturbation,
                               density_predictor,
                               density_potential_temperature_predictor,
+                              momentum_perturbation_w_rhs,
                               previous_density_potential_temperature_perturbation,
                               time_averaged_velocities,
                               slow_vertical_momentum_tendency,
@@ -922,62 +933,101 @@ end
 @inline apply_horizontal_pressure_gradient_substep(substep, Nτ) =
     (substep != 1) | (Nτ == 1)
 
-# Build per-column predictors `ρ′★`, `ρθ′★` (cell centers) AND
-# the explicit RHS for the tridiagonal `(ρw)′ᵐ⁺` solve at z-faces.
+# Cell-centred predictors `ρ′★`, `ρθ′★`.
 #
-# Off-centered Crank–Nicolson with new-side weight ω = forward_weight
-# and old-side weight 1−ω. The predictor uses δτˢ⁻ = (1−ω)Δτ on the
-# old-step vertical-flux contribution (ω-weighted CN of ∇·m); the
-# vertical RHS combines old and pred contributions with their matching
-# weights δτˢ⁻ and δτᵐ⁺ respectively. See derivation in
-# the split-explicit derivation in `docs/src/compressible_dynamics.md`.
-@kernel function _build_predictors_and_vertical_rhs!(ρw′_rhs,
-                                                     ρ′★, ρθ′★,
-                                                     ρ′, ρθ′, ρw′, ρu′, ρv′,
-                                                     grid, Δτ, δτᵐ⁺, δτˢ⁻,
-                                                     Gˢρ, Gˢρθ, Gˢρw,
-                                                     θᴸ, Πᴸ,
-                                                     γRᵐᴸ, g, dˢ⁻, sponge)
+# Off-centered Crank–Nicolson with new-side weight ω = forward_weight and
+# old-side weight 1−ω; only the explicit (1−ω) half of the vertical-flux
+# contribution shows up here (the implicit half is folded into the tridiag
+# RHS in `_build_vertical_momentum_rhs!`). See `docs/src/compressible_dynamics.md`.
+@kernel function _build_density_predictors!(ρ′★, ρθ′★,
+                                            ρ′, ρθ′, ρw′, ρu′, ρv′,
+                                            grid, Δτ, δτˢ⁻,
+                                            Gˢρ, Gˢρθ, θᴸ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        # Cell-centred predictors `ρ′★`, `ρθ′★`.
         V = Vᶜᶜᶜ(i, j, k, grid)
 
         ∇ʰ_M  = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
         ∇ʰ_θM = (δxᶜᵃᵃ(i, j, k, grid, theta_face_x_flux, θᴸ, ρu′) +
-                    δyᵃᶜᵃ(i, j, k, grid, theta_face_y_flux, θᴸ, ρv′)) / V
+                 δyᵃᶜᵃ(i, j, k, grid, theta_face_y_flux, θᴸ, ρv′)) / V
 
         ρ′★[i, j, k]  = ρ′[i, j, k] +
-                            Δτ * (Gˢρ[i, j, k] - ∇ʰ_M) -
-                            δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, ρw′)
+                        Δτ * (Gˢρ[i, j, k] - ∇ʰ_M) -
+                        δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, ρw′)
 
         ρθ′★[i, j, k] = ρθ′[i, j, k] +
-                            Δτ * (Gˢρθ[i, j, k] - ∇ʰ_θM) -
-                            δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, theta_face_z_flux, θᴸ, ρw′)
+                        Δτ * (Gˢρθ[i, j, k] - ∇ʰ_θM) -
+                        δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, theta_face_z_flux, θᴸ, ρw′)
+    end
+end
 
+# Vertical face stencils with a hard-coded Neumann BC across the bottom
+# face k=1. At k=1 the face-centred interpolation collapses to the value at
+# the cell centre k=1 and the vertical δz is zero, so the kernel never has
+# to consult the k=0 halo — which is uninitialised on GPU and would
+# otherwise poison the arithmetic with NaNs that survive the boundary-row
+# mask via `0 · NaN`. The k-1 index is rewritten to k before any indexing
+# happens, so we never *touch* the halo even on the discarded ifelse branch.
+@inline function ℑzᵃᵃᶠ_neumann_bottom(i, j, k, grid, c)
+    k⁻ = ifelse(k == 1, k, k - 1)
+    return @inbounds ifelse(k == 1, c[i, j, k], (c[i, j, k⁻] + c[i, j, k]) / 2)
+end
+
+@inline function δzᶜᶜᶠ_neumann_bottom(i, j, k, grid, c)
+    k⁻ = ifelse(k == 1, k, k - 1)
+    return @inbounds ifelse(k == 1, zero(grid), c[i, j, k] - c[i, j, k⁻])
+end
+
+# Function-evaluation form: δz of `f(i, j, k, grid, args...)` at face k.
+# Same Neumann-bottom contract.
+@inline function δzᶜᶜᶠ_neumann_bottom(i, j, k, grid, f, c, args...)
+    k⁻ = ifelse(k == 1, k, k - 1)
+    return ifelse(k == 1,
+                  zero(grid),
+                  f(i, j, k, grid, c, args...) - f(i, j, k⁻, grid, c, args...))
+end
+
+# Build the explicit RHS for the tridiagonal `(ρw)′ᵐ⁺` solve at z-faces.
+# Writes only the interior face range k=2..Nz of `ρw′_rhs` with the
+# Klemp–Wilhelmson split contributions (sound + buoyancy + vertical
+# divergence damping + upper-sponge). At k=1 the row reduces to the
+# Dirichlet boundary (matches diagonal `b[1] = 1 → (ρw)′[1] = 0`), so the
+# bottom-face row is written as zero; the top-face row k=Nz+1 is set once
+# at construction time (the kernel never touches it).
+#
+# All k-1 accesses use Neumann face stencils so the bottom-face arithmetic
+# never depends on the k=0 halo, which is not initialised by the substepper
+# allocator and is left as garbage on GPU.
+@kernel function _build_vertical_momentum_rhs!(ρw′_rhs,
+                                               ρ′★, ρθ′★, ρ′, ρθ′, ρw′,
+                                               grid, Δτ, δτᵐ⁺, δτˢ⁻,
+                                               Gˢρw, Πᴸ, γRᵐᴸ, g, dˢ⁻,
+                                               sponge)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
         # Face-level RHS for `(ρw)′ᵐ⁺` tridiag — split weights for the
         # predictor and old-step contributions per derivation (15).
         # `dˢ⁻ = (1−ω) α Δz²` adds the explicit half of the implicit
         # vertical damping (zero when damping is off or damp_vertical=false).
-        Δzᶠ   = Δzᶜᶜᶠ(i, j, k, grid)
-        Cᵏ⁺ = γRᵐᴸ[i, j, k]     * Πᴸ[i, j, k]
-        Cᵏ⁻ = γRᵐᴸ[i, j, k - 1] * Πᴸ[i, j, k - 1]
+        Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
 
-        ∂z_p′★  = Cᵏ⁺ * ρθ′★[i, j, k] - Cᵏ⁻ * ρθ′★[i, j, k - 1]
-        ∂z_p′ˢ⁻ = Cᵏ⁺ * ρθ′[i, j, k]  - Cᵏ⁻ * ρθ′[i, j, k - 1]
+        δz_p′★  = δzᶜᶜᶠ_neumann_bottom(i, j, k, grid, linearized_pressure_perturbation, ρθ′★, Πᴸ, γRᵐᴸ)
+        δz_p′ˢ⁻ = δzᶜᶜᶠ_neumann_bottom(i, j, k, grid, linearized_pressure_perturbation, ρθ′,  Πᴸ, γRᵐᴸ)
 
-        sound_force = (δτˢ⁻ * ∂z_p′ˢ⁻ + δτᵐ⁺ * ∂z_p′★) / Δzᶠ
+        sound_force = (δτˢ⁻ * δz_p′ˢ⁻ + δτᵐ⁺ * δz_p′★) / Δzᶠ
 
-        ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
-        ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)
+        ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ_neumann_bottom(i, j, k, grid, ρ′★)
+        ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ_neumann_bottom(i, j, k, grid, ρ′)
         buoy_force = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★)
 
         # Explicit (old-step) half of the vertical damping
         # `(1−ω) α Δz² ∂z²(ρw)′ˢ⁻`, evaluated at face k. The face-coupling
         # stencil matches the implicit half folded into the tridiag in
-        # `get_coefficient`.
-        ∂z²_ρw′ˢ⁻  = ∂zᶜᶜᶠ(i, j, k, grid, ∂zᶜᶜᶜ, ρw′)
+        # `get_coefficient`. Inherits the bottom Neumann BC by reading
+        # ∂zᶜᶜᶜ at center k-1 only when k > 1.
+        ∂z²_ρw′ˢ⁻  = δzᶜᶜᶠ_neumann_bottom(i, j, k, grid, ∂zᶜᶜᶜ, ρw′) / Δzᶠ
         damp_force = - dˢ⁻ * ∂z²_ρw′ˢ⁻
 
         # Explicit (old-step) half of the upper Rayleigh sponge:
@@ -986,8 +1036,14 @@ end
         # diagonal contribution. Local in z, so face-only.
         sponge_force = sponge_rhs(i, j, k, grid, sponge, δτˢ⁻, ρw′)
 
-        ρw′_rhs[i, j, k] = (ρw′[i, j, k] + Δτ * Gˢρw[i, j, k] -
-                            sound_force - buoy_force - damp_force - sponge_force) * (k > 1)
+        rhs = ρw′[i, j, k] + Δτ * Gˢρw[i, j, k] -
+              sound_force - buoy_force - damp_force - sponge_force
+
+        # k=1 is the Dirichlet row of the tridiag (matches `b[1] = 1`); the
+        # operators above already produce zero gradient and face-value
+        # contributions there, but we force the row to exactly zero so the
+        # solver gets a clean boundary regardless of round-off.
+        ρw′_rhs[i, j, k] = ifelse(k == 1, zero(rhs), rhs)
     end
 end
 
@@ -1355,18 +1411,36 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
         # `damp_vertical=false`.
         dᵐ⁺, dˢ⁻ = implicit_damping_factors(substepper.damping, ω, one_minus_ω, grid, FT)
 
-        # Step B: build predictors `ρ′★`, `ρθ′★` and the tridiag RHS for (ρw)′ᵐ⁺
-        launch!(arch, grid, :xyz, _build_predictors_and_vertical_rhs!,
-                substepper.momentum_perturbation.w,
+        # Step B.1: cell-centred predictors `ρ′★`, `ρθ′★`. Pure 3D
+        # `:xyz`; each thread owns its own (i, j, k) center, and only
+        # reads from fields that are not written in this kernel.
+        launch!(arch, grid, :xyz, _build_density_predictors!,
                 substepper.density_predictor,
                 substepper.density_potential_temperature_predictor,
                 substepper.density_perturbation,
                 substepper.density_potential_temperature_perturbation,
                 substepper.momentum_perturbation.w,
                 substepper.momentum_perturbation.u, substepper.momentum_perturbation.v,
+                grid, Δτ, δτˢ⁻,
+                Gⁿ.ρ, Gˢρθ,
+                substepper.linearization_potential_temperature)
+
+        # Step B.2: tridiag RHS for (ρw)′ᵐ⁺ at z-faces. Writes to a
+        # dedicated scratch face field (`momentum_perturbation_w_rhs`)
+        # rather than aliasing `momentum_perturbation.w`, so that the
+        # face stencil over ρw′ is race-free at `:xyz`. The k=Nz+1 row
+        # is held at zero by the substepper constructor (never written
+        # here); the k=1 Dirichlet row is written as zero by the kernel.
+        launch!(arch, grid, :xyz, _build_vertical_momentum_rhs!,
+                substepper.momentum_perturbation_w_rhs,
+                substepper.density_predictor,
+                substepper.density_potential_temperature_predictor,
+                substepper.density_perturbation,
+                substepper.density_potential_temperature_perturbation,
+                substepper.momentum_perturbation.w,
                 grid, Δτ, δτᵐ⁺, δτˢ⁻,
-                Gⁿ.ρ, Gˢρθ, substepper.slow_vertical_momentum_tendency,
-                substepper.linearization_potential_temperature, substepper.linearization_exner,
+                substepper.slow_vertical_momentum_tendency,
+                substepper.linearization_exner,
                 substepper.linearization_gamma_R_mixture, g, dˢ⁻,
                 substepper.sponge)
 
@@ -1375,7 +1449,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
         # `sponge` may add an implicit Rayleigh contribution on the
         # diagonal in a layer below the lid.
         solve!(substepper.momentum_perturbation.w, substepper.vertical_solver,
-               substepper.momentum_perturbation.w,
+               substepper.momentum_perturbation_w_rhs,
                substepper.linearization_exner, substepper.linearization_potential_temperature,
                substepper.linearization_gamma_R_mixture, g, δτᵐ⁺, dᵐ⁺,
                substepper.sponge)
