@@ -2,10 +2,12 @@ using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
+using Oceananigans: Face
+using Oceananigans.Grids: topology
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
-using Oceananigans.Utils: launch!
+using Oceananigans.Utils: launch!, KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
@@ -81,11 +83,24 @@ function compute_velocities!(model::AtmosphereModel)
     fill_halo_regions!(density)
     fill_halo_regions!(model.momentum)
 
-    launch!(arch, grid, :xyz,
-            _compute_velocities!,
-            model.velocities.u, model.velocities.v, model.velocities.w,
-            model.momentum.ρu,   model.momentum.ρv,   model.momentum.ρw,
-            grid, model.dynamics)
+    # Per-component launches, each sized to its own field's interior:
+    # `length(Face(), T, N)` is N+1 on Bounded (covers the boundary face),
+    # N on Periodic (halo refilled by the trailing `fill_halo_regions!`),
+    # N on Flat. Splitting u/v/w into three launches keeps each adjoint
+    # writing at a distinct StableHLO shape, which prevents XLA's
+    # multi-output fusion from pulling the three divides into a single
+    # downstream reducer (see #722 follow-up).
+    Nx, Ny, Nz = size(grid)
+    TX, TY, TZ = topology(grid)
+    launch!(arch, grid,
+            KernelParameters(1:length(Face(), TX(), Nx), 1:Ny, 1:Nz),
+            _compute_u!, model.velocities.u, model.momentum.ρu, grid, model.dynamics)
+    launch!(arch, grid,
+            KernelParameters(1:Nx, 1:length(Face(), TY(), Ny), 1:Nz),
+            _compute_v!, model.velocities.v, model.momentum.ρv, grid, model.dynamics)
+    launch!(arch, grid,
+            KernelParameters(1:Nx, 1:Ny, 1:length(Face(), TZ(), Nz)),
+            _compute_w!, model.velocities.w, model.momentum.ρw, grid, model.dynamics)
 
     foreach(mask_immersed_field!, model.velocities)
     fill_halo_regions!(model.velocities)
@@ -184,11 +199,21 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     return nothing
 end
 
-@kernel function _compute_velocities!(u, v, w, ρu, ρv, ρw, grid, dynamics)
+@kernel function _compute_u!(u, ρu, grid, dynamics)
     i, j, k = @index(Global, NTuple)
     ρ = dynamics_density(dynamics)
     @inbounds u[i, j, k] = ρu[i, j, k] / ℑxᶠᵃᵃ(i, j, k, grid, ρ)
+end
+
+@kernel function _compute_v!(v, ρv, grid, dynamics)
+    i, j, k = @index(Global, NTuple)
+    ρ = dynamics_density(dynamics)
     @inbounds v[i, j, k] = ρv[i, j, k] / ℑyᵃᶠᵃ(i, j, k, grid, ρ)
+end
+
+@kernel function _compute_w!(w, ρw, grid, dynamics)
+    i, j, k = @index(Global, NTuple)
+    ρ = dynamics_density(dynamics)
     @inbounds w[i, j, k] = ρw[i, j, k] / ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 end
 
