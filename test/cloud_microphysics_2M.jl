@@ -1,5 +1,5 @@
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, moisture_phase
 using CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -15,6 +15,7 @@ using .BreezeCloudMicrophysicsExt:
 
 using Breeze.Microphysics: ConstantRateCondensateFormation
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.Operators: ℑzᵃᵃᶠ
 
 #####
 ##### Two-moment microphysics tests
@@ -147,15 +148,18 @@ end
     @test spf isa Field
     compute!(spf)
 
+    # The surface precipitation flux uses the advection scheme's face reconstruction.
+    # The density is face-interpolated (ℑz) to match the advection operator.
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
-    ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
-    expected_flux = -wʳ * ρqʳ
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
+    expected_flux = -ρ_face * wʳ * qʳ
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] ≥ 0
 end
 
-@testset "TwoMomentCloudMicrophysics velocities and terminal velocities [$FT]" for FT in test_float_types()
+@testset "TwoMomentCloudMicrophysics sedimentation_velocity and velocities [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -169,7 +173,26 @@ end
 
     μ = model.microphysical_fields
 
-    # microphysical_velocities
+    # sedimentation_velocity returns the vertical velocity component fields
+    w_rain_mass = sedimentation_velocity(microphysics, μ, Val(:ρqʳ))
+    @test w_rain_mass === μ.wʳ
+
+    w_rain_number = sedimentation_velocity(microphysics, μ, Val(:ρnʳ))
+    @test w_rain_number === μ.wʳₙ
+
+    w_cloud_mass = sedimentation_velocity(microphysics, μ, Val(:ρqᶜˡ))
+    @test w_cloud_mass === μ.wᶜˡ
+
+    w_cloud_number = sedimentation_velocity(microphysics, μ, Val(:ρnᶜˡ))
+    @test w_cloud_number === μ.wᶜˡₙ
+
+    # moisture_phase classification
+    @test moisture_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
+    @test moisture_phase(microphysics, Val(:ρqʳ)) === Val(:liquid)
+    @test moisture_phase(microphysics, Val(:ρnᶜˡ)) === nothing  # number tracer
+    @test moisture_phase(microphysics, Val(:ρnʳ)) === nothing    # number tracer
+
+    # microphysical_velocities wraps sedimentation_velocity in a velocity tuple
     vel_rain_mass = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
     @test vel_rain_mass !== nothing
     @test haskey(vel_rain_mass, :w)
@@ -186,13 +209,31 @@ end
     @test vel_cloud_num !== nothing
     @test haskey(vel_cloud_num, :w)
 
-    # Terminal velocities
+    # Sedimentation velocities should be negative downward
     wᶜˡ = @allowscalar μ.wᶜˡ[1, 1, 2]
     wʳ = @allowscalar μ.wʳ[1, 1, 2]
 
-    @test wᶜˡ ≤ 0
+    @test wᶜˡ <= 0
     @test wʳ < 0
-    @test abs(wʳ) > abs(wᶜˡ)
+    @test wʳ < wᶜˡ
+
+    # Effective sedimentation velocities
+    bsv = model.sedimentation_velocities
+    @test bsv !== nothing
+    @test haskey(bsv, :ρqᴸ)
+    @test haskey(bsv, :ρqᴵ)
+
+    # Validate effective liquid sedimentation: sign convention and mass-weighted averaging
+    time_step!(model, 1)
+    qᶜˡ_val = @allowscalar μ.qᶜˡ[1, 1, 2]
+    qʳ_val  = @allowscalar μ.qʳ[1, 1, 2]
+    wᶜˡ_val = @allowscalar μ.wᶜˡ[1, 1, 2]
+    wʳ_val  = @allowscalar μ.wʳ[1, 1, 2]
+    wᴸ_val  = @allowscalar bsv.ρqᴸ.w[1, 1, 2]
+
+    @test qᶜˡ_val + qʳ_val > 0
+    @test wᴸ_val <= 0
+    @test wᴸ_val ≈ (wᶜˡ_val * qᶜˡ_val + wʳ_val * qʳ_val) / (qᶜˡ_val + qʳ_val)
 end
 
 @testset "TwoMomentCloudMicrophysics ImpenetrableBoundaryCondition [$FT]" for FT in test_float_types()
