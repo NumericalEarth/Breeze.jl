@@ -47,8 +47,12 @@ examples = [
     Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
     Example("Cloud formation in prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
     Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),
+<<<<<<< glwagner-patch-2
+    Example("Splitting supercell", "splitting_supercell"; build_always=true, gpu=true),
+=======
     Example("Splitting supercell", "splitting_supercell"; build_always=false, gpu=true),
     Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=false),
+>>>>>>> main
     Example("Tropical cyclone world", "tropical_cyclone_world"; build_always=false, gpu=true),
     Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
 ]
