@@ -522,9 +522,9 @@ end
     c_qcl = tendency_ρqᶜˡ(rates, ρ)
     # Prescribed-Nᶜ path: nc is a scheme parameter (not advected); tendency = 0.
     c_ncl = isnothing(p3.aerosol) ? zero(typeof(ρ)) :
-            tendency_ρnᶜˡ(rates, ρ, props.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
+            tendency_ρnᶜˡ(rates, ρ, props.Nᶜ, ℳ.qᶜˡ, p3)
     c_qr  = tendency_ρqʳ(rates, ρ)
-    c_nr  = tendency_ρnʳ(rates, ρ, props.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
+    c_nr  = tendency_ρnʳ(rates, ρ, props.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3)
     c_qi  = tendency_ρqⁱ(rates, ρ)
     c_ni  = tendency_ρnⁱ(rates, ρ)
     c_qf  = tendency_ρqᶠ(rates, ρ, Fᶠ)

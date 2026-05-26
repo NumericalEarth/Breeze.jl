@@ -17,6 +17,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     compute_p3_process_rates,
     consistent_rime_state,
     tendency_ρqᶜˡ,
+    tendency_ρnᶜˡ,
     tendency_ρqʳ,
     tendency_ρnʳ,
     tendency_ρqⁱ,
@@ -53,7 +54,11 @@ using Breeze.Microphysics.PredictedParticleProperties:
     immersion_freezing_rain_rate,
     air_transport_properties,
     psd_correction_spherical_volume,
-    liu_daum_shape_parameter
+    liu_daum_shape_parameter,
+    AbstractWarmRainScheme,
+    KhairoutdinovKogan2000,
+    Kogan2013,
+    SeifertBeheng2001
 
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
@@ -85,7 +90,38 @@ function p3_with_process_rates(p3, process_rates)
         p3.cloud,
         process_rates,
         p3.precipitation_boundary_condition,
-        p3.aerosol)
+        p3.aerosol,
+        p3.warm_rain_scheme)
+end
+
+function p3_process_rates_with(FT; kwargs...)
+    values = ntuple(index -> begin
+        field = fieldnames(P3ProcessRates)[index]
+        FT(get(kwargs, field, zero(FT)))
+    end, fieldcount(P3ProcessRates))
+    return P3ProcessRates(values...)
+end
+
+# Build a real p3 with a specific `process_rates`/`warm_rain_scheme`. Used in
+# tests that only need to exercise `tendency_ρnʳ` / `tendency_ρnᶜˡ` (which read
+# both fields). Prefer this over a NamedTuple shim so future field additions to
+# `PredictedParticlePropertiesMicrophysics` surface as compile errors, not silent
+# missing-field bugs.
+function tendency_test_p3(FT; process_rates = ProcessRateParameters(FT),
+                              warm_rain_scheme = KhairoutdinovKogan2000())
+    return PredictedParticlePropertiesMicrophysics(FT; process_rates, warm_rain_scheme)
+end
+
+function fortran_sb2001_ν(Nᶜ)
+    FT = typeof(Nᶜ)
+    μ_c = liu_daum_shape_parameter(Nᶜ)
+    dnu = FT.((-0.947, -0.871, -0.783, -0.688,
+               -0.588, -0.486, -0.382, -0.277,
+               -0.171, -0.064,  0.044,  0.152,
+                0.260,  0.369,  0.478,  0.588))
+    # Match production sb2001_shape_parameter: clamp index so μ_c = 15 stays in-bounds.
+    index = min(Int(floor(μ_c)) + 1, 15)
+    return dnu[index] + (dnu[index + 1] - dnu[index]) * (μ_c - index)
 end
 
 function expected_fortran_rain_epsilon(p3, qʳ, nʳ, ρ, transport, FT)
@@ -585,6 +621,7 @@ end
             # Phase 1: Rain (all positive magnitudes)
             FT(1e-7),   # autoconversion
             FT(2e-7),   # accretion
+            FT(0),      # cloud_self_collection (SB2001 only; 0 here)
             FT(5e-8),   # rain_evaporation (positive magnitude)
             FT(1e-6),   # rain_self_collection (positive magnitude)
             FT(5e-7),   # rain_breakup (positive = number source)
@@ -647,7 +684,8 @@ end
         # Test each tendency function returns a finite number
         @test isfinite(tendency_ρqᶜˡ(rates, ρ))
         @test isfinite(tendency_ρqʳ(rates, ρ))
-        @test isfinite(tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, zero(FT), one(FT), prp))
+        @test isfinite(tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, zero(FT), one(FT),
+                                    tendency_test_p3(FT; process_rates = prp)))
         @test isfinite(tendency_ρqⁱ(rates, ρ))
         @test isfinite(tendency_ρnⁱ(rates, ρ))
         @test isfinite(tendency_ρqᶠ(rates, ρ, Fᶠ))
@@ -667,7 +705,8 @@ end
 
         @test tendency_ρqᶜˡ(zero_rates, ρ) == 0.0
         @test tendency_ρqʳ(zero_rates, ρ) == 0.0
-        @test tendency_ρnʳ(zero_rates, ρ, FT(1e5), FT(1e-4), zero(FT), one(FT), ProcessRateParameters(FT)) == 0.0
+        @test tendency_ρnʳ(zero_rates, ρ, FT(1e5), FT(1e-4), zero(FT), one(FT),
+                           tendency_test_p3(FT)) == 0.0
         @test tendency_ρqⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρnⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρqᶠ(zero_rates, ρ, FT(0.3)) == 0.0
@@ -684,7 +723,7 @@ end
         prp = ProcessRateParameters(FT)
 
         rates = P3ProcessRates(
-            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # condensation + 5 rain
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),  # condensation + autoconv,accr,cloud_self,rain_evap,rain_self,rain_br
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),                     # deposition, partial_melt, complete_melt, melt_n
             FT(0.0),                                                  # sublimation_number (D2)
             FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(1e-8), FT(0.0), FT(0.0),  # agg, ni_limit (C3), 5 riming
@@ -731,7 +770,7 @@ end
         prp = ProcessRateParameters(FT)
 
         rates = P3ProcessRates(
-            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),
             FT(0.0),
             FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
@@ -1097,7 +1136,8 @@ end
 
         @test tendency_ρqᶜˡ(rates, ρ) isa FT
         @test tendency_ρqʳ(rates, ρ) isa FT
-        @test tendency_ρnʳ(rates, ρ, FT(1e5), FT(1e-4), zero(FT), one(FT), ProcessRateParameters(FT)) isa FT
+        @test tendency_ρnʳ(rates, ρ, FT(1e5), FT(1e-4), zero(FT), one(FT),
+                           tendency_test_p3(FT)) isa FT
         @test tendency_ρqⁱ(rates, ρ) isa FT
         @test tendency_ρnⁱ(rates, ρ) isa FT
         @test tendency_ρqᶠ(rates, ρ, FT(0.3)) isa FT
@@ -1160,6 +1200,84 @@ end
         # Higher rain gives faster accretion
         rate_high = rain_accretion_rate(p3, qc, FT(2e-3))
         @test rate_high > rate
+    end
+
+    @testset "warm_rain_scheme dispatch" begin
+        FT = Float64
+        qc = FT(1e-3)
+        qr = FT(5e-4)
+        Nc = FT(1e8)
+        nr = FT(1e4)
+        ρ  = FT(1.0)
+
+        p3_kk = PredictedParticlePropertiesMicrophysics(FT; warm_rain_scheme = KhairoutdinovKogan2000())
+        p3_k13 = PredictedParticlePropertiesMicrophysics(FT; warm_rain_scheme = Kogan2013())
+        p3_sb = PredictedParticlePropertiesMicrophysics(FT; warm_rain_scheme = SeifertBeheng2001())
+
+        # Default is KK2000 (no regression)
+        p3_default = PredictedParticlePropertiesMicrophysics(FT)
+        @test p3_default.warm_rain_scheme isa KhairoutdinovKogan2000
+        @test rain_autoconversion_rate(p3_default, qc, Nc, ρ, qr) ==
+              rain_autoconversion_rate(p3_kk, qc, Nc, ρ, qr)
+
+        # Each scheme produces finite, distinct autoconversion rates
+        a_kk  = rain_autoconversion_rate(p3_kk,  qc, Nc, ρ, qr)
+        a_k13 = rain_autoconversion_rate(p3_k13, qc, Nc, ρ, qr)
+        a_sb  = rain_autoconversion_rate(p3_sb,  qc, Nc, ρ, qr)
+        @test all(isfinite, (a_kk, a_k13, a_sb))
+        @test a_kk > 0
+        @test a_k13 > 0
+        @test a_sb > 0
+        @test a_kk != a_k13
+        @test a_kk != a_sb
+
+        # Each scheme produces finite, distinct accretion rates
+        c_kk  = rain_accretion_rate(p3_kk,  qc, qr, ρ)
+        c_k13 = rain_accretion_rate(p3_k13, qc, qr, ρ)
+        c_sb  = rain_accretion_rate(p3_sb,  qc, qr, ρ)
+        @test all(isfinite, (c_kk, c_k13, c_sb))
+        @test c_kk > 0
+        @test c_k13 > 0
+        @test c_sb > 0
+
+        # Rain self-collection: KK2000 and SB2001 share form; Kogan2013 differs
+        s_kk  = rain_self_collection_rate(p3_kk,  qr, nr, ρ)
+        s_k13 = rain_self_collection_rate(p3_k13, qr, nr, ρ)
+        s_sb  = rain_self_collection_rate(p3_sb,  qr, nr, ρ)
+        @test s_kk ≈ s_sb       # Fortran kr·1e-3 = 5.78 shared between KK2000 and SB2001
+        @test s_kk != s_k13
+
+        # Cloud self-collection: zero for KK2000/Kogan2013, positive for SB2001
+        @test PredictedParticleProperties.cloud_self_collection_rate(p3_kk,  qc, Nc, ρ) == 0
+        @test PredictedParticleProperties.cloud_self_collection_rate(p3_k13, qc, Nc, ρ) == 0
+        @test PredictedParticleProperties.cloud_self_collection_rate(p3_sb,  qc, Nc, ρ) > 0
+
+        # Seed-drop mass: KK2000 ≈ 25μm radius, Kogan2013 ≈ 40μm, SB2001 ≈ 2/7.6923e9
+        m_kk  = PredictedParticleProperties.rain_seed_drop_mass(p3_kk)
+        m_k13 = PredictedParticleProperties.rain_seed_drop_mass(p3_k13)
+        m_sb  = PredictedParticleProperties.rain_seed_drop_mass(p3_sb)
+        @test m_kk  ≈ 4π/3 * 1000 * (25e-6)^3
+        @test m_k13 ≈ 4π/3 * 1000 * (40e-6)^3
+        @test m_sb  ≈ 2 / 7.6923076e9
+
+        # SB2001 with qʳ = 0 still produces finite (smaller) rate via the dry-cloud limit
+        a_sb_dry = rain_autoconversion_rate(p3_sb, qc, Nc, ρ, zero(FT))
+        @test isfinite(a_sb_dry)
+        @test a_sb_dry < a_sb   # qr=0 → universal-function factor reduces to 1
+
+        # SB2001 must use Fortran's dynamic dnu(mu_c) lookup, not the selector default ν.
+        p3_sb_dynamic_reference =
+            PredictedParticlePropertiesMicrophysics(FT; warm_rain_scheme = SeifertBeheng2001(fortran_sb2001_ν(Nc)))
+        @test a_sb ≈ rain_autoconversion_rate(p3_sb_dynamic_reference, qc, Nc, ρ, qr)
+        @test a_sb != rain_autoconversion_rate(PredictedParticlePropertiesMicrophysics(FT;
+                                              warm_rain_scheme = SeifertBeheng2001(FT(0))),
+                                              qc, Nc, ρ, qr)
+
+        # Fortran SB2001 assembles nc tendency as -ncautc + (-self + ncautc),
+        # so autoconversion alone does not remove cloud number in that branch.
+        autoconversion_only = p3_process_rates_with(FT; autoconversion = FT(1e-7))
+        @test tendency_ρnᶜˡ(autoconversion_only, ρ, Nc, qc, p3_sb) == 0
+        @test tendency_ρnᶜˡ(autoconversion_only, ρ, Nc, qc, p3_kk) < 0
     end
 
     @testset "rain_evaporation_rate" begin

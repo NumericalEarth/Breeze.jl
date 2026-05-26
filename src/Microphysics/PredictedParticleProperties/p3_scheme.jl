@@ -13,7 +13,7 @@ using LazyArtifacts: LazyArtifacts
 The Predicted Particle Properties (P3) microphysics scheme. See the constructor
 [`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
-struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, AERO}
+struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, AERO, WRS}
     # Shared physical constants
     water_density :: FT
     # Top-level thresholds
@@ -29,6 +29,8 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, AE
     precipitation_boundary_condition :: BC
     # Aerosol activation (nothing = prescribed CCN, AerosolActivation = prognostic CCN)
     aerosol :: AERO
+    # Warm-rain (autoconversion/accretion/self-collection) scheme selector
+    warm_rain_scheme :: WRS
 end
 
 """
@@ -130,13 +132,14 @@ function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Flo
                                                  aerosol = nothing,
                                                  cloud = nothing,
                                                  process_rates = nothing,
-                                                 predict_supersaturation = false)
+                                                 predict_supersaturation = false,
+                                                 warm_rain_scheme = KhairoutdinovKogan2000())
     if isnothing(process_rates)
         process_rates = ProcessRateParameters(FT; predict_supersaturation)
     end
     return read_fortran_lookup_tables(lookup_tables; FT, three_moment_ice,
                                       water_density, precipitation_boundary_condition,
-                                      aerosol, cloud, process_rates)
+                                      aerosol, cloud, process_rates, warm_rain_scheme)
 end
 
 # Shorthand alias
@@ -152,7 +155,8 @@ function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, "├── rain: ", summary(p3.rain), "\n")
     print(io, "├── cloud: ", summary(p3.cloud), "\n")
     print(io, "├── process_rates: ", summary(p3.process_rates), "\n")
-    print(io, "└── aerosol: ", isnothing(p3.aerosol) ? "nothing (prescribed CCN)" : summary(p3.aerosol))
+    print(io, "├── aerosol: ", isnothing(p3.aerosol) ? "nothing (prescribed CCN)" : summary(p3.aerosol), "\n")
+    print(io, "└── warm_rain_scheme: ", summary(p3.warm_rain_scheme))
 end
 
 # Note: prognostic_field_names is implemented in p3_interface.jl to extend

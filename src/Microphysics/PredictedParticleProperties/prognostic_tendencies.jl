@@ -133,11 +133,14 @@ Rain number loses from:
 - Homogeneous freezing (Phase 2, T < -40°C)
 - Rain warm collection number (M9, Fortran nrcoll)
 """
-@inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ, nʳ, qʳ, prp::ProcessRateParameters)
+@inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ, nʳ, qʳ, p3)
     FT = typeof(ρ)
+    prp = p3.process_rates
 
-    # Phase 1: New drops from autoconversion
-    n_from_autoconv = rates.autoconversion / prp.initial_rain_drop_mass
+    # Phase 1: New drops from autoconversion. Seed-drop mass varies by scheme:
+    # KK2000 → 25 μm radius (Fortran cons3⁻¹), Kogan2013 → 40 μm (cons8⁻¹),
+    # SB2001 → mass = 2/7.6923e9 (Fortran assembles `nr += 0.5 × ncautc`).
+    n_from_autoconv = rates.autoconversion / rain_seed_drop_mass(p3)
 
     # Phase 1: New drops from complete melting (conserve number)
     # Only complete_melting produces new rain drops; partial_melting stays on ice
@@ -344,8 +347,9 @@ Activation creates new cloud droplets. Autoconversion, accretion, riming,
 freezing, and above-freezing collection remove cloud droplets in proportion
 to the cloud mass they consume, following the Fortran `nc` budget structure.
 """
-@inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜ, qᶜˡ, prp::ProcessRateParameters)
+@inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜ, qᶜˡ, p3)
     FT = typeof(ρ)
+    prp = p3.process_rates
     # Nᶜ is per-volume [#/m³]; dividing by ρ gives per-mass nᶜˡ [#/kg],
     # matching Fortran's nc/qc → [#/kg/s] when multiplied by mass rates.
     number_per_mass = safe_divide(Nᶜ, ρ * qᶜˡ, zero(FT))
@@ -354,7 +358,15 @@ to the cloud mass they consume, following the Fortran `nc` budget structure.
                                rates.ccn_activation_mass / seed_drop_mass,
                                rates.ccn_activation_number)
 
-    number_loss = number_per_mass * (rates.autoconversion + rates.accretion) +
+    # Scheme-aware cloud-number loss from autoconversion. SB2001 produces a
+    # fixed-mass drizzle drop per unit converted mass; KK2000 and Kogan2013
+    # scale by the in-cloud nc/qc ratio (Fortran ncautc = qcaut × nc/qc).
+    autoconv_n = cloud_number_loss_from_autoconversion(p3, rates.autoconversion,
+                                                       qᶜˡ, Nᶜ, ρ)
+
+    number_loss = autoconv_n +
+                  number_per_mass * rates.accretion +
+                  rates.cloud_self_collection +
                   rates.cloud_riming_number +
                   rates.cloud_freezing_number +
                   rates.cloud_homogeneous_number +
@@ -476,7 +488,7 @@ prescribed-Nᶜ path `rates.ccn_activation_number` is zero, so this returns 0.
 
 @inline tendency_ρqᶜˡ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρqʳ(::Nothing, ρ) = zero(ρ)
-@inline tendency_ρnᶜˡ(::Nothing, ρ, Nᶜ, qᶜˡ, prp) = zero(ρ)
+@inline tendency_ρnᶜˡ(::Nothing, ρ, Nᶜ, qᶜˡ, p3) = zero(ρ)
 @inline tendency_ρnʳ(::Nothing, ρ, nⁱ, qⁱ, args...) = zero(ρ)
 @inline tendency_ρqⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρnⁱ(::Nothing, ρ) = zero(ρ)

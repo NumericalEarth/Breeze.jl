@@ -60,9 +60,11 @@ with the runtime defaults ``k_1 \approx 0.355`` (= ``1350 \cdot 100^{-1.79}``),
 pair is a unit-rescaled equivalent of the original KK2000 form
 ``1350\, q_{cl}^{2.47}\, N_c[\text{cm}^{-3}]^{-1.79}`` used by the Fortran reference.
 
-!!! note "Single warm-rain option"
-    The reference Fortran offers Seifert–Beheng 2001 and Kogan 2013 as
-    alternatives via the `autoAccr_param` switch. Breeze hard-codes
+!!! note "Selectable warm-rain options"
+    Alongside KK2000 (the default), the reference Fortran offers
+    [Seifert and Beheng (2001)](@cite SeifertBeheng2001) and
+    [Kogan (2013)](@cite Kogan2013) via the `autoAccr_param` switch. Breeze
+    exposes all three through the `warm_rain_scheme` keyword, defaulting to
     KK2000.
 
 ### Accretion (KK2000)
@@ -582,9 +584,9 @@ tendency. The relevant latent heats at standard conditions are:
 | Process | Affects | Key parameter / form | Reference |
 |---------|---------|-----------------------|-----------|
 | Condensation / evaporation | ``q^{cl}, q^r, q^{wi}`` | Coupled semi-analytic | [Morrison2015parameterization](@cite) |
-| Autoconversion | ``q^{cl} \to q^r`` | KK2000 (only) | [KhairoutdinovKogan2000](@cite) |
-| Accretion | ``q^{cl} \to q^r`` | KK2000 | [KhairoutdinovKogan2000](@cite) |
-| Rain self-collection / breakup | ``n^r`` | Verlinde–Cotton + KK2000 | [Morrison2015parameterization](@cite) |
+| Autoconversion | ``q^{cl} \to q^r`` | KK2000 (default) / SB2001 / Kogan2013 | [KhairoutdinovKogan2000](@cite), [SeifertBeheng2001](@cite), [Kogan2013](@cite) |
+| Accretion | ``q^{cl} \to q^r`` | KK2000 (default) / SB2001 / Kogan2013 | [KhairoutdinovKogan2000](@cite), [SeifertBeheng2001](@cite), [Kogan2013](@cite) |
+| Rain self-collection / breakup | ``n^r`` | Verlinde–Cotton + KK2000/SB2001/Kogan2013 | [Morrison2015parameterization](@cite) |
 | Rain evaporation | ``q^r \to q_v`` | Ventilation integral | [Morrison2015parameterization](@cite) |
 | Cooper nucleation | ``q^i, n^i`` | ``T < -15°``C, ``S_i \ge 5\%`` | [Cooper1986](@cite) |
 | Immersion freezing | ``q^{cl}/q^r \to q^i`` | Barklie–Gokhale | [BarklieGokhale1959](@cite) |
@@ -610,7 +612,9 @@ tendency. The relevant latent heats at standard conditions are:
 - [Morrison2025complete3moment](@cite): Complete three-moment process rates.
 
 ### Related References
-- [KhairoutdinovKogan2000](@cite): Warm rain autoconversion.
+- [KhairoutdinovKogan2000](@cite): Warm rain autoconversion (Breeze default).
+- [SeifertBeheng2001](@cite): Alternative warm-rain (`autoAccr_param = 1`).
+- [Kogan2013](@cite): Alternative warm-rain (`autoAccr_param = 3`).
 - [MilbrandtYau2005](@cite): Multimoment sedimentation.
 - [pruppacher2010microphysics](@cite): Cloud physics fundamentals.
 - [rogers1989short](@cite): Cloud physics textbook.

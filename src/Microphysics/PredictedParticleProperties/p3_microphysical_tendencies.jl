@@ -24,7 +24,7 @@ zero and the field remains at its initial value.
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnᶜˡ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     isnothing(p3.aerosol) && return zero(ρ)
     rates, props = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρnᶜˡ(rates, ρ, props.Nᶜ, ℳ.qᶜˡ, p3.process_rates)
+    return tendency_ρnᶜˡ(rates, ρ, props.Nᶜ, ℳ.qᶜˡ, p3)
 end
 
 """
@@ -54,7 +54,7 @@ Rain number tendency: gains from autoconversion, melting, shedding; loses to sel
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnʳ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, props = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρnʳ(rates, ρ, props.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
+    return tendency_ρnʳ(rates, ρ, props.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3)
 end
 
 """

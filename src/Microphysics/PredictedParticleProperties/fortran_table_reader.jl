@@ -51,7 +51,8 @@ function read_fortran_lookup_tables(directory::AbstractString;
                                     precipitation_boundary_condition = nothing,
                                     aerosol = nothing,
                                     cloud = nothing,
-                                    process_rates = nothing)
+                                    process_rates = nothing,
+                                    warm_rain_scheme = KhairoutdinovKogan2000())
 
     # Auto-detect 2momI vs 3momI from file presence
     file_3momI = joinpath(directory, "p3_lookupTable_1.dat-v6.9-3momI")
@@ -126,7 +127,8 @@ function read_fortran_lookup_tables(directory::AbstractString;
         cloud,
         process_rates,
         precipitation_boundary_condition,
-        aerosol
+        aerosol,
+        warm_rain_scheme
     )
 end
 

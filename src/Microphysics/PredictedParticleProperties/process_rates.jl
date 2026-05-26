@@ -83,6 +83,7 @@ struct P3Phase1Rates{FT}
     ccn_activation_number :: FT
     autoconversion :: FT
     accretion :: FT
+    cloud_self_collection :: FT
     rain_evaporation :: FT
     rain_condensation :: FT
     rain_self_collection :: FT
@@ -159,6 +160,7 @@ struct P3ProcessRates{FT}
     # Phase 1: Rain tendencies (all positive magnitudes)
     autoconversion :: FT           # Cloud → rain mass [kg/kg/s]
     accretion :: FT                # Cloud → rain mass (via rain sweep-out) [kg/kg/s]
+    cloud_self_collection :: FT    # Cloud number loss from cloud-cloud coalescence [1/kg/s] (SB2001 only; 0 for KK2000/K2013)
     rain_evaporation :: FT         # Rain evaporation magnitude [kg/kg/s]
     rain_self_collection :: FT     # Rain number loss magnitude [1/kg/s]
     rain_breakup :: FT             # Rain number gain from breakup [1/kg/s]
@@ -296,8 +298,9 @@ end
     # =========================================================================
     # Rain processes
     # =========================================================================
-    autoconv = rain_autoconversion_rate(p3, ℳ.qᶜˡ, Nᶜ, ρ)
-    accr = rain_accretion_rate(p3, ℳ.qᶜˡ, ℳ.qʳ)
+    autoconv = rain_autoconversion_rate(p3, ℳ.qᶜˡ, Nᶜ, ρ, ℳ.qʳ)
+    accr = rain_accretion_rate(p3, ℳ.qᶜˡ, ℳ.qʳ, ρ)
+    cloud_self = cloud_self_collection_rate(p3, ℳ.qᶜˡ, Nᶜ, ρ)
     rain_evap = vapor_rates.rain_evaporation
     rain_cond = vapor_rates.rain_condensation
     rain_self = rain_self_collection_rate(p3, ℳ.qʳ, nʳ, ρ)
@@ -318,7 +321,8 @@ end
     melt_n = ice_melting_number_rate(ℳ.qⁱ, nⁱ, complete_melt)
 
     return P3Phase1Rates{FT}(cond, ccn_act, ccn_act_n,
-                             autoconv, accr, rain_evap, rain_cond, rain_self, rain_br,
+                             autoconv, accr, cloud_self,
+                             rain_evap, rain_cond, rain_self, rain_br,
                              dep, coat_cond, coat_evap,
                              partial_melt, complete_melt, melt_n)
 end
@@ -592,6 +596,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     ccn_act_n = ph1.ccn_activation_number
     autoconv = ph1.autoconversion
     accr = ph1.accretion
+    cloud_self = ph1.cloud_self_collection
     rain_evap = ph1.rain_evaporation
     rain_cond = ph1.rain_condensation
     rain_self = ph1.rain_self_collection
@@ -784,7 +789,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
 
     return P3ProcessRates{FT}(
         cond_total,
-        autoconv, accr, rain_evap, rain_self, rain_br,
+        autoconv, accr, cloud_self, rain_evap, rain_self, rain_br,
         dep, partial_melt, complete_melt, melt_n,
         sublim_n,
         agg, ni_lim,

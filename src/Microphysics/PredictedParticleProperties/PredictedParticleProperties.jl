@@ -147,7 +147,7 @@ export
     lambda_bounds_from_diameter,
     enforce_diameter_bounds
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDFIELDS
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDFIELDS, TYPEDEF
 using SpecialFunctions: loggamma, gamma_inc, erf
 
 using Oceananigans: Oceananigans
@@ -206,6 +206,12 @@ include("process_rate_parameters.jl")
 #####
 
 include("aerosol_activation.jl")
+
+#####
+##### Warm-rain scheme selector types
+#####
+
+include("warm_rain_schemes.jl")
 
 #####
 ##### Main scheme type

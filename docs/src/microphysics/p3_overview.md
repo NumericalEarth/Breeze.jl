@@ -169,8 +169,11 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
     The Fortran scheme exposes three autoconversion / accretion / rain
     self-collection options
     (``\mathtt{autoAccr\_param} \in \{\text{SB2001},\, \text{KK2000},\, \text{Kogan2013}\}``,
-    default KK2000). Breeze hard-codes the KK2000 option; the SB2001 and
-    Kogan 2013 alternatives are not exposed.
+    default KK2000). Breeze exposes all three through the `warm_rain_scheme`
+    keyword — [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000)
+    (default, `KhairoutdinovKogan2000`),
+    [Seifert and Beheng (2001)](@cite SeifertBeheng2001) (`SeifertBeheng2001`),
+    and [Kogan (2013)](@cite Kogan2013) (`Kogan2013`).
 
 !!! note "Variable rain shape parameter"
     Both Breeze and Fortran v5.5.0 hold the rain shape parameter at
@@ -283,5 +286,6 @@ The following sections provide detailed documentation of the P3 scheme:
 
 - [MilbrandtYau2005](@citet): Multimoment microphysics and spectral shape parameter.
 - [SeifertBeheng2006](@citet): Two-moment cloud microphysics for mixed-phase clouds.
-- [KhairoutdinovKogan2000](@citet): Warm rain autoconversion parameterization.
+- [KhairoutdinovKogan2000](@citet): Warm rain autoconversion parameterization (Breeze default).
+- [Kogan2013](@citet): Alternative warm-rain autoconversion / accretion parameterization.
 - [pruppacher2010microphysics](@citet): Microphysics of clouds and precipitation (textbook).

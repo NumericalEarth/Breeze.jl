@@ -79,24 +79,27 @@ using Oceananigans.Fields: interior
         μ = FT(0.0)
         λ_r = FT(1e4)
 
+        # Look up field indices by name so future field additions don't break these tests.
+        field_index(name) = findfirst(==(name), fieldnames(P3ProcessRates))::Int
+
         partial_only = P3ProcessRates(ntuple(index -> begin
-            index == 8 ? FT(1e-7) : zero(FT)
+            index == field_index(:partial_melting) ? FT(1e-7) : zero(FT)
         end, fieldcount(P3ProcessRates))...)
 
         complete_only = P3ProcessRates(ntuple(index -> begin
-            index == 9 ? FT(1e-7) : zero(FT)
+            index == field_index(:complete_melting) ? FT(1e-7) : zero(FT)
         end, fieldcount(P3ProcessRates))...)
 
         coat_cond_only = P3ProcessRates(ntuple(index -> begin
-            index == 45 ? FT(1e-8) : zero(FT)
+            index == field_index(:coating_condensation) ? FT(1e-8) : zero(FT)
         end, fieldcount(P3ProcessRates))...)
 
         coat_evap_only = P3ProcessRates(ntuple(index -> begin
-            index == 46 ? FT(1e-8) : zero(FT)
+            index == field_index(:coating_evaporation) ? FT(1e-8) : zero(FT)
         end, fieldcount(P3ProcessRates))...)
 
         rain_rime_only = P3ProcessRates(ntuple(index -> begin
-            index == 16 ? FT(1e-7) : zero(FT)
+            index == field_index(:rain_riming) ? FT(1e-7) : zero(FT)
         end, fieldcount(P3ProcessRates))...)
 
         @test tendency_ρzⁱ(partial_only, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, p3_tab, ν, D_v, μ, zero(FT)) ≈ 0
@@ -588,6 +591,7 @@ using Oceananigans.Fields: interior
             FT(5e-7),   # condensation (bidirectional)
             FT(1e-7),   # autoconversion
             FT(2e-7),   # accretion
+            FT(0),      # cloud_self_collection (SB2001 only; 0 here)
             FT(5e-8),   # rain_evaporation (positive magnitude)
             FT(1e-6),   # rain_self_collection (positive magnitude)
             FT(5e-7),   # rain_breakup
