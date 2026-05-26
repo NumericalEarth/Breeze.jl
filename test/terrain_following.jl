@@ -1,6 +1,7 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Grids: MutableVerticalDiscretization, rnode, xnode, znode
+using Oceananigans.Operators: Δzᶜᶜᶠ
 using Breeze.Thermodynamics: hydrostatic_pressure
 using Test
 
@@ -296,6 +297,45 @@ using Test
         # Mountain-top column should have lower p_ref at k=1 than flat column
         i_flat = 1
         i_peak = Nx÷2
+        @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
+    end
+
+    @testset "Moist terrain reference state satisfies discrete hydrostatic balance" begin
+        Nx, Nz = 8, 8
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        h(x, y) = 200 * exp(-x^2 / 2000^2)
+        metrics = follow_terrain!(grid, h)
+
+        θ_reference(z) = 300.0 + 0.01 * z
+        qᵛ_reference(z) = 0.012 * exp(-z / 1000)
+
+        dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                        terrain_metrics = metrics,
+                                        reference_potential_temperature = θ_reference,
+                                        reference_vapor_mass_fraction = qᵛ_reference)
+        model = AtmosphereModel(grid; dynamics)
+
+        p_ref = model.dynamics.terrain_reference_pressure
+        ρ_ref = model.dynamics.terrain_reference_density
+        g = model.thermodynamic_constants.gravitational_acceleration
+
+        @test p_ref !== nothing
+        @test ρ_ref !== nothing
+
+        for i in 1:Nx, k in 2:Nz
+            hydrostatic_residual = (p_ref[i, 1, k] - p_ref[i, 1, k - 1]) / Δzᶜᶜᶠ(i, 1, k, grid) +
+                                   g * (ρ_ref[i, 1, k] + ρ_ref[i, 1, k - 1]) / 2
+            @test abs(hydrostatic_residual) <= 1e-8
+        end
+
+        i_flat = 1
+        i_peak = Nx ÷ 2
         @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
     end
 end

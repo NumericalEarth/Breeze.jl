@@ -362,58 +362,140 @@ using GPUArraysCore: @allowscalar
 
 using Breeze.Thermodynamics: evaluate_profile, hydrostatic_pressure
 
+terrain_reference_profiles(ref_spec) = (ref_spec, nothing)
+
+function terrain_reference_profiles(ref_spec::NamedTuple)
+    haskey(ref_spec, :reference_temperature) &&
+        throw(ArgumentError("Terrain-following compressible reference states do not support `reference_temperature` with `terrain_metrics`."))
+
+    θᵣ = ref_spec.reference_potential_temperature === nothing ? 288 : ref_spec.reference_potential_temperature
+    qᵛᵣ = ref_spec.reference_vapor_mass_fraction
+
+    return θᵣ, qᵛᵣ
+end
+
+terrain_hydrostatic_pressure(z, p₀, θᵣ, ::Nothing, pˢᵗ, constants) =
+    hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
+
+function terrain_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+    z == 0 && return p₀
+
+    # Anchor for the k = 1 cell center: integrate the continuous hydrostatic
+    # equation dp/dz = -g ρ from the surface to the local physical height `z`
+    # with a midpoint rule. This only sets the column's pressure level; the
+    # discrete-balance recurrence in `compute_terrain_reference_state!` handles
+    # k ≥ 2. This is the moist analogue of `numerically_integrated_hydrostatic_pressure`
+    # and uses the same fixed `nsteps`.
+    nsteps = 1000
+
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    g = constants.gravitational_acceleration
+
+    Δz = z / nsteps
+    p = p₀
+
+    for n in 1:nsteps
+        zⁿ = (n - 0.5) * Δz
+        θⁿ = evaluate_profile(θᵣ, zⁿ)
+        qᵛⁿ = evaluate_profile(qᵛᵣ, zⁿ)
+        qᵈⁿ = 1 - qᵛⁿ
+        Rᵐⁿ = qᵈⁿ * Rᵈ + qᵛⁿ * Rᵛ
+        cᵖᵐⁿ = qᵈⁿ * cᵖᵈ + qᵛⁿ * cᵖᵛ
+        κᵐⁿ = Rᵐⁿ / cᵖᵐⁿ
+        Tⁿ = θⁿ * (p / pˢᵗ)^κᵐⁿ
+        ρⁿ = p / (Rᵐⁿ * Tⁿ)
+        p = p - g * ρⁿ * Δz
+    end
+
+    return p
+end
+
 """
 $(TYPEDSIGNATURES)
 
 Fill the 3D fields `p_ref` and `ρ_ref` with the hydrostatic reference pressure and
-density computed by per-column discrete Exner integration. On a terrain-following grid,
-different columns have different physical heights at the same computational index `k`,
-so the reference state varies horizontally even though the reference atmosphere is
+density, solving the discrete hydrostatic balance per column. On a terrain-following
+grid, different columns have different physical heights at the same computational index
+`k`, so the reference state varies horizontally even though the reference atmosphere is
 horizontally uniform.
 
-The Exner function is integrated upward at each column using the physical vertical
-spacing, ensuring that the discrete hydrostatic balance
+The first cell center anchors the column via continuous hydrostatic integration to the
+local physical height. From there, each face's pressure is found by a Newton solve that
+drives the discrete hydrostatic balance
 ```math
-\\frac{p_{ref}[k] - p_{ref}[k-1]}{Δz} + g \\frac{ρ_{ref}[k] + ρ_{ref}[k-1]}{2} \\approx 0
+\\frac{p_{ref}[k] - p_{ref}[k-1]}{Δz} + g \\frac{ρ_{ref}[k] + ρ_{ref}[k-1]}{2} = 0
 ```
-holds to high accuracy at every interior face. This is essential for reducing the
-truncation error in the vertical momentum equation (``-∂p/∂z - gρ``), which would
-otherwise be dominated by the near-cancellation of two large terms.
+to near machine precision at every interior face (the Exner integration provides only
+the Newton initial guess). The reference atmosphere uses level-local moist constants
+``Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ``, ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ``, ``κᵐ = Rᵐ/cᵖᵐ``, with the dry case
+recovered exactly when ``qᵛ ≡ 0``. Enforcing the discrete balance is essential for
+reducing the truncation error in the vertical momentum equation (``-∂p/∂z - gρ``), which
+would otherwise be dominated by the near-cancellation of two large terms.
 
 The reference pressure is also used for the perturbation horizontal pressure gradient,
 reducing the terrain-following PGF error.
 """
-function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢᵗ, constants)
+function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, ref_spec, pˢᵗ, constants)
     Nx, Ny, Nz = size(grid)
     c = Center()
+
+    θᵣ, qᵛᵣ = terrain_reference_profiles(ref_spec)
+
     Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
-    κ = Rᵈ / cᵖᵈ
+    cᵖᵛ = constants.vapor.heat_capacity
     g = constants.gravitational_acceleration
+
     @allowscalar for j in 1:Ny, i in 1:Nx
-        πₖ = zero(κ) # initialized at k == 1 below
+        p⁻ = zero(eltype(grid))
+        ρ⁻ = zero(eltype(grid))
+        Π⁻ = zero(eltype(grid))
+
         for k in 1:Nz
             z_phys = znode(i, j, k, grid, c, c, c)
             θₖ = evaluate_profile(θᵣ, z_phys)
+            qᵛₖ = qᵛᵣ === nothing ? zero(θₖ) : evaluate_profile(qᵛᵣ, z_phys)
+            qᵈₖ = 1 - qᵛₖ
+            Rᵐₖ = qᵈₖ * Rᵈ + qᵛₖ * Rᵛ
+            cᵖᵐₖ = qᵈₖ * cᵖᵈ + qᵛₖ * cᵖᵛ
+            κₖ = Rᵐₖ / cᵖᵐₖ
 
             if k == 1
                 # Evaluate the continuous hydrostatic pressure at the local
                 # physical height (which varies with terrain) rather than
                 # forcing sea-level pressure at every column.
-                p_hydro = hydrostatic_pressure(z_phys, p₀, θᵣ, pˢᵗ, constants)
-                πₖ = (p_hydro / pˢᵗ)^κ
+                pₖ = terrain_hydrostatic_pressure(z_phys, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
             else
                 z_below = znode(i, j, k - 1, grid, c, c, c)
                 θ_below = evaluate_profile(θᵣ, z_below)
                 θ_face = (θₖ + θ_below) / 2
                 Δz = Δzᶜᶜᶠ(i, j, k, grid)
-                πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)
+                Πₖ_init = Π⁻ - g * Δz / (cᵖᵐₖ * θ_face)
+                pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
+
+                Aₖ = g * pˢᵗ^κₖ / (2 * Rᵐₖ * θₖ)
+                Cₖ = p⁻ / Δz - g * ρ⁻ / 2
+
+                for _ in 1:5
+                    ρp = pₖ^(-κₖ)
+                    f = pₖ / Δz + Aₖ * pₖ * ρp - Cₖ
+                    f′ = 1 / Δz + Aₖ * (1 - κₖ) * ρp
+                    pₖ = pₖ - f / f′
+                end
             end
 
-            pₖ = pˢᵗ * πₖ^(1 / κ)
-            ρₖ = pₖ / (Rᵈ * θₖ * πₖ)
+            Πₖ = (pₖ / pˢᵗ)^κₖ
+            ρₖ = pₖ / (Rᵐₖ * θₖ * Πₖ)
             @inbounds p_ref[i, j, k] = pₖ
             @inbounds ρ_ref[i, j, k] = ρₖ
+
+            p⁻ = pₖ
+            ρ⁻ = ρₖ
+            Π⁻ = Πₖ
         end
     end
 
