@@ -22,21 +22,28 @@ module TerrainFollowingDiscretization
 
 export follow_terrain!, TerrainMetrics, BasicTerrainFollowing,
        GridFittedTerrain, FaceSampledTerrain,
-       SlopeOutsideInterpolation, SlopeInsideInterpolation
+       SlopeOutsideInterpolation, SlopeInsideInterpolation,
+       TerrainFollowingVerticalDiscretization, LinearDecay, SLEVE,
+       materialize_terrain!, ∂z∂x, ∂z∂y
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
-using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, interior
-using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: xnode, ynode, rnode
+using Oceananigans
+using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, interior, set!
+using Oceananigans.Architectures: architecture, on_architecture
+using Oceananigans.Grids: xnode, ynode, rnode, AbstractGrid
 using Oceananigans.ImmersedBoundaries: MutableGridOfSomeKind
 using Oceananigans.Utils: launch!
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxyᶠᶠᵃ
 
 include("terrain_smoothing.jl")
 include("terrain_metrics.jl")
 include("follow_terrain.jl")
+include("terrain_formulations.jl")
+include("terrain_following_vertical_discretization.jl")
+include("materialize_terrain.jl")
 
 end # module
