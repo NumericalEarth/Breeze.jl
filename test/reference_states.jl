@@ -288,6 +288,31 @@ using Test
         end
     end
 
+    @testset "pressure_balanced_density accounts for condensate" begin
+        pᵣ = FT(9e4)
+        pˢᵗ = FT(1e5)
+        ρ_background = FT(1.1)
+        θ_background = FT(300)
+        θ_initial = FT(303)
+        q = Breeze.Thermodynamics.MoistureMassFractions(FT(0.01), FT(0.01), zero(FT))
+
+        𝒰_background = Breeze.Thermodynamics.LiquidIcePotentialTemperatureState(θ_background, q, pˢᵗ, pᵣ)
+        𝒰_initial = Breeze.Thermodynamics.LiquidIcePotentialTemperatureState(θ_initial, q, pˢᵗ, pᵣ)
+        Rᵐ = mixture_gas_constant(q, constants)
+
+        p_background = ρ_background * Rᵐ * temperature(𝒰_background, constants)
+
+        ρ_shortcut = Breeze.Thermodynamics.pressure_balanced_density(ρ_background, θ_background, θ_initial)
+        p_shortcut = ρ_shortcut * Rᵐ * temperature(𝒰_initial, constants)
+
+        @test !isapprox(p_shortcut, p_background; rtol=FT(1e-5))
+
+        ρ_condensate_aware = Breeze.Thermodynamics.pressure_balanced_density(ρ_background, θ_background, θ_initial, q, pᵣ, pˢᵗ, constants)
+        p_condensate_aware = ρ_condensate_aware * Rᵐ * temperature(𝒰_initial, constants)
+
+        @test isapprox(p_condensate_aware, p_background; rtol=sqrt(eps(FT)))
+    end
+
     #####
     ##### ReferenceState with discrete_hydrostatic_balance
     #####

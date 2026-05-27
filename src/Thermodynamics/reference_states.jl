@@ -126,8 +126,16 @@ end
 $(TYPEDSIGNATURES)
 
 Return the density that keeps pressure unchanged when applying a potential-temperature
-perturbation at fixed composition. This is useful for compressible initial conditions:
-holding ``ρ θ`` fixed avoids seeding an acoustic pressure perturbation.
+perturbation at fixed composition.
+
+`pressure_balanced_density(ρ_background, θ_background, θ_initial)` applies the dry-air /
+vapor-only relation, for which holding ``ρ θ`` fixed avoids seeding an acoustic pressure
+perturbation.
+
+For fixed-composition states with nonzero liquid or ice condensate, use
+`pressure_balanced_density(ρ_background, θ_background, θ_initial, q, pᵣ, pˢᵗ, constants)`
+instead. The condensate-aware method evaluates the full liquid-ice potential-temperature
+equation of state before balancing density.
 
 # Examples
 ```jldoctest
@@ -144,6 +152,13 @@ pressure_balanced_density(ρ_background, θ_background, θ_initial)
 """
 @inline pressure_balanced_density(ρ_background, θ_background, θ_initial) =
     ρ_background * θ_background / θ_initial
+
+@inline function pressure_balanced_density(ρ_background, θ_background, θ_initial,
+                                          q::MoistureMassFractions, pᵣ, pˢᵗ, constants)
+    T_background = temperature(LiquidIcePotentialTemperatureState(θ_background, q, pˢᵗ, pᵣ), constants)
+    T_initial = temperature(LiquidIcePotentialTemperatureState(θ_initial, q, pˢᵗ, pᵣ), constants)
+    return ρ_background * T_background / T_initial
+end
 
 #####
 ##### Hydrostatic reference profiles from temperature and moisture
