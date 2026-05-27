@@ -878,12 +878,8 @@ end
                                                       dynamics::TerrainCompressibleDynamics,
                                                       ρuᴸ, ρvᴸ, ρwᴸ, ρu′, ρv′, ρw̃′)
     metrics = dynamics.terrain_metrics
-    ζ = rnode(k, grid, Face())
-    decay = 1 - ζ / metrics.z_top
-    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-    slope_x = ∂x_h_cc * decay
-    slope_y = ∂y_h_cc * decay
+    slope_x = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid, metrics)
 
     ρuᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, total_momentum, ρuᴸ, ρu′)
     ρvᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, total_momentum, ρvᴸ, ρv′)
@@ -1029,16 +1025,12 @@ end
 ##### pre-stored metrics.∂x_h. Both are equivalent for static terrain.
 
 @inline function slope_x_times_∂z(i, j, k, grid, metrics, p)
-    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂x_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_x_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, p)
 end
 
 @inline function slope_x_times_∂z_p′(i, j, k, grid, metrics, p, p_ref)
-    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂x_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_x_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, perturbation_pressure, p, p_ref)
 end
 
@@ -1112,16 +1104,12 @@ end
 ##### Slope-inside-interpolation (CM1-like): ℑz(ℑy(slope * ∂z(p')))
 
 @inline function slope_y_times_∂z(i, j, k, grid, metrics, p)
-    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂y_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_y_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, p)
 end
 
 @inline function slope_y_times_∂z_p′(i, j, k, grid, metrics, p, p_ref)
-    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂y_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_y_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, perturbation_pressure, p, p_ref)
 end
 
