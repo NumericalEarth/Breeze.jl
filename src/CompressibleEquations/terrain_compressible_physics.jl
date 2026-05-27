@@ -26,7 +26,8 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
-                                              SlopeInsideInterpolation
+                                              SlopeInsideInterpolation,
+                                              TFVDRG, ∂z∂x, ∂z∂y
 
 #####
 ##### Terrain-aware type alias
@@ -120,18 +121,11 @@ end
 @kernel function _compute_contravariant_velocity!(w̃, ρw̃, grid, momentum, density, metrics)
     i, j, k = @index(Global, NTuple)
 
-    # Terrain slope decay factor
-    ζ = rnode(k, grid, Face())
-    z_top = metrics.z_top
-    decay = 1 - ζ / z_top
-
-    # Terrain slopes interpolated to (Center, Center) using Oceananigans operators
-    # (handles Flat topologies correctly)
-    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-
-    slope_x = ∂x_h_cc * decay
-    slope_y = ∂y_h_cc * decay
+    # Terrain slopes (∂z/∂x, ∂z/∂y)_ζ at (Center, Center, Face). On a BTF/MVD
+    # grid these come from `metrics` with linear decay; on a terrain-following
+    # coordinate grid they come from the grid operator (formulation decay).
+    slope_x = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid, metrics)
 
     # Momentum interpolated to (Center, Center, Face).
     # ρu is at (Face, Center, Center) → ℑx then ℑz to (Center, Center, Face)
@@ -350,6 +344,17 @@ end
     return ∂y_h_cc * (1 - ζ / metrics.z_top)
 end
 
+# On a TerrainFollowingVerticalDiscretization grid the coordinate owns the
+# slope: take (∂z/∂x)_ζ from the grid operator (which carries the formulation's
+# decay — linear for LinearDecay, sinh for SLEVE) and interpolate the x-face
+# value to (Center, Center) at the z-face. The `metrics` argument is ignored;
+# σ and the slope come from the one coordinate map, so they cannot disagree.
+@inline terrain_slope_x_ccf(i, j, k, grid::TFVDRG, metrics) =
+    (∂z∂x(i, j, k, grid, Face()) + ∂z∂x(i + 1, j, k, grid, Face())) / 2
+
+@inline terrain_slope_y_ccf(i, j, k, grid::TFVDRG, metrics) =
+    (∂z∂y(i, j, k, grid, Face()) + ∂z∂y(i, j + 1, k, grid, Face())) / 2
+
 @inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics, p)
     metrics = dynamics.terrain_metrics
     slope_x = terrain_slope_x_ccf(i, j, k, grid, metrics)
@@ -441,33 +446,25 @@ end
 end
 
 @inline function slope_x_times_∂z_linearized_pressure(i, j, k, grid, metrics, ρθ′, Πᴸ, γRᵐᴸ)
-    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂x_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_x_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
 @inline function slope_x_times_∂z_full_dry_pressure(i, j, k, grid, metrics,
                                                     ρθ′, ρᴸ, θᴸ, pᵣ, pˢᵗ, κ, cᵖᵈ)
-    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂x_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_x_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, full_dry_acoustic_pressure_perturbation,
                           ρθ′, ρᴸ, θᴸ, pᵣ, pˢᵗ, κ, cᵖᵈ)
 end
 
 @inline function slope_y_times_∂z_linearized_pressure(i, j, k, grid, metrics, ρθ′, Πᴸ, γRᵐᴸ)
-    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂y_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_y_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
 @inline function slope_y_times_∂z_full_dry_pressure(i, j, k, grid, metrics,
                                                     ρθ′, ρᴸ, θᴸ, pᵣ, pˢᵗ, κ, cᵖᵈ)
-    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂y_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_y_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, full_dry_acoustic_pressure_perturbation,
                           ρθ′, ρᴸ, θᴸ, pᵣ, pˢᵗ, κ, cᵖᵈ)
 end
@@ -848,13 +845,8 @@ end
 
 @inline function terrain_vertical_transport_momentum(i, j, k, grid, metrics,
                                                      ρu, ρv, ρw)
-    ζ = rnode(k, grid, Face())
-    decay = 1 - ζ / metrics.z_top
-
-    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-    slope_x = ∂x_h_cc * decay
-    slope_y = ∂y_h_cc * decay
+    slope_x = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid, metrics)
 
     ρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ρu)
     ρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ρv)
