@@ -160,6 +160,42 @@ end
     @test !any(isnan, parent(model.momentum.ρu))
 end
 
+@testset "FieldTimeSeries Open BC on momentum [$FT]" for FT in test_float_types()
+    # Regression test for #717, array-backed branch: a `FieldTimeSeries` Open BC
+    # on momentum previously hit `getbc(::AbstractArray, i, j, ...)` (→ BoundsError
+    # on `condition[i, j]`) during the clock-less momentum halo fill. With the clock
+    # threaded through, `getbc` dispatches to the FTS method and interpolates in time.
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 4),
+                           x=(0, 1000), y=(0, 1000), z=(0, 200),
+                           topology=(Bounded, Bounded, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    reference_potential_temperature=FT(300),
+                                    surface_pressure=FT(1e5))
+
+    # 2-D (y, z) boundary slice for a west OBC on ρu (Face, Center, Center).
+    # Slice values 1, 2, 3 at times 0, 10, 20 so the boundary value linearly
+    # interpolates to 1.5 at t = 5.
+    times = [FT(0), FT(10), FT(20)]
+    ρu_fts = FieldTimeSeries{Nothing, Center, Center}(grid, times)
+    for n in eachindex(times)
+        set!(ρu_fts[n], (y, z) -> FT(n))
+    end
+
+    ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_fts))
+    model = AtmosphereModel(grid; dynamics, boundary_conditions=(; ρu=ρu_bcs))
+    set!(model; θ=FT(300), ρ=FT(1.17))
+
+    # t = 0: west boundary face equals the first slice.
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ FT(1) atol=sqrt(eps(FT))
+
+    # t = 5: halfway between slices 1 and 2 → linear interpolation gives 1.5.
+    time_step!(model, FT(5))
+    @test model.clock.iteration == 1
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ FT(1.5) atol=sqrt(eps(FT))
+    @test !any(isnan, parent(model.momentum.ρu))
+end
+
 @testset "Bulk boundary conditions [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
