@@ -12,6 +12,7 @@
 #####
 
 using Oceananigans.Grids: new_data
+using Oceananigans.Models: surface_kernel_parameters
 
 @inline _cc(FT, arch, topo, sz, halo) = new_data(FT, arch, (Center, Center, Nothing), topo, sz, halo)
 @inline _fc(FT, arch, topo, sz, halo) = new_data(FT, arch, (Face,   Center, Nothing), topo, sz, halo)
@@ -60,7 +61,9 @@ end
 function materialize_formulation!(f::LinearDecay, grid, topography, terrain_interpretation)
     arch = architecture(grid)
     h_field = _fill_terrain_height!(f.h, grid, topography, terrain_interpretation)
-    launch!(arch, grid, (size(grid, 1), size(grid, 2)),
+    # `surface_kernel_parameters` covers the halo region so the slope arrays are
+    # valid at periodic/boundary points (∂z∂x interpolates to i+1 there).
+    launch!(arch, grid, surface_kernel_parameters(grid),
             _compute_terrain_slopes!, f.∂x_h, f.∂y_h, grid, h_field)
     return nothing
 end
@@ -83,9 +86,9 @@ function materialize_formulation!(f::SLEVE, grid, topography, terrain_interpreta
 
     parent(f.h₁) .= parent(h₁_field)
     parent(f.h₂) .= parent(h₂_field)
-    launch!(arch, grid, (size(grid, 1), size(grid, 2)),
+    launch!(arch, grid, surface_kernel_parameters(grid),
             _compute_terrain_slopes!, f.∂x_h₁, f.∂y_h₁, grid, h₁_field)
-    launch!(arch, grid, (size(grid, 1), size(grid, 2)),
+    launch!(arch, grid, surface_kernel_parameters(grid),
             _compute_terrain_slopes!, f.∂x_h₂, f.∂y_h₂, grid, h₂_field)
     return nothing
 end
@@ -112,3 +115,20 @@ end
         out[i, j, 1] = sx
     end
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Build a `TerrainMetrics` for a materialized `TerrainFollowingVerticalDiscretization`
+grid. On such grids the terrain *slope* used by the dynamics comes from the grid
+`∂z∂x` operator (formulation decay), so this object only carries the
+`pressure_gradient_stencil`, `z_top`, and a representative terrain field for
+diagnostics. Lets the existing `TerrainCompressibleDynamics` construct unchanged.
+"""
+build_terrain_metrics(grid, stencil) = _build_terrain_metrics(grid.z.formulation, stencil)
+
+_build_terrain_metrics(f::LinearDecay, stencil) =
+    TerrainMetrics(f.h, f.∂x_h, f.∂y_h, f.z_top, stencil, Val(false))
+
+_build_terrain_metrics(f::SLEVE, stencil) =
+    TerrainMetrics(f.h₁, f.∂x_h₁, f.∂y_h₁, f.z_top, stencil, Val(false))

@@ -24,7 +24,7 @@ export follow_terrain!, TerrainMetrics, BasicTerrainFollowing,
        GridFittedTerrain, FaceSampledTerrain,
        SlopeOutsideInterpolation, SlopeInsideInterpolation,
        TerrainFollowingVerticalDiscretization, LinearDecay, SLEVE,
-       materialize_terrain!, ∂z∂x, ∂z∂y, TFVDRG
+       materialize_terrain!, build_terrain_metrics, ∂z∂x, ∂z∂y, TFVDRG
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF

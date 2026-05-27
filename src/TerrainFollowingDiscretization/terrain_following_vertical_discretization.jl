@@ -19,7 +19,7 @@ using Oceananigans.Grids: AbstractVerticalCoordinate, generate_coordinate, getno
                           RectilinearGrid, LatitudeLongitudeGrid
 using Oceananigans.Operators: σⁿ, Δrᶜᶜᶜ, Δrᶠᶜᶜ, Δrᶜᶠᶜ, Δrᶜᶜᶠ, Δrᶠᶠᶜ, Δrᶠᶜᶠ, Δrᶜᶠᶠ, Δrᶠᶠᶠ
 import Oceananigans.Grids: generate_coordinate, znode, validate_dimension_specification
-import Oceananigans.Operators: σⁿ
+import Oceananigans.Operators: σⁿ, σ⁻
 
 struct TerrainFollowingVerticalDiscretization{C, D, E, F, FM} <: AbstractVerticalCoordinate
     "Face-centered reference coordinate ζ"
@@ -103,6 +103,11 @@ const TFVDRG = Union{RectilinearGrid{<:Any, <:Any, <:Any, <:Any, <:TFVD},
 
 @inline σⁿ(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
     terrain_following_σ(i, j, k, grid, grid.z.formulation, ℓx, ℓy, ℓz)
+
+# The terrain is static, so the previous-step scaling equals the current one.
+# (The generic fallback returns `one(grid)` ≡ a flat grid, which makes any
+# consumer of σ⁻ see spurious grid motion and blow up.)
+@inline σ⁻(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) = σⁿ(i, j, k, grid, ℓx, ℓy, ℓz)
 
 @inline znode(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
     rnode(i, j, k, grid, ℓx, ℓy, ℓz) +
