@@ -12,7 +12,6 @@
 #####
 
 using Oceananigans.Grids: new_data
-using Oceananigans.Models: surface_kernel_parameters
 
 @inline _cc(FT, arch, topo, sz, halo) = new_data(FT, arch, (Center, Center, Nothing), topo, sz, halo)
 @inline _fc(FT, arch, topo, sz, halo) = new_data(FT, arch, (Face,   Center, Nothing), topo, sz, halo)
@@ -58,13 +57,29 @@ function _fill_terrain_height!(h_raw, grid, topography, terrain_interpretation)
     return h_field
 end
 
-function materialize_formulation!(f::LinearDecay, grid, topography, terrain_interpretation)
+# Compute the surface slopes in the interior, then fill_halo_regions! to wrap
+# the (periodic) halos correctly, then copy into the raw slope arrays. The grid
+# slope operator ∂z∂x interpolates to i+1 at i=Nx, so the slope halos MUST be
+# valid — an unfilled (zero) halo seeds a boundary instability. Computing the
+# slopes over the halo region directly (e.g. surface_kernel_parameters) instead
+# reads unfilled h at the outermost halo and produces garbage, so go through a
+# Field + fill_halo_regions!.
+function _fill_terrain_slopes!(∂x_raw, ∂y_raw, h_field, grid)
     arch = architecture(grid)
+    ∂x = XFaceField(grid, indices = (:, :, 1))
+    ∂y = YFaceField(grid, indices = (:, :, 1))
+    launch!(arch, grid, (size(grid, 1), size(grid, 2)),
+            _compute_terrain_slopes!, ∂x, ∂y, grid, h_field)
+    fill_halo_regions!(∂x)
+    fill_halo_regions!(∂y)
+    parent(∂x_raw) .= parent(∂x)
+    parent(∂y_raw) .= parent(∂y)
+    return nothing
+end
+
+function materialize_formulation!(f::LinearDecay, grid, topography, terrain_interpretation)
     h_field = _fill_terrain_height!(f.h, grid, topography, terrain_interpretation)
-    # `surface_kernel_parameters` covers the halo region so the slope arrays are
-    # valid at periodic/boundary points (∂z∂x interpolates to i+1 there).
-    launch!(arch, grid, surface_kernel_parameters(grid),
-            _compute_terrain_slopes!, f.∂x_h, f.∂y_h, grid, h_field)
+    _fill_terrain_slopes!(f.∂x_h, f.∂y_h, h_field, grid)
     return nothing
 end
 
@@ -86,10 +101,8 @@ function materialize_formulation!(f::SLEVE, grid, topography, terrain_interpreta
 
     parent(f.h₁) .= parent(h₁_field)
     parent(f.h₂) .= parent(h₂_field)
-    launch!(arch, grid, surface_kernel_parameters(grid),
-            _compute_terrain_slopes!, f.∂x_h₁, f.∂y_h₁, grid, h₁_field)
-    launch!(arch, grid, surface_kernel_parameters(grid),
-            _compute_terrain_slopes!, f.∂x_h₂, f.∂y_h₂, grid, h₂_field)
+    _fill_terrain_slopes!(f.∂x_h₁, f.∂y_h₁, h₁_field, grid)
+    _fill_terrain_slopes!(f.∂x_h₂, f.∂y_h₂, h₂_field, grid)
     return nothing
 end
 
