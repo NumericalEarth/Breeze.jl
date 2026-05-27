@@ -78,10 +78,16 @@ function compute_velocities!(model::AtmosphereModel)
     arch = grid.architecture
 
     # Ensure halos are filled before velocity computation
-    # (prognostic field halo fill in update_state! is async)
+    # (prognostic field halo fill in update_state! is async).
+    # Thread clock and model fields so time-dependent boundary conditions
+    # (e.g. continuous-callable or FieldTimeSeries Open BCs) on density/momentum
+    # dispatch correctly; without them `getbc` falls through to a signature that
+    # cannot evaluate the time argument. Note: velocities are still stale here
+    # (recomputed just below), so momentum BCs with velocity `field_dependencies`
+    # would see last-stage values.
     density = dynamics_density(model.dynamics)
-    fill_halo_regions!(density)
-    fill_halo_regions!(model.momentum)
+    fill_halo_regions!(density, model.clock, fields(model))
+    fill_halo_regions!(model.momentum, model.clock, fields(model))
 
     # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
     # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by

@@ -66,7 +66,7 @@
 
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture
+using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture, fields
 using Oceananigans.Grids: ZDirection, znode
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
 using Oceananigans.Operators:
@@ -1449,9 +1449,11 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
             χ_field,
             grid)
 
-    fill_halo_regions!(model.dynamics.density)
-    fill_halo_regions!(χ_field)
-    fill_halo_regions!(model.momentum)
+    # Thread clock + model fields so time-dependent Open BCs on the recovered
+    # prognostic state dispatch correctly in `getbc` (see #717).
+    fill_halo_regions!(model.dynamics.density, model.clock, fields(model))
+    fill_halo_regions!(χ_field, model.clock, fields(model))
+    fill_halo_regions!(model.momentum, model.clock, fields(model))
     AtmosphereModels.compute_velocities!(model)
 
     return nothing
