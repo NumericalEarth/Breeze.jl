@@ -126,6 +126,40 @@ end
     @test all(bottom_flux_tendency((:ρu, :ρv), 2) .== 0)
 end
 
+@testset "Time-dependent Open BC on momentum [$FT]" for FT in test_float_types()
+    # Regression test for #717: `compute_velocities!` refilled the density and
+    # momentum halos without threading `model.clock`/`fields(model)`, so a
+    # time-dependent Open BC on momentum hit a `getbc` signature that could not
+    # evaluate the time argument (continuous callables → MethodError;
+    # FieldTimeSeries → BoundsError on the `getbc(::AbstractArray, ...)` fallback).
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 4),
+                           x=(0, 1000), y=(0, 1000), z=(0, 200),
+                           topology=(Bounded, Bounded, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    reference_potential_temperature=FT(300),
+                                    surface_pressure=FT(1e5))
+
+    @inline ρu_west(y, z, t, p) = p.ρ * cos(p.ω * t)
+    ρu_bcs = FieldBoundaryConditions(
+        west = OpenBoundaryCondition(ρu_west; parameters=(; ρ=FT(1.17), ω=FT(0.01))))
+
+    # `set!` triggers `update_state!` → `compute_velocities!` → momentum halo fill.
+    # Pre-#717 this threw before any explicit time step.
+    model = AtmosphereModel(grid; dynamics, boundary_conditions=(; ρu=ρu_bcs))
+    set!(model; θ=FT(300), ρ=FT(1.17))
+
+    # West boundary face (i=1) carries the prescribed value at the current time.
+    bc_value(t) = FT(1.17) * cos(FT(0.01) * t)
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ bc_value(model.clock.time) atol=sqrt(eps(FT))
+
+    # Stepping re-evaluates the BC at the new time without error.
+    time_step!(model, FT(10))
+    @test model.clock.iteration == 1
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ bc_value(model.clock.time) atol=sqrt(eps(FT))
+    @test !any(isnan, parent(model.momentum.ρu))
+end
+
 @testset "Bulk boundary conditions [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
