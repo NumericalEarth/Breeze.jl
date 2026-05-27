@@ -692,29 +692,7 @@ function build_and_run_stage!(
         @info msg
         return nothing
     end
-    add_callback!(simulation, progress, TimeInterval(1hour))
-
-    ## Per-iteration probe for the first 250 steps. Logs max|·| of every
-    ## prognostic so any latent instability — most importantly the
-    ## anelastic-F32 NaN that motivated switching to acoustic substepping —
-    ## leaves a clean failure signature (gradual norm growth vs sudden
-    ## corruption, and which field reaches it first).
-    prognostics = Oceananigans.prognostic_fields(model)
-    function diagnostic_probe(sim)
-        iter = iteration(sim)
-        iter > 250 && return nothing
-        pieces = String[]
-        for (name, f) in pairs(prognostics)
-            push!(pieces, @sprintf("max|%s|=%.3e", name, maximum(abs, f)))
-        end
-        @info @sprintf(
-            "[%s][probe] iter=%4d t=%s Δt=%s | %s",
-            stage_label, iter, prettytime(sim), prettytime(sim.Δt),
-            join(pieces, "  ")
-        )
-        return nothing
-    end
-    add_callback!(simulation, diagnostic_probe, IterationInterval(1))
+    add_callback!(simulation, progress, TimeInterval(6hour))
 
     ## In-memory captures, hourly. Each push is ~55 MB × 5 fields = 275 MB,
     ## × 24 hourly steps = ~6.6 GB per stage on host RAM — fits comfortably
@@ -1363,7 +1341,7 @@ let
             fig[1, 1];
             xlabel = "Radius (km)", ylabel = "Height (km)",
             title = @sprintf(
-                "YD19 Fig 3a — Axisymmetric wind response (heated − control, %.0f-%.0f h, %.0f km box)",
+                "YD19 Fig 3a — Axisymmetric wind response (heated − control, %.0f-%.0f h, %.0f km box; arrows: (v̄', 10·w̄'))",
                 target_s[1] / hour, target_s[end] / hour, Lx / 1.0e3
             ),
             limits = (xlim_lo, xlim_hi, zlim_lo, zlim_hi)
