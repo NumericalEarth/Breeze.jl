@@ -349,11 +349,18 @@ end
 # decay — linear for LinearDecay, sinh for SLEVE) and interpolate the x-face
 # value to (Center, Center) at the z-face. The `metrics` argument is ignored;
 # σ and the slope come from the one coordinate map, so they cannot disagree.
+# Use Oceananigans' stagger interpolators (`ℑxᶜᵃᵃ`/`ℑyᵃᶜᵃ`) instead of a
+# manual `(idx, idx+1)/2` average: those handle Flat dimensions correctly.
+# The naive form reads `∂z∂y(i, j+1, …)` which is out-of-bounds on a Flat-y
+# grid (Ny = 1, no y halo) and returns uninitialised memory — which then
+# propagates as NaN through `compute_contravariant_velocity!` and the rest
+# of the substep. `ℑyᵃᶜᵃ` on a Flat-y grid collapses to a no-op, matching
+# the MVD `terrain_slope_y_ccf` path that uses `ℑyᵃᶜᵃ(metrics.∂y_h)`.
 @inline terrain_slope_x_ccf(i, j, k, grid::TFVDRG, metrics) =
-    (∂z∂x(i, j, k, grid, Face()) + ∂z∂x(i + 1, j, k, grid, Face())) / 2
+    ℑxᶜᵃᵃ(i, j, k, grid, ∂z∂x, Face())
 
 @inline terrain_slope_y_ccf(i, j, k, grid::TFVDRG, metrics) =
-    (∂z∂y(i, j, k, grid, Face()) + ∂z∂y(i, j + 1, k, grid, Face())) / 2
+    ℑyᵃᶜᵃ(i, j, k, grid, ∂z∂y, Face())
 
 @inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics, p)
     metrics = dynamics.terrain_metrics
