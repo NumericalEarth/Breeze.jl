@@ -30,6 +30,9 @@ BreezeCloudMicrophysicsExt = ["CloudMicrophysics", "SpecialFunctions"]
 BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
 BreezeReactantExt = "Reactant"
 
+[sources]
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev="dkz-adapt-all"}
+
 [compat]
 Adapt = "4.3.0"
 ClimaComms = "0.6"
