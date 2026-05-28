@@ -176,7 +176,7 @@ end
     # 2-D (y, z) boundary slice for a west OBC on ρu (Face, Center, Center).
     # Slice values 1, 2, 3 at times 0, 10, 20 so the boundary value linearly
     # interpolates to 1.5 at t = 5.
-    times = [FT(0), FT(10), FT(20)]
+    times = FT[0, 10, 20]
     ρu_fts = FieldTimeSeries{Nothing, Center, Center}(grid, times)
     for n in eachindex(times)
         set!(ρu_fts[n], (y, z) -> FT(n))
@@ -187,12 +187,12 @@ end
     set!(model; θ=FT(300), ρ=FT(1.17))
 
     # t = 0: west boundary face equals the first slice.
-    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ FT(1) atol=sqrt(eps(FT))
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ FT(1)
 
     # t = 5: halfway between slices 1 and 2 → linear interpolation gives 1.5.
     time_step!(model, FT(5))
     @test model.clock.iteration == 1
-    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ FT(1.5) atol=sqrt(eps(FT))
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ FT(1.5)
     @test !any(isnan, parent(model.momentum.ρu))
 end
 
