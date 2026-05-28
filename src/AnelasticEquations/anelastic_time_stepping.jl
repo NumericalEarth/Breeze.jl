@@ -64,7 +64,7 @@ Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic press
 """
 function AtmosphereModels.make_pressure_correction!(model::AnelasticModel, Δt)
     dynamics = model.dynamics
-    Δt_FT = convert(eltype(model.grid), Δt)
+    Δt_FT = kernel_time_step(model.architecture, model.grid, Δt)
 
     launch!(model.architecture, model.grid, :xyz,
             _pressure_correct_momentum!,

@@ -91,7 +91,7 @@ function compute_anelastic_source_term!(solver::FourierTridiagonalPoissonSolver,
     rhs = solver.source_term
     arch = architecture(solver)
     grid = solver.grid
-    Δt_FT = convert(eltype(grid), Δt)
+    Δt_FT = kernel_time_step(arch, grid, Δt)
     launch!(arch, grid, :xyz, _compute_anelastic_source_term!, rhs, grid, ρŨ, Δt_FT)
     return nothing
 end

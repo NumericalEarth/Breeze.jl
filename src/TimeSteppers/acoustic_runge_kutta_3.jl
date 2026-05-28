@@ -152,8 +152,8 @@ end
 #####
 
 function scalar_rk3_substep!(model, Δt_stage)
-    FT = eltype(model.grid)
-    Δt_FT = convert(FT, Δt_stage)
+    grid = model.grid
+    Δt_FT = kernel_time_step(grid.architecture, grid, Δt_stage)
     return scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_FT)
 end
 

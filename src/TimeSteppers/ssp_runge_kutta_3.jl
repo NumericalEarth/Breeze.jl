@@ -112,7 +112,7 @@ function ssp_rk3_substep!(model, Δt, α)
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
-    Δt_FT = convert(eltype(grid), Δt)
+    Δt_FT = kernel_time_step(arch, grid, Δt)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic_fields(model), U⁰, Gⁿ))
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt_FT, α)
