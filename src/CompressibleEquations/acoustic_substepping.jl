@@ -1310,21 +1310,22 @@ end
 
 @inline is_active_open_bc(bc) = (bc isa BoundaryCondition{<:Open}) && !(bc.condition isa Nothing)
 
-# Relax a Center perturbation toward the prescribed wall value in the outermost
-# open-boundary cell row: `target = v − ρᴸ[cell] = (base[halo] − base[cell]) / 2`.
-@kernel function _relax_open_boundary_x_cell!(pert, base, i_cell, i_halo, α)
+# Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the prescribed
+# wall value in a single kernel: target = v − cᴸ[iᴮ] = (cᴸ[iᴴ] − cᴸ[iᴮ]) / 2.
+# `iᴮ` is the outermost interior cell index, `iᴴ` the adjacent halo cell index.
+@kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, iᴮ, iᴴ, α)
     j, k = @index(Global, NTuple)
     @inbounds begin
-        target = (base[i_halo, j, k] - base[i_cell, j, k]) / 2
-        pert[i_cell, j, k] += α * (target - pert[i_cell, j, k])
+        ρ′[iᴮ, j, k]  += α * ((ρᴸ[iᴴ, j, k]  - ρᴸ[iᴮ, j, k])  / 2 - ρ′[iᴮ, j, k])
+        ρθ′[iᴮ, j, k] += α * ((ρθᴸ[iᴴ, j, k] - ρθᴸ[iᴮ, j, k]) / 2 - ρθ′[iᴮ, j, k])
     end
 end
 
-@kernel function _relax_open_boundary_y_cell!(pert, base, j_cell, j_halo, α)
+@kernel function _relax_open_boundary_y!(ρ′, ρθ′, ρᴸ, ρθᴸ, jᴮ, jᴴ, α)
     i, k = @index(Global, NTuple)
     @inbounds begin
-        target = (base[i, j_halo, k] - base[i, j_cell, k]) / 2
-        pert[i, j_cell, k] += α * (target - pert[i, j_cell, k])
+        ρ′[i, jᴮ, k]  += α * ((ρᴸ[i, jᴴ, k]  - ρᴸ[i, jᴮ, k])  / 2 - ρ′[i, jᴮ, k])
+        ρθ′[i, jᴮ, k] += α * ((ρθᴸ[i, jᴴ, k] - ρθᴸ[i, jᴮ, k]) / 2 - ρθ′[i, jᴮ, k])
     end
 end
 
@@ -1338,20 +1339,16 @@ function apply_open_boundary_relaxation!(substepper, model, grid, arch)
     ρᴸ  = model.dynamics.density
     ρθᴸ = thermodynamic_density(model.formulation)
     if is_active_open_bc(bcs_u.west)
-        launch!(arch, grid, :yz, _relax_open_boundary_x_cell!, ρ′,  ρᴸ,  1, 0, α)
-        launch!(arch, grid, :yz, _relax_open_boundary_x_cell!, ρθ′, ρθᴸ, 1, 0, α)
+        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
     end
     if is_active_open_bc(bcs_u.east)
-        launch!(arch, grid, :yz, _relax_open_boundary_x_cell!, ρ′,  ρᴸ,  Nx, Nx + 1, α)
-        launch!(arch, grid, :yz, _relax_open_boundary_x_cell!, ρθ′, ρθᴸ, Nx, Nx + 1, α)
+        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, Nx, Nx + 1, α)
     end
     if is_active_open_bc(bcs_v.south)
-        launch!(arch, grid, :xz, _relax_open_boundary_y_cell!, ρ′,  ρᴸ,  1, 0, α)
-        launch!(arch, grid, :xz, _relax_open_boundary_y_cell!, ρθ′, ρθᴸ, 1, 0, α)
+        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
     end
     if is_active_open_bc(bcs_v.north)
-        launch!(arch, grid, :xz, _relax_open_boundary_y_cell!, ρ′,  ρᴸ,  Ny, Ny + 1, α)
-        launch!(arch, grid, :xz, _relax_open_boundary_y_cell!, ρθ′, ρθᴸ, Ny, Ny + 1, α)
+        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, Ny, Ny + 1, α)
     end
     return nothing
 end
