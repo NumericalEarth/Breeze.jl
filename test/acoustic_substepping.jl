@@ -73,7 +73,7 @@ end
     fill!(ρv′, 0)
 
     launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
-            ρu′, ρv′, grid, FT(0.5), ρθ′, Πᴸ, pᴸ, Gρu, Gρv, γRᵐᴸ, false)
+            false, ρu′, ρv′, grid, FT(0.5), ρθ′, Πᴸ, pᴸ, Gρu, Gρv, γRᵐᴸ)
 
     @test @allowscalar(ρu′[2, 2, 2]) == -1
     @test @allowscalar(ρv′[2, 2, 2]) == -1.5
@@ -887,6 +887,100 @@ for arch in arches
         @test model.clock.iteration == 3
         @test !any(isnan, parent(model.dynamics.density))
         @test model.dynamics.reference_state === nothing
+    end
+
+    #####
+    ##### No-fill serial substepping regression: topology coverage.
+    #####
+    ##### These tests exercise the optimized substep loop (no per-substep
+    ##### `fill_halo_regions!`, fused `ρθ′ˢ⁻` snapshot, configured
+    ##### `convert_to_device` argument tuples) on several horizontal
+    ##### topologies that stress the topology-aware horizontal stencils
+    ##### at physical boundaries:
+    #####
+    ##### - `(Periodic, Periodic, Bounded)` with default
+    #####   `ThermalDivergenceDamping()` exercises the fused-snapshot
+    #####   path with full damping.
+    ##### - `(Bounded, Periodic, Bounded)` with `NoDivergenceDamping()`
+    #####   exercises the topology-aware x-wall stencils and the no-op
+    #####   damping setup path.
+    ##### - `(Bounded, Bounded, Bounded)` with default damping exercises
+    #####   walls in both horizontal directions.
+    #####
+    ##### `substeps = 6` keeps the runs cheap while making sure the
+    ##### substep loop runs more than once per stage, so the
+    ##### substep-entry `ρθ′ˢ⁻` snapshot written by the predictor
+    ##### kernel is genuinely consumed by the damping kernel.
+    #####
+
+    @testset "No-fill substep loop runs on $topology_name [$(arch), $(FT)]" for
+            (topology_name, topology, damping) in (
+                ("(Periodic, Periodic, Bounded) + ThermalDivergenceDamping",
+                 (Periodic, Periodic, Bounded), ThermalDivergenceDamping()),
+                ("(Bounded, Periodic, Bounded) + NoDivergenceDamping",
+                 (Bounded, Periodic, Bounded), NoDivergenceDamping()),
+                ("(Bounded, Bounded, Bounded) + ThermalDivergenceDamping",
+                 (Bounded, Bounded, Bounded), ThermalDivergenceDamping()),
+            ),
+            FT in as_test_float_types(arch)
+
+        Oceananigans.defaults.FloatType = FT
+        Lx = Ly = Lz = 8kilometers
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, Lx), y=(0, Ly), z=(0, Lz),
+                               topology=topology)
+
+        td = SplitExplicitTimeDiscretization(substeps=6, damping=damping)
+        dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics,
+                                timestepper=:AcousticRungeKutta3)
+
+        # Smooth horizontal θ perturbation so the topology-aware
+        # horizontal stencils at `Periodic` wrap-around and `Bounded`
+        # walls are actually exercised. The amplitude is small relative
+        # to the 300 K base state, so the run stays stable in Float32 on
+        # CPU while still driving non-trivial `(ρθ)′`, perturbation
+        # pressure gradients, and momentum divergence through the
+        # no-fill substep kernels.
+        Δθ = FT(0.5)
+        a = FT(2) * FT(kilometers)
+        xᵇ = Lx / 2
+        yᵇ = Ly / 2
+        zᵇ = Lz / 2
+        θ_initial(x, y, z) = FT(300) +
+            Δθ * exp(-((x - xᵇ)^2 + (y - yᵇ)^2 + (z - zᵇ)^2) / a^2)
+
+        ref = model.dynamics.reference_state
+        set!(model; θ=θ_initial, u=0, qᵗ=0, ρ=ref.density)
+
+        simulation = Simulation(model; Δt=FT(6), stop_iteration=3, verbose=false)
+        run!(simulation)
+
+        @test model.clock.iteration == 3
+
+        # No NaNs / infs anywhere in the recovered state — most reliable
+        # signal that the no-fill substep loop is consistent across all
+        # topologies.
+        for field in (model.dynamics.density,
+                      model.momentum.ρu, model.momentum.ρv, model.momentum.ρw)
+            @test !any(isnan, parent(field))
+            @test !any(isinf, parent(field))
+        end
+
+        # Density must remain physical (positive). If the no-fill path
+        # corrupts the recovery step or the topology-aware operators
+        # mishandle a wall, the easiest failure mode is negative ρ
+        # somewhere in the interior.
+        ρ_min = @allowscalar minimum(interior(model.dynamics.density))
+        @test ρ_min > 0
+
+        # The perturbation should produce a non-trivial response: at
+        # least one horizontal momentum field must develop a non-zero
+        # value in the interior. This guards against the no-fill
+        # operators silently zeroing everything out.
+        ρu_max = @allowscalar maximum(abs, interior(model.momentum.ρu))
+        ρv_max = @allowscalar maximum(abs, interior(model.momentum.ρv))
+        @test ρu_max + ρv_max > 0
     end
 
 end
