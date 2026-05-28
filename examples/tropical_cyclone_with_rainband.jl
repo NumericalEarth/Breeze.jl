@@ -966,9 +966,7 @@ end
 #
 # The two stubs below extend the spinup into a control / heated pair, which is
 # what YD19 actually subtract to get the quadrupole response. They are kept
-# commented out so this example stays short; uncomment to enable, then add
-# back the F03a / F04 / F05 / F06 plot blocks against `control_result` and
-# `heated_result`.
+# commented out so this example stays short.
 #
 # ```julia
 # @info "=== Control: $(prettytime(stage_stop_time)) ==="
