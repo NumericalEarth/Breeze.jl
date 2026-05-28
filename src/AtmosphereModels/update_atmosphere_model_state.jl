@@ -5,6 +5,7 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compu
 using Oceananigans: Face
 using Oceananigans.Grids: topology
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
+using Oceananigans.Models: boundary_condition_args
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
 using Oceananigans.Utils: launch!, KernelParameters
@@ -14,7 +15,7 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
     fix_negative_moisture!(model)  # fix negative moisture from advection
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
-    fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
+    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
@@ -78,10 +79,16 @@ function compute_velocities!(model::AtmosphereModel)
     arch = grid.architecture
 
     # Ensure halos are filled before velocity computation
-    # (prognostic field halo fill in update_state! is async)
+    # (prognostic field halo fill in update_state! is async).
+    # Thread clock and model fields so time-dependent boundary conditions
+    # (e.g. continuous-callable or FieldTimeSeries Open BCs) on density/momentum
+    # dispatch correctly; without them `getbc` falls through to a signature that
+    # cannot evaluate the time argument. Note: velocities are still stale here
+    # (recomputed just below), so momentum BCs with velocity `field_dependencies`
+    # would see last-stage values.
     density = dynamics_density(model.dynamics)
-    fill_halo_regions!(density)
-    fill_halo_regions!(model.momentum)
+    fill_halo_regions!(density, boundary_condition_args(model)...)
+    fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
 
     # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
     # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by
