@@ -1,7 +1,7 @@
 # # [Tropical cyclone with a stationary stratiform rainband](@id tc_rainband_example)
 #
 # This example reproduces the idealized tropical-cyclone rainband experiments
-# of [YuDidlake2019](@citet) (hereafter YD19), who asked a beautifully concrete question: if
+# of [YuDidlake2019](@citet) (hereafter YD19), who asked a question: if
 # you take a mature hurricane and paint a steady, stationary heating pattern
 # in one of its stratiform rainbands, what happens to the storm?
 #
@@ -15,18 +15,13 @@
 #
 # ## What this example does
 #
-# We run three back-to-back 24 h stages:
-#
-#   1. **Spinup** — the balanced vortex IC is released and relaxes to
-#      numerical equilibrium under no forcing (just the sponge at the model
-#      top). This is stage 1 of [YuDidlake2019](@citet) §3a2.
-#   2. **Control** — 24 h continuation of the post-spinup state, no heating.
-#   3. **Heated** — 24 h continuation of the *same* post-spinup state, now
-#      with the stationary MN10 stratiform heating switched on.
-#
-# Subtracting control from heated isolates the response to the imposed
-# heating (YD19 Eq. 4). Everything else — slow vortex drift, residual
-# gravity-wave activity, sponge interactions — cancels out.
+# We build a balanced tropical-cyclone vortex from the Jordan sounding, run a
+# 24 h spinup so the vortex relaxes to numerical equilibrium, and then
+# visualize the basic-state vortex alongside the analytic MN10 stratiform
+# heating field that YD19 use to drive the rainband response. The two
+# follow-on stages (control and heated) and their response diagnostics are
+# kept as commented-out stubs at the bottom of the file for users who want
+# to reproduce the full YD19 quadrupole.
 #
 # ## What this simulation teaches
 #
@@ -34,22 +29,14 @@
 #   (the Nolan 2001 / WRF `em_tropical_cyclone` procedure).
 # - How to wire a spatially structured, time-varying source term into the
 #   energy equation with `Forcing`.
-# - How to run three related stages of a simulation in one script, with the
-#   post-spinup state reused as the initial condition of the follow-on runs.
-# - How to isolate a forced response via a control experiment.
+# - How to inspect a model spinup with azimuthally-averaged diagnostics.
 #
 # ## Figures produced
 #
 # | File                             | Content                                           |
 # |----------------------------------|---------------------------------------------------|
-# | `F01_preflight.png`              | vortex IC sanity check                            |
 # | `F02ab_vortex.png`               | basic-state vortex ([YuDidlake2019](@citet); Fig. 2a,b) |
 # | `F02cd_heating.png`              | analytic heating ([YuDidlake2019](@citet); Fig. 2c,d)  |
-# | `F03a_axisym_response.png`       | axisymmetric response ([YuDidlake2019](@citet); Fig. 3a) |
-# | `F04_plan_response.png`          | plan-view response ([YuDidlake2019](@citet); Fig. 4a-c)  |
-# | `F04b_plan_w_raw.png`            | plan-view *raw* vertical velocity in the heated run     |
-# | `F05_cross_sections.png`         | cross sections ([YuDidlake2019](@citet); Fig. 5)     |
-# | `F06_response_timeseries.png`    | response amplitude vs time (diagnostic)           |
 
 using Breeze
 using Oceananigans: Oceananigans
@@ -75,49 +62,54 @@ end
 # Columns are pressure (mb), geopotential height (m), temperature (°C), and
 # potential temperature (K).
 
-const jordan_p_mb = Float32[
+jordan_p_mb = [
     1015.1, 1000.0, 950.0, 900.0, 850.0, 800.0, 750.0, 700.0, 650.0, 600.0,
     550.0, 500.0, 450.0, 400.0, 350.0, 300.0, 250.0, 200.0, 175.0, 150.0,
     125.0, 100.0, 80.0, 60.0, 50.0, 40.0, 30.0,
 ]
 
-const jordan_z_m = Float32[
+jordan_z_m = [
     0.0, 132.0, 583.0, 1054.0, 1547.0, 2063.0, 2609.0, 3182.0,
     3792.0, 4442.0, 5138.0, 5888.0, 6703.0, 7595.0, 8581.0, 9682.0,
     10935.0, 12396.0, 13236.0, 14177.0, 15260.0, 16568.0, 17883.0, 19620.0,
     20743.0, 22139.0, 23971.0,
 ]
 
-const jordan_T_C = Float32[
+jordan_T_C = [
     26.3, 26.0, 23.0, 19.8, 17.3, 14.6, 11.8, 8.6, 5.1, 1.4,
     -2.5, -6.9, -11.9, -17.7, -24.8, -33.2, -43.3, -55.2, -61.5, -67.6,
     -72.2, -73.5, -69.8, -63.9, -60.6, -57.3, -54.0,
 ]
 
-const jordan_θ_K = Float32[
+jordan_θ_K = [
     298.0, 299.0, 300.0, 302.0, 304.0, 307.0, 309.0, 312.0, 315.0, 318.0,
     321.0, 324.0, 328.0, 332.0, 335.0, 338.0, 342.0, 345.0, 348.0, 354.0,
     364.0, 386.0, 418.0, 468.0, 500.0, 542.0, 597.0,
 ]
 
-function linear_interpolate(xs::AbstractVector, ys::AbstractVector, x::Real)
-    x_c = clamp(x, first(xs), last(xs))
-    i = searchsortedfirst(xs, x_c)
-    i = clamp(i, 2, length(xs))
-    x0, x1 = xs[i - 1], xs[i]
-    y0, y1 = ys[i - 1], ys[i]
-    return y0 + (y1 - y0) * (x_c - x0) / (x1 - x0)
-end
+## A 1-D vertical RectilinearGrid carries the Jordan sounding. The 27
+## sounding levels map onto the 27 z-faces of a 26-cell Bounded grid, so
+## `ZFaceField`s store the data exactly and `Oceananigans.Fields.interpolate`
+## handles the linear lookup between levels. The fields are CPU-resident
+## because `θ_env`/`T_env`/`p_env` are called host-side during the
+## balanced-vortex Picard iteration; `set!` evaluates them on the host
+## before copying the result to GPU, so this works for either backend.
+const sounding_grid = RectilinearGrid(
+    size = length(jordan_z_m) - 1, z = jordan_z_m,
+    topology = (Flat, Flat, Bounded)
+)
 
-## Precompute the K- and Pa-converted soundings so `T_env`/`p_env` don't
-## allocate a fresh broadcasted array on every call, and so the type
-## propagates through interpolation as Float32.
-const jordan_T_K = jordan_T_C .+ 273.15f0
-const jordan_p_Pa = jordan_p_mb .* 100f0
+const jordan_θ = ZFaceField(sounding_grid)
+const jordan_T = ZFaceField(sounding_grid)
+const jordan_p = ZFaceField(sounding_grid)
 
-θ_env(z) = linear_interpolate(jordan_z_m, jordan_θ_K, z)
-T_env(z) = linear_interpolate(jordan_z_m, jordan_T_K, z)
-p_env(z) = linear_interpolate(jordan_z_m, jordan_p_Pa, z)
+interior(jordan_θ, 1, 1, :) .= jordan_θ_K
+interior(jordan_T, 1, 1, :) .= jordan_T_C .+ 273.15
+interior(jordan_p, 1, 1, :) .= jordan_p_mb .* 100
+
+θ_env(z) = Oceananigans.Fields.interpolate(z, jordan_θ)
+T_env(z) = Oceananigans.Fields.interpolate(z, jordan_T)
+p_env(z) = Oceananigans.Fields.interpolate(z, jordan_p)
 
 # ## YD19 physical parameters
 #
@@ -128,8 +120,8 @@ p_env(z) = linear_interpolate(jordan_z_m, jordan_p_Pa, z)
 # between 250 and 300 km is *not* in the original paper. Since our domain is periodic,
 # we need to impose this to limit unrealistic stress at the domain boundaries.
 
-f = 5.0e-5                     # f-plane Coriolis parameter, 1/s ([YuDidlake2019](@citet); §3a1)
-v_max_surface = 43.0           # initial surface v_max, m/s ([YuDidlake2019](@citet); §3a2)
+f = 5.0e-5                       # f-plane Coriolis parameter, 1/s ([YuDidlake2019](@citet); §3a1)
+v_max_surface = 43             # initial surface v_max, m/s ([YuDidlake2019](@citet); §3a2)
 a_decay = 0.5                  # modified-Rankine decay exponent ([YuDidlake2019](@citet); Eq. 2)
 rmw_surface = 31kilometers     # surface radius of maximum wind, m ([MoonNolan2010](@citet); Appendix A)
 z_vortex_top = 16kilometers    # outflow reference level, m ([MoonNolan2010](@citet); v = 0 at RMW at z ≈ 15.9 km)
@@ -138,11 +130,8 @@ r_taper_end = 300kilometers    # radial taper end, m
 
 # ## Output layout
 #
-# Run outputs live under `examples/output_tc_rainband/figures/` — F01-F06
-# PNGs (paper-reproduction outputs). Hourly state snapshots stay in host RAM
-# during the run (~6.6 GB per stage of host memory; fits comfortably on a
-# 128 GB host) and are released after stage 4's analysis, so the on-disk
-# footprint is only the figures themselves.
+# Run outputs live under `examples/output_tc_rainband/figures/` — the two
+# F02 PNGs (paper-reproduction outputs).
 
 output_dir = joinpath(@__DIR__, "output_tc_rainband")
 figures_dir = joinpath(output_dir, "figures")
@@ -171,15 +160,17 @@ Nx = Ny = Int(Lx / Δx)
 Nz = 75
 Lz = 25kilometers                 # YD19 §3a1
 Δz = Lz / Nz
-sponge_rate = 1f0 / Float32(333seconds) # ≈ WRF damp_opt=2 `dampcoef`
+sponge_rate = 1.0f0 / Float32(333seconds) # ≈ WRF damp_opt=2 `dampcoef`
 stage_stop_time = 24hours
 
 arch = CUDA.functional() ? GPU() : CPU()
 
-grid = RectilinearGrid(arch;
-                       size = (Nx, Ny, Nz), halo = (5, 5, 5),
-                       x = (-Lx / 2, Lx / 2), y = (-Lx / 2, Lx / 2), z = (0, Lz),
-                       topology = (Periodic, Periodic, Bounded))
+grid = RectilinearGrid(
+    arch;
+    size = (Nx, Ny, Nz), halo = (5, 5, 5),
+    x = (-Lx / 2, Lx / 2), y = (-Lx / 2, Lx / 2), z = (0, Lz),
+    topology = (Periodic, Periodic, Bounded)
+)
 
 # ## Reference state and thermodynamic constants
 #
@@ -201,10 +192,6 @@ reference_state = ReferenceState(
     potential_temperature = θ_env
 )
 
-## `interior(...)` below is for host-side reductions (balance iteration,
-## azimuthal binning, state save/restore), NOT for Makie plotting — so the
-## examples-rules ban on `interior(field, ...)` in heatmap!/lines! calls
-## doesn't apply. Plotting is done from already-reduced Arrays.
 pᵣ = Array(interior(reference_state.pressure, 1, 1, :))
 ρᵣ = Array(interior(reference_state.density, 1, 1, :))
 Tᵣ = Array(interior(reference_state.temperature, 1, 1, :))
@@ -492,9 +479,7 @@ t_full = Float32(1hour)            # 1 h ramp to avoid instantaneous onset
 Πᵣ = Float32[(pᵣ[k] / pˢᵗ)^κ for k in 1:Nz]
 Πᵣ_device = arch isa GPU ? CuArray(Πᵣ) : Πᵣ
 
-## Float32 π-multiples used inside the heating and sponge kernels. The
-## standalone expressions `π/4`, `π/2`, `2π`, and `π` evaluate to Float64
-## (Irrational arithmetic), which would promote the kernels to Float64.
+
 ## Precompute once at module load.
 const π_F32 = Float32(π)
 const π_4_F32 = Float32(π / 4)
@@ -514,7 +499,7 @@ const twoπ_F32 = Float32(2π)
     G_r = exp(-(r - r_bs)^2 / 2p.σ_r^2)
 
     z_rel = (z - p.z_bs) / p.σ_zs
-    V_z = ifelse(abs(z_rel) < 1, sin(π_F32 * z_rel), 0f0)
+    V_z = ifelse(abs(z_rel) < 1, sin(π_F32 * z_rel), 0.0f0)
 
     λ_c = mod(λ + π_4_F32 + π_F32, twoπ_F32) - π_F32
     A_λ = exp(-(λ_c / π_4_F32)^8)
@@ -529,7 +514,7 @@ const twoπ_F32 = Float32(2π)
 end
 
 heating_params = (;
-    Q_max, σ_r, σ_zs, z_bs, t_on = 0f0, t_full,
+    Q_max, σ_r, σ_zs, z_bs, t_on = 0.0f0, t_full,
     ρᵣ = ρᵣ_device, Πᵣ = Πᵣ_device,
 )
 
@@ -618,26 +603,18 @@ sponge_ρθ = Forcing(sponge_ρθ_fn; discrete_form = true, parameters = sponge_
 #
 # YD19 §3a1 uses Emanuel-1986 bulk aerodynamic drag (Cᴰ) and sensible heat
 # (Cᵀ) over a 300 K SST. We omit them here so the response field is the
-# direct dynamical response to the prescribed rainband heating, without
-# the surface-flux feedback contaminating the late-time saturation in F06.
-# This is the standard configuration for isolating the YD19 response
-# diagnostics; the 500 m no-surface run matches the paper's quasi-steady
-# response amplitude (≈ ±1.5 m/s) more closely than the with-surface run
-# (≈ ±2 m/s) does.
+# direct dynamical response to the prescribed rainband heating.
 
 # ## Model builder
 
 function build_model(; with_heating::Bool)
     coriolis = FPlane(; f)
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+    dynamics = CompressibleDynamics(
+        SplitExplicitTimeDiscretization();
         surface_pressure = p_env(0.0),
-        reference_potential_temperature = θ_env)
+        reference_potential_temperature = θ_env
+    )
     advection = WENO(order = 5)
-
-    ## Default formulation (:LiquidIcePotentialTemperature, prognostic ρθ).
-    ## We sponge ρθ rather than ρe and pass the heating as a ρθ-tendency,
-    ## because :StaticEnergy + CompressibleDynamics is currently broken on
-    ## GPU (gpu__compute_temperature_and_pressure! method-error).
     forcing = with_heating ?
         (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρθ = (heating_forcing, sponge_ρθ)) :
         (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρθ = sponge_ρθ)
@@ -648,23 +625,10 @@ function build_model(; with_heating::Bool)
 end
 
 # ## Stage runner
-#
-# Each stage (spinup, control, heated) builds a fresh `AtmosphereModel`, sets
-# its initial prognostic state (u, v, T) from either functions or cached host
-# Arrays, runs for `stop_time`, and returns the post-stage state as host
-# Arrays. Anelastic diagnoses ``w`` and ``p'`` from the elliptic constraint,
-# so ``u``, ``v``, ``T`` is the complete prognostic record we need to hand off between stages.
-
-## A `FieldTimeSeries`-shaped wrapper that holds in-memory host arrays.
-## The analysis section indexes `ts.u.times` and `ts.u[n]` (and similarly for
-## v, w, T). Since this example produces substantial output files, this saves
-## us from writing and reading JLD2 files between stages and keeps the creation of
-## this page small. Look at other examples for more information on saving and
-## loading time series with JLD2.
-## them directly without any further `interior(...)` indirection.
+# We build the model, run it, and save the full state for later analysis.
 struct InMemoryFTS
-    times :: Vector{Float64}
-    data  :: Vector{Array{Float32, 3}}
+    times::Vector{Float64}
+    data::Vector{Array{Float32, 3}}
 end
 InMemoryFTS() = InMemoryFTS(Float64[], Array{Float32, 3}[])
 Base.getindex(s::InMemoryFTS, n::Int) = s.data[n]
@@ -694,10 +658,6 @@ function build_and_run_stage!(
     end
     add_callback!(simulation, progress, TimeInterval(6hour))
 
-    ## In-memory captures, hourly. Each push is ~55 MB × 5 fields = 275 MB,
-    ## × 24 hourly steps = ~6.6 GB per stage on host RAM — fits comfortably
-    ## on a 128 GB host. Replaces the prior JLD2Writer; stage 4 reads
-    ## directly from these captures instead of opening hourly JLD2 files.
     captures = (
         u = InMemoryFTS(), v = InMemoryFTS(), w = InMemoryFTS(),
         T = InMemoryFTS(), ρ = InMemoryFTS(),
@@ -716,9 +676,6 @@ function build_and_run_stage!(
     @info "Running $stage_label stage for $(prettytime(stop_time))"
     run!(simulation)
 
-    ## Cache post-stage prognostic state as host Arrays so the next stage can
-    ## `set!(model; post...)` without a disk roundtrip. Compressible model
-    ## evolves ρ prognostically, so the post-state must include it.
     post = (
         u = Array(interior(model.velocities.u)),
         v = Array(interior(model.velocities.v)),
@@ -731,76 +688,8 @@ function build_and_run_stage!(
     return (post = post, captures = captures)
 end
 
-# ## F01 — vortex IC preflight (fast sanity check; always runs in spinup)
 
-function plot_preflight()
-    θ_anom = zeros(Nr_pre, Nz)
-    for k in 1:Nz, i in 1:Nr_pre
-        θ_anom[i, k] = vortex.θ[i, k] - θ_env(z_centers[k])
-    end
-    δp_sfc = [(vortex.p[i, 1] - p_env(z_centers[1])) / 100 for i in 1:Nr_pre]
-
-    fig = Figure(size = (1200, 900))
-
-    ax1 = Axis(
-        fig[1, 1]; xlabel = "RMW (km)", ylabel = "Height (km)",
-        title = "RMW(z) [Stern-Nolan 2009 Eq. 4.4]", limits = (0, 200, 0, 22)
-    )
-    lines!(ax1, rmw_profile ./ kilometer, z_centers ./ kilometer; color = :black, linewidth = 2)
-    hlines!(ax1, [z_vortex_top / 1e3]; color = :gray, linestyle = :dash)
-
-    ax2 = Axis(
-        fig[1, 2]; xlabel = "v_max (m s⁻¹)", ylabel = "Height (km)",
-        title = "v_max(z) at RMW", limits = (0, 50, 0, 22)
-    )
-    vmax_z = [tangential_wind(rmw_analytic(z), z) for z in z_centers]
-    lines!(ax2, vmax_z, z_centers ./ kilometer; color = :black, linewidth = 2)
-
-    ax3 = Axis(
-        fig[2, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",
-        title = "Warm-core θ' (t = 0)", limits = (0, 200, 0, 22)
-    )
-    hm = heatmap!(
-        ax3, r_pre ./ kilometer, z_centers ./ kilometer, θ_anom;
-        colormap = :balance, colorrange = (-14, 14)
-    )
-    contour!(
-        ax3, r_pre ./ kilometer, z_centers ./ kilometer, θ_anom;
-        levels = -14:1:14, color = :black, linewidth = 0.4
-    )
-    Colorbar(fig[2, 1][1, 2], hm; label = "θ' (K)")
-
-    ax4 = Axis(
-        fig[2, 2]; xlabel = "Radius (km)", ylabel = "δp (hPa)",
-        title = "Surface pressure deficit", limits = (0, 300, -60, 5)
-    )
-    lines!(ax4, r_pre ./ kilometer, δp_sfc; color = :black, linewidth = 2)
-    hlines!(ax4, [0.0]; color = :gray, linestyle = :dot)
-    δp_min = minimum(δp_sfc)
-    text!(
-        ax4, 10, -5; text = @sprintf("δp_min = %.1f hPa", δp_min),
-        align = (:left, :top)
-    )
-
-    Label(fig[0, :], "F01 — Vortex IC preflight (t = 0)"; fontsize = 18)
-
-    path = joinpath(figures_dir, "F01_preflight.png")
-    save(path, fig)
-    @info "Saved F01" path
-    return fig
-end
-
-# ## Stages 1-3 — Spinup, Control, Heated
-#
-# Each stage is idempotent: if its snapshot file already exists on disk we
-# reuse it instead of redoing the 24 h simulation. This makes re-running the
-# script for plotting tweaks cheap. The F01 preflight diagnostic still runs
-# either way (it's a function of the vortex IC, not the simulated state).
-
-plot_preflight()
-nothing # hide
-
-@info "=== Stage 1: $(prettytime(stage_stop_time)) spinup ==="
+@info "=== Spinup: $(prettytime(stage_stop_time)) ==="
 spinup_result = build_and_run_stage!(
     "spinup";
     with_heating = false,
@@ -810,42 +699,12 @@ spinup_result = build_and_run_stage!(
 post_spinup = spinup_result.post
 nothing # hide
 
-@info "=== Stage 2: $(prettytime(stage_stop_time)) control ==="
-control_result = build_and_run_stage!(
-    "control";
-    with_heating = false,
-    init = post_spinup,
-    stop_time = stage_stop_time,
-)
-ts_ctrl = control_result.captures
-nothing # hide
-
-@info "=== Stage 3: $(prettytime(stage_stop_time)) heated (MN10 stratiform) ==="
-heated_result = build_and_run_stage!(
-    "heated";
-    with_heating = true,
-    init = post_spinup,
-    stop_time = stage_stop_time,
-)
-ts_heat = heated_result.captures
-nothing # hide
-
 # ## Stage 4 — Analysis and figure production
-#
-# Everything below reads from the in-memory captures produced by stages 1-3
-# (see `InMemoryFTS` above). The captures hold cell-face host arrays with
-# halos already stripped, so the centering kernels below act on them
-# directly. Snapshots are copied into preallocated Float32 scratch buffers
-# instead of allocating per iteration, and `GC.gc()` at sub-figure
-# boundaries keeps the high-water mark low.
+# Now that the have the full simulation, we replicate the figures from YD19 to verify our results.
 
 let
     @info "=== Stage 4: Analysis ==="
 
-    ## Preallocated Float32 scratch buffers for cell-centered fields.
-    ## Reused across every figure so peak RSS during analysis is ~4 × Nx × Ny × Nz
-    ## × 4 bytes, not Nt × 4 × Nx × Ny × Nz × 8 bytes as the prior InMemory /
-    ## Float64 pattern was.
     u_sc = Array{Float32}(undef, Nx, Ny, Nz)
     v_sc = similar(u_sc)
     w_sc = similar(u_sc)
@@ -856,14 +715,14 @@ let
         Nxs, Nys, Nzs = size(out)
         return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
             ip = i == Nxs ? 1 : i + 1
-            out[i, j, k] = Float32((src[i, j, k] + src[ip, j, k])/2)
+            out[i, j, k] = Float32((src[i, j, k] + src[ip, j, k]) / 2)
         end
     end
     function center_v!(out::AbstractArray{Float32, 3}, src)
         Nxs, Nys, Nzs = size(out)
         return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
             jp = j == Nys ? 1 : j + 1
-            out[i, j, k] = Float32((src[i, j, k] + src[i, jp, k])/2)
+            out[i, j, k] = Float32((src[i, j, k] + src[i, jp, k]) / 2)
         end
     end
     function center_w!(out::AbstractArray{Float32, 3}, src)
@@ -871,7 +730,7 @@ let
         ## faces to get cell-centered values with size (Nx, Ny, Nz).
         Nxs, Nys, Nzs = size(out)
         return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
-            out[i, j, k] = Float32((src[i, j, k] + src[i, j, k + 1])/2)
+            out[i, j, k] = Float32((src[i, j, k] + src[i, j, k + 1]) / 2)
         end
     end
     function copy_f32!(out::AbstractArray{Float32, 3}, src)
@@ -880,10 +739,7 @@ let
         end
     end
 
-    ## Load one captured snapshot (index n) into the scratch buffers.
-    ## In-memory captures store host arrays with halos already stripped
-    ## (via `Array(interior(field))`), so we pass them straight to the
-    ## centering kernels.
+    ## Load one captured snapshot
     function load_snapshot!(u, v, w, T, u_ts, v_ts, w_ts, T_ts, n::Int)
         center_u!(u, u_ts[n])
         center_v!(v, v_ts[n])
@@ -898,7 +754,8 @@ let
     xs_center = Float32.(xnodes(grid, Center()))
     ys_center = Float32.(ynodes(grid, Center()))
 
-    ## Reusable azimuthal-mean workspace
+    ## Instead of plotting r x z cross sections, we are going to calculate a sector azimuthal average.
+    ## This will smooth out small-scale perturbations.
     vθ_ws = zeros(Float32, Nr_bin, Nz)
     vr_ws = similar(vθ_ws)
     w_ws = similar(vθ_ws)
@@ -921,7 +778,7 @@ let
             uij = u[i, j, k]
             vij = v[i, j, k]
             vθ[ib, k] += -yh * uij + xh * vij
-            vr[ib, k] +=  xh * uij + yh * vij
+            vr[ib, k] += xh * uij + yh * vij
             ww[ib, k] += w[i, j, k]
             TT[ib, k] += T[i, j, k]
             ct[ib, k] += 1
@@ -936,28 +793,6 @@ let
             end
         end
     end
-
-    ## Streaming time average: accumulate centered snapshots for each index
-    ## in `ns` into (uavg, vavg, wavg, Tavg), then divide by N. Uses the
-    ## primary scratch (u_sc, ...) as a per-iteration staging buffer.
-    function time_average_centered!(uavg, vavg, wavg, Tavg, ts, ns)
-        fill!(uavg, 0.0f0); fill!(vavg, 0.0f0); fill!(wavg, 0.0f0); fill!(Tavg, 0.0f0)
-        for n in ns
-            load_snapshot!(u_sc, v_sc, w_sc, T_sc, ts.u, ts.v, ts.w, ts.T, n)
-            uavg .+= u_sc
-            vavg .+= v_sc
-            wavg .+= w_sc
-            Tavg .+= T_sc
-        end
-        N = Float32(length(ns))
-        uavg ./= N
-        vavg ./= N
-        wavg ./= N
-        Tavg ./= N
-        return nothing
-    end
-
-    indices_near(times, targets_s) = [argmin(abs.(times .- t)) for t in targets_s]
 
     ## ---------------------------------------------------------
     ## F02ab — basic-state vortex (YD19 Fig 2a,b)
@@ -1124,866 +959,31 @@ let
     save(path, fig)
     @info "Saved F02cd" path
 
-    ## ---------------------------------------------------------
-    ## F03a, F04, F05 — require control + heated snapshots
-    ## ---------------------------------------------------------
-    let
-        @info "Reading heated and control captures (in-memory)..."
-
-        ts_ctrl = control_result.captures
-        ts_heat = heated_result.captures
-        ctrl_times = ts_ctrl.u.times
-        heat_times = ts_heat.u.times
-        ## Analysis window: t = 5-7 h — the pre-saturation window in which
-        ## the response sits near YD19's quoted ±1.5 m/s. Without explicit
-        ## horizontal diffusivity the response inflates linearly past this
-        ## window (see F06 for the diagnostic).
-        target_s = collect(5.0:1.0:7.0) .* hour
-        n_ctrl = indices_near(ctrl_times, target_s)
-        n_heat = indices_near(heat_times, target_s)
-        @info @sprintf(
-            "Control averaging window: t = %.1f - %.1f h (%d snapshots)",
-            ctrl_times[n_ctrl[1]] / hour, ctrl_times[n_ctrl[end]] / hour, length(n_ctrl)
-        )
-        @info @sprintf(
-            "Heated averaging window : t = %.1f - %.1f h (%d snapshots)",
-            heat_times[n_heat[1]] / hour, heat_times[n_heat[end]] / hour, length(n_heat)
-        )
-
-        ## Streaming time averages (Float32, preallocated).
-        u_ctrl = Array{Float32}(undef, Nx, Ny, Nz); v_ctrl = similar(u_ctrl)
-        w_ctrl = similar(u_ctrl);                   T_ctrl = similar(u_ctrl)
-        u_heat = similar(u_ctrl); v_heat = similar(u_ctrl)
-        w_heat = similar(u_ctrl); T_heat = similar(u_ctrl)
-        time_average_centered!(u_ctrl, v_ctrl, w_ctrl, T_ctrl, ts_ctrl, n_ctrl)
-        time_average_centered!(u_heat, v_heat, w_heat, T_heat, ts_heat, n_heat)
-
-        ## Azimuthal means for control
-        vθ_ctrl = zeros(Float32, Nr_bin, Nz); vr_ctrl = similar(vθ_ctrl)
-        w_ctrl_az = similar(vθ_ctrl);          T_ctrl_az = similar(vθ_ctrl)
-        azimuthal_mean!(
-            vθ_ctrl, vr_ctrl, w_ctrl_az, T_ctrl_az, ct_ws,
-            u_ctrl, v_ctrl, w_ctrl, T_ctrl
-        )
-        ## and for heated
-        vθ_heat = similar(vθ_ctrl); vr_heat = similar(vθ_ctrl)
-        w_heat_az = similar(vθ_ctrl); T_heat_az = similar(vθ_ctrl)
-        azimuthal_mean!(
-            vθ_heat, vr_heat, w_heat_az, T_heat_az, ct_ws,
-            u_heat, v_heat, w_heat, T_heat
-        )
-
-        vθ_resp = vθ_heat .- vθ_ctrl
-        vr_resp = vr_heat .- vr_ctrl
-        w_resp_rz = w_heat_az .- w_ctrl_az
-
-        ## --- F04b — raw vertical velocity plan views (heated run) ---
-        ## Companion to F04. F04 shows the *response* (heated − control); this
-        ## one shows the raw, time-averaged `w` field in the heated run so the
-        ## gravity-wave activity and convective-scale ascent / descent are
-        ## visible in absolute terms rather than only as anomalies. Produced
-        ## BEFORE the in-place subtraction below so the heated array is still
-        ## the raw field.
-        @info "Producing F04b (raw vertical velocity plan views)..."
-        let
-            xs_grid_pv = Array(xnodes(grid, Center()))
-            ys_grid_pv = Array(ynodes(grid, Center()))
-            panels = [
-                (6_000.0, "(a) z = 6 km"),
-                (3_600.0, "(b) z = 3.6 km"),
-                (2_000.0, "(c) z = 2 km"),
-            ]
-            w_lim_raw = 4.0   # matches F04 colorbar
-            fig = Figure(size = (1500, 560))
-            for (pi_, (z_slice, label)) in enumerate(panels)
-                k_s = argmin(abs.(z_centers .- z_slice))
-                w_s = w_heat[:, :, k_s]
-                ax = Axis(
-                    fig[1, pi_]; xlabel = "x (km)", ylabel = "y (km)",
-                    title = label, aspect = DataAspect(),
-                    limits = (-120, 120, -120, 120)
-                )
-                hm = heatmap!(
-                    ax, xs_grid_pv ./ 1.0e3, ys_grid_pv ./ 1.0e3, w_s;
-                    colormap = :balance, colorrange = (-w_lim_raw, w_lim_raw)
-                )
-                ## Heating overlay at the grid-aligned slice altitude
-                ## (`z_centers[k_s]`). Fixed ±1 K/h level so the drawn extent
-                ## scales with the heating amplitude at this panel's altitude
-                ## — same pattern as F04.
-                z_actual = z_centers[k_s]
-                Q_panel = [heating_rate_K_per_hour(sqrt(xs_grid_pv[i]^2 + ys_grid_pv[j]^2),
-                                                   atan(ys_grid_pv[j], xs_grid_pv[i]), z_actual)
-                           for i in 1:Nx, j in 1:Ny]
-                if maximum(Q_panel) > 1.0
-                    contour!(
-                        ax, xs_grid_pv ./ 1.0e3, ys_grid_pv ./ 1.0e3, Q_panel;
-                        levels = [1.0], color = :red, linewidth = 2.0
-                    )
-                end
-                if minimum(Q_panel) < -1.0
-                    contour!(
-                        ax, xs_grid_pv ./ 1.0e3, ys_grid_pv ./ 1.0e3, Q_panel;
-                        levels = [-1.0], color = :blue, linewidth = 2.0
-                    )
-                end
-                if pi_ == 3
-                    Colorbar(fig[1, 4], hm; label = "w (m s⁻¹)")
-                end
-            end
-            Label(
-                fig[0, :],
-                @sprintf(
-                    "F04b — Plan-view raw vertical velocity in heated run (%.0f-%.0f h, %.0f km box)",
-                    target_s[1] / hour, target_s[end] / hour, Lx / 1.0e3
-                );
-                fontsize = 17
-            )
-            path = joinpath(figures_dir, "F04b_plan_w_raw.png")
-            save(path, fig)
-            @info "Saved F04b" path
-        end
-        GC.gc()
-
-        ## In-place: overwrite heated 3D arrays with (heated − control), free control.
-        u_heat .-= u_ctrl; v_heat .-= v_ctrl; w_heat .-= w_ctrl
-        u_ctrl = v_ctrl = w_ctrl = T_ctrl = T_heat = nothing
-        GC.gc()
-        u_resp3, v_resp3, w_resp3 = u_heat, v_heat, w_heat
-
-        ## Azimuthal-mean heating (for ±0.15 K/h contour on F03a)
-        Q_bar = zeros(Nr_bin, Nz)
-        let Nphi = 512
-            for k in 1:Nz, ib in 1:Nr_bin
-                s = 0.0
-                r = r_bin_centers[ib]; zk = z_centers[k]
-                for q in 1:Nphi
-                    λ = -π + 2π * (q - 0.5) / Nphi
-                    s += heating_rate_K_per_hour(r, λ, zk)
-                end
-                Q_bar[ib, k] = s / Nphi
-            end
-        end
-
-        ## --- F06 — response time series (diagnostic) ---
-        ## For each hourly snapshot, compute the azimuthal-mean response
-        ## (heated minus control, no time averaging) and record the peak
-        ## |v̄'| inside the YD19 analysis window. Monotonic growth past
-        ## ~1.5 m/s signals IG-wave wrap-around contamination; saturation
-        ## near paper's value means the setup is intrinsically close.
-        @info "Producing F06 (response time series, streaming)..."
-        Nt = min(length(ctrl_times), length(heat_times))
-        ts_hours = Float64[]; peak_pos = Float64[]; peak_neg = Float64[]
-        window_r = findall(r -> 35_000 ≤ r ≤ 120_000, r_bin_centers)
-        window_z = findall(z -> 0.0 ≤ z ≤ 12_000, z_centers)
-        ## Second set of azimuthal-mean buffers for the paired control/heated load
-        vθ_h_ws = similar(vθ_ws); vr_h_ws = similar(vθ_ws)
-        w_h_ws = similar(vθ_ws); T_h_ws = similar(vθ_ws)
-        for n in 1:Nt
-            load_snapshot!(
-                u_sc, v_sc, w_sc, T_sc,
-                ts_ctrl.u, ts_ctrl.v, ts_ctrl.w, ts_ctrl.T, n
-            )
-            azimuthal_mean!(
-                vθ_ws, vr_ws, w_ws, T_ws, ct_ws,
-                u_sc, v_sc, w_sc, T_sc
-            )
-            load_snapshot!(
-                u_sc, v_sc, w_sc, T_sc,
-                ts_heat.u, ts_heat.v, ts_heat.w, ts_heat.T, n
-            )
-            azimuthal_mean!(
-                vθ_h_ws, vr_h_ws, w_h_ws, T_h_ws, ct_ws,
-                u_sc, v_sc, w_sc, T_sc
-            )
-            resp_view = @view(vθ_h_ws[window_r, window_z]) .- @view(vθ_ws[window_r, window_z])
-            push!(ts_hours, heat_times[n] / hour)
-            push!(peak_pos, maximum(resp_view))
-            push!(peak_neg, minimum(resp_view))
-        end
-        fig = Figure(size = (900, 500))
-        ax = Axis(
-            fig[1, 1]; xlabel = "Time after heating onset (h)",
-            ylabel = "Peak v̄' response (m s⁻¹)",
-            title = @sprintf(
-                "F06 — Response amplitude vs time (r ∈ [35, 120] km, z ∈ [0, 12] km, %.0f km box)",
-                Lx / 1.0e3
-            ),
-            limits = (0, ts_hours[end] + 1, -5, 5)
-        )
-        lines!(ax, ts_hours, peak_pos; color = :firebrick, linewidth = 2, label = "max v̄'")
-        lines!(ax, ts_hours, peak_neg; color = :navy, linewidth = 2, label = "min v̄'")
-        hlines!(ax, [1.5]; color = :firebrick, linestyle = :dash, linewidth = 1)
-        hlines!(ax, [-1.5]; color = :navy, linestyle = :dash, linewidth = 1)
-        hlines!(ax, [0.0]; color = :gray, linestyle = :dot)
-        text!(ax, 1.0, 1.7; text = "YD19 peak ≈ 1.5 m/s", color = :firebrick, fontsize = 12)
-        text!(ax, 1.0, -1.3; text = "YD19 dip ≈ -1.5 m/s", color = :navy, fontsize = 12)
-        axislegend(ax; position = :rb)
-        path = joinpath(figures_dir, "F06_response_timeseries.png")
-        save(path, fig)
-        @info "Saved F06" path
-        for n in 1:Nt
-            @info @sprintf(
-                "  t = %5.2f h   max v̄' = %+.3f  min v̄' = %+.3f",
-                ts_hours[n], peak_pos[n], peak_neg[n]
-            )
-        end
-        GC.gc()
-
-        ## --- F03a ---
-        @info "Producing F03a..."
-        xlim_lo, xlim_hi = 35.0, 120.0
-        zlim_lo, zlim_hi = 0.0, 12.0
-        v_lim = 3.5
-
-        fig = Figure(size = (900, 600))
-        ax = Axis(
-            fig[1, 1];
-            xlabel = "Radius (km)", ylabel = "Height (km)",
-            title = @sprintf(
-                "YD19 Fig 3a — Axisymmetric wind response (heated − control, %.0f-%.0f h, %.0f km box; arrows: (v̄', 10·w̄'))",
-                target_s[1] / hour, target_s[end] / hour, Lx / 1.0e3
-            ),
-            limits = (xlim_lo, xlim_hi, zlim_lo, zlim_hi)
-        )
-        hm = heatmap!(
-            ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_resp;
-            colormap = :balance, colorrange = (-v_lim, v_lim)
-        )
-        contour!(
-            ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_resp;
-            levels = -v_lim:0.5:v_lim, color = :black, linewidth = 0.5
-        )
-        contour!(
-            ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, Q_bar;
-            levels = [0.15], color = :red, linewidth = 2.0
-        )
-        contour!(
-            ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, Q_bar;
-            levels = [-0.15], color = :blue, linewidth = 2.0
-        )
-        Colorbar(fig[1, 2], hm; label = "v̄' (m s⁻¹)")
-
-        let stride_r = 2, stride_z = 3
-            rsub = r_bin_centers[1:stride_r:end] ./ kilometer
-            zsub = z_centers[1:stride_z:end] ./ kilometer
-            vsub = vr_resp[1:stride_r:end, 1:stride_z:end]
-            wsub = w_resp_rz[1:stride_r:end, 1:stride_z:end] .* 10
-            pts = Point2f[]; vecs = Vec2f[]
-            for j in eachindex(zsub), i in eachindex(rsub)
-                if xlim_lo <= rsub[i] <= xlim_hi && zlim_lo <= zsub[j] <= zlim_hi
-                    push!(pts, Point2f(rsub[i], zsub[j]))
-                    push!(vecs, Vec2f(vsub[i, j], wsub[i, j]))
-                end
-            end
-            arrows2d!(
-                ax, pts, vecs; lengthscale = 1.0, color = :gray20,
-                tiplength = 4, tipwidth = 3
-            )
-        end
-
-        r_win = findall(r -> xlim_lo * 1.0e3 ≤ r ≤ xlim_hi * 1.0e3, r_bin_centers)
-        z_win = findall(z -> zlim_lo * 1.0e3 ≤ z ≤ zlim_hi * 1.0e3, z_centers)
-        pk_pos = maximum(vθ_resp[r_win, z_win])
-        pk_neg = minimum(vθ_resp[r_win, z_win])
-        @info @sprintf(
-            "F03a: response range in YD19 window = [%.2f, %.2f] m/s  (YD19 peak ≈ 1.5 m/s)",
-            pk_neg, pk_pos
-        )
-
-        path = joinpath(figures_dir, "F03a_axisym_response.png")
-        save(path, fig)
-        @info "Saved F03a" path
-        GC.gc()
-
-        ## --- F04 ---
-        @info "Producing F04..."
-        xs_grid = Array(xnodes(grid, Center()))
-        ys_grid = Array(ynodes(grid, Center()))
-        ## Each panel slices `w'` at one altitude. The heating contour overlay
-        ## on each panel is the analytic heating field *at that panel's altitude*
-        ## — at z > z_bs (4 km) only the heating lobe (+1 K/h, red) is present;
-        ## at z < z_bs only the cooling lobe (-1 K/h, blue); at z = z_bs the
-        ## field is identically zero so neither contour draws.
-        panels = [
-            (6_000.0, "(a) z = 6 km"),
-            (3_600.0, "(b) z = 3.6 km"),
-            (2_000.0, "(c) z = 2 km"),
-        ]
-        ## Use 95th-percentile of |w'| (restricted to the rainband quadrant and
-        ## r ≤ 120 km) for color range — avoids letting inner-core IG noise
-        ## saturate the colormap while the actual signal is drowned out.
-        function w_scale(w3d, k_s)
-            w_s = w3d[:, :, k_s]
-            vals = Float64[]
-            for j in 1:Ny, i in 1:Nx
-                r = sqrt(xs_grid[i]^2 + ys_grid[j]^2)
-                r > 120_000 && continue
-                push!(vals, abs(w_s[i, j]))
-            end
-            sort!(vals)
-            return vals[ceil(Int, 0.95 * length(vals))]
-        end
-        w_scales = [w_scale(w_resp3, argmin(abs.(z_centers .- zp[1]))) for zp in panels]
-        ## Fixed colorbar range covers the full IG-wave dynamic range; the
-        ## 95th-percentile diagnostic is kept for logging but no longer used
-        ## to size the colorbar.
-        w_panel_lim = 4.0
-
-        fig = Figure(size = (1500, 560))
-        for (pi_, (z_slice, label)) in enumerate(panels)
-            k_s = argmin(abs.(z_centers .- z_slice))
-            w_s = w_resp3[:, :, k_s]
-            u_s = u_resp3[:, :, k_s]
-            v_s = v_resp3[:, :, k_s]
-
-            local ax = Axis(
-                fig[1, pi_]; xlabel = "x (km)", ylabel = "y (km)",
-                title = label, aspect = DataAspect(),
-                limits = (-120, 120, -120, 120)
-            )
-            local hm = heatmap!(
-                ax, xs_grid ./ kilometer, ys_grid ./ kilometer, w_s;
-                colormap = :balance, colorrange = (-w_panel_lim, w_panel_lim)
-            )
-
-            ## Heating overlay at the grid-aligned slice altitude
-            ## (`z_centers[k_s]`, not the requested `z_slice` literal —
-            ## those differ by up to Δz/2 ≈ 167 m, which matters near the
-            ## envelope edges where V_z(z) → 0). V_z flips sign at z = z_bs
-            ## = 4 km, so panels above 4 km show only the warm (+1 K/h, red)
-            ## contour, panels below only the cool (-1 K/h, blue). The
-            ## contour is drawn at a fixed ±1 K/h level so its visible extent
-            ## scales naturally with the heating amplitude at this panel's
-            ## altitude: wide near the heating peak (z ≈ 5 km or 3 km),
-            ## thin or absent near the envelope edges (z ≈ 6 km or 2 km).
-            z_actual = z_centers[k_s]
-            Q_panel = [heating_rate_K_per_hour(sqrt(xs_grid[i]^2 + ys_grid[j]^2),
-                                               atan(ys_grid[j], xs_grid[i]), z_actual)
-                       for i in 1:Nx, j in 1:Ny]
-            if maximum(Q_panel) > 1.0
-                contour!(
-                    ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_panel;
-                    levels = [1.0], color = :red, linewidth = 2.0
-                )
-            end
-            if minimum(Q_panel) < -1.0
-                contour!(
-                    ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_panel;
-                    levels = [-1.0], color = :blue, linewidth = 2.0
-                )
-            end
-
-            ss = 10
-            xa = xs_grid[1:ss:end] ./ kilometer
-            ya = ys_grid[1:ss:end] ./ kilometer
-            ua = u_s[1:ss:end, 1:ss:end]
-            va = v_s[1:ss:end, 1:ss:end]
-            local pts = [Point2f(xa[i], ya[j]) for i in eachindex(xa), j in eachindex(ya)][:]
-            local vecs = [Vec2f(ua[i, j], va[i, j]) for i in eachindex(xa), j in eachindex(ya)][:]
-            arrows2d!(
-                ax, pts, vecs; lengthscale = 2, color = :gray20,
-                tiplength = 4, tipwidth = 3
-            )
-            if pi_ == 3
-                Colorbar(fig[1, 4], hm; label = "w' (m s⁻¹)")
-            end
-        end
-        Label(
-            fig[0, :],
-            @sprintf(
-                "F04 — Plan-view response heated − control (YD19 Fig 4a-c, %.0f-%.0f h, %.0f km box)",
-                target_s[1] / hour, target_s[end] / hour, Lx / 1.0e3
-            );
-            fontsize = 17
-        )
-
-        path = joinpath(figures_dir, "F04_plan_response.png")
-        save(path, fig)
-        @info "Saved F04" path
-        @info @sprintf(
-            "F04 color range ±%.2f m/s  |  per-panel peak |w'| = [%.3f, %.3f, %.3f] m/s",
-            w_panel_lim, w_scales[1], w_scales[2], w_scales[3]
-        )
-        GC.gc()
-
-        ## --- F05 ---
-        @info "Producing F05..."
-        k_22 = argmin(abs.(z_centers .- 2_200.0))
-        w_22 = w_resp3[:, :, k_22]
-        z_slice_pv = z_centers[k_22]
-        w22_lim = max(0.3, ceil(maximum(abs, w_22) * 2) / 2)
-
-        ## Heating field at the slice altitude. The vertical shape factor
-        ## V_z(z) = sin(π·(z-z_bs)/σ_zs) is strictly negative for z < z_bs
-        ## (cooling) and strictly positive for z > z_bs (heating). At
-        ## z ≈ 2.2 km we are in the cooling lobe only, so the red +1 K/h
-        ## contour wouldn't draw anything — only blue does.
-        Q_at_slice = zeros(Nx, Ny)
-        for j in 1:Ny, i in 1:Nx
-            r = sqrt(xs_grid[i]^2 + ys_grid[j]^2)
-            λ = atan(ys_grid[j], xs_grid[i])
-            Q_at_slice[i, j] = heating_rate_K_per_hour(r, λ, z_slice_pv)
-        end
-        q_slice_min = minimum(Q_at_slice); q_slice_max = maximum(Q_at_slice)
-
-        ## Band-averaged cross-sections. The rainband spans λ ∈ [-π/2, 0];
-        ## we split that range into 5 equal-width bands of width π/10 and
-        ## plot the 1st (upwind), 3rd (middle), and 5th (downwind). Within
-        ## each band we sample `n_az` constant-λ radial cross-sections and
-        ## average them, killing most of the grid-scale gravity-wave noise
-        ## that single radial slices captured.
-        function cross_section_at!(vθ, vr, w, λ_cs)
-            xh = cos(λ_cs); yh = sin(λ_cs)
-            for k in 1:Nz, i in eachindex(r_bin_centers)
-                xp = r_bin_centers[i] * xh
-                yp = r_bin_centers[i] * yh
-                ix = searchsortedfirst(xs_grid, xp); ix = clamp(ix, 2, Nx)
-                iy = searchsortedfirst(ys_grid, yp); iy = clamp(iy, 2, Ny)
-                x0 = xs_grid[ix - 1]; x1 = xs_grid[ix]
-                y0 = ys_grid[iy - 1]; y1 = ys_grid[iy]
-                fx = clamp((xp - x0) / (x1 - x0), 0.0, 1.0)
-                fy = clamp((yp - y0) / (y1 - y0), 0.0, 1.0)
-                bil(A) = (1 - fx) * (1 - fy) * A[ix - 1, iy - 1, k] +
-                    fx * (1 - fy) * A[ix, iy - 1, k] +
-                    (1 - fx) * fy * A[ix - 1, iy, k] +
-                    fx * fy * A[ix, iy, k]
-                u_p = bil(u_resp3); v_p = bil(v_resp3); w_p = bil(w_resp3)
-                vr[i, k] += xh * u_p + yh * v_p
-                vθ[i, k] += -yh * u_p + xh * v_p
-                w[i, k] += w_p
-            end
-            return nothing
-        end
-
-        function cross_section_band(λ_lo, λ_hi; n_az = 11)
-            vθ = zeros(length(r_bin_centers), Nz)
-            vr = zeros(length(r_bin_centers), Nz)
-            w = zeros(length(r_bin_centers), Nz)
-            for q in 1:n_az
-                λ = λ_lo + (λ_hi - λ_lo) * (q - 0.5) / n_az
-                cross_section_at!(vθ, vr, w, λ)
-            end
-            vθ ./= n_az; vr ./= n_az; w ./= n_az
-            return (vθ = vθ, vr = vr, w = w)
-        end
-
-        Δλ_band = (π / 2) / 5
-        band_edges(k) = (-π / 2 + (k - 1) * Δλ_band, -π / 2 + k * Δλ_band)
-        λ_lo_up, λ_hi_up = band_edges(1)             # upwind  (1st band)
-        λ_lo_md, λ_hi_md = band_edges(3)             # middle  (3rd, centered at -π/4)
-        λ_lo_dn, λ_hi_dn = band_edges(5)             # downwind (5th band)
-        λ_c_up = (λ_lo_up + λ_hi_up) / 2
-        λ_c_md = (λ_lo_md + λ_hi_md) / 2
-        λ_c_dn = (λ_lo_dn + λ_hi_dn) / 2
-        @info @sprintf(
-            "Bands (deg): upwind [%.1f, %.1f], middle [%.1f, %.1f], downwind [%.1f, %.1f]",
-            rad2deg(λ_lo_up), rad2deg(λ_hi_up),
-            rad2deg(λ_lo_md), rad2deg(λ_hi_md),
-            rad2deg(λ_lo_dn), rad2deg(λ_hi_dn)
-        )
-
-        cs_up = cross_section_band(λ_lo_up, λ_hi_up)
-        cs_md = cross_section_band(λ_lo_md, λ_hi_md)
-        cs_dn = cross_section_band(λ_lo_dn, λ_hi_dn)
-
-        ## Wind-barb glyph for the (r, z) cross-section panels.
-        ## Speed → glyph mapping (m/s):
-        ##   half barb = 0.25, full barb = 0.5, pennant = 2.5
-        ## Calm winds (< 0.05 m/s) are drawn as an open circle.
-        ## `screen_aspect` is the panel's display px-per-km-z over px-per-km-r.
-        ## We *only* use it to size the staff in z-axis-km (so the staff has the
-        ## same visual length regardless of orientation): staff_z = staff_r/sa.
-        ## The unit direction is computed directly from (vr, w) so the staff
-        ## visually points where (vr, w) treats both components symmetrically —
-        ## i.e., a (1 m/s, 1 m/s) vector renders at 45° on screen.
-        function draw_wind_barbs!(
-                ax, pts, vecs;
-                panel_r_span,
-                screen_aspect = 4.8,
-                staff_frac = 0.025,
-                barb_frac = 0.45,
-                gap_frac = 0.20,
-                u_half = 0.25, u_full = 0.5, u_pennant = 2.5,
-                calm_threshold = 0.05,
-                color = :gray20,
-                linewidth = 0.9,
-            )
-            staff_r = staff_frac * panel_r_span
-            staff_z = staff_r / screen_aspect
-            barb_r = barb_frac * staff_r
-            barb_z = barb_frac * staff_z
-
-            staff_lines = Tuple{Point2f, Point2f}[]
-            barb_lines = Tuple{Point2f, Point2f}[]
-            pennants = NTuple{3, Point2f}[]
-            calm_pts = Point2f[]
-
-            for (p, v) in zip(pts, vecs)
-                vr_w, w_w = v[1], v[2]
-                speed = hypot(vr_w, w_w)
-                if speed < calm_threshold
-                    push!(calm_pts, Point2f(p))
-                    continue
-                end
-                ## Unit direction is the (vr, w) unit vector — no aspect
-                ## weighting here. The aspect correction is applied via
-                ## staff_z = staff_r/sa and barb_z = barb_r/sa, which makes
-                ## the *visual* (screen-space) staff length and barb-tick
-                ## length identical regardless of the staff's angle.
-                ##
-                ## Meteorological wind-barb convention: the staff points
-                ## UPSTREAM (the direction the wind is coming *from*), with
-                ## the barbs at the upstream end. Wind blows along the
-                ## staff from barbs toward the observation point. So we
-                ## negate the (vr, w) direction when laying down the staff.
-                s = hypot(vr_w, w_w)
-                ex = -vr_w / s; ez = -w_w / s
-                sx = ex * staff_r; sz = ez * staff_z
-                perp_x = -ez * barb_r; perp_z = ex * barb_z
-                tip = Point2f(p[1] + sx, p[2] + sz)
-                push!(staff_lines, (Point2f(p), tip))
-
-                rem = speed
-                npenn = floor(Int, rem / u_pennant); rem -= npenn * u_pennant
-                nfull = floor(Int, rem / u_full); rem -= nfull * u_full
-                nhalf = rem ≥ u_half ? 1 : 0
-
-                pos = 0.0
-                for _ in 1:npenn
-                    base1 = Point2f(p[1] + sx * (1 - pos), p[2] + sz * (1 - pos))
-                    base2 = Point2f(
-                        p[1] + sx * (1 - (pos + gap_frac)),
-                        p[2] + sz * (1 - (pos + gap_frac)),
-                    )
-                    mid_x = (base1[1] + base2[1]) / 2
-                    mid_z = (base1[2] + base2[2]) / 2
-                    ptip = Point2f(mid_x + perp_x, mid_z + perp_z)
-                    push!(pennants, (base1, base2, ptip))
-                    pos += gap_frac
-                end
-                if npenn > 0 && (nfull + nhalf) > 0
-                    pos += gap_frac * 0.5
-                end
-                for _ in 1:nfull
-                    base = Point2f(p[1] + sx * (1 - pos), p[2] + sz * (1 - pos))
-                    tip_b = Point2f(base[1] + perp_x, base[2] + perp_z)
-                    push!(barb_lines, (base, tip_b))
-                    pos += gap_frac
-                end
-                if nhalf == 1
-                    pos_h = nfull == 0 && npenn == 0 ? pos + gap_frac / 2 : pos
-                    base = Point2f(p[1] + sx * (1 - pos_h), p[2] + sz * (1 - pos_h))
-                    tip_b = Point2f(base[1] + 0.5 * perp_x, base[2] + 0.5 * perp_z)
-                    push!(barb_lines, (base, tip_b))
-                end
-            end
-
-            if !isempty(staff_lines)
-                linesegments!(
-                    ax,
-                    reduce(vcat, [[a, b] for (a, b) in staff_lines]);
-                    color = color, linewidth = linewidth,
-                )
-            end
-            if !isempty(barb_lines)
-                linesegments!(
-                    ax,
-                    reduce(vcat, [[a, b] for (a, b) in barb_lines]);
-                    color = color, linewidth = linewidth,
-                )
-            end
-            for tri in pennants
-                poly!(ax, [tri[1], tri[2], tri[3]]; color = color, strokewidth = 0)
-            end
-            if !isempty(calm_pts)
-                scatter!(
-                    ax, calm_pts;
-                    color = (:white, 0.0), strokecolor = color,
-                    strokewidth = linewidth, markersize = 6,
-                )
-            end
-            return nothing
-        end
-
-        ## Panel-(b/c/d) display geometry.
-        panel_r_lo, panel_r_hi = 35.0, 120.0
-        panel_z_lo, panel_z_hi = 0.0, 12.0
-        panel_r_span = panel_r_hi - panel_r_lo
-        barbs_screen_aspect = 4.8
-        barbs_staff_frac = 0.025
-        barbs_calm_threshold = 0.05
-        barbs_stride_r = 5
-        barbs_stride_z = 2
-
-        fig = Figure(size = (1400, 1080))
-
-        ax_pv = Axis(
-            fig[1, 1:3]; xlabel = "x (km)", ylabel = "y (km)",
-            title = @sprintf(
-                "(a) Vertical-velocity response at z = %.1f km",
-                z_slice_pv / 1.0e3
-            ),
-            aspect = DataAspect(),
-            limits = (-120, 120, -120, 120)
-        )
-        hm_pv = heatmap!(
-            ax_pv, xs_grid ./ kilometer, ys_grid ./ kilometer, w_22;
-            colormap = :balance, colorrange = (-w22_lim, w22_lim)
-        )
-        contour!(
-            ax_pv, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_at_slice;
-            levels = [1.0], color = :red, linewidth = 2.0
-        )
-        contour!(
-            ax_pv, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_at_slice;
-            levels = [-1.0], color = :blue, linewidth = 2.0
-        )
-        ## Azimuthal convention (YD19 §3b1):
-        ##   λ = 0     — downwind end (east, 60 km r_bsfc)
-        ##   λ = -π/4  — middle of rainband (southeast, 70 km)
-        ##   λ = -π/2  — upwind end (south, 80 km)
-        for (λ_cs, lbl) in [(0.0, "downwind"), (-π / 4, "middle"), (-π / 2, "upwind")]
-            x_end = 120 * cos(λ_cs); y_end = 120 * sin(λ_cs)
-            lines!(ax_pv, [0.0, x_end], [0.0, y_end]; color = :black, linewidth = 1.5)
-            text!(
-                ax_pv, x_end, y_end; text = " $lbl ",
-                align = (:left, :center), color = :black, fontsize = 12
-            )
-        end
-        Colorbar(fig[1, 4], hm_pv; label = "w' (m s⁻¹)")
-
-        cs_v_lim = 3.0
-        ## Heating-contour overlay is averaged over the same band the velocity
-        ## field is, for consistency. `λ_band` here is a `(λ_lo, λ_hi)` tuple.
-        function draw_cross!(ax, cs, λ_band, label; n_az = 11)
-            hm = heatmap!(
-                ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, cs.vθ;
-                colormap = :balance, colorrange = (-cs_v_lim, cs_v_lim)
-            )
-            contour!(
-                ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, cs.vθ;
-                levels = -cs_v_lim:0.5:cs_v_lim, color = :black, linewidth = 0.4
-            )
-            λ_lo_b, λ_hi_b = λ_band
-            Q_cs2 = zeros(length(r_bin_centers), Nz)
-            for q in 1:n_az
-                λ = λ_lo_b + (λ_hi_b - λ_lo_b) * (q - 0.5) / n_az
-                Q_cs2 .+= [heating_rate_K_per_hour(r, λ, z)
-                           for r in r_bin_centers, z in z_centers]
-            end
-            Q_cs2 ./= n_az
-            contour!(
-                ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, Q_cs2;
-                levels = [1.0], color = :red, linewidth = 2.0
-            )
-            contour!(
-                ax, r_bin_centers ./ kilometer, z_centers ./ kilometer, Q_cs2;
-                levels = [-1.0], color = :blue, linewidth = 2.0
-            )
-
-            stride_r = 2; stride_z = 3
-            rsub = r_bin_centers[1:stride_r:end] ./ 1.0e3
-            zsub = z_centers[1:stride_z:end] ./ 1.0e3
-            vsub = cs.vr[1:stride_r:end, 1:stride_z:end]
-            wsub = cs.w[1:stride_r:end, 1:stride_z:end] .* 10
-            pts = Point2f[]; vecs = Vec2f[]
-            for j in eachindex(zsub), i in eachindex(rsub)
-                if panel_r_lo <= rsub[i] <= panel_r_hi && panel_z_lo <= zsub[j] <= panel_z_hi
-                    push!(pts, Point2f(rsub[i], zsub[j]))
-                    push!(vecs, Vec2f(vsub[i, j], wsub[i, j]))
-                end
-            end
-            draw_wind_barbs!(
-                ax, pts, vecs;
-                panel_r_span = panel_r_span,
-                screen_aspect = barbs_screen_aspect,
-                staff_frac = barbs_staff_frac,
-                calm_threshold = barbs_calm_threshold,
-            )
-
-            ax.title = label
-            ax.xlabel = "Radius (km)"
-            ax.ylabel = "Height (km)"
-            return hm
-        end
-
-        ax_up = Axis(fig[2, 1]; limits = (panel_r_lo, panel_r_hi, panel_z_lo, panel_z_hi))
-        draw_cross!(
-            ax_up, cs_up, (λ_lo_up, λ_hi_up),
-            @sprintf("(b) upwind band 1/5 (λ ∈ [%.0f°, %.0f°])",
-                     rad2deg(λ_lo_up), rad2deg(λ_hi_up)),
-        )
-        ax_md = Axis(fig[2, 2]; limits = (panel_r_lo, panel_r_hi, panel_z_lo, panel_z_hi))
-        draw_cross!(
-            ax_md, cs_md, (λ_lo_md, λ_hi_md),
-            @sprintf("(c) middle band 3/5 (λ ∈ [%.0f°, %.0f°])",
-                     rad2deg(λ_lo_md), rad2deg(λ_hi_md)),
-        )
-        ax_dn = Axis(fig[2, 3]; limits = (panel_r_lo, panel_r_hi, panel_z_lo, panel_z_hi))
-        hm_dn = draw_cross!(
-            ax_dn, cs_dn, (λ_lo_dn, λ_hi_dn),
-            @sprintf("(d) downwind band 5/5 (λ ∈ [%.0f°, %.0f°])",
-                     rad2deg(λ_lo_dn), rad2deg(λ_hi_dn)),
-        )
-        Colorbar(fig[2, 4], hm_dn; label = "v̄' (m s⁻¹)")
-
-        ## Speed-key legend row. Reuses `draw_wind_barbs!` so the glyph
-        ## semantics are identical to the data panels. The legend axis is
-        ## short and wide, so its `screen_aspect` (px/km-y over px/km-x) is
-        ## much smaller than the data panels' — we choose `screen_aspect = 0.17`
-        ## and `staff_frac = 0.06` empirically so the barb ticks read at a
-        ## visible size in this row.
-        key_ax = Axis(fig[3, 1:3]; limits = (0, 1, 0, 1))
-        let
-            ## Only show glyphs that actually appear in the data — the response
-            ## winds are O(1 m/s), so pennants (2.5 m/s+) never get drawn.
-            samples = [
-                (0.0,  "calm"),
-                (0.25, "0.25 m s⁻¹"),
-                (0.5,  "0.5 m s⁻¹"),
-                (1.0,  "1.0 m s⁻¹"),
-                (1.5,  "1.5 m s⁻¹"),
-                (2.0,  "2.0 m s⁻¹"),
-            ]
-            n = length(samples)
-            pts = Point2f[]; vecs = Vec2f[]
-            for (i, (sp, _)) in enumerate(samples)
-                x = (i - 0.5) / n
-                push!(pts, Point2f(x, 0.6))
-                push!(vecs, Vec2f(sp, 0.0))
-            end
-            draw_wind_barbs!(
-                key_ax, pts, vecs;
-                panel_r_span = 1.0,
-                screen_aspect = 0.17,
-                staff_frac = 0.06,
-                calm_threshold = barbs_calm_threshold,
-            )
-            for (i, (_, lbl)) in enumerate(samples)
-                x = (i - 0.5) / n
-                text!(key_ax, x, 0.25; text = lbl, align = (:center, :center), fontsize = 11)
-            end
-        end
-        hidedecorations!(key_ax); hidespines!(key_ax)
-        rowsize!(fig.layout, 3, Relative(0.10))
-
-        Label(
-            fig[0, :],
-            @sprintf(
-                "F05 — Cross sections of tangential-wind response (YD19 Fig 5, %.0f-%.0f h, %.0f km box)",
-                target_s[1] / hour, target_s[end] / hour, Lx / 1.0e3
-            );
-            fontsize = 17
-        )
-
-        path = joinpath(figures_dir, "F05_cross_sections.png")
-        save(path, fig)
-        @info "Saved F05" path
-        GC.gc()
-
-        ## ---------------------------------------------------------
-        ## Animation — w' at z ≈ 3 km over the heated run
-        ## ---------------------------------------------------------
-        ##
-        ## The quickest way to feel the YD19 response is to watch vertical
-        ## velocity evolve. We pick the level closest to z = 3 km, then step
-        ## through every hourly snapshot of (heated − control) and record a
-        ## frame of the w-difference field on the plan view. The heating's
-        ## red/blue ±1 K/h contour is overlaid for reference.
-        @info "Producing animation (w' at z ≈ 3 km, heated − control)..."
-        k_anim = argmin(abs.(z_centers .- 3_000.0))
-        xs_grid = Float32.(xnodes(grid, Center()))
-        ys_grid = Float32.(ynodes(grid, Center()))
-
-        ## Heating field evaluated at the *animation* slice altitude (≈ 2.8 km).
-        ## At this height V_z(z) = sin(π·(z-z_bs)/σ_zs) is strictly negative, so
-        ## only the blue −1 K/h contour will draw — no spurious red lobe.
-        z_anim = z_centers[k_anim]
-        Q_anim_at = [
-            heating_rate_K_per_hour(
-                    sqrt(xs_grid[i]^2 + ys_grid[j]^2),
-                    atan(ys_grid[j], xs_grid[i]),
-                    z_anim
-                )
-                for i in 1:Nx, j in 1:Ny
-        ]
-        q_anim_min = minimum(Q_anim_at); q_anim_max = maximum(Q_anim_at)
-
-        ## Preload all frames as a time-indexed 3D array (Nx, Ny, Nt) of
-        ## Float32. For each hour n we compute
-        ## w_h(·, ·, k_anim) − w_c(·, ·, k_anim).
-        Nt_anim = min(length(ctrl_times), length(heat_times))
-        w_frames = zeros(Float32, Nx, Ny, Nt_anim)
-        for n in 1:Nt_anim
-            center_w!(w_sc, ts_ctrl.w[n])
-            @views w_frames[:, :, n] .= -w_sc[:, :, k_anim]
-            center_w!(w_sc, ts_heat.w[n])
-            @views w_frames[:, :, n] .+= w_sc[:, :, k_anim]
-        end
-        ## Robust color limit: 95th-percentile of |w'| restricted to the rainband
-        ## quadrant (x ≥ 0 ∧ y ≤ 0, the SE corner where the response lives). Using
-        ## the global maximum saturates the colormap with gravity-wave spikes and
-        ## squashes the actual ±1 m/s response to near-white.
-        w_lim = let vals = Float32[]
-            for n in 1:Nt_anim, j in 1:Ny, i in 1:Nx
-                if xs_grid[i] >= 0 && ys_grid[j] <= 0
-                    push!(vals, abs(w_frames[i, j, n]))
-                end
-            end
-            sort!(vals)
-            v = vals[ceil(Int, 0.95 * length(vals))]
-            max(0.3f0, Float32(ceil(v * 2) / 2))
-        end
-        @info @sprintf("Animation w_lim = ±%.2f m/s (95th percentile in SE quadrant)", w_lim)
-
-        ## Figure is wider/taller than before so the spiral structure is legible.
-        ## Compression stays at 30 — that combined with the bigger frame still
-        ## comes in under Documenter's size_threshold based on the prior page
-        ## size budget.
-        fig = Figure(size = (720, 560))
-        ax = Axis(
-            fig[1, 1]; xlabel = "x (km)", ylabel = "y (km)",
-            aspect = DataAspect(),
-            limits = (-120, 120, -120, 120)
-        )
-        n = Observable(1)
-        w_n = @lift @view(w_frames[:, :, $n])
-        title_t = @lift @sprintf(
-            "w' response at z = %.1f km — t = %.1f h after heating onset",
-            z_anim / 1.0e3, heat_times[$n] / hour
-        )
-        fig[0, :] = Label(fig, title_t; fontsize = 12, tellwidth = false)
-        hm = heatmap!(
-            ax, xs_grid ./ kilometer, ys_grid ./ kilometer, w_n;
-            colormap = :balance, colorrange = (-w_lim, w_lim)
-        )
-        ## Single Q field, both contour levels (red +1 K/h, blue −1 K/h).
-        ## At z_anim ≈ 2.8 km, V_z(z) is strictly negative so only the blue
-        ## contour draws in practice; we still pass both levels for safety
-        ## in case the slice altitude is bumped above z_bs in future tweaks.
-        contour!(
-            ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_anim_at;
-            levels = [1.0], color = :red, linewidth = 1.5
-        )
-        contour!(
-            ax, xs_grid ./ 1.0e3, ys_grid ./ 1.0e3, Q_anim_at;
-            levels = [-1.0], color = :blue, linewidth = 1.5
-        )
-        Colorbar(fig[1, 2], hm; label = "w' (m s⁻¹)")
-
-        anim_path = joinpath(figures_dir, "response_w_z3km.mp4")
-        CairoMakie.record(
-            fig, anim_path, 1:Nt_anim;
-            framerate = 2, compression = 30
-        ) do nn
-            n[] = nn
-        end
-        @info "Saved animation" anim_path
-        nothing #hide
-    end
-
     @info "=== Analysis complete ==="
 end
 
-# ![](output_tc_rainband/figures/response_w_z3km.mp4)
+# ## Reproducing the full YD19 response (optional)
+#
+# The two stubs below extend the spinup into a control / heated pair, which is
+# what YD19 actually subtract to get the quadrupole response. They are kept
+# commented out so this example stays short; uncomment to enable, then add
+# back the F03a / F04 / F05 / F06 plot blocks against `control_result` and
+# `heated_result`.
+#
+# ```julia
+# @info "=== Control: $(prettytime(stage_stop_time)) ==="
+# control_result = build_and_run_stage!(
+#     "control";
+#     with_heating = false,
+#     init = post_spinup,
+#     stop_time = stage_stop_time,
+# )
+#
+# @info "=== Heated: $(prettytime(stage_stop_time)) (MN10 stratiform) ==="
+# heated_result = build_and_run_stage!(
+#     "heated";
+#     with_heating = true,
+#     init = post_spinup,
+#     stop_time = stage_stop_time,
+# )
+# ```
