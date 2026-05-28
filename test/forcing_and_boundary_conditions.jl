@@ -151,12 +151,12 @@ end
 
     # West boundary face (i=1) carries the prescribed value at the current time.
     bc_value(t) = FT(1.17) * cos(FT(0.01) * t)
-    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ bc_value(model.clock.time) atol=sqrt(eps(FT))
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ bc_value(model.clock.time)
 
     # Stepping re-evaluates the BC at the new time without error.
     time_step!(model, FT(10))
     @test model.clock.iteration == 1
-    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ bc_value(model.clock.time) atol=sqrt(eps(FT))
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ bc_value(model.clock.time)
     @test !any(isnan, parent(model.momentum.ρu))
 end
 
