@@ -180,7 +180,7 @@ where ``G`` above is the right-hand-side, e.g., ``∂u/∂t = G(u)``.
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}, Δt; callbacks=[])
 
     # Be paranoid and prepare at iteration 0, in case run! is not used:
-    maybe_prepare_first_time_step!(model, Δt, callbacks)
+    maybe_prepare_first_time_step!(model, callbacks)
 
     ts = model.timestepper
     α¹ = ts.α¹

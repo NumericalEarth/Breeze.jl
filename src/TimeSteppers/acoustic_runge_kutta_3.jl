@@ -171,7 +171,7 @@ linearized acoustic substepping.
 """
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:AcousticRungeKutta3}, Δt; callbacks=[])
 
-    maybe_prepare_first_time_step!(model, Δt, callbacks)
+    maybe_prepare_first_time_step!(model, callbacks)
 
     ts = model.timestepper
     β₁ = ts.β₁
