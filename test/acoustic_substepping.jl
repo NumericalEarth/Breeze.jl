@@ -17,7 +17,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
 using Breeze.CompressibleEquations: _explicit_horizontal_step!
 using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
-                               buoyancy_forceᶜᶜᶜ, dynamics_density
+                               buoyancy_forceᶜᶜᶜ, dynamics_density, thermodynamic_density
 using Breeze.Thermodynamics: adiabatic_hydrostatic_density, ExnerReferenceState, surface_density
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -329,14 +329,16 @@ for arch in arches
         @test !any(isnan, parent(model_walls.dynamics.density))
     end
 
-    @testset "Open-boundary relaxation pulls outermost cell toward prescribed ρ [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+    @testset "Open-boundary relaxation pulls outermost cell toward prescribed ρ, ρθ [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         Oceananigans.defaults.FloatType = FT
 
         # Thin column so the hydrostatic ρ_ref variation is small (<1%) compared
         # to the deliberate ρ_wall jump below — keeps the test discriminating.
+        # All four lateral sides are bounded + open so both the x- and y-direction
+        # relaxation kernels fire and both ρ′ and (ρθ)′ are exercised.
         grid = RectilinearGrid(arch; size=(8, 8, 4), halo=(5, 5, 5),
                                x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 200),
-                               topology=(Bounded, Periodic, Bounded))
+                               topology=(Bounded, Bounded, Bounded))
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                         reference_potential_temperature=300)
@@ -345,21 +347,30 @@ for arch in arches
 
         # Drive the lateral boundaries off the interior state by 5%: a
         # `ValueBoundaryCondition` sets ρ_wall = 1.05·ρ_ref on the open faces,
-        # paired with `OpenBoundaryCondition(ρ_wall·U)` for a small inflow `U`
-        # on the corresponding `ρu`. With the per-substep relaxation, the
-        # outermost cell of ρ is pulled toward ρ_wall each substep; over the
-        # cumulative ~`Nτ` substeps per outer step the pull saturates and the
-        # cell tracks ρ_wall closely.
-        U      = FT(2)
-        ρ_wall = FT(1.05 * ρ_ref0)
-        ρu_val = FT(ρ_wall * U)
+        # paired with `OpenBoundaryCondition(ρ_wall·U)` / `OpenBoundaryCondition(ρ_wall·V)`
+        # for small inflows `U`, `V` on `ρu`, `ρv`. With the per-substep relaxation,
+        # the outermost cell of ρ and (ρθ) is pulled toward the wall value each
+        # substep; over the cumulative ~`Nτ` substeps per outer step the pull
+        # saturates and the cell tracks the wall value closely.
+        U       = FT(2)
+        V       = FT(2)
+        ρ_wall  = FT(1.05 * ρ_ref0)
+        ρθ_wall = FT(ρ_wall * 300)
+        ρu_val  = FT(ρ_wall * U)
+        ρv_val  = FT(ρ_wall * V)
         ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_val),
                                          east = OpenBoundaryCondition(ρu_val))
-        ρ_bcs  = FieldBoundaryConditions(west = ValueBoundaryCondition(ρ_wall),
-                                         east = ValueBoundaryCondition(ρ_wall))
-        ρθ_bcs = FieldBoundaryConditions(west = ValueBoundaryCondition(ρ_wall * FT(300)),
-                                         east = ValueBoundaryCondition(ρ_wall * FT(300)))
-        boundary_conditions = (; ρu = ρu_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+        ρv_bcs = FieldBoundaryConditions(south = OpenBoundaryCondition(ρv_val),
+                                         north = OpenBoundaryCondition(ρv_val))
+        ρ_bcs  = FieldBoundaryConditions(west  = ValueBoundaryCondition(ρ_wall),
+                                         east  = ValueBoundaryCondition(ρ_wall),
+                                         south = ValueBoundaryCondition(ρ_wall),
+                                         north = ValueBoundaryCondition(ρ_wall))
+        ρθ_bcs = FieldBoundaryConditions(west  = ValueBoundaryCondition(ρθ_wall),
+                                         east  = ValueBoundaryCondition(ρθ_wall),
+                                         south = ValueBoundaryCondition(ρθ_wall),
+                                         north = ValueBoundaryCondition(ρθ_wall))
+        boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
 
         model = AtmosphereModel(grid; advection=WENO(), dynamics,
                                 timestepper=:AcousticRungeKutta3,
@@ -371,23 +382,44 @@ for arch in arches
         @test !any(isnan, parent(model.dynamics.density))
 
         # After the relaxation has fired across ~`Nτ` substeps per outer step,
-        # the cumulative pull `1 − (1−α)^Nτ` saturates and ρ at the outermost
-        # cell should be much closer to ρ_wall than to the deep interior. We
-        # sample the interior bulk at i = Nx/2, away from boundary influence.
+        # the cumulative pull `1 − (1−α)^Nτ` saturates and the outermost cell of
+        # both ρ and (ρθ) should be much closer to the wall value than to the
+        # deep interior. We sample the interior bulk at (Nx/2, Ny/2), away from
+        # boundary influence in both horizontal directions.
         Nx = size(grid, 1)
+        Ny = size(grid, 2)
         ρ_int  = interior(model.dynamics.density)
-        ρ_west = @allowscalar mean(ρ_int[1,    :, :])
-        ρ_east = @allowscalar mean(ρ_int[Nx,   :, :])
-        ρ_bulk = @allowscalar mean(ρ_int[Nx÷2, :, :])
+        ρθ_int = interior(thermodynamic_density(model.formulation))
 
-        # Require the outermost cell to be at least halfway from the bulk to
-        # ρ_wall — a loose threshold that is comfortably met when the relaxation
-        # is firing (cumulative pull > 0.9 in practice) and would not be met if
-        # the boundary perturbation propagated only by interior acoustic
-        # dynamics over 3 small steps.
-        threshold = ρ_bulk + FT(0.5) * (ρ_wall - ρ_bulk)
-        @test ρ_west ≥ threshold
-        @test ρ_east ≥ threshold
+        ρ_west  = @allowscalar mean(ρ_int[1,    :, :])
+        ρ_east  = @allowscalar mean(ρ_int[Nx,   :, :])
+        ρ_south = @allowscalar mean(ρ_int[:, 1,    :])
+        ρ_north = @allowscalar mean(ρ_int[:, Ny,   :])
+        ρ_bulk  = @allowscalar mean(ρ_int[Nx÷2, Ny÷2, :])
+
+        ρθ_west  = @allowscalar mean(ρθ_int[1,    :, :])
+        ρθ_east  = @allowscalar mean(ρθ_int[Nx,   :, :])
+        ρθ_south = @allowscalar mean(ρθ_int[:, 1,    :])
+        ρθ_north = @allowscalar mean(ρθ_int[:, Ny,   :])
+        ρθ_bulk  = @allowscalar mean(ρθ_int[Nx÷2, Ny÷2, :])
+
+        # Require the outermost cell to be at least halfway from the bulk to the
+        # prescribed wall value — a loose threshold that is comfortably met when
+        # the relaxation is firing (cumulative pull > 0.9 in practice) and would
+        # not be met if the boundary perturbation propagated only by interior
+        # acoustic dynamics over 3 small steps.
+        ρ_threshold  = ρ_bulk  + FT(0.5) * (ρ_wall  - ρ_bulk)
+        ρθ_threshold = ρθ_bulk + FT(0.5) * (ρθ_wall - ρθ_bulk)
+
+        @test ρ_west  ≥ ρ_threshold
+        @test ρ_east  ≥ ρ_threshold
+        @test ρ_south ≥ ρ_threshold
+        @test ρ_north ≥ ρ_threshold
+
+        @test ρθ_west  ≥ ρθ_threshold
+        @test ρθ_east  ≥ ρθ_threshold
+        @test ρθ_south ≥ ρθ_threshold
+        @test ρθ_north ≥ ρθ_threshold
     end
 
     #####
