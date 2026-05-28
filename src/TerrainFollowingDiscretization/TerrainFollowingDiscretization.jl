@@ -44,6 +44,7 @@ include("terrain_metrics.jl")
 include("follow_terrain.jl")
 include("terrain_formulations.jl")
 include("terrain_following_vertical_discretization.jl")
+include("terrain_amg_operators.jl")
 include("materialize_terrain.jl")
 
 end # module
