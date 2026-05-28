@@ -422,6 +422,147 @@ for arch in arches
         @test ρθ_north ≥ ρθ_threshold
     end
 
+    @testset "Asymmetric wall values: each side tracks its own prescribed ρ [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+
+        # Distinct ρ_wall on each side catches a kernel where east/west or
+        # south/north indices are transposed: the symmetric test would still
+        # pass under such a swap, but here each outermost cell must be
+        # closer to its own prescribed value than to the opposite side's.
+        grid = RectilinearGrid(arch; size=(8, 8, 4), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 200),
+                               topology=(Bounded, Bounded, Bounded))
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=300)
+        ref = ExnerReferenceState(grid; potential_temperature=FT(300))
+        ρ_ref0 = @allowscalar interior(ref.density)[1, 1, 1]
+
+        ρ_wall_west  = FT(1.05 * ρ_ref0)
+        ρ_wall_east  = FT(0.97 * ρ_ref0)
+        ρ_wall_south = FT(1.03 * ρ_ref0)
+        ρ_wall_north = FT(0.96 * ρ_ref0)
+        U = FT(2); V = FT(2)
+
+        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(FT(ρ_wall_west * U)),
+                                         east = OpenBoundaryCondition(FT(ρ_wall_east * U)))
+        ρv_bcs = FieldBoundaryConditions(south = OpenBoundaryCondition(FT(ρ_wall_south * V)),
+                                         north = OpenBoundaryCondition(FT(ρ_wall_north * V)))
+        ρ_bcs  = FieldBoundaryConditions(west  = ValueBoundaryCondition(ρ_wall_west),
+                                         east  = ValueBoundaryCondition(ρ_wall_east),
+                                         south = ValueBoundaryCondition(ρ_wall_south),
+                                         north = ValueBoundaryCondition(ρ_wall_north))
+        ρθ_bcs = FieldBoundaryConditions(west  = ValueBoundaryCondition(FT(ρ_wall_west  * 300)),
+                                         east  = ValueBoundaryCondition(FT(ρ_wall_east  * 300)),
+                                         south = ValueBoundaryCondition(FT(ρ_wall_south * 300)),
+                                         north = ValueBoundaryCondition(FT(ρ_wall_north * 300)))
+        boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+
+        model = AtmosphereModel(grid; advection=WENO(), dynamics,
+                                timestepper=:AcousticRungeKutta3, boundary_conditions)
+        set!(model; θ=300, u=0, qᵗ=0, ρ=ρ_ref0)
+        run!(Simulation(model; Δt=1, stop_iteration=3, verbose=false))
+
+        Nx = size(grid, 1); Ny = size(grid, 2)
+        ρ_int = interior(model.dynamics.density)
+        ρ_west  = @allowscalar mean(ρ_int[1,    :, :])
+        ρ_east  = @allowscalar mean(ρ_int[Nx,   :, :])
+        ρ_south = @allowscalar mean(ρ_int[:, 1,    :])
+        ρ_north = @allowscalar mean(ρ_int[:, Ny,   :])
+
+        # Each side's outermost cell must be closer to its own prescribed wall
+        # value than to the opposite side's. An index transposition would flip
+        # one or both pairs.
+        @test abs(ρ_west  - ρ_wall_west)  < abs(ρ_west  - ρ_wall_east)
+        @test abs(ρ_east  - ρ_wall_east)  < abs(ρ_east  - ρ_wall_west)
+        @test abs(ρ_south - ρ_wall_south) < abs(ρ_south - ρ_wall_north)
+        @test abs(ρ_north - ρ_wall_north) < abs(ρ_north - ρ_wall_south)
+    end
+
+    @testset "Relaxation factor α controls pull strength [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+
+        # Two identical models differing only in α. With cumulative pull
+        # 1 − (1−α)^Nτ saturating monotonically in α, the high-α run must
+        # track ρ_wall more tightly than the low-α run. Catches bugs where
+        # α is ignored or hard-coded downstream.
+        function build_α_model(α)
+            grid = RectilinearGrid(arch; size=(8, 8, 4), halo=(5, 5, 5),
+                                   x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 200),
+                                   topology=(Bounded, Periodic, Bounded))
+            td = SplitExplicitTimeDiscretization(; open_boundary_relaxation = FT(α))
+            dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
+            ref = ExnerReferenceState(grid; potential_temperature=FT(300))
+            ρ_ref0 = @allowscalar interior(ref.density)[1, 1, 1]
+            ρ_wall = FT(1.05 * ρ_ref0)
+            ρu_val = FT(ρ_wall * 2)
+            ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_val),
+                                             east = OpenBoundaryCondition(ρu_val))
+            ρ_bcs  = FieldBoundaryConditions(west = ValueBoundaryCondition(ρ_wall),
+                                             east = ValueBoundaryCondition(ρ_wall))
+            ρθ_bcs = FieldBoundaryConditions(west = ValueBoundaryCondition(FT(ρ_wall * 300)),
+                                             east = ValueBoundaryCondition(FT(ρ_wall * 300)))
+            boundary_conditions = (; ρu = ρu_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+            model = AtmosphereModel(grid; advection=WENO(), dynamics,
+                                    timestepper=:AcousticRungeKutta3, boundary_conditions)
+            set!(model; θ=300, u=0, qᵗ=0, ρ=ρ_ref0)
+            run!(Simulation(model; Δt=1, stop_iteration=3, verbose=false))
+            return model, ρ_wall
+        end
+
+        model_low,  ρ_wall = build_α_model(0.05)
+        model_high, _      = build_α_model(1.0)
+
+        Nx = size(model_low.grid, 1)
+        ρ_west_low  = @allowscalar mean(interior(model_low.dynamics.density)[1, :, :])
+        ρ_west_high = @allowscalar mean(interior(model_high.dynamics.density)[1, :, :])
+
+        @test abs(ρ_west_high - ρ_wall) < abs(ρ_west_low - ρ_wall)
+    end
+
+    @testset "OpenBoundaryCondition(nothing) skips relaxation [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+
+        # `is_active_open_bc` excludes `OpenBoundaryCondition(nothing)` via its
+        # `!(bc.condition isa Nothing)` clause. Verify the kernel is not
+        # invoked in that case by setting ρ's `ValueBoundaryCondition` to a
+        # value the relaxation would visibly track if it fired, and checking
+        # the outermost cell stays near the initial state instead.
+        grid = RectilinearGrid(arch; size=(8, 8, 4), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 200),
+                               topology=(Bounded, Periodic, Bounded))
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=300)
+        ref = ExnerReferenceState(grid; potential_temperature=FT(300))
+        ρ_ref0 = @allowscalar interior(ref.density)[1, 1, 1]
+        ρ_wall = FT(1.05 * ρ_ref0)
+
+        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(nothing),
+                                         east = OpenBoundaryCondition(nothing))
+        ρ_bcs  = FieldBoundaryConditions(west = ValueBoundaryCondition(ρ_wall),
+                                         east = ValueBoundaryCondition(ρ_wall))
+        ρθ_bcs = FieldBoundaryConditions(west = ValueBoundaryCondition(FT(ρ_wall * 300)),
+                                         east = ValueBoundaryCondition(FT(ρ_wall * 300)))
+        boundary_conditions = (; ρu = ρu_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+
+        model = AtmosphereModel(grid; advection=WENO(), dynamics,
+                                timestepper=:AcousticRungeKutta3, boundary_conditions)
+        set!(model; θ=300, u=0, qᵗ=0, ρ=ρ_ref0)
+        run!(Simulation(model; Δt=1, stop_iteration=3, verbose=false))
+
+        Nx = size(grid, 1)
+        ρ_int = interior(model.dynamics.density)
+        ρ_west = @allowscalar mean(ρ_int[1,  :, :])
+        ρ_east = @allowscalar mean(ρ_int[Nx, :, :])
+
+        # Outermost cell must stay closer to the initial state than to ρ_wall;
+        # if the relaxation fired despite the Nothing condition, the cells
+        # would be pulled toward ρ_wall.
+        @test abs(ρ_west - ρ_ref0) < abs(ρ_west - ρ_wall)
+        @test abs(ρ_east - ρ_ref0) < abs(ρ_east - ρ_wall)
+    end
+
     #####
     ##### Test adaptive substep computation
     #####
