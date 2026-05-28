@@ -270,6 +270,127 @@ for arch in arches
     end
 
     #####
+    ##### Per-substep open-boundary enforcement (issue #738). Three tests:
+    ##### (1) `open_boundary_relaxation` kwarg propagates and is validated;
+    ##### (2) the relaxation is a no-op when no side carries an active open BC;
+    ##### (3) the outermost open-boundary cell of `ρ` tracks the prescribed
+    #####     wall value across the acoustic substeps.
+    #####
+
+    @testset "open_boundary_relaxation kwarg propagation [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
+
+        td_default = SplitExplicitTimeDiscretization()
+        @test td_default.open_boundary_relaxation isa FT
+        @test td_default.open_boundary_relaxation ≈ FT(0.5)
+        acoustic_default = AcousticSubstepper(grid, td_default)
+        @test acoustic_default.open_boundary_relaxation ≈ FT(0.5)
+
+        td_custom = SplitExplicitTimeDiscretization(; open_boundary_relaxation = 0.25)
+        @test td_custom.open_boundary_relaxation ≈ FT(0.25)
+        acoustic_custom = AcousticSubstepper(grid, td_custom)
+        @test acoustic_custom.open_boundary_relaxation ≈ FT(0.25)
+
+        # α must lie in (0, 1]: 0 (would disable the relaxation), >1 (would
+        # overshoot the prescribed value), and negative values are rejected.
+        @test_throws ArgumentError SplitExplicitTimeDiscretization(; open_boundary_relaxation = 0)
+        @test_throws ArgumentError SplitExplicitTimeDiscretization(; open_boundary_relaxation = 1.5)
+        @test_throws ArgumentError SplitExplicitTimeDiscretization(; open_boundary_relaxation = -0.1)
+    end
+
+    @testset "Open-boundary relaxation is a no-op without active open BCs [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+
+        # Doubly-periodic: no `Open` BC anywhere; `is_active_open_bc` should
+        # return false on every side and the relaxation should be a no-op.
+        grid_periodic = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                                        x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
+                                        topology=(Periodic, Periodic, Bounded))
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=300)
+        model = AtmosphereModel(grid_periodic; advection=WENO(), dynamics,
+                                timestepper=:AcousticRungeKutta3)
+        set!(model; θ=300, u=0, qᵗ=0, ρ=model.dynamics.reference_state.density)
+        run!(Simulation(model; Δt=1, stop_iteration=1, verbose=false))
+        @test model.clock.iteration == 1
+        @test !any(isnan, parent(model.dynamics.density))
+
+        # Bounded but no OBC supplied: the prognostic-momentum BCs default to
+        # impenetrable walls, which `is_active_open_bc` returns false for.
+        grid_walls = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                                     x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
+                                     topology=(Bounded, Bounded, Bounded))
+        model_walls = AtmosphereModel(grid_walls; advection=WENO(), dynamics,
+                                      timestepper=:AcousticRungeKutta3)
+        set!(model_walls; θ=300, u=0, qᵗ=0, ρ=model_walls.dynamics.reference_state.density)
+        run!(Simulation(model_walls; Δt=1, stop_iteration=1, verbose=false))
+        @test model_walls.clock.iteration == 1
+        @test !any(isnan, parent(model_walls.dynamics.density))
+    end
+
+    @testset "Open-boundary relaxation pulls outermost cell toward prescribed ρ [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+
+        # Thin column so the hydrostatic ρ_ref variation is small (<1%) compared
+        # to the deliberate ρ_wall jump below — keeps the test discriminating.
+        grid = RectilinearGrid(arch; size=(8, 8, 4), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 200),
+                               topology=(Bounded, Periodic, Bounded))
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=300)
+        ref = ExnerReferenceState(grid; potential_temperature=FT(300))
+        ρ_ref0 = @allowscalar interior(ref.density)[1, 1, 1]
+
+        # Drive the lateral boundaries off the interior state by 5%: a
+        # `ValueBoundaryCondition` sets ρ_wall = 1.05·ρ_ref on the open faces,
+        # paired with `OpenBoundaryCondition(ρ_wall·U)` for a small inflow `U`
+        # on the corresponding `ρu`. With the per-substep relaxation, the
+        # outermost cell of ρ is pulled toward ρ_wall each substep; over the
+        # cumulative ~`Nτ` substeps per outer step the pull saturates and the
+        # cell tracks ρ_wall closely.
+        U      = FT(2)
+        ρ_wall = FT(1.05 * ρ_ref0)
+        ρu_val = FT(ρ_wall * U)
+        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_val),
+                                         east = OpenBoundaryCondition(ρu_val))
+        ρ_bcs  = FieldBoundaryConditions(west = ValueBoundaryCondition(ρ_wall),
+                                         east = ValueBoundaryCondition(ρ_wall))
+        ρθ_bcs = FieldBoundaryConditions(west = ValueBoundaryCondition(ρ_wall * FT(300)),
+                                         east = ValueBoundaryCondition(ρ_wall * FT(300)))
+        boundary_conditions = (; ρu = ρu_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+
+        model = AtmosphereModel(grid; advection=WENO(), dynamics,
+                                timestepper=:AcousticRungeKutta3,
+                                boundary_conditions)
+        set!(model; θ=300, u=0, qᵗ=0, ρ=ρ_ref0)
+
+        run!(Simulation(model; Δt=1, stop_iteration=3, verbose=false))
+        @test model.clock.iteration == 3
+        @test !any(isnan, parent(model.dynamics.density))
+
+        # After the relaxation has fired across ~`Nτ` substeps per outer step,
+        # the cumulative pull `1 − (1−α)^Nτ` saturates and ρ at the outermost
+        # cell should be much closer to ρ_wall than to the deep interior. We
+        # sample the interior bulk at i = Nx/2, away from boundary influence.
+        Nx = size(grid, 1)
+        ρ_int  = interior(model.dynamics.density)
+        ρ_west = @allowscalar mean(ρ_int[1,    :, :])
+        ρ_east = @allowscalar mean(ρ_int[Nx,   :, :])
+        ρ_bulk = @allowscalar mean(ρ_int[Nx÷2, :, :])
+
+        # Require the outermost cell to be at least halfway from the bulk to
+        # ρ_wall — a loose threshold that is comfortably met when the relaxation
+        # is firing (cumulative pull > 0.9 in practice) and would not be met if
+        # the boundary perturbation propagated only by interior acoustic
+        # dynamics over 3 small steps.
+        threshold = ρ_bulk + FT(0.5) * (ρ_wall - ρ_bulk)
+        @test ρ_west ≥ threshold
+        @test ρ_east ≥ threshold
+    end
+
+    #####
     ##### Test adaptive substep computation
     #####
 
