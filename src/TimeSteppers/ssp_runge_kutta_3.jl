@@ -135,11 +135,12 @@ function ssp_rk3_substep!(model, Δt, α)
     return nothing
 end
 
-@kernel function _ssp_rk3_substep!(u, u⁰, G, Δt, α)
+@kernel function _ssp_rk3_substep!(u, u⁰, G, Δt, α::FT) where FT
     i, j, k = @index(Global, NTuple)
+    Δt_FT = convert(FT, Δt)
     @inbounds begin
         # u^(m) = (1 - α) * u^(0) + α * (u^(m-1) + Δt * G)
-        u[i, j, k] = (1 - α) * u⁰[i, j, k] + α * (u[i, j, k] + Δt * G[i, j, k])
+        u[i, j, k] = (1 - α) * u⁰[i, j, k] + α * (u[i, j, k] + Δt_FT * G[i, j, k])
     end
 end
 

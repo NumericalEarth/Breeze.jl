@@ -151,8 +151,11 @@ end
 ##### Scalar update with time-averaged velocities
 #####
 
-scalar_rk3_substep!(model, Δt_stage) =
-    scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_stage)
+function scalar_rk3_substep!(model, Δt_stage)
+    FT = eltype(model.grid)
+    Δt_FT = convert(FT, Δt_stage)
+    return scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_FT)
+end
 
 @kernel function _rk3_substep!(u, u⁰, G, Δt_stage)
     i, j, k = @index(Global, NTuple)

@@ -64,12 +64,13 @@ Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic press
 """
 function AtmosphereModels.make_pressure_correction!(model::AnelasticModel, Δt)
     dynamics = model.dynamics
+    Δt_FT = convert(eltype(model.grid), Δt)
 
     launch!(model.architecture, model.grid, :xyz,
             _pressure_correct_momentum!,
             model.momentum,
             model.grid,
-            Δt,
+            Δt_FT,
             dynamics.pressure_anomaly,  # kinematic pressure p'/ρᵣ
             dynamics.reference_state.density)
 

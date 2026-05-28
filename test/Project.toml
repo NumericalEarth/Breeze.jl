@@ -24,6 +24,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 Breeze = {path = ".."}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev="dkz-adapt-all"}
 
 [compat]
 Adapt = "4.3.0"
