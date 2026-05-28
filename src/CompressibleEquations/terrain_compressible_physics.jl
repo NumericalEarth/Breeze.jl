@@ -374,31 +374,60 @@ function terrain_reference_profiles(ref_spec::NamedTuple)
     return θᵣ, qᵛᵣ
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Integrate the hydrostatic equation ``∂p/∂z = \\mathrm{dpdz}(z, p)`` from the surface to
+height ``z``, repeatedly doubling the number of steps until the pressure at ``z`` changes
+by less than the relative `tolerance` between successive refinements. `dpdz(z, p)` returns
+the local pressure gradient ``-g ρ`` given height and pressure.
+"""
+function converged_hydrostatic_pressure(z, p₀, dpdz;
+                                        tolerance = sqrt(eps(float(typeof(p₀)))),
+                                        initial_steps = 16,
+                                        max_steps = 1 << 16)
+    z == 0 && return p₀
+
+    integrate(nsteps) = begin
+        dz = z / nsteps
+        half_dz = dz / 2
+        p = p₀
+        for i in 1:nsteps
+            zₗ = (i - 1) * dz
+            k₁ = dpdz(zₗ, p)
+            k₂ = dpdz(zₗ + half_dz, p + k₁ * half_dz)
+            p += k₂ * dz
+        end
+        return p
+    end
+
+    nsteps = initial_steps
+    p_coarse = integrate(nsteps)
+    while nsteps < max_steps
+        nsteps *= 2
+        p_fine = integrate(nsteps)
+        abs(p_fine - p_coarse) ≤ tolerance * abs(p_fine) && return p_fine
+        p_coarse = p_fine
+    end
+
+    return p_coarse
+end
+
 terrain_hydrostatic_pressure(z, p₀, θᵣ, ::Nothing, pˢᵗ, constants) =
     hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
 
 function terrain_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
-    z == 0 && return p₀
-
-    # Anchor for the k = 1 cell center: integrate the continuous hydrostatic
-    # equation dp/dz = -g ρ from the surface to the local physical height `z`
-    # with a midpoint rule. This only sets the column's pressure level; the
-    # discrete-balance recurrence in `compute_terrain_reference_state!` handles
-    # k ≥ 2. This is the moist analogue of `numerically_integrated_hydrostatic_pressure`
-    # and uses the same fixed `nsteps`.
-    nsteps = 1000
-
+    # Compute the continuous hydrostatic pressure at physical height `z`. For
+    # moist terrain columns this supplies the boundary state at the local terrain
+    # surface; the first cell center and the interior levels are then obtained by
+    # the same discrete-balance Newton solve.
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
     g = constants.gravitational_acceleration
 
-    Δz = z / nsteps
-    p = p₀
-
-    for n in 1:nsteps
-        zⁿ = (n - 0.5) * Δz
+    @inline function dpdz(zⁿ, p)
         θⁿ = evaluate_profile(θᵣ, zⁿ)
         qᵛⁿ = evaluate_profile(qᵛᵣ, zⁿ)
         qᵈⁿ = 1 - qᵛⁿ
@@ -406,11 +435,25 @@ function terrain_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants
         cᵖᵐⁿ = qᵈⁿ * cᵖᵈ + qᵛⁿ * cᵖᵛ
         κᵐⁿ = Rᵐⁿ / cᵖᵐⁿ
         Tⁿ = θⁿ * (p / pˢᵗ)^κᵐⁿ
-        ρⁿ = p / (Rᵐⁿ * Tⁿ)
-        p = p - g * ρⁿ * Δz
+        return -g * p / (Rᵐⁿ * Tⁿ)
     end
 
-    return p
+    return converged_hydrostatic_pressure(z, p₀, dpdz;
+                                          tolerance = sqrt(eps(float(typeof(p₀)))))
+end
+
+@inline function newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ)
+    Aₖ = g * pˢᵗ^κₖ / (2 * Rᵐₖ * θₖ)
+    Cₖ = p⁻ / Δz - g * ρ⁻ / 2
+
+    for _ in 1:7
+        ρp = pₖ^(-κₖ)
+        f = pₖ / Δz + Aₖ * pₖ * ρp - Cₖ
+        f′ = 1 / Δz + Aₖ * (1 - κₖ) * ρp
+        pₖ = pₖ - f / f′
+    end
+
+    return pₖ
 end
 
 """
@@ -422,14 +465,16 @@ grid, different columns have different physical heights at the same computationa
 `k`, so the reference state varies horizontally even though the reference atmosphere is
 horizontally uniform.
 
-The first cell center anchors the column via continuous hydrostatic integration to the
-local physical height. From there, each face's pressure is found by a Newton solve that
-drives the discrete hydrostatic balance
+Moist terrain columns first assign the local terrain surface the continuous hydrostatic
+state at its physical height, then use the same Newton solve for the surface-to-center
+half cell and every interior face to drive the discrete hydrostatic balance. Dry terrain
+columns keep the direct continuous anchor at the first cell center and use the Newton
+solve only on interior faces.
 ```math
 \\frac{p_{ref}[k] - p_{ref}[k-1]}{Δz} + g \\frac{ρ_{ref}[k] + ρ_{ref}[k-1]}{2} = 0
 ```
-to near machine precision at every interior face (the Exner integration provides only
-the Newton initial guess). The reference atmosphere uses level-local moist constants
+to near machine precision (the Exner integration provides only the Newton initial guess).
+The reference atmosphere uses level-local moist constants
 ``Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ``, ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ``, ``κᵐ = Rᵐ/cᵖᵐ``, with the dry case
 recovered exactly when ``qᵛ ≡ 0``. Enforcing the discrete balance is essential for
 reducing the truncation error in the vertical momentum equation (``-∂p/∂z - gρ``), which
@@ -465,10 +510,29 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, ref_spec, p
             κₖ = Rᵐₖ / cᵖᵐₖ
 
             if k == 1
-                # Evaluate the continuous hydrostatic pressure at the local
-                # physical height (which varies with terrain) rather than
-                # forcing sea-level pressure at every column.
-                pₖ = terrain_hydrostatic_pressure(z_phys, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+                if qᵛᵣ === nothing
+                    pₖ = terrain_hydrostatic_pressure(z_phys, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+                else
+                    z_surface = znode(i, j, 1, grid, c, c, Face())
+                    θ_surface = evaluate_profile(θᵣ, z_surface)
+                    qᵛ_surface = evaluate_profile(qᵛᵣ, z_surface)
+                    qᵈ_surface = 1 - qᵛ_surface
+                    Rᵐ_surface = qᵈ_surface * Rᵈ + qᵛ_surface * Rᵛ
+                    cᵖᵐ_surface = qᵈ_surface * cᵖᵈ + qᵛ_surface * cᵖᵛ
+                    κ_surface = Rᵐ_surface / cᵖᵐ_surface
+
+                    p⁻ = terrain_hydrostatic_pressure(z_surface, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+                    Π_surface = (p⁻ / pˢᵗ)^κ_surface
+                    ρ⁻ = p⁻ / (Rᵐ_surface * θ_surface * Π_surface)
+
+                    # The surface sits at the bottom face; the first cell center is
+                    # half a cell above it, so the surface-to-center balance spans Δzᶜᶜᶜ/2.
+                    Δz = Δzᶜᶜᶜ(i, j, 1, grid) / 2
+                    θ_face = (θₖ + θ_surface) / 2
+                    Πₖ_init = Π_surface - g * Δz / (cᵖᵐₖ * θ_face)
+                    pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
+                    pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ)
+                end
             else
                 z_below = znode(i, j, k - 1, grid, c, c, c)
                 θ_below = evaluate_profile(θᵣ, z_below)
@@ -476,16 +540,7 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, ref_spec, p
                 Δz = Δzᶜᶜᶠ(i, j, k, grid)
                 Πₖ_init = Π⁻ - g * Δz / (cᵖᵐₖ * θ_face)
                 pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
-
-                Aₖ = g * pˢᵗ^κₖ / (2 * Rᵐₖ * θₖ)
-                Cₖ = p⁻ / Δz - g * ρ⁻ / 2
-
-                for _ in 1:5
-                    ρp = pₖ^(-κₖ)
-                    f = pₖ / Δz + Aₖ * pₖ * ρp - Cₖ
-                    f′ = 1 / Δz + Aₖ * (1 - κₖ) * ρp
-                    pₖ = pₖ - f / f′
-                end
+                pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ)
             end
 
             Πₖ = (pₖ / pˢᵗ)^κₖ

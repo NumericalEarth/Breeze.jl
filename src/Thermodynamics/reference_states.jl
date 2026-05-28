@@ -244,6 +244,36 @@ end
 ##### Constructor
 #####
 
+# Dry hydrostatic balance is linear in the Exner function Π = (p / pˢᵗ)^κ,
+# so integrating Π(z) directly avoids repeatedly evaluating the nonlinear EOS.
+function converged_hydrostatic_integral(z, Π₀, dΠdz;
+                                        tolerance = sqrt(eps(float(typeof(Π₀)))),
+                                        initial_steps = 16,
+                                        max_steps = 1 << 16)
+    z == 0 && return Π₀
+
+    integrate(nsteps) = begin
+        dz = z / nsteps
+        Π = Π₀
+        for i in 1:nsteps
+            zᵢ = (i - 0.5) * dz
+            Π += dΠdz(zᵢ) * dz
+        end
+        return Π
+    end
+
+    nsteps = initial_steps
+    Π_coarse = integrate(nsteps)
+    while nsteps < max_steps
+        nsteps *= 2
+        Π_fine = integrate(nsteps)
+        abs(Π_fine - Π_coarse) ≤ tolerance * abs(Π_fine) && return Π_fine
+        Π_coarse = Π_fine
+    end
+
+    return Π_coarse
+end
+
 """
     numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants)
 
@@ -251,26 +281,19 @@ Compute the dry hydrostatic pressure at height ``z`` by numerically integrating
 ``∂p/∂z = -g ρ`` from ``z=0``, where ``ρ = p/(Rᵈ T)`` and ``T = θ(z) (p/pˢᵗ)^κ``.
 
 This function handles non-uniform potential temperature profiles ``θ(z)`` for which
-the closed-form adiabatic solution does not apply.
-Uses 1000 midpoint integration steps.
+the closed-form adiabatic solution does not apply. The integration is carried out in
+the dry Exner function ``Π = (p / pˢᵗ)^κ``, which satisfies the linear equation
+``∂Π/∂z = -g / (cᵖᵈ θ(z))``.
 """
 function numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants)
-    z == 0 && return p₀
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     κ = Rᵈ / cᵖᵈ
     g = constants.gravitational_acceleration
-    nsteps = 1000
-    dz = z / nsteps
-    p = p₀
-    for i in 1:nsteps
-        zᵢ = (i - 0.5) * dz
-        θᵢ = θ_func(zᵢ)
-        Tᵢ = θᵢ * (p / pˢᵗ)^κ
-        ρᵢ = p / (Rᵈ * Tᵢ)
-        p = p - g * ρᵢ * dz
-    end
-    return p
+    Π₀ = (p₀ / pˢᵗ)^κ
+    @inline dΠdz(zᵢ) = -g / (cᵖᵈ * θ_func(zᵢ))
+    Π = converged_hydrostatic_integral(z, Π₀, dΠdz)
+    return pˢᵗ * Π^(1 / κ)
 end
 
 """
