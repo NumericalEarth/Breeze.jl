@@ -49,7 +49,7 @@ jobs:
           - "1.12.6"
         os:
           - ubuntu-latest
-          - macOS-latest
+          - macOS-26
           - windows-latest
         arch:
           - "default"
