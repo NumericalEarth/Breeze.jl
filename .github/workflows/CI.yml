@@ -38,6 +38,9 @@ jobs:
     container:
       image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && format('ghcr.io/numericalearth/breeze-docker-images:test-julia_{0}', matrix.version) ) || '' }}
       options: --gpus=all
+      volumes:
+        # Mount host `/usr/local` so that we can delete some stuff afterwards
+        - /usr/local:/host-usr-local
     strategy:
       fail-fast: false
       matrix:
@@ -67,6 +70,19 @@ jobs:
             arch: "default"
             check-bounds: "auto"
     steps:
+      - name: df before cleanup
+        if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+        run: |
+          df -hT
+      - name: Clean up old CUDA toolkits
+        if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+        # Save storage by deleting old CUDA toolkits, we'll use v13
+        run: |
+          rm -rf /host-usr-local/cuda-12.*
+      - name: df after cleanup
+        if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+        run: |
+          df -hT
       - name: "Check out repository"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: "Install Julia"
@@ -157,6 +173,15 @@ jobs:
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
           julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
+      - name: "Upload Manifest"
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        timeout-minutes: 2
+        with:
+          name: manifest-${{ matrix.version }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.check-bounds }}
+          path: '**/Manifest*.toml'
+          retention-days: 90
+          overwrite: false
       - name: "Upload Reactant MLIR dumps as artifacts"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()

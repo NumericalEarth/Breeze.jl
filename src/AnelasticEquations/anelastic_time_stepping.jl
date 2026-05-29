@@ -26,7 +26,7 @@ Compute the pressure correction for anelastic dynamics by solving the pressure P
 function AtmosphereModels.compute_pressure_correction!(model::AnelasticModel, Δt)
     # Mask immersed velocities
     foreach(mask_immersed_field!, model.momentum)
-    fill_halo_regions!(model.momentum, model.clock, fields(model))
+    fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
 
     dynamics = model.dynamics
     ρŨ = model.momentum
@@ -64,12 +64,13 @@ Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic press
 """
 function AtmosphereModels.make_pressure_correction!(model::AnelasticModel, Δt)
     dynamics = model.dynamics
+    Δt_FT = kernel_time_step(model.architecture, model.grid, Δt)
 
     launch!(model.architecture, model.grid, :xyz,
             _pressure_correct_momentum!,
             model.momentum,
             model.grid,
-            Δt,
+            Δt_FT,
             dynamics.pressure_anomaly,  # kinematic pressure p'/ρᵣ
             dynamics.reference_state.density)
 

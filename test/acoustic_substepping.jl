@@ -215,6 +215,61 @@ for arch in arches
     end
 
     #####
+    ##### Regression for issue #716: nonzero OBC on prognostic momentum must
+    ##### not bleed onto the perturbation halo. Build a model with `Bounded`
+    ##### x-topology and `OpenBoundaryCondition(ρ·U)` on `ρu`, then confirm
+    ##### that (1) the substepper's perturbation field uses topology defaults
+    ##### on the open sides (not the inherited OBC), and (2) a forward step
+    ##### does not produce a `DomainError` from runaway-acoustic amplification
+    ##### at the wall.
+    #####
+
+    @testset "Nonzero momentum OBC: defaults on perturbation, stable step [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
+                               topology=(Bounded, Periodic, Bounded))
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=300)
+
+        # Representative low-altitude ρ·U; exact value is irrelevant — the test
+        # just needs a nonzero scalar `OpenBoundaryCondition` value.
+        ρU = FT(6)
+
+        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρU),
+                                         east = OpenBoundaryCondition(ρU))
+        boundary_conditions = (; ρu = ρu_bcs)
+
+        model = AtmosphereModel(grid;
+                                advection = WENO(),
+                                dynamics,
+                                timestepper = :AcousticRungeKutta3,
+                                boundary_conditions)
+
+        # The perturbation field uses topology defaults — west/east sides on
+        # a Bounded XFaceField default to `nothing`, so the prognostic's
+        # `OpenBoundaryCondition(ρU)` is not propagated.
+        substepper = model.timestepper.substepper
+        ρu_pert_bcs = substepper.momentum_perturbation.u.boundary_conditions
+        @test ρu_pert_bcs.west === nothing
+        @test ρu_pert_bcs.east === nothing
+
+        ref = model.dynamics.reference_state
+        set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
+
+        # One forward step must not throw DomainError (the failure mode of #716)
+        # nor produce NaNs.
+        simulation = Simulation(model; Δt=1, stop_iteration=1, verbose=false)
+        run!(simulation)
+
+        @test model.clock.iteration == 1
+        @test !any(isnan, parent(model.momentum.ρu))
+        @test !any(isnan, parent(model.momentum.ρw))
+        @test !any(isnan, parent(model.dynamics.density))
+    end
+
+    #####
     ##### Test adaptive substep computation
     #####
 
@@ -255,6 +310,15 @@ for arch in arches
             @test N_strict == ceil(Int, 12 * sqrt(1.4 * 287.0 * 300) / (0.25 * 1000))
             @test N_loose  == ceil(Int, 12 * sqrt(1.4 * 287.0 * 300) / (1.0  * 1000))
             @test N_strict > N_default > N_loose
+        end
+
+        @testset "Backward Δt yields same substep count" begin
+            grid = RectilinearGrid(arch; size=(100, 6, 10), halo=(5, 5, 5),
+                                   x=(0, 100kilometers), y=(0, 6kilometers), z=(0, 10kilometers))
+            N_fwd = compute_acoustic_substeps(grid, +12, constants, ν)
+            N_bwd = compute_acoustic_substeps(grid, -12, constants, ν)
+            @test N_fwd ≥ 1
+            @test N_bwd == N_fwd
         end
     end
 
@@ -337,6 +401,64 @@ for arch in arches
         @test !any(isnan, parent(model.momentum.ρu))
         @test !any(isnan, parent(model.momentum.ρw))
         @test !any(isnan, parent(model.dynamics.density))
+    end
+
+    #####
+    ##### Backward integration: one step forward, one step back
+    #####
+    ##### A coarse sanity test that `time_step!(model, -Δt)` does not blow
+    ##### up and produces a state close to the initial one. Exact
+    ##### reversibility is not expected: off-centered Crank–Nicolson, the
+    ##### Klemp 2018 horizontal divergence damping, and WENO upwinding in
+    ##### the slow tendency all introduce one-sided dissipation. We only
+    ##### check that the round-trip stays bounded and finite.
+    #####
+
+    @testset "Backward integration: one step forward and back [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=300)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics,
+                                timestepper=:AcousticRungeKutta3)
+
+        ref = model.dynamics.reference_state
+        # Small smooth θ anomaly so the forward step produces non-trivial
+        # dynamics; the reverse step is what the new code path exercises.
+        Lz = grid.Lz
+        θ₀(x, y, z) = FT(300) + FT(0.1) * sin(π * z / Lz)
+        set!(model; θ=θ₀, u=0, qᵗ=0, ρ=ref.density)
+
+        ρ_init  = Array(parent(model.dynamics.density))
+        ρu_init = Array(parent(model.momentum.ρu))
+        ρw_init = Array(parent(model.momentum.ρw))
+
+        Δt = FT(6)
+        time_step!(model, +Δt)
+        time_step!(model, -Δt)
+
+        # Clock counts both steps but net time returns to zero.
+        @test model.clock.iteration == 2
+        @test model.clock.time ≈ 0 atol=sqrt(eps(FT))
+
+        # Doesn't blow up.
+        for field in (model.dynamics.density, model.momentum.ρu, model.momentum.ρw)
+            @test !any(isnan, parent(field))
+            @test !any(isinf, parent(field))
+        end
+
+        # Round-trip is dissipative but tight: residuals are orders of
+        # magnitude smaller than the disturbance produced by the forward step.
+        # Use a relative tolerance for ρ (which has a meaningful baseline)
+        # and an absolute tolerance for ρu, ρw (which start from rest).
+        ρ_final  = Array(parent(model.dynamics.density))
+        ρu_final = Array(parent(model.momentum.ρu))
+        ρw_final = Array(parent(model.momentum.ρw))
+        @test isapprox(ρ_final,  ρ_init;  rtol=1e-3)
+        @test isapprox(ρu_final, ρu_init; atol=1e-3)
+        @test isapprox(ρw_final, ρw_init; atol=1e-3)
     end
 
     #####
