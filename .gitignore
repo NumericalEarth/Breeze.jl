@@ -53,6 +53,16 @@ validation_output/
 examples/tropical_cyclone_world.md
 examples/atsc-jas-d-18-0357*
 
+# Host-specific MPI/CUDA preferences for examples
+examples/LocalPreferences.toml
+
+# SLURM job logs (per-jobid files) and nsys reports
+examples/*-[0-9]*.out
+examples/*-[0-9]*.err
+examples/nsys_reports/
+probe_*-[0-9]*.out
+probe_*-[0-9]*.err
+
 # Benchmarking output
 *.json
 benchmark_results.md
