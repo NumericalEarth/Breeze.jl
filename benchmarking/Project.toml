@@ -1,7 +1,7 @@
 name = "BreezeBenchmarks"
 uuid = "bf6d035f-d60d-49bd-b9cb-a5154202673a"
-version = "0.1.0"
 authors = ["NumericalEarth organization (github.com/NumericalEarth) and contributors"]
+version = "0.1.0"
 
 [deps]
 AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"

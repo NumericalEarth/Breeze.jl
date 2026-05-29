@@ -116,14 +116,7 @@ function compute_velocities!(model::AtmosphereModel)
     fill_halo_regions!(density, boundary_condition_args(model)...)
     fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
 
-    # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
-    # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by
-    # the trailing `fill_halo_regions!(model.velocities)`), N for Flat.
-    Nx, Ny, Nz = size(grid)
-    TX, TY, TZ = topology(grid)
-    launch!(arch, grid, KernelParameters(1:length(Face(), TX(), Nx),
-                                         1:length(Face(), TY(), Ny),
-                                         1:length(Face(), TZ(), Nz)),
+    launch!(arch, grid, :xyz,
             _compute_velocities!,
             model.velocities.u, model.velocities.v, model.velocities.w,
             model.momentum.ρu,   model.momentum.ρv,   model.momentum.ρw,
