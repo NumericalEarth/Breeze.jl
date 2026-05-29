@@ -60,16 +60,14 @@ jobs:
           # Reactant vs vanilla — compressible_explicit + WENO5 + 1M mixed-phase
           # non-eq microphysics with ice on a PBB grid. Uses --simplified to
           # drop the geostrophic forcing and field-dependent surface drag BCs
-          # (which do not currently materialize on ReactantState). Runs in
-          # Float64 because Reactant's @trace loop trips on the Float32-grid
-          # / Float64-clock mismatch.
+          # (which do not currently materialize on ReactantState).
           - dynamics: 'compressible_explicit'
             microphysics: '1M_MixedNonEquilibrium'
             grid: '256x256x128'
             advection: 'WENO5'
             backend: 'vanilla, reactant'
             topology: 'PBB'
-            extra_flags: '--simplified --float_type=Float64'
+            extra_flags: '--simplified --float_type=Float32'
           # AD: forward+backward via Enzyme reverse-mode through the same
           # @trace checkpointed loop. Reactant-only by construction. No
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
@@ -81,7 +79,7 @@ jobs:
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
-            extra_flags: '--ad --simplified --float_type=Float64 --warmup_steps 1 --time_steps 1'
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 1'
     defaults:
       run:
         shell: bash
@@ -291,5 +289,5 @@ jobs:
           fail-on-alert: false
           # auto-push: true
           auto-push: ${{ github.event_name == 'push' }}
-          max-items-in-chart: 50
+          max-items-in-chart: 1000
           comment-on-alert: true
