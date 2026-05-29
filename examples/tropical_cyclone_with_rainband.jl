@@ -75,11 +75,11 @@ jordan_z_m = [
     20743.0, 22139.0, 23971.0,
 ]
 
-jordan_T_C = [
+jordan_T_K = [
     26.3, 26.0, 23.0, 19.8, 17.3, 14.6, 11.8, 8.6, 5.1, 1.4,
     -2.5, -6.9, -11.9, -17.7, -24.8, -33.2, -43.3, -55.2, -61.5, -67.6,
     -72.2, -73.5, -69.8, -63.9, -60.6, -57.3, -54.0,
-]
+] .+ 273.15
 
 jordan_θ_K = [
     298.0, 299.0, 300.0, 302.0, 304.0, 307.0, 309.0, 312.0, 315.0, 318.0,
@@ -94,17 +94,17 @@ jordan_θ_K = [
 ## because `θ_env`/`T_env`/`p_env` are called host-side during the
 ## balanced-vortex Picard iteration; `set!` evaluates them on the host
 ## before copying the result to GPU, so this works for either backend.
-const sounding_grid = RectilinearGrid(
+sounding_grid = RectilinearGrid(
     size = length(jordan_z_m) - 1, z = jordan_z_m,
     topology = (Flat, Flat, Bounded)
 )
 
-const jordan_θ = ZFaceField(sounding_grid)
-const jordan_T = ZFaceField(sounding_grid)
-const jordan_p = ZFaceField(sounding_grid)
+jordan_θ = ZFaceField(sounding_grid)
+jordan_T = ZFaceField(sounding_grid)
+jordan_p = ZFaceField(sounding_grid)
 
 interior(jordan_θ, 1, 1, :) .= jordan_θ_K
-interior(jordan_T, 1, 1, :) .= jordan_T_C .+ 273.15
+interior(jordan_T, 1, 1, :) .= jordan_T_K
 interior(jordan_p, 1, 1, :) .= jordan_p_mb .* 100
 
 θ_env(z) = Oceananigans.Fields.interpolate(z, jordan_θ)
