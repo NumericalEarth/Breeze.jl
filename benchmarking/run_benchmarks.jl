@@ -144,6 +144,11 @@ function parse_commandline()
             arg_type = Int
             default = 100
 
+        "--ad_time_steps"
+            help = "Number of time steps for AD (forward+backward) benchmark mode"
+            arg_type = Int
+            default = 4
+
         "--warmup_steps"
             help = "Number of warmup time steps (benchmark mode only)"
             arg_type = Int
@@ -340,7 +345,7 @@ function run_benchmarks(args)
 
     # Mode-specific parameters
     Δt = args["dt"]
-    time_steps = args["time_steps"]
+    time_steps = args["ad"] ? args["ad_time_steps"] : args["time_steps"]
     warmup_steps = args["warmup_steps"]
     stop_time = args["stop_time"] * 3600  # Convert hours to seconds
     output_interval = args["output_interval"] * 60  # Convert minutes to seconds
