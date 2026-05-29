@@ -96,9 +96,29 @@ arch  = use_nccl ?
 
 Lx = 642kilometers
 
+## SAM GATE_IDEAL stretched vertical grid, verbatim from PR #397's gate.jl:
+## 50 m near the surface, linearly stretched to 100 m through the troposphere,
+## then to 300 m aloft, model top at 27 km. Produces 181 levels with a clean
+## 50→300 m spacing (no sliver cells). NB: PiecewiseStretchedDiscretization with
+## the same breakpoints gives a *different* 259-level grid with 25 m slivers at
+## each breakpoint, which would throttle the acoustic substep — so we use the
+## canonical GATE construction here.
+function gate_vertical_grid(zᵗ; Δz⁰ = 50, Δzᵖ = 100, Δzᵗ = 300)
+    z₁, z₂, z₃ = 1275, 5100, 18000   # transition heights
+    z_faces = [0.0]
+    z = 0.0
+    while z < zᵗ
+        α = clamp((z - z₁) / (z₂ - z₁), 0, 1)
+        β = clamp((z - z₂) / (z₃ - z₂), 0, 1)
+        Δz = Δz⁰ + α * (Δzᵖ - Δz⁰) + β * (Δzᵗ - Δzᵖ)
+        z = min(z + Δz, zᵗ)
+        push!(z_faces, z)
+    end
+    return z_faces
+end
+
 if vertical_choice == "gate"
-    z_faces = PiecewiseStretchedDiscretization(z  = [0, 1275, 5100, 18000, 27000],
-                                               Δz = [50, 50, 100, 100, 300])
+    z_faces = gate_vertical_grid(27000)
     z_spec = z_faces
     Nz = length(z_faces) - 1
     Lz = z_faces[end]
