@@ -111,6 +111,67 @@ using Breeze: CompressibleDynamics
     end
 end
 
+# Regression test for the moist θₗᵢ→T inversion in the compressible EoS. The
+# diagnostic temperature must invert the liquid-ice potential temperature
+# consistently with Breeze's canonical definition even when condensate is
+# present. The original density-based one-step inversion evaluated the Exner
+# function at the dry pressure and under-heated condensate-laden cells by
+# ≈ (γ-1) ℒqˡ/cᵖᵐ (several K), giving a buoyancy inconsistent with the
+# anelastic core and a ~2.6× weaker moist supercell.
+using Breeze: SaturationAdjustment
+using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, MoistureMassFractions, temperature
+
+@testset "Compressible moist temperature inversion consistency [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    grid = RectilinearGrid(default_arch;
+                           size = (8, 8, 8),
+                           halo = (5, 5, 5),
+                           x = (0, 100),
+                           y = (0, 100),
+                           z = (0, 2000))
+
+    constants = ThermodynamicConstants(FT)
+    pˢᵗ = FT(100000)
+
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=2);
+                                    surface_pressure = FT(100000),
+                                    standard_pressure = pˢᵗ,
+                                    reference_potential_temperature = FT(290))
+
+    model = AtmosphereModel(grid; dynamics,
+                            microphysics = SaturationAdjustment(),
+                            thermodynamic_constants = constants,
+                            timestepper = :AcousticRungeKutta3)
+
+    # Warm, supersaturated initial state so saturation adjustment forms cloud
+    # condensate (which is what exposes the bug; dry/unsaturated cells are exact).
+    set!(model, θ = FT(290), qᵛ = FT(0.025), ρ = model.dynamics.reference_state.density)
+
+    ρ  = Array(interior(model.dynamics.density))
+    p  = Array(interior(model.dynamics.pressure))
+    T  = Array(interior(model.temperature))
+    ρθ = Array(interior(model.formulation.potential_temperature_density))
+    qᵛ = Array(interior(model.microphysical_fields.qᵛ))
+    qˡ = Array(interior(model.microphysical_fields.qˡ))
+    qⁱ = Array(interior(model.microphysical_fields.qⁱ))
+
+    # The test is only meaningful if condensate actually formed.
+    @test maximum(qˡ) > 0
+
+    # For every cell, the diagnosed temperature must equal the canonical inversion
+    # of θₗᵢ = ρθ/ρ at the diagnosed pressure.
+    max_error = zero(FT)
+    for idx in eachindex(T)
+        q = MoistureMassFractions(qᵛ[idx], qˡ[idx], qⁱ[idx])
+        θ = ρθ[idx] / ρ[idx]
+        𝒰 = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, p[idx])
+        max_error = max(max_error, abs(temperature(𝒰, constants) - T[idx]))
+    end
+
+    @test max_error <= FT(1e-3)  # K; pre-fix this is several K in condensate cells
+end
+
 #####
 ##### ThermodynamicFormulations
 #####

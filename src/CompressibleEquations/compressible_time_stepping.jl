@@ -133,17 +133,36 @@ end
     θ = ρθ / ρ
     pˢᵗ = standard_pressure(dynamics)
 
-    # Direct formula: T = θ^γ (ρ Rᵐ / pˢᵗ)^(γ-1)
-    # For moist air with condensate, adjust for latent heat
     qˡ = q.liquid
     qⁱ = q.ice
     ℒˡᵣ = constants.liquid.reference_latent_heat
     ℒⁱᵣ = constants.ice.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q, constants)
+    κ   = Rᵐ / cᵖᵐ
 
-    # T = θ^γ (ρ Rᵐ / pˢᵗ)^(γ-1) + latent heat correction
+    # Dry-adiabatic inversion of θ from the ideal gas law (exact when there is no
+    # condensate): T_dry = θ^γ (ρ Rᵐ / pˢᵗ)^(γ-1), equivalently T_dry = Π θ with
+    # the Exner function Π evaluated at the dry pressure ρ Rᵐ T_dry.
     T_dry = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1)
-    T = T_dry + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
+
+    # Latent-heat coupling for moist air. The liquid-ice potential temperature
+    # satisfies  θ = (T - L) (pˢᵗ/p)^κ  with L = (ℒˡ qˡ + ℒⁱ qⁱ)/cᵖᵐ and the
+    # ideal gas law p = ρ Rᵐ T. Naively adding L to `T_dry` evaluates the Exner
+    # function at the *dry* pressure ρ Rᵐ T_dry instead of the actual pressure
+    # ρ Rᵐ T, which under-heats condensate-laden parcels by ≈ (γ-1) L and yields
+    # a buoyancy inconsistent with the anelastic core (which inverts the same θ
+    # definition exactly). Solving the coupled (T, p) system gives the fixed point
+    #   T = D T^κ + L ,   D ≡ θ (ρ Rᵐ / pˢᵗ)^κ ,
+    # which we iterate to convergence (contraction rate ≈ κ ≈ 0.28). For dry/rest
+    # cells (L = 0) the result is `T_dry` bit-for-bit, preserving the exact
+    # discrete rest atmosphere.
+    L = (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
+    D = θ * (ρ * Rᵐ / pˢᵗ)^κ
+    T = T_dry + L
+    for _ in 1:8
+        T = D * T^κ + L
+    end
+    T = ifelse(L == 0, T_dry, T)
 
     # Ideal gas law: p = ρ Rᵐ T
     p = ρ * Rᵐ * T
