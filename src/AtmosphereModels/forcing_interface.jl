@@ -48,3 +48,34 @@ This function is extended by the `Forcings` module for forcing types that
 require pre-computation (e.g., `SubsidenceForcing` which computes horizontal averages).
 """
 compute_forcing!(forcing) = nothing # Fallback - do nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `true` if `forcing` produces a density-weighted tendency `F_{ρϕ}` directly
+(i.e., already includes the multiplication by `ρ`).
+
+Forcings that return density tendencies must be supplied under their density-weighted
+key (e.g., `ρθ`, `ρu`) rather than the corresponding specific key (`θ`, `u`), because
+the specific-key dispatch wraps user values in `SpecificForcing`, which would multiply
+by `ρ` a second time. This trait is used by `atmosphere_model_forcing` to reject such
+misuses with a clear error.
+
+Defaults to `false`. Extended for `SubsidenceForcing` and `GeostrophicForcing` in the
+`Forcings` module.
+"""
+is_density_tendency_forcing(::Any) = false
+
+"""
+    wrap_specific_forcing(value, density_name)
+
+Wrap `value` so that the kernel-time density factor `ρ` is applied automatically when
+the user supplies a forcing keyed by a specific (per-unit-mass) variable name like
+`θ`, `u`, `qᵉ`. Implemented in the `Forcings` module: constructs a `SpecificForcing`,
+recurses into tuples, and errors if `value` is itself a density-tendency forcing like
+`SubsidenceForcing` (which would double-count `ρ`).
+
+`density_name` is the corresponding density-weighted prognostic name (e.g. `:ρθ`) used
+to produce a helpful error message when the wrap is rejected.
+"""
+function wrap_specific_forcing end

@@ -188,6 +188,7 @@ makedocs(
             "Microphysics" => Any[
                 "Overview" => "developer/microphysics/overview.md",
                 "Example implementation" => "developer/microphysics/example.md",
+                "Fused-kernel implementation" => "developer/microphysics/fused_example.md",
                 "Future improvements" => "developer/microphysics/future_improvements.md",
             ],
         ],
