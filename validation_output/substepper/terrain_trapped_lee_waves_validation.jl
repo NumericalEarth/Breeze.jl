@@ -48,7 +48,7 @@ using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.OutputWriters: JLD2Writer, TimeInterval
 using Oceananigans.Architectures: architecture
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑzᵃᵃᶠ
-using Oceananigans: @kernel, @index
+using Oceananigans.Utils: @kernel, @index
 using Printf
 
 parse_env(::Type{T}, name, default) where T = parse(T, get(ENV, name, string(default)))
