@@ -1,0 +1,11 @@
+Saved-time field comparison summary
+
+rows = 148
+fail_rows = 144
+one_percent_pass = false
+worst_relative_l2_error = 1.0313818112185893
+worst_relative_l2_field = pressure_perturbation
+worst_relative_l2_time = 18000.0
+worst_relative_linf_error = 1.0679846154182675
+worst_relative_linf_field = pressure_perturbation
+worst_relative_linf_time = 11400.0

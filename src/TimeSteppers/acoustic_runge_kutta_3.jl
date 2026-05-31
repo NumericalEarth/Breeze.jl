@@ -15,6 +15,8 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, microphysics_m
 
 using Breeze.CompressibleEquations:
     CompressibleDynamics,
+    TerrainCompressibleDynamics,
+    FlatTerrainCompressibleDynamics,
     AcousticSubstepper,
     WickerSkamarock3,
     stage_fractions,
@@ -245,6 +247,22 @@ end
 #####
 
 function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
+                                                                      <:Any, <:Any, <:AcousticRungeKutta3})
+    sub = model.timestepper.substepper
+    return (u = sub.time_averaged_velocities.u,
+            v = sub.time_averaged_velocities.v,
+            w = sub.time_averaged_velocities.w)
+end
+
+function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:TerrainCompressibleDynamics,
+                                                                      <:Any, <:Any, <:AcousticRungeKutta3})
+    sub = model.timestepper.substepper
+    return (u = sub.time_averaged_velocities.u,
+            v = sub.time_averaged_velocities.v,
+            w = sub.time_averaged_velocities.w)
+end
+
+function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:FlatTerrainCompressibleDynamics,
                                                                       <:Any, <:Any, <:AcousticRungeKutta3})
     sub = model.timestepper.substepper
     return (u = sub.time_averaged_velocities.u,

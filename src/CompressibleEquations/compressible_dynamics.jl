@@ -17,7 +17,7 @@ Fields
 - `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref) or [`ExplicitTimeStepping`](@ref))
 - `reference_state`: Fixed hydrostatically-balanced reference state for base-state pressure correction (`nothing` or [`ExnerReferenceState`](@ref))
 - `terrain_metrics`: [`TerrainMetrics`](@ref) for terrain-following coordinates (or `nothing`)
-- `Ω̃`, `ρΩ̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
+- `w̃`, `ρw̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
 - `terrain_reference_pressure`, `terrain_reference_density`: 3D reference pressure / density for the terrain pressure gradient force (or `nothing`)
 
 The `time_discretization` determines how tendencies are computed and which
@@ -33,8 +33,8 @@ struct CompressibleDynamics{TD, D, P, FT, RS, TM, CV, CM, TRP, TRD}
     surface_pressure :: FT                     # p₀ (mean pressure at the bottom of the atmosphere)
     reference_state :: RS                      # ExnerReferenceState for base-state pressure correction (or Nothing)
     terrain_metrics :: TM                      # TerrainMetrics for terrain-following coordinates (or Nothing)
-    contravariant_vertical_velocity :: CV      # Ω̃ diagnostic field (or Nothing)
-    contravariant_vertical_momentum :: CM      # ρΩ̃ diagnostic field (or Nothing)
+    contravariant_vertical_velocity :: CV      # w̃ diagnostic field (or Nothing)
+    contravariant_vertical_momentum :: CM      # ρw̃ diagnostic field (or Nothing)
     terrain_reference_pressure :: TRP          # 3D reference pressure for terrain PG (or Nothing)
     terrain_reference_density :: TRD           # 3D reference density for terrain buoyancy (or Nothing)
 end

@@ -1,0 +1,31 @@
+#!/bin/bash
+#SBATCH --job-name=breeze-3d-mtn
+#SBATCH --output=/shared/home/greg/Projects/Breeze.jl/validation_output/substepper/terrain_3d_mountain_wave_gpu-%j.log
+#SBATCH --time=02:00:00
+#SBATCH --nodes=1
+#SBATCH --partition=gpu-prod
+#SBATCH --gres=gpu:h100:1
+#SBATCH --mem=64G
+
+set -eu
+echo "=== Node: $(hostname) ==="
+echo "Date: $(date -u)"
+nvidia-smi -L
+
+cd /shared/home/greg/Projects/Breeze.jl
+
+# Production 3D run at high resolution on H100.
+# 200×200×100 = 4M cells, ~3 minutes per acoustic step (CPU) → ~5x faster on H100 → 30-40 min total.
+export SCHAR3D_ARCH=gpu
+export SCHAR3D_NX=200
+export SCHAR3D_NY=200
+export SCHAR3D_NZ=100
+export SCHAR3D_LX=80e3
+export SCHAR3D_LY=80e3
+export SCHAR3D_LZ=25e3
+export SCHAR3D_STOP_SECONDS=3600
+export SCHAR3D_DT=2.0
+export SCHAR3D_SNAPSHOT_INTERVAL=60
+export SCHAR3D_OUTPUT_DIR=validation_output/substepper/terrain_3d_mountain_wave_200x200x100_gpu
+
+julia --project=benchmarking validation_output/substepper/terrain_3d_mountain_wave_validation.jl

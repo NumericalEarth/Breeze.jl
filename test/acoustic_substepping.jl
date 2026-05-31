@@ -41,6 +41,8 @@ as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float
     @test apply_horizontal_pressure_gradient_substep(2, 2)
     @test !apply_horizontal_pressure_gradient_substep(1, 6)
     @test apply_horizontal_pressure_gradient_substep(6, 6)
+    @test apply_horizontal_pressure_gradient_substep(1, 6, true)
+    @test apply_horizontal_pressure_gradient_substep(6, 6, true)
 end
 
 @testset "First acoustic substep retains frozen horizontal pressure gradient" begin
@@ -73,7 +75,7 @@ end
     fill!(ρv′, 0)
 
     launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
-            ρu′, ρv′, grid, FT(0.5), ρθ′, Πᴸ, pᴸ, Gρu, Gρv, γRᵐᴸ, false)
+            ρu′, ρv′, grid, nothing, FT(0.5), ρθ′, Πᴸ, pᴸ, Gρu, Gρv, γRᵐᴸ, false)
 
     @test @allowscalar(ρu′[2, 2, 2]) == -1
     @test @allowscalar(ρv′[2, 2, 2]) == -1.5

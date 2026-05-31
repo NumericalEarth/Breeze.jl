@@ -3,12 +3,12 @@
 #####
 ##### For terrain-following coordinates, three modifications are needed:
 #####
-##### 1. Contravariant vertical velocity Ω̃ replaces w in vertical transport
+##### 1. Contravariant vertical velocity w̃ replaces w in vertical transport
 ##### 2. Horizontal pressure gradient includes terrain correction
-##### 3. Density tendency uses ρΩ̃ instead of ρw
+##### 3. Density tendency uses ρw̃ instead of ρw
 #####
 ##### The contravariant vertical velocity is:
-#####   Ω̃ = w - (∂z/∂x)_ζ · u - (∂z/∂y)_ζ · v
+#####   w̃ = w - (∂z/∂x)_ζ · u - (∂z/∂y)_ζ · v
 #####
 ##### The terrain-corrected horizontal pressure gradient is:
 #####   (∂p/∂x)_z = (∂p/∂x)_ζ - (∂z/∂x)_ζ · (∂p/∂z)
@@ -25,14 +25,19 @@ using Oceananigans: architecture
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
-using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation, SlopeInsideInterpolation
+using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
+                                              SlopeInsideInterpolation,
+                                              TFVDRG, ∂z∂x, ∂z∂y
 
 #####
 ##### Terrain-aware type alias
 #####
 
 const TerrainCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}
+const FlatTerrainMetrics = TerrainMetrics{<:Any, <:Any, <:Any, <:Any, <:Any, Val{true}}
+const FlatTerrainCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:FlatTerrainMetrics}
 const TerrainCompressibleModel = AtmosphereModel{<:TerrainCompressibleDynamics}
+const FlatTerrainCompressibleModel = AtmosphereModel{<:FlatTerrainCompressibleDynamics}
 
 #####
 ##### Compute contravariant vertical velocity and momentum
@@ -41,15 +46,15 @@ const TerrainCompressibleModel = AtmosphereModel{<:TerrainCompressibleDynamics}
 """
 $(TYPEDSIGNATURES)
 
-Compute the contravariant vertical velocity ``\\tilde{\\Omega}`` and
-contravariant vertical momentum ``\\rho \\tilde{\\Omega}`` from the
+Compute the contravariant vertical velocity ``\\tilde{w}`` and
+contravariant vertical momentum ``\\rho \\tilde{w}`` from the
 Cartesian velocity and momentum fields.
 
 The contravariant vertical velocity is the velocity component normal
 to the terrain-following coordinate surfaces:
 
 ```math
-\\tilde{\\Omega} = w - \\left(\\frac{\\partial z}{\\partial x}\\right)_\\zeta u
+\\tilde{w} = w - \\left(\\frac{\\partial z}{\\partial x}\\right)_\\zeta u
                     - \\left(\\frac{\\partial z}{\\partial y}\\right)_\\zeta v
 ```
 """
@@ -57,29 +62,55 @@ function compute_contravariant_velocity!(model::TerrainCompressibleModel)
     grid = model.grid
     arch = architecture(grid)
     dynamics = model.dynamics
-    Ω̃ = dynamics.contravariant_vertical_velocity
-    ρΩ̃ = dynamics.contravariant_vertical_momentum
+    w̃ = dynamics.contravariant_vertical_velocity
+    ρw̃ = dynamics.contravariant_vertical_momentum
 
     launch!(arch, grid, :xyz,
             _compute_contravariant_velocity!,
-            Ω̃, ρΩ̃,
+            w̃, ρw̃,
             grid, model.momentum, dynamics.density,
             dynamics.terrain_metrics)
 
-    # Enforce kinematic BC: Ω̃ = 0 at the terrain surface (bottom face).
+    # Enforce kinematic BC: w̃ = 0 at the terrain surface (bottom face).
     # The ImpenetrableBoundaryCondition sets w = 0 at the bottom, but the
-    # correct terrain BC is Ω̃ = 0 (no flow through the terrain surface).
-    # Since Ω̃ = w - slope·u, having w = 0 gives Ω̃ = -slope·u ≠ 0 which is
-    # a spurious mass flux through the terrain. Setting Ω̃ = 0 directly here
+    # correct terrain BC is w̃ = 0 (no flow through the terrain surface).
+    # Since w̃ = w - slope·u, having w = 0 gives w̃ = -slope·u ≠ 0 which is
+    # a spurious mass flux through the terrain. Setting w̃ = 0 directly here
     # ensures no transport through the bottom boundary.
     # Zero bottom face BEFORE filling halos so the BC propagates correctly.
-    launch!(arch, grid, :xy, _zero_bottom_face!, Ω̃)
-    launch!(arch, grid, :xy, _zero_bottom_face!, ρΩ̃)
+    launch!(arch, grid, :xy, _zero_bottom_face!, w̃)
+    launch!(arch, grid, :xy, _zero_bottom_face!, ρw̃)
 
-    fill_halo_regions!(Ω̃)
-    fill_halo_regions!(ρΩ̃)
+    fill_halo_regions!(w̃)
+    fill_halo_regions!(ρw̃)
 
     return nothing
+end
+
+function compute_contravariant_velocity!(model::FlatTerrainCompressibleModel)
+    grid = model.grid
+    arch = architecture(grid)
+    dynamics = model.dynamics
+    w̃ = dynamics.contravariant_vertical_velocity
+    ρw̃ = dynamics.contravariant_vertical_momentum
+
+    launch!(arch, grid, :xyz,
+            _copy_flat_contravariant_velocity!,
+            w̃, ρw̃,
+            grid, model.velocities.w, model.momentum.ρw)
+
+    fill_halo_regions!(w̃)
+    fill_halo_regions!(ρw̃)
+
+    return nothing
+end
+
+@kernel function _copy_flat_contravariant_velocity!(w̃, ρw̃, grid, w, ρw)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        w̃[i, j, k] = w[i, j, k] * (k > 1)
+        ρw̃[i, j, k] = ρw[i, j, k] * (k > 1)
+    end
 end
 
 @kernel function _zero_bottom_face!(field)
@@ -87,21 +118,14 @@ end
     @inbounds field[i, j, 1] = 0
 end
 
-@kernel function _compute_contravariant_velocity!(Ω̃, ρΩ̃, grid, momentum, density, metrics)
+@kernel function _compute_contravariant_velocity!(w̃, ρw̃, grid, momentum, density, metrics)
     i, j, k = @index(Global, NTuple)
 
-    # Terrain slope decay factor
-    ζ = rnode(k, grid, Face())
-    z_top = metrics.z_top
-    decay = 1 - ζ / z_top
-
-    # Terrain slopes interpolated to (Center, Center) using Oceananigans operators
-    # (handles Flat topologies correctly)
-    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-
-    slope_x = ∂x_h_cc * decay
-    slope_y = ∂y_h_cc * decay
+    # Terrain slopes (∂z/∂x, ∂z/∂y)_ζ at (Center, Center, Face). On a BTF/MVD
+    # grid these come from `metrics` with linear decay; on a terrain-following
+    # coordinate grid they come from the grid operator (formulation decay).
+    slope_x = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid, metrics)
 
     # Momentum interpolated to (Center, Center, Face).
     # ρu is at (Face, Center, Center) → ℑx then ℑz to (Center, Center, Face)
@@ -110,15 +134,15 @@ end
     @inbounds ρw_ccf = momentum.ρw[i, j, k]
 
     # Contravariant vertical momentum (primary quantity)
-    ρΩ̃_ijk = ρw_ccf - slope_x * ρu_ccf - slope_y * ρv_ccf
+    ρw̃_ijk = ρw_ccf - slope_x * ρu_ccf - slope_y * ρv_ccf
 
-    # Diagnose velocity from momentum for discrete consistency: ρ_face · Ω̃ ≡ ρΩ̃
+    # Diagnose velocity from momentum for discrete consistency: ρ_face · w̃ ≡ ρw̃
     ρ_ccf = ℑzᵃᵃᶠ(i, j, k, grid, density)
-    Ω̃_ijk = ρΩ̃_ijk / ρ_ccf
+    w̃_ijk = ρw̃_ijk / ρ_ccf
 
     @inbounds begin
-        Ω̃[i, j, k] = Ω̃_ijk
-        ρΩ̃[i, j, k] = ρΩ̃_ijk
+        w̃[i, j, k] = w̃_ijk
+        ρw̃[i, j, k] = ρw̃_ijk
     end
 end
 
@@ -127,18 +151,820 @@ end
 #####
 
 function AtmosphereModels.transport_velocities(model::TerrainCompressibleModel)
-    Ω̃ = model.dynamics.contravariant_vertical_velocity
+    w̃ = model.dynamics.contravariant_vertical_velocity
     u = model.velocities.u
     v = model.velocities.v
-    return (; u, v, w=Ω̃)
+    return (; u, v, w=w̃)
 end
 
+AtmosphereModels.transport_velocities(model::FlatTerrainCompressibleModel) = model.velocities
+
+function outer_step_start_transport_velocities(model::TerrainCompressibleModel)
+    w̃ = model.dynamics.contravariant_vertical_velocity
+    u = model.velocities.u
+    v = model.velocities.v
+    return (; u, v, w=w̃)
+end
+
+outer_step_start_transport_velocities(model::FlatTerrainCompressibleModel) = model.velocities
+
 function AtmosphereModels.advecting_momentum(model::TerrainCompressibleModel)
-    ρΩ̃ = model.dynamics.contravariant_vertical_momentum
+    ρw̃ = model.dynamics.contravariant_vertical_momentum
     ρu = model.momentum.ρu
     ρv = model.momentum.ρv
-    return (; ρu, ρv, ρw=ρΩ̃)
+    return (; ρu, ρv, ρw=ρw̃)
 end
+
+function AtmosphereModels.advecting_momentum(model::FlatTerrainCompressibleModel)
+    ρu = model.momentum.ρu
+    ρv = model.momentum.ρv
+    ρw = model.momentum.ρw
+    return (; ρu, ρv, ρw)
+end
+
+#####
+##### Terrain-specialized acoustic substep helpers
+#####
+
+function initialize_vertical_momentum_perturbation!(substepper, model::TerrainCompressibleModel, Uᴸ_outer)
+    grid = model.grid
+    arch = architecture(grid)
+    launch!(arch, grid, :xyz, _initialize_terrain_vertical_momentum_perturbation!,
+            substepper.momentum_perturbation.w,
+            Uᴸ_outer.ρu, Uᴸ_outer.ρv, Uᴸ_outer.ρw,
+            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
+            grid, model.dynamics.terrain_metrics)
+    return nothing
+end
+
+@kernel function _initialize_terrain_vertical_momentum_perturbation!(ρw̃′,
+                                                                     ρu_outer, ρv_outer, ρw_outer,
+                                                                     ρu_stage, ρv_stage, ρw_stage,
+                                                                     grid, metrics)
+    i, j, k = @index(Global, NTuple)
+    ρw̃_outer = terrain_vertical_transport_momentum(i, j, k, grid, metrics,
+                                                    ρu_outer, ρv_outer, ρw_outer)
+    ρw̃_stage = terrain_vertical_transport_momentum(i, j, k, grid, metrics,
+                                                    ρu_stage, ρv_stage, ρw_stage)
+    @inbounds ρw̃′[i, j, k] = ρw̃_outer - ρw̃_stage
+end
+
+@inline function acoustic_x_pressure_gradient(i, j, k, grid, dynamics::TerrainCompressibleDynamics, p)
+    return AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
+end
+
+@inline function acoustic_x_pressure_gradient_components(i, j, k, grid,
+                                                         dynamics::TerrainCompressibleDynamics, p)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    return terrain_x_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                  stencil,
+                                                  dynamics.terrain_reference_pressure)
+end
+
+@inline function acoustic_x_pressure_gradient(i, j, k, grid, dynamics::FlatTerrainCompressibleDynamics, p)
+    return ∂xᶠᶜᶜ(i, j, k, grid, p)
+end
+
+@inline function acoustic_y_pressure_gradient(i, j, k, grid, dynamics::TerrainCompressibleDynamics, p)
+    return AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
+end
+
+@inline function acoustic_y_pressure_gradient_components(i, j, k, grid,
+                                                         dynamics::TerrainCompressibleDynamics, p)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    return terrain_y_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                  stencil,
+                                                  dynamics.terrain_reference_pressure)
+end
+
+@inline function acoustic_y_pressure_gradient(i, j, k, grid, dynamics::FlatTerrainCompressibleDynamics, p)
+    return ∂yᶜᶠᶜ(i, j, k, grid, p)
+end
+
+@inline function acoustic_x_linearized_pressure_gradient(i, j, k, grid,
+                                                         dynamics::FlatTerrainCompressibleDynamics,
+                                                         ρθ′, Πᴸ, γRᵐᴸ)
+    return ∂xᶠᶜᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+end
+
+@inline function acoustic_y_linearized_pressure_gradient(i, j, k, grid,
+                                                         dynamics::FlatTerrainCompressibleDynamics,
+                                                         ρθ′, Πᴸ, γRᵐᴸ)
+    return ∂yᶜᶠᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+end
+
+@inline function acoustic_x_linearized_pressure_gradient(i, j, k, grid,
+                                                         dynamics::TerrainCompressibleDynamics,
+                                                         ρθ′, Πᴸ, γRᵐᴸ)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    return terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
+                                                  stencil, ρθ′, Πᴸ, γRᵐᴸ)
+end
+
+@inline function acoustic_x_linearized_pressure_gradient_components(i, j, k, grid,
+                                                                    dynamics::TerrainCompressibleDynamics,
+                                                                    ρθ′, Πᴸ, γRᵐᴸ)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    return terrain_x_linearized_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                             stencil, ρθ′, Πᴸ, γRᵐᴸ)
+end
+
+@inline function acoustic_y_linearized_pressure_gradient(i, j, k, grid,
+                                                         dynamics::TerrainCompressibleDynamics,
+                                                         ρθ′, Πᴸ, γRᵐᴸ)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    return terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
+                                                  stencil, ρθ′, Πᴸ, γRᵐᴸ)
+end
+
+@inline function acoustic_y_linearized_pressure_gradient_components(i, j, k, grid,
+                                                                    dynamics::TerrainCompressibleDynamics,
+                                                                    ρθ′, Πᴸ, γRᵐᴸ)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    return terrain_y_linearized_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                             stencil, ρθ′, Πᴸ, γRᵐᴸ)
+end
+
+@inline function acoustic_x_full_dry_pressure_gradient(i, j, k, grid,
+                                                       dynamics::TerrainCompressibleDynamics,
+                                                       ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    return terrain_x_full_dry_pressure_gradient(i, j, k, grid, dynamics,
+                                                stencil, ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+end
+
+@inline function acoustic_x_full_dry_pressure_gradient_components(i, j, k, grid,
+                                                                  dynamics::TerrainCompressibleDynamics,
+                                                                  ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    return terrain_x_full_dry_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                           stencil, ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+end
+
+@inline function acoustic_y_full_dry_pressure_gradient(i, j, k, grid,
+                                                       dynamics::TerrainCompressibleDynamics,
+                                                       ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    return terrain_y_full_dry_pressure_gradient(i, j, k, grid, dynamics,
+                                                stencil, ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+end
+
+@inline function acoustic_y_full_dry_pressure_gradient_components(i, j, k, grid,
+                                                                  dynamics::TerrainCompressibleDynamics,
+                                                                  ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    return terrain_y_full_dry_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                           stencil, ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+end
+
+@inline reference_exner(i, j, k, pᵣ, pˢᵗ, κ) =
+    @inbounds (pᵣ[i, j, k] / pˢᵗ)^κ
+
+@inline frozen_exner_perturbation(i, j, k, grid, Πᴸ, pᵣ, pˢᵗ, κ) =
+    @inbounds Πᴸ[i, j, k] - reference_exner(i, j, k, pᵣ, pˢᵗ, κ)
+
+@inline function linearized_exner_perturbation(i, j, k, grid,
+                                               ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                                               γRᵐᴸ, κ, cᵖᵈ)
+    @inbounds begin
+        p′ = linearized_pressure_perturbation(i, j, k, grid, ρθ′, Πᴸ, γRᵐᴸ)
+        return p′ / (ρᴸ[i, j, k] * cᵖᵈ * θᴸ[i, j, k])
+    end
+end
+
+@inline function terrain_slope_x_ccf(i, j, k, grid, metrics)
+    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
+    ζ = rnode(k, grid, Face())
+    return ∂x_h_cc * (1 - ζ / metrics.z_top)
+end
+
+@inline function terrain_slope_y_ccf(i, j, k, grid, metrics)
+    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
+    ζ = rnode(k, grid, Face())
+    return ∂y_h_cc * (1 - ζ / metrics.z_top)
+end
+
+# On a TerrainFollowingVerticalDiscretization grid the coordinate owns the
+# slope: take (∂z/∂x)_ζ from the grid operator (which carries the formulation's
+# decay — linear for LinearDecay, sinh for SLEVE) and interpolate the x-face
+# value to (Center, Center) at the z-face. The `metrics` argument is ignored;
+# σ and the slope come from the one coordinate map, so they cannot disagree.
+# Use Oceananigans' stagger interpolators (`ℑxᶜᵃᵃ`/`ℑyᵃᶜᵃ`) instead of a
+# manual `(idx, idx+1)/2` average: those handle Flat dimensions correctly.
+# The naive form reads `∂z∂y(i, j+1, …)` which is out-of-bounds on a Flat-y
+# grid (Ny = 1, no y halo) and returns uninitialised memory — which then
+# propagates as NaN through `compute_contravariant_velocity!` and the rest
+# of the substep. `ℑyᵃᶜᵃ` on a Flat-y grid collapses to a no-op, matching
+# the MVD `terrain_slope_y_ccf` path that uses `ℑyᵃᶜᵃ(metrics.∂y_h)`.
+@inline terrain_slope_x_ccf(i, j, k, grid::TFVDRG, metrics) =
+    ℑxᶜᵃᵃ(i, j, k, grid, ∂z∂x, Face())
+
+@inline terrain_slope_y_ccf(i, j, k, grid::TFVDRG, metrics) =
+    ℑyᵃᶜᵃ(i, j, k, grid, ∂z∂y, Face())
+
+@inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics, p)
+    metrics = dynamics.terrain_metrics
+    slope_x = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid, metrics)
+    ∂x_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, acoustic_x_pressure_gradient, dynamics, p)
+    ∂y_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, acoustic_y_pressure_gradient, dynamics, p)
+    return slope_x * ∂x_p_ccf + slope_y * ∂y_p_ccf
+end
+
+@inline function terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
+                                                                            dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    metrics = dynamics.terrain_metrics
+    slope_x = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid, metrics)
+    ∂x_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, acoustic_x_linearized_pressure_gradient,
+                       dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    ∂y_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, acoustic_y_linearized_pressure_gradient,
+                       dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    return slope_x * ∂x_p′_ccf + slope_y * ∂y_p′_ccf
+end
+
+@inline function acoustic_z_linearized_pressure_gradient(i, j, k, grid,
+                                                         dynamics::TerrainCompressibleDynamics,
+                                                         ρθ′, Πᴸ, γRᵐᴸ)
+    ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+    correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
+                                                                            dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    return ∂z_p′ - correction
+end
+
+@inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
+                                                        ::SlopeOutsideInterpolation,
+                                                        ρθ′, Πᴸ, γRᵐᴸ)
+    return ∂xᶠᶜᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+end
+
+@inline function terrain_x_linearized_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                                   stencil::SlopeOutsideInterpolation,
+                                                                   ρθ′, Πᴸ, γRᵐᴸ)
+    gradient = terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
+                                                      stencil, ρθ′, Πᴸ, γRᵐᴸ)
+    return gradient, zero(grid)
+end
+
+@inline function terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
+                                                        ::SlopeOutsideInterpolation,
+                                                        ρθ′, Πᴸ, γRᵐᴸ)
+    return ∂yᶜᶠᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+end
+
+@inline function terrain_y_linearized_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                                   stencil::SlopeOutsideInterpolation,
+                                                                   ρθ′, Πᴸ, γRᵐᴸ)
+    gradient = terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
+                                                      stencil, ρθ′, Πᴸ, γRᵐᴸ)
+    return gradient, zero(grid)
+end
+
+@inline function terrain_x_full_dry_pressure_gradient(i, j, k, grid, dynamics,
+                                                      ::SlopeOutsideInterpolation,
+                                                      ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    pᵣ = dynamics.terrain_reference_pressure
+    return ∂xᶠᶜᶜ(i, j, k, grid, full_dry_acoustic_pressure_perturbation,
+                 ρθ′, ρᴸ, θᴸ, pᵣ, pˢᵗ, κ, cᵖᵈ)
+end
+
+@inline function terrain_x_full_dry_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                                 stencil::SlopeOutsideInterpolation,
+                                                                 ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    gradient = terrain_x_full_dry_pressure_gradient(i, j, k, grid, dynamics,
+                                                    stencil, ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    return gradient, zero(grid)
+end
+
+@inline function terrain_y_full_dry_pressure_gradient(i, j, k, grid, dynamics,
+                                                      ::SlopeOutsideInterpolation,
+                                                      ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    pᵣ = dynamics.terrain_reference_pressure
+    return ∂yᶜᶠᶜ(i, j, k, grid, full_dry_acoustic_pressure_perturbation,
+                 ρθ′, ρᴸ, θᴸ, pᵣ, pˢᵗ, κ, cᵖᵈ)
+end
+
+@inline function terrain_y_full_dry_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                                 stencil::SlopeOutsideInterpolation,
+                                                                 ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    gradient = terrain_y_full_dry_pressure_gradient(i, j, k, grid, dynamics,
+                                                    stencil, ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    return gradient, zero(grid)
+end
+
+@inline function slope_x_times_∂z_linearized_pressure(i, j, k, grid, metrics, ρθ′, Πᴸ, γRᵐᴸ)
+    slope = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+end
+
+@inline function slope_x_times_∂z_full_dry_pressure(i, j, k, grid, metrics,
+                                                    ρθ′, ρᴸ, θᴸ, pᵣ, pˢᵗ, κ, cᵖᵈ)
+    slope = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, full_dry_acoustic_pressure_perturbation,
+                          ρθ′, ρᴸ, θᴸ, pᵣ, pˢᵗ, κ, cᵖᵈ)
+end
+
+@inline function slope_y_times_∂z_linearized_pressure(i, j, k, grid, metrics, ρθ′, Πᴸ, γRᵐᴸ)
+    slope = terrain_slope_y_ccf(i, j, k, grid, metrics)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+end
+
+@inline function slope_y_times_∂z_full_dry_pressure(i, j, k, grid, metrics,
+                                                    ρθ′, ρᴸ, θᴸ, pᵣ, pˢᵗ, κ, cᵖᵈ)
+    slope = terrain_slope_y_ccf(i, j, k, grid, metrics)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, full_dry_acoustic_pressure_perturbation,
+                          ρθ′, ρᴸ, θᴸ, pᵣ, pˢᵗ, κ, cᵖᵈ)
+end
+
+@inline function slope_x_times_∂z_frozen_exner(i, j, k, grid, metrics, Πᴸ, pᵣ, pˢᵗ, κ)
+    slope = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, frozen_exner_perturbation, Πᴸ, pᵣ, pˢᵗ, κ)
+end
+
+@inline function slope_y_times_∂z_frozen_exner(i, j, k, grid, metrics, Πᴸ, pᵣ, pˢᵗ, κ)
+    slope = terrain_slope_y_ccf(i, j, k, grid, metrics)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, frozen_exner_perturbation, Πᴸ, pᵣ, pˢᵗ, κ)
+end
+
+@inline function slope_x_times_∂z_linearized_exner(i, j, k, grid, metrics,
+                                                   ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                                                   γRᵐᴸ, κ, cᵖᵈ)
+    slope = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, linearized_exner_perturbation,
+                          ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ, γRᵐᴸ, κ, cᵖᵈ)
+end
+
+@inline function slope_y_times_∂z_linearized_exner(i, j, k, grid, metrics,
+                                                   ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                                                   γRᵐᴸ, κ, cᵖᵈ)
+    slope = terrain_slope_y_ccf(i, j, k, grid, metrics)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, linearized_exner_perturbation,
+                          ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ, γRᵐᴸ, κ, cᵖᵈ)
+end
+
+@inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
+                                                        ::SlopeInsideInterpolation,
+                                                        ρθ′, Πᴸ, γRᵐᴸ)
+    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ) *
+            Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
+                       slope_x_times_∂z_linearized_pressure,
+                       dynamics.terrain_metrics, ρθ′, Πᴸ, γRᵐᴸ)
+    return ∂x_p′ - correction
+end
+
+@inline function terrain_x_linearized_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                                   ::SlopeInsideInterpolation,
+                                                                   ρθ′, Πᴸ, γRᵐᴸ)
+    horizontal_gradient =
+        δxᶠᶜᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ) *
+        Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
+                       slope_x_times_∂z_linearized_pressure,
+                       dynamics.terrain_metrics, ρθ′, Πᴸ, γRᵐᴸ)
+    return horizontal_gradient, -correction
+end
+
+@inline function terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
+                                                        ::SlopeInsideInterpolation,
+                                                        ρθ′, Πᴸ, γRᵐᴸ)
+    ∂y_p′ = δyᶜᶠᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ) *
+            Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
+                       slope_y_times_∂z_linearized_pressure,
+                       dynamics.terrain_metrics, ρθ′, Πᴸ, γRᵐᴸ)
+    return ∂y_p′ - correction
+end
+
+@inline function terrain_y_linearized_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                                   ::SlopeInsideInterpolation,
+                                                                   ρθ′, Πᴸ, γRᵐᴸ)
+    horizontal_gradient =
+        δyᶜᶠᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ) *
+        Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
+                       slope_y_times_∂z_linearized_pressure,
+                       dynamics.terrain_metrics, ρθ′, Πᴸ, γRᵐᴸ)
+    return horizontal_gradient, -correction
+end
+
+@inline function terrain_x_full_dry_pressure_gradient(i, j, k, grid, dynamics,
+                                                      ::SlopeInsideInterpolation,
+                                                      ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    horizontal_gradient =
+        δxᶠᶜᶜ(i, j, k, grid, full_dry_acoustic_pressure_perturbation,
+              ρθ′, ρᴸ, θᴸ, dynamics.terrain_reference_pressure, pˢᵗ, κ, cᵖᵈ) *
+        Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
+                       slope_x_times_∂z_full_dry_pressure,
+                       dynamics.terrain_metrics, ρθ′, ρᴸ, θᴸ,
+                       dynamics.terrain_reference_pressure, pˢᵗ, κ, cᵖᵈ)
+    return horizontal_gradient - correction
+end
+
+@inline function terrain_x_full_dry_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                                 ::SlopeInsideInterpolation,
+                                                                 ρθ′, ρᴸ, θᴸ,
+                                                                 pˢᵗ, κ, cᵖᵈ)
+    horizontal_gradient =
+        δxᶠᶜᶜ(i, j, k, grid, full_dry_acoustic_pressure_perturbation,
+              ρθ′, ρᴸ, θᴸ, dynamics.terrain_reference_pressure, pˢᵗ, κ, cᵖᵈ) *
+        Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
+                       slope_x_times_∂z_full_dry_pressure,
+                       dynamics.terrain_metrics, ρθ′, ρᴸ, θᴸ,
+                       dynamics.terrain_reference_pressure, pˢᵗ, κ, cᵖᵈ)
+    return horizontal_gradient, -correction
+end
+
+@inline function terrain_y_full_dry_pressure_gradient(i, j, k, grid, dynamics,
+                                                      ::SlopeInsideInterpolation,
+                                                      ρθ′, ρᴸ, θᴸ, pˢᵗ, κ, cᵖᵈ)
+    horizontal_gradient =
+        δyᶜᶠᶜ(i, j, k, grid, full_dry_acoustic_pressure_perturbation,
+              ρθ′, ρᴸ, θᴸ, dynamics.terrain_reference_pressure, pˢᵗ, κ, cᵖᵈ) *
+        Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
+                       slope_y_times_∂z_full_dry_pressure,
+                       dynamics.terrain_metrics, ρθ′, ρᴸ, θᴸ,
+                       dynamics.terrain_reference_pressure, pˢᵗ, κ, cᵖᵈ)
+    return horizontal_gradient - correction
+end
+
+@inline function terrain_y_full_dry_pressure_gradient_components(i, j, k, grid, dynamics,
+                                                                 ::SlopeInsideInterpolation,
+                                                                 ρθ′, ρᴸ, θᴸ,
+                                                                 pˢᵗ, κ, cᵖᵈ)
+    horizontal_gradient =
+        δyᶜᶠᶜ(i, j, k, grid, full_dry_acoustic_pressure_perturbation,
+              ρθ′, ρᴸ, θᴸ, dynamics.terrain_reference_pressure, pˢᵗ, κ, cᵖᵈ) *
+        Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
+                       slope_y_times_∂z_full_dry_pressure,
+                       dynamics.terrain_metrics, ρθ′, ρᴸ, θᴸ,
+                       dynamics.terrain_reference_pressure, pˢᵗ, κ, cᵖᵈ)
+    return horizontal_gradient, -correction
+end
+
+@inline function terrain_x_frozen_exner_gradient(i, j, k, grid, dynamics,
+                                                 ::SlopeOutsideInterpolation,
+                                                 Πᴸ, pᵣ, pˢᵗ, κ)
+    return ∂xᶠᶜᶜ(i, j, k, grid, frozen_exner_perturbation, Πᴸ, pᵣ, pˢᵗ, κ)
+end
+
+@inline function terrain_x_frozen_exner_gradient_components(i, j, k, grid, dynamics,
+                                                            stencil::SlopeOutsideInterpolation,
+                                                            Πᴸ, pᵣ, pˢᵗ, κ)
+    gradient = terrain_x_frozen_exner_gradient(i, j, k, grid, dynamics,
+                                               stencil, Πᴸ, pᵣ, pˢᵗ, κ)
+    return gradient, zero(grid)
+end
+
+@inline function terrain_y_frozen_exner_gradient(i, j, k, grid, dynamics,
+                                                 ::SlopeOutsideInterpolation,
+                                                 Πᴸ, pᵣ, pˢᵗ, κ)
+    return ∂yᶜᶠᶜ(i, j, k, grid, frozen_exner_perturbation, Πᴸ, pᵣ, pˢᵗ, κ)
+end
+
+@inline function terrain_y_frozen_exner_gradient_components(i, j, k, grid, dynamics,
+                                                            stencil::SlopeOutsideInterpolation,
+                                                            Πᴸ, pᵣ, pˢᵗ, κ)
+    gradient = terrain_y_frozen_exner_gradient(i, j, k, grid, dynamics,
+                                               stencil, Πᴸ, pᵣ, pˢᵗ, κ)
+    return gradient, zero(grid)
+end
+
+@inline function terrain_x_linearized_exner_gradient(i, j, k, grid, dynamics,
+                                                     ::SlopeOutsideInterpolation,
+                                                     ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                                                     γRᵐᴸ, κ, cᵖᵈ)
+    return ∂xᶠᶜᶜ(i, j, k, grid, linearized_exner_perturbation,
+                 ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ, γRᵐᴸ, κ, cᵖᵈ)
+end
+
+@inline function terrain_x_linearized_exner_gradient_components(i, j, k, grid, dynamics,
+                                                                stencil::SlopeOutsideInterpolation,
+                                                                ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                                                                γRᵐᴸ, κ, cᵖᵈ)
+    gradient = terrain_x_linearized_exner_gradient(i, j, k, grid, dynamics,
+                                                   stencil, ρθ′, Πᴸ, pᴸ, ρᴸ,
+                                                   θᴸ, γRᵐᴸ, κ, cᵖᵈ)
+    return gradient, zero(grid)
+end
+
+@inline function terrain_y_linearized_exner_gradient(i, j, k, grid, dynamics,
+                                                     ::SlopeOutsideInterpolation,
+                                                     ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                                                     γRᵐᴸ, κ, cᵖᵈ)
+    return ∂yᶜᶠᶜ(i, j, k, grid, linearized_exner_perturbation,
+                 ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ, γRᵐᴸ, κ, cᵖᵈ)
+end
+
+@inline function terrain_y_linearized_exner_gradient_components(i, j, k, grid, dynamics,
+                                                                stencil::SlopeOutsideInterpolation,
+                                                                ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                                                                γRᵐᴸ, κ, cᵖᵈ)
+    gradient = terrain_y_linearized_exner_gradient(i, j, k, grid, dynamics,
+                                                   stencil, ρθ′, Πᴸ, pᴸ, ρᴸ,
+                                                   θᴸ, γRᵐᴸ, κ, cᵖᵈ)
+    return gradient, zero(grid)
+end
+
+@inline function terrain_x_frozen_exner_gradient(i, j, k, grid, dynamics,
+                                                 ::SlopeInsideInterpolation,
+                                                 Πᴸ, pᵣ, pˢᵗ, κ)
+    ∂x_Πᴸ = δxᶠᶜᶜ(i, j, k, grid, frozen_exner_perturbation, Πᴸ, pᵣ, pˢᵗ, κ) *
+            Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
+                       slope_x_times_∂z_frozen_exner,
+                       dynamics.terrain_metrics, Πᴸ, pᵣ, pˢᵗ, κ)
+    return ∂x_Πᴸ - correction
+end
+
+@inline function terrain_x_frozen_exner_gradient_components(i, j, k, grid, dynamics,
+                                                            ::SlopeInsideInterpolation,
+                                                            Πᴸ, pᵣ, pˢᵗ, κ)
+    horizontal_gradient =
+        δxᶠᶜᶜ(i, j, k, grid, frozen_exner_perturbation, Πᴸ, pᵣ, pˢᵗ, κ) *
+        Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
+                       slope_x_times_∂z_frozen_exner,
+                       dynamics.terrain_metrics, Πᴸ, pᵣ, pˢᵗ, κ)
+    return horizontal_gradient, -correction
+end
+
+@inline function terrain_y_frozen_exner_gradient(i, j, k, grid, dynamics,
+                                                 ::SlopeInsideInterpolation,
+                                                 Πᴸ, pᵣ, pˢᵗ, κ)
+    ∂y_Πᴸ = δyᶜᶠᶜ(i, j, k, grid, frozen_exner_perturbation, Πᴸ, pᵣ, pˢᵗ, κ) *
+            Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
+                       slope_y_times_∂z_frozen_exner,
+                       dynamics.terrain_metrics, Πᴸ, pᵣ, pˢᵗ, κ)
+    return ∂y_Πᴸ - correction
+end
+
+@inline function terrain_y_frozen_exner_gradient_components(i, j, k, grid, dynamics,
+                                                            ::SlopeInsideInterpolation,
+                                                            Πᴸ, pᵣ, pˢᵗ, κ)
+    horizontal_gradient =
+        δyᶜᶠᶜ(i, j, k, grid, frozen_exner_perturbation, Πᴸ, pᵣ, pˢᵗ, κ) *
+        Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
+                       slope_y_times_∂z_frozen_exner,
+                       dynamics.terrain_metrics, Πᴸ, pᵣ, pˢᵗ, κ)
+    return horizontal_gradient, -correction
+end
+
+@inline function terrain_x_linearized_exner_gradient(i, j, k, grid, dynamics,
+                                                     ::SlopeInsideInterpolation,
+                                                     ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                                                     γRᵐᴸ, κ, cᵖᵈ)
+    ∂x_Π′ = δxᶠᶜᶜ(i, j, k, grid, linearized_exner_perturbation,
+                  ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ, γRᵐᴸ, κ, cᵖᵈ) *
+            Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
+                       slope_x_times_∂z_linearized_exner,
+                       dynamics.terrain_metrics, ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                       γRᵐᴸ, κ, cᵖᵈ)
+    return ∂x_Π′ - correction
+end
+
+@inline function terrain_x_linearized_exner_gradient_components(i, j, k, grid, dynamics,
+                                                                ::SlopeInsideInterpolation,
+                                                                ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                                                                γRᵐᴸ, κ, cᵖᵈ)
+    horizontal_gradient =
+        δxᶠᶜᶜ(i, j, k, grid, linearized_exner_perturbation,
+              ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ, γRᵐᴸ, κ, cᵖᵈ) *
+        Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
+                       slope_x_times_∂z_linearized_exner,
+                       dynamics.terrain_metrics, ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                       γRᵐᴸ, κ, cᵖᵈ)
+    return horizontal_gradient, -correction
+end
+
+@inline function terrain_y_linearized_exner_gradient(i, j, k, grid, dynamics,
+                                                     ::SlopeInsideInterpolation,
+                                                     ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                                                     γRᵐᴸ, κ, cᵖᵈ)
+    ∂y_Π′ = δyᶜᶠᶜ(i, j, k, grid, linearized_exner_perturbation,
+                  ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ, γRᵐᴸ, κ, cᵖᵈ) *
+            Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
+                       slope_y_times_∂z_linearized_exner,
+                       dynamics.terrain_metrics, ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                       γRᵐᴸ, κ, cᵖᵈ)
+    return ∂y_Π′ - correction
+end
+
+@inline function terrain_y_linearized_exner_gradient_components(i, j, k, grid, dynamics,
+                                                                ::SlopeInsideInterpolation,
+                                                                ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                                                                γRᵐᴸ, κ, cᵖᵈ)
+    horizontal_gradient =
+        δyᶜᶠᶜ(i, j, k, grid, linearized_exner_perturbation,
+              ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ, γRᵐᴸ, κ, cᵖᵈ) *
+        Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
+                       slope_y_times_∂z_linearized_exner,
+                       dynamics.terrain_metrics, ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ,
+                       γRᵐᴸ, κ, cᵖᵈ)
+    return horizontal_gradient, -correction
+end
+
+@inline function cm1_style_x_exner_pressure_acceleration_components(i, j, k, grid,
+                                                                    dynamics::TerrainCompressibleDynamics,
+                                                                    ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ, γRᵐᴸ,
+                                                                    apply_pressure_gradient,
+                                                                    pˢᵗ, κ, cᵖᵈ)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    pᵣ = dynamics.terrain_reference_pressure
+    frozen_horizontal_gradient, frozen_terrain_gradient =
+        terrain_x_frozen_exner_gradient_components(i, j, k, grid, dynamics,
+                                                   stencil, Πᴸ, pᵣ, pˢᵗ, κ)
+    perturbation_horizontal_gradient, perturbation_terrain_gradient =
+        terrain_x_linearized_exner_gradient_components(i, j, k, grid, dynamics,
+                                                       stencil, ρθ′, Πᴸ, pᴸ, ρᴸ,
+                                                       θᴸ, γRᵐᴸ, κ, cᵖᵈ)
+    perturbation_factor = ifelse(apply_pressure_gradient, one(cᵖᵈ), zero(cᵖᵈ))
+    θ_face = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
+    frozen_gradient = frozen_horizontal_gradient + frozen_terrain_gradient
+    perturbation_gradient =
+        perturbation_factor * (perturbation_horizontal_gradient + perturbation_terrain_gradient)
+    frozen_acceleration = -cᵖᵈ * θ_face * frozen_gradient
+    perturbation_acceleration = -cᵖᵈ * θ_face * perturbation_gradient
+    frozen_horizontal_acceleration = -cᵖᵈ * θ_face * frozen_horizontal_gradient
+    frozen_terrain_acceleration = -cᵖᵈ * θ_face * frozen_terrain_gradient
+    perturbation_horizontal_acceleration =
+        -cᵖᵈ * θ_face * perturbation_factor * perturbation_horizontal_gradient
+    perturbation_terrain_acceleration =
+        -cᵖᵈ * θ_face * perturbation_factor * perturbation_terrain_gradient
+    horizontal_acceleration =
+        frozen_horizontal_acceleration + perturbation_horizontal_acceleration
+    terrain_acceleration =
+        frozen_terrain_acceleration + perturbation_terrain_acceleration
+    return frozen_acceleration + perturbation_acceleration,
+           frozen_acceleration, perturbation_acceleration,
+           horizontal_acceleration, terrain_acceleration,
+           frozen_horizontal_acceleration, frozen_terrain_acceleration,
+           perturbation_horizontal_acceleration, perturbation_terrain_acceleration
+end
+
+@inline function cm1_style_y_exner_pressure_acceleration_components(i, j, k, grid,
+                                                                    dynamics::TerrainCompressibleDynamics,
+                                                                    ρθ′, Πᴸ, pᴸ, ρᴸ, θᴸ, γRᵐᴸ,
+                                                                    apply_pressure_gradient,
+                                                                    pˢᵗ, κ, cᵖᵈ)
+    stencil = dynamics.terrain_metrics.pressure_gradient_stencil
+    pᵣ = dynamics.terrain_reference_pressure
+    frozen_horizontal_gradient, frozen_terrain_gradient =
+        terrain_y_frozen_exner_gradient_components(i, j, k, grid, dynamics,
+                                                   stencil, Πᴸ, pᵣ, pˢᵗ, κ)
+    perturbation_horizontal_gradient, perturbation_terrain_gradient =
+        terrain_y_linearized_exner_gradient_components(i, j, k, grid, dynamics,
+                                                       stencil, ρθ′, Πᴸ, pᴸ, ρᴸ,
+                                                       θᴸ, γRᵐᴸ, κ, cᵖᵈ)
+    perturbation_factor = ifelse(apply_pressure_gradient, one(cᵖᵈ), zero(cᵖᵈ))
+    θ_face = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+    frozen_gradient = frozen_horizontal_gradient + frozen_terrain_gradient
+    perturbation_gradient =
+        perturbation_factor * (perturbation_horizontal_gradient + perturbation_terrain_gradient)
+    frozen_acceleration = -cᵖᵈ * θ_face * frozen_gradient
+    perturbation_acceleration = -cᵖᵈ * θ_face * perturbation_gradient
+    frozen_horizontal_acceleration = -cᵖᵈ * θ_face * frozen_horizontal_gradient
+    frozen_terrain_acceleration = -cᵖᵈ * θ_face * frozen_terrain_gradient
+    perturbation_horizontal_acceleration =
+        -cᵖᵈ * θ_face * perturbation_factor * perturbation_horizontal_gradient
+    perturbation_terrain_acceleration =
+        -cᵖᵈ * θ_face * perturbation_factor * perturbation_terrain_gradient
+    horizontal_acceleration =
+        frozen_horizontal_acceleration + perturbation_horizontal_acceleration
+    terrain_acceleration =
+        frozen_terrain_acceleration + perturbation_terrain_acceleration
+    return frozen_acceleration + perturbation_acceleration,
+           frozen_acceleration, perturbation_acceleration,
+           horizontal_acceleration, terrain_acceleration,
+           frozen_horizontal_acceleration, frozen_terrain_acceleration,
+           perturbation_horizontal_acceleration, perturbation_terrain_acceleration
+end
+
+@inline function terrain_vertical_transport_momentum(i, j, k, grid, metrics,
+                                                     ρu, ρv, ρw)
+    slope_x = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid, metrics)
+
+    ρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ρu)
+    ρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ρv)
+    @inbounds ρw_ccf = ρw[i, j, k]
+
+    return ρw_ccf - slope_x * ρu_ccf - slope_y * ρv_ccf
+end
+
+@inline function acoustic_vertical_momentum_flux(i, j, k, grid,
+                                                 dynamics::TerrainCompressibleDynamics,
+                                                 ρu′, ρv′, ρw̃′)
+    @inbounds return ρw̃′[i, j, k]
+end
+
+@inline function acoustic_stage_vertical_transport_momentum(i, j, k, grid,
+                                                            dynamics::TerrainCompressibleDynamics,
+                                                            ρu_stage, ρv_stage, ρw_stage)
+    return terrain_vertical_transport_momentum(i, j, k, grid, dynamics.terrain_metrics,
+                                               ρu_stage, ρv_stage, ρw_stage)
+end
+
+@inline function acoustic_stage_vertical_transport_momentum(i, j, k, grid,
+                                                            dynamics::FlatTerrainCompressibleDynamics,
+                                                            ρu_stage, ρv_stage, ρw_stage)
+    @inbounds return ρw_stage[i, j, k]
+end
+
+@inline function acoustic_recovered_vertical_momentum(i, j, k, grid,
+                                                      dynamics::TerrainCompressibleDynamics,
+                                                      ρuᴸ, ρvᴸ, ρwᴸ, ρu′, ρv′, ρw̃′)
+    metrics = dynamics.terrain_metrics
+    slope_x = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid, metrics)
+
+    ρuᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, total_momentum, ρuᴸ, ρu′)
+    ρvᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, total_momentum, ρvᴸ, ρv′)
+    ρw̃_stage = acoustic_stage_vertical_transport_momentum(i, j, k, grid, dynamics,
+                                                           ρuᴸ, ρvᴸ, ρwᴸ)
+    @inbounds ρw̃ᵐ⁺ = ρw̃_stage + ρw̃′[i, j, k]
+
+    return ρw̃ᵐ⁺ + slope_x * ρuᶜᶜᶠ + slope_y * ρvᶜᶜᶠ
+end
+
+@inline function acoustic_recovered_vertical_momentum(i, j, k, grid,
+                                                      dynamics::FlatTerrainCompressibleDynamics,
+                                                      ρuᴸ, ρvᴸ, ρwᴸ, ρu′, ρv′, ρw′)
+    @inbounds return ρwᴸ[i, j, k] + ρw′[i, j, k]
+end
+
+@inline total_momentum(i, j, k, grid, mᴸ, m′) = @inbounds mᴸ[i, j, k] + m′[i, j, k]
+
+function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubstepper,
+                                                   model::TerrainCompressibleModel,
+                                                   β_stage = nothing)
+    grid = model.grid
+    arch = architecture(grid)
+    g = convert(eltype(grid), model.thermodynamic_constants.gravitational_acceleration)
+    Gⁿ = model.timestepper.Gⁿ
+    dynamics = model.dynamics
+    vertical_pressure_tendency_factor =
+        β_stage == 1 ? substepper.final_stage_vertical_pressure_tendency_factor :
+        substepper.vertical_pressure_tendency_factor
+
+    launch!(arch, grid, :xyz, _assemble_terrain_slow_vertical_momentum_tendency!,
+            substepper.slow_vertical_momentum_tendency,
+            Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
+            dynamics.pressure,
+            dynamics.density,
+            dynamics.terrain_reference_pressure,
+            dynamics.terrain_reference_density,
+            grid, dynamics, g, vertical_pressure_tendency_factor)
+
+    return nothing
+end
+
+@kernel function _assemble_terrain_slow_vertical_momentum_tendency!(Gˢρw̃,
+                                                                    Gⁿρu, Gⁿρv, Gⁿρw,
+                                                                    pᴸ, ρᴸ, pᵣ, ρᵣ,
+                                                                    grid, dynamics, g,
+                                                                    vertical_pressure_tendency_factor)
+    i, j, k = @index(Global, NTuple)
+
+    metrics = dynamics.terrain_metrics
+    slope_x = terrain_slope_x_ccf(i, j, k, grid, metrics)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid, metrics)
+    Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, Gⁿρu)
+    Gⁿρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, Gⁿρv)
+
+    ∂z_p′ = terrain_vertical_pressure_gradient(i, j, k, grid, pᴸ, pᵣ)
+    ρ′ᶜᶜᶠ = terrain_vertical_buoyancy_density(i, j, k, grid, ρᴸ, ρᵣ)
+    horizontal_slow_tendency = slope_x * Gⁿρu_ccf + slope_y * Gⁿρv_ccf
+    horizontal_pressure_gradient = terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics, pᴸ)
+
+    @inbounds Gˢρw̃[i, j, k] = (Gⁿρw[i, j, k] -
+                                horizontal_slow_tendency -
+                                vertical_pressure_tendency_factor * ∂z_p′ +
+                                horizontal_pressure_gradient -
+                                g * ρ′ᶜᶜᶠ) * (k > 1)
+end
+
+@inline terrain_vertical_pressure_gradient(i, j, k, grid, p, ::Nothing) =
+    ∂zᶜᶜᶠ(i, j, k, grid, p)
+
+@inline terrain_vertical_pressure_gradient(i, j, k, grid, p, p_ref) =
+    ∂zᶜᶜᶠ(i, j, k, grid, p_perturbation, p, p_ref)
+
+@inline terrain_vertical_buoyancy_density(i, j, k, grid, ρ, ::Nothing) =
+    ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+
+@inline terrain_vertical_buoyancy_density(i, j, k, grid, ρ, ρ_ref) =
+    ℑzᵃᵃᶠ(i, j, k, grid, ρ_perturbation, ρ, ρ_ref)
 
 #####
 ##### Terrain-corrected pressure gradient
@@ -167,6 +993,10 @@ end
     return terrain_x_pressure_gradient(i, j, k, grid, d, stencil, d.terrain_reference_pressure)
 end
 
+@inline function AtmosphereModels.x_pressure_gradient(i, j, k, grid, d::FlatTerrainCompressibleDynamics)
+    return ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
+end
+
 ##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂xᶠᶜᶜ
 ##### which applies the chain-rule correction (∂p/∂x)_z = (∂p/∂x)_ζ - (∂z/∂x)_ζ · (∂p/∂z)
 
@@ -174,8 +1004,22 @@ end
     return ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
 end
 
+@inline function terrain_x_pressure_gradient_components(i, j, k, grid, d,
+                                                        stencil::SlopeOutsideInterpolation,
+                                                        ::Nothing)
+    gradient = terrain_x_pressure_gradient(i, j, k, grid, d, stencil, nothing)
+    return gradient, zero(grid)
+end
+
 @inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, p_ref)
     return ∂xᶠᶜᶜ(i, j, k, grid, perturbation_pressure, d.pressure, p_ref)
+end
+
+@inline function terrain_x_pressure_gradient_components(i, j, k, grid, d,
+                                                        stencil::SlopeOutsideInterpolation,
+                                                        p_ref)
+    gradient = terrain_x_pressure_gradient(i, j, k, grid, d, stencil, p_ref)
+    return gradient, zero(grid)
 end
 
 ##### Slope-inside-interpolation (CM1-like): ℑz(ℑx(slope * ∂z(p')))
@@ -188,16 +1032,12 @@ end
 ##### pre-stored metrics.∂x_h. Both are equivalent for static terrain.
 
 @inline function slope_x_times_∂z(i, j, k, grid, metrics, p)
-    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂x_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_x_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, p)
 end
 
 @inline function slope_x_times_∂z_p′(i, j, k, grid, metrics, p, p_ref)
-    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂x_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_x_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, perturbation_pressure, p, p_ref)
 end
 
@@ -207,10 +1047,30 @@ end
     return ∂x_p - correction
 end
 
+@inline function terrain_x_pressure_gradient_components(i, j, k, grid, d,
+                                                        ::SlopeInsideInterpolation,
+                                                        ::Nothing)
+    horizontal_gradient = δxᶠᶜᶜ(i, j, k, grid, d.pressure) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
+                       slope_x_times_∂z, d.terrain_metrics, d.pressure)
+    return horizontal_gradient, -correction
+end
+
 @inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, p_ref)
     ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, perturbation_pressure, d.pressure, p_ref) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
     correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, slope_x_times_∂z_p′, d.terrain_metrics, d.pressure, p_ref)
     return ∂x_p′ - correction
+end
+
+@inline function terrain_x_pressure_gradient_components(i, j, k, grid, d,
+                                                        ::SlopeInsideInterpolation,
+                                                        p_ref)
+    horizontal_gradient =
+        δxᶠᶜᶜ(i, j, k, grid, perturbation_pressure, d.pressure, p_ref) *
+        Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
+                       slope_x_times_∂z_p′, d.terrain_metrics, d.pressure, p_ref)
+    return horizontal_gradient, -correction
 end
 
 ##### Y-direction pressure gradient
@@ -220,29 +1080,43 @@ end
     return terrain_y_pressure_gradient(i, j, k, grid, d, stencil, d.terrain_reference_pressure)
 end
 
+@inline function AtmosphereModels.y_pressure_gradient(i, j, k, grid, d::FlatTerrainCompressibleDynamics)
+    return ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
+end
+
 ##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂yᶜᶠᶜ
 
 @inline function terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, ::Nothing)
     return ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
 end
 
+@inline function terrain_y_pressure_gradient_components(i, j, k, grid, d,
+                                                        stencil::SlopeOutsideInterpolation,
+                                                        ::Nothing)
+    gradient = terrain_y_pressure_gradient(i, j, k, grid, d, stencil, nothing)
+    return gradient, zero(grid)
+end
+
 @inline function terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, p_ref)
     return ∂yᶜᶠᶜ(i, j, k, grid, perturbation_pressure, d.pressure, p_ref)
+end
+
+@inline function terrain_y_pressure_gradient_components(i, j, k, grid, d,
+                                                        stencil::SlopeOutsideInterpolation,
+                                                        p_ref)
+    gradient = terrain_y_pressure_gradient(i, j, k, grid, d, stencil, p_ref)
+    return gradient, zero(grid)
 end
 
 ##### Slope-inside-interpolation (CM1-like): ℑz(ℑy(slope * ∂z(p')))
 
 @inline function slope_y_times_∂z(i, j, k, grid, metrics, p)
-    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂y_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_y_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, p)
 end
 
 @inline function slope_y_times_∂z_p′(i, j, k, grid, metrics, p, p_ref)
-    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-    ζ = rnode(k, grid, Face())
-    slope = ∂y_h_cc * (1 - ζ / metrics.z_top)
+    slope = terrain_slope_y_ccf(i, j, k, grid, metrics)
     return slope * ∂zᶜᶜᶠ(i, j, k, grid, perturbation_pressure, p, p_ref)
 end
 
@@ -252,10 +1126,30 @@ end
     return ∂y_p - correction
 end
 
+@inline function terrain_y_pressure_gradient_components(i, j, k, grid, d,
+                                                        ::SlopeInsideInterpolation,
+                                                        ::Nothing)
+    horizontal_gradient = δyᶜᶠᶜ(i, j, k, grid, d.pressure) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
+                       slope_y_times_∂z, d.terrain_metrics, d.pressure)
+    return horizontal_gradient, -correction
+end
+
 @inline function terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, p_ref)
     ∂y_p′ = δyᶜᶠᶜ(i, j, k, grid, perturbation_pressure, d.pressure, p_ref) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
     correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, slope_y_times_∂z_p′, d.terrain_metrics, d.pressure, p_ref)
     return ∂y_p′ - correction
+end
+
+@inline function terrain_y_pressure_gradient_components(i, j, k, grid, d,
+                                                        ::SlopeInsideInterpolation,
+                                                        p_ref)
+    horizontal_gradient =
+        δyᶜᶠᶜ(i, j, k, grid, perturbation_pressure, d.pressure, p_ref) *
+        Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
+                       slope_y_times_∂z_p′, d.terrain_metrics, d.pressure, p_ref)
+    return horizontal_gradient, -correction
 end
 
 #####
@@ -266,24 +1160,36 @@ function AtmosphereModels.compute_dynamics_tendency!(model::TerrainCompressibleM
     grid = model.grid
     arch = architecture(grid)
     Gρ = model.timestepper.Gⁿ.ρ
-    ρΩ̃ = model.dynamics.contravariant_vertical_momentum
+    ρw̃ = model.dynamics.contravariant_vertical_momentum
 
-    launch!(arch, grid, :xyz, _compute_terrain_density_tendency!, Gρ, grid, model.momentum, ρΩ̃)
+    launch!(arch, grid, :xyz, _compute_terrain_density_tendency!, Gρ, grid, model.momentum, ρw̃)
 
     return nothing
 end
 
-@kernel function _compute_terrain_density_tendency!(Gρ, grid, momentum, ρΩ̃)
+function AtmosphereModels.compute_dynamics_tendency!(model::FlatTerrainCompressibleModel)
+    grid = model.grid
+    arch = architecture(grid)
+    Gρ = model.timestepper.Gⁿ.ρ
+    momentum = model.momentum
+    td = model.dynamics.time_discretization
+
+    launch!(arch, grid, :xyz, _compute_density_tendency!, Gρ, grid, momentum, td)
+
+    return nothing
+end
+
+@kernel function _compute_terrain_density_tendency!(Gρ, grid, momentum, ρw̃)
     i, j, k = @index(Global, NTuple)
-    # Use ρΩ̃ (contravariant momentum) for vertical transport instead of ρw
-    @inbounds Gρ[i, j, k] = - divᶜᶜᶜ(i, j, k, grid, momentum.ρu, momentum.ρv, ρΩ̃)
+    # Use ρw̃ (contravariant momentum) for vertical transport instead of ρw
+    @inbounds Gρ[i, j, k] = - divᶜᶜᶜ(i, j, k, grid, momentum.ρu, momentum.ρv, ρw̃)
 end
 
 #####
-##### Hook into auxiliary variable computation to compute Ω̃ and ρΩ̃
+##### Hook into auxiliary variable computation to compute w̃ and ρw̃
 #####
 
-function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::TerrainCompressibleModel)
+function compute_terrain_temperature_and_pressure!(model::TerrainCompressibleModel)
     grid = model.grid
     arch = architecture(grid)
     dynamics = model.dynamics
@@ -309,9 +1215,21 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::TerrainCo
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(dynamics.pressure)
 
+    return nothing
+end
+
+function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::TerrainCompressibleModel)
+    compute_terrain_temperature_and_pressure!(model)
+
     # Compute contravariant velocity and momentum for terrain transport
     compute_contravariant_velocity!(model)
 
+    return nothing
+end
+
+function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::FlatTerrainCompressibleModel)
+    compute_terrain_temperature_and_pressure!(model)
+    compute_contravariant_velocity!(model)
     return nothing
 end
 
