@@ -76,6 +76,8 @@ default_output_dir = haskey(ENV, "SCRATCH") ? joinpath(ENV["SCRATCH"], "tc_distr
 output_dir      = argval("--output-dir", default_output_dir)
 benchmark_steps = parse(Int,     argval("--benchmark-steps", "0")) # >0: time N steps and exit
 warmup_steps    = parse(Int,     argval("--warmup-steps", "3"))   # warmup steps before benchmark window
+checkpoint_interval = parse(Float64, argval("--checkpoint-interval", "6")) # checkpoint cadence, hours
+restart         = "--restart" in ARGS                             # pick up from latest checkpoint
 benchmark_dt    = parse(Float64, argval("--benchmark-dt", "0.5")) # fixed Δt during benchmark, s
 
 Oceananigans.defaults.FloatType = FT
@@ -585,9 +587,22 @@ simulation.output_writers[:fields] = JLD2Writer(model, outputs;
                                                 schedule = TimeInterval(output_interval * hours),
                                                 overwrite_existing = true)
 
-rank == 0 && @info @sprintf("Running %s stage to %.0f h, 3D output every %.1f h → %s_rank*.jld2",
-                            stage, stop_time_hours, output_interval, output_prefix)
+## Checkpoint the full model state so the (multi-day) integration can span several
+## ≤48 h jobs. At ~2 s/step the default 6 sim-hour cadence is ~12 h wall — safely
+## inside a regular-queue window. `cleanup=true` keeps only the latest checkpoint
+## (full prognostic state is large at production resolution). Restart with `--restart`,
+## which makes run! pick up from the newest checkpoint in output_dir.
+simulation.output_writers[:checkpointer] = Checkpointer(model;
+                                                        schedule = TimeInterval(checkpoint_interval * hours),
+                                                        dir = output_dir,
+                                                        prefix = "tc_$(stage)_checkpoint",
+                                                        cleanup = true,
+                                                        overwrite_existing = true)
 
-run!(simulation)
+rank == 0 && @info @sprintf("Running %s stage to %.0f h, 3D output every %.1f h, checkpoint every %.1f h%s → %s",
+                            stage, stop_time_hours, output_interval, checkpoint_interval,
+                            restart ? " (RESTART)" : "", output_prefix)
+
+run!(simulation; pickup = restart)
 
 rank == 0 && @info "=== Distributed run complete ==="

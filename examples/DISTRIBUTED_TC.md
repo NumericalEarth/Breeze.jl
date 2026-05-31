@@ -105,7 +105,11 @@ NGPUS=60 DX=100 VERTICAL=gate STOP_TIME=24 OUTPUT_INTERVAL=1 \
   examples/distributed_tropical_cyclone.sh
 ```
 
-**3. Heated stage** (after a restart path exists): add `HEATING=1`.
+**2b. Resume after the wall clock (or a crash):** resubmit the *same* command with
+`RESTART=1` — `run!` picks up from the latest `tc_<stage>_checkpoint_*` in `$SCRATCH`.
+Chain these to span the multi-day integration across ≤48 h jobs.
+
+**3. Heated stage:** add `HEATING=1`.
 
 Output lands in `examples/output_tc_distributed/tc_<stage>_dx100m_gate_nz181_rank*.jld2`
 (one file per rank, each holding its x-slab of `u, v, w, T, ρ`). The figure job
@@ -122,6 +126,8 @@ reassembles the slabs and does the azimuthal averaging.
 | `--output-interval` | 1 | 3D snapshot cadence (hours) |
 | `--benchmark-steps` | 0 | >0: time N wizard steps, print projection, exit |
 | `--warmup-steps` | 3 | steps before the benchmark window |
+| `--checkpoint-interval` | 6 | full-state checkpoint cadence (sim-hours) |
+| `--restart` | off | pick up from the latest checkpoint in the output dir |
 | `--heating` | off | enable MN10 rainband heating (else spinup) |
 | `--no-nccl` | (NCCL on) | fall back to plain Cray-MPICH |
 | `--float-type` | Float32 | `Float32` or `Float64` |
@@ -163,8 +169,9 @@ queue limit, so **checkpoint/restart is needed** for the full integration.
 
 ## Known gaps / TODO
 
-- **No checkpoint/restart** yet — required to span the multi-day integration
-  across 24 h jobs. Add an Oceananigans `Checkpointer` + a `--restart` path.
+- **Checkpoint/restart is wired in** (`Checkpointer` every `--checkpoint-interval`
+  sim-hours, `cleanup=true`; resume with `RESTART=1`). Still needs a real multi-job
+  end-to-end test at scale to confirm distributed pickup.
 - Output is per-rank x-slabs; the reassembly/figure job is separate (not in this PR).
 - Δz ≈ 333 m at Nz=75; revisit a stretched vertical grid if upper-level wave
   reflection becomes an issue despite the sponge.

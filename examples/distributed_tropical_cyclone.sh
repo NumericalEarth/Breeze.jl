@@ -68,6 +68,8 @@ OUTPUT_INTERVAL="${OUTPUT_INTERVAL:-1}"
 BENCHMARK_STEPS="${BENCHMARK_STEPS:-0}"
 HEATING="${HEATING:-0}"          # 1 = rainband heating on, 0 = spinup
 NCCL="${NCCL:-1}"                # 1 = NCCL communicator, 0 = MPI
+CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-6}"  # checkpoint cadence, sim-hours
+RESTART="${RESTART:-0}"          # 1 = pick up from latest checkpoint
 
 echo "=========================================="
 echo "Distributed TC rainband -- Perlmutter"
@@ -93,7 +95,9 @@ srun --ntasks="${NGPUS}" --gpu-bind=none \
         --stop-time "${STOP_TIME}" \
         --output-interval "${OUTPUT_INTERVAL}" \
         --benchmark-steps "${BENCHMARK_STEPS}" \
+        --checkpoint-interval "${CHECKPOINT_INTERVAL}" \
         $([ "${HEATING}" = "1" ] && echo "--heating") \
+        $([ "${RESTART}" = "1" ] && echo "--restart") \
         $([ "${NCCL}" = "0" ] && echo "--no-nccl")
 
 rc=$?
