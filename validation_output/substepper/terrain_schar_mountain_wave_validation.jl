@@ -13,7 +13,6 @@
 #   SCHAR_A=5000
 #   SCHAR_LAMBDA=4000
 #   SCHAR_HILL_X_SHIFT=0
-#   SCHAR_TERRAIN_INTERPRETATION=grid
 #   SCHAR_U=10
 #   SCHAR_N=0.01
 #   SCHAR_SPONGE_DEPTH=10000
@@ -78,25 +77,25 @@ using Breeze.TerrainFollowingDiscretization: SlopeInsideInterpolation, SlopeOuts
                                               LinearDecay, SLEVE, materialize_terrain!,
                                               build_terrain_metrics
 using Oceananigans
-using Oceananigans.Grids: MutableVerticalDiscretization, xnode, znode, rnode
+using Oceananigans.Grids: xnode, znode, rnode
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑzᵃᵃᶠ
 using Oceananigans.TimeSteppers: update_state!
-using Oceananigans.Utils: launch!
-using Oceananigans.Architectures: architecture
 using KernelAbstractions: @kernel, @index
 using Breeze.TerrainFollowingDiscretization: ∂z∂x
 using Printf
 
-# Initialize w so the contravariant w̃ = w − slope·u vanishes at t = 0 (the
-# steady terrain-following IC). Uses the grid's own ∂z/∂x operator so the
-# formulation's decay (linear for LinearDecay, sinh for SLEVE) is respected
-# exactly. w_field is at (Center, Center, Face); we evaluate slope at the
-# same stagger as the grid does in `compute_contravariant_velocity!`, and
-# interpolate ρu (at Face, Center, Center) to (Center, Center, Face).
-@kernel function _init_terrain_balanced_w!(ρw, w, ρ, ρu, grid)
-    i, j, k = @index(Global, NTuple)
-    # Slope at (C, C, F) — matches the slope used by terrain_slope_x_ccf
-    # (which is ℑxᶜᵃᵃ over ∂z∂x at z-face). Interpolate ρu → (C, C, F).
+# Initialize w to match CM1's IC: w is exactly zero everywhere except at
+# the bottom face, where the kinematic terrain BC sets w(face k=1) = u · ∂h/∂x
+# (so the flow follows the terrain surface). The interior REST IC (w=0 above
+# the terrain face) is the same one CM1 uses for Schär — the wave develops
+# from the kinematic forcing at the bottom rather than being pre-loaded
+# through the column. Setting w throughout the column with a `b(ζ)` decay
+# (as the old `set!(w = U·∂x_h·(1-z/Lz))` and the previous kernel did) makes
+# Breeze launch with a column of physical w that CM1 doesn't have, which
+# excites a non-physical acoustic mode.
+@kernel function _init_terrain_bottom_face_w!(ρw, w, ρ, ρu, grid)
+    i, j = @index(Global, NTuple)
+    k = 1
     slope_x = ℑxᶜᵃᵃ(i, j, k, grid, ∂z∂x, Oceananigans.Face())
     ρu_ccf  = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ρu)
     @inbounds begin
@@ -124,7 +123,6 @@ const h₀ = parse_env(Float64, "SCHAR_H0", 250.0)
 const a = parse_env(Float64, "SCHAR_A", 5e3)
 const λ = parse_env(Float64, "SCHAR_LAMBDA", 4e3)
 const hill_x_shift = parse_env(Float64, "SCHAR_HILL_X_SHIFT", 0.0)
-const terrain_interpretation_name = lowercase(get(ENV, "SCHAR_TERRAIN_INTERPRETATION", "grid"))
 const thermodynamic_constants_name = lowercase(get(ENV, "SCHAR_THERMODYNAMIC_CONSTANTS", "breeze"))
 const advection_name = lowercase(get(ENV, "SCHAR_ADVECTION", "centered2"))
 const U = parse_env(Float64, "SCHAR_U", 10.0)
@@ -189,12 +187,6 @@ N² = N^2
 K = 2π / λ
 
 @inline θ_of_z(z) = θ₀ * exp(N² * z / g)
-function terrain_interpretation(name)
-    name in ("grid", "grid_fitted") && return GridFittedTerrain()
-    name in ("face_sampled", "cm1") && return FaceSampledTerrain()
-    error("SCHAR_TERRAIN_INTERPRETATION must be `grid`, `grid_fitted`, `face_sampled`, or `cm1`, got `$name`")
-end
-
 function schar_advection(name)
     name in ("centered2", "centered") && return Centered(order = 2)
     name in ("weno9", "cm1") && return WENO(order = 9)
@@ -207,17 +199,22 @@ function pressure_gradient_stencil(name)
     error("SCHAR_PRESSURE_GRADIENT_STENCIL must be `inside` or `outside`, got `$name`")
 end
 
-const face_sampled_terrain_shift = terrain_interpretation_name in ("face_sampled", "cm1") ? Lx / Nx / 2 : 0.0
-const diagnostic_hill_x_shift = hill_x_shift + face_sampled_terrain_shift
+const diagnostic_hill_x_shift = hill_x_shift
 
 @inline terrain_shifted_x(x) = x + hill_x_shift
 @inline diagnostic_shifted_x(x) = x + diagnostic_hill_x_shift
+# SCHAR_MODULATION=cos2 (default) → classic Schär envelope·cos² modulation;
+#                  =none           → plain Gaussian envelope (no cos² ripple)
+const _schar_modulation = lowercase(get(ENV, "SCHAR_MODULATION", "cos2"))
+@inline _modulation(x) = ifelse(_schar_modulation == "none", 1.0, cos(π * x / λ)^2)
+@inline _modulation_deriv(x) = ifelse(_schar_modulation == "none", 0.0,
+                                       -(π / λ) * sin(2π * x / λ))
 @inline hill(x, y) = h₀ * exp(-(terrain_shifted_x(x) / a)^2) *
-                     cos(π * terrain_shifted_x(x) / λ)^2
+                     _modulation(terrain_shifted_x(x))
 ∂x_hill(x) = h₀ * exp(-(diagnostic_shifted_x(x) / a)^2) *
              (-2diagnostic_shifted_x(x) / a^2 *
-              cos(π * diagnostic_shifted_x(x) / λ)^2 -
-              (π / λ) * sin(2π * diagnostic_shifted_x(x) / λ))
+              _modulation(diagnostic_shifted_x(x)) +
+              _modulation_deriv(diagnostic_shifted_x(x)))
 
 @inline function upper_sponge_weight(z)
     z_start = Lz - sponge_depth
@@ -272,35 +269,26 @@ function substep_distribution(name)
     error("SCHAR_SUBSTEP_DISTRIBUTION must be `proportional` or `monolithic_first_stage`, got `$name`")
 end
 
-# Vertical coordinate: "sigma"/"btf" (default) uses MutableVerticalDiscretization
-# + follow_terrain! (Gal-Chen linear decay). "sleve" uses the grid-owned
-# TerrainFollowingVerticalDiscretization with the SLEVE formulation (Schär et al.
-# 2002), which decays small-scale terrain fast with a k-dependent Jacobian.
-const SCHAR_TERRAIN_COORDINATE = lowercase(get(ENV, "SCHAR_TERRAIN_COORDINATE", "sigma"))
+# Vertical coordinate: "sleve" uses the Schär et al. (2002) SLEVE formulation;
+# "linear_tfvd" uses the Gal-Chen linear-decay formulation on the same
+# TerrainFollowingVerticalDiscretization grid type.
+const SCHAR_TERRAIN_COORDINATE = lowercase(get(ENV, "SCHAR_TERRAIN_COORDINATE", "sleve"))
 const stencil = pressure_gradient_stencil(pressure_gradient_stencil_name)
 
-if SCHAR_TERRAIN_COORDINATE in ("sleve", "linear_tfvd")
-    s₁ = parse_env(Float64, "SCHAR_SLEVE_S1", Lz / 2)
-    s₂ = parse_env(Float64, "SCHAR_SLEVE_S2", 2.5e3)
-    formulation = SCHAR_TERRAIN_COORDINATE == "sleve" ?
-        SLEVE(large_scale_height = s₁, small_scale_height = s₂) : LinearDecay()
-    z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length = Nz + 1));
-                                                     formulation = formulation)
-    global grid = RectilinearGrid(schar_arch(); size = (Nx, Nz), halo = (5, 5),
-                                  x = (-Lx / 2, Lx / 2), z = z_faces,
-                                  topology = (Periodic, Flat, Bounded))
-    materialize_terrain!(grid, hill;
-                         terrain_interpretation = terrain_interpretation(terrain_interpretation_name))
-    global metrics = build_terrain_metrics(grid, stencil)
-else
-    z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length = Nz + 1)))
-    global grid = RectilinearGrid(schar_arch(); size = (Nx, Nz), halo = (5, 5),
-                                  x = (-Lx / 2, Lx / 2), z = z_faces,
-                                  topology = (Periodic, Flat, Bounded))
-    global metrics = follow_terrain!(grid, hill;
-                              pressure_gradient_stencil = stencil,
-                              terrain_interpretation = terrain_interpretation(terrain_interpretation_name))
-end
+SCHAR_TERRAIN_COORDINATE in ("sleve", "linear_tfvd") ||
+    error("SCHAR_TERRAIN_COORDINATE must be `sleve` or `linear_tfvd`, got `$SCHAR_TERRAIN_COORDINATE`")
+
+s₁ = parse_env(Float64, "SCHAR_SLEVE_S1", Lz / 2)
+s₂ = parse_env(Float64, "SCHAR_SLEVE_S2", 2.5e3)
+formulation = SCHAR_TERRAIN_COORDINATE == "sleve" ?
+    SLEVE(large_scale_height = s₁, small_scale_height = s₂) : LinearDecay()
+z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length = Nz + 1));
+                                                 formulation = formulation)
+grid = RectilinearGrid(schar_arch(); size = (Nx, Nz), halo = (5, 5),
+                       x = (-Lx / 2, Lx / 2), z = z_faces,
+                       topology = (Periodic, Flat, Bounded))
+materialize_terrain!(grid, hill)
+metrics = build_terrain_metrics(grid, stencil)
 
 time_discretization = SplitExplicitTimeDiscretization(acoustic_cfl = acoustic_cfl,
                                                       forward_weight = forward_weight,
@@ -326,26 +314,23 @@ model = AtmosphereModel(grid; dynamics,
                         advection = schar_advection(advection_name),
                         forcing = prognostic_sponge ? prognostic_sponge_forcing() : NamedTuple())
 
+set!(model,
+     ρ = model.dynamics.terrain_reference_density,
+     θ = (x, z) -> θ_of_z(z),
+     u = U,
+     v = 0,
+     w = 0)
 ρ = model.dynamics.density
-ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
-parent(ρ) .= parent(model.dynamics.terrain_reference_density)
-set!(ρθ, (x, z) -> θ_of_z(z))
-parent(ρθ) .*= parent(ρ)
-# Initialize w to match the terrain so contravariant ρw̃ = 0 at t = 0 (the
-# steady "flow follows the terrain" condition). Setting physical w = 0
-# instead leaves ρw̃ ≈ −slope·ρu at the bottom above the mountain peak,
-# which excites an acoustic standing-wave resonance between the terrain
-# surface and the model lid — a strong vertical column over the peak that
-# CM1 doesn't show because in its computational coords w = 0 already
-# implies w̃ = 0. We use the grid's own ∂z/∂x operator (which carries the
-# formulation's decay — linear for LinearDecay, sinh for SLEVE) so the IC
-# matches whatever formulation is in use.
-set!(model, u = U, v = 0, w = 0)
+# Initialize only the bottom-face w to match CM1's terrain kinematic condition.
+# Interior w remains zero after `set!`, so the column is not pre-loaded with a
+# formulation-decayed balanced vertical velocity. The kernel still uses the
+# grid's own bottom-face slope so the bottom boundary condition matches the
+# active terrain formulation.
 let ρu = model.momentum.ρu, ρw = model.momentum.ρw,
     w  = model.velocities.w, ρ  = model.dynamics.density,
     grd = model.grid, arch = Oceananigans.Architectures.architecture(grd)
 
-    Oceananigans.Utils.launch!(arch, grd, :xyz, _init_terrain_balanced_w!,
+    Oceananigans.Utils.launch!(arch, grd, :xy, _init_terrain_bottom_face_w!,
                                ρw, w, ρ, ρu, grd)
 end
 update_state!(model)
@@ -455,6 +440,26 @@ acoustic_increment_file = joinpath(OUTPUT_DIR, "terrain_schar_mountain_wave_acou
 
 simulation = Simulation(model; Δt, stop_time = stop_seconds)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
+
+# Optional JLD2 snapshot writer for animations (`SCHAR_SNAPSHOT_INTERVAL=600`
+# enables snapshots every 600 simulation-seconds). Outputs `w`, `u`, θ', p' as
+# Center-staggered diagnostic fields so they pair directly with CM1's
+# `winterp`, `uinterp`, `thpert`, `prspert` arrays.
+const SCHAR_SNAPSHOT_INTERVAL = parse_env(Float64, "SCHAR_SNAPSHOT_INTERVAL", 0.0)
+if SCHAR_SNAPSHOT_INTERVAL > 0
+    using Oceananigans.OutputWriters: JLD2Writer, TimeInterval
+    using Oceananigans.Fields: Field, @at
+    snapshot_outputs = (
+        u = model.velocities.u,
+        w = model.velocities.w,
+    )
+    simulation.output_writers[:snapshots] = JLD2Writer(
+        model, snapshot_outputs;
+        filename     = joinpath(OUTPUT_DIR, "terrain_schar_snapshots.jld2"),
+        schedule     = TimeInterval(SCHAR_SNAPSHOT_INTERVAL),
+        overwrite_existing = true,
+    )
+end
 walltime_start_ns = Ref(time_ns())
 acoustic_increment_reference =
     write_acoustic_increment_budget ? acoustic_increment_reference!(model) : nothing
@@ -990,7 +995,7 @@ open(summary_file, "w") do io
     @printf(io, "  U = %.6e m/s, N = %.6e 1/s\n", U, N)
     @printf(io, "  h0 = %.6e m, a = %.6e m, lambda = %.6e m\n", h₀, a, λ)
     @printf(io, "  hill x shift = %.6e m\n", hill_x_shift)
-    println(io, "  terrain interpretation = $terrain_interpretation_name")
+    println(io, "  terrain coordinate = $SCHAR_TERRAIN_COORDINATE")
     @printf(io, "  diagnostic hill x shift = %.6e m\n", diagnostic_hill_x_shift)
     println(io, "  substep distribution = $substep_distribution_name")
     @printf(io, "  acoustic theta tendency factor = %.6e\n", acoustic_theta_tendency_factor)
