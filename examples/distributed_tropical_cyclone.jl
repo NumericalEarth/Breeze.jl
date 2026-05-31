@@ -30,6 +30,11 @@
 using MPI
 MPI.Init()
 
+## Cray MPICH inserts a malformed env entry after MPI_Init on multi-node srun,
+## which breaks CUDA.jl → multi-node GPU hangs. Strip it (Oceananigans #5513).
+include(joinpath(@__DIR__, "sanitize_environ.jl"))
+SanitizeEnviron.sanitize_environ!()
+
 using Breeze
 using Breeze: CompressibleDynamics
 using Breeze.CompressibleEquations: SplitExplicitTimeDiscretization
@@ -80,6 +85,19 @@ rank  = MPI.Comm_rank(MPI.COMM_WORLD)
 arch  = use_nccl ?
     NCCLDistributed(GPU(); partition = Partition(Ngpus, 1)) :
     Distributed(GPU(); partition = Partition(Ngpus, 1))
+
+## Diagnostic checkpoint: barrier then a flushed rank-0 log. Because the barrier
+## precedes the print, the LAST "CHECKPOINT" line in the log marks the last phase
+## that completed on all ranks — so a hang localizes to the span between the last
+## printed checkpoint and the next one. The flush defeats srun stderr buffering.
+function checkpoint(msg)
+    MPI.Barrier(MPI.COMM_WORLD)
+    if rank == 0
+        @info "CHECKPOINT: $msg"
+        flush(stderr)
+    end
+    return nothing
+end
 
 ## ---------------------------------------------------------------------------
 ## Domain & grid (YuDidlake2019 §3a1: 642 km × 642 km box)
@@ -158,6 +176,7 @@ if rank == 0
     @info @sprintf("Per-GPU grid: %d × %d × %d = %.1f M cells/GPU",
                    Nx ÷ Ngpus, Ny, Nz, (Nx ÷ Ngpus) * Ny * Nz / 1e6)
 end
+checkpoint("grid built")
 
 ## ---------------------------------------------------------------------------
 ## Jordan (1958) hurricane-season mean sounding (host-side, replicated per rank)
@@ -233,9 +252,11 @@ g   = constants.gravitational_acceleration
 κ   = Rᵈ / constants.dry_air.heat_capacity
 cᵖᵈ = constants.dry_air.heat_capacity
 
+checkpoint("before ReferenceState")
 reference_state = ReferenceState(grid, constants;
                                  surface_pressure = p_env(0.0),
                                  potential_temperature = θ_env)
+checkpoint("after ReferenceState")
 
 ## z is not partitioned, so the local column is the full global column on every rank.
 pᵣ = Array(interior(reference_state.pressure, 1, 1, :))
@@ -339,6 +360,7 @@ bal = solve_balanced_vortex_iterative(r_pre, z_centers, v2d, pᵣ, Tᵣ, ρᵣ; 
 vortex = (; v = v2d, p = bal.p, θ = θ_pre, T = bal.T, ρ = bal.ρ)
 
 rank == 0 && @info @sprintf("IC converged in %d Picard iters", length(bal.history))
+checkpoint("vortex IC computed")
 
 @inline function lookup_rz(table, r::Real, z::Real)
     r_c = clamp(r, first(r_pre), last(r_pre))
@@ -470,8 +492,11 @@ forcing = with_heating ?
     (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρθ = (heating_forcing, sponge_ρθ)) :
     (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρθ = sponge_ρθ)
 
+checkpoint("before AtmosphereModel")
 model = AtmosphereModel(grid; dynamics, coriolis, advection, forcing)
+checkpoint("after AtmosphereModel (before set!)")
 set!(model; u = uᵢ, v = vᵢ, T = Tᵢ, ρ = ρᵢ)
+checkpoint("after set!")
 
 if rank == 0
     CUDA.reclaim()
@@ -553,8 +578,10 @@ output_prefix = joinpath(output_dir,
 rank == 0 && mkpath(output_dir)
 MPI.Barrier(MPI.COMM_WORLD)
 
+## On a distributed grid JLD2Writer appends the rank to the filename itself, so
+## we pass the bare prefix (avoids the doubled `_rankN_rankN` suffix).
 simulation.output_writers[:fields] = JLD2Writer(model, outputs;
-                                                filename = @sprintf("%s_rank%d.jld2", output_prefix, rank),
+                                                filename = output_prefix * ".jld2",
                                                 schedule = TimeInterval(output_interval * hours),
                                                 overwrite_existing = true)
 

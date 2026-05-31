@@ -126,6 +126,41 @@ reassembles the slabs and does the azimuthal averaging.
 | `--no-nccl` | (NCCL on) | fall back to plain Cray-MPICH |
 | `--float-type` | Float32 | `Float32` or `Float64` |
 
+## Multi-node on Perlmutter — required setup (learned the hard way)
+
+Two things must be right or multi-node runs hang or crawl. Both are handled by
+`distributed_tropical_cyclone.sh`; documented here so they aren't lost.
+
+1. **Sanitize the environment after `MPI.Init()`.** Cray MPICH inserts a malformed
+   env entry (no `=`) after `MPI_Init` on multi-node `srun`; CUDA.jl chokes on it
+   and **every multi-node GPU run hangs** at the first halo exchange (1-node is
+   unaffected). Fix: `include("sanitize_environ.jl"); SanitizeEnviron.sanitize_environ!()`
+   right after `MPI.Init()` (Oceananigans discussion #5513, romanlee). Already wired
+   into the driver.
+
+2. **Give NCCL the AWS-OFI plugin** (`PLUGIN=2.18.3`, default in the `.sh`). Without
+   `libnccl-net.so` on `LD_LIBRARY_PATH`, NCCL silently falls back to **10 Gbps TCP
+   sockets with GPUDirect RDMA disabled** — inter-node runs ~3.3× slower. With the
+   plugin it uses CXI/Slingshot RDMA. `NCCL_jll` is 2.28.3; 2.18.3 is the newest
+   NERSC plugin that loads (AWS Libfabric v6). NB: NCCL.jl's error path has an
+   `err`-not-defined bug that *masks* plugin failures — check `NCCL_DEBUG=INFO`
+   (stdout) for `Using network AWS Libfabric` vs `Using network Socket`.
+
+## Backend & scaling (measured, 124 M cells/GPU = production slab)
+
+Weak scaling, ms/step (`examples/weak_scaling_sweep.sh`):
+
+| GPUs | NCCL (socket, broken) | MPI (Cray-MPICH) | **NCCL + OFI/RDMA** |
+|---:|---:|---:|---:|
+| 1 (compute) | 1495 | 1500 | 1498 |
+| 4 (1 node)  | 6677 | 2201 | **1904** |
+| 8 (2 nodes) | 6768 | 2289 | **2020** |
+
+→ **Use NCCL with the OFI plugin** (default): fastest, ~74% weak-scaling efficiency,
++6% across the node boundary. MPI is a solid fallback (`--no-nccl`, 66%). The
+60-GPU run is ~2.0 s/step ⇒ a 24 h spinup at Δt≈1 s is ~48 h wall — at the regular
+queue limit, so **checkpoint/restart is needed** for the full integration.
+
 ## Known gaps / TODO
 
 - **No checkpoint/restart** yet — required to span the multi-day integration

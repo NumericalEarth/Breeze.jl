@@ -44,6 +44,20 @@ export LD_PRELOAD="${CRAY_MPICH_ROOTDIR:-/opt/cray/pe/mpich/9.0.1}/gtl/lib/libmp
 ## pool allocations. Disable the pool to avoid CUDA_ERROR_INVALID_VALUE in MPI.
 export JULIA_CUDA_MEMORY_POOL=none
 
+## NCCL AWS-OFI plugin for CXI/Slingshot GPUDirect RDMA. WITHOUT THIS, NCCL silently
+## falls back to 10 Gbps TCP sockets (RDMA disabled) and inter-node runs ~3.3× slower.
+## 2.18.3 is the newest libnccl-net.so that loads with NCCL_jll 2.28.3 (AWS Libfabric v6).
+export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-hsn}"
+PLUGIN="${PLUGIN:-2.18.3}"
+if [ -n "${PLUGIN}" ] && [ "${NCCL:-1}" != "0" ]; then
+    export LD_LIBRARY_PATH="/global/common/software/nersc9/nccl/${PLUGIN}/lib:${LD_LIBRARY_PATH}"
+    export NCCL_NET_GDR_LEVEL=PHB
+    export NCCL_CROSS_NIC=1
+    export FI_CXI_DISABLE_HOST_REGISTER=1
+    export FI_MR_CACHE_MONITOR=userfaultfd
+    export FI_CXI_DEFAULT_CQ_SIZE=131072
+fi
+
 NGPUS="${NGPUS:-60}"
 FLOAT_TYPE="${FLOAT_TYPE:-Float32}"
 DX="${DX:-100}"
