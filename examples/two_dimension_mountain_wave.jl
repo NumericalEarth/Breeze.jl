@@ -8,9 +8,10 @@
 # The Schär mountain wave ([Schär et al. (2002)](@cite Schar2002)) is a stringent benchmark
 # for terrain-following coordinates because the fine-scale terrain corrugations create steep
 # coordinate-surface slopes that challenge the horizontal pressure gradient computation.
-# We deform the computational grid itself using [`follow_terrain!`](@ref), which applies the
-# [Gal-Chen and Somerville (1975)](@cite GalChen1975) coordinate transformation to exactly
-# capture the mountain profile at any resolution.
+# We deform the computational grid itself using
+# [`TerrainFollowingVerticalDiscretization`](@ref), with a SLEVE coordinate
+# following [Schär et al. (2002)](@cite Schar2002). The acoustic modes are
+# integrated with the split-explicit substepper.
 #
 # ## References
 #
@@ -80,15 +81,22 @@
 
 using Breeze
 using Oceananigans
-using Breeze.TerrainFollowingDiscretization: SlopeInsideInterpolation
-using Oceananigans.Grids: MutableVerticalDiscretization, xnodes, znode
-using Oceananigans.Operators: Δzᶜᶜᶠ
+using Breeze.TerrainFollowingDiscretization: SlopeInsideInterpolation,
+                                              TerrainFollowingVerticalDiscretization,
+                                              SLEVE,
+                                              materialize_terrain!,
+                                              build_terrain_metrics
+using Oceananigans.Grids: xnode, xnodes, znode
+using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Units
 using Oceananigans: Face, Center
-using Breeze.Thermodynamics: dry_air_gas_constant, hydrostatic_pressure
+using Breeze.Thermodynamics: dry_air_gas_constant
 using Printf
 using CairoMakie
 using CUDA
+
+parse_env(::Type{T}, name, default) where T =
+    haskey(ENV, name) ? parse(T, ENV[name]) : default
 
 # ## Thermodynamic parameters
 #
@@ -124,34 +132,41 @@ a  = 5000                   # m - Gaussian half-width parameter
 K  = 2π / λ                 # rad m⁻¹ - terrain wavenumber
 
 hill(x, y) = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
+∂x_hill(x) = h₀ * exp(-(x / a)^2) *
+             (-2x / a^2 * cos(π * x / λ)^2 -
+              (π / λ) * sin(2π * x / λ))
 
 # ## Grid setup
 #
 # The domain spans 200 km horizontally (±100 km) and 20 km vertically. We use a
-# `MutableVerticalDiscretization` with uniform spacing in the computational coordinate;
-# the terrain-following transformation deforms these surfaces to follow the mountain,
-# so no vertical grid stretching near the surface is needed.
+# `TerrainFollowingVerticalDiscretization` with uniform spacing in the computational
+# coordinate; the terrain-following transformation deforms these surfaces to follow
+# the mountain, so no vertical grid stretching near the surface is needed.
 
 
-arch = CUDA.functional() ? GPU() : CPU()
+arch_name = lowercase(get(ENV, "BREEZE_SCHAR_ARCH", CUDA.functional() ? "gpu" : "cpu"))
+arch = arch_name == "gpu" ? GPU() : CPU()
 
-Nx, Nz = 201, 50
-L = 100kilometers
-const H = 20kilometers
+Nx = parse_env(Int, "BREEZE_SCHAR_NX", 201)
+Nz = parse_env(Int, "BREEZE_SCHAR_NZ", 50)
+L = parse_env(Float64, "BREEZE_SCHAR_L", 100kilometers)
+const H = parse_env(Float64, "BREEZE_SCHAR_H", 20kilometers)
 
-z_faces = MutableVerticalDiscretization(collect(range(0, H, length=Nz+1)))
+z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, H, length=Nz+1));
+                                                 formulation = SLEVE(large_scale_height = H / 2,
+                                                                     small_scale_height = H / 8))
 grid = RectilinearGrid(arch, size = (Nx, Nz),
                        x = (-L/2, L/2), z = z_faces,
                        topology = (Periodic, Flat, Bounded))
 
 # ## Terrain
 #
-# Apply the Schär mountain profile to the grid via [`follow_terrain!`](@ref). This sets
-# the column scaling factors ``\sigma`` and surface displacement ``\eta`` on the grid's
-# `MutableVerticalDiscretization` and returns a [`TerrainMetrics`](@ref) object with
-# precomputed terrain slopes.
+# Apply the Schär mountain profile to the grid. This materializes the terrain
+# components inside the grid's `TerrainFollowingVerticalDiscretization` and returns a
+# [`TerrainMetrics`](@ref) object for the pressure-gradient stencil.
 
-metrics = follow_terrain!(grid, hill; pressure_gradient_stencil = SlopeInsideInterpolation())
+materialize_terrain!(grid, hill)
+metrics = build_terrain_metrics(grid, SlopeInsideInterpolation())
 
 # ## Plot: Terrain-following coordinate surfaces
 #
@@ -201,32 +216,33 @@ fig
 # ## Rayleigh damping layer
 #
 # A sponge layer near the domain top absorbs upward-propagating waves and prevents
-# spurious reflections from the rigid lid. The Gaussian mask is concentrated in the
-# upper quarter of the domain and decays to effectively zero below mid-level.
+# spurious reflections from the rigid lid. The split-explicit acoustic substepper
+# applies this sponge as part of the acoustic update.
 
-const sponge_width = H / 4
-sponge_mask(x, z) = exp(-(z - H)^2 / sponge_width^2)
-ρw_sponge = Relaxation(rate=1/10, mask=sponge_mask)
+const sponge_depth = H / 4
+const sponge_damping_rate = 0.1
 
 # ## Model construction
 #
-# Build a compressible model with explicit time-stepping, 5th-order WENO advection, and
-# terrain corrections. Passing `terrain_metrics` to [`CompressibleDynamics`](@ref)
+# Build a compressible model with split-explicit acoustic substepping, 5th-order WENO
+# advection, and terrain corrections. Passing `terrain_metrics` to [`CompressibleDynamics`](@ref)
 # activates the terrain-following physics: contravariant vertical velocity, corrected
 # pressure gradient, and terrain-aware divergence. The `reference_potential_temperature`
 # enables a perturbation pressure approach for the horizontal pressure gradient that
 # reduces the truncation error inherent in terrain-following coordinates
 # ([Klemp (2011)](@cite Klemp2011)).
 
-pˢᵗ = 1e5                   # Pa - standard pressure
-κ = Rᵈ / cᵖᵈ
+time_discretization = SplitExplicitTimeDiscretization(acoustic_cfl = 0.5,
+                                                      sponge = UpperSponge(damping_rate = sponge_damping_rate,
+                                                                           depth = sponge_depth))
 
-dynamics = CompressibleDynamics(ExplicitTimeStepping();
+dynamics = CompressibleDynamics(time_discretization;
                                 terrain_metrics = metrics,
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θ_of_z)
 
-model = AtmosphereModel(grid; dynamics, advection=WENO(order=5), forcing=(; ρw=ρw_sponge))
+model = AtmosphereModel(grid; dynamics, advection = WENO(order=5),
+                        timestepper = :AcousticRungeKutta3)
 
 # ## Initial conditions
 #
@@ -236,32 +252,32 @@ model = AtmosphereModel(grid; dynamics, advection=WENO(order=5), forcing=(; ρw=
 # balance. Because we passed `reference_potential_temperature` to `CompressibleDynamics`,
 # the model has already computed this discrete reference state for us in `terrain_reference_density`!
 
-ρ_ref = model.dynamics.terrain_reference_density
-ρ = model.dynamics.density
-ρθ = model.formulation.potential_temperature_density
+set!(model,
+     ρ = model.dynamics.terrain_reference_density,
+     θ = (x, z) -> θ_of_z(z),
+     u = U,
+     v = 0,
+     w = 0,
+     enforce_mass_conservation = false)
 
-set!(ρ, ρ_ref)
-set!(ρθ, (x, z) -> θ_of_z(z))
-parent(ρθ) .*= parent(ρ)
+CUDA.@allowscalar for i in 1:Nx
+    ρ_ccf = ℑzᵃᵃᶠ(i, 1, 1, grid, model.dynamics.density)
+    wᵇ = U * ∂x_hill(xnode(i, grid, Center()))
+    model.velocities.w[i, 1, 1] = wᵇ
+    model.momentum.ρw[i, 1, 1] = ρ_ccf * wᵇ
+end
 
-set!(model, u=U)
+Oceananigans.TimeSteppers.update_state!(model)
 
 # ## Simulation
 #
-# Acoustic waves require a CFL condition based on the sound speed, which gives a much
-# smaller time step than the anelastic equations. We use the potential temperature at
-# the domain top for a conservative estimate, since θ (and thus the sound speed)
-# increases with height.
-
-γ = cᵖᵈ / (cᵖᵈ - Rᵈ)
-θ_top = θ_of_z(H)
-ℂᵃᶜ = sqrt(γ * Rᵈ * θ_top)
+# The split-explicit scheme uses an advective outer time step; the acoustic waves are
+# handled by inner substeps.
 
 Δx = L / Nx
-Δz = H / Nz
-Δt = 0.4 * min(Δx, Δz) / (ℂᵃᶜ + U)
+Δt = parse_env(Float64, "BREEZE_SCHAR_DT", 0.5 * Δx / U)
 
-stop_time = 2hours
+stop_time = parse_env(Float64, "BREEZE_SCHAR_STOP_TIME", 2hours)
 
 simulation = Simulation(model; Δt, stop_time)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
@@ -294,7 +310,9 @@ add_callback!(simulation, progress, name=:progress, IterationInterval(500))
 w = model.velocities.w
 w̃ = model.dynamics.contravariant_vertical_velocity
 
-filename = "mountain_waves"
+filename = get(ENV, "BREEZE_SCHAR_OUTPUT", "mountain_waves")
+output_directory = dirname(filename)
+output_directory == "." || mkpath(output_directory)
 outputs = (; w, w̃)
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
                                               filename,
@@ -368,7 +386,7 @@ nothing #hide
 
 # ## Results: Comparison with analytical solution
 #
-# We compare the simulated vertical velocity field at 10 minutes with the linear
+# We compare the simulated vertical velocity field at the final time with the linear
 # analytical solution. The terrain-following grid exactly represents the corrugated
 # mountain profile, avoiding the staircase artifacts of the immersed boundary method.
 # The heatmaps display fields in physical ``(x, z)`` coordinates, with the deformed
@@ -381,7 +399,7 @@ set!(w_analytical, w_linear)
 
 fig = Figure(size=(900, 800), fontsize=14)
 
-ax1 = Axis(fig[1, 1], ylabel = "z (m)", title = "Simulated w at t = 2 hours")
+ax1 = Axis(fig[1, 1], ylabel = "z (m)", title = "Simulated w at final time")
 ax2 = Axis(fig[2, 1], xlabel = "x (m)", ylabel = "z (m)", title = "Linear Analytical w")
 hidexdecorations!(ax1, grid = false)
 

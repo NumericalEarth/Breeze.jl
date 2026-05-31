@@ -16,9 +16,9 @@
 #####
 
 using Oceananigans.Grids: AbstractVerticalCoordinate, generate_coordinate, getnode, total_length,
-                          RectilinearGrid, LatitudeLongitudeGrid
+                          RectilinearGrid, LatitudeLongitudeGrid, MutableVerticalDiscretization
 using Oceananigans.Operators: σⁿ, Δrᶜᶜᶜ, Δrᶠᶜᶜ, Δrᶜᶠᶜ, Δrᶜᶜᶠ, Δrᶠᶠᶜ, Δrᶠᶜᶠ, Δrᶜᶠᶠ, Δrᶠᶠᶠ
-import Oceananigans.Grids: generate_coordinate, znode, validate_dimension_specification
+import Oceananigans.Grids: generate_coordinate, node, znode, validate_dimension_specification
 import Oceananigans.Operators: σⁿ, σ⁻
 
 struct TerrainFollowingVerticalDiscretization{C, D, E, F, FM} <: AbstractVerticalCoordinate
@@ -46,6 +46,19 @@ TerrainFollowingVerticalDiscretization(r_faces; formulation = LinearDecay()) =
     TerrainFollowingVerticalDiscretization(r_faces, nothing, nothing, nothing, formulation)
 
 const TFVD = TerrainFollowingVerticalDiscretization
+const RegularTerrainFollowingVerticalDiscretization = TerrainFollowingVerticalDiscretization{<:Any, <:Any, <:Any, <:Number}
+
+Oceananigans.Grids.coordinate_summary(::Oceananigans.Grids.Bounded,
+                                      z::RegularTerrainFollowingVerticalDiscretization,
+                                      name) =
+    string("regularly spaced with terrain-following Δr=",
+           Oceananigans.Utils.prettysummary(z.Δᵃᵃᶜ))
+
+Oceananigans.Grids.coordinate_summary(::Oceananigans.Grids.Bounded, z::TFVD, name) =
+    string("variably spaced with terrain-following min(Δr)=",
+           Oceananigans.Utils.prettysummary(minimum(parent(z.Δᵃᵃᶜ))),
+           ", max(Δr)=",
+           Oceananigans.Utils.prettysummary(maximum(parent(z.Δᵃᵃᶜ))))
 
 # Validate the reference (ζ) face specification, keeping the formulation; the
 # reference coordinate arrays are built later by `generate_coordinate`.
@@ -112,6 +125,52 @@ const TFVDRG = Union{RectilinearGrid{<:Any, <:Any, <:Any, <:Any, <:TFVD},
 @inline znode(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
     rnode(i, j, k, grid, ℓx, ℓy, ℓz) +
     terrain_following_Δz_surface(i, j, k, grid, grid.z.formulation, ℓx, ℓy, ℓz)
+
+const MappedTerrainVerticalCoordinate = Union{MutableVerticalDiscretization, TFVD}
+const MappedTerrainRG = Union{RectilinearGrid{<:Any, <:Any, <:Any, <:Any, <:MappedTerrainVerticalCoordinate},
+                              LatitudeLongitudeGrid{<:Any, <:Any, <:Any, <:Any, <:MappedTerrainVerticalCoordinate}}
+const XFlatMappedTerrainRG  = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, <:Any, <:Any, <:MappedTerrainVerticalCoordinate},
+                                    LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, <:Any, <:Any, <:MappedTerrainVerticalCoordinate}}
+const YFlatMappedTerrainRG  = Union{RectilinearGrid{<:Any, <:Any, Oceananigans.Grids.Flat, <:Any, <:MappedTerrainVerticalCoordinate},
+                                    LatitudeLongitudeGrid{<:Any, <:Any, Oceananigans.Grids.Flat, <:Any, <:MappedTerrainVerticalCoordinate}}
+const ZFlatMappedTerrainRG  = Union{RectilinearGrid{<:Any, <:Any, <:Any, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate},
+                                    LatitudeLongitudeGrid{<:Any, <:Any, <:Any, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate}}
+const XYFlatMappedTerrainRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:Any, <:MappedTerrainVerticalCoordinate},
+                                    LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:Any, <:MappedTerrainVerticalCoordinate}}
+const XZFlatMappedTerrainRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, <:Any, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate},
+                                    LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, <:Any, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate}}
+const YZFlatMappedTerrainRG = Union{RectilinearGrid{<:Any, <:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate},
+                                    LatitudeLongitudeGrid{<:Any, <:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate}}
+const XYZFlatMappedTerrainRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate},
+                                     LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate}}
+
+@inline node(i, j, k, grid::MappedTerrainRG, ℓx, ℓy, ℓz) =
+    (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
+     ynode(i, j, k, grid, ℓx, ℓy, ℓz),
+     znode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+@inline node(i, j, k, grid::XFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+    (ynode(i, j, k, grid, ℓx, ℓy, ℓz),
+     znode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+@inline node(i, j, k, grid::YFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+    (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
+     znode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+@inline node(i, j, k, grid::ZFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+    (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
+     ynode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+@inline node(i, j, k, grid::XYFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+    tuple(znode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+@inline node(i, j, k, grid::XZFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+    tuple(ynode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+@inline node(i, j, k, grid::YZFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+    tuple(xnode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+@inline node(i, j, k, grid::XYZFlatMappedTerrainRG, ℓx, ℓy, ℓz) = tuple()
 
 # Vertical spacing = reference spacing × Jacobian, mirroring the mutable-grid
 # operators but dispatching on the terrain-following grid type.

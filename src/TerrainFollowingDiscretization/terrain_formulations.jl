@@ -41,11 +41,20 @@ Oceananigans.Architectures.on_architecture(arch, f::LinearDecay) =
 @inline _b_linear(ζ, z_top)  = 1 - ζ / z_top
 @inline _b′_linear(z_top)    = -1 / z_top
 
-# h interpolated to the (ℓx, ℓy) horizontal stagger.
-@inline _h(i, j, grid, h, ::Center, ::Center) = @inbounds h[i, j, 1]
-@inline _h(i, j, grid, h, ::Face,   ::Center) = ℑxᶠᵃᵃ(i, j, 1, grid, h)
-@inline _h(i, j, grid, h, ::Center, ::Face)   = ℑyᵃᶠᵃ(i, j, 1, grid, h)
-@inline _h(i, j, grid, h, ::Face,   ::Face)   = ℑxyᶠᶠᵃ(i, j, 1, grid, h)
+# h interpolated to the (ℓx, ℓy) horizontal stagger. The `::Nothing` cases
+# arise when one of the horizontal directions is Flat: znode/node may be
+# called with `ℓy=nothing` (or `ℓx=nothing`) so the function still has to
+# dispatch. Treat the Flat direction as Center (no interpolation in that
+# direction since the grid is degenerate there).
+@inline _h(i, j, grid, h, ::Center, ::Center)  = @inbounds h[i, j, 1]
+@inline _h(i, j, grid, h, ::Face,   ::Center)  = ℑxᶠᵃᵃ(i, j, 1, grid, h)
+@inline _h(i, j, grid, h, ::Center, ::Face)    = ℑyᵃᶠᵃ(i, j, 1, grid, h)
+@inline _h(i, j, grid, h, ::Face,   ::Face)    = ℑxyᶠᶠᵃ(i, j, 1, grid, h)
+@inline _h(i, j, grid, h, ::Center, ::Nothing) = @inbounds h[i, j, 1]
+@inline _h(i, j, grid, h, ::Face,   ::Nothing) = ℑxᶠᵃᵃ(i, j, 1, grid, h)
+@inline _h(i, j, grid, h, ::Nothing, ::Center) = @inbounds h[i, j, 1]
+@inline _h(i, j, grid, h, ::Nothing, ::Face)   = ℑyᵃᶠᵃ(i, j, 1, grid, h)
+@inline _h(i, j, grid, h, ::Nothing, ::Nothing) = @inbounds h[i, j, 1]
 
 @inline function terrain_following_σ(i, j, k, grid, f::LinearDecay, ℓx, ℓy, ℓz)
     h = _h(i, j, grid, f.h, ℓx, ℓy)
