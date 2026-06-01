@@ -41,7 +41,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans
 using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, interior, set!
 using Oceananigans.Architectures: architecture, on_architecture
-using Oceananigans.Grids: xnode, ynode, rnode, AbstractGrid
+using Oceananigans.Grids: xnode, ynode, znode, rnode, AbstractGrid
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxyᶠᶠᵃ

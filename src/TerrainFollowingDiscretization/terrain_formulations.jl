@@ -57,13 +57,13 @@ Oceananigans.Architectures.on_architecture(arch, f::LinearDecay) =
 @inline terrain_at_stagger(i, j, grid, h, ::Nothing, ::Nothing) = @inbounds h[i, j, 1]
 
 @inline function terrain_following_σ(i, j, k, grid, f::LinearDecay, ℓx, ℓy, ℓz)
-    h = _h(i, j, grid, f.h, ℓx, ℓy)
+    h = terrain_at_stagger(i, j, grid, f.h, ℓx, ℓy)
     return 1 + h * b′_linear(f.z_top)
 end
 
 @inline function terrain_following_Δz_surface(i, j, k, grid, f::LinearDecay, ℓx, ℓy, ℓz)
     ζ = rnode(k, grid, ℓz)
-    h = _h(i, j, grid, f.h, ℓx, ℓy)
+    h = terrain_at_stagger(i, j, grid, f.h, ℓx, ℓy)
     return h * b_linear(ζ, f.z_top)
 end
 
@@ -116,16 +116,16 @@ Oceananigans.Architectures.on_architecture(arch, f::TwoLevelDecay) =
 
 @inline function terrain_following_σ(i, j, k, grid, f::TwoLevelDecay, ℓx, ℓy, ℓz)
     ζ  = rnode(k, grid, ℓz)
-    h₁ = _h(i, j, grid, f.h₁, ℓx, ℓy)
-    h₂ = _h(i, j, grid, f.h₂, ℓx, ℓy)
+    h₁ = terrain_at_stagger(i, j, grid, f.h₁, ℓx, ℓy)
+    h₂ = terrain_at_stagger(i, j, grid, f.h₂, ℓx, ℓy)
     return 1 + h₁ * b′_two_level(ζ, f.z_top, f.large_scale_height) +
                h₂ * b′_two_level(ζ, f.z_top, f.small_scale_height)
 end
 
 @inline function terrain_following_Δz_surface(i, j, k, grid, f::TwoLevelDecay, ℓx, ℓy, ℓz)
     ζ  = rnode(k, grid, ℓz)
-    h₁ = _h(i, j, grid, f.h₁, ℓx, ℓy)
-    h₂ = _h(i, j, grid, f.h₂, ℓx, ℓy)
+    h₁ = terrain_at_stagger(i, j, grid, f.h₁, ℓx, ℓy)
+    h₂ = terrain_at_stagger(i, j, grid, f.h₂, ℓx, ℓy)
     return h₁ * b_two_level(ζ, f.z_top, f.large_scale_height) +
            h₂ * b_two_level(ζ, f.z_top, f.small_scale_height)
 end

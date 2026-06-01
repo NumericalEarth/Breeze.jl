@@ -61,7 +61,7 @@ Oceananigans.Grids.coordinate_summary(::Oceananigans.Grids.Bounded, z::TFVD, nam
 # Validate the reference (ζ) face specification, keeping the formulation; the
 # reference coordinate arrays are built later by `generate_coordinate`.
 function Oceananigans.Grids.validate_dimension_specification(T, ξ::TFVD, dir, N, FT)
-    cᶠ = validate_dimension_specification(T, ξ.cᵃᵃᶠ, dir, N, FT)
+    cᶠ = Oceananigans.Grids.validate_dimension_specification(T, ξ.cᵃᵃᶠ, dir, N, FT)
     return TerrainFollowingVerticalDiscretization(cᶠ, ξ.cᵃᵃᶜ, ξ.Δᵃᵃᶠ, ξ.Δᵃᵃᶜ, ξ.formulation)
 end
 
@@ -88,7 +88,7 @@ function Oceananigans.Grids.generate_coordinate(FT, topo, size, halo, coordinate
 
     Nz = size[3]; Hz = halo[3]
     r_faces = coordinate.cᵃᵃᶠ
-    Lz, rᵃᵃᶠ, rᵃᵃᶜ, Δrᵃᵃᶠ, Δrᵃᵃᶜ = generate_coordinate(FT, topo[3](), Nz, Hz, r_faces, :r, arch)
+    Lz, rᵃᵃᶠ, rᵃᵃᶜ, Δrᵃᵃᶠ, Δrᵃᵃᶜ = Oceananigans.Grids.generate_coordinate(FT, topo[3](), Nz, Hz, r_faces, :r, arch)
 
     # Allocate the formulation's terrain-component arrays (zero-filled; the
     # bottom of the domain is taken as z = 0, so z_top = Lz). Filled later by
@@ -150,22 +150,22 @@ const XYZFlatTFVDRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, Ocea
 @inline Oceananigans.Grids.node(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
     (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
      ynode(i, j, k, grid, ℓx, ℓy, ℓz),
-     znode(i, j, k, grid, ℓx, ℓy, ℓz))
+     Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
 @inline Oceananigans.Grids.node(i, j, k, grid::XFlatTFVDRG, ℓx, ℓy, ℓz) =
     (ynode(i, j, k, grid, ℓx, ℓy, ℓz),
-     znode(i, j, k, grid, ℓx, ℓy, ℓz))
+     Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
 @inline Oceananigans.Grids.node(i, j, k, grid::YFlatTFVDRG, ℓx, ℓy, ℓz) =
     (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
-     znode(i, j, k, grid, ℓx, ℓy, ℓz))
+     Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
 @inline Oceananigans.Grids.node(i, j, k, grid::ZFlatTFVDRG, ℓx, ℓy, ℓz) =
     (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
      ynode(i, j, k, grid, ℓx, ℓy, ℓz))
 
 @inline Oceananigans.Grids.node(i, j, k, grid::XYFlatTFVDRG, ℓx, ℓy, ℓz) =
-    tuple(znode(i, j, k, grid, ℓx, ℓy, ℓz))
+    tuple(Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
 @inline Oceananigans.Grids.node(i, j, k, grid::XZFlatTFVDRG, ℓx, ℓy, ℓz) =
     tuple(ynode(i, j, k, grid, ℓx, ℓy, ℓz))
