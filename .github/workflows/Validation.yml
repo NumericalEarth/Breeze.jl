@@ -22,9 +22,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
-
 # needed to allow julia-actions/cache to delete old caches that it has created
 permissions:
   actions: write
@@ -46,11 +43,14 @@ jobs:
         os:
           - ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: julia-actions/setup-julia@4c0cb0fce8556fdb04a90347310e5db8b1f98fb9 # v2.7.0
+      - name: "Check out repository"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: "Install Julia"
+        uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         with:
           version: ${{ matrix.version }}
-      - uses: julia-actions/cache@9a93c5fb3e9c1c20b60fc80a478cae53e38618a4 # v3.0.2
+      - name: "Cache Julia depot"
+        uses: julia-actions/cache@a45e8fa8be21c18a06b7177052533149e61e9b38 # v3.1.0
       - name: Instantiate examples environment
         shell: julia --color=yes --project=examples {0}
         run: |
@@ -62,3 +62,11 @@ jobs:
           CI: "true"
         run: |
           julia --color=yes --project=examples examples/boussinesq_bomex.jl
+      - name: "Upload Manifest"
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: manifest
+          path: '**/Manifest*.toml'
+          retention-days: 90

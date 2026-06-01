@@ -298,6 +298,20 @@ Fields
 - `substep_distribution`: How acoustic substeps are distributed across the
   three WS-RK3 stages.
 
+# Backward integration
+
+Backward integration (`Δt < 0`) is supported. The off-centered
+Crank–Nicolson vertical solve with ``ω ∈ [0.5, 1]`` has amplification
+factor ``|A|^2 = (1 + ((1-ω) ω_0 Δτ)^2) / (1 + (ω ω_0 Δτ)^2) \\le 1``
+for either sign of ``Δτ``, so the linearized acoustic substep is A-stable
+in both directions. Horizontal divergence damping is sign-self-consistent
+(``γ \\propto Δτ^{-1}`` and ``(ρθ)' - (ρθ)'_\\mathrm{old} \\propto Δτ``
+both flip sign with `Δt`). The adaptive substep count uses ``|Δt|``, and
+the optional [`UpperSponge`](@ref) keeps its dissipative sign so it acts
+as a one-sided regularizer in both directions (i.e. backward integration
+through a sponge layer is stable but not an exact inverse of the forward
+step inside the sponge).
+
 See also [`ExplicitTimeStepping`](@ref).
 """
 convert_acoustic_parameter(::Type{FT}, damping::NoDivergenceDamping) where FT = damping
@@ -457,6 +471,12 @@ number of acoustic substeps, a `forward_weight` for off-centering the acoustic
 solve, an acoustic `damping` strategy such as
 [`ThermalDivergenceDamping`](@ref), an optional [`UpperSponge`](@ref), and a
 `substep_distribution` such as [`ProportionalSubsteps`](@ref).
+
+Backward integration (`time_step!(model, Δt)` with `Δt < 0`) is supported
+for the linearized acoustic substep loop. See the field-documentation
+docstring for the A-stability argument, sign-handling of the adaptive
+substep count, and the irreversibility caveat for the optional
+[`UpperSponge`](@ref).
 """
 struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistribution}
     substeps :: N

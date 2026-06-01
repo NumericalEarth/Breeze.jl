@@ -44,6 +44,10 @@ export
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
+    AbstractSolarPosition,
+    ApparentSolarPosition,
+    DiurnalSolarPosition,
+    FixedCosineZenith,
     ConstantRadiusParticles,
     TemperatureField,
     IdealGas,
@@ -80,6 +84,7 @@ export
     saturation_specific_humidity,
     adiabatic_hydrostatic_density,
     dry_air_gas_constant,
+    vapor_gas_constant,
     PlanarLiquidSurface,
     PlanarIceSurface,
 
@@ -94,6 +99,8 @@ export
     equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
+    number_concentration,
+    number_concentration_field,
     BulkMicrophysics,
     initial_aerosol_number,
     compute_hydrostatic_pressure!,
@@ -115,6 +122,7 @@ export
     # Forcing utilities
     geostrophic_forcings,
     SubsidenceForcing,
+    SpecificForcing,
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
