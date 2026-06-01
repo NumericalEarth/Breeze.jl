@@ -43,7 +43,7 @@ jobs:
       volumes:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
         - /usr/local:/host-usr-local
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: df before cleanup
         run: |
