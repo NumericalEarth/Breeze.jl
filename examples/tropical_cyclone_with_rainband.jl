@@ -702,265 +702,259 @@ nothing # hide
 # ## Stage 4 — Analysis and figure production
 # Now that the have the full simulation, we replicate the figures from YD19 to verify our results.
 
-let
-    @info "=== Stage 4: Analysis ==="
+@info "=== Stage 4: Analysis ==="
 
-    u_sc = Array{Float32}(undef, Nx, Ny, Nz)
-    v_sc = similar(u_sc)
-    w_sc = similar(u_sc)
-    T_sc = similar(u_sc)
+u_sc = Array{Float32}(undef, Nx, Ny, Nz)
+v_sc = similar(u_sc)
+w_sc = similar(u_sc)
+T_sc = similar(u_sc)
 
-    ## In-place centered interpolation (Arakawa C-grid → Centers).
-    function center_u!(out::AbstractArray{Float32, 3}, src)
-        Nxs, Nys, Nzs = size(out)
-        return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
-            ip = i == Nxs ? 1 : i + 1
-            out[i, j, k] = Float32((src[i, j, k] + src[ip, j, k]) / 2)
-        end
+## In-place centered interpolation (Arakawa C-grid → Centers).
+function center_u!(out::AbstractArray{Float32, 3}, src)
+    Nxs, Nys, Nzs = size(out)
+    return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
+        ip = i == Nxs ? 1 : i + 1
+        out[i, j, k] = Float32((src[i, j, k] + src[ip, j, k]) / 2)
     end
-    function center_v!(out::AbstractArray{Float32, 3}, src)
-        Nxs, Nys, Nzs = size(out)
-        return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
-            jp = j == Nys ? 1 : j + 1
-            out[i, j, k] = Float32((src[i, j, k] + src[i, jp, k]) / 2)
-        end
-    end
-    function center_w!(out::AbstractArray{Float32, 3}, src)
-        ## w lives on z-Face (size Nz+1 in the vertical). Average adjacent
-        ## faces to get cell-centered values with size (Nx, Ny, Nz).
-        Nxs, Nys, Nzs = size(out)
-        return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
-            out[i, j, k] = Float32((src[i, j, k] + src[i, j, k + 1]) / 2)
-        end
-    end
-    function copy_f32!(out::AbstractArray{Float32, 3}, src)
-        return @inbounds for I in eachindex(out)
-            out[I] = Float32(src[I])
-        end
-    end
-
-    ## Load one captured snapshot
-    function load_snapshot!(u, v, w, T, u_ts, v_ts, w_ts, T_ts, n::Int)
-        center_u!(u, u_ts[n])
-        center_v!(v, v_ts[n])
-        center_w!(w, w_ts[n])
-        copy_f32!(T, T_ts[n])
-        return nothing
-    end
-
-    r_bin_edges = collect(range(0.0, 150kilometers, step = Δx))
-    Nr_bin = length(r_bin_edges) - 1
-    r_bin_centers = 0.5 .* (r_bin_edges[1:(end - 1)] .+ r_bin_edges[2:end])
-    xs_center = Float32.(xnodes(grid, Center()))
-    ys_center = Float32.(ynodes(grid, Center()))
-
-    ## Instead of plotting r x z cross sections, we are going to calculate a sector azimuthal average.
-    ## This will smooth out small-scale perturbations.
-    vθ_ws = zeros(Float32, Nr_bin, Nz)
-    vr_ws = similar(vθ_ws)
-    w_ws = similar(vθ_ws)
-    T_ws = similar(vθ_ws)
-    ct_ws = zeros(Int32, Nr_bin, Nz)
-    r_last = Float32(last(r_bin_edges))
-
-    function azimuthal_mean!(vθ, vr, ww, TT, ct, u, v, w, T)
-        fill!(vθ, 0.0f0); fill!(vr, 0.0f0); fill!(ww, 0.0f0); fill!(TT, 0.0f0); fill!(ct, 0)
-        Nxs, Nys, Nzs = size(u)
-        @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
-            x = xs_center[i]; y = ys_center[j]
-            r = sqrt(x^2 + y^2)
-            r ≥ r_last && continue
-            ib = searchsortedlast(r_bin_edges, Float64(r))
-            ib = clamp(ib, 1, Nr_bin)
-            rs = max(r, 1.0f0)
-            xh = x / rs
-            yh = y / rs
-            uij = u[i, j, k]
-            vij = v[i, j, k]
-            vθ[ib, k] += -yh * uij + xh * vij
-            vr[ib, k] += xh * uij + yh * vij
-            ww[ib, k] += w[i, j, k]
-            TT[ib, k] += T[i, j, k]
-            ct[ib, k] += 1
-        end
-        return @inbounds for k in 1:Nzs, ib in 1:Nr_bin
-            if ct[ib, k] > 0
-                inv = 1.0f0 / ct[ib, k]
-                vθ[ib, k] *= inv
-                vr[ib, k] *= inv
-                ww[ib, k] *= inv
-                TT[ib, k] *= inv
-            end
-        end
-    end
-
-    ## ---------------------------------------------------------
-    ## F02ab — basic-state vortex (YD19 Fig 2a,b)
-    ## ---------------------------------------------------------
-    let
-        @info "Producing F02ab (basic-state vortex)..."
-        ts_spin = spinup_result.captures
-        n_final = length(ts_spin.u.times)
-        t_final = ts_spin.u.times[n_final]
-        @info @sprintf(
-            "Spinup snapshot %d of %d  (t = %.2f h)",
-            n_final, length(ts_spin.u.times), t_final / hour
-        )
-
-        load_snapshot!(u_sc, v_sc, w_sc, T_sc, ts_spin.u, ts_spin.v, ts_spin.w, ts_spin.T, n_final)
-        azimuthal_mean!(vθ_ws, vr_ws, w_ws, T_ws, ct_ws, u_sc, v_sc, w_sc, T_sc)
-
-        θ_bar = similar(T_ws)
-        for k in 1:Nz, ib in 1:Nr_bin
-            θ_bar[ib, k] = T_ws[ib, k] * Float32((pˢᵗ / pᵣ[k])^κ)
-        end
-        θ_env_col = Float32[θ_env(z_centers[k]) for k in 1:Nz]
-        θ_anom = θ_bar .- reshape(θ_env_col, 1, :)
-
-        fig = Figure(size = (1300, 520))
-
-        ax_v = Axis(
-            fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",
-            title = "(a) Basic-state tangential wind v̄",
-            limits = (0, 150, 0, 22)
-        )
-        v_cr_hi = 50
-        hm_v = heatmap!(
-            ax_v, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_ws;
-            colormap = :inferno, colorrange = (0, v_cr_hi)
-        )
-        contour!(
-            ax_v, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_ws;
-            levels = 5:5:v_cr_hi, color = :white, linewidth = 0.8
-        )
-        Colorbar(fig[1, 2], hm_v; label = "v̄ (m s⁻¹)")
-
-        ax_θ = Axis(
-            fig[1, 3]; xlabel = "Radius (km)", ylabel = "Height (km)",
-            title = "(b) Potential-temperature anomaly θ̄'",
-            limits = (0, 150, 0, 22)
-        )
-        θ_span = max(15.0, ceil(maximum(abs, θ_anom)))
-        hm_θ = heatmap!(
-            ax_θ, r_bin_centers ./ kilometer, z_centers ./ kilometer, θ_anom;
-            colormap = :balance, colorrange = (-θ_span, θ_span)
-        )
-        contour!(
-            ax_θ, r_bin_centers ./ kilometer, z_centers ./ kilometer, θ_anom;
-            levels = -θ_span:1.69:θ_span, color = :black, linewidth = 0.5
-        )
-        Colorbar(fig[1, 4], hm_θ; label = "θ̄' (K)")
-
-        Label(
-            fig[0, :],
-            @sprintf(
-                "F02ab — Basic-state vortex at t = %.1f h spin-up (YD19 Fig 2a,b, %.0f km box)",
-                t_final / hour, Lx / kilometers
-            );
-            fontsize = 17
-        )
-
-        v_peak_sfc = maximum(@view vθ_ws[:, 1])
-        r_peak_sfc = r_bin_centers[argmax(@view vθ_ws[:, 1])] / kilometers
-        v_peak_all = maximum(vθ_ws)
-        idx_all = argmax(vθ_ws)
-        r_peak_all = r_bin_centers[idx_all[1]] / kilometers
-        z_peak_all = z_centers[idx_all[2]] / kilometers
-        θ_peak = maximum(θ_anom)
-        idx_θ = argmax(θ_anom)
-        r_θ_peak = r_bin_centers[idx_θ[1]] / kilometers
-        z_θ_peak = z_centers[idx_θ[2]] / kilometers
-        @info @sprintf(
-            "F02a: surface v̄_peak = %.2f m/s at r = %.1f km (YD19 target ≈ 40 m/s)",
-            v_peak_sfc, r_peak_sfc
-        )
-        @info @sprintf(
-            "F02a: global v̄_peak  = %.2f m/s at (r,z) = (%.1f, %.1f) km",
-            v_peak_all, r_peak_all, z_peak_all
-        )
-        @info @sprintf(
-            "F02b: peak θ'        = %.2f K at (r,z) = (%.1f, %.1f) km (YD19 ~12 K at 10-12 km)",
-            θ_peak, r_θ_peak, z_θ_peak
-        )
-
-        path = joinpath(figures_dir, "F02ab_vortex.png")
-        save(path, fig)
-        @info "Saved F02ab" path
-        GC.gc()
-    end
-
-    ## ---------------------------------------------------------
-    ## F02cd — analytic heating field (YD19 Fig 2c,d)
-    ## ---------------------------------------------------------
-    @info "Producing F02cd (heating field)..."
-    r_cs = collect(range(0.0, 150kilometers, length = 151))
-    z_cs = collect(range(0.0, 12kilometers, length = 61))
-    λ_mid = -π / 4
-    Q_cs = [heating_rate_K_per_hour(r, λ_mid, z) for r in r_cs, z in z_cs]
-
-    x_pv = collect(range(-Lx / 2, Lx / 2, length = 300))
-    y_pv = copy(x_pv)
-    z_level = 4.6kilometers
-    Q_pv = zeros(length(x_pv), length(y_pv))
-    for j in eachindex(y_pv), i in eachindex(x_pv)
-        r = sqrt(x_pv[i]^2 + y_pv[j]^2)
-        λ = atan(y_pv[j], x_pv[i])
-        Q_pv[i, j] = heating_rate_K_per_hour(r, λ, z_level)
-    end
-
-    Q_lim = 4.5
-    fig = Figure(size = (1300, 520))
-
-    ax_c = Axis(
-        fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",
-        title = "(c) Heating cross section at λ = -π/4 (middle of rainband)",
-        limits = (0, 150, 0, 12)
-    )
-    hm_c = heatmap!(
-        ax_c, r_cs ./ kilometer, z_cs ./ kilometer, Q_cs;
-        colormap = :balance, colorrange = (-Q_lim, Q_lim)
-    )
-    contour!(
-        ax_c, r_cs ./ kilometer, z_cs ./ kilometer, Q_cs;
-        levels = -4:1:4, color = :black, linewidth = 0.6
-    )
-    Colorbar(fig[1, 2], hm_c; label = "Q (K h⁻¹)")
-
-    ax_d = Axis(
-        fig[1, 3]; xlabel = "x (km)", ylabel = "y (km)",
-        title = @sprintf("(d) Heating plan view at z = %.1f km", z_level / 1000),
-        aspect = DataAspect(), limits = (-120, 120, -120, 120)
-    )
-    hm_d = heatmap!(
-        ax_d, x_pv ./ kilometer, y_pv ./ kilometer, Q_pv;
-        colormap = :balance, colorrange = (-Q_lim, Q_lim)
-    )
-    contour!(
-        ax_d, x_pv ./ kilometer, y_pv ./ kilometer, Q_pv;
-        levels = -4:0.5:4, color = :black, linewidth = 0.4
-    )
-    Colorbar(fig[1, 4], hm_d; label = "Q (K h⁻¹)")
-
-    Label(
-        fig[0, :],
-        @sprintf(
-            "F02cd — MN10 stratiform heating field (YD19 Fig 2c,d, %.0f km box)",
-            Lx / 1.0e3
-        );
-        fontsize = 17
-    )
-
-    peak_Q_cs = maximum(abs, Q_cs)
-    peak_Q_pv = maximum(abs, Q_pv)
-    @info @sprintf("F02c peak |Q| = %.2f K/h (YD19 Q_max = 4.24 K/h)", peak_Q_cs)
-    @info @sprintf("F02d peak |Q| at z=%.1fkm = %.2f K/h", z_level / 1.0e3, peak_Q_pv)
-
-    path = joinpath(figures_dir, "F02cd_heating.png")
-    save(path, fig)
-    @info "Saved F02cd" path
-
-    @info "=== Analysis complete ==="
 end
+function center_v!(out::AbstractArray{Float32, 3}, src)
+    Nxs, Nys, Nzs = size(out)
+    return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
+        jp = j == Nys ? 1 : j + 1
+        out[i, j, k] = Float32((src[i, j, k] + src[i, jp, k]) / 2)
+    end
+end
+function center_w!(out::AbstractArray{Float32, 3}, src)
+    ## w lives on z-Face (size Nz+1 in the vertical). Average adjacent
+    ## faces to get cell-centered values with size (Nx, Ny, Nz).
+    Nxs, Nys, Nzs = size(out)
+    return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
+        out[i, j, k] = Float32((src[i, j, k] + src[i, j, k + 1]) / 2)
+    end
+end
+function copy_f32!(out::AbstractArray{Float32, 3}, src)
+    return @inbounds for I in eachindex(out)
+        out[I] = Float32(src[I])
+    end
+end
+
+## Load one captured snapshot
+function load_snapshot!(u, v, w, T, u_ts, v_ts, w_ts, T_ts, n::Int)
+    center_u!(u, u_ts[n])
+    center_v!(v, v_ts[n])
+    center_w!(w, w_ts[n])
+    copy_f32!(T, T_ts[n])
+    return nothing
+end
+
+r_bin_edges = collect(range(0.0, 150kilometers, step = Δx))
+Nr_bin = length(r_bin_edges) - 1
+r_bin_centers = 0.5 .* (r_bin_edges[1:(end - 1)] .+ r_bin_edges[2:end])
+xs_center = Float32.(xnodes(grid, Center()))
+ys_center = Float32.(ynodes(grid, Center()))
+
+## Instead of plotting r x z cross sections, we are going to calculate a sector azimuthal average.
+## This will smooth out small-scale perturbations.
+vθ_ws = zeros(Float32, Nr_bin, Nz)
+vr_ws = similar(vθ_ws)
+w_ws = similar(vθ_ws)
+T_ws = similar(vθ_ws)
+ct_ws = zeros(Int32, Nr_bin, Nz)
+r_last = Float32(last(r_bin_edges))
+
+function azimuthal_mean!(vθ, vr, ww, TT, ct, u, v, w, T)
+    fill!(vθ, 0.0f0); fill!(vr, 0.0f0); fill!(ww, 0.0f0); fill!(TT, 0.0f0); fill!(ct, 0)
+    Nxs, Nys, Nzs = size(u)
+    @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
+        x = xs_center[i]; y = ys_center[j]
+        r = sqrt(x^2 + y^2)
+        r ≥ r_last && continue
+        ib = searchsortedlast(r_bin_edges, Float64(r))
+        ib = clamp(ib, 1, Nr_bin)
+        rs = max(r, 1.0f0)
+        xh = x / rs
+        yh = y / rs
+        uij = u[i, j, k]
+        vij = v[i, j, k]
+        vθ[ib, k] += -yh * uij + xh * vij
+        vr[ib, k] += xh * uij + yh * vij
+        ww[ib, k] += w[i, j, k]
+        TT[ib, k] += T[i, j, k]
+        ct[ib, k] += 1
+    end
+    return @inbounds for k in 1:Nzs, ib in 1:Nr_bin
+        if ct[ib, k] > 0
+            inv = 1.0f0 / ct[ib, k]
+            vθ[ib, k] *= inv
+            vr[ib, k] *= inv
+            ww[ib, k] *= inv
+            TT[ib, k] *= inv
+        end
+    end
+end
+
+# ## F02ab — basic-state vortex (YD19 Fig 2a,b)
+
+@info "Producing F02ab (basic-state vortex)..."
+ts_spin = spinup_result.captures
+n_final = length(ts_spin.u.times)
+t_final = ts_spin.u.times[n_final]
+@info @sprintf(
+    "Spinup snapshot %d of %d  (t = %.2f h)",
+    n_final, length(ts_spin.u.times), t_final / hour
+)
+
+load_snapshot!(u_sc, v_sc, w_sc, T_sc, ts_spin.u, ts_spin.v, ts_spin.w, ts_spin.T, n_final)
+azimuthal_mean!(vθ_ws, vr_ws, w_ws, T_ws, ct_ws, u_sc, v_sc, w_sc, T_sc)
+
+θ_bar = similar(T_ws)
+for k in 1:Nz, ib in 1:Nr_bin
+    θ_bar[ib, k] = T_ws[ib, k] * Float32((pˢᵗ / pᵣ[k])^κ)
+end
+θ_env_col = Float32[θ_env(z_centers[k]) for k in 1:Nz]
+θ_anom = θ_bar .- reshape(θ_env_col, 1, :)
+
+fig = Figure(size = (1300, 520))
+
+ax_v = Axis(
+    fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",
+    title = "(a) Basic-state tangential wind v̄",
+    limits = (0, 150, 0, 22)
+)
+v_cr_hi = 50
+hm_v = heatmap!(
+    ax_v, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_ws;
+    colormap = :inferno, colorrange = (0, v_cr_hi)
+)
+contour!(
+    ax_v, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_ws;
+    levels = 5:5:v_cr_hi, color = :white, linewidth = 0.8
+)
+Colorbar(fig[1, 2], hm_v; label = "v̄ (m s⁻¹)")
+
+ax_θ = Axis(
+    fig[1, 3]; xlabel = "Radius (km)", ylabel = "Height (km)",
+    title = "(b) Potential-temperature anomaly θ̄'",
+    limits = (0, 150, 0, 22)
+)
+θ_span = max(15.0, ceil(maximum(abs, θ_anom)))
+hm_θ = heatmap!(
+    ax_θ, r_bin_centers ./ kilometer, z_centers ./ kilometer, θ_anom;
+    colormap = :balance, colorrange = (-θ_span, θ_span)
+)
+contour!(
+    ax_θ, r_bin_centers ./ kilometer, z_centers ./ kilometer, θ_anom;
+    levels = -θ_span:1.69:θ_span, color = :black, linewidth = 0.5
+)
+Colorbar(fig[1, 4], hm_θ; label = "θ̄' (K)")
+
+Label(
+    fig[0, :],
+    @sprintf(
+        "F02ab — Basic-state vortex at t = %.1f h spin-up (YD19 Fig 2a,b, %.0f km box)",
+        t_final / hour, Lx / kilometers
+    );
+    fontsize = 17
+)
+
+v_peak_sfc = maximum(@view vθ_ws[:, 1])
+r_peak_sfc = r_bin_centers[argmax(@view vθ_ws[:, 1])] / kilometers
+v_peak_all = maximum(vθ_ws)
+idx_all = argmax(vθ_ws)
+r_peak_all = r_bin_centers[idx_all[1]] / kilometers
+z_peak_all = z_centers[idx_all[2]] / kilometers
+θ_peak = maximum(θ_anom)
+idx_θ = argmax(θ_anom)
+r_θ_peak = r_bin_centers[idx_θ[1]] / kilometers
+z_θ_peak = z_centers[idx_θ[2]] / kilometers
+@info @sprintf(
+    "F02a: surface v̄_peak = %.2f m/s at r = %.1f km (YD19 target ≈ 40 m/s)",
+    v_peak_sfc, r_peak_sfc
+)
+@info @sprintf(
+    "F02a: global v̄_peak  = %.2f m/s at (r,z) = (%.1f, %.1f) km",
+    v_peak_all, r_peak_all, z_peak_all
+)
+@info @sprintf(
+    "F02b: peak θ'        = %.2f K at (r,z) = (%.1f, %.1f) km (YD19 ~12 K at 10-12 km)",
+    θ_peak, r_θ_peak, z_θ_peak
+)
+
+path = joinpath(figures_dir, "F02ab_vortex.png")
+save(path, fig)
+@info "Saved F02ab" path
+GC.gc()
+fig
+
+# ## F02cd — analytic heating field (YD19 Fig 2c,d)
+
+@info "Producing F02cd (heating field)..."
+r_cs = collect(range(0.0, 150kilometers, length = 151))
+z_cs = collect(range(0.0, 12kilometers, length = 61))
+λ_mid = -π / 4
+Q_cs = [heating_rate_K_per_hour(r, λ_mid, z) for r in r_cs, z in z_cs]
+
+x_pv = collect(range(-Lx / 2, Lx / 2, length = 300))
+y_pv = copy(x_pv)
+z_level = 4.6kilometers
+Q_pv = zeros(length(x_pv), length(y_pv))
+for j in eachindex(y_pv), i in eachindex(x_pv)
+    r = sqrt(x_pv[i]^2 + y_pv[j]^2)
+    λ = atan(y_pv[j], x_pv[i])
+    Q_pv[i, j] = heating_rate_K_per_hour(r, λ, z_level)
+end
+
+Q_lim = 4.5
+fig = Figure(size = (1300, 520))
+
+ax_c = Axis(
+    fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",
+    title = "(c) Heating cross section at λ = -π/4 (middle of rainband)",
+    limits = (0, 150, 0, 12)
+)
+hm_c = heatmap!(
+    ax_c, r_cs ./ kilometer, z_cs ./ kilometer, Q_cs;
+    colormap = :balance, colorrange = (-Q_lim, Q_lim)
+)
+contour!(
+    ax_c, r_cs ./ kilometer, z_cs ./ kilometer, Q_cs;
+    levels = -4:1:4, color = :black, linewidth = 0.6
+)
+Colorbar(fig[1, 2], hm_c; label = "Q (K h⁻¹)")
+
+ax_d = Axis(
+    fig[1, 3]; xlabel = "x (km)", ylabel = "y (km)",
+    title = @sprintf("(d) Heating plan view at z = %.1f km", z_level / 1000),
+    aspect = DataAspect(), limits = (-120, 120, -120, 120)
+)
+hm_d = heatmap!(
+    ax_d, x_pv ./ kilometer, y_pv ./ kilometer, Q_pv;
+    colormap = :balance, colorrange = (-Q_lim, Q_lim)
+)
+contour!(
+    ax_d, x_pv ./ kilometer, y_pv ./ kilometer, Q_pv;
+    levels = -4:0.5:4, color = :black, linewidth = 0.4
+)
+Colorbar(fig[1, 4], hm_d; label = "Q (K h⁻¹)")
+
+Label(
+    fig[0, :],
+    @sprintf(
+        "F02cd — MN10 stratiform heating field (YD19 Fig 2c,d, %.0f km box)",
+        Lx / 1.0e3
+    );
+    fontsize = 17
+)
+
+peak_Q_cs = maximum(abs, Q_cs)
+peak_Q_pv = maximum(abs, Q_pv)
+@info @sprintf("F02c peak |Q| = %.2f K/h (YD19 Q_max = 4.24 K/h)", peak_Q_cs)
+@info @sprintf("F02d peak |Q| at z=%.1fkm = %.2f K/h", z_level / 1.0e3, peak_Q_pv)
+
+path = joinpath(figures_dir, "F02cd_heating.png")
+save(path, fig)
+@info "Saved F02cd" path
+fig
 
 # ## Reproducing the full YD19 response (optional)
 #
