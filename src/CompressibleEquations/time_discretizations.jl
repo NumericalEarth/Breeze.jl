@@ -297,6 +297,14 @@ Fields
   with the configured `damping_rate` and `depth`.
 - `substep_distribution`: How acoustic substeps are distributed across the
   three WS-RK3 stages.
+- `open_boundary_relaxation`: Per-substep relaxation factor ``α \\in (0, 1]``
+  applied at the outermost open-boundary cell of ``ρ′,(ρθ)′`` to enforce the
+  prescribed wall value across the acoustic substeps. Default ``α = 0.5``,
+  matching FV3-LAM's outermost-blend-row weight (``\\approx 0.6``). Without
+  this enforcement the perturbation halos reflect, biasing the discrete mass
+  balance under transient open-boundary inflow (issue #738). The relaxation is
+  a no-op when no side carries an active open BC (periodic, walls, impenetrable
+  defaults all skip it).
 
 # Backward integration
 
@@ -490,6 +498,7 @@ struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistri
     damping :: D
     sponge :: US
     substep_distribution :: AD
+    open_boundary_relaxation :: FT
 end
 
 function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
@@ -503,7 +512,8 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          apply_first_substep_pressure_gradient = false,
                                          damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
-                                         substep_distribution = ProportionalSubsteps())
+                                         substep_distribution = ProportionalSubsteps(),
+                                         open_boundary_relaxation = FT(0.5))
 
     damping isa AcousticDampingStrategy ||
         throw(ArgumentError("`damping` must be an `AcousticDampingStrategy`"))
@@ -513,6 +523,9 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
 
     acoustic_cfl > 0 ||
         throw(ArgumentError("`acoustic_cfl` must be positive (got $(acoustic_cfl))"))
+
+    0 < open_boundary_relaxation ≤ 1 ||
+        throw(ArgumentError("`open_boundary_relaxation` must be in (0, 1] (got $(open_boundary_relaxation))"))
 
     return SplitExplicitTimeDiscretization(
         substeps,
@@ -526,6 +539,7 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
         convert_acoustic_parameter(FT, damping),
         convert_acoustic_parameter(FT, sponge),
         substep_distribution,
+        convert(FT, open_boundary_relaxation),
     )
 end
 
