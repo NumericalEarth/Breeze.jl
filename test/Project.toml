@@ -25,6 +25,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 Breeze = {path = ".."}
+Metal = {url = "https://github.com/JuliaGPU/Metal.jl.git", rev = "tb/dump"}
 
 [compat]
 Adapt = "4.3.0"
@@ -37,7 +38,7 @@ Documenter = "1.15"
 Enzyme = "0.13.118"
 ExplicitImports = "1.13"
 GPUArraysCore = "0.2"
-GPUCompiler = "=1.13.1"
+GPUCompiler = "=1.13.1, 1.13"
 Logging = "<0.0.1, 1"
 Metal = "1.9"
 NCDatasets = "0.14"
