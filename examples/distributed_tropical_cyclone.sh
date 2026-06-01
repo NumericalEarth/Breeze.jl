@@ -70,6 +70,9 @@ HEATING="${HEATING:-0}"          # 1 = rainband heating on, 0 = spinup
 NCCL="${NCCL:-1}"                # 1 = NCCL communicator, 0 = MPI
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-6}"  # checkpoint cadence, sim-hours
 RESTART="${RESTART:-0}"          # 1 = pick up from latest checkpoint
+DT="${DT:-0.4}"                  # fixed time step, s (wizard is buggy on distributed face fields)
+DIAGNOSE="${DIAGNOSE:-0}"        # 1 = print per-rank velocity/momentum extrema after set!
+OUTPUT_DIR="${OUTPUT_DIR:-}"     # override output/checkpoint dir (default: $SCRATCH/tc_distributed)
 
 echo "=========================================="
 echo "Distributed TC rainband -- Perlmutter"
@@ -96,6 +99,9 @@ srun --ntasks="${NGPUS}" --gpu-bind=none \
         --output-interval "${OUTPUT_INTERVAL}" \
         --benchmark-steps "${BENCHMARK_STEPS}" \
         --checkpoint-interval "${CHECKPOINT_INTERVAL}" \
+        --dt "${DT}" \
+        ${OUTPUT_DIR:+--output-dir "${OUTPUT_DIR}"} \
+        $([ "${DIAGNOSE}" = "1" ] && echo "--diagnose") \
         $([ "${HEATING}" = "1" ] && echo "--heating") \
         $([ "${RESTART}" = "1" ] && echo "--restart") \
         $([ "${NCCL}" = "0" ] && echo "--no-nccl")

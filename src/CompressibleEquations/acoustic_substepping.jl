@@ -521,7 +521,11 @@ function compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_
         min(Δx, Δy)
     end
 
-    return max(1, ceil(Int, abs(FT(Δt)) * ℂᵃᶜ / (ν * Δx_min)))
+    n = abs(FT(Δt)) * ℂᵃᶜ / (ν * Δx_min)
+    isfinite(n) || throw(ArgumentError("compute_acoustic_substeps got non-finite Δt = $Δt \
+        (Δx_min = $Δx_min). Usually a CFL/velocity collapse — on a distributed grid, check \
+        that all ranks agree on Δt and that the velocity field was set correctly."))
+    return max(1, ceil(Int, n))
 end
 
 @inline acoustic_substeps(N::Int, grid, Δt, constants, acoustic_cfl) = N

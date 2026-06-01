@@ -78,6 +78,9 @@ benchmark_steps = parse(Int,     argval("--benchmark-steps", "0")) # >0: time N 
 warmup_steps    = parse(Int,     argval("--warmup-steps", "3"))   # warmup steps before benchmark window
 checkpoint_interval = parse(Float64, argval("--checkpoint-interval", "6")) # checkpoint cadence, hours
 restart         = "--restart" in ARGS                             # pick up from latest checkpoint
+fixed_dt        = parse(Float64, argval("--dt", "0.4"))           # fixed time step, s (wizard is buggy on distributed)
+use_wizard      = "--cfl-wizard" in ARGS                          # opt into the (currently buggy) CFL wizard
+diagnose        = "--diagnose" in ARGS                            # print per-rank velocity/momentum extrema after set!
 benchmark_dt    = parse(Float64, argval("--benchmark-dt", "0.5")) # fixed Δt during benchmark, s
 
 Oceananigans.defaults.FloatType = FT
@@ -500,6 +503,22 @@ checkpoint("after AtmosphereModel (before set!)")
 set!(model; u = uᵢ, v = vᵢ, T = Tᵢ, ρ = ρᵢ)
 checkpoint("after set!")
 
+## DIAGNOSTIC (--diagnose): per-rank LOCAL vs GLOBAL velocity/momentum extrema.
+## This showed the fields are correct locally but the distributed maximum(abs, ·)
+## over face fields returns flaky/zero GLOBAL values — the actual bug.
+diagnose && let
+    umax_loc  = maximum(abs, Array(interior(model.velocities.u)))
+    vmax_loc  = maximum(abs, Array(interior(model.velocities.v)))
+    ρumax_loc = maximum(abs, Array(interior(model.momentum.ρu)))
+    ρvmax_loc = maximum(abs, Array(interior(model.momentum.ρv)))
+    vmax_glob = maximum(abs, model.velocities.v)   # collective
+    umax_glob = maximum(abs, model.velocities.u)   # collective
+    @info @sprintf("[DIAG rank %02d] local max|u|=%.2f |v|=%.2f  |ρu|=%.1f |ρv|=%.1f   GLOBAL max|u|=%.2f |v|=%.2f",
+                   rank, umax_loc, vmax_loc, ρumax_loc, ρvmax_loc, umax_glob, vmax_glob)
+    flush(stderr)
+end
+MPI.Barrier(MPI.COMM_WORLD)
+
 if rank == 0
     CUDA.reclaim()
     total_GB     = CUDA.total_memory() / 2^30
@@ -509,11 +528,24 @@ if rank == 0
 end
 
 ## ---------------------------------------------------------------------------
-## Simulation + CFL wizard (shared by benchmark and production paths)
+## Simulation + time step (shared by benchmark and production paths)
 ## ---------------------------------------------------------------------------
+##
+## We use a FIXED Δt by default. The CFL time-step wizard relies on a global
+## maximum(abs, velocity) reduction, and that distributed reduction is currently
+## buggy for FACE fields (Oceananigans glw/nccl-distributed-solver): it returns a
+## flaky/zero global value even though the local fields are correct, which drives
+## Δt → Inf and crashes the acoustic substep count. The fields and dynamics are
+## fine — only the wizard's reduction is broken — so a fixed Δt runs correctly.
+## Opt back into the wizard with --cfl-wizard once that reduction is fixed.
 
-simulation = Simulation(model; Δt = benchmark_dt, stop_time = stop_time_hours * hours)
-conjure_time_step_wizard!(simulation, cfl = 0.5)
+simulation = Simulation(model; Δt = fixed_dt, stop_time = stop_time_hours * hours)
+if use_wizard
+    conjure_time_step_wizard!(simulation, cfl = 0.5)
+    rank == 0 && @warn "CFL wizard enabled, but distributed maximum(abs, ·) over face fields is buggy — Δt may go to Inf."
+else
+    rank == 0 && @info @sprintf("Fixed Δt = %.3f s (wizard disabled: distributed face-field reduction is buggy)", fixed_dt)
+end
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 u, v, w = model.velocities
