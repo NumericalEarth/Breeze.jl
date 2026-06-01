@@ -251,7 +251,7 @@ jobs:
         if: ${{ ! github.event.pull_request.head.repo.fork }}
         id: generate_token
         with:
-          app-id: "${{ secrets.NUMTERRA_BOT_ID }}"
+          client-id: "${{ secrets.NUMTERRA_BOT_ID }}"
           private-key: "${{ secrets.NUMTERRA_BOT_PRIVATE_KEY }}"
           owner: NumericalEarth
           repositories: |
