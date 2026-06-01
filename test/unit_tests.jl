@@ -189,6 +189,58 @@ using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, MoistureMassFra
     @test max_error <= FT(1e-3)  # K; pre-fix this is several K in condensate cells
 end
 
+# The solver parameters must actually gate the EOS iteration. With temperature_maxiter = 0
+# the fixed-point loop never runs, so condensate cells keep the un-iterated value
+# (T_dry + latent-heat correction) and are several K off the canonical inversion. This
+# fails if the kernel ignores the parameter (e.g. a hardcoded loop count).
+@testset "Compressible EOS solver parameters gate the iteration [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    grid = RectilinearGrid(default_arch;
+                           size = (8, 8, 8),
+                           halo = (5, 5, 5),
+                           x = (0, 100),
+                           y = (0, 100),
+                           z = (0, 2000))
+
+    constants = ThermodynamicConstants(FT)
+    pˢᵗ = FT(100000)
+
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=2);
+                                    surface_pressure = FT(100000),
+                                    standard_pressure = pˢᵗ,
+                                    reference_potential_temperature = FT(290),
+                                    temperature_maxiter = 0)
+
+    model = AtmosphereModel(grid; dynamics,
+                            microphysics = SaturationAdjustment(),
+                            thermodynamic_constants = constants,
+                            timestepper = :AcousticRungeKutta3)
+
+    set!(model, θ = FT(290), qᵛ = FT(0.025), ρ = model.dynamics.reference_state.density)
+
+    ρ  = Array(interior(model.dynamics.density))
+    p  = Array(interior(model.dynamics.pressure))
+    T  = Array(interior(model.temperature))
+    ρθ = Array(interior(model.formulation.potential_temperature_density))
+    qᵛ = Array(interior(model.microphysical_fields.qᵛ))
+    qˡ = Array(interior(model.microphysical_fields.qˡ))
+    qⁱ = Array(interior(model.microphysical_fields.qⁱ))
+
+    @test maximum(qˡ) > 0  # condensate must form for the test to be meaningful
+
+    max_error = zero(FT)
+    for idx in eachindex(T)
+        q = MoistureMassFractions(qᵛ[idx], qˡ[idx], qⁱ[idx])
+        θ = ρθ[idx] / ρ[idx]
+        𝒰 = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, p[idx])
+        max_error = max(max_error, abs(temperature(𝒰, constants) - T[idx]))
+    end
+
+    # With the loop disabled, condensate cells are off by several K (>> the converged 1e-3).
+    @test max_error > FT(0.1)
+end
+
 #####
 ##### ThermodynamicFormulations
 #####

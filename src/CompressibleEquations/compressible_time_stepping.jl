@@ -153,14 +153,21 @@ end
     # a buoyancy inconsistent with the anelastic core (which inverts the same θ
     # definition exactly). Solving the coupled (T, p) system gives the fixed point
     #   T = D T^κ + L ,   D ≡ θ (ρ Rᵐ / pˢᵗ)^κ ,
-    # which we iterate to convergence (contraction rate ≈ κ ≈ 0.28). For dry/rest
-    # cells (L = 0) the result is `T_dry` bit-for-bit, preserving the exact
-    # discrete rest atmosphere.
+    # which we iterate by fixed-point iteration (contraction rate ≈ κ ≈ 0.28),
+    # bounded by the user-configurable `dynamics.temperature_tolerance` (relative
+    # step |ΔT|/T) and `dynamics.temperature_maxiter`. For dry/rest cells (L = 0)
+    # the result is `T_dry` bit-for-bit, preserving the exact discrete rest atmosphere.
     L = (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
     D = θ * (ρ * Rᵐ / pˢᵗ)^κ
     T = T_dry + L
-    for _ in 1:8
-        T = D * T^κ + L
+    δ = dynamics.temperature_tolerance
+    ΔT = T          # initialize so the first convergence check runs
+    iter = 0
+    while abs(ΔT) > δ * T && iter < dynamics.temperature_maxiter
+        Tⁿ = D * T^κ + L
+        ΔT = Tⁿ - T
+        T = Tⁿ
+        iter += 1
     end
     T = ifelse(L == 0, T_dry, T)
 
