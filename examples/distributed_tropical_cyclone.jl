@@ -599,12 +599,21 @@ function progress(sim)
 end
 add_callback!(simulation, progress, TimeInterval(30minutes))
 
-## Per-rank 3D output. Each rank writes its own x-slab; the post-processing job
-## reassembles them. Saving u, v, w, T, ρ — the quantities the YD19 azimuthal-mean
-## analysis consumes.
+## Per-rank x-y SLICE output at a few z-levels (full 3D is multi-TB at production
+## scale; the YD19 plan-view + azimuthal-average analysis only needs horizontal
+## slices). Each rank writes its own x-slab; the figure job reassembles them.
+## Levels: surface, 2, 3.6, 6, 10 km — the YD19 plan-view analysis heights.
+## NB: `view` windows the Field (never `interior`), so the writer stores a slice.
 T_field = model.temperature
-ρ_field = model.dynamics.density
-outputs = (; u, v, w, T = T_field, ρ = ρ_field)
+klev(zt) = argmin(abs.(z_centers .- zt))
+ks = (surface = 1, z2km = klev(2000), z36 = klev(3600), z6km = klev(6000), z10km = klev(10000))
+slice(field, k) = view(field, :, :, k)
+outputs = NamedTuple()
+for (name, k) in pairs(ks)
+    names = (Symbol(:u_, name), Symbol(:v_, name), Symbol(:w_, name), Symbol(:T_, name))
+    vals  = (slice(u, k), slice(v, k), slice(w, k), slice(T_field, k))
+    global outputs = merge(outputs, NamedTuple{names}(vals))
+end
 
 stage = with_heating ? "heated" : "spinup"
 output_prefix = joinpath(output_dir,
@@ -631,8 +640,8 @@ simulation.output_writers[:checkpointer] = Checkpointer(model;
                                                         cleanup = true,
                                                         overwrite_existing = true)
 
-rank == 0 && @info @sprintf("Running %s stage to %.0f h, 3D output every %.1f h, checkpoint every %.1f h%s → %s",
-                            stage, stop_time_hours, output_interval, checkpoint_interval,
+rank == 0 && @info @sprintf("Running %s stage to %.0f h, x-y slices (%d fields) every %.2f h, checkpoint every %.1f h%s → %s",
+                            stage, stop_time_hours, length(outputs), output_interval, checkpoint_interval,
                             restart ? " (RESTART)" : "", output_prefix)
 
 run!(simulation; pickup = restart)
