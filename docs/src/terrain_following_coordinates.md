@@ -705,142 +705,79 @@ changes is *which* fields go into the kernels (contravariant vs Cartesian
 momentum) and *which* references are subtracted (3D ``p_\text{ref}, \rho_\text{ref}``
 vs 1D background).
 
-## Pitfalls: the IC gotcha that bites everyone
+## Pitfalls: altitude-dependent initial conditions
 
 > *This is the most important section on the page. Read it before you write any
 > validation script that initialises a stratified resting atmosphere over
 > terrain.*
 
-### Symptom
+On a TFVD grid, `rnode` and `znode` are different. A profile such as
+``\theta(z)``, ``q_v(z)``, or a height-dependent background wind must be
+evaluated at the physical altitude `znode`, not at the reference coordinate
+``\zeta``. Breeze extends Oceananigans' `node` for TFVD grids so user-facing
+`set!` calls receive the physical altitude.
 
-You set up a Schär-type mountain-wave validation with
-
-```julia
-θ_of_z(z)   = θ₀ * exp(N² * z / g)
-ρ           = model.dynamics.density
-ρθ          = thermodynamic_density(model.formulation)
-parent(ρ)  .= parent(model.dynamics.terrain_reference_density)
-set!(ρθ, (x, z) -> θ_of_z(z))
-parent(ρθ) .*= parent(ρ)
-```
-
-— i.e. ``\rho = \rho_\text{ref}``, ``\rho \theta = \rho_\text{ref} \cdot
-\theta(z)`` — and expect the discrete state to sit at rest. Instead, with
-``u = 0``, the model spontaneously generates ``\max|u| \to 1.3 \text{ m/s}`` and
-``\max|w| \to 1.0 \text{ m/s}`` within ~3 minutes. With ``u = 10 \text{ m/s}``
-background flow, you see a surface-bound ``w``-column directly over the
-mountain that other models (CM1, WRF) do not produce.
-
-### Cause
-
-`set!(field, f)` evaluates ``f(x, y, z)`` at the position returned by
-Oceananigans' `node(i, j, k, grid, ℓx, ℓy, ℓz)`. On a TFVD grid, **`node` uses
-`rnode` (the reference ``\zeta``) for the third coordinate, NOT `znode` (the
-physical altitude).** Inspect the source
-(`Oceananigans/src/Grids/nodes_and_spacings.jl`):
+The recommended hydrostatic thermal IC is therefore:
 
 ```julia
-@inline _node(i, j, k, grid, ℓx, ℓy, ℓz) = (ξnode(i, j, k, grid, ℓx, ℓy, ℓz),
-                                            ηnode(i, j, k, grid, ℓx, ℓy, ℓz),
-                                            rnode(i, j, k, grid, ℓx, ℓy, ℓz))
+θ_profile(x, z) = θ₀ * exp(N² * z / g)
+
+set!(model,
+     ρ = model.dynamics.terrain_reference_density,
+     θ = θ_profile,
+     u = U,
+     v = 0,
+     w = 0,
+     enforce_mass_conservation = false)
 ```
 
-So `set!(ρθ, (x, z) -> θ_of_z(z))` actually writes ``\rho_\text{ref}(i, j, k)
-\cdot \theta(\zeta_k)`` — *not* ``\rho_\text{ref}(i, j, k) \cdot \theta(z_\text{phys}(i, j, k))``.
-Over the summit of a 250 m hill, ``\zeta_1 = 75 \text{ m}`` while
-``z_\text{phys} = 311 \text{ m}``, so for an ``N = 0.01 \text{ s}^{-1}``
-stratified profile
-
-```math
-\Delta\theta = \theta_0 \left(e^{N^2 (z_\text{phys} - \zeta) / g} - 1\right)
-\approx 0.68 \text{ K} .
-```
-
-Meanwhile `compute_terrain_reference_state!` uses `znode` — the *physical*
-altitude — so ``\rho_\text{ref}`` and ``p_\text{ref}`` are constructed
-consistent with ``\theta(z_\text{phys})``.
-
-The result: ``\rho`` matches ``\rho_\text{ref}`` exactly, but ``\rho \theta``
-doesn't match what would be hydrostatically balanced with ``p_\text{ref}``.
-After `update_state!` runs the local-Exner pressure formula
-``p = p^* (R \rho \theta / p^*)^\gamma`` on this inconsistent ``\rho \theta``,
-you get
-
-```math
-p_\text{IC} \neq p_\text{ref}
-```
-
-by ~0.3 % over the mountain. The slow horizontal PGF then computes ``\partial_x
-(p_\text{IC} - p_\text{ref}) \neq 0`` and drives a 0.2 m/s² spurious horizontal
-acceleration at the surface — which integrates to the column you see at 1
-minute.
-
-### Diagnostic
-
-A short script reveals the imbalance at the IC, before any time integration:
+This keeps ``\rho``, ``\rho\theta``, and the terrain reference pressure
+consistent with the same physical-height profile. After `update_state!`, a rest
+state should satisfy
 
 ```julia
 using Oceananigans.Fields: interior
-parent(ρ) .= parent(model.dynamics.terrain_reference_density)
-set!(ρθ, (x, z) -> θ_of_z(z))      # <-- the bug
-parent(ρθ) .*= parent(ρ)
-set!(model, u = 0, v = 0, w = 0)
-update_state!(model)
 
-p_int    = interior(model.dynamics.pressure)
-pref_int = interior(model.dynamics.terrain_reference_pressure)
-@show maximum(abs, p_int .- pref_int)            # → 324.35 Pa, ~0.33 %
+p     = interior(model.dynamics.pressure)
+p_ref = interior(model.dynamics.terrain_reference_pressure)
+
+isapprox(p, p_ref; atol = 1e-9)   # → true for a well-balanced IC
 ```
 
-The horizontal PGF stencil gives the corresponding spurious force:
+`isapprox` (with a small absolute tolerance, since the perturbation should be
+machine zero) is the idiomatic way to test the balance — equality `==` is too
+strict for floating-point round-off, and a hand-rolled
+`maximum(abs, p .- p_ref) < tol` requires you to pick `tol` and read out a
+scalar. If this check returns `false` for a nominally resting hydrostatic IC,
+the first thing to suspect is whether some altitude-dependent quantity
+bypassed `set!` or was evaluated from `rnode`.
+
+### The failure mode this avoids
+
+If ``\rho = \rho_\text{ref}`` but ``\theta`` is evaluated at ``\zeta`` instead
+of ``z_\text{phys}``, then ``\rho\theta`` no longer matches the terrain
+reference state. Over the summit of a 250 m hill, ``\zeta_1`` and
+``z_\text{phys}`` can differ by hundreds of meters; for an
+``N = 0.01 \text{ s}^{-1}`` stratification this is an ``O(1 \text{ K})``
+potential-temperature error in the lowest cell.
+
+After `update_state!` applies the local equation of state, the IC pressure no
+longer equals ``p_\text{ref}``. The slow horizontal pressure-gradient force sees
+``\partial_x(p - p_\text{ref}) \neq 0`` and drives a surface-bound velocity
+column before the intended mountain wave has had time to develop.
+
+The same diagnostic should expose this immediately:
 
 ```julia
-using Breeze.CompressibleEquations: terrain_x_pressure_gradient
-stencil = model.dynamics.terrain_metrics.pressure_gradient_stencil
-nx, ny, nz = size(grid)
-pgf = zeros(nx, ny, nz)
-for ii in 1:nx, jj in 1:ny, kk in 1:nz
-    pgf[ii, jj, kk] = terrain_x_pressure_gradient(
-        ii, jj, kk, grid, model.dynamics,
-        stencil, model.dynamics.terrain_reference_pressure)
-end
-@show maximum(abs, pgf)                           # → 0.262 Pa/m  (~0.22 m/s²)
+p     = interior(model.dynamics.pressure)
+p_ref = interior(model.dynamics.terrain_reference_pressure)
+
+isapprox(p, p_ref; atol = 1e-9)   # → false when the IC is out of balance
 ```
 
-Both should be machine-zero for a balanced rest state.
-
-### Fix
-
-Use a kernel that evaluates ``\theta`` at the *physical* altitude via `znode`:
-
-```julia
-using Oceananigans.Grids: znode
-using Oceananigans.Utils: launch!
-using KernelAbstractions: @kernel, @index
-
-@kernel function _init_ρθ_at_zphys!(ρθ, grid, ρ, θ_function::F) where F
-    i, j, k = @index(Global, NTuple)
-    z_phys = znode(i, j, k, grid, Center(), Center(), Center())
-    @inbounds ρθ[i, j, k] = ρ[i, j, k] * θ_function(z_phys)
-end
-
-# IC:
-parent(ρ) .= parent(model.dynamics.terrain_reference_density)
-launch!(architecture(grid), grid, :xyz, _init_ρθ_at_zphys!, ρθ, grid, ρ, θ_of_z)
-```
-
-Verify:
-
-```julia
-update_state!(model)
-@show maximum(abs, interior(model.dynamics.pressure) .-
-                   interior(model.dynamics.terrain_reference_pressure))
-# → 4.4e-11 Pa, ratio ~ 1e-15
-```
-
-— now at machine precision. The discrete state is in exact hydrostatic balance
-with the reference state and no spurious force will drive ``u``, ``w`` away
-from rest.
+Both the pressure mismatch and the corresponding resting-state PGF should be
+machine-zero for a balanced IC; `isapprox(...; atol=…)` flips to `false` once
+the imbalance exceeds round-off.
 
 ### Quantitative impact in a real validation
 
@@ -858,22 +795,12 @@ The broken IC has both (a) the real Schär surface signal and (b) a broad
 spurious imbalance signal that smears across the whole domain. Fixing the IC
 removes (b), leaving (a) — which matches CM1's structure.
 
-### Why the same bug doesn't bite flat models
+### Why the same issue doesn't bite flat models
 
 On a flat-terrain grid, `rnode == znode` at every cell, so `set!(field, f(z))`
-is correct. The bug is specific to terrain-following coordinates — and to *any*
-field whose value depends on physical altitude (``\rho\theta``, ``q_v``,
-horizontal velocity profile, prescribed sponge state, …).
-
-### When in doubt: always use `znode`
-
-The general rule is: **on a terrain-following grid, write your IC kernel
-explicitly with `znode` for any altitude-dependent quantity.** `set!(field, f)`
-is fine for fields that depend only on `(x, y)` or on grid index, but for
-``z``-stratified fields it is a footgun.
-
-We anticipate adding a Breeze helper for this common pattern; until then, the
-kernel pattern above is the recommended idiom.
+and `set!(model, f(z))` are equivalent. The issue is specific to
+terrain-following coordinates and to quantities whose values depend on physical
+altitude.
 
 ## Adding a new formulation
 
@@ -905,17 +832,19 @@ attach to dynamics) automatically.
 ## Worked example: Schär mountain wave
 
 The full validation script is
-[`validation_output/substepper/terrain_schar_mountain_wave_validation.jl`](https://github.com/CliMA/Breeze.jl/blob/main/validation_output/substepper/terrain_schar_mountain_wave_validation.jl).
+[`validation_output/substepper/terrain_schar_mountain_wave_validation.jl`](https://github.com/NumericalEarth/Breeze.jl/blob/main/validation_output/substepper/terrain_schar_mountain_wave_validation.jl).
 Here's the minimal stand-alone version:
 
 ```julia
 using Oceananigans, Breeze
 using Breeze.TerrainFollowingDiscretization:
     TerrainFollowingVerticalDiscretization, SLEVE, materialize_terrain!,
-    build_terrain_metrics, SlopeOutsideInterpolation
+    build_terrain_metrics, SlopeOutsideInterpolation, ∂z∂x
 using Breeze.AtmosphereModels: AtmosphereModel
 using Breeze.CompressibleEquations: CompressibleDynamics, SplitExplicitTimeDiscretization
-using Oceananigans.Grids: znode
+using Oceananigans: Center, Face
+using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑzᵃᵃᶠ
+using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
 
@@ -930,7 +859,7 @@ const p₀     = 1e5
 const h₀     = 250.0
 const a      = 5e3
 const λ      = 4e3
-θ_of_z(z)    = θ₀ * exp(N² * z / g)
+θ_profile(x, z) = θ₀ * exp(N² * z / g)
 hill(x, y)   = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 
 # ---- grid ----
@@ -953,18 +882,13 @@ metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
 td = SplitExplicitTimeDiscretization(acoustic_cfl = 0.5)
 dyn = CompressibleDynamics(td;
     terrain_metrics                  = metrics,
-    reference_potential_temperature  = θ_of_z,
+    reference_potential_temperature  = θ_profile,
     surface_pressure                 = p₀,
 )
-model = AtmosphereModel(grid; dynamics = dyn, timestepper = :AcousticRungeKutta3)
+model = AtmosphereModel(grid; dynamics = dyn, advection = WENO(order = 9),
+                        timestepper = :AcousticRungeKutta3)
 
 # ---- IC: at-rest plus uniform U ----
-@kernel function _init_ρθ_at_zphys!(ρθ, grid, ρ, θ_function::F) where F
-    i, j, k = @index(Global, NTuple)
-    z_phys = znode(i, j, k, grid, Center(), Center(), Center())
-    @inbounds ρθ[i, j, k] = ρ[i, j, k] * θ_function(z_phys)
-end
-
 @kernel function _init_terrain_bottom_face_w!(ρw, w, ρ, ρu, grid)
     i, j = @index(Global, NTuple)
     k = 1
@@ -978,14 +902,14 @@ end
     end
 end
 
-ρ  = model.dynamics.density
-ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
+set!(model,
+     ρ = model.dynamics.terrain_reference_density,
+     θ = θ_profile,
+     u = U,
+     v = 0,
+     w = 0,
+     enforce_mass_conservation = false)
 
-parent(ρ) .= parent(model.dynamics.terrain_reference_density)
-launch!(architecture(grid), grid, :xyz, _init_ρθ_at_zphys!,
-        ρθ, grid, ρ, θ_of_z)
-
-set!(model, u = U, v = 0, w = 0)
 launch!(architecture(grid), grid, :xy, _init_terrain_bottom_face_w!,
         model.momentum.ρw, model.velocities.w,
         model.dynamics.density, model.momentum.ρu, grid)
@@ -999,13 +923,13 @@ run!(simulation)
 
 The two patterns to copy verbatim into your own scripts are:
 
-  1. `_init_ρθ_at_zphys!` — the only correct way to initialise an
-     altitude-stratified prognostic on a TFVD grid.
+  1. `set!(model, ρ = model.dynamics.terrain_reference_density,
+     θ = θ_profile, ...)` — the hydrostatic thermal IC path.
   2. `_init_terrain_bottom_face_w!` — the kinematic BC, applied once at IC so
      ``\rho \tilde{w} = 0`` from the very first substep.
 
-Both `@kernel`s belong in your script (or in a project-local utility module),
-not in the user code surrounding `set!` calls.
+The bottom-face kernel belongs in your script (or in a project-local utility
+module), after the `set!` call has filled the density and horizontal momentum.
 
 ## API reference
 
