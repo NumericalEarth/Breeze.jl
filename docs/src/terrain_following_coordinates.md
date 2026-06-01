@@ -380,10 +380,12 @@ grid = RectilinearGrid(
 #    - sets z_top on the formulation.
 hill(x, y) = 250 * exp(-(x / 5e3)^2) * cos(π * x / 4e3)^2
 materialize_terrain!(grid, hill)
-
-# 4. Build the TerrainMetrics (carries PGF stencil + diagnostic h)
-metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
 ```
+
+The pressure-gradient stencil ([`TerrainMetrics`](@ref)) is built automatically by
+`CompressibleDynamics` from the grid; the default stencil is
+[`SlopeOutsideInterpolation`](@ref). Override with
+`CompressibleDynamics(...; slope_stencil = SlopeInsideInterpolation())` when desired.
 
 ## Discrete operators
 
@@ -826,9 +828,9 @@ end
 # substitute the new b, b′.
 ```
 
-Then `materialize_terrain!` and `build_terrain_metrics` will dispatch the
-standard pipeline (evaluate ``h``, fill ``\partial_x h, \partial_y h``,
-attach to dynamics) automatically.
+Then `materialize_terrain!` followed by `CompressibleDynamics` will dispatch the
+standard pipeline (evaluate ``h``, fill ``\partial_x h, \partial_y h``, build the
+PGF stencil, attach to dynamics) automatically.
 
 ## Worked example: Schär mountain wave
 
@@ -840,7 +842,7 @@ Here's the minimal stand-alone version:
 using Oceananigans, Breeze
 using Breeze.TerrainFollowingDiscretization:
     TerrainFollowingVerticalDiscretization, TwoLevelDecay, materialize_terrain!,
-    build_terrain_metrics, SlopeOutsideInterpolation, ∂z∂x
+    SlopeOutsideInterpolation, ∂z∂x
 using Breeze.AtmosphereModels: AtmosphereModel
 using Breeze.CompressibleEquations: CompressibleDynamics, SplitExplicitTimeDiscretization
 using Oceananigans: Center, Face
@@ -877,12 +879,12 @@ grid = RectilinearGrid(
     topology = (Periodic, Flat, Bounded),
 )
 materialize_terrain!(grid, hill)
-metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
 
 # ---- dynamics ----
+# `CompressibleDynamics` auto-builds the PGF stencil from the TFVD grid; default
+# is `SlopeOutsideInterpolation()`, override with `slope_stencil = ...`.
 td = SplitExplicitTimeDiscretization(acoustic_cfl = 0.5)
 dyn = CompressibleDynamics(td;
-    terrain_metrics                  = metrics,
     reference_potential_temperature  = θ_profile,
     surface_pressure                 = p₀,
 )
@@ -937,10 +939,11 @@ module), after the `set!` call has filled the density and horizontal momentum.
   - [`TerrainFollowingVerticalDiscretization`](@ref) — terrain-following vertical coordinate
   - [`LinearDecay`](@ref), [`TwoLevelDecay`](@ref) — basis formulations
   - [`materialize_terrain!`](@ref) — evaluate ``h``, fill slopes
-  - [`build_terrain_metrics`](@ref) — attach PGF stencil
-  - [`TerrainMetrics`](@ref)
+  - [`TerrainMetrics`](@ref) — PGF stencil object (built automatically by
+    `CompressibleDynamics` on TFVD grids; `build_terrain_metrics` is also
+    exported as an advanced/manual entry point)
   - [`SlopeOutsideInterpolation`](@ref), [`SlopeInsideInterpolation`](@ref) —
-    PGF stencil flavours
+    PGF stencil flavours (pass via `slope_stencil = ...` to `CompressibleDynamics`)
   - [`compute_terrain_reference_state!`](@ref) — discrete hydrostatic reference
 
 ## References

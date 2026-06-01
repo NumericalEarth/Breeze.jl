@@ -84,8 +84,7 @@ using Oceananigans
 using Breeze.TerrainFollowingDiscretization: SlopeInsideInterpolation,
                                               TerrainFollowingVerticalDiscretization,
                                               TwoLevelDecay,
-                                              materialize_terrain!,
-                                              build_terrain_metrics
+                                              materialize_terrain!
 using Oceananigans.Grids: xnode, xnodes, znode
 using Oceananigans.Units
 using Oceananigans: Face, Center
@@ -165,11 +164,12 @@ grid = RectilinearGrid(arch, size = (Nx, Nz),
 # ## Terrain
 #
 # Apply the Schär mountain profile to the grid. This materializes the terrain
-# components inside the grid's `TerrainFollowingVerticalDiscretization` and returns a
-# [`TerrainMetrics`](@ref) object for the pressure-gradient stencil.
+# components inside the grid's `TerrainFollowingVerticalDiscretization`. The
+# pressure-gradient stencil ([`TerrainMetrics`](@ref)) is built automatically by
+# `CompressibleDynamics` from the grid; the default is `SlopeOutsideInterpolation`
+# and is overridden below with `slope_stencil = SlopeInsideInterpolation()`.
 
 materialize_terrain!(grid, hill)
-metrics = build_terrain_metrics(grid, SlopeInsideInterpolation())
 
 # ## Plot: Terrain-following coordinate surfaces
 #
@@ -230,19 +230,20 @@ const sponge_damping_rate = 0.1
 # ## Model construction
 #
 # Build a compressible model with split-explicit acoustic substepping, 9th-order WENO
-# advection, and terrain corrections. Passing `terrain_metrics` to [`CompressibleDynamics`](@ref)
-# activates the terrain-following physics: contravariant vertical velocity, corrected
-# pressure gradient, and terrain-aware divergence. The `reference_potential_temperature`
-# enables a perturbation pressure approach for the horizontal pressure gradient that
-# reduces the truncation error inherent in terrain-following coordinates
-# ([Klemp (2011)](@cite Klemp2011)).
+# advection, and terrain corrections. On a `TerrainFollowingVerticalDiscretization`
+# grid, [`CompressibleDynamics`](@ref) automatically activates the terrain-following
+# physics — contravariant vertical velocity, corrected pressure gradient, terrain-aware
+# divergence — and builds the pressure-gradient stencil with the `slope_stencil` kwarg.
+# The `reference_potential_temperature` enables a perturbation pressure approach for
+# the horizontal pressure gradient that reduces the truncation error inherent in
+# terrain-following coordinates ([Klemp (2011)](@cite Klemp2011)).
 
 time_discretization = SplitExplicitTimeDiscretization(acoustic_cfl = 0.5,
                                                       sponge = UpperSponge(damping_rate = sponge_damping_rate,
                                                                            depth = sponge_depth))
 
 dynamics = CompressibleDynamics(time_discretization;
-                                terrain_metrics = metrics,
+                                slope_stencil = SlopeInsideInterpolation(),
                                 surface_pressure = surface_pressure,
                                 reference_potential_temperature = potential_temperature_profile)
 

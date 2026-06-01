@@ -2,6 +2,11 @@
 ##### CompressibleDynamics definition
 #####
 
+using Breeze.TerrainFollowingDiscretization: TerrainMetrics,
+                                              TerrainFollowingVerticalDiscretization,
+                                              SlopeOutsideInterpolation,
+                                              build_terrain_metrics
+
 """
 $(TYPEDEF)
 
@@ -60,12 +65,17 @@ Keyword Arguments
   hydrostatically-balanced reference state used in base-state subtraction. Can be a constant `θ₀`
   or a function `θ(z)`. Default: `nothing` (no base-state correction).
   When provided, an [`ExnerReferenceState`](@ref) is built during materialization.
+- `slope_stencil`: Pressure-gradient slope-interpolation stencil for terrain-following grids.
+  Default: [`SlopeOutsideInterpolation`](@ref). Ignored on non-terrain-following grids.
+- `terrain_metrics`: Escape hatch — pass a pre-built [`TerrainMetrics`](@ref) to bypass the
+  automatic build. Default: `nothing` (auto-build from the grid using `slope_stencil`).
 """
 function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               standard_pressure = 1e5,
                               surface_pressure = 101325.0,
                               reference_potential_temperature = nothing,
                               reference_temperature = nothing,
+                              slope_stencil = SlopeOutsideInterpolation(),
                               terrain_metrics = nothing) where TD
 
     FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
@@ -78,10 +88,14 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     else
         reference_potential_temperature
     end
-    # contravariant fields, terrain_reference_pressure, and terrain_reference_density
-    # are built later in materialize_dynamics.
+    # Stash either a pre-built TerrainMetrics (escape hatch) or the stencil flavor in the
+    # `terrain_metrics` slot. `materialize_dynamics` resolves it: a stencil instance triggers
+    # `build_terrain_metrics(grid, stencil)` for TFVD grids; on non-TFVD grids the slot is
+    # zeroed regardless. contravariant fields, terrain_reference_pressure, and
+    # terrain_reference_density are built later in materialize_dynamics.
+    terrain_metrics_spec = terrain_metrics === nothing ? slope_stencil : terrain_metrics
     return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, ref_spec,
-                                terrain_metrics,
+                                terrain_metrics_spec,
                                 nothing, nothing, nothing, nothing)
 end
 
@@ -131,7 +145,18 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     # other columns that generates spurious vertical accelerations. Instead, terrain
     # grids use only the 3D terrain_reference_pressure for the horizontal PG.
     ref_spec = dynamics.reference_state
-    terrain_metrics = dynamics.terrain_metrics
+
+    # Resolve terrain metrics: nothing on non-TFVD grids; on TFVD grids, a pre-built
+    # `TerrainMetrics` passes through, anything else (a stencil flavor like
+    # `SlopeOutsideInterpolation()`) drives `build_terrain_metrics(grid, ·)`.
+    terrain_metrics_spec = dynamics.terrain_metrics
+    terrain_metrics = if grid.z isa TerrainFollowingVerticalDiscretization
+        terrain_metrics_spec isa TerrainMetrics ?
+            terrain_metrics_spec :
+            build_terrain_metrics(grid, terrain_metrics_spec)
+    else
+        nothing
+    end
 
     if ref_spec === nothing || terrain_metrics !== nothing
         reference_state = nothing
