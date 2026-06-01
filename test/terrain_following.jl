@@ -80,7 +80,8 @@ using Test
         a = 10000.0
         h(x, y) = h₀ * exp(-x^2 / a^2)
 
-        materialize_terrain!(grid, h); metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
+        materialize_terrain!(grid, h)
+        metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
 
         Δx = Lx / Nx
 
@@ -94,22 +95,21 @@ using Test
         end
     end
 
-    @testset "Terrain-following grid with CompressibleDynamics (no terrain physics)" begin
+    @testset "Non-TFVD grid leaves terrain_metrics nothing" begin
         Nx, Nz = 16, 8
         Lx, Lz = 10000.0, 5000.0
 
-        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
+        # Plain height-coordinate RectilinearGrid (no TFVD): `CompressibleDynamics`
+        # should leave terrain_metrics === nothing regardless of any kwarg.
         grid = RectilinearGrid(default_arch; size=(Nx, Nz),
-                               x=(-Lx/2, Lx/2), z=z_faces,
+                               x=(-Lx/2, Lx/2), z=(0, Lz),
                                topology=(Periodic, Flat, Bounded))
 
-        h(x, y) = 200 * exp(-x^2 / 2000^2)
-        materialize_terrain!(grid, h); metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
-
-        # Without terrain_metrics in dynamics, uses standard physics
         model = AtmosphereModel(grid; dynamics=CompressibleDynamics(ExplicitTimeStepping()))
         @test model isa AtmosphereModel
         @test model.dynamics.terrain_metrics === nothing
+        @test model.dynamics.contravariant_vertical_velocity === nothing
+        @test model.dynamics.contravariant_vertical_momentum === nothing
 
         θ₀ = 300.0
         p₀ = 101325.0
@@ -123,6 +123,34 @@ using Test
         @test isfinite(maximum(abs, model.velocities.w))
     end
 
+    @testset "CompressibleDynamics auto-builds TerrainMetrics on TFVD grid" begin
+        Nx, Nz = 16, 8
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+        materialize_terrain!(grid, (x, y) -> 200 * exp(-x^2 / 2000^2))
+
+        # Default: stencil is SlopeOutsideInterpolation()
+        model_default = AtmosphereModel(grid;
+            dynamics=CompressibleDynamics(ExplicitTimeStepping()))
+        @test model_default.dynamics.terrain_metrics isa TerrainMetrics
+        @test model_default.dynamics.terrain_metrics.pressure_gradient_stencil isa SlopeOutsideInterpolation
+
+        # Override via slope_stencil kwarg
+        model_inside = AtmosphereModel(grid;
+            dynamics=CompressibleDynamics(ExplicitTimeStepping(); slope_stencil = SlopeInsideInterpolation()))
+        @test model_inside.dynamics.terrain_metrics.pressure_gradient_stencil isa SlopeInsideInterpolation
+
+        # Escape hatch: pass a pre-built TerrainMetrics; it should pass through verbatim
+        pre_built = build_terrain_metrics(grid, SlopeInsideInterpolation())
+        model_explicit = AtmosphereModel(grid;
+            dynamics=CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics = pre_built))
+        @test model_explicit.dynamics.terrain_metrics === pre_built
+    end
+
     @testset "Terrain-following CompressibleDynamics with terrain physics" begin
         Nx, Nz = 16, 8
         Lx, Lz = 10000.0, 5000.0
@@ -133,10 +161,10 @@ using Test
                                topology=(Periodic, Flat, Bounded))
 
         h(x, y) = 200 * exp(-x^2 / 2000^2)
-        materialize_terrain!(grid, h); metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
+        materialize_terrain!(grid, h)
 
         # With terrain_metrics, physics includes terrain corrections
-        dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+        dynamics = CompressibleDynamics(ExplicitTimeStepping())
         model = AtmosphereModel(grid; dynamics)
 
         @test model isa AtmosphereModel
@@ -169,9 +197,9 @@ using Test
         h₀ = 200.0
         a = 2000.0
         h(x, y) = h₀ * exp(-x^2 / a^2)
-        materialize_terrain!(grid, h); metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
+        materialize_terrain!(grid, h)
 
-        dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+        dynamics = CompressibleDynamics(ExplicitTimeStepping())
         model = AtmosphereModel(grid; dynamics)
 
         constants = model.thermodynamic_constants
@@ -209,9 +237,8 @@ using Test
                                topology=(Periodic, Flat, Bounded))
 
         materialize_terrain!(grid, (x, y) -> 0)
-        metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
 
-        dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+        dynamics = CompressibleDynamics(ExplicitTimeStepping())
         model = AtmosphereModel(grid; dynamics)
 
         constants = model.thermodynamic_constants
@@ -236,16 +263,25 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         function flat_split_explicit_model(terrain; damping=NoDivergenceDamping())
-            z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
-            grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
-                                   x=(-Lx/2, Lx/2), z=z_faces,
-                                   topology=(Periodic, Flat, Bounded))
-            metrics = terrain ? (materialize_terrain!(grid, (x, y) -> 0); build_terrain_metrics(grid, SlopeOutsideInterpolation())) : nothing
+            # `terrain=false`: plain RectilinearGrid (no TFVD) → terrain_metrics === nothing
+            #                  via the auto-build path (only triggers on TFVD grids).
+            # `terrain=true`:  TFVD grid with h ≡ 0 → metrics auto-built; terrain physics
+            #                  runs but the slope factor is zero, so output should match.
+            grid = if terrain
+                z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
+                g = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
+                                    x=(-Lx/2, Lx/2), z=z_faces,
+                                    topology=(Periodic, Flat, Bounded))
+                materialize_terrain!(g, (x, y) -> 0)
+                g
+            else
+                RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
+                                x=(-Lx/2, Lx/2), z=(0, Lz),
+                                topology=(Periodic, Flat, Bounded))
+            end
             time_discretization = SplitExplicitTimeDiscretization(substeps=6,
                                                                   damping=damping)
-            dynamics = metrics === nothing ?
-                       CompressibleDynamics(time_discretization) :
-                       CompressibleDynamics(time_discretization; terrain_metrics=metrics)
+            dynamics = CompressibleDynamics(time_discretization)
             model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
             set!(model,
                  ρ=1,
@@ -264,7 +300,13 @@ using Test
         function assert_matching_prognostics(height_model, terrain_model)
             height_ρθ = Breeze.AtmosphereModels.thermodynamic_density(height_model.formulation)
             terrain_ρθ = Breeze.AtmosphereModels.thermodynamic_density(terrain_model.formulation)
-            zero_terrain_tolerance = 1e-24
+            # The "height" branch uses a plain RectilinearGrid while the "terrain"
+            # branch uses TFVD with h ≡ 0. The two grid types route through different
+            # spacing/operator code paths whose floating-point results agree only to
+            # ~machine precision (~10⁻²³ here in normalised units), so the comparison
+            # tolerance is machine-precision-floor, not the exact-zero bound used when
+            # both branches were the same TFVD grid.
+            zero_terrain_tolerance = 1e-14
 
             @test isapprox(interior(height_model.dynamics.density),
                            interior(terrain_model.dynamics.density);
@@ -320,8 +362,8 @@ using Test
                                topology=(Periodic, Flat, Bounded))
 
         h(x, y) = 200 * exp(-x^2 / 2000^2)
-        materialize_terrain!(grid, h); metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
-        dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+        materialize_terrain!(grid, h)
+        dynamics = CompressibleDynamics(ExplicitTimeStepping())
         model = AtmosphereModel(grid; dynamics)
 
         set!(model, ρ=1, θ=300, u=1, w=0)
@@ -350,8 +392,8 @@ using Test
             grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
-            (materialize_terrain!(grid, h); metrics = build_terrain_metrics(grid, stencil))
-            dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+            materialize_terrain!(grid, h)
+            dynamics = CompressibleDynamics(ExplicitTimeStepping(); slope_stencil = stencil)
             model = AtmosphereModel(grid; dynamics)
 
             for i in 1:Nx, k in 1:Nz
@@ -388,8 +430,7 @@ using Test
 
             h(x, y) = 200 * exp(-x^2 / 2000^2)
             materialize_terrain!(grid, h)
-            metrics = build_terrain_metrics(grid, SlopeInsideInterpolation())
-            dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+            dynamics = CompressibleDynamics(ExplicitTimeStepping(); slope_stencil = SlopeInsideInterpolation())
             model = AtmosphereModel(grid; dynamics)
 
             for i in 1:Nx, k in 1:Nz
@@ -482,10 +523,9 @@ using Test
                                topology=(Periodic, Flat, Bounded))
 
         h(x, y) = 100 * exp(-x^2 / 2000^2)
-        materialize_terrain!(grid, h); metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
+        materialize_terrain!(grid, h)
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
-                                        terrain_metrics=metrics,
                                         reference_potential_temperature=300)
         model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
         set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
@@ -557,9 +597,8 @@ using Test
         @test terrain_substeps ≥ 1
 
         model_grid = adaptive_grid(false)
-        materialize_terrain!(model_grid, (x, y) -> 100 * exp(-x^2 / 2000^2)); metrics = build_terrain_metrics(model_grid, SlopeOutsideInterpolation())
+        materialize_terrain!(model_grid, (x, y) -> 100 * exp(-x^2 / 2000^2))
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
-                                        terrain_metrics=metrics,
                                         reference_potential_temperature=300)
         model = AtmosphereModel(model_grid; dynamics, timestepper=:AcousticRungeKutta3)
         set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
@@ -587,10 +626,9 @@ using Test
             grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
-            materialize_terrain!(grid, (x, y) -> h₀ * exp(-x^2 / 2000^2)); metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
+            materialize_terrain!(grid, (x, y) -> h₀ * exp(-x^2 / 2000^2))
 
             dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
-                                            terrain_metrics=metrics,
                                             reference_potential_temperature=300)
             model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
             set!(model,
@@ -677,12 +715,11 @@ using Test
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
         materialize_terrain!(grid, hill)
-        metrics = build_terrain_metrics(grid, SlopeInsideInterpolation())
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=0.5,
                                                                         sponge=UpperSponge(damping_rate=0.1,
                                                                                            depth=Lz/3));
-                                        terrain_metrics=metrics,
+                                        slope_stencil = SlopeInsideInterpolation(),
                                         reference_potential_temperature=θ_of_z,
                                         surface_pressure=p₀,
                                         standard_pressure=pˢᵗ)
@@ -754,7 +791,7 @@ using Test
                                topology=(Periodic, Flat, Bounded))
 
         h(x, y) = 500 * exp(-x^2 / 1000^2)
-        materialize_terrain!(grid, h); metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
+        materialize_terrain!(grid, h)
 
         sponge = UpperSponge(damping_rate=0.2, depth=2000, ramp=LinearRamp())
         δτᵐ⁺ = 3.0
@@ -788,12 +825,11 @@ using Test
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
         materialize_terrain!(grid, (x, y) -> 100 * exp(-x^2 / 2000^2))
-        metrics = build_terrain_metrics(grid, SlopeInsideInterpolation())
 
         damping = ThermalDivergenceDamping(coefficient=0.05, damp_vertical=true)
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=4,
                                                                         damping=damping);
-                                        terrain_metrics=metrics,
+                                        slope_stencil = SlopeInsideInterpolation(),
                                         reference_potential_temperature=300)
         model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
         set!(model,
@@ -825,10 +861,9 @@ using Test
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
         materialize_terrain!(grid, (x, y) -> 100 * exp(-x^2 / 2000^2))
-        metrics = build_terrain_metrics(grid, SlopeInsideInterpolation())
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
-                                        terrain_metrics=metrics,
+                                        slope_stencil = SlopeInsideInterpolation(),
                                         reference_potential_temperature=300)
         model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
         set!(model,
@@ -860,14 +895,13 @@ using Test
         h₀ = 1000.0
         a = 10000.0
         h(x, y) = h₀ * exp(-x^2 / a^2)
-        materialize_terrain!(grid, h); metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
+        materialize_terrain!(grid, h)
 
         θ₀ = 300.0
         p₀ = 101325.0
         pˢᵗ = 1e5
 
         dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                        terrain_metrics=metrics,
                                         reference_potential_temperature=θ₀)
         model = AtmosphereModel(grid; dynamics)
         constants = model.thermodynamic_constants
@@ -912,7 +946,7 @@ using Test
         h₀ = 1000.0
         a = 10000.0
         h(x, y) = h₀ * exp(-x^2 / a^2)
-        materialize_terrain!(grid, h); metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
+        materialize_terrain!(grid, h)
 
         g_val = 9.80665
         N² = 1e-4
@@ -922,7 +956,6 @@ using Test
         θ_of_z(z) = θ₀ * exp(N² * z / g_val)
 
         dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                        terrain_metrics=metrics,
                                         reference_potential_temperature=θ_of_z)
         model = AtmosphereModel(grid; dynamics)
         constants = model.thermodynamic_constants
