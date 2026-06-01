@@ -5,7 +5,7 @@ Module implementing terrain-following vertical coordinates via the
 [`TerrainFollowingVerticalDiscretization`](@ref) (TFVD) grid type.
 
 TFVD stores a uniform reference vertical coordinate ``\\zeta`` and a
-formulation (e.g. [`LinearDecay`](@ref) or [`SLEVE`](@ref)) that defines
+formulation (e.g. [`LinearDecay`](@ref) or [`TwoLevelDecay`](@ref)) that defines
 the physical altitude
 
 ```math
@@ -19,7 +19,7 @@ Public API:
   - [`TerrainFollowingVerticalDiscretization`](@ref) — pass as the `z`
     argument to `RectilinearGrid` / `LatitudeLongitudeGrid`.
   - [`LinearDecay`](@ref) (Gal-Chen & Somerville 1975).
-  - [`SLEVE`](@ref) (Schär et al. 2002).
+  - [`TwoLevelDecay`](@ref) (Schär et al. 2002).
   - [`materialize_terrain!`](@ref) — fill the formulation's terrain fields
     from a `h(x, y)` function once the grid is built.
   - [`build_terrain_metrics`](@ref) — attach a pressure-gradient stencil.
@@ -31,7 +31,7 @@ module TerrainFollowingDiscretization
 
 export TerrainMetrics,
        SlopeOutsideInterpolation, SlopeInsideInterpolation,
-       TerrainFollowingVerticalDiscretization, LinearDecay, SLEVE,
+       TerrainFollowingVerticalDiscretization, LinearDecay, TwoLevelDecay,
        materialize_terrain!, build_terrain_metrics, ∂z∂x, ∂z∂y, TFVDRG
 
 using Adapt: Adapt, adapt

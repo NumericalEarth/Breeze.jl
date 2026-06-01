@@ -12,7 +12,7 @@
 ##### — the terrain components + decay law — and DERIVES the Jacobian
 ##### σ = ∂z/∂ζ and the slopes ∂z/∂x, ∂z/∂y in the operators, so σ and the
 ##### slope cannot drift out of consistency. `LinearDecay` (Gal-Chen) and
-##### `SLEVE` (Schär et al. 2002) are two formulations of the one type.
+##### `TwoLevelDecay` (Schär et al. 2002) are two formulations of the one type.
 #####
 
 using Oceananigans.Grids: AbstractVerticalCoordinate, generate_coordinate, getnode, total_length,
@@ -30,7 +30,7 @@ struct TerrainFollowingVerticalDiscretization{C, D, E, F, FM} <: AbstractVertica
     Δᵃᵃᶠ :: E
     "Cell-centered reference spacing Δζ"
     Δᵃᵃᶜ :: F
-    "Terrain-decay formulation (LinearDecay | SLEVE) — the generator of σ and the slopes"
+    "Terrain-decay formulation (LinearDecay | TwoLevelDecay) — the generator of σ and the slopes"
     formulation :: FM
 end
 
@@ -106,7 +106,7 @@ end
 ##### σⁿ = ∂z/∂ζ (Jacobian) and znode = z(x,y,ζ) are computed from the
 ##### formulation's terrain components + decay profiles. Δz spacings follow as
 ##### Δr · σⁿ. Defining σⁿ over (i,j,k) is what makes the Jacobian k-dependent
-##### for SLEVE without any 3-D σ storage.
+##### for TwoLevelDecay without any 3-D σ storage.
 #####
 
 # Match the terrain-following coordinate at the vertical-coordinate slot of the

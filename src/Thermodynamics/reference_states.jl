@@ -227,7 +227,7 @@ function numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, c
     p = p₀
     for i in 1:nsteps
         zᵢ = (i - 0.5) * dz
-        θᵢ = θ_func(zᵢ)
+        θᵢ = evaluate_profile(θ_func, zᵢ)
         Tᵢ = θᵢ * (p / pˢᵗ)^κ
         ρᵢ = p / (Rᵈ * Tᵢ)
         p = p - g * ρᵢ * dz
@@ -246,7 +246,7 @@ function numerically_integrated_hydrostatic_density(z, p₀, θ_func, pˢᵗ, co
     cᵖᵈ = constants.dry_air.heat_capacity
     κ = Rᵈ / cᵖᵈ
     p = numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants)
-    θ = θ_func(z)
+    θ = evaluate_profile(θ_func, z)
     T = θ * (p / pˢᵗ)^κ
     return p / (Rᵈ * T)
 end
@@ -278,7 +278,7 @@ hydrostatic_density(z, p₀, θᵣ::Function, pˢᵗ, constants) =
 function hydrostatic_temperature(z, p₀, θᵣ::Function, pˢᵗ, constants)
     κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
     p = numerically_integrated_hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
-    return θᵣ(z) * (p / pˢᵗ)^κ
+    return evaluate_profile(θᵣ, z) * (p / pˢᵗ)^κ
 end
 
 # Evaluate a profile (Number or Function) at a given height.
@@ -286,16 +286,35 @@ end
 """
     evaluate_profile(profile, z)
 
-Evaluate a vertical profile at height `z`. If `profile` is a `Number`, returns it unchanged.
-If `profile` is a `Function`, calls `profile(z)`.
+Evaluate a vertical profile at height `z`. If `profile` is a `Number`, returns
+it unchanged. If `profile` is a `Function`, calls `profile(z)`, `profile(0, z)`,
+or `profile(0, 0, z)` depending on the function arity.
 """
 @inline evaluate_profile(value::Number, z) = value
-@inline evaluate_profile(f::Function, z) = f(z)
+@inline function evaluate_profile(f::Function, z)
+    nargs = _nargs(f)
+    return if nargs == 1
+        f(z)
+    elseif nargs == 2
+        f(0, z)
+    else
+        f(0, 0, z)
+    end
+end
 
 # Surface value extraction. For 3-arg functions (lat, lon, z) used by the
 # LatitudeLongitudeGrid reference state path, evaluate at the equator surface.
 _surface_value(x::Number) = x
-_surface_value(f::Function) = _nargs(f) == 1 ? f(0) : f(0, 0, 0)
+function _surface_value(f::Function)
+    nargs = _nargs(f)
+    return if nargs == 1
+        f(0)
+    elseif nargs == 2
+        f(0, 0)
+    else
+        f(0, 0, 0)
+    end
+end
 
 """
 $(TYPEDSIGNATURES)

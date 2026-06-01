@@ -942,7 +942,7 @@ end
 # acoustic perturbation PGF, not the frozen large-step PGF. MPAS carries that
 # frozen PGF in `tend_u_euler`; here we add it explicitly because
 # `SlowTendencyMode` zeros pressure gradients in `Gⁿρu/Gⁿρv`.
-@kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Πᴸ, p,
+@kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Πᴸ,
                                             Gⁿρu, Gⁿρv, γRᵐᴸ, apply_pressure_gradient)
     i, j, k = @index(Global, NTuple)
 
@@ -975,6 +975,9 @@ end
 
 @inline apply_horizontal_pressure_gradient_substep(substep, Nτ, apply_first_substep_pressure_gradient) =
     apply_first_substep_pressure_gradient | (substep != 1) | (Nτ == 1)
+
+@inline apply_horizontal_pressure_gradient_substep(substep, Nτ) =
+    apply_horizontal_pressure_gradient_substep(substep, Nτ, false)
 
 # Build per-column predictors `ρ′★`, `ρθ′★` (cell centers) AND
 # the explicit RHS for the tridiagonal `(ρw)′ᵐ⁺` solve at z-faces.
@@ -1428,7 +1431,6 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
                 grid, model.dynamics, Δτ,
                 substepper.density_potential_temperature_perturbation,
                 substepper.linearization_exner,
-                model.dynamics.pressure,
                 Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture,
                 apply_pressure_gradient)
 

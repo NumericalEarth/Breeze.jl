@@ -23,12 +23,12 @@ function allocate_formulation(f::LinearDecay, FT, arch, sz, halo, topo, z_top)
     return LinearDecay(convert(FT, z_top), h, ∂x_h, ∂y_h)
 end
 
-function allocate_formulation(f::SLEVE, FT, arch, sz, halo, topo, z_top)
+function allocate_formulation(f::TwoLevelDecay, FT, arch, sz, halo, topo, z_top)
     h₁ = _cc(FT, arch, topo, sz, halo); h₂ = _cc(FT, arch, topo, sz, halo)
     ∂x_h₁ = _fc(FT, arch, topo, sz, halo); ∂x_h₂ = _fc(FT, arch, topo, sz, halo)
     ∂y_h₁ = _cf(FT, arch, topo, sz, halo); ∂y_h₂ = _cf(FT, arch, topo, sz, halo)
     for a in (h₁, h₂, ∂x_h₁, ∂x_h₂, ∂y_h₁, ∂y_h₂); fill!(a, 0); end
-    return SLEVE(convert(FT, z_top),
+    return TwoLevelDecay(convert(FT, z_top),
                  convert(FT, f.large_scale_height), convert(FT, f.small_scale_height),
                  h₁, h₂, ∂x_h₁, ∂x_h₂, ∂y_h₁, ∂y_h₂)
 end
@@ -38,7 +38,7 @@ $(TYPEDSIGNATURES)
 
 Fill the terrain components of a `TerrainFollowingVerticalDiscretization` grid
 in place from `topography(x, y)`. Must be called after the grid is built (the
-horizontal nodes are needed to evaluate the topography). For `SLEVE`, the
+horizontal nodes are needed to evaluate the topography). For `TwoLevelDecay`, the
 terrain is split into large- and small-scale parts by horizontal smoothing.
 
 The topography function is evaluated at each cell-centered (x, y) location.
@@ -101,7 +101,7 @@ function materialize_formulation!(f::LinearDecay, grid, topography)
     return nothing
 end
 
-function materialize_formulation!(f::SLEVE, grid, topography)
+function materialize_formulation!(f::TwoLevelDecay, grid, topography)
     arch = architecture(grid)
     # Full terrain into a temp field, then split: h₁ = smooth(h) (large scale),
     # h₂ = h − h₁ (small scale). Store the parts in the formulation's arrays.
@@ -161,5 +161,5 @@ build_terrain_metrics(grid, stencil) = _build_terrain_metrics(grid.z.formulation
 _build_terrain_metrics(f::LinearDecay, stencil) =
     TerrainMetrics(f.h, f.∂x_h, f.∂y_h, f.z_top, stencil, Val(false))
 
-_build_terrain_metrics(f::SLEVE, stencil) =
+_build_terrain_metrics(f::TwoLevelDecay, stencil) =
     TerrainMetrics(f.h₁, f.∂x_h₁, f.∂y_h₁, f.z_top, stencil, Val(false))

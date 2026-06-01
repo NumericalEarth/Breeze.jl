@@ -126,7 +126,7 @@ For basic terrain-following coordinates:
 ```
 
 This analytic decay is specific to the basic Gal-Chen and Somerville
-coordinate. SLEVE or hybrid terrain-following coordinates require metric terms
+coordinate. TwoLevelDecay or hybrid terrain-following coordinates require metric terms
 derived from the actual vertical mapping rather than this linear factor.
 """
 @inline function terrain_slope_x(i, j, k, grid, metrics, ℓz)

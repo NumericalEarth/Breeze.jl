@@ -9,7 +9,7 @@
 # for terrain-following coordinates because the fine-scale terrain corrugations create steep
 # coordinate-surface slopes that challenge the horizontal pressure gradient computation.
 # We deform the computational grid itself using
-# [`TerrainFollowingVerticalDiscretization`](@ref), with a SLEVE coordinate
+# [`TerrainFollowingVerticalDiscretization`](@ref), with a TwoLevelDecay coordinate
 # following [Schär et al. (2002)](@cite Schar2002). The acoustic modes are
 # integrated with the split-explicit substepper.
 #
@@ -22,8 +22,8 @@
 #
 # ## Physical setup
 #
-# The simulation initializes an atmosphere with constant Brunt–Väisälä frequency ``N`` and
-# uniform background wind ``U``. A bell-shaped mountain with superimposed oscillations
+# The simulation initializes an atmosphere with constant Brunt–Väisälä frequency ``buoyancy_frequency`` and
+# uniform background wind ``background_wind_speed``. A bell-shaped mountain with superimposed oscillations
 # triggers both propagating gravity waves (for wavenumbers below the critical value ``k^*``)
 # and evanescent waves (above ``k^*``).
 #
@@ -41,10 +41,10 @@
 # ### Constant stratification base state
 #
 # For a reference temperature ``T_0``, the background atmosphere corresponds to a constant
-# Brunt–Väisälä frequency ``N``:
+# Brunt–Väisälä frequency ``buoyancy_frequency``:
 #
 # ```math
-# N^2 = \frac{g^2}{c_p^d T_0}
+# buoyancy_frequency^2 = \frac{g^2}{c_p^d T_0}
 # ```
 #
 # The density-scale height parameter is:
@@ -53,10 +53,10 @@
 # \beta = \frac{g}{R^d T_0}
 # ```
 #
-# The potential temperature profile that maintains constant ``N`` is:
+# The potential temperature profile that maintains constant ``buoyancy_frequency`` is:
 #
 # ```math
-# \theta(z) = \theta_0 \exp\left(\frac{N^2 z}{g}\right)
+# \theta(z) = \theta_0 \exp\left(\frac{buoyancy_frequency^2 z}{g}\right)
 # ```
 #
 # ### Linear wave theory
@@ -65,14 +65,14 @@
 # dispersion relation (Appendix A of [KlempEtAl2015](@citet)):
 #
 # ```math
-# m^2 = \frac{N^2}{U^2} - \frac{\beta^2}{4} - k^2
+# m^2 = \frac{buoyancy_frequency^2}{background_wind_speed^2} - \frac{\beta^2}{4} - k^2
 # ```
 #
 # Waves propagate vertically when ``m^2 > 0`` (i.e., ``k < k^*``), and decay exponentially
 # when ``m^2 < 0`` (i.e., ``k > k^*``), where the critical wavenumber is:
 #
 # ```math
-# k^* = \sqrt{\frac{N^2}{U^2} - \frac{\beta^2}{4}}
+# k^* = \sqrt{\frac{buoyancy_frequency^2}{background_wind_speed^2} - \frac{\beta^2}{4}}
 # ```
 #
 # !!! note "Current limitations"
@@ -83,11 +83,10 @@ using Breeze
 using Oceananigans
 using Breeze.TerrainFollowingDiscretization: SlopeInsideInterpolation,
                                               TerrainFollowingVerticalDiscretization,
-                                              SLEVE,
+                                              TwoLevelDecay,
                                               materialize_terrain!,
                                               build_terrain_metrics
 using Oceananigans.Grids: xnode, xnodes, znode
-using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Units
 using Oceananigans: Face, Center
 using Breeze.Thermodynamics: dry_air_gas_constant
@@ -102,46 +101,49 @@ parse_env(::Type{T}, name, default) where T =
 #
 # We define the base state with surface pressure ``p_0 = 1000 \, {\rm hPa}``
 # and reference temperature ``T_0 = 300 \, {\rm K}``. We also set the background wind
-# at ``U = 20 \, {\rm m/s}``:
+# at ``background_wind_speed = 20 \, {\rm m/s}``:
 
 constants = ThermodynamicConstants(Float64)
 g = constants.gravitational_acceleration
-cᵖᵈ = constants.dry_air.heat_capacity
-Rᵈ = dry_air_gas_constant(constants)
+dry_air_heat_capacity = constants.dry_air.heat_capacity
+dry_air_gas_constant_value = dry_air_gas_constant(constants)
 
-p₀ = 100000                 # Pa - surface pressure
-T₀ = 300                    # K - reference temperature
-θ₀ = T₀                     # K - reference potential temperature
-U  = 20                     # m s⁻¹ - uniform background wind
+surface_pressure = 100000                         # Pa - surface pressure
+reference_temperature = 300                       # K - reference temperature
+surface_potential_temperature = reference_temperature # K - reference potential temperature
+background_wind_speed = 20                        # m s^-1 - uniform background wind
 
 # Derived atmospheric parameters for an isothermal base state at ``T_0``.
-# Note: the standard [Schar2002](@citet) parameters use ``N = 0.01 \, {\rm s}^{-1}``
-# (set `N² = 1e-4` to match that paper exactly).
+# Note: the standard [Schar2002](@citet) parameters use ``buoyancy_frequency = 0.01 \, {\rm s}^{-1}``
+# (set `buoyancy_frequency_squared = 1e-4` to match that paper exactly).
 
-N² = g^2 / (cᵖᵈ * T₀)       # s⁻² - Brunt–Väisälä frequency squared (≈ 3.2e-4)
-N  = sqrt(N²)               # s⁻¹ - Brunt–Väisälä frequency
-β  = g / (Rᵈ * T₀)          # m⁻¹ - density scale parameter
+buoyancy_frequency_squared = g^2 / (dry_air_heat_capacity * reference_temperature) # s^-2 - Brunt-Vaisala frequency squared
+buoyancy_frequency = sqrt(buoyancy_frequency_squared)                              # s^-1 - Brunt-Vaisala frequency
+density_scale = g / (dry_air_gas_constant_value * reference_temperature)           # m^-1 - density scale parameter
 
 # ## Schär mountain parameters
 #
 # The mountain profile with the parameters used by [Schar2002](@citet) is:
 
-h₀ = 250                    # m - peak mountain height (use 25 m for strict linearity)
-a  = 5000                   # m - Gaussian half-width parameter
-λ  = 4000                   # m - terrain corrugation wavelength
-K  = 2π / λ                 # rad m⁻¹ - terrain wavenumber
+mountain_height = 250        # m - peak mountain height (use 25 m for strict linearity)
+a = 5000                     # m - Gaussian half-width parameter
+terrain_wavelength = 4000    # m - terrain corrugation wavelength
+terrain_wavenumber = 2 * pi / terrain_wavelength # rad m^-1 - terrain wavenumber
 
-hill(x, y) = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
-∂x_hill(x) = h₀ * exp(-(x / a)^2) *
-             (-2x / a^2 * cos(π * x / λ)^2 -
-              (π / λ) * sin(2π * x / λ))
+hill(x, y) = mountain_height * exp(-(x / a)^2) * cos(pi * x / terrain_wavelength)^2
+terrain_slope(x) = mountain_height * exp(-(x / a)^2) *
+             (-2x / a^2 * cos(pi * x / terrain_wavelength)^2 -
+              (pi / terrain_wavelength) * sin(2 * pi * x / terrain_wavelength))
 
 # ## Grid setup
 #
 # The domain spans 200 km horizontally (±100 km) and 20 km vertically. We use a
 # `TerrainFollowingVerticalDiscretization` with uniform spacing in the computational
 # coordinate; the terrain-following transformation deforms these surfaces to follow
-# the mountain, so no vertical grid stretching near the surface is needed.
+# the mountain, so no vertical grid stretching near the surface is needed. The
+# defaults below are a quick preview; for the standard corrugated Schär validation,
+# use `BREEZE_SCHAR_NX=400 BREEZE_SCHAR_NZ=200` so the 4 km terrain wavelength is
+# resolved by roughly eight cells.
 
 
 arch_name = lowercase(get(ENV, "BREEZE_SCHAR_ARCH", CUDA.functional() ? "gpu" : "cpu"))
@@ -149,14 +151,14 @@ arch = arch_name == "gpu" ? GPU() : CPU()
 
 Nx = parse_env(Int, "BREEZE_SCHAR_NX", 201)
 Nz = parse_env(Int, "BREEZE_SCHAR_NZ", 50)
-L = parse_env(Float64, "BREEZE_SCHAR_L", 100kilometers)
-const H = parse_env(Float64, "BREEZE_SCHAR_H", 20kilometers)
+domain_width = parse_env(Float64, "BREEZE_SCHAR_L", 100kilometers)
+const domain_height = parse_env(Float64, "BREEZE_SCHAR_H", 20kilometers)
 
-z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, H, length=Nz+1));
-                                                 formulation = SLEVE(large_scale_height = H / 2,
-                                                                     small_scale_height = H / 8))
+z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, domain_height, length=Nz+1));
+                                                 formulation = TwoLevelDecay(large_scale_height = domain_height / 2,
+                                                                     small_scale_height = domain_height / 8))
 grid = RectilinearGrid(arch, size = (Nx, Nz),
-                       x = (-L/2, L/2), z = z_faces,
+                       x = (-domain_width/2, domain_width/2), z = z_faces,
                        topology = (Periodic, Flat, Bounded))
 
 # ## Terrain
@@ -183,7 +185,8 @@ ax = Axis(fig[1, 1],
           title = "Terrain-following grid near the Schär mountain")
 
 ## Plot coordinate surfaces at selected vertical levels
-CUDA.@allowscalar for k in [1, 3, 5, 8, 12, 17, 25]
+coordinate_surface_indices = unique(round.(Int, range(1, Nz + 1, length = 7)))
+CUDA.@allowscalar for k in coordinate_surface_indices
     z_surface = [znode(i, 1, k, grid, Center(), Center(), Face()) for i in 1:Nx]
     lines!(ax, x_grid, z_surface, color = :gray, linewidth = 0.5)
 end
@@ -194,12 +197,12 @@ lines!(ax, x_grid, z_bottom, color = :brown, linewidth = 2, label = "Terrain sur
 band!(ax, x_grid, zero(z_bottom), z_bottom, color = (:brown, 0.2))
 
 ## Analytical terrain for comparison
-x_fine = range(-L/6, L/6, length=2000)
+x_fine = range(-domain_width/6, domain_width/6, length=2000)
 lines!(ax, collect(x_fine), [hill(x, 0) for x in x_fine],
        color = :black, linestyle = :dash, linewidth = 1, label = "Analytical h(x)")
 
 axislegend(ax, position = :rt)
-xlims!(ax, -L/6, L/6)
+xlims!(ax, -domain_width/6, domain_width/6)
 ylims!(ax, -100, 3500)
 fig
 
@@ -208,10 +211,11 @@ fig
 # The potential temperature profile that maintains constant Brunt–Väisälä frequency is:
 #
 # ```math
-# \theta(z) = \theta_0 \exp\left(\frac{N^2 z}{g}\right)
+# \theta(z) = \theta_0 \exp\left(\frac{buoyancy_frequency^2 z}{g}\right)
 # ```
 
-θ_of_z(z) = θ₀ * exp(N² * z / g)
+potential_temperature_profile(x, z) =
+    surface_potential_temperature * exp(buoyancy_frequency_squared * z / g)
 
 # ## Rayleigh damping layer
 #
@@ -219,12 +223,12 @@ fig
 # spurious reflections from the rigid lid. The split-explicit acoustic substepper
 # applies this sponge as part of the acoustic update.
 
-const sponge_depth = H / 4
+const sponge_depth = domain_height / 4
 const sponge_damping_rate = 0.1
 
 # ## Model construction
 #
-# Build a compressible model with split-explicit acoustic substepping, 5th-order WENO
+# Build a compressible model with split-explicit acoustic substepping, 9th-order WENO
 # advection, and terrain corrections. Passing `terrain_metrics` to [`CompressibleDynamics`](@ref)
 # activates the terrain-following physics: contravariant vertical velocity, corrected
 # pressure gradient, and terrain-aware divergence. The `reference_potential_temperature`
@@ -238,10 +242,10 @@ time_discretization = SplitExplicitTimeDiscretization(acoustic_cfl = 0.5,
 
 dynamics = CompressibleDynamics(time_discretization;
                                 terrain_metrics = metrics,
-                                surface_pressure = p₀,
-                                reference_potential_temperature = θ_of_z)
+                                surface_pressure = surface_pressure,
+                                reference_potential_temperature = potential_temperature_profile)
 
-model = AtmosphereModel(grid; dynamics, advection = WENO(order=5),
+model = AtmosphereModel(grid; dynamics, advection = WENO(order=9),
                         timestepper = :AcousticRungeKutta3)
 
 # ## Initial conditions
@@ -254,17 +258,17 @@ model = AtmosphereModel(grid; dynamics, advection = WENO(order=5),
 
 set!(model,
      ρ = model.dynamics.terrain_reference_density,
-     θ = (x, z) -> θ_of_z(z),
-     u = U,
+     θ = potential_temperature_profile,
+     u = background_wind_speed,
      v = 0,
      w = 0,
      enforce_mass_conservation = false)
 
 CUDA.@allowscalar for i in 1:Nx
-    ρ_ccf = ℑzᵃᵃᶠ(i, 1, 1, grid, model.dynamics.density)
-    wᵇ = U * ∂x_hill(xnode(i, grid, Center()))
-    model.velocities.w[i, 1, 1] = wᵇ
-    model.momentum.ρw[i, 1, 1] = ρ_ccf * wᵇ
+    density_on_bottom_face = model.dynamics.density[i, 1, 1]
+    bottom_vertical_velocity = background_wind_speed * terrain_slope(xnode(i, grid, Center()))
+    model.velocities.w[i, 1, 1] = bottom_vertical_velocity
+    model.momentum.ρw[i, 1, 1] = density_on_bottom_face * bottom_vertical_velocity
 end
 
 Oceananigans.TimeSteppers.update_state!(model)
@@ -274,12 +278,12 @@ Oceananigans.TimeSteppers.update_state!(model)
 # The split-explicit scheme uses an advective outer time step; the acoustic waves are
 # handled by inner substeps.
 
-Δx = L / Nx
-Δt = parse_env(Float64, "BREEZE_SCHAR_DT", 0.5 * Δx / U)
+horizontal_spacing = domain_width / Nx
+time_step = parse_env(Float64, "BREEZE_SCHAR_DT", 0.5 * horizontal_spacing / background_wind_speed)
 
 stop_time = parse_env(Float64, "BREEZE_SCHAR_STOP_TIME", 2hours)
 
-simulation = Simulation(model; Δt, stop_time)
+simulation = Simulation(model; Δt = time_step, stop_time = stop_time)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # Progress callback to monitor simulation health:
@@ -308,12 +312,12 @@ add_callback!(simulation, progress, name=:progress, IterationInterval(500))
 # Save vertical velocity and contravariant vertical velocity for post-processing:
 
 w = model.velocities.w
-w̃ = model.dynamics.contravariant_vertical_velocity
+contravariant_w = model.dynamics.contravariant_vertical_velocity
 
 filename = get(ENV, "BREEZE_SCHAR_OUTPUT", "mountain_waves")
 output_directory = dirname(filename)
 output_directory == "." || mkpath(output_directory)
-outputs = (; w, w̃)
+outputs = (; w, contravariant_w)
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
                                               filename,
                                               schedule = TimeInterval(2minutes),
@@ -333,21 +337,21 @@ run!(simulation)
 #
 # ```math
 # \hat{h}(k) = \frac{\sqrt{\pi} h_0 a}{4} \left[
-#     e^{-a^2(K+k)^2/4} + e^{-a^2(K-k)^2/4} + 2e^{-a^2 k^2/4}
+#     e^{-a^2(terrain_wavenumber+k)^2/4} + e^{-a^2(terrain_wavenumber-k)^2/4} + 2e^{-a^2 k^2/4}
 # \right]
 # ```
 
-ĥ(k) = sqrt(π) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
-                                exp(-a^2 * (K - k)^2 / 4) +
-                                2exp(-a^2 * k^2 / 4))
+terrain_spectrum(k) = sqrt(pi) * mountain_height * a / 4 * (exp(-a^2 * (terrain_wavenumber + k)^2 / 4) +
+                                exp(-a^2 * (terrain_wavenumber - k)^2 / 4) +
+                                2 * exp(-a^2 * k^2 / 4))
 
 # ### Dispersion relation
 #
 # Vertical wavenumber squared (Equation A5) and critical wavenumber (Equation A11)
 # by [KlempEtAl2015](@citet):
 
-m²(k) = (N² / U^2 - β^2 / 4) - k^2
-k★ = sqrt(N² / U^2 - β^2 / 4)
+vertical_wavenumber_squared(k) = (buoyancy_frequency_squared / background_wind_speed^2 - density_scale^2 / 4) - k^2
+critical_wavenumber = sqrt(buoyancy_frequency_squared / background_wind_speed^2 - density_scale^2 / 4)
 
 # ### Linear vertical velocity
 #
@@ -355,7 +359,7 @@ k★ = sqrt(N² / U^2 - β^2 / 4)
 # by [KlempEtAl2015](@citet):
 #
 # ```math
-# w(x, z) = -\frac{U}{\pi} e^{\beta z/2} \left[
+# w(x, z) = -\frac{background_wind_speed}{\pi} e^{\beta z/2} \left[
 #     \int_0^{k^*} k \hat{h}(k) \sin(m z + k x) \, \mathrm{d}k +
 #     \int_{k^*}^{\infty} k \hat{h}(k) e^{-|m| z} \sin(k x) \, \mathrm{d}k
 # \right]
@@ -371,16 +375,16 @@ Compute the 2-D linear vertical velocity `w(x,z)` from the analytical solution
 (Appendix A, Equation A10 of Klemp et al., 2015).
 """
 function w_linear(x, z; nk=100)
-    k = range(0, 10k★; length=nk)
-    m_abs = @. sqrt(abs(m²(k)))
-    integrand = @. k * ĥ(k) * ifelse(m²(k) ≥ 0,
+    k = range(0, 10 * critical_wavenumber; length=nk)
+    m_abs = @. sqrt(abs(vertical_wavenumber_squared(k)))
+    integrand = @. k * terrain_spectrum(k) * ifelse(vertical_wavenumber_squared(k) >= 0,
                                    sin(m_abs * z + k * x),
                                    exp(-m_abs * z) * sin(k * x))
 
     ## Numerical integration using trapezoidal rule:
-    Δk = step(k)
-    integral = Δk * (sum(integrand) - (first(integrand) + last(integrand)) / 2)
-    return -(U / π) * exp(β * z / 2) * integral
+    wavenumber_spacing = step(k)
+    integral = wavenumber_spacing * (sum(integrand) - (first(integrand) + last(integrand)) / 2)
+    return -(background_wind_speed / pi) * exp(density_scale * z / 2) * integral
 end
 nothing #hide
 

@@ -128,7 +128,7 @@ export
     PiecewiseStretchedDiscretization,
     TerrainFollowingVerticalDiscretization,
     LinearDecay,
-    SLEVE,
+    TwoLevelDecay,
     materialize_terrain!,
     build_terrain_metrics,
     TerrainMetrics,

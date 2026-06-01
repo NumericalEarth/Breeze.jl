@@ -35,7 +35,7 @@ end
     Lx, Lz = FT(100000), FT(10000)
     r_faces = collect(range(0, Lz, length=Nz+1))
     z_faces = Breeze.TerrainFollowingDiscretization.TerrainFollowingVerticalDiscretization(
-        r_faces; formulation = Breeze.TerrainFollowingDiscretization.SLEVE(
+        r_faces; formulation = Breeze.TerrainFollowingDiscretization.TwoLevelDecay(
             large_scale_height = Lz / 2,
             small_scale_height = Lz / 4))
 
@@ -53,7 +53,7 @@ end
     constants = ThermodynamicConstants(FT)
     θ₀ = FT(300)
     N² = FT(1e-4)
-    θ_of_z(z) = θ₀ * exp(N² * z / constants.gravitational_acceleration)
+    θ_profile(x, z) = θ₀ * exp(N² * z / constants.gravitational_acceleration)
 
     θ_field = CenterField(grid)
     set!(θ_field, (x, z) -> z)
@@ -73,14 +73,14 @@ end
 
     dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                     terrain_metrics = metrics,
-                                    reference_potential_temperature = θ_of_z,
+                                    reference_potential_temperature = θ_profile,
                                     surface_pressure = FT(101325),
                                     standard_pressure = FT(1e5))
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants)
 
     set!(model,
          ρ = model.dynamics.terrain_reference_density,
-         θ = (x, z) -> θ_of_z(z),
+         θ = θ_profile,
          enforce_mass_conservation = false)
 
     p = model.dynamics.pressure

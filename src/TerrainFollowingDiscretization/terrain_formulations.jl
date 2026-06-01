@@ -78,12 +78,12 @@ end
 end
 
 #####
-##### SLEVE — Schär et al. (2002). Large/small split, sinh decay.
+##### TwoLevelDecay — Schär et al. (2002). Large/small split, sinh decay.
 #####   bₙ(ζ) = sinh((z_top−ζ)/sₙ)/sinh(z_top/sₙ)
 #####   bₙ′(ζ) = −cosh((z_top−ζ)/sₙ)/(sₙ·sinh(z_top/sₙ))
 #####
 
-struct SLEVE{ZT, FT, H, SX, SY} <: AbstractTerrainFormulation
+struct TwoLevelDecay{ZT, FT, H, SX, SY} <: AbstractTerrainFormulation
     z_top              :: ZT   # Nothing (skeleton) or FT (after allocation)
     large_scale_height :: FT   # s₁ (slow decay)
     small_scale_height :: FT   # s₂ (fast decay)
@@ -92,18 +92,18 @@ struct SLEVE{ZT, FT, H, SX, SY} <: AbstractTerrainFormulation
     ∂y_h₁ :: SY; ∂y_h₂ :: SY   # (Center, Face)
 end
 
-SLEVE(; large_scale_height, small_scale_height) =
-    SLEVE(nothing, large_scale_height, small_scale_height,
+TwoLevelDecay(; large_scale_height, small_scale_height) =
+    TwoLevelDecay(nothing, large_scale_height, small_scale_height,
           nothing, nothing, nothing, nothing, nothing, nothing)
 
-Adapt.adapt_structure(to, f::SLEVE) =
-    SLEVE(f.z_top, f.large_scale_height, f.small_scale_height,
+Adapt.adapt_structure(to, f::TwoLevelDecay) =
+    TwoLevelDecay(f.z_top, f.large_scale_height, f.small_scale_height,
           Adapt.adapt(to, f.h₁), Adapt.adapt(to, f.h₂),
           Adapt.adapt(to, f.∂x_h₁), Adapt.adapt(to, f.∂x_h₂),
           Adapt.adapt(to, f.∂y_h₁), Adapt.adapt(to, f.∂y_h₂))
 
-Oceananigans.Architectures.on_architecture(arch, f::SLEVE) =
-    SLEVE(f.z_top, f.large_scale_height, f.small_scale_height,
+Oceananigans.Architectures.on_architecture(arch, f::TwoLevelDecay) =
+    TwoLevelDecay(f.z_top, f.large_scale_height, f.small_scale_height,
           Oceananigans.Architectures.on_architecture(arch, f.h₁),
           Oceananigans.Architectures.on_architecture(arch, f.h₂),
           Oceananigans.Architectures.on_architecture(arch, f.∂x_h₁),
@@ -111,33 +111,33 @@ Oceananigans.Architectures.on_architecture(arch, f::SLEVE) =
           Oceananigans.Architectures.on_architecture(arch, f.∂y_h₁),
           Oceananigans.Architectures.on_architecture(arch, f.∂y_h₂))
 
-@inline _b_sleve(ζ, z_top, s)  = sinh((z_top - ζ) / s) / sinh(z_top / s)
-@inline _b′_sleve(ζ, z_top, s) = -cosh((z_top - ζ) / s) / (s * sinh(z_top / s))
+@inline _b_two_level(ζ, z_top, s)  = sinh((z_top - ζ) / s) / sinh(z_top / s)
+@inline _b′_two_level(ζ, z_top, s) = -cosh((z_top - ζ) / s) / (s * sinh(z_top / s))
 
-@inline function terrain_following_σ(i, j, k, grid, f::SLEVE, ℓx, ℓy, ℓz)
+@inline function terrain_following_σ(i, j, k, grid, f::TwoLevelDecay, ℓx, ℓy, ℓz)
     ζ  = rnode(k, grid, ℓz)
     h₁ = _h(i, j, grid, f.h₁, ℓx, ℓy)
     h₂ = _h(i, j, grid, f.h₂, ℓx, ℓy)
-    return 1 + h₁ * _b′_sleve(ζ, f.z_top, f.large_scale_height) +
-               h₂ * _b′_sleve(ζ, f.z_top, f.small_scale_height)
+    return 1 + h₁ * _b′_two_level(ζ, f.z_top, f.large_scale_height) +
+               h₂ * _b′_two_level(ζ, f.z_top, f.small_scale_height)
 end
 
-@inline function terrain_following_Δz_surface(i, j, k, grid, f::SLEVE, ℓx, ℓy, ℓz)
+@inline function terrain_following_Δz_surface(i, j, k, grid, f::TwoLevelDecay, ℓx, ℓy, ℓz)
     ζ  = rnode(k, grid, ℓz)
     h₁ = _h(i, j, grid, f.h₁, ℓx, ℓy)
     h₂ = _h(i, j, grid, f.h₂, ℓx, ℓy)
-    return h₁ * _b_sleve(ζ, f.z_top, f.large_scale_height) +
-           h₂ * _b_sleve(ζ, f.z_top, f.small_scale_height)
+    return h₁ * _b_two_level(ζ, f.z_top, f.large_scale_height) +
+           h₂ * _b_two_level(ζ, f.z_top, f.small_scale_height)
 end
 
-@inline function terrain_following_∂z∂x(i, j, k, grid, f::SLEVE, ℓz)
+@inline function terrain_following_∂z∂x(i, j, k, grid, f::TwoLevelDecay, ℓz)
     ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂x_h₁[i, j, 1] * _b_sleve(ζ, f.z_top, f.large_scale_height) +
-                     f.∂x_h₂[i, j, 1] * _b_sleve(ζ, f.z_top, f.small_scale_height)
+    @inbounds return f.∂x_h₁[i, j, 1] * _b_two_level(ζ, f.z_top, f.large_scale_height) +
+                     f.∂x_h₂[i, j, 1] * _b_two_level(ζ, f.z_top, f.small_scale_height)
 end
 
-@inline function terrain_following_∂z∂y(i, j, k, grid, f::SLEVE, ℓz)
+@inline function terrain_following_∂z∂y(i, j, k, grid, f::TwoLevelDecay, ℓz)
     ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂y_h₁[i, j, 1] * _b_sleve(ζ, f.z_top, f.large_scale_height) +
-                     f.∂y_h₂[i, j, 1] * _b_sleve(ζ, f.z_top, f.small_scale_height)
+    @inbounds return f.∂y_h₁[i, j, 1] * _b_two_level(ζ, f.z_top, f.large_scale_height) +
+                     f.∂y_h₂[i, j, 1] * _b_two_level(ζ, f.z_top, f.small_scale_height)
 end

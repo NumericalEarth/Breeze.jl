@@ -14,7 +14,7 @@ stratified resting atmosphere over terrain.
 
 The user-facing implementation is [`TerrainFollowingVerticalDiscretization`](@ref)
 (TFVD). TFVD stores the reference vertical coordinate and a formulation
-(`LinearDecay` or `SLEVE`) that evaluates the physical height, vertical
+(`LinearDecay` or `TwoLevelDecay`) that evaluates the physical height, vertical
 Jacobian, and terrain slopes used by the dynamics.
 
 ## Continuous formulation
@@ -181,11 +181,12 @@ model top — at high altitude, fast atmospheric flow over even mild terrain has
 to traverse rapidly varying coordinate surfaces, generating spurious numerical
 mixing.
 
-### SLEVE (Schär et al., 2002)
+### TwoLevelDecay (Schär et al., 2002)
 
-The **smooth level vertical (SLEVE)** coordinate splits the topography into a
-large-scale part ``h_1`` and a small-scale residual ``h_2 = h - h_1``, and uses
-*different* decay basis functions for each:
+The [`TwoLevelDecay`](@ref) coordinate — the "Smooth LEvel VErtical" (SLEVE)
+coordinate of Schär et al. (2002) — splits the topography into a large-scale
+part ``h_1`` and a small-scale residual ``h_2 = h - h_1``, and uses *different*
+decay basis functions for each:
 
 ```math
 z(x, y, \zeta)
@@ -285,7 +286,7 @@ the formula is
 end
 ```
 
-(`_b′_linear(z_top) = -1/z_top`). For SLEVE it's the same with two contributions
+(`_b′_linear(z_top) = -1/z_top`). For TwoLevelDecay it's the same with two contributions
 ``h_1 b_1'(\zeta) + h_2 b_2'(\zeta)``.
 
 All vertical spacings are derived through the same Jacobian:
@@ -301,14 +302,14 @@ All vertical spacings are derived through the same Jacobian:
 ### Slope arrays
 
 The formulation stores the precomputed horizontal slopes of ``h`` (or of
-``h_1, h_2`` for SLEVE) at the appropriate horizontal stagger:
+``h_1, h_2`` for TwoLevelDecay) at the appropriate horizontal stagger:
 
 ```julia
 # In LinearDecay:
 ∂x_h :: SX   # (Face,   Center) — slope at u-faces
 ∂y_h :: SY   # (Center, Face)   — slope at v-faces
 
-# In SLEVE:
+# In TwoLevelDecay:
 ∂x_h₁ :: SX  ; ∂x_h₂ :: SX
 ∂y_h₁ :: SY  ; ∂y_h₂ :: SY
 ```
@@ -338,11 +339,11 @@ the precomputed surface slope times the basis function:
 end
 ```
 
-For SLEVE both ``\partial_x h_1`` and ``\partial_x h_2`` are blended with their
+For TwoLevelDecay both ``\partial_x h_1`` and ``\partial_x h_2`` are blended with their
 respective bases:
 
 ```julia
-@inline function terrain_following_∂z∂x(i, j, k, grid, f::SLEVE, ℓz)
+@inline function terrain_following_∂z∂x(i, j, k, grid, f::TwoLevelDecay, ℓz)
     ζ = rnode(k, grid, ℓz)
     @inbounds return f.∂x_h₁[i, j, 1] * _b_sleve(ζ, f.z_top, f.large_scale_height) +
                      f.∂x_h₂[i, j, 1] * _b_sleve(ζ, f.z_top, f.small_scale_height)
@@ -358,7 +359,7 @@ using Breeze.TerrainFollowingDiscretization
 # 1. Specify reference ζ faces and the formulation
 z_faces = TerrainFollowingVerticalDiscretization(
     collect(range(0, 30e3, length = Nz + 1));
-    formulation = SLEVE(large_scale_height = 15e3,
+    formulation = TwoLevelDecay(large_scale_height = 15e3,
                         small_scale_height = 2.5e3),
 )
 
@@ -374,7 +375,7 @@ grid = RectilinearGrid(
 
 # 3. Materialise the terrain. This:
 #    - evaluates h(x, y) at each column,
-#    - smooths into h₁ and computes h₂ = h - h₁ (SLEVE only),
+#    - smooths into h₁ and computes h₂ = h - h₁ (TwoLevelDecay only),
 #    - fills the precomputed slope arrays,
 #    - sets z_top on the formulation.
 hill(x, y) = 250 * exp(-(x / 5e3)^2) * cos(π * x / 4e3)^2
@@ -782,7 +783,7 @@ the imbalance exceeds round-off.
 ### Quantitative impact in a real validation
 
 Schär mountain wave, ``N = 0.01 \text{ s}^{-1}``, ``U = 10 \text{ m/s}``,
-``h_0 = 250 \text{ m}``, SLEVE 400×200, ``t = 600 \text{ s}``:
+``h_0 = 250 \text{ m}``, TwoLevelDecay 400×200, ``t = 600 \text{ s}``:
 
 | quantity | broken IC | fixed IC | CM1 reference |
 |----------|-----------|----------|---------------|
@@ -838,7 +839,7 @@ Here's the minimal stand-alone version:
 ```julia
 using Oceananigans, Breeze
 using Breeze.TerrainFollowingDiscretization:
-    TerrainFollowingVerticalDiscretization, SLEVE, materialize_terrain!,
+    TerrainFollowingVerticalDiscretization, TwoLevelDecay, materialize_terrain!,
     build_terrain_metrics, SlopeOutsideInterpolation, ∂z∂x
 using Breeze.AtmosphereModels: AtmosphereModel
 using Breeze.CompressibleEquations: CompressibleDynamics, SplitExplicitTimeDiscretization
@@ -865,7 +866,7 @@ hill(x, y)   = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 # ---- grid ----
 z_faces = TerrainFollowingVerticalDiscretization(
     collect(range(0, Lz, length = Nz + 1));
-    formulation = SLEVE(large_scale_height = Lz / 2,
+    formulation = TwoLevelDecay(large_scale_height = Lz / 2,
                         small_scale_height = 2.5e3),
 )
 grid = RectilinearGrid(
@@ -934,7 +935,7 @@ module), after the `set!` call has filled the density and horizontal momentum.
 ## API reference
 
   - [`TerrainFollowingVerticalDiscretization`](@ref) — terrain-following vertical coordinate
-  - [`LinearDecay`](@ref), [`SLEVE`](@ref) — basis formulations
+  - [`LinearDecay`](@ref), [`TwoLevelDecay`](@ref) — basis formulations
   - [`materialize_terrain!`](@ref) — evaluate ``h``, fill slopes
   - [`build_terrain_metrics`](@ref) — attach PGF stencil
   - [`TerrainMetrics`](@ref)
@@ -946,7 +947,7 @@ module), after the `set!` call has filled the density and horizontal momentum.
 
   - [Gal-Chen and Somerville (1975)](@cite GalChen1975) — original
     terrain-following coordinate.
-  - [Schär et al. (2002)](@cite Schar2002) — SLEVE coordinate; the standard
+  - [Schär et al. (2002)](@cite Schar2002) — TwoLevelDecay coordinate; the standard
     Schär mountain-wave test case.
   - [Klemp (2011)](@cite Klemp2011) — hybrid terrain-following / height
     coordinate.
