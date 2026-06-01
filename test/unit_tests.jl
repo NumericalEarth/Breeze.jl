@@ -87,6 +87,16 @@ using Breeze: CompressibleDynamics
         @test dynamics.density === nothing  # Not materialized yet
         @test dynamics.standard_pressure == 1e5
         @test dynamics.surface_pressure == 101325
+
+        # Solver parameters default to the values that preserve current numerics.
+        @test dynamics.temperature_tolerance == 1e-8
+        @test dynamics.temperature_maxiter == 8
+        @test dynamics.temperature_maxiter isa Int
+
+        # Custom solver parameters are accepted as keyword arguments.
+        custom = CompressibleDynamics(temperature_tolerance = 1e-10, temperature_maxiter = 20)
+        @test custom.temperature_tolerance == 1e-10
+        @test custom.temperature_maxiter == 20
     end
 
     @testset "materialize_dynamics" begin
@@ -99,6 +109,13 @@ using Breeze: CompressibleDynamics
         @test dynamics.pressure isa Field
         @test dynamics_density(dynamics) === dynamics.density
         @test dynamics_pressure(dynamics) === dynamics.pressure
+
+        # Solver parameters survive materialization and the tolerance is converted
+        # to the grid float type (mirroring standard_pressure/surface_pressure).
+        @test dynamics.temperature_tolerance == FT(1e-8)
+        @test typeof(dynamics.temperature_tolerance) == FT
+        @test dynamics.temperature_maxiter == 8
+        @test dynamics.temperature_maxiter isa Int
     end
 
     @testset "materialize_dynamics seeds pressure" begin
