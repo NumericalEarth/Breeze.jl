@@ -66,7 +66,7 @@ jordan_p_mb = [
     1015.1, 1000.0, 950.0, 900.0, 850.0, 800.0, 750.0, 700.0, 650.0, 600.0,
     550.0, 500.0, 450.0, 400.0, 350.0, 300.0, 250.0, 200.0, 175.0, 150.0,
     125.0, 100.0, 80.0, 60.0, 50.0, 40.0, 30.0,
-]
+] .* 100
 
 jordan_z_m = [
     0.0, 132.0, 583.0, 1054.0, 1547.0, 2063.0, 2609.0, 3182.0,
@@ -105,7 +105,7 @@ jordan_p = ZFaceField(sounding_grid)
 
 interior(jordan_θ, 1, 1, :) .= jordan_θ_K
 interior(jordan_T, 1, 1, :) .= jordan_T_K
-interior(jordan_p, 1, 1, :) .= jordan_p_mb .* 100
+interior(jordan_p, 1, 1, :) .= jordan_p_mb
 
 θ_env(z) = Oceananigans.Fields.interpolate(z, jordan_θ)
 T_env(z) = Oceananigans.Fields.interpolate(z, jordan_T)
