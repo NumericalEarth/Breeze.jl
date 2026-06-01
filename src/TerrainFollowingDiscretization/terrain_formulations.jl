@@ -38,43 +38,43 @@ Oceananigans.Architectures.on_architecture(arch, f::LinearDecay) =
                 Oceananigans.Architectures.on_architecture(arch, f.∂x_h),
                 Oceananigans.Architectures.on_architecture(arch, f.∂y_h))
 
-@inline _b_linear(ζ, z_top)  = 1 - ζ / z_top
-@inline _b′_linear(z_top)    = -1 / z_top
+@inline b_linear(ζ, z_top)  = 1 - ζ / z_top
+@inline b′_linear(z_top)    = -1 / z_top
 
 # h interpolated to the (ℓx, ℓy) horizontal stagger. The `::Nothing` cases
 # arise when one of the horizontal directions is Flat: znode/node may be
 # called with `ℓy=nothing` (or `ℓx=nothing`) so the function still has to
 # dispatch. Treat the Flat direction as Center (no interpolation in that
 # direction since the grid is degenerate there).
-@inline _h(i, j, grid, h, ::Center, ::Center)  = @inbounds h[i, j, 1]
-@inline _h(i, j, grid, h, ::Face,   ::Center)  = ℑxᶠᵃᵃ(i, j, 1, grid, h)
-@inline _h(i, j, grid, h, ::Center, ::Face)    = ℑyᵃᶠᵃ(i, j, 1, grid, h)
-@inline _h(i, j, grid, h, ::Face,   ::Face)    = ℑxyᶠᶠᵃ(i, j, 1, grid, h)
-@inline _h(i, j, grid, h, ::Center, ::Nothing) = @inbounds h[i, j, 1]
-@inline _h(i, j, grid, h, ::Face,   ::Nothing) = ℑxᶠᵃᵃ(i, j, 1, grid, h)
-@inline _h(i, j, grid, h, ::Nothing, ::Center) = @inbounds h[i, j, 1]
-@inline _h(i, j, grid, h, ::Nothing, ::Face)   = ℑyᵃᶠᵃ(i, j, 1, grid, h)
-@inline _h(i, j, grid, h, ::Nothing, ::Nothing) = @inbounds h[i, j, 1]
+@inline terrain_at_stagger(i, j, grid, h, ::Center, ::Center)  = @inbounds h[i, j, 1]
+@inline terrain_at_stagger(i, j, grid, h, ::Face,   ::Center)  = ℑxᶠᵃᵃ(i, j, 1, grid, h)
+@inline terrain_at_stagger(i, j, grid, h, ::Center, ::Face)    = ℑyᵃᶠᵃ(i, j, 1, grid, h)
+@inline terrain_at_stagger(i, j, grid, h, ::Face,   ::Face)    = ℑxyᶠᶠᵃ(i, j, 1, grid, h)
+@inline terrain_at_stagger(i, j, grid, h, ::Center, ::Nothing) = @inbounds h[i, j, 1]
+@inline terrain_at_stagger(i, j, grid, h, ::Face,   ::Nothing) = ℑxᶠᵃᵃ(i, j, 1, grid, h)
+@inline terrain_at_stagger(i, j, grid, h, ::Nothing, ::Center) = @inbounds h[i, j, 1]
+@inline terrain_at_stagger(i, j, grid, h, ::Nothing, ::Face)   = ℑyᵃᶠᵃ(i, j, 1, grid, h)
+@inline terrain_at_stagger(i, j, grid, h, ::Nothing, ::Nothing) = @inbounds h[i, j, 1]
 
 @inline function terrain_following_σ(i, j, k, grid, f::LinearDecay, ℓx, ℓy, ℓz)
     h = _h(i, j, grid, f.h, ℓx, ℓy)
-    return 1 + h * _b′_linear(f.z_top)
+    return 1 + h * b′_linear(f.z_top)
 end
 
 @inline function terrain_following_Δz_surface(i, j, k, grid, f::LinearDecay, ℓx, ℓy, ℓz)
     ζ = rnode(k, grid, ℓz)
     h = _h(i, j, grid, f.h, ℓx, ℓy)
-    return h * _b_linear(ζ, f.z_top)
+    return h * b_linear(ζ, f.z_top)
 end
 
 @inline function terrain_following_∂z∂x(i, j, k, grid, f::LinearDecay, ℓz)
     ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂x_h[i, j, 1] * _b_linear(ζ, f.z_top)
+    @inbounds return f.∂x_h[i, j, 1] * b_linear(ζ, f.z_top)
 end
 
 @inline function terrain_following_∂z∂y(i, j, k, grid, f::LinearDecay, ℓz)
     ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂y_h[i, j, 1] * _b_linear(ζ, f.z_top)
+    @inbounds return f.∂y_h[i, j, 1] * b_linear(ζ, f.z_top)
 end
 
 #####
@@ -111,33 +111,33 @@ Oceananigans.Architectures.on_architecture(arch, f::TwoLevelDecay) =
           Oceananigans.Architectures.on_architecture(arch, f.∂y_h₁),
           Oceananigans.Architectures.on_architecture(arch, f.∂y_h₂))
 
-@inline _b_two_level(ζ, z_top, s)  = sinh((z_top - ζ) / s) / sinh(z_top / s)
-@inline _b′_two_level(ζ, z_top, s) = -cosh((z_top - ζ) / s) / (s * sinh(z_top / s))
+@inline b_two_level(ζ, z_top, s)  = sinh((z_top - ζ) / s) / sinh(z_top / s)
+@inline b′_two_level(ζ, z_top, s) = -cosh((z_top - ζ) / s) / (s * sinh(z_top / s))
 
 @inline function terrain_following_σ(i, j, k, grid, f::TwoLevelDecay, ℓx, ℓy, ℓz)
     ζ  = rnode(k, grid, ℓz)
     h₁ = _h(i, j, grid, f.h₁, ℓx, ℓy)
     h₂ = _h(i, j, grid, f.h₂, ℓx, ℓy)
-    return 1 + h₁ * _b′_two_level(ζ, f.z_top, f.large_scale_height) +
-               h₂ * _b′_two_level(ζ, f.z_top, f.small_scale_height)
+    return 1 + h₁ * b′_two_level(ζ, f.z_top, f.large_scale_height) +
+               h₂ * b′_two_level(ζ, f.z_top, f.small_scale_height)
 end
 
 @inline function terrain_following_Δz_surface(i, j, k, grid, f::TwoLevelDecay, ℓx, ℓy, ℓz)
     ζ  = rnode(k, grid, ℓz)
     h₁ = _h(i, j, grid, f.h₁, ℓx, ℓy)
     h₂ = _h(i, j, grid, f.h₂, ℓx, ℓy)
-    return h₁ * _b_two_level(ζ, f.z_top, f.large_scale_height) +
-           h₂ * _b_two_level(ζ, f.z_top, f.small_scale_height)
+    return h₁ * b_two_level(ζ, f.z_top, f.large_scale_height) +
+           h₂ * b_two_level(ζ, f.z_top, f.small_scale_height)
 end
 
 @inline function terrain_following_∂z∂x(i, j, k, grid, f::TwoLevelDecay, ℓz)
     ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂x_h₁[i, j, 1] * _b_two_level(ζ, f.z_top, f.large_scale_height) +
-                     f.∂x_h₂[i, j, 1] * _b_two_level(ζ, f.z_top, f.small_scale_height)
+    @inbounds return f.∂x_h₁[i, j, 1] * b_two_level(ζ, f.z_top, f.large_scale_height) +
+                     f.∂x_h₂[i, j, 1] * b_two_level(ζ, f.z_top, f.small_scale_height)
 end
 
 @inline function terrain_following_∂z∂y(i, j, k, grid, f::TwoLevelDecay, ℓz)
     ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂y_h₁[i, j, 1] * _b_two_level(ζ, f.z_top, f.large_scale_height) +
-                     f.∂y_h₂[i, j, 1] * _b_two_level(ζ, f.z_top, f.small_scale_height)
+    @inbounds return f.∂y_h₁[i, j, 1] * b_two_level(ζ, f.z_top, f.large_scale_height) +
+                     f.∂y_h₂[i, j, 1] * b_two_level(ζ, f.z_top, f.small_scale_height)
 end

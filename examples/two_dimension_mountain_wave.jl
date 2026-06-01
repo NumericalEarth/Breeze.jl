@@ -158,6 +158,7 @@ z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, domain_height,
                                                  formulation = TwoLevelDecay(large_scale_height = domain_height / 2,
                                                                      small_scale_height = domain_height / 8))
 grid = RectilinearGrid(arch, size = (Nx, Nz),
+                       halo = (5, 5),
                        x = (-domain_width/2, domain_width/2), z = z_faces,
                        topology = (Periodic, Flat, Bounded))
 

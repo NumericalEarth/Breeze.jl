@@ -15,11 +15,9 @@
 ##### `TwoLevelDecay` (Schär et al. 2002) are two formulations of the one type.
 #####
 
-using Oceananigans.Grids: AbstractVerticalCoordinate, generate_coordinate, getnode, total_length,
-                          RectilinearGrid, LatitudeLongitudeGrid, MutableVerticalDiscretization
-using Oceananigans.Operators: σⁿ, Δrᶜᶜᶜ, Δrᶠᶜᶜ, Δrᶜᶠᶜ, Δrᶜᶜᶠ, Δrᶠᶠᶜ, Δrᶠᶜᶠ, Δrᶜᶠᶠ, Δrᶠᶠᶠ
-import Oceananigans.Grids: generate_coordinate, node, znode, validate_dimension_specification
-import Oceananigans.Operators: σⁿ, σ⁻
+using Oceananigans.Grids: AbstractVerticalCoordinate, getnode, total_length,
+                          RectilinearGrid, LatitudeLongitudeGrid
+using Oceananigans.Operators: Δrᶜᶜᶜ, Δrᶠᶜᶜ, Δrᶜᶠᶜ, Δrᶜᶜᶠ, Δrᶠᶠᶜ, Δrᶠᶜᶠ, Δrᶜᶠᶠ, Δrᶠᶠᶠ
 
 struct TerrainFollowingVerticalDiscretization{C, D, E, F, FM} <: AbstractVerticalCoordinate
     "Face-centered reference coordinate ζ"
@@ -62,7 +60,7 @@ Oceananigans.Grids.coordinate_summary(::Oceananigans.Grids.Bounded, z::TFVD, nam
 
 # Validate the reference (ζ) face specification, keeping the formulation; the
 # reference coordinate arrays are built later by `generate_coordinate`.
-function validate_dimension_specification(T, ξ::TFVD, dir, N, FT)
+function Oceananigans.Grids.validate_dimension_specification(T, ξ::TFVD, dir, N, FT)
     cᶠ = validate_dimension_specification(T, ξ.cᵃᵃᶠ, dir, N, FT)
     return TerrainFollowingVerticalDiscretization(cᶠ, ξ.cᵃᵃᶜ, ξ.Δᵃᵃᶠ, ξ.Δᵃᵃᶜ, ξ.formulation)
 end
@@ -84,7 +82,7 @@ Oceananigans.Architectures.on_architecture(arch, z::TFVD) =
 # Build the reference (ζ) coordinate arrays exactly like a static z grid; the
 # formulation's terrain components start as `nothing` (skeleton) and are filled
 # by `materialize_terrain!` once the grid's horizontal nodes exist.
-function generate_coordinate(FT, topo, size, halo, coordinate::TFVD, coordinate_name, dim::Int, arch)
+function Oceananigans.Grids.generate_coordinate(FT, topo, size, halo, coordinate::TFVD, coordinate_name, dim::Int, arch)
     dim == 3 || throw(ArgumentError("TerrainFollowingVerticalDiscretization is only supported in the z (third) dimension"))
     coordinate_name == :z || throw(ArgumentError("TerrainFollowingVerticalDiscretization is only supported for the z-coordinate"))
 
@@ -114,63 +112,68 @@ end
 const TFVDRG = Union{RectilinearGrid{<:Any, <:Any, <:Any, <:Any, <:TFVD},
                      LatitudeLongitudeGrid{<:Any, <:Any, <:Any, <:Any, <:TFVD}}
 
-@inline σⁿ(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
+@inline Oceananigans.Operators.σⁿ(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
     terrain_following_σ(i, j, k, grid, grid.z.formulation, ℓx, ℓy, ℓz)
 
 # The terrain is static, so the previous-step scaling equals the current one.
 # (The generic fallback returns `one(grid)` ≡ a flat grid, which makes any
 # consumer of σ⁻ see spurious grid motion and blow up.)
-@inline σ⁻(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) = σⁿ(i, j, k, grid, ℓx, ℓy, ℓz)
+@inline Oceananigans.Operators.σ⁻(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) = Oceananigans.Operators.σⁿ(i, j, k, grid, ℓx, ℓy, ℓz)
 
-@inline znode(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
+@inline Oceananigans.Grids.znode(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
     rnode(i, j, k, grid, ℓx, ℓy, ℓz) +
     terrain_following_Δz_surface(i, j, k, grid, grid.z.formulation, ℓx, ℓy, ℓz)
 
-const MappedTerrainVerticalCoordinate = Union{MutableVerticalDiscretization, TFVD}
-const MappedTerrainRG = Union{RectilinearGrid{<:Any, <:Any, <:Any, <:Any, <:MappedTerrainVerticalCoordinate},
-                              LatitudeLongitudeGrid{<:Any, <:Any, <:Any, <:Any, <:MappedTerrainVerticalCoordinate}}
-const XFlatMappedTerrainRG  = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, <:Any, <:Any, <:MappedTerrainVerticalCoordinate},
-                                    LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, <:Any, <:Any, <:MappedTerrainVerticalCoordinate}}
-const YFlatMappedTerrainRG  = Union{RectilinearGrid{<:Any, <:Any, Oceananigans.Grids.Flat, <:Any, <:MappedTerrainVerticalCoordinate},
-                                    LatitudeLongitudeGrid{<:Any, <:Any, Oceananigans.Grids.Flat, <:Any, <:MappedTerrainVerticalCoordinate}}
-const ZFlatMappedTerrainRG  = Union{RectilinearGrid{<:Any, <:Any, <:Any, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate},
-                                    LatitudeLongitudeGrid{<:Any, <:Any, <:Any, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate}}
-const XYFlatMappedTerrainRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:Any, <:MappedTerrainVerticalCoordinate},
-                                    LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:Any, <:MappedTerrainVerticalCoordinate}}
-const XZFlatMappedTerrainRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, <:Any, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate},
-                                    LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, <:Any, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate}}
-const YZFlatMappedTerrainRG = Union{RectilinearGrid{<:Any, <:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate},
-                                    LatitudeLongitudeGrid{<:Any, <:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate}}
-const XYZFlatMappedTerrainRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate},
-                                     LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:MappedTerrainVerticalCoordinate}}
+# `node(i, j, k, grid, ℓx, ℓy, ℓz)` is the tuple `(xnode, ynode, znode)` used by
+# `set!(field, f)` when evaluating an initialiser at each cell. The Oceananigans
+# default returns `rnode` (the reference vertical coordinate ζ) as the third
+# entry, which on a terrain-following grid is *not* the physical altitude. To
+# make `set!(field, (x, y, z) -> f(z))` evaluate `f` at z = ζ + h(x,y)·b(ζ)
+# (the actual cell-centre altitude) we override `node` on grids whose vertical
+# discretisation is a TFVD. This dispatches on a type Breeze owns, so it is
+# not type piracy.
+const XFlatTFVDRG  = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, <:Any, <:Any, <:TFVD},
+                           LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, <:Any, <:Any, <:TFVD}}
+const YFlatTFVDRG  = Union{RectilinearGrid{<:Any, <:Any, Oceananigans.Grids.Flat, <:Any, <:TFVD},
+                           LatitudeLongitudeGrid{<:Any, <:Any, Oceananigans.Grids.Flat, <:Any, <:TFVD}}
+const ZFlatTFVDRG  = Union{RectilinearGrid{<:Any, <:Any, <:Any, Oceananigans.Grids.Flat, <:TFVD},
+                           LatitudeLongitudeGrid{<:Any, <:Any, <:Any, Oceananigans.Grids.Flat, <:TFVD}}
+const XYFlatTFVDRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:Any, <:TFVD},
+                           LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:Any, <:TFVD}}
+const XZFlatTFVDRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, <:Any, Oceananigans.Grids.Flat, <:TFVD},
+                           LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, <:Any, Oceananigans.Grids.Flat, <:TFVD}}
+const YZFlatTFVDRG = Union{RectilinearGrid{<:Any, <:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:TFVD},
+                           LatitudeLongitudeGrid{<:Any, <:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:TFVD}}
+const XYZFlatTFVDRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:TFVD},
+                            LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:TFVD}}
 
-@inline node(i, j, k, grid::MappedTerrainRG, ℓx, ℓy, ℓz) =
+@inline Oceananigans.Grids.node(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
     (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
      ynode(i, j, k, grid, ℓx, ℓy, ℓz),
      znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline node(i, j, k, grid::XFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+@inline Oceananigans.Grids.node(i, j, k, grid::XFlatTFVDRG, ℓx, ℓy, ℓz) =
     (ynode(i, j, k, grid, ℓx, ℓy, ℓz),
      znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline node(i, j, k, grid::YFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+@inline Oceananigans.Grids.node(i, j, k, grid::YFlatTFVDRG, ℓx, ℓy, ℓz) =
     (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
      znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline node(i, j, k, grid::ZFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+@inline Oceananigans.Grids.node(i, j, k, grid::ZFlatTFVDRG, ℓx, ℓy, ℓz) =
     (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
      ynode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline node(i, j, k, grid::XYFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+@inline Oceananigans.Grids.node(i, j, k, grid::XYFlatTFVDRG, ℓx, ℓy, ℓz) =
     tuple(znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline node(i, j, k, grid::XZFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+@inline Oceananigans.Grids.node(i, j, k, grid::XZFlatTFVDRG, ℓx, ℓy, ℓz) =
     tuple(ynode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline node(i, j, k, grid::YZFlatMappedTerrainRG, ℓx, ℓy, ℓz) =
+@inline Oceananigans.Grids.node(i, j, k, grid::YZFlatTFVDRG, ℓx, ℓy, ℓz) =
     tuple(xnode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline node(i, j, k, grid::XYZFlatMappedTerrainRG, ℓx, ℓy, ℓz) = tuple()
+@inline Oceananigans.Grids.node(i, j, k, grid::XYZFlatTFVDRG, ℓx, ℓy, ℓz) = tuple()
 
 # Vertical spacing = reference spacing × Jacobian, mirroring the mutable-grid
 # operators but dispatching on the terrain-following grid type.
@@ -181,7 +184,7 @@ for LX in (:ᶠ, :ᶜ), LY in (:ᶠ, :ᶜ), LZ in (:ᶠ, :ᶜ)
     ℓy = LY == :ᶜ ? :Center : :Face
     ℓz = LZ == :ᶜ ? :Center : :Face
     @eval @inline Oceananigans.Operators.$zspacing(i, j, k, grid::TFVDRG) =
-        Oceananigans.Operators.$rspacing(i, j, k, grid) * σⁿ(i, j, k, grid, $ℓx(), $ℓy(), $ℓz())
+        Oceananigans.Operators.$rspacing(i, j, k, grid) * Oceananigans.Operators.σⁿ(i, j, k, grid, $ℓx(), $ℓy(), $ℓz())
 end
 
 # Horizontal slope of the coordinate surfaces, (∂z/∂x)_ζ and (∂z/∂y)_ζ, at the

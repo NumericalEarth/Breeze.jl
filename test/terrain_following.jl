@@ -227,8 +227,8 @@ using Test
         # slope factor is zero, so ρw̃ ≈ ρw to machine precision (not bit-equal).
         w̃ = model.dynamics.contravariant_vertical_velocity
         ρw̃ = model.dynamics.contravariant_vertical_momentum
-        @test maximum(abs, interior(w̃) .- interior(model.velocities.w)) < 1e-12
-        @test maximum(abs, interior(ρw̃) .- interior(model.momentum.ρw)) < 1e-12
+        @test isapprox(interior(w̃),  interior(model.velocities.w); atol = 1e-12)
+        @test isapprox(interior(ρw̃), interior(model.momentum.ρw);  atol = 1e-12)
     end
 
     @testset "Split-explicit zero terrain matches height coordinates" begin
@@ -498,7 +498,7 @@ using Test
         compute_slow_momentum_tendencies!(model)
         compute_slow_scalar_tendencies!(model)
         assemble_slow_vertical_momentum_tendency!(substepper, model)
-        @test maximum(abs, interior(substepper.slow_vertical_momentum_tendency)) <= 1e-12
+        @test isapprox(maximum(abs, interior(substepper.slow_vertical_momentum_tendency)), 0; atol = 1e-12)
 
         initial_mass = sum(interior(model.dynamics.density))
         time_step!(model, 0.1)
@@ -512,8 +512,8 @@ using Test
         @test isfinite(maximum(abs, w̃))
         @test isfinite(maximum(abs, ρw̃))
         @test isfinite(maximum(abs, w̃_transport))
-        @test maximum(abs, interior(model.velocities.w)) <= 1e-12
-        @test maximum(abs, interior(w̃)) <= 1e-12
+        @test isapprox(maximum(abs, interior(model.velocities.w)), 0; atol = 1e-12)
+        @test isapprox(maximum(abs, interior(w̃)), 0; atol = 1e-12)
         @test abs(final_mass - initial_mass) / initial_mass <= 1e-13
 
         for i in 1:Nx
@@ -568,7 +568,7 @@ using Test
         time_step!(model, Δt)
         @test model.clock.iteration == 1
         @test isfinite(maximum(abs, interior(model.velocities.w)))
-        @test maximum(abs, interior(model.velocities.w)) <= 1e-12
+        @test isapprox(maximum(abs, interior(model.velocities.w)), 0; atol = 1e-12)
     end
 
     @testset "Split-explicit terrain acoustic stability diagnostics" begin
