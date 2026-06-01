@@ -97,7 +97,7 @@ jobs:
         run: |
           julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
       - name: "Cache Julia depot"
-        uses: julia-actions/cache@9a93c5fb3e9c1c20b60fc80a478cae53e38618a4 # v3.0.2
+        uses: julia-actions/cache@a45e8fa8be21c18a06b7177052533149e61e9b38 # v3.1.0
         with:
           # On self-hosted runners we use the prebuilt Docker container, which already
           # caches pkgimages and such, so we don't need to cache here most things.  Only
