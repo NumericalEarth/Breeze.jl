@@ -9,8 +9,7 @@ using Oceananigans.TimeSteppers:
     step_lagrangian_particles!,
     implicit_step!
 
-using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
-                                microphysics_model_update!
+using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -238,15 +237,17 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    # Operator-split microphysics: applied once per time step on the post-RK
-    # state (rather than once per stage from `update_state!`), so that the
-    # full Δt of autoconversion / accretion / condensation / sedimentation
-    # is applied exactly once. Required for `DCMIP2016KesslerMicrophysics`,
-    # which bypasses the standard tendency interface and updates state via
-    # this hook.
-    microphysics_model_update!(model.microphysics, model)
-
-    update_state!(model, callbacks; compute_tendencies = true)
+    # Operator-split microphysics is applied exactly once per time step, inside this
+    # final `update_state!` via `apply_microphysics_model_update=true`. Running it here
+    # (rather than from a separate hook before `update_state!`) means it sees the post-RK
+    # state *after* `compute_auxiliary_variables!` has refreshed the diagnostic `θ`,
+    # pressure, and moisture it reads, and the post-microphysics tendencies feed the next
+    # step. The per-stage `update_state!` calls above use the default
+    # `apply_microphysics_model_update=false` so the full-Δt update is not applied
+    # multiple times. (The tendency-interface microphysics still runs every stage as part
+    # of `compute_tendencies!`.) Required for `DCMIP2016KesslerMicrophysics`, which
+    # bypasses the tendency interface and updates state directly via this hook.
+    update_state!(model, callbacks; compute_tendencies = true, apply_microphysics_model_update = true)
     step_lagrangian_particles!(model, α³ * Δt)
 
     return nothing
