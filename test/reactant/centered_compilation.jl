@@ -46,7 +46,7 @@ topologies = [
 #####
 
 function make_grid(topo, nd; arch=ReactantState())
-    sz  = nd == 2 ? (8, 8)     : (8, 8, 8)
+    sz  = nd == 2 ? (20, 20)     : (20, 20, 20)
     ext = nd == 2 ? (1e3, 1e3) : (1e3, 1e3, 1e3)
     return RectilinearGrid(arch; size=sz, extent=ext, topology=topo)
 end
