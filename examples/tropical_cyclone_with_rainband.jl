@@ -163,7 +163,7 @@ Lz = 25kilometers                 # YD19 §3a1
 sponge_rate = 1.0f0 / Float32(333seconds) # ≈ WRF damp_opt=2 `dampcoef`
 stage_stop_time = 24hours
 
-arch = CUDA.functional() ? GPU() : CPU()
+arch = GPU()
 
 grid = RectilinearGrid(
     arch;
