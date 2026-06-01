@@ -82,7 +82,7 @@ using Oceananigans.Operators:
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
-using Oceananigans.Grids: Flat, Center, peripheral_node,
+using Oceananigans.Grids: Flat, Center, Face, peripheral_node,
                           topology,
                           minimum_xspacing, minimum_yspacing, minimum_zspacing
 
@@ -680,7 +680,7 @@ end
 @inline sponge_term_diag(i, j, k, grid, ::Nothing, δτᵐ⁺) = zero(grid)
 
 @inline function sponge_term_diag(i, j, k, grid, sponge::UpperSponge, δτᵐ⁺)
-    z = rnode(k, grid, Face())
+    z = rnode(i, j, k, grid, Center(), Center(), Face())
     return δτᵐ⁺ * sponge.damping_rate *
            sponge.ramp(z, grid.Lz, sponge.depth)
 end
@@ -688,7 +688,7 @@ end
 @inline sponge_rhs(i, j, k, grid, ::Nothing, δτˢ⁻, ρw_old) = zero(grid)
 
 @inline function sponge_rhs(i, j, k, grid, sponge::UpperSponge, δτˢ⁻, ρw_old)
-    z = rnode(k, grid, Face())
+    z = rnode(i, j, k, grid, Center(), Center(), Face())
     @inbounds return δτˢ⁻ * sponge.damping_rate *
                      sponge.ramp(z, grid.Lz, sponge.depth) * ρw_old[i, j, k]
 end
