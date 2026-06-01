@@ -126,9 +126,12 @@ export
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
-    follow_terrain!,
+    TerrainFollowingVerticalDiscretization,
+    LinearDecay,
+    TwoLevelDecay,
+    materialize_terrain!,
+    build_terrain_metrics,
     TerrainMetrics,
-    BasicTerrainFollowing,
     SlopeOutsideInterpolation,
     SlopeInsideInterpolation,
 
