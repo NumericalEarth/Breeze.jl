@@ -81,7 +81,7 @@ using Oceananigans.Operators:
     Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
-using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, Open
 
 using Oceananigans.Grids: Flat, Center, peripheral_node,
                           topology,
@@ -173,6 +173,9 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
     damping :: D
     substep_distribution :: AD
     sponge :: US
+    # Per-substep relaxation factor `α` for the outermost open-boundary cell
+    # of `ρ′,(ρθ)′`. See `apply_open_boundary_relaxation!` and issue #738.
+    open_boundary_relaxation :: FT
 
     # Linearization basic state ``Uᴸ`` — Πᴸ and θᴸ derived from the live
     # `model.dynamics.pressure`, `model.dynamics.density`, and the
@@ -226,6 +229,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.damping),
                        a.substep_distribution,
                        adapt(to, a.sponge),
+                       a.open_boundary_relaxation,
                        adapt(to, a.linearization_exner),
                        adapt(to, a.linearization_potential_temperature),
                        adapt(to, a.linearization_gamma_R_mixture),
@@ -276,6 +280,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     damping = split_explicit.damping
     sponge = split_explicit.sponge
     substep_distribution = split_explicit.substep_distribution
+    open_boundary_relaxation = convert(FT, split_explicit.open_boundary_relaxation)
 
     # Linearization basic state — Πᴸ, θᴸ derived from live model fields.
     linearization_exner                           = CenterField(grid)
@@ -313,7 +318,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                                                tridiagonal_direction = ZDirection())
 
     return AcousticSubstepper(Ns, acoustic_cfl, ω, damping, substep_distribution,
-                              sponge,
+                              sponge, open_boundary_relaxation,
                               linearization_exner,
                               linearization_potential_temperature,
                               linearization_gamma_R_mixture,
@@ -1281,6 +1286,73 @@ end
 ##### Section 12 — Substep loop driver
 #####
 
+# Per-substep open-boundary enforcement (Breeze.jl issue #738).
+#
+# The substepper's perturbation scalars `ρ′,(ρθ)′` carry zero-gradient halos
+# on `Bounded` dims, so an open lateral boundary reflects the linearized
+# acoustic pressure perturbation back into the domain. The boundary mass flux
+# is then carried only by the stage-entry slow tendency `Gˢρ` (frozen across
+# the substeps), biasing the discrete mass balance when a transient inflow
+# crosses the boundary. WRF, ERF, and MPAS all instead enforce the specified
+# lateral boundary on every acoustic substep.
+#
+# Here we mirror that by relaxing the outermost open-boundary cell of `ρ′`,
+# `(ρθ)′` toward the prescribed wall value `v` each substep. `update_state!`
+# applied the prognostic `ValueBoundaryCondition` to the base at stage entry,
+# so `ρᴸ[halo] = 2v − ρᴸ[cell]` and the target perturbation is
+# `v − ρᴸ[cell] = (ρᴸ[halo] − ρᴸ[cell]) / 2`, read directly from the base
+# field. The relaxation factor `α ∈ (0, 1]` (default 0.5, set via
+# `SplitExplicitTimeDiscretization(; open_boundary_relaxation = α)`) controls
+# how hard the cell is pulled each substep. The relaxation is a no-op on any
+# side whose prognostic-momentum BC is not an active `OpenBoundaryCondition`
+# (periodic, walls, and `OpenBoundaryCondition(nothing)` all skip it), so the
+# enforcement has zero cost when no open lateral BC is present.
+
+@inline is_active_open_bc(bc) = (bc isa BoundaryCondition{<:Open}) && !(bc.condition isa Nothing)
+
+# Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the prescribed
+# wall value in a single kernel: target = v − cᴸ[iᴮ] = (cᴸ[iᴴ] − cᴸ[iᴮ]) / 2.
+# `iᴮ` is the outermost interior cell index, `iᴴ` the adjacent halo cell index.
+@kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, iᴮ, iᴴ, α)
+    j, k = @index(Global, NTuple)
+    @inbounds begin
+        ρ′[iᴮ, j, k]  += α * ((ρᴸ[iᴴ, j, k]  - ρᴸ[iᴮ, j, k])  / 2 - ρ′[iᴮ, j, k])
+        ρθ′[iᴮ, j, k] += α * ((ρθᴸ[iᴴ, j, k] - ρθᴸ[iᴮ, j, k]) / 2 - ρθ′[iᴮ, j, k])
+    end
+end
+
+@kernel function _relax_open_boundary_y!(ρ′, ρθ′, ρᴸ, ρθᴸ, jᴮ, jᴴ, α)
+    i, k = @index(Global, NTuple)
+    @inbounds begin
+        ρ′[i, jᴮ, k]  += α * ((ρᴸ[i, jᴴ, k]  - ρᴸ[i, jᴮ, k])  / 2 - ρ′[i, jᴮ, k])
+        ρθ′[i, jᴮ, k] += α * ((ρθᴸ[i, jᴴ, k] - ρθᴸ[i, jᴮ, k]) / 2 - ρθ′[i, jᴮ, k])
+    end
+end
+
+function apply_open_boundary_relaxation!(substepper, model, grid, arch)
+    bcs_u = model.momentum.ρu.boundary_conditions
+    bcs_v = model.momentum.ρv.boundary_conditions
+    Nx, Ny, _ = size(grid)
+    α   = substepper.open_boundary_relaxation
+    ρ′  = substepper.density_perturbation
+    ρθ′ = substepper.density_potential_temperature_perturbation
+    ρᴸ  = model.dynamics.density
+    ρθᴸ = thermodynamic_density(model.formulation)
+    if is_active_open_bc(bcs_u.west)
+        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
+    end
+    if is_active_open_bc(bcs_u.east)
+        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, Nx, Nx + 1, α)
+    end
+    if is_active_open_bc(bcs_v.south)
+        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
+    end
+    if is_active_open_bc(bcs_v.north)
+        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, Ny, Ny + 1, α)
+    end
+    return nothing
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -1402,6 +1474,11 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
                 substepper.density_potential_temperature_predictor,
                 grid, δτᵐ⁺,
                 substepper.linearization_potential_temperature)
+
+        # Per-substep open-boundary enforcement (issue #738): relax the outermost
+        # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
+        # the halo fill, so the boundary cell tracks the prescribed inflow state.
+        apply_open_boundary_relaxation!(substepper, model, grid, arch)
 
         fill_halo_regions!(substepper.density_perturbation)
         fill_halo_regions!(substepper.density_potential_temperature_perturbation)
