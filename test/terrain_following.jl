@@ -1,7 +1,8 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Grids: MutableVerticalDiscretization, rnode, xnode, znode
-using Breeze.Thermodynamics: hydrostatic_pressure
+using Oceananigans.Operators: Δzᶜᶜᶠ, Δzᶜᶜᶜ
+using Breeze.Thermodynamics: hydrostatic_pressure, dry_air_gas_constant, vapor_gas_constant
 using Test
 
 @testset "TerrainFollowingDiscretization" begin
@@ -296,6 +297,110 @@ using Test
         # Mountain-top column should have lower p_ref at k=1 than flat column
         i_flat = 1
         i_peak = Nx÷2
+        @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
+    end
+
+    @testset "Constant moist terrain reference state satisfies discrete hydrostatic balance" begin
+        Nx, Nz = 8, 8
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        h(x, y) = 200 * exp(-x^2 / 2000^2)
+        metrics = follow_terrain!(grid, h)
+
+    θ_reference = 300.0
+    qᵛ_reference = 0.012
+
+        dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                        terrain_metrics = metrics,
+                                        reference_potential_temperature = θ_reference,
+                                        reference_vapor_mass_fraction = qᵛ_reference)
+        model = AtmosphereModel(grid; dynamics)
+
+        p_ref = model.dynamics.terrain_reference_pressure
+        ρ_ref = model.dynamics.terrain_reference_density
+        constants = model.thermodynamic_constants
+        g = constants.gravitational_acceleration
+        p₀ = dynamics.surface_pressure
+        pˢᵗ = dynamics.standard_pressure
+        Rᵈ = dry_air_gas_constant(constants)
+        Rᵛ = vapor_gas_constant(constants)
+        cᵖᵈ = constants.dry_air.heat_capacity
+        cᵖᵛ = constants.vapor.heat_capacity
+
+        @test p_ref !== nothing
+        @test ρ_ref !== nothing
+
+        qᵛ_surface = qᵛ_reference
+        qᵈ_surface = 1 - qᵛ_surface
+        Rᵐ_surface = qᵈ_surface * Rᵈ + qᵛ_surface * Rᵛ
+        cᵖᵐ_surface = qᵈ_surface * cᵖᵈ + qᵛ_surface * cᵖᵛ
+        κ_surface = Rᵐ_surface / cᵖᵐ_surface
+        T_surface₀ = θ_reference * (p₀ / pˢᵗ)^κ_surface
+
+        for i in 1:Nx
+            z_surface = znode(i, 1, 1, grid, Center(), Center(), Face())
+            p_surface = p₀ * (1 - g * z_surface / (cᵖᵐ_surface * T_surface₀))^(cᵖᵐ_surface / Rᵐ_surface)
+            T_surface = θ_reference * (p_surface / pˢᵗ)^κ_surface
+            ρ_surface = p_surface / (Rᵐ_surface * T_surface)
+
+            # Surface (bottom face) to first cell center spans half a cell.
+            hydrostatic_residual = (p_ref[i, 1, 1] - p_surface) / (Δzᶜᶜᶜ(i, 1, 1, grid) / 2) +
+                                   g * (ρ_ref[i, 1, 1] + ρ_surface) / 2
+            @test abs(hydrostatic_residual) <= 1e-6
+        end
+
+        for i in 1:Nx, k in 2:Nz
+            hydrostatic_residual = (p_ref[i, 1, k] - p_ref[i, 1, k - 1]) / Δzᶜᶜᶠ(i, 1, k, grid) +
+                                   g * (ρ_ref[i, 1, k] + ρ_ref[i, 1, k - 1]) / 2
+            @test abs(hydrostatic_residual) <= 1e-8
+        end
+
+        i_flat = 1
+        i_peak = Nx ÷ 2
+        @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
+    end
+
+    @testset "Variable moist terrain reference state satisfies interior discrete hydrostatic balance" begin
+        Nx, Nz = 8, 8
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        h(x, y) = 200 * exp(-x^2 / 2000^2)
+        metrics = follow_terrain!(grid, h)
+
+        θ_reference(z) = 300.0 + 0.01 * z
+        qᵛ_reference(z) = 0.012 * exp(-z / 1000)
+
+        dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                        terrain_metrics = metrics,
+                                        reference_potential_temperature = θ_reference,
+                                        reference_vapor_mass_fraction = qᵛ_reference)
+        model = AtmosphereModel(grid; dynamics)
+
+        p_ref = model.dynamics.terrain_reference_pressure
+        ρ_ref = model.dynamics.terrain_reference_density
+        g = model.thermodynamic_constants.gravitational_acceleration
+
+        @test p_ref !== nothing
+        @test ρ_ref !== nothing
+
+        for i in 1:Nx, k in 2:Nz
+            hydrostatic_residual = (p_ref[i, 1, k] - p_ref[i, 1, k - 1]) / Δzᶜᶜᶠ(i, 1, k, grid) +
+                                   g * (ρ_ref[i, 1, k] + ρ_ref[i, 1, k - 1]) / 2
+            @test abs(hydrostatic_residual) <= 1e-8
+        end
+
+        i_flat = 1
+        i_peak = Nx ÷ 2
         @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
     end
 end

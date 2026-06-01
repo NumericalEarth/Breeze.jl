@@ -60,21 +60,28 @@ Keyword Arguments
   hydrostatically-balanced reference state used in base-state subtraction. Can be a constant `θ₀`
   or a function `θ(z)`. Default: `nothing` (no base-state correction).
   When provided, an [`ExnerReferenceState`](@ref) is built during materialization.
+- `reference_vapor_mass_fraction`: Optional vapor mass fraction for building a moist
+  compressible reference state. Can be a constant `qᵛ`, function `qᵛ(z)`, or field,
+  and is used with `reference_potential_temperature`.
 """
 function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               standard_pressure = 1e5,
                               surface_pressure = 101325.0,
                               reference_potential_temperature = nothing,
                               reference_temperature = nothing,
+                              reference_vapor_mass_fraction = nothing,
                               terrain_metrics = nothing) where TD
 
     FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
     pˢᵗ = convert(FT, standard_pressure)
     p₀ = convert(FT, surface_pressure)
     # Store reference spec temporarily; ExnerReferenceState is built in materialize_dynamics.
-    # If reference_temperature is given, store it as a NamedTuple to distinguish from θ₀.
+    # If reference_temperature or reference_vapor_mass_fraction is given, wrap in a
+    # NamedTuple to distinguish from a bare θ₀ spec.
     ref_spec = if reference_temperature !== nothing
-        (; reference_temperature)
+        (; reference_temperature, reference_vapor_mass_fraction)
+    elseif reference_vapor_mass_fraction !== nothing
+        (; reference_potential_temperature, reference_vapor_mass_fraction)
     else
         reference_potential_temperature
     end
@@ -97,6 +104,24 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.contravariant_vertical_momentum),
                          adapt(to, dynamics.terrain_reference_pressure),
                          adapt(to, dynamics.terrain_reference_density))
+
+# Translate a stored reference spec — a bare θ₀, a (; reference_temperature, …)
+# NamedTuple, or a (; reference_potential_temperature, …) NamedTuple — into the
+# kwargs accepted by `ExnerReferenceState`. A `nothing` θ in the NamedTuple is
+# elided so `ExnerReferenceState`'s own `potential_temperature = 288` default
+# takes effect.
+_exner_kwargs(ref_spec) = (; potential_temperature = ref_spec)
+function _exner_kwargs(ref_spec::NamedTuple)
+    if haskey(ref_spec, :reference_temperature)
+        return (; reference_temperature = ref_spec.reference_temperature,
+                  vapor_mass_fraction = ref_spec.reference_vapor_mass_fraction)
+    elseif ref_spec.reference_potential_temperature === nothing
+        return (; vapor_mass_fraction = ref_spec.reference_vapor_mass_fraction)
+    else
+        return (; potential_temperature = ref_spec.reference_potential_temperature,
+                  vapor_mass_fraction = ref_spec.reference_vapor_mass_fraction)
+    end
+end
 
 #####
 ##### Materialization
@@ -135,18 +160,10 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
 
     if ref_spec === nothing || terrain_metrics !== nothing
         reference_state = nothing
-    elseif ref_spec isa NamedTuple && haskey(ref_spec, :reference_temperature)
-        # Isothermal base state (MPAS baroclinic wave convention)
-        reference_state = ExnerReferenceState(grid, thermodynamic_constants;
-                                              surface_pressure,
-                                              reference_temperature = ref_spec.reference_temperature,
-                                              standard_pressure)
     else
-        # Isentropic base state (constant or z-dependent θ₀)
         reference_state = ExnerReferenceState(grid, thermodynamic_constants;
-                                              surface_pressure,
-                                              potential_temperature = ref_spec,
-                                              standard_pressure)
+                                              surface_pressure, standard_pressure,
+                                              _exner_kwargs(ref_spec)...)
     end
 
     # Create contravariant velocity/momentum fields and terrain reference state
@@ -324,17 +341,9 @@ function AtmosphereModels.boundary_conditions_reference_state(dynamics::Compress
     standard_pressure = dynamics.standard_pressure
     surface_pressure = dynamics.surface_pressure
 
-    if ref_spec isa NamedTuple && haskey(ref_spec, :reference_temperature)
-        return ExnerReferenceState(grid, thermodynamic_constants;
-                                   surface_pressure,
-                                   reference_temperature = ref_spec.reference_temperature,
-                                   standard_pressure)
-    else
-        return ExnerReferenceState(grid, thermodynamic_constants;
-                                   surface_pressure,
-                                   potential_temperature = ref_spec,
-                                   standard_pressure)
-    end
+    return ExnerReferenceState(grid, thermodynamic_constants;
+                               surface_pressure, standard_pressure,
+                               _exner_kwargs(ref_spec)...)
 end
 
 #####
