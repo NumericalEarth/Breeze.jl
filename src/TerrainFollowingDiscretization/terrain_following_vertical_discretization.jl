@@ -141,20 +141,16 @@ const TFVDRG = Union{RectilinearGrid{<:Any, <:Any, <:Any, <:Any, <:TFVD},
 # (the actual cell-centre altitude) we override `node` on grids whose vertical
 # discretisation is a TFVD. This dispatches on a type Breeze owns, so it is
 # not type piracy.
+# z-Flat variants are intentionally absent: TFVD is the vertical discretization,
+# so `topology[3] == Flat` makes the terrain-following coordinate meaningless.
+# Only x-Flat (cross-section in y-z), y-Flat (cross-section in x-z), and xy-Flat
+# (single column) are real use cases.
 const XFlatTFVDRG  = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, <:Any, <:Any, <:TFVD},
                            LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, <:Any, <:Any, <:TFVD}}
 const YFlatTFVDRG  = Union{RectilinearGrid{<:Any, <:Any, Oceananigans.Grids.Flat, <:Any, <:TFVD},
                            LatitudeLongitudeGrid{<:Any, <:Any, Oceananigans.Grids.Flat, <:Any, <:TFVD}}
-const ZFlatTFVDRG  = Union{RectilinearGrid{<:Any, <:Any, <:Any, Oceananigans.Grids.Flat, <:TFVD},
-                           LatitudeLongitudeGrid{<:Any, <:Any, <:Any, Oceananigans.Grids.Flat, <:TFVD}}
 const XYFlatTFVDRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:Any, <:TFVD},
                            LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:Any, <:TFVD}}
-const XZFlatTFVDRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, <:Any, Oceananigans.Grids.Flat, <:TFVD},
-                           LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, <:Any, Oceananigans.Grids.Flat, <:TFVD}}
-const YZFlatTFVDRG = Union{RectilinearGrid{<:Any, <:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:TFVD},
-                           LatitudeLongitudeGrid{<:Any, <:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:TFVD}}
-const XYZFlatTFVDRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:TFVD},
-                            LatitudeLongitudeGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:TFVD}}
 
 @inline Oceananigans.Grids.node(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
     (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
@@ -169,20 +165,8 @@ const XYZFlatTFVDRG = Union{RectilinearGrid{<:Any, Oceananigans.Grids.Flat, Ocea
     (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
      Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline Oceananigans.Grids.node(i, j, k, grid::ZFlatTFVDRG, ℓx, ℓy, ℓz) =
-    (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
-     ynode(i, j, k, grid, ℓx, ℓy, ℓz))
-
 @inline Oceananigans.Grids.node(i, j, k, grid::XYFlatTFVDRG, ℓx, ℓy, ℓz) =
     tuple(Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
-
-@inline Oceananigans.Grids.node(i, j, k, grid::XZFlatTFVDRG, ℓx, ℓy, ℓz) =
-    tuple(ynode(i, j, k, grid, ℓx, ℓy, ℓz))
-
-@inline Oceananigans.Grids.node(i, j, k, grid::YZFlatTFVDRG, ℓx, ℓy, ℓz) =
-    tuple(xnode(i, j, k, grid, ℓx, ℓy, ℓz))
-
-@inline Oceananigans.Grids.node(i, j, k, grid::XYZFlatTFVDRG, ℓx, ℓy, ℓz) = tuple()
 
 # Vertical spacing = reference spacing × Jacobian, mirroring the mutable-grid
 # operators but dispatching on the terrain-following grid type.

@@ -975,5 +975,109 @@ using Test
         i_peak = Nx÷2
         @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
     end
+
+    #####
+    ##### 3D TFVD (non-Flat y) — exercises the y-direction chain-rule operators
+    ##### (`∂y_zᶜᶠᶜ`, `∂yᶜᶠᶜ`, etc.) and 3D node()/contravariant-velocity paths
+    ##### that 2D (Periodic, Flat, Bounded) tests cannot reach.
+    #####
+
+    @testset "3D TFVD with non-Flat y: explicit step + ∂y operators" begin
+        Nx, Ny, Nz = 8, 8, 6
+        Lx, Ly, Lz = 10000.0, 10000.0, 5000.0
+
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1));
+                                                          formulation = LinearDecay())
+        grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz), halo=(5, 5, 5),
+                               x=(-Lx/2, Lx/2), y=(-Ly/2, Ly/2), z=z_faces,
+                               topology=(Periodic, Periodic, Bounded))
+
+        # 3D bell mountain — non-trivial slope in BOTH x and y so ∂y operators fire
+        h₀, a = 200.0, 2000.0
+        h(x, y) = h₀ / (1 + (x/a)^2 + (y/a)^2)^1.5
+        materialize_terrain!(grid, h)
+        metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
+
+        # Both ∂x_h and ∂y_h should have non-zero interior values
+        @test maximum(abs, metrics.∂x_h) > 1e-3
+        @test maximum(abs, metrics.∂y_h) > 1e-3
+
+        dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                        reference_potential_temperature = 300)
+        model = AtmosphereModel(grid; dynamics)
+        ρᵢ(x, y, z) = adiabatic_hydrostatic_density(z, 101325.0, 300.0, 1e5,
+                                                    model.thermodynamic_constants)
+        set!(model, ρ=ρᵢ, θ=300, u=1.0, v=0.5)
+
+        @test model.dynamics.terrain_metrics isa TerrainMetrics
+        @test model.dynamics.contravariant_vertical_velocity !== nothing
+
+        Δt = 0.1
+        time_step!(model, Δt)
+        @test isfinite(maximum(abs, model.velocities.w))
+        @test isfinite(maximum(abs, model.velocities.v))
+        @test isfinite(maximum(abs, model.dynamics.contravariant_vertical_velocity))
+    end
+
+    @testset "3D TFVD with non-Flat y: split-explicit + ∂y pressure gradient" begin
+        Nx, Ny, Nz = 8, 8, 6
+        Lx, Ly, Lz = 10000.0, 10000.0, 5000.0
+
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1));
+                                                          formulation = LinearDecay())
+        grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz), halo=(5, 5, 5),
+                               x=(-Lx/2, Lx/2), y=(-Ly/2, Ly/2), z=z_faces,
+                               topology=(Periodic, Periodic, Bounded))
+        materialize_terrain!(grid, (x, y) -> 100 * exp(-(x^2 + y^2) / 2000^2))
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
+                                        reference_potential_temperature = 300)
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+        ρᵢ(x, y, z) = adiabatic_hydrostatic_density(z, 101325.0, 300.0, 1e5,
+                                                    model.thermodynamic_constants)
+        set!(model, ρ=ρᵢ, θ=300,
+             u=(x, y, z) -> 0.1 * sin(2π * x / Lx),
+             v=(x, y, z) -> 0.1 * sin(2π * y / Ly))
+
+        # Step the substepper. This routes through both ∂xᶠᶜᶜ and ∂yᶜᶠᶜ chain-rule
+        # operators (the y branch is unreachable on the 2D Flat-y tests above).
+        time_step!(model, 0.1)
+        @test isfinite(maximum(abs, model.velocities.w))
+        @test isfinite(maximum(abs, model.velocities.v))
+    end
+
+    @testset "on_architecture round-trip preserves materialised terrain" begin
+        # Mirrors the CPU mirror that `set_to_function!` builds when called on a
+        # GPU TFVD grid. Without `cpu_face_constructor_z(::TFVDRG)` + the
+        # materialised-arrays branch of `allocate_formulation`, the rebuild
+        # discards `formulation.h`/`∂x_h`/`∂y_h` and the `node()` override
+        # returns ζ instead of physical altitude.
+        Nx, Nz = 16, 8
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1));
+                                                          formulation = LinearDecay())
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+        h₀ = 300.0
+        materialize_terrain!(grid, (x, y) -> h₀ * exp(-x^2 / 2000^2))
+
+        cpu_arch = Oceananigans.Architectures.CPU()
+        rebuilt = Oceananigans.Architectures.on_architecture(cpu_arch, grid)
+
+        @test rebuilt.z isa TerrainFollowingVerticalDiscretization
+        @test rebuilt.z.formulation.h !== nothing
+        @test rebuilt.z.formulation.∂x_h !== nothing
+
+        # Compare znode (physical altitude) at the surface (k=1, Face) and at
+        # the top (k=Nz+1, Face) against the analytic terrain.
+        @allowscalar for i in 1:Nx
+            x = xnode(i, rebuilt, Center())
+            h_expected = h₀ * exp(-x^2 / 2000^2)
+            @test znode(i, 1, 1,    rebuilt, Center(), Center(), Face()) ≈ h_expected rtol=1e-10
+            @test znode(i, 1, Nz+1, rebuilt, Center(), Center(), Face()) ≈ Lz          rtol=1e-10
+        end
+    end
 end
 end
