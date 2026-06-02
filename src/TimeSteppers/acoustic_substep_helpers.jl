@@ -20,10 +20,8 @@ using Breeze.AtmosphereModels:
 using Breeze.CompressibleEquations: CompressibleDynamics
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
 
-const NonFlatTerrainMetrics = TerrainMetrics{<:Any, <:Any, <:Any, <:Any, <:Any, Val{false}}
-
-const NonFlatTerrainCompressibleAcousticModel =
-    AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:NonFlatTerrainMetrics}}
+const TerrainCompressibleAcousticModel =
+    AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}}
 
 #####
 ##### Slow momentum tendencies
@@ -36,7 +34,7 @@ const NonFlatTerrainCompressibleAcousticModel =
 
 slow_momentum_advection_momentum(model) = model.momentum
 
-function slow_momentum_advection_momentum(model::NonFlatTerrainCompressibleAcousticModel)
+function slow_momentum_advection_momentum(model::TerrainCompressibleAcousticModel)
     return advecting_momentum(model)
 end
 
@@ -93,7 +91,7 @@ end
 
 slow_thermodynamic_velocities(model) = model.velocities
 
-function slow_thermodynamic_velocities(model::NonFlatTerrainCompressibleAcousticModel)
+function slow_thermodynamic_velocities(model::TerrainCompressibleAcousticModel)
     u = model.velocities.u
     v = model.velocities.v
     w̃ = model.dynamics.contravariant_vertical_velocity

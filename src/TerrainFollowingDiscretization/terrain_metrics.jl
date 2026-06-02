@@ -27,7 +27,7 @@ using Oceananigans.Utils: prettysummary
 ##### SlopeInsideInterpolation:
 #####   ℑz(ℑx(slope(i, j, k) * ∂z(p')))
 #####   — slope is evaluated at each (Center, Center, Face) stencil point and
-#####     multiplied before averaging, closer to the CM1 approach.
+#####     multiplied before averaging.
 #####
 ##### The two stencils differ at O(Δx·Δz) on a terrain-deformed grid because
 ##### interpolation and pointwise multiplication do not commute when the
@@ -59,8 +59,7 @@ the interpolation of ``∂p'/∂ζ``:
 ```
 
 The slope is evaluated at each `(Center, Center, Face)` stencil point before
-averaging to `(Face, Center, Center)`. This stencil is closer to the CM1
-approach where the metric term sits inside the 4-point average.
+averaging to `(Face, Center, Center)`.
 """
 struct SlopeInsideInterpolation end
 
@@ -79,27 +78,21 @@ Fields
 - `pressure_gradient_stencil`: Stencil type for the terrain-corrected horizontal
   pressure gradient ([`SlopeOutsideInterpolation`](@ref) or
   [`SlopeInsideInterpolation`](@ref))
-- `flat`: `Val(true)` when the supplied topography is identically zero.
 """
-struct TerrainMetrics{H, SX, SY, FT, PG, F}
+struct TerrainMetrics{H, SX, SY, FT, PG}
     topography :: H
     ∂x_h :: SX
     ∂y_h :: SY
     z_top :: FT
     pressure_gradient_stencil :: PG
-    flat :: F
 end
-
-TerrainMetrics(topography, ∂x_h, ∂y_h, z_top, pressure_gradient_stencil) =
-    TerrainMetrics(topography, ∂x_h, ∂y_h, z_top, pressure_gradient_stencil, Val(false))
 
 Adapt.adapt_structure(to, m::TerrainMetrics) =
     TerrainMetrics(adapt(to, m.topography),
                    adapt(to, m.∂x_h),
                    adapt(to, m.∂y_h),
                    m.z_top,
-                   m.pressure_gradient_stencil,
-                   m.flat)
+                   m.pressure_gradient_stencil)
 
 Base.summary(tf::TerrainMetrics) = "TerrainMetrics for $(summary(tf.topography)) using $(summary(tf.pressure_gradient_stencil))"
 
@@ -109,8 +102,7 @@ function Base.show(io::IO, tm::TerrainMetrics)
     print(io, "├── ∂x_h: ", prettysummary(tm.∂x_h), '\n')
     print(io, "├── ∂y_h: ", prettysummary(tm.∂y_h), '\n')
     print(io, "├── z_top: ", prettysummary(tm.z_top), '\n')
-    print(io, "├── pressure_gradient_stencil: ", prettysummary(tm.pressure_gradient_stencil), '\n')
-    print(io, "└── flat: ", tm.flat isa Val{true})
+    print(io, "└── pressure_gradient_stencil: ", prettysummary(tm.pressure_gradient_stencil))
 end
 
 """

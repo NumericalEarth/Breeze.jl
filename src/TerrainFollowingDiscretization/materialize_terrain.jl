@@ -153,13 +153,12 @@ $(TYPEDSIGNATURES)
 Build a `TerrainMetrics` for a materialized `TerrainFollowingVerticalDiscretization`
 grid. On such grids the terrain *slope* used by the dynamics comes from the grid
 `∂z∂x` operator (formulation decay), so this object only carries the
-`pressure_gradient_stencil`, `z_top`, and a representative terrain field for
-diagnostics.
+`pressure_gradient_stencil`, `z_top`, and a representative terrain field.
 """
 build_terrain_metrics(grid, stencil) = terrain_metrics_for_formulation(grid.z.formulation, stencil)
 
 terrain_metrics_for_formulation(f::LinearDecay, stencil) =
-    TerrainMetrics(f.h, f.∂x_h, f.∂y_h, f.z_top, stencil, Val(false))
+    TerrainMetrics(f.h, f.∂x_h, f.∂y_h, f.z_top, stencil)
 
 terrain_metrics_for_formulation(f::TwoLevelDecay, stencil) =
-    TerrainMetrics(f.h₁, f.∂x_h₁, f.∂y_h₁, f.z_top, stencil, Val(false))
+    TerrainMetrics(f.h₁, f.∂x_h₁, f.∂y_h₁, f.z_top, stencil)

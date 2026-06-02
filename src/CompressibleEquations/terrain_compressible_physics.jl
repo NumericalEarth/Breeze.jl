@@ -34,10 +34,7 @@ using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpo
 #####
 
 const TerrainCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}
-const FlatTerrainMetrics = TerrainMetrics{<:Any, <:Any, <:Any, <:Any, <:Any, Val{true}}
-const FlatTerrainCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:FlatTerrainMetrics}
 const TerrainCompressibleModel = AtmosphereModel{<:TerrainCompressibleDynamics}
-const FlatTerrainCompressibleModel = AtmosphereModel{<:FlatTerrainCompressibleDynamics}
 
 #####
 ##### Compute contravariant vertical velocity and momentum
@@ -87,32 +84,6 @@ function compute_contravariant_velocity!(model::TerrainCompressibleModel)
     return nothing
 end
 
-function compute_contravariant_velocity!(model::FlatTerrainCompressibleModel)
-    grid = model.grid
-    arch = architecture(grid)
-    dynamics = model.dynamics
-    w̃ = dynamics.contravariant_vertical_velocity
-    ρw̃ = dynamics.contravariant_vertical_momentum
-
-    launch!(arch, grid, :xyz,
-            _copy_flat_contravariant_velocity!,
-            w̃, ρw̃,
-            grid, model.velocities.w, model.momentum.ρw)
-
-    fill_halo_regions!(w̃)
-    fill_halo_regions!(ρw̃)
-
-    return nothing
-end
-
-@kernel function _copy_flat_contravariant_velocity!(w̃, ρw̃, grid, w, ρw)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        w̃[i, j, k] = w[i, j, k] * (k > 1)
-        ρw̃[i, j, k] = ρw[i, j, k] * (k > 1)
-    end
-end
-
 @kernel function _zero_bottom_face!(field)
     i, j = @index(Global, NTuple)
     @inbounds field[i, j, 1] = 0
@@ -157,8 +128,6 @@ function AtmosphereModels.transport_velocities(model::TerrainCompressibleModel)
     return (; u, v, w=w̃)
 end
 
-AtmosphereModels.transport_velocities(model::FlatTerrainCompressibleModel) = model.velocities
-
 function outer_step_start_transport_velocities(model::TerrainCompressibleModel)
     w̃ = model.dynamics.contravariant_vertical_velocity
     u = model.velocities.u
@@ -166,20 +135,11 @@ function outer_step_start_transport_velocities(model::TerrainCompressibleModel)
     return (; u, v, w=w̃)
 end
 
-outer_step_start_transport_velocities(model::FlatTerrainCompressibleModel) = model.velocities
-
 function AtmosphereModels.advecting_momentum(model::TerrainCompressibleModel)
     ρw̃ = model.dynamics.contravariant_vertical_momentum
     ρu = model.momentum.ρu
     ρv = model.momentum.ρv
     return (; ρu, ρv, ρw=ρw̃)
-end
-
-function AtmosphereModels.advecting_momentum(model::FlatTerrainCompressibleModel)
-    ρu = model.momentum.ρu
-    ρv = model.momentum.ρv
-    ρw = model.momentum.ρw
-    return (; ρu, ρv, ρw)
 end
 
 #####
@@ -354,12 +314,6 @@ end
                                                ρu_stage, ρv_stage, ρw_stage)
 end
 
-@inline function acoustic_stage_vertical_transport_momentum(i, j, k, grid,
-                                                            dynamics::FlatTerrainCompressibleDynamics,
-                                                            ρu_stage, ρv_stage, ρw_stage)
-    @inbounds return ρw_stage[i, j, k]
-end
-
 @inline function acoustic_recovered_vertical_momentum(i, j, k, grid,
                                                       dynamics::TerrainCompressibleDynamics,
                                                       ρuᴸ, ρvᴸ, ρwᴸ, ρu′, ρv′, ρw̃′)
@@ -374,12 +328,6 @@ end
     @inbounds ρw̃ᵐ⁺ = ρw̃_stage + ρw̃′[i, j, k]
 
     return ρw̃ᵐ⁺ + slope_x * ρuᶜᶜᶠ + slope_y * ρvᶜᶜᶠ
-end
-
-@inline function acoustic_recovered_vertical_momentum(i, j, k, grid,
-                                                      dynamics::FlatTerrainCompressibleDynamics,
-                                                      ρuᴸ, ρvᴸ, ρwᴸ, ρu′, ρv′, ρw′)
-    @inbounds return ρwᴸ[i, j, k] + ρw′[i, j, k]
 end
 
 @inline total_momentum(i, j, k, grid, mᴸ, m′) = @inbounds mᴸ[i, j, k] + m′[i, j, k]
@@ -472,10 +420,6 @@ end
     return terrain_x_pressure_gradient(i, j, k, grid, d, stencil, d.terrain_reference_pressure)
 end
 
-@inline function AtmosphereModels.x_pressure_gradient(i, j, k, grid, d::FlatTerrainCompressibleDynamics)
-    return ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
-end
-
 ##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂xᶠᶜᶜ
 ##### which applies the chain-rule correction (∂p/∂x)_z = (∂p/∂x)_ζ - (∂z/∂x)_ζ · (∂p/∂z)
 
@@ -525,10 +469,6 @@ end
     return terrain_y_pressure_gradient(i, j, k, grid, d, stencil, d.terrain_reference_pressure)
 end
 
-@inline function AtmosphereModels.y_pressure_gradient(i, j, k, grid, d::FlatTerrainCompressibleDynamics)
-    return ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
-end
-
 ##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂yᶜᶠᶜ
 
 @inline function terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, ::Nothing)
@@ -574,18 +514,6 @@ function AtmosphereModels.compute_dynamics_tendency!(model::TerrainCompressibleM
     ρw̃ = model.dynamics.contravariant_vertical_momentum
 
     launch!(arch, grid, :xyz, _compute_terrain_density_tendency!, Gρ, grid, model.momentum, ρw̃)
-
-    return nothing
-end
-
-function AtmosphereModels.compute_dynamics_tendency!(model::FlatTerrainCompressibleModel)
-    grid = model.grid
-    arch = architecture(grid)
-    Gρ = model.timestepper.Gⁿ.ρ
-    momentum = model.momentum
-    td = model.dynamics.time_discretization
-
-    launch!(arch, grid, :xyz, _compute_density_tendency!, Gρ, grid, momentum, td)
 
     return nothing
 end
@@ -638,12 +566,6 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::TerrainCo
     return nothing
 end
 
-function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::FlatTerrainCompressibleModel)
-    compute_terrain_temperature_and_pressure!(model)
-    compute_contravariant_velocity!(model)
-    return nothing
-end
-
 #####
 ##### Terrain-corrected vertical pressure gradient and buoyancy
 #####
@@ -689,7 +611,7 @@ end
 
 using GPUArraysCore: @allowscalar
 
-using Breeze.Thermodynamics: evaluate_profile, hydrostatic_pressure
+using Breeze.Thermodynamics: hydrostatic_pressure
 
 """
 $(TYPEDSIGNATURES)
@@ -723,7 +645,7 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢ�
         πₖ = zero(κ) # initialized at k == 1 below
         for k in 1:Nz
             z_phys = znode(i, j, k, grid, c, c, c)
-            θₖ = evaluate_profile(θᵣ, z_phys)
+            θₖ = θᵣ isa Number ? θᵣ : θᵣ(z_phys)
 
             if k == 1
                 # Evaluate the continuous hydrostatic pressure at the local
@@ -733,7 +655,7 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢ�
                 πₖ = (p_hydro / pˢᵗ)^κ
             else
                 z_below = znode(i, j, k - 1, grid, c, c, c)
-                θ_below = evaluate_profile(θᵣ, z_below)
+                θ_below = θᵣ isa Number ? θᵣ : θᵣ(z_below)
                 θ_face = (θₖ + θ_below) / 2
                 Δz = Δzᶜᶜᶠ(i, j, k, grid)
                 πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)

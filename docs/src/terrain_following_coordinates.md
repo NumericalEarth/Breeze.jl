@@ -556,14 +556,15 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢ�
         πₖ = zero(κ)  # initialised below at k = 1
         for k in 1:Nz
             z_phys = znode(i, j, k, grid, c, c, c)
-            θₖ     = evaluate_profile(θᵣ, z_phys)
+            θₖ     = θᵣ isa Number ? θᵣ : θᵣ(z_phys)
 
             if k == 1
                 p_hydro = hydrostatic_pressure(z_phys, p₀, θᵣ, pˢᵗ, constants)
                 πₖ      = (p_hydro / pˢᵗ)^κ
             else
                 z_below = znode(i, j, k - 1, grid, c, c, c)
-                θ_face  = (θₖ + evaluate_profile(θᵣ, z_below)) / 2
+                θ_below = θᵣ isa Number ? θᵣ : θᵣ(z_below)
+                θ_face  = (θₖ + θ_below) / 2
                 Δz      = Δzᶜᶜᶠ(i, j, k, grid)
                 πₖ      = πₖ - g * Δz / (cᵖᵈ * θ_face)
             end

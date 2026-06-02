@@ -56,9 +56,3 @@ examples/atsc-jas-d-18-0357*
 # Benchmarking output
 *.json
 benchmark_results.md
-
-# Agent-internal session notes — not part of the PR
-HANDOFF.md
-RUNNING_REVIEW.md
-SLEVE_IMPLEMENTATION_PLAN.md
-SLEVE_SLOPEINSIDE_FOLLOWUP.md
