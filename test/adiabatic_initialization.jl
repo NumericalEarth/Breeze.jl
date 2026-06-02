@@ -5,7 +5,7 @@
 #####   and ρw is never snapshotted/nudged.
 ##### - Rest-state invariance: a discrete-balanced rest state is a fixed point —
 #####   slow fields return to it, ρw stays ~0, the clock resets to t=0.
-##### - Fast-mode damping: a seeded vertical-acoustic ρw shrinks across one cycle.
+##### - ρw spin-up: a seeded out-of-balance ρw shrinks across one cycle.
 #####
 
 using Breeze
@@ -55,23 +55,23 @@ end
 
 @testset "adiabatic_initialization!" begin
 
-    @testset "nudge algebra (slow fields blended, ρw untouched)" begin
+    @testset "nudge algebra (initial fields blended, ρw untouched)" begin
         model = _build_adiabatic_model(default_arch)
         _set_discrete_rest!(model)
 
         ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
 
-        # Snapshot the slow fields at value B = 2 for ρθ.
+        # Snapshot the initial fields at value B = 2 for ρθ.
         interior(ρθ) .= 2.0
-        snap = Breeze.CompressibleEquations.snapshot_slow_fields(model)
+        snap = Breeze.snapshot_initial_fields(model)
 
         # Move ρθ to A = 5 and seed ρw with a marker that must survive.
         interior(ρθ) .= 5.0
         interior(model.momentum.ρw) .= 7.0
 
-        Breeze.CompressibleEquations.nudge_slow_fields!(model, snap, 2)
+        Breeze.nudge_initial_fields!(model, snap, 2)
 
-        # (5 + 2·2)/3 = 3 for the nudged slow field; ρw unchanged.
+        # (5 + 2·2)/3 = 3 for the nudged initial field; ρw unchanged.
         @test @allowscalar(interior(ρθ)[4, 4, 16]) ≈ 3.0
         @test @allowscalar(interior(model.momentum.ρw)[4, 4, 16]) == 7.0
     end
@@ -79,6 +79,8 @@ end
     @testset "rest-state invariance and clock reset" begin
         model = _build_adiabatic_model(default_arch)
         _set_discrete_rest!(model)
+
+        @test length(Breeze.initial_fields(model)) == 5
 
         ρ   = dynamics_density(model.dynamics)
         ρθ  = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
@@ -94,7 +96,7 @@ end
         @test model.clock.iteration == 0
     end
 
-    @testset "fast-mode (acoustic) ρw shrinks across one cycle" begin
+    @testset "ρw spin-up: seeded ρw shrinks across one cycle" begin
         model = _build_adiabatic_model(default_arch)
         _set_discrete_rest!(model)
 
@@ -110,6 +112,41 @@ end
 
         @test w_before > 0
         @test w_after < w_before
+    end
+
+    @testset "anelastic: spin-up runs and preserves slow fields at rest" begin
+        grid = RectilinearGrid(default_arch;
+                               size = (8, 8, 16), halo = (3, 3, 3),
+                               x = (0, 1e4), y = (0, 1e4), z = (0, 4e3),
+                               topology = (Periodic, Periodic, Bounded))
+        constants = ThermodynamicConstants(eltype(grid))
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure      = 1e5,
+                                         potential_temperature = 300,
+                                         vapor_mass_fraction   = 0)
+        dynamics = AnelasticDynamics(reference_state)
+        model = AtmosphereModel(grid; dynamics,
+                                formulation  = :LiquidIcePotentialTemperature,
+                                microphysics = nothing)
+
+        # Isentropic reference θᵣ = 300; θ = θᵣ with zero velocities is an
+        # anelastic rest state (zero tendencies).
+        set!(model; θ = (x, y, z) -> 300.0)
+
+        # initial_fields drops ρ for anelastic → 4 entries (vs 5 for compressible).
+        @test length(Breeze.initial_fields(model)) == 4
+
+        ρθ  = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
+        ρθ₀ = Array(interior(ρθ))
+
+        # Exercises the backward step time_step!(anelastic, -Δt).
+        adiabatic_initialization!(model; Δt = 1.0, cycles = 1)
+
+        @test all(isfinite, Array(interior(model.momentum.ρu)))
+        @test maximum(abs, Array(interior(ρθ)) .- ρθ₀) <= 1e-6 * maximum(abs, ρθ₀)
+        @test maximum(abs, Array(interior(model.momentum.ρw))) <= 1e-6
+        @test model.clock.time == 0
+        @test model.clock.iteration == 0
     end
 
 end

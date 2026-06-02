@@ -47,8 +47,7 @@ export
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
     freeze_linearization_state!,
-    acoustic_rk3_substep_loop!,
-    adiabatic_initialization!
+    acoustic_rk3_substep_loop!
 
 using DocStringExtensions: TYPEDEF, TYPEDSIGNATURES
 using Adapt: Adapt, adapt
@@ -80,6 +79,5 @@ include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
-include("adiabatic_initialization.jl")
 
 end # module
