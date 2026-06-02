@@ -488,8 +488,22 @@ sponge_ρθ = Forcing(sponge_ρθ_fn; discrete_form = true, parameters = sponge_
 ## Model
 ## ---------------------------------------------------------------------------
 
+## Fixed acoustic substep count, computed HOST-SIDE from the known uniform horizontal
+## spacing Δx. The auto path (compute_acoustic_substeps → minimum_xspacing → a distributed
+## min-reduction over the spacing field) returns Δx_min = 0 at high rank counts (60 ranks),
+## giving Δt/Δx_min = Inf and crashing. We know Δx exactly, so compute N here and pass it
+## fixed — bypassing minimum_xspacing entirely (as profile_supercell does). Override: --substeps.
+γᵈ           = cᵖᵈ / (cᵖᵈ - Rᵈ)
+ℂᵃᶜ          = sqrt(γᵈ * Rᵈ * 300)        # acoustic speed at Tᵣ ≈ 300 K
+acoustic_cfl = 0.5
+substeps_arg   = parse(Int, argval("--substeps", "0"))
+substeps_count = substeps_arg > 0 ? substeps_arg :
+                 max(1, ceil(Int, fixed_dt * ℂᵃᶜ / (acoustic_cfl * Δx)))
+rank == 0 && @info @sprintf("Acoustic substeps = %d  (Δt=%.3f s, Δx=%.0f m, c≈%.0f m/s)",
+                            substeps_count, fixed_dt, Δx, ℂᵃᶜ)
+
 coriolis  = FPlane(; f)
-dynamics  = CompressibleDynamics(SplitExplicitTimeDiscretization();
+dynamics  = CompressibleDynamics(SplitExplicitTimeDiscretization(FT; substeps = substeps_count);
                                  surface_pressure = p_env(0.0),
                                  reference_potential_temperature = θ_env)
 advection = WENO(order = 5)

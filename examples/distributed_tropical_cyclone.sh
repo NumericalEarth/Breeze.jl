@@ -71,6 +71,7 @@ NCCL="${NCCL:-1}"                # 1 = NCCL communicator, 0 = MPI
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-6}"  # checkpoint cadence, sim-hours
 RESTART="${RESTART:-0}"          # 1 = pick up from latest checkpoint
 DT="${DT:-0.4}"                  # fixed time step, s (wizard is buggy on distributed face fields)
+SUBSTEPS="${SUBSTEPS:-0}"        # acoustic substeps; 0 = compute host-side from Δx (avoids minimum_xspacing)
 DIAGNOSE="${DIAGNOSE:-0}"        # 1 = print per-rank velocity/momentum extrema after set!
 OUTPUT_DIR="${OUTPUT_DIR:-}"     # override output/checkpoint dir (default: $SCRATCH/tc_distributed)
 
@@ -100,6 +101,7 @@ srun --ntasks="${NGPUS}" --gpu-bind=none \
         --benchmark-steps "${BENCHMARK_STEPS}" \
         --checkpoint-interval "${CHECKPOINT_INTERVAL}" \
         --dt "${DT}" \
+        --substeps "${SUBSTEPS}" \
         ${OUTPUT_DIR:+--output-dir "${OUTPUT_DIR}"} \
         $([ "${DIAGNOSE}" = "1" ] && echo "--diagnose") \
         $([ "${HEATING}" = "1" ] && echo "--heating") \
