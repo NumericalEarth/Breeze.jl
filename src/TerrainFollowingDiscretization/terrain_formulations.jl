@@ -20,6 +20,13 @@ abstract type AbstractTerrainFormulation end
 #####   b(ζ) = 1 − ζ/z_top,   b′(ζ) = −1/z_top
 #####
 
+"""
+$(TYPEDEF)
+
+Gal-Chen & Somerville (1975) terrain-following formulation: a single decay
+basis ``b(ζ) = 1 - ζ/z_{top}`` that linearly attenuates the terrain from the
+surface to the model top.
+"""
 struct LinearDecay{FT, H, SX, SY} <: AbstractTerrainFormulation
     z_top :: FT
     h     :: H      # terrain height (Center, Center)
@@ -83,6 +90,20 @@ end
 #####   bₙ′(ζ) = −cosh((z_top−ζ)/sₙ)/(sₙ·sinh(z_top/sₙ))
 #####
 
+"""
+$(TYPEDEF)
+
+Schär et al. (2002) "Smooth LEvel VErtical" (SLEVE) terrain-following
+formulation. Splits the terrain into a smoothed large-scale component ``h_1``
+(decay length `large_scale_height`) and the residual small-scale component
+``h_2`` (decay length `small_scale_height`). Each is attenuated with a
+hyperbolic-sine basis ``b_n(ζ) = \\sinh((z_{top}-ζ)/s_n) / \\sinh(z_{top}/s_n)``,
+so the small-scale features decay quickly while the large-scale envelope is
+preserved aloft.
+
+Constructed via the kwarg form `TwoLevelDecay(; large_scale_height,
+small_scale_height)`.
+"""
 struct TwoLevelDecay{ZT, FT, H, SX, SY} <: AbstractTerrainFormulation
     z_top              :: ZT   # Nothing (skeleton) or FT (after allocation)
     large_scale_height :: FT   # s₁ (slow decay)

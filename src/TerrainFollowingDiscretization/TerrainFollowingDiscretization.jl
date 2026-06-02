@@ -36,12 +36,10 @@ export TerrainMetrics,
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
-using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
-using Oceananigans
-using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, interior, set!
-using Oceananigans.Architectures: architecture, on_architecture
-using Oceananigans.Grids: xnode, ynode, znode, rnode, AbstractGrid
+using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, interior
+using Oceananigans.Architectures: architecture
+using Oceananigans.Grids: xnode, ynode, znode, rnode
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxyᶠᶠᵃ

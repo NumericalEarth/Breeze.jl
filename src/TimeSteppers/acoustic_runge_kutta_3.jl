@@ -260,4 +260,3 @@ function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:TerrainC
             v = sub.time_averaged_velocities.v,
             w = sub.time_averaged_velocities.w)
 end
-

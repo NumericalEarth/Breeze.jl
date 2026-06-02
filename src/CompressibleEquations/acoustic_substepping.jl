@@ -66,7 +66,7 @@
 
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture, interior
+using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.Grids: ZDirection, rnode, znode
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!

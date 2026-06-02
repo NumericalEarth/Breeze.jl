@@ -836,7 +836,7 @@ PGF stencil, attach to dynamics) automatically.
 ## Worked example: Schär mountain wave
 
 The full validation script is
-[`validation_output/substepper/terrain_schar_mountain_wave_validation.jl`](https://github.com/NumericalEarth/Breeze.jl/blob/main/validation_output/substepper/terrain_schar_mountain_wave_validation.jl).
+`validation_output/substepper/terrain_schar_mountain_wave_validation.jl` (kept locally; not part of the repo).
 Here's the minimal stand-alone version:
 
 ```julia
@@ -945,7 +945,7 @@ module), after the `set!` call has filled the density and horizontal momentum.
     exported as an advanced/manual entry point)
   - [`SlopeOutsideInterpolation`](@ref), [`SlopeInsideInterpolation`](@ref) —
     PGF stencil flavours (pass via `slope_stencil = ...` to `CompressibleDynamics`)
-  - [`compute_terrain_reference_state!`](@ref) — discrete hydrostatic reference
+  - `compute_terrain_reference_state!` — discrete hydrostatic reference (internal)
 
 ## References
 

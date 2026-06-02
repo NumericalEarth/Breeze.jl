@@ -15,9 +15,7 @@
 ##### `TwoLevelDecay` (Schär et al. 2002) are two formulations of the one type.
 #####
 
-using Oceananigans.Grids: AbstractVerticalCoordinate, getnode, total_length,
-                          RectilinearGrid, LatitudeLongitudeGrid
-using Oceananigans.Operators: Δrᶜᶜᶜ, Δrᶠᶜᶜ, Δrᶜᶠᶜ, Δrᶜᶜᶠ, Δrᶠᶠᶜ, Δrᶠᶜᶠ, Δrᶜᶠᶠ, Δrᶠᶠᶠ
+using Oceananigans.Grids: AbstractVerticalCoordinate, RectilinearGrid, LatitudeLongitudeGrid
 
 struct TerrainFollowingVerticalDiscretization{C, D, E, F, FM} <: AbstractVerticalCoordinate
     "Face-centered reference coordinate ζ"

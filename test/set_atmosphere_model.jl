@@ -53,7 +53,7 @@ end
     constants = ThermodynamicConstants(FT)
     θ₀ = FT(300)
     N² = FT(1e-4)
-    θ_profile(x, z) = θ₀ * exp(N² * z / constants.gravitational_acceleration)
+    θ_profile(z) = θ₀ * exp(N² * z / constants.gravitational_acceleration)
 
     θ_field = CenterField(grid)
     set!(θ_field, (x, z) -> z)
@@ -80,7 +80,7 @@ end
 
     set!(model,
          ρ = model.dynamics.terrain_reference_density,
-         θ = θ_profile,
+         θ = (x, z) -> θ_profile(z),
          enforce_mass_conservation = false)
 
     p = model.dynamics.pressure
