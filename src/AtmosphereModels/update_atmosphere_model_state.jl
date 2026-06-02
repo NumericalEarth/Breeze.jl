@@ -41,7 +41,11 @@ end
 # `update_state!`, after `compute_auxiliary_variables!` has refreshed the diagnostic
 # `θ`, pressure, and moisture that the update reads. This guarantees a scheme like
 # `DCMIP2016KesslerMicrophysics` (which bypasses the tendency interface and mutates
-# state directly) is applied exactly once per step, on a consistent state.
+# state directly) is applied exactly once per step, on a consistent state. Because that
+# update writes prognostic fields in the interior only, halos and the diagnostic
+# variables are recomputed afterwards (via `finalize_microphysics_model_update!`) so
+# the tendencies below — which the next step's first RK substep consumes — reflect the
+# post-update state rather than stale pre-update halos and diagnostics.
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[];
                                     compute_tendencies=true, apply_microphysics_model_update=false)
     fix_negative_moisture!(model)  # fix negative moisture from advection
@@ -55,6 +59,11 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[];
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
     apply_microphysics_model_update && microphysics_model_update!(model.microphysics, model)
+    # An operator-split update (e.g. `DCMIP2016KesslerMicrophysics`) rewrites prognostic
+    # fields in the interior, leaving halos and diagnostics stale; the scheme-dispatched
+    # finalize step below refills them so `compute_tendencies!` sees the post-update
+    # state (no-op for tendency-interface schemes).
+    apply_microphysics_model_update && finalize_microphysics_model_update!(model.microphysics, model)
 
     for callback in callbacks
         callback.callsite isa UpdateStateCallsite && callback(model)
@@ -213,6 +222,22 @@ function compute_auxiliary_variables!(model)
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Refill prognostic halos and recompute the diagnostic variables, mirroring the halo
+fill + [`compute_auxiliary_variables!`](@ref) at the top of [`update_state!`](@ref).
+
+Used as the [`finalize_microphysics_model_update!`](@ref) hook for operator-split
+microphysics schemes that rewrite prognostic fields in the interior, so the tendencies
+computed afterwards see the post-update state.
+"""
+function recompute_auxiliary_state!(model::AtmosphereModel)
+    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
+    compute_auxiliary_variables!(model)
     return nothing
 end
 

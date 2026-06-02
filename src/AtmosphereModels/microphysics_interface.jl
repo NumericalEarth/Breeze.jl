@@ -633,6 +633,21 @@ microphysics_model_update!(microphysics::Nothing, model) = nothing
 """
 $(TYPEDSIGNATURES)
 
+Finalize the model state after [`microphysics_model_update!`](@ref), so that the
+tendencies computed afterwards see the post-update state. Defaults to a no-op.
+
+Schemes that mutate prognostic fields in `microphysics_model_update!` (e.g.
+`DCMIP2016KesslerMicrophysics`) extend this — typically to
+[`recompute_auxiliary_state!`](@ref) — to refill halos and recompute diagnostic
+variables. Schemes that work through the tendency interface leave the update a
+no-op and need no finalization. Dispatching on `microphysics` keeps `update_state!`
+branch-free (autodiff friendly).
+"""
+finalize_microphysics_model_update!(microphysics, model) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
 Adjust the thermodynamic `state` according to the `scheme`.
 For example, if `scheme isa SaturationAdjustment`, then this function
 will adjust and return a new thermodynamic state given the specifications
