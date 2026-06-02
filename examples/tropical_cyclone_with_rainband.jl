@@ -16,12 +16,12 @@
 # ## What this example does
 #
 # We build a balanced tropical-cyclone vortex from the Jordan sounding, run a
-# 24 h spinup so the vortex relaxes to numerical equilibrium, and then
-# visualize the basic-state vortex alongside the analytic MN10 stratiform
-# heating field that YD19 use to drive the rainband response. The two
-# follow-on stages (control and heated) and their response diagnostics are
-# kept as commented-out stubs at the bottom of the file for users who want
-# to reproduce the full YD19 quadrupole.
+# 24 h spinup so the vortex relaxes to numerical equilibrium, then run a 24 h
+# *heated* continuation with the MN10 stratiform heating switched on. We
+# visualize the basic-state vortex, the analytic heating field, and a plan
+# view of the vertical velocity that the heating drives. A commented-out
+# control stub at the bottom lets users add the heated − control subtraction
+# YD19 use for their full quadrupole response.
 #
 # ## What this simulation teaches
 #
@@ -37,6 +37,7 @@
 # |----------------------------------|---------------------------------------------------|
 # | `F02ab_vortex.png`               | basic-state vortex ([YuDidlake2019](@citet); Fig. 2a,b) |
 # | `F02cd_heating.png`              | analytic heating ([YuDidlake2019](@citet); Fig. 2c,d)  |
+# | `F02e_w_heated.png`              | plan-view w in heated run (z = 3 km)              |
 
 using Breeze
 using Oceananigans: Oceananigans
@@ -130,7 +131,7 @@ r_taper_end = 300kilometers    # radial taper end, m
 
 # ## Output layout
 #
-# Run outputs live under `examples/output_tc_rainband/figures/` — the two
+# Run outputs live under `examples/output_tc_rainband/figures/` — the three
 # F02 PNGs (paper-reproduction outputs).
 
 output_dir = joinpath(@__DIR__, "output_tc_rainband")
@@ -699,6 +700,15 @@ spinup_result = build_and_run_stage!(
 post_spinup = spinup_result.post
 nothing # hide
 
+@info "=== Heated: $(prettytime(stage_stop_time)) (MN10 stratiform) ==="
+heated_result = build_and_run_stage!(
+    "heated";
+    with_heating = true,
+    init = post_spinup,
+    stop_time = stage_stop_time,
+)
+nothing # hide
+
 # ## Stage 4 — Analysis and figure production
 # Now that the have the full simulation, we replicate the figures from YD19 to verify our results.
 
@@ -837,7 +847,7 @@ ax_θ = Axis(
     title = "(b) Potential-temperature anomaly θ̄'",
     limits = (0, 150, 0, 22)
 )
-θ_span = max(15.0, ceil(maximum(abs, θ_anom)))
+θ_span = 10
 hm_θ = heatmap!(
     ax_θ, r_bin_centers ./ kilometer, z_centers ./ kilometer, θ_anom;
     colormap = :balance, colorrange = (-θ_span, θ_span)
@@ -956,25 +966,93 @@ save(path, fig)
 @info "Saved F02cd" path
 fig
 
+# ## F02e — plan-view vertical velocity in the heated run
+
+@info "Producing F02e (heated-run plan-view w)..."
+ts_heat = heated_result.captures
+n_heat_final = length(ts_heat.w.times)
+t_heat_final = ts_heat.w.times[n_heat_final]
+center_w!(w_sc, ts_heat.w[n_heat_final])
+copy_f32!(T_sc, ts_heat.T[n_heat_final])
+
+z_w_slice = 3kilometers
+k_w = argmin(abs.(z_centers .- z_w_slice))
+w_slice = w_sc[:, :, k_w]
+w_lim = max(0.5, ceil(maximum(abs, w_slice) * 2) / 2)
+
+xs_grid = Array(xnodes(grid, Center()))
+ys_grid = Array(ynodes(grid, Center()))
+
+## Heating overlay at the slice altitude — the red/blue ±1 K/h contours mark
+## where the imposed forcing sits.
+Q_slice = [
+    heating_rate_K_per_hour(
+            sqrt(xs_grid[i]^2 + ys_grid[j]^2),
+            atan(ys_grid[j], xs_grid[i]),
+            z_centers[k_w]
+        )
+        for i in 1:Nx, j in 1:Ny
+]
+
+fig = Figure(size = (800, 700))
+ax = Axis(
+    fig[1, 1];
+    xlabel = "x (km)", ylabel = "y (km)",
+    title = @sprintf(
+        "(e) Heated-run vertical velocity at z = %.1f km, t = %.1f h",
+        z_centers[k_w] / kilometer, t_heat_final / hour
+    ),
+    aspect = DataAspect(),
+    limits = (-120, 120, -120, 120),
+)
+hm = heatmap!(
+    ax, xs_grid ./ kilometer, ys_grid ./ kilometer, w_slice;
+    colormap = :balance, colorrange = (-w_lim, w_lim)
+)
+if maximum(Q_slice) > 1.0
+    contour!(
+        ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_slice;
+        levels = [1.0], color = :red, linewidth = 2.0
+    )
+end
+if minimum(Q_slice) < -1.0
+    contour!(
+        ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_slice;
+        levels = [-1.0], color = :blue, linewidth = 2.0
+    )
+end
+Colorbar(fig[1, 2], hm; label = "w (m s⁻¹)")
+
+Label(
+    fig[0, :],
+    @sprintf(
+        "F02e — Plan-view w in heated run (z = %.1f km, %.0f km box)",
+        z_centers[k_w] / kilometer, Lx / 1.0e3
+    );
+    fontsize = 17,
+)
+
+@info @sprintf(
+    "F02e: w range = [%.3f, %.3f] m/s (colorbar ±%.2f m/s)",
+    minimum(w_slice), maximum(w_slice), w_lim
+)
+
+path = joinpath(figures_dir, "F02e_w_heated.png")
+save(path, fig)
+@info "Saved F02e" path
+fig
+
 # ## Reproducing the full YD19 response (optional)
 #
-# The two stubs below extend the spinup into a control / heated pair, which is
-# what YD19 actually subtract to get the quadrupole response. They are kept
-# commented out so this example stays short.
+# To get the quadrupole *response* (heated − control) that YD19 plot in their
+# Figs 3–4, also run a control stage with `with_heating = false` from the
+# post-spinup state and subtract it from the heated captures above:
 #
 # ```julia
 # @info "=== Control: $(prettytime(stage_stop_time)) ==="
 # control_result = build_and_run_stage!(
 #     "control";
 #     with_heating = false,
-#     init = post_spinup,
-#     stop_time = stage_stop_time,
-# )
-#
-# @info "=== Heated: $(prettytime(stage_stop_time)) (MN10 stratiform) ==="
-# heated_result = build_and_run_stage!(
-#     "heated";
-#     with_heating = true,
 #     init = post_spinup,
 #     stop_time = stage_stop_time,
 # )
