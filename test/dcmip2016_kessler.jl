@@ -362,7 +362,10 @@ end
 
     set!(model.formulation.potential_temperature_density, reshape(ρ_prof .* θˡⁱ_init, 1, 1, Nz))
     model.clock.last_Δt = Δt
-    update_state!(model)
+    # Apply the operator-split Kessler update once, as the time-steppers do on the
+    # final post-RK `update_state!`; the default `apply_microphysics_model_update=false`
+    # leaves the prognostic state untouched.
+    update_state!(model; apply_microphysics_model_update=true)
 
     # Extract results
     ρqᶜˡ_result = Array(interior(model.microphysical_fields.ρqᶜˡ, 1, 1, :))

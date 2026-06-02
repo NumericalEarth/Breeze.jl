@@ -265,6 +265,12 @@ The Kessler scheme performs its own saturation adjustment internally via the ker
 """
 @inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, qᵛ, constants) = 𝒰
 
+# The Kessler scheme applies its full-Δt processes by writing prognostic fields
+# directly in `microphysics_model_update!` (interior only), so refill halos and
+# recompute diagnostics afterwards before `update_state!` computes tendencies.
+AtmosphereModels.finalize_microphysics_model_update!(::DCMIP2016KM, model) =
+    AtmosphereModels.recompute_auxiliary_state!(model)
+
 AtmosphereModels.moisture_prognostic_name(::DCMIP2016KM) = :ρqᵛ
 
 # DCMIP2016 Kessler stores vapor as prognostic; subtract all condensate from total.
