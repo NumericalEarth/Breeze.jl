@@ -110,6 +110,17 @@ end
 const TFVDRG = Union{RectilinearGrid{<:Any, <:Any, <:Any, <:Any, <:TFVD},
                      LatitudeLongitudeGrid{<:Any, <:Any, <:Any, <:Any, <:TFVD}}
 
+# Preserve the materialised terrain components when Oceananigans reconstructs
+# the grid (e.g. `on_architecture(CPU(), gpu_grid)` inside `set_to_function!`).
+# The default `cpu_face_constructor_z` returns only ζ-face coordinates, which
+# would make the downstream `generate_coordinate` allocate a fresh skeleton
+# formulation with zero h / ∂x_h / ∂y_h — and the `node()` override would then
+# return ζ instead of physical altitude. By wrapping the full TFVD here, the
+# formulation arrays survive the rebuild.
+@inline Oceananigans.Grids.cpu_face_constructor_z(grid::TFVDRG) =
+    TerrainFollowingVerticalDiscretization(Oceananigans.Grids.cpu_face_constructor_r(grid);
+                                            formulation = Oceananigans.Architectures.on_architecture(Oceananigans.Architectures.CPU(), grid.z.formulation))
+
 @inline Oceananigans.Operators.σⁿ(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
     terrain_following_σ(i, j, k, grid, grid.z.formulation, ℓx, ℓy, ℓz)
 

@@ -17,6 +17,14 @@ using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy
 @inline yface_data(FT, arch, topo, sz, halo) = new_data(FT, arch, (Center, Face,   Nothing), topo, sz, halo)
 
 function allocate_formulation(f::LinearDecay, FT, arch, sz, halo, topo, z_top)
+    # If the user-supplied formulation is already materialised (h ≠ nothing —
+    # typically because Oceananigans is reconstructing the grid via
+    # `on_architecture`), preserve the data and just move it to `arch` rather
+    # than allocating fresh zero-filled arrays.
+    if f.h !== nothing
+        return Oceananigans.Architectures.on_architecture(arch,
+            LinearDecay(convert(FT, z_top), f.h, f.∂x_h, f.∂y_h))
+    end
     h    = centered_data(FT, arch, topo, sz, halo); fill!(h, 0)
     ∂x_h = xface_data(FT, arch, topo, sz, halo); fill!(∂x_h, 0)
     ∂y_h = yface_data(FT, arch, topo, sz, halo); fill!(∂y_h, 0)
@@ -24,6 +32,13 @@ function allocate_formulation(f::LinearDecay, FT, arch, sz, halo, topo, z_top)
 end
 
 function allocate_formulation(f::TwoLevelDecay, FT, arch, sz, halo, topo, z_top)
+    # Preserve already-materialised data on rebuild (see LinearDecay variant).
+    if f.h₁ !== nothing
+        return Oceananigans.Architectures.on_architecture(arch,
+            TwoLevelDecay(convert(FT, z_top),
+                          convert(FT, f.large_scale_height), convert(FT, f.small_scale_height),
+                          f.h₁, f.h₂, f.∂x_h₁, f.∂x_h₂, f.∂y_h₁, f.∂y_h₂))
+    end
     h₁ = centered_data(FT, arch, topo, sz, halo); h₂ = centered_data(FT, arch, topo, sz, halo)
     ∂x_h₁ = xface_data(FT, arch, topo, sz, halo); ∂x_h₂ = xface_data(FT, arch, topo, sz, halo)
     ∂y_h₁ = yface_data(FT, arch, topo, sz, halo); ∂y_h₂ = yface_data(FT, arch, topo, sz, halo)
