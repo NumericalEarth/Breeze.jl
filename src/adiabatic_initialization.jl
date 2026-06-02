@@ -2,7 +2,7 @@
 $(TYPEDSIGNATURES)
 
 Spin up a balanced vertical momentum `ρw` (and the nonhydrostatic pressure
-balance) consistent with a `model`'s initial (analysis) state, via FV3-SHiELD-style
+balance) consistent with a `model`'s initial (analysis) state, via FV3
 adiabatic initialization (`na_init`).
 
 Analyses (ERA5, GFS, …) supply the density, momentum, and thermodynamic state but
@@ -14,7 +14,8 @@ which lets `ρw` develop — and then nudges the *initial fields* back toward th
 
     x ← (x + weight·x₀) / (1 + weight)
 
-(default `weight = 2` → ⅓ dynamics + ⅔ snapshot). The vertical momentum `ρw` is
+(default `weight = 2` → ⅓ dynamics + ⅔ snapshot). The nudge keeps the
+initialization from drifting too far from the initial conditions. The vertical momentum `ρw` is
 never snapshotted or nudged, so the balance the excursion imprints on it is
 exactly what is kept: with the initial fields held to the analysis and the
 vertical field free, `ρw` relaxes into balance with them.
@@ -36,7 +37,7 @@ pass a model built without physics (`microphysics = nothing`), without an upper
 sponge (`sponge = nothing`), and without forcing — these run inside
 `update_state!`/`time_step!` and would corrupt the spin-up. Boundary conditions
 are not modified; pass a model whose boundaries are time-invariant (e.g. frozen
-at the analysis time) so the symmetric excursion stays reversible.
+at the analysis time) so the symmetric excursion stays nearly reversible.
 """
 function adiabatic_initialization!(model::AtmosphereModel; Δt, cycles = 1, weight = 2)
     snapshot = snapshot_initial_fields(model)
