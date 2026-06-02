@@ -33,6 +33,7 @@ export
     CubicRamp,
     Sin2Ramp,
     ExplicitTimeStepping,
+    adiabatic_initialization!,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -239,7 +240,8 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping,
                               UpperSponge,
                               AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
-                              ExplicitTimeStepping
+                              ExplicitTimeStepping,
+                              adiabatic_initialization!
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel

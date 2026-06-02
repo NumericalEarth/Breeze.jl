@@ -47,7 +47,8 @@ export
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
     freeze_linearization_state!,
-    acoustic_rk3_substep_loop!
+    acoustic_rk3_substep_loop!,
+    adiabatic_initialization!
 
 using DocStringExtensions: TYPEDEF, TYPEDSIGNATURES
 using Adapt: Adapt, adapt
@@ -58,6 +59,7 @@ using Oceananigans.Grids: rnode, znode
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
                                 ∂zᶜᶜᶜ, ∂zᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.TimeSteppers: time_step!, update_state!
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
@@ -78,5 +80,6 @@ include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
+include("adiabatic_initialization.jl")
 
 end # module
