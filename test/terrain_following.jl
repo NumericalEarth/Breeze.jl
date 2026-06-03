@@ -1046,6 +1046,99 @@ using Test
         @test isfinite(maximum(abs, model.velocities.v))
     end
 
+    @testset "terrain_amg_operators: full chain-rule dispatch coverage" begin
+        # Drives every AMG-mirror operator on a TFVDRG: the slope operators
+        # (`∂x_z*`, `∂y_z*`), the `c::Number` disambiguators, and both the
+        # Field-arg and Function-arg chain-rule overloads across every
+        # supported stagger. The chain-rule identity says that for a field
+        # equal to physical altitude z_phys, `(∂ϕ/∂x)|_z = 0` because
+        # constant-altitude surfaces are flat in physical x by definition.
+        # With SlopeOutsideInterpolation the operators cancel discretely to
+        # machine precision, so we can assert this directly.
+
+        Nx, Ny, Nz = 8, 8, 6
+        Lx, Ly, Lz = 10000.0, 10000.0, 5000.0
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1));
+                                                          formulation = LinearDecay())
+        grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz), halo=(5, 5, 5),
+                               x=(-Lx/2, Lx/2), y=(-Ly/2, Ly/2), z=z_faces,
+                               topology=(Periodic, Periodic, Bounded))
+        materialize_terrain!(grid, (x, y) -> 200 * exp(-(x^2 + y^2) / 2000^2))
+
+        # Pick an interior point well away from boundaries.
+        i, j, k = 4, 4, 3
+        tol = 1e-10 * Lz   # relative to typical znode magnitude
+
+        # --- Slope operators (∂x_z*, ∂y_z*) — finite on a sloped grid ---
+        slope_ops = (
+            Oceananigans.Operators.∂x_zᶠᶜᶜ, Oceananigans.Operators.∂x_zᶜᶜᶜ,
+            Oceananigans.Operators.∂x_zᶠᶜᶠ, Oceananigans.Operators.∂x_zᶜᶠᶜ,
+            Oceananigans.Operators.∂x_zᶠᶠᶜ, Oceananigans.Operators.∂x_zᶜᶜᶠ,
+            Oceananigans.Operators.∂y_zᶜᶠᶜ, Oceananigans.Operators.∂y_zᶜᶜᶜ,
+            Oceananigans.Operators.∂y_zᶜᶠᶠ, Oceananigans.Operators.∂y_zᶠᶜᶜ,
+            Oceananigans.Operators.∂y_zᶠᶠᶜ, Oceananigans.Operators.∂y_zᶜᶜᶠ,
+        )
+        for op in slope_ops
+            @test isfinite(op(i, j, k, grid))
+        end
+
+        # --- Number disambiguators: derivative of a constant is exactly zero ---
+        number_ops = (
+            Oceananigans.Operators.∂xᶠᶜᶜ, Oceananigans.Operators.∂xᶜᶜᶜ,
+            Oceananigans.Operators.∂xᶠᶜᶠ, Oceananigans.Operators.∂xᶜᶠᶜ,
+            Oceananigans.Operators.∂xᶠᶠᶜ,
+            Oceananigans.Operators.∂yᶜᶠᶜ, Oceananigans.Operators.∂yᶜᶜᶜ,
+            Oceananigans.Operators.∂yᶜᶠᶠ, Oceananigans.Operators.∂yᶠᶜᶜ,
+            Oceananigans.Operators.∂yᶠᶠᶜ,
+        )
+        for op in number_ops
+            @test op(i, j, k, grid, 1.0) == 0
+        end
+
+        # --- Function-arg chain-rule overloads: ϕ = znode(physical) → ≈ 0 ---
+        # Operand stagger is X-flipped from the operator's result stagger:
+        # ∂xᶠ** ⇒ operand at C in x; ∂xᶜ** ⇒ operand at F in x; same for ∂y**.
+        function_arg_cases = (
+            (Oceananigans.Operators.∂xᶠᶜᶜ, Center(), Center(), Center()),
+            (Oceananigans.Operators.∂xᶜᶜᶜ, Face(),   Center(), Center()),
+            (Oceananigans.Operators.∂xᶠᶜᶠ, Center(), Center(), Face()),
+            (Oceananigans.Operators.∂xᶜᶠᶜ, Face(),   Face(),   Center()),
+            (Oceananigans.Operators.∂xᶠᶠᶜ, Center(), Face(),   Center()),
+            (Oceananigans.Operators.∂yᶜᶠᶜ, Center(), Center(), Center()),
+            (Oceananigans.Operators.∂yᶜᶜᶜ, Center(), Face(),   Center()),
+            (Oceananigans.Operators.∂yᶜᶠᶠ, Center(), Center(), Face()),
+            (Oceananigans.Operators.∂yᶠᶜᶜ, Face(),   Face(),   Center()),
+            (Oceananigans.Operators.∂yᶠᶠᶜ, Face(),   Center(), Center()),
+        )
+        for (op, ℓx, ℓy, ℓz) in function_arg_cases
+            v = op(i, j, k, grid, Oceananigans.Grids.znode, ℓx, ℓy, ℓz)
+            @test abs(v) < tol
+        end
+
+        # --- Field-arg chain-rule overloads: build a Field at each operand
+        # stagger, fill with physical z via set!, assert ≈ 0. ---
+        field_cases = (
+            (Oceananigans.Operators.∂xᶠᶜᶜ, Center, Center, Center),
+            (Oceananigans.Operators.∂xᶜᶜᶜ, Face,   Center, Center),
+            (Oceananigans.Operators.∂xᶠᶜᶠ, Center, Center, Face),
+            (Oceananigans.Operators.∂xᶜᶠᶜ, Face,   Face,   Center),
+            (Oceananigans.Operators.∂xᶠᶠᶜ, Center, Face,   Center),
+            (Oceananigans.Operators.∂yᶜᶠᶜ, Center, Center, Center),
+            (Oceananigans.Operators.∂yᶜᶜᶜ, Center, Face,   Center),
+            (Oceananigans.Operators.∂yᶜᶠᶠ, Center, Center, Face),
+            (Oceananigans.Operators.∂yᶠᶜᶜ, Face,   Face,   Center),
+            (Oceananigans.Operators.∂yᶠᶠᶜ, Face,   Center, Center),
+        )
+        for (op, LX, LY, LZ) in field_cases
+            ϕ = Field{LX, LY, LZ}(grid)
+            # set! with (x, y, z) -> z evaluates `z` at physical altitude via
+            # the TFVD `node()` override.
+            set!(ϕ, (x, y, z) -> z)
+            v = op(i, j, k, grid, ϕ)
+            @test abs(v) < tol
+        end
+    end
+
     @testset "on_architecture round-trip preserves materialised terrain" begin
         # Mirrors the CPU mirror that `set_to_function!` builds when called on a
         # GPU TFVD grid. Without `cpu_face_constructor_z(::TFVDRG)` + the
