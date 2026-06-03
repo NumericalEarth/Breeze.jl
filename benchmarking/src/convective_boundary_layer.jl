@@ -17,7 +17,7 @@ using Breeze: CompressibleDynamics
 
 """
     convective_boundary_layer(arch = CPU();
-                              float_type = Float64,
+                              float_type = Float32,
                               Nx = 64, Ny = 64, Nz = 64,
                               dynamics = nothing,
                               advection = WENO(order=5),
@@ -56,7 +56,7 @@ from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 - Initial perturbations: ±0.25 K in lowest 400 m
 """
 function convective_boundary_layer(arch = CPU();
-                                   float_type = Float64,
+                                   float_type = Float32,
                                    Nx = 64, Ny = 64, Nz = 64,
                                    dynamics = nothing,
                                    advection = WENO(order=5),
