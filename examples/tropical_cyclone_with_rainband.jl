@@ -121,7 +121,7 @@ p_env(z) = Oceananigans.Fields.interpolate(z, jordan_p)
 # between 250 and 300 km is *not* in the original paper. Since our domain is periodic,
 # we need to impose this to limit unrealistic stress at the domain boundaries.
 
-f = 5.0e-5                       # f-plane Coriolis parameter, 1/s ([YuDidlake2019](@citet); §3a1)
+f = 5e-5                       # f-plane Coriolis parameter, 1/s ([YuDidlake2019](@citet); §3a1)
 v_max_surface = 43             # initial surface v_max, m/s ([YuDidlake2019](@citet); §3a2)
 a_decay = 0.5                  # modified-Rankine decay exponent ([YuDidlake2019](@citet); Eq. 2)
 rmw_surface = 31kilometers     # surface radius of maximum wind, m ([MoonNolan2010](@citet); Appendix A)
@@ -141,9 +141,9 @@ nothing #hide
 
 # ## Grid and architecture
 #
-# [YuDidlake2019](@citet) §3a1 use a 3 km inner-nest resolution with a
+# [YuDidlake2019](@citet) §3a1 use a 5 km inner-nest resolution with a
 # 25 km deep domain. We match that on a ~ 642 km × 642 km periodic-in-x,y box:
-# 214² cells horizontally and 75 levels vertically (``Δz ≈ 333`` m). The run
+# 128² cells horizontally and 75 levels vertically (``Δz ≈ 333`` m). The run
 # prefers GPU and falls back to CPU if CUDA isn't functional.
 #
 # Dynamics: `CompressibleDynamics(SplitExplicitTimeDiscretization())` with
@@ -155,13 +155,13 @@ nothing #hide
 # and so anelastic F32 NaN'd at iter ~99 across all grid resolutions and
 # WENO orders tested.
 
-Δx = 3000meters
+Δx = 5kilometers
 Lx = 642kilometers
-Nx = Ny = Int(Lx / Δx)
+Nx = Ny = floor(Int, Lx / Δx)
 Nz = 75
 Lz = 25kilometers                 # YD19 §3a1
 Δz = Lz / Nz
-sponge_rate = 1.0f0 / Float32(333seconds) # ≈ WRF damp_opt=2 `dampcoef`
+sponge_rate = Float32(1 / 333) # ≈ WRF damp_opt=2 `dampcoef`
 stage_stop_time = 24hours
 
 arch = GPU()
