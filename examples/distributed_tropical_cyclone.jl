@@ -600,18 +600,29 @@ end
 ## Production integration
 ## ---------------------------------------------------------------------------
 
+## Iteration-based heartbeat: a WALL-CLOCK progress line every N steps so we can see
+## the run actually stepping and measure real ms/step. (A simulation-TIME progress
+## interval is invisible in a short job — it may not advance enough sim-time to fire,
+## making a healthy run and a hung run look identical in the log.) We deliberately
+## avoid the collective maximum(abs, velocity) here: the distributed face-field
+## reduction is buggy (cosmetic wrong values) and we don't want it on the heartbeat.
+const t_wall = Ref(time())
+const iter_prev = Ref(0)
+progress_every = parse(Int, argval("--progress-every", "20"))
 function progress(sim)
-    ## maximum over a distributed Field is collective — all ranks must call it.
-    mu = maximum(abs, u)
-    mv = maximum(abs, v)
-    mw = maximum(abs, w)
     if rank == 0
-        @info @sprintf("iter: %d, t: %s, Δt: %s, max|u,v|: %.2f, %.2f m/s, max|w|: %.2e m/s",
-                       iteration(sim), prettytime(sim), prettytime(sim.Δt), mu, mv, mw)
+        now = time()
+        n = iteration(sim)
+        dn = max(1, n - iter_prev[])
+        ms = 1e3 * (now - t_wall[]) / dn
+        @info @sprintf("iter %d  t=%s  Δt=%s  %.0f ms/step  (wall %s)",
+                       n, prettytime(sim), prettytime(sim.Δt), ms, prettytime(now - t_wall[]))
+        t_wall[] = now; iter_prev[] = n
+        flush(stderr)
     end
     return nothing
 end
-add_callback!(simulation, progress, TimeInterval(30minutes))
+add_callback!(simulation, progress, IterationInterval(progress_every))
 
 ## Per-rank x-y SLICE output at a few z-levels (full 3D is multi-TB at production
 ## scale; the YD19 plan-view + azimuthal-average analysis only needs horizontal

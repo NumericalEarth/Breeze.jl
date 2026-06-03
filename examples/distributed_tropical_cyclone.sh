@@ -102,6 +102,7 @@ srun --ntasks="${NGPUS}" --gpu-bind=none \
         --checkpoint-interval "${CHECKPOINT_INTERVAL}" \
         --dt "${DT}" \
         --substeps "${SUBSTEPS}" \
+        --progress-every "${PROGRESS_EVERY:-20}" \
         ${OUTPUT_DIR:+--output-dir "${OUTPUT_DIR}"} \
         $([ "${DIAGNOSE}" = "1" ] && echo "--diagnose") \
         $([ "${HEATING}" = "1" ] && echo "--heating") \
