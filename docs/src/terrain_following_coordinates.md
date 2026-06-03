@@ -1,7 +1,9 @@
 # [Terrain-following coordinates](@id Terrain-following-section)
 
 Terrain-following coordinates map the irregular physical domain above topography
-onto a regular computational domain. The horizontal grid stays uniform; only the
+onto a regular computational domain. The horizontal grid stays uniform — a design
+decision that simplifies the coordinate Jacobian (with ∂ξ/∂x = ∂η/∂y = const) to the
+vertical stretching factor σ = ∂z/∂ζ. Only the
 vertical coordinate is deformed so that the lowest face follows ``h(x, y)``. This
 avoids immersed boundaries and cut cells at the surface and makes the kinematic
 boundary condition trivial to express.
