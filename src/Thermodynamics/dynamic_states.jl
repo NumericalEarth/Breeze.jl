@@ -148,6 +148,97 @@ end
 end
 
 #####
+##### Liquid-ice potential temperature state (density-based)
+#####
+
+# The density-based counterpart of `LiquidIcePotentialTemperatureState`: it carries the density
+# ρ rather than a reference pressure, so `temperature` inverts θˡⁱ at constant density (with the
+# pressure diagnosed as p = ρ Rᵐ T) and `saturation_specific_humidity` (via the generic
+# AbstractThermodynamicState method) is evaluated at the actual ρ. This is the natural closure when ρ
+# is prognostic — e.g. on the compressible core, where using the pressure-based
+# `LiquidIcePotentialTemperatureState` causes the temperature-inversion inconsistency and the
+# saturation-against-a-stale-reference-pressure error. See NumericalEarth/Breeze.jl#765.
+struct LiquidIceDensityState{FT} <: AbstractThermodynamicState{FT}
+    potential_temperature :: FT
+    moisture_mass_fractions :: MoistureMassFractions{FT}
+    standard_pressure :: FT          # pˢᵗ: reference pressure for potential temperature
+    density :: FT                    # ρ: prognostic density (the variable the state is closed on)
+    temperature_tolerance :: FT      # relative convergence tol |ΔT|/T for the θˡⁱ→T inversion
+    temperature_maxiter :: Int       # iteration cap for the inversion
+end
+
+# Convenience constructor with default solver controls — used by tests and any construction site
+# without a `CompressibleDynamics` to source `temperature_tolerance`/`temperature_maxiter` from.
+@inline LiquidIceDensityState(θ::FT, q::MoistureMassFractions{FT}, pˢᵗ::FT, ρ::FT) where FT =
+    LiquidIceDensityState{FT}(θ, q, pˢᵗ, ρ, convert(FT, 1e-8), 8)
+
+@inline is_absolute_zero(𝒰::LiquidIceDensityState) = 𝒰.potential_temperature == 0
+
+@inline total_specific_moisture(state::LiquidIceDensityState) =
+    total_specific_moisture(state.moisture_mass_fractions)
+
+@inline with_moisture(𝒰::LiquidIceDensityState{FT}, q::MoistureMassFractions{FT}) where FT =
+    LiquidIceDensityState{FT}(𝒰.potential_temperature, q, 𝒰.standard_pressure, 𝒰.density,
+                                   𝒰.temperature_tolerance, 𝒰.temperature_maxiter)
+
+# Density is carried directly (not derived from a reference pressure).
+@inline density(𝒰::LiquidIceDensityState, constants) = 𝒰.density
+
+# Invert θˡⁱ at constant density: solve  g(T) = T − (ρ Rᵐ T / pˢᵗ)^κ θ − (ℒˡ qˡ + ℒⁱ qⁱ)/cᵖᵐ = 0.
+# Newton converges quadratically (g′ = 1 − κ Φ/T ≈ 1 − κ ≈ 0.72 is well away from zero); the loop
+# runs until the relative step |ΔT|/T falls below `temperature_tolerance` (or `temperature_maxiter`
+# is reached). With no condensate (L = 0) the dry closed form is already the root, so the first step
+# is exactly zero and the loop exits immediately.
+@inline function temperature(𝒰::LiquidIceDensityState, constants::ThermodynamicConstants)
+    θ   = 𝒰.potential_temperature
+    ρ   = 𝒰.density
+    pˢᵗ = 𝒰.standard_pressure
+    q   = 𝒰.moisture_mass_fractions
+    Rᵐ  = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    κ   = Rᵐ / cᵖᵐ
+    γ   = cᵖᵐ / (cᵖᵐ - Rᵐ)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    L   = (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
+
+    T  = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L         # dry closed form + latent shift (the old non-iterated guess)
+    ΔT = T                                         # ensure at least one Newton step is taken
+    iter = 0
+    while abs(ΔT) > 𝒰.temperature_tolerance * T && iter < 𝒰.temperature_maxiter
+        Φ  = (ρ * Rᵐ * T / pˢᵗ)^κ * θ              # = T − L at the root
+        ΔT = -(T - Φ - L) / (1 - κ * Φ / T)
+        T += ΔT
+        iter += 1
+    end
+    return T
+end
+
+# Exner function at the diagnosed (actual) pressure p = ρRᵐT: Π = (p/pˢᵗ)^κ.
+@inline function exner_function(𝒰::LiquidIceDensityState, constants::ThermodynamicConstants)
+    q   = 𝒰.moisture_mass_fractions
+    Rᵐ  = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    p   = 𝒰.density * Rᵐ * temperature(𝒰, constants)
+    return (p / 𝒰.standard_pressure)^(Rᵐ / cᵖᵐ)
+end
+
+@inline function with_temperature(𝒰::LiquidIceDensityState, T, constants)
+    q   = 𝒰.moisture_mass_fractions
+    ρ   = 𝒰.density
+    pˢᵗ = 𝒰.standard_pressure
+    Rᵐ  = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    κ   = Rᵐ / cᵖᵐ
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    L   = (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
+    p   = ρ * Rᵐ * T
+    θ   = (T - L) * (pˢᵗ / p)^κ
+    return LiquidIceDensityState{typeof(θ)}(θ, q, pˢᵗ, ρ, 𝒰.temperature_tolerance, 𝒰.temperature_maxiter)
+end
+
+#####
 ##### Moist static energy state (for microphysics interfaces)
 #####
 

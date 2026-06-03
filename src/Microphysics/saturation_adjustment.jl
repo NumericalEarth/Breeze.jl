@@ -1,6 +1,7 @@
 using ..Thermodynamics:
     Thermodynamics,
     MoistureMassFractions,
+    mixture_gas_constant,
     mixture_heat_capacity,
     saturation_specific_humidity,
     adjustment_saturation_specific_humidity,
@@ -9,6 +10,7 @@ using ..Thermodynamics:
     with_moisture,
     total_specific_moisture,
     AbstractThermodynamicState,
+    LiquidIceDensityState,
     WarmPhaseEquilibrium,
     MixedPhaseEquilibrium,
     equilibrated_surface
@@ -233,6 +235,80 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     end
 
     return 𝒰₂
+end
+
+#####
+##### Density-consistent saturation adjustment for the density-based θˡⁱ state
+#####
+
+# Residual for a constant-density saturated state at temperature `T`: saturate at the actual
+# density (density-based qsat), form the equilibrium partition, and return the density-based θˡⁱ
+# minus the target θ₀ together with the partition `q`. A root in `T` is the state that is both
+# saturated at ρ and conserves θˡⁱ. See NumericalEarth/Breeze.jl#765.
+@inline function saturated_density_residual(T, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, equilibrium)
+    q   = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
+    Rᵐ  = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    κ   = Rᵐ / cᵖᵐ
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    L   = (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
+    p   = ρ * Rᵐ * T
+    θ   = (T - L) * (pˢᵗ / p)^κ
+    return θ - θ₀, q
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Saturation adjustment for the [`LiquidIceDensityState`](@ref): a secant on the
+constant-density θˡⁱ-conservation residual, so `qsat` and the θˡⁱ inversion are evaluated at the
+state's actual density `ρ` (with true pressure `p = ρRᵐT`) rather than a fixed reference pressure.
+This is the density-consistent analogue of the generic (reference-pressure) [`adjust_state`] secant;
+like that one it holds θˡⁱ fixed (conserves it). See NumericalEarth/Breeze.jl#765.
+"""
+@inline function adjust_thermodynamic_state(𝒰₀::LiquidIceDensityState, microphysics::SA, constants)
+    FT = eltype(𝒰₀)
+    is_absolute_zero(𝒰₀) && return 𝒰₀
+
+    θ₀  = 𝒰₀.potential_temperature
+    ρ   = 𝒰₀.density
+    pˢᵗ = 𝒰₀.standard_pressure
+    qᵗ  = total_specific_moisture(𝒰₀)
+    equilibrium = microphysics.equilibrium
+
+    # Unsaturated? No condensation — return the all-vapor state.
+    𝒰₁ = with_moisture(𝒰₀, MoistureMassFractions(qᵗ))
+    T₁ = temperature(𝒰₁, constants)
+    qᵗ ≤ saturation_specific_humidity(T₁, ρ, constants, equilibrium) && return 𝒰₁
+
+    # Saturated: secant on the constant-density residual r(T) = θˡⁱ(T) − θ₀.
+    r₁, q₁ = saturated_density_residual(T₁, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
+
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    cᵖ₁ = mixture_heat_capacity(q₁, constants)
+    ΔT  = (ℒˡᵣ * q₁.liquid + ℒⁱᵣ * q₁.ice) / cᵖ₁   # latent warming implied at T₁
+    T₂  = T₁ + max(convert(FT, 0.01), ΔT / 2)
+    r₂, q₂ = saturated_density_residual(T₂, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
+
+    q = q₂
+    iter = 0
+    while abs(r₂) > microphysics.tolerance && iter < microphysics.maxiter
+        ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
+        valid_step = isfinite(ΔTΔr)
+        ΔTΔr = ifelse(valid_step, ΔTΔr, zero(FT))
+
+        r₁ = r₂; T₁ = T₂
+        T₂ = T₂ - r₂ * ΔTΔr
+        r₂, q₂ = saturated_density_residual(T₂, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
+        r₂ = ifelse(valid_step, r₂, zero(FT))
+        q = q₂
+        iter += 1
+    end
+
+    return with_moisture(𝒰₀, q)
 end
 
 """
