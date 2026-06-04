@@ -32,7 +32,7 @@ module TerrainFollowingDiscretization
 export TerrainMetrics,
        SlopeOutsideInterpolation, SlopeInsideInterpolation,
        TerrainFollowingVerticalDiscretization, LinearDecay, TwoLevelDecay,
-       materialize_terrain!, build_terrain_metrics, ∂z∂x, ∂z∂y, TFVDRG
+       materialize_terrain!, build_terrain_metrics, ∂z∂x, ∂z∂y, TerrainFollowingGrid
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF

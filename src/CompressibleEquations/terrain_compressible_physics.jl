@@ -27,7 +27,7 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
                                               SlopeInsideInterpolation,
-                                              TFVDRG, ∂z∂x, ∂z∂y
+                                              TerrainFollowingGrid, ∂z∂x, ∂z∂y
 
 #####
 ##### Terrain-aware type alias
@@ -209,10 +209,10 @@ end
 # propagates as NaN through `compute_contravariant_velocity!` and the rest
 # of the substep. `ℑyᵃᶜᵃ` on a Flat-y grid collapses to a no-op, matching
 # the MVD `terrain_slope_y_ccf` path that uses `ℑyᵃᶜᵃ(metrics.∂y_h)`.
-@inline terrain_slope_x_ccf(i, j, k, grid::TFVDRG, metrics) =
+@inline terrain_slope_x_ccf(i, j, k, grid::TerrainFollowingGrid, metrics) =
     ℑxᶜᵃᵃ(i, j, k, grid, ∂z∂x, Face())
 
-@inline terrain_slope_y_ccf(i, j, k, grid::TFVDRG, metrics) =
+@inline terrain_slope_y_ccf(i, j, k, grid::TerrainFollowingGrid, metrics) =
     ℑyᵃᶜᵃ(i, j, k, grid, ∂z∂y, Face())
 
 @inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics)

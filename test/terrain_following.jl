@@ -1047,7 +1047,7 @@ using Test
     end
 
     @testset "terrain_amg_operators: full chain-rule dispatch coverage" begin
-        # Drives every AMG-mirror operator on a TFVDRG: the slope operators
+        # Drives every AMG-mirror operator on a TerrainFollowingGrid: the slope operators
         # (`∂x_z*`, `∂y_z*`), the `c::Number` disambiguators, and both the
         # Field-arg and Function-arg chain-rule overloads across every
         # supported stagger. The chain-rule identity says that for a field
@@ -1141,7 +1141,7 @@ using Test
 
     @testset "on_architecture round-trip preserves materialised terrain" begin
         # Mirrors the CPU mirror that `set_to_function!` builds when called on a
-        # GPU TFVD grid. Without `cpu_face_constructor_z(::TFVDRG)` + the
+        # GPU TFVD grid. Without `cpu_face_constructor_z(::TerrainFollowingGrid)` + the
         # materialised-arrays branch of `allocate_formulation`, the rebuild
         # discards `formulation.h`/`∂x_h`/`∂y_h` and the `node()` override
         # returns r instead of physical altitude.
