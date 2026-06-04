@@ -61,7 +61,7 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
-using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity, dry_air_gas_constant,
+using Breeze.Thermodynamics: mixture_gas_constant, dry_air_gas_constant,
                              vapor_gas_constant, ExnerReferenceState, temperature, LiquidIceDensityState
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density, standard_pressure, thermodynamic_density, thermodynamic_density_name, specific_prognostic_moisture
