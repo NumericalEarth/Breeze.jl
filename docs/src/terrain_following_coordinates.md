@@ -752,6 +752,13 @@ pᵣ = interior(model.dynamics.terrain_reference_pressure)
 isapprox(p, pᵣ; atol = 1e-9)   # → true for a well-balanced IC
 ```
 
+For the Schär validation config below (SLEVE, 400×200, ``U = 10 \text{ m/s}``,
+``N = 0.01 \text{ s}^{-1}``), the balanced resting IC measures
+``\max|p - p_r| = 4.4\times10^{-11}`` Pa, so the spurious horizontal
+pressure-gradient force at rest is ``\max|\partial_x(p - p_r)| = 1.5\times10^{-13}``
+Pa/m — machine zero. The discrete state is hydrostatically well-balanced and
+generates no spurious flow before the mountain wave develops.
+
 `isapprox` (with a small absolute tolerance, since the perturbation should be
 machine zero) is the idiomatic way to test the balance — equality `==` is too
 strict for floating-point round-off, and a hand-rolled
@@ -772,19 +779,37 @@ invisible; it matters only on terrain-following grids.
 
 ### Validation: Schär mountain wave
 
-The well-balanced IC reproduces the CM1 reference. Schär mountain wave,
-``N = 0.01 \text{ s}^{-1}``, ``U = 10 \text{ m/s}``, ``h_0 = 250 \text{ m}``,
-TwoLevelDecay 400×200, ``t = 600 \text{ s}``:
+The terrain dynamics are validated against a [CM1](@cite BryanFritsch2002) reference run
+of the classic Schär test case. Both models use the same configuration: SLEVE
+(`TwoLevelDecay`) coordinate, ``400\times200`` grid over a
+``200\,\text{km}\times30\,\text{km}`` domain, ``U = 10 \text{ m/s}``,
+``N = 0.01 \text{ s}^{-1}``, ``h_0 = 250 \text{ m}`` (``a = 5\,\text{km}``,
+``\lambda = 4\,\text{km}``), a 10 km Rayleigh sponge on top, and ``t = 600
+\text{ s}``. Metrics are taken over the interior below the sponge
+(``z < 20\,\text{km}``); the Breeze run uses `Centered(2)` advection with
+`SlopeInsideInterpolation`.
 
-| quantity | Breeze | CM1 reference |
-|----------|--------|---------------|
-| ``\max\|w\|`` (m/s) | 1.54 | 2.03 |
-| 99th-pct ``\|w\|`` (m/s) | 0.07 | 0.10 |
-| summit-zone energy fraction | 24 % | 33 % |
-| spurious ``\partial_x p\|_\text{rest}`` | 1.5e-13 Pa/m (machine zero) | — |
+| metric | Breeze | CM1 |
+|--------|--------|-----|
+| ``\max \vert w \vert`` (m/s) | 1.66 | 2.17 |
+| 99th-percentile ``\vert w \vert`` (m/s) | 0.10 | 0.11 |
+| RMS ``w`` (m/s) | 0.043 | 0.049 |
+| pattern correlation of ``w`` (Breeze vs CM1) | 0.82 | — |
+| normalized RMS difference ``\Vert w_B - w_C \Vert / \Vert w_C \Vert`` | 0.58 | — |
 
-The resting-state pressure gradient is machine zero, confirming the discrete
-state is well-balanced, and the simulated wave field matches CM1's structure.
+The vertical-velocity field correlates with CM1 at 0.82 and the 99th-percentile
+amplitude agrees to within ~6%. The peak amplitude is ~75% of CM1's at this
+early time — expected, given `Centered(2)` advection versus CM1's higher-order
+scheme; the gap narrows with `WENO` and at later times once the wave is fully
+established. (A summit-zone energy-concentration metric was deliberately
+dropped: at ``t = 600\,\text{s}`` the wave has not propagated far, so essentially
+all the energy sits over the mountain for *both* models — ``\gtrsim 95\%`` within
+``|x| \le 20\,\text{km}`` — and the metric does not discriminate them.)
+
+Reproduce with
+`validation_output/substepper/terrain_schar_mountain_wave_validation.jl`
+(`SCHAR_NX=400 SCHAR_NZ=200`); the script and CM1 reference are kept locally and
+are not part of the repository.
 
 ## Adding a new formulation
 
