@@ -50,7 +50,7 @@ using Test
         # Check z_top
         @test metrics.z_top ≈ Lz
 
-        # Check that physical z-nodes reflect terrain (TFVD: z = ζ + h(x)·b(ζ)).
+        # Check that physical z-nodes reflect terrain (TFVD: z = r + h(x)·b(r)).
         # At the surface (k=1, Face), z should equal h(x).
         for i in 1:Nx
             x = xnode(i, grid, Center())
@@ -220,7 +220,7 @@ using Test
         @test maximum(abs, w̃) > 0
 
         # At the model top (k = Nz+1), terrain slopes decay to zero so w̃ ≈ w
-        # (the decay factor is 1 - ζ/z_top = 0 at the top)
+        # (the decay factor is 1 - r/z_top = 0 at the top)
         w = model.velocities.w
         for i in 1:Nx
             @test w̃[i, 1, Nz+1] ≈ w[i, 1, Nz+1] atol=1e-10
@@ -480,8 +480,8 @@ using Test
             end
 
             for i in 1:Nx, k in 1:Nz+1
-                ζ = rnode(k, grid, Face())
-                ρw̃[i, 1, k] = cos(π * ζ / Lz)
+                r = rnode(k, grid, Face())
+                ρw̃[i, 1, k] = cos(π * r / Lz)
             end
 
             set!(ρv, 0)
@@ -489,11 +489,11 @@ using Test
             maximum_error = 0.0
             for i in 3:Nx-2, k in 2:Nz-1
                 x = xnode(i, grid, Center())
-                ζ = rnode(k, grid, Center())
+                r = rnode(k, grid, Center())
 
                 horizontal_flux = sin(2π * x / Lx)
                 horizontal_flux_gradient = (2π / Lx) * cos(2π * x / Lx)
-                vertical_flux_gradient = -(π / Lz) * sin(π * ζ / Lz)
+                vertical_flux_gradient = -(π / Lz) * sin(π * r / Lz)
                 expected_divergence = (∂x_σ(x) * horizontal_flux +
                                        σ(x) * horizontal_flux_gradient +
                                        vertical_flux_gradient) / σ(x)
@@ -880,7 +880,7 @@ using Test
     end
 
     @testset "Terrain reference state matches continuous hydrostatic profile" begin
-        # The terrain reference state p_ref(i,j,k) must equal the continuous
+        # The terrain reference state pᵣ(i,j,k) must equal the continuous
         # hydrostatic pressure evaluated at the local physical height z(i,j,k).
         # A bug that initializes every column from sea-level pressure creates
         # O(ρgh) errors over terrain.
@@ -906,19 +906,19 @@ using Test
         model = AtmosphereModel(grid; dynamics)
         constants = model.thermodynamic_constants
 
-        p_ref = model.dynamics.terrain_reference_pressure
+        pᵣ = model.dynamics.terrain_reference_pressure
 
-        # At each grid point, p_ref should match the continuous profile
+        # At each grid point, pᵣ should match the continuous profile
         # to within the discretization error of the Exner integration (O(Δz²))
         for i in 1:Nx, k in 1:Nz
-            z_phys = znode(i, 1, k, grid, Center(), Center(), Center())
-            p_exact = hydrostatic_pressure(z_phys, p₀, θ₀, pˢᵗ, constants)
+            z = znode(i, 1, k, grid, Center(), Center(), Center())
+            p_exact = hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
             # Discrete Exner integration has O(Δz²) error; with Δz ≈ 1250 m
             # the accumulated error at the top is ~0.5%, so use 1% tolerance
-            @test p_ref[i, 1, k] ≈ p_exact rtol=1e-2
+            @test pᵣ[i, 1, k] ≈ p_exact rtol=1e-2
         end
 
-        # Critical check: at a given k-level, p_ref must NOT be constant across
+        # Critical check: at a given k-level, pᵣ must NOT be constant across
         # columns (it should vary because physical heights differ). But at the
         # SAME physical height, values from different columns should agree closely.
         # Compare the flat column (i at domain edge) vs the mountain-top column.
@@ -927,9 +927,9 @@ using Test
         z_flat_1 = znode(i_flat, 1, 1, grid, Center(), Center(), Center())
         z_peak_1 = znode(i_peak, 1, 1, grid, Center(), Center(), Center())
 
-        # Physical heights differ, so p_ref at k=1 should differ
+        # Physical heights differ, so pᵣ at k=1 should differ
         @test z_peak_1 > z_flat_1 + 100  # mountain is at least 100 m higher
-        @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]  # higher altitude → lower pressure
+        @test pᵣ[i_peak, 1, 1] < pᵣ[i_flat, 1, 1]  # higher altitude → lower pressure
     end
 
     @testset "Terrain reference state with θ(z) profile (Function dispatch)" begin
@@ -960,20 +960,20 @@ using Test
         model = AtmosphereModel(grid; dynamics)
         constants = model.thermodynamic_constants
 
-        p_ref = model.dynamics.terrain_reference_pressure
+        pᵣ = model.dynamics.terrain_reference_pressure
 
-        # At each grid point, p_ref should match the continuous profile
+        # At each grid point, pᵣ should match the continuous profile
         for i in 1:Nx, k in 1:Nz
-            z_phys = znode(i, 1, k, grid, Center(), Center(), Center())
-            p_exact = hydrostatic_pressure(z_phys, p₀, θ_of_z, pˢᵗ, constants)
+            z = znode(i, 1, k, grid, Center(), Center(), Center())
+            p_exact = hydrostatic_pressure(z, p₀, θ_of_z, pˢᵗ, constants)
             # Finer grid (Nz=16) so tighter tolerance than Nz=8 test
-            @test p_ref[i, 1, k] ≈ p_exact rtol=5e-3
+            @test pᵣ[i, 1, k] ≈ p_exact rtol=5e-3
         end
 
-        # Mountain-top column should have lower p_ref at k=1 than flat column
+        # Mountain-top column should have lower pᵣ at k=1 than flat column
         i_flat = 1
         i_peak = Nx÷2
-        @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
+        @test pᵣ[i_peak, 1, 1] < pᵣ[i_flat, 1, 1]
     end
 
     #####
@@ -1051,7 +1051,7 @@ using Test
         # (`∂x_z*`, `∂y_z*`), the `c::Number` disambiguators, and both the
         # Field-arg and Function-arg chain-rule overloads across every
         # supported stagger. The chain-rule identity says that for a field
-        # equal to physical altitude z_phys, `(∂ϕ/∂x)|_z = 0` because
+        # equal to physical altitude z, `(∂ϕ/∂x)|_z = 0` because
         # constant-altitude surfaces are flat in physical x by definition.
         # With SlopeOutsideInterpolation the operators cancel discretely to
         # machine precision, so we can assert this directly.
@@ -1144,7 +1144,7 @@ using Test
         # GPU TFVD grid. Without `cpu_face_constructor_z(::TFVDRG)` + the
         # materialised-arrays branch of `allocate_formulation`, the rebuild
         # discards `formulation.h`/`∂x_h`/`∂y_h` and the `node()` override
-        # returns ζ instead of physical altitude.
+        # returns r instead of physical altitude.
         Nx, Nz = 16, 8
         Lx, Lz = 10000.0, 5000.0
 

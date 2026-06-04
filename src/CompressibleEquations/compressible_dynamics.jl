@@ -187,7 +187,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
 
         # Build 3D reference pressure and density fields via per-column discrete
         # Exner integration. The discrete integration ensures that
-        #   δ(p_ref)/Δz + g ℑ(ρ_ref) ≈ 0
+        #   δ(pᵣ)/Δz + g ℑ(ρᵣ) ≈ 0
         # to high accuracy at every grid face, which is essential for reducing
         # the truncation error from the near-cancellation of ∂p/∂z and -gρ in
         # the vertical momentum equation. The reference pressure is also used for

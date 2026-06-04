@@ -3,16 +3,16 @@
 Terrain-following coordinates map the irregular physical domain above topography
 onto a regular computational domain. The horizontal grid stays uniform — a design
 decision that simplifies the coordinate Jacobian (with ∂ξ/∂x = ∂η/∂y = const) to the
-vertical stretching factor σ = ∂z/∂ζ. Only the
+vertical stretching factor σ = ∂z/∂r. Only the
 vertical coordinate is deformed so that the lowest face follows ``h(x, y)``. This
 avoids immersed boundaries and cut cells at the surface and makes the kinematic
 boundary condition trivial to express.
 
 The price is that derivatives in the computational frame are no longer Cartesian
 derivatives, and the discrete equations have to carry metric correction terms.
-Most of this page is about getting those corrections right — and about an
-initial-condition gotcha that bites every user the first time they set up a
-stratified resting atmosphere over terrain.
+Most of this page is about getting those corrections right, and about how the
+reference state and the contravariant velocity keep a stratified atmosphere over
+terrain well-balanced.
 
 The user-facing implementation is [`TerrainFollowingVerticalDiscretization`](@ref)
 (TFVD). TFVD stores the reference vertical coordinate and a formulation
@@ -23,8 +23,8 @@ Jacobian, and terrain slopes used by the dynamics.
 
 ### The coordinate mapping
 
-Let ``\zeta \in [0, z_\text{top}]`` be the computational vertical coordinate and
-``z(x, y, \zeta)`` the physical height. We need a smooth invertible mapping
+Let ``r \in [0, z_\text{top}]`` be the computational vertical coordinate and
+``z(x, y, r)`` the physical height. We need a smooth invertible mapping
 that satisfies
 
 ```math
@@ -35,10 +35,10 @@ so coordinate surfaces conform to the terrain at the ground and to a flat lid
 at the top. All formulations in Breeze take the additive form
 
 ```math
-\boxed{\, z(x, y, \zeta) = \zeta + h(x, y) \, b(\zeta) \,}
+\boxed{\, z(x, y, r) = r + h(x, y) \, b(r) \,}
 ```
 
-with a *basis function* ``b(\zeta)`` satisfying ``b(0) = 1`` and
+with a *basis function* ``b(r)`` satisfying ``b(0) = 1`` and
 ``b(z_\text{top}) = 0``. Different choices of ``b`` give different formulations
 (see [Coordinate formulations](#coordinate-formulations) below).
 
@@ -47,14 +47,14 @@ with a *basis function* ``b(\zeta)`` satisfying ``b(0) = 1`` and
 The vertical Jacobian of the coordinate map is
 
 ```math
-\sigma(x, y, \zeta) \;:=\; \frac{\partial z}{\partial \zeta}
-                = 1 + h(x, y) \, b'(\zeta) .
+\sigma(x, y, r) \;:=\; \frac{\partial z}{\partial r}
+                = 1 + h(x, y) \, b'(r) .
 ```
 
 Physical vertical spacings inherit this Jacobian:
 
 ```math
-\Delta z = \sigma \, \Delta \zeta .
+\Delta z = \sigma \, \Delta r .
 ```
 
 For a stable, monotone coordinate we need ``\sigma > 0`` everywhere, which
@@ -65,21 +65,21 @@ the dynamics will blow up.
 ### Generalised horizontal derivatives
 
 A horizontal derivative at constant physical altitude differs from one at
-constant ``\zeta``. Apply the chain rule on ``\phi(x, y, z(x, y, \zeta))``:
+constant ``r``. Apply the chain rule on ``\phi(x, y, z(x, y, r))``:
 
 ```math
 \left.\frac{\partial \phi}{\partial x}\right|_z
 \;=\;
-\left.\frac{\partial \phi}{\partial x}\right|_\zeta
+\left.\frac{\partial \phi}{\partial x}\right|_r
 \;-\;
-\left(\frac{\partial z}{\partial x}\right)_\zeta \frac{\partial \phi}{\partial z} .
+\left(\frac{\partial z}{\partial x}\right)_r \frac{\partial \phi}{\partial z} .
 ```
 
-The terrain slope ``(\partial z / \partial x)_\zeta`` is
+The terrain slope ``(\partial z / \partial x)_r`` is
 
 ```math
-\left(\frac{\partial z}{\partial x}\right)_\zeta
-= \frac{\partial h}{\partial x} \, b(\zeta) ,
+\left(\frac{\partial z}{\partial x}\right)_r
+= \frac{\partial h}{\partial x} \, b(r) ,
 ```
 
 which is the surface slope of ``h`` times the basis function. The slope inherits
@@ -87,24 +87,24 @@ the vertical decay of ``b`` — at the lid, ``b(z_\text{top}) = 0``, the coordin
 surface is flat and the chain-rule correction vanishes.
 
 Oceananigans' finite-difference operators on a `RectilinearGrid` naturally
-compute ``\partial / \partial x|_\zeta``, so to get the physical horizontal
+compute ``\partial / \partial x|_r``, so to get the physical horizontal
 derivative we have to *subtract* the slope term. This subtraction is the source
 of most discretisation pain in terrain-following dynamics.
 
 ### Contravariant vertical velocity
 
-The velocity normal to a coordinate surface ``\zeta = \text{const}`` is
+The velocity normal to a coordinate surface ``r = \text{const}`` is
 
 ```math
 \boxed{\,
 \tilde{w} \;:=\; w
-\;-\; \left(\frac{\partial z}{\partial x}\right)_\zeta u
-\;-\; \left(\frac{\partial z}{\partial y}\right)_\zeta v
+\;-\; \left(\frac{\partial z}{\partial x}\right)_r u
+\;-\; \left(\frac{\partial z}{\partial y}\right)_r v
 \,}
 ```
 
 — the **contravariant vertical velocity**. ``\tilde{w}`` is what governs
-transport *through* ``\zeta``-surfaces (advection, mass conservation, scalar
+transport *through* ``r``-surfaces (advection, mass conservation, scalar
 transport), while ``w`` is the Cartesian-frame vertical velocity (used for
 buoyancy and physical interpretation).
 
@@ -117,7 +117,7 @@ w \big|_{z = h} = u \, \frac{\partial h}{\partial x} + v \, \frac{\partial h}{\p
 becomes, in contravariant form,
 
 ```math
-\boxed{\, \tilde{w} \big|_{\zeta = 0} = 0 \,} .
+\boxed{\, \tilde{w} \big|_{r = 0} = 0 \,} .
 ```
 
 This is the killer feature of terrain-following coordinates: the no-flow-through
@@ -130,19 +130,19 @@ The continuity equation in the computational frame is
 
 ```math
 \partial_t \rho
-+ \partial_x|_\zeta(\rho u)
-+ \partial_y|_\zeta(\rho v)
-+ \partial_\zeta(\rho \tilde{w})
++ \partial_x|_r(\rho u)
++ \partial_y|_r(\rho v)
++ \partial_r(\rho \tilde{w})
 \;=\; 0 ,
 ```
 
-i.e. the ``\zeta``-frame divergence of the contravariant mass flux ``(\rho u, \rho v,
+i.e. the ``r``-frame divergence of the contravariant mass flux ``(\rho u, \rho v,
 \rho \tilde{w})``. Scalar transport for any density-weighted quantity ``\rho c``
 takes the same form,
 
 ```math
 \partial_t (\rho c)
-+ \boldsymbol{\nabla}_\zeta \cdot \big( \rho c \, (u, v, \tilde{w}) \big)
++ \boldsymbol{\nabla}_r \cdot \big( \rho c \, (u, v, \tilde{w}) \big)
 \;=\; S_c .
 ```
 
@@ -150,7 +150,7 @@ Vertical advection inside the dycore therefore uses ``\tilde{w}``, not ``w``.
 
 ## Coordinate formulations
 
-The choice of basis function ``b(\zeta)`` controls how rapidly the influence of
+The choice of basis function ``b(r)`` controls how rapidly the influence of
 terrain decays with altitude.
 
 ### LinearDecay (Gal-Chen & Somerville, 1975)
@@ -158,14 +158,14 @@ terrain decays with altitude.
 The simplest choice is
 
 ```math
-b(\zeta) = 1 - \frac{\zeta}{z_\text{top}} , \qquad
-b'(\zeta) = -\frac{1}{z_\text{top}} ,
+b(r) = 1 - \frac{r}{z_\text{top}} , \qquad
+b'(r) = -\frac{1}{z_\text{top}} ,
 ```
 
 so
 
 ```math
-z = \zeta + h \left(1 - \frac{\zeta}{z_\text{top}}\right) ,
+z = r + h \left(1 - \frac{r}{z_\text{top}}\right) ,
 \qquad
 \sigma = 1 - \frac{h}{z_\text{top}} ,
 ```
@@ -173,8 +173,8 @@ z = \zeta + h \left(1 - \frac{\zeta}{z_\text{top}}\right) ,
 and the slope decays linearly to zero at the lid:
 
 ```math
-\left(\frac{\partial z}{\partial x}\right)_\zeta = \frac{\partial h}{\partial x}
-\left(1 - \frac{\zeta}{z_\text{top}}\right) .
+\left(\frac{\partial z}{\partial x}\right)_r = \frac{\partial h}{\partial x}
+\left(1 - \frac{r}{z_\text{top}}\right) .
 ```
 
 LinearDecay is exact, simple, and bombproof. Its drawback is that small-scale
@@ -191,18 +191,18 @@ part ``h_1`` and a small-scale residual ``h_2 = h - h_1``, and uses *different*
 decay basis functions for each:
 
 ```math
-z(x, y, \zeta)
-= \zeta
-+ h_1(x, y) \, b_1(\zeta)
-+ h_2(x, y) \, b_2(\zeta) .
+z(x, y, r)
+= r
++ h_1(x, y) \, b_1(r)
++ h_2(x, y) \, b_2(r) .
 ```
 
 The bases are hyperbolic:
 
 ```math
-b_n(\zeta) = \frac{\sinh\!\big((z_\text{top} - \zeta)/s_n\big)}{\sinh(z_\text{top}/s_n)} ,
+b_n(r) = \frac{\sinh\!\big((z_\text{top} - r)/s_n\big)}{\sinh(z_\text{top}/s_n)} ,
 \qquad
-b_n'(\zeta) = -\frac{\cosh\!\big((z_\text{top} - \zeta)/s_n\big)}{s_n \, \sinh(z_\text{top}/s_n)} ,
+b_n'(r) = -\frac{\cosh\!\big((z_\text{top} - r)/s_n\big)}{s_n \, \sinh(z_\text{top}/s_n)} ,
 ```
 
 with *decay scales* ``s_1 \gg s_2``. Large-scale features (mountains) decay
@@ -225,14 +225,14 @@ scale is the Gaussian envelope.
 
 Not yet implemented but easy to add as a new `AbstractTerrainFormulation` (see
 [Adding a new formulation](#adding-a-new-formulation)). The hybrid coordinate
-forces ``b(\zeta) \to 0`` at a finite altitude ``\zeta_\text{flat}`` below the
-lid, so coordinate surfaces are *exactly* flat above ``\zeta_\text{flat}``. It
+forces ``b(r) \to 0`` at a finite altitude ``r_\text{flat}`` below the
+lid, so coordinate surfaces are *exactly* flat above ``r_\text{flat}``. It
 removes all terrain influence in the upper atmosphere.
 
 ## The discrete grid
 
 [`TerrainFollowingVerticalDiscretization`](@ref) stores both the reference
-``\zeta``-coordinate spacings *and* the formulation-specific terrain fields
+``r``-coordinate spacings *and* the formulation-specific terrain fields
 (``h``, ``\partial_x h``, etc.) needed to materialise the physical grid.
 
 ### Two vertical coordinates: `rnode` vs `znode`
@@ -241,14 +241,14 @@ This is the foundational distinction that trips users up:
 
 | function | symbol | meaning |
 |----------|--------|---------|
-| `rnode(i, j, k, grid, ℓz)` | ``\zeta_k`` | **reference** vertical coordinate — uniform, terrain-independent |
+| `rnode(i, j, k, grid, ℓz)` | ``r_k`` | **reference** vertical coordinate — uniform, terrain-independent |
 | `znode(i, j, k, grid, ℓx, ℓy, ℓz)` | ``z_{i,j,k}`` | **physical** altitude at cell ``(i, j, k)`` — varies with ``h(x, y)`` |
 
 The relationship is
 
 ```math
-z_{i, j, k} = \zeta_k + \Delta z^\text{surface}_{i, j, k} , \qquad
-\Delta z^\text{surface}_{i, j, k} = h(x_i, y_j) \, b(\zeta_k) .
+z_{i, j, k} = r_k + \Delta z^\text{surface}_{i, j, k} , \qquad
+\Delta z^\text{surface}_{i, j, k} = h(x_i, y_j) \, b(r_k) .
 ```
 
 `rnode` is what you store in your spec when you write
@@ -261,8 +261,8 @@ moisture profile ``q_v(z)`` — must be evaluated at `znode`, not `rnode`.
 using Oceananigans.Grids: rnode, znode
 
 # At cell (i, j, k) on a TFVD grid with mountain peak at (0, 0):
-rnode(k, grid, Center())                                    # → ζ_k, independent of x,y
-znode(i, j, k, grid, Center(), Center(), Center())          # → z_phys at this cell
+rnode(k, grid, Center())                                    # → r_k, independent of x,y
+znode(i, j, k, grid, Center(), Center(), Center())          # → z at this cell
 ```
 
 Implementation in `src/TerrainFollowingDiscretization/terrain_following_vertical_discretization.jl`:
@@ -273,7 +273,7 @@ Implementation in `src/TerrainFollowingDiscretization/terrain_following_vertical
     terrain_following_Δz_surface(i, j, k, grid, grid.z.formulation, ℓx, ℓy, ℓz)
 ```
 
-The `terrain_following_Δz_surface` term is `h * b(ζ)`, dispatched on the
+The `terrain_following_Δz_surface` term is `h * b(r)`, dispatched on the
 formulation.
 
 ### Vertical Jacobian σ and spacings
@@ -289,7 +289,7 @@ end
 ```
 
 (`_b′_linear(z_top) = -1/z_top`). For TwoLevelDecay it's the same with two contributions
-``h_1 b_1'(\zeta) + h_2 b_2'(\zeta)``.
+``h_1 b_1'(r) + h_2 b_2'(r)``.
 
 All vertical spacings are derived through the same Jacobian:
 
@@ -331,13 +331,13 @@ i.e. a 2-point centred difference of ``h`` to face position. The source uses
 purely horizontal surface quantity; it should not include the coordinate
 chain-rule correction used for atmospheric fields.
 
-The runtime slope used by the dynamics, ``\partial z / \partial x|_\zeta``, is
+The runtime slope used by the dynamics, ``\partial z / \partial x|_r``, is
 the precomputed surface slope times the basis function:
 
 ```julia
 @inline function terrain_following_∂z∂x(i, j, k, grid, f::LinearDecay, ℓz)
-    ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂x_h[i, j, 1] * _b_linear(ζ, f.z_top)
+    r = rnode(k, grid, ℓz)
+    @inbounds return f.∂x_h[i, j, 1] * _b_linear(r, f.z_top)
 end
 ```
 
@@ -346,9 +346,9 @@ respective bases:
 
 ```julia
 @inline function terrain_following_∂z∂x(i, j, k, grid, f::TwoLevelDecay, ℓz)
-    ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂x_h₁[i, j, 1] * _b_sleve(ζ, f.z_top, f.large_scale_height) +
-                     f.∂x_h₂[i, j, 1] * _b_sleve(ζ, f.z_top, f.small_scale_height)
+    r = rnode(k, grid, ℓz)
+    @inbounds return f.∂x_h₁[i, j, 1] * _b_sleve(r, f.z_top, f.large_scale_height) +
+                     f.∂x_h₂[i, j, 1] * _b_sleve(r, f.z_top, f.small_scale_height)
 end
 ```
 
@@ -358,7 +358,7 @@ end
 using Oceananigans
 using Breeze.TerrainFollowingDiscretization
 
-# 1. Specify reference ζ faces and the formulation
+# 1. Specify reference r faces and the formulation
 z_faces = TerrainFollowingVerticalDiscretization(
     collect(range(0, 30e3, length = Nz + 1));
     formulation = TwoLevelDecay(large_scale_height = 15e3,
@@ -397,8 +397,8 @@ The chain-rule generalisation
 
 ```math
 \left.\frac{\partial \phi}{\partial x}\right|_z
-= \left.\frac{\partial \phi}{\partial x}\right|_\zeta
-- \left(\frac{\partial z}{\partial x}\right)_\zeta \frac{\partial \phi}{\partial z}
+= \left.\frac{\partial \phi}{\partial x}\right|_r
+- \left(\frac{\partial z}{\partial x}\right)_r \frac{\partial \phi}{\partial z}
 ```
 
 admits two natural discretisations on a staggered grid. Both compute the
@@ -428,23 +428,20 @@ derivative *first*, on the cell-centered/face-centered grid where the slope
 lives, then interpolates the product:
 
 ```julia
-@inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, p_ref)
-    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, perturbation_pressure, d.pressure, p_ref) *
+@inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, pᵣ)
+    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, perturbation_pressure, d.pressure, pᵣ) *
             Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
     correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, slope_x_times_∂z_p′,
-                       d.terrain_metrics, d.pressure, p_ref)
+                       d.terrain_metrics, d.pressure, pᵣ)
     return ∂x_p′ - correction
 end
 ```
 
-where `slope_x_times_∂z_p′(i, j, k, grid, metrics, p, p_ref) = slope_x_ccf * ∂zᶜᶜᶠ(p − p_ref)`.
+where `slope_x_times_∂z_p′(i, j, k, grid, metrics, p, pᵣ) = slope_x_ccf * ∂zᶜᶜᶠ(p − pᵣ)`.
 
 The two are mathematically equivalent in the continuum limit but differ at
-``O(\Delta x^2, \Delta z^2)`` for a non-uniform topographic slope. In our
-experience neither version cures the kind of imbalance described in
-[Pitfalls](#pitfalls-the-ic-gotcha-that-bites-everyone) below: that pathology
-lives upstream of the PGF stencil choice. SlopeOutside is the default and is
-fine for production.
+``O(\Delta x^2, \Delta z^2)`` for a non-uniform topographic slope. SlopeOutside
+is the default and is fine for production.
 
 ### Contravariant momentum
 
@@ -487,7 +484,7 @@ The horizontal stagger of `slope_x_ccf` is `(Center, Center, Face)`, matching
     ℑxᶜᵃᵃ(i, j, k, grid, ∂z∂x, Face())
 ```
 
-The `Face()` argument selects the ``\zeta``-face position for `b(ζ)`, so the
+The `Face()` argument selects the ``r``-face position for `b(r)`, so the
 slope is sampled at the same vertical position as ``\rho \tilde{w}``.
 
 ### Transport dispatch
@@ -541,12 +538,12 @@ near-cancellation problem.
 
 On a flat grid the reference state is a function of ``z`` only and Breeze
 stores it as the 1D `ExnerReferenceState`. Over terrain, each column has its
-own ``z(x, y, \zeta)`` profile, so a single 1D reference profile would not be
+own ``z(x, y, r)`` profile, so a single 1D reference profile would not be
 hydrostatically balanced *per column*. Breeze therefore builds a fully 3D
 reference field via per-column discrete Exner integration:
 
 ```julia
-function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢᵗ, constants)
+function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, θᵣ, pˢᵗ, constants)
     Nx, Ny, Nz = size(grid)
     c = Center()
     Rᵈ  = dry_air_gas_constant(constants)
@@ -557,11 +554,11 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢ�
     for j in 1:Ny, i in 1:Nx
         πₖ = zero(κ)  # initialised below at k = 1
         for k in 1:Nz
-            z_phys = znode(i, j, k, grid, c, c, c)
-            θₖ     = θᵣ isa Number ? θᵣ : θᵣ(z_phys)
+            z = znode(i, j, k, grid, c, c, c)
+            θₖ     = θᵣ isa Number ? θᵣ : θᵣ(z)
 
             if k == 1
-                p_hydro = hydrostatic_pressure(z_phys, p₀, θᵣ, pˢᵗ, constants)
+                p_hydro = hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
                 πₖ      = (p_hydro / pˢᵗ)^κ
             else
                 z_below = znode(i, j, k - 1, grid, c, c, c)
@@ -573,8 +570,8 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢ�
 
             pₖ = pˢᵗ * πₖ^(1 / κ)
             ρₖ = pₖ / (Rᵈ * θₖ * πₖ)
-            @inbounds p_ref[i, j, k] = pₖ
-            @inbounds ρ_ref[i, j, k] = ρₖ
+            @inbounds pᵣ[i, j, k] = pₖ
+            @inbounds ρᵣ[i, j, k] = ρₖ
         end
     end
 end
@@ -583,7 +580,7 @@ end
 Two things to note:
 
 1. Each column starts the discrete Exner integration from the *physical* height
-   ``z_\text{phys}`` of the lowest cell — which is over the terrain, not at sea
+   ``z`` of the lowest cell — which is over the terrain, not at sea
    level. We evaluate the continuous hydrostatic pressure at that height and
    seed ``\pi`` from it.
 2. The march upward is the *discrete* Exner relation,
@@ -600,11 +597,11 @@ With the reference state available, the slow horizontal PGF subtracts
 ``p_\text{ref}`` before taking the generalised derivative:
 
 ```julia
-@inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, p_ref)
-    return ∂xᶠᶜᶜ(i, j, k, grid, perturbation_pressure, d.pressure, p_ref)
+@inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, pᵣ)
+    return ∂xᶠᶜᶜ(i, j, k, grid, perturbation_pressure, d.pressure, pᵣ)
 end
 
-@inline perturbation_pressure(i, j, k, grid, p, p_ref) = @inbounds p[i, j, k] - p_ref[i, j, k]
+@inline perturbation_pressure(i, j, k, grid, p, pᵣ) = @inbounds p[i, j, k] - pᵣ[i, j, k]
 ```
 
 i.e. compute ``\partial_x|_z (p - p_\text{ref})``. If the *actual* discrete
@@ -628,15 +625,16 @@ end
 For ``p = p_\text{ref}, \rho = \rho_\text{ref}`` the right-hand side is identically
 zero (modulo any horizontal-momentum-driven ``G^n_{\rho w}``), so an exactly
 balanced state remains at rest at machine precision — *provided* the IC actually
-satisfies ``p_\text{IC} = p_\text{ref}``. The next section is about how to
-ensure that.
+satisfies ``p_\text{IC} = p_\text{ref}``. [Initial conditions over
+terrain](#initial-conditions-over-terrain) explains how `set!` produces such an
+IC automatically.
 
 ## Boundary conditions
 
 ### Bottom: kinematic via ``\tilde{w} = 0``
 
 The continuous boundary condition ``w = u\,\partial_x h + v\,\partial_y h``
-becomes ``\tilde{w} = 0`` at ``\zeta = 0``. Breeze enforces this *exactly* each
+becomes ``\tilde{w} = 0`` at ``r = 0``. Breeze enforces this *exactly* each
 time ``\tilde{w}`` is computed:
 
 ```julia
@@ -683,7 +681,7 @@ right ``\rho w = 0`` interior but a non-zero ``\rho \tilde{w}`` at the surface
 
 ### Top: sponge
 
-The lid at ``\zeta = z_\text{top}`` is a closed boundary, but for gravity-wave
+The lid at ``r = z_\text{top}`` is a closed boundary, but for gravity-wave
 problems we want to absorb rather than reflect upgoing energy. Breeze provides
 [`UpperSponge`](@ref) (`damp_opt = 3` in WRF-speak) — an implicit Rayleigh
 sponge folded into the column tridiag of the acoustic substep. See
@@ -711,22 +709,22 @@ changes is *which* fields go into the kernels (contravariant vs Cartesian
 momentum) and *which* references are subtracted (3D ``p_\text{ref}, \rho_\text{ref}``
 vs 1D background).
 
-## Pitfalls: altitude-dependent initial conditions
+## Initial conditions over terrain
 
-> *This is the most important section on the page. Read it before you write any
-> validation script that initialises a stratified resting atmosphere over
-> terrain.*
+On a TFVD grid the reference coordinate `rnode` and the physical altitude
+`znode` differ. Any field whose value depends on altitude — ``\theta(z)``,
+``q_v(z)``, a height-dependent background wind — must be sampled at the *physical*
+altitude `znode`, not at the reference coordinate ``r``.
 
-On a TFVD grid, `rnode` and `znode` are different. A profile such as
-``\theta(z)``, ``q_v(z)``, or a height-dependent background wind must be
-evaluated at the physical altitude `znode`, not at the reference coordinate
-``\zeta``. Breeze extends Oceananigans' `node` for TFVD grids so user-facing
-`set!` calls receive the physical altitude.
-
-The recommended hydrostatic thermal IC is therefore:
+**`set!` does this for you.** Breeze extends Oceananigans' `node` on TFVD grids
+(see [Two vertical coordinates: `rnode` vs `znode`](#two-vertical-coordinates-rnode-vs-znode))
+so that the third coordinate passed to an initialiser is `znode`, the physical
+altitude. Therefore `set!(model, θ = (x, z) -> f(z))` evaluates `f` at the true
+cell-centre height ``z = r + h(x, y)\,b(r)``, and a stratified resting atmosphere
+comes out hydrostatically balanced — no special handling required:
 
 ```julia
-θ_profile(x, z) = θ₀ * exp(N² * z / g)
+θ_profile(x, z) = θ₀ * exp(N² * z / g)   # z here is the physical altitude
 
 set!(model,
      ρ = model.dynamics.terrain_reference_density,
@@ -738,75 +736,55 @@ set!(model,
 ```
 
 This keeps ``\rho``, ``\rho\theta``, and the terrain reference pressure
-consistent with the same physical-height profile. After `update_state!`, a rest
-state should satisfy
+consistent with the same physical-height profile.
+
+### Checking the balance
+
+After `update_state!`, a rest state satisfies ``p = p_\text{ref}`` to machine
+precision:
 
 ```julia
 using Oceananigans.Fields: interior
 
 p     = interior(model.dynamics.pressure)
-p_ref = interior(model.dynamics.terrain_reference_pressure)
+pᵣ = interior(model.dynamics.terrain_reference_pressure)
 
-isapprox(p, p_ref; atol = 1e-9)   # → true for a well-balanced IC
+isapprox(p, pᵣ; atol = 1e-9)   # → true for a well-balanced IC
 ```
 
 `isapprox` (with a small absolute tolerance, since the perturbation should be
 machine zero) is the idiomatic way to test the balance — equality `==` is too
 strict for floating-point round-off, and a hand-rolled
-`maximum(abs, p .- p_ref) < tol` requires you to pick `tol` and read out a
-scalar. If this check returns `false` for a nominally resting hydrostatic IC,
-the first thing to suspect is whether some altitude-dependent quantity
-bypassed `set!` or was evaluated from `rnode`.
+`maximum(abs, p .- pᵣ) < tol` requires you to pick `tol` and read out a
+scalar.
 
-### The failure mode this avoids
+If this check returns `false` for a nominally resting hydrostatic IC, the cause
+is almost always an altitude-dependent quantity that *bypassed* `set!` — for
+example a hand-written kernel that sampled `rnode` directly. The fix is to
+sample `znode` instead: `set!` is correct precisely because it does this for you.
+A mismatch of ``\rho\theta`` against the reference state translates, after the
+equation of state is applied, into ``\partial_x(p - p_\text{ref}) \neq 0`` and a
+spurious surface-bound flow — so the `isapprox` check is a cheap guard worth
+keeping in validation scripts.
 
-If ``\rho = \rho_\text{ref}`` but ``\theta`` is evaluated at ``\zeta`` instead
-of ``z_\text{phys}``, then ``\rho\theta`` no longer matches the terrain
-reference state. Over the summit of a 250 m hill, ``\zeta_1`` and
-``z_\text{phys}`` can differ by hundreds of meters; for an
-``N = 0.01 \text{ s}^{-1}`` stratification this is an ``O(1 \text{ K})``
-potential-temperature error in the lowest cell.
+On a flat-terrain grid `rnode == znode` at every cell, so the distinction is
+invisible; it matters only on terrain-following grids.
 
-After `update_state!` applies the local equation of state, the IC pressure no
-longer equals ``p_\text{ref}``. The slow horizontal pressure-gradient force sees
-``\partial_x(p - p_\text{ref}) \neq 0`` and drives a surface-bound velocity
-column before the intended mountain wave has had time to develop.
+### Validation: Schär mountain wave
 
-The same diagnostic should expose this immediately:
+The well-balanced IC reproduces the CM1 reference. Schär mountain wave,
+``N = 0.01 \text{ s}^{-1}``, ``U = 10 \text{ m/s}``, ``h_0 = 250 \text{ m}``,
+TwoLevelDecay 400×200, ``t = 600 \text{ s}``:
 
-```julia
-p     = interior(model.dynamics.pressure)
-p_ref = interior(model.dynamics.terrain_reference_pressure)
+| quantity | Breeze | CM1 reference |
+|----------|--------|---------------|
+| ``\max\|w\|`` (m/s) | 1.54 | 2.03 |
+| 99th-pct ``\|w\|`` (m/s) | 0.07 | 0.10 |
+| summit-zone energy fraction | 24 % | 33 % |
+| spurious ``\partial_x p\|_\text{rest}`` | 1.5e-13 Pa/m (machine zero) | — |
 
-isapprox(p, p_ref; atol = 1e-9)   # → false when the IC is out of balance
-```
-
-Both the pressure mismatch and the corresponding resting-state PGF should be
-machine-zero for a balanced IC; `isapprox(...; atol=…)` flips to `false` once
-the imbalance exceeds round-off.
-
-### Quantitative impact in a real validation
-
-Schär mountain wave, ``N = 0.01 \text{ s}^{-1}``, ``U = 10 \text{ m/s}``,
-``h_0 = 250 \text{ m}``, TwoLevelDecay 400×200, ``t = 600 \text{ s}``:
-
-| quantity | broken IC | fixed IC | CM1 reference |
-|----------|-----------|----------|---------------|
-| ``\max\|w\|`` (m/s) | 1.45 | 1.54 | 2.03 |
-| 99th-pct ``\|w\|`` (m/s) | **0.26** | **0.07** | 0.10 |
-| summit-zone energy fraction | 6.6 % | 24 % | 33 % |
-| spurious ``\partial_x p\|_\text{rest}`` | 0.26 Pa/m | 1.5e-13 Pa/m | — |
-
-The broken IC has both (a) the real Schär surface signal and (b) a broad
-spurious imbalance signal that smears across the whole domain. Fixing the IC
-removes (b), leaving (a) — which matches CM1's structure.
-
-### Why the same issue doesn't bite flat models
-
-On a flat-terrain grid, `rnode == znode` at every cell, so `set!(field, f(z))`
-and `set!(model, f(z))` are equivalent. The issue is specific to
-terrain-following coordinates and to quantities whose values depend on physical
-altitude.
+The resting-state pressure gradient is machine zero, confirming the discrete
+state is well-balanced, and the simulated wave field matches CM1's structure.
 
 ## Adding a new formulation
 
@@ -816,16 +794,16 @@ To add e.g. the Klemp (2011) hybrid coordinate, define a new struct
 ```julia
 struct Hybrid{ZT, FT, H, SX, SY} <: AbstractTerrainFormulation
     z_top   :: ZT
-    z_flat  :: FT       # height above which b(ζ) = 0
+    z_flat  :: FT       # height above which b(r) = 0
     h       :: H
     ∂x_h    :: SX
     ∂y_h    :: SY
 end
 
-@inline _b_hybrid(ζ, z_top, z_flat) =
-    ifelse(ζ >= z_flat, zero(ζ), (1 - ζ/z_flat)^6)
-@inline _b′_hybrid(ζ, z_top, z_flat) =
-    ifelse(ζ >= z_flat, zero(ζ), -6 * (1 - ζ/z_flat)^5 / z_flat)
+@inline _b_hybrid(r, z_top, z_flat) =
+    ifelse(r >= z_flat, zero(r), (1 - r/z_flat)^6)
+@inline _b′_hybrid(r, z_top, z_flat) =
+    ifelse(r >= z_flat, zero(r), -6 * (1 - r/z_flat)^5 / z_flat)
 
 # σⁿ, Δz_surface, ∂z∂x, ∂z∂y — copy the LinearDecay implementations and
 # substitute the new b, b′.

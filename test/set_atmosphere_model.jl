@@ -61,11 +61,11 @@ end
     max_znode_error = zero(FT)
     max_rnode_difference = zero(FT)
     @allowscalar for i in 1:Nx, k in 1:Nz
-        z_phys = znode(i, 1, k, grid, Center(), Center(), Center())
-        ζ = Oceananigans.Grids.rnode(i, 1, k, grid, Center(), Center(), Center())
+        z = znode(i, 1, k, grid, Center(), Center(), Center())
+        r = Oceananigans.Grids.rnode(i, 1, k, grid, Center(), Center(), Center())
         θ_value = θ_field[i, 1, k]
-        max_znode_error = max(max_znode_error, abs(θ_value - z_phys))
-        max_rnode_difference = max(max_rnode_difference, abs(θ_value - ζ))
+        max_znode_error = max(max_znode_error, abs(θ_value - z))
+        max_rnode_difference = max(max_rnode_difference, abs(θ_value - r))
     end
 
     @test max_znode_error < FT(1e-10)
@@ -84,8 +84,8 @@ end
          enforce_mass_conservation = false)
 
     p = model.dynamics.pressure
-    p_ref = model.dynamics.terrain_reference_pressure
-    @test @allowscalar maximum(abs, interior(p) .- interior(p_ref)) < FT(1e-6)
+    pᵣ = model.dynamics.terrain_reference_pressure
+    @test @allowscalar maximum(abs, interior(p) .- interior(pᵣ)) < FT(1e-6)
 end
 
 #####

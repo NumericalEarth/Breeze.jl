@@ -3,9 +3,9 @@ using Oceananigans.Utils: prettysummary
 #####
 ##### Terrain metric terms
 #####
-##### For basic terrain-following coordinates, the terrain slope at height ζ is
+##### For basic terrain-following coordinates, the terrain slope at height r is
 #####
-#####   (∂z/∂x)_ζ = (∂h/∂x) * (1 - ζ / z_top)
+#####   (∂z/∂x)_r = (∂h/∂x) * (1 - r / z_top)
 #####
 ##### These metric terms are needed for:
 ##### 1. Computing the contravariant vertical velocity w̃
@@ -16,7 +16,7 @@ using Oceananigans.Utils: prettysummary
 ##### Pressure gradient stencil types
 #####
 ##### The terrain-corrected horizontal pressure gradient requires interpolating
-##### ∂p/∂ζ to the velocity point and multiplying by the terrain slope. These
+##### ∂p/∂r to the velocity point and multiplying by the terrain slope. These
 ##### two types control the order of interpolation and multiplication:
 #####
 ##### SlopeOutsideInterpolation (default):
@@ -38,10 +38,10 @@ using Oceananigans.Utils: prettysummary
 $(TYPEDEF)
 
 Terrain pressure gradient stencil where the slope is multiplied outside
-the interpolation of ``∂p'/∂ζ``:
+the interpolation of ``∂p'/∂r``:
 
 ```math
-\\text{correction} = s(i,j,k) \\, \\overline{\\overline{\\partial_\\zeta p'}^x}^z
+\\text{correction} = s(i,j,k) \\, \\overline{\\overline{\\partial_r p'}^x}^z
 ```
 
 This is the default stencil.
@@ -52,10 +52,10 @@ struct SlopeOutsideInterpolation end
 $(TYPEDEF)
 
 Terrain pressure gradient stencil where the slope is multiplied inside
-the interpolation of ``∂p'/∂ζ``:
+the interpolation of ``∂p'/∂r``:
 
 ```math
-\\text{correction} = \\overline{\\overline{s \\, \\partial_\\zeta p'}^x}^z
+\\text{correction} = \\overline{\\overline{s \\, \\partial_r p'}^x}^z
 ```
 
 The slope is evaluated at each `(Center, Center, Face)` stencil point before
@@ -108,13 +108,13 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute ``(∂z/∂x)_\\zeta`` at horizontal location `(Face, Center)`
+Compute ``(∂z/∂x)_r`` at horizontal location `(Face, Center)`
 and vertical location `ℓz` (either `Center()` or `Face()`).
 
 For basic terrain-following coordinates:
 ```math
-\\left(\\frac{∂z}{∂x}\\right)_\\zeta
-    = \\frac{∂h}{∂x} \\left(1 - \\frac{\\zeta}{z_{top}}\\right)
+\\left(\\frac{∂z}{∂x}\\right)_r
+    = \\frac{∂h}{∂x} \\left(1 - \\frac{r}{z_{top}}\\right)
 ```
 
 This analytic decay is specific to the basic Gal-Chen and Somerville
@@ -122,24 +122,24 @@ coordinate. TwoLevelDecay or hybrid terrain-following coordinates require metric
 derived from the actual vertical mapping rather than this linear factor.
 """
 @inline function terrain_slope_x(i, j, k, grid, metrics, ℓz)
-    ζ = rnode(k, grid, ℓz)
+    r = rnode(k, grid, ℓz)
     z_top = metrics.z_top
     @inbounds ∂x_h = metrics.∂x_h[i, j, 1]
-    return ∂x_h * (1 - ζ / z_top)
+    return ∂x_h * (1 - r / z_top)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Compute ``(∂z/∂y)_\\zeta`` at horizontal location `(Center, Face)`
+Compute ``(∂z/∂y)_r`` at horizontal location `(Center, Face)`
 and vertical location `ℓz` (either `Center()` or `Face()`).
 
 See also [`terrain_slope_x`](@ref). The same basic-coordinate limitation of
-the analytic ``1 - ζ / z_{top}`` decay applies here.
+the analytic ``1 - r / z_{top}`` decay applies here.
 """
 @inline function terrain_slope_y(i, j, k, grid, metrics, ℓz)
-    ζ = rnode(k, grid, ℓz)
+    r = rnode(k, grid, ℓz)
     z_top = metrics.z_top
     @inbounds ∂y_h = metrics.∂y_h[i, j, 1]
-    return ∂y_h * (1 - ζ / z_top)
+    return ∂y_h * (1 - r / z_top)
 end

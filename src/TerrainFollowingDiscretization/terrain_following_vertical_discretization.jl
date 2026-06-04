@@ -4,13 +4,13 @@
 #####
 ##### The coordinate map is
 #####
-#####   z(x, y, ζ) = ζ + Σₙ hₙ(x, y) · bₙ(ζ)
+#####   z(x, y, r) = r + Σₙ hₙ(x, y) · bₙ(r)
 #####
 ##### with the formulation supplying the terrain components hₙ and the decay
-##### profiles bₙ(ζ). Unlike `MutableVerticalDiscretization` (which *stores* the
+##### profiles bₙ(r). Unlike `MutableVerticalDiscretization` (which *stores* the
 ##### scaling σ and has no horizontal slope), this type stores the *generator*
 ##### — the terrain components + decay law — and DERIVES the Jacobian
-##### σ = ∂z/∂ζ and the slopes ∂z/∂x, ∂z/∂y in the operators, so σ and the
+##### σ = ∂z/∂r and the slopes ∂z/∂x, ∂z/∂y in the operators, so σ and the
 ##### slope cannot drift out of consistency. `LinearDecay` (Gal-Chen) and
 ##### `TwoLevelDecay` (Schär et al. 2002) are two formulations of the one type.
 #####
@@ -18,13 +18,13 @@
 using Oceananigans.Grids: AbstractVerticalCoordinate, RectilinearGrid, LatitudeLongitudeGrid
 
 struct TerrainFollowingVerticalDiscretization{C, D, E, F, FM} <: AbstractVerticalCoordinate
-    "Face-centered reference coordinate ζ"
+    "Face-centered reference coordinate r"
     cᵃᵃᶠ :: C
-    "Cell-centered reference coordinate ζ"
+    "Cell-centered reference coordinate r"
     cᵃᵃᶜ :: D
-    "Face-centered reference spacing Δζ"
+    "Face-centered reference spacing Δr"
     Δᵃᵃᶠ :: E
-    "Cell-centered reference spacing Δζ"
+    "Cell-centered reference spacing Δr"
     Δᵃᵃᶜ :: F
     "Terrain-decay formulation (LinearDecay | TwoLevelDecay) — the generator of σ and the slopes"
     formulation :: FM
@@ -33,7 +33,7 @@ end
 """
     TerrainFollowingVerticalDiscretization(r_faces; formulation=LinearDecay())
 
-Skeleton constructor. `r_faces` is the reference (computational) ζ face
+Skeleton constructor. `r_faces` is the reference (computational) r face
 specification — a range, vector, or function — exactly as for a static z grid.
 The terrain components inside `formulation` are filled later by
 [`materialize_terrain!`](@ref) once the horizontal grid exists.
@@ -56,7 +56,7 @@ Oceananigans.Grids.coordinate_summary(::Oceananigans.Grids.Bounded, z::TFVD, nam
            ", max(Δr)=",
            Oceananigans.Utils.prettysummary(maximum(parent(z.Δᵃᵃᶜ))))
 
-# Validate the reference (ζ) face specification, keeping the formulation; the
+# Validate the reference (r) face specification, keeping the formulation; the
 # reference coordinate arrays are built later by `generate_coordinate`.
 function Oceananigans.Grids.validate_dimension_specification(T, ξ::TFVD, dir, N, FT)
     cᶠ = Oceananigans.Grids.validate_dimension_specification(T, ξ.cᵃᵃᶠ, dir, N, FT)
@@ -77,7 +77,7 @@ Oceananigans.Architectures.on_architecture(arch, z::TFVD) =
                                            Oceananigans.Architectures.on_architecture(arch, z.Δᵃᵃᶜ),
                                            Oceananigans.Architectures.on_architecture(arch, z.formulation))
 
-# Build the reference (ζ) coordinate arrays exactly like a static z grid; the
+# Build the reference (r) coordinate arrays exactly like a static z grid; the
 # formulation's terrain components start as `nothing` (skeleton) and are filled
 # by `materialize_terrain!` once the grid's horizontal nodes exist.
 function Oceananigans.Grids.generate_coordinate(FT, topo, size, halo, coordinate::TFVD, coordinate_name, dim::Int, arch)
@@ -99,7 +99,7 @@ end
 #####
 ##### Metric operators — derived from the formulation
 #####
-##### σⁿ = ∂z/∂ζ (Jacobian) and znode = z(x,y,ζ) are computed from the
+##### σⁿ = ∂z/∂r (Jacobian) and znode = z(x,y,r) are computed from the
 ##### formulation's terrain components + decay profiles. Δz spacings follow as
 ##### Δr · σⁿ. Defining σⁿ over (i,j,k) is what makes the Jacobian k-dependent
 ##### for TwoLevelDecay without any 3-D σ storage.
@@ -112,10 +112,10 @@ const TFVDRG = Union{RectilinearGrid{<:Any, <:Any, <:Any, <:Any, <:TFVD},
 
 # Preserve the materialised terrain components when Oceananigans reconstructs
 # the grid (e.g. `on_architecture(CPU(), gpu_grid)` inside `set_to_function!`).
-# The default `cpu_face_constructor_z` returns only ζ-face coordinates, which
+# The default `cpu_face_constructor_z` returns only r-face coordinates, which
 # would make the downstream `generate_coordinate` allocate a fresh skeleton
 # formulation with zero h / ∂x_h / ∂y_h — and the `node()` override would then
-# return ζ instead of physical altitude. By wrapping the full TFVD here, the
+# return r instead of physical altitude. By wrapping the full TFVD here, the
 # formulation arrays survive the rebuild.
 @inline Oceananigans.Grids.cpu_face_constructor_z(grid::TFVDRG) =
     TerrainFollowingVerticalDiscretization(Oceananigans.Grids.cpu_face_constructor_r(grid);
@@ -135,9 +135,9 @@ const TFVDRG = Union{RectilinearGrid{<:Any, <:Any, <:Any, <:Any, <:TFVD},
 
 # `node(i, j, k, grid, ℓx, ℓy, ℓz)` is the tuple `(xnode, ynode, znode)` used by
 # `set!(field, f)` when evaluating an initialiser at each cell. The Oceananigans
-# default returns `rnode` (the reference vertical coordinate ζ) as the third
+# default returns `rnode` (the reference vertical coordinate r) as the third
 # entry, which on a terrain-following grid is *not* the physical altitude. To
-# make `set!(field, (x, y, z) -> f(z))` evaluate `f` at z = ζ + h(x,y)·b(ζ)
+# make `set!(field, (x, y, z) -> f(z))` evaluate `f` at z = r + h(x,y)·b(r)
 # (the actual cell-centre altitude) we override `node` on grids whose vertical
 # discretisation is a TFVD. This dispatches on a type Breeze owns, so it is
 # not type piracy.
@@ -180,7 +180,7 @@ for LX in (:ᶠ, :ᶜ), LY in (:ᶠ, :ᶜ), LZ in (:ᶠ, :ᶜ)
         Oceananigans.Operators.$rspacing(i, j, k, grid) * Oceananigans.Operators.σⁿ(i, j, k, grid, $ℓx(), $ℓy(), $ℓz())
 end
 
-# Horizontal slope of the coordinate surfaces, (∂z/∂x)_ζ and (∂z/∂y)_ζ, at the
+# Horizontal slope of the coordinate surfaces, (∂z/∂x)_r and (∂z/∂y)_r, at the
 # requested vertical location. Used by the terrain pressure-gradient force.
 @inline ∂z∂x(i, j, k, grid::TFVDRG, ℓz) = terrain_following_∂z∂x(i, j, k, grid, grid.z.formulation, ℓz)
 @inline ∂z∂y(i, j, k, grid::TFVDRG, ℓz) = terrain_following_∂z∂y(i, j, k, grid, grid.z.formulation, ℓz)

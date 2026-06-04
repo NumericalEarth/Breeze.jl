@@ -4,15 +4,15 @@
 Module implementing terrain-following vertical coordinates via the
 [`TerrainFollowingVerticalDiscretization`](@ref) (TFVD) grid type.
 
-TFVD stores a uniform reference vertical coordinate ``\\zeta`` and a
+TFVD stores a uniform reference vertical coordinate ``r`` and a
 formulation (e.g. [`LinearDecay`](@ref) or [`TwoLevelDecay`](@ref)) that defines
 the physical altitude
 
 ```math
-z(x, y, \\zeta) = \\zeta + h(x, y) \\, b(\\zeta) ,
+z(x, y, r) = r + h(x, y) \\, b(r) ,
 ```
 
-where ``h(x, y)`` is the terrain and ``b(\\zeta)`` is a decay basis
+where ``h(x, y)`` is the terrain and ``b(r)`` is a decay basis
 satisfying ``b(0) = 1`` and ``b(z_\\text{top}) = 0``.
 
 Public API:

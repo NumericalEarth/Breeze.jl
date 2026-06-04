@@ -22,8 +22,8 @@
 #
 # ## Physical setup
 #
-# The simulation initializes an atmosphere with constant Brunt–Väisälä frequency ``buoyancy_frequency`` and
-# uniform background wind ``background_wind_speed``. A bell-shaped mountain with superimposed oscillations
+# The simulation initializes an atmosphere with constant Brunt–Väisälä frequency ``N`` and
+# uniform background wind ``U``. A bell-shaped mountain with superimposed oscillations
 # triggers both propagating gravity waves (for wavenumbers below the critical value ``k^*``)
 # and evanescent waves (above ``k^*``).
 #
@@ -41,10 +41,10 @@
 # ### Constant stratification base state
 #
 # For a reference temperature ``T_0``, the background atmosphere corresponds to a constant
-# Brunt–Väisälä frequency ``buoyancy_frequency``:
+# Brunt–Väisälä frequency ``N``:
 #
 # ```math
-# buoyancy_frequency^2 = \frac{g^2}{c_p^d T_0}
+# N^2 = \frac{g^2}{c_p^d T_0}
 # ```
 #
 # The density-scale height parameter is:
@@ -53,10 +53,10 @@
 # \beta = \frac{g}{R^d T_0}
 # ```
 #
-# The potential temperature profile that maintains constant ``buoyancy_frequency`` is:
+# The potential temperature profile that maintains constant ``N`` is:
 #
 # ```math
-# \theta(z) = \theta_0 \exp\left(\frac{buoyancy_frequency^2 z}{g}\right)
+# \theta(z) = \theta_0 \exp\left(\frac{N^2 z}{g}\right)
 # ```
 #
 # ### Linear wave theory
@@ -65,14 +65,14 @@
 # dispersion relation (Appendix A of [KlempEtAl2015](@citet)):
 #
 # ```math
-# m^2 = \frac{buoyancy_frequency^2}{background_wind_speed^2} - \frac{\beta^2}{4} - k^2
+# m^2 = \frac{N^2}{U^2} - \frac{\beta^2}{4} - k^2
 # ```
 #
 # Waves propagate vertically when ``m^2 > 0`` (i.e., ``k < k^*``), and decay exponentially
 # when ``m^2 < 0`` (i.e., ``k > k^*``), where the critical wavenumber is:
 #
 # ```math
-# k^* = \sqrt{\frac{buoyancy_frequency^2}{background_wind_speed^2} - \frac{\beta^2}{4}}
+# k^* = \sqrt{\frac{N^2}{U^2} - \frac{\beta^2}{4}}
 # ```
 #
 # !!! note "Current limitations"
@@ -100,25 +100,25 @@ parse_env(::Type{T}, name, default) where T =
 #
 # We define the base state with surface pressure ``p_0 = 1000 \, {\rm hPa}``
 # and reference temperature ``T_0 = 300 \, {\rm K}``. We also set the background wind
-# at ``background_wind_speed = 20 \, {\rm m/s}``:
+# at ``U = 20 \, {\rm m/s}``:
 
 constants = ThermodynamicConstants(Float64)
 g = constants.gravitational_acceleration
-dry_air_heat_capacity = constants.dry_air.heat_capacity
-dry_air_gas_constant_value = dry_air_gas_constant(constants)
+cᵖᵈ = constants.dry_air.heat_capacity
+Rᵈ = dry_air_gas_constant(constants)
 
-surface_pressure = 100000                         # Pa - surface pressure
-reference_temperature = 300                       # K - reference temperature
-surface_potential_temperature = reference_temperature # K - reference potential temperature
-background_wind_speed = 20                        # m s^-1 - uniform background wind
+p₀ = 100000                 # Pa - surface pressure
+T₀ = 300                    # K - reference temperature
+θ₀ = T₀                     # K - reference potential temperature
+U  = 20                     # m s⁻¹ - uniform background wind
 
 # Derived atmospheric parameters for an isothermal base state at ``T_0``.
-# Note: the standard [Schar2002](@citet) parameters use ``buoyancy_frequency = 0.01 \, {\rm s}^{-1}``
-# (set `buoyancy_frequency_squared = 1e-4` to match that paper exactly).
+# Note: the standard [Schar2002](@citet) parameters use ``N = 0.01 \, {\rm s}^{-1}``
+# (set `N² = 1e-4` to match that paper exactly).
 
-buoyancy_frequency_squared = g^2 / (dry_air_heat_capacity * reference_temperature) # s^-2 - Brunt-Vaisala frequency squared
-buoyancy_frequency = sqrt(buoyancy_frequency_squared)                              # s^-1 - Brunt-Vaisala frequency
-density_scale = g / (dry_air_gas_constant_value * reference_temperature)           # m^-1 - density scale parameter
+N² = g^2 / (cᵖᵈ * T₀)       # s⁻² - Brunt–Väisälä frequency squared (≈ 3.2e-4)
+N  = sqrt(N²)               # s⁻¹ - Brunt–Väisälä frequency
+β  = g / (Rᵈ * T₀)          # m⁻¹ - density scale parameter
 
 # ## Schär mountain parameters
 #
@@ -212,11 +212,15 @@ fig
 # The potential temperature profile that maintains constant Brunt–Väisälä frequency is:
 #
 # ```math
-# \theta(z) = \theta_0 \exp\left(\frac{buoyancy_frequency^2 z}{g}\right)
+# \theta(z) = \theta_0 \exp\left(\frac{N^2 z}{g}\right)
 # ```
 
-potential_temperature_profile(x, z) =
-    surface_potential_temperature * exp(buoyancy_frequency_squared * z / g)
+# The profile depends only on height. We give it a two-argument method as well so
+# the same function works both as `reference_potential_temperature` (called as
+# `θ(z)` by the reference-state builder) and in `set!` (called as `θ(x, z)` on
+# this `Flat`-in-`y` grid).
+potential_temperature_profile(z) = θ₀ * exp(N² * z / g)
+potential_temperature_profile(x, z) = potential_temperature_profile(z)
 
 # ## Rayleigh damping layer
 #
@@ -244,7 +248,7 @@ time_discretization = SplitExplicitTimeDiscretization(acoustic_cfl = 0.5,
 
 dynamics = CompressibleDynamics(time_discretization;
                                 slope_stencil = SlopeInsideInterpolation(),
-                                surface_pressure = surface_pressure,
+                                surface_pressure = p₀,
                                 reference_potential_temperature = potential_temperature_profile)
 
 model = AtmosphereModel(grid; dynamics, advection = WENO(order=9),
@@ -261,14 +265,14 @@ model = AtmosphereModel(grid; dynamics, advection = WENO(order=9),
 set!(model,
      ρ = model.dynamics.terrain_reference_density,
      θ = potential_temperature_profile,
-     u = background_wind_speed,
+     u = U,
      v = 0,
      w = 0,
      enforce_mass_conservation = false)
 
 CUDA.@allowscalar for i in 1:Nx
     density_on_bottom_face = model.dynamics.density[i, 1, 1]
-    bottom_vertical_velocity = background_wind_speed * terrain_slope(xnode(i, grid, Center()))
+    bottom_vertical_velocity = U * terrain_slope(xnode(i, grid, Center()))
     model.velocities.w[i, 1, 1] = bottom_vertical_velocity
     model.momentum.ρw[i, 1, 1] = density_on_bottom_face * bottom_vertical_velocity
 end
@@ -281,7 +285,7 @@ Oceananigans.TimeSteppers.update_state!(model)
 # handled by inner substeps.
 
 horizontal_spacing = domain_width / Nx
-time_step = parse_env(Float64, "BREEZE_SCHAR_DT", 0.5 * horizontal_spacing / background_wind_speed)
+time_step = parse_env(Float64, "BREEZE_SCHAR_DT", 0.5 * horizontal_spacing / U)
 
 stop_time = parse_env(Float64, "BREEZE_SCHAR_STOP_TIME", 2hours)
 
@@ -352,8 +356,8 @@ terrain_spectrum(k) = sqrt(pi) * mountain_height * a / 4 * (exp(-a^2 * (terrain_
 # Vertical wavenumber squared (Equation A5) and critical wavenumber (Equation A11)
 # by [KlempEtAl2015](@citet):
 
-vertical_wavenumber_squared(k) = (buoyancy_frequency_squared / background_wind_speed^2 - density_scale^2 / 4) - k^2
-critical_wavenumber = sqrt(buoyancy_frequency_squared / background_wind_speed^2 - density_scale^2 / 4)
+vertical_wavenumber_squared(k) = (N² / U^2 - β^2 / 4) - k^2
+critical_wavenumber = sqrt(N² / U^2 - β^2 / 4)
 
 # ### Linear vertical velocity
 #
@@ -361,7 +365,7 @@ critical_wavenumber = sqrt(buoyancy_frequency_squared / background_wind_speed^2 
 # by [KlempEtAl2015](@citet):
 #
 # ```math
-# w(x, z) = -\frac{background_wind_speed}{\pi} e^{\beta z/2} \left[
+# w(x, z) = -\frac{U}{\pi} e^{\beta z/2} \left[
 #     \int_0^{k^*} k \hat{h}(k) \sin(m z + k x) \, \mathrm{d}k +
 #     \int_{k^*}^{\infty} k \hat{h}(k) e^{-|m| z} \sin(k x) \, \mathrm{d}k
 # \right]
@@ -386,7 +390,7 @@ function w_linear(x, z; nk=100)
     ## Numerical integration using trapezoidal rule:
     wavenumber_spacing = step(k)
     integral = wavenumber_spacing * (sum(integrand) - (first(integrand) + last(integrand)) / 2)
-    return -(background_wind_speed / pi) * exp(density_scale * z / 2) * integral
+    return -(U / pi) * exp(β * z / 2) * integral
 end
 nothing #hide
 

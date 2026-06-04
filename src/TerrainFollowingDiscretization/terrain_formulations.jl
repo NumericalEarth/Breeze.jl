@@ -2,9 +2,9 @@
 ##### Terrain-decay formulations for TerrainFollowingVerticalDiscretization.
 #####
 ##### Each formulation is the *generator* of the coordinate map
-#####   z(x,y,ζ) = ζ + Σₙ hₙ(x,y) · bₙ(ζ)
+#####   z(x,y,r) = r + Σₙ hₙ(x,y) · bₙ(r)
 ##### supplying the terrain components hₙ (and their slopes) plus the decay
-##### functions bₙ(ζ) and bₙ′(ζ). The grid operators (σⁿ, znode, ∂z∂x) call
+##### functions bₙ(r) and bₙ′(r). The grid operators (σⁿ, znode, ∂z∂x) call
 ##### the methods below, so σ = 1 + Σ hₙ bₙ′ and the slope Σ ∂ₓhₙ bₙ are
 ##### derived from the *same* bₙ — they cannot drift apart.
 #####
@@ -17,14 +17,14 @@ abstract type AbstractTerrainFormulation end
 
 #####
 ##### LinearDecay — Gal-Chen & Somerville (1975). One component, linear decay.
-#####   b(ζ) = 1 − ζ/z_top,   b′(ζ) = −1/z_top
+#####   b(r) = 1 − r/z_top,   b′(r) = −1/z_top
 #####
 
 """
 $(TYPEDEF)
 
 Gal-Chen & Somerville (1975) terrain-following formulation: a single decay
-basis ``b(ζ) = 1 - ζ/z_{top}`` that linearly attenuates the terrain from the
+basis ``b(r) = 1 - r/z_{top}`` that linearly attenuates the terrain from the
 surface to the model top.
 """
 struct LinearDecay{FT, H, SX, SY} <: AbstractTerrainFormulation
@@ -45,7 +45,7 @@ Oceananigans.Architectures.on_architecture(arch, f::LinearDecay) =
                 Oceananigans.Architectures.on_architecture(arch, f.∂x_h),
                 Oceananigans.Architectures.on_architecture(arch, f.∂y_h))
 
-@inline b_linear(ζ, z_top)  = 1 - ζ / z_top
+@inline b_linear(r, z_top)  = 1 - r / z_top
 @inline b′_linear(z_top)    = -1 / z_top
 
 # h interpolated to the (ℓx, ℓy) horizontal stagger. The `::Nothing` cases
@@ -69,25 +69,25 @@ Oceananigans.Architectures.on_architecture(arch, f::LinearDecay) =
 end
 
 @inline function terrain_following_Δz_surface(i, j, k, grid, f::LinearDecay, ℓx, ℓy, ℓz)
-    ζ = rnode(k, grid, ℓz)
+    r = rnode(k, grid, ℓz)
     h = terrain_at_stagger(i, j, grid, f.h, ℓx, ℓy)
-    return h * b_linear(ζ, f.z_top)
+    return h * b_linear(r, f.z_top)
 end
 
 @inline function terrain_following_∂z∂x(i, j, k, grid, f::LinearDecay, ℓz)
-    ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂x_h[i, j, 1] * b_linear(ζ, f.z_top)
+    r = rnode(k, grid, ℓz)
+    @inbounds return f.∂x_h[i, j, 1] * b_linear(r, f.z_top)
 end
 
 @inline function terrain_following_∂z∂y(i, j, k, grid, f::LinearDecay, ℓz)
-    ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂y_h[i, j, 1] * b_linear(ζ, f.z_top)
+    r = rnode(k, grid, ℓz)
+    @inbounds return f.∂y_h[i, j, 1] * b_linear(r, f.z_top)
 end
 
 #####
 ##### TwoLevelDecay — Schär et al. (2002). Large/small split, sinh decay.
-#####   bₙ(ζ) = sinh((z_top−ζ)/sₙ)/sinh(z_top/sₙ)
-#####   bₙ′(ζ) = −cosh((z_top−ζ)/sₙ)/(sₙ·sinh(z_top/sₙ))
+#####   bₙ(r) = sinh((z_top−r)/sₙ)/sinh(z_top/sₙ)
+#####   bₙ′(r) = −cosh((z_top−r)/sₙ)/(sₙ·sinh(z_top/sₙ))
 #####
 
 """
@@ -97,7 +97,7 @@ Schär et al. (2002) "Smooth LEvel VErtical" (SLEVE) terrain-following
 formulation. Splits the terrain into a smoothed large-scale component ``h_1``
 (decay length `large_scale_height`) and the residual small-scale component
 ``h_2`` (decay length `small_scale_height`). Each is attenuated with a
-hyperbolic-sine basis ``b_n(ζ) = \\sinh((z_{top}-ζ)/s_n) / \\sinh(z_{top}/s_n)``,
+hyperbolic-sine basis ``b_n(r) = \\sinh((z_{top}-r)/s_n) / \\sinh(z_{top}/s_n)``,
 so the small-scale features decay quickly while the large-scale envelope is
 preserved aloft.
 
@@ -132,33 +132,33 @@ Oceananigans.Architectures.on_architecture(arch, f::TwoLevelDecay) =
           Oceananigans.Architectures.on_architecture(arch, f.∂y_h₁),
           Oceananigans.Architectures.on_architecture(arch, f.∂y_h₂))
 
-@inline b_two_level(ζ, z_top, s)  = sinh((z_top - ζ) / s) / sinh(z_top / s)
-@inline b′_two_level(ζ, z_top, s) = -cosh((z_top - ζ) / s) / (s * sinh(z_top / s))
+@inline b_two_level(r, z_top, s)  = sinh((z_top - r) / s) / sinh(z_top / s)
+@inline b′_two_level(r, z_top, s) = -cosh((z_top - r) / s) / (s * sinh(z_top / s))
 
 @inline function terrain_following_σ(i, j, k, grid, f::TwoLevelDecay, ℓx, ℓy, ℓz)
-    ζ  = rnode(k, grid, ℓz)
+    r  = rnode(k, grid, ℓz)
     h₁ = terrain_at_stagger(i, j, grid, f.h₁, ℓx, ℓy)
     h₂ = terrain_at_stagger(i, j, grid, f.h₂, ℓx, ℓy)
-    return 1 + h₁ * b′_two_level(ζ, f.z_top, f.large_scale_height) +
-               h₂ * b′_two_level(ζ, f.z_top, f.small_scale_height)
+    return 1 + h₁ * b′_two_level(r, f.z_top, f.large_scale_height) +
+               h₂ * b′_two_level(r, f.z_top, f.small_scale_height)
 end
 
 @inline function terrain_following_Δz_surface(i, j, k, grid, f::TwoLevelDecay, ℓx, ℓy, ℓz)
-    ζ  = rnode(k, grid, ℓz)
+    r  = rnode(k, grid, ℓz)
     h₁ = terrain_at_stagger(i, j, grid, f.h₁, ℓx, ℓy)
     h₂ = terrain_at_stagger(i, j, grid, f.h₂, ℓx, ℓy)
-    return h₁ * b_two_level(ζ, f.z_top, f.large_scale_height) +
-           h₂ * b_two_level(ζ, f.z_top, f.small_scale_height)
+    return h₁ * b_two_level(r, f.z_top, f.large_scale_height) +
+           h₂ * b_two_level(r, f.z_top, f.small_scale_height)
 end
 
 @inline function terrain_following_∂z∂x(i, j, k, grid, f::TwoLevelDecay, ℓz)
-    ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂x_h₁[i, j, 1] * b_two_level(ζ, f.z_top, f.large_scale_height) +
-                     f.∂x_h₂[i, j, 1] * b_two_level(ζ, f.z_top, f.small_scale_height)
+    r = rnode(k, grid, ℓz)
+    @inbounds return f.∂x_h₁[i, j, 1] * b_two_level(r, f.z_top, f.large_scale_height) +
+                     f.∂x_h₂[i, j, 1] * b_two_level(r, f.z_top, f.small_scale_height)
 end
 
 @inline function terrain_following_∂z∂y(i, j, k, grid, f::TwoLevelDecay, ℓz)
-    ζ = rnode(k, grid, ℓz)
-    @inbounds return f.∂y_h₁[i, j, 1] * b_two_level(ζ, f.z_top, f.large_scale_height) +
-                     f.∂y_h₂[i, j, 1] * b_two_level(ζ, f.z_top, f.small_scale_height)
+    r = rnode(k, grid, ℓz)
+    @inbounds return f.∂y_h₁[i, j, 1] * b_two_level(r, f.z_top, f.large_scale_height) +
+                     f.∂y_h₂[i, j, 1] * b_two_level(r, f.z_top, f.small_scale_height)
 end

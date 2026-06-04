@@ -674,7 +674,7 @@ end
 # below the lid where the vertical acoustic momentum perturbation is damped
 # at peak rate `damping_rate` (1/s) scaled by the configured ramp shape. The
 # ramp uses the reference vertical face coordinate (`rnode`) so terrain-
-# following grids get a horizontally uniform sponge in ζ. CN-weighted:
+# following grids get a horizontally uniform sponge in r. CN-weighted:
 # `|δτᵐ⁺| × rate × ramp` on the LHS diagonal, matched by `|δτˢ⁻| × rate ×
 # ramp × ρw_old` subtracted on the RHS in `_build_predictors_and_vertical_rhs!`.
 # Local in the vertical coordinate, so no off-diagonal coupling.
@@ -1031,12 +1031,12 @@ end
         # vertical damping (zero when damping is off or damp_vertical=false).
         for k in 2:Nz
             Δzᶠ   = Δzᶜᶜᶠ(i, j, k, grid)
-            ∂ζ_p′★ = z_linearized_pressure_gradient(i, j, k, grid, dynamics,
+            ∂r_p′★ = z_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                      ρθ′★, Πᴸ, γRᵐᴸ)
-            ∂ζ_p′ˢ⁻ = z_linearized_pressure_gradient(i, j, k, grid, dynamics,
+            ∂r_p′ˢ⁻ = z_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                       ρθ′, Πᴸ, γRᵐᴸ)
 
-            sound_force = δτˢ⁻ * ∂ζ_p′ˢ⁻ + δτᵐ⁺ * ∂ζ_p′★
+            sound_force = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★
 
             ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
             ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)

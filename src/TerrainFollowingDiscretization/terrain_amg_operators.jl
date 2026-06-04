@@ -3,7 +3,7 @@
 #####
 ##### Oceananigans applies the chain-rule horizontal-derivative correction
 #####
-#####   (∂ϕ/∂x)_z = (∂ϕ/∂x)_ζ − (∂z/∂x)_ζ · (∂ϕ/∂z)
+#####   (∂ϕ/∂x)_z = (∂ϕ/∂x)_r − (∂z/∂x)_r · (∂ϕ/∂z)
 #####
 ##### only on `AbstractMutableGrid` (alias `AMG`), which is keyed on the concrete
 ##### `MutableVerticalDiscretization`. Our `TerrainFollowingVerticalDiscretization`
@@ -33,7 +33,7 @@ const _C = Center
 const _F = Face
 
 #####
-##### Coordinate slopes ∂z/∂x|_ζ and ∂z/∂y|_ζ at every stagger
+##### Coordinate slopes ∂z/∂x|_r and ∂z/∂y|_r at every stagger
 #####
 ##### Use the discrete δx(znode)·Δx⁻¹ rather than the analytic ∂z∂x from the
 ##### formulation: that is what the chain-rule bodies below assume, and it
@@ -71,7 +71,7 @@ const _F = Face
 @inline Oceananigans.Operators.∂yᶠᶠᶜ(i, j, k, grid::TFVDRG, c::Number) = zero(grid)
 
 #####
-##### Chain-rule-correct x-derivatives: (∂ϕ/∂x)_z = (∂ϕ/∂x)_ζ − (∂z/∂x)_ζ·(∂ϕ/∂z)
+##### Chain-rule-correct x-derivatives: (∂ϕ/∂x)_z = (∂ϕ/∂x)_r − (∂z/∂x)_r·(∂ϕ/∂z)
 #####
 
 @inline function Oceananigans.Operators.∂xᶠᶜᶜ(i, j, k, grid::TFVDRG, ϕ)
@@ -145,7 +145,7 @@ end
 end
 
 #####
-##### Chain-rule-correct y-derivatives: (∂ϕ/∂y)_z = (∂ϕ/∂y)_ζ − (∂z/∂y)_ζ·(∂ϕ/∂z)
+##### Chain-rule-correct y-derivatives: (∂ϕ/∂y)_z = (∂ϕ/∂y)_r − (∂z/∂y)_r·(∂ϕ/∂z)
 #####
 
 @inline function Oceananigans.Operators.∂yᶜᶠᶜ(i, j, k, grid::TFVDRG, ϕ)
