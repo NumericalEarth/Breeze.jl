@@ -23,7 +23,7 @@
 
 using Oceananigans: architecture
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ
-using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.BoundaryConditions: fill_halo_regions!, OpenBoundaryCondition, FieldBoundaryConditions
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
                                               SlopeInsideInterpolation,
@@ -68,25 +68,16 @@ function compute_contravariant_velocity!(model::TerrainCompressibleModel)
             grid, model.momentum, dynamics.density,
             dynamics.terrain_metrics)
 
-    # Enforce kinematic BC: w̃ = 0 at the terrain surface (bottom face).
-    # The ImpenetrableBoundaryCondition sets w = 0 at the bottom, but the
-    # correct terrain BC is w̃ = 0 (no flow through the terrain surface).
-    # Since w̃ = w - slope·u, having w = 0 gives w̃ = -slope·u ≠ 0 which is
-    # a spurious mass flux through the terrain. Setting w̃ = 0 directly here
-    # ensures no transport through the bottom boundary.
-    # Zero bottom face BEFORE filling halos so the BC propagates correctly.
-    launch!(arch, grid, :xy, _zero_bottom_face!, w̃)
-    launch!(arch, grid, :xy, _zero_bottom_face!, ρw̃)
-
+    # The terrain kinematic BC (w̃ = 0 at the surface) is enforced declaratively:
+    # `ρw` carries an Open bottom BC ρw|₁ = slopeₓ·ρu + slopeᵧ·ρv (see
+    # `terrain_kinematic_bottom_ρw`), applied by `fill_halo_regions!(model.momentum, …)`
+    # before this kernel runs. Because the slope/interpolation here matches that BC,
+    # ρw̃|₁ = ρw|₁ − slope·ρu = 0 falls out automatically — no imperative bottom-face
+    # zeroing (and no one-shot IC kernel) required.
     fill_halo_regions!(w̃)
     fill_halo_regions!(ρw̃)
 
     return nothing
-end
-
-@kernel function _zero_bottom_face!(field)
-    i, j = @index(Global, NTuple)
-    @inbounds field[i, j, 1] = 0
 end
 
 @kernel function _compute_contravariant_velocity!(w̃, ρw̃, grid, momentum, density, metrics)
@@ -214,6 +205,42 @@ end
 
 @inline terrain_slope_y_ccf(i, j, k, grid::TerrainFollowingGrid, metrics) =
     ℑyᵃᶜᵃ(i, j, k, grid, ∂z∂y, Face())
+
+#####
+##### Bottom kinematic boundary condition for ρw (declarative, dispatch-selected)
+#####
+##### "No flow through the terrain surface" is, in contravariant form,
+#####   ρw̃ = ρw - slopeₓ·ρu - slopeᵧ·ρv = 0   at the bottom face,
+##### i.e. the Cartesian vertical momentum follows the terrain:
+#####   ρw|₁ = slopeₓ·ρu + slopeᵧ·ρv .
+##### We impose this as an `OpenBoundaryCondition` on `ρw` whose value is computed
+##### from the live momentum at fill time. `fill_halo_regions!(model.momentum,
+##### clock, fields(model))` runs every `update_state!`/substep, so the surface
+##### stays kinematically balanced at the IC and throughout the run — replacing the
+##### previous one-shot IC kernel and the imperative bottom-face zeroing. The slope
+##### and interpolation match `compute_contravariant_velocity!`, so ρw̃|₁ = 0 to
+##### machine precision. The perturbation fields keep their impenetrable defaults
+##### (the substepper deliberately does not inherit this BC; see the §"acoustic
+##### substep" note on issue #716).
+
+@inline function terrain_kinematic_bottom_ρw(i, j, grid, clock, model_fields)
+    slope_x = terrain_slope_x_ccf(i, j, 1, grid, nothing)
+    slope_y = terrain_slope_y_ccf(i, j, 1, grid, nothing)
+    ρu_ccf  = ℑzᵃᵃᶠ(i, j, 1, grid, ℑxᶜᵃᵃ, model_fields.ρu)
+    ρv_ccf  = ℑzᵃᵃᶠ(i, j, 1, grid, ℑyᵃᶜᵃ, model_fields.ρv)
+    return slope_x * ρu_ccf + slope_y * ρv_ccf
+end
+
+# Dispatch the ρw bottom boundary condition on the grid type: terrain-following
+# grids get the kinematic Open BC; every other grid keeps the BCs it was given
+# (impenetrable bottom by default). The terrain BC sets only the bottom; the top
+# (impenetrable lid) and horizontal sides take their usual regularised defaults.
+terrain_ρw_boundary_conditions(grid, ρw_bcs) = ρw_bcs
+terrain_ρw_boundary_conditions(::TerrainFollowingGrid, ρw_bcs) =
+    FieldBoundaryConditions(; west = ρw_bcs.west, east = ρw_bcs.east,
+                              south = ρw_bcs.south, north = ρw_bcs.north,
+                              bottom = OpenBoundaryCondition(terrain_kinematic_bottom_ρw; discrete_form = true),
+                              top = ρw_bcs.top, immersed = ρw_bcs.immersed)
 
 @inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics)
     metrics = dynamics.terrain_metrics

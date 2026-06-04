@@ -122,7 +122,7 @@ becomes, in contravariant form,
 
 This is the killer feature of terrain-following coordinates: the no-flow-through
 condition is just ``\tilde{w} = 0`` at the bottom face. Breeze enforces it
-explicitly each substep (see [Boundary conditions](#boundary-conditions)).
+through a boundary condition on ``\rho w`` (see [Boundary conditions](#boundary-conditions)).
 
 ### Conservation form on the computational grid
 
@@ -268,7 +268,7 @@ znode(i, j, k, grid, Center(), Center(), Center())          # → z at this cell
 Implementation in `src/TerrainFollowingDiscretization/terrain_following_vertical_discretization.jl`:
 
 ```julia
-@inline znode(i, j, k, grid::TFVDRG, ℓx, ℓy, ℓz) =
+@inline znode(i, j, k, grid::TerrainFollowingGrid, ℓx, ℓy, ℓz) =
     rnode(i, j, k, grid, ℓx, ℓy, ℓz) +
     terrain_following_Δz_surface(i, j, k, grid, grid.z.formulation, ℓx, ℓy, ℓz)
 ```
@@ -294,7 +294,7 @@ end
 All vertical spacings are derived through the same Jacobian:
 
 ```julia
-@inline Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid::TFVDRG) =
+@inline Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid::TerrainFollowingGrid) =
     Oceananigans.Operators.Δrᶜᶜᶜ(i, j, k, grid) *
     σⁿ(i, j, k, grid, Center(), Center(), Center())
 ```
@@ -410,7 +410,7 @@ result at the same destination stagger — `(Face, Center, Center)` for a `u`-PG
 operator:
 
 ```julia
-@inline function Oceananigans.Operators.∂xᶠᶜᶜ(i, j, k, grid::TFVDRG, ϕ)
+@inline function Oceananigans.Operators.∂xᶠᶜᶜ(i, j, k, grid::TerrainFollowingGrid, ϕ)
     ∂x_at_r = δxᶠᶜᶜ(i, j, k, grid, ϕ) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
     ∂z_ϕ    = ℑxzᶠᵃᶜ(i, j, k, grid, ∂zᶜᶜᶠ, ϕ)
     ∂x_z    = Oceananigans.Operators.∂x_zᶠᶜᶜ(i, j, k, grid)
@@ -468,19 +468,18 @@ each `update_state!`:
 end
 ```
 
-then the bottom face is zeroed:
-
-```julia
-launch!(arch, grid, :xy, _zero_bottom_face!, w̃)
-launch!(arch, grid, :xy, _zero_bottom_face!, ρw̃)
-```
+The surface value needs no special treatment here: ``\rho w``'s bottom boundary
+condition fixes ``\rho w|_1 = \text{slope}\cdot\rho u`` (filled before this
+kernel runs), so the expression above yields ``\rho \tilde{w}|_1 = 0``
+automatically — the kinematic terrain condition (see
+[Boundary conditions](#boundary-conditions)).
 
 The horizontal stagger of `slope_x_ccf` is `(Center, Center, Face)`, matching
 `ρw̃`'s stagger. It is obtained by interpolating the face-staggered ``\partial_z /
 \partial_x``:
 
 ```julia
-@inline terrain_slope_x_ccf(i, j, k, grid::TFVDRG, metrics) =
+@inline terrain_slope_x_ccf(i, j, k, grid::TerrainFollowingGrid, metrics) =
     ℑxᶜᵃᵃ(i, j, k, grid, ∂z∂x, Face())
 ```
 
@@ -634,50 +633,35 @@ IC automatically.
 ### Bottom: kinematic via ``\tilde{w} = 0``
 
 The continuous boundary condition ``w = u\,\partial_x h + v\,\partial_y h``
-becomes ``\tilde{w} = 0`` at ``r = 0``. Breeze enforces this *exactly* each
-time ``\tilde{w}`` is computed:
-
-```julia
-launch!(arch, grid, :xy, _zero_bottom_face!, w̃)
-launch!(arch, grid, :xy, _zero_bottom_face!, ρw̃)
-```
-
-(The bottom face is at ``k = 1`` in Oceananigans' Center-Face convention.) This
-means the prognostic state at the surface is the *Cartesian* ``\rho w``,
-determined diagnostically from the contravariant constraint:
+becomes ``\tilde{w} = 0`` at ``r = 0`` — no flow *through* the terrain surface.
+Breeze imposes this as a boundary condition on the prognostic vertical momentum
+``\rho w``: on a terrain-following grid its bottom face carries an
+`OpenBoundaryCondition` whose value is the kinematic Cartesian momentum
 
 ```math
 \rho w \big|_\text{surface}
-= \left(\frac{\partial h}{\partial x}\right) \rho u
-+ \left(\frac{\partial h}{\partial y}\right) \rho v ,
+= \left(\frac{\partial z}{\partial x}\right)_r \rho u
++ \left(\frac{\partial z}{\partial y}\right)_r \rho v ,
 ```
 
-while what propagates through the substep loop is ``\rho \tilde{w}``, anchored
-at zero on the ground.
+computed from the live momentum at fill time.
+`fill_halo_regions!(model.momentum, …)` applies it on every `update_state!` and
+acoustic substep, so the contravariant ``\rho \tilde{w} = \rho w -
+\text{slope}\cdot\rho u`` vanishes at the ground to machine precision — at the
+initial condition and throughout the run.
 
-For initialisation, the recommended pattern is the same: zero
-``\rho \tilde{w}`` at the surface and set ``\rho w`` from the kinematic
-constraint. The validation script provides a one-shot kernel:
+The BC is selected automatically by dispatch on the grid type
+([`TerrainFollowingGrid`](@ref) → terrain kinematic BC; any other grid keeps the
+standard impenetrable ``w = 0``). This matters because a plain impenetrable
+``w = 0`` bottom is *wrong* over terrain: it would leave
+``\tilde{w} = -\text{slope}\cdot u \neq 0``, a spurious mass flux through the
+surface.
 
-```julia
-@kernel function _init_terrain_bottom_face_w!(ρw, w, ρ, ρu, grid)
-    i, j = @index(Global, NTuple)
-    k = 1
-    slope_x = ℑxᶜᵃᵃ(i, j, k, grid, ∂z∂x, Oceananigans.Face())
-    ρu_ccf  = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ρu)
-    @inbounds begin
-        ρw_target = slope_x * ρu_ccf
-        ρ_ccf     = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-        ρw[i, j, k] = ρw_target
-        w[i, j, k]  = ρw_target / ρ_ccf
-    end
-end
-```
-
-Without this initialisation, a uniform background flow over terrain has the
-right ``\rho w = 0`` interior but a non-zero ``\rho \tilde{w}`` at the surface
-(because the substepper computes ``\rho \tilde{w}`` from ``\rho w - \text{slope}
-\cdot \rho u``), so the first substep starts with a wrong (non-zero) boundary value.
+Because the prognostic momentum carries the wall condition, initialisation is
+simply `set!(model; …, w = 0)`: `update_state!` overwrites the surface
+``\rho w`` with the kinematic value, and the contravariant velocity is anchored
+at zero on the ground from the very first substep. No manual bottom-face kernel
+is needed.
 
 ### Top: sponge
 
@@ -898,19 +882,6 @@ model = AtmosphereModel(grid; dynamics = dyn, advection = WENO(order = 9),
                         timestepper = :AcousticRungeKutta3)
 
 # ---- IC: at-rest plus uniform U ----
-@kernel function _init_terrain_bottom_face_w!(ρw, w, ρ, ρu, grid)
-    i, j = @index(Global, NTuple)
-    k = 1
-    slope_x = ℑxᶜᵃᵃ(i, j, k, grid, ∂z∂x, Face())
-    ρu_ccf  = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ρu)
-    @inbounds begin
-        ρw_target = slope_x * ρu_ccf
-        ρ_ccf     = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-        ρw[i, j, k] = ρw_target
-        w[i, j, k]  = ρw_target / ρ_ccf
-    end
-end
-
 set!(model,
      ρ = model.dynamics.terrain_reference_density,
      θ = θ_profile,
@@ -919,10 +890,6 @@ set!(model,
      w = 0,
      enforce_mass_conservation = false)
 
-launch!(architecture(grid), grid, :xy, _init_terrain_bottom_face_w!,
-        model.momentum.ρw, model.velocities.w,
-        model.dynamics.density, model.momentum.ρu, grid)
-
 update_state!(model)
 
 # ---- run ----
@@ -930,15 +897,12 @@ simulation = Simulation(model; Δt = 2.0, stop_time = 600.0)
 run!(simulation)
 ```
 
-The two patterns to copy verbatim into your own scripts are:
-
-  1. `set!(model, ρ = model.dynamics.terrain_reference_density,
-     θ = θ_profile, ...)` — the hydrostatic thermal IC path.
-  2. `_init_terrain_bottom_face_w!` — the kinematic BC, applied once at IC so
-     ``\rho \tilde{w} = 0`` from the very first substep.
-
-The bottom-face kernel belongs in your script (or in a project-local utility
-module), after the `set!` call has filled the density and horizontal momentum.
+The IC is just the hydrostatic thermal path —
+`set!(model, ρ = model.dynamics.terrain_reference_density, θ = θ_profile, …)`
+with `w = 0`. The terrain kinematic surface condition (``\rho \tilde{w} = 0``)
+is carried by ``\rho w``'s bottom boundary condition and applied automatically by
+`update_state!`, so no manual bottom-face initialisation is needed (see
+[Boundary conditions](#boundary-conditions)).
 
 ## API reference
 

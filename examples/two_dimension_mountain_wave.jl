@@ -130,9 +130,6 @@ a  = 5000         # m - Gaussian half-width parameter
 K  = 2 * pi / λ   # rad m⁻¹ - terrain wavenumber
 
 hill(x, y) = h₀ * exp(-(x / a)^2) * cos(pi * x / λ)^2
-terrain_slope(x) = h₀ * exp(-(x / a)^2) *
-             (-2x / a^2 * cos(pi * x / λ)^2 -
-              (pi / λ) * sin(2 * pi * x / λ))
 
 # ## Grid setup
 #
@@ -270,12 +267,11 @@ set!(model,
      w = 0,
      enforce_mass_conservation = false)
 
-CUDA.@allowscalar for i in 1:Nx
-    density_on_bottom_face = model.dynamics.density[i, 1, 1]
-    bottom_vertical_velocity = U * terrain_slope(xnode(i, grid, Center()))
-    model.velocities.w[i, 1, 1] = bottom_vertical_velocity
-    model.momentum.ρw[i, 1, 1] = density_on_bottom_face * bottom_vertical_velocity
-end
+# Note: we set `w = 0`, yet the flow must follow the terrain at the surface
+# (`w = u ∂h/∂x`). On a terrain-following grid `ρw` carries a kinematic bottom
+# boundary condition that enforces this automatically — `update_state!` fills it
+# in, so the contravariant `w̃` vanishes at the ground from the first step. No
+# manual bottom-face initialization is required.
 
 Oceananigans.TimeSteppers.update_state!(model)
 

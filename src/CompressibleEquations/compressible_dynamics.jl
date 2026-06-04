@@ -421,7 +421,10 @@ end
 function AtmosphereModels.materialize_momentum_and_velocities(::CompressibleDynamics, grid, boundary_conditions)
     ρu = XFaceField(grid, boundary_conditions=boundary_conditions.ρu)
     ρv = YFaceField(grid, boundary_conditions=boundary_conditions.ρv)
-    ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)
+    # On a terrain-following grid, `ρw` gets the kinematic terrain bottom BC
+    # (ρw|₁ = slopeₓ·ρu + slopeᵧ·ρv ⟺ w̃|₁ = 0), dispatched by grid type; other
+    # grids keep their given BCs. See `terrain_ρw_boundary_conditions`.
+    ρw = ZFaceField(grid, boundary_conditions=terrain_ρw_boundary_conditions(grid, boundary_conditions.ρw))
     momentum = (; ρu, ρv, ρw)
 
     # Velocity is diagnostic (u = ρu/ρ via compute_velocities!). Use the auxiliary-field
