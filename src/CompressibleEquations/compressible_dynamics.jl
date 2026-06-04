@@ -78,7 +78,7 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               temperature_tolerance = 1e-8,
                               temperature_maxiter = 8) where TD
 
-    FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
+    FT = float(promote_type(typeof(standard_pressure), typeof(surface_pressure)))
     pˢᵗ = convert(FT, standard_pressure)
     p₀ = convert(FT, surface_pressure)
     temperature_tolerance = convert(FT, temperature_tolerance)
