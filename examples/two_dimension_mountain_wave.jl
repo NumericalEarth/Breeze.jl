@@ -124,15 +124,15 @@ N  = sqrt(N²)               # s⁻¹ - Brunt–Väisälä frequency
 #
 # The mountain profile with the parameters used by [Schar2002](@citet) is:
 
-mountain_height = 250        # m - peak mountain height (use 25 m for strict linearity)
-a = 5000                     # m - Gaussian half-width parameter
-terrain_wavelength = 4000    # m - terrain corrugation wavelength
-terrain_wavenumber = 2 * pi / terrain_wavelength # rad m^-1 - terrain wavenumber
+h₀ = 250          # m - peak mountain height (use 25 m for strict linearity)
+a  = 5000         # m - Gaussian half-width parameter
+λ  = 4000         # m - terrain corrugation wavelength
+K  = 2 * pi / λ   # rad m⁻¹ - terrain wavenumber
 
-hill(x, y) = mountain_height * exp(-(x / a)^2) * cos(pi * x / terrain_wavelength)^2
-terrain_slope(x) = mountain_height * exp(-(x / a)^2) *
-             (-2x / a^2 * cos(pi * x / terrain_wavelength)^2 -
-              (pi / terrain_wavelength) * sin(2 * pi * x / terrain_wavelength))
+hill(x, y) = h₀ * exp(-(x / a)^2) * cos(pi * x / λ)^2
+terrain_slope(x) = h₀ * exp(-(x / a)^2) *
+             (-2x / a^2 * cos(pi * x / λ)^2 -
+              (pi / λ) * sin(2 * pi * x / λ))
 
 # ## Grid setup
 #
@@ -343,12 +343,12 @@ run!(simulation)
 #
 # ```math
 # \hat{h}(k) = \frac{\sqrt{\pi} h_0 a}{4} \left[
-#     e^{-a^2(terrain_wavenumber+k)^2/4} + e^{-a^2(terrain_wavenumber-k)^2/4} + 2e^{-a^2 k^2/4}
+#     e^{-a^2(K+k)^2/4} + e^{-a^2(K-k)^2/4} + 2e^{-a^2 k^2/4}
 # \right]
 # ```
 
-terrain_spectrum(k) = sqrt(pi) * mountain_height * a / 4 * (exp(-a^2 * (terrain_wavenumber + k)^2 / 4) +
-                                exp(-a^2 * (terrain_wavenumber - k)^2 / 4) +
+ĥ(k) = sqrt(pi) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
+                                exp(-a^2 * (K - k)^2 / 4) +
                                 2 * exp(-a^2 * k^2 / 4))
 
 # ### Dispersion relation
@@ -356,8 +356,8 @@ terrain_spectrum(k) = sqrt(pi) * mountain_height * a / 4 * (exp(-a^2 * (terrain_
 # Vertical wavenumber squared (Equation A5) and critical wavenumber (Equation A11)
 # by [KlempEtAl2015](@citet):
 
-vertical_wavenumber_squared(k) = (N² / U^2 - β^2 / 4) - k^2
-critical_wavenumber = sqrt(N² / U^2 - β^2 / 4)
+m²(k) = (N² / U^2 - β^2 / 4) - k^2
+k★ = sqrt(N² / U^2 - β^2 / 4)
 
 # ### Linear vertical velocity
 #
@@ -381,9 +381,9 @@ Compute the 2-D linear vertical velocity `w(x,z)` from the analytical solution
 (Appendix A, Equation A10 of Klemp et al., 2015).
 """
 function w_linear(x, z; nk=100)
-    k = range(0, 10 * critical_wavenumber; length=nk)
-    m_abs = @. sqrt(abs(vertical_wavenumber_squared(k)))
-    integrand = @. k * terrain_spectrum(k) * ifelse(vertical_wavenumber_squared(k) >= 0,
+    k = range(0, 10 * k★; length=nk)
+    m_abs = @. sqrt(abs(m²(k)))
+    integrand = @. k * ĥ(k) * ifelse(m²(k) >= 0,
                                    sin(m_abs * z + k * x),
                                    exp(-m_abs * z) * sin(k * x))
 

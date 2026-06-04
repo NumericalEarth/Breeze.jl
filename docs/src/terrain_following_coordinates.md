@@ -254,7 +254,7 @@ z_{i, j, k} = r_k + \Delta z^\text{surface}_{i, j, k} , \qquad
 `rnode` is what you store in your spec when you write
 `TerrainFollowingVerticalDiscretization(range(0, 30e3, length=Nz+1))`. `znode`
 is what the cell physically *is* in the atmosphere. Any field that depends on
-altitude — potential temperature ``\theta(z)``, reference pressure ``p_\text{ref}(z)``,
+altitude — potential temperature ``\theta(z)``, reference pressure ``p_r(z)``,
 moisture profile ``q_v(z)`` — must be evaluated at `znode`, not `rnode`.
 
 ```julia
@@ -518,13 +518,13 @@ The ``\mathcal{O}(\Delta z^2)`` truncation error from this cancellation can
 dominate the answer.
 
 The standard fix is to introduce a hydrostatically balanced reference state
-``(p_\text{ref}, \rho_\text{ref})`` and split:
+``(p_r, \rho_r)`` and split:
 
 ```math
-p = p_\text{ref}(x, y, z) + p' , \qquad \rho = \rho_\text{ref}(x, y, z) + \rho' ,
+p = p_r(x, y, z) + p' , \qquad \rho = \rho_r(x, y, z) + \rho' ,
 ```
 
-with ``\partial_z p_\text{ref} + g \rho_\text{ref} = 0`` *discretely*. The vertical PGF
+with ``\partial_z p_r + g \rho_r = 0`` *discretely*. The vertical PGF
 and buoyancy then operate on the perturbations:
 
 ```math
@@ -585,7 +585,7 @@ Two things to note:
    seed ``\pi`` from it.
 2. The march upward is the *discrete* Exner relation,
    ``\pi_k = \pi_{k-1} - g \Delta z / (c_p \theta_\text{face})``, which satisfies the
-   discrete hydrostatic balance ``\delta_z p_\text{ref} = -g \, \mathcal{I}_z \rho_\text{ref}``
+   discrete hydrostatic balance ``\delta_z p_r = -g \, \mathcal{I}_z \rho_r``
    to machine precision per column.
 
 Critically, **all ``z``'s in this construction are `znode`**: the *physical*
@@ -594,7 +594,7 @@ altitude of each cell, accounting for terrain deformation.
 ### Perturbation pressure gradient
 
 With the reference state available, the slow horizontal PGF subtracts
-``p_\text{ref}`` before taking the generalised derivative:
+``p_r`` before taking the generalised derivative:
 
 ```julia
 @inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, pᵣ)
@@ -604,8 +604,8 @@ end
 @inline perturbation_pressure(i, j, k, grid, p, pᵣ) = @inbounds p[i, j, k] - pᵣ[i, j, k]
 ```
 
-i.e. compute ``\partial_x|_z (p - p_\text{ref})``. If the *actual* discrete
-``p`` equals ``p_\text{ref}`` cell-by-cell (atmosphere at rest), then ``p - p_\text{ref}
+i.e. compute ``\partial_x|_z (p - p_r)``. If the *actual* discrete
+``p`` equals ``p_r`` cell-by-cell (atmosphere at rest), then ``p - p_r
 = 0`` and the chain-rule derivative is exactly zero — the discrete state is
 **well-balanced**.
 
@@ -622,10 +622,10 @@ The vertical PGF in the slow tendency uses the same trick:
 end
 ```
 
-For ``p = p_\text{ref}, \rho = \rho_\text{ref}`` the right-hand side is identically
+For ``p = p_r, \rho = \rho_r`` the right-hand side is identically
 zero (modulo any horizontal-momentum-driven ``G^n_{\rho w}``), so an exactly
 balanced state remains at rest at machine precision — *provided* the IC actually
-satisfies ``p_\text{IC} = p_\text{ref}``. [Initial conditions over
+satisfies ``p_\text{IC} = p_r``. [Initial conditions over
 terrain](#initial-conditions-over-terrain) explains how `set!` produces such an
 IC automatically.
 
@@ -698,7 +698,7 @@ with acoustic substepping. The relevant terrain-specific bits are:
     ``-\partial_z p' - g \rho'``, so a well-balanced reference state suppresses
     the dominant ``\mathcal{O}(\rho g)`` truncation error.
   - The horizontal PGF in the substep is also perturbation-form
-    (``\partial_x (p - p_\text{ref})``), so a well-balanced state generates
+    (``\partial_x (p - p_r)``), so a well-balanced state generates
     zero horizontal acceleration from PGF.
   - The Crank–Nicolson forward weight ``\omega \in [0.5, 1]`` off-centres the
     implicit vertical solve; the default ``\omega = 0.65`` adds modest
@@ -706,7 +706,7 @@ with acoustic substepping. The relevant terrain-specific bits are:
 
 The split-explicit machinery is the same as in flat-terrain models; what
 changes is *which* fields go into the kernels (contravariant vs Cartesian
-momentum) and *which* references are subtracted (3D ``p_\text{ref}, \rho_\text{ref}``
+momentum) and *which* references are subtracted (3D ``p_r, \rho_r``
 vs 1D background).
 
 ## Initial conditions over terrain
@@ -740,13 +740,13 @@ consistent with the same physical-height profile.
 
 ### Checking the balance
 
-After `update_state!`, a rest state satisfies ``p = p_\text{ref}`` to machine
+After `update_state!`, a rest state satisfies ``p = p_r`` to machine
 precision:
 
 ```julia
 using Oceananigans.Fields: interior
 
-p     = interior(model.dynamics.pressure)
+p  = interior(model.dynamics.pressure)
 pᵣ = interior(model.dynamics.terrain_reference_pressure)
 
 isapprox(p, pᵣ; atol = 1e-9)   # → true for a well-balanced IC
@@ -763,7 +763,7 @@ is almost always an altitude-dependent quantity that *bypassed* `set!` — for
 example a hand-written kernel that sampled `rnode` directly. The fix is to
 sample `znode` instead: `set!` is correct precisely because it does this for you.
 A mismatch of ``\rho\theta`` against the reference state translates, after the
-equation of state is applied, into ``\partial_x(p - p_\text{ref}) \neq 0`` and a
+equation of state is applied, into ``\partial_x(p - p_r) \neq 0`` and a
 spurious surface-bound flow — so the `isapprox` check is a cheap guard worth
 keeping in validation scripts.
 
