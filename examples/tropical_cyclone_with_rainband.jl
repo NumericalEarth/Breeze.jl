@@ -35,6 +35,7 @@
 #
 # | File                             | Content                                           |
 # |----------------------------------|---------------------------------------------------|
+# | `F01_sounding.png`               | Jordan (1958) environmental sounding              |
 # | `F02ab_vortex.png`               | basic-state vortex ([YuDidlake2019](@citet); Fig. 2a,b) |
 # | `F02cd_heating.png`              | analytic heating ([YuDidlake2019](@citet); Fig. 2c,d)  |
 # | `F02e_w_heated.png`              | plan-view w in heated run (z = 3 km)              |
@@ -42,7 +43,7 @@
 using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.Units
-using Printf
+using Oceananigans.AbstractOperations: XNode, YNode, grid_metric_operation
 using Random
 using CairoMakie
 using CUDA
@@ -88,13 +89,13 @@ jordan_θ_K = [
     364.0, 386.0, 418.0, 468.0, 500.0, 542.0, 597.0,
 ]
 
-## A 1-D vertical RectilinearGrid carries the Jordan sounding. The 27
-## sounding levels map onto the 27 z-faces of a 26-cell Bounded grid, so
-## `ZFaceField`s store the data exactly and `Oceananigans.Fields.interpolate`
-## handles the linear lookup between levels. The fields are CPU-resident
-## because `θ_env`/`T_env`/`p_env` are called host-side during the
-## balanced-vortex Picard iteration; `set!` evaluates them on the host
-## before copying the result to GPU, so this works for either backend.
+## A 1-D vertical RectilinearGrid carries the Jordan sounding. The data are given
+## on what amounts to cell interfaces, so the 27 sounding levels map onto the 27
+## z-faces of a 26-cell Bounded grid and `ZFaceField`s store them exactly;
+## `Oceananigans.Fields.interpolate` handles the linear lookup between levels.
+## The fields are CPU-resident because `θ_env` and the `interpolate` calls in the
+## balanced-vortex solve are evaluated host-side; `set!` evaluates such functions
+## on the host before copying the result to GPU.
 sounding_grid = RectilinearGrid(
     size = length(jordan_z_m) - 1, z = jordan_z_m,
     topology = (Flat, Flat, Bounded)
@@ -109,8 +110,37 @@ interior(jordan_T, 1, 1, :) .= jordan_T_K
 interior(jordan_p, 1, 1, :) .= jordan_p_mb
 
 θ_env(z) = Oceananigans.Fields.interpolate(z, jordan_θ)
-T_env(z) = Oceananigans.Fields.interpolate(z, jordan_T)
-p_env(z) = Oceananigans.Fields.interpolate(z, jordan_p)
+
+## The only environmental pressure we need as a scalar is the surface value, which
+## anchors both the reference state and the acoustic substepper. The rest of p(z)
+## then follows hydrostatically from θ(z) inside `ReferenceState`.
+surface_pressure = Oceananigans.Fields.interpolate(0, jordan_p)
+
+# ## Output layout
+#
+# Run outputs — the figures and the JLD2 output file — live under
+# `examples/output_tc_rainband/`.
+
+output_dir = joinpath(@__DIR__, "output_tc_rainband")
+figures_dir = joinpath(output_dir, "figures")
+mkpath(figures_dir)
+nothing #hide
+
+# ## A look at the environment
+#
+# Before building anything, let's look at the sounding we just loaded. CairoMakie
+# plots the `Field`s directly, so the vertical coordinate comes straight from the
+# grid (in metres) — no need to pull data out by hand.
+
+fig = Figure(size = (1000, 420))
+axθ = Axis(fig[1, 1]; xlabel = "θ (K)", ylabel = "z (m)", title = "Potential temperature")
+axT = Axis(fig[1, 2]; xlabel = "T (K)", ylabel = "z (m)", title = "Temperature")
+axp = Axis(fig[1, 3]; xlabel = "p (Pa)", ylabel = "z (m)", title = "Pressure")
+lines!(axθ, jordan_θ; color = :magenta)
+lines!(axT, jordan_T; color = :orangered)
+lines!(axp, jordan_p; color = :dodgerblue)
+save(joinpath(figures_dir, "F01_sounding.png"), fig) #src
+fig
 
 # ## YD19 physical parameters
 #
@@ -129,16 +159,6 @@ z_vortex_top = 16kilometers    # outflow reference level, m ([MoonNolan2010](@ci
 r_taper_start = 250kilometers  # radial taper start for periodic-domain compatibility, m
 r_taper_end = 300kilometers    # radial taper end, m
 
-# ## Output layout
-#
-# Run outputs live under `examples/output_tc_rainband/figures/` — the three
-# F02 PNGs (paper-reproduction outputs).
-
-output_dir = joinpath(@__DIR__, "output_tc_rainband")
-figures_dir = joinpath(output_dir, "figures")
-mkpath(figures_dir)
-nothing #hide
-
 # ## Grid and architecture
 #
 # [YuDidlake2019](@citet) §3a1 use a 5 km inner-nest resolution with a
@@ -155,7 +175,7 @@ nothing #hide
 # and so anelastic F32 NaN'd at iter ~99 across all grid resolutions and
 # WENO orders tested.
 
-Δx = 5kilometers
+Δx = 4kilometers
 Lx = 642kilometers
 Nx = Ny = floor(Int, Lx / Δx)
 Nz = 75
@@ -178,8 +198,7 @@ grid = RectilinearGrid(
 # The [`ReferenceState`](@ref Breeze.Thermodynamics.ReferenceState) is
 # the Jordan ``θ(z)`` profile, at the observed
 # surface pressure, giving us ``pᵣ(z)``, `ρᵣ(z)`, `Tᵣ(z)` — the hydrostatic
-# far-field of the anelastic problem. We pull the three columns down to the
-# host once, here, for use by the CPU-side balance iteration below.
+# far-field of the anelastic problem.
 
 constants = ThermodynamicConstants()
 Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
@@ -189,23 +208,12 @@ cᵖᵈ = constants.dry_air.heat_capacity
 
 reference_state = ReferenceState(
     grid, constants;
-    surface_pressure = p_env(0.0),
+    surface_pressure,
     potential_temperature = θ_env
 )
 
-pᵣ = Array(interior(reference_state.pressure, 1, 1, :))
-ρᵣ = Array(interior(reference_state.density, 1, 1, :))
-Tᵣ = Array(interior(reference_state.temperature, 1, 1, :))
-z_centers = collect(range(Δz / 2, step = Δz, length = Nz))
-
-@info @sprintf(
-    "Grid: %d × %d × %d   Δx = %.1f km   Lz = %.1f km   Δz = %.1f m",
-    Nx, Ny, Nz, Δx / 1.0e3, Lz / 1.0e3, Δz
-)
-@info @sprintf(
-    "Sponge: WRF damp_opt=2 analog, sin²() ramp from z = %.1f to %.1f km, rate %.3f s⁻¹ (ρu, ρv, ρw → 0; ρθ → ρᵣ·θᵣ)",
-    20.0, 25.0, sponge_rate
-)
+## Cell-center heights, reused by the analysis below.
+z_centers = znodes(grid, Center())
 
 # ## Vortex kinematics — RMW(z) and modified-Rankine v(r, z)
 #
@@ -244,19 +252,19 @@ z_centers = collect(range(Δz / 2, step = Δz, length = Nz))
 # the taper unnecessary, but we need it so the vortex doesn't wrap around
 # on the periodic box and collide with itself.
 
-ΔT_floor_default = 0.01   # micro-floor; avoids ÷ 0 exactly at z = z_vortex_top
+ΔT_floor = 0.01   # micro-floor; avoids ÷ 0 exactly at z = z_vortex_top
 
-function rmw_analytic(z; ΔT_floor = ΔT_floor_default)
-    T_out = T_env(z_vortex_top)
-    ΔT_0 = T_env(0.0) - T_out
-    ΔT_z = max(T_env(z) - T_out, ΔT_floor)
+function rmw_analytic(z)
+    T_out = Oceananigans.Fields.interpolate(z_vortex_top, jordan_T)
+    ΔT_0 = Oceananigans.Fields.interpolate(0, jordan_T) - T_out
+    ΔT_z = max(Oceananigans.Fields.interpolate(z, jordan_T) - T_out, ΔT_floor)
     return rmw_surface * sqrt(ΔT_0 / ΔT_z)
 end
 
-function tangential_wind(r, z; ΔT_floor = ΔT_floor_default)
-    r ≥ r_taper_end  && return 0.0
-    z ≥ z_vortex_top && return 0.0
-    rmw_z = rmw_analytic(z; ΔT_floor)
+function tangential_wind(r, z)
+    r ≥ r_taper_end  && return 0
+    z ≥ z_vortex_top && return 0
+    rmw_z = rmw_analytic(z)
     v_adj = rmw_surface / rmw_z
     vt = r ≤ rmw_z ?
         v_max_surface * v_adj * r / rmw_z :
@@ -287,146 +295,112 @@ end
 # ```
 #
 # This is the initializer used by the WRF `em_tropical_cyclone` ideal test
-# case ([Nolan2001](@cite)) and by [YuDidlake2019](@citet) §3a2. We solve
-# it by Picard iteration: fix ``T``, compute ``\rho`` from ideal gas,
-# sweep ``p`` inward from the outer BC via gradient wind, then recover a
-# new ``T`` from the diagnosed hydrostatic density. Under-relaxation
-# ``\alpha = 0.5`` on the ``T`` update stabilizes the fixed point, and
-# ``T`` is pinned to ``T_r`` at the top level where ``v \approx 0`` (there
-# ``\rho_\text{hyd}`` is ill-conditioned at ``p \approx 30`` hPa).
+# case ([Nolan2001](@cite)) and by [YuDidlake2019](@citet) §3a2. We solve it on a
+# 1-D-in-radius grid (`Flat` in y) entirely with Oceananigans `Field`s and
+# operators. Each Picard sweep:
 #
-# In practice the iteration converges in ~15 sweeps to gradient-wind
-# residual ``\sim 10^{-3}`` Pa/m and hydrostatic residual ``\sim 10^{-5}``
-# Pa/m — a 10⁴× collapse over the one-shot linearized baseline where
-# ``\rho`` is fixed to the environment and not allowed to adjust.
+# - forms ``\rho = p / (R^d T)`` and the gradient-wind integrand ``\rho(fv + v^2/r)``;
+# - integrates it inward from the far field with [`CumulativeIntegral`](@ref)
+#   (`reverse = true`) — its built-in ``\Delta r`` metric *is* the radial integral,
+#   so ``p = p_r - \int_r^R \rho(fv + v^2/r)\,dr``;
+# - recovers ``\rho`` from hydrostatic balance with `∂z`, where a `Gradient`
+#   boundary condition ``\partial p/\partial z = -\rho g`` makes the derivative
+#   correct at the top and bottom with no special-casing, then sets
+#   ``T = p / (R^d \rho)``;
+# - under-relaxes the ``T`` update by ``\alpha`` to stabilize the fixed point.
+#
+# The iteration converges to a gradient-wind residual ``\sim 10^{-3}`` Pa/m and a
+# hydrostatic residual at round-off. The radial grid reaches past the taper to the
+# domain corner so the initial-condition interpolation below never extrapolates,
+# and it runs in `Float64` even though the model is `Float32` (the gradient-wind
+# residual sits near `Float32` ε).
 
-function dpdz_centered(p, k, i, z_centers, Nz)
-    if k == 1
-        return (p[i, 2] - p[i, 1]) / (z_centers[2] - z_centers[1])
-    elseif k == Nz
-        return (p[i, Nz] - p[i, Nz - 1]) / (z_centers[Nz] - z_centers[Nz - 1])
-    else
-        return (p[i, k + 1] - p[i, k - 1]) / (z_centers[k + 1] - z_centers[k - 1])
-    end
-end
-
-function solve_balanced_vortex_iterative(
-        r_grid, z_centers, v2d, p_col, T_col, ρ_col;
-        Rᵈ = 287.04, g = 9.81,
-        α = 0.5, max_iter = 200, tol = 1.0e-3,
-        r_safe_min = 100.0, verbose = true
-    )
-
-    Nr = length(r_grid)
-    Nz = length(z_centers)
-    Δr = r_grid[2] - r_grid[1]
-    p = [p_col[k] for i in 1:Nr, k in 1:Nz]
-    T = [T_col[k] for i in 1:Nr, k in 1:Nz]
-    history = Float64[]
-    for iter in 1:max_iter
-        T_prev = copy(T)
-        ρ = p ./ (Rᵈ .* T)
-        for k in 1:Nz
-            p[end, k] = p_col[k]
-            for i in (Nr - 1):-1:1
-                ρ_face = 0.5 * (ρ[i, k] + ρ[i + 1, k])
-                v_face = 0.5 * (v2d[i, k] + v2d[i + 1, k])
-                r_face = 0.5 * (r_grid[i] + r_grid[i + 1])
-                dp_dr = ρ_face * (f * v_face + v_face^2 / max(r_face, r_safe_min))
-                p[i, k] = p[i + 1, k] - dp_dr * Δr
-            end
-        end
-        T_new = similar(T)
-        for i in 1:Nr
-            for k in 1:(Nz - 1)
-                dp_dz = dpdz_centered(p, k, i, z_centers, Nz)
-                ρ_hyd = max(-dp_dz / g, 1.0e-3)
-                T_new[i, k] = p[i, k] / (Rᵈ * ρ_hyd)
-            end
-            T_new[i, Nz] = T_col[Nz]
-        end
-        T .= α .* T_new .+ (1 - α) .* T_prev
-        maxΔT = maximum(abs.(T .- T_prev))
-        push!(history, maxΔT)
-        verbose && @info @sprintf("iter %3d   max|ΔT| = %.3e K", iter, maxΔT)
-        maxΔT < tol && break
-    end
-    return (; p, T, ρ = p ./ (Rᵈ .* T), history)
-end
-
-## Diagnostic: gradient-wind (∂p/∂r − ρ(fv + v²/r), Pa/m) and hydrostatic
-## (∂p/∂z + ρg, Pa/m) residuals on interior points. Iterative solver should
-## drive both to round-off; used as a pre-flight sanity check.
-function balance_residuals(
-        r_grid, z_centers, v2d, p, T;
-        Rᵈ = 287.04, g = 9.81, r_safe_min = 100.0
-    )
-    Nr = length(r_grid)
-    Nz = length(z_centers)
-    Δr = r_grid[2] - r_grid[1]
-    ρ = p ./ (Rᵈ .* T)
-    res_gw = zeros(Nr, Nz)
-    res_hy = zeros(Nr, Nz)
-    for k in 1:Nz, i in 2:(Nr - 1)
-        dp_dr = (p[i + 1, k] - p[i - 1, k]) / (2 * Δr)
-        res_gw[i, k] = dp_dr -
-            ρ[i, k] * (f * v2d[i, k] + v2d[i, k]^2 / max(r_grid[i], r_safe_min))
-    end
-    for i in 1:Nr, k in 2:(Nz - 1)
-        dp_dz = (p[i, k + 1] - p[i, k - 1]) / (z_centers[k + 1] - z_centers[k - 1])
-        res_hy[i, k] = dp_dz + ρ[i, k] * g
-    end
-    return (; gradient_wind = res_gw, hydrostatic = res_hy)
-end
-
-rmw_profile = [rmw_analytic(z) for z in z_centers]
-
-Nr_pre = 301
-r_pre = collect(range(0.0, r_taper_end, length = Nr_pre))
 pˢᵗ = 1.0e5
 
-@info "Computing balanced vortex IC (Picard iteration, Nolan 2001 / WRF em_tropical_cyclone)..."
-v2d = [tangential_wind(r_pre[i], z_centers[k]) for i in 1:Nr_pre, k in 1:Nz]
-bal = solve_balanced_vortex_iterative(
-    r_pre, z_centers, v2d,
-    pᵣ, Tᵣ, ρᵣ;
-    Rᵈ, g, verbose = false
+r_max_vortex = 500kilometers   # ≳ Lx/√2 (the domain corner) so the IC never extrapolates
+Nr_vortex = 500                # ⇒ Δr = 1 km, fine enough to resolve the RMW
+
+vortex_grid = RectilinearGrid(
+    CPU(), Float64;
+    size = (Nr_vortex, Nz), x = (0, r_max_vortex), z = (0, Lz),
+    topology = (Bounded, Flat, Bounded)
 )
 
-## Anelastic convention (matches Breeze's internal `liquid_ice_potential_temperature`
-## diagnostic and the F02b plot): θ is computed with the hydrostatic reference
-## pressure, not the balanced p. Keeps the IC warm-core diagnostic consistent
-## with the simulation's thermodynamic state.
-θ_pre = [bal.T[i, k] * (pˢᵗ / pᵣ[k])^κ for i in 1:Nr_pre, k in 1:Nz]
-p′_pre = bal.p .- reshape(pᵣ, 1, Nz)
-vortex = (; v = v2d, p = bal.p, θ = θ_pre, T = bal.T, ρ = bal.ρ, p′ = p′_pre)
+vortex_reference = ReferenceState(
+    vortex_grid, constants;
+    surface_pressure, potential_temperature = θ_env
+)
 
-let res = balance_residuals(r_pre, z_centers, v2d, bal.p, bal.T; Rᵈ, g)
-    @info @sprintf(
-        "IC residuals: gradient-wind max|res| = %.3e Pa/m,  hydrostatic max|res| = %.3e Pa/m  (iters = %d)",
-        maximum(abs, res.gradient_wind), maximum(abs, res.hydrostatic), length(bal.history)
-    )
+## Reference columns and the prescribed (tangential) wind vⱽ, as Fields on the
+## (r, z) grid. The reference fields are reduced in the horizontal — (Nothing,
+## Nothing, Center) — so `set!` broadcasts each column across r out of the box. The
+## radius is a coordinate (`XNode`) operation, so it needs no Field of its own.
+pᵣⱽ = CenterField(vortex_grid)
+Tᵣⱽ = CenterField(vortex_grid)
+vⱽ = CenterField(vortex_grid)
+set!(pᵣⱽ, vortex_reference.pressure)
+set!(Tᵣⱽ, vortex_reference.temperature)
+set!(vⱽ, (r, z) -> tangential_wind(r, z))
+radius = grid_metric_operation((Center(), Center(), Center()), XNode(), vortex_grid)
+
+## Pressure carries hydrostatic Gradient boundary conditions ∂p/∂z = -ρg so that
+## `∂z(p)` is correct at the top and bottom once halos are filled. We allocate the
+## working fields once and `compute!` them in place each sweep. The density ρ is a
+## standalone field — that lets the boundary conditions, which read it, be built
+## *before* p — and the boundary values are just -ρg windowed to the bottom and top
+## planes with `indices`.
+ρⱽ = CenterField(vortex_grid)
+integrand = ρⱽ * (f * vⱽ + vⱽ^2 / radius)
+
+∫p = Field(@at((Center, Center, Center),
+    Oceananigans.CumulativeIntegral(integrand, dims = 1, reverse = true)))
+
+∂z_pᵇ = Field(-g * ρⱽ, indices = (:, :, 1))
+∂z_pᵗ = Field(-g * ρⱽ, indices = (:, :, Nz))
+
+pressure_bcs = FieldBoundaryConditions(
+    vortex_grid, (Center(), Center(), Center());
+    bottom = GradientBoundaryCondition(∂z_pᵇ),
+    top = GradientBoundaryCondition(∂z_pᵗ)
+)
+
+pⱽ = CenterField(vortex_grid; boundary_conditions = pressure_bcs)
+Tⱽ = CenterField(vortex_grid)
+set!(pⱽ, pᵣⱽ)
+set!(Tⱽ, Tᵣⱽ)
+
+ρʰ = Field(@at((Center, Center, Center), -∂z(pⱽ) / g))
+α = 0.5
+T⁺ = Field(α * (pⱽ / (Rᵈ * ρʰ)) + (1 - α) * Tⱽ)
+
+for iter in 1:60
+    ρⱽ .= pⱽ / (Rᵈ * Tⱽ)
+
+    ## gradient wind: pⱽ(r, z) = pᵣ(z) - ∫ᵣᴿ ρ(f vⱽ + vⱽ²/r) dr
+    compute!(∫p)
+    pⱽ .= pᵣⱽ - ∫p
+
+    ## hydrostatic: ρ = -∂pⱽ/∂z / g, then T = pⱽ / (Rᵈ ρ); under-relax by α
+    compute!(∂z_pᵇ)
+    compute!(∂z_pᵗ)
+    Oceananigans.BoundaryConditions.fill_halo_regions!(pⱽ)
+
+    compute!(ρʰ)
+
+    compute!(T⁺)
+    Tⱽ .= T⁺
 end
 
-@inline function lookup_rz(table, r::Real, z::Real)
-    r_c = clamp(r, first(r_pre), last(r_pre))
-    z_c = clamp(z, first(z_centers), last(z_centers))
-    ir = searchsortedfirst(r_pre, r_c); ir = clamp(ir, 2, length(r_pre))
-    iz = searchsortedfirst(z_centers, z_c); iz = clamp(iz, 2, length(z_centers))
-    r0, r1 = r_pre[ir - 1], r_pre[ir]
-    z0, z1 = z_centers[iz - 1], z_centers[iz]
-    fr = (r_c - r0) / (r1 - r0)
-    fz = (z_c - z0) / (z1 - z0)
-    v00 = table[ir - 1, iz - 1]; v10 = table[ir, iz - 1]
-    v01 = table[ir - 1, iz];     v11 = table[ir, iz]
-    return (1 - fr) * (1 - fz) * v00 + fr * (1 - fz) * v10 +
-        (1 - fr) * fz * v01 + fr * fz * v11
-end
+ρⱽ .= pⱽ / (Rᵈ * Tⱽ)
 
-uᵢ(x, y, z) = (r = sqrt(x^2 + y^2); r < 1.0 ? 0.0 : -(y / r) * lookup_rz(vortex.v, r, z))
-vᵢ(x, y, z) = (r = sqrt(x^2 + y^2); r < 1.0 ? 0.0 : (x / r) * lookup_rz(vortex.v, r, z))
-Tᵢ(x, y, z) = lookup_rz(vortex.T, sqrt(x^2 + y^2), z)
-ρᵢ(x, y, z) = lookup_rz(vortex.ρ, sqrt(x^2 + y^2), z)
+## Map the axisymmetric (r, z) solution onto the 3-D model with pointwise initial
+## conditions; `set!` evaluates these on the host and `Oceananigans.Fields.interpolate`
+## does the (r, z) lookup, so no hand-rolled interpolation table is needed.
+r(x, y) = sqrt(x^2 + y^2)
+uᵢ(x, y, z) = -y / r(x, y) * Oceananigans.Fields.interpolate((r(x, y), z), vⱽ)
+vᵢ(x, y, z) = +x / r(x, y) * Oceananigans.Fields.interpolate((r(x, y), z), vⱽ)
+Tᵢ(x, y, z) = Oceananigans.Fields.interpolate((r(x, y), z), Tⱽ)
+ρᵢ(x, y, z) = Oceananigans.Fields.interpolate((r(x, y), z), ρⱽ)
 
 # ## Rainband heating — stationary, spiral, outward-tilted
 #
@@ -465,71 +439,68 @@ Tᵢ(x, y, z) = lookup_rz(vortex.T, sqrt(x^2 + y^2), z)
 #
 # i.e. heating raises ``T`` at rate ``Q``, which raises ``\theta`` at rate
 # ``Q/\Pi``. Within the WRF/MN10 idealized framework, ``\rho \approx \rho_r(z)``
-# inside the rainband, so we use the host-side reference profile.
+# inside the rainband, so we use the reference profile. Because that profile is
+# indexed by vertical level, the forcing is written in discrete form — the
+# `(i, j, k, …)` signature hands us `k` directly to look up ``\rho_r`` and ``\Pi``.
 
-Q_max = 4.24f0 / Float32(hour)     # YD19 Eq. 3 Q_max = 4.24 K/h (stored in K/s)
-z_bs = Float32(4kilometers)
-σ_r = Float32(6kilometers)
-σ_zs = Float32(2kilometers)
-t_full = Float32(1hour)            # 1 h ramp to avoid instantaneous onset
+Qₘₐₓ = 4.24f0 / Float32(hour)     # YD19 Eq. 3 peak rate, 4.24 K/h (stored in K/s)
+zᵇ = Float32(4kilometers)
+σᵣ = Float32(6kilometers)
+σᶻ = Float32(2kilometers)
+tᵣ = Float32(1hour)            # ramp duration, to avoid an instantaneous onset
 
-ρᵣ_device = arch isa GPU ? CuArray(ρᵣ) : ρᵣ
+## Rainband geometry (YD19 Eq. 3): the heating centerline sits at radius `rᵇ` on
+## the downwind (λ = 0) edge and moves outward by `Δrᵇ` per π/4 of azimuth. They
+## are `const` so the GPU forcing kernel that reads them stays type-stable.
+const rᵇ = 60kilometers
+const Δrᵇ = 10kilometers
 
-## Reference Exner-function profile Πᵣ(z) = (pᵣ(z)/pˢᵗ)^κ. Used to convert
-## the analytic ``T``-tendency ``Q`` (K/s) into the ρθ-tendency ``ρ Q / Π``.
-Πᵣ = Float32[(pᵣ[k] / pˢᵗ)^κ for k in 1:Nz]
-Πᵣ_device = arch isa GPU ? CuArray(Πᵣ) : Πᵣ
-
-
-## Precompute once at module load.
-const π_F32 = Float32(π)
-const π_4_F32 = Float32(π / 4)
-const π_2_F32 = Float32(π / 2)
-const twoπ_F32 = Float32(2π)
+## Reference Exner function Πᵣ(z) = (pᵣ/pˢᵗ)^κ converts the heating rate Q (K/s) into
+## the ρθ tendency ρ Q / Π. It — like the reference density — is a reduced
+## (Nothing, Nothing, Center) Field, indexed by vertical level in the forcing below.
+Πᵣ = Field((reference_state.pressure / pˢᵗ)^κ)
 
 @inline function rainband_heating(i, j, k, grid, clock, fields, p)
     x = Oceananigans.Grids.xnode(i, j, k, grid, Center(), Center(), Center())
     y = Oceananigans.Grids.ynode(i, j, k, grid, Center(), Center(), Center())
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Center())
-    t = clock.time
 
-    ramp = clamp((t - p.t_on) / (p.t_full - p.t_on), 0, 1)
+    ramp = clamp((clock.time - p.tᵒⁿ) / p.tᵣ, 0, 1)
     r = sqrt(x^2 + y^2)
-    λ = atan(y, x)
-    r_bs = (60 - 10 * (λ / π_4_F32)) * 1000 + z
-    G_r = exp(-(r - r_bs)^2 / 2p.σ_r^2)
+    s = 4 * atan(y, x) / π                 # azimuth in quadrants: s = λ / (π/4)
+    r_bs = rᵇ - Δrᵇ * s + z         # spiral centerline, tilting outward with height
+    G_r = exp(-(r - r_bs)^2 / 2p.σᵣ^2)     # radial Gaussian
 
-    z_rel = (z - p.z_bs) / p.σ_zs
-    V_z = ifelse(abs(z_rel) < 1, sin(π_F32 * z_rel), 0.0f0)
+    z_rel = (z - p.zᵇ) / p.σᶻ
+    V_z = ifelse(abs(z_rel) < 1, sin(π * z_rel), zero(z_rel))   # vertical sine lobe
 
-    λ_c = mod(λ + π_4_F32 + π_F32, twoπ_F32) - π_F32
-    A_λ = exp(-(λ_c / π_4_F32)^8)
+    A_λ = exp(-(s + 1)^8)                   # azimuthal super-Gaussian, centered at λ = -π/4 (s = -1)
 
-    Q = p.Q_max * G_r * V_z * A_λ * ramp
-    ## ρθ tendency: ρᵣ · Q / Πᵣ. WRF uses full ρ; under the WRF/MN10 idealized
-    ## framework ρ ≈ ρᵣ(z) inside the rainband, so the difference is second
-    ## order in p'/p.
-    ρᵣ_k = @inbounds p.ρᵣ[k]
-    Πᵣ_k = @inbounds p.Πᵣ[k]
+    Q = p.Qₘₐₓ * G_r * V_z * A_λ * ramp
+    ## ρθ tendency ρᵣ Q / Πᵣ, reading the level-indexed reference fields (reduced in
+    ## x and y, so any i, j returns the column value).
+    ρᵣ_k = @inbounds p.ρᵣ[i, j, k]
+    Πᵣ_k = @inbounds p.Πᵣ[i, j, k]
     return ρᵣ_k * Q / Πᵣ_k
 end
 
+## The ramp switches the heating on only after the spinup, at tᵒⁿ = stage_stop_time.
 heating_params = (;
-    Q_max, σ_r, σ_zs, z_bs, t_on = 0.0f0, t_full,
-    ρᵣ = ρᵣ_device, Πᵣ = Πᵣ_device,
+    Qₘₐₓ, σᵣ, σᶻ, zᵇ, tᵒⁿ = Float32(stage_stop_time), tᵣ,
+    ρᵣ = reference_state.density, Πᵣ,
 )
 
 heating_forcing = Forcing(rainband_heating; discrete_form = true, parameters = heating_params)
 
 ## Analytic heating rate at full strength (K/h) — for figure contours.
 function heating_rate_K_per_hour(r, λ, z)
-    r_bs = (60.0 - 10.0 * (λ / (π / 4))) * 1000.0 + z
-    G_r = exp(-(r - r_bs)^2 / 2σ_r^2)
-    z_rel = (z - z_bs) / σ_zs
-    V_z = abs(z_rel) < 1 ? sin(π * z_rel) : 0.0
-    λ_c = mod(λ - (-π / 4) + π, 2π) - π
-    A_λ = exp(-(λ_c / (π / 4))^8)
-    return 4.24 * G_r * V_z * A_λ
+    s = 4λ / π
+    r_bs = rᵇ - Δrᵇ * s + z
+    G_r = exp(-(r - r_bs)^2 / 2σᵣ^2)
+    z_rel = (z - zᵇ) / σᶻ
+    V_z = abs(z_rel) < 1 ? sin(π * z_rel) : zero(z_rel)
+    A_λ = exp(-(s + 1)^8)
+    return Qₘₐₓ * hour * G_r * V_z * A_λ   # K/h (Qₘₐₓ is stored in K/s)
 end
 
 # ## Upper-level sponge (WRF `damp_opt=2` analog)
@@ -555,19 +526,18 @@ sponge_z_top = Float32(25kilometers)
 ## in the upper-level damping layer. Using the default (LiquidIcePotentialTemperature)
 ## formulation because :StaticEnergy + CompressibleDynamics is currently broken
 ## on GPU (gpu__compute_temperature_and_pressure! method-error).
-ρθᵣ = Float32[ρᵣ[k] * θ_env(z_centers[k]) for k in 1:Nz]
-ρθᵣ_device = arch isa GPU ? CuArray(ρθᵣ) : ρθᵣ
+ρθᵣ = Field(reference_state.density * reference_state.temperature * (pˢᵗ / reference_state.pressure)^κ)
 
 sponge_vel_params = (z_bot = sponge_z_bottom, z_top = sponge_z_top, rate = sponge_rate)
 sponge_ρθ_params = (
     z_bot = sponge_z_bottom, z_top = sponge_z_top, rate = sponge_rate,
-    ρθ_bg = ρθᵣ_device,
+    ρθ_bg = ρθᵣ,
 )
 
 ## WRF `damp_opt=2` analog: zero below z_bot, sin²() ramp to max at z_top.
 @inline function sponge_mask(z, z_bot, z_top)
     ξ = (z - z_bot) / (z_top - z_bot)
-    return ifelse(ξ ≤ 0, zero(ξ), sin(π_2_F32 * ξ)^2)
+    return ifelse(ξ ≤ 0, zero(ξ), sin(π * ξ / 2)^2)
 end
 
 @inline function sponge_ρu_fn(i, j, k, grid, clock, fields, p)
@@ -591,7 +561,7 @@ end
 @inline function sponge_ρθ_fn(i, j, k, grid, clock, fields, p)
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Center())
     mask = sponge_mask(z, p.z_bot, p.z_top)
-    ρθ_tgt = @inbounds p.ρθ_bg[k]
+    ρθ_tgt = @inbounds p.ρθ_bg[i, j, k]
     return -p.rate * mask * (@inbounds fields.ρθ[i, j, k] - ρθ_tgt)
 end
 
@@ -606,223 +576,114 @@ sponge_ρθ = Forcing(sponge_ρθ_fn; discrete_form = true, parameters = sponge_
 # (Cᵀ) over a 300 K SST. We omit them here so the response field is the
 # direct dynamical response to the prescribed rainband heating.
 
-# ## Model builder
+# ## Build the model
+#
+# A single model carries both the rainband heating and the upper-level sponge.
+# Because the heating's time ramp only switches on at `tᵒⁿ = stage_stop_time`, the
+# first `stage_stop_time` is an unforced spinup and the remainder is the heated
+# continuation — there's no need for a second model or to re-initialize.
 
-function build_model(; with_heating::Bool)
-    coriolis = FPlane(; f)
-    dynamics = CompressibleDynamics(
-        SplitExplicitTimeDiscretization();
-        surface_pressure = p_env(0.0),
-        reference_potential_temperature = θ_env
-    )
-    advection = WENO(order = 5)
-    forcing = with_heating ?
-        (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρθ = (heating_forcing, sponge_ρθ)) :
-        (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρθ = sponge_ρθ)
-
-    return AtmosphereModel(
-        grid; dynamics, coriolis, advection, forcing
-    )
-end
-
-# ## Stage runner
-# We build the model, run it, and save the full state for later analysis.
-struct InMemoryFTS
-    times::Vector{Float64}
-    data::Vector{Array{Float32, 3}}
-end
-InMemoryFTS() = InMemoryFTS(Float64[], Array{Float32, 3}[])
-Base.getindex(s::InMemoryFTS, n::Int) = s.data[n]
-Base.length(s::InMemoryFTS) = length(s.data)
-
-function build_and_run_stage!(
-        stage_label::String;
-        with_heating::Bool, init, stop_time
-    )
-    model = build_model(; with_heating)
-    set!(model; init...)
-
-    simulation = Simulation(model; Δt = 2.0, stop_time)
-    conjure_time_step_wizard!(simulation, cfl = 0.5)
-    Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
-
-    u, v, w = model.velocities
-
-    function progress(sim)
-        msg = @sprintf(
-            "[%s] iter: %d, t: %s, Δt: %s, max|u,v|: %.2f, %.2f m/s, max|w|: %.2e m/s",
-            stage_label, iteration(sim), prettytime(sim), prettytime(sim.Δt),
-            maximum(abs, u), maximum(abs, v), maximum(abs, w)
-        )
-        @info msg
-        return nothing
-    end
-    add_callback!(simulation, progress, TimeInterval(6hour))
-
-    captures = (
-        u = InMemoryFTS(), v = InMemoryFTS(), w = InMemoryFTS(),
-        T = InMemoryFTS(), ρ = InMemoryFTS(),
-    )
-    function capture_state!(sim)
-        t = sim.model.clock.time
-        push!(captures.u.times, t); push!(captures.u.data, Array(interior(sim.model.velocities.u)))
-        push!(captures.v.times, t); push!(captures.v.data, Array(interior(sim.model.velocities.v)))
-        push!(captures.w.times, t); push!(captures.w.data, Array(interior(sim.model.velocities.w)))
-        push!(captures.T.times, t); push!(captures.T.data, Array(interior(sim.model.temperature)))
-        push!(captures.ρ.times, t); push!(captures.ρ.data, Array(interior(sim.model.dynamics.density)))
-        return nothing
-    end
-    add_callback!(simulation, capture_state!, TimeInterval(1hour))
-
-    @info "Running $stage_label stage for $(prettytime(stop_time))"
-    run!(simulation)
-
-    post = (
-        u = Array(interior(model.velocities.u)),
-        v = Array(interior(model.velocities.v)),
-        T = Array(interior(model.temperature)),
-        ρ = Array(interior(model.dynamics.density)),
-    )
-
-    model = nothing
-    GC.gc(); CUDA.reclaim()
-    return (post = post, captures = captures)
-end
-
-
-@info "=== Spinup: $(prettytime(stage_stop_time)) ==="
-spinup_result = build_and_run_stage!(
-    "spinup";
-    with_heating = false,
-    init = (u = uᵢ, v = vᵢ, T = Tᵢ, ρ = ρᵢ),
-    stop_time = stage_stop_time,
+coriolis = FPlane(; f)
+dynamics = CompressibleDynamics(
+    SplitExplicitTimeDiscretization();
+    surface_pressure, reference_potential_temperature = θ_env
 )
-post_spinup = spinup_result.post
-nothing # hide
+forcing = (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρθ = (heating_forcing, sponge_ρθ))
+model = AtmosphereModel(grid; dynamics, coriolis, advection = WENO(order = 5), forcing)
 
-@info "=== Heated: $(prettytime(stage_stop_time)) (MN10 stratiform) ==="
-heated_result = build_and_run_stage!(
-    "heated";
-    with_heating = true,
-    init = post_spinup,
-    stop_time = stage_stop_time,
+set!(model; u = uᵢ, v = vᵢ, T = Tᵢ, ρ = ρᵢ)
+
+# ## Run the spinup and heated continuation
+#
+# We step through `2 * stage_stop_time` — a 24 h spinup followed by the 24 h heated
+# run — and write hourly output. The velocities are interpolated to cell centers
+# with `@at` and the potential temperature is computed with
+# `liquid_ice_potential_temperature`, both *online*, so the analysis below reads
+# ready-to-use `Field`s straight back with `FieldTimeSeries`: no manual
+# interpolation, no thermodynamic reconstruction.
+
+simulation = Simulation(model; Δt = 2.0, stop_time = 2stage_stop_time)
+conjure_time_step_wizard!(simulation, cfl = 1.0)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
+
+u, v, w = model.velocities
+progress(sim) = @info "iter $(iteration(sim)),  t = $(prettytime(sim)),  Δt = $(prettytime(sim.Δt)),  max|w| = $(maximum(abs, w)) m/s"
+add_callback!(simulation, progress, TimeInterval(6hours))
+
+## Tangential wind vθ = (-y u + x v)/r, formed online from the XNode/YNode coordinate
+## operations — so the azimuthal average below is a pure radial binning.
+xᶜ = grid_metric_operation((Center(), Center(), Center()), XNode(), grid)
+yᶜ = grid_metric_operation((Center(), Center(), Center()), YNode(), grid)
+rᶜ = sqrt(xᶜ^2 + yᶜ^2)
+
+output_filename = joinpath(output_dir, "tc_rainband.jld2")
+outputs = (
+    vθ = Field(@at((Center, Center, Center), -yᶜ * u + xᶜ * v) / rᶜ),
+    w = Field(@at((Center, Center, Center), w)),
+    θ = liquid_ice_potential_temperature(model),
 )
-nothing # hide
+simulation.output_writers[:fields] = JLD2Writer(
+    model, outputs;
+    filename = output_filename, schedule = TimeInterval(1hour), overwrite_existing = true
+)
+
+run!(simulation)
 
 # ## Stage 4 — Analysis and figure production
 # Now that the have the full simulation, we replicate the figures from YD19 to verify our results.
 
 @info "=== Stage 4: Analysis ==="
 
-u_sc = Array{Float32}(undef, Nx, Ny, Nz)
-v_sc = similar(u_sc)
-w_sc = similar(u_sc)
-T_sc = similar(u_sc)
+## The writer stored the (online-rotated) tangential wind, w, and θ, so we read them
+## straight back as `FieldTimeSeries`. The analysis snapshots are the end of the
+## spinup (t = stage_stop_time) and the end of the heated run.
+vθt = FieldTimeSeries(output_filename, "vθ")
+wt = FieldTimeSeries(output_filename, "w")
+θt = FieldTimeSeries(output_filename, "θ")
+times = vθt.times
+n_spinup = searchsortedfirst(times, stage_stop_time)   # end of spinup
+n_heated = length(times)                               # end of heated run
 
-## In-place centered interpolation (Arakawa C-grid → Centers).
-function center_u!(out::AbstractArray{Float32, 3}, src)
-    Nxs, Nys, Nzs = size(out)
-    return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
-        ip = i == Nxs ? 1 : i + 1
-        out[i, j, k] = Float32((src[i, j, k] + src[ip, j, k]) / 2)
-    end
-end
-function center_v!(out::AbstractArray{Float32, 3}, src)
-    Nxs, Nys, Nzs = size(out)
-    return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
-        jp = j == Nys ? 1 : j + 1
-        out[i, j, k] = Float32((src[i, j, k] + src[i, jp, k]) / 2)
-    end
-end
-function center_w!(out::AbstractArray{Float32, 3}, src)
-    ## w lives on z-Face (size Nz+1 in the vertical). Average adjacent
-    ## faces to get cell-centered values with size (Nx, Ny, Nz).
-    Nxs, Nys, Nzs = size(out)
-    return @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
-        out[i, j, k] = Float32((src[i, j, k] + src[i, j, k + 1]) / 2)
-    end
-end
-function copy_f32!(out::AbstractArray{Float32, 3}, src)
-    return @inbounds for I in eachindex(out)
-        out[I] = Float32(src[I])
-    end
-end
-
-## Load one captured snapshot
-function load_snapshot!(u, v, w, T, u_ts, v_ts, w_ts, T_ts, n::Int)
-    center_u!(u, u_ts[n])
-    center_v!(v, v_ts[n])
-    center_w!(w, w_ts[n])
-    copy_f32!(T, T_ts[n])
-    return nothing
-end
-
-r_bin_edges = collect(range(0.0, 150kilometers, step = Δx))
+r_bin_edges = collect(range(0, 150kilometers, step = Δx))
 Nr_bin = length(r_bin_edges) - 1
 r_bin_centers = 0.5 .* (r_bin_edges[1:(end - 1)] .+ r_bin_edges[2:end])
-xs_center = Float32.(xnodes(grid, Center()))
-ys_center = Float32.(ynodes(grid, Center()))
+xs_center = xnodes(grid, Center())
+ys_center = ynodes(grid, Center())
+r_last = last(r_bin_edges)
 
-## Instead of plotting r x z cross sections, we are going to calculate a sector azimuthal average.
-## This will smooth out small-scale perturbations.
-vθ_ws = zeros(Float32, Nr_bin, Nz)
-vr_ws = similar(vθ_ws)
-w_ws = similar(vθ_ws)
-T_ws = similar(vθ_ws)
-ct_ws = zeros(Int32, Nr_bin, Nz)
-r_last = Float32(last(r_bin_edges))
+## Sector azimuthal average. The tangential wind was already formed online, so here
+## we only bin into radial rings (Oceananigans has no polar reduction).
+vθ_ws = zeros(Nr_bin, Nz)
+θ_ws = similar(vθ_ws)
+ct_ws = zeros(Int, Nr_bin, Nz)
 
-function azimuthal_mean!(vθ, vr, ww, TT, ct, u, v, w, T)
-    fill!(vθ, 0.0f0); fill!(vr, 0.0f0); fill!(ww, 0.0f0); fill!(TT, 0.0f0); fill!(ct, 0)
-    Nxs, Nys, Nzs = size(u)
+function azimuthal_mean!(v̄θ, θ̄, ct, vθ, θ)
+    fill!(v̄θ, 0); fill!(θ̄, 0); fill!(ct, 0)
+    Nxs, Nys, Nzs = size(vθ)
     @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
-        x = xs_center[i]; y = ys_center[j]
-        r = sqrt(x^2 + y^2)
+        r = sqrt(xs_center[i]^2 + ys_center[j]^2)
         r ≥ r_last && continue
-        ib = searchsortedlast(r_bin_edges, Float64(r))
-        ib = clamp(ib, 1, Nr_bin)
-        rs = max(r, 1.0f0)
-        xh = x / rs
-        yh = y / rs
-        uij = u[i, j, k]
-        vij = v[i, j, k]
-        vθ[ib, k] += -yh * uij + xh * vij
-        vr[ib, k] += xh * uij + yh * vij
-        ww[ib, k] += w[i, j, k]
-        TT[ib, k] += T[i, j, k]
+        ib = clamp(searchsortedlast(r_bin_edges, r), 1, Nr_bin)
+        v̄θ[ib, k] += vθ[i, j, k]
+        θ̄[ib, k] += θ[i, j, k]
         ct[ib, k] += 1
     end
-    return @inbounds for k in 1:Nzs, ib in 1:Nr_bin
+    @inbounds for k in 1:Nzs, ib in 1:Nr_bin
         if ct[ib, k] > 0
-            inv = 1.0f0 / ct[ib, k]
-            vθ[ib, k] *= inv
-            vr[ib, k] *= inv
-            ww[ib, k] *= inv
-            TT[ib, k] *= inv
+            v̄θ[ib, k] /= ct[ib, k]
+            θ̄[ib, k] /= ct[ib, k]
         end
     end
+    return nothing
 end
 
 # ## F02ab — basic-state vortex (YD19 Fig 2a,b)
 
-@info "Producing F02ab (basic-state vortex)..."
-ts_spin = spinup_result.captures
-n_final = length(ts_spin.u.times)
-t_final = ts_spin.u.times[n_final]
-@info @sprintf(
-    "Spinup snapshot %d of %d  (t = %.2f h)",
-    n_final, length(ts_spin.u.times), t_final / hour
-)
+azimuthal_mean!(vθ_ws, θ_ws, ct_ws, interior(vθt[n_spinup]), interior(θt[n_spinup]))
 
-load_snapshot!(u_sc, v_sc, w_sc, T_sc, ts_spin.u, ts_spin.v, ts_spin.w, ts_spin.T, n_final)
-azimuthal_mean!(vθ_ws, vr_ws, w_ws, T_ws, ct_ws, u_sc, v_sc, w_sc, T_sc)
-
-θ_bar = similar(T_ws)
-for k in 1:Nz, ib in 1:Nr_bin
-    θ_bar[ib, k] = T_ws[ib, k] * Float32((pˢᵗ / pᵣ[k])^κ)
-end
-θ_env_col = Float32[θ_env(z_centers[k]) for k in 1:Nz]
-θ_anom = θ_bar .- reshape(θ_env_col, 1, :)
+t_final = times[n_spinup]
+θ_env_column = [θ_env(z) for z in z_centers]
+θ_anom = θ_ws .- reshape(θ_env_column, 1, :)
 
 fig = Figure(size = (1300, 520))
 
@@ -858,47 +719,15 @@ contour!(
 )
 Colorbar(fig[1, 4], hm_θ; label = "θ̄' (K)")
 
-Label(
-    fig[0, :],
-    @sprintf(
-        "F02ab — Basic-state vortex at t = %.1f h spin-up (YD19 Fig 2a,b, %.0f km box)",
-        t_final / hour, Lx / kilometers
-    );
-    fontsize = 17
-)
+Label(fig[0, :],
+    "F02ab — Basic-state vortex at t = $(round(t_final / hour, digits = 1)) h spin-up ($(round(Int, Lx / kilometers)) km box)";
+    fontsize = 17)
 
-v_peak_sfc = maximum(@view vθ_ws[:, 1])
-r_peak_sfc = r_bin_centers[argmax(@view vθ_ws[:, 1])] / kilometers
-v_peak_all = maximum(vθ_ws)
-idx_all = argmax(vθ_ws)
-r_peak_all = r_bin_centers[idx_all[1]] / kilometers
-z_peak_all = z_centers[idx_all[2]] / kilometers
-θ_peak = maximum(θ_anom)
-idx_θ = argmax(θ_anom)
-r_θ_peak = r_bin_centers[idx_θ[1]] / kilometers
-z_θ_peak = z_centers[idx_θ[2]] / kilometers
-@info @sprintf(
-    "F02a: surface v̄_peak = %.2f m/s at r = %.1f km (YD19 target ≈ 40 m/s)",
-    v_peak_sfc, r_peak_sfc
-)
-@info @sprintf(
-    "F02a: global v̄_peak  = %.2f m/s at (r,z) = (%.1f, %.1f) km",
-    v_peak_all, r_peak_all, z_peak_all
-)
-@info @sprintf(
-    "F02b: peak θ'        = %.2f K at (r,z) = (%.1f, %.1f) km (YD19 ~12 K at 10-12 km)",
-    θ_peak, r_θ_peak, z_θ_peak
-)
-
-path = joinpath(figures_dir, "F02ab_vortex.png")
-save(path, fig)
-@info "Saved F02ab" path
-GC.gc()
+save(joinpath(figures_dir, "F02ab_vortex.png"), fig) #src
 fig
 
 # ## F02cd — analytic heating field (YD19 Fig 2c,d)
 
-@info "Producing F02cd (heating field)..."
 r_cs = collect(range(0.0, 150kilometers, length = 151))
 z_cs = collect(range(0.0, 12kilometers, length = 61))
 λ_mid = -π / 4
@@ -934,7 +763,7 @@ Colorbar(fig[1, 2], hm_c; label = "Q (K h⁻¹)")
 
 ax_d = Axis(
     fig[1, 3]; xlabel = "x (km)", ylabel = "y (km)",
-    title = @sprintf("(d) Heating plan view at z = %.1f km", z_level / 1000),
+    title = "(d) Heating plan view at z = $(round(z_level / 1000, digits = 1)) km",
     aspect = DataAspect(), limits = (-120, 120, -120, 120)
 )
 hm_d = heatmap!(
@@ -947,48 +776,30 @@ contour!(
 )
 Colorbar(fig[1, 4], hm_d; label = "Q (K h⁻¹)")
 
-Label(
-    fig[0, :],
-    @sprintf(
-        "F02cd — MN10 stratiform heating field (YD19 Fig 2c,d, %.0f km box)",
-        Lx / 1.0e3
-    );
-    fontsize = 17
-)
+Label(fig[0, :],
+    "F02cd — MN10 stratiform heating field ($(round(Int, Lx / kilometers)) km box)";
+    fontsize = 17)
 
-peak_Q_cs = maximum(abs, Q_cs)
-peak_Q_pv = maximum(abs, Q_pv)
-@info @sprintf("F02c peak |Q| = %.2f K/h (YD19 Q_max = 4.24 K/h)", peak_Q_cs)
-@info @sprintf("F02d peak |Q| at z=%.1fkm = %.2f K/h", z_level / 1.0e3, peak_Q_pv)
-
-path = joinpath(figures_dir, "F02cd_heating.png")
-save(path, fig)
-@info "Saved F02cd" path
+save(joinpath(figures_dir, "F02cd_heating.png"), fig) #src
 fig
 
 # ## F02e — plan-view vertical velocity in the heated run
 
-@info "Producing F02e (heated-run plan-view w)..."
-ts_heat = heated_result.captures
-n_heat_final = length(ts_heat.w.times)
-t_heat_final = ts_heat.w.times[n_heat_final]
-center_w!(w_sc, ts_heat.w[n_heat_final])
-copy_f32!(T_sc, ts_heat.T[n_heat_final])
+t_heat_final = times[n_heated]
+w_heated = interior(wt[n_heated])              # cell-centered w (host array)
 
 z_w_slice = 3kilometers
 k_w = argmin(abs.(z_centers .- z_w_slice))
-w_slice = w_sc[:, :, k_w]
+w_slice = w_heated[:, :, k_w]
 w_lim = max(0.5, ceil(maximum(abs, w_slice) * 2) / 2)
-
-xs_grid = Array(xnodes(grid, Center()))
-ys_grid = Array(ynodes(grid, Center()))
+z_w_km = z_centers[k_w] / kilometer
 
 ## Heating overlay at the slice altitude — the red/blue ±1 K/h contours mark
 ## where the imposed forcing sits.
 Q_slice = [
     heating_rate_K_per_hour(
-            sqrt(xs_grid[i]^2 + ys_grid[j]^2),
-            atan(ys_grid[j], xs_grid[i]),
+            sqrt(xs_center[i]^2 + ys_center[j]^2),
+            atan(ys_center[j], xs_center[i]),
             z_centers[k_w]
         )
         for i in 1:Nx, j in 1:Ny
@@ -998,48 +809,25 @@ fig = Figure(size = (800, 700))
 ax = Axis(
     fig[1, 1];
     xlabel = "x (km)", ylabel = "y (km)",
-    title = @sprintf(
-        "(e) Heated-run vertical velocity at z = %.1f km, t = %.1f h",
-        z_centers[k_w] / kilometer, t_heat_final / hour
-    ),
+    title = "(e) Heated-run vertical velocity at z = $(round(z_w_km, digits = 1)) km, t = $(round(t_heat_final / hour, digits = 1)) h",
     aspect = DataAspect(),
     limits = (-120, 120, -120, 120),
 )
 hm = heatmap!(
-    ax, xs_grid ./ kilometer, ys_grid ./ kilometer, w_slice;
+    ax, xs_center ./ kilometer, ys_center ./ kilometer, w_slice;
     colormap = :balance, colorrange = (-w_lim, w_lim)
 )
-if maximum(Q_slice) > 1.0
-    contour!(
-        ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_slice;
-        levels = [1.0], color = :red, linewidth = 2.0
-    )
-end
-if minimum(Q_slice) < -1.0
-    contour!(
-        ax, xs_grid ./ kilometer, ys_grid ./ kilometer, Q_slice;
-        levels = [-1.0], color = :blue, linewidth = 2.0
-    )
-end
+maximum(Q_slice) > 1 && contour!(ax, xs_center ./ kilometer, ys_center ./ kilometer, Q_slice;
+    levels = [1.0], color = :red, linewidth = 2)
+minimum(Q_slice) < -1 && contour!(ax, xs_center ./ kilometer, ys_center ./ kilometer, Q_slice;
+    levels = [-1.0], color = :blue, linewidth = 2)
 Colorbar(fig[1, 2], hm; label = "w (m s⁻¹)")
 
-Label(
-    fig[0, :],
-    @sprintf(
-        "F02e — Plan-view w in heated run (z = %.1f km, %.0f km box)",
-        z_centers[k_w] / kilometer, Lx / 1.0e3
-    );
-    fontsize = 17,
-)
+Label(fig[0, :],
+    "F02e — Plan-view w in heated run (z = $(round(z_w_km, digits = 1)) km, $(round(Int, Lx / kilometers)) km box)";
+    fontsize = 17)
 
-@info @sprintf(
-    "F02e: w range = [%.3f, %.3f] m/s (colorbar ±%.2f m/s)",
-    minimum(w_slice), maximum(w_slice), w_lim
-)
-
-path = joinpath(figures_dir, "F02e_w_heated.png")
-save(path, fig)
-@info "Saved F02e" path
+save(joinpath(figures_dir, "F02e_w_heated.png"), fig) #src
 fig
 
 # ## Reproducing the full YD19 response (optional)
