@@ -58,7 +58,6 @@ using Oceananigans.Grids: rnode, znode
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
                                 ∂zᶜᶜᶜ, ∂zᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.TimeSteppers: time_step!, update_state!
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
