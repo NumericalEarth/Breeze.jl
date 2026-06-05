@@ -64,7 +64,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
 
         ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_value),
                                          east = NormalFlowBoundaryCondition(ρu_value))
-        model = AtmosphereModel(grid_bpb; dynamics=dynamics,
+        model = AtmosphereModel(grid_bpb; dynamics,
                                           formulation=:LiquidIcePotentialTemperature,
                                           boundary_conditions=(; ρu=ρu_bcs))
 
@@ -93,10 +93,10 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         ρv_value = ρ_b * V_bg
 
         ρv_bcs = FieldBoundaryConditions(south = NormalFlowBoundaryCondition(ρv_value),
-                                          north = NormalFlowBoundaryCondition(ρv_value))
-        model = AtmosphereModel(grid_bbb; dynamics=dynamics,
-                                           formulation=:LiquidIcePotentialTemperature,
-                                           boundary_conditions=(; ρv=ρv_bcs))
+                                         north = NormalFlowBoundaryCondition(ρv_value))
+        model = AtmosphereModel(grid_bbb; dynamics,
+                                          formulation=:LiquidIcePotentialTemperature,
+                                          boundary_conditions=(; ρv=ρv_bcs))
 
         @test isnothing(model.velocities.v.boundary_conditions.south)
         @test isnothing(model.velocities.v.boundary_conditions.north)
@@ -121,10 +121,10 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         ρw_value = ρ_b * W_bg
 
         ρw_bcs = FieldBoundaryConditions(bottom = NormalFlowBoundaryCondition(ρw_value),
-                                          top    = NormalFlowBoundaryCondition(ρw_value))
-        model = AtmosphereModel(grid_bbb; dynamics=dynamics,
-                                           formulation=:LiquidIcePotentialTemperature,
-                                           boundary_conditions=(; ρw=ρw_bcs))
+                                         top    = NormalFlowBoundaryCondition(ρw_value))
+        model = AtmosphereModel(grid_bbb; dynamics,
+                                          formulation=:LiquidIcePotentialTemperature,
+                                          boundary_conditions=(; ρw=ρw_bcs))
 
         @test isnothing(model.velocities.w.boundary_conditions.bottom)
         @test isnothing(model.velocities.w.boundary_conditions.top)
@@ -149,7 +149,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
 
         ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_value),
                                          east = NormalFlowBoundaryCondition(ρu_value))
-        model = AtmosphereModel(grid_bpb; dynamics=dynamics,
+        model = AtmosphereModel(grid_bpb; dynamics,
                                           formulation=:LiquidIcePotentialTemperature,
                                           boundary_conditions=(; ρu=ρu_bcs))
 
@@ -175,8 +175,8 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         reference_state = ReferenceState(grid_bpb; surface_pressure=FT(101325),
                                                     potential_temperature=FT(300))
         dynamics = AnelasticDynamics(reference_state)
-        model = AtmosphereModel(grid_bpb; dynamics=dynamics,
-                                           formulation=:LiquidIcePotentialTemperature)
+        model = AtmosphereModel(grid_bpb; dynamics,
+                                          formulation=:LiquidIcePotentialTemperature)
 
         # y is Periodic on grid_bpb. Tangential u south/north and normal v south/north
         # should both be Periodic (not nothing).
@@ -204,7 +204,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
 
         ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_value),
                                          east = NormalFlowBoundaryCondition(ρu_value))
-        model = AtmosphereModel(grid_bpb; dynamics=dynamics,
+        model = AtmosphereModel(grid_bpb; dynamics,
                                           formulation=:LiquidIcePotentialTemperature,
                                           boundary_conditions=(; ρu=ρu_bcs))
         set!(model; θ=FT(300), ρu=(x,y,z) -> ρ_b * U_bg, ρv=0, ρw=0)
@@ -231,8 +231,8 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         reference_state = ReferenceState(grid_bpb; surface_pressure=FT(101325),
                                                     potential_temperature=FT(300))
         dynamics = AnelasticDynamics(reference_state)
-        model = AtmosphereModel(grid_bpb; dynamics=dynamics,
-                                           formulation=:LiquidIcePotentialTemperature)
+        model = AtmosphereModel(grid_bpb; dynamics,
+                                          formulation=:LiquidIcePotentialTemperature)
 
         @test isnothing(model.velocities.u.boundary_conditions.west)
         @test isnothing(model.velocities.u.boundary_conditions.east)
@@ -260,7 +260,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
 
         ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_value),
                                          east = NormalFlowBoundaryCondition(ρu_value))
-        model = AtmosphereModel(grid_bpb; dynamics=dynamics,
+        model = AtmosphereModel(grid_bpb; dynamics,
                                           formulation=:LiquidIcePotentialTemperature,
                                           boundary_conditions=(; ρu=ρu_bcs))
         set!(model; θ=FT(300), ρu=(x,y,z) -> ρ_b * U_bg, ρv=0, ρw=0)
@@ -287,7 +287,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
 
         ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_value),
                                          east = NormalFlowBoundaryCondition(ρu_value))
-        model = AtmosphereModel(grid_bpb; dynamics=dynamics,
+        model = AtmosphereModel(grid_bpb; dynamics,
                                           formulation=:LiquidIcePotentialTemperature,
                                           boundary_conditions=(; ρu=ρu_bcs))
         ref = model.dynamics.reference_state
