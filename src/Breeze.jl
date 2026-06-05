@@ -90,6 +90,7 @@ export
 
     # Microphysics
     SaturationAdjustment,
+    DCMIP2016LargeScaleCondensation,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,

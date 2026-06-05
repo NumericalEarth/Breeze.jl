@@ -17,6 +17,7 @@ export
     DewpointTemperature,
     DewpointTemperatureField,
     DCMIP2016KesslerMicrophysics,
+    DCMIP2016LargeScaleCondensation,
     kessler_terminal_velocity,
     saturation_adjustment_coefficient,
     RelativeHumidity,
@@ -32,5 +33,6 @@ include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")
 include("microphysics_diagnostics.jl")
 include("dcmip2016_kessler.jl")
+include("dcmip2016_large_scale_condensation.jl")
 
 end # module Microphysics
