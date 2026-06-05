@@ -432,14 +432,14 @@ heating = (Fₘₐₓ = 4.24f0 / Float32(hour),  # peak rate, 4.24 K/h (stored i
 @inline function rainband_heating_rate(x, y, z, t, p)
     r = sqrt(x^2 + y^2)
     λ = atan(y, x)
-    ramp = clamp((t - p.tᵒⁿ) / p.tᵣ, 0, 1)
-    s = 4λ / π                              # azimuth in quadrants: s = λ / (π/4)
-    r_bs = p.rᵇ - p.Δrᵇ * s + z             # spiral centerline, tilting outward with height
-    G_r = exp(-(r - r_bs)^2 / 2p.σᵣ^2)       # radial Gaussian
-    z_rel = (z - p.zᵇ) / p.σᶻ
-    V_z = ifelse(abs(z_rel) < 1, sin(π * z_rel), zero(z_rel))   # vertical sine lobe
-    A_λ = exp(-(s + 1)^8)                    # azimuthal super-Gaussian, centered at λ = -π/4
-    return p.Fₘₐₓ * G_r * V_z * A_λ * ramp
+    s = 4λ / π                               # azimuth in quadrants: s = λ / (π/4)
+    r₀ = p.rᵇ - p.Δrᵇ * s + z                # spiral centerline, tilting outward with height
+    ζ = (z - p.zᵇ) / p.σᶻ                     # height above the band center, in units of σᶻ
+    G = exp(-(r - r₀)^2 / 2p.σᵣ^2)            # radial Gaussian
+    V = ifelse(abs(ζ) < 1, sin(π * ζ), zero(ζ))   # vertical sine lobe
+    A = exp(-(s + 1)^8)                       # azimuthal super-Gaussian centered at λ = -π/4
+    R = clamp((t - p.tᵒⁿ) / p.tᵣ, 0, 1)       # linear switch-on ramp
+    return p.Fₘₐₓ * G * V * A * R
 end
 
 ## We attach the heating to the *specific* potential-temperature key `θ`. The model then
