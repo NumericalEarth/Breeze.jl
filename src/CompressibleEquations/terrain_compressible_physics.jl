@@ -659,51 +659,56 @@ otherwise be dominated by the near-cancellation of two large terms.
 The reference pressure is also used for the perturbation horizontal pressure gradient,
 reducing the terrain-following PGF error.
 """
-@kernel function _compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, θᵣ, pˢᵗ, constants)
-    i, j = @index(Global, NTuple)
-    c = Center()
-    Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    κ = Rᵈ / cᵖᵈ
-    g = constants.gravitational_acceleration
-    Nz = size(grid, 3)
-
-    πₖ = zero(κ) # initialized at k == 1 below
-    @inbounds for k in 1:Nz
-        z = znode(i, j, k, grid, c, c, c)
-        θₖ = θᵣ isa Number ? θᵣ : θᵣ(z)
-
-        if k == 1
-            # Evaluate the continuous hydrostatic pressure at the local physical
-            # height (which varies with terrain) rather than forcing sea-level
-            # pressure at every column.
-            p_hydro = hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
-            πₖ = (p_hydro / pˢᵗ)^κ
-        else
-            z_below = znode(i, j, k - 1, grid, c, c, c)
-            θ_below = θᵣ isa Number ? θᵣ : θᵣ(z_below)
-            θ_face = (θₖ + θ_below) / 2
-            Δz = Δzᶜᶜᶠ(i, j, k, grid)
-            πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)
-        end
-
-        pₖ = pˢᵗ * πₖ^(1 / κ)
-        ρₖ = pₖ / (Rᵈ * θₖ * πₖ)
-        pᵣ[i, j, k] = pₖ
-        ρᵣ[i, j, k] = ρₖ
-    end
-end
-
 function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, θᵣ, pˢᵗ, constants)
-    # The per-column upward Exner integration is serial in `k` but independent
-    # across columns, so we launch one GPU thread per (i, j) column. (Doing this
-    # loop on the host with a GPU grid would issue a scalar host↔device operation
-    # per cell — O(minutes) for millions of cells.) `hydrostatic_pressure` with a
-    # functional θ uses a fixed, allocation-free numerical integration, so the
-    # whole column fill is GPU-safe — cf. `_compute_hydrostatic_pressure!`.
+    # The 3D reference state is filled once, at construction. Each column is an
+    # upward Exner integration that is serial in `k` and evaluates the (possibly
+    # functional) reference θ at the physical height of every cell. We compute it on
+    # the host — into plain arrays, using a CPU mirror of the grid — then bulk-copy
+    # the result into the reference Fields. This keeps `reference_potential_temperature`
+    # an ordinary host function (no GPU type-stability/allocation requirement) and
+    # costs a single host→device transfer instead of a scalar host↔device op per cell.
+    # The CPU mirror preserves the materialised terrain through `on_architecture`, so
+    # its `znode`/`Δz` match the device grid exactly.
+    Nx, Ny, Nz = size(grid)
+    c = Center()
+    Rᵈ  = dry_air_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    κ   = Rᵈ / cᵖᵈ
+    g   = constants.gravitational_acceleration
+
+    cpu_grid = Oceananigans.Architectures.on_architecture(Oceananigans.CPU(), grid)
+    FT = eltype(grid)
+    p_host = zeros(FT, Nx, Ny, Nz)
+    ρ_host = zeros(FT, Nx, Ny, Nz)
+
+    for j in 1:Ny, i in 1:Nx
+        πₖ = zero(κ) # initialised at k = 1 below
+        for k in 1:Nz
+            z = znode(i, j, k, cpu_grid, c, c, c)
+            θₖ = θᵣ isa Number ? θᵣ : θᵣ(z)
+
+            if k == 1
+                # Seed from the continuous hydrostatic pressure at the local physical
+                # height (over terrain, not sea level).
+                p_hydro = hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
+                πₖ = (p_hydro / pˢᵗ)^κ
+            else
+                z_below = znode(i, j, k - 1, cpu_grid, c, c, c)
+                θ_below = θᵣ isa Number ? θᵣ : θᵣ(z_below)
+                θ_face  = (θₖ + θ_below) / 2
+                Δz      = Δzᶜᶜᶠ(i, j, k, cpu_grid)
+                πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)
+            end
+
+            pₖ = pˢᵗ * πₖ^(1 / κ)
+            @inbounds p_host[i, j, k] = pₖ
+            @inbounds ρ_host[i, j, k] = pₖ / (Rᵈ * θₖ * πₖ)
+        end
+    end
+
     arch = architecture(grid)
-    launch!(arch, grid, :xy, _compute_terrain_reference_state!,
-            pᵣ, ρᵣ, grid, p₀, θᵣ, pˢᵗ, constants)
+    copyto!(Oceananigans.interior(pᵣ), Oceananigans.Architectures.on_architecture(arch, p_host))
+    copyto!(Oceananigans.interior(ρᵣ), Oceananigans.Architectures.on_architecture(arch, ρ_host))
     fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
     return nothing
