@@ -93,10 +93,8 @@ jordan_θ_K = [
 ## The fields are CPU-resident because `θₑ` and the `interpolate` calls in the
 ## balanced-vortex solve are evaluated host-side; `set!` evaluates such functions
 ## on the host before copying the result to GPU.
-sounding_grid = RectilinearGrid(
-    size = length(jordan_z_m) - 1, z = jordan_z_m,
-    topology = (Flat, Flat, Bounded)
-)
+sounding_grid = RectilinearGrid(size = length(jordan_z_m) - 1, z = jordan_z_m,
+                                topology = (Flat, Flat, Bounded))
 
 jordan_θ = ZFaceField(sounding_grid)
 jordan_T = ZFaceField(sounding_grid)
@@ -172,12 +170,10 @@ stage_stop_time = 24hours
 
 arch = GPU()
 
-grid = RectilinearGrid(
-    arch;
-    size = (Nx, Ny, Nz), halo = (5, 5, 5),
-    x = (-Lx / 2, Lx / 2), y = (-Lx / 2, Lx / 2), z = (0, Lz),
-    topology = (Periodic, Periodic, Bounded)
-)
+grid = RectilinearGrid(arch;
+                       size = (Nx, Ny, Nz), halo = (5, 5, 5),
+                       x = (-Lx / 2, Lx / 2), y = (-Lx / 2, Lx / 2), z = (0, Lz),
+                       topology = (Periodic, Periodic, Bounded))
 
 # ## Reference state and thermodynamic constants
 #
@@ -192,11 +188,7 @@ g = constants.gravitational_acceleration
 κ = Rᵈ / constants.dry_air.heat_capacity
 cᵖᵈ = constants.dry_air.heat_capacity
 
-reference_state = ReferenceState(
-    grid, constants;
-    surface_pressure,
-    potential_temperature = θₑ
-)
+reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature = θₑ)
 
 ## Cell-center heights, reused by the analysis below.
 z_centers = znodes(grid, Center())
@@ -306,16 +298,11 @@ pˢᵗ = 1.0e5
 r_max_vortex = 500kilometers   # ≳ Lx/√2 (the domain corner) so the IC never extrapolates
 Nr_vortex = 500                # ⇒ Δr = 1 km, fine enough to resolve the RMW
 
-vortex_grid = RectilinearGrid(
-    CPU(), Float64;
-    size = (Nr_vortex, Nz), x = (0, r_max_vortex), z = (0, Lz),
-    topology = (Bounded, Flat, Bounded)
-)
+vortex_grid = RectilinearGrid(CPU(), Float64;
+                              size = (Nr_vortex, Nz), x = (0, r_max_vortex), z = (0, Lz),
+                              topology = (Bounded, Flat, Bounded))
 
-vortex_reference = ReferenceState(
-    vortex_grid, constants;
-    surface_pressure, potential_temperature = θₑ
-)
+vortex_reference = ReferenceState(vortex_grid, constants; surface_pressure, potential_temperature = θₑ)
 
 ## Reference columns and the prescribed (tangential) wind vⱽ, as Fields on the
 ## (r, z) grid. The reference fields are reduced in the horizontal — (Nothing,
@@ -344,11 +331,9 @@ integrand = ρⱽ * (f * vⱽ + vⱽ^2 / radius)
 ∂z_pᵇ = Field(-g * ρⱽ, indices = (:, :, 1))
 ∂z_pᵗ = Field(-g * ρⱽ, indices = (:, :, Nz))
 
-pressure_bcs = FieldBoundaryConditions(
-    vortex_grid, (Center(), Center(), Center());
-    bottom = GradientBoundaryCondition(∂z_pᵇ),
-    top = GradientBoundaryCondition(∂z_pᵗ)
-)
+pressure_bcs = FieldBoundaryConditions(vortex_grid, (Center(), Center(), Center());
+                                       bottom = GradientBoundaryCondition(∂z_pᵇ),
+                                       top = GradientBoundaryCondition(∂z_pᵗ))
 
 pⱽ = CenterField(vortex_grid; boundary_conditions = pressure_bcs)
 Tⱽ = CenterField(vortex_grid)
@@ -492,10 +477,7 @@ sponge_z_top = Float32(25kilometers)
 ρθᵣ = Field(reference_state.density * reference_state.temperature * (pˢᵗ / reference_state.pressure)^κ)
 
 sponge_vel_params = (z_bot = sponge_z_bottom, z_top = sponge_z_top, rate = sponge_rate)
-sponge_ρθ_params = (
-    z_bot = sponge_z_bottom, z_top = sponge_z_top, rate = sponge_rate,
-    ρθ_bg = ρθᵣ,
-)
+sponge_ρθ_params = (z_bot = sponge_z_bottom, z_top = sponge_z_top, rate = sponge_rate, ρθ_bg = ρθᵣ)
 
 ## WRF `damp_opt=2` analog: zero below z_bot, sin²() ramp to max at z_top.
 @inline function sponge_mask(z, z⁻, z⁺)
@@ -547,10 +529,8 @@ sponge_ρθ = Forcing(sponge_ρθ_fn; discrete_form = true, parameters = sponge_
 # continuation — there's no need for a second model or to re-initialize.
 
 coriolis = FPlane(; f)
-dynamics = CompressibleDynamics(
-    SplitExplicitTimeDiscretization();
-    surface_pressure, reference_potential_temperature = θₑ
-)
+dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                surface_pressure, reference_potential_temperature = θₑ)
 ## The heating enters via the specific key `θ` (a θ tendency, ρ applied by the model);
 ## the sponge relaxes the density `ρθ`. Both act on the same prognostic and are combined.
 forcing = (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, θ = heating_forcing, ρθ = sponge_ρθ)
@@ -634,19 +614,13 @@ r_km = xnodes(v̄θ.grid, Center()) ./ kilometer
 z_km = znodes(v̄θ.grid, Center()) ./ kilometer
 fig = Figure(size = (1300, 520))
 
-ax_v = Axis(
-    fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",
-    title = "(a) Basic-state tangential wind v̄", limits = (0, 150, 0, 22)
-)
+ax_v = Axis(fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)", title = "(a) Basic-state tangential wind v̄", limits = (0, 150, 0, 22))
 v̂ = 50
 hm_v = heatmap!(ax_v, r_km, z_km, view(v̄θ, :, 1, :); colormap = :inferno, colorrange = (0, v̂))
 contour!(ax_v, r_km, z_km, view(v̄θ, :, 1, :); levels = 5:5:v̂, color = :white, linewidth = 0.8)
 Colorbar(fig[1, 2], hm_v; label = "v̄ (m s⁻¹)")
 
-ax_θ = Axis(
-    fig[1, 3]; xlabel = "Radius (km)", ylabel = "Height (km)",
-    title = "(b) Potential-temperature anomaly θ̄'", limits = (0, 150, 0, 22)
-)
+ax_θ = Axis(fig[1, 3]; xlabel = "Radius (km)", ylabel = "Height (km)", title = "(b) Potential-temperature anomaly θ̄'", limits = (0, 150, 0, 22))
 θ̂ = 10
 hm_θ = heatmap!(ax_θ, r_km, z_km, view(θ̄′, :, 1, :); colormap = :balance, colorrange = (-θ̂, θ̂))
 contour!(ax_θ, r_km, z_km, view(θ̄′, :, 1, :); levels = -θ̂:1.69:θ̂, color = :black, linewidth = 0.5)
@@ -685,34 +659,14 @@ set!(Fᵈ, (x, y) -> rainband_heating_rate(x, y, z₀, t̂) * hour)
 F̂ = 4.5
 fig = Figure(size = (1300, 520))
 
-ax_c = Axis(
-    fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",
-    title = "(c) Heating cross section at λ = -π/4 (middle of rainband)",
-    limits = (0, 150, 0, 12)
-)
-hm_c = heatmap!(
-    ax_c, r_km, z_km, view(Fᶜ, :, 1, :);
-    colormap = :balance, colorrange = (-F̂, F̂)
-)
-contour!(
-    ax_c, r_km, z_km, view(Fᶜ, :, 1, :);
-    levels = -4:1:4, color = :black, linewidth = 0.6
-)
+ax_c = Axis(fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)", title = "(c) Heating cross section at λ = -π/4 (middle of rainband)", limits = (0, 150, 0, 12))
+hm_c = heatmap!(ax_c, r_km, z_km, view(Fᶜ, :, 1, :); colormap = :balance, colorrange = (-F̂, F̂))
+contour!(ax_c, r_km, z_km, view(Fᶜ, :, 1, :); levels = -4:1:4, color = :black, linewidth = 0.6)
 Colorbar(fig[1, 2], hm_c; label = "F (K h⁻¹)")
 
-ax_d = Axis(
-    fig[1, 3]; xlabel = "x (km)", ylabel = "y (km)",
-    title = "(d) Heating plan view at z = $(round(z₀ / 1000, digits = 1)) km",
-    aspect = DataAspect(), limits = (-120, 120, -120, 120)
-)
-hm_d = heatmap!(
-    ax_d, xc ./ kilometer, yc ./ kilometer, view(Fᵈ, :, :, 1);
-    colormap = :balance, colorrange = (-F̂, F̂)
-)
-contour!(
-    ax_d, xc ./ kilometer, yc ./ kilometer, view(Fᵈ, :, :, 1);
-    levels = -4:0.5:4, color = :black, linewidth = 0.4
-)
+ax_d = Axis(fig[1, 3]; xlabel = "x (km)", ylabel = "y (km)", title = "(d) Heating plan view at z = $(round(z₀ / 1000, digits = 1)) km", aspect = DataAspect(), limits = (-120, 120, -120, 120))
+hm_d = heatmap!(ax_d, xc ./ kilometer, yc ./ kilometer, view(Fᵈ, :, :, 1); colormap = :balance, colorrange = (-F̂, F̂))
+contour!(ax_d, xc ./ kilometer, yc ./ kilometer, view(Fᵈ, :, :, 1); levels = -4:0.5:4, color = :black, linewidth = 0.4)
 Colorbar(fig[1, 4], hm_d; label = "F (K h⁻¹)")
 
 Label(fig[0, :],
@@ -737,17 +691,9 @@ Fᵉ = CenterField(plan_grid)
 set!(Fᵉ, (x, y) -> rainband_heating_rate(x, y, zᶠ[k₃], t̂) * hour)
 
 fig = Figure(size = (800, 700))
-ax = Axis(
-    fig[1, 1];
-    xlabel = "x (km)", ylabel = "y (km)",
-    title = "(e) Heated-run vertical velocity at z = $(round(zᶠ[k₃] / kilometer, digits = 1)) km, t = $(round(tₕ / hour, digits = 1)) h",
-    aspect = DataAspect(),
-    limits = (-120, 120, -120, 120),
-)
-hm = heatmap!(
-    ax, xc ./ kilometer, yc ./ kilometer, wₛ;
-    colormap = :balance, colorrange = (-ŵ, ŵ)
-)
+ax = Axis(fig[1, 1]; xlabel = "x (km)", ylabel = "y (km)", aspect = DataAspect(), limits = (-120, 120, -120, 120),
+          title = "(e) Heated-run vertical velocity at z = $(round(zᶠ[k₃] / kilometer, digits = 1)) km, t = $(round(tₕ / hour, digits = 1)) h")
+hm = heatmap!(ax, xc ./ kilometer, yc ./ kilometer, wₛ; colormap = :balance, colorrange = (-ŵ, ŵ))
 maximum(Fᵉ) > 1 && contour!(ax, xc ./ kilometer, yc ./ kilometer, view(Fᵉ, :, :, 1);
     levels = [1.0], color = :red, linewidth = 2)
 minimum(Fᵉ) < -1 && contour!(ax, xc ./ kilometer, yc ./ kilometer, view(Fᵉ, :, :, 1);
