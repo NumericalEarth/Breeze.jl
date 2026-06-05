@@ -278,7 +278,7 @@ end
 # operators. Each Picard sweep:
 #
 # - forms ``\rho = p / (R^d T)`` and the gradient-wind integrand ``\rho(fv + v^2/r)``;
-# - integrates it inward from the far field with [`CumulativeIntegral`](@ref)
+# - integrates it inward from the far field with `CumulativeIntegral`
 #   (`reverse = true`) — its built-in ``\Delta r`` metric *is* the radial integral,
 #   so ``p = p_r - \int_r^R \rho(fv + v^2/r)\,dr``;
 # - recovers ``\rho`` from hydrostatic balance with `∂z`, where a `Gradient`
