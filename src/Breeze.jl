@@ -65,6 +65,8 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
+    azimuthal_mean,
+    azimuthal_mean!,
     static_energy_density,
     static_energy,
     total_energy,

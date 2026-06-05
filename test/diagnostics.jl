@@ -263,3 +263,29 @@ end
 
     @test ph ≈ p_expected
 end
+
+@testset "Azimuthal-mean diagnostic [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size = (64, 64, 4), x = (-1, 1), y = (-1, 1),
+                           z = (0, 1), topology = (Periodic, Periodic, Bounded))
+
+    # The azimuthal mean of a constant field is that constant in every (populated) ring.
+    c = CenterField(grid)
+    set!(c, (x, y, z) -> 5)
+    c̄ = azimuthal_mean(c; radius = 1, Nr = 8)
+    @test size(c̄) == (8, 1, 4)
+    @test all(interior(c̄) .≈ 5)
+
+    # The azimuthal mean of the radius field increases monotonically outward.
+    ρ = CenterField(grid)
+    set!(ρ, (x, y, z) -> sqrt(x^2 + y^2))
+    ρ̄ = azimuthal_mean(ρ; radius = 1, Nr = 8)
+    profile = Array(interior(ρ̄, :, 1, 1))
+    @test issorted(profile)
+    @test all(0 .< profile .< 1)
+
+    # The in-place form matches.
+    dest = CenterField(ρ̄.grid)
+    azimuthal_mean!(dest, ρ)
+    @test Array(interior(dest)) ≈ Array(interior(ρ̄))
+end
