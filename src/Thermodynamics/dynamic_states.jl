@@ -185,10 +185,18 @@ end
 @inline density(𝒰::LiquidIceDensityState, constants) = 𝒰.density
 
 # Invert θˡⁱ at constant density: solve  g(T) = T − (ρ Rᵐ T / pˢᵗ)^κ θ − (ℒˡ qˡ + ℒⁱ qⁱ)/cᵖᵐ = 0.
-# Newton converges quadratically (g′ = 1 − κ Φ/T ≈ 1 − κ ≈ 0.72 is well away from zero); the loop
-# runs until the relative step |ΔT|/T falls below `temperature_tolerance` (or `temperature_maxiter`
-# is reached). With no condensate (L = 0) the dry closed form is already the root, so the first step
-# is exactly zero and the loop exits immediately.
+# Newton converges quadratically (g′ = 1 − κ Φ/T ≈ 1 − κ ≈ 0.72 is well away from zero). With no
+# condensate (L = 0) the dry closed form is already the root, so a Newton step is exactly zero.
+#
+# The iteration has two forms, selected by the SIGN of `temperature_tolerance`. This is a uniform
+# scalar branch (the same value in every cell), resolved at compile/trace time — NOT a per-cell
+# data-dependent branch — so it is a plain `if`, not `ifelse`:
+#   • tolerance > 0 : tolerance-based `while` early-exit — fewest Newton steps on vanilla CPU/GPU.
+#   • tolerance ≤ 0 : fixed-trip `for 1:temperature_maxiter`. `temperature_maxiter` is a plain `Int`,
+#     so the loop unrolls to straight-line code. The `while` form traces to an XLA `while` op whose
+#     reverse-mode is pathological under Reactant/Enzyme (it hangs the differentiable acoustic_wave
+#     docs example — NumericalEarth/Breeze.jl#767); the unrolled form differentiates cheaply. Set
+#     `temperature_tolerance ≤ 0` on `CompressibleDynamics` for differentiable / Reactant runs.
 @inline function temperature(𝒰::LiquidIceDensityState, constants::ThermodynamicConstants)
     θ   = 𝒰.potential_temperature
     ρ   = 𝒰.density
@@ -202,14 +210,21 @@ end
     ℒⁱᵣ = constants.ice.reference_latent_heat
     L   = (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
 
-    T  = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L         # dry closed form + latent shift (the old non-iterated guess)
-    ΔT = T                                         # ensure at least one Newton step is taken
-    iter = 0
-    while abs(ΔT) > 𝒰.temperature_tolerance * T && iter < 𝒰.temperature_maxiter
-        Φ  = (ρ * Rᵐ * T / pˢᵗ)^κ * θ              # = T − L at the root
-        ΔT = -(T - Φ - L) / (1 - κ * Φ / T)
-        T += ΔT
-        iter += 1
+    T = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L          # dry closed form + latent shift (the old non-iterated guess)
+    if 𝒰.temperature_tolerance > 0
+        ΔT = T                                     # ensure at least one Newton step is taken
+        iter = 0
+        while abs(ΔT) > 𝒰.temperature_tolerance * T && iter < 𝒰.temperature_maxiter
+            Φ  = (ρ * Rᵐ * T / pˢᵗ)^κ * θ          # = T − L at the root
+            ΔT = -(T - Φ - L) / (1 - κ * Φ / T)
+            T += ΔT
+            iter += 1
+        end
+    else
+        for _ in 1:𝒰.temperature_maxiter           # fixed trip count → unrolls (Reactant/Enzyme-safe)
+            Φ = (ρ * Rᵐ * T / pˢᵗ)^κ * θ
+            T += -(T - Φ - L) / (1 - κ * Φ / T)
+        end
     end
     return T
 end
