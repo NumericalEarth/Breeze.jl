@@ -28,17 +28,14 @@
 # - How to build a balanced-vortex initial condition via Picard iteration
 #   (the Nolan 2001 / WRF `em_tropical_cyclone` procedure).
 # - How to wire a spatially structured, time-varying source term into the
-#   energy equation with `Forcing`.
+#   thermodynamic equation with `Forcing` (as a specific potential-temperature tendency).
 # - How to inspect a model spinup with azimuthally-averaged diagnostics.
 #
-# ## Figures produced
+# ## Figures
 #
-# | File                             | Content                                           |
-# |----------------------------------|---------------------------------------------------|
-# | `F01_sounding.png`               | Jordan (1958) environmental sounding              |
-# | `F02ab_vortex.png`               | basic-state vortex ([YuDidlake2019](@citet); Fig. 2a,b) |
-# | `F02cd_heating.png`              | analytic heating ([YuDidlake2019](@citet); Fig. 2c,d)  |
-# | `F02e_w_heated.png`              | plan-view w in heated run (z = 3 km)              |
+# The example displays, inline, the Jordan (1958) environmental sounding; the
+# basic-state vortex ([YuDidlake2019](@citet); Fig. 2a,b); the analytic heating field
+# (Fig. 2c,d); and a plan view of the heated-run vertical velocity (Fig. 2e).
 
 using Breeze
 using Oceananigans: Oceananigans
@@ -93,7 +90,7 @@ jordan_θ_K = [
 ## on what amounts to cell interfaces, so the 27 sounding levels map onto the 27
 ## z-faces of a 26-cell Bounded grid and `ZFaceField`s store them exactly;
 ## `Oceananigans.Fields.interpolate` handles the linear lookup between levels.
-## The fields are CPU-resident because `θ_env` and the `interpolate` calls in the
+## The fields are CPU-resident because `θₑ` and the `interpolate` calls in the
 ## balanced-vortex solve are evaluated host-side; `set!` evaluates such functions
 ## on the host before copying the result to GPU.
 sounding_grid = RectilinearGrid(
@@ -109,22 +106,12 @@ interior(jordan_θ, 1, 1, :) .= jordan_θ_K
 interior(jordan_T, 1, 1, :) .= jordan_T_K
 interior(jordan_p, 1, 1, :) .= jordan_p_mb
 
-θ_env(z) = Oceananigans.Fields.interpolate(z, jordan_θ)
+θₑ(z) = Oceananigans.Fields.interpolate(z, jordan_θ)
 
 ## The only environmental pressure we need as a scalar is the surface value, which
 ## anchors both the reference state and the acoustic substepper. The rest of p(z)
 ## then follows hydrostatically from θ(z) inside `ReferenceState`.
-surface_pressure = Oceananigans.Fields.interpolate(0, jordan_p)
-
-# ## Output layout
-#
-# Run outputs — the figures and the JLD2 output file — live under
-# `examples/output_tc_rainband/`.
-
-output_dir = joinpath(@__DIR__, "output_tc_rainband")
-figures_dir = joinpath(output_dir, "figures")
-mkpath(figures_dir)
-nothing #hide
+surface_pressure = first(jordan_p)
 
 # ## A look at the environment
 #
@@ -139,7 +126,6 @@ axp = Axis(fig[1, 3]; xlabel = "p (Pa)", ylabel = "z (m)", title = "Pressure")
 lines!(axθ, jordan_θ; color = :magenta)
 lines!(axT, jordan_T; color = :orangered)
 lines!(axp, jordan_p; color = :dodgerblue)
-save(joinpath(figures_dir, "F01_sounding.png"), fig) #src
 fig
 
 # ## YD19 physical parameters
@@ -209,7 +195,7 @@ cᵖᵈ = constants.dry_air.heat_capacity
 reference_state = ReferenceState(
     grid, constants;
     surface_pressure,
-    potential_temperature = θ_env
+    potential_temperature = θₑ
 )
 
 ## Cell-center heights, reused by the analysis below.
@@ -328,7 +314,7 @@ vortex_grid = RectilinearGrid(
 
 vortex_reference = ReferenceState(
     vortex_grid, constants;
-    surface_pressure, potential_temperature = θ_env
+    surface_pressure, potential_temperature = θₑ
 )
 
 ## Reference columns and the prescribed (tangential) wind vⱽ, as Fields on the
@@ -410,7 +396,7 @@ Tᵢ(x, y, z) = Oceananigans.Fields.interpolate((r(x, y), z), Tⱽ)
 # Eq. 3 (which in turn follows [MoonNolan2010](@cite)), is
 #
 # ```math
-# Q(r, \lambda, z, t) = Q_\text{max} \,
+# F(r, \lambda, z, t) = F_\text{max} \,
 #   \exp\!\left\{-\frac{[r - r_\text{bs}(\lambda, z)]^2}{2 \sigma_r^2}\right\} \,
 #   V_z(z) \, A_\lambda(\lambda) \, R(t)
 # ```
@@ -429,79 +415,59 @@ Tᵢ(x, y, z) = Oceananigans.Fields.interpolate((r(x, y), z), Tⱽ)
 #
 # The energy-equation source is keyed to the model's thermodynamic prognostic.
 # This driver uses the default `:LiquidIcePotentialTemperature` formulation
-# (prognostic ``\rho\theta``), so a heating rate ``Q`` (K/s) gives
+# (prognostic ``\rho\theta``), so a heating rate ``F`` (K/s) gives
 #
 # ```math
 # \left. \frac{\partial(\rho\theta)}{\partial t} \right|_\text{heat}
-#     = \rho \, \frac{Q}{\Pi},
+#     = \rho \, \frac{F}{\Pi},
 # \qquad \Pi(z) = \left(\frac{p_r(z)}{p^{\text{st}}}\right)^{R^d/c_p^d}
 # ```
 #
-# i.e. heating raises ``T`` at rate ``Q``, which raises ``\theta`` at rate
-# ``Q/\Pi``. Within the WRF/MN10 idealized framework, ``\rho \approx \rho_r(z)``
+# i.e. heating raises ``T`` at rate ``F``, which raises ``\theta`` at rate
+# ``F/\Pi``. Within the WRF/MN10 idealized framework, ``\rho \approx \rho_r(z)``
 # inside the rainband, so we use the reference profile. Because that profile is
 # indexed by vertical level, the forcing is written in discrete form — the
 # `(i, j, k, …)` signature hands us `k` directly to look up ``\rho_r`` and ``\Pi``.
 
-Qₘₐₓ = 4.24f0 / Float32(hour)     # YD19 Eq. 3 peak rate, 4.24 K/h (stored in K/s)
-zᵇ = Float32(4kilometers)
-σᵣ = Float32(6kilometers)
-σᶻ = Float32(2kilometers)
-tᵣ = Float32(1hour)            # ramp duration, to avoid an instantaneous onset
+## Rainband heating parameters (YD19 Eq. 3). They are `const` so the rate function
+## below — read inside the GPU forcing kernel — stays type-stable.
+const Fₘₐₓ = 4.24f0 / Float32(hour)  # peak rate, 4.24 K/h (stored in K/s)
+const zᵇ = Float32(4kilometers)      # heating base height
+const σᵣ = Float32(6kilometers)      # radial width
+const σᶻ = Float32(2kilometers)      # vertical width
+const tᵣ = Float32(1hour)            # ramp duration, to avoid an instantaneous onset
+const tᵒⁿ = Float32(stage_stop_time) # heating switches on after the spinup
+const rᵇ = 60kilometers              # centerline radius at the downwind (λ = 0) edge
+const Δrᵇ = 10kilometers             # outward shift per π/4 of azimuth
 
-## Rainband geometry (YD19 Eq. 3): the heating centerline sits at radius `rᵇ` on
-## the downwind (λ = 0) edge and moves outward by `Δrᵇ` per π/4 of azimuth. They
-## are `const` so the GPU forcing kernel that reads them stays type-stable.
-const rᵇ = 60kilometers
-const Δrᵇ = 10kilometers
+## The rainband heating, written in Cartesian coordinates so it drops straight into a
+## `Field` (for the figures) and into the forcing below — YD19 Eq. 3. We prescribe it as
+## a *potential-temperature* tendency F(x, y, z, t) in K/s.
+@inline function rainband_heating_rate(x, y, z, t)
+    r = sqrt(x^2 + y^2)
+    λ = atan(y, x)
+    ramp = clamp((t - tᵒⁿ) / tᵣ, 0, 1)
+    s = 4λ / π                              # azimuth in quadrants: s = λ / (π/4)
+    r_bs = rᵇ - Δrᵇ * s + z                 # spiral centerline, tilting outward with height
+    G_r = exp(-(r - r_bs)^2 / 2σᵣ^2)         # radial Gaussian
+    z_rel = (z - zᵇ) / σᶻ
+    V_z = ifelse(abs(z_rel) < 1, sin(π * z_rel), zero(z_rel))   # vertical sine lobe
+    A_λ = exp(-(s + 1)^8)                    # azimuthal super-Gaussian, centered at λ = -π/4
+    return Fₘₐₓ * G_r * V_z * A_λ * ramp
+end
 
-## Reference Exner function Πᵣ(z) = (pᵣ/pˢᵗ)^κ converts the heating rate Q (K/s) into
-## the ρθ tendency ρ Q / Π. It — like the reference density — is a reduced
-## (Nothing, Nothing, Center) Field, indexed by vertical level in the forcing below.
-Πᵣ = Field((reference_state.pressure / pˢᵗ)^κ)
-
-@inline function rainband_heating(i, j, k, grid, clock, fields, p)
+## We attach the heating to the *specific* potential-temperature key `θ`. The model then
+## reads it as a θ tendency (K/s) and multiplies by ρ to form the ρθ tendency itself
+## (`SpecificForcing`) — so there's no Exner function, no reference density, and no heat
+## capacity to supply here: the forcing is just F, with no parameters at all.
+@inline function rainband_heating(i, j, k, grid, clock, fields)
     x = Oceananigans.Grids.xnode(i, j, k, grid, Center(), Center(), Center())
     y = Oceananigans.Grids.ynode(i, j, k, grid, Center(), Center(), Center())
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Center())
-
-    ramp = clamp((clock.time - p.tᵒⁿ) / p.tᵣ, 0, 1)
-    r = sqrt(x^2 + y^2)
-    s = 4 * atan(y, x) / π                 # azimuth in quadrants: s = λ / (π/4)
-    r_bs = rᵇ - Δrᵇ * s + z         # spiral centerline, tilting outward with height
-    G_r = exp(-(r - r_bs)^2 / 2p.σᵣ^2)     # radial Gaussian
-
-    z_rel = (z - p.zᵇ) / p.σᶻ
-    V_z = ifelse(abs(z_rel) < 1, sin(π * z_rel), zero(z_rel))   # vertical sine lobe
-
-    A_λ = exp(-(s + 1)^8)                   # azimuthal super-Gaussian, centered at λ = -π/4 (s = -1)
-
-    Q = p.Qₘₐₓ * G_r * V_z * A_λ * ramp
-    ## ρθ tendency ρᵣ Q / Πᵣ, reading the level-indexed reference fields (reduced in
-    ## x and y, so any i, j returns the column value).
-    ρᵣ_k = @inbounds p.ρᵣ[i, j, k]
-    Πᵣ_k = @inbounds p.Πᵣ[i, j, k]
-    return ρᵣ_k * Q / Πᵣ_k
+    return rainband_heating_rate(x, y, z, clock.time)
 end
 
-## The ramp switches the heating on only after the spinup, at tᵒⁿ = stage_stop_time.
-heating_params = (;
-    Qₘₐₓ, σᵣ, σᶻ, zᵇ, tᵒⁿ = Float32(stage_stop_time), tᵣ,
-    ρᵣ = reference_state.density, Πᵣ,
-)
-
-heating_forcing = Forcing(rainband_heating; discrete_form = true, parameters = heating_params)
-
-## Analytic heating rate at full strength (K/h) — for figure contours.
-function heating_rate_K_per_hour(r, λ, z)
-    s = 4λ / π
-    r_bs = rᵇ - Δrᵇ * s + z
-    G_r = exp(-(r - r_bs)^2 / 2σᵣ^2)
-    z_rel = (z - zᵇ) / σᶻ
-    V_z = abs(z_rel) < 1 ? sin(π * z_rel) : zero(z_rel)
-    A_λ = exp(-(s + 1)^8)
-    return Qₘₐₓ * hour * G_r * V_z * A_λ   # K/h (Qₘₐₓ is stored in K/s)
-end
+heating_forcing = Forcing(rainband_heating; discrete_form = true)
 
 # ## Upper-level sponge (WRF `damp_opt=2` analog)
 #
@@ -522,10 +488,7 @@ end
 sponge_z_bottom = Float32(20kilometers)
 sponge_z_top = Float32(25kilometers)
 
-## Reference ρθ profile (kg K / m³). The sponge relaxes ρθ to this profile
-## in the upper-level damping layer. Using the default (LiquidIcePotentialTemperature)
-## formulation because :StaticEnergy + CompressibleDynamics is currently broken
-## on GPU (gpu__compute_temperature_and_pressure! method-error).
+## Reference ρθ profile (kg K / m³); the sponge relaxes ρθ to it in the damping layer.
 ρθᵣ = Field(reference_state.density * reference_state.temperature * (pˢᵗ / reference_state.pressure)^κ)
 
 sponge_vel_params = (z_bot = sponge_z_bottom, z_top = sponge_z_top, rate = sponge_rate)
@@ -535,9 +498,9 @@ sponge_ρθ_params = (
 )
 
 ## WRF `damp_opt=2` analog: zero below z_bot, sin²() ramp to max at z_top.
-@inline function sponge_mask(z, z_bot, z_top)
-    ξ = (z - z_bot) / (z_top - z_bot)
-    return ifelse(ξ ≤ 0, zero(ξ), sin(π * ξ / 2)^2)
+@inline function sponge_mask(z, z⁻, z⁺)
+    ξ = (z - z⁻) / (z⁺ - z⁻)
+    return sin(π * ξ / 2)^2 * (ξ > 0)
 end
 
 @inline function sponge_ρu_fn(i, j, k, grid, clock, fields, p)
@@ -586,9 +549,11 @@ sponge_ρθ = Forcing(sponge_ρθ_fn; discrete_form = true, parameters = sponge_
 coriolis = FPlane(; f)
 dynamics = CompressibleDynamics(
     SplitExplicitTimeDiscretization();
-    surface_pressure, reference_potential_temperature = θ_env
+    surface_pressure, reference_potential_temperature = θₑ
 )
-forcing = (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρθ = (heating_forcing, sponge_ρθ))
+## The heating enters via the specific key `θ` (a θ tendency, ρ applied by the model);
+## the sponge relaxes the density `ρθ`. Both act on the same prognostic and are combined.
+forcing = (ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, θ = heating_forcing, ρθ = sponge_ρθ)
 model = AtmosphereModel(grid; dynamics, coriolis, advection = WENO(order = 5), forcing)
 
 set!(model; u = uᵢ, v = vᵢ, T = Tᵢ, ρ = ρᵢ)
@@ -616,134 +581,108 @@ xᶜ = grid_metric_operation((Center(), Center(), Center()), XNode(), grid)
 yᶜ = grid_metric_operation((Center(), Center(), Center()), YNode(), grid)
 rᶜ = sqrt(xᶜ^2 + yᶜ^2)
 
-output_filename = joinpath(output_dir, "tc_rainband.jld2")
-outputs = (
-    vθ = Field(@at((Center, Center, Center), -yᶜ * u + xᶜ * v) / rᶜ),
-    w = Field(@at((Center, Center, Center), w)),
-    θ = liquid_ice_potential_temperature(model),
-)
-simulation.output_writers[:fields] = JLD2Writer(
-    model, outputs;
-    filename = output_filename, schedule = TimeInterval(1hour), overwrite_existing = true
-)
+output_filename = joinpath(@__DIR__, "tc_rainband.jld2")
+
+vθ = Field((-yᶜ * u + xᶜ * v) / rᶜ)
+θ = liquid_ice_potential_temperature(model)
+outputs = (; w, vθ, θ)
+
+ow = JLD2Writer(model, outputs;
+                filename = output_filename,
+                schedule = TimeInterval(1hour),
+                overwrite_existing = true)
+
+simulation.output_writers[:fields] = ow
 
 run!(simulation)
 
 # ## Stage 4 — Analysis and figure production
 # Now that the have the full simulation, we replicate the figures from YD19 to verify our results.
+#
+# The writer stored the (online-rotated) tangential wind, w, and θ, so we read them
+# straight back as `FieldTimeSeries`. The analysis snapshots are the end of the
+# spinup (t = stage_stop_time) and the end of the heated run.
 
-@info "=== Stage 4: Analysis ==="
-
-## The writer stored the (online-rotated) tangential wind, w, and θ, so we read them
-## straight back as `FieldTimeSeries`. The analysis snapshots are the end of the
-## spinup (t = stage_stop_time) and the end of the heated run.
 vθt = FieldTimeSeries(output_filename, "vθ")
 wt = FieldTimeSeries(output_filename, "w")
 θt = FieldTimeSeries(output_filename, "θ")
+
 times = vθt.times
-n_spinup = searchsortedfirst(times, stage_stop_time)   # end of spinup
-n_heated = length(times)                               # end of heated run
+Ns = searchsortedfirst(times, stage_stop_time)   # end of spinup
+Nh = length(times)                               # end of heated run
 
-r_bin_edges = collect(range(0, 150kilometers, step = Δx))
-Nr_bin = length(r_bin_edges) - 1
-r_bin_centers = 0.5 .* (r_bin_edges[1:(end - 1)] .+ r_bin_edges[2:end])
-xs_center = xnodes(grid, Center())
-ys_center = ynodes(grid, Center())
-r_last = last(r_bin_edges)
-
-## Sector azimuthal average. The tangential wind was already formed online, so here
-## we only bin into radial rings (Oceananigans has no polar reduction).
-vθ_ws = zeros(Nr_bin, Nz)
-θ_ws = similar(vθ_ws)
-ct_ws = zeros(Int, Nr_bin, Nz)
-
-function azimuthal_mean!(v̄θ, θ̄, ct, vθ, θ)
-    fill!(v̄θ, 0); fill!(θ̄, 0); fill!(ct, 0)
-    Nxs, Nys, Nzs = size(vθ)
-    @inbounds for k in 1:Nzs, j in 1:Nys, i in 1:Nxs
-        r = sqrt(xs_center[i]^2 + ys_center[j]^2)
-        r ≥ r_last && continue
-        ib = clamp(searchsortedlast(r_bin_edges, r), 1, Nr_bin)
-        v̄θ[ib, k] += vθ[i, j, k]
-        θ̄[ib, k] += θ[i, j, k]
-        ct[ib, k] += 1
-    end
-    @inbounds for k in 1:Nzs, ib in 1:Nr_bin
-        if ct[ib, k] > 0
-            v̄θ[ib, k] /= ct[ib, k]
-            θ̄[ib, k] /= ct[ib, k]
-        end
-    end
-    return nothing
-end
+xc = xnodes(grid, Center())
+yc = ynodes(grid, Center())
 
 # ## F02ab — basic-state vortex (YD19 Fig 2a,b)
+#
+# The azimuthal averages are a one-liner with Breeze's `azimuthal_mean`, which bins a
+# Cartesian snapshot into an `(r, z)` `Field` (on the GPU). The vortex sits at the
+# origin, so the default `center = (0, 0)` applies. The radius and height axes come
+# from the ring grid's `xnodes`/`znodes` (in km).
 
-azimuthal_mean!(vθ_ws, θ_ws, ct_ws, interior(vθt[n_spinup]), interior(θt[n_spinup]))
+v̄θ = azimuthal_mean(vθt[Ns]; radius = 150kilometers, Nr = 30)
+θ̄ = azimuthal_mean(θt[Ns]; radius = 150kilometers, Nr = 30)
+tₛ = times[Ns]
 
-t_final = times[n_spinup]
-θ_env_column = [θ_env(z) for z in z_centers]
-θ_anom = θ_ws .- reshape(θ_env_column, 1, :)
+## θ̄' = θ̄ − θₑ(z), formed on the (r, z) ring grid.
+θ̄ₑ = CenterField(θ̄.grid)
+set!(θ̄ₑ, (r, z) -> θₑ(z))
+θ̄′ = Field(θ̄ - θ̄ₑ)
 
+r_km = xnodes(v̄θ.grid, Center()) ./ kilometer
+z_km = znodes(v̄θ.grid, Center()) ./ kilometer
 fig = Figure(size = (1300, 520))
 
 ax_v = Axis(
     fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",
-    title = "(a) Basic-state tangential wind v̄",
-    limits = (0, 150, 0, 22)
+    title = "(a) Basic-state tangential wind v̄", limits = (0, 150, 0, 22)
 )
-v_cr_hi = 50
-hm_v = heatmap!(
-    ax_v, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_ws;
-    colormap = :inferno, colorrange = (0, v_cr_hi)
-)
-contour!(
-    ax_v, r_bin_centers ./ kilometer, z_centers ./ kilometer, vθ_ws;
-    levels = 5:5:v_cr_hi, color = :white, linewidth = 0.8
-)
+v̂ = 50
+hm_v = heatmap!(ax_v, r_km, z_km, view(v̄θ, :, 1, :); colormap = :inferno, colorrange = (0, v̂))
+contour!(ax_v, r_km, z_km, view(v̄θ, :, 1, :); levels = 5:5:v̂, color = :white, linewidth = 0.8)
 Colorbar(fig[1, 2], hm_v; label = "v̄ (m s⁻¹)")
 
 ax_θ = Axis(
     fig[1, 3]; xlabel = "Radius (km)", ylabel = "Height (km)",
-    title = "(b) Potential-temperature anomaly θ̄'",
-    limits = (0, 150, 0, 22)
+    title = "(b) Potential-temperature anomaly θ̄'", limits = (0, 150, 0, 22)
 )
-θ_span = 10
-hm_θ = heatmap!(
-    ax_θ, r_bin_centers ./ kilometer, z_centers ./ kilometer, θ_anom;
-    colormap = :balance, colorrange = (-θ_span, θ_span)
-)
-contour!(
-    ax_θ, r_bin_centers ./ kilometer, z_centers ./ kilometer, θ_anom;
-    levels = -θ_span:1.69:θ_span, color = :black, linewidth = 0.5
-)
+θ̂ = 10
+hm_θ = heatmap!(ax_θ, r_km, z_km, view(θ̄′, :, 1, :); colormap = :balance, colorrange = (-θ̂, θ̂))
+contour!(ax_θ, r_km, z_km, view(θ̄′, :, 1, :); levels = -θ̂:1.69:θ̂, color = :black, linewidth = 0.5)
 Colorbar(fig[1, 4], hm_θ; label = "θ̄' (K)")
 
 Label(fig[0, :],
-    "F02ab — Basic-state vortex at t = $(round(t_final / hour, digits = 1)) h spin-up ($(round(Int, Lx / kilometers)) km box)";
+    "F02ab — Basic-state vortex at t = $(round(tₛ / hour, digits = 1)) h spin-up ($(round(Int, Lx / kilometers)) km box)";
     fontsize = 17)
-
-save(joinpath(figures_dir, "F02ab_vortex.png"), fig) #src
 fig
 
 # ## F02cd — analytic heating field (YD19 Fig 2c,d)
+#
+# We render the prescribed heating F as `Field`s — on a dedicated (r, z) grid for the
+# cross section and a horizontal (x, y) grid for the plan view — letting `set!` evaluate
+# the Cartesian `rainband_heating_rate` on each, so coordinates always come from the grid.
 
-r_cs = collect(range(0.0, 150kilometers, length = 151))
-z_cs = collect(range(0.0, 12kilometers, length = 61))
-λ_mid = -π / 4
-Q_cs = [heating_rate_K_per_hour(r, λ_mid, z) for r in r_cs, z in z_cs]
+λ₀ = -π / 4
+z₀ = 4.6kilometers
+t̂ = tᵒⁿ + tᵣ                          # fully ramped-up heating, in K/h via × hour
 
-x_pv = collect(range(-Lx / 2, Lx / 2, length = 300))
-y_pv = copy(x_pv)
-z_level = 4.6kilometers
-Q_pv = zeros(length(x_pv), length(y_pv))
-for j in eachindex(y_pv), i in eachindex(x_pv)
-    r = sqrt(x_pv[i]^2 + y_pv[j]^2)
-    λ = atan(y_pv[j], x_pv[i])
-    Q_pv[i, j] = heating_rate_K_per_hour(r, λ, z_level)
-end
+## (c) radial–vertical cross section at λ = -π/4, on a dedicated (r, z) grid. The grid is
+## Flat in y, so `set!` calls f(r, z); we sample the band at fixed azimuth λ₀.
+cross_grid = RectilinearGrid(size = (150, 60), x = (0, 150kilometers), z = (0, 12kilometers),
+                             topology = (Bounded, Flat, Bounded))
+Fᶜ = CenterField(cross_grid)
+set!(Fᶜ, (r, z) -> rainband_heating_rate(r * cos(λ₀), r * sin(λ₀), z, t̂) * hour)
+r_km = xnodes(cross_grid, Center()) ./ kilometer
+z_km = znodes(cross_grid, Center()) ./ kilometer
 
-Q_lim = 4.5
+## (d) plan view at z₀, on a horizontal (x, y) grid matching the model's columns.
+plan_grid = RectilinearGrid(size = (Nx, Ny), x = (-Lx / 2, Lx / 2), y = (-Lx / 2, Lx / 2),
+                            topology = (Periodic, Periodic, Flat))
+Fᵈ = CenterField(plan_grid)
+set!(Fᵈ, (x, y) -> rainband_heating_rate(x, y, z₀, t̂) * hour)
+
+F̂ = 4.5
 fig = Figure(size = (1300, 520))
 
 ax_c = Axis(
@@ -752,82 +691,72 @@ ax_c = Axis(
     limits = (0, 150, 0, 12)
 )
 hm_c = heatmap!(
-    ax_c, r_cs ./ kilometer, z_cs ./ kilometer, Q_cs;
-    colormap = :balance, colorrange = (-Q_lim, Q_lim)
+    ax_c, r_km, z_km, view(Fᶜ, :, 1, :);
+    colormap = :balance, colorrange = (-F̂, F̂)
 )
 contour!(
-    ax_c, r_cs ./ kilometer, z_cs ./ kilometer, Q_cs;
+    ax_c, r_km, z_km, view(Fᶜ, :, 1, :);
     levels = -4:1:4, color = :black, linewidth = 0.6
 )
-Colorbar(fig[1, 2], hm_c; label = "Q (K h⁻¹)")
+Colorbar(fig[1, 2], hm_c; label = "F (K h⁻¹)")
 
 ax_d = Axis(
     fig[1, 3]; xlabel = "x (km)", ylabel = "y (km)",
-    title = "(d) Heating plan view at z = $(round(z_level / 1000, digits = 1)) km",
+    title = "(d) Heating plan view at z = $(round(z₀ / 1000, digits = 1)) km",
     aspect = DataAspect(), limits = (-120, 120, -120, 120)
 )
 hm_d = heatmap!(
-    ax_d, x_pv ./ kilometer, y_pv ./ kilometer, Q_pv;
-    colormap = :balance, colorrange = (-Q_lim, Q_lim)
+    ax_d, xc ./ kilometer, yc ./ kilometer, view(Fᵈ, :, :, 1);
+    colormap = :balance, colorrange = (-F̂, F̂)
 )
 contour!(
-    ax_d, x_pv ./ kilometer, y_pv ./ kilometer, Q_pv;
+    ax_d, xc ./ kilometer, yc ./ kilometer, view(Fᵈ, :, :, 1);
     levels = -4:0.5:4, color = :black, linewidth = 0.4
 )
-Colorbar(fig[1, 4], hm_d; label = "Q (K h⁻¹)")
+Colorbar(fig[1, 4], hm_d; label = "F (K h⁻¹)")
 
 Label(fig[0, :],
     "F02cd — MN10 stratiform heating field ($(round(Int, Lx / kilometers)) km box)";
     fontsize = 17)
-
-save(joinpath(figures_dir, "F02cd_heating.png"), fig) #src
 fig
 
 # ## F02e — plan-view vertical velocity in the heated run
 
-t_heat_final = times[n_heated]
-w_heated = interior(wt[n_heated])              # cell-centered w (host array)
+tₕ = times[Nh]
 
-z_w_slice = 3kilometers
-k_w = argmin(abs.(z_centers .- z_w_slice))
-w_slice = w_heated[:, :, k_w]
-w_lim = max(0.5, ceil(maximum(abs, w_slice) * 2) / 2)
-z_w_km = z_centers[k_w] / kilometer
+## w lives on z-faces, so slice at the face nearest 3 km (no interpolation, no `interior`).
+zᶠ = znodes(grid, Face())
+z₃ = 3kilometers
+k₃ = argmin(abs.(zᶠ .- z₃))
+wₛ = view(wt[Nh], :, :, k₃)              # native w (Center, Center, Face)
+ŵ = max(0.5, ceil(maximum(abs, wₛ) * 2) / 2)
 
-## Heating overlay at the slice altitude — the red/blue ±1 K/h contours mark
-## where the imposed forcing sits.
-Q_slice = [
-    heating_rate_K_per_hour(
-            sqrt(xs_center[i]^2 + ys_center[j]^2),
-            atan(ys_center[j], xs_center[i]),
-            z_centers[k_w]
-        )
-        for i in 1:Nx, j in 1:Ny
-]
+## Heating overlay at the slice altitude — a `Field` on the same horizontal grid — whose
+## red/blue ±1 K/h contours mark where the imposed forcing sits.
+Fᵉ = CenterField(plan_grid)
+set!(Fᵉ, (x, y) -> rainband_heating_rate(x, y, zᶠ[k₃], t̂) * hour)
 
 fig = Figure(size = (800, 700))
 ax = Axis(
     fig[1, 1];
     xlabel = "x (km)", ylabel = "y (km)",
-    title = "(e) Heated-run vertical velocity at z = $(round(z_w_km, digits = 1)) km, t = $(round(t_heat_final / hour, digits = 1)) h",
+    title = "(e) Heated-run vertical velocity at z = $(round(zᶠ[k₃] / kilometer, digits = 1)) km, t = $(round(tₕ / hour, digits = 1)) h",
     aspect = DataAspect(),
     limits = (-120, 120, -120, 120),
 )
 hm = heatmap!(
-    ax, xs_center ./ kilometer, ys_center ./ kilometer, w_slice;
-    colormap = :balance, colorrange = (-w_lim, w_lim)
+    ax, xc ./ kilometer, yc ./ kilometer, wₛ;
+    colormap = :balance, colorrange = (-ŵ, ŵ)
 )
-maximum(Q_slice) > 1 && contour!(ax, xs_center ./ kilometer, ys_center ./ kilometer, Q_slice;
+maximum(Fᵉ) > 1 && contour!(ax, xc ./ kilometer, yc ./ kilometer, view(Fᵉ, :, :, 1);
     levels = [1.0], color = :red, linewidth = 2)
-minimum(Q_slice) < -1 && contour!(ax, xs_center ./ kilometer, ys_center ./ kilometer, Q_slice;
+minimum(Fᵉ) < -1 && contour!(ax, xc ./ kilometer, yc ./ kilometer, view(Fᵉ, :, :, 1);
     levels = [-1.0], color = :blue, linewidth = 2)
 Colorbar(fig[1, 2], hm; label = "w (m s⁻¹)")
 
 Label(fig[0, :],
-    "F02e — Plan-view w in heated run (z = $(round(z_w_km, digits = 1)) km, $(round(Int, Lx / kilometers)) km box)";
+    "F02e — Plan-view w in heated run (z = $(round(zᶠ[k₃] / kilometer, digits = 1)) km, $(round(Int, Lx / kilometers)) km box)";
     fontsize = 17)
-
-save(joinpath(figures_dir, "F02e_w_heated.png"), fig) #src
 fig
 
 # ## Reproducing the full YD19 response (optional)
