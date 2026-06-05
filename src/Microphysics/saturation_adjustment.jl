@@ -262,10 +262,10 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Saturation adjustment for the [`LiquidIceDensityState`](@ref): a secant on the
+Saturation adjustment for the `LiquidIceDensityState`: a secant on the
 constant-density θˡⁱ-conservation residual, so `qsat` and the θˡⁱ inversion are evaluated at the
 state's actual density `ρ` (with true pressure `p = ρRᵐT`) rather than a fixed reference pressure.
-This is the density-consistent analogue of the generic (reference-pressure) [`adjust_state`] secant;
+This is the density-consistent analogue of the generic (reference-pressure) `adjust_state` secant;
 like that one it holds θˡⁱ fixed (conserves it). See NumericalEarth/Breeze.jl#765.
 """
 @inline function adjust_thermodynamic_state(𝒰₀::LiquidIceDensityState, microphysics::SA, constants)
