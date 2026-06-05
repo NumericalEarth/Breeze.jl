@@ -636,8 +636,6 @@ end
 ##### 3D terrain reference state via per-column discrete Exner integration
 #####
 
-using GPUArraysCore: @allowscalar
-
 using Breeze.Thermodynamics: hydrostatic_pressure
 
 """
@@ -661,40 +659,51 @@ otherwise be dominated by the near-cancellation of two large terms.
 The reference pressure is also used for the perturbation horizontal pressure gradient,
 reducing the terrain-following PGF error.
 """
-function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, θᵣ, pˢᵗ, constants)
-    Nx, Ny, Nz = size(grid)
+@kernel function _compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, θᵣ, pˢᵗ, constants)
+    i, j = @index(Global, NTuple)
     c = Center()
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     κ = Rᵈ / cᵖᵈ
     g = constants.gravitational_acceleration
-    @allowscalar for j in 1:Ny, i in 1:Nx
-        πₖ = zero(κ) # initialized at k == 1 below
-        for k in 1:Nz
-            z = znode(i, j, k, grid, c, c, c)
-            θₖ = θᵣ isa Number ? θᵣ : θᵣ(z)
+    Nz = size(grid, 3)
 
-            if k == 1
-                # Evaluate the continuous hydrostatic pressure at the local
-                # physical height (which varies with terrain) rather than
-                # forcing sea-level pressure at every column.
-                p_hydro = hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
-                πₖ = (p_hydro / pˢᵗ)^κ
-            else
-                z_below = znode(i, j, k - 1, grid, c, c, c)
-                θ_below = θᵣ isa Number ? θᵣ : θᵣ(z_below)
-                θ_face = (θₖ + θ_below) / 2
-                Δz = Δzᶜᶜᶠ(i, j, k, grid)
-                πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)
-            end
+    πₖ = zero(κ) # initialized at k == 1 below
+    @inbounds for k in 1:Nz
+        z = znode(i, j, k, grid, c, c, c)
+        θₖ = θᵣ isa Number ? θᵣ : θᵣ(z)
 
-            pₖ = pˢᵗ * πₖ^(1 / κ)
-            ρₖ = pₖ / (Rᵈ * θₖ * πₖ)
-            @inbounds pᵣ[i, j, k] = pₖ
-            @inbounds ρᵣ[i, j, k] = ρₖ
+        if k == 1
+            # Evaluate the continuous hydrostatic pressure at the local physical
+            # height (which varies with terrain) rather than forcing sea-level
+            # pressure at every column.
+            p_hydro = hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
+            πₖ = (p_hydro / pˢᵗ)^κ
+        else
+            z_below = znode(i, j, k - 1, grid, c, c, c)
+            θ_below = θᵣ isa Number ? θᵣ : θᵣ(z_below)
+            θ_face = (θₖ + θ_below) / 2
+            Δz = Δzᶜᶜᶠ(i, j, k, grid)
+            πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)
         end
-    end
 
+        pₖ = pˢᵗ * πₖ^(1 / κ)
+        ρₖ = pₖ / (Rᵈ * θₖ * πₖ)
+        pᵣ[i, j, k] = pₖ
+        ρᵣ[i, j, k] = ρₖ
+    end
+end
+
+function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, θᵣ, pˢᵗ, constants)
+    # The per-column upward Exner integration is serial in `k` but independent
+    # across columns, so we launch one GPU thread per (i, j) column. (Doing this
+    # loop on the host with a GPU grid would issue a scalar host↔device operation
+    # per cell — O(minutes) for millions of cells.) `hydrostatic_pressure` with a
+    # functional θ uses a fixed, allocation-free numerical integration, so the
+    # whole column fill is GPU-safe — cf. `_compute_hydrostatic_pressure!`.
+    arch = architecture(grid)
+    launch!(arch, grid, :xy, _compute_terrain_reference_state!,
+            pᵣ, ρᵣ, grid, p₀, θᵣ, pˢᵗ, constants)
     fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
     return nothing
