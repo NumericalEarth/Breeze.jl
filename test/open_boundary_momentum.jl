@@ -1,7 +1,7 @@
 using Test
 using Oceananigans
 using Oceananigans.Architectures: CPU
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, OpenBoundaryCondition,
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, NormalFlowBoundaryCondition,
                                        PeriodicBoundaryCondition, fill_halo_regions!
 using GPUArraysCore: @allowscalar
 using Breeze
@@ -62,8 +62,8 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         U_bg = FT(5.0)
         ρu_value = ρ_b * U_bg
 
-        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_value),
-                                          east = OpenBoundaryCondition(ρu_value))
+        ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_value),
+                                          east = NormalFlowBoundaryCondition(ρu_value))
         model = AtmosphereModel(grid_bpb; dynamics=dynamics,
                                            formulation=:LiquidIcePotentialTemperature,
                                            boundary_conditions=(; ρu=ρu_bcs))
@@ -92,8 +92,8 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         V_bg = FT(5.0)
         ρv_value = ρ_b * V_bg
 
-        ρv_bcs = FieldBoundaryConditions(south = OpenBoundaryCondition(ρv_value),
-                                          north = OpenBoundaryCondition(ρv_value))
+        ρv_bcs = FieldBoundaryConditions(south = NormalFlowBoundaryCondition(ρv_value),
+                                          north = NormalFlowBoundaryCondition(ρv_value))
         model = AtmosphereModel(grid_bbb; dynamics=dynamics,
                                            formulation=:LiquidIcePotentialTemperature,
                                            boundary_conditions=(; ρv=ρv_bcs))
@@ -120,8 +120,8 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         W_bg = FT(0.1)  # Small w to stay in hydrostatic-noise regime
         ρw_value = ρ_b * W_bg
 
-        ρw_bcs = FieldBoundaryConditions(bottom = OpenBoundaryCondition(ρw_value),
-                                          top    = OpenBoundaryCondition(ρw_value))
+        ρw_bcs = FieldBoundaryConditions(bottom = NormalFlowBoundaryCondition(ρw_value),
+                                          top    = NormalFlowBoundaryCondition(ρw_value))
         model = AtmosphereModel(grid_bbb; dynamics=dynamics,
                                            formulation=:LiquidIcePotentialTemperature,
                                            boundary_conditions=(; ρw=ρw_bcs))
@@ -147,8 +147,8 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         U_bg = FT(5.0)
         ρu_value = ρ_b * U_bg
 
-        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_value),
-                                          east = OpenBoundaryCondition(ρu_value))
+        ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_value),
+                                          east = NormalFlowBoundaryCondition(ρu_value))
         model = AtmosphereModel(grid_bpb; dynamics=dynamics,
                                            formulation=:LiquidIcePotentialTemperature,
                                            boundary_conditions=(; ρu=ρu_bcs))
@@ -202,8 +202,8 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         U_bg = FT(5.0)
         ρu_value = ρ_b * U_bg
 
-        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_value),
-                                          east = OpenBoundaryCondition(ρu_value))
+        ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_value),
+                                          east = NormalFlowBoundaryCondition(ρu_value))
         model = AtmosphereModel(grid_bpb; dynamics=dynamics,
                                            formulation=:LiquidIcePotentialTemperature,
                                            boundary_conditions=(; ρu=ρu_bcs))
@@ -226,7 +226,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
 
     @testset "Default impenetrable wall (no user momentum BC) gives u = 0 at wall" begin
         # `nothing` on velocity is the catch-all override, but the default impenetrable
-        # behavior must still hold: when momentum has the default OpenBoundaryCondition(0),
+        # behavior must still hold: when momentum has the default NormalFlowBoundaryCondition(0),
         # the kernel writes u = ρu/ρ = 0 at the wall and the wall stays impenetrable.
         reference_state = ReferenceState(grid_bpb; surface_pressure=FT(101325),
                                                     potential_temperature=FT(300))
@@ -258,8 +258,8 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         U_bg = FT(5.0)
         ρu_value = ρ_b * U_bg
 
-        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_value),
-                                          east = OpenBoundaryCondition(ρu_value))
+        ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_value),
+                                          east = NormalFlowBoundaryCondition(ρu_value))
         model = AtmosphereModel(grid_bpb; dynamics=dynamics,
                                            formulation=:LiquidIcePotentialTemperature,
                                            boundary_conditions=(; ρu=ρu_bcs))
@@ -285,8 +285,8 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         U_bg = FT(5.0)
         ρu_value = ρ_b * U_bg
 
-        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_value),
-                                          east = OpenBoundaryCondition(ρu_value))
+        ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_value),
+                                          east = NormalFlowBoundaryCondition(ρu_value))
         model = AtmosphereModel(grid_bpb; dynamics=dynamics,
                                            formulation=:LiquidIcePotentialTemperature,
                                            boundary_conditions=(; ρu=ρu_bcs))
