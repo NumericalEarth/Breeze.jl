@@ -19,9 +19,9 @@
 # 24 h spinup so the vortex relaxes to numerical equilibrium, then run a 24 h
 # *heated* continuation with the MN10 stratiform heating switched on. We
 # visualize the basic-state vortex, the analytic heating field, and a plan
-# view of the vertical velocity that the heating drives. A commented-out
-# control stub at the bottom lets users add the heated − control subtraction
-# YD19 use for their full quadrupole response.
+# view of the vertical velocity that the heating drives. A closing note sketches
+# how to add the heated − control subtraction YD19 use for their full quadrupole
+# response.
 #
 # ## What this simulation teaches
 #
@@ -359,6 +359,12 @@ set!(Tⱽ, Tᵣⱽ)
 α = 0.5
 T⁺ = Field(α * (pⱽ / (Rᵈ * ρʰ)) + (1 - α) * Tⱽ)
 
+# ### Iterate to the balanced fixed point
+#
+# Each sweep re-forms ``\rho``, integrates the gradient-wind balance inward with the
+# `CumulativeIntegral`, then recovers ``\rho`` and ``T`` from hydrostatic balance —
+# under-relaxing ``T`` by ``\alpha`` to converge the fixed point.
+
 for iter in 1:60
     ρⱽ .= pⱽ / (Rᵈ * Tⱽ)
 
@@ -379,9 +385,12 @@ end
 
 ρⱽ .= pⱽ / (Rᵈ * Tⱽ)
 
-## Map the axisymmetric (r, z) solution onto the 3-D model with pointwise initial
-## conditions; `set!` evaluates these on the host and `Oceananigans.Fields.interpolate`
-## does the (r, z) lookup, so no hand-rolled interpolation table is needed.
+# ### Map the (r, z) solution onto the 3-D model
+#
+# Pointwise initial-condition functions: `set!` evaluates these on the host and
+# `Oceananigans.Fields.interpolate` does the (r, z) lookup, so there's no hand-rolled
+# interpolation table.
+
 r(x, y) = sqrt(x^2 + y^2)
 uᵢ(x, y, z) = -y / r(x, y) * Oceananigans.Fields.interpolate((r(x, y), z), vⱽ)
 vᵢ(x, y, z) = +x / r(x, y) * Oceananigans.Fields.interpolate((r(x, y), z), vⱽ)
@@ -413,21 +422,12 @@ Tᵢ(x, y, z) = Oceananigans.Fields.interpolate((r(x, y), z), Tⱽ)
 # ``R(t)`` is a 1-hour linear ramp from zero to full strength to avoid an
 # instantaneous shock.
 #
-# The energy-equation source is keyed to the model's thermodynamic prognostic.
-# This driver uses the default `:LiquidIcePotentialTemperature` formulation
-# (prognostic ``\rho\theta``), so a heating rate ``F`` (K/s) gives
-#
-# ```math
-# \left. \frac{\partial(\rho\theta)}{\partial t} \right|_\text{heat}
-#     = \rho \, \frac{F}{\Pi},
-# \qquad \Pi(z) = \left(\frac{p_r(z)}{p^{\text{st}}}\right)^{R^d/c_p^d}
-# ```
-#
-# i.e. heating raises ``T`` at rate ``F``, which raises ``\theta`` at rate
-# ``F/\Pi``. Within the WRF/MN10 idealized framework, ``\rho \approx \rho_r(z)``
-# inside the rainband, so we use the reference profile. Because that profile is
-# indexed by vertical level, the forcing is written in discrete form — the
-# `(i, j, k, …)` signature hands us `k` directly to look up ``\rho_r`` and ``\Pi``.
+# We hand this to the model as a *specific potential-temperature* tendency: a forcing
+# keyed `θ`. The key is what fixes the units — it declares "``F`` is a ``\theta`` tendency
+# (K/s)" — so the model multiplies by ``\rho`` to form the ``\rho\theta`` tendency itself
+# (`SpecificForcing`), and no Exner function, reference density, or heat capacity appears
+# here. We write it in `discrete_form` only to read the cell-center coordinates
+# ``(x, y, z)`` from the grid inside the kernel.
 
 ## Rainband heating parameters (YD19 Eq. 3). They are `const` so the rate function
 ## below — read inside the GPU forcing kernel — stays type-stable.
@@ -596,8 +596,8 @@ simulation.output_writers[:fields] = ow
 
 run!(simulation)
 
-# ## Stage 4 — Analysis and figure production
-# Now that the have the full simulation, we replicate the figures from YD19 to verify our results.
+# ## Analysis and figure production
+# Now that we have the full simulation, we replicate the figures from YD19 to verify our results.
 #
 # The writer stored the (online-rotated) tangential wind, w, and θ, so we read them
 # straight back as `FieldTimeSeries`. The analysis snapshots are the end of the
@@ -614,7 +614,7 @@ Nh = length(times)                               # end of heated run
 xc = xnodes(grid, Center())
 yc = ynodes(grid, Center())
 
-# ## F02ab — basic-state vortex (YD19 Fig 2a,b)
+# ## Basic-state vortex (cf. YD19 Fig. 2a,b)
 #
 # The azimuthal averages are a one-liner with Breeze's `azimuthal_mean`, which bins a
 # Cartesian snapshot into an `(r, z)` `Field` (on the GPU). The vortex sits at the
@@ -653,11 +653,11 @@ contour!(ax_θ, r_km, z_km, view(θ̄′, :, 1, :); levels = -θ̂:1.69:θ̂, co
 Colorbar(fig[1, 4], hm_θ; label = "θ̄' (K)")
 
 Label(fig[0, :],
-    "F02ab — Basic-state vortex at t = $(round(tₛ / hour, digits = 1)) h spin-up ($(round(Int, Lx / kilometers)) km box)";
+    "Basic-state vortex at t = $(round(tₛ / hour, digits = 1)) h spin-up ($(round(Int, Lx / kilometers)) km box)";
     fontsize = 17)
 fig
 
-# ## F02cd — analytic heating field (YD19 Fig 2c,d)
+# ## Analytic heating field (cf. YD19 Fig. 2c,d)
 #
 # We render the prescribed heating F as `Field`s — on a dedicated (r, z) grid for the
 # cross section and a horizontal (x, y) grid for the plan view — letting `set!` evaluate
@@ -716,11 +716,11 @@ contour!(
 Colorbar(fig[1, 4], hm_d; label = "F (K h⁻¹)")
 
 Label(fig[0, :],
-    "F02cd — MN10 stratiform heating field ($(round(Int, Lx / kilometers)) km box)";
+    "MN10 stratiform heating field ($(round(Int, Lx / kilometers)) km box)";
     fontsize = 17)
 fig
 
-# ## F02e — plan-view vertical velocity in the heated run
+# ## Vertical velocity in the heated run (cf. YD19 Fig. 2e)
 
 tₕ = times[Nh]
 
@@ -755,22 +755,15 @@ minimum(Fᵉ) < -1 && contour!(ax, xc ./ kilometer, yc ./ kilometer, view(Fᵉ, 
 Colorbar(fig[1, 2], hm; label = "w (m s⁻¹)")
 
 Label(fig[0, :],
-    "F02e — Plan-view w in heated run (z = $(round(zᶠ[k₃] / kilometer, digits = 1)) km, $(round(Int, Lx / kilometers)) km box)";
+    "Plan-view w in heated run (z = $(round(zᶠ[k₃] / kilometer, digits = 1)) km, $(round(Int, Lx / kilometers)) km box)";
     fontsize = 17)
 fig
 
 # ## Reproducing the full YD19 response (optional)
 #
-# To get the quadrupole *response* (heated − control) that YD19 plot in their
-# Figs 3–4, also run a control stage with `with_heating = false` from the
-# post-spinup state and subtract it from the heated captures above:
-#
-# ```julia
-# @info "=== Control: $(prettytime(stage_stop_time)) ==="
-# control_result = build_and_run_stage!(
-#     "control";
-#     with_heating = false,
-#     init = post_spinup,
-#     stop_time = stage_stop_time,
-# )
-# ```
+# The figures above show the *heated* state. YD19's quadrupole *response* (their
+# Figs 3–4) is the heated − control difference. To build it, construct a second
+# `AtmosphereModel` identical to this one but with the heating dropped from the
+# `forcing` tuple (`forcing = (; ρu = sponge_ρu, ρv = sponge_ρv, ρw = sponge_ρw, ρθ = sponge_ρθ)`),
+# initialize it from the same balanced vortex, run it for the same `2 * stage_stop_time`,
+# and subtract its `FieldTimeSeries` from the heated ones — e.g. `Δw = wt[Nh] - wt_control[Nh]`.
