@@ -125,8 +125,8 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
 # kwargs accepted by `ExnerReferenceState`. A `nothing` θ in the NamedTuple is
 # elided so `ExnerReferenceState`'s own `potential_temperature = 288` default
 # takes effect.
-_exner_kwargs(ref_spec) = (; potential_temperature = ref_spec)
-function _exner_kwargs(ref_spec::NamedTuple)
+exner_kwargs(ref_spec) = (; potential_temperature = ref_spec)
+function exner_kwargs(ref_spec::NamedTuple)
     if haskey(ref_spec, :reference_temperature)
         return (; reference_temperature = ref_spec.reference_temperature,
                   vapor_mass_fraction = ref_spec.reference_vapor_mass_fraction)
@@ -179,7 +179,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     else
         reference_state = ExnerReferenceState(grid, thermodynamic_constants;
                                               surface_pressure, standard_pressure,
-                                              _exner_kwargs(ref_spec)...)
+                                              exner_kwargs(ref_spec)...)
     end
 
     # Create contravariant velocity/momentum fields and terrain reference state
@@ -360,7 +360,7 @@ function AtmosphereModels.boundary_conditions_reference_state(dynamics::Compress
 
     return ExnerReferenceState(grid, thermodynamic_constants;
                                surface_pressure, standard_pressure,
-                               _exner_kwargs(ref_spec)...)
+                               exner_kwargs(ref_spec)...)
 end
 
 #####

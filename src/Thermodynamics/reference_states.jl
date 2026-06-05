@@ -564,6 +564,36 @@ Base.show(io::IO, ref::ExnerReferenceState) = print(io, summary(ref))
     end
 end
 
+# Level-local moist EOS constants from a vapor mass fraction: the mixture gas
+# constant Rᵐ = (1-qᵛ) Rᵈ + qᵛ Rᵛ, isobaric heat capacity cᵖᵐ = (1-qᵛ) cᵖᵈ + qᵛ cᵖᵛ,
+# and κᵐ = Rᵐ/cᵖᵐ. The dry case is recovered exactly when qᵛ ≡ 0. Operates on plain
+# scalars (not a `MoistureMassFractions`) so it can be called from GPU kernels that
+# receive the bare constants rather than a `ThermodynamicConstants` object.
+@inline function moist_reference_constants(qᵛ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    qᵈ = 1 - qᵛ
+    Rᵐ = qᵈ * Rᵈ + qᵛ * Rᵛ
+    cᵖᵐ = qᵈ * cᵖᵈ + qᵛ * cᵖᵛ
+    return Rᵐ, cᵖᵐ, Rᵐ / cᵖᵐ
+end
+
+# Newton solve of the discrete hydrostatic balance for the pressure pₖ at one face,
+# given the level below (p⁻, ρ⁻) and the level-local moist constants. The residual
+#   F(p) = p / Δz + Aₖ p^(1−κₖ) − Cₖ,   Aₖ = g pˢᵗ^κₖ / (2 Rᵐₖ θₖ),  Cₖ = p⁻/Δz − g ρ⁻/2
+# is monotone increasing in p, so Newton converges in O(few) iterations from the
+# continuous-Π initial guess pₖ. Shared by the per-column Exner kernel and the terrain
+# reference-state solve; `iterations` is a fixed trip count so the loop unrolls on the GPU.
+@inline function newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, iterations)
+    Aₖ = g * pˢᵗ^κₖ / (2 * Rᵐₖ * θₖ)
+    Cₖ = p⁻ / Δz - g * ρ⁻ / 2
+    for _ in 1:iterations
+        ρp = pₖ^(-κₖ)
+        f  = pₖ / Δz + Aₖ * pₖ * ρp - Cₖ
+        f′ = 1 / Δz + Aₖ * (1 - κₖ) * ρp
+        pₖ = pₖ - f / f′
+    end
+    return pₖ
+end
+
 # Discrete-balance Exner integration for one column (i, j) of θ̄ and an
 # optional vapor profile qᵛ. Enforces
 #   (p[k] − p[k − 1]) / Δz_face[k] + g · (ρ[k] + ρ[k − 1]) / 2 = 0
@@ -581,10 +611,7 @@ end
     # face — no discrete-balance constraint applies — so the anchor is free.
     @inbounds begin
         qᵛ¹ = qᵛ[i, j, 1]
-        qᵈ¹ = 1 - qᵛ¹
-        Rᵐ¹ = qᵈ¹ * Rᵈ + qᵛ¹ * Rᵛ
-        cᵖᵐ¹ = qᵈ¹ * cᵖᵈ + qᵛ¹ * cᵖᵛ
-        κ¹ = Rᵐ¹ / cᵖᵐ¹
+        Rᵐ¹, cᵖᵐ¹, κ¹ = moist_reference_constants(qᵛ¹, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
         π₀_surface = (p₀ / pˢᵗ)^κ¹
 
         Δzᶜ₁ = Δzᶜᶜᶜ(i, j, 1, grid)
@@ -611,25 +638,15 @@ end
             θᵏ⁻ = θ₀[i, j, k - 1]
             qᵛᵏ = qᵛ[i, j, k]
         end
-        qᵈᵏ = 1 - qᵛᵏ
-        Rᵐᵏ = qᵈᵏ * Rᵈ + qᵛᵏ * Rᵛ
-        cᵖᵐᵏ = qᵈᵏ * cᵖᵈ + qᵛᵏ * cᵖᵛ
-        κᵏ = Rᵐᵏ / cᵖᵐᵏ
+        Rᵐᵏ, cᵖᵐᵏ, κᵏ = moist_reference_constants(qᵛᵏ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
 
         # Initial guess: continuous Π integration (one face step).
         θ_face = (θᵏ + θᵏ⁻) / 2
         Πᵏ_init = @inbounds(π₀[i, j, k - 1]) - g * Δz_face / (cᵖᵐᵏ * θ_face)
         pᵏ = pˢᵗ * Πᵏ_init^(1/κᵏ)
 
-        Aᵏ = g * pˢᵗ^κᵏ / (2 * Rᵐᵏ * θᵏ)
-        Cᵏ = p⁻ / Δz_face - g * ρ⁻ / 2
-        # Newton iterations on F(p) = p / Δz_face + Aᵏ · p^(1−κᵏ) − Cᵏ.
-        for _ in 1:5
-            ρp = pᵏ^(-κᵏ)               # = p^(1-κᵏ) / p
-            f  = pᵏ / Δz_face + Aᵏ * pᵏ * ρp - Cᵏ
-            f′ = 1 / Δz_face + Aᵏ * (1 - κᵏ) * ρp
-            pᵏ = pᵏ - f / f′
-        end
+        # Newton solve of the discrete-balance residual to machine precision.
+        pᵏ = newton_hydrostatic_pressure(p⁻, ρ⁻, θᵏ, Rᵐᵏ, κᵏ, Δz_face, pˢᵗ, g, pᵏ, 5)
         Πᵏ = (pᵏ / pˢᵗ)^κᵏ
         ρᵏ = pᵏ / (Rᵐᵏ * θᵏ * Πᵏ)
         @inbounds begin

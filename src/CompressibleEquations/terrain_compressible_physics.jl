@@ -360,7 +360,8 @@ end
 
 using GPUArraysCore: @allowscalar
 
-using Breeze.Thermodynamics: evaluate_profile, hydrostatic_pressure
+using Breeze.Thermodynamics: evaluate_profile, hydrostatic_pressure,
+                             newton_hydrostatic_pressure, moist_reference_constants
 
 terrain_reference_profiles(ref_spec) = (ref_spec, nothing)
 
@@ -430,30 +431,13 @@ function terrain_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants
     @inline function dpdz(zⁿ, p)
         θⁿ = evaluate_profile(θᵣ, zⁿ)
         qᵛⁿ = evaluate_profile(qᵛᵣ, zⁿ)
-        qᵈⁿ = 1 - qᵛⁿ
-        Rᵐⁿ = qᵈⁿ * Rᵈ + qᵛⁿ * Rᵛ
-        cᵖᵐⁿ = qᵈⁿ * cᵖᵈ + qᵛⁿ * cᵖᵛ
-        κᵐⁿ = Rᵐⁿ / cᵖᵐⁿ
+        Rᵐⁿ, cᵖᵐⁿ, κᵐⁿ = moist_reference_constants(qᵛⁿ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
         Tⁿ = θⁿ * (p / pˢᵗ)^κᵐⁿ
         return -g * p / (Rᵐⁿ * Tⁿ)
     end
 
     return converged_hydrostatic_pressure(z, p₀, dpdz;
                                           tolerance = sqrt(eps(float(typeof(p₀)))))
-end
-
-@inline function newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ)
-    Aₖ = g * pˢᵗ^κₖ / (2 * Rᵐₖ * θₖ)
-    Cₖ = p⁻ / Δz - g * ρ⁻ / 2
-
-    for _ in 1:7
-        ρp = pₖ^(-κₖ)
-        f = pₖ / Δz + Aₖ * pₖ * ρp - Cₖ
-        f′ = 1 / Δz + Aₖ * (1 - κₖ) * ρp
-        pₖ = pₖ - f / f′
-    end
-
-    return pₖ
 end
 
 """
@@ -504,10 +488,7 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, ref_spec, p
             z_phys = znode(i, j, k, grid, c, c, c)
             θₖ = evaluate_profile(θᵣ, z_phys)
             qᵛₖ = qᵛᵣ === nothing ? zero(θₖ) : evaluate_profile(qᵛᵣ, z_phys)
-            qᵈₖ = 1 - qᵛₖ
-            Rᵐₖ = qᵈₖ * Rᵈ + qᵛₖ * Rᵛ
-            cᵖᵐₖ = qᵈₖ * cᵖᵈ + qᵛₖ * cᵖᵛ
-            κₖ = Rᵐₖ / cᵖᵐₖ
+            Rᵐₖ, cᵖᵐₖ, κₖ = moist_reference_constants(qᵛₖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
 
             if k == 1
                 if qᵛᵣ === nothing
@@ -516,10 +497,7 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, ref_spec, p
                     z_surface = znode(i, j, 1, grid, c, c, Face())
                     θ_surface = evaluate_profile(θᵣ, z_surface)
                     qᵛ_surface = evaluate_profile(qᵛᵣ, z_surface)
-                    qᵈ_surface = 1 - qᵛ_surface
-                    Rᵐ_surface = qᵈ_surface * Rᵈ + qᵛ_surface * Rᵛ
-                    cᵖᵐ_surface = qᵈ_surface * cᵖᵈ + qᵛ_surface * cᵖᵛ
-                    κ_surface = Rᵐ_surface / cᵖᵐ_surface
+                    Rᵐ_surface, cᵖᵐ_surface, κ_surface = moist_reference_constants(qᵛ_surface, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
 
                     p⁻ = terrain_hydrostatic_pressure(z_surface, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
                     Π_surface = (p⁻ / pˢᵗ)^κ_surface
@@ -531,7 +509,7 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, ref_spec, p
                     θ_face = (θₖ + θ_surface) / 2
                     Πₖ_init = Π_surface - g * Δz / (cᵖᵐₖ * θ_face)
                     pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
-                    pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ)
+                    pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, 7)
                 end
             else
                 z_below = znode(i, j, k - 1, grid, c, c, c)
@@ -540,7 +518,7 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, ref_spec, p
                 Δz = Δzᶜᶜᶠ(i, j, k, grid)
                 Πₖ_init = Π⁻ - g * Δz / (cᵖᵐₖ * θ_face)
                 pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
-                pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ)
+                pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, 7)
             end
 
             Πₖ = (pₖ / pˢᵗ)^κₖ
