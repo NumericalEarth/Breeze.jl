@@ -85,7 +85,7 @@ using Breeze.TerrainFollowingDiscretization: SlopeInsideInterpolation,
                                               TerrainFollowingVerticalDiscretization,
                                               TwoLevelDecay,
                                               materialize_terrain!
-using Oceananigans.Grids: xnode, xnodes, znode
+using Oceananigans.Grids: xnodes, znode
 using Oceananigans.Units
 using Oceananigans: Face, Center
 using Breeze.Thermodynamics: dry_air_gas_constant
