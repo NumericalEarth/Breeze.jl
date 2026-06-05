@@ -414,45 +414,46 @@ Tᵢ(x, y, z) = Oceananigans.Fields.interpolate((r(x, y), z), Tⱽ)
 # here. We write it in `discrete_form` only to read the cell-center coordinates
 # ``(x, y, z)`` from the grid inside the kernel.
 
-## Rainband heating parameters (YD19 Eq. 3). They are `const` so the rate function
-## below — read inside the GPU forcing kernel — stays type-stable.
-const Fₘₐₓ = 4.24f0 / Float32(hour)  # peak rate, 4.24 K/h (stored in K/s)
-const zᵇ = Float32(4kilometers)      # heating base height
-const σᵣ = Float32(6kilometers)      # radial width
-const σᶻ = Float32(2kilometers)      # vertical width
-const tᵣ = Float32(1hour)            # ramp duration, to avoid an instantaneous onset
-const tᵒⁿ = Float32(stage_stop_time) # heating switches on after the spinup
-const rᵇ = 60kilometers              # centerline radius at the downwind (λ = 0) edge
-const Δrᵇ = 10kilometers             # outward shift per π/4 of azimuth
+## Rainband heating parameters (YD19 Eq. 3), gathered in a NamedTuple we pass explicitly to
+## the rate function — both from the figures and (via `Forcing`'s `parameters`) from the GPU
+## kernel — so the values stay type-stable on device with no global `const`s.
+heating = (Fₘₐₓ = 4.24f0 / Float32(hour),  # peak rate, 4.24 K/h (stored in K/s)
+           zᵇ = Float32(4kilometers),      # heating base height
+           σᵣ = Float32(6kilometers),      # radial width
+           σᶻ = Float32(2kilometers),      # vertical width
+           tᵣ = Float32(1hour),            # ramp duration, to avoid an instantaneous onset
+           tᵒⁿ = Float32(stage_stop_time), # heating switches on after the spinup
+           rᵇ = Float32(60kilometers),     # centerline radius at the downwind (λ = 0) edge
+           Δrᵇ = Float32(10kilometers))    # outward shift per π/4 of azimuth
 
 ## The rainband heating, written in Cartesian coordinates so it drops straight into a
-## `Field` (for the figures) and into the forcing below — YD19 Eq. 3. We prescribe it as
-## a *potential-temperature* tendency F(x, y, z, t) in K/s.
-@inline function rainband_heating_rate(x, y, z, t)
+## `Field` (for the figures) and into the forcing below — YD19 Eq. 3. We prescribe it as a
+## *potential-temperature* tendency F(x, y, z, t) in K/s; `p` carries the parameters above.
+@inline function rainband_heating_rate(x, y, z, t, p)
     r = sqrt(x^2 + y^2)
     λ = atan(y, x)
-    ramp = clamp((t - tᵒⁿ) / tᵣ, 0, 1)
+    ramp = clamp((t - p.tᵒⁿ) / p.tᵣ, 0, 1)
     s = 4λ / π                              # azimuth in quadrants: s = λ / (π/4)
-    r_bs = rᵇ - Δrᵇ * s + z                 # spiral centerline, tilting outward with height
-    G_r = exp(-(r - r_bs)^2 / 2σᵣ^2)         # radial Gaussian
-    z_rel = (z - zᵇ) / σᶻ
+    r_bs = p.rᵇ - p.Δrᵇ * s + z             # spiral centerline, tilting outward with height
+    G_r = exp(-(r - r_bs)^2 / 2p.σᵣ^2)       # radial Gaussian
+    z_rel = (z - p.zᵇ) / p.σᶻ
     V_z = ifelse(abs(z_rel) < 1, sin(π * z_rel), zero(z_rel))   # vertical sine lobe
     A_λ = exp(-(s + 1)^8)                    # azimuthal super-Gaussian, centered at λ = -π/4
-    return Fₘₐₓ * G_r * V_z * A_λ * ramp
+    return p.Fₘₐₓ * G_r * V_z * A_λ * ramp
 end
 
 ## We attach the heating to the *specific* potential-temperature key `θ`. The model then
 ## reads it as a θ tendency (K/s) and multiplies by ρ to form the ρθ tendency itself
 ## (`SpecificForcing`) — so there's no Exner function, no reference density, and no heat
-## capacity to supply here: the forcing is just F, with no parameters at all.
-@inline function rainband_heating(i, j, k, grid, clock, fields)
+## capacity to supply here. `Forcing` hands the parameters back to the kernel as `p`.
+@inline function rainband_heating(i, j, k, grid, clock, fields, p)
     x = Oceananigans.Grids.xnode(i, j, k, grid, Center(), Center(), Center())
     y = Oceananigans.Grids.ynode(i, j, k, grid, Center(), Center(), Center())
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Center())
-    return rainband_heating_rate(x, y, z, clock.time)
+    return rainband_heating_rate(x, y, z, clock.time, p)
 end
 
-heating_forcing = Forcing(rainband_heating; discrete_form = true)
+heating_forcing = Forcing(rainband_heating; discrete_form = true, parameters = heating)
 
 # ## Upper-level sponge (WRF `damp_opt=2` analog)
 #
@@ -470,16 +471,16 @@ heating_forcing = Forcing(rainband_heating; discrete_form = true)
 # Both the momentum and ρθ components are needed: without the ρθ term,
 # upper-level ``\theta'`` anomalies persist and the vortex fails to spin down.
 
-sponge_z_bottom = Float32(20kilometers)
-sponge_z_top = Float32(25kilometers)
+z⁻ = Float32(20kilometers)
+z⁺ = Float32(25kilometers)
 
 ## Reference ρθ profile (kg K / m³); the sponge relaxes ρθ to it in the damping layer.
 ρθᵣ = Field(reference_state.density * reference_state.temperature * (pˢᵗ / reference_state.pressure)^κ)
 
-sponge_vel_params = (z_bot = sponge_z_bottom, z_top = sponge_z_top, rate = sponge_rate)
-sponge_ρθ_params = (z_bot = sponge_z_bottom, z_top = sponge_z_top, rate = sponge_rate, ρθ_bg = ρθᵣ)
+sponge_vel_params = (; z⁻, z⁺, rate = sponge_rate)
+sponge_ρθ_params = (; z⁻, z⁺, rate = sponge_rate, ρθ_bg = ρθᵣ)
 
-## WRF `damp_opt=2` analog: zero below z_bot, sin²() ramp to max at z_top.
+## WRF `damp_opt=2` analog: zero below z⁻, sin²() ramp to max at z⁺.
 @inline function sponge_mask(z, z⁻, z⁺)
     ξ = (z - z⁻) / (z⁺ - z⁻)
     return sin(π * ξ / 2)^2 * (ξ > 0)
@@ -487,25 +488,25 @@ end
 
 @inline function sponge_ρu_fn(i, j, k, grid, clock, fields, p)
     z = Oceananigans.Grids.znode(i, j, k, grid, Face(), Center(), Center())
-    mask = sponge_mask(z, p.z_bot, p.z_top)
+    mask = sponge_mask(z, p.z⁻, p.z⁺)
     return -p.rate * mask * @inbounds fields.ρu[i, j, k]
 end
 
 @inline function sponge_ρv_fn(i, j, k, grid, clock, fields, p)
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Face(), Center())
-    mask = sponge_mask(z, p.z_bot, p.z_top)
+    mask = sponge_mask(z, p.z⁻, p.z⁺)
     return -p.rate * mask * @inbounds fields.ρv[i, j, k]
 end
 
 @inline function sponge_ρw_fn(i, j, k, grid, clock, fields, p)
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Face())
-    mask = sponge_mask(z, p.z_bot, p.z_top)
+    mask = sponge_mask(z, p.z⁻, p.z⁺)
     return -p.rate * mask * @inbounds fields.ρw[i, j, k]
 end
 
 @inline function sponge_ρθ_fn(i, j, k, grid, clock, fields, p)
     z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Center())
-    mask = sponge_mask(z, p.z_bot, p.z_top)
+    mask = sponge_mask(z, p.z⁻, p.z⁺)
     ρθ_tgt = @inbounds p.ρθ_bg[i, j, k]
     return -p.rate * mask * (@inbounds fields.ρθ[i, j, k] - ρθ_tgt)
 end
@@ -524,7 +525,7 @@ sponge_ρθ = Forcing(sponge_ρθ_fn; discrete_form = true, parameters = sponge_
 # ## Build the model
 #
 # A single model carries both the rainband heating and the upper-level sponge.
-# Because the heating's time ramp only switches on at `tᵒⁿ = stage_stop_time`, the
+# Because the heating's time ramp only switches on at `heating.tᵒⁿ = stage_stop_time`, the
 # first `stage_stop_time` is an unforced spinup and the remainder is the heated
 # continuation — there's no need for a second model or to re-initialize.
 
@@ -591,8 +592,8 @@ times = vθt.times
 Ns = searchsortedfirst(times, stage_stop_time)   # end of spinup
 Nh = length(times)                               # end of heated run
 
-xc = xnodes(grid, Center())
-yc = ynodes(grid, Center())
+xc = xnodes(grid, Center()) ./ kilometer
+yc = ynodes(grid, Center()) ./ kilometer
 
 # ## Basic-state vortex (cf. YD19 Fig. 2a,b)
 #
@@ -614,21 +615,23 @@ r_km = xnodes(v̄θ.grid, Center()) ./ kilometer
 z_km = znodes(v̄θ.grid, Center()) ./ kilometer
 fig = Figure(size = (1300, 520))
 
-ax_v = Axis(fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)", title = "(a) Basic-state tangential wind v̄", limits = (0, 150, 0, 22))
+ax_v = Axis(fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",
+            title = "(a) Basic-state tangential wind v̄", limits = (0, 150, 0, 22))
 v̂ = 50
 hm_v = heatmap!(ax_v, r_km, z_km, view(v̄θ, :, 1, :); colormap = :inferno, colorrange = (0, v̂))
 contour!(ax_v, r_km, z_km, view(v̄θ, :, 1, :); levels = 5:5:v̂, color = :white, linewidth = 0.8)
 Colorbar(fig[1, 2], hm_v; label = "v̄ (m s⁻¹)")
 
-ax_θ = Axis(fig[1, 3]; xlabel = "Radius (km)", ylabel = "Height (km)", title = "(b) Potential-temperature anomaly θ̄'", limits = (0, 150, 0, 22))
+ax_θ = Axis(fig[1, 3]; xlabel = "Radius (km)", ylabel = "Height (km)",
+            title = "(b) Potential-temperature anomaly θ̄'", limits = (0, 150, 0, 22))
 θ̂ = 10
 hm_θ = heatmap!(ax_θ, r_km, z_km, view(θ̄′, :, 1, :); colormap = :balance, colorrange = (-θ̂, θ̂))
 contour!(ax_θ, r_km, z_km, view(θ̄′, :, 1, :); levels = -θ̂:1.69:θ̂, color = :black, linewidth = 0.5)
 Colorbar(fig[1, 4], hm_θ; label = "θ̄' (K)")
 
-Label(fig[0, :],
-    "Basic-state vortex at t = $(round(tₛ / hour, digits = 1)) h spin-up ($(round(Int, Lx / kilometers)) km box)";
-    fontsize = 17)
+title = "Basic-state vortex at t = $(round(tₛ / hour, digits = 1)) \
+         h spin-up ($(round(Int, Lx / kilometers)) km box)";
+Label(fig[0, :], title, fontsize = 17)
 fig
 
 # ## Analytic heating field (cf. YD19 Fig. 2c,d)
@@ -639,14 +642,14 @@ fig
 
 λ₀ = -π / 4
 z₀ = 4.6kilometers
-t̂ = tᵒⁿ + tᵣ                          # fully ramped-up heating, in K/h via × hour
+t̂ = heating.tᵒⁿ + heating.tᵣ          # fully ramped-up heating, in K/h via × hour
 
 ## (c) radial–vertical cross section at λ = -π/4, on a dedicated (r, z) grid. The grid is
 ## Flat in y, so `set!` calls f(r, z); we sample the band at fixed azimuth λ₀.
 cross_grid = RectilinearGrid(size = (150, 60), x = (0, 150kilometers), z = (0, 12kilometers),
                              topology = (Bounded, Flat, Bounded))
 Fᶜ = CenterField(cross_grid)
-set!(Fᶜ, (r, z) -> rainband_heating_rate(r * cos(λ₀), r * sin(λ₀), z, t̂) * hour)
+set!(Fᶜ, (r, z) -> rainband_heating_rate(r * cos(λ₀), r * sin(λ₀), z, t̂, heating) * hour)
 r_km = xnodes(cross_grid, Center()) ./ kilometer
 z_km = znodes(cross_grid, Center()) ./ kilometer
 
@@ -654,24 +657,28 @@ z_km = znodes(cross_grid, Center()) ./ kilometer
 plan_grid = RectilinearGrid(size = (Nx, Ny), x = (-Lx / 2, Lx / 2), y = (-Lx / 2, Lx / 2),
                             topology = (Periodic, Periodic, Flat))
 Fᵈ = CenterField(plan_grid)
-set!(Fᵈ, (x, y) -> rainband_heating_rate(x, y, z₀, t̂) * hour)
+set!(Fᵈ, (x, y) -> rainband_heating_rate(x, y, z₀, t̂, heating) * hour)
 
 F̂ = 4.5
 fig = Figure(size = (1300, 520))
 
-ax_c = Axis(fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)", title = "(c) Heating cross section at λ = -π/4 (middle of rainband)", limits = (0, 150, 0, 12))
+ax_c = Axis(fig[1, 1]; xlabel = "Radius (km)", ylabel = "Height (km)",  limits = (0, 150, 0, 12),
+            title = "(c) Heating cross section at λ = -π/4 (middle of rainband)")
+
 hm_c = heatmap!(ax_c, r_km, z_km, view(Fᶜ, :, 1, :); colormap = :balance, colorrange = (-F̂, F̂))
 contour!(ax_c, r_km, z_km, view(Fᶜ, :, 1, :); levels = -4:1:4, color = :black, linewidth = 0.6)
 Colorbar(fig[1, 2], hm_c; label = "F (K h⁻¹)")
 
-ax_d = Axis(fig[1, 3]; xlabel = "x (km)", ylabel = "y (km)", title = "(d) Heating plan view at z = $(round(z₀ / 1000, digits = 1)) km", aspect = DataAspect(), limits = (-120, 120, -120, 120))
-hm_d = heatmap!(ax_d, xc ./ kilometer, yc ./ kilometer, view(Fᵈ, :, :, 1); colormap = :balance, colorrange = (-F̂, F̂))
+ax_d = Axis(fig[1, 3]; xlabel = "x (km)", ylabel = "y (km)",
+            aspect = DataAspect(), limits = (-120, 120, -120, 120),
+            title = "(d) Heating plan view at z = $(round(z₀ / 1000, digits = 1)) km")
+
+hm_d = heatmap!(ax_d, xc, yc, view(Fᵈ, :, :, 1); colormap = :balance, colorrange = (-F̂, F̂))
 contour!(ax_d, xc ./ kilometer, yc ./ kilometer, view(Fᵈ, :, :, 1); levels = -4:0.5:4, color = :black, linewidth = 0.4)
 Colorbar(fig[1, 4], hm_d; label = "F (K h⁻¹)")
 
-Label(fig[0, :],
-    "MN10 stratiform heating field ($(round(Int, Lx / kilometers)) km box)";
-    fontsize = 17)
+title = "MN10 stratiform heating field ($(round(Int, Lx / kilometers)) km box)";
+Label(fig[0, :], title, fontsize = 17)
 fig
 
 # ## Vertical velocity in the heated run (cf. YD19 Fig. 2e)
@@ -688,21 +695,21 @@ wₛ = view(wt[Nh], :, :, k₃)              # native w (Center, Center, Face)
 ## Heating overlay at the slice altitude — a `Field` on the same horizontal grid — whose
 ## red/blue ±1 K/h contours mark where the imposed forcing sits.
 Fᵉ = CenterField(plan_grid)
-set!(Fᵉ, (x, y) -> rainband_heating_rate(x, y, zᶠ[k₃], t̂) * hour)
+set!(Fᵉ, (x, y) -> rainband_heating_rate(x, y, zᶠ[k₃], t̂, heating) * hour)
 
 fig = Figure(size = (800, 700))
-ax = Axis(fig[1, 1]; xlabel = "x (km)", ylabel = "y (km)", aspect = DataAspect(), limits = (-120, 120, -120, 120),
+ax = Axis(fig[1, 1]; xlabel = "x (km)", ylabel = "y (km)",
+          aspect = DataAspect(), limits = (-120, 120, -120, 120),
           title = "(e) Heated-run vertical velocity at z = $(round(zᶠ[k₃] / kilometer, digits = 1)) km, t = $(round(tₕ / hour, digits = 1)) h")
-hm = heatmap!(ax, xc ./ kilometer, yc ./ kilometer, wₛ; colormap = :balance, colorrange = (-ŵ, ŵ))
-maximum(Fᵉ) > 1 && contour!(ax, xc ./ kilometer, yc ./ kilometer, view(Fᵉ, :, :, 1);
-    levels = [1.0], color = :red, linewidth = 2)
-minimum(Fᵉ) < -1 && contour!(ax, xc ./ kilometer, yc ./ kilometer, view(Fᵉ, :, :, 1);
-    levels = [-1.0], color = :blue, linewidth = 2)
+
+hm = heatmap!(ax, xc, yc, wₛ; colormap = :balance, colorrange = (-ŵ, ŵ))
+
+contour!(ax, xc, yc, view(Fᵉ, :, :, 1); levels = [1.0], color = :red, linewidth = 2)
+contour!(ax, xc, yc, view(Fᵉ, :, :, 1); levels = [-1.0], color = :blue, linewidth = 2)
 Colorbar(fig[1, 2], hm; label = "w (m s⁻¹)")
 
-Label(fig[0, :],
-    "Plan-view w in heated run (z = $(round(zᶠ[k₃] / kilometer, digits = 1)) km, $(round(Int, Lx / kilometers)) km box)";
-    fontsize = 17)
+title = "Plan-view w in heated run (z = $(round(zᶠ[k₃] / kilometer, digits = 1)) km, $(round(Int, Lx / kilometers)) km box)";
+Label(fig[0, :], title, fontsize = 17)
 fig
 
 # ## Reproducing the full YD19 response (optional)
