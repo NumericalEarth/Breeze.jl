@@ -126,24 +126,58 @@ through a boundary condition on ``\rho w`` (see [Boundary conditions](#boundary-
 
 ### Conservation form on the computational grid
 
-The continuity equation in the computational frame is
+Mass is conserved per *computational* cell, and a computational cell holds the
+physical volume ``\sigma \, \Delta r \, \Delta x \, \Delta y``. The continuity
+equation in the computational frame therefore carries the Jacobian ``\sigma =
+\partial z / \partial r`` as a density weight:
 
 ```math
-\partial_t \rho
-+ \partial_x|_r(\rho u)
-+ \partial_y|_r(\rho v)
+\partial_t (\sigma \rho)
++ \partial_x|_r(\sigma \rho u)
++ \partial_y|_r(\sigma \rho v)
 + \partial_r(\rho \tilde{w})
 \;=\; 0 ,
 ```
 
-i.e. the ``r``-frame divergence of the contravariant mass flux ``(\rho u, \rho v,
-\rho \tilde{w})``. Scalar transport for any density-weighted quantity ``\rho c``
-takes the same form,
+or, since the terrain (hence ``\sigma``) is static, equivalently
 
 ```math
-\partial_t (\rho c)
-+ \boldsymbol{\nabla}_r \cdot \big( \rho c \, (u, v, \tilde{w}) \big)
-\;=\; S_c .
+\partial_t \rho
+\;=\; -\frac{1}{\sigma}\Big[
+  \partial_x|_r(\sigma \rho u)
++ \partial_y|_r(\sigma \rho v)
++ \partial_r(\rho \tilde{w}) \Big] .
+```
+
+Note *where* ``\sigma`` appears. The **horizontal** fluxes carry it — the side
+face of a computational cell has area ``\Delta y \, \Delta z = \Delta y \,
+\sigma \Delta r`` — but the **vertical** contravariant flux ``\rho \tilde{w}``
+does *not*, because the top/bottom face area is the ``\sigma``-independent
+horizontal area ``\Delta x \, \Delta y``. Physically, ``\rho \tilde{w} = \sigma
+\rho \dot r`` is the mass flux through an ``r``-surface: a parcel's vertical
+coordinate velocity is ``\dot r = \tilde{w} / \sigma``, so the ``\sigma`` in
+``\sigma \rho \dot r`` cancels and the vertical flux reduces to ``\rho
+\tilde{w}``.
+
+This is exactly the metric scaling that Oceananigans' finite-volume divergence
+``\mathrm{div}_{ccc} = V^{-1}[\delta_x(A_x \, \rho u) + \delta_y(A_y \, \rho v)
++ \delta_z(A_z \, \rho \tilde{w})]`` already supplies: the side areas
+``A_x, A_y`` and the volume ``V`` all carry ``\Delta z = \sigma \Delta r``,
+while the horizontal area ``A_z`` does not. So the discrete density tendency
+``G_\rho = -\mathrm{div}_{ccc}(\rho u, \rho v, \rho \tilde{w})`` reproduces the
+advective form above with no explicit ``\sigma`` bookkeeping in the dynamics
+code.
+
+Scalar transport for any density-weighted quantity ``\rho c`` takes the same
+``\sigma``-weighted form (with ``S_c`` the physical-space source per unit
+volume),
+
+```math
+\partial_t (\sigma \rho c)
++ \partial_x|_r(\sigma \rho c \, u)
++ \partial_y|_r(\sigma \rho c \, v)
++ \partial_r(\rho c \, \tilde{w})
+\;=\; \sigma \, S_c .
 ```
 
 Vertical advection inside the dycore therefore uses ``\tilde{w}``, not ``w``.
