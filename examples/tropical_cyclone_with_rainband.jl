@@ -150,16 +150,12 @@ r_taper_end = 300kilometers    # radial taper end, m
 # 128² cells horizontally and 75 levels vertically (``Δz ≈ 333`` m). The run
 # prefers GPU and falls back to CPU if CUDA isn't functional.
 #
-# Dynamics: `CompressibleDynamics(SplitExplicitTimeDiscretization())` with
-# the [`AcousticRungeKutta3`](@ref) outer time stepper. Acoustic substepping
-# replaces the anelastic elliptic pressure solve with linearized acoustic
-# substeps, which lets the run go at `Float32` — the anelastic Poisson
-# solve loses its precision margin at F32 (the Picard IC's gradient-wind
-# residual sits at ~10⁻³ Pa/m on a 10⁵ Pa background, right at F32 ε)
-# and so anelastic F32 NaN'd at iter ~99 across all grid resolutions and
-# WENO orders tested.
+# Dynamics: `CompressibleDynamics(SplitExplicitTimeDiscretization())` with the
+# [`AcousticRungeKutta3`](@ref) outer time stepper. Acoustic substepping replaces the
+# anelastic elliptic pressure solve with linearized acoustic substeps, which lets the
+# run go at `Float32`.
 
-Δx = 4kilometers
+Δx = 5kilometers
 Lx = 642kilometers
 Nx = Ny = floor(Int, Lx / Δx)
 Nz = 75
@@ -189,9 +185,6 @@ g = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
 
 reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature = θₑ)
-
-## Cell-center heights, reused by the analysis below.
-z_centers = znodes(grid, Center())
 
 # ## Vortex kinematics — RMW(z) and modified-Rankine v(r, z)
 #
@@ -287,11 +280,9 @@ end
 #   ``T = p / (R^d \rho)``;
 # - under-relaxes the ``T`` update by ``\alpha`` to stabilize the fixed point.
 #
-# The iteration converges to a gradient-wind residual ``\sim 10^{-3}`` Pa/m and a
-# hydrostatic residual at round-off. The radial grid reaches past the taper to the
-# domain corner so the initial-condition interpolation below never extrapolates,
-# and it runs in `Float64` even though the model is `Float32` (the gradient-wind
-# residual sits near `Float32` ε).
+# The radial grid reaches past the taper to the domain corner so the initial-condition
+# interpolation below never extrapolates, and it runs in `Float64` even though the model
+# is `Float32` — the gradient-wind balance needs more precision than F32 affords.
 
 pˢᵗ = 1.0e5
 
@@ -345,10 +336,6 @@ set!(Tⱽ, Tᵣⱽ)
 T⁺ = Field(α * (pⱽ / (Rᵈ * ρʰ)) + (1 - α) * Tⱽ)
 
 # ### Iterate to the balanced fixed point
-#
-# Each sweep re-forms ``\rho``, integrates the gradient-wind balance inward with the
-# `CumulativeIntegral`, then recovers ``\rho`` and ``T`` from hydrostatic balance —
-# under-relaxing ``T`` by ``\alpha`` to converge the fixed point.
 
 for iter in 1:60
     ρⱽ .= pⱽ / (Rᵈ * Tⱽ)
@@ -442,10 +429,8 @@ heating = (Fₘₐₓ = 4.24f0 / Float32(hour),  # peak rate, 4.24 K/h (stored i
     return p.Fₘₐₓ * G * V * A * R
 end
 
-## We attach the heating to the *specific* potential-temperature key `θ`. The model then
-## reads it as a θ tendency (K/s) and multiplies by ρ to form the ρθ tendency itself
-## (`SpecificForcing`) — so there's no Exner function, no reference density, and no heat
-## capacity to supply here. `Forcing` hands the parameters back to the kernel as `p`.
+## The forcing kernel reads the cell-center coordinates from the grid and evaluates the
+## rate; `Forcing` hands the `heating` parameters back to the kernel as `p`.
 @inline function rainband_heating(i, j, k, grid, clock, fields, p)
     x = Oceananigans.Grids.xnode(i, j, k, grid, Center(), Center(), Center())
     y = Oceananigans.Grids.ynode(i, j, k, grid, Center(), Center(), Center())
