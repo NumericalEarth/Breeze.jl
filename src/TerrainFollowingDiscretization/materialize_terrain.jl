@@ -139,26 +139,37 @@ function materialize_formulation!(f::TwoLevelDecay, grid, topography)
     return nothing
 end
 
-# Iterated 1-2-1 horizontal smoothing (separable, periodic in x) to isolate the
-# large-scale terrain. `passes` controls the cutoff: more passes removes finer
-# scales into h₂.
+# Iterated 1-2-1 horizontal smoothing to isolate the large-scale terrain.
+# `passes` controls the cutoff: more passes removes finer scales into h₂.
 function smooth_horizontally!(out, in_field, grid; passes = 8)
     arch = architecture(grid)
     parent(out) .= parent(in_field)
     tmp = CenterField(grid, indices = (:, :, 1))
     for _ in 1:passes
         fill_halo_regions!(out)
-        launch!(arch, grid, (size(grid, 1), size(grid, 2)), _smooth_121!, tmp, out, grid)
-        parent(out) .= parent(tmp)
+        launch!(arch, grid, (size(grid, 1), size(grid, 2)), _smooth_x_121!, tmp, out, grid)
+
+        if size(grid, 2) == 1
+            parent(out) .= parent(tmp)
+        else
+            fill_halo_regions!(tmp)
+            launch!(arch, grid, (size(grid, 1), size(grid, 2)), _smooth_y_121!, out, tmp, grid)
+        end
     end
     return out
 end
 
-@kernel function _smooth_121!(out, in_field, grid)
+@kernel function _smooth_x_121!(out, in_field, grid)
     i, j = @index(Global, NTuple)
     @inbounds begin
-        sx = (in_field[i - 1, j, 1] + 2 * in_field[i, j, 1] + in_field[i + 1, j, 1]) / 4
-        out[i, j, 1] = sx
+        out[i, j, 1] = (in_field[i - 1, j, 1] + 2 * in_field[i, j, 1] + in_field[i + 1, j, 1]) / 4
+    end
+end
+
+@kernel function _smooth_y_121!(out, in_field, grid)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        out[i, j, 1] = (in_field[i, j - 1, 1] + 2 * in_field[i, j, 1] + in_field[i, j + 1, 1]) / 4
     end
 end
 

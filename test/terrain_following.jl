@@ -95,6 +95,33 @@ using Test
         end
     end
 
+    @testset "TwoLevelDecay smoothing separates y-dependent terrain" begin
+        Nx, Ny, Nz = 8, 8, 4
+        Lx, Ly, Lz = 10000.0, 10000.0, 5000.0
+
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1));
+                                                          formulation = TwoLevelDecay(large_scale_height = 4000,
+                                                                                      small_scale_height = 1000))
+        grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz),
+                               x=(-Lx/2, Lx/2), y=(-Ly/2, Ly/2), z=z_faces,
+                               topology=(Periodic, Periodic, Bounded))
+
+        h₀ = 100.0
+        h(x, y) = h₀ * sin(2π * y / Ly)
+
+        materialize_terrain!(grid, h)
+
+        maximum_h₂ = 0.0
+        maximum_∂y_h₂ = 0.0
+        for i in 1:Nx, j in 1:Ny
+            maximum_h₂ = max(maximum_h₂, abs(grid.z.formulation.h₂[i, j, 1]))
+            maximum_∂y_h₂ = max(maximum_∂y_h₂, abs(grid.z.formulation.∂y_h₂[i, j, 1]))
+        end
+
+        @test maximum_h₂ > 0.1h₀
+        @test maximum_∂y_h₂ > 0
+    end
+
     @testset "Non-TFVD grid leaves terrain_metrics nothing" begin
         Nx, Nz = 16, 8
         Lx, Lz = 10000.0, 5000.0
