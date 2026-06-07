@@ -398,8 +398,8 @@ Tᵢ(x, y, z) = Oceananigans.Fields.interpolate((r(x, y), z), Tⱽ)
 # keyed `θ`. The key is what fixes the units — it declares "``F`` is a ``\theta`` tendency
 # (K/s)" — so the model multiplies by ``\rho`` to form the ``\rho\theta`` tendency itself
 # (`SpecificForcing`), and no Exner function, reference density, or heat capacity appears
-# here. We write it in `discrete_form` only to read the cell-center coordinates
-# ``(x, y, z)`` from the grid inside the kernel.
+# here. Since `rainband_heating_rate` already takes ``(x, y, z, t)``, we pass it as a
+# *continuous* forcing — no discrete `(i, j, k, …)` kernel wrapper needed.
 
 ## Rainband heating parameters (YD19 Eq. 3), gathered in a NamedTuple we pass explicitly to
 ## the rate function — both from the figures and (via `Forcing`'s `parameters`) from the GPU
@@ -429,16 +429,7 @@ heating = (Fₘₐₓ = 4.24f0 / Float32(hour),  # peak rate, 4.24 K/h (stored i
     return p.Fₘₐₓ * G * V * A * R
 end
 
-## The forcing kernel reads the cell-center coordinates from the grid and evaluates the
-## rate; `Forcing` hands the `heating` parameters back to the kernel as `p`.
-@inline function rainband_heating(i, j, k, grid, clock, fields, p)
-    x = Oceananigans.Grids.xnode(i, j, k, grid, Center(), Center(), Center())
-    y = Oceananigans.Grids.ynode(i, j, k, grid, Center(), Center(), Center())
-    z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Center())
-    return rainband_heating_rate(x, y, z, clock.time, p)
-end
-
-heating_forcing = Forcing(rainband_heating; discrete_form = true, parameters = heating)
+heating_forcing = Forcing(rainband_heating_rate; parameters = heating)
 
 # ## Upper-level sponge (WRF `damp_opt=2` analog)
 #
