@@ -288,4 +288,22 @@ end
     dest = CenterField(ρ̄.grid)
     azimuthal_mean!(dest, ρ)
     @test Array(interior(dest)) ≈ Array(interior(ρ̄))
+
+    # A non-default center: averaging a field symmetric about (xc, yc) about that same
+    # center recovers a clean monotonic radial profile.
+    xc, yc = 0.3, -0.2
+    ρᵒ = CenterField(grid)
+    set!(ρᵒ, (x, y, z) -> sqrt((x - xc)^2 + (y - yc)^2))
+    ρ̄ᵒ = azimuthal_mean(ρᵒ; radius = 0.5, Nr = 8, center = (xc, yc))
+    offset_profile = Array(interior(ρ̄ᵒ, :, 1, 1))
+    @test issorted(offset_profile)
+    @test all(0 .< offset_profile .< 1)
+
+    # Rings finer than the grid leave some empty; those are filled with zero, not NaN,
+    # while populated rings still hold the constant.
+    fine = azimuthal_mean(c; radius = 1, Nr = 200)
+    fine_profile = Array(interior(fine, :, 1, 1))
+    @test any(fine_profile .== 0)
+    @test all(v -> v == 0 || v ≈ 5, fine_profile)
+    @test !any(isnan, fine_profile)
 end
