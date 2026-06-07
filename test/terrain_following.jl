@@ -583,10 +583,14 @@ using Test
         @test isapprox(maximum(abs, interior(w̃)), 0; atol = 1e-12)
         @test abs(final_mass - initial_mass) / initial_mass <= 1e-13
 
+        # The kinematic terrain BC makes the contravariant w̃ vanish at the surface.
+        # With the boundary-condition approach this is a computed cancellation
+        # (ρw̃ = ρw - slope·ρu with ρw|₁ = slope·ρu): exact in CPU Float64, but at
+        # machine epsilon on GPU (non-associative FP / FMA), so compare ≈ 0.
         for i in 1:Nx
-            @test w̃[i, 1, 1] == 0
-            @test ρw̃[i, 1, 1] == 0
-            @test w̃_transport[i, 1, 1] == 0
+            @test isapprox(w̃[i, 1, 1], 0; atol = 1e-12)
+            @test isapprox(ρw̃[i, 1, 1], 0; atol = 1e-12)
+            @test isapprox(w̃_transport[i, 1, 1], 0; atol = 1e-12)
         end
 
         bottom_w̃ = [w̃[i, 1, 1] for i in 1:Nx]
@@ -873,9 +877,11 @@ using Test
         @test isfinite(maximum(abs, model.velocities.w))
         @test isfinite(maximum(abs, model.dynamics.contravariant_vertical_velocity))
 
+        # w̃ = 0 at the surface is a computed cancellation under the kinematic terrain
+        # BC (exact in CPU Float64, machine-epsilon on GPU), so compare ≈ 0.
         for i in 1:Nx
-            @test model.dynamics.contravariant_vertical_velocity[i, 1, 1] == 0
-            @test model.dynamics.contravariant_vertical_momentum[i, 1, 1] == 0
+            @test isapprox(model.dynamics.contravariant_vertical_velocity[i, 1, 1], 0; atol = 1e-12)
+            @test isapprox(model.dynamics.contravariant_vertical_momentum[i, 1, 1], 0; atol = 1e-12)
         end
     end
 
