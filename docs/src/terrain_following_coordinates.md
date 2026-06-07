@@ -685,7 +685,7 @@ acoustic substep, so the contravariant ``\rho \tilde{w} = \rho w -
 initial condition and throughout the run.
 
 The BC is selected automatically by dispatch on the grid type
-([`TerrainFollowingGrid`](@ref) → terrain kinematic BC; any other grid keeps the
+(`TerrainFollowingGrid` → terrain kinematic BC; any other grid keeps the
 standard impenetrable ``w = 0``). This matters because a plain impenetrable
 ``w = 0`` bottom is *wrong* over terrain: it would leave
 ``\tilde{w} = -\text{slope}\cdot u \neq 0``, a spurious mass flux through the
