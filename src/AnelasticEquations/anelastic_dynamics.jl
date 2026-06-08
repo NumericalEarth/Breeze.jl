@@ -176,11 +176,14 @@ function AtmosphereModels.materialize_momentum_and_velocities(dynamics::Anelasti
     ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)
     momentum = (; ρu, ρv, ρw)
 
-    velocity_bcs = NamedTuple(name => FieldBoundaryConditions() for name in (:u, :v, :w))
-    velocity_bcs = regularize_field_boundary_conditions(velocity_bcs, grid, (:u, :v, :w))
-    u = XFaceField(grid, boundary_conditions=velocity_bcs.u)
-    v = YFaceField(grid, boundary_conditions=velocity_bcs.v)
-    w = ZFaceField(grid, boundary_conditions=velocity_bcs.w)
+    # Velocity is diagnostic (u = ρu/ρ via compute_velocities!). Use the auxiliary-field
+    # default BCs (`nothing` on Bounded-Face sides, Periodic on Periodic sides), which
+    # is what XFaceField gives us when constructed with no `boundary_conditions=` kwarg.
+    # `nothing` on Bounded-Face prevents `fill_halo_regions!(velocities)` from clobbering
+    # the kernel-computed boundary face — momentum carries the wall BC.
+    u = XFaceField(grid)
+    v = YFaceField(grid)
+    w = ZFaceField(grid)
     velocities = (; u, v, w)
 
     return momentum, velocities

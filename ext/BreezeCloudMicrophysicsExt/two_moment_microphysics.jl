@@ -914,3 +914,53 @@ end
 
 @inline AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᵃ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants) =
     wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρnᵃ
+
+#####
+##### Fused microphysics tendency for WPNE2M
+#####
+#
+# All 6 tendencies are computed together in `wpne2m_tendencies`. We override
+# `compute_microphysical_tendencies!` to compute the bundle once per cell and
+# write to all 6 G fields in a single kernel.
+
+@kernel function _compute_wpne2m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnᶜˡ, Gρnʳ, Gρnᵃ,
+                                             grid, microphysics, dynamics, formulation,
+                                             constants, specific_prognostic_moisture,
+                                             microphysical_fields, velocities)
+    i, j, k = @index(Global, NTuple)
+
+    ρ_field = AtmosphereModels.dynamics_density(dynamics)
+    @inbounds ρ = ρ_field[i, j, k]
+    @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
+
+    # Reconstruct moisture fractions and thermodynamic state at this cell.
+    q = AtmosphereModels.grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
+    𝒰 = AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
+
+    # WPNE2M's microphysical_state stores velocities (aerosol activation depends on w),
+    # so we need the full grid_microphysical_state which interpolates u, v, w to centers.
+    ℳ = AtmosphereModels.grid_microphysical_state(i, j, k, grid, microphysics, microphysical_fields, ρ, 𝒰, velocities)
+
+    G = wpne2m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
+
+    @inbounds Gρqᵛ[i, j, k]  += G.ρqᵛ
+    @inbounds Gρqᶜˡ[i, j, k] += G.ρqᶜˡ
+    @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
+    @inbounds Gρnᶜˡ[i, j, k] += G.ρnᶜˡ
+    @inbounds Gρnʳ[i, j, k]  += G.ρnʳ
+    @inbounds Gρnᵃ[i, j, k]  += G.ρnᵃ
+end
+
+function AtmosphereModels.compute_microphysical_tendencies!(microphysics::WPNE2M, model)
+    grid = model.grid
+    arch = grid.architecture
+    G = model.timestepper.Gⁿ
+
+    launch!(arch, grid, :xyz, _compute_wpne2m_tendencies!,
+            G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnᶜˡ, G.ρnʳ, G.ρnᵃ,
+            grid, microphysics, model.dynamics, model.formulation,
+            model.thermodynamic_constants, AtmosphereModels.specific_prognostic_moisture(model),
+            model.microphysical_fields, AtmosphereModels.transport_velocities(model))
+
+    return nothing
+end

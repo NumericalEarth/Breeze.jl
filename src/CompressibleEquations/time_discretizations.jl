@@ -294,6 +294,28 @@ Fields
   with the configured `damping_rate` and `depth`.
 - `substep_distribution`: How acoustic substeps are distributed across the
   three WS-RK3 stages.
+- `open_boundary_relaxation`: Per-substep relaxation factor ``α \\in (0, 1]``
+  applied at the outermost open-boundary cell of ``ρ′,(ρθ)′`` to enforce the
+  prescribed wall value across the acoustic substeps. Default ``α = 0.5``,
+  matching FV3-LAM's outermost-blend-row weight (``\\approx 0.6``). Without
+  this enforcement the perturbation halos reflect, biasing the discrete mass
+  balance under transient open-boundary inflow (issue #738). The relaxation is
+  a no-op when no side carries an active open BC (periodic, walls, impenetrable
+  defaults all skip it).
+
+# Backward integration
+
+Backward integration (`Δt < 0`) is supported. The off-centered
+Crank–Nicolson vertical solve with ``ω ∈ [0.5, 1]`` has amplification
+factor ``|A|^2 = (1 + ((1-ω) ω_0 Δτ)^2) / (1 + (ω ω_0 Δτ)^2) \\le 1``
+for either sign of ``Δτ``, so the linearized acoustic substep is A-stable
+in both directions. Horizontal divergence damping is sign-self-consistent
+(``γ \\propto Δτ^{-1}`` and ``(ρθ)' - (ρθ)'_\\mathrm{old} \\propto Δτ``
+both flip sign with `Δt`). The adaptive substep count uses ``|Δt|``, and
+the optional [`UpperSponge`](@ref) keeps its dissipative sign so it acts
+as a one-sided regularizer in both directions (i.e. backward integration
+through a sponge layer is stable but not an exact inverse of the forward
+step inside the sponge).
 
 See also [`ExplicitTimeStepping`](@ref).
 """
@@ -449,6 +471,12 @@ number of acoustic substeps, a `forward_weight` for off-centering the acoustic
 solve, an acoustic `damping` strategy such as
 [`ThermalDivergenceDamping`](@ref), an optional [`UpperSponge`](@ref), and a
 `substep_distribution` such as [`ProportionalSubsteps`](@ref).
+
+Backward integration (`time_step!(model, Δt)` with `Δt < 0`) is supported
+for the linearized acoustic substep loop. See the field-documentation
+docstring for the A-stability argument, sign-handling of the adaptive
+substep count, and the irreversibility caveat for the optional
+[`UpperSponge`](@ref).
 """
 struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistribution}
     substeps :: N
@@ -457,6 +485,7 @@ struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistri
     damping :: D
     sponge :: US
     substep_distribution :: AD
+    open_boundary_relaxation :: FT
 end
 
 function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
@@ -465,7 +494,8 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          forward_weight = FT(0.65),
                                          damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
-                                         substep_distribution = ProportionalSubsteps())
+                                         substep_distribution = ProportionalSubsteps(),
+                                         open_boundary_relaxation = FT(0.5))
 
     damping isa AcousticDampingStrategy ||
         throw(ArgumentError("`damping` must be an `AcousticDampingStrategy`"))
@@ -476,6 +506,9 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
     acoustic_cfl > 0 ||
         throw(ArgumentError("`acoustic_cfl` must be positive (got $(acoustic_cfl))"))
 
+    0 < open_boundary_relaxation ≤ 1 ||
+        throw(ArgumentError("`open_boundary_relaxation` must be in (0, 1] (got $(open_boundary_relaxation))"))
+
     return SplitExplicitTimeDiscretization(
         substeps,
         convert(FT, acoustic_cfl),
@@ -483,6 +516,7 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
         convert_acoustic_parameter(FT, damping),
         convert_acoustic_parameter(FT, sponge),
         substep_distribution,
+        convert(FT, open_boundary_relaxation),
     )
 end
 

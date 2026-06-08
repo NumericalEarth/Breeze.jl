@@ -37,7 +37,7 @@ examples = [
     Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
     Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz"; build_always=true, gpu=false),
     Example("Shallow cumulus convection (BOMEX)", "bomex"; build_always=true, gpu=true),
-    Example("Precipitating shallow cumulus (RICO)", "rico"; build_always=false, gpu=false),
+    Example("Precipitating shallow cumulus (RICO)", "rico"; build_always=false, gpu=true),
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature"; build_always=true, gpu=false),
     Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave"; build_always=true, gpu=false),
     Example("Neutral atmospheric boundary layer", "neutral_atmospheric_boundary_layer"; build_always=false, gpu=true),
@@ -188,6 +188,7 @@ makedocs(
             "Microphysics" => Any[
                 "Overview" => "developer/microphysics/overview.md",
                 "Example implementation" => "developer/microphysics/example.md",
+                "Fused-kernel implementation" => "developer/microphysics/fused_example.md",
                 "Future improvements" => "developer/microphysics/future_improvements.md",
             ],
         ],

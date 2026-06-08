@@ -34,19 +34,40 @@ Arguments:
 | Function | Arguments | Description |
 |----------|-----------|-------------|
 | `microphysical_tendency` | `(microphysics, name, ρ, ℳ, 𝒰, constants)` | **State-based**. Compute tendency for variable `name`. |
-| `grid_microphysical_tendency` | `(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)` | **Generic wrapper**. Builds `ℳ` and dispatches to state-based version. |
+| `compute_microphysical_tendencies!` | `(microphysics, model)` | **Model entry point**. Adds microphysics contributions to `Gⁿ`. |
 
-**Design principle**: Schemes implement the state-based version; grid-indexed is generic.
-All velocity components are interpolated from cell faces to cell centers and passed as a NamedTuple `(; u, v, w)` to the microphysical state for aerosol activation and other velocity-dependent processes.
+**Design principle**: `compute_microphysical_tendencies!` is the only call the atmosphere model
+makes into microphysics during tendency assembly — it runs *after* the per-tracer dynamics
+kernels (advection + diffusion + forcing) have written `Gⁿ`, and adds microphysics on top via `+=`.
+
+Schemes plug in by extending one of two methods:
+
+- **Per-name (typical)** — extend `microphysical_tendency(microphysics, Val(name), ρ, ℳ, 𝒰, constants)`.
+  The default `compute_microphysical_tendencies!` launches a single fused kernel that builds `ℳ`
+  and `𝒰` once per cell and `+=`s `microphysical_tendency` for each prognostic name into the
+  corresponding `G` field. This is the right extension point when the per-name tendencies don't
+  share intermediate work. See [Per-name Implementation](@ref) for a worked
+  example.
+- **Fused (bundle schemes)** — override `compute_microphysical_tendencies!(microphysics, model)`
+  directly. Use this when a single bundle of process rates (e.g. ~14 rates in mixed-phase 1M)
+  feeds multiple prognostic tendencies; computing the bundle once per cell rather than once per
+  prognostic is a substantial GPU win. See
+  [Fused-kernel Microphysics Implementation](@ref) for a worked example.
 
 The `name` argument is a `Val` type (e.g., `Val(:ρqᶜˡ)`) that dispatches to the appropriate tendency.
+Velocity components are interpolated from cell faces to cell centers and passed as a NamedTuple
+`(; u, v, w)` to the microphysical state for aerosol activation and other velocity-dependent processes.
 
 ### Moisture Fraction Computation
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `moisture_fractions` | `(microphysics, ℳ, qᵗ)` | **State-based**. Partition moisture into vapor, liquid, ice. |
-| `grid_moisture_fractions` | `(i, j, k, grid, microphysics, ρ, qᵗ, μ_fields)` | **Generic wrapper**. Builds state and dispatches. |
+| `moisture_fractions` | `(microphysics, ℳ, qᵛᵉ)` | **State-based**. Partition moisture into vapor, liquid, ice. |
+| `grid_moisture_fractions` | `(i, j, k, grid, microphysics, ρ, qᵛᵉ, μ_fields)` | **Generic wrapper**. Builds state and dispatches. |
+
+The argument `qᵛᵉ` is the scheme-dependent specific moisture: vapor (``qᵛ``) for
+non-equilibrium schemes, or equilibrium moisture (``qᵉ = qᵛ + qᶜˡ``) for saturation
+adjustment schemes.
 
 **Note**: Non-equilibrium schemes don't need `𝒰` to build their state (they use prognostic fields).
 Saturation adjustment schemes override `grid_moisture_fractions` directly since they read cloud
@@ -56,7 +77,7 @@ condensate from diagnostic fields.
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `maybe_adjust_thermodynamic_state` | `(𝒰, microphysics, qᵗ, constants)` | Apply saturation adjustment if scheme uses it. |
+| `maybe_adjust_thermodynamic_state` | `(𝒰, microphysics, qᵛᵉ, constants)` | Apply saturation adjustment if scheme uses it. |
 
 This function is fully gridless—it takes only scalar thermodynamic arguments.
 Non-equilibrium schemes simply return `𝒰` unchanged. Saturation adjustment schemes perform
@@ -112,7 +133,7 @@ These functions are sufficient to use a microphysics scheme with [`ParcelModel`]
 |----------|---------|
 | `microphysical_state(microphysics, ρ, μ, 𝒰, velocities)` | Build state from prognostics |
 | `microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)` | Compute tendencies |
-| `moisture_fractions(microphysics, ℳ, qᵗ)` | Partition moisture (if generic doesn't work) |
+| `moisture_fractions(microphysics, ℳ, qᵛᵉ)` | Partition moisture (if generic doesn't work) |
 | `prognostic_field_names(microphysics)` | List prognostic variables |
 
 **Why this works**: Parcel models operate on scalar states at a single point.
@@ -145,13 +166,16 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `prognostic_field_names` | ✓ | ✓ | Required for both |
 | `materialize_microphysical_fields` | — | ✓ | Fields for grid storage |
 | `update_microphysical_auxiliaries!` | — | ✓ | Write to diagnostic fields |
-| `microphysical_velocities` | — | ✓ | Sedimentation advection |
+| `microphysical_velocities` | — | ✓§ | Sedimentation advection |
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
-| `grid_microphysical_tendency` | — | — | Generic wrapper (don't override) |
-| `grid_moisture_fractions` | — | ✓* | Override for saturation adjustment |
-| `maybe_adjust_thermodynamic_state` | — | ✓* | Override for saturation adjustment |
+| `compute_microphysical_tendencies!` | — | ✓† | Override for fused bundle schemes |
+| `grid_moisture_fractions` | — | ✓‡ | Override for saturation adjustment |
+| `maybe_adjust_thermodynamic_state` | — | ✓‡ | Override for saturation adjustment |
 
-*Only needed for saturation adjustment schemes.
+† Only needed for bundle/fused-kernel schemes (e.g. mixed-phase 1M).
+‡ Only needed for saturation adjustment schemes.
+§ Only needed when one or more prognostic species sediments; non-sedimenting schemes can
+return `nothing` for every name.
 
 ### Saturation Adjustment Schemes
 
@@ -175,6 +199,23 @@ Built-in state types that schemes can use or extend:
 | `WarmRainState{FT}` | `qᶜˡ`, `qʳ` | Cloud liquid and rain |
 
 Schemes may define their own state types inheriting from `AbstractMicrophysicalState{FT}`.
+
+## Which Path Should I Pick?
+
+| Question | Per-name path | Bundled-rate path |
+|----------|:-------------:|:-----------------:|
+| Do per-name tendencies share intermediate work? | No | Yes |
+| Used from a `ParcelModel` or per-name unit tests? | Required | Optional wrappers |
+| Do you want to own the launch and kernel? | No | Yes |
+| Number of prognostic tendencies | Any | Most useful when ``≥ 3`` |
+
+**Start with the per-name path** in [Per-name Implementation](@ref). The default
+`compute_microphysical_tendencies!` already builds ``ℳ`` and ``𝒰`` once per cell, so the
+per-name interface is not paying for redundant state.
+Move to the [bundled-rate path](@ref "Fused-kernel Microphysics Implementation") only when
+profiling shows redundant intermediates *within* the tendencies dominate — the canonical
+cases are `MPNE1M` and `WPNE2M`, where ~14 process rates collectively determine 5 prognostic
+tendencies and computing the bundle once per cell is a substantial GPU win.
 
 ## Design Principles
 

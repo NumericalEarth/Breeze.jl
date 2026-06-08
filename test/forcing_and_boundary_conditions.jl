@@ -51,9 +51,33 @@ increment_tolerance(::Type{Float64}) = 1e-10
     end
 
     @testset "Forcing on non-existing field errors" begin
-        bad = (; u=forcings[1])
+        # `:u` is the specific alias of `:ρu`, so it's a valid key. Use a name that is
+        # neither a prognostic ρ-name nor a known specific alias.
+        bad = (; bogus=forcings[1])
         @test_throws ArgumentError AtmosphereModel(grid; forcing=bad)
     end
+end
+
+@testset "Forcing field_dependencies resolve consistently at materialize and runtime [$FT]" for FT in test_float_types()
+    # ContinuousForcing resolves `field_dependencies` to positional indices into the
+    # materialize-time `model_fields`, then dereferences those positions against the
+    # runtime `fields(model)` tuple. The two orderings must agree, or a forcing reads
+    # the wrong field. This test catches the order drift via a forcing that returns
+    # its `:u` dependency: under a misaligned ordering Gρθ would equal `θ` instead.
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    @inline u_dep(x, y, z, t, u) = u
+    u_forcing = Forcing(u_dep, field_dependencies=(:u,))
+    model = AtmosphereModel(grid; forcing=(; ρθ=u_forcing))
+
+    θ₀ = model.dynamics.reference_state.potential_temperature
+    u_value = 13
+    set!(model; θ=θ₀, u=u_value)
+    update_state!(model)
+
+    Gρθ = interior(model.timestepper.Gⁿ.ρθ) |> Array
+    @test all(isapprox.(Gρθ, u_value))
 end
 
 #####
@@ -100,6 +124,76 @@ end
     @test all(bottom_flux_tendency((:u, :v), 2) .== 0)
     @test all(bottom_flux_tendency((:ρu, :ρv), 1) .≈ FT(-8.75) / Δz)
     @test all(bottom_flux_tendency((:ρu, :ρv), 2) .== 0)
+end
+
+@testset "Time-dependent Open BC on momentum [$FT]" for FT in test_float_types()
+    # Regression test for #717: `compute_velocities!` refilled the density and
+    # momentum halos without threading `model.clock`/`fields(model)`, so a
+    # time-dependent Open BC on momentum hit a `getbc` signature that could not
+    # evaluate the time argument (continuous callables → MethodError;
+    # FieldTimeSeries → BoundsError on the `getbc(::AbstractArray, ...)` fallback).
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 4),
+                           x=(0, 1000), y=(0, 1000), z=(0, 200),
+                           topology=(Bounded, Bounded, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    reference_potential_temperature=FT(300),
+                                    surface_pressure=FT(1e5))
+
+    @inline ρu_west(y, z, t, p) = p.ρ * cos(p.ω * t)
+    ρu_bcs = FieldBoundaryConditions(
+        west = OpenBoundaryCondition(ρu_west; parameters=(; ρ=FT(1.17), ω=FT(0.01))))
+
+    # `set!` triggers `update_state!` → `compute_velocities!` → momentum halo fill.
+    # Pre-#717 this threw before any explicit time step.
+    model = AtmosphereModel(grid; dynamics, boundary_conditions=(; ρu=ρu_bcs))
+    set!(model; θ=FT(300), ρ=FT(1.17))
+
+    # West boundary face (i=1) carries the prescribed value at the current time.
+    bc_value(t) = FT(1.17) * cos(FT(0.01) * t)
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ bc_value(model.clock.time)
+
+    # Stepping re-evaluates the BC at the new time without error.
+    time_step!(model, FT(10))
+    @test model.clock.iteration == 1
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ bc_value(model.clock.time)
+    @test !any(isnan, parent(model.momentum.ρu))
+end
+
+@testset "FieldTimeSeries Open BC on momentum [$FT]" for FT in test_float_types()
+    # Regression test for #717, array-backed branch: a `FieldTimeSeries` Open BC
+    # on momentum previously hit `getbc(::AbstractArray, i, j, ...)` (→ BoundsError
+    # on `condition[i, j]`) during the clock-less momentum halo fill. With the clock
+    # threaded through, `getbc` dispatches to the FTS method and interpolates in time.
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 4),
+                           x=(0, 1000), y=(0, 1000), z=(0, 200),
+                           topology=(Bounded, Bounded, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    reference_potential_temperature=FT(300),
+                                    surface_pressure=FT(1e5))
+
+    # 2-D (y, z) boundary slice for a west OBC on ρu (Face, Center, Center).
+    # Slice values 1, 2, 3 at times 0, 10, 20 so the boundary value linearly
+    # interpolates to 1.5 at t = 5.
+    times = FT[0, 10, 20]
+    ρu_fts = FieldTimeSeries{Nothing, Center, Center}(grid, times)
+    for n in eachindex(times)
+        set!(ρu_fts[n], (y, z) -> FT(n))
+    end
+
+    ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_fts))
+    model = AtmosphereModel(grid; dynamics, boundary_conditions=(; ρu=ρu_bcs))
+    set!(model; θ=FT(300), ρ=FT(1.17))
+
+    # t = 0: west boundary face equals the first slice.
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ FT(1)
+
+    # t = 5: halfway between slices 1 and 2 → linear interpolation gives 1.5.
+    time_step!(model, FT(5))
+    @test model.clock.iteration == 1
+    @test @allowscalar(model.momentum.ρu[1, 1, 1]) ≈ FT(1.5)
+    @test !any(isnan, parent(model.momentum.ρu))
 end
 
 @testset "Bulk boundary conditions [$FT]" for FT in test_float_types()
