@@ -92,8 +92,11 @@ end
         @test maximum(abs, Array(interior(ρ))  .- ρ₀)  <= 1e-9 * maximum(abs, ρ₀)
         @test maximum(abs, Array(interior(ρθ)) .- ρθ₀) <= 1e-9 * maximum(abs, ρθ₀)
         @test maximum(abs, Array(interior(model.momentum.ρw))) <= 1e-8
+        # Fully reset, not just time/iteration: the excursion leaves stage/last_Δt dirty.
         @test model.clock.time == 0
         @test model.clock.iteration == 0
+        @test model.clock.stage == 0
+        @test isinf(model.clock.last_Δt)
     end
 
     @testset "ρw spin-up: seeded ρw shrinks across one cycle" begin
@@ -147,6 +150,8 @@ end
         @test maximum(abs, Array(interior(model.momentum.ρw))) <= 1e-6
         @test model.clock.time == 0
         @test model.clock.iteration == 0
+        @test model.clock.stage == 0
+        @test isinf(model.clock.last_Δt)
     end
 
 end

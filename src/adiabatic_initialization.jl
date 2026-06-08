@@ -57,9 +57,9 @@ function adiabatic_initialization!(model::AtmosphereModel; Δt, cycles = 1, weig
         update_state!(model)
     end
 
-    # Production integration begins from t = 0.
-    model.clock.time = zero(model.clock.time)
-    model.clock.iteration = 0
+    # Full reset (time, iteration, stage, last_Δt, …): the excursion leaves these
+    # dirty, misfiring e.g. the filtered surface state's `isinf(last_Δt)` guard.
+    reset!(model.clock)
 
     return model
 end

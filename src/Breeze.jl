@@ -245,7 +245,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
 # Adiabatic (FV3 na_init) initialization — dynamics-agnostic, dispatches on the
 # initial_fields method for CompressibleModel / AnelasticModel.
 using DocStringExtensions: TYPEDSIGNATURES
-using Oceananigans.TimeSteppers: update_state!
+using Oceananigans.TimeSteppers: update_state!, reset!
 include("adiabatic_initialization.jl")
 
 include("KinematicDriver/KinematicDriver.jl")
