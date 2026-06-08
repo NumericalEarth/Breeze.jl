@@ -20,7 +20,7 @@ never snapshotted or nudged, so the balance the excursion imprints on it is
 exactly what is kept: with the initial fields held to the analysis and the
 vertical field free, `ρw` relaxes into balance with them.
 
-The initial fields depend on the dynamics:
+The initial fields that are modified depend on the dynamics:
 
   * `CompressibleDynamics`: `(ρ, ρu, ρv, ρθ, ρqᵉ)`.
   * `AnelasticDynamics`: `(ρu, ρv, ρθ, ρqᵉ)` — density is the fixed anelastic
