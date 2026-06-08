@@ -7,10 +7,11 @@ adiabatic initialization (`na_init`).
 
 Analyses (ERA5, GFS, …) supply the density, momentum, and thermodynamic state but
 cold-start the vertical velocity `w` at zero (hydrostatic), so the vertical /
-nonhydrostatic state is out of balance with the rest. For each of `cycles`
-iterations the routine runs a symmetric forward/backward dynamics excursion —
-which lets `ρw` develop — and then nudges the *initial fields* back toward their
-`t = 0` snapshot by the weighted mean
+nonhydrostatic state is out of balance with the rest. Each cycle of `cycles`
+entails two half-cycles: a symmetric forward/backward dynamics excursion
+followed by a symmetric backward/forward excursion, both at the same `Δt`.
+Following each excursion — which lets `ρw` develop — the routine nudges
+the *initial fields* back toward their `t = 0` snapshot by the weighted mean
 
     x ← (x + weight·x₀) / (1 + weight)
 
