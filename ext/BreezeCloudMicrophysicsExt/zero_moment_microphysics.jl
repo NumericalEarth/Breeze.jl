@@ -37,8 +37,8 @@ end
 # the condensate latent-heat contribution by definition, so removing condensate
 # at fixed temperature requires sourcing it upward (issue #772):
 #
-#   ∂θˡⁱ/∂t |_precip = (ℒˡ Ṙˡ + ℒⁱ Ṙⁱ) / (cᵖᵐ Π)
-#   ∂eˡⁱ/∂t |_precip =  ℒˡ Ṙˡ + ℒⁱ Ṙⁱ
+#   ∂θˡⁱ/∂t |_precip = (ℒˡᵣ Ṙˡ + ℒⁱᵣ Ṙⁱ) / (cᵖᵐ Π)
+#   ∂eˡⁱ/∂t |_precip =  ℒˡᵣ Ṙˡ + ℒⁱᵣ Ṙⁱ
 #
 # where Ṙˡ, Ṙⁱ ≥ 0 are the per-phase condensate removal rates. As in the 1M
 # bundle (cf. wpne1m_tendencies), every tendency below derives from the same
@@ -54,7 +54,9 @@ end
 
     # Partition the removal between phases proportionally to their condensate.
     # When qᶜ = 0, remove_precipitation returns 0, so the guarded fractions only
-    # protect against 0/0.
+    # protect against 0/0. Advection undershoots can make one phase negative while
+    # qᶜ > 0; the fractions then fall outside [0, 1] but still satisfy Ṙˡ + Ṙⁱ = -Ṡ,
+    # preserving mass consistency (do not clamp).
     qᶜ = qˡ + qⁱ
     fˡ = ifelse(qᶜ > 0, qˡ / qᶜ, zero(qᶜ))
     fⁱ = ifelse(qᶜ > 0, qⁱ / qᶜ, zero(qᶜ))
@@ -66,9 +68,9 @@ end
 
 @inline function zero_moment_latent_heating(bμp::ZMCM, 𝒰, constants)
     rates = zero_moment_precipitation_rates(bμp, 𝒰)
-    ℒˡ = constants.liquid.reference_latent_heat
-    ℒⁱ = constants.ice.reference_latent_heat
-    return ℒˡ * rates.Ṙˡ + ℒⁱ * rates.Ṙⁱ
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    return ℒˡᵣ * rates.Ṙˡ + ℒⁱᵣ * rates.Ṙⁱ
 end
 
 @inline function AtmosphereModels.microphysical_tendency(bμp::ZMCM, ::Val{:ρqᵉ}, ρ, ℳ, 𝒰, constants)
@@ -109,11 +111,11 @@ and _either_
 - `S_0`: supersaturation threshold (default: 0)
 - `qc_0`: cloud liquid water threshold for precipitation (default: 5×10⁻⁴ kg/kg)
 
-For more information see the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/stable/Microphysics0M/).
-
 The latent heat of the removed condensate is retained: the removal sinks `ρqᵉ` and
 sources the thermodynamic prognostic (`ρθ` or `ρe`) from the same rate, so rain-out
 does not spuriously cool the column.
+
+For more information see the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/stable/Microphysics0M/).
 """
 function ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                      cloud_formation = SaturationAdjustment(FT),

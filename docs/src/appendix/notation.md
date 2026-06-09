@@ -100,6 +100,9 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{L}^i_r``                 | `ℒⁱᵣ`  | `TC.ice.reference_latent_heat`      | Latent heat of deposition at the energy reference temperature                  |
 | ``\mathcal{L}^l(T)``                | `ℒˡ`   | `liquid_latent_heat(T, constants)`  | Temperature-dependent latent heat of condensation                              |
 | ``\mathcal{L}^i(T)``                | `ℒⁱ`   | `ice_latent_heat(T, constants)`     | Temperature-dependent latent heat of deposition                                |
+| ``\dot{S}``                         | `Ṡ`    |                                     | Total condensate removal rate by 0M precipitation (≤ 0), s⁻¹                  |
+| ``\dot{R}^l``                       | `Ṙˡ`   |                                     | Liquid condensate removal rate by precipitation (≥ 0), s⁻¹                    |
+| ``\dot{R}^i``                       | `Ṙⁱ`   |                                     | Ice condensate removal rate by precipitation (≥ 0), s⁻¹                       |
 | ``θ₀``                              | `θ₀`   | `RS.potential_temperature`          | (Constant) reference potential temperature for the anelastic formulation       |
 | ``p₀``                              | `p₀`   | `RS.surface_pressure`               | Surface reference pressure                                              |
 | ``p^{st}``                          | `pˢᵗ`  | `RS.standard_pressure`              | Standard pressure for potential temperature (default 10⁵ Pa)                   |

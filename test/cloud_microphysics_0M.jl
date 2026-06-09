@@ -138,19 +138,22 @@ end
     pˢᵗ = FT(1e5)
     ρ = FT(11//10)
     θ = FT(300)
-    ℒˡ = constants.liquid.reference_latent_heat
-    ℒⁱ = constants.ice.reference_latent_heat
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
     microphysical_tendency = Breeze.AtmosphereModels.microphysical_tendency
 
     # Mixed-phase condensate above threshold
     q = MoistureMassFractions(FT(0.01), FT(2e-3), FT(1e-3))
     𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ)
+    qᶜ = q.liquid + q.ice
 
     Gρqᵉ = microphysical_tendency(microphysics, Val(:ρqᵉ), ρ, nothing, 𝒰, constants)
     Gρθ  = microphysical_tendency(microphysics, Val(:ρθ),  ρ, nothing, 𝒰, constants)
     Gρe  = microphysical_tendency(microphysics, Val(:ρe),  ρ, nothing, 𝒰, constants)
 
     @test Gρqᵉ < 0   # water removed
+    # Absolute magnitude from the documented 0M formula: dqᵉ/dt = -max(0, qᶜ - qc_0)/τ
+    @test Gρqᵉ ≈ -ρ * (qᶜ - FT(5e-4)) / 1000
     @test Gρθ > 0    # warming retained
     @test Gρe > 0
 
@@ -158,8 +161,7 @@ end
     # phase partition proportional to condensate:
     #   Gρθ = -Gρqᵉ ℒᶜ / (cᵖᵐ Π),   Gρe = -Gρqᵉ ℒᶜ,
     # where ℒᶜ is the condensate-weighted reference latent heat.
-    qᶜ = q.liquid + q.ice
-    ℒᶜ = (q.liquid * ℒˡ + q.ice * ℒⁱ) / qᶜ
+    ℒᶜ = (q.liquid * ℒˡᵣ + q.ice * ℒⁱᵣ) / qᶜ
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Π = exner_function(𝒰, constants)
     @test Gρθ ≈ -Gρqᵉ * ℒᶜ / (cᵖᵐ * Π)
