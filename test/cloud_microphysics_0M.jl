@@ -2,6 +2,7 @@ using Breeze
 using CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans
+using Statistics: mean
 using Test
 
 using Breeze.Thermodynamics:
@@ -178,4 +179,67 @@ end
     qᵛ = MoistureMassFractions(FT(0.01))
     𝒰ᵛ = LiquidIceDensityState(θ, qᵛ, pˢᵗ, ρ)
     @test microphysical_tendency(microphysics, Val(:ρθ), ρ, nothing, 𝒰ᵛ, constants) == 0
+end
+
+@testset "ZMCM rain-out retains latent warming (anelastic) [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Δt = 10
+    τ_precip = 100
+
+    function stepped_model(microphysics; formulation=:LiquidIcePotentialTemperature)
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+        dynamics = AnelasticDynamics(reference_state)
+        model = AtmosphereModel(grid; dynamics, microphysics, formulation)
+        set!(model; θ=300, qᵗ=0.025)   # supersaturated at 300 K → SA condenses everywhere
+        time_step!(model, Δt)
+        return model
+    end
+
+    constants = ThermodynamicConstants()
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    cᵖᵈ = constants.dry_air.heat_capacity
+
+    @testset "θˡⁱ formulation" begin
+        zmcm    = stepped_model(ZeroMomentCloudMicrophysics(FT; τ_precip, qc_0=0))
+        control = stepped_model(SaturationAdjustment(FT))
+
+        # Water actually precipitated
+        Δρq = mean(interior(control.moisture_density)) - mean(interior(zmcm.moisture_density))
+        @test Δρq > 0
+
+        # The latent warming of the removed condensate is retained in ρθ:
+        # Δ(ρθ) ≈ ℒˡᵣ Δ(ρqᵉ) / (cᵖᵐ Π). With Π ∈ [0.97, 1] and cᵖᵐ within a few
+        # percent of cᵖᵈ over this shallow domain, a generous ratio band
+        # suffices to discriminate from the broken behavior (ratio ≈ 0).
+        ρθ_zmcm = mean(interior(zmcm.formulation.potential_temperature_density))
+        ρθ_ctrl = mean(interior(control.formulation.potential_temperature_density))
+        Δρθ = ρθ_zmcm - ρθ_ctrl
+        expected = ℒˡᵣ * Δρq / cᵖᵈ
+        @test 0.7 * expected < Δρθ < 1.3 * expected
+
+        # The physical statement: precipitation leaves temperature unchanged.
+        # The broken code cools by the full ℒ Δqᶜ / cᵖᵐ.
+        T_zmcm = mean(interior(zmcm.temperature))
+        T_ctrl = mean(interior(control.temperature))
+        ρ̄ = mean(interior(Breeze.AtmosphereModels.dynamics_density(zmcm.dynamics)))
+        ΔT_bug = ℒˡᵣ * (Δρq / ρ̄) / cᵖᵈ
+        @test abs(T_zmcm - T_ctrl) < FT(0.2) * ΔT_bug
+    end
+
+    @testset "static energy formulation" begin
+        zmcm    = stepped_model(ZeroMomentCloudMicrophysics(FT; τ_precip, qc_0=0); formulation=:StaticEnergy)
+        control = stepped_model(SaturationAdjustment(FT); formulation=:StaticEnergy)
+
+        Δρq = mean(interior(control.moisture_density)) - mean(interior(zmcm.moisture_density))
+        @test Δρq > 0
+
+        # Δ(ρe) ≈ ℒˡᵣ Δ(ρqᵉ): the static-energy source has no Exner/cᵖᵐ factor.
+        ρe_zmcm = mean(interior(zmcm.formulation.energy_density))
+        ρe_ctrl = mean(interior(control.formulation.energy_density))
+        Δρe = ρe_zmcm - ρe_ctrl
+        expected = ℒˡᵣ * Δρq
+        @test 0.8 * expected < Δρe < 1.2 * expected
+    end
 end
