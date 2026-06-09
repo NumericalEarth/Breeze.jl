@@ -23,7 +23,7 @@
 
 using Oceananigans: architecture
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ
-using Oceananigans.BoundaryConditions: fill_halo_regions!, OpenBoundaryCondition, FieldBoundaryConditions
+using Oceananigans.BoundaryConditions: fill_halo_regions!, NormalFlowBoundaryCondition, FieldBoundaryConditions
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
                                               SlopeInsideInterpolation,
@@ -69,7 +69,7 @@ function compute_contravariant_velocity!(model::TerrainCompressibleModel)
             dynamics.terrain_metrics)
 
     # The terrain kinematic BC (w̃ = 0 at the surface) is enforced declaratively:
-    # `ρw` carries an Open bottom BC ρw|₁ = slopeₓ·ρu + slopeᵧ·ρv (see
+    # `ρw` carries a NormalFlow bottom BC ρw|₁ = slopeₓ·ρu + slopeᵧ·ρv (see
     # `terrain_kinematic_bottom_ρw`), applied by `fill_halo_regions!(model.momentum, …)`
     # before this kernel runs. Because the slope/interpolation here matches that BC,
     # ρw̃|₁ = ρw|₁ − slope·ρu = 0 falls out automatically — no imperative bottom-face
@@ -213,7 +213,7 @@ end
 #####   ρw̃ = ρw - slopeₓ·ρu - slopeᵧ·ρv = 0   at the bottom face,
 ##### i.e. the Cartesian vertical momentum follows the terrain:
 #####   ρw|₁ = slopeₓ·ρu + slopeᵧ·ρv .
-##### We impose this as an `OpenBoundaryCondition` on `ρw` whose value is computed
+##### We impose this as a `NormalFlowBoundaryCondition` on `ρw` whose value is computed
 ##### from the live momentum at fill time. `fill_halo_regions!(model.momentum,
 ##### clock, fields(model))` runs every `update_state!`/substep, so the surface
 ##### stays kinematically balanced at the IC and throughout the run — replacing the
@@ -239,7 +239,7 @@ terrain_ρw_boundary_conditions(grid, ρw_bcs) = ρw_bcs
 terrain_ρw_boundary_conditions(::TerrainFollowingGrid, ρw_bcs) =
     FieldBoundaryConditions(; west = ρw_bcs.west, east = ρw_bcs.east,
                               south = ρw_bcs.south, north = ρw_bcs.north,
-                              bottom = OpenBoundaryCondition(terrain_kinematic_bottom_ρw; discrete_form = true),
+                              bottom = NormalFlowBoundaryCondition(terrain_kinematic_bottom_ρw; discrete_form = true),
                               top = ρw_bcs.top, immersed = ρw_bcs.immersed)
 
 @inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics)
