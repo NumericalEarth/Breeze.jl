@@ -264,7 +264,7 @@ function compute_microphysical_tendencies!(microphysics, model)
     prog_names = prognostic_field_names(microphysics)
     thermo_names = microphysical_thermodynamic_names(microphysics, model.formulation)
     all_names = (moist_name, prog_names..., thermo_names...)
-    return launch_microphysical_tendencies!(model, microphysics, all_names, transport_velocities(model))
+    return launch_microphysical_tendencies!(microphysics, model, all_names, transport_velocities(model))
 end
 
 """
@@ -293,6 +293,10 @@ This exists for the compressible `AcousticRungeKutta3` core, whose
 contributions added by `compute_microphysical_tendencies!` during
 `update_state!` never reach the acoustic substep loop there, so the slow-tendency
 assembly calls this function instead. No-op when the scheme does not opt in.
+
+`velocities` must match those used to assemble the thermodynamic slow tendency
+(`model.velocities` in the `AcousticRungeKutta3` slow-tendency assembly), not
+`transport_velocities(model)`.
 """
 compute_microphysical_thermodynamic_tendencies!(model, velocities) =
     compute_microphysical_thermodynamic_tendencies!(model.microphysics, model, velocities)
@@ -301,12 +305,12 @@ compute_microphysical_thermodynamic_tendencies!(::Nothing, model, velocities) = 
 
 function compute_microphysical_thermodynamic_tendencies!(microphysics, model, velocities)
     thermo_names = microphysical_thermodynamic_names(microphysics, model.formulation)
-    return launch_microphysical_tendencies!(model, microphysics, thermo_names, velocities)
+    return launch_microphysical_tendencies!(microphysics, model, thermo_names, velocities)
 end
 
-launch_microphysical_tendencies!(model, microphysics, names::Tuple{}, velocities) = nothing
+@inline launch_microphysical_tendencies!(microphysics, model, names::Tuple{}, velocities) = nothing
 
-function launch_microphysical_tendencies!(model, microphysics, names::Tuple, velocities)
+@inline function launch_microphysical_tendencies!(microphysics, model, names::Tuple, velocities)
     grid = model.grid
     arch = grid.architecture
     G = model.timestepper.Gⁿ
