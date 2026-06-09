@@ -102,3 +102,24 @@ end
     P_ice = precipitation_rate(model, :ice)
     @test P_ice === nothing
 end
+
+@testset "microphysical_thermodynamic_names defaults and opt-in" begin
+    # Default: schemes do not source the thermodynamic prognostic
+    sa = SaturationAdjustment()
+    @test Breeze.AtmosphereModels.microphysical_thermodynamic_names(sa, nothing) == ()
+    @test Breeze.AtmosphereModels.microphysical_thermodynamic_names(nothing, nothing) == ()
+
+    # ZMCM opts in, per formulation (completed by Task 2 — @test_broken for now)
+    grid = RectilinearGrid(default_arch; size=(1, 1, 2), x=(0, 1), y=(0, 1), z=(0, 1))
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+
+    θ_model = AtmosphereModel(grid; dynamics, microphysics=ZeroMomentCloudMicrophysics())
+    @test_broken Breeze.AtmosphereModels.microphysical_thermodynamic_names(θ_model.microphysics, θ_model.formulation) == (:ρθ,)
+
+    reference_state_e = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    e_model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state_e),
+                              microphysics=ZeroMomentCloudMicrophysics(), formulation=:StaticEnergy)
+    @test_broken Breeze.AtmosphereModels.microphysical_thermodynamic_names(e_model.microphysics, e_model.formulation) == (:ρe,)
+end

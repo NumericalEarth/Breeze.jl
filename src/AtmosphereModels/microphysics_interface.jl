@@ -260,20 +260,63 @@ compute_microphysical_tendencies!(::Nothing, model) = nothing
 # Default fused per-tracer kernel: ℳ and 𝒰 built once per cell, contributions
 # accumulated into each G field via `+=`.
 function compute_microphysical_tendencies!(microphysics, model)
+    moist_name = moisture_prognostic_name(microphysics)
+    prog_names = prognostic_field_names(microphysics)
+    thermo_names = microphysical_thermodynamic_names(microphysics, model.formulation)
+    all_names = (moist_name, prog_names..., thermo_names...)
+    return launch_microphysical_tendencies!(model, microphysics, all_names, transport_velocities(model))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the tuple of thermodynamic prognostic names (e.g. `(:ρθ,)` or `(:ρe,)`)
+that `microphysics` sources through [`microphysical_tendency`](@ref).
+
+The default is the empty tuple: most schemes exchange water between phases that
+all remain inside the conserved liquid-ice variable's latent-heat accounting, so
+no thermodynamic source is needed. Schemes that remove condensate in place
+(e.g. `ZeroMomentCloudMicrophysics`) override this to retain the latent warming
+of precipitated condensate (issue #772).
+"""
+@inline microphysical_thermodynamic_names(microphysics, formulation) = ()
+
+"""
+$(TYPEDSIGNATURES)
+
+Add the microphysical contributions to the thermodynamic prognostic tendency
+(`Gⁿ.ρθ` or `Gⁿ.ρe`) only — the names given by
+[`microphysical_thermodynamic_names`](@ref).
+
+This exists for the compressible `AcousticRungeKutta3` core, whose
+`compute_slow_scalar_tendencies!` overwrites `Gⁿ.ρθ` at every RK stage entry:
+contributions added by `compute_microphysical_tendencies!` during
+`update_state!` never reach the acoustic substep loop there, so the slow-tendency
+assembly calls this function instead. No-op when the scheme does not opt in.
+"""
+compute_microphysical_thermodynamic_tendencies!(model, velocities) =
+    compute_microphysical_thermodynamic_tendencies!(model.microphysics, model, velocities)
+
+compute_microphysical_thermodynamic_tendencies!(::Nothing, model, velocities) = nothing
+
+function compute_microphysical_thermodynamic_tendencies!(microphysics, model, velocities)
+    thermo_names = microphysical_thermodynamic_names(microphysics, model.formulation)
+    return launch_microphysical_tendencies!(model, microphysics, thermo_names, velocities)
+end
+
+launch_microphysical_tendencies!(model, microphysics, names::Tuple{}, velocities) = nothing
+
+function launch_microphysical_tendencies!(model, microphysics, names::Tuple, velocities)
     grid = model.grid
     arch = grid.architecture
     G = model.timestepper.Gⁿ
-
-    moist_name = moisture_prognostic_name(microphysics)
-    prog_names = prognostic_field_names(microphysics)
-    all_names = (moist_name, prog_names...)
-    G_tuple = map(n -> getproperty(G, n), all_names)
-    name_tuple = map(Val, all_names)
+    G_tuple = map(n -> getproperty(G, n), names)
+    name_tuple = map(Val, names)
 
     launch!(arch, grid, :xyz, _default_microphysical_tendencies_kernel!,
             G_tuple, name_tuple, grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, specific_prognostic_moisture(model),
-            model.microphysical_fields, transport_velocities(model))
+            model.microphysical_fields, velocities)
 
     return nothing
 end
