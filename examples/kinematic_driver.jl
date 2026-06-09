@@ -70,7 +70,7 @@ dynamics = PrescribedDynamics(reference_state; divergence_correction=true)
 qᵗ₀ = 0.018 # Incoming specific humidity (18 g/kg) — typical tropical boundary layer
 ρθ_bcs = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * θ₀))
 ρqᵉ_bcs = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * qᵗ₀))
-w_bcs = FieldBoundaryConditions(bottom=OpenBoundaryCondition(W₀), top=OpenBoundaryCondition(W₀))
+w_bcs = FieldBoundaryConditions(bottom=NormalFlowBoundaryCondition(W₀), top=NormalFlowBoundaryCondition(W₀))
 
 # ## Microphysics: warm-phase saturation adjustment
 #
