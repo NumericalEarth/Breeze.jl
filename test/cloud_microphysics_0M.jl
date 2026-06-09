@@ -4,6 +4,12 @@ using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
+using Breeze.Thermodynamics:
+    MoistureMassFractions,
+    LiquidIceDensityState,
+    mixture_heat_capacity,
+    exner_function
+
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
 
@@ -116,10 +122,58 @@ end
     dynamics = AnelasticDynamics(reference_state)
 
     θ_model = AtmosphereModel(grid; dynamics, microphysics=ZeroMomentCloudMicrophysics())
-    @test_broken Breeze.AtmosphereModels.microphysical_thermodynamic_names(θ_model.microphysics, θ_model.formulation) == (:ρθ,)
+    @test Breeze.AtmosphereModels.microphysical_thermodynamic_names(θ_model.microphysics, θ_model.formulation) == (:ρθ,)
 
     reference_state_e = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
     e_model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state_e),
                               microphysics=ZeroMomentCloudMicrophysics(), formulation=:StaticEnergy)
-    @test_broken Breeze.AtmosphereModels.microphysical_thermodynamic_names(e_model.microphysics, e_model.formulation) == (:ρe,)
+    @test Breeze.AtmosphereModels.microphysical_thermodynamic_names(e_model.microphysics, e_model.formulation) == (:ρe,)
+end
+
+@testset "ZMCM precipitation tendencies retain latent heat [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    constants = ThermodynamicConstants(FT)
+    microphysics = ZeroMomentCloudMicrophysics(FT; τ_precip=1000, qc_0=5e-4)
+
+    pˢᵗ = FT(1e5)
+    ρ = FT(11//10)
+    θ = FT(300)
+    ℒˡ = constants.liquid.reference_latent_heat
+    ℒⁱ = constants.ice.reference_latent_heat
+    microphysical_tendency = Breeze.AtmosphereModels.microphysical_tendency
+
+    # Mixed-phase condensate above threshold
+    q = MoistureMassFractions(FT(0.01), FT(2e-3), FT(1e-3))
+    𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ)
+
+    Gρqᵉ = microphysical_tendency(microphysics, Val(:ρqᵉ), ρ, nothing, 𝒰, constants)
+    Gρθ  = microphysical_tendency(microphysics, Val(:ρθ),  ρ, nothing, 𝒰, constants)
+    Gρe  = microphysical_tendency(microphysics, Val(:ρe),  ρ, nothing, 𝒰, constants)
+
+    @test Gρqᵉ < 0   # water removed
+    @test Gρθ > 0    # warming retained
+    @test Gρe > 0
+
+    # Water sink and warming source derive from the same removal rate, with the
+    # phase partition proportional to condensate:
+    #   Gρθ = -Gρqᵉ ℒᶜ / (cᵖᵐ Π),   Gρe = -Gρqᵉ ℒᶜ,
+    # where ℒᶜ is the condensate-weighted reference latent heat.
+    qᶜ = q.liquid + q.ice
+    ℒᶜ = (q.liquid * ℒˡ + q.ice * ℒⁱ) / qᶜ
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Π = exner_function(𝒰, constants)
+    @test Gρθ ≈ -Gρqᵉ * ℒᶜ / (cᵖᵐ * Π)
+    @test Gρe ≈ -Gρqᵉ * ℒᶜ
+
+    # Below the removal threshold: no precipitation, no spurious heating
+    q₀ = MoistureMassFractions(FT(0.01), FT(1e-4), FT(0))
+    𝒰₀ = LiquidIceDensityState(θ, q₀, pˢᵗ, ρ)
+    @test microphysical_tendency(microphysics, Val(:ρqᵉ), ρ, nothing, 𝒰₀, constants) == 0
+    @test microphysical_tendency(microphysics, Val(:ρθ),  ρ, nothing, 𝒰₀, constants) == 0
+    @test microphysical_tendency(microphysics, Val(:ρe),  ρ, nothing, 𝒰₀, constants) == 0
+
+    # Zero condensate: the phase-partition guard must not produce NaN
+    qᵛ = MoistureMassFractions(FT(0.01))
+    𝒰ᵛ = LiquidIceDensityState(θ, qᵛ, pˢᵗ, ρ)
+    @test microphysical_tendency(microphysics, Val(:ρθ), ρ, nothing, 𝒰ᵛ, constants) == 0
 end

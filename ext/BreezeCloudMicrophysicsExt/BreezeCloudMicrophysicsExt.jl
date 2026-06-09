@@ -50,7 +50,8 @@ using Breeze.Thermodynamics:
     ice_latent_heat,
     vapor_gas_constant,
     mixture_gas_constant,
-    mixture_heat_capacity
+    mixture_heat_capacity,
+    exner_function
 
 using Breeze: Microphysics
 

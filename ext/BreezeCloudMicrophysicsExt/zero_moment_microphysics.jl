@@ -27,17 +27,70 @@ AtmosphereModels.materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = mater
     return adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants)
 end
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::ZMCM, ::Val{:ρqᵉ}, ρ, ℳ, 𝒰, constants)
-    # Get cloud liquid water from the (saturation-adjusted) moisture state.
+#####
+##### Precipitation rates and tendencies
+#####
+#
+# Precipitation removes condensate from the column while leaving the in-situ
+# temperature unchanged (the falling drop carries only its negligible sensible
+# enthalpy, with no phase change). The conserved liquid-ice variable subtracts
+# the condensate latent-heat contribution by definition, so removing condensate
+# at fixed temperature requires sourcing it upward (issue #772):
+#
+#   ∂θˡⁱ/∂t |_precip = (ℒˡ Ṙˡ + ℒⁱ Ṙⁱ) / (cᵖᵐ Π)
+#   ∂eˡⁱ/∂t |_precip =  ℒˡ Ṙˡ + ℒⁱ Ṙⁱ
+#
+# where Ṙˡ, Ṙⁱ ≥ 0 are the per-phase condensate removal rates. As in the 1M
+# bundle (cf. wpne1m_tendencies), every tendency below derives from the same
+# rates, so water sink and warming source are consistent by construction.
+
+@inline function zero_moment_precipitation_rates(bμp::ZMCM, 𝒰)
     q = 𝒰.moisture_mass_fractions
     qˡ = q.liquid
     qⁱ = q.ice
 
-    # remove_precipitation returns -dqᵉ/dt (rate of moisture removal); multiply by
-    # density to get the tendency for ρqᵉ.
-    parameters_0M = bμp.categories
-    return ρ * remove_precipitation(parameters_0M, qˡ, qⁱ)
+    # remove_precipitation returns the (≤ 0) total moisture removal rate dqᵉ/dt.
+    Ṡ = remove_precipitation(bμp.categories, qˡ, qⁱ)
+
+    # Partition the removal between phases proportionally to their condensate.
+    # When qᶜ = 0, remove_precipitation returns 0, so the guarded fractions only
+    # protect against 0/0.
+    qᶜ = qˡ + qⁱ
+    fˡ = ifelse(qᶜ > 0, qˡ / qᶜ, zero(qᶜ))
+    fⁱ = ifelse(qᶜ > 0, qⁱ / qᶜ, zero(qᶜ))
+    Ṙˡ = -Ṡ * fˡ
+    Ṙⁱ = -Ṡ * fⁱ
+
+    return (; Ṡ, Ṙˡ, Ṙⁱ)
 end
+
+@inline function zero_moment_latent_heating(bμp::ZMCM, 𝒰, constants)
+    rates = zero_moment_precipitation_rates(bμp, 𝒰)
+    ℒˡ = constants.liquid.reference_latent_heat
+    ℒⁱ = constants.ice.reference_latent_heat
+    return ℒˡ * rates.Ṙˡ + ℒⁱ * rates.Ṙⁱ
+end
+
+@inline function AtmosphereModels.microphysical_tendency(bμp::ZMCM, ::Val{:ρqᵉ}, ρ, ℳ, 𝒰, constants)
+    rates = zero_moment_precipitation_rates(bμp, 𝒰)
+    return ρ * rates.Ṡ
+end
+
+@inline function AtmosphereModels.microphysical_tendency(bμp::ZMCM, ::Val{:ρθ}, ρ, ℳ, 𝒰, constants)
+    latent_heating = zero_moment_latent_heating(bμp, 𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Π = exner_function(𝒰, constants)
+    return ρ * latent_heating / (cᵖᵐ * Π)
+end
+
+@inline function AtmosphereModels.microphysical_tendency(bμp::ZMCM, ::Val{:ρe}, ρ, ℳ, 𝒰, constants)
+    latent_heating = zero_moment_latent_heating(bμp, 𝒰, constants)
+    return ρ * latent_heating
+end
+
+AtmosphereModels.microphysical_thermodynamic_names(bμp::ZMCM, formulation) =
+    (AtmosphereModels.thermodynamic_density_name(formulation),)
 
 """
     ZeroMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
@@ -57,6 +110,10 @@ and _either_
 - `qc_0`: cloud liquid water threshold for precipitation (default: 5×10⁻⁴ kg/kg)
 
 For more information see the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/stable/Microphysics0M/).
+
+The latent heat of the removed condensate is retained: the removal sinks `ρqᵉ` and
+sources the thermodynamic prognostic (`ρθ` or `ρe`) from the same rate, so rain-out
+does not spuriously cool the column.
 """
 function ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                      cloud_formation = SaturationAdjustment(FT),
