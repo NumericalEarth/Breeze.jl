@@ -248,3 +248,56 @@ end
         # the retained latent heat without Exner/cᵖᵐ slop.
     end
 end
+
+@testset "ZMCM rain-out retains latent warming (compressible) [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Δt = 1
+    τ_precip = 20
+
+    function stepped_compressible_model(microphysics)
+        grid = RectilinearGrid(default_arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 1_000), y=(0, 1_000), z=(0, 1_000),
+                               topology=(Periodic, Periodic, Bounded))
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        surface_pressure=1e5, standard_pressure=1e5,
+                                        reference_potential_temperature=300)
+        model = AtmosphereModel(grid; dynamics, microphysics, timestepper=:AcousticRungeKutta3)
+        set!(model; ρ=model.dynamics.reference_state.density, θ=300, qᵗ=0.025)
+        time_step!(model, Δt)
+        return model
+    end
+
+    constants = ThermodynamicConstants()
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    cᵖᵈ = constants.dry_air.heat_capacity
+
+    zmcm    = stepped_compressible_model(ZeroMomentCloudMicrophysics(FT; τ_precip, qc_0=0))
+    control = stepped_compressible_model(SaturationAdjustment(FT))
+
+    Δρq = mean(interior(control.moisture_density)) - mean(interior(zmcm.moisture_density))
+    @test Δρq > 0
+
+    # Without the slow-path consumption, Gⁿ.ρθ contributions from the fused
+    # microphysics pass are overwritten at every RK stage entry and Δρθ ≈ 0.
+    ρθ_zmcm = mean(interior(zmcm.formulation.potential_temperature_density))
+    ρθ_ctrl = mean(interior(control.formulation.potential_temperature_density))
+    Δρθ = ρθ_zmcm - ρθ_ctrl
+    expected = ℒˡᵣ * Δρq / cᵖᵈ
+    @test 0.7 * expected < Δρθ < 1.3 * expected
+end
+
+@testset "Thermo-only microphysics accumulation no-ops for non-opting schemes" begin
+    grid = RectilinearGrid(default_arch; size=(8, 8, 8), halo=(5, 5, 5),
+                           x=(0, 1_000), y=(0, 1_000), z=(0, 1_000),
+                           topology=(Periodic, Periodic, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    surface_pressure=1e5, standard_pressure=1e5,
+                                    reference_potential_temperature=300)
+    model = AtmosphereModel(grid; dynamics, microphysics=SaturationAdjustment(),
+                            timestepper=:AcousticRungeKutta3)
+    set!(model; ρ=model.dynamics.reference_state.density, θ=300, qᵗ=0.02)
+
+    Gρθ_before = Array(interior(model.timestepper.Gⁿ.ρθ))
+    Breeze.AtmosphereModels.compute_microphysical_thermodynamic_tendencies!(model, model.velocities)
+    @test Array(interior(model.timestepper.Gⁿ.ρθ)) == Gρθ_before
+end

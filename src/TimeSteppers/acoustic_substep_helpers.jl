@@ -13,6 +13,7 @@ using Breeze.AtmosphereModels:
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
     compute_dynamics_tendency!,
+    compute_microphysical_thermodynamic_tendencies!,
     specific_prognostic_moisture
 
 #####
@@ -112,6 +113,15 @@ function compute_slow_scalar_tendencies!(model)
         fields(model))
 
     AtmosphereModels.compute_thermodynamic_tendency!(model, common_args)
+
+    # Microphysical sources to the thermodynamic prognostic (e.g. ZMCM's
+    # precipitation latent warming, #772) are accumulated HERE so the acoustic
+    # substep loop consumes them: the Gⁿ.ρθ assembled in update_state!'s
+    # compute_tendencies! is overwritten above at every RK stage entry. This is
+    # a physics source like forcing — it does not route the substepper's
+    # time-averaged transport velocity into the θ path (see note below); the
+    # velocities argument only parameterizes the microphysical state.
+    compute_microphysical_thermodynamic_tendencies!(model, model.velocities)
 
     return nothing
 end
