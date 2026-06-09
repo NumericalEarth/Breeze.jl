@@ -119,8 +119,12 @@ function compute_slow_scalar_tendencies!(model)
     # substep loop consumes them: the Gⁿ.ρθ assembled in update_state!'s
     # compute_tendencies! is overwritten above at every RK stage entry. This is
     # a physics source like forcing — it does not route the substepper's
-    # time-averaged transport velocity into the θ path (see note below); the
+    # time-averaged transport velocity into the θ path (see the transport-velocity note above); the
     # velocities argument only parameterizes the microphysical state.
+    # TODO: fuse this source into compute_thermodynamic_tendency!'s kernel (which
+    # already builds q, 𝒰, Π, cᵖᵐ per cell); beware the anelastic core, where the
+    # source already arrives via compute_microphysical_tendencies! — naive fusion
+    # would double-count there.
     compute_microphysical_thermodynamic_tendencies!(model, model.velocities)
 
     return nothing

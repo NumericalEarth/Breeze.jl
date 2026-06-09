@@ -262,6 +262,10 @@ end
                                         surface_pressure=1e5, standard_pressure=1e5,
                                         reference_potential_temperature=300)
         model = AtmosphereModel(grid; dynamics, microphysics, timestepper=:AcousticRungeKutta3)
+        # Dry-balanced rest state: with qᵗ > 0 the virtual-density contribution
+        # leaves a small hydrostatic imbalance, identical in both models, so the
+        # control comparison cancels it. Don't "fix" the IC — the band relies on
+        # the shared-imbalance cancellation.
         set!(model; ρ=model.dynamics.reference_state.density, θ=300, qᵗ=0.025)
         time_step!(model, Δt)
         return model
@@ -300,4 +304,6 @@ end
     Gρθ_before = Array(interior(model.timestepper.Gⁿ.ρθ))
     Breeze.AtmosphereModels.compute_microphysical_thermodynamic_tendencies!(model, model.velocities)
     @test Array(interior(model.timestepper.Gⁿ.ρθ)) == Gρθ_before
+    # The Nothing-microphysics method is also a no-op
+    @test Breeze.AtmosphereModels.compute_microphysical_thermodynamic_tendencies!(nothing, model, model.velocities) === nothing
 end

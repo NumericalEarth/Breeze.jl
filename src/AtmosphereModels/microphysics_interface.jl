@@ -263,6 +263,10 @@ function compute_microphysical_tendencies!(microphysics, model)
     moist_name = moisture_prognostic_name(microphysics)
     prog_names = prognostic_field_names(microphysics)
     thermo_names = microphysical_thermodynamic_names(microphysics, model.formulation)
+    # On the compressible AcousticRungeKutta3 core the thermo-name contributions
+    # written here are dead (Gⁿ.ρθ is overwritten at every RK stage entry and
+    # re-sourced in compute_slow_scalar_tendencies!); they are live on the
+    # anelastic core.
     all_names = (moist_name, prog_names..., thermo_names...)
     return launch_microphysical_tendencies!(microphysics, model, all_names, transport_velocities(model))
 end
