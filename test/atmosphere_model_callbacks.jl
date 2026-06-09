@@ -1,7 +1,7 @@
 using Breeze
 using Oceananigans
 using Oceananigans: UpdateStateCallsite, TendencyCallsite, TimeStepCallsite
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, OpenBoundaryCondition
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, NormalFlowBoundaryCondition
 using Oceananigans.Fields: flattened_unique_values
 using Oceananigans.Models: update_model_field_time_series!
 using Oceananigans.OutputReaders: extract_field_time_series, InMemory
@@ -90,7 +90,7 @@ end
             set!(fts[n], (y, z) -> FT(n) / FT(10))   # small momenta, ~0.1–0.4
         end
 
-        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(fts))
+        ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(fts))
         model = AtmosphereModel(cgrid; dynamics, boundary_conditions=(; ρu=ρu_bcs))
         set!(model; θ=FT(300), ρ=FT(1.17))
 
