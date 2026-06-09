@@ -217,7 +217,7 @@ for arch in arches
     #####
     ##### Regression for issue #716: nonzero OBC on prognostic momentum must
     ##### not bleed onto the perturbation halo. Build a model with `Bounded`
-    ##### x-topology and `NormalFlowBoundaryCondition(ρ·U)` on `ρu`, then confirm
+    ##### x-topology and `OpenBoundaryCondition(ρ·U)` on `ρu`, then confirm
     ##### that (1) the substepper's perturbation field uses topology defaults
     ##### on the open sides (not the inherited OBC), and (2) a forward step
     ##### does not produce a `DomainError` from runaway-acoustic amplification
@@ -234,11 +234,11 @@ for arch in arches
                                         reference_potential_temperature=300)
 
         # Representative low-altitude ρ·U; exact value is irrelevant — the test
-        # just needs a nonzero scalar `NormalFlowBoundaryCondition` value.
+        # just needs a nonzero scalar `OpenBoundaryCondition` value.
         ρU = FT(6)
 
-        ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρU),
-                                         east = NormalFlowBoundaryCondition(ρU))
+        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρU),
+                                         east = OpenBoundaryCondition(ρU))
         boundary_conditions = (; ρu = ρu_bcs)
 
         model = AtmosphereModel(grid;
@@ -249,7 +249,7 @@ for arch in arches
 
         # The perturbation field uses topology defaults — west/east sides on
         # a Bounded XFaceField default to `nothing`, so the prognostic's
-        # `NormalFlowBoundaryCondition(ρU)` is not propagated.
+        # `OpenBoundaryCondition(ρU)` is not propagated.
         substepper = model.timestepper.substepper
         ρu_pert_bcs = substepper.momentum_perturbation.u.boundary_conditions
         @test ρu_pert_bcs.west === nothing
@@ -347,7 +347,7 @@ for arch in arches
 
         # Drive the lateral boundaries off the interior state by 5%: a
         # `ValueBoundaryCondition` sets ρ_wall = 1.05·ρ_ref on the open faces,
-        # paired with `NormalFlowBoundaryCondition(ρ_wall·U)` / `NormalFlowBoundaryCondition(ρ_wall·V)`
+        # paired with `OpenBoundaryCondition(ρ_wall·U)` / `OpenBoundaryCondition(ρ_wall·V)`
         # for small inflows `U`, `V` on `ρu`, `ρv`. With the per-substep relaxation,
         # the outermost cell of ρ and (ρθ) is pulled toward the wall value each
         # substep; over the cumulative ~`Nτ` substeps per outer step the pull
@@ -358,10 +358,10 @@ for arch in arches
         ρθ_wall = FT(ρ_wall * 300)
         ρu_val  = FT(ρ_wall * U)
         ρv_val  = FT(ρ_wall * V)
-        ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_val),
-                                         east = NormalFlowBoundaryCondition(ρu_val))
-        ρv_bcs = FieldBoundaryConditions(south = NormalFlowBoundaryCondition(ρv_val),
-                                         north = NormalFlowBoundaryCondition(ρv_val))
+        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_val),
+                                         east = OpenBoundaryCondition(ρu_val))
+        ρv_bcs = FieldBoundaryConditions(south = OpenBoundaryCondition(ρv_val),
+                                         north = OpenBoundaryCondition(ρv_val))
         ρ_bcs  = FieldBoundaryConditions(west  = ValueBoundaryCondition(ρ_wall),
                                          east  = ValueBoundaryCondition(ρ_wall),
                                          south = ValueBoundaryCondition(ρ_wall),
@@ -444,10 +444,10 @@ for arch in arches
         ρ_wall_north = FT(0.96 * ρ_ref0)
         U = FT(2); V = FT(2)
 
-        ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(FT(ρ_wall_west * U)),
-                                         east = NormalFlowBoundaryCondition(FT(ρ_wall_east * U)))
-        ρv_bcs = FieldBoundaryConditions(south = NormalFlowBoundaryCondition(FT(ρ_wall_south * V)),
-                                         north = NormalFlowBoundaryCondition(FT(ρ_wall_north * V)))
+        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(FT(ρ_wall_west * U)),
+                                         east = OpenBoundaryCondition(FT(ρ_wall_east * U)))
+        ρv_bcs = FieldBoundaryConditions(south = OpenBoundaryCondition(FT(ρ_wall_south * V)),
+                                         north = OpenBoundaryCondition(FT(ρ_wall_north * V)))
         ρ_bcs  = FieldBoundaryConditions(west  = ValueBoundaryCondition(ρ_wall_west),
                                          east  = ValueBoundaryCondition(ρ_wall_east),
                                          south = ValueBoundaryCondition(ρ_wall_south),
@@ -496,8 +496,8 @@ for arch in arches
             ρ_ref0 = @allowscalar interior(ref.density)[1, 1, 1]
             ρ_wall = FT(1.05 * ρ_ref0)
             ρu_val = FT(ρ_wall * 2)
-            ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_val),
-                                             east = NormalFlowBoundaryCondition(ρu_val))
+            ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_val),
+                                             east = OpenBoundaryCondition(ρu_val))
             ρ_bcs  = FieldBoundaryConditions(west = ValueBoundaryCondition(ρ_wall),
                                              east = ValueBoundaryCondition(ρ_wall))
             ρθ_bcs = FieldBoundaryConditions(west = ValueBoundaryCondition(FT(ρ_wall * 300)),
@@ -520,10 +520,10 @@ for arch in arches
         @test abs(ρ_west_high - ρ_wall) < abs(ρ_west_low - ρ_wall)
     end
 
-    @testset "NormalFlowBoundaryCondition(nothing) skips relaxation [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+    @testset "OpenBoundaryCondition(nothing) skips relaxation [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         Oceananigans.defaults.FloatType = FT
 
-        # `is_active_open_bc` excludes `NormalFlowBoundaryCondition(nothing)` via its
+        # `is_active_open_bc` excludes `OpenBoundaryCondition(nothing)` via its
         # `!(bc.condition isa Nothing)` clause. Verify the kernel is not
         # invoked in that case by setting ρ's `ValueBoundaryCondition` to a
         # value the relaxation would visibly track if it fired, and checking
@@ -538,8 +538,8 @@ for arch in arches
         ρ_ref0 = @allowscalar interior(ref.density)[1, 1, 1]
         ρ_wall = FT(1.05 * ρ_ref0)
 
-        ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(nothing),
-                                         east = NormalFlowBoundaryCondition(nothing))
+        ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(nothing),
+                                         east = OpenBoundaryCondition(nothing))
         ρ_bcs  = FieldBoundaryConditions(west = ValueBoundaryCondition(ρ_wall),
                                          east = ValueBoundaryCondition(ρ_wall))
         ρθ_bcs = FieldBoundaryConditions(west = ValueBoundaryCondition(FT(ρ_wall * 300)),

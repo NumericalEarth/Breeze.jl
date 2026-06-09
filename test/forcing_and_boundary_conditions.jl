@@ -142,7 +142,7 @@ end
 
     @inline ρu_west(y, z, t, p) = p.ρ * cos(p.ω * t)
     ρu_bcs = FieldBoundaryConditions(
-        west = NormalFlowBoundaryCondition(ρu_west; parameters=(; ρ=FT(1.17), ω=FT(0.01))))
+        west = OpenBoundaryCondition(ρu_west; parameters=(; ρ=FT(1.17), ω=FT(0.01))))
 
     # `set!` triggers `update_state!` → `compute_velocities!` → momentum halo fill.
     # Pre-#717 this threw before any explicit time step.
@@ -182,7 +182,7 @@ end
         set!(ρu_fts[n], (y, z) -> FT(n))
     end
 
-    ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_fts))
+    ρu_bcs = FieldBoundaryConditions(west = OpenBoundaryCondition(ρu_fts))
     model = AtmosphereModel(grid; dynamics, boundary_conditions=(; ρu=ρu_bcs))
     set!(model; θ=FT(300), ρ=FT(1.17))
 

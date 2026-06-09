@@ -4,7 +4,7 @@ using Breeze: PrescribedDensity, PrescribedDynamics, KinematicModel
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Architectures: on_architecture
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, NormalFlowBoundaryCondition
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, OpenBoundaryCondition
 using Oceananigans.Fields: ZeroField
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
 using Test
@@ -72,7 +72,7 @@ using Test
 
     @testset "Velocity boundary conditions" begin
         w_inlet(x, y, t) = FT(0.5)
-        w_bcs = FieldBoundaryConditions(bottom=NormalFlowBoundaryCondition(w_inlet))
+        w_bcs = FieldBoundaryConditions(bottom=OpenBoundaryCondition(w_inlet))
         boundary_conditions = (; w = w_bcs)
 
         model = AtmosphereModel(grid; dynamics=PrescribedDynamics(reference_state), boundary_conditions)

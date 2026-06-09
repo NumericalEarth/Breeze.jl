@@ -181,7 +181,7 @@ const zf = ZeroField()
 @inline AM.microphysical_velocities(bμp::OMCM, μ, ::Val{:ρqʳ}) = (u=zf, v=zf, w=μ.wʳ)
 
 # ImpenetrableBoundaryCondition alias
-const IBC = BoundaryCondition{<:NormalFlow, Nothing}
+const IBC = BoundaryCondition{<:Open, Nothing}
 
 # Helper for bottom terminal velocity based on precipitation_boundary_condition
 # Used in update_microphysical_fields! to set wʳ[bottom] = 0 for ImpenetrableBoundaryCondition
