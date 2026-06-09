@@ -186,9 +186,10 @@ end
     Δt = 10
     τ_precip = 100
 
+    constants = ThermodynamicConstants()
+
     function stepped_model(microphysics; formulation=:LiquidIcePotentialTemperature)
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-        constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
         dynamics = AnelasticDynamics(reference_state)
         model = AtmosphereModel(grid; dynamics, microphysics, formulation)
@@ -197,7 +198,6 @@ end
         return model
     end
 
-    constants = ThermodynamicConstants()
     ℒˡᵣ = constants.liquid.reference_latent_heat
     cᵖᵈ = constants.dry_air.heat_capacity
 
@@ -220,12 +220,15 @@ end
         @test 0.7 * expected < Δρθ < 1.3 * expected
 
         # The physical statement: precipitation leaves temperature unchanged.
-        # The broken code cools by the full ℒ Δqᶜ / cᵖᵐ.
+        # The broken code cools by ℒ Δqᶜ / (cᵖᵐ (1 + γ)) ≈ 0.23 ΔT_bug, where
+        # γ = (ℒ/cᵖᵐ) ∂qˢ/∂T ≈ 3.4 at 300 K: the saturation adjustment
+        # re-condenses vapor as the column cools, masking most of the lost
+        # warming. The bound must therefore sit well below 0.23 ΔT_bug.
         T_zmcm = mean(interior(zmcm.temperature))
         T_ctrl = mean(interior(control.temperature))
-        ρ̄ = mean(interior(Breeze.AtmosphereModels.dynamics_density(zmcm.dynamics)))
+        ρ̄ = mean(interior(dynamics_density(zmcm.dynamics)))
         ΔT_bug = ℒˡᵣ * (Δρq / ρ̄) / cᵖᵈ
-        @test abs(T_zmcm - T_ctrl) < FT(0.2) * ΔT_bug
+        @test abs(T_zmcm - T_ctrl) < 0.1 * ΔT_bug
     end
 
     @testset "static energy formulation" begin
@@ -241,5 +244,7 @@ end
         Δρe = ρe_zmcm - ρe_ctrl
         expected = ℒˡᵣ * Δρq
         @test 0.8 * expected < Δρe < 1.2 * expected
+        # No separate T-invariance check here: the tight Δρe band already pins
+        # the retained latent heat without Exner/cᵖᵐ slop.
     end
 end
