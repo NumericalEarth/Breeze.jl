@@ -263,13 +263,20 @@ end
     return slope_x * ∂x_p′_ccf + slope_y * ∂y_p′_ccf
 end
 
+# `slope_correction` (0 or 1) gates the horizontal slope correction slopeₓ·∂ₓ(Cᴸ(ρθ)′) +
+# slopeᵧ·∂ᵧ(Cᴸ(ρθ)′) in lockstep with the MPAS first-small-step gate applied to ρu's
+# perturbation PGF in `_explicit_horizontal_step!`. Because ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv,
+# the slope-projected correction must be skipped on exactly the substeps where ρu skips
+# its perturbation horizontal PGF; otherwise the two are out of phase on substep 1 of a
+# multi-substep stage. The vertical ∂z(Cᴸ(ρθ)′) part is always applied — the
+# vertical acoustic mode is solved implicitly every substep.
 @inline function z_linearized_pressure_gradient(i, j, k, grid,
                                                 dynamics::TerrainCompressibleDynamics,
-                                                ρθ′, Πᴸ, γRᵐᴸ)
+                                                ρθ′, Πᴸ, γRᵐᴸ, slope_correction)
     ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
     correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
                                                                             dynamics, ρθ′, Πᴸ, γRᵐᴸ)
-    return ∂z_p′ - correction
+    return ∂z_p′ - slope_correction * correction
 end
 
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,

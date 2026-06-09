@@ -969,7 +969,10 @@ end
 @inline linearized_pressure_perturbation(i, j, k, grid, ρθ′, Πᴸ, γRᵐᴸ) =
     @inbounds γRᵐᴸ[i, j, k] * Πᴸ[i, j, k] * ρθ′[i, j, k]
 
-@inline z_linearized_pressure_gradient(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) =
+# `slope_correction` gates the terrain horizontal slope correction (see the
+# `TerrainCompressibleDynamics` method in `terrain_compressible_physics.jl`).
+# On a flat grid there is no horizontal correction, so the factor is ignored here.
+@inline z_linearized_pressure_gradient(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ, slope_correction) =
     ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
 
 @inline x_linearized_pressure_gradient(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) =
@@ -1001,9 +1004,16 @@ end
                                                      thermodynamic_tendency_factor,
                                                      vertical_momentum_tendency_factor,
                                                      θᴸ, Πᴸ,
-                                                     γRᵐᴸ, g, dˢ⁻, sponge)
+                                                     γRᵐᴸ, g, dˢ⁻, sponge,
+                                                     apply_pressure_gradient)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
+
+    # Gate the terrain horizontal slope correction in the contravariant ρw̃ vertical
+    # solve in lockstep with the MPAS first-small-step gate that `_explicit_horizontal_step!`
+    # applies to ρu's perturbation PGF. The vertical ∂z(Cᴸ(ρθ)′) part is
+    # unaffected (no horizontal correction on a flat grid; always applied on terrain).
+    slope_correction = ifelse(apply_pressure_gradient, one(Δτ), zero(Δτ))
 
     @inbounds begin
         # Cell-centred predictors `ρ′★`, `ρθ′★`.
@@ -1032,9 +1042,9 @@ end
         for k in 2:Nz
             Δzᶠ   = Δzᶜᶜᶠ(i, j, k, grid)
             ∂r_p′★ = z_linearized_pressure_gradient(i, j, k, grid, dynamics,
-                                                     ρθ′★, Πᴸ, γRᵐᴸ)
+                                                     ρθ′★, Πᴸ, γRᵐᴸ, slope_correction)
             ∂r_p′ˢ⁻ = z_linearized_pressure_gradient(i, j, k, grid, dynamics,
-                                                      ρθ′, Πᴸ, γRᵐᴸ)
+                                                      ρθ′, Πᴸ, γRᵐᴸ, slope_correction)
 
             sound_force = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★
 
@@ -1546,7 +1556,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
                 substepper.vertical_momentum_tendency_factor,
                 substepper.linearization_potential_temperature, substepper.linearization_exner,
                 substepper.linearization_gamma_R_mixture, g, dˢ⁻,
-                substepper.sponge)
+                substepper.sponge, apply_pressure_gradient)
 
         # Step C: implicit tridiag solve for (ρw)′ with implicit-half δτᵐ⁺
         # and (when active) implicit vertical damping prefactor `dᵐ⁺`.

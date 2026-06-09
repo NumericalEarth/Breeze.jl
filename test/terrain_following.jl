@@ -14,15 +14,18 @@ using Breeze.CompressibleEquations: assemble_slow_vertical_momentum_tendency!,
                                     compute_acoustic_substeps,
                                     compute_contravariant_velocity!,
                                     freeze_linearization_state!,
+                                    linearized_pressure_perturbation,
                                     outer_step_start_transport_velocities,
                                     sponge_rhs,
-                                    sponge_term_diag
+                                    sponge_term_diag,
+                                    terrain_horizontal_linearized_pressure_gradient_correction,
+                                    z_linearized_pressure_gradient
 using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
                            compute_slow_scalar_tendencies!
 using Oceananigans
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: rnode, xnode, znode, λnode, φnode
-using Oceananigans.Operators: divᶜᶜᶜ
+using Oceananigans.Operators: divᶜᶜᶜ, ∂zᶜᶜᶠ
 using Breeze.Thermodynamics: hydrostatic_pressure
 using Test
 
@@ -948,6 +951,67 @@ using Test
         @test model.clock.iteration == 1
         @test isfinite(maximum(abs, interior(model.momentum.ρu)))
         @test isfinite(maximum(abs, interior(model.dynamics.density)))
+    end
+
+    @testset "Acoustic substep gates terrain ρw̃ slope correction" begin
+        # The contravariant vertical-momentum perturbation ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv
+        # carries a horizontal slope correction slopeₓ·∂ₓ(Cᴸ(ρθ)′) in its acoustic
+        # pressure-gradient force. Because ρw̃ and ρu are tied by that relation, the
+        # correction must respect the SAME MPAS first-small-step gate that
+        # `_explicit_horizontal_step!` applies to ρu's perturbation PGF — otherwise the
+        # two are out of phase on substep 1 of a multi-substep stage. The gate factor
+        # therefore scales ONLY the horizontal slope correction inside
+        # `z_linearized_pressure_gradient`; the vertical ∂z(Cᴸ(ρθ)′) part is always
+        # applied (the vertical acoustic mode is solved implicitly every substep).
+        Nx, Nz = 16, 8
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+        materialize_terrain!(grid, (x, y) -> 300 * exp(-x^2 / 2000^2))
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
+                                        slope_stencil = SlopeOutsideInterpolation(),
+                                        reference_potential_temperature = 300)
+        model = AtmosphereModel(grid; dynamics)
+        d = model.dynamics
+
+        # Linearization coefficients and a non-constant ρθ′ perturbation (varies in x
+        # so the horizontal slope correction is genuinely nonzero over the mountain).
+        ρθ′  = CenterField(grid)
+        Πᴸ   = CenterField(grid)
+        γRᵐᴸ = CenterField(grid)
+        for i in 1:Nx, k in 1:Nz
+            x = xnode(i, grid, Center())
+            z = znode(i, 1, k, grid, Center(), Center(), Center())
+            ρθ′[i, 1, k]  = sin(2π * x / Lx) * (1 + z / Lz)
+            Πᴸ[i, 1, k]   = 1.0
+            γRᵐᴸ[i, 1, k] = 287.0 * 1.4
+        end
+        fill_halo_regions!(ρθ′)
+        fill_halo_regions!(Πᴸ)
+        fill_halo_regions!(γRᵐᴸ)
+
+        correction_seen = false
+        for i in 3:Nx-2, k in 2:Nz-1
+            ∂z_p′      = ∂zᶜᶜᶠ(i, 1, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+            correction = terrain_horizontal_linearized_pressure_gradient_correction(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ)
+
+            z_gated = z_linearized_pressure_gradient(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 0.0)
+            z_full  = z_linearized_pressure_gradient(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 1.0)
+
+            # Gate off ⇒ pure vertical gradient, no horizontal slope correction.
+            @test z_gated == ∂z_p′
+            # Gate on ⇒ vertical gradient minus the full horizontal slope correction.
+            @test z_full == ∂z_p′ - correction
+
+            correction_seen = correction_seen || (abs(correction) > 1e-10)
+        end
+
+        # The gate is meaningful: the slope correction is genuinely nonzero over the mountain.
+        @test correction_seen
     end
 
     @testset "Terrain reference state matches continuous hydrostatic profile" begin
