@@ -39,7 +39,7 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, interior
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: xnode, ynode, znode, rnode
+using Oceananigans.Grids: xnode, ynode, znode, rnode, ξnode, ηnode
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxyᶠᶠᵃ

@@ -63,11 +63,13 @@ function materialize_terrain!(grid, topography)
     return grid
 end
 
-# Evaluate topography(x, y) at cell-centred horizontal nodes and write into a
-# CenterField. Done on CPU then copied across (cheap; this is one-shot setup).
+# Evaluate topography(ξ, η) at cell-centred horizontal nodes and write into a
+# CenterField. ξnode/ηnode dispatch on grid type (x/y for RectilinearGrid,
+# λ/φ for LatitudeLongitudeGrid). Done on CPU then copied across.
 function set_topography!(h_field, grid, topography::Function)
     Nx, Ny = size(grid, 1), size(grid, 2)
-    cpu_h = [topography(xnode(i, grid, Center()), ynode(j, grid, Center()))
+    cpu_h = [topography(ξnode(i, 1, 1, grid, Center(), Center(), Center()),
+                        ηnode(1, j, 1, grid, Center(), Center(), Center()))
               for i in 1:Nx, j in 1:Ny]
     copyto!(interior(h_field, :, :, 1), cpu_h)
     return all(iszero, cpu_h)
