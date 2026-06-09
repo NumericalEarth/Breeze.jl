@@ -35,6 +35,8 @@ Arguments:
 |----------|-----------|-------------|
 | `microphysical_tendency` | `(microphysics, name, ρ, ℳ, 𝒰, constants)` | **State-based**. Compute tendency for variable `name`. |
 | `compute_microphysical_tendencies!` | `(microphysics, model)` | **Model entry point**. Adds microphysics contributions to `Gⁿ`. |
+| `microphysical_thermodynamic_names` | `(microphysics, formulation)` | **Opt-in hook**. Return tuple of thermodynamic prognostic names sourced by this scheme (default `()`). |
+| `compute_microphysical_thermodynamic_tendencies!` | `(model, velocities)` | **Compressible-core helper**. Accumulate thermodynamic-source contributions inside the slow scalar tendency assembly. |
 
 **Design principle**: `compute_microphysical_tendencies!` is the only call the atmosphere model
 makes into microphysics during tendency assembly — it runs *after* the per-tracer dynamics
@@ -53,6 +55,18 @@ Schemes plug in by extending one of two methods:
   feeds multiple prognostic tendencies; computing the bundle once per cell rather than once per
   prognostic is a substantial GPU win. See
   [Fused-kernel Microphysics Implementation](@ref) for a worked example.
+
+**Thermodynamic opt-in** (`microphysical_thermodynamic_names`): most schemes exchange water between
+phases whose latent heat is already accounted for in the conserved thermodynamic variable, so no
+additional source is needed and the default returns `()`. Schemes that *remove* condensate in place
+— e.g. `ZeroMomentCloudMicrophysics`, which converts cloud liquid directly to precipitation —
+override this to return `(:ρθ,)` or `(:ρe,)` (via `thermodynamic_density_name(formulation)`) so
+that their `Val(:ρθ)` / `Val(:ρe)` `microphysical_tendency` methods are accumulated by the fused
+tendency pass, retaining the latent warming of precipitated condensate in the conserved
+thermodynamic variable (issue #772). On the compressible `AcousticRungeKutta3` core these
+contributions are consumed via `compute_microphysical_thermodynamic_tendencies!` inside the slow
+scalar tendency assembly, because `Gⁿ.ρθ` is overwritten at every RK stage entry and would
+otherwise discard sources written during `update_state!`.
 
 The `name` argument is a `Val` type (e.g., `Val(:ρqᶜˡ)`) that dispatches to the appropriate tendency.
 Velocity components are interpolated from cell faces to cell centers and passed as a NamedTuple
@@ -169,6 +183,8 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `microphysical_velocities` | — | ✓§ | Sedimentation advection |
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
 | `compute_microphysical_tendencies!` | — | ✓† | Override for fused bundle schemes |
+| `microphysical_thermodynamic_names` | — | ✓∥ | Override to opt in to thermodynamic sourcing |
+| `compute_microphysical_thermodynamic_tendencies!` | — | — | Compressible-core helper (don't override) |
 | `grid_moisture_fractions` | — | ✓‡ | Override for saturation adjustment |
 | `maybe_adjust_thermodynamic_state` | — | ✓‡ | Override for saturation adjustment |
 
@@ -176,6 +192,7 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 ‡ Only needed for saturation adjustment schemes.
 § Only needed when one or more prognostic species sediments; non-sedimenting schemes can
 return `nothing` for every name.
+∥ Only needed for schemes that remove condensate in place (e.g. `ZeroMomentCloudMicrophysics`).
 
 ### Saturation Adjustment Schemes
 

@@ -91,6 +91,8 @@ end
     return ρ * latent_heating
 end
 
+# Assumes every formulation defines thermodynamic_density_name (ρθ or ρe today);
+# a future formulation (e.g. prognostic ρη) must extend the warming tendencies too.
 AtmosphereModels.microphysical_thermodynamic_names(bμp::ZMCM, formulation) =
     (AtmosphereModels.thermodynamic_density_name(formulation),)
 

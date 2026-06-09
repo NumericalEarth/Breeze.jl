@@ -116,7 +116,7 @@ end
     @test Breeze.AtmosphereModels.microphysical_thermodynamic_names(sa, nothing) == ()
     @test Breeze.AtmosphereModels.microphysical_thermodynamic_names(nothing, nothing) == ()
 
-    # ZMCM opts in, per formulation (completed by Task 2 — @test_broken for now)
+    # ZMCM opts in, per formulation
     grid = RectilinearGrid(default_arch; size=(1, 1, 2), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
