@@ -37,7 +37,7 @@ export TerrainMetrics,
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using KernelAbstractions: @kernel, @index
-using Oceananigans: Oceananigans, Center, Face, Field, CenterField, XFaceField, YFaceField, set!
+using Oceananigans: Oceananigans, Center, Face, Field, set!
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: znode, rnode, ξnode, ηnode
 using Oceananigans.Utils: launch!

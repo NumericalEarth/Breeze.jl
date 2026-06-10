@@ -56,23 +56,25 @@ in place from `topography(x, y)`. Must be called after the grid is built (the
 horizontal nodes are needed to evaluate the topography). For `TwoLevelDecay`, the
 terrain is split into large- and small-scale parts by horizontal smoothing.
 
-The topography function is evaluated at each cell-centered (x, y) location.
+The topography is evaluated at the horizontal cell-centre nodes. Its arguments
+follow the grid's horizontal coordinates with Flat dimensions dropped, matching
+every other `set!` initialiser: `topography(x, y)` on a RectilinearGrid,
+`topography(λ, φ)` on a LatitudeLongitudeGrid, and e.g. `topography(x)` when y is
+Flat.
 """
 function materialize_terrain!(grid, topography)
     materialize_formulation!(grid.z.formulation, grid, topography)
     return grid
 end
 
-# Evaluate the topography into a temporary 2D (… , Nothing) field, then copy into
-# the raw array. The field's vertical location is `Nothing`, so `set!` evaluates
-# `topography` at the horizontal nodes only — `topography(x, y)` on a
-# RectilinearGrid, `topography(λ, φ)` on a LatitudeLongitudeGrid, and with the
-# Flat dimension dropped on reduced grids (e.g. `topography(x)` when y is Flat).
-function fill_terrain_height!(h_raw, grid, topography)
+# Evaluate the topography into a fresh 2D (… , Nothing) field. The field's
+# vertical location is `Nothing`, so `set!` evaluates `topography` at the
+# horizontal nodes only (with Flat dimensions dropped), without a spurious
+# vertical coordinate.
+function terrain_height_field(grid, topography)
     h_field = Field((Center(), Center(), nothing), grid)
     set!(h_field, topography)
     fill_halo_regions!(h_field)
-    parent(h_raw) .= parent(h_field)
     return h_field
 end
 
@@ -93,8 +95,8 @@ end
 # must be valid — an unfilled (zero) halo seeds a boundary instability.
 function fill_terrain_slopes!(∂x_raw, ∂y_raw, h_field, grid)
     arch = architecture(grid)
-    ∂x = XFaceField(grid, indices = (:, :, 1))
-    ∂y = YFaceField(grid, indices = (:, :, 1))
+    ∂x = Field((Face(), Center(), nothing), grid)
+    ∂y = Field((Center(), Face(), nothing), grid)
     launch!(arch, grid, (size(grid, 1), size(grid, 2)),
             _compute_terrain_slopes!, ∂x, ∂y, grid, h_field)
     fill_halo_regions!(∂x)
@@ -105,24 +107,22 @@ function fill_terrain_slopes!(∂x_raw, ∂y_raw, h_field, grid)
 end
 
 function materialize_formulation!(f::LinearDecay, grid, topography)
-    h_field = fill_terrain_height!(f.h, grid, topography)
+    h_field = terrain_height_field(grid, topography)
+    parent(f.h) .= parent(h_field)
     fill_terrain_slopes!(f.∂x_h, f.∂y_h, h_field, grid)
     return nothing
 end
 
 function materialize_formulation!(f::TwoLevelDecay, grid, topography)
-    arch = architecture(grid)
     # Full terrain into a temp field, then split: h₁ = smooth(h) (large scale),
     # h₂ = h − h₁ (small scale). Store the parts in the formulation's arrays.
-    h_field  = Field((Center(), Center(), nothing), grid)
-    set!(h_field, topography)
-    fill_halo_regions!(h_field)
+    h_field = terrain_height_field(grid, topography)
 
-    h₁_field = CenterField(grid, indices = (:, :, 1))
+    h₁_field = Field((Center(), Center(), nothing), grid)
     smooth_horizontally!(h₁_field, h_field, grid; passes = 8)   # large-scale part
     fill_halo_regions!(h₁_field)
 
-    h₂_field = CenterField(grid, indices = (:, :, 1))
+    h₂_field = Field((Center(), Center(), nothing), grid)
     parent(h₂_field) .= parent(h_field) .- parent(h₁_field)     # small-scale residual
     fill_halo_regions!(h₂_field)
 
@@ -138,7 +138,7 @@ end
 function smooth_horizontally!(out, in_field, grid; passes = 8)
     arch = architecture(grid)
     parent(out) .= parent(in_field)
-    tmp = CenterField(grid, indices = (:, :, 1))
+    tmp = Field((Center(), Center(), nothing), grid)
     for _ in 1:passes
         fill_halo_regions!(out)
         launch!(arch, grid, (size(grid, 1), size(grid, 2)), _smooth_x_121!, tmp, out, grid)
