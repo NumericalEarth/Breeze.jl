@@ -81,7 +81,7 @@ using Oceananigans.Operators:
     Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
-using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, Open
+using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
 
 using Oceananigans.Grids: Flat, Center, peripheral_node,
                           topology,
@@ -263,7 +263,7 @@ topology-derived defaults — periodic wrap on `Periodic` dims, impenetrability
 on `Bounded` dims. The prognostic momentum's own boundary conditions are not
 inherited: doing so silently imprints the full-state wall target onto the
 perturbation halo when the user supplies a nonzero
-`OpenBoundaryCondition` (issue \\#716), and propagates dimensionally
+`NormalFlowBoundaryCondition` (issue \\#716), and propagates dimensionally
 inconsistent BCs (momentum BCs on velocity face fields) for the time-averaged
 velocities. The wall target re-enters the prognostic state through the
 prognostic momentum's own BC after `accumulate_momentum_perturbations!`.
@@ -1304,11 +1304,11 @@ end
 # field. The relaxation factor `α ∈ (0, 1]` (default 0.5, set via
 # `SplitExplicitTimeDiscretization(; open_boundary_relaxation = α)`) controls
 # how hard the cell is pulled each substep. The relaxation is a no-op on any
-# side whose prognostic-momentum BC is not an active `OpenBoundaryCondition`
-# (periodic, walls, and `OpenBoundaryCondition(nothing)` all skip it), so the
+# side whose prognostic-momentum BC is not an active `NormalFlowBoundaryCondition`
+# (periodic, walls, and `NormalFlowBoundaryCondition(nothing)` all skip it), so the
 # enforcement has zero cost when no open lateral BC is present.
 
-@inline is_active_open_bc(bc) = (bc isa BoundaryCondition{<:Open}) && !(bc.condition isa Nothing)
+@inline is_active_open_bc(bc) = (bc isa BoundaryCondition{<:NormalFlow}) && !(bc.condition isa Nothing)
 
 # Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the prescribed
 # wall value in a single kernel: target = v − cᴸ[iᴮ] = (cᴸ[iᴴ] − cᴸ[iᴮ]) / 2.
