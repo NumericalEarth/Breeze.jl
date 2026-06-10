@@ -45,7 +45,7 @@ end
 
     h₀ = FT(1000)
     a = FT(10000)
-    hill(x, y) = h₀ * exp(-x^2 / a^2)
+    hill(x) = h₀ * exp(-x^2 / a^2)
     Breeze.TerrainFollowingDiscretization.materialize_terrain!(grid, hill)
     metrics = Breeze.TerrainFollowingDiscretization.build_terrain_metrics(
         grid, Breeze.TerrainFollowingDiscretization.SlopeInsideInterpolation())

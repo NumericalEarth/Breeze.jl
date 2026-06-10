@@ -129,7 +129,7 @@ a  = 5000         # m - Gaussian half-width parameter
 λ  = 4000         # m - terrain corrugation wavelength
 K  = 2 * pi / λ   # rad m⁻¹ - terrain wavenumber
 
-hill(x, y) = h₀ * exp(-(x / a)^2) * cos(pi * x / λ)^2
+hill(x) = h₀ * exp(-(x / a)^2) * cos(pi * x / λ)^2
 
 # ## Grid setup
 #
@@ -196,7 +196,7 @@ band!(ax, x_grid, zero(z_bottom), z_bottom, color = (:brown, 0.2))
 
 ## Analytical terrain for comparison
 x_fine = range(-domain_width/6, domain_width/6, length=2000)
-lines!(ax, collect(x_fine), [hill(x, 0) for x in x_fine],
+lines!(ax, collect(x_fine), [hill(x) for x in x_fine],
        color = :black, linestyle = :dash, linewidth = 1, label = "Analytical h(x)")
 
 axislegend(ax, position = :rt)

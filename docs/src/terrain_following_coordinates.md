@@ -887,7 +887,7 @@ const h₀     = 250.0
 const a      = 5e3
 const λ      = 4e3
 θ_profile(x, z) = θ₀ * exp(N² * z / g)
-hill(x, y)   = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
+hill(x)      = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 
 # ---- grid ----
 z_faces = TerrainFollowingVerticalDiscretization(
