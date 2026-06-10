@@ -134,7 +134,7 @@ const TerrainFollowingGrid = AbstractUnderlyingGrid{<:Any, <:Any, <:Any, <:Ocean
     rnode(i, j, k, grid, ℓx, ℓy, ℓz) +
     terrain_following_Δz_surface(i, j, k, grid, grid.z.formulation, ℓx, ℓy, ℓz)
 
-# `node(i, j, k, grid, ℓx, ℓy, ℓz)` is the tuple `(xnode, ynode, znode)` used by
+# `node(i, j, k, grid, ℓx, ℓy, ℓz)` is the tuple `(ξnode, ηnode, znode)` used by
 # `set!(field, f)` when evaluating an initialiser at each cell. The Oceananigans
 # default returns `rnode` (the reference vertical coordinate r) as the third
 # entry, which on a terrain-following grid is *not* the physical altitude. To
@@ -151,20 +151,38 @@ const YFlatTerrainFollowingGrid  = AbstractUnderlyingGrid{<:Any, <:Any, Oceanani
 const XYFlatTerrainFollowingGrid = AbstractUnderlyingGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:Oceananigans.Grids.Bounded, <:TFVD}
 
 @inline Oceananigans.Grids.node(i, j, k, grid::TerrainFollowingGrid, ℓx, ℓy, ℓz) =
-    (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
-     ynode(i, j, k, grid, ℓx, ℓy, ℓz),
+    (ξnode(i, j, k, grid, ℓx, ℓy, ℓz),
+     ηnode(i, j, k, grid, ℓx, ℓy, ℓz),
      Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
 @inline Oceananigans.Grids.node(i, j, k, grid::XFlatTerrainFollowingGrid, ℓx, ℓy, ℓz) =
-    (ynode(i, j, k, grid, ℓx, ℓy, ℓz),
+    (ηnode(i, j, k, grid, ℓx, ℓy, ℓz),
      Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
 @inline Oceananigans.Grids.node(i, j, k, grid::YFlatTerrainFollowingGrid, ℓx, ℓy, ℓz) =
-    (xnode(i, j, k, grid, ℓx, ℓy, ℓz),
+    (ξnode(i, j, k, grid, ℓx, ℓy, ℓz),
      Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
 @inline Oceananigans.Grids.node(i, j, k, grid::XYFlatTerrainFollowingGrid, ℓx, ℓy, ℓz) =
     tuple(Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+# Vertically-reduced fields (ℓz === nothing, e.g. a (Center, Center, Nothing)
+# topography field) carry no vertical coordinate, so `node` drops the z entry —
+# mirroring Oceananigans' Nothing-dropping in `_node`. Without these, `set!`-ing a
+# 2D field on a terrain-following grid would evaluate `znode` at a `nothing`
+# location and throw. Per-grid methods resolve dispatch ambiguity with the Flat
+# variants above.
+@inline Oceananigans.Grids.node(i, j, k, grid::TerrainFollowingGrid, ℓx, ℓy, ℓz::Nothing) =
+    (ξnode(i, j, k, grid, ℓx, ℓy, ℓz), ηnode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+@inline Oceananigans.Grids.node(i, j, k, grid::XFlatTerrainFollowingGrid, ℓx, ℓy, ℓz::Nothing) =
+    tuple(ηnode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+@inline Oceananigans.Grids.node(i, j, k, grid::YFlatTerrainFollowingGrid, ℓx, ℓy, ℓz::Nothing) =
+    tuple(ξnode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+@inline Oceananigans.Grids.node(i, j, k, grid::XYFlatTerrainFollowingGrid, ℓx, ℓy, ℓz::Nothing) =
+    tuple()
 
 # Vertical spacing = reference spacing × Jacobian, mirroring the mutable-grid
 # operators but dispatching on the terrain-following grid type.

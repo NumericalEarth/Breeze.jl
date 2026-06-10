@@ -63,22 +63,14 @@ function materialize_terrain!(grid, topography)
     return grid
 end
 
-# Evaluate topography(ξ, η) at cell-centred horizontal nodes and write into a
-# CenterField. ξnode/ηnode dispatch on grid type (x/y for RectilinearGrid,
-# λ/φ for LatitudeLongitudeGrid). Done on CPU then copied across.
-function set_topography!(h_field, grid, topography::Function)
-    Nx, Ny = size(grid, 1), size(grid, 2)
-    cpu_h = [topography(ξnode(i, 1, 1, grid, Center(), Center(), Center()),
-                        ηnode(1, j, 1, grid, Center(), Center(), Center()))
-              for i in 1:Nx, j in 1:Ny]
-    copyto!(interior(h_field, :, :, 1), cpu_h)
-    return all(iszero, cpu_h)
-end
-
-# Evaluate topography into a temporary CenterField, then copy into the raw array.
+# Evaluate the topography into a temporary 2D (… , Nothing) field, then copy into
+# the raw array. The field's vertical location is `Nothing`, so `set!` evaluates
+# `topography` at the horizontal nodes only — `topography(x, y)` on a
+# RectilinearGrid, `topography(λ, φ)` on a LatitudeLongitudeGrid, and with the
+# Flat dimension dropped on reduced grids (e.g. `topography(x)` when y is Flat).
 function fill_terrain_height!(h_raw, grid, topography)
-    h_field = CenterField(grid, indices = (:, :, 1))
-    set_topography!(h_field, grid, topography)
+    h_field = Field((Center(), Center(), nothing), grid)
+    set!(h_field, topography)
     fill_halo_regions!(h_field)
     parent(h_raw) .= parent(h_field)
     return h_field
@@ -122,8 +114,8 @@ function materialize_formulation!(f::TwoLevelDecay, grid, topography)
     arch = architecture(grid)
     # Full terrain into a temp field, then split: h₁ = smooth(h) (large scale),
     # h₂ = h − h₁ (small scale). Store the parts in the formulation's arrays.
-    h_field  = CenterField(grid, indices = (:, :, 1))
-    set_topography!(h_field, grid, topography)
+    h_field  = Field((Center(), Center(), nothing), grid)
+    set!(h_field, topography)
     fill_halo_regions!(h_field)
 
     h₁_field = CenterField(grid, indices = (:, :, 1))

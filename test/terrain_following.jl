@@ -49,7 +49,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         h₀ = 500.0
         a = 2000.0
-        h(x, y) = h₀ * exp(-x^2 / a^2)
+        h(x) = h₀ * exp(-x^2 / a^2)
 
         materialize_terrain!(grid, h)
         metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
@@ -88,7 +88,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         # Gaussian mountain: h(x) = h₀ * exp(-x² / a²), so ∂h/∂x = -2x/a² * h
         h₀ = 500.0
         a = 10000.0
-        h(x, y) = h₀ * exp(-x^2 / a^2)
+        h(x) = h₀ * exp(-x^2 / a^2)
 
         materialize_terrain!(grid, h)
         metrics = build_terrain_metrics(grid, SlopeOutsideInterpolation())
@@ -206,7 +206,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
-        materialize_terrain!(grid, (x, y) -> 200 * exp(-x^2 / 2000^2))
+        materialize_terrain!(grid, x -> 200 * exp(-x^2 / 2000^2))
 
         # Default: stencil is SlopeOutsideInterpolation()
         model_default = AtmosphereModel(grid;
@@ -235,7 +235,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
-        h(x, y) = 200 * exp(-x^2 / 2000^2)
+        h(x) = 200 * exp(-x^2 / 2000^2)
         materialize_terrain!(grid, h)
 
         # With terrain_metrics, physics includes terrain corrections
@@ -271,7 +271,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         h₀ = 200.0
         a = 2000.0
-        h(x, y) = h₀ * exp(-x^2 / a^2)
+        h(x) = h₀ * exp(-x^2 / a^2)
         materialize_terrain!(grid, h)
 
         dynamics = CompressibleDynamics(ExplicitTimeStepping())
@@ -311,7 +311,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
-        materialize_terrain!(grid, (x, y) -> 0)
+        materialize_terrain!(grid, x -> 0)
 
         dynamics = CompressibleDynamics(ExplicitTimeStepping())
         model = AtmosphereModel(grid; dynamics)
@@ -347,7 +347,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                 g = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                     x=(-Lx/2, Lx/2), z=z_faces,
                                     topology=(Periodic, Flat, Bounded))
-                materialize_terrain!(g, (x, y) -> 0)
+                materialize_terrain!(g, x -> 0)
                 g
             else
                 RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
@@ -436,7 +436,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
-        h(x, y) = 200 * exp(-x^2 / 2000^2)
+        h(x) = 200 * exp(-x^2 / 2000^2)
         materialize_terrain!(grid, h)
         dynamics = CompressibleDynamics(ExplicitTimeStepping())
         model = AtmosphereModel(grid; dynamics)
@@ -503,7 +503,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
 
-            h(x, y) = 200 * exp(-x^2 / 2000^2)
+            h(x) = 200 * exp(-x^2 / 2000^2)
             materialize_terrain!(grid, h)
             dynamics = CompressibleDynamics(ExplicitTimeStepping(); slope_stencil = SlopeInsideInterpolation())
             model = AtmosphereModel(grid; dynamics)
@@ -543,7 +543,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
-            materialize_terrain!(grid, (x, y) -> h(x))
+            materialize_terrain!(grid, h)
 
             ρu = XFaceField(grid)
             ρv = YFaceField(grid)
@@ -597,7 +597,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
-        h(x, y) = 100 * exp(-x^2 / 2000^2)
+        h(x) = 100 * exp(-x^2 / 2000^2)
         materialize_terrain!(grid, h)
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
@@ -660,7 +660,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
-            terrain && materialize_terrain!(grid, (x, y) -> 100 * exp(-x^2 / 2000^2))
+            terrain && materialize_terrain!(grid, x -> 100 * exp(-x^2 / 2000^2))
             return grid
         end
 
@@ -676,7 +676,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         @test terrain_substeps ≥ 1
 
         model_grid = adaptive_grid(false)
-        materialize_terrain!(model_grid, (x, y) -> 100 * exp(-x^2 / 2000^2))
+        materialize_terrain!(model_grid, x -> 100 * exp(-x^2 / 2000^2))
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
                                         reference_potential_temperature=300)
         model = AtmosphereModel(model_grid; dynamics, timestepper=:AcousticRungeKutta3)
@@ -705,7 +705,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
-            materialize_terrain!(grid, (x, y) -> h₀ * exp(-x^2 / 2000^2))
+            materialize_terrain!(grid, x -> h₀ * exp(-x^2 / 2000^2))
 
             dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
                                             reference_potential_temperature=300)
@@ -765,7 +765,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         horizontal_wavelength = 2π / k★
 
         θ_of_z(z) = θ₀ * exp(N² * z / g)
-        hill(x, y) = h₀ / (1 + (x / a)^2)
+        hill(x) = h₀ / (1 + (x / a)^2)
         ĥ(k) = π * a * h₀ * exp(-a * abs(k))
         m²(k) = N² / U^2 - β^2 / 4 - k^2
 
@@ -869,7 +869,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
-        h(x, y) = 500 * exp(-x^2 / 1000^2)
+        h(x) = 500 * exp(-x^2 / 1000^2)
         materialize_terrain!(grid, h)
 
         sponge = UpperSponge(damping_rate=0.2, depth=2000, ramp=LinearRamp())
@@ -903,7 +903,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
-        materialize_terrain!(grid, (x, y) -> 100 * exp(-x^2 / 2000^2))
+        materialize_terrain!(grid, x -> 100 * exp(-x^2 / 2000^2))
 
         damping = ThermalDivergenceDamping(coefficient=0.05, damp_vertical=true)
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=4,
@@ -941,7 +941,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
-        materialize_terrain!(grid, (x, y) -> 100 * exp(-x^2 / 2000^2))
+        materialize_terrain!(grid, x -> 100 * exp(-x^2 / 2000^2))
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         slope_stencil = SlopeInsideInterpolation(),
@@ -977,7 +977,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
-        materialize_terrain!(grid, (x, y) -> 300 * exp(-x^2 / 2000^2))
+        materialize_terrain!(grid, x -> 300 * exp(-x^2 / 2000^2))
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         slope_stencil = SlopeOutsideInterpolation(),
@@ -1036,7 +1036,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         h₀ = 1000.0
         a = 10000.0
-        h(x, y) = h₀ * exp(-x^2 / a^2)
+        h(x) = h₀ * exp(-x^2 / a^2)
         materialize_terrain!(grid, h)
 
         θ₀ = 300.0
@@ -1087,7 +1087,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         h₀ = 1000.0
         a = 10000.0
-        h(x, y) = h₀ * exp(-x^2 / a^2)
+        h(x) = h₀ * exp(-x^2 / a^2)
         materialize_terrain!(grid, h)
 
         g_val = 9.80665
@@ -1296,7 +1296,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
         h₀ = 300.0
-        materialize_terrain!(grid, (x, y) -> h₀ * exp(-x^2 / 2000^2))
+        materialize_terrain!(grid, x -> h₀ * exp(-x^2 / 2000^2))
 
         cpu_arch = Oceananigans.Architectures.CPU()
         rebuilt = Oceananigans.Architectures.on_architecture(cpu_arch, grid)
