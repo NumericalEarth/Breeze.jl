@@ -110,9 +110,12 @@ end
     # Compute moisture fractions
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    cᵛᵐ = cᵖᵐ - Rᵐ
+    γ = cᵖᵐ / cᵛᵐ
 
     # Compute temperature and pressure jointly
-    T, p = temperature_and_pressure(i, j, k, grid, formulation, dynamics, ρ, Rᵐ, q, constants)
+    T, p = temperature_and_pressure(i, j, k, grid, formulation, dynamics, ρ, Rᵐ, γ, q, constants)
 
     @inbounds begin
         temperature_field[i, j, k] = T
@@ -124,34 +127,26 @@ end
 
 @inline function temperature_and_pressure(i, j, k, grid,
                                           formulation::LiquidIcePotentialTemperatureFormulation,
-                                          dynamics, ρ, Rᵐ, q, constants)
+                                          dynamics, ρ, Rᵐ, γ, q, constants)
     # Note: potential_temperature_density is ρθ (prognostic), potential_temperature is θ (diagnostic)
     ρθ = @inbounds formulation.potential_temperature_density[i, j, k]
     θ = ρθ / ρ
     pˢᵗ = standard_pressure(dynamics)
 
-    # Invert θˡⁱ at constant density via LiquidIceDensityState.temperature, which iterates the
-    # implicit relation T = (ρRᵐT/pˢᵗ)^κ θ + (ℒˡqˡ+ℒⁱqⁱ)/cᵖᵐ to convergence. This is the same
-    # inversion used by the saturation adjustment on the compressible core, so the dynamics and the
-    # microphysics carry one self-consistent T (fixes the κ·ΔL split — NumericalEarth/Breeze.jl#765).
-    𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ, dynamics.temperature_tolerance, dynamics.temperature_maxiter)
-    T = temperature(𝒰, constants)
+    # Direct formula: T = θ^γ (ρ Rᵐ / pˢᵗ)^(γ-1)
+    # For moist air with condensate, adjust for latent heat
+    qˡ = q.liquid
+    qⁱ = q.ice
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+
+    # T = θ^γ (ρ Rᵐ / pˢᵗ)^(γ-1) + latent heat correction
+    T_dry = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1)
+    T = T_dry + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
 
     # Ideal gas law: p = ρ Rᵐ T
     p = ρ * Rᵐ * T
 
     return T, p
-end
-
-# Build the density-based thermodynamic state for the compressible core, so that the
-# saturation adjustment and the θˡⁱ→T inversion are evaluated at the prognostic density ρ (true
-# pressure p = ρRᵐT) rather than a reference pressure. The generic (reference-pressure) method in
-# PotentialTemperatureFormulations is retained for anelastic dynamics. See NumericalEarth/Breeze.jl#765.
-@inline function AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid,
-                                                               formulation::LiquidIcePotentialTemperatureFormulation,
-                                                               dynamics::CompressibleDynamics, q)
-    θ = @inbounds formulation.potential_temperature[i, j, k]
-    ρ = @inbounds dynamics_density(dynamics)[i, j, k]
-    pˢᵗ = standard_pressure(dynamics)
-    return LiquidIceDensityState(θ, q, pˢᵗ, ρ, dynamics.temperature_tolerance, dynamics.temperature_maxiter)
 end
