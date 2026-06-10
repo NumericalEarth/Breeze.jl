@@ -232,7 +232,7 @@ end
 end
 
 # Dispatch the ρw bottom boundary condition on the grid type: terrain-following
-# grids get the kinematic Open BC; every other grid keeps the BCs it was given
+# grids get the kinematic normal-flow BC; every other grid keeps the BCs it was given
 # (impenetrable bottom by default). The terrain BC sets only the bottom; the top
 # (impenetrable lid) and horizontal sides take their usual regularised defaults.
 terrain_ρw_boundary_conditions(grid, ρw_bcs) = ρw_bcs

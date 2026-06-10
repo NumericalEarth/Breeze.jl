@@ -29,6 +29,13 @@ using Oceananigans.Operators: divᶜᶜᶜ, ∂zᶜᶜᶠ
 using Breeze.Thermodynamics: hydrostatic_pressure
 using Test
 
+# The terrain physics testsets that close the TwoLevelDecay-through-substepper gap are
+# parametrized over both formulations. Both are skeleton instances (terrain components
+# filled per-grid by materialize_terrain!), so the same constant is reused across grids.
+const TERRAIN_FORMULATIONS = (LinearDecay(),
+                              TwoLevelDecay(large_scale_height = 2500.0,
+                                            small_scale_height = 1250.0))
+
 @allowscalar begin
 @testset "TerrainFollowingDiscretization" begin
     @testset "materialize_terrain! with function topography" begin
@@ -581,11 +588,11 @@ using Test
         @test fine_divergence_error < medium_divergence_error / 2
     end
 
-    @testset "Split-explicit terrain transport uses w̃" begin
+    @testset "Split-explicit terrain transport uses w̃ [$(nameof(typeof(formulation)))]" for formulation in TERRAIN_FORMULATIONS
         Nx, Nz = 8, 6
         Lx, Lz = 10000.0, 5000.0
 
-        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation)
         grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
@@ -682,7 +689,7 @@ using Test
         @test isapprox(maximum(abs, interior(model.velocities.w)), 0; atol = 1e-12)
     end
 
-    @testset "Split-explicit terrain acoustic stability diagnostics" begin
+    @testset "Split-explicit terrain acoustic stability diagnostics [$(nameof(typeof(formulation)))]" for formulation in TERRAIN_FORMULATIONS
         Nx, Nz = 8, 6
         Lx, Lz = 10000.0, 5000.0
         Δt = 2.0
@@ -694,7 +701,7 @@ using Test
         sound_speed = sqrt(γᵈ * Rᵈ * 300)
 
         for h₀ in (0.0, 100.0, 300.0)
-            z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
+            z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation)
             grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
@@ -953,7 +960,7 @@ using Test
         @test isfinite(maximum(abs, interior(model.dynamics.density)))
     end
 
-    @testset "Acoustic substep gates terrain ρw̃ slope correction" begin
+    @testset "Acoustic substep gates terrain ρw̃ slope correction [$(nameof(typeof(formulation)))]" for formulation in TERRAIN_FORMULATIONS
         # The contravariant vertical-momentum perturbation ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv
         # carries a horizontal slope correction slopeₓ·∂ₓ(Cᴸ(ρθ)′) in its acoustic
         # pressure-gradient force. Because ρw̃ and ρu are tied by that relation, the
@@ -966,7 +973,7 @@ using Test
         Nx, Nz = 16, 8
         Lx, Lz = 10000.0, 5000.0
 
-        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation)
         grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
