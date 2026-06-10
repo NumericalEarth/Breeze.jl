@@ -299,11 +299,10 @@ end
     @test issorted(offset_profile)
     @test all(0 .< offset_profile .< 1)
 
-    # Rings finer than the grid leave some empty; those are filled with zero, not NaN,
-    # while populated rings still hold the constant.
+    # Rings finer than the grid leave some empty; those are filled with NaN (not zero, which
+    # would bias a downstream radial average), while populated rings still hold the constant.
     fine = azimuthal_mean(c; radius = 1, Nr = 200)
     fine_profile = Array(interior(fine, :, 1, 1))
-    @test any(fine_profile .== 0)
-    @test all(v -> v == 0 || v ≈ 5, fine_profile)
-    @test !any(isnan, fine_profile)
+    @test any(isnan, fine_profile)
+    @test all(v -> isnan(v) || v ≈ 5, fine_profile)
 end

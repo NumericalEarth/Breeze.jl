@@ -10,7 +10,10 @@ vertical grid as `field`.
 
 This bins the Cartesian `field` by radius, a pragmatic stand-in for a reduction on a true
 cylindrical grid; the kernel runs on the CPU and the GPU. The radial grid is assumed
-uniform.
+uniform. Rings that catch no grid points are filled with `NaN` (not zero) so they read as
+"no data" and don't bias a subsequent radial average. Keep the rings coarse enough to stay
+populated — roughly ``\\texttt{radius} / N_r \\gtrsim`` the horizontal grid spacing; far
+finer `Nr` just produces empty (`NaN`) rings.
 
 ```jldoctest
 using Oceananigans, Breeze
@@ -72,5 +75,7 @@ end
         ring_sum += ifelse(in_ring, field[ii, jj, k], zero(FT))
         ring_count += ifelse(in_ring, 1, 0)
     end
-    @inbounds profile[ir, j, k] = ifelse(ring_count > 0, ring_sum / ring_count, zero(FT))
+    # Empty rings get `NaN`, not zero, so they read as "no data" and don't bias a
+    # subsequent radial average.
+    @inbounds profile[ir, j, k] = ifelse(ring_count > 0, ring_sum / ring_count, convert(FT, NaN))
 end
