@@ -70,7 +70,7 @@ function follow_terrain!(grid, topography, ::BasicTerrainFollowing, pressure_gra
     h_field = CenterField(grid, indices=(:, :, 1))
 
     # Set topography values and fill halos
-    set_topography!(h_field, grid, topography)
+    set_topography!(h_field, topography)
     fill_halo_regions!(h_field)
 
     # Compute sigma and eta on the grid
@@ -90,18 +90,22 @@ function follow_terrain!(grid, topography, ::BasicTerrainFollowing, pressure_gra
     return TerrainMetrics(h_field, ∂x_h, ∂y_h, z_top, pressure_gradient_stencil)
 end
 
-# Set topography from a function: always evaluate on CPU, then copy to device.
-# This supports arbitrary user-defined functions (including those that reference
-# non-const globals) without requiring GPU-compatible code.
-# Note: Oceananigans' set!(field, func) requires func(x, y, z) and evaluates on-device,
-# which would fail for non-GPU-compatible user functions. The manual copyto! pattern here
-# is intentionally more general.
-function set_topography!(h_field, grid, topography::Function)
+# Set topography from a function, evaluating it on the CPU and copying to the device.
+#
+# We deliberately don't use Oceananigans' `set!(h_field, topography)`. `set!`
+# evaluates a FunctionField at the field's location, which (1) requires the
+# function's arity to match the grid dimensionality — `f(x, y, z)` on a 3D grid,
+# whereas the topography API is the two-argument `h(x, y)` — and (2) on a 2D x–z
+# (Flat) grid drops the Flat direction and calls `f(x, z)`, leaking the vertical
+# coordinate into the meridional slot.
+#
+# Sampling `ξnode`/`ηnode` directly keeps the documented `h(x, y)` API and always
+# feeds horizontal-only coordinates: `(x, y)` on a RectilinearGrid, `(λ, φ)` on a
+# LatitudeLongitudeGrid, and `nothing` for a Flat direction — never z. Evaluating
+# on the CPU also supports user functions that reference non-const globals.
+function set_topography!(h_field, topography::Function)
+    grid = h_field.grid
     Nx, Ny = size(grid, 1), size(grid, 2)
-    # ξnode/ηnode are grid-agnostic horizontal coordinates: (x, y) on a
-    # RectilinearGrid, (λ, φ) on a LatitudeLongitudeGrid. Unlike `node`, they
-    # don't drop Flat directions, so the second argument is always the
-    # meridional coordinate (never z) on a 2D x–z grid.
     cpu_h = [topography(ξnode(i, j, 1, grid, Center(), Center(), Center()),
                         ηnode(i, j, 1, grid, Center(), Center(), Center()))
               for i in 1:Nx, j in 1:Ny]
