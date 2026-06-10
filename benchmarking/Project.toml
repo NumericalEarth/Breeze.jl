@@ -27,7 +27,7 @@ Breeze = {path = ".."}
 AMDGPU = "2.3.0"
 ArgParse = "1"
 CUDA = "5, 6.0"
-CloudMicrophysics = "0.31.4, 0.32, 0.33, 0.34, 0.35, 0.36"
+CloudMicrophysics = "0.36"
 Dates = "<0.0.1, 1"
 Enzyme = "0.13.118"
 GPUCompiler = "=1.13.1"
