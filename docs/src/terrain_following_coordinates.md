@@ -669,8 +669,8 @@ IC automatically.
 The continuous boundary condition ``w = u\,\partial_x h + v\,\partial_y h``
 becomes ``\tilde{w} = 0`` at ``r = 0`` — no flow *through* the terrain surface.
 Breeze imposes this as a boundary condition on the prognostic vertical momentum
-``\rho w``: on a terrain-following grid its bottom face carries an
-`OpenBoundaryCondition` whose value is the kinematic Cartesian momentum
+``\rho w``: on a terrain-following grid its bottom face carries a
+`NormalFlowBoundaryCondition` whose value is the kinematic Cartesian momentum
 
 ```math
 \rho w \big|_\text{surface}
