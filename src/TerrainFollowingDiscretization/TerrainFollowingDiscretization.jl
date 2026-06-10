@@ -29,7 +29,7 @@ using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
 using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, interior
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: xnode, ynode, rnode
+using Oceananigans.Grids: ξnode, ηnode, rnode
 using Oceananigans.ImmersedBoundaries: MutableGridOfSomeKind
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxyᶠᶠᵃ

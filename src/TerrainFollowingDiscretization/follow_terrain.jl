@@ -98,7 +98,12 @@ end
 # is intentionally more general.
 function set_topography!(h_field, grid, topography::Function)
     Nx, Ny = size(grid, 1), size(grid, 2)
-    cpu_h = [topography(xnode(i, grid, Center()), ynode(j, grid, Center()))
+    # ξnode/ηnode are grid-agnostic horizontal coordinates: (x, y) on a
+    # RectilinearGrid, (λ, φ) on a LatitudeLongitudeGrid. Unlike `node`, they
+    # don't drop Flat directions, so the second argument is always the
+    # meridional coordinate (never z) on a 2D x–z grid.
+    cpu_h = [topography(ξnode(i, j, 1, grid, Center(), Center(), Center()),
+                        ηnode(i, j, 1, grid, Center(), Center(), Center()))
               for i in 1:Nx, j in 1:Ny]
     copyto!(interior(h_field, :, :, 1), cpu_h)
     return nothing

@@ -1,6 +1,6 @@
 using Breeze
 using Oceananigans
-using Oceananigans.Grids: MutableVerticalDiscretization, rnode, xnode, znode
+using Oceananigans.Grids: MutableVerticalDiscretization, rnode, xnode, ynode, znode, λnode, φnode
 using Breeze.Thermodynamics: hydrostatic_pressure
 using Test
 
@@ -158,6 +158,40 @@ using Test
         @test isfinite(maximum(abs, model.dynamics.contravariant_vertical_velocity))
     end
 
+    @testset "Terrain-following CompressibleDynamics on a LatitudeLongitudeGrid" begin
+        # Spherical-geometry insurance: the same terrain physics must run on a
+        # LatitudeLongitudeGrid, where the metric terms carry cos(φ) factors and
+        # the topography is sampled at (λ, φ) rather than (x, y).
+        Nλ, Nφ, Nz = 8, 8, 8
+        Lz = 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = LatitudeLongitudeGrid(CPU(); size=(Nλ, Nφ, Nz),
+                                     longitude=(-2, 2), latitude=(40, 44), z=z_faces)
+
+        h(λ, φ) = 200 * exp(-(λ^2 + (φ - 42)^2) / 0.5)
+        metrics = follow_terrain!(grid, h)
+
+        dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+        model = AtmosphereModel(grid; dynamics)
+
+        @test model isa AtmosphereModel
+        @test model.dynamics.terrain_metrics isa TerrainMetrics
+        @test model.dynamics.contravariant_vertical_velocity !== nothing
+
+        θ₀ = 300.0
+        p₀ = 101325.0
+        pˢᵗ = 1e5
+        constants = model.thermodynamic_constants
+        ρᵢ(λ, φ, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
+        set!(model, ρ=ρᵢ, θ=θ₀)
+
+        Δt = 0.1
+        time_step!(model, Δt)
+        @test isfinite(maximum(abs, model.velocities.w))
+        @test isfinite(maximum(abs, model.dynamics.contravariant_vertical_velocity))
+    end
+
     @testset "Contravariant velocity for horizontal flow over terrain" begin
         Nx, Nz = 16, 8
         Lx, Lz = 10000.0, 5000.0
@@ -297,5 +331,48 @@ using Test
         i_flat = 1
         i_peak = Nx÷2
         @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
+    end
+
+    @testset "set_topography! horizontal coordinates (Flat, 3D, lat-lon)" begin
+        # The horizontal coordinates passed to topography(...) come from
+        # ξnode/ηnode (see follow_terrain.jl::set_topography!). This guards two
+        # properties that a naive `node(...)[1:2]` would break:
+        #   (a) on a 2D x–z (Flat) grid the second argument is the degenerate
+        #       meridional node `nothing`, NOT the vertical coordinate z;
+        #   (b) the coordinates generalize to (λ, φ) on a LatitudeLongitudeGrid.
+
+        # (a) Flat grid: probe returns a sentinel iff the second arg is `nothing`.
+        #     If z ever leaked into that slot, the probe would return 2.0 instead.
+        Nx, Nz = 8, 6
+        zf = MutableVerticalDiscretization(collect(range(0, 500.0, length=Nz+1)))
+        flat_grid = RectilinearGrid(CPU(); size=(Nx, Nz), x=(-500, 500), z=zf,
+                                    topology=(Periodic, Flat, Bounded))
+        h_probe(x, y) = y === nothing ? 1.0 : 2.0
+        m_flat = follow_terrain!(flat_grid, h_probe)
+        @test all(m_flat.topography[i, 1, 1] == 1.0 for i in 1:Nx)
+
+        # (b) 3D grid: topography receives the true (x, y).
+        Nx3, Ny3, Nz3 = 5, 4, 3
+        zf3 = MutableVerticalDiscretization(collect(range(0, 300.0, length=Nz3+1)))
+        grid3 = RectilinearGrid(CPU(); size=(Nx3, Ny3, Nz3), x=(0, 100), y=(0, 80),
+                                z=zf3, topology=(Periodic, Periodic, Bounded))
+        h_xy(x, y) = x + 2y
+        m3 = follow_terrain!(grid3, h_xy)
+        for i in 1:Nx3, j in 1:Ny3
+            expected = xnode(i, grid3, Center()) + 2 * ynode(j, grid3, Center())
+            @test m3.topography[i, j, 1] ≈ expected
+        end
+
+        # (c) LatitudeLongitudeGrid: topography receives (λ, φ) in degrees.
+        Nλ, Nφ, Nzll = 6, 5, 4
+        zfll = MutableVerticalDiscretization(collect(range(0, 4000.0, length=Nzll+1)))
+        llg = LatitudeLongitudeGrid(CPU(); size=(Nλ, Nφ, Nzll),
+                                    longitude=(-5, 5), latitude=(40, 50), z=zfll)
+        h_λφ(λ, φ) = 100.0 + λ + 2φ
+        m_ll = follow_terrain!(llg, h_λφ)
+        for i in 1:Nλ, j in 1:Nφ
+            expected = h_λφ(λnode(i, llg, Center()), φnode(j, llg, Center()))
+            @test m_ll.topography[i, j, 1] ≈ expected
+        end
     end
 end
