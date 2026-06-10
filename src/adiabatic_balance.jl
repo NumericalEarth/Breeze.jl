@@ -33,14 +33,14 @@ The initial fields that are modified depend on the dynamics:
 reset to `t = 0` on exit. `Δt` is the forward/backward step size, taken with the
 model's own time stepper.
 
-`adiabatic_initialization!` performs *adiabatic* dynamics only. The caller must
+`adiabatic_balance!` performs *adiabatic* dynamics only. The caller must
 pass a model built without physics (`microphysics = nothing`), without an upper
 sponge (`sponge = nothing`), and without forcing — these run inside
 `update_state!`/`time_step!` and would corrupt the spin-up. Boundary conditions
 are not modified; pass a model whose boundaries are time-invariant (e.g. frozen
 at the analysis time) so the symmetric excursion stays nearly reversible.
 """
-function adiabatic_initialization!(model::AtmosphereModel; Δt, cycles = 1, weight = 2)
+function adiabatic_balance!(model::AtmosphereModel; Δt, cycles = 1, weight = 2)
     snapshot = snapshot_initial_fields(model)
 
     for _ in 1:cycles
