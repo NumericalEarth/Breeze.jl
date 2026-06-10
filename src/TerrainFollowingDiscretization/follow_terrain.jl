@@ -90,6 +90,11 @@ function follow_terrain!(grid, topography, ::BasicTerrainFollowing, pressure_gra
     return TerrainMetrics(h_field, ∂x_h, ∂y_h, z_top, pressure_gradient_stencil)
 end
 
+# Generic fallback: an array, Field, or number is handed straight to Oceananigans'
+# `set!`, which copies/broadcasts it onto `h_field` directly. Only the `::Function`
+# method below needs special coordinate handling.
+set_topography!(h_field, topography) = (set!(h_field, topography); nothing)
+
 # Set topography from a function, evaluating it on the CPU and copying to the device.
 #
 # We deliberately don't use Oceananigans' `set!(h_field, topography)`. `set!`

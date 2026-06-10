@@ -27,7 +27,7 @@ using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
-using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, interior
+using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, interior, set!
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: ξnode, ηnode, rnode
 using Oceananigans.ImmersedBoundaries: MutableGridOfSomeKind

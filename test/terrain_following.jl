@@ -375,4 +375,22 @@ using Test
             @test m_ll.topography[i, j, 1] ≈ expected
         end
     end
+
+    @testset "set_topography! generic fallback (Number, Array)" begin
+        # Non-Function topography (a constant or a precomputed height field)
+        # is handed straight to Oceananigans' set!, bypassing coordinate sampling.
+        Nx, Nz = 8, 6
+        zf = MutableVerticalDiscretization(collect(range(0, 500.0, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz), x=(-500, 500), z=zf,
+                               topology=(Periodic, Flat, Bounded))
+
+        # Constant terrain height
+        m_const = follow_terrain!(grid, 250.0)
+        @test all(m_const.topography[i, 1, 1] == 250.0 for i in 1:Nx)
+
+        # Precomputed array of heights
+        heights = reshape(Float64.(1:Nx), Nx, 1, 1)
+        m_arr = follow_terrain!(grid, heights)
+        @test all(m_arr.topography[i, 1, 1] == i for i in 1:Nx)
+    end
 end
