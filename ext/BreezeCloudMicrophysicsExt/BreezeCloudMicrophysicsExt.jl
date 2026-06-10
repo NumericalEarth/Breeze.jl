@@ -75,7 +75,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans: Center, Face, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: ZeroField, ZFaceField
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, Open
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, NormalFlow
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
