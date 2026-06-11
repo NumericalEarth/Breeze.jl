@@ -342,6 +342,17 @@ function hydrostatic_temperature(z, p₀, θᵣ::Function, pˢᵗ, constants)
     return θᵣ(z) * (p / pˢᵗ)^κ
 end
 
+# Evaluate a profile (Number or Function) at a given height.
+# Used both here and in terrain_compressible_physics.jl for reference state construction.
+"""
+    evaluate_profile(profile, z)
+
+Evaluate a vertical profile at height `z`. If `profile` is a `Number`, returns it unchanged.
+If `profile` is a `Function`, calls `profile(z)`.
+"""
+@inline evaluate_profile(value::Number, z) = value
+@inline evaluate_profile(f::Function, z) = f(z)
+
 # Surface value for a reference profile: a `Number`, a column profile `f(z)`, or a
 # horizontally varying profile `f(x, y, z)` (the 3D reference path) evaluated at the origin.
 @inline surface_value(θ::Number) = θ
@@ -774,9 +785,8 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
 
             qᵛᵣ = reference_moisture_field(vapor_mass_fraction, grid)
             qᵛ_surface = @allowscalar qᵛᵣ[1, 1, 1]
-            Rᵐ_surface = (1 - qᵛ_surface) * Rᵈ + qᵛ_surface * Rᵛ
-            cᵖᵐ_surface = (1 - qᵛ_surface) * cᵖᵈ + qᵛ_surface * cᵖᵛ
-            π₀_surface = (p₀ / pˢᵗ)^(Rᵐ_surface / cᵖᵐ_surface)
+            Rᵐ_surface, _, κᵐ_surface = moist_reference_constants(qᵛ_surface, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+            π₀_surface = (p₀ / pˢᵗ)^κᵐ_surface
             ρ₀_surface = p₀ / (Rᵐ_surface * θ₀_surface * π₀_surface)
 
             p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
