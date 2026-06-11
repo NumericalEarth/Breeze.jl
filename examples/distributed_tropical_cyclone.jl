@@ -126,19 +126,7 @@ Lx = 642kilometers
 ## the same breakpoints gives a *different* 259-level grid with 25 m slivers at
 ## each breakpoint, which would throttle the acoustic substep — so we use the
 ## canonical GATE construction here.
-function gate_vertical_grid(zᵗ; Δz⁰ = 50, Δzᵖ = 100, Δzᵗ = 300)
-    z₁, z₂, z₃ = 1275, 5100, 18000   # transition heights
-    z_faces = [0.0]
-    z = 0.0
-    while z < zᵗ
-        α = clamp((z - z₁) / (z₂ - z₁), 0, 1)
-        β = clamp((z - z₂) / (z₃ - z₂), 0, 1)
-        Δz = Δz⁰ + α * (Δzᵖ - Δz⁰) + β * (Δzᵗ - Δzᵖ)
-        z = min(z + Δz, zᵗ)
-        push!(z_faces, z)
-    end
-    return z_faces
-end
+include(joinpath(@__DIR__, "gate_vertical_grid.jl"))
 
 if vertical_choice == "gate"
     z_faces = gate_vertical_grid(27000)
@@ -624,25 +612,40 @@ function progress(sim)
 end
 add_callback!(simulation, progress, IterationInterval(progress_every))
 
-## Per-rank x-y SLICE output at a few z-levels (full 3D is multi-TB at production
-## scale; the YD19 plan-view + azimuthal-average analysis only needs horizontal
-## slices). Each rank writes its own x-slab; the figure job reassembles them.
-## Levels: surface, 2, 3.6, 6, 10 km — the YD19 plan-view analysis heights.
+## Per-rank SLICE output (full 3D is multi-TB at production scale; the YD19
+## plan-view + azimuthal-average analysis only needs slices). Each rank writes
+## its own x-slab; the movie/figure job reassembles them by `vcat` along x.
 ## NB: `view` windows the Field (never `interior`), so the writer stores a slice.
+##
+##   x-y planes at a few z-levels — surface, 2, 3.6, 6, 10 km (YD19 plan-view heights)
+##   x-z plane through the storm center (y = 0) — for vertical structure (w, u, T)
+##
+## These feed the two movies: `make_planar_movie.jl` (x-y) and `make_vertical_movie.jl` (x-z).
 T_field = model.temperature
 klev(zt) = argmin(abs.(z_centers .- zt))
 ks = (surface = 1, z2km = klev(2000), z36 = klev(3600), z6km = klev(6000), z10km = klev(10000))
-slice(field, k) = view(field, :, :, k)
+xyslice(field, k) = view(field, :, :, k)
 outputs = NamedTuple()
 for (name, k) in pairs(ks)
     names = (Symbol(:u_, name), Symbol(:v_, name), Symbol(:w_, name), Symbol(:T_, name))
-    vals  = (slice(u, k), slice(v, k), slice(w, k), slice(T_field, k))
+    vals  = (xyslice(u, k), xyslice(v, k), xyslice(w, k), xyslice(T_field, k))
     global outputs = merge(outputs, NamedTuple{names}(vals))
 end
 
+## Vertical (x-z) cross-section through y = 0, the row that passes through the vortex
+## center. Each rank holds the full y-extent (x-only partition), so j is global.
+jmid = Ny ÷ 2
+xzslice(field) = view(field, :, jmid, :)
+outputs = merge(outputs, (w_xz = xzslice(w), u_xz = xzslice(u), v_xz = xzslice(v), T_xz = xzslice(T_field)))
+
 stage = with_heating ? "heated" : "spinup"
+## Tag the slice files with the SLURM job id so a checkpoint/restart CHAIN leaves one
+## file set per job rather than overwriting; the movie scripts concatenate them by time
+## into a single timeline. (The checkpoint prefix below stays constant so restart finds it.)
+job_tag = get(ENV, "SLURM_JOB_ID", "")
+run_suffix = isempty(job_tag) ? "" : "_job$(job_tag)"
 output_prefix = joinpath(output_dir,
-                         @sprintf("tc_%s_dx%dm_%s_nz%d", stage, round(Int, Δx), vertical_choice, Nz))
+                         @sprintf("tc_%s_dx%dm_%s_nz%d%s", stage, round(Int, Δx), vertical_choice, Nz, run_suffix))
 rank == 0 && mkpath(output_dir)
 MPI.Barrier(MPI.COMM_WORLD)
 
