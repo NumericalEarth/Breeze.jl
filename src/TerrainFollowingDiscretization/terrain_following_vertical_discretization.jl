@@ -134,54 +134,50 @@ const TerrainFollowingGrid = AbstractUnderlyingGrid{<:Any, <:Any, <:Any, <:Ocean
     rnode(i, j, k, grid, ℓx, ℓy, ℓz) +
     terrain_following_Δz_surface(i, j, k, grid, grid.z.formulation, ℓx, ℓy, ℓz)
 
-# `node(i, j, k, grid, ℓx, ℓy, ℓz)` is the tuple `(ξnode, ηnode, znode)` used by
-# `set!(field, f)` when evaluating an initialiser at each cell. The Oceananigans
-# default returns `rnode` (the reference vertical coordinate r) as the third
-# entry, which on a terrain-following grid is *not* the physical altitude. To
-# make `set!(field, (x, y, z) -> f(z))` evaluate `f` at z = r + h(x,y)·b(r)
-# (the actual cell-centre altitude) we override `node` on grids whose vertical
-# discretisation is a TFVD. This dispatches on a type Breeze owns, so it is
-# not type piracy.
-# z-Flat variants are intentionally absent: TFVD is the vertical discretization,
-# so `topology[3] == Flat` makes the terrain-following coordinate meaningless.
-# Only x-Flat (cross-section in y-z), y-Flat (cross-section in x-z), and xy-Flat
-# (single column) are real use cases.
-const XFlatTerrainFollowingGrid  = AbstractUnderlyingGrid{<:Any, Oceananigans.Grids.Flat, <:Any, <:Oceananigans.Grids.Bounded, <:TFVD}
-const YFlatTerrainFollowingGrid  = AbstractUnderlyingGrid{<:Any, <:Any, Oceananigans.Grids.Flat, <:Oceananigans.Grids.Bounded, <:TFVD}
-const XYFlatTerrainFollowingGrid = AbstractUnderlyingGrid{<:Any, Oceananigans.Grids.Flat, Oceananigans.Grids.Flat, <:Oceananigans.Grids.Bounded, <:TFVD}
-
-@inline Oceananigans.Grids.node(i, j, k, grid::TerrainFollowingGrid, ℓx, ℓy, ℓz) =
+# `set!(field, f)` evaluates the initialiser at `node(i, j, k, grid, ℓx, ℓy, ℓz)`,
+# which nullifies Flat dimensions and then delegates to `Oceananigans.Grids._node`
+# to drop `Nothing`-located dimensions. Stock `_node` returns `rnode` (the reference
+# coordinate r) as the vertical entry — on a terrain-following grid that is *not*
+# the physical altitude. We extend `_node` (not `node`) on grids whose vertical
+# discretisation is a TFVD so the vertical entry is `znode` (z = r + h(x,y)·b(r),
+# the actual cell-centre altitude), making `set!(field, (x, y, z) -> f(z))`
+# evaluate `f` at the true altitude. Extending `_node` reuses Oceananigans' Flat
+# handling unchanged — we only mirror its `Nothing`-dropping layer.
+#
+# These are a copy of Oceananigans' eight `_node` methods with `rnode` → `znode`.
+# The four that carry no vertical entry (ℓz === nothing) are identical to stock and
+# exist only to resolve dispatch ambiguity between our grid-typed methods and
+# Oceananigans' `Nothing`-location-typed ones.
+#
+# TODO (upstream Oceananigans): if stock `_node` used `znode` instead of `rnode`
+# (a no-op for every existing grid, since `znode` defaults to `rnode` in
+# vertical_discretization.jl), our `znode` override above would flow through `set!`
+# automatically and this entire block could be deleted.
+@inline Oceananigans.Grids._node(i, j, k, grid::TerrainFollowingGrid, ℓx, ℓy, ℓz) =
     (ξnode(i, j, k, grid, ℓx, ℓy, ℓz),
      ηnode(i, j, k, grid, ℓx, ℓy, ℓz),
      Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline Oceananigans.Grids.node(i, j, k, grid::XFlatTerrainFollowingGrid, ℓx, ℓy, ℓz) =
-    (ηnode(i, j, k, grid, ℓx, ℓy, ℓz),
-     Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
+@inline Oceananigans.Grids._node(i, j, k, grid::TerrainFollowingGrid, ℓx::Nothing, ℓy, ℓz) =
+    (ηnode(i, j, k, grid, ℓx, ℓy, ℓz), Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline Oceananigans.Grids.node(i, j, k, grid::YFlatTerrainFollowingGrid, ℓx, ℓy, ℓz) =
-    (ξnode(i, j, k, grid, ℓx, ℓy, ℓz),
-     Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
+@inline Oceananigans.Grids._node(i, j, k, grid::TerrainFollowingGrid, ℓx, ℓy::Nothing, ℓz) =
+    (ξnode(i, j, k, grid, ℓx, ℓy, ℓz), Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline Oceananigans.Grids.node(i, j, k, grid::XYFlatTerrainFollowingGrid, ℓx, ℓy, ℓz) =
+@inline Oceananigans.Grids._node(i, j, k, grid::TerrainFollowingGrid, ℓx::Nothing, ℓy::Nothing, ℓz) =
     tuple(Oceananigans.Grids.znode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-# Vertically-reduced fields (ℓz === nothing, e.g. a (Center, Center, Nothing)
-# topography field) carry no vertical coordinate, so `node` drops the z entry —
-# mirroring Oceananigans' Nothing-dropping in `_node`. Without these, `set!`-ing a
-# 2D field on a terrain-following grid would evaluate `znode` at a `nothing`
-# location and throw. Per-grid methods resolve dispatch ambiguity with the Flat
-# variants above.
-@inline Oceananigans.Grids.node(i, j, k, grid::TerrainFollowingGrid, ℓx, ℓy, ℓz::Nothing) =
+# ℓz === nothing: no vertical entry, identical to stock `_node` (disambiguators only).
+@inline Oceananigans.Grids._node(i, j, k, grid::TerrainFollowingGrid, ℓx, ℓy, ℓz::Nothing) =
     (ξnode(i, j, k, grid, ℓx, ℓy, ℓz), ηnode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline Oceananigans.Grids.node(i, j, k, grid::XFlatTerrainFollowingGrid, ℓx, ℓy, ℓz::Nothing) =
-    tuple(ηnode(i, j, k, grid, ℓx, ℓy, ℓz))
-
-@inline Oceananigans.Grids.node(i, j, k, grid::YFlatTerrainFollowingGrid, ℓx, ℓy, ℓz::Nothing) =
+@inline Oceananigans.Grids._node(i, j, k, grid::TerrainFollowingGrid, ℓx, ℓy::Nothing, ℓz::Nothing) =
     tuple(ξnode(i, j, k, grid, ℓx, ℓy, ℓz))
 
-@inline Oceananigans.Grids.node(i, j, k, grid::XYFlatTerrainFollowingGrid, ℓx, ℓy, ℓz::Nothing) =
+@inline Oceananigans.Grids._node(i, j, k, grid::TerrainFollowingGrid, ℓx::Nothing, ℓy, ℓz::Nothing) =
+    tuple(ηnode(i, j, k, grid, ℓx, ℓy, ℓz))
+
+@inline Oceananigans.Grids._node(i, j, k, grid::TerrainFollowingGrid, ℓx::Nothing, ℓy::Nothing, ℓz::Nothing) =
     tuple()
 
 # Vertical spacing = reference spacing × Jacobian, mirroring the mutable-grid
