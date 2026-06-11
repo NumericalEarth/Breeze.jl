@@ -125,7 +125,8 @@ end
 
     @inbounds begin
         ρ  = ρ_field[i, j, k]
-        qᵗ = ρqᵛ[i, j, k] / ρ      # total water = prognostic vapor (no retained condensate)
+        ρqᵛ₀ = ρqᵛ[i, j, k]
+        qᵗ = ρqᵛ₀ / ρ              # total water = prognostic vapor (no retained condensate)
         θ₀ = ρθˡⁱ[i, j, k] / ρ      # θˡⁱ — conserved by the reversible condensation
 
         # Condensation — constant-density saturation adjustment with θˡⁱ held fixed. Delegated to
@@ -137,17 +138,21 @@ end
         q   = 𝒰₁.moisture_mass_fractions
         T   = temperature(𝒰₁, constants)
         qᵛ⁺ = q.vapor
-        qᶜ  = q.liquid + q.ice          # condensate → rained out
 
         # Rain-out — remove all condensate but RETAIN the latent warming: the vapor-only parcel
         # keeps T, so its θˡⁱ is the condensate-free (L = 0) inversion. with_temperature on the
         # vapor-only state is exactly the old closed form θᶠ = T^(1/γ)(ρRᵐ/pˢᵗ)^((1-γ)/γ).
         𝒰ᵥ = with_moisture(𝒰₁, MoistureMassFractions(qᵛ⁺))
         θᶠ = with_temperature(𝒰ᵥ, T, constants).potential_temperature
+        ρqᵛ⁺ = ρ * qᵛ⁺
+        condensed_water_density = max(0, ρqᵛ₀ - ρqᵛ⁺)
+        precipitation_rate = condensed_water_density / Δt
 
-        ρqᵛ[i, j, k]  = ρ * qᵛ⁺
+        ρqᵛ[i, j, k]  = ρqᵛ⁺
         ρθˡⁱ[i, j, k] = ρ * θᶠ
         μ.qᵛ[i, j, k] = qᵛ⁺
-        μ.precipitation_rate[i, j, k] = ρ * qᶜ / Δt
+        μ.precipitation_rate[i, j, k] = ifelse(condensed_water_density > 0,
+                                               precipitation_rate,
+                                               μ.precipitation_rate[i, j, k])
     end
 end

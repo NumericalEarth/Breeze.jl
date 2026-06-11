@@ -182,6 +182,17 @@ end
         end
     end
 
+    @testset "final update_state! preserves precipitation diagnostic" begin
+        model = build_model(0.030)
+
+        model.clock.last_Δt = 1.0
+        microphysics_model_update!(model.microphysics, model)
+        update_state!(model)
+
+        prate = Array(interior(model.microphysical_fields.precipitation_rate))
+        @test all(prate .> 0)
+    end
+
     @testset "subsaturated ⇒ no-op" begin
         model = build_model(0.001)
         ρθ0 = Array(interior(model.formulation.potential_temperature_density))
