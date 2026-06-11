@@ -27,6 +27,67 @@ using Test
     @test θ_model ≈ θᵢ
 end
 
+@testset "Setting potential temperature from physical z over terrain" begin
+    FT = Float64
+    Oceananigans.defaults.FloatType = FT
+
+    Nx, Nz = 16, 8
+    Lx, Lz = FT(100000), FT(10000)
+    r_faces = collect(range(0, Lz, length=Nz+1))
+    z_faces = Breeze.TerrainFollowingDiscretization.TerrainFollowingVerticalDiscretization(
+        r_faces; formulation = Breeze.TerrainFollowingDiscretization.TwoLevelDecay(
+            large_scale_height = Lz / 2,
+            small_scale_height = Lz / 4))
+
+    grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(3, 3),
+                           x=(-Lx/2, Lx/2), z=z_faces,
+                           topology=(Periodic, Flat, Bounded))
+
+    h₀ = FT(1000)
+    a = FT(10000)
+    hill(x) = h₀ * exp(-x^2 / a^2)
+    Breeze.TerrainFollowingDiscretization.materialize_terrain!(grid, hill)
+    metrics = Breeze.TerrainFollowingDiscretization.build_terrain_metrics(
+        grid, Breeze.TerrainFollowingDiscretization.SlopeInsideInterpolation())
+
+    constants = ThermodynamicConstants(FT)
+    θ₀ = FT(300)
+    N² = FT(1e-4)
+    θ_profile(z) = θ₀ * exp(N² * z / constants.gravitational_acceleration)
+
+    θ_field = CenterField(grid)
+    set!(θ_field, (x, z) -> z)
+
+    max_znode_error = zero(FT)
+    max_rnode_difference = zero(FT)
+    @allowscalar for i in 1:Nx, k in 1:Nz
+        z = znode(i, 1, k, grid, Center(), Center(), Center())
+        r = Oceananigans.Grids.rnode(i, 1, k, grid, Center(), Center(), Center())
+        θ_value = θ_field[i, 1, k]
+        max_znode_error = max(max_znode_error, abs(θ_value - z))
+        max_rnode_difference = max(max_rnode_difference, abs(θ_value - r))
+    end
+
+    @test max_znode_error < FT(1e-10)
+    @test max_rnode_difference > FT(1)
+
+    dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                    terrain_metrics = metrics,
+                                    reference_potential_temperature = θ_profile,
+                                    surface_pressure = FT(101325),
+                                    standard_pressure = FT(1e5))
+    model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants)
+
+    set!(model,
+         ρ = model.dynamics.terrain_reference_density,
+         θ = (x, z) -> θ_profile(z),
+         enforce_mass_conservation = false)
+
+    p = model.dynamics.pressure
+    pᵣ = model.dynamics.terrain_reference_pressure
+    @test @allowscalar maximum(abs, interior(p) .- interior(pᵣ)) < FT(1e-6)
+end
+
 #####
 ##### Setting temperature directly
 #####

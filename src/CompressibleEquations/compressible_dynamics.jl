@@ -2,6 +2,11 @@
 ##### CompressibleDynamics definition
 #####
 
+using Breeze.TerrainFollowingDiscretization: TerrainMetrics,
+                                              TerrainFollowingVerticalDiscretization,
+                                              SlopeOutsideInterpolation,
+                                              build_terrain_metrics
+
 """
 $(TYPEDEF)
 
@@ -17,7 +22,7 @@ Fields
 - `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref) or [`ExplicitTimeStepping`](@ref))
 - `reference_state`: Fixed hydrostatically-balanced reference state for base-state pressure correction (`nothing` or [`ExnerReferenceState`](@ref))
 - `terrain_metrics`: [`TerrainMetrics`](@ref) for terrain-following coordinates (or `nothing`)
-- `Ω̃`, `ρΩ̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
+- `w̃`, `ρw̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
 - `terrain_reference_pressure`, `terrain_reference_density`: 3D reference pressure / density for the terrain pressure gradient force (or `nothing`)
 - `temperature_tolerance`, `temperature_maxiter`: relative convergence tolerance on the moist
   equation-of-state temperature inversion step `|ΔT|/T`, and the iteration cap on that solve
@@ -35,8 +40,8 @@ struct CompressibleDynamics{TD, D, P, FT, RS, TM, CV, CM, TRP, TRD}
     surface_pressure :: FT                     # p₀ (mean pressure at the bottom of the atmosphere)
     reference_state :: RS                      # ExnerReferenceState for base-state pressure correction (or Nothing)
     terrain_metrics :: TM                      # TerrainMetrics for terrain-following coordinates (or Nothing)
-    contravariant_vertical_velocity :: CV      # Ω̃ diagnostic field (or Nothing)
-    contravariant_vertical_momentum :: CM      # ρΩ̃ diagnostic field (or Nothing)
+    contravariant_vertical_velocity :: CV      # w̃ diagnostic field (or Nothing)
+    contravariant_vertical_momentum :: CM      # ρw̃ diagnostic field (or Nothing)
     terrain_reference_pressure :: TRP          # 3D reference pressure for terrain PG (or Nothing)
     terrain_reference_density :: TRD           # 3D reference density for terrain buoyancy (or Nothing)
     temperature_tolerance :: FT                # relative convergence tol |ΔT|/T for the moist EOS θˡⁱ→T inversion
@@ -64,6 +69,10 @@ Keyword Arguments
   hydrostatically-balanced reference state used in base-state subtraction. Can be a constant `θ₀`
   or a function `θ(z)`. Default: `nothing` (no base-state correction).
   When provided, an [`ExnerReferenceState`](@ref) is built during materialization.
+- `slope_stencil`: Pressure-gradient slope-interpolation stencil for terrain-following grids.
+  Default: [`SlopeOutsideInterpolation`](@ref). Ignored on non-terrain-following grids.
+- `terrain_metrics`: Escape hatch — pass a pre-built [`TerrainMetrics`](@ref) to bypass the
+  automatic build. Default: `nothing` (auto-build from the grid using `slope_stencil`).
 - `temperature_tolerance`: relative convergence tolerance on the moist EOS temperature
   inversion step `|ΔT|/T` (default: `1e-8`)
 - `temperature_maxiter`: maximum number of moist EOS temperature inversion iterations
@@ -74,6 +83,7 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               surface_pressure = 101325.0,
                               reference_potential_temperature = nothing,
                               reference_temperature = nothing,
+                              slope_stencil = SlopeOutsideInterpolation(),
                               terrain_metrics = nothing,
                               temperature_tolerance = 1e-8,
                               temperature_maxiter = 8) where TD
@@ -90,10 +100,14 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     else
         reference_potential_temperature
     end
-    # contravariant fields, terrain_reference_pressure, and terrain_reference_density
-    # are built later in materialize_dynamics.
+    # Stash either a pre-built TerrainMetrics (escape hatch) or the stencil flavor in the
+    # `terrain_metrics` slot. `materialize_dynamics` resolves it: a stencil instance triggers
+    # `build_terrain_metrics(grid, stencil)` for TFVD grids; on non-TFVD grids the slot is
+    # zeroed regardless. contravariant fields, terrain_reference_pressure, and
+    # terrain_reference_density are built later in materialize_dynamics.
+    terrain_metrics_spec = terrain_metrics === nothing ? slope_stencil : terrain_metrics
     return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, ref_spec,
-                                terrain_metrics,
+                                terrain_metrics_spec,
                                 nothing, nothing, nothing, nothing,
                                 temperature_tolerance, temperature_maxiter)
 end
@@ -147,7 +161,18 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     # other columns that generates spurious vertical accelerations. Instead, terrain
     # grids use only the 3D terrain_reference_pressure for the horizontal PG.
     ref_spec = dynamics.reference_state
-    terrain_metrics = dynamics.terrain_metrics
+
+    # Resolve terrain metrics: nothing on non-TFVD grids; on TFVD grids, a pre-built
+    # `TerrainMetrics` passes through, anything else (a stencil flavor like
+    # `SlopeOutsideInterpolation()`) drives `build_terrain_metrics(grid, ·)`.
+    terrain_metrics_spec = dynamics.terrain_metrics
+    terrain_metrics = if grid.z isa TerrainFollowingVerticalDiscretization
+        terrain_metrics_spec isa TerrainMetrics ?
+            terrain_metrics_spec :
+            build_terrain_metrics(grid, terrain_metrics_spec)
+    else
+        nothing
+    end
 
     if ref_spec === nothing || terrain_metrics !== nothing
         reference_state = nothing
@@ -178,7 +203,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
 
         # Build 3D reference pressure and density fields via per-column discrete
         # Exner integration. The discrete integration ensures that
-        #   δ(p_ref)/Δz + g ℑ(ρ_ref) ≈ 0
+        #   δ(pᵣ)/Δz + g ℑ(ρᵣ) ≈ 0
         # to high accuracy at every grid face, which is essential for reducing
         # the truncation error from the near-cancellation of ∂p/∂z and -gρ in
         # the vertical momentum equation. The reference pressure is also used for
@@ -413,7 +438,10 @@ end
 function AtmosphereModels.materialize_momentum_and_velocities(::CompressibleDynamics, grid, boundary_conditions)
     ρu = XFaceField(grid, boundary_conditions=boundary_conditions.ρu)
     ρv = YFaceField(grid, boundary_conditions=boundary_conditions.ρv)
-    ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)
+    # On a terrain-following grid, `ρw` gets the kinematic terrain bottom BC
+    # (ρw|₁ = slopeₓ·ρu + slopeᵧ·ρv ⟺ w̃|₁ = 0), dispatched by grid type; other
+    # grids keep their given BCs. See `terrain_ρw_boundary_conditions`.
+    ρw = ZFaceField(grid, boundary_conditions=terrain_ρw_boundary_conditions(grid, boundary_conditions.ρw))
     momentum = (; ρu, ρv, ρw)
 
     # Velocity is diagnostic (u = ρu/ρ via compute_velocities!). Use the auxiliary-field

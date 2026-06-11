@@ -58,7 +58,8 @@ end
     ρv′ = YFaceField(grid)
     ρθ′ = CenterField(grid)
     Πᴸ = CenterField(grid)
-    pᴸ = CenterField(grid)
+    model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+    pᴸ = model.dynamics.pressure
     Gρu = XFaceField(grid)
     Gρv = YFaceField(grid)
     γRᵐᴸ = CenterField(grid)
@@ -73,7 +74,7 @@ end
     fill!(ρv′, 0)
 
     launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
-            ρu′, ρv′, grid, FT(0.5), ρθ′, Πᴸ, pᴸ, Gρu, Gρv, γRᵐᴸ, false)
+            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Πᴸ, Gρu, Gρv, γRᵐᴸ, false)
 
     @test @allowscalar(ρu′[2, 2, 2]) == -1
     @test @allowscalar(ρv′[2, 2, 2]) == -1.5
