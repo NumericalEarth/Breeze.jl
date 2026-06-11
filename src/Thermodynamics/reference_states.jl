@@ -1,4 +1,4 @@
-using Oceananigans: Oceananigans, Center, CenterField, Field, set!, fill_halo_regions!
+using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 using Oceananigans.Fields: ZeroField
@@ -342,21 +342,10 @@ function hydrostatic_temperature(z, p₀, θᵣ::Function, pˢᵗ, constants)
     return θᵣ(z) * (p / pˢᵗ)^κ
 end
 
-# Evaluate a profile (Number or Function) at a given height.
-# Used both here and in terrain_compressible_physics.jl for reference state construction.
-"""
-    evaluate_profile(profile, z)
-
-Evaluate a vertical profile at height `z`. If `profile` is a `Number`, returns it unchanged.
-If `profile` is a `Function`, calls `profile(z)`.
-"""
-@inline evaluate_profile(value::Number, z) = value
-@inline evaluate_profile(f::Function, z) = f(z)
-
-# Surface value extraction. For 3-arg functions (lat, lon, z) used by the
-# LatitudeLongitudeGrid reference state path, evaluate at the equator surface.
-_surface_value(x::Number) = x
-_surface_value(f::Function) = _nargs(f) == 1 ? f(0) : f(0, 0, 0)
+# Surface value for a reference profile: a `Number`, a column profile `f(z)`, or a
+# horizontally varying profile `f(x, y, z)` (the 3D reference path) evaluated at the origin.
+@inline surface_value(θ::Number) = θ
+surface_value(f::Function) = _nargs(f) == 1 ? f(0) : f(0, 0, 0)
 
 """
 $(TYPEDSIGNATURES)
@@ -419,7 +408,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     qⁱᵣ = reference_moisture_field(ice_mass_fraction, grid)
 
     θᵣ = potential_temperature
-    θ₀ = convert(FT, _surface_value(θᵣ))
+    θ₀ = convert(FT, surface_value(θᵣ))
     ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
 
     ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
@@ -781,7 +770,7 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
             fill_halo_regions!(θᵣ)
 
             πᵣ = Field{Nothing, Nothing, Center}(grid)
-            θ₀_surface = convert(FT, _surface_value(potential_temperature))
+            θ₀_surface = convert(FT, surface_value(potential_temperature))
 
             qᵛᵣ = reference_moisture_field(vapor_mass_fraction, grid)
             qᵛ_surface = @allowscalar qᵛᵣ[1, 1, 1]
@@ -809,7 +798,7 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     θ₀_val = if reference_temperature !== nothing
         convert(FT, reference_temperature)  # T₀ (at surface Π≈1, θ≈T)
     else
-        convert(FT, _surface_value(potential_temperature))
+        convert(FT, surface_value(potential_temperature))
     end
 
     return ExnerReferenceState(p₀, θ₀_val, pˢᵗ, pᵣ, ρᵣ, πᵣ)

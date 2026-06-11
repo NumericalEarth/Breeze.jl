@@ -165,6 +165,73 @@ linearized pressure coefficient
 ``C^L = γ^m R^m\big|_L Π^L`` and the temperature-flux factor ``θ^L`` are cached for the
 stage, which is what makes each stage's substep system linear.
 
+### Terrain-following fast acoustic system
+
+When [`CompressibleDynamics`](@ref) is given terrain metrics, the acoustic substep loop
+uses the contravariant vertical momentum ``ρ\tilde{w}`` for transport through
+``\zeta``-surfaces. The perturbation stored in the substepper's vertical momentum slot is
+
+```math
+(ρ\tilde{w})' =
+\left[ρw - \left(\frac{\partial z}{\partial x}\right)_\zeta ρu
+          - \left(\frac{\partial z}{\partial y}\right)_\zeta ρv \right]
+-
+\left[ρw - \left(\frac{\partial z}{\partial x}\right)_\zeta ρu
+          - \left(\frac{\partial z}{\partial y}\right)_\zeta ρv \right]^L .
+```
+
+The horizontally explicit momentum update still advances Cartesian momenta ``(ρu)'`` and
+``(ρv)'``, but the pressure-gradient operator is the terrain-aware physical gradient
+``(\partial p / \partial x)_z`` and ``(\partial p / \partial y)_z`` described in
+[Terrain-following coordinates](@ref Terrain-following-section). The mass and thermodynamic
+fast equations use the contravariant vertical perturbation flux:
+
+```math
+\begin{aligned}
+∂_τ ρ'    &+ ∂_x(ρu)' + ∂_y(ρv)' + ∂_\zeta (ρ\tilde{w})' = G^s_ρ , \\
+∂_τ (ρθ)' &+ ∂_x\!\left(θ^L (ρu)'\right)
+            + ∂_y\!\left(θ^L (ρv)'\right)
+            + ∂_\zeta\!\left(θ^L (ρ\tilde{w})'\right) = G^s_{ρθ}.
+\end{aligned}
+```
+
+The vertical acoustic equation is projected onto the same contravariant
+momentum. With static terrain slopes, the pressure part of the fast force is
+
+```math
+\partial_\zeta p'
+- \left(\frac{\partial z}{\partial x}\right)_\zeta \partial_x p'
+- \left(\frac{\partial z}{\partial y}\right)_\zeta \partial_y p' .
+```
+
+The slow vertical tendency is projected consistently as the Cartesian
+vertical-momentum slow tendency minus the slope-weighted horizontal slow
+tendencies, plus the slope-weighted frozen horizontal pressure gradients.
+This prevents the recovery step below from adding a spurious slope times
+horizontal momentum update to the Cartesian ``ρw`` tendency.
+
+The vertically implicit column solve remains a tridiagonal solve in the contravariant
+vertical-momentum perturbation. After the solve, Breeze recovers the Cartesian vertical
+momentum needed by the rest of the model through
+
+```math
+(ρw)^{τ+Δτ} =
+(ρ\tilde{w})^{τ+Δτ}
++ \left(\frac{\partial z}{\partial x}\right)_\zeta (ρu)^{τ+Δτ}
++ \left(\frac{\partial z}{\partial y}\right)_\zeta (ρv)^{τ+Δτ}.
+```
+
+At the lower boundary, the no-normal-flow condition is imposed as
+``\tilde{w} = 0`` and ``ρ\tilde{w} = 0`` on the bottom face. This is the terrain-surface
+impenetrability condition; enforcing only Cartesian ``w = 0`` would allow a nonzero normal
+flux when the lower coordinate surface is sloped.
+
+For zero terrain, ``(\partial z / \partial x)_\zeta =
+(\partial z / \partial y)_\zeta = 0``. Therefore ``\tilde{w} = w``,
+``ρ\tilde{w} = ρw``, the terrain pressure-gradient operator reduces to the Cartesian
+operator, and the terrain acoustic substep equations reduce exactly to the height-coordinate
+system above.
+
 ### [Reference state and discrete hydrostatic balance](@id reference-state)
 
 The slow vertical PGF ``-∂_z p^L - ρ^L g`` is the difference between two large numbers,
@@ -295,8 +362,8 @@ step skips the perturbation pressure gradient inside `atm_advance_acoustic_step`
 while the large-step pressure-gradient tendency is already present in
 `tend_u_euler`.
 
-**Vertical implicit solve — column tridiag in ``(ρw)'``.** The vertical-momentum, density,
-and ``ρθ`` perturbations are coupled through the vertical pressure gradient, the vertical
+**Vertical implicit solve — column tridiag in the acoustic vertical momentum.** The
+vertical-momentum, density, and ``ρθ`` perturbations are coupled through the vertical pressure gradient, the vertical
 divergence in the mass and ``ρθ`` equations, and the buoyancy term. To remove the
 ``Δτ < Δz / c_s`` constraint that an explicit treatment would impose on vertically refined
 grids, the vertical block is treated implicitly. Using the off-centering parameter
@@ -310,10 +377,15 @@ implicit weight ``ω``:
 \end{aligned}
 ```
 
+For height-coordinate dynamics the tridiagonal unknown is ``(ρw)'``. For
+terrain-following dynamics the same column solve advances the contravariant
+vertical momentum perturbation ``(ρ\tilde{w})'`` and recovers Cartesian ``ρw``
+after the acoustic update.
+
 The horizontal divergence in the mass and ``ρθ`` equations is taken from the just-updated
 horizontal momenta ``(ρu)'_{τ+Δτ}, (ρv)'_{τ+Δτ}`` (forward–backward coupling). Substituting
-the discrete updates of ``ρ'`` and ``(ρθ)'`` into the ``(ρw)'`` equation yields a
-tridiagonal Schur system for ``(ρw)'`` at z-faces, with diagonals proportional to
+the discrete updates of ``ρ'`` and ``(ρθ)'`` into the vertical-momentum equation yields a
+tridiagonal Schur system at z-faces, with diagonals proportional to
 ``ω^2 Δτ^2`` and the local ``C^L = γ R^m Π^L`` and ``g`` coefficients. Importantly, the
 pressure perturbation is ``p' = C^L (ρθ)'`` at cell centers, so the discrete pressure
 gradient is the gradient of this product, not ``C^L`` interpolated to a face times
@@ -398,8 +470,10 @@ so the empirical safe range is ``α ∈ [0.05, 0.20]``. The default ``α = 0.1``
 the bound and is the verified pairing for the default ``ω = 0.65``.
 
 If `damp_vertical = true`, the vertical part is represented implicitly as a Laplacian on
-``(ρw)'`` inside the tridiagonal solve, with CN-split factors proportional to
-``ω α Δz_{\min}^2`` and ``(1-ω) α Δz_{\min}^2`` on the implicit and explicit sides.
+the same vertical-momentum perturbation, ``(ρw)'`` in height coordinates or
+``(ρ\tilde{w})'`` in terrain-following coordinates, inside the tridiagonal solve,
+with CN-split factors proportional to ``ω α Δz_{\min}^2`` and
+``(1-ω) α Δz_{\min}^2`` on the implicit and explicit sides.
 
 ## [Stability analysis](@id stability-analysis)
 

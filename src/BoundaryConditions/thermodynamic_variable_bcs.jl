@@ -61,10 +61,20 @@ const EastEnergyFluxBC   = EnergyFluxBoundaryConditionFunction{<:Any, <:East}
 const SouthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:South}
 const NorthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:North}
 
+# Near-surface density for the energy→θ flux conversion. The energy BC materializes
+# *before* the dynamics allocates its density (issue #777): for `AnelasticDynamics`
+# the reference density already exists and is captured here, but for
+# `CompressibleDynamics` the captured `ef.density` is `nothing`. Resolve it at runtime
+# instead — fall back to the prognostic density `ρ` carried in the model `fields`
+# (`dynamics_prognostic_fields(::CompressibleDynamics) = (; ρ=dynamics.density)`).
+# Type-stable: `ef.density` is a `Field` (anelastic) or `Nothing` (compressible) per BC.
+@inline _energy_flux_density(density, fields, i, j, k) = @inbounds density[i, j, k]
+@inline _energy_flux_density(::Nothing, fields, i, j, k) = @inbounds fields.ρ[i, j, k]
+
 # Convert energy flux to potential temperature flux: Jᶿ = 𝒬 / cᵖᵐ
 @inline function 𝒬_to_Jᶿ(i, j, k, grid, ef, 𝒬, fields)
     qᵛ = @inbounds fields.qᵛ[i, j, k]
-    ρ = @inbounds ef.density[i, j, k]
+    ρ = _energy_flux_density(ef.density, fields, i, j, k)
     q = grid_moisture_fractions(i, j, k, grid, ef.microphysics, ρ, qᵛ, fields)
     cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
     return 𝒬 / cᵖᵐ
