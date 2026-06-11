@@ -33,7 +33,7 @@ export
     CubicRamp,
     Sin2Ramp,
     ExplicitTimeStepping,
-    adiabatic_balance!,
+    balance_adiabatically!,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -246,7 +246,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
 # initial_fields method for CompressibleModel / AnelasticModel.
 using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans.TimeSteppers: update_state!, reset!
-include("adiabatic_balance.jl")
+include("balance_adiabatically.jl")
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
