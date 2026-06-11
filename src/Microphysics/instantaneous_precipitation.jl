@@ -18,12 +18,13 @@ using KernelAbstractions: @index, @kernel
 using DocStringExtensions: TYPEDSIGNATURES
 
 """
-    struct DCMIP2016LargeScaleCondensation{S}
+    struct InstantaneousPrecipitation{S}
 
-Reed–Jablonowski large-scale condensation microphysics: an instantaneous,
+Instantaneous-precipitation microphysics: an instantaneous,
 *irreversible* condensation with immediate rain-out and no re-evaporation
 (no cloud or rain stage). Excess water vapor above saturation condenses, releases
-its latent heat to the air, and is removed as precipitation in the same step.
+its latent heat to the air, and is removed as precipitation in the same step. This
+is the "large-scale condensation" of the DCMIP2016 Reed–Jablonowski simple-physics suite.
 
 The saturation/latent-heat solve is delegated to a `SaturationAdjustment`
 instance (`saturation_adjustment`), so the equilibrium thermodynamics are shared
@@ -32,45 +33,45 @@ the prognostic vapor every step and cannot re-evaporate.
 
 The prognostic moisture is the vapor density `ρqᵛ` (no condensate is retained).
 """
-struct DCMIP2016LargeScaleCondensation{S}
+struct InstantaneousPrecipitation{S}
     saturation_adjustment :: S
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Construct a `DCMIP2016LargeScaleCondensation` scheme. `equilibrium` selects the phase
+Construct an `InstantaneousPrecipitation` scheme. `equilibrium` selects the phase
 equilibrium used by the underlying saturation solve (default warm-phase).
 """
-function DCMIP2016LargeScaleCondensation(FT::DataType=Oceananigans.defaults.FloatType;
+function InstantaneousPrecipitation(FT::DataType=Oceananigans.defaults.FloatType;
                                          equilibrium = WarmPhaseEquilibrium(),
                                          tolerance = 1e-3,
                                          maxiter = Inf)
     sa = SaturationAdjustment(FT; tolerance, maxiter, equilibrium)
-    return DCMIP2016LargeScaleCondensation(sa)
+    return InstantaneousPrecipitation(sa)
 end
 
-const LSC = DCMIP2016LargeScaleCondensation
+const IP = InstantaneousPrecipitation
 
 # Prognostic vapor density; no retained condensate fields.
-AtmosphereModels.moisture_prognostic_name(::LSC) = :ρqᵛ
-AtmosphereModels.prognostic_field_names(::LSC) = tuple()
+AtmosphereModels.moisture_prognostic_name(::IP) = :ρqᵛ
+AtmosphereModels.prognostic_field_names(::IP) = tuple()
 
-AtmosphereModels.liquid_mass_fraction(::LSC, model) = nothing
-AtmosphereModels.ice_mass_fraction(::LSC, model) = nothing
-@inline AtmosphereModels.microphysical_velocities(::LSC, μ, name) = nothing
-@inline AtmosphereModels.microphysical_tendency(::LSC, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
+AtmosphereModels.liquid_mass_fraction(::IP, model) = nothing
+AtmosphereModels.ice_mass_fraction(::IP, model) = nothing
+@inline AtmosphereModels.microphysical_velocities(::IP, μ, name) = nothing
+@inline AtmosphereModels.microphysical_tendency(::IP, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 # Diagnostic vapor + a precipitation-rate field (kg m⁻³ s⁻¹ of condensed/removed water).
-AtmosphereModels.materialize_microphysical_fields(::LSC, grid, bcs) =
+AtmosphereModels.materialize_microphysical_fields(::IP, grid, bcs) =
     (; qᵛ = CenterField(grid), precipitation_rate = CenterField(grid))
 
 # Prognostic vapor only; no stored condensate (all moisture is vapor between steps).
-@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::LSC, ρ, qᵛ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::IP, ρ, qᵛ, μ)
     return MoistureMassFractions(qᵛ)
 end
 
-@inline function AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, ::LSC, ρ, 𝒰, constants)
+@inline function AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, ::IP, ρ, 𝒰, constants)
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     return nothing
 end
@@ -79,10 +80,10 @@ end
 # (and its latent heating) happens once per step in microphysics_model_update!,
 # not in the per-stage equilibrium adjustment. Delegating to SA here would make
 # update_state! re-condense after the kernel and double-count the latent heat.
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::LSC, qᵛ, constants) = 𝒰
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::IP, qᵛ, constants) = 𝒰
 
-AtmosphereModels.precipitation_rate(model, ::LSC, ::Val{:liquid}) = model.microphysical_fields.precipitation_rate
-AtmosphereModels.precipitation_rate(model, ::LSC, ::Val{:ice}) = nothing
+AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:liquid}) = model.microphysical_fields.precipitation_rate
+AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:ice}) = nothing
 
 #####
 ##### Once-per-step irreversible condensation + rain-out
@@ -95,7 +96,7 @@ Condense supersaturation, retain the released latent heat, and remove the
 condensate as precipitation — applied directly to the prognostic vapor `ρqᵛ`
 and liquid-ice potential temperature density `ρθˡⁱ`.
 """
-function AtmosphereModels.microphysics_model_update!(microphysics::LSC, model)
+function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
     grid = model.grid
     arch = architecture(grid)
     Δt = model.clock.last_Δt
@@ -111,13 +112,13 @@ function AtmosphereModels.microphysics_model_update!(microphysics::LSC, model)
 
     saturation_adjustment = microphysics.saturation_adjustment
 
-    launch!(arch, grid, :xyz, _large_scale_condensation_update!,
+    launch!(arch, grid, :xyz, _instantaneous_precipitation_update!,
             model.dynamics, saturation_adjustment, constants, pˢᵗ, Δt, ρθˡⁱ, ρqᵛ, μ)
 
     return nothing
 end
 
-@kernel function _large_scale_condensation_update!(dynamics, saturation_adjustment,
+@kernel function _instantaneous_precipitation_update!(dynamics, saturation_adjustment,
                                                    constants, pˢᵗ, Δt, ρθˡⁱ, ρqᵛ, μ)
     i, j, k = @index(Global, NTuple)
 
@@ -131,8 +132,8 @@ end
 
         # Condensation — constant-density saturation adjustment with θˡⁱ held fixed. Delegated to
         # the shared #765 secant, which saturates against the density-based qsat at the cell's own
-        # ρ (true pressure p = ρRᵐT). Subsaturated cells short-circuit untouched, reproducing LSC's
-        # original behavior. See adjust_thermodynamic_state(::LiquidIceDensityState, ::SA).
+        # ρ (true pressure p = ρRᵐT). Subsaturated cells short-circuit untouched, matching the
+        # original large-scale-condensation behavior. See adjust_thermodynamic_state(::LiquidIceDensityState, ::SA).
         𝒰₀  = LiquidIceDensityState(θ₀, MoistureMassFractions(qᵗ), pˢᵗ, ρ)
         𝒰₁  = adjust_thermodynamic_state(𝒰₀, saturation_adjustment, constants)
         q   = 𝒰₁.moisture_mass_fractions

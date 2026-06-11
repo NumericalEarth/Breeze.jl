@@ -14,7 +14,7 @@ using Breeze.Thermodynamics:
     saturation_specific_humidity
 
 using Breeze.Microphysics:
-    DCMIP2016LargeScaleCondensation,
+    InstantaneousPrecipitation,
     SaturationAdjustment,
     WarmPhaseEquilibrium,
     adjust_thermodynamic_state,
@@ -23,17 +23,17 @@ using Breeze.Microphysics:
 using Breeze.AtmosphereModels: microphysics_model_update!
 using Oceananigans.TimeSteppers: update_state!
 
-# Tests for the `DCMIP2016LargeScaleCondensation` (LSC) scheme after it was refactored onto the shared #765
+# Tests for the `InstantaneousPrecipitation` scheme after it was refactored onto the shared #765
 # density-based saturation-adjustment machinery: the once-per-step kernel now delegates condensation
 # to `adjust_thermodynamic_state(::LiquidIceDensityState, ::SaturationAdjustment)` and rains out via
 # `with_temperature`, instead of its own constant-density secant. These tests pin (a) numerical parity
 # with the pre-refactor inline formulas and (b) the physical behavior: instantaneous condensation,
 # rain-out with retained latent warming, and density-consistent saturation.
 
-# Reference implementation of the *pre-refactor* LSC scalar math: a constant-density θˡⁱ secant
+# Reference implementation of the *pre-refactor* large-scale-condensation scalar math: a constant-density θˡⁱ secant
 # (run to tight convergence) plus the closed-form vapor-only rain-out. This is the ground truth the
 # delegated path must reproduce.
-function reference_lsc_update(θ₀, qᵗ, ρ, pˢᵗ, constants, equilibrium)
+function reference_ip_update(θ₀, qᵗ, ρ, pˢᵗ, constants, equilibrium)
     ℒˡ = constants.liquid.reference_latent_heat
     ℒⁱ = constants.ice.reference_latent_heat
 
@@ -82,7 +82,7 @@ function reference_lsc_update(θ₀, qᵗ, ρ, pˢᵗ, constants, equilibrium)
 end
 
 # The post-refactor scalar composition (mirrors the kernel body) using the shared #765 primitives.
-function delegated_lsc_update(θ₀, qᵗ, ρ, pˢᵗ, sa, constants)
+function delegated_ip_update(θ₀, qᵗ, ρ, pˢᵗ, sa, constants)
     𝒰₀  = LiquidIceDensityState(θ₀, MoistureMassFractions(qᵗ), pˢᵗ, ρ)
     𝒰₁  = adjust_thermodynamic_state(𝒰₀, sa, constants)
     q   = 𝒰₁.moisture_mass_fractions
@@ -94,7 +94,7 @@ function delegated_lsc_update(θ₀, qᵗ, ρ, pˢᵗ, sa, constants)
     return (; T, qᵛ⁺, qᶜ, θᶠ)
 end
 
-@testset "LSC refactor parity vs pre-refactor inline formulas [$FT]" for FT in test_float_types()
+@testset "InstantaneousPrecipitation refactor parity vs pre-refactor inline formulas [$FT]" for FT in test_float_types()
     constants = ThermodynamicConstants(FT)
     pˢᵗ = FT(1e5)
     ρ   = FT(1)
@@ -105,8 +105,8 @@ end
 
     # Supersaturated parcels spanning the warm range — both paths converge to the unique root.
     for (θ₀, qᵗ) in ((FT(300), FT(0.030)), (FT(295), FT(0.022)), (FT(305), FT(0.045)))
-        new = delegated_lsc_update(θ₀, qᵗ, ρ, pˢᵗ, sa, constants)
-        ref = reference_lsc_update(θ₀, qᵗ, ρ, pˢᵗ, constants, eq)
+        new = delegated_ip_update(θ₀, qᵗ, ρ, pˢᵗ, sa, constants)
+        ref = reference_ip_update(θ₀, qᵗ, ρ, pˢᵗ, constants, eq)
         @test new.qᶜ > 0                            # genuinely condensing
         @test new.T   ≈ ref.T    rtol = rtol
         @test new.qᵛ⁺ ≈ ref.qᵛ⁺  rtol = rtol
@@ -117,7 +117,7 @@ end
 
     # Subsaturated parcel: no condensation, θˡⁱ unchanged (round-trips), no precipitation.
     let θ₀ = FT(300), qᵗ = FT(0.001)
-        new = delegated_lsc_update(θ₀, qᵗ, ρ, pˢᵗ, sa, constants)
+        new = delegated_ip_update(θ₀, qᵗ, ρ, pˢᵗ, sa, constants)
         @test new.qᶜ == 0
         @test new.qᵛ⁺ ≈ qᵗ rtol = rtol
         @test new.θᶠ  ≈ θ₀ rtol = rtol
@@ -126,7 +126,7 @@ end
 
 # Integration: drive the real once-per-step kernel through `microphysics_model_update!` on a
 # compressible model and confirm the rain-out physics and the #765 density-consistency hold.
-@testset "DCMIP2016LargeScaleCondensation once-per-step kernel (integration)" begin
+@testset "InstantaneousPrecipitation once-per-step kernel (integration)" begin
     arch = default_arch
     grid = RectilinearGrid(arch; size = (8, 8, 8), halo = (5, 5, 5),
                            x = (0, 1e3), y = (0, 1e3), z = (0, 1e3),
@@ -141,11 +141,11 @@ end
 
     function build_model(qᵗ)
         model = AtmosphereModel(grid; dynamics = dyn,
-                                microphysics = DCMIP2016LargeScaleCondensation(equilibrium = eq),
+                                microphysics = InstantaneousPrecipitation(equilibrium = eq),
                                 thermodynamic_constants = constants,
                                 timestepper = :AcousticRungeKutta3)
         set!(model; ρ = model.dynamics.reference_state.density, θ = 300.0, qᵗ = qᵗ)
-        update_state!(model)   # Δt invalid here ⇒ LSC kernel is a no-op; populates diagnostics
+        update_state!(model)   # Δt invalid here ⇒ the precipitation kernel is a no-op; populates diagnostics
         return model
     end
 
