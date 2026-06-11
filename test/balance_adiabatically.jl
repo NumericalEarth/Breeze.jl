@@ -1,5 +1,5 @@
 #####
-##### Tests for `adiabatic_balance!` (FV3-SHiELD `na_init`).
+##### Tests for `balance_adiabatically!` (FV3-SHiELD `na_init`).
 #####
 ##### - Nudge algebra: the slow-field blend is exactly (x + weight·x₀)/(1+weight),
 #####   and ρw is never snapshotted/nudged.
@@ -53,7 +53,7 @@ function _set_discrete_rest!(model)
     return nothing
 end
 
-@testset "adiabatic_balance!" begin
+@testset "balance_adiabatically!" begin
 
     @testset "nudge algebra (initial fields blended, ρw untouched)" begin
         model = _build_adiabatic_model(default_arch)
@@ -87,7 +87,7 @@ end
         ρ₀  = Array(interior(ρ))
         ρθ₀ = Array(interior(ρθ))
 
-        adiabatic_balance!(model; Δt = 1.0, cycles = 1)
+        balance_adiabatically!(model; Δt = 1.0, cycles = 1)
 
         @test maximum(abs, Array(interior(ρ))  .- ρ₀)  <= 1e-9 * maximum(abs, ρ₀)
         @test maximum(abs, Array(interior(ρθ)) .- ρθ₀) <= 1e-9 * maximum(abs, ρθ₀)
@@ -110,7 +110,7 @@ end
 
         # Acoustic Δt; default forward_weight = 0.65 damps the resolved
         # acoustic branch within the symmetric excursion.
-        adiabatic_balance!(model; Δt = 0.1, cycles = 1)
+        balance_adiabatically!(model; Δt = 0.1, cycles = 1)
         w_after = maximum(abs, Array(interior(model.momentum.ρw)))
 
         @test w_before > 0
@@ -143,7 +143,7 @@ end
         ρθ₀ = Array(interior(ρθ))
 
         # Exercises the backward step time_step!(anelastic, -Δt).
-        adiabatic_balance!(model; Δt = 1.0, cycles = 1)
+        balance_adiabatically!(model; Δt = 1.0, cycles = 1)
 
         @test all(isfinite, Array(interior(model.momentum.ρu)))
         @test maximum(abs, Array(interior(ρθ)) .- ρθ₀) <= 1e-6 * maximum(abs, ρθ₀)
