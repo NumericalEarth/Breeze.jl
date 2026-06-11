@@ -17,6 +17,8 @@ export
 
 using DocStringExtensions: TYPEDSIGNATURES
 
+using Breeze.Solvers: SecantSolver
+
 using Breeze.Thermodynamics:
     Thermodynamics,
     vapor_gas_constant,

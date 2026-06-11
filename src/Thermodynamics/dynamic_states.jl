@@ -158,19 +158,18 @@ end
 # is prognostic — e.g. on the compressible core, where using the pressure-based
 # `LiquidIcePotentialTemperatureState` causes the temperature-inversion inconsistency and the
 # saturation-against-a-stale-reference-pressure error. See NumericalEarth/Breeze.jl#765.
-struct LiquidIceDensityState{FT} <: AbstractThermodynamicState{FT}
+struct LiquidIceDensityState{FT, S} <: AbstractThermodynamicState{FT}
     potential_temperature :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
     standard_pressure :: FT          # pˢᵗ: reference pressure for potential temperature
     density :: FT                    # ρ: prognostic density (the variable the state is closed on)
-    temperature_tolerance :: FT      # relative convergence tol |ΔT|/T for the θˡⁱ→T inversion
-    temperature_maxiter :: Int       # iteration cap for the inversion
+    temperature_solver :: S          # solver for the θˡⁱ→T inversion (NewtonSolver, FixedIterations, or Nothing)
 end
 
-# Convenience constructor with default solver controls — used by tests and any construction site
-# without a `CompressibleDynamics` to source `temperature_tolerance`/`temperature_maxiter` from.
+# Convenience constructor with the default Newton solver — used by tests and any construction
+# site without a formulation to source `temperature_solver` from.
 @inline LiquidIceDensityState(θ::FT, q::MoistureMassFractions{FT}, pˢᵗ::FT, ρ::FT) where FT =
-    LiquidIceDensityState{FT}(θ, q, pˢᵗ, ρ, convert(FT, 1e-8), 8)
+    LiquidIceDensityState(θ, q, pˢᵗ, ρ, NewtonSolver(FT))
 
 @inline is_absolute_zero(𝒰::LiquidIceDensityState) = 𝒰.potential_temperature == 0
 
@@ -178,25 +177,23 @@ end
     total_specific_moisture(state.moisture_mass_fractions)
 
 @inline with_moisture(𝒰::LiquidIceDensityState{FT}, q::MoistureMassFractions{FT}) where FT =
-    LiquidIceDensityState{FT}(𝒰.potential_temperature, q, 𝒰.standard_pressure, 𝒰.density,
-                                   𝒰.temperature_tolerance, 𝒰.temperature_maxiter)
+    LiquidIceDensityState(𝒰.potential_temperature, q, 𝒰.standard_pressure, 𝒰.density,
+                          𝒰.temperature_solver)
 
 # Density is carried directly (not derived from a reference pressure).
 @inline density(𝒰::LiquidIceDensityState, constants) = 𝒰.density
 
-# Invert θˡⁱ at constant density: solve  g(T) = T − (ρ Rᵐ T / pˢᵗ)^κ θ − (ℒˡ qˡ + ℒⁱ qⁱ)/cᵖᵐ = 0.
-# Newton converges quadratically (g′ = 1 − κ Φ/T ≈ 1 − κ ≈ 0.72 is well away from zero). With no
+# Invert θˡⁱ at constant density: solve  r(T) = T − (ρ Rᵐ T / pˢᵗ)^κ θ − (ℒˡ qˡ + ℒⁱ qⁱ)/cᵖᵐ = 0.
+# Newton converges quadratically (r′ = 1 − κ Φ/T ≈ 1 − κ ≈ 0.72 is well away from zero). With no
 # condensate (L = 0) the dry closed form is already the root, so a Newton step is exactly zero.
 #
-# The iteration has two forms, selected by the SIGN of `temperature_tolerance`. This is a uniform
-# scalar branch (the same value in every cell), resolved at compile/trace time — NOT a per-cell
-# data-dependent branch — so it is a plain `if`, not `ifelse`:
-#   • tolerance > 0 : tolerance-based `while` early-exit — fewest Newton steps on vanilla CPU/GPU.
-#   • tolerance ≤ 0 : fixed-trip `for 1:temperature_maxiter`. `temperature_maxiter` is a plain `Int`,
-#     so the loop unrolls to straight-line code. The `while` form traces to an XLA `while` op whose
-#     reverse-mode is pathological under Reactant/Enzyme (it hangs the differentiable acoustic_wave
-#     docs example — NumericalEarth/Breeze.jl#767); the unrolled form differentiates cheaply. Set
-#     `temperature_tolerance ≤ 0` on `CompressibleDynamics` for differentiable / Reactant runs.
+# The iteration form is selected by the solver type (see Breeze.Solvers):
+#   • NewtonSolver     : tolerance-based `while` early-exit — fewest Newton steps on vanilla CPU/GPU.
+#   • FixedIterations  : fixed trip count that unrolls to straight-line code. The `while` form traces
+#     to an XLA `while` op whose reverse-mode is pathological under Reactant/Enzyme (it hangs the
+#     differentiable acoustic_wave docs example — NumericalEarth/Breeze.jl#767); the unrolled form
+#     differentiates cheaply. Use `FixedIterations` for differentiable / Reactant runs.
+#   • nothing          : the non-iterated closed form below (dry inversion + latent shift).
 @inline function temperature(𝒰::LiquidIceDensityState, constants::ThermodynamicConstants)
     θ   = 𝒰.potential_temperature
     ρ   = 𝒰.density
@@ -210,23 +207,14 @@ end
     ℒⁱᵣ = constants.ice.reference_latent_heat
     L   = (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
 
-    T = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L          # dry closed form + latent shift (the old non-iterated guess)
-    if 𝒰.temperature_tolerance > 0
-        ΔT = T                                     # ensure at least one Newton step is taken
-        iter = 0
-        while abs(ΔT) > 𝒰.temperature_tolerance * T && iter < 𝒰.temperature_maxiter
-            Φ  = (ρ * Rᵐ * T / pˢᵗ)^κ * θ          # = T − L at the root
-            ΔT = -(T - Φ - L) / (1 - κ * Φ / T)
-            T += ΔT
-            iter += 1
-        end
-    else
-        for _ in 1:𝒰.temperature_maxiter           # fixed trip count → unrolls (Reactant/Enzyme-safe)
-            Φ = (ρ * Rᵐ * T / pˢᵗ)^κ * θ
-            T += -(T - Φ - L) / (1 - κ * Φ / T)
-        end
+    T₁ = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L     # dry closed form + latent shift (the non-iterated guess)
+
+    @inline function residual_and_derivative(T)
+        Φ = (ρ * Rᵐ * T / pˢᵗ)^κ * θ           # = T − L at the root
+        return (T - Φ - L, 1 - κ * Φ / T)
     end
-    return T
+
+    return newton_solve(residual_and_derivative, 𝒰.temperature_solver, T₁)
 end
 
 # Exner function at the diagnosed (actual) pressure p = ρRᵐT: Π = (p/pˢᵗ)^κ.
@@ -250,7 +238,7 @@ end
     L   = (ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / cᵖᵐ
     p   = ρ * Rᵐ * T
     θ   = (T - L) * (pˢᵗ / p)^κ
-    return LiquidIceDensityState{typeof(θ)}(θ, q, pˢᵗ, ρ, 𝒰.temperature_tolerance, 𝒰.temperature_maxiter)
+    return LiquidIceDensityState(θ, q, pˢᵗ, ρ, 𝒰.temperature_solver)
 end
 
 #####
