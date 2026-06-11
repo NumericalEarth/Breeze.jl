@@ -33,7 +33,7 @@ export
     CubicRamp,
     Sin2Ramp,
     ExplicitTimeStepping,
-    adiabatic_balance!,
+    balance_adiabatically!,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -66,6 +66,8 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
+    azimuthal_mean,
+    azimuthal_mean!,
     static_energy_density,
     static_energy,
     total_energy,
@@ -132,9 +134,12 @@ export
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
-    follow_terrain!,
+    TerrainFollowingVerticalDiscretization,
+    LinearDecay,
+    TwoLevelDecay,
+    materialize_terrain!,
+    build_terrain_metrics,
     TerrainMetrics,
-    BasicTerrainFollowing,
     SlopeOutsideInterpolation,
     SlopeInsideInterpolation,
 
@@ -254,7 +259,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
 # initial_fields method for CompressibleModel / AnelasticModel.
 using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans.TimeSteppers: update_state!, reset!
-include("adiabatic_balance.jl")
+include("balance_adiabatically.jl")
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel

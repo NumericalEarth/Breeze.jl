@@ -3,12 +3,12 @@ using Oceananigans.Utils: prettysummary
 #####
 ##### Terrain metric terms
 #####
-##### For basic terrain-following coordinates, the terrain slope at height ζ is
+##### For basic terrain-following coordinates, the terrain slope at height r is
 #####
-#####   (∂z/∂x)_ζ = (∂h/∂x) * (1 - ζ / z_top)
+#####   (∂z/∂x)_r = (∂h/∂x) * (1 - r / z_top)
 #####
 ##### These metric terms are needed for:
-##### 1. Computing the contravariant vertical velocity Ω̃
+##### 1. Computing the contravariant vertical velocity w̃
 ##### 2. Correcting horizontal pressure gradients
 #####
 
@@ -16,7 +16,7 @@ using Oceananigans.Utils: prettysummary
 ##### Pressure gradient stencil types
 #####
 ##### The terrain-corrected horizontal pressure gradient requires interpolating
-##### ∂p/∂ζ to the velocity point and multiplying by the terrain slope. These
+##### ∂p/∂r to the velocity point and multiplying by the terrain slope. These
 ##### two types control the order of interpolation and multiplication:
 #####
 ##### SlopeOutsideInterpolation (default):
@@ -27,7 +27,7 @@ using Oceananigans.Utils: prettysummary
 ##### SlopeInsideInterpolation:
 #####   ℑz(ℑx(slope(i, j, k) * ∂z(p')))
 #####   — slope is evaluated at each (Center, Center, Face) stencil point and
-#####     multiplied before averaging, closer to the CM1 approach.
+#####     multiplied before averaging.
 #####
 ##### The two stencils differ at O(Δx·Δz) on a terrain-deformed grid because
 ##### interpolation and pointwise multiplication do not commute when the
@@ -38,10 +38,10 @@ using Oceananigans.Utils: prettysummary
 $(TYPEDEF)
 
 Terrain pressure gradient stencil where the slope is multiplied outside
-the interpolation of ``∂p'/∂ζ``:
+the interpolation of ``∂p'/∂r``:
 
 ```math
-\\text{correction} = s(i,j,k) \\, \\overline{\\overline{\\partial_\\zeta p'}^x}^z
+\\text{correction} = s(i,j,k) \\, \\overline{\\overline{\\partial_r p'}^x}^z
 ```
 
 This is the default stencil.
@@ -52,15 +52,14 @@ struct SlopeOutsideInterpolation end
 $(TYPEDEF)
 
 Terrain pressure gradient stencil where the slope is multiplied inside
-the interpolation of ``∂p'/∂ζ``:
+the interpolation of ``∂p'/∂r``:
 
 ```math
-\\text{correction} = \\overline{\\overline{s \\, \\partial_\\zeta p'}^x}^z
+\\text{correction} = \\overline{\\overline{s \\, \\partial_r p'}^x}^z
 ```
 
 The slope is evaluated at each `(Center, Center, Face)` stencil point before
-averaging to `(Face, Center, Center)`. This stencil is closer to the CM1
-approach where the metric term sits inside the 4-point average.
+averaging to `(Face, Center, Center)`.
 """
 struct SlopeInsideInterpolation end
 
@@ -77,7 +76,8 @@ Fields
 - `∂y_h`: 2D field storing ``\\partial h / \\partial y`` at `(Center, Face)`
 - `z_top`: Height of the model top (top of the reference coordinate)
 - `pressure_gradient_stencil`: Stencil type for the terrain-corrected horizontal
-  pressure gradient ([`SlopeOutsideInterpolation`](@ref) or [`SlopeInsideInterpolation`](@ref))
+  pressure gradient ([`SlopeOutsideInterpolation`](@ref) or
+  [`SlopeInsideInterpolation`](@ref))
 """
 struct TerrainMetrics{H, SX, SY, FT, PG}
     topography :: H
@@ -103,38 +103,4 @@ function Base.show(io::IO, tm::TerrainMetrics)
     print(io, "├── ∂y_h: ", prettysummary(tm.∂y_h), '\n')
     print(io, "├── z_top: ", prettysummary(tm.z_top), '\n')
     print(io, "└── pressure_gradient_stencil: ", prettysummary(tm.pressure_gradient_stencil))
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Compute ``(∂z/∂x)_\\zeta`` at horizontal location `(Face, Center)`
-and vertical location `ℓz` (either `Center()` or `Face()`).
-
-For basic terrain-following coordinates:
-```math
-\\left(\\frac{∂z}{∂x}\\right)_\\zeta
-    = \\frac{∂h}{∂x} \\left(1 - \\frac{\\zeta}{z_{top}}\\right)
-```
-"""
-@inline function terrain_slope_x(i, j, k, grid, metrics, ℓz)
-    ζ = rnode(k, grid, ℓz)
-    z_top = metrics.z_top
-    @inbounds ∂x_h = metrics.∂x_h[i, j, 1]
-    return ∂x_h * (1 - ζ / z_top)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Compute ``(∂z/∂y)_\\zeta`` at horizontal location `(Center, Face)`
-and vertical location `ℓz` (either `Center()` or `Face()`).
-
-See also [`terrain_slope_x`](@ref).
-"""
-@inline function terrain_slope_y(i, j, k, grid, metrics, ℓz)
-    ζ = rnode(k, grid, ℓz)
-    z_top = metrics.z_top
-    @inbounds ∂y_h = metrics.∂y_h[i, j, 1]
-    return ∂y_h * (1 - ζ / z_top)
 end
