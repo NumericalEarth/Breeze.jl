@@ -299,8 +299,17 @@ end
     @test issorted(offset_profile)
     @test all(0 .< offset_profile .< 1)
 
-    # Rings finer than the grid leave some empty; those are filled with NaN (not zero, which
-    # would bias a downstream radial average), while populated rings still hold the constant.
+    # Sub-cell sampling (default m > 1) fills rings that center-only binning (m = 1) leaves
+    # empty near the center, and stays conservative (a constant maps to that constant).
+    coarse = Array(interior(azimuthal_mean(c; radius = 1, Nr = 64, m = 1), :, 1, 1))
+    filled = Array(interior(azimuthal_mean(c; radius = 1, Nr = 64), :, 1, 1))
+    @test any(isnan, coarse)
+    @test !any(isnan, filled)
+    @test all(v -> isnan(v) || v ≈ 5, coarse)
+    @test all(filled .≈ 5)
+
+    # Past the sub-cell resolution (very fine Nr) some rings still catch nothing; they are
+    # filled with NaN (not zero, which would bias a downstream radial average).
     fine = azimuthal_mean(c; radius = 1, Nr = 200)
     fine_profile = Array(interior(fine, :, 1, 1))
     @test any(isnan, fine_profile)

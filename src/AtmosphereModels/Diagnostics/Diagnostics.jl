@@ -45,6 +45,7 @@ using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: architecture
 using Oceananigans.Fields: Field, CenterField
 using Oceananigans.Grids: znode, znodes, xnode, ynode, RectilinearGrid, Bounded, Flat, Face
+using Oceananigans.Operators: Δxᶜᶜᶜ, Δyᶜᶜᶜ
 using Oceananigans.Utils: launch!
 
 # Flavor types for specific vs density-weighted diagnostics
