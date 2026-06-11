@@ -379,7 +379,7 @@ Non-equilibrium schemes simply return the state unchanged.
 """
 $(TYPEDSIGNATURES)
 
-Return `tuple()` - zero-moment scheme has no prognostic variables.
+Return `tuple()` - `Nothing` microphysics has no prognostic variables.
 """
 prognostic_field_names(::Nothing) = tuple()
 
@@ -652,8 +652,7 @@ If a scheme is non-adjusting, we just return `state`.
 Return a `KernelFunctionOperation` representing the precipitation rate for the given `phase`.
 
 The precipitation rate is the rate at which moisture is removed from the atmosphere
-by precipitation processes. For zero-moment schemes, this is computed from the
-`remove_precipitation` function applied to cloud condensate.
+by precipitation processes.
 
 Arguments:
 - `model`: An `AtmosphereModel` with a microphysics scheme
