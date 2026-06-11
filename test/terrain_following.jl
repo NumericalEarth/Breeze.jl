@@ -24,7 +24,7 @@ using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
                            compute_slow_scalar_tendencies!
 using Oceananigans
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Grids: MutableVerticalDiscretization, rnode, xnode, znode, λnode, φnode
+using Oceananigans.Grids: rnode, xnode, znode, λnode, φnode
 using Oceananigans.Operators: Δzᶜᶜᶠ, Δzᶜᶜᶜ, divᶜᶜᶜ, ∂zᶜᶜᶠ
 using Breeze.Thermodynamics: hydrostatic_pressure, dry_air_gas_constant, vapor_gas_constant
 using Test
@@ -1654,19 +1654,18 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         Nx, Nz = 8, 8
         Lx, Lz = 10000.0, 5000.0
 
-        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
         grid = RectilinearGrid(CPU(); size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
-        h(x, y) = 200 * exp(-x^2 / 2000^2)
-        metrics = follow_terrain!(grid, h)
+        h(x) = 200 * exp(-x^2 / 2000^2)
+        materialize_terrain!(grid, h)
 
-    θ_reference = 300.0
-    qᵛ_reference = 0.012
+        θ_reference = 300.0
+        qᵛ_reference = 0.012
 
         dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                        terrain_metrics = metrics,
                                         reference_potential_temperature = θ_reference,
                                         reference_vapor_mass_fraction = qᵛ_reference)
         model = AtmosphereModel(grid; dynamics)
@@ -1719,19 +1718,18 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         Nx, Nz = 8, 8
         Lx, Lz = 10000.0, 5000.0
 
-        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
         grid = RectilinearGrid(CPU(); size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
-        h(x, y) = 200 * exp(-x^2 / 2000^2)
-        metrics = follow_terrain!(grid, h)
+        h(x) = 200 * exp(-x^2 / 2000^2)
+        materialize_terrain!(grid, h)
 
         θ_reference(z) = 300.0 + 0.01 * z
         qᵛ_reference(z) = 0.012 * exp(-z / 1000)
 
         dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                        terrain_metrics = metrics,
                                         reference_potential_temperature = θ_reference,
                                         reference_vapor_mass_fraction = qᵛ_reference)
         model = AtmosphereModel(grid; dynamics)
