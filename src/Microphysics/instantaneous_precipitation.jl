@@ -11,7 +11,7 @@ using ..AtmosphereModels:
     dynamics_density,
     standard_pressure
 
-using Oceananigans: Oceananigans, CenterField
+using Oceananigans: Oceananigans, CenterField, Field, Integral
 using Oceananigans.Architectures: architecture
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @index, @kernel
@@ -84,6 +84,19 @@ end
 
 AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:liquid}) = model.microphysical_fields.precipitation_rate
 AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:ice}) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the surface precipitation flux for the DCMIP2016 large-scale condensation scheme.
+
+The scheme removes condensed water immediately, so the surface flux is the column integral
+of the volumetric precipitation rate. Units are kg/m²/s.
+"""
+function AtmosphereModels.surface_precipitation_flux(model, ::LSC)
+    P = model.microphysical_fields.precipitation_rate
+    return Field(Integral(P, dims=3))
+end
 
 #####
 ##### Once-per-step irreversible condensation + rain-out

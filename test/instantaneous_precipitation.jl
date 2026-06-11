@@ -162,11 +162,15 @@ end
         ρθ1   = Array(interior(model.formulation.potential_temperature_density))
         ρq1   = Array(interior(model.moisture_density))
         prate = Array(interior(model.microphysical_fields.precipitation_rate))
+        surface_flux = surface_precipitation_flux(model) |> compute!
+        column_integrated_prate = Field(Integral(model.microphysical_fields.precipitation_rate, dims=3)) |> compute!
 
         @test all(isfinite, ρθ1) && all(isfinite, ρq1)
         @test all(ρq1 .< ρq0)             # vapor condensed out
         @test all(ρθ1 .> ρθ0)             # latent warming retained ⇒ θˡⁱ rose
         @test all(prate .> 0)             # precipitation produced
+        @test all(Array(interior(surface_flux)) .> 0)
+        @test Array(interior(surface_flux)) ≈ Array(interior(column_integrated_prate))
 
         for I in eachindex(ρ)
             ρI = ρ[I]
