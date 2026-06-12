@@ -244,6 +244,8 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     qᵛ = CenterField(grid)
 
     # Sedimentation velocity fields (pre-computed during update_state!)
+    wᶜˡ = CenterField(grid) # Cloud mass-weighted terminal velocity
+    wᶜˡₙ = CenterField(grid) # Cloud number-weighted terminal velocity
     wʳ  = CenterField(grid)  # Rain mass-weighted terminal velocity
     wʳₙ = CenterField(grid)  # Rain number-weighted terminal velocity
     wⁱ  = CenterField(grid)  # Ice mass-weighted terminal velocity
@@ -269,7 +271,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
 
     return (; ρqᶜˡ, ρnᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρz̃ⁱ, ρqʷⁱ, ρsˢᵃᵗ, ρnᵃ,
               qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, z̃ⁱ, qʷⁱ, sˢᵃᵗ, nᵃ, qᵛ,
-              wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
+              wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
               cache_ρqᶜˡ, cache_ρnᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
               cache_ρqᶠ, cache_ρbᶠ, cache_ρz̃ⁱ, cache_ρqʷⁱ, cache_ρsˢᵃᵗ, cache_ρqᵛ, cache_ρnᵃ)
 end
@@ -455,7 +457,7 @@ end
 
 # GPU-safe return struct for the full P3 computation (NamedTuples require jl_f_tuple on GPU).
 struct P3CacheResult{FT}
-    wʳ :: FT; wʳₙ :: FT; wⁱ :: FT; wⁱₙ :: FT; wⁱ_z :: FT
+    wᶜˡ :: FT; wᶜˡₙ :: FT; wʳ :: FT; wʳₙ :: FT; wⁱ :: FT; wⁱₙ :: FT; wⁱ_z :: FT
     c_qcl :: FT; c_ncl :: FT; c_qr :: FT; c_nr :: FT
     c_qi :: FT; c_ni :: FT; c_qf :: FT; c_bf :: FT
     c_zi :: FT; c_qwi :: FT; c_ss :: FT; c_qv :: FT
@@ -495,6 +497,12 @@ end
     props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
     Fᶠ = props.Fᶠ
     ρᶠ = props.ρᶠ
+
+    # Cloud terminal velocities — Fortran sediments cloud mass and number with
+    # DSD-integrated Stokes velocities in sedimentation_liquid(liq_type = 1).
+    vᶜ = cloud_terminal_velocities(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ, props.nu)
+    wᶜˡ = vᶜ.mass_weighted
+    wᶜˡₙ = vᶜ.number_weighted
 
     # Rain terminal velocities — fused call shares λ_r, ρ_correction, log10(λ_r)
     # across the two 1D table lookups (mass- and number-weighted).
@@ -543,8 +551,8 @@ end
     c_na  = tendency_ρnᵃ(rates, ρ)
 
     FT = typeof(ρ)
-    return P3CacheResult{FT}(wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
-                              c_qcl, c_ncl, c_qr, c_nr, c_qi, c_ni, c_qf, c_bf, c_zi, c_qwi, c_ss, c_qv, c_na)
+    return P3CacheResult{FT}(wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
+                               c_qcl, c_ncl, c_qr, c_nr, c_qi, c_ni, c_qf, c_bf, c_zi, c_qwi, c_ss, c_qv, c_na)
 end
 
 # Kernel entry point: reads OffsetArrays → calls @noinline scalar compute → writes OffsetArrays.
@@ -558,6 +566,8 @@ end
     r = _p3_scalar_compute(p3, ρ, ℳ, 𝒰, constants)
 
     @inbounds begin
+        μ.wᶜˡ[i, j, k]  = -r.wᶜˡ
+        μ.wᶜˡₙ[i, j, k] = -r.wᶜˡₙ
         μ.wʳ[i, j, k]   = -r.wʳ
         μ.wʳₙ[i, j, k]  = -r.wʳₙ
         μ.wⁱ[i, j, k]   = -r.wⁱ
@@ -614,7 +624,11 @@ end
 
 @inline AM.microphysical_velocities(::P3, μ, name) = nothing  # Default: no sedimentation
 
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnᶜˡ}) = nothing
+# Cloud mass: mass-weighted Stokes fall speed
+@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqᶜˡ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wᶜˡ)
+
+# Cloud number: number-weighted Stokes fall speed
+@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρnᶜˡ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wᶜˡₙ)
 
 # Rain mass: mass-weighted fall speed
 @inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqʳ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wʳ)

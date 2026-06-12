@@ -1,7 +1,7 @@
 using Test
 import Breeze
 using Breeze.Microphysics.PredictedParticleProperties
-using Breeze.AtmosphereModels: prognostic_field_names
+using Breeze.AtmosphereModels: microphysical_velocities, prognostic_field_names
 using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
 
 using Breeze.Microphysics.PredictedParticleProperties:
@@ -46,6 +46,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     RainMassWeightedVelocityEvaluator,
     RainNumberWeightedVelocityEvaluator,
     RainEvaporationVentilationEvaluator,
+    air_transport_properties,
     tabulated_function_1d,
     ProcessRateParameters,
     homogeneous_freezing_cloud_rate,
@@ -887,6 +888,49 @@ end
         @test :ρzⁱ ∉ names
         @test Breeze.AtmosphereModels.specific_field_name(:ρz̃ⁱ) == :z̃ⁱ
         @test Breeze.AtmosphereModels.specific_field_name(:ρqⁱ) == :qⁱ
+    end
+
+    @testset "P3 sediments cloud mass and number with Fortran Stokes velocities" begin
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
+        grid = RectilinearGrid(CPU(), FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+        μ = Breeze.AtmosphereModels.materialize_microphysical_fields(p3, grid, NamedTuple())
+
+        @test haskey(μ, :wᶜˡ)
+        @test haskey(μ, :wᶜˡₙ)
+
+        cloud_mass_velocity = microphysical_velocities(p3, μ, Val(:ρqᶜˡ))
+        cloud_number_velocity = microphysical_velocities(p3, μ, Val(:ρnᶜˡ))
+        @test cloud_mass_velocity !== nothing
+        @test cloud_number_velocity !== nothing
+        @test cloud_mass_velocity.w === μ.wᶜˡ
+        @test cloud_number_velocity.w === μ.wᶜˡₙ
+
+        ρ = FT(1)
+        T = FT(283.15)
+        P = FT(85000)
+        pˢᵗ = FT(100000)
+        qᶜˡ = FT(5e-4)
+        nᶜˡ = FT(2e8)
+        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        q = MoistureMassFractions(qᵛ, qᶜˡ, FT(0))
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, FT(0), FT(0), FT(0), FT(0),
+                                 FT(0), FT(0), FT(0), FT(0), FT(0))
+
+        cache = PPP._p3_scalar_compute(p3, ρ, ℳ, 𝒰, constants)
+        cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+        transport = air_transport_properties(T, P)
+        μ_air = transport.nu * ρ
+        a_cn = constants.gravitational_acceleration * p3.process_rates.liquid_water_density /
+               (FT(18) * max(μ_air, FT(1e-20)))
+        expected_mass_velocity = a_cn * (cloud.μ_c + 5) * (cloud.μ_c + 4) / cloud.λ_c^2
+        expected_number_velocity = a_cn * (cloud.μ_c + 2) * (cloud.μ_c + 1) / cloud.λ_c^2
+
+        @test cache.wᶜˡ ≈ expected_mass_velocity rtol=FT(1e-12)
+        @test cache.wᶜˡₙ ≈ expected_number_velocity rtol=FT(1e-12)
+        @test cache.wᶜˡ > cache.wᶜˡₙ
     end
 
     @testset "Tabulated deposition does not destroy the sixth moment" begin

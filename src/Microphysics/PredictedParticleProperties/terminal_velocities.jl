@@ -117,6 +117,27 @@ struct RainTerminalVelocities{FT}
     number_weighted :: FT
 end
 
+struct CloudTerminalVelocities{FT}
+    mass_weighted :: FT
+    number_weighted :: FT
+end
+
+@inline function cloud_terminal_velocities(p3, qᶜˡ, nᶜˡ, ρ, ν)
+    FT = typeof(qᶜˡ + nᶜˡ + ρ + ν)
+    cloud = diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+    μ_c = cloud.μ_c
+    λ_c = cloud.λ_c
+    μ_air = ν * ρ
+    a_cn = FT(9.81) * p3.process_rates.liquid_water_density /
+           (FT(18) * max(μ_air, FT(1e-20)))
+    inverse_λ_squared = inv(λ_c^2)
+    active = qᶜˡ >= p3.minimum_mass_mixing_ratio
+    mass_weighted = a_cn * (μ_c + 5) * (μ_c + 4) * inverse_λ_squared
+    number_weighted = a_cn * (μ_c + 2) * (μ_c + 1) * inverse_λ_squared
+    return CloudTerminalVelocities{FT}(ifelse(active, mass_weighted, zero(FT)),
+                                       ifelse(active, number_weighted, zero(FT)))
+end
+
 """
 $(TYPEDSIGNATURES)
 
