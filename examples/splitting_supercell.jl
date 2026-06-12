@@ -1,18 +1,26 @@
-# # Splitting supercell
+# # Splitting supercell — anelastic vs compressible
 #
-# This example simulates the development of a splitting supercell thunderstorm, following the
-# idealized test case described by [KlempEtAl2015](@citet) and the DCMIP2016
-# supercell intercomparison by [Zarzycki2019](@citet). This benchmark evaluates the model's
-# ability to capture deep moist convection with warm-rain microphysics and strong updrafts.
+# This example simulates the development of a splitting supercell thunderstorm with
+# both Breeze dynamical cores side-by-side, following the idealized test case
+# described by [KlempEtAl2015](@citet) and the DCMIP2016 supercell intercomparison
+# by [Zarzycki2019](@citet). This benchmark evaluates the model's ability to capture
+# deep moist convection with warm-rain microphysics and strong updrafts.
 #
 # For microphysics we use the Kessler scheme, which includes prognostic cloud water
-# and rain water with autoconversion, accretion, rain evaporation, and sedimentation processes.
-# This is the same scheme used in the DCMIP2016 supercell intercomparison [Zarzycki2019](@cite).
+# and rain water with autoconversion, accretion, rain evaporation, and sedimentation
+# processes. This is the same scheme used in the DCMIP2016 supercell intercomparison
+# [Zarzycki2019](@cite).
+#
+# We run two simulations from identical initial conditions: one with the anelastic
+# solver and one with the fully compressible solver (split-explicit acoustic
+# substepping). At the end we compare horizontal (`xy` at ``z \approx 5 \, {\rm km}``)
+# and vertical (`xz` at ``y = L_y/2``) slices side-by-side, and plot maximum
+# vertical-velocity time series for both runs on the same axes.
 #
 # ## Physical setup
 #
-# The simulation initializes a conditionally unstable atmosphere with a warm bubble perturbation
-# that triggers deep convection. The environment includes:
+# The simulation initializes a conditionally unstable atmosphere with a warm bubble
+# perturbation that triggers deep convection. The environment includes:
 # - A realistic tropospheric potential temperature profile with a tropopause at 12 km
 # - Relative humidity that decreases with height, with the resulting water vapor mixing ratio capped at
 #   0.014 kg/kg "to approximate a well-mixed boundary layer in the lowest kilometer" ([KlempEtAl2015](@citet)).
@@ -59,7 +67,8 @@
 
 using Breeze
 using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
-using Breeze.Thermodynamics: hydrostatic_density, hydrostatic_temperature
+using Breeze.Thermodynamics: hydrostatic_density, hydrostatic_temperature,
+                             pressure_balanced_density
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: znodes
@@ -87,40 +96,34 @@ grid = RectilinearGrid(GPU(),
                        halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
-# ## Reference state and dynamics
+# ## Background profiles
 #
-# We define the anelastic reference state with surface pressure ``p_0 = 1000 \, {\rm hPa}``
-# and reference potential temperature ``θ_0 = 300 \, {\rm K}``.
+# Thermodynamic constants and the surface/standard pressures shared by both runs:
 
 constants = ThermodynamicConstants(saturation_vapor_pressure = TetensFormula())
 
-reference_state = ReferenceState(grid, constants,
-                                 surface_pressure = 100000,
-                                 potential_temperature = 300)
+p₀  = 100000
+pˢᵗ = 100000
 
-dynamics = AnelasticDynamics(reference_state)
+# Stratification parameters define the troposphere–stratosphere transition:
 
-# ## Background atmosphere profiles
-#
-# The atmospheric stratification parameters define the troposphere-stratosphere transition.
-
-θ₀ = 300       # K - surface potential temperature
-θᵖ = 343       # K - tropopause potential temperature
-zᵖ = 12000     # m - tropopause height
-Tᵖ = 213       # K - tropopause temperature
-qᵛ_max = 0.014 # kg/kg - cap on water vapor mixing ratio from Klemp et al. (2015)
+θ₀     = 300       # K - surface potential temperature
+θᵖ     = 343       # K - tropopause potential temperature
+zᵖ     = 12000     # m - tropopause height
+Tᵖ     = 213       # K - tropopause temperature
+qᵛ_max = 0.014     # kg/kg - cap on water vapor mixing ratio from Klemp et al. (2015)
 nothing #hide
 
-# Wind shear parameters control the low-level environmental wind profile:
+# Wind shear parameters:
 
 zˢ = 5kilometers  # m - shear layer height
 uˢ = 30           # m/s - maximum shear wind speed
 uᶜ = 15           # m/s - storm motion (Galilean translation speed)
 nothing #hide
 
-# Extract thermodynamic constants for profile calculations:
+# Thermodynamic constants used inside the profile functions:
 
-g = constants.gravitational_acceleration
+g   = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
 nothing #hide
 
@@ -133,25 +136,16 @@ function θ_background(z)
 end
 
 # Relative humidity profile (Equations 11–12 by [KlempEtAl2015](@citet)) combined with
-# the water vapor cap ``qᵛ_{max}``. The local temperature and density
-# are obtained by numerically integrating the hydrostatic balance with the actual
-# ``θ(z)`` profile:
+# the water vapor cap ``qᵛ_{max}``. The local temperature and density are obtained by
+# numerically integrating the hydrostatic balance with the actual ``θ(z)`` profile:
 
 function qᵛ_bg(z)
     ℋ = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z ≤ zᵖ) + 1/4 * (z > zᵖ)
-    p₀ = reference_state.surface_pressure
-    pˢᵗ = reference_state.standard_pressure
     T = hydrostatic_temperature(z, p₀, θ_background, pˢᵗ, constants)
     ρ = hydrostatic_density(z, p₀, θ_background, pˢᵗ, constants)
     qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     return min(ℋ * qᵛ⁺, qᵛ_max)
 end
-
-# Evaluate ``qᵛ`` on a column field so the hydrostatic integration runs only once
-# per vertical level rather than once per horizontal grid point:
-
-qᵛ_column = Field{Nothing, Nothing, Center}(grid)
-set!(qᵛ_column, qᵛ_bg)
 
 # Zonal wind profile with linear shear below ``zˢ`` and smooth transition (Equations 15-16):
 
@@ -168,12 +162,12 @@ end
 #
 # The warm bubble parameters following Equations 17–18 in [KlempEtAl2015](@citet):
 
-Δθ = 3              # K - perturbation amplitude
-rᵇʰ = 10kilometers  # m - bubble horizontal radius
-rᵇᵛ = 1500          # m - bubble vertical radius
-zᵇ = 1500           # m - bubble center height
-xᵇ = Lx / 2         # m - bubble center x-coordinate
-yᵇ = Ly / 2         # m - bubble center y-coordinate
+Δθ  = 3              # K - perturbation amplitude
+rᵇʰ = 10kilometers   # m - bubble horizontal radius
+rᵇᵛ = 1500           # m - bubble vertical radius
+zᵇ  = 1500           # m - bubble center height
+xᵇ  = Lx / 2         # m - bubble center x-coordinate
+yᵇ  = Ly / 2         # m - bubble center y-coordinate
 nothing #hide
 
 # The total initial potential temperature combines the background profile with the
@@ -189,14 +183,30 @@ end
 
 uᵢ(x, y, z) = u_background(z)
 
+# ## Initial-condition fields
+#
+# We evaluate the background ``qᵛ`` and the bubble-augmented ``θ`` once on column /
+# 3D fields and reuse them for both the anelastic and compressible runs. The
+# hydrostatic integration in `qᵛ_bg` then runs only once per vertical level rather
+# than once per horizontal grid point.
+
+qᵛ_column = Field{Nothing, Nothing, Center}(grid)
+set!(qᵛ_column, qᵛ_bg)
+
+θ_background_column = Field{Nothing, Nothing, Center}(grid)
+set!(θ_background_column, θ_background)
+
+θ_initial_field = CenterField(grid)
+set!(θ_initial_field, θᵢ)
+
 # ## Visualization of initial conditions and warm bubble perturbation
 #
-# We visualize the background potential temperature, water vapor mixing ratio, and wind shear
-# profiles that define the environmental stratification:
+# We visualize the background potential temperature, water vapor mixing ratio, and
+# wind shear profiles that define the environmental stratification:
 
-θ_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> θ_background(z))
+θ_profile  = set!(Field{Nothing, Nothing, Center}(grid), z -> θ_background(z))
 qᵛ_profile = set!(Field{Nothing, Nothing, Center}(grid), 1000 * qᵛ_column) # convert kg/kg -> g/kg
-u_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> u_background(z))
+u_profile  = set!(Field{Nothing, Nothing, Center}(grid), z -> u_background(z))
 
 fig = Figure(size=(1000, 400), fontsize=14)
 
@@ -230,159 +240,326 @@ Colorbar(fig[1, 2], hm, label="θ′ (K)")
 save("supercell_warm_bubble.png", fig) #src
 fig
 
-# ## Model setup
+# ## Reference state — anelastic
 #
-# We use the DCMIP2016 Kessler microphysics scheme with high-order WENO advection.
-# The Kessler scheme includes prognostic cloud water and rain water with autoconversion,
-# accretion, rain evaporation, and sedimentation processes.
+# Breeze dynamics subtract a hydrostatically-balanced reference column from the
+# prognostic state so that the time-tendency variables carry only the deviation
+# from rest. For the **anelastic** core, density is a fixed background ``\bar ρ(z)``
+# rather than a prognostic variable, and we construct the reference from a single
+# surface potential temperature `θ₀`. Anelastic dynamics are insensitive to the
+# exact reference stratification as long as buoyancy perturbations remain small
+# compared with it.
+
+reference_state_anelastic = ReferenceState(grid, constants;
+                                           surface_pressure = p₀,
+                                           potential_temperature = θ₀)
+
+# ## Dynamics — anelastic
+#
+# `AnelasticDynamics` integrates an incompressible-with-stratification equation set
+# that filters acoustic waves by construction through a pressure-Poisson solve at
+# every RK substep:
+
+dynamics_anelastic = AnelasticDynamics(reference_state_anelastic)
+
+# ## Microphysics
+#
+# Kessler warm-rain microphysics carries prognostic cloud water `qᶜˡ` and rain
+# water `qʳ` alongside vapor `qᵛ`, with autoconversion, accretion, rain
+# evaporation, and sedimentation:
 
 microphysics = DCMIP2016KesslerMicrophysics()
+
+# ## Advection
+#
+# We use WENO advection at order 9. [KlempEtAl2015](@citet) note that supercell
+# intensity and structure are highly sensitive to numerical diffusion; high-order
+# WENO keeps it low without adding an explicit diffusion operator.
+
 advection = WENO(order=9)
 
-model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
-
-# ## Model initialization
+# ## Building the anelastic model
 #
-# We initialize the model with the previously described initial conditions, including a warm-bubble perturbation.
+# `AtmosphereModel` ties together the grid, dynamics, microphysics, advection, and
+# thermodynamic constants. The same constructor signature works for both dynamical
+# cores — only the `dynamics` argument changes.
 
-set!(model, θ=θᵢ, qᵛ=qᵛ_column, u=uᵢ)
+model_anelastic = AtmosphereModel(grid; dynamics = dynamics_anelastic,
+                                  microphysics, advection,
+                                  thermodynamic_constants = constants)
 
-# ## Simulation
+# ## Initializing the anelastic model
 #
-# Run for 2 hours with adaptive time stepping (CFL = 0.7):
+# `set!` accepts pointwise functions (`uᵢ`) and pre-built fields
+# (`θ_initial_field`, `qᵛ_column`). It calls `update_state!` internally so a single
+# invocation refreshes all auxiliary diagnostics.
 
-simulation = Simulation(model; Δt=2, stop_time=2hours)
-conjure_time_step_wizard!(simulation, cfl=0.7)
-Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
+set!(model_anelastic, θ=θ_initial_field, qᵛ=qᵛ_column, u=uᵢ)
 
-# ## Output and progress
+# ## Slice indices for output
 #
-# We set up callbacks to monitor simulation health and collect diagnostics.
-# The maximum vertical velocity is tracked during the simulation to avoid
-# saving large 3D datasets.
+# We save horizontal slices at ``z \approx 5 \, {\rm km}`` (mid-troposphere, where
+# the rotating updraft is well-developed) and vertical slices through the bubble
+# center at ``y = L_y/2``. Both runs use the same indices.
 
-θˡⁱ = liquid_ice_potential_temperature(model)
-qᶜˡ = model.microphysical_fields.qᶜˡ
-qʳ = model.microphysical_fields.qʳ
-qᵛ = model.microphysical_fields.qᵛ
-u, v, w = model.velocities
+z_centers = znodes(grid, Center())
+const k_5km    = searchsortedfirst(z_centers, 5000)
+const j_center = Ny ÷ 2 + 1
+@info "Saving xy at z = $(z_centers[k_5km]) m (k = $k_5km); xz at y = $(Ly/2) m (j = $j_center)"
 
-wall_clock = Ref(time_ns())
+# ## Simulation driver
+#
+# `run_simulation` accepts an already-built `AtmosphereModel`, runs it for 2 hours
+# with a CFL-controlled time-step wizard, periodically writes horizontal (`xy` at
+# ``z \approx 5 \, {\rm km}``) and vertical (`xz` at ``y = L_y/2``) slices, and
+# collects the maximum vertical-velocity time series. We use this same driver for
+# both the anelastic and compressible runs.
 
-function progress(sim)
-    elapsed = 1e-9 * (time_ns() - wall_clock[])
+function run_simulation(model, label)
+    @info "=== Running case: $label ==="
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|u|: %.2f m/s, max w: %.2f m/s, min w: %.2f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), prettytime(elapsed),
-                   maximum(abs, u), maximum(w), minimum(w))
+    θ  = liquid_ice_potential_temperature(model)
+    θ′ = Field(θ - deepcopy(θ))  ## lazy field, recomputed each output
 
-    msg *= @sprintf(", max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(qʳ): %.2e",
-                    maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ))
-    @info msg
+    qᶜˡ = model.microphysical_fields.qᶜˡ
+    qʳ  = model.microphysical_fields.qʳ
+    qᵛ  = model.microphysical_fields.qᵛ
+    u, v, w = model.velocities
 
-    return nothing
+    simulation = Simulation(model; Δt=2, stop_time=2hours)
+    conjure_time_step_wizard!(simulation, cfl=0.7)
+    Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
+
+    wall_clock = Ref(time_ns())
+    function progress(sim)
+        elapsed = 1e-9 * (time_ns() - wall_clock[])
+        compute!(θ′)
+        msg = @sprintf("[%s] Iter: %d, t: %s, Δt: %s, wall: %s, max|u|: %.2f, max w: %.2f, min w: %.2f, extrema(θ'): (%.2f, %.2f)",
+                       label, iteration(sim), prettytime(sim), prettytime(sim.Δt), prettytime(elapsed),
+                       maximum(abs, u), maximum(w), minimum(w),
+                       minimum(θ′), maximum(θ′))
+        msg *= @sprintf(", max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(qʳ): %.2e",
+                        maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ))
+        @info msg
+        return nothing
+    end
+    add_callback!(simulation, progress, IterationInterval(100))
+
+    max_w_ts    = Float64[]
+    max_w_times = Float64[]
+    function collect_max_w(sim)
+        push!(max_w_times, time(sim))
+        push!(max_w_ts, maximum(w))
+        return nothing
+    end
+    add_callback!(simulation, collect_max_w, TimeInterval(1minutes))
+
+    slice_outputs = (
+        wxy   = view(w,   :, :, k_5km),
+        qᶜˡxy = view(qᶜˡ, :, :, k_5km),
+        qʳxy  = view(qʳ,  :, :, k_5km),
+        wxz   = view(w,   :, j_center, :),
+        θ′xz  = view(θ′,  :, j_center, :),
+        qᶜˡxz = view(qᶜˡ, :, j_center, :),
+        qʳxz  = view(qʳ,  :, j_center, :),
+    )
+
+    slices_filename = "splitting_supercell_$(label)_slices.jld2"
+    simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
+        filename=slices_filename, schedule=TimeInterval(2minutes), overwrite_existing=true)
+
+    run!(simulation)
+    wall_seconds = simulation.run_wall_time
+    @info @sprintf("[%s] DONE. wall time = %.1f s (%.2f min) over %d iterations",
+                   label, wall_seconds, wall_seconds / 60, iteration(simulation))
+
+    return (; label, wall_seconds, slices_filename, max_w_ts, max_w_times,
+            iterations = iteration(simulation))
 end
 
-add_callback!(simulation, progress, IterationInterval(100))
+# Run the anelastic simulation:
 
-# Collect maximum vertical velocity time series during simulation:
+results = Dict{String, Any}()
+results["anelastic"] = run_simulation(model_anelastic, "anelastic")
 
-max_w_ts = []
-max_w_times = []
+# ## Now the compressible core
+#
+# `CompressibleDynamics` integrates the fully compressible Euler equations and
+# resolves acoustic waves explicitly via split-explicit substepping: a small Δt
+# advances sound and buoyancy oscillations, while the standard CFL Δt advances
+# advection and physics. Density is now a prognostic variable, so the reference
+# state must closely match the actual atmosphere. We pass the same
+# `θ_background(z)` and `qᵛ_bg(z)` profiles used in the initial condition;
+# `CompressibleDynamics` builds an `ExnerReferenceState` internally that satisfies
+# discrete hydrostatic balance to machine precision, so the slow vertical-momentum
+# tendency vanishes on a rest atmosphere.
 
-function collect_max_w(sim)
-    push!(max_w_times, time(sim))
-    push!(max_w_ts, maximum(w))
-    return nothing
+dynamics_compressible = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                             surface_pressure = p₀,
+                                             standard_pressure = pˢᵗ,
+                                             reference_potential_temperature = θ_background,
+                                             reference_vapor_mass_fraction = qᵛ_bg)
+
+# Build the model — same constructor, different dynamics:
+
+model_compressible = AtmosphereModel(grid; dynamics = dynamics_compressible,
+                                     microphysics, advection,
+                                     thermodynamic_constants = constants)
+
+# Initial density. Naively setting `ρ` to the reference density while perturbing
+# `θ` would change `ρθ` and seed a spurious acoustic pulse from the warm bubble.
+# Instead we rescale the reference density via [`pressure_balanced_density`](@ref Breeze.Thermodynamics.pressure_balanced_density)
+# so that `ρθ` (and therefore the equation-of-state pressure) is unchanged at
+# `t = 0`:
+
+ρ_initial = CenterField(grid)
+set!(ρ_initial, pressure_balanced_density(model_compressible.dynamics.reference_state.density,
+                                          θ_background_column, θ_initial_field))
+
+# Set the same θ, qᵛ, u initial state plus the balanced ρ:
+
+set!(model_compressible, θ=θ_initial_field, qᵛ=qᵛ_column, u=uᵢ, ρ=ρ_initial)
+
+# Run the compressible simulation:
+
+results["compressible"] = run_simulation(model_compressible, "compressible")
+
+# ## Wall-time summary
+
+println("\n========== Wall-time summary ==========")
+@printf("%-14s  %12s  %12s  %12s\n", "case", "wall (s)", "wall (min)", "iterations")
+for label in ("anelastic", "compressible")
+    r = results[label]
+    @printf("%-14s  %12.1f  %12.2f  %12d\n",
+            label, r.wall_seconds, r.wall_seconds / 60, r.iterations)
 end
 
-add_callback!(simulation, collect_max_w, TimeInterval(1minutes))
-
-# Save horizontal slices at z ≈ 5 km for animation:
-
-z = znodes(grid, Center())
-k_5km = searchsortedfirst(z, 5000)
-@info "Saving xy slices at z = $(z[k_5km]) m (k = $k_5km)"
-
-slice_outputs = (
-    wxy = view(w, :, :, k_5km),
-    qʳxy = view(qʳ, :, :, k_5km),
-    qᶜˡxy = view(qᶜˡ, :, :, k_5km),
-)
-
-slices_filename = "splitting_supercell_slices.jld2"
-simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename=slices_filename,
-                                                schedule = TimeInterval(2minutes),
-                                                overwrite_existing = true)
-
-run!(simulation)
-
-# ## Animation: horizontal slices at z ≈ 5 km
+# ## Horizontal slice comparison (z ≈ 5 km)
 #
-# We create a 3-panel animation showing the storm structure at mid-levels:
-# - Vertical velocity ``w``: reveals the updraft/downdraft structure
-# - Cloud liquid ``qᶜˡ``: shows the cloud boundaries
-# - Rain ``qʳ``: indicates precipitation regions
-#
-# The simulated supercell exhibits splitting behavior, with the initial storm
-# dividing into right-moving and left-moving cells, consistent with the
-# DCMIP2016 intercomparison results [Zarzycki2019](@cite).
+# Top row: anelastic, bottom row: compressible. Columns show vertical velocity ``w``,
+# cloud water ``qᶜˡ``, and rain water ``qʳ``. The simulated supercell exhibits
+# splitting behavior, with the initial storm dividing into right- and left-moving
+# cells, consistent with the DCMIP2016 intercomparison results [Zarzycki2019](@cite).
 
-wxy_ts = FieldTimeSeries(slices_filename, "wxy")
-qʳxy_ts = FieldTimeSeries(slices_filename, "qʳxy")
-qᶜˡxy_ts = FieldTimeSeries(slices_filename, "qᶜˡxy")
+xy_ts = Dict(label => (
+        wxy   = FieldTimeSeries(results[label].slices_filename, "wxy"),
+        qᶜˡxy = FieldTimeSeries(results[label].slices_filename, "qᶜˡxy"),
+        qʳxy  = FieldTimeSeries(results[label].slices_filename, "qʳxy"),
+    ) for label in ("anelastic", "compressible"))
 
-times = wxy_ts.times
-Nt = length(times)
+wlim   = maximum(maximum(abs, xy_ts[l].wxy)   for l in keys(xy_ts)) / 2
+qᶜˡlim = maximum(maximum(xy_ts[l].qᶜˡxy)     for l in keys(xy_ts)) / 4
+qʳlim  = maximum(maximum(xy_ts[l].qʳxy)      for l in keys(xy_ts)) / 4
 
-wlim = maximum(abs, wxy_ts) / 2
-qʳlim = maximum(qʳxy_ts) / 4
-qᶜˡlim = maximum(qᶜˡxy_ts) / 4
+times_xy = xy_ts["anelastic"].wxy.times
+Nt_xy    = min(length(times_xy), length(xy_ts["compressible"].wxy.times))
 
-fig = Figure(size=(900, 400), fontsize=12)
+fig = Figure(size=(1200, 750), fontsize=12)
+fig[1, 1] = Label(fig, "anelastic",    rotation=π/2, fontsize=14, tellheight=false)
+fig[2, 1] = Label(fig, "compressible", rotation=π/2, fontsize=14, tellheight=false)
 
-axw = Axis(fig[1, 1], aspect=1, xlabel="x (m)", ylabel="y (m)", title="w (m/s)")
-axqᶜˡ = Axis(fig[1, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qᶜˡ (kg/kg)")
-axqʳ = Axis(fig[1, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qʳ (kg/kg)")
+axw_anel   = Axis(fig[1, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="w (m/s)")
+axqᶜˡ_anel = Axis(fig[1, 4], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qᶜˡ (kg/kg)")
+axqʳ_anel  = Axis(fig[1, 6], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qʳ (kg/kg)")
+axw_comp   = Axis(fig[2, 2], aspect=1, xlabel="x (m)", ylabel="y (m)")
+axqᶜˡ_comp = Axis(fig[2, 4], aspect=1, xlabel="x (m)", ylabel="y (m)")
+axqʳ_comp  = Axis(fig[2, 6], aspect=1, xlabel="x (m)", ylabel="y (m)")
 
-n = Observable(1)
-wxy_n = @lift wxy_ts[$n]
-qᶜˡxy_n = @lift qᶜˡxy_ts[$n]
-qʳxy_n = @lift qʳxy_ts[$n]
-title = @lift "Splitting supercell at z ≈ 5 km, t = " * prettytime(times[$n])
+n_xy = Observable(1)
+wxy_anel_n   = @lift xy_ts["anelastic"].wxy[$n_xy]
+qᶜˡxy_anel_n = @lift xy_ts["anelastic"].qᶜˡxy[$n_xy]
+qʳxy_anel_n  = @lift xy_ts["anelastic"].qʳxy[$n_xy]
+wxy_comp_n   = @lift xy_ts["compressible"].wxy[$n_xy]
+qᶜˡxy_comp_n = @lift xy_ts["compressible"].qᶜˡxy[$n_xy]
+qʳxy_comp_n  = @lift xy_ts["compressible"].qʳxy[$n_xy]
+title_xy     = @lift "Splitting supercell, xy at z ≈ 5 km, t = " * prettytime(times_xy[$n_xy])
 
-hmw = heatmap!(axw, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
-hmqᶜˡ = heatmap!(axqᶜˡ, qᶜˡxy_n, colormap=:dense, colorrange=(0, qᶜˡlim))
-hmqʳ = heatmap!(axqʳ, qʳxy_n, colormap=:amp, colorrange=(0, qʳlim))
+hmw_anel   = heatmap!(axw_anel,   wxy_anel_n,   colormap=:balance, colorrange=(-wlim, wlim))
+hmqᶜˡ_anel = heatmap!(axqᶜˡ_anel, qᶜˡxy_anel_n, colormap=:dense,   colorrange=(0, qᶜˡlim))
+hmqʳ_anel  = heatmap!(axqʳ_anel,  qʳxy_anel_n,  colormap=:amp,     colorrange=(0, qʳlim))
+             heatmap!(axw_comp,   wxy_comp_n,   colormap=:balance, colorrange=(-wlim, wlim))
+             heatmap!(axqᶜˡ_comp, qᶜˡxy_comp_n, colormap=:dense,   colorrange=(0, qᶜˡlim))
+             heatmap!(axqʳ_comp,  qʳxy_comp_n,  colormap=:amp,     colorrange=(0, qʳlim))
 
-Colorbar(fig[2, 1], hmw, vertical=false)
-Colorbar(fig[2, 2], hmqᶜˡ, vertical=false)
-Colorbar(fig[2, 3], hmqʳ, vertical=false)
+Colorbar(fig[1:2, 3], hmw_anel)
+Colorbar(fig[1:2, 5], hmqᶜˡ_anel)
+Colorbar(fig[1:2, 7], hmqʳ_anel)
+fig[0, :] = Label(fig, title_xy, fontsize=14, tellwidth=false)
 
-fig[0, :] = Label(fig, title, fontsize=14, tellwidth=false)
-
-CairoMakie.record(fig, "splitting_supercell_slices.mp4", 1:Nt, framerate=10) do nn
-    n[] = nn
+CairoMakie.record(fig, "splitting_supercell_xy_comparison.mp4", 1:Nt_xy, framerate=10) do nn
+    n_xy[] = nn
 end
 nothing #hide
 
-# ![](splitting_supercell_slices.mp4)
+# ![](splitting_supercell_xy_comparison.mp4)
 
-# ## Results: maximum vertical velocity time series
+# ## Vertical slice comparison (y = Ly/2)
 #
-# The maximum updraft velocity is a key diagnostic for supercell intensity.
-# Strong supercells typically develop updrafts exceeding 30–50 m/s.
+# Vertical (xz) slice cut through the bubble center. Columns show ``w`` and the
+# potential-temperature perturbation ``θ' = θ - θ_{\rm initial}``; rows show
+# anelastic (top) vs compressible (bottom).
+
+xz_ts = Dict(label => (
+        wxz  = FieldTimeSeries(results[label].slices_filename, "wxz"),
+        θ′xz = FieldTimeSeries(results[label].slices_filename, "θ′xz"),
+    ) for label in ("anelastic", "compressible"))
+
+wlim_xz  = maximum(maximum(abs, xz_ts[l].wxz)  for l in keys(xz_ts)) / 2
+θ′lim_xz = maximum(maximum(abs, xz_ts[l].θ′xz) for l in keys(xz_ts)) / 2
+
+times_xz = xz_ts["anelastic"].wxz.times
+Nt_xz    = min(length(times_xz), length(xz_ts["compressible"].wxz.times))
+
+fig = Figure(size=(1100, 700), fontsize=12)
+fig[1, 1] = Label(fig, "anelastic",    rotation=π/2, fontsize=14, tellheight=false)
+fig[2, 1] = Label(fig, "compressible", rotation=π/2, fontsize=14, tellheight=false)
+
+axw_anel_xz = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="w (m/s)")
+axθ_anel_xz = Axis(fig[1, 4], xlabel="x (m)", ylabel="z (m)", title="θ' (K)")
+axw_comp_xz = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)")
+axθ_comp_xz = Axis(fig[2, 4], xlabel="x (m)", ylabel="z (m)")
+
+n_xz = Observable(1)
+wxz_anel_n  = @lift xz_ts["anelastic"].wxz[$n_xz]
+θ′xz_anel_n = @lift xz_ts["anelastic"].θ′xz[$n_xz]
+wxz_comp_n  = @lift xz_ts["compressible"].wxz[$n_xz]
+θ′xz_comp_n = @lift xz_ts["compressible"].θ′xz[$n_xz]
+title_xz    = @lift "Splitting supercell, xz at y = Ly/2, t = " * prettytime(times_xz[$n_xz])
+
+hmw_anel_xz = heatmap!(axw_anel_xz, wxz_anel_n,  colormap=:balance, colorrange=(-wlim_xz,  wlim_xz))
+hmθ_anel_xz = heatmap!(axθ_anel_xz, θ′xz_anel_n, colormap=:balance, colorrange=(-θ′lim_xz, θ′lim_xz))
+              heatmap!(axw_comp_xz, wxz_comp_n,  colormap=:balance, colorrange=(-wlim_xz,  wlim_xz))
+              heatmap!(axθ_comp_xz, θ′xz_comp_n, colormap=:balance, colorrange=(-θ′lim_xz, θ′lim_xz))
+
+Colorbar(fig[1:2, 3], hmw_anel_xz)
+Colorbar(fig[1:2, 5], hmθ_anel_xz)
+fig[0, :] = Label(fig, title_xz, fontsize=14, tellwidth=false)
+
+CairoMakie.record(fig, "splitting_supercell_xz_comparison.mp4", 1:Nt_xz, framerate=10) do nn
+    n_xz[] = nn
+end
+nothing #hide
+
+# ![](splitting_supercell_xz_comparison.mp4)
+
+# ## Maximum vertical velocity time series
 #
-# Our simulated storm intensity is notably stronger than the DCMIP2016 intercomparison
-# results reported by [Zarzycki2019](@citet). One explanation is that
-# no explicit numerical diffusion is applied in this simulation. As noted by
-# [KlempEtAl2015](@citet), the simulated storm intensity and structure
-# are highly sensitive to numerical diffusion.
+# The maximum updraft velocity is a key diagnostic for supercell intensity. Strong
+# supercells typically develop updrafts exceeding 30–50 m/s. As noted by
+# [KlempEtAl2015](@citet), the simulated storm intensity and structure are highly
+# sensitive to numerical diffusion; no explicit numerical diffusion is applied here.
+# Plotting both runs together highlights how closely the two dynamical cores agree
+# (or where they diverge) under identical microphysics and initial conditions.
 
 fig = Figure(size=(700, 400), fontsize=14)
-ax = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Maximum w (m/s)", title="Maximum Vertical Velocity",
+ax = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Maximum w (m/s)",
+          title="Maximum vertical velocity",
           xticks=0:1800:7200)
-lines!(ax, max_w_times, max_w_ts, linewidth=2)
+lines!(ax, results["anelastic"].max_w_times,    results["anelastic"].max_w_ts,
+       linewidth=2, color=:dodgerblue, label="anelastic")
+lines!(ax, results["compressible"].max_w_times, results["compressible"].max_w_ts,
+       linewidth=2, color=:orangered,  label="compressible")
+axislegend(ax, position=:lt)
 
-save("supercell_max_w.png", fig) #src
+save("supercell_max_w_comparison.png", fig) #src
 fig
