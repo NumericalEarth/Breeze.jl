@@ -30,10 +30,7 @@ using CloudMicrophysics: MicrophysicsNonEq as CMNonEq
 
 using Breeze.AtmosphereModels: AtmosphereModels,
     AbstractNumberConcentrationCategories,
-    dynamics_density,
-    materialize_microphysical_fields,
-    update_microphysical_fields!,
-    grid_moisture_fractions
+    dynamics_density
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -56,7 +53,6 @@ using Breeze.Microphysics:
     center_field_tuple,
     BulkMicrophysics,
     FourCategories,
-    SaturationAdjustment,
     WarmPhaseSaturationAdjustment,
     MixedPhaseSaturationAdjustment,
     AbstractCondensateFormation,
