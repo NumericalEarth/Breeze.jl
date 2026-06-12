@@ -33,6 +33,7 @@ export
     CubicRamp,
     Sin2Ramp,
     ExplicitTimeStepping,
+    balance_adiabatically!,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -65,6 +66,8 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
+    azimuthal_mean,
+    azimuthal_mean!,
     static_energy_density,
     static_energy,
     total_energy,
@@ -129,9 +132,12 @@ export
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
-    follow_terrain!,
+    TerrainFollowingVerticalDiscretization,
+    LinearDecay,
+    TwoLevelDecay,
+    materialize_terrain!,
+    build_terrain_metrics,
     TerrainMetrics,
-    BasicTerrainFollowing,
     SlopeOutsideInterpolation,
     SlopeInsideInterpolation,
 
@@ -160,7 +166,7 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     Integral, IterationInterval, JLD2Writer,
                     KernelFunctionOperation, LagrangianParticles,
                     LatitudeLongitudeGrid, NetCDFWriter,
-                    NonTraditionalBetaPlane, OnDisk, OpenBoundaryCondition,
+                    NonTraditionalBetaPlane, OnDisk, NormalFlowBoundaryCondition,
                     PartialCellBottom, Partition, Periodic,
                     PerturbationAdvection, RectilinearGrid, Simulation,
                     SphericalCoriolis,
@@ -174,7 +180,7 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     zspacings, ∂x, ∂y, ∂z
 
 using Oceananigans.Grids: znode, MutableVerticalDiscretization
-using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition, fill_halo_regions!
 
 export
     CPU, GPU,
@@ -188,7 +194,7 @@ export
     Distributed, Partition,
     Centered, UpwindBiased, WENO, FluxFormAdvection,
     FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
-    OpenBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
+    NormalFlowBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
     BoundaryConditionOperation,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
     Average, Integral,
@@ -243,6 +249,12 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               UpperSponge,
                               AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
                               ExplicitTimeStepping
+
+# Adiabatic (FV3 na_init) initialization — dynamics-agnostic, dispatches on the
+# initial_fields method for CompressibleModel / AnelasticModel.
+using DocStringExtensions: TYPEDSIGNATURES
+using Oceananigans.TimeSteppers: update_state!, reset!
+include("balance_adiabatically.jl")
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel

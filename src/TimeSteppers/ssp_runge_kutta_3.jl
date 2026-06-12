@@ -112,9 +112,10 @@ function ssp_rk3_substep!(model, Δt, α)
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
+    Δt_FT = kernel_time_step(arch, grid, Δt)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic_fields(model), U⁰, Gⁿ))
-        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
+        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt_FT, α)
 
         # Field index for implicit solver:
         # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
@@ -180,7 +181,7 @@ where ``G`` above is the right-hand-side, e.g., ``∂u/∂t = G(u)``.
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}, Δt; callbacks=[])
 
     # Be paranoid and prepare at iteration 0, in case run! is not used:
-    maybe_prepare_first_time_step!(model, callbacks)
+    maybe_prepare_first_time_step!(model, Δt, callbacks)
 
     ts = model.timestepper
     α¹ = ts.α¹
@@ -237,15 +238,12 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    # Operator-split microphysics: applied once per time step on the post-RK
-    # state (rather than once per stage from `update_state!`), so that the
-    # full Δt of autoconversion / accretion / condensation / sedimentation
-    # is applied exactly once. Required for `DCMIP2016KesslerMicrophysics`,
-    # which bypasses the standard tendency interface and updates state via
-    # this hook.
+    update_state!(model, callbacks; compute_tendencies = true)
+
+    # Apply the operator-split microphysics update exactly once per step, on the post-RK
+    # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
 
-    update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, α³ * Δt)
 
     return nothing

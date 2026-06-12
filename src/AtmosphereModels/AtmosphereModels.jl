@@ -84,6 +84,8 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
+    azimuthal_mean,
+    azimuthal_mean!,
     compute_hydrostatic_pressure!,
     set_to_mean!,
 
@@ -94,7 +96,10 @@ export
     # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
-    compute_z_momentum_tendency!
+    compute_z_momentum_tendency!,
+
+    # Architecture-dispatched helper for safely converting Δt to a kernel arg
+    kernel_time_step
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
@@ -107,6 +112,13 @@ using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
+
+# Convert Δt to the kernel-compatible time type for `grid`'s architecture.
+# Metal cannot load Float64 kernel arguments, so we must convert at the launch
+# site for Float32 grids. Reactant tracing breaks if we convert outside the
+# kernel — BreezeReactantExt overrides this for `ReactantState` archs to pass
+# Δt through unchanged.
+@inline kernel_time_step(arch, grid, Δt) = convert(eltype(grid), Δt)
 
 #####
 ##### Interfaces (define the contract that dynamics implementations must fulfill)

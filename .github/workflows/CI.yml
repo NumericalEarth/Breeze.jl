@@ -86,7 +86,7 @@ jobs:
       - name: "Check out repository"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: "Install Julia"
-        uses: julia-actions/setup-julia@4c0cb0fce8556fdb04a90347310e5db8b1f98fb9 # v2.7.0
+        uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         # On the self-hosted GPU runners we use a Docker image with Julia pre-installed.
         if: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         with:
@@ -97,7 +97,7 @@ jobs:
         run: |
           julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
       - name: "Cache Julia depot"
-        uses: julia-actions/cache@9a93c5fb3e9c1c20b60fc80a478cae53e38618a4 # v3.0.2
+        uses: julia-actions/cache@a45e8fa8be21c18a06b7177052533149e61e9b38 # v3.1.0
         with:
           # On self-hosted runners we use the prebuilt Docker container, which already
           # caches pkgimages and such, so we don't need to cache here most things.  Only
@@ -173,6 +173,15 @@ jobs:
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
           julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
+      - name: "Upload Manifest"
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        timeout-minutes: 2
+        with:
+          name: manifest-${{ matrix.version }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.check-bounds }}
+          path: '**/Manifest*.toml'
+          retention-days: 90
+          overwrite: false
       - name: "Upload Reactant MLIR dumps as artifacts"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()

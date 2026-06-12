@@ -10,8 +10,9 @@ using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNCheck
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 using Oceananigans.TimeSteppers: TimeStepper
-using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
 using Oceananigans.Architectures: on_architecture
+using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields
+using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 
 struct DefaultValue end

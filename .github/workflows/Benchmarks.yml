@@ -60,16 +60,14 @@ jobs:
           # Reactant vs vanilla — compressible_explicit + WENO5 + 1M mixed-phase
           # non-eq microphysics with ice on a PBB grid. Uses --simplified to
           # drop the geostrophic forcing and field-dependent surface drag BCs
-          # (which do not currently materialize on ReactantState). Runs in
-          # Float64 because Reactant's @trace loop trips on the Float32-grid
-          # / Float64-clock mismatch.
+          # (which do not currently materialize on ReactantState).
           - dynamics: 'compressible_explicit'
             microphysics: '1M_MixedNonEquilibrium'
             grid: '256x256x128'
             advection: 'WENO5'
             backend: 'vanilla, reactant'
             topology: 'PBB'
-            extra_flags: '--simplified --float_type=Float64'
+            extra_flags: '--simplified --float_type=Float32'
           # AD: forward+backward via Enzyme reverse-mode through the same
           # @trace checkpointed loop. Reactant-only by construction. No
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
@@ -81,7 +79,7 @@ jobs:
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
-            extra_flags: '--ad --simplified --float_type=Float64 --warmup_steps 1 --time_steps 1'
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 1'
     defaults:
       run:
         shell: bash
@@ -113,6 +111,8 @@ jobs:
           Pkg.instantiate()
       - name: Run benchmarks
         timeout-minutes: 45
+        env:
+          XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
@@ -121,6 +121,15 @@ jobs:
         with:
           name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
           path: benchmarking/benchmark_results.*
+          retention-days: 90
+          overwrite: false
+      - name: "Upload Manifest"
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: 'manifest-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
+          path: '**/Manifest*.toml'
           retention-days: 90
           overwrite: false
       - name: Create job summary
@@ -238,11 +247,11 @@ jobs:
           with open('github-action-benchmark.json', 'w') as f:
               json.dump(data, f)
       - name: "Generate token"
-        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         if: ${{ ! github.event.pull_request.head.repo.fork }}
         id: generate_token
         with:
-          app-id: "${{ secrets.NUMTERRA_BOT_ID }}"
+          client-id: "${{ secrets.NUMTERRA_BOT_ID }}"
           private-key: "${{ secrets.NUMTERRA_BOT_PRIVATE_KEY }}"
           owner: NumericalEarth
           repositories: |
@@ -265,7 +274,7 @@ jobs:
           git commit -m'Save benchmark results for commit ${{ github.sha }}'
           git push -u origin main
       - name: "Publish benchmark results"
-        uses: benchmark-action/github-action-benchmark@a60cea5bc7b49e15c1f58f411161f99e0df48372 # v1.22.0
+        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
         with:
           name: Breeze.jl Benchmarks
           tool: "customBiggerIsBetter"
@@ -280,5 +289,5 @@ jobs:
           fail-on-alert: false
           # auto-push: true
           auto-push: ${{ github.event_name == 'push' }}
-          max-items-in-chart: 50
+          max-items-in-chart: 1000
           comment-on-alert: true
