@@ -21,7 +21,9 @@ using CloudMicrophysics.Microphysics1M:
     accretion,
     accretion_rain_sink,
     accretion_snow_rain,
-    terminal_velocity
+    terminal_velocity,
+    get_n0,
+    lambda_inverse
 
 # Two-moment microphysics
 using CloudMicrophysics: Microphysics2M as CM2
@@ -30,6 +32,7 @@ using CloudMicrophysics: MicrophysicsNonEq as CMNonEq
 
 using Breeze.AtmosphereModels: AtmosphereModels,
     AbstractNumberConcentrationCategories,
+    dynamics_density,
     materialize_microphysical_fields,
     update_microphysical_fields!,
     grid_moisture_fractions
@@ -49,6 +52,8 @@ using Breeze.Thermodynamics:
     mixture_gas_constant,
     mixture_heat_capacity
 
+using Breeze: Microphysics
+
 using Breeze.Microphysics:
     center_field_tuple,
     BulkMicrophysics,
@@ -59,6 +64,7 @@ using Breeze.Microphysics:
     AbstractCondensateFormation,
     ConstantRateCondensateFormation,
     NonEquilibriumCloudFormation,
+    NumberConcentrationKernelFunction,
     condensation_rate,
     deposition_rate,
     adjust_thermodynamic_state
@@ -69,7 +75,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans: Center, Face, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: ZeroField, ZFaceField
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, Open
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, NormalFlow
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt

@@ -102,6 +102,22 @@ Adapt.adapt_structure(to, k::TwoMomentSurfacePrecipitationFluxKernel) =
 end
 
 #####
+##### Number concentration diagnostic (2-moment)
+#####
+#
+# For 2-mom microphysics, the total number concentration is the prognostic
+# ρnˣ field; the diagnostic just hands it back so consumers see the same
+# interface as the 1-mom case (build a `Field` if they need to compute).
+
+Microphysics.number_concentration(model, ::TwoMomentCloudMicrophysics, ::Val{:rain}) =
+    get(model.microphysical_fields, :ρnʳ, nothing)
+
+Microphysics.number_concentration(model, ::TwoMomentCloudMicrophysics, ::Val{:cloud_liquid}) =
+    get(model.microphysical_fields, :ρnᶜˡ, nothing)
+
+Microphysics.number_concentration(model, ::TwoMomentCloudMicrophysics, ::Val) = nothing
+
+#####
 ##### show methods for two-moment microphysics
 #####
 

@@ -15,6 +15,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, microphysics_m
 
 using Breeze.CompressibleEquations:
     CompressibleDynamics,
+    TerrainCompressibleDynamics,
     AcousticSubstepper,
     WickerSkamarock3,
     stage_fractions,
@@ -151,8 +152,11 @@ end
 ##### Scalar update with time-averaged velocities
 #####
 
-scalar_rk3_substep!(model, Δt_stage) =
-    scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_stage)
+function scalar_rk3_substep!(model, Δt_stage)
+    grid = model.grid
+    Δt_FT = kernel_time_step(grid.architecture, grid, Δt_stage)
+    return scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_FT)
+end
 
 @kernel function _rk3_substep!(u, u⁰, G, Δt_stage)
     i, j, k = @index(Global, NTuple)
@@ -171,7 +175,7 @@ linearized acoustic substepping.
 """
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:AcousticRungeKutta3}, Δt; callbacks=[])
 
-    maybe_prepare_first_time_step!(model, callbacks)
+    maybe_prepare_first_time_step!(model, Δt, callbacks)
 
     ts = model.timestepper
     β₁ = ts.β₁
@@ -242,6 +246,14 @@ end
 #####
 
 function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
+                                                                      <:Any, <:Any, <:AcousticRungeKutta3})
+    sub = model.timestepper.substepper
+    return (u = sub.time_averaged_velocities.u,
+            v = sub.time_averaged_velocities.v,
+            w = sub.time_averaged_velocities.w)
+end
+
+function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:TerrainCompressibleDynamics,
                                                                       <:Any, <:Any, <:AcousticRungeKutta3})
     sub = model.timestepper.substepper
     return (u = sub.time_averaged_velocities.u,

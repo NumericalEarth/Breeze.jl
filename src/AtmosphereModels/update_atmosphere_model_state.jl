@@ -1,25 +1,53 @@
 using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
+using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans.Grids: Bounded, Periodic, Flat # , topology, halo_size
+using Oceananigans.Fields: flattened_unique_values
+using Oceananigans.Grids: topology
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.TimeSteppers: TimeSteppers
+using Oceananigans.Models: boundary_condition_args
+using Oceananigans.OutputReaders: update_field_time_series!, extract_field_time_series
+using Oceananigans.TimeSteppers: TimeSteppers, Clock
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
-using Oceananigans.Utils: launch! # , KernelParameters
+using Oceananigans.Units: Time
+using Oceananigans.Utils: launch!, KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
+
+# Advance any `FieldTimeSeries` embedded in boundary conditions or forcings so that
+# halo fill and tendency computation see the current time slice. Mirrors
+# `Oceananigans.Models.update_model_field_time_series!(::OceananigansModels, ::Clock)`
+# (`Models.jl:150`); `AtmosphereModel` is not in the `OceananigansModels` Union, so
+# without this extension calls fall through to the no-op `::AbstractModel` fallback.
+function Oceananigans.Models.update_model_field_time_series!(model::AtmosphereModel, clock::Clock)
+    time = Time(clock.time)
+    possible_fts = (fields(model), model.forcing)
+    time_series_tuple = extract_field_time_series(possible_fts)
+    time_series_tuple = flattened_unique_values(time_series_tuple)
+    for fts in time_series_tuple
+        update_field_time_series!(fts, time)
+    end
+    return nothing
+end
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     fix_negative_moisture!(model)  # fix negative moisture from advection
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
-    fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
+    Oceananigans.Models.update_model_field_time_series!(model, model.clock)
+
+    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
     microphysics_model_update!(model.microphysics, model)
-    compute_tendencies && compute_tendencies!(model)
+
+    for callback in callbacks
+        callback.callsite isa UpdateStateCallsite && callback(model)
+    end
+
+    compute_tendencies && compute_tendencies!(model, callbacks)
 
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
 
@@ -63,12 +91,6 @@ function tracer_specific_to_density!(tracers, density)
     return nothing
 end
 
-diagnostic_indices(::Bounded, N, H) = 1:N+1
-# For Periodic, start at -H+2 because face-interpolation (ℑxᶠᵃᵃ) accesses i-1.
-# Starting at -H+1 would require accessing index -H which is out of bounds.
-diagnostic_indices(::Periodic, N, H) = -H+2:N+H
-diagnostic_indices(::Flat, N, H) = 1:N
-
 #####
 ##### Velocity and momentum computation
 #####
@@ -82,32 +104,30 @@ function compute_velocities!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
-    #TODO: Better support OffsetStaticSize in KernalAbstractions
-    # For now, just use :xyz instead of KernelParameters
-    # See: https://github.com/NumericalEarth/Breeze.jl/issues/433
-
-    # TX, TY, TZ = topology(grid)
-    # Nx, Ny, Nz = size(grid)
-    # Hx, Hy, Hz = halo_size(grid)
-
-    # ii = diagnostic_indices(TX(), Nx, Hx)
-    # jj = diagnostic_indices(TY(), Ny, Hy)
-    # kk = diagnostic_indices(TZ(), Nz, Hz)
-
-    # kp = KernelParameters(ii, jj, kk)
-
     # Ensure halos are filled before velocity computation
-    # (prognostic field halo fill in update_state! is async)
+    # (prognostic field halo fill in update_state! is async).
+    # Thread clock and model fields so time-dependent boundary conditions
+    # (e.g. continuous-callable or FieldTimeSeries Open BCs) on density/momentum
+    # dispatch correctly; without them `getbc` falls through to a signature that
+    # cannot evaluate the time argument. Note: velocities are still stale here
+    # (recomputed just below), so momentum BCs with velocity `field_dependencies`
+    # would see last-stage values.
     density = dynamics_density(model.dynamics)
-    fill_halo_regions!(density)
-    fill_halo_regions!(model.momentum)
+    fill_halo_regions!(density, boundary_condition_args(model)...)
+    fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
 
-    launch!(arch, grid, :xyz,
+    # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
+    # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by
+    # the trailing `fill_halo_regions!(model.velocities)`), N for Flat.
+    Nx, Ny, Nz = size(grid)
+    TX, TY, TZ = topology(grid)
+    launch!(arch, grid, KernelParameters(1:length(Face(), TX(), Nx),
+                                         1:length(Face(), TY(), Ny),
+                                         1:length(Face(), TZ(), Nz)),
             _compute_velocities!,
-            model.velocities,
-            grid,
-            model.dynamics,
-            model.momentum)
+            model.velocities.u, model.velocities.v, model.velocities.w,
+            model.momentum.ρu,   model.momentum.ρv,   model.momentum.ρw,
+            grid, model.dynamics)
 
     foreach(mask_immersed_field!, model.velocities)
     fill_halo_regions!(model.velocities)
@@ -206,24 +226,12 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     return nothing
 end
 
-@kernel function _compute_velocities!(velocities, grid, dynamics, momentum)
+@kernel function _compute_velocities!(u, v, w, ρu, ρv, ρw, grid, dynamics)
     i, j, k = @index(Global, NTuple)
-
     ρ = dynamics_density(dynamics)
-
-    @inbounds begin
-        ρu = momentum.ρu[i, j, k]
-        ρv = momentum.ρv[i, j, k]
-        ρw = momentum.ρw[i, j, k]
-
-        ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
-        ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
-        ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-
-        velocities.u[i, j, k] = ρu / ρᶠᶜᶜ
-        velocities.v[i, j, k] = ρv / ρᶜᶠᶜ
-        velocities.w[i, j, k] = ρw / ρᶜᶜᶠ
-    end
+    @inbounds u[i, j, k] = ρu[i, j, k] / ℑxᶠᵃᵃ(i, j, k, grid, ρ)
+    @inbounds v[i, j, k] = ρv[i, j, k] / ℑyᵃᶠᵃ(i, j, k, grid, ρ)
+    @inbounds w[i, j, k] = ρw[i, j, k] / ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
@@ -264,7 +272,7 @@ end
     @inbounds temperature[i, j, k] = T
 end
 
-function compute_tendencies!(model::AtmosphereModel)
+function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     grid = model.grid
     arch = grid.architecture
 
@@ -351,6 +359,10 @@ function compute_tendencies!(model::AtmosphereModel)
     #####
 
     compute_dynamics_tendency!(model)
+
+    for callback in callbacks
+        callback.callsite isa TendencyCallsite && callback(model)
+    end
 
     return nothing
 end

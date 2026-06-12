@@ -18,11 +18,12 @@ using Oceananigans.Operators:
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
-    time_discretization,
     _viscous_flux_ux, _viscous_flux_uy, _viscous_flux_uz,
     _viscous_flux_vx, _viscous_flux_vy, _viscous_flux_vz,
     _viscous_flux_wx, _viscous_flux_wy, _viscous_flux_wz,
     _diffusive_flux_x, _diffusive_flux_y, _diffusive_flux_z
+
+using Oceananigans.TimeSteppers: time_discretization
 
 using ..AtmosphereModels: AtmosphereModels
 

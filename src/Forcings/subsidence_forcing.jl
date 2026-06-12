@@ -8,32 +8,33 @@ using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
 
 #####
-##### Subsidence forcing types (unmaterialized stubs)
+##### Subsidence forcing
 #####
 
-struct SubsidenceForcing{W, R, A}
+struct SubsidenceForcing{W, A}
     subsidence_vertical_velocity :: W
-    density :: R
     averaged_field :: A
 end
 
 Adapt.adapt_structure(to, sf::SubsidenceForcing) =
     SubsidenceForcing(Adapt.adapt(to, sf.subsidence_vertical_velocity),
-                      Adapt.adapt(to, sf.density),
                       Adapt.adapt(to, sf.averaged_field))
 
 """
 $(TYPEDSIGNATURES)
 
 Forcing that represents large-scale subsidence advecting horizontally-averaged
-fields downward:
+fields downward. The kernel returns the *specific* tendency
 
 ```math
-F_{ρ ϕ} = - ρᵣ wˢ ∂_z \\overline{ϕ}
+F_ϕ = - w^s \\, ∂_z \\overline{ϕ}
 ```
 
-where ``wˢ`` is the `subsidence_vertical_velocity`, ``ρᵣ`` is the reference density,
-and ``\\overline{ϕ}`` is the horizontal average of the field being forced.
+where ``w^s`` is the `subsidence_vertical_velocity` and ``\\overline{ϕ}`` is the
+horizontal average of the field being forced. Supply `SubsidenceForcing` under
+the specific prognostic name (e.g. `θ`, `qᵉ`, `u`); the `AtmosphereModel` dispatch
+wraps it in [`SpecificForcing`](@ref) so the density factor ``ρ`` is applied
+automatically at kernel time.
 
 # Fields
 - `wˢ`: Either a function of `z` specifying the subsidence velocity profile,
@@ -50,18 +51,18 @@ grid = RectilinearGrid(size=(64, 64, 75), x=(0, 6400), y=(0, 6400), z=(0, 3000))
 
 wˢ(z) = z < 1500 ? -0.0065 * z / 1500 : -0.0065 * (1 - (z - 1500) / 600)
 subsidence = SubsidenceForcing(wˢ)
-forcing = (; ρθ=subsidence, ρqᵛ=subsidence)
+forcing = (; θ=subsidence, qᵛ=subsidence)
 
 model = AtmosphereModel(grid; forcing)
 
-model.forcing.ρθ
+model.forcing.ρθ.forcing
 
 # output
 SubsidenceForcing with wˢ: 1×1×76 Field{Nothing, Nothing, Face} reduced over dims = (1, 2) on RectilinearGrid on CPU
 └── averaged_field: 1×1×75 Field{Nothing, Nothing, Center} reduced over dims = (1, 2) on RectilinearGrid on CPU
 ```
 """
-SubsidenceForcing(wˢ) = SubsidenceForcing(wˢ, nothing, nothing)
+SubsidenceForcing(wˢ) = SubsidenceForcing(wˢ, nothing)
 
 function Base.summary(forcing::SubsidenceForcing)
     wˢ = forcing.subsidence_vertical_velocity
@@ -77,10 +78,9 @@ function Base.show(io::IO, forcing::SubsidenceForcing)
 end
 
 #####
-##### Materialized subsidence forcing
+##### Kernel: returns the specific subsidence tendency (the ρ-multiply happens in SpecificForcing)
 #####
 
-# Kernel function for subsidence forcing
 @inline w_dz_ϕᵃᵃᶠ(i, j, k, grid, w, ϕ) = @inbounds w[1, 1, k] * ∂zᶜᶜᶠ(1, 1, k, grid, ϕ)
 
 @inline function ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
@@ -92,32 +92,27 @@ end
     return ifelse(top, w_dz_ϕᵏ, ifelse(bottom, w_dz_ϕ⁺, ℑz_w_dz_ϕ))
 end
 
- function (forcing::SubsidenceForcing)(i, j, k, grid, clock, fields)
+@inline function (forcing::SubsidenceForcing)(i, j, k, grid, clock, fields)
     wˢ = forcing.subsidence_vertical_velocity
     ϕ_avg = forcing.averaged_field
-    ρ = @inbounds forcing.density[1, 1, k]
     w_dz_ϕ_avg = ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
-    return - ρ * w_dz_ϕ_avg
+    return - w_dz_ϕ_avg
 end
 
 #####
-##### Materialization function for subsidence forcing
+##### Materialization: build the horizontal average of the specific field
 #####
 
-# This is called from AtmosphereModels.atmosphere_model_forcing
-# The `averaged_field` is determined by the field name (e.g., :ρu → u, :ρθ → θ)
-# and passed in from atmosphere_model_forcing
+function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing,
+                                                               field, name, model_field_names,
+                                                               context::NamedTuple)
+    if startswith(string(name), "ρ")
+        msg = string("SubsidenceForcing now returns a specific tendency F_ϕ = -wˢ ∂_z ϕ̄ and ",
+                     "must be supplied under the specific prognostic name (e.g. `θ` instead of `ρθ`). ",
+                     "Breeze applies the density factor ρ automatically via SpecificForcing.")
+        throw(ArgumentError(msg))
+    end
 
-# Strip the ρ prefix from density variable names
-# e.g., :ρu → :u, :ρθ → :θ, :ρe → :e
-function strip_density_prefix(name::Symbol)
-    chars = string(name) |> collect
-    popfirst!(chars)
-    return Symbol(chars...)
-end
-
-function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name,
-                                                               model_field_names, context::NamedTuple)
     grid = field.grid
 
     if forcing.subsidence_vertical_velocity isa AbstractField
@@ -128,18 +123,11 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
         fill_halo_regions!(wˢ)
     end
 
-    if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe, :ρqᵗ, :ρqᵛ, :ρqᵉ)
-        specific_name = strip_density_prefix(name)
-        specific_field = context.specific_fields[specific_name]
-    else
-        # Note that tracers are converted from density to specific within
-        # update_state!, before `compute_forcing!` is called.
-        specific_field = field
-    end
-
+    # `name` is the specific prognostic name (e.g. :θ); look up the matching field directly.
+    specific_field = haskey(context.specific_fields, name) ? context.specific_fields[name] : field
     averaged_field = Average(specific_field, dims=(1, 2)) |> Field
-    ρ = context.density
-    return SubsidenceForcing(wˢ, ρ, averaged_field)
+
+    return SubsidenceForcing(wˢ, averaged_field)
 end
 
 #####
