@@ -25,7 +25,7 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Oceananigans: Oceananigans
 
-using Breeze.Solvers: NewtonSolver, SecantSolver, newton_solve, secant_solve
+using Breeze.Solvers: NewtonSolver, SecantSolver, FixedIterations, secant_solve
 
 include("thermodynamics_constants.jl")
 include("vapor_saturation.jl")

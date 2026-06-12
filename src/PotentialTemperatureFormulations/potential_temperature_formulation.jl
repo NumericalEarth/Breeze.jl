@@ -22,10 +22,10 @@ relation `T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ`. The inversion is controlled
   [`default_temperature_solver(dynamics)`](@ref Breeze.AtmosphereModels.default_temperature_solver) —
   `nothing` for anelastic dynamics (closed-form inversion) and `NewtonSolver()` for
   compressible dynamics.
-* [`NewtonSolver`](@ref): tolerance-based Newton iteration.
-* [`FixedIterations`](@ref): a fixed number of Newton steps with no convergence test,
-  which unrolls to straight-line code (required for Reactant tracing and cheap
-  reverse-mode differentiation).
+* [`NewtonSolver`](@ref Breeze.Solvers.NewtonSolver): tolerance-based Newton iteration.
+* [`FixedIterations`](@ref Breeze.Solvers.FixedIterations): a fixed number of Newton steps
+  with no convergence test, which unrolls to straight-line code (required for Reactant
+  tracing and cheap reverse-mode differentiation).
 * `nothing`: the non-iterated closed-form inversion.
 """
 struct LiquidIcePotentialTemperatureFormulation{F, T, S}

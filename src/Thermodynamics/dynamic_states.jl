@@ -209,12 +209,34 @@ end
 
     T₁ = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L     # dry closed form + latent shift (the non-iterated guess)
 
-    @inline function residual_and_derivative(T)
-        Φ = (ρ * Rᵐ * T / pˢᵗ)^κ * θ           # = T − L at the root
-        return (T - Φ - L, 1 - κ * Φ / T)
-    end
+    return solve_temperature(𝒰.temperature_solver, T₁, θ, ρ, Rᵐ, pˢᵗ, κ, L)
+end
 
-    return newton_solve(residual_and_derivative, 𝒰.temperature_solver, T₁)
+# The Newton iteration below is written with the loop body inline and plain scalar
+# arguments — NOT through `Solvers.newton_solve` with a residual closure — because the
+# Reactant GPU kernel-raising pipeline fails on the closure form ("failed to run pass
+# manager on module") when Enzyme reverse-differentiates the compressible time step
+# (NumericalEarth/Breeze.jl#780). The solver abstraction is preserved through dispatch.
+@inline solve_temperature(::Nothing, T, θ, ρ, Rᵐ, pˢᵗ, κ, L) = T
+
+@inline function solve_temperature(solver::NewtonSolver, T, θ, ρ, Rᵐ, pˢᵗ, κ, L)
+    ΔT = T                                     # guarantees the convergence test fails before the first step
+    iter = 0
+    while abs(ΔT) > max(solver.abstol, solver.reltol * T) && iter < solver.maxiter
+        Φ  = (ρ * Rᵐ * T / pˢᵗ)^κ * θ          # = T − L at the root
+        ΔT = -(T - Φ - L) / (1 - κ * Φ / T)
+        T += ΔT
+        iter += 1
+    end
+    return T
+end
+
+@inline function solve_temperature(solver::FixedIterations, T, θ, ρ, Rᵐ, pˢᵗ, κ, L)
+    for _ in 1:solver.iterations               # fixed trip count → unrolls (Reactant/Enzyme-safe)
+        Φ = (ρ * Rᵐ * T / pˢᵗ)^κ * θ
+        T += -(T - Φ - L) / (1 - κ * Φ / T)
+    end
+    return T
 end
 
 # Exner function at the diagnosed (actual) pressure p = ρRᵐT: Π = (p/pˢᵗ)^κ.
