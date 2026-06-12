@@ -212,11 +212,12 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    # Call the microphysics update hook once per outer time step on the post-RK state.
-    # Some schemes use this for a full-Δt process update; for others it is a no-op.
+    update_state!(model, callbacks; compute_tendencies = true)
+
+    # Apply the operator-split microphysics update exactly once per step, on the post-RK
+    # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
 
-    update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₃ * Δt)
 
     return nothing
