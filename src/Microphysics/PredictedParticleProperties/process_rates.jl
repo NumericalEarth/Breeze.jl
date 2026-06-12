@@ -395,7 +395,7 @@ end
     qwgrth = ifelse(has_hydrometeors, qwgrth_raw, zero(FT))
 
     total_collection = cloud_rim + rain_rim
-    is_wet_growth = total_collection > qwgrth + FT(1e-10)
+    is_wet_growth = has_hydrometeors & (total_collection > qwgrth + FT(1e-10))
 
     wg_cloud = ifelse(is_wet_growth, cloud_rim, zero(FT))
     wg_rain  = ifelse(is_wet_growth, rain_rim, zero(FT))
