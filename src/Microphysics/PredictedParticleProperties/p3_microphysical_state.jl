@@ -655,12 +655,16 @@ end
     FT = typeof(ρ)
     qⁱ_raw = total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ)
     has_ice_mass = qⁱ_raw > FT(1e-20)
-    nⁱ_raw = min(ℳ.nⁱ, p3.process_rates.maximum_ice_number_density / ρ)
-    nⁱ = ifelse(has_ice_mass, nⁱ_raw, FT(0))
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
     qⁱ_total = max(qⁱ_raw, FT(1e-20))
     Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, ℳ.qʷⁱ)
+    nⁱ_global = min(ℳ.nⁱ, p3.process_rates.maximum_ice_number_density / ρ)
+    μ_for_limiter = compute_ice_shape_parameter(p3, qⁱ_total, nⁱ_global, ℳ.zⁱ,
+                                                rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
+    nⁱ_bounded = bounded_ice_number(p3, qⁱ_total, nⁱ_global, rime_state.Fᶠ, Fˡ,
+                                    rime_state.ρᶠ, μ_for_limiter)
+    nⁱ = ifelse(has_ice_mass, nⁱ_bounded, FT(0))
     μ_ice = compute_ice_shape_parameter(p3, qⁱ_total, nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
     zⁱ_bounded = bound_ice_sixth_moment(p3, qⁱ_total, nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ, μ_ice)
     T = temperature(𝒰, constants)

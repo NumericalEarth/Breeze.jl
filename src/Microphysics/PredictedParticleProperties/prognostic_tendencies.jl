@@ -224,6 +224,7 @@ Ice number loses from:
 - Melting (Phase 1)
 - Aggregation (Phase 2)
 - Global number limiter (C3, impose_max_Ni)
+- Ice λ-limiter correction (Fortran f1pr09/f1pr10 write-back)
 """
 @inline function tendency_ρnⁱ(rates::P3ProcessRates, ρ)
     # Gains from nucleation, freezing, splintering, homogeneous freezing
@@ -234,7 +235,7 @@ Ice number loses from:
     # sublimation_number — ice number loss from sublimation (Fortran nisub)
     # ni_limit: C3 global Nᵢ cap (impose_max_Ni); relaxation sink above N_max/ρ.
     loss = rates.melting_number + rates.sublimation_number + rates.aggregation + rates.ni_limit
-    return ρ * (gain - loss)
+    return ρ * (gain - loss + rates.ice_number_correction)
 end
 
 """

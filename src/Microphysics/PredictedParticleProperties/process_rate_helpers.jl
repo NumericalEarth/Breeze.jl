@@ -251,6 +251,27 @@ end
                        FT(1e-20))
 end
 
+@inline function bounded_ice_number(table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+    FT = typeof(qⁱ_total + nⁱ)
+    qⁱ_eff = clamp_positive(qⁱ_total)
+    nⁱ_eff = clamp_positive(nⁱ)
+    log_m = log10(safe_divide(max(qⁱ_eff, FT(1e-20)),
+                              max(nⁱ_eff, FT(1e-16)),
+                              FT(1e-20)))
+    limiter = table.lambda_limiter
+    nⁱ_min = limiter.large_q(log_m, Fᶠ, Fˡ, ρᶠ, μ) * qⁱ_eff
+    nⁱ_max = limiter.small_q(log_m, Fᶠ, Fˡ, ρᶠ, μ) * qⁱ_eff
+    bounded = clamp(nⁱ_eff, nⁱ_min, nⁱ_max)
+    return ifelse(qⁱ_eff > FT(1e-20), bounded, zero(FT))
+end
+
+@inline bounded_ice_number(::Nothing, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ) =
+    ifelse(qⁱ_total > zero(qⁱ_total), clamp_positive(nⁱ), zero(nⁱ))
+
+@inline function bounded_ice_number(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+    return bounded_ice_number(ice_integrals_table(p3), qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+end
+
 @inline function rain_slope_parameter(qʳ, nʳ, prp)
     FT = typeof(qʳ + nʳ)
     qʳ_eff = clamp_positive(qʳ)

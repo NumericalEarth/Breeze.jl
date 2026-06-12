@@ -603,6 +603,41 @@ end
         @test raw_rate ≈ bounded_rate
     end
 
+    @testset "ice lambda limiter recomputes number" begin
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
+        ρ = FT(0.8)
+        q = MoistureMassFractions(FT(1e-3))
+        𝒰 = LiquidIcePotentialTemperatureState(FT(265), q, FT(1e5), FT(8e4))
+        qⁱ = FT(1e-4)
+        nⁱ = FT(1e-2)
+        ℳ = P3MicrophysicalState(FT(0), FT(0), FT(0), FT(0),
+                                  qⁱ, nⁱ, FT(0), FT(0),
+                                  FT(0), FT(0), FT(0))
+
+        rime_state = PPP.consistent_rime_state(p3, qⁱ, FT(0), FT(0), FT(0))
+        Fˡ = PPP.liquid_fraction_on_ice(qⁱ, FT(0))
+        μ_for_limiter = PPP.compute_ice_shape_parameter(p3, qⁱ, nⁱ, FT(0),
+                                                        rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
+        log_m = log10(qⁱ / nⁱ)
+        limiter = PPP.ice_integrals_table(p3).lambda_limiter
+        lower_nⁱ = limiter.large_q(log_m, rime_state.Fᶠ, Fˡ,
+                                   rime_state.ρᶠ, μ_for_limiter) * qⁱ
+        upper_nⁱ = limiter.small_q(log_m, rime_state.Fᶠ, Fˡ,
+                                   rime_state.ρᶠ, μ_for_limiter) * qⁱ
+        expected_nⁱ = clamp(nⁱ, lower_nⁱ, upper_nⁱ)
+        props = PPP.p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+
+        @test expected_nⁱ > nⁱ
+        @test props.nⁱ ≈ expected_nⁱ
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, props)
+        τ = p3.process_rates.sink_limiting_timescale
+        @test rates.ice_number_correction ≈ (expected_nⁱ - nⁱ) / τ
+        @test tendency_ρnⁱ(rates, ρ) >= ρ * rates.ice_number_correction
+    end
+
     @testset "Tendency functions - smoke tests" begin
         FT = Float64
         ρ = FT(1.0)    # Air density [kg/m³]
@@ -677,6 +712,7 @@ end
             FT(0.0),    # wet_growth_densification_volume (H9)
             FT(0.0),    # cloud_number_correction (M6)
             FT(0.0),    # rain_number_correction (M6)
+            FT(0.0),    # ice_number_correction (M4)
             FT(0.0),    # predicted_ssat_adjustment
             FT(0.0),    # predicted_ssat_tendency
         )
@@ -736,7 +772,7 @@ end
             FT(0.0), FT(0.0),                                         # D8 wet growth shedding
             FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),              # M9 stubs (ccn_act_mass, ccn_act_number, rain_cond, coat_cond, coat_evap)
             FT(0.0), FT(0.0),                                         # H9 wet growth densification
-            FT(0.0), FT(0.0),                                         # M6 DSD number corrections
+            FT(0.0), FT(0.0), FT(0.0),                                # M6/M4 DSD number corrections
             FT(0.0), FT(0.0),                                         # predicted supersaturation adjustment and tendency
         )
 
@@ -779,7 +815,7 @@ end
             FT(1e-10), FT(1.0),
             FT(2e-9), FT(20.0), FT(4e-9), FT(40.0),
             FT(0.0), FT(0.0), FT(0.0), FT(0.0),
-            FT(0.0), FT(0.0),
+            FT(0.0), FT(0.0), FT(0.0),
             FT(0.0), FT(0.0),
             FT(0.0), FT(0.0), FT(0.0), FT(0.0), FT(0.0),
             FT(0.0), FT(0.0),

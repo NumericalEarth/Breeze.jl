@@ -639,6 +639,7 @@ using Oceananigans.Fields: interior
             FT(0.0),    # wet_growth_densification_volume (H9)
             FT(0.0),    # cloud_number_correction (M6)
             FT(0.0),    # rain_number_correction (M6)
+            FT(0.0),    # ice_number_correction (M4)
             FT(0.0),    # predicted_ssat_adjustment
             FT(0.0),    # predicted_ssat_tendency
         )

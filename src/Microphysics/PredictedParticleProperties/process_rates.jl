@@ -245,6 +245,7 @@ struct P3ProcessRates{FT}
     # the correction as a relaxation rate over dt_safety.
     cloud_number_correction :: FT  # (nᶜˡ_bounded - nᶜˡ) / τ [1/kg/s]
     rain_number_correction :: FT   # (nʳ_bounded - nʳ) / τ [1/kg/s]
+    ice_number_correction :: FT    # (nⁱ_lambda_bounded - nⁱ_global_bounded) / τ [1/kg/s]
 
     # G&M (2008) bounded supersaturation adjustment, also folded into
     # `condensation` so vapor and cloud tendencies include it automatically.
@@ -522,10 +523,10 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     qʳ = ℳ.qʳ
     nʳ = ℳ.nʳ
     qⁱ = ℳ.qⁱ
-    nⁱ = ℳ.nⁱ
+    nⁱ_raw = ℳ.nⁱ
     qʷⁱ = ℳ.qʷⁱ
 
-    nⁱ = min(nⁱ, prp.maximum_ice_number_density / ρ)
+    nⁱ_global = min(nⁱ_raw, prp.maximum_ice_number_density / ρ)
 
     rain_active = (qʳ > FT(1e-14)) & (nʳ > FT(1e-16))
     qʳ_pos = clamp_positive(qʳ)
@@ -542,14 +543,18 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         props.qᶠ, props.bᶠ, props.Fᶠ, props.ρᶠ
     end
 
-    qⁱ_total_mu = isnothing(props) ?
-                  max(clamp_positive(qⁱ) + clamp_positive(qʷⁱ), FT(1e-20)) :
-                  props.qⁱ_total
-    Fˡ_mu = isnothing(props) ? (clamp_positive(qʷⁱ) / qⁱ_total_mu) : props.Fˡ
-    # μ_ice is still recomputed here because props.μ_ice uses props.nⁱ which is
-    # zeroed in the no-ice case, whereas the local nⁱ above is just clamp-capped.
-    # The two values agree in cells with ice (the cells that matter for rates).
-    μ_ice = compute_ice_shape_parameter(p3, qⁱ_total_mu, nⁱ, ℳ.zⁱ, Fᶠ, Fˡ_mu, ρᶠ)
+    if isnothing(props)
+        qⁱ_total_mu = max(clamp_positive(qⁱ) + clamp_positive(qʷⁱ), FT(1e-20))
+        Fˡ_mu = clamp_positive(qʷⁱ) / qⁱ_total_mu
+        μ_for_limiter = compute_ice_shape_parameter(p3, qⁱ_total_mu, nⁱ_global, ℳ.zⁱ, Fᶠ, Fˡ_mu, ρᶠ)
+        nⁱ = bounded_ice_number(p3, qⁱ_total_mu, nⁱ_global, Fᶠ, Fˡ_mu, ρᶠ, μ_for_limiter)
+        μ_ice = compute_ice_shape_parameter(p3, qⁱ_total_mu, nⁱ, ℳ.zⁱ, Fᶠ, Fˡ_mu, ρᶠ)
+    else
+        qⁱ_total_mu = props.qⁱ_total
+        Fˡ_mu = props.Fˡ
+        nⁱ = props.nⁱ
+        μ_ice = props.μ_ice
+    end
 
     T = temperature(𝒰, constants)
     q_base = 𝒰.moisture_mass_fractions
@@ -761,6 +766,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # DSD number correction feedback
     ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
     nr_correction = (nʳ - ℳ.nʳ) / dt_safety
+    ni_correction = (nⁱ - nⁱ_global) / dt_safety
 
     # Fortran's `microphy_p3.f90:5053-5063` recomputes ssat = qv - qvs(T)
     # at the end of the substep. Breeze must diagnose that final T from the
@@ -802,7 +808,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         ccn_act, ccn_act_n, rain_cond,
         coat_cond, coat_evap,
         wg_densif_mass, wg_densif_vol,
-        ncl_correction, nr_correction,
+        ncl_correction, nr_correction, ni_correction,
         cond_GM, ssat_tendency,
     )
 end
