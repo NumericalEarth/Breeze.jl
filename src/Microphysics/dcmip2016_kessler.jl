@@ -22,6 +22,7 @@ using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: architecture
 using Oceananigans.Fields: interpolate
 using Oceananigans.Grids: Center, znode
+using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 
 using Adapt: Adapt, adapt
@@ -265,12 +266,6 @@ The Kessler scheme performs its own saturation adjustment internally via the ker
 """
 @inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, qᵛ, constants) = 𝒰
 
-# The Kessler scheme applies its full-Δt processes by writing prognostic fields
-# directly in `microphysics_model_update!` (interior only), so refill halos and
-# recompute diagnostics afterwards before `update_state!` computes tendencies.
-AtmosphereModels.finalize_microphysics_model_update!(::DCMIP2016KM, model) =
-    AtmosphereModels.recompute_auxiliary_state!(model)
-
 AtmosphereModels.moisture_prognostic_name(::DCMIP2016KM) = :ρqᵛ
 
 # DCMIP2016 Kessler stores vapor as prognostic; subtract all condensate from total.
@@ -427,6 +422,9 @@ This function launches a kernel that processes each column independently, with r
 
 The kernel handles conversion between mass fractions and mixing ratios
 internally for efficiency. Water vapor is diagnosed from ``q^v = q^t - q^{cl} - q^r``.
+
+The kernel writes prognostic fields in the interior only, so `update_state!` is called
+afterwards to restore a consistent model state (halos, diagnostics, and tendencies).
 """
 function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model)
     grid = model.grid
@@ -460,6 +458,10 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     launch!(arch, grid, :xy, _microphysical_update!,
             microphysics, grid, Nz, Δt, ρ, p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+
+    # The kernel mutated prognostic fields in the interior; refill halos and recompute
+    # diagnostics and tendencies so the post-update state is consistent for the next step.
+    update_state!(model)
 
     return nothing
 end

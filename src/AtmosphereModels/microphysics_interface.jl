@@ -622,28 +622,17 @@ For example, the terminal velocity of falling rain.
 """
 $(TYPEDSIGNATURES)
 
-Apply microphysics model update for the given `microphysics` scheme.
+Apply the operator-split microphysics update for the given `microphysics` scheme.
 
-This function is called during `update_state!` to apply microphysics processes
-that operate on the full model state (not the tendency fields).
-Specific microphysics schemes should extend this function.
+This is called once per time step by the time-stepper (not from `update_state!`) to
+apply microphysics processes that operate on the full model state by the full `Δt`,
+rather than through the per-stage tendency interface. It runs after the time-stepper's
+`update_state!` has refreshed the diagnostic state it reads. Schemes that mutate
+prognostic fields here are responsible for restoring a consistent model state (halos,
+diagnostics, and tendencies) before returning — e.g. by calling `update_state!`.
+Defaults to a no-op; specific microphysics schemes extend this function.
 """
 microphysics_model_update!(microphysics::Nothing, model) = nothing
-
-"""
-$(TYPEDSIGNATURES)
-
-Finalize the model state after [`microphysics_model_update!`](@ref), so that the
-tendencies computed afterwards see the post-update state. Defaults to a no-op.
-
-Schemes that mutate prognostic fields in `microphysics_model_update!` (e.g.
-`DCMIP2016KesslerMicrophysics`) extend this — typically to
-[`recompute_auxiliary_state!`](@ref) — to refill halos and recompute diagnostic
-variables. Schemes that work through the tendency interface leave the update a
-no-op and need no finalization. Dispatching on `microphysics` keeps `update_state!`
-branch-free (autodiff friendly).
-"""
-finalize_microphysics_model_update!(microphysics, model) = nothing
 
 """
 $(TYPEDSIGNATURES)
