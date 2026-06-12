@@ -1793,6 +1793,79 @@ end
         @test capacity ≈ expected rtol=1e-6
     end
 
+    @testset "wet growth preserves collection number sinks" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+
+        ρ = FT(1.0)
+        P = FT(85000.0)
+        T = p3.process_rates.freezing_temperature - FT(1e-3)
+        qᵛ = FT(0.02)
+        qᶜˡ = FT(1e-3)
+        qʳ = FT(1e-3)
+        qⁱ = FT(1e-4)
+        nⁱ = FT(1e3)
+        nʳ = FT(1e4)
+        qᶠ = FT(1e-5)
+        bᶠ = qᶠ / FT(400)
+        Fᶠ = FT(0.1)
+        ρᶠ = FT(400)
+        μ_ice = FT(0)
+
+        cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, FT(300e6), ρ)
+        q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qⁱ)
+        transport = air_transport_properties(T, P)
+        state = PPP.P3DerivedState{FT, typeof(q)}(
+            nⁱ,
+            nʳ,
+            qᶠ,
+            bᶠ,
+            Fᶠ,
+            ρᶠ,
+            μ_ice,
+            FT(0),
+            cloud.Nᶜ,
+            cloud.nᶜˡ,
+            cloud.μ_c,
+            cloud.λ_c,
+            T,
+            P,
+            qᵛ,
+            qᵛ,
+            qᵛ,
+            q,
+            transport.D_v,
+            transport.K_a,
+            transport.nu,
+            mixture_heat_capacity(q, constants),
+        )
+        ℳ = P3MicrophysicalState(
+            qᶜˡ,
+            cloud.nᶜˡ,
+            qʳ,
+            nʳ,
+            qⁱ,
+            nⁱ,
+            qᶠ,
+            bᶠ,
+            FT(1e-10),
+            FT(0),
+            FT(0),
+        )
+        phase1 = PPP.P3Phase1Rates{FT}(ntuple(_ -> zero(FT), fieldcount(PPP.P3Phase1Rates{FT}))...)
+
+        rates = PPP._p3_phase2_rates(p3, ρ, ℳ, constants, state, phase1)
+
+        @test rates.cloud_riming == 0
+        @test rates.rain_riming == 0
+        @test rates.wet_growth_cloud > 0
+        @test rates.wet_growth_rain > 0
+        @test rates.cloud_riming_number > 0
+        @test rates.rain_riming_number > 0
+    end
+
     @testset "refreezing_rate keeps sensible term outside 2π/Lf" begin
         PPP = Breeze.Microphysics.PredictedParticleProperties
         p3 = PredictedParticlePropertiesMicrophysics()

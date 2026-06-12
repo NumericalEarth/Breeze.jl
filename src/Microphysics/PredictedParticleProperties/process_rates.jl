@@ -400,9 +400,7 @@ end
     wg_cloud = ifelse(is_wet_growth, cloud_rim, zero(FT))
     wg_rain  = ifelse(is_wet_growth, rain_rim, zero(FT))
     cloud_rim   = ifelse(is_wet_growth, zero(FT), cloud_rim)
-    cloud_rim_n = ifelse(is_wet_growth, zero(FT), cloud_rim_n)
     rain_rim    = ifelse(is_wet_growth, zero(FT), rain_rim)
-    rain_rim_n  = ifelse(is_wet_growth, zero(FT), rain_rim_n)
 
     # Wet growth shedding
     shed_active = !prp.liquid_fraction_active & is_wet_growth
