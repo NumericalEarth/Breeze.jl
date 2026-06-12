@@ -451,7 +451,7 @@ double-count of autoconversion-derived cloud-number loss when assembled with
 `-ncautc` in the final tendency. Here we return only the genuine self-collection
 magnitude; the autoconversion-derived loss is handled separately by
 [`cloud_number_loss_from_autoconversion`](@ref). The asymmetry with
-[`rain_self_collection_rate`](@ref) — which uses [`bounded_rain_number`](@ref) —
+[`rain_self_collection_rate`](@ref) — which uses `bounded_rain_number` —
 is intentional: there is no analogous DSD-shape bound for the cloud branch in
 Fortran's `ncslf` formula.
 """
