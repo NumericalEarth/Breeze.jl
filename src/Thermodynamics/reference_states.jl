@@ -122,6 +122,44 @@ the density of dry air at the reference pressure and temperature.
     return ρ₀ * (pᵣ / p₀)^(1 - Rᵈ / cᵖᵈ)
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the density that keeps pressure unchanged when applying a potential-temperature
+perturbation at fixed composition.
+
+`pressure_balanced_density(ρ_background, θ_background, θ_initial)` applies the dry-air /
+vapor-only relation, for which holding ``ρ θ`` fixed avoids seeding an acoustic pressure
+perturbation.
+
+For fixed-composition states with nonzero liquid or ice condensate, use
+`pressure_balanced_density(ρ_background, θ_background, θ_initial, q, pᵣ, pˢᵗ, constants)`
+instead. The condensate-aware method evaluates the full liquid-ice potential-temperature
+equation of state before balancing density.
+
+# Examples
+```jldoctest
+using Breeze.Thermodynamics: pressure_balanced_density
+
+ρ_background = 1.0
+θ_background = 300.0
+θ_initial = 303.0
+pressure_balanced_density(ρ_background, θ_background, θ_initial)
+
+# output
+0.9900990099009901
+```
+"""
+@inline pressure_balanced_density(ρ_background, θ_background, θ_initial) =
+    ρ_background * θ_background / θ_initial
+
+@inline function pressure_balanced_density(ρ_background, θ_background, θ_initial,
+                                          q::MoistureMassFractions, pᵣ, pˢᵗ, constants)
+    T_background = temperature(LiquidIcePotentialTemperatureState(θ_background, q, pˢᵗ, pᵣ), constants)
+    T_initial = temperature(LiquidIcePotentialTemperatureState(θ_initial, q, pˢᵗ, pᵣ), constants)
+    return ρ_background * T_background / T_initial
+end
+
 #####
 ##### Hydrostatic reference profiles from temperature and moisture
 #####
@@ -206,6 +244,36 @@ end
 ##### Constructor
 #####
 
+# Dry hydrostatic balance is linear in the Exner function Π = (p / pˢᵗ)^κ,
+# so integrating Π(z) directly avoids repeatedly evaluating the nonlinear EOS.
+function converged_hydrostatic_integral(z, Π₀, dΠdz;
+                                        tolerance = sqrt(eps(float(typeof(Π₀)))),
+                                        initial_steps = 16,
+                                        max_steps = 1 << 16)
+    z == 0 && return Π₀
+
+    integrate(nsteps) = begin
+        dz = z / nsteps
+        Π = Π₀
+        for i in 1:nsteps
+            zᵢ = (i - 0.5) * dz
+            Π += dΠdz(zᵢ) * dz
+        end
+        return Π
+    end
+
+    nsteps = initial_steps
+    Π_coarse = integrate(nsteps)
+    while nsteps < max_steps
+        nsteps *= 2
+        Π_fine = integrate(nsteps)
+        abs(Π_fine - Π_coarse) ≤ tolerance * abs(Π_fine) && return Π_fine
+        Π_coarse = Π_fine
+    end
+
+    return Π_coarse
+end
+
 """
     numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants)
 
@@ -213,26 +281,19 @@ Compute the dry hydrostatic pressure at height ``z`` by numerically integrating
 ``∂p/∂z = -g ρ`` from ``z=0``, where ``ρ = p/(Rᵈ T)`` and ``T = θ(z) (p/pˢᵗ)^κ``.
 
 This function handles non-uniform potential temperature profiles ``θ(z)`` for which
-the closed-form adiabatic solution does not apply.
-Uses 1000 midpoint integration steps.
+the closed-form adiabatic solution does not apply. The integration is carried out in
+the dry Exner function ``Π = (p / pˢᵗ)^κ``, which satisfies the linear equation
+``∂Π/∂z = -g / (cᵖᵈ θ(z))``.
 """
 function numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants)
-    z == 0 && return p₀
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     κ = Rᵈ / cᵖᵈ
     g = constants.gravitational_acceleration
-    nsteps = 1000
-    dz = z / nsteps
-    p = p₀
-    for i in 1:nsteps
-        zᵢ = (i - 0.5) * dz
-        θᵢ = θ_func(zᵢ)
-        Tᵢ = θᵢ * (p / pˢᵗ)^κ
-        ρᵢ = p / (Rᵈ * Tᵢ)
-        p = p - g * ρᵢ * dz
-    end
-    return p
+    Π₀ = (p₀ / pˢᵗ)^κ
+    @inline dΠdz(zᵢ) = -g / (cᵖᵈ * θ_func(zᵢ))
+    Π = converged_hydrostatic_integral(z, Π₀, dΠdz)
+    return pˢᵗ * Π^(1 / κ)
 end
 
 """
@@ -281,9 +342,21 @@ function hydrostatic_temperature(z, p₀, θᵣ::Function, pˢᵗ, constants)
     return θᵣ(z) * (p / pˢᵗ)^κ
 end
 
-# Surface value at z = 0 for a `Number | f(z)` reference profile.
+# Evaluate a profile (Number or Function) at a given height.
+# Used both here and in terrain_compressible_physics.jl for reference state construction.
+"""
+    evaluate_profile(profile, z)
+
+Evaluate a vertical profile at height `z`. If `profile` is a `Number`, returns it unchanged.
+If `profile` is a `Function`, calls `profile(z)`.
+"""
+@inline evaluate_profile(value::Number, z) = value
+@inline evaluate_profile(f::Function, z) = f(z)
+
+# Surface value for a reference profile: a `Number`, a column profile `f(z)`, or a
+# horizontally varying profile `f(x, y, z)` (the 3D reference path) evaluated at the origin.
 @inline surface_value(θ::Number) = θ
-@inline surface_value(θ::Function) = θ(0)
+surface_value(f::Function) = _nargs(f) == 1 ? f(0) : f(0, 0, 0)
 
 """
 $(TYPEDSIGNATURES)
@@ -491,73 +564,104 @@ Base.show(io::IO, ref::ExnerReferenceState) = print(io, summary(ref))
     end
 end
 
-@kernel function _compute_exner_reference!(π₀, pᵣ, ρᵣ, θ₀, grid, Nz, π₀_surface, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
-    _ = @index(Global)
+# Level-local moist EOS constants from a vapor mass fraction: the mixture gas
+# constant Rᵐ = (1-qᵛ) Rᵈ + qᵛ Rᵛ, isobaric heat capacity cᵖᵐ = (1-qᵛ) cᵖᵈ + qᵛ cᵖᵛ,
+# and κᵐ = Rᵐ/cᵖᵐ. The dry case is recovered exactly when qᵛ ≡ 0. Operates on plain
+# scalars (not a `MoistureMassFractions`) so it can be called from GPU kernels that
+# receive the bare constants rather than a `ThermodynamicConstants` object.
+@inline function moist_reference_constants(qᵛ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    qᵈ = 1 - qᵛ
+    Rᵐ = qᵈ * Rᵈ + qᵛ * Rᵛ
+    cᵖᵐ = qᵈ * cᵖᵈ + qᵛ * cᵖᵛ
+    return Rᵐ, cᵖᵐ, Rᵐ / cᵖᵐ
+end
 
-    # Discrete-balance reference for prescribed θ̄(z). Enforces
-    #   (p[k] − p[k − 1]) / Δz_face[k] + g · (ρ[k] + ρ[k − 1]) / 2 = 0
-    # at every interior face k = 2..Nz, with ρ[k] = p[k] / (Rᵈ T[k]) and
-    # T[k] = θ̄[k] · Π[k] = θ̄[k] · (p[k]/pˢᵗ)^κ. Substituting gives a
-    # nonlinear equation in p[k] solved by Newton iteration.
-    #
-    # The previous implementation (MPAS-style up-then-down Π integration
-    # using `ΔΠ = -g Δz_face / (cᵖᵈ θ_face)`) satisfies the *continuous*
-    # hydrostatic equation but not the substepper's discrete operator,
-    # leaving a residual ~1e-3 N/m³ that seeds an acoustic instability
-    # at production Δt.
+# Newton solve of the discrete hydrostatic balance for the pressure pₖ at one face,
+# given the level below (p⁻, ρ⁻) and the level-local moist constants. The residual
+#   F(p) = p / Δz + Aₖ p^(1−κₖ) − Cₖ,   Aₖ = g pˢᵗ^κₖ / (2 Rᵐₖ θₖ),  Cₖ = p⁻/Δz − g ρ⁻/2
+# is monotone increasing in p, so Newton converges in O(few) iterations from the
+# continuous-Π initial guess pₖ. Shared by the per-column Exner kernel and the terrain
+# reference-state solve; `iterations` is a fixed trip count so the loop unrolls on the GPU.
+@inline function newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, iterations)
+    Aₖ = g * pˢᵗ^κₖ / (2 * Rᵐₖ * θₖ)
+    Cₖ = p⁻ / Δz - g * ρ⁻ / 2
+    for _ in 1:iterations
+        ρp = pₖ^(-κₖ)
+        f  = pₖ / Δz + Aₖ * pₖ * ρp - Cₖ
+        f′ = 1 / Δz + Aₖ * (1 - κₖ) * ρp
+        pₖ = pₖ - f / f′
+    end
+    return pₖ
+end
 
+# Discrete-balance Exner integration for one column (i, j) of θ̄ and an
+# optional vapor profile qᵛ. Enforces
+#   (p[k] − p[k − 1]) / Δz_face[k] + g · (ρ[k] + ρ[k − 1]) / 2 = 0
+# at every interior face k = 2..Nz, with the level-local moist EOS
+# ρ[k] = p[k] / (Rᵐ[k] T[k]), T[k] = θ̄[k] · Π[k], Π[k] = (p/pˢᵗ)^κᵐ[k],
+# κᵐ = Rᵐ/cᵖᵐ, Rᵐ = (1-qᵛ) Rᵈ + qᵛ Rᵛ, cᵖᵐ = (1-qᵛ) cᵖᵈ + qᵛ cᵖᵛ. The dry
+# case is recovered exactly when qᵛ ≡ 0.
+#
+# The previous MPAS-style up-then-down Π integration satisfies the
+# *continuous* hydrostatic equation but leaves a discrete-operator
+# residual ~1e-3 N/m³ that seeds an acoustic instability at production Δt.
+@inline function _compute_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
     # Anchor at first cell center via the continuous Π recurrence (one
-    # half-step from surface). Face k = 1 is the impenetrability
-    # boundary face — no discrete-balance constraint applies — so the
-    # anchor is free.
+    # half-step from surface). Face k = 1 is the impenetrability boundary
+    # face — no discrete-balance constraint applies — so the anchor is free.
     @inbounds begin
-        Δzᶜ₁ = Δzᶜᶜᶜ(1, 1, 1, grid)
-        Π¹ = π₀_surface - g * Δzᶜ₁ / (2 * cᵖᵈ * θ₀[1, 1, 1])
-        T¹ = θ₀[1, 1, 1] * Π¹
-        p¹ = pˢᵗ * Π¹^(1/κ)
-        ρ¹ = p¹ / (Rᵈ * T¹)
+        qᵛ¹ = qᵛ[i, j, 1]
+        Rᵐ¹, cᵖᵐ¹, κ¹ = moist_reference_constants(qᵛ¹, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+        π₀_surface = (p₀ / pˢᵗ)^κ¹
 
-        π₀[1, 1, 1] = Π¹
-        pᵣ[1, 1, 1] = p¹
-        ρᵣ[1, 1, 1] = ρ¹
+        Δzᶜ₁ = Δzᶜᶜᶜ(i, j, 1, grid)
+        θ¹ = θ₀[i, j, 1]
+        Π¹ = π₀_surface - g * Δzᶜ₁ / (2 * cᵖᵐ¹ * θ¹)
+        p¹ = pˢᵗ * Π¹^(1/κ¹)
+        ρ¹ = p¹ / (Rᵐ¹ * θ¹ * Π¹)
+
+        π₀[i, j, 1] = Π¹
+        pᵣ[i, j, 1] = p¹
+        ρᵣ[i, j, 1] = ρ¹
     end
     p⁻ = p¹
     ρ⁻ = ρ¹
 
     # Discrete-balance recurrence for k = 2..Nz. The residual
     #   F(p) = (p − p⁻) / Δz_face + g · (ρ(p) + ρ⁻) / 2
-    # with ρ(p) = p^(1−κ) · pˢᵗ^κ / (Rᵈ θ̄[k]) is monotone increasing
-    # in p, so Newton converges in O(few) iterations from the
-    # continuous-formula initial guess.
+    # with ρ(p) = p^(1−κᵏ) · pˢᵗ^κᵏ / (Rᵐᵏ θ̄[k]) is monotone increasing in
+    # p, so Newton converges in O(few) iterations from the continuous-Π guess.
     for k in 2:Nz
-        Δz_face = Δzᶜᶜᶠ(1, 1, k, grid)
-        @inbounds θᵏ = θ₀[1, 1, k]
+        Δz_face = Δzᶜᶜᶠ(i, j, k, grid)
+        @inbounds begin
+            θᵏ = θ₀[i, j, k]
+            θᵏ⁻ = θ₀[i, j, k - 1]
+            qᵛᵏ = qᵛ[i, j, k]
+        end
+        Rᵐᵏ, cᵖᵐᵏ, κᵏ = moist_reference_constants(qᵛᵏ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
 
         # Initial guess: continuous Π integration (one face step).
-        @inbounds θ_face = (θ₀[1, 1, k] + θ₀[1, 1, k - 1]) / 2
-        Πᵏ_init = π₀[1, 1, k - 1] - g * Δz_face / (cᵖᵈ * θ_face)
-        pᵏ = pˢᵗ * Πᵏ_init^(1/κ)
+        θ_face = (θᵏ + θᵏ⁻) / 2
+        Πᵏ_init = @inbounds(π₀[i, j, k - 1]) - g * Δz_face / (cᵖᵐᵏ * θ_face)
+        pᵏ = pˢᵗ * Πᵏ_init^(1/κᵏ)
 
-        Aᵏ = g * pˢᵗ^κ / (2 * Rᵈ * θᵏ)
-        Cᵏ = p⁻ / Δz_face - g * ρ⁻ / 2
-        # Newton iterations on F(p) = p / Δz_face + Aᵏ · p^(1−κ) − Cᵏ.
-        for _ in 1:5
-            ρp = pᵏ^(-κ)               # = p^(1-κ) / p
-            f  = pᵏ / Δz_face + Aᵏ * pᵏ * ρp - Cᵏ
-            f′ = 1 / Δz_face + Aᵏ * (1 - κ) * ρp
-            pᵏ = pᵏ - f / f′
-        end
-        Πᵏ = (pᵏ / pˢᵗ)^κ
-        Tᵏ = θᵏ * Πᵏ
-        ρᵏ = pᵏ / (Rᵈ * Tᵏ)
+        # Newton solve of the discrete-balance residual to machine precision.
+        pᵏ = newton_hydrostatic_pressure(p⁻, ρ⁻, θᵏ, Rᵐᵏ, κᵏ, Δz_face, pˢᵗ, g, pᵏ, 5)
+        Πᵏ = (pᵏ / pˢᵗ)^κᵏ
+        ρᵏ = pᵏ / (Rᵐᵏ * θᵏ * Πᵏ)
         @inbounds begin
-            π₀[1, 1, k] = Πᵏ
-            pᵣ[1, 1, k] = pᵏ
-            ρᵣ[1, 1, k] = ρᵏ
+            π₀[i, j, k] = Πᵏ
+            pᵣ[i, j, k] = pᵏ
+            ρᵣ[i, j, k] = ρᵏ
         end
         p⁻ = pᵏ
         ρ⁻ = ρᵏ
     end
+end
+
+@kernel function _compute_exner_reference!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    _ = @index(Global)
+    _compute_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, 1, 1, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
 end
 
 """
@@ -567,9 +671,15 @@ Construct an `ExnerReferenceState` by discrete Exner integration on `grid`.
 
 Two modes are supported, controlled by which keyword is provided:
 
-**Isentropic** (`potential_temperature`): Constant or z-dependent θ₀.
-The Exner function is built by MPAS-style up-then-down integration using
-``ΔΠ = -g Δz / (cᵖᵈ θ₀^{face})``. Density: ``ρ₀ = p₀ / (Rᵈ θ₀ Π₀)``.
+**Isentropic** (`potential_temperature`): Constant or horizontally-varying θ₀.
+Each column is built by Newton iteration on the discrete hydrostatic balance
+``(p_k - p_{k-1})/Δz_{face} + g(ρ_k + ρ_{k-1})/2 = 0`` so the substepper's
+slow vertical-momentum tendency vanishes to ulp on a rest atmosphere. The
+same column kernel handles both the 1D path (`θ₀` constant or z-dependent)
+and the 3D path (`θ₀(x, y, z)`); `vapor_mass_fraction` is supported in both.
+When provided, the level-local moist gas constants ``Rᵐ = (1-qᵛ)Rᵈ + qᵛRᵛ``,
+``cᵖᵐ = (1-qᵛ)cᵖᵈ + qᵛcᵖᵛ`` are used; the dry case is recovered exactly
+when ``qᵛ ≡ 0``.
 
 **Isothermal** (`reference_temperature`): Constant T₀ (MPAS baroclinic wave
 convention). Uses the analytic isothermal solution:
@@ -589,24 +699,33 @@ Keyword Arguments
 - `reference_temperature`: Constant T₀ for isothermal reference (default: `nothing`).
   When provided, overrides `potential_temperature`.
 - `standard_pressure`: pˢᵗ for potential temperature definition (default: 1e5 Pa)
+- `vapor_mass_fraction`: Optional vapor mass fraction for a moist reference state.
+  A number or function `qᵛ(z)` builds a 1D column; a multi-argument function
+  `qᵛ(x, y, z)` (or `qᵛ(φ, z)` on a `LatitudeLongitudeGrid`) builds a 3D field.
 """
 function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
                              surface_pressure = 101325,
                              potential_temperature = 288,
                              reference_temperature = nothing,
-                             standard_pressure = 1e5)
+                             standard_pressure = 1e5,
+                             vapor_mass_fraction = nothing)
 
     FT = eltype(grid)
     arch = architecture(grid)
     p₀ = convert(FT, surface_pressure)
     pˢᵗ = convert(FT, standard_pressure)
     Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
     κ = Rᵈ / cᵖᵈ
     g = constants.gravitational_acceleration
     Nz = size(grid, 3)
 
     if reference_temperature !== nothing
+        vapor_mass_fraction === nothing ||
+            throw(ArgumentError("`vapor_mass_fraction` is not supported with `reference_temperature`."))
+
         # ── Isothermal base state (MPAS baroclinic wave convention) ──
         # Analytic solution: p(z) = p₀ exp(-gz/(Rᵈ T₀)), Π = (p/pˢᵗ)^κ,
         # ρ = p/(Rᵈ T₀), θ = T₀/Π.  (MPAS init_atm_cases.F lines 813-817)
@@ -626,24 +745,58 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
                 πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, p₀, pˢᵗ, κ, Rᵈ, g, T₀)
     else
         # ── Isentropic base state (constant or z-dependent θ₀) ──
-        # Single-column reference, broadcast to all (i, j).
-        loc = (nothing, nothing, Center())
-        θᵣ = Field{Nothing, Nothing, Center}(grid)
-        set!(θᵣ, potential_temperature)
-        fill_halo_regions!(θᵣ)
+        # Detect whether θ₀ depends on horizontal coordinates (3D reference).
+        needs_3d = _needs_3d_reference(potential_temperature)
 
-        πᵣ = Field{Nothing, Nothing, Center}(grid)
-        π₀_surface = (p₀ / pˢᵗ)^κ
-        θ₀_surface = convert(FT, surface_value(potential_temperature))
-        ρ₀_surface = p₀ / (Rᵈ * θ₀_surface * π₀_surface)
+        if needs_3d
+            # 3D reference: per-column discrete-balance integration for
+            # horizontally varying θ₀(x, y, z). Same kernel as the 1D path,
+            # indexed by (i, j); dry case (qᵛ = ZeroField) and moist case
+            # share a single code path.
+            θᵣ = CenterField(grid)
+            set!(θᵣ, potential_temperature)
+            fill_halo_regions!(θᵣ)
 
-        p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
-        pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
-        ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀_surface))
-        ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+            πᵣ = CenterField(grid)
+            pᵣ = CenterField(grid)
+            ρᵣ = CenterField(grid)
 
-        launch!(arch, grid, tuple(1), _compute_exner_reference!,
-                πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, π₀_surface, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+            qᵛᵣ = vapor_mass_fraction === nothing ? ZeroField(FT) :
+                  let qf = CenterField(grid)
+                      set!(qf, vapor_mass_fraction)
+                      fill_halo_regions!(qf)
+                      qf
+                  end
+
+            launch!(arch, grid, :xy, _compute_exner_reference_3d!,
+                    πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+        else
+            # 1D reference: single column, broadcast to all (i,j). The unified
+            # kernel handles both dry (qᵛ = ZeroField) and moist cases via the
+            # moist gas constants Rᵐ, cᵖᵐ, κᵐ — these reduce to Rᵈ, cᵖᵈ, κ
+            # when qᵛ = 0.
+            loc = (nothing, nothing, Center())
+            θᵣ = Field{Nothing, Nothing, Center}(grid)
+            set!(θᵣ, potential_temperature)
+            fill_halo_regions!(θᵣ)
+
+            πᵣ = Field{Nothing, Nothing, Center}(grid)
+            θ₀_surface = convert(FT, surface_value(potential_temperature))
+
+            qᵛᵣ = reference_moisture_field(vapor_mass_fraction, grid)
+            qᵛ_surface = @allowscalar qᵛᵣ[1, 1, 1]
+            Rᵐ_surface, _, κᵐ_surface = moist_reference_constants(qᵛ_surface, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+            π₀_surface = (p₀ / pˢᵗ)^κᵐ_surface
+            ρ₀_surface = p₀ / (Rᵐ_surface * θ₀_surface * π₀_surface)
+
+            p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
+            pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
+            ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀_surface))
+            ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+
+            launch!(arch, grid, tuple(1), _compute_exner_reference!,
+                    πᵣ, pᵣ, ρᵣ, θᵣ, qᵛᵣ, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+        end
     end
 
     fill_halo_regions!(θᵣ)
@@ -659,6 +812,17 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
     end
 
     return ExnerReferenceState(p₀, θ₀_val, pˢᵗ, pᵣ, ρᵣ, πᵣ)
+end
+
+# Detect if θ₀ needs a 3D (per-column) reference.
+# Functions with ≥2 methods or ≥2 arguments → 3D.
+_needs_3d_reference(::Number) = false
+_needs_3d_reference(f::Function) = _nargs(f) > 1
+_nargs(f) = maximum(m.nargs for m in methods(f)) - 1  # subtract 1 for the function itself
+
+@kernel function _compute_exner_reference_3d!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    i, j = @index(Global, NTuple)
+    _compute_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
 end
 
 # ExnerReferenceState has the same surface_density interface as ReferenceState
