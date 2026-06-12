@@ -113,7 +113,7 @@ using Breeze.Microphysics
 cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 # output
-SaturationAdjustment{WarmPhaseEquilibrium, Breeze.Solvers.SecantSolver{Float64}}(WarmPhaseEquilibrium(), SecantSolver(reltol=0.0, abstol=0.001, maxiter=100))
+SaturationAdjustment{WarmPhaseEquilibrium, SecantSolver{Float64}}(WarmPhaseEquilibrium(), SecantSolver(reltol=0.0, abstol=0.001, maxiter=100))
 ```
 
 # Keyword arguments
