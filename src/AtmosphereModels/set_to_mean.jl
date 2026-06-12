@@ -76,6 +76,11 @@ fields are left as-is and only diagnostics are recomputed.
 function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
     constants = model.thermodynamic_constants
 
+    if rescale_densities
+        ρᵣ_old = similar(dynamics_density(model.dynamics))
+        parent(ρᵣ_old) .= parent(dynamics_density(model.dynamics))
+    end
+
     # Update reference temperature and moisture from horizontal means
     mean!(ref.temperature, model.temperature)
     fill_halo_regions!(ref.temperature)
@@ -88,8 +93,6 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
     compute_hydrostatic_reference!(ref, constants)
 
     if rescale_densities
-        ρᵣ_old = similar(dynamics_density(model.dynamics))
-        parent(ρᵣ_old) .= parent(dynamics_density(model.dynamics))
         rescale_density_weighted_fields!(model, ρᵣ_old)
     end
 
