@@ -474,7 +474,7 @@ end
     rain_warm_q_full = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
     # Number sink from above-freezing rain collection fires in both branches
     # (Fortran nrcoll for liquid-fraction, nrcol for non-liquid-fraction).
-    rain_warm_n = safe_divide(nʳ * rain_warm_q_full, qʳ, zero(FT))
+    rain_warm_n = rain_warm_collection_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
     # Mass transfer of collected rain into qʷⁱ only happens in the liquid-fraction
     # branch (Fortran qrcoll). The non-liquid path explicitly leaves rain mass alone
     # — see microphy_p3.f90:3055-3066, "collection of rain above freezing does not

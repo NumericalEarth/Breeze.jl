@@ -139,6 +139,32 @@ function expected_fortran_rain_epsilon(p3, qʳ, nʳ, ρ, transport, FT)
     return ifelse(qʳ_eff >= p3.minimum_mass_mixing_ratio, epsilon_r, zero(FT))
 end
 
+function expected_fortran_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ)
+    FT = typeof(qʳ)
+    prp = p3.process_rates
+    qʳ_eff = max(0, qʳ)
+    nʳ_eff = max(0, nʳ)
+    qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
+    nⁱ_eff = max(0, nⁱ)
+    active = (T > prp.freezing_temperature) &
+             (qʳ_eff > FT(1e-14)) &
+             (qⁱ_total > FT(1e-14)) &
+             (nʳ_eff > FT(1)) &
+             (nⁱ_eff > FT(1))
+
+    λ_r = PPP.rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
+    nʳ_bounded = PPP.rain_number_from_slope(qʳ_eff, λ_r, prp)
+    Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
+    m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
+    number_kernel = PPP.rain_riming_number_kernel(PPP.rain_ice_collection_table(p3),
+                                                  m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
+    ρ₀ = p3.ice.fall_speed.reference_air_density
+    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+    N₀ʳ = nʳ_bounded * λ_r
+    rate = prp.rain_ice_collection_efficiency * N₀ʳ * nⁱ_eff * ρ * rhofaci * number_kernel
+    return ifelse(active, rate, zero(FT))
+end
+
 function expected_fortran_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
     FT = typeof(qⁱ)
     Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
@@ -2360,6 +2386,47 @@ end
         )
         expected_shed_drop_source = ρ * manual_rates.cloud_warm_collection * FT(1.923e6)
         @test tendency_ρnʳ(manual_rates, ρ, nⁱ, qⁱ, nʳ, one(FT), p3) ≈ expected_shed_drop_source
+    end
+
+    @testset "above-freezing rain collection uses table number kernel" begin
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+
+        ρ = FT(1.0)
+        T = FT(278.15)
+        P = FT(85000)
+        pˢᵗ = FT(100000)
+        qᶜˡ = FT(0)
+        nᶜˡ = FT(0)
+        qʳ = FT(1e-3)
+        nʳ = FT(1e4)
+        qⁱ = FT(1e-4)
+        nⁱ = FT(1e5)
+        qᶠ = FT(2e-5)
+        qʷⁱ = FT(0)
+        sˢᵃᵗ = FT(0)
+        μ = FT(0)
+
+        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        q = MoistureMassFractions(qᵛ, qʳ + qʷⁱ, qⁱ)
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
+                                qᶠ, qᶠ / FT(400), FT(1e-10), qʷⁱ, sˢᵃᵗ)
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        rime = consistent_rime_state(p3, qⁱ, qᶠ, qᶠ / FT(400), qʷⁱ)
+        expected_number = expected_fortran_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+                                                                       T, rime.Fᶠ, rime.ρᶠ, ρ, μ)
+        expected_mass = PPP.rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ,
+                                                      T, rime.Fᶠ, rime.ρᶠ, ρ, μ, qʷⁱ)
+        expected_number_per_mass = expected_number / expected_mass
+        actual_number_per_mass = rates.rain_warm_collection_number / rates.rain_warm_collection
+        monodisperse_number_per_mass = nʳ / qʳ
+
+        @test rates.rain_warm_collection > 0
+        @test actual_number_per_mass ≈ expected_number_per_mass rtol=FT(1e-12)
+        @test !isapprox(actual_number_per_mass, monodisperse_number_per_mass; rtol=FT(1e-2))
     end
 
     @testset "compute_p3_process_rates vapor-limits cloud evaporation before cloud budget" begin
