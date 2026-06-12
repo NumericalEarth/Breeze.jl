@@ -468,8 +468,8 @@ end
     rain_hom_q, rain_hom_n = homogeneous_freezing_rain_rate(p3, qʳ, nʳ, T)
 
     # Above-freezing collection
-    cloud_warm_q, cloud_warm_n_raw = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
-    cloud_warm_n = cloud_warm_n_raw
+    cloud_warm_q, _ = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
+    cloud_warm_n = cloud_riming_number_rate(qᶜˡ, Nᶜ, ρ, cloud_warm_q)
     rain_warm_q_full = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
     # Number sink from above-freezing rain collection fires in both branches
     # (Fortran nrcoll for liquid-fraction, nrcol for non-liquid-fraction).

@@ -2284,6 +2284,48 @@ end
         @test rates.rime_density_new <= 900
     end
 
+    @testset "above-freezing cloud collection separates cloud sink from shed rain source" begin
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        process_rates = ProcessRateParameters(FT; liquid_fraction_active = false)
+        p3 = PredictedParticlePropertiesMicrophysics(FT; process_rates)
+
+        ρ = FT(1.0)
+        T = FT(278.15)
+        P = FT(85000)
+        pˢᵗ = FT(100000)
+        qᶜˡ = FT(1e-3)
+        nᶜˡ = FT(2e8)
+        qʳ = FT(0)
+        nʳ = FT(0)
+        qⁱ = FT(1e-4)
+        nⁱ = FT(1e5)
+        qᶠ = FT(1e-5)
+        qʷⁱ = FT(0)
+        sˢᵃᵗ = FT(0)
+
+        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+        ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
+                                qᶠ, qᶠ / FT(400), FT(1e-10), qʷⁱ, sˢᵃᵗ)
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+        expected_cloud_number_per_mass = cloud.Nᶜ / (ρ * qᶜˡ)
+
+        @test rates.cloud_warm_collection > 0
+        @test rates.cloud_warm_collection_number / rates.cloud_warm_collection ≈
+              expected_cloud_number_per_mass rtol=FT(1e-12)
+
+        manual_rates = p3_process_rates_with(FT;
+            cloud_warm_collection = FT(1e-8),
+            cloud_warm_collection_number = FT(1e4),
+        )
+        expected_shed_drop_source = ρ * manual_rates.cloud_warm_collection * FT(1.923e6)
+        @test tendency_ρnʳ(manual_rates, ρ, nⁱ, qⁱ, nʳ, one(FT), p3) ≈ expected_shed_drop_source
+    end
+
     @testset "compute_p3_process_rates vapor-limits cloud evaporation before cloud budget" begin
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64

@@ -123,7 +123,7 @@ Rain number gains from:
 - Complete melting (Phase 1) - new rain drops from melted ice
 - Breakup (Phase 1) - large drops fragment into smaller ones
 - Shedding (Phase 2)
-- Cloud warm collection number (M9, Fortran ncshdc)
+- Shed drops from above-freezing cloud collection (Fortran ncshdc)
 
 Rain number loses from:
 - Self-collection (Phase 1)
@@ -151,12 +151,13 @@ Rain number loses from:
     n_from_evap = safe_divide(nʳ * rates.rain_evaporation, qʳ, zero(FT))
 
     # Gains: shedding produces rain drops
-    # cloud_warm_collection_number → new rain drops from above-freezing cloud
-    #      collection (Fortran ncshdc). Only in non-liquid-fraction path;
-    #      when liquid fraction is active, collected mass goes to qʷⁱ, not rain.
+    # cloud_warm_collection → new rain drops from above-freezing cloud
+    #      collection (Fortran ncshdc = qcshd × 1.923e6). Only in
+    #      non-liquid-fraction path; when liquid fraction is active, collected
+    #      mass goes to qʷⁱ, not rain.
     # wet_growth_shedding_number → rain drops from excess wet growth (Fortran nrshdr)
     cloud_warm_rain_n = ifelse(prp.liquid_fraction_active, zero(FT),
-                               rates.cloud_warm_collection_number)
+                               rates.cloud_warm_collection * FT(1.923e6))
     n_gain = n_from_autoconv + n_from_melt +
              rates.rain_breakup +
              rates.shedding_number +
