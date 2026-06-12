@@ -618,45 +618,134 @@ end
 ##### 3D terrain reference state via per-column discrete Exner integration
 #####
 
-using Breeze.Thermodynamics: hydrostatic_pressure
+using Breeze.Thermodynamics: evaluate_profile, hydrostatic_pressure,
+                             newton_hydrostatic_pressure, moist_reference_constants
+
+terrain_reference_profiles(ref_spec) = (ref_spec, nothing)
+
+function terrain_reference_profiles(ref_spec::NamedTuple)
+    haskey(ref_spec, :reference_temperature) &&
+        throw(ArgumentError("Terrain-following compressible reference states do not support `reference_temperature` with `terrain_metrics`."))
+
+    θᵣ = ref_spec.reference_potential_temperature === nothing ? 288 : ref_spec.reference_potential_temperature
+    qᵛᵣ = ref_spec.reference_vapor_mass_fraction
+
+    return θᵣ, qᵛᵣ
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Integrate the hydrostatic equation ``∂p/∂z = \\mathrm{dpdz}(z, p)`` from the surface to
+height ``z``, repeatedly doubling the number of steps until the pressure at ``z`` changes
+by less than the relative `tolerance` between successive refinements. `dpdz(z, p)` returns
+the local pressure gradient ``-g ρ`` given height and pressure.
+"""
+function converged_hydrostatic_pressure(z, p₀, dpdz;
+                                        tolerance = sqrt(eps(float(typeof(p₀)))),
+                                        initial_steps = 16,
+                                        max_steps = 1 << 16)
+    z == 0 && return p₀
+
+    integrate(nsteps) = begin
+        dz = z / nsteps
+        half_dz = dz / 2
+        p = p₀
+        for i in 1:nsteps
+            zₗ = (i - 1) * dz
+            k₁ = dpdz(zₗ, p)
+            k₂ = dpdz(zₗ + half_dz, p + k₁ * half_dz)
+            p += k₂ * dz
+        end
+        return p
+    end
+
+    nsteps = initial_steps
+    p_coarse = integrate(nsteps)
+    while nsteps < max_steps
+        nsteps *= 2
+        p_fine = integrate(nsteps)
+        abs(p_fine - p_coarse) ≤ tolerance * abs(p_fine) && return p_fine
+        p_coarse = p_fine
+    end
+
+    return p_coarse
+end
+
+terrain_hydrostatic_pressure(z, p₀, θᵣ, ::Nothing, pˢᵗ, constants) =
+    hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
+
+function terrain_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+    # Compute the continuous hydrostatic pressure at physical height `z`. For
+    # moist terrain columns this supplies the boundary state at the local terrain
+    # surface; the first cell center and the interior levels are then obtained by
+    # the same discrete-balance Newton solve.
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    g = constants.gravitational_acceleration
+
+    @inline function dpdz(zⁿ, p)
+        θⁿ = evaluate_profile(θᵣ, zⁿ)
+        qᵛⁿ = evaluate_profile(qᵛᵣ, zⁿ)
+        Rᵐⁿ, cᵖᵐⁿ, κᵐⁿ = moist_reference_constants(qᵛⁿ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+        Tⁿ = θⁿ * (p / pˢᵗ)^κᵐⁿ
+        return -g * p / (Rᵐⁿ * Tⁿ)
+    end
+
+    return converged_hydrostatic_pressure(z, p₀, dpdz;
+                                          tolerance = sqrt(eps(float(typeof(p₀)))))
+end
 
 """
 $(TYPEDSIGNATURES)
 
 Fill the 3D fields `pᵣ` and `ρᵣ` with the hydrostatic reference pressure and
-density computed by per-column discrete Exner integration. On a terrain-following grid,
-different columns have different physical heights at the same computational index `k`,
-so the reference state varies horizontally even though the reference atmosphere is
+density, solving the discrete hydrostatic balance per column. On a terrain-following
+grid, different columns have different physical heights at the same computational index
+`k`, so the reference state varies horizontally even though the reference atmosphere is
 horizontally uniform.
 
-The Exner function is integrated upward at each column using the physical vertical
-spacing, ensuring that the discrete hydrostatic balance
+Moist terrain columns first assign the local terrain surface the continuous hydrostatic
+state at its physical height, then use the same Newton solve for the surface-to-center
+half cell and every interior face to drive the discrete hydrostatic balance. Dry terrain
+columns keep the direct continuous anchor at the first cell center and use the Newton
+solve only on interior faces.
 ```math
-\\frac{p_{ref}[k] - p_{ref}[k-1]}{Δz} + g \\frac{ρ_{ref}[k] + ρ_{ref}[k-1]}{2} \\approx 0
+\\frac{p_{ref}[k] - p_{ref}[k-1]}{Δz} + g \\frac{ρ_{ref}[k] + ρ_{ref}[k-1]}{2} = 0
 ```
-holds to high accuracy at every interior face. This is essential for reducing the
-truncation error in the vertical momentum equation (``-∂p/∂z - gρ``), which would
-otherwise be dominated by the near-cancellation of two large terms.
+to near machine precision (the Exner integration provides only the Newton initial guess).
+The reference atmosphere uses level-local moist constants
+``Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ``, ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ``, ``κᵐ = Rᵐ/cᵖᵐ``, with the dry case
+recovered exactly when ``qᵛ ≡ 0``. Enforcing the discrete balance is essential for
+reducing the truncation error in the vertical momentum equation (``-∂p/∂z - gρ``), which
+would otherwise be dominated by the near-cancellation of two large terms.
 
 The reference pressure is also used for the perturbation horizontal pressure gradient,
 reducing the terrain-following PGF error.
 """
-function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, θᵣ, pˢᵗ, constants)
-    # The 3D reference state is filled once, at construction. Each column is an
-    # upward Exner integration that is serial in `k` and evaluates the (possibly
-    # functional) reference θ at the physical height of every cell. We compute it on
-    # the host — into plain arrays, using a CPU mirror of the grid — then bulk-copy
-    # the result into the reference Fields. This keeps `reference_potential_temperature`
-    # an ordinary host function (no GPU type-stability/allocation requirement) and
-    # costs a single host→device transfer instead of a scalar host↔device op per cell.
-    # The CPU mirror preserves the materialised terrain through `on_architecture`, so
-    # its `znode`/`Δz` match the device grid exactly.
+function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢᵗ, constants)
+    # The 3D reference state is filled once, at construction. Each column is an upward,
+    # serial-in-`k` discrete-hydrostatic Newton solve that evaluates the (possibly
+    # functional) reference θ — and qᵛ for moist columns — at the physical height of
+    # every cell. We compute it on the host — into plain arrays, using a CPU mirror of
+    # the grid — then bulk-copy the result into the reference Fields. This keeps
+    # `reference_potential_temperature`/`reference_vapor_mass_fraction` ordinary host
+    # functions (no GPU type-stability/allocation requirement) and costs a single
+    # host→device transfer instead of a scalar host↔device op per cell. The CPU mirror
+    # preserves the materialised terrain through `on_architecture`, so its `znode`/`Δz`
+    # match the device grid exactly.
     Nx, Ny, Nz = size(grid)
     c = Center()
-    Rᵈ  = dry_air_gas_constant(constants)
+
+    θᵣ, qᵛᵣ = terrain_reference_profiles(ref_spec)
+
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
-    κ   = Rᵈ / cᵖᵈ
-    g   = constants.gravitational_acceleration
+    cᵖᵛ = constants.vapor.heat_capacity
+    g = constants.gravitational_acceleration
 
     cpu_grid = Oceananigans.Architectures.on_architecture(Oceananigans.CPU(), grid)
     FT = eltype(grid)
@@ -664,27 +753,55 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, θᵣ, pˢᵗ
     ρ_host = zeros(FT, Nx, Ny, Nz)
 
     for j in 1:Ny, i in 1:Nx
-        πₖ = zero(κ) # initialised at k = 1 below
+        p⁻ = zero(FT)
+        ρ⁻ = zero(FT)
+        Π⁻ = zero(FT)
+
         for k in 1:Nz
-            z = znode(i, j, k, cpu_grid, c, c, c)
-            θₖ = θᵣ isa Number ? θᵣ : θᵣ(z)
+            z_phys = znode(i, j, k, cpu_grid, c, c, c)
+            θₖ = evaluate_profile(θᵣ, z_phys)
+            qᵛₖ = qᵛᵣ === nothing ? zero(θₖ) : evaluate_profile(qᵛᵣ, z_phys)
+            Rᵐₖ, cᵖᵐₖ, κₖ = moist_reference_constants(qᵛₖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
 
             if k == 1
-                # Seed from the continuous hydrostatic pressure at the local physical
-                # height (over terrain, not sea level).
-                p_hydro = hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
-                πₖ = (p_hydro / pˢᵗ)^κ
+                if qᵛᵣ === nothing
+                    pₖ = terrain_hydrostatic_pressure(z_phys, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+                else
+                    z_surface = znode(i, j, 1, cpu_grid, c, c, Face())
+                    θ_surface = evaluate_profile(θᵣ, z_surface)
+                    qᵛ_surface = evaluate_profile(qᵛᵣ, z_surface)
+                    Rᵐ_surface, cᵖᵐ_surface, κ_surface = moist_reference_constants(qᵛ_surface, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+
+                    p⁻ = terrain_hydrostatic_pressure(z_surface, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+                    Π_surface = (p⁻ / pˢᵗ)^κ_surface
+                    ρ⁻ = p⁻ / (Rᵐ_surface * θ_surface * Π_surface)
+
+                    # The surface sits at the bottom face; the first cell center is
+                    # half a cell above it, so the surface-to-center balance spans Δzᶜᶜᶜ/2.
+                    Δz = Δzᶜᶜᶜ(i, j, 1, cpu_grid) / 2
+                    θ_face = (θₖ + θ_surface) / 2
+                    Πₖ_init = Π_surface - g * Δz / (cᵖᵐₖ * θ_face)
+                    pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
+                    pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, 7)
+                end
             else
                 z_below = znode(i, j, k - 1, cpu_grid, c, c, c)
-                θ_below = θᵣ isa Number ? θᵣ : θᵣ(z_below)
-                θ_face  = (θₖ + θ_below) / 2
-                Δz      = Δzᶜᶜᶠ(i, j, k, cpu_grid)
-                πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)
+                θ_below = evaluate_profile(θᵣ, z_below)
+                θ_face = (θₖ + θ_below) / 2
+                Δz = Δzᶜᶜᶠ(i, j, k, cpu_grid)
+                Πₖ_init = Π⁻ - g * Δz / (cᵖᵐₖ * θ_face)
+                pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
+                pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, 7)
             end
 
-            pₖ = pˢᵗ * πₖ^(1 / κ)
+            Πₖ = (pₖ / pˢᵗ)^κₖ
+            ρₖ = pₖ / (Rᵐₖ * θₖ * Πₖ)
             @inbounds p_host[i, j, k] = pₖ
-            @inbounds ρ_host[i, j, k] = pₖ / (Rᵈ * θₖ * πₖ)
+            @inbounds ρ_host[i, j, k] = ρₖ
+
+            p⁻ = pₖ
+            ρ⁻ = ρₖ
+            Π⁻ = Πₖ
         end
     end
 

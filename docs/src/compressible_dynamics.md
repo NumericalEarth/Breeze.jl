@@ -238,16 +238,97 @@ The slow vertical PGF ``-∂_z p^L - ρ^L g`` is the difference between two larg
 each ``\mathcal{O}(10^4)`` in SI units, whose true value is small everywhere and exactly zero
 in a rest atmosphere. To preserve this cancellation at the discrete level,
 `CompressibleDynamics` accepts a `reference_state` keyword that builds a
-[`ExnerReferenceState`](@ref) ``(ρ_r, p_r)`` satisfying
+[`ExnerReferenceState`](@ref) ``(ρ_r, p_r, Π_r)`` satisfying
 
 ```math
-\frac{p_{r,k+1/2} - p_{r,k-1/2}}{Δz_{k}^f} + g \, \overline{ρ_r}^z\big|_{k+1/2} = 0
+\frac{p_{r,k} - p_{r,k-1}}{Δz_k^f} + g \, \frac{ρ_{r,k} + ρ_{r,k-1}}{2} = 0
 ```
 
-at every face — a discrete hydrostatic balance to machine precision. The slow vertical
-momentum tendency uses the *imbalance* ``-∂_z(p^L - p_r) - (ρ^L - ρ_r) g`` so that a column
-in exact discrete balance contributes zero buoyancy forcing, no matter how steeply
-``ρ_r(z)`` and ``p_r(z)`` vary.
+at every interior z-face ``k`` — the *discrete* hydrostatic balance with the same
+two-point face derivative and arithmetic face-average that the substepper itself uses.
+The slow vertical momentum tendency uses the *imbalance*
+``-∂_z(p^L - p_r) - (ρ^L - ρ_r) g`` so that a column in exact discrete balance contributes
+zero buoyancy forcing, no matter how steeply ``ρ_r(z)`` and ``p_r(z)`` vary.
+
+#### Per-column Newton integration
+
+For a prescribed background ``\bar{θ}(z)`` and optional ``\bar{q}^v(z)``, the level-local
+moist EOS
+
+```math
+ρ_{r,k} = \frac{p_{r,k}}{R^m_k \, T_{r,k}}, \quad
+T_{r,k} = \bar{θ}_k \, Π_{r,k}, \quad
+Π_{r,k} = \!\left(\frac{p_{r,k}}{p^{st}}\right)^{κ^m_k}, \quad
+κ^m_k = \frac{R^m_k}{c^{pm}_k}
+```
+
+is substituted into the discrete-balance constraint. The result is a scalar residual
+
+```math
+F_k(p) \;=\; \frac{p - p_{r,k-1}}{Δz_k^f}
+      + g \, \frac{ρ(p) + ρ_{r,k-1}}{2},
+\qquad
+ρ(p) = \frac{p^{1-κ^m_k} \, (p^{st})^{κ^m_k}}{R^m_k \, \bar{θ}_k}
+```
+
+that is monotone increasing in ``p``; Newton iteration from a continuous-``Π`` guess
+converges in O(few) iterations and runs inside the per-column loop of a single GPU
+kernel. The first cell center is anchored by the continuous ``Π`` recurrence over the
+half-step below it (face ``k=1`` is the impenetrability boundary — no discrete-balance
+constraint applies there, so the anchor is free).
+
+Why the discrete (rather than continuous) balance matters: an MPAS-style up-then-down
+``Π`` integration satisfies the *continuous* hydrostatic equation but leaves an
+``\mathcal{O}(Δz^2)`` truncation residual of order ``10^{-3}\,``N/m³ in the substepper's
+discrete face operator. At production ``Δt`` that residual seeds an acoustic instability;
+discrete balance brings it to machine precision and the rest-atmosphere test in
+`test/substepper_rest_state.jl` holds at ulp.
+
+#### Moist reference states
+
+Passing `vapor_mass_fraction` to `ExnerReferenceState` replaces the dry constants with the
+level-local moist mixture
+
+```math
+R^m_k = (1 - q^v_k)\, R^d + q^v_k\, R^v, \qquad
+c^{pm}_k = (1 - q^v_k)\, c^{pd} + q^v_k\, c^{pv} .
+```
+
+The dry path (`vapor_mass_fraction === nothing`) uses a `ZeroField` for ``q^v`` and is
+recovered *exactly* — same residual, same Newton trajectory, no bit-level drift.
+
+`CompressibleDynamics` exposes this through the `reference_vapor_mass_fraction` keyword:
+moist convection cases that target a state with ``\bar{q}^v(z) > 0`` must pass both
+`reference_potential_temperature` and `reference_vapor_mass_fraction`, otherwise the
+reference state is dry and the moist resting atmosphere is not in discrete balance —
+which radiates spurious acoustic / gravity waves on startup.
+
+#### 1D and 3D reference backgrounds
+
+A constant or 1-argument ``\bar{θ}(z)`` builds a single column broadcast to all ``(i,j)``;
+a multi-argument ``\bar{θ}(x, y, z)`` (e.g. the latitude-dependent profile of the
+DCMIP-2016 baroclinic wave) triggers a per-column integration via the same kernel,
+indexed over ``(i, j)``. Both paths support `vapor_mass_fraction`; the 3D path accepts
+``\bar{q}^v(x, y, z)`` and allocates a `CenterField`, while the 1D path uses the column
+field. Either way, every column individually satisfies the discrete balance above to
+machine precision.
+
+#### Pressure-balanced density for initial conditions
+
+A reference state in discrete balance is necessary but not sufficient — an initial
+``θ`` perturbation that leaves ``ρ = ρ_r`` unchanged shifts ``ρθ`` and therefore the
+diagnosed initial pressure, putting the perturbed state *out* of balance even though
+the background is balanced. The
+[`pressure_balanced_density`](@ref Breeze.Thermodynamics.pressure_balanced_density)
+helper preserves ``ρθ`` under a ``θ`` perturbation:
+
+```math
+ρ(x,y,z) \;=\; ρ_r(z)\, \frac{\bar{θ}(z)}{θ(x,y,z)} .
+```
+
+Initializing ``ρ`` from this helper, instead of ``ρ = ρ_r`` directly, keeps the resting
+discrete balance under perturbations and suppresses the acoustic / gravity-wave noise
+that an unbalanced startup would otherwise radiate.
 
 ### Time discretization of the substep loop
 
