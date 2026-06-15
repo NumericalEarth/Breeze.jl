@@ -10,6 +10,7 @@ using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNCheck
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 using Oceananigans.TimeSteppers: TimeStepper
+using Oceananigans.Architectures: on_architecture
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields
 using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
@@ -258,6 +259,9 @@ function AtmosphereModel(grid;
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     materialized_advection = NamedTuple(name => adapt_advection_order(materialize_advection(scheme, grid), grid) for (name, scheme) in pairs(advection))
+
+    # Move microphysics lookup tables to the grid architecture (CPU → GPU)
+    microphysics = on_architecture(arch, microphysics)
 
     model = AtmosphereModel(arch,
                             grid,

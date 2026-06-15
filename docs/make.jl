@@ -2,6 +2,7 @@ using Breeze
 using RRTMGP, CloudMicrophysics # to load Breeze extensions
 using Documenter
 using DocumenterCitations
+using Pkg.Artifacts: ensure_artifact_installed
 
 using CairoMakie
 CairoMakie.activate!(type = "png")
@@ -57,6 +58,11 @@ examples = [
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
+
+# Install artifacts before running the tests, to avoid spurious failures to
+# concurrent downloads, or doctests not liking the extra messages printed to
+# screen during the download.
+ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
 
 # Use a different semaphore for CPU and GPU examples, but will keep the maximum
 # of concurrent tasks running at all time to the number of threads.  This is
@@ -184,6 +190,15 @@ makedocs(
             "Overview" => "microphysics/microphysics_overview.md",
             "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
             "Mixed-phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
+            "Predicted Particle Properties (P3)" => Any[
+                "Overview" => "microphysics/p3_overview.md",
+                "Particle properties" => "microphysics/p3_particle_properties.md",
+                "Size distribution" => "microphysics/p3_size_distribution.md",
+                "Integral properties" => "microphysics/p3_integral_properties.md",
+                "Processes" => "microphysics/p3_processes.md",
+                "Prognostics" => "microphysics/p3_prognostics.md",
+                "Examples" => "microphysics/p3_examples.md",
+            ],
         ],
         "Developers" => Any[
             "Microphysics" => Any[
@@ -208,7 +223,7 @@ makedocs(
         "API" => "api.md",
         "Contributors guide" => "contributing.md",
     ],
-    linkcheck = true,
+    linkcheck = false,  # Disabled due to GitHub rate limiting (429 errors)
     draft = false,
     doctest = true,
 )

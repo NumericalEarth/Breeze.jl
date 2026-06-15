@@ -35,4 +35,14 @@ include("microphysics_diagnostics.jl")
 include("dcmip2016_kessler.jl")
 include("instantaneous_precipitation.jl")
 
+#####
+##### Predicted Particle Properties (P3) submodule
+#####
+
+include("PredictedParticleProperties/PredictedParticleProperties.jl")
+using .PredictedParticleProperties
+
+# Re-export key P3 types
+export PredictedParticlePropertiesMicrophysics, P3Microphysics
+
 end # module Microphysics
