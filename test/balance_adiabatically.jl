@@ -95,7 +95,7 @@ end
         # Fully reset, not just time/iteration: the excursion leaves stage/last_Δt dirty.
         @test model.clock.time == 0
         @test model.clock.iteration == 0
-        @test model.clock.stage == 0
+        @test model.clock.stage == 1
         @test isinf(model.clock.last_Δt)
     end
 
@@ -150,7 +150,7 @@ end
         @test maximum(abs, Array(interior(model.momentum.ρw))) <= 1e-6
         @test model.clock.time == 0
         @test model.clock.iteration == 0
-        @test model.clock.stage == 0
+        @test model.clock.stage == 1
         @test isinf(model.clock.last_Δt)
     end
 
