@@ -104,24 +104,26 @@ preserved aloft.
 Constructed via the kwarg form `TwoLevelDecay(; large_scale_height,
 small_scale_height)`.
 """
-struct TwoLevelDecay{ZT, FT, H, SX, SY} <: AbstractTerrainFormulation
+struct TwoLevelDecay{ZT, FT, H, SX, SY, B} <: AbstractTerrainFormulation
     z_top              :: ZT   # Nothing (skeleton) or FT (after allocation)
     large_scale_height :: FT   # s₁ (slow decay)
     small_scale_height :: FT   # s₂ (fast decay)
     h₁ :: H; h₂ :: H           # large/small terrain (Center, Center)
     ∂x_h₁ :: SX; ∂x_h₂ :: SX   # (Face, Center)
     ∂y_h₁ :: SY; ∂y_h₂ :: SY   # (Center, Face)
+    basis :: B                 # TwoLevelBasis (materialized) or Nothing (skeleton)
 end
 
 TwoLevelDecay(; large_scale_height, small_scale_height) =
     TwoLevelDecay(nothing, large_scale_height, small_scale_height,
-          nothing, nothing, nothing, nothing, nothing, nothing)
+          nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 
 Adapt.adapt_structure(to, f::TwoLevelDecay) =
     TwoLevelDecay(f.z_top, f.large_scale_height, f.small_scale_height,
           Adapt.adapt(to, f.h₁), Adapt.adapt(to, f.h₂),
           Adapt.adapt(to, f.∂x_h₁), Adapt.adapt(to, f.∂x_h₂),
-          Adapt.adapt(to, f.∂y_h₁), Adapt.adapt(to, f.∂y_h₂))
+          Adapt.adapt(to, f.∂y_h₁), Adapt.adapt(to, f.∂y_h₂),
+          Adapt.adapt(to, f.basis))
 
 Oceananigans.Architectures.on_architecture(arch, f::TwoLevelDecay) =
     TwoLevelDecay(f.z_top, f.large_scale_height, f.small_scale_height,
@@ -130,35 +132,75 @@ Oceananigans.Architectures.on_architecture(arch, f::TwoLevelDecay) =
           Oceananigans.Architectures.on_architecture(arch, f.∂x_h₁),
           Oceananigans.Architectures.on_architecture(arch, f.∂x_h₂),
           Oceananigans.Architectures.on_architecture(arch, f.∂y_h₁),
-          Oceananigans.Architectures.on_architecture(arch, f.∂y_h₂))
+          Oceananigans.Architectures.on_architecture(arch, f.∂y_h₂),
+          Oceananigans.Architectures.on_architecture(arch, f.basis))
 
 @inline b_two_level(r, z_top, s)  = sinh((z_top - r) / s) / sinh(z_top / s)
 @inline b′_two_level(r, z_top, s) = -cosh((z_top - r) / s) / (s * sinh(z_top / s))
 
+#####
+##### Precomputed SLEVE decay bases.
+#####
+##### bₙ(r) and bₙ′(r) depend on the reference coordinate r alone (plus the static
+##### formulation parameters), but σ → Δz and znode evaluate them on every operator
+##### access. For TwoLevelDecay each evaluation is a sinh/cosh pair, which is
+##### catastrophic on the GPU (≈20–30× the LinearDecay per-step cost). We
+##### materialize bₙ, bₙ′ once at the Center and Face z-locations (1D in z, indexed
+##### [1, 1, k] over the same halo'd k-range as rnode) so the hot path is a memory
+##### read instead of a transcendental.
+#####
+
+struct TwoLevelBasis{A}
+    b₁ᶜ :: A; b₁ᶠ :: A     # b₁(r) at Center, Face   (large scale, s₁)
+    b₂ᶜ :: A; b₂ᶠ :: A     # b₂(r) at Center, Face   (small scale, s₂)
+    ∂b₁ᶜ :: A; ∂b₁ᶠ :: A   # b₁′(r) at Center, Face
+    ∂b₂ᶜ :: A; ∂b₂ᶠ :: A   # b₂′(r) at Center, Face
+end
+
+Adapt.adapt_structure(to, c::TwoLevelBasis) =
+    TwoLevelBasis(Adapt.adapt(to, c.b₁ᶜ), Adapt.adapt(to, c.b₁ᶠ),
+                  Adapt.adapt(to, c.b₂ᶜ), Adapt.adapt(to, c.b₂ᶠ),
+                  Adapt.adapt(to, c.∂b₁ᶜ), Adapt.adapt(to, c.∂b₁ᶠ),
+                  Adapt.adapt(to, c.∂b₂ᶜ), Adapt.adapt(to, c.∂b₂ᶠ))
+
+Oceananigans.Architectures.on_architecture(arch, c::TwoLevelBasis) =
+    TwoLevelBasis(Oceananigans.Architectures.on_architecture(arch, c.b₁ᶜ),
+                  Oceananigans.Architectures.on_architecture(arch, c.b₁ᶠ),
+                  Oceananigans.Architectures.on_architecture(arch, c.b₂ᶜ),
+                  Oceananigans.Architectures.on_architecture(arch, c.b₂ᶠ),
+                  Oceananigans.Architectures.on_architecture(arch, c.∂b₁ᶜ),
+                  Oceananigans.Architectures.on_architecture(arch, c.∂b₁ᶠ),
+                  Oceananigans.Architectures.on_architecture(arch, c.∂b₂ᶜ),
+                  Oceananigans.Architectures.on_architecture(arch, c.∂b₂ᶠ))
+
+# Read the precomputed basis at vertical index k and z-location ℓz (Center/Face).
+@inline sleve_b₁(c::TwoLevelBasis, k, ::Center)  = @inbounds c.b₁ᶜ[1, 1, k]
+@inline sleve_b₁(c::TwoLevelBasis, k, ::Face)    = @inbounds c.b₁ᶠ[1, 1, k]
+@inline sleve_b₂(c::TwoLevelBasis, k, ::Center)  = @inbounds c.b₂ᶜ[1, 1, k]
+@inline sleve_b₂(c::TwoLevelBasis, k, ::Face)    = @inbounds c.b₂ᶠ[1, 1, k]
+@inline sleve_∂b₁(c::TwoLevelBasis, k, ::Center) = @inbounds c.∂b₁ᶜ[1, 1, k]
+@inline sleve_∂b₁(c::TwoLevelBasis, k, ::Face)   = @inbounds c.∂b₁ᶠ[1, 1, k]
+@inline sleve_∂b₂(c::TwoLevelBasis, k, ::Center) = @inbounds c.∂b₂ᶜ[1, 1, k]
+@inline sleve_∂b₂(c::TwoLevelBasis, k, ::Face)   = @inbounds c.∂b₂ᶠ[1, 1, k]
+
 @inline function terrain_following_σ(i, j, k, grid, f::TwoLevelDecay, ℓx, ℓy, ℓz)
-    r  = rnode(k, grid, ℓz)
     h₁ = terrain_at_stagger(i, j, grid, f.h₁, ℓx, ℓy)
     h₂ = terrain_at_stagger(i, j, grid, f.h₂, ℓx, ℓy)
-    return 1 + h₁ * b′_two_level(r, f.z_top, f.large_scale_height) +
-               h₂ * b′_two_level(r, f.z_top, f.small_scale_height)
+    return 1 + h₁ * sleve_∂b₁(f.basis, k, ℓz) + h₂ * sleve_∂b₂(f.basis, k, ℓz)
 end
 
 @inline function terrain_following_Δz_surface(i, j, k, grid, f::TwoLevelDecay, ℓx, ℓy, ℓz)
-    r  = rnode(k, grid, ℓz)
     h₁ = terrain_at_stagger(i, j, grid, f.h₁, ℓx, ℓy)
     h₂ = terrain_at_stagger(i, j, grid, f.h₂, ℓx, ℓy)
-    return h₁ * b_two_level(r, f.z_top, f.large_scale_height) +
-           h₂ * b_two_level(r, f.z_top, f.small_scale_height)
+    return h₁ * sleve_b₁(f.basis, k, ℓz) + h₂ * sleve_b₂(f.basis, k, ℓz)
 end
 
 @inline function terrain_following_∂z∂x(i, j, k, grid, f::TwoLevelDecay, ℓz)
-    r = rnode(k, grid, ℓz)
-    @inbounds return f.∂x_h₁[i, j, 1] * b_two_level(r, f.z_top, f.large_scale_height) +
-                     f.∂x_h₂[i, j, 1] * b_two_level(r, f.z_top, f.small_scale_height)
+    @inbounds return f.∂x_h₁[i, j, 1] * sleve_b₁(f.basis, k, ℓz) +
+                     f.∂x_h₂[i, j, 1] * sleve_b₂(f.basis, k, ℓz)
 end
 
 @inline function terrain_following_∂z∂y(i, j, k, grid, f::TwoLevelDecay, ℓz)
-    r = rnode(k, grid, ℓz)
-    @inbounds return f.∂y_h₁[i, j, 1] * b_two_level(r, f.z_top, f.large_scale_height) +
-                     f.∂y_h₂[i, j, 1] * b_two_level(r, f.z_top, f.small_scale_height)
+    @inbounds return f.∂y_h₁[i, j, 1] * sleve_b₁(f.basis, k, ℓz) +
+                     f.∂y_h₂[i, j, 1] * sleve_b₂(f.basis, k, ℓz)
 end

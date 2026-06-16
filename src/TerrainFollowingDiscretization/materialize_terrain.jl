@@ -31,21 +31,32 @@ function allocate_formulation(f::LinearDecay, FT, arch, sz, halo, topo, z_top)
     return LinearDecay(convert(FT, z_top), h, ∂x_h, ∂y_h)
 end
 
+# 1D-in-z basis component (Center or Face in z, singleton x, y), zero-filled.
+@inline zcenter_data(FT, arch, topo, sz, halo) = new_data(FT, arch, (Nothing, Nothing, Center), topo, sz, halo)
+@inline zface_data(FT, arch, topo, sz, halo)   = new_data(FT, arch, (Nothing, Nothing, Face),   topo, sz, halo)
+
+function allocate_two_level_basis(FT, arch, sz, halo, topo)
+    zc() = (a = zcenter_data(FT, arch, topo, sz, halo); fill!(a, 0); a)
+    zf() = (a = zface_data(FT, arch, topo, sz, halo);   fill!(a, 0); a)
+    return TwoLevelBasis(zc(), zf(), zc(), zf(), zc(), zf(), zc(), zf())
+end
+
 function allocate_formulation(f::TwoLevelDecay, FT, arch, sz, halo, topo, z_top)
     # Preserve already-materialised data on rebuild (see LinearDecay variant).
     if f.h₁ !== nothing
         return Oceananigans.Architectures.on_architecture(arch,
             TwoLevelDecay(convert(FT, z_top),
                           convert(FT, f.large_scale_height), convert(FT, f.small_scale_height),
-                          f.h₁, f.h₂, f.∂x_h₁, f.∂x_h₂, f.∂y_h₁, f.∂y_h₂))
+                          f.h₁, f.h₂, f.∂x_h₁, f.∂x_h₂, f.∂y_h₁, f.∂y_h₂, f.basis))
     end
     h₁ = centered_data(FT, arch, topo, sz, halo); h₂ = centered_data(FT, arch, topo, sz, halo)
     ∂x_h₁ = xface_data(FT, arch, topo, sz, halo); ∂x_h₂ = xface_data(FT, arch, topo, sz, halo)
     ∂y_h₁ = yface_data(FT, arch, topo, sz, halo); ∂y_h₂ = yface_data(FT, arch, topo, sz, halo)
     for a in (h₁, h₂, ∂x_h₁, ∂x_h₂, ∂y_h₁, ∂y_h₂); fill!(a, 0); end
+    basis = allocate_two_level_basis(FT, arch, sz, halo, topo)
     return TwoLevelDecay(convert(FT, z_top),
                  convert(FT, f.large_scale_height), convert(FT, f.small_scale_height),
-                 h₁, h₂, ∂x_h₁, ∂x_h₂, ∂y_h₁, ∂y_h₂)
+                 h₁, h₂, ∂x_h₁, ∂x_h₂, ∂y_h₁, ∂y_h₂, basis)
 end
 
 """
@@ -130,6 +141,27 @@ function materialize_formulation!(f::TwoLevelDecay, grid, topography)
     parent(f.h₂) .= parent(h₂_field)
     fill_terrain_slopes!(f.∂x_h₁, f.∂y_h₁, h₁_field, grid)
     fill_terrain_slopes!(f.∂x_h₂, f.∂y_h₂, h₂_field, grid)
+    fill_two_level_basis!(f.basis, grid, f.z_top, f.large_scale_height, f.small_scale_height)
+    return nothing
+end
+
+# Evaluate bₙ(r), bₙ′(r) at the reference centre/face nodes (grid.z.cᵃᵃᶜ/cᵃᵃᶠ) and
+# store them. Broadcasting over the raw coordinate arrays covers the full halo'd
+# k-range and works on CPU and GPU (sinh/cosh broadcast on either architecture).
+set_basis_component!(dest, rcoord, fn, z_top, s) =
+    (vec(parent(dest)) .= fn.(parent(rcoord), z_top, s); nothing)
+
+function fill_two_level_basis!(basis, grid, z_top, s₁, s₂)
+    rᶜ = grid.z.cᵃᵃᶜ   # reference centre coordinate (1D in z, with halos)
+    rᶠ = grid.z.cᵃᵃᶠ   # reference face coordinate
+    set_basis_component!(basis.b₁ᶜ, rᶜ, b_two_level, z_top, s₁)
+    set_basis_component!(basis.b₁ᶠ, rᶠ, b_two_level, z_top, s₁)
+    set_basis_component!(basis.b₂ᶜ, rᶜ, b_two_level, z_top, s₂)
+    set_basis_component!(basis.b₂ᶠ, rᶠ, b_two_level, z_top, s₂)
+    set_basis_component!(basis.∂b₁ᶜ, rᶜ, b′_two_level, z_top, s₁)
+    set_basis_component!(basis.∂b₁ᶠ, rᶠ, b′_two_level, z_top, s₁)
+    set_basis_component!(basis.∂b₂ᶜ, rᶜ, b′_two_level, z_top, s₂)
+    set_basis_component!(basis.∂b₂ᶠ, rᶠ, b′_two_level, z_top, s₂)
     return nothing
 end
 
