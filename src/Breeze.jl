@@ -98,6 +98,7 @@ export
 
     # Microphysics
     SaturationAdjustment,
+    InstantaneousPrecipitation,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,

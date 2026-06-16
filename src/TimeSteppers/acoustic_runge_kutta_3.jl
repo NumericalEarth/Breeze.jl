@@ -117,7 +117,7 @@ Run one Wicker–Skamarock RK3 stage: compute slow tendencies, then
 execute the linearized-acoustic substep loop, then update remaining
 scalars.
 """
-function acoustic_rk3_substep!(model, Δt, β)
+function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = ts.U⁰
@@ -152,7 +152,7 @@ end
 ##### Scalar update with time-averaged velocities
 #####
 
-function scalar_rk3_substep!(model, Δt_stage)
+function scalar_rk3_substep!(model::AtmosphereModel, Δt_stage)
     grid = model.grid
     Δt_FT = kernel_time_step(grid.architecture, grid, Δt_stage)
     return scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_FT)
