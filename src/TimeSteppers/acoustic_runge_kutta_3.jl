@@ -117,7 +117,7 @@ Run one Wicker–Skamarock RK3 stage: compute slow tendencies, then
 execute the linearized-acoustic substep loop, then update remaining
 scalars.
 """
-function acoustic_rk3_substep!(model, Δt, β)
+function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = ts.U⁰
@@ -152,7 +152,7 @@ end
 ##### Scalar update with time-averaged velocities
 #####
 
-function scalar_rk3_substep!(model, Δt_stage)
+function scalar_rk3_substep!(model::AtmosphereModel, Δt_stage)
     grid = model.grid
     Δt_FT = kernel_time_step(grid.architecture, grid, Δt_stage)
     return scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_FT)
@@ -212,11 +212,12 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    # Call the microphysics update hook once per outer time step on the post-RK state.
-    # Some schemes use this for a full-Δt process update; for others it is a no-op.
+    update_state!(model, callbacks; compute_tendencies = true)
+
+    # Apply the operator-split microphysics update exactly once per step, on the post-RK
+    # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
 
-    update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₃ * Δt)
 
     return nothing

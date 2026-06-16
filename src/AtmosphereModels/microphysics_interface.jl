@@ -379,7 +379,7 @@ Non-equilibrium schemes simply return the state unchanged.
 """
 $(TYPEDSIGNATURES)
 
-Return `tuple()` - zero-moment scheme has no prognostic variables.
+Return `tuple()` - `Nothing` microphysics has no prognostic variables.
 """
 prognostic_field_names(::Nothing) = tuple()
 
@@ -622,11 +622,15 @@ For example, the terminal velocity of falling rain.
 """
 $(TYPEDSIGNATURES)
 
-Apply microphysics model update for the given `microphysics` scheme.
+Apply the operator-split microphysics update for the given `microphysics` scheme.
 
-This function is called during `update_state!` to apply microphysics processes
-that operate on the full model state (not the tendency fields).
-Specific microphysics schemes should extend this function.
+This is called once per time step by the time-stepper (not from `update_state!`) to
+apply microphysics processes that operate on the full model state by the full `Δt`,
+rather than through the per-stage tendency interface. It runs after the time-stepper's
+`update_state!` has refreshed the diagnostic state it reads. Schemes that mutate
+prognostic fields here are responsible for restoring a consistent model state (halos,
+diagnostics, and tendencies) before returning — e.g. by calling `update_state!`.
+Defaults to a no-op; specific microphysics schemes extend this function.
 """
 microphysics_model_update!(microphysics::Nothing, model) = nothing
 
@@ -652,8 +656,7 @@ If a scheme is non-adjusting, we just return `state`.
 Return a `KernelFunctionOperation` representing the precipitation rate for the given `phase`.
 
 The precipitation rate is the rate at which moisture is removed from the atmosphere
-by precipitation processes. For zero-moment schemes, this is computed from the
-`remove_precipitation` function applied to cloud condensate.
+by precipitation processes.
 
 Arguments:
 - `model`: An `AtmosphereModel` with a microphysics scheme

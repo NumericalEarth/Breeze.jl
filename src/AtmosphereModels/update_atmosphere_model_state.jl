@@ -30,6 +30,13 @@ function Oceananigans.Models.update_model_field_time_series!(model::AtmosphereMo
     return nothing
 end
 
+# `update_state!` is idempotent: it can be called any number of times and always
+# leaves the model in the same consistent state (refreshed halos, diagnostics, and
+# tendencies) for the prognostic fields it is given. It deliberately does *not* advance
+# the operator-split microphysics update (`microphysics_model_update!`), which mutates
+# prognostic fields by a full `Δt` and so must run exactly once per step — the
+# time-steppers invoke it directly. (The tendency-interface microphysics still runs
+# every RK stage as part of `compute_tendencies!`.)
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     fix_negative_moisture!(model)  # fix negative moisture from advection
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
@@ -41,7 +48,6 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
-    microphysics_model_update!(model.microphysics, model)
 
     for callback in callbacks
         callback.callsite isa UpdateStateCallsite && callback(model)
