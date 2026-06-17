@@ -2,6 +2,7 @@ using Breeze
 using Test
 
 using Breeze.Solvers: newton_solve, secant_solve, materialize_solver
+using Breeze.Thermodynamics: newton_hydrostatic_pressure
 
 # Unit tests for the unified iterative solver abstraction (Breeze.Solvers): the solver
 # types describe stopping rules that thermodynamic algorithms dispatch on — NewtonSolver
@@ -40,6 +41,45 @@ using Breeze.Solvers: newton_solve, secant_solve, materialize_solver
         flat(x) = one(FT)
         @test isfinite(secant_solve(flat, SecantSolver(FT; abstol=1e-5, maxiter=50), x₁, x₂, scale))
         @test isfinite(secant_solve(flat, FixedIterations(5), x₁, x₂, scale))
+    end
+
+    @testset "default tolerances" begin
+        # The defaults encode the tolerance conventions documented in Breeze.Solvers:
+        # temperature solves use an absolute tolerance of 1e-4 K (see also the dewpoint
+        # diagnostic, which opts into a relative tolerance against the vapor pressure).
+        newton = NewtonSolver(FT)
+        @test newton.reltol == 0
+        @test newton.abstol == FT(1e-4)
+        @test newton.maxiter == 8
+
+        secant = SecantSolver(FT)
+        @test secant.reltol == 0
+        @test secant.abstol == FT(1e-4)
+        @test secant.maxiter == 20
+    end
+
+    @testset "hydrostatic Newton convergence" begin
+        # The discrete hydrostatic balance solved by `newton_hydrostatic_pressure` is
+        # monotone in p, so Newton converges quadratically. Both call sites use
+        # FixedIterations(5); verify that count reaches machine precision (matches a
+        # heavily-iterated reference) across a representative range of layer thickness and θ.
+        pˢᵗ = FT(1e5)
+        g   = FT(9.81)
+        Rᵐ  = FT(287)
+        cᵖ  = FT(1005)
+        κ   = Rᵐ / cᵖ
+
+        for Δz in (FT(10), FT(100), FT(500)), θ in (FT(250), FT(300), FT(320))
+            p⁻ = pˢᵗ
+            ρ⁻ = p⁻ / (Rᵐ * θ * (p⁻ / pˢᵗ)^κ)
+            # Continuous-Π initial guess, as used at the call sites.
+            Π_init = (p⁻ / pˢᵗ)^κ - g * Δz / (cᵖ * θ)
+            p_init = pˢᵗ * Π_init^(1 / κ)
+
+            p5  = newton_hydrostatic_pressure(p⁻, ρ⁻, θ, Rᵐ, κ, Δz, pˢᵗ, g, p_init, FixedIterations(5))
+            p30 = newton_hydrostatic_pressure(p⁻, ρ⁻, θ, Rᵐ, κ, Δz, pˢᵗ, g, p_init, FixedIterations(30))
+            @test p5 ≈ p30 rtol=10 * eps(FT)
+        end
     end
 
     @testset "materialize_solver" begin

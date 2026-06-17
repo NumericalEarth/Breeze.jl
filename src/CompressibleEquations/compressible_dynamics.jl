@@ -92,7 +92,7 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
         throw(ArgumentError("The `temperature_tolerance` and `temperature_maxiter` keyword arguments \
                              have moved from `CompressibleDynamics` to the thermodynamic formulation. \
                              Use, for example, \
-                             `formulation = LiquidIcePotentialTemperatureFormulation(temperature_solver = NewtonSolver(reltol=1e-8, maxiter=8))`, \
+                             `formulation = LiquidIcePotentialTemperatureFormulation(temperature_solver = NewtonSolver(abstol=1e-4, maxiter=8))`, \
                              `temperature_solver = FixedIterations(2)` for Reactant / differentiable runs, \
                              or `temperature_solver = nothing` for the non-iterated closed-form inversion."))
     end

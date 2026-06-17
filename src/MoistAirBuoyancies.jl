@@ -176,7 +176,7 @@ r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
 """
 @inline compute_boussinesq_adjustment_temperature(𝒰₀::LiquidIcePotentialTemperatureState{FT}, constants) where FT =
-    compute_boussinesq_adjustment_temperature(𝒰₀, constants, SecantSolver(FT; abstol=1e-3, maxiter=100))
+    compute_boussinesq_adjustment_temperature(𝒰₀, constants, SecantSolver(FT; abstol=1e-4, maxiter=20))
 
 @inline function compute_boussinesq_adjustment_temperature(𝒰₀::LiquidIcePotentialTemperatureState{FT}, constants, solver) where FT
     θ = 𝒰₀.potential_temperature

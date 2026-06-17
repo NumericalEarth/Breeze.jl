@@ -20,6 +20,25 @@ algorithms dispatch on:
 
 The drivers [`newton_solve`](@ref) and [`secant_solve`](@ref) implement the iterations
 once, so every algorithm shares the same loop logic and the same solver vocabulary.
+
+## Tolerance conventions
+
+The choice between `reltol` and `abstol` follows the *natural scale* of the residual:
+
+* Quantities bounded away from zero with a fixed precision target use an **absolute**
+  tolerance. Every iteration on a temperature (the `θˡⁱ→T` inversion, saturation adjustment,
+  the Boussinesq adjustment temperature) is solved to `abstol = 1e-4` K — far below any
+  physically or numerically meaningful temperature increment, yet reached in a handful of
+  iterations by both Newton (quadratic) and secant (superlinear).
+* Quantities that range over orders of magnitude use a **relative** tolerance against an
+  algorithm-supplied `scale`. The dewpoint solve iterates on a saturation-vapor-pressure
+  residual (Pa), which spans roughly two decades over the atmospheric temperature range, so
+  it uses `reltol = 1e-4` against the vapor pressure; an absolute Pa tolerance would be
+  meaningless across that range.
+
+Iteration caps reflect each method's convergence order and role: the quadratically-convergent
+Newton inversion caps at `maxiter = 8`, the superlinear secant temperature solves cap at
+`maxiter = 20`, and the dewpoint diagnostic caps at `maxiter = 10`.
 """
 module Solvers
 
@@ -54,13 +73,13 @@ Return a [`NewtonSolver`](@ref) with relative tolerance `reltol`, absolute toler
 ```jldoctest
 using Breeze
 
-NewtonSolver(reltol=1e-6, maxiter=4)
+NewtonSolver(maxiter=4)
 
 # output
-NewtonSolver(reltol=1.0e-6, abstol=0.0, maxiter=4)
+NewtonSolver(reltol=0.0, abstol=0.0001, maxiter=4)
 ```
 """
-NewtonSolver(FT::DataType=Oceananigans.defaults.FloatType; reltol=1e-8, abstol=0, maxiter=8) =
+NewtonSolver(FT::DataType=Oceananigans.defaults.FloatType; reltol=0, abstol=1e-4, maxiter=8) =
     NewtonSolver(convert(FT, reltol), convert(FT, abstol), Int(maxiter))
 
 """
@@ -91,7 +110,7 @@ SecantSolver(abstol=1e-4, maxiter=20)
 SecantSolver(reltol=0.0, abstol=0.0001, maxiter=20)
 ```
 """
-SecantSolver(FT::DataType=Oceananigans.defaults.FloatType; reltol=0, abstol=1e-3, maxiter=100) =
+SecantSolver(FT::DataType=Oceananigans.defaults.FloatType; reltol=0, abstol=1e-4, maxiter=20) =
     SecantSolver(convert(FT, reltol), convert(FT, abstol), Int(maxiter))
 
 """

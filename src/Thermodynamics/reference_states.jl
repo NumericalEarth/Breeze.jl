@@ -579,11 +579,12 @@ end
 # Newton solve of the discrete hydrostatic balance for the pressure pₖ at one face,
 # given the level below (p⁻, ρ⁻) and the level-local moist constants. The residual
 #   F(p) = p / Δz + Aₖ p^(1−κₖ) − Cₖ,   Aₖ = g pˢᵗ^κₖ / (2 Rᵐₖ θₖ),  Cₖ = p⁻/Δz − g ρ⁻/2
-# is monotone increasing in p, so Newton converges in O(few) iterations from the
-# continuous-Π initial guess pₖ. Shared by the per-column Exner kernel and the terrain
-# reference-state solve. The iteration is delegated to the unified `newton_solve` driver
-# (see Breeze.Solvers); passing a `FixedIterations` solver keeps the trip count fixed so
-# the loop unrolls to straight-line code on the GPU.
+# is monotone increasing in p, so Newton converges quadratically from the continuous-Π
+# initial guess pₖ — `FixedIterations(5)` reaches machine precision across the atmospheric
+# range (verified in test/solvers.jl), and both call sites (the per-column Exner kernel and
+# the terrain reference-state solve) use that same count. The iteration is delegated to the
+# unified `newton_solve` driver (see Breeze.Solvers); passing a `FixedIterations` solver
+# keeps the trip count fixed so the loop unrolls to straight-line code on the GPU.
 @inline function newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, solver)
     Aₖ = g * pˢᵗ^κₖ / (2 * Rᵐₖ * θₖ)
     Cₖ = p⁻ / Δz - g * ρ⁻ / 2

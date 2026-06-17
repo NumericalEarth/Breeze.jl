@@ -47,13 +47,13 @@ The options for `equilibrium` are:
   the supercooled liquid fraction vanishes.
 
 The options for `solver` are [`SecantSolver`](@ref) (default:
-`SecantSolver(abstol=1e-3, maxiter=100)`, an absolute tolerance on the temperature-like
+`SecantSolver(abstol=1e-4, maxiter=20)`, an absolute tolerance on the temperature-like
 residual in Kelvin) and [`FixedIterations`](@ref Breeze.Solvers.FixedIterations), which performs a fixed number of secant
 steps with no convergence test (the form required for Reactant tracing and cheap
 reverse-mode differentiation).
 """
 function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
-                              solver = SecantSolver(FT; abstol=1e-3, maxiter=100),
+                              solver = SecantSolver(FT; abstol=1e-4, maxiter=20),
                               equilibrium = MixedPhaseEquilibrium(FT),
                               tolerance = nothing,
                               maxiter = nothing)
@@ -61,7 +61,7 @@ function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
     if tolerance !== nothing || maxiter !== nothing
         throw(ArgumentError("The `tolerance` and `maxiter` keyword arguments have been replaced \
                              by `solver`. Use, for example, \
-                             `SaturationAdjustment(solver = SecantSolver(abstol=1e-3, maxiter=100))` \
+                             `SaturationAdjustment(solver = SecantSolver(abstol=1e-4, maxiter=20))` \
                              or `solver = FixedIterations(n)` for Reactant / differentiable runs."))
     end
 
