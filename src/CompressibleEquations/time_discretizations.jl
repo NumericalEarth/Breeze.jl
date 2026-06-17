@@ -151,9 +151,11 @@ Used by
 horizontal momentum perturbation components ``(ρu)′`` and ``(ρv)′`` pick
 up an explicit correction proportional to the horizontal gradient of
 ``D``. If `damp_vertical = true`, the vertical component is folded
-implicitly into the column tridiag as a Laplacian on ``(ρw)′``. By
-default, `damp_vertical = false` and vertical acoustic damping comes from
-the off-centered implicit solve.
+implicitly into the column tridiag as a Laplacian on the acoustic vertical
+momentum perturbation: ``(ρw)′`` for height-coordinate dynamics and
+``(ρ\tilde{w})′`` for terrain-following dynamics. By default,
+`damp_vertical = false` and vertical acoustic damping comes from the
+off-centered implicit solve.
 
 Per-substep momentum correction (Klemp, Skamarock & Ha 2018 eq. 36, MPAS form):
 
@@ -199,7 +201,8 @@ Fields
   ``γ_y = α Δy^2 / Δτ``). Setting `length_scale = ℓ` forces a fixed
   ``γ = α \\, ℓ² / Δτ`` in both horizontal directions.
 - `damp_vertical`: If `true`, the vertical part of the divergence
-  damping is folded into the column tridiag (a Laplacian on `(ρw)′`).
+  damping is folded into the column tridiag (a Laplacian on `(ρw)′` in
+  height coordinates or `(ρw̃)′` in terrain-following coordinates).
   If `false` (default), no extra vertical damping is applied — the
   vertical acoustic modes are damped solely by the off-centering of the
   implicit pressure-gradient solve (``\\omega > 0.5``), which Klemp et
@@ -294,6 +297,14 @@ Fields
   with the configured `damping_rate` and `depth`.
 - `substep_distribution`: How acoustic substeps are distributed across the
   three WS-RK3 stages.
+- `open_boundary_relaxation`: Per-substep relaxation factor ``α \\in (0, 1]``
+  applied at the outermost open-boundary cell of ``ρ′,(ρθ)′`` to enforce the
+  prescribed wall value across the acoustic substeps. Default ``α = 0.5``,
+  matching FV3-LAM's outermost-blend-row weight (``\\approx 0.6``). Without
+  this enforcement the perturbation halos reflect, biasing the discrete mass
+  balance under transient open-boundary inflow (issue #738). The relaxation is
+  a no-op when no side carries an active open BC (periodic, walls, impenetrable
+  defaults all skip it).
 
 # Backward integration
 
@@ -382,9 +393,12 @@ end
 """
 $(TYPEDEF)
 
-Implicit upper Rayleigh sponge for the substepper inner loop. Damps ``(ρw)′``
-toward zero inside a layer of thickness `depth` below the model lid, with
-peak damping rate `damping_rate` (in 1/s) at the lid scaled by `ramp(z)`.
+Implicit upper Rayleigh sponge for the substepper inner loop. Damps the
+acoustic vertical momentum perturbation toward zero inside a layer of thickness
+`depth` below the model lid, with peak damping rate `damping_rate` (in 1/s) at
+the lid scaled by `ramp(z)`. The damped variable is ``(ρw)′`` for
+height-coordinate dynamics and ``(ρ\tilde{w})′`` for terrain-following
+dynamics.
 
 The damping is applied **inside the column tridiag** as a CN-weighted
 contribution (paralleling the existing implicit divergence-damping
@@ -414,7 +428,8 @@ classic ``\\sin^2`` profile.
     just below the sponge, prefer ``\\text{rate} ≈ 0.1`` and a deeper
     layer.
 
-- `depth`: sponge-layer thickness below the lid, in metres. Default `5e3`.
+- `depth`: sponge-layer thickness below the lid, in metres along the
+  reference vertical coordinate. Default `5e3`.
 
   Should span at least ~10 grid cells in the vertical to give the smooth
   profile room to absorb without aliasing; for ``Δz ≈ 1\\,\\text{km}`` the
@@ -426,8 +441,9 @@ classic ``\\sin^2`` profile.
   [`LinearRamp()`](@ref). Custom shapes are supported by subtyping
   `AbstractRamp` and defining `(::MyRamp)(z, sponge_top, depth)`.
 
-The ramp is z-only (no horizontal variation), so the sponge does not
-break zonal symmetry.
+The ramp depends only on the reference vertical coordinate (no horizontal
+variation), so the sponge does not break zonal symmetry and remains uniform
+over terrain-following grids.
 """
 struct UpperSponge{FT, R <: AbstractRamp}
     damping_rate :: FT
@@ -474,18 +490,30 @@ struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistri
     substeps :: N
     acoustic_cfl :: FT
     forward_weight :: FT
+    thermodynamic_tendency_factor :: FT
+    vertical_momentum_tendency_factor :: FT
+    vertical_pressure_tendency_factor :: FT
+    final_stage_vertical_pressure_tendency_factor :: FT
+    apply_first_substep_pressure_gradient :: Bool
     damping :: D
     sponge :: US
     substep_distribution :: AD
+    open_boundary_relaxation :: FT
 end
 
 function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          substeps = nothing,
                                          acoustic_cfl = FT(0.5),
                                          forward_weight = FT(0.65),
+                                         thermodynamic_tendency_factor = FT(1),
+                                         vertical_momentum_tendency_factor = FT(1),
+                                         vertical_pressure_tendency_factor = FT(1),
+                                         final_stage_vertical_pressure_tendency_factor = FT(1),
+                                         apply_first_substep_pressure_gradient = false,
                                          damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
-                                         substep_distribution = ProportionalSubsteps())
+                                         substep_distribution = ProportionalSubsteps(),
+                                         open_boundary_relaxation = FT(0.5))
 
     damping isa AcousticDampingStrategy ||
         throw(ArgumentError("`damping` must be an `AcousticDampingStrategy`"))
@@ -496,13 +524,22 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
     acoustic_cfl > 0 ||
         throw(ArgumentError("`acoustic_cfl` must be positive (got $(acoustic_cfl))"))
 
+    0 < open_boundary_relaxation ≤ 1 ||
+        throw(ArgumentError("`open_boundary_relaxation` must be in (0, 1] (got $(open_boundary_relaxation))"))
+
     return SplitExplicitTimeDiscretization(
         substeps,
         convert(FT, acoustic_cfl),
         convert(FT, forward_weight),
+        convert(FT, thermodynamic_tendency_factor),
+        convert(FT, vertical_momentum_tendency_factor),
+        convert(FT, vertical_pressure_tendency_factor),
+        convert(FT, final_stage_vertical_pressure_tendency_factor),
+        Bool(apply_first_substep_pressure_gradient),
         convert_acoustic_parameter(FT, damping),
         convert_acoustic_parameter(FT, sponge),
         substep_distribution,
+        convert(FT, open_boundary_relaxation),
     )
 end
 

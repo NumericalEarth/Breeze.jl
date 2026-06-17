@@ -81,6 +81,8 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
+    azimuthal_mean,
+    azimuthal_mean!,
     compute_hydrostatic_pressure!,
     set_to_mean!,
 
