@@ -43,6 +43,10 @@ validation_output/
 # Validation studies commit the figures they produce (rendered manually, not built in CI)
 !validation/**/*.png
 
+# Willson reference data is downloaded manually (see refdata/DOWNLOAD.md), not committed
+validation/DCMIP2016_TC/refdata/*
+!validation/DCMIP2016_TC/refdata/DOWNLOAD.md
+
 # other files we don't want
 *.swp
 *.DS_Store
