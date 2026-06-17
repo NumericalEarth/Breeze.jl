@@ -521,6 +521,29 @@ function Oceananigans.prognostic_fields(model::AtmosphereModel)
     return merge(dynamics_fields, model.momentum, thermodynamic_fields, μ_fields, model.tracers)
 end
 
+#####
+##### Checkpointing
+#####
+
+# Restore only what a self-starting Runge–Kutta step needs: the clock and the prognostic
+# fields. Tendencies (`Gⁿ`) are recomputed from scratch each step, so the timestepper carries
+# no state across the checkpoint boundary. Without this method, the checkpointer falls back to
+# `prognostic_state(obj) = obj` and serializes the *entire* model — every `Field` (including the
+# grid and diagnostics) as a device array — which both bloats the file and, on restore,
+# reconstructs a duplicate device array per field and exhausts GPU memory at pickup.
+function Oceananigans.prognostic_state(model::AtmosphereModel)
+    return (clock = Oceananigans.prognostic_state(model.clock),
+            prognostic_fields = Oceananigans.prognostic_state(prognostic_fields(model)))
+end
+
+function Oceananigans.restore_prognostic_state!(model::AtmosphereModel, from)
+    Oceananigans.restore_prognostic_state!(model.clock, from.clock)
+    Oceananigans.restore_prognostic_state!(prognostic_fields(model), from.prognostic_fields)
+    return model
+end
+
+Oceananigans.restore_prognostic_state!(::AtmosphereModel, ::Nothing) = nothing
+
 Models.boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
 
 function total_energy(model)
