@@ -1,13 +1,15 @@
 # # DCMIP2016 tropical cyclone: resolution and advection intercomparison
 #
 # This study quantifies how the numerics — horizontal resolution, advection order, and
-# vertical level placement — control the intensification of the DCMIP2016 Reed–Jablonowski
-# tropical cyclone in Breeze.jl. The analytic balanced vortex (Reed & Jablonowski 2011;
-# Ullrich et al. 2016, DCMIP2016;
-# [Willson et al. 2024, GMD 17:2493](https://doi.org/10.5194/gmd-17-2493-2024)) is a
-# standard non-hydrostatic dynamical-core benchmark: a weak warm-core vortex placed in a
-# quiescent moist tropical sounding intensifies into a tropical cyclone over ~10 days,
-# driven entirely by bulk surface enthalpy fluxes over a fixed 302.15 K sea surface.
+# vertical level placement — control the intensification of the Reed–Jablonowski tropical
+# cyclone ([Reed & Jablonowski 2012](https://doi.org/10.1029/2011MS000099)) in Breeze.jl.
+# The analytic balanced vortex is a standard non-hydrostatic dynamical-core benchmark
+# of the 2016 Dynamical Core Intercomparison Project (DCMIP)
+# ([Ullrich et al. 2016](https://doi.org/10.5194/gmd-10-4477-2017);
+# [Willson et al. 2024](https://doi.org/10.5194/gmd-17-2493-2024)): a weak warm-core
+# vortex placed in a quiescent moist tropical sounding intensifies into a tropical
+# cyclone over ~10 days, driven entirely by bulk surface enthalpy fluxes over a fixed
+# 302.15 K sea surface.
 #
 # The model configuration — vortex, sounding, lid, and the complete Reed–Jablonowski
 # "simple physics" (wind-dependent surface drag, wind-dependent boundary-layer mixing, and
@@ -15,15 +17,15 @@
 # we hold all of that fixed and run two studies:
 #
 #   * **Study 1** — horizontal resolution (**0.5°** vs **0.25°**) × advection order
-#     (**WENO5** vs **WENO9**): a 2×2 matrix.
-#   * **Study 2** — vertical level configuration at fixed 0.5° WENO9: the 32-level baseline,
-#     a count-doubled 64-level grid, and a 64-level grid with levels re-placed into the
+#     (**WENO5** vs **WENO9**).
+#   * **Study 2** — effective vertical resolution at fixed 0.5° WENO9: the 32-level baseline,
+#     a count-doubled 64-level grid, and a 64-level grid with levels clustered in the
 #     5–14 km updraft layer.
 #
-# The diagnostic of record is the minimum sea-level pressure (MSP) — the canonical
-# TC-intensity metric — together with the mature-storm azimuthally-averaged radial pressure
-# structure (days 4–10), compared against the balanced tropical cyclone reported by Willson
-# et al. (2024, their Figs. 5 and 7).
+# The TC intensity metrics of interest are the minimum sea-level pressure (MSP) and maximum
+# tangential wind at 1 km atltitude (MWS) — together with the mature-storm (days 4-10)
+# azimuthally-averaged storm structure, compared against the balanced tropical cyclone
+# reported by Willson et al. (2024, their Figs. 5 and 7).
 #
 # > **Compute.** These are 10-day global runs and are **not** part of the docs/CI build. Run
 # > this script on a GPU node (`julia --project dcmip2016_tc_intercomparison.jl`); the six
@@ -262,3 +264,54 @@ end
 # rigid lid has no absorbing sponge, leaving a weak gravity-wave reflection that does not
 # materially affect the surface intensity but should be kept in mind for upper-level
 # diagnostics.
+
+# ## Comparison with Willson et al. (2024)
+#
+# The point of the DCMIP2016 protocol is the multi-model intercomparison, so we place Breeze
+# directly against the [Willson et al. (2024)](https://doi.org/10.5194/gmd-17-2493-2024) ensemble,
+# reproducing their Figs. 5, 7, and 8. The published profiles (the nine models at 50 km, five also
+# at 25 km, processed with TempestExtremes) are from the Willson Dryad archive in `refdata/`. For a
+# fair comparison Breeze is reduced through the *same* TempestExtremes-equivalent pipeline — a
+# stable sub-grid storm center and a ring-interpolation azimuthal-mean **tangential** wind on the
+# published radial grid (`extract_willson_comparison_data.jl`) — and overlaid by
+# `plot_willson_comparison.jl`. The Breeze curves are WENO5 and WENO9 at 0.25°.
+#
+# > **Reproduction.** Unlike the figures above (surface pressure only), these need the 3-D `(u,v)`
+# > field output and the reference data, so they are built by the companion scripts rather than by
+# > this run: download `refdata/` (see `refdata/DOWNLOAD.md`), run the WENO5/WENO9 0.25° cases with
+# > velocity output, then `julia extract_willson_comparison_data.jl <weno5_dir> <weno9_dir>`
+# > (writes `postproc/breeze_*_010.csv`) and `julia plot_willson_comparison.jl` (writes
+# > `postproc/willson_fig{5,7,8}.png`).
+#
+# ### Intensity time series — cf. Willson et al. (2024), Fig. 5
+#
+# Minimum sea-level pressure (top) and maximum 1 km tangential wind (bottom) versus time.
+#
+# ![Comparison with Willson et al. (2024) Fig. 5](postproc/willson_fig5_intensity.png)
+#
+# Breeze WENO9 (0.25°) intensifies to ≈ 921 hPa with a peak azimuthal-mean 1 km tangential wind
+# ≈ 59–66 m/s — the **intense end** of the ensemble, alongside CAM-SE; WENO5 is weaker and mid-pack.
+# FV3 (50 km, black) is the intense-group benchmark.
+#
+# ### Mature radial structure — cf. Willson et al. (2024), Fig. 7
+#
+# Days-4–10 azimuthal-mean surface pressure (top) and 1 km tangential wind (bottom) versus radius.
+#
+# ![Comparison with Willson et al. (2024) Fig. 7](postproc/willson_fig7_radial.png)
+#
+# Breeze lies on the ensemble's universal wind–pressure structure — the right wind for a given
+# central pressure — with WENO9 in the intense group. Its eyewall is notably **compact**, RMW
+# ≈ 50–60 km versus FV3's ≈ 100 km — a genuine feature (the radius is set by the resolved dynamics,
+# not by the diagnostic).
+#
+# ### Radius–height tangential wind — cf. Willson et al. (2024), Fig. 8
+#
+# Days-4–10 azimuthal-mean tangential-wind composites, one row per model: FV3 (50 km), then ACME-A,
+# CAM-SE, Breeze-WENO5, and Breeze-WENO9 (25 km / 0.25°). A cyclonic (red) vortex below the
+# tropopause is capped by the anticyclonic (blue) upper-level outflow.
+#
+# ![Comparison with Willson et al. (2024) Fig. 8](postproc/willson_fig8_rz.png)
+#
+# Breeze reproduces the published intense models' structure — a deep cyclonic core capped by the
+# outflow anticyclone — with a tighter but smooth eyewall, consistent with its higher effective
+# resolution at fixed grid spacing.

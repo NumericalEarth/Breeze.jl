@@ -72,9 +72,16 @@ function build_html(studies)
         # simulations. Rendered into the staging tree; the committed GitHub markdown is untouched.
         Literate.markdown(joinpath(studydir, doc), outdir;
                           flavor = Literate.CommonMarkFlavor(), execute = false)
-        # Copy the committed figures so the document's relative image links resolve.
-        for f in readdir(studydir)
-            endswith(f, ".png") && cp(joinpath(studydir, f), joinpath(outdir, f); force = true)
+        # Copy the committed figures so the document's relative image links resolve, including
+        # any in subdirectories (e.g. the Willson comparison PNGs under postproc/).
+        for (root, _, files) in walkdir(studydir)
+            rel = relpath(root, studydir)
+            for f in files
+                endswith(f, ".png") || continue
+                dest = rel == "." ? outdir : joinpath(outdir, rel)
+                mkpath(dest)
+                cp(joinpath(root, f), joinpath(dest, f); force = true)
+            end
         end
         push!(pages, title => joinpath(dir, splitext(doc)[1] * ".md"))
     end
