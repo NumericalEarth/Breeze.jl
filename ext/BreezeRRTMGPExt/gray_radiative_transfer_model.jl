@@ -410,7 +410,7 @@ function update_rrtmgp_state!(rrtmgp_state::GrayAtmosphericState, model, surface
     # Temperature field (actual temperature from model state)
     # Reference state provides the hydrostatic pressure profile
     # In the anelastic approximation, pressure ≈ reference pressure
-    p = model.dynamics.reference_state.pressure
+    p = radiation_reference_pressure(model.dynamics)
     T = model.temperature
     T₀ = surface_temperature
 

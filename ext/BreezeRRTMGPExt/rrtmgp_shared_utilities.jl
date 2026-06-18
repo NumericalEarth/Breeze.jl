@@ -9,17 +9,43 @@ using Oceananigans.Utils: launch!
 using RRTMGP.AtmosphericStates: AtmosphericState
 
 using Breeze.AtmosphereModels: BackgroundAtmosphere, specific_humidity
+using Breeze.CompressibleEquations: CompressibleDynamics
 
 #####
 ##### Gas state update (shared by clear-sky and all-sky)
 #####
+
+# RRTMGP uses the hydrostatic reference pressure as the layer pressure. Anelastic dynamics
+# and compressible dynamics on a flat grid expose it as `reference_state.pressure`.
+# Compressible dynamics on a terrain-following grid leave `reference_state === nothing` (a
+# single 1D column is not hydrostatically balanced per terrain column) and carry the 3D
+# reference in `terrain_reference_pressure`; fall back to the diagnostic pressure if no
+# reference state was built.
+@inline radiation_reference_pressure(dynamics) = dynamics.reference_state.pressure
+@inline function radiation_reference_pressure(dynamics::CompressibleDynamics)
+    reference_state = dynamics.reference_state
+    reference_state === nothing || return reference_state.pressure
+    terrain_reference_pressure = dynamics.terrain_reference_pressure
+    return terrain_reference_pressure === nothing ? dynamics.pressure : terrain_reference_pressure
+end
+
+# Companion accessor for the reference density (used by cloud-state water paths), with the
+# same logic: reference_state.density (anelastic / flat compressible), else
+# terrain_reference_density (terrain compressible), else the prognostic density.
+@inline radiation_reference_density(dynamics) = dynamics.reference_state.density
+@inline function radiation_reference_density(dynamics::CompressibleDynamics)
+    reference_state = dynamics.reference_state
+    reference_state === nothing || return reference_state.density
+    terrain_reference_density = dynamics.terrain_reference_density
+    return terrain_reference_density === nothing ? dynamics.density : terrain_reference_density
+end
 
 function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperature,
                                   background_atmosphere::BackgroundAtmosphere, params)
     grid = model.grid
     arch = architecture(grid)
 
-    pᵣ = model.dynamics.reference_state.pressure
+    pᵣ = radiation_reference_pressure(model.dynamics)
     T = model.temperature
     qᵛ = specific_humidity(model)
 
