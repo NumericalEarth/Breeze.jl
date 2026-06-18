@@ -1355,6 +1355,39 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         @test maximum(abs, grid_2.z.formulation.h₂) > 0
     end
 
+    @testset "TwoLevelDecay precomputed decay basis matches analytic bₙ(r)" begin
+        TFD = Breeze.TerrainFollowingDiscretization
+        Nx, Nz = 8, 16
+        Lz = 10000.0
+        s₁, s₂ = 6000.0, 1500.0
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length = Nz+1));
+                      formulation = TwoLevelDecay(large_scale_height = s₁, small_scale_height = s₂))
+        grid = RectilinearGrid(default_arch; size = (Nx, Nz), halo = (5, 5),
+                               x = (0, 1000), z = z_faces, topology = (Periodic, Flat, Bounded))
+        materialize_terrain!(grid, x -> 100.0)
+        f = grid.z.formulation
+        z_top = f.z_top
+
+        # The materialized basis must reproduce the analytic bₙ(r), bₙ′(r) at the
+        # Center and Face reference nodes (same b evaluated at the same r).
+        for k in 1:Nz
+            rc = rnode(k, grid, Center())
+            @test @allowscalar(f.basis.b₁ᶜ[1, 1, k])  ≈ TFD.b_two_level(rc, z_top, s₁)  rtol=1e-5
+            @test @allowscalar(f.basis.b₂ᶜ[1, 1, k])  ≈ TFD.b_two_level(rc, z_top, s₂)  rtol=1e-5
+            @test @allowscalar(f.basis.∂b₁ᶜ[1, 1, k]) ≈ TFD.b′_two_level(rc, z_top, s₁) rtol=1e-5
+            @test @allowscalar(f.basis.∂b₂ᶜ[1, 1, k]) ≈ TFD.b′_two_level(rc, z_top, s₂) rtol=1e-5
+        end
+        for k in 1:Nz+1
+            rf = rnode(k, grid, Face())
+            @test @allowscalar(f.basis.b₁ᶠ[1, 1, k])  ≈ TFD.b_two_level(rf, z_top, s₁)  rtol=1e-5
+            @test @allowscalar(f.basis.∂b₂ᶠ[1, 1, k]) ≈ TFD.b′_two_level(rf, z_top, s₂) rtol=1e-5
+        end
+
+        # b(r) decays from 1 at the surface (r=0) toward 0 at the model top.
+        @test @allowscalar(f.basis.b₁ᶠ[1, 1, 1]) ≈ 1 rtol=1e-6
+        @test abs(@allowscalar(f.basis.b₁ᶠ[1, 1, Nz+1])) < 1e-6
+    end
+
     @testset "LLG: explicit time stepping with terrain" begin
         Nλ, Nφ, Nz = 12, 10, 6
         Lz = 10000.0
