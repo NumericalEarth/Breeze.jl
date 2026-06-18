@@ -41,13 +41,13 @@ end
 $(TYPEDSIGNATURES)
 
 Construct an `InstantaneousPrecipitation` scheme. `equilibrium` selects the phase
-equilibrium used by the underlying saturation solve (default warm-phase).
+equilibrium used by the underlying saturation solve (default warm-phase), and `solver`
+controls its iteration (see [`SaturationAdjustment`](@ref)).
 """
 function InstantaneousPrecipitation(FT::DataType=Oceananigans.defaults.FloatType;
                                          equilibrium = WarmPhaseEquilibrium(),
-                                         tolerance = 1e-3,
-                                         maxiter = Inf)
-    sa = SaturationAdjustment(FT; tolerance, maxiter, equilibrium)
+                                         solver = SecantSolver(FT))
+    sa = SaturationAdjustment(FT; solver, equilibrium)
     return InstantaneousPrecipitation(sa)
 end
 
