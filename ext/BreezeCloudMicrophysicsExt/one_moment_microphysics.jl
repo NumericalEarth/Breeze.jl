@@ -113,7 +113,7 @@ using Breeze.Microphysics
 cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 # output
-SaturationAdjustment{WarmPhaseEquilibrium, Float64}(0.001, Inf, WarmPhaseEquilibrium())
+SaturationAdjustment{WarmPhaseEquilibrium, Breeze.Solvers.SecantSolver{Float64}}(WarmPhaseEquilibrium(), SecantSolver(reltol=0.0, abstol=0.0001, maxiter=20))
 ```
 
 # Keyword arguments
@@ -181,7 +181,7 @@ const zf = ZeroField()
 @inline AM.microphysical_velocities(bμp::OMCM, μ, ::Val{:ρqʳ}) = (u=zf, v=zf, w=μ.wʳ)
 
 # ImpenetrableBoundaryCondition alias
-const IBC = BoundaryCondition{<:Open, Nothing}
+const IBC = BoundaryCondition{<:NormalFlow, Nothing}
 
 # Helper for bottom terminal velocity based on precipitation_boundary_condition
 # Used in update_microphysical_fields! to set wʳ[bottom] = 0 for ImpenetrableBoundaryCondition

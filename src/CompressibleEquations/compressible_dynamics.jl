@@ -2,6 +2,11 @@
 ##### CompressibleDynamics definition
 #####
 
+using Breeze.TerrainFollowingDiscretization: TerrainMetrics,
+                                              TerrainFollowingVerticalDiscretization,
+                                              SlopeOutsideInterpolation,
+                                              build_terrain_metrics
+
 """
 $(TYPEDEF)
 
@@ -17,15 +22,17 @@ Fields
 - `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref) or [`ExplicitTimeStepping`](@ref))
 - `reference_state`: Fixed hydrostatically-balanced reference state for base-state pressure correction (`nothing` or [`ExnerReferenceState`](@ref))
 - `terrain_metrics`: [`TerrainMetrics`](@ref) for terrain-following coordinates (or `nothing`)
-- `Ω̃`, `ρΩ̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
+- `w̃`, `ρw̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
 - `terrain_reference_pressure`, `terrain_reference_density`: 3D reference pressure / density for the terrain pressure gradient force (or `nothing`)
-- `temperature_tolerance`, `temperature_maxiter`: relative convergence tolerance on the moist
-  equation-of-state temperature inversion step `|ΔT|/T`, and the iteration cap on that solve
 
 The `time_discretization` determines how tendencies are computed and which
 time-stepper is used:
 - [`SplitExplicitTimeDiscretization`](@ref): Acoustic substepping with separate slow/fast tendencies
 - [`ExplicitTimeStepping`](@ref): All tendencies computed together (small Δt required)
+
+The moist equation-of-state θˡⁱ→T temperature inversion is controlled by the
+thermodynamic formulation, not the dynamics: see `temperature_solver` on
+`LiquidIcePotentialTemperatureFormulation`.
 """
 struct CompressibleDynamics{TD, D, P, FT, RS, TM, CV, CM, TRP, TRD}
     time_discretization :: TD                  # SplitExplicitTimeDiscretization or ExplicitTimeStepping
@@ -35,12 +42,10 @@ struct CompressibleDynamics{TD, D, P, FT, RS, TM, CV, CM, TRP, TRD}
     surface_pressure :: FT                     # p₀ (mean pressure at the bottom of the atmosphere)
     reference_state :: RS                      # ExnerReferenceState for base-state pressure correction (or Nothing)
     terrain_metrics :: TM                      # TerrainMetrics for terrain-following coordinates (or Nothing)
-    contravariant_vertical_velocity :: CV      # Ω̃ diagnostic field (or Nothing)
-    contravariant_vertical_momentum :: CM      # ρΩ̃ diagnostic field (or Nothing)
+    contravariant_vertical_velocity :: CV      # w̃ diagnostic field (or Nothing)
+    contravariant_vertical_momentum :: CM      # ρw̃ diagnostic field (or Nothing)
     terrain_reference_pressure :: TRP          # 3D reference pressure for terrain PG (or Nothing)
     terrain_reference_density :: TRD           # 3D reference density for terrain buoyancy (or Nothing)
-    temperature_tolerance :: FT                # relative convergence tol |ΔT|/T for the moist EOS θˡⁱ→T inversion
-    temperature_maxiter :: Int                 # iteration cap for the moist EOS temperature inversion
 end
 
 """
@@ -64,38 +69,56 @@ Keyword Arguments
   hydrostatically-balanced reference state used in base-state subtraction. Can be a constant `θ₀`
   or a function `θ(z)`. Default: `nothing` (no base-state correction).
   When provided, an [`ExnerReferenceState`](@ref) is built during materialization.
-- `temperature_tolerance`: relative convergence tolerance on the moist EOS temperature
-  inversion step `|ΔT|/T` (default: `1e-8`)
-- `temperature_maxiter`: maximum number of moist EOS temperature inversion iterations
-  (default: `8`)
+- `reference_vapor_mass_fraction`: Optional vapor mass fraction for building a moist
+  compressible reference state. Can be a constant `qᵛ`, function `qᵛ(z)`, or field,
+  and is used with `reference_potential_temperature`.
+- `slope_stencil`: Pressure-gradient slope-interpolation stencil for terrain-following grids.
+  Default: [`SlopeOutsideInterpolation`](@ref). Ignored on non-terrain-following grids.
+- `terrain_metrics`: Escape hatch — pass a pre-built [`TerrainMetrics`](@ref) to bypass the
+  automatic build. Default: `nothing` (auto-build from the grid using `slope_stencil`).
 """
 function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               standard_pressure = 1e5,
                               surface_pressure = 101325.0,
                               reference_potential_temperature = nothing,
                               reference_temperature = nothing,
+                              reference_vapor_mass_fraction = nothing,
+                              slope_stencil = SlopeOutsideInterpolation(),
                               terrain_metrics = nothing,
-                              temperature_tolerance = 1e-8,
-                              temperature_maxiter = 8) where TD
+                              temperature_tolerance = nothing,
+                              temperature_maxiter = nothing) where TD
+
+    if temperature_tolerance !== nothing || temperature_maxiter !== nothing
+        throw(ArgumentError("The `temperature_tolerance` and `temperature_maxiter` keyword arguments \
+                             have moved from `CompressibleDynamics` to the thermodynamic formulation. \
+                             Use, for example, \
+                             `formulation = LiquidIcePotentialTemperatureFormulation(temperature_solver = NewtonSolver(abstol=1e-4, maxiter=8))`, \
+                             `temperature_solver = FixedIterations(2)` for Reactant / differentiable runs, \
+                             or `temperature_solver = nothing` for the non-iterated closed-form inversion."))
+    end
 
     FT = float(promote_type(typeof(standard_pressure), typeof(surface_pressure)))
     pˢᵗ = convert(FT, standard_pressure)
     p₀ = convert(FT, surface_pressure)
-    temperature_tolerance = convert(FT, temperature_tolerance)
-    temperature_maxiter = Int(temperature_maxiter)
     # Store reference spec temporarily; ExnerReferenceState is built in materialize_dynamics.
-    # If reference_temperature is given, store it as a NamedTuple to distinguish from θ₀.
+    # If reference_temperature or reference_vapor_mass_fraction is given, wrap in a
+    # NamedTuple to distinguish from a bare θ₀ spec.
     ref_spec = if reference_temperature !== nothing
-        (; reference_temperature)
+        (; reference_temperature, reference_vapor_mass_fraction)
+    elseif reference_vapor_mass_fraction !== nothing
+        (; reference_potential_temperature, reference_vapor_mass_fraction)
     else
         reference_potential_temperature
     end
-    # contravariant fields, terrain_reference_pressure, and terrain_reference_density
-    # are built later in materialize_dynamics.
+    # Stash either a pre-built TerrainMetrics (escape hatch) or the stencil flavor in the
+    # `terrain_metrics` slot. `materialize_dynamics` resolves it: a stencil instance triggers
+    # `build_terrain_metrics(grid, stencil)` for TFVD grids; on non-TFVD grids the slot is
+    # zeroed regardless. contravariant fields, terrain_reference_pressure, and
+    # terrain_reference_density are built later in materialize_dynamics.
+    terrain_metrics_spec = terrain_metrics === nothing ? slope_stencil : terrain_metrics
     return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, ref_spec,
-                                terrain_metrics,
-                                nothing, nothing, nothing, nothing,
-                                temperature_tolerance, temperature_maxiter)
+                                terrain_metrics_spec,
+                                nothing, nothing, nothing, nothing)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
@@ -109,9 +132,30 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.contravariant_vertical_velocity),
                          adapt(to, dynamics.contravariant_vertical_momentum),
                          adapt(to, dynamics.terrain_reference_pressure),
-                         adapt(to, dynamics.terrain_reference_density),
-                         dynamics.temperature_tolerance,
-                         dynamics.temperature_maxiter)
+                         adapt(to, dynamics.terrain_reference_density))
+
+# The compressible θˡⁱ→T inversion is implicit (T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ), so the
+# default temperature solver iterates to convergence. The anelastic inversion is
+# closed-form and uses the generic `nothing` fallback.
+AtmosphereModels.default_temperature_solver(::CompressibleDynamics) = NewtonSolver()
+
+# Translate a stored reference spec — a bare θ₀, a (; reference_temperature, …)
+# NamedTuple, or a (; reference_potential_temperature, …) NamedTuple — into the
+# kwargs accepted by `ExnerReferenceState`. A `nothing` θ in the NamedTuple is
+# elided so `ExnerReferenceState`'s own `potential_temperature = 288` default
+# takes effect.
+exner_kwargs(ref_spec) = (; potential_temperature = ref_spec)
+function exner_kwargs(ref_spec::NamedTuple)
+    if haskey(ref_spec, :reference_temperature)
+        return (; reference_temperature = ref_spec.reference_temperature,
+                  vapor_mass_fraction = ref_spec.reference_vapor_mass_fraction)
+    elseif ref_spec.reference_potential_temperature === nothing
+        return (; vapor_mass_fraction = ref_spec.reference_vapor_mass_fraction)
+    else
+        return (; potential_temperature = ref_spec.reference_potential_temperature,
+                  vapor_mass_fraction = ref_spec.reference_vapor_mass_fraction)
+    end
+end
 
 #####
 ##### Materialization
@@ -135,7 +179,6 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     FT = eltype(grid)
     standard_pressure = convert(FT, dynamics.standard_pressure)
     surface_pressure = convert(FT, dynamics.surface_pressure)
-    temperature_tolerance = convert(FT, dynamics.temperature_tolerance)
 
     # Build reference state from the stored spec (θ₀, T₀ NamedTuple, or nothing).
     # ExnerReferenceState builds the Exner function π₀ by discrete integration,
@@ -147,22 +190,25 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     # other columns that generates spurious vertical accelerations. Instead, terrain
     # grids use only the 3D terrain_reference_pressure for the horizontal PG.
     ref_spec = dynamics.reference_state
-    terrain_metrics = dynamics.terrain_metrics
+
+    # Resolve terrain metrics: nothing on non-TFVD grids; on TFVD grids, a pre-built
+    # `TerrainMetrics` passes through, anything else (a stencil flavor like
+    # `SlopeOutsideInterpolation()`) drives `build_terrain_metrics(grid, ·)`.
+    terrain_metrics_spec = dynamics.terrain_metrics
+    terrain_metrics = if grid.z isa TerrainFollowingVerticalDiscretization
+        terrain_metrics_spec isa TerrainMetrics ?
+            terrain_metrics_spec :
+            build_terrain_metrics(grid, terrain_metrics_spec)
+    else
+        nothing
+    end
 
     if ref_spec === nothing || terrain_metrics !== nothing
         reference_state = nothing
-    elseif ref_spec isa NamedTuple && haskey(ref_spec, :reference_temperature)
-        # Isothermal base state (MPAS baroclinic wave convention)
-        reference_state = ExnerReferenceState(grid, thermodynamic_constants;
-                                              surface_pressure,
-                                              reference_temperature = ref_spec.reference_temperature,
-                                              standard_pressure)
     else
-        # Isentropic base state (constant or z-dependent θ₀)
         reference_state = ExnerReferenceState(grid, thermodynamic_constants;
-                                              surface_pressure,
-                                              potential_temperature = ref_spec,
-                                              standard_pressure)
+                                              surface_pressure, standard_pressure,
+                                              exner_kwargs(ref_spec)...)
     end
 
     # Create contravariant velocity/momentum fields and terrain reference state
@@ -178,7 +224,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
 
         # Build 3D reference pressure and density fields via per-column discrete
         # Exner integration. The discrete integration ensures that
-        #   δ(p_ref)/Δz + g ℑ(ρ_ref) ≈ 0
+        #   δ(pᵣ)/Δz + g ℑ(ρᵣ) ≈ 0
         # to high accuracy at every grid face, which is essential for reducing
         # the truncation error from the near-cancellation of ∂p/∂z and -gρ in
         # the vertical momentum equation. The reference pressure is also used for
@@ -215,8 +261,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
                                 terrain_metrics,
                                 contravariant_vertical_velocity,
                                 contravariant_vertical_momentum,
-                                terrain_reference_pressure, terrain_reference_density,
-                                temperature_tolerance, dynamics.temperature_maxiter)
+                                terrain_reference_pressure, terrain_reference_density)
 end
 
 function seed_pressure!(pressure, grid, pressure_reference)
@@ -341,17 +386,9 @@ function AtmosphereModels.boundary_conditions_reference_state(dynamics::Compress
     standard_pressure = dynamics.standard_pressure
     surface_pressure = dynamics.surface_pressure
 
-    if ref_spec isa NamedTuple && haskey(ref_spec, :reference_temperature)
-        return ExnerReferenceState(grid, thermodynamic_constants;
-                                   surface_pressure,
-                                   reference_temperature = ref_spec.reference_temperature,
-                                   standard_pressure)
-    else
-        return ExnerReferenceState(grid, thermodynamic_constants;
-                                   surface_pressure,
-                                   potential_temperature = ref_spec,
-                                   standard_pressure)
-    end
+    return ExnerReferenceState(grid, thermodynamic_constants;
+                               surface_pressure, standard_pressure,
+                               exner_kwargs(ref_spec)...)
 end
 
 """
@@ -431,7 +468,10 @@ end
 function AtmosphereModels.materialize_momentum_and_velocities(::CompressibleDynamics, grid, boundary_conditions)
     ρu = XFaceField(grid, boundary_conditions=boundary_conditions.ρu)
     ρv = YFaceField(grid, boundary_conditions=boundary_conditions.ρv)
-    ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)
+    # On a terrain-following grid, `ρw` gets the kinematic terrain bottom BC
+    # (ρw|₁ = slopeₓ·ρu + slopeᵧ·ρv ⟺ w̃|₁ = 0), dispatched by grid type; other
+    # grids keep their given BCs. See `terrain_ρw_boundary_conditions`.
+    ρw = ZFaceField(grid, boundary_conditions=terrain_ρw_boundary_conditions(grid, boundary_conditions.ρw))
     momentum = (; ρu, ρv, ρw)
 
     # Velocity is diagnostic (u = ρu/ρ via compute_velocities!). Use the auxiliary-field

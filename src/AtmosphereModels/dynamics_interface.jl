@@ -427,7 +427,7 @@ Return the velocity tuple used for scalar advection transport.
 
 For standard (non-terrain) models, this is `model.velocities`.
 For terrain-following coordinates, the vertical component is replaced
-by the contravariant vertical velocity ``\\tilde{\\Omega}``.
+by the contravariant vertical velocity ``\\tilde{w}``.
 """
 transport_velocities(model) = model.velocities
 
@@ -439,7 +439,7 @@ and the continuity equation divergence.
 
 For standard (non-terrain) models, this is `model.momentum`.
 For terrain-following coordinates, the vertical component `ρw` is
-replaced by the contravariant vertical momentum ``\\rho \\tilde{\\Omega}``.
+replaced by the contravariant vertical momentum ``\\rho \\tilde{w}``.
 """
 advecting_momentum(model) = model.momentum
 
