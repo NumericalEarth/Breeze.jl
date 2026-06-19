@@ -84,9 +84,17 @@ using Oceananigans.TimeSteppers: update_state!
         @test T★ > T_noniter                            # the non-iterated inversion is biased cold
         @test isapprox(T★ - T_noniter, FT(1.39) * κ * L; rtol=FT(0.15))   # gap ≈ 1.39 κΔL (leading order)
 
-        # The solver controls are honored: temperature_maxiter = 0 returns the un-iterated inversion.
-        𝒰_noniter = LiquidIceDensityState{FT}(θ, q, pˢᵗ, ρ, one(FT), 0)
+        # The solver abstraction is honored: `nothing` returns the un-iterated closed form,
+        # and `FixedIterations` (the unrolled, Reactant-safe form) matches the converged Newton.
+        𝒰_noniter = LiquidIceDensityState(θ, q, pˢᵗ, ρ, nothing)
         @test temperature(𝒰_noniter, constants) ≈ T_noniter  rtol=rtol
+
+        𝒰_fixed = LiquidIceDensityState(θ, q, pˢᵗ, ρ, FixedIterations(8))
+        @test temperature(𝒰_fixed, constants) ≈ T★  rtol=rtol
+
+        # An abstol-only Newton solver (no relative criterion) also converges to the root.
+        𝒰_abstol = LiquidIceDensityState(θ, q, pˢᵗ, ρ, NewtonSolver(FT; reltol=0, abstol=1e-6, maxiter=20))
+        @test temperature(𝒰_abstol, constants) ≈ T★  atol=FT(1e-4)
 
         # Control: with no condensate the inversion reduces to the dry closed form (no latent shift).
         qd = MoistureMassFractions(FT(0.020))
