@@ -391,6 +391,24 @@ function AtmosphereModels.boundary_conditions_reference_state(dynamics::Compress
                                exner_kwargs(ref_spec)...)
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+`BulkDrag` under `CompressibleDynamics` requires the user to supply
+`surface_temperature` explicitly. Unlike `AnelasticDynamics`, compressible
+dynamics does not carry a reference profile from which a surface temperature
+can be unambiguously derived. A clean default would require either coupling
+to a surface model or diagnosing the surface state from the prognostic fields
+(which would make ρ₀ grid-dependent and break MO consistency at the surface);
+both are out of scope for now.
+"""
+AtmosphereModels.default_drag_surface_temperature(::CompressibleDynamics, grid, constants) =
+    throw(ArgumentError(
+        "BulkDrag under CompressibleDynamics requires `surface_temperature` to be " *
+        "provided explicitly. There is no default surface temperature for compressible " *
+        "dynamics (no reference profile to draw from). Construct BulkDrag with a " *
+        "`surface_temperature` keyword (a `Number`, `Function`, or `Field`)."))
+
 #####
 ##### Pressure solver (none needed for compressible dynamics)
 #####
