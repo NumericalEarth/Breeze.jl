@@ -1541,6 +1541,25 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
         # `damp_vertical=false`.
         dᵐ⁺, dˢ⁻ = implicit_damping_factors(substepper.damping, ω, one_minus_ω, grid, FT)
 
+      if get(ENV, "FUSE_ACOUSTIC", "0") == "1"
+        # EXPERIMENT (abandoned, −24%): fuse Steps B+C+D into one :xy kernel. See
+        # fused_acoustic_substep.jl. Off by default.
+        launch!(arch, grid, :xy, _fused_acoustic_substep!,
+                substepper.density_perturbation,
+                substepper.density_potential_temperature_perturbation,
+                substepper.momentum_perturbation.w,
+                substepper.momentum_perturbation.u, substepper.momentum_perturbation.v,
+                substepper.density_predictor,
+                substepper.density_potential_temperature_predictor,
+                substepper.vertical_solver.t,
+                grid, model.dynamics, Δτ, δτᵐ⁺, δτˢ⁻, dᵐ⁺, dˢ⁻,
+                Gⁿ.ρ, Gˢρθ, substepper.slow_vertical_momentum_tendency,
+                substepper.thermodynamic_tendency_factor,
+                substepper.vertical_momentum_tendency_factor,
+                substepper.linearization_potential_temperature, substepper.linearization_exner,
+                substepper.linearization_gamma_R_mixture, g,
+                substepper.sponge, apply_pressure_gradient)
+      else
         # Step B: build predictors `ρ′★`, `ρθ′★` and the tridiag RHS for (ρw)′ᵐ⁺
         launch!(arch, grid, :xy, _build_predictors_and_vertical_rhs!,
                 substepper.momentum_perturbation.w,
@@ -1579,6 +1598,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
                 substepper.density_potential_temperature_predictor,
                 grid, model.dynamics, δτᵐ⁺,
                 substepper.linearization_potential_temperature)
+      end
 
         # Per-substep open-boundary enforcement (issue #738): relax the outermost
         # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before

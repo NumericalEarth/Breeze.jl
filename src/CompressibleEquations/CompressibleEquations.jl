@@ -79,5 +79,6 @@ include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
+include("fused_acoustic_substep.jl")   # EXPERIMENT (abandoned, opt-in FUSE_ACOUSTIC)
 
 end # module
