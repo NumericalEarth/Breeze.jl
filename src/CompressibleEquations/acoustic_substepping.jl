@@ -147,8 +147,8 @@ Per-column scratch (column kernel only):
 
 - `density_predictor`, `density_potential_temperature_predictor`: explicit
   predictors built before the implicit vertical solve.
-- `previous_density_potential_temperature_perturbation`: ``η`` from the
-  previous substep, used by Klemp 2018 damping.
+- `horizontal_divergence`: scratch for the horizontal mass divergence
+  ``∂x(ρu)′ + ∂y(ρv)′``, recomputed each substep for the Klemp 2018 damping.
 
 Time-averaged velocity for non-acoustic scalar transport (WRF/MPAS-style
 dynamics-transport split):
@@ -204,7 +204,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
 
     density_predictor :: CF
     density_potential_temperature_predictor :: CF
-    previous_density_potential_temperature_perturbation :: CF
+    horizontal_divergence :: CF
 
     # Time-averaged velocities for non-acoustic scalar advection (WRF/MPAS
     # dynamics-transport split).
@@ -250,7 +250,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                         w = adapt(to, a.momentum_perturbation.w)),
                        adapt(to, a.density_predictor),
                        adapt(to, a.density_potential_temperature_predictor),
-                       adapt(to, a.previous_density_potential_temperature_perturbation),
+                       adapt(to, a.horizontal_divergence),
                        (u = adapt(to, a.time_averaged_velocities.u),
                         v = adapt(to, a.time_averaged_velocities.v),
                         w = adapt(to, a.time_averaged_velocities.w)),
@@ -314,7 +314,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     density_predictor                                = CenterField(grid)
     density_potential_temperature_predictor          = CenterField(grid)
-    previous_density_potential_temperature_perturbation = CenterField(grid)
+    horizontal_divergence = CenterField(grid)
 
     # Substep-averaged velocities for scalar transport.
     time_averaged_velocities = (u = XFaceField(grid),
@@ -348,7 +348,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               momentum_perturbation,
                               density_predictor,
                               density_potential_temperature_predictor,
-                              previous_density_potential_temperature_perturbation,
+                              horizontal_divergence,
                               time_averaged_velocities,
                               slow_vertical_momentum_tendency,
                               vertical_solver)
@@ -873,8 +873,8 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     grid = model.grid
     arch = architecture(grid)
 
-    # Auxiliary workspaces: zero.
-    fill!(parent(substepper.previous_density_potential_temperature_perturbation), 0)
+    # Auxiliary workspaces: zero. (`horizontal_divergence` is recomputed each
+    # substep before the damping, so it needs no stage-init zero.)
     fill!(parent(substepper.density_predictor), 0)
     fill!(parent(substepper.density_potential_temperature_predictor), 0)
 
@@ -1140,68 +1140,73 @@ end
     return (convert(FT, ω) * base, convert(FT, one_minus_ω) * base)
 end
 
-# Klemp, Skamarock & Ha (2018) acoustic divergence damping (MPAS form).
-# In the linearized acoustic mode,
-#   (ρθ)′ − (ρθ)′ˢ⁻ ≈ −Δτ · θᴸ · ∇·((ρu)′, (ρv)′, (ρw)′)
-# so D ≡ ((ρθ)′ − (ρθ)′ˢ⁻) / θᴸ is a discrete proxy for −Δτ · ∇·(ρu)′.
-# The default per-substep momentum correction is horizontal:
-#   Δ(ρu)′ = −γ · ∂x D , Δ(ρv)′ = −γ · ∂y D
-# with per-direction horizontal diffusivities:
-#   γˣ = α · Δx² / Δτ,   γʸ = α · Δy² / Δτ
-# or, when `length_scale = ℓ` is specified, fixed diffusivity
-#   γ = α · ℓ² / Δτ
-# in both horizontal directions.
-# If `damp_vertical = true`, the vertical contribution
-#   γ_z = α · Δz² / Δτ
-# is folded into the column tridiag instead of applied as a post-substep
-# correction.
-# `α` is the dimensionless Klemp 2018 coefficient (`config_smdiv` in MPAS,
-# default 0.1). Linear stability of the explicit forward-Euler horizontal
-# step gives `A(k) = 1 − 4α · Σᵢ sin²(kᵢ Δxᵢ/2)`; worst case (2-D Nyquist)
-# is `8α ≤ 2 → α ≤ 0.25`; we default to 0.1 for margin. The optional
-# vertical component is not applied by default; the default vertical acoustic
-# damping comes from off-centering (`forward_weight > 0.5`) in the implicit
-# column solve.
+# Klemp, Skamarock & Ha (2018) acoustic divergence damping (MPAS form), applied
+# per substep to the horizontal mass divergence
+#   δ ≡ ∂x(ρu)′ + ∂y(ρv)′          (terrain-aware `div_xyᶜᶜᶜ`)
+# as a horizontal momentum correction
+#   Δ(ρu)′ = γˣ · ∂x δ ,   Δ(ρv)′ = γʸ · ∂y δ
+# with per-direction diffusivities γˣ = α·Δx², γʸ = α·Δy² (or, when
+# `length_scale = ℓ` is given, the fixed γ = α·ℓ²). This is a Laplacian
+# diffusion of δ (Δδ = γ ∇²δ, mode gain 1 − γk²), strictly dissipative for
+# α ≤ 2/π² ≈ 0.2, so it damps grid-scale horizontal-acoustic divergence; we
+# default α = 0.1.
+#
+# NOTE: an earlier version damped the (ρθ)′ tendency `(ρθ)′ − (ρθ)′ˢ⁻` (a proxy
+# for −Δτ·θᴸ·∇·m) with diffusivity α·Δx²/Δτ. The Δτ cancels only when that change
+# is divergence-dominated; for an unbalanced cold start the (ρθ)′ change is O(1)
+# (hydrostatic/PGF adjustment, not divergence), so the proxy left a spurious
+# `∝ α/Δτ` horizontal force that blew up the split cold start. Damping the true
+# horizontal divergence is equivalent for a balanced acoustic wave but robust
+# (Δτ-independent, dissipative) for the transient.
+#
+# `α` is the dimensionless Klemp 2018 coefficient (`config_smdiv` in MPAS).
+# `damp_vertical = true` folds the vertical Laplacian on (ρw)′ into the column
+# tridiag (see `implicit_damping_factors`); the default vertical damping comes
+# from off-centering (`forward_weight > 0.5`).
 function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
-    FT    = eltype(grid)
-    arch  = architecture(grid)
-    α     = convert(FT, damping.coefficient)
-    Δτ_FT = convert(FT, Δτ)
+    FT   = eltype(grid)
+    arch = architecture(grid)
+    α    = convert(FT, damping.coefficient)
 
     TX, TY, _ = topology(grid)
-    x_damping_scale = TX === Flat ? NoHorizontalDampingScale() :
-                      horizontal_damping_scale(damping, α, Δτ_FT)
-    y_damping_scale = TY === Flat ? NoHorizontalDampingScale() :
-                      horizontal_damping_scale(damping, α, Δτ_FT)
+    x_damping_scale = TX === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
+    y_damping_scale = TY === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
 
-    launch!(arch, grid, :xyz, _thermal_divergence_damping!,
-            substepper.momentum_perturbation.u,
-            substepper.momentum_perturbation.v,
-            substepper.density_potential_temperature_perturbation,
-            substepper.previous_density_potential_temperature_perturbation,
-            substepper.linearization_potential_temperature,
-            grid, x_damping_scale, y_damping_scale)
+    ρu′ = substepper.momentum_perturbation.u
+    ρv′ = substepper.momentum_perturbation.v
+    δ   = substepper.horizontal_divergence
+
+    # Compute δ = ∂x(ρu)′ + ∂y(ρv)′ everywhere and fill its halos, then damp it.
+    # Two kernels: the damping reads δ at neighbours while writing ρu′/ρv′, so δ
+    # must be complete before the second launch.
+    launch!(arch, grid, :xyz, _compute_horizontal_divergence!, δ, ρu′, ρv′, grid)
+    fill_halo_regions!(δ)
+    launch!(arch, grid, :xyz, _thermal_divergence_damping!, ρu′, ρv′, δ, grid,
+            x_damping_scale, y_damping_scale)
 
     return nothing
 end
 
-@inline dρθ′(i, j, k, grid, ρθ′, ρθ′ˢ⁻) = @inbounds ρθ′[i, j, k] - ρθ′ˢ⁻[i, j, k]
+@kernel function _compute_horizontal_divergence!(δ, ρu′, ρv′, grid)
+    i, j, k = @index(Global, NTuple)
+    @inbounds δ[i, j, k] = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
+end
 
 struct NoHorizontalDampingScale end
 struct LocalHorizontalDampingScale{FT}
-    coefficient_over_Δτ :: FT
+    coefficient :: FT
 end
 
 struct FixedHorizontalDampingScale{FT}
     diffusivity :: FT
 end
 
-@inline horizontal_damping_scale(damping::ThermalDivergenceDamping{FT, Nothing}, α, Δτ) where FT =
-    LocalHorizontalDampingScale(α / Δτ)
+@inline horizontal_damping_scale(damping::ThermalDivergenceDamping{FT, Nothing}, α) where FT =
+    LocalHorizontalDampingScale(α)
 
-@inline function horizontal_damping_scale(damping::ThermalDivergenceDamping, α, Δτ)
+@inline function horizontal_damping_scale(damping::ThermalDivergenceDamping, α)
     ℓ = convert(typeof(α), damping.length_scale)
-    return FixedHorizontalDampingScale(α * ℓ^2 / Δτ)
+    return FixedHorizontalDampingScale(α * ℓ^2)
 end
 
 @inline x_damping_diffusivity(i, j, k, grid, ::NoHorizontalDampingScale) = zero(grid)
@@ -1214,36 +1219,27 @@ end
     scale.diffusivity
 
 @inline x_damping_diffusivity(i, j, k, grid, scale::LocalHorizontalDampingScale) =
-    scale.coefficient_over_Δτ * Δxᶠᶜᶜ(i, j, k, grid)^2
+    scale.coefficient * Δxᶠᶜᶜ(i, j, k, grid)^2
 
 @inline y_damping_diffusivity(i, j, k, grid, scale::LocalHorizontalDampingScale) =
-    scale.coefficient_over_Δτ * Δyᶜᶠᶜ(i, j, k, grid)^2
+    scale.coefficient * Δyᶜᶠᶜ(i, j, k, grid)^2
 
 
-# Horizontal divergence damping in the form of Klemp, Skamarock & Ha (2018)
-# eq. (36): per-substep momentum correction is the gradient of the (ρθ)′
-# tendency, divided by θᴸ at the face,
-#   Δ(ρu)′ = −γˣ · ∂x[(ρθ)′ − (ρθ)′ˢ⁻] / ℑxᶠᵃᵃ(θᴸ)
-#   Δ(ρv)′ = −γʸ · ∂y[(ρθ)′ − (ρθ)′ˢ⁻] / ℑyᵃᶠᵃ(θᴸ)
-# with local default diffusivities γˣ = α Δx² / Δτ and γʸ = α Δy² / Δτ.
-# If the user passes a fixed `length_scale`, both directions use the fixed
-# diffusivity γ = α length_scale² / Δτ for backwards-compatible tuning.
-# The vertical component lives in the column tridiag (it's a Laplacian on
-# (ρw)′ folded into the implicit acoustic solve), not here.
-@kernel function _thermal_divergence_damping!(ρu′, ρv′, ρθ′, ρθ′ˢ⁻, θᴸ, grid,
+# Damp the horizontal mass divergence δ as a Laplacian diffusion:
+#   Δ(ρu)′ = γˣ · ∂x δ ,   Δ(ρv)′ = γʸ · ∂y δ ,   γ = α·Δx² (Δτ-independent).
+# δ (`div_xyᶜᶜᶜ`) is precomputed and halo-filled by `apply_divergence_damping!`.
+# The vertical component lives in the column tridiag (a Laplacian on (ρw)′ folded
+# into the implicit acoustic solve), not here.
+@kernel function _thermal_divergence_damping!(ρu′, ρv′, δ, grid,
                                               x_damping_scale, y_damping_scale)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
-        θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
         γˣ = x_damping_diffusivity(i, j, k, grid, x_damping_scale)
-        ρu′[i, j, k] -= γˣ * ∂x_div / θᴸᶠᶜᶜ
+        ρu′[i, j, k] += γˣ * ∂xᶠᶜᶜ(i, j, k, grid, δ)
 
-        ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
-        θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
         γʸ = y_damping_diffusivity(i, j, k, grid, y_damping_scale)
-        ρv′[i, j, k] -= γʸ * ∂y_div / θᴸᶜᶠᶜ
+        ρv′[i, j, k] += γʸ * ∂yᶜᶠᶜ(i, j, k, grid, δ)
     end
 end
 
@@ -1518,11 +1514,6 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)
-
-
-        # Save (ρθ)′ before the column kernel for damping use
-        parent(substepper.previous_density_potential_temperature_perturbation) .=
-            parent(substepper.density_potential_temperature_perturbation)
 
         # CN time-step weights for this substep. δτᵐ⁺ = ω·Δτ is the
         # new-side weight (used by the matrix and the post-solve);
