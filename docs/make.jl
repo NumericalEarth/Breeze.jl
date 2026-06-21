@@ -33,7 +33,7 @@ Example(title::String, basename::String; build_always::Bool, gpu::Bool) =
     Example(title, basename, build_always, gpu)
 
 examples = [
-    # Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
+    Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
     # Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
     # Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz"; build_always=true, gpu=false),
     # Example("Shallow cumulus convection (BOMEX)", "bomex"; build_always=true, gpu=true),
