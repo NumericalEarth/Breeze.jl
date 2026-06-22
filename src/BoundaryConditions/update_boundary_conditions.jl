@@ -13,6 +13,7 @@ function Oceananigans.BoundaryConditions.update_boundary_condition!(
         bc::BoundaryCondition{<:Flux, <:BulkDragFunction}, side, field, model)
     fv = bc.condition.filtered_velocities
     update_filtered_surface_state!(fv, model)
+    update_filtered_θᵥ!(fv, filtered_θᵥ_source(bc.condition.coefficient), model)
     return nothing
 end
 
@@ -20,6 +21,7 @@ function Oceananigans.BoundaryConditions.update_boundary_condition!(
         bc::BoundaryCondition{<:Flux, <:BulkSensibleHeatFluxFunction}, side, field, model)
     fv = bc.condition.filtered_velocities
     update_filtered_surface_state!(fv, model)
+    update_filtered_θᵥ!(fv, filtered_θᵥ_source(bc.condition.coefficient), model)
     fs = bc.condition.filtered_scalar
     source = sensible_heat_source_field(bc.condition.formulation, model)
     update_filtered_surface_state!(fs, source, model)
@@ -30,6 +32,7 @@ function Oceananigans.BoundaryConditions.update_boundary_condition!(
         bc::BoundaryCondition{<:Flux, <:BulkVaporFluxFunction}, side, field, model)
     fv = bc.condition.filtered_velocities
     update_filtered_surface_state!(fv, model)
+    update_filtered_θᵥ!(fv, filtered_θᵥ_source(bc.condition.coefficient), model)
     fs = bc.condition.filtered_scalar
     source = vapor_source_field(model)
     update_filtered_surface_state!(fs, source, model)
@@ -43,6 +46,12 @@ sensible_heat_source_field(::Nothing, model) = model.formulation.potential_tempe
 
 vapor_source_field(model) = AtmosphereModels.specific_prognostic_moisture(model)
 
+# θᵥ source helper: only PolynomialCoefficient carries a virtual-potential-temperature
+# diagnostic (it's needed for the stability correction). Constant coefficients return
+# `nothing` and the θᵥ filter update becomes a no-op.
+filtered_θᵥ_source(::Number) = nothing
+filtered_θᵥ_source(c::PolynomialCoefficient) = c.virtual_potential_temperature
+
 #####
 ##### initialize_boundary_conditions! — called from initialize!(model)
 #####
@@ -53,6 +62,7 @@ function initialize_boundary_condition!(
         bc::BoundaryCondition{<:Flux, <:BulkDragFunction}, side, field, model)
     fv = bc.condition.filtered_velocities
     initialize_filtered_surface_state!(fv, model)
+    initialize_filtered_θᵥ!(fv, filtered_θᵥ_source(bc.condition.coefficient), model)
     return nothing
 end
 
@@ -60,6 +70,7 @@ function initialize_boundary_condition!(
         bc::BoundaryCondition{<:Flux, <:BulkSensibleHeatFluxFunction}, side, field, model)
     fv = bc.condition.filtered_velocities
     initialize_filtered_surface_state!(fv, model)
+    initialize_filtered_θᵥ!(fv, filtered_θᵥ_source(bc.condition.coefficient), model)
     fs = bc.condition.filtered_scalar
     source = sensible_heat_source_field(bc.condition.formulation, model)
     initialize_filtered_surface_state!(fs, source, model)
@@ -70,6 +81,7 @@ function initialize_boundary_condition!(
         bc::BoundaryCondition{<:Flux, <:BulkVaporFluxFunction}, side, field, model)
     fv = bc.condition.filtered_velocities
     initialize_filtered_surface_state!(fv, model)
+    initialize_filtered_θᵥ!(fv, filtered_θᵥ_source(bc.condition.coefficient), model)
     fs = bc.condition.filtered_scalar
     source = vapor_source_field(model)
     initialize_filtered_surface_state!(fs, source, model)

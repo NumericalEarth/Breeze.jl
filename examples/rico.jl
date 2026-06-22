@@ -172,8 +172,7 @@ nothing #hide
 # We use one-moment bulk microphysics from [CloudMicrophysics](https://clima.github.io/CloudMicrophysics.jl/dev/)
 # with cloud formatiom modeled with warm-phase saturationa adjustment and 5th-order WENO advection.
 # The one-moment scheme prognoses rain density `ρqʳ` includes autoconversion (cloud liquid → rain)
-# and accretion (cloud liquid swept up by falling rain) processes. This is a more physically-realistic
-# representation of warm-rain precipitation than the zero-moment scheme.
+# and accretion (cloud liquid swept up by falling rain) processes.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics

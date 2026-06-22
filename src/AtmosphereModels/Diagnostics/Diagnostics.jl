@@ -12,10 +12,14 @@ export
     DewpointTemperature,
     DewpointTemperatureField,
     equilibrium_saturation_specific_humidity,
+    azimuthal_mean,
+    azimuthal_mean!,
     # Interface functions extended by Microphysics
     microphysics_phase_equilibrium
 
 using DocStringExtensions: TYPEDSIGNATURES
+
+using Breeze.Solvers: SecantSolver
 
 using Breeze.Thermodynamics:
     Thermodynamics,
@@ -37,10 +41,14 @@ using Breeze.Thermodynamics:
 using Breeze.AtmosphereModels: AtmosphereModel, grid_moisture_fractions, specific_prognostic_moisture
 
 using Adapt: Adapt, adapt
+using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, Center
 using Oceananigans.AbstractOperations: KernelFunctionOperation
-using Oceananigans.Fields: Field
-using Oceananigans.Grids: znode
+using Oceananigans.Architectures: architecture
+using Oceananigans.Fields: Field, CenterField
+using Oceananigans.Grids: znode, znodes, xnode, ynode, RectilinearGrid, Bounded, Flat, Face
+using Oceananigans.Operators: Δxᶜᶜᶜ, Δyᶜᶜᶜ
+using Oceananigans.Utils: launch!
 
 # Flavor types for specific vs density-weighted diagnostics
 struct Specific end
@@ -53,5 +61,6 @@ include("potential_temperatures.jl")
 include("static_energy.jl")
 include("saturation_specific_humidity.jl")
 include("dewpoint_temperature.jl")
+include("azimuthal_mean.jl")
 
 end # module
