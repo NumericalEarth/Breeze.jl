@@ -226,7 +226,7 @@ coriolis = SphericalCoriolis(rotation_rate=Ω)
 T₀ᵣ = 250
 θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
 
-dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=0.75);
+dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=0.7);
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
