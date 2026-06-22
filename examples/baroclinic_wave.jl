@@ -51,7 +51,7 @@
 # center and is tapered smoothly to zero above 15 km:
 #
 # ```math
-# u'(λ, φ, z) = u_p \, \mathcal{T}(z) \, \exp\!\left(-\left(\frac{d}{r_p}\right)^2\right)
+# u'(λ, φ, z) = u_p \, \mathcal{T}(z) \, \exp \left( -d^2 / r_p^2 \right)
 # ```
 #
 # where ``d`` is the great-circle distance, ``r_p = 0.1\,a``, ``u_p = 1`` m/s,
