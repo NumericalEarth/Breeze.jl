@@ -22,9 +22,8 @@ using Breeze: CompressibleDynamics
                               dynamics = nothing,
                               advection = WENO(order=5),
                               closure = nothing,
-                              microphysics = nothing,
-                              )
-
+                              microphysics = nothing)
+                              
 Create an `AtmosphereModel` for the dry convective boundary layer benchmark case
 from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 
@@ -63,8 +62,7 @@ function convective_boundary_layer(arch = CPU();
                                    closure = nothing,
                                    microphysics = nothing,
                                    topology = (Periodic, Periodic, Bounded),
-                                   simplified = false,
-                                   )
+                                   simplified = false)
 
     # Set floating point precision
     Oceananigans.defaults.FloatType = float_type
@@ -96,16 +94,14 @@ function convective_boundary_layer(arch = CPU();
         # Default: anelastic dynamics with reference state
         reference_state = ReferenceState(grid, constants;
             surface_pressure = p₀,
-            potential_temperature = θ₀
-        )
+            potential_temperature = θ₀)
         dynamics = AnelasticDynamics(reference_state)
     elseif dynamics isa CompressibleDynamics
         # CompressibleDynamics is passed in pre-constructed;
         # set reference_potential_temperature for acoustic substepping if not already set
         dynamics = CompressibleDynamics(dynamics.time_discretization;
             surface_pressure = p₀,
-            reference_potential_temperature = θ₀
-        )
+            reference_potential_temperature = θ₀)
     end
 
     # Coriolis parameter for latitude 33.5° N
@@ -139,8 +135,7 @@ function convective_boundary_layer(arch = CPU();
             closure,
             coriolis,
             microphysics,
-            boundary_conditions = (ρθ = ρθ_bcs,)
-        )
+            boundary_conditions = (; ρθ = ρθ_bcs))
     else
         geostrophic = geostrophic_forcings(z -> Uᵍ, z -> Vᵍ)
 
@@ -163,8 +158,7 @@ function convective_boundary_layer(arch = CPU();
             coriolis,
             forcing,
             microphysics,
-            boundary_conditions = (ρθ = ρθ_bcs, ρu = ρu_bcs, ρv = ρv_bcs)
-        )
+            boundary_conditions = (ρθ = ρθ_bcs, ρu = ρu_bcs, ρv = ρv_bcs))
     end
 
     # Set initial conditions
