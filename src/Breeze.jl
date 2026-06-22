@@ -81,6 +81,11 @@ export
     moisture_specific_name,
     specific_prognostic_moisture,
 
+    # Solvers
+    NewtonSolver,
+    SecantSolver,
+    FixedIterations,
+
     # Thermodynamics
     temperature,
     supersaturation,
@@ -209,6 +214,9 @@ export
     FieldTimeSeries, FieldDataset, InMemory, OnDisk,
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
+
+include("Solvers.jl")
+using .Solvers
 
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics

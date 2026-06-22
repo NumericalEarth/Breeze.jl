@@ -61,6 +61,7 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
+using Breeze.Solvers: NewtonSolver
 using Breeze.Thermodynamics: mixture_gas_constant, dry_air_gas_constant,
                              vapor_gas_constant, ExnerReferenceState, temperature, LiquidIceDensityState
 

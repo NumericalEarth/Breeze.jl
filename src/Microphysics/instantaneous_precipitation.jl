@@ -13,6 +13,7 @@ using ..AtmosphereModels:
 
 using Oceananigans: Oceananigans, CenterField, Field, Integral
 using Oceananigans.Architectures: architecture
+using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @index, @kernel
 using DocStringExtensions: TYPEDSIGNATURES
@@ -41,13 +42,13 @@ end
 $(TYPEDSIGNATURES)
 
 Construct an `InstantaneousPrecipitation` scheme. `equilibrium` selects the phase
-equilibrium used by the underlying saturation solve (default warm-phase).
+equilibrium used by the underlying saturation solve (default warm-phase), and `solver`
+controls its iteration (see [`SaturationAdjustment`](@ref)).
 """
 function InstantaneousPrecipitation(FT::DataType=Oceananigans.defaults.FloatType;
                                          equilibrium = WarmPhaseEquilibrium(),
-                                         tolerance = 1e-3,
-                                         maxiter = Inf)
-    sa = SaturationAdjustment(FT; tolerance, maxiter, equilibrium)
+                                         solver = SecantSolver(FT))
+    sa = SaturationAdjustment(FT; solver, equilibrium)
     return InstantaneousPrecipitation(sa)
 end
 
@@ -127,6 +128,10 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
 
     launch!(arch, grid, :xyz, _instantaneous_precipitation_update!,
             model.dynamics, saturation_adjustment, constants, pˢᵗ, Δt, ρθˡⁱ, ρqᵛ, μ)
+
+    # The kernel mutated prognostic fields in the interior only; refill halos and recompute
+    # diagnostics and tendencies so the post-update state is consistent for the next step.
+    update_state!(model)
 
     return nothing
 end
