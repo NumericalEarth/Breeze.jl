@@ -15,6 +15,7 @@ using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Oceananigans.Grids: Periodic, Bounded
+using Oceananigans.TimeSteppers: first_time_step!
 using Reactant
 using Printf: @printf
 using Test
@@ -84,7 +85,7 @@ function build_model_pair(topology)
     return vmodel, rmodel
 end
 
-@testset "Reactant correctness — time_step! parity" begin
+@testset "Reactant correctness — first_time_step! parity" begin
     Δt = 0.02
     atol = sqrt(eps(Float64))
 
@@ -96,12 +97,12 @@ end
     @testset "topology=$label" for (label, topology, rtol) in cases
         vmodel, rmodel = build_model_pair(topology)
 
-        @test report_state("topology=$label — before time_step!", vmodel, rmodel; rtol, atol)
+        @test report_state("topology=$label — before first_time_step!", vmodel, rmodel; rtol, atol)
 
         time_step!(vmodel, Δt)
-        r_step! = Reactant.@compile raise=true sync=true time_step!(rmodel, Δt)
+        r_step! = Reactant.@compile raise=true sync=true first_time_step!(rmodel, Δt)
         r_step!(rmodel, Δt)
 
-        @test report_state("topology=$label — after  time_step!", vmodel, rmodel; rtol, atol)
+        @test report_state("topology=$label — after  first_time_step!", vmodel, rmodel; rtol, atol)
     end
 end
