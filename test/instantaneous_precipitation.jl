@@ -100,7 +100,7 @@ end
     ρ   = FT(1)
     eq  = WarmPhaseEquilibrium()
     tol = FT == Float64 ? FT(1e-12) : FT(1e-6)
-    sa  = SaturationAdjustment(FT; tolerance = tol, maxiter = 100, equilibrium = eq)
+    sa  = SaturationAdjustment(FT; solver = SecantSolver(FT; abstol = tol, maxiter = 100), equilibrium = eq)
     rtol = FT == Float64 ? FT(1e-9) : FT(1e-4)
 
     # Supersaturated parcels spanning the warm range — both paths converge to the unique root.
