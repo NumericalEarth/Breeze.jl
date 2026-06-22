@@ -147,8 +147,8 @@ Per-column scratch (column kernel only):
 
 - `density_predictor`, `density_potential_temperature_predictor`: explicit
   predictors built before the implicit vertical solve.
-- `horizontal_divergence`: scratch for the horizontal mass divergence
-  ``∂x(ρu)′ + ∂y(ρv)′``, recomputed each substep for the Klemp 2018 damping.
+- `horizontal_divergence`: scratch for the horizontal θ-flux divergence
+  ``∂x(θᴸ(ρu)′) + ∂y(θᴸ(ρv)′)``, recomputed each substep for the Klemp 2018 damping.
 
 Time-averaged velocity for non-acoustic scalar transport (WRF/MPAS-style
 dynamics-transport split):
@@ -1140,24 +1140,28 @@ end
     return (convert(FT, ω) * base, convert(FT, one_minus_ω) * base)
 end
 
-# Klemp, Skamarock & Ha (2018) acoustic divergence damping (MPAS form), applied
-# per substep to the horizontal mass divergence
-#   δ ≡ ∂x(ρu)′ + ∂y(ρv)′          (terrain-aware `div_xyᶜᶜᶜ`)
+# Klemp, Skamarock & Ha (2018) acoustic divergence damping (MPAS form, eq. 36),
+# applied per substep to the horizontal θ-flux divergence
+#   δ ≡ ∂x(θᴸ(ρu)′) + ∂y(θᴸ(ρv)′)
 # as a horizontal momentum correction
-#   Δ(ρu)′ = γˣ · ∂x δ ,   Δ(ρv)′ = γʸ · ∂y δ
+#   Δ(ρu)′ = γˣ · ∂x δ / θᴸ ,   Δ(ρv)′ = γʸ · ∂y δ / θᴸ
 # with per-direction diffusivities γˣ = α·Δx², γʸ = α·Δy² (or, when
-# `length_scale = ℓ` is given, the fixed γ = α·ℓ²). This is a Laplacian
-# diffusion of δ (Δδ = γ ∇²δ, mode gain 1 − γk²), strictly dissipative for
-# α ≤ 2/π² ≈ 0.2, so it damps grid-scale horizontal-acoustic divergence; we
-# default α = 0.1.
+# `length_scale = ℓ` is given, the fixed γ = α·ℓ²). KSH18 (eq. 1) show that the
+# divergence specific to the acoustic modes is the ρθ-flux divergence
+# `D = ∇·(ρθ𝐯)`, and that the damping divergence must be numerically the same as
+# the divergence in the Θ = ρθ equation — here it is exactly `∇ʰ_θM` from the
+# column kernel (`theta_face_{x,y}_flux`). The momentum correction divides that
+# by θᴸ at the face per eq. (36). To leading order this is a Laplacian diffusion
+# of δ (mode gain 1 − γk²), strictly dissipative for α ≤ 2/π² ≈ 0.2; we default
+# α = 0.1.
 #
-# NOTE: an earlier version damped the (ρθ)′ tendency `(ρθ)′ − (ρθ)′ˢ⁻` (a proxy
-# for −Δτ·θᴸ·∇·m) with diffusivity α·Δx²/Δτ. The Δτ cancels only when that change
-# is divergence-dominated; for an unbalanced cold start the (ρθ)′ change is O(1)
-# (hydrostatic/PGF adjustment, not divergence), so the proxy left a spurious
-# `∝ α/Δτ` horizontal force that blew up the split cold start. Damping the true
-# horizontal divergence is equivalent for a balanced acoustic wave but robust
-# (Δτ-independent, dissipative) for the transient.
+# NOTE: an earlier version recovered the divergence from the (ρθ)′ tendency
+# `(ρθ)′ − (ρθ)′ˢ⁻` (eq. 36 uses (Θᵗ⁺ᐩ − Θᵗ)/Δτ = −D) with diffusivity α·Δx²/Δτ.
+# That identity holds only when the per-substep (ρθ)′ change equals −Δτ·D; for an
+# unbalanced cold start the change carries an O(1), Δτ-independent component
+# (hydrostatic/PGF adjustment, not divergence), so the `/Δτ` left a spurious
+# `∝ α/Δτ` horizontal force that blew up the split cold start. Computing D
+# directly each substep is exact (no proxy) and Δτ-independent.
 #
 # `α` is the dimensionless Klemp 2018 coefficient (`config_smdiv` in MPAS).
 # `damp_vertical = true` folds the vertical Laplacian on (ρw)′ into the column
@@ -1175,21 +1179,27 @@ function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper
     ρu′ = substepper.momentum_perturbation.u
     ρv′ = substepper.momentum_perturbation.v
     δ   = substepper.horizontal_divergence
+    θᴸ  = substepper.linearization_potential_temperature
 
-    # Compute δ = ∂x(ρu)′ + ∂y(ρv)′ everywhere and fill its halos, then damp it.
-    # Two kernels: the damping reads δ at neighbours while writing ρu′/ρv′, so δ
-    # must be complete before the second launch.
-    launch!(arch, grid, :xyz, _compute_horizontal_divergence!, δ, ρu′, ρv′, grid)
+    # Compute δ = ∇ʰ·(θᴸ𝐦′) everywhere and fill its halos, then damp it. Two
+    # kernels: the damping reads δ at neighbours while writing ρu′/ρv′, so δ must
+    # be complete before the second launch.
+    launch!(arch, grid, :xyz, _compute_horizontal_divergence!, δ, ρu′, ρv′, θᴸ, grid)
     fill_halo_regions!(δ)
-    launch!(arch, grid, :xyz, _thermal_divergence_damping!, ρu′, ρv′, δ, grid,
+    launch!(arch, grid, :xyz, _thermal_divergence_damping!, ρu′, ρv′, δ, θᴸ, grid,
             x_damping_scale, y_damping_scale)
 
     return nothing
 end
 
-@kernel function _compute_horizontal_divergence!(δ, ρu′, ρv′, grid)
+# δ = ∇ʰ·(θᴸ𝐦′) at cell centers — the same area-weighted θ-flux divergence the
+# column kernel uses for the (ρθ)′ predictor (`theta_face_{x,y}_flux`), so the
+# damping and the Θ equation see numerically identical divergences (KSH18).
+@kernel function _compute_horizontal_divergence!(δ, ρu′, ρv′, θᴸ, grid)
     i, j, k = @index(Global, NTuple)
-    @inbounds δ[i, j, k] = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
+    @inbounds δ[i, j, k] = (δxᶜᵃᵃ(i, j, k, grid, theta_face_x_flux, θᴸ, ρu′) +
+                            δyᵃᶜᵃ(i, j, k, grid, theta_face_y_flux, θᴸ, ρv′)) /
+                           Vᶜᶜᶜ(i, j, k, grid)
 end
 
 struct NoHorizontalDampingScale end
@@ -1225,21 +1235,23 @@ end
     scale.coefficient * Δyᶜᶠᶜ(i, j, k, grid)^2
 
 
-# Damp the horizontal mass divergence δ as a Laplacian diffusion:
-#   Δ(ρu)′ = γˣ · ∂x δ ,   Δ(ρv)′ = γʸ · ∂y δ ,   γ = α·Δx² (Δτ-independent).
-# δ (`div_xyᶜᶜᶜ`) is precomputed and halo-filled by `apply_divergence_damping!`.
-# The vertical component lives in the column tridiag (a Laplacian on (ρw)′ folded
-# into the implicit acoustic solve), not here.
-@kernel function _thermal_divergence_damping!(ρu′, ρv′, δ, grid,
+# Damp the θ-flux divergence δ = ∇ʰ·(θᴸ𝐦′) per KSH18 eq. (36):
+#   Δ(ρu)′ = γˣ · ∂x δ / θᴸ ,   Δ(ρv)′ = γʸ · ∂y δ / θᴸ ,   γ = α·Δx² (Δτ-independent).
+# δ is precomputed and halo-filled by `apply_divergence_damping!`; the face θᴸ in
+# the denominator matches the θᴸ weighting inside δ (eq. 36 corrects V = ρ𝐯, so
+# the θ used to form the divergence is divided back out). The vertical component
+# lives in the column tridiag (a Laplacian on (ρw)′ folded into the implicit
+# acoustic solve), not here.
+@kernel function _thermal_divergence_damping!(ρu′, ρv′, δ, θᴸ, grid,
                                               x_damping_scale, y_damping_scale)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         γˣ = x_damping_diffusivity(i, j, k, grid, x_damping_scale)
-        ρu′[i, j, k] += γˣ * ∂xᶠᶜᶜ(i, j, k, grid, δ)
+        ρu′[i, j, k] += γˣ * ∂xᶠᶜᶜ(i, j, k, grid, δ) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
 
         γʸ = y_damping_diffusivity(i, j, k, grid, y_damping_scale)
-        ρv′[i, j, k] += γʸ * ∂yᶜᶠᶜ(i, j, k, grid, δ)
+        ρv′[i, j, k] += γʸ * ∂yᶜᶠᶜ(i, j, k, grid, δ) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
     end
 end
 
