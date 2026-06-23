@@ -159,7 +159,7 @@ The wall target re-enters via the prognostic momentum's own BC after each subste
 The `prognostic_momentum` kwarg is retained for backwards compatibility but no longer consulted.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
-                            prognostic_momentum = nothing, ST = eltype(grid))
+                            prognostic_momentum = nothing, substep_floattype = eltype(grid))
     Ns = split_explicit.substeps
     FT = eltype(grid)
     ω  = convert(FT, split_explicit.forward_weight)
@@ -175,31 +175,31 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     substep_distribution = split_explicit.substep_distribution
     open_boundary_relaxation = convert(FT, split_explicit.open_boundary_relaxation)
 
-    # `ST` (default `eltype(grid)`) is the storage type for the acoustic perturbation/predictor/
+    # `substep_floattype` (default `eltype(grid)`) is the storage type for the acoustic perturbation/predictor/
     # linearization working fields below. Pass a reduced-precision type (e.g. `BFloat16`, where the
     # grid/field types support it) to halve their HBM traffic in the bandwidth-bound substep kernels:
-    # kernels read ST, promote to FT, compute in FT, store ST. The (ρw)′ solve target, tridiag scratch,
+    # kernels read substep_floattype, promote to FT, compute in FT, store substep_floattype. The (ρw)′ solve target, tridiag scratch,
     # primary prognostics, and WENO tendencies stay FT regardless (the solver recurrence and WENO
     # degrade in low precision).
 
     # Linearization basic state — Πᴸ, θᴸ derived from live model fields.
-    linearization_exner = CenterField(grid, ST)
-    linearization_potential_temperature = CenterField(grid, ST)
+    linearization_exner = CenterField(grid, substep_floattype)
+    linearization_potential_temperature = CenterField(grid, substep_floattype)
 
     # γᵐRᵐᴸ — the only cached moisture quantity. Recomputed once per stage
     # refresh from the live moisture state.
-    linearization_gamma_R_mixture = CenterField(grid, ST)
+    linearization_gamma_R_mixture = CenterField(grid, substep_floattype)
 
-    density_perturbation = CenterField(grid, ST)
-    density_potential_temperature_perturbation = CenterField(grid, ST)
+    density_perturbation = CenterField(grid, substep_floattype)
+    density_potential_temperature_perturbation = CenterField(grid, substep_floattype)
 
-    momentum_perturbation = (u = XFaceField(grid, ST),
-                             v = YFaceField(grid, ST),
+    momentum_perturbation = (u = XFaceField(grid, substep_floattype),
+                             v = YFaceField(grid, substep_floattype),
                              w = ZFaceField(grid)) # (ρw)′ stays FT — it is the tridiag solve target
 
-    density_predictor = CenterField(grid, ST)
-    density_potential_temperature_predictor = CenterField(grid, ST)
-    previous_density_potential_temperature_perturbation = CenterField(grid, ST)
+    density_predictor = CenterField(grid, substep_floattype)
+    density_potential_temperature_predictor = CenterField(grid, substep_floattype)
+    previous_density_potential_temperature_perturbation = CenterField(grid, substep_floattype)
 
     # Substep-averaged velocities for scalar transport.
     time_averaged_velocities = (u = XFaceField(grid),
