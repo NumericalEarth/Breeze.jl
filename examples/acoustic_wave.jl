@@ -258,6 +258,16 @@ using Reactant: @trace
 
 Reactant.set_default_backend("cpu")
 
+# Disable LLVM's auto-vectorizers before any kernels are compiled. Otherwise LLVM
+# packs scalar per-grid-point arithmetic (e.g. `qᵈ Rᵈ + qᵛ Rᵛ`, advection stencils)
+# into `vector<2xf64>` ops, which EnzymeXLA's raise-to-StableHLO pass cannot lower —
+# producing "failed to raise func" errors during differentiated compilation. With the
+# kernels kept scalar, raising succeeds; XLA re-vectorizes across grid points anyway,
+# so the compiled executable is not slowed down. This sets global LLVM state for the
+# session, so prefer a session dedicated to the Reactant/AD workflow.
+# (`Reactant.LLVM` is Reactant's own LLVM dependency — no extra package needed.)
+Reactant.LLVM.clopts("-vectorize-slp=false", "-vectorize-loops=false")
+
 # Rebuild the grid and model on `ReactantState`.
 
 grid_ad = RectilinearGrid(ReactantState(); size = (Nx, Nz),
@@ -371,7 +381,7 @@ du, J = compiled_grad(model_ad, dmodel_ad, uᵢ, duᵢ, ρ_total, ρᵇᵍ, θ�
 xs_u = xnodes(grid_ad, Face())
 zs   = znodes(grid_ad, Center())
 
-@info @sprintf("Surface-mean (ρ - ρ̄)² = %.6e after %d steps", Float64(only(J)), Nsteps)
+@info @sprintf("Surface-mean (ρ - ρ̄)² = %.6e after %d steps", Reactant.to_number(only(J)), Nsteps)
 
 # ### Sensitivity visualization
 #
