@@ -1015,6 +1015,36 @@ for arch in arches
         @test !any(isnan, parent(model.dynamics.density))
     end
 
+    @testset "Direct DivergenceDamping [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+
+        # Construction + propagation through the split-explicit time discretization.
+        @test DivergenceDamping().coefficient isa FT
+        td0 = SplitExplicitTimeDiscretization(damping=DivergenceDamping(coefficient=0.2))
+        @test td0.damping isa DivergenceDamping
+        @test td0.damping.coefficient ≈ FT(0.2)
+
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
+
+        # Direct 3-D divergence damping: forms ∇·(ρ𝐮)′ explicitly rather than via the (ρθ)′ proxy.
+        td = SplitExplicitTimeDiscretization(substeps=8, damping=DivergenceDamping(coefficient=FT(0.5)))
+        dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics,
+                                timestepper=:AcousticRungeKutta3)
+
+        ref = model.dynamics.reference_state
+        # Seed a horizontally divergent momentum perturbation for the damping to act on.
+        set!(model; θ=300, u=(x, y, z) -> FT(0.1) * sinpi(2x / 8kilometers), qᵗ=0, ρ=ref.density)
+
+        simulation = Simulation(model; Δt=6, stop_iteration=3, verbose=false)
+        run!(simulation)
+
+        @test model.clock.iteration == 3
+        @test !any(isnan, parent(model.momentum.ρu))
+        @test !any(isnan, parent(model.dynamics.density))
+    end
+
     #####
     ##### Test acoustic upper sponge
     #####

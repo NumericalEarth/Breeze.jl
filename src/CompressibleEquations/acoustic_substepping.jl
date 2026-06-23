@@ -1077,6 +1077,42 @@ end
     end
 end
 
+# Direct divergence damping (`DivergenceDamping`): form the full 3-D divergence ∇·(ρ𝐮)′ from the
+# perturbation momentum (vs the (ρθ)′-tendency proxy of `ThermalDivergenceDamping`), then correct the
+# horizontal momentum by its gradient,
+#   Δ(ρu)′ = +α Δx² ∂x[∇·(ρ𝐮)′],   Δ(ρv)′ = +α Δy² ∂y[∇·(ρ𝐮)′].
+# Two launches are required because the gradient reads neighbouring divergence values: materialize
+# ∇·(ρ𝐮)′ into the (now-free, post-recovery) density predictor as scratch, halo-fill it, then take ∂x/∂y.
+# (KSH18 eq. 7 / §3 "old method". The local diffusivity α Δx² carries no 1/Δτ — unlike the thermal form
+# whose γ = α Δx²/Δτ cancels the Δτ buried in the (ρθ)′ tendency it differences.)
+function apply_divergence_damping!(damping::DivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
+    arch = architecture(grid)
+    α    = convert(eltype(grid), damping.coefficient)
+    D    = substepper.density_predictor   # free between recovery and the next predictor build
+    ρu′  = substepper.momentum_perturbation.u
+    ρv′  = substepper.momentum_perturbation.v
+    ρw′  = substepper.momentum_perturbation.w
+
+    launch!(arch, grid, :xyz, _compute_momentum_divergence!, D, grid, ρu′, ρv′, ρw′)
+    fill_halo_regions!(D)
+    launch!(arch, grid, :xyz, _apply_direct_divergence_damping!, ρu′, ρv′, grid, D, α)
+
+    return nothing
+end
+
+@kernel function _compute_momentum_divergence!(D, grid, ρu′, ρv′, ρw′)
+    i, j, k = @index(Global, NTuple)
+    @inbounds D[i, j, k] = divᶜᶜᶜ(i, j, k, grid, ρu′, ρv′, ρw′)
+end
+
+@kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, D, α)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, D)
+        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, D)
+    end
+end
+
 #####
 ##### Section 10 — Time-averaged velocity for non-acoustic scalar transport
 #####
