@@ -55,8 +55,7 @@ function _build_str_model(arch; ω = 0.55)
                                surface_pressure = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
-                                  thermodynamic_constants = constants,
-                                  timestepper = :AcousticRungeKutta3)
+                                  thermodynamic_constants = constants)
 end
 
 function _set_str_rest!(model)
@@ -312,8 +311,7 @@ end
     ρu_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.0))
     model = AtmosphereModel(grid; dynamics = dyn,
                                   thermodynamic_constants = constants,
-                                  boundary_conditions = (ρu = ρu_bcs,),
-                                  timestepper = :AcousticRungeKutta3)
+                                  boundary_conditions = (ρu = ρu_bcs,))
 
     ref = model.dynamics.reference_state
     Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)

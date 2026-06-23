@@ -357,7 +357,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             time_discretization = SplitExplicitTimeDiscretization(substeps=6,
                                                                   damping=damping)
             dynamics = CompressibleDynamics(time_discretization)
-            model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+            model = AtmosphereModel(grid; dynamics)
             set!(model,
                  ρ=1,
                  θ=300,
@@ -602,7 +602,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid; dynamics)
         set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
 
         @test model.timestepper isa AcousticRungeKutta3
@@ -679,7 +679,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         materialize_terrain!(model_grid, x -> 100 * exp(-x^2 / 2000^2))
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(model_grid; dynamics, timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(model_grid; dynamics)
         set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
 
         @test model.timestepper.substepper.substeps === nothing
@@ -709,7 +709,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
             dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
                                             reference_potential_temperature=300)
-            model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+            model = AtmosphereModel(grid; dynamics)
             set!(model,
                  θ=300,
                  ρ=model.dynamics.terrain_reference_density,
@@ -803,8 +803,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                         surface_pressure=p₀,
                                         standard_pressure=pˢᵗ)
         model = AtmosphereModel(grid; dynamics,
-                                thermodynamic_constants=constants,
-                                timestepper=:AcousticRungeKutta3)
+                                thermodynamic_constants=constants)
 
         set!(model,
              ρ = model.dynamics.terrain_reference_density,
@@ -910,7 +909,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                                                         damping=damping);
                                         slope_stencil = SlopeInsideInterpolation(),
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid; dynamics)
         set!(model,
              θ=300,
              ρ=model.dynamics.terrain_reference_density,
@@ -946,7 +945,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         slope_stencil = SlopeInsideInterpolation(),
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid; dynamics)
         set!(model,
              θ=300,
              ρ=model.dynamics.terrain_reference_density,
@@ -1174,7 +1173,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         reference_potential_temperature = 300)
-        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid; dynamics)
         ρᵢ(x, y, z) = adiabatic_hydrostatic_density(z, 101325.0, 300.0, 1e5,
                                                     model.thermodynamic_constants)
         set!(model, ρ=ρᵢ, θ=300,
@@ -1439,7 +1438,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             SplitExplicitTimeDiscretization(acoustic_cfl=0.5; damping=damping);
             slope_stencil = SlopeInsideInterpolation(),
             reference_potential_temperature = 300)
-        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid; dynamics)
         set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
 
         @test model.dynamics.terrain_metrics.pressure_gradient_stencil isa SlopeInsideInterpolation
@@ -1503,8 +1502,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                       longitude=(0, 360), latitude=(-60, 60), z=(0, Lz))
             end
             m = AtmosphereModel(g;
-                dynamics=CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6)),
-                timestepper=:AcousticRungeKutta3)
+                dynamics=CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6)))
             set!(m, ρ=1, θ=300, u=0.1, w=0.01)
             return m
         end

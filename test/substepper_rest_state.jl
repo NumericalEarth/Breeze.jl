@@ -84,8 +84,7 @@ function _build_rest_model(arch; substeps = nothing,
                                surface_pressure = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
-                                  thermodynamic_constants = constants,
-                                  timestepper = :AcousticRungeKutta3)
+                                  thermodynamic_constants = constants)
 end
 
 # Set the model state to the discrete-balanced reference EXACTLY.
