@@ -22,8 +22,10 @@ using Breeze: CompressibleDynamics
                               dynamics = nothing,
                               advection = WENO(order=5),
                               closure = nothing,
-                              microphysics = nothing)
-                              
+                              microphysics = nothing,
+                              topology = (Periodic, Periodic, Bounded),
+                              simplified = false)
+
 Create an `AtmosphereModel` for the dry convective boundary layer benchmark case
 from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 
@@ -34,16 +36,16 @@ from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 - `float_type`: Floating point precision (`Float32` or `Float64`)
 - `Nx, Ny, Nz`: Grid resolution
 - `dynamics`: Dynamics formulation. `nothing` defaults to `AnelasticDynamics`.
-  Pass a `CompressibleDynamics` instance for compressible formulations.
+              Pass a `CompressibleDynamics` instance for compressible formulations.
 - `advection`: Advection scheme (default: `WENO(order=5)`)
 - `closure`: Turbulence closure (default: `nothing`)
 - `microphysics`: Microphysics (default: `nothing`)
 - `topology`: Grid topology tuple (default: `(Periodic, Periodic, Bounded)`).
-  Pass `(Periodic, Bounded, Bounded)` for a PBB grid.
+              Pass `(Periodic, Bounded, Bounded)` for a PBB grid.
 - `simplified`: When `true`, omit the geostrophic body forcing and the
-  field-dependent surface-drag boundary conditions (default `false`). These
-  currently do not materialize on `ReactantState`, so set this `true` for a
-  Reactant-vs-vanilla benchmark to keep the same physics on both backends.
+                field-dependent surface-drag boundary conditions (default `false`). These
+                currently do not materialize on `ReactantState`, so set this `true` for a
+                Reactant-vs-vanilla benchmark to keep the same physics on both backends.
 
 # Physical parameters (from Sauer & Munoz-Esparza 2020, Section 4.2)
 - Domain: 12 km × 12 km × 3 km
