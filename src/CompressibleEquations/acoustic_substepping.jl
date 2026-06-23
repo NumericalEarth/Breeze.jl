@@ -683,15 +683,15 @@ end
     @inbounds begin
         # Reference-subtracted PGF and buoyancy: at Uᴸ = reference state
         # both terms are exactly zero by construction of the reference.
-        ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δp, pᴸ, pᵣ)
-        ρ′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, δρ, ρᴸ, ρᵣ)
+        ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δϕ, pᴸ, pᵣ)
+        ρ′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, δϕ, ρᴸ, ρᵣ)
 
         Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - ∂z_p′ - g * ρ′ᶜᶜᶠ) * (k > 1)
     end
 end
 
-@inline δp(i, j, k, grid, pᴸ, pᵣ) = @inbounds pᴸ[i, j, k] - pᵣ[i, j, k]
-@inline δρ(i, j, k, grid, ρᴸ, ρᵣ) = @inbounds ρᴸ[i, j, k] - ρᵣ[i, j, k]
+# Field perturbation about a reference (used for both pressure and density).
+@inline δϕ(i, j, k, grid, ϕᴸ, ϕᵣ) = @inbounds ϕᴸ[i, j, k] - ϕᵣ[i, j, k]
 
 @kernel function _assemble_slow_vertical_momentum_tendency_no_ref!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, grid, g)
     i, j, k = @index(Global, NTuple)
@@ -893,28 +893,27 @@ end
     slope_correction = ifelse(apply_pressure_gradient, one(Δτ), zero(Δτ))
 
     @inbounds begin
-        if k == 1
-            ρw′_rhs[i, j, 1] = 0
-        else
-            ∂r_p′★  = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′★, Πᴸ, γRᵐᴸ, slope_correction)
-            ∂r_p′ˢ⁻ = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′,  Πᴸ, γRᵐᴸ, slope_correction)
-            sound_force = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★
+        ∂r_p′★  = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′★, Πᴸ, γRᵐᴸ, slope_correction)
+        ∂r_p′ˢ⁻ = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′,  Πᴸ, γRᵐᴸ, slope_correction)
+        sound_force = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★
 
-            ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
-            ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)
-            buoy_force = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★)
+        ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
+        ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)
+        buoy_force = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★)
 
-            ∂z²_ρw′ˢ⁻  = ∂zᶜᶜᶠ(i, j, k, grid, ∂zᶜᶜᶜ, ρw′)
-            damp_force = - dˢ⁻ * ∂z²_ρw′ˢ⁻
+        ∂z²_ρw′ˢ⁻  = ∂zᶜᶜᶠ(i, j, k, grid, ∂zᶜᶜᶜ, ρw′)
+        damp_force = - dˢ⁻ * ∂z²_ρw′ˢ⁻
 
-            sponge_force = sponge_rhs(i, j, k, grid, sponge, δτˢ⁻, ρw′)
+        sponge_force = sponge_rhs(i, j, k, grid, sponge, δτˢ⁻, ρw′)
 
-            ρw′_rhs[i, j, k] = ρw′[i, j, k] + Δτ * fw * Gˢρw[i, j, k] -
-                               sound_force - buoy_force - damp_force - sponge_force
-        end
-        if k == Nz
-            ρw′_rhs[i, j, Nz + 1] = 0
-        end
+        rhs = ρw′[i, j, k] + Δτ * fw * Gˢρw[i, j, k] -
+              sound_force - buoy_force - damp_force - sponge_force
+
+        # Interior faces 2:Nz carry the acoustic RHS; boundary faces 1 and Nz+1 are pinned to 0
+        # (tridiag b[1] = 1 ⇒ (ρw)′[1] = 0; impenetrability w(top) = 0). Branchless (launched over
+        # 1:Nz+1, no warp divergence); the boundary stencils read unfilled k=0/Nz+1 halos but the
+        # result is discarded.
+        ρw′_rhs[i, j, k] = ifelse((k != 1) & (k != Nz + 1), rhs, zero(rhs))
     end
 end
 
@@ -1024,7 +1023,7 @@ end
 
 struct NoHorizontalDampingScale end
 struct LocalHorizontalDampingScale{FT}
-    coefficient_over_Δτ :: FT
+    α_over_Δτ :: FT
 end
 
 struct FixedHorizontalDampingScale{FT}
@@ -1039,14 +1038,14 @@ end
     return FixedHorizontalDampingScale(α * ℓ^2 / Δτ)
 end
 
-@inline x_damping_diffusivity(i, j, k, grid, ::NoHorizontalDampingScale) = zero(grid)
-@inline y_damping_diffusivity(i, j, k, grid, ::NoHorizontalDampingScale) = zero(grid)
+@inline κˣ(i, j, k, grid, ::NoHorizontalDampingScale) = zero(grid)
+@inline κʸ(i, j, k, grid, ::NoHorizontalDampingScale) = zero(grid)
 
-@inline x_damping_diffusivity(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
-@inline y_damping_diffusivity(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
+@inline κˣ(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
+@inline κʸ(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
 
-@inline x_damping_diffusivity(i, j, k, grid, scale::LocalHorizontalDampingScale) = scale.coefficient_over_Δτ * Δxᶠᶜᶜ(i, j, k, grid)^2
-@inline y_damping_diffusivity(i, j, k, grid, scale::LocalHorizontalDampingScale) = scale.coefficient_over_Δτ * Δyᶜᶠᶜ(i, j, k, grid)^2
+@inline κˣ(i, j, k, grid, scale::LocalHorizontalDampingScale) = scale.α_over_Δτ * Δxᶠᶜᶜ(i, j, k, grid)^2
+@inline κʸ(i, j, k, grid, scale::LocalHorizontalDampingScale) = scale.α_over_Δτ * Δyᶜᶠᶜ(i, j, k, grid)^2
 
 
 # Horizontal divergence damping in the form of Klemp, Skamarock & Ha (2018)
@@ -1066,12 +1065,12 @@ end
     @inbounds begin
         ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
         θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
-        γˣ = x_damping_diffusivity(i, j, k, grid, x_damping_scale)
+        γˣ = κˣ(i, j, k, grid, x_damping_scale)
         ρu′[i, j, k] -= γˣ * ∂x_div / θᴸᶠᶜᶜ
 
         ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
         θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
-        γʸ = y_damping_diffusivity(i, j, k, grid, y_damping_scale)
+        γʸ = κʸ(i, j, k, grid, y_damping_scale)
         ρv′[i, j, k] -= γʸ * ∂y_div / θᴸᶜᶠᶜ
     end
 end
@@ -1124,7 +1123,7 @@ end
     @inbounds begin
         ρu_total = ρu_stage[i, j, k] + u_avg[i, j, k] * inv_Nτ
         ρv_total = ρv_stage[i, j, k] + v_avg[i, j, k] * inv_Nτ
-        ρw_total = acoustic_stage_vertical_transport_momentum(i, j, k, grid, dynamics,
+        ρw_total = transport_ρw(i, j, k, grid, dynamics,
                                                               ρu_stage, ρv_stage, ρw_stage) +
                    w_avg[i, j, k] * inv_Nτ
 
@@ -1141,7 +1140,7 @@ end
     end
 end
 
-@inline acoustic_stage_vertical_transport_momentum(i, j, k, grid, dynamics, ρu_stage, ρv_stage, ρw_stage) =
+@inline transport_ρw(i, j, k, grid, dynamics, ρu_stage, ρv_stage, ρw_stage) =
     @inbounds ρw_stage[i, j, k]
 
 #####
@@ -1343,7 +1342,8 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
                 substepper.linearization_potential_temperature)
         fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
 
-        launch!(arch, grid, :xyz, _build_vertical_rhs!,
+        launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
+                _build_vertical_rhs!,
                 substepper.momentum_perturbation.w,
                 substepper.density_predictor,
                 substepper.density_potential_temperature_predictor,

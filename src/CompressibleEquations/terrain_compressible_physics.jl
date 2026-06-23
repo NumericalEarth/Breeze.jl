@@ -317,7 +317,7 @@ end
     return ρw_ccf - slope_x * ρu_ccf - slope_y * ρv_ccf
 end
 
-@inline function acoustic_stage_vertical_transport_momentum(i, j, k, grid,
+@inline function transport_ρw(i, j, k, grid,
                                                             dynamics::TerrainCompressibleDynamics,
                                                             ρu_stage, ρv_stage, ρw_stage)
     return terrain_vertical_transport_momentum(i, j, k, grid,
@@ -332,7 +332,7 @@ end
 
     ρuᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, total_momentum, ρuᴸ, ρu′)
     ρvᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, total_momentum, ρvᴸ, ρv′)
-    ρw̃_stage = acoustic_stage_vertical_transport_momentum(i, j, k, grid, dynamics,
+    ρw̃_stage = transport_ρw(i, j, k, grid, dynamics,
                                                            ρuᴸ, ρvᴸ, ρwᴸ)
     @inbounds ρw̃ᵐ⁺ = ρw̃_stage + ρw̃′[i, j, k]
 
@@ -393,13 +393,13 @@ end
     ∂zᶜᶜᶠ(i, j, k, grid, p)
 
 @inline terrain_vertical_pressure_gradient(i, j, k, grid, p, pᵣ) =
-    ∂zᶜᶜᶠ(i, j, k, grid, δp, p, pᵣ)
+    ∂zᶜᶜᶠ(i, j, k, grid, δϕ, p, pᵣ)
 
 @inline terrain_vertical_buoyancy_density(i, j, k, grid, ρ, ::Nothing) =
     ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 
 @inline terrain_vertical_buoyancy_density(i, j, k, grid, ρ, ρᵣ) =
-    ℑzᵃᵃᶠ(i, j, k, grid, δρ, ρ, ρᵣ)
+    ℑzᵃᵃᶠ(i, j, k, grid, δϕ, ρ, ρᵣ)
 
 #####
 ##### Terrain-corrected pressure gradient
