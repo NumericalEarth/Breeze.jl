@@ -36,7 +36,7 @@ using Oceananigans.Operators:
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
     δxᶜᵃᵃ, δyᵃᶜᵃ,
     div_xyᶜᶜᶜ,
-    Δzᶜᶜᶜ, Δzᶜᶜᶠ,
+    Δz⁻¹ᶜᶜᶜ, Δz⁻¹ᶜᶜᶠ,
     Δxᶠᶜᶜ,
     Δyᶜᶠᶜ,
     Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ
@@ -162,13 +162,14 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                             prognostic_momentum = nothing, substep_floattype = eltype(grid))
     Ns = split_explicit.substeps
     FT = eltype(grid)
-    ω  = convert(FT, split_explicit.forward_weight)
+    ω = convert(FT, split_explicit.forward_weight)
+
     acoustic_cfl = convert(FT, split_explicit.acoustic_cfl)
     thermodynamic_tendency_factor = convert(FT, split_explicit.thermodynamic_tendency_factor)
     vertical_momentum_tendency_factor = convert(FT, split_explicit.vertical_momentum_tendency_factor)
     vertical_pressure_tendency_factor = convert(FT, split_explicit.vertical_pressure_tendency_factor)
-    final_stage_vertical_pressure_tendency_factor =
-        convert(FT, split_explicit.final_stage_vertical_pressure_tendency_factor)
+    final_stage_vertical_pressure_tendency_factor = convert(FT, split_explicit.final_stage_vertical_pressure_tendency_factor)
+
     apply_first_substep_pressure_gradient = split_explicit.apply_first_substep_pressure_gradient
     damping = split_explicit.damping
     sponge = split_explicit.sponge
@@ -274,9 +275,11 @@ end
 # Copy the three velocity components (full parent arrays, halos included) in one launch.
 @kernel function _seed_time_averaged_velocity!(avg, src)
     i, j, k = @index(Global, NTuple)
-    checkbounds(Bool, avg.u, i, j, k) && @inbounds (avg.u[i, j, k] = src.u[i, j, k])
-    checkbounds(Bool, avg.v, i, j, k) && @inbounds (avg.v[i, j, k] = src.v[i, j, k])
-    checkbounds(Bool, avg.w, i, j, k) && @inbounds (avg.w[i, j, k] = src.w[i, j, k])
+    @inbounds begin
+        avg.u[i, j, k] = src.u[i, j, k]
+        avg.v[i, j, k] = src.v[i, j, k]
+        avg.w[i, j, k] = src.w[i, j, k]
+    end
 end
 
 outer_step_start_transport_velocities(model) = model.velocities
@@ -548,8 +551,7 @@ end
 
 @inline function sponge_term_diag(i, j, k, grid, sponge::UpperSponge, δτᵐ⁺)
     z = rnode(i, j, k, grid, Center(), Center(), Face())
-    return abs(δτᵐ⁺) * sponge.damping_rate *
-           sponge.ramp(z, grid.Lz, sponge.depth)
+    return abs(δτᵐ⁺) * sponge.damping_rate * sponge.ramp(z, grid.Lz, sponge.depth)
 end
 
 @inline sponge_rhs(i, j, k, grid, ::Nothing, δτˢ⁻, ρw_old) = zero(grid)
@@ -561,16 +563,16 @@ end
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagLower, p, ::ZDirection,
                                  Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
-    kᶠ      = k + 1
-    Δzᶠ     = Δzᶜᶜᶠ(i, j, kᶠ, grid)
-    Δz⁻¹ᵏ⁻  = 1 / Δzᶜᶜᶜ(i, j, kᶠ - 1, grid)
+    kᶠ     = k + 1
+    Δz⁻¹ᶠ  = Δz⁻¹ᶜᶜᶠ(i, j, kᶠ, grid)
+    Δz⁻¹ᵏ⁻ = Δz⁻¹ᶜᶜᶜ(i, j, kᶠ - 1, grid)
 
     @inbounds Cᵏ⁻ = γRᵐᴸ[i, j, kᶠ - 1] * Πᴸ[i, j, kᶠ - 1]
-    θᵏ⁻     = ℑbzᵃᵃᶠ(i, j, kᶠ - 1, grid, θᴸ)
+    θᵏ⁻ = ℑbzᵃᵃᶠ(i, j, kᶠ - 1, grid, θᴸ)
 
-    pgf_term  = - δτᵐ⁺^2 * Cᵏ⁻ * θᵏ⁻ * Δz⁻¹ᵏ⁻ / Δzᶠ
+    pgf_term  = - δτᵐ⁺^2 * Cᵏ⁻ * θᵏ⁻ * Δz⁻¹ᵏ⁻ * Δz⁻¹ᶠ
     buoy_term = + δτᵐ⁺^2 * g * Δz⁻¹ᵏ⁻ / 2
-    damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁻ / Δzᶠ
+    damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁻ * Δz⁻¹ᶠ
     # Upper sponge is local in z (Rayleigh-type), so no off-diagonal coupling.
     return pgf_term + buoy_term + damp_term
 end
@@ -578,37 +580,37 @@ end
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagDiagonal, p, ::ZDirection,
                                  Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
 
-    Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
-    Δz⁻¹ᵏ⁺ = 1 / Δzᶜᶜᶜ(i, j, k,     grid)
-    Δz⁻¹ᵏ⁻ = 1 / Δzᶜᶜᶜ(i, j, k - 1, grid)
+    Δz⁻¹ᶠ  = Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
+    Δz⁻¹ᵏ⁺ = Δz⁻¹ᶜᶜᶜ(i, j, k,     grid)
+    Δz⁻¹ᵏ⁻ = Δz⁻¹ᶜᶜᶜ(i, j, k - 1, grid)
 
     @inbounds begin
         Cᵏ⁺ = γRᵐᴸ[i, j, k]     * Πᴸ[i, j, k]
         Cᵏ⁻ = γRᵐᴸ[i, j, k - 1] * Πᴸ[i, j, k - 1]
     end
-    
+
     θᶜᶜᶠ = ℑbzᵃᵃᶠ(i, j, k, grid, θᴸ)
 
-    pgf_diag   = δτᵐ⁺^2 * θᶜᶜᶠ * (Cᵏ⁺ * Δz⁻¹ᵏ⁺ + Cᵏ⁻ * Δz⁻¹ᵏ⁻) / Δzᶠ
+    pgf_diag   = δτᵐ⁺^2 * θᶜᶜᶠ * (Cᵏ⁺ * Δz⁻¹ᵏ⁺ + Cᵏ⁻ * Δz⁻¹ᵏ⁻) * Δz⁻¹ᶠ
     buoy_diag  = δτᵐ⁺^2 * g * (Δz⁻¹ᵏ⁺ - Δz⁻¹ᵏ⁻) / 2
-    damp_diag  = dᵐ⁺ * (Δz⁻¹ᵏ⁺ + Δz⁻¹ᵏ⁻) / Δzᶠ
+    damp_diag  = dᵐ⁺ * (Δz⁻¹ᵏ⁺ + Δz⁻¹ᵏ⁻) * Δz⁻¹ᶠ
     spnge_diag = sponge_term_diag(i, j, k, grid, sponge, δτᵐ⁺)
 
-    return one(grid) + (pgf_diag + buoy_diag + damp_diag + spnge_diag) * (k > 1)
+    return 1 + (pgf_diag + buoy_diag + damp_diag + spnge_diag) * (k > 1)
 end
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagUpper, p, ::ZDirection,
                                  Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
 
-    Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
-    Δz⁻¹ᵏ⁺  = 1 / Δzᶜᶜᶜ(i, j, k, grid)
+    Δz⁻¹ᶠ   = Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
+    Δz⁻¹ᵏ⁺  = Δz⁻¹ᶜᶜᶜ(i, j, k, grid)
 
     @inbounds Cᵏ⁺ = γRᵐᴸ[i, j, k] * Πᴸ[i, j, k]
     θᵏ⁺ = ℑbzᵃᵃᶠ(i, j, k + 1, grid, θᴸ)
 
-    pgf_term  = - δτᵐ⁺^2 * Cᵏ⁺ * θᵏ⁺ * Δz⁻¹ᵏ⁺ / Δzᶠ
+    pgf_term  = - δτᵐ⁺^2 * Cᵏ⁺ * θᵏ⁺ * Δz⁻¹ᵏ⁺ * Δz⁻¹ᶠ
     buoy_term = - δτᵐ⁺^2 * g * Δz⁻¹ᵏ⁺ / 2
-    damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁺ / Δzᶠ
+    damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁺ * Δz⁻¹ᶠ
     # Upper sponge is local in z (Rayleigh-type), so no off-diagonal coupling.
 
     return (pgf_term + buoy_term + damp_term) * (k > 1)
