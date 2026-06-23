@@ -50,7 +50,15 @@ Lx, Lz = 1000, 200  # (m)
 grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
                        topology = (Periodic, Flat, Bounded))
 
-model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+# This example is dry, so the θˡⁱ→T inversion has an exact closed form and needs no Newton steps.
+# `FixedIterations(2)` selects the fixed-trip (unrolled) inversion with a tiny trip count: the
+# differentiable pass at the end of this example takes a reverse-mode gradient through the
+# compressible time step with Reactant/Enzyme, and the default tolerance-based `NewtonSolver`
+# (a `while` loop) compiles to an XLA `while` op that does not differentiate cheaply, while a high
+# iteration count needlessly inflates the traced graph (NumericalEarth/Breeze.jl#767). The forward
+# and adjoint models use identical dynamics and formulation.
+formulation = LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2))
+model = AtmosphereModel(grid; formulation, dynamics = CompressibleDynamics(ExplicitTimeStepping()))
 
 # ## Background state
 #
@@ -256,7 +264,8 @@ grid_ad = RectilinearGrid(ReactantState(); size = (Nx, Nz),
                           x = (-Lx/2, Lx/2), z = (0, Lz),
                           topology = (Periodic, Flat, Bounded))
 
-model_ad = AtmosphereModel(grid_ad; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+formulation_ad = LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2)) # fixed-trip, low-iteration EOS inversion so Enzyme can differentiate it cheaply (see forward model)
+model_ad = AtmosphereModel(grid_ad; formulation = formulation_ad, dynamics = CompressibleDynamics(ExplicitTimeStepping()))
 
 # ### Fixed and varying fields
 #
