@@ -249,20 +249,22 @@ end
 """
 $(TYPEDEF)
 
-Acoustic divergence damping that forms the 3-D divergence ``∇·(ρ𝐮)′`` **directly** from the
-perturbation momentum, rather than approximating it through the ``(ρθ)′`` substep tendency the way
-[`ThermalDivergenceDamping`](@ref) does (Klemp, Skamarock & Ha 2018, their eq. 36). After each acoustic
-substep the horizontal perturbation momentum receives the correction
+Acoustic divergence damping that forms the **horizontal** θ-flux divergence
+``δ = ∂ₓ(θᴸ(ρu)′) + ∂_y(θᴸ(ρv)′)`` **directly** from the perturbation momentum, rather than approximating
+it through the ``(ρθ)′`` substep tendency the way [`ThermalDivergenceDamping`](@ref) does (Klemp,
+Skamarock & Ha 2018, their eq. 36). After each acoustic substep the horizontal perturbation momentum
+receives the correction
 
 ```math
-Δ(ρu)′ = α\\, Δx²\\, ∂ₓ[∇·(ρ𝐮)′], \\qquad Δ(ρv)′ = α\\, Δy²\\, ∂_y[∇·(ρ𝐮)′],
+Δ(ρu)′ = α\\, Δx²\\, ∂ₓ δ / θᴸ, \\qquad Δ(ρv)′ = α\\, Δy²\\, ∂_y δ / θᴸ,
 ```
 
-with the single dimensionless coefficient `α` (MPAS `config_smdiv`, default `0.1`). This is the direct,
-"construct the divergence ``D′``" form (KSH18 eq. 7 / their §3). Because the thermal proxy obeys
-``(ρθ)′ - (ρθ)′ˢ⁻ ≈ -Δτ\\, θᴸ\\, ∇·(ρ𝐮)′``, the two strategies damp the same leading-order divergence for
-matching `α`; the direct form differences the velocity field itself and so carries no ``1/Δτ`` in the
-local diffusivity.
+with the single dimensionless coefficient `α` (MPAS `config_smdiv`, default `0.1`; the Laplacian-diffusion
+stability bound is `α ≲ 0.2`). The divergence is **horizontal only**: the damped quantity must match the
+divergence in the ``Θ = ρθ`` equation, and folding in the vertical θ-flux divergence damps the resolved
+vertical flux and destabilizes the flow. Differencing the velocity field directly (rather than the
+``(ρθ)′`` tendency) carries no ``1/Δτ`` in the diffusivity, which also avoids the thermal proxy's
+cold-start ``∝ α/Δτ`` spurious force (cf. PR #794).
 """
 struct DirectDivergenceDamping{FT} <: AcousticDampingStrategy
     coefficient :: FT

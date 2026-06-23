@@ -1032,7 +1032,7 @@ end
 # vertical component is not applied by default; the default vertical acoustic
 # damping comes from off-centering (`forward_weight > 0.5`) in the implicit
 # column solve.
-function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, dynamics, Δτ, thermodynamic_constants)
+function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
     FT    = eltype(grid)
     arch  = architecture(grid)
     α     = convert(FT, damping.coefficient)
@@ -1109,50 +1109,47 @@ end
     end
 end
 
-# Direct divergence damping (`DirectDivergenceDamping`): form the 3-D Θ-flux divergence
-# D = ∇·(θᴸ(ρ𝐮)′) *directly* from the velocity — the same divergence carried by the (ρθ)′ continuity
-# equation (Klemp, Skamarock & Ha 2018: D = ∇·ρθ𝐯) — rather than approximating it through the (ρθ)′
-# tendency as `ThermalDivergenceDamping` does (their eq. 36). The horizontal momentum is then corrected
-# by the θᴸ-scaled gradient (matching the 1/θ in eq. 36):
-#   Δ(ρu)′ = +α Δx² ∂x[D] / θᴸ,   Δ(ρv)′ = +α Δy² ∂y[D] / θᴸ,   D = ∇·(θᴸ(ρ𝐮)′).
-# Two launches: materialize D into the (now-free, post-recovery) density predictor scratch, halo-fill it,
-# then take its gradient. Because D excludes the slow forcing F (the thermal proxy carries −Δτ D + Δτ F),
-# this damps the divergence toward zero rather than toward the diabatic balance (KSH18 eq. 7 / §3). The
-# local diffusivity α Δx² carries no 1/Δτ because D is the divergence itself, not the Δτ-scaled tendency.
-function apply_divergence_damping!(damping::DirectDivergenceDamping, substepper, grid, dynamics, Δτ, thermodynamic_constants)
+# Direct divergence damping (`DirectDivergenceDamping`): form the *horizontal* Θ-flux divergence
+# δ = ∂x(θᴸ(ρu)′) + ∂y(θᴸ(ρv)′) directly from the velocity — the divergence carried by the (ρθ)′
+# continuity equation (Klemp, Skamarock & Ha 2018, eq. 36) — rather than approximating it through the
+# (ρθ)′ tendency as `ThermalDivergenceDamping` does. The horizontal momentum is then corrected by the
+# θᴸ-scaled gradient:
+#   Δ(ρu)′ = α Δx² ∂x[δ] / θᴸ,   Δ(ρv)′ = α Δy² ∂y[δ] / θᴸ,   δ = ∇ʰ·(θᴸ(ρ𝐮)′).
+# Horizontal only — by design. Folding the vertical Θ-flux divergence ∂z(θᴸ(ρw)′) into δ damps the
+# *resolved* vertical flux and blows up the baroclinic wave; the horizontal divergence is the correct
+# quantity for the horizontal filter (cf. PR #794, which fixes the same cold-start blow-up this way).
+# Two launches: materialize δ into the (now-free, post-recovery) density-predictor scratch, halo-fill it,
+# then take its gradient. The local diffusivity α Δx² carries no 1/Δτ — δ is the divergence itself, not
+# the Δτ-scaled (ρθ)′ tendency — which also removes the thermal form's cold-start ∝ α/Δτ spurious force.
+function apply_divergence_damping!(damping::DirectDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
     arch = architecture(grid)
-    α    = convert(eltype(grid), damping.coefficient)
-    D    = substepper.density_predictor   # free between recovery and the next predictor build
-    θᴸ   = substepper.linearization_potential_temperature
-    ρu′  = substepper.momentum_perturbation.u
-    ρv′  = substepper.momentum_perturbation.v
-    ρw′  = substepper.momentum_perturbation.w
+    α = convert(eltype(grid), damping.coefficient)
 
-    launch!(arch, grid, :xyz, _compute_thermal_flux_divergence!, D, grid, dynamics, θᴸ, ρu′, ρv′, ρw′)
-    fill_halo_regions!(D)
-    launch!(arch, grid, :xyz, _apply_direct_divergence_damping!, ρu′, ρv′, grid, D, θᴸ, α)
+    δ   = substepper.density_predictor   # free between recovery and the next predictor build
+    θᴸ  = substepper.linearization_potential_temperature
+    ρu′ = substepper.momentum_perturbation.u
+    ρv′ = substepper.momentum_perturbation.v
+
+    launch!(arch, grid, :xyz, _compute_horizontal_theta_flux_divergence!, δ, grid, θᴸ, ρu′, ρv′)
+    fill_halo_regions!(δ)
+    launch!(arch, grid, :xyz, _apply_direct_divergence_damping!, ρu′, ρv′, grid, δ, θᴸ, α)
 
     return nothing
 end
 
-# D = ∇·(θᴸ(ρ𝐮)′): area-weighted horizontal Θ-flux divergence + vertical Θ-flux divergence, using the
-# same flux-form (θFˣ, θFʸ, θFᶻ) that `build_predictors!` uses for ∇ʰ_θM and the vertical θ-flux.
-@kernel function _compute_thermal_flux_divergence!(D, grid, dynamics, θᴸ, ρu′, ρv′, ρw′)
+# δ = ∇ʰ·(θᴸ(ρ𝐮)′): area-weighted horizontal Θ-flux divergence, using the same flux-form (θFˣ, θFʸ)
+# `build_predictors!` uses for ∇ʰ_θM (so the damped divergence matches the one in the Θ equation).
+@kernel function _compute_horizontal_theta_flux_divergence!(δ, grid, θᴸ, ρu′, ρv′)
     i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        V⁻¹ = 1 / Vᶜᶜᶜ(i, j, k, grid)
-        ∇ʰ  = (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) +
-               δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) * V⁻¹
-        ∇ᶻ  = ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
-        D[i, j, k] = ∇ʰ + ∇ᶻ
-    end
+    @inbounds δ[i, j, k] = (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) +
+                            δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) / Vᶜᶜᶜ(i, j, k, grid)
 end
 
-@kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, D, θᴸ, α)
+@kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, α)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, D) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
-        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, D) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, δ) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
+        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, δ) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
     end
 end
 
@@ -1470,7 +1467,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
         # Step E: optional Klemp 2018 post-substep damping (no-op for
         # `NoDivergenceDamping`).
-        apply_divergence_damping!(substepper.damping, substepper, grid, model.dynamics, Δτ, constants)
+        apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
 
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)
