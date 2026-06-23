@@ -518,24 +518,34 @@ import Oceananigans.Solvers: get_coefficient
     return (f⁺ + f⁻) / 2
 end
 
-# Off-centered CN tridiag derivation
-# ----------------------------------
+#####
+##### Off-centered CN tridiag derivation
+#####
+
 # At face k the (ρw)′ CN update is
+#
 #   (ρw)′ₙ(k) = (ρw)′ₒ(k) + Δτ Gˢρw(k) − Δτ(ωˢ⁻ ∂z p′ₒ + ωᵐ⁺ ∂z p′ₙ) − Δτ g(ωˢ⁻ ρ′_faceₒ + ωᵐ⁺ ρ′_faceₙ),
+#
 # with ωᵐ⁺=(1+ε)/2, ωˢ⁻=(1−ε)/2 (ε=0 centered). p′ = Cᴸ(ρθ)′, Cᴸ≡γRᵐᴸΠᴸ, so the discrete PGF is the
 # gradient of the product Cᴸ·(ρθ)′ (not Cᴸ_face·∂z(ρθ)′). Post-solve substitution (δτᵐ⁺=ωᵐ⁺Δτ):
+#
 #   ρ′ₙ(k)    = ρ′★(k)  − δτᵐ⁺((ρw)′ₙ(k+1) − (ρw)′ₙ(k))/Δz_c(k)
 #   (ρθ)′ₙ(k) = ρθ′★(k) − δτᵐ⁺(θᴸ_face(k+1)(ρw)′ₙ(k+1) − θᴸ_face(k)(ρw)′ₙ(k))/Δz_c(k)
+#
 # yields the tridiag coefficients (ω≡ωᵐ⁺):
+#
 #   A[k,k+1] = −(ωΔτ)² Cᴸ(k)  θᴸ_face(k+1) rdz_c(k)   /Δzᶠ(k) − (ωΔτ)² g rdz_c(k)/2
 #   A[k,k]   = 1 + (ωΔτ)² θᴸ_face(k)(Cᴸ(k)rdz_c(k)+Cᴸ(k−1)rdz_c(k−1))/Δzᶠ(k) + (ωΔτ)² g(rdz_c(k)−rdz_c(k−1))/2
 #   A[k,k−1] = −(ωΔτ)² Cᴸ(k−1)θᴸ_face(k−1)rdz_c(k−1)/Δzᶠ(k) + (ωΔτ)² g rdz_c(k−1)/2
+#
 # γᵐRᵐᴸ (cell-centered γᵐRᵐ cached in `linearization_gamma_R_mixture`, refreshed per stage, interpolated to
 # faces in-kernel) collapses bit-identically to dry γᵈRᵈ for qᵛ=qˡ=qⁱ=0.
 #
 # Implicit vertical damping: for `ThermalDivergenceDamping(damp_vertical=true)`, the vertical divergence
 # damping folds into the same tridiag via a discrete vertical Laplacian on (ρw)′:
+#
 #   (ρw)′ₙ − ωαΔz² ∂z²(ρw)′ₙ = (ρw)′ₒ + (1−ω)αΔz² ∂z²(ρw)′ₒ.
+#
 # With dᵐ⁺≡ωαΔz², the −∂z² stencil adds  A[k,k±1] += −dᵐ⁺ rdz_c(k or k−1)/Δzᶠ(k),  A[k,k] += +dᵐ⁺(rdz_c(k)
 # + rdz_c(k−1))/Δzᶠ(k); the matching (1−ω) term goes on the predictor RHS in `_build_vertical_rhs!`.
 # Constant-Courant scaling γ_z=αΔz²/Δτ makes dᵐ⁺ Δτ-independent. `damp_vertical=false`/`NoDivergenceDamping` ⇒ 0.
@@ -573,6 +583,7 @@ end
     pgf_term  = - δτᵐ⁺^2 * Cᵏ⁻ * θᵏ⁻ * Δz⁻¹ᵏ⁻ * Δz⁻¹ᶠ
     buoy_term = + δτᵐ⁺^2 * g * Δz⁻¹ᵏ⁻ / 2
     damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁻ * Δz⁻¹ᶠ
+
     # Upper sponge is local in z (Rayleigh-type), so no off-diagonal coupling.
     return pgf_term + buoy_term + damp_term
 end
@@ -602,8 +613,8 @@ end
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagUpper, p, ::ZDirection,
                                  Πᴸ, θᴸ, γRᵐᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
 
-    Δz⁻¹ᶠ   = Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
-    Δz⁻¹ᵏ⁺  = Δz⁻¹ᶜᶜᶜ(i, j, k, grid)
+    Δz⁻¹ᶠ  = Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
+    Δz⁻¹ᵏ⁺ = Δz⁻¹ᶜᶜᶜ(i, j, k, grid)
 
     @inbounds Cᵏ⁺ = γRᵐᴸ[i, j, k] * Πᴸ[i, j, k]
     θᵏ⁺ = ℑbzᵃᵃᶠ(i, j, k + 1, grid, θᴸ)
@@ -611,29 +622,35 @@ end
     pgf_term  = - δτᵐ⁺^2 * Cᵏ⁺ * θᵏ⁺ * Δz⁻¹ᵏ⁺ * Δz⁻¹ᶠ
     buoy_term = - δτᵐ⁺^2 * g * Δz⁻¹ᵏ⁺ / 2
     damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁺ * Δz⁻¹ᶠ
-    # Upper sponge is local in z (Rayleigh-type), so no off-diagonal coupling.
 
+    # Upper sponge is local in z (Rayleigh-type), so no off-diagonal coupling.
     return (pgf_term + buoy_term + damp_term) * (k > 1)
 end
 
 #####
 ##### Section 7 — Slow vertical-momentum tendency assembly
 #####
-##### The full vertical-momentum equation is
-#####   ∂t (ρw) + ∇·(ρw u) + ∂z p + g ρ = 0
-##### The dynamics kernel runs in `SlowTendencyMode` for SplitExplicit,
-##### which zeroes the PGF and buoyancy in `Gⁿρw`. We reinstate the
-##### **Uᴸ-state** PGF and buoyancy here so the slow ρw tendency has the
-##### form
-#####   Gˢρw = -∇·(ρw u)  -  ∂z(pᴸ - pᵣ)  -  g · (ρᴸ - ρᵣ)   (with reference)
-#####   Gˢρw = -∇·(ρw u)  -  ∂z pᴸ        -  g · ρᴸ           (no reference)
-##### and the per-substep linearized forces operate on the perturbations:
-#####   ∂t (ρw)′ = Gˢρw - γRᵐ · Πᴸ · ∂z((ρθ)′)  -  g · ρ′
-##### Total force = Gˢρw + perturbation force = full ∂t(ρw) at the
-##### linearization-consistent level. With a hydrostatic-balanced reference
-##### state, the reference subtraction makes Gˢρw vanish identically on a
-##### resting atmosphere (no FP-rounding noise).
-#####
+
+# The full vertical-momentum equation is
+#
+# ∂t (ρw) + ∇·(ρw u) + ∂z p + g ρ = 0
+#
+# The dynamics kernel runs in `SlowTendencyMode` for SplitExplicit,
+# which zeroes the PGF and buoyancy in `Gⁿρw`. We reinstate the
+# **Uᴸ-state** PGF and buoyancy here so the slow ρw tendency has the
+# form
+#
+#   Gˢρw = -∇·(ρw u)  -  ∂z(pᴸ - pᵣ)  -  g · (ρᴸ - ρᵣ)   (with reference)
+#   Gˢρw = -∇·(ρw u)  -  ∂z pᴸ        -  g · ρᴸ           (no reference)
+#
+# and the per-substep linearized forces operate on the perturbations:
+#
+#   ∂t (ρw)′ = Gˢρw - γRᵐ · Πᴸ · ∂z((ρθ)′)  -  g · ρ′
+#
+# Total force = Gˢρw + perturbation force = full ∂t(ρw) at the
+# linearization-consistent level. With a hydrostatic-balanced reference
+# state, the reference subtraction makes Gˢρw vanish identically on a
+# resting atmosphere (no FP-rounding noise).
 
 function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubstepper, model, β_stage = nothing)
     grid = model.grid
@@ -801,12 +818,16 @@ end
 
 # Explicit forward step for horizontal momentum perturbations (ρu)′, (ρv)′.
 # Linearized at Uᴸ, the horizontal pressure gradient splits as
+#
 #   ∂x p_full = ∂x pᴸ + ∂x(Cᴸ (ρθ)′),  Cᴸ = γRᵐᴸ Πᴸ
+#
 # the first piece frozen at the linearization point, the second the
 # perturbation force. `ExnerReferenceState` depends only on z, so ∂x pᵣ ≡ 0
 # and no horizontal pressure-perturbation field is needed.
+#
 #   (ρu)′^{τ+Δτ} = (ρu)′^τ + Δτ (Gⁿρu − ∂x pᴸ − ∂x(Cᴸ (ρθ)′))
 #   (ρv)′^{τ+Δτ} = (ρv)′^τ + Δτ (Gⁿρv − ∂y pᴸ − ∂y(Cᴸ (ρθ)′))
+#
 # `Gⁿρu` (SlowTendencyMode) carries non-pressure slow terms with PGF zeroed;
 # we reinstate the frozen large-step PGF here (MPAS keeps it in `tend_u_euler`).
 # Forward-backward sequencing skips only the acoustic perturbation PGF.
@@ -875,6 +896,7 @@ end
 
         ρ′★[i, j, k]  = ρ′[i, j, k] + Δτ * (Gˢρ[i, j, k] - ∇ʰ_M) -
                             δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′)
+
         ρθ′★[i, j, k] = ρθ′[i, j, k] + Δτ * (fθ * Gˢρθ[i, j, k] - ∇ʰ_θM) -
                             δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
     end
@@ -980,17 +1002,27 @@ end
 
 # Klemp, Skamarock & Ha (2018) acoustic divergence damping (MPAS form).
 # In the linearized acoustic mode,
+#
 #   (ρθ)′ − (ρθ)′ˢ⁻ ≈ −Δτ · θᴸ · ∇·((ρu)′, (ρv)′, (ρw)′)
+#
 # so D ≡ ((ρθ)′ − (ρθ)′ˢ⁻) / θᴸ is a discrete proxy for −Δτ · ∇·(ρu)′.
 # The default per-substep momentum correction is horizontal:
+#
 #   Δ(ρu)′ = −γ · ∂x D , Δ(ρv)′ = −γ · ∂y D
+#
 # with per-direction horizontal diffusivities:
+#
 #   γˣ = α · Δx² / Δτ,   γʸ = α · Δy² / Δτ
+#
 # or, when `length_scale = ℓ` is specified, fixed diffusivity
+#
 #   γ = α · ℓ² / Δτ
+#
 # in both horizontal directions.
 # If `damp_vertical = true`, the vertical contribution
+#
 #   γ_z = α · Δz² / Δτ
+#
 # is folded into the column tridiag instead of applied as a post-substep
 # correction.
 # `α` is the dimensionless Klemp 2018 coefficient (`config_smdiv` in MPAS,
@@ -1000,7 +1032,7 @@ end
 # vertical component is not applied by default; the default vertical acoustic
 # damping comes from off-centering (`forward_weight > 0.5`) in the implicit
 # column solve.
-function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
+function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, dynamics, Δτ, thermodynamic_constants)
     FT    = eltype(grid)
     arch  = architecture(grid)
     α     = convert(FT, damping.coefficient)
@@ -1077,39 +1109,50 @@ end
     end
 end
 
-# Direct divergence damping (`DivergenceDamping`): form the full 3-D divergence ∇·(ρ𝐮)′ from the
-# perturbation momentum (vs the (ρθ)′-tendency proxy of `ThermalDivergenceDamping`), then correct the
-# horizontal momentum by its gradient,
-#   Δ(ρu)′ = +α Δx² ∂x[∇·(ρ𝐮)′],   Δ(ρv)′ = +α Δy² ∂y[∇·(ρ𝐮)′].
-# Two launches are required because the gradient reads neighbouring divergence values: materialize
-# ∇·(ρ𝐮)′ into the (now-free, post-recovery) density predictor as scratch, halo-fill it, then take ∂x/∂y.
-# (KSH18 eq. 7 / §3 "old method". The local diffusivity α Δx² carries no 1/Δτ — unlike the thermal form
-# whose γ = α Δx²/Δτ cancels the Δτ buried in the (ρθ)′ tendency it differences.)
-function apply_divergence_damping!(damping::DivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
+# Direct divergence damping (`DirectDivergenceDamping`): form the 3-D Θ-flux divergence
+# D = ∇·(θᴸ(ρ𝐮)′) *directly* from the velocity — the same divergence carried by the (ρθ)′ continuity
+# equation (Klemp, Skamarock & Ha 2018: D = ∇·ρθ𝐯) — rather than approximating it through the (ρθ)′
+# tendency as `ThermalDivergenceDamping` does (their eq. 36). The horizontal momentum is then corrected
+# by the θᴸ-scaled gradient (matching the 1/θ in eq. 36):
+#   Δ(ρu)′ = +α Δx² ∂x[D] / θᴸ,   Δ(ρv)′ = +α Δy² ∂y[D] / θᴸ,   D = ∇·(θᴸ(ρ𝐮)′).
+# Two launches: materialize D into the (now-free, post-recovery) density predictor scratch, halo-fill it,
+# then take its gradient. Because D excludes the slow forcing F (the thermal proxy carries −Δτ D + Δτ F),
+# this damps the divergence toward zero rather than toward the diabatic balance (KSH18 eq. 7 / §3). The
+# local diffusivity α Δx² carries no 1/Δτ because D is the divergence itself, not the Δτ-scaled tendency.
+function apply_divergence_damping!(damping::DirectDivergenceDamping, substepper, grid, dynamics, Δτ, thermodynamic_constants)
     arch = architecture(grid)
     α    = convert(eltype(grid), damping.coefficient)
     D    = substepper.density_predictor   # free between recovery and the next predictor build
+    θᴸ   = substepper.linearization_potential_temperature
     ρu′  = substepper.momentum_perturbation.u
     ρv′  = substepper.momentum_perturbation.v
     ρw′  = substepper.momentum_perturbation.w
 
-    launch!(arch, grid, :xyz, _compute_momentum_divergence!, D, grid, ρu′, ρv′, ρw′)
+    launch!(arch, grid, :xyz, _compute_thermal_flux_divergence!, D, grid, dynamics, θᴸ, ρu′, ρv′, ρw′)
     fill_halo_regions!(D)
-    launch!(arch, grid, :xyz, _apply_direct_divergence_damping!, ρu′, ρv′, grid, D, α)
+    launch!(arch, grid, :xyz, _apply_direct_divergence_damping!, ρu′, ρv′, grid, D, θᴸ, α)
 
     return nothing
 end
 
-@kernel function _compute_momentum_divergence!(D, grid, ρu′, ρv′, ρw′)
-    i, j, k = @index(Global, NTuple)
-    @inbounds D[i, j, k] = divᶜᶜᶜ(i, j, k, grid, ρu′, ρv′, ρw′)
-end
-
-@kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, D, α)
+# D = ∇·(θᴸ(ρ𝐮)′): area-weighted horizontal Θ-flux divergence + vertical Θ-flux divergence, using the
+# same flux-form (θFˣ, θFʸ, θFᶻ) that `build_predictors!` uses for ∇ʰ_θM and the vertical θ-flux.
+@kernel function _compute_thermal_flux_divergence!(D, grid, dynamics, θᴸ, ρu′, ρv′, ρw′)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, D)
-        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, D)
+        V⁻¹ = 1 / Vᶜᶜᶜ(i, j, k, grid)
+        ∇ʰ  = (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) +
+               δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) * V⁻¹
+        ∇ᶻ  = ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
+        D[i, j, k] = ∇ʰ + ∇ᶻ
+    end
+end
+
+@kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, D, θᴸ, α)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, D) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
+        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, D) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
     end
 end
 
@@ -1427,7 +1470,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
         # Step E: optional Klemp 2018 post-substep damping (no-op for
         # `NoDivergenceDamping`).
-        apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
+        apply_divergence_damping!(substepper.damping, substepper, grid, model.dynamics, Δτ, constants)
 
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)

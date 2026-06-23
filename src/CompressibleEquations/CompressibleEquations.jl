@@ -40,7 +40,7 @@ export
     AcousticDampingStrategy,
     NoDivergenceDamping,
     ThermalDivergenceDamping,
-    DivergenceDamping,
+    DirectDivergenceDamping,
     UpperSponge,
     AbstractRamp,
     LinearRamp,

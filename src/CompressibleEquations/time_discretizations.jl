@@ -264,12 +264,12 @@ with the single dimensionless coefficient `α` (MPAS `config_smdiv`, default `0.
 matching `α`; the direct form differences the velocity field itself and so carries no ``1/Δτ`` in the
 local diffusivity.
 """
-struct DivergenceDamping{FT} <: AcousticDampingStrategy
+struct DirectDivergenceDamping{FT} <: AcousticDampingStrategy
     coefficient :: FT
 end
 
-DivergenceDamping(; coefficient = 0.1) =
-    DivergenceDamping{Oceananigans.defaults.FloatType}(convert(Oceananigans.defaults.FloatType, coefficient))
+DirectDivergenceDamping(; coefficient = 0.1) =
+    DirectDivergenceDamping{Oceananigans.defaults.FloatType}(convert(Oceananigans.defaults.FloatType, coefficient))
 
 #####
 ##### Split-explicit time discretization
@@ -372,6 +372,9 @@ function convert_acoustic_parameter(::Type{FT}, damping::ThermalDivergenceDampin
                                            length_scale,
                                            damping.damp_vertical)
 end
+
+convert_acoustic_parameter(::Type{FT}, damping::DirectDivergenceDamping) where FT =
+    DirectDivergenceDamping{FT}(convert(FT, damping.coefficient))
 
 """
 Abstract supertype for upper-sponge ramp shapes. A concrete `AbstractRamp`
@@ -551,7 +554,7 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          vertical_pressure_tendency_factor = FT(1),
                                          final_stage_vertical_pressure_tendency_factor = FT(1),
                                          apply_first_substep_pressure_gradient = false,
-                                         damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
+                                         damping = NoDivergenceDamping(),
                                          sponge = nothing,
                                          substep_distribution = ProportionalSubsteps(),
                                          open_boundary_relaxation = FT(0.5))
