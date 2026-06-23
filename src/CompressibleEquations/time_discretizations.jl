@@ -65,24 +65,29 @@ across the three Wicker–Skamarock RK3 stages.
 
 Concrete subtypes:
 
-  - [`ProportionalSubsteps`](@ref) — every stage uses the same substep size
-    ``Δτ = Δt/N``, with stage-dependent substep counts ``Nτ = \\max(1, \\mathrm{round}(β N))``
-    (so for the canonical β = (1/3, 1/2, 1) this is N/3, N/2, N substeps in
-    stages 1, 2, 3). This is the default.
+  - [`ProportionalSubsteps`](@ref) — each stage independently covers its own
+    interval ``β Δt`` with ``Nτ = ⌈β N⌉`` substeps of size ``Δτ = β Δt / Nτ``
+    (count proportional to the stage fraction; size fitted so the substeps exactly
+    tile ``β Δt``). This is the default.
+
+  - [`ConstantSubstepSize`](@ref) — every stage uses the same substep size
+    ``Δτ = Δt/N`` (``N`` rounded up to a multiple of 6 so ``β N`` is integral),
+    with stage-dependent counts ``Nτ = β N``.
 
   - [`MonolithicFirstStage`](@ref) — stage 1 collapses to a single substep of
-    size ``Δt/3``; stages 2 and 3 are the same as `ProportionalSubsteps`.
+    size ``Δt/3``; stages 2 and 3 are the same as `ConstantSubstepSize`.
 """
 abstract type AcousticSubstepDistribution end
 
 """
 $(TYPEDEF)
 
-Acoustic substep distribution where every stage uses the same substep size
-``Δτ = Δt/N`` and the substep counts scale with the WS-RK3 stage fraction
-``Nτ = \\max(1, \\mathrm{round}(β_\\mathrm{stage} N))``. For the canonical
-β = (1/3, 1/2, 1) this gives ``N/3``, ``N/2``, ``N`` substeps in stages 1,
-2, 3 respectively.
+Acoustic substep distribution where each WS-RK3 stage independently covers its
+interval ``β_\\mathrm{stage} Δt`` with ``Nτ = ⌈β_\\mathrm{stage} N⌉`` substeps of
+size ``Δτ = β_\\mathrm{stage} Δt / Nτ``. The count is proportional to the stage
+fraction and the size is fitted so the substeps exactly tile each stage — exact
+coverage at the minimum substep count (no global quantization; Δτ may differ
+slightly by stage).
 
 This is the default.
 """
@@ -91,9 +96,20 @@ struct ProportionalSubsteps <: AcousticSubstepDistribution end
 """
 $(TYPEDEF)
 
+Acoustic substep distribution where every stage uses the same substep size
+``Δτ = Δt/N``. ``N`` is rounded up to a multiple of 6 (= LCM of the WS-RK3 stage
+denominators 2 and 3) so the per-stage count ``Nτ = β_\\mathrm{stage} N`` is an
+exact integer and each stage covers exactly ``β Δt`` — uniform Δτ, at the cost of
+over-resolving (substep count is the next multiple of 6 ≥ the CFL minimum).
+"""
+struct ConstantSubstepSize <: AcousticSubstepDistribution end
+
+"""
+$(TYPEDEF)
+
 Acoustic substep distribution where stage 1 collapses to a single substep
 of size ``Δt/3``; stages 2 and 3 are the same as
-[`ProportionalSubsteps`](@ref) (``N/2`` and ``N`` substeps of size
+[`ConstantSubstepSize`](@ref) (``N/2`` and ``N`` substeps of size
 ``Δτ = Δt/N``).
 """
 struct MonolithicFirstStage <: AcousticSubstepDistribution end

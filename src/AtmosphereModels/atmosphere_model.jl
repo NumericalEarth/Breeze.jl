@@ -9,6 +9,7 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
+using Oceananigans.Grids: OrthogonalSphericalShellGrid
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields
 using Oceananigans.TimeSteppers: time_discretization
@@ -146,7 +147,11 @@ function AtmosphereModel(grid;
     validate_model_halo(grid, momentum_advection, scalar_advection, closure)
 
     # Reduce the advection order in directions that do not have enough grid points
-    momentum_advection = validate_momentum_advection(momentum_advection, grid)
+    # Flux-form momentum advection is valid on an OrthogonalSphericalShellGrid here because the
+    # compressible core adds the curvilinear curvature term `U_dot_∇u_metric`; skip the guard
+    # inherited from the hydrostatic ocean model (which restricts OSSG to `VectorInvariant`).
+    momentum_advection = grid isa OrthogonalSphericalShellGrid ? momentum_advection :
+                         validate_momentum_advection(momentum_advection, grid)
     default_scalar_advection, scalar_advection = validate_tracer_advection(scalar_advection, grid)
 
     arch = grid.architecture
