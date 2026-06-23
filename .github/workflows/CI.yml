@@ -112,10 +112,10 @@ jobs:
       - name: "Set test arguments and other environment variables"
         shell: bash
         run: |
-          # Common test options:
-          # * run tests in verbose mode
-          # * exit immediately if there's a test failure
-          TEST_ARGS=(--verbose --quickfail)
+          # Run tests in verbose mode
+          TEST_ARGS=(--verbose)
+          # Exit immediately if there's a test failure
+          TEST_ARGS+=(--quickfail)
 
           if [[ ${{ matrix.os }} == *linux-nvidia-gpu* ]]; then
               # When running the tests on a GPU node we always want to make sure
