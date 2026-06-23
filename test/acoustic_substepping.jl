@@ -175,9 +175,9 @@ for arch in arches
             acoustic = AcousticSubstepper(grid, td)
             @test acoustic.substeps === nothing  # adaptive by default
             @test acoustic.forward_weight ≈ FT(0.65)  # off-centered CN, ε = 2ω - 1 = 0.3
-            # Default damping is DirectDivergenceDamping (NoDivergenceDamping was found to blow up
-            # the baroclinic wave — CN off-centering alone is insufficient for horizontal stability).
-            @test acoustic.damping isa DirectDivergenceDamping
+            # Default damping is ThermalDivergenceDamping (the proven config; isolating whether the
+            # baroclinic-wave blow-up is the damping form or the recip/per-stage substep changes).
+            @test acoustic.damping isa ThermalDivergenceDamping
             @test acoustic.damping.coefficient ≈ FT(0.1)
             @test acoustic.linearization_potential_temperature isa Oceananigans.Fields.Field
         end

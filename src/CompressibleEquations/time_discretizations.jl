@@ -556,7 +556,7 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          vertical_pressure_tendency_factor = FT(1),
                                          final_stage_vertical_pressure_tendency_factor = FT(1),
                                          apply_first_substep_pressure_gradient = false,
-                                         damping = DirectDivergenceDamping(),
+                                         damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
                                          substep_distribution = ProportionalSubsteps(),
                                          open_boundary_relaxation = FT(0.5))
