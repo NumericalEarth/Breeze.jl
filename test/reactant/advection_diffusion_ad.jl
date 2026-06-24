@@ -10,7 +10,7 @@ using GPUArraysCore: @allowscalar
 using Enzyme
 using Test
 
-if get(ENV, "GITHUB_ACTIONS", "false") == "true"
+if @show(get(ENV, "GITHUB_ACTIONS", "false") == "true")
     Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
 end
 
@@ -93,7 +93,7 @@ function loss(model, T⁰, θ, xc, yc, Δt, Nₛ, Δx)
     @trace track_numbers = false mincut = true checkpointing = false for _ in 1:Nₛ
         time_step!(model, Δt)
     end
-    return Δx^2 * sum(interior(model.tracers.ρc) .^ 2)
+    return Δx^2 # * sum(interior(model.tracers.ρc) .^ 2)
 end
 
 function grad_loss(model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
