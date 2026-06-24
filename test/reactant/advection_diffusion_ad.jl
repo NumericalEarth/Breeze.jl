@@ -117,30 +117,44 @@ end
     N_list = [16, 32, 64]
     exact  = analytical_values(_A, _σ₀, _κ, _t_f)
 
+    @show @__LINE__
+
     results = map(N_list) do N
         Δx = _L / N
         Δt = _CFL * Δx / (_c_s + _U₀)
         Nₛ = ceil(Int, _t_f / Δt)
         Δt = _t_f / Nₛ
 
+        @show @__LINE__
+
         model, dmodel, T⁰, dT⁰, xc, yc, _ = build_case(N, _L, _κ)
         θ  = Reactant.to_rarray(Float64[_A, _σ₀, _U₀])
         dθ = Reactant.to_rarray(zeros(3))
 
+        @show @__LINE__
+
         compiled = Reactant.@compile raise_first = true raise = true sync = true grad_loss(
             model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
+
+        @show @__LINE__
 
         dθ_result, J_ad = compiled(model, dmodel, T⁰, dT⁰, θ, dθ, xc, yc, Δt, Nₛ, Δx)
         J_ad  = Float64(J_ad)
         grads = Array(dθ_result)
+
+        @show @__LINE__
 
         rel_J  = abs(J_ad - exact.J) / abs(exact.J)
         rel_A  = abs(grads[1] - exact.∂J_∂A)  / abs(exact.∂J_∂A)
         rel_σ₀ = abs(grads[2] - exact.∂J_∂σ₀) / abs(exact.∂J_∂σ₀)
         rel_U₀ = abs(grads[3]) / abs(exact.J / _U₀)
 
+        @show @__LINE__
+
         (; N, J_ad, grads, rel_J, rel_A, rel_σ₀, rel_U₀)
     end
+
+    @show @__LINE__
 
     # Sanity checks on the finest-grid result
     @testset "Raise backward (N=$(N_list[end]))" begin
@@ -150,6 +164,8 @@ end
         @test all(isfinite, r.grads)
         @test maximum(abs, r.grads) > 0
     end
+
+    @show @__LINE__
 
     # AD gradients are exact for the discrete system; errors come only from the
     # spatial discretisation of the continuous PDE.  Halving Δx must strictly
