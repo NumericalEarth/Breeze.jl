@@ -114,6 +114,8 @@ jobs:
         run: |
           # Run tests in verbose mode
           TEST_ARGS=(--verbose)
+          # Exit immediately if there's a test failure
+          TEST_ARGS+=(--quickfail)
 
           if [[ ${{ matrix.os }} == *linux-nvidia-gpu* ]]; then
               # When running the tests on a GPU node we always want to make sure
