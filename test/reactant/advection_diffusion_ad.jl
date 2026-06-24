@@ -1,3 +1,4 @@
+using Reactant
 import CUDA
 using Oceananigans.Architectures: CPU, GPU
 
