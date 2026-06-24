@@ -10,6 +10,10 @@ using GPUArraysCore: @allowscalar
 using Enzyme
 using Test
 
+if get(ENV, "GITHUB_ACTIONS", "false") == "true"
+    Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+end
+
 if default_arch isa GPU
     Reactant.set_default_backend("gpu")
 else
