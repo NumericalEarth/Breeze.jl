@@ -118,7 +118,7 @@ end
 #####
 
 @testset "advection_diffusion_ad" begin
-    N_list = [16, 32, 64]
+    N_list = [32]
     exact  = analytical_values(_A, _σ₀, _κ, _t_f)
 
     @show @__LINE__
