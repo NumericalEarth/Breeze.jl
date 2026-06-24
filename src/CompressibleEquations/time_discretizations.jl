@@ -550,7 +550,7 @@ end
 function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          substeps = nothing,
                                          acoustic_cfl = FT(0.7),
-                                         forward_weight = FT(0.65),
+                                         forward_weight = FT(0.8),
                                          thermodynamic_tendency_factor = FT(1),
                                          vertical_momentum_tendency_factor = FT(1),
                                          vertical_pressure_tendency_factor = FT(1),

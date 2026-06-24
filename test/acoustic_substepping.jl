@@ -174,7 +174,7 @@ for arch in arches
             @test td.damping.coefficient isa FT
             acoustic = AcousticSubstepper(grid, td)
             @test acoustic.substeps === nothing  # adaptive by default
-            @test acoustic.forward_weight ≈ FT(0.65)  # off-centered CN, ε = 2ω - 1 = 0.3
+            @test acoustic.forward_weight ≈ FT(0.8)  # off-centered CN, ε = 2ω - 1 = 0.6
             # Default damping is ThermalDivergenceDamping (the proven config; isolating whether the
             # baroclinic-wave blow-up is the damping form or the recip/per-stage substep changes).
             @test acoustic.damping isa ThermalDivergenceDamping
