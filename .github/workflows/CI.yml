@@ -193,7 +193,7 @@ jobs:
         if: always()
         with:
           name: mlir-dumps-${{ matrix.version }}-${{ matrix.os }}
-          path: tmp/
+          path: ${{ github.workspace }}/tmp/
           if-no-files-found: ignore
           retention-days: 7
       - name: "Process Julia coverage files"
