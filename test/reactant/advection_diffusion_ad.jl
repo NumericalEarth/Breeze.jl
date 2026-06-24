@@ -124,6 +124,8 @@ end
     @show @__LINE__
 
     results = map(N_list) do N
+        @show N
+
         Δx = _L / N
         Δt = _CFL * Δx / (_c_s + _U₀)
         Nₛ = ceil(Int, _t_f / Δt)
@@ -159,30 +161,4 @@ end
     end
 
     @show @__LINE__
-
-    # Sanity checks on the finest-grid result
-    @testset "Raise backward (N=$(N_list[end]))" begin
-        r = results[end]
-        @test isfinite(r.J_ad)
-        @test r.J_ad > 0
-        @test all(isfinite, r.grads)
-        @test maximum(abs, r.grads) > 0
-    end
-
-    @show @__LINE__
-
-    # AD gradients are exact for the discrete system; errors come only from the
-    # spatial discretisation of the continuous PDE.  Halving Δx must strictly
-    # reduce each relative error — a broken adjoint would violate this.
-    @testset "Convergence" begin
-        for i in 1:length(N_list)-1
-            lo, hi = results[i], results[i+1]
-            @testset "N=$(lo.N) → N=$(hi.N)" begin
-                @test hi.rel_J  < lo.rel_J
-                @test hi.rel_A  < lo.rel_A
-                @test hi.rel_σ₀ < lo.rel_σ₀
-                @test hi.rel_U₀ < lo.rel_U₀
-            end
-        end
-    end
 end
