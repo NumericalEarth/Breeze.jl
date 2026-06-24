@@ -125,7 +125,6 @@ jobs:
               # concurrent jobs, some of them reaching a large memory usage.  We reduce the
               # number of jobs to avoid memory issues.
               TEST_ARGS+=(--jobs=$(($(nproc) - 1)))
-              TEST_ARGS+=(--quickfail)
           fi
 
           if [[ ${{ runner.os }} == "macOS" ]]; then
