@@ -39,7 +39,7 @@ using Oceananigans.Operators:
     Δz⁻¹ᶜᶜᶜ, Δz⁻¹ᶜᶜᶠ,
     Δxᶠᶜᶜ,
     Δyᶜᶠᶜ,
-    Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ
+    Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ, V⁻¹ᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
@@ -292,10 +292,11 @@ outer_step_start_transport_velocities(model) = model.velocities
 function refresh_linearization_basic_state!(substepper::AcousticSubstepper, model)
     grid = model.grid
     arch = architecture(grid)
-    FT   = eltype(grid)
+    FT  = eltype(grid)
+    
     constants = model.thermodynamic_constants
-    κ    = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
-    pˢᵗ  = convert(FT, model.dynamics.standard_pressure)
+    κ   = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+    pˢᵗ = convert(FT, model.dynamics.standard_pressure)
 
     ρθ_field = thermodynamic_density(model.formulation)
 
@@ -868,37 +869,29 @@ end
 # Build per-column predictors `ρ′★`, `ρθ′★` (cell centers) AND
 # the explicit RHS for the tridiagonal `(ρw)′ᵐ⁺` solve at z-faces.
 #
-# Off-centered Crank–Nicolson with new-side weight ω = forward_weight
-# and old-side weight 1−ω. The predictor uses δτˢ⁻ = (1−ω)Δτ on the
-# old-step vertical-flux contribution (ω-weighted CN of ∇·m); the
-# vertical RHS combines old and pred contributions with their matching
-# weights δτˢ⁻ and δτᵐ⁺ respectively. See derivation in
-# the split-explicit derivation in `docs/src/compressible_dynamics.md`.
-# Build the cell-centred predictors ρ′★, ρθ′★ in one 3D kernel, then the face-level
-# tridiag RHS for (ρw)′ᵐ⁺ in a second 3D kernel that reads them. Split (vs one column
-# kernel) so both run `:xyz` for full occupancy; the kernel-launch boundary is the
-# global sync that lets the RHS read predictor values at k±1. The predictor kernel also
-# stashes the old (ρθ)′ into ρθ′ˢ⁻ (for the divergence damping), folding in what was a
-# separate full-field copy. (Flat grids only read predictors vertically here; terrain's
-# horizontal slope read would need a ρθ′★ halo fill between the two kernels — as the
-# former single column kernel already required across columns.)
-@kernel function _build_predictors!(ρ′★, ρθ′★, ρθ′ˢ⁻,
-                                    ρ′, ρθ′, ρw′, ρu′, ρv′,
+# Off-centered Crank–Nicolson with
+#     - ω = forward_weight = "new side" weight
+#     - 1 - ω = "old side" weight
+#     - δτˢ⁻ = (1 − ω) Δτ
+#
+# See derivation in the split-explicit derivation in `docs/src/compressible_dynamics.md`.
+@kernel function _build_predictors!(ρ′★, ρθ′★, ρθ′ˢ⁻, ρ′, ρθ′, ρw′, ρu′, ρv′,
                                     grid, dynamics, Δτ, δτˢ⁻, Gˢρ, Gˢρθ, fθ, θᴸ)
+
     i, j, k = @index(Global, NTuple)
+
     @inbounds begin
-        ρθ′ˢ⁻[i, j, k] = ρθ′[i, j, k]   # stash old (ρθ)′ for the divergence damping
+        ρθ′ˢ⁻[i, j, k] = ρθ′[i, j, k] # stash old (ρθ)′ for the divergence damping
 
-        V⁻¹ = 1 / Vᶜᶜᶜ(i, j, k, grid)
+        V⁻¹ = V⁻¹ᶜᶜᶜ(i, j, k, grid)
         ∇ʰ_M  = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
-        ∇ʰ_θM = (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) +
-                 δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) * V⁻¹
+        ∇ʰ_θM = V⁻¹ * (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) + δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′))
 
-        ρ′★[i, j, k]  = ρ′[i, j, k] + Δτ * (Gˢρ[i, j, k] - ∇ʰ_M) -
-                            δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′)
+        ρ′★[i, j, k] = ρ′[i, j, k] + 
+            Δτ * (Gˢρ[i, j, k] - ∇ʰ_M) - δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′)
 
-        ρθ′★[i, j, k] = ρθ′[i, j, k] + Δτ * (fθ * Gˢρθ[i, j, k] - ∇ʰ_θM) -
-                            δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
+        ρθ′★[i, j, k] = ρθ′[i, j, k] +
+            Δτ * (fθ * Gˢρθ[i, j, k] - ∇ʰ_θM) - δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
     end
 end
 
@@ -919,19 +912,18 @@ end
     @inbounds begin
         ∂r_p′★  = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′★, Πᴸ, γRᵐᴸ, slope_correction)
         ∂r_p′ˢ⁻ = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′,  Πᴸ, γRᵐᴸ, slope_correction)
-        sound_force = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★
+        Gρwᵖ = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★ # pressure gradient
 
         ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
         ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)
-        buoy_force = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★)
+        Gρwᵇ = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★) # buoyancy
 
-        ∂z²_ρw′ˢ⁻  = ∂zᶜᶜᶠ(i, j, k, grid, ∂zᶜᶜᶜ, ρw′)
-        damp_force = - dˢ⁻ * ∂z²_ρw′ˢ⁻
+        ∂z²_ρw′ˢ⁻ = ∂zᶜᶜᶠ(i, j, k, grid, ∂zᶜᶜᶜ, ρw′)
+        Gρwᵈ = - dˢ⁻ * ∂z²_ρw′ˢ⁻ # damping
 
-        sponge_force = sponge_rhs(i, j, k, grid, sponge, δτˢ⁻, ρw′)
+        Gρwˢ = sponge_rhs(i, j, k, grid, sponge, δτˢ⁻, ρw′)
 
-        rhs = ρw′[i, j, k] + Δτ * fw * Gˢρw[i, j, k] -
-              sound_force - buoy_force - damp_force - sponge_force
+        rhs = ρw′[i, j, k] + Δτ * fw * Gˢρw[i, j, k] - Gρwᵖ - Gρwᵇ - Gρwᵈ - Gρwˢ 
 
         # Interior faces 2:Nz carry the acoustic RHS; boundary faces 1 and Nz+1 are pinned to 0
         # (tridiag b[1] = 1 ⇒ (ρw)′[1] = 0; impenetrability w(top) = 0). Branchless (launched over
@@ -955,14 +947,8 @@ end
 
 # Post-solve recovery: substitute the tridiag-solved `(ρw)′ᵐ⁺` back
 # into the `ρ′★`, `ρθ′★` predictors to get `ρ′ᵐ⁺`, `ρθ′ᵐ⁺`
-# (the IMPLICIT half of CN).
 #
-#   ρ′_n(k)    = ρ′★(k)  - (δτᵐ⁺ / Δz_c(k)) · ((ρw)′_n(k+1) - (ρw)′_n(k))
-#   (ρθ)′_n(k) = ρθ′★(k) - (δτᵐ⁺ / Δz_c(k)) · (θᴸ_face(k+1) (ρw)′_n(k+1)
-#                                                    - θᴸ_face(k)   (ρw)′_n(k))
-# Recovers ρ′, (ρθ)′ from the solved (ρw)′, and folds in the time-averaged-velocity
-# accumulation (Step F) since the momentum components are already loaded here. NOTE: this
-# runs *before* the divergence damping, so `avg` accumulates the pre-damping (ρu)′,(ρv)′.
+# NOTE: this runs *before* the divergence damping, so `avg` accumulates the pre-damping (ρu)′,(ρv)′.
 # Identical for dry runs (the transport velocity is unused without scalars); for moist
 # runs it omits the per-substep damping increment from the transport average.
 @kernel function _post_solve_recovery!(ρ′, ρθ′, ρw′, ρu′, ρv′, ρ′★, ρθ′★, avg, grid, dynamics, δτᵐ⁺, θᴸ)
@@ -1078,8 +1064,16 @@ end
 @inline κˣ(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
 @inline κʸ(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
 
-@inline κˣ(i, j, k, grid, scale::LocalHorizontalDampingScale) = scale.α_over_Δτ * Δxᶠᶜᶜ(i, j, k, grid)^2
-@inline κʸ(i, j, k, grid, scale::LocalHorizontalDampingScale) = scale.α_over_Δτ * Δyᶜᶠᶜ(i, j, k, grid)^2
+# Isotropic, mesh-varying horizontal damping (MPAS-style): a single scalar diffusivity
+# κ = α/Δτ · ℓ² applied identically in x and y, with ℓ the *smallest* local horizontal
+# spacing.  Using min(Δx, Δy) (rather than Δx, Δy separately, or the geometric mean
+# √(ΔxΔy), or cbrt(V) which is dragged down by the thin Δz) keeps the explicit-diffusion
+# number κΔτ/Δ² ≤ α in both directions everywhere — including the converging meridians at
+# high latitude, where √(ΔxΔy) would push it past the α ≤ 0.25 stability bound.
+@inline _κ_local(i, j, k, grid, scale::LocalHorizontalDampingScale) =
+    scale.α_over_Δτ * min(Δxᶠᶜᶜ(i, j, k, grid), Δyᶜᶠᶜ(i, j, k, grid))^2
+@inline κˣ(i, j, k, grid, scale::LocalHorizontalDampingScale) = _κ_local(i, j, k, grid, scale)
+@inline κʸ(i, j, k, grid, scale::LocalHorizontalDampingScale) = _κ_local(i, j, k, grid, scale)
 
 
 # Horizontal divergence damping in the form of Klemp, Skamarock & Ha (2018)
@@ -1142,7 +1136,7 @@ end
 @kernel function _compute_horizontal_theta_flux_divergence!(δ, grid, θᴸ, ρu′, ρv′)
     i, j, k = @index(Global, NTuple)
     @inbounds δ[i, j, k] = (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) +
-                            δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) / Vᶜᶜᶜ(i, j, k, grid)
+                            δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) * V⁻¹ᶜᶜᶜ(i, j, k, grid)
 end
 
 @kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, α)
