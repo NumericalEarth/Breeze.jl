@@ -386,48 +386,40 @@ function run_benchmarks(args)
         ft_str = FT == Float32 ? "F32" : "F64"
         mode_suffix = args["ad"] ? "_AD" : ""
 
-        # Tendency mode profiles the bare scalar-tendency WENO kernel with no
-        # model (hence no dynamics/closure/microphysics). Reactant only, since
-        # it compiles the launch into a single XLA program. Handle it up front
-        # and skip the model-building path below.
+        # Tendency mode times the bare scalar-tendency WENO kernel with no model
+        # (hence no dynamics/closure/microphysics). Runs on both backends so the
+        # Reactant-compiled XLA program can be compared against the eager vanilla
+        # launch. Handle it up front and skip the model-building path below.
         if mode == "tendency"
-            # Dump all MLIR (every compile stage) for the tendency compile so it
-            # can be saved as a CI artifact for future inspection (GB-25 pattern).
+            # On Reactant, dump all MLIR (every compile stage) so it can be saved
+            # as a CI artifact for future inspection (GB-25 pattern). No-op for
+            # the vanilla backend, which does not compile through Reactant.
             if get(ENV, "GITHUB_ACTIONS", "false") == "true"
                 Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps"))
                 Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
             end
 
-            backend_name == "reactant" ||
-                error("tendency mode requires --backend reactant (got $backend_name)")
             m = match(r"^WENO(\d+)$", adv_name)
             isnothing(m) && error("tendency mode supports WENO<order> advection, got $adv_name")
             order = parse(Int, m[1])
 
+            name = "ScalarTendency_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(backend_name)"
+            println("\n", "-" ^ 70)
+            println("Running: $name")
+            println("-" ^ 70)
+
             arch = make_backend_arch(backend_name, device)
             topology = make_topology(topo_name)
-
-            # Compile the same kernel fully optimized and at the pre-raise
-            # stage, so we can compare the optimized vs before-raise MLIR
-            # (both dump under DUMP_MLIR_ALWAYS above).
-            for optimize in (true, :before_raise)
-                opt_tag = optimize === true ? "opt" : "before_raise"
-                name = "ScalarTendency_$(size_str)_$(ft_str)_$(adv_name)_$(opt_tag)_$(topo_name)_$(backend_name)"
-                println("\n", "-" ^ 70)
-                println("Running: $name")
-                println("-" ^ 70)
-
-                tendency!, tendency_args = scalar_tendency_problem(arch;
-                                                                  Nx, Ny, Nz,
-                                                                  order,
-                                                                  float_type = FT,
-                                                                  topology)
-                push!(results, benchmark_scalar_tendency(tendency!, tendency_args;
-                                                         nrepeat = time_steps,
-                                                         name,
-                                                         advection = adv_name,
-                                                         optimize))
-            end
+            tendency!, tendency_args = scalar_tendency_problem(arch;
+                                                              Nx, Ny, Nz,
+                                                              order,
+                                                              float_type = FT,
+                                                              topology)
+            push!(results, benchmark_scalar_tendency(tendency!, tendency_args;
+                                                     nrepeat = time_steps,
+                                                     name,
+                                                     advection = adv_name,
+                                                     backend = backend_name))
             continue
         end
 

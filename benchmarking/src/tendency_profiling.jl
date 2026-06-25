@@ -1,10 +1,12 @@
 #####
 ##### Scalar-tendency kernel profiling (no Simulation, no model)
 #####
-##### Compiles the bare scalar tendency kernel through Reactant (raise=true) and
-##### profiles its execution with `Reactant.Profiler.@timed`, which auto-detects
-##### the already-compiled program and reports the mean runtime per call. Results
-##### reuse `BenchmarkResult` with `mode = "tendency"` so they flow through the
+##### Times the bare scalar tendency kernel on either backend so they can be
+##### compared. On a `ReactantState` grid the launch is compiled into a single
+##### optimized XLA program (`raise=true`) and profiled with
+##### `Reactant.Profiler.@timed`; on a vanilla (eager KA/CUDA) grid the kernel
+##### is launched directly and timed with device synchronization. Results reuse
+##### `BenchmarkResult` with `mode = "tendency"` so they flow through the
 ##### existing JSON / publish pipeline unchanged.
 #####
 
@@ -13,15 +15,15 @@
                               nrepeat = 100,
                               name = "scalar_tendency",
                               advection::AbstractString = "",
-                              optimize = true,
+                              backend::AbstractString = "reactant",
                               verbose = true)
 
-Compile `tendency!(args...)` with `Reactant.@compile optimize=optimize raise=true
-raise_first=true sync=true` (recording compile time separately, since the KA
-kernel must be raised to XLA) and profile its runtime with
-`Reactant.Profiler.@timed`. `args` is the tuple `(Gc, grid, advection, U, c)`
-returned by `scalar_tendency_problem`. Pass `optimize=false` to skip XLA's
-optimization passes (`:none`) and benchmark / dump the unoptimized program.
+Time `tendency!(args...)` on the architecture of the grid in `args` (the tuple
+`(Gc, grid, advection, U, c)` from `scalar_tendency_problem`). On a
+`ReactantState` grid the launch is compiled with `Reactant.@compile raise=true
+raise_first=true sync=true` (compile time recorded separately) and profiled via
+`Reactant.Profiler.@timed`. On a vanilla grid the kernel is launched eagerly and
+timed over `nrepeat` calls with device synchronization (no Reactant compile).
 
 Returns a `BenchmarkResult` with `mode = "tendency"`, where `time_per_step_seconds`
 is the mean wall time of one tendency evaluation and `grid_points_per_second` is
@@ -31,7 +33,7 @@ function benchmark_scalar_tendency(tendency!, args;
                                    nrepeat = 100,
                                    name = "scalar_tendency",
                                    advection::AbstractString = "",
-                                   optimize = true,
+                                   backend::AbstractString = "reactant",
                                    verbose = true)
 
     grid = args[2]  # args = (Gc, grid, advection, U, c)
@@ -39,26 +41,41 @@ function benchmark_scalar_tendency(tendency!, args;
     FT = eltype(grid)
     Nx, Ny, Nz = size(grid)
     total_points = Nx * Ny * Nz
+    is_reactant = arch isa ReactantState
 
     if verbose
         @info "Scalar tendency benchmark: $name"
         @info "  Architecture: $arch"
+        @info "  Backend: $backend"
         @info "  Advection: $advection"
         @info "  Grid size: $Nx × $Ny × $Nz ($total_points points)"
         @info "  Repeats: $nrepeat"
-        @info "  Optimize: $optimize"
-        @info "  Compiling scalar_tendency! with Reactant (raise=true, optimize=$optimize)..."
     end
 
-    compile_start = time_ns()
-    compiled! = Reactant.@compile optimize=optimize raise=true raise_first=true sync=true tendency!(args...)
-    compile_time_seconds = (time_ns() - compile_start) / 1e9
-
-    # Mean runtime per call. Passing the already-compiled thunk makes @timed
-    # profile it directly (it special-cases `::Reactant.Compiler.Thunk`) rather
-    # than recompiling without `raise`. `runtime_ns` is the mean over `nrepeat`.
-    prof = Reactant.Profiler.@timed nrepeat=nrepeat compiled!(args...)
-    time_per_call_seconds = prof.runtime_ns / 1e9
+    if is_reactant
+        # Compile the launch into a single optimized XLA program, then profile
+        # it. Passing the already-compiled thunk makes @timed profile it
+        # directly (it special-cases `::Reactant.Compiler.Thunk`). `runtime_ns`
+        # is the mean over `nrepeat`.
+        verbose && @info "  Compiling scalar_tendency! with Reactant (raise=true)..."
+        compile_start = time_ns()
+        compiled! = Reactant.@compile raise=true raise_first=true sync=true tendency!(args...)
+        compile_time_seconds = (time_ns() - compile_start) / 1e9
+        prof = Reactant.Profiler.@timed nrepeat=nrepeat compiled!(args...)
+        time_per_call_seconds = prof.runtime_ns / 1e9
+    else
+        # Vanilla backend: launch the kernel eagerly (no Reactant compile). Warm
+        # up once, then time `nrepeat` launches with device synchronization.
+        compile_time_seconds = 0.0
+        tendency!(args...)
+        synchronize_device(arch)
+        start_time = time_ns()
+        for _ in 1:nrepeat
+            tendency!(args...)
+        end
+        synchronize_device(arch)
+        time_per_call_seconds = ((time_ns() - start_time) / 1e9) / nrepeat
+    end
 
     total_time_seconds = time_per_call_seconds * nrepeat
     calls_per_second = 1 / time_per_call_seconds
@@ -76,7 +93,7 @@ function benchmark_scalar_tendency(tendency!, args;
         "none",      # closure
         "none",      # dynamics
         "none",      # microphysics
-        "reactant",  # backend
+        String(backend),
         "tendency",  # mode
         (Nx, Ny, Nz),
         nrepeat,

@@ -80,15 +80,16 @@ jobs:
             backend: 'reactant'
             topology: 'PBB'
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 1'
-          # Scalar-tendency kernel sweep (no model): compile the bare WENO
-          # advective tendency Gc = -∇·(𝐮 c) on one grid across orders and
-          # profile it with Reactant.Profiler. Reactant-only; --mode tendency
-          # skips model construction, so there is no dynamics/microphysics.
+          # Scalar-tendency kernel sweep (no model): time the bare WENO
+          # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
+          # the Reactant-compiled XLA program and the eager vanilla launch.
+          # --mode tendency skips model construction, so there is no
+          # dynamics/microphysics.
           - dynamics: 'none'
             microphysics: 'none'
             grid: '256x256x128'
             advection: 'WENO3, WENO5, WENO7, WENO9'
-            backend: 'reactant'
+            backend: 'vanilla, reactant'
             topology: 'PPB'
             extra_flags: '--mode tendency --float_type=Float32'
     defaults:
@@ -228,14 +229,12 @@ jobs:
               # closure/dynamics/microphysics are 'none', so skip the forward
               # clauses below via continue.
               if mode == 'tendency':
-                  # Optimized vs before-raise compile are distinct series (the
-                  # name carries an `_opt_`/`_before_raise_` tag), so the chart
-                  # shows both for each WENO order.
-                  opt = 'before_raise' if 'before_raise' in d['name'] else 'opt'
+                  # Vanilla vs Reactant are distinct series, so the chart shows
+                  # both backends for each WENO order.
                   level_1 = f'{base_name}; Scalar tendency [{ft}]'
                   level_2 = f'Compare WENO order'
                   level_3 = f'{gpu}'
-                  level_4 = f'{advection} {opt}'
+                  level_4 = f'{advection} {backend}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
