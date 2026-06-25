@@ -33,8 +33,8 @@ end
 #####
 
 topologies = [
-    ("Periodic, Periodic, Flat",    (Periodic, Periodic, Flat),    2),
     ("Periodic, Bounded, Bounded",  (Periodic, Bounded,  Bounded), 3),
+    ("Periodic, Periodic, Bounded",     (Periodic, Periodic, Bounded),   3),
 ]
 
 schemes = [
@@ -47,7 +47,7 @@ schemes = [
 #####
 
 function make_grid(topo, nd; arch=ReactantState())
-    sz  = nd == 2 ? (8, 8)     : (8, 8, 8)
+    sz  = nd == 2 ? (20, 20)   : (20, 20, 20)
     ext = nd == 2 ? (1e3, 1e3) : (1e3, 1e3, 1e3)
     hl  = nd == 2 ? (5, 5)     : (5, 5, 5)
     return RectilinearGrid(arch; size=sz, extent=ext, halo=hl, topology=topo)
