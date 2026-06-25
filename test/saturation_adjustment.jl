@@ -33,7 +33,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
     reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
 
     atol = test_tol(FT)
-    microphysics = SaturationAdjustment(FT; tolerance=solver_tol(FT), equilibrium=WarmPhaseEquilibrium())
+    microphysics = SaturationAdjustment(FT; solver=SecantSolver(FT; abstol=solver_tol(FT)), equilibrium=WarmPhaseEquilibrium())
 
     pᵣ = @allowscalar first(reference_state.pressure)
     g = constants.gravitational_acceleration
@@ -120,7 +120,7 @@ end
     Tᶠ = FT(273.15)
 
     equilibrium = MixedPhaseEquilibrium(FT; freezing_temperature=Tᶠ, homogeneous_ice_nucleation_temperature=Tʰ)
-    microphysics = SaturationAdjustment(FT; tolerance=solver_tol(FT), equilibrium)
+    microphysics = SaturationAdjustment(FT; solver=SecantSolver(FT; abstol=solver_tol(FT)), equilibrium)
 
     # Test only one formulation to reduce test count (StaticEnergy is representative)
     formulation = :StaticEnergy
@@ -252,7 +252,7 @@ end
     pᵣ = @allowscalar first(reference_state.pressure)
 
     equilibrium = WarmPhaseEquilibrium()
-    microphysics = SaturationAdjustment(FT; tolerance=FT(1e-3), maxiter=10, equilibrium)
+    microphysics = SaturationAdjustment(FT; solver=SecantSolver(FT; abstol=1e-3, maxiter=10), equilibrium)
 
     # Highly supersaturated: qᵗ = 0.05 at T = 300 K (saturation is ~0.022)
     T_ref = FT(300)

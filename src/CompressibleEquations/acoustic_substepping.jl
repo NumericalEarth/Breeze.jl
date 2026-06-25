@@ -1454,7 +1454,7 @@ Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
 substep loop. Number and size of substeps in this stage depend on
 `substepper.substep_distribution`.
 """
-function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, Uᴸ)
+function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ)
     grid = model.grid
     arch = architecture(grid)
 

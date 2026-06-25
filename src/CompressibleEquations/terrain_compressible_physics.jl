@@ -620,6 +620,7 @@ end
 
 using Breeze.Thermodynamics: evaluate_profile, hydrostatic_pressure,
                              newton_hydrostatic_pressure, moist_reference_constants
+using Breeze.Solvers: FixedIterations
 
 terrain_reference_profiles(ref_spec) = (ref_spec, nothing)
 
@@ -782,7 +783,7 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢ
                     θ_face = (θₖ + θ_surface) / 2
                     Πₖ_init = Π_surface - g * Δz / (cᵖᵐₖ * θ_face)
                     pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
-                    pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, 7)
+                    pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, FixedIterations(5))
                 end
             else
                 z_below = znode(i, j, k - 1, cpu_grid, c, c, c)
@@ -791,7 +792,7 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢ
                 Δz = Δzᶜᶜᶠ(i, j, k, cpu_grid)
                 Πₖ_init = Π⁻ - g * Δz / (cᵖᵐₖ * θ_face)
                 pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
-                pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, 7)
+                pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, FixedIterations(5))
             end
 
             Πₖ = (pₖ / pˢᵗ)^κₖ
