@@ -62,7 +62,7 @@ a   = Oceananigans.defaults.planet_radius
 # levels up to 30 km — matching the production resolution from
 # [`baroclinic_wave`](@ref). Uncomment a different line to switch phases.
 
-Nλ = 360; Nφ = 150; Nz = 128     ## Phase 3: production (1°)
+Nλ = 360; Nφ = 150; Nz = 32      ## Phase 3: production (1°)
 
 H = 30kilometers
 
@@ -105,9 +105,12 @@ function τ_and_integrals(z)
     return τ₁, τ₂, ∫τ₁, ∫τ₂
 end
 
-## Meridional shape functions
-F(φ)  = cosd(φ)^K - K / (K + 2) * cosd(φ)^(K + 2)
-dF(φ) = cosd(φ)^(K - 1) - cosd(φ)^(K + 1)
+## Meridional shape functions (NH-only jet)
+## A smooth cutoff zeros the jet south of the equator, eliminating the
+## hemispheric degeneracy that would otherwise stall the power method.
+hemisphere(φ) = φ ≤ 0 ? 0.0 : φ ≥ 10 ? 1.0 : 0.5 * (1 - cospi(φ / 10))
+F(φ)  = hemisphere(φ) * (cosd(φ)^K - K / (K + 2) * cosd(φ)^(K + 2))
+dF(φ) = hemisphere(φ) * (cosd(φ)^(K - 1) - cosd(φ)^(K + 1))
 
 function virtual_temperature(λ, φ, z)
     τ₁, τ₂, _, _ = τ_and_integrals(z)
@@ -209,22 +212,13 @@ add_callback!(simulation, power_method_progress, IterationInterval(100))
 # to the reference amplitude. The clock is reset to ``t = 0`` so each
 # iteration starts from the same initial time.
 #
-# After rescaling, we **zero the southern hemisphere perturbation** by
-# resetting SH grid points to the background state. The DCMIP2016 jet
-# is symmetric about the equator, so both hemispheres support baroclinic
-# modes with the same growth rate. Without this filtering, the two
-# hemispheric modes compete and prevent the power method from converging
-# to a single eigenmode.
+# The hemispheric degeneracy is eliminated at the source: the balanced
+# jet exists only in the NH (via the `hemisphere` cutoff in `F(φ)`), so
+# there is no SH eigenmode to compete with.
 
 max_iterations = 80
 convergence_threshold = 0.001  ## relative change in σ
 σ_history = Float64[]
-
-## SH filter: latitude indices where φ < 0 (j=1:Nφ/2 for symmetric grid)
-## Halo offset: parent array index = grid index + halo
-j_sh = 1:Nφ÷2
-halo_φ = grid.Hy
-j_sh_parent = j_sh .+ halo_φ  ## offset into parent array
 
 for n in 1:max_iterations
     run!(simulation)
@@ -245,12 +239,7 @@ for n in 1:max_iterations
         parent(f) .= bg .+ scale .* (parent(f) .- bg)
     end
 
-    ## Zero out SH perturbation: reset southern hemisphere to background
-    for (f, bg) in zip(prognostic_fields(model), background)
-        parent(f)[:, j_sh_parent, :] .= bg[:, j_sh_parent, :]
-    end
-
-    ## Fill halos after all modifications
+    ## Fill halos after rescaling
     for f in prognostic_fields(model)
         fill_halo_regions!(f)
     end
@@ -333,3 +322,30 @@ save("power_method_eigenmode.png", fig2)
 nothing #hide
 
 # ![](power_method_eigenmode.png)
+
+# ### Longitude–height cross section at the jet core
+
+j_jet = Nφ ÷ 2 + 45  ## ≈ 45° N, near the jet maximum
+
+v_xz = view(v, :, j_jet, :)
+δθ_xz = view(θ_perturbation, :, j_jet, :)
+
+vlim_xz = maximum(abs, v_xz)
+δθlim_xz = maximum(abs, δθ_xz)
+
+fig3 = Figure(size=(1200, 500))
+
+ax3 = Axis(fig3[1, 1]; title="v eigenmode (λ–z at jet core)",
+           xlabel="Longitude", ylabel="z (m)")
+hm3 = heatmap!(ax3, v_xz; colormap=:balance, colorrange=(-vlim_xz, vlim_xz))
+Colorbar(fig3[1, 2], hm3; label="v (m/s)")
+
+ax4 = Axis(fig3[1, 3]; title="δθ eigenmode (λ–z at jet core)",
+           xlabel="Longitude", ylabel="z (m)")
+hm4 = heatmap!(ax4, δθ_xz; colormap=:balance, colorrange=(-δθlim_xz, δθlim_xz))
+Colorbar(fig3[1, 4], hm4; label="δθ (K)")
+
+save("power_method_eigenmode_xz.png", fig3)
+nothing #hide
+
+# ![](power_method_eigenmode_xz.png)

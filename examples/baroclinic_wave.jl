@@ -196,7 +196,8 @@ function zonal_velocity(λ, φ, z)
     great_circle = acos(sin(φₚ) * sin(φʳ) + cos(φₚ) * cos(φʳ) * cos(λʳ - λₚ)) / rₚ
 
     taper = ifelse(z < zₚ, 1 - 3 * (z / zₚ)^2 + 2 * (z / zₚ)^3, zero(z))
-    u_perturbation = ifelse(great_circle < 1, uₚ * taper * exp(-great_circle^2), zero(z))
+    #u_perturbation = ifelse(great_circle < 1, uₚ * taper * exp(-great_circle^2), zero(z))
+    u_perturbation = zero(typeof(u_balanced))
 
     return u_balanced + u_perturbation
 end
