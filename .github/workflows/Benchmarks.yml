@@ -92,6 +92,16 @@ jobs:
             backend: 'vanilla, reactant'
             topology: 'PPB'
             extra_flags: '--mode tendency --float_type=Float32'
+          # Full-model tendency: time compute_tendencies! for a compressible
+          # AtmosphereModel across WENO orders, vanilla vs Reactant. --mode
+          # model_tendency builds the model, so dynamics/microphysics are unused.
+          - dynamics: 'none'
+            microphysics: 'none'
+            grid: '256x256x128'
+            advection: 'WENO3, WENO5, WENO7, WENO9'
+            backend: 'vanilla, reactant'
+            topology: 'PPB'
+            extra_flags: '--mode model_tendency --float_type=Float32'
     defaults:
       run:
         shell: bash
@@ -136,8 +146,8 @@ jobs:
           retention-days: 90
           overwrite: false
       - name: "Upload MLIR dumps as artifacts"
-        # Only the tendency matrix entry dumps MLIR (see --mode tendency);
-        # other entries produce no files and are skipped.
+        # Only the tendency / model_tendency matrix entries dump MLIR (Reactant
+        # backend); other entries produce no files and are skipped.
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -228,10 +238,10 @@ jobs:
               # a fixed grid. Reuses BenchmarkResult with mode == 'tendency';
               # closure/dynamics/microphysics are 'none', so skip the forward
               # clauses below via continue.
-              if mode == 'tendency':
-                  # Vanilla vs Reactant are distinct series, so the chart shows
-                  # both backends for each WENO order.
-                  level_1 = f'{base_name}; Scalar tendency [{ft}]'
+              if mode in ('tendency', 'model_tendency'):
+                  # Vanilla vs Reactant are distinct series; ScalarTendency vs
+                  # ModelTendency land on separate charts via base_name.
+                  level_1 = f'{base_name} [{ft}]'
                   level_2 = f'Compare WENO order'
                   level_3 = f'{gpu}'
                   level_4 = f'{advection} {backend}'

@@ -1,42 +1,45 @@
 #####
-##### Scalar-tendency kernel profiling (no Simulation, no model)
+##### Tendency profiling (no Simulation)
 #####
-##### Times the bare scalar tendency kernel on either backend so they can be
-##### compared. On a `ReactantState` grid the launch is compiled into a single
-##### optimized XLA program (`raise=true`) and profiled with
-##### `Reactant.Profiler.@timed`; on a vanilla (eager KA/CUDA) grid the kernel
-##### is launched directly and timed with device synchronization. Results reuse
-##### `BenchmarkResult` with `mode = "tendency"` so they flow through the
-##### existing JSON / publish pipeline unchanged.
+##### Times a tendency evaluation on either backend so they can be compared. On
+##### a `ReactantState` grid the call is compiled into a single optimized XLA
+##### program (`raise=true`) and profiled with `Reactant.Profiler.@timed`; on a
+##### vanilla (eager KA/CUDA) grid it is run directly and timed with device
+##### synchronization. Used for both the bare scalar kernel (`scalar_tendency.jl`)
+##### and the full-model `compute_tendencies!` (`model_tendency.jl`). Results
+##### reuse `BenchmarkResult` so they flow through the existing JSON / publish
+##### pipeline unchanged.
 #####
 
 """
-    benchmark_scalar_tendency(tendency!, args;
-                              nrepeat = 100,
-                              name = "scalar_tendency",
-                              advection::AbstractString = "",
-                              backend::AbstractString = "reactant",
-                              verbose = true)
+    benchmark_tendency(tendency!, args, grid;
+                       nrepeat = 100,
+                       name = "tendency",
+                       advection::AbstractString = "",
+                       backend::AbstractString = "reactant",
+                       mode::AbstractString = "tendency",
+                       verbose = true)
 
-Time `tendency!(args...)` on the architecture of the grid in `args` (the tuple
-`(Gc, grid, advection, U, c)` from `scalar_tendency_problem`). On a
-`ReactantState` grid the launch is compiled with `Reactant.@compile raise=true
+Time `tendency!(args...)` on the architecture of `grid`. `args` is the argument
+tuple for `tendency!` — e.g. `(Gc, grid, advection, U, c)` from
+`scalar_tendency_problem`, or `(model,)` from `model_tendency_problem`. On a
+`ReactantState` grid the call is compiled with `Reactant.@compile raise=true
 raise_first=true sync=true` (compile time recorded separately) and profiled via
-`Reactant.Profiler.@timed`. On a vanilla grid the kernel is launched eagerly and
-timed over `nrepeat` calls with device synchronization (no Reactant compile).
+`Reactant.Profiler.@timed`. On a vanilla grid it is run eagerly and timed over
+`nrepeat` calls with device synchronization (no Reactant compile).
 
-Returns a `BenchmarkResult` with `mode = "tendency"`, where `time_per_step_seconds`
-is the mean wall time of one tendency evaluation and `grid_points_per_second` is
-the corresponding throughput.
+Returns a `BenchmarkResult` tagged with `mode`, where `time_per_step_seconds` is
+the mean wall time of one tendency evaluation and `grid_points_per_second` is the
+corresponding throughput.
 """
-function benchmark_scalar_tendency(tendency!, args;
-                                   nrepeat = 100,
-                                   name = "scalar_tendency",
-                                   advection::AbstractString = "",
-                                   backend::AbstractString = "reactant",
-                                   verbose = true)
+function benchmark_tendency(tendency!, args, grid;
+                            nrepeat = 100,
+                            name = "tendency",
+                            advection::AbstractString = "",
+                            backend::AbstractString = "reactant",
+                            mode::AbstractString = "tendency",
+                            verbose = true)
 
-    grid = args[2]  # args = (Gc, grid, advection, U, c)
     arch = Oceananigans.Architectures.architecture(grid)
     FT = eltype(grid)
     Nx, Ny, Nz = size(grid)
@@ -44,7 +47,7 @@ function benchmark_scalar_tendency(tendency!, args;
     is_reactant = arch isa ReactantState
 
     if verbose
-        @info "Scalar tendency benchmark: $name"
+        @info "Tendency benchmark: $name"
         @info "  Architecture: $arch"
         @info "  Backend: $backend"
         @info "  Advection: $advection"
@@ -57,7 +60,7 @@ function benchmark_scalar_tendency(tendency!, args;
         # it. Passing the already-compiled thunk makes @timed profile it
         # directly (it special-cases `::Reactant.Compiler.Thunk`). `runtime_ns`
         # is the mean over `nrepeat`.
-        verbose && @info "  Compiling scalar_tendency! with Reactant (raise=true)..."
+        verbose && @info "  Compiling tendency with Reactant (raise=true)..."
         compile_start = time_ns()
         compiled! = Reactant.@compile raise=true raise_first=true sync=true tendency!(args...)
         compile_time_seconds = (time_ns() - compile_start) / 1e9
@@ -94,7 +97,7 @@ function benchmark_scalar_tendency(tendency!, args;
         "none",      # dynamics
         "none",      # microphysics
         String(backend),
-        "tendency",  # mode
+        String(mode),
         (Nx, Ny, Nz),
         nrepeat,
         0.0,         # Δt — not applicable to a single tendency evaluation

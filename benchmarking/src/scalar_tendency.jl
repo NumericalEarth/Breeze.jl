@@ -34,8 +34,8 @@ and a `WENO` scheme of the given `order`, materialized onto the grid exactly as
 `AtmosphereModel` does. The halo is sized to the WENO stencil so any order up to
 the requested one fits.
 
-Returns `(scalar_tendency!, (Gc, grid, advection, U, c))`, ready to hand to
-`benchmark_scalar_tendency` or `Reactant.@compile`.
+Returns `(scalar_tendency!, (Gc, grid, advection, U, c), grid)`, ready to hand
+to `benchmark_tendency` or `Reactant.@compile`.
 """
 function scalar_tendency_problem(arch;
                                  Nx, Ny, Nz,
@@ -57,5 +57,5 @@ function scalar_tendency_problem(arch;
     set!(U.u, 1)
     set!(c, (x, y, z) -> sinpi(2x) * sinpi(2y))
 
-    return scalar_tendency!, (Gc, grid, advection, U, c)
+    return scalar_tendency!, (Gc, grid, advection, U, c), grid
 end

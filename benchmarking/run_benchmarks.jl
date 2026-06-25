@@ -21,7 +21,7 @@
 
 using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
 using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation, BenchmarkResult
-using BreezeBenchmarks: scalar_tendency_problem, benchmark_scalar_tendency
+using BreezeBenchmarks: scalar_tendency_problem, model_tendency_problem, benchmark_tendency
 using JSON: JSON
 using Oceananigans
 using Oceananigans.TurbulenceClosures: SmagorinskyLilly, DynamicSmagorinsky
@@ -65,7 +65,8 @@ function parse_commandline()
     @add_arg_table! s begin
         "--mode"
             help = "Mode: 'benchmark' for quick performance tests, 'simulate' for full runs with output, " *
-                   "'tendency' to profile a single scalar-tendency WENO kernel (no model; Reactant only)"
+                   "'tendency' for the bare scalar WENO kernel, or 'model_tendency' for the full-model " *
+                   "compute_tendencies! (both have no Simulation and run vanilla vs Reactant)"
             arg_type = String
             default = "benchmark"
 
@@ -386,40 +387,44 @@ function run_benchmarks(args)
         ft_str = FT == Float32 ? "F32" : "F64"
         mode_suffix = args["ad"] ? "_AD" : ""
 
-        # Tendency mode times the bare scalar-tendency WENO kernel with no model
-        # (hence no dynamics/closure/microphysics). Runs on both backends so the
+        # Tendency modes time a tendency evaluation with no Simulation. "tendency"
+        # uses the bare scalar WENO kernel (no model); "model_tendency" uses the
+        # full-model compute_tendencies!. Both run on both backends so the
         # Reactant-compiled XLA program can be compared against the eager vanilla
-        # launch. Handle it up front and skip the model-building path below.
-        if mode == "tendency"
+        # launch. Handled up front; the model-stepping path below is skipped.
+        if mode == "tendency" || mode == "model_tendency"
             m = match(r"^WENO(\d+)$", adv_name)
-            isnothing(m) && error("tendency mode supports WENO<order> advection, got $adv_name")
+            isnothing(m) && error("$mode mode supports WENO<order> advection, got $adv_name")
             order = parse(Int, m[1])
 
-            name = "ScalarTendency_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(backend_name)"
+            label = mode == "tendency" ? "ScalarTendency" : "ModelTendency"
+            name = "$(label)_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(backend_name)"
             println("\n", "-" ^ 70)
             println("Running: $name")
             println("-" ^ 70)
 
-            # On Reactant, dump all MLIR (every compile stage) into a per-WENO
-            # subdirectory so each case stays separate; saved as a CI artifact
-            # (GB-25 pattern). Vanilla does not compile through Reactant.
+            # On Reactant, dump all MLIR (every compile stage) into a per-case
+            # subdirectory so each stays separate; saved as a CI artifact (GB-25
+            # pattern). Vanilla does not compile through Reactant.
             if get(ENV, "GITHUB_ACTIONS", "false") == "true" && backend_name == "reactant"
-                Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps", adv_name))
+                Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps", "$(label)_$(adv_name)"))
                 Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
             end
 
             arch = make_backend_arch(backend_name, device)
             topology = make_topology(topo_name)
-            tendency!, tendency_args = scalar_tendency_problem(arch;
+            problem = mode == "tendency" ? scalar_tendency_problem : model_tendency_problem
+            tendency!, tendency_args, tendency_grid = problem(arch;
                                                               Nx, Ny, Nz,
                                                               order,
                                                               float_type = FT,
                                                               topology)
-            push!(results, benchmark_scalar_tendency(tendency!, tendency_args;
-                                                     nrepeat = time_steps,
-                                                     name,
-                                                     advection = adv_name,
-                                                     backend = backend_name))
+            push!(results, benchmark_tendency(tendency!, tendency_args, tendency_grid;
+                                              nrepeat = time_steps,
+                                              name,
+                                              advection = adv_name,
+                                              backend = backend_name,
+                                              mode))
             continue
         end
 
