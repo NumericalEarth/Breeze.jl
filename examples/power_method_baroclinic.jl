@@ -32,7 +32,6 @@ using Oceananigans.TimeSteppers: update_state!, reset!
 using Printf
 using CairoMakie
 using CUDA
-using FFTW
 
 # ## DCMIP2016 parameters
 #
@@ -63,7 +62,7 @@ a   = Oceananigans.defaults.planet_radius
 # levels up to 30 km — matching the production resolution from
 # [`baroclinic_wave`](@ref). Uncomment a different line to switch phases.
 
-Nλ = 360; Nφ = 150; Nz = 32      ## Phase 3: production (1°)
+Nλ = 360; Nφ = 150; Nz = 128     ## Phase 3: production (1°)
 
 H = 30kilometers
 
@@ -210,45 +209,17 @@ add_callback!(simulation, power_method_progress, IterationInterval(100))
 # to the reference amplitude. The clock is reset to ``t = 0`` so each
 # iteration starts from the same initial time.
 #
-# After rescaling, we **project perturbations onto wavenumber 9** using
-# an FFT along longitude. This isolates the baroclinic eigenmode from
-# faster-growing but physically uninteresting zonally symmetric (m=0)
-# and other wavenumber modes. The symmetric jet supports identical modes
-# in both hemispheres, but the Fourier projection handles this cleanly —
-# no hemispheric filtering needed.
+# No wavenumber or hemispheric filtering is applied — this is the raw
+# power method on the full symmetric DCMIP2016 jet.
 
 max_iterations = 80
 convergence_threshold = 0.001  ## relative change in σ
 σ_history = Float64[]
 
-halo_λ = grid.Hx
-halo_φ = grid.Hy
-halo_z = grid.Hz
-m_target = 9  ## wavenumber to retain
-
-## Fourier projection setup: retain only ±m_target
-iλ = halo_λ .+ (1:Nλ)
-iφ = halo_φ .+ (1:Nφ)
-iz = halo_z .+ (1:Nz)
-mask = zeros(Bool, Nλ)
-mask[m_target + 1] = true      ## positive frequency m=9
-mask[Nλ - m_target + 1] = true  ## negative frequency m=-9
-mask_3d = reshape(mask, Nλ, 1, 1)
-
 for n in 1:max_iterations
     run!(simulation)
 
-    ## Fourier-project all perturbation fields onto wavenumber m_target
-    for (f, bg) in zip(prognostic_fields(model), background)
-        pf = parent(f)
-        perturbation = Array(pf[iλ, iφ, iz] .- bg[iλ, iφ, iz])
-        F̂ = fft(perturbation, 1)
-        F̂ .= F̂ .* mask_3d
-        filtered = real(ifft(F̂, 1))
-        pf[iλ, iφ, iz] .= bg[iλ, iφ, iz] .+ CuArray(Float32.(filtered))
-    end
-
-    ## Measure max|v| of the m=9 component at the lowest model level (k=1)
+    ## Measure max|v| at the lowest model level (k=1), following Park et al.
     v_sfc_max = maximum(abs, view(model.velocities.v, :, :, 1))
 
     ## Growth rate
@@ -258,13 +229,13 @@ for n in 1:max_iterations
     @info @sprintf("Power iteration %3d | σ = %.4f day⁻¹ | sfc max|v| = %.4e m/s",
                    n, σ * 86400, v_sfc_max)
 
-    ## Rescale all prognostic perturbations to reference amplitude
+    ## Rescale all prognostic perturbations: field = background + scale × (field - background)
     scale = v_ref / v_sfc_max
     for (f, bg) in zip(prognostic_fields(model), background)
         parent(f) .= bg .+ scale .* (parent(f) .- bg)
     end
 
-    ## Fill halos after all modifications
+    ## Fill halos after rescaling
     for f in prognostic_fields(model)
         fill_halo_regions!(f)
     end
@@ -347,30 +318,3 @@ save("power_method_eigenmode.png", fig2)
 nothing #hide
 
 # ![](power_method_eigenmode.png)
-
-# ### Longitude–height cross section at the jet core
-
-j_jet = Nφ ÷ 2 + 45  ## ≈ 45° N, near the jet maximum
-
-v_xz = view(v, :, j_jet, :)
-δθ_xz = view(θ_perturbation, :, j_jet, :)
-
-vlim_xz = maximum(abs, v_xz)
-δθlim_xz = maximum(abs, δθ_xz)
-
-fig3 = Figure(size=(1200, 500))
-
-ax3 = Axis(fig3[1, 1]; title="v eigenmode (λ–z at jet core)",
-           xlabel="Longitude", ylabel="z (m)")
-hm3 = heatmap!(ax3, v_xz; colormap=:balance, colorrange=(-vlim_xz, vlim_xz))
-Colorbar(fig3[1, 2], hm3; label="v (m/s)")
-
-ax4 = Axis(fig3[1, 3]; title="δθ eigenmode (λ–z at jet core)",
-           xlabel="Longitude", ylabel="z (m)")
-hm4 = heatmap!(ax4, δθ_xz; colormap=:balance, colorrange=(-δθlim_xz, δθlim_xz))
-Colorbar(fig3[1, 4], hm4; label="δθ (K)")
-
-save("power_method_eigenmode_xz.png", fig3)
-nothing #hide
-
-# ![](power_method_eigenmode_xz.png)
