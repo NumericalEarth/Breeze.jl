@@ -26,7 +26,8 @@ tuple for `tendency!` — e.g. `(Gc, grid, advection, U, c)` from
 `ReactantState` grid the call is compiled with `Reactant.@compile raise=true
 raise_first=true sync=true` (compile time recorded separately) and profiled via
 `Reactant.Profiler.@timed`. On a vanilla grid it is run eagerly and timed over
-`nrepeat` calls with device synchronization (no Reactant compile).
+`nrepeat` calls with device synchronization (no Reactant compile). When
+`profile_dir` is set, the Reactant profiler writes its xprof trace files there.
 
 Returns a `BenchmarkResult` tagged with `mode`, where `time_per_step_seconds` is
 the mean wall time of one tendency evaluation and `grid_points_per_second` is the
@@ -38,6 +39,7 @@ function benchmark_tendency(tendency!, args, grid;
                             advection::AbstractString = "",
                             backend::AbstractString = "reactant",
                             mode::AbstractString = "tendency",
+                            profile_dir = nothing,
                             verbose = true)
 
     arch = Oceananigans.Architectures.architecture(grid)
@@ -64,7 +66,9 @@ function benchmark_tendency(tendency!, args, grid;
         compile_start = time_ns()
         compiled! = Reactant.@compile raise=true raise_first=true sync=true tendency!(args...)
         compile_time_seconds = (time_ns() - compile_start) / 1e9
-        prof = Reactant.Profiler.@timed nrepeat=nrepeat compiled!(args...)
+        # `profile_dir` (when set) directs the xprof trace files there; when
+        # `nothing`, the profiler uses its default scratch directory.
+        prof = Reactant.Profiler.@timed nrepeat=nrepeat profile_dir=profile_dir compiled!(args...)
         time_per_call_seconds = prof.runtime_ns / 1e9
     else
         # Vanilla backend: launch the kernel eagerly (no Reactant compile). Warm

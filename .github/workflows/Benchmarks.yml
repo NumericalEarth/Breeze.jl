@@ -156,6 +156,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
           overwrite: false
+      - name: "Upload profiles as artifacts"
+        # Only the tendency / model_tendency matrix entries write xprof profiles
+        # (Reactant backend); other entries produce no files and are skipped.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: 'profiles-dynamics_${{ matrix.dynamics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
+          path: benchmarking/profiles/
+          if-no-files-found: ignore
+          retention-days: 90
+          overwrite: false
       - name: "Upload Manifest"
         if: always()
         timeout-minutes: 2

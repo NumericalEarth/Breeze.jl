@@ -403,12 +403,15 @@ function run_benchmarks(args)
             println("Running: $name")
             println("-" ^ 70)
 
-            # On Reactant, dump all MLIR (every compile stage) into a per-case
-            # subdirectory so each stays separate; saved as a CI artifact (GB-25
-            # pattern). Vanilla does not compile through Reactant.
+            # On Reactant, dump all MLIR (every compile stage) and the xprof
+            # profiles into per-case subdirectories so each stays separate;
+            # saved as CI artifacts (GB-25 pattern). Vanilla does not compile
+            # through Reactant, so neither is produced there.
+            profile_dir = nothing
             if get(ENV, "GITHUB_ACTIONS", "false") == "true" && backend_name == "reactant"
                 Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps", "$(label)_$(adv_name)"))
                 Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+                profile_dir = mkpath(joinpath(@__DIR__, "profiles", "$(label)_$(adv_name)"))
             end
 
             arch = make_backend_arch(backend_name, device)
@@ -424,7 +427,8 @@ function run_benchmarks(args)
                                               name,
                                               advection = adv_name,
                                               backend = backend_name,
-                                              mode))
+                                              mode,
+                                              profile_dir))
             continue
         end
 
