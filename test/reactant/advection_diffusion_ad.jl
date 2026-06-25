@@ -119,7 +119,7 @@ end
 #####
 
 @testset "advection_diffusion_ad" begin
-    N_list = [32]
+    N_list = [16, 32, 64]
     exact  = analytical_values(_A, _σ₀, _κ, _t_f)
 
     @show @__LINE__
@@ -162,4 +162,28 @@ end
     end
 
     @show @__LINE__
+
+    # Sanity checks on the finest-grid result
+    @testset "Raise backward (N=$(N_list[end]))" begin
+        r = results[end]
+        @test isfinite(r.J_ad)
+        @test r.J_ad > 0
+        @test all(isfinite, r.grads)
+        @test maximum(abs, r.grads) > 0
+    end
+
+    # AD gradients are exact for the discrete system; errors come only from the
+    # spatial discretisation of the continuous PDE.  Halving Δx must strictly
+    # reduce each relative error — a broken adjoint would violate this.
+    @testset "Convergence" begin
+        for i in 1:length(N_list)-1
+            lo, hi = results[i], results[i+1]
+            @testset "N=$(lo.N) → N=$(hi.N)" begin
+                @test hi.rel_J  < lo.rel_J
+                @test hi.rel_A  < lo.rel_A
+                @test hi.rel_σ₀ < lo.rel_σ₀
+                @test hi.rel_U₀ < lo.rel_U₀
+            end
+        end
+    end
 end
