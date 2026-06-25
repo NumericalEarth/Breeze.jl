@@ -21,6 +21,7 @@
 
 using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
 using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation, BenchmarkResult
+using BreezeBenchmarks: scalar_tendency_problem, benchmark_scalar_tendency
 using JSON: JSON
 using Oceananigans
 using Oceananigans.TurbulenceClosures: SmagorinskyLilly, DynamicSmagorinsky
@@ -63,7 +64,8 @@ function parse_commandline()
 
     @add_arg_table! s begin
         "--mode"
-            help = "Mode: 'benchmark' for quick performance tests, 'simulate' for full runs with output"
+            help = "Mode: 'benchmark' for quick performance tests, 'simulate' for full runs with output, " *
+                   "'tendency' to profile a single scalar-tendency WENO kernel (no model; Reactant only)"
             arg_type = String
             default = "benchmark"
 
@@ -383,6 +385,37 @@ function run_benchmarks(args)
         size_str = "$(Nx)x$(Ny)x$(Nz)"
         ft_str = FT == Float32 ? "F32" : "F64"
         mode_suffix = args["ad"] ? "_AD" : ""
+
+        # Tendency mode profiles the bare scalar-tendency WENO kernel with no
+        # model (hence no dynamics/closure/microphysics). Reactant only, since
+        # it compiles the launch into a single XLA program. Handle it up front
+        # and skip the model-building path below.
+        if mode == "tendency"
+            backend_name == "reactant" ||
+                error("tendency mode requires --backend reactant (got $backend_name)")
+            m = match(r"^WENO(\d+)$", adv_name)
+            isnothing(m) && error("tendency mode supports WENO<order> advection, got $adv_name")
+            order = parse(Int, m[1])
+
+            name = "ScalarTendency_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(backend_name)"
+            println("\n", "-" ^ 70)
+            println("Running: $name")
+            println("-" ^ 70)
+
+            arch = make_backend_arch(backend_name, device)
+            topology = make_topology(topo_name)
+            tendency!, tendency_args = scalar_tendency_problem(arch;
+                                                              Nx, Ny, Nz,
+                                                              order,
+                                                              float_type = FT,
+                                                              topology)
+            push!(results, benchmark_scalar_tendency(tendency!, tendency_args;
+                                                     nrepeat = time_steps,
+                                                     name,
+                                                     advection = adv_name))
+            continue
+        end
+
         name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)_$(backend_name)$(mode_suffix)"
 
         println("\n", "-" ^ 70)
@@ -442,7 +475,7 @@ function run_benchmarks(args)
                                      microphysics=micro_name,
                                      )
         else
-            error("Unknown mode: $mode. Use 'benchmark' or 'simulate'.")
+            error("Unknown mode: $mode. Use 'benchmark', 'simulate', or 'tendency'.")
         end
         push!(results, result)
     end
