@@ -13,12 +13,15 @@
                               nrepeat = 100,
                               name = "scalar_tendency",
                               advection::AbstractString = "",
+                              optimize = true,
                               verbose = true)
 
-Compile `tendency!(args...)` with `Reactant.@compile raise=true raise_first=true
-sync=true` (recording compile time separately, since the KA kernel must be
-raised to XLA) and profile its runtime with `Reactant.Profiler.@timed`. `args`
-is the tuple `(Gc, grid, advection, U, c)` returned by `scalar_tendency_problem`.
+Compile `tendency!(args...)` with `Reactant.@compile optimize=optimize raise=true
+raise_first=true sync=true` (recording compile time separately, since the KA
+kernel must be raised to XLA) and profile its runtime with
+`Reactant.Profiler.@timed`. `args` is the tuple `(Gc, grid, advection, U, c)`
+returned by `scalar_tendency_problem`. Pass `optimize=false` to skip XLA's
+optimization passes (`:none`) and benchmark / dump the unoptimized program.
 
 Returns a `BenchmarkResult` with `mode = "tendency"`, where `time_per_step_seconds`
 is the mean wall time of one tendency evaluation and `grid_points_per_second` is
@@ -28,6 +31,7 @@ function benchmark_scalar_tendency(tendency!, args;
                                    nrepeat = 100,
                                    name = "scalar_tendency",
                                    advection::AbstractString = "",
+                                   optimize = true,
                                    verbose = true)
 
     grid = args[2]  # args = (Gc, grid, advection, U, c)
@@ -42,11 +46,12 @@ function benchmark_scalar_tendency(tendency!, args;
         @info "  Advection: $advection"
         @info "  Grid size: $Nx × $Ny × $Nz ($total_points points)"
         @info "  Repeats: $nrepeat"
-        @info "  Compiling scalar_tendency! with Reactant (raise=true)..."
+        @info "  Optimize: $optimize"
+        @info "  Compiling scalar_tendency! with Reactant (raise=true, optimize=$optimize)..."
     end
 
     compile_start = time_ns()
-    compiled! = Reactant.@compile raise=true raise_first=true sync=true tendency!(args...)
+    compiled! = Reactant.@compile optimize=optimize raise=true raise_first=true sync=true tendency!(args...)
     compile_time_seconds = (time_ns() - compile_start) / 1e9
 
     # Mean runtime per call. Passing the already-compiled thunk makes @timed

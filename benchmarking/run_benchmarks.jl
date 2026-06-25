@@ -404,22 +404,30 @@ function run_benchmarks(args)
             isnothing(m) && error("tendency mode supports WENO<order> advection, got $adv_name")
             order = parse(Int, m[1])
 
-            name = "ScalarTendency_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(backend_name)"
-            println("\n", "-" ^ 70)
-            println("Running: $name")
-            println("-" ^ 70)
-
             arch = make_backend_arch(backend_name, device)
             topology = make_topology(topo_name)
-            tendency!, tendency_args = scalar_tendency_problem(arch;
-                                                              Nx, Ny, Nz,
-                                                              order,
-                                                              float_type = FT,
-                                                              topology)
-            push!(results, benchmark_scalar_tendency(tendency!, tendency_args;
-                                                     nrepeat = time_steps,
-                                                     name,
-                                                     advection = adv_name))
+
+            # Compile + profile the same kernel both with and without XLA's
+            # optimization passes, so we can compare optimized vs unoptimized
+            # runtime and MLIR (both dump under DUMP_MLIR_ALWAYS above).
+            for optimize in (true, false)
+                opt_tag = optimize ? "opt" : "noopt"
+                name = "ScalarTendency_$(size_str)_$(ft_str)_$(adv_name)_$(opt_tag)_$(topo_name)_$(backend_name)"
+                println("\n", "-" ^ 70)
+                println("Running: $name")
+                println("-" ^ 70)
+
+                tendency!, tendency_args = scalar_tendency_problem(arch;
+                                                                  Nx, Ny, Nz,
+                                                                  order,
+                                                                  float_type = FT,
+                                                                  topology)
+                push!(results, benchmark_scalar_tendency(tendency!, tendency_args;
+                                                         nrepeat = time_steps,
+                                                         name,
+                                                         advection = adv_name,
+                                                         optimize))
+            end
             continue
         end
 

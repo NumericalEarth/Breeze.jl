@@ -228,10 +228,14 @@ jobs:
               # closure/dynamics/microphysics are 'none', so skip the forward
               # clauses below via continue.
               if mode == 'tendency':
+                  # Optimized vs unoptimized compile are distinct series (the
+                  # name carries an `_opt_`/`_noopt_` tag), so the chart shows
+                  # both for each WENO order.
+                  opt = 'noopt' if 'noopt' in d['name'] else 'opt'
                   level_1 = f'{base_name}; Scalar tendency [{ft}]'
                   level_2 = f'Compare WENO order'
                   level_3 = f'{gpu}'
-                  level_4 = f'{advection} {grid_str}'
+                  level_4 = f'{advection} {opt}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
