@@ -1,31 +1,22 @@
-# # Eigenvalue spectrum of the baroclinic instability via Arnoldi iteration
+# # Eigenvalue spectrum of the single-timestep operator via Arnoldi
 #
-# The power method finds only the **dominant** eigenvalue. To diagnose why
-# it overshoots the Park et al. reference (σ ≈ 0.46 day⁻¹), we need the
-# full leading eigenvalue spectrum.
+# The power method finds only the **dominant** eigenvalue. To diagnose
+# whether a numerical mode is contaminating the growth rate, we need the
+# full leading eigenvalue spectrum of the **single time step** operator.
 #
-# The 3-day forward integration defines a linear operator
-# ``L : \delta\mathbf{x} \to \delta\mathbf{x}'`` on the perturbation
-# state vector. Constructing the explicit matrix is intractable
-# (8.64 M DOF → 33 years of wall time), but **Arnoldi iteration** finds
-# the top k eigenvalues with only O(k) matrix-vector products.
+# One explicit time step IS the forward operator — the 3-day power method
+# integration is this operator composed ~360 times. Any eigenvalue |λ| > 1
+# of a single step gets amplified as |λ|^360 over 3 days.
 #
-# ## Cost estimate
-#
-# | Quantity | Value |
-# |----------|-------|
-# | State DOF | 5 × 360 × 150 × 32 = 8,640,000 |
-# | One forward pass (A100) | ~2 min |
-# | Krylov dimension k = 80 | ~2.7 hours |
-# | Krylov basis memory | 80 × 8.64M × 8 B ≈ 5.5 GB (CPU) |
-# | Explicit matrix (comparison) | 8.64M² × 4 B ≈ 300 TB — infeasible |
+# Arnoldi iteration finds the top k eigenvalues with only O(k) steps,
+# each nearly instant on GPU at the production resolution.
 
 using Breeze
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans: prognostic_fields
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.TimeSteppers: update_state!, reset!
+using Oceananigans.TimeSteppers: time_step!, update_state!
 using Printf
 using CairoMakie
 using CUDA
@@ -125,35 +116,17 @@ set!(model; θ=potential_temperature, u=zonal_velocity_balanced, ρ=density)
 
 background = map(f -> copy(parent(f)), prognostic_fields(model))
 
-# ## Forward operator: pack/unpack state ↔ vector
-#
-# The perturbation state vector is the concatenation of the interior
-# values of all prognostic fields (ρ, ρu, ρv, ρw, ρθ), stored as
-# Float64 on CPU. The forward operator transfers to GPU Float32,
-# integrates 3 days, and extracts the result back to CPU Float64.
+# ## State vector utilities
 
 n_per_field = Nλ * Nφ * Nz
 n_fields = length(prognostic_fields(model))
 N = n_fields * n_per_field
 
 @info @sprintf("State vector dimension N = %d (%.1f M)", N, N / 1e6)
-@info @sprintf("Explicit matrix would need %d forward passes (%.1f years at 2 min/pass)",
-               N, N * 2 / 60 / 24 / 365)
 
 iλ = grid.Hx .+ (1:Nλ)
 iφ = grid.Hy .+ (1:Nφ)
 iz = grid.Hz .+ (1:Nz)
-
-function pack_perturbation(model, background)
-    x = Vector{Float64}(undef, N)
-    offset = 0
-    for (f, bg) in zip(prognostic_fields(model), background)
-        chunk = Array(parent(f)[iλ, iφ, iz] .- bg[iλ, iφ, iz])
-        x[offset+1:offset+n_per_field] .= vec(Float64.(chunk))
-        offset += n_per_field
-    end
-    return x
-end
 
 function unpack_perturbation!(model, x, background)
     offset = 0
@@ -167,49 +140,53 @@ function unpack_perturbation!(model, x, background)
     end
 end
 
-# ## Simulation (reused for every forward pass)
+# ## Single time step as the forward operator
+#
+# We compute the Jacobian of one time step about the background state:
+#   column i = (L(bg + ε eᵢ) - L(bg)) / ε
+# First step the unperturbed background to get the reference output.
 
-Δτ = 3days
+Δt = 12 * 60  ## 12 minutes in seconds
 
-simulation = Simulation(model; Δt=12minutes, stop_time=Δτ)
-conjure_time_step_wizard!(simulation; cfl=1.4, max_Δt=12minutes)
-Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
+@info "Stepping unperturbed background (JIT warmup + reference)..."
+
+for (f, bg) in zip(prognostic_fields(model), background)
+    parent(f) .= bg
+end
+for f in prognostic_fields(model)
+    fill_halo_regions!(f)
+end
+update_state!(model, compute_tendencies=false)
+
+t_warmup = @elapsed time_step!(model, Δt)
+bg_stepped = map(f -> copy(parent(f)), prognostic_fields(model))
+@info @sprintf("Reference step complete (%.2f s)", t_warmup)
 
 pass_count = Ref(0)
 
-function arnoldi_progress(sim)
-    if iteration(sim) % 100 == 0
-        v = sim.model.velocities.v
-        @info @sprintf("  [pass %d] step %d | t = %s | max|v| = %.4e",
-                       pass_count[], iteration(sim), prettytime(sim), maximum(abs, v))
-    end
-    return nothing
-end
-
-add_callback!(simulation, arnoldi_progress, IterationInterval(1))
-
 function apply_forward_operator(x)
     pass_count[] += 1
-    t_start = time()
 
-    ## Set model state = background + perturbation
+    ## Reset to background + perturbation
     unpack_perturbation!(model, x, background)
-    reset!(model.clock)
-    simulation.stop_time = Δτ
     update_state!(model, compute_tendencies=false)
 
-    ## Integrate 3 days
-    run!(simulation)
+    ## One time step
+    time_step!(model, Δt)
 
-    ## Extract perturbation
-    y = pack_perturbation(model, background)
+    ## Extract output perturbation relative to stepped background
+    y = Vector{Float64}(undef, N)
+    offset = 0
+    for (f, bg_s) in zip(prognostic_fields(model), bg_stepped)
+        chunk = Array(parent(f)[iλ, iφ, iz] .- bg_s[iλ, iφ, iz])
+        y[offset+1:offset+n_per_field] .= vec(Float64.(chunk))
+        offset += n_per_field
+    end
 
-    elapsed = time() - t_start
-    ynorm = norm(y)
-    amplification = ynorm / norm(x)
-    @info @sprintf("Forward pass %d complete (%.1f s) | ||y||/||x|| = %.4f | σ_inst = %.4f day⁻¹",
-                   pass_count[], elapsed, amplification,
-                   log(amplification) / (3 * 86400) * 86400)
+    if pass_count[] % 10 == 0
+        @info @sprintf("  Arnoldi pass %d | ||y||/||x|| = %.6f",
+                       pass_count[], norm(y) / norm(x))
+    end
     return y
 end
 
@@ -222,8 +199,7 @@ end
 
 krylov_dim = 80  ## number of Arnoldi steps
 
-@info @sprintf("Arnoldi iteration: k = %d, estimated wall time ≈ %.1f hours (at 2 min/pass)",
-               krylov_dim, krylov_dim * 2 / 60)
+@info @sprintf("Arnoldi iteration: k = %d (each step = one time_step! call)", krylov_dim)
 
 ## Initial vector: wavenumber-9 v perturbation (same as power method seed)
 v_ref = 1.2
@@ -278,10 +254,10 @@ for j in 1:krylov_dim
     if j ≥ 5 && j % 5 == 0
         Hk = H[1:j, 1:j]
         λ_ritz = eigvals(Hk)
-        σ_ritz = sort(log.(abs.(λ_ritz)) / (3 * 86400) * 86400; rev=true)
-        top5 = σ_ritz[1:min(5, length(σ_ritz))]
-        @info @sprintf("  Top 5 Ritz values (day⁻¹): %s",
-                       join([@sprintf("%.4f", s) for s in top5], ", "))
+        abs_sorted = sort(abs.(λ_ritz); rev=true)
+        top5 = abs_sorted[1:min(5, length(abs_sorted))]
+        @info @sprintf("  Top 5 |λ|: %s  (>1 = amplifying per step)",
+                       join([@sprintf("%.6f", s) for s in top5], ", "))
     end
 end
 
@@ -290,22 +266,27 @@ end
 Hk = H[1:krylov_dim, 1:krylov_dim]
 λ_all = eigvals(Hk)
 
-## Growth rates and phase information
-amplification = abs.(λ_all)
-σ_all = log.(amplification) / (3 * 86400) * 86400  ## day⁻¹
-phase_all = angle.(λ_all)  ## radians — nonzero means oscillatory
+## For a single time step: |λ| > 1 means amplifying, |λ| < 1 means damping.
+## Growth rate per day: σ = ln|λ| / Δt * 86400
+σ_all = log.(abs.(λ_all)) / Δt * 86400  ## day⁻¹
+phase_all = angle.(λ_all)
 
-## Sort by growth rate (descending)
-order = sortperm(σ_all; rev=true)
-σ_sorted = σ_all[order]
+## Sort by |λ| (descending)
+order = sortperm(abs.(λ_all); rev=true)
 λ_sorted = λ_all[order]
+σ_sorted = σ_all[order]
 phase_sorted = phase_all[order]
 
-@info "=== Top 20 eigenvalues ==="
-for i in 1:min(20, length(σ_sorted))
+ρ_A = maximum(abs, λ_all)
+@info @sprintf("Spectral radius ρ(A) = %.6f  (> 1 means unstable per step!)", ρ_A)
+@info @sprintf("Over 360 steps (3 days): ρ^360 = %.4e → σ_eff = %.4f day⁻¹",
+               ρ_A^360, log(ρ_A^360) / (3 * 86400) * 86400)
+
+@info "=== Top 20 eigenvalues (sorted by |λ|) ==="
+for i in 1:min(20, length(λ_sorted))
     λi = λ_sorted[i]
-    @info @sprintf("  %2d | σ = %+.4f day⁻¹ | |λ| = %.4f | phase = %+.4f rad | λ = %.4f %+.4fi",
-                   i, σ_sorted[i], abs(λi), phase_sorted[i], real(λi), imag(λi))
+    @info @sprintf("  %2d | |λ| = %.6f | σ = %+.4f day⁻¹ | phase = %+.4f rad | λ = %.4f %+.4fi",
+                   i, abs(λi), σ_sorted[i], phase_sorted[i], real(λi), imag(λi))
 end
 
 # ## Save results
@@ -314,7 +295,7 @@ using JLD2
 jldsave("arnoldi_eigenvalues.jld2";
         λ_all, σ_all, σ_sorted, λ_sorted, phase_sorted,
         H = Hk, krylov_dim,
-        Nλ, Nφ, Nz, Δτ)
+        Nλ, Nφ, Nz, Δt)
 
 @info "Saved eigenvalues to arnoldi_eigenvalues.jld2"
 
@@ -322,57 +303,46 @@ jldsave("arnoldi_eigenvalues.jld2";
 
 # ### Eigenvalue spectrum in the complex plane
 
-fig = Figure(size=(1400, 500))
+fig = Figure(size=(1800, 500))
 
+## Complex plane — unit circle is the stability boundary
 ax1 = Axis(fig[1, 1];
            title = "Ritz values in the complex plane",
-           xlabel = "Re(λ)", ylabel = "Im(λ)",
-           aspect = DataAspect())
+           xlabel = "Re(λ)", ylabel = "Im(λ)")
 
 scatter!(ax1, real.(λ_sorted), imag.(λ_sorted);
-         color = σ_sorted, colormap = :RdBu, markersize = 8)
+         color = log10.(abs.(λ_sorted)), colormap = :RdBu, markersize = 8)
 
-## Unit circle for reference (|λ| = 1 means neutral)
 θ_circle = range(0, 2π; length=200)
 lines!(ax1, cos.(θ_circle), sin.(θ_circle);
-       color = :gray60, linestyle = :dash, label = "|λ| = 1 (neutral)")
+       color = :gray40, linestyle = :dash, linewidth = 2, label = "|λ| = 1 (neutral)")
 axislegend(ax1; position = :lb)
 
 Colorbar(fig[1, 2]; colormap = :RdBu,
-         limits = extrema(σ_sorted),
-         label = "σ (day⁻¹)")
+         limits = extrema(log10.(abs.(λ_sorted))),
+         label = "log₁₀|λ|")
 
-# ### Growth rate histogram
-
+## |λ| spectrum
 ax2 = Axis(fig[1, 3];
-           title = "Growth rate spectrum",
-           xlabel = "σ (day⁻¹)",
-           ylabel = "Count")
+           title = "|λ| spectrum (single Δt = $(Δt÷60) min)",
+           xlabel = "Eigenvalue index (sorted by |λ|)",
+           ylabel = "|λ|")
 
-hist!(ax2, σ_sorted; bins = 40, color = :dodgerblue)
-vlines!(ax2, [0.46]; linestyle = :dash, color = :red, label = "Park et al.")
-vlines!(ax2, [0.0]; linestyle = :solid, color = :gray60, label = "neutral")
+scatter!(ax2, 1:krylov_dim, abs.(λ_sorted); markersize = 6, color = :dodgerblue)
+hlines!(ax2, [1.0]; color = :red, linewidth = 2, linestyle = :dash, label = "|λ| = 1")
 axislegend(ax2; position = :rt)
 
-save("arnoldi_eigenvalues.png", fig)
-@info "Saved arnoldi_eigenvalues.png"
-
-# ### Top eigenvalues bar chart
-
-n_top = min(30, length(σ_sorted))
-
-fig2 = Figure(size=(900, 500))
-ax3 = Axis(fig2[1, 1];
-           title = "Leading growth rates from Arnoldi (k = $krylov_dim)",
+## Growth rate (day⁻¹)
+ax3 = Axis(fig[1, 4];
+           title = "Growth rate (day⁻¹)",
            xlabel = "Eigenvalue index",
            ylabel = "σ (day⁻¹)")
 
-barplot!(ax3, 1:n_top, σ_sorted[1:n_top];
-         color = [s > 0 ? :dodgerblue : :gray60 for s in σ_sorted[1:n_top]])
-hlines!(ax3, [0.46]; linestyle = :dash, color = :red, linewidth = 2, label = "Park et al. (2013)")
-hlines!(ax3, [0.0]; linestyle = :solid, color = :gray40)
+scatter!(ax3, 1:krylov_dim, σ_sorted; markersize = 6, color = :dodgerblue)
+hlines!(ax3, [0.46]; linestyle = :dash, color = :red, label = "Park et al. (2013)")
+hlines!(ax3, [0.0]; color = :gray60)
 axislegend(ax3; position = :rt)
 
-save("arnoldi_top_eigenvalues.png", fig2)
-@info "Saved arnoldi_top_eigenvalues.png"
+save("arnoldi_eigenvalues.png", fig)
+@info "Saved arnoldi_eigenvalues.png"
 nothing
