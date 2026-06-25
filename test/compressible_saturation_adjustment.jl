@@ -129,7 +129,7 @@ end
 
     T  = Array(interior(model.temperature))
     p  = Array(interior(model.dynamics.pressure))
-    ρ  = Array(interior(model.dynamics.density))
+    ρ  = Array(interior(model.dynamics.total_density))  # saturation adjustment saturates at total ρ
     qˡ = Array(interior(model.microphysical_fields.qˡ))
     qᵛ = Array(interior(model.microphysical_fields.qᵛ))
 

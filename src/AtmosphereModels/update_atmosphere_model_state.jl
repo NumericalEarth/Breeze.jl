@@ -39,6 +39,7 @@ end
 # every RK stage as part of `compute_tendencies!`.)
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     fix_negative_moisture!(model)  # fix negative moisture from advection
+    compute_total_density!(model)  # diagnose total air density ρ = ρᵈ + Σρˣ (no-op unless compressible)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
@@ -78,8 +79,14 @@ function compute_forcings!(model)
     return nothing
 end
 
-tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, dynamics_density(model.dynamics))
-tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, dynamics_density(model.dynamics))
+# Tracer↔specific conversion uses the TOTAL air density (mass fractions qˣ = ρˣ/ρ), keeping the
+# thermodynamics in mass fractions. For anelastic, `total_air_density === dynamics_density`.
+tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, total_air_density(model.dynamics))
+tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, total_air_density(model.dynamics))
+
+# Diagnose the total air density ρ = ρᵈ + Σρˣ. No-op unless the dynamics carries a distinct
+# total-density field (CompressibleDynamics overrides this); anelastic aliases dynamics_density.
+compute_total_density!(model) = nothing
 
 function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel
@@ -253,7 +260,7 @@ end
 
     compute_auxiliary_thermodynamic_variables!(formulation, dynamics, i, j, k, grid)
 
-    ρ_field = dynamics_density(dynamics)
+    ρ_field = total_air_density(dynamics)  # total ρ → qᵛᵉ is a mass fraction (thermo unchanged)
     @inbounds begin
         ρ = ρ_field[i, j, k]
         ρqᵛᵉ = moisture_density[i, j, k]

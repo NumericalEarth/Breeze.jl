@@ -341,6 +341,9 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 
 AtmosphereModels.prognostic_field_names(::WPNE2M) = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρnᵃ)
 
+# Water-mass densities only (drop the number-concentration fields ρnˣ) for total_water_density.
+AtmosphereModels.water_mass_field_names(::WPNE2M) = (:ρqᶜˡ, :ρqʳ)
+
 # Negative moisture correction chain: rain ← cloud ← vapor
 AtmosphereModels.correction_moisture_fields(::WPNE2M, μ) = (μ.ρqʳ, μ.ρqᶜˡ)
 
@@ -929,7 +932,7 @@ end
                                              microphysical_fields, velocities)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field = AtmosphereModels.dynamics_density(dynamics)
+    ρ_field = AtmosphereModels.total_air_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
 

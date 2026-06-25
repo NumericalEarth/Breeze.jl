@@ -58,6 +58,16 @@ function set_momentum!(model::AtmosphereModel, name::Symbol, value)
 end
 
 """
+    reconcile_initial_density!(model, total_density_given)
+
+Post-`set!` hook to reconcile a TOTAL-density `:ρ` initial condition with the prognostic coupling
+density. No-op by default; `CompressibleModel` overrides it to back out the dry density ρᵈ = ρ·qᵈ
+and re-weight the dry-coupled prognostics (`ρθ`, momentum). `total_density_given` is `false` when the
+user set `:ρᵈ` directly (or set no density).
+"""
+reconcile_initial_density!(model, total_density_given) = nothing
+
+"""
 $(TYPEDSIGNATURES)
 
 Convert a specific microphysical variable name to its density-weighted counterpart.
@@ -152,6 +162,10 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     end
 
     names = collect(keys(kw))
+    # `:ρ` is interpreted as TOTAL density (Option A): set into the dry-density field as a
+    # placeholder, then reconciled to ρᵈ = ρ·qᵈ after all kwargs (see `reconcile_initial_density!`).
+    # `:ρᵈ` sets the dry density directly. No-op flag for non-compressible dynamics.
+    total_density_given = :ρ ∈ names
     prioritized = prioritize_names(names)
 
     for name in prioritized
@@ -195,8 +209,11 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         elseif name ∈ settable_thermodynamic_variables
             set_thermodynamic_variable!(model, Val(name), value)
 
-        elseif name == :ρ
-            # Set density for compressible dynamics
+        elseif name == :ρ || name == :ρᵈ
+            # `:ρᵈ` sets the dry-air density directly. `:ρ` sets TOTAL density into the same field
+            # as a placeholder; `reconcile_initial_density!` (after the loop) backs out ρᵈ = ρ·qᵈ and
+            # re-weights the dry-coupled prognostics (ρθ, momentum). The placeholder lets the
+            # moisture branches below weight by ρ, giving the correct partial densities ρqˣ = ρ·qˣ.
             ρ = dynamics_density(model.dynamics)
             set!(ρ, value)
             # Fill halos immediately - needed for velocity→momentum conversion
@@ -239,6 +256,10 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             throw(ArgumentError(msg))
         end
     end
+
+    # Reconcile a TOTAL-density `:ρ` input into the prognostic dry density ρᵈ = ρ·qᵈ (Option A),
+    # re-weighting the dry-coupled prognostics. No-op for `:ρᵈ` input and for non-compressible dynamics.
+    reconcile_initial_density!(model, total_density_given)
 
     # Apply a mask
     foreach(mask_immersed_field!, prognostic_fields(model))

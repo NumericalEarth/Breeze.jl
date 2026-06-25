@@ -25,11 +25,13 @@ The following table also uses a few conventions that suffuse the source code and
 * `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
 * "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
 * Phase or mixture identifiers (``d``, ``v``, ``m``) appear as superscripts (e.g., ``Rᵈ``, ``cᵖᵐ``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
-* Conservative variables are stored in ρᵣ-weighted form in the code (e.g., `ρu`, `ρv`, `ρw`, `ρe`, `ρqᵉ` or `ρqᵛ`).
+* Momentum and the thermodynamic variable are stored *coupling-density-weighted* (``ρu = ρᵈ u``, ``ρθ = ρᵈ θ``, likewise ``ρe``). The coupling density is `dynamics_density(dynamics)`: the reference density ``ρᵣ`` for [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics), and the prognostic dry-air density ``ρᵈ`` for [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics). Velocity and ``θ`` are recovered by dividing by the coupling density.
+* Water/moisture is stored as *partial densities* (`ρqᵛ`, `ρqˡ`, `ρqⁱ`, …; mass per volume) and recovered as **mass fractions** by dividing by the *total* air density ``ρ = ρᵈ + Σ ρˣ`` (``qˣ = ρˣ/ρ``), so the thermodynamics works in mass fractions throughout. The total density (`total_air_density(dynamics)`) is ``ρᵈ`` plus all water densities — diagnosed on the compressible core, the reference density on the anelastic core — and is also the carrier for scalar/water advection, the equation of state, and buoyancy.
 
 | math symbol                         | code   | property name                       | description                                                                    |
 | ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
-| ``\rho``                            | `ρ`    | `AM.density`                        | Density, ``ρ = pᵣ / Rᵐ T`` for anelastic                                       |
+| ``\rho``                            | `ρ`    | `AM.density`                        | Total air density, ``ρ = ρᵈ + Σ ρˣ`` (diagnosed on the compressible core); the reference density ``ρ = pᵣ / Rᵐ T`` on the anelastic core |
+| ``ρᵈ``                              | `ρᵈ`   | `AM.dynamics.dry_density`           | Dry-air density; the prognostic coupling density of [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics) (total ``ρ = ρᵈ + Σ ρˣ``) |
 | ``\alpha``                          | `α`    |                                     | Specific volume, ``α = 1/ρ``                                                   |
 | ``\boldsymbol{u} = (u,v,w)``        | `u, v, w` | `AM.velocities`                  | Velocity components in (x, y, z) or (east, north, up)                          |
 | ``\boldsymbol{ρu} = (ρu, ρv, ρw)``  | `ρu, ρv, ρw` | `AM.momentum`                 | Momentum components                                                            |

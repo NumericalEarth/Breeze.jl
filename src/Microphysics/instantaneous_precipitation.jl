@@ -9,6 +9,7 @@ using ..Thermodynamics:
 using ..AtmosphereModels:
     AtmosphereModels,
     dynamics_density,
+    total_air_density,
     standard_pressure
 
 using Oceananigans: Oceananigans, CenterField, Field, Integral
@@ -140,13 +141,15 @@ end
                                                    constants, pˢᵗ, Δt, ρθˡⁱ, ρqᵛ, μ)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field = dynamics_density(dynamics)
+    ρ_total = total_air_density(dynamics)   # total ρ: mass fractions, saturation, density-based inversion
+    ρ_dry   = dynamics_density(dynamics)     # ρᵈ: ρθ = ρᵈθ is dry-coupled
 
     @inbounds begin
-        ρ  = ρ_field[i, j, k]
+        ρ  = ρ_total[i, j, k]
+        ρᵈ = ρ_dry[i, j, k]
         ρqᵛ₀ = ρqᵛ[i, j, k]
-        qᵗ = ρqᵛ₀ / ρ              # total water = prognostic vapor (no retained condensate)
-        θ₀ = ρθˡⁱ[i, j, k] / ρ      # θˡⁱ — conserved by the reversible condensation
+        qᵗ = ρqᵛ₀ / ρ              # total water mass fraction (÷ total ρ); prognostic vapor, no retained condensate
+        θ₀ = ρθˡⁱ[i, j, k] / ρᵈ     # θˡⁱ = ρθˡⁱ/ρᵈ (dry-coupled), conserved by the reversible condensation
 
         # Condensation — constant-density saturation adjustment with θˡⁱ held fixed. Delegated to
         # the shared #765 secant, which saturates against the density-based qsat at the cell's own
@@ -164,11 +167,13 @@ end
         𝒰ᵥ = with_moisture(𝒰₁, MoistureMassFractions(qᵛ⁺))
         θᶠ = with_temperature(𝒰ᵥ, T, constants).potential_temperature
         ρqᵛ⁺ = ρ * qᵛ⁺
-        condensed_water_density = max(0, ρqᵛ₀ - ρqᵛ⁺)
+        # Mass-fraction form (≡ ρqᵛ₀ - ρqᵛ⁺, since qᵗ = ρqᵛ₀/ρ) but exactly 0 when subsaturated
+        # (qᵛ⁺ = qᵗ), avoiding a round-trip ρ·(ρqᵛ₀/ρ) that would leave a spurious tiny precip rate.
+        condensed_water_density = ρ * max(0, qᵗ - qᵛ⁺)
         precipitation_rate = condensed_water_density / Δt
 
         ρqᵛ[i, j, k]  = ρqᵛ⁺
-        ρθˡⁱ[i, j, k] = ρ * θᶠ
+        ρθˡⁱ[i, j, k] = ρᵈ * θᶠ    # ρθ = ρᵈθ (dry-coupled)
         μ.qᵛ[i, j, k] = qᵛ⁺
         μ.precipitation_rate[i, j, k] = ifelse(condensed_water_density > 0,
                                                precipitation_rate,

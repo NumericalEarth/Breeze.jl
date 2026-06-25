@@ -19,7 +19,7 @@ using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
-    set_thermodynamic_variable!, dynamics_density, dynamics_pressure, standard_pressure,
+    set_thermodynamic_variable!, dynamics_density, total_air_density, dynamics_pressure, standard_pressure,
     dynamics_prognostic_fields, grid_moisture_fractions, maybe_adjust_thermodynamic_state,
     div_ρUc, c_div_ρU, ∇_dot_Jᶜ, AtmosphereModelBuoyancy,
     radiation_flux_divergence, materialize_formulation,

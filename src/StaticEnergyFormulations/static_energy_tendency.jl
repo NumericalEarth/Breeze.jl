@@ -124,7 +124,7 @@ end
 
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
-        ρᵣ = dynamics_density(dynamics)[i, j, k]
+        ρᵣ = total_air_density(dynamics)[i, j, k]
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         θ = potential_temperature[i, j, k]
     end
@@ -196,7 +196,7 @@ end
 
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
-        ρᵣ = dynamics_density(dynamics)[i, j, k]
+        ρᵣ = total_air_density(dynamics)[i, j, k]
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end

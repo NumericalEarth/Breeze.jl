@@ -383,8 +383,8 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             # both branches were the same TFVD grid.
             zero_terrain_tolerance = 1e-14
 
-            @test isapprox(interior(height_model.dynamics.density),
-                           interior(terrain_model.dynamics.density);
+            @test isapprox(interior(height_model.dynamics.dry_density),
+                           interior(terrain_model.dynamics.dry_density);
                            atol=zero_terrain_tolerance)
             @test isapprox(interior(height_ρθ),
                            interior(terrain_ρθ);
@@ -615,9 +615,9 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         assemble_slow_vertical_momentum_tendency!(substepper, model)
         @test isapprox(maximum(abs, interior(substepper.slow_vertical_momentum_tendency)), 0; atol = 1e-12)
 
-        initial_mass = sum(interior(model.dynamics.density))
+        initial_mass = sum(interior(model.dynamics.dry_density))
         time_step!(model, 0.1)
-        final_mass = sum(interior(model.dynamics.density))
+        final_mass = sum(interior(model.dynamics.dry_density))
 
         w̃ = model.dynamics.contravariant_vertical_velocity
         ρw̃ = model.dynamics.contravariant_vertical_momentum
@@ -732,7 +732,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                 maximum_advective_CFL = max(maximum_advective_CFL, advective_CFL)
                 maximum_contravariant_CFL = max(maximum_contravariant_CFL, contravariant_CFL)
 
-                @test isfinite(maximum(abs, interior(model.dynamics.density)))
+                @test isfinite(maximum(abs, interior(model.dynamics.dry_density)))
                 @test isfinite(maximum(abs, interior(model.momentum.ρu)))
                 @test isfinite(maximum(abs, interior(model.momentum.ρw)))
                 @test isfinite(maximum(abs, interior(w̃)))
@@ -957,7 +957,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         time_step!(model, 0.01)
         @test model.clock.iteration == 1
         @test isfinite(maximum(abs, interior(model.momentum.ρu)))
-        @test isfinite(maximum(abs, interior(model.dynamics.density)))
+        @test isfinite(maximum(abs, interior(model.dynamics.dry_density)))
     end
 
     @testset "Acoustic substep gates terrain ρw̃ slope correction [$(nameof(typeof(formulation)))]" for formulation in TERRAIN_FORMULATIONS
@@ -1445,9 +1445,9 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         @test model.dynamics.terrain_metrics.pressure_gradient_stencil isa SlopeInsideInterpolation
         @test model.timestepper.substepper.substeps === nothing  # adaptive
 
-        initial_mass = sum(interior(model.dynamics.density))
+        initial_mass = sum(interior(model.dynamics.dry_density))
         time_step!(model, 0.1)
-        final_mass = sum(interior(model.dynamics.density))
+        final_mass = sum(interior(model.dynamics.dry_density))
 
         w̃ = model.dynamics.contravariant_vertical_velocity
         ρw̃ = model.dynamics.contravariant_vertical_momentum
@@ -1518,8 +1518,8 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         height_ρθ  = Breeze.AtmosphereModels.thermodynamic_density(height_model.formulation)
         terrain_ρθ = Breeze.AtmosphereModels.thermodynamic_density(terrain_model.formulation)
 
-        @test isapprox(interior(height_model.dynamics.density),
-                       interior(terrain_model.dynamics.density); atol=tol)
+        @test isapprox(interior(height_model.dynamics.dry_density),
+                       interior(terrain_model.dynamics.dry_density); atol=tol)
         @test isapprox(interior(height_ρθ), interior(terrain_ρθ); atol=tol)
         @test isapprox(interior(height_model.momentum.ρu),
                        interior(terrain_model.momentum.ρu); atol=tol)

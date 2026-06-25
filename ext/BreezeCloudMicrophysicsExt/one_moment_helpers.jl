@@ -128,7 +128,7 @@ end
 Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val) = nothing
 
 function build_number_concentration_op(model, pdf, mass, ρq)
-    ρ = dynamics_density(model.dynamics)
+    ρ = total_air_density(model.dynamics)  # number conc N = ρ·n uses total air density
     func = NumberConcentrationKernelFunction(pdf, mass, ρq, ρ)
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
 end

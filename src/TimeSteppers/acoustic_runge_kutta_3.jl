@@ -246,7 +246,7 @@ end
 ##### at outer-step start.
 #####
 
-function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
+function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
                                                                       <:Any, <:Any, <:AcousticRungeKutta3})
     sub = model.timestepper.substepper
     return (u = sub.time_averaged_velocities.u,

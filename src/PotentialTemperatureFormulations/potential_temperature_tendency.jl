@@ -82,8 +82,8 @@ end
                                                 model_fields)
 
     potential_temperature = formulation.potential_temperature
-    ρ_field = dynamics_density(dynamics)
-    @inbounds ρ = ρ_field[i, j, k]
+    ρ_field = dynamics_density(dynamics)                # coupling density ρᵈ (advection/diffusion carrier)
+    @inbounds ρ = total_air_density(dynamics)[i, j, k]  # total ρ (mass fractions)
     @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
 
     # Compute moisture fractions first
@@ -163,7 +163,7 @@ end
 
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
-        ρᵣ = dynamics_density(dynamics)[i, j, k]
+        ρᵣ = total_air_density(dynamics)[i, j, k]
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         e = specific_energy[i, j, k]
     end
@@ -234,7 +234,7 @@ end
 
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
-        ρᵣ = dynamics_density(dynamics)[i, j, k]
+        ρᵣ = total_air_density(dynamics)[i, j, k]
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end

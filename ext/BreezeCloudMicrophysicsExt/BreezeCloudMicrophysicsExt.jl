@@ -30,7 +30,7 @@ using CloudMicrophysics: MicrophysicsNonEq as CMNonEq
 
 using Breeze.AtmosphereModels: AtmosphereModels,
     AbstractNumberConcentrationCategories,
-    dynamics_density
+    total_air_density
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
