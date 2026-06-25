@@ -391,14 +391,6 @@ function run_benchmarks(args)
         # Reactant-compiled XLA program can be compared against the eager vanilla
         # launch. Handle it up front and skip the model-building path below.
         if mode == "tendency"
-            # On Reactant, dump all MLIR (every compile stage) so it can be saved
-            # as a CI artifact for future inspection (GB-25 pattern). No-op for
-            # the vanilla backend, which does not compile through Reactant.
-            if get(ENV, "GITHUB_ACTIONS", "false") == "true"
-                Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps"))
-                Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
-            end
-
             m = match(r"^WENO(\d+)$", adv_name)
             isnothing(m) && error("tendency mode supports WENO<order> advection, got $adv_name")
             order = parse(Int, m[1])
@@ -407,6 +399,14 @@ function run_benchmarks(args)
             println("\n", "-" ^ 70)
             println("Running: $name")
             println("-" ^ 70)
+
+            # On Reactant, dump all MLIR (every compile stage) into a per-WENO
+            # subdirectory so each case stays separate; saved as a CI artifact
+            # (GB-25 pattern). Vanilla does not compile through Reactant.
+            if get(ENV, "GITHUB_ACTIONS", "false") == "true" && backend_name == "reactant"
+                Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps", adv_name))
+                Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+            end
 
             arch = make_backend_arch(backend_name, device)
             topology = make_topology(topo_name)
