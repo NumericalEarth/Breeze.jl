@@ -32,6 +32,7 @@ using Oceananigans.TimeSteppers: update_state!, reset!
 using Printf
 using CairoMakie
 using CUDA
+using FFTW
 
 # ## DCMIP2016 parameters
 #
@@ -105,12 +106,9 @@ function τ_and_integrals(z)
     return τ₁, τ₂, ∫τ₁, ∫τ₂
 end
 
-## Meridional shape functions (NH-only jet)
-## A smooth cutoff zeros the jet south of the equator, eliminating the
-## hemispheric degeneracy that would otherwise stall the power method.
-hemisphere(φ) = φ ≤ 0 ? 0.0 : φ ≥ 10 ? 1.0 : 0.5 * (1 - cospi(φ / 10))
-F(φ)  = hemisphere(φ) * (cosd(φ)^K - K / (K + 2) * cosd(φ)^(K + 2))
-dF(φ) = hemisphere(φ) * (cosd(φ)^(K - 1) - cosd(φ)^(K + 1))
+## Meridional shape functions
+F(φ)  = cosd(φ)^K - K / (K + 2) * cosd(φ)^(K + 2)
+dF(φ) = cosd(φ)^(K - 1) - cosd(φ)^(K + 1)
 
 function virtual_temperature(λ, φ, z)
     τ₁, τ₂, _, _ = τ_and_integrals(z)
@@ -212,18 +210,45 @@ add_callback!(simulation, power_method_progress, IterationInterval(100))
 # to the reference amplitude. The clock is reset to ``t = 0`` so each
 # iteration starts from the same initial time.
 #
-# The hemispheric degeneracy is eliminated at the source: the balanced
-# jet exists only in the NH (via the `hemisphere` cutoff in `F(φ)`), so
-# there is no SH eigenmode to compete with.
+# After rescaling, we **project perturbations onto wavenumber 9** using
+# an FFT along longitude. This isolates the baroclinic eigenmode from
+# faster-growing but physically uninteresting zonally symmetric (m=0)
+# and other wavenumber modes. The symmetric jet supports identical modes
+# in both hemispheres, but the Fourier projection handles this cleanly —
+# no hemispheric filtering needed.
 
 max_iterations = 80
 convergence_threshold = 0.001  ## relative change in σ
 σ_history = Float64[]
 
+halo_λ = grid.Hx
+halo_φ = grid.Hy
+halo_z = grid.Hz
+m_target = 9  ## wavenumber to retain
+
+## Fourier projection setup: retain only ±m_target
+iλ = halo_λ .+ (1:Nλ)
+iφ = halo_φ .+ (1:Nφ)
+iz = halo_z .+ (1:Nz)
+mask = zeros(Bool, Nλ)
+mask[m_target + 1] = true      ## positive frequency m=9
+mask[Nλ - m_target + 1] = true  ## negative frequency m=-9
+mask_3d = reshape(mask, Nλ, 1, 1)
+
 for n in 1:max_iterations
     run!(simulation)
 
-    ## Measure max|v| at the lowest model level (k=1), following Park et al.
+    ## Fourier-project all perturbation fields onto wavenumber m_target
+    for (f, bg) in zip(prognostic_fields(model), background)
+        pf = parent(f)
+        perturbation = Array(pf[iλ, iφ, iz] .- bg[iλ, iφ, iz])
+        F̂ = fft(perturbation, 1)
+        F̂ .= F̂ .* mask_3d
+        filtered = real(ifft(F̂, 1))
+        pf[iλ, iφ, iz] .= bg[iλ, iφ, iz] .+ CuArray(Float32.(filtered))
+    end
+
+    ## Measure max|v| of the m=9 component at the lowest model level (k=1)
     v_sfc_max = maximum(abs, view(model.velocities.v, :, :, 1))
 
     ## Growth rate
@@ -233,13 +258,13 @@ for n in 1:max_iterations
     @info @sprintf("Power iteration %3d | σ = %.4f day⁻¹ | sfc max|v| = %.4e m/s",
                    n, σ * 86400, v_sfc_max)
 
-    ## Rescale all prognostic perturbations: field = background + scale × (field - background)
+    ## Rescale all prognostic perturbations to reference amplitude
     scale = v_ref / v_sfc_max
     for (f, bg) in zip(prognostic_fields(model), background)
         parent(f) .= bg .+ scale .* (parent(f) .- bg)
     end
 
-    ## Fill halos after rescaling
+    ## Fill halos after all modifications
     for f in prognostic_fields(model)
         fill_halo_regions!(f)
     end
