@@ -128,6 +128,17 @@ iλ = grid.Hx .+ (1:Nλ)
 iφ = grid.Hy .+ (1:Nφ)
 iz = grid.Hz .+ (1:Nz)
 
+function pack_perturbation(model, background)
+    x = Vector{Float64}(undef, N)
+    offset = 0
+    for (f, bg) in zip(prognostic_fields(model), background)
+        chunk = Array(parent(f)[iλ, iφ, iz] .- bg[iλ, iφ, iz])
+        x[offset+1:offset+n_per_field] .= vec(Float64.(chunk))
+        offset += n_per_field
+    end
+    return x
+end
+
 function unpack_perturbation!(model, x, background)
     offset = 0
     for (f, bg) in zip(prognostic_fields(model), background)
