@@ -80,6 +80,17 @@ jobs:
             backend: 'reactant'
             topology: 'PBB'
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 1'
+          # Scalar-tendency kernel sweep (no model): compile the bare WENO
+          # advective tendency Gc = -∇·(𝐮 c) on one grid across orders and
+          # profile it with Reactant.Profiler. Reactant-only; --mode tendency
+          # skips model construction, so there is no dynamics/microphysics.
+          - dynamics: 'none'
+            microphysics: 'none'
+            grid: '256x256x128'
+            advection: 'WENO3, WENO5, WENO7, WENO9'
+            backend: 'reactant'
+            topology: 'PPB'
+            extra_flags: '--mode tendency --float_type=Float32'
     defaults:
       run:
         shell: bash
@@ -196,6 +207,20 @@ jobs:
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
                   level_4 = f'{grid_str}'
+
+                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  continue
+
+              # Scalar-tendency kernel sweep (no model): compare WENO orders on
+              # a fixed grid. Reuses BenchmarkResult with mode == 'tendency';
+              # closure/dynamics/microphysics are 'none', so skip the forward
+              # clauses below via continue.
+              if mode == 'tendency':
+                  level_1 = f'{base_name}; Scalar tendency [{ft}]'
+                  level_2 = f'Compare WENO order'
+                  level_3 = f'{gpu}'
+                  level_4 = f'{advection} {grid_str}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
