@@ -19,7 +19,6 @@ using CUDA
 
 if get(ENV, "GITHUB_ACTIONS", "false") == "true"
     Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
-    ENV["TMPDIR"] = mkpath(joinpath(@__DIR__, "..", "tmp"))
 end
 
 if default_arch isa GPU
