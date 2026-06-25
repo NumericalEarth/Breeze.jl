@@ -134,6 +134,17 @@ jobs:
           path: benchmarking/benchmark_results.*
           retention-days: 90
           overwrite: false
+      - name: "Upload MLIR dumps as artifacts"
+        # Only the tendency matrix entry dumps MLIR (see --mode tendency);
+        # other entries produce no files and are skipped.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: 'mlir-dumps-dynamics_${{ matrix.dynamics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
+          path: benchmarking/mlir_dumps/
+          if-no-files-found: ignore
+          retention-days: 90
+          overwrite: false
       - name: "Upload Manifest"
         if: always()
         timeout-minutes: 2

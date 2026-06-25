@@ -391,6 +391,13 @@ function run_benchmarks(args)
         # it compiles the launch into a single XLA program. Handle it up front
         # and skip the model-building path below.
         if mode == "tendency"
+            # Dump all MLIR (every compile stage) for the tendency compile so it
+            # can be saved as a CI artifact for future inspection (GB-25 pattern).
+            if get(ENV, "GITHUB_ACTIONS", "false") == "true"
+                Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps"))
+                Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+            end
+
             backend_name == "reactant" ||
                 error("tendency mode requires --backend reactant (got $backend_name)")
             m = match(r"^WENO(\d+)$", adv_name)
