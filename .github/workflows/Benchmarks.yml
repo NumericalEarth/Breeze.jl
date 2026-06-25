@@ -228,10 +228,10 @@ jobs:
               # closure/dynamics/microphysics are 'none', so skip the forward
               # clauses below via continue.
               if mode == 'tendency':
-                  # Optimized vs unoptimized compile are distinct series (the
-                  # name carries an `_opt_`/`_noopt_` tag), so the chart shows
-                  # both for each WENO order.
-                  opt = 'noopt' if 'noopt' in d['name'] else 'opt'
+                  # Optimized vs before-raise compile are distinct series (the
+                  # name carries an `_opt_`/`_before_raise_` tag), so the chart
+                  # shows both for each WENO order.
+                  opt = 'before_raise' if 'before_raise' in d['name'] else 'opt'
                   level_1 = f'{base_name}; Scalar tendency [{ft}]'
                   level_2 = f'Compare WENO order'
                   level_3 = f'{gpu}'

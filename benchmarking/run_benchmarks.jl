@@ -407,11 +407,11 @@ function run_benchmarks(args)
             arch = make_backend_arch(backend_name, device)
             topology = make_topology(topo_name)
 
-            # Compile + profile the same kernel both with and without XLA's
-            # optimization passes, so we can compare optimized vs unoptimized
-            # runtime and MLIR (both dump under DUMP_MLIR_ALWAYS above).
-            for optimize in (true, false)
-                opt_tag = optimize ? "opt" : "noopt"
+            # Compile the same kernel fully optimized and at the pre-raise
+            # stage, so we can compare the optimized vs before-raise MLIR
+            # (both dump under DUMP_MLIR_ALWAYS above).
+            for optimize in (true, :before_raise)
+                opt_tag = optimize === true ? "opt" : "before_raise"
                 name = "ScalarTendency_$(size_str)_$(ft_str)_$(adv_name)_$(opt_tag)_$(topo_name)_$(backend_name)"
                 println("\n", "-" ^ 70)
                 println("Running: $name")
