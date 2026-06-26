@@ -69,7 +69,7 @@ function benchmark_tendency(tendency!, args, grid;
         # `profile_dir` (when set) directs the xprof trace files there; when
         # `nothing`, the profiler uses its default scratch directory.
         prof = Reactant.Profiler.@timed nrepeat=nrepeat profile_dir=profile_dir compiled!(args...)
-        time_per_call_seconds = prof.runtime_ns / 1e9
+        time_per_step_seconds = prof.runtime_ns / 1e9
     else
         # Vanilla backend: launch the kernel eagerly (no Reactant compile). Warm
         # up once, then time `nrepeat` launches with device synchronization.
@@ -81,18 +81,18 @@ function benchmark_tendency(tendency!, args, grid;
             tendency!(args...)
         end
         synchronize_device(arch)
-        time_per_call_seconds = ((time_ns() - start_time) / 1e9) / nrepeat
+        time_per_step_seconds = ((time_ns() - start_time) / 1e9) / nrepeat
     end
 
-    total_time_seconds = time_per_call_seconds * nrepeat
-    calls_per_second = 1 / time_per_call_seconds
-    grid_points_per_second = total_points / time_per_call_seconds
+    total_time_seconds = time_per_step_seconds * nrepeat
+    steps_per_second = 1 / time_per_step_seconds
+    grid_points_per_second = total_points / time_per_step_seconds
 
     gpu_memory_used = arch isa GPU{CUDABackend} ? CUDACore.MemoryInfo().pool_used_bytes : 0
     metadata = BenchmarkMetadata(arch)
 
-    # Reuse BenchmarkResult: `time_steps` -> nrepeat, per-step fields hold
-    # per-call timings, and the non-applicable model fields are "none".
+    # Reuse BenchmarkResult: `time_steps` holds nrepeat, the per-step fields
+    # hold per-evaluation timings, and the unused model fields are "none".
     result = BenchmarkResult(
         name,
         string(FT),
@@ -106,20 +106,15 @@ function benchmark_tendency(tendency!, args, grid;
         nrepeat,
         0.0,         # Δt — not applicable to a single tendency evaluation
         total_time_seconds,
-        time_per_call_seconds,
-        calls_per_second,
+        time_per_step_seconds,
+        steps_per_second,
         grid_points_per_second,
         compile_time_seconds,
         gpu_memory_used,
         metadata,
     )
 
-    if verbose
-        @info "  Results:"
-        @info "    Time per call: $(@sprintf("%.6f", time_per_call_seconds)) s"
-        @info "    Grid points/s: $(@sprintf("%.2e", grid_points_per_second))"
-        @info "    Compile time: $(@sprintf("%.3f", compile_time_seconds)) s"
-    end
+    verbose && log_benchmark_result(result)
 
     memory_reclaim(arch)
 
