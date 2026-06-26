@@ -11,7 +11,8 @@ using Oceananigans.TimeSteppers:
     implicit_step!
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
-                                microphysics_model_update!, dynamics_density, field_advection_scheme
+                                microphysics_model_update!, dynamics_density, field_advection_scheme,
+                                breeze_implicit_step!
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -135,17 +136,17 @@ function ssp_rk3_substep!(model, Δt, α)
         # AtmosphereModels/implicit_vertical_advection.jl. All other schemes use the unchanged
         # diffusion-only implicit step (a no-op when there is no vertically-implicit closure).
         if needs_implicit_solver(advection)
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           α * Δt,
-                           advection,
-                           model.velocities,
-                           ρ)
+            breeze_implicit_step!(u,
+                                  model.timestepper.implicit_solver,
+                                  model.closure,
+                                  model.closure_fields,
+                                  field_index,
+                                  model.clock,
+                                  fields(model),
+                                  α * Δt,
+                                  advection,
+                                  model.velocities,
+                                  ρ)
         else
             implicit_step!(u,
                            model.timestepper.implicit_solver,

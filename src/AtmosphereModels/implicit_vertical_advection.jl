@@ -39,6 +39,16 @@ using Oceananigans.TurbulenceClosures:
 
 const AIVA = AdaptiveImplicitVerticalAdvection
 
+# Breeze-owned wrapper carrying the anelastic reference density into the implicit solve. Its sole
+# purpose is to put a Breeze-owned type into the `get_coefficient` signatures below so those methods
+# extend Oceananigans' `get_coefficient` without committing type piracy (every other argument type is
+# Oceananigans-owned). It is unwrapped to the bare density field inside the coefficient functions.
+struct AIVADensity{D}
+    density :: D
+end
+
+Adapt.adapt_structure(to, ρ::AIVADensity) = AIVADensity(adapt(to, ρ.density))
+
 #####
 ##### Density-weighted implicit advection diagonals (scalars at z-Centers)
 #####
@@ -95,43 +105,45 @@ end
 #####
 ##### get_coefficient seam: sum diffusion + density-weighted advection diagonals
 #####
-##### `solve!` forwards trailing args to `get_coefficient`. Breeze's `implicit_step!` (below)
-##### passes `(advection, w, ρ)` — three trailing args — which do not collide with Oceananigans'
-##### own two-arg `(advection::AIVA, w)` methods.
+##### `solve!` forwards trailing args to `get_coefficient`. `breeze_implicit_step!` (below) passes
+##### `(advection, w, ρ::AIVADensity)`; the `AIVADensity` wrapper is unwrapped here. These three
+##### trailing args do not collide with Oceananigans' own two-arg `(advection::AIVA, w)` methods.
 #####
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionUpperDiagonal, p, ::ZDirection,
-                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, advection::AIVA, w, ρ)
+                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, advection::AIVA, w, ρ::AIVADensity)
     du_diff = _ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
-    du_adv  = breeze_implicit_advection_upper_diagonal(i, j, k, grid, advection, w, ρ, Δt)
+    du_adv  = breeze_implicit_advection_upper_diagonal(i, j, k, grid, advection, w, ρ.density, Δt)
     return du_diff + du_adv
 end
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionLowerDiagonal, p, ::ZDirection,
-                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, advection::AIVA, w, ρ)
+                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, advection::AIVA, w, ρ::AIVADensity)
     dl_diff = _ivd_lower_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
-    dl_adv  = breeze_implicit_advection_lower_diagonal(i, j, k, grid, advection, w, ρ, Δt)
+    dl_adv  = breeze_implicit_advection_lower_diagonal(i, j, k, grid, advection, w, ρ.density, Δt)
     return dl_diff + dl_adv
 end
 
 @inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionDiagonal, p, ::ZDirection,
-                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, advection::AIVA, w, ρ)
+                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, advection::AIVA, w, ρ::AIVADensity)
     d_diff = ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
-    d_adv  = breeze_implicit_advection_diagonal(i, j, k, grid, advection, w, ρ, Δt)
+    d_adv  = breeze_implicit_advection_diagonal(i, j, k, grid, advection, w, ρ.density, Δt)
     return d_diff + d_adv
 end
 
 #####
-##### implicit_step! that threads the reference density ρ through the solve
+##### Breeze implicit step that threads the reference density ρ through the solve
 #####
 
 # AIVA scalar: combined implicit (diffusion + density-weighted vertical advection) solve.
-# Runs even when `closure` is `nothing` (AIVA without a vertically-implicit closure).
-function TimeSteppers.implicit_step!(field::Field,
-                                     implicit_solver::BatchedTridiagonalSolver,
-                                     closure, closure_fields, tracer_index,
-                                     clock, fields, Δt,
-                                     advection::AIVA, velocities, ρ)
+# Runs even when `closure` is `nothing` (AIVA without a vertically-implicit closure). This is a
+# Breeze-owned function (not an extension of `TimeSteppers.implicit_step!`) so that wiring the
+# density-weighted advection into the solve does not require pirating Oceananigans' `implicit_step!`.
+function breeze_implicit_step!(field::Field,
+                               implicit_solver::BatchedTridiagonalSolver,
+                               closure, closure_fields, tracer_index,
+                               clock, fields, Δt,
+                               advection::AIVA, velocities, ρ)
 
     if closure isa Tuple
         N = length(closure)
@@ -146,7 +158,7 @@ function TimeSteppers.implicit_step!(field::Field,
     return solve!(field, implicit_solver, field,
                   vi_closure, vi_closure_fields, tracer_index,
                   LX(), LY(), LZ(), Δt, clock, fields,
-                  advection, velocities.w, ρ)
+                  advection, velocities.w, AIVADensity(ρ))
 end
 
 #####
