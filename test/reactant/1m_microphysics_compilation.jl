@@ -48,7 +48,7 @@ function loss(model, θ_init, Δt, Nsteps)
     # @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
     #     time_step!(model, Δt)
     # end
-    return mean(interior(model.temperature) .^ 2)
+    return mean(interior(model.temperature) .^ 2), θ_init
 end
 
 function grad_loss(model, dmodel, θ_init, dθ_init, Δt, Nsteps)
@@ -86,7 +86,8 @@ end
             # compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
             #     model, dmodel, θ_init, dθ_init, Δt, Ns)
             # dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
-            Reactant.@compile raise=true raise_first=true sync=true loss(model, θ_init, Δt, Ns)
+            cl = Reactant.@compile raise=true raise_first=true sync=true loss(model, θ_init, Δt, Ns)
+            _, θ_init = cl(model, θ_init, Δt, Ns)
         end
     end
 end
