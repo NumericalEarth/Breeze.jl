@@ -250,12 +250,15 @@ jobs:
               # closure/dynamics/microphysics are 'none', so skip the forward
               # clauses below via continue.
               if mode in ('tendency', 'model_tendency'):
-                  # Vanilla vs Reactant are distinct series; ScalarTendency vs
-                  # ModelTendency land on separate charts via base_name.
-                  level_1 = f'{base_name} [{ft}]'
-                  level_2 = f'Compare WENO order'
+                  # One figure per case (ScalarTendency / ModelTendency), one
+                  # side-by-side panel per WENO order, and one line per
+                  # float-type × backend config. Scalar gets 4 lines (Float32 /
+                  # BFloat16 × vanilla / reactant); model gets 2 (Float32 only,
+                  # since it has no BFloat16 rows).
+                  level_1 = f'{base_name}'
+                  level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
-                  level_4 = f'{advection} {backend}'
+                  level_4 = f'{ft} {backend}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
