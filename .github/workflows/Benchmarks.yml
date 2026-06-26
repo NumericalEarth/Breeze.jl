@@ -91,7 +91,7 @@ jobs:
             advection: 'WENO3, WENO5, WENO7, WENO9'
             backend: 'vanilla, reactant'
             topology: 'PPB'
-            extra_flags: '--mode tendency --float_type=Float32'
+            extra_flags: '--mode tendency --float_type=Float32 --time_steps 320'
           # Full-model tendency: time compute_tendencies! for a compressible
           # AtmosphereModel across WENO orders, vanilla vs Reactant. --mode
           # model_tendency builds the model, so dynamics/microphysics are unused.
@@ -101,7 +101,7 @@ jobs:
             advection: 'WENO3, WENO5, WENO7, WENO9'
             backend: 'vanilla, reactant'
             topology: 'PPB'
-            extra_flags: '--mode model_tendency --float_type=Float32'
+            extra_flags: '--mode model_tendency --float_type=Float32 --time_steps 320'
     defaults:
       run:
         shell: bash

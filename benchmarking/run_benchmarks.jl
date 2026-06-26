@@ -422,11 +422,8 @@ function run_benchmarks(args)
                                                               order,
                                                               float_type = FT,
                                                               topology)
-            # A single tendency evaluation is far cheaper than a time step, so
-            # use many more trials to get a stable timing (independent of the
-            # --time_steps used for the stepping benchmarks).
             push!(results, benchmark_tendency(tendency!, tendency_args, tendency_grid;
-                                              nrepeat = 300,
+                                              nrepeat = time_steps,
                                               name,
                                               advection = adv_name,
                                               backend = backend_name,
