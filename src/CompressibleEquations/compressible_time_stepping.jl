@@ -49,11 +49,11 @@ solve_for_pressure!(::CompressibleModel) = nothing
 function AtmosphereModels.compute_total_density!(model::CompressibleModel)
     grid = model.grid
     arch = grid.architecture
-    ρ_total = model.dynamics.total_density
+    ρ = model.dynamics.total_density
     launch!(arch, grid, :xyz, _compute_total_density!,
-            ρ_total, grid, model.dynamics.dry_density, model.microphysics,
+            ρ, grid, model.dynamics.dry_density, model.microphysics,
             model.moisture_density, model.microphysical_fields)
-    fill_halo_regions!(ρ_total)
+    fill_halo_regions!(ρ)
     return nothing
 end
 
