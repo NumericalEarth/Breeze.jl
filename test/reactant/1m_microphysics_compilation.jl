@@ -6,7 +6,7 @@
 #   (a)   Build model on ReactantState with OneMomentCloudMicrophysics (MPNE1M)
 #   (b)   Compile + raise backward (Enzyme reverse mode)
 
-using CUDA
+# using CUDA
 using Breeze
 using Breeze.Microphysics: NonEquilibriumCloudFormation
 using CloudMicrophysics
