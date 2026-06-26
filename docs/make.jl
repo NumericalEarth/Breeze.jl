@@ -32,29 +32,26 @@ end
 Example(title::String, basename::String; build_always::Bool, gpu::Bool) =
     Example(title, basename, build_always, gpu)
 
-# TEMPORARY (revert before merge): all examples except the tropical-cyclone rainband are commented
-# out to isolate the rainband on CI, and its `build_always` is forced `true` so it runs on PRs. This
-# validates the dry-density set!(ρ=…, T=…) fix end-to-end through the docs/Literate pipeline.
 examples = [
-    # Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
-    # Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
-    # Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz"; build_always=true, gpu=false),
-    # Example("Shallow cumulus convection (BOMEX)", "bomex"; build_always=true, gpu=true),
-    # Example("Precipitating shallow cumulus (RICO)", "rico"; build_always=false, gpu=true),
-    # Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature"; build_always=true, gpu=false),
-    # Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave"; build_always=true, gpu=false),
-    # Example("Neutral atmospheric boundary layer", "neutral_atmospheric_boundary_layer"; build_always=false, gpu=true),
-    # Example("Single column radiation", "single_column_radiation"; build_always=true, gpu=false),
-    # Example("Stationary parcel model", "stationary_parcel_model"; build_always=true, gpu=false),
-    # Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),
-    # Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
-    # Example("Cloud formation in prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
-    # Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),
-    # Example("Splitting supercell", "splitting_supercell"; build_always=false, gpu=true),
-    # Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=false),
-    # Example("Tropical cyclone world", "tropical_cyclone_world"; build_always=false, gpu=true),
-    Example("Tropical cyclone with stratiform rainband heating (YD19)", "tropical_cyclone_with_rainband"; build_always=true, gpu=true),
-    # Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
+    Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
+    Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
+    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz"; build_always=true, gpu=false),
+    Example("Shallow cumulus convection (BOMEX)", "bomex"; build_always=true, gpu=true),
+    Example("Precipitating shallow cumulus (RICO)", "rico"; build_always=false, gpu=true),
+    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature"; build_always=true, gpu=false),
+    Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave"; build_always=true, gpu=false),
+    Example("Neutral atmospheric boundary layer", "neutral_atmospheric_boundary_layer"; build_always=false, gpu=true),
+    Example("Single column radiation", "single_column_radiation"; build_always=true, gpu=false),
+    Example("Stationary parcel model", "stationary_parcel_model"; build_always=true, gpu=false),
+    Example("Rising parcel: adiabatic ascent", "rising_parcels"; build_always=true, gpu=false),
+    Example("Acoustic wave in shear layer", "acoustic_wave"; build_always=true, gpu=false),
+    Example("Cloud formation in prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
+    Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),
+    Example("Splitting supercell", "splitting_supercell"; build_always=false, gpu=true),
+    Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=false),
+    Example("Tropical cyclone world", "tropical_cyclone_world"; build_always=false, gpu=true),
+    Example("Tropical cyclone with stratiform rainband heating (YD19)", "tropical_cyclone_with_rainband"; build_always=false, gpu=true),
+    Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
 ]
 
 # Filter out long-running example if necessary
