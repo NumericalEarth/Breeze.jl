@@ -9,7 +9,7 @@ using ..Thermodynamics:
 using ..AtmosphereModels:
     AtmosphereModels,
     dynamics_density,
-    total_air_density,
+    total_density,
     standard_pressure
 
 using Oceananigans: Oceananigans, CenterField, Field, Integral
@@ -141,12 +141,12 @@ end
                                                    constants, pˢᵗ, Δt, ρθˡⁱ, ρqᵛ, μ)
     i, j, k = @index(Global, NTuple)
 
-    ρ_total = total_air_density(dynamics)   # total ρ: mass fractions, saturation, density-based inversion
-    ρ_dry   = dynamics_density(dynamics)     # ρᵈ: ρθ = ρᵈθ is dry-coupled
+    ρ_field  = total_density(dynamics)     # total ρ: mass fractions, saturation, density-based inversion
+    ρᵈ_field = dynamics_density(dynamics)  # ρᵈ: ρθ = ρᵈθ is dry-coupled
 
     @inbounds begin
-        ρ  = ρ_total[i, j, k]
-        ρᵈ = ρ_dry[i, j, k]
+        ρ  = ρ_field[i, j, k]
+        ρᵈ = ρᵈ_field[i, j, k]
         ρqᵛ₀ = ρqᵛ[i, j, k]
         qᵗ = ρqᵛ₀ / ρ              # total water mass fraction (÷ total ρ); prognostic vapor, no retained condensate
         θ₀ = ρθˡⁱ[i, j, k] / ρᵈ     # θˡⁱ = ρθˡⁱ/ρᵈ (dry-coupled), conserved by the reversible condensation

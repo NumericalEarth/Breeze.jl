@@ -80,9 +80,9 @@ function compute_forcings!(model)
 end
 
 # Tracer↔specific conversion uses the TOTAL air density (mass fractions qˣ = ρˣ/ρ), keeping the
-# thermodynamics in mass fractions. For anelastic, `total_air_density === dynamics_density`.
-tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, total_air_density(model.dynamics))
-tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, total_air_density(model.dynamics))
+# thermodynamics in mass fractions. For anelastic, `total_density === dynamics_density`.
+tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, total_density(model.dynamics))
+tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, total_density(model.dynamics))
 
 # Diagnose the total air density ρ = ρᵈ + Σρˣ. No-op unless the dynamics carries a distinct
 # total-density field (CompressibleDynamics overrides this); anelastic aliases dynamics_density.
@@ -260,7 +260,7 @@ end
 
     compute_auxiliary_thermodynamic_variables!(formulation, dynamics, i, j, k, grid)
 
-    ρ_field = total_air_density(dynamics)  # total ρ → qᵛᵉ is a mass fraction (thermo unchanged)
+    ρ_field = total_density(dynamics)  # total ρ → qᵛᵉ is a mass fraction (thermo unchanged)
     @inbounds begin
         ρ = ρ_field[i, j, k]
         ρqᵛᵉ = moisture_density[i, j, k]

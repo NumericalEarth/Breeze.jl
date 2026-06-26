@@ -17,7 +17,7 @@
 ##### The linearized perturbation equations integrated by the substep loop:
 #####
 #####   ∂t ρ′    +     ∇·((ρu)′, (ρv)′, (ρw)′)        = Gˢρ
-#####   ∂t (ρθ)′ +     ∇·(θᴸ · ((ρu)′, (ρv)′, (ρw)′)) = Gˢρθ
+#####   ∂t (ρθ)′ +     ∇·(θᴸ · ((ρu)′, (ρv)′, (ρw)′)) = Gˢρᵡ
 #####   ∂t (ρu)′ + ∂x pᴸ + ∂x(Cᴸ (ρθ)′)               = Gˢρu
 #####   ∂t (ρv)′ + ∂y pᴸ + ∂y(Cᴸ (ρθ)′)               = Gˢρv
 #####   ∂t (ρw)′ +         ∂z(Cᴸ (ρθ)′) + g · ρ′      = Gˢρw
@@ -891,14 +891,14 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     # ρθ is held in `model.dynamics.dry_density` and the formulation's ρθ
     # field — untouched by the substep loop, so they equal the per-stage
     # linearization base.
-    χ_field = thermodynamic_density(model.formulation)
-    χ_name = thermodynamic_density_name(model.formulation)
+    ρᵡ = thermodynamic_density(model.formulation)
+    ρᵡ_name = thermodynamic_density_name(model.formulation)
     launch!(arch, grid, :xyz, _initialize_perturbation_with_rewind!,
             substepper.density_perturbation,
             Uᴸ_outer.ρᵈ, model.dynamics.dry_density)
     launch!(arch, grid, :xyz, _initialize_perturbation_with_rewind!,
             substepper.density_potential_temperature_perturbation,
-            Uᴸ_outer[χ_name], χ_field)
+            Uᴸ_outer[ρᵡ_name], ρᵡ)
     launch!(arch, grid, :xyz, _initialize_perturbation_with_rewind!,
             substepper.momentum_perturbation.u,
             Uᴸ_outer.ρu, model.momentum.ρu)
@@ -1001,7 +1001,7 @@ end
                                                      ρ′★, ρθ′★,
                                                      ρ′, ρθ′, ρw′, ρu′, ρv′,
                                                      grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
-                                                     Gˢρ, Gˢρθ, Gˢρw,
+                                                     Gˢρ, Gˢρᵡ, Gˢρw,
                                                      thermodynamic_tendency_factor,
                                                      vertical_momentum_tendency_factor,
                                                      θᴸ, Πᴸ,
@@ -1031,7 +1031,7 @@ end
                                                dynamics, ρu′, ρv′, ρw′)
 
             ρθ′★[i, j, k] = ρθ′[i, j, k] +
-                                Δτ * (thermodynamic_tendency_factor * Gˢρθ[i, j, k] - ∇ʰ_θM) -
+                                Δτ * (thermodynamic_tendency_factor * Gˢρᵡ[i, j, k] - ∇ʰ_θM) -
                                 δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, theta_face_z_flux,
                                                θᴸ, dynamics, ρu′, ρv′, ρw′)
         end
@@ -1492,8 +1492,8 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     initialize_stage_perturbations!(substepper, model, Uᴸ)
 
     Gⁿ = model.timestepper.Gⁿ
-    χ_name = thermodynamic_density_name(model.formulation)
-    Gˢρθ = getproperty(Gⁿ, χ_name)
+    ρᵡ_name = thermodynamic_density_name(model.formulation)
+    Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
     # Substep loop
     for substep in 1:Nτ
@@ -1552,7 +1552,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
                 substepper.momentum_perturbation.w,
                 substepper.momentum_perturbation.u, substepper.momentum_perturbation.v,
                 grid, model.dynamics, Δτ, δτᵐ⁺, δτˢ⁻,
-                Gⁿ.ρᵈ, Gˢρθ, substepper.slow_vertical_momentum_tendency,
+                Gⁿ.ρᵈ, Gˢρᵡ, substepper.slow_vertical_momentum_tendency,
                 substepper.thermodynamic_tendency_factor,
                 substepper.vertical_momentum_tendency_factor,
                 substepper.linearization_potential_temperature, substepper.linearization_exner,
@@ -1614,14 +1614,14 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     finalize_time_averaged_velocity!(substepper, model, Nτ)
 
     # Stage-end: recover the full prognostic state in-place. `model.dynamics.dry_density`,
-    # `χ_field`, and `model.momentum.*` are still the stage-entry Uᴸ values here
+    # `ρᵡ`, and `model.momentum.*` are still the stage-entry Uᴸ values here
     # (the substep loop only touched substepper.* perturbation fields). The
     # recovery kernel reads them as Uᴸ AND writes the full state back to the
     # same fields — per-thread read-before-write makes this aliasing safe
     # because all reads are local to the same grid point.
-    χ_field = thermodynamic_density(model.formulation)
+    ρᵡ = thermodynamic_density(model.formulation)
     launch!(arch, grid, :xyz, _recover_full_state!,
-            model.dynamics.dry_density, χ_field,
+            model.dynamics.dry_density, ρᵡ,
             model.momentum,
             substepper.density_perturbation,
             substepper.density_potential_temperature_perturbation,
@@ -1630,13 +1630,13 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
             substepper.momentum_perturbation.w,
             model.dynamics.dry_density,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
-            χ_field,
+            ρᵡ,
             grid, model.dynamics)
 
     # Thread clock + model fields so time-dependent Open BCs on the recovered
     # prognostic state dispatch correctly in `getbc` (see #717).
     fill_halo_regions!(model.dynamics.dry_density, boundary_condition_args(model)...)
-    fill_halo_regions!(χ_field, boundary_condition_args(model)...)
+    fill_halo_regions!(ρᵡ, boundary_condition_args(model)...)
     fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
     AtmosphereModels.compute_velocities!(model)
 

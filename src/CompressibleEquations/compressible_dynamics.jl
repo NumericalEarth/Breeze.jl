@@ -333,7 +333,7 @@ AtmosphereModels.dynamics_density(dynamics::CompressibleDynamics) = dynamics.dry
 # Total air density ρ = ρᵈ + Σρˣ (diagnosed once per update into `total_density`); this is the
 # density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
-AtmosphereModels.total_air_density(dynamics::CompressibleDynamics) = dynamics.total_density
+AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
 
 """
 $(TYPEDSIGNATURES)

@@ -57,23 +57,23 @@ function AtmosphereModels.compute_total_density!(model::CompressibleModel)
     return nothing
 end
 
-@kernel function _compute_total_density!(ρ_total, grid, dry_density, microphysics,
+@kernel function _compute_total_density!(ρ, grid, dry_density, microphysics,
                                          moisture_density, microphysical_fields)
     i, j, k = @index(Global, NTuple)
-    @inbounds ρ_total[i, j, k] =
-        AtmosphereModels.total_air_density(i, j, k, dry_density, microphysics,
-                                           moisture_density, microphysical_fields)
+    @inbounds ρ[i, j, k] =
+        AtmosphereModels.total_density(i, j, k, dry_density, microphysics,
+                                       moisture_density, microphysical_fields)
 end
 
 #####
 ##### Initial-condition reconciliation: total density `:ρ` → dry density ρᵈ
 #####
 
-# `set!(model, ρ=ρ_total, …)` puts ρ_total into the dry-density field as a placeholder, so the
-# moisture/θ/velocity branches weight by ρ_total — giving the correct moisture partial densities
-# ρqˣ = ρ_total·qˣ but ρθ = ρ_total·θ and momentum = ρ_total·u. Here we back out ρᵈ = ρ_total·qᵈ
+# `set!(model, ρ=…)` (ρ is the total density) puts that value into the dry-density field as a
+# placeholder, so the moisture/θ/velocity branches weight by ρ — giving the correct moisture
+# partial densities ρqˣ = ρ·qˣ but ρθ = ρ·θ and momentum = ρ·u. Here we back out ρᵈ = ρ·qᵈ
 # and re-weight the dry-coupled prognostics: ρθ → ρᵈθ, momentum → ρᵈu. The result satisfies
-# total = ρᵈ + Σρqˣ = ρ_total (the column starts in the intended balance). No-op when `:ρᵈ` was
+# ρᵈ + Σρqˣ = ρ (the column starts in the intended balance). No-op when `:ρᵈ` was
 # set directly (`total_density_given == false`) or when dry (qᵛᵉ = 0 ⇒ qᵈ = 1).
 function AtmosphereModels.reconcile_initial_density!(model::CompressibleModel, total_density_given)
     total_density_given || return nothing
@@ -87,7 +87,7 @@ function AtmosphereModels.reconcile_initial_density!(model::CompressibleModel, t
     launch!(arch, grid, :xyz, _scale_to_dry_density!, ρᵈ, ρ_thermo, qᵛᵉ)
     fill_halo_regions!(ρᵈ)
 
-    # Re-weight momentum by the now-correct ρᵈ (the placeholder momentum was ρ_total·u). The
+    # Re-weight momentum by the now-correct ρᵈ (the placeholder momentum was ρ·u). The
     # velocity fields still hold u, v, w; set_velocity! recomputes ρuᵢ = ℑ(ρᵈ)·uᵢ.
     for name in (:u, :v, :w)
         AtmosphereModels.set_velocity!(model, name, model.velocities[name])

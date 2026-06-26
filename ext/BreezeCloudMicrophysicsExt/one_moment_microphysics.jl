@@ -945,7 +945,7 @@ end
                                              microphysical_fields)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field = AM.total_air_density(dynamics)
+    ρ_field = AM.total_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
 

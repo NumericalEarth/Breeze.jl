@@ -284,7 +284,7 @@ end
                                                             microphysical_fields, velocities)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field = total_air_density(dynamics)  # total ρ: mass fractions + microphysical state
+    ρ_field = total_density(dynamics)  # total ρ: mass fractions + microphysical state
     @inbounds ρ = ρ_field[i, j, k]
     @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
 
@@ -386,16 +386,16 @@ prognostic_field_names(::Nothing) = tuple()
 """
 $(TYPEDSIGNATURES)
 
-Return the names of the prognostic microphysical fields that carry water *mass*
+Return the names of the prognostic microphysical fields that carry condensate *mass*
 (condensate and precipitation densities), excluding number-concentration fields.
 
 This is the subset of [`prognostic_field_names`](@ref) that, together with the moisture
-density, is summed by [`total_water_density`](@ref) to form the total water mass per unit
+density, is summed by [`total_condensate_density`](@ref) to form the total condensate mass per unit
 volume. It defaults to all prognostic fields; schemes with prognostic number concentrations
 (e.g. two-moment) override it to drop the `ρnˣ` fields.
 """
-water_mass_field_names(microphysics) = prognostic_field_names(microphysics)
-water_mass_field_names(::Nothing) = tuple()
+condensate_field_names(microphysics) = prognostic_field_names(microphysics)
+condensate_field_names(::Nothing) = tuple()
 
 
 """
@@ -620,23 +620,25 @@ end
 @inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵛ, μ) = MoistureMassFractions(qᵛ)
 
 #####
-##### Total water and total air density (diagnosed from dry density)
+##### Total condensate and total air density (diagnosed from dry density)
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-Total water density ``Σ ρˣ`` at `(i, j, k)`: the moisture density ``ρqᵛᵉ`` (vapor or
-equilibrium moisture) plus every water-mass microphysical density named by
-[`water_mass_field_names`](@ref). Number-concentration fields (`ρnˣ`) are excluded.
+Total condensate density ``ρᵗ = ρqᵛᵉ + Σ ρqᶜ`` at `(i, j, k)`: the moisture density ``ρqᵛᵉ``
+(vapor or equilibrium moisture) plus every condensed-species density named by
+[`condensate_field_names`](@ref). Number-concentration fields (`ρnˣ`) are excluded. This sums
+all phases of the condensable species (water by default), so other condensates can be added by
+extending `condensate_field_names`.
 """
-@inline function total_water_density(i, j, k, microphysics, moisture_density, microphysical_fields)
+@inline function total_condensate_density(i, j, k, microphysics, moisture_density, microphysical_fields)
     ρqᵛᵉ = @inbounds moisture_density[i, j, k]
-    ρqᶜ = sum_microphysical_densities(i, j, k, microphysical_fields, water_mass_field_names(microphysics))
+    ρqᶜ = sum_microphysical_densities(i, j, k, microphysical_fields, condensate_field_names(microphysics))
     return ρqᵛᵉ + ρqᶜ
 end
 
-# Compile-time recursion over the water-mass field names (cf. `extract_microphysical_prognostics`).
+# Compile-time recursion over the condensate field names (cf. `extract_microphysical_prognostics`).
 # `false` is the additive identity and promotes to the field element type.
 @inline sum_microphysical_densities(i, j, k, microphysical_fields, ::Tuple{}) = false
 @inline function sum_microphysical_densities(i, j, k, microphysical_fields, names::Tuple{Symbol, Vararg})
@@ -647,13 +649,13 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Total air density ``ρ = ρᵈ + Σ ρˣ`` at `(i, j, k)`: the dry-air density `dry_density`
-plus the [`total_water_density`](@ref). This is the diagnosed total mass density used where
-total mass enters the physics — the gravitational/buoyancy term and the equation of state.
+Total air density ``ρ = ρᵈ + ρᵗ`` at `(i, j, k)`: the dry-air density `dry_density`
+plus the [`total_condensate_density`](@ref) ``ρᵗ``. This is the diagnosed total mass density used
+where total mass enters the physics — the gravitational/buoyancy term and the equation of state.
 """
-@inline function total_air_density(i, j, k, dry_density, microphysics, moisture_density, microphysical_fields)
+@inline function total_density(i, j, k, dry_density, microphysics, moisture_density, microphysical_fields)
     ρᵈ = @inbounds dry_density[i, j, k]
-    return ρᵈ + total_water_density(i, j, k, microphysics, moisture_density, microphysical_fields)
+    return ρᵈ + total_condensate_density(i, j, k, microphysics, moisture_density, microphysical_fields)
 end
 
 """
