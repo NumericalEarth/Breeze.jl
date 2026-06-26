@@ -45,9 +45,9 @@ grid_configs = [
 
 function loss(model, θ_init, Δt, Nsteps)
     set!(model; θ=θ_init, ρ=1.0, ρqᵛ=0.01, ρqᶜˡ=1e-4, ρqᶜⁱ=1e-5, ρqʳ=1e-5, ρqˢ=1e-6)
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
-        time_step!(model, Δt)
-    end
+    # @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
+    #     time_step!(model, Δt)
+    # end
     return mean(interior(model.temperature) .^ 2)
 end
 
