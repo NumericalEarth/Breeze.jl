@@ -78,7 +78,7 @@ function parse_commandline()
             default = "64^3"
 
         "--device"
-            help = "Device to run on: CPU or GPU"
+            help = "Device to run on: CPU, GPU, or TPU (TPU requires --backend reactant)"
             arg_type = String
             default = "GPU"
 
@@ -229,14 +229,17 @@ make_float_type(name) = @eval $(Symbol(name))
     make_backend_arch(backend, device)
 
 Return the architecture instance to build the model on, given a backend name
-("vanilla" or "reactant") and a device name ("CPU" or "GPU"). For Reactant we
-also set the default backend so XLA targets the requested device.
+("vanilla" or "reactant") and a device name ("CPU", "GPU", or "TPU"). For
+Reactant we also set the default backend so XLA targets the requested device.
+The vanilla (eager KernelAbstractions/CUDA) backend has no TPU path.
 """
 function make_backend_arch(backend, device)
     if backend == "vanilla"
+        device == "TPU" && error("vanilla backend cannot target TPU; use --backend reactant")
         return make_architecture(device)
     elseif backend == "reactant"
-        Reactant.set_default_backend(device == "GPU" ? "gpu" : "cpu")
+        reactant_backend = device == "GPU" ? "gpu" : device == "TPU" ? "tpu" : "cpu"
+        Reactant.set_default_backend(reactant_backend)
         return ReactantState()
     else
         error("Unknown backend: $backend. Use 'vanilla' or 'reactant'.")
