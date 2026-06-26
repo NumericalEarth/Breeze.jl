@@ -34,7 +34,7 @@ jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - check-bounds ${{ matrix.check-bounds }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 75
     container:
       image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && format('ghcr.io/numericalearth/breeze-docker-images:test-julia_{0}', matrix.version) ) || '' }}
       options: --gpus=all
@@ -169,7 +169,6 @@ jobs:
           '
       - name: Run tests
         shell: bash
-        timeout-minutes: 80
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
@@ -178,16 +177,10 @@ jobs:
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
 
-          if [[ ${{ runner.os }} == 'macOS' ]]; then
-              TIMEOUT_CMD=""
-          else
-              TIMEOUT_CMD="timeout --signal=TERM --verbose 75m"
-          fi
-
           export TMPDIR="${{ github.workspace }}/tmp"
           mkdir -vp "${TMPDIR}"
 
-          ${TIMEOUT_CMD} julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
+          julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
       - name: "Upload Manifest"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -200,7 +193,6 @@ jobs:
       - name: "Upload Reactant MLIR dumps as artifacts"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
-        timeout-minutes: 2
         with:
           name: mlir-dumps-${{ matrix.version }}-${{ matrix.os }}
           path: ${{ github.workspace }}/tmp/
