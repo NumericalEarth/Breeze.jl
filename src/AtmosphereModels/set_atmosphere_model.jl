@@ -13,9 +13,9 @@ move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
 
 function prioritize_names(names)
     # Priority order (first items applied last, so reverse order of priority):
-    # 1. ρ must be set first for compressible dynamics (density needed for momentum)
+    # 1. ρ (or ρᵈ) must be set first for compressible dynamics (density needed to weight moisture)
     # 2. Then velocities/momentum and moisture
-    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ, :qᵛ, :ρqᵛ, :qᵉ, :ρqᵉ, :ρ)
+    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ, :qᵛ, :ρqᵛ, :qᵉ, :ρqᵉ, :ρᵈ, :ρ)
         if n ∈ names
             names = move_to_front(names, n)
         end
@@ -58,14 +58,24 @@ function set_momentum!(model::AtmosphereModel, name::Symbol, value)
 end
 
 """
-    reconcile_initial_density!(model, total_density_given)
+    establish_densities!(model, total_density_given, dry_density_given)
 
-Post-`set!` hook to reconcile a TOTAL-density `:ρ` initial condition with the prognostic coupling
-density. No-op by default; `CompressibleModel` overrides it to back out the dry density ρᵈ = ρ·qᵈ
-and re-weight the dry-coupled prognostics (`ρθ`, momentum). `total_density_given` is `false` when the
-user set `:ρᵈ` directly (or set no density).
+Mid-`set!` hook (run after density + moisture are set, before the thermodynamic variable and
+velocities) that makes the dry density `ρᵈ` and the diagnosed total density `ρ` mutually consistent
+and available to the phase-2 kernels. The two density-input modes need different computations:
+
+- `total_density_given` (`:ρ`): the field holds the *total* ρ (placeholder); split it into the
+  total-density field and back out `ρᵈ = ρ − Σρqˣ` (the moisture partial densities were already
+  weighted by the total).
+- `dry_density_given` (`:ρᵈ`): the field holds `ρᵈ`; recover the total `ρ = ρᵈ/qᵈ` (with
+  `qᵈ = 1 − qᵗ`, taking the moisture into account) and (re)weight the moisture partial densities
+  `ρqˣ = ρ·qˣ`.
+- neither: diagnose `ρ = ρᵈ + Σρqˣ` from the existing fields.
+
+No-op by default (single-density formulations like anelastic, where `total_density === dynamics_density`);
+`CompressibleModel` overrides it.
 """
-reconcile_initial_density!(model, total_density_given) = nothing
+establish_densities!(model, total_density_given, dry_density_given) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -162,17 +172,29 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     end
 
     names = collect(keys(kw))
-    # `:ρ` is interpreted as TOTAL density (Option A): set into the dry-density field as a
-    # placeholder, then reconciled to ρᵈ = ρ·qᵈ after all kwargs (see `reconcile_initial_density!`).
-    # `:ρᵈ` sets the dry density directly. No-op flag for non-compressible dynamics.
+    # Density-input mode for compressible dynamics (no-op flags otherwise):
+    #   `:ρ`  — TOTAL density ρ. Written into the dry-density field as a placeholder so the moisture
+    #           branches weight partial densities by the total (ρqˣ = ρ·qˣ); `establish_densities!`
+    #           then splits it into ρᵈ = ρ − Σρqˣ and the diagnosed total-density field.
+    #   `:ρᵈ` — dry density directly. `establish_densities!` recovers the total ρ = ρᵈ/qᵈ from ρᵈ and
+    #           the moisture, then (re)weights the moisture partial densities by the total.
     total_density_given = :ρ ∈ names
+    dry_density_given   = :ρᵈ ∈ names
     prioritized = prioritize_names(names)
 
-    for name in prioritized
-        value = kw[name]
+    # Two-phase application. The thermodynamic variable (coupling-weighted: ρθ = ρᵈθ) and the
+    # kinematic fields (momentum ρu = ρᵈu) read the dry density ρᵈ AND the total density ρ, so they
+    # must run *after* `establish_densities!` has made the two mutually consistent. `:ℋ` is deferred
+    # with them because it derives moisture from the saturation state, which needs the thermodynamic
+    # variable. Everything else (density, moisture, microphysics, tracers) is set in phase 1.
+    momentum_names = propertynames(model.momentum)
+    is_phase_two(name) = name ∈ settable_thermodynamic_variables || name === :ℋ ||
+                         name ∈ (:u, :v, :w) || name ∈ momentum_names
 
+    # Per-kwarg dispatch, shared by both phases.
+    function apply_set!(name, value)
         # Prognostic variables
-        if name ∈ propertynames(model.momentum)
+        if name ∈ momentum_names
             set_momentum!(model, name, value)
 
         elseif name ∈ propertynames(model.tracers)
@@ -210,10 +232,8 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set_thermodynamic_variable!(model, Val(name), value)
 
         elseif name == :ρ || name == :ρᵈ
-            # `:ρᵈ` sets the dry-air density directly. `:ρ` sets TOTAL density into the same field
-            # as a placeholder; `reconcile_initial_density!` (after the loop) backs out ρᵈ = ρ·qᵈ and
-            # re-weights the dry-coupled prognostics (ρθ, momentum). The placeholder lets the
-            # moisture branches below weight by ρ, giving the correct partial densities ρqˣ = ρ·qˣ.
+            # Write the given density into the dry-density field. For `:ρ` this is the TOTAL-density
+            # placeholder (split by `establish_densities!`); for `:ρᵈ` it is the dry density directly.
             ρ = dynamics_density(model.dynamics)
             set!(ρ, value)
             # Fill halos immediately - needed for velocity→momentum conversion
@@ -255,11 +275,23 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
             throw(ArgumentError(msg))
         end
+
+        return nothing
     end
 
-    # Reconcile a TOTAL-density `:ρ` input into the prognostic dry density ρᵈ = ρ·qᵈ (Option A),
-    # re-weighting the dry-coupled prognostics. No-op for `:ρᵈ` input and for non-compressible dynamics.
-    reconcile_initial_density!(model, total_density_given)
+    # Phase 1: density, moisture, microphysics, tracers.
+    for name in prioritized
+        is_phase_two(name) || apply_set!(name, kw[name])
+    end
+
+    # Make ρᵈ and the diagnosed total density ρ mutually consistent for whichever density was given
+    # (no-op for non-compressible dynamics).
+    establish_densities!(model, total_density_given, dry_density_given)
+
+    # Phase 2: thermodynamic variable, ℋ, and kinematic fields — these read the established densities.
+    for name in prioritized
+        is_phase_two(name) && apply_set!(name, kw[name])
+    end
 
     # Apply a mask
     foreach(mask_immersed_field!, prognostic_fields(model))

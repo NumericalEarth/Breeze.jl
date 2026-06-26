@@ -66,42 +66,66 @@ end
 end
 
 #####
-##### Initial-condition reconciliation: total density `:ρ` → dry density ρᵈ
+##### Initial-condition density reconciliation: make ρᵈ and the total density ρ consistent
 #####
 
-# `set!(model, ρ=…)` (ρ is the total density) puts that value into the dry-density field as a
-# placeholder, so the moisture/θ/velocity branches weight by ρ — giving the correct moisture
-# partial densities ρqˣ = ρ·qˣ but ρθ = ρ·θ and momentum = ρ·u. Here we back out ρᵈ = ρ·qᵈ
-# and re-weight the dry-coupled prognostics: ρθ → ρᵈθ, momentum → ρᵈu. The result satisfies
-# ρᵈ + Σρqˣ = ρ (the column starts in the intended balance). No-op when `:ρᵈ` was
-# set directly (`total_density_given == false`) or when dry (qᵛᵉ = 0 ⇒ qᵈ = 1).
-function AtmosphereModels.reconcile_initial_density!(model::CompressibleModel, total_density_given)
-    total_density_given || return nothing
-
+# `set!` mid-hook (after density + moisture, before the thermodynamic variable and velocities).
+# The two density-input modes need different computations, since the moisture partial densities
+# ρqˣ = ρ·qˣ themselves depend on the total ρ:
+#
+#   `:ρ`  (total given) — the value sits in the dry-density field as a placeholder, and the moisture
+#         branches already weighted the partial densities by it. Move it into the total-density
+#         field and back out ρᵈ = ρ − Σρqˣ.
+#   `:ρᵈ` (dry given)   — recover ρ = ρᵈ/qᵈ with qᵈ = 1 − qᵗ (combining ρᵈ and the moisture), then
+#         (re)weight the moisture partial densities by the total. A moist `:ρᵈ` initial condition
+#         should provide moisture as a fraction (`qᵗ`/`qᵛ`/`qᵉ`).
+#   neither — diagnose ρ = ρᵈ + Σρqˣ from the existing fields.
+#
+# The thermodynamic variable (ρθ = ρᵈθ) and momentum (ρu = ρᵈu) are set afterwards (phase 2) and so
+# need no rescaling here.
+function AtmosphereModels.establish_densities!(model::CompressibleModel, total_density_given, dry_density_given)
     grid = model.grid
     arch = grid.architecture
     ρᵈ = model.dynamics.dry_density
-    ρ_thermo = thermodynamic_density(model.formulation)   # ρθ (or ρe), coupling-weighted
-    qᵛᵉ = specific_prognostic_moisture(model)
+    ρ  = model.dynamics.total_density
 
-    launch!(arch, grid, :xyz, _scale_to_dry_density!, ρᵈ, ρ_thermo, qᵛᵉ)
-    fill_halo_regions!(ρᵈ)
-
-    # Re-weight momentum by the now-correct ρᵈ (the placeholder momentum was ρ·u). The
-    # velocity fields still hold u, v, w; set_velocity! recomputes ρuᵢ = ℑ(ρᵈ)·uᵢ.
-    for name in (:u, :v, :w)
-        AtmosphereModels.set_velocity!(model, name, model.velocities[name])
+    if total_density_given
+        launch!(arch, grid, :xyz, _split_total_into_dry!,
+                ρ, ρᵈ, model.microphysics, model.moisture_density, model.microphysical_fields)
+    elseif dry_density_given
+        qᵛᵉ = specific_prognostic_moisture(model)
+        launch!(arch, grid, :xyz, _dry_to_total!, ρ, ρᵈ, qᵛᵉ, model.moisture_density)
+    else
+        return AtmosphereModels.compute_total_density!(model)
     end
 
+    fill_halo_regions!(ρ)
+    fill_halo_regions!(ρᵈ)
     return nothing
 end
 
-@kernel function _scale_to_dry_density!(ρᵈ, ρ_thermo, qᵛᵉ)
+# `:ρ` placeholder (= total ρ) is in `ρᵈ`; copy it to the total-density field and back out the dry
+# density ρᵈ = ρ − Σρqˣ. The read-before-write at the same point makes the in-place `ρᵈ` aliasing safe.
+@kernel function _split_total_into_dry!(ρ, ρᵈ, microphysics, moisture_density, microphysical_fields)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        qᵈ = 1 - qᵛᵉ[i, j, k]   # dry-air mass fraction (total water ≈ qᵛᵉ at initialization)
-        ρᵈ[i, j, k] *= qᵈ
-        ρ_thermo[i, j, k] *= qᵈ
+        total = ρᵈ[i, j, k]   # placeholder = total density ρ
+        ρqᵗ = AtmosphereModels.total_condensate_density(i, j, k, microphysics,
+                                                        moisture_density, microphysical_fields)
+        ρ[i, j, k]  = total
+        ρᵈ[i, j, k] = total - ρqᵗ
+    end
+end
+
+# `:ρᵈ` is the dry density; recover ρ = ρᵈ/qᵈ (qᵈ = 1 − qᵛᵉ) and re-weight the moisture density by ρ.
+@kernel function _dry_to_total!(ρ, ρᵈ, qᵛᵉ, moisture_density)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        qᵛ = qᵛᵉ[i, j, k]
+        qᵈ = 1 - qᵛ                # dry-air mass fraction (vapor/equilibrium moisture at init)
+        ρ_ijk = ρᵈ[i, j, k] / qᵈ   # total density ρ = ρᵈ / qᵈ
+        ρ[i, j, k] = ρ_ijk
+        moisture_density[i, j, k] = ρ_ijk * qᵛ
     end
 end
 

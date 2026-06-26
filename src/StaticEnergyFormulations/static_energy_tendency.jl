@@ -124,7 +124,8 @@ end
 
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
-        ρ = total_density(dynamics)[i, j, k]
+        ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
+        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρe = ρᵈe)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         θ = potential_temperature[i, j, k]
     end
@@ -142,7 +143,7 @@ end
     e = 𝒰e₁.static_energy
 
     @inbounds specific_energy[i, j, k] = e
-    @inbounds energy_density[i, j, k] = ρ * e
+    @inbounds energy_density[i, j, k] = ρᵈ * e
 end
 
 #####
@@ -196,7 +197,8 @@ end
 
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
-        ρ = total_density(dynamics)[i, j, k]
+        ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
+        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρe = ρᵈe)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end
@@ -211,5 +213,5 @@ end
 
     e = 𝒰₁.static_energy
     @inbounds specific_energy[i, j, k] = e
-    @inbounds energy_density[i, j, k] = ρ * e
+    @inbounds energy_density[i, j, k] = ρᵈ * e
 end
