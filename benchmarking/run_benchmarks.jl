@@ -23,6 +23,7 @@ using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
 using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation, BenchmarkResult
 using BreezeBenchmarks: scalar_tendency_problem, model_tendency_problem, benchmark_tendency
 using JSON: JSON
+using BFloat16s: BFloat16
 using Oceananigans
 using Oceananigans.TurbulenceClosures: SmagorinskyLilly, DynamicSmagorinsky
 
@@ -87,7 +88,7 @@ function parse_commandline()
             default = "convective_boundary_layer"
 
         "--float_type"
-            help = "Floating point type: Float32 or Float64. " *
+            help = "Floating point type: Float32, Float64, or BFloat16. " *
                    "Multiple types can be specified as comma-separated list."
             arg_type = String
             default = "Float32"
@@ -384,7 +385,7 @@ function run_benchmarks(args)
 
         # Build benchmark name
         size_str = "$(Nx)x$(Ny)x$(Nz)"
-        ft_str = FT == Float32 ? "F32" : "F64"
+        ft_str = FT == Float32 ? "F32" : FT == Float64 ? "F64" : "BF16"
         mode_suffix = args["ad"] ? "_AD" : ""
 
         # Tendency modes time a tendency evaluation with no Simulation. "tendency"

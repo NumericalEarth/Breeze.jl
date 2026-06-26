@@ -6,6 +6,7 @@ authors = ["NumericalEarth organization (github.com/NumericalEarth) and contribu
 [deps]
 AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+BFloat16s = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
 Breeze = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
@@ -27,6 +28,7 @@ Metal = {url = "https://github.com/JuliaGPU/Metal.jl.git", rev = "d6b4ca22238cfa
 [compat]
 AMDGPU = "2.3.0"
 ArgParse = "1"
+BFloat16s = "0.6"
 CUDA = "5, 6.0"
 CloudMicrophysics = "0.31.4, 0.32, 0.33, 0.34, 0.35"
 Dates = "<0.0.1, 1"
