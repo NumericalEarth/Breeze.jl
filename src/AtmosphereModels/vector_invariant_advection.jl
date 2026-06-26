@@ -116,6 +116,13 @@ Base.show(io::IO, a::CompressibleVectorInvariant) = print(io, summary(a))
 
 Advection.adapt_advection_order(a::CompressibleVectorInvariant, grid::AbstractGrid) = a
 
+# Materialize the underlying scheme (e.g. resolve a WENO scheme's `Nothing`
+# weight-computation type to a concrete, architecture-dependent type). Without this
+# the generic `materialize_advection` passthrough leaves the inner scheme
+# unmaterialized and WENO reconstruction fails (`newton_div(::Type{Nothing}, …)`).
+Advection.materialize_advection(a::CompressibleVectorInvariant, grid) =
+    CompressibleVectorInvariant(materialize_advection(a.scheme, grid), a.divergence)
+
 #####
 ##### Momentum flux divergence: horizontal components dispatch on the flavor
 #####
@@ -132,7 +139,8 @@ Advection.adapt_advection_order(a::CompressibleVectorInvariant, grid::AbstractGr
                x_vector_invariant_advection(i, j, k, grid, advection, velocities) +
            x_vertical_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities) +
            @inbounds(velocities.u[i, j, k]) *
-               x_divergence_correction(i, j, k, grid, advection.divergence, momentum)
+               x_divergence_correction(i, j, k, grid, advection.divergence, momentum) +
+           U_dot_∇u_metric(i, j, k, grid, advection.scheme, momentum, velocities)
 end
 
 @inline function y_momentum_flux_divergence(i, j, k, grid, advection::CompressibleVectorInvariant,
@@ -142,13 +150,16 @@ end
                y_vector_invariant_advection(i, j, k, grid, advection, velocities) +
            y_vertical_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities) +
            @inbounds(velocities.v[i, j, k]) *
-               y_divergence_correction(i, j, k, grid, advection.divergence, momentum)
+               y_divergence_correction(i, j, k, grid, advection.divergence, momentum) +
+           U_dot_∇v_metric(i, j, k, grid, advection.scheme, momentum, velocities)
 end
 
-# Vertical momentum stays flux form (MPAS treats ρw in flux form) for both flavors.
+# Vertical momentum stays flux form (MPAS treats ρw in flux form) for both flavors,
+# plus the nonhydrostatic w-curvature metric term (zero on rectilinear grids).
 @inline z_momentum_flux_divergence(i, j, k, grid, advection::CompressibleVectorInvariant,
                                    momentum, velocities, dynamics) =
-    div_𝐯w(i, j, k, grid, compressible_vi_vertical_scheme(advection), momentum, velocities.w)
+    div_𝐯w(i, j, k, grid, compressible_vi_vertical_scheme(advection), momentum, velocities.w) +
+    U_dot_∇w_metric(i, j, k, grid, advection.scheme, momentum, velocities)
 
 #####
 ##### Advective part: horizontal (MPAS) vs full velocity-form (3D)
