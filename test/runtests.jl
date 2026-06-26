@@ -11,8 +11,10 @@ args = parse_args(ARGS)
 const REACTANT_COMPAT = VERSION < v"1.13-" && Base.JLOptions().check_bounds != 1
 
 if filter_tests!(testsuite, args)
-    if !startswith(key, "reactant/1m_microphysics_compilation")
-        delete!(testsuite, key)
+    for key in keys(testsuite)
+        if !startswith(key, "reactant/1m_microphysics_compilation")
+            delete!(testsuite, key)
+        end
     end
 end
 
