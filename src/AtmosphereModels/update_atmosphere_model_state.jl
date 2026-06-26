@@ -1,6 +1,7 @@
 using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
+using Oceananigans.Advection: update_advection_timestep!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
 using Oceananigans.Fields: flattened_unique_values
@@ -52,6 +53,11 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
     for callback in callbacks
         callback.callsite isa UpdateStateCallsite && callback(model)
     end
+
+    # Refresh the adaptive-implicit-vertical-advection time step before computing tendencies, so the
+    # explicit (CFL-scaled) velocity baked into Gⁿ matches the implicit velocity used by the
+    # following solve. A no-op unless some advection scheme uses an adaptive-implicit discretization.
+    update_advection_timestep!(model.advection, model.timestepper, model.clock)
 
     compute_tendencies && compute_tendencies!(model, callbacks)
 
