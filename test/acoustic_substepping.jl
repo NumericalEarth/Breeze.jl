@@ -15,6 +15,9 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     AcousticTridiagLower, AcousticTridiagDiagonal,
                                     AcousticTridiagUpper
 using Breeze.CompressibleEquations: _explicit_horizontal_step!
+using Breeze.CompressibleEquations: _compute_horizontal_divergence!, _thermal_divergence_damping!,
+                                    LocalHorizontalDampingScale, x_damping_diffusivity
+using Breeze.TerrainFollowingDiscretization: TerrainFollowingVerticalDiscretization, materialize_terrain!
 using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, dynamics_density, thermodynamic_density
@@ -1184,4 +1187,66 @@ for arch in arches
         @test model.dynamics.reference_state === nothing
     end
 
+end
+
+#####
+##### Horizontal divergence damping (Klemp, Skamarock & Ha 2018, eq. 36).
+#####
+##### The damper acts on the θ-flux divergence δ = ∂x(θᴸ(ρu)′) + ∂y(θᴸ(ρv)′) — the
+##### acoustic-mode divergence ∇·(ρθ𝐯) (KSH18 eq. 1), numerically identical to the
+##### divergence in the Θ = ρθ equation — as a Δτ-independent momentum correction
+##### Δ(ρu)′ = α·Δx²·∂x δ / θᴸ. It must (1) be dissipative — reduce ‖δ‖ — both with
+##### and without terrain, and (2) use diffusivity α·Δx² with NO 1/Δτ factor (the
+##### old `(ρθ)′`-change proxy with γ = α·Δx²/Δτ injected a spurious ∝α/Δτ force
+##### that blew up the split cold start).
+#####
+@testset "Horizontal divergence damping (θ-flux divergence, KSH18 eq. 36)" begin
+    arch = default_arch
+    Nx = Ny = 16; Nz = 6
+    Lx = Ly = 4000.0; Lz = 3000.0
+
+    flat_grid = RectilinearGrid(arch; size = (Nx, Ny, Nz), x = (0, Lx), y = (0, Ly), z = (0, Lz),
+                                halo = (5, 5, 5), topology = (Periodic, Periodic, Bounded))
+
+    z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length = Nz + 1)))
+    terrain_grid = RectilinearGrid(arch; size = (Nx, Ny, Nz), x = (0, Lx), y = (0, Ly), z = z_faces,
+                                   halo = (5, 5, 5), topology = (Periodic, Periodic, Bounded))
+    materialize_terrain!(terrain_grid, (x, y) -> 300.0 * sin(2π * x / Lx) * sin(2π * y / Ly))
+
+    α = 0.1
+    scale = LocalHorizontalDampingScale(α)
+    divergence_norm(δ) = sqrt(sum(interior(δ) .^ 2))
+
+    # (1) dissipative — with and without terrain. A uniform θᴸ isolates the
+    # Laplacian dissipativity (mode gain 1 − γk²); the terrain grid still
+    # exercises the metric/area factors in the θ-flux divergence.
+    for (label, grid) in (("flat", flat_grid), ("terrain", terrain_grid))
+        @testset "dissipative on the horizontal divergence [$label]" begin
+            ρu = XFaceField(grid); ρv = YFaceField(grid); δ = CenterField(grid)
+            θᴸ = CenterField(grid)
+            set!(θᴸ, (x, y, z) -> 300.0); fill_halo_regions!(θᴸ)
+            set!(ρu, (x, y, z) -> sin(6π * x / Lx) * cos(2π * y / Ly))
+            set!(ρv, (x, y, z) -> cos(2π * x / Lx) * sin(6π * y / Ly))
+            fill_halo_regions!(ρu); fill_halo_regions!(ρv)
+
+            launch!(arch, grid, :xyz, _compute_horizontal_divergence!, δ, ρu, ρv, θᴸ, grid)
+            fill_halo_regions!(δ)
+            div_before = divergence_norm(δ)
+            @test div_before > 0
+
+            launch!(arch, grid, :xyz, _thermal_divergence_damping!, ρu, ρv, δ, θᴸ, grid, scale, scale)
+            fill_halo_regions!(ρu); fill_halo_regions!(ρv)
+            launch!(arch, grid, :xyz, _compute_horizontal_divergence!, δ, ρu, ρv, θᴸ, grid)
+            div_after = divergence_norm(δ)
+
+            @test div_after < div_before               # the damping reduced the divergence
+            @test all(isfinite, interior(δ))
+        end
+    end
+
+    # (2) diffusivity is α·Δx², independent of Δτ (the fix to the blow-up)
+    @testset "diffusivity is α·Δx² (Δτ-independent)" begin
+        Δx = Lx / Nx
+        @test @allowscalar(x_damping_diffusivity(2, 2, 2, flat_grid, scale)) ≈ α * Δx^2
+    end
 end
