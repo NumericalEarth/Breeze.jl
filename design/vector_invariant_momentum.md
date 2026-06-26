@@ -249,3 +249,26 @@ Seam: `src/AtmosphereModels/dynamics_kernel_functions.jl`.
   strict PV form, §2 obs. 2).
 - Hollingsworth et al. (1983) — rectangular-C-grid VI instability.
 - Oceananigans `src/Advection/vector_invariant_advection.jl` — reusable operators.
+
+## 12. Validation status — global baroclinic wave (GPU)
+
+Verified on an H100 at the full example resolution (360×150×32, Float32, MPAS-style
+`SplitExplicitTimeDiscretization`):
+
+- **Horizontal flavor** (`CompressibleWENOVectorInvariant(; divergence=HorizontalDivergence())`):
+  **stable** over a 2-day integration — `max|u|` holds at ≈28 m/s (steady zonal jet,
+  no growth), `max|w|` ≈ 0.006–0.013 m/s and slightly decaying (no grid-scale noise).
+  This is the configuration the baroclinic-wave example now uses.
+- **3D flavor** (`CompressibleWENOVectorInvariant()`, `ThreeDimensionalDivergence`):
+  **unstable** — NaN by iteration 10. Cause: the 3D flavor multiplies Oceananigans'
+  full `U_dot_∇u` (which for WENO already carries an internal divergence-upwinding
+  term) by ρ and *also* adds the explicit `−u ∇·(ρ𝐮)` total-divergence correction,
+  double-counting/unbalancing the divergence terms. The 3D flavor needs the proper
+  WENO-upwinded total-divergence operator (the `CompressibleWENOVectorInvariant`
+  divergence-scheme work, pending notes) rather than naive `ρ·U_dot_∇u + divᶜᶜᶜ`;
+  until then it should be treated as experimental.
+
+Note: running any compressible `SplitExplicitTimeDiscretization` on the resolved
+Oceananigans (0.109.2) first required a pre-existing-compat fix — `NormalFlow` →
+`Open` in `acoustic_substepping.jl` (Oceananigans renamed the open-BC
+classification). This is independent of the vector-invariant work.

@@ -230,17 +230,18 @@ dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
-# For momentum we use [`CompressibleWENOVectorInvariant`](@ref), an MPAS-style
-# vector-invariant scheme for the coupled momentum `ρ𝐮`: it advects the horizontal
-# momentum through the absolute-vorticity flux and kinetic-energy gradient rather
-# than a flux-form divergence. The WENO reconstruction supplies the scale-selective
-# dissipation that keeps the scheme stable on the latitude–longitude C-grid (the
-# vector-invariant form is otherwise prone to the Hollingsworth instability there).
-# Scalars are still advected with flux-form `WENO`.
+# For momentum we use [`CompressibleWENOVectorInvariant`](@ref) in its MPAS-faithful
+# [`HorizontalDivergence`](@ref) flavor: an MPAS-style vector-invariant scheme for the
+# coupled momentum `ρ𝐮` that advects the horizontal momentum through the
+# absolute-vorticity flux and kinetic-energy gradient (not a flux-form divergence),
+# with flux-form vertical advection and a horizontal mass-divergence correction. The
+# WENO reconstruction supplies the scale-selective dissipation that keeps the scheme
+# stable on the latitude–longitude C-grid (the vector-invariant form is otherwise
+# prone to the Hollingsworth instability there). Scalars use flux-form `WENO`.
 
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        momentum_advection = CompressibleWENOVectorInvariant(),
+                        momentum_advection = CompressibleWENOVectorInvariant(; divergence = HorizontalDivergence()),
                         scalar_advection = WENO())
 
 # ## Set initial conditions
