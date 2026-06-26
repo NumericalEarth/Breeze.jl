@@ -18,13 +18,14 @@
                        advection::AbstractString = "",
                        backend::AbstractString = "reactant",
                        mode::AbstractString = "tendency",
+                       raise = true,
                        verbose = true)
 
 Time `tendency!(args...)` on the architecture of `grid`. `args` is the argument
 tuple for `tendency!` — e.g. `(Gc, grid, advection, U, c)` from
 `scalar_tendency_problem`, or `(model,)` from `model_tendency_problem`. On a
-`ReactantState` grid the call is compiled with `Reactant.@compile raise=true
-raise_first=true sync=true` (compile time recorded separately) and profiled via
+`ReactantState` grid the call is compiled with `Reactant.@compile raise=raise
+raise_first=raise sync=true` (compile time recorded separately) and profiled via
 `Reactant.Profiler.@timed`. On a vanilla grid it is run eagerly and timed over
 `nrepeat` calls with device synchronization (no Reactant compile). When
 `profile_dir` is set, the Reactant profiler writes its xprof trace files there.
@@ -39,6 +40,7 @@ function benchmark_tendency(tendency!, args, grid;
                             advection::AbstractString = "",
                             backend::AbstractString = "reactant",
                             mode::AbstractString = "tendency",
+                            raise = true,
                             profile_dir = nothing,
                             verbose = true)
 
@@ -62,9 +64,9 @@ function benchmark_tendency(tendency!, args, grid;
         # it. Passing the already-compiled thunk makes @timed profile it
         # directly (it special-cases `::Reactant.Compiler.Thunk`). `runtime_ns`
         # is the mean over `nrepeat`.
-        verbose && @info "  Compiling tendency with Reactant (raise=true)..."
+        verbose && @info "  Compiling tendency with Reactant (raise=$raise)..."
         compile_start = time_ns()
-        compiled! = Reactant.@compile raise=true raise_first=true sync=true tendency!(args...)
+        compiled! = Reactant.@compile raise=raise raise_first=raise sync=true tendency!(args...)
         compile_time_seconds = (time_ns() - compile_start) / 1e9
         # `profile_dir` (when set) directs the xprof trace files there; when
         # `nothing`, the profiler uses its default scratch directory.

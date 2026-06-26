@@ -402,37 +402,54 @@ function run_benchmarks(args)
             order = parse(Int, m[1])
 
             label = mode == "tendency" ? "ScalarTendency" : "ModelTendency"
-            name = "$(label)_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(backend_name)"
-            println("\n", "-" ^ 70)
-            println("Running: $name")
-            println("-" ^ 70)
-
-            # On Reactant, dump all MLIR (every compile stage) and the xprof
-            # profiles into per-case subdirectories so each stays separate;
-            # saved as CI artifacts (GB-25 pattern). Vanilla does not compile
-            # through Reactant, so neither is produced there.
-            profile_dir = nothing
-            if get(ENV, "GITHUB_ACTIONS", "false") == "true" && backend_name == "reactant"
-                Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps", "$(label)_$(adv_name)"))
-                Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
-                profile_dir = mkpath(joinpath(@__DIR__, "profiles", "$(label)_$(adv_name)"))
-            end
-
             arch = make_backend_arch(backend_name, device)
             topology = make_topology(topo_name)
             problem = mode == "tendency" ? scalar_tendency_problem : model_tendency_problem
-            tendency!, tendency_args, tendency_grid = problem(arch;
-                                                              Nx, Ny, Nz,
-                                                              order,
-                                                              float_type = FT,
-                                                              topology)
-            push!(results, benchmark_tendency(tendency!, tendency_args, tendency_grid;
-                                              nrepeat = time_steps,
-                                              name,
-                                              advection = adv_name,
-                                              backend = backend_name,
-                                              mode,
-                                              profile_dir))
+
+            # Reactant additionally compares raise=true vs raise=false (the
+            # latter keeps kernels as XLA custom calls instead of raising them to
+            # StableHLO). raise=false needs the CUDA custom-call path, so it is
+            # skipped on TPU. Vanilla is eager — raise does not apply.
+            configs = if backend_name == "reactant"
+                raises = device == "TPU" ? (true,) : (true, false)
+                [(r ? "reactant raise=true" : "reactant raise=false",
+                  r ? "reactant-raise"      : "reactant-noraise",
+                  r) for r in raises]
+            else
+                [(backend_name, backend_name, true)]
+            end
+
+            for (backend_label, tag, raise) in configs
+                name = "$(label)_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(tag)"
+                println("\n", "-" ^ 70)
+                println("Running: $name")
+                println("-" ^ 70)
+
+                # On Reactant, dump all MLIR (every compile stage) and the xprof
+                # profiles into per-case subdirectories so each stays separate;
+                # saved as CI artifacts (GB-25 pattern). Vanilla does not compile
+                # through Reactant, so neither is produced there.
+                profile_dir = nothing
+                if get(ENV, "GITHUB_ACTIONS", "false") == "true" && backend_name == "reactant"
+                    Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps", "$(label)_$(adv_name)_$(tag)"))
+                    Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+                    profile_dir = mkpath(joinpath(@__DIR__, "profiles", "$(label)_$(adv_name)_$(tag)"))
+                end
+
+                tendency!, tendency_args, tendency_grid = problem(arch;
+                                                                  Nx, Ny, Nz,
+                                                                  order,
+                                                                  float_type = FT,
+                                                                  topology)
+                push!(results, benchmark_tendency(tendency!, tendency_args, tendency_grid;
+                                                  nrepeat = time_steps,
+                                                  name,
+                                                  advection = adv_name,
+                                                  backend = backend_label,
+                                                  mode,
+                                                  raise,
+                                                  profile_dir))
+            end
             continue
         end
 
