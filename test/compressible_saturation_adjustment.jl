@@ -173,30 +173,40 @@ end
     ρ₀ = FT(1.16)      # total air density [kg m⁻³]
     rtol = FT == Float64 ? FT(1e-6) : FT(1e-3)
 
+    # Pull interiors to the CPU before reducing — `all(≈(ρ₀; rtol), ::CuArray)` would compile the
+    # keyword-carrying closure into a GPU kernel (non-bitstype Symbol in the kwargs) and fail.
+    cpu(field) = Array(interior(field))
+
     # Mode 1: total density given.
     model_ρ = make_model()
     set!(model_ρ; ρ = ρ₀, T = T₀, qᵗ = qᵗ)
     update_state!(model_ρ)
 
-    ρθ = interior(model_ρ.formulation.potential_temperature_density)
-    @test all(isfinite, ρθ) && all(>(0), ρθ)                                   # not the ρθ = 0 bug
-    @test all(≈(ρ₀; rtol), interior(model_ρ.dynamics.total_density))
-    @test all(≈(ρ₀ * (1 - qᵗ); rtol), interior(model_ρ.dynamics.dry_density))  # dry excludes water
+    ρθ_ρ = cpu(model_ρ.formulation.potential_temperature_density)
+    ρt_ρ = cpu(model_ρ.dynamics.total_density)
+    ρd_ρ = cpu(model_ρ.dynamics.dry_density)
+    T_ρ  = cpu(model_ρ.temperature)
+    @test all(isfinite, ρθ_ρ) && all(>(0), ρθ_ρ)            # not the ρθ = 0 bug
+    @test all(≈(ρ₀; rtol), ρt_ρ)
+    @test all(≈(ρ₀ * (1 - qᵗ); rtol), ρd_ρ)                  # dry excludes water
     # Physical, finite temperature — the ρθ = 0 staleness bug gave θ = ρθ/ρᵈ = 0 ⇒ T ≈ 0.
-    @test all(t -> isfinite(t) && 200 < t < 400, interior(model_ρ.temperature))
+    @test all(t -> isfinite(t) && 200 < t < 400, T_ρ)
 
     # Mode 2: dry density given, chosen so the total recovers to ρ₀.
     model_ρᵈ = make_model()
     set!(model_ρᵈ; ρᵈ = ρ₀ * (1 - qᵗ), T = T₀, qᵗ = qᵗ)
     update_state!(model_ρᵈ)
 
-    @test all(≈(ρ₀; rtol), interior(model_ρᵈ.dynamics.total_density))          # ρ = ρᵈ/(1-qᵗ)
-    @test all(≈(ρ₀ * (1 - qᵗ); rtol), interior(model_ρᵈ.dynamics.dry_density))
+    ρθ_ρᵈ = cpu(model_ρᵈ.formulation.potential_temperature_density)
+    ρt_ρᵈ = cpu(model_ρᵈ.dynamics.total_density)
+    ρd_ρᵈ = cpu(model_ρᵈ.dynamics.dry_density)
+    T_ρᵈ  = cpu(model_ρᵈ.temperature)
+    @test all(≈(ρ₀; rtol), ρt_ρᵈ)                            # ρ = ρᵈ/(1-qᵗ)
+    @test all(≈(ρ₀ * (1 - qᵗ); rtol), ρd_ρᵈ)
 
     # The two input modes describe the same column → identical state.
-    @test interior(model_ρ.dynamics.total_density) ≈ interior(model_ρᵈ.dynamics.total_density)
-    @test interior(model_ρ.dynamics.dry_density)   ≈ interior(model_ρᵈ.dynamics.dry_density)
-    @test interior(model_ρ.formulation.potential_temperature_density) ≈
-          interior(model_ρᵈ.formulation.potential_temperature_density)
-    @test interior(model_ρ.temperature) ≈ interior(model_ρᵈ.temperature)
+    @test ρt_ρ ≈ ρt_ρᵈ
+    @test ρd_ρ ≈ ρd_ρᵈ
+    @test ρθ_ρ ≈ ρθ_ρᵈ
+    @test T_ρ  ≈ T_ρᵈ
 end
