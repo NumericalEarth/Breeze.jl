@@ -194,6 +194,20 @@ function AtmosphereModel(grid;
     dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics)
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
+    # The acoustic substepper integrates the thermodynamic density within the acoustic substep loop
+    # (not via the generic scalar implicit step), so adaptive implicit vertical advection is not
+    # supported for it there. (AIVA is supported for moisture and tracers, which the substepper
+    # advances with the generic implicit step; and for all scalars under SSPRungeKutta3.)
+    if _timestepper_is_acoustic(timestepper)
+        thermo_name = thermodynamic_density_name(formulation)
+        thermo_advection = get(scalar_advection, thermo_name, default_scalar_advection)
+        needs_implicit_solver(thermo_advection) &&
+            throw(ArgumentError("Adaptive implicit vertical advection is not supported for the " *
+                                "thermodynamic variable ($thermo_name) with the AcousticRungeKutta3 " *
+                                "substepper, which integrates it within the acoustic substep loop. " *
+                                "Use an explicit scheme for $thermo_name, or the SSPRungeKutta3 timestepper."))
+    end
+
     # Materialize momentum and velocities
     # If velocities is provided (e.g., PrescribedVelocityFields), use it
     if isnothing(velocities)
@@ -309,6 +323,11 @@ _timestepper_uses_dynamics(::Val) = false
 _timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
 _timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
 _timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
+
+# Whether the (pre-materialization) `timestepper` specification selects the acoustic substepper,
+# which integrates the thermodynamic density inside the acoustic substep loop.
+_timestepper_is_acoustic(timestepper::Symbol) = timestepper === :AcousticRungeKutta3
+_timestepper_is_acoustic(timestepper) = nameof(typeof(timestepper)) === :AcousticRungeKutta3
 
 function Base.summary(model::AtmosphereModel)
     A = nameof(typeof(model.grid.architecture))

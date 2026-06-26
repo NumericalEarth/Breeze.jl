@@ -1,6 +1,7 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields, architecture
+using Oceananigans.Advection: needs_implicit_solver
 using Oceananigans.Utils: launch!
 
 using Oceananigans.TimeSteppers: implicit_step!
@@ -11,6 +12,9 @@ using Breeze.AtmosphereModels:
     SlowTendencyMode,
     advecting_momentum,
     dynamics_density,
+    transport_velocities,
+    field_advection_scheme,
+    breeze_implicit_step!,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
@@ -158,7 +162,14 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
     prognostic = prognostic_fields(model)
+    names = keys(prognostic)
     n_acoustic = 5  # ρ, ρu, ρv, ρw, ρθ are advanced inside the substep loop
+
+    # Reference/prognostic density and the time-averaged transport velocity that the explicit
+    # scalar tendencies (Gⁿ) were built with — adaptive implicit vertical advection must use the
+    # same `w` so the explicit/implicit velocity split is consistent.
+    ρ = dynamics_density(model.dynamics)
+    velocities = transport_velocities(model)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
         i <= n_acoustic && continue
@@ -166,14 +177,30 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
         launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
 
         field_index = Val(i - n_acoustic)
-        implicit_step!(u,
-                       model.timestepper.implicit_solver,
-                       model.closure,
-                       model.closure_fields,
-                       field_index,
-                       model.clock,
-                       fields(model),
-                       Δt_implicit)
+        advection = field_advection_scheme(model.advection, names[i])
+
+        if needs_implicit_solver(advection)
+            breeze_implicit_step!(u,
+                                  model.timestepper.implicit_solver,
+                                  model.closure,
+                                  model.closure_fields,
+                                  field_index,
+                                  model.clock,
+                                  fields(model),
+                                  Δt_implicit,
+                                  advection,
+                                  velocities,
+                                  ρ)
+        else
+            implicit_step!(u,
+                           model.timestepper.implicit_solver,
+                           model.closure,
+                           model.closure_fields,
+                           field_index,
+                           model.clock,
+                           fields(model),
+                           Δt_implicit)
+        end
     end
 
     return nothing

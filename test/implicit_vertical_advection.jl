@@ -4,6 +4,8 @@ using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization, needs_im
                               implicit_advection_upper_diagonal, implicit_advection_lower_diagonal,
                               implicit_advection_diagonal
 using Oceananigans.Solvers: BatchedTridiagonalSolver
+using Oceananigans.Units: kilometers
+using Breeze.CompressibleEquations: CompressibleDynamics, SplitExplicitTimeDiscretization
 using Test
 
 import Breeze.AtmosphereModels as AM
@@ -68,5 +70,33 @@ import Breeze.AtmosphereModels as AM
             time_step!(model, 30)
         end
         @test all(isfinite, Array(interior(model.tracers.ρc)))
+    end
+
+    @testset "Works with the acoustic substepper (compressible)" begin
+        cgrid = RectilinearGrid(default_arch; size=(8, 8, 8), halo=(5, 5, 5),
+                                x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
+                                topology=(Periodic, Periodic, Bounded))
+        cdyn = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+
+        # AIVA on a transport scalar (tracer) is supported with the acoustic substepper: those
+        # scalars are advanced by the generic implicit step (`scalar_substep!`).
+        model = AtmosphereModel(cgrid; dynamics=cdyn, timestepper=:AcousticRungeKutta3,
+                                tracers=:ρc, scalar_advection=(; ρc=aiva()))
+        @test needs_implicit_solver(model.advection.ρc)
+        @test model.timestepper.implicit_solver isa BatchedTridiagonalSolver
+
+        ref = model.dynamics.reference_state
+        set!(model; θ = (x, y, z) -> 300 + 2 * exp(-((x-4kilometers)^2 + (z-4kilometers)^2) / (2*(1kilometers)^2)),
+                    ρ = ref.density,
+                    ρc = (x, y, z) -> exp(-(z - 4kilometers)^2 / (2*(1kilometers)^2)))
+        for _ in 1:5
+            time_step!(model, 1)
+        end
+        @test all(isfinite, Array(interior(model.tracers.ρc)))
+
+        # AIVA on the thermodynamic variable is rejected with the acoustic substepper, which
+        # integrates it inside the acoustic substep loop rather than the generic implicit step.
+        @test_throws ArgumentError AtmosphereModel(cgrid; dynamics=cdyn, timestepper=:AcousticRungeKutta3,
+                                                   scalar_advection=(; ρθ=aiva()))
     end
 end
