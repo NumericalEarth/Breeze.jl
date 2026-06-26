@@ -57,19 +57,25 @@ Vector-invariant flavor that uses the full velocity-form advection ``ρ(𝐮·�
 struct ThreeDimensionalDivergence end
 
 """
-    CompressibleVectorInvariant{S, D}
+    CompressibleVectorInvariant{S, D, V}
 
 Vector-invariant momentum advection for the compressible coupled-momentum (ρ𝐮)
 equations. Holds an underlying Oceananigans vector-invariant `scheme` (supplying
-the vorticity-flux and kinetic-energy-gradient operators) and a `divergence` trait
+the vorticity-flux and kinetic-energy-gradient operators), a `vertical_scheme` for the
+flux-form vertical advection of momentum (stored as a materialized field, *not* built
+in-kernel, so the GPU kernel reads a concrete scheme), and a `divergence` trait
 selecting the [`HorizontalDivergence`](@ref) (MPAS-faithful) or
 [`ThreeDimensionalDivergence`](@ref) flavor. Construct with
 [`CompressibleVectorInvariant(FT; ...)`](@ref) or
 [`CompressibleWENOVectorInvariant`](@ref).
 """
-struct CompressibleVectorInvariant{S, D}
+# NOTE: `divergence` stays the SECOND type parameter — the advective-part and divergence-correction
+# methods dispatch on `CompressibleVectorInvariant{<:Any, <:HorizontalDivergence/ThreeDimensionalDivergence}`.
+# `vertical_scheme` is appended LAST so it doesn't shift that positional dispatch.
+struct CompressibleVectorInvariant{S, D, V}
     scheme :: S
     divergence :: D
+    vertical_scheme :: V
 end
 
 """
@@ -84,8 +90,10 @@ forwarded to [`VectorInvariant`](@ref) (e.g. `vorticity_scheme`,
 `vertical_advection_scheme`, `divergence_scheme`, `upwinding`).
 """
 CompressibleVectorInvariant(FT::DataType = Oceananigans.defaults.FloatType;
-                            divergence = HorizontalDivergence(), kwargs...) =
-    CompressibleVectorInvariant(VectorInvariant(FT; kwargs...), divergence)
+                            divergence = HorizontalDivergence(),
+                            vertical_scheme = Centered(FT),
+                            kwargs...) =
+    CompressibleVectorInvariant(VectorInvariant(FT; kwargs...), divergence, vertical_scheme)
 
 """
     CompressibleWENOVectorInvariant(FT = Oceananigans.defaults.FloatType;
@@ -97,8 +105,10 @@ WENO-based [`CompressibleVectorInvariant`](@ref). Mirrors Oceananigans'
 `divergence` are forwarded to [`WENOVectorInvariant`](@ref).
 """
 CompressibleWENOVectorInvariant(FT::DataType = Oceananigans.defaults.FloatType;
-                                divergence = ThreeDimensionalDivergence(), kwargs...) =
-    CompressibleVectorInvariant(WENOVectorInvariant(FT; kwargs...), divergence)
+                                divergence = ThreeDimensionalDivergence(),
+                                vertical_scheme = Centered(FT),
+                                kwargs...) =
+    CompressibleVectorInvariant(WENOVectorInvariant(FT; kwargs...), divergence, vertical_scheme)
 
 Base.summary(::HorizontalDivergence) = "HorizontalDivergence"
 Base.summary(::ThreeDimensionalDivergence) = "ThreeDimensionalDivergence"
@@ -121,16 +131,19 @@ Advection.adapt_advection_order(a::CompressibleVectorInvariant, grid::AbstractGr
 # the generic `materialize_advection` passthrough leaves the inner scheme
 # unmaterialized and WENO reconstruction fails (`newton_div(::Type{Nothing}, …)`).
 Advection.materialize_advection(a::CompressibleVectorInvariant, grid) =
-    CompressibleVectorInvariant(materialize_advection(a.scheme, grid), a.divergence)
+    CompressibleVectorInvariant(materialize_advection(a.scheme, grid),
+                                a.divergence,
+                                materialize_advection(a.vertical_scheme, grid))
 
 #####
 ##### Momentum flux divergence: horizontal components dispatch on the flavor
 #####
 
-# TODO (vertical reconstruction): both the flux-form vertical advection of horizontal
-# momentum and the z-momentum equation reconstruct with `Centered()` for now. The
-# scheme should carry a deliberate momentum-flux reconstruction (e.g. matching WENO).
-@inline compressible_vi_vertical_scheme(::CompressibleVectorInvariant) = Centered()
+# Vertical reconstruction for the flux-form vertical advection of horizontal momentum and the
+# z-momentum equation. Carried as a materialized struct field (default `Centered`) — NOT constructed
+# in-kernel: building a scheme object inside the GPU kernel is illegal IR (`apply_type`/`new_structv`).
+# TODO (vertical reconstruction): default to a deliberate momentum-flux reconstruction (e.g. WENO).
+@inline compressible_vi_vertical_scheme(a::CompressibleVectorInvariant) = a.vertical_scheme
 
 @inline function x_momentum_flux_divergence(i, j, k, grid, advection::CompressibleVectorInvariant,
                                             momentum, velocities, dynamics)
