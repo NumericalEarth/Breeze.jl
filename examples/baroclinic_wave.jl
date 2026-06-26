@@ -104,7 +104,7 @@ H  = 30kilometers
 
 grid = LatitudeLongitudeGrid(GPU();
                              size = (Nλ, Nφ, Nz),
-                             halo = (5, 5, 5),
+                             halo = (6, 6, 5),
                              longitude = (0, 360),
                              latitude = (-75, 75),
                              z = (0, H))
@@ -230,9 +230,18 @@ dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
+# For momentum we use [`CompressibleWENOVectorInvariant`](@ref), an MPAS-style
+# vector-invariant scheme for the coupled momentum `ρ𝐮`: it advects the horizontal
+# momentum through the absolute-vorticity flux and kinetic-energy gradient rather
+# than a flux-form divergence. The WENO reconstruction supplies the scale-selective
+# dissipation that keeps the scheme stable on the latitude–longitude C-grid (the
+# vector-invariant form is otherwise prone to the Hollingsworth instability there).
+# Scalars are still advected with flux-form `WENO`.
+
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        advection = WENO())
+                        momentum_advection = CompressibleWENOVectorInvariant(),
+                        scalar_advection = WENO())
 
 # ## Set initial conditions
 
