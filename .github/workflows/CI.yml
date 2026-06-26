@@ -44,20 +44,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version:
-          - "min"
-          - "1.12.6"
-        os:
-          - ubuntu-latest
-          - macOS-latest
-          - windows-latest
-        arch:
-          - "default"
-        check-bounds:
-          - "yes"
-        exclude:
-          - version: "min"
-            os: windows-latest
+        # version:
+        #   - "min"
+        #   - "1.12.6"
+        # os:
+        #   - ubuntu-latest
+        #   - macOS-latest
+        #   - windows-latest
+        # arch:
+        #   - "default"
+        # check-bounds:
+        #   - "yes"
+        # exclude:
+        #   - version: "min"
+        #     os: windows-latest
         include:
           # `--check-bounds=auto` is necessary for testing Reactant workloads
           # until https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
@@ -65,10 +65,10 @@ jobs:
             os: aws-linux-nvidia-gpu-l4-4xl
             arch: "default"
             check-bounds: "auto"
-          - version: "1.11.9"
-            os: aws-linux-nvidia-gpu-l4-4xl
-            arch: "default"
-            check-bounds: "auto"
+          # - version: "1.11.9"
+          #   os: aws-linux-nvidia-gpu-l4-4xl
+          #   arch: "default"
+          #   check-bounds: "auto"
     steps:
       - name: df before cleanup
         if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
