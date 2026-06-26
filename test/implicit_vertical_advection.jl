@@ -18,23 +18,26 @@ import Breeze.AtmosphereModels as AM
     aiva() = WENO(FT; time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
 
     @testset "Density-weighted coefficients reduce to Oceananigans at ρ ≡ 1" begin
+        # This is a pointwise, architecture-independent comparison of the coefficient functions, so
+        # it is evaluated on a CPU grid (the loop below indexes fields from the host).
+        cpu_grid = RectilinearGrid(CPU(); size=(4, 4, 16), x=(0, 100), y=(0, 100), z=(0, 1000))
         Δt = FT(50)
         scheme = WENO(FT; time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=FT(0.3)))
         scheme.time_discretization.Δt[] = Δt   # populate the Ref as the time loop would
 
-        w = Field{Center, Center, Face}(grid)
+        w = Field{Center, Center, Face}(cpu_grid)
         set!(w, (x, y, z) -> 5 * sin(2π * z / 1000))   # strong w that violates the explicit CFL
-        ρ1 = CenterField(grid)
+        ρ1 = CenterField(cpu_grid)
         set!(ρ1, 1)
 
         maxerr = zero(FT)
         for k in 2:15, j in 1:4, i in 1:4
-            bu = AM.breeze_implicit_advection_upper_diagonal(i, j, k, grid, scheme, w, ρ1, Δt)
-            ou = implicit_advection_upper_diagonal(i, j, k, grid, scheme, w, Δt, Center(), Center())
-            bl = AM.breeze_implicit_advection_lower_diagonal(i, j, k, grid, scheme, w, ρ1, Δt)
-            ol = implicit_advection_lower_diagonal(i, j, k, grid, scheme, w, Δt, Center(), Center())
-            bd = AM.breeze_implicit_advection_diagonal(i, j, k, grid, scheme, w, ρ1, Δt)
-            od = implicit_advection_diagonal(i, j, k, grid, scheme, w, Δt, Center(), Center())
+            bu = AM.breeze_implicit_advection_upper_diagonal(i, j, k, cpu_grid, scheme, w, ρ1, Δt)
+            ou = implicit_advection_upper_diagonal(i, j, k, cpu_grid, scheme, w, Δt, Center(), Center())
+            bl = AM.breeze_implicit_advection_lower_diagonal(i, j, k, cpu_grid, scheme, w, ρ1, Δt)
+            ol = implicit_advection_lower_diagonal(i, j, k, cpu_grid, scheme, w, Δt, Center(), Center())
+            bd = AM.breeze_implicit_advection_diagonal(i, j, k, cpu_grid, scheme, w, ρ1, Δt)
+            od = implicit_advection_diagonal(i, j, k, cpu_grid, scheme, w, Δt, Center(), Center())
             maxerr = max(maxerr, abs(bu - ou), abs(bl - ol), abs(bd - od))
         end
         @test maxerr == 0
@@ -64,6 +67,6 @@ import Breeze.AtmosphereModels as AM
         for _ in 1:20
             time_step!(model, 30)
         end
-        @test all(isfinite, interior(model.tracers.ρc))
+        @test all(isfinite, Array(interior(model.tracers.ρc)))
     end
 end
