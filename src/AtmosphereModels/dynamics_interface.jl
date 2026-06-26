@@ -218,6 +218,25 @@ Default is 100000 Pa (1000 hPa).
 function standard_pressure end
 
 """
+    default_drag_surface_temperature(dynamics, grid, thermodynamic_constants)
+
+Return a default surface temperature for `BulkDrag` when the user has not supplied
+one. Dispatched on the dynamics type because the notion of a "default" surface
+temperature depends on what reference structure the dynamics carries: anelastic
+has a full reference profile whose surface value is well-defined; compressible
+has no equivalent up-front surface temperature and therefore requires the user
+to provide one explicitly.
+
+The default (no method) throws an informative error. Each dynamics type extends
+this hook.
+"""
+default_drag_surface_temperature(dynamics, grid, thermodynamic_constants) =
+    throw(ArgumentError(
+        "BulkDrag was constructed without `surface_temperature`, and no default is " *
+        "defined for dynamics of type `$(typeof(dynamics))`. Please pass " *
+        "`surface_temperature` explicitly when constructing `BulkDrag`."))
+
+"""
     initialize_model_thermodynamics!(model)
 
 Initialize the thermodynamic state for a newly constructed model.
@@ -408,7 +427,7 @@ Return the velocity tuple used for scalar advection transport.
 
 For standard (non-terrain) models, this is `model.velocities`.
 For terrain-following coordinates, the vertical component is replaced
-by the contravariant vertical velocity ``\\tilde{\\Omega}``.
+by the contravariant vertical velocity ``\\tilde{w}``.
 """
 transport_velocities(model) = model.velocities
 
@@ -420,7 +439,7 @@ and the continuity equation divergence.
 
 For standard (non-terrain) models, this is `model.momentum`.
 For terrain-following coordinates, the vertical component `ρw` is
-replaced by the contravariant vertical momentum ``\\rho \\tilde{\\Omega}``.
+replaced by the contravariant vertical momentum ``\\rho \\tilde{w}``.
 """
 advecting_momentum(model) = model.momentum
 
