@@ -114,6 +114,8 @@ jobs:
         run: |
           # Run tests in verbose mode
           TEST_ARGS=(--verbose)
+          # Exit immediately if there's a test failure
+          TEST_ARGS+=(--quickfail)
 
           if [[ ${{ matrix.os }} == *linux-nvidia-gpu* ]]; then
               # When running the tests on a GPU node we always want to make sure
@@ -167,11 +169,17 @@ jobs:
           '
       - name: Run tests
         shell: bash
+        env:
+          XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
           if [[ ${{ runner.os }} == 'Linux' ]]; then
               # We use earlyoom only on the Linux machines
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
+
+          export TMPDIR="${{ github.workspace }}/tmp"
+          mkdir -vp "${TMPDIR}"
+
           julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
       - name: "Upload Manifest"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -187,7 +195,7 @@ jobs:
         if: always()
         with:
           name: mlir-dumps-${{ matrix.version }}-${{ matrix.os }}
-          path: tmp/
+          path: ${{ github.workspace }}/tmp/
           if-no-files-found: ignore
           retention-days: 7
       - name: "Process Julia coverage files"

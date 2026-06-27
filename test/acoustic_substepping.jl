@@ -265,7 +265,7 @@ for arch in arches
         @test model.clock.iteration == 1
         @test !any(isnan, parent(model.momentum.ρu))
         @test !any(isnan, parent(model.momentum.ρw))
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
     end
 
     #####
@@ -312,7 +312,7 @@ for arch in arches
         set!(model; θ=300, u=0, qᵗ=0, ρ=model.dynamics.reference_state.density)
         run!(Simulation(model; Δt=1, stop_iteration=1, verbose=false))
         @test model.clock.iteration == 1
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
 
         # Bounded but no OBC supplied: the prognostic-momentum BCs default to
         # impenetrable walls, which `is_active_open_bc` returns false for.
@@ -323,7 +323,7 @@ for arch in arches
         set!(model_walls; θ=300, u=0, qᵗ=0, ρ=model_walls.dynamics.reference_state.density)
         run!(Simulation(model_walls; Δt=1, stop_iteration=1, verbose=false))
         @test model_walls.clock.iteration == 1
-        @test !any(isnan, parent(model_walls.dynamics.density))
+        @test !any(isnan, parent(model_walls.dynamics.dry_density))
     end
 
     @testset "Open-boundary relaxation pulls outermost cell toward prescribed ρ, ρθ [$(arch), $(FT)]" for FT in as_test_float_types(arch)
@@ -367,7 +367,7 @@ for arch in arches
                                          east  = ValueBoundaryCondition(ρθ_wall),
                                          south = ValueBoundaryCondition(ρθ_wall),
                                          north = ValueBoundaryCondition(ρθ_wall))
-        boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+        boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρᵈ = ρ_bcs, ρθ = ρθ_bcs)
 
         model = AtmosphereModel(grid; advection=WENO(), dynamics,
                                 boundary_conditions)
@@ -375,7 +375,7 @@ for arch in arches
 
         run!(Simulation(model; Δt=1, stop_iteration=3, verbose=false))
         @test model.clock.iteration == 3
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
 
         # After the relaxation has fired across ~`Nτ` substeps per outer step,
         # the cumulative pull `1 − (1−α)^Nτ` saturates and the outermost cell of
@@ -384,7 +384,7 @@ for arch in arches
         # boundary influence in both horizontal directions.
         Nx = size(grid, 1)
         Ny = size(grid, 2)
-        ρ_int  = interior(model.dynamics.density)
+        ρ_int  = interior(model.dynamics.dry_density)
         ρθ_int = interior(thermodynamic_density(model.formulation))
 
         ρ_west  = @allowscalar mean(ρ_int[1,    :, :])
@@ -452,7 +452,7 @@ for arch in arches
                                          east  = ValueBoundaryCondition(FT(ρ_wall_east  * 300)),
                                          south = ValueBoundaryCondition(FT(ρ_wall_south * 300)),
                                          north = ValueBoundaryCondition(FT(ρ_wall_north * 300)))
-        boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+        boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρᵈ = ρ_bcs, ρθ = ρθ_bcs)
 
         model = AtmosphereModel(grid; advection=WENO(), dynamics,
                                 boundary_conditions)
@@ -460,7 +460,7 @@ for arch in arches
         run!(Simulation(model; Δt=1, stop_iteration=3, verbose=false))
 
         Nx = size(grid, 1); Ny = size(grid, 2)
-        ρ_int = interior(model.dynamics.density)
+        ρ_int = interior(model.dynamics.dry_density)
         ρ_west  = @allowscalar mean(ρ_int[1,    :, :])
         ρ_east  = @allowscalar mean(ρ_int[Nx,   :, :])
         ρ_south = @allowscalar mean(ρ_int[:, 1,    :])
@@ -498,7 +498,7 @@ for arch in arches
                                              east = ValueBoundaryCondition(ρ_wall))
             ρθ_bcs = FieldBoundaryConditions(west = ValueBoundaryCondition(FT(ρ_wall * 300)),
                                              east = ValueBoundaryCondition(FT(ρ_wall * 300)))
-            boundary_conditions = (; ρu = ρu_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+            boundary_conditions = (; ρu = ρu_bcs, ρᵈ = ρ_bcs, ρθ = ρθ_bcs)
             model = AtmosphereModel(grid; advection=WENO(), dynamics,
                                     boundary_conditions)
             set!(model; θ=300, u=0, qᵗ=0, ρ=ρ_ref0)
@@ -510,8 +510,8 @@ for arch in arches
         model_high, _      = build_α_model(1.0)
 
         Nx = size(model_low.grid, 1)
-        ρ_west_low  = @allowscalar mean(interior(model_low.dynamics.density)[1, :, :])
-        ρ_west_high = @allowscalar mean(interior(model_high.dynamics.density)[1, :, :])
+        ρ_west_low  = @allowscalar mean(interior(model_low.dynamics.dry_density)[1, :, :])
+        ρ_west_high = @allowscalar mean(interior(model_high.dynamics.dry_density)[1, :, :])
 
         @test abs(ρ_west_high - ρ_wall) < abs(ρ_west_low - ρ_wall)
     end
@@ -540,7 +540,7 @@ for arch in arches
                                          east = ValueBoundaryCondition(ρ_wall))
         ρθ_bcs = FieldBoundaryConditions(west = ValueBoundaryCondition(FT(ρ_wall * 300)),
                                          east = ValueBoundaryCondition(FT(ρ_wall * 300)))
-        boundary_conditions = (; ρu = ρu_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+        boundary_conditions = (; ρu = ρu_bcs, ρᵈ = ρ_bcs, ρθ = ρθ_bcs)
 
         model = AtmosphereModel(grid; advection=WENO(), dynamics,
                                 boundary_conditions)
@@ -548,7 +548,7 @@ for arch in arches
         run!(Simulation(model; Δt=1, stop_iteration=3, verbose=false))
 
         Nx = size(grid, 1)
-        ρ_int = interior(model.dynamics.density)
+        ρ_int = interior(model.dynamics.dry_density)
         ρ_west = @allowscalar mean(ρ_int[1,  :, :])
         ρ_east = @allowscalar mean(ρ_int[Nx, :, :])
 
@@ -688,7 +688,7 @@ for arch in arches
         @test model.clock.iteration == 5
         @test !any(isnan, parent(model.momentum.ρu))
         @test !any(isnan, parent(model.momentum.ρw))
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
     end
 
     #####
@@ -718,7 +718,7 @@ for arch in arches
         θ₀(x, y, z) = FT(300) + FT(0.1) * sin(π * z / Lz)
         set!(model; θ=θ₀, u=0, qᵗ=0, ρ=ref.density)
 
-        ρ_init  = Array(parent(model.dynamics.density))
+        ρ_init  = Array(parent(model.dynamics.dry_density))
         ρu_init = Array(parent(model.momentum.ρu))
         ρw_init = Array(parent(model.momentum.ρw))
 
@@ -731,7 +731,7 @@ for arch in arches
         @test model.clock.time ≈ 0 atol=sqrt(eps(FT))
 
         # Doesn't blow up.
-        for field in (model.dynamics.density, model.momentum.ρu, model.momentum.ρw)
+        for field in (model.dynamics.dry_density, model.momentum.ρu, model.momentum.ρw)
             @test !any(isnan, parent(field))
             @test !any(isinf, parent(field))
         end
@@ -740,7 +740,7 @@ for arch in arches
         # magnitude smaller than the disturbance produced by the forward step.
         # Use a relative tolerance for ρ (which has a meaningful baseline)
         # and an absolute tolerance for ρu, ρw (which start from rest).
-        ρ_final  = Array(parent(model.dynamics.density))
+        ρ_final  = Array(parent(model.dynamics.dry_density))
         ρu_final = Array(parent(model.momentum.ρu))
         ρw_final = Array(parent(model.momentum.ρw))
         @test isapprox(ρ_final,  ρ_init;  rtol=1e-3)
@@ -799,7 +799,7 @@ for arch in arches
         run!(simulation)
 
         @test model.clock.iteration == 20
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
         @test !any(isnan, parent(model.momentum.ρw))
 
         # max|w| should remain bounded
@@ -807,7 +807,7 @@ for arch in arches
         @test w_max < 1.0
 
         # Density should remain physical
-        ρ_min = @allowscalar minimum(interior(model.dynamics.density))
+        ρ_min = @allowscalar minimum(interior(model.dynamics.dry_density))
         @test ρ_min > 0
     end
 
@@ -1005,7 +1005,7 @@ for arch in arches
         run!(simulation)
 
         @test model.clock.iteration == 3
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
     end
 
     @testset "Direct DirectDivergenceDamping [$(arch), $(FT)]" for FT in as_test_float_types(arch)
@@ -1034,7 +1034,7 @@ for arch in arches
 
         @test model.clock.iteration == 3
         @test !any(isnan, parent(model.momentum.ρu))
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
     end
 
     #####
@@ -1174,14 +1174,14 @@ for arch in arches
             @test y_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test z_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, slow) == 0
-            @test dynamics_density(slow) === model.dynamics.density
+            @test dynamics_density(slow) === model.dynamics.dry_density
         end
 
         @testset "HorizontalSlowMode" begin
             hslow = HorizontalSlowMode(model.dynamics)
             @test z_pressure_gradient(1, 1, 1, grid, hslow) == 0
             @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, hslow) == 0
-            @test dynamics_density(hslow) === model.dynamics.density
+            @test dynamics_density(hslow) === model.dynamics.dry_density
         end
     end
 
@@ -1202,7 +1202,7 @@ for arch in arches
         run!(simulation)
 
         @test model.clock.iteration == 3
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
         @test model.dynamics.reference_state === nothing
     end
 
