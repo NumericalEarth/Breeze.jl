@@ -66,8 +66,8 @@ for (ρw)′.
 
 Fields:
 - `substeps`: acoustic substeps N per Δt (`nothing` ⇒ adaptive via `acoustic_cfl`).
-- `acoustic_cfl`: target horizontal acoustic Courant number for the adaptive count (default 0.5).
-- `forward_weight`: CN off-centering ω (0.5 = centered; default 0.65).
+- `acoustic_cfl`: target horizontal acoustic Courant number for the adaptive count (default 0.7).
+- `forward_weight`: CN off-centering ω (0.5 = centered; default 0.8).
 - `damping`, `substep_distribution`: divergence-damping strategy; substep allocation across WS-RK3 stages.
 - `linearization_exner` (Πᴸ), `linearization_potential_temperature` (θᴸ), `linearization_gamma_R_mixture`
   (γᵐRᵐᴸ, the moist PGF coefficient): per-stage caches.
@@ -406,8 +406,8 @@ N \\approx
 
 with ``\\mathbb{C}^{ac} = \\sqrt{γ^d R^d T_r}`` for a nominal reference
 temperature ``T_r = 300\\,\\mathrm{K}`` and ``ν`` the target acoustic
-Courant number `acoustic_cfl` (default `0.5`, the ERF/WRF target —
-equivalent to the conventional safety factor of `2`).
+Courant number `acoustic_cfl` (default `0.7`; the conventional ERF/WRF
+target is `0.5`, equivalent to a safety factor of `2`).
 """
 function compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_cfl)
     FT   = eltype(grid)

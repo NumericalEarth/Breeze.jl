@@ -616,7 +616,7 @@ for arch in arches
         Oceananigans.defaults.FloatType = FT
         td_default = SplitExplicitTimeDiscretization()
         td_strict  = SplitExplicitTimeDiscretization(; acoustic_cfl = 0.25)
-        @test td_default.acoustic_cfl == FT(0.5)
+        @test td_default.acoustic_cfl == FT(0.7)
         @test td_strict.acoustic_cfl  == FT(0.25)
 
         # Rejects nonpositive values.
