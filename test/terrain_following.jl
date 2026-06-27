@@ -14,12 +14,12 @@ using Breeze.CompressibleEquations: assemble_slow_vertical_momentum_tendency!,
                                     compute_acoustic_substeps,
                                     compute_contravariant_velocity!,
                                     freeze_linearization_state!,
-                                    linearized_pressure_perturbation,
+                                    δpᴸ,
                                     outer_step_start_transport_velocities,
                                     sponge_rhs,
                                     sponge_term_diag,
                                     terrain_horizontal_linearized_pressure_gradient_correction,
-                                    z_linearized_pressure_gradient
+                                    ∇ᶻp′
 using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
                            compute_slow_scalar_tendencies!
 using Oceananigans
@@ -967,7 +967,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         # `_explicit_horizontal_step!` applies to ρu's perturbation PGF — otherwise the
         # two are out of phase on substep 1 of a multi-substep stage. The gate factor
         # therefore scales ONLY the horizontal slope correction inside
-        # `z_linearized_pressure_gradient`; the vertical ∂z(Cᴸ(ρθ)′) part is always
+        # `∇ᶻp′`; the vertical ∂z(Cᴸ(ρθ)′) part is always
         # applied (the vertical acoustic mode is solved implicitly every substep).
         Nx, Nz = 16, 8
         Lx, Lz = 10000.0, 5000.0
@@ -1002,11 +1002,11 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         correction_seen = false
         for i in 3:Nx-2, k in 2:Nz-1
-            ∂z_p′      = ∂zᶜᶜᶠ(i, 1, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+            ∂z_p′      = ∂zᶜᶜᶠ(i, 1, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
             correction = terrain_horizontal_linearized_pressure_gradient_correction(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ)
 
-            z_gated = z_linearized_pressure_gradient(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 0.0)
-            z_full  = z_linearized_pressure_gradient(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 1.0)
+            z_gated = ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 0.0)
+            z_full  = ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 1.0)
 
             # Gate off ⇒ pure vertical gradient, no horizontal slope correction.
             @test z_gated == ∂z_p′
