@@ -151,7 +151,8 @@ end
 
     @testset "supersaturated ⇒ condense, rain out, retain warming" begin
         model = build_model(0.030)
-        ρ   = Array(interior(model.dynamics.density))
+        ρt  = Array(interior(model.dynamics.total_density))  # mass fractions, EOS, saturation
+        ρd  = Array(interior(model.dynamics.dry_density))    # ρθ = ρᵈθ is dry-coupled → θ recovery
         ρθ0 = Array(interior(model.formulation.potential_temperature_density))
         ρq0 = Array(interior(model.moisture_density))
 
@@ -172,15 +173,14 @@ end
         @test all(Array(interior(surface_flux)) .> 0)
         @test Array(interior(surface_flux)) ≈ Array(interior(column_integrated_prate))
 
-        for I in eachindex(ρ)
-            ρI = ρ[I]
-            qv = ρq1[I] / ρI
-            θᶠ = ρθ1[I] / ρI
+        for I in eachindex(ρt)
+            qv = ρq1[I] / ρt[I]   # vapor mass fraction (÷ total ρ)
+            θᶠ = ρθ1[I] / ρd[I]   # ρθ = ρᵈθ is dry-coupled (÷ ρᵈ)
             # Vapor-only post-state: diagnose its T and confirm it sits on the saturation curve at
-            # the cell's own density ρ (the #765 density-consistency property).
-            𝒰 = LiquidIceDensityState(θᶠ, MoistureMassFractions(qv), pˢᵗ, ρI)
+            # the cell's own TOTAL density (the #765 density-consistency property).
+            𝒰 = LiquidIceDensityState(θᶠ, MoistureMassFractions(qv), pˢᵗ, ρt[I])
             T = temperature(𝒰, constants)
-            @test qv ≈ saturation_specific_humidity(T, ρI, constants, eq) atol = 1e-4
+            @test qv ≈ saturation_specific_humidity(T, ρt[I], constants, eq) atol = 1e-4
             # Water budget: all condensed vapor leaves as precipitation.
             @test prate[I] ≈ (ρq0[I] - ρq1[I]) / Δt rtol = 1e-6
         end

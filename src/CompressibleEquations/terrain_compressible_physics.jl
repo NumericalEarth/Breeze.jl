@@ -33,7 +33,7 @@ using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpo
 ##### Terrain-aware type alias
 #####
 
-const TerrainCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}
+const TerrainCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}
 const TerrainCompressibleModel = AtmosphereModel{<:TerrainCompressibleDynamics}
 
 #####
@@ -65,7 +65,7 @@ function compute_contravariant_velocity!(model::TerrainCompressibleModel)
     launch!(arch, grid, :xyz,
             _compute_contravariant_velocity!,
             w̃, ρw̃,
-            grid, model.momentum, dynamics.density)
+            grid, model.momentum, dynamics.dry_density)
 
     # The terrain kinematic BC (w̃ = 0 at the surface) is enforced declaratively:
     # `ρw` carries a NormalFlow bottom BC ρw|₁ = slopeₓ·ρu + slopeᵧ·ρv (see
@@ -357,7 +357,7 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
             substepper.slow_vertical_momentum_tendency,
             Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
             dynamics.pressure,
-            dynamics.density,
+            dynamics.total_density,
             dynamics.terrain_reference_pressure,
             dynamics.terrain_reference_density,
             grid, dynamics, g, vertical_pressure_tendency_factor)
@@ -519,7 +519,7 @@ end
 function AtmosphereModels.compute_dynamics_tendency!(model::TerrainCompressibleModel)
     grid = model.grid
     arch = architecture(grid)
-    Gρ = model.timestepper.Gⁿ.ρ
+    Gρ = model.timestepper.Gⁿ.ρᵈ
     ρw̃ = model.dynamics.contravariant_vertical_momentum
 
     launch!(arch, grid, :xyz, _compute_terrain_density_tendency!, Gρ, grid, model.momentum, ρw̃)
@@ -543,7 +543,7 @@ function compute_terrain_temperature_and_pressure!(model::TerrainCompressibleMod
     dynamics = model.dynamics
 
     # Ensure halos are filled
-    fill_halo_regions!(dynamics.density)
+    fill_halo_regions!(dynamics.dry_density)
     fill_halo_regions!(prognostic_fields(model.formulation))
 
     # Compute temperature and pressure (same as non-terrain CompressibleModel)
@@ -551,7 +551,8 @@ function compute_terrain_temperature_and_pressure!(model::TerrainCompressibleMod
             _compute_temperature_and_pressure!,
             model.temperature,
             dynamics.pressure,
-            dynamics.density,
+            dynamics.dry_density,
+            dynamics.total_density,
             model.formulation,
             dynamics,
             specific_prognostic_moisture(model),
@@ -604,7 +605,7 @@ end
                                                     microphysics,
                                                     microphysical_fields,
                                                     constants)
-    ρ_field = dynamics_density(dynamics)
+    ρ_field = dynamics.total_density  # total air density: gravity acts on total mass
     @inbounds ρ = ρ_field[i, j, k]
     g = constants.gravitational_acceleration
     ρᵣ = terrain_reference_density(i, j, k, dynamics.terrain_reference_density)
