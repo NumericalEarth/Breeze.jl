@@ -87,7 +87,7 @@ jobs:
           # dynamics/microphysics.
           - dynamics: 'none'
             microphysics: 'none'
-            grid: '256x256x128'
+            grid: '512x512x128'
             advection: 'WENO3, WENO5, WENO7, WENO9'
             backend: 'vanilla, reactant'
             topology: 'PPB'
@@ -97,7 +97,7 @@ jobs:
           # model_tendency builds the model, so dynamics/microphysics are unused.
           - dynamics: 'none'
             microphysics: 'none'
-            grid: '256x256x128'
+            grid: '512x512x128'
             advection: 'WENO3, WENO5, WENO7, WENO9'
             backend: 'vanilla, reactant'
             topology: 'PPB'
@@ -342,15 +342,15 @@ jobs:
           name: Breeze.jl Benchmarks
           tool: "customBiggerIsBetter"
           output-file-path: "github-action-benchmark.json"
-          # benchmark-data-dir-path: ${{ github.event_name == 'push' && '.' || format('previews/PR{0}', github.event.number) }}
-          benchmark-data-dir-path: "."
+          benchmark-data-dir-path: ${{ github.event_name == 'push' && '.' || format('previews/PR{0}', github.event.number) }}
+          # benchmark-data-dir-path: "."
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
           github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
           comment-always: false
           summary-always: true
           alert-threshold: "110%"
           fail-on-alert: false
-          # auto-push: true
-          auto-push: ${{ github.event_name == 'push' }}
+          auto-push: true
+          # auto-push: ${{ github.event_name == 'push' }}
           max-items-in-chart: 1000
           comment-on-alert: true
