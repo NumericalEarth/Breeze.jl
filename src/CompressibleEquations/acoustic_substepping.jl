@@ -39,7 +39,7 @@ using Oceananigans.Operators:
     Δz⁻¹ᶜᶜᶜ, Δz⁻¹ᶜᶜᶠ,
     Δxᶠᶜᶜ,
     Δyᶜᶠᶜ,
-    Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ, V⁻¹ᶜᶜᶜ
+    Axᶠᶜᶜ, Ayᶜᶠᶜ, V⁻¹ᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
@@ -263,26 +263,14 @@ function freeze_linearization_state!(substepper::AcousticSubstepper, model)
     refresh_linearization_basic_state!(substepper, model)
     velocities = outer_step_start_transport_velocities(model)
 
-    # Seed the time-averaged velocity field with the outer-step-start velocities.
-    grid = model.grid
-    arch = architecture(grid)
-    avg = map(parent, substepper.time_averaged_velocities)
-    src = map(parent, velocities)
-    sz = max.(map(size, avg)...)
-    launch!(arch, grid, KernelParameters(1:sz[1], 1:sz[2], 1:sz[3]),
-            _seed_time_averaged_velocity!, avg, src)
+    # Seed the time-averaged velocity with the outer-step-start velocities (full
+    # parent arrays, halos included). The three staggered components have
+    # different array sizes, so each is copied over its own bounds.
+    for (avg, src) in zip(substepper.time_averaged_velocities, velocities)
+        copyto!(parent(avg), parent(src))
+    end
 
     return nothing
-end
-
-# Copy the three velocity components (full parent arrays, halos included) in one launch.
-@kernel function _seed_time_averaged_velocity!(avg, src)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        avg.u[i, j, k] = src.u[i, j, k]
-        avg.v[i, j, k] = src.v[i, j, k]
-        avg.w[i, j, k] = src.w[i, j, k]
-    end
 end
 
 outer_step_start_transport_velocities(model) = model.velocities
