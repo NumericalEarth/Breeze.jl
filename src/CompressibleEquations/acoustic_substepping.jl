@@ -81,7 +81,7 @@ using Oceananigans.Operators:
     Axᶠᶜᶜ, Ayᶜᶠᶜ, Vᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
-using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, Open
+using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
 
 using Oceananigans.Grids: Flat, Center, Face, peripheral_node,
                           topology,
@@ -1402,7 +1402,7 @@ end
 # (periodic, walls, and `NormalFlowBoundaryCondition(nothing)` all skip it), so the
 # enforcement has zero cost when no open lateral BC is present.
 
-@inline is_active_open_bc(bc) = (bc isa BoundaryCondition{<:Open}) && !(bc.condition isa Nothing)
+@inline is_active_open_bc(bc) = (bc isa BoundaryCondition{<:NormalFlow}) && !(bc.condition isa Nothing)
 
 # Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the prescribed
 # wall value in a single kernel: target = v − cᴸ[iᴮ] = (cᴸ[iᴴ] − cᴸ[iᴮ]) / 2.
