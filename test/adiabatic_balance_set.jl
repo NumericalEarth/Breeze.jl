@@ -85,6 +85,27 @@ end
         @test (@allocated adiabatic_balance_twin(model)) < 12 * one_field_bytes
     end
 
+    @testset "native time stepping (time_stepping = nothing) reuses the split-explicit scheme" begin
+        model = _build_production(default_arch)
+        twin  = adiabatic_balance_twin(model, nothing)
+
+        # Native scheme reused, but the (irreversible) sponge is stripped.
+        @test twin.dynamics.time_discretization isa SplitExplicitTimeDiscretization
+        @test twin.dynamics.time_discretization.sponge === nothing
+        @test model.dynamics.time_discretization.sponge !== nothing
+        # Tendency storage is still aliased (the rebuilt acoustic substepper is the only new memory).
+        @test twin.timestepper.Gⁿ.ρu === model.timestepper.Gⁿ.ρu
+        @test twin.momentum.ρw === model.momentum.ρw
+
+        # Fixed point holds with the native scheme too.
+        _set_discrete_rest!(model)
+        ρ₀ = Array(interior(dynamics_density(model.dynamics)))
+        set!(model; balance = AdiabaticBalance(Δt = 0.5, cycles = 1, time_stepping = nothing))
+        @test maximum(abs, Array(interior(dynamics_density(model.dynamics))) .- ρ₀) <= 1e-8 * maximum(abs, ρ₀)
+        @test maximum(abs, Array(interior(model.momentum.ρw))) <= 1e-7
+        @test model.clock.iteration == 0
+    end
+
     @testset "moisture-key remap (SaturationAdjustment :ρqᵉ → twin :ρqᵛ)" begin
         model = _build_production(default_arch; microphysics = SaturationAdjustment())
         @test Breeze.AtmosphereModels.moisture_prognostic_name(model.microphysics) == :ρqᵉ

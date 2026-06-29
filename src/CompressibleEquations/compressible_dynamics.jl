@@ -352,6 +352,30 @@ with_time_discretization(dynamics::CompressibleDynamics, time_discretization) =
                          dynamics.terrain_reference_pressure,
                          dynamics.terrain_reference_density)
 
+"""
+$(TYPEDSIGNATURES)
+
+Return a copy of `time_discretization` with its upper sponge removed. The adiabatic-balance
+excursion must be reversible, and the sponge (like divergence damping) is an irreversible term;
+`balance_adiabatically!` therefore requires a sponge-free model. No-op for discretizations that
+carry no sponge (e.g. `ExplicitTimeStepping`).
+"""
+without_sponge(time_discretization) = time_discretization
+
+without_sponge(td::SplitExplicitTimeDiscretization) =
+    SplitExplicitTimeDiscretization(td.substeps,
+                                    td.acoustic_cfl,
+                                    td.forward_weight,
+                                    td.thermodynamic_tendency_factor,
+                                    td.vertical_momentum_tendency_factor,
+                                    td.vertical_pressure_tendency_factor,
+                                    td.final_stage_vertical_pressure_tendency_factor,
+                                    td.apply_first_substep_pressure_gradient,
+                                    td.damping,
+                                    nothing,
+                                    td.substep_distribution,
+                                    td.open_boundary_relaxation)
+
 # Total air density ρ = ρᵈ + Σρˣ (diagnosed once per update into `total_density`); this is the
 # density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
