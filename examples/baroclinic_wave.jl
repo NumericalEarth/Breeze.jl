@@ -276,16 +276,19 @@ add_callback!(simulation, progress, IterationInterval(50))
 #
 # We save the velocities, the full potential temperature ``θ`` (the
 # classic surface synoptic diagnostic for the cold/warm sectors during
-# cyclogenesis), and the vertical vorticity ``ζ``, sliced at two levels:
-# k = 1 (surface) and k = 16 (mid-troposphere, ~5 km).
+# cyclogenesis), the vertical vorticity ``ζ``, and the full pressure
+# field ``p`` — sliced at two levels: k = 1 (surface) and k = 16
+# (mid-troposphere, ~5 km). Surface pressure ``p_{\rm sfc}`` reveals
+# the growing baroclinic wave as alternating highs and lows.
 
 using Oceananigans.Operators: ζ₃ᶠᶠᶜ
 u, v, w = model.velocities
 ζ = KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, model.grid, u, v)
 
 θ = PotentialTemperature(model)
+p = model.dynamics.pressure
 
-outputs = merge(model.velocities, (; ζ, θ))
+outputs = merge(model.velocities, (; ζ, θ, p))
 
 for k in (1, 16)
     filename = "baroclinic_wave_k$k"
@@ -303,15 +306,18 @@ run!(simulation)
 
 # ## Visualization
 #
-# We plot three diagnostics on the sphere: the **surface potential temperature**
+# We plot four diagnostics on the sphere: the **surface potential temperature**
 # ``θ_{\rm sfc}`` (the classic synoptic diagnostic for the cold/warm sectors),
 # the **surface vertical vorticity** ``ζ`` (which reveals the cyclones and
-# anticyclones), and the **mid-level vertical velocity** ``w`` (which highlights
-# the warm conveyor belt and the wave's vertical structure).
+# anticyclones), the **mid-level vertical velocity** ``w`` (which highlights
+# the warm conveyor belt and the wave's vertical structure), and the
+# **surface pressure** ``p_{\rm sfc}`` (which shows the growing highs and lows
+# directly).
 
 θ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "θ")
 ζ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "ζ")
 w_ts = FieldTimeSeries("baroclinic_wave_k16.jld2", "w")
+p_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "p")
 times = θ_ts.times
 Nt = length(times)
 
@@ -322,10 +328,12 @@ k_mid = 16
 sphere_kw = (elevation = π/6, azimuth = π/2, aspect = :data)
 ζlim = 1e-4
 wlim = 0.06
+plim = 3000   # Pa — ±30 hPa captures the full cyclone/anticyclone range
 
 θ_kw = (colormap = :thermal, colorrange = (260, 310))
 ζ_kw = (colormap = :balance, colorrange = (-ζlim, ζlim))
 w_kw = (colormap = :balance, colorrange = (-wlim, wlim))
+p_kw = (colormap = :balance, colorrange = (p₀ - plim, p₀ + plim))
 
 # ### Animation
 
@@ -333,11 +341,12 @@ n = Observable(1)
 θn = @lift view(θ_ts[$n], :, :, k_sfc)
 ζn = @lift view(ζ_ts[$n], :, :, k_sfc)
 wn = @lift view(w_ts[$n], :, :, k_mid)
+pn = @lift view(p_ts[$n], :, :, k_sfc)
 
-fig = Figure(size = (1800, 700))
+fig = Figure(size = (2400, 700))
 
 title = @lift "t = $(prettytime(times[$n]))"
-fig[0, 1:6] = Label(fig, title, fontsize=22, tellwidth=false)
+fig[0, 1:8] = Label(fig, title, fontsize=22, tellwidth=false)
 
 ax1 = Axis3(fig[1, 1]; title = "θ at surface", sphere_kw...)
 hm1 = surface!(ax1, θn; shading = NoShading, θ_kw...)
@@ -351,7 +360,11 @@ ax3 = Axis3(fig[1, 5]; title = "w at mid-level", sphere_kw...)
 hm3 = surface!(ax3, wn; shading = NoShading, w_kw...)
 Colorbar(fig[1, 6], hm3; label = "w (m/s)", height=Relative(0.5))
 
-for ax in (ax1, ax2, ax3)
+ax4 = Axis3(fig[1, 7]; title = "p at surface", sphere_kw...)
+hm4 = surface!(ax4, pn; shading = NoShading, p_kw...)
+Colorbar(fig[1, 8], hm4; label = "p (Pa)", height=Relative(0.5))
+
+for ax in (ax1, ax2, ax3, ax4)
     hidedecorations!(ax)
     hidespines!(ax)
 end

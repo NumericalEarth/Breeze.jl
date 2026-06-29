@@ -153,9 +153,22 @@ dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
+# ### Horizontal dissipation
+#
+# Without an explicit closure the advection scheme's implicit dissipation is the
+# only small-scale sink, and it is too weak to enforce the physical short-wave
+# cutoff: the inviscid operator amplifies marginally-resolved scales into a
+# spurious high-wavenumber band that outgrows the physical wavenumber-9 wave.
+# A scale-selective horizontal viscosity fixes this — it damps mode ``k`` at
+# rate ``ν k²``, hammering the grid-scale band while barely touching the
+# synoptic wave, so wavenumber 9 is restored as the leading baroclinic mode.
+
+using Oceananigans.TurbulenceClosures: HorizontalScalarDiffusivity
+closure = HorizontalScalarDiffusivity(ν=3e5, κ=3e5)   # m²/s
+
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        advection = WENO())
+                        advection = WENO(), closure)
 
 # ## Balanced initial condition and background snapshot
 #
