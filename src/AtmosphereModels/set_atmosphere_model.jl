@@ -172,7 +172,7 @@ Variables are set via keyword arguments. Supported variables include:
   to ensure the velocity field satisfies the anelastic continuity equation.
 - `balance`: adiabatic (FV3 `na_init`) spin-up of the nonhydrostatic state, run in place after the
   rest of `set!`. `false` (default) does nothing; `true` uses `AdiabaticBalance()` (auto step size);
-  pass an [`AdiabaticBalance`](@ref) to control `Δt`, `cycles`, `weight`, and `with_moisture`. The
+  pass an [`AdiabaticBalance`](@ref Breeze.AdiabaticBalance) to control `Δt`, `cycles`, `weight`, and `with_moisture`. The
   balance runs on a stripped twin that shares all field memory with `model` (no second field set,
   no graft). Supported for `CompressibleDynamics`; for other dynamics call `balance_adiabatically!`
   directly on a stripped model.
