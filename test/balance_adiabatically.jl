@@ -35,15 +35,14 @@ function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 1
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
                                  thermodynamic_constants = constants,
-                                 microphysics = nothing,
-                                 timestepper = :AcousticRungeKutta3)
+                                 microphysics = nothing)
 end
 
 # Discrete-balanced rest state (mirrors substepper_rest_state.jl::set_rest_state!).
 function _set_discrete_rest!(model)
     ref = model.dynamics.reference_state
     Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
-    parent(model.dynamics.density) .= parent(ref.density)
+    parent(model.dynamics.dry_density) .= parent(ref.density)
     ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
     parent(ρθ) .= parent(ref.pressure) ./ (Rᵈ .* parent(ref.exner_function))
     fill!(parent(model.velocities.u), 0)

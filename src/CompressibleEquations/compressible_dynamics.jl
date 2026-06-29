@@ -15,7 +15,8 @@ Fully compressible dynamics with prognostic density and diagnostic pressure.
 Fields
 ======
 
-- `density`: Prognostic density field ρ
+- `dry_density`: Prognostic dry-air density field ρᵈ
+- `total_density`: Diagnosed total air density ρ = ρᵈ + Σρˣ (used for thermodynamics, scalar advection, EOS, buoyancy)
 - `pressure`: Diagnostic pressure field p = ρ Rᵐ T
 - `standard_pressure`: Reference pressure pˢᵗ for potential temperature (default 10⁵ Pa)
 - `surface_pressure`: Mean pressure at the bottom of the atmosphere p₀
@@ -34,9 +35,10 @@ The moist equation-of-state θˡⁱ→T temperature inversion is controlled by t
 thermodynamic formulation, not the dynamics: see `temperature_solver` on
 `LiquidIcePotentialTemperatureFormulation`.
 """
-struct CompressibleDynamics{TD, D, P, FT, RS, TM, CV, CM, TRP, TRD}
+struct CompressibleDynamics{TD, D, DT, P, FT, RS, TM, CV, CM, TRP, TRD}
     time_discretization :: TD                  # SplitExplicitTimeDiscretization or ExplicitTimeStepping
-    density :: D                               # ρ (prognostic)
+    dry_density :: D                           # ρᵈ (prognostic dry-air density)
+    total_density :: DT                        # ρ = ρᵈ + Σρˣ (diagnosed; thermo/advection/EOS/buoyancy)
     pressure :: P                              # p = ρ R^m T (diagnostic)
     standard_pressure :: FT                    # pˢᵗ (reference pressure for potential temperature)
     surface_pressure :: FT                     # p₀ (mean pressure at the bottom of the atmosphere)
@@ -116,14 +118,15 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     # zeroed regardless. contravariant fields, terrain_reference_pressure, and
     # terrain_reference_density are built later in materialize_dynamics.
     terrain_metrics_spec = terrain_metrics === nothing ? slope_stencil : terrain_metrics
-    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, ref_spec,
+    return CompressibleDynamics(time_discretization, nothing, nothing, nothing, pˢᵗ, p₀, ref_spec,
                                 terrain_metrics_spec,
                                 nothing, nothing, nothing, nothing)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
     CompressibleDynamics(dynamics.time_discretization,
-                         adapt(to, dynamics.density),
+                         adapt(to, dynamics.dry_density),
+                         adapt(to, dynamics.total_density),
                          adapt(to, dynamics.pressure),
                          dynamics.standard_pressure,
                          dynamics.surface_pressure,
@@ -168,13 +171,14 @@ Materialize a stub `CompressibleDynamics` into a full dynamics object with densi
 """
 function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, grid, boundary_conditions, thermodynamic_constants)
     # Get density boundary conditions if provided
-    if haskey(boundary_conditions, :ρ)
-        density = CenterField(grid, boundary_conditions=boundary_conditions.ρ)
+    if haskey(boundary_conditions, :ρᵈ)
+        density = CenterField(grid, boundary_conditions=boundary_conditions.ρᵈ)
     else
         density = CenterField(grid)  # Use default for grid topology
     end
 
     pressure = CenterField(grid)  # Diagnostic pressure from equation of state
+    total_density = CenterField(grid)  # Diagnosed total air density ρ = ρᵈ + Σρˣ
 
     FT = eltype(grid)
     standard_pressure = convert(FT, dynamics.standard_pressure)
@@ -256,7 +260,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         seed_pressure!(pressure, grid, surface_pressure)
     end
 
-    return CompressibleDynamics(dynamics.time_discretization, density, pressure,
+    return CompressibleDynamics(dynamics.time_discretization, density, total_density, pressure,
                                 standard_pressure, surface_pressure, reference_state,
                                 terrain_metrics,
                                 contravariant_vertical_velocity,
@@ -324,7 +328,12 @@ $(TYPEDSIGNATURES)
 
 Return the prognostic density field for `CompressibleDynamics`.
 """
-AtmosphereModels.dynamics_density(dynamics::CompressibleDynamics) = dynamics.density
+AtmosphereModels.dynamics_density(dynamics::CompressibleDynamics) = dynamics.dry_density
+
+# Total air density ρ = ρᵈ + Σρˣ (diagnosed once per update into `total_density`); this is the
+# density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The
+# coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
+AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
 
 """
 $(TYPEDSIGNATURES)
@@ -339,7 +348,7 @@ AtmosphereModels.dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pr
 #####
 
 # Compressible dynamics has prognostic density
-AtmosphereModels.prognostic_dynamics_field_names(::CompressibleDynamics) = (:ρ,)
+AtmosphereModels.prognostic_dynamics_field_names(::CompressibleDynamics) = (:ρᵈ,)
 AtmosphereModels.additional_dynamics_field_names(::CompressibleDynamics) = ()
 
 """
@@ -348,7 +357,7 @@ $(TYPEDSIGNATURES)
 Return prognostic fields specific to compressible dynamics.
 Returns the density field as a prognostic variable.
 """
-AtmosphereModels.dynamics_prognostic_fields(dynamics::CompressibleDynamics) = (; ρ=dynamics.density)
+AtmosphereModels.dynamics_prognostic_fields(dynamics::CompressibleDynamics) = (; ρᵈ=dynamics.dry_density)
 
 """
 $(TYPEDSIGNATURES)
@@ -449,11 +458,12 @@ end
 
 function Base.show(io::IO, dynamics::CompressibleDynamics)
     print(io, summary(dynamics), '\n')
-    if dynamics.density === nothing
-        print(io, "├── density: not materialized\n")
+    if dynamics.dry_density === nothing
+        print(io, "├── dry_density: not materialized\n")
         print(io, "├── pressure: not materialized\n")
     else
-        print(io, "├── density: ", prettysummary(dynamics.density), '\n')
+        print(io, "├── dry_density: ", prettysummary(dynamics.dry_density), '\n')
+        print(io, "├── total_density: ", prettysummary(dynamics.total_density), '\n')
         print(io, "├── pressure: ", prettysummary(dynamics.pressure), '\n')
     end
     print(io, "├── terrain_metrics: ", summary(dynamics.terrain_metrics), '\n')
@@ -503,9 +513,9 @@ AtmosphereModels.Diagnostics.dynamics_pressure_for_potential_temperature(dynamic
 $(TYPEDSIGNATURES)
 
 Return the density field for potential temperature diagnostics.
-For compressible dynamics, uses the actual density field.
+For compressible dynamics, uses the diagnosed total air density (the moisture fractions need total ρ).
 """
-AtmosphereModels.Diagnostics.dynamics_density_for_potential_temperature(dynamics::CompressibleDynamics) = dynamics.density
+AtmosphereModels.Diagnostics.dynamics_density_for_potential_temperature(dynamics::CompressibleDynamics) = dynamics.total_density
 
 """
 $(TYPEDSIGNATURES)

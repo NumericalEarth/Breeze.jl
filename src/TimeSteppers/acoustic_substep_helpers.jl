@@ -21,7 +21,7 @@ using Breeze.CompressibleEquations: CompressibleDynamics
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
 
 const TerrainCompressibleAcousticModel =
-    AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}}
+    AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}}
 
 #####
 ##### Slow momentum tendencies
@@ -103,9 +103,9 @@ $(TYPEDSIGNATURES)
 
 Compute slow tendencies for density and the thermodynamic variable:
 
-  - ``Gˢ_ρ = -∇·m``: full density tendency (continuity equation),
-    written into `model.timestepper.Gⁿ.ρ`.
-  - ``Gˢ_χ``: full thermodynamic tendency (advection + physics).
+  - ``Gˢ_ρᵈ = -∇·m``: full dry-density tendency (continuity equation),
+    written into `model.timestepper.Gⁿ.ρᵈ`.
+  - ``Gˢ_ρᵡ``: full thermodynamic-density tendency (advection + physics).
 """
 function compute_slow_scalar_tendencies!(model)
     compute_dynamics_tendency!(model)

@@ -32,11 +32,11 @@ end
 Example(title::String, basename::String; build_always::Bool, gpu::Bool) =
     Example(title, basename, build_always, gpu)
 
-# NOTE (vector-invariant PR): all examples except the baroclinic wave are
-# temporarily disabled so the docs build only renders the baroclinic-wave figures
-# for evaluating CompressibleWENOVectorInvariant. Restore the full list before merge.
+# NOTE (vector-invariant PR): temporarily building only the stratified thermal bubble + baroclinic
+# wave to validate CompressibleWENOVectorInvariant (esp. that the baroclinic wave completes on GPU).
+# Restore the full list before merge.
 examples = [
-    # Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
+    Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
     # Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
     # Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz"; build_always=true, gpu=false),
     # Example("Shallow cumulus convection (BOMEX)", "bomex"; build_always=true, gpu=true),
