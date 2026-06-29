@@ -260,10 +260,11 @@ jobs:
                   # float-type × backend config. Scalar gets 4 lines (Float32 /
                   # BFloat16 × vanilla / reactant); model gets 2 (Float32 only,
                   # since it has no BFloat16 rows).
-                  level_1 = f'{base_name}'
+                  ft_short = {'Float32': 'F32', 'BFloat16': 'BF16', 'Float64': 'F64'}.get(ft, ft)
+                  level_1 = f'{base_name}; Grid: {grid_str}'
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
-                  level_4 = f'{ft} {backend}'
+                  level_4 = f'{ft_short} {backend}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
