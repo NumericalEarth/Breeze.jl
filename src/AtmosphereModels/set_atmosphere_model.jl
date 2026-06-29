@@ -9,6 +9,11 @@ using ..Thermodynamics:
     MoistureMassFractions,
     mixture_gas_constant
 
+# Adiabatic (FV3 na_init) initialization hook for `set!(model; balance = …)`. Declared here as an
+# interface stub; the methods (dispatching on `Bool` / `AdiabaticBalance`) are added at the Breeze
+# top level, where the explicit-stepper twin builder and `balance_adiabatically!` are in scope.
+function balance_initial_state! end
+
 move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
 
 function prioritize_names(names)
@@ -165,8 +170,14 @@ Variables are set via keyword arguments. Supported variables include:
 
 - `enforce_mass_conservation`: If `true` (default), applies a pressure correction
   to ensure the velocity field satisfies the anelastic continuity equation.
+- `balance`: adiabatic (FV3 `na_init`) spin-up of the nonhydrostatic state, run in place after the
+  rest of `set!`. `false` (default) does nothing; `true` uses `AdiabaticBalance()` (auto step size);
+  pass an [`AdiabaticBalance`](@ref) to control `Δt`, `cycles`, `weight`, and `with_moisture`. The
+  balance runs on a stripped twin that shares all field memory with `model` (no second field set,
+  no graft). Supported for `CompressibleDynamics`; for other dynamics call `balance_adiabatically!`
+  directly on a stripped model.
 """
-function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true, kw...)
+function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true, balance=false, kw...)
     if !isnothing(time)
         model.clock.time = time
     end
@@ -306,6 +317,9 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     end
 
     initialize_closure_fields!(model.closure_fields, model.closure, model)
+
+    # Optional adiabatic (FV3 na_init) spin-up of the nonhydrostatic state, in place.
+    balance === false || balance_initial_state!(model, balance)
 
     return nothing
 end

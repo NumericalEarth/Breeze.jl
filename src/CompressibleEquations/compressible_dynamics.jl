@@ -330,6 +330,28 @@ Return the prognostic density field for `CompressibleDynamics`.
 """
 AtmosphereModels.dynamics_density(dynamics::CompressibleDynamics) = dynamics.dry_density
 
+"""
+$(TYPEDSIGNATURES)
+
+Return a `CompressibleDynamics` identical to `dynamics` but with its `time_discretization`
+replaced. Every field (densities, pressure, reference and terrain states) is shared by
+reference — only the immutable scheme wrapper changes — so this allocates no field memory. Used
+to build the adiabatic-balance twin (an `ExplicitTimeStepping` view of a production model).
+"""
+with_time_discretization(dynamics::CompressibleDynamics, time_discretization) =
+    CompressibleDynamics(time_discretization,
+                         dynamics.dry_density,
+                         dynamics.total_density,
+                         dynamics.pressure,
+                         dynamics.standard_pressure,
+                         dynamics.surface_pressure,
+                         dynamics.reference_state,
+                         dynamics.terrain_metrics,
+                         dynamics.contravariant_vertical_velocity,
+                         dynamics.contravariant_vertical_momentum,
+                         dynamics.terrain_reference_pressure,
+                         dynamics.terrain_reference_density)
+
 # Total air density ρ = ρᵈ + Σρˣ (diagnosed once per update into `total_density`); this is the
 # density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
