@@ -239,9 +239,18 @@ dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
 # stable on the latitude–longitude C-grid (the vector-invariant form is otherwise
 # prone to the Hollingsworth instability there). Scalars use flux-form `WENO`.
 
+# We use a `WENO` reconstruction for the flux-form vertical advection of momentum
+# (`vertical_scheme`) as well as for the vorticity and kinetic-energy gradients. A
+# non-dissipative centered vertical reconstruction lets grid-scale vertical-velocity
+# noise build up once the wave matures (sharp fronts, strong updrafts) and the run
+# destabilizes around day 14; WENO supplies the scale-selective dissipation that
+# keeps the mature wave clean — matching the all-WENO robustness of the flux-form
+# reference, so no additional explicit closure is needed.
+
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        momentum_advection = CompressibleWENOVectorInvariant(; divergence = HorizontalDivergence()),
+                        momentum_advection = CompressibleWENOVectorInvariant(; divergence = HorizontalDivergence(),
+                                                                              vertical_scheme = WENO()),
                         scalar_advection = WENO())
 
 # ## Set initial conditions
