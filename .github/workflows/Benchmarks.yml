@@ -87,7 +87,7 @@ jobs:
           # dynamics/microphysics.
           - dynamics: 'none'
             microphysics: 'none'
-            grid: '512x512x128'
+            grid: '256x256x128'
             advection: 'WENO3, WENO5, WENO7, WENO9'
             backend: 'vanilla, reactant'
             topology: 'PPB'
@@ -97,7 +97,7 @@ jobs:
           # model_tendency builds the model, so dynamics/microphysics are unused.
           - dynamics: 'none'
             microphysics: 'none'
-            grid: '512x512x128'
+            grid: '256x256x128'
             advection: 'WENO3, WENO5, WENO7, WENO9'
             backend: 'vanilla, reactant'
             topology: 'PPB'
