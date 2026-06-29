@@ -2,7 +2,8 @@
 ##### `set!(model; balance = …)` — in-place adiabatic (FV3 `na_init`) initialization.
 #####
 ##### `balance_adiabatically!` (included earlier) does the spin-up but requires a *stripped*
-##### model: no microphysics, no upper sponge, no forcing, and a reversible time stepper. Rather
+##### model: no microphysics, no closure, no upper sponge, no forcing, and a reversible time
+##### stepper (dissipative/irreversible terms corrupt the symmetric forward/backward excursion). Rather
 ##### than make the caller hand-build that twin and graft fields back (see the DFI block in
 ##### NumericalEarth's breeze_downscaling_era5 example), `AdiabaticBalance` + `adiabatic_balance_twin`
 ##### construct a twin that SHARES all field memory with the production model and steps it in place,
@@ -91,7 +92,8 @@ stripped. Only the pieces that must differ are rebuilt:
 
   * the dynamics' `time_discretization` is swapped (a fresh immutable wrapper around the *same*
     dynamics fields, via `with_time_discretization`);
-  * microphysics is disabled and forcing zeroed;
+  * microphysics, closure (turbulent diffusion), and the implicit diffusion solver are disabled,
+    and forcing is zeroed — all dissipative/irreversible;
   * a time stepper matching the twin's discretization is built, its `Gⁿ`/`U⁰` tendency storage
     *aliasing* the production stepper's same-named arrays (the production prognostics are a superset
     of the twin's, with the moisture key re-mapped from the microphysics name, e.g. `:ρqᵉ`, to the
@@ -123,10 +125,11 @@ function adiabatic_balance_twin(model::AtmosphereModel, time_stepping = Explicit
 
     Gⁿ = NamedTuple{twin_names}(model.timestepper.Gⁿ[remap(n)] for n in twin_names)
     U⁰ = NamedTuple{twin_names}(model.timestepper.U⁰[remap(n)] for n in twin_names)
+    # No implicit_solver: vertically-implicit diffusion is irreversible (it amplifies on the −Δt
+    # step), and the closure is stripped below — the excursion must be adiabatic.
     twin_timestepper = TimeStepper(AtmosphereModels.default_timestepper(twin_dynamics),
                                    grid, twin_prognostic;
-                                   dynamics = twin_dynamics, Gⁿ, U⁰,
-                                   implicit_solver = model.timestepper.implicit_solver)
+                                   dynamics = twin_dynamics, Gⁿ, U⁰, implicit_solver = nothing)
 
     # Advection schemes are immutable and shared; just re-key the moisture scheme and drop precip.
     twin_scalar_names = (:ρθ, twin_moisture_name, keys(model.tracers)...)
@@ -142,13 +145,15 @@ function adiabatic_balance_twin(model::AtmosphereModel, time_stepping = Explicit
                                                              model.velocities, twin_dynamics, formulation,
                                                              twin_microphysics, qᵛ)
 
+    # closure = nothing: turbulent diffusion is dissipative (irreversible), so it is excluded from
+    # the adiabatic excursion. `closure_fields` is carried along but unused when closure is nothing.
     return AtmosphereModel(arch, grid, Clock(grid),
                            twin_dynamics, formulation, constants,
                            model.momentum, model.moisture_density, model.temperature,
                            model.pressure_solver, model.velocities, model.tracers,
                            nothing, twin_advection, model.coriolis, twin_forcing,
                            twin_microphysics, twin_microphysical, twin_timestepper,
-                           model.closure, model.closure_fields, nothing)
+                           nothing, model.closure_fields, nothing)
 end
 
 # `set!(model; balance = …)` hook. `false` → no-op; `true` → default `AdiabaticBalance`.

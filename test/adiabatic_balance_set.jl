@@ -71,8 +71,11 @@ end
         @test twin.timestepper.Gⁿ.ρu === model.timestepper.Gⁿ.ρu
         @test twin.timestepper.U⁰.ρθ === model.timestepper.U⁰.ρθ
 
-        # Stripped for a reversible adiabatic excursion.
+        # Stripped for a reversible adiabatic excursion: no microphysics, no closure/diffusion
+        # (the implicit vertical-diffusion solve is irreversible), no radiation.
         @test twin.microphysics === nothing
+        @test twin.closure      === nothing
+        @test twin.timestepper.implicit_solver === nothing
         @test twin.radiation    === nothing
         @test twin.dynamics.time_discretization isa ExplicitTimeStepping
         @test model.dynamics.time_discretization isa SplitExplicitTimeDiscretization
