@@ -91,6 +91,10 @@ jobs:
             advection: 'WENO5, WENO7, WENO9'
             backend: 'vanilla, reactant'
             topology: 'PPB'
+            # `mode` distinguishes the two tendency entries in the artifact names
+            # (their other matrix fields are identical, so without this they
+            # collide and only one set of results survives the publish merge).
+            mode: 'scalar_tendency'
             extra_flags: '--mode scalar_tendency --float_type=Float32,BFloat16 --time_steps 320'
           # Full-model tendency: time compute_tendencies! for a compressible
           # AtmosphereModel across WENO orders, vanilla vs Reactant. --mode
@@ -101,6 +105,7 @@ jobs:
             advection: 'WENO5, WENO7, WENO9'
             backend: 'vanilla, reactant'
             topology: 'PPB'
+            mode: 'model_tendency'
             extra_flags: '--mode model_tendency --float_type=Float32 --time_steps 320'
     defaults:
       run:
@@ -141,7 +146,7 @@ jobs:
       - name: "Upload benchmark results as artifacts"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
+          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
           path: benchmarking/benchmark_results.*
           retention-days: 90
           overwrite: false
@@ -151,7 +156,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: 'mlir-dumps-dynamics_${{ matrix.dynamics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
+          name: 'mlir-dumps-dynamics_${{ matrix.dynamics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
           path: benchmarking/mlir_dumps/
           if-no-files-found: ignore
           retention-days: 90
@@ -162,7 +167,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: 'profiles-dynamics_${{ matrix.dynamics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
+          name: 'profiles-dynamics_${{ matrix.dynamics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
           path: benchmarking/profiles/
           if-no-files-found: ignore
           retention-days: 90
@@ -172,7 +177,7 @@ jobs:
         timeout-minutes: 2
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: 'manifest-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
+          name: 'manifest-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
           path: '**/Manifest*.toml'
           retention-days: 90
           overwrite: false
