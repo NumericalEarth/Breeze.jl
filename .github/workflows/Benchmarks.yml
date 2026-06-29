@@ -88,17 +88,17 @@ jobs:
           - dynamics: 'none'
             microphysics: 'none'
             grid: '256x256x128'
-            advection: 'WENO3, WENO5, WENO7, WENO9'
+            advection: 'WENO5, WENO7, WENO9'
             backend: 'vanilla, reactant'
             topology: 'PPB'
-            extra_flags: '--mode tendency --float_type=Float32,BFloat16 --time_steps 320'
+            extra_flags: '--mode scalar_tendency --float_type=Float32,BFloat16 --time_steps 320'
           # Full-model tendency: time compute_tendencies! for a compressible
           # AtmosphereModel across WENO orders, vanilla vs Reactant. --mode
           # model_tendency builds the model, so dynamics/microphysics are unused.
           - dynamics: 'none'
             microphysics: 'none'
             grid: '256x256x128'
-            advection: 'WENO3, WENO5, WENO7, WENO9'
+            advection: 'WENO5, WENO7, WENO9'
             backend: 'vanilla, reactant'
             topology: 'PPB'
             extra_flags: '--mode model_tendency --float_type=Float32 --time_steps 320'
@@ -249,7 +249,7 @@ jobs:
               # a fixed grid. Reuses BenchmarkResult with mode == 'tendency';
               # closure/dynamics/microphysics are 'none', so skip the forward
               # clauses below via continue.
-              if mode in ('tendency', 'model_tendency'):
+              if mode in ('scalar_tendency', 'model_tendency'):
                   # One figure per case (ScalarTendency / ModelTendency), one
                   # side-by-side panel per WENO order, and one line per
                   # float-type × backend config. Scalar gets 4 lines (Float32 /

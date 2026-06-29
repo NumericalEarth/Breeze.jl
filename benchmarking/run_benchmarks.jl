@@ -66,7 +66,7 @@ function parse_commandline()
     @add_arg_table! s begin
         "--mode"
             help = "Mode: 'benchmark' for quick performance tests, 'simulate' for full runs with output, " *
-                   "'tendency' for the bare scalar WENO kernel, or 'model_tendency' for the full-model " *
+                   "'scalar_tendency' for the bare scalar WENO kernel, or 'model_tendency' for the full-model " *
                    "compute_tendencies! (both have no Simulation and run vanilla vs Reactant)"
             arg_type = String
             default = "benchmark"
@@ -391,20 +391,21 @@ function run_benchmarks(args)
         ft_str = FT == Float32 ? "F32" : FT == Float64 ? "F64" : "BF16"
         mode_suffix = args["ad"] ? "_AD" : ""
 
-        # Tendency modes time a tendency evaluation with no Simulation. "tendency"
-        # uses the bare scalar WENO kernel (no model); "model_tendency" uses the
-        # full-model compute_tendencies!. Both run on both backends so the
-        # Reactant-compiled XLA program can be compared against the eager vanilla
-        # launch. Handled up front; the model-stepping path below is skipped.
-        if mode == "tendency" || mode == "model_tendency"
+        # Tendency modes time a tendency evaluation with no Simulation.
+        # "scalar_tendency" uses the bare scalar WENO kernel (no model);
+        # "model_tendency" uses the full-model compute_tendencies!. Both run on
+        # both backends so the Reactant-compiled XLA program can be compared
+        # against the eager vanilla launch. Handled up front; the model-stepping
+        # path below is skipped.
+        if mode == "scalar_tendency" || mode == "model_tendency"
             m = match(r"^WENO(\d+)$", adv_name)
             isnothing(m) && error("$mode mode supports WENO<order> advection, got $adv_name")
             order = parse(Int, m[1])
 
-            label = mode == "tendency" ? "ScalarTendency" : "ModelTendency"
+            label = mode == "scalar_tendency" ? "ScalarTendency" : "ModelTendency"
             arch = make_backend_arch(backend_name, device)
             topology = make_topology(topo_name)
-            problem = mode == "tendency" ? scalar_tendency_problem : model_tendency_problem
+            problem = mode == "scalar_tendency" ? scalar_tendency_problem : model_tendency_problem
 
             # Reactant additionally compares raise=true vs raise=false (the
             # latter keeps kernels as XLA custom calls instead of raising them to
@@ -512,7 +513,7 @@ function run_benchmarks(args)
                                      microphysics=micro_name,
                                      )
         else
-            error("Unknown mode: $mode. Use 'benchmark', 'simulate', or 'tendency'.")
+            error("Unknown mode: $mode. Use 'benchmark', 'simulate', 'scalar_tendency', or 'model_tendency'.")
         end
         push!(results, result)
     end
