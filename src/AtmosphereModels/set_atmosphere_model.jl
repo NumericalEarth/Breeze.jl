@@ -165,8 +165,15 @@ Variables are set via keyword arguments. Supported variables include:
 
 - `enforce_mass_conservation`: If `true` (default), applies a pressure correction
   to ensure the velocity field satisfies the anelastic continuity equation.
+- `balancer`: adiabatic (FV3 `na_init`) spin-up of the nonhydrostatic state, run in place after the
+  rest of `set!` — equivalent to calling `balance_adiabatically!(model, balancer)`. `false`
+  (default) does nothing; `true` uses `AdiabaticBalancer()` (auto step size); pass an
+  [`AdiabaticBalancer`](@ref) to control `Δt`, `cycles`, `weight`,
+  `with_moisture`, and (compressible) `time_stepping`. The balance runs on a stripped twin that
+  shares all field memory with `model` (no second field set, no graft). Works for both
+  `CompressibleDynamics` and `AnelasticDynamics`.
 """
-function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true, kw...)
+function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true, balancer=false, kw...)
     if !isnothing(time)
         model.clock.time = time
     end
@@ -306,6 +313,9 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     end
 
     initialize_closure_fields!(model.closure_fields, model.closure, model)
+
+    # Optional adiabatic (FV3 na_init) spin-up of the nonhydrostatic state, in place.
+    balancer === false || balance_adiabatically!(model, balancer)
 
     return nothing
 end
