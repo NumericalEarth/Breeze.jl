@@ -17,7 +17,8 @@ using Breeze.AtmosphereModels:
     set_to_mean!,
     specific_humidity,
     liquid_mass_fraction,
-    ice_mass_fraction
+    ice_mass_fraction,
+    total_density
 
 using Oceananigans
 using Oceananigans.Fields: ZeroField
@@ -555,5 +556,25 @@ end
 
         set!(model; ρ=1, θˡⁱ=300, qᵗ=0, compute_reference_state=true)
         @test model.dynamics.reference_state === nothing   # unchanged; no error
+    end
+
+    # `ρ = HydrostaticallyBalancedDensity()` integrates the hydrostatic column from the surface
+    # pressure. For a uniform θ it must reproduce a fresh ExnerReferenceState built at that θ (same
+    # per-column integration), to machine precision — and the balanced state survives the default
+    # mass-conservation correction.
+    @testset "HydrostaticallyBalancedDensity sets a balanced column" begin
+        θ  = 300
+        p₀ = 101325
+
+        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ, surface_pressure=p₀)
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=θ, surface_pressure=p₀)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+
+        set!(model; θˡⁱ=θ, qᵗ=0, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀))
+
+        @test model.dynamics.pressure        ≈ ref_truth.pressure rtol=1e-6
+        @test total_density(model.dynamics)  ≈ ref_truth.density  rtol=1e-6
     end
 end

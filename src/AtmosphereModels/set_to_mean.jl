@@ -1,5 +1,7 @@
 using ..Thermodynamics: ReferenceState, ExnerReferenceState, compute_hydrostatic_reference!,
-                        _compute_exner_reference!, dry_air_gas_constant, vapor_gas_constant
+                        _compute_exner_reference!, _compute_exner_reference_3d!,
+                        dry_air_gas_constant, vapor_gas_constant
+using Oceananigans: CenterField
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
@@ -174,6 +176,72 @@ end
 function mean_mass_fraction!(ref_field, ::Nothing)
     interior(ref_field) .= 0
     fill_halo_regions!(ref_field)
+    return nothing
+end
+
+"""
+    HydrostaticallyBalancedDensity(; surface_pressure = nothing)
+
+Marker passed as the `ρ` value to [`set!`](@ref) to set the density — and seed the pressure — in
+discrete moist hydrostatic balance with the just-set `θˡⁱ`/`qᵛ`, by per-column integration of the
+hydrostatic equation upward from `surface_pressure` (a scalar; defaults to the dynamics' mean
+surface pressure). For `CompressibleDynamics`.
+
+Unlike supplying a density field, this guarantees the initial column satisfies the discrete
+hydrostatic balance `(pᵏ − pᵏ⁻¹)/Δz + g(ρᵏ + ρᵏ⁻¹)/2 = 0`, so the cold start carries no spurious
+vertical pressure-gradient force. Combine with `compute_reference_state = true` (perturbation-form
+base state) and `balancer` (nonhydrostatic `ρw` spin-up) for a full one-call initialization.
+"""
+struct HydrostaticallyBalancedDensity{P}
+    surface_pressure :: P
+end
+
+HydrostaticallyBalancedDensity(; surface_pressure = nothing) = HydrostaticallyBalancedDensity(surface_pressure)
+
+"""
+$(TYPEDSIGNATURES)
+
+Set the prognostic density (and seed the diagnostic pressure) of a `CompressibleDynamics` model into
+discrete hydrostatic balance with the current `θˡⁱ`/`qᵛ`, per [`HydrostaticallyBalancedDensity`](@ref).
+Runs the same per-column Exner integration the reference-state constructor uses, then scales the dry
+density (and rescales the density-weighted prognostics, preserving `θ`, `qˣ`, and velocities) so the
+total density matches the balanced column.
+"""
+function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalancedDensity)
+    dynamics  = model.dynamics
+    grid      = model.grid
+    arch      = architecture(grid)
+    Nz        = size(grid, 3)
+    constants = model.thermodynamic_constants
+
+    p₀  = isnothing(spec.surface_pressure) ? dynamics.surface_pressure : spec.surface_pressure
+    pˢᵗ = dynamics.standard_pressure
+    Rᵈ  = dry_air_gas_constant(constants)
+    Rᵛ  = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    g   = constants.gravitational_acceleration
+
+    θ  = model.formulation.potential_temperature   # specific θˡⁱ, filled by the preceding update_state!
+    qᵛ = specific_prognostic_moisture(model)
+
+    # Per-column hydrostatic integration → balanced pressure (seeded into the model) + total density.
+    pressure = dynamics_pressure(dynamics)
+    π = CenterField(grid)
+    ρ = CenterField(grid)
+    launch!(arch, grid, :xy, _compute_exner_reference_3d!,
+            π, pressure, ρ, θ, qᵛ, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    fill_halo_regions!(pressure)
+
+    # Scale the prognostic dry density so the diagnosed total density equals the balanced column ρ,
+    # then rescale the density-weighted prognostics to preserve θ, qˣ, and the velocities.
+    ρᵈ     = dynamics_density(dynamics)
+    ρᵈ_old = copy(parent(ρᵈ))
+    parent(ρᵈ) .*= parent(ρ) ./ parent(total_density(dynamics))
+    fill_halo_regions!(ρᵈ)
+    rescale_density_weighted_fields!(model, ρᵈ_old)
+
+    update_state!(model; compute_tendencies=false)
     return nothing
 end
 

@@ -36,6 +36,7 @@ export
     ExplicitTimeStepping,
     balance_adiabatically!,
     AdiabaticBalancer,
+    HydrostaticallyBalancedDensity,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,

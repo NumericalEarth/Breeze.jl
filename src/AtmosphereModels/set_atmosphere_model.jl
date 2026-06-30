@@ -128,6 +128,9 @@ Set variables in an [`AtmosphereModel`](@ref).
 Variables are set via keyword arguments. Supported variables include:
 
 **Prognostic variables** (density-weighted):
+- `ρ`/`ρᵈ`: total / dry density (compressible). `ρ` may also be set to
+  [`HydrostaticallyBalancedDensity()`](@ref), which derives the density from the just-set `θˡⁱ`/`qᵛ`
+  so the initial column is in discrete hydrostatic balance.
 - `ρu`, `ρv`, `ρw`: momentum components
 - `ρqᵉ`/`ρqᵛ`/`ρqᵗ`: moisture density (scheme-dependent)
 - Prognostic microphysical variables
@@ -192,7 +195,13 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     #           then splits it into ρᵈ = ρ − Σρqˣ and the diagnosed total-density field.
     #   `:ρᵈ` — dry density directly. `establish_densities!` recovers the total ρ = ρᵈ/qᵈ from ρᵈ and
     #           the moisture, then (re)weights the moisture partial densities by the total.
-    total_density_given = :ρ ∈ names
+    # `ρ = HydrostaticallyBalancedDensity(...)` is a *deferred* density: it depends on the
+    # thermodynamic state, so it is skipped in phase 1 and computed at the end (after θ/qᵛ are set),
+    # by integrating the hydrostatic column — not treated as a supplied total-density field here.
+    balanced_density    = get(kw, :ρ, nothing)
+    hydrostatic_balance = balanced_density isa HydrostaticallyBalancedDensity
+
+    total_density_given = (:ρ ∈ names) && !hydrostatic_balance
     dry_density_given   = :ρᵈ ∈ names
     prioritized = prioritize_names(names)
 
@@ -248,8 +257,10 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         elseif name == :ρ || name == :ρᵈ
             # Write the given density into the dry-density field. For `:ρ` this is the TOTAL-density
             # placeholder (split by `establish_densities!`); for `:ρᵈ` it is the dry density directly.
+            # `HydrostaticallyBalancedDensity` is a deferred marker: write a unit placeholder now so
+            # the thermodynamic/kinematic sets have a nonzero ρᵈ; it is overwritten balanced later.
             ρ = dynamics_density(model.dynamics)
-            set!(ρ, value)
+            set!(ρ, value isa HydrostaticallyBalancedDensity ? one(eltype(model.grid)) : value)
             # Fill halos immediately - needed for velocity→momentum conversion
             fill_halo_regions!(ρ)
 
@@ -293,7 +304,9 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         return nothing
     end
 
-    # Phase 1: density, moisture, microphysics, tracers.
+    # Phase 1: density, moisture, microphysics, tracers. A deferred `ρ = HydrostaticallyBalancedDensity`
+    # marker sets a unit placeholder density here (so the phase-2 thermodynamic/kinematic sets have a
+    # nonzero ρᵈ to weight against); the balanced density is computed after the state is set, below.
     for name in prioritized
         is_phase_two(name) || apply_set!(name, kw[name])
     end
@@ -315,6 +328,12 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     # mass-conservation correction so the pressure projection uses the new reference.
     if compute_reference_state
         reset_reference_state!(model)
+    end
+
+    # Set the density (and seed the pressure) into discrete hydrostatic balance with the just-set
+    # thermodynamic state, before the mass-conservation correction.
+    if hydrostatic_balance
+        set_hydrostatically_balanced_density!(model, balanced_density)
     end
 
     if enforce_mass_conservation
