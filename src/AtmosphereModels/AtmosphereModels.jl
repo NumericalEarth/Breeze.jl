@@ -4,6 +4,11 @@ export
     # AtmosphereModel core
     AtmosphereModel,
     AtmosphereModelBuoyancy,
+    # Vector-invariant momentum advection
+    CompressibleVectorInvariant,
+    CompressibleWENOVectorInvariant,
+    HorizontalDivergence,
+    ThreeDimensionalDivergence,
     # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
     dynamics_pressure,
@@ -142,6 +147,7 @@ include("atmosphere_model_buoyancy.jl")
 include("solar_position.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
+include("vector_invariant_advection.jl")
 include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")

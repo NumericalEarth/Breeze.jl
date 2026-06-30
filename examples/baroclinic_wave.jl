@@ -104,7 +104,7 @@ H  = 30kilometers
 
 grid = LatitudeLongitudeGrid(GPU();
                              size = (Nλ, Nφ, Nz),
-                             halo = (5, 5, 5),
+                             halo = (6, 6, 5),
                              longitude = (0, 360),
                              latitude = (-75, 75),
                              z = (0, H))
@@ -230,9 +230,28 @@ dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();  # default da
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
+# For momentum we use [`CompressibleWENOVectorInvariant`](@ref) in its MPAS-faithful
+# [`HorizontalDivergence`](@ref) flavor: an MPAS-style vector-invariant scheme for the
+# coupled momentum `ρ𝐮` that advects the horizontal momentum through the
+# absolute-vorticity flux and kinetic-energy gradient (not a flux-form divergence),
+# with flux-form vertical advection and a horizontal mass-divergence correction. The
+# WENO reconstruction supplies the scale-selective dissipation that keeps the scheme
+# stable on the latitude–longitude C-grid (the vector-invariant form is otherwise
+# prone to the Hollingsworth instability there). Scalars use flux-form `WENO`.
+
+# We use a `WENO` reconstruction for the flux-form vertical advection of momentum
+# (`vertical_scheme`) as well as for the vorticity and kinetic-energy gradients. A
+# non-dissipative centered vertical reconstruction lets grid-scale vertical-velocity
+# noise build up once the wave matures (sharp fronts, strong updrafts) and the run
+# destabilizes around day 14; WENO supplies the scale-selective dissipation that
+# keeps the mature wave clean — matching the all-WENO robustness of the flux-form
+# reference, so no additional explicit closure is needed.
+
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        advection = WENO())
+                        momentum_advection = CompressibleWENOVectorInvariant(; divergence = HorizontalDivergence(),
+                                                                              vertical_scheme = WENO()),
+                        scalar_advection = WENO())
 
 # ## Set initial conditions
 

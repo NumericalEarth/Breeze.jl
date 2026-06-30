@@ -32,9 +32,9 @@ end
 Example(title::String, basename::String; build_always::Bool, gpu::Bool) =
     Example(title, basename, build_always, gpu)
 
-# NOTE: temporarily building only the stratified thermal bubble + baroclinic wave to validate the
-# acoustic-substep changes in this PR (esp. that the baroclinic wave completes). Restore the rest
-# before merge.
+# NOTE (vector-invariant PR): temporarily building only the stratified thermal bubble + baroclinic
+# wave to validate CompressibleWENOVectorInvariant (esp. that the baroclinic wave completes on GPU).
+# Restore the full list before merge.
 examples = [
     Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
     # Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
@@ -51,7 +51,7 @@ examples = [
     # Example("Cloud formation in prescribed updraft", "kinematic_driver"; build_always=true, gpu=false),
     # Example("Schär mountain wave with terrain-following coordinates", "two_dimension_mountain_wave"; build_always=false, gpu=true),
     # Example("Splitting supercell", "splitting_supercell"; build_always=false, gpu=true),
-    Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=false),
+    Example("Baroclinic wave on the sphere", "baroclinic_wave"; build_always=true, gpu=true),
     # Example("Tropical cyclone world", "tropical_cyclone_world"; build_always=false, gpu=true),
     # Example("Tropical cyclone with stratiform rainband heating (YD19)", "tropical_cyclone_with_rainband"; build_always=false, gpu=true),
     # Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
