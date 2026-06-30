@@ -51,7 +51,7 @@
 # center and is tapered smoothly to zero above 15 km:
 #
 # ```math
-# u'(λ, φ, z) = u_p \, \mathcal{T}(z) \, \exp\!\left(-\left(\frac{d}{r_p}\right)^2\right)
+# u'(λ, φ, z) = u_p \, \mathcal{T}(z) \, \exp \left( -d^2 / r_p^2 \right)
 # ```
 #
 # where ``d`` is the great-circle distance, ``r_p = 0.1\,a``, ``u_p = 1`` m/s,
@@ -226,7 +226,7 @@ coriolis = SphericalCoriolis(rotation_rate=Ω)
 T₀ᵣ = 250
 θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
 
-dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();  # default damping: ThermalDivergenceDamping(coefficient = 0.1)
+dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=0.7);
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
