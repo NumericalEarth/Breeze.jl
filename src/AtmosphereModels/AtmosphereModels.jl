@@ -4,6 +4,9 @@ export
     # AtmosphereModel core
     AtmosphereModel,
     AtmosphereModelBuoyancy,
+    # Adiabatic (FV3 na_init) initialization
+    balance_adiabatically!,
+    AdiabaticBalancer,
     # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
     dynamics_pressure,
@@ -156,5 +159,10 @@ using .Diagnostics
 # set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
 include("set_atmosphere_model.jl")
 include("set_to_mean.jl")
+
+# Adiabatic (FV3 na_init) initialization. The dynamics-specific twin construction
+# (`adiabatic_twin_dynamics`) is extended in CompressibleEquations; the generic fallback here keeps
+# the balance solver-agnostic.
+include("adiabatic_balance.jl")
 
 end

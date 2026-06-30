@@ -330,6 +330,65 @@ Return the prognostic density field for `CompressibleDynamics`.
 """
 AtmosphereModels.dynamics_density(dynamics::CompressibleDynamics) = dynamics.dry_density
 
+"""
+$(TYPEDSIGNATURES)
+
+Return a `CompressibleDynamics` identical to `dynamics` but with its `time_discretization`
+replaced. Every field (densities, pressure, reference and terrain states) is shared by
+reference — only the immutable scheme wrapper changes — so this allocates no field memory. Used
+to build the adiabatic-balance twin (an `ExplicitTimeStepping` view of a production model).
+"""
+with_time_discretization(dynamics::CompressibleDynamics, time_discretization) =
+    CompressibleDynamics(time_discretization,
+                         dynamics.dry_density,
+                         dynamics.total_density,
+                         dynamics.pressure,
+                         dynamics.standard_pressure,
+                         dynamics.surface_pressure,
+                         dynamics.reference_state,
+                         dynamics.terrain_metrics,
+                         dynamics.contravariant_vertical_velocity,
+                         dynamics.contravariant_vertical_momentum,
+                         dynamics.terrain_reference_pressure,
+                         dynamics.terrain_reference_density)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a copy of `time_discretization` with its upper sponge removed. The adiabatic-balance
+excursion must be reversible, and the sponge (like divergence damping) is an irreversible term;
+`balance_adiabatically!` therefore requires a sponge-free model. No-op for discretizations that
+carry no sponge (e.g. `ExplicitTimeStepping`).
+"""
+without_sponge(time_discretization) = time_discretization
+
+without_sponge(td::SplitExplicitTimeDiscretization) =
+    SplitExplicitTimeDiscretization(td.substeps,
+                                    td.acoustic_cfl,
+                                    td.forward_weight,
+                                    td.thermodynamic_tendency_factor,
+                                    td.vertical_momentum_tendency_factor,
+                                    td.vertical_pressure_tendency_factor,
+                                    td.final_stage_vertical_pressure_tendency_factor,
+                                    td.apply_first_substep_pressure_gradient,
+                                    td.damping,
+                                    nothing,
+                                    td.substep_distribution,
+                                    td.open_boundary_relaxation)
+
+# Adiabatic-balance twin dynamics (extends the solver-agnostic fallback in AtmosphereModels). The
+# sponge is always stripped — it is irreversible. The default builds the fully-explicit twin
+# (memory-minimal, cleanly reversible); `nothing` reuses the model's native scheme; any other value
+# is taken as the twin's time discretization.
+AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, ::AtmosphereModels.DefaultTimeStepping) =
+    with_time_discretization(dynamics, ExplicitTimeStepping())
+
+AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, ::Nothing) =
+    with_time_discretization(dynamics, without_sponge(dynamics.time_discretization))
+
+AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_stepping) =
+    with_time_discretization(dynamics, without_sponge(time_stepping))
+
 # Total air density ρ = ρᵈ + Σρˣ (diagnosed once per update into `total_density`); this is the
 # density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
