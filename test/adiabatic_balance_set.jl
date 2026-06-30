@@ -9,6 +9,8 @@
 ##### - resolve_balance_Δt: auto acoustic-CFL step, explicit override round-trips.
 ##### - Fixed point: a discrete-balanced rest state is preserved; the production clock is untouched.
 ##### - with_moisture: false preserves ρqᵉ bit-for-bit; true lets it relax.
+##### - Equivalence + non-degeneracy: the in-place twin reproduces a hand-stripped explicit graft,
+#####   and an out-of-balance analysis develops nonzero ρw (catches a silent no-op / NaN blow-up).
 ##### - Anelastic: the balance also works on AnelasticDynamics (dynamics reused as-is).
 #####
 
@@ -55,7 +57,7 @@ end
 @testset "AdiabaticBalancer / balance_adiabatically!(model, balancer)" begin
 
     @testset "twin shares memory and is correctly stripped" begin
-        model = _build_production(default_arch)
+        model = _build_production(default_arch; Nx = 32, Ny = 32, Nz = 48)
         twin  = adiabatic_balance_twin(model)
 
         # Every heavy field is the SAME object, not a copy.
@@ -82,11 +84,12 @@ end
         @test model.dynamics.time_discretization isa SplitExplicitTimeDiscretization
         @test twin.clock !== model.clock
 
-        # No field SETS allocated: the two aliased tendency sets (Gⁿ+U⁰ ≈ 12 fields) dwarf the
-        # one-time NamedTuple/struct scratch the builder does allocate.
+        # The builder's one-time NamedTuple/forcing/stepper scratch is grid-INDEPENDENT (~270 KB),
+        # so on this large grid it is well under one field (~0.3×); reallocating either aliased
+        # tendency set (Gⁿ or U⁰, 6 fields each) instead of sharing it would blow well past one field.
         one_field_bytes = sizeof(parent(model.momentum.ρu))
         adiabatic_balance_twin(model)  # compile
-        @test (@allocated adiabatic_balance_twin(model)) < 12 * one_field_bytes
+        @test (@allocated adiabatic_balance_twin(model)) < one_field_bytes
     end
 
     @testset "native time stepping (time_stepping = nothing) reuses the split-explicit scheme" begin
@@ -155,6 +158,63 @@ end
 
         set!(model; balancer = AdiabaticBalancer(Δt = 0.1, with_moisture = true))
         @test isfinite(maximum(abs, model.moisture_density))
+    end
+
+    @testset "in-place twin reproduces a hand-stripped explicit graft (non-degenerate)" begin
+        Δt, cycles = 0.5, 2
+
+        # Near-balanced moist analysis shared by both paths: discrete rest state + a small smooth
+        # thermal bump (mild hydrostatic imbalance → ρw spins up but stays finite) + subsaturated qᵗ.
+        function analysis!(m)
+            _set_discrete_rest!(m)
+            set!(m; qᵗ = (x, y, z) -> 4e-3 * exp(-z / 3e3))
+            δ = CenterField(m.grid)
+            set!(δ, (x, y, z) -> 5.0 * exp(-((z - 5e3) / 1.5e3)^2))
+            parent(ρθ_of(m)) .+= parent(δ)
+            update_state!(m)
+            return m
+        end
+
+        # Path A — in-place twin on a moist production model. The default ExplicitTimeStepping twin
+        # balances (ρ, ρu, ρv, ρw, ρθ); with_moisture = false preserves ρqᵉ.
+        model = _build_production(default_arch; microphysics = SaturationAdjustment())
+        analysis!(model)
+        ρqᵉ_analysis = deepcopy(model.moisture_density)
+        balance_adiabatically!(model, AdiabaticBalancer(Δt = Δt, cycles = cycles, with_moisture = false))
+
+        # Path B — an independent, hand-stripped moistureless model built directly on
+        # ExplicitTimeStepping (matching the default twin), balanced via the low-level routine.
+        grid = model.grid
+        dyn  = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature = θ_iso_bs,
+                                    surface_pressure = 1e5, standard_pressure = 1e5)
+        ref  = AtmosphereModel(grid; dynamics = dyn,
+                               thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
+                               microphysics = nothing, coriolis = nothing)
+        analysis!(ref)
+        balance_adiabatically!(ref; Δt = Δt, cycles = cycles)
+
+        # The in-place twin reproduces the graft (identical explicit scheme + identical IC).
+        for (a, b) in zip((dynamics_density(model.dynamics), model.momentum.ρu, model.momentum.ρv,
+                           model.momentum.ρw, ρθ_of(model)),
+                          (dynamics_density(ref.dynamics), ref.momentum.ρu, ref.momentum.ρv,
+                           ref.momentum.ρw, ρθ_of(ref)))
+            @test a ≈ b rtol=1e-8
+        end
+
+        # Non-degenerate: the imbalance develops nonzero ρw (else the match above is vacuous; this
+        # also catches a NaN blow-up, since `NaN > 0` is false).
+        @test maximum(abs, model.momentum.ρw) > 0
+        @test maximum(abs, ref.momentum.ρw)   > 0
+
+        # ρqᵉ preserved bit-for-bit — the graft never touches moisture.
+        @test maximum(abs, model.moisture_density - ρqᵉ_analysis) == 0
+    end
+
+    @testset "edge cases: Bool no-op and unsupported dynamics" begin
+        model = _build_production(default_arch)
+        @test balance_adiabatically!(model, false) === model                 # Bool false → no-op
+        # The twin builder only supports CompressibleDynamics / AnelasticDynamics; anything else errors.
+        @test_throws ArgumentError adiabatic_balance_twin(model, 0.0, AdiabaticBalancer())
     end
 
     @testset "AnelasticDynamics: twin reuses the projection scheme; rest state preserved" begin
