@@ -376,6 +376,19 @@ without_sponge(td::SplitExplicitTimeDiscretization) =
                                     td.substep_distribution,
                                     td.open_boundary_relaxation)
 
+# Adiabatic-balance twin dynamics (extends the solver-agnostic fallback in AtmosphereModels). The
+# sponge is always stripped — it is irreversible. The default builds the fully-explicit twin
+# (memory-minimal, cleanly reversible); `nothing` reuses the model's native scheme; any other value
+# is taken as the twin's time discretization.
+AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, ::AtmosphereModels.DefaultTimeStepping) =
+    with_time_discretization(dynamics, ExplicitTimeStepping())
+
+AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, ::Nothing) =
+    with_time_discretization(dynamics, without_sponge(dynamics.time_discretization))
+
+AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_stepping) =
+    with_time_discretization(dynamics, without_sponge(time_stepping))
+
 # Total air density ρ = ρᵈ + Σρˣ (diagnosed once per update into `total_density`); this is the
 # density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.

@@ -185,7 +185,7 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     zspacings, ∂x, ∂y, ∂z
 
 using Oceananigans.Grids: znode, MutableVerticalDiscretization
-using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition, fill_halo_regions!
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 
 export
     CPU, GPU,
@@ -258,21 +258,11 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
                               ExplicitTimeStepping
 
-# Adiabatic (FV3 na_init) initialization — dynamics-agnostic, dispatches on the
-# initial_fields method for CompressibleModel / AnelasticModel.
-using DocStringExtensions: TYPEDSIGNATURES
-using Oceananigans.TimeSteppers: update_state!, reset!
-include("balance_adiabatically.jl")
-
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
 
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
-
-# `set!(model; balancer = …)` adiabatic initialization — needs SSPRungeKutta3 (TimeSteppers above)
-# and CompressibleEquations.with_time_discretization (included earlier).
-include("adiabatic_balance.jl")
 
 include("ParcelModels/ParcelModels.jl")
 using .ParcelModels
