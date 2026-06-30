@@ -174,10 +174,9 @@ for arch in arches
             @test td.damping.coefficient isa FT
             acoustic = AcousticSubstepper(grid, td)
             @test acoustic.substeps === nothing  # adaptive by default
-            @test acoustic.forward_weight ≈ FT(0.65)  # off-centered CN, ε = 2ω - 1 = 0.3
-            # Default damping is ThermalDivergenceDamping(0.1) (Klemp/Skamarock/Ha 2018
-            # with the vertical part left to CN off-centering by default); required
-            # for stability of the WS-RK3 + substepper coupling at production Δt.
+            @test acoustic.forward_weight ≈ FT(0.8)  # off-centered CN, ε = 2ω - 1 = 0.6
+            # Default damping is ThermalDivergenceDamping (the proven config; isolating whether the
+            # baroclinic-wave blow-up is the damping form or the recip/per-stage substep changes).
             @test acoustic.damping isa ThermalDivergenceDamping
             @test acoustic.damping.coefficient ≈ FT(0.1)
             @test acoustic.linearization_potential_temperature isa Oceananigans.Fields.Field
@@ -245,7 +244,6 @@ for arch in arches
         model = AtmosphereModel(grid;
                                 advection = WENO(),
                                 dynamics,
-                                timestepper = :AcousticRungeKutta3,
                                 boundary_conditions)
 
         # The perturbation field uses topology defaults — west/east sides on
@@ -267,7 +265,7 @@ for arch in arches
         @test model.clock.iteration == 1
         @test !any(isnan, parent(model.momentum.ρu))
         @test !any(isnan, parent(model.momentum.ρw))
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
     end
 
     #####
@@ -310,24 +308,22 @@ for arch in arches
                                         topology=(Periodic, Periodic, Bounded))
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid_periodic; advection=WENO(), dynamics,
-                                timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid_periodic; advection=WENO(), dynamics)
         set!(model; θ=300, u=0, qᵗ=0, ρ=model.dynamics.reference_state.density)
         run!(Simulation(model; Δt=1, stop_iteration=1, verbose=false))
         @test model.clock.iteration == 1
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
 
         # Bounded but no OBC supplied: the prognostic-momentum BCs default to
         # impenetrable walls, which `is_active_open_bc` returns false for.
         grid_walls = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
                                      x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
                                      topology=(Bounded, Bounded, Bounded))
-        model_walls = AtmosphereModel(grid_walls; advection=WENO(), dynamics,
-                                      timestepper=:AcousticRungeKutta3)
+        model_walls = AtmosphereModel(grid_walls; advection=WENO(), dynamics)
         set!(model_walls; θ=300, u=0, qᵗ=0, ρ=model_walls.dynamics.reference_state.density)
         run!(Simulation(model_walls; Δt=1, stop_iteration=1, verbose=false))
         @test model_walls.clock.iteration == 1
-        @test !any(isnan, parent(model_walls.dynamics.density))
+        @test !any(isnan, parent(model_walls.dynamics.dry_density))
     end
 
     @testset "Open-boundary relaxation pulls outermost cell toward prescribed ρ, ρθ [$(arch), $(FT)]" for FT in as_test_float_types(arch)
@@ -371,16 +367,15 @@ for arch in arches
                                          east  = ValueBoundaryCondition(ρθ_wall),
                                          south = ValueBoundaryCondition(ρθ_wall),
                                          north = ValueBoundaryCondition(ρθ_wall))
-        boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+        boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρᵈ = ρ_bcs, ρθ = ρθ_bcs)
 
         model = AtmosphereModel(grid; advection=WENO(), dynamics,
-                                timestepper=:AcousticRungeKutta3,
                                 boundary_conditions)
         set!(model; θ=300, u=0, qᵗ=0, ρ=ρ_ref0)
 
         run!(Simulation(model; Δt=1, stop_iteration=3, verbose=false))
         @test model.clock.iteration == 3
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
 
         # After the relaxation has fired across ~`Nτ` substeps per outer step,
         # the cumulative pull `1 − (1−α)^Nτ` saturates and the outermost cell of
@@ -389,7 +384,7 @@ for arch in arches
         # boundary influence in both horizontal directions.
         Nx = size(grid, 1)
         Ny = size(grid, 2)
-        ρ_int  = interior(model.dynamics.density)
+        ρ_int  = interior(model.dynamics.dry_density)
         ρθ_int = interior(thermodynamic_density(model.formulation))
 
         ρ_west  = @allowscalar mean(ρ_int[1,    :, :])
@@ -457,15 +452,15 @@ for arch in arches
                                          east  = ValueBoundaryCondition(FT(ρ_wall_east  * 300)),
                                          south = ValueBoundaryCondition(FT(ρ_wall_south * 300)),
                                          north = ValueBoundaryCondition(FT(ρ_wall_north * 300)))
-        boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+        boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρᵈ = ρ_bcs, ρθ = ρθ_bcs)
 
         model = AtmosphereModel(grid; advection=WENO(), dynamics,
-                                timestepper=:AcousticRungeKutta3, boundary_conditions)
+                                boundary_conditions)
         set!(model; θ=300, u=0, qᵗ=0, ρ=ρ_ref0)
         run!(Simulation(model; Δt=1, stop_iteration=3, verbose=false))
 
         Nx = size(grid, 1); Ny = size(grid, 2)
-        ρ_int = interior(model.dynamics.density)
+        ρ_int = interior(model.dynamics.dry_density)
         ρ_west  = @allowscalar mean(ρ_int[1,    :, :])
         ρ_east  = @allowscalar mean(ρ_int[Nx,   :, :])
         ρ_south = @allowscalar mean(ρ_int[:, 1,    :])
@@ -503,9 +498,9 @@ for arch in arches
                                              east = ValueBoundaryCondition(ρ_wall))
             ρθ_bcs = FieldBoundaryConditions(west = ValueBoundaryCondition(FT(ρ_wall * 300)),
                                              east = ValueBoundaryCondition(FT(ρ_wall * 300)))
-            boundary_conditions = (; ρu = ρu_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+            boundary_conditions = (; ρu = ρu_bcs, ρᵈ = ρ_bcs, ρθ = ρθ_bcs)
             model = AtmosphereModel(grid; advection=WENO(), dynamics,
-                                    timestepper=:AcousticRungeKutta3, boundary_conditions)
+                                    boundary_conditions)
             set!(model; θ=300, u=0, qᵗ=0, ρ=ρ_ref0)
             run!(Simulation(model; Δt=1, stop_iteration=3, verbose=false))
             return model, ρ_wall
@@ -515,8 +510,8 @@ for arch in arches
         model_high, _      = build_α_model(1.0)
 
         Nx = size(model_low.grid, 1)
-        ρ_west_low  = @allowscalar mean(interior(model_low.dynamics.density)[1, :, :])
-        ρ_west_high = @allowscalar mean(interior(model_high.dynamics.density)[1, :, :])
+        ρ_west_low  = @allowscalar mean(interior(model_low.dynamics.dry_density)[1, :, :])
+        ρ_west_high = @allowscalar mean(interior(model_high.dynamics.dry_density)[1, :, :])
 
         @test abs(ρ_west_high - ρ_wall) < abs(ρ_west_low - ρ_wall)
     end
@@ -545,15 +540,15 @@ for arch in arches
                                          east = ValueBoundaryCondition(ρ_wall))
         ρθ_bcs = FieldBoundaryConditions(west = ValueBoundaryCondition(FT(ρ_wall * 300)),
                                          east = ValueBoundaryCondition(FT(ρ_wall * 300)))
-        boundary_conditions = (; ρu = ρu_bcs, ρ = ρ_bcs, ρθ = ρθ_bcs)
+        boundary_conditions = (; ρu = ρu_bcs, ρᵈ = ρ_bcs, ρθ = ρθ_bcs)
 
         model = AtmosphereModel(grid; advection=WENO(), dynamics,
-                                timestepper=:AcousticRungeKutta3, boundary_conditions)
+                                boundary_conditions)
         set!(model; θ=300, u=0, qᵗ=0, ρ=ρ_ref0)
         run!(Simulation(model; Δt=1, stop_iteration=3, verbose=false))
 
         Nx = size(grid, 1)
-        ρ_int = interior(model.dynamics.density)
+        ρ_int = interior(model.dynamics.dry_density)
         ρ_west = @allowscalar mean(ρ_int[1,  :, :])
         ρ_east = @allowscalar mean(ρ_int[Nx, :, :])
 
@@ -621,7 +616,7 @@ for arch in arches
         Oceananigans.defaults.FloatType = FT
         td_default = SplitExplicitTimeDiscretization()
         td_strict  = SplitExplicitTimeDiscretization(; acoustic_cfl = 0.25)
-        @test td_default.acoustic_cfl == FT(0.5)
+        @test td_default.acoustic_cfl == FT(0.7)
         @test td_strict.acoustic_cfl  == FT(0.25)
 
         # Rejects nonpositive values.
@@ -646,8 +641,7 @@ for arch in arches
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
         model = AtmosphereModel(grid;
-                                dynamics,
-                                timestepper=:AcousticRungeKutta3)
+                                dynamics)
 
         @test model.timestepper isa AcousticRungeKutta3
         @test model.timestepper.substepper isa AcousticSubstepper
@@ -683,8 +677,7 @@ for arch in arches
                                         reference_potential_temperature=300)
         model = AtmosphereModel(grid;
                                 advection=WENO(),
-                                dynamics,
-                                timestepper=:AcousticRungeKutta3)
+                                dynamics)
 
         ref = model.dynamics.reference_state
         set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
@@ -695,7 +688,7 @@ for arch in arches
         @test model.clock.iteration == 5
         @test !any(isnan, parent(model.momentum.ρu))
         @test !any(isnan, parent(model.momentum.ρw))
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
     end
 
     #####
@@ -716,8 +709,7 @@ for arch in arches
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; advection=WENO(), dynamics,
-                                timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics)
 
         ref = model.dynamics.reference_state
         # Small smooth θ anomaly so the forward step produces non-trivial
@@ -726,7 +718,7 @@ for arch in arches
         θ₀(x, y, z) = FT(300) + FT(0.1) * sin(π * z / Lz)
         set!(model; θ=θ₀, u=0, qᵗ=0, ρ=ref.density)
 
-        ρ_init  = Array(parent(model.dynamics.density))
+        ρ_init  = Array(parent(model.dynamics.dry_density))
         ρu_init = Array(parent(model.momentum.ρu))
         ρw_init = Array(parent(model.momentum.ρw))
 
@@ -739,7 +731,7 @@ for arch in arches
         @test model.clock.time ≈ 0 atol=sqrt(eps(FT))
 
         # Doesn't blow up.
-        for field in (model.dynamics.density, model.momentum.ρu, model.momentum.ρw)
+        for field in (model.dynamics.dry_density, model.momentum.ρu, model.momentum.ρw)
             @test !any(isnan, parent(field))
             @test !any(isinf, parent(field))
         end
@@ -748,7 +740,7 @@ for arch in arches
         # magnitude smaller than the disturbance produced by the forward step.
         # Use a relative tolerance for ρ (which has a meaningful baseline)
         # and an absolute tolerance for ρu, ρw (which start from rest).
-        ρ_final  = Array(parent(model.dynamics.density))
+        ρ_final  = Array(parent(model.dynamics.dry_density))
         ρu_final = Array(parent(model.momentum.ρu))
         ρw_final = Array(parent(model.momentum.ρw))
         @test isapprox(ρ_final,  ρ_init;  rtol=1e-3)
@@ -763,7 +755,7 @@ for arch in arches
     ##### at advection-limited Δt=12 to verify the acoustic substepping is stable.
     #####
 
-    function build_igw_model(arch; timestepper=:AcousticRungeKutta3, Ns=8, κᵈ=0.05)
+    function build_igw_model(arch; Ns=8, κᵈ=0.05)
         Nx, Ny, Nz = 100, 6, 10
         Lx, Ly, Lz = 100kilometers, 6kilometers, 10kilometers
 
@@ -790,7 +782,7 @@ for arch in arches
         dynamics = CompressibleDynamics(td; surface_pressure=p₀,
                                         reference_potential_temperature=θᵇᵍ)
 
-        model = AtmosphereModel(grid; advection=WENO(), dynamics, timestepper)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics)
 
         ref = model.dynamics.reference_state
         set!(model; θ=θᵢ, u=U, qᵗ=0, ρ=ref.density)
@@ -801,13 +793,13 @@ for arch in arches
     @testset "IGW stability: WS-RK3 (Δt=12, Ns=8) [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         Oceananigans.defaults.FloatType = FT
 
-        model = build_igw_model(arch; timestepper=:AcousticRungeKutta3, Ns=8, κᵈ=0.10)
+        model = build_igw_model(arch; Ns=8, κᵈ=0.10)
 
         simulation = Simulation(model; Δt=12, stop_iteration=20, verbose=false)
         run!(simulation)
 
         @test model.clock.iteration == 20
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
         @test !any(isnan, parent(model.momentum.ρw))
 
         # max|w| should remain bounded
@@ -815,7 +807,7 @@ for arch in arches
         @test w_max < 1.0
 
         # Density should remain physical
-        ρ_min = @allowscalar minimum(interior(model.dynamics.density))
+        ρ_min = @allowscalar minimum(interior(model.dynamics.dry_density))
         @test ρ_min > 0
     end
 
@@ -867,12 +859,14 @@ for arch in arches
                                             surface_pressure,
                                             standard_pressure,
                                             reference_potential_temperature = θ_background)
-            timestepper = :AcousticRungeKutta3
+            timestepper = nothing  # auto-selects :AcousticRungeKutta3 for split-explicit dynamics
         else
             error("Unknown tiny bubble model kind: $kind")
         end
 
-        model = AtmosphereModel(grid; advection = WENO(), dynamics, timestepper)
+        model = isnothing(timestepper) ?
+            AtmosphereModel(grid; advection = WENO(), dynamics) :
+            AtmosphereModel(grid; advection = WENO(), dynamics, timestepper)
 
         Δθ = 10
         radius = 2kilometers
@@ -1002,8 +996,7 @@ for arch in arches
         td = SplitExplicitTimeDiscretization(substeps=8,
                                              damping=ThermalDivergenceDamping(coefficient=FT(0.5)))
         dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
-        model = AtmosphereModel(grid; advection=WENO(), dynamics,
-                                timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics)
 
         ref = model.dynamics.reference_state
         set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
@@ -1012,7 +1005,36 @@ for arch in arches
         run!(simulation)
 
         @test model.clock.iteration == 3
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
+    end
+
+    @testset "Direct DirectDivergenceDamping [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+
+        # Construction + propagation through the split-explicit time discretization.
+        @test DirectDivergenceDamping().coefficient isa FT
+        td0 = SplitExplicitTimeDiscretization(damping=DirectDivergenceDamping(coefficient=0.2))
+        @test td0.damping isa DirectDivergenceDamping
+        @test td0.damping.coefficient ≈ FT(0.2)
+
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
+
+        # Direct 3-D divergence damping: forms ∇·(ρ𝐮)′ explicitly rather than via the (ρθ)′ proxy.
+        td = SplitExplicitTimeDiscretization(substeps=8, damping=DirectDivergenceDamping(coefficient=FT(0.5)))
+        dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics)
+
+        ref = model.dynamics.reference_state
+        # Seed a horizontally divergent momentum perturbation for the damping to act on.
+        set!(model; θ=300, u=(x, y, z) -> FT(0.1) * sinpi(2x / 8kilometers), qᵗ=0, ρ=ref.density)
+
+        simulation = Simulation(model; Δt=6, stop_iteration=3, verbose=false)
+        run!(simulation)
+
+        @test model.clock.iteration == 3
+        @test !any(isnan, parent(model.momentum.ρu))
+        @test !any(isnan, parent(model.dynamics.dry_density))
     end
 
     #####
@@ -1152,14 +1174,14 @@ for arch in arches
             @test y_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test z_pressure_gradient(1, 1, 1, grid, slow) == 0
             @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, slow) == 0
-            @test dynamics_density(slow) === model.dynamics.density
+            @test dynamics_density(slow) === model.dynamics.dry_density
         end
 
         @testset "HorizontalSlowMode" begin
             hslow = HorizontalSlowMode(model.dynamics)
             @test z_pressure_gradient(1, 1, 1, grid, hslow) == 0
             @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, hslow) == 0
-            @test dynamics_density(hslow) === model.dynamics.density
+            @test dynamics_density(hslow) === model.dynamics.dry_density
         end
     end
 
@@ -1180,7 +1202,7 @@ for arch in arches
         run!(simulation)
 
         @test model.clock.iteration == 3
-        @test !any(isnan, parent(model.dynamics.density))
+        @test !any(isnan, parent(model.dynamics.dry_density))
         @test model.dynamics.reference_state === nothing
     end
 

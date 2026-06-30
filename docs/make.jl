@@ -32,6 +32,9 @@ end
 Example(title::String, basename::String; build_always::Bool, gpu::Bool) =
     Example(title, basename, build_always, gpu)
 
+# NOTE: temporarily building only the stratified thermal bubble + baroclinic wave to validate the
+# acoustic-substep changes in this PR (esp. that the baroclinic wave completes). Restore the rest
+# before merge.
 examples = [
     Example("Stratified dry thermal bubble", "dry_thermal_bubble"; build_always=true, gpu=false),
     # Example("Cloudy thermal bubble", "cloudy_thermal_bubble"; build_always=true, gpu=false),
