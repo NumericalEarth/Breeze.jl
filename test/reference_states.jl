@@ -6,6 +6,7 @@ using Breeze
 using Breeze.Thermodynamics:
     compute_reference_state!,
     compute_hydrostatic_reference!,
+    ExnerReferenceState,
     dry_air_gas_constant,
     hydrostatic_pressure,
     vapor_gas_constant,
@@ -496,5 +497,33 @@ end
         @test ρqᵗ_after ≈ ρqᵗ_before
         @test ρu_after  ≈ ρu_before
         @test ρw_after  ≈ ρw_before
+    end
+
+    #####
+    ##### set_to_mean! for the split-explicit ExnerReferenceState
+    #####
+    #
+    # Recomputing the Exner reference from a uniform model state at θ_new must reproduce a fresh
+    # ExnerReferenceState built directly at θ_new (the constructor and the recompute share the same
+    # discrete column integration), to machine precision.
+
+    @testset "set_to_mean! recomputes the Exner reference" begin
+        θ_init = FT(290)
+        θ_new  = FT(305)
+        p₀     = FT(101325)
+
+        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, surface_pressure=p₀)
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=θ_init, surface_pressure=p₀)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+        ref = model.dynamics.reference_state
+        @test ref isa ExnerReferenceState
+
+        set!(model; ρ=FT(1), θˡⁱ=θ_new, qᵗ=FT(0))
+        set_to_mean!(ref, model)
+
+        @test Array(interior(ref.pressure)) ≈ Array(interior(ref_truth.pressure)) rtol=FT(1e-6)
+        @test Array(interior(ref.density))  ≈ Array(interior(ref_truth.density))  rtol=FT(1e-6)
     end
 end

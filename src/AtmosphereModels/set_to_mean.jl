@@ -1,7 +1,10 @@
-using ..Thermodynamics: ReferenceState, compute_hydrostatic_reference!
+using ..Thermodynamics: ReferenceState, ExnerReferenceState, compute_hydrostatic_reference!,
+                        _compute_exner_reference!, dry_air_gas_constant, vapor_gas_constant
 using Oceananigans: Oceananigans, prognostic_fields
+using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Fields: interior, ZeroField
+using Oceananigans.Fields: interior, ZeroField, Field
+using Oceananigans.Grids: Center
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 using Statistics: mean!
 
@@ -99,6 +102,71 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
     # Recompute all diagnostic variables (T, qᵗ, u, v, w, diffusivities, etc.)
     TimeSteppers.update_state!(model; compute_tendencies=false)
 
+    return nothing
+end
+
+"""
+    set_to_mean!(ref::ExnerReferenceState, model; rescale_densities=false)
+
+Exner analogue of the `ReferenceState` method, for split-explicit `CompressibleDynamics`. Recompute
+the base `exner_function`/`pressure`/`density` by re-running the same discrete Exner column
+integration the constructor uses, with the horizontal-mean liquid-ice potential temperature and vapor
+mass fraction of the current model state. The recomputed reference is horizontally uniform (a single
+column). (Assumes a 1-D column reference, the form built from a constant or `z`-dependent θ₀.)
+"""
+function set_to_mean!(ref::ExnerReferenceState, model; rescale_densities=false)
+    constants = model.thermodynamic_constants
+    grid = ref.pressure.grid
+    arch = architecture(grid)
+    Nz   = size(grid, 3)
+
+    if rescale_densities
+        ρᵣ_old = similar(dynamics_density(model.dynamics))
+        parent(ρᵣ_old) .= parent(dynamics_density(model.dynamics))
+    end
+
+    # Horizontal-mean θˡⁱ and qᵛ as single-column reference profiles.
+    θ̄ = Field{Nothing, Nothing, Center}(grid)
+    mean!(θ̄, liquid_ice_potential_temperature(model))
+    fill_halo_regions!(θ̄)
+
+    q̄ᵛ = Field{Nothing, Nothing, Center}(grid)
+    mean_mass_fraction!(q̄ᵛ, specific_humidity(model))
+
+    Rᵈ  = dry_air_gas_constant(constants)
+    Rᵛ  = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    g   = constants.gravitational_acceleration
+
+    launch!(arch, grid, tuple(1), _compute_exner_reference!,
+            ref.exner_function, ref.pressure, ref.density, θ̄, q̄ᵛ, grid, Nz,
+            ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    fill_halo_regions!(ref.exner_function)
+    fill_halo_regions!(ref.pressure)
+    fill_halo_regions!(ref.density)
+
+    if rescale_densities
+        rescale_density_weighted_fields!(model, ρᵣ_old)
+    end
+
+    # Recompute all diagnostics (T, qᵗ, u, v, w, …) consistent with the new reference.
+    TimeSteppers.update_state!(model; compute_tendencies=false)
+    return nothing
+end
+
+"""
+    reset_reference_state!(model)
+
+Recompute the dynamics' reference state from the horizontal means of the model's current state via
+[`set_to_mean!`](@ref) — works for both the anelastic `ReferenceState` and the split-explicit
+`ExnerReferenceState` — if the dynamics carries one; a no-op otherwise. Invoked by
+`set!(model; compute_reference_state=true)`.
+"""
+function reset_reference_state!(model)
+    dynamics = model.dynamics
+    ref = hasproperty(dynamics, :reference_state) ? dynamics.reference_state : nothing
+    isnothing(ref) || set_to_mean!(ref, model)
     return nothing
 end
 

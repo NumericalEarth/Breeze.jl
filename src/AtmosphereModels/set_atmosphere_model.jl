@@ -165,8 +165,14 @@ Variables are set via keyword arguments. Supported variables include:
 
 - `enforce_mass_conservation`: If `true` (default), applies a pressure correction
   to ensure the velocity field satisfies the anelastic continuity equation.
+
+- `compute_reference_state`: If `true` (default `false`), recompute the dynamics' hydrostatic
+  reference state from the horizontal means of the just-set state (see [`set_to_mean!`](@ref)),
+  before the mass-conservation correction. A no-op for dynamics without a `ReferenceState`. Useful
+  when initializing from an analysis whose mean profile should define the perturbation base state.
 """
-function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true, kw...)
+function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true,
+                     compute_reference_state=false, kw...)
     if !isnothing(time)
         model.clock.time = time
     end
@@ -296,6 +302,12 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     # Apply a mask
     foreach(mask_immersed_field!, prognostic_fields(model))
     update_state!(model, compute_tendencies=false)
+
+    # Recompute the hydrostatic reference state from the just-set state, before the
+    # mass-conservation correction so the pressure projection uses the new reference.
+    if compute_reference_state
+        reset_reference_state!(model)
+    end
 
     if enforce_mass_conservation
         FT = eltype(model.grid)
