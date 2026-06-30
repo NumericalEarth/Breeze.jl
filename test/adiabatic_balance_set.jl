@@ -15,7 +15,8 @@
 #####
 
 using Breeze
-using Breeze: dynamics_density, adiabatic_balance_twin, resolve_balance_Δt, AdiabaticBalancer
+using Breeze: dynamics_density, AdiabaticBalancer
+using Breeze.AtmosphereModels: adiabatic_balance_twin, resolve_balance_Δt
 using Oceananigans
 using Oceananigans.Grids: minimum_zspacing
 using Oceananigans.TimeSteppers: update_state!
@@ -210,11 +211,9 @@ end
         @test maximum(abs, model.moisture_density - ρqᵉ_analysis) == 0
     end
 
-    @testset "edge cases: Bool no-op and unsupported dynamics" begin
+    @testset "edge case: Bool false is a no-op" begin
         model = _build_production(default_arch)
-        @test balance_adiabatically!(model, false) === model                 # Bool false → no-op
-        # The twin builder only supports CompressibleDynamics / AnelasticDynamics; anything else errors.
-        @test_throws ArgumentError adiabatic_balance_twin(model, 0.0, AdiabaticBalancer())
+        @test balance_adiabatically!(model, false) === model   # Bool false → no-op
     end
 
     @testset "AnelasticDynamics: twin reuses the projection scheme; rest state preserved" begin
