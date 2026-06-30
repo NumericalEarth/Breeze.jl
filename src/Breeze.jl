@@ -269,7 +269,7 @@ using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
 
-# `set!(model; balance = …)` adiabatic initialization — needs SSPRungeKutta3 (TimeSteppers above)
+# `set!(model; balancer = …)` adiabatic initialization — needs SSPRungeKutta3 (TimeSteppers above)
 # and CompressibleEquations.with_time_discretization (included earlier).
 include("adiabatic_balance.jl")
 
