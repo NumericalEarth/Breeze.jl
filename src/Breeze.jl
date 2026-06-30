@@ -35,6 +35,7 @@ export
     Sin2Ramp,
     ExplicitTimeStepping,
     balance_adiabatically!,
+    AdiabaticBalancer,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -268,6 +269,10 @@ using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
 
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
+
+# `set!(model; balancer = …)` adiabatic initialization — needs SSPRungeKutta3 (TimeSteppers above)
+# and CompressibleEquations.with_time_discretization (included earlier).
+include("adiabatic_balance.jl")
 
 include("ParcelModels/ParcelModels.jl")
 using .ParcelModels
