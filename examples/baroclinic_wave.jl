@@ -232,7 +232,7 @@ dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();  # default da
 
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        advection = WENO())
+                        advection = UpwindBiased(order=3))
 
 # ## Set initial conditions
 
