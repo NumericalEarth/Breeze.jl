@@ -106,24 +106,23 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
 end
 
 """
-    set_to_mean!(ref::ExnerReferenceState, model; rescale_densities=false)
+    set_to_mean!(ref::ExnerReferenceState, model)
 
 Exner analogue of the `ReferenceState` method, for split-explicit `CompressibleDynamics`. Recompute
 the base `exner_function`/`pressure`/`density` by re-running the same discrete Exner column
 integration the constructor uses, with the horizontal-mean liquid-ice potential temperature and vapor
 mass fraction of the current model state. The recomputed reference is horizontally uniform (a single
 column). (Assumes a 1-D column reference, the form built from a constant or `z`-dependent θ₀.)
+
+Unlike the anelastic `ReferenceState` method there is no `rescale_densities` option: the Exner
+reference is only the perturbation-form base state, not the prognostic density (`ρᵈ`), so changing it
+does not require rescaling the density-weighted prognostics.
 """
-function set_to_mean!(ref::ExnerReferenceState, model; rescale_densities=false)
+function set_to_mean!(ref::ExnerReferenceState, model)
     constants = model.thermodynamic_constants
     grid = ref.pressure.grid
     arch = architecture(grid)
     Nz   = size(grid, 3)
-
-    if rescale_densities
-        ρᵣ_old = similar(dynamics_density(model.dynamics))
-        parent(ρᵣ_old) .= parent(dynamics_density(model.dynamics))
-    end
 
     # Horizontal-mean θˡⁱ and qᵛ as single-column reference profiles.
     θ̄ = Field{Nothing, Nothing, Center}(grid)
@@ -145,10 +144,6 @@ function set_to_mean!(ref::ExnerReferenceState, model; rescale_densities=false)
     fill_halo_regions!(ref.exner_function)
     fill_halo_regions!(ref.pressure)
     fill_halo_regions!(ref.density)
-
-    if rescale_densities
-        rescale_density_weighted_fields!(model, ρᵣ_old)
-    end
 
     # Recompute all diagnostics (T, qᵗ, u, v, w, …) consistent with the new reference.
     TimeSteppers.update_state!(model; compute_tendencies=false)

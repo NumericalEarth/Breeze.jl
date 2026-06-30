@@ -508,9 +508,9 @@ end
     # discrete column integration), to machine precision.
 
     @testset "set_to_mean! recomputes the Exner reference" begin
-        θ_init = FT(290)
-        θ_new  = FT(305)
-        p₀     = FT(101325)
+        θ_init = 290
+        θ_new  = 305
+        p₀     = 101325
 
         ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, surface_pressure=p₀)
 
@@ -520,10 +520,40 @@ end
         ref = model.dynamics.reference_state
         @test ref isa ExnerReferenceState
 
-        set!(model; ρ=FT(1), θˡⁱ=θ_new, qᵗ=FT(0))
+        set!(model; ρ=1, θˡⁱ=θ_new, qᵗ=0)
         set_to_mean!(ref, model)
 
-        @test Array(interior(ref.pressure)) ≈ Array(interior(ref_truth.pressure)) rtol=FT(1e-6)
-        @test Array(interior(ref.density))  ≈ Array(interior(ref_truth.density))  rtol=FT(1e-6)
+        @test ref.pressure ≈ ref_truth.pressure rtol=1e-6
+        @test ref.density  ≈ ref_truth.density  rtol=1e-6
+    end
+
+    # The public path: `set!(model; compute_reference_state=true)` → `reset_reference_state!` →
+    # `set_to_mean!`. Same outcome as calling `set_to_mean!` directly above.
+    @testset "set!(; compute_reference_state) recomputes the reference" begin
+        θ_init = 290
+        θ_new  = 305
+        p₀     = 101325
+
+        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, surface_pressure=p₀)
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=θ_init, surface_pressure=p₀)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+
+        set!(model; ρ=1, θˡⁱ=θ_new, qᵗ=0, compute_reference_state=true)
+
+        @test model.dynamics.reference_state.pressure ≈ ref_truth.pressure rtol=1e-6
+        @test model.dynamics.reference_state.density  ≈ ref_truth.density  rtol=1e-6
+    end
+
+    # `reset_reference_state!` is a no-op for dynamics without a reference state (here a
+    # CompressibleDynamics built with no `reference_potential_temperature`).
+    @testset "set!(; compute_reference_state) is a no-op without a reference state" begin
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+        @test model.dynamics.reference_state === nothing
+
+        set!(model; ρ=1, θˡⁱ=300, qᵗ=0, compute_reference_state=true)
+        @test model.dynamics.reference_state === nothing   # unchanged; no error
     end
 end
