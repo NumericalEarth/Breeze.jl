@@ -35,7 +35,8 @@ function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 1
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
                                  thermodynamic_constants = constants,
-                                 microphysics = nothing)
+                                 microphysics = nothing,
+                                 timestepper = :AcousticRungeKutta3)
 end
 
 # Discrete-balanced rest state (mirrors substepper_rest_state.jl::set_rest_state!).
