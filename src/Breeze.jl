@@ -34,7 +34,7 @@ export
     Sin2Ramp,
     ExplicitTimeStepping,
     balance_adiabatically!,
-    AdiabaticBalance,
+    AdiabaticBalancer,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,

@@ -5,7 +5,7 @@
 ##### model: no microphysics, no closure, no upper sponge, no forcing, and a reversible time
 ##### stepper (dissipative/irreversible terms corrupt the symmetric forward/backward excursion). Rather
 ##### than make the caller hand-build that twin and graft fields back (see the DFI block in
-##### NumericalEarth's breeze_downscaling_era5 example), `AdiabaticBalance` + `adiabatic_balance_twin`
+##### NumericalEarth's breeze_downscaling_era5 example), `AdiabaticBalancer` + `adiabatic_balance_twin`
 ##### construct a twin that SHARES all field memory with the production model and steps it in place,
 ##### so the balanced state lands directly in the production model with no graft and no second field
 ##### set.
@@ -20,7 +20,7 @@ using Oceananigans.TimeSteppers: TimeStepper, update_state!
 $(TYPEDSIGNATURES)
 
 Specification for the adiabatic (FV3 `na_init`) initialization run by
-`set!(model; balance = AdiabaticBalance(...))`.
+`set!(model; balance = AdiabaticBalancer(...))`.
 
 Keyword arguments
 =================
@@ -45,7 +45,7 @@ Keyword arguments
     and restored after, so it is preserved exactly — reproducing the grafted DFI that returns only
     `(ρ, ρu, ρv, ρw, ρθ)`.
 """
-struct AdiabaticBalance{T, S}
+struct AdiabaticBalancer{T, S}
     Δt :: T
     cycles :: Int
     weight :: Float64
@@ -53,16 +53,16 @@ struct AdiabaticBalance{T, S}
     time_stepping :: S
 end
 
-AdiabaticBalance(; Δt = nothing, cycles = 1, weight = 2, with_moisture = true,
+AdiabaticBalancer(; Δt = nothing, cycles = 1, weight = 2, with_moisture = true,
                  time_stepping = ExplicitTimeStepping()) =
-    AdiabaticBalance(Δt, cycles, Float64(weight), with_moisture, time_stepping)
+    AdiabaticBalancer(Δt, cycles, Float64(weight), with_moisture, time_stepping)
 
 # Conservative fraction of the vertical acoustic CFL used for the auto-derived balance Δt.
 const acoustic_cfl_safety = 0.85
 
 # Resolve the balance step size: honor an explicit `Δt`, else derive it from the vertical acoustic
 # CFL on the smallest cell using the (warmest, hence fastest-sound) analysis temperature.
-resolve_balance_Δt(spec::AdiabaticBalance, model) = resolve_balance_Δt(spec.Δt, model)
+resolve_balance_Δt(spec::AdiabaticBalancer, model) = resolve_balance_Δt(spec.Δt, model)
 resolve_balance_Δt(Δt, model) = Δt
 
 function resolve_balance_Δt(::Nothing, model)
@@ -87,7 +87,7 @@ $(TYPEDSIGNATURES)
 Build a stripped adiabatic twin of `model` that SHARES all field memory (momentum, velocities,
 densities, ρθ, moisture, temperature, pressure solver, dynamics fields) and steps it in place.
 
-`time_stepping` selects the twin's scheme (see [`AdiabaticBalance`](@ref)); the sponge is always
+`time_stepping` selects the twin's scheme (see [`AdiabaticBalancer`](@ref)); the sponge is always
 stripped. Only the pieces that must differ are rebuilt:
 
   * the dynamics' `time_discretization` is swapped (a fresh immutable wrapper around the *same*
@@ -156,11 +156,11 @@ function adiabatic_balance_twin(model::AtmosphereModel, time_stepping = Explicit
                            nothing, model.closure_fields, nothing)
 end
 
-# `set!(model; balance = …)` hook. `false` → no-op; `true` → default `AdiabaticBalance`.
+# `set!(model; balance = …)` hook. `false` → no-op; `true` → default `AdiabaticBalancer`.
 AtmosphereModels.balance_initial_state!(model, balance::Bool) =
-    balance ? AtmosphereModels.balance_initial_state!(model, AdiabaticBalance()) : nothing
+    balance ? AtmosphereModels.balance_initial_state!(model, AdiabaticBalancer()) : nothing
 
-function AtmosphereModels.balance_initial_state!(model, spec::AdiabaticBalance)
+function AtmosphereModels.balance_initial_state!(model, spec::AdiabaticBalancer)
     model.dynamics isa CompressibleDynamics || throw(ArgumentError(
         "set!(model; balance = …) currently supports only CompressibleDynamics. For other " *
         "dynamics, call balance_adiabatically!(model; Δt, cycles) directly on a model built " *

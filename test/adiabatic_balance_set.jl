@@ -1,5 +1,5 @@
 #####
-##### Tests for `set!(model; balance = AdiabaticBalance(...))` — in-place adiabatic (FV3 na_init)
+##### Tests for `set!(model; balance = AdiabaticBalancer(...))` — in-place adiabatic (FV3 na_init)
 ##### initialization on a memory-sharing, stripped twin (`adiabatic_balance_twin`).
 #####
 ##### - Memory sharing: the twin aliases every heavy field + the stepper's Gⁿ/U⁰ tendency storage,
@@ -12,7 +12,7 @@
 #####
 
 using Breeze
-using Breeze: dynamics_density, adiabatic_balance_twin, resolve_balance_Δt, AdiabaticBalance
+using Breeze: dynamics_density, adiabatic_balance_twin, resolve_balance_Δt, AdiabaticBalancer
 using Oceananigans
 using Oceananigans.Grids: minimum_zspacing
 using Oceananigans.TimeSteppers: update_state!
@@ -103,7 +103,7 @@ end
         # Fixed point holds with the native scheme too.
         _set_discrete_rest!(model)
         ρ₀ = Array(interior(dynamics_density(model.dynamics)))
-        set!(model; balance = AdiabaticBalance(Δt = 0.5, cycles = 1, time_stepping = nothing))
+        set!(model; balance = AdiabaticBalancer(Δt = 0.5, cycles = 1, time_stepping = nothing))
         @test maximum(abs, Array(interior(dynamics_density(model.dynamics))) .- ρ₀) <= 1e-8 * maximum(abs, ρ₀)
         @test maximum(abs, Array(interior(model.momentum.ρw))) <= 1e-7
         @test model.clock.iteration == 0
@@ -121,8 +121,8 @@ end
     @testset "resolve_balance_Δt" begin
         model = _build_production(default_arch)
         _set_discrete_rest!(model)
-        @test resolve_balance_Δt(AdiabaticBalance(Δt = 0.123), model) == 0.123  # explicit round-trips
-        Δt_auto = resolve_balance_Δt(AdiabaticBalance(), model)               # auto from acoustic CFL
+        @test resolve_balance_Δt(AdiabaticBalancer(Δt = 0.123), model) == 0.123  # explicit round-trips
+        Δt_auto = resolve_balance_Δt(AdiabaticBalancer(), model)               # auto from acoustic CFL
         @test 0 < Δt_auto < minimum_zspacing(model.grid) / 250                # ≈ Δz/c, c ≳ 300 m/s
     end
 
@@ -134,7 +134,7 @@ end
         ρ₀  = Array(interior(ρ))
         ρθ₀ = Array(interior(ρθ))
 
-        set!(model; balance = AdiabaticBalance(Δt = 0.1, cycles = 1))
+        set!(model; balance = AdiabaticBalancer(Δt = 0.1, cycles = 1))
 
         @test maximum(abs, Array(interior(ρ))  .- ρ₀)  <= 1e-8 * maximum(abs, ρ₀)
         @test maximum(abs, Array(interior(ρθ)) .- ρθ₀) <= 1e-8 * maximum(abs, ρθ₀)
@@ -151,10 +151,10 @@ end
         set!(model; w = (x, y, z) -> 0.01 * sin(2π * z / 2e3))
 
         ρqᵉ₀ = Array(interior(model.moisture_density))
-        set!(model; balance = AdiabaticBalance(Δt = 0.1, with_moisture = false))
+        set!(model; balance = AdiabaticBalancer(Δt = 0.1, with_moisture = false))
         @test Array(interior(model.moisture_density)) == ρqᵉ₀   # bit-identical
 
-        set!(model; balance = AdiabaticBalance(Δt = 0.1, with_moisture = true))
+        set!(model; balance = AdiabaticBalancer(Δt = 0.1, with_moisture = true))
         @test all(isfinite, Array(interior(model.moisture_density)))
     end
 

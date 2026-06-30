@@ -10,7 +10,7 @@ using ..Thermodynamics:
     mixture_gas_constant
 
 # Adiabatic (FV3 na_init) initialization hook for `set!(model; balance = …)`. Declared here as an
-# interface stub; the methods (dispatching on `Bool` / `AdiabaticBalance`) are added at the Breeze
+# interface stub; the methods (dispatching on `Bool` / `AdiabaticBalancer`) are added at the Breeze
 # top level, where the explicit-stepper twin builder and `balance_adiabatically!` are in scope.
 function balance_initial_state! end
 
@@ -171,8 +171,8 @@ Variables are set via keyword arguments. Supported variables include:
 - `enforce_mass_conservation`: If `true` (default), applies a pressure correction
   to ensure the velocity field satisfies the anelastic continuity equation.
 - `balance`: adiabatic (FV3 `na_init`) spin-up of the nonhydrostatic state, run in place after the
-  rest of `set!`. `false` (default) does nothing; `true` uses `AdiabaticBalance()` (auto step size);
-  pass an [`AdiabaticBalance`](@ref Breeze.AdiabaticBalance) to control `Δt`, `cycles`, `weight`, and `with_moisture`. The
+  rest of `set!`. `false` (default) does nothing; `true` uses `AdiabaticBalancer()` (auto step size);
+  pass an [`AdiabaticBalancer`](@ref Breeze.AdiabaticBalancer) to control `Δt`, `cycles`, `weight`, and `with_moisture`. The
   balance runs on a stripped twin that shares all field memory with `model` (no second field set,
   no graft). Supported for `CompressibleDynamics`; for other dynamics call `balance_adiabatically!`
   directly on a stripped model.
