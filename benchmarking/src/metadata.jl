@@ -43,6 +43,7 @@ function BenchmarkMetadata(arch)
         # Non-CUDA Reactant (e.g. TPU): label by the XLA platform ("TPU") so
         # these results aren't recorded with a `nothing` device.
         try
+            gpu_name = uppercase(Reactant.XLA.platform_name(Reactant.XLA.default_backend()))
         catch
             gpu_name = "Reactant"
         end
