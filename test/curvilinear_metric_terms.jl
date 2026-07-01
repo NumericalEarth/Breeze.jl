@@ -32,7 +32,7 @@ using Breeze
 using Breeze.CompressibleEquations: CompressibleDynamics, ExplicitTimeStepping
 using Oceananigans
 using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, Field,
-                    interior, compute!, set!, fill_halo_regions!
+                    interior, set!, fill_halo_regions!
 using Oceananigans.AbstractOperations: KernelFunctionOperation, @at
 using Oceananigans.Operators: Vᶠᶜᶜ, Vᶜᶠᶜ, Vᶜᶜᶠ
 using Oceananigans.Advection: Centered, WENO, materialize_advection,
@@ -84,9 +84,9 @@ function metric_test_model(arch, FT; Nx = 48, Ny = 44, Nz = 8)
 end
 
 function metric_fields(grid, madv, momentum, velocities)
-    Mu = compute!(Field(KernelFunctionOperation{Face, Center, Center}(U_dot_∇u_metric, grid, madv, momentum, velocities)))
-    Mv = compute!(Field(KernelFunctionOperation{Center, Face, Center}(U_dot_∇v_metric, grid, madv, momentum, velocities)))
-    Mw = compute!(Field(KernelFunctionOperation{Center, Center, Face}(U_dot_∇w_metric, grid, madv, momentum, velocities)))
+    Mu = Field(KernelFunctionOperation{Face, Center, Center}(U_dot_∇u_metric, grid, madv, momentum, velocities))
+    Mv = Field(KernelFunctionOperation{Center, Face, Center}(U_dot_∇v_metric, grid, madv, momentum, velocities))
+    Mw = Field(KernelFunctionOperation{Center, Center, Face}(U_dot_∇w_metric, grid, madv, momentum, velocities))
     return Mu, Mv, Mw
 end
 
@@ -94,9 +94,9 @@ end
 # Σ u·Gᵤ·V + v·Gᵥ·V + w·G_w·V, normalized by the sum of absolute contributions.
 function whole_domain_curvature_work(grid, madv, momentum, velocities)
     Mu, Mv, Mw = metric_fields(grid, madv, momentum, velocities)
-    Vu = compute!(Field(KernelFunctionOperation{Face, Center, Center}(Vᶠᶜᶜ, grid)))
-    Vv = compute!(Field(KernelFunctionOperation{Center, Face, Center}(Vᶜᶠᶜ, grid)))
-    Vw = compute!(Field(KernelFunctionOperation{Center, Center, Face}(Vᶜᶜᶠ, grid)))
+    Vu = Field(KernelFunctionOperation{Face, Center, Center}(Vᶠᶜᶜ, grid))
+    Vv = Field(KernelFunctionOperation{Center, Face, Center}(Vᶜᶠᶜ, grid))
+    Vw = Field(KernelFunctionOperation{Center, Center, Face}(Vᶜᶜᶠ, grid))
     u, v, w = velocities
     wu = interior(u) .* interior(Mu) .* interior(Vu)
     wv = interior(v) .* interior(Mv) .* interior(Vv)

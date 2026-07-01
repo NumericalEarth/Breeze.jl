@@ -221,9 +221,9 @@ end
 function vi_exactness_errors(model)
     grid = model.grid
     adv, mom, vel, dyn = model.advection.momentum, model.momentum, model.velocities, model.dynamics
-    Ax = compute!(Field(KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, adv, mom, vel, dyn)))
-    Ay = compute!(Field(KernelFunctionOperation{Center, Face, Center}(y_momentum_flux_divergence, grid, adv, mom, vel, dyn)))
-    Az = compute!(Field(KernelFunctionOperation{Center, Center, Face}(z_momentum_flux_divergence, grid, adv, mom, vel, dyn)))
+    Ax = Field(KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, adv, mom, vel, dyn))
+    Ay = Field(KernelFunctionOperation{Center, Face, Center}(y_momentum_flux_divergence, grid, adv, mom, vel, dyn))
+    Az = Field(KernelFunctionOperation{Center, Center, Face}(z_momentum_flux_divergence, grid, adv, mom, vel, dyn))
     ex = Field{Face, Center, Center}(grid);   set!(ex, exact_x_mfd)
     ey = Field{Center, Face, Center}(grid);   set!(ey, exact_y_mfd)
     ez = Field{Center, Center, Face}(grid);   set!(ez, exact_z_mfd)
@@ -257,6 +257,50 @@ EXACTNESS_SCHEMES = (VI_FLAVORS..., ("flux-form WENO", () -> WENO()))
 end
 
 #####
+##### Energy-production audit (design note): the discrete kinetic-energy
+##### production of the advective operator, P = Σ 𝐮·[∇·(ρ𝐮⊗𝐮)]·V, must match
+##### the continuum value for every scheme — an indefinite or non-converging
+##### residual is the Hollingsworth signature.
+#####
+
+using Oceananigans.Operators: Vᶠᶜᶜ, Vᶜᶠᶜ, Vᶜᶜᶠ
+
+function vi_energy_production(model)
+    grid = model.grid
+    adv, mom, vel, dyn = model.advection.momentum, model.momentum, model.velocities, model.dynamics
+    Ax = Field(KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, adv, mom, vel, dyn))
+    Ay = Field(KernelFunctionOperation{Center, Face, Center}(y_momentum_flux_divergence, grid, adv, mom, vel, dyn))
+    Az = Field(KernelFunctionOperation{Center, Center, Face}(z_momentum_flux_divergence, grid, adv, mom, vel, dyn))
+    ex = Field{Face, Center, Center}(grid);   set!(ex, exact_x_mfd)
+    ey = Field{Center, Face, Center}(grid);   set!(ey, exact_y_mfd)
+    ez = Field{Center, Center, Face}(grid);   set!(ez, exact_z_mfd)
+    Vu = Field(KernelFunctionOperation{Face, Center, Center}(Vᶠᶜᶜ, grid))
+    Vv = Field(KernelFunctionOperation{Center, Face, Center}(Vᶜᶠᶜ, grid))
+    Vw = Field(KernelFunctionOperation{Center, Center, Face}(Vᶜᶜᶠ, grid))
+    production(qx, qy, qz) = sum(interior(vel.u) .* interior(qx) .* interior(Vu)) +
+                             sum(interior(vel.v) .* interior(qy) .* interior(Vv)) +
+                             sum(interior(vel.w) .* interior(qz) .* interior(Vw))
+    return production(Ax, Ay, Az), production(ex, ey, ez)
+end
+
+@testset "energy-production audit P_VI: $label" for (label, make) in EXACTNESS_SCHEMES
+    Oceananigans.defaults.FloatType = Float64
+
+    audits = map((16, 32)) do N
+        model = vi_model(vi_exactness_grid(Float64, N), make())
+        set!(model; ρ = ρᵛⁱ, θ = (x, y, z) -> 300.0, u = uᵛⁱ, v = vᵛⁱ, w = wᵛⁱ)
+        update_state!(model)
+        P, P_exact = vi_energy_production(model)
+        abs(P - P_exact) / abs(P_exact)
+    end
+
+    # Converging, with an absolute floor: WENO nonlinear weights make the
+    # residual non-monotone once it is already ≲ 10⁻³ of the production.
+    @test audits[1] < 0.2
+    @test audits[2] < max(audits[1] / 1.8, 0.005)
+end
+
+#####
 ##### Full-divergence test (design note): ∇ₕ·(ρ𝐮ₕ) = 0 but ∂z(ρw) ≠ 0, with
 ##### uniform u. The exact x-flux divergence is u ∂z(ρw), carried entirely by
 ##### the vertical part of the mass-flux divergence — this catches accidental
@@ -279,7 +323,7 @@ end
         set!(model; ρ = ρ₀, θ = (x, y, z) -> 300.0, u = (x, y, z) -> U₀, w = w₀)
         update_state!(model)
         adv, mom, vel, dyn = model.advection.momentum, model.momentum, model.velocities, model.dynamics
-        Ax = compute!(Field(KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, adv, mom, vel, dyn)))
+        Ax = Field(KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, adv, mom, vel, dyn))
         ex = Field{Face, Center, Center}(grid); set!(ex, exact_x)
         Nz = size(grid, 3)
         r = 4:Nz-3

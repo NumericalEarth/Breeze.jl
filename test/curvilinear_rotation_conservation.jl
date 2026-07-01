@@ -25,7 +25,7 @@ using Breeze
 using Breeze.CompressibleEquations: CompressibleDynamics, ExplicitTimeStepping
 using Breeze.AtmosphereModels: x_momentum_flux_divergence, y_momentum_flux_divergence
 using Oceananigans
-using Oceananigans: Field, interior, compute!, set!, fill_halo_regions!
+using Oceananigans: Field, interior, set!, fill_halo_regions!
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Operators: ζ₃ᶠᶠᶜ, div_xyᶜᶜᶜ, Azᶠᶠᶜ, Vᶠᶜᶜ, Vᶜᶠᶜ, Vᶜᶜᶠ,
                               δxᶜᵃᵃ, δyᵃᶜᵃ, Δx⁻¹ᶜᶠᶜ, Δy⁻¹ᶠᶜᶜ
@@ -67,12 +67,12 @@ cwᵢ(λ, φ, z) = 0.5 + 0.3 * cosd(λ) + 0.2 * sind(2φ) + 0.1 * sind(λ) * cos
 
 function coriolis_work(model)
     grid = model.grid; cor = model.coriolis; mom = model.momentum
-    Cu = compute!(Field(KernelFunctionOperation{Face, Center, Center}(x_f_cross_U, grid, cor, mom)))
-    Cv = compute!(Field(KernelFunctionOperation{Center, Face, Center}(y_f_cross_U, grid, cor, mom)))
-    Cw = compute!(Field(KernelFunctionOperation{Center, Center, Face}(z_f_cross_U, grid, cor, mom)))
-    Vu = compute!(Field(KernelFunctionOperation{Face, Center, Center}(Vᶠᶜᶜ, grid)))
-    Vv = compute!(Field(KernelFunctionOperation{Center, Face, Center}(Vᶜᶠᶜ, grid)))
-    Vw = compute!(Field(KernelFunctionOperation{Center, Center, Face}(Vᶜᶜᶠ, grid)))
+    Cu = Field(KernelFunctionOperation{Face, Center, Center}(x_f_cross_U, grid, cor, mom))
+    Cv = Field(KernelFunctionOperation{Center, Face, Center}(y_f_cross_U, grid, cor, mom))
+    Cw = Field(KernelFunctionOperation{Center, Center, Face}(z_f_cross_U, grid, cor, mom))
+    Vu = Field(KernelFunctionOperation{Face, Center, Center}(Vᶠᶜᶜ, grid))
+    Vv = Field(KernelFunctionOperation{Center, Face, Center}(Vᶜᶠᶜ, grid))
+    Vw = Field(KernelFunctionOperation{Center, Center, Face}(Vᶜᶜᶠ, grid))
     u, v, w = model.velocities
     wu = interior(u) .* interior(Cu) .* interior(Vu)
     wv = interior(v) .* interior(Cv) .* interior(Vv)
@@ -89,7 +89,7 @@ end
         update_state!(model)
         @test coriolis_work(model) < tol
         if Nz > 1   # the non-traditional vertical Coriolis must be active in 3D
-            Cw = compute!(Field(KernelFunctionOperation{Center, Center, Face}(z_f_cross_U, model.grid, model.coriolis, model.momentum)))
+            Cw = Field(KernelFunctionOperation{Center, Center, Face}(z_f_cross_U, model.grid, model.coriolis, model.momentum))
             @test maximum(abs, interior(Cw)) > 0
         end
     end
@@ -112,8 +112,8 @@ function set_nondivergent_flow!(model)
     grid = model.grid
     Ψ = Field{Face, Face, Center}(grid); set!(Ψ, Ψfunc); fill_halo_regions!(Ψ)
     u, v, w = model.velocities
-    set!(u, compute!(Field(KernelFunctionOperation{Face, Center, Center}(ustream, grid, Ψ))))
-    set!(v, compute!(Field(KernelFunctionOperation{Center, Face, Center}(vstream, grid, Ψ))))
+    set!(u, Field(KernelFunctionOperation{Face, Center, Center}(ustream, grid, Ψ)))
+    set!(v, Field(KernelFunctionOperation{Center, Face, Center}(vstream, grid, Ψ)))
     set!(w, 0)
     fill_halo_regions!((u, v, w))
     set!(model.momentum.ρu, u); set!(model.momentum.ρv, v); set!(model.momentum.ρw, w)
@@ -124,16 +124,16 @@ end
 function enstrophy_source(model)
     grid = model.grid; dyn = model.dynamics; cor = model.coriolis
     mom = model.momentum; vel = model.velocities; adv = model.advection.momentum
-    Au = compute!(Field(KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, adv, mom, vel, dyn)))
-    Av = compute!(Field(KernelFunctionOperation{Center, Face, Center}(y_momentum_flux_divergence, grid, adv, mom, vel, dyn)))
-    Cu = compute!(Field(KernelFunctionOperation{Face, Center, Center}(x_f_cross_U, grid, cor, mom)))
-    Cv = compute!(Field(KernelFunctionOperation{Center, Face, Center}(y_f_cross_U, grid, cor, mom)))
-    Tu = compute!(Field(-Au - Cu)); Tv = compute!(Field(-Av - Cv))   # ρ=1 velocity tendency (pressure is curl-free)
+    Au = Field(KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, adv, mom, vel, dyn))
+    Av = Field(KernelFunctionOperation{Center, Face, Center}(y_momentum_flux_divergence, grid, adv, mom, vel, dyn))
+    Cu = Field(KernelFunctionOperation{Face, Center, Center}(x_f_cross_U, grid, cor, mom))
+    Cv = Field(KernelFunctionOperation{Center, Face, Center}(y_f_cross_U, grid, cor, mom))
+    Tu = Field(-Au - Cu); Tv = Field(-Av - Cv)   # ρ=1 velocity tendency (pressure is curl-free)
     fill_halo_regions!((Tu, Tv))
-    dζ = compute!(Field(KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, grid, Tu, Tv)))
-    ζ  = compute!(Field(KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, grid, vel.u, vel.v)))
-    f  = compute!(Field(KernelFunctionOperation{Face, Face, Center}(fᶠᶠᵃ, grid, cor)))
-    Az = compute!(Field(KernelFunctionOperation{Face, Face, Center}(Azᶠᶠᶜ, grid)))
+    dζ = Field(KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, grid, Tu, Tv))
+    ζ  = Field(KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, grid, vel.u, vel.v))
+    f  = Field(KernelFunctionOperation{Face, Face, Center}(fᶠᶠᵃ, grid, cor))
+    Az = Field(KernelFunctionOperation{Face, Face, Center}(Azᶠᶠᶜ, grid))
     q = interior(ζ) .+ interior(f)
     e = q .* interior(dζ) .* interior(Az)
     rel = abs(sum(e)) / sum(abs, e)
@@ -141,7 +141,7 @@ function enstrophy_source(model)
 end
 
 function max_divergence(model)
-    d = compute!(Field(KernelFunctionOperation{Center, Center, Center}(div_xyᶜᶜᶜ, model.grid, model.momentum.ρu, model.momentum.ρv)))
+    d = Field(KernelFunctionOperation{Center, Center, Center}(div_xyᶜᶜᶜ, model.grid, model.momentum.ρu, model.momentum.ρv))
     return maximum(abs, interior(d))
 end
 
