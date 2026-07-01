@@ -53,7 +53,7 @@ using Oceananigans.Advection: VectorInvariant, WENOVectorInvariant,
                               _symmetric_interpolate_xᶠᵃᵃ, _symmetric_interpolate_yᵃᶠᵃ,
                               bias, FunctionStencil, Khᶜᶜᶜ, ϕ²
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
-                              V⁻¹ᶠᶜᶜ, V⁻¹ᶜᶠᶜ, δzᵃᵃᶜ, div_xyᶜᶜᶜ, divᶜᶜᶜ,
+                              V⁻¹ᶠᶜᶜ, V⁻¹ᶜᶠᶜ, V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ, div_xyᶜᶜᶜ, divᶜᶜᶜ,
                               ζ₃ᶠᶠᶜ, Δx_qᶜᶠᶜ, Δy_qᶠᶜᶜ, Az_qᶜᶜᶠ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ,
                               Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, Az⁻¹ᶠᶜᶜ, Az⁻¹ᶜᶠᶜ,
                               δxᶜᶜᶜ, δyᶜᶜᶜ, δzᶜᶜᶜ,
@@ -333,11 +333,13 @@ end
 const VectorInvariantUpwindDivergence = Union{VectorInvariantSelfVerticalUpwinding,
                                               VectorInvariantCrossVerticalUpwinding}
 
-# Area-weighted mass-flux differences (kg/s per cell); divided by the volume of
-# the target momentum cell after interpolation.
-@inline δx_ρU(i, j, k, grid, ρu, ρv, ρw) = δxᶜᶜᶜ(i, j, k, grid, Ax_qᶠᶜᶜ, ρu)
-@inline δy_ρV(i, j, k, grid, ρu, ρv, ρw) = δyᶜᶜᶜ(i, j, k, grid, Ay_qᶜᶠᶜ, ρv)
-@inline δz_ρW(i, j, k, grid, ρu, ρv, ρw) = δzᶜᶜᶜ(i, j, k, grid, Az_qᶜᶜᶠ, ρw)
+# Volume-normalized mass-flux divergence contributions (kg m⁻³ s⁻¹). Normalizing
+# per cell BEFORE reconstruction keeps the WENO stencil values O(∇·𝐔) ~ 10⁻⁵;
+# reconstructing the raw area-weighted differences (~10⁹ kg/s on a global grid)
+# overflows Float32 in the squared smoothness indicators.
+@inline δx_ρU(i, j, k, grid, ρu, ρv, ρw) = δxᶜᶜᶜ(i, j, k, grid, Ax_qᶠᶜᶜ, ρu) * V⁻¹ᶜᶜᶜ(i, j, k, grid)
+@inline δy_ρV(i, j, k, grid, ρu, ρv, ρw) = δyᶜᶜᶜ(i, j, k, grid, Ay_qᶜᶠᶜ, ρv) * V⁻¹ᶜᶜᶜ(i, j, k, grid)
+@inline δz_ρW(i, j, k, grid, ρu, ρv, ρw) = δzᶜᶜᶜ(i, j, k, grid, Az_qᶜᶜᶠ, ρw) * V⁻¹ᶜᶜᶜ(i, j, k, grid)
 
 @inline δyz_ρU(i, j, k, grid, ρu, ρv, ρw) = δy_ρV(i, j, k, grid, ρu, ρv, ρw) + δz_ρW(i, j, k, grid, ρu, ρv, ρw)
 @inline δxz_ρV(i, j, k, grid, ρu, ρv, ρw) = δx_ρU(i, j, k, grid, ρu, ρv, ρw) + δz_ρW(i, j, k, grid, ρu, ρv, ρw)
@@ -360,7 +362,7 @@ const mass_divergence_stencil = FunctionStencil(mass_divergence_smoothness)
     δˢ = _symmetric_interpolate_xᶠᵃᵃ(i, j, k, grid, scheme, cross_scheme, δyz_ρU, ρu, ρv, ρw)
     δᴿ = _biased_interpolate_xᶠᵃᵃ(i, j, k, grid, scheme, scheme.divergence_scheme, bias(û),
                                    δx_ρU, mass_divergence_stencil, ρu, ρv, ρw)
-    return (δˢ + δᴿ) * V⁻¹ᶠᶜᶜ(i, j, k, grid)
+    return δˢ + δᴿ
 end
 
 @inline function mass_divergenceᶜᶠᶜ(i, j, k, grid, scheme::VectorInvariantUpwindDivergence, v̂, ρu, ρv, ρw)
@@ -368,7 +370,7 @@ end
     δˢ = _symmetric_interpolate_yᵃᶠᵃ(i, j, k, grid, scheme, cross_scheme, δxz_ρV, ρu, ρv, ρw)
     δᴿ = _biased_interpolate_yᵃᶠᵃ(i, j, k, grid, scheme, scheme.divergence_scheme, bias(v̂),
                                    δy_ρV, mass_divergence_stencil, ρu, ρv, ρw)
-    return (δˢ + δᴿ) * V⁻¹ᶜᶠᶜ(i, j, k, grid)
+    return δˢ + δᴿ
 end
 
 @inline function x_momentum_flux_divergence(i, j, k, grid, advection::ThreeDimensionalCVI,
