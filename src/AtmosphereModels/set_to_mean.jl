@@ -162,7 +162,12 @@ Recompute the dynamics' reference state from the horizontal means of the model's
 """
 function reset_reference_state!(model)
     ref = dynamics_reference_state(model.dynamics)
-    isnothing(ref) || set_to_mean!(ref, model)
+    if ref isa ReferenceState
+        set_to_mean!(ref, model; rescale_densities=true)
+    elseif !isnothing(ref)
+        set_to_mean!(ref, model)
+    end
+
     return nothing
 end
 

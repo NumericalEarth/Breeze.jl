@@ -500,6 +500,25 @@ end
         @test ρw_after  ≈ ρw_before
     end
 
+    @testset "set!(; compute_reference_state) preserves anelastic specific quantities" begin
+        θ_init = FT(290)
+        θ_new  = FT(305)
+        q_new  = FT(0.01)
+        u_new  = FT(5)
+
+        reference_state = ReferenceState(grid, constants; potential_temperature=θ_init,
+                                         vapor_mass_fraction=0)
+        dynamics = AnelasticDynamics(reference_state)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+
+        set!(model; θ=θ_new, qᵗ=q_new, u=u_new, w=0,
+             compute_reference_state=true, enforce_mass_conservation=false)
+
+        @test all(Array(interior(model.formulation.potential_temperature)) .≈ θ_new)
+        @test all(Array(interior(specific_humidity(model))) .≈ q_new)
+        @test all(Array(interior(model.velocities.u)) .≈ u_new)
+    end
+
     #####
     ##### set_to_mean! for the split-explicit ExnerReferenceState
     #####
