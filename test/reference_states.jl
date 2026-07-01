@@ -547,6 +547,26 @@ end
         @test ref.density  ≈ ref_truth.density  rtol=1e-6
     end
 
+    @testset "set_to_mean! overwrites every column of a 3D Exner reference" begin
+        θ_init(x, y, z) = FT(290) + FT(5) * sin(FT(2π) * x / FT(100))
+        θ_new = FT(305)
+        p₀    = FT(101325)
+
+        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, surface_pressure=p₀)
+
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature=θ_init, surface_pressure=p₀)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+        ref = model.dynamics.reference_state
+        @test ref isa ExnerReferenceState
+
+        set!(model; ρ=1, θˡⁱ=θ_new, qᵗ=0)
+        set_to_mean!(ref, model)
+
+        @test ref.pressure ≈ ref_truth.pressure rtol=1e-6
+        @test ref.density  ≈ ref_truth.density  rtol=1e-6
+    end
+
     # The public path: `set!(model; compute_reference_state=true)` → `reset_reference_state!` →
     # `set_to_mean!`. Same outcome as calling `set_to_mean!` directly above.
     @testset "set!(; compute_reference_state) recomputes the reference" begin

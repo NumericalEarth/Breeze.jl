@@ -143,6 +143,12 @@ function set_to_mean!(ref::ExnerReferenceState, model)
     launch!(arch, grid, tuple(1), _compute_exner_reference!,
             ref.exner_function, ref.pressure, ref.density, θ̄, q̄ᵛ, grid, Nz,
             ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+
+    if size(ref.pressure, 1) > 1 || size(ref.pressure, 2) > 1
+        launch!(arch, grid, :xyz, _broadcast_exner_reference_column!,
+                ref.exner_function, ref.pressure, ref.density)
+    end
+
     fill_halo_regions!(ref.exner_function)
     fill_halo_regions!(ref.pressure)
     fill_halo_regions!(ref.density)
@@ -150,6 +156,15 @@ function set_to_mean!(ref::ExnerReferenceState, model)
     # Recompute all diagnostics (T, qᵗ, u, v, w, …) consistent with the new reference.
     TimeSteppers.update_state!(model; compute_tendencies=false)
     return nothing
+end
+
+@kernel function _broadcast_exner_reference_column!(πᵣ, pᵣ, ρᵣ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        πᵣ[i, j, k] = πᵣ[1, 1, k]
+        pᵣ[i, j, k] = pᵣ[1, 1, k]
+        ρᵣ[i, j, k] = ρᵣ[1, 1, k]
+    end
 end
 
 """
