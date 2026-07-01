@@ -50,6 +50,37 @@ function rescale_density_weighted_fields!(model, ρ⁻)
     return nothing
 end
 
+function rescale_dry_density_weighted_fields!(model, ρᵈ⁻)
+    grid = model.grid
+    arch = grid.architecture
+    ρᵈ = dynamics_density(model.dynamics)
+
+    launch!(arch, grid, :xyz, _rescale_momentum!, grid, model.momentum, ρᵈ, ρᵈ⁻)
+
+    formulation_fields = prognostic_fields(model.formulation)
+    for field in formulation_fields
+        parent(field) .*= parent(ρᵈ) ./ parent(ρᵈ⁻)
+    end
+
+    return nothing
+end
+
+function scale_total_density_weighted_fields!(model, ρ, ρᵈ⁻)
+    parent(model.moisture_density) .*= parent(ρ) ./ parent(ρᵈ⁻)
+
+    μ_names = prognostic_field_names(model.microphysics)
+    for name in μ_names
+        field = model.microphysical_fields[name]
+        parent(field) .*= parent(ρ) ./ parent(ρᵈ⁻)
+    end
+
+    for field in model.tracers
+        parent(field) .*= parent(ρ) ./ parent(ρᵈ⁻)
+    end
+
+    return nothing
+end
+
 @kernel function _rescale_momentum!(grid, momentum, ρ, ρ⁻)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
@@ -65,6 +96,17 @@ end
         ρ⁻ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ⁻)
         momentum.ρw[i, j, k] *= ρᶜᶜᶠ / ρ⁻ᶜᶜᶠ
     end
+end
+
+@kernel function _set_dry_density_from_total_density!(ρᵈ, ρ, microphysics, moisture_density, microphysical_fields)
+    i, j, k = @index(Global, NTuple)
+    ρqᵗ = total_condensate_density(i, j, k, microphysics, moisture_density, microphysical_fields)
+    @inbounds ρᵈ[i, j, k] = ρ[i, j, k] - ρqᵗ
+end
+
+@kernel function _dry_weighted_specific_moisture!(qᵛ, ρqᵛ, ρᵈ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds qᵛ[i, j, k] = ρqᵛ[i, j, k] / ρᵈ[i, j, k]
 end
 
 """
@@ -242,7 +284,11 @@ function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalan
     g   = constants.gravitational_acceleration
 
     θ  = model.formulation.potential_temperature   # specific θˡⁱ, filled by the preceding update_state!
-    qᵛ = specific_prognostic_moisture(model)
+    qᵛ = CenterField(grid)
+    ρᵈ = dynamics_density(dynamics)
+    ρᵈ_old = CenterField(grid)
+    copyto!(parent(ρᵈ_old), parent(ρᵈ))
+    launch!(arch, grid, :xyz, _dry_weighted_specific_moisture!, qᵛ, model.moisture_density, ρᵈ_old)
 
     # Per-column hydrostatic integration → balanced total density.
     π = CenterField(grid)
@@ -251,14 +297,13 @@ function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalan
     launch!(arch, grid, :xy, _compute_exner_reference_3d!,
             π, pressure, ρ, θ, qᵛ, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
 
-    # Scale the prognostic dry density so the diagnosed total density equals the balanced column ρ,
-    # then rescale the density-weighted prognostics to preserve θ, qˣ, and the velocities.
-    ρᵈ     = dynamics_density(dynamics)
-    ρᵈ_old = CenterField(grid)
-    copyto!(parent(ρᵈ_old), parent(ρᵈ))
-    parent(ρᵈ) .*= parent(ρ) ./ parent(total_density(dynamics))
+    # Scale total-density-weighted constituents by ρ / ρᵈ_old, set dry density as the residual,
+    # then scale dry-density-weighted prognostics by ρᵈ_new / ρᵈ_old.
+    scale_total_density_weighted_fields!(model, ρ, ρᵈ_old)
+    launch!(arch, grid, :xyz, _set_dry_density_from_total_density!,
+            ρᵈ, ρ, model.microphysics, model.moisture_density, model.microphysical_fields)
     fill_halo_regions!(ρᵈ)
-    rescale_density_weighted_fields!(model, ρᵈ_old)
+    rescale_dry_density_weighted_fields!(model, ρᵈ_old)
 
     update_state!(model; compute_tendencies=false)
     return nothing

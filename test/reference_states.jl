@@ -659,6 +659,7 @@ end
     @testset "HydrostaticallyBalancedDensity sets a balanced column" begin
         θ  = 300
         p₀ = 101325
+        qᵗ = FT(0.02)
 
         ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ, surface_pressure=p₀)
 
@@ -670,5 +671,10 @@ end
 
         @test model.dynamics.pressure        ≈ ref_truth.pressure rtol=1e-6
         @test total_density(model.dynamics)  ≈ ref_truth.density  rtol=1e-6
+
+        set!(model; θˡⁱ=θ, qᵗ, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀),
+             enforce_mass_conservation=false)
+
+        @test all(q -> q ≈ qᵗ, Array(interior(specific_humidity(model))))
     end
 end
