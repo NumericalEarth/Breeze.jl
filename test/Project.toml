@@ -25,6 +25,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 [sources]
 Breeze = {path = ".."}
 Metal = {url = "https://github.com/JuliaGPU/Metal.jl.git", rev = "d6b4ca22238cfaaefbaa8d96832ccd5384725865"}
+Reactant = {url = "https://github.com/EnzymeAD/Reactant.jl", rev = "main"}
 
 [compat]
 Adapt = "4.3.0"
@@ -44,7 +45,7 @@ Oceananigans = "0.110.2"
 ParallelTestRunner = "2.0.1"
 Printf = "<0.0.1, 1"
 RRTMGP = "0.21"
-Reactant = "0.2.268"
+Reactant = "=0.2.270"
 SpecialFunctions = "2"
 Statistics = "<0.0.1, 1"
 Test = "<0.0.1, 1"
