@@ -122,7 +122,8 @@ end
                                reference_potential_temperature = θref)
     model = AtmosphereModel(grid; dynamics = dyn,
                             microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()),
-                            thermodynamic_constants = constants)
+                            thermodynamic_constants = constants,
+                            timestepper = :AcousticRungeKutta3)
     set!(model; ρ = model.dynamics.reference_state.density, θ = 300.0, qᵗ = 0.030)
     update_state!(model)
 
