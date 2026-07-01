@@ -146,7 +146,8 @@ end
                                     reference_vapor_mass_fraction = qᵛ_reference)
 
     model = AtmosphereModel(grid; dynamics,
-                            thermodynamic_constants = constants)
+                            thermodynamic_constants = constants,
+                            timestepper = :AcousticRungeKutta3)
 
     reference_state = model.dynamics.reference_state
     θ_column = Field{Nothing, Nothing, Center}(grid)

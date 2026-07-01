@@ -226,7 +226,7 @@ coriolis = SphericalCoriolis(rotation_rate=Ω)
 T₀ᵣ = 250
 θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
 
-dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();  # default damping: ThermalDivergenceDamping(coefficient = 0.1)
+dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 

@@ -142,7 +142,8 @@ end
     function build_model(qᵗ)
         model = AtmosphereModel(grid; dynamics = dyn,
                                 microphysics = InstantaneousPrecipitation(equilibrium = eq),
-                                thermodynamic_constants = constants)
+                                thermodynamic_constants = constants,
+                                timestepper = :AcousticRungeKutta3)
         set!(model; ρ = model.dynamics.reference_state.density, θ = 300.0, qᵗ = qᵗ)
         update_state!(model)   # Δt invalid here ⇒ the precipitation kernel is a no-op; populates diagnostics
         return model
