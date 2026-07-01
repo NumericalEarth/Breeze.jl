@@ -28,6 +28,7 @@ using Oceananigans
 using Oceananigans.Units
 using Oceananigans: prognostic_fields
 using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.Models: boundary_condition_args
 using Oceananigans.TimeSteppers: update_state!, reset!
 using Printf
 using CairoMakie
@@ -36,7 +37,7 @@ using CUDA
 # ## DCMIP2016 parameters
 #
 # All parameters follow the DCMIP2016 specification [UllrichEtAl2016](@citet),
-# matching the [`baroclinic_wave`](@ref) example.
+# matching `baroclinic_wave.jl`.
 
 Oceananigans.defaults.FloatType = Float32
 Oceananigans.defaults.gravitational_acceleration = 9.80616
@@ -58,11 +59,14 @@ a   = Oceananigans.defaults.planet_radius
 
 # ## Grid
 #
-# A 1° latitude-longitude grid spanning 75° S to 75° N with 32 vertical
-# levels up to 30 km — matching the production resolution from
-# [`baroclinic_wave`](@ref). Uncomment a different line to switch phases.
+# A 1° latitude-longitude grid spanning 75° S to 75° N, up to 30 km —
+# the same horizontal resolution as `baroclinic_wave.jl`, but with
+# 128 vertical levels rather than 32: the power method's growth rate is
+# sensitive to vertical resolution (see `power_method_baroclinic_cartesian.jl`'s
+# resolution study), so we resolve the vertical more finely here than the
+# nonlinear life-cycle example needs.
 
-Nλ = 360; Nφ = 150; Nz = 128     ## Phase 3: production (1°)
+Nλ = 360; Nφ = 150; Nz = 128
 
 H = 30kilometers
 
@@ -77,7 +81,7 @@ grid = LatitudeLongitudeGrid(GPU();
 #
 # The DCMIP2016 balanced state: virtual temperature ``T_v(\varphi, z)``,
 # pressure, density, potential temperature, and gradient-wind-balanced
-# zonal velocity. These are identical to [`baroclinic_wave`](@ref).
+# zonal velocity. These are identical to `baroclinic_wave.jl`.
 
 ## Temperature profile parameters
 Tᴱ = 310     # K — equatorial surface temperature
@@ -142,7 +146,7 @@ end
 # ## Model
 #
 # Compressible dynamics with acoustic substepping, matching
-# [`baroclinic_wave`](@ref).
+# `baroclinic_wave.jl`.
 
 coriolis = SphericalCoriolis(rotation_rate=Ω)
 
@@ -243,15 +247,13 @@ for n in 1:max_iterations
                    n, σ * 86400, v_sfc_max)
 
     ## Rescale all prognostic perturbations: field = background + scale × (field - background)
-    scale = v_ref / v_sfc_max
+    scale = convert(eltype(model.grid), v_ref / v_sfc_max)
     for (f, bg) in zip(prognostic_fields(model), background)
         parent(f) .= bg .+ scale .* (parent(f) .- bg)
     end
 
     ## Fill halos after rescaling
-    for f in prognostic_fields(model)
-        fill_halo_regions!(f)
-    end
+    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
 
     ## Check convergence (after rescaling so final state has reference amplitude)
     converged = n ≥ 2 && abs(σ_history[end] - σ_history[end-1]) / abs(σ_history[end]) < convergence_threshold

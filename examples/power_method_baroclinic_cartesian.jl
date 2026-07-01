@@ -1,16 +1,19 @@
 # # Resolution convergence of the Cartesian power method
 #
 # Does the wavenumber-9 growth rate depend on the grid? We run the power
-# method on four progressively finer grids — from a coarse 400 km mesh
-# up to a 50 km mesh — and check that ``\sigma`` converges. At the
-# finest resolution we also plot the eigenmode to confirm it retains the
-# correct baroclinic structure (westward tilt with height).
+# method on six grids — four horizontal refinements from a coarse 400 km
+# mesh up to a 50 km mesh, plus two vertical-only refinements at the
+# 100 km and 50 km horizontal resolutions — and check that ``\sigma``
+# converges. At the finest resolution we also plot the eigenmode to
+# confirm it retains the correct baroclinic structure (westward tilt with
+# height).
 
 using Breeze
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans: prognostic_fields
 using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.Models: boundary_condition_args
 using Oceananigans.TimeSteppers: update_state!, reset!
 using Printf
 using CairoMakie
@@ -18,7 +21,7 @@ using CUDA
 
 # ## URJ15 parameters
 #
-# Identical to [`power_method_cartesian_baroclinic`](@ref).
+# Identical to `baroclinic_wave_cartesian.jl`.
 
 Oceananigans.defaults.FloatType = Float32
 Oceananigans.defaults.gravitational_acceleration = 9.80616
@@ -171,9 +174,7 @@ function run_power_method(Nx, Ny, Nz_run)
 
     set!(model; v=v_pert)
 
-    for f in prognostic_fields(model)
-        fill_halo_regions!(f)
-    end
+    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
     update_state!(model, compute_tendencies=false)
 
     simulation = Simulation(model; Δt=10minutes, stop_time=Δτ)
@@ -191,14 +192,12 @@ function run_power_method(Nx, Ny, Nz_run)
 
         @info @sprintf("  iter %3d | σ = %.4f day⁻¹ | sfc max|v| = %.4e m/s", n, σ * 86400, v_sfc_max)
 
-        scale = v_ref / v_sfc_max
+        scale = convert(eltype(model.grid), v_ref / v_sfc_max)
         for (f, bg) in zip(prognostic_fields(model), background)
             parent(f) .= bg .+ scale .* (parent(f) .- bg)
         end
 
-        for f in prognostic_fields(model)
-            fill_halo_regions!(f)
-        end
+        fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
 
         converged = n ≥ 2 && abs(σ_history[end] - σ_history[end-1]) / abs(σ_history[end]) < convergence_threshold
 
@@ -218,11 +217,14 @@ function run_power_method(Nx, Ny, Nz_run)
     return Lx / Nx, σ_final, max_iterations, model, σ_history .* 86400
 end
 
-# ## Run at four resolutions
+# ## Run at six resolutions
 #
-# Each doubling in resolution roughly doubles the number of grid points
-# in each direction. Vertical resolution matters most for this problem:
-# the jump from ``N_z = 15`` to ``N_z = 30`` is where ``\sigma`` locks in.
+# The first four configs double the horizontal grid points in each
+# direction; the last two hold horizontal resolution fixed and instead
+# refine ``N_z`` from 30 to 128. Vertical resolution matters most for
+# this problem: the jump from ``N_z = 15`` to ``N_z = 30`` is where
+# ``\sigma`` locks in, and the last two configs check whether it shifts
+# again at even higher vertical resolution.
 
 resolution_configs = [
     (100,  15,  8),   ## Δx ≈ 400 km
