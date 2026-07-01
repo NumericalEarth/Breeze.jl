@@ -1062,8 +1062,19 @@ end
 # √(ΔxΔy), or cbrt(V) which is dragged down by the thin Δz) keeps the explicit-diffusion
 # number κΔτ/Δ² ≤ α in both directions everywhere — including the converging meridians at
 # high latitude, where √(ΔxΔy) would push it past the α ≤ 0.25 stability bound.
+# Smallest local horizontal spacing, excluding Flat dimensions. A Flat direction has degenerate
+# unit spacing (Δ = 1), which must not enter the min — otherwise it collapses the diffusivity in the
+# non-Flat direction(s). Treating Flat dims as +∞ makes `min` select the physical spacing.
+@inline function _min_horizontal_spacing(i, j, k, grid)
+    FT = eltype(grid)
+    TX, TY, _ = topology(grid)
+    Δx = TX === Flat ? FT(Inf) : Δxᶠᶜᶜ(i, j, k, grid)
+    Δy = TY === Flat ? FT(Inf) : Δyᶜᶠᶜ(i, j, k, grid)
+    return min(Δx, Δy)
+end
+
 @inline _κ_local(i, j, k, grid, scale::LocalHorizontalDampingScale) =
-    scale.α_over_Δτ * min(Δxᶠᶜᶜ(i, j, k, grid), Δyᶜᶠᶜ(i, j, k, grid))^2
+    scale.α_over_Δτ * _min_horizontal_spacing(i, j, k, grid)^2
 @inline κˣ(i, j, k, grid, scale::LocalHorizontalDampingScale) = _κ_local(i, j, k, grid, scale)
 @inline κʸ(i, j, k, grid, scale::LocalHorizontalDampingScale) = _κ_local(i, j, k, grid, scale)
 
