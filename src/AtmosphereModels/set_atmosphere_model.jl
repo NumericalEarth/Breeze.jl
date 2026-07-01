@@ -118,6 +118,15 @@ end
 
 settable_specific_microphysical_names(::Nothing) = ()
 
+function enforce_mass_conservation!(model::AtmosphereModel)
+    FT = eltype(model.grid)
+    Δt = one(FT)
+    compute_pressure_correction!(model, Δt)
+    make_pressure_correction!(model, Δt)
+    update_state!(model, compute_tendencies=false)
+    return nothing
+end
+
 """
     set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
@@ -128,6 +137,9 @@ Set variables in an [`AtmosphereModel`](@ref).
 Variables are set via keyword arguments. Supported variables include:
 
 **Prognostic variables** (density-weighted):
+- `ρ`/`ρᵈ`: total / dry density (compressible). `ρ` may also be set to
+  [`HydrostaticallyBalancedDensity()`](@ref), which derives the density from the just-set `θˡⁱ`/`qᵛ`
+  so the initial column is in discrete hydrostatic balance.
 - `ρu`, `ρv`, `ρw`: momentum components
 - `ρqᵉ`/`ρqᵛ`/`ρqᵗ`: moisture density (scheme-dependent)
 - Prognostic microphysical variables
@@ -164,7 +176,14 @@ Variables are set via keyword arguments. Supported variables include:
 # Options
 
 - `enforce_mass_conservation`: If `true` (default), applies a pressure correction
-  to ensure the velocity field satisfies the anelastic continuity equation.
+  to ensure the velocity field satisfies the anelastic continuity equation. If `balancer` is also
+  used, a final correction is applied after the balance.
+
+- `compute_reference_state`: If `true` (default `false`), recompute the dynamics' hydrostatic
+  reference state from the horizontal means of the just-set state (see [`set_to_mean!`](@ref)),
+  before the mass-conservation correction. A no-op for dynamics without a `ReferenceState`. Useful
+  when initializing from an analysis whose mean profile should define the perturbation base state.
+
 - `balancer`: adiabatic (FV3 `na_init`) spin-up of the nonhydrostatic state, run in place after the
   rest of `set!` — equivalent to calling `balance_adiabatically!(model, balancer)`. `false`
   (default) does nothing; `true` uses `AdiabaticBalancer()` (auto step size); pass an
@@ -173,7 +192,8 @@ Variables are set via keyword arguments. Supported variables include:
   shares all field memory with `model` (no second field set, no graft). Works for both
   `CompressibleDynamics` and `AnelasticDynamics`.
 """
-function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true, balancer=false, kw...)
+function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true,
+                     compute_reference_state=false, balancer=false, kw...)
     if !isnothing(time)
         model.clock.time = time
     end
@@ -185,7 +205,13 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     #           then splits it into ρᵈ = ρ − Σρqˣ and the diagnosed total-density field.
     #   `:ρᵈ` — dry density directly. `establish_densities!` recovers the total ρ = ρᵈ/qᵈ from ρᵈ and
     #           the moisture, then (re)weights the moisture partial densities by the total.
-    total_density_given = :ρ ∈ names
+    # `ρ = HydrostaticallyBalancedDensity(...)` is a *deferred* density: it depends on the
+    # thermodynamic state, so it is skipped in phase 1 and computed at the end (after θ/qᵛ are set),
+    # by integrating the hydrostatic column — not treated as a supplied total-density field here.
+    balanced_density    = get(kw, :ρ, nothing)
+    hydrostatic_balance = balanced_density isa HydrostaticallyBalancedDensity
+
+    total_density_given = (:ρ ∈ names) && !hydrostatic_balance
     dry_density_given   = :ρᵈ ∈ names
     prioritized = prioritize_names(names)
 
@@ -241,8 +267,10 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         elseif name == :ρ || name == :ρᵈ
             # Write the given density into the dry-density field. For `:ρ` this is the TOTAL-density
             # placeholder (split by `establish_densities!`); for `:ρᵈ` it is the dry density directly.
+            # `HydrostaticallyBalancedDensity` is a deferred marker: write a unit placeholder now so
+            # the thermodynamic/kinematic sets have a nonzero ρᵈ; it is overwritten balanced later.
             ρ = dynamics_density(model.dynamics)
-            set!(ρ, value)
+            set!(ρ, value isa HydrostaticallyBalancedDensity ? one(eltype(model.grid)) : value)
             # Fill halos immediately - needed for velocity→momentum conversion
             fill_halo_regions!(ρ)
 
@@ -286,7 +314,9 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         return nothing
     end
 
-    # Phase 1: density, moisture, microphysics, tracers.
+    # Phase 1: density, moisture, microphysics, tracers. A deferred `ρ = HydrostaticallyBalancedDensity`
+    # marker sets a unit placeholder density here (so the phase-2 thermodynamic/kinematic sets have a
+    # nonzero ρᵈ to weight against); the balanced density is computed after the state is set, below.
     for name in prioritized
         is_phase_two(name) || apply_set!(name, kw[name])
     end
@@ -304,18 +334,27 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     foreach(mask_immersed_field!, prognostic_fields(model))
     update_state!(model, compute_tendencies=false)
 
-    if enforce_mass_conservation
-        FT = eltype(model.grid)
-        Δt = one(FT)
-        compute_pressure_correction!(model, Δt)
-        make_pressure_correction!(model, Δt)
-        update_state!(model, compute_tendencies=false)
+    # Recompute the hydrostatic reference state from the just-set state, before the
+    # mass-conservation correction so the pressure projection uses the new reference.
+    if compute_reference_state
+        reset_reference_state!(model)
     end
+
+    # Set the density into discrete hydrostatic balance with the just-set thermodynamic state,
+    # before the mass-conservation correction.
+    if hydrostatic_balance
+        set_hydrostatically_balanced_density!(model, balanced_density)
+    end
+
+    enforce_mass_conservation && enforce_mass_conservation!(model)
 
     initialize_closure_fields!(model.closure_fields, model.closure, model)
 
     # Optional adiabatic (FV3 na_init) spin-up of the nonhydrostatic state, in place.
-    balancer === false || balance_adiabatically!(model, balancer)
+    if balancer !== false
+        balance_adiabatically!(model, balancer)
+        enforce_mass_conservation && enforce_mass_conservation!(model)
+    end
 
     return nothing
 end

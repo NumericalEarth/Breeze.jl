@@ -229,6 +229,15 @@ constructs a fully-built reference state up front (e.g. `AnelasticDynamics`).
 boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants) = dynamics.reference_state
 
 """
+    dynamics_reference_state(dynamics)
+
+Return the dynamics' reference state (an anelastic `ReferenceState` or a split-explicit
+`ExnerReferenceState`), or `nothing` if the dynamics carries none. Dispatched so that
+`reset_reference_state!` needn't reach into fields by name.
+"""
+dynamics_reference_state(dynamics) = nothing
+
+"""
     standard_pressure(dynamics)
 
 Return the standard pressure used for potential temperature calculations.

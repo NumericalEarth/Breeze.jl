@@ -7,6 +7,7 @@ export
     # Adiabatic (FV3 na_init) initialization
     balance_adiabatically!,
     AdiabaticBalancer,
+    HydrostaticallyBalancedDensity,
     # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
     dynamics_pressure,

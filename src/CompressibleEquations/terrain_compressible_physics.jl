@@ -36,6 +36,73 @@ using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpo
 const TerrainCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}
 const TerrainCompressibleModel = AtmosphereModel{<:TerrainCompressibleDynamics}
 
+"""
+$(TYPEDEF)
+
+Callable piecewise-linear vertical profile. `profile(z)` linearly interpolates `values`
+against `heights` (both ordered bottom-to-top) and holds the nearest end value constant for
+`z` below `heights[1]` or above `heights[end]`. Subtypes `Function` so it is picked up by
+`evaluate_profile` wherever a `z`-dependent reference profile is expected.
+"""
+struct HorizontalMeanProfile{H, V} <: Function
+    heights :: H
+    values :: V
+end
+
+function (profile::HorizontalMeanProfile)(z)
+    heights = profile.heights
+    values = profile.values
+
+    z ≤ heights[1] && return values[1]
+
+    for k in 2:length(heights)
+        if z ≤ heights[k]
+            lower_height = heights[k-1]
+            upper_height = heights[k]
+            weight = (z - lower_height) / (upper_height - lower_height)
+            return (1 - weight) * values[k-1] + weight * values[k]
+        end
+    end
+
+    return values[end]
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Reduce a 3D `field` to a `HorizontalMeanProfile` of its horizontal mean at each
+vertical level, paired with the horizontal-mean physical height of that level. On a
+terrain-following grid the cell-center height `znode(i, j, k, …)` varies with `(i, j)`, so
+both the value and the height are averaged over `(i, j)` (on a CPU mirror of the grid) to
+give a single representative profile that can be re-evaluated per column.
+"""
+function horizontal_mean_profile(field)
+    grid = field.grid
+    Nx, Ny, Nz = size(grid)
+    cpu_grid = Oceananigans.Architectures.on_architecture(Oceananigans.CPU(), grid)
+    data = Array(Oceananigans.interior(field))
+    FT = eltype(grid)
+    c = Center()
+    normalization = one(FT) / (Nx * Ny)
+    heights = zeros(FT, Nz)
+    values = zeros(FT, Nz)
+
+    for k in 1:Nz
+        height_sum = zero(FT)
+        value_sum = zero(FT)
+
+        for j in 1:Ny, i in 1:Nx
+            height_sum += znode(i, j, k, cpu_grid, c, c, c)
+            value_sum += data[i, j, k]
+        end
+
+        heights[k] = height_sum * normalization
+        values[k] = value_sum * normalization
+    end
+
+    return HorizontalMeanProfile(heights, values)
+end
+
 #####
 ##### Compute contravariant vertical velocity and momentum
 #####
@@ -812,5 +879,45 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢ
     copyto!(Oceananigans.interior(ρᵣ), Oceananigans.Architectures.on_architecture(arch, ρ_host))
     fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Build the reference specification (`reference_potential_temperature`,
+`reference_vapor_mass_fraction`) for a terrain-following compressible model from the
+horizontal means of its current `θˡⁱ` and `qᵛ`. The vapor profile is dropped (set to
+`nothing`, selecting the dry reference path) when the mean moisture is identically zero.
+"""
+function terrain_reference_mean_profiles(model)
+    θ̄ = horizontal_mean_profile(AtmosphereModels.liquid_ice_potential_temperature(model))
+    qᵛ_profile = horizontal_mean_profile(AtmosphereModels.specific_humidity(model))
+    q̄ᵛ = all(iszero, qᵛ_profile.values) ? nothing : qᵛ_profile
+    return (; reference_potential_temperature=θ̄,
+              reference_vapor_mass_fraction=q̄ᵛ)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Recompute the 3D terrain reference pressure/density in place from the horizontal-mean state,
+via `compute_terrain_reference_state!`. Unlike the Exner/anelastic `set_to_mean!` reset, no
+`update_state!` follows: the terrain reference feeds only the buoyancy and pressure-gradient
+tendencies, not any diagnostic field. A no-op if the dynamics carries no terrain reference.
+"""
+function AtmosphereModels.reset_reference_state!(model::TerrainCompressibleModel)
+    dynamics = model.dynamics
+    pᵣ = dynamics.terrain_reference_pressure
+    ρᵣ = dynamics.terrain_reference_density
+    (pᵣ === nothing || ρᵣ === nothing) && return nothing
+
+    ref_spec = terrain_reference_mean_profiles(model)
+    compute_terrain_reference_state!(pᵣ, ρᵣ, model.grid,
+                                     surface_pressure(dynamics),
+                                     ref_spec,
+                                     standard_pressure(dynamics),
+                                     model.thermodynamic_constants)
+
     return nothing
 end
