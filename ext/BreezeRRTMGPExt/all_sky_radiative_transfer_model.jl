@@ -310,7 +310,7 @@ function update_rrtmgp_cloud_state!(cloud_state, model, liquid_effective_radius,
     grid = model.grid
     arch = architecture(grid)
 
-    ρᵣ = model.dynamics.reference_state.density
+    ρᵣ = radiation_reference_density(model.dynamics)
     microphysics = model.microphysics
     microphysical_fields = model.microphysical_fields
     qᵛ = specific_prognostic_moisture(model)
