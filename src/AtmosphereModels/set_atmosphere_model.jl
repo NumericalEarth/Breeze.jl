@@ -340,8 +340,8 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         reset_reference_state!(model)
     end
 
-    # Set the density (and seed the pressure) into discrete hydrostatic balance with the just-set
-    # thermodynamic state, before the mass-conservation correction.
+    # Set the density into discrete hydrostatic balance with the just-set thermodynamic state,
+    # before the mass-conservation correction.
     if hydrostatic_balance
         set_hydrostatically_balanced_density!(model, balanced_density)
     end

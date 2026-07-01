@@ -201,8 +201,8 @@ end
 """
     HydrostaticallyBalancedDensity(; surface_pressure = nothing)
 
-Marker passed as the `ρ` value to [`set!`](@ref) to set the density — and seed the pressure — in
-discrete moist hydrostatic balance with the just-set `θˡⁱ`/`qᵛ`, by per-column integration of the
+Marker passed as the `ρ` value to [`set!`](@ref) to set the density in discrete moist hydrostatic
+balance with the just-set `θˡⁱ`/`qᵛ`, by per-column integration of the
 hydrostatic equation upward from `surface_pressure` (a scalar; defaults to the dynamics' mean
 surface pressure). For `CompressibleDynamics`.
 
@@ -220,11 +220,11 @@ HydrostaticallyBalancedDensity(; surface_pressure = nothing) = HydrostaticallyBa
 """
 $(TYPEDSIGNATURES)
 
-Set the prognostic density (and seed the diagnostic pressure) of a `CompressibleDynamics` model into
-discrete hydrostatic balance with the current `θˡⁱ`/`qᵛ`, per [`HydrostaticallyBalancedDensity`](@ref).
-Runs the same per-column Exner integration the reference-state constructor uses, then scales the dry
-density (and rescales the density-weighted prognostics, preserving `θ`, `qˣ`, and velocities) so the
-total density matches the balanced column.
+Set the prognostic density of a `CompressibleDynamics` model into discrete hydrostatic balance with
+the current `θˡⁱ`/`qᵛ`, per [`HydrostaticallyBalancedDensity`](@ref). Runs the same per-column
+Exner integration the reference-state constructor uses, then scales the dry density (and rescales
+the density-weighted prognostics, preserving `θ`, `qˣ`, and velocities) so the total density matches
+the balanced column.
 """
 function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalancedDensity)
     dynamics  = model.dynamics
@@ -244,18 +244,18 @@ function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalan
     θ  = model.formulation.potential_temperature   # specific θˡⁱ, filled by the preceding update_state!
     qᵛ = specific_prognostic_moisture(model)
 
-    # Per-column hydrostatic integration → balanced pressure (seeded into the model) + total density.
-    pressure = dynamics_pressure(dynamics)
+    # Per-column hydrostatic integration → balanced total density.
     π = CenterField(grid)
+    pressure = CenterField(grid)
     ρ = CenterField(grid)
     launch!(arch, grid, :xy, _compute_exner_reference_3d!,
             π, pressure, ρ, θ, qᵛ, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
-    fill_halo_regions!(pressure)
 
     # Scale the prognostic dry density so the diagnosed total density equals the balanced column ρ,
     # then rescale the density-weighted prognostics to preserve θ, qˣ, and the velocities.
     ρᵈ     = dynamics_density(dynamics)
-    ρᵈ_old = copy(parent(ρᵈ))
+    ρᵈ_old = CenterField(grid)
+    copyto!(parent(ρᵈ_old), parent(ρᵈ))
     parent(ρᵈ) .*= parent(ρ) ./ parent(total_density(dynamics))
     fill_halo_regions!(ρᵈ)
     rescale_density_weighted_fields!(model, ρᵈ_old)
