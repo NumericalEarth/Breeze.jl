@@ -597,6 +597,61 @@ end
         @test model.dynamics.reference_state === nothing   # unchanged; no error
     end
 
+    @testset "set!(; compute_reference_state) recomputes terrain reference fields" begin
+        Nx, Nz = 8, 6
+        Lx, Lz = FT(10000), FT(5000)
+        z_faces = Breeze.TerrainFollowingDiscretization.TerrainFollowingVerticalDiscretization(
+            collect(range(0, Lz, length=Nz+1));
+            formulation = Breeze.TerrainFollowingDiscretization.LinearDecay())
+        terrain_grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(3, 3),
+                                       x=(-Lx/2, Lx/2), z=z_faces,
+                                       topology=(Periodic, Flat, Bounded))
+
+        h₀ = FT(200)
+        a = FT(2000)
+        hill(x) = h₀ * exp(-x^2 / a^2)
+        Breeze.TerrainFollowingDiscretization.materialize_terrain!(terrain_grid, hill)
+
+        θ_init = FT(290)
+        θ_new  = FT(305)
+        p₀     = FT(101325)
+
+        truth_dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                              reference_potential_temperature=θ_new,
+                                              surface_pressure=p₀)
+        truth_model = AtmosphereModel(terrain_grid; thermodynamic_constants=constants,
+                                      dynamics=truth_dynamics)
+
+        dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                        reference_potential_temperature=θ_init,
+                                        surface_pressure=p₀)
+        model = AtmosphereModel(terrain_grid; thermodynamic_constants=constants,
+                                dynamics)
+
+        set!(model; ρ=1, θˡⁱ=θ_new, qᵗ=0,
+             compute_reference_state=true,
+             enforce_mass_conservation=false)
+
+        @test model.dynamics.terrain_reference_pressure ≈
+              truth_model.dynamics.terrain_reference_pressure rtol=1e-6
+        @test model.dynamics.terrain_reference_density ≈
+              truth_model.dynamics.terrain_reference_density rtol=1e-6
+    end
+
+    @testset "HorizontalMeanProfile interpolates linearly and clamps outside its range" begin
+        # The integration test above uses a uniform θ, so the piecewise-linear interpolation
+        # never actually varies. Exercise it directly on a known profile.
+        HorizontalMeanProfile = Breeze.CompressibleEquations.HorizontalMeanProfile
+        profile = HorizontalMeanProfile(FT[100, 200, 300], FT[10, 20, 30])
+
+        @test profile(FT(50))  == FT(10)   # below heights[1] → clamp to values[1]
+        @test profile(FT(100)) == FT(10)   # at the bottom node
+        @test profile(FT(150)) ≈  FT(15)   # linear interpolation between nodes
+        @test profile(FT(250)) ≈  FT(25)
+        @test profile(FT(300)) == FT(30)   # at the top node
+        @test profile(FT(350)) == FT(30)   # above heights[end] → clamp to values[end]
+    end
+
     # `ρ = HydrostaticallyBalancedDensity()` integrates the hydrostatic column from the surface
     # pressure. For a uniform θ it must reproduce a fresh ExnerReferenceState built at that θ (same
     # per-column integration), to machine precision — and the balanced state survives the default
