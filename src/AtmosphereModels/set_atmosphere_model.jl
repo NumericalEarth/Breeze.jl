@@ -118,6 +118,15 @@ end
 
 settable_specific_microphysical_names(::Nothing) = ()
 
+function enforce_mass_conservation!(model::AtmosphereModel)
+    FT = eltype(model.grid)
+    Δt = one(FT)
+    compute_pressure_correction!(model, Δt)
+    make_pressure_correction!(model, Δt)
+    update_state!(model, compute_tendencies=false)
+    return nothing
+end
+
 """
     set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
@@ -167,7 +176,8 @@ Variables are set via keyword arguments. Supported variables include:
 # Options
 
 - `enforce_mass_conservation`: If `true` (default), applies a pressure correction
-  to ensure the velocity field satisfies the anelastic continuity equation.
+  to ensure the velocity field satisfies the anelastic continuity equation. If `balancer` is also
+  used, a final correction is applied after the balance.
 
 - `compute_reference_state`: If `true` (default `false`), recompute the dynamics' hydrostatic
   reference state from the horizontal means of the just-set state (see [`set_to_mean!`](@ref)),
@@ -336,18 +346,15 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         set_hydrostatically_balanced_density!(model, balanced_density)
     end
 
-    if enforce_mass_conservation
-        FT = eltype(model.grid)
-        Δt = one(FT)
-        compute_pressure_correction!(model, Δt)
-        make_pressure_correction!(model, Δt)
-        update_state!(model, compute_tendencies=false)
-    end
+    enforce_mass_conservation && enforce_mass_conservation!(model)
 
     initialize_closure_fields!(model.closure_fields, model.closure, model)
 
     # Optional adiabatic (FV3 na_init) spin-up of the nonhydrostatic state, in place.
-    balancer === false || balance_adiabatically!(model, balancer)
+    if balancer !== false
+        balance_adiabatically!(model, balancer)
+        enforce_mass_conservation && enforce_mass_conservation!(model)
+    end
 
     return nothing
 end

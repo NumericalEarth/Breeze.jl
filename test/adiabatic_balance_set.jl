@@ -16,7 +16,8 @@
 
 using Breeze
 using Breeze: dynamics_density, AdiabaticBalancer
-using Breeze.AtmosphereModels: adiabatic_balance_twin, resolve_balance_Δt
+using Breeze.AtmosphereModels: adiabatic_balance_twin, compute_pressure_correction!,
+                               make_pressure_correction!, resolve_balance_Δt
 using Oceananigans
 using Oceananigans.Grids: minimum_zspacing
 using Oceananigans.TimeSteppers: update_state!
@@ -240,6 +241,40 @@ end
         @test ρθ_of(model) ≈ ρθ₀ rtol=1e-6
         @test isapprox(maximum(abs, model.momentum.ρw), 0; atol=1e-6)
         @test model.clock.iteration == 0
+    end
+
+    @testset "AnelasticDynamics: set! with balancer preserves mass projection" begin
+        grid = RectilinearGrid(default_arch; size = (8, 8, 16), halo = (3, 3, 3),
+                               x = (0, 1e4), y = (0, 1e4), z = (0, 4e3),
+                               topology = (Periodic, Periodic, Bounded))
+        constants = ThermodynamicConstants(eltype(grid))
+        reference_state = ReferenceState(grid, constants; surface_pressure = 1e5,
+                                         potential_temperature = 300, vapor_mass_fraction = 0)
+        model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state), microphysics = nothing)
+
+        set!(model;
+             θ = (x, y, z) -> 300 + sin(2π * x / 1e4) * cos(2π * z / 4e3),
+             u = (x, y, z) -> 50 * sin(2π * x / 1e4) * cos(2π * z / 4e3),
+             v = (x, y, z) -> 50 * cos(2π * y / 1e4) * sin(2π * z / 4e3),
+             w = 0,
+             enforce_mass_conservation = true,
+             balancer = AdiabaticBalancer(Δt = 2.0, cycles = 1))
+
+        ρu = Array(interior(model.momentum.ρu))
+        ρv = Array(interior(model.momentum.ρv))
+        ρw = Array(interior(model.momentum.ρw))
+
+        compute_pressure_correction!(model, 1)
+        make_pressure_correction!(model, 1)
+        update_state!(model, compute_tendencies = false)
+
+        projection_change = maximum((
+            maximum(abs, Array(interior(model.momentum.ρu)) .- ρu),
+            maximum(abs, Array(interior(model.momentum.ρv)) .- ρv),
+            maximum(abs, Array(interior(model.momentum.ρw)) .- ρw)))
+
+        momentum_scale = maximum((1, maximum(abs, ρu), maximum(abs, ρv), maximum(abs, ρw)))
+        @test projection_change <= 1e-8 * momentum_scale
     end
 
 end
