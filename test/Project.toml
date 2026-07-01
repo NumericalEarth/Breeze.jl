@@ -25,6 +25,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 [sources]
 Breeze = {path = ".."}
 Metal = {url = "https://github.com/JuliaGPU/Metal.jl.git", rev = "d6b4ca22238cfaaefbaa8d96832ccd5384725865"}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "main"}
 
 [compat]
 Adapt = "4.3.0"
