@@ -433,6 +433,8 @@ Return the standard pressure for potential temperature calculations.
 """
 AtmosphereModels.standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
 
+AtmosphereModels.dynamics_reference_state(dynamics::CompressibleDynamics) = dynamics.reference_state
+
 """
 $(TYPEDSIGNATURES)
 

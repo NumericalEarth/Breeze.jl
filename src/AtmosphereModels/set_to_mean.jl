@@ -161,8 +161,7 @@ Recompute the dynamics' reference state from the horizontal means of the model's
 `set!(model; compute_reference_state=true)`.
 """
 function reset_reference_state!(model)
-    dynamics = model.dynamics
-    ref = hasproperty(dynamics, :reference_state) ? dynamics.reference_state : nothing
+    ref = dynamics_reference_state(model.dynamics)
     isnothing(ref) || set_to_mean!(ref, model)
     return nothing
 end
@@ -214,8 +213,8 @@ function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalan
     Nz        = size(grid, 3)
     constants = model.thermodynamic_constants
 
-    p₀  = isnothing(spec.surface_pressure) ? dynamics.surface_pressure : spec.surface_pressure
-    pˢᵗ = dynamics.standard_pressure
+    p₀  = isnothing(spec.surface_pressure) ? surface_pressure(dynamics) : spec.surface_pressure
+    pˢᵗ = standard_pressure(dynamics)
     Rᵈ  = dry_air_gas_constant(constants)
     Rᵛ  = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity

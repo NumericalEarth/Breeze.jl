@@ -147,6 +147,8 @@ Return the standard pressure from the reference state for potential temperature 
 """
 AtmosphereModels.standard_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.standard_pressure
 
+AtmosphereModels.dynamics_reference_state(dynamics::AnelasticDynamics) = dynamics.reference_state
+
 #####
 ##### Show methods
 #####

@@ -1020,6 +1020,10 @@ function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper
     x_damping_scale = TX === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α, Δτ_FT)
     y_damping_scale = TY === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α, Δτ_FT)
 
+    # ρθ′ˢ⁻ (old (ρθ)′ stashed in `_build_predictors!`) is read at faces below via `dρθ′`, so fill
+    # its halos here — this strategy is its only consumer, so the other strategies skip the fill.
+    fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
+
     launch!(arch, grid, :xyz, _thermal_divergence_damping!,
             substepper.momentum_perturbation.u,
             substepper.momentum_perturbation.v,
@@ -1380,8 +1384,6 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)
 
-        # (old (ρθ)′ is stashed into ρθ′ˢ⁻ inside `_build_predictors!`, then halo-filled.)
-
         # Implicit-vertical-damping prefactors. When the damping strategy
         # is `ThermalDivergenceDamping(damp_vertical=true)`, the
         # vertical part of the divergence damping is folded into the
@@ -1392,7 +1394,8 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
         dᵐ⁺, dˢ⁻ = implicit_damping_factors(substepper.damping, ω, grid, FT)
 
         # Step B: build predictors ρ′★, ρθ′★ (3D), then the (ρw)′ᵐ⁺ tridiag RHS (3D).
-        # `_build_predictors!` also stashes old (ρθ)′ into ρθ′ˢ⁻; halo-fill it for the damping.
+        # `_build_predictors!` also stashes old (ρθ)′ into ρθ′ˢ⁻ (its halos are filled by the
+        # thermal-divergence-damping step below, the only consumer).
         launch!(arch, grid, :xyz, _build_predictors!,
                 substepper.density_predictor,
                 substepper.density_potential_temperature_predictor,
@@ -1404,7 +1407,6 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
                 grid, model.dynamics, Δτ, δτˢ⁻,
                 Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
                 substepper.linearization_potential_temperature)
-        fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
 
         launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
                 _build_vertical_rhs!,
