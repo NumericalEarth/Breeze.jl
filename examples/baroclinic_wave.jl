@@ -72,7 +72,7 @@ using CUDA
 # so that the grid, Coriolis, and model thermodynamics are all consistent
 # with the analytic initial conditions.
 
-Oceananigans.defaults.FloatType = Float64
+Oceananigans.defaults.FloatType = Float32
 Oceananigans.defaults.gravitational_acceleration = 9.80616
 Oceananigans.defaults.planet_radius = 6371220
 Oceananigans.defaults.planet_rotation_rate = 7.29212e-5
@@ -230,24 +230,10 @@ dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
-# ### Horizontal dissipation
-#
-# The advection scheme's own implicit dissipation is the only small-scale
-# sink here. A scale-selective horizontal viscosity — damping mode ``k`` at
-# rate ``ν k²``, hammering the grid-scale band while barely touching the
-# synoptic wave — is one way to guard against the inviscid operator
-# amplifying marginally-resolved scales into a spurious high-wavenumber band
-# that could outgrow the physical wavenumber-9 wave. At ninth-order WENO,
-# though, the scheme's own dissipation is enough to keep the grid scale
-# quiet over this run's 30-day span, so no closure is used here. The
-# power-method examples (`power_method_baroclinic.jl`), which run at lower
-# WENO order and repeatedly rescale perturbations back to a fixed amplitude,
-# do need the explicit closure to keep wavenumber 9 the leading unstable
-# mode.
-
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        advection = WENO(order=9))
+                        advection = WENO())
+
 # ## Set initial conditions
 
 set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
@@ -287,18 +273,18 @@ add_callback!(simulation, progress, IterationInterval(50))
 
 # ## Output
 #
-# We save the velocities, the full potential temperature ``θ``, the
-# diagnostic pressure ``p``, and the vertical vorticity ``ζ``, sliced at two
-# levels: k = 1 (surface) and k = 16 (mid-troposphere, ~5 km).
+# We save the velocities, the full potential temperature ``θ`` (the
+# classic surface synoptic diagnostic for the cold/warm sectors during
+# cyclogenesis), and the vertical vorticity ``ζ``, sliced at two levels:
+# k = 1 (surface) and k = 16 (mid-troposphere, ~5 km).
 
 using Oceananigans.Operators: ζ₃ᶠᶠᶜ
 u, v, w = model.velocities
 ζ = KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, model.grid, u, v)
 
 θ = PotentialTemperature(model)
-p = dynamics_pressure(model.dynamics)
 
-outputs = merge(model.velocities, (; ζ, θ, p))
+outputs = merge(model.velocities, (; ζ, θ))
 
 for k in (1, 16)
     filename = "baroclinic_wave_k$k"
@@ -316,17 +302,14 @@ run!(simulation)
 
 # ## Visualization
 #
-# We plot four diagnostics on the sphere: the **surface potential temperature**
+# We plot three diagnostics on the sphere: the **surface potential temperature**
 # ``θ_{\rm sfc}`` (the classic synoptic diagnostic for the cold/warm sectors),
 # the **surface vertical vorticity** ``ζ`` (which reveals the cyclones and
-# anticyclones), the **mid-level vertical velocity** ``w`` (which highlights
-# the warm conveyor belt and the wave's vertical structure), and the
-# **surface pressure** ``p`` (the model's own diagnosed pressure field) on a
-# diverging colormap (`:RdBu_r`) centered at 1000 hPa with ±20 hPa range.
+# anticyclones), and the **mid-level vertical velocity** ``w`` (which highlights
+# the warm conveyor belt and the wave's vertical structure).
 
 θ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "θ")
 ζ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "ζ")
-p_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "p")
 w_ts = FieldTimeSeries("baroclinic_wave_k16.jld2", "w")
 times = θ_ts.times
 Nt = length(times)
@@ -334,48 +317,43 @@ Nt = length(times)
 k_sfc = 1
 k_mid = 16
 
+# Sphere view: rotate so the developing wave faces the camera.
+sphere_kw = (elevation = π/6, azimuth = π/2, aspect = :data)
 ζlim = 1e-4
 wlim = 0.06
 
-p_ctr  = 1e5      # Pa — reference pressure (1000 hPa) for diverging colormap
-p_half = 2000.0   # Pa — ±20 hPa half-range resolves synoptic highs and lows
-
-θ_kw = (colormap = :thermal,  colorrange = (260, 310))
-ζ_kw = (colormap = :balance,  colorrange = (-ζlim, ζlim))
-w_kw = (colormap = :balance,  colorrange = (-wlim, wlim))
-p_kw = (colormap = Reverse(:RdBu), colorrange = (p_ctr - p_half, p_ctr + p_half),
-        lowclip = :darkblue, highclip = :darkred)
+θ_kw = (colormap = :thermal, colorrange = (260, 310))
+ζ_kw = (colormap = :balance, colorrange = (-ζlim, ζlim))
+w_kw = (colormap = :balance, colorrange = (-wlim, wlim))
 
 # ### Animation
 
 n = Observable(1)
-θn  = @lift view(θ_ts[$n], :, :, k_sfc)
-ζn  = @lift view(ζ_ts[$n], :, :, k_sfc)
-wn  = @lift view(w_ts[$n], :, :, k_mid)
-pn  = @lift view(p_ts[$n], :, :, k_sfc)
+θn = @lift view(θ_ts[$n], :, :, k_sfc)
+ζn = @lift view(ζ_ts[$n], :, :, k_sfc)
+wn = @lift view(w_ts[$n], :, :, k_mid)
 
-fig = Figure(size = (2400, 700))
+fig = Figure(size = (1800, 700))
 
 title = @lift "t = $(prettytime(times[$n]))"
-fig[0, 1:8] = Label(fig, title, fontsize=22, tellwidth=false)
+fig[0, 1:6] = Label(fig, title, fontsize=22, tellwidth=false)
 
-ax_kw = (xlabel = "Longitude (°)", ylabel = "Latitude (°)")
-
-ax1 = Axis(fig[1, 1]; title = "θ at surface", ax_kw...)
-hm1 = heatmap!(ax1, θn; θ_kw...)
+ax1 = Axis3(fig[1, 1]; title = "θ at surface", sphere_kw...)
+hm1 = surface!(ax1, θn; shading = NoShading, θ_kw...)
 Colorbar(fig[1, 2], hm1; label = "θ (K)", height=Relative(0.5))
 
-ax2 = Axis(fig[1, 3]; title = "ζ at surface", ax_kw...)
-hm2 = heatmap!(ax2, ζn; ζ_kw...)
+ax2 = Axis3(fig[1, 3]; title = "ζ at surface", sphere_kw...)
+hm2 = surface!(ax2, ζn; shading = NoShading, ζ_kw...)
 Colorbar(fig[1, 4], hm2; label = "ζ (1/s)", height=Relative(0.5))
 
-ax3 = Axis(fig[1, 5]; title = "w at mid-level", ax_kw...)
-hm3 = heatmap!(ax3, wn; w_kw...)
+ax3 = Axis3(fig[1, 5]; title = "w at mid-level", sphere_kw...)
+hm3 = surface!(ax3, wn; shading = NoShading, w_kw...)
 Colorbar(fig[1, 6], hm3; label = "w (m/s)", height=Relative(0.5))
 
-ax4 = Axis(fig[1, 7]; title = "p at surface", ax_kw...)
-hm4 = heatmap!(ax4, pn; p_kw...)
-Colorbar(fig[1, 8], hm4; label = "p (Pa)", height=Relative(0.5))
+for ax in (ax1, ax2, ax3)
+    hidedecorations!(ax)
+    hidespines!(ax)
+end
 
 CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 12) do nn
     n[] = nn
