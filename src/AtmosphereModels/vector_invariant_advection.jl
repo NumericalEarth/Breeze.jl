@@ -51,7 +51,9 @@ using Oceananigans.Advection: VectorInvariant, WENOVectorInvariant,
                               _biased_interpolate_xᶜᵃᵃ, _biased_interpolate_xᶠᵃᵃ,
                               _biased_interpolate_yᵃᶜᵃ, _biased_interpolate_yᵃᶠᵃ,
                               _symmetric_interpolate_xᶠᵃᵃ, _symmetric_interpolate_yᵃᶠᵃ,
-                              bias, FunctionStencil, Khᶜᶜᶜ, ϕ²
+                              _biased_interpolate_zᵃᵃᶜ,
+                              bias, FunctionStencil, DefaultStencil,
+                              AbstractUpwindBiasedAdvectionScheme, Khᶜᶜᶜ, ϕ²
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
                               V⁻¹ᶠᶜᶜ, V⁻¹ᶜᶠᶜ, V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ, div_xyᶜᶜᶜ, divᶜᶜᶜ,
                               ζ₃ᶠᶠᶜ, Δx_qᶜᶠᶜ, Δy_qᶠᶜᶜ, Az_qᶜᶜᶠ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ,
@@ -94,9 +96,10 @@ used by continuity) and all three momentum components, including ``ρw``, are
 advected in vector-invariant form. See
 `design/compressible_orthogonal_cgrid_weno_vi_with_hollingsworth.md`.
 
-Reconstruction staging: the vertical-vorticity (ζ₃) fluxes and the mass-flux
-divergence are upwinded when the wrapped scheme upwinds them; the horizontal-
-vorticity (ζ₁, ζ₂) fluxes and the kinetic-energy gradient are centered.
+Reconstruction staging: the ζ₃ fluxes, the ζ₁/ζ₂ fluxes, the mass-flux
+divergence, and the horizontal kinetic-energy gradient are all upwinded when
+the wrapped scheme upwinds them (biased by the transporting mass flux); the
+w²/2 contribution and the vertical kinetic-energy gradient are centered.
 """
 struct ThreeDimensionalDivergence end
 
@@ -268,10 +271,9 @@ end
 ##### fluxes used by continuity (design principle of
 ##### design/compressible_orthogonal_cgrid_weno_vi_with_hollingsworth.md).
 #####
-##### Only ζ₃ and ∇·𝐔 are upwinded (when the wrapped scheme upwinds them); the
-##### ζ₁/ζ₂ fluxes and ∇K are centered. TODO (staged, per the design note):
-##### WENO reconstruction of the ζ₁/ζ₂ fluxes biased by the vertical mass flux,
-##### and of the kinetic-energy gradient.
+##### ζ₃, ζ₁/ζ₂, ∇·𝐔, and the horizontal ∇K are upwinded when the wrapped
+##### scheme upwinds them (biased by the transporting mass flux); the w²/2
+##### contribution and the vertical ∇K (w equation) remain centered.
 #####
 
 # Horizontal-axis relative vorticity components
@@ -312,20 +314,62 @@ end
     return Û * ζᴿ
 end
 
-# ζ₂/ζ₁ fluxes transported by the vertical mass flux (centered, Az-weighted,
-# mirroring Oceananigans' energy-conserving vertical stencil)
+# ζ₂/ζ₁ fluxes transported by the vertical mass flux. Centered (Az-weighted,
+# mirroring Oceananigans' energy-conserving vertical stencil) for centered
+# schemes; for upwind-vertical schemes ζ is reconstructed in z with the
+# `vertical_advection_scheme`, biased by the transporting mass flux (design-note
+# Stage 3).
+const VectorInvariantUpwindVertical = VectorInvariant{<:Any, <:Any, <:Any, <:Any, <:Any,
+                                                      <:AbstractUpwindBiasedAdvectionScheme}
+
+# NOTE: the z-direction `_biased_interpolate_zᵃᵃᶜ` takes the reconstruction scheme
+# directly — Oceananigans generates the VectorInvariant peel-off wrappers only for
+# the horizontal directions.
+
 @inline Az_ρw_ζ₂ᶠᶜᶠ(i, j, k, grid, u, w, ρw) = ℑxᶠᵃᵃ(i, j, k, grid, Az_qᶜᶜᶠ, ρw) * ζ₂ᶠᶜᶠ(i, j, k, grid, u, w)
 @inline Az_ρw_ζ₁ᶜᶠᶠ(i, j, k, grid, v, w, ρw) = ℑyᵃᶠᵃ(i, j, k, grid, Az_qᶜᶜᶠ, ρw) * ζ₁ᶜᶠᶠ(i, j, k, grid, v, w)
 
-@inline Wζ₂ᶠᶜᶜ(i, j, k, grid, u, w, ρw) = ℑzᵃᵃᶜ(i, j, k, grid, Az_ρw_ζ₂ᶠᶜᶠ, u, w, ρw) * Az⁻¹ᶠᶜᶜ(i, j, k, grid)
-@inline Wζ₁ᶜᶠᶜ(i, j, k, grid, v, w, ρw) = ℑzᵃᵃᶜ(i, j, k, grid, Az_ρw_ζ₁ᶜᶠᶠ, v, w, ρw) * Az⁻¹ᶜᶠᶜ(i, j, k, grid)
+@inline Wζ₂ᶠᶜᶜ(i, j, k, grid, scheme::VectorInvariant, u, w, ρw) =
+    ℑzᵃᵃᶜ(i, j, k, grid, Az_ρw_ζ₂ᶠᶜᶠ, u, w, ρw) * Az⁻¹ᶠᶜᶜ(i, j, k, grid)
+@inline Wζ₁ᶜᶠᶜ(i, j, k, grid, scheme::VectorInvariant, v, w, ρw) =
+    ℑzᵃᵃᶜ(i, j, k, grid, Az_ρw_ζ₁ᶜᶠᶠ, v, w, ρw) * Az⁻¹ᶜᶠᶜ(i, j, k, grid)
 
-# ζ₂/ζ₁ fluxes for the w equation, transported by the horizontal mass fluxes (centered)
+@inline function Wζ₂ᶠᶜᶜ(i, j, k, grid, scheme::VectorInvariantUpwindVertical, u, w, ρw)
+    Ŵ = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, Az_qᶜᶜᶠ, ρw) * Az⁻¹ᶠᶜᶜ(i, j, k, grid)
+    ζᴿ = _biased_interpolate_zᵃᵃᶜ(i, j, k, grid, scheme.vertical_advection_scheme, bias(Ŵ),
+                                   ζ₂ᶠᶜᶠ, DefaultStencil(), u, w)
+    return Ŵ * ζᴿ
+end
+
+@inline function Wζ₁ᶜᶠᶜ(i, j, k, grid, scheme::VectorInvariantUpwindVertical, v, w, ρw)
+    Ŵ = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, Az_qᶜᶜᶠ, ρw) * Az⁻¹ᶜᶠᶜ(i, j, k, grid)
+    ζᴿ = _biased_interpolate_zᵃᵃᶜ(i, j, k, grid, scheme.vertical_advection_scheme, bias(Ŵ),
+                                   ζ₁ᶜᶠᶠ, DefaultStencil(), v, w)
+    return Ŵ * ζᴿ
+end
+
+# ζ₂/ζ₁ fluxes for the w equation, transported by the horizontal mass fluxes.
+# The reconstruction is horizontal, so upwind schemes reconstruct ζ with the
+# `vorticity_scheme`, biased by the transporting mass flux.
 @inline ρv_ζ₁ᶜᶠᶠ(i, j, k, grid, v, w, ρv) = ℑzᵃᵃᶠ(i, j, k, grid, ρv) * ζ₁ᶜᶠᶠ(i, j, k, grid, v, w)
 @inline ρu_ζ₂ᶠᶜᶠ(i, j, k, grid, u, w, ρu) = ℑzᵃᵃᶠ(i, j, k, grid, ρu) * ζ₂ᶠᶜᶠ(i, j, k, grid, u, w)
 
-@inline Vζ₁ᶜᶜᶠ(i, j, k, grid, v, w, ρv) = ℑyᵃᶜᵃ(i, j, k, grid, ρv_ζ₁ᶜᶠᶠ, v, w, ρv)
-@inline Uζ₂ᶜᶜᶠ(i, j, k, grid, u, w, ρu) = ℑxᶜᵃᵃ(i, j, k, grid, ρu_ζ₂ᶠᶜᶠ, u, w, ρu)
+@inline Vζ₁ᶜᶜᶠ(i, j, k, grid, scheme::VectorInvariant, v, w, ρv) = ℑyᵃᶜᵃ(i, j, k, grid, ρv_ζ₁ᶜᶠᶠ, v, w, ρv)
+@inline Uζ₂ᶜᶜᶠ(i, j, k, grid, scheme::VectorInvariant, u, w, ρu) = ℑxᶜᵃᵃ(i, j, k, grid, ρu_ζ₂ᶠᶜᶠ, u, w, ρu)
+
+@inline function Vζ₁ᶜᶜᶠ(i, j, k, grid, scheme::VectorInvariantUpwindVorticity, v, w, ρv)
+    V̂ = ℑyᵃᶜᵃ(i, j, k, grid, ℑzᵃᵃᶠ, ρv)
+    ζᴿ = _biased_interpolate_yᵃᶜᵃ(i, j, k, grid, scheme, scheme.vorticity_scheme, bias(V̂),
+                                   ζ₁ᶜᶠᶠ, DefaultStencil(), v, w)
+    return V̂ * ζᴿ
+end
+
+@inline function Uζ₂ᶜᶜᶠ(i, j, k, grid, scheme::VectorInvariantUpwindVorticity, u, w, ρu)
+    Û = ℑxᶜᵃᵃ(i, j, k, grid, ℑzᵃᵃᶠ, ρu)
+    ζᴿ = _biased_interpolate_xᶜᵃᵃ(i, j, k, grid, scheme, scheme.vorticity_scheme, bias(Û),
+                                   ζ₂ᶠᶜᶠ, DefaultStencil(), u, w)
+    return Û * ζᴿ
+end
 
 # Full 3D mass-flux divergence interpolated to the momentum locations. For
 # schemes with divergence-upwinding machinery, the own-direction flux difference
@@ -386,7 +430,7 @@ end
     @inbounds û = u[i, j, k]
     ∂xK = bernoulli_head_U(i, j, k, grid, scheme, u, v) + ∂xᶠᶜᶜ(i, j, k, grid, Kwᶜᶜᶜ, w)
     return - Vζ₃ᶠᶜᶜ(i, j, k, grid, scheme, u, v, ρv) +
-             Wζ₂ᶠᶜᶜ(i, j, k, grid, u, w, ρw) +
+             Wζ₂ᶠᶜᶜ(i, j, k, grid, scheme, u, w, ρw) +
              ℑxᶠᵃᵃ(i, j, k, grid, ρ) * ∂xK +
              û * mass_divergenceᶠᶜᶜ(i, j, k, grid, scheme, û, ρu, ρv, ρw) +
              U_dot_∇u_metric(i, j, k, grid, scheme, momentum, velocities)
@@ -401,7 +445,7 @@ end
     @inbounds v̂ = v[i, j, k]
     ∂yK = bernoulli_head_V(i, j, k, grid, scheme, u, v) + ∂yᶜᶠᶜ(i, j, k, grid, Kwᶜᶜᶜ, w)
     return + Uζ₃ᶜᶠᶜ(i, j, k, grid, scheme, u, v, ρu) -
-             Wζ₁ᶜᶠᶜ(i, j, k, grid, v, w, ρw) +
+             Wζ₁ᶜᶠᶜ(i, j, k, grid, scheme, v, w, ρw) +
              ℑyᵃᶠᵃ(i, j, k, grid, ρ) * ∂yK +
              v̂ * mass_divergenceᶜᶠᶜ(i, j, k, grid, scheme, v̂, ρu, ρv, ρw) +
              U_dot_∇v_metric(i, j, k, grid, scheme, momentum, velocities)
@@ -414,8 +458,8 @@ end
     u, v, w = velocities.u, velocities.v, velocities.w
     ρu, ρv, ρw = momentum.ρu, momentum.ρv, momentum.ρw
     @inbounds ŵ = w[i, j, k]
-    return + Vζ₁ᶜᶜᶠ(i, j, k, grid, v, w, ρv) -
-             Uζ₂ᶜᶜᶠ(i, j, k, grid, u, w, ρu) +
+    return + Vζ₁ᶜᶜᶠ(i, j, k, grid, scheme, v, w, ρv) -
+             Uζ₂ᶜᶜᶠ(i, j, k, grid, scheme, u, w, ρu) +
              ℑzᵃᵃᶠ(i, j, k, grid, ρ) * ∂zᶜᶜᶠ(i, j, k, grid, K³ᶜᶜᶜ, u, v, w) +
              ŵ * mass_divergenceᶜᶜᶠ(i, j, k, grid, scheme, ŵ, ρu, ρv, ρw) +
              U_dot_∇w_metric(i, j, k, grid, scheme, momentum, velocities)
