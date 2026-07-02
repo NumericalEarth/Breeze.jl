@@ -13,9 +13,10 @@
 # trait that selects the consistent pairing of vertical-advection treatment and
 # mass-divergence correction (see design/vector_invariant_momentum.md):
 #
-#   * `HorizontalDivergence` (MPAS-faithful): horizontal VI advective part
-#     ρ(ζ×𝐮 + ∇K)ₕ + flux-form vertical advection ∂z(ρw·u) + horizontal-divergence
-#     correction −u ∇ₕ·(ρ𝐮). Vertical momentum ρw stays flux form, matching MPAS.
+#   * `HorizontalDivergence` (MPAS-faithful): mass-flux ζ₃ vorticity flux (the
+#     prognostic ρ𝐮ₕ transports the vorticity, as in MPAS) + ρ-weighted horizontal
+#     KE gradient + flux-form vertical advection ∂z(ρw·u) + horizontal-divergence
+#     correction −u ∇ₕ·(ρ𝐮ₕ). Vertical momentum ρw stays flux form, matching MPAS.
 #
 #   * `ThreeDimensionalDivergence` (unsplit, design/compressible_orthogonal_cgrid_
 #     weno_vi_with_hollingsworth.md): the mass-flux Lamb vector form
@@ -45,7 +46,6 @@ using Oceananigans.Advection: VectorInvariant, WENOVectorInvariant,
                               VectorInvariantUpwindVorticity,
                               VectorInvariantSelfVerticalUpwinding,
                               VectorInvariantCrossVerticalUpwinding,
-                              horizontal_advection_U, horizontal_advection_V,
                               bernoulli_head_U, bernoulli_head_V,
                               _advective_momentum_flux_Wu, _advective_momentum_flux_Wv,
                               _biased_interpolate_xᶜᵃᵃ, _biased_interpolate_xᶠᵃᵃ,
@@ -69,9 +69,12 @@ using Oceananigans.Grids: AbstractGrid
     HorizontalDivergence()
 
 Vector-invariant flavor that advects the horizontal momentum with the
-vector-invariant form in the horizontal only, treats vertical advection of
-horizontal momentum in flux form, and corrects with the horizontal mass-flux
-divergence ``∇ₕ·(ρ𝐮)``. This is the MPAS-Atmosphere choice.
+vector-invariant form in the horizontal only — the ζ₃ vorticity flux transported
+by the prognostic horizontal mass fluxes, plus the ρ-weighted horizontal
+kinetic-energy gradient — treats vertical advection of horizontal momentum in
+flux form, and corrects with the horizontal mass-flux divergence ``∇ₕ·(ρ𝐮ₕ)``.
+This is the MPAS-Atmosphere choice (MPAS transports its rotational tendency
+with the ρ𝐮 fluxes).
 """
 struct HorizontalDivergence end
 
@@ -191,26 +194,35 @@ Advection.materialize_advection(a::CompressibleVectorInvariant, grid) =
 const HorizontalCVI = CompressibleVectorInvariant{<:Any, <:HorizontalDivergence}
 const ThreeDimensionalCVI = CompressibleVectorInvariant{<:Any, <:ThreeDimensionalDivergence}
 
+# The ζ₃ vorticity flux is transported by the prognostic mass flux (Vζ₃ᶠᶜᶜ /
+# Uζ₃ᶜᶠᶜ below) — the density-weighted structure that controls the Hollingsworth
+# energy residual, and what MPAS actually does (its rotational tendency uses the
+# ρu fluxes). The kinetic-energy gradient is ρ-weighted outside, which is the
+# correct placement for ρ∇K.
 @inline function x_momentum_flux_divergence(i, j, k, grid, advection::HorizontalCVI,
                                             momentum, velocities, dynamics)
     ρ = dynamics_density(dynamics)
-    return ℑxᶠᵃᵃ(i, j, k, grid, ρ) *
-               x_vector_invariant_advection(i, j, k, grid, advection, velocities) +
+    scheme = advection.scheme
+    u, v = velocities.u, velocities.v
+    return - Vζ₃ᶠᶜᶜ(i, j, k, grid, scheme, u, v, momentum.ρv) +
+           ℑxᶠᵃᵃ(i, j, k, grid, ρ) * bernoulli_head_U(i, j, k, grid, scheme, u, v) +
            x_vertical_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities) +
            @inbounds(velocities.u[i, j, k]) *
                x_divergence_correction(i, j, k, grid, advection.divergence, momentum) +
-           U_dot_∇u_metric(i, j, k, grid, advection.scheme, momentum, velocities)
+           U_dot_∇u_metric(i, j, k, grid, scheme, momentum, velocities)
 end
 
 @inline function y_momentum_flux_divergence(i, j, k, grid, advection::HorizontalCVI,
                                             momentum, velocities, dynamics)
     ρ = dynamics_density(dynamics)
-    return ℑyᵃᶠᵃ(i, j, k, grid, ρ) *
-               y_vector_invariant_advection(i, j, k, grid, advection, velocities) +
+    scheme = advection.scheme
+    u, v = velocities.u, velocities.v
+    return + Uζ₃ᶜᶠᶜ(i, j, k, grid, scheme, u, v, momentum.ρu) +
+           ℑyᵃᶠᵃ(i, j, k, grid, ρ) * bernoulli_head_V(i, j, k, grid, scheme, u, v) +
            y_vertical_momentum_flux_divergence(i, j, k, grid, advection, momentum, velocities) +
            @inbounds(velocities.v[i, j, k]) *
                y_divergence_correction(i, j, k, grid, advection.divergence, momentum) +
-           U_dot_∇v_metric(i, j, k, grid, advection.scheme, momentum, velocities)
+           U_dot_∇v_metric(i, j, k, grid, scheme, momentum, velocities)
 end
 
 # Vertical momentum stays flux form for the MPAS-faithful horizontal flavor,
@@ -219,18 +231,6 @@ end
                                    momentum, velocities, dynamics) =
     div_𝐯w(i, j, k, grid, compressible_vi_vertical_scheme(advection), momentum, velocities.w) +
     U_dot_∇w_metric(i, j, k, grid, advection.scheme, momentum, velocities)
-
-#####
-##### Advective part of the horizontal (MPAS) flavor
-#####
-
-@inline x_vector_invariant_advection(i, j, k, grid, a::HorizontalCVI, U) =
-    horizontal_advection_U(i, j, k, grid, a.scheme, U.u, U.v) +
-    bernoulli_head_U(i, j, k, grid, a.scheme, U.u, U.v)
-
-@inline y_vector_invariant_advection(i, j, k, grid, a::HorizontalCVI, U) =
-    horizontal_advection_V(i, j, k, grid, a.scheme, U.u, U.v) +
-    bernoulli_head_V(i, j, k, grid, a.scheme, U.u, U.v)
 
 #####
 ##### Flux-form vertical advection of horizontal momentum (horizontal flavor only)
@@ -278,8 +278,12 @@ end
 @inline ζ₁ᶜᶠᶠ(i, j, k, grid, v, w) = ∂yᶜᶠᶠ(i, j, k, grid, w) - ∂zᶜᶠᶠ(i, j, k, grid, v)
 @inline ζ₂ᶠᶜᶠ(i, j, k, grid, u, w) = ∂zᶠᶜᶠ(i, j, k, grid, u) - ∂xᶠᶜᶠ(i, j, k, grid, w)
 
-# Full 3D kinetic energy at cell centers
-@inline K³ᶜᶜᶜ(i, j, k, grid, u, v, w) = Khᶜᶜᶜ(i, j, k, grid, u, v) + ℑzᵃᵃᶜ(i, j, k, grid, ϕ², w) / 2
+# Vertical and full 3D kinetic energy at cell centers. The horizontal part of
+# the KE gradient in the u/v equations goes through `bernoulli_head_U/V` (which
+# upwinds it for WENO schemes — Stage 4 of the design note); only the w²/2
+# contribution and the z-gradient (w equation) are centered.
+@inline Kwᶜᶜᶜ(i, j, k, grid, w) = ℑzᵃᵃᶜ(i, j, k, grid, ϕ², w) / 2
+@inline K³ᶜᶜᶜ(i, j, k, grid, u, v, w) = Khᶜᶜᶜ(i, j, k, grid, u, v) + Kwᶜᶜᶜ(i, j, k, grid, w)
 
 # ζ₃ fluxes transported by the horizontal mass fluxes. The centered form mirrors
 # Oceananigans' enstrophy-conserving stencil; the upwind form mirrors its
@@ -380,9 +384,10 @@ end
     u, v, w = velocities.u, velocities.v, velocities.w
     ρu, ρv, ρw = momentum.ρu, momentum.ρv, momentum.ρw
     @inbounds û = u[i, j, k]
+    ∂xK = bernoulli_head_U(i, j, k, grid, scheme, u, v) + ∂xᶠᶜᶜ(i, j, k, grid, Kwᶜᶜᶜ, w)
     return - Vζ₃ᶠᶜᶜ(i, j, k, grid, scheme, u, v, ρv) +
              Wζ₂ᶠᶜᶜ(i, j, k, grid, u, w, ρw) +
-             ℑxᶠᵃᵃ(i, j, k, grid, ρ) * ∂xᶠᶜᶜ(i, j, k, grid, K³ᶜᶜᶜ, u, v, w) +
+             ℑxᶠᵃᵃ(i, j, k, grid, ρ) * ∂xK +
              û * mass_divergenceᶠᶜᶜ(i, j, k, grid, scheme, û, ρu, ρv, ρw) +
              U_dot_∇u_metric(i, j, k, grid, scheme, momentum, velocities)
 end
@@ -394,9 +399,10 @@ end
     u, v, w = velocities.u, velocities.v, velocities.w
     ρu, ρv, ρw = momentum.ρu, momentum.ρv, momentum.ρw
     @inbounds v̂ = v[i, j, k]
+    ∂yK = bernoulli_head_V(i, j, k, grid, scheme, u, v) + ∂yᶜᶠᶜ(i, j, k, grid, Kwᶜᶜᶜ, w)
     return + Uζ₃ᶜᶠᶜ(i, j, k, grid, scheme, u, v, ρu) -
              Wζ₁ᶜᶠᶜ(i, j, k, grid, v, w, ρw) +
-             ℑyᵃᶠᵃ(i, j, k, grid, ρ) * ∂yᶜᶠᶜ(i, j, k, grid, K³ᶜᶜᶜ, u, v, w) +
+             ℑyᵃᶠᵃ(i, j, k, grid, ρ) * ∂yK +
              v̂ * mass_divergenceᶜᶠᶜ(i, j, k, grid, scheme, v̂, ρu, ρv, ρw) +
              U_dot_∇v_metric(i, j, k, grid, scheme, momentum, velocities)
 end
