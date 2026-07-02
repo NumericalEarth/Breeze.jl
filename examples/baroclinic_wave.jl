@@ -14,8 +14,8 @@
 # `SphericalCoriolis` (non-hydrostatic) on a 1° latitude-longitude grid spanning
 # 75° S to 75° N. Acoustic substepping lets the outer time step be set by
 # the *advective* CFL rather than the much-tighter acoustic CFL — here a
-# time-step wizard floats Δt at advective CFL ≈ 1.4 against the polar
-# `Δx_min ≈ 28.8 km`, capped at 12 min.
+# time-step wizard floats Δt subject to the vector-invariant scheme's
+# stability limit, capped at 9 min.
 #
 # A future moist version (one-moment mixed-phase microphysics + bulk surface
 # fluxes) will be added once the moist substepper supports the larger ``Δt``
