@@ -196,18 +196,11 @@ function AtmosphereModel(grid;
     # Adaptive implicit vertical advection is supported for all prognostics with SSPRungeKutta3
     # (per-substep solve) and with AcousticRungeKutta3 (moisture and tracers via the generic
     # implicit step; momentum and the thermodynamic variable via a per-stage solve after the
-    # acoustic substep loop — see TimeSteppers/acoustic_substep_helpers.jl). Terrain-following
-    # dynamics advect vertically with the contravariant velocity, which the implicit split does
-    # not yet incorporate, so they opt out via `supports_implicit_vertical_advection`.
+    # acoustic substep loop — see TimeSteppers/acoustic_substep_helpers.jl). On terrain-following
+    # grids the split partitions the contravariant velocity (see `advecting_vertical_velocity`).
     advection_needs_solver = needs_implicit_solver(momentum_advection) ||
                              needs_implicit_solver(default_scalar_advection) ||
                              any(needs_implicit_solver, values(scalar_advection))
-
-    if advection_needs_solver && !supports_implicit_vertical_advection(dynamics)
-        throw(ArgumentError("Adaptive implicit vertical advection is not supported with " *
-                            "terrain-following (TFVD) dynamics, whose vertical transport uses " *
-                            "the contravariant velocity. Use explicit advection schemes."))
-    end
 
     # Materialize momentum and velocities
     # If velocities is provided (e.g., PrescribedVelocityFields), use it

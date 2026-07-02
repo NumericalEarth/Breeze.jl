@@ -207,18 +207,51 @@ import Breeze.AtmosphereModels as AM
         end
     end
 
-    @testset "Rejected with terrain-following dynamics" begin
-        Nz = 8
-        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, 5000, length=Nz+1)); formulation=LinearDecay())
-        terrain_grid = RectilinearGrid(default_arch; size=(8, Nz), x=(-5000, 5000), z=z_faces,
+    @testset "Terrain-following dynamics (TFVD, acoustic)" begin
+        Nx, Nz = 16, 16
+        Lx, Lz = 10000.0, 4000.0
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation=LinearDecay())
+        terrain_grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
+                                       x=(-Lx/2, Lx/2), z=z_faces,
                                        topology=(Periodic, Flat, Bounded))
         materialize_terrain!(terrain_grid, x -> 200 * exp(-x^2 / 2000^2))
 
-        # Terrain-following vertical transport uses the contravariant velocity, which the
-        # implicit velocity split does not yet incorporate.
-        @test_throws ArgumentError AtmosphereModel(terrain_grid;
-                                                   dynamics=CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300),
-                                                   timestepper=:AcousticRungeKutta3,
-                                                   tracers=:ρc, scalar_advection=(; ρc=aiva()))
+        terrain_dynamics() = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+
+        p₀, θ₀, pˢᵗ = 101325.0, 300.0, 100000.0
+        ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
+        θᵢ(x, z) = θ₀ + 2 * exp(-(x^2 + (z - 1500)^2) / (2 * 500^2))
+
+        explicit_model = AtmosphereModel(terrain_grid; dynamics=terrain_dynamics(), timestepper=:AcousticRungeKutta3,
+                                         momentum_advection=WENO(FT), scalar_advection=(; ρθ=WENO(FT)))
+        adaptive_model = AtmosphereModel(terrain_grid; dynamics=terrain_dynamics(), timestepper=:AcousticRungeKutta3,
+                                         momentum_advection=aiva(), scalar_advection=(; ρθ=aiva()))
+
+        # On terrain-following grids the adaptive-implicit split partitions the contravariant velocity.
+        @test AM.advecting_vertical_velocity(adaptive_model.dynamics, adaptive_model.velocities) ===
+              adaptive_model.dynamics.contravariant_vertical_velocity
+
+        # Below the CFL threshold the adaptive scheme reproduces the explicit one over terrain too.
+        for model in (explicit_model, adaptive_model)
+            set!(model; ρ=ρᵢ, θ=θᵢ, u=10)
+            for _ in 1:3
+                time_step!(model, 1//2)
+            end
+        end
+        for name in (:ρu, :ρv, :ρw, :ρθ)
+            explicit_field = Array(interior(Oceananigans.fields(explicit_model)[name]))
+            adaptive_field = Array(interior(Oceananigans.fields(adaptive_model)[name]))
+            @test isapprox(explicit_field, adaptive_field; rtol=sqrt(eps(FT)))
+        end
+
+        # Above the explicit vertical advective CFL: re-seed a strong updraft (α ≈ 10 ⋅ 30 / 250 ≈ 1.2)
+        # and take large steps; the acoustic substep count adapts automatically.
+        set!(adaptive_model; w = (x, z) -> 10 * exp(-(z - 1500)^2 / (2 * 400^2)))
+        for _ in 1:3
+            time_step!(adaptive_model, 30)
+        end
+        for name in (:ρu, :ρv, :ρw, :ρθ)
+            @test all(isfinite, Array(interior(Oceananigans.fields(adaptive_model)[name])))
+        end
     end
 end

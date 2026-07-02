@@ -11,6 +11,7 @@ using Breeze.AtmosphereModels:
     AtmosphereModel,
     SlowTendencyMode,
     advecting_momentum,
+    advecting_vertical_velocity,
     dynamics_density,
     total_density,
     thermodynamic_density_name,
@@ -242,6 +243,9 @@ function implicit_advection_substep!(model, Δt_stage)
     # without adaptive implicit advection. TODO: thread the closure through these solves (and
     # add a diffusion-only step for explicit advection schemes) to support vertically-implicit
     # closures with the acoustic substepper.
+    # Momentum advects with the (possibly contravariant) advecting vertical velocity — the
+    # same velocity the slow momentum flux divergence splits.
+    w = advecting_vertical_velocity(model.dynamics, model.velocities)
     momentum_advection = model.advection.momentum
     if needs_implicit_solver(momentum_advection)
         for name in (:ρu, :ρv, :ρw)
@@ -252,7 +256,7 @@ function implicit_advection_substep!(model, Δt_stage)
                            fields(model),
                            Δt_stage,
                            implicit_step_advection(momentum_advection, name),
-                           model.velocities,
+                           (; w),
                            ρᵈ)
         end
     end

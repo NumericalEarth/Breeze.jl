@@ -149,13 +149,16 @@ overrides it with a diagnosed total-density field, distinct from the coupling de
 total_density(dynamics) = dynamics_density(dynamics)
 
 """
-    supports_implicit_vertical_advection(dynamics)
+    advecting_vertical_velocity(dynamics, velocities)
 
-Whether `dynamics` supports adaptive implicit vertical advection. Defaults to `true`.
-Terrain-following dynamics opt out: their vertical transport uses the contravariant
-velocity, which the implicit-advection velocity split does not yet incorporate.
+Return the vertical velocity that advects momentum through the grid's coordinate surfaces:
+the Cartesian `velocities.w` on height-coordinate grids, and the contravariant vertical
+velocity `w̃` on terrain-following grids (mirroring [`advecting_momentum`](@ref), whose
+vertical component is the contravariant momentum). The adaptive-implicit vertical-advection
+split must partition this velocity on both the explicit (flux-scaling) and implicit
+(tridiagonal) sides, so it stays consistent with the momentum flux divergence.
 """
-supports_implicit_vertical_advection(dynamics) = true
+@inline advecting_vertical_velocity(dynamics, velocities) = velocities.w
 
 """
     dynamics_pressure(dynamics)
