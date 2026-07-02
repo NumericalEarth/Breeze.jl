@@ -83,10 +83,9 @@ end
             dθ_init = CenterField(grid); set!(dθ_init, 0)
             dmodel  = Enzyme.make_zero(model)
 
-            # compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-            #     model, dmodel, θ_init, dθ_init, Δt, Ns)
-            # dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
-            Reactant.@compile raise=true raise_first=true sync=true loss(model, θ_init, Δt, Ns)
+            compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+                model, dmodel, θ_init, dθ_init, Δt, Ns)
+            dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
         end
     end
 end
