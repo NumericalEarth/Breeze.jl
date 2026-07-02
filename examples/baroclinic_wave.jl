@@ -230,27 +230,20 @@ dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();  # default da
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
-# For momentum we use [`CompressibleWENOVectorInvariant`](@ref) in its MPAS-faithful
-# [`HorizontalDivergence`](@ref) flavor: an MPAS-style vector-invariant scheme for the
-# coupled momentum `ρ𝐮` that advects the horizontal momentum through the
-# absolute-vorticity flux and kinetic-energy gradient (not a flux-form divergence),
-# with flux-form vertical advection and a horizontal mass-divergence correction. The
-# WENO reconstruction supplies the scale-selective dissipation that keeps the scheme
-# stable on the latitude–longitude C-grid (the vector-invariant form is otherwise
-# prone to the Hollingsworth instability there). Scalars use flux-form `WENO`.
-
-# We use a `WENO` reconstruction for the flux-form vertical advection of momentum
-# (`vertical_scheme`) as well as for the vorticity and kinetic-energy gradients. A
-# non-dissipative centered vertical reconstruction lets grid-scale vertical-velocity
-# noise build up once the wave matures (sharp fronts, strong updrafts) and the run
-# destabilizes around day 14; WENO supplies the scale-selective dissipation that
-# keeps the mature wave clean — matching the all-WENO robustness of the flux-form
-# reference, so no additional explicit closure is needed.
+# For momentum we use [`CompressibleWENOVectorInvariant`](@ref) in its unsplit
+# [`ThreeDimensionalDivergence`](@ref) flavor: the mass-flux Lamb-vector form
+# `∂t(ρ𝐮) = 𝐔×ζ − ρ∇K − 𝐮(∇·𝐔)`, in which the prognostic mass fluxes — the same
+# fluxes continuity uses — transport the vorticity, the kinetic energy is the full
+# `|𝐮|²/2`, and the mass-flux divergence is fully three-dimensional. The
+# density-weighted transport is what controls the Hollingsworth instability that
+# vector-invariant forms are otherwise prone to on the C-grid, and the WENO
+# reconstructions of the vorticity components, mass divergence, and kinetic-energy
+# gradient supply scale-selective dissipation at the mature wave's fronts.
+# Scalars use flux-form `WENO`.
 
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        momentum_advection = CompressibleWENOVectorInvariant(; divergence = HorizontalDivergence(),
-                                                                              vertical_scheme = WENO()),
+                        momentum_advection = CompressibleWENOVectorInvariant(),
                         scalar_advection = WENO())
 
 # ## Set initial conditions
@@ -260,22 +253,18 @@ set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
 # ## Time-stepping
 #
 # Substepping eliminates the acoustic CFL constraint on the outer Δt; only
-# the advective CFL remains. A time-step wizard targets advective CFL ≈ 1.4
-# against the polar `Δx_min ≈ 28.8 km`, capped at Δt = 12 min:
-#
-# ```math
-# Δt = \min\!\left(1.4 \cdot Δx_{\min} / U_{\max},\ 720 \text{ s}\right).
-# ```
-#
-# This is many times larger than the acoustic-CFL-limited Δt a fully
-# explicit solver would require. We run for 30 days to capture the full
-# BCI life cycle.
+# the advective CFL remains, and it is many times larger than the acoustic-CFL
+# limit a fully explicit solver would require. The vector-invariant scheme has
+# a stricter advective stability limit than flux-form WENO: at this resolution
+# it integrates the mature wave (jet peaking near 60 m/s around day 11) stably
+# at Δt = 9 min but not at 12 min, so we cap the time-step wizard there.
+# We run for 30 days to capture the full BCI life cycle.
 
-Δt = 12minutes
+Δt = 9minutes
 stop_time = 30days
 
 simulation = Simulation(model; Δt, stop_time)
-conjure_time_step_wizard!(simulation; cfl=1.4, max_Δt=12minutes)
+conjure_time_step_wizard!(simulation; cfl=1.4, max_Δt=9minutes)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Progress callback

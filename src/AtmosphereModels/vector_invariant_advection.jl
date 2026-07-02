@@ -51,13 +51,14 @@ using Oceananigans.Advection: VectorInvariant, WENOVectorInvariant,
                               _biased_interpolate_xᶜᵃᵃ, _biased_interpolate_xᶠᵃᵃ,
                               _biased_interpolate_yᵃᶜᵃ, _biased_interpolate_yᵃᶠᵃ,
                               _symmetric_interpolate_xᶠᵃᵃ, _symmetric_interpolate_yᵃᶠᵃ,
-                              _biased_interpolate_zᵃᵃᶜ,
+                              _biased_interpolate_zᵃᵃᶜ, _biased_interpolate_zᵃᵃᶠ,
+                              VectorInvariantKineticEnergyUpwinding,
                               bias, FunctionStencil, DefaultStencil,
                               AbstractUpwindBiasedAdvectionScheme, Khᶜᶜᶜ, ϕ²
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
                               V⁻¹ᶠᶜᶜ, V⁻¹ᶜᶠᶜ, V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ, div_xyᶜᶜᶜ, divᶜᶜᶜ,
                               ζ₃ᶠᶠᶜ, Δx_qᶜᶠᶜ, Δy_qᶠᶜᶜ, Az_qᶜᶜᶠ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ,
-                              Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, Az⁻¹ᶠᶜᶜ, Az⁻¹ᶜᶠᶜ,
+                              Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, Δz⁻¹ᶜᶜᶠ, Az⁻¹ᶠᶜᶜ, Az⁻¹ᶜᶠᶜ,
                               δxᶜᶜᶜ, δyᶜᶜᶜ, δzᶜᶜᶜ,
                               ∂xᶠᶜᶠ, ∂zᶠᶜᶠ, ∂yᶜᶠᶠ, ∂zᶜᶠᶠ,
                               ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
@@ -99,7 +100,8 @@ advected in vector-invariant form. See
 Reconstruction staging: the ζ₃ fluxes, the ζ₁/ζ₂ fluxes, the mass-flux
 divergence, and the horizontal kinetic-energy gradient are all upwinded when
 the wrapped scheme upwinds them (biased by the transporting mass flux); the
-w²/2 contribution and the vertical kinetic-energy gradient are centered.
+w²/2 self-contribution of the vertical kinetic-energy gradient is upwinded by
+the vertical velocity; the horizontal w²/2 cross-contribution is centered.
 """
 struct ThreeDimensionalDivergence end
 
@@ -287,6 +289,25 @@ end
 @inline Kwᶜᶜᶜ(i, j, k, grid, w) = ℑzᵃᵃᶜ(i, j, k, grid, ϕ², w) / 2
 @inline K³ᶜᶜᶜ(i, j, k, grid, u, v, w) = Khᶜᶜᶜ(i, j, k, grid, u, v) + Kwᶜᶜᶜ(i, j, k, grid, w)
 
+# Vertical kinetic-energy gradient for the w equation. The w²/2 self-contribution
+# is the term that lets grid-scale w noise self-amplify at mature fronts, so for
+# KE-upwinding schemes it is reconstructed in z biased by ŵ (design-note Stage 4:
+# "directional KE differences, especially self-contributions such as Dz(w²/2),
+# with bias determined by W"); the horizontal-KE cross contribution is centered.
+@inline half_ϕ²(i, j, k, grid, ϕ) = @inbounds ϕ[i, j, k]^2 / 2
+@inline δz_half_w²ᶜᶜᶜ(i, j, k, grid, w) = δzᵃᵃᶜ(i, j, k, grid, half_ϕ², w)
+
+@inline vertical_kinetic_energy_gradientᶜᶜᶠ(i, j, k, grid, scheme::VectorInvariant, u, v, w, ŵ) =
+    ∂zᶜᶜᶠ(i, j, k, grid, K³ᶜᶜᶜ, u, v, w)
+
+@inline function vertical_kinetic_energy_gradientᶜᶜᶠ(i, j, k, grid, scheme::VectorInvariantKineticEnergyUpwinding,
+                                                     u, v, w, ŵ)
+    ∂z_cross = ∂zᶜᶜᶠ(i, j, k, grid, Khᶜᶜᶜ, u, v)
+    δᴿ = _biased_interpolate_zᵃᵃᶠ(i, j, k, grid, scheme.kinetic_energy_gradient_scheme, bias(ŵ),
+                                   δz_half_w²ᶜᶜᶜ, DefaultStencil(), w)
+    return ∂z_cross + δᴿ * Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
+end
+
 # ζ₃ fluxes transported by the horizontal mass fluxes. The centered form mirrors
 # Oceananigans' enstrophy-conserving stencil; the upwind form mirrors its
 # vorticity upwinding, with the reconstruction biased by the mass-flux sign.
@@ -460,7 +481,7 @@ end
     @inbounds ŵ = w[i, j, k]
     return + Vζ₁ᶜᶜᶠ(i, j, k, grid, scheme, v, w, ρv) -
              Uζ₂ᶜᶜᶠ(i, j, k, grid, scheme, u, w, ρu) +
-             ℑzᵃᵃᶠ(i, j, k, grid, ρ) * ∂zᶜᶜᶠ(i, j, k, grid, K³ᶜᶜᶜ, u, v, w) +
+             ℑzᵃᵃᶠ(i, j, k, grid, ρ) * vertical_kinetic_energy_gradientᶜᶜᶠ(i, j, k, grid, scheme, u, v, w, ŵ) +
              ŵ * mass_divergenceᶜᶜᶠ(i, j, k, grid, scheme, ŵ, ρu, ρv, ρw) +
              U_dot_∇w_metric(i, j, k, grid, scheme, momentum, velocities)
 end
