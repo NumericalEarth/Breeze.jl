@@ -113,6 +113,17 @@ Collect all prognostic fields into a single NamedTuple.
 """
 function collect_prognostic_fields end
 
+"""
+    adiabatic_twin_formulation(formulation)
+
+Return a formulation for the adiabatic-balance twin: identical to `formulation` but with its
+thermodynamic-density field rebuilt over the SAME data with `microphysics = nothing`-keyed surface-flux
+boundary conditions (so the twin, which sets `microphysics = nothing`, does not evaluate a production
+microphysics scheme on its stripped field set). The default is the identity; formulations with
+microphysics-dependent thermodynamic BCs add methods.
+"""
+adiabatic_twin_formulation(formulation) = formulation
+
 #####
 ##### State computation interface
 #####

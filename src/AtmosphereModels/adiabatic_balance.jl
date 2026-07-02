@@ -213,6 +213,10 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     formulation = model.formulation
     constants   = model.thermodynamic_constants
 
+    # microphysics = nothing on the twin: rebuild the thermodynamic-density field's surface-flux BCs to
+    # match (else the shared BCs call the production scheme on the twin's stripped field set → error).
+    twin_formulation = adiabatic_twin_formulation(formulation)
+
     twin_microphysics  = nothing
     qᵛ                 = specific_prognostic_moisture(model)
     twin_microphysical = (; qᵛ)
@@ -222,7 +226,7 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     twin_moisture_name = moisture_prognostic_name(twin_microphysics)
     remap(name) = name === twin_moisture_name ? prod_moisture_name : name
 
-    twin_prognostic = collect_prognostic_fields(formulation, twin_dynamics, model.momentum,
+    twin_prognostic = collect_prognostic_fields(twin_formulation, twin_dynamics, model.momentum,
                                                 model.moisture_density, twin_moisture_name, (;), model.tracers)
     twin_names = keys(twin_prognostic)
 
@@ -240,7 +244,7 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
 
     # Zeroed forcing, keyed exactly as the constructor would for this stripped prognostic set.
     density = dynamics_density(twin_dynamics)
-    twin_model_fields = merge(twin_prognostic, fields(formulation), model.velocities,
+    twin_model_fields = merge(twin_prognostic, fields(twin_formulation), model.velocities,
                               (; T = model.temperature), twin_microphysical)
     twin_forcing = atmosphere_model_forcing(NamedTuple(), twin_prognostic, twin_model_fields,
                                             grid, model.coriolis, density,
@@ -250,7 +254,7 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     # closure = nothing: turbulent diffusion is dissipative (irreversible), so it is excluded from the
     # adiabatic excursion. `closure_fields` is carried along but unused when closure is nothing.
     return AtmosphereModel(arch, grid, Clock(grid),
-                           twin_dynamics, formulation, constants,
+                           twin_dynamics, twin_formulation, constants,
                            model.momentum, model.moisture_density, model.temperature,
                            model.pressure_solver, model.velocities, model.tracers,
                            nothing, twin_advection, model.coriolis, twin_forcing,
