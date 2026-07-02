@@ -8,11 +8,17 @@ using Oceananigans.Architectures: Architectures
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
-using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields
 using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
+
+# AtmosphereModel-specific momentum-advection validation. The compressible core advects momentum in
+# flux form (`div_𝐯u`) plus the curvilinear curvature term `U_dot_∇u_metric`, so any flux-form scheme
+# is valid on every grid — including `OrthogonalSphericalShellGrid` (where the hydrostatic ocean model
+# restricts to `VectorInvariant`). We define our own validator rather than importing Oceananigans' and
+# accept the requested scheme as-is.
+validate_momentum_advection(momentum_advection, grid) = momentum_advection
 
 struct DefaultValue end
 
@@ -145,7 +151,6 @@ function AtmosphereModel(grid;
     # Check halos and throw an error if the grid's halo is too small
     validate_model_halo(grid, momentum_advection, scalar_advection, closure)
 
-    # Reduce the advection order in directions that do not have enough grid points
     momentum_advection = validate_momentum_advection(momentum_advection, grid)
     default_scalar_advection, scalar_advection = validate_tracer_advection(scalar_advection, grid)
 

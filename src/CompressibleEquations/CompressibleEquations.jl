@@ -35,10 +35,12 @@ export
     stage_fractions,
     AcousticSubstepDistribution,
     ProportionalSubsteps,
+    ConstantSubstepSize,
     MonolithicFirstStage,
     AcousticDampingStrategy,
     NoDivergenceDamping,
     ThermalDivergenceDamping,
+    DirectDivergenceDamping,
     UpperSponge,
     AbstractRamp,
     LinearRamp,
@@ -59,7 +61,7 @@ using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑy�
                                 ∂zᶜᶜᶜ, ∂zᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: divᶜᶜᶜ
-using Oceananigans.Utils: prettysummary, launch!
+using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 
 using Breeze.Solvers: NewtonSolver
 using Breeze.Thermodynamics: mixture_gas_constant, dry_air_gas_constant,
