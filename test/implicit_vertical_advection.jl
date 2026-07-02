@@ -140,11 +140,11 @@ import Breeze.AtmosphereModels as AM
         cgrid = RectilinearGrid(default_arch; size=(8, 8, 8), halo=(5, 5, 5),
                                 x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
                                 topology=(Periodic, Periodic, Bounded))
-        cdyn = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+        cdyn() = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
 
-        # AIVA on a transport scalar (tracer) is supported with the acoustic substepper: those
-        # scalars are advanced by the generic implicit step (`scalar_substep!`).
-        model = AtmosphereModel(cgrid; dynamics=cdyn, timestepper=:AcousticRungeKutta3,
+        # AIVA on a transport scalar (tracer) with the acoustic substepper: those scalars are
+        # advanced by the generic implicit step (`scalar_substep!`).
+        model = AtmosphereModel(cgrid; dynamics=cdyn(), timestepper=:AcousticRungeKutta3,
                                 tracers=:ρc, scalar_advection=(; ρc=aiva()))
         @test needs_implicit_solver(model.advection.ρc)
         @test model.timestepper.implicit_solver isa BatchedTridiagonalSolver
@@ -158,13 +158,67 @@ import Breeze.AtmosphereModels as AM
         end
         @test all(isfinite, Array(interior(model.tracers.ρc)))
 
-        # AIVA on the thermodynamic variable is rejected with the acoustic substepper, which
-        # integrates it inside the acoustic substep loop rather than the generic implicit step.
-        @test_throws ArgumentError AtmosphereModel(cgrid; dynamics=cdyn, timestepper=:AcousticRungeKutta3,
-                                                   scalar_advection=(; ρθ=aiva()))
+        # Momentum and thermodynamic-variable AIVA with the acoustic substepper: the implicit
+        # remainder is applied once per RK stage after the substep loop
+        # (`implicit_advection_substep!`). Below the CFL threshold the flux scale is 1 and the
+        # implicit velocity is 0, so the adaptive scheme must reproduce the explicit one.
+        θᵢ(x, y, z) = 300 + 2 * exp(-((x-4kilometers)^2 + (y-4kilometers)^2 + (z-4kilometers)^2) / (2*(1kilometers)^2))
 
-        # Likewise for momentum, which the substepper advances within the acoustic loop.
-        @test_throws ArgumentError AtmosphereModel(cgrid; dynamics=cdyn, timestepper=:AcousticRungeKutta3,
-                                                   momentum_advection=aiva())
+        explicit_model = AtmosphereModel(cgrid; dynamics=cdyn(), timestepper=:AcousticRungeKutta3,
+                                         momentum_advection=WENO(FT), scalar_advection=(; ρθ=WENO(FT)))
+        adaptive_model = AtmosphereModel(cgrid; dynamics=cdyn(), timestepper=:AcousticRungeKutta3,
+                                         momentum_advection=aiva(), scalar_advection=(; ρθ=aiva()))
+
+        for model in (explicit_model, adaptive_model)
+            set!(model; θ=θᵢ, ρ=model.dynamics.reference_state.density)
+            for _ in 1:3
+                time_step!(model, 1)
+            end
+        end
+
+        for name in (:ρu, :ρv, :ρw, :ρθ)
+            explicit_field = Array(interior(Oceananigans.fields(explicit_model)[name]))
+            adaptive_field = Array(interior(Oceananigans.fields(adaptive_model)[name]))
+            @test isapprox(explicit_field, adaptive_field; rtol=sqrt(eps(FT)))
+        end
+    end
+
+    @testset "Acoustic substepper is stable above the explicit vertical advective CFL" begin
+        tall_grid = RectilinearGrid(default_arch; size=(8, 8, 32), halo=(5, 5, 5),
+                                    x=(0, 4kilometers), y=(0, 4kilometers), z=(0, 2kilometers),
+                                    topology=(Periodic, Periodic, Bounded))
+        model = AtmosphereModel(tall_grid;
+                                dynamics=CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300),
+                                timestepper=:AcousticRungeKutta3,
+                                momentum_advection=aiva(), scalar_advection=(; ρθ=aiva()))
+
+        ref = model.dynamics.reference_state
+        set!(model; θ = (x, y, z) -> 300 + 2 * exp(-((x-2kilometers)^2 + (y-2kilometers)^2 + (z-700)^2) / (2*300^2)),
+                    ρ = ref.density)
+        set!(model; w = (x, y, z) -> 10 * exp(-(z-700)^2 / (2*200^2)))
+
+        # Δt = 10 gives a vertical advective CFL of max|w| Δt / Δz ≈ 10 ⋅ 10 / 62.5 = 1.6; the
+        # acoustic substep count adapts to the acoustic CFL automatically.
+        for _ in 1:5
+            time_step!(model, 10)
+        end
+        for name in (:ρu, :ρv, :ρw, :ρθ)
+            @test all(isfinite, Array(interior(Oceananigans.fields(model)[name])))
+        end
+    end
+
+    @testset "Rejected with terrain-following dynamics" begin
+        Nz = 8
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, 5000, length=Nz+1)); formulation=LinearDecay())
+        terrain_grid = RectilinearGrid(default_arch; size=(8, Nz), x=(-5000, 5000), z=z_faces,
+                                       topology=(Periodic, Flat, Bounded))
+        materialize_terrain!(terrain_grid, x -> 200 * exp(-x^2 / 2000^2))
+
+        # Terrain-following vertical transport uses the contravariant velocity, which the
+        # implicit velocity split does not yet incorporate.
+        @test_throws ArgumentError AtmosphereModel(terrain_grid;
+                                                   dynamics=CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300),
+                                                   timestepper=:AcousticRungeKutta3,
+                                                   tracers=:ρc, scalar_advection=(; ρc=aiva()))
     end
 end

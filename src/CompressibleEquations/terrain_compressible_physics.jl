@@ -36,6 +36,10 @@ using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpo
 const TerrainCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}
 const TerrainCompressibleModel = AtmosphereModel{<:TerrainCompressibleDynamics}
 
+# Vertical transport on terrain-following grids uses the contravariant velocity w̃, which the
+# adaptive-implicit velocity split (and its tridiagonal coefficients) does not yet incorporate.
+AtmosphereModels.supports_implicit_vertical_advection(::TerrainCompressibleDynamics) = false
+
 """
 $(TYPEDEF)
 

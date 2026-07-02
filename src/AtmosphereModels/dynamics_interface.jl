@@ -149,6 +149,15 @@ overrides it with a diagnosed total-density field, distinct from the coupling de
 total_density(dynamics) = dynamics_density(dynamics)
 
 """
+    supports_implicit_vertical_advection(dynamics)
+
+Whether `dynamics` supports adaptive implicit vertical advection. Defaults to `true`.
+Terrain-following dynamics opt out: their vertical transport uses the contravariant
+velocity, which the implicit-advection velocity split does not yet incorporate.
+"""
+supports_implicit_vertical_advection(dynamics) = true
+
+"""
     dynamics_pressure(dynamics)
 
 Return the pressure field appropriate to the dynamical formulation.
