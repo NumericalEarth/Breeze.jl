@@ -2,7 +2,7 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
                     Centered, fields, prognostic_fields
-using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection
+using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection, needs_implicit_solver
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.Architectures: Architectures
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
@@ -10,7 +10,7 @@ using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNCheck
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 using Oceananigans.TimeSteppers: TimeStepper
-using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields
+using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields, VerticallyImplicitTimeDiscretization
 using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 
@@ -149,6 +149,12 @@ function AtmosphereModel(grid;
     momentum_advection = validate_momentum_advection(momentum_advection, grid)
     default_scalar_advection, scalar_advection = validate_tracer_advection(scalar_advection, grid)
 
+    # Adaptive implicit vertical advection is currently supported for scalars only.
+    needs_implicit_solver(momentum_advection) &&
+        throw(ArgumentError("Adaptive implicit vertical advection is not yet supported for momentum. " *
+                            "Use an explicit `momentum_advection` and set the adaptive-implicit time " *
+                            "discretization on `scalar_advection` only."))
+
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     tracer_names = validate_tracers(tracers)
@@ -188,6 +194,20 @@ function AtmosphereModel(grid;
     dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics)
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
+    # The acoustic substepper integrates the thermodynamic density within the acoustic substep loop
+    # (not via the generic scalar implicit step), so adaptive implicit vertical advection is not
+    # supported for it there. (AIVA is supported for moisture and tracers, which the substepper
+    # advances with the generic implicit step; and for all scalars under SSPRungeKutta3.)
+    if _timestepper_is_acoustic(timestepper)
+        thermo_name = thermodynamic_density_name(formulation)
+        thermo_advection = get(scalar_advection, thermo_name, default_scalar_advection)
+        needs_implicit_solver(thermo_advection) &&
+            throw(ArgumentError("Adaptive implicit vertical advection is not supported for the " *
+                                "thermodynamic variable ($thermo_name) with the AcousticRungeKutta3 " *
+                                "substepper, which integrates it within the acoustic substep loop. " *
+                                "Use an explicit scheme for $thermo_name, or the SSPRungeKutta3 timestepper."))
+    end
+
     # Materialize momentum and velocities
     # If velocities is provided (e.g., PrescribedVelocityFields), use it
     if isnothing(velocities)
@@ -219,6 +239,15 @@ function AtmosphereModel(grid;
                                                         tracers)
 
     implicit_solver = implicit_diffusion_solver(time_discretization(closure), grid)
+
+    # Build a vertical tridiagonal solver for adaptive implicit vertical advection even when the
+    # closure is explicit. When both are present, the diffusion and advection diagonals are summed
+    # into a single system (see implicit_vertical_advection.jl).
+    advection_needs_solver = needs_implicit_solver(default_scalar_advection) ||
+                             any(needs_implicit_solver, values(scalar_advection))
+    if implicit_solver === nothing && advection_needs_solver
+        implicit_solver = implicit_diffusion_solver(VerticallyImplicitTimeDiscretization(), grid)
+    end
 
     # Only pass `dynamics` to time steppers that accept it (Breeze's acoustic and SSP steppers).
     # Oceananigans' built-in time steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
@@ -294,6 +323,11 @@ _timestepper_uses_dynamics(::Val) = false
 _timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
 _timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
 _timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
+
+# Whether the (pre-materialization) `timestepper` specification selects the acoustic substepper,
+# which integrates the thermodynamic density inside the acoustic substep loop.
+_timestepper_is_acoustic(timestepper::Symbol) = timestepper === :AcousticRungeKutta3
+_timestepper_is_acoustic(timestepper) = nameof(typeof(timestepper)) === :AcousticRungeKutta3
 
 function Base.summary(model::AtmosphereModel)
     A = nameof(typeof(model.grid.architecture))
