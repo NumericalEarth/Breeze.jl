@@ -67,6 +67,9 @@ Keyword Arguments
 
 - `implicit_solver`: Optional implicit solver for diffusion. Default: `nothing`
 - `Gⁿ`: Tendency fields at current stage. Default: similar to `prognostic_fields`
+- `U⁰`: Storage for the state at the beginning of the step. Default: similar to
+  `prognostic_fields`. Accepting it as a keyword lets callers (e.g. the adiabatic-balance
+  twin) alias another stepper's tendency storage instead of allocating fresh fields.
 
 References
 ==========
@@ -77,7 +80,8 @@ Shu, C.-W., & Osher, S. (1988). Efficient implementation of essentially non-osci
 function SSPRungeKutta3(grid, prognostic_fields;
                         dynamics = nothing,
                         implicit_solver::TI = nothing,
-                        Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
+                        Gⁿ::TG = map(similar, prognostic_fields),
+                        U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
 
     FT = eltype(grid)
 
@@ -85,10 +89,6 @@ function SSPRungeKutta3(grid, prognostic_fields;
     α¹ = FT(1)
     α² = FT(1//4)
     α³ = FT(2//3)
-
-    # Create storage for initial state (used in stages 2 and 3)
-    U⁰ = map(similar, prognostic_fields)
-    U0 = typeof(U⁰)
 
     return SSPRungeKutta3{FT, U0, TG, TI}(α¹, α², α³, U⁰, Gⁿ, implicit_solver)
 end

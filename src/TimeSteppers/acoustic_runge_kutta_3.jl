@@ -73,14 +73,19 @@ end
     AcousticRungeKutta3(grid, prognostic_fields;
                         dynamics,
                         implicit_solver = nothing,
-                        Gⁿ = map(similar, prognostic_fields))
+                        Gⁿ = map(similar, prognostic_fields),
+                        U⁰ = map(similar, prognostic_fields))
 
 Construct an `AcousticRungeKutta3` time stepper for fully compressible dynamics.
+
+`Gⁿ` and `U⁰` may be supplied to alias another stepper's tendency storage instead of
+allocating fresh fields (used by the native-stepper adiabatic-balance twin).
 """
 function AcousticRungeKutta3(grid, prognostic_fields;
                              dynamics,
                              implicit_solver::TI = nothing,
-                             Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
+                             Gⁿ::TG = map(similar, prognostic_fields),
+                             U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
 
     FT = eltype(grid)
 
@@ -92,9 +97,6 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     β₁ = FT(β[1])
     β₂ = FT(β[2])
     β₃ = FT(β[3])
-
-    U⁰ = map(similar, prognostic_fields)
-    U0 = typeof(U⁰)
 
     substepper = AcousticSubstepper(grid, dynamics.time_discretization;
                                     prognostic_momentum = (ρu = prognostic_fields.ρu,
@@ -246,7 +248,7 @@ end
 ##### at outer-step start.
 #####
 
-function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
+function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
                                                                       <:Any, <:Any, <:AcousticRungeKutta3})
     sub = model.timestepper.substepper
     return (u = sub.time_averaged_velocities.u,
