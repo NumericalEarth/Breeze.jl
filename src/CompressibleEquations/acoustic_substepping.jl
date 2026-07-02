@@ -821,11 +821,45 @@ end
 #   (ρu)′^{τ+Δτ} = (ρu)′^τ + Δτ (Gⁿρu − ∂x pᴸ − ∂x(Cᴸ (ρθ)′))
 #   (ρv)′^{τ+Δτ} = (ρv)′^τ + Δτ (Gⁿρv − ∂y pᴸ − ∂y(Cᴸ (ρθ)′))
 #
+# Which lateral sides carry an active open boundary (`NormalFlow` with a non-`nothing`
+# condition; cf. `is_active_open_bc`). Threaded into the acoustic-substep kernels for the
+# MPAS-style spec-zone exclusion (#825): the acoustic *perturbation* pressure gradient is
+# zeroed on the faces bounding the outermost open cell, so that cell's per-substep scalar
+# relaxation (`apply_open_boundary_relaxation!`) cannot kick the boundary-adjacent momentum
+# through ∂p′. All-`Bool` ⇒ isbits ⇒ GPU / `Adapt`-transparent.
+struct OpenSides
+    west  :: Bool
+    east  :: Bool
+    south :: Bool
+    north :: Bool
+end
+
+# `(xspec, yspec)`: `true` on the x-/y-faces whose acoustic perturbation PGF stencil reads
+# an outermost open ("spec") cell — the MPAS `specZoneMaskEdge`. Zero the perturbation PGF
+# there so the relaxed boundary (ρθ)′ cannot kick the momentum.
+#
+# `∂xᶠᶜᶜ` at x-face (i,j) differences centers (i,j) and (i-1,j); `∂yᶜᶠᶜ` at y-face (i,j)
+# differences (i,j) and (i,j-1). A center is a spec cell if it is in the outermost ring of
+# an active-open side. The `:xyz` launch writes faces 1:Nx / 1:Ny (the min-side normal face
+# 1 *is* written; the max-side normal face Nx+1/Ny+1 is not), giving the asymmetric
+# west/south (i ≤ 2 / j ≤ 2) vs east/north (i == Nx / j == Ny) tests for the *normal*
+# component, plus the tangential rows/columns (ρu on the south/north rows, ρv on the
+# west/east columns) whose stencil also reads a spec cell.
+@inline function spec_zone_faces(i, j, grid, open_sides)
+    Nx = size(grid, 1)
+    Ny = size(grid, 2)
+    xspec = (open_sides.west  & (i <= 2)) | (open_sides.east  & (i == Nx)) |
+            (open_sides.south & (j == 1)) | (open_sides.north & (j == Ny))
+    yspec = (open_sides.south & (j <= 2)) | (open_sides.north & (j == Ny)) |
+            (open_sides.west  & (i == 1)) | (open_sides.east  & (i == Nx))
+    return xspec, yspec
+end
+
 # `Gⁿρu` (SlowTendencyMode) carries non-pressure slow terms with PGF zeroed;
 # we reinstate the frozen large-step PGF here (MPAS keeps it in `tend_u_euler`).
 # Forward-backward sequencing skips only the acoustic perturbation PGF.
 @kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Πᴸ,
-                                            Gⁿρu, Gⁿρv, γRᵐᴸ, apply_pressure_gradient)
+                                            Gⁿρu, Gⁿρv, γRᵐᴸ, apply_pressure_gradient, open_sides)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -834,9 +868,14 @@ end
         ∂y_pᴸ  = AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
         ∂y_p′  = ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
 
+        # MPAS spec-zone exclusion (#825): zero the acoustic perturbation PGF on the faces
+        # bounding an outermost open cell so the relaxed boundary (ρθ)′ cannot kick the
+        # boundary-adjacent momentum. The frozen large-step PGF ∂pᴸ and slow tendency Gⁿ are
+        # kept — that is the "driven by the slow tendency only" of the MPAS edge rule.
+        xspec, yspec = spec_zone_faces(i, j, grid, open_sides)
         perturbation_pressure_gradient_factor = ifelse(apply_pressure_gradient, one(Δτ), zero(Δτ))
-        ∂x_p = ∂x_pᴸ + perturbation_pressure_gradient_factor * ∂x_p′
-        ∂y_p = ∂y_pᴸ + perturbation_pressure_gradient_factor * ∂y_p′
+        ∂x_p = ∂x_pᴸ + ifelse(xspec, zero(Δτ), perturbation_pressure_gradient_factor) * ∂x_p′
+        ∂y_p = ∂y_pᴸ + ifelse(yspec, zero(Δτ), perturbation_pressure_gradient_factor) * ∂y_p′
 
         ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - ∂x_p)
         ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - ∂y_p)
@@ -1010,7 +1049,7 @@ end
 # vertical component is not applied by default; the default vertical acoustic
 # damping comes from off-centering (`forward_weight > 0.5`) in the implicit
 # column solve.
-function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
+function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants, open_sides)
     FT    = eltype(grid)
     arch  = architecture(grid)
     α     = convert(FT, damping.coefficient)
@@ -1026,7 +1065,7 @@ function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper
             substepper.density_potential_temperature_perturbation,
             substepper.previous_density_potential_temperature_perturbation,
             substepper.linearization_potential_temperature,
-            grid, x_damping_scale, y_damping_scale)
+            grid, x_damping_scale, y_damping_scale, open_sides)
 
     return nothing
 end
@@ -1090,18 +1129,23 @@ end
 # The vertical component lives in the column tridiag (it's a Laplacian on
 # (ρw)′ folded into the implicit acoustic solve), not here.
 @kernel function _thermal_divergence_damping!(ρu′, ρv′, ρθ′, ρθ′ˢ⁻, θᴸ, grid,
-                                              x_damping_scale, y_damping_scale)
+                                              x_damping_scale, y_damping_scale, open_sides)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
+        # Spec-zone exclusion (#825): the divergence damping is a second acoustic
+        # PGF-shaped injector (∂ of the (ρθ)′ tendency); gate it on the same spec faces
+        # as `_explicit_horizontal_step!` or it re-kicks the boundary momentum each substep.
+        xspec, yspec = spec_zone_faces(i, j, grid, open_sides)
+
         ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
         θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
-        γˣ = κˣ(i, j, k, grid, x_damping_scale)
+        γˣ = ifelse(xspec, zero(grid), κˣ(i, j, k, grid, x_damping_scale))
         ρu′[i, j, k] -= γˣ * ∂x_div / θᴸᶠᶜᶜ
 
         ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
         θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
-        γʸ = κʸ(i, j, k, grid, y_damping_scale)
+        γʸ = ifelse(yspec, zero(grid), κʸ(i, j, k, grid, y_damping_scale))
         ρv′[i, j, k] -= γʸ * ∂y_div / θᴸᶜᶠᶜ
     end
 end
@@ -1118,7 +1162,7 @@ end
 # Two launches: materialize δ into the (now-free, post-recovery) density-predictor scratch, halo-fill it,
 # then take its gradient. The local diffusivity α Δx² carries no 1/Δτ — δ is the divergence itself, not
 # the Δτ-scaled (ρθ)′ tendency — which also removes the thermal form's cold-start ∝ α/Δτ spurious force.
-function apply_divergence_damping!(damping::DirectDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
+function apply_divergence_damping!(damping::DirectDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants, open_sides)
     arch = architecture(grid)
     α = convert(eltype(grid), damping.coefficient)
 
@@ -1129,7 +1173,7 @@ function apply_divergence_damping!(damping::DirectDivergenceDamping, substepper,
 
     launch!(arch, grid, :xyz, _compute_horizontal_theta_flux_divergence!, δ, grid, θᴸ, ρu′, ρv′)
     fill_halo_regions!(δ)
-    launch!(arch, grid, :xyz, _apply_direct_divergence_damping!, ρu′, ρv′, grid, δ, θᴸ, α)
+    launch!(arch, grid, :xyz, _apply_direct_divergence_damping!, ρu′, ρv′, grid, δ, θᴸ, α, open_sides)
 
     return nothing
 end
@@ -1142,11 +1186,14 @@ end
                             δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) * V⁻¹ᶜᶜᶜ(i, j, k, grid)
 end
 
-@kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, α)
+@kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, α, open_sides)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, δ) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
-        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, δ) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+        # Spec-zone exclusion (#825): same spec-face gate as the thermal form (this is the
+        # other acoustic PGF-shaped injector, ∂ of the horizontal Θ-flux divergence δ).
+        xspec, yspec = spec_zone_faces(i, j, grid, open_sides)
+        ρu′[i, j, k] += ifelse(xspec, zero(α), α) * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, δ) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
+        ρv′[i, j, k] += ifelse(yspec, zero(α), α) * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, δ) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
     end
 end
 
@@ -1367,6 +1414,16 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
+    # Active open lateral sides (NormalFlow with a non-nothing condition), for the
+    # MPAS-style spec-zone exclusion (#825): the acoustic perturbation PGF and the
+    # divergence-damping injection are zeroed on the outermost open cells' faces, and the
+    # spec column's (ρw)′ is prescribed in `apply_open_boundary_relaxation!`. Static over
+    # the stage; computed once here from the momentum BCs.
+    bcs_u = model.momentum.ρu.boundary_conditions
+    bcs_v = model.momentum.ρv.boundary_conditions
+    open_sides = OpenSides(is_active_open_bc(bcs_u.west), is_active_open_bc(bcs_u.east),
+                           is_active_open_bc(bcs_v.south), is_active_open_bc(bcs_v.north))
+
     # Substep loop
     for substep in 1:Nτ
         # Step A: explicit horizontal forward of (ρu)′, (ρv)′. Following the
@@ -1386,7 +1443,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
                 substepper.density_potential_temperature_perturbation,
                 substepper.linearization_exner,
                 Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture,
-                apply_pressure_gradient)
+                apply_pressure_gradient, open_sides)
 
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)
@@ -1464,7 +1521,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
         # Step E: optional Klemp 2018 post-substep damping (no-op for
         # `NoDivergenceDamping`).
-        apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
+        apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants, open_sides)
 
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)
