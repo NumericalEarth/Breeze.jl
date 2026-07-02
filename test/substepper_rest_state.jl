@@ -84,8 +84,7 @@ function _build_rest_model(arch; substeps = nothing,
                                surface_pressure = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
-                                  thermodynamic_constants = constants,
-                                  timestepper = :AcousticRungeKutta3)
+                                  thermodynamic_constants = constants)
 end
 
 # Set the model state to the discrete-balanced reference EXACTLY.
@@ -98,7 +97,7 @@ function set_rest_state!(model)
     Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
 
     # ρ ← ρ_ref (the model's prognostic density field).
-    parent(model.dynamics.density) .= parent(ref.density)
+    parent(model.dynamics.dry_density) .= parent(ref.density)
 
     # ρθ ← p_ref / (Rᵈ Π_ref). Equivalent to ρ_ref · θ̄_ref with
     # θ̄_ref = T₀/Π_ref, but avoids any continuous-formula intermediate.

@@ -131,7 +131,7 @@ add_callback!(simulation, progress, IterationInterval(100))
 #
 # We perturbation fields for density and x-velocity for visualization.
 
-ρ = model.dynamics.density
+ρ = model.dynamics.dry_density
 u, v, w = model.velocities
 
 ρᵇᵍ = CenterField(grid)
@@ -327,7 +327,7 @@ function loss(model, uᵢ, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
-    ρ₀  = interior(model.dynamics.density, :, :, 1)
+    ρ₀  = interior(model.dynamics.dry_density, :, :, 1)
     ρᵇ₀ = interior(ρᵇᵍ, :, :, 1)
     return mean((ρ₀ .- ρᵇ₀).^2)
 end

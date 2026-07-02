@@ -106,8 +106,7 @@ end
                                                                         field_dependencies = dependencies,
                                                                         parameters = (;)))
         model = AtmosphereModel(grid; dynamics,
-                                      boundary_conditions = (; ρv = ρv_bcs),
-                                      timestepper = :AcousticRungeKutta3)
+                                      boundary_conditions = (; ρv = ρv_bcs))
 
         set!(model, ρ = (x, y, z) -> FT(1),
                     θ = (x, y, z) -> FT(300),
