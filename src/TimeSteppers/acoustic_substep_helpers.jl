@@ -14,7 +14,6 @@ using Breeze.AtmosphereModels:
     dynamics_density,
     transport_velocities,
     field_advection_scheme,
-    breeze_implicit_step!,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
@@ -180,17 +179,17 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
         advection = field_advection_scheme(model.advection, names[i])
 
         if needs_implicit_solver(advection)
-            breeze_implicit_step!(u,
-                                  model.timestepper.implicit_solver,
-                                  model.closure,
-                                  model.closure_fields,
-                                  field_index,
-                                  model.clock,
-                                  fields(model),
-                                  Δt_implicit,
-                                  advection,
-                                  velocities,
-                                  ρ)
+            implicit_step!(u,
+                           model.timestepper.implicit_solver,
+                           model.closure,
+                           model.closure_fields,
+                           field_index,
+                           model.clock,
+                           fields(model),
+                           Δt_implicit,
+                           advection,
+                           velocities,
+                           ρ)
         else
             implicit_step!(u,
                            model.timestepper.implicit_solver,

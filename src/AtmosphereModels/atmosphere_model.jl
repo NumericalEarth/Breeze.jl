@@ -149,12 +149,6 @@ function AtmosphereModel(grid;
     momentum_advection = validate_momentum_advection(momentum_advection, grid)
     default_scalar_advection, scalar_advection = validate_tracer_advection(scalar_advection, grid)
 
-    # Adaptive implicit vertical advection is currently supported for scalars only.
-    needs_implicit_solver(momentum_advection) &&
-        throw(ArgumentError("Adaptive implicit vertical advection is not yet supported for momentum. " *
-                            "Use an explicit `momentum_advection` and set the adaptive-implicit time " *
-                            "discretization on `scalar_advection` only."))
-
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     tracer_names = validate_tracers(tracers)
@@ -194,11 +188,18 @@ function AtmosphereModel(grid;
     dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics)
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
-    # The acoustic substepper integrates the thermodynamic density within the acoustic substep loop
-    # (not via the generic scalar implicit step), so adaptive implicit vertical advection is not
-    # supported for it there. (AIVA is supported for moisture and tracers, which the substepper
-    # advances with the generic implicit step; and for all scalars under SSPRungeKutta3.)
+    # The acoustic substepper integrates momentum and the thermodynamic density within the acoustic
+    # substep loop (not via the generic implicit step), so adaptive implicit vertical advection is
+    # not supported for either there. (AIVA is supported for moisture and tracers, which the
+    # substepper advances with the generic implicit step; and for all prognostics — momentum and
+    # scalars — under SSPRungeKutta3.)
     if _timestepper_is_acoustic(timestepper)
+        needs_implicit_solver(momentum_advection) &&
+            throw(ArgumentError("Adaptive implicit vertical advection is not supported for momentum " *
+                                "with the AcousticRungeKutta3 substepper, which advances momentum " *
+                                "within the acoustic substep loop. Use an explicit `momentum_advection`, " *
+                                "or the SSPRungeKutta3 timestepper."))
+
         thermo_name = thermodynamic_density_name(formulation)
         thermo_advection = get(scalar_advection, thermo_name, default_scalar_advection)
         needs_implicit_solver(thermo_advection) &&
@@ -243,7 +244,8 @@ function AtmosphereModel(grid;
     # Build a vertical tridiagonal solver for adaptive implicit vertical advection even when the
     # closure is explicit. When both are present, the diffusion and advection diagonals are summed
     # into a single system (see implicit_vertical_advection.jl).
-    advection_needs_solver = needs_implicit_solver(default_scalar_advection) ||
+    advection_needs_solver = needs_implicit_solver(momentum_advection) ||
+                             needs_implicit_solver(default_scalar_advection) ||
                              any(needs_implicit_solver, values(scalar_advection))
     if implicit_solver === nothing && advection_needs_solver
         implicit_solver = implicit_diffusion_solver(VerticallyImplicitTimeDiscretization(), grid)

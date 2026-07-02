@@ -12,7 +12,7 @@ using Oceananigans.TimeSteppers:
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
                                 microphysics_model_update!, dynamics_density, field_advection_scheme,
-                                breeze_implicit_step!
+                                implicit_step_advection
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -132,21 +132,23 @@ function ssp_rk3_substep!(model, Δt, α)
         advection = field_advection_scheme(model.advection, names[i])
 
         # Adaptive implicit vertical advection schemes add a density-weighted vertical-advection
-        # contribution to the implicit solve (combined with vertically-implicit diffusion); see
-        # AtmosphereModels/implicit_vertical_advection.jl. All other schemes use the unchanged
-        # diffusion-only implicit step (a no-op when there is no vertically-implicit closure).
+        # contribution to the implicit solve (combined with vertically-implicit diffusion).
+        # Scalars, ρu, and ρv use Oceananigans' z-Center coefficients directly; ρw is routed to
+        # Breeze's z-Face coefficients (see AtmosphereModels/implicit_vertical_advection.jl).
+        # All other schemes use the unchanged diffusion-only implicit step (a no-op when there
+        # is no vertically-implicit closure).
         if needs_implicit_solver(advection)
-            breeze_implicit_step!(u,
-                                  model.timestepper.implicit_solver,
-                                  model.closure,
-                                  model.closure_fields,
-                                  field_index,
-                                  model.clock,
-                                  fields(model),
-                                  α * Δt,
-                                  advection,
-                                  model.velocities,
-                                  ρ)
+            implicit_step!(u,
+                           model.timestepper.implicit_solver,
+                           model.closure,
+                           model.closure_fields,
+                           field_index,
+                           model.clock,
+                           fields(model),
+                           α * Δt,
+                           implicit_step_advection(advection, names[i]),
+                           model.velocities,
+                           ρ)
         else
             implicit_step!(u,
                            model.timestepper.implicit_solver,
