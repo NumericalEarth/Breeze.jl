@@ -174,7 +174,7 @@ for arch in arches
             @test td.damping.coefficient isa FT
             acoustic = AcousticSubstepper(grid, td)
             @test acoustic.substeps === nothing  # adaptive by default
-            @test acoustic.forward_weight ≈ FT(0.8)  # off-centered CN, ε = 2ω - 1 = 0.6
+            @test acoustic.forward_weight ≈ FT(0.65)  # off-centered CN, ε = 2ω - 1 = 0.3
             # Default damping is ThermalDivergenceDamping (the proven config; isolating whether the
             # baroclinic-wave blow-up is the damping form or the recip/per-stage substep changes).
             @test acoustic.damping isa ThermalDivergenceDamping
@@ -616,7 +616,7 @@ for arch in arches
         Oceananigans.defaults.FloatType = FT
         td_default = SplitExplicitTimeDiscretization()
         td_strict  = SplitExplicitTimeDiscretization(; acoustic_cfl = 0.25)
-        @test td_default.acoustic_cfl == FT(0.7)
+        @test td_default.acoustic_cfl == FT(0.5)
         @test td_strict.acoustic_cfl  == FT(0.25)
 
         # Rejects nonpositive values.
