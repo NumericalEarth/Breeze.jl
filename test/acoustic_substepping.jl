@@ -14,7 +14,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     apply_horizontal_pressure_gradient_substep,
                                     AcousticTridiagLower, AcousticTridiagDiagonal,
                                     AcousticTridiagUpper
-using Breeze.CompressibleEquations: _explicit_horizontal_step!
+using Breeze.CompressibleEquations: _explicit_horizontal_step!, OpenSides, spec_zone_faces
 using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, dynamics_density, thermodynamic_density
@@ -73,11 +73,84 @@ end
     fill!(ρu′, 0)
     fill!(ρv′, 0)
 
+    # No open boundaries here: spec-zone gate is a no-op (all-false OpenSides).
     launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
-            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Πᴸ, Gρu, Gρv, γRᵐᴸ, false)
+            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Πᴸ, Gρu, Gρv, γRᵐᴸ, false,
+            OpenSides(false, false, false, false))
 
     @test @allowscalar(ρu′[2, 2, 2]) == -1
     @test @allowscalar(ρv′[2, 2, 2]) == -1.5
+end
+
+# MPAS-style spec-zone exclusion (#825): the acoustic perturbation PGF is zeroed on any
+# face whose ∂-stencil reads an outermost open cell. spec_zone_faces encodes that mask.
+@testset "spec_zone_faces open-boundary gate logic" begin
+    grid = RectilinearGrid(CPU(); size = (6, 6, 2), halo = (3, 3, 3),
+                           x = (0, 6), y = (0, 6), z = (0, 2),
+                           topology = (Bounded, Bounded, Bounded))
+
+    # No active open side ⇒ never gate anything (regression: fix is inert when closed).
+    none = OpenSides(false, false, false, false)
+    @test all(spec_zone_faces(i, j, grid, none) == (false, false) for i in 1:6, j in 1:6)
+
+    # West open: ρu (xspec) gated on faces i = 1, 2 (∂xᶠᶜᶜ reads centers i, i-1, and the
+    # :xyz launch writes face 1); ρv (yspec) gated on the west column i = 1 only.
+    W = OpenSides(true, false, false, false)
+    @test spec_zone_faces(1, 3, grid, W) == (true, true)
+    @test spec_zone_faces(2, 3, grid, W) == (true, false)
+    @test spec_zone_faces(3, 3, grid, W) == (false, false)
+
+    # East open: max-side normal face Nx+1 is unwritten, so only i == Nx is gated.
+    E = OpenSides(false, true, false, false)
+    @test spec_zone_faces(6, 3, grid, E) == (true, true)
+    @test spec_zone_faces(5, 3, grid, E) == (false, false)
+
+    # South open: ρv gated on faces j = 1, 2; ρu gated on the south row j = 1 only.
+    S = OpenSides(false, false, true, false)
+    @test spec_zone_faces(3, 1, grid, S) == (true, true)
+    @test spec_zone_faces(3, 2, grid, S) == (false, true)
+    @test spec_zone_faces(3, 3, grid, S) == (false, false)
+
+    # North open: only j == Ny gated (max-side normal face Ny+1 unwritten).
+    N = OpenSides(false, false, false, true)
+    @test spec_zone_faces(3, 6, grid, N) == (true, true)
+    @test spec_zone_faces(3, 5, grid, N) == (false, false)
+end
+
+@testset "spec-zone gate zeros the acoustic perturbation PGF on open faces" begin
+    FT = Float64
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(CPU(); size = (4, 4, 4), halo = (3, 3, 3),
+                           x = (0, 4), y = (0, 4), z = (0, 4),
+                           topology = (Bounded, Periodic, Bounded))
+
+    ρu′ = XFaceField(grid); ρv′ = YFaceField(grid)
+    ρθ′ = CenterField(grid); Πᴸ = CenterField(grid); γRᵐᴸ = CenterField(grid)
+    Gρu = XFaceField(grid); Gρv = YFaceField(grid)
+    model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+
+    # p′ = γRᵐᴸ · Πᴸ · (ρθ)′ = x  ⇒  ∂x_p′ = 1 (uniform); base pressure 0 ⇒ ∂x_pᴸ = 0,
+    # so ρu′ collects only the acoustic perturbation PGF (Δτ = 1 ⇒ interior face gets -1).
+    set!(Πᴸ, 1); set!(γRᵐᴸ, 1); set!(model.dynamics.pressure, 0)
+    set!(ρθ′, (x, y, z) -> x); fill_halo_regions!(ρθ′)
+    fill!(Gρu, 0); fill!(Gρv, 0)
+
+    # (a) closed: perturbation PGF applied on every face.
+    fill!(ρu′, 0)
+    launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
+            ρu′, ρv′, grid, model.dynamics, FT(1), ρθ′, Πᴸ, Gρu, Gρv, γRᵐᴸ, true,
+            OpenSides(false, false, false, false))
+    @test @allowscalar(ρu′[2, 2, 2]) ≈ -1   # west-adjacent face, ungated
+    @test @allowscalar(ρu′[3, 2, 2]) ≈ -1   # interior face
+
+    # (b) west open: spec faces i = 1, 2 gated (∂x_p′ zeroed, ∂x_pᴸ = 0 ⇒ ρu′ = 0);
+    #     the interior face i = 3 is untouched by the gate.
+    fill!(ρu′, 0)
+    launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
+            ρu′, ρv′, grid, model.dynamics, FT(1), ρθ′, Πᴸ, Gρu, Gρv, γRᵐᴸ, true,
+            OpenSides(true, false, false, false))
+    @test @allowscalar(ρu′[2, 2, 2]) == 0
+    @test @allowscalar(ρu′[3, 2, 2]) ≈ -1
 end
 
 @testset "Acoustic vertical tridiagonal coefficients" begin
