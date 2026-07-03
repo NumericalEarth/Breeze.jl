@@ -332,3 +332,54 @@ end
         @test maximum(abs.(interior(Ax)[:, :, r] .- interior(ex)[:, :, r])) / scale < 0.1
     end
 end
+
+#####
+##### Meridional-wall treatment: for a balanced along-wall zonal jet (v = w = 0)
+##### the x-tendency must vanish identically (zonal symmetry), the y-tendency
+##### must equal the curvature term ρu²tanφ/a — second order in the interior and
+##### first order (converging) in the wall row — and the free-slip wall ζ₃ must
+##### converge to the physical curvature vorticity u·tanφ/a.
+#####
+
+using Oceananigans.Operators: ζ₃ᶠᶠᶜ
+
+@testset "meridional wall: balanced jet consistency [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    FT === Float64 || return
+
+    planet_radius = Oceananigans.defaults.planet_radius
+    ujet(λ, φ, z) = 40 * cosd(φ)^2 * (1 + z / 1e4)
+    exact_y(λ, φ, z) = ujet(λ, φ, z)^2 * tand(φ) / planet_radius
+
+    errors = map((36, 72)) do Nφ
+        grid = LatitudeLongitudeGrid(default_arch, FT; size = (2Nφ, Nφ, 6), halo = (6, 6, 6),
+                                     longitude = (0, 360), latitude = (-75, 75), z = (0, 1e4),
+                                     topology = (Periodic, Bounded, Bounded))
+        model = vi_model(grid, CompressibleWENOVectorInvariant())
+        set!(model; θ = 300, ρ = 1, u = ujet)
+        update_state!(model)
+        mom, vel, dyn = model.momentum, model.velocities, model.dynamics
+        adv = model.advection.momentum
+        Ax = Field(KernelFunctionOperation{Face, Center, Center}(x_momentum_flux_divergence, grid, adv, mom, vel, dyn))
+        Ay = Field(KernelFunctionOperation{Center, Face, Center}(y_momentum_flux_divergence, grid, adv, mom, vel, dyn))
+        ey = Field{Center, Face, Center}(grid); set!(ey, exact_y)
+        dy = abs.(interior(Ay) .- interior(ey)); sc = maximum(abs.(interior(ey)))
+        Ny = size(interior(Ay), 2)
+        ζ  = Field(KernelFunctionOperation{Face, Face, Center}(ζ₃ᶠᶠᶜ, grid, vel.u, vel.v))
+        _, φn, zn = nodes(ζ)
+        ζ_wall = interior(ζ)[1, length(φn), 3]
+        ζ_phys = ujet(0, φn[end], zn[3]) * tand(φn[end]) / planet_radius
+        (x_sym = maximum(abs.(interior(Ax))),
+         interior_err = maximum(dy[:, 4:Ny-3, :]) / sc,
+         wall_err = maximum(dy[:, Ny, :]) / sc,
+         ζ_rel = abs(ζ_wall - ζ_phys) / abs(ζ_phys))
+    end
+    coarse, fine = errors
+
+    @test coarse.x_sym == 0                         # exact zonal symmetry, wall included
+    @test fine.interior_err < coarse.interior_err / 3   # ~2nd order interior
+    @test coarse.wall_err < 0.05
+    @test fine.wall_err < coarse.wall_err / 1.7     # ~1st order, converging wall row
+    @test fine.ζ_rel < 0.2                          # free-slip ζ₃ → u·tanφ/a
+    @test fine.ζ_rel < coarse.ζ_rel
+end
