@@ -29,6 +29,7 @@ permissions:
 
 env:
   JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
+  JULIA_PKG_SERVER: ''
 
 jobs:
   validate:

@@ -28,6 +28,7 @@ env:
   JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
   # Silence most messages coming from XLA
   TF_CPP_MIN_LOG_LEVEL: '3'
+  JULIA_PKG_SERVER: ''
 
 jobs:
   build-docs:
