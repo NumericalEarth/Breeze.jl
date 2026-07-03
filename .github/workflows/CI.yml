@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 75
     container:
       image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && format('ghcr.io/numericalearth/breeze-docker-images:test-julia_{0}', matrix.version) ) || '' }}
-      options: --gpus=all
+      options: --gpus=all --ulimit stack=10485760:-1
       volumes:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
         - /usr/local:/host-usr-local
@@ -181,13 +181,12 @@ jobs:
           mkdir -vp "${TMPDIR}"
 
           echo "USER=${USER}"
-          echo "--> ulimit -S -s"
-          ulimit -S -s
-          echo "--> ulimit -H -s"
-          ulimit -H -s
+          echo "--> ulimit -Sa"
+          ulimit -Sa
+          echo "--> ulimit -Ha"
+          ulimit -Ha
 
-          cmd="julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=[\"--check-bounds=${{ matrix.check-bounds }}\", \"--compiled-modules=yes\", \"--depwarn=yes\", \"-O0\"], test_args=\`${{ env.runtest_test_args }}\`, force_latest_compatible_version=false, allow_reresolve=true)'"
-          sudo sh -c "ulimit -H -s unlimited && exec su ${USER} -c '${cmd}'"
+          julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
       - name: "Upload Manifest"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
