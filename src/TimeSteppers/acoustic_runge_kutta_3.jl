@@ -144,10 +144,11 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰)
 
-    # Adaptive implicit vertical advection for the acoustic prognostics (momentum and the
-    # thermodynamic variable): apply the implicit remainder of the CFL-split vertical flux
-    # over the stage interval β Δt. A no-op for explicit advection schemes.
-    implicit_advection_substep!(model, β * Δt)
+    # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
+    # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit
+    # vertical advection combined with vertically-implicit closure diffusion. A no-op when
+    # the timestepper has no implicit solver.
+    implicit_substep!(model, β * Δt)
 
     # Update remaining scalars (tracers) using WS-RK3.
     scalar_rk3_substep!(model, β * Δt)

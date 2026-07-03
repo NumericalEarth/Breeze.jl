@@ -187,9 +187,12 @@ import Breeze.AtmosphereModels as AM
         tall_grid = RectilinearGrid(default_arch; size=(8, 8, 32), halo=(5, 5, 5),
                                     x=(0, 4kilometers), y=(0, 4kilometers), z=(0, 2kilometers),
                                     topology=(Periodic, Periodic, Bounded))
+        # The vertically-implicit closure exercises the combined diffusion + advection solve:
+        # both contributions land in the same tridiagonal system for each acoustic prognostic.
         model = AtmosphereModel(tall_grid;
                                 dynamics=CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300),
                                 timestepper=:AcousticRungeKutta3,
+                                closure=ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=1, κ=1),
                                 momentum_advection=aiva(), scalar_advection=(; ρθ=aiva()))
 
         ref = model.dynamics.reference_state

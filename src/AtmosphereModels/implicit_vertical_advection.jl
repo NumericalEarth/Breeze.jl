@@ -82,7 +82,9 @@ end
 
 # `ρw` lives at (Center, Center, Face) and needs the Breeze-owned z-Face implicit-advection
 # coefficients below; every other prognostic is at z-Centers and uses Oceananigans' coefficients.
-implicit_step_advection(advection, name::Symbol) =
+# Explicit schemes pass through unwrapped, so their implicit step reduces to diffusion only.
+implicit_step_advection(advection, name::Symbol) = advection
+implicit_step_advection(advection::AIVA, name::Symbol) =
     name === :ρw ? VerticalMomentumImplicitAdvection(advection) : advection
 
 # Density weighting the advective flux of each prognostic. Momentum and the thermodynamic
