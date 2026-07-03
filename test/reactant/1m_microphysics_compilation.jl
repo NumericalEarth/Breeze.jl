@@ -15,6 +15,18 @@ end
 
 @show stack_size()
 
+function task_stack(t::Task = current_task())
+    active_lo = Ref{Ptr{Cvoid}}(C_NULL); active_hi = Ref{Ptr{Cvoid}}(C_NULL)
+    total_lo  = Ref{Ptr{Cvoid}}(C_NULL); total_hi  = Ref{Ptr{Cvoid}}(C_NULL)
+    ccall(:jl_active_task_stack, Cvoid,
+        (Any, Ptr{Ptr{Cvoid}}, Ptr{Ptr{Cvoid}}, Ptr{Ptr{Cvoid}}, Ptr{Ptr{Cvoid}}),
+         t, active_lo, active_hi, total_lo, total_hi)
+    total  = UInt(total_hi[])  - UInt(total_lo[])   # allocated stack size in bytes
+    active = UInt(active_hi[]) - UInt(active_lo[])  # portion currently in use
+    return (total = total, active = active)
+end
+@show fetch(Threads.@spawn task_stack())
+
 # using CUDA
 using Breeze
 using Breeze.Microphysics: NonEquilibriumCloudFormation
