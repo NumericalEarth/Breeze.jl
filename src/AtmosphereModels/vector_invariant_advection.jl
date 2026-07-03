@@ -152,6 +152,13 @@ WENO-based [`CompressibleVectorInvariant`](@ref). Mirrors Oceananigans'
 [`WENOVectorInvariant`](@ref) and defaults to the total-divergence
 ([`ThreeDimensionalDivergence`](@ref)) flavor. Keyword arguments other than
 `divergence` are forwarded to [`WENOVectorInvariant`](@ref).
+
+Stability: the vector-invariant form is stable to an advective CFL of roughly
+0.5 — about half of flux-form WENO's limit, and consistent with MPAS practice
+(Δt ≈ 5–6 s per km of grid spacing). On the 1° DCMIP baroclinic wave the
+mature jet (≈ 60 m/s) integrates stably at Δt = 9 min but not 12 min, with the
+instability seeded at boundary-adjacent rows where one-sided stencils reduce
+the local stability constant.
 """
 CompressibleWENOVectorInvariant(FT::DataType = Oceananigans.defaults.FloatType;
                                 divergence = ThreeDimensionalDivergence(),
