@@ -60,7 +60,7 @@ function grad_loss(model, dmodel, θ_init, dθ_init, Δt, Nsteps)
         Enzyme.Duplicated(θ_init, dθ_init),
         Enzyme.Const(Δt),
         Enzyme.Const(Nsteps))
-    return dθ_init, loss_value
+    return loss_value
 end
 
 #####
@@ -85,7 +85,7 @@ end
 
             compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
                 model, dmodel, θ_init, dθ_init, Δt, Ns)
-            dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
+            compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
         end
     end
 end
