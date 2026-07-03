@@ -6,6 +6,15 @@
 #   (a)   Build model on ReactantState with OneMomentCloudMicrophysics (MPNE1M)
 #   (b)   Compile + raise backward (Enzyme reverse mode)
 
+function stack_size()
+    rlim = Vector{UInt64}(undef, 2)
+    rc = ccall(:getrlimit, Cint, (Cint, Ptr{UInt64}), 3, rlim)
+    rc == 0 || error("getrlimit failed")
+    return (soft = rlim[1], hard = rlim[2])
+end
+
+@show stack_size()
+
 # using CUDA
 using Breeze
 using Breeze.Microphysics: NonEquilibriumCloudFormation
