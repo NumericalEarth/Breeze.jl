@@ -82,8 +82,29 @@ end
 
 # `ρw` lives at (Center, Center, Face) and needs the Breeze-owned z-Face implicit-advection
 # coefficients below; every other prognostic is at z-Centers and uses Oceananigans' coefficients.
-implicit_step_advection(advection, name::Symbol) =
+# Explicit schemes pass through unwrapped, so their implicit step reduces to diffusion only.
+implicit_step_advection(advection, name::Symbol) = advection
+implicit_step_advection(advection::AIVA, name::Symbol) =
     name === :ρw ? VerticalMomentumImplicitAdvection(advection) : advection
+
+# Density weighting the advective flux of each prognostic. Momentum and the thermodynamic
+# variable are carried by the coupling density (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`; see `dynamics_density`),
+# while water species and tracers advect as mass fractions of the total density ρ = ρᵈ + Σρˣ
+# (see `scalar_tendency`). The implicit solve must weight its upwind coefficients with the same
+# density the explicit flux divergence uses; on the anelastic core the two densities coincide.
+function implicit_advection_density(dynamics, formulation, name::Symbol)
+    coupling = name === :ρu || name === :ρv || name === :ρw ||
+               name === thermodynamic_density_name(formulation)
+    return coupling ? dynamics_density(dynamics) : total_density(dynamics)
+end
+
+# Velocities whose vertical component the implicit solve splits — these must match the velocity
+# each prognostic's tendency advects with. Momentum advects with the (possibly contravariant)
+# advecting vertical velocity; every other prognostic advects with `velocities` as given.
+function implicit_advection_velocities(dynamics, velocities, name::Symbol)
+    momentum = name === :ρu || name === :ρv || name === :ρw
+    return momentum ? (; w = advecting_vertical_velocity(dynamics, velocities)) : velocities
+end
 
 #####
 ##### Explicit vertical momentum fluxes scaled by the velocity CFL
@@ -119,23 +140,26 @@ end
 # velocity-CFL scaling above. Horizontal fluxes dispatch to the fully-explicit methods
 # Oceananigans defines for the adaptive-implicit time discretization.
 @inline function x_momentum_flux_divergence(i, j, k, grid, advection::AIVA, momentum, velocities, dynamics)
+    w = advecting_vertical_velocity(dynamics, velocities)
     return V⁻¹ᶠᶜᶜ(i, j, k, grid) * (δxᶠᵃᵃ(i, j, k, grid, _advective_momentum_flux_Uu, advection, momentum[1], velocities.u) +
                                     δyᵃᶜᵃ(i, j, k, grid, _advective_momentum_flux_Vu, advection, momentum[2], velocities.u) +
-                                    δzᵃᵃᶜ(i, j, k, grid, scaled_momentum_flux_Wu, advection, momentum[3], velocities.u, velocities.w)) +
+                                    δzᵃᵃᶜ(i, j, k, grid, scaled_momentum_flux_Wu, advection, momentum[3], velocities.u, w)) +
            U_dot_∇u_metric(i, j, k, grid, advection, momentum, velocities)
 end
 
 @inline function y_momentum_flux_divergence(i, j, k, grid, advection::AIVA, momentum, velocities, dynamics)
+    w = advecting_vertical_velocity(dynamics, velocities)
     return V⁻¹ᶜᶠᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, _advective_momentum_flux_Uv, advection, momentum[1], velocities.v) +
                                     δyᵃᶠᵃ(i, j, k, grid, _advective_momentum_flux_Vv, advection, momentum[2], velocities.v) +
-                                    δzᵃᵃᶜ(i, j, k, grid, scaled_momentum_flux_Wv, advection, momentum[3], velocities.v, velocities.w)) +
+                                    δzᵃᵃᶜ(i, j, k, grid, scaled_momentum_flux_Wv, advection, momentum[3], velocities.v, w)) +
            U_dot_∇v_metric(i, j, k, grid, advection, momentum, velocities)
 end
 
 @inline function z_momentum_flux_divergence(i, j, k, grid, advection::AIVA, momentum, velocities, dynamics)
+    w = advecting_vertical_velocity(dynamics, velocities)
     return V⁻¹ᶜᶜᶠ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, _advective_momentum_flux_Uw, advection, momentum[1], velocities.w) +
                                     δyᵃᶜᵃ(i, j, k, grid, _advective_momentum_flux_Vw, advection, momentum[2], velocities.w) +
-                                    δzᵃᵃᶠ(i, j, k, grid, scaled_momentum_flux_Ww, advection, momentum[3], velocities.w)) +
+                                    δzᵃᵃᶠ(i, j, k, grid, scaled_momentum_flux_Ww, advection, momentum[3], w)) +
            U_dot_∇w_metric(i, j, k, grid, advection, momentum, velocities)
 end
 

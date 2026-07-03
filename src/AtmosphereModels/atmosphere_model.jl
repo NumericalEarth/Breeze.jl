@@ -193,26 +193,14 @@ function AtmosphereModel(grid;
     dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics)
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
-    # The acoustic substepper integrates momentum and the thermodynamic density within the acoustic
-    # substep loop (not via the generic implicit step), so adaptive implicit vertical advection is
-    # not supported for either there. (AIVA is supported for moisture and tracers, which the
-    # substepper advances with the generic implicit step; and for all prognostics — momentum and
-    # scalars — under SSPRungeKutta3.)
-    if _timestepper_is_acoustic(timestepper)
-        needs_implicit_solver(momentum_advection) &&
-            throw(ArgumentError("Adaptive implicit vertical advection is not supported for momentum " *
-                                "with the AcousticRungeKutta3 substepper, which advances momentum " *
-                                "within the acoustic substep loop. Use an explicit `momentum_advection`, " *
-                                "or the SSPRungeKutta3 timestepper."))
-
-        thermo_name = thermodynamic_density_name(formulation)
-        thermo_advection = get(scalar_advection, thermo_name, default_scalar_advection)
-        needs_implicit_solver(thermo_advection) &&
-            throw(ArgumentError("Adaptive implicit vertical advection is not supported for the " *
-                                "thermodynamic variable ($thermo_name) with the AcousticRungeKutta3 " *
-                                "substepper, which integrates it within the acoustic substep loop. " *
-                                "Use an explicit scheme for $thermo_name, or the SSPRungeKutta3 timestepper."))
-    end
+    # Adaptive implicit vertical advection is supported for all prognostics with SSPRungeKutta3
+    # (per-substep solve) and with AcousticRungeKutta3 (moisture and tracers via the generic
+    # implicit step; momentum and the thermodynamic variable via a per-stage solve after the
+    # acoustic substep loop — see TimeSteppers/acoustic_substep_helpers.jl). On terrain-following
+    # grids the split partitions the contravariant velocity (see `advecting_vertical_velocity`).
+    advection_needs_solver = needs_implicit_solver(momentum_advection) ||
+                             needs_implicit_solver(default_scalar_advection) ||
+                             any(needs_implicit_solver, values(scalar_advection))
 
     # Materialize momentum and velocities
     # If velocities is provided (e.g., PrescribedVelocityFields), use it
@@ -249,16 +237,13 @@ function AtmosphereModel(grid;
     # Build a vertical tridiagonal solver for adaptive implicit vertical advection even when the
     # closure is explicit. When both are present, the diffusion and advection diagonals are summed
     # into a single system (see implicit_vertical_advection.jl).
-    advection_needs_solver = needs_implicit_solver(momentum_advection) ||
-                             needs_implicit_solver(default_scalar_advection) ||
-                             any(needs_implicit_solver, values(scalar_advection))
     if implicit_solver === nothing && advection_needs_solver
         implicit_solver = implicit_diffusion_solver(VerticallyImplicitTimeDiscretization(), grid)
     end
 
     # Only pass `dynamics` to time steppers that accept it (Breeze's acoustic and SSP steppers).
     # Oceananigans' built-in time steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
-    if _timestepper_uses_dynamics(timestepper)
+    if timestepper_uses_dynamics(timestepper)
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver, timestepper_kwargs...)
     else
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
@@ -326,15 +311,10 @@ end
 
 # Breeze's acoustic and SSP time steppers accept a `dynamics` keyword;
 # Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
-_timestepper_uses_dynamics(::Val) = false
-_timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
-_timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
-_timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
-
-# Whether the (pre-materialization) `timestepper` specification selects the acoustic substepper,
-# which integrates the thermodynamic density inside the acoustic substep loop.
-_timestepper_is_acoustic(timestepper::Symbol) = timestepper === :AcousticRungeKutta3
-_timestepper_is_acoustic(timestepper) = nameof(typeof(timestepper)) === :AcousticRungeKutta3
+timestepper_uses_dynamics(::Val) = false
+timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
+timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
+timestepper_uses_dynamics(s::Symbol) = timestepper_uses_dynamics(Val(s))
 
 function Base.summary(model::AtmosphereModel)
     A = nameof(typeof(model.grid.architecture))
