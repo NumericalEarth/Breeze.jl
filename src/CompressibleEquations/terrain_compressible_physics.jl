@@ -36,6 +36,12 @@ using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpo
 const TerrainCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}
 const TerrainCompressibleModel = AtmosphereModel{<:TerrainCompressibleDynamics}
 
+# Vertical transport on terrain-following grids goes through the tilted coordinate surfaces:
+# momentum advects with the contravariant momentum ρw̃ (see `advecting_momentum` below), so the
+# adaptive-implicit vertical-advection split partitions the contravariant velocity w̃.
+@inline AtmosphereModels.advecting_vertical_velocity(dynamics::TerrainCompressibleDynamics, velocities) =
+    dynamics.contravariant_vertical_velocity
+
 """
 $(TYPEDEF)
 
