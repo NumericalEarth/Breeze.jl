@@ -109,7 +109,7 @@ end
             t = Task(() -> let
                          compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
                          @show(task_stack())
-                     end, 16 << 20)
+                     end, 8 << 20)
             schedule(t)
             wait(t)
         end
