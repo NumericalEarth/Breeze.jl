@@ -23,7 +23,6 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [sources]
 Breeze = {path = ".."}
-Metal = {url = "https://github.com/JuliaGPU/Metal.jl.git", rev = "d6b4ca22238cfaaefbaa8d96832ccd5384725865"}
 
 [compat]
 AMDGPU = "2.3.0"
