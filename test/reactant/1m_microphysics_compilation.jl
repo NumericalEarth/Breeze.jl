@@ -94,7 +94,13 @@ end
 
             compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
                 model, dmodel, θ_init, dθ_init, Δt, Ns)
-            dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
+            # Running the compiled gradient causes a stackoverflow error in Julia v1.12,
+            # similarly to issue <https://github.com/JuliaLang/julia/issues/54998>.  We
+            # increase the task's stack size to 16 MiB to work around the issue.
+            task = Task(() -> compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns), 16 << 20)
+            schedule(task)
+            wait(task)
+            dθ, loss_val = fetch(task)
             ad_grad = @allowscalar Array(interior(dθ))
 
             @test loss_val > 0
