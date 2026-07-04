@@ -106,7 +106,9 @@ end
 
             compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
                 model, dmodel, θ_init, dθ_init, Δt, Ns)
-            compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
+            t = Task(() -> compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns), 64 << 20)
+            schedule(t)
+            wait(t)
         end
     end
 end
