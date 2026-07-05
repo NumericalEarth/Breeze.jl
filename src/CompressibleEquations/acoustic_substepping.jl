@@ -44,7 +44,7 @@ using Oceananigans.Operators:
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
 
-using Oceananigans.Grids: Flat, Center, Face, peripheral_node,
+using Oceananigans.Grids: Flat, Bounded, Center, Face, peripheral_node,
                           topology,
                           minimum_xspacing, minimum_yspacing, minimum_zspacing
 
@@ -1323,6 +1323,51 @@ function apply_open_boundary_relaxation!(substepper, model, grid, arch)
     return nothing
 end
 
+# Per-substep impenetrability enforcement on the wall-normal momentum
+# perturbations — the closed-wall companion of `apply_open_boundary_relaxation!`
+# above (which handles open lateral boundaries, issue #738).
+#
+# The slow momentum tendency is computed on the west/south wall faces (the
+# `:xyz` tendency launch covers index 1 of a `Face` dimension but not index
+# N+1), so on an impermeable `Bounded` boundary the substep loop integrates
+# Δτ·Gⁿρv on the south wall face every substep, and the predictor's horizontal
+# divergence then drives a spurious wall mass flux — creating mass ∝
+# Gⁿρv(wall)·(βΔt)² per stage (hence the observed Δt²-per-step, south/bottom-
+# heavy drift). The prognostic momentum's wall values are re-zeroed by its
+# boundary conditions at stage end, so the defect is invisible in the recovered
+# state. Enforce impenetrability on the perturbations every substep, on any
+# `Bounded` side without an active open boundary, matching the per-substep
+# boundary enforcement of WRF and MPAS. See
+# `validation/baroclinic_wave_mass_conservation_findings.md`.
+
+@kernel function _zero_x_wall_face!(ρu′, iᶠ)
+    j, k = @index(Global, NTuple)
+    @inbounds ρu′[iᶠ, j, k] = 0
+end
+
+@kernel function _zero_y_wall_face!(ρv′, jᶠ)
+    i, k = @index(Global, NTuple)
+    @inbounds ρv′[i, jᶠ, k] = 0
+end
+
+function enforce_wall_impenetrability!(substepper, model, grid, arch)
+    TX, TY, _ = topology(grid)
+    Nx, Ny, _ = size(grid)
+    ρu′ = substepper.momentum_perturbation.u
+    ρv′ = substepper.momentum_perturbation.v
+    bcs_u = model.momentum.ρu.boundary_conditions
+    bcs_v = model.momentum.ρv.boundary_conditions
+    if TX === Bounded
+        is_active_open_bc(bcs_u.west) || launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
+        is_active_open_bc(bcs_u.east) || launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
+    end
+    if TY === Bounded
+        is_active_open_bc(bcs_v.south) || launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
+        is_active_open_bc(bcs_v.north) || launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
+    end
+    return nothing
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -1390,6 +1435,10 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)
+
+        # Impenetrability on the wall-normal momentum perturbations, before the
+        # predictor takes their horizontal divergence (mass conservation).
+        enforce_wall_impenetrability!(substepper, model, grid, arch)
 
         # (old (ρθ)′ is stashed into ρθ′ˢ⁻ inside `_build_predictors!`, then halo-filled.)
 
@@ -1468,6 +1517,11 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)
+
+        # The damping kernel also writes the south/west wall face; re-enforce
+        # impenetrability so the next substep's divergence and the accumulated
+        # transport velocity see a closed wall (mass conservation).
+        enforce_wall_impenetrability!(substepper, model, grid, arch)
         # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
     end
 
