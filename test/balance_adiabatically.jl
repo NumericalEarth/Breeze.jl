@@ -35,15 +35,14 @@ function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 1
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
                                  thermodynamic_constants = constants,
-                                 microphysics = nothing,
-                                 timestepper = :AcousticRungeKutta3)
+                                 microphysics = nothing)
 end
 
 # Discrete-balanced rest state (mirrors substepper_rest_state.jl::set_rest_state!).
 function _set_discrete_rest!(model)
     ref = model.dynamics.reference_state
     Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
-    parent(model.dynamics.density) .= parent(ref.density)
+    parent(model.dynamics.dry_density) .= parent(ref.density)
     ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
     parent(ρθ) .= parent(ref.pressure) ./ (Rᵈ .* parent(ref.exner_function))
     fill!(parent(model.velocities.u), 0)
@@ -63,13 +62,13 @@ end
 
         # Snapshot the initial fields at value B = 2 for ρθ.
         interior(ρθ) .= 2.0
-        snap = Breeze.snapshot_initial_fields(model)
+        snap = Breeze.AtmosphereModels.snapshot_initial_fields(model)
 
         # Move ρθ to A = 5 and seed ρw with a marker that must survive.
         interior(ρθ) .= 5.0
         interior(model.momentum.ρw) .= 7.0
 
-        Breeze.nudge_initial_fields!(model, snap, 2)
+        Breeze.AtmosphereModels.nudge_initial_fields!(model, snap, 2)
 
         # (5 + 2·2)/3 = 3 for the nudged initial field; ρw unchanged.
         @test @allowscalar(interior(ρθ)[4, 4, 16]) ≈ 3.0
@@ -80,7 +79,7 @@ end
         model = _build_adiabatic_model(default_arch)
         _set_discrete_rest!(model)
 
-        @test length(Breeze.initial_fields(model)) == 5
+        @test length(Breeze.AtmosphereModels.initial_fields(model)) == 5
 
         ρ   = dynamics_density(model.dynamics)
         ρθ  = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
@@ -137,7 +136,7 @@ end
         set!(model; θ = (x, y, z) -> 300.0)
 
         # initial_fields drops ρ for anelastic → 4 entries (vs 5 for compressible).
-        @test length(Breeze.initial_fields(model)) == 4
+        @test length(Breeze.AtmosphereModels.initial_fields(model)) == 4
 
         ρθ  = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
         ρθ₀ = Array(interior(ρθ))
