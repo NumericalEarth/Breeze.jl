@@ -27,7 +27,8 @@ using Breeze
 using Breeze: dynamics_density
 using Breeze.CompressibleEquations: AcousticSubstepper,
                                     freeze_linearization_state!,
-                                    assemble_slow_vertical_momentum_tendency!
+                                    assemble_slow_vertical_momentum_tendency!,
+                                    enforce_wall_impenetrability!
 using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
                            compute_slow_scalar_tendencies!
 
@@ -390,5 +391,52 @@ total_dry_mass(model) = sum(Float64.(interior(model.dynamics.dry_density)))
     # with the fix it is ≈1.5×10⁻¹⁶ (machine floor). The 1e-12 bound sits far
     # below the bug and far above the achieved floor.
     @test relative_drift <= 1e-12
+end
+#####
+##### T8 — Unit test for _zero_x_wall_face! and _zero_y_wall_face! kernels
+#####
+##### Direct coverage of the wall-zeroing kernels called by
+##### `enforce_wall_impenetrability!`. Fills the momentum perturbation
+##### fields with ones on a fully Bounded grid, calls the function, and
+##### verifies that exactly the wall-normal faces are zeroed while the
+##### interior is untouched.
+#####
+
+@testset "T8 — enforce_wall_impenetrability! zeroes wall faces" begin
+    Nx, Ny, Nz = 8, 8, 16
+    grid = _build_rest_grid(default_arch;
+                            Nx, Ny, Nz, Lz = 10e3,
+                            topology = (Bounded, Bounded, Bounded))
+    constants = ThermodynamicConstants(eltype(grid))
+    dyn = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                               reference_potential_temperature = θ_isothermal_ref,
+                               surface_pressure = 1e5, standard_pressure = 1e5)
+    model = AtmosphereModel(grid; dynamics = dyn,
+                                  thermodynamic_constants = constants)
+
+    sub = model.timestepper.substepper
+    ρu′ = sub.momentum_perturbation.u
+    ρv′ = sub.momentum_perturbation.v
+
+    # Fill perturbations with ones so every entry is nonzero.
+    fill!(parent(ρu′), 1)
+    fill!(parent(ρv′), 1)
+
+    arch = Oceananigans.architecture(grid)
+    enforce_wall_impenetrability!(sub, model, grid, arch)
+
+    # x-wall faces: ρu′[1, :, :] and ρu′[Nx+1, :, :] must be zero.
+    ρu_arr = Array(interior(ρu′, :, :, :))
+    @test all(ρu_arr[1, :, :] .== 0)
+    @test all(ρu_arr[Nx + 1, :, :] .== 0)
+    # Interior x-faces (2:Nx) must still be 1.
+    @test all(ρu_arr[2:Nx, :, :] .== 1)
+
+    # y-wall faces: ρv′[:, 1, :] and ρv′[:, Ny+1, :] must be zero.
+    ρv_arr = Array(interior(ρv′, :, :, :))
+    @test all(ρv_arr[:, 1, :] .== 0)
+    @test all(ρv_arr[:, Ny + 1, :] .== 0)
+    # Interior y-faces (2:Ny) must still be 1.
+    @test all(ρv_arr[:, 2:Ny, :] .== 1)
 end
 end  # outer "Substepper rest-state validation"
