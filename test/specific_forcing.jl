@@ -189,11 +189,11 @@ end
     set!(model; θ=θ₀)
     update_state!(model)
 
-    Gρθ = interior(model.timestepper.Gⁿ.ρθ) |> Array
-    ρᵣ = interior(model.dynamics.reference_state.density) |> Array
-    θ = interior(model.formulation.potential_temperature) |> Array
-    expected = ρᵣ .* rate .* (θ_target .- θ)
-    @test maximum(abs.(Gρθ .- expected)) < 100 * eps(FT) * maximum(abs.(expected))
+    Gρθ = model.timestepper.Gⁿ.ρθ
+    ρᵣ = model.dynamics.reference_state.density
+    θ = model.formulation.potential_temperature
+    expected = ρᵣ * rate * (θ_target - θ)
+    @test maximum(abs(Gρθ - expected)) ≈ 0 atol = 100 * eps(FT) * maximum(abs(expected))
 
     # Face path: u relaxation. ρᵣ varies only in z, so its x-Face interpolation equals
     # the Center value and Gρu = ρᵣ · rate · (u_target − u).
@@ -203,9 +203,9 @@ end
     set!(model; θ=θ₀, u=u₀)
     update_state!(model)
 
-    Gρu = interior(model.timestepper.Gⁿ.ρu) |> Array
-    expected_u = ρᵣ .* rate .* (u_target - u₀)
-    @test maximum(abs.(Gρu .- expected_u)) < 100 * eps(FT) * maximum(abs.(expected_u))
+    Gρu = model.timestepper.Gⁿ.ρu
+    expected_u = ρᵣ * rate * (u_target - u₀)
+    @test maximum(abs(Gρu - expected_u)) ≈ 0 atol = 100 * eps(FT) * maximum(abs(expected_u))
 end
 
 #####
