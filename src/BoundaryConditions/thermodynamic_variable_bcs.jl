@@ -346,3 +346,35 @@ function set_sensible_heat_formulation_bcs(fbcs::FieldBoundaryConditions, formul
                                      top      = set_sensible_heat_formulation(fbcs.top, formulation),
                                      immersed = set_sensible_heat_formulation(fbcs.immersed, formulation))
 end
+
+#####
+##### Re-key thermodynamic surface-flux BCs to microphysics = nothing
+#####
+##### The adiabatic-balance twin sets `microphysics = nothing` but shares the production fields and their
+##### already-materialized flux BCs, whose captured scheme reads condensate fields the stripped twin lacks.
+##### Re-keying the energy/θ-flux BCs to `nothing` makes them dispatch the vapor-only
+##### `grid_moisture_fractions(::Nothing)` fallback — consistent with the twin's `microphysics = nothing`.
+
+without_microphysics(bc) = bc
+
+function without_microphysics(bc::BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction})
+    ef = bc.condition
+    new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, ef.side, nothing, ef.thermodynamic_constants, ef.density)
+    return BoundaryCondition(Flux(), new_ef)
+end
+
+function without_microphysics(bc::BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction})
+    tf = bc.condition
+    new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, tf.side, nothing, tf.thermodynamic_constants, tf.density)
+    return BoundaryCondition(Flux(), new_tf)
+end
+
+function without_microphysics_bcs(fbcs::FieldBoundaryConditions)
+    return FieldBoundaryConditions(; west     = without_microphysics(fbcs.west),
+                                     east     = without_microphysics(fbcs.east),
+                                     south    = without_microphysics(fbcs.south),
+                                     north    = without_microphysics(fbcs.north),
+                                     bottom   = without_microphysics(fbcs.bottom),
+                                     top      = without_microphysics(fbcs.top),
+                                     immersed = without_microphysics(fbcs.immersed))
+end

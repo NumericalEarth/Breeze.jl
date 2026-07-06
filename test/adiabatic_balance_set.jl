@@ -4,13 +4,17 @@
 ##### (`adiabatic_balance_twin`).
 #####
 ##### - Memory sharing: the twin aliases every heavy field + the stepper's Gⁿ/U⁰ tendency storage,
-#####   and is correctly stripped (ExplicitTimeStepping, no microphysics/closure/radiation, own clock).
+#####   and is correctly stripped: a reversible LEAPFROG stepper, ExplicitTimeStepping dynamics,
+#####   Centered(order=2) advection, no microphysics/closure/radiation, own clock. The excursion is a
+#####   Lynch–Huang digital filter (`span` forward + `span` backward leapfrog steps, low-pass average);
+#####   these three — leapfrog, fully-explicit acoustic, and centered advection — are exactly the
+#####   pieces that make the ±Δt trajectory reversible so the filter can remove the fast acoustic modes.
 ##### - Moisture-key remap: a SaturationAdjustment production model (:ρqᵉ) maps to the twin's :ρqᵛ.
 ##### - resolve_balance_Δt: auto acoustic-CFL step, explicit override round-trips.
 ##### - Fixed point: a discrete-balanced rest state is preserved; the production clock is untouched.
 ##### - with_moisture: false preserves ρqᵉ bit-for-bit; true lets it relax.
-##### - Equivalence + non-degeneracy: the in-place twin reproduces a hand-stripped explicit graft,
-#####   and an out-of-balance analysis develops nonzero ρw (catches a silent no-op / NaN blow-up).
+##### - Equivalence + non-degeneracy: the in-place twin reproduces an independent leapfrog+Centered
+#####   graft, and an out-of-balance analysis develops nonzero ρw (catches a silent no-op / NaN blow-up).
 ##### - Anelastic: the balance also works on AnelasticDynamics (dynamics reused as-is).
 #####
 
@@ -18,7 +22,9 @@ using Breeze
 using Breeze: dynamics_density, AdiabaticBalancer
 using Breeze.AtmosphereModels: adiabatic_balance_twin, compute_pressure_correction!,
                                make_pressure_correction!, resolve_balance_Δt
+using Breeze.TimeSteppers: Leapfrog
 using Oceananigans
+using Oceananigans: Centered
 using Oceananigans.Grids: minimum_zspacing
 using Oceananigans.TimeSteppers: update_state!
 using Test
@@ -71,7 +77,10 @@ end
         @test twin.temperature      === model.temperature
         @test twin.pressure_solver  === model.pressure_solver
         @test dynamics_density(twin.dynamics) === dynamics_density(model.dynamics)
-        @test ρθ_of(twin)           === ρθ_of(model)
+        # ρθ is rebuilt over the SAME data with microphysics-stripped surface-flux BCs
+        # (`adiabatic_twin_formulation`), so it is a distinct Field wrapper but shares storage — and it
+        # is that shared storage that lets the twin balance ρθ in place.
+        @test ρθ_of(twin).data === ρθ_of(model).data
         # Stepper tendency storage is aliased, not reallocated.
         @test twin.timestepper.Gⁿ.ρu === model.timestepper.Gⁿ.ρu
         @test twin.timestepper.U⁰.ρθ === model.timestepper.U⁰.ρθ
@@ -82,34 +91,46 @@ end
         @test twin.closure      === nothing
         @test twin.timestepper.implicit_solver === nothing
         @test twin.radiation    === nothing
+        # Reversible leapfrog stepper (not the production RK3) + fully-explicit acoustic dynamics: the
+        # digital-filter excursion needs an exactly time-reversible trajectory.
+        @test twin.timestepper isa Leapfrog
         @test twin.dynamics.time_discretization isa ExplicitTimeStepping
         @test model.dynamics.time_discretization isa SplitExplicitTimeDiscretization
+        # Centered (non-dissipative ⇒ reversible) advection replaces the production WENO.
+        @test twin.advection.momentum isa Centered
         @test twin.clock !== model.clock
 
-        # The builder's one-time NamedTuple/forcing/stepper scratch is grid-INDEPENDENT (~270 KB),
-        # so on this large grid it is well under one field (~0.3×); reallocating either aliased
-        # tendency set (Gⁿ or U⁰, 6 fields each) instead of sharing it would blow well past one field.
+        # The leapfrog carries one EXTRA time level uⁿ⁻¹ (`Uᵐ`, one field per prognostic) that cannot
+        # alias anything — that is the twin's only heavy allocation. On top of it the builder's
+        # NamedTuple/forcing/stepper scratch is grid-INDEPENDENT (~270 KB), well under one field on this
+        # large grid. So the twin allocates ≈ (nprognostic + <1) fields; reallocating either aliased
+        # tendency set (Gⁿ or U⁰, nprognostic fields each) instead of sharing it would roughly double it.
         one_field_bytes = sizeof(parent(model.momentum.ρu))
+        nprog = length(Oceananigans.prognostic_fields(twin))
         adiabatic_balance_twin(model)  # compile
-        @test (@allocated adiabatic_balance_twin(model)) < one_field_bytes
+        @test (@allocated adiabatic_balance_twin(model)) < (nprog + 2) * one_field_bytes
     end
 
-    @testset "native time stepping (time_stepping = nothing) reuses the split-explicit scheme" begin
+    @testset "compressible twin ignores time_stepping (always fully-explicit leapfrog)" begin
         model = _build_production(default_arch)
-        twin  = adiabatic_balance_twin(model, AdiabaticBalancer(time_stepping = nothing))
 
-        # Native scheme reused, but the (irreversible) sponge is stripped.
-        @test twin.dynamics.time_discretization isa SplitExplicitTimeDiscretization
-        @test twin.dynamics.time_discretization.sponge === nothing
-        @test model.dynamics.time_discretization.sponge !== nothing
-        # Tendency storage is still aliased (the rebuilt acoustic substepper is the only new memory).
-        @test twin.timestepper.Gⁿ.ρu === model.timestepper.Gⁿ.ρu
-        @test twin.momentum.ρw === model.momentum.ρw
+        # The compressible twin's stepper is the reversible leapfrog, which does no acoustic
+        # substepping — so a split-explicit discretization would be incoherent. The `time_stepping`
+        # request is therefore ignored for CompressibleDynamics: the twin is ALWAYS
+        # ExplicitTimeStepping + Leapfrog, whatever is passed.
+        for ts in (nothing, SplitExplicitTimeDiscretization(), ExplicitTimeStepping())
+            twin = adiabatic_balance_twin(model, AdiabaticBalancer(time_stepping = ts))
+            @test twin.dynamics.time_discretization isa ExplicitTimeStepping
+            @test twin.timestepper isa Leapfrog
+            # Tendency storage is still aliased regardless.
+            @test twin.timestepper.Gⁿ.ρu === model.timestepper.Gⁿ.ρu
+            @test twin.momentum.ρw === model.momentum.ρw
+        end
 
-        # Fixed point holds with the native scheme too.
+        # Fixed point still holds with an explicit time_stepping override.
         _set_discrete_rest!(model)
         ρ₀ = deepcopy(dynamics_density(model.dynamics))
-        set!(model; balancer = AdiabaticBalancer(Δt = 0.5, cycles = 1, time_stepping = nothing))
+        set!(model; balancer = AdiabaticBalancer(Δt = 0.5, span = 4, time_stepping = nothing))
         @test dynamics_density(model.dynamics) ≈ ρ₀ rtol=1e-8
         @test isapprox(maximum(abs, model.momentum.ρw), 0; atol=1e-7)
         @test model.clock.iteration == 0
@@ -162,8 +183,12 @@ end
         @test isfinite(maximum(abs, model.moisture_density))
     end
 
-    @testset "in-place twin reproduces a hand-stripped explicit graft (non-degenerate)" begin
-        Δt, cycles = 0.5, 2
+    @testset "in-place twin reproduces a hand-stripped leapfrog graft (non-degenerate)" begin
+        # Shared balancer: Path A uses it directly; Path B mirrors its span and robert_asselin so both
+        # paths run the identical DFI. Sourcing them from the balancer keeps the test tracking the
+        # defaults rather than hard-coding them.
+        balancer = AdiabaticBalancer(Δt = 0.5, span = 4, with_moisture = false)
+        Δt = balancer.Δt
 
         # Near-balanced moist analysis shared by both paths: discrete rest state + a small smooth
         # thermal bump (mild hydrostatic imbalance → ρw spins up but stays finite) + subsaturated qᵗ.
@@ -177,25 +202,31 @@ end
             return m
         end
 
-        # Path A — in-place twin on a moist production model. The default ExplicitTimeStepping twin
-        # balances (ρ, ρu, ρv, ρw, ρθ); with_moisture = false preserves ρqᵉ.
+        # Path A — in-place twin on a moist production model. The compressible twin balances
+        # (ρ, ρu, ρv, ρw, ρθ) on a leapfrog; with_moisture = false preserves ρqᵉ.
         model = _build_production(default_arch; microphysics = SaturationAdjustment())
         analysis!(model)
         ρqᵉ_analysis = deepcopy(model.moisture_density)
-        balance_adiabatically!(model, AdiabaticBalancer(Δt = Δt, cycles = cycles, with_moisture = false))
+        balance_adiabatically!(model, balancer)
 
-        # Path B — an independent, hand-stripped moistureless model built directly on
-        # ExplicitTimeStepping (matching the default twin), balanced via the low-level routine.
+        # Path B — an independent, hand-stripped moistureless model built to mirror the twin EXACTLY:
+        # ExplicitTimeStepping dynamics, a Leapfrog stepper, and Centered(order=2) advection on
+        # momentum and scalars. Balanced via the low-level routine with the balancer's span and a
+        # matched Robert–Asselin coefficient, so the two DFI trajectories are bit-for-bit identical.
         grid = model.grid
         dyn  = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature = θ_iso_bs,
                                     surface_pressure = 1e5, standard_pressure = 1e5)
         ref  = AtmosphereModel(grid; dynamics = dyn,
                                thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
-                               microphysics = nothing, coriolis = nothing)
+                               microphysics = nothing, coriolis = nothing,
+                               momentum_advection = Centered(order = 2),
+                               scalar_advection = Centered(order = 2),
+                               timestepper = :Leapfrog)
+        ref.timestepper.robert_asselin = convert(eltype(grid), balancer.robert_asselin)
         analysis!(ref)
-        balance_adiabatically!(ref; Δt = Δt, cycles = cycles)
+        balance_adiabatically!(ref; Δt = Δt, span = balancer.span)
 
-        # The in-place twin reproduces the graft (identical explicit scheme + identical IC).
+        # The in-place twin reproduces the graft (identical leapfrog scheme + identical IC).
         for (a, b) in zip((dynamics_density(model.dynamics), model.momentum.ρu, model.momentum.ρv,
                            model.momentum.ρw, ρθ_of(model)),
                           (dynamics_density(ref.dynamics), ref.momentum.ρu, ref.momentum.ρv,
@@ -227,17 +258,21 @@ end
         model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state), microphysics = nothing)
 
         # The anelastic twin shares memory and reuses the dynamics as-is (no time-discretization to
-        # swap); time_stepping is ignored. Tendency storage is still aliased.
+        # swap); time_stepping is ignored. Tendency storage is still aliased. Crucially it KEEPS its
+        # native projection stepper — anelastic has no acoustic modes (so no reversibility problem)
+        # and needs the pressure projection every step, which the compressible leapfrog omits.
         twin = adiabatic_balance_twin(model)
         @test twin.dynamics === model.dynamics
         @test twin.momentum.ρw === model.momentum.ρw
         @test twin.timestepper.Gⁿ.ρu === model.timestepper.Gⁿ.ρu
         @test twin.microphysics === nothing
+        @test !(twin.timestepper isa Leapfrog)
+        @test typeof(twin.timestepper) == typeof(model.timestepper)
 
         # θ = θᵣ at rest is an anelastic fixed point. Use the positional `(model, balancer)` interface.
         set!(model; θ = (x, y, z) -> 300.0)
         ρθ₀ = deepcopy(ρθ_of(model))
-        balance_adiabatically!(model, AdiabaticBalancer(Δt = 1.0, cycles = 1))
+        balance_adiabatically!(model, AdiabaticBalancer(Δt = 1.0, span = 4))
         @test ρθ_of(model) ≈ ρθ₀ rtol=1e-6
         @test isapprox(maximum(abs, model.momentum.ρw), 0; atol=1e-6)
         @test model.clock.iteration == 0
@@ -258,7 +293,7 @@ end
              v = (x, y, z) -> 50 * cos(2π * y / 1e4) * sin(2π * z / 4e3),
              w = 0,
              enforce_mass_conservation = true,
-             balancer = AdiabaticBalancer(Δt = 2.0, cycles = 1))
+             balancer = AdiabaticBalancer(Δt = 2.0, span = 4))
 
         ρu = Array(interior(model.momentum.ρu))
         ρv = Array(interior(model.momentum.ρv))
