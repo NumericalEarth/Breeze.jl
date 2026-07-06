@@ -86,7 +86,16 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Specific
     # name to look up the field they advect or apply at.
     specific_name = startswith(string(name), "ρ") ?
                     Symbol(string(name)[nextind(string(name), 1):end]) : name
-    inner = materialize_atmosphere_model_forcing(forcing.forcing, field, specific_name,
+    # Materialize the inner forcing against the *specific* field, not the ρ-weighted
+    # prognostic: forcing types that capture the forced field at materialization
+    # (Oceananigans ≥ v0.110.7 `Relaxation`) must relax the specific variable the
+    # forcing is keyed on, or a fringe relaxation of u computes rate·(u_target − ρu).
+    # The specific diagnostic fields (u, v, w, θ/e, moisture) are refreshed in place
+    # by `update_state!`, so the captured reference stays live; they share the
+    # prognostic's location, so location-only consumers are unaffected. Prognostics
+    # without a specific diagnostic (user tracers) fall back to the prognostic field.
+    specific_field = get(context.specific_fields, specific_name, field)
+    inner = materialize_atmosphere_model_forcing(forcing.forcing, specific_field, specific_name,
                                                  model_field_names, context)
     ρ = context.density
     target_location = instantiated_location(field)
