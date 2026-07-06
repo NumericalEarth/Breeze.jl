@@ -96,26 +96,6 @@ function balance_adiabatically!(model::AtmosphereModel; Δt, span::Int = 16, cut
     return model
 end
 
-# The prognostic fields nudged back toward the analysis each cycle: every prognostic except the
-# vertical momentum `ρw`, which is the free field that spins up balance with them. Solver-agnostic —
-# for `CompressibleDynamics` this is `(ρ, ρu, ρv, ρθ, ρqᵉ)`; for `AnelasticDynamics`, `(ρu, ρv, ρθ,
-# ρqᵉ)` (the reference density `ρᵣ` is not prognostic and so is absent from `prognostic_fields`).
-initial_fields(model::AtmosphereModel) = values(Base.structdiff(prognostic_fields(model), NamedTuple{(:ρw,)}))
-
-# Copy the initial fields' full (haloed) parent arrays at t = 0.
-snapshot_initial_fields(model::AtmosphereModel) = map(f -> copy(parent(f)), initial_fields(model))
-
-# In-place weighted blend of each initial field toward its snapshot: x ← (x + weight·x₀) / (1 + weight).
-function nudge_initial_fields!(model::AtmosphereModel, snapshot, weight)
-    w = convert(eltype(model.grid), weight)
-    for (f, x₀) in zip(initial_fields(model), snapshot)
-        p = parent(f)
-        @. p = (p + w * x₀) / (1 + w)
-        fill_halo_regions!(f)
-    end
-    return nothing
-end
-
 """
 $(TYPEDEF)
 
