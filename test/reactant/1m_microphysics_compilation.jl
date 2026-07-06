@@ -105,8 +105,8 @@ end
 
             @test loss_val > 0
             @test isfinite(loss_val)
-            @test maximum(abs, ad_grad) > 0
-            @test !any(isnan, ad_grad)
+            @test any(!iszero, ad_grad)
+            @test all(!isnan, ad_grad)
         end
     end
 end
