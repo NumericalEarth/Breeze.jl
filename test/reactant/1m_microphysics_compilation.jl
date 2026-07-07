@@ -106,7 +106,7 @@ end
             @test loss_val > 0
             @test isfinite(loss_val)
             @test any(!iszero, ad_grad)
-            @test all(!isnan, ad_grad)
+            @test all(isfinite, ad_grad)
         end
     end
 end
