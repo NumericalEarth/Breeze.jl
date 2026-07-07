@@ -1058,8 +1058,8 @@ end
 @inline κˣ(i, j, k, grid, ::NoHorizontalDampingScale, Δτ) = zero(grid)
 @inline κʸ(i, j, k, grid, ::NoHorizontalDampingScale, Δτ) = zero(grid)
 
-@inline κˣ(i, j, k, grid, scale::FixedHorizontalDampingScale, Δτ) = scale.diffusivity
-@inline κʸ(i, j, k, grid, scale::FixedHorizontalDampingScale, Δτ) = scale.diffusivity
+@inline κˣ(i, j, k, grid, scale::FixedHorizontalDampingScale, Δτ) = scale.coefficient / Δτ
+@inline κʸ(i, j, k, grid, scale::FixedHorizontalDampingScale, Δτ) = scale.coefficient / Δτ
 
 # Isotropic, mesh-varying horizontal damping (MPAS-style): a single scalar diffusivity
 # κ = α/Δτ · ℓ² applied identically in x and y, with ℓ the *smallest* local horizontal
