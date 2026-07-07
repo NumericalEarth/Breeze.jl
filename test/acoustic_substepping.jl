@@ -13,7 +13,10 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     sponge_term_diag, sponge_rhs,
                                     apply_horizontal_pressure_gradient_substep,
                                     AcousticTridiagLower, AcousticTridiagDiagonal,
-                                    AcousticTridiagUpper
+                                    AcousticTridiagUpper,
+                                    horizontal_damping_scale, κˣ, κʸ,
+                                    FixedHorizontalDampingScale, LocalHorizontalDampingScale,
+                                    NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _explicit_horizontal_step!
 using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
@@ -206,6 +209,42 @@ for arch in arches
             @test acoustic.sponge isa UpperSponge
             @test acoustic.sponge.damping_rate ≈ FT(sponge_rate)
             @test acoustic.sponge.depth ≈ FT(sponge_depth)
+        end
+
+        @testset "Horizontal damping-scale diffusivities" begin
+            # The per-direction diffusivities κˣ, κʸ carry the 1/Δτ factor at call
+            # time (Δτ is deliberately kept out of the scale structs so a traced
+            # substep size never lands in a struct field). Exercise the accessors
+            # directly — they are otherwise only hit inside the damping kernel, so a
+            # wrong field name or missing 1/Δτ would slip through construction tests.
+            Δτ = FT(2)
+            Δ  = FT(25)  # min(Δx, Δy) on this 4×4 grid over a 100 m extent
+
+            # Fixed length scale ⇒ γ = α ℓ² / Δτ, uniform in x and y.
+            ℓ = FT(250)
+            fixed_damping = ThermalDivergenceDamping(coefficient=0.2, length_scale=ℓ)
+            fixed_scale = horizontal_damping_scale(fixed_damping, fixed_damping.coefficient)
+            @test fixed_scale isa FixedHorizontalDampingScale
+            @test fixed_scale.coefficient ≈ FT(0.2) * ℓ^2
+            @allowscalar begin
+                @test κˣ(2, 2, 4, grid, fixed_scale, Δτ) ≈ FT(0.2) * ℓ^2 / Δτ
+                @test κʸ(2, 2, 4, grid, fixed_scale, Δτ) ≈ FT(0.2) * ℓ^2 / Δτ
+            end
+
+            # Default (no length scale) ⇒ mesh-local γ = α min(Δx, Δy)² / Δτ.
+            local_damping = ThermalDivergenceDamping(coefficient=0.2)
+            local_scale = horizontal_damping_scale(local_damping, local_damping.coefficient)
+            @test local_scale isa LocalHorizontalDampingScale
+            @allowscalar begin
+                @test κˣ(2, 2, 4, grid, local_scale, Δτ) ≈ FT(0.2) * Δ^2 / Δτ
+                @test κʸ(2, 2, 4, grid, local_scale, Δτ) ≈ FT(0.2) * Δ^2 / Δτ
+            end
+
+            # A Flat direction gets a no-op scale that damps nothing.
+            @allowscalar begin
+                @test κˣ(2, 2, 4, grid, NoHorizontalDampingScale(), Δτ) == 0
+                @test κʸ(2, 2, 4, grid, NoHorizontalDampingScale(), Δτ) == 0
+            end
         end
 
         @testset "Invalid damping parameters" begin
