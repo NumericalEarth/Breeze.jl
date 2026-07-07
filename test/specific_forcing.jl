@@ -193,7 +193,7 @@ end
     ρᵣ = model.dynamics.reference_state.density
     θ = model.formulation.potential_temperature
     expected = ρᵣ * rate * (θ_target - θ)
-    @test maximum(abs(Gρθ - expected)) ≈ 0 atol = 100 * eps(FT) * maximum(abs(expected))
+    @test Gρθ ≈ expected rtol=100 * eps(FT)
 
     # Face path: u relaxation. ρᵣ varies only in z, so its x-Face interpolation equals
     # the Center value and Gρu = ρᵣ · rate · (u_target − u).
@@ -205,7 +205,7 @@ end
 
     Gρu = model.timestepper.Gⁿ.ρu
     expected_u = ρᵣ * rate * (u_target - u₀)
-    @test maximum(abs(Gρu - expected_u)) ≈ 0 atol = 100 * eps(FT) * maximum(abs(expected_u))
+    @test Gρu ≈ expected_u rtol=100 * eps(FT)
 end
 
 #####
