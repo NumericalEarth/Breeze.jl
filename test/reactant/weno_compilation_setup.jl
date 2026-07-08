@@ -38,11 +38,6 @@ topologies = [
     ("Bounded, Bounded, Bounded",   (Bounded, Bounded, Bounded), 3),
 ]
 
-schemes = [
-    ("WENO(order=5)",               WENO(order=5)),
-    ("WENO(order=5, bounds=(0,1))", WENO(order=5, bounds=(0, 1))),
-]
-
 #####
 ##### Helpers
 #####
@@ -92,10 +87,10 @@ end
 ##### Tests
 #####
 
-@testset "reactant_weno_compilation" begin
-    Δt = 0.02
+function run_weno_tests(scheme_label, scheme)
+    @testset "reactant_weno_compilation - $scheme_label" begin
+        Δt = 0.02
 
-    @testset "$scheme_label" for (scheme_label, scheme) in schemes
         @testset "$label" for (label, topo, nd) in topologies
             grid = make_grid(topo, nd)
 
