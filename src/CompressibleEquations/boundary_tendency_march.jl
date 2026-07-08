@@ -3,7 +3,7 @@
 #####
 ##### A scheme attached to the momentum `NormalFlowBoundaryCondition`s. When an
 ##### open lateral side carries it, the acoustic substep loop treats that side's
-##### outermost open cell ring as an MPAS specified zone: the acoustic
+##### outermost interior cells as an MPAS specified zone: the acoustic
 ##### perturbation pressure gradient never acts on specified faces, specified
 ##### cells are excluded from the coupled acoustic update, the specified
 ##### column's (ρw)′ is closed by a per-substep zero-gradient copy from the
@@ -30,7 +30,7 @@
 $(TYPEDEF)
 
 Scheme for a momentum `NormalFlowBoundaryCondition` that drives the outermost
-open cell ring (an MPAS-style specified zone) by boundary value + time-tendency
+interior cells (an MPAS-style specified zone) by boundary value + time-tendency
 each acoustic substep, instead of freezing it at the stage-entry state.
 
 Tendency sources are callables of `(x, y, z, t)` returning the local time

@@ -412,6 +412,53 @@ already advances the same prognostic variables as the outer scheme. The slow ten
 ``G^s`` are applied through the substep loop, so the WS-RK3 stage update
 ``U^{(k)} = U^n + β_k Δt R(U^{(k-1)})`` falls out of the same loop.
 
+### Specified-zone boundary drive (`BoundaryTendencyMarch`)
+
+The substep loop advances the fast system many times between the slow
+(per-RK-stage) boundary updates, so a normal-flow lateral boundary needs
+boundary information *within* the acoustic substeps.
+[`BoundaryTendencyMarch`](@ref) supplies it with the specified-zone approach of
+[MPAS](@cite SkamarockEtAl2012) (and WRF's specified boundary): when the
+momentum `NormalFlowBoundaryCondition`s on a side carry the scheme, the
+outermost interior cells on that side become a *specified zone* in which
+
+1. the acoustic perturbation pressure gradient is **gated** on every face whose
+   stencil reads a specified cell,
+2. specified cells are **excluded** from the coupled acoustic update (mass and
+   ``ρθ`` predictors and the implicit vertical solve),
+3. the specified column's ``(ρw)'`` is closed by a per-substep **zero-gradient**
+   copy from the nearest interior column (WRF `zero_grad_bdy` analog), and
+4. the specified zone's momentum and scalar perturbations are **marched** by
+   their boundary time-tendencies every acoustic substep:
+
+```math
+(ρu)' ← (ρu)' + Δτ \, ∂_t(ρu)_\mathrm{boundary}
+```
+
+the analog of MPAS's `ru_p += dts·lbc_tend_ru`. Because each RK stage
+initializes its perturbations with the rewind ``(ρu)' = U⁰ − U^L_\mathrm{stage}``,
+the per-substep *increment* composes to ``U⁰ + β\,Δt\,∂_t`` at each stage end —
+the boundary state at its stage time. (An overwrite ``τ\,∂_t`` would instead
+compound across stages into a secular ``(β₁+β₂+β₃) = 11/6`` over-advance per
+outer step, invisible to steady-state tests.)
+
+On marched sides the per-substep ``α`` relaxation of ``ρᵈ', (ρθ)'`` is
+superseded and skipped: the march holds the same cells to the time-accurate
+boundary state directly. Normal-flow boundaries without the scheme retain the
+relaxation unchanged.
+
+Tendency sources are callables of ``(x, y, z, t)`` evaluated over the specified
+zone once per outer time step; alternatively, the underlying tendency fields are
+exposed through [`boundary_tendency_fields`](@ref) for drivers whose boundary
+data cannot be evaluated on the device (e.g. interpolated forcing files).
+
+Two current restrictions: the scheme errors on `TerrainCompressibleDynamics`
+(the terrain horizontal pressure-gradient stencils are not column-local, so
+marched specified-cell scalars would leak into interior columns), and optional
+post-loop stage physics (vertically implicit closures, microphysics updates)
+is not excluded from the specified zone — with such physics enabled the zone
+deviates from the driving data by one step of ungated tendencies.
+
 ## [Klemp divergence damping](@id klemp-damping)
 
 [Klemp, Skamarock, and Ha (2018)](@cite KlempSkamarockHa2018) prescribe a per-substep
@@ -604,67 +651,6 @@ stage-rewind formulation keeps that state bounded at ``Δt = 20\,``s. This shoul
 interpreted as a recommendation to remove damping in production: noisy baroclinic-wave and
 LES cases still use the default horizontal Klemp damping to control grid-scale divergent
 acoustic modes.
-
-## Specified-zone boundary drive (`BoundaryTendencyMarch`)
-
-At open lateral boundaries, the split-explicit substep loop needs boundary
-information *within* the acoustic substeps: the slow (per-RK-stage) boundary
-conditions alone leave the outermost cells' fast dynamics unconstrained, and the
-per-substep relaxation of ``ρᵈ'`` and ``(ρθ)'`` toward the stage-frozen wall value
-constrains the mass field but kicks the boundary-adjacent momentum through the
-acoustic pressure gradient (issue #825).
-
-[`BoundaryTendencyMarch`](@ref) replaces this treatment with the specified-zone approach
-of [MPAS](@cite SkamarockEtAl2012) (and WRF's specified boundary): when the momentum
-`NormalFlowBoundaryCondition`s on a side carry the scheme, the outermost open
-cell ring becomes a *specified zone* in which
-
-1. the acoustic perturbation pressure gradient is **gated** on every face whose
-   stencil reads a specified cell,
-2. specified cells are **excluded** from the coupled acoustic update (mass and
-   ``ρθ`` predictors and the implicit vertical solve),
-3. the specified column's ``(ρw)'`` is closed by a per-substep **zero-gradient**
-   copy from the nearest interior column (WRF `zero_grad_bdy` analog), and
-4. the specified zone's momentum and scalar perturbations are **marched** by
-   their boundary time-tendencies every acoustic substep:
-
-```math
-(ρu)' ← (ρu)' + Δτ \, ∂_t(ρu)_\mathrm{boundary}
-```
-
-the analog of MPAS's `ru_p += dts·lbc_tend_ru`. Because each RK stage
-initializes its perturbations with the rewind ``(ρu)' = U⁰ − U^L_\mathrm{stage}``,
-the per-substep *increment* composes to ``U⁰ + β\,Δt\,∂_t`` at each stage end —
-the boundary state at its stage time. (An overwrite ``τ\,∂_t`` would instead
-compound across stages into a secular ``(β₁+β₂+β₃) = 11/6`` over-advance per
-outer step, invisible to steady-state tests.)
-
-Where the scheme is active, the per-substep ``α`` relaxation of ``ρ', (ρθ)'``
-(issue #738) is superseded and skipped: the march holds the same cells to the
-time-accurate boundary state directly. Boundaries without the scheme retain the
-relaxation unchanged.
-
-Tendency sources are callables of ``(x, y, z, t)`` evaluated over the specified
-zone once per outer time step; alternatively, the underlying tendency fields are
-exposed through [`boundary_tendency_fields`](@ref) for drivers whose boundary
-data cannot be evaluated on the device (e.g. interpolated forcing files).
-
-
-Two current restrictions: the scheme errors on `TerrainCompressibleDynamics`
-(the terrain horizontal pressure-gradient stencils are not column-local, so
-marched specified-cell scalars would leak into interior columns), and
-optional post-loop stage physics (vertically implicit closures, microphysics
-updates) is not excluded from the specified zone — with such physics enabled
-the zone deviates from the driving data by one step of ungated tendencies.
-
-!!! warning "Initialize consistently with the boundary data"
-    The specified zone renders any mismatch between the interior state and the
-    boundary data as a vortex sheet at the zone's inner edge — created once,
-    then advected and long-lived. Initialize the interior from the same
-    parent/driving data that supplies the boundary values and tendencies
-    (standard limited-area practice). In particular, a far-field vortex or jet
-    whose algebraic tail reaches the domain must be present in the initial
-    condition, not only in the boundary data.
 
 ## Comparison with anelastic dynamics
 
