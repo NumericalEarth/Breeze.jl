@@ -38,6 +38,7 @@ jobs:
         with:
           filters: |
             files:
+              - ".github/workflows/Documentation.yml"
               - "docs/**"
               - "examples/**"
               - "src/**"
