@@ -17,7 +17,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     horizontal_damping_scale, κˣ, κʸ,
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
-using Breeze.CompressibleEquations: _explicit_horizontal_step!
+using Breeze.CompressibleEquations: _explicit_horizontal_step!, OpenSides
 using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, dynamics_density, thermodynamic_density
@@ -77,7 +77,8 @@ end
     fill!(ρv′, 0)
 
     launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
-            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Πᴸ, Gρu, Gρv, γRᵐᴸ, false)
+            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Πᴸ, Gρu, Gρv, γRᵐᴸ, false,
+            OpenSides(false, false, false, false), nothing, nothing)
 
     @test @allowscalar(ρu′[2, 2, 2]) == -1
     @test @allowscalar(ρv′[2, 2, 2]) == -1.5

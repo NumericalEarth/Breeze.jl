@@ -29,6 +29,8 @@ export
     CompressibleDynamics,
     CompressibleModel,
     AcousticSubstepper,
+    BoundaryTendencyMarch,
+    boundary_tendency_fields,
     SplitExplicitTimeDiscretization,
     AcousticOuterScheme,
     WickerSkamarock3,
@@ -56,10 +58,10 @@ using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, ZFaceField, prognostic_fields
-using Oceananigans.Grids: rnode, znode
+using Oceananigans.Grids: rnode, xnode, ynode, znode
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
                                 ∂zᶜᶜᶜ, ∂zᶜᶜᶠ
-using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 
@@ -81,6 +83,7 @@ const CompressibleModel = AtmosphereModel{<:CompressibleDynamics}
 
 include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
+include("boundary_tendency_march.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
 

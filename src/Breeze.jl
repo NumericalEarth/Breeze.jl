@@ -151,6 +151,8 @@ export
     SSPRungeKutta3,
     AcousticRungeKutta3,
     AcousticSubstepper,
+    BoundaryTendencyMarch,
+    boundary_tendency_fields,
 
     # ParcelDynamics
     ParcelDynamics,
@@ -251,6 +253,7 @@ using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 
 include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
+                              BoundaryTendencyMarch, boundary_tendency_fields,
                               SplitExplicitTimeDiscretization,
                               AcousticOuterScheme, WickerSkamarock3,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
