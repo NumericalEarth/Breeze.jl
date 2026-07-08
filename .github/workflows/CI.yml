@@ -40,7 +40,6 @@ jobs:
         with:
           filters: |
             files:
-              - ".github/workflows/CI.yml"
               - "ext/**"
               - "src/**"
               - "test/**"
