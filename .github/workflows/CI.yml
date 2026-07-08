@@ -4,14 +4,7 @@ on:
   push:
     branches:
       - "main"
-    paths: &paths
-      - ".github/workflows/CI.yml"
-      - "ext/**"
-      - "src/**"
-      - "test/**"
-      - "Project.toml"
   pull_request:
-    paths: *paths
   workflow_dispatch:
 
 concurrency:
@@ -31,7 +24,31 @@ env:
   JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
 
 jobs:
+  check-files:
+    name: Check for modified files
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      files: ${{ steps.filter.outputs.files }}
+    steps:
+      - name: "Check out repository"
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: filter
+        with:
+          filters: |
+            docfiles:
+              - ".github/workflows/CI.yml"
+              - "ext/**"
+              - "src/**"
+              - "test/**"
+              - "Project.toml"
+
   test:
+    needs: check-files
+    if: ${{ needs.check-files.outputs.files == 'true' }}
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - check-bounds ${{ matrix.check-bounds }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
@@ -84,7 +101,7 @@ jobs:
         run: |
           df -hT
       - name: "Check out repository"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: "Install Julia"
         uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         # On the self-hosted GPU runners we use a Docker image with Julia pre-installed.
