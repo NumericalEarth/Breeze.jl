@@ -22,7 +22,6 @@ using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: architecture
 using Oceananigans.Fields: interpolate
 using Oceananigans.Grids: Center, znode
-using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 
 using Adapt: Adapt, adapt
@@ -422,9 +421,6 @@ This function launches a kernel that processes each column independently, with r
 
 The kernel handles conversion between mass fractions and mixing ratios
 internally for efficiency. Water vapor is diagnosed from ``q^v = q^t - q^{cl} - q^r``.
-
-The kernel writes prognostic fields in the interior only, so `update_state!` is called
-afterwards to restore a consistent model state (halos, diagnostics, and tendencies).
 """
 function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model)
     grid = model.grid
@@ -458,10 +454,6 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     launch!(arch, grid, :xy, _microphysical_update!,
             microphysics, grid, Nz, Δt, ρ, p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
-
-    # The kernel mutated prognostic fields in the interior; refill halos and recompute
-    # diagnostics and tendencies so the post-update state is consistent for the next step.
-    update_state!(model)
 
     return nothing
 end

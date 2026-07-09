@@ -306,11 +306,13 @@ equals the actual temperature and `T` is returned.
 - `constants`: `ThermodynamicConstants`
 - `surface`: Surface type for saturation vapor pressure calculation
 
-- `solver`: Iterative solver controlling the secant iteration; the convergence criterion
-  compares the vapor pressure residual against `pᵛ`. When omitted, defaults to
-  `SecantSolver(reltol=1e-4, abstol=0, maxiter=10)`.
+# Keyword arguments
+- `tolerance`: Relative tolerance for convergence (default: 1e-4)
+- `maxiter`: Maximum number of iterations (default: 10)
 """
-@inline function dewpoint_temperature(pᵛ, T, constants, surface, solver)
+@inline function dewpoint_temperature(pᵛ, T, constants, surface;
+                                      tolerance = 1e-4,
+                                      maxiter = 10)
     # First guess: current temperature
     T⁺₁ = T
     pᵛ⁺₁ = saturation_vapor_pressure(T⁺₁, constants, surface)
@@ -322,16 +324,22 @@ equals the actual temperature and `T` is returned.
     # Second guess: lower temperature based on relative humidity
     ℋ = pᵛ / pᵛ⁺₁  # relative humidity
     T⁺₂ = T - (1 - ℋ) * 20  # heuristic initial step
+    pᵛ⁺₂ = saturation_vapor_pressure(T⁺₂, constants, surface)
+    r₂ = pᵛ⁺₂ - pᵛ
 
-    @inline residual(T⁺) = saturation_vapor_pressure(T⁺, constants, surface) - pᵛ
+    # Secant iteration
+    iter = 0
+    while abs(r₂) > tolerance * pᵛ && iter < maxiter
+        ΔTΔr = (T⁺₂ - T⁺₁) / (r₂ - r₁)
+        r₁, T⁺₁ = r₂, T⁺₂
+        T⁺₂ -= r₂ * ΔTΔr
+        pᵛ⁺₂ = saturation_vapor_pressure(T⁺₂, constants, surface)
+        r₂ = pᵛ⁺₂ - pᵛ
+        iter += 1
+    end
 
-    return secant_solve(residual, solver, T⁺₁, T⁺₂, pᵛ)
+    return T⁺₂
 end
-
-@inline default_dewpoint_solver(T) = SecantSolver(typeof(float(T)); reltol=1e-4, abstol=0, maxiter=10)
-
-@inline dewpoint_temperature(pᵛ, T, constants, surface) =
-    dewpoint_temperature(pᵛ, T, constants, surface, default_dewpoint_solver(T))
 
 """
 $(TYPEDSIGNATURES)
@@ -339,10 +347,9 @@ $(TYPEDSIGNATURES)
 Compute the dewpoint temperature using a phase `equilibrium` model to determine
 the condensation surface based on temperature `T`.
 """
-@inline function dewpoint_temperature(pᵛ, T, constants, equilibrium::AbstractPhaseEquilibrium, solver)
+@inline function dewpoint_temperature(pᵛ, T, constants, equilibrium::AbstractPhaseEquilibrium;
+                                      tolerance = 1e-4,
+                                      maxiter = 10)
     surface = equilibrated_surface(equilibrium, T)
-    return dewpoint_temperature(pᵛ, T, constants, surface, solver)
+    return dewpoint_temperature(pᵛ, T, constants, surface; tolerance, maxiter)
 end
-
-@inline dewpoint_temperature(pᵛ, T, constants, equilibrium::AbstractPhaseEquilibrium) =
-    dewpoint_temperature(pᵛ, T, constants, equilibrium, default_dewpoint_solver(T))

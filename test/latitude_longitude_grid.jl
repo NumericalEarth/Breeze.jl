@@ -146,5 +146,5 @@ end
     run!(simulation)
 
     @test model.clock.iteration == 3
-    @test !any(isnan, parent(model.dynamics.dry_density))
+    @test !any(isnan, parent(model.dynamics.density))
 end

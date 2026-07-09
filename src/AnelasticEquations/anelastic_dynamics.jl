@@ -83,24 +83,6 @@ function AtmosphereModels.total_pressure(dynamics::AnelasticDynamics)
     return p̄ + p′
 end
 
-"""
-$(TYPEDSIGNATURES)
-
-Default surface temperature for `BulkDrag` under `AnelasticDynamics`: the
-reference-state surface temperature, recovered from the reference potential
-temperature via the surface Exner function ``T₀ = (p₀/pˢᵗ)^{Rᵈ/cᵖᵈ}\\,θ₀``.
-
-Used only when the user constructs `BulkDrag` without an explicit
-`surface_temperature`. The result is a horizontally uniform scalar.
-"""
-function AtmosphereModels.default_drag_surface_temperature(dynamics::AnelasticDynamics, grid, constants)
-    ref = dynamics.reference_state
-    Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    Π₀ = (ref.surface_pressure / ref.standard_pressure)^(Rᵈ / cᵖᵈ)
-    return Π₀ * ref.potential_temperature
-end
-
 #####
 ##### Density and pressure access interface
 #####
@@ -146,8 +128,6 @@ $(TYPEDSIGNATURES)
 Return the standard pressure from the reference state for potential temperature calculations.
 """
 AtmosphereModels.standard_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.standard_pressure
-
-AtmosphereModels.dynamics_reference_state(dynamics::AnelasticDynamics) = dynamics.reference_state
 
 #####
 ##### Show methods

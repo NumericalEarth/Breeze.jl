@@ -6,11 +6,6 @@
 ##### in bulk flux computations (Shin, Yang & Howland 2025;
 ##### Nishizawa & Kitamura 2018).
 #####
-##### `FilteredSurfaceVelocities` holds the filtered velocity components and the
-##### filtered virtual potential temperature `θᵥ` used by stability-dependent bulk
-##### coefficients. Per-BC scalar differences (θ, e, qᵛ) are held separately in
-##### `FilteredSurfaceScalar`.
-#####
 
 using KernelAbstractions: @kernel, @index
 using Oceananigans: architecture
@@ -22,54 +17,39 @@ using Oceananigans.Utils: launch!, KernelParameters, prettysummary
 ##### FilteredSurfaceVelocities
 #####
 
-struct FilteredSurfaceVelocities{U, V, Θ, H, FT, R, RΘ}
+struct FilteredSurfaceVelocities{U, V, H, FT, R}
     u :: U   # Field{Face, Center, Nothing}
     v :: V   # Field{Center, Face, Nothing}
-    θᵥ :: Θ  # Field{Center, Center, Nothing} — filtered virtual potential temperature
     height :: H
     filter_timescale :: FT
-    last_update :: R     # Ref{Tuple{Int, Int}} on CPU, Tuple{Int, Int} on GPU (for u, v)
-    last_θᵥ_update :: RΘ # independent Ref for θᵥ (its source may be nothing)
+    last_update :: R  # Ref{Tuple{Int, Int}} on CPU, Tuple{Int, Int} on GPU
 end
 
 """
     FilteredSurfaceVelocities(grid; height=nothing, filter_timescale=Inf)
 
 Two-dimensional fields storing temporally filtered near-surface velocities
-and virtual potential temperature for use in bulk flux boundary conditions.
-Filtering the matching velocity mitigates log-layer mismatch in wall-modeled
-large-eddy simulations by removing the spurious correlation between the
-instantaneous friction velocity and matching-velocity fluctuations
-([Nishizawa & Kitamura (2018)](@cite NishizawaKitamura2018);
-[Shin, Yang & Howland (2025)](@cite ShinYangHowland2025)).
+for use in bulk flux boundary conditions.
 
-The filtered velocities `ū`, `v̄` (and `θ̄ᵥ` when a stability-dependent bulk
-coefficient is attached) are updated each time step via an exponential
-(first-order) filter:
+The filtered velocities `ū`, `v̄` are updated each time step via an
+exponential (first-order) filter:
 
     ū ← (ū + ϵ u_new) / (1 + ϵ),     ϵ = Δt / τ
 
 where `τ` is the `filter_timescale`.
 
-`θ̄ᵥ` is updated from the virtual-potential-temperature diagnostic owned by any
-attached `PolynomialCoefficient`; when the bulk coefficient is a plain `Number`
-(no stability correction) the `θ̄ᵥ` field is allocated but unused.
-
 # Keyword Arguments
 
 - `height`: Reference height (m) for velocity evaluation. If `nothing` (default),
   the first grid cell center value is used. If a number, velocity is linearly
-  interpolated to that height. (`θ̄ᵥ` is always read at the first cell center,
-  matching the height at which `bulk_coefficient` evaluates stability.)
+  interpolated to that height.
 - `filter_timescale`: Filter time scale `τ` in seconds (default: `Inf`, no filtering).
 """
 function FilteredSurfaceVelocities(grid; height=nothing, filter_timescale=Inf)
-    u  = Field{Face, Center, Nothing}(grid)
-    v  = Field{Center, Face, Nothing}(grid)
-    θᵥ = Field{Center, Center, Nothing}(grid)
+    u = Field{Face, Center, Nothing}(grid)
+    v = Field{Center, Face, Nothing}(grid)
     FT = typeof(filter_timescale)
-    return FilteredSurfaceVelocities(u, v, θᵥ, height, FT(filter_timescale),
-                                     Ref((0, 0)), Ref((0, 0)))
+    return FilteredSurfaceVelocities(u, v, height, FT(filter_timescale), Ref((0, 0)))
 end
 
 _deref(r::Ref) = r[]
@@ -78,11 +58,9 @@ _deref(t::Tuple) = t
 Adapt.adapt_structure(to, fv::FilteredSurfaceVelocities) =
     FilteredSurfaceVelocities(Adapt.adapt(to, fv.u),
                               Adapt.adapt(to, fv.v),
-                              Adapt.adapt(to, fv.θᵥ),
                               fv.height,
                               fv.filter_timescale,
-                              _deref(fv.last_update),
-                              _deref(fv.last_θᵥ_update))
+                              _deref(fv.last_update))
 
 Base.summary(fv::FilteredSurfaceVelocities) =
     string("FilteredSurfaceVelocities(height=", fv.height,
@@ -92,11 +70,9 @@ function Base.show(io::IO, fv::FilteredSurfaceVelocities)
     print(io, summary(fv), ":\n",
           "├── u: ", prettysummary(fv.u), '\n',
           "├── v: ", prettysummary(fv.v), '\n',
-          "├── θᵥ: ", prettysummary(fv.θᵥ), '\n',
           "├── height: ", prettysummary(fv.height), '\n',
           "├── filter_timescale: ", prettysummary(fv.filter_timescale), '\n',
-          "├── last_update: ", fv.last_update, '\n',
-          "└── last_θᵥ_update: ", fv.last_θᵥ_update)
+          "└── last_update: ", fv.last_update)
 end
 
 #####
@@ -194,17 +170,6 @@ end
     @inbounds f̂[i, j, 1] = (f̂[i, j, 1] + ϵ * fⁿ) / (1 + ϵ)
 end
 
-# θᵥ is always read at the first cell (matches the height at which the bulk
-# coefficient evaluates stability). The source field may be a
-# `KernelFunctionOperation`, for which `interpolate` is not generally defined.
-@kernel function _update_filtered_θᵥ!(θ̂ᵥ, θᵥ_source, ϵ)
-    i, j = @index(Global, NTuple)
-    @inbounds begin
-        θⁿᵥ = θᵥ_source[i, j, 1]
-        θ̂ᵥ[i, j, 1] = (θ̂ᵥ[i, j, 1] + ϵ * θⁿᵥ) / (1 + ϵ)
-    end
-end
-
 #####
 ##### Initialization kernels
 #####
@@ -218,11 +183,6 @@ end
 @kernel function _initialize_filtered_scalar!(f̂, field_3d, grid, height)
     i, j = @index(Global, NTuple)
     @inbounds f̂[i, j, 1] = interpolate_or_surface(i, j, grid, field_3d, Center(), Center(), height)
-end
-
-@kernel function _initialize_filtered_θᵥ!(θ̂ᵥ, θᵥ_source)
-    i, j = @index(Global, NTuple)
-    @inbounds θ̂ᵥ[i, j, 1] = θᵥ_source[i, j, 1]
 end
 
 #####
@@ -286,31 +246,6 @@ function update!(fs::FilteredSurfaceScalar, field_3d, grid, Δt)
     return nothing
 end
 
-"""
-    initialize_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid)
-
-Set the filtered virtual potential temperature to the current first-cell value.
-"""
-function initialize_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid)
-    arch = architecture(grid)
-    kp = filtered_kernel_parameters(grid)
-    launch!(arch, grid, kp, _initialize_filtered_θᵥ!, fv.θᵥ, θᵥ_source)
-    return nothing
-end
-
-"""
-    update_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, Δt)
-
-Apply the exponential filter to the virtual potential temperature.
-"""
-function update_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, Δt)
-    arch = architecture(grid)
-    kp = filtered_kernel_parameters(grid)
-    ϵ = Δt / fv.filter_timescale
-    launch!(arch, grid, kp, _update_filtered_θᵥ!, fv.θᵥ, θᵥ_source, ϵ)
-    return nothing
-end
-
 #####
 ##### Deduplication-aware initialize and update helpers
 #####
@@ -348,30 +283,5 @@ function update_filtered_surface_state!(fs::FilteredSurfaceScalar, source_field,
     isinf(Δt) && return nothing # no valid Δt yet (before first time step)
     update!(fs, source_field, model.grid, Δt)
     fs.last_update[] = key
-    return nothing
-end
-
-# θᵥ filter — dedup-aware variants. No-op when either the FilteredSurfaceVelocities
-# or the source field is absent (constant bulk coefficient ⇒ no stability ⇒ no θᵥ).
-initialize_filtered_θᵥ!(::Nothing, model) = nothing
-initialize_filtered_θᵥ!(::Nothing, source_field, model) = nothing
-initialize_filtered_θᵥ!(fv::FilteredSurfaceVelocities, ::Nothing, model) = nothing
-
-function initialize_filtered_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, model)
-    initialize_θᵥ!(fv, θᵥ_source, model.grid)
-    return nothing
-end
-
-update_filtered_θᵥ!(::Nothing, model) = nothing
-update_filtered_θᵥ!(::Nothing, source_field, model) = nothing
-update_filtered_θᵥ!(fv::FilteredSurfaceVelocities, ::Nothing, model) = nothing
-
-function update_filtered_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, model)
-    key = (model.clock.iteration, model.clock.stage)
-    fv.last_θᵥ_update[] == key && return nothing
-    Δt = model.clock.last_Δt
-    isinf(Δt) && return nothing
-    update_θᵥ!(fv, θᵥ_source, model.grid, Δt)
-    fv.last_θᵥ_update[] = key
     return nothing
 end

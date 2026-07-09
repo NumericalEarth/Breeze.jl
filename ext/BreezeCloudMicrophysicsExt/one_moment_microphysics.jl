@@ -113,7 +113,7 @@ using Breeze.Microphysics
 cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 # output
-SaturationAdjustment{WarmPhaseEquilibrium, Breeze.Solvers.SecantSolver{Float64}}(WarmPhaseEquilibrium(), SecantSolver(reltol=0.0, abstol=0.0001, maxiter=20))
+SaturationAdjustment{WarmPhaseEquilibrium, Float64}(0.001, Inf, WarmPhaseEquilibrium())
 ```
 
 # Keyword arguments
@@ -945,7 +945,7 @@ end
                                              microphysical_fields)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field = AM.total_density(dynamics)
+    ρ_field = AM.dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
 

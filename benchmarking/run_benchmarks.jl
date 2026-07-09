@@ -21,9 +21,7 @@
 
 using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
 using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation, BenchmarkResult
-using BreezeBenchmarks: scalar_tendency_problem, model_tendency_problem, benchmark_tendency
 using JSON: JSON
-using BFloat16s: BFloat16
 using Oceananigans
 using Oceananigans.TurbulenceClosures: SmagorinskyLilly, DynamicSmagorinsky
 
@@ -65,9 +63,7 @@ function parse_commandline()
 
     @add_arg_table! s begin
         "--mode"
-            help = "Mode: 'benchmark' for quick performance tests, 'simulate' for full runs with output, " *
-                   "'scalar_tendency' for the bare scalar WENO kernel, or 'model_tendency' for the full-model " *
-                   "compute_tendencies! (both have no Simulation and run vanilla vs Reactant)"
+            help = "Mode: 'benchmark' for quick performance tests, 'simulate' for full runs with output"
             arg_type = String
             default = "benchmark"
 
@@ -78,7 +74,7 @@ function parse_commandline()
             default = "64^3"
 
         "--device"
-            help = "Device to run on: CPU, GPU, or TPU (TPU requires --backend reactant)"
+            help = "Device to run on: CPU or GPU"
             arg_type = String
             default = "GPU"
 
@@ -88,7 +84,7 @@ function parse_commandline()
             default = "convective_boundary_layer"
 
         "--float_type"
-            help = "Floating point type: Float32, Float64, or BFloat16. " *
+            help = "Floating point type: Float32 or Float64. " *
                    "Multiple types can be specified as comma-separated list."
             arg_type = String
             default = "Float32"
@@ -229,17 +225,14 @@ make_float_type(name) = @eval $(Symbol(name))
     make_backend_arch(backend, device)
 
 Return the architecture instance to build the model on, given a backend name
-("vanilla" or "reactant") and a device name ("CPU", "GPU", or "TPU"). For
-Reactant we also set the default backend so XLA targets the requested device.
-The vanilla (eager KernelAbstractions/CUDA) backend has no TPU path.
+("vanilla" or "reactant") and a device name ("CPU" or "GPU"). For Reactant we
+also set the default backend so XLA targets the requested device.
 """
 function make_backend_arch(backend, device)
     if backend == "vanilla"
-        device == "TPU" && error("vanilla backend cannot target TPU; use --backend reactant")
         return make_architecture(device)
     elseif backend == "reactant"
-        reactant_backend = device == "GPU" ? "gpu" : device == "TPU" ? "tpu" : "cpu"
-        Reactant.set_default_backend(reactant_backend)
+        Reactant.set_default_backend(device == "GPU" ? "gpu" : "cpu")
         return ReactantState()
     else
         error("Unknown backend: $backend. Use 'vanilla' or 'reactant'.")
@@ -388,72 +381,8 @@ function run_benchmarks(args)
 
         # Build benchmark name
         size_str = "$(Nx)x$(Ny)x$(Nz)"
-        ft_str = FT == Float32 ? "F32" : FT == Float64 ? "F64" : "BF16"
+        ft_str = FT == Float32 ? "F32" : "F64"
         mode_suffix = args["ad"] ? "_AD" : ""
-
-        # Tendency modes time a tendency evaluation with no Simulation.
-        # "scalar_tendency" uses the bare scalar WENO kernel (no model);
-        # "model_tendency" uses the full-model compute_tendencies!. Both run on
-        # both backends so the Reactant-compiled XLA program can be compared
-        # against the eager vanilla launch. Handled up front; the model-stepping
-        # path below is skipped.
-        if mode == "scalar_tendency" || mode == "model_tendency"
-            m = match(r"^WENO(\d+)$", adv_name)
-            isnothing(m) && error("$mode mode supports WENO<order> advection, got $adv_name")
-            order = parse(Int, m[1])
-
-            label = mode == "scalar_tendency" ? "ScalarTendency" : "ModelTendency"
-            arch = make_backend_arch(backend_name, device)
-            topology = make_topology(topo_name)
-            problem = mode == "scalar_tendency" ? scalar_tendency_problem : model_tendency_problem
-
-            # Reactant additionally compares raise=true vs raise=false (the
-            # latter keeps kernels as XLA custom calls instead of raising them to
-            # StableHLO). raise=false needs the CUDA custom-call path, so it is
-            # skipped on TPU. Vanilla is eager — raise does not apply.
-            configs = if backend_name == "reactant"
-                raises = device == "TPU" ? (true,) : (true, false)
-                [(r ? "reactant raise=true" : "reactant raise=false",
-                  r ? "reactant-raise"      : "reactant-noraise",
-                  r) for r in raises]
-            else
-                [(backend_name, backend_name, true)]
-            end
-
-            for (backend_label, tag, raise) in configs
-                name = "$(label)_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(tag)"
-                println("\n", "-" ^ 70)
-                println("Running: $name")
-                println("-" ^ 70)
-
-                # On Reactant, dump all MLIR (every compile stage) and the xprof
-                # profiles into per-case subdirectories so each stays separate;
-                # saved as CI artifacts (GB-25 pattern). Vanilla does not compile
-                # through Reactant, so neither is produced there.
-                profile_dir = nothing
-                if get(ENV, "GITHUB_ACTIONS", "false") == "true" && backend_name == "reactant"
-                    Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps", "$(label)_$(adv_name)_$(tag)"))
-                    Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
-                    profile_dir = mkpath(joinpath(@__DIR__, "profiles", "$(label)_$(adv_name)_$(tag)"))
-                end
-
-                tendency!, tendency_args, tendency_grid = problem(arch;
-                                                                  Nx, Ny, Nz,
-                                                                  order,
-                                                                  float_type = FT,
-                                                                  topology)
-                push!(results, benchmark_tendency(tendency!, tendency_args, tendency_grid;
-                                                  nrepeat = time_steps,
-                                                  name,
-                                                  advection = adv_name,
-                                                  backend = backend_label,
-                                                  mode,
-                                                  raise,
-                                                  profile_dir))
-            end
-            continue
-        end
-
         name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)_$(backend_name)$(mode_suffix)"
 
         println("\n", "-" ^ 70)
@@ -513,7 +442,7 @@ function run_benchmarks(args)
                                      microphysics=micro_name,
                                      )
         else
-            error("Unknown mode: $mode. Use 'benchmark', 'simulate', 'scalar_tendency', or 'model_tendency'.")
+            error("Unknown mode: $mode. Use 'benchmark' or 'simulate'.")
         end
         push!(results, result)
     end

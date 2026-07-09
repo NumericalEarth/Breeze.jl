@@ -6,7 +6,6 @@ using Breeze
 using Breeze.Thermodynamics:
     compute_reference_state!,
     compute_hydrostatic_reference!,
-    ExnerReferenceState,
     dry_air_gas_constant,
     hydrostatic_pressure,
     vapor_gas_constant,
@@ -17,8 +16,7 @@ using Breeze.AtmosphereModels:
     set_to_mean!,
     specific_humidity,
     liquid_mass_fraction,
-    ice_mass_fraction,
-    total_density
+    ice_mass_fraction
 
 using Oceananigans
 using Oceananigans.Fields: ZeroField
@@ -290,31 +288,6 @@ using Test
         end
     end
 
-    @testset "pressure_balanced_density accounts for condensate" begin
-        pᵣ = FT(9e4)
-        pˢᵗ = FT(1e5)
-        ρ_background = FT(1.1)
-        θ_background = FT(300)
-        θ_initial = FT(303)
-        q = Breeze.Thermodynamics.MoistureMassFractions(FT(0.01), FT(0.01), zero(FT))
-
-        𝒰_background = Breeze.Thermodynamics.LiquidIcePotentialTemperatureState(θ_background, q, pˢᵗ, pᵣ)
-        𝒰_initial = Breeze.Thermodynamics.LiquidIcePotentialTemperatureState(θ_initial, q, pˢᵗ, pᵣ)
-        Rᵐ = mixture_gas_constant(q, constants)
-
-        p_background = ρ_background * Rᵐ * temperature(𝒰_background, constants)
-
-        ρ_shortcut = Breeze.Thermodynamics.pressure_balanced_density(ρ_background, θ_background, θ_initial)
-        p_shortcut = ρ_shortcut * Rᵐ * temperature(𝒰_initial, constants)
-
-        @test !isapprox(p_shortcut, p_background; rtol=FT(1e-5))
-
-        ρ_condensate_aware = Breeze.Thermodynamics.pressure_balanced_density(ρ_background, θ_background, θ_initial, q, pᵣ, pˢᵗ, constants)
-        p_condensate_aware = ρ_condensate_aware * Rᵐ * temperature(𝒰_initial, constants)
-
-        @test isapprox(p_condensate_aware, p_background; rtol=sqrt(eps(FT)))
-    end
-
     #####
     ##### ReferenceState with discrete_hydrostatic_balance
     #####
@@ -498,183 +471,5 @@ end
         @test ρqᵗ_after ≈ ρqᵗ_before
         @test ρu_after  ≈ ρu_before
         @test ρw_after  ≈ ρw_before
-    end
-
-    @testset "set!(; compute_reference_state) preserves anelastic specific quantities" begin
-        θ_init = FT(290)
-        θ_new  = FT(305)
-        q_new  = FT(0.01)
-        u_new  = FT(5)
-
-        reference_state = ReferenceState(grid, constants; potential_temperature=θ_init,
-                                         vapor_mass_fraction=0)
-        dynamics = AnelasticDynamics(reference_state)
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-
-        set!(model; θ=θ_new, qᵗ=q_new, u=u_new, w=0,
-             compute_reference_state=true, enforce_mass_conservation=false)
-
-        @test all(Array(interior(model.formulation.potential_temperature)) .≈ θ_new)
-        @test all(Array(interior(specific_humidity(model))) .≈ q_new)
-        @test all(Array(interior(model.velocities.u)) .≈ u_new)
-    end
-
-    #####
-    ##### set_to_mean! for the split-explicit ExnerReferenceState
-    #####
-    #
-    # Recomputing the Exner reference from a uniform model state at θ_new must reproduce a fresh
-    # ExnerReferenceState built directly at θ_new (the constructor and the recompute share the same
-    # discrete column integration), to machine precision.
-
-    @testset "set_to_mean! recomputes the Exner reference" begin
-        θ_init = 290
-        θ_new  = 305
-        p₀     = 101325
-
-        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, surface_pressure=p₀)
-
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        reference_potential_temperature=θ_init, surface_pressure=p₀)
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-        ref = model.dynamics.reference_state
-        @test ref isa ExnerReferenceState
-
-        set!(model; ρ=1, θˡⁱ=θ_new, qᵗ=0)
-        set_to_mean!(ref, model)
-
-        @test ref.pressure ≈ ref_truth.pressure rtol=1e-6
-        @test ref.density  ≈ ref_truth.density  rtol=1e-6
-    end
-
-    @testset "set_to_mean! overwrites every column of a 3D Exner reference" begin
-        θ_init(x, y, z) = FT(290) + FT(5) * sin(FT(2π) * x / FT(100))
-        θ_new = FT(305)
-        p₀    = FT(101325)
-
-        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, surface_pressure=p₀)
-
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        reference_potential_temperature=θ_init, surface_pressure=p₀)
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-        ref = model.dynamics.reference_state
-        @test ref isa ExnerReferenceState
-
-        set!(model; ρ=1, θˡⁱ=θ_new, qᵗ=0)
-        set_to_mean!(ref, model)
-
-        @test ref.pressure ≈ ref_truth.pressure rtol=1e-6
-        @test ref.density  ≈ ref_truth.density  rtol=1e-6
-    end
-
-    # The public path: `set!(model; compute_reference_state=true)` → `reset_reference_state!` →
-    # `set_to_mean!`. Same outcome as calling `set_to_mean!` directly above.
-    @testset "set!(; compute_reference_state) recomputes the reference" begin
-        θ_init = 290
-        θ_new  = 305
-        p₀     = 101325
-
-        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, surface_pressure=p₀)
-
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        reference_potential_temperature=θ_init, surface_pressure=p₀)
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-
-        set!(model; ρ=1, θˡⁱ=θ_new, qᵗ=0, compute_reference_state=true)
-
-        @test model.dynamics.reference_state.pressure ≈ ref_truth.pressure rtol=1e-6
-        @test model.dynamics.reference_state.density  ≈ ref_truth.density  rtol=1e-6
-    end
-
-    # `reset_reference_state!` is a no-op for dynamics without a reference state (here a
-    # CompressibleDynamics built with no `reference_potential_temperature`).
-    @testset "set!(; compute_reference_state) is a no-op without a reference state" begin
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-        @test model.dynamics.reference_state === nothing
-
-        set!(model; ρ=1, θˡⁱ=300, qᵗ=0, compute_reference_state=true)
-        @test model.dynamics.reference_state === nothing   # unchanged; no error
-    end
-
-    @testset "set!(; compute_reference_state) recomputes terrain reference fields" begin
-        Nx, Nz = 8, 6
-        Lx, Lz = FT(10000), FT(5000)
-        z_faces = Breeze.TerrainFollowingDiscretization.TerrainFollowingVerticalDiscretization(
-            collect(range(0, Lz, length=Nz+1));
-            formulation = Breeze.TerrainFollowingDiscretization.LinearDecay())
-        terrain_grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(3, 3),
-                                       x=(-Lx/2, Lx/2), z=z_faces,
-                                       topology=(Periodic, Flat, Bounded))
-
-        h₀ = FT(200)
-        a = FT(2000)
-        hill(x) = h₀ * exp(-x^2 / a^2)
-        Breeze.TerrainFollowingDiscretization.materialize_terrain!(terrain_grid, hill)
-
-        θ_init = FT(290)
-        θ_new  = FT(305)
-        p₀     = FT(101325)
-
-        truth_dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                              reference_potential_temperature=θ_new,
-                                              surface_pressure=p₀)
-        truth_model = AtmosphereModel(terrain_grid; thermodynamic_constants=constants,
-                                      dynamics=truth_dynamics)
-
-        dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                        reference_potential_temperature=θ_init,
-                                        surface_pressure=p₀)
-        model = AtmosphereModel(terrain_grid; thermodynamic_constants=constants,
-                                dynamics)
-
-        set!(model; ρ=1, θˡⁱ=θ_new, qᵗ=0,
-             compute_reference_state=true,
-             enforce_mass_conservation=false)
-
-        @test model.dynamics.terrain_reference_pressure ≈
-              truth_model.dynamics.terrain_reference_pressure rtol=1e-6
-        @test model.dynamics.terrain_reference_density ≈
-              truth_model.dynamics.terrain_reference_density rtol=1e-6
-    end
-
-    @testset "HorizontalMeanProfile interpolates linearly and clamps outside its range" begin
-        # The integration test above uses a uniform θ, so the piecewise-linear interpolation
-        # never actually varies. Exercise it directly on a known profile.
-        HorizontalMeanProfile = Breeze.CompressibleEquations.HorizontalMeanProfile
-        profile = HorizontalMeanProfile(FT[100, 200, 300], FT[10, 20, 30])
-
-        @test profile(FT(50))  == FT(10)   # below heights[1] → clamp to values[1]
-        @test profile(FT(100)) == FT(10)   # at the bottom node
-        @test profile(FT(150)) ≈  FT(15)   # linear interpolation between nodes
-        @test profile(FT(250)) ≈  FT(25)
-        @test profile(FT(300)) == FT(30)   # at the top node
-        @test profile(FT(350)) == FT(30)   # above heights[end] → clamp to values[end]
-    end
-
-    # `ρ = HydrostaticallyBalancedDensity()` integrates the hydrostatic column from the surface
-    # pressure. For a uniform θ it must reproduce a fresh ExnerReferenceState built at that θ (same
-    # per-column integration), to machine precision — and the balanced state survives the default
-    # mass-conservation correction.
-    @testset "HydrostaticallyBalancedDensity sets a balanced column" begin
-        θ  = 300
-        p₀ = 101325
-        qᵗ = FT(0.02)
-
-        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ, surface_pressure=p₀)
-
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        reference_potential_temperature=θ, surface_pressure=p₀)
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-
-        set!(model; θˡⁱ=θ, qᵗ=0, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀))
-
-        @test model.dynamics.pressure        ≈ ref_truth.pressure rtol=1e-6
-        @test total_density(model.dynamics)  ≈ ref_truth.density  rtol=1e-6
-
-        set!(model; θˡⁱ=θ, qᵗ, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀),
-             enforce_mass_conservation=false)
-
-        @test all(q -> q ≈ qᵗ, Array(interior(specific_humidity(model))))
     end
 end

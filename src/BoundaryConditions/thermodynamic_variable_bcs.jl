@@ -66,10 +66,10 @@ const NorthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:North}
 # the reference density already exists and is captured here, but for
 # `CompressibleDynamics` the captured `ef.density` is `nothing`. Resolve it at runtime
 # instead — fall back to the prognostic density `ρ` carried in the model `fields`
-# (`dynamics_prognostic_fields(::CompressibleDynamics) = (; ρᵈ=dynamics.dry_density)`).
+# (`dynamics_prognostic_fields(::CompressibleDynamics) = (; ρ=dynamics.density)`).
 # Type-stable: `ef.density` is a `Field` (anelastic) or `Nothing` (compressible) per BC.
 @inline _energy_flux_density(density, fields, i, j, k) = @inbounds density[i, j, k]
-@inline _energy_flux_density(::Nothing, fields, i, j, k) = @inbounds fields.ρᵈ[i, j, k]
+@inline _energy_flux_density(::Nothing, fields, i, j, k) = @inbounds fields.ρ[i, j, k]
 
 # Convert energy flux to potential temperature flux: Jᶿ = 𝒬 / cᵖᵐ
 @inline function 𝒬_to_Jᶿ(i, j, k, grid, ef, 𝒬, fields)

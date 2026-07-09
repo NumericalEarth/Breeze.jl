@@ -27,7 +27,6 @@ export
     AcousticDampingStrategy,
     NoDivergenceDamping,
     ThermalDivergenceDamping,
-    DirectDivergenceDamping,
     UpperSponge,
     AbstractRamp,
     LinearRamp,
@@ -35,8 +34,6 @@ export
     Sin2Ramp,
     ExplicitTimeStepping,
     balance_adiabatically!,
-    AdiabaticBalancer,
-    HydrostaticallyBalancedDensity,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -69,8 +66,6 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
-    azimuthal_mean,
-    azimuthal_mean!,
     static_energy_density,
     static_energy,
     total_energy,
@@ -84,11 +79,6 @@ export
     moisture_specific_name,
     specific_prognostic_moisture,
 
-    # Solvers
-    NewtonSolver,
-    SecantSolver,
-    FixedIterations,
-
     # Thermodynamics
     temperature,
     supersaturation,
@@ -101,7 +91,6 @@ export
 
     # Microphysics
     SaturationAdjustment,
-    InstantaneousPrecipitation,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
@@ -186,7 +175,7 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     zspacings, ∂x, ∂y, ∂z
 
 using Oceananigans.Grids: znode, MutableVerticalDiscretization
-using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition, fill_halo_regions!
 
 export
     CPU, GPU,
@@ -217,9 +206,6 @@ export
     FieldTimeSeries, FieldDataset, InMemory, OnDisk,
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
-
-include("Solvers.jl")
-using .Solvers
 
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
@@ -254,10 +240,16 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               SplitExplicitTimeDiscretization,
                               AcousticOuterScheme, WickerSkamarock3,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
-                              AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping, DirectDivergenceDamping,
+                              AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping,
                               UpperSponge,
                               AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
                               ExplicitTimeStepping
+
+# Adiabatic (FV3 na_init) initialization — dynamics-agnostic, dispatches on the
+# initial_fields method for CompressibleModel / AnelasticModel.
+using DocStringExtensions: TYPEDSIGNATURES
+using Oceananigans.TimeSteppers: update_state!, reset!
+include("balance_adiabatically.jl")
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel

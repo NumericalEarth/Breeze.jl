@@ -15,14 +15,13 @@ using ..Thermodynamics:
     MixedPhaseEquilibrium,
     equilibrated_surface
 
-using Breeze.Solvers: SecantSolver, secant_solve, materialize_solver
-
 using Oceananigans: Oceananigans, CenterField
 using DocStringExtensions: TYPEDSIGNATURES
 
-struct SaturationAdjustment{E, S}
+struct SaturationAdjustment{E, FT}
+    tolerance :: FT
+    maxiter :: FT
     equilibrium :: E
-    solver :: S
 end
 
 const SA = SaturationAdjustment
@@ -31,8 +30,8 @@ const SA = SaturationAdjustment
 $(TYPEDSIGNATURES)
 
 Return `SaturationAdjustment` microphysics representing an instantaneous adjustment
-to `equilibrium` between condensates and water vapor, computed by a secant iteration
-on the temperature residual controlled by `solver`.
+to `equilibrium` between condensates and water vapor, computed by a solver with
+`tolerance` and `maxiter`.
 
 The options for `equilibrium` are:
 
@@ -45,28 +44,14 @@ The options for `equilibrium` are:
   between the freezing temperature (e.g. 273.15 K) below which liquid water is supercooled,
   and the temperature of homogeneous ice nucleation temperature (e.g. 233.15 K) at which
   the supercooled liquid fraction vanishes.
-
-The options for `solver` are [`SecantSolver`](@ref) (default:
-`SecantSolver(abstol=1e-4, maxiter=20)`, an absolute tolerance on the temperature-like
-residual in Kelvin) and [`FixedIterations`](@ref Breeze.Solvers.FixedIterations), which performs a fixed number of secant
-steps with no convergence test (the form required for Reactant tracing and cheap
-reverse-mode differentiation).
 """
 function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
-                              solver = SecantSolver(FT; abstol=1e-4, maxiter=20),
-                              equilibrium = MixedPhaseEquilibrium(FT),
-                              tolerance = nothing,
-                              maxiter = nothing)
-
-    if tolerance !== nothing || maxiter !== nothing
-        throw(ArgumentError("The `tolerance` and `maxiter` keyword arguments have been replaced \
-                             by `solver`. Use, for example, \
-                             `SaturationAdjustment(solver = SecantSolver(abstol=1e-4, maxiter=20))` \
-                             or `solver = FixedIterations(n)` for Reactant / differentiable runs."))
-    end
-
-    solver = materialize_solver(solver, FT)
-    return SaturationAdjustment(equilibrium, solver)
+                              tolerance = 1e-3,
+                              maxiter = Inf,
+                              equilibrium = MixedPhaseEquilibrium(FT))
+    tolerance = convert(FT, tolerance)
+    maxiter = convert(FT, maxiter)
+    return SaturationAdjustment(tolerance, maxiter, equilibrium)
 end
 
 @inline AtmosphereModels.microphysical_velocities(::SaturationAdjustment, μ, name) = nothing
@@ -99,8 +84,8 @@ end
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
-const WarmPhaseSaturationAdjustment{S} = SaturationAdjustment{WarmPhaseEquilibrium, S} where S
-const MixedPhaseSaturationAdjustment{FT} = SaturationAdjustment{MixedPhaseEquilibrium{FT}} where FT
+const WarmPhaseSaturationAdjustment{FT} = SaturationAdjustment{WarmPhaseEquilibrium, FT} where FT
+const MixedPhaseSaturationAdjustment{FT} = SaturationAdjustment{MixedPhaseEquilibrium{FT}, FT} where FT
 
 const WPSA = WarmPhaseSaturationAdjustment
 const MPSA = MixedPhaseSaturationAdjustment
@@ -220,14 +205,36 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     ΔT = (ℒˡᵣ * qˡ₁ + ℒⁱᵣ * qⁱ₁) / cᵖᵐ
     ϵT = convert(FT, 0.01) # minimum increment for second guess
     T₂ = T₁ + max(ϵT, ΔT / 2) # reduce the increment, recognizing it is an overshoot
+    𝒰₂ = adjust_state(𝒰₁, T₂, constants, equilibrium)
 
-    # Secant iteration on the temperature residual. `adjust_state` depends only on the
-    # invariants of 𝒰₀ (its reference pressure and total moisture), so the residual is a
-    # pure function of T and the adjusted state is recovered from the converged root.
-    @inline residual(T) = saturation_adjustment_residual(T, 𝒰₀, constants, equilibrium)
-    T★ = secant_solve(residual, microphysics.solver, T₁, T₂, T₂)
+    # Initialize secant iteration
+    r₁ = saturation_adjustment_residual(T₁, 𝒰₁, constants, equilibrium)
+    r₂ = saturation_adjustment_residual(T₂, 𝒰₂, constants, equilibrium)
+    δ = microphysics.tolerance
+    iter = 0
 
-    return adjust_state(𝒰₀, T★, constants, equilibrium)
+    while abs(r₂) > δ && iter < microphysics.maxiter
+        # Compute slope; guard against stagnation (r₂ = r₁ → division by zero).
+        ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
+        valid_step = isfinite(ΔTΔr)
+        ΔTΔr = ifelse(valid_step, ΔTΔr, zero(FT))
+
+        # Store previous values
+        r₁ = r₂
+        T₁ = T₂
+        𝒰₁ = 𝒰₂
+
+        # Update
+        T₂ -= r₂ * ΔTΔr
+        𝒰₂ = adjust_state(𝒰₂, T₂, constants, equilibrium)
+        r₂ = saturation_adjustment_residual(T₂, 𝒰₂, constants, equilibrium)
+
+        # Ensures loop terminates naturally on next header check instead of a 'break'
+        r₂ = ifelse(valid_step, r₂, zero(FT))
+        iter += 1
+    end
+
+    return 𝒰₂
 end
 
 #####
@@ -277,18 +284,30 @@ like that one it holds θˡⁱ fixed (conserves it). See NumericalEarth/Breeze.j
     qᵗ ≤ saturation_specific_humidity(T₁, ρ, constants, equilibrium) && return 𝒰₁
 
     # Saturated: secant on the constant-density residual r(T) = θˡⁱ(T) − θ₀.
-    _, q₁ = saturated_density_residual(T₁, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
+    r₁, q₁ = saturated_density_residual(T₁, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
 
     ℒˡᵣ = constants.liquid.reference_latent_heat
     ℒⁱᵣ = constants.ice.reference_latent_heat
     cᵖ₁ = mixture_heat_capacity(q₁, constants)
     ΔT  = (ℒˡᵣ * q₁.liquid + ℒⁱᵣ * q₁.ice) / cᵖ₁   # latent warming implied at T₁
     T₂  = T₁ + max(convert(FT, 0.01), ΔT / 2)
+    r₂, q₂ = saturated_density_residual(T₂, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
 
-    @inline residual(T) = first(saturated_density_residual(T, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium))
-    T★ = secant_solve(residual, microphysics.solver, T₁, T₂, T₂)
+    q = q₂
+    iter = 0
+    while abs(r₂) > microphysics.tolerance && iter < microphysics.maxiter
+        ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
+        valid_step = isfinite(ΔTΔr)
+        ΔTΔr = ifelse(valid_step, ΔTΔr, zero(FT))
 
-    _, q = saturated_density_residual(T★, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
+        r₁ = r₂; T₁ = T₂
+        T₂ = T₂ - r₂ * ΔTΔr
+        r₂, q₂ = saturated_density_residual(T₂, θ₀, ρ, qᵗ, pˢᵗ, constants, equilibrium)
+        r₂ = ifelse(valid_step, r₂, zero(FT))
+        q = q₂
+        iter += 1
+    end
+
     return with_moisture(𝒰₀, q)
 end
 

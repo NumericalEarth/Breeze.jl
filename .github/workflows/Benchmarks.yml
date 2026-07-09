@@ -80,33 +80,6 @@ jobs:
             backend: 'reactant'
             topology: 'PBB'
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 1'
-          # Scalar-tendency kernel sweep (no model): time the bare WENO
-          # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
-          # the Reactant-compiled XLA program and the eager vanilla launch.
-          # --mode tendency skips model construction, so there is no
-          # dynamics/microphysics.
-          - dynamics: 'none'
-            microphysics: 'none'
-            grid: '256x256x128'
-            advection: 'WENO5, WENO7, WENO9'
-            backend: 'vanilla, reactant'
-            topology: 'PPB'
-            # `mode` distinguishes the two tendency entries in the artifact names
-            # (their other matrix fields are identical, so without this they
-            # collide and only one set of results survives the publish merge).
-            mode: 'scalar_tendency'
-            extra_flags: '--mode scalar_tendency --float_type=Float32,BFloat16 --time_steps 320'
-          # Full-model tendency: time compute_tendencies! for a compressible
-          # AtmosphereModel across WENO orders, vanilla vs Reactant. --mode
-          # model_tendency builds the model, so dynamics/microphysics are unused.
-          - dynamics: 'none'
-            microphysics: 'none'
-            grid: '256x256x128'
-            advection: 'WENO5, WENO7, WENO9'
-            backend: 'vanilla, reactant'
-            topology: 'PPB'
-            mode: 'model_tendency'
-            extra_flags: '--mode model_tendency --float_type=Float32 --time_steps 320'
     defaults:
       run:
         shell: bash
@@ -120,7 +93,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: "Check out repository"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: df before cleanup
         run: |
           df -hT
@@ -146,30 +119,8 @@ jobs:
       - name: "Upload benchmark results as artifacts"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
+          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
           path: benchmarking/benchmark_results.*
-          retention-days: 90
-          overwrite: false
-      - name: "Upload MLIR dumps as artifacts"
-        # Only the tendency / model_tendency matrix entries dump MLIR (Reactant
-        # backend); other entries produce no files and are skipped.
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: 'mlir-dumps-dynamics_${{ matrix.dynamics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
-          path: benchmarking/mlir_dumps/
-          if-no-files-found: ignore
-          retention-days: 90
-          overwrite: false
-      - name: "Upload profiles as artifacts"
-        # Only the tendency / model_tendency matrix entries write xprof profiles
-        # (Reactant backend); other entries produce no files and are skipped.
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: 'profiles-dynamics_${{ matrix.dynamics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
-          path: benchmarking/profiles/
-          if-no-files-found: ignore
           retention-days: 90
           overwrite: false
       - name: "Upload Manifest"
@@ -177,7 +128,7 @@ jobs:
         timeout-minutes: 2
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: 'manifest-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
+          name: 'manifest-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
           path: '**/Manifest*.toml'
           retention-days: 90
           overwrite: false
@@ -245,26 +196,6 @@ jobs:
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
                   level_4 = f'{grid_str}'
-
-                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
-                  continue
-
-              # Scalar-tendency kernel sweep (no model): compare WENO orders on
-              # a fixed grid. Reuses BenchmarkResult with mode == 'tendency';
-              # closure/dynamics/microphysics are 'none', so skip the forward
-              # clauses below via continue.
-              if mode in ('scalar_tendency', 'model_tendency'):
-                  # One figure per case (ScalarTendency / ModelTendency), one
-                  # side-by-side panel per WENO order, and one line per
-                  # float-type × backend config. Scalar gets 4 lines (Float32 /
-                  # BFloat16 × vanilla / reactant); model gets 2 (Float32 only,
-                  # since it has no BFloat16 rows).
-                  ft_short = {'Float32': 'F32', 'BFloat16': 'BF16', 'Float64': 'F64'}.get(ft, ft)
-                  level_1 = f'{base_name}; Grid: {grid_str}'
-                  level_2 = f'Advection: {advection}'
-                  level_3 = f'{gpu}'
-                  level_4 = f'{ft_short} {backend}'
 
                   name = f"{level_1}/{level_2}/{level_3}/{level_4}"
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})

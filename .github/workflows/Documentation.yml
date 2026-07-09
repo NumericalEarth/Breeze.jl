@@ -5,7 +5,15 @@ on:
     branches:
       - main
     tags: "*"
+    paths: &paths
+      - ".github/workflows/Documentation.yml"
+      - "docs/**"
+      - "examples/**"
+      - "src/**"
+      - "Project.toml"
+      - "CHANGELOG.md"
   pull_request:
+    paths: *paths
 
 concurrency:
   # Skip intermediate builds: always.
@@ -22,31 +30,7 @@ env:
   TF_CPP_MIN_LOG_LEVEL: '3'
 
 jobs:
-  check-files:
-    name: Check for modified files
-    timeout-minutes: 5
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-    outputs:
-      files: ${{ steps.filter.outputs.files }}
-    steps:
-      - name: "Check out repository"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
-        id: filter
-        with:
-          filters: |
-            files:
-              - ".github/workflows/Documentation.yml"
-              - "docs/**"
-              - "examples/**"
-              - "src/**"
-              - "Project.toml"
-
   build-docs:
-    needs: check-files
-    if: ${{ needs.check-files.outputs.files == 'true' }}
     permissions:
       actions: write
       contents: write
@@ -59,7 +43,7 @@ jobs:
       volumes:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
         - /usr/local:/host-usr-local
-    timeout-minutes: 120
+    timeout-minutes: 90
     steps:
       - name: df before cleanup
         run: |
@@ -72,7 +56,7 @@ jobs:
         run: |
           df -hT
       - name: "Check out repository"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Set BREEZE_BUILD_ALL_EXAMPLES
         shell: bash
         run: |
@@ -95,7 +79,7 @@ jobs:
           git config --global --add safe.directory ${PWD}
       - name: Build documentation
         shell: bash
-        timeout-minutes: 110
+        timeout-minutes: 75
         run:
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           julia --color=yes --project=docs --threads 1,$(($(nproc)-1)) docs/make.jl
@@ -135,7 +119,7 @@ jobs:
       group: docs-pushing
     steps:
       - name: "Check out repository"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: "Install Julia"
         uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         with:

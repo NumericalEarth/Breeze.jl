@@ -124,14 +124,13 @@ end
 
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
-        ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρe = ρᵈe)
+        ρᵣ = dynamics_density(dynamics)[i, j, k]
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         θ = potential_temperature[i, j, k]
     end
 
     pˢᵗ = standard_pressure(dynamics)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛᵉ, microphysical_fields)
     𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
     𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, qᵛᵉ, constants)
     T = temperature(𝒰θ₁, constants)
@@ -143,7 +142,7 @@ end
     e = 𝒰e₁.static_energy
 
     @inbounds specific_energy[i, j, k] = e
-    @inbounds energy_density[i, j, k] = ρᵈ * e
+    @inbounds energy_density[i, j, k] = ρᵣ * e
 end
 
 #####
@@ -197,14 +196,13 @@ end
 
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
-        ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρe = ρᵈe)
+        ρᵣ = dynamics_density(dynamics)[i, j, k]
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end
 
     # Get moisture fractions (vapor only for unsaturated air)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛᵉ, microphysical_fields)
 
     # Convert temperature to static energy
     z = znode(i, j, k, grid, c, c, c)
@@ -213,5 +211,5 @@ end
 
     e = 𝒰₁.static_energy
     @inbounds specific_energy[i, j, k] = e
-    @inbounds energy_density[i, j, k] = ρᵈ * e
+    @inbounds energy_density[i, j, k] = ρᵣ * e
 end

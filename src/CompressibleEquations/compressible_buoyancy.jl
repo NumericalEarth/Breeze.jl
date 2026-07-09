@@ -29,7 +29,7 @@ Without a reference state, the full gravitational force ``-gρ`` is used.
                                                     microphysical_fields,
                                                     constants)
 
-    ρ_field = dynamics.total_density  # total air density: gravity acts on total mass
+    ρ_field = dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     g = constants.gravitational_acceleration
     ρᵣ = reference_densityᶜᶜᶜ(i, j, k, grid, dynamics.reference_state)

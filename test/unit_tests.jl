@@ -76,7 +76,6 @@ end
 #####
 
 using Breeze: CompressibleDynamics
-using Breeze.Thermodynamics: pressure_balanced_density
 
 @testset "CompressibleDynamics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -85,7 +84,7 @@ using Breeze.Thermodynamics: pressure_balanced_density
     @testset "Constructor" begin
         dynamics = CompressibleDynamics()
         @test dynamics isa CompressibleDynamics
-        @test dynamics.dry_density === nothing  # Not materialized yet
+        @test dynamics.density === nothing  # Not materialized yet
         @test dynamics.standard_pressure == 1e5
         @test dynamics.surface_pressure == 101325
     end
@@ -96,9 +95,9 @@ using Breeze.Thermodynamics: pressure_balanced_density
         dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
 
         @test dynamics isa CompressibleDynamics
-        @test dynamics.dry_density isa Field
+        @test dynamics.density isa Field
         @test dynamics.pressure isa Field
-        @test dynamics_density(dynamics) === dynamics.dry_density
+        @test dynamics_density(dynamics) === dynamics.density
         @test dynamics_pressure(dynamics) === dynamics.pressure
     end
 
@@ -110,70 +109,6 @@ using Breeze.Thermodynamics: pressure_balanced_density
 
         @test all(Array(interior(dynamics.pressure)) .== surface_pressure)
     end
-end
-
-@testset "Pressure-balanced density [$(FT)]" for FT in test_float_types()
-    ρ_background = FT(1.1)
-    θ_background = FT(300)
-    θ_initial = FT(303)
-
-    ρ_initial = pressure_balanced_density(ρ_background, θ_background, θ_initial)
-
-    @test ρ_initial < ρ_background
-    @test ρ_initial * θ_initial ≈ ρ_background * θ_background
-end
-
-@testset "Moist CompressibleDynamics reference state [$(FT)]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-
-    grid = RectilinearGrid(default_arch;
-                           size = (8, 8, 8),
-                           halo = (5, 5, 5),
-                           x = (0, 100),
-                           y = (0, 100),
-                           z = (0, 1000))
-
-    constants = ThermodynamicConstants(FT)
-    surface_pressure = FT(100000)
-    standard_pressure = FT(100000)
-    θ_reference(z) = FT(300) + FT(0.01) * z
-    qᵛ_reference(z) = FT(0.012) * exp(-z / FT(1000))
-
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=2);
-                                    surface_pressure,
-                                    standard_pressure,
-                                    reference_potential_temperature = θ_reference,
-                                    reference_vapor_mass_fraction = qᵛ_reference)
-
-    model = AtmosphereModel(grid; dynamics,
-                            thermodynamic_constants = constants)
-
-    reference_state = model.dynamics.reference_state
-    θ_column = Field{Nothing, Nothing, Center}(grid)
-    set!(θ_column, θ_reference)
-
-    qᵛ_column = Field{Nothing, Nothing, Center}(grid)
-    set!(qᵛ_column, qᵛ_reference)
-
-    set!(model, θ=θ_column, qᵛ=qᵛ_column, ρ=reference_state.density)
-
-    pressure_error = maximum(abs, interior(model.dynamics.pressure) .-
-                                  interior(reference_state.pressure))
-    pressure_scale = maximum(abs, interior(reference_state.pressure))
-
-    @test pressure_error <= 100 * eps(FT) * pressure_scale
-
-    θ_perturbed = CenterField(grid)
-    set!(θ_perturbed, (x, y, z) -> θ_reference(z) + FT(1))
-
-    ρ_balanced = CenterField(grid)
-    set!(ρ_balanced, pressure_balanced_density(reference_state.density, θ_column, θ_perturbed))
-    set!(model, θ=θ_perturbed, qᵛ=qᵛ_column, ρ=ρ_balanced)
-
-    balanced_pressure_error = maximum(abs, interior(model.dynamics.pressure) .-
-                                           interior(reference_state.pressure))
-
-    @test balanced_pressure_error <= 100 * eps(FT) * pressure_scale
 end
 
 #####

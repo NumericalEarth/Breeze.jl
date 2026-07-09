@@ -51,14 +51,13 @@ grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
                        topology = (Periodic, Flat, Bounded))
 
 # This example is dry, so the θˡⁱ→T inversion has an exact closed form and needs no Newton steps.
-# `FixedIterations(2)` selects the fixed-trip (unrolled) inversion with a tiny trip count: the
-# differentiable pass at the end of this example takes a reverse-mode gradient through the
-# compressible time step with Reactant/Enzyme, and the default tolerance-based `NewtonSolver`
-# (a `while` loop) compiles to an XLA `while` op that does not differentiate cheaply, while a high
+# `temperature_tolerance = 0` selects the fixed-trip (unrolled) inversion and `temperature_maxiter = 2`
+# keeps the trip count tiny: the differentiable pass at the end of this example takes a reverse-mode
+# gradient through the compressible time step with Reactant/Enzyme, and the default tolerance-based
+# `while` inversion compiles to an XLA `while` op that does not differentiate cheaply, while a high
 # iteration count needlessly inflates the traced graph (NumericalEarth/Breeze.jl#767). The forward
-# and adjoint models use identical dynamics and formulation.
-formulation = LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2))
-model = AtmosphereModel(grid; formulation, dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+# and adjoint models use identical dynamics.
+model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping(); temperature_tolerance = 0, temperature_maxiter = 2))
 
 # ## Background state
 #
@@ -131,7 +130,7 @@ add_callback!(simulation, progress, IterationInterval(100))
 #
 # We perturbation fields for density and x-velocity for visualization.
 
-ρ = model.dynamics.dry_density
+ρ = model.dynamics.density
 u, v, w = model.velocities
 
 ρᵇᵍ = CenterField(grid)
@@ -264,8 +263,7 @@ grid_ad = RectilinearGrid(ReactantState(); size = (Nx, Nz),
                           x = (-Lx/2, Lx/2), z = (0, Lz),
                           topology = (Periodic, Flat, Bounded))
 
-formulation_ad = LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2)) # fixed-trip, low-iteration EOS inversion so Enzyme can differentiate it cheaply (see forward model)
-model_ad = AtmosphereModel(grid_ad; formulation = formulation_ad, dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+model_ad = AtmosphereModel(grid_ad; dynamics = CompressibleDynamics(ExplicitTimeStepping(); temperature_tolerance = 0, temperature_maxiter = 2)) # fixed-trip, low-iteration EOS inversion so Enzyme can differentiate it cheaply (see forward model)
 
 # ### Fixed and varying fields
 #
@@ -327,7 +325,7 @@ function loss(model, uᵢ, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
-    ρ₀  = interior(model.dynamics.dry_density, :, :, 1)
+    ρ₀  = interior(model.dynamics.density, :, :, 1)
     ρᵇ₀ = interior(ρᵇᵍ, :, :, 1)
     return mean((ρ₀ .- ρᵇ₀).^2)
 end

@@ -49,23 +49,6 @@ function Base.show(io::IO, ::MIME"text/plain", r::BenchmarkResult)
     print(io,   "└── metadata: ", r.metadata.architecture, " @ ", r.metadata.timestamp)
 end
 
-"""
-    log_benchmark_result(r::BenchmarkResult)
-
-Emit the standard `@info` summary lines for a benchmark result. Shared by the
-time-stepping and tendency benchmarks so they report identically (total time,
-time per step, throughput, and — when applicable — compile time and GPU memory).
-"""
-function log_benchmark_result(r::BenchmarkResult)
-    @info "  Results:"
-    @info "    Total time: $(@sprintf("%.3f", r.total_time_seconds)) s"
-    @info "    Time per step: $(@sprintf("%.6f", r.time_per_step_seconds)) s"
-    @info "    Grid points/s: $(@sprintf("%.2e", r.grid_points_per_second))"
-    r.compile_time_seconds > 0 && @info "    Compile time: $(@sprintf("%.3f", r.compile_time_seconds)) s"
-    r.gpu_memory_used > 0 && @info "    GPU memory usage: $(Base.format_bytes(r.gpu_memory_used))"
-    return nothing
-end
-
 #####
 ##### Simulation result container (for full simulations with output)
 #####

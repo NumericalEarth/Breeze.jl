@@ -26,8 +26,7 @@ export BulkDragFunction,
        default_neutral_latent_heat_polynomial
 
 using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density,
-                          standard_pressure, boundary_conditions_reference_state,
-                          default_drag_surface_temperature
+                          standard_pressure, boundary_conditions_reference_state
 using ..AtmosphereModels.Diagnostics: VirtualPotentialTemperature, saturation_total_specific_moisture
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity, dry_air_gas_constant, vapor_gas_constant,
@@ -122,19 +121,6 @@ end
     v² = ℑyᵃᶜᵃ(i, j, 1, grid, ϕ², fv.v)
     return u² + v²
 end
-
-#####
-##### Near-surface velocity at face locations (for momentum drag formula)
-#####
-##### When filtering is disabled, read u (or v) at the first cell face from the
-##### live velocity fields. When `FilteredSurfaceVelocities` is supplied, read
-##### the filtered surface velocity. These mirror the wind-speed dispatch.
-#####
-
-@inline near_surface_velocity(i, j, fields, ::Nothing, ::XDirection) = @inbounds fields.u[i, j, 1]
-@inline near_surface_velocity(i, j, fields, ::Nothing, ::YDirection) = @inbounds fields.v[i, j, 1]
-@inline near_surface_velocity(i, j, fields, fv::FilteredSurfaceVelocities, ::XDirection) = @inbounds fv.u[i, j, 1]
-@inline near_surface_velocity(i, j, fields, fv::FilteredSurfaceVelocities, ::YDirection) = @inbounds fv.v[i, j, 1]
 
 #####
 ##### AtmosphereModel boundary condition regularization
@@ -291,21 +277,12 @@ end
 
 function materialize_bulk_drag(df, grid, dynamics, microphysics, surface_pressure, constants,
                                microphysical_fields, specific_prognostic_moisture, temperature)
-    # The new momentum-drag formula `Jᵘ = -ρ₀ Cᴰ |U| u` needs a surface temperature to
-    # compute ρ₀. When the user did not supply one (allowed for constant `coefficient`),
-    # fall back to the reference-state surface temperature derived from the dynamics.
-    T₀_input = if isnothing(df.surface_temperature)
-        default_drag_surface_temperature(dynamics, grid, constants)
-    else
-        df.surface_temperature
-    end
-    T₀ = materialize_surface_field(T₀_input, grid)
+    T₀ = materialize_surface_field(df.surface_temperature, grid)
     coef = materialize_coefficient(df.coefficient, grid, dynamics, microphysics,
                                    surface_pressure, constants,
                                    microphysical_fields, specific_prognostic_moisture, temperature,
                                    Val(:momentum))
-    new_df = BulkDragFunction(df.direction, coef, df.gustiness, T₀, df.filtered_velocities,
-                              surface_pressure, constants)
+    new_df = BulkDragFunction(df.direction, coef, df.gustiness, T₀, df.filtered_velocities)
     return BoundaryCondition(Flux(), new_df)
 end
 
@@ -325,8 +302,7 @@ function materialize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux,
         throw(ArgumentError("Can only specify BulkDrag on x-momentum or y-momentum fields!"))
     end
 
-    directed_df = BulkDragFunction(direction, df.coefficient, df.gustiness, df.surface_temperature,
-                                   df.filtered_velocities, df.surface_pressure, df.thermodynamic_constants)
+    directed_df = BulkDragFunction(direction, df.coefficient, df.gustiness, df.surface_temperature, df.filtered_velocities)
     return materialize_bulk_drag(directed_df, grid, dynamics, microphysics, surface_pressure, constants,
                                  microphysical_fields, specific_prognostic_moisture, temperature)
 end
@@ -425,8 +401,8 @@ end
 ##### so that they add methods to the existing constructors.
 #####
 
-BulkDragFunction(d, coef::NothingPolynomialCoefficient, g, t, fv, p, c) =
-    BulkDragFunction(d, fill_polynomial(coef, default_neutral_drag_polynomial, Val(:momentum)), g, t, fv, p, c)
+BulkDragFunction(d, coef::NothingPolynomialCoefficient, g, t, fv) =
+    BulkDragFunction(d, fill_polynomial(coef, default_neutral_drag_polynomial, Val(:momentum)), g, t, fv)
 
 BulkSensibleHeatFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, s, c, f) =
     BulkSensibleHeatFluxFunction(fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)),

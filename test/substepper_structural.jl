@@ -55,14 +55,15 @@ function _build_str_model(arch; ω = 0.55)
                                surface_pressure = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
-                                  thermodynamic_constants = constants)
+                                  thermodynamic_constants = constants,
+                                  timestepper = :AcousticRungeKutta3)
 end
 
 function _set_str_rest!(model)
     ref = model.dynamics.reference_state
     Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
 
-    parent(model.dynamics.dry_density) .= parent(ref.density)
+    parent(model.dynamics.density) .= parent(ref.density)
     ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
     parent(ρθ) .= parent(ref.pressure) ./ (Rᵈ .* parent(ref.exner_function))
     fill!(parent(model.velocities.u), 0)
@@ -211,7 +212,7 @@ end
     _set_str_rest!(model)
 
     grid = model.grid
-    ρ_field = model.dynamics.dry_density
+    ρ_field = model.dynamics.density
     V_cell = (grid.Lx / grid.Nx) * (grid.Ly / grid.Ny) * (grid.Lz / grid.Nz)
     ρ_array() = Array(interior(ρ_field))
 
@@ -228,7 +229,7 @@ end
 ##### Impenetrability at the rigid lid means ρw at the top face must be
 ##### identically zero. The solver only handles face indices 1..Nz, so
 ##### ρw[Nz+1] is supposed to be set to 0 externally
-##### (in `_build_vertical_rhs!`). If the substepper
+##### (in `_build_predictors_and_vertical_rhs!`). If the substepper
 ##### ever lets `ρw[Nz+1]` drift, mass conservation breaks at the lid.
 #####
 
@@ -311,11 +312,12 @@ end
     ρu_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.0))
     model = AtmosphereModel(grid; dynamics = dyn,
                                   thermodynamic_constants = constants,
-                                  boundary_conditions = (ρu = ρu_bcs,))
+                                  boundary_conditions = (ρu = ρu_bcs,),
+                                  timestepper = :AcousticRungeKutta3)
 
     ref = model.dynamics.reference_state
     Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
-    parent(model.dynamics.dry_density) .= parent(ref.density)
+    parent(model.dynamics.density) .= parent(ref.density)
     ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
     parent(ρθ) .= parent(ref.pressure) ./ (Rᵈ .* parent(ref.exner_function))
     update_state!(model)
@@ -353,7 +355,7 @@ end
         _set_str_rest!(model)
 
         k_anom = Nz ÷ 2
-        ρ_array = parent(model.dynamics.dry_density)
+        ρ_array = parent(model.dynamics.density)
         @allowscalar begin
             ρ_array[:, :, k_anom + model.grid.Hz] .+= 1e-3
         end

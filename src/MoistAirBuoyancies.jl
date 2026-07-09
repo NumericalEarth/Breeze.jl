@@ -34,8 +34,6 @@ using ..Thermodynamics:
     saturation_specific_humidity,
     adjustment_saturation_specific_humidity
 
-using Breeze.Solvers: SecantSolver, secant_solve
-
 struct MoistAirBuoyancy{RS, AT} <: AbstractBuoyancyFormulation{Nothing}
     reference_state :: RS
     thermodynamic_constants :: AT
@@ -175,10 +173,7 @@ r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 
 Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
 """
-@inline compute_boussinesq_adjustment_temperature(𝒰₀::LiquidIcePotentialTemperatureState{FT}, constants) where FT =
-    compute_boussinesq_adjustment_temperature(𝒰₀, constants, SecantSolver(FT; abstol=1e-4, maxiter=20))
-
-@inline function compute_boussinesq_adjustment_temperature(𝒰₀::LiquidIcePotentialTemperatureState{FT}, constants, solver) where FT
+@inline function compute_boussinesq_adjustment_temperature(𝒰₀::LiquidIcePotentialTemperatureState{FT}, constants) where FT
     θ = 𝒰₀.potential_temperature
     θ == 0 && return zero(FT)
 
@@ -213,13 +208,31 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     ℒˡᵣ = constants.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q₁, constants)
     T₂ = T₁ + ℒˡᵣ * qˡ₁ / cᵖᵐ
+    𝒰₂ = adjust_state(𝒰₁, T₂, constants)
 
-    # Secant iteration on the saturated residual. `adjust_state` depends only on the
-    # invariants of 𝒰₀ (its reference pressure and total moisture), so the residual
-    # is a pure function of T.
-    @inline residual(T) = saturation_adjustment_residual(T, adjust_state(𝒰₀, T, constants), constants)
+    # Initialize saturation adjustment
+    r₁ = saturation_adjustment_residual(T₁, 𝒰₁, constants)
+    r₂ = saturation_adjustment_residual(T₂, 𝒰₂, constants)
+    δ = convert(FT, 1e-3)
+    iter = 0
 
-    return secant_solve(residual, solver, T₁, T₂, T₂)
+    while abs(T₂ - T₁) > δ
+        # Compute slope
+        ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
+
+        # Store previous values
+        r₁ = r₂
+        T₁ = T₂
+        𝒰₁ = 𝒰₂
+
+        T₂ -= r₂ * ΔTΔr
+        𝒰₂ = adjust_state(𝒰₂, T₂, constants)
+        r₂ = saturation_adjustment_residual(T₂, 𝒰₂, constants)
+
+        iter += 1
+    end
+
+    return T₂
 end
 
 @inline function adjust_state(𝒰₀, T, constants)

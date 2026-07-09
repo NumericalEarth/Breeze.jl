@@ -164,7 +164,18 @@ function benchmark_time_stepping(model;
         metadata,
     )
 
-    verbose && log_benchmark_result(result)
+    if verbose
+        @info "  Results:"
+        @info "    Total time: $(@sprintf("%.3f", total_time_seconds)) s"
+        @info "    Time per step: $(@sprintf("%.6f", time_per_step_seconds)) s"
+        @info "    Grid points/s: $(@sprintf("%.2e", grid_points_per_second))"
+        if is_reactant
+            @info "    Compile time: $(@sprintf("%.3f", compile_time_seconds)) s"
+        end
+        if arch isa GPU{CUDABackend}
+            @info "    GPU memory usage: $(Base.format_bytes(gpu_memory_used))"
+        end
+    end
 
     memory_reclaim(arch)
 

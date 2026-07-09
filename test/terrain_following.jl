@@ -14,19 +14,19 @@ using Breeze.CompressibleEquations: assemble_slow_vertical_momentum_tendency!,
                                     compute_acoustic_substeps,
                                     compute_contravariant_velocity!,
                                     freeze_linearization_state!,
-                                    δpᴸ,
+                                    linearized_pressure_perturbation,
                                     outer_step_start_transport_velocities,
                                     sponge_rhs,
                                     sponge_term_diag,
                                     terrain_horizontal_linearized_pressure_gradient_correction,
-                                    ∇ᶻp′
+                                    z_linearized_pressure_gradient
 using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
                            compute_slow_scalar_tendencies!
 using Oceananigans
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: rnode, xnode, znode, λnode, φnode
-using Oceananigans.Operators: Δzᶜᶜᶠ, Δzᶜᶜᶜ, divᶜᶜᶜ, ∂zᶜᶜᶠ
-using Breeze.Thermodynamics: hydrostatic_pressure, dry_air_gas_constant, vapor_gas_constant
+using Oceananigans.Operators: divᶜᶜᶜ, ∂zᶜᶜᶠ
+using Breeze.Thermodynamics: hydrostatic_pressure
 using Test
 
 # The terrain physics testsets that close the TwoLevelDecay-through-substepper gap are
@@ -357,7 +357,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             time_discretization = SplitExplicitTimeDiscretization(substeps=6,
                                                                   damping=damping)
             dynamics = CompressibleDynamics(time_discretization)
-            model = AtmosphereModel(grid; dynamics)
+            model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
             set!(model,
                  ρ=1,
                  θ=300,
@@ -383,8 +383,8 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             # both branches were the same TFVD grid.
             zero_terrain_tolerance = 1e-14
 
-            @test isapprox(interior(height_model.dynamics.dry_density),
-                           interior(terrain_model.dynamics.dry_density);
+            @test isapprox(interior(height_model.dynamics.density),
+                           interior(terrain_model.dynamics.density);
                            atol=zero_terrain_tolerance)
             @test isapprox(interior(height_ρθ),
                            interior(terrain_ρθ);
@@ -602,7 +602,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; dynamics)
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
         set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
 
         @test model.timestepper isa AcousticRungeKutta3
@@ -615,9 +615,9 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         assemble_slow_vertical_momentum_tendency!(substepper, model)
         @test isapprox(maximum(abs, interior(substepper.slow_vertical_momentum_tendency)), 0; atol = 1e-12)
 
-        initial_mass = sum(interior(model.dynamics.dry_density))
+        initial_mass = sum(interior(model.dynamics.density))
         time_step!(model, 0.1)
-        final_mass = sum(interior(model.dynamics.dry_density))
+        final_mass = sum(interior(model.dynamics.density))
 
         w̃ = model.dynamics.contravariant_vertical_velocity
         ρw̃ = model.dynamics.contravariant_vertical_momentum
@@ -679,7 +679,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         materialize_terrain!(model_grid, x -> 100 * exp(-x^2 / 2000^2))
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(model_grid; dynamics)
+        model = AtmosphereModel(model_grid; dynamics, timestepper=:AcousticRungeKutta3)
         set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
 
         @test model.timestepper.substepper.substeps === nothing
@@ -709,7 +709,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
             dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
                                             reference_potential_temperature=300)
-            model = AtmosphereModel(grid; dynamics)
+            model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
             set!(model,
                  θ=300,
                  ρ=model.dynamics.terrain_reference_density,
@@ -732,7 +732,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                 maximum_advective_CFL = max(maximum_advective_CFL, advective_CFL)
                 maximum_contravariant_CFL = max(maximum_contravariant_CFL, contravariant_CFL)
 
-                @test isfinite(maximum(abs, interior(model.dynamics.dry_density)))
+                @test isfinite(maximum(abs, interior(model.dynamics.density)))
                 @test isfinite(maximum(abs, interior(model.momentum.ρu)))
                 @test isfinite(maximum(abs, interior(model.momentum.ρw)))
                 @test isfinite(maximum(abs, interior(w̃)))
@@ -803,7 +803,8 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                         surface_pressure=p₀,
                                         standard_pressure=pˢᵗ)
         model = AtmosphereModel(grid; dynamics,
-                                thermodynamic_constants=constants)
+                                thermodynamic_constants=constants,
+                                timestepper=:AcousticRungeKutta3)
 
         set!(model,
              ρ = model.dynamics.terrain_reference_density,
@@ -909,7 +910,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                                                         damping=damping);
                                         slope_stencil = SlopeInsideInterpolation(),
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; dynamics)
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
         set!(model,
              θ=300,
              ρ=model.dynamics.terrain_reference_density,
@@ -945,7 +946,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         slope_stencil = SlopeInsideInterpolation(),
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; dynamics)
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
         set!(model,
              θ=300,
              ρ=model.dynamics.terrain_reference_density,
@@ -956,7 +957,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         time_step!(model, 0.01)
         @test model.clock.iteration == 1
         @test isfinite(maximum(abs, interior(model.momentum.ρu)))
-        @test isfinite(maximum(abs, interior(model.dynamics.dry_density)))
+        @test isfinite(maximum(abs, interior(model.dynamics.density)))
     end
 
     @testset "Acoustic substep gates terrain ρw̃ slope correction [$(nameof(typeof(formulation)))]" for formulation in TERRAIN_FORMULATIONS
@@ -967,7 +968,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         # `_explicit_horizontal_step!` applies to ρu's perturbation PGF — otherwise the
         # two are out of phase on substep 1 of a multi-substep stage. The gate factor
         # therefore scales ONLY the horizontal slope correction inside
-        # `∇ᶻp′`; the vertical ∂z(Cᴸ(ρθ)′) part is always
+        # `z_linearized_pressure_gradient`; the vertical ∂z(Cᴸ(ρθ)′) part is always
         # applied (the vertical acoustic mode is solved implicitly every substep).
         Nx, Nz = 16, 8
         Lx, Lz = 10000.0, 5000.0
@@ -1002,11 +1003,11 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         correction_seen = false
         for i in 3:Nx-2, k in 2:Nz-1
-            ∂z_p′      = ∂zᶜᶜᶠ(i, 1, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+            ∂z_p′      = ∂zᶜᶜᶠ(i, 1, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
             correction = terrain_horizontal_linearized_pressure_gradient_correction(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ)
 
-            z_gated = ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 0.0)
-            z_full  = ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 1.0)
+            z_gated = z_linearized_pressure_gradient(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 0.0)
+            z_full  = z_linearized_pressure_gradient(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 1.0)
 
             # Gate off ⇒ pure vertical gradient, no horizontal slope correction.
             @test z_gated == ∂z_p′
@@ -1173,7 +1174,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         reference_potential_temperature = 300)
-        model = AtmosphereModel(grid; dynamics)
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
         ρᵢ(x, y, z) = adiabatic_hydrostatic_density(z, 101325.0, 300.0, 1e5,
                                                     model.thermodynamic_constants)
         set!(model, ρ=ρᵢ, θ=300,
@@ -1354,39 +1355,6 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         @test maximum(abs, grid_2.z.formulation.h₂) > 0
     end
 
-    @testset "TwoLevelDecay precomputed decay basis matches analytic bₙ(r)" begin
-        TFD = Breeze.TerrainFollowingDiscretization
-        Nx, Nz = 8, 16
-        Lz = 10000.0
-        s₁, s₂ = 6000.0, 1500.0
-        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length = Nz+1));
-                      formulation = TwoLevelDecay(large_scale_height = s₁, small_scale_height = s₂))
-        grid = RectilinearGrid(default_arch; size = (Nx, Nz), halo = (5, 5),
-                               x = (0, 1000), z = z_faces, topology = (Periodic, Flat, Bounded))
-        materialize_terrain!(grid, x -> 100.0)
-        f = grid.z.formulation
-        z_top = f.z_top
-
-        # The materialized basis must reproduce the analytic bₙ(r), bₙ′(r) at the
-        # Center and Face reference nodes (same b evaluated at the same r).
-        for k in 1:Nz
-            rc = rnode(k, grid, Center())
-            @test @allowscalar(f.basis.b₁ᶜ[1, 1, k])  ≈ TFD.b_two_level(rc, z_top, s₁)  rtol=1e-5
-            @test @allowscalar(f.basis.b₂ᶜ[1, 1, k])  ≈ TFD.b_two_level(rc, z_top, s₂)  rtol=1e-5
-            @test @allowscalar(f.basis.∂b₁ᶜ[1, 1, k]) ≈ TFD.b′_two_level(rc, z_top, s₁) rtol=1e-5
-            @test @allowscalar(f.basis.∂b₂ᶜ[1, 1, k]) ≈ TFD.b′_two_level(rc, z_top, s₂) rtol=1e-5
-        end
-        for k in 1:Nz+1
-            rf = rnode(k, grid, Face())
-            @test @allowscalar(f.basis.b₁ᶠ[1, 1, k])  ≈ TFD.b_two_level(rf, z_top, s₁)  rtol=1e-5
-            @test @allowscalar(f.basis.∂b₂ᶠ[1, 1, k]) ≈ TFD.b′_two_level(rf, z_top, s₂) rtol=1e-5
-        end
-
-        # b(r) decays from 1 at the surface (r=0) toward 0 at the model top.
-        @test @allowscalar(f.basis.b₁ᶠ[1, 1, 1]) ≈ 1 rtol=1e-6
-        @test abs(@allowscalar(f.basis.b₁ᶠ[1, 1, Nz+1])) < 1e-6
-    end
-
     @testset "LLG: explicit time stepping with terrain" begin
         Nλ, Nφ, Nz = 12, 10, 6
         Lz = 10000.0
@@ -1438,15 +1406,15 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             SplitExplicitTimeDiscretization(acoustic_cfl=0.5; damping=damping);
             slope_stencil = SlopeInsideInterpolation(),
             reference_potential_temperature = 300)
-        model = AtmosphereModel(grid; dynamics)
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
         set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
 
         @test model.dynamics.terrain_metrics.pressure_gradient_stencil isa SlopeInsideInterpolation
         @test model.timestepper.substepper.substeps === nothing  # adaptive
 
-        initial_mass = sum(interior(model.dynamics.dry_density))
+        initial_mass = sum(interior(model.dynamics.density))
         time_step!(model, 0.1)
-        final_mass = sum(interior(model.dynamics.dry_density))
+        final_mass = sum(interior(model.dynamics.density))
 
         w̃ = model.dynamics.contravariant_vertical_velocity
         ρw̃ = model.dynamics.contravariant_vertical_momentum
@@ -1502,7 +1470,8 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                       longitude=(0, 360), latitude=(-60, 60), z=(0, Lz))
             end
             m = AtmosphereModel(g;
-                dynamics=CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6)))
+                dynamics=CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6)),
+                timestepper=:AcousticRungeKutta3)
             set!(m, ρ=1, θ=300, u=0.1, w=0.01)
             return m
         end
@@ -1516,8 +1485,8 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         height_ρθ  = Breeze.AtmosphereModels.thermodynamic_density(height_model.formulation)
         terrain_ρθ = Breeze.AtmosphereModels.thermodynamic_density(terrain_model.formulation)
 
-        @test isapprox(interior(height_model.dynamics.dry_density),
-                       interior(terrain_model.dynamics.dry_density); atol=tol)
+        @test isapprox(interior(height_model.dynamics.density),
+                       interior(terrain_model.dynamics.density); atol=tol)
         @test isapprox(interior(height_ρθ), interior(terrain_ρθ); atol=tol)
         @test isapprox(interior(height_model.momentum.ρu),
                        interior(terrain_model.momentum.ρu); atol=tol)
@@ -1679,108 +1648,6 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             @test znode(i, j, 1,    rebuilt, Center(), Center(), Face()) ≈ h_expected rtol=1e-10
             @test znode(i, j, Nz+1, rebuilt, Center(), Center(), Face()) ≈ Lz          rtol=1e-10
         end
-    end
-
-    @testset "Constant moist terrain reference state satisfies discrete hydrostatic balance" begin
-        Nx, Nz = 8, 8
-        Lx, Lz = 10000.0, 5000.0
-
-        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
-                               x=(-Lx/2, Lx/2), z=z_faces,
-                               topology=(Periodic, Flat, Bounded))
-
-        h(x) = 200 * exp(-x^2 / 2000^2)
-        materialize_terrain!(grid, h)
-
-        θ_reference = 300.0
-        qᵛ_reference = 0.012
-
-        dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                        reference_potential_temperature = θ_reference,
-                                        reference_vapor_mass_fraction = qᵛ_reference)
-        model = AtmosphereModel(grid; dynamics)
-
-        p_ref = model.dynamics.terrain_reference_pressure
-        ρ_ref = model.dynamics.terrain_reference_density
-        constants = model.thermodynamic_constants
-        g = constants.gravitational_acceleration
-        p₀ = dynamics.surface_pressure
-        pˢᵗ = dynamics.standard_pressure
-        Rᵈ = dry_air_gas_constant(constants)
-        Rᵛ = vapor_gas_constant(constants)
-        cᵖᵈ = constants.dry_air.heat_capacity
-        cᵖᵛ = constants.vapor.heat_capacity
-
-        @test p_ref !== nothing
-        @test ρ_ref !== nothing
-
-        qᵛ_surface = qᵛ_reference
-        qᵈ_surface = 1 - qᵛ_surface
-        Rᵐ_surface = qᵈ_surface * Rᵈ + qᵛ_surface * Rᵛ
-        cᵖᵐ_surface = qᵈ_surface * cᵖᵈ + qᵛ_surface * cᵖᵛ
-        κ_surface = Rᵐ_surface / cᵖᵐ_surface
-        T_surface₀ = θ_reference * (p₀ / pˢᵗ)^κ_surface
-
-        for i in 1:Nx
-            z_surface = znode(i, 1, 1, grid, Center(), Center(), Face())
-            p_surface = p₀ * (1 - g * z_surface / (cᵖᵐ_surface * T_surface₀))^(cᵖᵐ_surface / Rᵐ_surface)
-            T_surface = θ_reference * (p_surface / pˢᵗ)^κ_surface
-            ρ_surface = p_surface / (Rᵐ_surface * T_surface)
-
-            # Surface (bottom face) to first cell center spans half a cell.
-            hydrostatic_residual = (p_ref[i, 1, 1] - p_surface) / (Δzᶜᶜᶜ(i, 1, 1, grid) / 2) +
-                                   g * (ρ_ref[i, 1, 1] + ρ_surface) / 2
-            @test abs(hydrostatic_residual) <= 1e-6
-        end
-
-        for i in 1:Nx, k in 2:Nz
-            hydrostatic_residual = (p_ref[i, 1, k] - p_ref[i, 1, k - 1]) / Δzᶜᶜᶠ(i, 1, k, grid) +
-                                   g * (ρ_ref[i, 1, k] + ρ_ref[i, 1, k - 1]) / 2
-            @test abs(hydrostatic_residual) <= 1e-8
-        end
-
-        i_flat = 1
-        i_peak = Nx ÷ 2
-        @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
-    end
-
-    @testset "Variable moist terrain reference state satisfies interior discrete hydrostatic balance" begin
-        Nx, Nz = 8, 8
-        Lx, Lz = 10000.0, 5000.0
-
-        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
-                               x=(-Lx/2, Lx/2), z=z_faces,
-                               topology=(Periodic, Flat, Bounded))
-
-        h(x) = 200 * exp(-x^2 / 2000^2)
-        materialize_terrain!(grid, h)
-
-        θ_reference(z) = 300.0 + 0.01 * z
-        qᵛ_reference(z) = 0.012 * exp(-z / 1000)
-
-        dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                        reference_potential_temperature = θ_reference,
-                                        reference_vapor_mass_fraction = qᵛ_reference)
-        model = AtmosphereModel(grid; dynamics)
-
-        p_ref = model.dynamics.terrain_reference_pressure
-        ρ_ref = model.dynamics.terrain_reference_density
-        g = model.thermodynamic_constants.gravitational_acceleration
-
-        @test p_ref !== nothing
-        @test ρ_ref !== nothing
-
-        for i in 1:Nx, k in 2:Nz
-            hydrostatic_residual = (p_ref[i, 1, k] - p_ref[i, 1, k - 1]) / Δzᶜᶜᶠ(i, 1, k, grid) +
-                                   g * (ρ_ref[i, 1, k] + ρ_ref[i, 1, k - 1]) / 2
-            @test abs(hydrostatic_residual) <= 1e-8
-        end
-
-        i_flat = 1
-        i_peak = Nx ÷ 2
-        @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
     end
 end
 end

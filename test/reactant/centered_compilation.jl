@@ -19,6 +19,7 @@ using CUDA
 
 if get(ENV, "GITHUB_ACTIONS", "false") == "true"
     Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+    ENV["TMPDIR"] = mkpath(joinpath(@__DIR__, "..", "tmp"))
 end
 
 if default_arch isa GPU
@@ -36,8 +37,6 @@ topologies = [
     ("Bounded, Bounded, Flat",       (Bounded,  Bounded,  Flat),     2),
     ("Periodic, Periodic, Periodic", (Periodic, Periodic, Periodic), 3),
     ("Periodic, Bounded, Bounded",   (Periodic, Bounded,  Bounded),  3),
-    ("Bounded, Bounded, Bounded",     (Bounded, Bounded, Bounded),   3),
-    ("Periodic, Periodic, Bounded",     (Periodic, Periodic, Bounded),   3),
 ]
 
 #####
@@ -45,7 +44,7 @@ topologies = [
 #####
 
 function make_grid(topo, nd; arch=ReactantState())
-    sz  = nd == 2 ? (20, 20)     : (20, 20, 20)
+    sz  = nd == 2 ? (8, 8)     : (8, 8, 8)
     ext = nd == 2 ? (1e3, 1e3) : (1e3, 1e3, 1e3)
     return RectilinearGrid(arch; size=sz, extent=ext, topology=topo)
 end

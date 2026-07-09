@@ -3,13 +3,10 @@ module BreezeBenchmarks
 export
     # Benchmark cases
     convective_boundary_layer,
-    scalar_tendency_problem,
-    model_tendency_problem,
 
     # Benchmark utilities
     many_time_steps!,
     benchmark_time_stepping,
-    benchmark_tendency,
     run_benchmark_simulation,
     BenchmarkResult,
     SimulationResult,
@@ -50,10 +47,5 @@ include("timestepping.jl")
 include("utils.jl")
 # Specific models to benchmark
 include("convective_boundary_layer.jl")
-# Tendency benchmark cases (bare scalar kernel + full-model compute_tendencies!)
-# and their shared profiling runner.
-include("scalar_tendency.jl")
-include("model_tendency.jl")
-include("tendency_profiling.jl")
 
 end # module

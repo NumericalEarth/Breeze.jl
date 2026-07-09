@@ -44,7 +44,7 @@ Since momentum `ρu` is already available, this is simply the negative divergenc
 function AtmosphereModels.compute_dynamics_tendency!(model::CompressibleModel)
     grid = model.grid
     arch = grid.architecture
-    Gρ = model.timestepper.Gⁿ.ρᵈ
+    Gρ = model.timestepper.Gⁿ.ρ
     momentum = model.momentum
     td = model.dynamics.time_discretization
     launch!(arch, grid, :xyz, _compute_density_tendency!, Gρ, grid, momentum, td)

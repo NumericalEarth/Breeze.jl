@@ -1,7 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields, architecture
-using Oceananigans.Advection: needs_implicit_solver
 using Oceananigans.Utils: launch!
 
 using Oceananigans.TimeSteppers: implicit_step!
@@ -11,13 +10,7 @@ using Breeze.AtmosphereModels:
     AtmosphereModel,
     SlowTendencyMode,
     advecting_momentum,
-    advecting_vertical_velocity,
     dynamics_density,
-    total_density,
-    thermodynamic_density_name,
-    transport_velocities,
-    field_advection_scheme,
-    implicit_step_advection,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
@@ -28,7 +21,7 @@ using Breeze.CompressibleEquations: CompressibleDynamics
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
 
 const TerrainCompressibleAcousticModel =
-    AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}}
+    AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}}
 
 #####
 ##### Slow momentum tendencies
@@ -110,9 +103,9 @@ $(TYPEDSIGNATURES)
 
 Compute slow tendencies for density and the thermodynamic variable:
 
-  - ``Gˢ_ρᵈ = -∇·m``: full dry-density tendency (continuity equation),
-    written into `model.timestepper.Gⁿ.ρᵈ`.
-  - ``Gˢ_ρᵡ``: full thermodynamic-density tendency (advection + physics).
+  - ``Gˢ_ρ = -∇·m``: full density tendency (continuity equation),
+    written into `model.timestepper.Gⁿ.ρ`.
+  - ``Gˢ_χ``: full thermodynamic tendency (advection + physics).
 """
 function compute_slow_scalar_tendencies!(model)
     compute_dynamics_tendency!(model)
@@ -165,16 +158,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
     prognostic = prognostic_fields(model)
-    names = keys(prognostic)
     n_acoustic = 5  # ρ, ρu, ρv, ρw, ρθ are advanced inside the substep loop
-
-    # Water species and tracers advect as mass fractions of the total density ρ = ρᵈ + Σρˣ
-    # (see `scalar_tendency`), so the implicit solve is weighted with the same density. The
-    # velocities are the time-averaged transport velocities that the explicit scalar tendencies
-    # (Gⁿ) were built with — adaptive implicit vertical advection must use the same `w` so the
-    # explicit/implicit velocity split is consistent.
-    ρ = total_density(model.dynamics)
-    velocities = transport_velocities(model)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
         i <= n_acoustic && continue
@@ -182,103 +166,15 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
         launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
 
         field_index = Val(i - n_acoustic)
-        advection = field_advection_scheme(model.advection, names[i])
-
-        if needs_implicit_solver(advection)
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           Δt_implicit,
-                           advection,
-                           velocities,
-                           ρ)
-        else
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           Δt_implicit)
-        end
-    end
-
-    return nothing
-end
-
-#####
-##### Implicit vertical solve for the acoustic prognostics
-#####
-
-"""
-$(TYPEDSIGNATURES)
-
-Apply the vertically-implicit tridiagonal solve to the prognostics that the acoustic substep
-loop advances: momentum and the thermodynamic variable. Dispatch on the timestepper's
-`implicit_solver` selects the method: `nothing` means nothing in the model is vertically
-implicit and the substep is a no-op.
-
-Each field's solve combines every implicit vertical piece into a single tridiagonal system:
-the first-order-upwind remainder of adaptive implicit vertical advection (whose CFL-limited
-explicit flux the slow tendencies carry through the advection dispatch), plus vertically-implicit
-closure diffusion. Explicit advection schemes contribute no advection coefficients and explicit
-closures no diffusion coefficients, so each combination reduces to the right system. The solve
-runs once per RK stage after the substep loop, over the stage interval — the operator split WRF
-and CM1 use for their implicit vertical pieces. Continuity takes no implicit solve: the
-coupling-density tendency is the acoustic mass-flux divergence itself, not scalar advection.
-
-The advecting velocity passed to each solve must be the one its slow tendency was built with,
-so the explicit/implicit velocity split is consistent: the RK stage-entry predictor velocities
-(see `compute_slow_momentum_tendencies!` and `compute_slow_scalar_tendencies!`), not the
-substepper's time-averaged transport velocities that moisture and tracers use.
-"""
-implicit_substep!(model, Δt_stage) =
-    implicit_substep!(model, model.timestepper.implicit_solver, Δt_stage)
-
-# No implicit solver ⇒ nothing in the model is vertically implicit.
-implicit_substep!(model, ::Nothing, Δt_stage) = nothing
-
-function implicit_substep!(model, implicit_solver, Δt_stage)
-    # Momentum and the thermodynamic variable are coupling-density-weighted (ρu = ρᵈ u, ρθ = ρᵈ θ).
-    ρᵈ = dynamics_density(model.dynamics)
-    prognostic = prognostic_fields(model)
-
-    # Momentum advects with the (possibly contravariant) advecting vertical velocity — the
-    # same velocity the slow momentum flux divergence splits.
-    w = advecting_vertical_velocity(model.dynamics, model.velocities)
-    momentum_advection = model.advection.momentum
-    for name in (:ρu, :ρv, :ρw)
-        implicit_step!(prognostic[name],
-                       implicit_solver,
+        implicit_step!(u,
+                       model.timestepper.implicit_solver,
                        model.closure,
                        model.closure_fields,
-                       nothing,
+                       field_index,
                        model.clock,
                        fields(model),
-                       Δt_stage,
-                       implicit_step_advection(momentum_advection, name),
-                       (; w),
-                       ρᵈ)
+                       Δt_implicit)
     end
-
-    θ_name = thermodynamic_density_name(model.formulation)
-    θ_advection = field_advection_scheme(model.advection, θ_name)
-    implicit_step!(prognostic[θ_name],
-                   implicit_solver,
-                   model.closure,
-                   model.closure_fields,
-                   Val(1),   # the thermodynamic variable leads the closure's scalar names (see `with_tracers`)
-                   model.clock,
-                   fields(model),
-                   Δt_stage,
-                   θ_advection,
-                   slow_thermodynamic_velocities(model),
-                   ρᵈ)
 
     return nothing
 end

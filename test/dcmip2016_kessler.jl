@@ -2,7 +2,6 @@ using Breeze
 using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
-using Breeze.AtmosphereModels: microphysics_model_update!
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -363,10 +362,7 @@ end
 
     set!(model.formulation.potential_temperature_density, reshape(ρ_prof .* θˡⁱ_init, 1, 1, Nz))
     model.clock.last_Δt = Δt
-    # Refresh the diagnostic state from the prognostics, then apply the operator-split
-    # Kessler update once, mirroring how the time-steppers call it after `update_state!`.
     update_state!(model)
-    microphysics_model_update!(model.microphysics, model)
 
     # Extract results
     ρqᶜˡ_result = Array(interior(model.microphysical_fields.ρqᶜˡ, 1, 1, :))

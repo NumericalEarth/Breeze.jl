@@ -1,12 +1,7 @@
-using ..Thermodynamics: ReferenceState, ExnerReferenceState, compute_hydrostatic_reference!,
-                        _compute_exner_reference!, _compute_exner_reference_3d!,
-                        dry_air_gas_constant, vapor_gas_constant
-using Oceananigans: CenterField
+using ..Thermodynamics: ReferenceState, compute_hydrostatic_reference!
 using Oceananigans: Oceananigans, prognostic_fields
-using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Fields: interior, ZeroField, Field
-using Oceananigans.Grids: Center
+using Oceananigans.Fields: interior, ZeroField
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 using Statistics: mean!
 
@@ -50,37 +45,6 @@ function rescale_density_weighted_fields!(model, ρ⁻)
     return nothing
 end
 
-function rescale_dry_density_weighted_fields!(model, ρᵈ⁻)
-    grid = model.grid
-    arch = grid.architecture
-    ρᵈ = dynamics_density(model.dynamics)
-
-    launch!(arch, grid, :xyz, _rescale_momentum!, grid, model.momentum, ρᵈ, ρᵈ⁻)
-
-    formulation_fields = prognostic_fields(model.formulation)
-    for field in formulation_fields
-        parent(field) .*= parent(ρᵈ) ./ parent(ρᵈ⁻)
-    end
-
-    return nothing
-end
-
-function scale_total_density_weighted_fields!(model, ρ, ρᵈ⁻)
-    parent(model.moisture_density) .*= parent(ρ) ./ parent(ρᵈ⁻)
-
-    μ_names = prognostic_field_names(model.microphysics)
-    for name in μ_names
-        field = model.microphysical_fields[name]
-        parent(field) .*= parent(ρ) ./ parent(ρᵈ⁻)
-    end
-
-    for field in model.tracers
-        parent(field) .*= parent(ρ) ./ parent(ρᵈ⁻)
-    end
-
-    return nothing
-end
-
 @kernel function _rescale_momentum!(grid, momentum, ρ, ρ⁻)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
@@ -96,17 +60,6 @@ end
         ρ⁻ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ⁻)
         momentum.ρw[i, j, k] *= ρᶜᶜᶠ / ρ⁻ᶜᶜᶠ
     end
-end
-
-@kernel function _set_dry_density_from_total_density!(ρᵈ, ρ, microphysics, moisture_density, microphysical_fields)
-    i, j, k = @index(Global, NTuple)
-    ρqᵗ = total_condensate_density(i, j, k, microphysics, moisture_density, microphysical_fields)
-    @inbounds ρᵈ[i, j, k] = ρ[i, j, k] - ρqᵗ
-end
-
-@kernel function _dry_weighted_specific_moisture!(qᵛ, ρqᵛ, ρᵈ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds qᵛ[i, j, k] = ρqᵛ[i, j, k] / ρᵈ[i, j, k]
 end
 
 """
@@ -149,85 +102,6 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
     return nothing
 end
 
-"""
-    set_to_mean!(ref::ExnerReferenceState, model)
-
-Exner analogue of the `ReferenceState` method, for split-explicit `CompressibleDynamics`. Recompute
-the base `exner_function`/`pressure`/`density` by re-running the same discrete Exner column
-integration the constructor uses, with the horizontal-mean liquid-ice potential temperature and vapor
-mass fraction of the current model state. The recomputed reference is horizontally uniform (a single
-column). (Assumes a 1-D column reference, the form built from a constant or `z`-dependent θ₀.)
-
-Unlike the anelastic `ReferenceState` method there is no `rescale_densities` option: the Exner
-reference is only the perturbation-form base state, not the prognostic density (`ρᵈ`), so changing it
-does not require rescaling the density-weighted prognostics.
-"""
-function set_to_mean!(ref::ExnerReferenceState, model)
-    constants = model.thermodynamic_constants
-    grid = ref.pressure.grid
-    arch = architecture(grid)
-    Nz   = size(grid, 3)
-
-    # Horizontal-mean θˡⁱ and qᵛ as single-column reference profiles.
-    θ̄ = Field{Nothing, Nothing, Center}(grid)
-    mean!(θ̄, liquid_ice_potential_temperature(model))
-    fill_halo_regions!(θ̄)
-
-    q̄ᵛ = Field{Nothing, Nothing, Center}(grid)
-    mean_mass_fraction!(q̄ᵛ, specific_humidity(model))
-
-    Rᵈ  = dry_air_gas_constant(constants)
-    Rᵛ  = vapor_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    cᵖᵛ = constants.vapor.heat_capacity
-    g   = constants.gravitational_acceleration
-
-    launch!(arch, grid, tuple(1), _compute_exner_reference!,
-            ref.exner_function, ref.pressure, ref.density, θ̄, q̄ᵛ, grid, Nz,
-            ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
-
-    if size(ref.pressure, 1) > 1 || size(ref.pressure, 2) > 1
-        launch!(arch, grid, :xyz, _broadcast_exner_reference_column!,
-                ref.exner_function, ref.pressure, ref.density)
-    end
-
-    fill_halo_regions!(ref.exner_function)
-    fill_halo_regions!(ref.pressure)
-    fill_halo_regions!(ref.density)
-
-    # Recompute all diagnostics (T, qᵗ, u, v, w, …) consistent with the new reference.
-    TimeSteppers.update_state!(model; compute_tendencies=false)
-    return nothing
-end
-
-@kernel function _broadcast_exner_reference_column!(πᵣ, pᵣ, ρᵣ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        πᵣ[i, j, k] = πᵣ[1, 1, k]
-        pᵣ[i, j, k] = pᵣ[1, 1, k]
-        ρᵣ[i, j, k] = ρᵣ[1, 1, k]
-    end
-end
-
-"""
-    reset_reference_state!(model)
-
-Recompute the dynamics' reference state from the horizontal means of the model's current state via
-[`set_to_mean!`](@ref) — works for both the anelastic `ReferenceState` and the split-explicit
-`ExnerReferenceState` — if the dynamics carries one; a no-op otherwise. Invoked by
-`set!(model; compute_reference_state=true)`.
-"""
-function reset_reference_state!(model)
-    ref = dynamics_reference_state(model.dynamics)
-    if ref isa ReferenceState
-        set_to_mean!(ref, model; rescale_densities=true)
-    elseif !isnothing(ref)
-        set_to_mean!(ref, model)
-    end
-
-    return nothing
-end
-
 function mean_mass_fraction!(ref_field, field)
     mean!(ref_field, field)
     fill_halo_regions!(ref_field)
@@ -237,75 +111,6 @@ end
 function mean_mass_fraction!(ref_field, ::Nothing)
     interior(ref_field) .= 0
     fill_halo_regions!(ref_field)
-    return nothing
-end
-
-"""
-    HydrostaticallyBalancedDensity(; surface_pressure = nothing)
-
-Marker passed as the `ρ` value to [`set!`](@ref) to set the density in discrete moist hydrostatic
-balance with the just-set `θˡⁱ`/`qᵛ`, by per-column integration of the
-hydrostatic equation upward from `surface_pressure` (a scalar; defaults to the dynamics' mean
-surface pressure). For `CompressibleDynamics`.
-
-Unlike supplying a density field, this guarantees the initial column satisfies the discrete
-hydrostatic balance `(pᵏ − pᵏ⁻¹)/Δz + g(ρᵏ + ρᵏ⁻¹)/2 = 0`, so the cold start carries no spurious
-vertical pressure-gradient force. Combine with `compute_reference_state = true` (perturbation-form
-base state) and `balancer` (nonhydrostatic `ρw` spin-up) for a full one-call initialization.
-"""
-struct HydrostaticallyBalancedDensity{P}
-    surface_pressure :: P
-end
-
-HydrostaticallyBalancedDensity(; surface_pressure = nothing) = HydrostaticallyBalancedDensity(surface_pressure)
-
-"""
-$(TYPEDSIGNATURES)
-
-Set the prognostic density of a `CompressibleDynamics` model into discrete hydrostatic balance with
-the current `θˡⁱ`/`qᵛ`, per [`HydrostaticallyBalancedDensity`](@ref). Runs the same per-column
-Exner integration the reference-state constructor uses, then scales the dry density (and rescales
-the density-weighted prognostics, preserving `θ`, `qˣ`, and velocities) so the total density matches
-the balanced column.
-"""
-function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalancedDensity)
-    dynamics  = model.dynamics
-    grid      = model.grid
-    arch      = architecture(grid)
-    Nz        = size(grid, 3)
-    constants = model.thermodynamic_constants
-
-    p₀  = isnothing(spec.surface_pressure) ? surface_pressure(dynamics) : spec.surface_pressure
-    pˢᵗ = standard_pressure(dynamics)
-    Rᵈ  = dry_air_gas_constant(constants)
-    Rᵛ  = vapor_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    cᵖᵛ = constants.vapor.heat_capacity
-    g   = constants.gravitational_acceleration
-
-    θ  = model.formulation.potential_temperature   # specific θˡⁱ, filled by the preceding update_state!
-    qᵛ = CenterField(grid)
-    ρᵈ = dynamics_density(dynamics)
-    ρᵈ_old = CenterField(grid)
-    copyto!(parent(ρᵈ_old), parent(ρᵈ))
-    launch!(arch, grid, :xyz, _dry_weighted_specific_moisture!, qᵛ, model.moisture_density, ρᵈ_old)
-
-    # Per-column hydrostatic integration → balanced total density.
-    π = CenterField(grid)
-    pressure = CenterField(grid)
-    ρ = CenterField(grid)
-    launch!(arch, grid, :xy, _compute_exner_reference_3d!,
-            π, pressure, ρ, θ, qᵛ, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
-
-    # Scale total-density-weighted constituents by ρ / ρᵈ_old, set dry density as the residual,
-    # then scale dry-density-weighted prognostics by ρᵈ_new / ρᵈ_old.
-    scale_total_density_weighted_fields!(model, ρ, ρᵈ_old)
-    launch!(arch, grid, :xyz, _set_dry_density_from_total_density!,
-            ρᵈ, ρ, model.microphysics, model.moisture_density, model.microphysical_fields)
-    fill_halo_regions!(ρᵈ)
-    rescale_dry_density_weighted_fields!(model, ρᵈ_old)
-
-    update_state!(model; compute_tendencies=false)
     return nothing
 end
 

@@ -1,7 +1,6 @@
 using ..Thermodynamics: Thermodynamics, mixture_gas_constant
 
 using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
-using Oceananigans.Advection: update_advection_timestep!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
 using Oceananigans.Fields: flattened_unique_values
@@ -31,16 +30,8 @@ function Oceananigans.Models.update_model_field_time_series!(model::AtmosphereMo
     return nothing
 end
 
-# `update_state!` is idempotent: it can be called any number of times and always
-# leaves the model in the same consistent state (refreshed halos, diagnostics, and
-# tendencies) for the prognostic fields it is given. It deliberately does *not* advance
-# the operator-split microphysics update (`microphysics_model_update!`), which mutates
-# prognostic fields by a full `Δt` and so must run exactly once per step — the
-# time-steppers invoke it directly. (The tendency-interface microphysics still runs
-# every RK stage as part of `compute_tendencies!`.)
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     fix_negative_moisture!(model)  # fix negative moisture from advection
-    compute_total_density!(model)  # diagnose total air density ρ = ρᵈ + Σρˣ (no-op unless compressible)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
@@ -50,15 +41,11 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
+    microphysics_model_update!(model.microphysics, model)
 
     for callback in callbacks
         callback.callsite isa UpdateStateCallsite && callback(model)
     end
-
-    # Refresh the adaptive-implicit-vertical-advection time step before computing tendencies, so the
-    # explicit (CFL-scaled) velocity baked into Gⁿ matches the implicit velocity used by the
-    # following solve. A no-op unless some advection scheme uses an adaptive-implicit discretization.
-    update_advection_timestep!(model.advection, model.timestepper, model.clock)
 
     compute_tendencies && compute_tendencies!(model, callbacks)
 
@@ -85,14 +72,8 @@ function compute_forcings!(model)
     return nothing
 end
 
-# Tracer↔specific conversion uses the TOTAL air density (mass fractions qˣ = ρˣ/ρ), keeping the
-# thermodynamics in mass fractions. For anelastic, `total_density === dynamics_density`.
-tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, total_density(model.dynamics))
-tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, total_density(model.dynamics))
-
-# Diagnose the total air density ρ = ρᵈ + Σρˣ. No-op unless the dynamics carries a distinct
-# total-density field (CompressibleDynamics overrides this); anelastic aliases dynamics_density.
-compute_total_density!(model) = nothing
+tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, dynamics_density(model.dynamics))
+tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, dynamics_density(model.dynamics))
 
 function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel
@@ -266,7 +247,7 @@ end
 
     compute_auxiliary_thermodynamic_variables!(formulation, dynamics, i, j, k, grid)
 
-    ρ_field = total_density(dynamics)  # total ρ → qᵛᵉ is a mass fraction (thermo unchanged)
+    ρ_field = dynamics_density(dynamics)
     @inbounds begin
         ρ = ρ_field[i, j, k]
         ρqᵛᵉ = moisture_density[i, j, k]
