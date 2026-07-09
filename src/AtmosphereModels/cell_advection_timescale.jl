@@ -17,7 +17,8 @@
 ##### `cell_advection_timescale(model::AtmosphereModel)` (the wizard's default) makes this choice
 ##### automatically from `model.advection`. `CellAdvectionTimescale(formulation)` is the explicit
 ##### override — pass it to the wizard's `cell_advection_timescale` keyword to force a horizontal
-##### or three-dimensional timescale, or use it in an `AdvectiveCFL` diagnostic to monitor the true
+##### or three-dimensional timescale, or as the `timescale` argument of a `CFL` diagnostic
+##### (`CFL(Δt, CellAdvectionTimescale(ThreeDimensionalFormulation()))`) to monitor the true
 ##### three-dimensional CFL even while the wizard floats on the horizontal one.
 
 using Oceananigans.Advection: Advection, cell_advection_timescale, needs_implicit_solver
@@ -30,8 +31,9 @@ $(TYPEDSIGNATURES)
 A callable that returns the advective timescale of a `model` restricted to the directions of
 `formulation`: `HorizontalFormulation()` counts only the horizontal advective CFL (dropping the
 vertical term), `ThreeDimensionalFormulation()` counts all three directions. Pass it to the
-`cell_advection_timescale` keyword of `TimeStepWizard` / `conjure_time_step_wizard!`, or to
-`AdvectiveCFL`, to control or monitor which directions bind the time step.
+`cell_advection_timescale` keyword of `TimeStepWizard` / `conjure_time_step_wizard!`, or as the
+`timescale` argument of `CFL` (`CFL(Δt, CellAdvectionTimescale(...))`), to control or monitor
+which directions bind the time step.
 """
 struct CellAdvectionTimescale{F}
     formulation :: F
