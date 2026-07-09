@@ -15,11 +15,9 @@
 ##### diffusion, whose `cell_diffusion_timescale` returns `Inf` for the same reason.
 #####
 ##### `cell_advection_timescale(model::AtmosphereModel)` (the wizard's default) makes this choice
-##### automatically from `model.advection`. `CellAdvectionTimescale(formulation)` is the explicit
-##### override — pass it to the wizard's `cell_advection_timescale` keyword to force a horizontal
-##### or three-dimensional timescale, or as the `timescale` argument of a `CFL` diagnostic
-##### (`CFL(Δt, CellAdvectionTimescale(ThreeDimensionalFormulation()))`) to monitor the true
-##### three-dimensional CFL even while the wizard floats on the horizontal one.
+##### automatically from `model.advection`; `CellAdvectionTimescale(formulation)` is the explicit
+##### override for forcing or monitoring a particular direction (see its docstring) — e.g. to watch
+##### the true three-dimensional CFL even while the wizard floats Δt on the horizontal one.
 
 using Oceananigans.Advection: Advection, cell_advection_timescale, needs_implicit_solver
 using Oceananigans.Fields: ZeroField
@@ -39,9 +37,7 @@ struct CellAdvectionTimescale{F}
     formulation :: F
 end
 
-CellAdvectionTimescale() = CellAdvectionTimescale(ThreeDimensionalFormulation())
-
-@inline (τ::CellAdvectionTimescale)(model) = cell_advection_timescale(model, τ.formulation)
+(τ::CellAdvectionTimescale)(model) = cell_advection_timescale(model, τ.formulation)
 
 # The vertical advecting velocity is Cartesian `w` on height-coordinate grids and the contravariant
 # `w̃` on terrain-following grids (see `advecting_vertical_velocity`). A `ZeroField` in the vertical
