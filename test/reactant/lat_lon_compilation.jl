@@ -1,10 +1,11 @@
 #####
-##### Reactant compilation tests — Centered advection
+##### Reactant compilation tests — LatitudeLongitudeGrid (Periodic, Bounded, Bounded)
 #####
 #
-# Phase structure per topology:
+# Phase structure per dynamics variant:
 #   (a)   Build model on ReactantState
 #   (b)   Compile + raise backward (Enzyme reverse mode)
+#   (c)   FD validation of AD gradients
 
 using Breeze
 using Oceananigans
@@ -19,6 +20,7 @@ using CUDA
 
 if get(ENV, "GITHUB_ACTIONS", "false") == "true"
     Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+    ENV["TMPDIR"] = mkpath(joinpath(@__DIR__, "..", "tmp"))
 end
 
 if default_arch isa GPU
@@ -28,36 +30,28 @@ else
 end
 
 #####
-##### Topology configurations
+##### Dynamics variants
 #####
 
-topologies = [
-    ("Periodic, Periodic, Flat",     (Periodic, Periodic, Flat),     2),
-    ("Bounded, Bounded, Flat",       (Bounded,  Bounded,  Flat),     2),
-    ("Periodic, Periodic, Periodic", (Periodic, Periodic, Periodic), 3),
-    ("Periodic, Bounded, Bounded",   (Periodic, Bounded,  Bounded),  3),
-    ("Bounded, Bounded, Bounded",     (Bounded, Bounded, Bounded),   3),
-    ("Periodic, Periodic, Bounded",     (Periodic, Periodic, Bounded),   3),
+dynamics_variants = [
+    ("ExplicitTimeStepping",            () -> CompressibleDynamics(ExplicitTimeStepping())),
+    ("SplitExplicitTimeDiscretization", () -> CompressibleDynamics(
+        SplitExplicitTimeDiscretization(substeps=3))),
 ]
 
 #####
 ##### Helpers
 #####
 
-function make_grid(topo, nd; arch=ReactantState())
-    sz  = nd == 2 ? (20, 20)     : (20, 20, 20)
-    ext = nd == 2 ? (1e3, 1e3) : (1e3, 1e3, 1e3)
-    return RectilinearGrid(arch; size=sz, extent=ext, topology=topo)
+function make_grid(; arch=ReactantState())
+    return LatitudeLongitudeGrid(arch;
+                                 size = (8, 6, 4),
+                                 halo = (5, 5, 5),
+                                 longitude = (0, 360),
+                                 latitude = (-85, 85),
+                                 z = (0, 10_000.0),
+                                 topology = (Periodic, Bounded, Bounded))
 end
-
-function run_time_steps!(model, Δt, Nsteps)
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
-        time_step!(model, Δt)
-    end
-    return nothing
-end
-
-get_temperature(model) = Array(interior(model.temperature))
 
 function make_init_fields(grid)
     θ_init  = CenterField(grid); set!(θ_init,  (args...) -> 300.0)
@@ -95,34 +89,33 @@ end
 ##### Tests
 #####
 
-@testset "Reactant CompressibleDynamics — Centered" begin
+@testset "Reactant CompressibleDynamics — LatitudeLongitudeGrid (PBB)" begin
     Δt = 0.02
 
-    @testset "$label" for (label, topo, nd) in topologies
-        grid = make_grid(topo, nd)
+    @testset "$label" for (label, make_dynamics) in dynamics_variants
+        grid = make_grid()
 
         # ── Build ──
         @testset "Build" begin
-            model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
+            model = AtmosphereModel(grid; dynamics=make_dynamics(), coriolis=SphericalCoriolis())
             @test model isa AtmosphereModel
             @test model.dynamics isa CompressibleDynamics
-
-            set!(model; θ=300.0, ρ=1.0)
-            T = get_temperature(model)
-            @test all(isfinite, T)
-            @test all(T .> 0)
         end
 
-        # Reconstruct for compilation phases
-        model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
-
+        model  = AtmosphereModel(grid; dynamics=make_dynamics(), coriolis=SphericalCoriolis())
         θ_init, dθ_init = make_init_fields(grid)
         dmodel = Enzyme.make_zero(model)
         Ns = 1
 
         compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
             model, dmodel, θ_init, dθ_init, Δt, Ns)
-        dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
+        # Running the compiled gradient causes a stackoverflow error in Julia v1.12,
+        # similarly to issue <https://github.com/JuliaLang/julia/issues/54998>.  We
+        # increase the task's stack size to 16 MiB to work around the issue.
+        task = Task(() -> compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns), 16 << 20)
+        schedule(task)
+        wait(task)
+        dθ, loss_val = fetch(task)
         ad_grad = @allowscalar Array(interior(dθ))
 
         # ── Raise backward ──
@@ -134,20 +127,14 @@ end
         end
 
         # ── FD validation ──
-        # Verify AD gradients against one-sided finite differences:
-        #   ∂J/∂θ(i,j,k) ≈ (J(θ + ε·eᵢⱼₖ) - J(θ)) / ε
-        # Checked at two grid cells and two step sizes to confirm
-        # convergence is not an artifact of a particular ε.
         @testset "FD validation" begin
-            grid_fd = make_grid(topo, nd; arch=default_arch)
-            make_fd_model() = AtmosphereModel(grid_fd; dynamics=CompressibleDynamics())
+            grid_fd = make_grid(arch=default_arch)
+            make_fd_model() = AtmosphereModel(grid_fd; dynamics=make_dynamics(), coriolis=SphericalCoriolis())
 
             θ₀_fd = CenterField(grid_fd); set!(θ₀_fd, (args...) -> 300.0)
             J₀ = loss(make_fd_model(), θ₀_fd, Δt, Ns)
 
-            test_cells = nd == 2 ? [(1,1,1), (4,4,1)] : [(1,1,1), (4,4,4)]
-
-            for ε in (1e-4, 1e-6), (ic, jc, kc) in test_cells
+            for ε in (1e-4, 1e-6), (ic, jc, kc) in [(1,1,1), (4,4,4)]
                 @testset let ε=ε, (ic, jc, kc)=(ic, jc, kc)
                     θ_fd = CenterField(grid_fd); set!(θ_fd, (args...) -> 300.0)
                     @allowscalar interior(θ_fd, ic, jc, kc)[] += ε

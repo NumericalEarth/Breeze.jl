@@ -20,7 +20,6 @@ using CUDA
 
 if get(ENV, "GITHUB_ACTIONS", "false") == "true"
     Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
-    ENV["TMPDIR"] = mkpath(joinpath(@__DIR__, "..", "tmp"))
 end
 
 if default_arch isa GPU
@@ -34,13 +33,9 @@ end
 #####
 
 topologies = [
-    ("Periodic, Periodic, Flat",    (Periodic, Periodic, Flat),    2),
     ("Periodic, Bounded, Bounded",  (Periodic, Bounded,  Bounded), 3),
-]
-
-schemes = [
-    ("WENO(order=5)",               WENO(order=5)),
-    ("WENO(order=5, bounds=(0,1))", WENO(order=5, bounds=(0, 1))),
+    ("Periodic, Periodic, Bounded",     (Periodic, Periodic, Bounded),   3),
+    ("Bounded, Bounded, Bounded",   (Bounded, Bounded, Bounded), 3),
 ]
 
 #####
@@ -48,7 +43,7 @@ schemes = [
 #####
 
 function make_grid(topo, nd; arch=ReactantState())
-    sz  = nd == 2 ? (8, 8)     : (8, 8, 8)
+    sz  = nd == 2 ? (20, 20)   : (20, 20, 20)
     ext = nd == 2 ? (1e3, 1e3) : (1e3, 1e3, 1e3)
     hl  = nd == 2 ? (5, 5)     : (5, 5, 5)
     return RectilinearGrid(arch; size=sz, extent=ext, halo=hl, topology=topo)
@@ -92,10 +87,10 @@ end
 ##### Tests
 #####
 
-@testset "reactant_weno_compilation" begin
-    Δt = 0.02
+function run_weno_tests(scheme_label, scheme)
+    @testset "reactant_weno_compilation - $scheme_label" begin
+        Δt = 0.02
 
-    @testset "$scheme_label" for (scheme_label, scheme) in schemes
         @testset "$label" for (label, topo, nd) in topologies
             grid = make_grid(topo, nd)
 

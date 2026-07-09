@@ -4,14 +4,7 @@ on:
   push:
     branches:
       - "main"
-    paths: &paths
-      - ".github/workflows/CI.yml"
-      - "ext/**"
-      - "src/**"
-      - "test/**"
-      - "Project.toml"
   pull_request:
-    paths: *paths
   workflow_dispatch:
 
 concurrency:
@@ -31,7 +24,31 @@ env:
   JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
 
 jobs:
+  check-files:
+    name: Check for modified files
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      files: ${{ steps.filter.outputs.files }}
+    steps:
+      - name: "Check out repository"
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: filter
+        with:
+          filters: |
+            files:
+              - ".github/workflows/CI.yml"
+              - "ext/**"
+              - "src/**"
+              - "test/**"
+              - "Project.toml"
+
   test:
+    needs: check-files
+    if: ${{ needs.check-files.outputs.files == 'true' }}
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - check-bounds ${{ matrix.check-bounds }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
@@ -84,7 +101,7 @@ jobs:
         run: |
           df -hT
       - name: "Check out repository"
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: "Install Julia"
         uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         # On the self-hosted GPU runners we use a Docker image with Julia pre-installed.
@@ -114,6 +131,8 @@ jobs:
         run: |
           # Run tests in verbose mode
           TEST_ARGS=(--verbose)
+          # Exit immediately if there's a test failure
+          TEST_ARGS+=(--quickfail)
 
           if [[ ${{ matrix.os }} == *linux-nvidia-gpu* ]]; then
               # When running the tests on a GPU node we always want to make sure
@@ -167,11 +186,17 @@ jobs:
           '
       - name: Run tests
         shell: bash
+        env:
+          XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
           if [[ ${{ runner.os }} == 'Linux' ]]; then
               # We use earlyoom only on the Linux machines
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
+
+          export TMPDIR="${{ github.workspace }}/tmp"
+          mkdir -vp "${TMPDIR}"
+
           julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
       - name: "Upload Manifest"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -187,14 +212,40 @@ jobs:
         if: always()
         with:
           name: mlir-dumps-${{ matrix.version }}-${{ matrix.os }}
-          path: tmp/
+          path: ${{ github.workspace }}/tmp/
           if-no-files-found: ignore
           retention-days: 7
       - name: "Process Julia coverage files"
         uses: julia-actions/julia-processcoverage@03114f09f119417c3242a9fb6e0b722676aedf38 # v1.2.2
       - name: "Upload coverage data to CodeCov"
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
         continue-on-error: true
+
+  # Fake test job, to launch when no relevant files are modified: we need this is launch a
+  # job with the required name, even when we don't actually want to run CI.
+  fake-test:
+    needs: check-files
+    if: ${{ needs.check-files.outputs.files != 'true' }}
+    # The name must exactly match the required job.
+    name: Julia ${{ matrix.fake-version }} - ${{ matrix.fake-os }} - ${{ matrix.fake-arch }} - check-bounds ${{ matrix.fake-check-bounds }} - ${{ github.event_name }}
+    runs-on: ${{ matrix.fake-os }}
+    timeout-minutes: 1
+    strategy:
+      # NOTE: we use a one-element matrix, instead of just hardcoding the expected name
+      # above, because when this job is to be skipped, we don't want this to have the name
+      # fully resolved, otherwise it may accidentally make the PR mergeable when it
+      # shouldn't (the `${{ matrix.... }}` in the job name are resolved only when the job is
+      # actually launched).
+      matrix:
+        include:
+          - fake-version: "min"
+            fake-os: ubuntu-latest
+            fake-arch: "default"
+            fake-check-bounds: "yes"
+    steps:
+      - name: "Run fake tests"
+        run: |
+          true
