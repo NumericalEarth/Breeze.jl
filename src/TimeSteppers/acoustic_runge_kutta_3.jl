@@ -21,7 +21,8 @@ using Breeze.CompressibleEquations:
     stage_fractions,
     acoustic_rk3_substep_loop!,
     prepare_acoustic_cache!,
-    freeze_linearization_state!
+    freeze_linearization_state!,
+    reimpose_specified_zone!
 
 """
 $(TYPEDEF)
@@ -153,6 +154,14 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     # Update remaining scalars (tracers) using WS-RK3.
     scalar_rk3_substep!(model, β * Δt)
 
+    # Restore the marched specified zone to U⁰ + βΔt·∂ₜ: the implicit solve
+    # and the scalar update above are not excluded from the zone, so their
+    # increments there are discarded (see `reimpose_specified_zone!`). A no-op
+    # when no momentum BC carries a march scheme. No halo fill here — the
+    # `update_state!` that follows every stage refills prognostic halos before
+    # anything reads them.
+    reimpose_specified_zone!(substepper, model, β * Δt)
+
     return nothing
 end
 
@@ -225,6 +234,12 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
+
+    # Restore the marched specified zone after the microphysics update (which
+    # mutates zone ρθ, ρqᵛ for mutating schemes), with halo refill since no
+    # further `update_state!` runs this step. The zone's rim diagnostics stay
+    # those of the pre-restore state until the next stage's `update_state!`.
+    reimpose_specified_zone!(model.timestepper.substepper, model, Δt; fill_halos = true)
 
     step_lagrangian_particles!(model, β₃ * Δt)
 

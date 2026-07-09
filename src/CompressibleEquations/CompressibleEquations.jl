@@ -71,7 +71,8 @@ using Breeze.Thermodynamics: mixture_gas_constant, dry_air_gas_constant,
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                surface_pressure, standard_pressure, thermodynamic_density,
-                               thermodynamic_density_name, specific_prognostic_moisture
+                               thermodynamic_density_name, specific_prognostic_moisture,
+                               moisture_prognostic_name
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
 include("time_discretizations.jl")

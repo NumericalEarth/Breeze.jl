@@ -452,12 +452,23 @@ zone once per outer time step; alternatively, the underlying tendency fields are
 exposed through [`boundary_tendency_fields`](@ref) for drivers whose boundary
 data cannot be evaluated on the device (e.g. interpolated forcing files).
 
-Two current restrictions: the scheme errors on `TerrainCompressibleDynamics`
+Stage physics that runs after the substep loop — the vertically-implicit
+solve, the per-stage scalar update, and the once-per-step operator-split
+microphysics update — is not gated away from the zone; instead the zone is
+*restored* to its marched state ``U⁰ + β\,Δt\,∂_t`` after those operations,
+discarding their increments there. Interior physics therefore never acts on
+the specified zone, the standard limited-area contract. This restoration also
+carries the moisture drive: the moisture density never enters the acoustic
+loop, so a supplied ``ρqᵛ`` tendency marches the zone's moisture purely
+through the restore (a `nothing` source holds zone moisture frozen, like the
+other variables). Two caveats: the specified column's ``(ρw)'`` has no
+boundary data — its zero-gradient closure stands and the column-local
+implicit operator acts on it unrestored — and the zone's diagnostic fields
+(temperature, pressure) refresh only at the next stage's state update.
+
+One current restriction: the scheme errors on `TerrainCompressibleDynamics`
 (the terrain horizontal pressure-gradient stencils are not column-local, so
-marched specified-cell scalars would leak into interior columns), and optional
-post-loop stage physics (vertically implicit closures, microphysics updates)
-is not excluded from the specified zone — with such physics enabled the zone
-deviates from the driving data by one step of ungated tendencies.
+marched specified-cell scalars would leak into interior columns).
 
 ## [Klemp divergence damping](@id klemp-damping)
 

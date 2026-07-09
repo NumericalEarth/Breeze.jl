@@ -81,7 +81,7 @@ Fields:
   excluded — those are in the fast operator).
 - `vertical_solver`: `BatchedTridiagonalSolver` for the implicit (ρw)′ update.
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, BTU, BTV, BTR, BTX}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, BTU, BTV, BTR, BTX, BTQ}
     substeps :: N
     acoustic_cfl :: FT
     forward_weight :: FT
@@ -128,6 +128,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, BTU, BTV, BTR, 
     boundary_momentum_tendency_v :: BTV
     boundary_density_tendency :: BTR
     boundary_density_potential_temperature_tendency :: BTX
+    boundary_moisture_tendency :: BTQ
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -158,7 +159,8 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.boundary_momentum_tendency_u),
                        adapt(to, a.boundary_momentum_tendency_v),
                        adapt(to, a.boundary_density_tendency),
-                       adapt(to, a.boundary_density_potential_temperature_tendency))
+                       adapt(to, a.boundary_density_potential_temperature_tendency),
+                       adapt(to, a.boundary_moisture_tendency))
 
 #####
 ##### Section 2 — Constructor
@@ -239,6 +241,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     boundary_momentum_tendency_v = marched ? YFaceField(grid, substep_floattype) : nothing
     boundary_density_tendency = marched ? CenterField(grid, substep_floattype) : nothing
     boundary_density_potential_temperature_tendency = marched ? CenterField(grid, substep_floattype) : nothing
+    boundary_moisture_tendency = marched ? CenterField(grid, substep_floattype) : nothing
 
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
@@ -272,7 +275,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               boundary_momentum_tendency_u,
                               boundary_momentum_tendency_v,
                               boundary_density_tendency,
-                              boundary_density_potential_temperature_tendency)
+                              boundary_density_potential_temperature_tendency,
+                              boundary_moisture_tendency)
 end
 
 #####
