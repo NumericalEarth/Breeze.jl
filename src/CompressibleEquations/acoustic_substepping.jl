@@ -1011,14 +1011,13 @@ end
 # damping comes from off-centering (`forward_weight > 0.5`) in the implicit
 # column solve.
 function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
-    FT    = eltype(grid)
-    arch  = architecture(grid)
-    α     = convert(FT, damping.coefficient)
-    Δτ_FT = convert(FT, Δτ)
+    FT   = eltype(grid)
+    arch = architecture(grid)
+    α    = damping.coefficient
 
     TX, TY, _ = topology(grid)
-    x_damping_scale = TX === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α, Δτ_FT)
-    y_damping_scale = TY === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α, Δτ_FT)
+    x_damping_scale = TX === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
+    y_damping_scale = TY === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
 
     launch!(arch, grid, :xyz, _thermal_divergence_damping!,
             substepper.momentum_perturbation.u,
@@ -1026,7 +1025,7 @@ function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper
             substepper.density_potential_temperature_perturbation,
             substepper.previous_density_potential_temperature_perturbation,
             substepper.linearization_potential_temperature,
-            grid, x_damping_scale, y_damping_scale)
+            grid, convert(FT, Δτ), x_damping_scale, y_damping_scale)
 
     return nothing
 end
@@ -1034,27 +1033,33 @@ end
 @inline dρθ′(i, j, k, grid, ρθ′, ρθ′ˢ⁻) = @inbounds ρθ′[i, j, k] - ρθ′ˢ⁻[i, j, k]
 
 struct NoHorizontalDampingScale end
+
+# Stores only the dimensionless Klemp coefficient α. Δτ is excluded from the
+# struct so that a TracedRNumber substep size never ends up as a struct field
+# (embedding traced values in structs causes invalid LLVM IR in Reactant kernels).
+# Δτ is passed as a direct scalar argument to the kernel instead.
 struct LocalHorizontalDampingScale{FT}
-    α_over_Δτ :: FT
+    α :: FT
 end
 
+# Stores α · ℓ² (without the 1/Δτ factor) for the same reason.
 struct FixedHorizontalDampingScale{FT}
-    diffusivity :: FT
+    coefficient :: FT
 end
 
-@inline horizontal_damping_scale(damping::ThermalDivergenceDamping{FT, Nothing}, α, Δτ) where FT =
-    LocalHorizontalDampingScale(α / Δτ)
+@inline horizontal_damping_scale(damping::ThermalDivergenceDamping{FT, Nothing}, α) where FT =
+    LocalHorizontalDampingScale(α)
 
-@inline function horizontal_damping_scale(damping::ThermalDivergenceDamping, α, Δτ)
+@inline function horizontal_damping_scale(damping::ThermalDivergenceDamping, α)
     ℓ = convert(typeof(α), damping.length_scale)
-    return FixedHorizontalDampingScale(α * ℓ^2 / Δτ)
+    return FixedHorizontalDampingScale(α * ℓ^2)
 end
 
-@inline κˣ(i, j, k, grid, ::NoHorizontalDampingScale) = zero(grid)
-@inline κʸ(i, j, k, grid, ::NoHorizontalDampingScale) = zero(grid)
+@inline κˣ(i, j, k, grid, ::NoHorizontalDampingScale, Δτ) = zero(grid)
+@inline κʸ(i, j, k, grid, ::NoHorizontalDampingScale, Δτ) = zero(grid)
 
-@inline κˣ(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
-@inline κʸ(i, j, k, grid, scale::FixedHorizontalDampingScale) = scale.diffusivity
+@inline κˣ(i, j, k, grid, scale::FixedHorizontalDampingScale, Δτ) = scale.coefficient / Δτ
+@inline κʸ(i, j, k, grid, scale::FixedHorizontalDampingScale, Δτ) = scale.coefficient / Δτ
 
 # Isotropic, mesh-varying horizontal damping (MPAS-style): a single scalar diffusivity
 # κ = α/Δτ · ℓ² applied identically in x and y, with ℓ the *smallest* local horizontal
@@ -1073,10 +1078,10 @@ end
     return min(Δx, Δy)
 end
 
-@inline _κ_local(i, j, k, grid, scale::LocalHorizontalDampingScale) =
-    scale.α_over_Δτ * _min_horizontal_spacing(i, j, k, grid)^2
-@inline κˣ(i, j, k, grid, scale::LocalHorizontalDampingScale) = _κ_local(i, j, k, grid, scale)
-@inline κʸ(i, j, k, grid, scale::LocalHorizontalDampingScale) = _κ_local(i, j, k, grid, scale)
+@inline _κ_local(i, j, k, grid, scale::LocalHorizontalDampingScale, Δτ) =
+    scale.α * _min_horizontal_spacing(i, j, k, grid)^2 / Δτ
+@inline κˣ(i, j, k, grid, scale::LocalHorizontalDampingScale, Δτ) = _κ_local(i, j, k, grid, scale, Δτ)
+@inline κʸ(i, j, k, grid, scale::LocalHorizontalDampingScale, Δτ) = _κ_local(i, j, k, grid, scale, Δτ)
 
 
 # Horizontal divergence damping in the form of Klemp, Skamarock & Ha (2018)
@@ -1089,19 +1094,19 @@ end
 # diffusivity γ = α length_scale² / Δτ for backwards-compatible tuning.
 # The vertical component lives in the column tridiag (it's a Laplacian on
 # (ρw)′ folded into the implicit acoustic solve), not here.
-@kernel function _thermal_divergence_damping!(ρu′, ρv′, ρθ′, ρθ′ˢ⁻, θᴸ, grid,
+@kernel function _thermal_divergence_damping!(ρu′, ρv′, ρθ′, ρθ′ˢ⁻, θᴸ, grid, Δτ,
                                               x_damping_scale, y_damping_scale)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
         θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
-        γˣ = κˣ(i, j, k, grid, x_damping_scale)
+        γˣ = κˣ(i, j, k, grid, x_damping_scale, Δτ)
         ρu′[i, j, k] -= γˣ * ∂x_div / θᴸᶠᶜᶜ
 
         ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
         θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
-        γʸ = κʸ(i, j, k, grid, y_damping_scale)
+        γʸ = κʸ(i, j, k, grid, y_damping_scale, Δτ)
         ρv′[i, j, k] -= γʸ * ∂y_div / θᴸᶜᶠᶜ
     end
 end
