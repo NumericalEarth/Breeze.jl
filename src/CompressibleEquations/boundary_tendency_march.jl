@@ -29,20 +29,16 @@
 """
 $(TYPEDEF)
 
-Scheme for a momentum `NormalFlowBoundaryCondition` that drives the outermost
-interior cells (an MPAS-style specified zone) by boundary value + time-tendency
-each acoustic substep, instead of freezing it at the stage-entry state.
+Marker scheme for a momentum `NormalFlowBoundaryCondition` that drives the
+outermost interior cells (an MPAS-style specified zone) by boundary value +
+time-tendency each acoustic substep, instead of freezing them at the
+stage-entry state.
 
-Tendency sources are callables of `(x, y, z, t)` returning the local time
-derivative of the coupled quantity (``∂ₜ(ρu)``, ``∂ₜ(ρv)``, ``∂ₜρᵈ``,
-``∂ₜ(ρθ)``, ``∂ₜ(ρqᵛ)``), evaluated over the specified zone once per outer
-time step. Sources are evaluated on the device, so they must capture only
-isbits values (the standard boundary-condition-function restriction). A source
-may be `nothing`, in which case the corresponding tendency field stays zero —
-a frozen hold for that variable — unless filled in place through
-[`boundary_tendency_fields`](@ref) (for boundary data that cannot be evaluated
-on the device, e.g. interpolated forcing files). One scheme instance must be
-shared by all marched momentum boundary conditions.
+The scheme carries no data. The specified-zone time-tendencies
+(``∂ₜ(ρu)``, ``∂ₜ(ρv)``, ``∂ₜρᵈ``, ``∂ₜ(ρθ)``, ``∂ₜ(ρqᵛ)``) are held in fields
+exposed by [`boundary_tendency_fields`](@ref), which a driver fills in place
+over the specified zone each outer time step (e.g. from a parent model or from
+interpolated forcing files). A field left zero holds its variable frozen.
 
 The boundary *value* enters through the `NormalFlowBoundaryCondition`'s own
 condition, exactly as without the scheme; the scheme adds the tendency drive.
@@ -51,49 +47,12 @@ condition, exactly as without the scheme; the scheme adds the tendency drive.
 julia> using Breeze
 
 julia> BoundaryTendencyMarch()
-BoundaryTendencyMarch(ρu_tendency=nothing, ρv_tendency=nothing, ρᵈ_tendency=nothing, ρθ_tendency=nothing, ρqᵛ_tendency=nothing)
+BoundaryTendencyMarch()
 ```
 """
-struct BoundaryTendencyMarch{U, V, R, X, Q}
-    ρu_tendency :: U
-    ρv_tendency :: V
-    ρᵈ_tendency :: R
-    ρθ_tendency :: X
-    ρqᵛ_tendency :: Q
-end
+struct BoundaryTendencyMarch end
 
-"""
-$(TYPEDSIGNATURES)
-
-Build a [`BoundaryTendencyMarch`](@ref) from keyword tendency sources, each a
-callable of `(x, y, z, t)` or `nothing` (see the type docstring).
-"""
-BoundaryTendencyMarch(; ρu_tendency = nothing,
-                        ρv_tendency = nothing,
-                        ρᵈ_tendency = nothing,
-                        ρθ_tendency = nothing,
-                        ρqᵛ_tendency = nothing) =
-    BoundaryTendencyMarch(ρu_tendency, ρv_tendency, ρᵈ_tendency, ρθ_tendency, ρqᵛ_tendency)
-
-Adapt.adapt_structure(to, scheme::BoundaryTendencyMarch) =
-    BoundaryTendencyMarch(adapt(to, scheme.ρu_tendency),
-                          adapt(to, scheme.ρv_tendency),
-                          adapt(to, scheme.ρᵈ_tendency),
-                          adapt(to, scheme.ρθ_tendency),
-                          adapt(to, scheme.ρqᵛ_tendency))
-
-Base.summary(scheme::BoundaryTendencyMarch) = "BoundaryTendencyMarch"
-
-tendency_summary(source) = prettysummary(source)
-tendency_summary(::Nothing) = "nothing"
-
-Base.show(io::IO, scheme::BoundaryTendencyMarch) =
-    print(io, "BoundaryTendencyMarch",
-              "(ρu_tendency=", tendency_summary(scheme.ρu_tendency),
-              ", ρv_tendency=", tendency_summary(scheme.ρv_tendency),
-              ", ρᵈ_tendency=", tendency_summary(scheme.ρᵈ_tendency),
-              ", ρθ_tendency=", tendency_summary(scheme.ρθ_tendency),
-              ", ρqᵛ_tendency=", tendency_summary(scheme.ρqᵛ_tendency), ")")
+Base.summary(::BoundaryTendencyMarch) = "BoundaryTendencyMarch"
 
 # Scheme detection on a momentum boundary condition. A side is marched when its
 # normal-momentum BC is a `NormalFlow` carrying a `BoundaryTendencyMarch`.
@@ -124,24 +83,6 @@ function active_march_sides(model)
     ρv_bcs = model.momentum.ρv.boundary_conditions
     open_sides = march_open_sides(ρu_bcs, ρv_bcs)
     return any_marched(open_sides) ? open_sides : nothing
-end
-
-# The one scheme shared by the marched sides. The tendency fields are filled
-# from a single instance, so differing instances would be silently ignored —
-# error instead.
-function shared_march_scheme(ρu_bcs, ρv_bcs)
-    scheme = nothing
-    for bc in (ρu_bcs.west, ρu_bcs.east, ρv_bcs.south, ρv_bcs.north)
-        side_scheme = march_scheme(bc)
-        side_scheme === nothing && continue
-        if scheme === nothing
-            scheme = side_scheme
-        elseif scheme !== side_scheme
-            error("All marched momentum boundary conditions must share one " *
-                  "BoundaryTendencyMarch instance; found two distinct schemes.")
-        end
-    end
-    return scheme
 end
 
 # `(x_specified, y_specified)`: true on the x-/y-faces whose acoustic ∂p′
@@ -197,66 +138,6 @@ end
         j2 = j + ifelse(s.south & (j == 1),  1, 0) - ifelse(s.north & (j == Ny), 1, 0)
         @inbounds ρw′[i, j, k] = ρw′[i2, j2, k]
     end
-    return nothing
-end
-
-@inline tendency_value(::Nothing, x, y, z, t) = zero(x)
-@inline tendency_value(f, x, y, z, t) = f(x, y, z, t)
-
-@inline has_tendency_sources(scheme::BoundaryTendencyMarch) =
-    !(scheme.ρu_tendency === nothing && scheme.ρv_tendency === nothing &&
-      scheme.ρᵈ_tendency === nothing && scheme.ρθ_tendency === nothing &&
-      scheme.ρqᵛ_tendency === nothing)
-
-# Evaluate the scheme's tendency sources over the specified zone (zero outside
-# it, and zero where the source is `nothing`). Launched once per outer step.
-# Each source is bound before its `ifelse` so both branches share one type
-# even when the callable's return type differs from the grid float type.
-@kernel function _fill_boundary_tendencies!(∂ₜρu, ∂ₜρv, ∂ₜρᵈ, ∂ₜρθ, ∂ₜρqᵛ, grid, scheme, open_sides, t)
-    i, j, k = @index(Global, NTuple)
-
-    x_specified, y_specified = specified_zone_faces(i, j, grid, open_sides)
-    cell_specified = specified_zone_cell(i, j, grid, open_sides)
-
-    @inbounds begin
-        xᶠ = xnode(i, j, k, grid, Face(), Center(), Center())
-        xᶜ = xnode(i, j, k, grid, Center(), Center(), Center())
-        yᶠ = ynode(i, j, k, grid, Center(), Face(), Center())
-        yᶜ = ynode(i, j, k, grid, Center(), Center(), Center())
-        zᶜ = znode(i, j, k, grid, Center(), Center(), Center())
-
-        ∂ₜρu_value = tendency_value(scheme.ρu_tendency, xᶠ, yᶜ, zᶜ, t)
-        ∂ₜρv_value = tendency_value(scheme.ρv_tendency, xᶜ, yᶠ, zᶜ, t)
-        ∂ₜρᵈ_value = tendency_value(scheme.ρᵈ_tendency, xᶜ, yᶜ, zᶜ, t)
-        ∂ₜρθ_value = tendency_value(scheme.ρθ_tendency, xᶜ, yᶜ, zᶜ, t)
-        ∂ₜρqᵛ_value = tendency_value(scheme.ρqᵛ_tendency, xᶜ, yᶜ, zᶜ, t)
-
-        ∂ₜρu[i, j, k] = ifelse(x_specified,    ∂ₜρu_value, zero(∂ₜρu_value))
-        ∂ₜρv[i, j, k] = ifelse(y_specified,    ∂ₜρv_value, zero(∂ₜρv_value))
-        ∂ₜρᵈ[i, j, k] = ifelse(cell_specified, ∂ₜρᵈ_value, zero(∂ₜρᵈ_value))
-        ∂ₜρθ[i, j, k] = ifelse(cell_specified, ∂ₜρθ_value, zero(∂ₜρθ_value))
-        ∂ₜρqᵛ[i, j, k] = ifelse(cell_specified, ∂ₜρqᵛ_value, zero(∂ₜρqᵛ_value))
-    end
-end
-
-function fill_boundary_tendencies!(substepper, model)
-    ∂ₜρu = substepper.boundary_momentum_tendency_u
-    ∂ₜρu === nothing && return nothing
-
-    ρu_bcs = model.momentum.ρu.boundary_conditions
-    ρv_bcs = model.momentum.ρv.boundary_conditions
-    scheme = shared_march_scheme(ρu_bcs, ρv_bcs)
-    (scheme === nothing || !has_tendency_sources(scheme)) && return nothing
-
-    grid = model.grid
-    launch!(architecture(grid), grid, :xyz, _fill_boundary_tendencies!,
-            ∂ₜρu,
-            substepper.boundary_momentum_tendency_v,
-            substepper.boundary_density_tendency,
-            substepper.boundary_density_potential_temperature_tendency,
-            substepper.boundary_moisture_tendency,
-            grid, scheme, march_open_sides(ρu_bcs, ρv_bcs), model.clock.time)
-
     return nothing
 end
 
@@ -349,11 +230,10 @@ Return the substepper's boundary tendency fields
 `(ρu = ..., ρv = ..., ρᵈ = ..., ρθ = ..., ρqᵛ = ...)` for a model whose
 momentum boundary conditions carry a [`BoundaryTendencyMarch`](@ref) scheme.
 The fields hold ``∂ₜ(ρu)``, ``∂ₜ(ρv)``, ``∂ₜρᵈ``, ``∂ₜ(ρθ)``, ``∂ₜ(ρqᵛ)`` over
-the specified zone (zero elsewhere) and may be filled in place by a driver
-each outer time step as an alternative to callable tendency sources, e.g.
-when the boundary data comes from interpolated files that cannot be evaluated
-on the device. When callable sources ARE provided, the fields are refreshed
-from them once per outer step and external fills are overwritten.
+the specified zone (only their specified-zone entries are ever read). A driver
+fills them in place each outer time step — e.g. from a parent model or from
+interpolated forcing files — and the values persist until overwritten. A field
+left zero holds its variable frozen.
 """
 boundary_tendency_fields(model) =
     (ρu = model.timestepper.substepper.boundary_momentum_tendency_u,

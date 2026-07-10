@@ -83,13 +83,14 @@ end
     # (β₁+β₂+β₃) = 11/6·Δt·a). Rest state ⇒ the only spec-face forcing is the march.
     grid = bounded_grid(Float64)
     a = 1e-4   # ∂ₜ(ρu) [kg m⁻² s⁻²]
-    scheme = BoundaryTendencyMarch(ρu_tendency=(x, y, z, t) -> a)
+    scheme = BoundaryTendencyMarch()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
     model = AtmosphereModel(grid; dynamics, boundary_conditions = (ρu = ρu_bcs,))
     ref = model.dynamics.reference_state
     set!(model; θ = 300, u = 0, ρ = ref.density)
+    set!(boundary_tendency_fields(model).ρu, a)
 
     Δt = 10.0
     i, j, k = 2, 4, 2          # a west specified face away from corners
@@ -127,13 +128,14 @@ end
 @testset "reimpose_specified_zone! restores the marched zone" begin
     grid = bounded_grid(Float64)
     a = 1e-4
-    scheme = BoundaryTendencyMarch(ρu_tendency=(x, y, z, t) -> a)
+    scheme = BoundaryTendencyMarch()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
     model = AtmosphereModel(grid; dynamics, boundary_conditions = (ρu = ρu_bcs,))
     ref = model.dynamics.reference_state
     set!(model; θ = 300, u = 0, ρ = ref.density)
+    set!(boundary_tendency_fields(model).ρu, a)
 
     Δt = 10.0
     time_step!(model, Δt)
@@ -168,7 +170,7 @@ end
     grid = bounded_grid(Float64)
     a = 1e-4
     Lz = 400.0
-    scheme = BoundaryTendencyMarch(ρu_tendency=(x, y, z, t) -> a * (z / Lz)^2)
+    scheme = BoundaryTendencyMarch()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
@@ -177,6 +179,7 @@ end
     @test model.timestepper.implicit_solver !== nothing
     ref = model.dynamics.reference_state
     set!(model; θ = 300, u = 0, ρ = ref.density)
+    set!(boundary_tendency_fields(model).ρu, (x, y, z) -> a * (z / Lz)^2)
 
     Δt = 10.0
     i, j = 2, 4                # a west specified face away from corners
@@ -202,13 +205,14 @@ end
     # re-imposition.
     grid = bounded_grid(Float64)
     b = 1e-7   # ∂ₜ(ρqᵛ) [kg m⁻³ s⁻¹]
-    scheme = BoundaryTendencyMarch(ρqᵛ_tendency=(x, y, z, t) -> b)
+    scheme = BoundaryTendencyMarch()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
     model = AtmosphereModel(grid; dynamics, boundary_conditions = (ρu = ρu_bcs,))
     ref = model.dynamics.reference_state
     set!(model; θ = 300, u = 0, ρ = ref.density)
+    set!(boundary_tendency_fields(model).ρqᵛ, b)
 
     Δt = 10.0
     ρqᵛ = model.moisture_density

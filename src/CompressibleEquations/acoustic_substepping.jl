@@ -298,12 +298,6 @@ After this call:
 function freeze_linearization_state!(substepper::AcousticSubstepper, model)
     refresh_linearization_basic_state!(substepper, model)
 
-    # BoundaryTendencyMarch (#825): refresh the specified-zone boundary
-    # tendencies from the scheme's sources at outer-step entry (one
-    # stage-constant ∂ₜ per outer step — the MPAS lbc_tend cadence). No-op
-    # without the scheme or when the driver fills the fields in place.
-    fill_boundary_tendencies!(substepper, model)
-
     velocities = outer_step_start_transport_velocities(model)
 
     # Seed the time-averaged velocity with the outer-step-start velocities (full

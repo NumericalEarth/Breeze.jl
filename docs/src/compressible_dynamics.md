@@ -447,10 +447,11 @@ superseded and skipped: the march holds the same cells to the time-accurate
 boundary state directly. Normal-flow boundaries without the scheme retain the
 relaxation unchanged.
 
-Tendency sources are callables of ``(x, y, z, t)`` evaluated over the specified
-zone once per outer time step; alternatively, the underlying tendency fields are
-exposed through [`boundary_tendency_fields`](@ref) for drivers whose boundary
-data cannot be evaluated on the device (e.g. interpolated forcing files).
+The specified-zone tendencies are supplied through the fields exposed by
+[`boundary_tendency_fields`](@ref) — ``∂_t(ρu)``, ``∂_t(ρv)``, ``∂_t ρᵈ``,
+``∂_t(ρθ)``, ``∂_t(ρqᵛ)`` — which a driver fills in place over the specified
+zone each outer time step (e.g. from a parent model or interpolated forcing
+files). A field left zero holds its variable frozen.
 
 Stage physics that runs after the substep loop — the vertically-implicit
 solve, the per-stage scalar update, and the once-per-step operator-split
@@ -460,8 +461,8 @@ discarding their increments there. Interior physics therefore never acts on
 the specified zone, the standard limited-area contract. This restoration also
 carries the moisture drive: the moisture density never enters the acoustic
 loop, so a supplied ``ρqᵛ`` tendency marches the zone's moisture purely
-through the restore (a `nothing` source holds zone moisture frozen, like the
-other variables). Two caveats: the specified column's ``(ρw)'`` has no
+through the restore (a zero ``ρqᵛ`` tendency field holds zone moisture frozen,
+like the other variables). Two caveats: the specified column's ``(ρw)'`` has no
 boundary data — its zero-gradient closure stands and the column-local
 implicit operator acts on it unrestored — and the zone's diagnostic fields
 (temperature, pressure) refresh only at the next stage's state update.
