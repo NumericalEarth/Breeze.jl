@@ -102,6 +102,15 @@ intensive variable is recovered as `θ = ρθ / dynamics_density(dynamics)`.
 """
 function thermodynamic_density end
 
+"""
+    with_thermodynamic_density(formulation, ρᵡ)
+
+Return a copy of `formulation` whose thermodynamic density field (see [`thermodynamic_density`](@ref))
+is replaced by `ρᵡ`, leaving the diagnostic fields and solvers untouched. Used to swap in a
+thermodynamic field carrying different boundary conditions without reallocating the diagnostics.
+"""
+function with_thermodynamic_density end
+
 #####
 ##### Prognostic field collection
 #####

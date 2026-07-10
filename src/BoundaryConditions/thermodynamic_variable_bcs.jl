@@ -296,6 +296,27 @@ function theta_to_energy_bcs(fbcs::FieldBoundaryConditions)
 end
 
 #####
+##### Strip diabatic surface fluxes for adiabatic initialization
+#####
+
+# Replace a diabatic thermodynamic surface flux (sensible-heat / energy / θ flux) with no-flux;
+# pass every other (dynamical) boundary condition through unchanged.
+adiabatic_thermodynamic_bc(bc) = bc
+adiabatic_thermodynamic_bc(::BulkSensibleHeatFluxBoundaryCondition) = OceananigansBC.NoFluxBoundaryCondition()
+adiabatic_thermodynamic_bc(::EnergyFluxBCType) = OceananigansBC.NoFluxBoundaryCondition()
+adiabatic_thermodynamic_bc(::ThetaFluxBCType)  = OceananigansBC.NoFluxBoundaryCondition()
+
+function AtmosphereModels.adiabatic_thermodynamic_bcs(fbcs::FieldBoundaryConditions)
+    return FieldBoundaryConditions(; west     = adiabatic_thermodynamic_bc(fbcs.west),
+                                     east     = adiabatic_thermodynamic_bc(fbcs.east),
+                                     south    = adiabatic_thermodynamic_bc(fbcs.south),
+                                     north    = adiabatic_thermodynamic_bc(fbcs.north),
+                                     bottom   = adiabatic_thermodynamic_bc(fbcs.bottom),
+                                     top      = adiabatic_thermodynamic_bc(fbcs.top),
+                                     immersed = adiabatic_thermodynamic_bc(fbcs.immersed))
+end
+
+#####
 ##### Regularization functions for BC wrappers
 #####
 

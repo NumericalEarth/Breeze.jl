@@ -10,7 +10,10 @@
 
 using Breeze
 using Breeze: dynamics_density
+using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, EnergyFluxBoundaryConditionFunction
+using Breeze.AtmosphereModels: adiabatic_balance_twin, AdiabaticBalancer, thermodynamic_density
 using Oceananigans
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions
 using Oceananigans.TimeSteppers: update_state!
 using GPUArraysCore: @allowscalar
 using Test
@@ -151,6 +154,42 @@ end
         @test model.clock.iteration == 0
         @test model.clock.stage == 1
         @test isinf(model.clock.last_Δt)
+    end
+
+    @testset "adiabatic twin strips diabatic surface fluxes (#842)" begin
+        grid = RectilinearGrid(default_arch;
+                               size = (8, 8, 32), halo = (5, 5, 5),
+                               x = (0, 100e3), y = (0, 100e3), z = (0, 10e3),
+                               topology = (Periodic, Periodic, Bounded))
+        constants = ThermodynamicConstants(eltype(grid))
+        dyn = CompressibleDynamics(SplitExplicitTimeDiscretization(; sponge = nothing);
+                                   reference_potential_temperature = θ_iso_ai,
+                                   surface_pressure  = 1e5,
+                                   standard_pressure = 1e5)
+        ρθ_bcs = FieldBoundaryConditions(bottom = EnergyFluxBoundaryCondition(100.0))
+        model = AtmosphereModel(grid; dynamics = dyn,
+                                      thermodynamic_constants = constants,
+                                      microphysics = nothing,
+                                      boundary_conditions = (; ρθ = ρθ_bcs))
+
+        # Production carries the diabatic surface energy-flux BC...
+        ρθ = thermodynamic_density(model.formulation)
+        @test ρθ.boundary_conditions.bottom.condition isa EnergyFluxBoundaryConditionFunction
+
+        # ...the adiabatic twin does not, and shares the production data so the balanced state
+        # still lands in `model`.
+        twin = adiabatic_balance_twin(model, AdiabaticBalancer())
+        ρθ_twin = thermodynamic_density(twin.formulation)
+        @test !(ρθ_twin.boundary_conditions.bottom.condition isa EnergyFluxBoundaryConditionFunction)
+        @test ρθ_twin.data === ρθ.data
+
+        # And the balancer runs to completion with the diabatic BC present on the model: from a
+        # discrete-balanced rest state, ρw stays ~0 (on GPU this also exercises the flux-BC kernel
+        # that #842 fails to compile).
+        _set_discrete_rest!(model)
+        balance_adiabatically!(model, AdiabaticBalancer())
+        @test all(isfinite, Array(interior(model.momentum.ρw)))
+        @test maximum(abs, Array(interior(model.momentum.ρw))) <= 1e-6
     end
 
 end
