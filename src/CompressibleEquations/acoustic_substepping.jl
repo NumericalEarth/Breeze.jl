@@ -1325,20 +1325,7 @@ end
 
 # Per-substep impenetrability enforcement on the wall-normal momentum
 # perturbations — the closed-wall companion of `apply_open_boundary_relaxation!`
-# above (which handles open lateral boundaries, issue #738).
-#
-# The slow momentum tendency is computed on the west/south wall faces (the
-# `:xyz` tendency launch covers index 1 of a `Face` dimension but not index
-# N+1), so on an impermeable `Bounded` boundary the substep loop integrates
-# Δτ·Gⁿρv on the south wall face every substep, and the predictor's horizontal
-# divergence then drives a spurious wall mass flux — creating mass ∝
-# Gⁿρv(wall)·(βΔt)² per stage (hence the observed Δt²-per-step, south/bottom-
-# heavy drift). The prognostic momentum's wall values are re-zeroed by its
-# boundary conditions at stage end, so the defect is invisible in the recovered
-# state. Enforce impenetrability on the perturbations every substep, on any
-# `Bounded` side without an active open boundary, matching the per-substep
-# boundary enforcement of WRF and MPAS. See
-# `validation/baroclinic_wave_mass_conservation_findings.md`.
+# above (which handles open lateral boundaries).
 
 @kernel function _zero_x_wall_face!(ρu′, iᶠ)
     j, k = @index(Global, NTuple)
@@ -1350,6 +1337,8 @@ end
     @inbounds ρv′[i, jᶠ, k] = 0
 end
 
+@inline is_impenetrable_wall(bc) = (bc isa BoundaryCondition{NormalFlow{Nothing}}) && (bc.condition isa Nothing)
+
 function enforce_wall_impenetrability!(substepper, model, grid, arch)
     TX, TY, _ = topology(grid)
     Nx, Ny, _ = size(grid)
@@ -1358,12 +1347,12 @@ function enforce_wall_impenetrability!(substepper, model, grid, arch)
     bcs_u = model.momentum.ρu.boundary_conditions
     bcs_v = model.momentum.ρv.boundary_conditions
     if TX === Bounded
-        is_active_open_bc(bcs_u.west) || launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
-        is_active_open_bc(bcs_u.east) || launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
+        is_impenetrable_wall(bcs_u.west) && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
+        is_impenetrable_wall(bcs_u.east) && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
     end
     if TY === Bounded
-        is_active_open_bc(bcs_v.south) || launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
-        is_active_open_bc(bcs_v.north) || launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
+        is_impenetrable_wall(bcs_v.south) && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
+        is_impenetrable_wall(bcs_v.north) && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
     end
     return nothing
 end
