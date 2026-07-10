@@ -63,15 +63,16 @@ end
         twin  = adiabatic_balance_twin(model)
 
         # Every heavy field is the SAME object, not a copy.
-        @test twin.momentum.ρu      === model.momentum.ρu
-        @test twin.momentum.ρv      === model.momentum.ρv
-        @test twin.momentum.ρw      === model.momentum.ρw
         @test twin.velocities       === model.velocities
         @test twin.temperature      === model.temperature
         @test twin.pressure_solver  === model.pressure_solver
         @test dynamics_density(twin.dynamics) === dynamics_density(model.dynamics)
-        # ρθ and moisture_density are the exception: the twin gets its own Field wrapper carrying
-        # stripped (no-flux) surface BCs, but shares the production data (no reallocation).
+        # Momentum, ρθ, moisture_density, and tracers are the exception: the twin gets its own
+        # Field wrapper carrying stripped (no-flux) surface BCs, but shares the production data
+        # (no reallocation).
+        @test twin.momentum.ρu.data      === model.momentum.ρu.data
+        @test twin.momentum.ρv.data      === model.momentum.ρv.data
+        @test twin.momentum.ρw.data      === model.momentum.ρw.data
         @test ρθ_of(twin).data           === ρθ_of(model).data
         @test twin.moisture_density.data === model.moisture_density.data
         # Stepper tendency storage is aliased, not reallocated.
@@ -106,7 +107,7 @@ end
         @test model.dynamics.time_discretization.sponge !== nothing
         # Tendency storage is still aliased (the rebuilt acoustic substepper is the only new memory).
         @test twin.timestepper.Gⁿ.ρu === model.timestepper.Gⁿ.ρu
-        @test twin.momentum.ρw === model.momentum.ρw
+        @test twin.momentum.ρw.data === model.momentum.ρw.data
 
         # Fixed point holds with the native scheme too.
         _set_discrete_rest!(model)
@@ -233,7 +234,7 @@ end
         # swap); time_stepping is ignored. Tendency storage is still aliased.
         twin = adiabatic_balance_twin(model)
         @test twin.dynamics === model.dynamics
-        @test twin.momentum.ρw === model.momentum.ρw
+        @test twin.momentum.ρw.data === model.momentum.ρw.data
         @test twin.timestepper.Gⁿ.ρu === model.timestepper.Gⁿ.ρu
         @test twin.microphysics === nothing
 

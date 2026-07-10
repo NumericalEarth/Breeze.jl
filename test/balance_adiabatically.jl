@@ -11,6 +11,7 @@
 using Breeze
 using Breeze: dynamics_density
 using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, EnergyFluxBoundaryConditionFunction
+using Breeze.BoundaryConditions: BulkDrag, BulkDragFunction
 using Breeze.AtmosphereModels: adiabatic_balance_twin, AdiabaticBalancer, thermodynamic_density
 using Breeze.AtmosphereModels: adiabatic_scalar_bcs
 using Oceananigans
@@ -27,7 +28,7 @@ const CPD_AI = 1005.0
 # Init-mode model: no upper sponge (the one irreversible substep ingredient),
 # no microphysics. Otherwise mirrors the production split-explicit config.
 function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 100e3,
-                                boundary_conditions = NamedTuple())
+                                boundary_conditions = NamedTuple(), tracers = tuple())
     grid = RectilinearGrid(arch;
                            size = (Nx, Ny, Nz), halo = (5, 5, 5),
                            x = (0, Lh), y = (0, Lh), z = (0, Lz),
@@ -41,7 +42,7 @@ function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 1
     return AtmosphereModel(grid; dynamics = dyn,
                                  thermodynamic_constants = constants,
                                  microphysics = nothing,
-                                 boundary_conditions)
+                                 boundary_conditions, tracers)
 end
 
 # Discrete-balanced rest state (mirrors substepper_rest_state.jl::set_rest_state!).
@@ -221,6 +222,33 @@ end
         twin = adiabatic_balance_twin(model, AdiabaticBalancer())
         @test twin.moisture_density.boundary_conditions.bottom.condition === nothing
         @test twin.moisture_density.data === q_prod.data
+    end
+
+    @testset "adiabatic twin strips a momentum surface drag" begin
+        ρu_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient = 1e-3, surface_temperature = T₀_AI))
+        model = _build_adiabatic_model(default_arch; Nz = 16, Lz = 4e3, Lh = 1e4,
+                                       boundary_conditions = (; ρu = ρu_bcs))
+
+        # Surface momentum drag is dissipative (friction), just like closure — so the twin strips
+        # it too, leaving the reversible excursion free of any surface momentum sink.
+        ρu_prod = model.momentum.ρu
+        @test ρu_prod.boundary_conditions.bottom.condition isa BulkDragFunction
+        twin = adiabatic_balance_twin(model, AdiabaticBalancer())
+        @test !(twin.momentum.ρu.boundary_conditions.bottom.condition isa BulkDragFunction)
+        @test twin.momentum.ρu.boundary_conditions.bottom.condition === nothing
+        @test twin.momentum.ρu.data === ρu_prod.data
+    end
+
+    @testset "adiabatic twin strips a generic tracer surface flux" begin
+        c_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1e-4))
+        model = _build_adiabatic_model(default_arch; Nz = 16, Lz = 4e3, Lh = 1e4,
+                                       tracers = :c, boundary_conditions = (; c = c_bcs))
+
+        c_prod = model.tracers.c
+        @test c_prod.boundary_conditions.bottom.condition == 1e-4
+        twin = adiabatic_balance_twin(model, AdiabaticBalancer())
+        @test twin.tracers.c.boundary_conditions.bottom.condition === nothing
+        @test twin.tracers.c.data === c_prod.data
     end
 
 end
