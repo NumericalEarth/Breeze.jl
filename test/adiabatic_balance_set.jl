@@ -71,7 +71,9 @@ end
         @test twin.temperature      === model.temperature
         @test twin.pressure_solver  === model.pressure_solver
         @test dynamics_density(twin.dynamics) === dynamics_density(model.dynamics)
-        @test ρθ_of(twin)           === ρθ_of(model)
+        # ρθ is the exception: the twin gets its own Field wrapper carrying stripped (no-flux)
+        # thermodynamic BCs, but shares the production data (no reallocation).
+        @test ρθ_of(twin).data      === ρθ_of(model).data
         # Stepper tendency storage is aliased, not reallocated.
         @test twin.timestepper.Gⁿ.ρu === model.timestepper.Gⁿ.ρu
         @test twin.timestepper.U⁰.ρθ === model.timestepper.U⁰.ρθ
