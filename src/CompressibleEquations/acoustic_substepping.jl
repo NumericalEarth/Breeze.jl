@@ -232,11 +232,16 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     # BoundaryTendencyMarch (#825): allocate the specified-zone tendency storage
     # only when a momentum BC carries the scheme; `nothing` otherwise, so models
     # without the scheme pay no memory and the kernels specialize the march away.
-    marched = prognostic_momentum !== nothing &&
-              any_marched(march_open_sides(prognostic_momentum.ρu.boundary_conditions,
-                                           prognostic_momentum.ρv.boundary_conditions))
-    # The zero-gradient (ρw)′ closure copies from ring 2, which must be interior.
-    marched && @assert min(size(grid, 1), size(grid, 2)) >= 3 "BoundaryTendencyMarch requires at least 3 cells in each marched horizontal direction"
+    open_sides = prognostic_momentum === nothing ? OpenSides(false, false, false, false) :
+                 march_open_sides(prognostic_momentum.ρu.boundary_conditions,
+                                  prognostic_momentum.ρv.boundary_conditions)
+    marched = any_marched(open_sides)
+    # The zero-gradient (ρw)′ closure copies from ring 2, which must be interior, so a
+    # marched horizontal direction needs ≥ 3 cells. Assert PER marched direction (not on
+    # `min(Nx, Ny)`): a Flat-y terrain grid (Ny = 1) that marches only west/east must
+    # still construct — only the x direction it actually marches is constrained.
+    @assert (!(open_sides.west | open_sides.east)) || (size(grid, 1) >= 3) "BoundaryTendencyMarch requires at least 3 cells in the x direction when west or east is marched"
+    @assert (!(open_sides.south | open_sides.north)) || (size(grid, 2) >= 3) "BoundaryTendencyMarch requires at least 3 cells in the y direction when south or north is marched"
     boundary_momentum_tendency_u = marched ? XFaceField(grid, substep_floattype) : nothing
     boundary_momentum_tendency_v = marched ? YFaceField(grid, substep_floattype) : nothing
     boundary_density_tendency = marched ? CenterField(grid, substep_floattype) : nothing
@@ -899,7 +904,9 @@ end
 # On a flat grid there is no horizontal correction, so the factor is ignored here.
 @inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) = ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 @inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ) = ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
-@inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ, slope_correction) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
+# `march_sides` gates the terrain horizontal PGF correction (see the terrain method);
+# a flat grid has no horizontal correction, so this method accepts and ignores it.
+@inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Πᴸ, γRᵐᴸ, slope_correction, march_sides) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 
 @inline apply_horizontal_pressure_gradient_substep(substep, Nτ, apply_first_substep_pressure_gradient) =
     apply_first_substep_pressure_gradient | (substep != 1) | (Nτ == 1)
@@ -955,7 +962,7 @@ end
 # top face Nz+1 lives outside the solver (impenetrability w(top) = 0).
 @kernel function _build_vertical_rhs!(ρw′_rhs, ρ′★, ρθ′★, ρ′, ρθ′, ρw′,
                                       grid, dynamics, Δτ, δτᵐ⁺, δτˢ⁻, Πᴸ, γRᵐᴸ, g, dˢ⁻,
-                                      fw, Gˢρw, sponge, apply_pressure_gradient)
+                                      fw, Gˢρw, sponge, apply_pressure_gradient, march_sides)
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -964,8 +971,8 @@ end
     slope_correction = ifelse(apply_pressure_gradient, one(Δτ), zero(Δτ))
 
     @inbounds begin
-        ∂r_p′★  = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′★, Πᴸ, γRᵐᴸ, slope_correction)
-        ∂r_p′ˢ⁻ = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′,  Πᴸ, γRᵐᴸ, slope_correction)
+        ∂r_p′★  = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′★, Πᴸ, γRᵐᴸ, slope_correction, march_sides)
+        ∂r_p′ˢ⁻ = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′,  Πᴸ, γRᵐᴸ, slope_correction, march_sides)
         Gρwᵖ = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★ # pressure gradient
 
         ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
@@ -1468,12 +1475,6 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     marched = any_marched(open_sides)
     march_sides = marched ? open_sides : nothing
 
-    # The terrain horizontal PGF stencils are not column-local, so marched
-    # specified-cell scalars would leak into interior columns ungated.
-    if marched && model.dynamics isa TerrainCompressibleDynamics
-        error("BoundaryTendencyMarch does not support TerrainCompressibleDynamics yet.")
-    end
-
     if marched && substepper.boundary_momentum_tendency_u === nothing
         error("The momentum boundary conditions carry a BoundaryTendencyMarch scheme " *
               "but the AcousticSubstepper was constructed without them; construct the " *
@@ -1547,7 +1548,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
                 substepper.linearization_exner, substepper.linearization_gamma_R_mixture,
                 g, dˢ⁻, substepper.vertical_momentum_tendency_factor,
                 substepper.slow_vertical_momentum_tendency,
-                substepper.sponge, apply_pressure_gradient)
+                substepper.sponge, apply_pressure_gradient, march_sides)
 
         # Step C: implicit tridiag solve for (ρw)′ with implicit-half δτᵐ⁺
         # and (when active) implicit vertical damping prefactor `dᵐ⁺`.

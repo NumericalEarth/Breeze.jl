@@ -5,7 +5,8 @@
 using Breeze
 using Breeze.CompressibleEquations: BoundaryTendencyMarch, boundary_tendency_fields,
                                     OpenSides, specified_zone_faces, specified_zone_cell,
-                                    march_scheme, reimpose_specified_zone!
+                                    march_scheme, reimpose_specified_zone!,
+                                    compute_contravariant_velocity!
 using Breeze.Microphysics: InstantaneousPrecipitation, WarmPhaseEquilibrium
 using Oceananigans
 using Oceananigans.BoundaryConditions: NormalFlowBoundaryCondition, FieldBoundaryConditions
@@ -279,4 +280,163 @@ end
     end
     @test maximum(abs, interior(model.velocities.u)) < 1e-10
     @test maximum(abs, interior(model.velocities.w)) < 1e-10
+end
+
+#####
+##### BoundaryTendencyMarch over TerrainCompressibleDynamics (#839)
+#####
+##### Shared CPU terrain test problem (duplicated in-file per the two-PR plan — no shared
+##### helper file, since `find_tests` auto-discovers every `test/*.jl`). The march-only
+##### `BoundaryTendencyMarch` is fully qualified so no extra import is needed. The hill
+##### `h₀ sin(πx/Lx)` has zero height and MAX slope at both x-walls (discrete ccf wall
+##### slope ≈ 0.039), so the marched west/east zone sits where the terrain correction is
+##### strongest — the sharpest test of the specified-zone gating.
+
+function terrain_testproblem_grid_and_dynamics(arch)
+    Nx, Nz = 16, 8
+    Lx, Lz = 16e3, 4e3
+    h₀ = 400.0
+    hill(x) = h₀ * sin(π * x / Lx)
+
+    z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length = Nz + 1));
+                                                     formulation = LinearDecay())
+    grid = RectilinearGrid(arch; size = (Nx, Nz), halo = (5, 5),
+                           x = (0, Lx), z = z_faces,
+                           topology = (Bounded, Flat, Bounded))
+    materialize_terrain!(grid, hill)
+
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl = 0.5);
+                                    reference_potential_temperature = 300)
+    return grid, dynamics
+end
+
+# Discrete, density-consistent ρu inflow momentum ρᵣ·U at the west/east faces, read from
+# the model's OWN discrete terrain reference density (NOT a bare constant).
+function terrain_inflow_momentum_columns(grid, dynamics, U)
+    ρᵣ = AtmosphereModel(grid; dynamics).dynamics.terrain_reference_density
+    Nx = size(grid, 1)
+    ρᵣ_int = Array(interior(ρᵣ))          # (Nx, 1, Nz) on CPU
+    west = U .* ρᵣ_int[1, 1, :]
+    east = U .* ρᵣ_int[Nx, 1, :]
+    return west, east
+end
+
+# (a) rest, (b) flowing, (c) march.
+function build_terrain_testproblem(variant; arch = CPU(), U = 10.0)
+    grid, dynamics = terrain_testproblem_grid_and_dynamics(arch)
+
+    if variant === :rest
+        model = AtmosphereModel(grid; dynamics)     # default impenetrable walls
+        set!(model; θ = 300, u = 0, ρ = model.dynamics.terrain_reference_density)
+        return model
+    end
+
+    # Density-consistent DISCRETE inflow momentum ρu = ρᵣ·U at the inflow faces.
+    ρu_west, ρu_east = terrain_inflow_momentum_columns(grid, dynamics, U)
+    Nx = size(grid, 1)
+    west_value(j, k, grid, clock, fields) = @inbounds ρu_west[k]
+    east_value(j, k, grid, clock, fields) = @inbounds ρu_east[k]
+
+    if variant === :flowing
+        ρu_bcs = FieldBoundaryConditions(
+            west = NormalFlowBoundaryCondition(west_value; discrete_form = true),
+            east = NormalFlowBoundaryCondition(east_value; discrete_form = true))
+        model = AtmosphereModel(grid; dynamics, boundary_conditions = (ρu = ρu_bcs,))
+        set!(model; θ = 300, u = U, ρ = model.dynamics.terrain_reference_density,
+             enforce_mass_conservation = false)
+        return model
+
+    elseif variant === :march
+        scheme = Breeze.CompressibleEquations.BoundaryTendencyMarch()   # fieldless marker
+        ρu_bcs = FieldBoundaryConditions(
+            west = NormalFlowBoundaryCondition(west_value; discrete_form = true, scheme),
+            east = NormalFlowBoundaryCondition(east_value; discrete_form = true, scheme))
+        model = AtmosphereModel(grid; dynamics, boundary_conditions = (ρu = ρu_bcs,))
+        set!(model; θ = 300, u = U, ρ = model.dynamics.terrain_reference_density,
+             enforce_mass_conservation = false)
+        return model
+    end
+    error("unknown variant $variant")
+end
+
+# A marched-REST terrain model: the shared terrain grid/dynamics with a
+# `BoundaryTendencyMarch` west/east zone but zero inflow, so the only specified-zone
+# forcing is whatever `boundary_tendency_fields` supplies. Used by the three terrain
+# march testsets below (a flowing base would confound the clean Δρu = Δt·∂ₜ composition).
+function terrain_march_rest_model(; arch = CPU())
+    grid, dynamics = terrain_testproblem_grid_and_dynamics(arch)
+    scheme = BoundaryTendencyMarch()
+    ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
+                                     east = NormalFlowBoundaryCondition(0; scheme))
+    model = AtmosphereModel(grid; dynamics, boundary_conditions = (ρu = ρu_bcs,))
+    set!(model; θ = 300, u = 0, ρ = model.dynamics.terrain_reference_density)
+    return model
+end
+
+@testset "Terrain march holds a rest state" begin
+    # The marched west/east zone with zero boundary tendencies must hold the discrete
+    # terrain rest state to machine precision — the contravariant w̃ (the terrain
+    # transport velocity) included, since a leak in the slope-projected acoustic/slow
+    # terms would show there first. `Δt = 10` from `acoustic_cfl = 0.5`.
+    model = terrain_march_rest_model()
+    w̃ = model.dynamics.contravariant_vertical_velocity
+    ρᵈ = model.dynamics.dry_density
+    mass₀ = sum(interior(ρᵈ))
+
+    for _ in 1:5
+        time_step!(model, 10.0)
+    end
+    compute_contravariant_velocity!(model)
+
+    @test maximum(abs, interior(model.velocities.u)) < 1e-10
+    @test maximum(abs, interior(model.velocities.w)) < 1e-10
+    @test maximum(abs, interior(w̃)) < 1e-10
+    @test abs(sum(interior(ρᵈ)) - mass₀) / mass₀ ≤ 1e-13
+end
+
+@testset "Terrain march composition recovers Δρu = Δt·∂ₜ" begin
+    # A constant ∂ₜ(ρu) = a on the specified zone advances the recovered west-face
+    # momentum by exactly Δt·a per outer step over terrain, just as on a flat grid —
+    # the terrain slope corrections must not perturb the increment. A supplied-zero
+    # ρθ tendency holds the zone's thermodynamic density exactly. Flat-y ⇒ j = 1.
+    model = terrain_march_rest_model()
+    a = 1e-4
+    set!(boundary_tendency_fields(model).ρu, a)
+
+    Δt = 10.0
+    i, j, k = 2, 1, 2          # a west specified face (i ≤ 2), Flat-y column
+    ρu = model.momentum.ρu
+    ρθ = model.formulation.potential_temperature_density
+    zone_ρθ₀ = @allowscalar ρθ[1, 1, 2]
+
+    ρu₀ = @allowscalar ρu[i, j, k]
+    time_step!(model, Δt)
+    ρu₁ = @allowscalar ρu[i, j, k]
+    @test isapprox(ρu₁ - ρu₀, Δt * a; rtol = 1e-10)
+
+    time_step!(model, Δt)
+    ρu₂ = @allowscalar ρu[i, j, k]
+    @test isapprox(ρu₂ - ρu₁, Δt * a; rtol = 1e-10)
+
+    @test (@allowscalar ρθ[1, 1, 2]) == zone_ρθ₀   # zero-tendency ρθ held exactly
+end
+
+@testset "Terrain march does not leak specified-zone scalars into the interior" begin
+    # Discriminator for the terrain slope-correction gating (Path A + the slow-w̃
+    # pressure/momentum substitution): heat ONLY the specified zone via a ρθ tendency.
+    # The zone marches by Δt·∂ₜ, but with the terrain horizontal-PGF stencils gated on
+    # the marched side the heated cell's perturbation pressure must NOT project into any
+    # interior column's vertical momentum. An ungated leak drives w ~ 1e-3 at column 2
+    # (≈ 7 orders above the machine-level bound here).
+    model = terrain_march_rest_model()
+    set!(boundary_tendency_fields(model).ρθ, 1e-2)
+
+    Δt = 10.0
+    ρθ = model.formulation.potential_temperature_density
+    zone₀ = @allowscalar ρθ[1, 1, 2]
+    time_step!(model, Δt)
+    zone₁ = @allowscalar ρθ[1, 1, 2]
+
+    @test isapprox(zone₁ - zone₀, Δt * 1e-2; rtol = 1e-10)      # zone marched
+    @test maximum(abs, interior(model.velocities.w)) < 1e-10    # interior did not leak
 end

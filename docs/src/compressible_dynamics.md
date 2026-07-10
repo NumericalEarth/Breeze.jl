@@ -467,9 +467,14 @@ boundary data — its zero-gradient closure stands and the column-local
 implicit operator acts on it unrestored — and the zone's diagnostic fields
 (temperature, pressure) refresh only at the next stage's state update.
 
-One current restriction: the scheme errors on `TerrainCompressibleDynamics`
-(the terrain horizontal pressure-gradient stencils are not column-local, so
-marched specified-cell scalars would leak into interior columns).
+The scheme also supports `TerrainCompressibleDynamics`. The terrain horizontal
+pressure-gradient stencils are not column-local, so on a marched side the
+slope-projected pressure-gradient corrections — both the acoustic linearized
+``∂p'`` correction and the slow-tendency full ``∂p`` correction — are
+interpolated one-sidedly, dropping the specified faces, and the terrain slow
+contravariant-momentum tendency substitutes the marched boundary tendency at
+specified faces. Together these keep a marched cell's re-imposed state from
+projecting into any interior column's contravariant vertical momentum.
 
 ## [Klemp divergence damping](@id klemp-damping)
 

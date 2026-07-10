@@ -1003,10 +1003,12 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         correction_seen = false
         for i in 3:Nx-2, k in 2:Nz-1
             ∂z_p′      = ∂zᶜᶜᶠ(i, 1, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
-            correction = terrain_horizontal_linearized_pressure_gradient_correction(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ)
+            # `nothing` march_sides: the unmarched path (no BoundaryTendencyMarch side),
+            # which is what this gate test exercises.
+            correction = terrain_horizontal_linearized_pressure_gradient_correction(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, nothing)
 
-            z_gated = ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 0.0)
-            z_full  = ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 1.0)
+            z_gated = ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 0.0, nothing)
+            z_full  = ∇ᶻp′(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, 1.0, nothing)
 
             # Gate off ⇒ pure vertical gradient, no horizontal slope correction.
             @test z_gated == ∂z_p′
