@@ -26,7 +26,8 @@ const CPD_AI = 1005.0
 
 # Init-mode model: no upper sponge (the one irreversible substep ingredient),
 # no microphysics. Otherwise mirrors the production split-explicit config.
-function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 100e3)
+function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 100e3,
+                                boundary_conditions = NamedTuple())
     grid = RectilinearGrid(arch;
                            size = (Nx, Ny, Nz), halo = (5, 5, 5),
                            x = (0, Lh), y = (0, Lh), z = (0, Lz),
@@ -39,7 +40,8 @@ function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 1
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
                                  thermodynamic_constants = constants,
-                                 microphysics = nothing)
+                                 microphysics = nothing,
+                                 boundary_conditions)
 end
 
 # Discrete-balanced rest state (mirrors substepper_rest_state.jl::set_rest_state!).
@@ -158,20 +160,8 @@ end
     end
 
     @testset "adiabatic twin strips diabatic surface fluxes (#842)" begin
-        grid = RectilinearGrid(default_arch;
-                               size = (8, 8, 32), halo = (5, 5, 5),
-                               x = (0, 100e3), y = (0, 100e3), z = (0, 10e3),
-                               topology = (Periodic, Periodic, Bounded))
-        constants = ThermodynamicConstants(eltype(grid))
-        dyn = CompressibleDynamics(SplitExplicitTimeDiscretization(; sponge = nothing);
-                                   reference_potential_temperature = θ_iso_ai,
-                                   surface_pressure  = 1e5,
-                                   standard_pressure = 1e5)
         ρθ_bcs = FieldBoundaryConditions(bottom = EnergyFluxBoundaryCondition(100.0))
-        model = AtmosphereModel(grid; dynamics = dyn,
-                                      thermodynamic_constants = constants,
-                                      microphysics = nothing,
-                                      boundary_conditions = (; ρθ = ρθ_bcs))
+        model = _build_adiabatic_model(default_arch; boundary_conditions = (; ρθ = ρθ_bcs))
 
         # Production carries the diabatic surface energy-flux BC...
         ρθ = thermodynamic_density(model.formulation)
@@ -204,17 +194,9 @@ end
     end
 
     @testset "adiabatic twin strips a plain ρθ surface flux" begin
-        grid = RectilinearGrid(default_arch;
-                               size = (8, 8, 16), halo = (5, 5, 5),
-                               x = (0, 1e4), y = (0, 1e4), z = (0, 4e3),
-                               topology = (Periodic, Periodic, Bounded))
-        dyn = CompressibleDynamics(SplitExplicitTimeDiscretization(; sponge = nothing);
-                                   reference_potential_temperature = θ_iso_ai,
-                                   surface_pressure  = 1e5,
-                                   standard_pressure = 1e5)
         ρθ_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1e-2))
-        model = AtmosphereModel(grid; dynamics = dyn, microphysics = nothing,
-                                      boundary_conditions = (; ρθ = ρθ_bcs))
+        model = _build_adiabatic_model(default_arch; Nz = 16, Lz = 4e3, Lh = 1e4,
+                                       boundary_conditions = (; ρθ = ρθ_bcs))
 
         # A plain (non-wrapped) θ flux survives on production but is stripped from the twin — the
         # diabatic BC the type-specific strip used to pass through unchanged.
@@ -227,17 +209,9 @@ end
     end
 
     @testset "adiabatic twin strips a moisture surface flux" begin
-        grid = RectilinearGrid(default_arch;
-                               size = (8, 8, 16), halo = (5, 5, 5),
-                               x = (0, 1e4), y = (0, 1e4), z = (0, 4e3),
-                               topology = (Periodic, Periodic, Bounded))
-        dyn = CompressibleDynamics(SplitExplicitTimeDiscretization(; sponge = nothing);
-                                   reference_potential_temperature = θ_iso_ai,
-                                   surface_pressure  = 1e5,
-                                   standard_pressure = 1e5)
         ρqᵛ_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1e-5))
-        model = AtmosphereModel(grid; dynamics = dyn, microphysics = nothing,
-                                      boundary_conditions = (; ρqᵛ = ρqᵛ_bcs))
+        model = _build_adiabatic_model(default_arch; Nz = 16, Lz = 4e3, Lh = 1e4,
+                                       boundary_conditions = (; ρqᵛ = ρqᵛ_bcs))
 
         # The moisture density carries a surface vapor flux on production; the twin strips it too,
         # so the excursion has no surface moisture source (and never lowers a flux BC on the twin,

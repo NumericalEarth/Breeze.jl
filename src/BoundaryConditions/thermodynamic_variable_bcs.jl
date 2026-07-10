@@ -260,6 +260,21 @@ function ThetaFluxBoundaryCondition(flux)
 end
 
 #####
+##### Shared helper: map a per-side BC function over all seven sides
+#####
+
+# Apply `f` to each of the seven `FieldBoundaryConditions` sides, threading any extra `args`
+# through, and reconstruct a `FieldBoundaryConditions` from the results.
+map_field_boundary_conditions(f, fbcs::FieldBoundaryConditions, args...) =
+    FieldBoundaryConditions(; west     = f(fbcs.west, args...),
+                              east     = f(fbcs.east, args...),
+                              south    = f(fbcs.south, args...),
+                              north    = f(fbcs.north, args...),
+                              bottom   = f(fbcs.bottom, args...),
+                              top      = f(fbcs.top, args...),
+                              immersed = f(fbcs.immersed, args...))
+
+#####
 ##### Conversion functions: energy ↔ theta boundary conditions
 #####
 
@@ -268,15 +283,7 @@ energy_to_theta_bc(bc) = bc
 energy_to_theta_bc(bc::BulkSensibleHeatFluxBoundaryCondition) = bc
 energy_to_theta_bc(bc::BoundaryCondition{<:Flux}) = EnergyFluxBoundaryCondition(bc.condition)
 
-function energy_to_theta_bcs(fbcs::FieldBoundaryConditions)
-    return FieldBoundaryConditions(; west     = energy_to_theta_bc(fbcs.west),
-                                     east     = energy_to_theta_bc(fbcs.east),
-                                     south    = energy_to_theta_bc(fbcs.south),
-                                     north    = energy_to_theta_bc(fbcs.north),
-                                     bottom   = energy_to_theta_bc(fbcs.bottom),
-                                     top      = energy_to_theta_bc(fbcs.top),
-                                     immersed = energy_to_theta_bc(fbcs.immersed))
-end
+energy_to_theta_bcs(fbcs::FieldBoundaryConditions) = map_field_boundary_conditions(energy_to_theta_bc, fbcs)
 
 # Convert ρθ BCs → ρe BCs (for diagnostic energy_density with PotentialTemperatureFormulation)
 theta_to_energy_bc(bc) = bc
@@ -285,15 +292,7 @@ theta_to_energy_bc(bc::EnergyFluxBCType) = BoundaryCondition(Flux(), bc.conditio
 # For regular flux BCs (actual θ fluxes), wrap to multiply by cᵖᵐ
 theta_to_energy_bc(bc::BoundaryCondition{<:Flux}) = ThetaFluxBoundaryCondition(bc.condition)
 
-function theta_to_energy_bcs(fbcs::FieldBoundaryConditions)
-    return FieldBoundaryConditions(; west     = theta_to_energy_bc(fbcs.west),
-                                     east     = theta_to_energy_bc(fbcs.east),
-                                     south    = theta_to_energy_bc(fbcs.south),
-                                     north    = theta_to_energy_bc(fbcs.north),
-                                     bottom   = theta_to_energy_bc(fbcs.bottom),
-                                     top      = theta_to_energy_bc(fbcs.top),
-                                     immersed = theta_to_energy_bc(fbcs.immersed))
-end
+theta_to_energy_bcs(fbcs::FieldBoundaryConditions) = map_field_boundary_conditions(theta_to_energy_bc, fbcs)
 
 #####
 ##### Strip surface fluxes for adiabatic initialization
@@ -307,15 +306,8 @@ end
 adiabatic_scalar_bc(bc) = bc
 adiabatic_scalar_bc(::BoundaryCondition{<:Flux}) = OceananigansBC.NoFluxBoundaryCondition()
 
-function AtmosphereModels.adiabatic_scalar_bcs(fbcs::FieldBoundaryConditions)
-    return FieldBoundaryConditions(; west     = adiabatic_scalar_bc(fbcs.west),
-                                     east     = adiabatic_scalar_bc(fbcs.east),
-                                     south    = adiabatic_scalar_bc(fbcs.south),
-                                     north    = adiabatic_scalar_bc(fbcs.north),
-                                     bottom   = adiabatic_scalar_bc(fbcs.bottom),
-                                     top      = adiabatic_scalar_bc(fbcs.top),
-                                     immersed = adiabatic_scalar_bc(fbcs.immersed))
-end
+AtmosphereModels.adiabatic_scalar_bcs(fbcs::FieldBoundaryConditions) =
+    map_field_boundary_conditions(adiabatic_scalar_bc, fbcs)
 
 #####
 ##### Regularization functions for BC wrappers
@@ -359,12 +351,5 @@ function set_sensible_heat_formulation(bc::BulkSensibleHeatFluxBoundaryCondition
     return BoundaryCondition(Flux(), new_bf)
 end
 
-function set_sensible_heat_formulation_bcs(fbcs::FieldBoundaryConditions, formulation)
-    return FieldBoundaryConditions(; west     = set_sensible_heat_formulation(fbcs.west, formulation),
-                                     east     = set_sensible_heat_formulation(fbcs.east, formulation),
-                                     south    = set_sensible_heat_formulation(fbcs.south, formulation),
-                                     north    = set_sensible_heat_formulation(fbcs.north, formulation),
-                                     bottom   = set_sensible_heat_formulation(fbcs.bottom, formulation),
-                                     top      = set_sensible_heat_formulation(fbcs.top, formulation),
-                                     immersed = set_sensible_heat_formulation(fbcs.immersed, formulation))
-end
+set_sensible_heat_formulation_bcs(fbcs::FieldBoundaryConditions, formulation) =
+    map_field_boundary_conditions(set_sensible_heat_formulation, fbcs, formulation)
