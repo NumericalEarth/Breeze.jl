@@ -99,36 +99,23 @@ a   = Oceananigans.defaults.planet_radius
 # `a · cos 75° · 2π/Nλ ≈ 28.8 km`. The domain extends from the surface to
 # 30 km with 64 vertical levels, exponentially stretched toward the surface
 # with [`ExponentialDiscretization`](@ref): the interfaces are clustered near
-# the ground (`bias = :left`) so the smallest cell is `Δz ≈ 150 m` at the
-# surface, growing to `≈ 1064 m` at the model top. We pick the exponential
-# e-folding `scale` by a short bisection so the surface cell is exactly 150 m.
+# the ground (`bias = :left`) so the smallest cells sit at the surface
+# (`Δz ≈ 150 m`) and coarsen to `≈ 1070 m` at the model top. The e-folding
+# `scale = H/2` sets how quickly the spacing grows with height.
 
 Nλ = 360
 Nφ = 150
 Nz = 64
 H  = 30kilometers
 
-## Choose the e-folding scale so the smallest (surface) cell equals Δz_surface.
-Δz_surface = 150
-function exponential_scale(Nz, H, Δz_surface)
-    surface_Δz(scale) = (z = ExponentialDiscretization(Nz, 0, H; scale, bias=:left); z(2) - z(1))
-    lo, hi = 1.0, 10H
-    for _ in 1:100
-        mid = (lo + hi) / 2
-        surface_Δz(mid) < Δz_surface ? (lo = mid) : (hi = mid)
-    end
-    return (lo + hi) / 2
-end
-
-#scale = exponential_scale(Nz, H, Δz_surface)
-#z_faces = ExponentialDiscretization(Nz, 0, H; scale, bias = :left)
+z_faces = ExponentialDiscretization(Nz, 0, H; scale = H/2, bias = :left)
 
 grid = LatitudeLongitudeGrid(GPU();
                              size = (Nλ, Nφ, Nz),
                              halo = (5, 5, 5),
                              longitude = (0, 360),
                              latitude = (-75, 75),
-                             z = (0,H))
+                             z = z_faces)
 
 # ## Temperature profile parameters
 
