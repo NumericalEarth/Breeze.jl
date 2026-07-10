@@ -96,6 +96,9 @@ export
     transport_velocities,
     advecting_momentum,
 
+    # Advective timescale for the time-step wizard
+    CellAdvectionTimescale,
+
     # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
@@ -147,6 +150,7 @@ include("solar_position.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
 include("implicit_vertical_advection.jl")
+include("cell_advection_timescale.jl")
 include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")

@@ -1,12 +1,15 @@
 using Breeze
 using Oceananigans
-using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization, needs_implicit_solver
+using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization, needs_implicit_solver,
+                              cell_advection_timescale
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: Center, Face
 using Oceananigans.Operators: volume
 using Oceananigans.Solvers: BatchedTridiagonalSolver
+using Oceananigans.Simulations: TimeStepWizard
 using Oceananigans.TimeSteppers: implicit_step!
-using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, VerticallyImplicitTimeDiscretization
+using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, VerticallyImplicitTimeDiscretization,
+                                       HorizontalFormulation, ThreeDimensionalFormulation
 using Oceananigans.Units: kilometers
 using Breeze.CompressibleEquations: CompressibleDynamics, SplitExplicitTimeDiscretization
 using Test
@@ -256,5 +259,62 @@ import Breeze.AtmosphereModels as AM
         for name in (:ρu, :ρv, :ρw, :ρθ)
             @test all(isfinite, Array(interior(Oceananigans.fields(adaptive_model)[name])))
         end
+    end
+
+    @testset "Advective timescale drops the vertical term under AIVA" begin
+        Δx = 100 / 4
+        Δz = 1000 / 16
+
+        # A strong updraft so the vertical advective CFL dominates the 3D timescale. Set the
+        # velocity fields directly (the anelastic model would otherwise re-diagnose w from
+        # continuity); the timescale reads `model.velocities`.
+        function seed_flow!(model)
+            set!(model.velocities.u, 2)
+            set!(model.velocities.w, 20)
+            fill_halo_regions!(model.velocities.u)
+            fill_halo_regions!(model.velocities.w)
+            return model
+        end
+
+        τ_horizontal = Δx / 2                        # 1 / (|u|/Δx)
+        τ_three_dim  = 1 / (2/Δx + 20/Δz)            # 1 / (|u|/Δx + |w|/Δz)
+
+        # Explicit direction control via the callable, independent of the advection schemes.
+        explicit_model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature,
+                                         momentum_advection=WENO(FT))
+        seed_flow!(explicit_model)
+
+        τ3 = CellAdvectionTimescale(ThreeDimensionalFormulation())(explicit_model)
+        τh = CellAdvectionTimescale(HorizontalFormulation())(explicit_model)
+        @test τ3 ≈ τ_three_dim rtol=1e-6
+        @test τh ≈ τ_horizontal rtol=1e-6
+        @test τh > τ3
+        # The three-dimensional method reproduces Oceananigans' plain timescale.
+        @test τ3 ≈ cell_advection_timescale(grid, explicit_model.velocities) rtol=1e-6
+        # With explicit advection the automatic default keeps the vertical term.
+        @test cell_advection_timescale(explicit_model) ≈ τ_three_dim rtol=1e-6
+
+        # All-AIVA model: every vertically-advected prognostic is implicit, so the automatic
+        # default drops the vertical term and the wizard would float Δt on the horizontal CFL.
+        aiva_model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature,
+                                     momentum_advection=aiva(),
+                                     scalar_advection=(; ρθ=aiva(), ρqᵛ=aiva()))
+        seed_flow!(aiva_model)
+        @test cell_advection_timescale(aiva_model) ≈ τ_horizontal rtol=1e-6
+
+        # A single explicit scalar (ρqᵛ here) re-imposes the vertical CFL through the shared w.
+        mixed_model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature,
+                                      momentum_advection=aiva(),
+                                      scalar_advection=(; ρθ=aiva()))  # ρqᵛ defaults to explicit
+        seed_flow!(mixed_model)
+        @test cell_advection_timescale(mixed_model) ≈ τ_three_dim rtol=1e-6
+
+        # The wizard's hook calls our method: at cfl the picked Δt rides the horizontal CFL for
+        # the all-AIVA model, leaving a vertical advective CFL well above 1 for AIVA to absorb.
+        wizard = TimeStepWizard(cfl=FT(0.5))
+        @test wizard.cell_advection_timescale === cell_advection_timescale
+        Δt_wizard = wizard.cfl * wizard.cell_advection_timescale(aiva_model)
+        @test Δt_wizard ≈ FT(0.5) * τ_horizontal rtol=1e-6
+        @test Δt_wizard * (20 / Δz) > 1   # vertical CFL the wizard no longer clamps
     end
 end

@@ -86,7 +86,9 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Specific
     # name to look up the field they advect or apply at.
     specific_name = startswith(string(name), "ρ") ?
                     Symbol(string(name)[nextind(string(name), 1):end]) : name
-    inner = materialize_atmosphere_model_forcing(forcing.forcing, field, specific_name,
+    # Materialize the inner forcing against the *specific* field, not the ρ-weighted prognostic.
+    specific_field = get(context.specific_fields, specific_name, field)
+    inner = materialize_atmosphere_model_forcing(forcing.forcing, specific_field, specific_name,
                                                  model_field_names, context)
     ρ = context.density
     target_location = instantiated_location(field)

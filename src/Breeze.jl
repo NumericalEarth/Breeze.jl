@@ -61,6 +61,11 @@ export
     dynamics_density,
     dynamics_pressure,
 
+    # Advective timescale control for the time-step wizard
+    CellAdvectionTimescale,
+    HorizontalFormulation,
+    ThreeDimensionalFormulation,
+
     # Diagnostics
     compute_hydrostatic_pressure!,
     PotentialTemperature,
@@ -187,6 +192,8 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
 
 using Oceananigans.Grids: znode, MutableVerticalDiscretization
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+# Reused to select the direction of `CellAdvectionTimescale` (see AtmosphereModels/cell_advection_timescale.jl)
+using Oceananigans.TurbulenceClosures: HorizontalFormulation, ThreeDimensionalFormulation
 
 export
     CPU, GPU,
