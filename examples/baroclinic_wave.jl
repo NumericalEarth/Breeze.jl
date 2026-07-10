@@ -60,6 +60,8 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Units
+using Oceananigans.TurbulenceClosures: HorizontalScalarBiharmonicDiffusivity
+using Oceananigans.Grids: φnode
 using Printf
 using CairoMakie
 using CUDA
@@ -95,21 +97,41 @@ a   = Oceananigans.defaults.planet_radius
 # We use a 1° latitude-longitude grid spanning 75° S to 75° N. Capping the
 # domain at ±75° (rather than the poles) keeps the polar `Δx_min` manageable:
 # `a · cos 75° · 2π/Nλ ≈ 28.8 km`. The domain extends from the surface to
-# 30 km with 32 vertical levels (Δz ≈ 940 m).
+# 30 km with 64 vertical levels, exponentially stretched toward the surface
+# with [`ExponentialDiscretization`](@ref): the interfaces are clustered near
+# the ground (`bias = :left`) so the smallest cell is `Δz ≈ 150 m` at the
+# surface, growing to `≈ 1064 m` at the model top. We pick the exponential
+# e-folding `scale` by a short bisection so the surface cell is exactly 150 m.
 
 Nλ = 360
 Nφ = 150
-Nz = 32
+Nz = 64
 H  = 30kilometers
+
+## Choose the e-folding scale so the smallest (surface) cell equals Δz_surface.
+Δz_surface = 150
+function exponential_scale(Nz, H, Δz_surface)
+    surface_Δz(scale) = (z = ExponentialDiscretization(Nz, 0, H; scale, bias=:left); z(2) - z(1))
+    lo, hi = 1.0, 10H
+    for _ in 1:100
+        mid = (lo + hi) / 2
+        surface_Δz(mid) < Δz_surface ? (lo = mid) : (hi = mid)
+    end
+    return (lo + hi) / 2
+end
+
+#scale = exponential_scale(Nz, H, Δz_surface)
+#z_faces = ExponentialDiscretization(Nz, 0, H; scale, bias = :left)
 
 grid = LatitudeLongitudeGrid(GPU();
                              size = (Nλ, Nφ, Nz),
                              halo = (5, 5, 5),
                              longitude = (0, 360),
                              latitude = (-75, 75),
-                             z = (0, H))
+                             z = (0,H))
 
-## Temperature profile parameters
+# ## Temperature profile parameters
+
 Tᴱ = 310     # K — equatorial surface temperature
 Tᴾ = 240     # K — polar surface temperature
 Tᴹ = (Tᴱ + Tᴾ) / 2
@@ -220,19 +242,21 @@ end
 # ``2Ω \cos φ`` cross-terms that couple horizontal momentum to ``w``. Breeze
 # evolves prognostic ``ρw`` so the non-traditional terms are physically
 # required for self-consistent dynamics on the sphere.
+#
+# Tracer and momentum advection uses ninth-order `WENO` reconstruction.
 
 coriolis = SphericalCoriolis(rotation_rate=Ω)
 
 T₀ᵣ = 250
 θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
 
-dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();  # default damping: ThermalDivergenceDamping(coefficient = 0.1)
+dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        advection = WENO())
+                        advection = WENO(order=5))
 
 # ## Set initial conditions
 
@@ -275,8 +299,11 @@ add_callback!(simulation, progress, IterationInterval(50))
 #
 # We save the velocities, the full potential temperature ``θ`` (the
 # classic surface synoptic diagnostic for the cold/warm sectors during
-# cyclogenesis), and the vertical vorticity ``ζ``, sliced at two levels:
-# k = 1 (surface) and k = 16 (mid-troposphere, ~5 km).
+# cyclogenesis), and the vertical vorticity ``ζ``, sliced at four levels:
+# k = 1 (surface), k = 16 (lower troposphere, ~2.9 km),
+# k = 38 (the 250 hPa jet level, ~10.5 km, where the upper-tropospheric
+# wave is most vigorous), and k = 64 (the model top, ~29.5 km, where
+# gravity waves radiate into the stratosphere).
 
 using Oceananigans.Operators: ζ₃ᶠᶠᶜ
 u, v, w = model.velocities
@@ -286,7 +313,7 @@ u, v, w = model.velocities
 
 outputs = merge(model.velocities, (; ζ, θ))
 
-for k in (1, 16)
+for k in (1, 16, 38, 64)
     filename = "baroclinic_wave_k$k"
     ow = JLD2Writer(model, outputs; filename,
                     indices = (:, :, k),
@@ -302,42 +329,63 @@ run!(simulation)
 
 # ## Visualization
 #
-# We plot three diagnostics on the sphere: the **surface potential temperature**
-# ``θ_{\rm sfc}`` (the classic synoptic diagnostic for the cold/warm sectors),
-# the **surface vertical vorticity** ``ζ`` (which reveals the cyclones and
-# anticyclones), and the **mid-level vertical velocity** ``w`` (which highlights
-# the warm conveyor belt and the wave's vertical structure).
+# We plot six diagnostics on the sphere in a two-row grid. The top row shows
+# the near-surface synoptics: the **surface potential temperature**
+# ``θ_{\rm sfc}`` (the classic diagnostic for the cold/warm sectors), the
+# **surface vertical vorticity** ``ζ`` (which reveals the cyclones and
+# anticyclones), and the **lower-tropospheric vertical velocity** ``w`` at
+# ~2.9 km (the warm conveyor belt). The bottom row climbs the column: the
+# **jet-level vorticity** ``ζ`` at the 250 hPa jet (~10.5 km), where the
+# upper-tropospheric Rossby wave train is sharpest, the **model-top
+# vertical velocity** ``w`` at ~29.5 km, where gravity waves radiate into
+# the stratosphere, and the **model-top vertical vorticity** ``ζ`` at the
+# same level, showing how the wave signature imprints on the stratosphere.
 
-θ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "θ")
-ζ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "ζ")
-w_ts = FieldTimeSeries("baroclinic_wave_k16.jld2", "w")
+θ_ts    = FieldTimeSeries("baroclinic_wave_k1.jld2",  "θ")
+ζ_ts    = FieldTimeSeries("baroclinic_wave_k1.jld2",  "ζ")
+w_ts    = FieldTimeSeries("baroclinic_wave_k16.jld2", "w")
+ζjet_ts = FieldTimeSeries("baroclinic_wave_k38.jld2", "ζ")
+wtop_ts = FieldTimeSeries("baroclinic_wave_k64.jld2", "w")
+ζtop_ts = FieldTimeSeries("baroclinic_wave_k64.jld2", "ζ")
 times = θ_ts.times
 Nt = length(times)
 
 k_sfc = 1
 k_mid = 16
+k_jet = 38
+k_top = 64
 
 # Sphere view: rotate so the developing wave faces the camera.
 sphere_kw = (elevation = π/6, azimuth = π/2, aspect = :data)
-ζlim = 1e-4
-wlim = 0.06
+ζlim    = 1e-4
+wlim    = 0.06
+ζjetlim = 1.5e-4   # upper-level vorticity is somewhat stronger than at the surface
+wtoplim = 0.02     # stratospheric vertical velocities are weaker
+ζtoplim = 5e-5     # model-top vorticity is weaker than the tropospheric signal
 
-θ_kw = (colormap = :thermal, colorrange = (260, 310))
-ζ_kw = (colormap = :balance, colorrange = (-ζlim, ζlim))
-w_kw = (colormap = :balance, colorrange = (-wlim, wlim))
+θ_kw    = (colormap = :thermal, colorrange = (260, 310))
+ζ_kw    = (colormap = :balance, colorrange = (-ζlim, ζlim))
+w_kw    = (colormap = :balance, colorrange = (-wlim, wlim))
+ζjet_kw = (colormap = :balance, colorrange = (-ζjetlim, ζjetlim))
+wtop_kw = (colormap = :balance, colorrange = (-wtoplim, wtoplim))
+ζtop_kw = (colormap = :balance, colorrange = (-ζtoplim, ζtoplim))
 
 # ### Animation
 
 n = Observable(1)
-θn = @lift view(θ_ts[$n], :, :, k_sfc)
-ζn = @lift view(ζ_ts[$n], :, :, k_sfc)
-wn = @lift view(w_ts[$n], :, :, k_mid)
+θn    = @lift view(θ_ts[$n],    :, :, k_sfc)
+ζn    = @lift view(ζ_ts[$n],    :, :, k_sfc)
+wn    = @lift view(w_ts[$n],    :, :, k_mid)
+ζjetn = @lift view(ζjet_ts[$n], :, :, k_jet)
+wtopn = @lift view(wtop_ts[$n], :, :, k_top)
+ζtopn = @lift view(ζtop_ts[$n], :, :, k_top)
 
-fig = Figure(size = (1800, 700))
+fig = Figure(size = (1800, 1300))
 
 title = @lift "t = $(prettytime(times[$n]))"
 fig[0, 1:6] = Label(fig, title, fontsize=22, tellwidth=false)
 
+## Top row: near-surface synoptics
 ax1 = Axis3(fig[1, 1]; title = "θ at surface", sphere_kw...)
 hm1 = surface!(ax1, θn; shading = NoShading, θ_kw...)
 Colorbar(fig[1, 2], hm1; label = "θ (K)", height=Relative(0.5))
@@ -346,18 +394,31 @@ ax2 = Axis3(fig[1, 3]; title = "ζ at surface", sphere_kw...)
 hm2 = surface!(ax2, ζn; shading = NoShading, ζ_kw...)
 Colorbar(fig[1, 4], hm2; label = "ζ (1/s)", height=Relative(0.5))
 
-ax3 = Axis3(fig[1, 5]; title = "w at mid-level", sphere_kw...)
+ax3 = Axis3(fig[1, 5]; title = "w at 2.9 km", sphere_kw...)
 hm3 = surface!(ax3, wn; shading = NoShading, w_kw...)
 Colorbar(fig[1, 6], hm3; label = "w (m/s)", height=Relative(0.5))
 
-for ax in (ax1, ax2, ax3)
+## Bottom row: jet level and model top
+ax4 = Axis3(fig[2, 1]; title = "ζ at jet level (10.5 km)", sphere_kw...)
+hm4 = surface!(ax4, ζjetn; shading = NoShading, ζjet_kw...)
+Colorbar(fig[2, 2], hm4; label = "ζ (1/s)", height=Relative(0.5))
+
+ax5 = Axis3(fig[2, 3]; title = "w at model top (29.5 km)", sphere_kw...)
+hm5 = surface!(ax5, wtopn; shading = NoShading, wtop_kw...)
+Colorbar(fig[2, 4], hm5; label = "w (m/s)", height=Relative(0.5))
+
+ax6 = Axis3(fig[2, 5]; title = "ζ at model top (29.5 km)", sphere_kw...)
+hm6 = surface!(ax6, ζtopn; shading = NoShading, ζtop_kw...)
+Colorbar(fig[2, 6], hm6; label = "ζ (1/s)", height=Relative(0.5))
+
+for ax in (ax1, ax2, ax3, ax4, ax5, ax6)
     hidedecorations!(ax)
     hidespines!(ax)
 end
 
-CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 12) do nn
+CairoMakie.record(fig, "baroclinic_wave_f32_w5.mp4", 1:Nt; framerate = 12) do nn
     n[] = nn
 end
 nothing #hide
 
-# ![](baroclinic_wave.mp4)
+# ![](baroclinic_wave_f32_w5.mp4)
