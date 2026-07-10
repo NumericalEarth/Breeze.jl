@@ -7,9 +7,10 @@ Provides time stepping schemes for AtmosphereModel, including:
 """
 module TimeSteppers
 
-export SSPRungeKutta3, AcousticRungeKutta3,
+export SSPRungeKutta3, AcousticRungeKutta3, Leapfrog,
        store_initial_state!,
        ssp_rk3_substep!,
+       reset_leapfrog!, turnaround!,
        maybe_prepare_first_time_step!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
@@ -20,6 +21,7 @@ using Breeze.AtmosphereModels: kernel_time_step
 include("ssp_runge_kutta_3.jl")
 include("acoustic_substep_helpers.jl")
 include("acoustic_runge_kutta_3.jl")
+include("leapfrog.jl")
 
 # Extend TimeStepper to support time steppers via Symbol
 OceananigansTimeSteppers.TimeStepper(::Val{:SSPRungeKutta3}, args...; kwargs...) =
@@ -27,5 +29,8 @@ OceananigansTimeSteppers.TimeStepper(::Val{:SSPRungeKutta3}, args...; kwargs...)
 
 OceananigansTimeSteppers.TimeStepper(::Val{:AcousticRungeKutta3}, args...; kwargs...) =
     AcousticRungeKutta3(args...; kwargs...)
+
+OceananigansTimeSteppers.TimeStepper(::Val{:Leapfrog}, args...; kwargs...) =
+    Leapfrog(args...; kwargs...)
 
 end # module

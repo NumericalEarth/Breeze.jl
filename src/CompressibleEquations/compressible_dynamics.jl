@@ -377,17 +377,18 @@ without_sponge(td::SplitExplicitTimeDiscretization) =
                                     td.open_boundary_relaxation)
 
 # Adiabatic-balance twin dynamics (extends the solver-agnostic fallback in AtmosphereModels). The
-# sponge is always stripped — it is irreversible. The default builds the fully-explicit twin
-# (memory-minimal, cleanly reversible); `nothing` reuses the model's native scheme; any other value
-# is taken as the twin's time discretization.
-AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, ::AtmosphereModels.DefaultTimeStepping) =
+# compressible twin is ALWAYS fully explicit (`ExplicitTimeStepping`): its stepper is the reversible
+# leapfrog (see `adiabatic_twin_timestepper`), which does no acoustic substepping, so a split-explicit
+# discretization would step the acoustic terms at the full Δt and blow up. The `time_stepping` request
+# is therefore ignored for `CompressibleDynamics` — the reversible integrator is the whole point of the
+# DFI — and the (irreversible) sponge falls away with the split-explicit machinery.
+AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_stepping) =
     with_time_discretization(dynamics, ExplicitTimeStepping())
 
-AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, ::Nothing) =
-    with_time_discretization(dynamics, without_sponge(dynamics.time_discretization))
-
-AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_stepping) =
-    with_time_discretization(dynamics, without_sponge(time_stepping))
+# The compressible balance twin steps on a reversible leapfrog: the digital-filter excursion needs an
+# exactly time-reversible trajectory, which the acoustic RK3 schemes (amplitude error on the acoustic
+# branch) do not provide. Non-acoustic solvers keep their native projection scheme (the fallback).
+AtmosphereModels.adiabatic_twin_timestepper_symbol(::CompressibleDynamics) = :Leapfrog
 
 # Total air density ρ = ρᵈ + Σρˣ (diagnosed once per update into `total_density`); this is the
 # density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The

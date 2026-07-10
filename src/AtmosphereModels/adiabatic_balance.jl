@@ -12,7 +12,7 @@
 #####     balanced state lands directly in `model` with no graft and no second field set.
 #####
 
-using Oceananigans: time_step!
+using Oceananigans: time_step!, Centered
 using Oceananigans.Grids: minimum_zspacing
 using Oceananigans.TimeSteppers: reset!
 
@@ -41,48 +41,59 @@ modified; pass a model whose boundaries are time-invariant so the symmetric excu
 reversible. The two-argument [`balance_adiabatically!`](@ref)`(model, balancer)` constructs such a
 model automatically.
 """
-function balance_adiabatically!(model::AtmosphereModel; Δt, cycles = 1, weight = 2)
-    snapshot = snapshot_initial_fields(model)
-
-    for _ in 1:cycles
-        # Half-cycle A: 0 → +Δt → 0, then nudge.
-        time_step!(model, +Δt)
-        time_step!(model, -Δt)
-        nudge_initial_fields!(model, snapshot, weight)
-        update_state!(model)
-
-        # Half-cycle B: 0 → -Δt → 0, then nudge.
-        time_step!(model, -Δt)
-        time_step!(model, +Δt)
-        nudge_initial_fields!(model, snapshot, weight)
-        update_state!(model)
+# Lynch–Huang digital-filter weights: a Lanczos-windowed ideal low-pass, symmetric in `k = 0…span`
+# (h₋ₖ = hₖ), cutoff period `τc`. Modes with period < τc (the fast acoustic branch) are removed;
+# slower (balanced) modes pass. Normalized so h₀ + 2 Σₖ hₖ = 1.
+function dfi_lanczos_weights(span::Int, Δt, τc)
+    θc = 2π * abs(Δt) / τc                       # digital cutoff (rad/step)
+    h  = zeros(Float64, span + 1)
+    h[1] = θc / π
+    for k in 1:span
+        lanczos = sin(k * π / (span + 1)) / (k * π / (span + 1))   # window
+        h[k + 1] = sin(k * θc) / (k * π) * lanczos
     end
+    h ./= (h[1] + 2 * sum(@view h[2:end]))
+    return h
+end
+
+# Reset the leapfrog bootstrap so the next `time_step!` re-seeds uⁿ⁻¹ with a forward-Euler half-step.
+# No-op for non-leapfrog steppers, which carry no bootstrap state (e.g. the anelastic twin's native
+# projection RK3), so the low-level DFI stays solver-agnostic.
+restart_bootstrap!(timestepper) = hasfield(typeof(timestepper), :started) && (timestepper.started = false)
+
+function balance_adiabatically!(model::AtmosphereModel; Δt, span::Int = 16, cutoff_period = 2 * span * abs(Δt))
+    prog = prognostic_fields(model)
+    U⁰   = map(f -> copy(parent(f)), prog)
+    h    = dfi_lanczos_weights(span, Δt, cutoff_period)
+
+    # Symmetric Lynch–Huang filter over a reversible (leapfrog) trajectory: seed with h₀·u(0), run
+    # `span` forward and `span` backward leapfrog steps from u(0), accumulating hₖ·u(±kΔt). The
+    # leapfrog is exactly reversible (no acoustic amplitude error) so each run stays bounded; the
+    # low-pass removes the fast acoustic modes, leaving the balanced state (incl. a consistent ρw).
+    acc = map(u0 -> h[1] .* u0, U⁰)
+
+    restart_bootstrap!(model.timestepper)        # (re)bootstrap the leapfrog for a fresh run
+    for k in 1:span
+        time_step!(model, +Δt)
+        for (a, f) in zip(acc, prog); a .+= h[k + 1] .* parent(f); end
+    end
+
+    for (f, u0) in zip(prog, U⁰); parent(f) .= u0; end   # restore u(0)
+    update_state!(model)
+    restart_bootstrap!(model.timestepper)
+    for k in 1:span
+        time_step!(model, -Δt)
+        for (a, f) in zip(acc, prog); a .+= h[k + 1] .* parent(f); end
+    end
+
+    for (f, a) in zip(prog, acc); parent(f) .= a; end     # install the filtered (balanced) state
+    update_state!(model)
 
     # Full reset (time, iteration, stage, last_Δt, …): the excursion leaves these dirty, misfiring
     # e.g. the filtered surface state's `isinf(last_Δt)` guard.
     reset!(model.clock)
 
     return model
-end
-
-# The prognostic fields nudged back toward the analysis each cycle: every prognostic except the
-# vertical momentum `ρw`, which is the free field that spins up balance with them. Solver-agnostic —
-# for `CompressibleDynamics` this is `(ρ, ρu, ρv, ρθ, ρqᵉ)`; for `AnelasticDynamics`, `(ρu, ρv, ρθ,
-# ρqᵉ)` (the reference density `ρᵣ` is not prognostic and so is absent from `prognostic_fields`).
-initial_fields(model::AtmosphereModel) = values(Base.structdiff(prognostic_fields(model), NamedTuple{(:ρw,)}))
-
-# Copy the initial fields' full (haloed) parent arrays at t = 0.
-snapshot_initial_fields(model::AtmosphereModel) = map(f -> copy(parent(f)), initial_fields(model))
-
-# In-place weighted blend of each initial field toward its snapshot: x ← (x + weight·x₀) / (1 + weight).
-function nudge_initial_fields!(model::AtmosphereModel, snapshot, weight)
-    w = convert(eltype(model.grid), weight)
-    for (f, x₀) in zip(initial_fields(model), snapshot)
-        p = parent(f)
-        @. p = (p + w * x₀) / (1 + w)
-        fill_halo_regions!(f)
-    end
-    return nothing
 end
 
 """
@@ -117,26 +128,36 @@ Keyword arguments
   * `Δt`: forward/backward step size. `nothing` (default) auto-derives the vertical-acoustic-CFL step
     `acoustic_cfl_safety · Δz_min / c` from the grid and analysis sound speed; pass a number to
     override.
-  * `cycles`: number of balance cycles (default `1`).
-  * `weight`: nudging weight toward the analysis snapshot (default `2` → ⅓ dynamics + ⅔ analysis).
-  * `with_moisture`: if `true` (default) the moisture density `ρqᵉ` relaxes with the other
+  * `span`: one-sided digital-filter window `N` (default `16`) — the number of leapfrog steps run
+    forward and backward from the analysis state.
+  * `cutoff`: Lynch–Huang cutoff period `τc`. `nothing` (default) auto-derives `2·span·|Δt|` (modes
+    faster than the excursion window are filtered); pass a number to override.
+  * `with_moisture`: if `true` (default) the moisture density `ρqᵉ` is filtered with the other
     prognostics. If `false`, `ρqᵉ` is snapshotted before the balance and restored after, so it is
     preserved exactly — reproducing a graft that returns only `(ρ, ρu, ρv, ρw, ρθ)`.
 """
-struct AdiabaticBalancer{T, S}
+struct AdiabaticBalancer{T, C, S}
     Δt :: T
-    cycles :: Int
-    weight :: Float64
+    span :: Int
+    cutoff :: C
+    robert_asselin :: Float64
     with_moisture :: Bool
     time_stepping :: S
 end
 
-AdiabaticBalancer(; Δt = nothing, cycles = 1, weight = 2, with_moisture = true,
-                  time_stepping = DefaultTimeStepping()) =
-    AdiabaticBalancer(Δt, cycles, Float64(weight), with_moisture, time_stepping)
+AdiabaticBalancer(; Δt = nothing, span = 16, cutoff = nothing, robert_asselin = 0.02,
+                  with_moisture = true, time_stepping = DefaultTimeStepping()) =
+    AdiabaticBalancer(Δt, span, cutoff, Float64(robert_asselin), with_moisture, time_stepping)
 
-# Conservative fraction of the vertical acoustic CFL used for the auto-derived balance Δt.
-const acoustic_cfl_safety = 0.85
+# Fraction of the vertical acoustic CFL used for the auto-derived balance Δt. The leapfrog excursion
+# is neutrally stable only for the acoustic Courant number ≤ 1 and — being reversible — provides NO
+# damping, so any cell that exceeds the limit grows its acoustic/gravity oscillation over the span
+# until a step drives ρ or θ transiently negative (crashing the Exner `θ^γ` mid-excursion). The
+# nominal `minimum_zspacing` also understates the true spacing in terrain-metric-compressed columns,
+# pushing the effective Courant number higher there. So this is deliberately well below 1 (≈2.5×
+# headroom) to keep every cell — including steep-terrain ones — inside the leapfrog stability region.
+# Override per-call with `AdiabaticBalancer(Δt = …)` (the balance-Δt sweep lever).
+const acoustic_cfl_safety = 0.4
 
 # Resolve the balance step size: honor an explicit `Δt`, else derive it from the vertical acoustic
 # CFL on the smallest cell using the (warmest, hence fastest-sound) analysis temperature.
@@ -169,9 +190,15 @@ function balance_adiabatically!(model::AtmosphereModel, balancer::AdiabaticBalan
     balancer.with_moisture || (ρqᵉ₀ = copy(parent(model.moisture_density)))
 
     twin = adiabatic_balance_twin(model, balancer)
+    # The Robert–Asselin coefficient is a leapfrog concept (compressible twin); non-acoustic solvers
+    # keep their native projection stepper, which carries no such field.
+    if hasfield(typeof(twin.timestepper), :robert_asselin)
+        twin.timestepper.robert_asselin = convert(eltype(twin.grid), balancer.robert_asselin)
+    end
     update_state!(twin)
-    balance_adiabatically!(twin; Δt = resolve_balance_Δt(balancer, model),
-                           cycles = balancer.cycles, weight = balancer.weight)
+    Δt_b = resolve_balance_Δt(balancer, model)
+    τc   = isnothing(balancer.cutoff) ? 2 * balancer.span * abs(Δt_b) : balancer.cutoff
+    balance_adiabatically!(twin; Δt = Δt_b, span = balancer.span, cutoff_period = τc)
 
     balancer.with_moisture || (parent(model.moisture_density) .= ρqᵉ₀)
     update_state!(model)
@@ -195,6 +222,25 @@ adiabatic_twin_dynamics(dynamics, time_stepping) = dynamics
 """
 $(TYPEDSIGNATURES)
 
+Return the time stepper for the adiabatic-balance twin, given the resolved `twin_dynamics`. The
+generic fallback keeps the solver's native scheme (`default_timestepper`) — it carries the pressure
+projection the excursion needs and is correct for solvers *without* acoustic modes (e.g.
+`AnelasticDynamics`, whose projection must run every step). `CompressibleDynamics` overrides this
+with a reversible **leapfrog**: the acoustic branch is exactly where the RK3 schemes' amplitude
+error accumulates over the ±Δt digital-filter excursion and drives density negative, so acoustic
+reversibility is the whole point. `Gⁿ`/`U⁰` alias the production stepper's tendency storage.
+"""
+adiabatic_twin_timestepper(twin_dynamics, grid, twin_prognostic; Gⁿ, U⁰) =
+    TimeStepper(Val(adiabatic_twin_timestepper_symbol(twin_dynamics)), grid, twin_prognostic;
+                dynamics = twin_dynamics, Gⁿ, U⁰, implicit_solver = nothing)
+
+# Which registered stepper the twin uses. Native scheme by default (carries the projection needed by
+# non-acoustic solvers); `CompressibleDynamics` overrides this to the reversible `:Leapfrog`.
+adiabatic_twin_timestepper_symbol(twin_dynamics) = default_timestepper(twin_dynamics)
+
+"""
+$(TYPEDSIGNATURES)
+
 Build a stripped adiabatic twin of `model` that SHARES all field memory (momentum, velocities,
 densities, ρθ, moisture, temperature, pressure solver, dynamics fields) and steps it in place. The
 twin's dynamics comes from [`adiabatic_twin_dynamics`](@ref) (per `balancer.time_stepping`);
@@ -213,6 +259,10 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     formulation = model.formulation
     constants   = model.thermodynamic_constants
 
+    # microphysics = nothing on the twin: rebuild the thermodynamic-density field's surface-flux BCs to
+    # match (else the shared BCs call the production scheme on the twin's stripped field set → error).
+    twin_formulation = adiabatic_twin_formulation(formulation)
+
     twin_microphysics  = nothing
     qᵛ                 = specific_prognostic_moisture(model)
     twin_microphysical = (; qᵛ)
@@ -222,25 +272,30 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     twin_moisture_name = moisture_prognostic_name(twin_microphysics)
     remap(name) = name === twin_moisture_name ? prod_moisture_name : name
 
-    twin_prognostic = collect_prognostic_fields(formulation, twin_dynamics, model.momentum,
+    twin_prognostic = collect_prognostic_fields(twin_formulation, twin_dynamics, model.momentum,
                                                 model.moisture_density, twin_moisture_name, (;), model.tracers)
     twin_names = keys(twin_prognostic)
 
     Gⁿ = NamedTuple{twin_names}(model.timestepper.Gⁿ[remap(n)] for n in twin_names)
     U⁰ = NamedTuple{twin_names}(model.timestepper.U⁰[remap(n)] for n in twin_names)
     # No implicit_solver: vertically-implicit diffusion is irreversible (it amplifies on the −Δt
-    # step), and the closure is stripped below — the excursion must be adiabatic.
-    twin_timestepper = TimeStepper(default_timestepper(twin_dynamics), grid, twin_prognostic;
-                                   dynamics = twin_dynamics, Gⁿ, U⁰, implicit_solver = nothing)
+    # step), and the closure is stripped below — the excursion must be adiabatic. The stepper is
+    # dynamics-dependent (see `adiabatic_twin_timestepper`): a reversible leapfrog for the acoustic
+    # `CompressibleDynamics`, the native projection scheme for `AnelasticDynamics`/others.
+    twin_timestepper = adiabatic_twin_timestepper(twin_dynamics, grid, twin_prognostic; Gⁿ, U⁰)
 
     # Advection schemes are immutable and shared; just re-key the moisture scheme and drop precip.
     twin_scalar_names = (:ρθ, twin_moisture_name, keys(model.tracers)...)
-    twin_advection = merge((; momentum = model.advection.momentum),
-                           NamedTuple{twin_scalar_names}(model.advection[remap(n)] for n in twin_scalar_names))
+    # Centered (non-dissipative ⇒ reversible) advection for momentum AND scalars: WENO's grid-scale
+    # upwind anti-diffusion is the other irreversibility source (it breaks the DFI's reversibility on
+    # the backward run). The balanced state is handed back to the production model, which keeps WENO.
+    centered = Centered(order = 2)
+    twin_advection = merge((; momentum = centered),
+                           NamedTuple{twin_scalar_names}(centered for _ in twin_scalar_names))
 
     # Zeroed forcing, keyed exactly as the constructor would for this stripped prognostic set.
     density = dynamics_density(twin_dynamics)
-    twin_model_fields = merge(twin_prognostic, fields(formulation), model.velocities,
+    twin_model_fields = merge(twin_prognostic, fields(twin_formulation), model.velocities,
                               (; T = model.temperature), twin_microphysical)
     twin_forcing = atmosphere_model_forcing(NamedTuple(), twin_prognostic, twin_model_fields,
                                             grid, model.coriolis, density,
@@ -250,7 +305,7 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     # closure = nothing: turbulent diffusion is dissipative (irreversible), so it is excluded from the
     # adiabatic excursion. `closure_fields` is carried along but unused when closure is nothing.
     return AtmosphereModel(arch, grid, Clock(grid),
-                           twin_dynamics, formulation, constants,
+                           twin_dynamics, twin_formulation, constants,
                            model.momentum, model.moisture_density, model.temperature,
                            model.pressure_solver, model.velocities, model.tracers,
                            nothing, twin_advection, model.coriolis, twin_forcing,

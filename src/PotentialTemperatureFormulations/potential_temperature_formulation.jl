@@ -160,6 +160,19 @@ function AtmosphereModels.collect_prognostic_fields(formulation::LiquidIcePotent
     return merge(dynamics_fields, momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
+# Rebuild ρθ over the SAME data with microphysics-stripped surface-flux BCs, so the adiabatic-balance
+# twin's shared ρθ evaluates the vapor-only grid_moisture_fractions(::Nothing) fallback (consistent with
+# the twin's microphysics = nothing) instead of the production scheme it can no longer feed.
+function AtmosphereModels.adiabatic_twin_formulation(formulation::LiquidIcePotentialTemperatureFormulation)
+    ρθ = formulation.potential_temperature_density
+    LX, LY, LZ = Oceananigans.Fields.location(ρθ)
+    twin_bcs = without_microphysics_bcs(ρθ.boundary_conditions)
+    twin_ρθ = Oceananigans.Fields.Field{LX, LY, LZ}(ρθ.grid; data = ρθ.data,
+                                                    boundary_conditions = twin_bcs, indices = ρθ.indices)
+    return LiquidIcePotentialTemperatureFormulation(twin_ρθ, formulation.potential_temperature,
+                                                    formulation.temperature_solver)
+end
+
 #####
 ##### Show methods
 #####

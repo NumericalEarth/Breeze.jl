@@ -3,7 +3,7 @@ using Breeze.AtmosphereModels: AtmosphereModel, specific_prognostic_moisture
 
 using Oceananigans.Fields: Field, set!
 using Breeze.Thermodynamics: temperature
-using Breeze.BoundaryConditions: theta_to_energy_bcs, materialize_atmosphere_field_bcs
+using Breeze.BoundaryConditions: theta_to_energy_bcs, materialize_atmosphere_field_bcs, without_microphysics_bcs
 
 const PotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTemperatureFormulation}
 
