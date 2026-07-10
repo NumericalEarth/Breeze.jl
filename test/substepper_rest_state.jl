@@ -427,16 +427,16 @@ end
 
     # x-wall faces: ρu′[1, :, :] and ρu′[Nx+1, :, :] must be zero.
     ρu_arr = Array(interior(ρu′, :, :, :))
-    @test all(ρu_arr[1, :, :] .== 0)
-    @test all(ρu_arr[Nx + 1, :, :] .== 0)
+    @test all(==(0), ρu_arr[1, :, :])
+    @test all(==(0), ρu_arr[Nx + 1, :, :])
     # Interior x-faces (2:Nx) must still be 1.
-    @test all(ρu_arr[2:Nx, :, :] .== 1)
+    @test all(==(1), ρu_arr[2:Nx, :, :])
 
     # y-wall faces: ρv′[:, 1, :] and ρv′[:, Ny+1, :] must be zero.
     ρv_arr = Array(interior(ρv′, :, :, :))
-    @test all(ρv_arr[:, 1, :] .== 0)
-    @test all(ρv_arr[:, Ny + 1, :] .== 0)
+    @test all(==(0), ρv_arr[:, 1, :])
+    @test all(==(0), ρv_arr[:, Ny + 1, :])
     # Interior y-faces (2:Ny) must still be 1.
-    @test all(ρv_arr[:, 2:Ny, :] .== 1)
+    @test all(==(1), ρv_arr[:, 2:Ny, :])
 end
 end  # outer "Substepper rest-state validation"
