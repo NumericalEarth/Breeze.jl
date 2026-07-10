@@ -209,13 +209,13 @@ reset does not touch the production clock.
 adiabatic_balance_twin(model::AtmosphereModel, balancer::AdiabaticBalancer = AdiabaticBalancer()) =
     assemble_adiabatic_twin(model, adiabatic_twin_dynamics(model.dynamics, balancer.time_stepping))
 
-# Rewrap a prognostic scalar `field` with its surface fluxes stripped to no-flux (see
+# Rewrap a prognostic scalar `twin_field` with its surface fluxes stripped to no-flux (see
 # [`adiabatic_scalar_bcs`](@ref)), sharing the production `data`, indices, and operand so no memory
 # is reallocated and the balanced state still lands in `model`.
-adiabatic_field(field) =
-    Oceananigans.Field(Oceananigans.instantiated_location(field), field.grid, field.data,
-                       adiabatic_scalar_bcs(field.boundary_conditions),
-                       field.indices, field.operand, field.status)
+adiabatic_field(twin_field) =
+    Oceananigans.Field(Oceananigans.instantiated_location(twin_field), twin_field.grid, twin_field.data,
+                       adiabatic_scalar_bcs(twin_field.boundary_conditions),
+                       twin_field.indices, twin_field.operand, twin_field.status)
 
 function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     grid        = model.grid
