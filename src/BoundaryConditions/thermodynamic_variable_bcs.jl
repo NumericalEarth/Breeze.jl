@@ -296,24 +296,25 @@ function theta_to_energy_bcs(fbcs::FieldBoundaryConditions)
 end
 
 #####
-##### Strip diabatic surface fluxes for adiabatic initialization
+##### Strip surface fluxes for adiabatic initialization
 #####
 
-# Replace a diabatic thermodynamic surface flux (sensible-heat / energy / θ flux) with no-flux;
-# pass every other (dynamical) boundary condition through unchanged.
-adiabatic_thermodynamic_bc(bc) = bc
-adiabatic_thermodynamic_bc(::BulkSensibleHeatFluxBoundaryCondition) = OceananigansBC.NoFluxBoundaryCondition()
-adiabatic_thermodynamic_bc(::EnergyFluxBCType) = OceananigansBC.NoFluxBoundaryCondition()
-adiabatic_thermodynamic_bc(::ThetaFluxBCType)  = OceananigansBC.NoFluxBoundaryCondition()
+# Replace any surface flux boundary condition with no-flux, passing every other (dynamical)
+# boundary condition through unchanged. On a prognostic scalar every non-zero surface flux is a
+# diabatic source, so a single `Flux` method covers the wrapped flux types (bulk sensible-heat,
+# energy, θ, and vapor) and a plain `FluxBoundaryCondition` alike; an existing no-flux BC maps to
+# an equivalent no-flux, and Value/Gradient/Periodic/Open BCs pass through the fallback.
+adiabatic_scalar_bc(bc) = bc
+adiabatic_scalar_bc(::BoundaryCondition{<:Flux}) = OceananigansBC.NoFluxBoundaryCondition()
 
-function AtmosphereModels.adiabatic_thermodynamic_bcs(fbcs::FieldBoundaryConditions)
-    return FieldBoundaryConditions(; west     = adiabatic_thermodynamic_bc(fbcs.west),
-                                     east     = adiabatic_thermodynamic_bc(fbcs.east),
-                                     south    = adiabatic_thermodynamic_bc(fbcs.south),
-                                     north    = adiabatic_thermodynamic_bc(fbcs.north),
-                                     bottom   = adiabatic_thermodynamic_bc(fbcs.bottom),
-                                     top      = adiabatic_thermodynamic_bc(fbcs.top),
-                                     immersed = adiabatic_thermodynamic_bc(fbcs.immersed))
+function AtmosphereModels.adiabatic_scalar_bcs(fbcs::FieldBoundaryConditions)
+    return FieldBoundaryConditions(; west     = adiabatic_scalar_bc(fbcs.west),
+                                     east     = adiabatic_scalar_bc(fbcs.east),
+                                     south    = adiabatic_scalar_bc(fbcs.south),
+                                     north    = adiabatic_scalar_bc(fbcs.north),
+                                     bottom   = adiabatic_scalar_bc(fbcs.bottom),
+                                     top      = adiabatic_scalar_bc(fbcs.top),
+                                     immersed = adiabatic_scalar_bc(fbcs.immersed))
 end
 
 #####

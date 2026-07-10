@@ -29,15 +29,17 @@ boundary conditions.
 function materialize_atmosphere_model_boundary_conditions end
 
 """
-    adiabatic_thermodynamic_bcs(bcs)
+    adiabatic_scalar_bcs(bcs)
 
-Return a copy of the thermodynamic-variable `FieldBoundaryConditions` `bcs` with every diabatic
-surface flux (sensible-heat / energy / θ flux) replaced by a no-flux condition, leaving all other
-(dynamical) boundary conditions untouched. Used to strip surface heating from the adiabatic
-initialization twin (see [`balance_adiabatically!`](@ref)). Extended by the `BoundaryConditions`
-module, which owns the diabatic flux BC types.
+Return a copy of the prognostic-scalar `FieldBoundaryConditions` `bcs` with every surface flux
+replaced by a no-flux condition, leaving all other (dynamical) boundary conditions untouched.
+Applied to both the thermodynamic density (bulk sensible-heat / energy / θ flux) and the moisture
+density (vapor flux) to strip surface sources from the adiabatic initialization twin, so its
+symmetric forward/backward excursion stays pure, reversible dynamics (see
+[`balance_adiabatically!`](@ref)). Extended by the `BoundaryConditions` module, which owns the
+flux BC types.
 """
-function adiabatic_thermodynamic_bcs end
+function adiabatic_scalar_bcs end
 
 """
     materialize_atmosphere_model_forcing(forcing, field, name, model_field_names, context)
