@@ -212,11 +212,8 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     arch        = model.architecture
     constants   = model.thermodynamic_constants
 
-    # Strip diabatic surface fluxes from the twin's thermodynamic field. The excursion is adiabatic,
-    # so surface heating must be absent; and a moisture-coupled energy-flux BC additionally fails to
-    # compile on GPU against the physics-free twin, whose field set drops the microphysics fields the
-    # BC reads (issue #842). Rebuild the thermodynamic density sharing the production data (so the
-    # balanced state still lands in `model`) but with no-flux vertical BCs.
+    # Strip diabatic surface fluxes from the twin's thermodynamic field.
+    # The excursion is adiabatic—i.e., pure dynamics—so surface heating must be absent.
     formulation = model.formulation
     ρᵡ = thermodynamic_density(formulation)
     ρᵡ_adiabatic = Oceananigans.Field(Oceananigans.instantiated_location(ρᵡ), grid, ρᵡ.data,
