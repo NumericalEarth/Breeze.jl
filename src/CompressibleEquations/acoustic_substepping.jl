@@ -120,7 +120,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, BTU, BTV, BTR, 
     slow_vertical_momentum_tendency :: GT
     vertical_solver :: TS
 
-    # BoundaryTendencyMarch (#825): per-substep march of the specified-zone
+    # SubstepBoundaryUpdate (#825): per-substep march of the specified-zone
     # perturbations by their boundary time-tendencies. `Nothing` unless a
     # momentum BC carries the scheme; filled once per outer step (from the
     # scheme's sources, or in place by a driver via `boundary_tendency_fields`).
@@ -175,7 +175,7 @@ prognostic momentum's BCs: inheriting them would imprint the full-state wall tar
 halo for a nonzero `NormalFlowBoundaryCondition` (issue \\#716) and apply momentum BCs to velocity fields.
 The wall target re-enters via the prognostic momentum's own BC after each substep's momentum update.
 The `prognostic_momentum` kwarg supplies the momentum boundary conditions, which are consulted only
-to detect a [`BoundaryTendencyMarch`](@ref) scheme (the specified-zone boundary drive, issue \\#825);
+to detect a [`SubstepBoundaryUpdate`](@ref) scheme (the specified-zone boundary drive, issue \\#825);
 the tendency storage below is allocated only when one is present.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
@@ -229,7 +229,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     slow_vertical_momentum_tendency = ZFaceField(grid)
 
-    # BoundaryTendencyMarch (#825): allocate the specified-zone tendency storage
+    # SubstepBoundaryUpdate (#825): allocate the specified-zone tendency storage
     # only when a momentum BC carries the scheme; `nothing` otherwise, so models
     # without the scheme pay no memory and the kernels specialize the march away.
     open_sides = prognostic_momentum === nothing ? OpenSides(false, false, false, false) :
@@ -240,8 +240,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     # marched horizontal direction needs ≥ 3 cells. Assert PER marched direction (not on
     # `min(Nx, Ny)`): a Flat-y terrain grid (Ny = 1) that marches only west/east must
     # still construct — only the x direction it actually marches is constrained.
-    @assert (!(open_sides.west | open_sides.east)) || (size(grid, 1) >= 3) "BoundaryTendencyMarch requires at least 3 cells in the x direction when west or east is marched"
-    @assert (!(open_sides.south | open_sides.north)) || (size(grid, 2) >= 3) "BoundaryTendencyMarch requires at least 3 cells in the y direction when south or north is marched"
+    @assert (!(open_sides.west | open_sides.east)) || (size(grid, 1) >= 3) "SubstepBoundaryUpdate requires at least 3 cells in the x direction when west or east is marched"
+    @assert (!(open_sides.south | open_sides.north)) || (size(grid, 2) >= 3) "SubstepBoundaryUpdate requires at least 3 cells in the y direction when south or north is marched"
     boundary_momentum_tendency_u = marched ? XFaceField(grid, substep_floattype) : nothing
     boundary_momentum_tendency_v = marched ? YFaceField(grid, substep_floattype) : nothing
     boundary_density_tendency = marched ? CenterField(grid, substep_floattype) : nothing
@@ -881,7 +881,7 @@ end
         ∂x_p = ∂x_pᴸ + perturbation_pressure_gradient_factor * ∂x_p′
         ∂y_p = ∂y_pᴸ + perturbation_pressure_gradient_factor * ∂y_p′
 
-        # BoundaryTendencyMarch (#825): a specified face takes no acoustic update
+        # SubstepBoundaryUpdate (#825): a specified face takes no acoustic update
         # (in particular no acoustic ∂p′ — the momentum kick channel); it is
         # MARCHED by its boundary tendency instead, an increment that composes
         # with the SK08 rewind init (ρu)′ = U⁰ − Uᴸ_stage to recover
@@ -929,7 +929,7 @@ end
 
     i, j, k = @index(Global, NTuple)
 
-    # BoundaryTendencyMarch (#825): a specified cell is prescribed, not
+    # SubstepBoundaryUpdate (#825): a specified cell is prescribed, not
     # acoustically evolved — its predictors take the boundary-tendency march
     # instead of the coupled update, so its mass is never driven by the
     # (gated) boundary momentum.
@@ -1016,7 +1016,7 @@ end
                                        march_sides)
     i, j, k = @index(Global, NTuple)
 
-    # BoundaryTendencyMarch (#825): specified cells keep their marched
+    # SubstepBoundaryUpdate (#825): specified cells keep their marched
     # predictors (no recovery from the boundary column's acoustic w), and the
     # specified column's (ρw)′ is replaced by the zero-gradient closure (see
     # `replace_specified_column_vertical_momentum!`).
@@ -1180,7 +1180,7 @@ end
                                               x_damping_scale, y_damping_scale, march_sides)
     i, j, k = @index(Global, NTuple)
 
-    # BoundaryTendencyMarch (#825): specified faces take no damping correction —
+    # SubstepBoundaryUpdate (#825): specified faces take no damping correction —
     # they are prescribed, and the correction would re-inject the boundary
     # momentum kick the specified zone removes.
     x_specified, y_specified = specified_zone_faces(i, j, grid, march_sides)
@@ -1237,7 +1237,7 @@ end
 @kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, α, march_sides)
     i, j, k = @index(Global, NTuple)
 
-    # BoundaryTendencyMarch (#825): no damping correction on specified faces.
+    # SubstepBoundaryUpdate (#825): no damping correction on specified faces.
     x_specified, y_specified = specified_zone_faces(i, j, grid, march_sides)
 
     @inbounds begin
@@ -1465,7 +1465,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
-    # BoundaryTendencyMarch (#825): sides whose momentum BC carries the scheme
+    # SubstepBoundaryUpdate (#825): sides whose momentum BC carries the scheme
     # form the specified zone. `march_sides === nothing` when none does, so the
     # kernels compile the specified-zone branches (and the tendency-field
     # loads) away and the default path is identical to a schemeless build.
@@ -1476,7 +1476,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     march_sides = marched ? open_sides : nothing
 
     if marched && substepper.boundary_momentum_tendency_u === nothing
-        error("The momentum boundary conditions carry a BoundaryTendencyMarch scheme " *
+        error("The momentum boundary conditions carry a SubstepBoundaryUpdate scheme " *
               "but the AcousticSubstepper was constructed without them; construct the " *
               "substepper with `prognostic_momentum` so the tendency storage is allocated.")
     end
@@ -1577,7 +1577,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
         # Per-substep open-boundary enforcement (issue #738): relax the outermost
         # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
         # the halo fill, so the boundary cell tracks the prescribed inflow state.
-        # Superseded per side by BoundaryTendencyMarch (#825): a marched side's
+        # Superseded per side by SubstepBoundaryUpdate (#825): a marched side's
         # cells are held to the time-accurate boundary state directly, so the
         # relaxation's stage-frozen target is redundant staleness there; sides
         # without the scheme keep the relaxation.

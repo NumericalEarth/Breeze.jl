@@ -1,5 +1,5 @@
 #####
-##### BoundaryTendencyMarch — MPAS-style specified-zone boundary drive (#825)
+##### SubstepBoundaryUpdate — MPAS-style specified-zone boundary drive (#825)
 #####
 ##### A scheme attached to the momentum `NormalFlowBoundaryCondition`s. When an
 ##### open lateral side carries it, the acoustic substep loop treats that side's
@@ -46,18 +46,18 @@ condition, exactly as without the scheme; the scheme adds the tendency drive.
 ```jldoctest
 julia> using Breeze
 
-julia> BoundaryTendencyMarch()
-BoundaryTendencyMarch()
+julia> SubstepBoundaryUpdate()
+SubstepBoundaryUpdate()
 ```
 """
-struct BoundaryTendencyMarch end
+struct SubstepBoundaryUpdate end
 
-Base.summary(::BoundaryTendencyMarch) = "BoundaryTendencyMarch"
+Base.summary(::SubstepBoundaryUpdate) = "SubstepBoundaryUpdate"
 
 # Scheme detection on a momentum boundary condition. A side is marched when its
-# normal-momentum BC is a `NormalFlow` carrying a `BoundaryTendencyMarch`.
+# normal-momentum BC is a `NormalFlow` carrying a `SubstepBoundaryUpdate`.
 @inline march_scheme(bc) = nothing
-@inline march_scheme(bc::BoundaryCondition{<:NormalFlow{<:BoundaryTendencyMarch}}) =
+@inline march_scheme(bc::BoundaryCondition{<:NormalFlow{<:SubstepBoundaryUpdate}}) =
     bc.classification.scheme
 
 # Which lateral sides are marched (isbits; threaded into the substep kernels).
@@ -228,7 +228,7 @@ $(TYPEDSIGNATURES)
 
 Return the substepper's boundary tendency fields
 `(ρu = ..., ρv = ..., ρᵈ = ..., ρθ = ..., ρqᵛ = ...)` for a model whose
-momentum boundary conditions carry a [`BoundaryTendencyMarch`](@ref) scheme.
+momentum boundary conditions carry a [`SubstepBoundaryUpdate`](@ref) scheme.
 The fields hold ``∂ₜ(ρu)``, ``∂ₜ(ρv)``, ``∂ₜρᵈ``, ``∂ₜ(ρθ)``, ``∂ₜ(ρqᵛ)`` over
 the specified zone (only their specified-zone entries are ever read). A driver
 fills them in place each outer time step — e.g. from a parent model or from

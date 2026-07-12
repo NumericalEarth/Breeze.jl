@@ -1,9 +1,9 @@
 #####
-##### Tests for the BoundaryTendencyMarch specified-zone boundary drive (#825)
+##### Tests for the SubstepBoundaryUpdate specified-zone boundary drive (#825)
 #####
 
 using Breeze
-using Breeze.CompressibleEquations: BoundaryTendencyMarch, boundary_tendency_fields,
+using Breeze.CompressibleEquations: SubstepBoundaryUpdate, boundary_tendency_fields,
                                     OpenSides, specified_zone_faces, specified_zone_cell,
                                     march_scheme, reimpose_specified_zone!,
                                     compute_contravariant_velocity!
@@ -57,7 +57,7 @@ end
 @testset "Scheme detection and gated allocation" begin
     grid = bounded_grid(Float64)
 
-    scheme = BoundaryTendencyMarch()
+    scheme = SubstepBoundaryUpdate()
     @test march_scheme(NormalFlowBoundaryCondition(0; scheme)) === scheme
     @test march_scheme(NormalFlowBoundaryCondition(0)) === nothing
 
@@ -84,7 +84,7 @@ end
     # (β₁+β₂+β₃) = 11/6·Δt·a). Rest state ⇒ the only spec-face forcing is the march.
     grid = bounded_grid(Float64)
     a = 1e-4   # ∂ₜ(ρu) [kg m⁻² s⁻²]
-    scheme = BoundaryTendencyMarch()
+    scheme = SubstepBoundaryUpdate()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
@@ -109,7 +109,7 @@ end
 
 @testset "Zero-tendency march holds a rest state" begin
     grid = bounded_grid(Float64)
-    scheme = BoundaryTendencyMarch()
+    scheme = SubstepBoundaryUpdate()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     ρv_bcs = FieldBoundaryConditions(south = NormalFlowBoundaryCondition(0; scheme),
@@ -129,7 +129,7 @@ end
 @testset "reimpose_specified_zone! restores the marched zone" begin
     grid = bounded_grid(Float64)
     a = 1e-4
-    scheme = BoundaryTendencyMarch()
+    scheme = SubstepBoundaryUpdate()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
@@ -171,7 +171,7 @@ end
     grid = bounded_grid(Float64)
     a = 1e-4
     Lz = 400.0
-    scheme = BoundaryTendencyMarch()
+    scheme = SubstepBoundaryUpdate()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
@@ -206,7 +206,7 @@ end
     # re-imposition.
     grid = bounded_grid(Float64)
     b = 1e-7   # ∂ₜ(ρqᵛ) [kg m⁻³ s⁻¹]
-    scheme = BoundaryTendencyMarch()
+    scheme = SubstepBoundaryUpdate()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
@@ -234,7 +234,7 @@ end
     # frozen hold (all tendency sources `nothing`) while the interior
     # precipitates freely.
     grid = bounded_grid(Float64)
-    scheme = BoundaryTendencyMarch()
+    scheme = SubstepBoundaryUpdate()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
@@ -260,7 +260,7 @@ end
 
 @testset "Zero-tendency march holds a rest state with implicit closure" begin
     grid = bounded_grid(Float64)
-    scheme = BoundaryTendencyMarch()
+    scheme = SubstepBoundaryUpdate()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     ρv_bcs = FieldBoundaryConditions(south = NormalFlowBoundaryCondition(0; scheme),
@@ -283,11 +283,11 @@ end
 end
 
 #####
-##### BoundaryTendencyMarch over TerrainCompressibleDynamics (#839)
+##### SubstepBoundaryUpdate over TerrainCompressibleDynamics (#839)
 #####
 ##### Shared CPU terrain test problem (duplicated in-file per the two-PR plan — no shared
 ##### helper file, since `find_tests` auto-discovers every `test/*.jl`). The march-only
-##### `BoundaryTendencyMarch` is fully qualified so no extra import is needed. The hill
+##### `SubstepBoundaryUpdate` is fully qualified so no extra import is needed. The hill
 ##### `h₀ sin(πx/Lx)` has zero height and MAX slope at both x-walls (discrete ccf wall
 ##### slope ≈ 0.039), so the marched west/east zone sits where the terrain correction is
 ##### strongest — the sharpest test of the specified-zone gating.
@@ -347,7 +347,7 @@ function build_terrain_testproblem(variant; arch = CPU(), U = 10.0)
         return model
 
     elseif variant === :march
-        scheme = Breeze.CompressibleEquations.BoundaryTendencyMarch()   # fieldless marker
+        scheme = Breeze.CompressibleEquations.SubstepBoundaryUpdate()   # fieldless marker
         ρu_bcs = FieldBoundaryConditions(
             west = NormalFlowBoundaryCondition(west_value; discrete_form = true, scheme),
             east = NormalFlowBoundaryCondition(east_value; discrete_form = true, scheme))
@@ -360,12 +360,12 @@ function build_terrain_testproblem(variant; arch = CPU(), U = 10.0)
 end
 
 # A marched-REST terrain model: the shared terrain grid/dynamics with a
-# `BoundaryTendencyMarch` west/east zone but zero inflow, so the only specified-zone
+# `SubstepBoundaryUpdate` west/east zone but zero inflow, so the only specified-zone
 # forcing is whatever `boundary_tendency_fields` supplies. Used by the three terrain
 # march testsets below (a flowing base would confound the clean Δρu = Δt·∂ₜ composition).
 function terrain_march_rest_model(; arch = CPU())
     grid, dynamics = terrain_testproblem_grid_and_dynamics(arch)
-    scheme = BoundaryTendencyMarch()
+    scheme = SubstepBoundaryUpdate()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
                                      east = NormalFlowBoundaryCondition(0; scheme))
     model = AtmosphereModel(grid; dynamics, boundary_conditions = (ρu = ρu_bcs,))

@@ -412,12 +412,12 @@ already advances the same prognostic variables as the outer scheme. The slow ten
 ``G^s`` are applied through the substep loop, so the WS-RK3 stage update
 ``U^{(k)} = U^n + β_k Δt R(U^{(k-1)})`` falls out of the same loop.
 
-### Specified-zone boundary drive (`BoundaryTendencyMarch`)
+### Specified-zone boundary drive (`SubstepBoundaryUpdate`)
 
 The substep loop advances the fast system many times between the slow
 (per-RK-stage) boundary updates, so a normal-flow lateral boundary needs
 boundary information *within* the acoustic substeps.
-[`BoundaryTendencyMarch`](@ref) supplies it with the specified-zone approach of
+[`SubstepBoundaryUpdate`](@ref) supplies it with the specified-zone approach of
 [MPAS](@cite SkamarockEtAl2012) (and WRF's specified boundary): when the
 momentum `NormalFlowBoundaryCondition`s on a side carry the scheme, the
 outermost interior cells on that side become a *specified zone* in which

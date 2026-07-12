@@ -1003,7 +1003,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         correction_seen = false
         for i in 3:Nx-2, k in 2:Nz-1
             ∂z_p′      = ∂zᶜᶜᶠ(i, 1, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
-            # `nothing` march_sides: the unmarched path (no BoundaryTendencyMarch side),
+            # `nothing` march_sides: the unmarched path (no SubstepBoundaryUpdate side),
             # which is what this gate test exercises.
             correction = terrain_horizontal_linearized_pressure_gradient_correction(i, 1, k, grid, d, ρθ′, Πᴸ, γRᵐᴸ, nothing)
 

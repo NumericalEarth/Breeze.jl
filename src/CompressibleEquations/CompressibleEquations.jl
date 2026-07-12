@@ -29,7 +29,7 @@ export
     CompressibleDynamics,
     CompressibleModel,
     AcousticSubstepper,
-    BoundaryTendencyMarch,
+    SubstepBoundaryUpdate,
     boundary_tendency_fields,
     SplitExplicitTimeDiscretization,
     AcousticOuterScheme,
