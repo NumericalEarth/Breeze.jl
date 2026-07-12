@@ -537,6 +537,7 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
     # the kernel's helpers dispatch the specified-face substitution away and the default
     # terrain path is identical to a schemeless build.
     march_sides = active_march_sides(model)
+    bt = substepper.boundary_tendencies
 
     launch!(arch, grid, :xyz, _assemble_terrain_slow_vertical_momentum_tendency!,
             substepper.slow_vertical_momentum_tendency,
@@ -546,8 +547,8 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
             dynamics.terrain_reference_pressure,
             dynamics.terrain_reference_density,
             grid, dynamics, g, vertical_pressure_tendency_factor,
-            substepper.boundary_momentum_tendency_u,
-            substepper.boundary_momentum_tendency_v,
+            boundary_tendency(bt, Val(:ρu)),
+            boundary_tendency(bt, Val(:ρv)),
             march_sides)
 
     return nothing

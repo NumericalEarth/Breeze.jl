@@ -448,7 +448,7 @@ boundary state directly. Normal-flow boundaries without the scheme retain the
 relaxation unchanged.
 
 The specified-zone tendencies are supplied through the fields exposed by
-[`boundary_tendency_fields`](@ref) — ``∂_t(ρu)``, ``∂_t(ρv)``, ``∂_t ρᵈ``,
+[`boundary_tendencies`](@ref) — ``∂_t(ρu)``, ``∂_t(ρv)``, ``∂_t ρᵈ``,
 ``∂_t(ρθ)``, ``∂_t(ρqᵛ)`` — which a driver fills in place over the specified
 zone each outer time step (e.g. from a parent model or interpolated forcing
 files). A field left zero holds its variable frozen.

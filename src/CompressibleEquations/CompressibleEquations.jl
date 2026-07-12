@@ -30,7 +30,7 @@ export
     CompressibleModel,
     AcousticSubstepper,
     SubstepBoundaryUpdate,
-    boundary_tendency_fields,
+    boundary_tendencies,
     SplitExplicitTimeDiscretization,
     AcousticOuterScheme,
     WickerSkamarock3,

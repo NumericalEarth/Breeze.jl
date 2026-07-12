@@ -3,7 +3,7 @@
 #####
 
 using Breeze
-using Breeze.CompressibleEquations: SubstepBoundaryUpdate, boundary_tendency_fields,
+using Breeze.CompressibleEquations: SubstepBoundaryUpdate, boundary_tendencies,
                                     OpenSides, specified_zone_faces, specified_zone_cell,
                                     march_scheme, reimpose_specified_zone!,
                                     compute_contravariant_velocity!
@@ -67,13 +67,13 @@ end
     ρv_bcs = FieldBoundaryConditions(south = NormalFlowBoundaryCondition(0; scheme),
                                      north = NormalFlowBoundaryCondition(0; scheme))
     model = AtmosphereModel(grid; dynamics, boundary_conditions = (ρu = ρu_bcs, ρv = ρv_bcs))
-    fields = boundary_tendency_fields(model)
+    fields = boundary_tendencies(model)
     @test fields.ρu isa Field
     @test fields.ρᵈ isa Field
 
     # Without the scheme, no tendency storage is allocated.
     plain = AtmosphereModel(grid; dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization()))
-    @test plain.timestepper.substepper.boundary_momentum_tendency_u === nothing
+    @test plain.timestepper.substepper.boundary_tendencies === nothing
 end
 
 @testset "March composition recovers U⁰ + Δt·∂ₜ over a full RK3 step" begin
@@ -91,7 +91,7 @@ end
     model = AtmosphereModel(grid; dynamics, boundary_conditions = (ρu = ρu_bcs,))
     ref = model.dynamics.reference_state
     set!(model; θ = 300, u = 0, ρ = ref.density)
-    set!(boundary_tendency_fields(model).ρu, a)
+    set!(boundary_tendencies(model).ρu, a)
 
     Δt = 10.0
     i, j, k = 2, 4, 2          # a west specified face away from corners
@@ -136,7 +136,7 @@ end
     model = AtmosphereModel(grid; dynamics, boundary_conditions = (ρu = ρu_bcs,))
     ref = model.dynamics.reference_state
     set!(model; θ = 300, u = 0, ρ = ref.density)
-    set!(boundary_tendency_fields(model).ρu, a)
+    set!(boundary_tendencies(model).ρu, a)
 
     Δt = 10.0
     time_step!(model, Δt)
@@ -180,12 +180,12 @@ end
     @test model.timestepper.implicit_solver !== nothing
     ref = model.dynamics.reference_state
     set!(model; θ = 300, u = 0, ρ = ref.density)
-    set!(boundary_tendency_fields(model).ρu, (x, y, z) -> a * (z / Lz)^2)
+    set!(boundary_tendencies(model).ρu, (x, y, z) -> a * (z / Lz)^2)
 
     Δt = 10.0
     i, j = 2, 4                # a west specified face away from corners
     ρu = model.momentum.ρu
-    ∂ₜρu = boundary_tendency_fields(model).ρu
+    ∂ₜρu = boundary_tendencies(model).ρu
 
     ρu₀ = @allowscalar [ρu[i, j, k] for k in 1:4]
     time_step!(model, Δt)
@@ -213,7 +213,7 @@ end
     model = AtmosphereModel(grid; dynamics, boundary_conditions = (ρu = ρu_bcs,))
     ref = model.dynamics.reference_state
     set!(model; θ = 300, u = 0, ρ = ref.density)
-    set!(boundary_tendency_fields(model).ρqᵛ, b)
+    set!(boundary_tendencies(model).ρqᵛ, b)
 
     Δt = 10.0
     ρqᵛ = model.moisture_density
@@ -361,7 +361,7 @@ end
 
 # A marched-REST terrain model: the shared terrain grid/dynamics with a
 # `SubstepBoundaryUpdate` west/east zone but zero inflow, so the only specified-zone
-# forcing is whatever `boundary_tendency_fields` supplies. Used by the three terrain
+# forcing is whatever `boundary_tendencies` supplies. Used by the three terrain
 # march testsets below (a flowing base would confound the clean Δρu = Δt·∂ₜ composition).
 function terrain_march_rest_model(; arch = CPU())
     grid, dynamics = terrain_testproblem_grid_and_dynamics(arch)
@@ -401,7 +401,7 @@ end
     # ρθ tendency holds the zone's thermodynamic density exactly. Flat-y ⇒ j = 1.
     model = terrain_march_rest_model()
     a = 1e-4
-    set!(boundary_tendency_fields(model).ρu, a)
+    set!(boundary_tendencies(model).ρu, a)
 
     Δt = 10.0
     i, j, k = 2, 1, 2          # a west specified face (i ≤ 2), Flat-y column
@@ -429,7 +429,7 @@ end
     # interior column's vertical momentum. An ungated leak drives w ~ 1e-3 at column 2
     # (≈ 7 orders above the machine-level bound here).
     model = terrain_march_rest_model()
-    set!(boundary_tendency_fields(model).ρθ, 1e-2)
+    set!(boundary_tendencies(model).ρθ, 1e-2)
 
     Δt = 10.0
     ρθ = model.formulation.potential_temperature_density

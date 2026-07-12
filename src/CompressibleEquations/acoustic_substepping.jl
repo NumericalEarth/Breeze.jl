@@ -81,7 +81,7 @@ Fields:
   excluded — those are in the fast operator).
 - `vertical_solver`: `BatchedTridiagonalSolver` for the implicit (ρw)′ update.
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, BTU, BTV, BTR, BTX, BTQ}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, BT}
     substeps :: N
     acoustic_cfl :: FT
     forward_weight :: FT
@@ -121,14 +121,11 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, BTU, BTV, BTR, 
     vertical_solver :: TS
 
     # SubstepBoundaryUpdate (#825): per-substep march of the specified-zone
-    # perturbations by their boundary time-tendencies. `Nothing` unless a
-    # momentum BC carries the scheme; filled once per outer step (from the
-    # scheme's sources, or in place by a driver via `boundary_tendency_fields`).
-    boundary_momentum_tendency_u :: BTU
-    boundary_momentum_tendency_v :: BTV
-    boundary_density_tendency :: BTR
-    boundary_density_potential_temperature_tendency :: BTX
-    boundary_moisture_tendency :: BTQ
+    # perturbations by their boundary time-tendencies. A `NamedTuple` with keys
+    # `(ρu, ρv, ρᵈ, ρθ, ρqᵛ)`, or `nothing` unless a momentum BC carries the
+    # scheme; filled once per outer step (from the scheme's sources, or in place
+    # by a driver via `boundary_tendencies`).
+    boundary_tendencies :: BT
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -156,11 +153,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.time_averaged_velocities),
                        adapt(to, a.slow_vertical_momentum_tendency),
                        adapt(to, a.vertical_solver),
-                       adapt(to, a.boundary_momentum_tendency_u),
-                       adapt(to, a.boundary_momentum_tendency_v),
-                       adapt(to, a.boundary_density_tendency),
-                       adapt(to, a.boundary_density_potential_temperature_tendency),
-                       adapt(to, a.boundary_moisture_tendency))
+                       adapt(to, a.boundary_tendencies))
 
 #####
 ##### Section 2 — Constructor
@@ -242,11 +235,11 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     # still construct — only the x direction it actually marches is constrained.
     @assert (!(open_sides.west | open_sides.east)) || (size(grid, 1) >= 3) "SubstepBoundaryUpdate requires at least 3 cells in the x direction when west or east is marched"
     @assert (!(open_sides.south | open_sides.north)) || (size(grid, 2) >= 3) "SubstepBoundaryUpdate requires at least 3 cells in the y direction when south or north is marched"
-    boundary_momentum_tendency_u = marched ? XFaceField(grid, substep_floattype) : nothing
-    boundary_momentum_tendency_v = marched ? YFaceField(grid, substep_floattype) : nothing
-    boundary_density_tendency = marched ? CenterField(grid, substep_floattype) : nothing
-    boundary_density_potential_temperature_tendency = marched ? CenterField(grid, substep_floattype) : nothing
-    boundary_moisture_tendency = marched ? CenterField(grid, substep_floattype) : nothing
+    boundary_tendencies = marched ? (ρu = XFaceField(grid, substep_floattype),
+                                     ρv = YFaceField(grid, substep_floattype),
+                                     ρᵈ = CenterField(grid, substep_floattype),
+                                     ρθ = CenterField(grid, substep_floattype),
+                                     ρqᵛ = CenterField(grid, substep_floattype)) : nothing
 
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
@@ -277,11 +270,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               time_averaged_velocities,
                               slow_vertical_momentum_tendency,
                               vertical_solver,
-                              boundary_momentum_tendency_u,
-                              boundary_momentum_tendency_v,
-                              boundary_density_tendency,
-                              boundary_density_potential_temperature_tendency,
-                              boundary_moisture_tendency)
+                              boundary_tendencies)
 end
 
 #####
@@ -1475,11 +1464,19 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     marched = any_marched(open_sides)
     march_sides = marched ? open_sides : nothing
 
-    if marched && substepper.boundary_momentum_tendency_u === nothing
+    bt = substepper.boundary_tendencies
+    if marched && bt === nothing
         error("The momentum boundary conditions carry a SubstepBoundaryUpdate scheme " *
               "but the AcousticSubstepper was constructed without them; construct the " *
               "substepper with `prognostic_momentum` so the tendency storage is allocated.")
     end
+
+    # Bind the per-variable specified-zone tendency fields once for the substep
+    # loop's repeated launches (`nothing` each for a schemeless build).
+    ∂ₜρu = boundary_tendency(bt, Val(:ρu))
+    ∂ₜρv = boundary_tendency(bt, Val(:ρv))
+    ∂ₜρᵈ = boundary_tendency(bt, Val(:ρᵈ))
+    ∂ₜρθ = boundary_tendency(bt, Val(:ρθ))
 
     # Substep loop
     for substep in 1:Nτ
@@ -1501,8 +1498,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
                 substepper.linearization_exner,
                 Gⁿ.ρu, Gⁿ.ρv, substepper.linearization_gamma_R_mixture,
                 apply_pressure_gradient, march_sides,
-                substepper.boundary_momentum_tendency_u,
-                substepper.boundary_momentum_tendency_v)
+                ∂ₜρu, ∂ₜρv)
 
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)
@@ -1532,8 +1528,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
                 Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
                 substepper.linearization_potential_temperature,
                 march_sides,
-                substepper.boundary_density_tendency,
-                substepper.boundary_density_potential_temperature_tendency)
+                ∂ₜρᵈ, ∂ₜρθ)
         fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
 
         launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),

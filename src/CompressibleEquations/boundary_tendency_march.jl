@@ -36,7 +36,7 @@ stage-entry state.
 
 The scheme carries no data. The specified-zone time-tendencies
 (``∂ₜ(ρu)``, ``∂ₜ(ρv)``, ``∂ₜρᵈ``, ``∂ₜ(ρθ)``, ``∂ₜ(ρqᵛ)``) are held in fields
-exposed by [`boundary_tendency_fields`](@ref), which a driver fills in place
+exposed by [`boundary_tendencies`](@ref), which a driver fills in place
 over the specified zone each outer time step (e.g. from a parent model or from
 interpolated forcing files). A field left zero holds its variable frozen.
 
@@ -119,6 +119,14 @@ end
 @inline march_increment(::Nothing, i, j, k, Δτ) = zero(Δτ)
 @inline march_increment(∂ₜ, i, j, k, Δτ) = @inbounds Δτ * ∂ₜ[i, j, k]
 
+# Per-variable access to the bundled specified-zone boundary tendencies. Returns
+# the field for a marched substepper (a `NamedTuple` with keys `ρu, ρv, ρᵈ, ρθ,
+# ρqᵛ`), or `nothing` when the substepper was built without the scheme (the whole
+# bundle is `nothing`) so the substep launches pass `nothing` and the kernels
+# dispatch the march away. `Val` keeps the heterogeneous-field access type-stable.
+@inline boundary_tendency(bt::NamedTuple, ::Val{name}) where {name} = getproperty(bt, name)
+@inline boundary_tendency(::Nothing, ::Val) = nothing
+
 # Close the specified column's (ρw)′ by a zero-gradient copy from the nearest
 # interior column (WRF `zero_grad_bdy` analog): a hard hold would be reflective
 # at the specified/interior seam, and the boundary data carries no w. A
@@ -181,8 +189,8 @@ refilled, since the boundary-condition fills extrapolate from the re-imposed
 zone cells.
 """
 function reimpose_specified_zone!(substepper, model, βΔt; fill_halos = false)
-    ∂ₜρu = substepper.boundary_momentum_tendency_u
-    ∂ₜρu === nothing && return nothing
+    bt = substepper.boundary_tendencies
+    bt === nothing && return nothing
     march_sides = active_march_sides(model)
     march_sides === nothing && return nothing
 
@@ -199,11 +207,7 @@ function reimpose_specified_zone!(substepper, model, βΔt; fill_halos = false)
 
     args = (model.momentum.ρu, model.momentum.ρv, ρᵈ, ρᵡ, ρqᵛ, grid,
             U⁰.ρu, U⁰.ρv, U⁰.ρᵈ, getproperty(U⁰, ρᵡ_name), getproperty(U⁰, ρqᵛ_name),
-            ∂ₜρu,
-            substepper.boundary_momentum_tendency_v,
-            substepper.boundary_density_tendency,
-            substepper.boundary_density_potential_temperature_tendency,
-            substepper.boundary_moisture_tendency,
+            bt.ρu, bt.ρv, bt.ρᵈ, bt.ρθ, bt.ρqᵛ,
             march_sides, convert(eltype(grid), βΔt))
 
     # x-face windows span i ≤ 2 / i = Nx (the `x_specified` band); the cell and
@@ -226,18 +230,14 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return the substepper's boundary tendency fields
+Return the substepper's bundled boundary tendency fields
 `(ρu = ..., ρv = ..., ρᵈ = ..., ρθ = ..., ρqᵛ = ...)` for a model whose
-momentum boundary conditions carry a [`SubstepBoundaryUpdate`](@ref) scheme.
-The fields hold ``∂ₜ(ρu)``, ``∂ₜ(ρv)``, ``∂ₜρᵈ``, ``∂ₜ(ρθ)``, ``∂ₜ(ρqᵛ)`` over
-the specified zone (only their specified-zone entries are ever read). A driver
-fills them in place each outer time step — e.g. from a parent model or from
-interpolated forcing files — and the values persist until overwritten. A field
-left zero holds its variable frozen.
+momentum boundary conditions carry a [`SubstepBoundaryUpdate`](@ref) scheme, or
+`nothing` for a model built without it. The fields hold ``∂ₜ(ρu)``, ``∂ₜ(ρv)``,
+``∂ₜρᵈ``, ``∂ₜ(ρθ)``, ``∂ₜ(ρqᵛ)`` over the specified zone (only their
+specified-zone entries are ever read). A driver fills them in place each outer
+time step — e.g. from a parent model or from interpolated forcing files — and
+the values persist until overwritten. A field left zero holds its variable
+frozen.
 """
-boundary_tendency_fields(model) =
-    (ρu = model.timestepper.substepper.boundary_momentum_tendency_u,
-     ρv = model.timestepper.substepper.boundary_momentum_tendency_v,
-     ρᵈ = model.timestepper.substepper.boundary_density_tendency,
-     ρθ = model.timestepper.substepper.boundary_density_potential_temperature_tendency,
-     ρqᵛ = model.timestepper.substepper.boundary_moisture_tendency)
+boundary_tendencies(model) = model.timestepper.substepper.boundary_tendencies
