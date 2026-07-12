@@ -1,5 +1,5 @@
 #####
-##### SubstepBoundaryUpdate — MPAS-style specified-zone boundary drive (#825)
+##### SubstepBoundaryUpdate — MPAS-style specified-zone boundary update (#825)
 #####
 ##### A scheme attached to the momentum `NormalFlowBoundaryCondition`s. When an
 ##### open lateral side carries it, the acoustic substep loop treats that side's
@@ -8,19 +8,19 @@
 ##### cells are excluded from the coupled acoustic update, the specified
 ##### column's (ρw)′ is closed by a per-substep zero-gradient copy from the
 ##### nearest interior column (WRF `zero_grad_bdy` analog), and the specified
-##### zone's momentum and scalar perturbations are MARCHED by their boundary
+##### zone's momentum and scalar perturbations are updated by their boundary
 ##### time-tendencies each acoustic substep,
 #####
 #####     (ρu)′ ← (ρu)′ + Δτ · ∂ₜ(ρu)_boundary
 #####
 ##### (MPAS `ru_p += dts·lbc_tend_ru`). Composed with the stage-entry rewind
 ##### initialization (ρu)′ = U⁰ − Uᴸ_stage, the increment recovers
-##### U⁰ + β·Δt·∂ₜ at each RK-stage end. The march must be an increment: an
+##### U⁰ + β·Δt·∂ₜ at each RK-stage end. The update must be an increment: an
 ##### overwrite τ·∂ₜ composes with the per-stage recovery into a secular
 ##### (β₁+β₂+β₃) = 11/6 over-advance per outer step.
 #####
-##### Where a side is marched, the per-substep α relaxation of ρ′,(ρθ)′
-##### (issue #738) is superseded on that side and skipped: the march holds the
+##### Where a side is specified, the per-substep α relaxation of ρ′,(ρθ)′
+##### (issue #738) is superseded on that side and skipped: the update holds the
 ##### same cells to the time-accurate boundary state directly, so the
 ##### relaxation's stage-frozen target is redundant. Sides without the scheme
 ##### keep the relaxation unchanged.
@@ -29,7 +29,7 @@
 """
 $(TYPEDEF)
 
-Marker scheme for a momentum `NormalFlowBoundaryCondition` that drives the
+Marker scheme for a momentum `NormalFlowBoundaryCondition` that updates the
 outermost interior cells (an MPAS-style specified zone) by boundary value +
 time-tendency each acoustic substep, instead of freezing them at the
 stage-entry state.
@@ -41,7 +41,7 @@ over the specified zone each outer time step (e.g. from a parent model or from
 interpolated forcing files). A field left zero holds its variable frozen.
 
 The boundary *value* enters through the `NormalFlowBoundaryCondition`'s own
-condition, exactly as without the scheme; the scheme adds the tendency drive.
+condition, exactly as without the scheme; the scheme adds the tendency update.
 
 ```jldoctest
 julia> using Breeze
@@ -54,13 +54,13 @@ struct SubstepBoundaryUpdate end
 
 Base.summary(::SubstepBoundaryUpdate) = "SubstepBoundaryUpdate"
 
-# Scheme detection on a momentum boundary condition. A side is marched when its
+# Scheme detection on a momentum boundary condition. A side is specified when its
 # normal-momentum BC is a `NormalFlow` carrying a `SubstepBoundaryUpdate`.
-@inline march_scheme(bc) = nothing
-@inline march_scheme(bc::BoundaryCondition{<:NormalFlow{<:SubstepBoundaryUpdate}}) =
+@inline specified_zone_scheme(bc) = nothing
+@inline specified_zone_scheme(bc::BoundaryCondition{<:NormalFlow{<:SubstepBoundaryUpdate}}) =
     bc.classification.scheme
 
-# Which lateral sides are marched (isbits; threaded into the substep kernels).
+# Which lateral sides are specified (isbits; threaded into the substep kernels).
 struct OpenSides
     west  :: Bool
     east  :: Bool
@@ -68,33 +68,33 @@ struct OpenSides
     north :: Bool
 end
 
-march_open_sides(ρu_bcs, ρv_bcs) = OpenSides(march_scheme(ρu_bcs.west) !== nothing,
-                                             march_scheme(ρu_bcs.east) !== nothing,
-                                             march_scheme(ρv_bcs.south) !== nothing,
-                                             march_scheme(ρv_bcs.north) !== nothing)
+specified_open_sides(ρu_bcs, ρv_bcs) = OpenSides(specified_zone_scheme(ρu_bcs.west) !== nothing,
+                                             specified_zone_scheme(ρu_bcs.east) !== nothing,
+                                             specified_zone_scheme(ρv_bcs.south) !== nothing,
+                                             specified_zone_scheme(ρv_bcs.north) !== nothing)
 
-@inline any_marched(s::OpenSides) = s.west | s.east | s.south | s.north
+@inline any_specified(s::OpenSides) = s.west | s.east | s.south | s.north
 
-# The sides whose momentum BCs carry a march scheme, or `nothing` when none
+# The sides whose momentum BCs carry a specified-zone scheme, or `nothing` when none
 # does (the type-determined `nothing` lets downstream kernels compile the
 # specified-zone branches away).
-function active_march_sides(model)
+function active_specified_sides(model)
     ρu_bcs = model.momentum.ρu.boundary_conditions
     ρv_bcs = model.momentum.ρv.boundary_conditions
-    open_sides = march_open_sides(ρu_bcs, ρv_bcs)
-    return any_marched(open_sides) ? open_sides : nothing
+    open_sides = specified_open_sides(ρu_bcs, ρv_bcs)
+    return any_specified(open_sides) ? open_sides : nothing
 end
 
 # `(x_specified, y_specified)`: true on the x-/y-faces whose acoustic ∂p′
 # stencil reads a specified cell (MPAS `specZoneMaskEdge`). `∂xᶠᶜᶜ` at face i
 # reads centers i, i−1; `∂yᶜᶠᶜ` at face j reads j, j−1; the `:xyz` launch
 # writes faces 1:Nx / 1:Ny. (The min-side normal faces i=1/j=1 are inside the
-# launch and marched, but the perturbation fields' impenetrability halo fill
+# launch and specified, but the perturbation fields' impenetrability halo fill
 # re-pins them to zero after every substep; the wall value re-enters through
 # the prognostic momentum's own boundary condition at stage end. The max-side
 # normal faces Nx+1/Ny+1 sit outside the launch and take the same fill.)
 # The `Nothing` methods let the kernels compile the specified-zone branches
-# away entirely when no side is marched.
+# away entirely when no side is specified.
 @inline function specified_zone_faces(i, j, grid, s::OpenSides)
     Nx = size(grid, 1)
     Ny = size(grid, 2)
@@ -114,16 +114,16 @@ end
 
 @inline specified_zone_cell(i, j, grid, ::Nothing) = false
 
-# Per-substep march increment Δτ·∂ₜ. The `Nothing` method keeps kernels free of
+# Per-substep specified-zone increment Δτ·∂ₜ. The `Nothing` method keeps kernels free of
 # speculative loads (and of the fields entirely) when no scheme is present.
-@inline march_increment(::Nothing, i, j, k, Δτ) = zero(Δτ)
-@inline march_increment(∂ₜ, i, j, k, Δτ) = @inbounds Δτ * ∂ₜ[i, j, k]
+@inline specified_zone_increment(::Nothing, i, j, k, Δτ) = zero(Δτ)
+@inline specified_zone_increment(∂ₜ, i, j, k, Δτ) = @inbounds Δτ * ∂ₜ[i, j, k]
 
 # Per-variable access to the bundled specified-zone boundary tendencies. Returns
-# the field for a marched substepper (a `NamedTuple` with keys `ρu, ρv, ρᵈ, ρθ,
+# the field for a specified substepper (a `NamedTuple` with keys `ρu, ρv, ρᵈ, ρθ,
 # ρqᵛ`), or `nothing` when the substepper was built without the scheme (the whole
 # bundle is `nothing`) so the substep launches pass `nothing` and the kernels
-# dispatch the march away. `Val` keeps the heterogeneous-field access type-stable.
+# dispatch the update away. `Val` keeps the heterogeneous-field access type-stable.
 @inline boundary_tendency(bt::NamedTuple, ::Val{name}) where {name} = getproperty(bt, name)
 @inline boundary_tendency(::Nothing, ::Val) = nothing
 
@@ -149,7 +149,7 @@ end
     return nothing
 end
 
-# Re-impose the marched specified-zone state U⁰ + βΔt·∂ₜ on the prognostic
+# Re-impose the specified-zone state U⁰ + βΔt·∂ₜ on the prognostic
 # fields. The substep loop leaves the zone exactly there, but post-loop stage
 # physics (the vertically-implicit solve, operator-split microphysics, the
 # per-stage scalar update of ρqᵛ) is not excluded from the zone; rather than
@@ -161,11 +161,11 @@ end
 @kernel function _reimpose_specified_zone!(ρu, ρv, ρᵈ, ρθ, ρqᵛ, grid,
                                            ρu⁰, ρv⁰, ρᵈ⁰, ρθ⁰, ρqᵛ⁰,
                                            ∂ₜρu, ∂ₜρv, ∂ₜρᵈ, ∂ₜρθ, ∂ₜρqᵛ,
-                                           march_sides, βΔt)
+                                           specified_sides, βΔt)
     i, j, k = @index(Global, NTuple)
 
-    x_specified, y_specified = specified_zone_faces(i, j, grid, march_sides)
-    cell_specified = specified_zone_cell(i, j, grid, march_sides)
+    x_specified, y_specified = specified_zone_faces(i, j, grid, specified_sides)
+    cell_specified = specified_zone_cell(i, j, grid, specified_sides)
 
     @inbounds begin
         ρu[i, j, k]  = ifelse(x_specified,    ρu⁰[i, j, k]  + βΔt * ∂ₜρu[i, j, k],  ρu[i, j, k])
@@ -179,11 +179,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Restore the marched prognostics (ρu, ρv, ρᵈ, the thermodynamic density, and
+Restore the specified prognostics (ρu, ρv, ρᵈ, the thermodynamic density, and
 the moisture density) to the specified-zone state `U⁰ + βΔt·∂ₜ` after
 post-substep-loop stage physics has acted on the zone. Thin per-side window
 launches; corner overlap writes identical values. A no-op when no side is
-marched. With `fill_halos = true` (the once-per-step call, after the
+specified. With `fill_halos = true` (the once-per-step call, after the
 operator-split microphysics update) the affected prognostic halos are
 refilled, since the boundary-condition fills extrapolate from the re-imposed
 zone cells.
@@ -191,8 +191,8 @@ zone cells.
 function reimpose_specified_zone!(substepper, model, βΔt; fill_halos = false)
     bt = substepper.boundary_tendencies
     bt === nothing && return nothing
-    march_sides = active_march_sides(model)
-    march_sides === nothing && return nothing
+    specified_sides = active_specified_sides(model)
+    specified_sides === nothing && return nothing
 
     grid = model.grid
     arch = architecture(grid)
@@ -208,14 +208,14 @@ function reimpose_specified_zone!(substepper, model, βΔt; fill_halos = false)
     args = (model.momentum.ρu, model.momentum.ρv, ρᵈ, ρᵡ, ρqᵛ, grid,
             U⁰.ρu, U⁰.ρv, U⁰.ρᵈ, getproperty(U⁰, ρᵡ_name), getproperty(U⁰, ρqᵛ_name),
             bt.ρu, bt.ρv, bt.ρᵈ, bt.ρθ, bt.ρqᵛ,
-            march_sides, convert(eltype(grid), βΔt))
+            specified_sides, convert(eltype(grid), βΔt))
 
     # x-face windows span i ≤ 2 / i = Nx (the `x_specified` band); the cell and
     # y-face writes inside each window are decided by the full predicates.
-    march_sides.west  && launch!(arch, grid, KernelParameters(1:2, 1:Ny, 1:Nz),  _reimpose_specified_zone!, args...)
-    march_sides.east  && launch!(arch, grid, KernelParameters(Nx:Nx, 1:Ny, 1:Nz), _reimpose_specified_zone!, args...)
-    march_sides.south && launch!(arch, grid, KernelParameters(1:Nx, 1:2, 1:Nz),  _reimpose_specified_zone!, args...)
-    march_sides.north && launch!(arch, grid, KernelParameters(1:Nx, Ny:Ny, 1:Nz), _reimpose_specified_zone!, args...)
+    specified_sides.west  && launch!(arch, grid, KernelParameters(1:2, 1:Ny, 1:Nz),  _reimpose_specified_zone!, args...)
+    specified_sides.east  && launch!(arch, grid, KernelParameters(Nx:Nx, 1:Ny, 1:Nz), _reimpose_specified_zone!, args...)
+    specified_sides.south && launch!(arch, grid, KernelParameters(1:Nx, 1:2, 1:Nz),  _reimpose_specified_zone!, args...)
+    specified_sides.north && launch!(arch, grid, KernelParameters(1:Nx, Ny:Ny, 1:Nz), _reimpose_specified_zone!, args...)
 
     if fill_halos
         fill_halo_regions!(ρᵈ, boundary_condition_args(model)...)

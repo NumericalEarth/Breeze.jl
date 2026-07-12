@@ -1,11 +1,11 @@
 #####
-##### Tests for the SubstepBoundaryUpdate specified-zone boundary drive (#825)
+##### Tests for the SubstepBoundaryUpdate specified-zone boundary update (#825)
 #####
 
 using Breeze
 using Breeze.CompressibleEquations: SubstepBoundaryUpdate, boundary_tendencies,
                                     OpenSides, specified_zone_faces, specified_zone_cell,
-                                    march_scheme, reimpose_specified_zone!,
+                                    specified_zone_scheme, reimpose_specified_zone!,
                                     compute_contravariant_velocity!
 using Breeze.Microphysics: InstantaneousPrecipitation, WarmPhaseEquilibrium
 using Oceananigans
@@ -24,7 +24,7 @@ bounded_grid(FT; Nz=4, Lz=400) =
     grid = bounded_grid(Float64)
     N = 8
 
-    # All four sides marched: the face and cell sets match the truth tables.
+    # All four sides specified: the face and cell sets match the truth tables.
     s = OpenSides(true, true, true, true)
     xspec_truth(i, j) = i <= 2 || i == N || j == 1 || j == N
     yspec_truth(i, j) = j <= 2 || j == N || i == 1 || i == N
@@ -36,7 +36,7 @@ bounded_grid(FT; Nz=4, Lz=400) =
         @test specified_zone_cell(i, j, grid, s) == cell_truth(i, j)
     end
 
-    # Single marched side: only that side's band is marked.
+    # Single specified side: only that side's band is marked.
     s_west = OpenSides(true, false, false, false)
     for j in 1:N, i in 1:N
         xspec, yspec = specified_zone_faces(i, j, grid, s_west)
@@ -45,7 +45,7 @@ bounded_grid(FT; Nz=4, Lz=400) =
         @test specified_zone_cell(i, j, grid, s_west) == (i == 1)
     end
 
-    # No marched sides: nothing marked.
+    # No specified sides: nothing marked.
     s_off = OpenSides(false, false, false, false)
     for j in 1:N, i in 1:N
         xspec, yspec = specified_zone_faces(i, j, grid, s_off)
@@ -58,8 +58,8 @@ end
     grid = bounded_grid(Float64)
 
     scheme = SubstepBoundaryUpdate()
-    @test march_scheme(NormalFlowBoundaryCondition(0; scheme)) === scheme
-    @test march_scheme(NormalFlowBoundaryCondition(0)) === nothing
+    @test specified_zone_scheme(NormalFlowBoundaryCondition(0; scheme)) === scheme
+    @test specified_zone_scheme(NormalFlowBoundaryCondition(0)) === nothing
 
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
@@ -76,12 +76,12 @@ end
     @test plain.timestepper.substepper.boundary_tendencies === nothing
 end
 
-@testset "March composition recovers U⁰ + Δt·∂ₜ over a full RK3 step" begin
+@testset "Specified-zone composition recovers U⁰ + Δt·∂ₜ over a full RK3 step" begin
     # A constant-in-time tendency ∂ₜ(ρu) = a on the specified zone must advance
     # the recovered specified-face momentum by exactly Δt·a per outer step,
     # independent of the stage substep counts — the regression for the
     # increment-vs-overwrite composition (an overwrite compounds to
-    # (β₁+β₂+β₃) = 11/6·Δt·a). Rest state ⇒ the only spec-face forcing is the march.
+    # (β₁+β₂+β₃) = 11/6·Δt·a). Rest state ⇒ the only spec-face forcing is the update.
     grid = bounded_grid(Float64)
     a = 1e-4   # ∂ₜ(ρu) [kg m⁻² s⁻²]
     scheme = SubstepBoundaryUpdate()
@@ -100,14 +100,14 @@ end
     ρu₁ = @allowscalar model.momentum.ρu[i, j, k]
     @test isapprox(ρu₁ - ρu₀, Δt * a; rtol=1e-10)
 
-    # Second step: the march re-anchors to the marched state, so the advance
+    # Second step: the update re-anchors to the specified state, so the advance
     # stays Δt·a per step (no compounding).
     time_step!(model, Δt)
     ρu₂ = @allowscalar model.momentum.ρu[i, j, k]
     @test isapprox(ρu₂ - ρu₁, Δt * a; rtol=1e-10)
 end
 
-@testset "Zero-tendency march holds a rest state" begin
+@testset "Zero-tendency update holds a rest state" begin
     grid = bounded_grid(Float64)
     scheme = SubstepBoundaryUpdate()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
@@ -126,7 +126,7 @@ end
     @test maximum(abs, interior(model.velocities.w)) < 1e-10
 end
 
-@testset "reimpose_specified_zone! restores the marched zone" begin
+@testset "reimpose_specified_zone! restores the specified zone" begin
     grid = bounded_grid(Float64)
     a = 1e-4
     scheme = SubstepBoundaryUpdate()
@@ -146,7 +146,7 @@ end
     ρu = model.momentum.ρu
     ρθ = model.formulation.potential_temperature_density
 
-    # Scribble garbage into the zone (a marched face and a specified cell) and
+    # Scribble garbage into the zone (a specified face and a specified cell) and
     # a sentinel into the interior, then restore.
     sentinel = 7.89
     @allowscalar begin
@@ -162,12 +162,12 @@ end
     end
 end
 
-@testset "March composition with a vertically-implicit closure" begin
+@testset "Specified-zone composition with a vertically-implicit closure" begin
     # The implicit vertical solve runs after the substep loop over all columns,
     # including the specified zone; the re-imposition must discard its
     # increments there. A z-dependent tendency with curvature discriminates:
     # without the restore, the implicit diffusion (ν Δt/Δz² ≫ rtol) smooths the
-    # marched profile and the composition fails.
+    # specified profile and the composition fails.
     grid = bounded_grid(Float64)
     a = 1e-4
     Lz = 400.0
@@ -200,9 +200,9 @@ end
     end
 end
 
-@testset "Moisture march composition" begin
+@testset "Moisture specified-zone composition" begin
     # ρqᵛ never enters the acoustic loop — it is stepped per stage from the
-    # slow tendencies — so its specified-zone march is carried entirely by the
+    # slow tendencies — so its specified-zone update is carried entirely by the
     # re-imposition.
     grid = bounded_grid(Float64)
     b = 1e-7   # ∂ₜ(ρqᵛ) [kg m⁻³ s⁻¹]
@@ -258,7 +258,7 @@ end
     end
 end
 
-@testset "Zero-tendency march holds a rest state with implicit closure" begin
+@testset "Zero-tendency update holds a rest state with implicit closure" begin
     grid = bounded_grid(Float64)
     scheme = SubstepBoundaryUpdate()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
@@ -267,7 +267,7 @@ end
                                      north = NormalFlowBoundaryCondition(0; scheme))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
     # Momentum-only diffusion: κ ≠ 0 drifts this discrete rest state by ~1e-4
-    # with or without the march (identically, scheme-independent) — a
+    # with or without the update (identically, scheme-independent) — a
     # pre-existing θ-diffusion/stratified-reference interaction, not a zone
     # property. ν exercises the implicit solve + per-stage re-imposition.
     closure = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν = 1)
@@ -286,10 +286,10 @@ end
 ##### SubstepBoundaryUpdate over TerrainCompressibleDynamics (#839)
 #####
 ##### Shared CPU terrain test problem (duplicated in-file per the two-PR plan — no shared
-##### helper file, since `find_tests` auto-discovers every `test/*.jl`). The march-only
+##### helper file, since `find_tests` auto-discovers every `test/*.jl`). The specified-zone-only
 ##### `SubstepBoundaryUpdate` is fully qualified so no extra import is needed. The hill
 ##### `h₀ sin(πx/Lx)` has zero height and MAX slope at both x-walls (discrete ccf wall
-##### slope ≈ 0.039), so the marched west/east zone sits where the terrain correction is
+##### slope ≈ 0.039), so the specified west/east zone sits where the terrain correction is
 ##### strongest — the sharpest test of the specified-zone gating.
 
 function terrain_testproblem_grid_and_dynamics(arch)
@@ -321,7 +321,7 @@ function terrain_inflow_momentum_columns(grid, dynamics, U)
     return west, east
 end
 
-# (a) rest, (b) flowing, (c) march.
+# (a) rest, (b) flowing, (c) specified.
 function build_terrain_testproblem(variant; arch = CPU(), U = 10.0)
     grid, dynamics = terrain_testproblem_grid_and_dynamics(arch)
 
@@ -346,7 +346,7 @@ function build_terrain_testproblem(variant; arch = CPU(), U = 10.0)
              enforce_mass_conservation = false)
         return model
 
-    elseif variant === :march
+    elseif variant === :specified
         scheme = Breeze.CompressibleEquations.SubstepBoundaryUpdate()   # fieldless marker
         ρu_bcs = FieldBoundaryConditions(
             west = NormalFlowBoundaryCondition(west_value; discrete_form = true, scheme),
@@ -359,11 +359,11 @@ function build_terrain_testproblem(variant; arch = CPU(), U = 10.0)
     error("unknown variant $variant")
 end
 
-# A marched-REST terrain model: the shared terrain grid/dynamics with a
+# A specified-REST terrain model: the shared terrain grid/dynamics with a
 # `SubstepBoundaryUpdate` west/east zone but zero inflow, so the only specified-zone
 # forcing is whatever `boundary_tendencies` supplies. Used by the three terrain
-# march testsets below (a flowing base would confound the clean Δρu = Δt·∂ₜ composition).
-function terrain_march_rest_model(; arch = CPU())
+# specified-zone testsets below (a flowing base would confound the clean Δρu = Δt·∂ₜ composition).
+function terrain_specified_rest_model(; arch = CPU())
     grid, dynamics = terrain_testproblem_grid_and_dynamics(arch)
     scheme = SubstepBoundaryUpdate()
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(0; scheme),
@@ -373,12 +373,12 @@ function terrain_march_rest_model(; arch = CPU())
     return model
 end
 
-@testset "Terrain march holds a rest state" begin
-    # The marched west/east zone with zero boundary tendencies must hold the discrete
+@testset "Terrain specified zone holds a rest state" begin
+    # The specified west/east zone with zero boundary tendencies must hold the discrete
     # terrain rest state to machine precision — the contravariant w̃ (the terrain
     # transport velocity) included, since a leak in the slope-projected acoustic/slow
     # terms would show there first. `Δt = 10` from `acoustic_cfl = 0.5`.
-    model = terrain_march_rest_model()
+    model = terrain_specified_rest_model()
     w̃ = model.dynamics.contravariant_vertical_velocity
     ρᵈ = model.dynamics.dry_density
     mass₀ = sum(interior(ρᵈ))
@@ -394,12 +394,12 @@ end
     @test abs(sum(interior(ρᵈ)) - mass₀) / mass₀ ≤ 1e-13
 end
 
-@testset "Terrain march composition recovers Δρu = Δt·∂ₜ" begin
+@testset "Terrain specified-zone composition recovers Δρu = Δt·∂ₜ" begin
     # A constant ∂ₜ(ρu) = a on the specified zone advances the recovered west-face
     # momentum by exactly Δt·a per outer step over terrain, just as on a flat grid —
     # the terrain slope corrections must not perturb the increment. A supplied-zero
     # ρθ tendency holds the zone's thermodynamic density exactly. Flat-y ⇒ j = 1.
-    model = terrain_march_rest_model()
+    model = terrain_specified_rest_model()
     a = 1e-4
     set!(boundary_tendencies(model).ρu, a)
 
@@ -421,14 +421,14 @@ end
     @test (@allowscalar ρθ[1, 1, 2]) == zone_ρθ₀   # zero-tendency ρθ held exactly
 end
 
-@testset "Terrain march does not leak specified-zone scalars into the interior" begin
+@testset "Terrain specified zone does not leak specified-zone scalars into the interior" begin
     # Discriminator for the terrain slope-correction gating (Path A + the slow-w̃
     # pressure/momentum substitution): heat ONLY the specified zone via a ρθ tendency.
-    # The zone marches by Δt·∂ₜ, but with the terrain horizontal-PGF stencils gated on
-    # the marched side the heated cell's perturbation pressure must NOT project into any
+    # The zone updates by Δt·∂ₜ, but with the terrain horizontal-PGF stencils gated on
+    # the specified side the heated cell's perturbation pressure must NOT project into any
     # interior column's vertical momentum. An ungated leak drives w ~ 1e-3 at column 2
     # (≈ 7 orders above the machine-level bound here).
-    model = terrain_march_rest_model()
+    model = terrain_specified_rest_model()
     set!(boundary_tendencies(model).ρθ, 1e-2)
 
     Δt = 10.0
@@ -437,6 +437,6 @@ end
     time_step!(model, Δt)
     zone₁ = @allowscalar ρθ[1, 1, 2]
 
-    @test isapprox(zone₁ - zone₀, Δt * 1e-2; rtol = 1e-10)      # zone marched
+    @test isapprox(zone₁ - zone₀, Δt * 1e-2; rtol = 1e-10)      # zone updated
     @test maximum(abs, interior(model.velocities.w)) < 1e-10    # interior did not leak
 end

@@ -428,7 +428,7 @@ outermost interior cells on that side become a *specified zone* in which
    ``ρθ`` predictors and the implicit vertical solve),
 3. the specified column's ``(ρw)'`` is closed by a per-substep **zero-gradient**
    copy from the nearest interior column (WRF `zero_grad_bdy` analog), and
-4. the specified zone's momentum and scalar perturbations are **marched** by
+4. the specified zone's momentum and scalar perturbations are **updated** by
    their boundary time-tendencies every acoustic substep:
 
 ```math
@@ -442,8 +442,8 @@ the boundary state at its stage time. (An overwrite ``τ\,∂_t`` would instead
 compound across stages into a secular ``(β₁+β₂+β₃) = 11/6`` over-advance per
 outer step, invisible to steady-state tests.)
 
-On marched sides the per-substep ``α`` relaxation of ``ρᵈ', (ρθ)'`` is
-superseded and skipped: the march holds the same cells to the time-accurate
+On specified sides the per-substep ``α`` relaxation of ``ρᵈ', (ρθ)'`` is
+superseded and skipped: the update holds the same cells to the time-accurate
 boundary state directly. Normal-flow boundaries without the scheme retain the
 relaxation unchanged.
 
@@ -456,11 +456,11 @@ files). A field left zero holds its variable frozen.
 Stage physics that runs after the substep loop — the vertically-implicit
 solve, the per-stage scalar update, and the once-per-step operator-split
 microphysics update — is not gated away from the zone; instead the zone is
-*restored* to its marched state ``U⁰ + β\,Δt\,∂_t`` after those operations,
+*restored* to its specified-zone state ``U⁰ + β\,Δt\,∂_t`` after those operations,
 discarding their increments there. Interior physics therefore never acts on
 the specified zone, the standard limited-area contract. This restoration also
 carries the moisture drive: the moisture density never enters the acoustic
-loop, so a supplied ``ρqᵛ`` tendency marches the zone's moisture purely
+loop, so a supplied ``ρqᵛ`` tendency updates the zone's moisture purely
 through the restore (a zero ``ρqᵛ`` tendency field holds zone moisture frozen,
 like the other variables). Two caveats: the specified column's ``(ρw)'`` has no
 boundary data — its zero-gradient closure stands and the column-local
@@ -468,12 +468,12 @@ implicit operator acts on it unrestored — and the zone's diagnostic fields
 (temperature, pressure) refresh only at the next stage's state update.
 
 The scheme also supports `TerrainCompressibleDynamics`. The terrain horizontal
-pressure-gradient stencils are not column-local, so on a marched side the
+pressure-gradient stencils are not column-local, so on a specified side the
 slope-projected pressure-gradient corrections — both the acoustic linearized
 ``∂p'`` correction and the slow-tendency full ``∂p`` correction — are
 interpolated one-sidedly, dropping the specified faces, and the terrain slow
-contravariant-momentum tendency substitutes the marched boundary tendency at
-specified faces. Together these keep a marched cell's re-imposed state from
+contravariant-momentum tendency substitutes the specified boundary tendency at
+specified faces. Together these keep a specified cell's re-imposed state from
 projecting into any interior column's contravariant vertical momentum.
 
 ## [Klemp divergence damping](@id klemp-damping)
