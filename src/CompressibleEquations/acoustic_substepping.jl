@@ -44,7 +44,7 @@ using Oceananigans.Operators:
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
 
-using Oceananigans.Grids: Flat, Center, Face, peripheral_node,
+using Oceananigans.Grids: Flat, Bounded, Center, Face, peripheral_node,
                           topology,
                           minimum_xspacing, minimum_yspacing, minimum_zspacing
 
@@ -1328,6 +1328,40 @@ function apply_open_boundary_relaxation!(substepper, model, grid, arch)
     return nothing
 end
 
+# Per-substep impenetrability enforcement on the wall-normal momentum
+# perturbations — the closed-wall companion of `apply_open_boundary_relaxation!`
+# above (which handles open lateral boundaries).
+
+@kernel function _zero_x_wall_face!(ρu′, iᶠ)
+    j, k = @index(Global, NTuple)
+    @inbounds ρu′[iᶠ, j, k] = 0
+end
+
+@kernel function _zero_y_wall_face!(ρv′, jᶠ)
+    i, k = @index(Global, NTuple)
+    @inbounds ρv′[i, jᶠ, k] = 0
+end
+
+@inline is_impenetrable_wall(bc) = (bc isa BoundaryCondition{NormalFlow{Nothing}}) && (bc.condition isa Nothing)
+
+function enforce_wall_impenetrability!(substepper, model, grid, arch)
+    TX, TY, _ = topology(grid)
+    Nx, Ny, _ = size(grid)
+    ρu′ = substepper.momentum_perturbation.u
+    ρv′ = substepper.momentum_perturbation.v
+    bcs_u = model.momentum.ρu.boundary_conditions
+    bcs_v = model.momentum.ρv.boundary_conditions
+    if TX === Bounded
+        is_impenetrable_wall(bcs_u.west) && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
+        is_impenetrable_wall(bcs_u.east) && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
+    end
+    if TY === Bounded
+        is_impenetrable_wall(bcs_v.south) && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
+        is_impenetrable_wall(bcs_v.north) && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
+    end
+    return nothing
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -1395,6 +1429,10 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)
+
+        # Impenetrability on the wall-normal momentum perturbations, before the
+        # predictor takes their horizontal divergence (mass conservation).
+        enforce_wall_impenetrability!(substepper, model, grid, arch)
 
         # (old (ρθ)′ is stashed into ρθ′ˢ⁻ inside `_build_predictors!`, then halo-filled.)
 
@@ -1473,6 +1511,11 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
         fill_halo_regions!(substepper.momentum_perturbation.u)
         fill_halo_regions!(substepper.momentum_perturbation.v)
+
+        # The damping kernel also writes the south/west wall face; re-enforce
+        # impenetrability so the next substep's divergence and the accumulated
+        # transport velocity see a closed wall (mass conservation).
+        enforce_wall_impenetrability!(substepper, model, grid, arch)
         # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
     end
 
