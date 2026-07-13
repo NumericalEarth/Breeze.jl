@@ -14,7 +14,7 @@
 # `SphericalCoriolis` (non-hydrostatic) on a 1° latitude-longitude grid spanning
 # 75° S to 75° N. Acoustic substepping lets the outer time step be set by
 # the *advective* CFL rather than the much-tighter acoustic CFL — here a
-# time-step wizard floats Δt at advective CFL ≈ 1.4 against the polar
+# time-step wizard floats Δt at advective CFL ≈ 0.7 against the polar
 # `Δx_min ≈ 28.8 km`, capped at 12 min.
 #
 # A future moist version (one-moment mixed-phase microphysics + bulk surface
@@ -230,7 +230,9 @@ end
 # evolves prognostic ``ρw`` so the non-traditional terms are physically
 # required for self-consistent dynamics on the sphere.
 #
-# Tracer and momentum advection uses ninth-order `WENO` reconstruction.
+# Tracer and momentum advection uses fifth-order `WENO` reconstruction. No
+# explicit closure is applied: WENO's implicit dissipation suffices on this
+# poleward-refined, near-surface-stretched grid.
 
 coriolis = SphericalCoriolis(rotation_rate=Ω)
 
@@ -252,11 +254,11 @@ set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
 # ## Time-stepping
 #
 # Substepping eliminates the acoustic CFL constraint on the outer Δt; only
-# the advective CFL remains. A time-step wizard targets advective CFL ≈ 1.4
+# the advective CFL remains. A time-step wizard targets advective CFL ≈ 0.7
 # against the polar `Δx_min ≈ 28.8 km`, capped at Δt = 12 min:
 #
 # ```math
-# Δt = \min\!\left(1.4 \cdot Δx_{\min} / U_{\max},\ 720 \text{ s}\right).
+# Δt = \min\!\left(0.7 \cdot Δx_{\min} / U_{\max},\ 720 \text{ s}\right).
 # ```
 #
 # This is many times larger than the acoustic-CFL-limited Δt a fully
@@ -267,7 +269,7 @@ set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
 stop_time = 30days
 
 simulation = Simulation(model; Δt, stop_time)
-conjure_time_step_wizard!(simulation; cfl=1.4, max_Δt=12minutes)
+conjure_time_step_wizard!(simulation; cfl=0.7, max_Δt=12minutes)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Progress callback
@@ -316,17 +318,12 @@ run!(simulation)
 
 # ## Visualization
 #
-# We plot six diagnostics on the sphere in a two-row grid. The top row shows
-# the near-surface synoptics: the **surface potential temperature**
-# ``θ_{\rm sfc}`` (the classic diagnostic for the cold/warm sectors), the
-# **surface vertical vorticity** ``ζ`` (which reveals the cyclones and
-# anticyclones), and the **lower-tropospheric vertical velocity** ``w`` at
-# ~2.9 km (the warm conveyor belt). The bottom row climbs the column: the
-# **jet-level vorticity** ``ζ`` at the 250 hPa jet (~10.5 km), where the
-# upper-tropospheric Rossby wave train is sharpest, the **model-top
-# vertical velocity** ``w`` at ~29.5 km, where gravity waves radiate into
-# the stratosphere, and the **model-top vertical vorticity** ``ζ`` at the
-# same level, showing how the wave signature imprints on the stratosphere.
+
+# We plot three near-surface diagnostics on the sphere: the **surface
+# potential temperature** ``θ_{\rm sfc}`` (the classic diagnostic for the
+# cold/warm sectors), the **surface vertical vorticity** ``ζ`` (which reveals
+# the cyclones and anticyclones), and the **lower-tropospheric vertical
+# velocity** ``w`` at ~2.9 km (the warm conveyor belt).
 
 θ_ts    = FieldTimeSeries("baroclinic_wave_k1.jld2",  "θ")
 ζ_ts    = FieldTimeSeries("baroclinic_wave_k1.jld2",  "ζ")
