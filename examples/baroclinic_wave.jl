@@ -72,7 +72,7 @@ using CUDA
 # so that the grid, Coriolis, and model thermodynamics are all consistent
 # with the analytic initial conditions.
 
-Oceananigans.defaults.FloatType = Float32
+Oceananigans.defaults.FloatType = Float64
 Oceananigans.defaults.gravitational_acceleration = 9.80616
 Oceananigans.defaults.planet_radius = 6371220
 Oceananigans.defaults.planet_rotation_rate = 7.29212e-5
