@@ -14,7 +14,7 @@
 # `SphericalCoriolis` (non-hydrostatic) on a 1° latitude-longitude grid spanning
 # 75° S to 75° N. Acoustic substepping lets the outer time step be set by
 # the *advective* CFL rather than the much-tighter acoustic CFL — here a
-# time-step wizard floats Δt at advective CFL ≈ 0.7 against the polar
+# time-step wizard floats Δt at advective CFL ≈ 1.4 against the polar
 # `Δx_min ≈ 28.8 km`, capped at 12 min.
 #
 # A future moist version (one-moment mixed-phase microphysics + bulk surface
@@ -252,11 +252,11 @@ set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
 # ## Time-stepping
 #
 # Substepping eliminates the acoustic CFL constraint on the outer Δt; only
-# the advective CFL remains. A time-step wizard targets advective CFL ≈ 0.7
+# the advective CFL remains. A time-step wizard targets advective CFL ≈ 1.4
 # against the polar `Δx_min ≈ 28.8 km`, capped at Δt = 12 min:
 #
 # ```math
-# Δt = \min\!\left(0.7 \cdot Δx_{\min} / U_{\max},\ 720 \text{ s}\right).
+# Δt = \min\!\left(1.4 \cdot Δx_{\min} / U_{\max},\ 720 \text{ s}\right).
 # ```
 #
 # This is many times larger than the acoustic-CFL-limited Δt a fully
@@ -265,9 +265,10 @@ set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
 
 Δt = 12minutes
 stop_time = 30days
+cfl = 1.4
 
 simulation = Simulation(model; Δt, stop_time)
-conjure_time_step_wizard!(simulation; cfl=0.7, max_Δt=12minutes)
+conjure_time_step_wizard!(simulation; cfl, max_Δt=12minutes)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Progress callback
@@ -281,6 +282,23 @@ function progress(sim)
 end
 
 add_callback!(simulation, progress, IterationInterval(50))
+
+# We also record the domain-maximum winds every 6 hours to a small CSV, so the
+# max-wind evolution can be compared offline against other dynamical cores.
+
+maxwind_file = "baroclinic_wave_maxwind_cfl$(cfl).csv"
+open(io -> println(io, "time_days,max_u,max_v,max_w"), maxwind_file, "w")
+
+function record_maxwind(sim)
+    u, v, w = sim.model.velocities
+    open(maxwind_file, "a") do io
+        @printf(io, "%.4f,%.4f,%.4f,%.4f\n", sim.model.clock.time / 86400,
+                maximum(abs, u), maximum(abs, v), maximum(abs, w))
+    end
+    return nothing
+end
+
+add_callback!(simulation, record_maxwind, TimeInterval(6hours))
 
 # ## Output
 #
