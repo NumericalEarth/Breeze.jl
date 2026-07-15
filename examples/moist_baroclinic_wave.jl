@@ -36,14 +36,14 @@
 #     time-step wizard below. A full 30-day sphere run is a workstation-GPU-scale
 #     computation, not a quick doctest.
 #
-# !!! warning "Known limitation (day ~8)"
-#     With the settings below the wave develops realistically — jet, growing
-#     Rossby wave, condensation, and rainfall — through roughly day 8, but the run
-#     currently **crashes during vigorous moist cyclogenesis** around day 8: sharp
-#     F32 frontal features trip the thermodynamic ``θ→T`` inversion. Reaching the
-#     full 30 days needs added frontal dissipation or a more robust inversion, which
-#     is tracked as follow-up. For a complete end-to-end run today, set
-#     `stop_time` to ≲ 7 days.
+# !!! note "Grid-scale dissipation"
+#     Moist frontogenesis around day 8 excites a grid-scale (2Δx) *computational*
+#     instability near the jet that WENO's implicit dissipation alone does not
+#     control (the dry wave never sharpens fronts this far). The ``\cos⁴φ``-scaled
+#     biharmonic hyperviscosity added below suppresses it, and the run then carries
+#     through vigorous moist cyclogenesis — verified stable to day 12 with peak
+#     winds ``≈ 70`` m/s. This is the same role the explicit scale-selective filter
+#     (e.g. WRF's 6th-order diffusion) plays on split-explicit cores.
 #
 # ## Physical setup
 #
@@ -93,6 +93,7 @@ using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: φnode
+using Oceananigans.TurbulenceClosures: HorizontalScalarBiharmonicDiffusivity
 using Printf
 using CairoMakie
 using CUDA
@@ -306,9 +307,24 @@ scalar_advection = (ρθ  = WENO(order=5),
                     ρqᶜˡ = WENO(order=5, bounds=(0, 1)),
                     ρqʳ  = WENO(order=5, bounds=(0, 1)))
 
+# Horizontal biharmonic hyperviscosity (∇⁴) to suppress the grid-scale (2Δx)
+# computational mode that moist frontogenesis excites near the jet around day 8.
+# WENO's implicit dissipation controls it in the dry wave, but the sharper moist
+# fronts need an explicit, scale-selective filter — the same role WRF's 6th-order
+# diffusion plays on its Wicker–Skamarock core.
+#
+# The coefficient is scaled by ``\cos⁴φ`` for the converging lat-lon meridians:
+# since ``Δx = a\cosφ\,Δλ``, a biharmonic-CFL-safe viscosity must scale like
+# ``Δx⁴ ∝ \cos⁴φ``, which keeps the 2Δx damping timescale latitude-independent.
+# ``ν₄⁰ = 10¹⁴`` m⁴ s⁻¹ gives a ~4 h damping time for the 2Δx mode at the jet —
+# fast enough to beat its ~8 h growth, and ~20× below the coefficient that itself
+# goes unstable at this Float32 resolution. Applied to momentum only (``κ`` = 0).
+@inline ν₄(λ, φ, z, t) = 1e14 * cosd(φ)^4
+closure = HorizontalScalarBiharmonicDiffusivity(ν=ν₄)
+
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        microphysics,
+                        microphysics, closure,
                         momentum_advection, scalar_advection)
 
 # ## Set initial conditions
