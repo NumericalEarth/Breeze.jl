@@ -283,23 +283,6 @@ end
 
 add_callback!(simulation, progress, IterationInterval(50))
 
-# We also record the domain-maximum winds every 6 hours to a small CSV, so the
-# max-wind evolution can be compared offline against other dynamical cores.
-
-maxwind_file = "baroclinic_wave_maxwind_cfl$(cfl).csv"
-open(io -> println(io, "time_days,max_u,max_v,max_w"), maxwind_file, "w")
-
-function record_maxwind(sim)
-    u, v, w = sim.model.velocities
-    open(maxwind_file, "a") do io
-        @printf(io, "%.4f,%.4f,%.4f,%.4f\n", sim.model.clock.time / 86400,
-                maximum(abs, u), maximum(abs, v), maximum(abs, w))
-    end
-    return nothing
-end
-
-add_callback!(simulation, record_maxwind, TimeInterval(6hours))
-
 # ## Output
 #
 # We save the velocities, the full potential temperature ``θ`` (the
