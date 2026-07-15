@@ -4,6 +4,10 @@ export
     # AtmosphereModel core
     AtmosphereModel,
     AtmosphereModelBuoyancy,
+    # Adiabatic (FV3 na_init) initialization
+    balance_adiabatically!,
+    AdiabaticBalancer,
+    HydrostaticallyBalancedDensity,
     # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
     dynamics_pressure,
@@ -18,6 +22,8 @@ export
     # Thermodynamic formulation interface (formulation types exported by their respective modules)
     thermodynamic_density_name,
     thermodynamic_density,
+    DefaultTemperatureSolver,
+    default_temperature_solver,
     # Helpers
     static_energy_density,
     static_energy,
@@ -43,6 +49,7 @@ export
     WarmRainState,
     microphysical_state,
     microphysical_tendency,
+    prepare_microphysical_tendencies!,
     compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,
@@ -92,6 +99,9 @@ export
     # Transport interface (for terrain-following coordinates)
     transport_velocities,
     advecting_momentum,
+
+    # Advective timescale for the time-step wizard
+    CellAdvectionTimescale,
 
     # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
     compute_x_momentum_tendency!,
@@ -143,6 +153,8 @@ include("atmosphere_model_buoyancy.jl")
 include("solar_position.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
+include("implicit_vertical_advection.jl")
+include("cell_advection_timescale.jl")
 include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
@@ -157,5 +169,10 @@ using .Diagnostics
 # set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
 include("set_atmosphere_model.jl")
 include("set_to_mean.jl")
+
+# Adiabatic (FV3 na_init) initialization. The dynamics-specific twin construction
+# (`adiabatic_twin_dynamics`) is extended in CompressibleEquations; the generic fallback here keeps
+# the balance solver-agnostic.
+include("adiabatic_balance.jl")
 
 end

@@ -84,9 +84,17 @@ using Oceananigans.TimeSteppers: update_state!
         @test T★ > T_noniter                            # the non-iterated inversion is biased cold
         @test isapprox(T★ - T_noniter, FT(1.39) * κ * L; rtol=FT(0.15))   # gap ≈ 1.39 κΔL (leading order)
 
-        # The solver controls are honored: temperature_maxiter = 0 returns the un-iterated inversion.
-        𝒰_noniter = LiquidIceDensityState{FT}(θ, q, pˢᵗ, ρ, one(FT), 0)
+        # The solver abstraction is honored: `nothing` returns the un-iterated closed form,
+        # and `FixedIterations` (the unrolled, Reactant-safe form) matches the converged Newton.
+        𝒰_noniter = LiquidIceDensityState(θ, q, pˢᵗ, ρ, nothing)
         @test temperature(𝒰_noniter, constants) ≈ T_noniter  rtol=rtol
+
+        𝒰_fixed = LiquidIceDensityState(θ, q, pˢᵗ, ρ, FixedIterations(8))
+        @test temperature(𝒰_fixed, constants) ≈ T★  rtol=rtol
+
+        # An abstol-only Newton solver (no relative criterion) also converges to the root.
+        𝒰_abstol = LiquidIceDensityState(θ, q, pˢᵗ, ρ, NewtonSolver(FT; reltol=0, abstol=1e-6, maxiter=20))
+        @test temperature(𝒰_abstol, constants) ≈ T★  atol=FT(1e-4)
 
         # Control: with no condensate the inversion reduces to the dry closed form (no latent shift).
         qd = MoistureMassFractions(FT(0.020))
@@ -114,14 +122,13 @@ end
                                reference_potential_temperature = θref)
     model = AtmosphereModel(grid; dynamics = dyn,
                             microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()),
-                            thermodynamic_constants = constants,
-                            timestepper = :AcousticRungeKutta3)
+                            thermodynamic_constants = constants)
     set!(model; ρ = model.dynamics.reference_state.density, θ = 300.0, qᵗ = 0.030)
     update_state!(model)
 
     T  = Array(interior(model.temperature))
     p  = Array(interior(model.dynamics.pressure))
-    ρ  = Array(interior(model.dynamics.density))
+    ρ  = Array(interior(model.dynamics.total_density))  # saturation adjustment saturates at total ρ
     qˡ = Array(interior(model.microphysical_fields.qˡ))
     qᵛ = Array(interior(model.microphysical_fields.qᵛ))
 
@@ -137,4 +144,68 @@ end
 
     time_step!(model, 1e-3)
     @test all(isfinite, interior(model.temperature))
+end
+
+# `set!` density-input modes on the compressible core. Initializing with an in-situ temperature `T`
+# exercises the θˡⁱ-from-T kernel, which needs the diagnosed total density ρ available (mass
+# fractions) and weights ρθ = ρᵈθ by the dry density. The two input modes establish ρ differently:
+#   `:ρ`  (total) — total_density ← ρ, dry_density ← ρ·(1-qᵗ)
+#   `:ρᵈ` (dry)   — total_density ← ρᵈ/(1-qᵗ), dry_density ← ρᵈ
+# Choosing ρᵈ = ρ·(1-qᵗ) makes the two columns identical, so they must produce the same state.
+@testset "Moist compressible set! density modes (ρ vs ρᵈ) [$FT]" for FT in test_float_types()
+    arch = default_arch
+    grid = RectilinearGrid(arch; size = (8, 8, 8), halo = (5, 5, 5),
+                           x = (0, 1e3), y = (0, 1e3), z = (0, 1e3),
+                           topology = (Periodic, Periodic, Bounded))
+    constants = ThermodynamicConstants(FT)
+
+    make_model() = AtmosphereModel(grid;
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        surface_pressure = 1e5, standard_pressure = 1e5,
+                                        reference_potential_temperature = z -> 300.0),
+        microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()),
+        thermodynamic_constants = constants,
+        timestepper = :AcousticRungeKutta3)
+
+    T₀ = FT(300)
+    qᵗ = FT(0.005)     # unsaturated at 300 K, 1e5 Pa — no condensation
+    ρ₀ = FT(1.16)      # total air density [kg m⁻³]
+    rtol = FT == Float64 ? FT(1e-6) : FT(1e-3)
+
+    # Pull interiors to the CPU before reducing — `all(≈(ρ₀; rtol), ::CuArray)` would compile the
+    # keyword-carrying closure into a GPU kernel (non-bitstype Symbol in the kwargs) and fail.
+    cpu(field) = Array(interior(field))
+
+    # Mode 1: total density given.
+    model_ρ = make_model()
+    set!(model_ρ; ρ = ρ₀, T = T₀, qᵗ = qᵗ)
+    update_state!(model_ρ)
+
+    ρθ_ρ = cpu(model_ρ.formulation.potential_temperature_density)
+    ρt_ρ = cpu(model_ρ.dynamics.total_density)
+    ρd_ρ = cpu(model_ρ.dynamics.dry_density)
+    T_ρ  = cpu(model_ρ.temperature)
+    @test all(isfinite, ρθ_ρ) && all(>(0), ρθ_ρ)            # not the ρθ = 0 bug
+    @test all(≈(ρ₀; rtol), ρt_ρ)
+    @test all(≈(ρ₀ * (1 - qᵗ); rtol), ρd_ρ)                  # dry excludes water
+    # Physical, finite temperature — the ρθ = 0 staleness bug gave θ = ρθ/ρᵈ = 0 ⇒ T ≈ 0.
+    @test all(t -> isfinite(t) && 200 < t < 400, T_ρ)
+
+    # Mode 2: dry density given, chosen so the total recovers to ρ₀.
+    model_ρᵈ = make_model()
+    set!(model_ρᵈ; ρᵈ = ρ₀ * (1 - qᵗ), T = T₀, qᵗ = qᵗ)
+    update_state!(model_ρᵈ)
+
+    ρθ_ρᵈ = cpu(model_ρᵈ.formulation.potential_temperature_density)
+    ρt_ρᵈ = cpu(model_ρᵈ.dynamics.total_density)
+    ρd_ρᵈ = cpu(model_ρᵈ.dynamics.dry_density)
+    T_ρᵈ  = cpu(model_ρᵈ.temperature)
+    @test all(≈(ρ₀; rtol), ρt_ρᵈ)                            # ρ = ρᵈ/(1-qᵗ)
+    @test all(≈(ρ₀ * (1 - qᵗ); rtol), ρd_ρᵈ)
+
+    # The two input modes describe the same column → identical state.
+    @test ρt_ρ ≈ ρt_ρᵈ
+    @test ρd_ρ ≈ ρd_ρᵈ
+    @test ρθ_ρ ≈ ρθ_ρᵈ
+    @test T_ρ  ≈ T_ρᵈ
 end

@@ -106,8 +106,7 @@ end
                                                                         field_dependencies = dependencies,
                                                                         parameters = (;)))
         model = AtmosphereModel(grid; dynamics,
-                                      boundary_conditions = (; ρv = ρv_bcs),
-                                      timestepper = :AcousticRungeKutta3)
+                                      boundary_conditions = (; ρv = ρv_bcs))
 
         set!(model, ρ = (x, y, z) -> FT(1),
                     θ = (x, y, z) -> FT(300),
@@ -223,6 +222,16 @@ end
         # Test that BulkDrag on a scalar field throws an error
         ρθ_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
         @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
+
+        # CompressibleDynamics has no default surface temperature for BulkDrag;
+        # constructing a model without an explicit surface_temperature must error.
+        compressible_dyn = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=2);
+                                                reference_potential_temperature = FT(300),
+                                                surface_pressure = FT(1e5),
+                                                standard_pressure = FT(1e5))
+        ρu_bcs_no_T₀ = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
+        @test_throws ArgumentError AtmosphereModel(grid; dynamics=compressible_dyn,
+                                                         boundary_conditions=(; ρu=ρu_bcs_no_T₀))
     end
 
     @testset "BulkSensibleHeatFlux construction and application [$FT]" begin
@@ -293,6 +302,42 @@ end
         compute!(Jᶿ_field)
 
         @test all(abs.(interior(Jᶿ_field)) .<= increment_tolerance(FT))
+    end
+
+    @testset "BulkDrag uses ρ₀, filtered u and θᵥ [$FT]" begin
+        using Oceananigans.Models: BoundaryConditionOperation
+        using Breeze.Thermodynamics: surface_density
+
+        grid_1 = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 100))
+        fv = FilteredSurfaceVelocities(grid_1; filter_timescale=FT(3600))
+
+        drag = BulkDrag(coefficient = FT(Cᴰ),
+                        gustiness = FT(gustiness),
+                        surface_temperature = FT(T₀),
+                        filtered_velocities = fv)
+        ρu_bcs = FieldBoundaryConditions(bottom = drag)
+        model = AtmosphereModel(grid_1; boundary_conditions=(; ρu=ρu_bcs))
+
+        U = FT(5)
+        set!(model; θ=model.dynamics.reference_state.potential_temperature, u=U)
+        Oceananigans.initialize!(model)
+
+        # Shared FilteredSurfaceVelocities should now expose a θᵥ field
+        bc_condition = Oceananigans.boundary_conditions(model.momentum.ρu).bottom.condition
+        @test bc_condition.filtered_velocities === fv
+        @test bc_condition.surface_pressure ≈ surface_pressure(model.dynamics)
+
+        Jᵘ_op = BoundaryConditionOperation(model.momentum.ρu, :bottom, model)
+        Jᵘ_field = Field(Jᵘ_op)
+        compute!(Jᵘ_field)
+
+        constants = model.thermodynamic_constants
+        p₀ = surface_pressure(model.dynamics)
+        ρ₀ = surface_density(p₀, FT(T₀), constants)
+        Ũ = sqrt(U^2 + FT(gustiness)^2)
+        Jᵘ_expected = - ρ₀ * FT(Cᴰ) * Ũ * U
+
+        @test all(abs.(Array(interior(Jᵘ_field)) .- Jᵘ_expected) .<= increment_tolerance(FT))
     end
 
     @testset "BulkSensibleHeatFlux with StaticEnergyFormulation [$FT]" begin

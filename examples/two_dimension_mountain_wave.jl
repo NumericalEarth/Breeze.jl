@@ -248,8 +248,7 @@ dynamics = CompressibleDynamics(time_discretization;
                                 surface_pressure = p₀,
                                 reference_potential_temperature = potential_temperature_profile)
 
-model = AtmosphereModel(grid; dynamics, advection = WENO(order=9),
-                        timestepper = :AcousticRungeKutta3)
+model = AtmosphereModel(grid; dynamics, advection = WENO(order=9))
 
 # ## Initial conditions
 #

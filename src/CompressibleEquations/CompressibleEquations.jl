@@ -35,10 +35,12 @@ export
     stage_fractions,
     AcousticSubstepDistribution,
     ProportionalSubsteps,
+    ConstantSubstepSize,
     MonolithicFirstStage,
     AcousticDampingStrategy,
     NoDivergenceDamping,
     ThermalDivergenceDamping,
+    DirectDivergenceDamping,
     UpperSponge,
     AbstractRamp,
     LinearRamp,
@@ -59,12 +61,15 @@ using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑy�
                                 ∂zᶜᶜᶜ, ∂zᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: divᶜᶜᶜ
-using Oceananigans.Utils: prettysummary, launch!
+using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 
+using Breeze.Solvers: NewtonSolver
 using Breeze.Thermodynamics: mixture_gas_constant, dry_air_gas_constant,
                              vapor_gas_constant, ExnerReferenceState, temperature, LiquidIceDensityState
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density, standard_pressure, thermodynamic_density, thermodynamic_density_name, specific_prognostic_moisture
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
+                               surface_pressure, standard_pressure, thermodynamic_density,
+                               thermodynamic_density_name, specific_prognostic_moisture
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
 include("time_discretizations.jl")

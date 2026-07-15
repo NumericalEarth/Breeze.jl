@@ -22,7 +22,7 @@
 #####
 
 using Oceananigans: architecture
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ, Δzᶜᶜᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!, NormalFlowBoundaryCondition, FieldBoundaryConditions
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
@@ -33,8 +33,81 @@ using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpo
 ##### Terrain-aware type alias
 #####
 
-const TerrainCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}
+const TerrainCompressibleDynamics = CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:TerrainMetrics}
 const TerrainCompressibleModel = AtmosphereModel{<:TerrainCompressibleDynamics}
+
+# Vertical transport on terrain-following grids goes through the tilted coordinate surfaces:
+# momentum advects with the contravariant momentum ρw̃ (see `advecting_momentum` below), so the
+# adaptive-implicit vertical-advection split partitions the contravariant velocity w̃.
+@inline AtmosphereModels.advecting_vertical_velocity(dynamics::TerrainCompressibleDynamics, velocities) =
+    dynamics.contravariant_vertical_velocity
+
+"""
+$(TYPEDEF)
+
+Callable piecewise-linear vertical profile. `profile(z)` linearly interpolates `values`
+against `heights` (both ordered bottom-to-top) and holds the nearest end value constant for
+`z` below `heights[1]` or above `heights[end]`. Subtypes `Function` so it is picked up by
+`evaluate_profile` wherever a `z`-dependent reference profile is expected.
+"""
+struct HorizontalMeanProfile{H, V} <: Function
+    heights :: H
+    values :: V
+end
+
+function (profile::HorizontalMeanProfile)(z)
+    heights = profile.heights
+    values = profile.values
+
+    z ≤ heights[1] && return values[1]
+
+    for k in 2:length(heights)
+        if z ≤ heights[k]
+            lower_height = heights[k-1]
+            upper_height = heights[k]
+            weight = (z - lower_height) / (upper_height - lower_height)
+            return (1 - weight) * values[k-1] + weight * values[k]
+        end
+    end
+
+    return values[end]
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Reduce a 3D `field` to a `HorizontalMeanProfile` of its horizontal mean at each
+vertical level, paired with the horizontal-mean physical height of that level. On a
+terrain-following grid the cell-center height `znode(i, j, k, …)` varies with `(i, j)`, so
+both the value and the height are averaged over `(i, j)` (on a CPU mirror of the grid) to
+give a single representative profile that can be re-evaluated per column.
+"""
+function horizontal_mean_profile(field)
+    grid = field.grid
+    Nx, Ny, Nz = size(grid)
+    cpu_grid = Oceananigans.Architectures.on_architecture(Oceananigans.CPU(), grid)
+    data = Array(Oceananigans.interior(field))
+    FT = eltype(grid)
+    c = Center()
+    normalization = one(FT) / (Nx * Ny)
+    heights = zeros(FT, Nz)
+    values = zeros(FT, Nz)
+
+    for k in 1:Nz
+        height_sum = zero(FT)
+        value_sum = zero(FT)
+
+        for j in 1:Ny, i in 1:Nx
+            height_sum += znode(i, j, k, cpu_grid, c, c, c)
+            value_sum += data[i, j, k]
+        end
+
+        heights[k] = height_sum * normalization
+        values[k] = value_sum * normalization
+    end
+
+    return HorizontalMeanProfile(heights, values)
+end
 
 #####
 ##### Compute contravariant vertical velocity and momentum
@@ -65,7 +138,7 @@ function compute_contravariant_velocity!(model::TerrainCompressibleModel)
     launch!(arch, grid, :xyz,
             _compute_contravariant_velocity!,
             w̃, ρw̃,
-            grid, model.momentum, dynamics.density)
+            grid, model.momentum, dynamics.dry_density)
 
     # The terrain kinematic BC (w̃ = 0 at the surface) is enforced declaratively:
     # `ρw` carries a NormalFlow bottom BC ρw|₁ = slopeₓ·ρu + slopeᵧ·ρv (see
@@ -158,7 +231,7 @@ end
     @inbounds ρw̃′[i, j, k] = ρw̃_outer - ρw̃_stage
 end
 
-@inline function x_linearized_pressure_gradient(i, j, k, grid,
+@inline function ∇ˣp′(i, j, k, grid,
                                                 dynamics::TerrainCompressibleDynamics,
                                                 ρθ′, Πᴸ, γRᵐᴸ)
     stencil = dynamics.terrain_metrics.pressure_gradient_stencil
@@ -166,7 +239,7 @@ end
                                                   stencil, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
-@inline function y_linearized_pressure_gradient(i, j, k, grid,
+@inline function ∇ʸp′(i, j, k, grid,
                                                 dynamics::TerrainCompressibleDynamics,
                                                 ρθ′, Πᴸ, γRᵐᴸ)
     stencil = dynamics.terrain_metrics.pressure_gradient_stencil
@@ -238,9 +311,9 @@ end
                                                                             dynamics, ρθ′, Πᴸ, γRᵐᴸ)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
-    ∂x_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, x_linearized_pressure_gradient,
+    ∂x_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ∇ˣp′,
                        dynamics, ρθ′, Πᴸ, γRᵐᴸ)
-    ∂y_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, y_linearized_pressure_gradient,
+    ∂y_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ∇ʸp′,
                        dynamics, ρθ′, Πᴸ, γRᵐᴸ)
     return slope_x * ∂x_p′_ccf + slope_y * ∂y_p′_ccf
 end
@@ -252,10 +325,10 @@ end
 # its perturbation horizontal PGF; otherwise the two are out of phase on substep 1 of a
 # multi-substep stage. The vertical ∂z(Cᴸ(ρθ)′) part is always applied — the
 # vertical acoustic mode is solved implicitly every substep.
-@inline function z_linearized_pressure_gradient(i, j, k, grid,
+@inline function ∇ᶻp′(i, j, k, grid,
                                                 dynamics::TerrainCompressibleDynamics,
                                                 ρθ′, Πᴸ, γRᵐᴸ, slope_correction)
-    ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+    ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
     correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
                                                                             dynamics, ρθ′, Πᴸ, γRᵐᴸ)
     return ∂z_p′ - slope_correction * correction
@@ -264,29 +337,29 @@ end
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeOutsideInterpolation,
                                                         ρθ′, Πᴸ, γRᵐᴸ)
-    return ∂xᶠᶜᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+    return ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
 @inline function terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeOutsideInterpolation,
                                                         ρθ′, Πᴸ, γRᵐᴸ)
-    return ∂yᶜᶠᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+    return ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
 @inline function slope_x_times_∂z_linearized_pressure(i, j, k, grid, ρθ′, Πᴸ, γRᵐᴸ)
     slope = terrain_slope_x_ccf(i, j, k, grid)
-    return slope * ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
 @inline function slope_y_times_∂z_linearized_pressure(i, j, k, grid, ρθ′, Πᴸ, γRᵐᴸ)
     slope = terrain_slope_y_ccf(i, j, k, grid)
-    return slope * ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ)
+    return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
 end
 
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeInsideInterpolation,
                                                         ρθ′, Πᴸ, γRᵐᴸ)
-    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ) *
+    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ) *
             Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
     correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
                        slope_x_times_∂z_linearized_pressure,
@@ -297,7 +370,7 @@ end
 @inline function terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeInsideInterpolation,
                                                         ρθ′, Πᴸ, γRᵐᴸ)
-    ∂y_p′ = δyᶜᶠᶜ(i, j, k, grid, linearized_pressure_perturbation, ρθ′, Πᴸ, γRᵐᴸ) *
+    ∂y_p′ = δyᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ) *
             Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
     correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
                        slope_y_times_∂z_linearized_pressure,
@@ -317,7 +390,7 @@ end
     return ρw_ccf - slope_x * ρu_ccf - slope_y * ρv_ccf
 end
 
-@inline function acoustic_stage_vertical_transport_momentum(i, j, k, grid,
+@inline function transport_ρw(i, j, k, grid,
                                                             dynamics::TerrainCompressibleDynamics,
                                                             ρu_stage, ρv_stage, ρw_stage)
     return terrain_vertical_transport_momentum(i, j, k, grid,
@@ -332,7 +405,7 @@ end
 
     ρuᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, total_momentum, ρuᴸ, ρu′)
     ρvᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, total_momentum, ρvᴸ, ρv′)
-    ρw̃_stage = acoustic_stage_vertical_transport_momentum(i, j, k, grid, dynamics,
+    ρw̃_stage = transport_ρw(i, j, k, grid, dynamics,
                                                            ρuᴸ, ρvᴸ, ρwᴸ)
     @inbounds ρw̃ᵐ⁺ = ρw̃_stage + ρw̃′[i, j, k]
 
@@ -357,7 +430,7 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
             substepper.slow_vertical_momentum_tendency,
             Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
             dynamics.pressure,
-            dynamics.density,
+            dynamics.total_density,
             dynamics.terrain_reference_pressure,
             dynamics.terrain_reference_density,
             grid, dynamics, g, vertical_pressure_tendency_factor)
@@ -393,13 +466,13 @@ end
     ∂zᶜᶜᶠ(i, j, k, grid, p)
 
 @inline terrain_vertical_pressure_gradient(i, j, k, grid, p, pᵣ) =
-    ∂zᶜᶜᶠ(i, j, k, grid, p_perturbation, p, pᵣ)
+    ∂zᶜᶜᶠ(i, j, k, grid, δϕ, p, pᵣ)
 
 @inline terrain_vertical_buoyancy_density(i, j, k, grid, ρ, ::Nothing) =
     ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 
 @inline terrain_vertical_buoyancy_density(i, j, k, grid, ρ, ρᵣ) =
-    ℑzᵃᵃᶠ(i, j, k, grid, ρ_perturbation, ρ, ρᵣ)
+    ℑzᵃᵃᶠ(i, j, k, grid, δϕ, ρ, ρᵣ)
 
 #####
 ##### Terrain-corrected pressure gradient
@@ -519,7 +592,7 @@ end
 function AtmosphereModels.compute_dynamics_tendency!(model::TerrainCompressibleModel)
     grid = model.grid
     arch = architecture(grid)
-    Gρ = model.timestepper.Gⁿ.ρ
+    Gρ = model.timestepper.Gⁿ.ρᵈ
     ρw̃ = model.dynamics.contravariant_vertical_momentum
 
     launch!(arch, grid, :xyz, _compute_terrain_density_tendency!, Gρ, grid, model.momentum, ρw̃)
@@ -543,7 +616,7 @@ function compute_terrain_temperature_and_pressure!(model::TerrainCompressibleMod
     dynamics = model.dynamics
 
     # Ensure halos are filled
-    fill_halo_regions!(dynamics.density)
+    fill_halo_regions!(dynamics.dry_density)
     fill_halo_regions!(prognostic_fields(model.formulation))
 
     # Compute temperature and pressure (same as non-terrain CompressibleModel)
@@ -551,7 +624,8 @@ function compute_terrain_temperature_and_pressure!(model::TerrainCompressibleMod
             _compute_temperature_and_pressure!,
             model.temperature,
             dynamics.pressure,
-            dynamics.density,
+            dynamics.dry_density,
+            dynamics.total_density,
             model.formulation,
             dynamics,
             specific_prognostic_moisture(model),
@@ -604,7 +678,7 @@ end
                                                     microphysics,
                                                     microphysical_fields,
                                                     constants)
-    ρ_field = dynamics_density(dynamics)
+    ρ_field = dynamics.total_density  # total air density: gravity acts on total mass
     @inbounds ρ = ρ_field[i, j, k]
     g = constants.gravitational_acceleration
     ρᵣ = terrain_reference_density(i, j, k, dynamics.terrain_reference_density)
@@ -620,6 +694,7 @@ end
 
 using Breeze.Thermodynamics: evaluate_profile, hydrostatic_pressure,
                              newton_hydrostatic_pressure, moist_reference_constants
+using Breeze.Solvers: FixedIterations
 
 terrain_reference_profiles(ref_spec) = (ref_spec, nothing)
 
@@ -782,7 +857,7 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢ
                     θ_face = (θₖ + θ_surface) / 2
                     Πₖ_init = Π_surface - g * Δz / (cᵖᵐₖ * θ_face)
                     pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
-                    pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, 7)
+                    pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, FixedIterations(5))
                 end
             else
                 z_below = znode(i, j, k - 1, cpu_grid, c, c, c)
@@ -791,7 +866,7 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢ
                 Δz = Δzᶜᶜᶠ(i, j, k, cpu_grid)
                 Πₖ_init = Π⁻ - g * Δz / (cᵖᵐₖ * θ_face)
                 pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
-                pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, 7)
+                pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, FixedIterations(5))
             end
 
             Πₖ = (pₖ / pˢᵗ)^κₖ
@@ -810,5 +885,45 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢ
     copyto!(Oceananigans.interior(ρᵣ), Oceananigans.Architectures.on_architecture(arch, ρ_host))
     fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Build the reference specification (`reference_potential_temperature`,
+`reference_vapor_mass_fraction`) for a terrain-following compressible model from the
+horizontal means of its current `θˡⁱ` and `qᵛ`. The vapor profile is dropped (set to
+`nothing`, selecting the dry reference path) when the mean moisture is identically zero.
+"""
+function terrain_reference_mean_profiles(model)
+    θ̄ = horizontal_mean_profile(AtmosphereModels.liquid_ice_potential_temperature(model))
+    qᵛ_profile = horizontal_mean_profile(AtmosphereModels.specific_humidity(model))
+    q̄ᵛ = all(iszero, qᵛ_profile.values) ? nothing : qᵛ_profile
+    return (; reference_potential_temperature=θ̄,
+              reference_vapor_mass_fraction=q̄ᵛ)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Recompute the 3D terrain reference pressure/density in place from the horizontal-mean state,
+via `compute_terrain_reference_state!`. Unlike the Exner/anelastic `set_to_mean!` reset, no
+`update_state!` follows: the terrain reference feeds only the buoyancy and pressure-gradient
+tendencies, not any diagnostic field. A no-op if the dynamics carries no terrain reference.
+"""
+function AtmosphereModels.reset_reference_state!(model::TerrainCompressibleModel)
+    dynamics = model.dynamics
+    pᵣ = dynamics.terrain_reference_pressure
+    ρᵣ = dynamics.terrain_reference_density
+    (pᵣ === nothing || ρᵣ === nothing) && return nothing
+
+    ref_spec = terrain_reference_mean_profiles(model)
+    compute_terrain_reference_state!(pᵣ, ρᵣ, model.grid,
+                                     surface_pressure(dynamics),
+                                     ref_spec,
+                                     standard_pressure(dynamics),
+                                     model.thermodynamic_constants)
+
     return nothing
 end

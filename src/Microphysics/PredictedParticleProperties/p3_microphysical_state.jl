@@ -141,6 +141,11 @@ Return prognostic field names for the P3 scheme.
                  z_names..., ssat_names..., aero_names...)
 end
 
+# True condensate partial densities that contribute to total air mass. Number moments,
+# supersaturation, and aerosol are not masses. Rime mass is already contained in total
+# ice mass, so including ρqᶠ would count it twice; ρbᶠ and ρz̃ⁱ are ice properties.
+@inline AM.condensate_field_names(::P3) = (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqʷⁱ)
+
 """
 $(TYPEDSIGNATURES)
 
@@ -243,7 +248,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     # Diagnostic field for vapor
     qᵛ = CenterField(grid)
 
-    # Sedimentation velocity fields (pre-computed during update_state!)
+    # Sedimentation velocity fields (pre-computed once per RK-stage tendency evaluation)
     wᶜˡ = CenterField(grid) # Cloud mass-weighted terminal velocity
     wᶜˡₙ = CenterField(grid) # Cloud number-weighted terminal velocity
     wʳ  = CenterField(grid)  # Rain mass-weighted terminal velocity
@@ -412,8 +417,9 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
 """
 # Lightweight diagnostics update — called from the thermodynamic variables kernel.
 # Only writes basic specific quantities and vapor. The heavy computation (terminal
-# velocities, process rates, tendency cache) is deferred to microphysics_model_update!
-# via a SEPARATE kernel launch, avoiding GPU compilation failure from force-inlining
+# velocities, process rates, tendency cache) is deferred to
+# prepare_microphysical_tendencies! via a SEPARATE kernel launch, avoiding GPU
+# compilation failure from force-inlining
 # ~1000 lines of P3 physics into the thermodynamic kernel.
 @inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
     @inbounds μ.qᵛ[i, j, k]  = 𝒰.moisture_mass_fractions.vapor
@@ -618,7 +624,7 @@ end
 ##### Microphysical velocities (sedimentation)
 #####
 #
-# Terminal velocities are pre-computed in update_microphysical_auxiliaries!
+# Terminal velocities are pre-computed in prepare_microphysical_tendencies!
 # and stored in diagnostic fields. microphysical_velocities returns NamedTuples
 # compatible with Oceananigans' sum_of_velocities.
 

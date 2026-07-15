@@ -612,11 +612,17 @@ Returns the transfer coefficient (dimensionless).
 # Default: evaluate at first cell center height
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀)
     h = znode(i, j, 1, grid, Center(), Center(), Center())
-    return coef(i, j, grid, U, T₀, h)
+    return coef(i, j, grid, U, T₀, h, nothing)
 end
 
-# Explicit height: used for filtered velocity with a fixed reference height
+# Explicit height: used for filtered velocity with a fixed reference height.
+# Optional `θᵥ_source` selects a filtered θᵥ field over the instantaneous diagnostic
+# stored in `coef.virtual_potential_temperature`.
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h)
+    return coef(i, j, grid, U, T₀, h, nothing)
+end
+
+@inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h, θᵥ_source)
     C¹⁰ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed)
 
     # Adjust for measurement height using logarithmic profile:
@@ -625,29 +631,36 @@ end
     α = log(h / ℓ)
     Cʰ = C¹⁰ * (log(10 / ℓ) / α)^2
 
-    # Apply stability correction
-    return stability_corrected_coefficient(i, j, grid, coef, Cʰ, h, α, U, T₀)
+    # Apply stability correction (reads filtered θᵥ when `θᵥ_source` is provided)
+    return stability_corrected_coefficient(i, j, grid, coef, Cʰ, h, α, U, T₀, θᵥ_source)
 end
 
-# No stability correction (stability_function = nothing)
+# No stability correction (stability_function = nothing) — `θᵥ_source` is ignored
 @inline stability_corrected_coefficient(i, j, grid,
-    ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cʰ, h, α, U, T₀) = Cʰ
+    ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cʰ, h, α, U, T₀, θᵥ_source) = Cʰ
 
-# FittedStabilityFunction correction (Li et al. 2010 mapping + MOST Ψ functions)
+# FittedStabilityFunction correction (Li et al. 2010 mapping + MOST Ψ functions).
+# The `θᵥ_source` argument selects which θᵥ field to read:
+#   - `nothing` → read instantaneous `coef.virtual_potential_temperature[i, j, 1]`
+#   - any field-like (Field, 2D filtered field) → read `θᵥ_source[i, j, 1]`
 @inline function stability_corrected_coefficient(i, j, grid,
-    coef::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, T₀)
+    coef::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, T₀, θᵥ_source)
 
     sf = coef.stability_function
     ℓ = coef.roughness_length
     ℓh = sf.scalar_roughness_length
     β = log(ℓ / ℓh)
 
-    θᵥ = @inbounds coef.virtual_potential_temperature[i, j, 1]
+    θᵥ = surface_layer_θᵥ(i, j, coef.virtual_potential_temperature, θᵥ_source)
     θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants, coef.surface)
     Riᴮ = bulk_richardson_number(h, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
 
     return Cʰ * sf(Riᴮ, α, β, coef.transfer_type)
 end
+
+# Read θᵥ at the first cell, dispatching on whether a filtered source is supplied
+@inline surface_layer_θᵥ(i, j, θᵥ_3d, ::Nothing) = @inbounds θᵥ_3d[i, j, 1]
+@inline surface_layer_θᵥ(i, j, θᵥ_3d, θᵥ_filtered) = @inbounds θᵥ_filtered[i, j, 1]
 
 #####
 ##### Bulk coefficient evaluation
@@ -680,12 +693,17 @@ end
 #####
 ##### Bulk coefficient evaluation — with filtered velocities
 #####
+##### When a `FilteredSurfaceVelocities` is provided, both the wind speed and
+##### the stability input `θᵥ` are read from the filtered fields. This keeps the
+##### bulk coefficient consistent with the rest of the bulk formula in which
+##### every term is computed from filtered state.
+#####
 
 @inline function bulk_coefficient(i, j, grid, C::PolynomialCoefficient, fields, T₀, fv::FilteredSurfaceVelocities)
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields, fv)
     U = sqrt(U²)
     h = evaluation_height(i, j, grid, fv.height)
-    return C(i, j, grid, U, T₀, h)
+    return C(i, j, grid, U, T₀, h, fv.θᵥ)
 end
 
 #####

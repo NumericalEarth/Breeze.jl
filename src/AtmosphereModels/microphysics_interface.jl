@@ -19,7 +19,8 @@
 #    schemes write a fused kernel that computes the bundle once per cell.
 #
 # The model never calls `microphysical_tendency` directly during tendency assembly —
-# `compute_microphysical_tendencies!` is the only entry point.
+# `compute_microphysical_tendencies!` is the entry point that adds microphysical
+# sources to `Gⁿ`.
 #####
 
 using Oceananigans.Fields: set!
@@ -227,17 +228,41 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 ##### Fused microphysical tendency interface
 #####
 #
+# `prepare_microphysical_tendencies!` refreshes stage-local diagnostics consumed
+# while assembling tendencies, such as terminal velocities and process-rate caches.
+# It runs before the scalar kernels so sedimentation uses the current RK-stage state.
+#
 # `compute_microphysical_tendencies!` is the single entry point through which the
-# atmosphere model invokes microphysics during tendency assembly. The model calls it
+# atmosphere model adds microphysical sources during tendency assembly. The model calls it
 # *after* the per-tracer dynamics kernels have written advection + diffusion + forcing
 # into `Gⁿ`; microphysics contributions are added on top via `+=`.
 
 """
 $(TYPEDSIGNATURES)
 
+Prepare stage-local microphysical diagnostics used during tendency assembly.
+
+`compute_tendencies!` calls this once per RK stage before thermodynamic and scalar
+tendencies are evaluated. Schemes should extend the two-argument helper
+`prepare_microphysical_tendencies!(microphysics, model)` when their tendencies or
+sedimentation velocities require a fused precomputation from the current stage state.
+The default is a no-op.
+
+This hook must not advance prognostic fields. Full-step, operator-split updates belong
+in [`microphysics_model_update!`](@ref).
+"""
+prepare_microphysical_tendencies!(model) =
+    prepare_microphysical_tendencies!(model.microphysics, model)
+
+prepare_microphysical_tendencies!(microphysics, model) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
 Add microphysics tendency contributions to the model's `Gⁿ` fields.
 
-This is the only entry point through which `compute_tendencies!` invokes microphysics.
+This is the only entry point through which `compute_tendencies!` adds microphysical
+sources to the model's `Gⁿ` fields.
 Concrete implementations add methods on the two-argument helper
 `compute_microphysical_tendencies!(microphysics, model)`.
 
@@ -284,7 +309,7 @@ end
                                                             microphysical_fields, velocities)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field = dynamics_density(dynamics)
+    ρ_field = total_density(dynamics)  # total ρ: mass fractions + microphysical state
     @inbounds ρ = ρ_field[i, j, k]
     @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
 
@@ -379,9 +404,23 @@ Non-equilibrium schemes simply return the state unchanged.
 """
 $(TYPEDSIGNATURES)
 
-Return `tuple()` - zero-moment scheme has no prognostic variables.
+Return `tuple()` - `Nothing` microphysics has no prognostic variables.
 """
 prognostic_field_names(::Nothing) = tuple()
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the names of the prognostic microphysical fields that carry condensate *mass*
+(condensate and precipitation densities), excluding number-concentration fields.
+
+This is the subset of [`prognostic_field_names`](@ref) that, together with the moisture
+density, is summed by [`total_condensate_density`](@ref) to form the total condensate mass per unit
+volume. It defaults to all prognostic fields; schemes with prognostic number concentrations
+(e.g. two-moment) override it to drop the `ρnˣ` fields.
+"""
+condensate_field_names(microphysics) = prognostic_field_names(microphysics)
+condensate_field_names(::Nothing) = tuple()
 
 
 """
@@ -605,6 +644,45 @@ end
 # Fallback for Nothing microphysics (no fields to index)
 @inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵛ, μ) = MoistureMassFractions(qᵛ)
 
+#####
+##### Total condensate and total air density (diagnosed from dry density)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Total condensate density ``ρᵗ = ρqᵛᵉ + Σ ρqᶜ`` at `(i, j, k)`: the moisture density ``ρqᵛᵉ``
+(vapor or equilibrium moisture) plus every condensed-species density named by
+[`condensate_field_names`](@ref). Number-concentration fields (`ρnˣ`) are excluded. This sums
+all phases of the condensable species (water by default), so other condensates can be added by
+extending `condensate_field_names`.
+"""
+@inline function total_condensate_density(i, j, k, microphysics, moisture_density, microphysical_fields)
+    ρqᵛᵉ = @inbounds moisture_density[i, j, k]
+    ρqᶜ = sum_microphysical_densities(i, j, k, microphysical_fields, condensate_field_names(microphysics))
+    return ρqᵛᵉ + ρqᶜ
+end
+
+# Compile-time recursion over the condensate field names (cf. `extract_microphysical_prognostics`).
+# `false` is the additive identity and promotes to the field element type.
+@inline sum_microphysical_densities(i, j, k, microphysical_fields, ::Tuple{}) = false
+@inline function sum_microphysical_densities(i, j, k, microphysical_fields, names::Tuple{Symbol, Vararg})
+    ρqˣ = @inbounds getproperty(microphysical_fields, first(names))[i, j, k]
+    return ρqˣ + sum_microphysical_densities(i, j, k, microphysical_fields, Base.tail(names))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Total air density ``ρ = ρᵈ + ρᵗ`` at `(i, j, k)`: the dry-air density `dry_density`
+plus the [`total_condensate_density`](@ref) ``ρᵗ``. This is the diagnosed total mass density used
+where total mass enters the physics — the gravitational/buoyancy term and the equation of state.
+"""
+@inline function total_density(i, j, k, dry_density, microphysics, moisture_density, microphysical_fields)
+    ρᵈ = @inbounds dry_density[i, j, k]
+    return ρᵈ + total_condensate_density(i, j, k, microphysics, moisture_density, microphysical_fields)
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -656,8 +734,7 @@ If a scheme is non-adjusting, we just return `state`.
 Return a `KernelFunctionOperation` representing the precipitation rate for the given `phase`.
 
 The precipitation rate is the rate at which moisture is removed from the atmosphere
-by precipitation processes. For zero-moment schemes, this is computed from the
-`remove_precipitation` function applied to cloud condensate.
+by precipitation processes.
 
 Arguments:
 - `model`: An `AtmosphereModel` with a microphysics scheme

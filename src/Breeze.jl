@@ -27,6 +27,7 @@ export
     AcousticDampingStrategy,
     NoDivergenceDamping,
     ThermalDivergenceDamping,
+    DirectDivergenceDamping,
     UpperSponge,
     AbstractRamp,
     LinearRamp,
@@ -34,6 +35,8 @@ export
     Sin2Ramp,
     ExplicitTimeStepping,
     balance_adiabatically!,
+    AdiabaticBalancer,
+    HydrostaticallyBalancedDensity,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -58,6 +61,11 @@ export
     dynamics_density,
     dynamics_pressure,
 
+    # Advective timescale control for the time-step wizard
+    CellAdvectionTimescale,
+    HorizontalFormulation,
+    ThreeDimensionalFormulation,
+
     # Diagnostics
     compute_hydrostatic_pressure!,
     PotentialTemperature,
@@ -81,6 +89,11 @@ export
     moisture_specific_name,
     specific_prognostic_moisture,
 
+    # Solvers
+    NewtonSolver,
+    SecantSolver,
+    FixedIterations,
+
     # Thermodynamics
     temperature,
     supersaturation,
@@ -94,6 +107,7 @@ export
     # Microphysics
     prognostic_field_names,
     SaturationAdjustment,
+    InstantaneousPrecipitation,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
@@ -180,7 +194,9 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     zspacings, ∂x, ∂y, ∂z
 
 using Oceananigans.Grids: znode, MutableVerticalDiscretization
-using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition, fill_halo_regions!
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+# Reused to select the direction of `CellAdvectionTimescale` (see AtmosphereModels/cell_advection_timescale.jl)
+using Oceananigans.TurbulenceClosures: HorizontalFormulation, ThreeDimensionalFormulation
 
 export
     CPU, GPU,
@@ -211,6 +227,9 @@ export
     FieldTimeSeries, FieldDataset, InMemory, OnDisk,
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
+
+include("Solvers.jl")
+using .Solvers
 
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
@@ -245,16 +264,10 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               SplitExplicitTimeDiscretization,
                               AcousticOuterScheme, WickerSkamarock3,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
-                              AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping,
+                              AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping, DirectDivergenceDamping,
                               UpperSponge,
                               AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
                               ExplicitTimeStepping
-
-# Adiabatic (FV3 na_init) initialization — dynamics-agnostic, dispatches on the
-# initial_fields method for CompressibleModel / AnelasticModel.
-using DocStringExtensions: TYPEDSIGNATURES
-using Oceananigans.TimeSteppers: update_state!, reset!
-include("balance_adiabatically.jl")
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel

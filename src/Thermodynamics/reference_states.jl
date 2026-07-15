@@ -579,19 +579,22 @@ end
 # Newton solve of the discrete hydrostatic balance for the pressure pₖ at one face,
 # given the level below (p⁻, ρ⁻) and the level-local moist constants. The residual
 #   F(p) = p / Δz + Aₖ p^(1−κₖ) − Cₖ,   Aₖ = g pˢᵗ^κₖ / (2 Rᵐₖ θₖ),  Cₖ = p⁻/Δz − g ρ⁻/2
-# is monotone increasing in p, so Newton converges in O(few) iterations from the
-# continuous-Π initial guess pₖ. Shared by the per-column Exner kernel and the terrain
-# reference-state solve; `iterations` is a fixed trip count so the loop unrolls on the GPU.
-@inline function newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, iterations)
+# is monotone increasing in p, so Newton converges quadratically from the continuous-Π
+# initial guess pₖ — `FixedIterations(5)` reaches machine precision across the atmospheric
+# range (verified in test/solvers.jl), and both call sites (the per-column Exner kernel and
+# the terrain reference-state solve) use that same count. The iteration is delegated to the
+# unified `newton_solve` driver (see Breeze.Solvers); passing a `FixedIterations` solver
+# keeps the trip count fixed so the loop unrolls to straight-line code on the GPU.
+@inline function newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, solver)
     Aₖ = g * pˢᵗ^κₖ / (2 * Rᵐₖ * θₖ)
     Cₖ = p⁻ / Δz - g * ρ⁻ / 2
-    for _ in 1:iterations
-        ρp = pₖ^(-κₖ)
-        f  = pₖ / Δz + Aₖ * pₖ * ρp - Cₖ
+    @inline function residual_and_derivative(p)
+        ρp = p^(-κₖ)
+        f  = p / Δz + Aₖ * p * ρp - Cₖ
         f′ = 1 / Δz + Aₖ * (1 - κₖ) * ρp
-        pₖ = pₖ - f / f′
+        return f, f′
     end
-    return pₖ
+    return newton_solve(residual_and_derivative, solver, pₖ)
 end
 
 # Discrete-balance Exner integration for one column (i, j) of θ̄ and an
@@ -646,7 +649,7 @@ end
         pᵏ = pˢᵗ * Πᵏ_init^(1/κᵏ)
 
         # Newton solve of the discrete-balance residual to machine precision.
-        pᵏ = newton_hydrostatic_pressure(p⁻, ρ⁻, θᵏ, Rᵐᵏ, κᵏ, Δz_face, pˢᵗ, g, pᵏ, 5)
+        pᵏ = newton_hydrostatic_pressure(p⁻, ρ⁻, θᵏ, Rᵐᵏ, κᵏ, Δz_face, pˢᵗ, g, pᵏ, FixedIterations(5))
         Πᵏ = (pᵏ / pˢᵗ)^κᵏ
         ρᵏ = pᵏ / (Rᵐᵏ * θᵏ * Πᵏ)
         @inbounds begin

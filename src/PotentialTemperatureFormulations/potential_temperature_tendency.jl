@@ -82,8 +82,8 @@ end
                                                 model_fields)
 
     potential_temperature = formulation.potential_temperature
-    ρ_field = dynamics_density(dynamics)
-    @inbounds ρ = ρ_field[i, j, k]
+    ρ_field = dynamics_density(dynamics)                # coupling density ρᵈ (advection/diffusion carrier)
+    @inbounds ρ = total_density(dynamics)[i, j, k]  # total ρ (mass fractions)
     @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
 
     # Compute moisture fractions first
@@ -163,13 +163,14 @@ end
 
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
-        ρᵣ = dynamics_density(dynamics)[i, j, k]
+        ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
+        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρθ = ρᵈθ)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         e = specific_energy[i, j, k]
     end
 
     z = znode(i, j, k, grid, c, c, c)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛᵉ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
     𝒰e₀ = StaticEnergyState(e, q, z, pᵣ)
     𝒰e₁ = maybe_adjust_thermodynamic_state(𝒰e₀, microphysics, qᵛᵉ, constants)
     T = temperature(𝒰e₁, constants)
@@ -180,7 +181,7 @@ end
     𝒰θ = with_temperature(𝒰θ, T, constants)
     θ = 𝒰θ.potential_temperature
     @inbounds potential_temperature[i, j, k] = θ
-    @inbounds potential_temperature_density[i, j, k] = ρᵣ * θ
+    @inbounds potential_temperature_density[i, j, k] = ρᵈ * θ
 end
 
 #####
@@ -233,14 +234,15 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        pᵣ = dynamics_pressure(dynamics)[i, j, k]
-        ρᵣ = dynamics_density(dynamics)[i, j, k]
+        ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
+        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρθ = ρᵈθ)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end
 
     # Get moisture fractions (vapor only for unsaturated air)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛᵉ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    pᵣ = pressure_from_density_temperature(i, j, k, dynamics, ρ, T, q, constants)
 
     # Convert temperature to potential temperature using the inverse of the T(θ) relation
     pˢᵗ = standard_pressure(dynamics)
@@ -249,5 +251,5 @@ end
     θ = 𝒰₁.potential_temperature
 
     @inbounds potential_temperature[i, j, k] = θ
-    @inbounds potential_temperature_density[i, j, k] = ρᵣ * θ
+    @inbounds potential_temperature_density[i, j, k] = ρᵈ * θ
 end

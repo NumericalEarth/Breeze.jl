@@ -15,6 +15,9 @@
 #####        sweep of `Δt` values
 ##### - T6 — Bounded-y vs Periodic-y produce identical rest-atmosphere
 #####        trajectories
+##### - T7 — total mass is conserved on a closed (Bounded) domain with a
+#####        Coriolis-forced wall-parallel flow (the wall-impenetrability
+#####        regression: a rest state cannot expose it)
 #####
 ##### The pass criteria below are intentionally stated inline so this
 ##### file is self-contained.
@@ -24,7 +27,8 @@ using Breeze
 using Breeze: dynamics_density
 using Breeze.CompressibleEquations: AcousticSubstepper,
                                     freeze_linearization_state!,
-                                    assemble_slow_vertical_momentum_tendency!
+                                    assemble_slow_vertical_momentum_tendency!,
+                                    enforce_wall_impenetrability!
 using Breeze.TimeSteppers: compute_slow_momentum_tendencies!,
                            compute_slow_scalar_tendencies!
 
@@ -84,8 +88,7 @@ function _build_rest_model(arch; substeps = nothing,
                                surface_pressure = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
-                                  thermodynamic_constants = constants,
-                                  timestepper = :AcousticRungeKutta3)
+                                  thermodynamic_constants = constants)
 end
 
 # Set the model state to the discrete-balanced reference EXACTLY.
@@ -98,7 +101,7 @@ function set_rest_state!(model)
     Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
 
     # ρ ← ρ_ref (the model's prognostic density field).
-    parent(model.dynamics.density) .= parent(ref.density)
+    parent(model.dynamics.dry_density) .= parent(ref.density)
 
     # ρθ ← p_ref / (Rᵈ Π_ref). Equivalent to ρ_ref · θ̄_ref with
     # θ̄_ref = T₀/Π_ref, but avoids any continuous-formula intermediate.
@@ -331,5 +334,109 @@ end
     # what we test is that they *agree* to within 1e-12 m/s, not the
     # absolute drift (T4 is responsible for that).
     @test Δmax <= 1e-12
+end
+
+#####
+##### T7 — Mass conservation on a closed domain with Coriolis-forced flow
+#####
+##### The split-explicit substep loop computes the slow wall-normal momentum
+##### tendency on the south/west wall face (the `:xyz` launch reaches index 1
+##### of a `Face` dimension but not index N+1). On an impermeable `Bounded`
+##### boundary the loop then integrates `Δτ·Gⁿρv` there every substep and the
+##### predictor's horizontal divergence pumps a spurious wall mass flux,
+##### growing total mass ∝ (Δt)² per step. A *rest* state (u = 0) cannot expose
+##### this: the wall-face tendency is `ρ·f·u`, so a nonzero wall-parallel flow
+##### with Coriolis is required. `enforce_wall_impenetrability!` zeroes the
+##### wall-normal momentum perturbations every substep and restores exact
+##### (roundoff-level) mass conservation, matching the `ExplicitTimeStepping`
+##### control. See `validation/baroclinic_wave_mass_conservation_findings.md`.
+#####
+
+# Total dry mass on a uniform-Δ grid is ∝ Σ ρᵈ over the interior (constant
+# cell volume), summed in Float64 regardless of the model float type.
+total_dry_mass(model) = sum(Float64.(interior(model.dynamics.dry_density)))
+
+@testset "T7 — Mass conservation, closed walls + Coriolis flow" begin
+    Δt      = 30.0
+    n_steps = 30
+    f       = 1e-4        # f-plane Coriolis parameter (1/s)
+    u₀      = 20.0        # uniform zonal (wall-parallel) flow (m/s)
+
+    grid = _build_rest_grid(default_arch;
+                            Nx = 8, Ny = 16, Nz = 32, Lz = 10e3,
+                            topology = (Periodic, Bounded, Bounded))
+    constants = ThermodynamicConstants(eltype(grid))
+    dyn = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                               reference_potential_temperature = θ_isothermal_ref,
+                               surface_pressure = 1e5, standard_pressure = 1e5)
+    model = AtmosphereModel(grid; dynamics = dyn,
+                                  thermodynamic_constants = constants,
+                                  coriolis = FPlane(f = eltype(grid)(f)))
+
+    # Balanced rest state, then add a uniform zonal flow so the y-wall
+    # Coriolis force ρ·f·u ≠ 0 (the wall-face tendency that seeds the bug).
+    set_rest_state!(model)
+    set!(model, u = u₀)
+    update_state!(model)
+
+    M₀ = total_dry_mass(model)
+    for _ in 1:n_steps
+        time_step!(model, Δt)
+    end
+    M₁ = total_dry_mass(model)
+    relative_drift = abs(M₁ - M₀) / M₀
+
+    # Contract: closed boundaries ⇒ total mass conserved to roundoff. Without
+    # the fix this drift is ≈3.4×10⁻⁴ on this configuration (∝ (Δt)²·n_steps);
+    # with the fix it is ≈1.5×10⁻¹⁶ (machine floor). The 1e-12 bound sits far
+    # below the bug and far above the achieved floor.
+    @test relative_drift <= 1e-12
+end
+#####
+##### T8 — Unit test for _zero_x_wall_face! and _zero_y_wall_face! kernels
+#####
+##### Direct coverage of the wall-zeroing kernels called by
+##### `enforce_wall_impenetrability!`. Fills the momentum perturbation
+##### fields with ones on a fully Bounded grid, calls the function, and
+##### verifies that exactly the wall-normal faces are zeroed while the
+##### interior is untouched.
+#####
+
+@testset "T8 — enforce_wall_impenetrability! zeroes wall faces" begin
+    Nx, Ny, Nz = 8, 8, 16
+    grid = _build_rest_grid(default_arch;
+                            Nx, Ny, Nz, Lz = 10e3,
+                            topology = (Bounded, Bounded, Bounded))
+    constants = ThermodynamicConstants(eltype(grid))
+    dyn = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                               reference_potential_temperature = θ_isothermal_ref,
+                               surface_pressure = 1e5, standard_pressure = 1e5)
+    model = AtmosphereModel(grid; dynamics = dyn,
+                                  thermodynamic_constants = constants)
+
+    sub = model.timestepper.substepper
+    ρu′ = sub.momentum_perturbation.u
+    ρv′ = sub.momentum_perturbation.v
+
+    # Fill perturbations with ones so every entry is nonzero.
+    fill!(parent(ρu′), 1)
+    fill!(parent(ρv′), 1)
+
+    arch = Oceananigans.architecture(grid)
+    enforce_wall_impenetrability!(sub, model, grid, arch)
+
+    # x-wall faces: ρu′[1, :, :] and ρu′[Nx+1, :, :] must be zero.
+    ρu_arr = Array(interior(ρu′, :, :, :))
+    @test all(==(0), ρu_arr[1, :, :])
+    @test all(==(0), ρu_arr[Nx + 1, :, :])
+    # Interior x-faces (2:Nx) must still be 1.
+    @test all(==(1), ρu_arr[2:Nx, :, :])
+
+    # y-wall faces: ρv′[:, 1, :] and ρv′[:, Ny+1, :] must be zero.
+    ρv_arr = Array(interior(ρv′, :, :, :))
+    @test all(==(0), ρv_arr[:, 1, :])
+    @test all(==(0), ρv_arr[:, Ny + 1, :])
+    # Interior y-faces (2:Ny) must still be 1.
+    @test all(==(1), ρv_arr[:, 2:Ny, :])
 end
 end  # outer "Substepper rest-state validation"

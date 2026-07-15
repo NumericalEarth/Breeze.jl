@@ -11,7 +11,7 @@ using Adapt: Adapt
 
 struct SpecificForcing{F, D, L}
     forcing :: F          # materialized inner forcing (kernel callable)
-    density :: D          # ρᵣ(z) for anelastic, ρ(x, y, z, t) for compressible
+    density :: D          # target's physical density carrier (ρᵣ, ρᵈ, or total ρ)
     target_location :: L  # (LX, LY, LZ) tuple of instances for the target prognostic field
 end
 
@@ -28,10 +28,13 @@ kernel callable returns
 
 interpolating ``ρ`` to the appropriate cell face for fields whose target prognostic
 lives at `Face` in any direction (e.g. ``ρ`` is interpolated to x-Face for `u`-forcings
-via ``ℑxᶠᵃᵃ``, to z-Face for `w` via ``ℑzᵃᵃᶠ``). `ρ` is `ρᵣ(z)` under
-[`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics) and the prognostic
-`ρ(x, y, z, t)` under [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics);
-the same wrapper handles both.
+via ``ℑxᶠᵃᵃ``, to z-Face for `w` via ``ℑzᵃᵃᶠ``). Under
+[`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics), `ρ` is the reference
+density `ρᵣ(z)`. Under
+[`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics), the carrier
+depends on the target conservation law: momentum and thermodynamic tendencies use the dry-air
+coupling density `ρᵈ`, while moisture, microphysical moments, and user tracers use total density
+`ρ`. The same wrapper handles all carriers.
 
 Users typically supply specific forcings directly through specific-named keys
 (`u`, `v`, `w`, `θ`, `e`, `qᵉ`, `qᵛ`, …) in the `forcing` `NamedTuple` passed to
@@ -77,6 +80,14 @@ end
 ##### Materialization: resolve density and target field location from context + target field
 #####
 
+function specific_forcing_density(name, context)
+    if name ∈ context.coupling_density_names
+        return context.coupling_density
+    else
+        return context.total_density
+    end
+end
+
 function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SpecificForcing,
                                                                field, name, model_field_names,
                                                                context::NamedTuple)
@@ -86,9 +97,11 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Specific
     # name to look up the field they advect or apply at.
     specific_name = startswith(string(name), "ρ") ?
                     Symbol(string(name)[nextind(string(name), 1):end]) : name
-    inner = materialize_atmosphere_model_forcing(forcing.forcing, field, specific_name,
+    # Materialize the inner forcing against the *specific* field, not the ρ-weighted prognostic.
+    specific_field = get(context.specific_fields, specific_name, field)
+    inner = materialize_atmosphere_model_forcing(forcing.forcing, specific_field, specific_name,
                                                  model_field_names, context)
-    ρ = context.density
+    ρ = specific_forcing_density(name, context)
     target_location = instantiated_location(field)
     return SpecificForcing(inner, ρ, target_location)
 end

@@ -1,4 +1,4 @@
-using Oceananigans: CenterField
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField
 using DocStringExtensions: TYPEDSIGNATURES
 
@@ -12,13 +12,13 @@ using Breeze: Microphysics
 const P3 = PredictedParticlePropertiesMicrophysics
 
 #####
-##### Model update
+##### Stage-local tendency preparation
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-Apply P3 model update during state update phase.
+Prepare P3 diagnostics for the current RK stage.
 
 Launches a separate GPU kernel to compute terminal velocities, process rates,
 and tendency cache fields. This heavy computation is split out of the thermodynamic
@@ -26,11 +26,11 @@ variables kernel to avoid overwhelming the GPU compiler with force-inlined P3 ph
 (~1000 lines of code). The lighter `update_microphysical_auxiliaries!` only writes
 basic diagnostic quantities in the thermodynamic kernel.
 """
-function AM.microphysics_model_update!(p3::P3, model)
+function AM.prepare_microphysical_tendencies!(p3::P3, model)
     grid = model.grid
     arch = grid.architecture
     μ = model.microphysical_fields
-    ρ_field = AM.dynamics_density(model.dynamics)
+    ρ_field = AM.total_density(model.dynamics)
     constants = model.thermodynamic_constants
     velocities = model.velocities
 
@@ -38,8 +38,17 @@ function AM.microphysics_model_update!(p3::P3, model)
             _p3_compute_and_cache_kernel!,
             μ, model.formulation, model.dynamics, grid, constants, p3, ρ_field, velocities)
 
+    # The scalar advection operators interpolate terminal velocities through halo
+    # cells. The preparation kernel overwrites interiors after update_state!'s generic
+    # halo fill, so refresh these diagnostic halos before sedimentation is evaluated.
+    sedimentation_velocities = (μ.wᶜˡ, μ.wᶜˡₙ, μ.wʳ, μ.wʳₙ, μ.wⁱ, μ.wⁱₙ, μ.wⁱ_z)
+    fill_halo_regions!(sedimentation_velocities)
+
     return nothing
 end
+
+# P3 evolves through RK-stage tendencies; it has no full-Δt operator-split update.
+AM.microphysics_model_update!(::P3, model) = nothing
 
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
@@ -50,7 +59,6 @@ using KernelAbstractions: @kernel, @index
     @inbounds ρ = ρ_field[i, j, k]
 
     # Reconstruct thermodynamic state (same as in the thermodynamic kernel)
-    ρqᵛᵉ = μ.qᵛ[i, j, k] * ρ  # qᵛ was already written by update_microphysical_auxiliaries!
     qᵛᵉ = μ.qᵛ[i, j, k]
     # moisture_fractions does not read ℳ.w; pass ZeroField placeholders to skip the
     # ℑzᵃᵃᶜ interpolation here. The real velocities are forwarded to p3_compute_and_cache!.
@@ -67,7 +75,7 @@ end
 ##### Fused tendency override (fast path for AtmosphereModel)
 #####
 #
-# `microphysics_model_update!` already wrote every cell's microphysics contribution
+# `prepare_microphysical_tendencies!` already wrote every cell's microphysics contribution
 # into the `cache_ρ*` fields. The fused override simply `+=`s those cached values
 # into `Gⁿ` in a single kernel launch after the dynamics tendency kernels run.
 # The state-based `microphysical_tendency` methods above remain the gridless

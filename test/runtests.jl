@@ -10,6 +10,9 @@ args = parse_args(ARGS)
 
 const REACTANT_COMPAT = VERSION < v"1.13-" && Base.JLOptions().check_bounds != 1
 
+# This isn't a test file, it's only used as a setup for other files.
+delete!(testsuite, "reactant/weno_compilation_setup")
+
 if filter_tests!(testsuite, args)
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
     # limitation).

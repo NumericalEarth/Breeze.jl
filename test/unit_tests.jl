@@ -85,7 +85,7 @@ using Breeze.Thermodynamics: pressure_balanced_density
     @testset "Constructor" begin
         dynamics = CompressibleDynamics()
         @test dynamics isa CompressibleDynamics
-        @test dynamics.density === nothing  # Not materialized yet
+        @test dynamics.dry_density === nothing  # Not materialized yet
         @test dynamics.standard_pressure == 1e5
         @test dynamics.surface_pressure == 101325
     end
@@ -96,9 +96,9 @@ using Breeze.Thermodynamics: pressure_balanced_density
         dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
 
         @test dynamics isa CompressibleDynamics
-        @test dynamics.density isa Field
+        @test dynamics.dry_density isa Field
         @test dynamics.pressure isa Field
-        @test dynamics_density(dynamics) === dynamics.density
+        @test dynamics_density(dynamics) === dynamics.dry_density
         @test dynamics_pressure(dynamics) === dynamics.pressure
     end
 
@@ -146,8 +146,7 @@ end
                                     reference_vapor_mass_fraction = qᵛ_reference)
 
     model = AtmosphereModel(grid; dynamics,
-                            thermodynamic_constants = constants,
-                            timestepper = :AcousticRungeKutta3)
+                            thermodynamic_constants = constants)
 
     reference_state = model.dynamics.reference_state
     θ_column = Field{Nothing, Nothing, Center}(grid)
