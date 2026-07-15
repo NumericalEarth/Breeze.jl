@@ -1,23 +1,19 @@
 #####
-##### SubstepBoundaryUpdate — MPAS-style specified-zone boundary update
+##### SubstepBoundaryUpdate — specified-zone boundary update
 #####
 ##### A scheme attached to the momentum `NormalFlowBoundaryCondition`s. When an
 ##### open lateral side carries it, the acoustic substep loop treats that side's
-##### outermost interior cells as an MPAS specified zone: the acoustic
+##### outermost interior cells as a specified zone: the acoustic
 ##### perturbation pressure gradient never acts on specified faces, specified
 ##### cells are excluded from the coupled acoustic update, the specified
 ##### column's (ρw)′ is closed by a per-substep zero-gradient copy from the
-##### nearest interior column (WRF `zero_grad_bdy` analog), and the specified
-##### zone's momentum and scalar perturbations are updated by their boundary
-##### time-tendencies each acoustic substep,
-#####
-#####     (ρu)′ ← (ρu)′ + Δτ · ∂ₜ(ρu)_boundary
-#####
-##### (MPAS `ru_p += dts·lbc_tend_ru`). Composed with the stage-entry rewind
-##### initialization (ρu)′ = U⁰ − Uᴸ_stage, the increment recovers
-##### U⁰ + β·Δt·∂ₜ at each RK-stage end. The update must be an increment: an
-##### overwrite τ·∂ₜ composes with the per-stage recovery into a secular
-##### (β₁+β₂+β₃) = 11/6 over-advance per outer step.
+##### nearest interior column, and the specified
+##### zone's momentum and scalar perturbations are updated each acoustic substep
+##### by an increment, (ρu)′ ← (ρu)′ + Δτ·∂ₜ(ρu)_boundary. The increment —
+##### not an overwrite — is load-
+##### bearing: see `.agents/substepping.md` for the composition with the
+##### stage-entry rewind and the 11/6 secular-drift argument, and for the full
+##### WRF/MPAS correspondence.
 #####
 ##### Where a side is specified, the per-substep α relaxation of ρ′,(ρθ)′
 ##### (issue #738) is superseded on that side and skipped: the update holds the
@@ -86,7 +82,7 @@ function active_specified_sides(model)
 end
 
 # `(x_specified, y_specified)`: true on the x-/y-faces whose acoustic ∂p′
-# stencil reads a specified cell (MPAS `specZoneMaskEdge`). `∂xᶠᶜᶜ` at face i
+# stencil reads a specified cell. `∂xᶠᶜᶜ` at face i
 # reads centers i, i−1; `∂yᶜᶠᶜ` at face j reads j, j−1; the `:xyz` launch
 # writes faces 1:Nx / 1:Ny. (The min-side normal faces i=1/j=1 are inside the
 # launch and specified, but the perturbation fields' impenetrability halo fill
@@ -105,7 +101,7 @@ end
 
 @inline specified_zone_faces(i, j, grid, ::Nothing) = (false, false)
 
-# `true` if cell (i, j) is a specified cell — MPAS `specZoneMaskCell`.
+# `true` if cell (i, j) is a specified cell.
 @inline function specified_zone_cell(i, j, grid, s::OpenSides)
     Nx = size(grid, 1)
     Ny = size(grid, 2)
@@ -128,7 +124,7 @@ end
 @inline boundary_tendency(::Nothing, ::Val) = nothing
 
 # Close the specified column's (ρw)′ by a zero-gradient copy from the nearest
-# interior column (WRF `zero_grad_bdy` analog): a hard hold would be reflective
+# interior column: a hard hold would be reflective
 # at the specified/interior seam, and the boundary data carries no w. A
 # divergent `if` is deliberate here — an `ifelse` would force the (i2, j2)
 # gather at every thread. The copy is race-free for min(Nx, Ny) ≥ 3: only
@@ -153,7 +149,7 @@ end
 # fields. The substep loop leaves the zone exactly there, but post-loop stage
 # physics (the vertically-implicit solve, operator-split microphysics, the
 # per-stage scalar update of ρqᵛ) is not excluded from the zone; rather than
-# gating every such kernel, the zone is restored afterwards — the WRF
+# gating every such kernel, the zone is restored afterwards — the
 # specified-zone contract, where interior physics never acts on the zone.
 # (ρw)′ has no boundary data and its zero-gradient closure is a
 # perturbation-space relation that cannot be reconstructed post-recovery, so

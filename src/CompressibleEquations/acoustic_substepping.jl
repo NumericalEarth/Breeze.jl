@@ -12,7 +12,7 @@
 #####   ∂t (ρv)′ + ∂y pᴸ + ∂y(Cᴸ(ρθ)′)        = Gˢρv
 #####   ∂t (ρw)′ +         ∂z(Cᴸ(ρθ)′) + g·ρ′ = Gˢρw
 #####
-##### Time discretization: horizontal momentum is forward-Euler with MPAS first-small-step sequencing
+##### Time discretization: horizontal momentum is forward-Euler with first-small-step sequencing
 ##### (first substep applies frozen ∇pᴸ but skips the perturbation horizontal PGF; it enters on later
 ##### substeps). Vertical ((ρw)′,(ρθ)′,ρ′) coupling is off-centered Crank-Nicolson (`forward_weight` ω:
 ##### 0.5 = centered, >0.5 = dissipative), reducing to a tridiagonal Schur solve for (ρw)′ at z-faces.
@@ -114,7 +114,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, BT}
     density_potential_temperature_predictor :: CF
     previous_density_potential_temperature_perturbation :: CF
 
-    # Acoustic-mean velocity for non-acoustic scalar transport (WRF/MPAS split; see docstring).
+    # Acoustic-mean velocity for non-acoustic scalar transport (see docstring).
     time_averaged_velocities :: TAV
 
     slow_vertical_momentum_tendency :: GT
@@ -754,7 +754,7 @@ end
 # & Klemp 2008, above eq. 16): substep variables are deviations from the
 # linearization base Uᴸ (refreshed by `prepare_acoustic_cache!` just before).
 # The WS-RK3 invariant ``U^{(k)} = U(t) + β_k Δt R(U^{(k-1)})`` requires each
-# stage to integrate from U(t) ≡ Uᴸ_outer. The WRF/MPAS trick: init the
+# stage to integrate from U(t) ≡ Uᴸ_outer. Init the
 # perturbations to the rewind ``(U_outer − Uᴸ)`` so the substep's starting
 # full state ``Uᴸ + (U_outer − Uᴸ) = U_outer`` regardless of Uᴸ. Stage 1
 # rewind = 0; stages 2–3 pick up the previous-stage update. `_recover_full_state!`
@@ -853,7 +853,7 @@ end
 #   (ρv)′^{τ+Δτ} = (ρv)′^τ + Δτ (Gⁿρv − ∂y pᴸ − ∂y(Cᴸ (ρθ)′))
 #
 # `Gⁿρu` (SlowTendencyMode) carries non-pressure slow terms with PGF zeroed;
-# we reinstate the frozen large-step PGF here (MPAS keeps it in `tend_u_euler`).
+# we reinstate the frozen large-step PGF here.
 # Forward-backward sequencing skips only the acoustic perturbation PGF.
 @kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Πᴸ,
                                             Gⁿρu, Gⁿρv, γRᵐᴸ, apply_pressure_gradient,
@@ -872,10 +872,8 @@ end
 
         # SubstepBoundaryUpdate: a specified face takes no acoustic update
         # (in particular no acoustic ∂p′ — the momentum kick channel); it is
-        # updated by its boundary tendency instead, an increment that composes
-        # with the SK08 rewind init (ρu)′ = U⁰ − Uᴸ_stage to recover
-        # U⁰ + β·Δt·∂ₜ at each stage end. (An overwrite τ·∂ₜ would compound
-        # across stages into a secular 11/6 over-advance per outer step.)
+        # updated by its boundary tendency instead, as an increment
+        # (see `.agents/substepping.md` for the 11/6 secular-drift argument).
         x_specified, y_specified = specified_zone_faces(i, j, grid, specified_sides)
         ρu_update = ρu′[i, j, k] + Δτ * (Gⁿρu[i, j, k] - ∂x_p)
         ρv_update = ρv′[i, j, k] + Δτ * (Gⁿρv[i, j, k] - ∂y_p)
@@ -955,7 +953,7 @@ end
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
 
-    # Gate the terrain horizontal slope correction in lockstep with the MPAS
+    # Gate the terrain horizontal slope correction in lockstep with the
     # first-small-step gate (no effect on a flat grid; always applied on terrain).
     slope_correction = ifelse(apply_pressure_gradient, one(Δτ), zero(Δτ))
 
@@ -1049,7 +1047,7 @@ end
     return (convert(FT, ω) * base, convert(FT, 1 - ω) * base)
 end
 
-# Klemp, Skamarock & Ha (2018) acoustic divergence damping (MPAS form).
+# Klemp, Skamarock & Ha (2018) acoustic divergence damping.
 # In the linearized acoustic mode,
 #
 #   (ρθ)′ − (ρθ)′ˢ⁻ ≈ −Δτ · θᴸ · ∇·((ρu)′, (ρv)′, (ρw)′)
@@ -1074,8 +1072,8 @@ end
 #
 # is folded into the column tridiag instead of applied as a post-substep
 # correction.
-# `α` is the dimensionless Klemp 2018 coefficient (`config_smdiv` in MPAS,
-# default 0.1). Linear stability of the explicit forward-Euler horizontal
+# `α` is the dimensionless Klemp 2018 coefficient (default 0.1). Linear
+# stability of the explicit forward-Euler horizontal
 # step gives `A(k) = 1 − 4α · Σᵢ sin²(kᵢ Δxᵢ/2)`; worst case (2-D Nyquist)
 # is `8α ≤ 2 → α ≤ 0.25`; we default to 0.1 for margin. The optional
 # vertical component is not applied by default; the default vertical acoustic
@@ -1132,7 +1130,7 @@ end
 @inline κˣ(i, j, k, grid, scale::FixedHorizontalDampingScale, Δτ) = scale.coefficient / Δτ
 @inline κʸ(i, j, k, grid, scale::FixedHorizontalDampingScale, Δτ) = scale.coefficient / Δτ
 
-# Isotropic, mesh-varying horizontal damping (MPAS-style): a single scalar diffusivity
+# Isotropic, mesh-varying horizontal damping: a single scalar diffusivity
 # κ = α/Δτ · ℓ² applied identically in x and y, with ℓ the *smallest* local horizontal
 # spacing.  Using min(Δx, Δy) (rather than Δx, Δy separately, or the geometric mean
 # √(ΔxΔy), or cbrt(V) which is dragged down by the thin Δz) keeps the explicit-diffusion
@@ -1240,7 +1238,7 @@ end
 #####
 ##### Section 10 — Time-averaged velocity for non-acoustic scalar transport
 #####
-##### WRF/MPAS dynamics-transport split: non-acoustic scalars (moisture,
+##### Dynamics-transport split: non-acoustic scalars (moisture,
 ##### tracers, chemistry, TKE) advect against the substep-loop-averaged
 ##### velocity, not a snapshot. (The slow `ρθ` tendency is part of the
 ##### acoustic system, computed separately before the loop.) We accumulate
@@ -1353,10 +1351,10 @@ end
 # The perturbation scalars `ρ′,(ρθ)′` carry zero-gradient halos on `Bounded`
 # dims, so an open lateral boundary reflects the acoustic pressure perturbation
 # back inward — the boundary mass flux is then carried only by the frozen slow
-# tendency `Gˢρ`, biasing mass balance under transient inflow. WRF/ERF/MPAS
-# instead enforce the specified lateral boundary every substep.
-# We mirror that by relaxing the outermost open-boundary cell of `ρ′`, `(ρθ)′`
-# toward the prescribed wall value `v` each substep. `update_state!` applied the
+# tendency `Gˢρ`, biasing mass balance under transient inflow. Enforcing the
+# specified lateral boundary every substep fixes this: we relax the outermost
+# open-boundary cell of `ρ′`, `(ρθ)′` toward the prescribed wall value `v` each
+# substep. `update_state!` applied the
 # prognostic `ValueBoundaryCondition` to the base at stage entry, so
 # `ρᴸ[halo] = 2v − ρᴸ[cell]` and the target perturbation is
 # `v − ρᴸ[cell] = (ρᴸ[halo] − ρᴸ[cell]) / 2`, read straight from the base field.
@@ -1481,7 +1479,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # Substep loop
     for substep in 1:Nτ
         # Step A: explicit horizontal forward of (ρu)′, (ρv)′. Following the
-        # MPAS forward-backward acoustic sequence, the first small step in a
+        # forward-backward acoustic sequence, the first small step in a
         # multi-step stage includes the frozen large-step pressure gradient
         # but skips the acoustic perturbation pressure gradient until
         # mass/thermodynamic perturbations have been advanced once. For

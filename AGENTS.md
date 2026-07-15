@@ -144,6 +144,7 @@ Detailed reference docs are in `.agents/` — read on demand:
 | `.agents/documentation.md` | Building docs, fast builds, Literate.jl examples, doctest details |
 | `.agents/validation.md` | Reproducing paper results, common issues, TC genesis |
 | `.agents/physics-debugging.md` | Thermodynamic variables, diagnose-before-fix, model architecture |
+| `.agents/substepping.md` | Split-explicit acoustic substepping: WRF/MPAS correspondence, the increment-vs-overwrite (11/6) decision, specified-zone boundary update |
 
 ### Auto-loading Rules
 
