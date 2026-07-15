@@ -56,12 +56,13 @@
 # the moist tropical lower troposphere:
 #
 # ```math
-# q^v(φ, z) = q_0 \, \exp\!\left[-\left(\frac{φ}{φ_w}\right)^4\right]
-#                    \exp\!\left[-\left(\frac{z}{z_q}\right)^2\right]
+# q^v(φ, η) = q_0 \, \exp\!\left[-\left(\frac{φ}{φ_w}\right)^4\right]
+#                    \exp\!\left[-\left(\frac{(η - 1)\, p_0}{p_w}\right)^2\right]
 # ```
 #
-# capped to a tiny background value ``q_t`` above the moisture-cutoff height
-# ``z_t``. With ``q^v`` known, the actual temperature follows from the virtual
+# where ``η = p / p_0`` is the pressure coordinate and ``p_w = 340`` hPa the
+# vertical e-folding width, capped to a tiny stratospheric value ``q_t`` above
+# ``η = 0.1``. With ``q^v`` known, the actual temperature follows from the virtual
 # temperature via ``T = T_v / (1 + \epsilon\, q^v)`` with
 # ``\epsilon = R^v/R^d - 1 \approx 0.608``.
 #
@@ -156,9 +157,8 @@ b  = 2        # vertical half-width parameter
 
 q₀   = 0.018    # kg/kg — maximum (equatorial, surface) specific humidity
 φʷ   = 2π / 9   # rad — moisture meridional half-width (≈ 40°)
-zq   = 20000    # m — moisture vertical scale
-zᵗ   = 15000    # m — moisture cutoff height (≈ tropopause)
-qᵗᵒᵖ = 1e-12    # kg/kg — background specific humidity above the cutoff
+pʷ   = 34000    # Pa — moisture vertical scale (pressure e-folding width)
+qᵗᵒᵖ = 1e-12    # kg/kg — background (stratospheric) specific humidity
 
 # ## Analytic initial conditions
 #
@@ -205,11 +205,13 @@ end
 ## unchanged from the dry case.
 density(λ, φ, z) = pressure(λ, φ, z) / (Rᵈ * virtual_temperature(λ, φ, z))
 
-## DCMIP2016 background specific humidity qᵛ(φ, z), tapered to qᵗᵒᵖ above zᵗ.
+## DCMIP2016 §1.1 background specific humidity qᵛ(φ, η) in the pressure
+## coordinate η = p / p₀, tapered to the stratospheric value qᵗᵒᵖ above η = 0.1.
 function vapor_mass_fraction(λ, φ, z)
     φʳ = deg2rad(φ)
-    qᵛ = q₀ * exp(-(φʳ / φʷ)^4) * exp(-(z / zq)^2)
-    return ifelse(z < zᵗ, qᵛ, qᵗᵒᵖ)
+    η  = pressure(λ, φ, z) / p₀
+    qᵛ = q₀ * exp(-(φʳ / φʷ)^4) * exp(-((η - 1) * p₀ / pʷ)^2)
+    return ifelse(η > 0.1, qᵛ, qᵗᵒᵖ)
 end
 
 ## Potential temperature θ = T (p₀/p)^κ, using the *actual* temperature
