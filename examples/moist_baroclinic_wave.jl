@@ -315,15 +315,20 @@ set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density, qᵛ=vapor_m
 #
 # Substepping eliminates the acoustic CFL constraint on the outer Δt; the advective
 # CFL remains. A time-step wizard targets advective CFL ≈ 0.7 against the polar
-# `Δx_min ≈ 28.8 km`, capped at Δt = 12 min. This cap is the same aspirational
-# target as the dry case; moist convection may require a smaller step, so reduce
-# `max_Δt` if the run destabilizes.
+# `Δx_min ≈ 28.8 km`, capped at Δt = 12 min (the same target as the dry case).
+#
+# We start from a gentle `Δt = 1 minute` and let the wizard ramp it (`max_change =
+# 1.08` per adjustment) up to the 12 min cap. The moist balanced state launches a
+# brief adjustment transient in the first steps; at full resolution the sharp
+# near-surface layer amplifies it, so taking the first ~hour of simulation at a
+# small step lets it damp out before the step grows. Jumping straight to 12 min on
+# step 1 instead re-triggers the transient into a vertical-velocity shock.
 
-Δt = 12minutes
+Δt = 1minute
 stop_time = 30days
 
 simulation = Simulation(model; Δt, stop_time)
-conjure_time_step_wizard!(simulation; cfl=0.7, max_Δt=12minutes)
+conjure_time_step_wizard!(simulation; cfl=0.7, max_Δt=12minutes, max_change=1.08)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Progress callback
