@@ -36,14 +36,17 @@
 #     time-step wizard below. A full 30-day sphere run is a workstation-GPU-scale
 #     computation, not a quick doctest.
 #
-# !!! note "Grid-scale dissipation"
+# !!! note "Grid-scale dissipation and precision"
 #     Moist frontogenesis around day 8 excites a grid-scale (2Δx) *computational*
 #     instability near the jet that WENO's implicit dissipation alone does not
 #     control (the dry wave never sharpens fronts this far). The ``\cos⁴φ``-scaled
-#     biharmonic hyperviscosity added below suppresses it, and the run then carries
-#     through vigorous moist cyclogenesis — verified stable to day 12 with peak
-#     winds ``≈ 70`` m/s. This is the same role the explicit scale-selective filter
-#     (e.g. WRF's 6th-order diffusion) plays on split-explicit cores.
+#     biharmonic hyperviscosity added below suppresses it — the same role WRF's
+#     6th-order filter plays on split-explicit cores — carrying **Float32** cleanly
+#     through cyclogenesis to ~day 14.5. The intense mature phase (~80+ m/s) then
+#     needs **Float64**: in F32 the ``θ→T`` inversion trips on the sharp mature
+#     fronts near day 14.5, whereas F64 **completes the full 30-day life cycle**.
+#     For the complete run set `Oceananigans.defaults.FloatType = Float64` below
+#     (≈2× cost/memory); F32 is enough through the DCMIP2016 day-10–15 window.
 #
 # ## Physical setup
 #
