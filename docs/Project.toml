@@ -20,6 +20,8 @@ Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 
 [sources]
 Breeze = {path = ".."}
+KernelAbstractions = {url = "https://github.com/JuliaGPU/KernelAbstractions.jl.git", rev = "0534c7336ea0ef7a178836cbb6268b1250ff65b2"}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "1483172fcebcab5cc77977e81fe27f1e8dbcde58"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
@@ -31,7 +33,7 @@ DocumenterCitations = "1.4"
 Enzyme = "0.13.132"
 GPUArraysCore = "0.2.0"
 InteractiveUtils = "<0.0.1, 1"
-KernelAbstractions = "0.9.41"
+KernelAbstractions = "0.9.41, 0.10"
 Literate = "2"
 NCDatasets = "0.14"
 Oceananigans = "0.110"
