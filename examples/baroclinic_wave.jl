@@ -95,21 +95,28 @@ a   = Oceananigans.defaults.planet_radius
 # We use a 1° latitude-longitude grid spanning 75° S to 75° N. Capping the
 # domain at ±75° (rather than the poles) keeps the polar `Δx_min` manageable:
 # `a · cos 75° · 2π/Nλ ≈ 28.8 km`. The domain extends from the surface to
-# 30 km with 32 vertical levels (Δz ≈ 940 m).
+# 30 km with 64 vertical levels, exponentially stretched toward the surface
+# with `ExponentialDiscretization`: the interfaces are clustered near
+# the ground (`bias = :left`) so the smallest cells sit at the surface
+# (`Δz ≈ 150 m`) and coarsen to `≈ 1070 m` at the model top. The e-folding
+# `scale = H/2` sets how quickly the spacing grows with height.
 
 Nλ = 360
 Nφ = 150
-Nz = 32
+Nz = 64
 H  = 30kilometers
+
+z_faces = ExponentialDiscretization(Nz, 0, H; scale = H/2, bias = :left)
 
 grid = LatitudeLongitudeGrid(GPU();
                              size = (Nλ, Nφ, Nz),
                              halo = (5, 5, 5),
                              longitude = (0, 360),
                              latitude = (-75, 75),
-                             z = (0, H))
+                             z = z_faces)
 
-## Temperature profile parameters
+# ## Temperature profile parameters
+
 Tᴱ = 310     # K — equatorial surface temperature
 Tᴾ = 240     # K — polar surface temperature
 Tᴹ = (Tᴱ + Tᴾ) / 2
@@ -220,19 +227,23 @@ end
 # ``2Ω \cos φ`` cross-terms that couple horizontal momentum to ``w``. Breeze
 # evolves prognostic ``ρw`` so the non-traditional terms are physically
 # required for self-consistent dynamics on the sphere.
+#
+# Tracer and momentum advection uses fifth-order `WENO` reconstruction. No
+# explicit closure is applied: WENO's implicit dissipation suffices on this
+# poleward-refined, near-surface-stretched grid.
 
 coriolis = SphericalCoriolis(rotation_rate=Ω)
 
 T₀ᵣ = 250
 θᵣ(z) = T₀ᵣ * exp(g * z / (cᵖᵈ * T₀ᵣ))
 
-dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();  # default damping: ThermalDivergenceDamping(coefficient = 0.1)
+dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵣ)
 
 model = AtmosphereModel(grid; dynamics, coriolis,
                         thermodynamic_constants = constants,
-                        advection = WENO())
+                        advection = WENO(order=5))
 
 # ## Set initial conditions
 
@@ -254,9 +265,10 @@ set!(model, θ=potential_temperature, u=zonal_velocity, ρ=density)
 
 Δt = 12minutes
 stop_time = 30days
+cfl = 1.4
 
 simulation = Simulation(model; Δt, stop_time)
-conjure_time_step_wizard!(simulation; cfl=1.4, max_Δt=12minutes)
+conjure_time_step_wizard!(simulation; cfl, max_Δt=12minutes)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Progress callback
@@ -276,7 +288,7 @@ add_callback!(simulation, progress, IterationInterval(50))
 # We save the velocities, the full potential temperature ``θ`` (the
 # classic surface synoptic diagnostic for the cold/warm sectors during
 # cyclogenesis), and the vertical vorticity ``ζ``, sliced at two levels:
-# k = 1 (surface) and k = 16 (mid-troposphere, ~5 km).
+# k = 1 (surface) and k = 16 (lower troposphere, ~2.9 km).
 
 using Oceananigans.Operators: ζ₃ᶠᶠᶜ
 u, v, w = model.velocities
@@ -302,11 +314,11 @@ run!(simulation)
 
 # ## Visualization
 #
-# We plot three diagnostics on the sphere: the **surface potential temperature**
-# ``θ_{\rm sfc}`` (the classic synoptic diagnostic for the cold/warm sectors),
-# the **surface vertical vorticity** ``ζ`` (which reveals the cyclones and
-# anticyclones), and the **mid-level vertical velocity** ``w`` (which highlights
-# the warm conveyor belt and the wave's vertical structure).
+# We plot three near-surface diagnostics on the sphere: the **surface
+# potential temperature** ``θ_{\rm sfc}`` (the classic diagnostic for the
+# cold/warm sectors), the **surface vertical vorticity** ``ζ`` (which reveals
+# the cyclones and anticyclones), and the **lower-tropospheric vertical
+# velocity** ``w`` at ~2.9 km (the warm conveyor belt).
 
 θ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "θ")
 ζ_ts = FieldTimeSeries("baroclinic_wave_k1.jld2",  "ζ")
@@ -346,7 +358,7 @@ ax2 = Axis3(fig[1, 3]; title = "ζ at surface", sphere_kw...)
 hm2 = surface!(ax2, ζn; shading = NoShading, ζ_kw...)
 Colorbar(fig[1, 4], hm2; label = "ζ (1/s)", height=Relative(0.5))
 
-ax3 = Axis3(fig[1, 5]; title = "w at mid-level", sphere_kw...)
+ax3 = Axis3(fig[1, 5]; title = "w at 2.9 km", sphere_kw...)
 hm3 = surface!(ax3, wn; shading = NoShading, w_kw...)
 Colorbar(fig[1, 6], hm3; label = "w (m/s)", height=Relative(0.5))
 
