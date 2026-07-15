@@ -36,6 +36,15 @@
 #     time-step wizard below. A full 30-day sphere run is a workstation-GPU-scale
 #     computation, not a quick doctest.
 #
+# !!! warning "Known limitation (day ~8)"
+#     With the settings below the wave develops realistically — jet, growing
+#     Rossby wave, condensation, and rainfall — through roughly day 8, but the run
+#     currently **crashes during vigorous moist cyclogenesis** around day 8: sharp
+#     F32 frontal features trip the thermodynamic ``θ→T`` inversion. Reaching the
+#     full 30 days needs added frontal dissipation or a more robust inversion, which
+#     is tracked as follow-up. For a complete end-to-end run today, set
+#     `stop_time` to ≲ 7 days.
+#
 # ## Physical setup
 #
 # The DCMIP2016 background state is an analytic steady-state solution of
