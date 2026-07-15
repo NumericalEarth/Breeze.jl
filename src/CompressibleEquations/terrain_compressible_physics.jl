@@ -301,7 +301,7 @@ terrain_ρw_boundary_conditions(::TerrainFollowingGrid, ρw_bcs) =
 
 # One-sided, specified-face-dropping interpolation of a face quantity `q(i, j, k, grid,
 # args...)` to a Center, used to gate the terrain slope corrections on a specified side
-# (SubstepBoundaryUpdate #825). It is the Bool-weighted average `Σ aₚ qₚ / max(Σ aₚ, 1)`
+# (SubstepBoundaryUpdate). It is the Bool-weighted average `Σ aₚ qₚ / max(Σ aₚ, 1)`
 # over the two bracketing faces, weight `aₚ = !specified(face p)`, so a specified face is
 # dropped and the average becomes one-sided at the specified/interior seam. Written as
 # `2·ℑ(a·q) / max(2·ℑ(a), 1)`, delegating the interpolation to Oceananigans' `ℑxᶜᵃᵃ`/
@@ -348,7 +348,7 @@ end
 # `specified_sides` gates it exactly as the linearized correction below: on a specified side the
 # ∂ₓp/∂ᵧp interpolation is one-sided, dropping specified faces so the re-imposed
 # specified-cell pressure never projects into an interior column's Gˢρw̃ through the slope
-# (a leak channel: SubstepBoundaryUpdate #825). The `::Nothing` method (no side specified —
+# (a leak channel: SubstepBoundaryUpdate). The `::Nothing` method (no side specified —
 # every unspecified terrain model) is the original plain interpolation, BIT-IDENTICAL.
 @inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics, ::Nothing)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
@@ -533,7 +533,7 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
         β_stage == 1 ? substepper.final_stage_vertical_pressure_tendency_factor :
         substepper.vertical_pressure_tendency_factor
 
-    # SubstepBoundaryUpdate (#825): `nothing` when no momentum BC carries the scheme, so
+    # SubstepBoundaryUpdate: `nothing` when no momentum BC carries the scheme, so
     # the kernel's helpers dispatch the specified-face substitution away and the default
     # terrain path is identical to a schemeless build.
     specified_sides = active_specified_sides(model)
@@ -564,7 +564,7 @@ end
 
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
-    # SubstepBoundaryUpdate (#825): a specified x-/y-face takes its specified boundary
+    # SubstepBoundaryUpdate: a specified x-/y-face takes its specified boundary
     # tendency in place of Gⁿρu/Gⁿρv (see the helpers above); unspecified builds are
     # bit-identical to the plain `ℑ`-of-Gⁿ interpolation.
     Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, specified_slow_x_momentum_tendency, Gⁿρu, ∂ₜρu_boundary, specified_sides)

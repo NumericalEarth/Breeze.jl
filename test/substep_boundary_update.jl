@@ -1,5 +1,5 @@
 #####
-##### Tests for the SubstepBoundaryUpdate specified-zone boundary update (#825)
+##### Tests for the SubstepBoundaryUpdate specified-zone boundary update
 #####
 
 using Breeze

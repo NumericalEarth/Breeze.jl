@@ -412,7 +412,7 @@ already advances the same prognostic variables as the outer scheme. The slow ten
 ``G^s`` are applied through the substep loop, so the WS-RK3 stage update
 ``U^{(k)} = U^n + β_k Δt R(U^{(k-1)})`` falls out of the same loop.
 
-### Specified-zone boundary drive (`SubstepBoundaryUpdate`)
+### Time-varying specified-zone boundary (`SubstepBoundaryUpdate`)
 
 The substep loop advances the fast system many times between the slow
 (per-RK-stage) boundary updates, so a normal-flow lateral boundary needs
@@ -459,7 +459,7 @@ microphysics update — is not gated away from the zone; instead the zone is
 *restored* to its specified-zone state ``U⁰ + β\,Δt\,∂_t`` after those operations,
 discarding their increments there. Interior physics therefore never acts on
 the specified zone, the standard limited-area contract. This restoration also
-carries the moisture drive: the moisture density never enters the acoustic
+carries the time-varying boundary moisture: the moisture density never enters the acoustic
 loop, so a supplied ``ρqᵛ`` tendency updates the zone's moisture purely
 through the restore (a zero ``ρqᵛ`` tendency field holds zone moisture frozen,
 like the other variables). Two caveats: the specified column's ``(ρw)'`` has no

@@ -1,5 +1,5 @@
 #####
-##### SubstepBoundaryUpdate — MPAS-style specified-zone boundary update (#825)
+##### SubstepBoundaryUpdate — MPAS-style specified-zone boundary update
 #####
 ##### A scheme attached to the momentum `NormalFlowBoundaryCondition`s. When an
 ##### open lateral side carries it, the acoustic substep loop treats that side's

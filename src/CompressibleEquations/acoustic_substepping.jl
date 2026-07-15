@@ -120,7 +120,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, BT}
     slow_vertical_momentum_tendency :: GT
     vertical_solver :: TS
 
-    # SubstepBoundaryUpdate (#825): per-substep update of the specified-zone
+    # SubstepBoundaryUpdate: per-substep update of the specified-zone
     # perturbations by their boundary time-tendencies. A `NamedTuple` with keys
     # `(ρu, ρv, ρᵈ, ρθ, ρqᵛ)`, or `nothing` unless a momentum BC carries the
     # scheme; filled once per outer step (from the scheme's sources, or in place
@@ -168,7 +168,7 @@ prognostic momentum's BCs: inheriting them would imprint the full-state wall tar
 halo for a nonzero `NormalFlowBoundaryCondition` (issue \\#716) and apply momentum BCs to velocity fields.
 The wall target re-enters via the prognostic momentum's own BC after each substep's momentum update.
 The `prognostic_momentum` kwarg supplies the momentum boundary conditions, which are consulted only
-to detect a [`SubstepBoundaryUpdate`](@ref) scheme (the specified-zone boundary drive, issue \\#825);
+to detect a [`SubstepBoundaryUpdate`](@ref) scheme (the time-varying specified-zone boundary);
 the tendency storage below is allocated only when one is present.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
@@ -222,7 +222,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     slow_vertical_momentum_tendency = ZFaceField(grid)
 
-    # SubstepBoundaryUpdate (#825): allocate the specified-zone tendency storage
+    # SubstepBoundaryUpdate: allocate the specified-zone tendency storage
     # only when a momentum BC carries the scheme; `nothing` otherwise, so models
     # without the scheme pay no memory and the kernels specialize the update away.
     open_sides = prognostic_momentum === nothing ? OpenSides(false, false, false, false) :
@@ -870,7 +870,7 @@ end
         ∂x_p = ∂x_pᴸ + perturbation_pressure_gradient_factor * ∂x_p′
         ∂y_p = ∂y_pᴸ + perturbation_pressure_gradient_factor * ∂y_p′
 
-        # SubstepBoundaryUpdate (#825): a specified face takes no acoustic update
+        # SubstepBoundaryUpdate: a specified face takes no acoustic update
         # (in particular no acoustic ∂p′ — the momentum kick channel); it is
         # updated by its boundary tendency instead, an increment that composes
         # with the SK08 rewind init (ρu)′ = U⁰ − Uᴸ_stage to recover
@@ -918,7 +918,7 @@ end
 
     i, j, k = @index(Global, NTuple)
 
-    # SubstepBoundaryUpdate (#825): a specified cell is prescribed, not
+    # SubstepBoundaryUpdate: a specified cell is prescribed, not
     # acoustically evolved — its predictors take the boundary-tendency update
     # instead of the coupled update, so its mass is never driven by the
     # (gated) boundary momentum.
@@ -1005,7 +1005,7 @@ end
                                        specified_sides)
     i, j, k = @index(Global, NTuple)
 
-    # SubstepBoundaryUpdate (#825): specified cells keep their updated
+    # SubstepBoundaryUpdate: specified cells keep their updated
     # predictors (no recovery from the boundary column's acoustic w), and the
     # specified column's (ρw)′ is replaced by the zero-gradient closure (see
     # `replace_specified_column_vertical_momentum!`).
@@ -1169,7 +1169,7 @@ end
                                               x_damping_scale, y_damping_scale, specified_sides)
     i, j, k = @index(Global, NTuple)
 
-    # SubstepBoundaryUpdate (#825): specified faces take no damping correction —
+    # SubstepBoundaryUpdate: specified faces take no damping correction —
     # they are prescribed, and the correction would re-inject the boundary
     # momentum kick the specified zone removes.
     x_specified, y_specified = specified_zone_faces(i, j, grid, specified_sides)
@@ -1226,7 +1226,7 @@ end
 @kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, α, specified_sides)
     i, j, k = @index(Global, NTuple)
 
-    # SubstepBoundaryUpdate (#825): no damping correction on specified faces.
+    # SubstepBoundaryUpdate: no damping correction on specified faces.
     x_specified, y_specified = specified_zone_faces(i, j, grid, specified_sides)
 
     @inbounds begin
@@ -1454,7 +1454,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
-    # SubstepBoundaryUpdate (#825): sides whose momentum BC carries the scheme
+    # SubstepBoundaryUpdate: sides whose momentum BC carries the scheme
     # form the specified zone. `specified_sides === nothing` when none does, so the
     # kernels compile the specified-zone branches (and the tendency-field
     # loads) away and the default path is identical to a schemeless build.
@@ -1572,7 +1572,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
         # Per-substep open-boundary enforcement (issue #738): relax the outermost
         # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
         # the halo fill, so the boundary cell tracks the prescribed inflow state.
-        # Superseded per side by SubstepBoundaryUpdate (#825): a specified side's
+        # Superseded per side by SubstepBoundaryUpdate: a specified side's
         # cells are held to the time-accurate boundary state directly, so the
         # relaxation's stage-frozen target is redundant staleness there; sides
         # without the scheme keep the relaxation.
