@@ -22,8 +22,11 @@ Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [sources]
+AMDGPU = {url = "https://github.com/christiangnrd/AMDGPU.jl.git", rev = "intrinsics"}
 Breeze = {path = ".."}
+CUDA = {url = "https://github.com/christiangnrd/CUDA.jl.git", rev = "intrinsics"}
 KernelAbstractions = {url = "https://github.com/JuliaGPU/KernelAbstractions.jl.git", rev = "0534c7336ea0ef7a178836cbb6268b1250ff65b2"}
+Metal = {url = "https://github.com/JuliaGPU/Metal.jl.git", rev = "kaintr"}
 Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "1483172fcebcab5cc77977e81fe27f1e8dbcde58"}
 
 [compat]

@@ -24,6 +24,8 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 Breeze = {path = ".."}
+CUDA = {url = "https://github.com/christiangnrd/CUDA.jl.git", rev = "intrinsics"}
+Metal = {url = "https://github.com/JuliaGPU/Metal.jl.git", rev = "kaintr"}
 Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "1483172fcebcab5cc77977e81fe27f1e8dbcde58"}
 
 [compat]
