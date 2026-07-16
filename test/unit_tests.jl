@@ -348,6 +348,7 @@ end
 
 using Breeze.Thermodynamics:
     TetensFormula,
+    FlatauPolynomial,
     saturation_vapor_pressure,
     PlanarLiquidSurface,
     PlanarIceSurface,
@@ -452,6 +453,28 @@ end
         expected_mixed = λ * pˡ + (1 - λ) * pⁱ
         @test saturation_vapor_pressure(T_test, thermo, surface) ≈ expected_mixed rtol=rtol
     end
+end
+
+@testset "Flatau vs Clausius-Clapeyron comparison [$FT]" for FT in test_float_types()
+    flatau = FlatauPolynomial(FT)
+    thermo_flatau = ThermodynamicConstants(FT; saturation_vapor_pressure=flatau)
+    thermo_cc = ThermodynamicConstants(FT) # Default is Clausius-Clapeyron
+
+    # the polynomial fits track the integrated CC form closely over the atmospheric range
+    for T in FT.((240, 260, 285, 300, 310))
+        pˡ_flatau = saturation_vapor_pressure(T, thermo_flatau, PlanarLiquidSurface())
+        pˡ_cc = saturation_vapor_pressure(T, thermo_cc, PlanarLiquidSurface())
+        @test pˡ_flatau ≈ pˡ_cc rtol=FT(0.01)
+    end
+    for T in FT.((200, 240, 260, 273))
+        pⁱ_flatau = saturation_vapor_pressure(T, thermo_flatau, PlanarIceSurface())
+        pⁱ_cc = saturation_vapor_pressure(T, thermo_cc, PlanarIceSurface())
+        @test pⁱ_flatau ≈ pⁱ_cc rtol=FT(0.05)
+    end
+
+    # far below the fit range the argument is clamped rather than extrapolated
+    @test saturation_vapor_pressure(FT(150), thermo_flatau, PlanarLiquidSurface()) ==
+          saturation_vapor_pressure(FT(193.16), thermo_flatau, PlanarLiquidSurface())
 end
 
 @testset "Tetens vs Clausius-Clapeyron comparison [$FT]" for FT in test_float_types()
