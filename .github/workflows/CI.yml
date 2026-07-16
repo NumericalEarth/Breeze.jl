@@ -178,6 +178,7 @@ jobs:
           # tests).
           cp -v /usr/local/share/julia/environments/breeze/LocalPreferences.toml test/.
       - name: Instantiate test environment
+        timeout-minutes: 30
         shell: bash
         run: |
           julia --project=test --color=yes --check-bounds=${{ matrix.check-bounds }} -e '
