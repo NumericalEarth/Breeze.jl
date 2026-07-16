@@ -147,14 +147,10 @@ jobs:
           if [[ ${{ runner.os }} == "macOS" ]]; then
               # On macOS runners, `Metal.functional()` returns `false` because the GPU is
               # virtualised, but we should be able to actually use it anyway.
-              echo "BREEZE_FORCE_METAL_FUNCTIONAL=true" >> "${GITHUB_ENV}"
+              echo "BREEZE_FORCE_METAL_FUNCTIONAL=true" | tee -a "${GITHUB_ENV}"
               # Encourage ParallelTestRunner to use multiple jobs on macOS, rather
               # than the single one it'd use by default.
               TEST_ARGS+=(--jobs=2)
-              # ...but also set a more conservative limit to memory usage before
-              # reciclying a worker, to avoid trashing memory or out-of-memory errors.
-              JULIA_TEST_MAXRSS_MB=1800
-              echo "JULIA_TEST_MAXRSS_MB=${JULIA_TEST_MAXRSS_MB}" | tee -a "${GITHUB_ENV}"
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" | tee -a "${GITHUB_ENV}"
       - name: Install earlyoom
