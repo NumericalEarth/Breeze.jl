@@ -1,5 +1,5 @@
 import Breeze
-using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests
+using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests, available_memory
 using Test
 
 # Start with autodiscovered tests
@@ -47,6 +47,17 @@ const init_code = quote
 
     # Returns both Float32 and Float64 for tests that need both precision levels
     all_float_types() = (Float32, Float64)
+end
+
+if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
+    GC.gc(true); GC.gc(false); GC.gc(true)
+    # macOS runners have little memory compared to the other runners, let's set a more
+    # conservative limit to memory usage before reciclying a worker, to avoid trashing
+    # memory or out-of-memory errors.  We set the memory limit dynamically, based on the
+    # currently available memory (with a ~10% margin), with a lower bound of 1800 MiB.
+    max_rss_memory = max(1_800, round(Int, available_memory() / 2 ^ 20 / 2  * 0.9))
+    ENV["JULIA_TEST_MAXRSS_MB"] = string(max_rss_memory)
+    @info "JULIA_TEST_MAXRSS_MB set to $(max_rss_memory)"
 end
 
 runtests(Breeze, args; testsuite, init_code)
