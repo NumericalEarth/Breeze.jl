@@ -537,7 +537,7 @@ using Breeze.AtmosphereModels: BackgroundAtmosphere,
         @test atm.CO₂ ≈ 420e-6
         @test atm.CH₄ ≈ 1.8e-6
         @test atm.N₂O ≈ 330e-9
-        @test atm.O₃ == 0.0
+        @test atm.O₃ === Breeze.standard_ozone_profile
         @test atm.CFC₁₁ == 0.0
     end
 
