@@ -107,3 +107,16 @@ Flatau et al. (1992) eighth-order polynomial in ``T - Tᵣ``.
     x = max(T - fp.reference_temperature, -fp.minimum_temperature_offset)
     return evalpoly(x, fp.ice_coefficients)
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the saturation vapor pressure over a planar mixed-phase surface by linearly
+interpolating the liquid and ice Flatau polynomials by `liquid_fraction`.
+"""
+@inline function saturation_vapor_pressure(T, constants::FlatauPolynomialThermodynamicConstants, surface::PlanarMixedPhaseSurface)
+    pᵛ⁺ˡ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
+    pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
+    λ = surface.liquid_fraction
+    return λ * pᵛ⁺ˡ + (1 - λ) * pᵛ⁺ⁱ
+end
