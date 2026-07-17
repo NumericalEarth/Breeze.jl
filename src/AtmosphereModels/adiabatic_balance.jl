@@ -196,22 +196,44 @@ adiabatic_twin_dynamics(dynamics, time_stepping) = dynamics
 $(TYPEDSIGNATURES)
 
 Build a stripped adiabatic twin of `model` that SHARES all field memory (momentum, velocities,
-densities, ρθ, moisture, temperature, pressure solver, dynamics fields) and steps it in place. The
-twin's dynamics comes from [`adiabatic_twin_dynamics`](@ref) (per `balancer.time_stepping`);
-microphysics, closure, the implicit diffusion solver, the sponge, and forcing — all
-dissipative/irreversible — are removed; the time stepper's `Gⁿ`/`U⁰` tendency storage *aliases* the
-production stepper's same-named arrays (moisture key re-mapped from the microphysics name, e.g.
-`:ρqᵉ`, to the moistureless `:ρqᵛ`); and a fresh `Clock` is used so the balance's clock reset does
-not touch the production clock.
+densities, ρθ, moisture, tracers, temperature, pressure solver, dynamics fields) and steps it in
+place. Every prognostic scalar — momentum, ρθ/ρe, moisture, and tracers — is rewrapped with its
+surface fluxes stripped to no-flux (see [`adiabatic_scalar_bcs`](@ref)), sharing the production data
+so no memory is reallocated. The twin's dynamics comes from [`adiabatic_twin_dynamics`](@ref) (per
+`balancer.time_stepping`); microphysics, closure, the implicit diffusion solver, the sponge, and
+forcing — all dissipative/irreversible — are removed; the time stepper's `Gⁿ`/`U⁰` tendency storage
+*aliases* the production stepper's same-named arrays (moisture key re-mapped from the microphysics
+name, e.g. `:ρqᵉ`, to the moistureless `:ρqᵛ`); and a fresh `Clock` is used so the balance's clock
+reset does not touch the production clock.
 """
 adiabatic_balance_twin(model::AtmosphereModel, balancer::AdiabaticBalancer = AdiabaticBalancer()) =
     assemble_adiabatic_twin(model, adiabatic_twin_dynamics(model.dynamics, balancer.time_stepping))
 
+# Rewrap a prognostic scalar `twin_field` with its surface fluxes stripped to no-flux (see
+# [`adiabatic_scalar_bcs`](@ref)), sharing the production `data`, indices, and operand so no memory
+# is reallocated and the balanced state still lands in `model`.
+adiabatic_field(twin_field) =
+    Oceananigans.Field(Oceananigans.instantiated_location(twin_field), twin_field.grid, twin_field.data,
+                       adiabatic_scalar_bcs(twin_field.boundary_conditions),
+                       twin_field.indices, twin_field.operand, twin_field.status)
+
 function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     grid        = model.grid
     arch        = model.architecture
-    formulation = model.formulation
     constants   = model.thermodynamic_constants
+
+    # Strip surface fluxes from every one of the twin's prognostic scalars. The excursion is
+    # adiabatic — pure, reversible dynamics — so surface heating (bulk sensible-heat / energy / θ
+    # flux), surface moisture sources (vapor flux), surface tracer fluxes, and surface momentum
+    # drag (dissipative, like closure) must all be absent. Each field is rewrapped sharing the
+    # production data (no reallocation), so the balanced state still lands in `model`.
+    formulation = model.formulation
+    ρᵡ = thermodynamic_density(formulation)
+    formulation = with_thermodynamic_density(formulation, adiabatic_field(ρᵡ))
+
+    twin_momentum         = NamedTuple{keys(model.momentum)}(adiabatic_field(ρu) for ρu in model.momentum)
+    twin_moisture_density = adiabatic_field(model.moisture_density)
+    twin_tracers          = NamedTuple{keys(model.tracers)}(adiabatic_field(c) for c in model.tracers)
 
     twin_microphysics  = nothing
     qᵛ                 = specific_prognostic_moisture(model)
@@ -222,8 +244,8 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     twin_moisture_name = moisture_prognostic_name(twin_microphysics)
     remap(name) = name === twin_moisture_name ? prod_moisture_name : name
 
-    twin_prognostic = collect_prognostic_fields(formulation, twin_dynamics, model.momentum,
-                                                model.moisture_density, twin_moisture_name, (;), model.tracers)
+    twin_prognostic = collect_prognostic_fields(formulation, twin_dynamics, twin_momentum,
+                                                twin_moisture_density, twin_moisture_name, (;), twin_tracers)
     twin_names = keys(twin_prognostic)
 
     Gⁿ = NamedTuple{twin_names}(model.timestepper.Gⁿ[remap(n)] for n in twin_names)
@@ -234,7 +256,7 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
                                    dynamics = twin_dynamics, Gⁿ, U⁰, implicit_solver = nothing)
 
     # Advection schemes are immutable and shared; just re-key the moisture scheme and drop precip.
-    twin_scalar_names = (:ρθ, twin_moisture_name, keys(model.tracers)...)
+    twin_scalar_names = (:ρθ, twin_moisture_name, keys(twin_tracers)...)
     twin_advection = merge((; momentum = model.advection.momentum),
                            NamedTuple{twin_scalar_names}(model.advection[remap(n)] for n in twin_scalar_names))
 
@@ -251,8 +273,8 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     # adiabatic excursion. `closure_fields` is carried along but unused when closure is nothing.
     return AtmosphereModel(arch, grid, Clock(grid),
                            twin_dynamics, formulation, constants,
-                           model.momentum, model.moisture_density, model.temperature,
-                           model.pressure_solver, model.velocities, model.tracers,
+                           twin_momentum, twin_moisture_density, model.temperature,
+                           model.pressure_solver, model.velocities, twin_tracers,
                            nothing, twin_advection, model.coriolis, twin_forcing,
                            twin_microphysics, twin_microphysical, twin_timestepper,
                            nothing, model.closure_fields, nothing)

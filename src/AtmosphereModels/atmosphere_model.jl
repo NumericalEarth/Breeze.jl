@@ -369,7 +369,8 @@ function Base.show(io::IO, model::AtmosphereModel)
               "└── microphysics: ", Mic)
 end
 
-Advection.cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)
+# `cell_advection_timescale(model::AtmosphereModel)` and the direction-aware `CellAdvectionTimescale`
+# callable are defined in cell_advection_timescale.jl (included after this file).
 
 # Prognostic field names from dynamics + thermodynamic formulation + microphysics + tracers
 function prognostic_field_names(dynamics, formulation, microphysics, tracer_names)
