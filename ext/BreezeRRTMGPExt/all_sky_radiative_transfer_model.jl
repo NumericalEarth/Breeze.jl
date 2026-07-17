@@ -103,13 +103,13 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
             throw(ArgumentError(error_msg))
         end
 
-        surface_albedo = materialize_surface_property(surface_albedo, grid)
+        surface_albedo = materialize_surface_property(surface_albedo, grid, solar_position)
         diffuse_surface_albedo = surface_albedo
         direct_surface_albedo = surface_albedo
 
     elseif !isnothing(diffuse_surface_albedo) && !isnothing(direct_surface_albedo)
-        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid)
-        diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid)
+        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid, solar_position)
+        diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid, solar_position)
     else
         throw(ArgumentError(error_msg))
     end

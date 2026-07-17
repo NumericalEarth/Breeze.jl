@@ -67,6 +67,7 @@ export
     RadiativeTransferModel,
     BackgroundAtmosphere,
     materialize_background_atmosphere,
+    materialize_surface_property,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
