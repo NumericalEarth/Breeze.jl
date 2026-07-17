@@ -195,3 +195,13 @@ end
     # Flux divergence: -dF/dz (positive when flux convergence warms)
     @inbounds flux_div[i, j, k] = -(F_k1 - F_k) / Δz
 end
+
+# The constructors accept `surface_temperature = nothing` so that a coupled model can bind
+# its interface surface temperature after construction; solving without one is an error.
+function assert_bound_surface_temperature(rtm)
+    isnothing(rtm.surface_properties.surface_temperature) && throw(ArgumentError(
+        "This RadiativeTransferModel has no surface temperature: construct it with " *
+        "`surface_temperature = ...`, or bind one before the first radiation update " *
+        "(coupled models wire their interface surface temperature automatically)."))
+    return nothing
+end
