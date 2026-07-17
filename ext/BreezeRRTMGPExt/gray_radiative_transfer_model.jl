@@ -51,7 +51,9 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 
 # Keyword Arguments
 - `optical_thickness`: Optical thickness parameterization (default: `GrayOpticalThicknessOGorman2008(FT)`).
-- `surface_temperature`: Surface temperature in Kelvin (required).
+- `surface_temperature`: Surface temperature in Kelvin, a `Number` or 2D `Field`. Default: `nothing` —
+  bind one before the first radiation update (a coupled model wires its interface surface
+  temperature into the radiation automatically).
 - `solar_position`: Specification of the solar zenith angle. See [`AbstractSolarPosition`](@ref) and its subtypes:
   - [`ApparentSolarPosition`](@ref) (default) — time-varying, computed from the model clock and grid (or explicit) longitude/latitude.
   - [`FixedCosineZenith`](@ref) — constant cos(θ_z), independent of the clock.
@@ -66,7 +68,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::GrayOptics,
                                                  constants::ThermodynamicConstants;
                                                  optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid)),
-                                                 surface_temperature,
+                                                 surface_temperature = nothing,
                                                  solar_position::AbstractSolarPosition = ApparentSolarPosition(),
                                                  surface_emissivity = 0.98,
                                                  direct_surface_albedo = nothing,
@@ -292,6 +294,7 @@ This function:
 Sign convention: positive flux = upward, negative flux = downward.
 """
 function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, model)
+    assert_bound_surface_temperature(rtm)
     grid = model.grid
     clock = model.clock
 
