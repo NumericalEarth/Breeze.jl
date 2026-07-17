@@ -348,6 +348,7 @@ end
 
 using Breeze.Thermodynamics:
     TetensFormula,
+    FlatauPolynomial,
     saturation_vapor_pressure,
     PlanarLiquidSurface,
     PlanarIceSurface,
@@ -452,6 +453,52 @@ end
         expected_mixed = λ * pˡ + (1 - λ) * pⁱ
         @test saturation_vapor_pressure(T_test, thermo, surface) ≈ expected_mixed rtol=rtol
     end
+end
+
+@testset "Flatau vs Clausius-Clapeyron comparison [$FT]" for FT in test_float_types()
+    flatau = FlatauPolynomial(FT)
+    thermo_flatau = ThermodynamicConstants(FT; saturation_vapor_pressure=flatau)
+    thermo_cc = ThermodynamicConstants(FT) # Default is Clausius-Clapeyron
+
+    # the polynomial fits track the integrated CC form closely over the atmospheric range
+    for T in FT.((240, 260, 285, 300, 310))
+        pˡ_flatau = saturation_vapor_pressure(T, thermo_flatau, PlanarLiquidSurface())
+        pˡ_cc = saturation_vapor_pressure(T, thermo_cc, PlanarLiquidSurface())
+        @test pˡ_flatau ≈ pˡ_cc rtol=FT(0.01)
+    end
+    for T in FT.((200, 240, 260, 273))
+        pⁱ_flatau = saturation_vapor_pressure(T, thermo_flatau, PlanarIceSurface())
+        pⁱ_cc = saturation_vapor_pressure(T, thermo_cc, PlanarIceSurface())
+        @test pⁱ_flatau ≈ pⁱ_cc rtol=FT(0.05)
+    end
+
+    # far below the fit range the argument is clamped rather than extrapolated
+    @test saturation_vapor_pressure(FT(150), thermo_flatau, PlanarLiquidSurface()) ==
+          saturation_vapor_pressure(FT(193.16), thermo_flatau, PlanarLiquidSurface())
+
+    # mixed-phase surface: λ-weighted blend of the liquid and ice polynomials. Regression for a
+    # missing `saturation_vapor_pressure(..., ::PlanarMixedPhaseSurface)` method — without it,
+    # `SaturationAdjustment` (which uses `MixedPhaseEquilibrium`) throws a `MethodError`, which also
+    # breaks GPU kernel codegen (`InvalidIRError`).
+    T_mixed = FT(268)
+    pˡ = saturation_vapor_pressure(T_mixed, thermo_flatau, PlanarLiquidSurface())
+    pⁱ = saturation_vapor_pressure(T_mixed, thermo_flatau, PlanarIceSurface())
+    for λ in (FT(0), FT(0.5), FT(1))
+        surface = PlanarMixedPhaseSurface(λ)
+        @test saturation_vapor_pressure(T_mixed, thermo_flatau, surface) ≈ λ * pˡ + (1 - λ) * pⁱ
+    end
+end
+
+@testset "Flatau mixed-phase SVP compiles on device [$FT]" for FT in test_float_types()
+    flatau = FlatauPolynomial(FT)
+    thermo = ThermodynamicConstants(FT; saturation_vapor_pressure = flatau)
+    surface = PlanarMixedPhaseSurface(FT(0.4))
+    # Broadcasting over a device array compiles a kernel that calls the mixed-phase SVP. On a GPU this
+    # is the exact codegen that failed (InvalidIRError from a dynamic MethodError throw) when the
+    # PlanarMixedPhaseSurface method was missing — SaturationAdjustment uses it every step.
+    Ts = Oceananigans.Architectures.on_architecture(default_arch, collect(FT, 250:5:290))
+    p = saturation_vapor_pressure.(Ts, Ref(thermo), Ref(surface))
+    @test all(isfinite, Array(p))
 end
 
 @testset "Tetens vs Clausius-Clapeyron comparison [$FT]" for FT in test_float_types()
