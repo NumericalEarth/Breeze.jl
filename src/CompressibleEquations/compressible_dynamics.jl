@@ -304,6 +304,20 @@ For compressible dynamics, there is no separate mean pressure - returns the full
 """
 AtmosphereModels.mean_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
+function AtmosphereModels.reference_pressure(dynamics::CompressibleDynamics)
+    reference_state = dynamics.reference_state
+    reference_state === nothing || return reference_state.pressure
+    terrain_reference_pressure = dynamics.terrain_reference_pressure
+    return terrain_reference_pressure === nothing ? dynamics.pressure : terrain_reference_pressure
+end
+
+function AtmosphereModels.reference_density(dynamics::CompressibleDynamics)
+    reference_state = dynamics.reference_state
+    reference_state === nothing || return reference_state.density
+    terrain_reference_density = dynamics.terrain_reference_density
+    return terrain_reference_density === nothing ? dynamics.total_density : terrain_reference_density
+end
+
 """
 $(TYPEDSIGNATURES)
 
