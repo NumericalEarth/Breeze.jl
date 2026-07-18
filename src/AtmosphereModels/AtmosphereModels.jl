@@ -68,6 +68,7 @@ export
     BackgroundAtmosphere,
     standard_ozone_profile,
     materialize_background_atmosphere,
+    materialize_surface_property,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,

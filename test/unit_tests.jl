@@ -620,3 +620,32 @@ end
     grid = RectilinearGrid(default_arch; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
     @test radiation_flux_divergence(1, 1, 1, grid, nothing) == zero(eltype(grid))
 end
+
+#####
+##### materialize_surface_property
+#####
+
+using Breeze.AtmosphereModels: materialize_surface_property
+
+# Extension point: downstream packages materialize property sources against grid + solar position.
+struct TestSurfacePropertySource end
+Breeze.AtmosphereModels.materialize_surface_property(::TestSurfacePropertySource, grid, solar_position) =
+    convert(eltype(grid), 1//2)
+
+@testset "materialize_surface_property [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1), y=(0, 1), z=(0, 1))
+
+    x = materialize_surface_property(0.2, grid)
+    @test x isa FT
+    @test x ≈ 0.2
+
+    α = CenterField(grid)
+    @test materialize_surface_property(α, grid) === α
+
+    # The three-argument form falls back to the two-argument form...
+    @test materialize_surface_property(0.2, grid, nothing) === materialize_surface_property(0.2, grid)
+
+    # ...and dispatches to source-specific methods.
+    @test materialize_surface_property(TestSurfacePropertySource(), grid, nothing) == FT(0.5)
+end
