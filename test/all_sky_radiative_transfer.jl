@@ -35,6 +35,20 @@ using RRTMGP
                                                           surface_temperature = 300)
     end
 
+    @testset "Optional surface temperature" begin
+        Oceananigans.defaults.FloatType = FT
+        topology = (Flat, Flat, Bounded)
+        grid = RectilinearGrid(default_arch; size=4, x=0, y=45, z=(0, 10kilometers), topology)
+        constants = ThermodynamicConstants()
+
+        # Legal to construct without one (a coupled model binds it later)...
+        radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants; surface_albedo = 0.1)
+        @test isnothing(radiation.surface_properties.surface_temperature)
+
+        # ...but solving before anything is bound fails loudly.
+        @test_throws ArgumentError Breeze.AtmosphereModels._update_radiation!(radiation, nothing)
+    end
+
     @testset "Single column grid with clouds [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         topology = (Flat, Flat, Bounded)
