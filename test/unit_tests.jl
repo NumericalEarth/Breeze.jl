@@ -548,6 +548,14 @@ using Breeze.AtmosphereModels: BackgroundAtmosphere,
         @test atm.N₂ ≈ 0.78084  # default preserved
     end
 
+    @testset "standard_ozone_profile" begin
+        O₃ = Breeze.standard_ozone_profile
+        @test O₃(0) ≈ 3e-8 rtol=1e-3           # tropospheric background at the surface
+        @test O₃(25e3) ≈ 8e-6 rtol=1e-3        # stratospheric peak
+        @test O₃(50e3) < O₃(25e3)              # decays above the peak
+        @test all(z -> O₃(z) > 0, 0:1e3:60e3)
+    end
+
     @testset "Function-based O₃" begin
         ozone(z) = 30e-9 * (1 + z / 10000)
         atm = BackgroundAtmosphere(O₃ = ozone)
@@ -611,4 +619,33 @@ end
     # Inline Nothing accessor
     grid = RectilinearGrid(default_arch; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
     @test radiation_flux_divergence(1, 1, 1, grid, nothing) == zero(eltype(grid))
+end
+
+#####
+##### materialize_surface_property
+#####
+
+using Breeze.AtmosphereModels: materialize_surface_property
+
+# Extension point: downstream packages materialize property sources against grid + solar position.
+struct TestSurfacePropertySource end
+Breeze.AtmosphereModels.materialize_surface_property(::TestSurfacePropertySource, grid, solar_position) =
+    convert(eltype(grid), 1//2)
+
+@testset "materialize_surface_property [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1), y=(0, 1), z=(0, 1))
+
+    x = materialize_surface_property(0.2, grid)
+    @test x isa FT
+    @test x ≈ 0.2
+
+    α = CenterField(grid)
+    @test materialize_surface_property(α, grid) === α
+
+    # The three-argument form falls back to the two-argument form...
+    @test materialize_surface_property(0.2, grid, nothing) === materialize_surface_property(0.2, grid)
+
+    # ...and dispatches to source-specific methods.
+    @test materialize_surface_property(TestSurfacePropertySource(), grid, nothing) == FT(0.5)
 end
