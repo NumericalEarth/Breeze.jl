@@ -95,6 +95,23 @@ make_pressure_correction!(model, Δt) = nothing
 #####
 
 """
+    reference_pressure(dynamics)
+
+Return the best available static reference pressure (Pa): the hydrostatic reference
+state when the dynamics carries one, else a terrain-following 3D reference, else the
+prognostic pressure. Consumers wanting a stable background (e.g. radiative transfer)
+should prefer this over `dynamics_pressure`.
+"""
+reference_pressure(dynamics) = dynamics_pressure(dynamics)
+
+"""
+    reference_density(dynamics)
+
+Companion to [`reference_pressure`](@ref) for the (moist) reference density.
+"""
+reference_density(dynamics) = dynamics_density(dynamics)
+
+"""
     mean_pressure(dynamics)
 
 Return the mean (background/reference) pressure field in Pa.

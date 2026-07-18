@@ -53,6 +53,8 @@ $(TYPEDSIGNATURES)
 Return the mean (reference) pressure field for `AnelasticDynamics`, in Pa.
 """
 AtmosphereModels.mean_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
+AtmosphereModels.reference_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
+AtmosphereModels.reference_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
 """
 $(TYPEDSIGNATURES)
