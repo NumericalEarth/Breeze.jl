@@ -537,7 +537,7 @@ using Breeze.AtmosphereModels: BackgroundAtmosphere,
         @test atm.CO₂ ≈ 420e-6
         @test atm.CH₄ ≈ 1.8e-6
         @test atm.N₂O ≈ 330e-9
-        @test atm.O₃ == 0.0
+        @test atm.O₃ === Breeze.standard_ozone_profile
         @test atm.CFC₁₁ == 0.0
     end
 
@@ -546,6 +546,14 @@ using Breeze.AtmosphereModels: BackgroundAtmosphere,
         @test atm.CO₂ ≈ 400e-6
         @test atm.O₃ ≈ 30e-9
         @test atm.N₂ ≈ 0.78084  # default preserved
+    end
+
+    @testset "standard_ozone_profile" begin
+        O₃ = Breeze.standard_ozone_profile
+        @test O₃(0) ≈ 3e-8 rtol=1e-3           # tropospheric background at the surface
+        @test O₃(25e3) ≈ 8e-6 rtol=1e-3        # stratospheric peak
+        @test O₃(50e3) < O₃(25e3)              # decays above the peak
+        @test all(z -> O₃(z) > 0, 0:1e3:60e3)
     end
 
     @testset "Function-based O₃" begin
