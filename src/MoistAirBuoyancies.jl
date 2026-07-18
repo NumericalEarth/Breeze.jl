@@ -185,7 +185,6 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     # Generate guess for unsaturated conditions; if dry, return T₁
     qᵗ = total_specific_moisture(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ)
-    𝒰₁ = with_moisture(𝒰₀, q₁)
     Π₁ = exner_function(𝒰₀, constants)
     T₁ = Π₁ * θ
 
@@ -202,7 +201,6 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, pᵣ, qᵗ, constants, constants.liquid)
     qˡ₁ = qᵗ - qᵛ⁺₁
     q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁)
-    𝒰₁ = with_moisture(𝒰₀, q₁)
 
     # We generate a second guess to start a secant iteration
     # by applying the potential temperature assuming a liquid fraction
@@ -235,7 +233,6 @@ end
 @inline function saturation_adjustment_residual(T, 𝒰, constants)
     Π = exner_function(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    θ = 𝒰.potential_temperature
     ℒˡᵣ = constants.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q, constants)
     qˡ = q.liquid

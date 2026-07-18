@@ -811,7 +811,7 @@ end
             rᶜˡ = μ.qᶜˡ[i, j, k]
             rʳ = μ.qʳ[i, j, k]
 
-            qᵛ, qᶜˡ, qʳ, qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
+            qᵛ, qᶜˡ, qʳ, _qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
 
             ρqᵛ[i, j, k]    = ρ * qᵛ
             μ.ρqᶜˡ[i, j, k] = ρ * qᶜˡ
