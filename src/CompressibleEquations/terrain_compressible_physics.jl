@@ -764,7 +764,7 @@ function terrain_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants
     @inline function dpdz(zⁿ, p)
         θⁿ = evaluate_profile(θᵣ, zⁿ)
         qᵛⁿ = evaluate_profile(qᵛᵣ, zⁿ)
-        Rᵐⁿ, cᵖᵐⁿ, κᵐⁿ = moist_reference_constants(qᵛⁿ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+        Rᵐⁿ, _cᵖᵐⁿ, κᵐⁿ = moist_reference_constants(qᵛⁿ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
         Tⁿ = θⁿ * (p / pˢᵗ)^κᵐⁿ
         return -g * p / (Rᵐⁿ * Tⁿ)
     end
@@ -845,7 +845,7 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢ
                     z_surface = znode(i, j, 1, cpu_grid, c, c, Face())
                     θ_surface = evaluate_profile(θᵣ, z_surface)
                     qᵛ_surface = evaluate_profile(qᵛᵣ, z_surface)
-                    Rᵐ_surface, cᵖᵐ_surface, κ_surface = moist_reference_constants(qᵛ_surface, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+                    Rᵐ_surface, _cᵖᵐ_surface, κ_surface = moist_reference_constants(qᵛ_surface, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
 
                     p⁻ = terrain_hydrostatic_pressure(z_surface, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
                     Π_surface = (p⁻ / pˢᵗ)^κ_surface
