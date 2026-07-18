@@ -37,7 +37,7 @@ end
     reference_state = dynamics.reference_state
     reference_state === nothing || return reference_state.density
     terrain_reference_density = dynamics.terrain_reference_density
-    return terrain_reference_density === nothing ? dynamics.density : terrain_reference_density
+    return terrain_reference_density === nothing ? dynamics.total_density : terrain_reference_density
 end
 
 function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperature,
