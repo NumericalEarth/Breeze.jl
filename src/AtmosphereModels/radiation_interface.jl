@@ -176,6 +176,19 @@ function RadiativeTransferModel(grid::AbstractGrid, optics, args...; kw...)
 end
 
 """
+    materialize_surface_property(x, grid [, solar_position])
+
+Convert a surface property (albedo, emissivity) to the form the radiative-transfer
+solver stores: a `Number` becomes a grid-eltype scalar and a `Field` passes through.
+Extend the three-argument form for property sources that must be resolved against the
+grid and the solar `epoch` (e.g. an observed-albedo dataset); it falls back to the
+two-argument form.
+"""
+materialize_surface_property(x, grid, solar_position) = materialize_surface_property(x, grid)
+materialize_surface_property(x::Number, grid) = convert(eltype(grid), x)
+materialize_surface_property(x::Oceananigans.Field, grid) = x
+
+"""
 $(TYPEDEF)
 
 Volume mixing ratios (VMR) for radiatively active gases.

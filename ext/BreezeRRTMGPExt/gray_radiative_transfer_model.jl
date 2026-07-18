@@ -21,8 +21,6 @@ using Dates: AbstractDateTime, Millisecond
 # Dispatch on background_atmosphere = Nothing for gray radiation
 const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, Nothing}
 
-materialize_surface_property(x::Number, grid) = convert(eltype(grid), x)
-materialize_surface_property(x::Field, grid) = x
 
 #####
 ##### Solar position handling: resolve user-facing input into a concrete
@@ -51,7 +49,9 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 
 # Keyword Arguments
 - `optical_thickness`: Optical thickness parameterization (default: `GrayOpticalThicknessOGorman2008(FT)`).
-- `surface_temperature`: Surface temperature in Kelvin (required).
+- `surface_temperature`: Surface temperature in Kelvin, a `Number` or 2D `Field`. Default: `nothing` —
+  bind one before the first radiation update (a coupled model wires its interface surface
+  temperature into the radiation automatically).
 - `solar_position`: Specification of the solar zenith angle. See [`AbstractSolarPosition`](@ref) and its subtypes:
   - [`ApparentSolarPosition`](@ref) (default) — time-varying, computed from the model clock and grid (or explicit) longitude/latitude.
   - [`FixedCosineZenith`](@ref) — constant cos(θ_z), independent of the clock.
@@ -66,7 +66,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::GrayOptics,
                                                  constants::ThermodynamicConstants;
                                                  optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid)),
-                                                 surface_temperature,
+                                                 surface_temperature = nothing,
                                                  solar_position::AbstractSolarPosition = ApparentSolarPosition(),
                                                  surface_emissivity = 0.98,
                                                  direct_surface_albedo = nothing,
@@ -88,13 +88,13 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
             throw(ArgumentError(error_msg))
         end
 
-        surface_albedo = materialize_surface_property(surface_albedo, grid)
+        surface_albedo = materialize_surface_property(surface_albedo, grid, solar_position)
         diffuse_surface_albedo = surface_albedo
         direct_surface_albedo = surface_albedo
 
     elseif !isnothing(diffuse_surface_albedo) && !isnothing(direct_surface_albedo)
-        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid)
-        diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid)
+        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid, solar_position)
+        diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid, solar_position)
     else
         throw(ArgumentError(error_msg))
     end
@@ -292,6 +292,7 @@ This function:
 Sign convention: positive flux = upward, negative flux = downward.
 """
 function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, model)
+    assert_bound_surface_temperature(rtm)
     grid = model.grid
     clock = model.clock
 

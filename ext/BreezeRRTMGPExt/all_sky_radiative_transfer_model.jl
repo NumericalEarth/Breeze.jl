@@ -57,7 +57,9 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere()`).
   O₃ can be a Number or Function of `z`; other gases are global mean constants.
   O₃ can be a Number, Function, or Field; other gases are global mean constants.
-- `surface_temperature`: Surface temperature in Kelvin (required).
+- `surface_temperature`: Surface temperature in Kelvin, a `Number` or 2D `Field`. Default: `nothing` —
+  bind one before the first radiation update (a coupled model wires its interface surface
+  temperature into the radiation automatically).
 - `solar_position`: Specification of the solar zenith angle. See [`AbstractSolarPosition`](@ref) and its subtypes:
   - [`ApparentSolarPosition`](@ref) (default) — time-varying, computed from the model clock and grid (or explicit) longitude/latitude.
   - [`FixedCosineZenith`](@ref) — constant cos(θ_z), independent of the clock.
@@ -75,7 +77,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::AllSkyOptics,
                                                  constants::ThermodynamicConstants;
                                                  background_atmosphere = BackgroundAtmosphere(),
-                                                 surface_temperature,
+                                                 surface_temperature = nothing,
                                                  solar_position::AbstractSolarPosition = ApparentSolarPosition(),
                                                  surface_emissivity = 0.98,
                                                  direct_surface_albedo = nothing,
@@ -103,13 +105,13 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
             throw(ArgumentError(error_msg))
         end
 
-        surface_albedo = materialize_surface_property(surface_albedo, grid)
+        surface_albedo = materialize_surface_property(surface_albedo, grid, solar_position)
         diffuse_surface_albedo = surface_albedo
         direct_surface_albedo = surface_albedo
 
     elseif !isnothing(diffuse_surface_albedo) && !isnothing(direct_surface_albedo)
-        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid)
-        diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid)
+        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid, solar_position)
+        diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid, solar_position)
     else
         throw(ArgumentError(error_msg))
     end
@@ -270,6 +272,7 @@ $(TYPEDSIGNATURES)
 Update the all-sky (gas + cloud) full-spectrum radiative fluxes from the current model state.
 """
 function AtmosphereModels._update_radiation!(rtm::AllSkyRadiativeTransferModel, model)
+    assert_bound_surface_temperature(rtm)
     grid = model.grid
     clock = model.clock
     solver = rtm.longwave_solver
