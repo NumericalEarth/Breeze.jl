@@ -97,17 +97,17 @@ make_pressure_correction!(model, Δt) = nothing
 """
     reference_pressure(dynamics)
 
-Return the best available static reference pressure (Pa): the hydrostatic reference
-state when the dynamics carries one, else a terrain-following 3D reference, else the
-prognostic pressure. Consumers wanting a stable background (e.g. radiative transfer)
-should prefer this over `dynamics_pressure`.
+Total thermodynamic pressure (Pa) to feed radiation. A compressible atmosphere carries the
+true total (its diagnosed pressure); an anelastic atmosphere has no thermodynamic pressure
+other than its reference profile, so that is its total. NOT the dynamics' pressure-gradient
+reference state — that must never reach radiation.
 """
 reference_pressure(dynamics) = dynamics_pressure(dynamics)
 
 """
     reference_density(dynamics)
 
-Companion to [`reference_pressure`](@ref) for the (moist) reference density.
+Companion to [`reference_pressure`](@ref): the total (moist) air density to feed radiation.
 """
 reference_density(dynamics) = dynamics_density(dynamics)
 
