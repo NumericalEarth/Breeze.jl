@@ -77,7 +77,11 @@ end
                                           vent_e::P3Table5D,
                                           m_mean, Fᶠ, Fˡ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
     FT = typeof(m_mean)
-    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
+    # m_mean = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
+    # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
+    # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg), matching
+    # Fortran's clamp of the lookup index to 1 (find_lookupTable_indices_1a).
+    log_m = log10(max(m_mean, FT(1e-20)))
     # vent stores the constant ventilation term (0.65 × ∫ C(D) N'(D) dD)
     # vent_e stores the enhanced term (0.44 × ∫ C(D)√(V×D) N'(D) dD)  [m² s^(-1/2)]
     # Runtime correction via ventilation_sc_correction:
@@ -97,7 +101,8 @@ using PSD-integrated lookup tables, blending ice (0.65, 0.44) and rain
                                        vent_e::P3Table5D,
                                        m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
     FT = typeof(m_mean)
-    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
+    # Per-particle-mass log-guard (see deposition_ventilation); not the bulk qmin.
+    log_m = log10(max(m_mean, FT(1e-20)))
     return vent(log_m, Fᶠ, Fl, ρᶠ, μ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fl, ρᶠ, μ)
 end
 
@@ -116,7 +121,8 @@ end
 @inline function collection_kernel_per_particle(coll::P3Table5D,
                                                   m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
     FT = typeof(m_mean)
-    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
+    # Per-particle-mass log-guard (see deposition_ventilation); not the bulk qmin.
+    log_m = log10(max(m_mean, FT(1e-20)))
     return coll(log_m, Fᶠ, Fˡ, ρᶠ, μ)
 end
 
@@ -135,7 +141,8 @@ end
 @inline function aggregation_kernel(coll::P3Table5D,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
     FT = typeof(m_mean)
-    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
+    # Per-particle-mass log-guard (see deposition_ventilation); not the bulk qmin.
+    log_m = log10(max(m_mean, FT(1e-20)))
     # Table stores the half-integral (Fortran convention):
     # (1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂
     # No E_agg — collection efficiency is applied by the caller.

@@ -213,7 +213,11 @@ end
 
 # Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
 @inline function tabulated_mass_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
-    log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
+    # m̄ = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
+    # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
+    # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg), matching
+    # Fortran's clamp of the lookup index to 1 (find_lookupTable_indices_1a).
+    log_mean_mass = log10(max(m̄, oftype(m̄, 1e-20)))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
     return vₜ_norm * ρ_correction
 end
@@ -258,7 +262,9 @@ end
 
 # Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
 @inline function tabulated_number_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
-    log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
+    # Per-particle-mass log-guard; the table clamps its mass axis (see
+    # tabulated_mass_weighted_fall_speed), not the bulk qmin.
+    log_mean_mass = log10(max(m̄, oftype(m̄, 1e-20)))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
     return vₜ_norm * ρ_correction
 end
@@ -306,7 +312,9 @@ end
 
 # Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
 @inline function tabulated_reflectivity_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
-    log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
+    # Per-particle-mass log-guard; the table clamps its mass axis (see
+    # tabulated_mass_weighted_fall_speed), not the bulk qmin.
+    log_mean_mass = log10(max(m̄, oftype(m̄, 1e-20)))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
     return vₜ_norm * ρ_correction
 end
@@ -383,7 +391,9 @@ end
 @inline function fused_fall_speeds(mass_table::P3Table5D, number_table::P3Table5D, refl_table::P3Table5D,
                                     m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
     FT = typeof(m̄)
-    log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
+    # Per-particle-mass log-guard; the table clamps its mass axis (see
+    # tabulated_mass_weighted_fall_speed), not the bulk qmin.
+    log_mean_mass = log10(max(m̄, FT(1e-20)))
     prep = prepare_5d(mass_table, log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
     return IceTerminalVelocities{FT}(
         tabulated_mass_weighted_fall_speed(mass_table, prep, ρ_correction),
@@ -397,7 +407,9 @@ end
 @inline function fused_fall_speeds(mass_table::P3Table5D, number_table::P3Table5D, refl_table::Nothing,
                                     m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
     FT = typeof(m̄)
-    log_mean_mass = log10(max(m̄, p3.minimum_mass_mixing_ratio))
+    # Per-particle-mass log-guard; the table clamps its mass axis (see
+    # tabulated_mass_weighted_fall_speed), not the bulk qmin.
+    log_mean_mass = log10(max(m̄, FT(1e-20)))
     prep = prepare_5d(mass_table, log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
     return IceTerminalVelocities{FT}(
         tabulated_mass_weighted_fall_speed(mass_table, prep, ρ_correction),

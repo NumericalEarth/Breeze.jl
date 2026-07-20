@@ -94,7 +94,11 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     # during table generation, so they don't use the dry-ice PSD from the M5 fix).
     # All 4 tables share Table-1 axes so the interpolation indices are computed once.
     dep = p3.ice.deposition
-    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
+    # m_mean = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
+    # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
+    # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg), matching
+    # Fortran's clamp of the lookup index to 1 (find_lookupTable_indices_1a).
+    log_m = log10(max(m_mean, FT(1e-20)))
     sc_corr = ventilation_sc_correction(nu, D_v, ρ_correction)
     prep = prepare_5d(dep.small_ice_ventilation_constant, log_m, Fᶠ, Fl, ρᶠ, μ)
     C_fv = (evaluate_at(dep.small_ice_ventilation_constant, prep) +
@@ -204,7 +208,8 @@ end
                                             lc::P3Table5D, lr::P3Table5D,
                                             m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
     FT = typeof(m_mean)
-    log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
+    # Per-particle-mass log-guard (see ice_melting_rate); not the bulk qmin.
+    log_m = log10(max(m_mean, FT(1e-20)))
     sc_corr = ventilation_sc_correction(nu, D_v, ρ_correction)
 
     # All 4 tables share Table-1 axes by construction, so prepare interpolation

@@ -333,6 +333,33 @@ using Oceananigans.Fields: interior
         @test V_large > V_small  # Larger drops fall faster
     end
 
+    @testset "ice terminal velocity resolves sub-qmin mean particle mass (issue #6)" begin
+        # The lookup coordinate is the mean *particle* mass m̄ = qⁱ/nⁱ [kg], which
+        # must not be floored by the bulk mass-mixing-ratio threshold
+        # `minimum_mass_mixing_ratio` (1e-14 kg/kg). The Table-1 mass axis extends
+        # down to ≈1.56e-15 kg, and newly nucleated ice is ≈3.77e-15 kg. Fortran
+        # (find_lookupTable_indices_1a) uses the raw m̄ and clamps only the table
+        # index; the Julia table clamp reproduces that, so small ice must fall
+        # slower than heavier ice instead of collapsing to a single speed.
+        p3_tab = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        ρ  = FT(0.8)
+        Fᶠ = FT(0.0)
+        ρᶠ = FT(400.0)
+        nⁱ = FT(1e6)
+
+        # Mean masses spanning the (buggy) 1e-14 floor but inside the mass axis.
+        m_new  = FT(3.77e-15)   # newly nucleated ice, below the 1e-14 floor
+        m_mid  = FT(6e-15)      # still below the floor
+        m_qmin = FT(1e-14)      # exactly the old floor value
+
+        v(m) = PredictedParticleProperties.ice_terminal_velocity_mass_weighted(p3_tab, m * nⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+
+        # Before the fix all three collapse to a single speed (the 1e-14 coordinate).
+        @test v(m_new) < v(m_mid) < v(m_qmin)
+        @test v(m_new) > 0
+    end
+
     @testset "Homogeneous freezing" begin
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
