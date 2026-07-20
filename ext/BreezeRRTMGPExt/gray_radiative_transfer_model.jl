@@ -396,9 +396,9 @@ atmospheric data. It does not interpolate from layers to levels internally becau
 **Temperature**: We use the actual temperature field `T` from the model state.
 This is the temperature that matters for thermal emission and absorption.
 
-**Pressure**: In the anelastic approximation, pressure perturbations are negligible
-compared to the hydrostatic reference pressure. We use `reference_state.pressure`
-at cell centers, computed via `adiabatic_hydrostatic_pressure(z, p₀, θ₀)`.
+**Pressure**: We use `reference_pressure(model.dynamics)` at cell centers — the anelastic
+hydrostatic reference pressure (in that approximation pressure perturbations are negligible), or
+the compressible total pressure. Never the dynamics' pressure-gradient reference state.
 
 # RRTMGP array layout
 - Layer arrays `(Nz, Nc)`: values at cell centers, layer 1 at bottom
@@ -408,9 +408,9 @@ function update_rrtmgp_state!(rrtmgp_state::GrayAtmosphericState, model, surface
     grid = model.grid
     arch = architecture(grid)
 
-    # Temperature field (actual temperature from model state)
-    # Reference state provides the hydrostatic pressure profile
-    # In the anelastic approximation, pressure ≈ reference pressure
+    # Temperature field (actual temperature from model state).
+    # `reference_pressure` is the anelastic hydrostatic reference pressure or the compressible
+    # total pressure — the total thermodynamic pressure, never the pressure-gradient reference state.
     p = reference_pressure(model.dynamics)
     T = model.temperature
     T₀ = surface_temperature

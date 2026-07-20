@@ -9,18 +9,20 @@ using Oceananigans.Utils: launch!
 using RRTMGP.AtmosphericStates: AtmosphericState
 
 using Breeze.AtmosphereModels: BackgroundAtmosphere, specific_humidity
-using Breeze.CompressibleEquations: CompressibleDynamics
 
 #####
 ##### Gas state update (shared by clear-sky and all-sky)
 #####
-
 
 function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperature,
                                   background_atmosphere::BackgroundAtmosphere, params)
     grid = model.grid
     arch = architecture(grid)
 
+    # RRTMGP assumes level pressures are positive and monotonically decreasing with height.
+    # `reference_pressure` returns the anelastic hydrostatic reference (guaranteed monotonic) or
+    # the compressible total pressure, whose hydrostatic part dominates dynamic/acoustic
+    # perturbations by orders of magnitude, so monotonicity holds in practice.
     pᵣ = reference_pressure(model.dynamics)
     T = model.temperature
     qᵛ = specific_humidity(model)

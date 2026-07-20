@@ -108,8 +108,11 @@ reference_pressure(dynamics) = dynamics_pressure(dynamics)
     reference_density(dynamics)
 
 Companion to [`reference_pressure`](@ref): the total (moist) air density to feed radiation.
+Delegates to [`total_density`](@ref) — never [`dynamics_density`](@ref), which is the coupling
+density (the dry-air density on the compressible core) and would understate the absorber and
+condensate mass seen by radiation.
 """
-reference_density(dynamics) = dynamics_density(dynamics)
+reference_density(dynamics) = total_density(dynamics)
 
 """
     mean_pressure(dynamics)

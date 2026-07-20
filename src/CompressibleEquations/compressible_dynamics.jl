@@ -304,11 +304,10 @@ For compressible dynamics, there is no separate mean pressure - returns the full
 """
 AtmosphereModels.mean_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
-# Radiation reads the TOTAL thermodynamic state, which CompressibleDynamics carries directly.
-# The (flat/terrain) reference states are pressure-gradient devices for the dynamics and must
-# never reach radiation.
-AtmosphereModels.reference_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
-AtmosphereModels.reference_density(dynamics::CompressibleDynamics) = dynamics.total_density
+# Radiation reads the TOTAL thermodynamic state via `reference_pressure`/`reference_density`
+# (the interface defaults, `dynamics_pressure`/`total_density`), which CompressibleDynamics carries
+# directly as `pressure` and `total_density`. The (flat/terrain) reference states are
+# pressure-gradient devices for the dynamics and must never reach radiation.
 
 """
 $(TYPEDSIGNATURES)
