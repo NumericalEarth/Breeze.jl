@@ -23,7 +23,8 @@ where:
 - T_0 is the freezing temperature
 - ℒˡ is latent heat of vaporization
 - D_v is diffusivity of water vapor
-- q_v, q_sat0 are vapor mixing ratio and saturation mixing ratio at T₀
+- q_v, q_sat0 are the vapor and saturation specific humidities (total-air mass
+  fractions) at T₀; q_sat0 = ρᵛ⁺(T₀)/ρ so that ρ (q_v - q_sat0) = ρᵛ - ρᵛ⁺(T₀)
 - f_v is the ventilation factor
 
 # Arguments
@@ -67,11 +68,15 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
     nu  = transport.nu        # Kinematic viscosity [m²/s]
 
-    # use mixing ratio convention (Fortran: rho*Lv*Dv*(Qv-qsat0))
-    Rᵈ = FT(dry_air_gas_constant(constants))
-    ε = Rᵈ / Rᵛ
+    # Saturation vapor mass fraction at the melting point T₀. Breeze's qᵛ is a
+    # total-air mass fraction (ρᵛ/ρ), so q_sat0 must use the same basis:
+    # q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ). With this convention the diffusion
+    # term ℒˡ Dᵥ ρ (qᵛ - q_sat0) reduces to the exact vapor-density difference
+    # ρᵛ - ρᵛ⁺(T₀). The Fortran uses the dry-air mixing ratio ε e_s0/(P - e_s0)
+    # because its vapor Qv is itself a dry-air mixing ratio; mixing the two mass
+    # bases here would bias the melting heat balance.
     e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
-    q_sat0 = ε * e_s0 / max(P - e_s0, FT(1))
+    q_sat0 = e_s0 / (Rᵛ * T₀ * ρ)
 
     # Liquid fraction for Fl-blended ventilation.
     # Fl = qʷⁱ / (qⁱ + qʷⁱ): fraction of ice-particle mass that is liquid.

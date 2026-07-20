@@ -2,7 +2,7 @@ using Test
 import Breeze
 using Breeze.Microphysics.PredictedParticleProperties
 using Breeze.AtmosphereModels: microphysical_velocities, prognostic_field_names
-using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
+using Breeze.Thermodynamics: ThermodynamicConstants
 
 using Breeze.Microphysics.PredictedParticleProperties:
     IceSizeDistributionState,
@@ -1815,6 +1815,57 @@ end
 
     end
 
+    @testset "ice_melting_rate uses specific-humidity coordinate (finding #5)" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        qi = FT(1e-4)
+        ni = FT(1e4)
+        P = FT(70000.0)
+        Ff = FT(0.2)
+        ρf = FT(400.0)
+        ρ = FT(0.9)
+        μ = FT(0.0)
+        # Small superheating keeps the rate below the qi/τ cap so the sensible
+        # (temperature) term is isolated once the vapor term is zeroed via qv.
+        T = FT(273.25)
+        transport = air_transport_properties(T, P)
+
+        T₀ = p3.process_rates.freezing_temperature
+        Rᵥ = Breeze.Thermodynamics.vapor_gas_constant(ThermodynamicConstants(FT))
+        e_s0 = PPP.saturation_vapor_pressure_at_freezing(nothing, T₀)
+        # Saturation *specific humidity* (total-air mass fraction) ρᵛ⁺(T₀)/ρ =
+        # e_s0/(Rᵥ T₀ ρ), matching qᵛ's mass basis, so the latent diffusion term
+        # ℒˡ Dᵥ ρ (qᵛ - q_sat0) vanishes exactly. The dry-air mixing ratio
+        # ε e_s0/(P - e_s0) would leave a spurious latent term biasing melting.
+        qv = e_s0 / (Rᵥ * T₀ * ρ)
+
+        # Replicate the melting ventilation constant C_fv (small + large dry-ice
+        # PSD ventilation integrals, Fortran f1pr24–f1pr27).
+        Fl = FT(0)
+        m_mean = qi / ni
+        ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
+        sc_corr = PPP.ventilation_sc_correction(transport.nu, transport.D_v, ρ_correction)
+        dep = p3.ice.deposition
+        log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
+        prep = PPP.prepare_5d(dep.small_ice_ventilation_constant, log_m, Ff, Fl, ρf, μ)
+        C_fv = (PPP.evaluate_at(dep.small_ice_ventilation_constant, prep) +
+                sc_corr * PPP.evaluate_at(dep.small_ice_ventilation_reynolds, prep)) +
+               (PPP.evaluate_at(dep.large_ice_ventilation_constant, prep) +
+                sc_corr * PPP.evaluate_at(dep.large_ice_ventilation_reynolds, prep))
+        L_f = PPP.fusion_latent_heat(nothing, T)
+
+        # With the latent term zeroed the melt rate is the pure heat-conduction
+        # rate (uses 2π/L_f because the ventilation table stores capm = 2C).
+        expected = ni * 2 * FT(π) * C_fv * transport.K_a * (T - T₀) / L_f
+        rate = ice_melting_rate(p3, qi, ni, FT(0), T, P, qv, FT(0.01), Ff, ρf, ρ,
+                                nothing, transport, μ)
+
+        @test rate > 0
+        @test rate ≈ expected rtol=1e-9
+    end
+
     @testset "ice_melting_rates partitioning" begin
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
@@ -1880,11 +1931,12 @@ end
 
         T₀ = p3.process_rates.freezing_temperature
         Rᵥ = Breeze.Thermodynamics.vapor_gas_constant(ThermodynamicConstants(FT))
-        Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(ThermodynamicConstants(FT))
-        ε = Rᵈ / Rᵥ
         e_s0 = PPP.saturation_vapor_pressure_at_freezing(nothing, T₀)
-        # M10: set qv = q_sat0 (mixing ratio convention) so latent term vanishes
-        qv = ε * e_s0 / max(P - e_s0, FT(1))
+        # Set qv to the saturation *specific humidity* (total-air mass
+        # fraction) ρᵛ⁺(T₀)/ρ = e_s0/(Rᵥ T₀ ρ), matching qᵛ's mass basis, so the
+        # latent diffusion term vanishes and only the sensible term remains. The
+        # dry-air mixing ratio ε e_s0/(P - e_s0) would leave a spurious latent term.
+        qv = e_s0 / (Rᵥ * T₀ * ρ)
 
         m_mean = qi / ni
         ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
@@ -1896,7 +1948,7 @@ end
         capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, P, qv, Ff, ρf, ρ, nothing, transport, μ)
         expected = C_fv * transport.K_a * (T₀ - T) * ni
 
-        @test capacity ≈ expected rtol=1e-6
+        @test capacity ≈ expected rtol=1e-9
     end
 
     @testset "wet growth preserves collection number sinks" begin
@@ -2052,7 +2104,9 @@ end
         qwi = FT(1)
         qi = FT(1e-4)
         ni = FT(1e4)
-        T = FT(268.15)
+        # Small supercooling keeps the rate below the qʷⁱ/τ cap so the sensible
+        # term is isolated once the vapor term is zeroed via qv below.
+        T = FT(273.148)
         P = FT(85000.0)
         Ff = FT(0.2)
         ρf = FT(400.0)
@@ -2062,16 +2116,27 @@ end
 
         T₀ = p3.process_rates.freezing_temperature
         Rᵥ = Breeze.Thermodynamics.vapor_gas_constant(ThermodynamicConstants(FT))
-        Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(ThermodynamicConstants(FT))
-        ε = Rᵈ / Rᵥ
         e_s0 = PPP.saturation_vapor_pressure_at_freezing(nothing, T₀)
-        # M10: set qv = q_sat0 (mixing ratio convention) so latent term vanishes
-        qv = ε * e_s0 / max(P - e_s0, FT(1))
+        # Saturation *specific humidity* (total-air mass fraction)
+        # ρᵛ⁺(T₀)/ρ = e_s0/(Rᵥ T₀ ρ), matching qᵛ's mass basis, so the latent
+        # diffusion term vanishes, leaving the sensible (conduction) term.
+        qv = e_s0 / (Rᵥ * T₀ * ρ)
+
+        Fˡ = PPP.liquid_fraction_on_ice(qi, qwi)
+        m_mean = PPP.mean_total_ice_mass(qi, qwi, ni)
+        ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
+        C_fv = PPP.deposition_ventilation(
+            p3.ice.deposition.ventilation,
+            p3.ice.deposition.ventilation_enhanced,
+            m_mean, Ff, Fˡ, ρf, p3.process_rates, transport.nu, transport.D_v, ρ_correction, p3, μ)
 
         refreezing = PPP.refreezing_rate(p3, qwi, qi, ni, T, P, qv, Ff, ρf, ρ, nothing, transport, μ)
+        expected = C_fv * transport.K_a * (T₀ - T) * ni
 
-        # Refreezing should remain active below freezing with liquid-coated ice.
+        # Refreezing remains active below freezing and, with the latent term
+        # zeroed, equals the pure-conduction rate (sensible term not × 2π/Lf).
         @test refreezing > 0
+        @test refreezing ≈ expected rtol=1e-9
     end
 
     @testset "ice_aggregation_rate" begin
