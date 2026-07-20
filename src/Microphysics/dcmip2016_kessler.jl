@@ -6,6 +6,7 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     saturation_specific_humidity,
     temperature,
+    TetensFormulaThermodynamicConstants,
     total_mixing_ratio,
     total_specific_moisture,
     with_moisture
@@ -184,6 +185,24 @@ function DCMIP2016KesslerMicrophysics(FT = Oceananigans.defaults.FloatType;
 end
 
 const DCMIP2016KM = DCMIP2016KesslerMicrophysics
+
+# The DCMIP2016 Kessler saturation adjustment reads the liquid coefficient and temperature
+# offset of the Tetens formula (see `saturation_adjustment_coefficient` and the kernel), so it
+# requires thermodynamic constants built with a `TetensFormula` saturation vapor pressure. With
+# other formulations (e.g. the default `ClausiusClapeyron`) those fields are absent and the
+# scheme would fail inside the kernel — an opaque `getproperty` error on the CPU and a GPU
+# compilation failure. Validate at model construction to give a clear, early error instead.
+function AtmosphereModels.validate_microphysics(::DCMIP2016KM, thermodynamic_constants)
+    if !(thermodynamic_constants isa TetensFormulaThermodynamicConstants)
+        svp = thermodynamic_constants.saturation_vapor_pressure
+        throw(ArgumentError(string(
+            "DCMIP2016KesslerMicrophysics requires `thermodynamic_constants` with a `TetensFormula` ",
+            "saturation vapor pressure formulation, but got `", summary(svp), "`. ",
+            "Construct the model with, e.g., ",
+            "`thermodynamic_constants = ThermodynamicConstants(FT; saturation_vapor_pressure = TetensFormula(FT))`.")))
+    end
+    return nothing
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -466,7 +485,12 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     return nothing
 end
 
-function saturation_adjustment_coefficient(T_DCMIP2016, constants)
+# Constrained to `TetensFormulaThermodynamicConstants`: the coefficient `a` is the liquid
+# coefficient of the Tetens formula, which only exists for those constants. The annotation
+# makes the dependence explicit to the compiler (and to static analysis like JETLS), so an
+# incompatible formulation fails as a clear `MethodError` rather than a dynamic `getproperty`
+# inside the GPU kernel. `validate_microphysics` catches the mismatch earlier still.
+@inline function saturation_adjustment_coefficient(T_DCMIP2016, constants::TetensFormulaThermodynamicConstants)
     a = constants.saturation_vapor_pressure.liquid_coefficient
     ℒˡᵣ = constants.liquid.reference_latent_heat
     cᵖᵈ = constants.dry_air.heat_capacity
@@ -811,7 +835,7 @@ end
             rᶜˡ = μ.qᶜˡ[i, j, k]
             rʳ = μ.qʳ[i, j, k]
 
-            qᵛ, qᶜˡ, qʳ, qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
+            qᵛ, qᶜˡ, qʳ, _qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
 
             ρqᵛ[i, j, k]    = ρ * qᵛ
             μ.ρqᶜˡ[i, j, k] = ρ * qᶜˡ

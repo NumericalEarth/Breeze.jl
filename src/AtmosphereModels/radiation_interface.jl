@@ -244,6 +244,23 @@ end
 """
 $(TYPEDSIGNATURES)
 
+An idealized climatological ozone volume mixing ratio (mol/mol) as a function of height
+`z` (m): a weak tropospheric background increasing toward the tropopause, blended into a
+Gaussian stratospheric layer peaking near 25 km. Keeps the stratospheric column near
+radiative balance in deep-column simulations — without ozone the upper column is far from
+radiative equilibrium and destabilizes when the spectral fluxes recompute. Not a substitute
+for an observed or model ozone climatology.
+"""
+@inline function standard_ozone_profile(z)
+    troposphere_O₃  = 3e-8 * (1 + 0.5 * z / 1e3)
+    stratosphere_O₃ = 8e-6 * exp(-((z - 25e3) / 5e3)^2)
+    χˢᵗ = 1 / (1 + exp(-(z - 15e3) / 2))
+    return troposphere_O₃ * (1 - χˢᵗ) + stratosphere_O₃ * χˢᵗ
+end
+
+"""
+$(TYPEDSIGNATURES)
+
 Construct a `BackgroundAtmosphere` with volume mixing ratios for radiatively active gases.
 All values are dimensionless molar fractions.
 
@@ -258,7 +275,8 @@ RRTMGP supports spatially-varying VMR only for H₂O and O₃. Other gases use g
 - Hydrofluorocarbons: `HFC₁₂₅`, `HFC₁₃₄ₐ`, `HFC₁₄₃ₐ`, `HFC₂₃`, `HFC₃₂`
 - Spatially-varying: `O₃` (can be Number or Function)
 
-Defaults are approximate modern atmospheric values; halocarbons default to zero.
+Defaults are approximate modern atmospheric values; halocarbons default to zero, and ozone
+defaults to [`standard_ozone_profile`](@ref) (pass `O₃ = 0` for an ozone-free atmosphere).
 Note: H₂O is computed from the model's prognostic moisture field.
 
 # Example
@@ -267,12 +285,13 @@ Note: H₂O is computed from the model's prognostic moisture field.
 julia> using Breeze
 
 julia> background = BackgroundAtmosphere(CO₂ = 400e-6)
-BackgroundAtmosphere with 5 active gases:
+BackgroundAtmosphere with 6 active gases:
   N₂ = 0.78084
   O₂ = 0.20946
   CO₂ = 400.0 ppm
   CH₄ = 1.8 ppm
   N₂O = 330.0 ppb
+  O₃ = standard_ozone_profile (generic function with 1 method)
 
 julia> tropical_ozone(z) = 30e-9 * (1 + z / 10000);
 
@@ -293,7 +312,7 @@ function BackgroundAtmosphere(; N₂  = 0.78084,      # Nitrogen (~78%)
                                 N₂O = 330e-9,       # Nitrous oxide (~330 ppb)
                                 CO  = 0.0,          # Carbon monoxide
                                 NO₂ = 0.0,          # Nitrogen dioxide
-                                O₃  = 0.0,          # Ozone (can be profile function)
+                                O₃  = standard_ozone_profile,   # Ozone (Number or profile function; 0 disables)
                                 CFC₁₁ = 0.0,        # Trichlorofluoromethane
                                 CFC₁₂ = 0.0,        # Dichlorodifluoromethane
                                 CFC₂₂ = 0.0,        # Chlorodifluoromethane
