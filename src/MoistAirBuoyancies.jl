@@ -175,17 +175,16 @@ r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 
 Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
 """
-@inline compute_boussinesq_adjustment_temperature(𝒰₀::LiquidIcePotentialTemperatureState{FT}, constants) where FT =
+@inline compute_boussinesq_adjustment_temperature(𝒰₀::LiquidIcePotentialTemperatureState{FT}, constants::ThermodynamicConstants) where FT =
     compute_boussinesq_adjustment_temperature(𝒰₀, constants, SecantSolver(FT; abstol=1e-4, maxiter=20))
 
-@inline function compute_boussinesq_adjustment_temperature(𝒰₀::LiquidIcePotentialTemperatureState{FT}, constants, solver) where FT
+@inline function compute_boussinesq_adjustment_temperature(𝒰₀::LiquidIcePotentialTemperatureState{FT}, constants::ThermodynamicConstants, solver) where FT
     θ = 𝒰₀.potential_temperature
     θ == 0 && return zero(FT)
 
     # Generate guess for unsaturated conditions; if dry, return T₁
     qᵗ = total_specific_moisture(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ)
-    𝒰₁ = with_moisture(𝒰₀, q₁)
     Π₁ = exner_function(𝒰₀, constants)
     T₁ = Π₁ * θ
 
@@ -202,7 +201,6 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, pᵣ, qᵗ, constants, constants.liquid)
     qˡ₁ = qᵗ - qᵛ⁺₁
     q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁)
-    𝒰₁ = with_moisture(𝒰₀, q₁)
 
     # We generate a second guess to start a secant iteration
     # by applying the potential temperature assuming a liquid fraction
@@ -222,7 +220,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     return secant_solve(residual, solver, T₁, T₂, T₂)
 end
 
-@inline function adjust_state(𝒰₀, T, constants)
+@inline function adjust_state(𝒰₀::LiquidIcePotentialTemperatureState, T, constants::ThermodynamicConstants)
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_specific_moisture(𝒰₀)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, constants.liquid)
@@ -232,10 +230,9 @@ end
     return with_moisture(𝒰₀, q₁)
 end
 
-@inline function saturation_adjustment_residual(T, 𝒰, constants)
+@inline function saturation_adjustment_residual(T, 𝒰::LiquidIcePotentialTemperatureState, constants::ThermodynamicConstants)
     Π = exner_function(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    θ = 𝒰.potential_temperature
     ℒˡᵣ = constants.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q, constants)
     qˡ = q.liquid

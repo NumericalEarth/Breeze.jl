@@ -512,3 +512,19 @@ end
     @test all(≈(surface_mass_flux_ref; rtol), precipitation_flux)
     @test maximum(abs.(precipitation_flux .- surface_ρᵈ .* precipitation_rate)) > 1e-8
 end
+
+@testset "Thermodynamic constants validation" begin
+    FT = Float64
+    grid = RectilinearGrid(CPU(), size=(1, 1, 4), extent=(1, 1, 1))
+    microphysics = DCMIP2016KesslerMicrophysics(FT)
+
+    # DCMIP2016 Kessler requires Tetens saturation vapor pressure. The default constants use
+    # ClausiusClapeyron, which lacks the Tetens coefficients the scheme reads — this should be
+    # rejected at construction with a clear error, not fail later inside the kernel (issue #858).
+    @test_throws ArgumentError AtmosphereModel(grid; microphysics)
+
+    # Constructing with Tetens constants succeeds.
+    tetens_constants = ThermodynamicConstants(FT; saturation_vapor_pressure = TetensFormula(FT))
+    model = AtmosphereModel(grid; microphysics, thermodynamic_constants=tetens_constants)
+    @test model.microphysics isa DCMIP2016KesslerMicrophysics
+end

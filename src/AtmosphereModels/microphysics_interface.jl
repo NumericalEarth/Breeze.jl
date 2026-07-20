@@ -715,6 +715,18 @@ microphysics_model_update!(microphysics::Nothing, model) = nothing
 """
 $(TYPEDSIGNATURES)
 
+Validate that `microphysics` is compatible with the model's `thermodynamic_constants`.
+
+Defaults to a no-op. Schemes that require a particular thermodynamic formulation (for
+example a specific saturation vapor pressure formula) extend this method to throw a clear
+`ArgumentError` at model construction, rather than failing later inside a kernel — where the
+failure surfaces as an opaque dynamic `getproperty` / GPU compilation error.
+"""
+validate_microphysics(microphysics, thermodynamic_constants) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
 Adjust the thermodynamic `state` according to the `scheme`.
 For example, if `scheme isa SaturationAdjustment`, then this function
 will adjust and return a new thermodynamic state given the specifications

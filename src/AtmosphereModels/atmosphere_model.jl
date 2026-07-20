@@ -140,6 +140,9 @@ function AtmosphereModel(grid;
     # Validate that velocity boundary conditions are only provided for dynamics that support them
     validate_velocity_boundary_conditions(dynamics, boundary_conditions)
 
+    # Validate that the microphysics scheme is compatible with the thermodynamic constants
+    validate_microphysics(microphysics, thermodynamic_constants)
+
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
         scalar_advection = momentum_advection = advection

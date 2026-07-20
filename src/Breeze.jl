@@ -45,6 +45,7 @@ export
     LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
     BackgroundAtmosphere,
+    standard_ozone_profile,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
