@@ -25,6 +25,8 @@ Fields
 - `terrain_metrics`: [`TerrainMetrics`](@ref) for terrain-following coordinates (or `nothing`)
 - `w̃`, `ρw̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
 - `terrain_reference_pressure`, `terrain_reference_density`: 3D reference pressure / density for the terrain pressure gradient force (or `nothing`)
+- `reference_from_state`: `true` when the terrain reference was left to be deduced from the initial
+  state (no explicit reference profile supplied); gates the auto-reset in `set!`. `false` otherwise.
 
 The `time_discretization` determines how tendencies are computed and which
 time-stepper is used:
@@ -48,7 +50,13 @@ struct CompressibleDynamics{TD, D, DT, P, FT, RS, TM, CV, CM, TRP, TRD}
     contravariant_vertical_momentum :: CM      # ρw̃ diagnostic field (or Nothing)
     terrain_reference_pressure :: TRP          # 3D reference pressure for terrain PG (or Nothing)
     terrain_reference_density :: TRD           # 3D reference density for terrain buoyancy (or Nothing)
+    reference_from_state :: Bool               # terrain reference deduced from the initial state (no explicit spec)
 end
+
+# Skeleton-only sentinel stored in the reference-spec slot when `terrain_reference = false`, to
+# distinguish "reference explicitly disabled" from "no spec → deduce from state" (both otherwise
+# read as `nothing`). Resolved in `materialize_dynamics`; never survives into a materialized object.
+struct NoReferenceState end
 
 """
 $(TYPEDSIGNATURES)
@@ -78,6 +86,12 @@ Keyword Arguments
   Default: [`SlopeOutsideInterpolation`](@ref). Ignored on non-terrain-following grids.
 - `terrain_metrics`: Escape hatch — pass a pre-built [`TerrainMetrics`](@ref) to bypass the
   automatic build. Default: `nothing` (auto-build from the grid using `slope_stencil`).
+- `terrain_reference`: Whether to carry a reference state on terrain-following grids (default:
+  `true`). By default the terrain reference is enabled and, absent an explicit profile, deduced
+  from the initial state's horizontal mean by `set!` (perturbation-form PGF/buoyancy, which
+  suppresses the terrain-following pressure-gradient error). Set `false` to disable it entirely —
+  the PGF and buoyancy then difference the full pressure, reproducing the un-corrected behavior
+  (useful for testing). Mutually exclusive with an explicit reference profile.
 """
 function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               standard_pressure = 1e5,
@@ -87,6 +101,7 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               reference_vapor_mass_fraction = nothing,
                               slope_stencil = SlopeOutsideInterpolation(),
                               terrain_metrics = nothing,
+                              terrain_reference = true,
                               temperature_tolerance = nothing,
                               temperature_maxiter = nothing) where TD
 
@@ -112,6 +127,16 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     else
         reference_potential_temperature
     end
+    # `terrain_reference = false` disables the reference state entirely (full-pressure PGF/buoyancy).
+    # It is mutually exclusive with an explicit reference profile; the `NoReferenceState` sentinel
+    # keeps this distinct from `nothing` ("deduce from state"), and is resolved in materialization.
+    if !terrain_reference
+        ref_spec === nothing || throw(ArgumentError(
+            "`terrain_reference = false` disables the reference state and is mutually exclusive with an \
+             explicit reference profile (`reference_potential_temperature`/`reference_temperature`/\
+             `reference_vapor_mass_fraction`)."))
+        ref_spec = NoReferenceState()
+    end
     # Stash either a pre-built TerrainMetrics (escape hatch) or the stencil flavor in the
     # `terrain_metrics` slot. `materialize_dynamics` resolves it: a stencil instance triggers
     # `build_terrain_metrics(grid, stencil)` for TFVD grids; on non-TFVD grids the slot is
@@ -120,7 +145,7 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     terrain_metrics_spec = terrain_metrics === nothing ? slope_stencil : terrain_metrics
     return CompressibleDynamics(time_discretization, nothing, nothing, nothing, pˢᵗ, p₀, ref_spec,
                                 terrain_metrics_spec,
-                                nothing, nothing, nothing, nothing)
+                                nothing, nothing, nothing, nothing, false)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
@@ -135,7 +160,8 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.contravariant_vertical_velocity),
                          adapt(to, dynamics.contravariant_vertical_momentum),
                          adapt(to, dynamics.terrain_reference_pressure),
-                         adapt(to, dynamics.terrain_reference_density))
+                         adapt(to, dynamics.terrain_reference_density),
+                         dynamics.reference_from_state)
 
 # The compressible θˡⁱ→T inversion is implicit (T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ), so the
 # default temperature solver iterates to convergence. The anelastic inversion is
@@ -207,7 +233,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         nothing
     end
 
-    if ref_spec === nothing || terrain_metrics !== nothing
+    if ref_spec === nothing || ref_spec isa NoReferenceState || terrain_metrics !== nothing
         reference_state = nothing
     else
         reference_state = ExnerReferenceState(grid, thermodynamic_constants;
@@ -222,23 +248,32 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         contravariant_vertical_momentum = nothing
         terrain_reference_pressure = nothing
         terrain_reference_density = nothing
+    elseif ref_spec isa NoReferenceState
+        # Reference explicitly disabled (`terrain_reference = false`): allocate the contravariant
+        # transport fields (terrain kinematics still apply) but carry no reference — the PGF and
+        # buoyancy fall back to their full-pressure `::Nothing` dispatch.
+        contravariant_vertical_velocity = ZFaceField(grid)
+        contravariant_vertical_momentum = ZFaceField(grid)
+        terrain_reference_pressure = nothing
+        terrain_reference_density = nothing
     else
         contravariant_vertical_velocity = ZFaceField(grid)
         contravariant_vertical_momentum = ZFaceField(grid)
 
-        # Build 3D reference pressure and density fields via per-column discrete
-        # Exner integration. The discrete integration ensures that
-        #   δ(pᵣ)/Δz + g ℑ(ρᵣ) ≈ 0
-        # to high accuracy at every grid face, which is essential for reducing
-        # the truncation error from the near-cancellation of ∂p/∂z and -gρ in
-        # the vertical momentum equation. The reference pressure is also used for
-        # the perturbation horizontal PG to reduce terrain-following PGF errors.
-        if ref_spec === nothing
-            terrain_reference_pressure = nothing
-            terrain_reference_density = nothing
-        else
-            terrain_reference_pressure = CenterField(grid)
-            terrain_reference_density = CenterField(grid)
+        # Allocate the 3D reference pressure/density fields. On terrain-following grids the
+        # reference is mandatory: without it the horizontal PG and vertical buoyancy difference
+        # the *full* pressure, whose near-cancellation over steep terrain drives spurious
+        # slope-correlated surface winds. The reference is horizontally uniform in θ̄(z) but its
+        # per-column hydrostatic integration ensures δ(pᵣ)/Δz + g ℑ(ρᵣ) ≈ 0 at every face.
+        #
+        # An explicit `ref_spec` (user-supplied θ profile) is built here. With no spec, the
+        # fields are left zero and the reference is deduced from the initial state's
+        # height-resolved horizontal mean by `set!` (compute_reference_state, auto-enabled for
+        # terrain *without* an explicit spec) — see `reset_reference_state!`. No fabricated
+        # constant profile is used. An explicit spec is preserved: `set!` does not auto-reset it.
+        terrain_reference_pressure = CenterField(grid)
+        terrain_reference_density = CenterField(grid)
+        if ref_spec !== nothing
             compute_terrain_reference_state!(terrain_reference_pressure,
                                              terrain_reference_density,
                                              grid, surface_pressure, ref_spec,
@@ -246,15 +281,19 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         end
     end
 
-    # Seed the diagnostic pressure with the reference profile (or surface pressure if
-    # no reference state is built). Without this, the very first `update_state!` runs
-    # sat-adjust against an uninitialized (zero) pressure field, which produces NaN
-    # temperatures because the Exner function `(p/pˢᵗ)^κ` collapses to zero.
-    # `compute_auxiliary_dynamics_variables!` overwrites pressure properly on every
-    # subsequent call.
+    # Terrain grids with no explicit reference spec deduce their (mandatory) reference from the
+    # initial state, so `set!` auto-resets by default; an explicit spec is honored as-is.
+    reference_from_state = terrain_metrics !== nothing && ref_spec === nothing
+
+    # Seed the diagnostic pressure so the first `update_state!` sat-adjust does not divide by an
+    # uninitialized (zero) pressure — `(p/pˢᵗ)^κ` would collapse to zero and produce NaN
+    # temperatures. `compute_auxiliary_dynamics_variables!` overwrites pressure on every
+    # subsequent call. Seed from a built reference when one exists, else from surface pressure
+    # (which also covers the deferred terrain case whose reference is filled later by `set!`).
+    reference_built = terrain_reference_pressure !== nothing && ref_spec !== nothing
     if reference_state isa ExnerReferenceState
         seed_pressure!(pressure, grid, reference_state.pressure)
-    elseif terrain_reference_pressure !== nothing
+    elseif reference_built
         seed_pressure!(pressure, grid, terrain_reference_pressure)
     else
         seed_pressure!(pressure, grid, surface_pressure)
@@ -265,7 +304,8 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
                                 terrain_metrics,
                                 contravariant_vertical_velocity,
                                 contravariant_vertical_momentum,
-                                terrain_reference_pressure, terrain_reference_density)
+                                terrain_reference_pressure, terrain_reference_density,
+                                reference_from_state)
 end
 
 function seed_pressure!(pressure, grid, pressure_reference)
@@ -350,7 +390,8 @@ with_time_discretization(dynamics::CompressibleDynamics, time_discretization) =
                          dynamics.contravariant_vertical_velocity,
                          dynamics.contravariant_vertical_momentum,
                          dynamics.terrain_reference_pressure,
-                         dynamics.terrain_reference_density)
+                         dynamics.terrain_reference_density,
+                         dynamics.reference_from_state)
 
 """
 $(TYPEDSIGNATURES)

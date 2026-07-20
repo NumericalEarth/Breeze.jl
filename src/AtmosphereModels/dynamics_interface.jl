@@ -250,6 +250,19 @@ Return the dynamics' reference state (an anelastic `ReferenceState` or a split-e
 dynamics_reference_state(dynamics) = nothing
 
 """
+    auto_reset_reference_state(dynamics)
+
+Whether `set!` should, by default, recompute the dynamics' reference state from the just-set
+state (see [`reset_reference_state!`](@ref)). `false` for most dynamics — their reference is
+either absent or supplied up front. `true` for terrain-following compressible dynamics *that were
+not given an explicit reference profile*: their reference is mandatory and best deduced from the
+initial state's height-resolved horizontal mean. When an explicit reference profile was supplied
+at construction it is authoritative, so this stays `false` and `set!` leaves it untouched. An
+explicit `compute_reference_state` keyword to `set!` overrides this default either way.
+"""
+auto_reset_reference_state(dynamics) = false
+
+"""
     standard_pressure(dynamics)
 
 Return the standard pressure used for potential temperature calculations.

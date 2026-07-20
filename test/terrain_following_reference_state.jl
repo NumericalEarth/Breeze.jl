@@ -216,5 +216,30 @@ using Test
         @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
     end
 
+    @testset "terrain_reference toggle: default builds a reference, false disables it" begin
+        Nx, Nz = 8, 6
+        Lx, Lz = 10000.0, 5000.0
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+        materialize_terrain!(grid, x -> 200 * exp(-x^2 / 2000^2))
+
+        # Default: terrain reference is on and allocated (filled from state at set!).
+        default_model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+        @test default_model.dynamics.terrain_reference_pressure !== nothing
+        @test default_model.dynamics.terrain_reference_density !== nothing
+
+        # Disabled: no reference fields → full-pressure PGF/buoyancy fall back to ::Nothing dispatch.
+        off_model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_reference=false))
+        @test off_model.dynamics.terrain_reference_pressure === nothing
+        @test off_model.dynamics.terrain_reference_density === nothing
+
+        # Disabling and supplying an explicit reference profile are mutually exclusive.
+        @test_throws ArgumentError CompressibleDynamics(ExplicitTimeStepping();
+                                                        terrain_reference=false,
+                                                        reference_potential_temperature=300)
+    end
+
 end
 end

@@ -76,11 +76,24 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Reduce a 3D `field` to a `HorizontalMeanProfile` of its horizontal mean at each
-vertical level, paired with the horizontal-mean physical height of that level. On a
-terrain-following grid the cell-center height `znode(i, j, k, …)` varies with `(i, j)`, so
-both the value and the height are averaged over `(i, j)` (on a CPU mirror of the grid) to
-give a single representative profile that can be re-evaluated per column.
+Reduce a 3D `field` to a `HorizontalMeanProfile` of its horizontal mean **at constant physical
+height**. On a terrain-following grid the cell-center height `znode(i, j, k, …)` varies with
+`(i, j)`, so a plain per-`k` average would blend, e.g., valley-floor and mountain-top air at the
+same computational level. Instead each cell is binned by its physical height and averaged within
+the bin, giving a genuine `θ̄(z)` — the horizontally-uniform reference profile that WRF-style
+base states use, evaluated per column at its own terrain by `compute_terrain_reference_state!`.
+
+Bins are the vertical cells of the lowest-terrain column (minimum surface height): its faces are
+the bin edges and its bottom face is the global-minimum surface, so every cell sits at or above
+`edges[1]`. That column contributes one cell to every bin, so no bin is ever empty (any that were
+are filled by interpolation from populated neighbours). Cells above the column's top face — which
+only occur when the model top is not flat — fall into the top bin; the bin's representative height
+tracks its contents, so this stays well-defined.
+
+Each bin's value is paired with the **mean physical height of the cells that populate it**, not
+the bin-center height: pairing a multi-column average with a single-column height would misplace
+the value by `~(⟨z⟩_bin − z_center)·dφ/dz`, biasing the reconstructed profile wherever `φ` varies
+with height. Empty bins fall back to the lowest-terrain column's cell-center height.
 """
 function horizontal_mean_profile(field)
     grid = field.grid
@@ -89,24 +102,66 @@ function horizontal_mean_profile(field)
     data = Array(Oceananigans.interior(field))
     FT = eltype(grid)
     c = Center()
-    normalization = one(FT) / (Nx * Ny)
-    heights = zeros(FT, Nz)
-    values = zeros(FT, Nz)
+    f = Face()
 
-    for k in 1:Nz
-        height_sum = zero(FT)
-        value_sum = zero(FT)
-
-        for j in 1:Ny, i in 1:Nx
-            height_sum += znode(i, j, k, cpu_grid, c, c, c)
-            value_sum += data[i, j, k]
+    # Locate the lowest-terrain column (minimum bottom-face height): its faces span the full
+    # physical-height range from the bottom and define the bin edges.
+    imin, jmin = 1, 1
+    lowest_surface = FT(Inf)
+    for j in 1:Ny, i in 1:Nx
+        zb = znode(i, j, 1, cpu_grid, c, c, f)
+        if zb < lowest_surface
+            lowest_surface = zb
+            imin, jmin = i, j
         end
-
-        heights[k] = height_sum * normalization
-        values[k] = value_sum * normalization
     end
 
+    edges = FT[znode(imin, jmin, k, cpu_grid, c, c, f) for k in 1:Nz+1]
+    fallback_heights = FT[znode(imin, jmin, k, cpu_grid, c, c, c) for k in 1:Nz]
+
+    value_sums = zeros(FT, Nz)
+    height_sums = zeros(FT, Nz)
+    counts = zeros(Int, Nz)
+    for k in 1:Nz, j in 1:Ny, i in 1:Nx
+        z = znode(i, j, k, cpu_grid, c, c, c)
+        b = clamp(searchsortedlast(edges, z), 1, Nz)
+        value_sums[b] += data[i, j, k]
+        height_sums[b] += z
+        counts[b] += 1
+    end
+
+    # Pair each bin's mean value with the mean height of its contributing cells. Because each
+    # bin's mean height lies inside [edges[b], edges[b+1]) and the edges increase, the resulting
+    # `heights` are strictly increasing (required by `HorizontalMeanProfile` and the fill below).
+    heights = FT[counts[b] > 0 ? height_sums[b] / counts[b] : fallback_heights[b] for b in 1:Nz]
+    values = FT[counts[b] > 0 ? value_sums[b] / counts[b] : FT(NaN) for b in 1:Nz]
+    fill_empty_bins!(values, heights)
+
     return HorizontalMeanProfile(heights, values)
+end
+
+# Linearly interpolate any empty (NaN) bins from the nearest populated neighbours, holding the
+# nearest end value beyond the outermost populated bins. Empty bins are not expected when the
+# lowest-terrain column defines the bins, but this keeps the profile well-defined regardless.
+function fill_empty_bins!(values, heights)
+    n = length(values)
+    populated = findall(!isnan, values)
+    isempty(populated) && return values
+    for b in 1:n
+        isnan(values[b]) || continue
+        lo = findlast(≤(b), populated)
+        hi = findfirst(≥(b), populated)
+        if lo === nothing
+            values[b] = values[populated[hi]]
+        elseif hi === nothing
+            values[b] = values[populated[lo]]
+        else
+            bl, bh = populated[lo], populated[hi]
+            w = (heights[b] - heights[bl]) / (heights[bh] - heights[bl])
+            values[b] = (1 - w) * values[bl] + w * values[bh]
+        end
+    end
+    return values
 end
 
 #####
@@ -927,3 +982,10 @@ function AtmosphereModels.reset_reference_state!(model::TerrainCompressibleModel
 
     return nothing
 end
+
+# Terrain-following compressible dynamics carries a mandatory reference state. When no explicit
+# reference profile was supplied, it is best deduced from the initial state, so `set!` recomputes
+# it from the height-resolved horizontal mean by default. When the user did supply an explicit
+# reference profile, that profile is authoritative and `set!` leaves it untouched.
+AtmosphereModels.auto_reset_reference_state(dynamics::TerrainCompressibleDynamics) =
+    dynamics.reference_from_state

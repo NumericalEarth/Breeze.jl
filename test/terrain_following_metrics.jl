@@ -286,7 +286,11 @@ using Test
 
         h(x) = 200 * exp(-x^2 / 2000^2)
         materialize_terrain!(grid, h)
-        dynamics = CompressibleDynamics(ExplicitTimeStepping())
+        # This testset checks raw metric identities of the PGF operator (e.g. a horizontally
+        # constant *total* pressure has zero gradient), which hold for the full-pressure form.
+        # Disable the terrain reference (on by default for terrain grids) so the operator
+        # differences the full pressure rather than a perturbation about pᵣ(z).
+        dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_reference=false)
         model = AtmosphereModel(grid; dynamics)
 
         set!(model, ρ=1, θ=300, u=1, w=0)

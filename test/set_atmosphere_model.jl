@@ -78,6 +78,10 @@ end
                                     standard_pressure = FT(1e5))
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants)
 
+    # Check consistency against the explicit construction reference: setting ρ and θ to the
+    # reference density/potential temperature must diagnose pressure equal to pᵣ. This model was
+    # built with an explicit `reference_potential_temperature`, so `set!` must preserve that
+    # reference (no auto-reset) — hence no `compute_reference_state` keyword here.
     set!(model,
          ρ = model.dynamics.terrain_reference_density,
          θ = (x, z) -> θ_profile(z),

@@ -51,7 +51,10 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             end
             time_discretization = SplitExplicitTimeDiscretization(substeps=6,
                                                                   damping=damping)
-            dynamics = CompressibleDynamics(time_discretization)
+            # Isolate the pure slope-term reduction: disable the terrain reference (on by default
+            # for terrain grids) so both branches difference the full pressure and the flat
+            # (h ≡ 0) terrain path matches the height path to machine precision.
+            dynamics = CompressibleDynamics(time_discretization; terrain_reference=false)
             model = AtmosphereModel(grid; dynamics)
             set!(model,
                  ρ=1,
