@@ -178,6 +178,7 @@ makedocs(
         ;
         size_threshold_warn = 2 ^ 19, # 512 KiB
         size_threshold = 2 ^ 20, # 1 MiB
+        size_threshold_ignore = ["api.md"],
     ),
     pages=[
         "Home" => "index.md",
