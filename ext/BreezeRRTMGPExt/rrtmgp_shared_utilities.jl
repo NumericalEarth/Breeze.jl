@@ -20,10 +20,10 @@ function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperatu
     arch = architecture(grid)
 
     # RRTMGP assumes level pressures are positive and monotonically decreasing with height.
-    # `reference_pressure` returns the anelastic hydrostatic reference (guaranteed monotonic) or
-    # the compressible total pressure, whose hydrostatic part dominates dynamic/acoustic
+    # `thermodynamic_pressure` returns the anelastic hydrostatic reference (guaranteed monotonic)
+    # or the compressible diagnosed pressure, whose hydrostatic part dominates dynamic/acoustic
     # perturbations by orders of magnitude, so monotonicity holds in practice.
-    pᵣ = reference_pressure(model.dynamics)
+    p = thermodynamic_pressure(model.dynamics)
     T = model.temperature
     qᵛ = specific_humidity(model)
 
@@ -33,11 +33,11 @@ function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperatu
     ℕᴬ = params.avogad
     O₃ = background_atmosphere.O₃  # Can be ConstantField or Field
 
-    launch!(arch, grid, :xyz, _update_rrtmgp_gas_state!, as, grid, pᵣ, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
+    launch!(arch, grid, :xyz, _update_rrtmgp_gas_state!, as, grid, p, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
     return nothing
 end
 
-@kernel function _update_rrtmgp_gas_state!(as, grid, pᵣ, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
+@kernel function _update_rrtmgp_gas_state!(as, grid, p, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
     i, j, k = @index(Global, NTuple)
 
     Nz = size(grid, 3)
@@ -53,12 +53,12 @@ end
 
     @inbounds begin
         # Layer (cell-centered) values
-        pᶜ = pᵣ[i, j, k]
+        pᶜ = p[i, j, k]
         qᵛₖ = max(qᵛ[i, j, k], zero(eltype(qᵛ)))
 
         # Face values at k and k+1 (needed for column dry air mass and level temperatures)
-        pᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, pᵣ)
-        pᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, pᵣ)
+        pᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, p)
+        pᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, p)
         Tᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, T)
         Tᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, T)
 
@@ -84,7 +84,7 @@ end
 
         # Topmost level (once)
         if k == 1
-            pᶠ[Nz+1, c] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, pᵣ)
+            pᶠ[Nz+1, c] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, p)
             Tᴺ⁺¹ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
             Tᶠ[Nz+1, c] = clamp(Tᴺ⁺¹, Tmin, Tmax)
             T₀[c] = clamp(surface_temperature[i, j, 1], Tmin, Tmax)

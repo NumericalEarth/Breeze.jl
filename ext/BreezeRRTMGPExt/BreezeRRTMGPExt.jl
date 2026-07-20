@@ -3,7 +3,7 @@ module BreezeRRTMGPExt
 using Breeze
 
 using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles, materialize_surface_property,
-                              reference_pressure, reference_density
+                              thermodynamic_pressure, total_density
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 

@@ -95,24 +95,14 @@ make_pressure_correction!(model, Δt) = nothing
 #####
 
 """
-    reference_pressure(dynamics)
+$(TYPEDSIGNATURES)
 
-Total thermodynamic pressure (Pa) to feed radiation. A compressible atmosphere carries the
-true total (its diagnosed pressure); an anelastic atmosphere has no thermodynamic pressure
-other than its reference profile, so that is its total. NOT the dynamics' pressure-gradient
-reference state — that must never reach radiation.
+Return the thermodynamic pressure in Pa. A compressible atmosphere returns its diagnosed
+equation-of-state pressure. An anelastic atmosphere returns its hydrostatic reference pressure,
+excluding the non-hydrostatic pressure anomaly that enforces the divergence constraint but does
+not perturb the thermodynamic state.
 """
-reference_pressure(dynamics) = dynamics_pressure(dynamics)
-
-"""
-    reference_density(dynamics)
-
-Companion to [`reference_pressure`](@ref): the total (moist) air density to feed radiation.
-Delegates to [`total_density`](@ref) — never [`dynamics_density`](@ref), which is the coupling
-density (the dry-air density on the compressible core) and would understate the absorber and
-condensate mass seen by radiation.
-"""
-reference_density(dynamics) = total_density(dynamics)
+thermodynamic_pressure(dynamics) = dynamics_pressure(dynamics)
 
 """
     mean_pressure(dynamics)

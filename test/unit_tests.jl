@@ -13,7 +13,7 @@ using Test
 ##### AnelasticDynamics
 #####
 
-using Breeze: ReferenceState, AnelasticDynamics
+using Breeze: ReferenceState, AnelasticDynamics, thermodynamic_pressure, total_density
 using Breeze.AtmosphereModels: materialize_dynamics, default_dynamics
 using Breeze.AtmosphereModels: mean_pressure, pressure_anomaly, total_pressure
 using Breeze.AtmosphereModels: dynamics_density, dynamics_pressure
@@ -60,6 +60,8 @@ using Breeze.AtmosphereModels: dynamics_density, dynamics_pressure
         # Test mean_pressure
         p̄ = mean_pressure(dynamics)
         @test p̄ === reference_state.pressure
+        @test thermodynamic_pressure(dynamics) === reference_state.pressure
+        @test total_density(dynamics) === reference_state.density
 
         # Test pressure_anomaly (returns an AbstractOperation)
         p′ = pressure_anomaly(dynamics)
@@ -100,6 +102,8 @@ using Breeze.Thermodynamics: pressure_balanced_density
         @test dynamics.pressure isa Field
         @test dynamics_density(dynamics) === dynamics.dry_density
         @test dynamics_pressure(dynamics) === dynamics.pressure
+        @test thermodynamic_pressure(dynamics) === dynamics.pressure
+        @test total_density(dynamics) === dynamics.total_density
     end
 
     @testset "materialize_dynamics seeds pressure" begin

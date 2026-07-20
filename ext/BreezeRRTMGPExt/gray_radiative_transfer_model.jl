@@ -354,7 +354,7 @@ This matches the finite-volume staggering used in Oceananigans:
     z_lev[Nz+1] ━━━━━━━ │  level Nz+1 (TOA):  p_lev, t_lev, z_lev         │ ← extrapolated
                         └─────────────────────────────────────────────────┘
                         ┌─────────────────────────────────────────────────┐
-                        │  layer Nz:  T[Nz], p_lay[Nz] = pᵣ[Nz]           │ ← from model
+                        │  layer Nz:  T[Nz], p_lay[Nz] = p[Nz]            │ ← from model
                         └─────────────────────────────────────────────────┘
     z_lev[Nz]   ━━━━━━━   level Nz:   p_lev, t_lev, z_lev                   ← interpolated
                         ┌─────────────────────────────────────────────────┐
@@ -366,9 +366,9 @@ This matches the finite-volume staggering used in Oceananigans:
                         └─────────────────────────────────────────────────┘
     z_lev[2]    ━━━━━━━   level 2:    p_lev, t_lev, z_lev                   ← interpolated
                         ┌─────────────────────────────────────────────────┐
-                        │  layer 1:   T[1], p_lay[1] = pᵣ[1]              │ ← from model
+                        │  layer 1:   T[1], p_lay[1] = p[1]               │ ← from model
                         └─────────────────────────────────────────────────┘
-    z_lev[1]    ━━━━━━━   level 1 (surface, z=0):  p_lev = p₀, t_lev      │ ← from reference state
+    z_lev[1]    ━━━━━━━   level 1 (surface, z=0):  p_lev, t_lev           │ ← interpolated
                         ══════════════════════════════════════════════════
                                         GROUND (t_sfc)
 ```
@@ -379,24 +379,23 @@ RRTMGP is a general-purpose radiative transfer solver that operates on columns o
 atmospheric data. It does not interpolate from layers to levels internally because:
 
 1. **Boundary conditions**: The surface (level 1) and TOA (level Nz+1) require
-   boundary values that only the atmospheric model knows. For pressure, we use
-   the reference state's `surface_pressure` at z=0. For the top, we extrapolate
-   using the adiabatic hydrostatic formula.
+   boundary values that only the atmospheric model knows. Breeze interpolates or extrapolates
+   its thermodynamic pressure and temperature fields to those boundary faces.
 
 2. **Physics-appropriate interpolation**: Different quantities need different
    interpolation methods. Pressure uses geometric mean (log-linear interpolation)
    because it varies exponentially with height. Temperature uses arithmetic mean.
 
-3. **Model consistency**: The pressure profile must be consistent with the
-   atmospheric model's reference state. RRTMGP has no knowledge of the anelastic
-   approximation or the reference potential temperature θ₀.
+3. **Model consistency**: The pressure profile must be consistent with the atmospheric model's
+   thermodynamic state. RRTMGP has no knowledge of the anelastic approximation or of which
+   dynamical pressure contributions affect thermodynamics.
 
 # Physics notes
 
 **Temperature**: We use the actual temperature field `T` from the model state.
 This is the temperature that matters for thermal emission and absorption.
 
-**Pressure**: We use `reference_pressure(model.dynamics)` at cell centers — the anelastic
+**Pressure**: We use `thermodynamic_pressure(model.dynamics)` at cell centers — the anelastic
 hydrostatic reference pressure (in that approximation pressure perturbations are negligible), or
 the compressible total pressure. Never the dynamics' pressure-gradient reference state.
 
@@ -409,9 +408,9 @@ function update_rrtmgp_state!(rrtmgp_state::GrayAtmosphericState, model, surface
     arch = architecture(grid)
 
     # Temperature field (actual temperature from model state).
-    # `reference_pressure` is the anelastic hydrostatic reference pressure or the compressible
-    # total pressure — the total thermodynamic pressure, never the pressure-gradient reference state.
-    p = reference_pressure(model.dynamics)
+    # `thermodynamic_pressure` is the anelastic hydrostatic reference pressure or the compressible
+    # diagnosed pressure, never the pressure-gradient reference state.
+    p = thermodynamic_pressure(model.dynamics)
     T = model.temperature
     T₀ = surface_temperature
 
