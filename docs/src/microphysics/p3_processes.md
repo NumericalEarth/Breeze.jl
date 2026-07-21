@@ -236,13 +236,12 @@ stores this as `35.e+4` per gram and applies a ``\times 10^3`` kg→g
 conversion at the call site). The mass rate uses an initial diameter
 ``D_\text{init,HM} = 10\;μ``m at ``ρ_i = 900`` kg/m³.
 
-!!! warning "Surface-temperature shutoff diverges"
-    Fortran shuts off Hallett–Mossop when the *column-bottom* temperature
-    exceeds 282 K (a proxy for surface conditions); Breeze uses the local
-    cell air temperature, which for tall columns is far below 282 K and
-    therefore never triggers the shutoff. Fortran also raises ``D_\text{HM}``
-    to 1000 μm for ``n_\text{cat} > 1``; Breeze uses the single-category
-    threshold (250 μm) regardless.
+The 282 K warm-season shutoff uses the ``k=1`` air temperature on regular,
+vertically unpartitioned grids, matching the Fortran column-bottom proxy. For
+gridless calculations, where no column exists, the local air temperature is used.
+Fortran also raises ``D_\text{HM}`` to
+1000 μm for ``n_\text{cat} > 1``; Breeze currently uses the single-category
+threshold (250 μm) regardless.
 
 ## Droplet Activation (CCN)
 

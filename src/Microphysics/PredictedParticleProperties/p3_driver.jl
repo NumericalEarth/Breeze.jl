@@ -1,6 +1,6 @@
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField
-using DocStringExtensions: TYPEDSIGNATURES
+using Oceananigans.Utils: launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
 using Breeze.AtmosphereModels: AbstractMicrophysicalState
@@ -8,6 +8,9 @@ using Breeze.AtmosphereModels: AbstractMicrophysicalState
 using Breeze.Thermodynamics: MoistureMassFractions
 
 using Breeze: Microphysics
+
+using DocStringExtensions: TYPEDSIGNATURES
+using KernelAbstractions: @kernel, @index
 
 const P3 = PredictedParticlePropertiesMicrophysics
 
@@ -36,12 +39,14 @@ function AM.prepare_microphysical_tendencies!(p3::P3, model)
 
     launch!(arch, grid, :xyz,
             _p3_compute_and_cache_kernel!,
-            μ, model.formulation, model.dynamics, grid, constants, p3, ρ_field, velocities)
+            μ, model.formulation, model.dynamics, grid, constants, p3, ρ_field,
+            velocities, model.temperature)
 
     # The scalar advection operators interpolate terminal velocities through halo
     # cells. The preparation kernel overwrites interiors after update_state!'s generic
     # halo fill, so refresh these diagnostic halos before sedimentation is evaluated.
-    sedimentation_velocities = (μ.wᶜˡ, μ.wᶜˡₙ, μ.wʳ, μ.wʳₙ, μ.wⁱ, μ.wⁱₙ, μ.wⁱ_z)
+    sedimentation_velocities = (μ.wᶜˡ, μ.wᶜˡₙ, μ.wʳ, μ.wʳₙ,
+                                μ.wⁱ, μ.wⁱₙ, μ.wⁱ_z, μ.wⁱ_z̃)
     fill_halo_regions!(sedimentation_velocities)
 
     return nothing
@@ -50,10 +55,8 @@ end
 # P3 evolves through RK-stage tendencies; it has no full-Δt operator-split update.
 AM.microphysics_model_update!(::P3, model) = nothing
 
-using Oceananigans.Utils: launch!
-using KernelAbstractions: @kernel, @index
-
-@kernel function _p3_compute_and_cache_kernel!(μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
+@kernel function _p3_compute_and_cache_kernel!(μ, formulation, dynamics, grid, constants, p3,
+                                               ρ_field, velocities, temperature_field)
     i, j, k = @index(Global, NTuple)
 
     @inbounds ρ = ρ_field[i, j, k]
@@ -67,7 +70,12 @@ using KernelAbstractions: @kernel, @index
     𝒰₀ = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
     𝒰 = AM.maybe_adjust_thermodynamic_state(𝒰₀, p3, qᵛᵉ, constants)
 
-    p3_compute_and_cache!(μ, i, j, k, grid, p3, ρ, 𝒰, constants, velocities)
+    # Materialize a true column-bottom temperature diagnostic, including
+    # immersed-bottom lookup and vertical-partition communication. Local k=1 is
+    # the Fortran kbot equivalent only on regular, vertically unpartitioned grids.
+    @inbounds surface_temperature = temperature_field[i, j, 1]
+    p3_compute_and_cache!(μ, i, j, k, grid, p3, ρ, 𝒰, constants, velocities,
+                          surface_temperature)
 end
 
 

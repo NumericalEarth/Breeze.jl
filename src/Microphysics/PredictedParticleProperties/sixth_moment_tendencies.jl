@@ -63,10 +63,10 @@ end
     group2_rime_volume = group2_rime_mass / max(prp.maximum_rime_density, eps(FT))
     current_rime_state = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, qʷⁱ)
 
-    qⁱ_rate = tendency_ρqⁱ(rates, one(FT)) - group2_mass
-    qʷⁱ_rate = tendency_ρqʷⁱ(rates, one(FT))
+    qⁱ_rate = tendency_ρqⁱ(rates, one(FT), prp) - group2_mass
+    qʷⁱ_rate = tendency_ρqʷⁱ(rates, one(FT), prp)
     nⁱ_rate = tendency_ρnⁱ(rates, one(FT)) - group2_number
-    qᶠ_rate = tendency_ρqᶠ(rates, one(FT), current_rime_state.Fᶠ) - group2_rime_mass
+    qᶠ_rate = tendency_ρqᶠ(rates, one(FT), current_rime_state.Fᶠ, prp) - group2_rime_mass
     bᶠ_rate = tendency_ρbᶠ(rates, one(FT), current_rime_state.Fᶠ, current_rime_state.ρᶠ, qⁱ, prp) -
               group2_rime_volume
 

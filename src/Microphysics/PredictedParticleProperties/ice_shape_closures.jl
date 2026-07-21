@@ -10,7 +10,8 @@
     FixedShapeParameter
 
 Fixed shape parameter closure: always returns a constant μ regardless of λ.
-Used for tabulation with exponential PSD (μ=0) to match Fortran Table 1.
+Useful for controlled experiments and custom tables that deliberately assume a
+constant gamma-distribution shape.
 See [`FixedShapeParameter()`](@ref) constructor.
 """
 struct FixedShapeParameter{FT}
@@ -23,9 +24,9 @@ $(TYPEDSIGNATURES)
 Construct a fixed shape parameter closure.
 
 This bypasses the empirical μ-λ relationship and uses a constant μ for all λ values.
-The primary use case is tabulation: the Fortran P3 Table 1 is generated with μ=0
-(exponential PSD), so using `FixedShapeParameter(0)` produces tables that match
-the Fortran reference values.
+The primary use cases are controlled experiments and custom table generation.
+Fortran's two-moment Table 1 instead uses its diagnostic `diagnostic_mui_Fl`
+closure, so a fixed μ does not reproduce that table's shape parameter.
 
 # Keyword Arguments
 
@@ -103,11 +104,13 @@ Compute shape parameter μ.
 
     # 1. Compute graupel density (rho_g)
     # Fortran convention: for Fr=0, cgp = crp = ρ_rime × π/6, so the effective
-    # density used in D_mvd is ρ_rime (not ρⁱ).  This matches the Fortran's
-    # diagnostic_mui / diagnostic_mui_Fl shape parameter diagnostic.
-    ρ_dep = deposited_ice_density(mass, rime_fraction, rime_density)
-    ρ_g_rimed = graupel_density(rime_fraction, rime_density, ρ_dep)
-    ρ_g_dry = ifelse(iszero(rime_fraction), rime_density, ρ_g_rimed)
+    # density used in D_mvd is ρ_rime (not ρⁱ). Table 1's rime-density axis starts
+    # at 50 kg/m³, and the runtime lookup clamps the canonical unrimed value ρᶠ=0
+    # to that first coordinate. Apply the same floor only within this diagnostic.
+    ρᶠ_diagnostic = max(rime_density, FT(50))
+    ρ_dep = deposited_ice_density(mass, rime_fraction, ρᶠ_diagnostic)
+    ρ_g_rimed = graupel_density(rime_fraction, ρᶠ_diagnostic, ρ_dep)
+    ρ_g_dry = ifelse(iszero(rime_fraction), ρᶠ_diagnostic, ρ_g_rimed)
     # blend liquid water density into bulk density (Fortran diagnostic_mui_Fl)
     ρᴸ = FT(1000)
     ρ_g = (1 - liquid_fraction) * ρ_g_dry + liquid_fraction * ρᴸ

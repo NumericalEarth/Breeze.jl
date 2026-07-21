@@ -48,6 +48,29 @@ GPU-compatible: uses `ifelse` instead of branching.
                   one(typeof(available_mass)))
 end
 
+@inline function p3_ice_saturation_specific_humidity(T, ρ, constants,
+                                                     freezing_temperature,
+                                                     qᵛ⁺ˡ)
+    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+    return ifelse(T >= freezing_temperature, qᵛ⁺ˡ, qᵛ⁺ⁱ)
+end
+
+@inline function p3_ice_saturation_specific_humidity(T, ρ, constants,
+                                                     freezing_temperature)
+    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    return p3_ice_saturation_specific_humidity(T, ρ, constants,
+                                               freezing_temperature, qᵛ⁺ˡ)
+end
+
+@inline function p3_adjustment_ice_saturation_specific_humidity(T, P, qᵗ, constants,
+                                                                freezing_temperature)
+    qᵛ⁺ˡ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants,
+                                                               PlanarLiquidSurface())
+    qᵛ⁺ⁱ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants,
+                                                               PlanarIceSurface())
+    return ifelse(T >= freezing_temperature, qᵛ⁺ˡ, qᵛ⁺ⁱ)
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -81,7 +104,8 @@ Returns a NamedTuple of the possibly-rescaled rates.
 """
 @inline function limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
                                    dep, coat_cond, coat_evap, nuc_q, nuc_n,
-                                   qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety)
+                                   qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety,
+                                   freezing_temperature)
     FT = typeof(qᵛ)
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
@@ -121,7 +145,8 @@ Returns a NamedTuple of the possibly-rescaled rates.
                  rain_evap - coat_evap - clamp_positive(-cond)
     qᵛ_after = qᵛ - net_liquid * dt_safety
     T_after = T + net_liquid * ℒˡ * dt_safety / cᵖᵈ
-    qᵛ⁺ⁱ_after = adjustment_saturation_specific_humidity(T_after, P, qᵗ, constants, PlanarIceSurface())
+    qᵛ⁺ⁱ_after = p3_adjustment_ice_saturation_specific_humidity(
+        T_after, P, qᵗ, constants, freezing_temperature)
     ℒⁱ_after = sublimation_latent_heat(constants, T_after)
     ξⁱ_after = ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, Rᵛ, T_after)
 
@@ -146,6 +171,16 @@ Returns a NamedTuple of the possibly-rescaled rates.
 
     return (; cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
               dep, coat_cond, coat_evap, nuc_q, nuc_n)
+end
+
+@inline function limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
+                                   dep, coat_cond, coat_evap, nuc_q, nuc_n,
+                                   qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety)
+    freezing_temperature = typeof(T)(273.15)
+    return limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
+                             dep, coat_cond, coat_evap, nuc_q, nuc_n,
+                             qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety,
+                             freezing_temperature)
 end
 
 @inline function safe_divide(a, b, default)
@@ -174,8 +209,8 @@ end
 end
 
 @inline function rain_number_tendency_before_homogeneous_freezing(p3, nⁱ, qⁱ, nʳ, qʳ,
-                                                autoconversion, complete_melting,
-                                                evaporation, self_collection, breakup,
+                                                autoconversion, melting_number,
+                                                evaporation_number, self_collection, breakup,
                                                 riming_number, freezing_number,
                                                 shedding_number, cloud_warm_collection,
                                                 warm_collection_number,
@@ -183,13 +218,12 @@ end
     FT = typeof(nⁱ + qⁱ + nʳ + qʳ)
     prp = p3.process_rates
     number_from_autoconversion = autoconversion / rain_seed_drop_mass(p3)
-    number_from_melting = safe_divide(nⁱ * complete_melting, qⁱ, zero(FT))
-    number_from_evaporation = safe_divide(nʳ * evaporation, qʳ, zero(FT))
+    number_from_melting = melting_number
     cloud_warm_rain_number = ifelse(prp.liquid_fraction_active, zero(FT),
-                                    cloud_warm_collection * FT(1.923e6))
+                                    cloud_warm_collection / prp.shed_drop_mass)
     number_gain = number_from_autoconversion + number_from_melting + breakup +
                   shedding_number + cloud_warm_rain_number + wet_growth_shedding_number
-    number_loss = number_from_evaporation + self_collection + riming_number +
+    number_loss = evaporation_number + self_collection + riming_number +
                   freezing_number + warm_collection_number
     return number_gain - number_loss
 end

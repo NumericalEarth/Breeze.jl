@@ -256,6 +256,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     wⁱ  = CenterField(grid)  # Ice mass-weighted terminal velocity
     wⁱₙ = CenterField(grid)  # Ice number-weighted terminal velocity
     wⁱ_z = CenterField(grid) # Ice reflectivity-weighted terminal velocity
+    wⁱ_z̃ = CenterField(grid) # Ice sqrt-moment terminal velocity
 
     # Microphysical tendency cache (written in update_microphysical_auxiliaries!, read by
     # grid_microphysical_tendency). Storing the microphysics-only contribution avoids 10×
@@ -276,7 +277,7 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
 
     return (; ρqᶜˡ, ρnᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρz̃ⁱ, ρqʷⁱ, ρsˢᵃᵗ, ρnᵃ,
               qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, z̃ⁱ, qʷⁱ, sˢᵃᵗ, nᵃ, qᵛ,
-              wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
+              wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z, wⁱ_z̃,
               cache_ρqᶜˡ, cache_ρnᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
               cache_ρqᶠ, cache_ρbᶠ, cache_ρz̃ⁱ, cache_ρqʷⁱ, cache_ρsˢᵃᵗ, cache_ρqᵛ, cache_ρnᵃ)
 end
@@ -500,6 +501,12 @@ end
 # compute_p3_process_rates (also @noinline) handles the heavy rates.
 # All operations are scalar — no array access.
 @noinline function _p3_scalar_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    surface_temperature = temperature(𝒰, constants)
+    return _p3_scalar_compute(p3, ρ, ℳ, 𝒰, constants, surface_temperature)
+end
+
+@noinline function _p3_scalar_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants,
+                                      surface_temperature)
     props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
     Fᶠ = props.Fᶠ
     ρᶠ = props.ρᶠ
@@ -530,14 +537,15 @@ end
     # Process rates (heavy, @noinline — compiled as a separate GPU function).
     # Passing `props` lets compute_p3_process_rates skip the redundant
     # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation.
-    rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, props)
+    rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, props,
+                                     surface_temperature)
 
     # Tendency extraction
     c_qcl = tendency_ρqᶜˡ(rates, ρ)
     # Prescribed-Nᶜ path: nc is a scheme parameter (not advected); tendency = 0.
     c_ncl = isnothing(p3.aerosol) ? zero(typeof(ρ)) :
             tendency_ρnᶜˡ(rates, ρ, props.Nᶜ, ℳ.qᶜˡ, p3)
-    c_qr  = tendency_ρqʳ(rates, ρ)
+    c_qr  = tendency_ρqʳ(rates, ρ, p3.process_rates)
     c_nr  = tendency_ρnʳ(rates, ρ, props.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3)
     c_qi  = tendency_ρqⁱ(rates, ρ)
     c_ni  = tendency_ρnⁱ(rates, ρ)
@@ -549,7 +557,7 @@ end
     ρz̃ⁱ = ρ * sqrt(max(0, ℳ.zⁱ * props.nⁱ))
     c_zi = z̃ⁱ_tendency(props.nⁱ, props.zⁱ_bounded, tendency_ρz_phys, c_ni,
                         ρz̃ⁱ, p3.process_rates.sink_limiting_timescale)
-    c_qwi = tendency_ρqʷⁱ(rates, ρ)
+    c_qwi = tendency_ρqʷⁱ(rates, ρ, p3.process_rates)
     c_ss  = tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates)
     c_qv  = tendency_ρqᵛ(rates, ρ)
     # Aerosol depletion: every activated cloud droplet removes one from ρnᵃ.
@@ -564,12 +572,13 @@ end
 # Kernel entry point: reads OffsetArrays → calls @noinline scalar compute → writes OffsetArrays.
 # Keeping array access in the kernel (inlined) and physics in @noinline (separate compilation)
 # prevents the GPU compiler from seeing the full P3 physics + OffsetArray access together.
-@inline function p3_compute_and_cache!(μ, i, j, k, grid, p3::P3, ρ, 𝒰, constants, velocities)
+@inline function p3_compute_and_cache!(μ, i, j, k, grid, p3::P3, ρ, 𝒰, constants,
+                                       velocities, surface_temperature)
     @inbounds begin
         ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
     end
 
-    r = _p3_scalar_compute(p3, ρ, ℳ, 𝒰, constants)
+    r = _p3_scalar_compute(p3, ρ, ℳ, 𝒰, constants, surface_temperature)
 
     @inbounds begin
         μ.wᶜˡ[i, j, k]  = -r.wᶜˡ
@@ -579,6 +588,7 @@ end
         μ.wⁱ[i, j, k]   = -r.wⁱ
         μ.wⁱₙ[i, j, k]  = -r.wⁱₙ
         μ.wⁱ_z[i, j, k] = -r.wⁱ_z
+        μ.wⁱ_z̃[i, j, k] = -(r.wⁱ_z + r.wⁱₙ) / 2
         μ.cache_ρqᶜˡ[i, j, k] = r.c_qcl
         μ.cache_ρnᶜˡ[i, j, k] = r.c_ncl
         μ.cache_ρqʳ[i, j, k]  = r.c_qr
@@ -654,8 +664,15 @@ end
 # Rime volume: same as ice mass
 @inline AM.microphysical_velocities(::P3, μ, ::Val{:ρbᶠ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
 
-# Ice square-root sixth moment: reflectivity-weighted fall speed
-@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρz̃ⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ_z)
+# Ice square-root sixth moment. From d√(ZN) = ½√(N/Z)dZ + ½√(Z/N)dN,
+# the local sedimentation characteristic is the mean of the Z- and N-weighted
+# particle velocities. Keeping it in the normal scalar path also preserves the
+# configured nonlinear and implicit advection semantics.
+# TODO: Replace this characteristic approximation with coupled Z- and N-flux
+# divergences once the host tracer interface can assemble one tendency from two
+# moment fluxes; one velocity is not exact for independently size-sorted profiles.
+@inline AM.microphysical_velocities(::P3, μ, ::Val{:ρz̃ⁱ}) =
+    (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ_z̃)
 
 # Liquid on ice: same as ice mass
 @inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqʷⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
@@ -705,8 +722,38 @@ end
     return rates, props
 end
 
+@inline function cloud_shape_before_homogeneous_freezing(p3, rates, ρ,
+                                                          ℳ::P3MicrophysicalState,
+                                                          props::P3IceProps)
+    FT = typeof(ρ)
+    τ = p3.process_rates.sink_limiting_timescale
+
+    # Remove the homogeneous-freezing sink from the assembled cloud tendency to
+    # recover the residual cloud reservoir immediately before that process.
+    cloud_mass_tendency = tendency_ρqᶜˡ(rates, ρ) / ρ +
+                          rates.cloud_homogeneous_mass
+    cloud_mass = max(0, ℳ.qᶜˡ + cloud_mass_tendency * τ)
+
+    cloud_number_tendency = cloud_number_tendency_before_homogeneous_freezing(
+        p3, ρ, ℳ.qᶜˡ, props.Nᶜ,
+        rates.ccn_activation_mass, rates.ccn_activation_number,
+        rates.autoconversion, rates.accretion, rates.cloud_self_collection,
+        rates.cloud_riming_number, rates.cloud_freezing_number,
+        rates.cloud_warm_collection_number)
+    prognostic_cloud_number = max(0, props.Nᶜ / ρ + cloud_number_tendency * τ)
+    prescribed_cloud_number = p3.cloud.number_concentration / ρ
+    cloud_number = ifelse(isnothing(p3.aerosol), prescribed_cloud_number,
+                          prognostic_cloud_number)
+
+    residual_cloud = diagnose_cloud_dsd(p3, cloud_mass, cloud_number, ρ)
+    has_residual_cloud = cloud_mass >= p3.minimum_mass_mixing_ratio
+    return ifelse(has_residual_cloud, residual_cloud.μ_c, props.μ_cloud)
+end
+
 @inline function p3_ice_sixth_moment_tendency(::Nothing, p3, rates, ρ, ℳ::P3MicrophysicalState, props::P3IceProps)
-    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, props.nⁱ, props.zⁱ_bounded, p3.process_rates)
+    μ_cloud = cloud_shape_before_homogeneous_freezing(p3, rates, ρ, ℳ, props)
+    return tendency_ρzⁱ(rates, ρ, props.qⁱ_total, props.nⁱ, props.zⁱ_bounded,
+                         p3.process_rates, zero(typeof(ρ)), μ_cloud)
 end
 
 @inline function p3_ice_sixth_moment_tendency(ice_table::P3IceIntegralsTable, p3, rates, ρ, ℳ::P3MicrophysicalState, props::P3IceProps)
@@ -715,8 +762,9 @@ end
     # processes reconstruct Z with fixed μ over the same safety timescale used
     # by process-rate limiting, while group-2 sources initialize new ice moments
     # analytically.
+    μ_cloud = cloud_shape_before_homogeneous_freezing(p3, rates, ρ, ℳ, props)
     return active_ice_sixth_moment_tendency(ice_table, p3, rates, ρ,
                                             ℳ.qⁱ, ℳ.qʷⁱ, props.nⁱ, props.qᶠ,
                                             props.bᶠ, props.zⁱ_bounded,
-                                            props.μ_ice, zero(typeof(ρ)))
+                                            props.μ_ice, zero(typeof(ρ)), μ_cloud)
 end

@@ -12,11 +12,9 @@ using Oceananigans: Oceananigans
 
 using Breeze.Thermodynamics: temperature,
                              with_moisture,
-                             adjustment_saturation_specific_humidity,
                              saturation_specific_humidity,
                              saturation_vapor_pressure,
                              PlanarLiquidSurface,
-                             PlanarIceSurface,
                              density,
                              liquid_latent_heat,
                              ice_latent_heat,
@@ -120,6 +118,8 @@ struct P3Phase2Rates{FT}
     shedding_number :: FT
     refreezing :: FT
     complete_melting :: FT  # Phase 1 value + M8/M12c clipping
+    melting_number :: FT
+    whole_particle_clipping :: Bool
     nucleation_mass :: FT
     nucleation_number :: FT
     cloud_freezing_mass :: FT
@@ -159,6 +159,7 @@ struct P3ProcessRates{FT}
     accretion :: FT                # Cloud → rain mass (via rain sweep-out) [kg/kg/s]
     cloud_self_collection :: FT    # Cloud number loss from cloud-cloud coalescence [1/kg/s] (SB2001 only; 0 for KK2000/K2013)
     rain_evaporation :: FT         # Rain evaporation magnitude [kg/kg/s]
+    rain_evaporation_number :: FT  # Rain number loss from evaporation [1/kg/s]
     rain_self_collection :: FT     # Rain number loss magnitude [1/kg/s]
     rain_breakup :: FT             # Rain number gain from breakup [1/kg/s]
 
@@ -167,6 +168,10 @@ struct P3ProcessRates{FT}
     partial_melting :: FT          # Ice → liquid coating (stays on ice) [kg/kg/s]
     complete_melting :: FT         # Ice → rain mass (sheds) [kg/kg/s]
     melting_number :: FT           # Ice number loss magnitude from melting [1/kg/s]
+    clipping_dry_mass :: FT        # Whole-particle clip contribution to complete melting [kg/kg/s]
+    clipping_rime_mass :: FT       # Rime mass removed exactly by whole-particle clips [kg/kg/s]
+    clipping_rime_volume :: FT     # Rime volume removed exactly by whole-particle clips [m³/kg/s]
+    post_process_clipping :: FT    # One when the post-process liquid-fraction clip fires
 
     # D2/D1: Ice number loss from vapor-driven sinks (Fortran nisub + nlevp)
     sublimation_number :: FT       # Ice number loss magnitude from sublimation / coating evaporation [1/kg/s]
@@ -207,21 +212,21 @@ struct P3ProcessRates{FT}
     rain_homogeneous_mass :: FT    # Rain → ice from homogeneous freezing [kg/kg/s]
     rain_homogeneous_number :: FT  # Rain number → ice [1/kg/s]
 
-    # Above-freezing collection (T > T₀): collected hydrometeors → qʷⁱ
-    # (Milbrandt et al. 2025; Fortran qccoll/qrcoll pathway)
-    cloud_warm_collection :: FT        # Cloud collected above T₀ → qʷⁱ [kg/kg/s]
+    # Above-freezing collection (T > T₀). Cloud collection goes to qʷⁱ in
+    # liquid-fraction mode and sheds to rain otherwise; rain mass transfers only to qʷⁱ.
+    cloud_warm_collection :: FT        # Cloud collected above T₀ [kg/kg/s]
     cloud_warm_collection_number :: FT # Cloud number loss from warm collection [1/kg/s]
     rain_warm_collection :: FT         # Rain collected above T₀ → qʷⁱ [kg/kg/s]
     rain_warm_collection_number :: FT  # M9: Rain number loss from warm collection [1/kg/s]
 
-    # Wet growth: collected hydrometeors redirected to qʷⁱ when collection
-    # exceeds freezing capacity (Milbrandt et al. 2025; Fortran qwgrth1c/qwgrth1r)
+    # Liquid-fraction wet growth: collected hydrometeors redirected to qʷⁱ when
+    # collection exceeds freezing capacity (Fortran qwgrth1c/qwgrth1r).
     wet_growth_cloud :: FT             # Cloud collection redirected to qʷⁱ [kg/kg/s]
     wet_growth_rain :: FT              # Rain collection redirected to qʷⁱ [kg/kg/s]
 
-    # Wet growth shedding — excess collection beyond freezing capacity goes to rain
-    # (Fortran nrshdr/qcshd: mass that can't freeze sheds as 1 mm rain drops)
-    wet_growth_shedding :: FT          # Excess collection → rain mass [kg/kg/s]
+    # Non-liquid-fraction wet growth shedding. Only excess cloud water is a new
+    # rain-mass source; number includes excess cloud and recycled rain collection.
+    wet_growth_shedding :: FT          # Excess cloud collection → rain mass [kg/kg/s]
     wet_growth_shedding_number :: FT   # Rain number from wet growth shedding [1/kg/s]
 
     # Warm/mixed-phase budget terms
@@ -255,6 +260,21 @@ struct P3ProcessRates{FT}
     # Tied to the same dt = τ assumption.
     predicted_ssat_tendency :: FT
 end
+
+# Preserve the original 54-rate positional constructor used by downstream
+# diagnostics. New number-limiter and clip-accounting fields default to zero in
+# that compatibility path.
+function P3ProcessRates{FT}(first_rate::Number,
+                            remaining_rates::Vararg{Number, 53}) where FT
+    converted_rates = map(FT, remaining_rates)
+    return P3ProcessRates{FT}(FT(first_rate), converted_rates[1:4]..., zero(FT),
+                              converted_rates[5:10]...,
+                              zero(FT), zero(FT), zero(FT), zero(FT),
+                              converted_rates[11:53]...)
+end
+
+P3ProcessRates(first_rate::FT, remaining_rates::Vararg{FT, 53}) where FT =
+    P3ProcessRates{FT}(first_rate, remaining_rates...)
 
 @noinline function _p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState)
     FT = typeof(ρ)
@@ -316,6 +336,10 @@ end
     melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, ℳ.qʷⁱ, T, P, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ, constants, transport, μ_ice)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
+    complete_melt = ifelse(p3.process_rates.liquid_fraction_active,
+                           complete_melt, complete_melt + partial_melt)
+    partial_melt = ifelse(p3.process_rates.liquid_fraction_active,
+                          partial_melt, zero(FT))
     melt_n = ice_melting_number_rate(ℳ.qⁱ, nⁱ, complete_melt)
 
     return P3Phase1Rates{FT}(cond, ccn_act, ccn_act_n,
@@ -325,7 +349,13 @@ end
                              partial_melt, complete_melt, melt_n)
 end
 
-@noinline function _p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState, phase1::P3Phase1Rates)
+@noinline function _p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
+                                   phase1::P3Phase1Rates)
+    return _p3_phase2_rates(p3, ρ, ℳ, constants, state, phase1, state.T)
+end
+
+@noinline function _p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
+                                   phase1::P3Phase1Rates, surface_temperature)
     FT = typeof(ρ)
     prp = p3.process_rates
     T₀ = prp.freezing_temperature
@@ -395,22 +425,35 @@ end
     total_collection = cloud_rim + rain_rim
     is_wet_growth = has_hydrometeors & (total_collection > qwgrth + FT(1e-10))
 
-    wg_cloud = ifelse(is_wet_growth, cloud_rim, zero(FT))
-    wg_rain  = ifelse(is_wet_growth, rain_rim, zero(FT))
-    cloud_rim   = ifelse(is_wet_growth, zero(FT), cloud_rim)
-    rain_rim    = ifelse(is_wet_growth, zero(FT), rain_rim)
+    liquid_fraction_wet_growth = prp.liquid_fraction_active & is_wet_growth
+    dry_wet_growth = !prp.liquid_fraction_active & is_wet_growth
+    retained_fraction = clamp(safe_divide(qwgrth, total_collection, zero(FT)), 0, 1)
+    retained_cloud = cloud_rim * retained_fraction
+    retained_rain = rain_rim * retained_fraction
+    excess_cloud = cloud_rim - retained_cloud
+    excess_rain = rain_rim - retained_rain
 
-    # Wet growth shedding
-    shed_active = !prp.liquid_fraction_active & is_wet_growth
-    wg_shed   = ifelse(shed_active, clamp_positive(total_collection - qwgrth), zero(FT))
-    wg_shed_n = wg_shed / prp.shed_drop_mass
+    # With prognostic liquid fraction, all collection becomes liquid coating. Without
+    # it, the freezing-capacity portion becomes dense rime while only excess cloud
+    # water is a new rain-mass source; excess collected rain simply returns to rain.
+    wg_cloud = ifelse(liquid_fraction_wet_growth, cloud_rim, zero(FT))
+    wg_rain = ifelse(liquid_fraction_wet_growth, rain_rim, zero(FT))
+    cloud_rim = ifelse(liquid_fraction_wet_growth, zero(FT),
+                       ifelse(dry_wet_growth, retained_cloud, cloud_rim))
+    rain_rim = ifelse(liquid_fraction_wet_growth, zero(FT),
+                      ifelse(dry_wet_growth, retained_rain, rain_rim))
+    wg_shed = ifelse(dry_wet_growth, excess_cloud, zero(FT))
+    wg_shed_n = ifelse(dry_wet_growth,
+                       (excess_cloud + excess_rain) / prp.shed_drop_mass,
+                       zero(FT))
+    ρᶠ_new = ifelse(dry_wet_growth, prp.maximum_rime_density, ρᶠ_new)
 
     # Wet growth rime densification
     ρ_rimemax = prp.maximum_rime_density
     τ_densif = prp.rime_densification_timescale
     qⁱ_safe = clamp_positive(qⁱ)
     bᶠ_safe = max(bᶠ, FT(1e-20))
-    wg_densif_active = is_wet_growth & !prp.liquid_fraction_active & (qⁱ_safe > FT(1e-14))
+    wg_densif_active = dry_wet_growth & (qⁱ_safe > FT(1e-14))
     wg_densif_mass = clamp_positive(qⁱ_safe - qᶠ) / τ_densif
     wg_densif_vol = (qⁱ_safe / ρ_rimemax - bᶠ_safe) / τ_densif
     wg_densif_mass = ifelse(wg_densif_active, wg_densif_mass, zero(FT))
@@ -433,33 +476,38 @@ end
     τ_clip = prp.refreezing_timescale
     qʷⁱ_eff = clamp_positive(qʷⁱ)
     clip_freeze = (T < T₀) & (Fˡ < Fl_small) & (Fˡ > 0)
-    clip_melt   = (T >= T₀) & (Fˡ > 1 - Fl_small)
     refrz = ifelse(clip_freeze, refrz + qʷⁱ_eff / τ_clip, refrz)
-    shed = ifelse(clip_melt, shed + qʷⁱ_eff / τ_clip, shed)
 
-    # Filiq > 0.99 safety clipping
+    # Whole-particle liquid-fraction and tiny-warm-ice clips. These predicates can
+    # overlap, so form their union and transfer each reservoir exactly once.
     qⁱ_dry = clamp_positive(qⁱ)
-    clip_high_fl = (Fˡ > FT(0.99)) & (qⁱ_dry > 0)
-    complete_melt = phase1.complete_melting  # start from Phase 1 value
-    complete_melt = ifelse(clip_high_fl, complete_melt + qⁱ_dry / τ_clip, complete_melt)
-    shed = ifelse(clip_high_fl, shed + qʷⁱ_eff / τ_clip, shed)
-
-    # M12(c): Melt tiny ice at T >= T₀
     qⁱ_total_clip = qⁱ_dry + qʷⁱ_eff
-    tiny_warm_ice = (T >= T₀) & (qⁱ_total_clip >= FT(1e-14)) & (qⁱ_total_clip < prp.qsmall_dry)
-    complete_melt = ifelse(tiny_warm_ice, complete_melt + qⁱ_dry / τ_clip, complete_melt)
-    shed = ifelse(tiny_warm_ice, shed + qʷⁱ_eff / τ_clip, shed)
+    has_clip_mass = qⁱ_total_clip >= p3.minimum_mass_mixing_ratio
+    warm_liquid_clip = (T >= T₀) & (Fˡ > 1 - Fl_small) & has_clip_mass
+    high_liquid_fraction_clip = (Fˡ > FT(0.99)) & has_clip_mass
+    tiny_warm_ice = (T >= T₀) & has_clip_mass & (qⁱ_total_clip < prp.qsmall_dry)
+    whole_particle_clipping = warm_liquid_clip | high_liquid_fraction_clip | tiny_warm_ice
+    complete_melt = ifelse(whole_particle_clipping, qⁱ_dry / τ_clip,
+                           phase1.complete_melting)
+    melt_n = ifelse(whole_particle_clipping,
+                    clamp_positive(ℳ.nⁱ) / τ_clip, phase1.melting_number)
+    shed = ifelse(whole_particle_clipping, qʷⁱ_eff / τ_clip, shed)
+    shed_n = ifelse(whole_particle_clipping, zero(FT), shed_n)
+    refrz = ifelse(whole_particle_clipping, zero(FT), refrz)
 
     # =========================================================================
     # Ice nucleation
     # =========================================================================
-    nuc_q, nuc_n = deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ)
+    nucleation_existing_number = ifelse(whole_particle_clipping, zero(FT), nⁱ)
+    nuc_q, nuc_n = deposition_nucleation_rate(
+        p3, T, qᵛ, qᵛ⁺ⁱ, nucleation_existing_number, ρ)
     cloud_frz_q, cloud_frz_n = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
     μ_r = zero(FT)
     rain_frz_q, rain_frz_n = immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μ_r)
 
     # Rime splintering
-    spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T, D_mean, Fˡ, T, qᶠ)
+    spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T, D_mean, Fˡ,
+                                        surface_temperature, qᶠ)
 
     # Homogeneous freezing is diagnosed later from the post-process liquid residual
     # (see `compute_p3_process_rates`), so it is not computed here.
@@ -481,7 +529,7 @@ end
         agg, ni_lim,
         cloud_rim, cloud_rim_n, rain_rim, rain_rim_n, ρᶠ_new,
         wg_cloud, wg_rain, wg_shed, wg_shed_n, wg_densif_mass, wg_densif_vol,
-        shed, shed_n, refrz, complete_melt,
+        shed, shed_n, refrz, complete_melt, melt_n, whole_particle_clipping,
         nuc_q, nuc_n, cloud_frz_q, cloud_frz_n, rain_frz_q, rain_frz_n,
         spl_q, spl_n,
         cloud_warm_q, cloud_warm_n, rain_warm_q, rain_warm_n,
@@ -507,8 +555,20 @@ suitable for use in GPU kernels where grid indexing is handled externally.
 # Returns
 - `P3ProcessRates` containing all computed rates
 """
-@noinline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants,
-                                            props = nothing)
+@noinline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+    surface_temperature = temperature(𝒰, constants)
+    return compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, nothing,
+                                    surface_temperature)
+end
+
+@noinline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, props)
+    surface_temperature = temperature(𝒰, constants)
+    return compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, props,
+                                    surface_temperature)
+end
+
+@noinline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, props,
+                                            surface_temperature)
     FT = typeof(ρ)
     prp = p3.process_rates
     T₀ = prp.freezing_temperature
@@ -564,7 +624,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     T = ssat_adjustment.T
     q = MoistureMassFractions(qᵛ, q_base.liquid + ssat_adjustment.ε, q_base.ice)
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+    qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρ, constants, T₀, qᵛ⁺ˡ)
     transport = air_transport_properties(T, P)
 
     cloud = diagnose_cloud_dsd(p3, qᶜˡ, ℳ.nᶜˡ, ρ)
@@ -585,7 +645,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
 
     # === PHASE 1 & 2 RATES (delegated to @noinline sub-functions) ===
     ph1 = _p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state)
-    ph2 = _p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, ph1)
+    ph2 = _p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, ph1,
+                           surface_temperature)
 
     # === EXTRACT RATES INTO LOCAL VARIABLES FOR SINK LIMITING ===
     # Phase 1
@@ -602,9 +663,10 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     dep = ph1.deposition
     coat_cond = ph1.coating_condensation
     coat_evap = ph1.coating_evaporation
-    partial_melt = ph1.partial_melting
+    partial_melt = ifelse(ph2.whole_particle_clipping, zero(FT), ph1.partial_melting)
     complete_melt = ph2.complete_melting  # NOTE: Phase 2 modified this with clipping
-    melt_n = ph1.melting_number
+    melt_n = ph2.melting_number
+    whole_particle_clipping = ph2.whole_particle_clipping
 
     # Phase 2
     agg = ph2.aggregation
@@ -618,6 +680,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     wg_rain = ph2.wet_growth_rain
     wg_shed = ph2.wet_growth_shedding
     wg_shed_n = ph2.wet_growth_shedding_number
+    wg_excess_rain = ifelse(whole_particle_clipping, zero(FT),
+                            max(0, wg_shed_n * prp.shed_drop_mass - wg_shed))
     wg_densif_mass = ph2.wet_growth_densification_mass
     wg_densif_vol = ph2.wet_growth_densification_volume
     shed = ph2.shedding
@@ -636,6 +700,40 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     rain_warm_q = ph2.rain_warm_collection
     rain_warm_n = ph2.rain_warm_collection_number
 
+    # These clips correspond to Fortran's pre-process whole-particle transfers:
+    # the original ice particle is gone before collection, vapor growth, or
+    # aggregation is evaluated. Retain independent new-ice sources (nucleation and
+    # freezing), but suppress every process that requires the clipped particle.
+    dep = ifelse(whole_particle_clipping, zero(FT), dep)
+    coat_cond = ifelse(whole_particle_clipping, zero(FT), coat_cond)
+    coat_evap = ifelse(whole_particle_clipping, zero(FT), coat_evap)
+    agg = ifelse(whole_particle_clipping, zero(FT), agg)
+    ni_lim = ifelse(whole_particle_clipping, zero(FT), ni_lim)
+    cloud_rim = ifelse(whole_particle_clipping, zero(FT), cloud_rim)
+    cloud_rim_n = ifelse(whole_particle_clipping, zero(FT), cloud_rim_n)
+    rain_rim = ifelse(whole_particle_clipping, zero(FT), rain_rim)
+    rain_rim_n = ifelse(whole_particle_clipping, zero(FT), rain_rim_n)
+    wg_cloud = ifelse(whole_particle_clipping, zero(FT), wg_cloud)
+    wg_rain = ifelse(whole_particle_clipping, zero(FT), wg_rain)
+    wg_shed = ifelse(whole_particle_clipping, zero(FT), wg_shed)
+    wg_shed_n = ifelse(whole_particle_clipping, zero(FT), wg_shed_n)
+    wg_densif_mass = ifelse(whole_particle_clipping, zero(FT), wg_densif_mass)
+    wg_densif_vol = ifelse(whole_particle_clipping, zero(FT), wg_densif_vol)
+    spl_q = ifelse(whole_particle_clipping, zero(FT), spl_q)
+    spl_n = ifelse(whole_particle_clipping, zero(FT), spl_n)
+    cloud_warm_q = ifelse(whole_particle_clipping, zero(FT), cloud_warm_q)
+    cloud_warm_n = ifelse(whole_particle_clipping, zero(FT), cloud_warm_n)
+    rain_warm_q = ifelse(whole_particle_clipping, zero(FT), rain_warm_q)
+    rain_warm_n = ifelse(whole_particle_clipping, zero(FT), rain_warm_n)
+
+    # Track clip-only contributions separately so rime mass and volume can be
+    # drained exactly instead of assuming the beginning-of-stage rime fraction.
+    clipping_dry_mass = ifelse(whole_particle_clipping, complete_melt, zero(FT))
+    clipping_rime_mass = ifelse(whole_particle_clipping, qᶠ / prp.refreezing_timescale,
+                                zero(FT))
+    clipping_rime_volume = ifelse(whole_particle_clipping, bᶠ / prp.refreezing_timescale,
+                                  zero(FT))
+
     # === SINK LIMITING ===
     dt_safety = prp.sink_limiting_timescale
 
@@ -646,7 +744,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     qᵗ = q.vapor + q.liquid + q.ice
     vapor_rates = limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
                                     dep, coat_cond, coat_evap, nuc_q, nuc_n,
-                                    qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety)
+                                    qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety, T₀)
     cond = vapor_rates.cond
     ccn_act = vapor_rates.ccn_act
     ccn_act_n = vapor_rates.ccn_act_n
@@ -671,7 +769,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # ordinary cloud processes first act on the full cloud reservoir.
     cloud_available = max(0, qᶜˡ) + cloud_source_total * dt_safety
     cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
-                       cloud_warm_q + wg_cloud + cloud_evap
+                       cloud_warm_q + wg_cloud + wg_shed + cloud_evap
     f_cloud = sink_limiting_factor(cloud_sink_total, cloud_available, dt_safety)
     autoconv      = autoconv * f_cloud
     accr          = accr * f_cloud
@@ -682,12 +780,17 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     cloud_warm_q  = cloud_warm_q * f_cloud
     cloud_warm_n  = cloud_warm_n * f_cloud
     wg_cloud      = wg_cloud * f_cloud
+    wg_shed       = wg_shed * f_cloud
     cond          = ifelse(cond < 0, cond * f_cloud, cond)
+
+    cloud_warm_to_ice = ifelse(prp.liquid_fraction_active, cloud_warm_q, zero(FT))
+    cloud_warm_to_rain = ifelse(prp.liquid_fraction_active, zero(FT), cloud_warm_q)
 
     # --- Rain sinks ---
     # As with cloud above, limit ordinary rain processes against the full rain
     # reservoir. Homogeneous freezing is diagnosed from the residual later.
-    rain_source_total = autoconv + accr + complete_melt + shed + wg_shed + rain_cond
+    rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
+                        cloud_warm_to_rain + rain_cond
     rain_available = max(0, qʳ) + rain_source_total * dt_safety
     rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
     f_rain = sink_limiting_factor(rain_sink_total, rain_available, dt_safety)
@@ -699,6 +802,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     rain_warm_n   = rain_warm_n * f_rain
     wg_rain       = wg_rain * f_rain
     rain_evap     = rain_evap * f_rain
+    wg_excess_rain = wg_excess_rain * f_rain
+    wg_shed_n = (wg_shed + wg_excess_rain) / prp.shed_drop_mass
 
     # Sublimation number loss
     sublim_mag = clamp_positive(-dep)
@@ -717,13 +822,16 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # transfers mass dry → coating without changing the total).
     total_ice_source_total = max(0, dep) + cloud_rim + rain_rim +
                              nuc_q + cloud_frz_q + rain_frz_q +
-                             cloud_warm_q + rain_warm_q +
+                             cloud_warm_to_ice + rain_warm_q +
                              wg_cloud + wg_rain + coat_cond
     total_ice_available = max(total_ice_mass(qⁱ, qʷⁱ), FT(0)) + total_ice_source_total * dt_safety
     total_ice_sink_total = complete_melt + clamp_positive(-dep) + shed + coat_evap
     f_total_ice = sink_limiting_factor(total_ice_sink_total, total_ice_available, dt_safety)
     complete_melt = complete_melt * f_total_ice
     melt_n        = melt_n * f_total_ice
+    clipping_dry_mass = clipping_dry_mass * f_total_ice
+    clipping_rime_mass = clipping_rime_mass * f_total_ice
+    clipping_rime_volume = clipping_rime_volume * f_total_ice
     dep           = ifelse(dep < 0, dep * f_total_ice, dep)
     sublim_n      = sublim_n * f_total_ice
     shed          = shed * f_total_ice
@@ -731,16 +839,109 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     coat_evap     = coat_evap * f_total_ice
 
     # --- qʷⁱ sinks ---
-    qwi_source_total = partial_melt + cloud_warm_q + rain_warm_q + wg_cloud + wg_rain + coat_cond
+    qwi_source_total = partial_melt + cloud_warm_to_ice + rain_warm_q +
+                       wg_cloud + wg_rain + coat_cond
     qwi_available = max(0, qʷⁱ) + qwi_source_total * dt_safety
-    qwi_sink_total = shed + refrz + wg_shed + coat_evap
+    qwi_sink_total = shed + refrz + coat_evap
     f_qwi = sink_limiting_factor(qwi_sink_total, qwi_available, dt_safety)
     shed      = shed * f_qwi
     shed_n    = shed_n * f_qwi
     refrz     = refrz * f_qwi
-    wg_shed   = wg_shed * f_qwi
-    wg_shed_n = wg_shed_n * f_qwi
     coat_evap = coat_evap * f_qwi
+
+    # A whole-particle clip transfers dry mass, coating, and number together. If
+    # competition for coating water imposes an additional limiter, apply that same
+    # factor to the dry-mass and number companions.
+    complete_melt = ifelse(whole_particle_clipping, complete_melt * f_qwi,
+                           complete_melt)
+    melt_n = ifelse(whole_particle_clipping, melt_n * f_qwi, melt_n)
+    clipping_dry_mass = ifelse(whole_particle_clipping,
+                               clipping_dry_mass * f_qwi, clipping_dry_mass)
+    clipping_rime_mass = ifelse(whole_particle_clipping,
+                                clipping_rime_mass * f_qwi, clipping_rime_mass)
+    clipping_rime_volume = ifelse(whole_particle_clipping,
+                                  clipping_rime_volume * f_qwi,
+                                  clipping_rime_volume)
+
+    # Rain, dry ice, total ice, and coating exchange mass with one another.
+    # A single sequential limiter pass can credit a source that a later donor
+    # limiter subsequently reduces. Re-project the four donor budgets a
+    # configurable number of times; every projection only reduces rates, so
+    # this converges monotonically while remaining allocation-free and GPU-safe.
+    for _ in 1:prp.coupled_sink_limiting_iterations
+        dry_ice_source_total = max(0, dep) + cloud_rim + rain_rim + refrz +
+                               nuc_q + cloud_frz_q + rain_frz_q
+        dry_ice_available = max(0, qⁱ) + dry_ice_source_total * dt_safety
+        dry_ice_sink_total = partial_melt + complete_melt + clamp_positive(-dep)
+        f_dry_ice = sink_limiting_factor(dry_ice_sink_total, dry_ice_available,
+                                         dt_safety)
+        partial_melt = partial_melt * f_dry_ice
+        complete_melt = complete_melt * f_dry_ice
+        melt_n = melt_n * f_dry_ice
+        clipping_dry_mass = clipping_dry_mass * f_dry_ice
+        clipping_rime_mass = clipping_rime_mass * f_dry_ice
+        clipping_rime_volume = clipping_rime_volume * f_dry_ice
+        dep = ifelse(dep < 0, dep * f_dry_ice, dep)
+        sublim_n = sublim_n * f_dry_ice
+
+        rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
+                            cloud_warm_to_rain + rain_cond
+        rain_available = max(0, qʳ) + rain_source_total * dt_safety
+        rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
+        f_rain = sink_limiting_factor(rain_sink_total, rain_available, dt_safety)
+        rain_rim = rain_rim * f_rain
+        rain_rim_n = rain_rim_n * f_rain
+        rain_frz_q = rain_frz_q * f_rain
+        rain_frz_n = rain_frz_n * f_rain
+        rain_warm_q = rain_warm_q * f_rain
+        rain_warm_n = rain_warm_n * f_rain
+        wg_rain = wg_rain * f_rain
+        rain_evap = rain_evap * f_rain
+        wg_excess_rain = wg_excess_rain * f_rain
+        wg_shed_n = (wg_shed + wg_excess_rain) / prp.shed_drop_mass
+
+        total_ice_source_total = max(0, dep) + cloud_rim + rain_rim +
+                                 nuc_q + cloud_frz_q + rain_frz_q +
+                                 cloud_warm_to_ice + rain_warm_q +
+                                 wg_cloud + wg_rain + coat_cond
+        total_ice_available = max(total_ice_mass(qⁱ, qʷⁱ), FT(0)) +
+                              total_ice_source_total * dt_safety
+        total_ice_sink_total = complete_melt + clamp_positive(-dep) + shed + coat_evap
+        f_total_ice = sink_limiting_factor(total_ice_sink_total,
+                                           total_ice_available, dt_safety)
+        complete_melt = complete_melt * f_total_ice
+        melt_n = melt_n * f_total_ice
+        clipping_dry_mass = clipping_dry_mass * f_total_ice
+        clipping_rime_mass = clipping_rime_mass * f_total_ice
+        clipping_rime_volume = clipping_rime_volume * f_total_ice
+        dep = ifelse(dep < 0, dep * f_total_ice, dep)
+        sublim_n = sublim_n * f_total_ice
+        shed = shed * f_total_ice
+        shed_n = shed_n * f_total_ice
+        coat_evap = coat_evap * f_total_ice
+
+        qwi_source_total = partial_melt + cloud_warm_to_ice + rain_warm_q +
+                           wg_cloud + wg_rain + coat_cond
+        qwi_available = max(0, qʷⁱ) + qwi_source_total * dt_safety
+        qwi_sink_total = shed + refrz + coat_evap
+        f_qwi = sink_limiting_factor(qwi_sink_total, qwi_available, dt_safety)
+        shed = shed * f_qwi
+        shed_n = shed_n * f_qwi
+        refrz = refrz * f_qwi
+        coat_evap = coat_evap * f_qwi
+        complete_melt = ifelse(whole_particle_clipping,
+                               complete_melt * f_qwi, complete_melt)
+        melt_n = ifelse(whole_particle_clipping, melt_n * f_qwi, melt_n)
+        clipping_dry_mass = ifelse(whole_particle_clipping,
+                                   clipping_dry_mass * f_qwi,
+                                   clipping_dry_mass)
+        clipping_rime_mass = ifelse(whole_particle_clipping,
+                                    clipping_rime_mass * f_qwi,
+                                    clipping_rime_mass)
+        clipping_rime_volume = ifelse(whole_particle_clipping,
+                                      clipping_rime_volume * f_qwi,
+                                      clipping_rime_volume)
+    end
 
     qⁱ_total_coat = max(total_ice_mass(qⁱ, qʷⁱ), FT(1e-20))
     coat_evap_n = coat_evap * safe_divide(clamp_positive(nⁱ), qⁱ_total_coat, zero(FT))
@@ -749,10 +950,129 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Recompute splintering from sink-limited riming rates
     D_mean = ph2.D_mean
     Fˡ = ph2.Fˡ
-    cloud_spl_q, rain_spl_q, spl_n = rime_splintering_rates(p3, cloud_rim, rain_rim, T, D_mean, Fˡ, T, qᶠ)
+    cloud_spl_q, rain_spl_q, spl_n = rime_splintering_rates(
+        p3, cloud_rim, rain_rim, T, D_mean, Fˡ, surface_temperature, qᶠ)
     cloud_spl_q = min(cloud_spl_q, clamp_positive(cloud_rim))
     rain_spl_q = min(rain_spl_q, clamp_positive(rain_rim))
     spl_q = cloud_spl_q + rain_spl_q
+
+    # Reconstruct the ordinary post-process ice reservoirs. Fortran applies a
+    # second Fˡ > 0.99 clip after these processes, so a particle that crosses
+    # the threshold during melting must transfer its residual mass and number as
+    # a whole. The dry-ice projection above guarantees these residuals are
+    # non-negative before the clip is diagnosed.
+    dry_ice_source_total = dep + cloud_rim + rain_rim + refrz +
+                           nuc_q + cloud_frz_q + rain_frz_q
+    dry_ice_sink_total = partial_melt + complete_melt
+    dry_ice_remaining = max(0, qⁱ +
+                                (dry_ice_source_total - dry_ice_sink_total) * dt_safety)
+
+    qwi_source_total = partial_melt + cloud_warm_to_ice + rain_warm_q +
+                       wg_cloud + wg_rain + coat_cond
+    qwi_sink_total = shed + refrz + coat_evap
+    qwi_remaining = max(0, qʷⁱ + (qwi_source_total - qwi_sink_total) * dt_safety)
+    total_ice_remaining = dry_ice_remaining + qwi_remaining
+    liquid_fraction_remaining = safe_divide(qwi_remaining, total_ice_remaining,
+                                            zero(FT))
+    post_process_clipping_active = prp.liquid_fraction_active &
+                                   (total_ice_remaining >= p3.minimum_mass_mixing_ratio) &
+                                   (liquid_fraction_remaining > 1 - prp.liquid_fraction_small)
+
+    # Rime companions are reconstructed with the same formulas used by the
+    # prognostic tendencies, excluding homogeneous freezing, which occurs after
+    # this clip in the Fortran ordering.
+    ordinary_complete_melting = max(0, complete_melt - clipping_dry_mass)
+    ordinary_total_melting = partial_melt + ordinary_complete_melting
+    sublimation = clamp_positive(-dep)
+    rime_mass_gain = cloud_rim + rain_rim + refrz + cloud_frz_q + rain_frz_q +
+                     wg_densif_mass
+    rime_mass_loss = Fᶠ * (ordinary_total_melting + sublimation) +
+                     clipping_rime_mass
+    rime_mass_remaining = max(0, qᶠ +
+                                  (rime_mass_gain - rime_mass_loss) * dt_safety)
+
+    rime_density_safe = max(ρᶠ, prp.minimum_rime_density)
+    new_rime_density_safe = max(ρᶠ_new, prp.minimum_rime_density)
+    maximum_rime_density = prp.maximum_rime_density
+    rime_volume_gain = cloud_rim / new_rime_density_safe +
+                       (rain_rim + refrz + cloud_frz_q + rain_frz_q) /
+                       maximum_rime_density + wg_densif_vol
+    rime_volume_loss = Fᶠ * (ordinary_total_melting + sublimation) /
+                       rime_density_safe + clipping_rime_volume
+    dry_ice_safe = max(qⁱ, FT(1e-12))
+    rime_volume = Fᶠ * dry_ice_safe / rime_density_safe
+    melt_densification = rime_volume * (prp.pure_ice_density - rime_density_safe) *
+                          ordinary_total_melting / (rime_density_safe * dry_ice_safe)
+    densification_active = (rime_density_safe < prp.pure_ice_density) &
+                           !prp.liquid_fraction_active
+    melt_densification = ifelse(densification_active, melt_densification, zero(FT))
+    rime_volume_after_ordinary_processes = max(
+        0, bᶠ + (rime_volume_gain - rime_volume_loss) * dt_safety)
+    maximum_melt_densification = rime_volume_after_ordinary_processes / dt_safety
+    melt_densification = min(melt_densification, maximum_melt_densification)
+    rime_volume_remaining = max(
+        0, rime_volume_after_ordinary_processes - melt_densification * dt_safety)
+
+    ni_correction = ifelse(whole_particle_clipping, zero(FT),
+                           (nⁱ - nⁱ_global) / dt_safety)
+    ice_number_source_total = nuc_n + cloud_frz_n + rain_frz_n + spl_n
+    # Global and DSD corrections conceptually replace the raw population with
+    # the bounded one before physical processes act. Give particle-removing
+    # melting/sublimation priority, then limit number-only aggregation to the
+    # population that remains. A pre-process whole-particle clip instead drains
+    # the raw population directly and suppresses both corrections.
+    number_after_correction = ifelse(whole_particle_clipping, nⁱ_raw, nⁱ)
+    particle_sink_capacity = max(
+        0, number_after_correction / dt_safety + ice_number_source_total)
+    melt_n = min(melt_n, particle_sink_capacity)
+    particle_sink_capacity = max(0, particle_sink_capacity - melt_n)
+    sublim_n = min(sublim_n, particle_sink_capacity)
+    number_available_for_aggregation = max(0, particle_sink_capacity - sublim_n)
+    agg = min(agg, number_available_for_aggregation)
+    ice_number_sink_total = melt_n + sublim_n + agg
+    ice_number_remaining = max(0, number_after_correction +
+                                   (ice_number_source_total - ice_number_sink_total) *
+                                   dt_safety)
+
+    post_clip_dry_mass = ifelse(post_process_clipping_active,
+                                dry_ice_remaining / dt_safety, zero(FT))
+    post_clip_coating = ifelse(post_process_clipping_active,
+                               qwi_remaining / dt_safety, zero(FT))
+    post_clip_number = ifelse(post_process_clipping_active,
+                              ice_number_remaining / dt_safety, zero(FT))
+    post_clip_rime_mass = ifelse(post_process_clipping_active,
+                                 rime_mass_remaining / dt_safety, zero(FT))
+    post_clip_rime_volume = ifelse(post_process_clipping_active,
+                                   rime_volume_remaining / dt_safety, zero(FT))
+
+    complete_melt = complete_melt + post_clip_dry_mass
+    shed = shed + post_clip_coating
+    melt_n = melt_n + post_clip_number
+    clipping_dry_mass = clipping_dry_mass + post_clip_dry_mass
+    clipping_rime_mass = clipping_rime_mass + post_clip_rime_mass
+    clipping_rime_volume = clipping_rime_volume + post_clip_rime_volume
+    post_process_clipping = ifelse(post_process_clipping_active, one(FT), zero(FT))
+
+    # All rain-number sinks act on the same lambda-bounded population. Project
+    # them together after the mass-rate limiters are final so evaporation,
+    # collection, freezing, and self-collection cannot independently consume
+    # the same drops. Number companions may be more restrictive than their mass
+    # rates; this changes the diagnosed mean drop mass without changing water.
+    cloud_warm_rain_number = ifelse(
+        prp.liquid_fraction_active, zero(FT), cloud_warm_q / prp.shed_drop_mass)
+    rain_number_source_total = autoconv / rain_seed_drop_mass(p3) + melt_n +
+                               rain_br + shed_n + cloud_warm_rain_number + wg_shed_n
+    rain_evap_n = safe_divide(nʳ * rain_evap, qʳ, zero(FT))
+    rain_number_sink_total = rain_evap_n + rain_self + rain_rim_n +
+                             rain_frz_n + rain_warm_n
+    rain_number_available = max(0, nʳ) + rain_number_source_total * dt_safety
+    f_rain_number = sink_limiting_factor(
+        rain_number_sink_total, rain_number_available, dt_safety)
+    rain_evap_n = rain_evap_n * f_rain_number
+    rain_self = rain_self * f_rain_number
+    rain_rim_n = rain_rim_n * f_rain_number
+    rain_frz_n = rain_frz_n * f_rain_number
+    rain_warm_n = rain_warm_n * f_rain_number
 
     # --- Homogeneous freezing of post-process liquid ---
     # Fortran applies homogeneous freezing after the ordinary process updates and
@@ -763,11 +1083,12 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # captures liquid created by condensation, melting, or shedding during this
     # interval.
     cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
-                       cloud_warm_q + wg_cloud + clamp_positive(-cond)
+                       cloud_warm_q + wg_cloud + wg_shed + clamp_positive(-cond)
     cloud_remaining = max(0, max(0, qᶜˡ) +
                                 (cloud_source_total - cloud_sink_total) * dt_safety)
 
-    rain_source_total = autoconv + accr + complete_melt + shed + wg_shed + rain_cond
+    rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
+                        cloud_warm_to_rain + rain_cond
     rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
     rain_remaining = max(0, max(0, qʳ) +
                                (rain_source_total - rain_sink_total) * dt_safety)
@@ -781,10 +1102,12 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         cloud_rim_n, cloud_frz_n, cloud_warm_n)
     prognostic_cloud_number = max(0, cloud.nᶜˡ +
                                      cloud_number_tendency * dt_safety)
-    cloud_number_remaining = ifelse(isnothing(p3.aerosol), Nᶜ / ρ, prognostic_cloud_number)
+    prescribed_cloud_number = p3.cloud.number_concentration / ρ
+    cloud_number_remaining = ifelse(isnothing(p3.aerosol), prescribed_cloud_number,
+                                    prognostic_cloud_number)
 
     rain_number_tendency = rain_number_tendency_before_homogeneous_freezing(
-        p3, nⁱ, qⁱ, nʳ, qʳ, autoconv, complete_melt, rain_evap, rain_self,
+        p3, nⁱ, qⁱ, nʳ, qʳ, autoconv, melt_n, rain_evap_n, rain_self,
         rain_br, rain_rim_n, rain_frz_n, shed_n, cloud_warm_q, rain_warm_n, wg_shed_n)
     rain_number_remaining = max(0, nʳ +
                                    rain_number_tendency * dt_safety)
@@ -807,7 +1130,6 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # DSD number correction feedback
     ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
     nr_correction = (nʳ - ℳ.nʳ) / dt_safety
-    ni_correction = (nⁱ - nⁱ_global) / dt_safety
 
     # Fortran's `microphy_p3.f90:5053-5063` recomputes ssat = qv - qvs(T)
     # at the end of the substep. Breeze must diagnose that final T from the
@@ -834,8 +1156,10 @@ suitable for use in GPU kernels where grid indexing is handled externally.
 
     return P3ProcessRates{FT}(
         cond_total,
-        autoconv, accr, cloud_self, rain_evap, rain_self, rain_br,
+        autoconv, accr, cloud_self, rain_evap, rain_evap_n, rain_self, rain_br,
         dep, partial_melt, complete_melt, melt_n,
+        clipping_dry_mass, clipping_rime_mass, clipping_rime_volume,
+        post_process_clipping,
         sublim_n,
         agg, ni_lim,
         cloud_rim, cloud_rim_n, rain_rim, rain_rim_n, ρᶠ_new,

@@ -44,7 +44,7 @@ Rain mass tendency: gains from autoconversion, accretion, melting, shedding; los
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqʳ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρqʳ(rates, ρ)
+    return tendency_ρqʳ(rates, ρ, p3.process_rates)
 end
 
 """
@@ -119,7 +119,7 @@ Liquid on ice tendency: loses from shedding and refreezing.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqʷⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρqʷⁱ(rates, ρ)
+    return tendency_ρqʷⁱ(rates, ρ, p3.process_rates)
 end
 
 """

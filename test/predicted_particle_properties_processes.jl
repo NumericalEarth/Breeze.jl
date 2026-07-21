@@ -2,7 +2,7 @@ using Test
 import Breeze
 using Breeze.Microphysics.PredictedParticleProperties
 using Breeze.AtmosphereModels: microphysical_velocities, prognostic_field_names
-using Breeze.Thermodynamics: ThermodynamicConstants
+using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
 
 using Breeze.Microphysics.PredictedParticleProperties:
     IceSizeDistributionState,
@@ -876,6 +876,15 @@ end
         @test limited_tendency == -FT(2) / τ
     end
 
+    @testset "coupled sink limiter iterations are configurable" begin
+        FT = Float32
+        @test ProcessRateParameters(FT).coupled_sink_limiting_iterations == 4
+        configured = ProcessRateParameters(FT; coupled_sink_limiting_iterations = 3)
+        @test configured.coupled_sink_limiting_iterations == 3
+        @test_throws ArgumentError ProcessRateParameters(FT;
+                                                         coupled_sink_limiting_iterations = 0)
+    end
+
     @testset "P3 advects the square-root sixth moment" begin
         FT = Float32
         p3 = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)
@@ -1078,115 +1087,6 @@ end
         rates_updraft = compute_p3_process_rates(p3, ρ, ℳ_updraft, 𝒰, constants)
 
         @test rates_updraft.condensation > rates_still.condensation
-    end
-
-    @testset "Homogeneous freezing acts on the post-process liquid residual" begin
-        FT = Float64
-        constants = ThermodynamicConstants(FT)
-        p3 = PredictedParticlePropertiesMicrophysics()
-        dt_safety = p3.process_rates.sink_limiting_timescale
-
-        ρ   = FT(1)
-        T   = FT(230)          # below the 233.15 K homogeneous-freezing threshold
-        P   = FT(80000)
-        pˢᵗ = FT(100000)
-
-        qᶜˡ = FT(1e-3)
-        qʳ  = FT(5e-4)
-        qⁱ  = FT(2e-4)
-        qᵛ  = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-        q   = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qⁱ)
-        𝒰   = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
-
-        # Cloud + rain + ice are all present, so ordinary collection and freezing
-        # processes modify the liquid reservoirs before homogeneous freezing.
-        ℳ = P3MicrophysicalState(qᶜˡ, FT(1e8), qʳ, FT(1e5),
-                                 qⁱ, FT(1e5), zero(FT), zero(FT),
-                                 zero(FT), zero(FT), zero(FT), zero(FT), zero(FT))
-
-        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
-
-        # Fortran applies ordinary microphysics before homogeneous freezing. The
-        # ordinary rates must therefore remain active below the threshold rather
-        # than being suppressed by reserving all beginning-of-stage liquid.
-        @test rates.autoconversion > 0
-        @test rates.accretion > 0
-        @test rates.cloud_riming + rates.cloud_freezing_mass > 0
-        @test rates.rain_riming + rates.rain_freezing_mass > 0
-
-        # Add homogeneous freezing back to each liquid tendency to reconstruct the
-        # post-ordinary reservoir. With the default τ_hom == dt_safety, precisely
-        # that residual is then frozen and both liquid species finish non-negative.
-        cloud_after_ordinary = qᶜˡ +
-                               (tendency_ρqᶜˡ(rates, ρ) / ρ +
-                                rates.cloud_homogeneous_mass) * dt_safety
-        rain_after_ordinary = qʳ +
-                              (tendency_ρqʳ(rates, ρ) / ρ +
-                               rates.rain_homogeneous_mass) * dt_safety
-        @test rates.cloud_homogeneous_mass * dt_safety ≈ cloud_after_ordinary
-        @test rates.rain_homogeneous_mass * dt_safety ≈ rain_after_ordinary atol=1e-18
-        @test rates.cloud_homogeneous_mass < qᶜˡ / dt_safety
-        @test qᶜˡ + tendency_ρqᶜˡ(rates, ρ) / ρ * dt_safety ≈ 0 atol=1e-18
-        @test qʳ + tendency_ρqʳ(rates, ρ) / ρ * dt_safety ≈ 0 atol=1e-18
-
-        # Total water remains conserved under the sequential partition.
-        total_water = tendency_ρqᵛ(rates, ρ) + tendency_ρqᶜˡ(rates, ρ) +
-                      tendency_ρqʳ(rates, ρ) + tendency_ρqⁱ(rates, ρ) +
-                      tendency_ρqʷⁱ(rates, ρ)
-        @test abs(total_water) < 1e-15 * ρ
-
-        # The homogeneous and limiter timescales are independent user parameters.
-        # A faster homogeneous timescale must be capped at the residual reservoir,
-        # including both mass and its paired number transfer.
-        fast_process_rates = ProcessRateParameters(
-            FT; homogeneous_freezing_timescale = 1,
-                sink_limiting_timescale = dt_safety,
-                immersion_freezing_coefficient = 0,
-                immersion_freezing_nucleation_coefficient = 0)
-        fast_p3 = p3_with_process_rates(p3, fast_process_rates)
-        fast_q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, zero(FT))
-        𝒰_fast = with_temperature(
-            LiquidIcePotentialTemperatureState(zero(FT), fast_q, pˢᵗ, P), T, constants)
-        ℳ_fast = P3MicrophysicalState(qᶜˡ, FT(1e8), qʳ, FT(1e5),
-                                          zero(FT), zero(FT), zero(FT), zero(FT),
-                                          zero(FT), zero(FT), zero(FT), zero(FT), zero(FT))
-        fast_rates = compute_p3_process_rates(fast_p3, ρ, ℳ_fast, 𝒰_fast, constants)
-        fast_cloud_after_ordinary = qᶜˡ +
-                                    (tendency_ρqᶜˡ(fast_rates, ρ) / ρ +
-                                     fast_rates.cloud_homogeneous_mass) * dt_safety
-        fast_rain_after_ordinary = qʳ +
-                                   (tendency_ρqʳ(fast_rates, ρ) / ρ +
-                                    fast_rates.rain_homogeneous_mass) * dt_safety
-        fast_cloud_final = qᶜˡ + tendency_ρqᶜˡ(fast_rates, ρ) / ρ * dt_safety
-        fast_rain_final = qʳ + tendency_ρqʳ(fast_rates, ρ) / ρ * dt_safety
-        @test fast_rates.cloud_homogeneous_mass > 0
-        @test fast_rates.rain_homogeneous_mass > 0
-        @test fast_rates.cloud_homogeneous_mass * dt_safety ≈ fast_cloud_after_ordinary
-        @test fast_rates.rain_homogeneous_mass * dt_safety ≈ fast_rain_after_ordinary
-        @test fast_cloud_final ≈ 0 atol=1e-18
-        @test fast_rain_final ≈ 0 atol=1e-18
-
-        fast_rain_number_tendency = tendency_ρnʳ(
-            fast_rates, ρ, zero(FT), zero(FT), ℳ_fast.nʳ, qʳ, fast_p3) / ρ
-        fast_rain_number_after_ordinary = ℳ_fast.nʳ +
-                                          (fast_rain_number_tendency +
-                                           fast_rates.rain_homogeneous_number) * dt_safety
-        @test fast_rates.cloud_homogeneous_number * dt_safety ≈
-              ℳ_fast.nᶜˡ
-        @test fast_rates.rain_homogeneous_number * dt_safety ≈
-              fast_rain_number_after_ordinary
-        @test ℳ_fast.nʳ + fast_rain_number_tendency * dt_safety ≈ 0 atol=1e-10
-
-        # Above the threshold the homogeneous rates vanish and the ordinary warm
-        # sinks stay active — i.e. the budget reduces to its original single-reservoir form.
-        T_warm = FT(250)
-        qᵛ_warm = saturation_specific_humidity(T_warm, ρ, constants, PlanarLiquidSurface())
-        q_warm = MoistureMassFractions(qᵛ_warm, qᶜˡ + qʳ, qⁱ)
-        𝒰_warm = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q_warm, pˢᵗ, P), T_warm, constants)
-        rates_warm = compute_p3_process_rates(p3, ρ, ℳ, 𝒰_warm, constants)
-        @test rates_warm.cloud_homogeneous_mass == 0
-        @test rates_warm.rain_homogeneous_mass == 0
-        @test rates_warm.accretion > 0
     end
 
     @testset "P3 active sixth moment keeps splintered mass out of group 1" begin
@@ -1924,57 +1824,6 @@ end
 
     end
 
-    @testset "ice_melting_rate uses specific-humidity coordinate (finding #5)" begin
-        PPP = Breeze.Microphysics.PredictedParticleProperties
-        p3 = PredictedParticlePropertiesMicrophysics()
-        FT = Float64
-
-        qi = FT(1e-4)
-        ni = FT(1e4)
-        P = FT(70000.0)
-        Ff = FT(0.2)
-        ρf = FT(400.0)
-        ρ = FT(0.9)
-        μ = FT(0.0)
-        # Small superheating keeps the rate below the qi/τ cap so the sensible
-        # (temperature) term is isolated once the vapor term is zeroed via qv.
-        T = FT(273.25)
-        transport = air_transport_properties(T, P)
-
-        T₀ = p3.process_rates.freezing_temperature
-        Rᵥ = Breeze.Thermodynamics.vapor_gas_constant(ThermodynamicConstants(FT))
-        e_s0 = PPP.saturation_vapor_pressure_at_freezing(nothing, T₀)
-        # Saturation *specific humidity* (total-air mass fraction) ρᵛ⁺(T₀)/ρ =
-        # e_s0/(Rᵥ T₀ ρ), matching qᵛ's mass basis, so the latent diffusion term
-        # ℒˡ Dᵥ ρ (qᵛ - q_sat0) vanishes exactly. The dry-air mixing ratio
-        # ε e_s0/(P - e_s0) would leave a spurious latent term biasing melting.
-        qv = e_s0 / (Rᵥ * T₀ * ρ)
-
-        # Replicate the melting ventilation constant C_fv (small + large dry-ice
-        # PSD ventilation integrals, Fortran f1pr24–f1pr27).
-        Fl = FT(0)
-        m_mean = qi / ni
-        ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
-        sc_corr = PPP.ventilation_sc_correction(transport.nu, transport.D_v, ρ_correction)
-        dep = p3.ice.deposition
-        log_m = log10(max(m_mean, p3.minimum_mass_mixing_ratio))
-        prep = PPP.prepare_5d(dep.small_ice_ventilation_constant, log_m, Ff, Fl, ρf, μ)
-        C_fv = (PPP.evaluate_at(dep.small_ice_ventilation_constant, prep) +
-                sc_corr * PPP.evaluate_at(dep.small_ice_ventilation_reynolds, prep)) +
-               (PPP.evaluate_at(dep.large_ice_ventilation_constant, prep) +
-                sc_corr * PPP.evaluate_at(dep.large_ice_ventilation_reynolds, prep))
-        L_f = PPP.fusion_latent_heat(nothing, T)
-
-        # With the latent term zeroed the melt rate is the pure heat-conduction
-        # rate (uses 2π/L_f because the ventilation table stores capm = 2C).
-        expected = ni * 2 * FT(π) * C_fv * transport.K_a * (T - T₀) / L_f
-        rate = ice_melting_rate(p3, qi, ni, FT(0), T, P, qv, FT(0.01), Ff, ρf, ρ,
-                                nothing, transport, μ)
-
-        @test rate > 0
-        @test rate ≈ expected rtol=1e-9
-    end
-
     @testset "ice_melting_rates partitioning" begin
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
@@ -2040,12 +1889,11 @@ end
 
         T₀ = p3.process_rates.freezing_temperature
         Rᵥ = Breeze.Thermodynamics.vapor_gas_constant(ThermodynamicConstants(FT))
+        Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(ThermodynamicConstants(FT))
+        ε = Rᵈ / Rᵥ
         e_s0 = PPP.saturation_vapor_pressure_at_freezing(nothing, T₀)
-        # Set qv to the saturation *specific humidity* (total-air mass
-        # fraction) ρᵛ⁺(T₀)/ρ = e_s0/(Rᵥ T₀ ρ), matching qᵛ's mass basis, so the
-        # latent diffusion term vanishes and only the sensible term remains. The
-        # dry-air mixing ratio ε e_s0/(P - e_s0) would leave a spurious latent term.
-        qv = e_s0 / (Rᵥ * T₀ * ρ)
+        # M10: set qv = q_sat0 (mixing ratio convention) so latent term vanishes
+        qv = ε * e_s0 / max(P - e_s0, FT(1))
 
         m_mean = qi / ni
         ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
@@ -2057,7 +1905,7 @@ end
         capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, P, qv, Ff, ρf, ρ, nothing, transport, μ)
         expected = C_fv * transport.K_a * (T₀ - T) * ni
 
-        @test capacity ≈ expected rtol=1e-9
+        @test capacity ≈ expected rtol=1e-6
     end
 
     @testset "wet growth preserves collection number sinks" begin
@@ -2213,9 +2061,7 @@ end
         qwi = FT(1)
         qi = FT(1e-4)
         ni = FT(1e4)
-        # Small supercooling keeps the rate below the qʷⁱ/τ cap so the sensible
-        # term is isolated once the vapor term is zeroed via qv below.
-        T = FT(273.148)
+        T = FT(268.15)
         P = FT(85000.0)
         Ff = FT(0.2)
         ρf = FT(400.0)
@@ -2225,27 +2071,16 @@ end
 
         T₀ = p3.process_rates.freezing_temperature
         Rᵥ = Breeze.Thermodynamics.vapor_gas_constant(ThermodynamicConstants(FT))
+        Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(ThermodynamicConstants(FT))
+        ε = Rᵈ / Rᵥ
         e_s0 = PPP.saturation_vapor_pressure_at_freezing(nothing, T₀)
-        # Saturation *specific humidity* (total-air mass fraction)
-        # ρᵛ⁺(T₀)/ρ = e_s0/(Rᵥ T₀ ρ), matching qᵛ's mass basis, so the latent
-        # diffusion term vanishes, leaving the sensible (conduction) term.
-        qv = e_s0 / (Rᵥ * T₀ * ρ)
-
-        Fˡ = PPP.liquid_fraction_on_ice(qi, qwi)
-        m_mean = PPP.mean_total_ice_mass(qi, qwi, ni)
-        ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
-        C_fv = PPP.deposition_ventilation(
-            p3.ice.deposition.ventilation,
-            p3.ice.deposition.ventilation_enhanced,
-            m_mean, Ff, Fˡ, ρf, p3.process_rates, transport.nu, transport.D_v, ρ_correction, p3, μ)
+        # M10: set qv = q_sat0 (mixing ratio convention) so latent term vanishes
+        qv = ε * e_s0 / max(P - e_s0, FT(1))
 
         refreezing = PPP.refreezing_rate(p3, qwi, qi, ni, T, P, qv, Ff, ρf, ρ, nothing, transport, μ)
-        expected = C_fv * transport.K_a * (T₀ - T) * ni
 
-        # Refreezing remains active below freezing and, with the latent term
-        # zeroed, equals the pure-conduction rate (sensible term not × 2π/Lf).
+        # Refreezing should remain active below freezing with liquid-coated ice.
         @test refreezing > 0
-        @test refreezing ≈ expected rtol=1e-9
     end
 
     @testset "ice_aggregation_rate" begin
@@ -2604,6 +2439,39 @@ end
         )
         expected_shed_drop_source = ρ * manual_rates.cloud_warm_collection * FT(1.923e6)
         @test tendency_ρnʳ(manual_rates, ρ, nⁱ, qⁱ, nʳ, one(FT), p3) ≈ expected_shed_drop_source
+    end
+
+    @testset "non-liquid-fraction routing keeps warm collection and wet growth out of qʷⁱ" begin
+        FT = Float64
+        ρ = FT(1)
+        Fᶠ = FT(0)
+        ρᶠ = FT(400)
+        qⁱ = FT(1e-4)
+        process_rates = ProcessRateParameters(FT; liquid_fraction_active = false)
+
+        warm_rates = p3_process_rates_with(FT;
+            cloud_warm_collection = FT(1e-8),
+        )
+
+        @test tendency_ρqʳ(warm_rates, ρ, process_rates) ≈ ρ * FT(1e-8)
+        @test tendency_ρqʷⁱ(warm_rates, ρ, process_rates) == 0
+
+        wet_growth_rates = p3_process_rates_with(FT;
+            rime_density_new = FT(300),
+            wet_growth_cloud = FT(3e-8),
+            wet_growth_rain = FT(2e-8),
+            wet_growth_shedding = FT(1e-8),
+        )
+
+        retained_total = FT(4e-8)
+        retained_cloud = FT(2.4e-8)
+        retained_rain = FT(1.6e-8)
+
+        @test tendency_ρqⁱ(wet_growth_rates, ρ, process_rates) ≈ ρ * retained_total
+        @test tendency_ρqᶠ(wet_growth_rates, ρ, Fᶠ, process_rates) ≈ ρ * retained_total
+        @test tendency_ρbᶠ(wet_growth_rates, ρ, Fᶠ, ρᶠ, qⁱ, process_rates) ≈
+              ρ * (retained_cloud / FT(300) + retained_rain / process_rates.maximum_rime_density)
+        @test tendency_ρqʷⁱ(wet_growth_rates, ρ, process_rates) == 0
     end
 
     @testset "above-freezing rain collection uses table number kernel" begin

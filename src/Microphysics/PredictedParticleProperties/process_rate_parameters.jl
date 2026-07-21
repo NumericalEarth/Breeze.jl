@@ -150,6 +150,11 @@ struct ProcessRateParameters{FT}
     # all sink rates for that species are rescaled proportionally.
     sink_limiting_timescale :: FT            # dt_safety [s]
 
+    # Coupled donor-budget limiter
+    # Fixed re-projection passes for the coupled dry-ice, rain, total-ice,
+    # and coating-water sink budgets. Must be positive.
+    coupled_sink_limiting_iterations :: Int
+
     # Global ice number limiter (Fortran P3 v5.5.0 impose_max_Ni)
     # Applied as a relaxation sink whenever nⁱ × ρ > N_max.
     maximum_ice_number_density :: FT         # Nᵢ_max [1/m³]
@@ -217,7 +222,9 @@ typeof(params)
 ProcessRateParameters{Float64}
 ```
 
-All parameters are keyword arguments with physically-based defaults.
+All parameters are keyword arguments with physically-based defaults. The coupled
+donor-budget limiter uses four re-projection passes by default; set
+`coupled_sink_limiting_iterations` to tune that count.
 """
 function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Physical constants
@@ -372,6 +379,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Sink-limiting safety timescale
         sink_limiting_timescale = 10.0, # dt_safety [s]
 
+        # Coupled donor-budget limiter
+        coupled_sink_limiting_iterations::Integer = 4,
+
         # Global ice number limiter (Fortran P3 v5.5.0 impose_max_Ni)
         # Relaxation sink drains nⁱ toward N_max/ρ when nⁱ × ρ > N_max.
         maximum_ice_number_density = 2e6,  # [1/m³], Fortran impose_max_Ni cap
@@ -398,6 +408,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # (from small particles that fully melt). This floor approximates that
         # effect without requiring size-threshold table integrals (f1pr24-f1pr27).
         minimum_complete_melting_fraction = 0.2)
+
+    coupled_sink_limiting_iterations > 0 ||
+        throw(ArgumentError("coupled_sink_limiting_iterations must be positive"))
 
     return ProcessRateParameters(
         FT(liquid_water_density),
@@ -480,6 +493,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(rain_lambda_min),
         FT(rain_lambda_max),
         FT(sink_limiting_timescale),
+        Int(coupled_sink_limiting_iterations),
         FT(maximum_ice_number_density),
         FT(liquid_fraction_small),
         FT(qsmall_dry),

@@ -82,6 +82,34 @@ using Oceananigans.TimeSteppers: update_state!
         @test second_rain_source != first_rain_source
     end
 
+    @testset "P3 square-root moment uses the mean Z/N fall speed" begin
+        FT = Float64
+        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 3),
+                               extent = (100, 100, 150))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = FT(101325),
+                                         potential_temperature = FT(268))
+        dynamics = AnelasticDynamics(reference_state)
+        p3 = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)
+        model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                                microphysics = p3)
+
+        set!(model; θ = FT(268), qᵛ = FT(0.003), qⁱ = FT(1e-4),
+             nⁱ = FT(1e5), qᶠ = FT(2e-5), enforce_mass_conservation = false)
+        set!(model.microphysical_fields.ρz̃ⁱ, (x, y, z) -> FT(1e-8) * (1 + z / 150))
+        update_state!(model)
+
+        μ = model.microphysical_fields
+        number_velocity = Array(interior(μ.wⁱₙ))
+        reflectivity_velocity = Array(interior(μ.wⁱ_z))
+        square_root_velocity = Array(interior(μ.wⁱ_z̃))
+        square_root_tendency = Array(interior(model.timestepper.Gⁿ.ρz̃ⁱ))
+
+        @test square_root_velocity ≈ (number_velocity + reflectivity_velocity) / 2
+        @test all(isfinite, square_root_tendency)
+    end
+
     @testset "P3 initialization is consistent for total and dry density inputs" begin
         FT = Float64
         grid = RectilinearGrid(default_arch, FT; size = (5, 5, 5), halo = (5, 5, 5),
