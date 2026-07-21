@@ -320,7 +320,9 @@ using Test
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
             materialize_terrain!(grid, h)
-            dynamics = CompressibleDynamics(ExplicitTimeStepping(); slope_stencil = stencil)
+            dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                            slope_stencil = stencil,
+                                            reference_state = nothing)
             model = AtmosphereModel(grid; dynamics)
 
             for i in 1:Nx, k in 1:Nz
@@ -357,7 +359,9 @@ using Test
 
             h(x) = 200 * exp(-x^2 / 2000^2)
             materialize_terrain!(grid, h)
-            dynamics = CompressibleDynamics(ExplicitTimeStepping(); slope_stencil = SlopeInsideInterpolation())
+            dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                            slope_stencil = SlopeInsideInterpolation(),
+                                            reference_state = nothing)
             model = AtmosphereModel(grid; dynamics)
 
             for i in 1:Nx, k in 1:Nz
