@@ -587,9 +587,9 @@ end
     end
 
     # `reset_reference_state!` is a no-op for dynamics without a reference state (here a
-    # CompressibleDynamics built with no `reference_potential_temperature`).
+    # CompressibleDynamics built with `reference_state = nothing`, which disables it).
     @testset "set!(; compute_reference_state) is a no-op without a reference state" begin
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_state=nothing)
         model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
         @test model.dynamics.reference_state === nothing
 
@@ -632,10 +632,10 @@ end
              compute_reference_state=true,
              enforce_mass_conservation=false)
 
-        @test model.dynamics.terrain_reference_pressure ≈
-              truth_model.dynamics.terrain_reference_pressure rtol=1e-6
-        @test model.dynamics.terrain_reference_density ≈
-              truth_model.dynamics.terrain_reference_density rtol=1e-6
+        @test model.dynamics.reference_state.pressure ≈
+              truth_model.dynamics.reference_state.pressure rtol=1e-6
+        @test model.dynamics.reference_state.density ≈
+              truth_model.dynamics.reference_state.density rtol=1e-6
     end
 
     @testset "HorizontalMeanProfile interpolates linearly and clamps outside its range" begin

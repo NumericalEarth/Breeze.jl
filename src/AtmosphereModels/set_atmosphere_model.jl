@@ -182,9 +182,10 @@ Variables are set via keyword arguments. Supported variables include:
 - `compute_reference_state`: Whether to recompute the dynamics' hydrostatic reference state from
   the horizontal means of the just-set state (see [`set_to_mean!`](@ref)), before the
   mass-conservation correction. Default (`nothing`) defers to `auto_reset_reference_state(dynamics)`:
-  `true` for terrain-following compressible dynamics with no explicit reference profile (whose
-  reference is mandatory and best deduced from the initial state), `false` otherwise — including
-  terrain dynamics given an explicit reference, which is preserved untouched. Pass `true`/`false`
+  `true` for compressible dynamics with no explicit reference profile (the default
+  `reference_state = :auto`, whose reference is built by default and best deduced from the initial
+  state, on both height-coordinate and terrain-following grids), `false` otherwise — including
+  dynamics given an explicit reference profile, which is preserved untouched. Pass `true`/`false`
   to override. A no-op for dynamics without a reference state. Useful when initializing from an
   analysis whose mean profile should define the perturbation base state.
 

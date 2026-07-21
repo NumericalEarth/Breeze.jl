@@ -54,7 +54,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             # Isolate the pure slope-term reduction: disable the terrain reference (on by default
             # for terrain grids) so both branches difference the full pressure and the flat
             # (h ≡ 0) terrain path matches the height path to machine precision.
-            dynamics = CompressibleDynamics(time_discretization; terrain_reference=false)
+            dynamics = CompressibleDynamics(time_discretization; reference_state=nothing)
             model = AtmosphereModel(grid; dynamics)
             set!(model,
                  ρ=1,
@@ -140,7 +140,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         reference_potential_temperature=300)
         model = AtmosphereModel(grid; dynamics)
-        set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
+        set!(model, θ=300, ρ=model.dynamics.reference_state.density, u=0, w=0)
 
         @test model.timestepper isa AcousticRungeKutta3
         @test transport_velocities(model).w === model.timestepper.substepper.time_averaged_velocities.w
@@ -217,7 +217,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(acoustic_cfl=acoustic_cfl);
                                         reference_potential_temperature=300)
         model = AtmosphereModel(model_grid; dynamics)
-        set!(model, θ=300, ρ=model.dynamics.terrain_reference_density, u=0, w=0)
+        set!(model, θ=300, ρ=model.dynamics.reference_state.density, u=0, w=0)
 
         @test model.timestepper.substepper.substeps === nothing
         time_step!(model, Δt)
@@ -249,7 +249,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             model = AtmosphereModel(grid; dynamics)
             set!(model,
                  θ=300,
-                 ρ=model.dynamics.terrain_reference_density,
+                 ρ=model.dynamics.reference_state.density,
                  u=(x, z) -> 1 + 0.1 * sin(2π * x / Lx),
                  w=0)
 
@@ -343,7 +343,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                 thermodynamic_constants=constants)
 
         set!(model,
-             ρ = model.dynamics.terrain_reference_density,
+             ρ = model.dynamics.reference_state.density,
              θ = (x, z) -> θ_of_z(z),
              u = U,
              v = 0,
@@ -414,7 +414,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         model = AtmosphereModel(grid; dynamics)
         set!(model,
              θ=300,
-             ρ=model.dynamics.terrain_reference_density,
+             ρ=model.dynamics.reference_state.density,
              u=(x, z) -> 1 + 1e-3 * sin(2π * x / Lx),
              v=0,
              w=0)
@@ -450,7 +450,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         model = AtmosphereModel(grid; dynamics)
         set!(model,
              θ=300,
-             ρ=model.dynamics.terrain_reference_density,
+             ρ=model.dynamics.reference_state.density,
              u=(x, z) -> 0.1 * sin(2π * x / Lx),
              w=0)
 

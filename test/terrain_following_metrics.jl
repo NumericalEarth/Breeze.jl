@@ -290,7 +290,7 @@ using Test
         # constant *total* pressure has zero gradient), which hold for the full-pressure form.
         # Disable the terrain reference (on by default for terrain grids) so the operator
         # differences the full pressure rather than a perturbation about pᵣ(z).
-        dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_reference=false)
+        dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state=nothing)
         model = AtmosphereModel(grid; dynamics)
 
         set!(model, ρ=1, θ=300, u=1, w=0)

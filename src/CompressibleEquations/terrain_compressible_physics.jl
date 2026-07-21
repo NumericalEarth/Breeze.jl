@@ -486,8 +486,8 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
             Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
             dynamics.pressure,
             dynamics.total_density,
-            dynamics.terrain_reference_pressure,
-            dynamics.terrain_reference_density,
+            reference_pressure_field(dynamics.reference_state),
+            reference_density_field(dynamics.reference_state),
             grid, dynamics, g, vertical_pressure_tendency_factor)
 
     return nothing
@@ -551,9 +551,17 @@ end
 
 @inline perturbation_pressure(i, j, k, grid, p, pᵣ) = @inbounds p[i, j, k] - pᵣ[i, j, k]
 
+# Extract the reference pressure/density fields (or `nothing` when the reference is disabled) from
+# the single `reference_state` slot, so the terrain PGF/buoyancy kernels keep dispatching on
+# `::Nothing` (full pressure) vs a field (perturbation form).
+@inline reference_pressure_field(::Nothing) = nothing
+@inline reference_pressure_field(ref::ExnerReferenceState) = ref.pressure
+@inline reference_density_field(::Nothing) = nothing
+@inline reference_density_field(ref::ExnerReferenceState) = ref.density
+
 @inline function AtmosphereModels.x_pressure_gradient(i, j, k, grid, d::TerrainCompressibleDynamics)
     stencil = d.terrain_metrics.pressure_gradient_stencil
-    return terrain_x_pressure_gradient(i, j, k, grid, d, stencil, d.terrain_reference_pressure)
+    return terrain_x_pressure_gradient(i, j, k, grid, d, stencil, reference_pressure_field(d.reference_state))
 end
 
 ##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂xᶠᶜᶜ
@@ -603,7 +611,7 @@ end
 
 @inline function AtmosphereModels.y_pressure_gradient(i, j, k, grid, d::TerrainCompressibleDynamics)
     stencil = d.terrain_metrics.pressure_gradient_stencil
-    return terrain_y_pressure_gradient(i, j, k, grid, d, stencil, d.terrain_reference_pressure)
+    return terrain_y_pressure_gradient(i, j, k, grid, d, stencil, reference_pressure_field(d.reference_state))
 end
 
 ##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂yᶜᶠᶜ
@@ -717,31 +725,12 @@ end
 ##### where p' = p - pᵣ and ρ' = ρ - ρᵣ are small perturbations.
 #####
 
-@inline function AtmosphereModels.z_pressure_gradient(i, j, k, grid, d::TerrainCompressibleDynamics)
-    ∂z_p = ∂zᶜᶜᶠ(i, j, k, grid, d.pressure)
-    ∂z_pᵣ = terrain_∂z_reference_pressure(i, j, k, grid, d.terrain_reference_pressure)
-    return ∂z_p - ∂z_pᵣ
-end
-
-@inline terrain_∂z_reference_pressure(i, j, k, grid, ::Nothing) = zero(grid)
-@inline terrain_∂z_reference_pressure(i, j, k, grid, pᵣ) = ∂zᶜᶜᶠ(i, j, k, grid, pᵣ)
-
-@inline function AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid,
-                                                    dynamics::TerrainCompressibleDynamics,
-                                                    temperature,
-                                                    specific_moisture,
-                                                    microphysics,
-                                                    microphysical_fields,
-                                                    constants)
-    ρ_field = dynamics.total_density  # total air density: gravity acts on total mass
-    @inbounds ρ = ρ_field[i, j, k]
-    g = constants.gravitational_acceleration
-    ρᵣ = terrain_reference_density(i, j, k, dynamics.terrain_reference_density)
-    return -g * (ρ - ρᵣ)
-end
-
-@inline terrain_reference_density(i, j, k, ::Nothing) = false
-@inline terrain_reference_density(i, j, k, ρᵣ) = @inbounds ρᵣ[i, j, k]
+# The vertical pressure gradient `-∂(p - pᵣ)/∂z` and buoyancy `-g(ρ - ρᵣ)` are identical on
+# terrain-following and height-coordinate grids once both read the single grid-polymorphic
+# `reference_state` — the 3D reference field simply broadcasts nothing and indexes `[i, j, k]`.
+# The flat `z_pressure_gradient(::CompressibleDynamics)` and `buoyancy_forceᶜᶜᶜ(::CompressibleDynamics)`
+# methods therefore serve terrain models too (via `∂z_reference_pressureᶜᶜᶠ`/`reference_densityᶜᶜᶜ`);
+# no terrain-specific override is needed.
 
 #####
 ##### 3D terrain reference state via per-column discrete Exner integration
@@ -855,7 +844,7 @@ would otherwise be dominated by the near-cancellation of two large terms.
 The reference pressure is also used for the perturbation horizontal pressure gradient,
 reducing the terrain-following PGF error.
 """
-function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢᵗ, constants)
+function compute_terrain_reference_state!(pᵣ, ρᵣ, πᵣ, grid, p₀, ref_spec, pˢᵗ, constants)
     # The 3D reference state is filled once, at construction. Each column is an upward,
     # serial-in-`k` discrete-hydrostatic Newton solve that evaluates the (possibly
     # functional) reference θ — and qᵛ for moist columns — at the physical height of
@@ -881,6 +870,7 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢ
     FT = eltype(grid)
     p_host = zeros(FT, Nx, Ny, Nz)
     ρ_host = zeros(FT, Nx, Ny, Nz)
+    π_host = zeros(FT, Nx, Ny, Nz)
 
     for j in 1:Ny, i in 1:Nx
         p⁻ = zero(FT)
@@ -928,6 +918,7 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢ
             ρₖ = pₖ / (Rᵐₖ * θₖ * Πₖ)
             @inbounds p_host[i, j, k] = pₖ
             @inbounds ρ_host[i, j, k] = ρₖ
+            @inbounds π_host[i, j, k] = Πₖ
 
             p⁻ = pₖ
             ρ⁻ = ρₖ
@@ -938,10 +929,38 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢ
     arch = architecture(grid)
     copyto!(Oceananigans.interior(pᵣ), Oceananigans.Architectures.on_architecture(arch, p_host))
     copyto!(Oceananigans.interior(ρᵣ), Oceananigans.Architectures.on_architecture(arch, ρ_host))
+    copyto!(Oceananigans.interior(πᵣ), Oceananigans.Architectures.on_architecture(arch, π_host))
     fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
+    fill_halo_regions!(πᵣ)
     return nothing
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Build the single 3D `ExnerReferenceState` for a terrain-following compressible model from an
+explicit reference profile `ref_spec` (a `reference_potential_temperature` — constant or `θ(z)` —
+optionally with `reference_vapor_mass_fraction`). Its `pressure`/`density`/`exner_function` are
+horizontally-varying `CenterField`s in per-column discrete hydrostatic balance
+(`compute_terrain_reference_state!`); only `pressure`/`density` are read by the terrain kernels,
+but `exner_function` is filled for consistency with the 1D-column form.
+"""
+function terrain_exner_reference_state(grid, surface_pressure, ref_spec, standard_pressure, constants)
+    FT = eltype(grid)
+    pᵣ = CenterField(grid)
+    ρᵣ = CenterField(grid)
+    πᵣ = CenterField(grid)
+    compute_terrain_reference_state!(pᵣ, ρᵣ, πᵣ, grid, surface_pressure, ref_spec, standard_pressure, constants)
+    θᵣ, _ = terrain_reference_profiles(ref_spec)
+    θ₀ = convert(FT, evaluate_profile(θᵣ, 0))
+    return ExnerReferenceState(convert(FT, surface_pressure), θ₀, convert(FT, standard_pressure), pᵣ, ρᵣ, πᵣ)
+end
+
+# Terrain-following method of the reference-state builder (the height-coordinate method is in
+# `compressible_dynamics.jl`): an explicit profile builds the 3D `ExnerReferenceState`.
+build_reference_state(grid, ::TerrainMetrics, ref_spec, surface_pressure, standard_pressure, constants) =
+    terrain_exner_reference_state(grid, surface_pressure, ref_spec, standard_pressure, constants)
 
 """
 $(TYPEDSIGNATURES)
@@ -962,19 +981,20 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Recompute the 3D terrain reference pressure/density in place from the horizontal-mean state,
-via `compute_terrain_reference_state!`. Unlike the Exner/anelastic `set_to_mean!` reset, no
-`update_state!` follows: the terrain reference feeds only the buoyancy and pressure-gradient
-tendencies, not any diagnostic field. A no-op if the dynamics carries no terrain reference.
+Recompute the terrain-following model's 3D `ExnerReferenceState` in place from the height-resolved
+horizontal-mean state, via `compute_terrain_reference_state!`. Unlike the flat Exner / anelastic
+`set_to_mean!` reset, this specializes on the *model* (rather than the reference type) because the
+terrain mean must be taken at constant physical height (`horizontal_mean_profile`), not per
+computational level. No `update_state!` follows: the terrain reference feeds only the buoyancy and
+pressure-gradient tendencies, not any diagnostic field. A no-op if the dynamics carries no reference.
 """
 function AtmosphereModels.reset_reference_state!(model::TerrainCompressibleModel)
     dynamics = model.dynamics
-    pᵣ = dynamics.terrain_reference_pressure
-    ρᵣ = dynamics.terrain_reference_density
-    (pᵣ === nothing || ρᵣ === nothing) && return nothing
+    ref = dynamics.reference_state
+    ref === nothing && return nothing
 
     ref_spec = terrain_reference_mean_profiles(model)
-    compute_terrain_reference_state!(pᵣ, ρᵣ, model.grid,
+    compute_terrain_reference_state!(ref.pressure, ref.density, ref.exner_function, model.grid,
                                      surface_pressure(dynamics),
                                      ref_spec,
                                      standard_pressure(dynamics),
@@ -982,10 +1002,3 @@ function AtmosphereModels.reset_reference_state!(model::TerrainCompressibleModel
 
     return nothing
 end
-
-# Terrain-following compressible dynamics carries a mandatory reference state. When no explicit
-# reference profile was supplied, it is best deduced from the initial state, so `set!` recomputes
-# it from the height-resolved horizontal mean by default. When the user did supply an explicit
-# reference profile, that profile is authoritative and `set!` leaves it untouched.
-AtmosphereModels.auto_reset_reference_state(dynamics::TerrainCompressibleDynamics) =
-    dynamics.reference_from_state

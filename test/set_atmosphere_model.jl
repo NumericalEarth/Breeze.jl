@@ -83,12 +83,12 @@ end
     # built with an explicit `reference_potential_temperature`, so `set!` must preserve that
     # reference (no auto-reset) — hence no `compute_reference_state` keyword here.
     set!(model,
-         ρ = model.dynamics.terrain_reference_density,
+         ρ = model.dynamics.reference_state.density,
          θ = (x, z) -> θ_profile(z),
          enforce_mass_conservation = false)
 
     p = model.dynamics.pressure
-    pᵣ = model.dynamics.terrain_reference_pressure
+    pᵣ = model.dynamics.reference_state.pressure
     @test @allowscalar maximum(abs, interior(p) .- interior(pᵣ)) < FT(1e-6)
 end
 

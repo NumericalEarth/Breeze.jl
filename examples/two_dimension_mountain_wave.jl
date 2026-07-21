@@ -256,10 +256,10 @@ model = AtmosphereModel(grid; dynamics, advection = WENO(order=9))
 # integration. This is essential for compressible models on terrain-following grids:
 # the equation of state alone does not produce a pressure field in discrete hydrostatic
 # balance. Because we passed `reference_potential_temperature` to `CompressibleDynamics`,
-# the model has already computed this discrete reference state for us in `terrain_reference_density`!
+# the model has already computed this discrete reference state for us in `reference_state.density`!
 
 set!(model,
-     ρ = model.dynamics.terrain_reference_density,
+     ρ = model.dynamics.reference_state.density,
      θ = potential_temperature_profile,
      u = U,
      v = 0,
