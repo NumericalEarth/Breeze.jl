@@ -348,6 +348,7 @@ end
 
 using Breeze.Thermodynamics:
     TetensFormula,
+    FlatauPolynomial,
     saturation_vapor_pressure,
     PlanarLiquidSurface,
     PlanarIceSurface,
@@ -454,6 +455,52 @@ end
     end
 end
 
+@testset "Flatau vs Clausius-Clapeyron comparison [$FT]" for FT in test_float_types()
+    flatau = FlatauPolynomial(FT)
+    thermo_flatau = ThermodynamicConstants(FT; saturation_vapor_pressure=flatau)
+    thermo_cc = ThermodynamicConstants(FT) # Default is Clausius-Clapeyron
+
+    # the polynomial fits track the integrated CC form closely over the atmospheric range
+    for T in FT.((240, 260, 285, 300, 310))
+        pˡ_flatau = saturation_vapor_pressure(T, thermo_flatau, PlanarLiquidSurface())
+        pˡ_cc = saturation_vapor_pressure(T, thermo_cc, PlanarLiquidSurface())
+        @test pˡ_flatau ≈ pˡ_cc rtol=FT(0.01)
+    end
+    for T in FT.((200, 240, 260, 273))
+        pⁱ_flatau = saturation_vapor_pressure(T, thermo_flatau, PlanarIceSurface())
+        pⁱ_cc = saturation_vapor_pressure(T, thermo_cc, PlanarIceSurface())
+        @test pⁱ_flatau ≈ pⁱ_cc rtol=FT(0.05)
+    end
+
+    # far below the fit range the argument is clamped rather than extrapolated
+    @test saturation_vapor_pressure(FT(150), thermo_flatau, PlanarLiquidSurface()) ==
+          saturation_vapor_pressure(FT(193.16), thermo_flatau, PlanarLiquidSurface())
+
+    # mixed-phase surface: λ-weighted blend of the liquid and ice polynomials. Regression for a
+    # missing `saturation_vapor_pressure(..., ::PlanarMixedPhaseSurface)` method — without it,
+    # `SaturationAdjustment` (which uses `MixedPhaseEquilibrium`) throws a `MethodError`, which also
+    # breaks GPU kernel codegen (`InvalidIRError`).
+    T_mixed = FT(268)
+    pˡ = saturation_vapor_pressure(T_mixed, thermo_flatau, PlanarLiquidSurface())
+    pⁱ = saturation_vapor_pressure(T_mixed, thermo_flatau, PlanarIceSurface())
+    for λ in (FT(0), FT(0.5), FT(1))
+        surface = PlanarMixedPhaseSurface(λ)
+        @test saturation_vapor_pressure(T_mixed, thermo_flatau, surface) ≈ λ * pˡ + (1 - λ) * pⁱ
+    end
+end
+
+@testset "Flatau mixed-phase SVP compiles on device [$FT]" for FT in test_float_types()
+    flatau = FlatauPolynomial(FT)
+    thermo = ThermodynamicConstants(FT; saturation_vapor_pressure = flatau)
+    surface = PlanarMixedPhaseSurface(FT(0.4))
+    # Broadcasting over a device array compiles a kernel that calls the mixed-phase SVP. On a GPU this
+    # is the exact codegen that failed (InvalidIRError from a dynamic MethodError throw) when the
+    # PlanarMixedPhaseSurface method was missing — SaturationAdjustment uses it every step.
+    Ts = Oceananigans.Architectures.on_architecture(default_arch, collect(FT, 250:5:290))
+    p = saturation_vapor_pressure.(Ts, Ref(thermo), Ref(surface))
+    @test all(isfinite, Array(p))
+end
+
 @testset "Tetens vs Clausius-Clapeyron comparison [$FT]" for FT in test_float_types()
     tetens = TetensFormula(FT)
     thermo_tetens = ThermodynamicConstants(FT; saturation_vapor_pressure=tetens)
@@ -490,7 +537,7 @@ using Breeze.AtmosphereModels: BackgroundAtmosphere,
         @test atm.CO₂ ≈ 420e-6
         @test atm.CH₄ ≈ 1.8e-6
         @test atm.N₂O ≈ 330e-9
-        @test atm.O₃ == 0.0
+        @test atm.O₃ === Breeze.standard_ozone_profile
         @test atm.CFC₁₁ == 0.0
     end
 
@@ -499,6 +546,14 @@ using Breeze.AtmosphereModels: BackgroundAtmosphere,
         @test atm.CO₂ ≈ 400e-6
         @test atm.O₃ ≈ 30e-9
         @test atm.N₂ ≈ 0.78084  # default preserved
+    end
+
+    @testset "standard_ozone_profile" begin
+        O₃ = Breeze.standard_ozone_profile
+        @test O₃(0) ≈ 3e-8 rtol=1e-3           # tropospheric background at the surface
+        @test O₃(25e3) ≈ 8e-6 rtol=1e-3        # stratospheric peak
+        @test O₃(50e3) < O₃(25e3)              # decays above the peak
+        @test all(z -> O₃(z) > 0, 0:1e3:60e3)
     end
 
     @testset "Function-based O₃" begin
@@ -564,4 +619,33 @@ end
     # Inline Nothing accessor
     grid = RectilinearGrid(default_arch; size=4, z=(0, 100), topology=(Flat, Flat, Bounded))
     @test radiation_flux_divergence(1, 1, 1, grid, nothing) == zero(eltype(grid))
+end
+
+#####
+##### materialize_surface_property
+#####
+
+using Breeze.AtmosphereModels: materialize_surface_property
+
+# Extension point: downstream packages materialize property sources against grid + solar position.
+struct TestSurfacePropertySource end
+Breeze.AtmosphereModels.materialize_surface_property(::TestSurfacePropertySource, grid, solar_position) =
+    convert(eltype(grid), 1//2)
+
+@testset "materialize_surface_property [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1), y=(0, 1), z=(0, 1))
+
+    x = materialize_surface_property(0.2, grid)
+    @test x isa FT
+    @test x ≈ 0.2
+
+    α = CenterField(grid)
+    @test materialize_surface_property(α, grid) === α
+
+    # The three-argument form falls back to the two-argument form...
+    @test materialize_surface_property(0.2, grid, nothing) === materialize_surface_property(0.2, grid)
+
+    # ...and dispatches to source-specific methods.
+    @test materialize_surface_property(TestSurfacePropertySource(), grid, nothing) == FT(0.5)
 end
