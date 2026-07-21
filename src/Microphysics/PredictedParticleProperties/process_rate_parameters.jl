@@ -389,13 +389,12 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Liquid fraction clipping (Milbrandt et al. 2025)
         liquid_fraction_small = 0.01,  # Fortran liqfracsmall
 
-        # M12(c): Tiny-ice threshold for warm pre-processing (Fortran qsmall_dry).
-        # Fortran has qsmall_dry1 = 1e-8 (fast mode) and qsmall_dry2 = 1e-12 (liquid frac mode).
-        # Ice with qi ∈ [qsmall, qsmall_dry) at T ≥ T₀ is converted to rain.
-        qsmall_dry = 1e-12,  # [kg/kg], Fortran qsmall_dry2
-
         # Liquid fraction mode (Fortran log_LiquidFrac)
         liquid_fraction_active = true,
+
+        # M12(c): Tiny-ice threshold for warm pre-processing (Fortran qsmall_dry).
+        # Ice with qi ∈ [qsmall, qsmall_dry) at T ≥ T₀ is converted to rain.
+        qsmall_dry = 1e-12,
 
         # Predicted supersaturation (Fortran log_predictSsat, default .false.)
         predict_supersaturation = false,

@@ -67,13 +67,11 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = z
 
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    nⁱ_eff = clamp_positive(nⁱ)
+    nⁱ_eff = max(clamp_positive(nⁱ), p3.minimum_number_mixing_ratio)
 
-    # Thresholds
-    qⁱ_threshold = FT(1e-14)
-    nⁱ_threshold = FT(1e2)
-
-    aggregation_active = (qⁱ_total > qⁱ_threshold) & (nⁱ_eff > nⁱ_threshold)
+    # Fortran gates aggregation on bulk ice mass only. It floors the active
+    # category's number to nsmall before evaluating the collection kernel.
+    aggregation_active = qⁱ_total >= p3.minimum_mass_mixing_ratio
 
     # Temperature-dependent sticking efficiency (linear ramp)
     # Cold ice is less sticky, near-melting ice is very sticky

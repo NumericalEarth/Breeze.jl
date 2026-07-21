@@ -19,8 +19,12 @@ using Breeze.Thermodynamics: temperature,
                              density,
                              liquid_latent_heat,
                              ice_latent_heat,
+                             mixture_gas_constant,
                              mixture_heat_capacity,
                              vapor_gas_constant,
+                             LiquidIcePotentialTemperatureState,
+                             LiquidIceDensityState,
+                             StaticEnergyState,
                              MoistureMassFractions,
                              ThermodynamicConstants
 using DocStringExtensions: TYPEDSIGNATURES
@@ -30,6 +34,17 @@ using DocStringExtensions: TYPEDSIGNATURES
 #####
 
 @inline clamp_positive(x) = max(0, x)
+
+@inline p3_air_pressure(𝒰::LiquidIcePotentialTemperatureState, constants) =
+    𝒰.reference_pressure
+
+@inline p3_air_pressure(𝒰::StaticEnergyState, constants) = 𝒰.reference_pressure
+
+@inline function p3_air_pressure(𝒰::LiquidIceDensityState, constants)
+    q = 𝒰.moisture_mass_fractions
+    Rᵐ = mixture_gas_constant(q, constants)
+    return 𝒰.density * Rᵐ * temperature(𝒰, constants)
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -318,6 +333,9 @@ end
     return clamp_positive(qʷⁱ) / qⁱ_total
 end
 
+@inline active_liquid_on_ice(p3, qʷⁱ) =
+    ifelse(p3.process_rates.liquid_fraction_active, qʷⁱ, zero(qʷⁱ))
+
 @inline function mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
     FT = typeof(qⁱ)
     return safe_divide(max(total_ice_mass(qⁱ, qʷⁱ), FT(1e-20)),
@@ -374,24 +392,58 @@ end
 
 @inline function ice_mean_density_for_bounds(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
     FT = typeof(qⁱ_total)
-    m̄ = safe_divide(max(qⁱ_total, FT(1e-20)), max(nⁱ, FT(1e-16)), FT(1e-20))
-    log_mean_mass = log10(max(m̄, FT(1e-20)))
+    m̄ = safe_divide(qⁱ_total, nⁱ, one(FT))
+    log_mean_mass = log10(ifelse(m̄ > 0, m̄, one(FT)))
     return ice_table.bulk_properties.mean_density(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
 end
 
-@inline function bound_ice_sixth_moment(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+@inline function ice_mean_density(shape_table::P3ThreeMomentShapeTable,
+                                  ice_table::P3IceIntegralsTable,
+                                  qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
     FT = typeof(qⁱ_total)
-    has_ice = (qⁱ_total > FT(1e-20)) & (nⁱ > FT(1e-16))
-    ρ_bulk = ice_mean_density_for_bounds(ice_table, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+    qⁱ_lookup = ifelse(qⁱ_total > 0, qⁱ_total, one(FT))
+    nⁱ_lookup = ifelse(nⁱ > 0, nⁱ, one(FT))
+    zⁱ_lookup = clamp(zⁱ, FT(1e-35), one(FT))
+    return mean_density_lookup(shape_table, qⁱ_lookup, nⁱ_lookup, zⁱ_lookup,
+                               Fᶠ, Fˡ, ρᶠ)
+end
+
+@inline function ice_mean_density(::Nothing, ice_table::P3IceIntegralsTable,
+                                  qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+    return ice_mean_density_for_bounds(ice_table, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+end
+
+@inline function ice_mean_density(p3, qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+    return ice_mean_density(three_moment_shape_table(p3), ice_integrals_table(p3),
+                            qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+end
+
+@inline function bound_ice_sixth_moment_with_density(qⁱ_total, nⁱ, zⁱ, ρ_mean)
+    FT = typeof(qⁱ_total)
+    has_ice = (qⁱ_total > 0) & (nⁱ > 0)
     μ_bounds = ThreeMomentClosure(FT)
-    z_bounded = enforce_z_bounds(clamp_positive(zⁱ), qⁱ_total, nⁱ, ρ_bulk, μ_bounds.μmin, μ_bounds.μmax)
+    z_bounded = enforce_z_bounds(clamp_positive(zⁱ), qⁱ_total, nⁱ, ρ_mean,
+                                 μ_bounds.μmin, μ_bounds.μmax)
     return ifelse(has_ice, z_bounded, zero(FT))
+end
+
+@inline function bound_ice_sixth_moment(shape_table, ice_table::P3IceIntegralsTable,
+                                        qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+    ρ_bulk = ice_mean_density(shape_table, ice_table, qⁱ_total, nⁱ, zⁱ,
+                              Fᶠ, Fˡ, ρᶠ, μ)
+    return bound_ice_sixth_moment_with_density(qⁱ_total, nⁱ, zⁱ, ρ_bulk)
+end
+
+@inline function bound_ice_sixth_moment(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+    return bound_ice_sixth_moment(nothing, ice_table, qⁱ_total, nⁱ, zⁱ,
+                                  Fᶠ, Fˡ, ρᶠ, μ)
 end
 
 @inline bound_ice_sixth_moment(::Nothing, qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ) = clamp_positive(zⁱ)
 
 @inline function bound_ice_sixth_moment(p3, qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
-    return bound_ice_sixth_moment(ice_integrals_table(p3), qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+    return bound_ice_sixth_moment(three_moment_shape_table(p3), ice_integrals_table(p3),
+                                  qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
 end
 
 #####
@@ -423,16 +475,18 @@ end
 # 3-moment: diagnose μ from Table 3 (independent of mu axis)
 @inline function ice_shape_parameter(shape_table_3mom::P3ThreeMomentShapeTable, shape_table,
                                       qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
-    qⁱ_safe = max(qⁱ, eps(FT))
-    nⁱ_safe = max(nⁱ, eps(FT))
-    zⁱ_safe = max(zⁱ, eps(FT))
-    return shape_parameter_lookup(shape_table_3mom, qⁱ_safe, nⁱ_safe, zⁱ_safe, Fᶠ, Fˡ, ρᶠ)
+    qⁱ_lookup = ifelse(qⁱ > 0, qⁱ, one(FT))
+    nⁱ_lookup = ifelse(nⁱ > 0, nⁱ, one(FT))
+    zⁱ_lookup = clamp(zⁱ, FT(1e-35), one(FT))
+    return shape_parameter_lookup(shape_table_3mom, qⁱ_lookup, nⁱ_lookup,
+                                  zⁱ_lookup, Fᶠ, Fˡ, ρᶠ)
 end
 
 # 2-moment with tables: look up μ from Table 1 (mu_i_save)
 @inline function ice_shape_parameter(::Nothing, shape_table::P3Table5D,
                                       qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, FT)
-    log_m = log10(max(qⁱ / max(nⁱ, eps(FT)), eps(FT)))
+    m̄ = safe_divide(qⁱ, nⁱ, one(FT))
+    log_m = log10(ifelse(m̄ > 0, m̄, one(FT)))
     return shape_table(log_m, Fᶠ, Fˡ, ρᶠ, zero(FT))
 end
 

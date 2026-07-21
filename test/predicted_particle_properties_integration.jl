@@ -4,11 +4,30 @@ using Breeze
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.Microphysics.PredictedParticleProperties: PredictedParticlePropertiesMicrophysics
 
-using Oceananigans: CPU, CenterField, RectilinearGrid, set!, time_step!
+using Oceananigans: CPU, Center, CenterField, Field, GridFittedBottom,
+                     ImmersedBoundaryGrid, RectilinearGrid, set!, time_step!
 using Oceananigans.Fields: interior
 using Oceananigans.TimeSteppers: update_state!
 
 @testset "P3 atmosphere integration" begin
+    @testset "Hallett–Mossop surface temperature follows the immersed bottom" begin
+        FT = Float64
+        underlying_grid = RectilinearGrid(default_arch, FT;
+                                          size = (2, 1, 4),
+                                          x = (0, 2), y = (0, 1), z = (0, 4))
+        bottom_height = reshape(FT[0, 2], 2, 1)
+        grid = ImmersedBoundaryGrid(underlying_grid,
+                                    GridFittedBottom(bottom_height))
+        temperature = CenterField(grid)
+        surface_temperature = Field{Center, Center, Nothing}(grid)
+        set!(temperature, (x, y, z) -> FT(270) + z)
+
+        Breeze.Microphysics.PredictedParticleProperties.compute_p3_surface_temperature!(
+            surface_temperature, temperature, grid)
+
+        @test vec(Array(interior(surface_temperature))) ≈ FT[270.5, 272.5]
+    end
+
     @testset "P3 contributes only physical condensate mass to total density" begin
         p3 = PredictedParticlePropertiesMicrophysics(Float64)
         p3_three_moment = PredictedParticlePropertiesMicrophysics(Float64; three_moment_ice = true)
@@ -329,5 +348,31 @@ using Oceananigans.TimeSteppers: update_state!
                             sum(Array(interior(μ.ρqⁱ))) +
                             sum(Array(interior(μ.ρqʷⁱ)))
         @test total_water_after ≈ total_water_before rtol = 1e-8
+    end
+
+    @testset "P3 runs under the acoustic RK stepper" begin
+        FT = Float64
+        grid = RectilinearGrid(
+            CPU(), FT; size = (5, 5, 5), halo = (5, 5, 5),
+            extent = (100, 100, 100))
+        dynamics = CompressibleDynamics(
+            SplitExplicitTimeDiscretization();
+            surface_pressure = FT(1e5),
+            standard_pressure = FT(1e5),
+            reference_potential_temperature = z -> FT(280))
+        model = AtmosphereModel(
+            grid; dynamics,
+            microphysics = PredictedParticlePropertiesMicrophysics(FT),
+            timestepper = :AcousticRungeKutta3)
+        set!(model; ρᵈ = FT(1), T = FT(280), qᵛ = FT(0.01),
+             qᶜˡ = FT(1e-4), nᶜˡ = FT(1e8),
+             enforce_mass_conservation = false)
+
+        Δt = FT(0.01)
+        time_step!(model, Δt)
+        μ = model.microphysical_fields
+
+        @test all(isfinite, Array(interior(μ.ρqᶜˡ)))
+        @test all(isfinite, Array(interior(model.moisture_density)))
     end
 end

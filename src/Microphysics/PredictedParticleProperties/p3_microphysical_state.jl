@@ -1,12 +1,13 @@
-using Oceananigans: CenterField
-using Oceananigans.Fields: ZeroField
+using Oceananigans: CenterField, Field
+using Oceananigans.Fields: ZeroField, set!
+using Oceananigans.Grids: Center
 using Oceananigans.Operators: ℑzᵃᵃᶜ
 using DocStringExtensions: TYPEDSIGNATURES
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
 using Breeze.AtmosphereModels: AbstractMicrophysicalState
 
-using Breeze.Thermodynamics: MoistureMassFractions
+using Breeze.Thermodynamics: MoistureMassFractions, mixture_heat_capacity
 
 using Breeze: Microphysics
 
@@ -52,7 +53,7 @@ struct P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
     sˢᵃᵗ :: FT
     "Unactivated aerosol number concentration [1/kg] (zero when no aerosol prognostic)"
     nᵃ  :: FT
-    "Cell-center vertical velocity [m/s] — drives the dynamic supersaturation forcing A_w in `coupled_saturation_adjustment_rates`"
+    "Cell-center vertical velocity [m/s] (retained for the common microphysical-state interface)"
     w   :: FT
 end
 
@@ -258,9 +259,9 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     wⁱ_z = CenterField(grid) # Ice reflectivity-weighted terminal velocity
     wⁱ_z̃ = CenterField(grid) # Ice sqrt-moment terminal velocity
 
-    # Microphysical tendency cache (written in update_microphysical_auxiliaries!, read by
-    # grid_microphysical_tendency). Storing the microphysics-only contribution avoids 10×
-    # redundant compute_p3_process_rates calls — one per prognostic field per grid point.
+    # Microphysical tendency cache (written once per RK-stage tendency evaluation,
+    # then added to G). Storing the microphysics-only contribution avoids one
+    # compute_p3_process_rates call per prognostic field.
     cache_ρqᶜˡ = CenterField(grid)
     cache_ρnᶜˡ = CenterField(grid)
     cache_ρqʳ  = CenterField(grid)
@@ -275,11 +276,16 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     cache_ρqᵛ  = CenterField(grid)
     cache_ρnᵃ  = CenterField(grid)
 
+    # Hallett–Mossop uses the temperature at the lowest active atmospheric cell.
+    # Store one value per column rather than assuming that local k=1 is active.
+    surface_temperature = Field{Center, Center, Nothing}(grid)
+
     return (; ρqᶜˡ, ρnᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρz̃ⁱ, ρqʷⁱ, ρsˢᵃᵗ, ρnᵃ,
               qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, z̃ⁱ, qʷⁱ, sˢᵃᵗ, nᵃ, qᵛ,
               wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z, wⁱ_z̃,
               cache_ρqᶜˡ, cache_ρnᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
-              cache_ρqᶠ, cache_ρbᶠ, cache_ρz̃ⁱ, cache_ρqʷⁱ, cache_ρsˢᵃᵗ, cache_ρqᵛ, cache_ρnᵃ)
+              cache_ρqᶠ, cache_ρbᶠ, cache_ρz̃ⁱ, cache_ρqʷⁱ, cache_ρsˢᵃᵗ, cache_ρqᵛ,
+              cache_ρnᵃ, surface_temperature)
 end
 
 #####
@@ -365,6 +371,36 @@ end
 # accumulate ρz̃ⁱ above the physical bound while tendency math sees only the
 # bounded zⁱ — there is no restoring force and the prognostic drifts.
 # 2-moment (no `three_moment_shape_table`) is a compile-time no-op.
+struct P3IceMomentBounds{FT}
+    qⁱ_total :: FT
+    nⁱ_diagnostic :: FT
+    nⁱ :: FT
+    μ_ice :: FT
+    ρ_mean :: FT
+    zⁱ :: FT
+end
+
+@inline function p3_ice_moment_bounds(p3::P3, ρ, qⁱ_raw, nⁱ_raw, zⁱ,
+                                      Fᶠ, Fˡ, ρᶠ)
+    FT = typeof(ρ)
+    has_ice_mass = qⁱ_raw > FT(1e-20)
+    qⁱ_total = max(qⁱ_raw, FT(1e-20))
+    nⁱ_global = min(clamp_positive(nⁱ_raw),
+                    p3.process_rates.maximum_ice_number_density / ρ)
+    nⁱ_diagnostic = max(nⁱ_global, p3.minimum_number_mixing_ratio)
+    μ_ice = compute_ice_shape_parameter(p3, qⁱ_total, nⁱ_diagnostic, zⁱ,
+                                        Fᶠ, Fˡ, ρᶠ)
+    ρ_mean = ice_mean_density(p3, qⁱ_total, nⁱ_diagnostic, zⁱ,
+                              Fᶠ, Fˡ, ρᶠ, μ_ice)
+    nⁱ_bounded = bounded_ice_number(p3, qⁱ_total, nⁱ_diagnostic,
+                                    Fᶠ, Fˡ, ρᶠ, μ_ice)
+    nⁱ = ifelse(has_ice_mass, nⁱ_bounded, FT(0))
+    zⁱ_bounded = bound_ice_sixth_moment_with_density(qⁱ_total, nⁱ, zⁱ,
+                                                     ρ_mean)
+    return P3IceMomentBounds{FT}(qⁱ_total, nⁱ_diagnostic, nⁱ, μ_ice,
+                                 ρ_mean, zⁱ_bounded)
+end
+
 @inline clamp_ice_sixth_moment!(μ, i, j, k, p3::P3, ρ, ℳ) =
     clamp_ice_sixth_moment_dispatch(three_moment_shape_table(p3), μ, i, j, k, p3, ρ, ℳ)
 
@@ -372,15 +408,13 @@ end
 
 @inline function clamp_ice_sixth_moment_dispatch(::P3ThreeMomentShapeTable,
                                                    μ, i, j, k, p3::P3, ρ, ℳ)
-    FT = typeof(ρ)
-    qⁱ_total = total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ)
-    qⁱ_safe = max(qⁱ_total, FT(1e-20))
-    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
-    Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, ℳ.qʷⁱ)
-    μ_ice = compute_ice_shape_parameter(p3, qⁱ_safe, ℳ.nⁱ, ℳ.zⁱ,
-                                         rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
-    zⁱ_bounded = bound_ice_sixth_moment(p3, qⁱ_safe, ℳ.nⁱ, ℳ.zⁱ,
-                                         rime_state.Fᶠ, Fˡ, rime_state.ρᶠ, μ_ice)
+    qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
+    qⁱ_total = total_ice_mass(ℳ.qⁱ, qʷⁱ)
+    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, qʷⁱ)
+    bounds = p3_ice_moment_bounds(p3, ρ, qⁱ_total, ℳ.nⁱ, ℳ.zⁱ,
+                                  rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
+    zⁱ_bounded = bounds.zⁱ
     @inbounds μ.ρz̃ⁱ[i, j, k] = ρ * sqrt(max(0, zⁱ_bounded * ℳ.nⁱ))
     return P3MicrophysicalState(ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, ℳ.nʳ, ℳ.qⁱ, ℳ.nⁱ,
                                  ℳ.qᶠ, ℳ.bᶠ, zⁱ_bounded, ℳ.qʷⁱ, ℳ.sˢᵃᵗ, ℳ.nᵃ, ℳ.w)
@@ -417,11 +451,11 @@ After the moisture refactor, vapor is the prognostic moisture variable.
 The diagnostic `qᵛ` field is updated from the thermodynamic state.
 """
 # Lightweight diagnostics update — called from the thermodynamic variables kernel.
-# Only writes basic specific quantities and vapor. The heavy computation (terminal
-# velocities, process rates, tendency cache) is deferred to
-# prepare_microphysical_tendencies! via a SEPARATE kernel launch, avoiding GPU
-# compilation failure from force-inlining
-# ~1000 lines of P3 physics into the thermodynamic kernel.
+# Only writes basic specific quantities and vapor. Terminal velocities are deferred to
+# prepare_microphysical_tendencies! before sedimentation. Process-rate caches are filled
+# in compute_microphysical_tendencies! from the preceding stage's realized host history,
+# avoiding GPU compilation failure from force-inlining ~1000 lines of P3 physics into
+# the thermodynamic kernel.
 @inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
     @inbounds μ.qᵛ[i, j, k]  = 𝒰.moisture_mass_fractions.vapor
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
@@ -453,6 +487,10 @@ struct P3IceProps{FT}
     # (μ_ice, zⁱ_bounded) and the tabulated Z tendency use the same nⁱ that the
     # rate = N × m_table × env decomposition inside the process rates was built with.
     nⁱ :: FT
+    # Number and Table-3 mean density diagnosed before the lambda limiter. Fortran
+    # retains these values for volume-equivalent diameter and sixth-moment bounds.
+    nⁱ_diagnostic :: FT
+    ρ_mean :: FT
     μ_ice :: FT
     μ_cloud :: FT
     Nᶜ :: FT
@@ -462,7 +500,18 @@ struct P3IceProps{FT}
     λ_r :: FT
 end
 
-# GPU-safe return struct for the full P3 computation (NamedTuples require jl_f_tuple on GPU).
+# GPU-safe return structs (NamedTuples require jl_f_tuple on GPU).
+struct P3FallSpeedResult{FT}
+    wᶜˡ :: FT; wᶜˡₙ :: FT; wʳ :: FT; wʳₙ :: FT; wⁱ :: FT; wⁱₙ :: FT; wⁱ_z :: FT
+end
+
+struct P3TendencyCacheResult{FT}
+    c_qcl :: FT; c_ncl :: FT; c_qr :: FT; c_nr :: FT
+    c_qi :: FT; c_ni :: FT; c_qf :: FT; c_bf :: FT
+    c_zi :: FT; c_qwi :: FT; c_ss :: FT; c_qv :: FT
+    c_na :: FT
+end
+
 struct P3CacheResult{FT}
     wᶜˡ :: FT; wᶜˡₙ :: FT; wʳ :: FT; wʳₙ :: FT; wⁱ :: FT; wⁱₙ :: FT; wⁱ_z :: FT
     c_qcl :: FT; c_ncl :: FT; c_qr :: FT; c_nr :: FT
@@ -476,9 +525,9 @@ end
     z_times_n = zⁱ * nⁱ
     existing_distribution = (zⁱ > 0) & (nⁱ > 0) & (z_times_n > 0)
 
-    regularized_z_times_n = max(z_times_n, eps(FT)^2)
-    z̃ = sqrt(regularized_z_times_n)
-    existing_tendency = (nⁱ * tendency_ρz_phys + zⁱ * tendency_ρn) / (2 * z̃)
+    z̃ = sqrt(max(0, z_times_n))
+    numerator = nⁱ * tendency_ρz_phys + zⁱ * tendency_ρn
+    existing_tendency = safe_divide(numerator, 2 * z̃, zero(FT))
 
     # At ice initiation z=n=0, d(sqrt(zn))/dt is sqrt(dz/dt * dn/dt).
     # This is the one-sided limit for simultaneous positive Z and N sources.
@@ -497,17 +546,11 @@ end
     return max(raw_tendency, -maximum_sink)
 end
 
-# All P3 physics in a single @noinline function returning a concrete struct.
-# compute_p3_process_rates (also @noinline) handles the heavy rates.
-# All operations are scalar — no array access.
-@noinline function _p3_scalar_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
-    surface_temperature = temperature(𝒰, constants)
-    return _p3_scalar_compute(p3, ρ, ℳ, 𝒰, constants, surface_temperature)
-end
-
-@noinline function _p3_scalar_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants,
-                                      surface_temperature)
-    props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+# Terminal velocities must be available before scalar tendency assembly, while
+# process rates need the resolved host tendencies assembled during that step.
+# Keep both computations scalar and return concrete structs for GPU compilation.
+@noinline function p3_fall_speed_compute(p3::P3, ρ, ℳ::P3MicrophysicalState,
+                                          props::P3IceProps)
     Fᶠ = props.Fᶠ
     ρᶠ = props.ρᶠ
 
@@ -526,19 +569,31 @@ end
     # array is capped in place, so all downstream math — process rates, terminal
     # velocities, Z tendency, reflectivity — sees the same value. Mirror that here by
     # using props.nⁱ (= min(ℳ.nⁱ, max_Ni/ρ)) wherever Fortran would see capped nitot.
-    # Fortran indexes the ice fall-speed lookup with qitot (= dry + liquid-on-ice);
-    # the table's q-norm axis is total ice mass per particle.
-    qⁱ_total = total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ)
+    # Fortran indexes the ice fall-speed lookup with qitot. `props.qⁱ_total`
+    # includes liquid coating only when that prognostic mode is active, so a
+    # stale restart coating cannot affect the non-liquid-fraction fast branch.
+    qⁱ_total = props.qⁱ_total
     # Fused call: shares m̄, ρ_correction, log(m̄), and the 5D interpolation indices
     # across mass-, number-, and reflectivity-weighted fall speeds.
     vᵢ = ice_terminal_velocities(p3, qⁱ_total, props.nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=props.Fˡ, μ=props.μ_ice)
     wⁱ, wⁱₙ, wⁱ_z = vᵢ.mass_weighted, vᵢ.number_weighted, vᵢ.reflectivity_weighted
 
+    FT = typeof(ρ)
+    return P3FallSpeedResult{FT}(wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z)
+end
+
+@noinline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
+                                        constants, props::P3IceProps,
+                                        surface_temperature, temperature_tendency,
+                                        vapor_tendency)
+    Fᶠ = props.Fᶠ
+    ρᶠ = props.ρᶠ
     # Process rates (heavy, @noinline — compiled as a separate GPU function).
     # Passing `props` lets compute_p3_process_rates skip the redundant
     # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation.
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, props,
-                                     surface_temperature)
+                                     surface_temperature, temperature_tendency,
+                                     vapor_tendency)
 
     # Tendency extraction
     c_qcl = tendency_ρqᶜˡ(rates, ρ)
@@ -565,18 +620,118 @@ end
     c_na  = tendency_ρnᵃ(rates, ρ)
 
     FT = typeof(ρ)
-    return P3CacheResult{FT}(wᶜˡ, wᶜˡₙ, wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
-                               c_qcl, c_ncl, c_qr, c_nr, c_qi, c_ni, c_qf, c_bf, c_zi, c_qwi, c_ss, c_qv, c_na)
+    return P3TendencyCacheResult{FT}(c_qcl, c_ncl, c_qr, c_nr, c_qi, c_ni,
+                                     c_qf, c_bf, c_zi, c_qwi, c_ss, c_qv, c_na)
 end
 
-# Kernel entry point: reads OffsetArrays → calls @noinline scalar compute → writes OffsetArrays.
-# Keeping array access in the kernel (inlined) and physics in @noinline (separate compilation)
-# prevents the GPU compiler from seeing the full P3 physics + OffsetArray access together.
+
+# Adiabatic temperature tendency from the resolved (grid) or parcel vertical velocity,
+# used as P3's resolved thermodynamic forcing on both paths. Resolved vapor forcing is
+# neglected: gridless parcels conserve static energy, and the grid path drops it for
+# simplicity (see `_p3_compute_tendency_cache_kernel!`).
+@inline function p3_adiabatic_temperature_tendency(ℳ::P3MicrophysicalState, 𝒰, constants)
+    cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
+    return -constants.gravitational_acceleration * ℳ.w / cᵖᵐ
+end
+
+# Combined scalar helper retained for the gridless/test path.
+@noinline function _p3_scalar_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    surface_temperature = temperature(𝒰, constants)
+    temperature_tendency = p3_adiabatic_temperature_tendency(ℳ, 𝒰, constants)
+    return _p3_scalar_compute(p3, ρ, ℳ, 𝒰, constants, surface_temperature,
+                              temperature_tendency, zero(ρ))
+end
+
+
+@noinline function _p3_scalar_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants,
+                                      surface_temperature)
+    return _p3_scalar_compute(p3, ρ, ℳ, 𝒰, constants, surface_temperature,
+                              zero(ρ), zero(ρ))
+end
+
+
+@noinline function _p3_scalar_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants,
+                                      surface_temperature, temperature_tendency,
+                                      vapor_tendency)
+    props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+    velocities = p3_fall_speed_compute(p3, ρ, ℳ, props)
+    tendencies = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, props,
+                                      surface_temperature, temperature_tendency,
+                                      vapor_tendency)
+    FT = typeof(ρ)
+    return P3CacheResult{FT}(velocities.wᶜˡ, velocities.wᶜˡₙ,
+                              velocities.wʳ, velocities.wʳₙ,
+                              velocities.wⁱ, velocities.wⁱₙ, velocities.wⁱ_z,
+                              tendencies.c_qcl, tendencies.c_ncl,
+                              tendencies.c_qr, tendencies.c_nr,
+                              tendencies.c_qi, tendencies.c_ni,
+                              tendencies.c_qf, tendencies.c_bf,
+                              tendencies.c_zi, tendencies.c_qwi,
+                              tendencies.c_ss, tendencies.c_qv, tendencies.c_na)
+end
+
+
+@inline function write_p3_fall_speeds!(μ, i, j, k, result::P3FallSpeedResult)
+    @inbounds begin
+        μ.wᶜˡ[i, j, k]  = -result.wᶜˡ
+        μ.wᶜˡₙ[i, j, k] = -result.wᶜˡₙ
+        μ.wʳ[i, j, k]   = -result.wʳ
+        μ.wʳₙ[i, j, k]  = -result.wʳₙ
+        μ.wⁱ[i, j, k]   = -result.wⁱ
+        μ.wⁱₙ[i, j, k]  = -result.wⁱₙ
+        μ.wⁱ_z[i, j, k] = -result.wⁱ_z
+        μ.wⁱ_z̃[i, j, k] = -(result.wⁱ_z + result.wⁱₙ) / 2
+    end
+    return nothing
+end
+
+
+@inline function write_p3_tendency_cache!(μ, i, j, k, result::P3TendencyCacheResult)
+    @inbounds begin
+        μ.cache_ρqᶜˡ[i, j, k] = result.c_qcl
+        μ.cache_ρnᶜˡ[i, j, k] = result.c_ncl
+        μ.cache_ρqʳ[i, j, k]  = result.c_qr
+        μ.cache_ρnʳ[i, j, k]  = result.c_nr
+        μ.cache_ρqⁱ[i, j, k]  = result.c_qi
+        μ.cache_ρnⁱ[i, j, k]  = result.c_ni
+        μ.cache_ρqᶠ[i, j, k]  = result.c_qf
+        μ.cache_ρbᶠ[i, j, k]  = result.c_bf
+        μ.cache_ρz̃ⁱ[i, j, k] = result.c_zi
+        μ.cache_ρqʷⁱ[i, j, k] = result.c_qwi
+        μ.cache_ρsˢᵃᵗ[i, j, k] = result.c_ss
+        μ.cache_ρqᵛ[i, j, k]  = result.c_qv
+        μ.cache_ρnᵃ[i, j, k]  = result.c_na
+    end
+    return nothing
+end
+
+
+@inline function p3_compute_fall_speeds!(μ, i, j, k, grid, p3::P3, ρ, 𝒰,
+                                          constants, velocities)
+    ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
+    props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+    result = p3_fall_speed_compute(p3, ρ, ℳ, props)
+    return write_p3_fall_speeds!(μ, i, j, k, result)
+end
+
+
+@inline function p3_compute_tendency_cache!(μ, i, j, k, grid, p3::P3, ρ, 𝒰,
+                                             constants, velocities,
+                                             surface_temperature,
+                                             temperature_tendency,
+                                             vapor_tendency)
+    ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
+    props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+    result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, props,
+                                 surface_temperature, temperature_tendency,
+                                 vapor_tendency)
+    return write_p3_tendency_cache!(μ, i, j, k, result)
+end
+
+# Compatibility entry point for callers that require both result groups at once.
 @inline function p3_compute_and_cache!(μ, i, j, k, grid, p3::P3, ρ, 𝒰, constants,
                                        velocities, surface_temperature)
-    @inbounds begin
-        ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
-    end
+    ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
 
     r = _p3_scalar_compute(p3, ρ, ℳ, 𝒰, constants, surface_temperature)
 
@@ -682,35 +837,29 @@ end
 #####
 #
 # Two paths:
-#   1. Grid-based (AtmosphereModel): grid_microphysical_tendency reads from the cache
-#      fields populated by update_microphysical_auxiliaries! — one compute_p3_process_rates
-#      call per grid point serves all 10 P3 fields.
+#   1. Grid-based (AtmosphereModel): the fused driver fills the cache once from the
+#      realized host-forcing history and adds every cached tendency to G.
 #   2. Gridless (ParcelModel): microphysical_tendency builds state and computes rates directly.
 
 # Helper to compute P3 rates and extract ice properties from ℳ
 @inline function p3_ice_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     FT = typeof(ρ)
-    qⁱ_raw = total_ice_mass(ℳ.qⁱ, ℳ.qʷⁱ)
-    has_ice_mass = qⁱ_raw > FT(1e-20)
+    qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
+    qⁱ_raw = total_ice_mass(ℳ.qⁱ, qʷⁱ)
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
-    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ)
-    qⁱ_total = max(qⁱ_raw, FT(1e-20))
-    Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, ℳ.qʷⁱ)
-    nⁱ_global = min(ℳ.nⁱ, p3.process_rates.maximum_ice_number_density / ρ)
-    μ_for_limiter = compute_ice_shape_parameter(p3, qⁱ_total, nⁱ_global, ℳ.zⁱ,
-                                                rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
-    nⁱ_bounded = bounded_ice_number(p3, qⁱ_total, nⁱ_global, rime_state.Fᶠ, Fˡ,
-                                    rime_state.ρᶠ, μ_for_limiter)
-    nⁱ = ifelse(has_ice_mass, nⁱ_bounded, FT(0))
-    μ_ice = compute_ice_shape_parameter(p3, qⁱ_total, nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
-    zⁱ_bounded = bound_ice_sixth_moment(p3, qⁱ_total, nⁱ, ℳ.zⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ, μ_ice)
+    rime_state = consistent_rime_state(p3, ℳ.qⁱ, ℳ.qᶠ, ℳ.bᶠ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(ℳ.qⁱ, qʷⁱ)
+    bounds = p3_ice_moment_bounds(p3, ρ, qⁱ_raw, ℳ.nⁱ, ℳ.zⁱ,
+                                  rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
     T = temperature(𝒰, constants)
-    P = 𝒰.reference_pressure
+    P = p3_air_pressure(𝒰, constants)
     transport = air_transport_properties(T, P)
     λ_r = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     return P3IceProps{FT}(rime_state.qᶠ, rime_state.bᶠ, rime_state.Fᶠ, Fˡ,
-                          rime_state.ρᶠ, qⁱ_total, nⁱ, μ_ice, cloud.μ_c, cloud.Nᶜ,
-                          zⁱ_bounded, transport.D_v, transport.nu, λ_r)
+                          rime_state.ρᶠ, bounds.qⁱ_total, bounds.nⁱ,
+                          bounds.nⁱ_diagnostic, bounds.ρ_mean, bounds.μ_ice,
+                          cloud.μ_c, cloud.Nᶜ, bounds.zⁱ,
+                          transport.D_v, transport.nu, λ_r)
 end
 
 @inline function p3_rates_and_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -718,7 +867,11 @@ end
     # the redundant rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ
     # calls inside compute_p3_process_rates.
     props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
-    rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, props)
+    surface_temperature = temperature(𝒰, constants)
+    temperature_tendency = p3_adiabatic_temperature_tendency(ℳ, 𝒰, constants)
+    rates = compute_p3_process_rates(
+        p3, ρ, ℳ, 𝒰, constants, props, surface_temperature,
+        temperature_tendency, zero(ρ))
     return rates, props
 end
 
@@ -763,8 +916,9 @@ end
     # by process-rate limiting, while group-2 sources initialize new ice moments
     # analytically.
     μ_cloud = cloud_shape_before_homogeneous_freezing(p3, rates, ρ, ℳ, props)
+    qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
     return active_ice_sixth_moment_tendency(ice_table, p3, rates, ρ,
-                                            ℳ.qⁱ, ℳ.qʷⁱ, props.nⁱ, props.qᶠ,
+                                            ℳ.qⁱ, qʷⁱ, props.nⁱ, props.qᶠ,
                                             props.bᶠ, props.zⁱ_bounded,
                                             props.μ_ice, zero(typeof(ρ)), μ_cloud)
 end

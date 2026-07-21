@@ -1,7 +1,8 @@
 using Test
 import Breeze
 using Breeze.Microphysics.PredictedParticleProperties
-using Breeze.AtmosphereModels: microphysical_velocities, prognostic_field_names
+using Breeze.AtmosphereModels: microphysical_tendency, microphysical_velocities,
+                               prognostic_field_names
 using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
 
 using Breeze.Microphysics.PredictedParticleProperties:
@@ -203,7 +204,9 @@ end
 
 function expected_reduced_fortran_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
                                               qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                              constants, transport, q, μ)
+                                              constants, transport, q, μ;
+                                              temperature_tendency = zero(T),
+                                              vapor_tendency = zero(qᵛ))
     FT = typeof(qᶜˡ)
     τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
     Rᵛ = FT(Breeze.Thermodynamics.vapor_gas_constant(constants))
@@ -228,7 +231,9 @@ function expected_reduced_fortran_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ
     xx = max(epsc + epsr + epsi * ice_liquid_coupling + epsiw, FT(1e-20))
     transient = (1 - exp(-xx * τ)) / τ
     ssat_liquid = qᵛ - qᵛ⁺ˡ
-    aaa = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * epsi
+    bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * epsi
+    external_driver = vapor_tendency - dqᵛ⁺ˡ_dT * temperature_tendency
+    aaa = external_driver + bergeron_driver
 
     qc_raw = (aaa * epsc / xx + (ssat_liquid - aaa / xx) * epsc / xx * transient) / ab
     qr_raw = (aaa * epsr / xx + (ssat_liquid - aaa / xx) * epsr / xx * transient) / ab
@@ -1062,7 +1067,7 @@ end
         @test ℳ.w == FT(2.0)
     end
 
-    @testset "compute_p3_process_rates uses ℳ.w dynamic supersaturation forcing" begin
+    @testset "compute_p3_process_rates uses resolved supersaturation forcing" begin
         FT = Float64
         constants = ThermodynamicConstants(FT)
         p3 = PredictedParticlePropertiesMicrophysics()
@@ -1076,17 +1081,31 @@ end
         q = MoistureMassFractions(qᵛ, qᶜˡ, zero(FT))
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
 
-        ℳ_still = P3MicrophysicalState(qᶜˡ, FT(2e8), zero(FT), zero(FT),
-                                       zero(FT), zero(FT), zero(FT), zero(FT),
-                                       zero(FT), zero(FT), zero(FT), zero(FT), zero(FT))
-        ℳ_updraft = P3MicrophysicalState(qᶜˡ, FT(2e8), zero(FT), zero(FT),
-                                         zero(FT), zero(FT), zero(FT), zero(FT),
-                                         zero(FT), zero(FT), zero(FT), zero(FT), FT(1))
+        ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), zero(FT), zero(FT),
+                                 zero(FT), zero(FT), zero(FT), zero(FT),
+                                 zero(FT), zero(FT), zero(FT), zero(FT), zero(FT))
+        ℳ_with_w = P3MicrophysicalState(qᶜˡ, FT(2e8), zero(FT), zero(FT),
+                                        zero(FT), zero(FT), zero(FT), zero(FT),
+                                        zero(FT), zero(FT), zero(FT), zero(FT), FT(1))
 
-        rates_still = compute_p3_process_rates(p3, ρ, ℳ_still, 𝒰, constants)
-        rates_updraft = compute_p3_process_rates(p3, ρ, ℳ_updraft, 𝒰, constants)
+        rates_unforced = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants,
+                                                  nothing, T, FT(0), FT(0))
+        rates_cooling = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants,
+                                                 nothing, T, FT(-0.01), FT(0))
+        rates_vapor_source = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants,
+                                                      nothing, T, FT(0), FT(1e-6))
+        rates_w_only = compute_p3_process_rates(p3, ρ, ℳ_with_w, 𝒰, constants,
+                                                nothing, T, FT(0), FT(0))
 
-        @test rates_updraft.condensation > rates_still.condensation
+        @test rates_cooling.condensation > rates_unforced.condensation
+        @test rates_vapor_source.condensation > rates_unforced.condensation
+        @test rates_w_only.condensation == rates_unforced.condensation
+
+        vapor_tendency_stationary = microphysical_tendency(
+            p3, Val(:ρqᵛ), ρ, ℳ, 𝒰, constants)
+        vapor_tendency_ascending = microphysical_tendency(
+            p3, Val(:ρqᵛ), ρ, ℳ_with_w, 𝒰, constants)
+        @test vapor_tendency_ascending < vapor_tendency_stationary
     end
 
     @testset "P3 active sixth moment keeps splintered mass out of group 1" begin
@@ -1143,10 +1162,11 @@ end
         @test isapprox(tendency, expected; rtol=FT(1e-5))
     end
 
-    @testset "P3 active sixth moment uses rain μ for group-2 sources" begin
+    @testset "P3 active sixth moment uses process-specific group-2 shapes" begin
         FT = Float32
         prp = ProcessRateParameters(FT)
         μ_r = FT(2)
+        μ_cloud = FT(10)
         rate_names = fieldnames(P3ProcessRates)
         nucleation_mass = FT(1e-10)
         nucleation_number = FT(10)
@@ -1187,10 +1207,10 @@ end
                    PPP.initiated_ice_sixth_moment_tendency(rain_freezing_mass, rain_freezing_number, μ_r) +
                    PPP.initiated_ice_sixth_moment_tendency(rain_splintering_mass, splintering_number, μ_r) +
                    PPP.initiated_ice_sixth_moment_tendency(cloud_splintering_mass, splintering_number, μ_r) +
-                   PPP.initiated_ice_sixth_moment_tendency(cloud_homogeneous_mass, cloud_homogeneous_number, μ_r) +
+                   PPP.initiated_ice_sixth_moment_tendency(cloud_homogeneous_mass, cloud_homogeneous_number, μ_cloud) +
                    PPP.initiated_ice_sixth_moment_tendency(rain_homogeneous_mass, rain_homogeneous_number, μ_r)
 
-        @test PPP.group2_ice_sixth_moment_tendency(rates, prp, μ_r) ≈ expected
+        @test PPP.group2_ice_sixth_moment_tendency(rates, prp, μ_r, μ_cloud) ≈ expected
     end
 
     @testset "split_splintering_mass honors splintering_cloud_riming_scale" begin
@@ -1460,7 +1480,6 @@ end
                                                      constants, transport, q, μ)
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-        cᵖᵐ = mixture_heat_capacity(q, constants)
         # predict_supersaturation defaults to false, so this M&G call sees
         # the host state directly and the G&M ε is gated to zero by
         # `compute_p3_process_rates` (not this function).
@@ -1468,7 +1487,7 @@ end
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖᵐ)
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), FT(0))
         expected_rates = expected_reduced_fortran_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
@@ -1480,7 +1499,7 @@ end
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖᵐ)
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), FT(0))
 
         @test epsr ≈ expected_epsr
         @test epsi ≈ expected_epsi
@@ -1495,41 +1514,42 @@ end
         @test rates.coating_evaporation == 0
         @test rates.condensation < rates_noice.condensation
 
-        # A_w bitwise equivalence: w = 0 reproduces the Bergeron-only behavior.
-        rates_w0 = PPP.coupled_saturation_adjustment_rates(
+        # Zero host forcing reproduces the Bergeron-only behavior bitwise.
+        rates_unforced = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖᵐ)
-        @test rates_w0.condensation === rates.condensation
-        @test rates_w0.deposition === rates.deposition
-        @test rates_w0.rain_evaporation === rates.rain_evaporation
-        @test rates_w0.rain_condensation === rates.rain_condensation
-        @test rates_w0.coating_condensation === rates.coating_condensation
-        @test rates_w0.coating_evaporation === rates.coating_evaporation
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), FT(0))
+        @test rates_unforced.condensation === rates.condensation
+        @test rates_unforced.deposition === rates.deposition
+        @test rates_unforced.rain_evaporation === rates.rain_evaporation
+        @test rates_unforced.rain_condensation === rates.rain_condensation
+        @test rates_unforced.coating_condensation === rates.coating_condensation
+        @test rates_unforced.coating_evaporation === rates.coating_evaporation
 
-        # Pure adiabatic forcing: saturated, no ice, w > 0 → positive condensation.
+        # Pure adiabatic forcing: saturated cooling produces condensation.
         let
             T_ad = FT(280.0)
             qᵛ⁺ˡ_ad = saturation_specific_humidity(T_ad, ρ, constants, PlanarLiquidSurface())
             qᵛ⁺ⁱ_ad = saturation_specific_humidity(T_ad, ρ, constants, PlanarIceSurface())
             qᵛ_ad = qᵛ⁺ˡ_ad  # exactly saturated → ssat_liquid = 0
-            w_ad = FT(1.0)
             q_ad = MoistureMassFractions(qᵛ_ad, qᶜˡ + qʳ + qʷⁱ, zero(FT))
             transport_ad = air_transport_properties(T_ad, P)
             cloud_ad = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
             cᵖᵐ_ad = mixture_heat_capacity(q_ad, constants)
-            rates_w = PPP.coupled_saturation_adjustment_rates(
+            temperature_tendency = -constants.gravitational_acceleration / cᵖᵐ_ad
+            rates_cooling = PPP.coupled_saturation_adjustment_rates(
                 p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
                 qᵛ_ad, qᵛ⁺ˡ_ad, qᵛ⁺ⁱ_ad, Fᶠ, ρᶠ, T_ad, P, ρ,
                 constants, transport_ad, q_ad, μ,
-                cloud_ad.μ_c, cloud_ad.λ_c, cloud_ad.nᶜˡ, w_ad, cᵖᵐ_ad)
-            @test rates_w.condensation > 0
-            @test rates_w.deposition == 0  # no ice present
+                cloud_ad.μ_c, cloud_ad.λ_c, cloud_ad.nᶜˡ,
+                temperature_tendency, FT(0))
+            @test rates_cooling.condensation > 0
+            @test rates_cooling.deposition == 0  # no ice present
         end
 
-        # Sign symmetry: at exactly saturated state, w > 0 generates condensation,
-        # w < 0 routes the same magnitude into evaporation. We use a soft check
+        # Sign symmetry: at exactly saturated state, cooling generates condensation,
+        # while warming routes the same forcing into evaporation. We use a soft check
         # because the clamps in coupled_saturation_adjustment_rates may route the
         # mass through different fields.
         let
@@ -1540,16 +1560,16 @@ end
             q_s = MoistureMassFractions(qᵛ_s, qᶜˡ + qʳ + qʷⁱ, zero(FT))
             transport_s = air_transport_properties(T_s, P)
             cloud_s = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-            cᵖᵐ_s = mixture_heat_capacity(q_s, constants)
             common = (p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
                       qᵛ_s, qᵛ⁺ˡ_s, qᵛ⁺ⁱ_s, Fᶠ, ρᶠ, T_s, P, ρ,
                       constants, transport_s, q_s, μ,
                       cloud_s.μ_c, cloud_s.λ_c, cloud_s.nᶜˡ)
-            rates_up   = PPP.coupled_saturation_adjustment_rates(common..., FT(+1.0), cᵖᵐ_s)
-            rates_down = PPP.coupled_saturation_adjustment_rates(common..., FT(-1.0), cᵖᵐ_s)
+            rates_up = PPP.coupled_saturation_adjustment_rates(common..., FT(-0.01), FT(0))
+            rates_down = PPP.coupled_saturation_adjustment_rates(common..., FT(+0.01), FT(0))
             @test rates_up.condensation > 0
-            # Descending air evaporates the cloud reservoir: with cloud present
-            # and A_w < 0 the `condensation` channel goes negative (cloud → vapor),
+            # Warming evaporates the cloud reservoir: with cloud present
+            # and positive temperature tendency the `condensation` channel goes
+            # negative (cloud → vapor),
             # mirroring the sign flip in the production routine.
             @test rates_down.condensation < 0
         end
@@ -1590,12 +1610,11 @@ end
                                                          constants, transport, q, μ)
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-        cᵖᵐ = mixture_heat_capacity(q, constants)
         rates = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), cᵖᵐ)
+            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), FT(0))
         expected_rates = expected_reduced_fortran_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
@@ -1889,11 +1908,10 @@ end
 
         T₀ = p3.process_rates.freezing_temperature
         Rᵥ = Breeze.Thermodynamics.vapor_gas_constant(ThermodynamicConstants(FT))
-        Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(ThermodynamicConstants(FT))
-        ε = Rᵈ / Rᵥ
         e_s0 = PPP.saturation_vapor_pressure_at_freezing(nothing, T₀)
-        # M10: set qv = q_sat0 (mixing ratio convention) so latent term vanishes
-        qv = ε * e_s0 / max(P - e_s0, FT(1))
+        # Breeze carries total-air specific humidity, so set qv to the matching
+        # saturation mass fraction and isolate the sensible-conduction term.
+        qv = e_s0 / (Rᵥ * T₀ * ρ)
 
         m_mean = qi / ni
         ρ_correction = PPP.ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)

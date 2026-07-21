@@ -67,10 +67,14 @@ cloud-side vapor state here rather than a grid-mean vapor state.
     return Q_nuc, N_nuc
 end
 
-@inline function immersion_freezing_rate_coefficient(bimm, V_drop, aimm, ΔT, τ)
-    FT = typeof(bimm + V_drop + aimm + ΔT + τ)
+@inline function immersion_freezing_rate_coefficient(bimm, V_drop, aimm, ΔT,
+                                                      maximum_multiplier)
+    FT = typeof(bimm + V_drop + aimm + ΔT + maximum_multiplier)
     log_rate = log(max(bimm * V_drop, FT(1e-30))) + aimm * ΔT
-    maximum_rate = one(FT) / max(τ, eps(FT))
+    # Apply only a common numerical overflow guard. The species-level budget
+    # later scales both raw moments together; capping here at 1/τ would prevent
+    # newly condensed liquid from participating in Fortran's combined budget.
+    maximum_rate = sqrt(floatmax(FT)) / max(maximum_multiplier, one(FT))
     return exp(min(log_rate, log(maximum_rate)))
 end
 
@@ -127,24 +131,25 @@ negligible for small droplets.
 
     # Individual droplet mass and volume (monodisperse assumption)
     # Nᶜ is [1/m³]; convert to per-kg: nᶜ = Nᶜ/ρ [1/kg]
-    nᶜ = max(Nᶜ / ρ, FT(1))
+    nᶜ = max(Nᶜ / ρ, p3.minimum_number_mixing_ratio)
     m_drop = qᶜˡ_eff / nᶜ                     # [kg]
     V_drop = m_drop / ρᴸ                   # [m³]
 
     # Fortran's per-drop freezing coefficient (NO psd_correction) is a
     # linear per-second rate. The log form avoids overflow at very low
-    # temperatures; the safety cap is the same all-available-drops limit that
-    # the later species budget limiter would impose.
+    # temperatures. Any numerical cap is applied equally before the two moment
+    # products so their ratio is unchanged.
     # The PSD correction applies only to the mass (6th moment) rate,
     # not the number (3rd moment) rate, matching Fortran P3 v5.5.0.
-    τ = prp.sink_limiting_timescale
-    freezing_rate = immersion_freezing_rate_coefficient(bimm, V_drop, aimm, ΔT, τ)
+    maximum_multiplier = max(qᶜˡ_eff * psd_correction, nᶜ)
+    freezing_rate = immersion_freezing_rate_coefficient(
+        bimm, V_drop, aimm, ΔT, maximum_multiplier)
 
-    # Mass freezing rate [kg/kg/s]: boosted by PSD correction (large drops freeze first)
-    Q_frz = min(qᶜˡ_eff * psd_correction * freezing_rate, qᶜˡ_eff / τ)
-
-    # Number freezing rate [1/kg/s]: no PSD correction (C_N = 1)
-    N_frz = min(nᶜ * freezing_rate, nᶜ / τ)
+    # Form the raw rates. The combined cloud budget in compute_p3_process_rates
+    # applies one factor to qcheti and ncheti together, after condensation and
+    # competing sinks have been included.
+    Q_frz = qᶜˡ_eff * psd_correction * freezing_rate
+    N_frz = nᶜ * freezing_rate
 
     Q_frz = ifelse(freezing_active, Q_frz, zero(FT))
     N_frz = ifelse(freezing_active, N_frz, zero(FT))
@@ -199,24 +204,24 @@ uses ``\\mu_r(i,k)`` in `gamma(7.+mu_r)` and `gamma(mu_r+4.)` terms).
     ΔT = max(T₀ - T, zero(FT))
 
     # Individual rain drop mass and volume (monodisperse assumption)
-    nʳ_safe = max(nʳ_eff, FT(1))
+    nʳ_safe = max(nʳ_eff, p3.minimum_number_mixing_ratio)
     m_drop = qʳ_eff / nʳ_safe          # [kg]
     V_drop = m_drop / ρᴸ            # [m³]
 
     # Fortran's per-drop freezing coefficient (NO psd_correction) is a
     # linear per-second rate. The log form avoids overflow at very low
-    # temperatures; the safety cap is the same all-available-drops limit that
-    # the later species budget limiter would impose.
+    # temperatures. Any numerical cap is applied equally before the two moment
+    # products so their ratio is unchanged.
     # The PSD correction applies only to the mass (6th moment) rate,
     # not the number (3rd moment) rate, matching Fortran P3 v5.5.0.
-    τ = prp.sink_limiting_timescale
-    freezing_rate = immersion_freezing_rate_coefficient(bimm, V_drop, aimm, ΔT, τ)
+    maximum_multiplier = max(qʳ_eff * psd_correction, nʳ_eff)
+    freezing_rate = immersion_freezing_rate_coefficient(
+        bimm, V_drop, aimm, ΔT, maximum_multiplier)
 
-    # Mass freezing rate: boosted by PSD correction (large drops freeze first)
-    Q_frz = min(qʳ_eff * psd_correction * freezing_rate, qʳ_eff / τ)
-
-    # Number freezing rate: no PSD correction (C_N = 1)
-    N_frz = min(nʳ_eff * freezing_rate, nʳ_eff / τ)
+    # The combined rain budget later applies the same limiter to qrheti and
+    # nrheti, preserving the mean mass of preferentially frozen drops.
+    Q_frz = qʳ_eff * psd_correction * freezing_rate
+    N_frz = nʳ_eff * freezing_rate
 
     Q_frz = ifelse(freezing_active, Q_frz, zero(FT))
     N_frz = ifelse(freezing_active, N_frz, zero(FT))

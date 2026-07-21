@@ -176,7 +176,9 @@ separately.
 @inline function coupled_saturation_adjustment_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
                                                      qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                                      constants, transport, q, μ,
-                                                     μ_c, λ_c, nᶜˡ_bounded, w, cᵖᵐ)
+                                                     μ_c, λ_c, nᶜˡ_bounded,
+                                                     temperature_tendency,
+                                                     vapor_tendency)
     FT = typeof(qᶜˡ)
     τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
     Rᵛ = FT(vapor_gas_constant(constants))
@@ -208,15 +210,13 @@ separately.
     # host-advected `sˢᵃᵗ`.
     ssat_liquid = qᵛ - qᵛ⁺ˡ
     bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * εⁱ
-    # A_w: adiabatic supersaturation forcing from vertical motion.
-    # Fortran reference: `aaa = ... - dqsdT*(-dum*g*i_cp) ...` with
-    # dum = -cp/g · dT/dt, i.e. dT/dt|_dynamics ≈ -g/cᵖᵐ · w. Here cᵖᵐ is the
-    # moist heat capacity of the local gas mixture, matching Fortran's `i_cp`.
-    # We omit the (qᵛ - qᵛ_old)/dt contribution to Fortran's `aaa` because the
-    # host does not carry qᵛ_old.
-    g = constants.gravitational_acceleration
-    A_w = (g / cᵖᵐ) * dqᵛ⁺ˡ_dT * w
-    A_total = A_w + bergeron_driver
+    # Fortran's `aaa` forcing is the realized host change in liquid-relative
+    # supersaturation: dqᵛ/dt - (dqᵛ⁺ˡ/dT) dT/dt. The atmosphere driver supplies
+    # these two tendencies from the nonmicrophysical RK right-hand side, thereby
+    # retaining mixing, radiation, and resolved vapor forcing in addition to
+    # adiabatic vertical motion.
+    external_driver = vapor_tendency - dqᵛ⁺ˡ_dT * temperature_tendency
+    A_total = external_driver + bergeron_driver
 
     qc_raw = (A_total * εᶜˡ / ε_total + (ssat_liquid - A_total / ε_total) * εᶜˡ / ε_total * transient) / ξˡ
     qr_raw = (A_total * εʳ / ε_total + (ssat_liquid - A_total / ε_total) * εʳ / ε_total * transient) / ξˡ

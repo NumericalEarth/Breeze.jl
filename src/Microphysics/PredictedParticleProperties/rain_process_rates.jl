@@ -122,30 +122,39 @@ schemes correspond to Fortran P3 v5.5.0 `autoAccr_param` 1–3; see
     rain_accretion_rate(p3.warm_rain_scheme, p3, qᶜˡ, qʳ, ρ)
 
 @inline function rain_accretion_rate(::KhairoutdinovKogan2000, p3, qᶜˡ, qʳ, ρ)
+    FT = typeof(qᶜˡ)
     prp = p3.process_rates
     qᶜˡ_eff = clamp_positive(qᶜˡ)
     qʳ_eff = clamp_positive(qʳ)
+    active = (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
+             (qʳ_eff >= p3.minimum_mass_mixing_ratio)
 
     # KK2000 Eq. 5 (Fortran P3 form): ∂qʳ/∂t = k₂ × (qᶜˡ × qʳ)^α
     k₂ = prp.accretion_coefficient
     α = prp.accretion_exponent
 
-    return k₂ * (qᶜˡ_eff * qʳ_eff)^α
+    rate = k₂ * (qᶜˡ_eff * qʳ_eff)^α
+    return ifelse(active, rate, zero(FT))
 end
 
 @inline function rain_accretion_rate(::Kogan2013, p3, qᶜˡ, qʳ, ρ)
     FT = typeof(qᶜˡ)
     qᶜˡ_eff = clamp_positive(qᶜˡ)
     qʳ_eff = clamp_positive(qʳ)
+    active = (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
+             (qʳ_eff >= p3.minimum_mass_mixing_ratio)
 
     # Fortran: qcacc = 8.53 × qc^1.05 × qr^0.98
-    return FT(8.53) * qᶜˡ_eff^FT(1.05) * qʳ_eff^FT(0.98)
+    rate = FT(8.53) * qᶜˡ_eff^FT(1.05) * qʳ_eff^FT(0.98)
+    return ifelse(active, rate, zero(FT))
 end
 
 @inline function rain_accretion_rate(::SeifertBeheng2001, p3, qᶜˡ, qʳ, ρ)
     FT = typeof(qᶜˡ)
     qᶜˡ_eff = clamp_positive(qᶜˡ)
     qʳ_eff = clamp_positive(qʳ)
+    active = (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
+             (qʳ_eff >= p3.minimum_mass_mixing_ratio)
 
     # Fortran kr = 5.78e3 (Long 1974 accretion kernel coefficient).
     kr = FT(5.78e3)
@@ -156,7 +165,8 @@ end
     Φac = (τ / (τ + FT(5e-4)))^4  # Fortran 'dum1' in accretion branch
 
     # Fortran: qcacc = kr × ρ × 1e-3 × qᶜˡ × qʳ × Φac
-    return kr * ρ * FT(1e-3) * qᶜˡ_eff * qʳ_eff * Φac
+    rate = kr * ρ * FT(1e-3) * qᶜˡ_eff * qʳ_eff * Φac
+    return ifelse(active, rate, zero(FT))
 end
 
 """
@@ -183,13 +193,16 @@ KK2000 (default) and SB2001 share the same linear form `k_rr × ρ × qʳ × nʳ
 
 @inline function rain_self_collection_rate(::Union{KhairoutdinovKogan2000, SeifertBeheng2001},
                                            p3, qʳ, nʳ, ρ)
+    FT = typeof(qʳ)
     prp = p3.process_rates
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = bounded_rain_number(nʳ, qʳ_eff, prp)
+    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
 
     # KK2000 / SB2001: |∂nʳ/∂t| = k_rr × ρ × qʳ × nʳ
     k_rr = prp.self_collection_coefficient
-    return k_rr * ρ * qʳ_eff * nʳ_eff
+    rate = k_rr * ρ * qʳ_eff * nʳ_eff
+    return ifelse(active, rate, zero(FT))
 end
 
 @inline function rain_self_collection_rate(::Kogan2013, p3, qʳ, nʳ, ρ)
@@ -197,12 +210,14 @@ end
     prp = p3.process_rates
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = bounded_rain_number(nʳ, qʳ_eff, prp)
+    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
 
     # Fortran: nrslf_base = 205. × qr^1.55 × (nr × 1e-6 × ρ)^0.6 × 1e6 / ρ
     # (nrslf is multiplied by the Verlinde-Cotton breakup modifier 'dum' downstream
     # in `rain_breakup_rate`; here we return the unmodified base rate.)
     nʳ_per_volume = max(nʳ_eff * ρ * FT(1e-6), FT(1e-30))
-    return FT(205) * qʳ_eff^FT(1.55) * nʳ_per_volume^FT(0.6) * FT(1e6) / max(ρ, eps(FT))
+    rate = FT(205) * qʳ_eff^FT(1.55) * nʳ_per_volume^FT(0.6) * FT(1e6) / max(ρ, eps(FT))
+    return ifelse(active, rate, zero(FT))
 end
 
 """
@@ -260,7 +275,9 @@ is smaller than the physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
     # When D_r < D_th: modifier = 1 → breakup = 0 (no effect)
     # When D_r ≥ D_th: modifier < 1 → breakup > 0 (number source)
     # self_collection is positive magnitude (M7); breakup is positive (number source).
-    return (FT(1) - breakup_modifier) * self_collection
+    rate = (FT(1) - breakup_modifier) * self_collection
+    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
+    return ifelse(active, rate, zero(FT))
 end
 
 """
@@ -464,11 +481,13 @@ Fortran's `ncslf` formula.
 @inline function cloud_self_collection_rate(sb::SeifertBeheng2001, p3, qᶜˡ, Nᶜ, ρ)
     FT = typeof(qᶜˡ)
     qᶜˡ_eff = clamp_positive(qᶜˡ)
+    active = qᶜˡ_eff >= p3.minimum_mass_mixing_ratio
     kc = FT(9.44e9)
     ν = sb2001_shape_parameter(sb, Nᶜ)
 
     ρqᶜ_g_cm3 = ρ * qᶜˡ_eff * FT(1e-3)
-    return kc * ρqᶜ_g_cm3^2 * (ν + FT(2)) / (ν + FT(1)) * FT(1e6) / ρ
+    rate = kc * ρqᶜ_g_cm3^2 * (ν + FT(2)) / (ν + FT(1)) * FT(1e6) / ρ
+    return ifelse(active, rate, zero(FT))
 end
 
 @inline function sb2001_shape_parameter(::SeifertBeheng2001{Nothing}, Nᶜ)

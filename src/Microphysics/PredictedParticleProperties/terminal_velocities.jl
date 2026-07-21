@@ -38,9 +38,11 @@ function rain_terminal_velocity_mass_weighted(p3, qʳ, nʳ, ρ)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # m9: Fortran applies no velocity clamping; table bounds are sufficient.
-    return tabulated_rain_mass_weighted_velocity(p3.rain.velocity_mass,
-                                                  qʳ_eff, nʳ_eff, ρ_correction,
-                                                  ρʷ, prp, FT)
+    velocity = tabulated_rain_mass_weighted_velocity(p3.rain.velocity_mass,
+                                                       qʳ_eff, nʳ_eff, ρ_correction,
+                                                       ρʷ, prp, FT)
+    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
+    return ifelse(active, velocity, zero(FT))
 end
 
 # Tabulated path: look up PSD-integrated mass-weighted velocity
@@ -90,10 +92,12 @@ function rain_terminal_velocity_number_weighted(p3, qʳ, nʳ, ρ)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # m9: Fortran applies no velocity clamping; table bounds are sufficient.
-    return tabulated_rain_number_weighted_velocity(p3.rain.velocity_number,
-                                                    p3.rain.velocity_mass,
-                                                    qʳ_eff, nʳ_eff, ρ_correction,
-                                                    ρʷ, prp, FT)
+    velocity = tabulated_rain_number_weighted_velocity(p3.rain.velocity_number,
+                                                         p3.rain.velocity_mass,
+                                                         qʳ_eff, nʳ_eff, ρ_correction,
+                                                         ρʷ, prp, FT)
+    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
+    return ifelse(active, velocity, zero(FT))
 end
 
 # Tabulated path: look up PSD-integrated number-weighted velocity
@@ -166,8 +170,10 @@ and `rain_terminal_velocity_number_weighted` separately.
 
     vₘ = p3.rain.velocity_mass(log_λ) * ρ_correction
     vₙ = p3.rain.velocity_number(log_λ) * ρ_correction
+    active = qʳ_eff >= p3.minimum_mass_mixing_ratio
 
-    return RainTerminalVelocities{FT}(vₘ, vₙ)
+    return RainTerminalVelocities{FT}(ifelse(active, vₘ, zero(FT)),
+                                       ifelse(active, vₙ, zero(FT)))
 end
 
 """
@@ -208,7 +214,9 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # m9: Fortran applies no velocity clamping; table bounds are sufficient.
-    return tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    velocity = tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
+    return ifelse(active, velocity, zero(FT))
 end
 
 # Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
@@ -257,7 +265,9 @@ Compute number-weighted terminal velocity for ice.
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # m9: Fortran applies no velocity clamping; table bounds are sufficient.
-    return tabulated_number_weighted_fall_speed(fs.number_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    velocity = tabulated_number_weighted_fall_speed(fs.number_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
+    return ifelse(active, velocity, zero(FT))
 end
 
 # Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
@@ -307,7 +317,11 @@ Uses pre-computed lookup tables for accurate PSD integration.
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # m9: Fortran applies no velocity clamping; table bounds are sufficient.
-    return tabulated_reflectivity_weighted_fall_speed(fs.reflectivity_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    velocity = tabulated_reflectivity_weighted_fall_speed(fs.reflectivity_weighted,
+                                                            m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction,
+                                                            p3, prp, μ)
+    active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
+    return ifelse(active, velocity, zero(FT))
 end
 
 # Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
@@ -382,8 +396,14 @@ function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeo
     # Density correction factor (Heymsfield et al. 2007, exponent 0.54 for ice)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
-    return fused_fall_speeds(fs.mass_weighted, fs.number_weighted, fs.reflectivity_weighted,
-                              m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    velocities = fused_fall_speeds(fs.mass_weighted, fs.number_weighted, fs.reflectivity_weighted,
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
+    return IceTerminalVelocities{FT}(
+        ifelse(active, velocities.mass_weighted, zero(FT)),
+        ifelse(active, velocities.number_weighted, zero(FT)),
+        ifelse(active, velocities.reflectivity_weighted, zero(FT)),
+    )
 end
 
 # Fast path: all three tables are 5D (the supported P3 configuration with loaded tables).

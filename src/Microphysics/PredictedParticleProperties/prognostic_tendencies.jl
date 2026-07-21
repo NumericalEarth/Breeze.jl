@@ -72,10 +72,12 @@ Cloud liquid is consumed by:
     # Phase 1: autoconversion and accretion
     # Phase 2: cloud riming by ice, immersion freezing, homogeneous freezing
     # Above-freezing: cloud collected by melting ice → qʷⁱ
-    # Wet growth: cloud collection redirected to qʷⁱ
+    # Wet growth: retained cloud collection goes to ice or qʷⁱ; in the
+    # non-liquid-fraction branch, excess cloud collection is shed to rain.
     loss = rates.autoconversion + rates.accretion + rates.cloud_riming +
            rates.cloud_freezing_mass + rates.cloud_homogeneous_mass +
-           rates.cloud_warm_collection + rates.wet_growth_cloud
+           rates.cloud_warm_collection + rates.wet_growth_cloud +
+           rates.wet_growth_shedding
     return ρ * (gain - loss)
 end
 
@@ -153,9 +155,10 @@ Rain number loses from:
     # SB2001 → mass = 2/7.6923e9 (Fortran assembles `nr += 0.5 × ncautc`).
     n_from_autoconv = rates.autoconversion / rain_seed_drop_mass(p3)
 
-    # Phase 1: New drops from complete melting (conserve number)
-    # Only complete_melting produces new rain drops; partial_melting stays on ice
-    n_from_melt = safe_divide(nⁱ * rates.complete_melting, qⁱ, zero(FT))
+    # Phase 1: New drops from complete melting (conserve number). The process
+    # limiter carries this companion explicitly because whole-particle cleanup
+    # can transfer the remaining population even when dry-ice mass is zero.
+    n_from_melt = rates.melting_number
 
     # Phase 1: Evaporation removes rain number proportionally (Fortran P3 v5.5.0)
     # rain_evaporation is positive magnitude (M7); proportional number loss is positive.
@@ -300,13 +303,17 @@ end
            rates.cloud_freezing_mass + rates.rain_freezing_mass +
            rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass +
            rates.wet_growth_densification_mass + retained_wet_growth
-    # Phase 1: melts and sublimates proportionally with ice mass
-    # sublimation (negative deposition) also removes rime proportionally
+    # Ordinary melting and sublimation remove the beginning-of-stage rime
+    # fraction. Whole-particle clipping instead drains the explicitly
+    # reconstructed residual rime companion, including post-process changes.
     sublimation = clamp_positive(-rates.deposition)
+    ordinary_complete_melting =
+        max(0, rates.complete_melting - rates.clipping_dry_mass)
     # Splintering (nCat=1): Fortran subtracts splintering from riming then adds it back
     # as qcmul/qrmul, netting to zero effect on rime. Since cloud_riming and rain_riming
     # are the full (unreduced) rates, no splintering subtraction is needed here.
-    loss = Fᶠ * (rates.partial_melting + rates.complete_melting + sublimation)
+    loss = Fᶠ * (rates.partial_melting + ordinary_complete_melting + sublimation) +
+           rates.clipping_rime_mass
     return ρ * (gain - loss)
 end
 
@@ -323,8 +330,8 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
 @inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ, qⁱ, prp)
     FT = typeof(ρ)
 
-    ρᶠ_safe = max(ρᶠ, FT(100))
-    ρ_rim_new_safe = max(rates.rime_density_new, FT(100))
+    ρᶠ_safe = max(ρᶠ, prp.minimum_rime_density)
+    ρ_rim_new_safe = max(rates.rime_density_new, prp.minimum_rime_density)
 
     # Fortran P3 v5.5.0: rho_rimeMax = 900 for rain rime and freezing
     ρ_rimemax = prp.maximum_rime_density
@@ -351,11 +358,15 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
                    rates.wet_growth_densification_volume +
                    retained_cloud_volume + retained_rain_volume
 
-    # Phase 1: Volume loss from melting and sublimation (proportional to rime fraction)
-    # sublimation (negative deposition) also removes rime volume proportionally
+    # Ordinary melting and sublimation remove volume proportionally. A whole-
+    # particle clip uses the reconstructed companion volume so post-process rime
+    # and densification changes are removed exactly.
     sublimation = clamp_positive(-rates.deposition)
-    total_melting = rates.partial_melting + rates.complete_melting
-    volume_loss = Fᶠ * (total_melting + sublimation) / ρᶠ_safe
+    ordinary_complete_melting =
+        max(0, rates.complete_melting - rates.clipping_dry_mass)
+    ordinary_total_melting = rates.partial_melting + ordinary_complete_melting
+    volume_loss = Fᶠ * (ordinary_total_melting + sublimation) / ρᶠ_safe +
+                  rates.clipping_rime_volume
 
     # Melt-densification (Fortran P3 v5.5.0 lines 4309-4313)
     # Low-density rime portions melt first → remaining ice approaches 917 kg/m³.
@@ -366,7 +377,8 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
     ρ_solid_ice = prp.pure_ice_density  # 917 kg/m³
     qⁱ_safe = max(qⁱ, FT(1e-12))
     bᶠ = Fᶠ * qⁱ_safe / ρᶠ_safe
-    densification = bᶠ * (ρ_solid_ice - ρᶠ_safe) * total_melting / (ρᶠ_safe * qⁱ_safe)
+    densification = bᶠ * (ρ_solid_ice - ρᶠ_safe) * ordinary_total_melting /
+                    (ρᶠ_safe * qⁱ_safe)
     # Only apply when ρᶠ < 917, there is melting, AND liquid fraction is not active
     apply_densification = (ρᶠ_safe < ρ_solid_ice) & !prp.liquid_fraction_active
     densification = ifelse(apply_densification, densification, zero(FT))

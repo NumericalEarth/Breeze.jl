@@ -116,7 +116,7 @@ function read_fortran_lookup_tables(directory::AbstractString;
 
     # Construct full scheme
     cloud = isnothing(cloud) ? CloudDropletProperties(FT) : cloud
-    process_rates = isnothing(process_rates) ? ProcessRateParameters(FT) : process_rates
+    input_process_rates = isnothing(process_rates) ? ProcessRateParameters(FT) : process_rates
 
     return PredictedParticlePropertiesMicrophysics(
         FT(water_density),
@@ -125,7 +125,7 @@ function read_fortran_lookup_tables(directory::AbstractString;
         ice,
         rain,
         cloud,
-        process_rates,
+        input_process_rates,
         precipitation_boundary_condition,
         aerosol,
         warm_rain_scheme

@@ -229,8 +229,8 @@ Matches Fortran `apply_mui_bounds_to_zi` and basic zsmall/zlarge clamps.
     Z_clamped = clamp(Z_ice, FT(1e-35), FT(1))
 
     # Moment-based bounds: G(μ_max) × M₃²/N ≤ Z ≤ G(μ_min) × M₃²/N
-    M₃ = FT(6) * L_ice / (FT(π) * max(ρ_bulk, eps(FT)))
-    M₃²_over_N = M₃^2 / max(N_ice, eps(FT))
+    M₃ = safe_divide(FT(6) * L_ice, FT(π) * ρ_bulk, zero(FT))
+    M₃²_over_N = safe_divide(M₃^2, N_ice, zero(FT))
 
     G_min = g_of_mu(μmin)  # upper Z bound (wide distribution)
     G_max = g_of_mu(μmax)  # lower Z bound (narrow distribution)

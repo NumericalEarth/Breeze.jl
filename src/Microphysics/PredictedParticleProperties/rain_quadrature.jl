@@ -101,8 +101,8 @@ Apply `(ρ₀/ρ)^0.54` at the call site if needed.
     # Density correction is 1 at reference conditions (applied at call site)
     ρ_correction = one(FT)
 
-    mass_vel_integral = zero(FT)
-    mass_integral     = zero(FT)
+    velocity_diameter_cubed_integral = zero(FT)
+    diameter_cubed_integral          = zero(FT)
     n = length(e.nodes)
 
     for i in 1:n
@@ -111,16 +111,19 @@ Apply `(ρ₀/ρ)^0.54` at the call site if needed.
         D = transform_to_diameter(x, λ_r)
         J = jacobian_diameter_transform(x, λ_r)
 
-        m = (FT(π) / 6) * FT(997) * D^3
         V = rain_fall_speed(D, ρ_correction)
         psd = exp(-λ_r * D)
 
-        mass_vel_integral += w * V * m * psd * J
-        mass_integral     += w * m * psd * J
+        velocity_diameter_cubed_integral += w * V * D^3 * psd * J
+        diameter_cubed_integral          += w * D^3 * psd * J
     end
 
-    denom  = max(mass_integral, eps(FT))
-    result = mass_vel_integral / denom
+    # The constant spherical-water mass factor cancels between numerator and
+    # denominator. Following Fortran, floor the unscaled D³ integral at 1e-30;
+    # a machine-epsilon floor on the dimensional mass integral suppresses valid
+    # Float32 velocities throughout the rain lookup-table range.
+    denominator = max(diameter_cubed_integral, FT(1e-30))
+    result = velocity_diameter_cubed_integral / denominator
     return ifelse(isfinite(result), result, zero(FT))
 end
 
@@ -191,8 +194,8 @@ Returns the velocity in [m/s] at reference air density.
         number_integral += w * psd * J
     end
 
-    denom  = max(number_integral, eps(FT))
-    result = vel_integral / denom
+    denominator = max(number_integral, FT(1e-30))
+    result = vel_integral / denominator
     return ifelse(isfinite(result), result, zero(FT))
 end
 

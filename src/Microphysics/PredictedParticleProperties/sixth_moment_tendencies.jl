@@ -25,26 +25,28 @@ using Breeze.Thermodynamics: temperature,
                              ThermodynamicConstants
 using DocStringExtensions: TYPEDSIGNATURES
 
-@inline function group2_ice_sixth_moment_tendency(rates::P3ProcessRates, prp::ProcessRateParameters, μ_r)
-    FT = typeof(rates.nucleation_mass + μ_r)
+@inline function group2_ice_sixth_moment_tendency(rates::P3ProcessRates,
+                                                  prp::ProcessRateParameters,
+                                                  μ_r, μ_cloud = μ_r)
     cloud_splintering_mass, rain_splintering_mass = split_splintering_mass(rates, prp)
-    # Fortran P3 v5.5.0 uses diagnosed μ_r uniformly for group-2 initiated ice
-    # (microphy_p3.f90 update_zi_proc2 calls around line 4483).
+    # Main-process group-2 sources use the rain shape in Fortran. Homogeneous
+    # freezing is applied later: cloud water uses its diagnosed cloud shape,
+    # while rain continues to use the rain shape.
     return initiated_ice_sixth_moment_tendency(rates.nucleation_mass, rates.nucleation_number, μ_r) +
            initiated_ice_sixth_moment_tendency(rates.cloud_freezing_mass, rates.cloud_freezing_number, μ_r) +
            initiated_ice_sixth_moment_tendency(rates.rain_freezing_mass, rates.rain_freezing_number, μ_r) +
            initiated_ice_sixth_moment_tendency(rain_splintering_mass, rates.splintering_number, μ_r) +
            initiated_ice_sixth_moment_tendency(cloud_splintering_mass, rates.splintering_number, μ_r) +
-           initiated_ice_sixth_moment_tendency(rates.cloud_homogeneous_mass, rates.cloud_homogeneous_number, μ_r) +
+           initiated_ice_sixth_moment_tendency(rates.cloud_homogeneous_mass, rates.cloud_homogeneous_number, μ_cloud) +
            initiated_ice_sixth_moment_tendency(rates.rain_homogeneous_mass, rates.rain_homogeneous_number, μ_r)
 end
 
 @inline function active_ice_sixth_moment_tendency(ice_table::P3IceIntegralsTable, p3, rates::P3ProcessRates,
                                                   ρ, qⁱ, qʷⁱ, nⁱ, qᶠ, bᶠ, zⁱ,
-                                                  μ_ice, μ_r)
+                                                  μ_ice, μ_r, μ_cloud = μ_r)
     FT = typeof(ρ)
     prp = p3.process_rates
-    τ = max(prp.sink_limiting_timescale, eps(FT))
+    τ = prp.sink_limiting_timescale
 
     splintering_mass = clamp_positive(rates.splintering_mass)
 
@@ -60,7 +62,7 @@ end
     group2_rime_mass = rates.cloud_freezing_mass + rates.rain_freezing_mass +
                        splintering_mass + rates.cloud_homogeneous_mass +
                        rates.rain_homogeneous_mass
-    group2_rime_volume = group2_rime_mass / max(prp.maximum_rime_density, eps(FT))
+    group2_rime_volume = group2_rime_mass / prp.maximum_rime_density
     current_rime_state = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, qʷⁱ)
 
     qⁱ_rate = tendency_ρqⁱ(rates, one(FT), prp) - group2_mass
@@ -72,7 +74,7 @@ end
 
     qⁱ_new = max(0, qⁱ + τ * qⁱ_rate)
     qʷⁱ_new = max(0, qʷⁱ + τ * qʷⁱ_rate)
-    nⁱ_new = max(nⁱ + τ * nⁱ_rate, eps(FT))
+    nⁱ_new = max(nⁱ + τ * nⁱ_rate, p3.minimum_number_mixing_ratio)
     qᶠ_new = max(0, qᶠ + τ * qᶠ_rate)
     bᶠ_new = max(0, bᶠ + τ * bᶠ_rate)
 
@@ -81,13 +83,13 @@ end
     qⁱ_total_new = max(total_ice_mass(qⁱ_new, qʷⁱ_new), FT(1e-20))
     ρ_bulk_new = ice_mean_density_for_bounds(ice_table, qⁱ_total_new, nⁱ_new,
                                              rime_state.Fᶠ, Fˡ_new, rime_state.ρᶠ, μ_ice)
-    M₃_new = FT(6) * qⁱ_total_new / (FT(π) * max(ρ_bulk_new, eps(FT)))
-    zⁱ_new_raw = g_of_mu(μ_ice) * M₃_new^2 / max(nⁱ_new, eps(FT))
-    has_group1_ice = (qⁱ_new > FT(1e-20)) & (nⁱ_new > eps(FT))
+    M₃_new = FT(6) * qⁱ_total_new / (FT(π) * ρ_bulk_new)
+    zⁱ_new_raw = g_of_mu(μ_ice) * M₃_new^2 / nⁱ_new
+    has_group1_ice = qⁱ_new > FT(1e-20)
     zⁱ_new = ifelse(has_group1_ice, max(FT(1e-35), zⁱ_new_raw), zero(FT))
 
     z_group1 = (zⁱ_new - max(0, zⁱ)) / τ
-    z_group2 = group2_ice_sixth_moment_tendency(rates, prp, μ_r)
+    z_group2 = group2_ice_sixth_moment_tendency(rates, prp, μ_r, μ_cloud)
 
     return ρ * (z_group1 + z_group2)
 end
@@ -108,7 +110,9 @@ This simplified version uses proportional scaling (Z/q ratio).
 For three-moment P3 with lookup tables, use `active_ice_sixth_moment_tendency`,
 which mirrors Fortran's active fixed-μ reconstruction path.
 """
-@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, prp::ProcessRateParameters, μ_r = zero(typeof(ρ)))
+@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ,
+                              prp::ProcessRateParameters,
+                              μ_r = zero(typeof(ρ)), μ_cloud = μ_r)
     FT = typeof(ρ)
     # Simplified: Z changes proportionally to mass changes
     # More accurate version would use full integral formulation
@@ -120,7 +124,7 @@ which mirrors Fortran's active fixed-μ reconstruction path.
     mass_change = rates.deposition - total_melting +
                   rates.cloud_riming + rates.rain_riming + rates.refreezing +
                   rates.coating_condensation - rates.coating_evaporation
-    z_group2 = group2_ice_sixth_moment_tendency(rates, prp, μ_r)
+    z_group2 = group2_ice_sixth_moment_tendency(rates, prp, μ_r, μ_cloud)
 
     return ρ * (ratio * mass_change + z_group2)
 end
@@ -204,7 +208,7 @@ end
     sixth = ice_table.sixth_moment
     dep = ice_table.deposition
 
-    inv_nⁱ = safe_divide(one(FT), nⁱ, eps(FT))
+    inv_nⁱ = safe_divide(one(FT), nⁱ, zero(FT))
 
     # All Fortran Table 1 entries (deposition.* and sixth_moment.*) share the same
     # 5D axes, so we compute interpolation indices/weights once at this cell's
@@ -220,7 +224,7 @@ end
     # but the SAME mass integrals (vdep/vdep1). Separate via sign of rates.deposition.
     mass_dep_combined = evaluate_at(dep.ventilation, prep) +
                         sc_correction * evaluate_at(dep.ventilation_enhanced, prep)
-    env_dep = safe_divide(abs(rates.deposition), max(nⁱ * mass_dep_combined, eps(FT)), zero(FT))
+    env_dep = safe_divide(abs(rates.deposition), nⁱ * mass_dep_combined, zero(FT))
 
     z_dep_combined = evaluate_at(sixth.deposition, prep) +
                      sc_correction * evaluate_at(sixth.deposition1, prep)
@@ -237,8 +241,8 @@ end
     is_deposition = rates.deposition > zero(FT)
     z_dep_sub_rate = ifelse(is_deposition, z_dep_combined, -z_sub_combined) * env_dep
 
-    env_coat_cond = safe_divide(rates.coating_condensation, max(nⁱ * mass_dep_combined, eps(FT)), zero(FT))
-    env_coat_evap = safe_divide(rates.coating_evaporation, max(nⁱ * mass_dep_combined, eps(FT)), zero(FT))
+    env_coat_cond = safe_divide(rates.coating_condensation, nⁱ * mass_dep_combined, zero(FT))
+    env_coat_evap = safe_divide(rates.coating_evaporation, nⁱ * mass_dep_combined, zero(FT))
     z_coat_rate = z_dep_combined * env_coat_cond - z_sub_combined * env_coat_evap
 
     # --- Melting ---
@@ -248,7 +252,7 @@ end
     mass_melt_enh   = evaluate_at(dep.small_ice_ventilation_reynolds, prep)
     mass_melt_combined = mass_melt_const + sc_correction * mass_melt_enh
     complete_melting = rates.complete_melting
-    env_melt = safe_divide(complete_melting, max(nⁱ * mass_melt_combined, eps(FT)), zero(FT))
+    env_melt = safe_divide(complete_melting, nⁱ * mass_melt_combined, zero(FT))
 
     # Fortran uses D ≤ D_crit filtered tables (f1pr32/f1pr33) for Z melting when
     # liquid fraction is active. The non-liquid-fraction zimlt path in Fortran reuses
@@ -286,7 +290,7 @@ end
     z_wg_cloud_rate = z_cloud_rime * rates.wet_growth_cloud * inv_nⁱ
     z_wg_rain_rate = z_rain_rime_factor * rates.wet_growth_rain
     wg_total = rates.wet_growth_cloud + rates.wet_growth_rain
-    shed_frac = safe_divide(rates.wet_growth_shedding, max(wg_total, eps(FT)), zero(FT))
+    shed_frac = safe_divide(rates.wet_growth_shedding, wg_total, zero(FT))
     z_wg_rate = ifelse(prp.liquid_fraction_active,
                        z_wg_cloud_rate + z_wg_rain_rate,
                        (z_wg_cloud_rate + z_wg_rain_rate) * (1 - shed_frac))
@@ -297,9 +301,11 @@ end
 
     # --- Shedding (single term): z_table = dG_kernel/M3 ---
     z_shed = evaluate_at(sixth.shedding, prep)
-    z_shed_rate = z_shed * rates.shedding * inv_nⁱ
+    liquid_fraction_shedding = ifelse(prp.liquid_fraction_active,
+                                       rates.shedding, zero(FT))
+    z_shed_rate = z_shed * liquid_fraction_shedding * inv_nⁱ
 
-    z_group2 = group2_ice_sixth_moment_tendency(rates, prp, zero(FT))
+    z_group2 = group2_ice_sixth_moment_tendency(rates, prp, zero(FT), μ_cloud)
 
     # Total Z rate
     z_rate = z_dep_sub_rate +
@@ -319,7 +325,7 @@ end
 @inline function tabulated_z_tendency(ice::IceProperties,
                                         log_m, Fᶠ, Fˡ, ρᶠ, rates, ρ, qⁱ, nⁱ, zⁱ,
                                         prp::ProcessRateParameters, sc_correction, p3, μ, μ_cloud, λ_r = nothing)
-    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp)
+    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, prp, zero(typeof(ρ)), μ_cloud)
 end
 
 @inline function rain_riming_sixth_moment_factor(::Nothing, log_m, Fᶠ, Fˡ, ρᶠ, μ, λ_r,
@@ -353,7 +359,7 @@ end
     n_source = clamp_positive(number_tendency)
     has_source = (q_source > zero(FT)) & (n_source > zero(FT))
     mom3_tendency = q_source * FT(6) / (FT(900) * FT(π))
-    z_source = g_of_mu(μ_new) * mom3_tendency^2 / max(n_source, eps(FT))
+    z_source = safe_divide(g_of_mu(μ_new) * mom3_tendency^2, n_source, zero(FT))
     return ifelse(has_source, z_source, zero(FT))
 end
 
