@@ -71,6 +71,8 @@ AtmosphereModels.prognostic_thermodynamic_field_names(::LiquidIcePotentialTemper
 AtmosphereModels.additional_thermodynamic_field_names(::LiquidIcePotentialTemperatureFormulation) = tuple(:θ)
 AtmosphereModels.thermodynamic_density_name(::LiquidIcePotentialTemperatureFormulation) = :ρθ
 AtmosphereModels.thermodynamic_density(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature_density
+AtmosphereModels.with_thermodynamic_density(f::LiquidIcePotentialTemperatureFormulation, ρθ) =
+    LiquidIcePotentialTemperatureFormulation(ρθ, f.potential_temperature, f.temperature_solver)
 
 # Val-based versions for pre-materialization (called via Symbol fallback in interface)
 AtmosphereModels.prognostic_thermodynamic_field_names(::Val{:LiquidIcePotentialTemperature}) = tuple(:ρθ)

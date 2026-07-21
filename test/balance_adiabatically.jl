@@ -10,7 +10,12 @@
 
 using Breeze
 using Breeze: dynamics_density
+using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, EnergyFluxBoundaryConditionFunction
+using Breeze.BoundaryConditions: BulkDrag, BulkDragFunction
+using Breeze.AtmosphereModels: adiabatic_balance_twin, AdiabaticBalancer, thermodynamic_density
+using Breeze.AtmosphereModels: adiabatic_scalar_bcs
 using Oceananigans
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions
 using Oceananigans.TimeSteppers: update_state!
 using GPUArraysCore: @allowscalar
 using Test
@@ -22,7 +27,8 @@ const CPD_AI = 1005.0
 
 # Init-mode model: no upper sponge (the one irreversible substep ingredient),
 # no microphysics. Otherwise mirrors the production split-explicit config.
-function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 100e3)
+function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 100e3,
+                                boundary_conditions = NamedTuple(), tracers = tuple())
     grid = RectilinearGrid(arch;
                            size = (Nx, Ny, Nz), halo = (5, 5, 5),
                            x = (0, Lh), y = (0, Lh), z = (0, Lz),
@@ -36,14 +42,14 @@ function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 1
     return AtmosphereModel(grid; dynamics = dyn,
                                  thermodynamic_constants = constants,
                                  microphysics = nothing,
-                                 timestepper = :AcousticRungeKutta3)
+                                 boundary_conditions, tracers)
 end
 
 # Discrete-balanced rest state (mirrors substepper_rest_state.jl::set_rest_state!).
 function _set_discrete_rest!(model)
     ref = model.dynamics.reference_state
     Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
-    parent(model.dynamics.density) .= parent(ref.density)
+    parent(model.dynamics.dry_density) .= parent(ref.density)
     ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
     parent(ρθ) .= parent(ref.pressure) ./ (Rᵈ .* parent(ref.exner_function))
     fill!(parent(model.velocities.u), 0)
@@ -63,13 +69,13 @@ end
 
         # Snapshot the initial fields at value B = 2 for ρθ.
         interior(ρθ) .= 2.0
-        snap = Breeze.snapshot_initial_fields(model)
+        snap = Breeze.AtmosphereModels.snapshot_initial_fields(model)
 
         # Move ρθ to A = 5 and seed ρw with a marker that must survive.
         interior(ρθ) .= 5.0
         interior(model.momentum.ρw) .= 7.0
 
-        Breeze.nudge_initial_fields!(model, snap, 2)
+        Breeze.AtmosphereModels.nudge_initial_fields!(model, snap, 2)
 
         # (5 + 2·2)/3 = 3 for the nudged initial field; ρw unchanged.
         @test @allowscalar(interior(ρθ)[4, 4, 16]) ≈ 3.0
@@ -80,7 +86,7 @@ end
         model = _build_adiabatic_model(default_arch)
         _set_discrete_rest!(model)
 
-        @test length(Breeze.initial_fields(model)) == 5
+        @test length(Breeze.AtmosphereModels.initial_fields(model)) == 5
 
         ρ   = dynamics_density(model.dynamics)
         ρθ  = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
@@ -137,7 +143,7 @@ end
         set!(model; θ = (x, y, z) -> 300.0)
 
         # initial_fields drops ρ for anelastic → 4 entries (vs 5 for compressible).
-        @test length(Breeze.initial_fields(model)) == 4
+        @test length(Breeze.AtmosphereModels.initial_fields(model)) == 4
 
         ρθ  = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
         ρθ₀ = Array(interior(ρθ))
@@ -152,6 +158,97 @@ end
         @test model.clock.iteration == 0
         @test model.clock.stage == 1
         @test isinf(model.clock.last_Δt)
+    end
+
+    @testset "adiabatic twin strips diabatic surface fluxes (#842)" begin
+        ρθ_bcs = FieldBoundaryConditions(bottom = EnergyFluxBoundaryCondition(100.0))
+        model = _build_adiabatic_model(default_arch; boundary_conditions = (; ρθ = ρθ_bcs))
+
+        # Production carries the diabatic surface energy-flux BC...
+        ρθ = thermodynamic_density(model.formulation)
+        @test ρθ.boundary_conditions.bottom.condition isa EnergyFluxBoundaryConditionFunction
+
+        # ...the adiabatic twin does not, and shares the production data so the balanced state
+        # still lands in `model`.
+        twin = adiabatic_balance_twin(model, AdiabaticBalancer())
+        ρθ_twin = thermodynamic_density(twin.formulation)
+        @test !(ρθ_twin.boundary_conditions.bottom.condition isa EnergyFluxBoundaryConditionFunction)
+        @test ρθ_twin.data === ρθ.data
+
+        # And the balancer runs to completion with the diabatic BC present on the model: from a
+        # discrete-balanced rest state, ρw stays ~0 (on GPU this also exercises the flux-BC kernel
+        # that #842 fails to compile).
+        _set_discrete_rest!(model)
+        balance_adiabatically!(model, AdiabaticBalancer())
+        @test all(isfinite, Array(interior(model.momentum.ρw)))
+        @test maximum(abs, Array(interior(model.momentum.ρw))) <= 1e-6
+    end
+
+    @testset "adiabatic_scalar_bcs strips every surface flux, keeps other BCs" begin
+        bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.5),
+                                      top    = ValueBoundaryCondition(300.0))
+        stripped = adiabatic_scalar_bcs(bcs)
+        # A plain (non-zero) flux BC — the case the type-specific strip used to miss — → no-flux.
+        @test stripped.bottom.condition === nothing
+        # Non-flux BCs (here a Dirichlet value, inert on the closure-free twin) pass through.
+        @test stripped.top.condition == 300.0
+    end
+
+    @testset "adiabatic twin strips a plain ρθ surface flux" begin
+        ρθ_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1e-2))
+        model = _build_adiabatic_model(default_arch; Nz = 16, Lz = 4e3, Lh = 1e4,
+                                       boundary_conditions = (; ρθ = ρθ_bcs))
+
+        # A plain (non-wrapped) θ flux survives on production but is stripped from the twin — the
+        # diabatic BC the type-specific strip used to pass through unchanged.
+        ρθ = thermodynamic_density(model.formulation)
+        @test ρθ.boundary_conditions.bottom.condition == 1e-2
+        twin = adiabatic_balance_twin(model, AdiabaticBalancer())
+        ρθ_twin = thermodynamic_density(twin.formulation)
+        @test ρθ_twin.boundary_conditions.bottom.condition === nothing
+        @test ρθ_twin.data === ρθ.data
+    end
+
+    @testset "adiabatic twin strips a moisture surface flux" begin
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1e-5))
+        model = _build_adiabatic_model(default_arch; Nz = 16, Lz = 4e3, Lh = 1e4,
+                                       boundary_conditions = (; ρqᵛ = ρqᵛ_bcs))
+
+        # The moisture density carries a surface vapor flux on production; the twin strips it too,
+        # so the excursion has no surface moisture source (and never lowers a flux BC on the twin,
+        # which drops the microphysics fields a bulk vapor flux would read — the #842 failure mode).
+        q_prod = model.moisture_density
+        @test q_prod.boundary_conditions.bottom.condition == 1e-5
+        twin = adiabatic_balance_twin(model, AdiabaticBalancer())
+        @test twin.moisture_density.boundary_conditions.bottom.condition === nothing
+        @test twin.moisture_density.data === q_prod.data
+    end
+
+    @testset "adiabatic twin strips a momentum surface drag" begin
+        ρu_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient = 1e-3, surface_temperature = T₀_AI))
+        model = _build_adiabatic_model(default_arch; Nz = 16, Lz = 4e3, Lh = 1e4,
+                                       boundary_conditions = (; ρu = ρu_bcs))
+
+        # Surface momentum drag is dissipative (friction), just like closure — so the twin strips
+        # it too, leaving the reversible excursion free of any surface momentum sink.
+        ρu_prod = model.momentum.ρu
+        @test ρu_prod.boundary_conditions.bottom.condition isa BulkDragFunction
+        twin = adiabatic_balance_twin(model, AdiabaticBalancer())
+        @test !(twin.momentum.ρu.boundary_conditions.bottom.condition isa BulkDragFunction)
+        @test twin.momentum.ρu.boundary_conditions.bottom.condition === nothing
+        @test twin.momentum.ρu.data === ρu_prod.data
+    end
+
+    @testset "adiabatic twin strips a generic tracer surface flux" begin
+        c_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1e-4))
+        model = _build_adiabatic_model(default_arch; Nz = 16, Lz = 4e3, Lh = 1e4,
+                                       tracers = :c, boundary_conditions = (; c = c_bcs))
+
+        c_prod = model.tracers.c
+        @test c_prod.boundary_conditions.bottom.condition == 1e-4
+        twin = adiabatic_balance_twin(model, AdiabaticBalancer())
+        @test twin.tracers.c.boundary_conditions.bottom.condition === nothing
+        @test twin.tracers.c.data === c_prod.data
     end
 
 end

@@ -2,7 +2,7 @@ using Breeze
 using Breeze: SpecificForcing
 using Breeze.AtmosphereModels: is_density_tendency_forcing
 using Oceananigans: Oceananigans, prognostic_fields
-using Oceananigans.Forcings: MultipleForcings
+using Oceananigans.Forcings: MultipleForcings, Relaxation
 using Oceananigans.Fields: interior
 using Oceananigans.TimeSteppers: update_state!
 using Test
@@ -167,6 +167,45 @@ end
     ρᵣ = interior(model.dynamics.reference_state.density) |> Array
     expected = ρᵣ .* F_θ_specific .+ F_ρθ_density
     @test maximum(abs.(Gρθ .- expected)) < eps(FT) * 100
+end
+
+@testset "Specific-keyed Relaxation relaxes the specific variable [$(FT)]" for FT in test_float_types()
+    # Regression test for the Oceananigans ≥ v0.110.7 Relaxation rework (Oceananigans
+    # #5620): `materialize_forcing(::Relaxation, field, name, …)` now captures `field`
+    # as the relaxed variable instead of binding `name`. SpecificForcing must therefore
+    # materialize its inner forcing against the *specific* field — otherwise a
+    # specific-keyed relaxation (e.g. a Davies fringe on θ) computes
+    # rate·(θ_target − ρθ) instead of rate·(θ_target − θ).
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    rate = FT(1/100)
+
+    # Center path: θ relaxation. With uniform θ and zero velocity the tendency is
+    # forcing-only, so Gρθ = ρᵣ · rate · (θ_target − θ).
+    θ_target = FT(310)
+    model = AtmosphereModel(grid; forcing=(; θ=Relaxation(; rate, target=θ_target)))
+    θ₀ = model.dynamics.reference_state.potential_temperature
+    set!(model; θ=θ₀)
+    update_state!(model)
+
+    Gρθ = model.timestepper.Gⁿ.ρθ
+    ρᵣ = model.dynamics.reference_state.density
+    θ = model.formulation.potential_temperature
+    expected = ρᵣ * rate * (θ_target - θ)
+    @test Gρθ ≈ expected rtol=100 * eps(FT)
+
+    # Face path: u relaxation. ρᵣ varies only in z, so its x-Face interpolation equals
+    # the Center value and Gρu = ρᵣ · rate · (u_target − u).
+    u_target = FT(10)
+    u₀ = FT(2)
+    model = AtmosphereModel(grid; forcing=(; u=Relaxation(; rate, target=u_target)))
+    set!(model; θ=θ₀, u=u₀)
+    update_state!(model)
+
+    Gρu = model.timestepper.Gⁿ.ρu
+    expected_u = ρᵣ * rate * (u_target - u₀)
+    @test Gρu ≈ expected_u rtol=100 * eps(FT)
 end
 
 #####

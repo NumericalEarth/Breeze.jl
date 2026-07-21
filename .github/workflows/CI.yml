@@ -4,14 +4,7 @@ on:
   push:
     branches:
       - "main"
-    paths: &paths
-      - ".github/workflows/CI.yml"
-      - "ext/**"
-      - "src/**"
-      - "test/**"
-      - "Project.toml"
   pull_request:
-    paths: *paths
   workflow_dispatch:
 
 concurrency:
@@ -31,7 +24,31 @@ env:
   JULIA_PKG_SERVER_REGISTRY_PREFERENCE: 'eager'
 
 jobs:
+  check-files:
+    name: Check for modified files
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      files: ${{ steps.filter.outputs.files }}
+    steps:
+      - name: "Check out repository"
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: filter
+        with:
+          filters: |
+            files:
+              - ".github/workflows/CI.yml"
+              - "ext/**"
+              - "src/**"
+              - "test/**"
+              - "Project.toml"
+
   test:
+    needs: check-files
+    if: ${{ needs.check-files.outputs.files == 'true' }}
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - check-bounds ${{ matrix.check-bounds }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
@@ -84,7 +101,7 @@ jobs:
         run: |
           df -hT
       - name: "Check out repository"
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: "Install Julia"
         uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         # On the self-hosted GPU runners we use a Docker image with Julia pre-installed.
@@ -130,14 +147,10 @@ jobs:
           if [[ ${{ runner.os }} == "macOS" ]]; then
               # On macOS runners, `Metal.functional()` returns `false` because the GPU is
               # virtualised, but we should be able to actually use it anyway.
-              echo "BREEZE_FORCE_METAL_FUNCTIONAL=true" >> "${GITHUB_ENV}"
+              echo "BREEZE_FORCE_METAL_FUNCTIONAL=true" | tee -a "${GITHUB_ENV}"
               # Encourage ParallelTestRunner to use multiple jobs on macOS, rather
               # than the single one it'd use by default.
               TEST_ARGS+=(--jobs=2)
-              # ...but also set a more conservative limit to memory usage before
-              # reciclying a worker, to avoid trashing memory or out-of-memory errors.
-              JULIA_TEST_MAXRSS_MB=1800
-              echo "JULIA_TEST_MAXRSS_MB=${JULIA_TEST_MAXRSS_MB}" | tee -a "${GITHUB_ENV}"
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" | tee -a "${GITHUB_ENV}"
       - name: Install earlyoom
@@ -161,6 +174,7 @@ jobs:
           # tests).
           cp -v /usr/local/share/julia/environments/breeze/LocalPreferences.toml test/.
       - name: Instantiate test environment
+        timeout-minutes: 30
         shell: bash
         run: |
           julia --project=test --color=yes --check-bounds=${{ matrix.check-bounds }} -e '
@@ -201,8 +215,34 @@ jobs:
       - name: "Process Julia coverage files"
         uses: julia-actions/julia-processcoverage@03114f09f119417c3242a9fb6e0b722676aedf38 # v1.2.2
       - name: "Upload coverage data to CodeCov"
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
         continue-on-error: true
+
+  # Fake test job, to launch when no relevant files are modified: we need this is launch a
+  # job with the required name, even when we don't actually want to run CI.
+  fake-test:
+    needs: check-files
+    if: ${{ needs.check-files.outputs.files != 'true' }}
+    # The name must exactly match the required job.
+    name: Julia ${{ matrix.fake-version }} - ${{ matrix.fake-os }} - ${{ matrix.fake-arch }} - check-bounds ${{ matrix.fake-check-bounds }} - ${{ github.event_name }}
+    runs-on: ${{ matrix.fake-os }}
+    timeout-minutes: 1
+    strategy:
+      # NOTE: we use a one-element matrix, instead of just hardcoding the expected name
+      # above, because when this job is to be skipped, we don't want this to have the name
+      # fully resolved, otherwise it may accidentally make the PR mergeable when it
+      # shouldn't (the `${{ matrix.... }}` in the job name are resolved only when the job is
+      # actually launched).
+      matrix:
+        include:
+          - fake-version: "min"
+            fake-os: ubuntu-latest
+            fake-arch: "default"
+            fake-check-bounds: "yes"
+    steps:
+      - name: "Run fake tests"
+        run: |
+          true
