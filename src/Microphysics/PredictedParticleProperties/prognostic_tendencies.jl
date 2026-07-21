@@ -134,47 +134,16 @@ Rain number loses from:
 - Rain warm collection number (M9, Fortran nrcoll)
 """
 @inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ, nʳ, qʳ, p3)
-    FT = typeof(ρ)
-    prp = p3.process_rates
-
-    # Phase 1: New drops from autoconversion. Seed-drop mass varies by scheme:
-    # KK2000 → 25 μm radius (Fortran cons3⁻¹), Kogan2013 → 40 μm (cons8⁻¹),
-    # SB2001 → mass = 2/7.6923e9 (Fortran assembles `nr += 0.5 × ncautc`).
-    n_from_autoconv = rates.autoconversion / rain_seed_drop_mass(p3)
-
-    # Phase 1: New drops from complete melting (conserve number)
-    # Only complete_melting produces new rain drops; partial_melting stays on ice
-    n_from_melt = safe_divide(nⁱ * rates.complete_melting, qⁱ, zero(FT))
-
-    # Phase 1: Evaporation removes rain number proportionally (Fortran P3 v5.5.0)
-    # rain_evaporation is positive magnitude (M7); proportional number loss is positive.
-    n_from_evap = safe_divide(nʳ * rates.rain_evaporation, qʳ, zero(FT))
-
-    # Gains: shedding produces rain drops
-    # cloud_warm_collection → new rain drops from above-freezing cloud
-    #      collection (Fortran ncshdc = qcshd × 1.923e6). Only in
-    #      non-liquid-fraction path; when liquid fraction is active, collected
-    #      mass goes to qʷⁱ, not rain.
-    # wet_growth_shedding_number → rain drops from excess wet growth (Fortran nrshdr)
-    cloud_warm_rain_n = ifelse(prp.liquid_fraction_active, zero(FT),
-                               rates.cloud_warm_collection * FT(1.923e6))
-    n_gain = n_from_autoconv + n_from_melt +
-             rates.rain_breakup +
-             rates.shedding_number +
-             cloud_warm_rain_n +
-             rates.wet_growth_shedding_number
-    # Losses (all positive magnitudes, M7)
-    # rain_warm_collection_number → rain number sink from above-freezing rain
-    #      collection (Fortran nrcoll)
-    n_loss = n_from_evap +
-             rates.rain_self_collection +
-             rates.rain_riming_number +
-             rates.rain_freezing_number +
-             rates.rain_homogeneous_number +
-             rates.rain_warm_collection_number
+    tendency_before_homogeneous_freezing = rain_number_tendency_before_homogeneous_freezing(
+        p3, nⁱ, qⁱ, nʳ, qʳ, rates.autoconversion, rates.complete_melting,
+        rates.rain_evaporation, rates.rain_self_collection, rates.rain_breakup,
+        rates.rain_riming_number, rates.rain_freezing_number, rates.shedding_number,
+        rates.cloud_warm_collection, rates.rain_warm_collection_number,
+        rates.wet_growth_shedding_number)
 
     # DSD number correction feedback (Fortran get_rain_dsd2 writes back bounded nr)
-    return ρ * (n_gain - n_loss + rates.rain_number_correction)
+    return ρ * (tendency_before_homogeneous_freezing - rates.rain_homogeneous_number +
+                rates.rain_number_correction)
 end
 
 """
@@ -350,32 +319,15 @@ freezing, and above-freezing collection remove cloud droplets in proportion
 to the cloud mass they consume, following the Fortran `nc` budget structure.
 """
 @inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜ, qᶜˡ, p3)
-    FT = typeof(ρ)
-    prp = p3.process_rates
-    # Nᶜ is per-volume [#/m³]; dividing by ρ gives per-mass nᶜˡ [#/kg],
-    # matching Fortran's nc/qc → [#/kg/s] when multiplied by mass rates.
-    number_per_mass = safe_divide(Nᶜ, ρ * qᶜˡ, zero(FT))
-    seed_drop_mass = 4 * FT(π) / 3 * prp.liquid_water_density * FT(1e-18)
-    activation_number = ifelse(iszero(rates.ccn_activation_number),
-                               rates.ccn_activation_mass / seed_drop_mass,
-                               rates.ccn_activation_number)
-
-    # Scheme-aware cloud-number loss from autoconversion. SB2001 produces a
-    # fixed-mass drizzle drop per unit converted mass; KK2000 and Kogan2013
-    # scale by the in-cloud nc/qc ratio (Fortran ncautc = qcaut × nc/qc).
-    autoconv_n = cloud_number_loss_from_autoconversion(p3, rates.autoconversion,
-                                                       qᶜˡ, Nᶜ, ρ)
-
-    number_loss = autoconv_n +
-                  number_per_mass * rates.accretion +
-                  rates.cloud_self_collection +
-                  rates.cloud_riming_number +
-                  rates.cloud_freezing_number +
-                  rates.cloud_homogeneous_number +
-                  rates.cloud_warm_collection_number
+    tendency_before_homogeneous_freezing = cloud_number_tendency_before_homogeneous_freezing(
+        p3, ρ, qᶜˡ, Nᶜ, rates.ccn_activation_mass,
+        rates.ccn_activation_number, rates.autoconversion, rates.accretion,
+        rates.cloud_self_collection, rates.cloud_riming_number,
+        rates.cloud_freezing_number, rates.cloud_warm_collection_number)
 
     # DSD number correction feedback (Fortran get_cloud_dsd2 writes back bounded nc)
-    return ρ * (activation_number - number_loss + rates.cloud_number_correction)
+    return ρ * (tendency_before_homogeneous_freezing - rates.cloud_homogeneous_number +
+                rates.cloud_number_correction)
 end
 
 """

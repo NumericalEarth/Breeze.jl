@@ -1080,6 +1080,115 @@ end
         @test rates_updraft.condensation > rates_still.condensation
     end
 
+    @testset "Homogeneous freezing acts on the post-process liquid residual" begin
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        p3 = PredictedParticlePropertiesMicrophysics()
+        dt_safety = p3.process_rates.sink_limiting_timescale
+
+        ρ   = FT(1)
+        T   = FT(230)          # below the 233.15 K homogeneous-freezing threshold
+        P   = FT(80000)
+        pˢᵗ = FT(100000)
+
+        qᶜˡ = FT(1e-3)
+        qʳ  = FT(5e-4)
+        qⁱ  = FT(2e-4)
+        qᵛ  = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        q   = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qⁱ)
+        𝒰   = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
+
+        # Cloud + rain + ice are all present, so ordinary collection and freezing
+        # processes modify the liquid reservoirs before homogeneous freezing.
+        ℳ = P3MicrophysicalState(qᶜˡ, FT(1e8), qʳ, FT(1e5),
+                                 qⁱ, FT(1e5), zero(FT), zero(FT),
+                                 zero(FT), zero(FT), zero(FT), zero(FT), zero(FT))
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+
+        # Fortran applies ordinary microphysics before homogeneous freezing. The
+        # ordinary rates must therefore remain active below the threshold rather
+        # than being suppressed by reserving all beginning-of-stage liquid.
+        @test rates.autoconversion > 0
+        @test rates.accretion > 0
+        @test rates.cloud_riming + rates.cloud_freezing_mass > 0
+        @test rates.rain_riming + rates.rain_freezing_mass > 0
+
+        # Add homogeneous freezing back to each liquid tendency to reconstruct the
+        # post-ordinary reservoir. With the default τ_hom == dt_safety, precisely
+        # that residual is then frozen and both liquid species finish non-negative.
+        cloud_after_ordinary = qᶜˡ +
+                               (tendency_ρqᶜˡ(rates, ρ) / ρ +
+                                rates.cloud_homogeneous_mass) * dt_safety
+        rain_after_ordinary = qʳ +
+                              (tendency_ρqʳ(rates, ρ) / ρ +
+                               rates.rain_homogeneous_mass) * dt_safety
+        @test rates.cloud_homogeneous_mass * dt_safety ≈ cloud_after_ordinary
+        @test rates.rain_homogeneous_mass * dt_safety ≈ rain_after_ordinary atol=1e-18
+        @test rates.cloud_homogeneous_mass < qᶜˡ / dt_safety
+        @test qᶜˡ + tendency_ρqᶜˡ(rates, ρ) / ρ * dt_safety ≈ 0 atol=1e-18
+        @test qʳ + tendency_ρqʳ(rates, ρ) / ρ * dt_safety ≈ 0 atol=1e-18
+
+        # Total water remains conserved under the sequential partition.
+        total_water = tendency_ρqᵛ(rates, ρ) + tendency_ρqᶜˡ(rates, ρ) +
+                      tendency_ρqʳ(rates, ρ) + tendency_ρqⁱ(rates, ρ) +
+                      tendency_ρqʷⁱ(rates, ρ)
+        @test abs(total_water) < 1e-15 * ρ
+
+        # The homogeneous and limiter timescales are independent user parameters.
+        # A faster homogeneous timescale must be capped at the residual reservoir,
+        # including both mass and its paired number transfer.
+        fast_process_rates = ProcessRateParameters(
+            FT; homogeneous_freezing_timescale = 1,
+                sink_limiting_timescale = dt_safety,
+                immersion_freezing_coefficient = 0,
+                immersion_freezing_nucleation_coefficient = 0)
+        fast_p3 = p3_with_process_rates(p3, fast_process_rates)
+        fast_q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, zero(FT))
+        𝒰_fast = with_temperature(
+            LiquidIcePotentialTemperatureState(zero(FT), fast_q, pˢᵗ, P), T, constants)
+        ℳ_fast = P3MicrophysicalState(qᶜˡ, FT(1e8), qʳ, FT(1e5),
+                                          zero(FT), zero(FT), zero(FT), zero(FT),
+                                          zero(FT), zero(FT), zero(FT), zero(FT), zero(FT))
+        fast_rates = compute_p3_process_rates(fast_p3, ρ, ℳ_fast, 𝒰_fast, constants)
+        fast_cloud_after_ordinary = qᶜˡ +
+                                    (tendency_ρqᶜˡ(fast_rates, ρ) / ρ +
+                                     fast_rates.cloud_homogeneous_mass) * dt_safety
+        fast_rain_after_ordinary = qʳ +
+                                   (tendency_ρqʳ(fast_rates, ρ) / ρ +
+                                    fast_rates.rain_homogeneous_mass) * dt_safety
+        fast_cloud_final = qᶜˡ + tendency_ρqᶜˡ(fast_rates, ρ) / ρ * dt_safety
+        fast_rain_final = qʳ + tendency_ρqʳ(fast_rates, ρ) / ρ * dt_safety
+        @test fast_rates.cloud_homogeneous_mass > 0
+        @test fast_rates.rain_homogeneous_mass > 0
+        @test fast_rates.cloud_homogeneous_mass * dt_safety ≈ fast_cloud_after_ordinary
+        @test fast_rates.rain_homogeneous_mass * dt_safety ≈ fast_rain_after_ordinary
+        @test fast_cloud_final ≈ 0 atol=1e-18
+        @test fast_rain_final ≈ 0 atol=1e-18
+
+        fast_rain_number_tendency = tendency_ρnʳ(
+            fast_rates, ρ, zero(FT), zero(FT), ℳ_fast.nʳ, qʳ, fast_p3) / ρ
+        fast_rain_number_after_ordinary = ℳ_fast.nʳ +
+                                          (fast_rain_number_tendency +
+                                           fast_rates.rain_homogeneous_number) * dt_safety
+        @test fast_rates.cloud_homogeneous_number * dt_safety ≈
+              ℳ_fast.nᶜˡ
+        @test fast_rates.rain_homogeneous_number * dt_safety ≈
+              fast_rain_number_after_ordinary
+        @test ℳ_fast.nʳ + fast_rain_number_tendency * dt_safety ≈ 0 atol=1e-10
+
+        # Above the threshold the homogeneous rates vanish and the ordinary warm
+        # sinks stay active — i.e. the budget reduces to its original single-reservoir form.
+        T_warm = FT(250)
+        qᵛ_warm = saturation_specific_humidity(T_warm, ρ, constants, PlanarLiquidSurface())
+        q_warm = MoistureMassFractions(qᵛ_warm, qᶜˡ + qʳ, qⁱ)
+        𝒰_warm = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q_warm, pˢᵗ, P), T_warm, constants)
+        rates_warm = compute_p3_process_rates(p3, ρ, ℳ, 𝒰_warm, constants)
+        @test rates_warm.cloud_homogeneous_mass == 0
+        @test rates_warm.rain_homogeneous_mass == 0
+        @test rates_warm.accretion > 0
+    end
+
     @testset "P3 active sixth moment keeps splintered mass out of group 1" begin
         FT = Float32
         base_p3 = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)

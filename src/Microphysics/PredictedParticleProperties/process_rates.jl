@@ -98,7 +98,8 @@ end
 
 """
 Phase 2 process rates: aggregation, riming, wet growth, shedding,
-nucleation, homogeneous freezing, and warm collection.
+nucleation, and warm collection. Homogeneous freezing is diagnosed
+separately in `compute_p3_process_rates` from the post-process liquid residual.
 Returned by `_p3_phase2_rates`. Internal implementation detail.
 """
 struct P3Phase2Rates{FT}
@@ -127,10 +128,6 @@ struct P3Phase2Rates{FT}
     rain_freezing_number :: FT
     splintering_mass :: FT
     splintering_number :: FT
-    cloud_homogeneous_mass :: FT
-    cloud_homogeneous_number :: FT
-    rain_homogeneous_mass :: FT
-    rain_homogeneous_number :: FT
     cloud_warm_collection :: FT
     cloud_warm_collection_number :: FT
     rain_warm_collection :: FT
@@ -464,9 +461,8 @@ end
     # Rime splintering
     spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T, D_mean, Fˡ, T, qᶠ)
 
-    # Homogeneous freezing
-    cloud_hom_q, cloud_hom_n = homogeneous_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
-    rain_hom_q, rain_hom_n = homogeneous_freezing_rain_rate(p3, qʳ, nʳ, T)
+    # Homogeneous freezing is diagnosed later from the post-process liquid residual
+    # (see `compute_p3_process_rates`), so it is not computed here.
 
     # Above-freezing collection
     cloud_warm_q, _ = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ_ice, qʷⁱ)
@@ -488,7 +484,6 @@ end
         shed, shed_n, refrz, complete_melt,
         nuc_q, nuc_n, cloud_frz_q, cloud_frz_n, rain_frz_q, rain_frz_n,
         spl_q, spl_n,
-        cloud_hom_q, cloud_hom_n, rain_hom_q, rain_hom_n,
         cloud_warm_q, cloud_warm_n, rain_warm_q, rain_warm_n,
         D_mean, Fˡ
     )
@@ -636,10 +631,6 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     rain_frz_n = ph2.rain_freezing_number
     spl_q = ph2.splintering_mass
     spl_n = ph2.splintering_number
-    cloud_hom_q = ph2.cloud_homogeneous_mass
-    cloud_hom_n = ph2.cloud_homogeneous_number
-    rain_hom_q = ph2.rain_homogeneous_mass
-    rain_hom_n = ph2.rain_homogeneous_number
     cloud_warm_q = ph2.cloud_warm_collection
     cloud_warm_n = ph2.cloud_warm_collection_number
     rain_warm_q = ph2.rain_warm_collection
@@ -675,9 +666,12 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # other cloud sinks when the budget would over-deplete `qᶜˡ`.
     cloud_evap = clamp_positive(-cond)
     cloud_source_total = clamp_positive(cond) + ccn_act
+    # Homogeneous freezing is applied after all ordinary process budgets below,
+    # matching its ordering in Fortran P3. Do not reserve liquid for it here:
+    # ordinary cloud processes first act on the full cloud reservoir.
     cloud_available = max(0, qᶜˡ) + cloud_source_total * dt_safety
     cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
-                       cloud_hom_q + cloud_warm_q + wg_cloud + cloud_evap
+                       cloud_warm_q + wg_cloud + cloud_evap
     f_cloud = sink_limiting_factor(cloud_sink_total, cloud_available, dt_safety)
     autoconv      = autoconv * f_cloud
     accr          = accr * f_cloud
@@ -685,24 +679,22 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     cloud_rim_n   = cloud_rim_n * f_cloud
     cloud_frz_q   = cloud_frz_q * f_cloud
     cloud_frz_n   = cloud_frz_n * f_cloud
-    cloud_hom_q   = cloud_hom_q * f_cloud
-    cloud_hom_n   = cloud_hom_n * f_cloud
     cloud_warm_q  = cloud_warm_q * f_cloud
     cloud_warm_n  = cloud_warm_n * f_cloud
     wg_cloud      = wg_cloud * f_cloud
     cond          = ifelse(cond < 0, cond * f_cloud, cond)
 
     # --- Rain sinks ---
+    # As with cloud above, limit ordinary rain processes against the full rain
+    # reservoir. Homogeneous freezing is diagnosed from the residual later.
     rain_source_total = autoconv + accr + complete_melt + shed + wg_shed + rain_cond
     rain_available = max(0, qʳ) + rain_source_total * dt_safety
-    rain_sink_total = rain_rim + rain_frz_q + rain_hom_q + rain_warm_q + wg_rain + rain_evap
+    rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
     f_rain = sink_limiting_factor(rain_sink_total, rain_available, dt_safety)
     rain_rim      = rain_rim * f_rain
     rain_rim_n    = rain_rim_n * f_rain
     rain_frz_q    = rain_frz_q * f_rain
     rain_frz_n    = rain_frz_n * f_rain
-    rain_hom_q    = rain_hom_q * f_rain
-    rain_hom_n    = rain_hom_n * f_rain
     rain_warm_q   = rain_warm_q * f_rain
     rain_warm_n   = rain_warm_n * f_rain
     wg_rain       = wg_rain * f_rain
@@ -725,7 +717,6 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # transfers mass dry → coating without changing the total).
     total_ice_source_total = max(0, dep) + cloud_rim + rain_rim +
                              nuc_q + cloud_frz_q + rain_frz_q +
-                             cloud_hom_q + rain_hom_q +
                              cloud_warm_q + rain_warm_q +
                              wg_cloud + wg_rain + coat_cond
     total_ice_available = max(total_ice_mass(qⁱ, qʷⁱ), FT(0)) + total_ice_source_total * dt_safety
@@ -762,6 +753,56 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     cloud_spl_q = min(cloud_spl_q, clamp_positive(cloud_rim))
     rain_spl_q = min(rain_spl_q, clamp_positive(rain_rim))
     spl_q = cloud_spl_q + rain_spl_q
+
+    # --- Homogeneous freezing of post-process liquid ---
+    # Fortran applies homogeneous freezing after the ordinary process updates and
+    # sedimentation (`microphy_p3.f90:4650-4757`). Sedimentation is advanced by the
+    # host model in Breeze, but within the local process operator we can preserve
+    # the essential ordering: first finalize every ordinary limiter above, then
+    # freeze the liquid that remains. Re-diagnosing the rate from the residual also
+    # captures liquid created by condensation, melting, or shedding during this
+    # interval.
+    cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
+                       cloud_warm_q + wg_cloud + clamp_positive(-cond)
+    cloud_remaining = max(0, max(0, qᶜˡ) +
+                                (cloud_source_total - cloud_sink_total) * dt_safety)
+
+    rain_source_total = autoconv + accr + complete_melt + shed + wg_shed + rain_cond
+    rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
+    rain_remaining = max(0, max(0, qʳ) +
+                               (rain_source_total - rain_sink_total) * dt_safety)
+
+    # Diagnose the post-process number reservoirs as well, so frozen liquid carries
+    # the number left by collection, breakup, melting, and activation rather than the
+    # beginning-of-stage number. In the prescribed-Nᶜ path Fortran resets cloud
+    # number to its prescribed value immediately before homogeneous freezing.
+    cloud_number_tendency = cloud_number_tendency_before_homogeneous_freezing(
+        p3, ρ, qᶜˡ, Nᶜ, ccn_act, ccn_act_n, autoconv, accr, cloud_self,
+        cloud_rim_n, cloud_frz_n, cloud_warm_n)
+    prognostic_cloud_number = max(0, cloud.nᶜˡ +
+                                     cloud_number_tendency * dt_safety)
+    cloud_number_remaining = ifelse(isnothing(p3.aerosol), Nᶜ / ρ, prognostic_cloud_number)
+
+    rain_number_tendency = rain_number_tendency_before_homogeneous_freezing(
+        p3, nⁱ, qⁱ, nʳ, qʳ, autoconv, complete_melt, rain_evap, rain_self,
+        rain_br, rain_rim_n, rain_frz_n, shed_n, cloud_warm_q, rain_warm_n, wg_shed_n)
+    rain_number_remaining = max(0, nʳ +
+                                   rain_number_tendency * dt_safety)
+
+    cloud_hom_q, cloud_hom_n = homogeneous_freezing_cloud_rate(
+        p3, cloud_remaining, ρ * cloud_number_remaining, T, ρ)
+    rain_hom_q, rain_hom_n = homogeneous_freezing_rain_rate(
+        p3, rain_remaining, rain_number_remaining, T)
+
+    # `homogeneous_freezing_timescale` and `sink_limiting_timescale` are
+    # independently configurable. Cap both mass and number consistently so one
+    # limiter interval can never remove more than the residual reservoir.
+    f_cloud_hom = sink_limiting_factor(cloud_hom_q, cloud_remaining, dt_safety)
+    cloud_hom_q = cloud_hom_q * f_cloud_hom
+    cloud_hom_n = cloud_hom_n * f_cloud_hom
+    f_rain_hom = sink_limiting_factor(rain_hom_q, rain_remaining, dt_safety)
+    rain_hom_q = rain_hom_q * f_rain_hom
+    rain_hom_n = rain_hom_n * f_rain_hom
 
     # DSD number correction feedback
     ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety

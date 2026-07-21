@@ -154,6 +154,46 @@ end
 
 @inline safe_divide(a, b) = safe_divide(a, b, zero(a))
 
+@inline function cloud_number_tendency_before_homogeneous_freezing(p3, ρ, qᶜˡ, Nᶜ,
+                                                 ccn_activation_mass, ccn_activation_number,
+                                                 autoconversion, accretion, self_collection,
+                                                 riming_number, freezing_number,
+                                                 warm_collection_number)
+    FT = typeof(ρ)
+    prp = p3.process_rates
+    seed_drop_mass = 4 * FT(π) / 3 * prp.liquid_water_density * FT(1e-18)
+    activation_number = ifelse(iszero(ccn_activation_number),
+                               ccn_activation_mass / seed_drop_mass,
+                               ccn_activation_number)
+    autoconversion_number = cloud_number_loss_from_autoconversion(
+        p3, autoconversion, qᶜˡ, Nᶜ, ρ)
+    collection_number = safe_divide(Nᶜ * accretion, ρ * qᶜˡ, zero(FT))
+    number_loss = autoconversion_number + collection_number + self_collection +
+                  riming_number + freezing_number + warm_collection_number
+    return activation_number - number_loss
+end
+
+@inline function rain_number_tendency_before_homogeneous_freezing(p3, nⁱ, qⁱ, nʳ, qʳ,
+                                                autoconversion, complete_melting,
+                                                evaporation, self_collection, breakup,
+                                                riming_number, freezing_number,
+                                                shedding_number, cloud_warm_collection,
+                                                warm_collection_number,
+                                                wet_growth_shedding_number)
+    FT = typeof(nⁱ + qⁱ + nʳ + qʳ)
+    prp = p3.process_rates
+    number_from_autoconversion = autoconversion / rain_seed_drop_mass(p3)
+    number_from_melting = safe_divide(nⁱ * complete_melting, qⁱ, zero(FT))
+    number_from_evaporation = safe_divide(nʳ * evaporation, qʳ, zero(FT))
+    cloud_warm_rain_number = ifelse(prp.liquid_fraction_active, zero(FT),
+                                    cloud_warm_collection * FT(1.923e6))
+    number_gain = number_from_autoconversion + number_from_melting + breakup +
+                  shedding_number + cloud_warm_rain_number + wet_growth_shedding_number
+    number_loss = number_from_evaporation + self_collection + riming_number +
+                  freezing_number + warm_collection_number
+    return number_gain - number_loss
+end
+
 @inline function ice_air_density_correction(reference_air_density, air_density)
     FT = typeof(reference_air_density)
     return (reference_air_density / max(air_density, FT(0.01)))^FT(0.54)
