@@ -7,8 +7,27 @@ using Oceananigans.Architectures: architecture
 using Oceananigans.Utils: launch!
 
 using RRTMGP.AtmosphericStates: AtmosphericState
+using RRTMGP.VolumeMixingRatios: VmrGM
 
 using Breeze.AtmosphereModels: BackgroundAtmosphere, specific_humidity
+
+#####
+##### Volume mixing ratio initialization (shared by clear-sky and all-sky)
+#####
+
+# Zero-initialized global-mean volume mixing ratios: H₂O and O₃ vary per layer
+# and column, all other gases are well-mixed scalars.
+function initialize_global_mean_vmr(Ngas, Nz, Nc, FT, ArrayType)
+    vmr_h2o = ArrayType{FT}(undef, Nz, Nc)
+    vmr_o3 = ArrayType{FT}(undef, Nz, Nc)
+    global_mean_vmr = ArrayType{FT}(undef, Ngas)
+
+    fill!(vmr_h2o, zero(FT))
+    fill!(vmr_o3, zero(FT))
+    fill!(global_mean_vmr, zero(FT))
+
+    return VmrGM(vmr_h2o, vmr_o3, global_mean_vmr)
+end
 
 #####
 ##### Gas state update (shared by clear-sky and all-sky)
@@ -116,9 +135,10 @@ function copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
     arch = architecture(grid)
     Nz = size(grid, 3)
 
-    lw_flux_up = solver.lws.flux.flux_up
-    lw_flux_dn = solver.lws.flux.flux_dn
-    sw_flux_dn = solver.sws.flux.flux_dn  # Total SW (direct + diffuse)
+    # (Nz+1, Nc) presentation views, refreshed by update_lw_fluxes!/update_sw_fluxes!
+    lw_flux_up = RRTMGP.lw_flux_up(solver)
+    lw_flux_dn = RRTMGP.lw_flux_dn(solver)
+    sw_flux_dn = RRTMGP.sw_flux_dn(solver)  # Total SW (direct + diffuse)
 
     ℐ_lw_up = rtm.upwelling_longwave_flux
     ℐ_lw_dn = rtm.downwelling_longwave_flux
