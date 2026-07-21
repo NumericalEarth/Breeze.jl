@@ -45,12 +45,20 @@ using CairoMakie
 # ## Grid and model setup
 
 Nx, Nz = 128, 64
-Lx, Lz = 1000, 200  # meters
+Lx, Lz = 1000, 200  # (m)
 
 grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
                        topology = (Periodic, Flat, Bounded))
 
-model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+# This example is dry, so the θˡⁱ→T inversion has an exact closed form and needs no Newton steps.
+# `FixedIterations(2)` selects the fixed-trip (unrolled) inversion with a tiny trip count: the
+# differentiable pass at the end of this example takes a reverse-mode gradient through the
+# compressible time step with Reactant/Enzyme, and the default tolerance-based `NewtonSolver`
+# (a `while` loop) compiles to an XLA `while` op that does not differentiate cheaply, while a high
+# iteration count needlessly inflates the traced graph (NumericalEarth/Breeze.jl#767). The forward
+# and adjoint models use identical dynamics and formulation.
+formulation = LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2))
+model = AtmosphereModel(grid; formulation, dynamics = CompressibleDynamics(ExplicitTimeStepping()))
 
 # ## Background state
 #
@@ -74,8 +82,8 @@ cᵖᵈ = constants.dry_air.heat_capacity
 
 # The wind profile follows the classic log-law of the atmospheric surface layer.
 
-U₀ = 20 # Surface velocity (m/s, u★ / κ)
-ℓ = 1  # Roughness length [m] -- like, shrubs and stuff
+U₀ = 20 # Surface velocity (m/s), u★/κ
+ℓ = 1   # Roughness length (m), like, shrubs and stuff
 
 Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
 
@@ -85,16 +93,16 @@ Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
 # For a rightward-propagating acoustic wave, the velocity perturbation is in phase with
 # the density perturbation: ``u' = (ℂᵃᶜ / ρ₀) ρ'``.
 
-δρ = 0.01         # Density perturbation amplitude (kg/m³)
-σ = 20            # Pulse width (m)
+δρ = 0.01    # Density perturbation amplitude (kg/m³)
+σ = 20       # Pulse width (m)
 
 gaussian(x, z) = exp(-(x^2 + z^2) / 2σ^2)
 ρ₀ = interior(reference.density, 1, 1, 1)[]
 
-ρ_init(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
-uᵢ(x, z) = Uᵢ(z) #+ (ℂᵃᶜ / ρ₀) * δρ * gaussian(x, z)
+ρᵢ_func(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
+uᵢ_func(x, z) = Uᵢ(z) # + (ℂᵃᶜ / ρ₀) * δρ * gaussian(x, z)
 
-set!(model, ρ=ρ_init, θ=θ₀, u=uᵢ)
+set!(model, ρ=ρᵢ_func, θ=θ₀, u=uᵢ_func)
 
 
 # ## Simulation setup
@@ -104,7 +112,7 @@ set!(model, ρ=ρ_init, θ=θ₀, u=uᵢ)
 
 Δx, Δz = Lx / Nx, Lz / Nz
 Δt = 0.5 * min(Δx, Δz) / (ℂᵃᶜ + Uᵢ(Lz))
-stop_time = 0.5 # seconds — long enough for the wave to traverse the domain and for refraction to bend rays visibly
+stop_time = 0.5 # (s) — long enough for the wave to traverse the domain and for refraction to bend rays visibly
 
 simulation = Simulation(model; Δt, stop_time)
 Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
@@ -123,7 +131,7 @@ add_callback!(simulation, progress, IterationInterval(100))
 #
 # We perturbation fields for density and x-velocity for visualization.
 
-ρ = model.dynamics.density
+ρ = model.dynamics.dry_density
 u, v, w = model.velocities
 
 ρᵇᵍ = CenterField(grid)
@@ -242,8 +250,7 @@ nothing #hide
 # buffers.  We therefore rebuild the *same* physical setup on a new grid whose
 # architecture is `ReactantState()`.
 
-using CUDA       # required for Reactant extension loading
-using Reactant
+using Reactant, CUDA    # CUDA is required for loading the Reactant extension
 using Enzyme
 using Statistics: mean
 using Oceananigans.Architectures: ReactantState
@@ -257,7 +264,8 @@ grid_ad = RectilinearGrid(ReactantState(); size = (Nx, Nz),
                           x = (-Lx/2, Lx/2), z = (0, Lz),
                           topology = (Periodic, Flat, Bounded))
 
-model_ad = AtmosphereModel(grid_ad; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+formulation_ad = LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2)) # fixed-trip, low-iteration EOS inversion so Enzyme can differentiate it cheaply (see forward model)
+model_ad = AtmosphereModel(grid_ad; formulation = formulation_ad, dynamics = CompressibleDynamics(ExplicitTimeStepping()))
 
 # ### Fixed and varying fields
 #
@@ -271,16 +279,15 @@ model_ad = AtmosphereModel(grid_ad; dynamics = CompressibleDynamics(ExplicitTime
 set!(ρᵇᵍ, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
 
 ρ_total = CenterField(grid_ad)
-set!(ρ_total, ρ_init)
+set!(ρ_total, ρᵢ_func)
 
 # The initial wind field is the quantity we differentiate with respect to.
-# Enzyme accumulates ``\partial J / \partial u_0`` into the shadow buffer
-# ``du_0``.
+# Enzyme accumulates ``∂J / ∂u_i`` into the shadow buffer ``du_i``.
 
-u₀  = XFaceField(grid_ad)
-du₀ = XFaceField(grid_ad)
-set!(u₀, (x, z) -> Uᵢ(z))
-set!(du₀, 0)
+uᵢ  = XFaceField(grid_ad)
+duᵢ = XFaceField(grid_ad)
+set!(uᵢ, (x, z) -> Uᵢ(z))
+set!(duᵢ, 0)
 
 # The shadow model stores accumulated adjoints for every prognostic field.
 
@@ -303,7 +310,7 @@ Nsteps = (isqrt(Nt - 1) + 1)^2
 # the domain:
 #
 # ```math
-# J \;=\; \frac{1}{N_x}\sum_{i}\bigl(\rho(x_i, z_1) - \bar\rho(x_i, z_1)\bigr)^2
+# J \;=\; \frac{1}{N_x}\sum_{i}\bigl[\rho(x_i, z_1) - \bar\rho(x_i, z_1)\bigr]^2
 # ```
 #
 # This is a global measure of how much acoustic energy ends up trapped near
@@ -315,14 +322,14 @@ Nsteps = (isqrt(Nt - 1) + 1)^2
 # wind field on every backward evaluation.  Without it, AD would differentiate
 # a stale trajectory.
 
-function loss(model, u₀, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
-    set!(model; ρ = ρ_total, θ = θ₀, u = u₀)
+function loss(model, uᵢ, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
+    set!(model; ρ = ρ_total, θ = θ₀, u = uᵢ)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
-    ρ_surf  = interior(model.dynamics.density)[:, :, 1]
-    ρᵇ_surf = interior(ρᵇᵍ)[:, :, 1]
-    return mean((ρ_surf .- ρᵇ_surf) .^ 2)
+    ρ₀  = interior(model.dynamics.dry_density, :, :, 1)
+    ρᵇ₀ = interior(ρᵇᵍ, :, :, 1)
+    return mean((ρ₀ .- ρᵇ₀).^2)
 end
 
 # ### The gradient wrapper
@@ -331,20 +338,19 @@ end
 # mode.  The model and the initial wind are `Duplicated` (primal + shadow);
 # everything else is `Const`.
 
-function grad_loss(model, dmodel, u₀, du₀,
-                   ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
-    parent(du₀) .= 0
+function grad_loss(model, dmodel, uᵢ, duᵢ, ρ_total, ρᵇᵍ, θ₀, Δt, nsteps)
+    parent(duᵢ) .= 0
     _, J = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
         Enzyme.Duplicated(model, dmodel),
-        Enzyme.Duplicated(u₀, du₀),
+        Enzyme.Duplicated(uᵢ, duᵢ),
         Enzyme.Const(ρ_total),
         Enzyme.Const(ρᵇᵍ),
         Enzyme.Const(θ₀),
         Enzyme.Const(Δt),
         Enzyme.Const(nsteps))
-    return du₀, J
+    return duᵢ, J
 end
 
 # ### Compilation and execution
@@ -356,23 +362,20 @@ end
 
 @info "Compiling differentiated model — this may take a minute..."
 compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-    model_ad, dmodel_ad, u₀, du₀,
+    model_ad, dmodel_ad, uᵢ, duᵢ,
     ρ_total, ρᵇᵍ, θ₀, Δt, Nsteps)
 
 @info "Running gradient..."
-du, J = compiled_grad(
-    model_ad, dmodel_ad, u₀, du₀,
-    ρ_total, ρᵇᵍ, θ₀, Δt, Nsteps)
+du, J = compiled_grad(model_ad, dmodel_ad, uᵢ, duᵢ, ρ_total, ρᵇᵍ, θ₀, Δt, Nsteps)
 
 xs_u = xnodes(grid_ad, Face())
 zs   = znodes(grid_ad, Center())
 
-@info @sprintf("Surface-mean (ρ - ρ̄)² = %.6e after %d steps",
-               Float64(only(J)), Nsteps)
+@info @sprintf("Surface-mean (ρ - ρ̄)² = %.6e after %d steps", Float64(only(J)), Nsteps)
 
 # ### Sensitivity visualization
 #
-# The heatmap shows ``\partial J / \partial u_0(x,z)``: positive values are
+# The heatmap shows ``\partial J / \partial u_i(x, z)``: positive values are
 # wind perturbations that would *increase* surface acoustic energy, negative
 # values would decrease it.  Because ``J`` integrates along the entire bottom,
 # the pattern reveals which parts of the wind profile feed energy into the
@@ -383,12 +386,12 @@ abs_max     = maximum(abs, sensitivity)
 
 fig_sens = Figure(size = (800, 350), fontsize = 12)
 Label(fig_sens[0, :],
-      @sprintf("∂J / ∂u₀  (J = ⟨(ρ - ρ̄)²⟩ at surface,  t=%d Δt)", Nsteps),
+      "∂J / ∂uᵢ  (J = ⟨(ρ - ρ̄)²⟩ at surface,  t=$(prettytime(Nsteps * Δt))",
       fontsize = 14, tellwidth = false)
 ax_sens = Axis(fig_sens[1, 1]; xlabel = "x (m)", ylabel = "z (m)")
 hm = heatmap!(ax_sens, xs_u, zs, sensitivity; colormap = :balance,
               colorrange = (-abs_max, abs_max))
-Colorbar(fig_sens[1, 2], hm; label = "∂J / ∂u₀")
+Colorbar(fig_sens[1, 2], hm; label = "∂J / ∂uᵢ")
 
 save("acoustic_wave_wind_sensitivity.png", fig_sens; px_per_unit = 2) #src
 fig_sens

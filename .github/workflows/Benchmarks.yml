@@ -42,7 +42,7 @@ jobs:
             advection: 'WENO5, WENO9'
             backend: 'vanilla'
             topology: 'PPB'
-            extra_flags: ''
+            extra_flags: '--warmup_steps 5 --time_steps 150'
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '512x512x256'
@@ -60,16 +60,14 @@ jobs:
           # Reactant vs vanilla — compressible_explicit + WENO5 + 1M mixed-phase
           # non-eq microphysics with ice on a PBB grid. Uses --simplified to
           # drop the geostrophic forcing and field-dependent surface drag BCs
-          # (which do not currently materialize on ReactantState). Runs in
-          # Float64 because Reactant's @trace loop trips on the Float32-grid
-          # / Float64-clock mismatch.
+          # (which do not currently materialize on ReactantState).
           - dynamics: 'compressible_explicit'
             microphysics: '1M_MixedNonEquilibrium'
             grid: '256x256x128'
             advection: 'WENO5'
             backend: 'vanilla, reactant'
             topology: 'PBB'
-            extra_flags: '--simplified --float_type=Float64'
+            extra_flags: '--simplified --float_type=Float32'
           # AD: forward+backward via Enzyme reverse-mode through the same
           # @trace checkpointed loop. Reactant-only by construction. No
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
@@ -81,7 +79,34 @@ jobs:
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
-            extra_flags: '--ad --simplified --float_type=Float64 --warmup_steps 1 --time_steps 1'
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 1'
+          # Scalar-tendency kernel sweep (no model): time the bare WENO
+          # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
+          # the Reactant-compiled XLA program and the eager vanilla launch.
+          # --mode tendency skips model construction, so there is no
+          # dynamics/microphysics.
+          - dynamics: 'none'
+            microphysics: 'none'
+            grid: '256x256x128'
+            advection: 'WENO5, WENO7, WENO9'
+            backend: 'vanilla, reactant'
+            topology: 'PPB'
+            # `mode` distinguishes the two tendency entries in the artifact names
+            # (their other matrix fields are identical, so without this they
+            # collide and only one set of results survives the publish merge).
+            mode: 'scalar_tendency'
+            extra_flags: '--mode scalar_tendency --float_type=Float32,BFloat16 --time_steps 320'
+          # Full-model tendency: time compute_tendencies! for a compressible
+          # AtmosphereModel across WENO orders, vanilla vs Reactant. --mode
+          # model_tendency builds the model, so dynamics/microphysics are unused.
+          - dynamics: 'none'
+            microphysics: 'none'
+            grid: '256x256x128'
+            advection: 'WENO5, WENO7, WENO9'
+            backend: 'vanilla, reactant'
+            topology: 'PPB'
+            mode: 'model_tendency'
+            extra_flags: '--mode model_tendency --float_type=Float32 --time_steps 320'
     defaults:
       run:
         shell: bash
@@ -89,10 +114,23 @@ jobs:
     container:
       image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.6'
       options: --gpus=all
+      volumes:
+        # Mount host `/usr/local` so that we can delete some stuff afterwards
+        - /usr/local:/host-usr-local
     timeout-minutes: 30
     steps:
       - name: "Check out repository"
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: df before cleanup
+        run: |
+          df -hT
+      - name: Clean up old CUDA toolkits
+        # Save storage by deleting old CUDA toolkits, we'll use v13
+        run: |
+          rm -rf /host-usr-local/cuda-12.*
+      - name: df after cleanup
+        run: |
+          df -hT
       - name: Instantiate benchmarking environment
         shell: julia --color=yes --project {0}
         run: |
@@ -100,14 +138,47 @@ jobs:
           Pkg.instantiate()
       - name: Run benchmarks
         timeout-minutes: 45
+        env:
+          XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
         run: |
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }}
       - name: "Upload benchmark results as artifacts"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}'
+          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
           path: benchmarking/benchmark_results.*
+          retention-days: 90
+          overwrite: false
+      - name: "Upload MLIR dumps as artifacts"
+        # Only the tendency / model_tendency matrix entries dump MLIR (Reactant
+        # backend); other entries produce no files and are skipped.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: 'mlir-dumps-dynamics_${{ matrix.dynamics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
+          path: benchmarking/mlir_dumps/
+          if-no-files-found: ignore
+          retention-days: 90
+          overwrite: false
+      - name: "Upload profiles as artifacts"
+        # Only the tendency / model_tendency matrix entries write xprof profiles
+        # (Reactant backend); other entries produce no files and are skipped.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: 'profiles-dynamics_${{ matrix.dynamics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
+          path: benchmarking/profiles/
+          if-no-files-found: ignore
+          retention-days: 90
+          overwrite: false
+      - name: "Upload Manifest"
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: 'manifest-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}-backend_${{ matrix.backend }}-topology_${{ matrix.topology }}-${{ matrix.mode }}'
+          path: '**/Manifest*.toml'
           retention-days: 90
           overwrite: false
       - name: Create job summary
@@ -179,6 +250,26 @@ jobs:
                   data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
                   continue
 
+              # Scalar-tendency kernel sweep (no model): compare WENO orders on
+              # a fixed grid. Reuses BenchmarkResult with mode == 'tendency';
+              # closure/dynamics/microphysics are 'none', so skip the forward
+              # clauses below via continue.
+              if mode in ('scalar_tendency', 'model_tendency'):
+                  # One figure per case (ScalarTendency / ModelTendency), one
+                  # side-by-side panel per WENO order, and one line per
+                  # float-type × backend config. Scalar gets 4 lines (Float32 /
+                  # BFloat16 × vanilla / reactant); model gets 2 (Float32 only,
+                  # since it has no BFloat16 rows).
+                  ft_short = {'Float32': 'F32', 'BFloat16': 'BF16', 'Float64': 'F64'}.get(ft, ft)
+                  level_1 = f'{base_name}; Grid: {grid_str}'
+                  level_2 = f'Advection: {advection}'
+                  level_3 = f'{gpu}'
+                  level_4 = f'{ft_short} {backend}'
+
+                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  continue
+
               # We want to group benchmarks in different ways. NOTE:
               # the same benchmark may appear in multiple groups
               if dynamics == 'anelastic' and grid_str == '512x512x256' and advection == 'WENO5':
@@ -225,11 +316,11 @@ jobs:
           with open('github-action-benchmark.json', 'w') as f:
               json.dump(data, f)
       - name: "Generate token"
-        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         if: ${{ ! github.event.pull_request.head.repo.fork }}
         id: generate_token
         with:
-          app-id: "${{ secrets.NUMTERRA_BOT_ID }}"
+          client-id: "${{ secrets.NUMTERRA_BOT_ID }}"
           private-key: "${{ secrets.NUMTERRA_BOT_PRIVATE_KEY }}"
           owner: NumericalEarth
           repositories: |
@@ -252,7 +343,7 @@ jobs:
           git commit -m'Save benchmark results for commit ${{ github.sha }}'
           git push -u origin main
       - name: "Publish benchmark results"
-        uses: benchmark-action/github-action-benchmark@a60cea5bc7b49e15c1f58f411161f99e0df48372 # v1.22.0
+        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
         with:
           name: Breeze.jl Benchmarks
           tool: "customBiggerIsBetter"
@@ -267,5 +358,5 @@ jobs:
           fail-on-alert: false
           # auto-push: true
           auto-push: ${{ github.event_name == 'push' }}
-          max-items-in-chart: 50
+          max-items-in-chart: 1000
           comment-on-alert: true

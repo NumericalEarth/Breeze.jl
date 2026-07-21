@@ -17,10 +17,13 @@ export
     DewpointTemperature,
     DewpointTemperatureField,
     DCMIP2016KesslerMicrophysics,
+    InstantaneousPrecipitation,
     kessler_terminal_velocity,
     saturation_adjustment_coefficient,
     RelativeHumidity,
-    RelativeHumidityField
+    RelativeHumidityField,
+    number_concentration,
+    number_concentration_field
 
 using ..AtmosphereModels: AtmosphereModels, moisture_fractions, grid_moisture_fractions,
     materialize_microphysical_fields, update_microphysical_fields!,
@@ -30,5 +33,6 @@ include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")
 include("microphysics_diagnostics.jl")
 include("dcmip2016_kessler.jl")
+include("instantaneous_precipitation.jl")
 
 end # module Microphysics

@@ -27,12 +27,16 @@ export
     AcousticDampingStrategy,
     NoDivergenceDamping,
     ThermalDivergenceDamping,
+    DirectDivergenceDamping,
     UpperSponge,
     AbstractRamp,
     LinearRamp,
     CubicRamp,
     Sin2Ramp,
     ExplicitTimeStepping,
+    balance_adiabatically!,
+    AdiabaticBalancer,
+    HydrostaticallyBalancedDensity,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -41,6 +45,7 @@ export
     LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
     BackgroundAtmosphere,
+    standard_ozone_profile,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
@@ -57,6 +62,11 @@ export
     dynamics_density,
     dynamics_pressure,
 
+    # Advective timescale control for the time-step wizard
+    CellAdvectionTimescale,
+    HorizontalFormulation,
+    ThreeDimensionalFormulation,
+
     # Diagnostics
     compute_hydrostatic_pressure!,
     PotentialTemperature,
@@ -65,6 +75,8 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
+    azimuthal_mean,
+    azimuthal_mean!,
     static_energy_density,
     static_energy,
     total_energy,
@@ -78,6 +90,11 @@ export
     moisture_specific_name,
     specific_prognostic_moisture,
 
+    # Solvers
+    NewtonSolver,
+    SecantSolver,
+    FixedIterations,
+
     # Thermodynamics
     temperature,
     supersaturation,
@@ -90,6 +107,7 @@ export
 
     # Microphysics
     SaturationAdjustment,
+    InstantaneousPrecipitation,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
@@ -99,6 +117,8 @@ export
     equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
+    number_concentration,
+    number_concentration_field,
     BulkMicrophysics,
     initial_aerosol_number,
     compute_hydrostatic_pressure!,
@@ -120,12 +140,16 @@ export
     # Forcing utilities
     geostrophic_forcings,
     SubsidenceForcing,
+    SpecificForcing,
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
-    follow_terrain!,
+    TerrainFollowingVerticalDiscretization,
+    LinearDecay,
+    TwoLevelDecay,
+    materialize_terrain!,
+    build_terrain_metrics,
     TerrainMetrics,
-    BasicTerrainFollowing,
     SlopeOutsideInterpolation,
     SlopeInsideInterpolation,
 
@@ -154,7 +178,7 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     Integral, IterationInterval, JLD2Writer,
                     KernelFunctionOperation, LagrangianParticles,
                     LatitudeLongitudeGrid, NetCDFWriter,
-                    NonTraditionalBetaPlane, OnDisk, OpenBoundaryCondition,
+                    NonTraditionalBetaPlane, OnDisk, NormalFlowBoundaryCondition,
                     PartialCellBottom, Partition, Periodic,
                     PerturbationAdvection, RectilinearGrid, Simulation,
                     SphericalCoriolis,
@@ -169,6 +193,8 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
 
 using Oceananigans.Grids: znode, MutableVerticalDiscretization
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+# Reused to select the direction of `CellAdvectionTimescale` (see AtmosphereModels/cell_advection_timescale.jl)
+using Oceananigans.TurbulenceClosures: HorizontalFormulation, ThreeDimensionalFormulation
 
 export
     CPU, GPU,
@@ -182,7 +208,7 @@ export
     Distributed, Partition,
     Centered, UpwindBiased, WENO, FluxFormAdvection,
     FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
-    OpenBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
+    NormalFlowBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
     BoundaryConditionOperation,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
     Average, Integral,
@@ -199,6 +225,9 @@ export
     FieldTimeSeries, FieldDataset, InMemory, OnDisk,
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
+
+include("Solvers.jl")
+using .Solvers
 
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
@@ -233,7 +262,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               SplitExplicitTimeDiscretization,
                               AcousticOuterScheme, WickerSkamarock3,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
-                              AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping,
+                              AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping, DirectDivergenceDamping,
                               UpperSponge,
                               AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
                               ExplicitTimeStepping

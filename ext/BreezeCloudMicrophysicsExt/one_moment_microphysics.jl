@@ -113,7 +113,7 @@ using Breeze.Microphysics
 cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 # output
-SaturationAdjustment{WarmPhaseEquilibrium, Float64}(0.001, Inf, WarmPhaseEquilibrium())
+SaturationAdjustment{WarmPhaseEquilibrium, Breeze.Solvers.SecantSolver{Float64}}(WarmPhaseEquilibrium(), SecantSolver(reltol=0.0, abstol=0.0001, maxiter=20))
 ```
 
 # Keyword arguments
@@ -186,7 +186,7 @@ const OMCM = OneMomentCloudMicrophysics
 @inline AM.moisture_phase(bμp::OMCM, ::Val{:ρqˢ})  = Val(:ice)
 
 # ImpenetrableBoundaryCondition alias
-const IBC = BoundaryCondition{<:Open, Nothing}
+const IBC = BoundaryCondition{<:NormalFlow, Nothing}
 
 # Helper for bottom sedimentation velocity based on precipitation_boundary_condition
 # Used in update_microphysical_fields! to set wʳ[bottom] = 0 for ImpenetrableBoundaryCondition
@@ -950,7 +950,7 @@ end
                                              microphysical_fields)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field = AM.dynamics_density(dynamics)
+    ρ_field = AM.total_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
 

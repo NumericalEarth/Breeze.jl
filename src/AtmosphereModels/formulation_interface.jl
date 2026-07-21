@@ -25,6 +25,34 @@ materialize_formulation(formulation_name::Symbol, args...) =
     materialize_formulation(Val(formulation_name), args...)
 
 #####
+##### Temperature solver interface
+#####
+
+"""
+$(TYPEDEF)
+
+Sentinel indicating that a formulation's temperature solver should be chosen by the
+dynamics: `materialize_formulation` replaces it with
+[`default_temperature_solver(dynamics)`](@ref default_temperature_solver).
+"""
+struct DefaultTemperatureSolver end
+
+Base.summary(::DefaultTemperatureSolver) = "DefaultTemperatureSolver"
+
+"""
+    default_temperature_solver(dynamics)
+
+Return the default solver for a formulation's temperature inversion given `dynamics`.
+
+The need for an iterative inversion is dictated by the intersection of the dynamics and
+the thermodynamic formulation: the fallback returns `nothing` (closed-form, no iteration),
+and dynamics whose prognostic closure makes the inversion implicit (e.g.
+`CompressibleDynamics` with `LiquidIcePotentialTemperatureFormulation`, where temperature
+solves `T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ`) extend this function to return an iterative solver.
+"""
+default_temperature_solver(dynamics) = nothing
+
+#####
 ##### Field naming interface
 #####
 
@@ -64,9 +92,24 @@ thermodynamic_density_name(formulation::Symbol) =
 """
     thermodynamic_density(formulation)
 
-Return the thermodynamic density field for the given formulation.
+Return the thermodynamic density field for the given formulation — the prognostic
+thermodynamic variable in coupling-density-weighted ("flux") form (`ρθ`, `ρe`, `ρE`).
+
+The weighting density is the dynamics' coupling density (see [`dynamics_density`](@ref)):
+the reference density `ρᵣ` on the anelastic core and the prognostic dry-air density `ρᵈ` on the
+compressible core. The generic name (`ρθ`) is therefore `ρᵈθ` on `CompressibleDynamics`; the
+intensive variable is recovered as `θ = ρθ / dynamics_density(dynamics)`.
 """
 function thermodynamic_density end
+
+"""
+    with_thermodynamic_density(formulation, ρᵡ)
+
+Return a copy of `formulation` whose thermodynamic density field (see [`thermodynamic_density`](@ref))
+is replaced by `ρᵡ`, leaving the diagnostic fields and solvers untouched. Used to swap in a
+thermodynamic field carrying different boundary conditions without reallocating the diagnostics.
+"""
+function with_thermodynamic_density end
 
 #####
 ##### Prognostic field collection

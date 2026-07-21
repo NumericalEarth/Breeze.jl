@@ -122,12 +122,43 @@ function total_pressure end
 """
     dynamics_density(dynamics)
 
-Return the density field appropriate to the dynamical formulation.
+Return the *coupling density* — the density weighting the momentum (`ρu = ρᵈ u`) and the
+thermodynamic flux variable (`ρθ = ρᵈ θ`), and the divisor for diagnosing velocity (`u = ρu/ρᵈ`)
+and potential temperature (`θ = ρθ/ρᵈ`). It is the prognostic mass variable advanced by continuity.
 
-For anelastic dynamics, returns the reference density (time-independent background state).
-For compressible dynamics, returns the prognostic density field.
+- `AnelasticDynamics`: the time-independent reference density `ρᵣ`.
+- `CompressibleDynamics`: the prognostic dry-air density `ρᵈ`.
+
+The *total* air density `ρ = ρᵈ + Σ ρˣ` (dry air plus every water species) is a separate, diagnosed
+quantity — see [`total_density`](@ref) — used wherever total mass enters the physics: the
+moisture **mass-fraction** recovery (`qˣ = ρˣ/ρ`, so the thermodynamics stays in mass fractions),
+scalar and water advection, the equation of state, and buoyancy. The water densities (`ρqᵛ`, `ρqˡ`,
+…) are stored as partial densities (mass per volume), *not* coupling-weighted. On the anelastic core
+the two densities coincide (`total_density === dynamics_density`).
 """
 function dynamics_density end
+
+"""
+    total_density(dynamics)
+
+Return the total air density ρ = ρᵈ + Σρˣ used by the thermodynamics, scalar advection,
+equation of state, and buoyancy. Defaults to [`dynamics_density`](@ref) — correct for
+formulations with a single density (e.g. the anelastic reference density). `CompressibleDynamics`
+overrides it with a diagnosed total-density field, distinct from the coupling density ρᵈ.
+"""
+total_density(dynamics) = dynamics_density(dynamics)
+
+"""
+    advecting_vertical_velocity(dynamics, velocities)
+
+Return the vertical velocity that advects momentum through the grid's coordinate surfaces:
+the Cartesian `velocities.w` on height-coordinate grids, and the contravariant vertical
+velocity `w̃` on terrain-following grids (mirroring [`advecting_momentum`](@ref), whose
+vertical component is the contravariant momentum). The adaptive-implicit vertical-advection
+split must partition this velocity on both the explicit (flux-scaling) and implicit
+(tridiagonal) sides, so it stays consistent with the momentum flux divergence.
+"""
+@inline advecting_vertical_velocity(dynamics, velocities) = velocities.w
 
 """
     dynamics_pressure(dynamics)
@@ -210,12 +241,40 @@ constructs a fully-built reference state up front (e.g. `AnelasticDynamics`).
 boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants) = dynamics.reference_state
 
 """
+    dynamics_reference_state(dynamics)
+
+Return the dynamics' reference state (an anelastic `ReferenceState` or a split-explicit
+`ExnerReferenceState`), or `nothing` if the dynamics carries none. Dispatched so that
+`reset_reference_state!` needn't reach into fields by name.
+"""
+dynamics_reference_state(dynamics) = nothing
+
+"""
     standard_pressure(dynamics)
 
 Return the standard pressure used for potential temperature calculations.
 Default is 100000 Pa (1000 hPa).
 """
 function standard_pressure end
+
+"""
+    default_drag_surface_temperature(dynamics, grid, thermodynamic_constants)
+
+Return a default surface temperature for `BulkDrag` when the user has not supplied
+one. Dispatched on the dynamics type because the notion of a "default" surface
+temperature depends on what reference structure the dynamics carries: anelastic
+has a full reference profile whose surface value is well-defined; compressible
+has no equivalent up-front surface temperature and therefore requires the user
+to provide one explicitly.
+
+The default (no method) throws an informative error. Each dynamics type extends
+this hook.
+"""
+default_drag_surface_temperature(dynamics, grid, thermodynamic_constants) =
+    throw(ArgumentError(
+        "BulkDrag was constructed without `surface_temperature`, and no default is " *
+        "defined for dynamics of type `$(typeof(dynamics))`. Please pass " *
+        "`surface_temperature` explicitly when constructing `BulkDrag`."))
 
 """
     initialize_model_thermodynamics!(model)
@@ -246,7 +305,7 @@ prognostic_momentum_field_names(::Any) = (:ρu, :ρv, :ρw)
 Return a tuple of prognostic field names specific to the dynamics formulation.
 
 For anelastic dynamics, returns an empty tuple (no prognostic density).
-For compressible dynamics, returns `(:ρ,)` for prognostic density.
+For compressible dynamics, returns `(:ρᵈ,)` for prognostic density.
 """
 prognostic_dynamics_field_names(::Any) = ()
 
@@ -408,7 +467,7 @@ Return the velocity tuple used for scalar advection transport.
 
 For standard (non-terrain) models, this is `model.velocities`.
 For terrain-following coordinates, the vertical component is replaced
-by the contravariant vertical velocity ``\\tilde{\\Omega}``.
+by the contravariant vertical velocity ``\\tilde{w}``.
 """
 transport_velocities(model) = model.velocities
 
@@ -420,7 +479,7 @@ and the continuity equation divergence.
 
 For standard (non-terrain) models, this is `model.momentum`.
 For terrain-following coordinates, the vertical component `ρw` is
-replaced by the contravariant vertical momentum ``\\rho \\tilde{\\Omega}``.
+replaced by the contravariant vertical momentum ``\\rho \\tilde{w}``.
 """
 advecting_momentum(model) = model.momentum
 

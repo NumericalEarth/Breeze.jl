@@ -15,6 +15,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, microphysics_m
 
 using Breeze.CompressibleEquations:
     CompressibleDynamics,
+    TerrainCompressibleDynamics,
     AcousticSubstepper,
     WickerSkamarock3,
     stage_fractions,
@@ -72,14 +73,19 @@ end
     AcousticRungeKutta3(grid, prognostic_fields;
                         dynamics,
                         implicit_solver = nothing,
-                        Gⁿ = map(similar, prognostic_fields))
+                        Gⁿ = map(similar, prognostic_fields),
+                        U⁰ = map(similar, prognostic_fields))
 
 Construct an `AcousticRungeKutta3` time stepper for fully compressible dynamics.
+
+`Gⁿ` and `U⁰` may be supplied to alias another stepper's tendency storage instead of
+allocating fresh fields (used by the native-stepper adiabatic-balance twin).
 """
 function AcousticRungeKutta3(grid, prognostic_fields;
                              dynamics,
                              implicit_solver::TI = nothing,
-                             Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
+                             Gⁿ::TG = map(similar, prognostic_fields),
+                             U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
 
     FT = eltype(grid)
 
@@ -91,9 +97,6 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     β₁ = FT(β[1])
     β₂ = FT(β[2])
     β₃ = FT(β[3])
-
-    U⁰ = map(similar, prognostic_fields)
-    U0 = typeof(U⁰)
 
     substepper = AcousticSubstepper(grid, dynamics.time_discretization;
                                     prognostic_momentum = (ρu = prognostic_fields.ρu,
@@ -116,7 +119,7 @@ Run one Wicker–Skamarock RK3 stage: compute slow tendencies, then
 execute the linearized-acoustic substep loop, then update remaining
 scalars.
 """
-function acoustic_rk3_substep!(model, Δt, β)
+function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = ts.U⁰
@@ -141,6 +144,12 @@ function acoustic_rk3_substep!(model, Δt, β)
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰)
 
+    # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
+    # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit
+    # vertical advection combined with vertically-implicit closure diffusion. A no-op when
+    # the timestepper has no implicit solver.
+    implicit_substep!(model, β * Δt)
+
     # Update remaining scalars (tracers) using WS-RK3.
     scalar_rk3_substep!(model, β * Δt)
 
@@ -151,8 +160,11 @@ end
 ##### Scalar update with time-averaged velocities
 #####
 
-scalar_rk3_substep!(model, Δt_stage) =
-    scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_stage)
+function scalar_rk3_substep!(model::AtmosphereModel, Δt_stage)
+    grid = model.grid
+    Δt_FT = kernel_time_step(grid.architecture, grid, Δt_stage)
+    return scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_FT)
+end
 
 @kernel function _rk3_substep!(u, u⁰, G, Δt_stage)
     i, j, k = @index(Global, NTuple)
@@ -171,7 +183,7 @@ linearized acoustic substepping.
 """
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:AcousticRungeKutta3}, Δt; callbacks=[])
 
-    maybe_prepare_first_time_step!(model, callbacks)
+    maybe_prepare_first_time_step!(model, Δt, callbacks)
 
     ts = model.timestepper
     β₁ = ts.β₁
@@ -208,11 +220,12 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    # Call the microphysics update hook once per outer time step on the post-RK state.
-    # Some schemes use this for a full-Δt process update; for others it is a no-op.
+    update_state!(model, callbacks; compute_tendencies = true)
+
+    # Apply the operator-split microphysics update exactly once per step, on the post-RK
+    # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
 
-    update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₃ * Δt)
 
     return nothing
@@ -241,7 +254,15 @@ end
 ##### at outer-step start.
 #####
 
-function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
+function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
+                                                                      <:Any, <:Any, <:AcousticRungeKutta3})
+    sub = model.timestepper.substepper
+    return (u = sub.time_averaged_velocities.u,
+            v = sub.time_averaged_velocities.v,
+            w = sub.time_averaged_velocities.w)
+end
+
+function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:TerrainCompressibleDynamics,
                                                                       <:Any, <:Any, <:AcousticRungeKutta3})
     sub = model.timestepper.substepper
     return (u = sub.time_averaged_velocities.u,

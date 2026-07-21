@@ -73,7 +73,7 @@ Units: kg/m²/s (positive = downward, out of domain)
 """
 function AtmosphereModels.surface_precipitation_flux(model, microphysics::TwoMomentCloudMicrophysics)
     grid = model.grid
-    ρ = model.dynamics.reference_state.density
+    ρ = total_density(model.dynamics)
     wᵗ = AtmosphereModels.transport_velocities(model).w
     wʳ = model.microphysical_fields.wʳ
     qʳ = model.microphysical_fields.qʳ
@@ -82,6 +82,22 @@ function AtmosphereModels.surface_precipitation_flux(model, microphysics::TwoMom
     op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid, ρ, wᵗ, wʳ, qʳ)
     return Field(op)
 end
+
+#####
+##### Number concentration diagnostic (2-moment)
+#####
+#
+# For 2-mom microphysics, the total number concentration is the prognostic
+# ρnˣ field; the diagnostic just hands it back so consumers see the same
+# interface as the 1-mom case (build a `Field` if they need to compute).
+
+Microphysics.number_concentration(model, ::TwoMomentCloudMicrophysics, ::Val{:rain}) =
+    get(model.microphysical_fields, :ρnʳ, nothing)
+
+Microphysics.number_concentration(model, ::TwoMomentCloudMicrophysics, ::Val{:cloud_liquid}) =
+    get(model.microphysical_fields, :ρnᶜˡ, nothing)
+
+Microphysics.number_concentration(model, ::TwoMomentCloudMicrophysics, ::Val) = nothing
 
 #####
 ##### show methods for two-moment microphysics

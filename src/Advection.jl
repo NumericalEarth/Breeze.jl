@@ -117,7 +117,7 @@ Kernel for `KernelFunctionOperation`
 that computes the advection-consistent precipitation flux at the bottom boundary.
 
 The kernel is called as `kernel(i, j, k, grid, ρ, wᵗ, wˢᵉᵈ, c)` where `ρ` is the
-reference density, `wᵗ` is the vertical transport velocity used by tracer advection,
+total density used to carry tracer advection, `wᵗ` is the vertical transport velocity,
 `wˢᵉᵈ` is the sedimentation velocity, and `c` is the specific tracer (e.g., `qʳ`). Pass
 these four fields as arguments to the `KernelFunctionOperation`:
 

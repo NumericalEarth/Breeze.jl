@@ -1,5 +1,5 @@
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, moisture_phase
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, moisture_phase, total_density
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using GPUArraysCore: @allowscalar
@@ -218,14 +218,13 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
-    constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    dynamics = AnelasticDynamics(reference_state)
+    dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=300)
 
     microphysics = OneMomentCloudMicrophysics()
     model = AtmosphereModel(grid; dynamics, microphysics)
 
-    set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0.001)
+    set!(model; ρ = 2, θ = 300, qᵗ = 0.020, qᶜˡ = 0, qʳ = 0.001,
+         enforce_mass_conservation = false)
 
     spf = surface_precipitation_flux(model)
     @test spf isa Field
@@ -237,9 +236,12 @@ end
     # the advection operator.
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
-    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
+    ρ_reference_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
     expected_flux = -ρ_face * wʳ * qʳ
 
+    @test ρ_face ≈ FT(2)
+    @test !isapprox(ρ_face, ρ_reference_face)
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] > 0
 end
@@ -271,7 +273,7 @@ end
     wᵗ = @allowscalar transport_w[1, 1, 1]
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
-    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
 
     expected_flux = -ρ_face * (wᵗ + wʳ) * qʳ
     sedimentation_only_flux = -ρ_face * wʳ * qʳ

@@ -1,7 +1,7 @@
 module BreezeCloudMicrophysicsExt
 
 using CloudMicrophysics: CloudMicrophysics
-using CloudMicrophysics.Parameters: Parameters0M, Rain, Snow, CloudIce, CloudLiquid, CollisionEff
+using CloudMicrophysics.Parameters: Rain, Snow, CloudIce, CloudLiquid, CollisionEff
 using CloudMicrophysics.Parameters: Blk1MVelType, Blk1MVelTypeRain, Blk1MVelTypeSnow
 using CloudMicrophysics.Parameters: AirProperties
 # Two-moment parameters
@@ -13,15 +13,15 @@ using CloudMicrophysics: AerosolModel as CMAM
 # SpecialFunctions for error function
 using SpecialFunctions: erf
 
-using CloudMicrophysics.Microphysics0M: remove_precipitation
-
 using CloudMicrophysics.Microphysics1M:
     conv_q_lcl_to_q_rai,
     conv_q_icl_to_q_sno_no_supersat,
     accretion,
     accretion_rain_sink,
     accretion_snow_rain,
-    terminal_velocity
+    terminal_velocity,
+    get_n0,
+    lambda_inverse
 
 # Two-moment microphysics
 using CloudMicrophysics: Microphysics2M as CM2
@@ -30,9 +30,7 @@ using CloudMicrophysics: MicrophysicsNonEq as CMNonEq
 
 using Breeze.AtmosphereModels: AtmosphereModels,
     AbstractNumberConcentrationCategories,
-    materialize_microphysical_fields,
-    update_microphysical_fields!,
-    grid_moisture_fractions
+    total_density
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -49,16 +47,18 @@ using Breeze.Thermodynamics:
     mixture_gas_constant,
     mixture_heat_capacity
 
+using Breeze: Microphysics
+
 using Breeze.Microphysics:
     center_field_tuple,
     BulkMicrophysics,
     FourCategories,
-    SaturationAdjustment,
     WarmPhaseSaturationAdjustment,
     MixedPhaseSaturationAdjustment,
     AbstractCondensateFormation,
     ConstantRateCondensateFormation,
     NonEquilibriumCloudFormation,
+    NumberConcentrationKernelFunction,
     condensation_rate,
     deposition_rate,
     adjust_thermodynamic_state
@@ -69,7 +69,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans: Center, Face, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: ZFaceField
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, Open
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, NormalFlow
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
@@ -77,7 +77,6 @@ using Adapt: Adapt, adapt
 using Breeze.Advection: SurfacePrecipitationFluxKernel
 
 include("cloud_microphysics_translations.jl")
-include("zero_moment_microphysics.jl")
 include("one_moment_microphysics.jl")
 include("one_moment_helpers.jl")
 include("two_moment_microphysics.jl")

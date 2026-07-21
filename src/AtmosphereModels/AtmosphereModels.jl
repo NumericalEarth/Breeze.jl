@@ -4,6 +4,10 @@ export
     # AtmosphereModel core
     AtmosphereModel,
     AtmosphereModelBuoyancy,
+    # Adiabatic (FV3 na_init) initialization
+    balance_adiabatically!,
+    AdiabaticBalancer,
+    HydrostaticallyBalancedDensity,
     # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
     dynamics_pressure,
@@ -18,6 +22,8 @@ export
     # Thermodynamic formulation interface (formulation types exported by their respective modules)
     thermodynamic_density_name,
     thermodynamic_density,
+    DefaultTemperatureSolver,
+    default_temperature_solver,
     # Helpers
     static_energy_density,
     static_energy,
@@ -61,11 +67,14 @@ export
     materialize_atmosphere_model_boundary_conditions,
     materialize_atmosphere_model_forcing,
     compute_forcing!,
+    is_density_tendency_forcing,
 
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
     BackgroundAtmosphere,
+    standard_ozone_profile,
     materialize_background_atmosphere,
+    materialize_surface_property,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
@@ -86,6 +95,8 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
+    azimuthal_mean,
+    azimuthal_mean!,
     compute_hydrostatic_pressure!,
     set_to_mean!,
 
@@ -93,10 +104,16 @@ export
     transport_velocities,
     advecting_momentum,
 
+    # Advective timescale for the time-step wizard
+    CellAdvectionTimescale,
+
     # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
-    compute_z_momentum_tendency!
+    compute_z_momentum_tendency!,
+
+    # Architecture-dispatched helper for safely converting Δt to a kernel arg
+    kernel_time_step
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
@@ -109,6 +126,13 @@ using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
+
+# Convert Δt to the kernel-compatible time type for `grid`'s architecture.
+# Metal cannot load Float64 kernel arguments, so we must convert at the launch
+# site for Float32 grids. Reactant tracing breaks if we convert outside the
+# kernel — BreezeReactantExt overrides this for `ReactantState` archs to pass
+# Δt through unchanged.
+@inline kernel_time_step(arch, grid, Δt) = convert(eltype(grid), Δt)
 
 #####
 ##### Interfaces (define the contract that dynamics implementations must fulfill)
@@ -133,6 +157,8 @@ include("atmosphere_model_buoyancy.jl")
 include("solar_position.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
+include("implicit_vertical_advection.jl")
+include("cell_advection_timescale.jl")
 include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
@@ -147,5 +173,10 @@ using .Diagnostics
 # set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
 include("set_atmosphere_model.jl")
 include("set_to_mean.jl")
+
+# Adiabatic (FV3 na_init) initialization. The dynamics-specific twin construction
+# (`adiabatic_twin_dynamics`) is extended in CompressibleEquations; the generic fallback here keeps
+# the balance solver-agnostic.
+include("adiabatic_balance.jl")
 
 end

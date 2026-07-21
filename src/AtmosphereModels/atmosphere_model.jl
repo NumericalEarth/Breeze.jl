@@ -2,16 +2,23 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
                     Centered, fields, prognostic_fields
-using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection
+using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, materialize_advection, needs_implicit_solver
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.Architectures: Architectures
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
-using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 using Oceananigans.TimeSteppers: TimeStepper
-using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
+using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields, VerticallyImplicitTimeDiscretization
+using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
+
+# AtmosphereModel-specific momentum-advection validation. The compressible core advects momentum in
+# flux form (`div_𝐯u`) plus the curvilinear curvature term `U_dot_∇u_metric`, so any flux-form scheme
+# is valid on every grid — including `OrthogonalSphericalShellGrid` (where the hydrostatic ocean model
+# restricts to `VectorInvariant`). We define our own validator rather than importing Oceananigans' and
+# accept the requested scheme as-is.
+validate_momentum_advection(momentum_advection, grid) = momentum_advection
 
 struct DefaultValue end
 
@@ -134,6 +141,9 @@ function AtmosphereModel(grid;
     # Validate that velocity boundary conditions are only provided for dynamics that support them
     validate_velocity_boundary_conditions(dynamics, boundary_conditions)
 
+    # Validate that the microphysics scheme is compatible with the thermodynamic constants
+    validate_microphysics(microphysics, thermodynamic_constants)
+
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
         scalar_advection = momentum_advection = advection
@@ -145,7 +155,6 @@ function AtmosphereModel(grid;
     # Check halos and throw an error if the grid's halo is too small
     validate_model_halo(grid, momentum_advection, scalar_advection, closure)
 
-    # Reduce the advection order in directions that do not have enough grid points
     momentum_advection = validate_momentum_advection(momentum_advection, grid)
     default_scalar_advection, scalar_advection = validate_tracer_advection(scalar_advection, grid)
 
@@ -188,6 +197,15 @@ function AtmosphereModel(grid;
     dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics)
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
+    # Adaptive implicit vertical advection is supported for all prognostics with SSPRungeKutta3
+    # (per-substep solve) and with AcousticRungeKutta3 (moisture and tracers via the generic
+    # implicit step; momentum and the thermodynamic variable via a per-stage solve after the
+    # acoustic substep loop — see TimeSteppers/acoustic_substep_helpers.jl). On terrain-following
+    # grids the split partitions the contravariant velocity (see `advecting_vertical_velocity`).
+    advection_needs_solver = needs_implicit_solver(momentum_advection) ||
+                             needs_implicit_solver(default_scalar_advection) ||
+                             any(needs_implicit_solver, values(scalar_advection))
+
     # Materialize momentum and velocities
     # If velocities is provided (e.g., PrescribedVelocityFields), use it
     if isnothing(velocities)
@@ -221,9 +239,16 @@ function AtmosphereModel(grid;
 
     implicit_solver = implicit_diffusion_solver(time_discretization(closure), grid)
 
+    # Build a vertical tridiagonal solver for adaptive implicit vertical advection even when the
+    # closure is explicit. When both are present, the diffusion and advection diagonals are summed
+    # into a single system (see implicit_vertical_advection.jl).
+    if implicit_solver === nothing && advection_needs_solver
+        implicit_solver = implicit_diffusion_solver(VerticallyImplicitTimeDiscretization(), grid)
+    end
+
     # Only pass `dynamics` to time steppers that accept it (Breeze's acoustic and SSP steppers).
     # Oceananigans' built-in time steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
-    if _timestepper_uses_dynamics(timestepper)
+    if timestepper_uses_dynamics(timestepper)
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver, timestepper_kwargs...)
     else
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
@@ -232,8 +257,12 @@ function AtmosphereModel(grid;
 
     moisture_specific = moisture_specific_name(microphysics)
     specific_prognostic_moisture = microphysical_fields[moisture_specific]
-    model_fields = merge(prognostic_model_fields, velocities, microphysical_fields,
-                         (; T=temperature))
+    # Build `model_fields` with the same key order as Oceananigans.fields(model::AtmosphereModel)
+    # below. ContinuousForcing resolves `field_dependencies` to positional indices at
+    # materialize time and looks them up positionally at runtime; the two tuples must
+    # agree on ordering, or forcings will read the wrong field.
+    model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
+                         (; T=temperature), microphysical_fields)
     density = dynamics_density(dynamics)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, density,
@@ -288,10 +317,10 @@ end
 
 # Breeze's acoustic and SSP time steppers accept a `dynamics` keyword;
 # Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
-_timestepper_uses_dynamics(::Val) = false
-_timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
-_timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
-_timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
+timestepper_uses_dynamics(::Val) = false
+timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
+timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
+timestepper_uses_dynamics(s::Symbol) = timestepper_uses_dynamics(Val(s))
 
 function Base.summary(model::AtmosphereModel)
     A = nameof(typeof(model.grid.architecture))
@@ -346,7 +375,8 @@ function Base.show(io::IO, model::AtmosphereModel)
               "└── microphysics: ", Mic)
 end
 
-Advection.cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)
+# `cell_advection_timescale(model::AtmosphereModel)` and the direction-aware `CellAdvectionTimescale`
+# callable are defined in cell_advection_timescale.jl (included after this file).
 
 # Prognostic field names from dynamics + thermodynamic formulation + microphysics + tracers
 function prognostic_field_names(dynamics, formulation, microphysics, tracer_names)
@@ -399,10 +429,17 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     forcing_names = keys(forcing_fields)
 
+    # Build a specific→density name map for any prognostic name that starts with `ρ`.
+    # For example, :ρθ contributes :θ => :ρθ. Users may supply forcings under either key,
+    # and the dispatch routes specific-keyed values through wrap_specific_forcing.
+    specific_to_density = NamedTuple(specific_to_density_pairs(forcing_names))
+    valid_specific_names = keys(specific_to_density)
+
     for name in user_forcing_names
-        if name ∉ forcing_names
+        if name ∉ forcing_names && name ∉ valid_specific_names
             msg = string("Invalid forcing: forcing contains an entry for $name, but $name is not a prognostic field!", '\n',
-                         "The forcing fields are ", forcing_names)
+                         "The forcing fields are ", forcing_names,
+                         "; specific-key aliases are ", valid_specific_names, '.')
             throw(ArgumentError(msg))
         end
     end
@@ -418,16 +455,84 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     forcing_context = (; coriolis, density, specific_fields)
 
     materialized = Tuple(
-        n in keys(user_forcings) ?
-            materialize_atmosphere_model_forcing(user_forcings[n], f, n, model_names, forcing_context) :
-            Returns(zero(eltype(f)))
-            for (n, f) in pairs(forcing_fields)
+        assemble_field_forcing(n, f, user_forcings, model_names, forcing_context)
+        for (n, f) in pairs(forcing_fields)
     )
 
     forcings = NamedTuple{forcing_names}(materialized)
 
     return forcings
 end
+
+# Assemble the materialized forcing for one prognostic field. Dispatch on the result of
+# `specific_name_of(prognostic_name)`: a `Symbol` is the specific alias of a ρ-prefixed
+# prognostic; `Nothing` means the prognostic name is already in specific form (e.g. a
+# user tracer like `:c`) and has no separate density alias.
+function assemble_field_forcing(prognostic_name, target_field, user_forcings, model_names, context)
+    return assemble_field_forcing(prognostic_name, specific_name_of(prognostic_name),
+                                  target_field, user_forcings, model_names, context)
+end
+
+# ρ-prefixed prognostic: combine any user-supplied ρ-keyed entry with any specific-keyed
+# entry on the same prognostic, wrapping the specific-keyed entry in SpecificForcing.
+function assemble_field_forcing(density_name, specific_name::Symbol, target_field,
+                                user_forcings, model_names, context)
+    raw_specific_forcing = get(user_forcings, specific_name, nothing)
+    wrapped_specific_forcing = wrap_specific_forcing(raw_specific_forcing, density_name)
+    raw_density_forcing = get(user_forcings, density_name, nothing)
+    combined = combine_forcing_values(raw_density_forcing, wrapped_specific_forcing)
+    return materialize_or_default(combined, target_field, density_name, model_names, context)
+end
+
+# Unprefixed prognostic (a user tracer like `:c`): the prognostic name *is* in specific
+# form, so any forcing supplied under that name is a specific tendency and gets wrapped
+# in SpecificForcing — the ρ factor is then applied at kernel time, matching the
+# convention used for ρ-prefixed prognostics' specific aliases.
+function assemble_field_forcing(tracer_name, ::Nothing, target_field,
+                                user_forcings, model_names, context)
+    raw_forcing = get(user_forcings, tracer_name, nothing)
+    wrapped_forcing = wrap_specific_forcing(raw_forcing, tracer_name)
+    return materialize_or_default(wrapped_forcing, target_field, tracer_name, model_names, context)
+end
+
+# Strip the `ρ` prefix from a density-weighted prognostic name; returns `nothing` for
+# any name that is not ρ-prefixed.
+function specific_name_of(density_name)
+    s = string(density_name)
+    return startswith(s, "ρ") ? Symbol(s[nextind(s, 1):end]) : nothing
+end
+
+# Default forcing for fields the user did not supply: a Returns that yields zero at every
+# grid point. Dispatch on Nothing keeps the assemble path branch-free.
+materialize_or_default(::Nothing, target_field, density_name, model_names, context) =
+    Returns(zero(target_field.grid))
+
+materialize_or_default(forcing, target_field, density_name, model_names, context) =
+    materialize_atmosphere_model_forcing(forcing, target_field, density_name, model_names, context)
+
+# Build (specific_name => density_name) pairs from a tuple of prognostic ρ-names.
+function specific_to_density_pairs(forcing_names)
+    pairs = Pair{Symbol, Symbol}[]
+    for name in forcing_names
+        specific_name = specific_name_of(name)
+        isnothing(specific_name) || push!(pairs, specific_name => name)
+    end
+    return Tuple(pairs)
+end
+
+# Combine a density-keyed forcing value with the specific-keyed forcing value supplied
+# for the same prognostic. `nothing` denotes "user did not supply this side". The two
+# sides are flattened into a single tuple so the existing tuple-materialization path
+# wraps them in MultipleForcings.
+combine_forcing_values(::Nothing, ::Nothing) = nothing
+combine_forcing_values(a::Tuple, ::Nothing) = a
+combine_forcing_values(::Nothing, b::Tuple) = b
+combine_forcing_values(a, ::Nothing) = a
+combine_forcing_values(::Nothing, b) = b
+combine_forcing_values(a::Tuple, b::Tuple) = (a..., b...)
+combine_forcing_values(a::Tuple, b) = (a..., b)
+combine_forcing_values(a, b::Tuple) = (a, b...)
+combine_forcing_values(a, b) = (a, b)
 
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)

@@ -134,36 +134,36 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # ## Moisture tendency
 #
 # A prescribed large-scale moisture tendency represents the effects of advection
-# by the large-scale circulation [vanZanten2011](@cite).
+# by the large-scale circulation [vanZanten2011](@cite). We supply this tendency
+# in specific form; Breeze multiplies by ``ρ`` automatically at kernel time when
+# the forcing is keyed under the specific variable name `qᵉ`.
 
-ρᵣ = reference_state.density
-∂t_ρqᵉ_large_scale = Field{Nothing, Nothing, Center}(grid)
+∂t_qᵉ_large_scale = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Rico_dqtdt(FT)
-set!(∂t_ρqᵉ_large_scale, z -> dqdt_profile(z))
-set!(∂t_ρqᵉ_large_scale, ρᵣ * ∂t_ρqᵉ_large_scale)
-∂t_ρqᵉ_large_scale_forcing = Forcing(∂t_ρqᵉ_large_scale)
+set!(∂t_qᵉ_large_scale, z -> dqdt_profile(z))
+qᵉ_large_scale_forcing = Forcing(∂t_qᵉ_large_scale)
 
 # ## Radiative cooling
 #
 # A prescribed radiative cooling profile is applied to the thermodynamic equation.
-# The RICO case uses a constant radiative cooling rate of ``-2.5`` K/day
-# applied uniformly throughout the domain [vanZanten2011](@cite).
-# This is the key simplification that allows us to avoid interactive radiation.
+# The RICO case uses a constant radiative cooling rate of ``-2.5`` K/day applied
+# uniformly throughout the domain [vanZanten2011](@cite). This is the key
+# simplification that allows us to avoid interactive radiation. We supply it
+# under the specific potential-temperature key `θ`.
 
-∂t_ρθ_large_scale = Field{Nothing, Nothing, Center}(grid)
-∂t_θ_large_scale = - 2.5 / day # K / day
-set!(∂t_ρθ_large_scale, ρᵣ * ∂t_θ_large_scale)
-ρθ_large_scale_forcing = Forcing(∂t_ρθ_large_scale)
+θ_large_scale_forcing = (x, y, z, t) -> - 2.5 / day
 
 # ## Assembling forcing and boundary conditions
+#
+# Forcings are keyed under specific prognostic names (`u`, `v`, `w`, `θ`, `qᵉ`);
+# Breeze applies the density factor ``ρ`` automatically at kernel time. The
+# Oceananigans `Relaxation` sponge damps the vertical velocity `w` toward zero.
 
-Fρu = (subsidence, geostrophic.ρu)
-Fρv = (subsidence, geostrophic.ρv)
-Fρw = sponge
-Fρqᵉ = (subsidence, ∂t_ρqᵉ_large_scale_forcing)
-Fρθ = (subsidence, ρθ_large_scale_forcing)
-
-forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵉ=Fρqᵉ, ρθ=Fρθ)
+forcing = (; u = (subsidence, geostrophic.u),
+             v = (subsidence, geostrophic.v),
+             w = sponge,
+             qᵉ = (subsidence, qᵉ_large_scale_forcing),
+             θ = (subsidence, θ_large_scale_forcing))
 boundary_conditions = (ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
@@ -172,8 +172,7 @@ nothing #hide
 # We use one-moment bulk microphysics from [CloudMicrophysics](https://clima.github.io/CloudMicrophysics.jl/dev/)
 # with cloud formatiom modeled with warm-phase saturationa adjustment and 5th-order WENO advection.
 # The one-moment scheme prognoses rain density `ρqʳ` includes autoconversion (cloud liquid → rain)
-# and accretion (cloud liquid swept up by falling rain) processes. This is a more physically-realistic
-# representation of warm-rain precipitation than the zero-moment scheme.
+# and accretion (cloud liquid swept up by falling rain) processes.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics

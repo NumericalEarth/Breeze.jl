@@ -1,6 +1,7 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields
+using Oceananigans.Advection: needs_implicit_solver
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
     tick_stage!,
@@ -10,7 +11,9 @@ using Oceananigans.TimeSteppers:
     implicit_step!
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
-                                microphysics_model_update!
+                                microphysics_model_update!, field_advection_scheme,
+                                implicit_advection_density, implicit_advection_velocities,
+                                implicit_step_advection
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -67,6 +70,9 @@ Keyword Arguments
 
 - `implicit_solver`: Optional implicit solver for diffusion. Default: `nothing`
 - `Gⁿ`: Tendency fields at current stage. Default: similar to `prognostic_fields`
+- `U⁰`: Storage for the state at the beginning of the step. Default: similar to
+  `prognostic_fields`. Accepting it as a keyword lets callers (e.g. the adiabatic-balance
+  twin) alias another stepper's tendency storage instead of allocating fresh fields.
 
 References
 ==========
@@ -77,7 +83,8 @@ Shu, C.-W., & Osher, S. (1988). Efficient implementation of essentially non-osci
 function SSPRungeKutta3(grid, prognostic_fields;
                         dynamics = nothing,
                         implicit_solver::TI = nothing,
-                        Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
+                        Gⁿ::TG = map(similar, prognostic_fields),
+                        U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
 
     FT = eltype(grid)
 
@@ -85,10 +92,6 @@ function SSPRungeKutta3(grid, prognostic_fields;
     α¹ = FT(1)
     α² = FT(1//4)
     α³ = FT(2//3)
-
-    # Create storage for initial state (used in stages 2 and 3)
-    U⁰ = map(similar, prognostic_fields)
-    U0 = typeof(U⁰)
 
     return SSPRungeKutta3{FT, U0, TG, TI}(α¹, α², α³, U⁰, Gⁿ, implicit_solver)
 end
@@ -112,24 +115,49 @@ function ssp_rk3_substep!(model, Δt, α)
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
+    Δt_FT = kernel_time_step(arch, grid, Δt)
 
-    for (i, (u, u⁰, G)) in enumerate(zip(prognostic_fields(model), U⁰, Gⁿ))
-        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
+    prognostic = prognostic_fields(model)
+    names = keys(prognostic)
+
+    for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
+        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt_FT, α)
 
         # Field index for implicit solver:
         # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
         # - indices 4+ are scalars (ρθ/ρe, ρqᵗ, microphysics, tracers)
         # For scalars, we use Val(i - 3) to get Val(1), Val(2), etc.
         field_index = Val(i - 3)
+        advection = field_advection_scheme(model.advection, names[i])
 
-        implicit_step!(u,
-                       model.timestepper.implicit_solver,
-                       model.closure,
-                       model.closure_fields,
-                       field_index,
-                       model.clock,
-                       fields(model),
-                       α * Δt)
+        # Adaptive implicit vertical advection schemes add a density-weighted vertical-advection
+        # contribution to the implicit solve (combined with vertically-implicit diffusion).
+        # Scalars, ρu, and ρv use Oceananigans' z-Center coefficients directly; ρw is routed to
+        # Breeze's z-Face coefficients (see AtmosphereModels/implicit_vertical_advection.jl).
+        # All other schemes use the unchanged diffusion-only implicit step (a no-op when there
+        # is no vertically-implicit closure).
+        if needs_implicit_solver(advection)
+            implicit_step!(u,
+                           model.timestepper.implicit_solver,
+                           model.closure,
+                           model.closure_fields,
+                           field_index,
+                           model.clock,
+                           fields(model),
+                           α * Δt,
+                           implicit_step_advection(advection, names[i]),
+                           implicit_advection_velocities(model.dynamics, model.velocities, names[i]),
+                           implicit_advection_density(model.dynamics, model.formulation, names[i]))
+        else
+            implicit_step!(u,
+                           model.timestepper.implicit_solver,
+                           model.closure,
+                           model.closure_fields,
+                           field_index,
+                           model.clock,
+                           fields(model),
+                           α * Δt)
+        end
     end
 
     return nothing
@@ -180,7 +208,7 @@ where ``G`` above is the right-hand-side, e.g., ``∂u/∂t = G(u)``.
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}, Δt; callbacks=[])
 
     # Be paranoid and prepare at iteration 0, in case run! is not used:
-    maybe_prepare_first_time_step!(model, callbacks)
+    maybe_prepare_first_time_step!(model, Δt, callbacks)
 
     ts = model.timestepper
     α¹ = ts.α¹
@@ -237,15 +265,12 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    # Operator-split microphysics: applied once per time step on the post-RK
-    # state (rather than once per stage from `update_state!`), so that the
-    # full Δt of autoconversion / accretion / condensation / sedimentation
-    # is applied exactly once. Required for `DCMIP2016KesslerMicrophysics`,
-    # which bypasses the standard tendency interface and updates state via
-    # this hook.
+    update_state!(model, callbacks; compute_tendencies = true)
+
+    # Apply the operator-split microphysics update exactly once per step, on the post-RK
+    # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
 
-    update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, α³ * Δt)
 
     return nothing

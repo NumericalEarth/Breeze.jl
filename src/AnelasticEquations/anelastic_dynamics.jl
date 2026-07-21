@@ -83,6 +83,24 @@ function AtmosphereModels.total_pressure(dynamics::AnelasticDynamics)
     return p̄ + p′
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Default surface temperature for `BulkDrag` under `AnelasticDynamics`: the
+reference-state surface temperature, recovered from the reference potential
+temperature via the surface Exner function ``T₀ = (p₀/pˢᵗ)^{Rᵈ/cᵖᵈ}\\,θ₀``.
+
+Used only when the user constructs `BulkDrag` without an explicit
+`surface_temperature`. The result is a horizontally uniform scalar.
+"""
+function AtmosphereModels.default_drag_surface_temperature(dynamics::AnelasticDynamics, grid, constants)
+    ref = dynamics.reference_state
+    Rᵈ = dry_air_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    Π₀ = (ref.surface_pressure / ref.standard_pressure)^(Rᵈ / cᵖᵈ)
+    return Π₀ * ref.potential_temperature
+end
+
 #####
 ##### Density and pressure access interface
 #####
@@ -129,6 +147,8 @@ Return the standard pressure from the reference state for potential temperature 
 """
 AtmosphereModels.standard_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.standard_pressure
 
+AtmosphereModels.dynamics_reference_state(dynamics::AnelasticDynamics) = dynamics.reference_state
+
 #####
 ##### Show methods
 #####
@@ -158,11 +178,14 @@ function AtmosphereModels.materialize_momentum_and_velocities(dynamics::Anelasti
     ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)
     momentum = (; ρu, ρv, ρw)
 
-    velocity_bcs = NamedTuple(name => FieldBoundaryConditions() for name in (:u, :v, :w))
-    velocity_bcs = regularize_field_boundary_conditions(velocity_bcs, grid, (:u, :v, :w))
-    u = XFaceField(grid, boundary_conditions=velocity_bcs.u)
-    v = YFaceField(grid, boundary_conditions=velocity_bcs.v)
-    w = ZFaceField(grid, boundary_conditions=velocity_bcs.w)
+    # Velocity is diagnostic (u = ρu/ρ via compute_velocities!). Use the auxiliary-field
+    # default BCs (`nothing` on Bounded-Face sides, Periodic on Periodic sides), which
+    # is what XFaceField gives us when constructed with no `boundary_conditions=` kwarg.
+    # `nothing` on Bounded-Face prevents `fill_halo_regions!(velocities)` from clobbering
+    # the kernel-computed boundary face — momentum carries the wall BC.
+    u = XFaceField(grid)
+    v = YFaceField(grid)
+    w = ZFaceField(grid)
     velocities = (; u, v, w)
 
     return momentum, velocities

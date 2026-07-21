@@ -5,6 +5,7 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        CondensedPhase,
        ClausiusClapeyron, ClausiusClapeyronThermodynamicConstants,
        TetensFormula, TetensFormulaThermodynamicConstants,
+       FlatauPolynomial, FlatauPolynomialThermodynamicConstants,
        MoistureMassFractions, MoistureMixingRatio,
        vapor_gas_constant, dry_air_gas_constant,
        mixture_gas_constant, mixture_heat_capacity,
@@ -14,7 +15,8 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        equilibrium_saturation_specific_humidity, adjustment_saturation_specific_humidity,
        dewpoint_temperature,
        vapor_pressure, relative_humidity,
-       adiabatic_hydrostatic_pressure, adiabatic_hydrostatic_density, surface_density,
+       adiabatic_hydrostatic_pressure, adiabatic_hydrostatic_density, pressure_balanced_density,
+       surface_density,
        temperature_from_potential_temperature, potential_temperature_from_temperature,
        temperature, with_temperature, with_moisture,
        PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
@@ -25,10 +27,13 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Oceananigans: Oceananigans
 
+using Breeze.Solvers: NewtonSolver, SecantSolver, FixedIterations, newton_solve, secant_solve
+
 include("thermodynamics_constants.jl")
 include("vapor_saturation.jl")
 include("clausius_clapeyron.jl")
 include("tetens_formula.jl")
+include("flatau_polynomial.jl")
 include("reference_states.jl")
 include("dynamic_states.jl")
 

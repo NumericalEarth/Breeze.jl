@@ -1,5 +1,5 @@
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, moisture_phase
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, moisture_phase, total_density
 using CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -152,11 +152,37 @@ end
     # The density is face-interpolated (ℑz) to match the advection operator.
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
-    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
     expected_flux = -ρ_face * wʳ * qʳ
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] ≥ 0
+end
+
+@testset "TwoMomentCloudMicrophysics compressible surface flux [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=300)
+    microphysics = TwoMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; dynamics, microphysics)
+
+    set!(model; ρ = 2, θ = 300, qᵗ = 0.020, qᶜˡ = 0, nᶜˡ = 0, qʳ = 0.001, nʳ = 1e5,
+         enforce_mass_conservation = false)
+
+    spf = surface_precipitation_flux(model)
+    compute!(spf)
+
+    wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
+    ρ_reference_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
+    expected_flux = -ρ_face * wʳ * qʳ
+
+    @test ρ_face ≈ FT(2)
+    @test !isapprox(ρ_face, ρ_reference_face)
+    @test @allowscalar spf[1, 1] ≈ expected_flux
+    @test @allowscalar spf[1, 1] > 0
 end
 
 @testset "TwoMomentCloudMicrophysics sedimentation_velocity and velocities [$FT]" for FT in test_float_types()

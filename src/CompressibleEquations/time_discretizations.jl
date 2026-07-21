@@ -65,24 +65,29 @@ across the three Wicker–Skamarock RK3 stages.
 
 Concrete subtypes:
 
-  - [`ProportionalSubsteps`](@ref) — every stage uses the same substep size
-    ``Δτ = Δt/N``, with stage-dependent substep counts ``Nτ = \\max(1, \\mathrm{round}(β N))``
-    (so for the canonical β = (1/3, 1/2, 1) this is N/3, N/2, N substeps in
-    stages 1, 2, 3). This is the default.
+  - [`ProportionalSubsteps`](@ref) — each stage independently covers its own
+    interval ``β Δt`` with ``Nτ = ⌈β N⌉`` substeps of size ``Δτ = β Δt / Nτ``
+    (count proportional to the stage fraction; size fitted so the substeps exactly
+    tile ``β Δt``). This is the default.
+
+  - [`ConstantSubstepSize`](@ref) — every stage uses the same substep size
+    ``Δτ = Δt/N`` (``N`` rounded up to a multiple of 6 so ``β N`` is integral),
+    with stage-dependent counts ``Nτ = β N``.
 
   - [`MonolithicFirstStage`](@ref) — stage 1 collapses to a single substep of
-    size ``Δt/3``; stages 2 and 3 are the same as `ProportionalSubsteps`.
+    size ``Δt/3``; stages 2 and 3 are the same as `ConstantSubstepSize`.
 """
 abstract type AcousticSubstepDistribution end
 
 """
 $(TYPEDEF)
 
-Acoustic substep distribution where every stage uses the same substep size
-``Δτ = Δt/N`` and the substep counts scale with the WS-RK3 stage fraction
-``Nτ = \\max(1, \\mathrm{round}(β_\\mathrm{stage} N))``. For the canonical
-β = (1/3, 1/2, 1) this gives ``N/3``, ``N/2``, ``N`` substeps in stages 1,
-2, 3 respectively.
+Acoustic substep distribution where each WS-RK3 stage independently covers its
+interval ``β_\\mathrm{stage} Δt`` with ``Nτ = ⌈β_\\mathrm{stage} N⌉`` substeps of
+size ``Δτ = β_\\mathrm{stage} Δt / Nτ``. The count is proportional to the stage
+fraction and the size is fitted so the substeps exactly tile each stage — exact
+coverage at the minimum substep count (no global quantization; Δτ may differ
+slightly by stage).
 
 This is the default.
 """
@@ -91,9 +96,20 @@ struct ProportionalSubsteps <: AcousticSubstepDistribution end
 """
 $(TYPEDEF)
 
+Acoustic substep distribution where every stage uses the same substep size
+``Δτ = Δt/N``. ``N`` is rounded up to a multiple of 6 (= LCM of the WS-RK3 stage
+denominators 2 and 3) so the per-stage count ``Nτ = β_\\mathrm{stage} N`` is an
+exact integer and each stage covers exactly ``β Δt`` — uniform Δτ, at the cost of
+over-resolving (substep count is the next multiple of 6 ≥ the CFL minimum).
+"""
+struct ConstantSubstepSize <: AcousticSubstepDistribution end
+
+"""
+$(TYPEDEF)
+
 Acoustic substep distribution where stage 1 collapses to a single substep
 of size ``Δt/3``; stages 2 and 3 are the same as
-[`ProportionalSubsteps`](@ref) (``N/2`` and ``N`` substeps of size
+[`ConstantSubstepSize`](@ref) (``N/2`` and ``N`` substeps of size
 ``Δτ = Δt/N``).
 """
 struct MonolithicFirstStage <: AcousticSubstepDistribution end
@@ -151,9 +167,11 @@ Used by
 horizontal momentum perturbation components ``(ρu)′`` and ``(ρv)′`` pick
 up an explicit correction proportional to the horizontal gradient of
 ``D``. If `damp_vertical = true`, the vertical component is folded
-implicitly into the column tridiag as a Laplacian on ``(ρw)′``. By
-default, `damp_vertical = false` and vertical acoustic damping comes from
-the off-centered implicit solve.
+implicitly into the column tridiag as a Laplacian on the acoustic vertical
+momentum perturbation: ``(ρw)′`` for height-coordinate dynamics and
+``(ρ\tilde{w})′`` for terrain-following dynamics. By default,
+`damp_vertical = false` and vertical acoustic damping comes from the
+off-centered implicit solve.
 
 Per-substep momentum correction (Klemp, Skamarock & Ha 2018 eq. 36, MPAS form):
 
@@ -199,7 +217,8 @@ Fields
   ``γ_y = α Δy^2 / Δτ``). Setting `length_scale = ℓ` forces a fixed
   ``γ = α \\, ℓ² / Δτ`` in both horizontal directions.
 - `damp_vertical`: If `true`, the vertical part of the divergence
-  damping is folded into the column tridiag (a Laplacian on `(ρw)′`).
+  damping is folded into the column tridiag (a Laplacian on `(ρw)′` in
+  height coordinates or `(ρw̃)′` in terrain-following coordinates).
   If `false` (default), no extra vertical damping is applied — the
   vertical acoustic modes are damped solely by the off-centering of the
   implicit pressure-gradient solve (``\\omega > 0.5``), which Klemp et
@@ -226,6 +245,33 @@ function ThermalDivergenceDamping(; coefficient = 0.1,
                                                 damp_vertical)
     end
 end
+
+"""
+$(TYPEDEF)
+
+Acoustic divergence damping that forms the **horizontal** θ-flux divergence
+``δ = ∂ₓ(θᴸ(ρu)′) + ∂_y(θᴸ(ρv)′)`` **directly** from the perturbation momentum, rather than approximating
+it through the ``(ρθ)′`` substep tendency the way [`ThermalDivergenceDamping`](@ref) does (Klemp,
+Skamarock & Ha 2018, their eq. 36). After each acoustic substep the horizontal perturbation momentum
+receives the correction
+
+```math
+Δ(ρu)′ = α\\, Δx²\\, ∂ₓ δ / θᴸ, \\qquad Δ(ρv)′ = α\\, Δy²\\, ∂_y δ / θᴸ,
+```
+
+with the single dimensionless coefficient `α` (MPAS `config_smdiv`, default `0.1`; the Laplacian-diffusion
+stability bound is `α ≲ 0.2`). The divergence is **horizontal only**: the damped quantity must match the
+divergence in the ``Θ = ρθ`` equation, and folding in the vertical θ-flux divergence damps the resolved
+vertical flux and destabilizes the flow. Differencing the velocity field directly (rather than the
+``(ρθ)′`` tendency) carries no ``1/Δτ`` in the diffusivity, which also avoids the thermal proxy's
+cold-start ``∝ α/Δτ`` spurious force (cf. PR #794).
+"""
+struct DirectDivergenceDamping{FT} <: AcousticDampingStrategy
+    coefficient :: FT
+end
+
+DirectDivergenceDamping(; coefficient = 0.1) =
+    DirectDivergenceDamping{Oceananigans.defaults.FloatType}(convert(Oceananigans.defaults.FloatType, coefficient))
 
 #####
 ##### Split-explicit time discretization
@@ -294,6 +340,28 @@ Fields
   with the configured `damping_rate` and `depth`.
 - `substep_distribution`: How acoustic substeps are distributed across the
   three WS-RK3 stages.
+- `open_boundary_relaxation`: Per-substep relaxation factor ``α \\in (0, 1]``
+  applied at the outermost open-boundary cell of ``ρ′,(ρθ)′`` to enforce the
+  prescribed wall value across the acoustic substeps. Default ``α = 0.5``,
+  matching FV3-LAM's outermost-blend-row weight (``\\approx 0.6``). Without
+  this enforcement the perturbation halos reflect, biasing the discrete mass
+  balance under transient open-boundary inflow (issue #738). The relaxation is
+  a no-op when no side carries an active open BC (periodic, walls, impenetrable
+  defaults all skip it).
+
+# Backward integration
+
+Backward integration (`Δt < 0`) is supported. The off-centered
+Crank–Nicolson vertical solve with ``ω ∈ [0.5, 1]`` has amplification
+factor ``|A|^2 = (1 + ((1-ω) ω_0 Δτ)^2) / (1 + (ω ω_0 Δτ)^2) \\le 1``
+for either sign of ``Δτ``, so the linearized acoustic substep is A-stable
+in both directions. Horizontal divergence damping is sign-self-consistent
+(``γ \\propto Δτ^{-1}`` and ``(ρθ)' - (ρθ)'_\\mathrm{old} \\propto Δτ``
+both flip sign with `Δt`). The adaptive substep count uses ``|Δt|``, and
+the optional [`UpperSponge`](@ref) keeps its dissipative sign so it acts
+as a one-sided regularizer in both directions (i.e. backward integration
+through a sponge layer is stable but not an exact inverse of the forward
+step inside the sponge).
 
 See also [`ExplicitTimeStepping`](@ref).
 """
@@ -306,6 +374,9 @@ function convert_acoustic_parameter(::Type{FT}, damping::ThermalDivergenceDampin
                                            length_scale,
                                            damping.damp_vertical)
 end
+
+convert_acoustic_parameter(::Type{FT}, damping::DirectDivergenceDamping) where FT =
+    DirectDivergenceDamping{FT}(convert(FT, damping.coefficient))
 
 """
 Abstract supertype for upper-sponge ramp shapes. A concrete `AbstractRamp`
@@ -368,9 +439,12 @@ end
 """
 $(TYPEDEF)
 
-Implicit upper Rayleigh sponge for the substepper inner loop. Damps ``(ρw)′``
-toward zero inside a layer of thickness `depth` below the model lid, with
-peak damping rate `damping_rate` (in 1/s) at the lid scaled by `ramp(z)`.
+Implicit upper Rayleigh sponge for the substepper inner loop. Damps the
+acoustic vertical momentum perturbation toward zero inside a layer of thickness
+`depth` below the model lid, with peak damping rate `damping_rate` (in 1/s) at
+the lid scaled by `ramp(z)`. The damped variable is ``(ρw)′`` for
+height-coordinate dynamics and ``(ρ\tilde{w})′`` for terrain-following
+dynamics.
 
 The damping is applied **inside the column tridiag** as a CN-weighted
 contribution (paralleling the existing implicit divergence-damping
@@ -400,7 +474,8 @@ classic ``\\sin^2`` profile.
     just below the sponge, prefer ``\\text{rate} ≈ 0.1`` and a deeper
     layer.
 
-- `depth`: sponge-layer thickness below the lid, in metres. Default `5e3`.
+- `depth`: sponge-layer thickness below the lid, in metres along the
+  reference vertical coordinate. Default `5e3`.
 
   Should span at least ~10 grid cells in the vertical to give the smooth
   profile room to absorb without aliasing; for ``Δz ≈ 1\\,\\text{km}`` the
@@ -412,8 +487,9 @@ classic ``\\sin^2`` profile.
   [`LinearRamp()`](@ref). Custom shapes are supported by subtyping
   `AbstractRamp` and defining `(::MyRamp)(z, sponge_top, depth)`.
 
-The ramp is z-only (no horizontal variation), so the sponge does not
-break zonal symmetry.
+The ramp depends only on the reference vertical coordinate (no horizontal
+variation), so the sponge does not break zonal symmetry and remains uniform
+over terrain-following grids.
 """
 struct UpperSponge{FT, R <: AbstractRamp}
     damping_rate :: FT
@@ -449,23 +525,41 @@ number of acoustic substeps, a `forward_weight` for off-centering the acoustic
 solve, an acoustic `damping` strategy such as
 [`ThermalDivergenceDamping`](@ref), an optional [`UpperSponge`](@ref), and a
 `substep_distribution` such as [`ProportionalSubsteps`](@ref).
+
+Backward integration (`time_step!(model, Δt)` with `Δt < 0`) is supported
+for the linearized acoustic substep loop. See the field-documentation
+docstring for the A-stability argument, sign-handling of the adaptive
+substep count, and the irreversibility caveat for the optional
+[`UpperSponge`](@ref).
 """
 struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistribution}
     substeps :: N
     acoustic_cfl :: FT
     forward_weight :: FT
+    thermodynamic_tendency_factor :: FT
+    vertical_momentum_tendency_factor :: FT
+    vertical_pressure_tendency_factor :: FT
+    final_stage_vertical_pressure_tendency_factor :: FT
+    apply_first_substep_pressure_gradient :: Bool
     damping :: D
     sponge :: US
     substep_distribution :: AD
+    open_boundary_relaxation :: FT
 end
 
 function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          substeps = nothing,
                                          acoustic_cfl = FT(0.5),
                                          forward_weight = FT(0.65),
+                                         thermodynamic_tendency_factor = FT(1),
+                                         vertical_momentum_tendency_factor = FT(1),
+                                         vertical_pressure_tendency_factor = FT(1),
+                                         final_stage_vertical_pressure_tendency_factor = FT(1),
+                                         apply_first_substep_pressure_gradient = false,
                                          damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
-                                         substep_distribution = ProportionalSubsteps())
+                                         substep_distribution = ProportionalSubsteps(),
+                                         open_boundary_relaxation = FT(0.5))
 
     damping isa AcousticDampingStrategy ||
         throw(ArgumentError("`damping` must be an `AcousticDampingStrategy`"))
@@ -476,13 +570,22 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
     acoustic_cfl > 0 ||
         throw(ArgumentError("`acoustic_cfl` must be positive (got $(acoustic_cfl))"))
 
+    0 < open_boundary_relaxation ≤ 1 ||
+        throw(ArgumentError("`open_boundary_relaxation` must be in (0, 1] (got $(open_boundary_relaxation))"))
+
     return SplitExplicitTimeDiscretization(
         substeps,
         convert(FT, acoustic_cfl),
         convert(FT, forward_weight),
+        convert(FT, thermodynamic_tendency_factor),
+        convert(FT, vertical_momentum_tendency_factor),
+        convert(FT, vertical_pressure_tendency_factor),
+        convert(FT, final_stage_vertical_pressure_tendency_factor),
+        Bool(apply_first_substep_pressure_gradient),
         convert_acoustic_parameter(FT, damping),
         convert_acoustic_parameter(FT, sponge),
         substep_distribution,
+        convert(FT, open_boundary_relaxation),
     )
 end
 

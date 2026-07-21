@@ -2,6 +2,7 @@ using Breeze
 using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
+using Breeze.AtmosphereModels: microphysics_model_update!
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -362,7 +363,10 @@ end
 
     set!(model.formulation.potential_temperature_density, reshape(ρ_prof .* θˡⁱ_init, 1, 1, Nz))
     model.clock.last_Δt = Δt
+    # Refresh the diagnostic state from the prognostics, then apply the operator-split
+    # Kessler update once, mirroring how the time-steppers call it after `update_state!`.
     update_state!(model)
+    microphysics_model_update!(model.microphysics, model)
 
     # Extract results
     ρqᶜˡ_result = Array(interior(model.microphysical_fields.ρqᶜˡ, 1, 1, :))
@@ -393,4 +397,20 @@ end
     @test qᵛ_breeze ≈ qᵛ_ref rtol=1e-12
     @test qᶜˡ_breeze ≈ qᶜˡ_ref rtol=1e-12
     @test qʳ_breeze ≈ qʳ_ref rtol=1e-12
+end
+
+@testset "Thermodynamic constants validation" begin
+    FT = Float64
+    grid = RectilinearGrid(CPU(), size=(1, 1, 4), extent=(1, 1, 1))
+    microphysics = DCMIP2016KesslerMicrophysics(FT)
+
+    # DCMIP2016 Kessler requires Tetens saturation vapor pressure. The default constants use
+    # ClausiusClapeyron, which lacks the Tetens coefficients the scheme reads — this should be
+    # rejected at construction with a clear error, not fail later inside the kernel (issue #858).
+    @test_throws ArgumentError AtmosphereModel(grid; microphysics)
+
+    # Constructing with Tetens constants succeeds.
+    tetens_constants = ThermodynamicConstants(FT; saturation_vapor_pressure = TetensFormula(FT))
+    model = AtmosphereModel(grid; microphysics, thermodynamic_constants=tetens_constants)
+    @test model.microphysics isa DCMIP2016KesslerMicrophysics
 end
