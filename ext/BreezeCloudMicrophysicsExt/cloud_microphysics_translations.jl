@@ -25,7 +25,7 @@ const Γ = SF.gamma
 #####
 
 """
-    diffusional_growth_factor(aps::AirProperties, T, constants)
+$(TYPEDSIGNATURES)
 
 Compute the thermodynamic factor ``G`` that controls the rate of diffusional
 growth of cloud droplets and rain drops.
@@ -62,10 +62,93 @@ end
     ℒⁱ = ice_latent_heat(T, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
 
-    Dᵛ = D_vapor
-
     # TODO: notation for the thermal diffusivity K_therm?
-    return 1 / (ℒⁱ / (K_therm * T) * (ℒⁱ / (Rᵛ * T) - 1) + Rᵛ * T / (Dᵛ * pᵛ⁺))
+    return 1 / (ℒⁱ / (K_therm * T) * (ℒⁱ / (Rᵛ * T) - 1) + Rᵛ * T / (D_vapor * pᵛ⁺))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the cloud-ice deposition relaxation timescale for the
+CloudMicrophysics `TemperatureDependent` option.
+
+This is a branch-free translation of `CloudMicrophysics.MicrophysicsNonEq.τ_relax`
+for use from Breeze GPU kernels.
+"""
+@inline function temperature_dependent_ice_relaxation_timescale(
+    cloud_ice::CloudIce,
+    air_properties::AirProperties,
+    frostenberg,
+    qᶜⁱ,
+    T,
+)
+    FT = typeof(T)
+    Tᶜ = min(T - frostenberg.T_freeze, 0)
+    Nᶜⁱ = exp(9 * log(-Tᶜ / 10))
+    ρᵢ = cloud_ice.ρᵢ
+    Dᵛ = air_properties.D_vapor
+    r = max(ifelse(
+        Nᶜⁱ > ϵ_numerics(FT),
+        cbrt(3 * qᶜⁱ / (4 * FT(π) * Nᶜⁱ * ρᵢ)),
+        zero(FT),
+    ), FT(1e-6))
+    return inv(4 * FT(π) * Dᵛ * Nᶜⁱ * r)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute supersaturation-dependent autoconversion of cloud ice to snow using
+Breeze thermodynamics.
+"""
+@inline function ice_autoconversion_with_supersaturation(
+    option::WithSupersaturation,
+    parameters::Microphysics1MParams,
+    q::MoistureMassFractions{FT},
+    qᶜⁱ::FT,
+    ρ::FT,
+    T::FT,
+    Tᶠ::FT,
+    constants,
+) where {FT}
+    (; pdf, mass) = parameters.cloud.ice
+    (; me, Δm) = mass
+    r_ice_snow = option.r_ice_snow
+    𝒮 = supersaturation(T, ρ, q, constants, PlanarIceSurface())
+    G = diffusional_growth_factor_ice(parameters.air_properties, T, constants)
+    n₀ = get_n0(pdf)
+    λ⁻¹ = lambda_inverse(pdf, mass, qᶜⁱ, ρ)
+
+    rate = 4 * FT(π) * 𝒮 * G * n₀ / ρ *
+           exp(-r_ice_snow / λ⁻¹) *
+           (r_ice_snow^2 / (me + Δm) + (r_ice_snow / λ⁻¹ + 1) * λ⁻¹^2)
+
+    active = (qᶜⁱ > ϵ_numerics(FT)) & (𝒮 > 0) & (T < Tᶠ)
+    return ifelse(active, rate, zero(FT))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute melting of cloud ice to cloud liquid using Breeze thermodynamics.
+"""
+@inline function cloud_ice_melting(
+    cloud_ice::CloudIce,
+    air_properties::AirProperties,
+    qᶜⁱ::FT,
+    ρ::FT,
+    T::FT,
+    Tᶠ::FT,
+    constants,
+) where {FT}
+    (; pdf, mass) = cloud_ice
+    K = air_properties.K_therm
+    ℒf = ice_latent_heat(T, constants) - liquid_latent_heat(T, constants)
+    n₀ = get_n0(pdf)
+    λ⁻¹ = lambda_inverse(pdf, mass, qᶜⁱ, ρ)
+    rate = 4 * FT(π) * n₀ / ρ * K / ℒf * (T - Tᶠ) * λ⁻¹^2
+    melting = (qᶜⁱ > ϵ_numerics(FT)) & (T > Tᶠ)
+    return ifelse(melting, rate, zero(FT))
 end
 
 #####
@@ -73,11 +156,11 @@ end
 #####
 
 """
-    rain_evaporation(rain_params, vel, aps, q, qʳ, ρ, T, constants)
+$(TYPEDSIGNATURES)
 
 Compute the rain evaporation rate (dqʳ/dt, negative for evaporation).
 
-This is a translation of `CloudMicrophysics.Microphysics1M.evaporation_sublimation`
+This is a translation of `CloudMicrophysics.Microphysics1M.conv_q_rai_to_q_vap`
 that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 
 # Arguments
@@ -94,7 +177,7 @@ that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 Rate of change of rain specific humidity (negative = evaporation)
 """
 @inline function rain_evaporation(
-    (; pdf, mass, vent)::Rain{FT},
+    (; pdf, mass, vent)::Rain,
     vel::Blk1MVelTypeRain{FT},
     aps::AirProperties{FT},
     q::MoistureMassFractions{FT},
@@ -104,7 +187,7 @@ Rate of change of rain specific humidity (negative = evaporation)
     constants,
 ) where {FT}
     (; ν_air, D_vapor) = aps
-    (; χv, ve, Δv) = vel
+    (; χv, ve, Δv, gamma_vent) = vel
     (; r0) = mass
     aᵥ = vent.a
     bᵥ = vent.b
@@ -122,12 +205,11 @@ Rate of change of rain specific humidity (negative = evaporation)
     base_rate = 4 * FT(π) * n₀ / ρ * 𝒮 * G * λ⁻¹^2
 
     # Ventilation correction terms
-    Sc = ν_air / D_vapor
+    Sc = ν_air / max(D_vapor, ϵ_numerics(FT))
     Re = 2v₀ * χv / ν_air * λ⁻¹
     size_factor = (r0 / λ⁻¹)^((ve + Δv) / 2)
-    gamma_factor = Γ((ve + Δv + 5) / 2)
 
-    ventilation = aᵥ + bᵥ * cbrt(Sc) * sqrt(Re) / size_factor * gamma_factor
+    ventilation = aᵥ + bᵥ * cbrt(Sc) * sqrt(Re) / size_factor * gamma_vent
 
     evap_rate = base_rate * ventilation
 
@@ -143,14 +225,14 @@ end
 #####
 
 """
-    snow_sublimation_deposition(snow_params, vel, aps, q, qˢ, ρ, T, constants)
+$(TYPEDSIGNATURES)
 
 Compute the snow sublimation/deposition rate (dqˢ/dt).
 
 Positive values mean deposition (vapor → snow), negative means sublimation (snow → vapor).
 Unlike rain evaporation, both signs are physical for snow.
 
-This is a translation of `CloudMicrophysics.Microphysics1M.evaporation_sublimation`
+This is a translation of `CloudMicrophysics.Microphysics1M.conv_q_sno_to_q_vap`
 for snow that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 
 # Arguments
@@ -177,7 +259,7 @@ Rate of change of snow specific humidity (positive = deposition, negative = subl
     constants,
 ) where {FT}
     (; ν_air, D_vapor) = aps
-    (; χv, ve, Δv) = vel
+    (; χv, ve, Δv, gamma_vent) = vel
     (; r0) = mass
     aᵥ = vent.a
     bᵥ = vent.b
@@ -194,12 +276,11 @@ Rate of change of snow specific humidity (positive = deposition, negative = subl
     base_rate = 4 * FT(π) * n₀ / ρ * 𝒮 * G * λ⁻¹^2
 
     # Ventilation correction terms
-    Sc = ν_air / D_vapor
+    Sc = ν_air / max(D_vapor, ϵ_numerics(FT))
     Re = 2v₀ * χv / ν_air * λ⁻¹
     size_factor = (r0 / λ⁻¹)^((ve + Δv) / 2)
-    gamma_factor = Γ((ve + Δv + 5) / 2)
 
-    ventilation = aᵥ + bᵥ * cbrt(Sc) * sqrt(Re) / size_factor * gamma_factor
+    ventilation = aᵥ + bᵥ * cbrt(Sc) * sqrt(Re) / size_factor * gamma_vent
 
     rate = base_rate * ventilation
 
@@ -213,39 +294,41 @@ end
 #####
 
 """
-    snow_melting(snow_params, vel, aps, qˢ, ρ, T, constants)
+$(TYPEDSIGNATURES)
 
 Compute the snow melting rate (dqˢ/dt due to melting, always non-negative).
 
-Sensible-heat-driven melting: heat from warm air (``T > T_{freeze}``) melts snow to rain.
-The rate is proportional to (``T - T_{freeze}``) and includes ventilation corrections.
+Sensible-heat-driven melting: heat from warm air (``T > Tᶠ``) melts snow to rain.
+The rate is proportional to (``T - Tᶠ``) and includes ventilation corrections.
 
-This is a translation of `CloudMicrophysics.Microphysics1M.snow_melt`
+This is a translation of `CloudMicrophysics.Microphysics1M.conv_q_sno_to_q_rai`
 that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 
 # Arguments
-- `snow_params`: Snow microphysics parameters (``T_{freeze}``, pdf, mass, vent)
+- `snow_params`: Snow microphysics parameters (pdf, mass, vent)
 - `vel`: Snow terminal velocity parameters
 - `aps`: Air properties (kinematic viscosity, vapor diffusivity, thermal conductivity)
 - `qˢ`: Snow specific humidity
 - `ρ`: Air density
 - `T`: Temperature
-- `constants`: Breeze ThermodynamicConstants
+- `Tᶠ`: Freezing temperature
+- `constants`: Breeze `ThermodynamicConstants`
 
 # Returns
 Rate of snow mass lost to melting [kg/kg/s] (always non-negative)
 """
 @inline function snow_melting(
-    (; T_freeze, pdf, mass, vent)::Snow{FT},
+    (; pdf, mass, vent)::Snow{FT},
     vel::Blk1MVelTypeSnow{FT},
     aps::AirProperties{FT},
     qˢ::FT,
     ρ::FT,
     T::FT,
+    Tᶠ::FT,
     constants,
 ) where {FT}
     (; ν_air, D_vapor, K_therm) = aps
-    (; χv, ve, Δv) = vel
+    (; χv, ve, Δv, gamma_vent) = vel
     (; r0) = mass
     aᵥ = vent.a
     bᵥ = vent.b
@@ -258,20 +341,19 @@ Rate of snow mass lost to melting [kg/kg/s] (always non-negative)
     λ⁻¹ = lambda_inverse(pdf, mass, qˢ, ρ)
 
     # Sensible-heat-driven melting rate
-    base_rate = 4 * FT(π) * n₀ / ρ * K_therm / ℒf * (T - T_freeze) * λ⁻¹^2
+    base_rate = 4 * FT(π) * n₀ / ρ * K_therm / ℒf * (T - Tᶠ) * λ⁻¹^2
 
     # Ventilation correction terms
-    Sc = ν_air / D_vapor
+    Sc = ν_air / max(D_vapor, ϵ_numerics(FT))
     Re = 2v₀ * χv / ν_air * λ⁻¹
     size_factor = (r0 / λ⁻¹)^((ve + Δv) / 2)
-    gamma_factor = Γ((ve + Δv + 5) / 2)
 
-    ventilation = aᵥ + bᵥ * cbrt(Sc) * sqrt(Re) / size_factor * gamma_factor
+    ventilation = aᵥ + bᵥ * cbrt(Sc) * sqrt(Re) / size_factor * gamma_vent
 
     melt_rate = base_rate * ventilation
 
     # Only melt when snow exists and temperature is above freezing
-    melting = (qˢ > ϵ_numerics(FT)) & (T > T_freeze)
+    melting = (qˢ > ϵ_numerics(FT)) & (T > Tᶠ)
     return ifelse(melting, melt_rate, zero(FT))
 end
 
@@ -280,7 +362,7 @@ end
 #####
 
 """
-    warm_accretion_melt_factor(snow_params, T, constants)
+$(TYPEDSIGNATURES)
 
 Compute the thermal melt factor for warm accretion processes.
 
@@ -289,29 +371,29 @@ carried by the warm hydrometeor melts additional snow. The factor ``α`` gives
 the mass ratio of melted snow to accreted warm hydrometeor mass:
 
 ```math
-α = cˡ (T - T_{freeze}) / ℒ_f
+α = cˡ (T - Tᶠ) / ℒ_f
 ```
 
-This is a translation of `CloudMicrophysics.BulkMicrophysicsTendencies.warm_accretion_melt_factor`
+This is a translation of `CloudMicrophysics.Microphysics1M.warm_accretion_melt_factor`
 that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
 
 # Arguments
-- `snow_params`: Snow parameters (contains ``T_{freeze}``)
 - `T`: Temperature
-- `constants`: Breeze ThermodynamicConstants
+- `Tᶠ`: Freezing temperature
+- `constants`: Breeze `ThermodynamicConstants`
 
 # Returns
-Thermal melt factor α (zero when ``T ≤ T_{freeze}``)
+Thermal melt factor α (zero when ``T ≤ Tᶠ``)
 """
 @inline function warm_accretion_melt_factor(
-    (; T_freeze)::Snow{FT},
     T::FT,
+    Tᶠ::FT,
     constants,
 ) where {FT}
     cˡ = constants.liquid.heat_capacity
     ℒf = ice_latent_heat(T, constants) - liquid_latent_heat(T, constants)
-    ΔT = T - T_freeze
-    return ifelse(T ≤ T_freeze, zero(FT), cˡ / ℒf * ΔT)
+    ΔT = T - Tᶠ
+    return ifelse(T ≤ Tᶠ, zero(FT), cˡ / ℒf * ΔT)
 end
 
 #####

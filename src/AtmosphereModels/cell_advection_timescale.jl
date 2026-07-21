@@ -65,5 +65,7 @@ function Advection.cell_advection_timescale(model::AtmosphereModel)
 end
 
 # `nothing` schemes advect nothing (no vertical CFL); every other scheme must be AIVA.
-all_vertical_advection_is_implicit(advection::NamedTuple) =
-    all(scheme -> scheme === nothing || needs_implicit_solver(scheme), values(advection))
+# Note: `all` follows the three-valued logic and _may_ return `missing` in some cases.  Let's
+# inform the compiler with the `::Bool` annotation that we know we only deal with booleans.
+all_vertical_advection_is_implicit(advection::NamedTuple)::Bool =
+    all(scheme -> scheme === nothing || needs_implicit_solver(scheme), values(advection))::Bool

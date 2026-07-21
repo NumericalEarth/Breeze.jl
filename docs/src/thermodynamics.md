@@ -551,6 +551,23 @@ fig
 The mixed-phase saturation vapor pressure lies between the liquid and ice curves,
 providing a smooth interpolation between the two pure phases.
 
+### The Flatau polynomial fits
+
+For performance-sensitive configurations Breeze provides
+[`FlatauPolynomial`](@ref Breeze.Thermodynamics.FlatauPolynomial): the eighth-order
+polynomial fits of [Flatau1992](@citet) to the liquid and ice saturation curves
+(the relative-error-norm coefficient sets in operational use in WRF-family
+microphysics). The polynomial agrees with the integrated Clausius–Clapeyron
+formulation to within 0.2 % over 233–313 K (liquid) while replacing a `^` and an
+`exp` with a branch-free Horner evaluation — roughly 70× cheaper per call on CPU
+`Float64` and free of the FP64 transcendental penalty on GPUs, which matters because
+`SaturationAdjustment` evaluates the saturation curve inside a secant iteration in
+every cell at every stage:
+
+```julia
+constants = ThermodynamicConstants(saturation_vapor_pressure = FlatauPolynomial())
+```
+
 ### The Tetens formula for saturation vapor pressure
 
 In addition to the first-principles [`ClausiusClapeyron`](@ref Breeze.Thermodynamics.ClausiusClapeyron),

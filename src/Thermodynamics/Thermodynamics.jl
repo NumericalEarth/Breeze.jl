@@ -5,6 +5,7 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        CondensedPhase,
        ClausiusClapeyron, ClausiusClapeyronThermodynamicConstants,
        TetensFormula, TetensFormulaThermodynamicConstants,
+       FlatauPolynomial, FlatauPolynomialThermodynamicConstants,
        MoistureMassFractions, MoistureMixingRatio,
        vapor_gas_constant, dry_air_gas_constant,
        mixture_gas_constant, mixture_heat_capacity,
@@ -32,6 +33,7 @@ include("thermodynamics_constants.jl")
 include("vapor_saturation.jl")
 include("clausius_clapeyron.jl")
 include("tetens_formula.jl")
+include("flatau_polynomial.jl")
 include("reference_states.jl")
 include("dynamic_states.jl")
 
