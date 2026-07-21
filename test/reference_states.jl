@@ -586,6 +586,43 @@ end
         @test model.dynamics.reference_state.density  ≈ ref_truth.density  rtol=1e-6
     end
 
+    @testset "Automatic reference is valid and waits for thermodynamic initialization" begin
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+        ref = model.dynamics.reference_state
+
+        @test ref isa ExnerReferenceState
+        @test all(isfinite, Array(interior(ref.pressure)))
+        @test all(ρ -> ρ > 0, Array(interior(ref.density)))
+
+        initial_reference_pressure = Array(interior(ref.pressure))
+        set!(model; ρ=1, enforce_mass_conservation=false)
+        @test Array(interior(ref.pressure)) == initial_reference_pressure
+
+        set!(model; θ=300, enforce_mass_conservation=false)
+        @test Array(interior(ref.pressure)) == initial_reference_pressure
+        @test all(isfinite, Array(interior(model.temperature)))
+
+        set!(model; ρ=1, θ=300, enforce_mass_conservation=false)
+        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=300)
+        @test ref.pressure ≈ ref_truth.pressure rtol=1e-6
+        @test ref.density  ≈ ref_truth.density  rtol=1e-6
+    end
+
+    @testset "Automatic reference is disabled for periodic vertical topology" begin
+        periodic_grid = RectilinearGrid(default_arch;
+                                        size=(4, 4, 8), extent=(100, 100, 1000),
+                                        topology=(Periodic, Periodic, Periodic))
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
+        model = AtmosphereModel(periodic_grid; thermodynamic_constants=constants, dynamics)
+
+        @test model.dynamics.reference_state === nothing
+        @test !model.dynamics.reference_from_state
+
+        set!(model; ρ=1, θ=300, enforce_mass_conservation=false)
+        @test all(isfinite, Array(interior(model.temperature)))
+    end
+
     # `reset_reference_state!` is a no-op for dynamics without a reference state (here a
     # CompressibleDynamics built with `reference_state = nothing`, which disables it).
     @testset "set!(; compute_reference_state) is a no-op without a reference state" begin

@@ -7,6 +7,8 @@ using Breeze.TerrainFollowingDiscretization: TerrainMetrics,
                                               SlopeOutsideInterpolation,
                                               build_terrain_metrics
 
+using Oceananigans.Grids: Bounded, topology
+
 """
 $(TYPEDEF)
 
@@ -29,8 +31,9 @@ Fields
 - `terrain_metrics`: [`TerrainMetrics`](@ref) for terrain-following coordinates (or `nothing`).
   This — not `reference_state` — is the sole "is this a terrain grid?" signal.
 - `w̃`, `ρw̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
-- `reference_from_state`: `true` when the reference state was left to be deduced from the initial
-  state (no explicit reference profile supplied); gates the auto-reset in `set!`. `false` otherwise.
+- `reference_from_state`: `true` when a reference state was left to be deduced from the initial
+  state (no explicit reference profile supplied) on a compatible bounded vertical grid; gates the
+  auto-reset in `set!`. `false` otherwise.
 
 The `time_discretization` determines how tendencies are computed and which
 time-stepper is used:
@@ -92,13 +95,15 @@ Keyword Arguments
 - `terrain_metrics`: Escape hatch — pass a pre-built [`TerrainMetrics`](@ref) to bypass the
   automatic build. Default: `nothing` (auto-build from the grid using `slope_stencil`).
 - `reference_state`: Whether to carry the single hydrostatic reference state used for the
-  perturbation-form pressure-gradient force and buoyancy. Default: `:auto` — build one by default
-  (a 1D column on height-coordinate grids, 3D fields on terrain-following grids) and, absent an
-  explicit profile, deduce it from the initial state's horizontal mean by `set!` (which suppresses
-  the terrain-following pressure-gradient error and makes a resting atmosphere balance to machine
-  precision). Pass `reference_state = nothing` to disable it entirely — the PGF and buoyancy then
-  difference the full pressure, reproducing the un-corrected behavior (useful for testing).
-  Disabling is mutually exclusive with an explicit reference profile.
+  perturbation-form pressure-gradient force and buoyancy. Default: `:auto` — on a bounded vertical
+  grid, build a valid provisional hydrostatic reference (a 1D column on height-coordinate grids,
+  3D fields on terrain-following grids) and, absent an explicit profile, deduce it from the initial
+  state's horizontal mean when `set!` supplies both density and a thermodynamic variable. Periodic
+  and flat vertical topologies carry no automatic reference because a nontrivial hydrostatic
+  atmosphere is incompatible with periodicity and unnecessary without a vertical dimension. Pass
+  `reference_state = nothing` to disable it entirely — the PGF and buoyancy then difference the
+  full pressure, reproducing the un-corrected behavior (useful for testing). Disabling is mutually
+  exclusive with an explicit reference profile.
 
   !!! note "Deep near-isentropic initial states"
       The deduced reference integrates the hydrostatic equation up each column using the mean
@@ -255,15 +260,20 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     # (where Δz varies per column, so a single column is not hydrostatically consistent). This
     # supports both split-explicit (acoustic substepping) and explicit time stepping.
     #
-    # With `AutoReference()` (the default, no explicit profile) a zero-filled reference of the
-    # right dimensionality is allocated here and filled by `set!` from the initial state's
-    # height-resolved horizontal mean (`reference_from_state`; see `reset_reference_state!`). No
-    # fabricated constant profile is used. An explicit profile is built now and preserved by `set!`.
-    reference_from_state = ref_spec isa AutoReference
-    reference_state = if ref_spec === nothing
+    # With `AutoReference()` (the default, no explicit profile), a valid hydrostatic reference is
+    # built from the standard 288 K profile and later overwritten by `set!` from the initial state's
+    # height-resolved horizontal mean (`reference_from_state`; see `reset_reference_state!`). This
+    # ensures the public `reference_state` is usable immediately after model construction. Automatic
+    # references are disabled for Periodic and Flat vertical topologies: gravity makes a nontrivial
+    # hydrostatic column nonperiodic, while a Flat vertical dimension needs no hydrostatic split.
+    # Explicit profiles retain their existing opt-in behavior on every topology.
+    auto_reference = ref_spec isa AutoReference
+    reference_from_state = auto_reference && topology(grid)[3] === Bounded
+    reference_state = if ref_spec === nothing || (auto_reference && !reference_from_state)
         nothing
-    elseif reference_from_state
-        zero_reference_state(grid, terrain_metrics, surface_pressure, standard_pressure)
+    elseif auto_reference
+        build_reference_state(grid, terrain_metrics, FT(288),
+                              surface_pressure, standard_pressure, thermodynamic_constants)
     else
         build_reference_state(grid, terrain_metrics, ref_spec,
                               surface_pressure, standard_pressure, thermodynamic_constants)
@@ -281,9 +291,8 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     # Seed the diagnostic pressure so the first `update_state!` sat-adjust does not divide by an
     # uninitialized (zero) pressure — `(p/pˢᵗ)^κ` would collapse to zero and produce NaN
     # temperatures. `compute_auxiliary_dynamics_variables!` overwrites pressure on every subsequent
-    # call. Seed from a built (explicit-profile) reference, else from surface pressure — which
-    # covers both the disabled case and the deferred auto reference filled later by `set!`.
-    if reference_state isa ExnerReferenceState && !reference_from_state
+    # call. Seed from any built reference, else from surface pressure.
+    if reference_state isa ExnerReferenceState
         seed_pressure!(pressure, grid, reference_state.pressure)
     else
         seed_pressure!(pressure, grid, surface_pressure)
@@ -300,26 +309,6 @@ end
 #####
 ##### Reference-state builders (dispatched on whether the grid is terrain-following)
 #####
-
-# A zero-filled `ExnerReferenceState` of the right dimensionality — a 1D column on
-# height-coordinate grids, 3D on terrain-following grids — used as the deferred placeholder for an
-# auto reference (`reference_state = :auto`, no explicit profile) that `set!` fills from the initial
-# state. The scalar surface fields are nominal (overwritten conceptually by `set!`); only the field
-# dimensionality must match the grid so the reset writes to the correct shape.
-function zero_reference_state(grid, terrain_metrics, surface_pressure, standard_pressure)
-    FT = eltype(grid)
-    if terrain_metrics === nothing
-        pᵣ = Field{Nothing, Nothing, Center}(grid)
-        ρᵣ = Field{Nothing, Nothing, Center}(grid)
-        πᵣ = Field{Nothing, Nothing, Center}(grid)
-    else
-        pᵣ = CenterField(grid)
-        ρᵣ = CenterField(grid)
-        πᵣ = CenterField(grid)
-    end
-    return ExnerReferenceState(convert(FT, surface_pressure), FT(288),
-                               convert(FT, standard_pressure), pᵣ, ρᵣ, πᵣ)
-end
 
 # Explicit-profile reference on a height-coordinate grid: a 1D-column `ExnerReferenceState`
 # (or 3D when the profile depends on the horizontal coordinates). The terrain-following method is
@@ -494,10 +483,10 @@ AtmosphereModels.standard_pressure(dynamics::CompressibleDynamics) = dynamics.st
 AtmosphereModels.dynamics_reference_state(dynamics::CompressibleDynamics) = dynamics.reference_state
 
 # Compressible dynamics whose reference was left to be deduced from the initial state (the default
-# `reference_state = :auto` with no explicit profile) has `set!` recompute it from the horizontal
-# mean by default — on both height-coordinate and terrain-following grids. An explicit reference
-# profile is authoritative, so this is `false` and `set!` leaves it untouched. The
-# `compute_reference_state` keyword to `set!` overrides either way.
+# `reference_state = :auto` with no explicit profile on a bounded vertical grid) has `set!`
+# recompute it from the horizontal mean by default when that call supplies both density and a
+# thermodynamic variable. An explicit reference profile is authoritative, so this is `false` and
+# `set!` leaves it untouched. The `compute_reference_state` keyword to `set!` overrides either way.
 AtmosphereModels.auto_reset_reference_state(dynamics::CompressibleDynamics) = dynamics.reference_from_state
 
 """

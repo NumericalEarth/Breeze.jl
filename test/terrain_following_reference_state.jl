@@ -231,6 +231,8 @@ using Test
         @test default_model.dynamics.reference_state isa ExnerReferenceState
         @test default_model.dynamics.reference_from_state
         @test size(default_model.dynamics.reference_state.pressure) == (Nx, 1, Nz)  # 3D on terrain
+        @test all(isfinite, Array(interior(default_model.dynamics.reference_state.pressure)))
+        @test all(ρ -> ρ > 0, Array(interior(default_model.dynamics.reference_state.density)))
 
         # Disabled (`reference_state = nothing`): no reference → full-pressure PGF/buoyancy via ::Nothing.
         off_model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state=nothing))

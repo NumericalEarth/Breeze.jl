@@ -255,11 +255,13 @@ dynamics_reference_state(dynamics) = nothing
 Whether `set!` should, by default, recompute the dynamics' reference state from the just-set
 state (see [`reset_reference_state!`](@ref)). `false` for most dynamics — their reference is
 either absent or supplied up front. `true` for compressible dynamics *that were not given an
-explicit reference profile* (the default `reference_state = :auto`): their reference is built by
-default and best deduced from the initial state's horizontal mean — on both height-coordinate and
-terrain-following grids. When an explicit reference profile was supplied at construction it is
-authoritative, so this stays `false` and `set!` leaves it untouched. An explicit
-`compute_reference_state` keyword to `set!` overrides this default either way.
+explicit reference profile* on a compatible bounded vertical grid (the default
+`reference_state = :auto`): their valid provisional reference is best replaced by one deduced from
+the initial state's horizontal mean. Automatic reset occurs only when `set!` supplies both density
+and a thermodynamic variable, so partial initialization remains valid. When an explicit reference
+profile was supplied at construction it is authoritative, so this stays `false` and `set!` leaves
+it untouched. An explicit `compute_reference_state` keyword to `set!` overrides this default either
+way.
 """
 auto_reset_reference_state(dynamics) = false
 
