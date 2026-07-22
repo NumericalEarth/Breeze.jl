@@ -1,4 +1,3 @@
-using Oceananigans: prognostic_fields
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField
 using Oceananigans.Grids: inactive_cell

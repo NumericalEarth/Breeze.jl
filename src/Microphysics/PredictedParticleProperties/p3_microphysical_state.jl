@@ -1,5 +1,5 @@
 using Oceananigans: CenterField, Field
-using Oceananigans.Fields: ZeroField, set!
+using Oceananigans.Fields: ZeroField
 using Oceananigans.Grids: Center
 using Oceananigans.Operators: ℑzᵃᵃᶜ
 using DocStringExtensions: TYPEDSIGNATURES
