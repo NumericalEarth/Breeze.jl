@@ -159,7 +159,7 @@ let
              [LineElement(color = c) for (_, c, _) in STYLE]...]
     labs = ["DCMIP2016 ensemble (50 km)", "DCMIP2016 ensemble (25 km)", "FV3 (50 km)",
             [l for (_, _, l) in STYLE]...]
-    axislegend(axp, elems, labs; position = :rt, framevisible = false, labelsize = 10)
+    axislegend(axp, elems, labs; position = :rb, framevisible = false, labelsize = 10)
     save(joinpath(PP, "willson_fig7_radial.png"), fig)
 end
 
