@@ -160,9 +160,15 @@ Rain number loses from:
     # can transfer the remaining population even when dry-ice mass is zero.
     n_from_melt = rates.melting_number
 
-    # Phase 1: Evaporation removes rain number proportionally (Fortran P3 v5.5.0)
-    # rain_evaporation is positive magnitude (M7); proportional number loss is positive.
-    n_from_evap = safe_divide(nʳ * rates.rain_evaporation, qʳ, zero(FT))
+    # Phase 1: Evaporation removes rain number proportionally (Fortran nrevp =
+    # qrevp·nr/qr, microphy_p3.f90:3698). Consume the value the process operator
+    # already budgeted (`rain_evaporation_number`): it is formed from the
+    # DSD-bounded nʳ and rescaled by the rain-number sink limiter `f_rain_number`.
+    # Recomputing it here from the raw prognostic nʳ/qʳ would bypass both the
+    # λ-limiter write-back and f_rain_number, breaking the port's no-over-depletion
+    # guarantee and disagreeing with the homogeneous-freezing residual, which
+    # already consumes the budgeted value.
+    n_from_evap = rates.rain_evaporation_number
 
     # Gains: shedding produces rain drops
     # cloud_warm_collection → new rain drops from above-freezing cloud

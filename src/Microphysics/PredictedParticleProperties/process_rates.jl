@@ -631,13 +631,14 @@ end
     nⁱ_global = min(clamp_positive(nⁱ_raw),
                     prp.maximum_ice_number_density / ρ)
 
-    rain_active = (qʳ > FT(1e-14)) & (nʳ > FT(1e-16))
+    rain_active = qʳ > FT(1e-14)
     qʳ_pos = clamp_positive(qʳ)
+    nʳ_floored = max(clamp_positive(nʳ), FT(1e-16))
     # rain_slope_parameter and consistent_rime_state are pure functions of (ℳ, prp);
     # when props is supplied (hot path from _p3_scalar_compute / p3_rates_and_properties)
     # we reuse the values already computed in p3_ice_properties.
-    λ_r = isnothing(props) ? rain_slope_parameter(qʳ_pos, clamp_positive(nʳ), prp) : props.λ_r
-    nʳ = ifelse(rain_active, rain_number_from_slope(qʳ_pos, λ_r, prp), nʳ)
+    λ_r = isnothing(props) ? rain_slope_parameter(qʳ_pos, nʳ_floored, prp) : props.λ_r
+    nʳ = ifelse(rain_active, rain_number_from_slope(qʳ_pos, λ_r, prp), zero(FT))
 
     qᶠ, bᶠ, Fᶠ, ρᶠ = if isnothing(props)
         rs = consistent_rime_state(p3, qⁱ, ℳ.qᶠ, ℳ.bᶠ, qʷⁱ)
