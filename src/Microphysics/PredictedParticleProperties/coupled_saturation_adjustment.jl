@@ -194,12 +194,24 @@ separately.
 
     εᶜˡ = cloud_condensation_epsilon(p3, qᶜˡ, ρ, transport.D_v, μ_c, λ_c, nᶜˡ_bounded)
     εʳ = rain_condensation_epsilon(p3, qʳ, nʳ, ρ, transport)
-    εⁱ = ice_deposition_epsilon(p3, qⁱ, qʷⁱ, nⁱ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                constants, transport, q, μ)
+    # `qⁱ` is the dry ice mass in Julia — equivalent to Fortran's `qitot - qiliq` —
+    # so `qⁱ + qʷⁱ` maps to Fortran `qitot`. Compute `qⁱ_total`/`Fˡ` once here and
+    # reuse them for the relaxation gates and the tiny-mass overrides below.
+    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
+    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
+    # Dry-ice (`epsi`) and wet-ice (`epsiw`) relaxation coefficients share the same
+    # `ice_relaxation_epsilon` and select mutually exclusive liquid-fraction regimes
+    # (matching `ice_deposition_epsilon` / `ice_coating_epsilon`), so evaluate the
+    # coefficient — which carries a `density()` and a ventilation-table lookup — once.
+    ice_relaxation_active = qⁱ_total >= p3.minimum_mass_mixing_ratio
+    ε_ice_relaxation = ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                              constants, transport, q, μ)
+    εⁱ = ifelse(ice_relaxation_active & (Fˡ < p3.process_rates.liquid_fraction_small),
+                ε_ice_relaxation, zero(FT))
     # Fortran `epsiw_tot`: wet-ice surface condenses vapor as liquid, so it
     # couples through `ξˡ` (like cloud), not through the Bergeron coupling.
-    εⁱʷ = ice_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                              constants, transport, q, μ)
+    εⁱʷ = ifelse(ice_relaxation_active & (Fˡ >= p3.process_rates.liquid_fraction_small),
+                 ε_ice_relaxation, zero(FT))
 
     ice_liquid_coupling = (1 + ℒⁱ * dqᵛ⁺ˡ_dT / cᵖᵈ) / ξⁱ
     ε_total = max(εᶜˡ + εʳ + εⁱ * ice_liquid_coupling + εⁱʷ, FT(1e-20))
@@ -230,10 +242,7 @@ separately.
     𝒮ˡ = ssat_liquid / max(qᵛ⁺ˡ, FT(1e-30))
     𝒮ⁱ = qᵛ / max(qᵛ⁺ⁱ, FT(1e-30)) - 1
     # Fortran tiny-mass clauses (3684-3685, 3715-3719, 3753-3756) all gate on
-    # total hydrometeor mass. `qⁱ` is the dry ice mass in Julia — equivalent to
-    # Fortran's `qitot - qiliq` — so `qⁱ + qʷⁱ` maps to Fortran `qitot`.
-    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
+    # total hydrometeor mass (`qⁱ_total`, computed above).
     qc_raw = ifelse((𝒮ˡ < FT(-0.001)) & (qᶜˡ < FT(1e-12)), -qᶜˡ / τ, qc_raw)
     qr_raw = ifelse((𝒮ˡ < FT(-0.001)) & (qʳ < FT(1e-12)), -qʳ / τ, qr_raw)
     # Match the cloud/rain branches above: do NOT clamp_positive the prognostic

@@ -493,6 +493,7 @@ struct P3IceProps{FT}
     ρ_mean :: FT
     μ_ice :: FT
     μ_cloud :: FT
+    λ_cloud :: FT
     Nᶜ :: FT
     zⁱ_bounded :: FT
     D_v :: FT
@@ -556,7 +557,7 @@ end
 
     # Cloud terminal velocities — Fortran sediments cloud mass and number with
     # DSD-integrated Stokes velocities in sedimentation_liquid(liq_type = 1).
-    vᶜ = cloud_terminal_velocities(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ, props.nu)
+    vᶜ = cloud_terminal_velocities(p3, ℳ.qᶜˡ, ρ, props.nu, props.μ_cloud, props.λ_cloud)
     wᶜˡ = vᶜ.mass_weighted
     wᶜˡₙ = vᶜ.number_weighted
 
@@ -714,54 +715,6 @@ end
     return write_p3_fall_speeds!(μ, i, j, k, result)
 end
 
-
-@inline function p3_compute_tendency_cache!(μ, i, j, k, grid, p3::P3, ρ, 𝒰,
-                                             constants, velocities,
-                                             surface_temperature,
-                                             temperature_tendency,
-                                             vapor_tendency)
-    ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
-    props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
-    result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, props,
-                                 surface_temperature, temperature_tendency,
-                                 vapor_tendency)
-    return write_p3_tendency_cache!(μ, i, j, k, result)
-end
-
-# Compatibility entry point for callers that require both result groups at once.
-@inline function p3_compute_and_cache!(μ, i, j, k, grid, p3::P3, ρ, 𝒰, constants,
-                                       velocities, surface_temperature)
-    ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
-
-    r = _p3_scalar_compute(p3, ρ, ℳ, 𝒰, constants, surface_temperature)
-
-    @inbounds begin
-        μ.wᶜˡ[i, j, k]  = -r.wᶜˡ
-        μ.wᶜˡₙ[i, j, k] = -r.wᶜˡₙ
-        μ.wʳ[i, j, k]   = -r.wʳ
-        μ.wʳₙ[i, j, k]  = -r.wʳₙ
-        μ.wⁱ[i, j, k]   = -r.wⁱ
-        μ.wⁱₙ[i, j, k]  = -r.wⁱₙ
-        μ.wⁱ_z[i, j, k] = -r.wⁱ_z
-        μ.wⁱ_z̃[i, j, k] = -(r.wⁱ_z + r.wⁱₙ) / 2
-        μ.cache_ρqᶜˡ[i, j, k] = r.c_qcl
-        μ.cache_ρnᶜˡ[i, j, k] = r.c_ncl
-        μ.cache_ρqʳ[i, j, k]  = r.c_qr
-        μ.cache_ρnʳ[i, j, k]  = r.c_nr
-        μ.cache_ρqⁱ[i, j, k]  = r.c_qi
-        μ.cache_ρnⁱ[i, j, k]  = r.c_ni
-        μ.cache_ρqᶠ[i, j, k]  = r.c_qf
-        μ.cache_ρbᶠ[i, j, k]  = r.c_bf
-        μ.cache_ρz̃ⁱ[i, j, k] = r.c_zi
-        μ.cache_ρqʷⁱ[i, j, k] = r.c_qwi
-        μ.cache_ρsˢᵃᵗ[i, j, k] = r.c_ss
-        μ.cache_ρqᵛ[i, j, k]  = r.c_qv
-        μ.cache_ρnᵃ[i, j, k]  = r.c_na
-    end
-
-    return nothing
-end
-
 #####
 ##### Moisture fractions (state-based)
 #####
@@ -858,7 +811,7 @@ end
     return P3IceProps{FT}(rime_state.qᶠ, rime_state.bᶠ, rime_state.Fᶠ, Fˡ,
                           rime_state.ρᶠ, bounds.qⁱ_total, bounds.nⁱ,
                           bounds.nⁱ_diagnostic, bounds.ρ_mean, bounds.μ_ice,
-                          cloud.μ_c, cloud.Nᶜ, bounds.zⁱ,
+                          cloud.μ_c, cloud.λ_c, cloud.Nᶜ, bounds.zⁱ,
                           transport.D_v, transport.nu, λ_r)
 end
 

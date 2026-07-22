@@ -126,11 +126,11 @@ struct CloudTerminalVelocities{FT}
     number_weighted :: FT
 end
 
-@inline function cloud_terminal_velocities(p3, qᶜˡ, nᶜˡ, ρ, ν)
-    FT = typeof(qᶜˡ + nᶜˡ + ρ + ν)
-    cloud = diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-    μ_c = cloud.μ_c
-    λ_c = cloud.λ_c
+# `μ_c` and `λ_c` are the cloud-DSD shape/slope diagnosed by `diagnose_cloud_dsd`;
+# the caller passes the values already computed in `p3_ice_properties`
+# (`props.μ_cloud`/`props.λ_cloud`) so the fall-speed kernel does not re-diagnose them.
+@inline function cloud_terminal_velocities(p3, qᶜˡ, ρ, ν, μ_c, λ_c)
+    FT = typeof(qᶜˡ + ρ + ν + μ_c + λ_c)
     μ_air = ν * ρ
     a_cn = FT(9.81) * p3.process_rates.liquid_water_density /
            (FT(18) * max(μ_air, FT(1e-20)))

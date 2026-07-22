@@ -93,22 +93,6 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute per-particle ventilation integral C(D) × f_v(D) for melting
-using PSD-integrated lookup tables, blending ice (0.65, 0.44) and rain
-(0.78, 0.28) ventilation coefficients weighted by liquid fraction Fl.
-"""
-@inline function melting_ventilation(vent::P3Table5D,
-                                       vent_e::P3Table5D,
-                                       m_mean, Fl, Fᶠ, ρᶠ, prp, nu, D_v, ρ_correction, p3, μ)
-    FT = typeof(m_mean)
-    # Per-particle-mass log-guard (see deposition_ventilation); not the bulk qmin.
-    log_m = log10(max(m_mean, FT(1e-20)))
-    return vent(log_m, Fᶠ, Fl, ρᶠ, μ) + ventilation_sc_correction(nu, D_v, ρ_correction) * vent_e(log_m, Fᶠ, Fl, ρᶠ, μ)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
 Compute per-particle collection kernel ⟨A × V⟩ for riming.
 Returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from lookup table.
 """
