@@ -1807,6 +1807,20 @@ end
             custom_constants, transport, MoistureMassFractions(qv_super), μ)
 
         @test !isapprox(rate_custom_constants, rate_default_constants; rtol=1e-12, atol=0)
+
+        # L4 regression: the deposition rate must NOT depend on the thermal
+        # conductivity K_a. The Fortran-parity formula carries the latent-heat
+        # resistance once through Γⁱ (= abi) with a vapor-diffusion-only ε and has
+        # no Mason thermal-conduction term. The former buggy formula divided by
+        # Γⁱ·(A + B) with A ∝ 1/K_a, so doubling K_a shifted the rate (~17% at -20C).
+        transport_hi_Ka = (; D_v = transport.D_v, K_a = 2 * transport.K_a, nu = transport.nu)
+        rate_hi_Ka = ventilation_enhanced_deposition(
+            p3, qi, qwi, ni, qv_super, qv_sat_ice, Ff, ρf, T, P,
+            nothing, transport_hi_Ka, MoistureMassFractions(qv_super), μ)
+        rate_base_Ka = ventilation_enhanced_deposition(
+            p3, qi, qwi, ni, qv_super, qv_sat_ice, Ff, ρf, T, P,
+            nothing, transport, MoistureMassFractions(qv_super), μ)
+        @test rate_hi_Ka ≈ rate_base_Ka rtol=1e-12
     end
 
     @testset "ice_melting_rate" begin
