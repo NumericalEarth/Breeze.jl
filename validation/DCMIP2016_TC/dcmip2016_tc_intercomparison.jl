@@ -28,9 +28,10 @@
 # balanced TC reported by Willson et al. (2024, their Figs. 5 and 7).
 #
 # > **Compute.** These are 10-day global runs and are **not** part of the docs/CI build. Run
-# > this script on a GPU node (`julia --project dcmip2016_tc_intercomparison.jl`); the six
-# > unique configurations total ≈ 1.75 h on one H100 (0.5° runs ≈ 8 min, 0.25° runs ≈ 37
-# > min). Each run is skipped if its `<prefix>_psfc.jld2` already exists, so the study
+# > this script on a GPU node with **Julia ≥ 1.12** (`julia --project dcmip2016_tc_intercomparison.jl`);
+# > on Julia 1.11 the environment fails to instantiate (a Pkg resolver bug drops a build dependency
+# > from the manifest). The six unique configurations total ≈ 1.75 h on one H100 (0.5° runs ≈ 8 min,
+# > 0.25° runs ≈ 37 min). Each run is skipped if its `<prefix>_psfc.jld2` already exists, so the study
 # > resumes cheaply. The figures committed alongside this file were produced this way.
 
 # ## Setup

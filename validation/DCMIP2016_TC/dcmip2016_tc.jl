@@ -55,6 +55,9 @@ end
 @inline (cd::WindDependentDrag)(i, j, grid, U, T₀) = min(cd.a + cd.b * U, cd.cmax)
 @inline Breeze.BoundaryConditions.bulk_coefficient(i, j, grid, cd::WindDependentDrag, fields, T₀, ::Nothing) =
     cd(i, j, grid, sqrt(wind_speed²ᶜᶜᶜ(i, j, grid, fields)), T₀)
+# Wind-only drag: no stability correction, so no filtered virtual-potential-temperature is
+# needed (mirrors Breeze's constant-coefficient path `filtered_θᵥ_source(::Number) = nothing`).
+Breeze.BoundaryConditions.filtered_θᵥ_source(::WindDependentDrag) = nothing
 
 # Reed–Jablonowski (2012) wind-dependent boundary-layer eddy diffusivity, per the
 # DCMIP2016 simple_physics reference (TC_PBL_mod = false):
@@ -290,12 +293,15 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
 
     # Bulk surface fluxes (Reed–Jablonowski simple physics) over fixed SST.
     # Wind-dependent drag Cᴰ = min(7e-4 + 6.5e-5|v|, 2e-3); constant heat/moisture Cᵀ = 1.1e-3.
+    # `surface_temperature = Ts` sets the ideal-gas surface density ρ₀ in the drag stress
+    # τ = ρ₀ Cᴰ |v| v (required under CompressibleDynamics, which has no reference profile),
+    # consistent with the SST used by the enthalpy/moisture fluxes.
     FT = Oceananigans.defaults.FloatType
     Cᴰ = WindDependentDrag(FT(7e-4), FT(6.5e-5), FT(2e-3))
     Cᵀ = 1.1e-3
     Uᵍ = 1.0
-    ρu_bcs  = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ))
-    ρv_bcs  = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ))
+    ρu_bcs  = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ, surface_temperature = Ts))
+    ρv_bcs  = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ, surface_temperature = Ts))
     ρe_bcs  = FieldBoundaryConditions(bottom = BulkSensibleHeatFlux(coefficient = Cᵀ, gustiness = Uᵍ,
                                                                     surface_temperature = Ts))
     ρqᵛ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = Cᵀ, gustiness = Uᵍ,
