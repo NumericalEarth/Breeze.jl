@@ -1,37 +1,38 @@
 # DCMIP2016 tropical cyclone: resolution and advection intercomparison
 
-This study quantifies how the numerics — horizontal resolution, advection order, and
+This study quantifies how numerics — horizontal resolution, advection order, and
 vertical level placement — control the intensification of the Reed–Jablonowski tropical
-cyclone ([Reed & Jablonowski 2012](https://doi.org/10.1029/2011MS000099)) in Breeze.jl.
-The analytic balanced vortex is a standard non-hydrostatic dynamical-core benchmark
-of the 2016 Dynamical Core Intercomparison Project (DCMIP)
-([Ullrich et al. 2016](https://doi.org/10.5194/gmd-10-4477-2017);
-[Willson et al. 2024](https://doi.org/10.5194/gmd-17-2493-2024)): a weak warm-core
-vortex placed in a quiescent moist tropical sounding intensifies into a tropical
-cyclone over ~10 days, driven entirely by bulk surface enthalpy fluxes over a fixed
-302.15 K sea surface.
+cyclone ([Reed & Jablonowski 2012](https://doi.org/10.1029/2011MS000099)), a standard
+non-hydrostatic dynamical-core benchmark of the 2016 Dynamical Core Intercomparison
+Project (DCMIP; [Ullrich et al. 2016](https://doi.org/10.5194/gmd-10-4477-2017),
+[Willson et al. 2024](https://doi.org/10.5194/gmd-17-2493-2024)). Starting from
+quiescent background conditions described by a moist tropical sounding, a weak, warm-core
+analytical vortex intensifies into a tropical cyclone (TC) over ~10 days, driven entirely
+by bulk surface enthalpy fluxes over a fixed 302.15 K sea surface.
 
-The model configuration — vortex, sounding, lid, and the complete Reed–Jablonowski
-"simple physics" (wind-dependent surface drag, wind-dependent boundary-layer mixing, and
-`InstantaneousPrecipitation` rain-out) — is defined once in `dcmip2016_tc.jl`. Here
-we hold all of that fixed and run two studies:
+The model configuration — initial vortex, background sounding, grid height, and the
+complete Reed–Jablonowski "simple physics" package (wind-dependent surface drag,
+wind-dependent boundary-layer mixing, and `InstantaneousPrecipitation` rain-out) — is
+defined in `dcmip2016_tc.jl`. We hold those parameters fixed and run two studies:
 
-  * **Study 1** — horizontal resolution (**0.5°** vs **0.25°**) × advection order
+  * **Study 1**: horizontal resolution (**0.5°** vs **0.25°**) × advection order
     (**WENO5** vs **WENO9**).
-  * **Study 2** — effective vertical resolution at fixed 0.5° WENO9: the 32-level baseline,
+  * **Study 2**: effective vertical resolution at fixed 0.5° WENO9: the 32-level baseline,
     a count-doubled 64-level grid, and a 64-level grid with levels clustered in the
     5–14 km updraft layer.
 
 The TC intensity metrics of interest are the minimum sea-level pressure (MSP) and maximum
-tangential wind at 1 km atltitude (MWS) — together with the mature-storm (days 4-10)
-azimuthally-averaged storm structure, compared against the balanced tropical cyclone
-reported by Willson et al. (2024, their Figs. 5 and 7).
+tangential wind at 1 km atltitude (MWS). Time histories are shown along with the
+mature-storm (days 4-10) azimuthally-averaged storm structure, compared against the
+balanced TC reported by Willson et al. (2024, their Figs. 5 and 7).
 
 > **Compute.** These are 10-day global runs and are **not** part of the docs/CI build. Run
 > this script on a GPU node (`julia --project dcmip2016_tc_intercomparison.jl`); the six
 > unique configurations total ≈ 1.75 h on one H100 (0.5° runs ≈ 8 min, 0.25° runs ≈ 37
 > min). Each run is skipped if its `<prefix>_psfc.jld2` already exists, so the study
 > resumes cheaply. The figures committed alongside this file were produced this way.
+
+## Setup
 
 ````julia
 using Oceananigans
@@ -50,13 +51,14 @@ include("dcmip2016_tc.jl")
 CairoMakie.activate!(type = "png")
 ````
 
-## Diagnostics from the surface-pressure output
+### Diagnostics from the surface-pressure output
 
-Each run writes only its surface pressure (`<prefix>_psfc.jld2`) — enough for both the
-intensity time series and the radial structure, and small enough that all runs fit on
-disk. `analyze_surface_pressure` reduces one run to (i) the MSP time series and (ii) the
+Each run writes its surface pressure (`<prefix>_psfc.jld2`) providing the intensity time
+series and the radial structure.
+
+`analyze_surface_pressure` reduces one run to (i) the MSP time series and (ii) the
 days-4–10 azimuthally-averaged radial pressure profile, recentered on the instantaneous
-eye (minimum surface pressure) each frame so the storm's drift does not smear the average.
+eye (location of MSP) each frame so the storm's drift does not smear the average.
 
 ````julia
 const EARTH_RADIUS = 6371220.0   # m, DCMIP2016 planet radius
@@ -118,15 +120,15 @@ end
 
 ## Study 1: horizontal resolution × advection order
 
-Resolution is encoded by colour (0.5° orange, 0.25° blue) and advection order by line
-style (WENO5 dashed, WENO9 solid), so the two effects can be read off independently.
+Resolution is encoded by color (0.5° blue, 0.25° orange) and advection order by line
+style (WENO5 dashed, WENO9 solid).
 
 ````julia
 configs = [
-    (; resolution = 0.5,  advection_order = 5, label = "0.5° WENO5",  color = :darkorange, linestyle = :dash),
-    (; resolution = 0.5,  advection_order = 9, label = "0.5° WENO9",  color = :darkorange, linestyle = :solid),
-    (; resolution = 0.25, advection_order = 5, label = "0.25° WENO5", color = :royalblue,  linestyle = :dash),
-    (; resolution = 0.25, advection_order = 9, label = "0.25° WENO9", color = :royalblue,  linestyle = :solid),
+    (; resolution = 0.5,  advection_order = 5, label = "0.5° WENO5",  color = :royalblue,  linestyle = :dash),
+    (; resolution = 0.5,  advection_order = 9, label = "0.5° WENO9",  color = :royalblue,  linestyle = :solid),
+    (; resolution = 0.25, advection_order = 5, label = "0.25° WENO5", color = :darkorange, linestyle = :dash),
+    (; resolution = 0.25, advection_order = 9, label = "0.25° WENO9", color = :darkorange, linestyle = :solid),
 ]
 
 config_prefix(cfg) = "dcmip_tc_$(cfg.resolution)deg_weno$(cfg.advection_order)"
@@ -204,13 +206,15 @@ end
 
 The picture is consistent with the published DCMIP2016 intercomparison. Halving the grid
 spacing from 0.5° to 0.25° deepens the storm by ~38 hPa (WENO5) to ~42 hPa (WENO9): the
-0.5° grid (~55 km) barely resolves the eyewall (RMW ~50–75 km ≈ one grid cell), whereas
-0.25° resolves it directly. Raising the advection order from WENO5 to WENO9 lowers the
+0.5° grid (~55 km) barely resolves the eyewall, described by a radius of maximum wind
+(RMW) ~50–75 km ≈ one grid cell, whereas 0.25° resolves it directly.
+
+Raising the advection order from WENO5 to WENO9 lowers the
 implicit numerical diffusion and deepens the storm by a further ~13 hPa at 0.5° and ~16 hPa
 at 0.25°. The 0.25° WENO9 storm — the configuration `dcmip2016_tc.jl` runs by default —
 reaches ≈ 921 hPa and develops the realistic, balanced radial structure documented by
 Willson et al. (2024), placing Breeze within the spread of the 0.25° models in that
-intercomparison.
+intercomparison (see [Comparison with Willson et al.](Comparison with Willson et al. (2024))).
 
 ## Study 2: vertical level configuration
 
@@ -229,9 +233,9 @@ grid. We hold 0.5° WENO9 fixed and compare three 30 km-lid vertical grids:
 
 ````julia
 vertical_configs = [
-    (; label = "32 levels (baseline)",        prefix = "dcmip_tc_0.5deg_weno9",        z_faces = stretched_z_faces(32, 4.2),  color = :black,    linestyle = :solid),
-    (; label = "64 levels (×2 uniform)",      prefix = "dcmip_tc_0.5deg_weno9_nz64",   z_faces = stretched_z_faces(64, 4.2),  color = :seagreen, linestyle = :dash),
-    (; label = "64 levels (updraft-refined)", prefix = "dcmip_tc_0.5deg_weno9_vref64", z_faces = updraft_refined_z_faces(),   color = :purple,   linestyle = :solid),
+    (; label = "32 levels (baseline)",        prefix = "dcmip_tc_0.5deg_weno9",        z_faces = stretched_z_faces(32, 4.2),  color = :royalblue, linestyle = :solid),
+    (; label = "64 levels (×2 uniform)",      prefix = "dcmip_tc_0.5deg_weno9_nz64",   z_faces = stretched_z_faces(64, 4.2),  color = :seagreen,  linestyle = :dash),
+    (; label = "64 levels (updraft-refined)", prefix = "dcmip_tc_0.5deg_weno9_vref64", z_faces = updraft_refined_z_faces(),   color = :red,       linestyle = :solid),
 ]
 
 vresults = [run_or_load(vc.prefix; resolution = 0.5, advection_order = 9, z_faces = vc.z_faces)
@@ -292,10 +296,10 @@ diagnostics.
 The point of the DCMIP2016 protocol is the multi-model intercomparison, so we place Breeze
 directly against the [Willson et al. (2024)](https://doi.org/10.5194/gmd-17-2493-2024) ensemble,
 reproducing their Figs. 5, 7, and 8. The published profiles (the nine models at 50 km, five also
-at 25 km, processed with TempestExtremes) are from the Willson Dryad archive in `refdata/`. For a
-fair comparison Breeze is reduced through the *same* TempestExtremes-equivalent pipeline — a
-stable sub-grid storm center and a ring-interpolation azimuthal-mean **tangential** wind on the
-published radial grid (`extract_willson_comparison_data.jl`) — and overlaid by
+at 25 km, processed with the `TempestExtremes` code) are from the Willson Dryad archive in
+`refdata/`. For a fair comparison Breeze is reduced through the *same* TempestExtremes-equivalent
+pipeline — a stable sub-grid storm center and a ring-interpolation azimuthal-mean **tangential**
+wind on the published radial grid (`extract_willson_comparison_data.jl`) — and overlaid by
 `plot_willson_comparison.jl`. The Breeze curves are WENO5 and WENO9 at 0.25°.
 
 > **Reproduction.** Unlike the figures above (surface pressure only), these need the 3-D `(u,v)`
@@ -328,9 +332,9 @@ not by the diagnostic).
 
 ### Radius–height tangential wind — cf. Willson et al. (2024), Fig. 8
 
-Days-4–10 azimuthal-mean tangential-wind composites, one row per model: FV3 (50 km), then ACME-A,
-CAM-SE, Breeze-WENO5, and Breeze-WENO9 (25 km / 0.25°). A cyclonic (red) vortex below the
-tropopause is capped by the anticyclonic (blue) upper-level outflow.
+Days-4–10 azimuthal-mean tangential-wind composites, one row per model: FV3 (50 km), then ACME-A
+(the early version of E3SM), CAM-SE, Breeze-WENO5, and Breeze-WENO9 (25 km / 0.25°). A cyclonic
+(red) vortex below the tropopause is capped by the anticyclonic (blue) upper-level outflow.
 
 ![Comparison with Willson et al. (2024) Fig. 8](postproc/willson_fig8_rz.png)
 
