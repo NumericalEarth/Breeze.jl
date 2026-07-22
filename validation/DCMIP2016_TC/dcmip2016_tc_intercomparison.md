@@ -23,9 +23,18 @@ parameters fixed and run two studies:
     5–14 km updraft layer.
 
 The TC intensity metrics of interest are the minimum sea-level pressure (MSP) and maximum
-tangential wind at 1 km atltitude (MWS). Time histories are shown along with the
+_tangential_ wind at 1 km atltitude (MWS). Time histories are shown along with the
 mature-storm (days 4-10) azimuthally-averaged storm structure, compared against the
 balanced TC reported by Willson et al. (2024, their Figs. 5 and 7).
+
+To keep that comparison apples-to-apples, these Breeze diagnostics are reduced with a
+postprocessing pipeline matched to the [`TempestExtremes` v2.1](https://github.com/ClimateGlobalChange/tempestextremes/tree/4caa80d53f4c39e1df08c33a3f10cea41643eb28)
+`NodeFileCompose … radial_wind_profile` procedure Willson et al. applied to the ensemble
+(a sub-grid storm center + azimuthal ring-averaging of the *tangential* wind on the
+published 0.25°-great-circle radial grid), then compared against their archived reference
+profiles (the Willson et al. [Dryad dataset](https://doi.org/10.5061/dryad.fttdz08z5), also
+noted in `refdata/DOWNLOAD.md`). See the *Comparison with Willson et al. (2024)* section
+below for the method and the figure-by-figure results.
 
 > **Compute.** These are 10-day global runs and are **not** part of the docs/CI build. Run
 > this script on a GPU node (`julia --project dcmip2016_tc_intercomparison.jl`); the six
@@ -40,16 +49,14 @@ using Oceananigans
 using Oceananigans.Grids: λnodes, φnodes
 using CairoMakie
 using Printf
+
+CairoMakie.activate!(type = "png")
 ````
 
-Bring in the simulation generator. The `abspath(PROGRAM_FILE) == @__FILE__` guard in
-`dcmip2016_tc.jl` means `include` only defines the generator and the fixed test setup;
-it does not launch the best-configuration run.
+Bring in the simulation generator.
 
 ````julia
 include("dcmip2016_tc.jl")
-
-CairoMakie.activate!(type = "png")
 ````
 
 ### Diagnostics from the surface-pressure output
@@ -297,8 +304,9 @@ diagnostics.
 The point of the DCMIP2016 protocol is the multi-model intercomparison, so we place Breeze
 directly against the [Willson et al. (2024)](https://doi.org/10.5194/gmd-17-2493-2024) ensemble,
 reproducing their Figs. 5, 7, and 8. The published profiles (the nine models at 50 km, five also
-at 25 km, processed with the `TempestExtremes` code) are from the Willson Dryad archive in
-`refdata/`. For a fair comparison Breeze is reduced through the *same* TempestExtremes-equivalent
+at 25 km, processed with [`TempestExtremes` v2.1](https://github.com/ClimateGlobalChange/tempestextremes/tree/4caa80d53f4c39e1df08c33a3f10cea41643eb28))
+are from the Willson et al. [Dryad archive](https://doi.org/10.5061/dryad.fttdz08z5) (see
+`refdata/DOWNLOAD.md`). For a fair comparison Breeze is reduced through the *same* TempestExtremes-equivalent
 pipeline — a stable sub-grid storm center and a ring-interpolation azimuthal-mean **tangential**
 wind on the published radial grid (`extract_willson_comparison_data.jl`) — and overlaid by
 `plot_willson_comparison.jl`. The Breeze curves are WENO5 and WENO9 at 0.25°.
