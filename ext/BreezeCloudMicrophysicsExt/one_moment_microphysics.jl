@@ -174,7 +174,7 @@ const OMCM = OneMomentCloudMicrophysics
 @inline AM.microphysical_tendency(bμp::OMCM, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 # Default fallback for sedimentation velocity
-@inline AM.sedimentation_velocity(bμp::OMCM, μ, name) = nothing
+@inline AM.sedimentation_velocity(bμp::OMCM, μ, ::Val) = nothing
 
 # Rain sedimentation velocity: stored as a vertical velocity component
 @inline AM.sedimentation_velocity(bμp::OMCM, μ, ::Val{:ρqʳ}) = μ.wʳ

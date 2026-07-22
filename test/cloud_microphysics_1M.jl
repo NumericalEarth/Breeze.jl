@@ -530,7 +530,7 @@ end
 
 @testset "Effective velocity uses face-collocated humidities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 2), extent=(100, 100, 100))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
@@ -572,7 +572,7 @@ end
 
 @testset "Mixed-phase ice velocity and snow surface flux [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 2), extent=(100, 100, 100))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=250)
@@ -581,7 +581,7 @@ end
     microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
     model = AtmosphereModel(grid; dynamics, microphysics)
 
-    set!(model; θ=250, qᵗ=0.01, qʳ=0.0005, qˢ=0.001)
+    set!(model; θ=250, qᵗ=0.01, qʳ=0.0005, qˢ=0.0005)
     μ = model.microphysical_fields
     qᶜⁱ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qᶜⁱ)
     qʳ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qʳ)

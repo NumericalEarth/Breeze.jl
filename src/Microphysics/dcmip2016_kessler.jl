@@ -309,7 +309,7 @@ Return `nothing`.
 
 Rain sedimentation is handled internally by the kernel rather than through the advection interface.
 """
-@inline AtmosphereModels.sedimentation_velocity(::DCMIP2016KM, μ, name) = nothing
+@inline AtmosphereModels.sedimentation_velocity(::DCMIP2016KM, μ, ::Val) = nothing
 
 """
 $(TYPEDSIGNATURES)

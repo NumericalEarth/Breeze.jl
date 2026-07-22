@@ -62,10 +62,11 @@ end
 
 # Main operator
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection, ρ, U, c)
+    explicit_w = explicit_vertical_velocity(advection, grid, U.w)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (
         δxᶜᵃᵃ(i, j, k, grid, tracer_mass_flux_x, ρ, advection, U.u, c) +
         δyᵃᶜᵃ(i, j, k, grid, tracer_mass_flux_y, ρ, advection, U.v, c) +
-        δzᵃᵃᶜ(i, j, k, grid, tracer_mass_flux_z, ρ, advection, U.w, c))
+        δzᵃᵃᶜ(i, j, k, grid, tracer_mass_flux_z, ρ, advection, explicit_w, c))
 end
 
 # Fallback for nothing advection

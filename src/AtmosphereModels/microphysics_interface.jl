@@ -680,8 +680,13 @@ the prognostic tracer `name`, or `nothing` if the tracer does not sediment.
 
 Microphysics schemes should extend this function for each sedimenting tracer.
 """
-@inline sedimentation_velocity(microphysics, microphysical_fields, name) = nothing
-@inline sedimentation_velocity(microphysics::Nothing, microphysical_fields, name) = nothing
+# `name` is normalized to a `Val` by the `Symbol` method so schemes only dispatch on `::Val`.
+# The `::Val` fallback returns `nothing` for every scheme (including `Nothing` microphysics)
+# that has not defined a sedimenting tracer, so no `::Nothing` method is needed here (adding
+# one would be ambiguous with the `::Val` fallback).
+@inline sedimentation_velocity(microphysics, microphysical_fields, name::Symbol) =
+    sedimentation_velocity(microphysics, microphysical_fields, Val(name))
+@inline sedimentation_velocity(microphysics, microphysical_fields, ::Val) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -691,8 +696,9 @@ or `nothing` if the tracer has no defined phase.
 
 Microphysics schemes should extend this function.
 """
-@inline moisture_phase(microphysics, name) = nothing
-@inline moisture_phase(microphysics::Nothing, name) = nothing
+@inline moisture_phase(microphysics, name::Symbol) =
+    moisture_phase(microphysics, Val(name))
+@inline moisture_phase(microphysics, ::Val) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -844,21 +850,23 @@ end
     liquid_numerator = weighted_sedimentation_velocity_sum(i, j, k, grid, liquid_components)
     liquid_denominator = phase_humidity_at_face(i, j, k, grid, liquid_humidity, liquid_components)
     has_liquid = liquid_denominator > 0
-    safe_liquid_denominator = ifelse(has_liquid, liquid_denominator, one(grid))
-    wᴸ_value = ifelse(has_liquid, liquid_numerator / safe_liquid_denominator, 0)
+    safe_liquid_denominator = ifelse(has_liquid, liquid_denominator, one(liquid_denominator))
+    wᴸ_value = ifelse(has_liquid, liquid_numerator / safe_liquid_denominator, zero(grid))
     @inbounds wᴸ[i, j, k] = wᴸ_value
 
     # Ice phase
     ice_numerator = weighted_sedimentation_velocity_sum(i, j, k, grid, ice_components)
     ice_denominator = phase_humidity_at_face(i, j, k, grid, ice_humidity, ice_components)
     has_ice = ice_denominator > 0
-    safe_ice_denominator = ifelse(has_ice, ice_denominator, one(grid))
-    wᴵ_value = ifelse(has_ice, ice_numerator / safe_ice_denominator, 0)
+    safe_ice_denominator = ifelse(has_ice, ice_denominator, one(ice_denominator))
+    wᴵ_value = ifelse(has_ice, ice_numerator / safe_ice_denominator, zero(grid))
     @inbounds wᴵ[i, j, k] = wᴵ_value
 end
 
-# Recursive face-collocated sum: Σ(wᵢ * ℑz(qᵢ)).
-@inline weighted_sedimentation_velocity_sum(i, j, k, grid, ::Tuple{}) = 0
+# Recursive face-collocated sum: Σ(wᵢ * ℑz(qᵢ)). The empty-tuple base case returns a
+# grid-typed zero so the numerator (and denominator below) stay `eltype(grid)` even when a
+# phase has no classified components — otherwise the kernel result would be type-unstable.
+@inline weighted_sedimentation_velocity_sum(i, j, k, grid, ::Tuple{}) = zero(grid)
 @inline function weighted_sedimentation_velocity_sum(i, j, k, grid, components::Tuple)
     w_field, q_field = first(components)
     q_face = ℑzᵃᵃᶠ(i, j, k, grid, q_field)
@@ -871,7 +879,7 @@ end
     @inbounds w_field[i, j, k] * max(0, q_face)
 
 # Recursive face-collocated sum used when no total-phase auxiliary field exists.
-@inline humidity_sum(i, j, k, grid, ::Tuple{}) = 0
+@inline humidity_sum(i, j, k, grid, ::Tuple{}) = zero(grid)
 @inline function humidity_sum(i, j, k, grid, components::Tuple)
     _, q_field = first(components)
     q_face = ℑzᵃᵃᶠ(i, j, k, grid, q_field)

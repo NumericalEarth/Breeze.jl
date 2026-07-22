@@ -327,7 +327,7 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 @inline AtmosphereModels.microphysical_tendency(bμp::TwoMomentCloudMicrophysics, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 # Default fallback for sedimentation velocity
-@inline AtmosphereModels.sedimentation_velocity(bμp::TwoMomentCloudMicrophysics, μ, name) = nothing
+@inline AtmosphereModels.sedimentation_velocity(bμp::TwoMomentCloudMicrophysics, μ, ::Val) = nothing
 
 # Moisture phase classification
 @inline AtmosphereModels.moisture_phase(bμp::WPNE2M, ::Val{:ρqᶜˡ}) = Val(:liquid)
