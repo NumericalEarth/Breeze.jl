@@ -475,11 +475,14 @@ using Oceananigans.Fields: interior
         @test N_moderate ≈ nᶜ * linear_rate
 
         # Very cold supercell states make the Barklie-Gokhale exponential
-        # effectively instantaneous. Rates should approach freezing all
-        # available drops over the safety timescale, not overflow.
+        # effectively instantaneous. The raw rate is intentionally NOT capped at
+        # 1/τ here (commit 48b073e3): the all-available-over-τ limit is applied
+        # later by the combined cloud/rain budget in compute_p3_process_rates
+        # (Fortran parity). The log-form overflow guard only keeps the extreme-cold
+        # exponential finite, so at the rate-function level we require the moment
+        # rates to be finite (no Float32 overflow) and non-negative.
         FT = Float32
         p3_32 = PredictedParticlePropertiesMicrophysics(FT)
-        τ = p3_32.process_rates.sink_limiting_timescale
         T_very_cold = FT(136.18727)
         ρ_cold = FT(0.12194309)
 
@@ -489,8 +492,8 @@ using Oceananigans.Fields: interior
                                                        T_very_cold, ρ_cold)
         @test isfinite(Q_cold)
         @test isfinite(N_cold)
-        @test 0 <= Q_cold <= qcl_trace / τ
-        @test 0 <= N_cold <= (p3_32.cloud.number_concentration / ρ_cold) / τ
+        @test Q_cold >= 0
+        @test N_cold >= 0
 
         qr_trace = FT(8.707481e-11)
         nr_trace = FT(130.94022)
@@ -498,8 +501,8 @@ using Oceananigans.Fields: interior
                                                                 nr_trace, T_very_cold, FT(0))
         @test isfinite(Q_rain_cold)
         @test isfinite(N_rain_cold)
-        @test 0 <= Q_rain_cold <= qr_trace / τ
-        @test 0 <= N_rain_cold <= nr_trace / τ
+        @test Q_rain_cold >= 0
+        @test N_rain_cold >= 0
     end
 
     #####
@@ -655,8 +658,14 @@ using Oceananigans.Fields: interior
             FT(1e2),    # rain_warm_collection_number (M9)
             FT(3e-8),   # wet_growth_cloud (cloud riming redirected to qʷⁱ)
             FT(2e-8),   # wet_growth_rain (rain riming redirected to qʷⁱ)
-            FT(1e-8),   # wet_growth_shedding (D8: excess → rain)
-            FT(1e-8 * 1.923e6),  # wet_growth_shedding_number (D8)
+            # wet_growth_shedding is nonzero ONLY in the dry (non-liquid-fraction)
+            # branch, where it is the excess cloud collection shed to rain and
+            # wet_growth_cloud/rain are zero (process_rates.jl:464-473). It is
+            # mutually exclusive with the wet_growth_cloud/rain set above, so under
+            # this default (liquid-fraction) routing it must be 0 — otherwise the
+            # struct describes an unreachable state and double-charges cloud.
+            FT(0.0),    # wet_growth_shedding (dry-branch only; 0 under LF routing)
+            FT(0.0),    # wet_growth_shedding_number (dry-branch only)
             FT(0.0),    # ccn_activation_mass (M9 stub)
             FT(0.0),    # ccn_activation_number (M9 stub)
             FT(0.0),    # rain_condensation (M9 stub)
