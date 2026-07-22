@@ -23,18 +23,9 @@ parameters fixed and run two studies:
     5–14 km updraft layer.
 
 The TC intensity metrics of interest are the minimum sea-level pressure (MSP) and maximum
-_tangential_ wind at 1 km atltitude (MWS). Time histories are shown along with the
+tangential wind at 1 km altitude (MWS). Time histories are shown along with the
 mature-storm (days 4-10) azimuthally-averaged storm structure, compared against the
 balanced TC reported by Willson et al. (2024, their Figs. 5 and 7).
-
-To keep that comparison apples-to-apples, these Breeze diagnostics are reduced with a
-postprocessing pipeline matched to the [`TempestExtremes` v2.1](https://github.com/ClimateGlobalChange/tempestextremes/tree/4caa80d53f4c39e1df08c33a3f10cea41643eb28)
-`NodeFileCompose … radial_wind_profile` procedure Willson et al. applied to the ensemble
-(a sub-grid storm center + azimuthal ring-averaging of the *tangential* wind on the
-published 0.25°-great-circle radial grid), then compared against their archived reference
-profiles (the Willson et al. [Dryad dataset](https://doi.org/10.5061/dryad.fttdz08z5), also
-noted in `refdata/DOWNLOAD.md`). See the *Comparison with Willson et al. (2024)* section
-below for the method and the figure-by-figure results.
 
 > **Compute.** These are 10-day global runs and are **not** part of the docs/CI build. Run
 > this script on a GPU node (`julia --project dcmip2016_tc_intercomparison.jl`); the six
@@ -111,8 +102,8 @@ function analyze_surface_pressure(prefix; mature_days = 6, dr = 50e3, rmax = 150
 end
 ````
 
-Build and run a configuration only if its surface-pressure output is absent (so an
-interrupted or extended study resumes cheaply), then reduce it to the per-run diagnostics.
+Build and run a configuration only if its surface-pressure output is absent,
+then reduce it to the per-run diagnostics.
 
 ````julia
 function run_or_load(prefix; kwargs...)
@@ -304,12 +295,12 @@ diagnostics.
 The point of the DCMIP2016 protocol is the multi-model intercomparison, so we place Breeze
 directly against the [Willson et al. (2024)](https://doi.org/10.5194/gmd-17-2493-2024) ensemble,
 reproducing their Figs. 5, 7, and 8. The published profiles (the nine models at 50 km, five also
-at 25 km, processed with [`TempestExtremes` v2.1](https://github.com/ClimateGlobalChange/tempestextremes/tree/4caa80d53f4c39e1df08c33a3f10cea41643eb28))
-are from the Willson et al. [Dryad archive](https://doi.org/10.5061/dryad.fttdz08z5) (see
-`refdata/DOWNLOAD.md`). For a fair comparison Breeze is reduced through the *same* TempestExtremes-equivalent
-pipeline — a stable sub-grid storm center and a ring-interpolation azimuthal-mean **tangential**
-wind on the published radial grid (`extract_willson_comparison_data.jl`) — and overlaid by
-`plot_willson_comparison.jl`. The Breeze curves are WENO5 and WENO9 at 0.25°.
+at 25 km, processed with [`TempestExtremes` v2.1](https://github.com/ClimateGlobalChange/tempestextremes/tree/4caa80d53f4c39e1df08c33a3f10cea41643eb28)) are from the Willson Dryad archive in
+`refdata/`. For a fair comparison Breeze is reduced through the same TempestExtremes
+procedure. Radial profiles are based on a stable *sub-grid* storm center and ring-averaging
+of the *tangential* wind on the published radial grid (0.25° great circle). These are
+computed by `extract_willson_comparison_data.jl` and overlaid by `plot_willson_comparison.jl`.
+The Breeze curves are WENO5 and WENO9 at 0.25°.
 
 > **Reproduction.** Unlike the figures above (surface pressure only), these need the 3-D `(u,v)`
 > field output and the reference data, so they are built by the companion scripts rather than by
@@ -342,7 +333,7 @@ not by the diagnostic).
 ### Radius–height tangential wind — cf. Willson et al. (2024), Fig. 8
 
 Days-4–10 azimuthal-mean tangential-wind composites, one row per model: FV3 (50 km), then ACME-A
-(the early version of E3SM), CAM-SE, Breeze-WENO5, and Breeze-WENO9 (25 km / 0.25°). A cyclonic
+(the early version of E3SM), CAM-SE, Breeze-WENO5, and Breeze-WENO9 (0.25°). A cyclonic
 (red) vortex below the tropopause is capped by the anticyclonic (blue) upper-level outflow.
 
 ![Comparison with Willson et al. (2024) Fig. 8](postproc/willson_fig8_rz.png)

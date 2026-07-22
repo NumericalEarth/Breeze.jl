@@ -95,8 +95,8 @@ function analyze_surface_pressure(prefix; mature_days = 6, dr = 50e3, rmax = 150
     return (; days, msp, rmid, pprof, min_msp = minimum(msp))
 end
 
-# Build and run a configuration only if its surface-pressure output is absent (so an
-# interrupted or extended study resumes cheaply), then reduce it to the per-run diagnostics.
+# Build and run a configuration only if its surface-pressure output is absent,
+# then reduce it to the per-run diagnostics.
 function run_or_load(prefix; kwargs...)
     if isfile("$(prefix)_psfc.jld2")
         @info "reusing existing $(prefix)_psfc.jld2"
@@ -274,7 +274,7 @@ end
 # directly against the [Willson et al. (2024)](https://doi.org/10.5194/gmd-17-2493-2024) ensemble,
 # reproducing their Figs. 5, 7, and 8. The published profiles (the nine models at 50 km, five also
 # at 25 km, processed with [`TempestExtremes` v2.1](https://github.com/ClimateGlobalChange/tempestextremes/tree/4caa80d53f4c39e1df08c33a3f10cea41643eb28)) are from the Willson Dryad archive in
-# `refdata/`. For a fair comparison Breeze is reduced through the *same* TempestExtremes
+# `refdata/`. For a fair comparison Breeze is reduced through the same TempestExtremes
 # procedure. Radial profiles are based on a stable *sub-grid* storm center and ring-averaging
 # of the *tangential* wind on the published radial grid (0.25° great circle). These are
 # computed by `extract_willson_comparison_data.jl` and overlaid by `plot_willson_comparison.jl`.
@@ -311,7 +311,7 @@ end
 # ### Radius–height tangential wind — cf. Willson et al. (2024), Fig. 8
 #
 # Days-4–10 azimuthal-mean tangential-wind composites, one row per model: FV3 (50 km), then ACME-A
-# (the early version of E3SM), CAM-SE, Breeze-WENO5, and Breeze-WENO9 (25 km / 0.25°). A cyclonic
+# (the early version of E3SM), CAM-SE, Breeze-WENO5, and Breeze-WENO9 (0.25°). A cyclonic
 # (red) vortex below the tropopause is capped by the anticyclonic (blue) upper-level outflow.
 #
 # ![Comparison with Willson et al. (2024) Fig. 8](postproc/willson_fig8_rz.png)
