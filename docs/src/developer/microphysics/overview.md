@@ -127,10 +127,15 @@ iterative adjustment to partition moisture between vapor and condensate.
 `microphysical_velocities` wrapper calls `sedimentation_velocity` and constructs a
 `(u=ZeroField(), v=ZeroField(), w=w)` tuple for the advection operator.
 
+CloudMicrophysics returns positive downward terminal-speed magnitudes `𝕎ˣ`. Breeze uses a
+signed vertical coordinate that is positive upward, so the corresponding velocity is
+`wˣ = -𝕎ˣ` and falling hydrometeors have `wˣ < 0`.
+
 #### From individual sedimentation velocities to effective bulk velocities
 
 The effective total liquid and total ice sedimentation velocities are mass-weighted averages
-of their sub-components:
+of all phase mass. A constituent that does not sediment contributes zero to the numerator but
+still contributes to the total phase humidity in the denominator:
 
 ```math
 w^{L} = \frac{q^{cl} \, w^{cl} + q^r \, w^r}{q^l}, \qquad
@@ -138,13 +143,20 @@ w^{I} = \frac{q^{ci} \, w^{ci} + q^s \, w^s}{q^i}
 ```
 
 The `(velocity_field, humidity_field)` pairs are built generically from `sedimentation_velocity`
-and `moisture_phase`: for each mass tracer in `prognostic_field_names` (names starting with `:ρq`),
-`sedimentation_velocity` is called. If non-nothing, `moisture_phase` classifies the tracer as liquid
-or ice. Number tracers (e.g. `:ρnᶜˡ`) return `nothing` from `moisture_phase` and are excluded.
+and `moisture_phase`: `moisture_phase` classifies each mass tracer in
+`prognostic_field_names` as liquid or ice. Its sedimentation velocity may be `nothing`, in
+which case the constituent contributes zero to the numerator but remains in the denominator.
+Number tracers (e.g. `:ρnᶜˡ`) return `nothing` from `moisture_phase` and are excluded.
+The numerator uses each component humidity interpolated to the velocity's vertical face, while
+the denominator uses the face-interpolated total `qˡ` or `qⁱ`. The denominator is lower-bounded
+by the sum of positive classified components so numerical negatives cannot produce a bulk speed
+larger than its constituent speeds. Diagnosed, stationary cloud condensate therefore correctly
+slows the effective phase velocity.
 
 #### Model-level bulk sedimentation velocities
 
-Precomputed aggregate sedimentation velocities are stored on the model as
+When a scheme classifies at least one prognostic mass tracer by phase, precomputed
+aggregate sedimentation velocities are stored on the model as
 `model.sedimentation_velocities`, a `NamedTuple` with keys `ρqᴸ` and `ρqᴵ`:
 
 ```julia
@@ -154,7 +166,8 @@ Precomputed aggregate sedimentation velocities are stored on the model as
 
 where `wᴸ` and `wᴵ` are `ZFaceField`s storing **negative** values (downward velocity,
 consistent with the advection operator's convention). These fields are updated during
-`update_state!` via `update_sedimentation_velocities!`.
+`update_state!` via `update_sedimentation_velocities!`. Schemes that handle sedimentation
+internally and do not implement `moisture_phase` store `nothing` instead.
 
 ### Specific Humidity
 

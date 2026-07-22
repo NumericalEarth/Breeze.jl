@@ -30,7 +30,13 @@ using CloudMicrophysics: MicrophysicsNonEq as CMNonEq
 
 using Breeze.AtmosphereModels: AtmosphereModels,
     AbstractNumberConcentrationCategories,
-    total_density
+    is_moisture_mass_tracer,
+    total_density,
+    moisture_phase,
+    prognostic_field_names,
+    sedimentation_velocity,
+    specific_field_name,
+    transport_velocities
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,

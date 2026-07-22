@@ -59,7 +59,6 @@ export
     sedimentation_velocity,
     moisture_phase,
     microphysical_velocities,
-    NegatedField,
     materialize_sedimentation_velocities,
     update_sedimentation_velocities!,
 

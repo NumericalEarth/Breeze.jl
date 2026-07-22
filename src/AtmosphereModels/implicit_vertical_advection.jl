@@ -41,6 +41,7 @@ using Oceananigans.Advection:
     vertical_scheme,
     densityᶜᶜᶜ,
     densityᶜᶜᶠ,
+    implicit_vertical_velocity,
     explicit_velocity_scaleᶠᶜᶠ,
     explicit_velocity_scaleᶜᶠᶠ,
     advective_momentum_flux_Wu,
@@ -104,6 +105,55 @@ end
 function implicit_advection_velocities(dynamics, velocities, name::Symbol)
     momentum = name === :ρu || name === :ρv || name === :ρw
     return momentum ? (; w = advecting_vertical_velocity(dynamics, velocities)) : velocities
+end
+
+"""
+$(TYPEDEF)
+
+Wrap a sedimenting tracer's total vertical velocity so the adaptive implicit solve
+includes both transport and sedimentation, including outflow through domain boundaries.
+
+$(TYPEDFIELDS)
+"""
+struct OutflowEnabledVelocity{W}
+    velocity :: W
+end
+
+@inline Base.getindex(w::OutflowEnabledVelocity, i, j, k) = @inbounds w.velocity[i, j, k]
+
+Adapt.adapt_structure(to, w::OutflowEnabledVelocity) = OutflowEnabledVelocity(adapt(to, w.velocity))
+
+function implicit_advection_velocities(dynamics, velocities, name::Symbol, microphysics, microphysical_fields)
+    transport = implicit_advection_velocities(dynamics, velocities, name)
+    sedimentation = microphysical_velocities(microphysics, microphysical_fields, Val(name))
+    total = sum_of_velocities(transport, sedimentation)
+    isnothing(sedimentation) && return total
+    return merge(total, (; w = OutflowEnabledVelocity(total.w)))
+end
+
+# Oceananigans assumes impermeable boundaries and masks peripheral faces from the
+# AIVA diagonal. Hydrometeor sedimentation instead has an open bottom boundary.
+# Off-diagonal coefficients remain masked at domain edges; retaining the diagonal
+# outflow terms makes the implicit first-order flux conservative and positivity-preserving.
+@inline function Oceananigans.Advection.implicit_advection_diagonal(i, j, k, grid,
+                                                                    advection::AIVA,
+                                                                    w::OutflowEnabledVelocity,
+                                                                    Δt, ℓx, ℓy,
+                                                                    density=nothing)
+    scheme = vertical_scheme(advection)
+    td = time_discretization(scheme)
+    wⁱ⁺ = implicit_vertical_velocity(ℓx, ℓy, i, j, k+1, grid, scheme, td, w)
+    wⁱ⁻ = implicit_vertical_velocity(ℓx, ℓy, i, j, k,   grid, scheme, td, w)
+
+    Az⁺ = Az(i, j, k+1, grid, ℓx, ℓy, Face())
+    Az⁻ = Az(i, j, k,   grid, ℓx, ℓy, Face())
+    ρᶠ⁺ = densityᶜᶜᶠ(i, j, k+1, grid, density)
+    ρᶠ⁻ = densityᶜᶜᶠ(i, j, k,   grid, density)
+    ρᶜ = densityᶜᶜᶜ(i, j, k, grid, density)
+    V⁻¹ = 1 / volume(i, j, k, grid, ℓx, ℓy, Center())
+
+    return Δt * V⁻¹ / ρᶜ * (Az⁺ * ρᶠ⁺ * max(wⁱ⁺, 0) -
+                               Az⁻ * ρᶠ⁻ * min(wⁱ⁻, 0))
 end
 
 #####

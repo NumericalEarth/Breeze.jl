@@ -219,7 +219,7 @@ function AtmosphereModel(grid;
 
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
     initialize_model_microphysical_fields!(microphysical_fields, microphysics)
-    sedimentation_velocities = materialize_sedimentation_velocities(microphysics, microphysical_fields, grid)
+    sedimentation_velocities = materialize_sedimentation_velocities(dynamics, microphysics, microphysical_fields, grid)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 

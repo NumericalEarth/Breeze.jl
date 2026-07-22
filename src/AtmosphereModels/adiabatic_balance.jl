@@ -276,6 +276,6 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
                            twin_momentum, twin_moisture_density, model.temperature,
                            model.pressure_solver, model.velocities, twin_tracers,
                            nothing, twin_advection, model.coriolis, twin_forcing,
-                           twin_microphysics, twin_microphysical, twin_timestepper,
+                           twin_microphysics, twin_microphysical, nothing, twin_timestepper,
                            nothing, model.closure_fields, nothing)
 end

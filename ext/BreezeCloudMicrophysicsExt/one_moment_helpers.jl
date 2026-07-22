@@ -6,7 +6,7 @@ function AtmosphereModels.precipitation_rate(model, microphysics::OneMomentLiqui
     grid = model.grid
     qᶜˡ = model.microphysical_fields.qᶜˡ
     ρqʳ = model.microphysical_fields.ρqʳ
-    ρ = model.dynamics.reference_state.density
+    ρ = total_density(model.dynamics)
     kernel = OneMomentPrecipitationRateKernel(microphysics.categories, qᶜˡ, ρqʳ, ρ)
     op = KernelFunctionOperation{Center, Center, Center}(kernel, grid)
     return Field(op)
@@ -23,20 +23,20 @@ struct OneMomentPrecipitationRateKernel{C, QL, RR, RS}
     categories :: C
     cloud_liquid :: QL
     rain_density :: RR
-    reference_density :: RS
+    density :: RS
 end
 
 Adapt.adapt_structure(to, k::OneMomentPrecipitationRateKernel) =
     OneMomentPrecipitationRateKernel(adapt(to, k.categories),
                                       adapt(to, k.cloud_liquid),
                                       adapt(to, k.rain_density),
-                                      adapt(to, k.reference_density))
+                                      adapt(to, k.density))
 
 @inline function (k::OneMomentPrecipitationRateKernel)(i, j, k_idx, grid)
     categories = k.categories
     @inbounds qᶜˡ = k.cloud_liquid[i, j, k_idx]
     @inbounds ρqʳ = k.rain_density[i, j, k_idx]
-    @inbounds ρ = k.reference_density[i, j, k_idx]
+    @inbounds ρ = k.density[i, j, k_idx]
 
     qʳ = ρqʳ / ρ
 
@@ -61,23 +61,44 @@ $(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the precipitation flux at the bottom boundary.
 
-The surface precipitation flux is computed using the same advection scheme that
-transports rain during time stepping, evaluated at the bottom face (`k = 1`).
-This ensures numerical consistency between the diagnosed flux and the actual
-mass leaving the domain through the advection operator.
+The surface precipitation flux sums every sedimenting prognostic moisture-mass tracer,
+using the same advection scheme that transports each tracer during time stepping and
+evaluating its flux at the bottom face (`k = 1`).
+For explicit advection this is the same boundary flux used by the tendency operator.
+For adaptive implicit advection it is the instantaneous split-operator flux.
 
 Units: kg/m²/s (positive = downward, out of domain)
 """
 function AtmosphereModels.surface_precipitation_flux(model, microphysics::OneMomentCloudMicrophysics)
+    return sedimenting_moisture_surface_flux(model, microphysics)
+end
+
+sedimenting_moisture_surface_flux_operations(model, microphysics, ::Tuple{}) = ()
+
+function sedimenting_moisture_surface_flux_operations(model, microphysics, names::Tuple{Symbol, Vararg})
+    name = first(names)
+    rest = sedimenting_moisture_surface_flux_operations(model, microphysics, Base.tail(names))
+    is_moisture_mass_tracer(name) || return rest
+    isnothing(moisture_phase(microphysics, Val(name))) && return rest
+
+    w = sedimentation_velocity(microphysics, model.microphysical_fields, Val(name))
+    isnothing(w) && return rest
+
     grid = model.grid
     ρ = total_density(model.dynamics)
-    wᵗ = AtmosphereModels.transport_velocities(model).w
-    wʳ = model.microphysical_fields.wʳ
-    qʳ = model.microphysical_fields.qʳ
-    advection = model.advection.ρqʳ
+    wᵗ = transport_velocities(model).w
+    q = getproperty(model.microphysical_fields, specific_field_name(name))
+    advection = getproperty(model.advection, name)
     kernel = SurfacePrecipitationFluxKernel(advection)
-    op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid, ρ, wᵗ, wʳ, qʳ)
-    return Field(op)
+    operation = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid, ρ, wᵗ, w, q)
+    return (operation, rest...)
+end
+
+function sedimenting_moisture_surface_flux(model, microphysics)
+    names = prognostic_field_names(microphysics)
+    operations = sedimenting_moisture_surface_flux_operations(model, microphysics, names)
+    isempty(operations) && return Field{Center, Center, Nothing}(model.grid)
+    return Field(reduce(+, operations))
 end
 
 #####

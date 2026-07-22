@@ -72,6 +72,10 @@ The following table also uses a few conventions that suffuse the source code and
 | ``N^{cl}``                          | `Nᶜˡ`  |                                     | Volumetric cloud droplet number density, ``Nᶜˡ = ρ nᶜˡ`` (1/m³)               |
 | ``N^r``                             | `Nʳ`   |                                     | Volumetric rain drop number density, ``Nʳ = ρ nʳ`` (1/m³)                      |
 | ``N^a``                             | `Nᵃ`   |                                     | Volumetric aerosol number density, ``Nᵃ = ρ nᵃ`` (1/m³)                        |
+| ``\mathbb{W}^{cl}``                | `𝕎ᶜˡ`  |                                     | Cloud liquid terminal-speed magnitude (positive downward)                       |
+| ``\mathbb{W}^{ci}``                | `𝕎ᶜⁱ`  |                                     | Cloud ice terminal-speed magnitude (positive downward)                          |
+| ``\mathbb{W}^r``                   | `𝕎ʳ`   |                                     | Rain terminal-speed magnitude (positive downward)                               |
+| ``\mathbb{W}^s``                   | `𝕎ˢ`   |                                     | Snow terminal-speed magnitude (positive downward)                               |
 | ``w^{cl}``                           | `wᶜˡ`  |                                     | Cloud liquid sedimentation velocity field (vertical component; negative for downward motion)         |
 | ``w^{ci}``                           | `wᶜⁱ`  |                                     | Cloud ice sedimentation velocity field (vertical component; negative for downward motion)            |
 | ``w^r``                              | `wʳ`   |                                     | Rain sedimentation velocity field (vertical component; negative for downward motion)                 |

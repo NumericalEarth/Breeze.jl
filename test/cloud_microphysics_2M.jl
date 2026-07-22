@@ -5,6 +5,8 @@ using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
+const CM2 = CloudMicrophysics.Microphysics2M
+
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt:
     TwoMomentCloudMicrophysics,
@@ -148,12 +150,14 @@ end
     @test spf isa Field
     compute!(spf)
 
-    # The surface precipitation flux uses the advection scheme's face reconstruction.
+    # The surface precipitation flux sums the cloud-liquid and rain reconstructions.
     # The density is face-interpolated (ℑz) to match the advection operator.
+    wᶜˡ = @allowscalar model.microphysical_fields.wᶜˡ[1, 1, 1]
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
+    qᶜˡ = @allowscalar model.microphysical_fields.qᶜˡ[1, 1, 1]
     qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
     ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
-    expected_flux = -ρ_face * wʳ * qʳ
+    expected_flux = -ρ_face * (wᶜˡ * qᶜˡ + wʳ * qʳ)
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] ≥ 0
@@ -167,17 +171,33 @@ end
     microphysics = TwoMomentCloudMicrophysics()
     model = AtmosphereModel(grid; dynamics, microphysics)
 
-    set!(model; ρ = 2, θ = 300, qᵗ = 0.020, qᶜˡ = 0, nᶜˡ = 0, qʳ = 0.001, nʳ = 1e5,
+    set!(model; ρ = 2, θ = 300, qᵗ = 0.020, qᶜˡ = 0.001, nᶜˡ = 1e8, qʳ = 0.001, nʳ = 1e5,
          enforce_mass_conservation = false)
+
+    production = precipitation_rate(model, :liquid)
+    compute!(production)
+
+    sb = microphysics.categories.warm_processes
+    ρ = @allowscalar total_density(model.dynamics)[1, 1, 1]
+    qᶜˡ = @allowscalar model.microphysical_fields.qᶜˡ[1, 1, 1]
+    nᶜˡ = @allowscalar model.microphysical_fields.nᶜˡ[1, 1, 1]
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    Nᶜˡ = ρ * nᶜˡ
+    autoconversion_rate = CM2.autoconversion(sb.acnv, sb.pdf_c, qᶜˡ, qʳ, ρ, Nᶜˡ)
+    accretion_rate = CM2.accretion(sb, qᶜˡ, qʳ, ρ, Nᶜˡ)
+    expected_production = autoconversion_rate.dq_rai_dt + accretion_rate.dq_rai_dt
+    @test @allowscalar production[1, 1, 1] ≈ expected_production
 
     spf = surface_precipitation_flux(model)
     compute!(spf)
 
+    wᶜˡ = @allowscalar model.microphysical_fields.wᶜˡ[1, 1, 1]
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
+    qᶜˡ = @allowscalar model.microphysical_fields.qᶜˡ[1, 1, 1]
     qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
     ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
     ρ_reference_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
-    expected_flux = -ρ_face * wʳ * qʳ
+    expected_flux = -ρ_face * (wᶜˡ * qᶜˡ + wʳ * qʳ)
 
     @test ρ_face ≈ FT(2)
     @test !isapprox(ρ_face, ρ_reference_face)
@@ -251,8 +271,8 @@ end
 
     # Validate effective liquid sedimentation: sign convention and mass-weighted averaging
     time_step!(model, 1)
-    qᶜˡ_val = @allowscalar μ.qᶜˡ[1, 1, 2]
-    qʳ_val  = @allowscalar μ.qʳ[1, 1, 2]
+    qᶜˡ_val = @allowscalar ℑzᵃᵃᶠ(1, 1, 2, grid, μ.qᶜˡ)
+    qʳ_val  = @allowscalar ℑzᵃᵃᶠ(1, 1, 2, grid, μ.qʳ)
     wᶜˡ_val = @allowscalar μ.wᶜˡ[1, 1, 2]
     wʳ_val  = @allowscalar μ.wʳ[1, 1, 2]
     wᴸ_val  = @allowscalar bsv.ρqᴸ.w[1, 1, 2]
