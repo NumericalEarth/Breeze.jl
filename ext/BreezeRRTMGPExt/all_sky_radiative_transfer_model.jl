@@ -313,34 +313,34 @@ function update_rrtmgp_cloud_state!(cloud_state, model, liquid_effective_radius,
     grid = model.grid
     arch = architecture(grid)
 
-    ρᵣ = model.dynamics.reference_state.density
+    ρ = total_density(model.dynamics)
     microphysics = model.microphysics
     microphysical_fields = model.microphysical_fields
     qᵛ = specific_prognostic_moisture(model)
 
     launch!(arch, grid, :xyz, _update_rrtmgp_cloud_state!,
-            cloud_state, grid, ρᵣ, microphysics, microphysical_fields, qᵛ,
+            cloud_state, grid, ρ, microphysics, microphysical_fields, qᵛ,
             liquid_effective_radius, ice_effective_radius)
 
     return nothing
 end
 
-@kernel function _update_rrtmgp_cloud_state!(cloud_state, grid, ρᵣ, microphysics, microphysical_fields, specific_prognostic_moisture,
+@kernel function _update_rrtmgp_cloud_state!(cloud_state, grid, ρ, microphysics, microphysical_fields, specific_prognostic_moisture,
                                              liquid_effective_radius, ice_effective_radius)
     i, j, k = @index(Global, NTuple)
 
     c = rrtmgp_column_index(i, j, grid.Nx)
 
-    FT = eltype(ρᵣ)
+    FT = eltype(ρ)
     kg_to_g = convert(FT, 1000)
 
     @inbounds begin
-        ρ = ρᵣ[i, j, k]
+        ρᶜ = ρ[i, j, k]
         Δz = Δzᶜᶜᶜ(i, j, k, grid)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
 
         # Get moisture fractions from microphysics
-        q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+        q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᶜ, qᵛᵉ, microphysical_fields)
 
         # Extract liquid and ice mass fractions
         qˡ = q.liquid
@@ -348,8 +348,8 @@ end
 
         # Cloud water path in g/m² (RRTMGP convention)
         # Note: cld_path_liq/ice, cld_frac, cld_r_eff_liq/ice are RRTMGP's CloudState field names
-        cloud_liquid_water_path = kg_to_g * ρ * qˡ * Δz
-        cloud_ice_water_path = kg_to_g * ρ * qⁱ * Δz
+        cloud_liquid_water_path = kg_to_g * ρᶜ * qˡ * Δz
+        cloud_ice_water_path = kg_to_g * ρᶜ * qⁱ * Δz
         cloud_state.cld_path_liq[k, c] = cloud_liquid_water_path
         cloud_state.cld_path_ice[k, c] = cloud_ice_water_path
 

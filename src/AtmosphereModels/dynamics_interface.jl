@@ -95,6 +95,16 @@ make_pressure_correction!(model, Δt) = nothing
 #####
 
 """
+$(TYPEDSIGNATURES)
+
+Return the thermodynamic pressure in Pa. A compressible atmosphere returns its diagnosed
+equation-of-state pressure. An anelastic atmosphere returns its hydrostatic reference pressure,
+excluding the non-hydrostatic pressure anomaly that enforces the divergence constraint but does
+not perturb the thermodynamic state.
+"""
+thermodynamic_pressure(dynamics) = dynamics_pressure(dynamics)
+
+"""
     mean_pressure(dynamics)
 
 Return the mean (background/reference) pressure field in Pa.
