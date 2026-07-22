@@ -14,11 +14,11 @@
 # constants and analytic initial state) is the fixed test definition; only the generator's
 # keyword arguments vary between runs.
 #
-# Reed–Jablonowski "simple physics" implemented here (all three components):
-#   1. wind-dependent bulk surface drag  Cᴰ = min(a + b|v|, cmax)
-#   2. wind-dependent boundary-layer eddy diffusivity (see the closure below)
-#   3. large-scale condensation with instantaneous rain-out that retains latent warming
-#      (`InstantaneousPrecipitation`)
+# Reed–Jablonowski "simple physics" (all three components):
+#   1. wind-dependent bulk surface drag  Cᴰ = min(a + b|v|, cmax)  — defined below (`WindDependentDrag`)
+#   2. wind-dependent boundary-layer eddy diffusivity              — defined below (`rj_Km`/`rj_Ke`)
+#   3. large-scale condensation with instantaneous rain-out that retains latent warming —
+#      Breeze's built-in `InstantaneousPrecipitation` scheme (shipped with Breeze), selected here
 #
 # Usage:
 #   julia --project dcmip2016_tc.jl                         # runs the best configuration

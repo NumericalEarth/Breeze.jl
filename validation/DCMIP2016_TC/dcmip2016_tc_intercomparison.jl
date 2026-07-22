@@ -11,9 +11,10 @@
 # by bulk surface enthalpy fluxes over a fixed 302.15 K sea surface.
 #
 # The model configuration — initial vortex, background sounding, grid height, and the
-# complete Reed–Jablonowski "simple physics" package (wind-dependent surface drag,
-# wind-dependent boundary-layer mixing, and `InstantaneousPrecipitation` rain-out) — is
-# defined in `dcmip2016_tc.jl`. We hold those parameters fixed and run two studies:
+# complete Reed–Jablonowski "simple physics" (locally-defined wind-dependent surface drag
+# and boundary-layer mixing, plus Breeze's built-in `InstantaneousPrecipitation` for the
+# large-scale-condensation rain-out) — is assembled in `dcmip2016_tc.jl`. We hold those
+# parameters fixed and run two studies:
 #
 #   * **Study 1**: horizontal resolution (**0.5°** vs **0.25°**) × advection order
 #     (**WENO5** vs **WENO9**).
