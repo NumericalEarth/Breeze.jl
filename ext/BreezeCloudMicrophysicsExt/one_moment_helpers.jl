@@ -39,14 +39,21 @@ Adapt.adapt_structure(to, k::OneMomentPrecipitationRateKernel) =
     @inbounds ρ = k.reference_density[i, j, k_idx]
 
     qʳ = ρqʳ / ρ
+    parameters = categories.parameters
 
     # Autoconversion: cloud liquid → rain
-    Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
+    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
 
     # Accretion: cloud liquid captured by falling rain
-    Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
-                     categories.hydrometeor_velocities.blk1m.rain, categories.collisions,
-                     qᶜˡ, qʳ, ρ)
+    Sᵃᶜᶜ = cloud_precipitation_accretion(
+        parameters.options.cloud_liquid_rain_accretion,
+        parameters.cloud.liquid,
+        parameters.precip.rain,
+        parameters.terminal_velocity.rain,
+        qᶜˡ,
+        qʳ,
+        ρ,
+    )
 
     # Total precipitation production rate (kg/kg/s)
     return Sᵃᶜⁿᵛ + Sᵃᶜᶜ
@@ -110,16 +117,16 @@ end
 
 function Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val{:rain})
     haskey(model.microphysical_fields, :ρqʳ) || return nothing
-    pdf = microphysics.categories.rain.pdf
-    mass = microphysics.categories.rain.mass
+    pdf = microphysics.categories.parameters.precip.rain.pdf
+    mass = microphysics.categories.parameters.precip.rain.mass
     ρq = model.microphysical_fields.ρqʳ
     return build_number_concentration_op(model, pdf, mass, ρq)
 end
 
 function Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val{:snow})
     haskey(model.microphysical_fields, :ρqˢ) || return nothing
-    pdf = microphysics.categories.snow.pdf
-    mass = microphysics.categories.snow.mass
+    pdf = microphysics.categories.parameters.precip.snow.pdf
+    mass = microphysics.categories.parameters.precip.snow.mass
     ρq = model.microphysical_fields.ρqˢ
     return build_number_concentration_op(model, pdf, mass, ρq)
 end
@@ -128,7 +135,7 @@ end
 Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val) = nothing
 
 function build_number_concentration_op(model, pdf, mass, ρq)
-    ρ = dynamics_density(model.dynamics)
+    ρ = total_density(model.dynamics)  # number conc N = ρ·n uses total air density
     func = NumberConcentrationKernelFunction(pdf, mass, ρq, ρ)
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
 end
@@ -154,16 +161,14 @@ function Utils.prettysummary(cl::CloudLiquid)
     return string("CloudLiquid(",
                   "ρw=", prettysummary(cl.ρw), ", ",
                   "r_eff=", prettysummary(cl.r_eff), ", ",
-                  "τ_relax=", prettysummary(cl.τ_relax))
+                  "N_0=", prettysummary(cl.N_0), ")")
 end
 
 function Utils.prettysummary(ci::CloudIce)
     return string("CloudIce(",
-                  "r0=", prettysummary(ci.r0), ", ",
                   "r_eff=", prettysummary(ci.r_eff), ", ",
                   "ρᵢ=", prettysummary(ci.ρᵢ), ", ",
-                  "r_ice_snow=", prettysummary(ci.r_ice_snow), ", ",
-                  "τ_relax=", prettysummary(ci.τ_relax), ", ",
+                  "N_0=", prettysummary(ci.N_0), ", ",
                   "mass=", prettysummary(ci.mass), ", ",
                   "pdf=", prettysummary(ci.pdf), ")")
 end
@@ -181,29 +186,8 @@ function Utils.prettysummary(pdf::CloudMicrophysics.Parameters.ParticlePDFIceRai
     return string("ParticlePDFIceRain(n0=", prettysummary(pdf.n0), ")")
 end
 
-function Utils.prettysummary(eff::CloudMicrophysics.Parameters.CollisionEff)
-    return string("CollisionEff(",
-                  "e_lcl_rai=", prettysummary(eff.e_lcl_rai), ", ",
-                  "e_lcl_sno=", prettysummary(eff.e_lcl_sno), ", ",
-                  "e_icl_rai=", prettysummary(eff.e_icl_rai), ", ",
-                  "e_icl_sno=", prettysummary(eff.e_icl_sno), ", ",
-                  "e_rai_sno=", prettysummary(eff.e_rai_sno), ")")
-end
-
 Utils.prettysummary(rain::CloudMicrophysics.Parameters.Rain) = "CloudMicrophysics.Parameters.Rain"
 Utils.prettysummary(snow::CloudMicrophysics.Parameters.Snow) = "CloudMicrophysics.Parameters.Snow"
-
-#=
-function Utils.prettysummary(rain::CloudMicrophysics.Parameters.Rain)
-    return string("Rain(",
-                  "acnv1M=", prettysummary(rain.acnv1M), ", ",
-                  "area=", prettysummary(rain.area), ", ",
-                  "vent=", prettysummary(rain.vent), ", ",
-                  "r0=", prettysummary(rain.r0), ", ",
-                  "mass=", prettysummary(rain.mass), ", ",
-                  "pdf=", prettysummary(rain.pdf), ")")
-end
-=#
 
 function Utils.prettysummary(acnv::CloudMicrophysics.Parameters.Acnv1M)
     return string("Acnv1M(",
@@ -244,22 +228,27 @@ function Utils.prettysummary(ne::NonEquilibriumCloudFormation)
 end
 
 function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM1MCategories})
+    parameters = bμp.categories.parameters
+    options = parameters.options
+    rain = parameters.precip.rain
+    snow = parameters.precip.snow
+
     print(io, summary(bμp), ":\n",
           "├── cloud_formation: ", prettysummary(bμp.cloud_formation), '\n',
-          "├── collisions: ", prettysummary(bμp.categories.collisions), '\n',
-          "├── cloud_liquid: ", prettysummary(bμp.categories.cloud_liquid), '\n',
-          "├── cloud_ice: ", prettysummary(bμp.categories.cloud_ice), '\n',
-          "├── rain: ", prettysummary(bμp.categories.rain), '\n',
-          "│   ├── acnv1M: ", prettysummary(bμp.categories.rain.acnv1M), '\n',
-          "│   ├── area:   ", prettysummary(bμp.categories.rain.area), '\n',
-          "│   ├── vent:   ", prettysummary(bμp.categories.rain.vent), '\n',
-          "│   └── pdf:    ", prettysummary(bμp.categories.rain.pdf), '\n',
-          "├── snow: ", prettysummary(bμp.categories.snow), "\n",
-          "│   ├── acnv1M: ", prettysummary(bμp.categories.snow.acnv1M), '\n',
-          "│   ├── area:   ", prettysummary(bμp.categories.snow.area), '\n',
-          "│   ├── mass:   ", prettysummary(bμp.categories.snow.mass), '\n',
-          "│   ├── r0:     ", prettysummary(bμp.categories.snow.r0), '\n',
-          "│   ├── ρᵢ:     ", prettysummary(bμp.categories.snow.ρᵢ), '\n',
-          "│   └── aspr:   ", prettysummary(bμp.categories.snow.aspr), '\n',
+          "├── options: ", summary(options), '\n',
+          "├── cloud_liquid: ", prettysummary(parameters.cloud.liquid), '\n',
+          "├── cloud_ice: ", prettysummary(parameters.cloud.ice), '\n',
+          "├── rain: ", prettysummary(rain), '\n',
+          "│   ├── autoconversion: ", prettysummary(options.rain_autoconversion), '\n',
+          "│   ├── area:   ", prettysummary(rain.area), '\n',
+          "│   ├── vent:   ", prettysummary(rain.vent), '\n',
+          "│   └── pdf:    ", prettysummary(rain.pdf), '\n',
+          "├── snow: ", prettysummary(snow), "\n",
+          "│   ├── autoconversion: ", prettysummary(options.snow_autoconversion), '\n',
+          "│   ├── area:   ", prettysummary(snow.area), '\n',
+          "│   ├── mass:   ", prettysummary(snow.mass), '\n',
+          "│   ├── ρᵢ:     ", prettysummary(snow.ρᵢ), '\n',
+          "│   └── aspr:   ", prettysummary(snow.aspr), '\n',
+          "├── freezing_temperature: ", prettysummary(bμp.categories.freezing_temperature), '\n',
           "└── velocities: ", prettysummary(bμp.categories.hydrometeor_velocities))
 end

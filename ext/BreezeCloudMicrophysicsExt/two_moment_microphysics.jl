@@ -341,6 +341,9 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 
 AtmosphereModels.prognostic_field_names(::WPNE2M) = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρnᵃ)
 
+# Condensate densities only (drop the number-concentration fields ρnˣ) for total_condensate_density.
+AtmosphereModels.condensate_field_names(::WPNE2M) = (:ρqᶜˡ, :ρqʳ)
+
 # Negative moisture correction chain: rain ← cloud ← vapor
 AtmosphereModels.correction_moisture_fields(::WPNE2M, μ) = (μ.ρqʳ, μ.ρqᶜˡ)
 
@@ -608,11 +611,18 @@ end
     dNʳ_sc = CM2.rain_self_collection(sb.pdf_r, sb.self, max(0, qʳ), ρ, Nʳ)
     dNʳ_br = CM2.rain_breakup(sb.pdf_r, sb.brek, max(0, qʳ), ρ, Nʳ, dNʳ_sc)
 
-    # Number adjustment to keep mean mass within physical bounds (Horn 2012)
-    dNᶜˡ_adj_up = CM2.number_increase_for_mass_limit(sb.numadj, sb.pdf_c.xc_max, max(0, qᶜˡ), ρ, Nᶜˡ)
-    dNᶜˡ_adj_dn = CM2.number_decrease_for_mass_limit(sb.numadj, sb.pdf_c.xc_min, max(0, qᶜˡ), ρ, Nᶜˡ)
-    dNʳ_adj_up = CM2.number_increase_for_mass_limit(sb.numadj, sb.pdf_r.xr_max, max(0, qʳ), ρ, Nʳ)
-    dNʳ_adj_dn = CM2.number_decrease_for_mass_limit(sb.numadj, sb.pdf_r.xr_min, max(0, qʳ), ρ, Nʳ)
+    # Number adjustment to keep mean mass within physical bounds (Horn 2012).
+    # CloudMicrophysics returns one specific-number tendency; split it into
+    # source (up) and sink (dn) parts so the sink can be limited with the
+    # other number sinks below.
+    numadjᶜ = (; sb.numadj.τ, x_min = sb.pdf_c.xc_min, x_max = sb.pdf_c.xc_max)
+    numadjʳ = (; sb.numadj.τ, x_min = sb.pdf_r.xr_min, x_max = sb.pdf_r.xr_max)
+    dNᶜˡ_adj = ρ * CM2.number_tendency_from_mass_limits(numadjᶜ, max(0, qᶜˡ), max(0, nᶜˡ))
+    dNʳ_adj = ρ * CM2.number_tendency_from_mass_limits(numadjʳ, max(0, qʳ), max(0, nʳ))
+    dNᶜˡ_adj_up = max(0, dNᶜˡ_adj)
+    dNᶜˡ_adj_dn = min(0, dNᶜˡ_adj)
+    dNʳ_adj_up = max(0, dNʳ_adj)
+    dNʳ_adj_dn = min(0, dNʳ_adj)
 
     # ===== Coupled per-reservoir sink limiting =====
     #
@@ -929,7 +939,7 @@ end
                                              microphysical_fields, velocities)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field = AtmosphereModels.dynamics_density(dynamics)
+    ρ_field = AtmosphereModels.total_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
 

@@ -107,14 +107,26 @@ one_moment_cloud_microphysics_categories = BreezeCloudMicrophysicsExt.one_moment
 precipitation_boundary_condition = ImpenetrableBoundaryCondition()
 
 ## First, a slow scheme
-cloud_liquid_slow = CMP.CloudLiquid{Float64}(τ_relax=20.0, ρw=1000.0, r_eff=1e-5, N_0=5e8)
-categories = one_moment_cloud_microphysics_categories(cloud_liquid = cloud_liquid_slow)
-microphysics_1m_slow = OneMomentCloudMicrophysics(; categories, precipitation_boundary_condition)
+parameters_slow = CMP.Microphysics1MParams(
+    Float64;
+    cloud_liquid_formation = CMP.CloudLiquidFormation(20.0),
+)
+categories_slow = one_moment_cloud_microphysics_categories(Float64; parameters = parameters_slow)
+microphysics_1m_slow = OneMomentCloudMicrophysics(;
+    categories = categories_slow,
+    precipitation_boundary_condition,
+)
 
 # Then a fast scheme
-cloud_liquid_fast = CMP.CloudLiquid{Float64}(τ_relax=2.0, ρw=1000.0, r_eff=1e-5, N_0=5e8)
-categories = one_moment_cloud_microphysics_categories(cloud_liquid = cloud_liquid_fast)
-microphysics_1m_fast = OneMomentCloudMicrophysics(; categories, precipitation_boundary_condition)
+parameters_fast = CMP.Microphysics1MParams(
+    Float64;
+    cloud_liquid_formation = CMP.CloudLiquidFormation(2.0),
+)
+categories_fast = one_moment_cloud_microphysics_categories(Float64; parameters = parameters_fast)
+microphysics_1m_fast = OneMomentCloudMicrophysics(;
+    categories = categories_fast,
+    precipitation_boundary_condition,
+)
 
 # And now a default two-moment scheme using Seifert and Beheng (2006)
 microphysics_2m = TwoMomentCloudMicrophysics(; precipitation_boundary_condition)

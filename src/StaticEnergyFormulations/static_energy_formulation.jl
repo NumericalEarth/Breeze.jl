@@ -38,6 +38,8 @@ AtmosphereModels.prognostic_thermodynamic_field_names(::StaticEnergyFormulation)
 AtmosphereModels.additional_thermodynamic_field_names(::StaticEnergyFormulation) = tuple(:e)
 AtmosphereModels.thermodynamic_density_name(::StaticEnergyFormulation) = :ρe
 AtmosphereModels.thermodynamic_density(formulation::StaticEnergyFormulation) = formulation.energy_density
+AtmosphereModels.with_thermodynamic_density(f::StaticEnergyFormulation, ρe) =
+    StaticEnergyFormulation(ρe, f.specific_energy)
 
 AtmosphereModels.prognostic_thermodynamic_field_names(::Val{:StaticEnergy}) = tuple(:ρe)
 AtmosphereModels.additional_thermodynamic_field_names(::Val{:StaticEnergy}) = tuple(:e)

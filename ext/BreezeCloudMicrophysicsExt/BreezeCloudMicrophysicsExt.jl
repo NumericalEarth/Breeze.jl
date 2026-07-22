@@ -1,7 +1,16 @@
 module BreezeCloudMicrophysicsExt
 
 using CloudMicrophysics: CloudMicrophysics
-using CloudMicrophysics.Parameters: Rain, Snow, CloudIce, CloudLiquid, CollisionEff
+using CloudMicrophysics.Parameters:
+    Rain,
+    Snow,
+    CloudIce,
+    CloudLiquid,
+    Microphysics1MParams,
+    TemperatureDependent,
+    WithSupersaturation,
+    SublimationOnly,
+    CloudIceMelt
 using CloudMicrophysics.Parameters: Blk1MVelType, Blk1MVelTypeRain, Blk1MVelTypeSnow
 using CloudMicrophysics.Parameters: AirProperties
 # Two-moment parameters
@@ -15,7 +24,7 @@ using SpecialFunctions: erf
 
 using CloudMicrophysics.Microphysics1M:
     conv_q_lcl_to_q_rai,
-    conv_q_icl_to_q_sno_no_supersat,
+    conv_q_icl_to_q_sno,
     accretion,
     accretion_rain_sink,
     accretion_snow_rain,
@@ -30,7 +39,7 @@ using CloudMicrophysics: MicrophysicsNonEq as CMNonEq
 
 using Breeze.AtmosphereModels: AtmosphereModels,
     AbstractNumberConcentrationCategories,
-    dynamics_density
+    total_density
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -52,7 +61,6 @@ using Breeze: Microphysics
 using Breeze.Microphysics:
     center_field_tuple,
     BulkMicrophysics,
-    FourCategories,
     WarmPhaseSaturationAdjustment,
     MixedPhaseSaturationAdjustment,
     AbstractCondensateFormation,
