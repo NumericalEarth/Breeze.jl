@@ -520,21 +520,26 @@ end
          qᵗ = qᵗ,
          z = 0, w = 1)
 
-    # Run long enough for cloud formation and autoconversion
+    # Cloud liquid forms first, then is converted to rain.
+    simulation = Simulation(model; Δt=1, stop_time=60minutes, verbose=false)
+    run!(simulation)
+
+    qᶜˡ_cloudy = model.dynamics.state.μ.ρqᶜˡ / model.dynamics.state.ρ
+    @test qᶜˡ_cloudy > 0
+
     simulation = Simulation(model; Δt=1, stop_time=120minutes, verbose=false)
     run!(simulation)
 
-    # Extract final microphysical state
+    # Extract the post-autoconversion microphysical state.
     ρ_final = model.dynamics.state.ρ
-    qᶜˡ_final = model.dynamics.state.μ.ρqᶜˡ / ρ_final
     qʳ_final = model.dynamics.state.μ.ρqʳ / ρ_final
 
-    # Both cloud and rain should be present after 2 hours of ascent
-    @test qᶜˡ_final > 0  # Cloud liquid present
-    @test qʳ_final > 0   # Rain produced via autoconversion
+    # Rain should remain after the cloud liquid has undergone autoconversion.
+    @test qʳ_final > 0
 
     # Total water should be conserved (vapor + cloud + rain = initial qᵗ at parcel altitude)
     q = model.dynamics.state.𝒰.moisture_mass_fractions
+    qᶜˡ_final = model.dynamics.state.μ.ρqᶜˡ / ρ_final
     qᵗ = q.vapor + qᶜˡ_final + qʳ_final
     @test qᵗ ≈ model.dynamics.state.qᵗ rtol=1e-10
 end

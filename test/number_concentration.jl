@@ -35,7 +35,7 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     @test all(isfinite.(interior(ρnʳ)))
 
     # Compare with n0 · λ⁻¹ computed directly from the scheme's DSD.
-    rain = microphysics.categories.rain
+    rain = microphysics.categories.parameters.precip.rain
     ρ = @allowscalar reference_state.density[1, 1, 1]
     q = qʳ_value
     n0 = get_n0(rain.pdf, q, ρ)
@@ -75,7 +75,7 @@ end
 
     # Snow's n₀ depends on (q, ρ), so the closed-form rain expression cannot
     # substitute. Compare against CloudMicrophysics directly.
-    snow = microphysics.categories.snow
+    snow = microphysics.categories.parameters.precip.snow
     ρ = @allowscalar reference_state.density[1, 1, 1]
     q = qˢ_value
     n0 = get_n0(snow.pdf, q, ρ)
