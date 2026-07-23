@@ -348,26 +348,26 @@ end
         constants = ThermodynamicConstants(FT)
         τ = process_rates.sink_limiting_timescale
 
-        # qsmall_dry defaults to 1e-12 regardless of moment mode or liquid-fraction setting.
-        @test p3.process_rates.qsmall_dry == FT(1e-12)
+        # tiny_ice_to_rain_threshold defaults to 1e-12 regardless of moment mode or liquid-fraction setting.
+        @test p3.process_rates.tiny_ice_to_rain_threshold == FT(1e-12)
         p3_three_moment = PredictedParticlePropertiesMicrophysics(
             FT; three_moment_ice = true,
             process_rates = ProcessRateParameters(
                 FT; liquid_fraction_active = false))
-        @test p3_three_moment.process_rates.qsmall_dry == FT(1e-12)
+        @test p3_three_moment.process_rates.tiny_ice_to_rain_threshold == FT(1e-12)
         overridden_qsmall = FT(3e-9)
         p3_overridden = PredictedParticlePropertiesMicrophysics(
             FT; three_moment_ice = true,
             process_rates = ProcessRateParameters(
                 FT; liquid_fraction_active = false,
-                qsmall_dry = overridden_qsmall))
-        @test p3_overridden.process_rates.qsmall_dry == overridden_qsmall
+                tiny_ice_to_rain_threshold = overridden_qsmall))
+        @test p3_overridden.process_rates.tiny_ice_to_rain_threshold == overridden_qsmall
 
         mixed_precision = PredictedParticlePropertiesMicrophysics(
             Float64; process_rates = ProcessRateParameters(
                 Float32; liquid_fraction_active = false))
-        @test mixed_precision.process_rates.qsmall_dry isa Float32
-        @test mixed_precision.process_rates.qsmall_dry == Float32(1e-12)
+        @test mixed_precision.process_rates.tiny_ice_to_rain_threshold isa Float32
+        @test mixed_precision.process_rates.tiny_ice_to_rain_threshold == Float32(1e-12)
 
         wet_growth_temperature = process_rates.freezing_temperature - FT(1e-3)
         wet_growth_vapor = FT(0.02)

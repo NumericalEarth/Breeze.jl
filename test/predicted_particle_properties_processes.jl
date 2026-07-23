@@ -180,7 +180,7 @@ function expected_fortran_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P,
     epsilon_i = FT(2π) * ρ * transport.D_v * max(max(0, nⁱ), FT(1e-16)) * C_fv
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
-             (Fˡ < p3.process_rates.liquid_fraction_small)
+             (Fˡ < p3.process_rates.liquid_fraction_clipping_threshold)
     return ifelse(active, epsilon_i, zero(FT))
 end
 
@@ -198,7 +198,7 @@ function expected_fortran_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T
     epsilon_iw = FT(2π) * ρ * transport.D_v * max(max(0, nⁱ), FT(1e-16)) * C_fv
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
-             (Fˡ >= p3.process_rates.liquid_fraction_small)
+             (Fˡ >= p3.process_rates.liquid_fraction_clipping_threshold)
     return ifelse(active, epsilon_iw, zero(FT))
 end
 

@@ -144,7 +144,7 @@ end
     prp = p3.process_rates
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) & (Fˡ < prp.liquid_fraction_small)
+    active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) & (Fˡ < prp.liquid_fraction_clipping_threshold)
     epsilon_i = ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                         constants, transport, q, μ)
     return ifelse(active, epsilon_i, zero(FT))
@@ -159,7 +159,7 @@ end
     prp = p3.process_rates
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) & (Fˡ >= prp.liquid_fraction_small)
+    active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) & (Fˡ >= prp.liquid_fraction_clipping_threshold)
     epsilon_iw = ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                          constants, transport, q, μ)
     return ifelse(active, epsilon_iw, zero(FT))
@@ -206,11 +206,11 @@ separately.
     ice_relaxation_active = qⁱ_total >= p3.minimum_mass_mixing_ratio
     ε_ice_relaxation = ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                               constants, transport, q, μ)
-    εⁱ = ifelse(ice_relaxation_active & (Fˡ < p3.process_rates.liquid_fraction_small),
+    εⁱ = ifelse(ice_relaxation_active & (Fˡ < p3.process_rates.liquid_fraction_clipping_threshold),
                 ε_ice_relaxation, zero(FT))
     # Fortran `epsiw_tot`: wet-ice surface condenses vapor as liquid, so it
     # couples through `ξˡ` (like cloud), not through the Bergeron coupling.
-    εⁱʷ = ifelse(ice_relaxation_active & (Fˡ >= p3.process_rates.liquid_fraction_small),
+    εⁱʷ = ifelse(ice_relaxation_active & (Fˡ >= p3.process_rates.liquid_fraction_clipping_threshold),
                  ε_ice_relaxation, zero(FT))
 
     ice_liquid_coupling = (1 + ℒⁱ * dqᵛ⁺ˡ_dT / cᵖᵈ) / ξⁱ
@@ -251,12 +251,12 @@ separately.
     # rate so the downstream cap (lines 943 / 946) can pull mass back from
     # vapor and restore the field. The qᵛ/τ caps still bound the magnitude.
     qi_raw = ifelse((𝒮ⁱ < FT(-0.001)) & (qⁱ_total < FT(1e-12)) &
-                    (Fˡ < p3.process_rates.liquid_fraction_small),
+                    (Fˡ < p3.process_rates.liquid_fraction_clipping_threshold),
                     -qⁱ / τ,
                     qi_raw)
     # Wet-ice tiny-mass instant evaporation of the liquid coating (Fortran 3753-3756).
     ql_raw = ifelse((𝒮ⁱ < FT(-0.001)) & (qⁱ_total < FT(1e-12)) &
-                    (Fˡ >= p3.process_rates.liquid_fraction_small),
+                    (Fˡ >= p3.process_rates.liquid_fraction_clipping_threshold),
                     -qʷⁱ / τ,
                     ql_raw)
 

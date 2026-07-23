@@ -34,7 +34,7 @@ struct ProcessRateParameters{FT}
 
     # Rain self-collection and breakup (KK2000 self-collection rate combined with
     # Verlinde-Cotton 1993 breakup multiplier; matches Fortran P3 v5.5.0 autoAccr_param=2)
-    self_collection_coefficient :: FT        # k_rr [-]
+    rain_self_collection_coefficient :: FT        # k_rr [-]
     rain_breakup_diameter_threshold :: FT    # D_th threshold for breakup [m] (1/λ_r convention)
     rain_breakup_coefficient :: FT           # κ_br [1/m]
 
@@ -69,11 +69,11 @@ struct ProcessRateParameters{FT}
     refreezing_timescale :: FT               # τ_frz [s]
 
     # Deposition nucleation (Cooper 1986)
-    nucleation_temperature_threshold :: FT   # T below which nucleation occurs [K]
-    nucleation_supersaturation_threshold :: FT  # Sⁱ threshold [-]
-    nucleation_maximum_concentration :: FT   # N_max [1/m³]
-    nucleation_timescale :: FT               # τ_nuc [s]
-    nucleation_coefficient :: FT             # Cooper (1986) prefactor [1/m³] (default 5.0)
+    ice_nucleation_temperature_threshold :: FT   # T below which nucleation occurs [K]
+    ice_nucleation_supersaturation_threshold :: FT  # Sⁱ threshold [-]
+    ice_nucleation_maximum_concentration :: FT   # N_max [1/m³]
+    ice_nucleation_timescale :: FT               # τ_nuc [s]
+    ice_nucleation_coefficient :: FT             # Cooper (1986) prefactor [1/m³] (default 5.0)
 
     # Immersion freezing (Barklie-Gokhale 1959)
     immersion_freezing_temperature_max :: FT # T_max [K]
@@ -136,7 +136,7 @@ struct ProcessRateParameters{FT}
     # Homogeneous freezing (Koop et al. 2000)
     homogeneous_freezing_temperature :: FT   # T < threshold: all cloud/rain freezes [K]
     homogeneous_freezing_timescale :: FT     # τ_hom [s], effective instantaneous
-    minimum_cloud_drop_mass :: FT           # mass-number consistency cap for N_hom [kg]
+    homogeneous_freezing_minimum_drop_mass :: FT           # mass-number consistency cap for N_hom [kg]
 
     # Rime densification
     rime_densification_timescale :: FT       # τ_densif [s]
@@ -162,11 +162,11 @@ struct ProcessRateParameters{FT}
     # Liquid fraction clipping threshold (Milbrandt et al. 2025)
     # Fl < this: instantly freeze all qwi to rime; Fl > (1 - this): fully melt to rain.
     # Implemented as a relaxation drain over refreezing_timescale.
-    liquid_fraction_small :: FT              # Fortran liqfracsmall [-]
+    liquid_fraction_clipping_threshold :: FT              # Fortran liqfracsmall [-]
 
     # M12(c): Tiny-ice threshold for warm pre-processing (Fortran qsmall_dry).
     # Ice with qi ∈ [qsmall, qsmall_dry) at T ≥ T₀ is converted to rain.
-    qsmall_dry :: FT                         # [kg/kg]
+    tiny_ice_to_rain_threshold :: FT                         # [kg/kg]
 
     # Liquid fraction mode (Fortran log_LiquidFrac).
     # When true: wet growth rime densification is suppressed (liquid tracked
@@ -251,7 +251,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         accretion_exponent = 1.15,
 
         # Rain self-collection and breakup
-        self_collection_coefficient = 5.78,
+        rain_self_collection_coefficient = 5.78,
         rain_breakup_diameter_threshold = 280e-6,  # 280 μm: Fortran P3 breakup threshold (1/λ_r convention)
         rain_breakup_coefficient = 2300.0,
 
@@ -287,11 +287,11 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         refreezing_timescale = 10.0,
 
         # Deposition nucleation
-        nucleation_temperature_threshold = 258.15,
-        nucleation_supersaturation_threshold = 0.05,
-        nucleation_maximum_concentration = 100e3,
-        nucleation_timescale = 10.0,
-        nucleation_coefficient = 5.0,
+        ice_nucleation_temperature_threshold = 258.15,
+        ice_nucleation_supersaturation_threshold = 0.05,
+        ice_nucleation_maximum_concentration = 100e3,
+        ice_nucleation_timescale = 10.0,
+        ice_nucleation_coefficient = 5.0,
 
         # Immersion freezing
         immersion_freezing_temperature_max = 269.15,
@@ -366,7 +366,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         homogeneous_freezing_timescale = 10.0,
         # Mass-number consistency cap: at most one particle per minimum-size droplet
         # (≈ 6 μm radius cloud droplet → m ≈ 4/3 π ρ_w r³ ≈ 9e-13 kg; use 1e-12 kg)
-        minimum_cloud_drop_mass = 1e-12,
+        homogeneous_freezing_minimum_drop_mass = 1e-12,
 
         # Rime densification
         rime_densification_timescale = 10.0,
@@ -387,14 +387,14 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         maximum_ice_number_density = 2e6,  # [1/m³], Fortran impose_max_Ni cap
 
         # Liquid fraction clipping (Milbrandt et al. 2025)
-        liquid_fraction_small = 0.01,  # Fortran liqfracsmall
+        liquid_fraction_clipping_threshold = 0.01,  # Fortran liqfracsmall
 
         # Liquid fraction mode (Fortran log_LiquidFrac)
         liquid_fraction_active = true,
 
         # M12(c): Tiny-ice threshold for warm pre-processing (Fortran qsmall_dry).
         # Ice with qi ∈ [qsmall, qsmall_dry) at T ≥ T₀ is converted to rain.
-        qsmall_dry = 1e-12,
+        tiny_ice_to_rain_threshold = 1e-12,
 
         # Predicted supersaturation (Fortran log_predictSsat, default .false.)
         predict_supersaturation = false,
@@ -424,7 +424,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(autoconversion_reference_concentration),
         FT(accretion_coefficient),
         FT(accretion_exponent),
-        FT(self_collection_coefficient),
+        FT(rain_self_collection_coefficient),
         FT(rain_breakup_diameter_threshold),
         FT(rain_breakup_coefficient),
         FT(rain_evaporation_timescale),
@@ -443,11 +443,11 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(shed_drop_mass),
         FT(shed_drop_mass_liqfrac),
         FT(refreezing_timescale),
-        FT(nucleation_temperature_threshold),
-        FT(nucleation_supersaturation_threshold),
-        FT(nucleation_maximum_concentration),
-        FT(nucleation_timescale),
-        FT(nucleation_coefficient),
+        FT(ice_nucleation_temperature_threshold),
+        FT(ice_nucleation_supersaturation_threshold),
+        FT(ice_nucleation_maximum_concentration),
+        FT(ice_nucleation_timescale),
+        FT(ice_nucleation_coefficient),
         FT(immersion_freezing_temperature_max),
         FT(immersion_freezing_coefficient),
         FT(splintering_temperature_low),
@@ -487,15 +487,15 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(freezing_rain_psd_correction),
         FT(homogeneous_freezing_temperature),
         FT(homogeneous_freezing_timescale),
-        FT(minimum_cloud_drop_mass),
+        FT(homogeneous_freezing_minimum_drop_mass),
         FT(rime_densification_timescale),
         FT(rain_lambda_min),
         FT(rain_lambda_max),
         FT(sink_limiting_timescale),
         Int(coupled_sink_limiting_iterations),
         FT(maximum_ice_number_density),
-        FT(liquid_fraction_small),
-        FT(qsmall_dry),
+        FT(liquid_fraction_clipping_threshold),
+        FT(tiny_ice_to_rain_threshold),
         Bool(liquid_fraction_active),
         Bool(predict_supersaturation),
         FT(calibration_factor_deposition),

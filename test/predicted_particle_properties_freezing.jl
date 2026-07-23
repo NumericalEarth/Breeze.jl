@@ -601,7 +601,7 @@ using Oceananigans.Fields: interior
         @test prp.freezing_rain_psd_correction ≈ 20.0 atol=0.01
 
         @test prp.reference_air_density ≈ 100000 / (dry_air_gas_constant(ThermodynamicConstants(Float64)) * 273.15) rtol=1e-12
-        @test prp.nucleation_supersaturation_threshold == 0.05
+        @test prp.ice_nucleation_supersaturation_threshold == 0.05
         @test prp.rain_lambda_min == 500.0
         @test prp.rain_lambda_max == 100000.0
 

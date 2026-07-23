@@ -200,7 +200,7 @@ KK2000 (default) and SB2001 share the same linear form `k_rr × ρ × qʳ × nʳ
     active = qʳ_eff >= p3.minimum_mass_mixing_ratio
 
     # KK2000 / SB2001: |∂nʳ/∂t| = k_rr × ρ × qʳ × nʳ
-    k_rr = prp.self_collection_coefficient
+    k_rr = prp.rain_self_collection_coefficient
     rate = k_rr * ρ * qʳ_eff * nʳ_eff
     return ifelse(active, rate, zero(FT))
 end

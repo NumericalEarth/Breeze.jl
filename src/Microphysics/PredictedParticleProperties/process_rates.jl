@@ -505,7 +505,7 @@ end
     refrz = ifelse(prp.liquid_fraction_active, refrz, zero(FT))
 
     # Liquid fraction clipping
-    Fl_small = prp.liquid_fraction_small
+    Fl_small = prp.liquid_fraction_clipping_threshold
     τ_clip = prp.refreezing_timescale
     qʷⁱ_eff = clamp_positive(qʷⁱ)
     clip_freeze = prp.liquid_fraction_active & (T < T₀) & (Fˡ < Fl_small) & (Fˡ > 0)
@@ -519,7 +519,7 @@ end
     warm_liquid_clip = (T >= T₀) & (Fˡ > 1 - Fl_small) & has_clip_mass
     high_liquid_fraction_clip = (Fˡ > FT(0.99)) & has_clip_mass
     tiny_warm_ice = (T >= T₀) & has_clip_mass &
-                    (qⁱ_total_clip < prp.qsmall_dry)
+                    (qⁱ_total_clip < prp.tiny_ice_to_rain_threshold)
     liquid_fraction_clipping = prp.liquid_fraction_active &
                                (warm_liquid_clip | high_liquid_fraction_clip)
     whole_particle_clipping = liquid_fraction_clipping | tiny_warm_ice
@@ -1038,7 +1038,7 @@ end
                                             zero(FT))
     post_process_clipping_active = prp.liquid_fraction_active &
                                    (total_ice_remaining >= p3.minimum_mass_mixing_ratio) &
-                                   (liquid_fraction_remaining > 1 - prp.liquid_fraction_small)
+                                   (liquid_fraction_remaining > 1 - prp.liquid_fraction_clipping_threshold)
 
     # Rime companions are reconstructed with the same formulas used by the
     # prognostic tendencies, excluding homogeneous freezing, which occurs after

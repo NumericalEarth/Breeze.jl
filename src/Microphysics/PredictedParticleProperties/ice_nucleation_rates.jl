@@ -29,13 +29,13 @@ cloud-side vapor state here rather than a grid-mean vapor state.
     FT = typeof(T)
     prp = p3.process_rates
 
-    T_threshold = prp.nucleation_temperature_threshold
-    Sⁱ_threshold = prp.nucleation_supersaturation_threshold
-    N_max = prp.nucleation_maximum_concentration
-    τ_nuc = prp.nucleation_timescale
+    T_threshold = prp.ice_nucleation_temperature_threshold
+    Sⁱ_threshold = prp.ice_nucleation_supersaturation_threshold
+    N_max = prp.ice_nucleation_maximum_concentration
+    τ_nuc = prp.ice_nucleation_timescale
     T₀ = prp.freezing_temperature
     mᵢ₀ = prp.nucleated_ice_mass
-    c_nuc = prp.nucleation_coefficient
+    c_nuc = prp.ice_nucleation_coefficient
 
     # Ice supersaturation. Fortran uses cloud-side `supi_cld`; with the current
     # LES-only `SCF = 1` formulation, `qᵛ` is that local/cloud-side value.
