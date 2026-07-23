@@ -60,7 +60,7 @@ export
     mixture_gas_constant,
     mixture_heat_capacity,
     dynamics_density,
-    dynamics_pressure,
+    mean_pressure,
 
     # Advective timescale control for the time-step wizard
     CellAdvectionTimescale,

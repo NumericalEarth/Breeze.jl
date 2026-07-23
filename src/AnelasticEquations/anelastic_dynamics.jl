@@ -115,16 +115,6 @@ reference state density ``ρᵣ(z)``.
 """
 AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
-"""
-$(TYPEDSIGNATURES)
-
-Return the reference pressure field for `AnelasticDynamics`.
-
-For anelastic models, the dynamics pressure is the time-independent
-hydrostatic reference state pressure ``pᵣ(z)``.
-"""
-AtmosphereModels.dynamics_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
-
 #####
 ##### Prognostic fields
 #####

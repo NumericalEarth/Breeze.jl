@@ -88,7 +88,7 @@ function AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid,
                                                        q)
 
     e = @inbounds formulation.specific_energy[i, j, k]
-    pᵣ = @inbounds dynamics_pressure(dynamics)[i, j, k]
+    pᵣ = @inbounds mean_pressure(dynamics)[i, j, k]
     z = znode(i, j, k, grid, c, c, c)
 
     return StaticEnergyState(e, q, z, pᵣ)

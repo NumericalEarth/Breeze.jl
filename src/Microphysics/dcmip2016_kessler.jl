@@ -13,7 +13,7 @@ using ..Thermodynamics:
 
 using ..AtmosphereModels:
     dynamics_density,
-    dynamics_pressure,
+    mean_pressure,
     standard_pressure
 
 using ..ParcelModels: ParcelModel
@@ -457,7 +457,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # Density and pressure fields (compatible with both Anelastic and Compressible dynamics)
     ρ = dynamics_density(model.dynamics)
-    p = dynamics_pressure(model.dynamics)
+    p = mean_pressure(model.dynamics)
 
     # Standard pressure (reference pressure for the Exner function, pˢᵗ)
     pˢᵗ = standard_pressure(model.dynamics)

@@ -133,7 +133,6 @@ AtmosphereModels.dynamics_prognostic_fields(d::PrescribedDynamics) = (; ρ=dynam
 
 # Pressure accessors
 AtmosphereModels.dynamics_pressure_solver(::PrescribedDynamics, grid) = nothing
-AtmosphereModels.dynamics_pressure(d::PrescribedDynamics) = d.pressure
 AtmosphereModels.mean_pressure(d::PrescribedDynamics) = d.pressure
 AtmosphereModels.pressure_anomaly(::PrescribedDynamics) = ZeroField()
 AtmosphereModels.total_pressure(d::PrescribedDynamics) = d.pressure
