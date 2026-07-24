@@ -198,7 +198,7 @@ Variables are set via keyword arguments. Supported variables include:
   `CompressibleDynamics` and `AnelasticDynamics`.
 """
 function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true,
-                     compute_reference_state=nothing, balancer=false, kw...)
+                     compute_reference_state=false, balancer=false, kw...)
     if !isnothing(time)
         model.clock.time = time
     end
