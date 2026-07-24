@@ -2,7 +2,7 @@ using Breeze
 using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
-using Breeze.AtmosphereModels: microphysics_model_update!
+using Breeze.AtmosphereModels: microphysics_model_update!, surface_precipitation_flux
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -35,7 +35,9 @@ for rain sedimentation CFL constraints.
 References: DCMIP2016 Fortran implementation (`kessler.f90` in [DOI: 10.5281/zenodo.1298671](https://doi.org/10.5281/zenodo.1298671))
 
 """
-function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constants, microphysics)
+function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constants, microphysics;
+                                             sedimentation_density = ρ,
+                                             dry_air_coupled = false)
     Nz = length(T)
     FT = eltype(T)
 
@@ -101,8 +103,16 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
     # Subcycling
     Ns = max(1, ceil(Int, Δt / max_Δt))
     Δtₛ = Δt / Ns
+    surface_mass_flux = zero(FT)
 
     for s = 1:Ns
+        rᵗ₁ = rᵛ[1] + rᶜˡ[1] + rʳ[1]
+        qʳ₁ = rʳ[1] / (1 + rᵗ₁)
+        ρqʳ₁ = ifelse(dry_air_coupled,
+                      sedimentation_density[1] * rʳ[1],
+                      ρ[1] * qʳ₁)
+        surface_mass_flux += ρqʳ₁ * 𝕎ʳ[1]
+
         zᵏ = z[1]
 
         for k = 1:Nz
@@ -121,9 +131,9 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
             if k < Nz
                 zᵏ⁺¹ = z[k+1]
                 Δz = zᵏ⁺¹ - zᵏ
-                flux_out = ρ[k+1] * rʳ[k+1] * 𝕎ʳ[k+1]
-                flux_in = ρ[k] * rʳ[k] * 𝕎ʳ[k]
-                Δr𝕎 = Δtₛ * (flux_out - flux_in) / (ρ[k] * Δz)
+                flux_out = sedimentation_density[k+1] * rʳ[k+1] * 𝕎ʳ[k+1]
+                flux_in = sedimentation_density[k] * rʳ[k] * 𝕎ʳ[k]
+                Δr𝕎 = Δtₛ * (flux_out - flux_in) / (sedimentation_density[k] * Δz)
                 zᵏ = zᵏ⁺¹
             else
                 Δz_half = 0.5 * (z[k] - z[k-1])
@@ -201,6 +211,8 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
         Π = (p[k] / p₀)^(Rᵐ / cᵖᵐ)
         T[k] = Π * θˡⁱ[k] + ℒˡᵣ * (qᶜˡ[k] + qʳ[k]) / cᵖᵐ
     end
+
+    return surface_mass_flux / Ns
 end
 
 #####
@@ -397,6 +409,108 @@ end
     @test qᵛ_breeze ≈ qᵛ_ref rtol=1e-12
     @test qᶜˡ_breeze ≈ qᶜˡ_ref rtol=1e-12
     @test qʳ_breeze ≈ qʳ_ref rtol=1e-12
+end
+
+@testset "Compressible Kessler density roles" begin
+    FT = Float64
+    Nx = 5
+    Nz = 8
+    grid = RectilinearGrid(default_arch, FT;
+                           size = (Nx, Nx, Nz),
+                           halo = (5, 5, 5),
+                           x = (0, 500),
+                           y = (0, 500),
+                           z = (0, 800),
+                           topology = (Periodic, Periodic, Bounded))
+
+    constants = ThermodynamicConstants(FT; saturation_vapor_pressure = TetensFormula(FT))
+    microphysics = DCMIP2016KesslerMicrophysics(FT)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                    surface_pressure = FT(1e5),
+                                    standard_pressure = FT(1e5),
+                                    reference_potential_temperature = z -> FT(285))
+    model = AtmosphereModel(grid; dynamics, microphysics,
+                            thermodynamic_constants = constants,
+                            timestepper = :AcousticRungeKutta3)
+
+    # A deliberately moist state keeps total and dry density measurably distinct. Cloud and rain
+    # activate phase conversion and sedimentation, so using the wrong density changes the result.
+    qʳ_profile(x, y, z) = FT(0.003) * exp(-z / FT(250))
+    set!(model; ρ = FT(1.1), T = FT(285), qᵛ = FT(0.016),
+         qᶜˡ = FT(0.004), qʳ = qʳ_profile, enforce_mass_conservation = false)
+    update_state!(model)
+
+    column(field) = vec(Array(interior(field, 1, 1, :)))
+    ρ = column(model.dynamics.total_density)
+    ρᵈ = column(model.dynamics.dry_density)
+    p = column(model.dynamics.pressure)
+    T = column(model.temperature)
+    qᵛ = column(model.moisture_density) ./ ρ
+    qᶜˡ = column(model.microphysical_fields.ρqᶜˡ) ./ ρ
+    qʳ = column(model.microphysical_fields.ρqʳ) ./ ρ
+    z = collect(znodes(grid, Center()))
+
+    @test all(ρ .> ρᵈ)
+
+    # Advance an independent column reference from the exact diagnosed pre-update state. The
+    # Kessler physics consumes total air density; its thermodynamic prognostic remains ρᵈθˡⁱ.
+    Δt = FT(20)
+    T_ref = copy(T)
+    qᵛ_ref = copy(qᵛ)
+    qᶜˡ_ref = copy(qᶜˡ)
+    qʳ_ref = copy(qʳ)
+    surface_mass_flux_ref =
+        dcmip2016_klemp_wilhelmson_kessler!(T_ref, qᵛ_ref, qᶜˡ_ref, qʳ_ref,
+                                            ρ, p, Δt, z, constants, microphysics;
+                                            sedimentation_density = ρᵈ,
+                                            dry_air_coupled = true)
+
+    qᵗ_ref = qᵛ_ref .+ qᶜˡ_ref .+ qʳ_ref
+    rᵛ_ref = qᵛ_ref ./ (1 .- qᵗ_ref)
+    rᶜˡ_ref = qᶜˡ_ref ./ (1 .- qᵗ_ref)
+    rʳ_ref = qʳ_ref ./ (1 .- qᵗ_ref)
+
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    θˡⁱ_ref = similar(T_ref)
+    for k in eachindex(T_ref)
+        q = MoistureMassFractions(qᵛ_ref[k], qᶜˡ_ref[k] + qʳ_ref[k])
+        cᵖᵐ = mixture_heat_capacity(q, constants)
+        Rᵐ = mixture_gas_constant(q, constants)
+        Π = (p[k] / FT(1e5))^(Rᵐ / cᵖᵐ)
+        θˡⁱ_ref[k] = (T_ref[k] - ℒˡᵣ * (qᶜˡ_ref[k] + qʳ_ref[k]) / cᵖᵐ) / Π
+    end
+
+    model.clock.last_Δt = Δt
+    microphysics_model_update!(model.microphysics, model)
+
+    rtol = 1e-10
+    for i in 1:Nx, j in 1:Nx
+        @test vec(Array(interior(model.moisture_density, i, j, :))) ≈ ρᵈ .* rᵛ_ref rtol=rtol
+        @test vec(Array(interior(model.microphysical_fields.ρqᶜˡ, i, j, :))) ≈ ρᵈ .* rᶜˡ_ref rtol=rtol
+        @test vec(Array(interior(model.microphysical_fields.ρqʳ, i, j, :))) ≈ ρᵈ .* rʳ_ref rtol=rtol
+        @test vec(Array(interior(model.formulation.potential_temperature_density, i, j, :))) ≈
+              ρᵈ .* θˡⁱ_ref rtol=rtol
+    end
+
+    # Re-diagnosing total density after writeback must recover the same q/r state, rather than
+    # silently changing it because old total density was used after sedimentation.
+    ρ_new = column(model.dynamics.total_density)
+    @test ρ_new[1] < ρ[1] # net rain outflow makes old and final surface density distinct
+    @test column(model.moisture_density) ./ ρ_new ≈ qᵛ_ref rtol=rtol
+    @test column(model.microphysical_fields.ρqᶜˡ) ./ ρ_new ≈ qᶜˡ_ref rtol=rtol
+    @test column(model.microphysical_fields.ρqʳ) ./ ρ_new ≈ qʳ_ref rtol=rtol
+
+    # The public surface flux must use the compressible model's total surface density, not its
+    # dry density (nor a reference-state density).
+    precipitation_rate = Array(interior(model.microphysical_fields.precipitation_rate))
+    precipitation_flux = Array(interior(compute!(surface_precipitation_flux(model))))
+    surface_ρ = Array(interior(model.dynamics.total_density, :, :, 1))
+    surface_ρᵈ = Array(interior(model.dynamics.dry_density, :, :, 1))
+
+    @test all(precipitation_rate .> 0)
+    @test precipitation_flux ≈ surface_ρ .* precipitation_rate rtol=rtol
+    @test all(≈(surface_mass_flux_ref; rtol), precipitation_flux)
+    @test maximum(abs.(precipitation_flux .- surface_ρᵈ .* precipitation_rate)) > 1e-8
 end
 
 @testset "Thermodynamic constants validation" begin

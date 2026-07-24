@@ -402,6 +402,11 @@ Pressure is computed diagnostically from the equation of state.
 """
 AtmosphereModels.dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
+@inline AtmosphereModels.pressure_from_density_temperature(i, j, k,
+                                                            dynamics::CompressibleDynamics,
+                                                            ρ, T, q, constants) =
+    ρ * mixture_gas_constant(q, constants) * T
+
 #####
 ##### Prognostic fields
 #####

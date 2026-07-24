@@ -49,6 +49,7 @@ export
     WarmRainState,
     microphysical_state,
     microphysical_tendency,
+    prepare_microphysical_tendencies!,
     compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,
@@ -81,6 +82,9 @@ export
 
     # Cloud effective radius
     ConstantRadiusParticles,
+
+    # Microphysics interface
+    prognostic_field_names,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,

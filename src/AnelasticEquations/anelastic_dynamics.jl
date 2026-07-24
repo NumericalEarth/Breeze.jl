@@ -115,6 +115,12 @@ reference state density ``ρᵣ(z)``.
 """
 AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
+@inline function AtmosphereModels.humidity_density(i, j, k, dynamics::AnelasticDynamics,
+                                                    T, q, constants)
+    @inbounds p = dynamics.reference_state.pressure[i, j, k]
+    return density(T, p, q, constants)
+end
+
 """
 $(TYPEDSIGNATURES)
 

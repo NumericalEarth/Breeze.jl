@@ -149,6 +149,18 @@ overrides it with a diagnosed total-density field, distinct from the coupling de
 total_density(dynamics) = dynamics_density(dynamics)
 
 """
+$(TYPEDSIGNATURES)
+
+Return the gas density used to convert vapor mass fraction into vapor partial pressure.
+The default uses [`total_density`](@ref), appropriate to fully compressible and prescribed-density
+models. Reference-density dynamics may override this when their thermodynamic pressure and current
+temperature/composition imply a different equation-of-state density.
+"""
+@inline function humidity_density(i, j, k, dynamics, T, q, constants)
+    return @inbounds total_density(dynamics)[i, j, k]
+end
+
+"""
     advecting_vertical_velocity(dynamics, velocities)
 
 Return the vertical velocity that advects momentum through the grid's coordinate surfaces:
@@ -169,6 +181,19 @@ For anelastic dynamics, returns the reference pressure (hydrostatic background s
 For compressible dynamics, returns the prognostic pressure field.
 """
 function dynamics_pressure end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return pressure consistent with a prescribed temperature during thermodynamic initialization.
+
+The default retains the dynamics pressure (appropriate for anelastic/reference-pressure models).
+Compressible dynamics overrides this with the equation of state `p = ρ Rᵐ T`, avoiding a
+fixed-point error when density or composition was changed immediately before setting temperature.
+"""
+@inline function pressure_from_density_temperature(i, j, k, dynamics, ρ, T, q, constants)
+    return @inbounds dynamics_pressure(dynamics)[i, j, k]
+end
 
 #####
 ##### Buoyancy interface

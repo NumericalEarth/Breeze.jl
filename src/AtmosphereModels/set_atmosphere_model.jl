@@ -58,7 +58,7 @@ function set_momentum!(model::AtmosphereModel, name::Symbol, value)
 end
 
 """
-    establish_densities!(model, total_density_given, dry_density_given)
+$(TYPEDSIGNATURES)
 
 Mid-`set!` hook (run after density + moisture are set, before the thermodynamic variable and
 velocities) that makes the dry density `ρᵈ` and the diagnosed total density `ρ` mutually consistent
@@ -75,7 +75,23 @@ and available to the phase-2 kernels. The two density-input modes need different
 No-op by default (single-density formulations like anelastic, where `total_density === dynamics_density`);
 `CompressibleModel` overrides it.
 """
-establish_densities!(model, total_density_given, dry_density_given) = nothing
+establish_densities!(model, total_density_given, dry_density_given,
+                     moisture_given=false, specific_moisture_given=false,
+                     total_moisture_given=false,
+                     specific_microphysical_names=()) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Reconcile dry and total density after relative humidity has diagnosed specific vapor.
+
+Relative humidity is evaluated only after the thermodynamic state is available, later than the
+usual [`establish_densities!`](@ref) pass. Compressible dynamics overrides this hook to preserve a
+supplied total density, or otherwise preserve dry density, while converting the diagnosed vapor
+and any specifically supplied microphysical moments to total-density-weighted prognostics.
+"""
+establish_relative_humidity_densities!(model, total_density_given,
+                                       specific_microphysical_names=()) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -211,9 +227,38 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     balanced_density    = get(kw, :ρ, nothing)
     hydrostatic_balance = balanced_density isa HydrostaticallyBalancedDensity
 
+    (:ρ ∈ names && :ρᵈ ∈ names) &&
+        throw(ArgumentError("set! cannot set both total density ρ and dry density ρᵈ"))
+
     total_density_given = (:ρ ∈ names) && !hydrostatic_balance
     dry_density_given   = :ρᵈ ∈ names
     prioritized = prioritize_names(names)
+
+    direct_moisture_input_names =
+        filter(name -> name ∈ (:qᵗ, :ρqᵗ, :qᵛ, :ρqᵛ, :qᵉ, :ρqᵉ), names)
+    moisture_input_names =
+        filter(name -> name ∈ (:qᵗ, :ρqᵗ, :qᵛ, :ρqᵛ, :qᵉ, :ρqᵉ, :ℋ), names)
+    length(moisture_input_names) ≤ 1 ||
+        throw(ArgumentError("set! accepts only one moisture representation, got $moisture_input_names"))
+
+    relative_humidity_given = :ℋ ∈ names
+    hydrostatic_balance && relative_humidity_given &&
+        throw(ArgumentError("HydrostaticallyBalancedDensity cannot be combined with ℋ because " *
+                            "the hydrostatic solve changes the pressure used to diagnose saturation"))
+
+    moisture_given = !isempty(direct_moisture_input_names)
+    specific_moisture_given = any(name -> name ∈ (:qᵗ, :qᵛ, :qᵉ), names)
+    total_moisture_given = any(name -> name ∈ (:qᵗ, :ρqᵗ), names)
+    total_moisture_was_set = total_moisture_given
+
+    settable_specific_names = settable_specific_microphysical_names(model.microphysics)
+    specific_microphysical_names = Tuple(name for name in names if name ∈ settable_specific_names)
+
+    for specific_name in specific_microphysical_names
+        density_name = specific_to_density_weighted(specific_name)
+        density_name ∈ names &&
+            throw(ArgumentError("set! cannot set both $specific_name and $density_name"))
+    end
 
     # Two-phase application. The thermodynamic variable (coupling-weighted: ρθ = ρᵈθ) and the
     # kinematic fields (momentum ρu = ρᵈu) read the dry density ρᵈ AND the total density ρ, so they
@@ -234,7 +279,13 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             c = getproperty(model.tracers, name)
             set!(c, value)
 
-        elseif name ∈ (:ρqᵗ, :ρqᵛ, :ρqᵉ)
+        elseif name == :ρqᵗ
+            set!(model.moisture_density, value)
+            ρ = dynamics_density(model.dynamics)
+            qᵛᵉ = specific_prognostic_moisture(model)
+            set!(qᵛᵉ, model.moisture_density / ρ)
+
+        elseif name ∈ (:ρqᵛ, :ρqᵉ)
             set!(model.moisture_density, value)
             ρ = dynamics_density(model.dynamics)
             qᵛᵉ = specific_prognostic_moisture(model)
@@ -252,7 +303,13 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             ρ = dynamics_density(model.dynamics)
             set!(ρμ, ρ * ρμ)
 
-        elseif name ∈ (:qᵗ, :qᵛ, :qᵉ)
+        elseif name == :qᵗ
+            qᵛᵉ = specific_prognostic_moisture(model)
+            set!(qᵛᵉ, value)
+            ρ = dynamics_density(model.dynamics)
+            set!(model.moisture_density, ρ * qᵛᵉ)
+
+        elseif name ∈ (:qᵛ, :qᵉ)
             qᵛᵉ = specific_prognostic_moisture(model)
             set!(qᵛᵉ, value)
             ρ = dynamics_density(model.dynamics)
@@ -278,10 +335,10 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             # Call update_state! to ensure temperature is computed from thermodynamic variables
             update_state!(model, compute_tendencies=false)
 
-            # Compute saturation specific humidity into a concrete field.
-            # This must be materialized before overwriting qᵗ, because
-            # SaturationSpecificHumidity reads qᵗ by reference.
-            qᵛ⁺ = Field(SaturationSpecificHumidity(model, :equilibrium))
+            # Compute saturation specific humidity from the current temperature and
+            # total density into a concrete field. Materialize before overwriting the
+            # prognostic moisture because the diagnostic references model fields.
+            qᵛ⁺ = Field(SaturationSpecificHumidity(model, :prognostic))
 
             # Set specific prognostic moisture = ℋ * qᵛ⁺
             qᵛᵉ = specific_prognostic_moisture(model)
@@ -292,7 +349,10 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set!(qᵛᵉ, value)
             set!(qᵛᵉ, qᵛᵉ * qᵛ⁺)
 
-            ρ = dynamics_density(model.dynamics)
+            # Store the requested vapor partial density. In compressible dynamics this
+            # must use total density: ρ qᵛ = ℋ pᵛ⁺ / (Rᵛ T), which remains
+            # invariant while the dry/total densities are reconciled below.
+            ρ = total_density(model.dynamics)
             set!(model.moisture_density, ρ * qᵛᵉ)
 
         else
@@ -323,11 +383,47 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
     # Make ρᵈ and the diagnosed total density ρ mutually consistent for whichever density was given
     # (no-op for non-compressible dynamics).
-    establish_densities!(model, total_density_given, dry_density_given)
+    establish_densities!(model, total_density_given, dry_density_given,
+                         moisture_given, specific_moisture_given, total_moisture_given,
+                         specific_microphysical_names)
 
-    # Phase 2: thermodynamic variable, ℋ, and kinematic fields — these read the established densities.
-    for name in prioritized
-        is_phase_two(name) && apply_set!(name, kw[name])
+    if total_moisture_was_set
+        # The moisture and microphysical prognostics are total-air mass fractions.
+        # For compressible dynamics this differs from the dry coupling density ρᵈ.
+        ρ = total_density(model.dynamics)
+        qᵗ = model.moisture_density / ρ
+
+        if !isnothing(model.microphysics) &&
+           hasmethod(specific_prognostic_moisture_from_total,
+                     Tuple{typeof(model.microphysics), typeof(qᵗ), typeof(model.microphysical_fields), typeof(ρ)})
+            qᵛᵉ = specific_prognostic_moisture(model)
+            set!(qᵛᵉ, specific_prognostic_moisture_from_total(model.microphysics, qᵗ, model.microphysical_fields, ρ))
+            set!(model.moisture_density, ρ * qᵛᵉ)
+        end
+    end
+
+    # Phase 2: thermodynamic variable, ℋ, and kinematic fields. Relative humidity needs a
+    # preliminary thermodynamic state to diagnose saturation, then a second density-reconciliation
+    # pass because the diagnosed vapor was not available during `establish_densities!`. Reapply the
+    # other phase-2 inputs afterwards so their density weighting uses the final moist state.
+    if relative_humidity_given
+        for name in prioritized
+            name ∈ settable_thermodynamic_variables && apply_set!(name, kw[name])
+        end
+
+        apply_set!(:ℋ, kw[:ℋ])
+
+        establish_relative_humidity_densities!(model, total_density_given,
+                                                specific_microphysical_names)
+        update_state!(model, compute_tendencies=false)
+
+        for name in prioritized
+            name !== :ℋ && is_phase_two(name) && apply_set!(name, kw[name])
+        end
+    else
+        for name in prioritized
+            is_phase_two(name) && apply_set!(name, kw[name])
+        end
     end
 
     # Apply a mask

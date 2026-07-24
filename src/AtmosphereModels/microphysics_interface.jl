@@ -19,7 +19,8 @@
 #    schemes write a fused kernel that computes the bundle once per cell.
 #
 # The model never calls `microphysical_tendency` directly during tendency assembly —
-# `compute_microphysical_tendencies!` is the only entry point.
+# `compute_microphysical_tendencies!` is the entry point that adds microphysical
+# sources to `Gⁿ`.
 #####
 
 using Oceananigans.Fields: set!
@@ -227,17 +228,41 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 ##### Fused microphysical tendency interface
 #####
 #
+# `prepare_microphysical_tendencies!` refreshes stage-local diagnostics consumed
+# while assembling tendencies, such as terminal velocities and process-rate caches.
+# It runs before the scalar kernels so sedimentation uses the current RK-stage state.
+#
 # `compute_microphysical_tendencies!` is the single entry point through which the
-# atmosphere model invokes microphysics during tendency assembly. The model calls it
+# atmosphere model adds microphysical sources during tendency assembly. The model calls it
 # *after* the per-tracer dynamics kernels have written advection + diffusion + forcing
 # into `Gⁿ`; microphysics contributions are added on top via `+=`.
 
 """
 $(TYPEDSIGNATURES)
 
+Prepare stage-local microphysical diagnostics used during tendency assembly.
+
+`compute_tendencies!` calls this once per RK stage before thermodynamic and scalar
+tendencies are evaluated. Schemes should extend the two-argument helper
+`prepare_microphysical_tendencies!(microphysics, model)` when their tendencies or
+sedimentation velocities require a fused precomputation from the current stage state.
+The default is a no-op.
+
+This hook must not advance prognostic fields. Full-step, operator-split updates belong
+in [`microphysics_model_update!`](@ref).
+"""
+prepare_microphysical_tendencies!(model) =
+    prepare_microphysical_tendencies!(model.microphysics, model)
+
+prepare_microphysical_tendencies!(microphysics, model) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
 Add microphysics tendency contributions to the model's `Gⁿ` fields.
 
-This is the only entry point through which `compute_tendencies!` invokes microphysics.
+This is the only entry point through which `compute_tendencies!` adds microphysical
+sources to the model's `Gⁿ` fields.
 Concrete implementations add methods on the two-argument helper
 `compute_microphysical_tendencies!(microphysics, model)`.
 
