@@ -1,7 +1,7 @@
 using Breeze
 using Breeze.AtmosphereModels: microphysical_velocities
 using CloudMicrophysics
-using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
+using CloudMicrophysics.Parameters: CloudLiquid, CloudIce, Microphysics1MParams
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
@@ -25,6 +25,37 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     @test μ1.cloud_formation isa NonEquilibriumCloudFormation
     @test μ1.cloud_formation.liquid isa ConstantRateCondensateFormation
     @test μ1.cloud_formation.ice === nothing
+    @test μ1.categories.parameters isa Microphysics1MParams
+    @test μ1.categories.hydrometeor_velocities.blk1m === μ1.categories.parameters.terminal_velocity
+    @test μ1.categories.freezing_temperature === FT(273.15)
+
+    converted_categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(
+        FT;
+        freezing_temperature = 273,
+    )
+    @test converted_categories.freezing_temperature === FT(273)
+
+    # Disabled formation options materialize as zero-rate Breeze models.
+    disabled_parameters = Microphysics1MParams(
+        FT;
+        cloud_liquid_formation = nothing,
+        cloud_ice_formation = nothing,
+    )
+    disabled_categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(
+        FT;
+        parameters = disabled_parameters,
+    )
+    μ1_disabled = OneMomentCloudMicrophysics(FT; categories = disabled_categories)
+    @test iszero(μ1_disabled.cloud_formation.liquid.rate)
+    @test μ1_disabled.cloud_formation.ice === nothing
+
+    disabled_mixed_formation = NonEquilibriumCloudFormation(nothing, CloudIce(FT))
+    μ1_disabled_mixed = OneMomentCloudMicrophysics(
+        FT;
+        categories = disabled_categories,
+        cloud_formation = disabled_mixed_formation,
+    )
+    @test iszero(μ1_disabled_mixed.cloud_formation.ice.rate)
 
     μ1_vertical = OneMomentCloudMicrophysics(FT;
                                              negative_moisture_correction = Breeze.AtmosphereModels.VerticalBorrowing())
@@ -163,7 +194,6 @@ end
     cloud_formation_default = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing)
     @test cloud_formation_default.liquid isa CloudLiquid
     @test cloud_formation_default.ice === nothing
-    @test cloud_formation_default.liquid.τ_relax == FT(10.0)
 
     cloud_formation_mixed = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
     @test cloud_formation_mixed.liquid isa CloudLiquid
@@ -171,7 +201,7 @@ end
 
     μ1 = OneMomentCloudMicrophysics(FT; cloud_formation=cloud_formation_default)
     @test μ1.cloud_formation isa NonEquilibriumCloudFormation
-    @test μ1.categories.cloud_liquid.τ_relax == FT(10.0)
+    @test μ1.cloud_formation.liquid.rate == inv(FT(10.0))
 end
 
 @testset "Setting specific microphysical variables [$(FT)]" for FT in test_float_types()
@@ -242,7 +272,7 @@ end
     set!(model; θ=300, qᵗ=FT(0.050))
 
     # Reduced simulation time (from 5τ + 30τ = 35τ to just 10τ total)
-    τ = microphysics.categories.cloud_liquid.τ_relax
+    τ = inv(microphysics.cloud_formation.liquid.rate)
     simulation = Simulation(model; Δt=τ/5, stop_time=10τ, verbose=false)
     run!(simulation)
 
@@ -270,7 +300,7 @@ end
     set!(model; θ=300, qᵗ=FT(0.050))
 
     # Reduced simulation time (from 10τ to 5τ)
-    τ = microphysics.categories.cloud_liquid.τ_relax
+    τ = inv(microphysics.cloud_formation.liquid.rate)
     simulation = Simulation(model; Δt=τ/10, stop_time=5τ, verbose=false)
     run!(simulation)
 

@@ -319,7 +319,7 @@ function make_microphysics(name, FT=Float32)
         cloud_formation = NonEquilibriumCloudFormation(nothing, nothing)  # will get ice from categories
         # For mixed-phase, we need to specify ice formation
         categories = CMExt.one_moment_cloud_microphysics_categories(FT)
-        cloud_formation = NonEquilibriumCloudFormation(nothing, categories.cloud_ice)
+        cloud_formation = NonEquilibriumCloudFormation(nothing, categories.parameters.cloud.ice)
         return OneMomentCloudMicrophysics(FT; cloud_formation, categories)
     else
         error("Unknown microphysics: $name")
