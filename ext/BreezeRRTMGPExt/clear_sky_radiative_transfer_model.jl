@@ -21,8 +21,6 @@ using KernelAbstractions: @kernel, @index
 using RRTMGP: ClearSkyRadiation, RRTMGPSolver, lookup_tables, update_lw_fluxes!, update_sw_fluxes!
 using RRTMGP.AtmosphericStates: AtmosphericState
 using RRTMGP.BCs: LwBCs, SwBCs
-using RRTMGP.Fluxes: set_flux_to_zero!
-using RRTMGP.Vmrs: init_vmr
 
 # Dispatch on background_atmosphere = BackgroundAtmosphere for clear-sky radiation
 const ClearSkyRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere}
@@ -98,7 +96,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # RRTMGP grid + context
     context = rrtmgp_context(arch)
     ArrayType = ClimaComms.array_type(context.device)
-    grid_params = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
+    grid_params = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
 
     # Lookup tables (requires NCDatasets extension for RRTMGP)
     radiation_method = ClearSkyRadiation(false)
@@ -117,9 +115,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
         end
     end
 
-    Nband_lw = luts.lu_kwargs.nbnd_lw
-    Nband_sw = luts.lu_kwargs.nbnd_sw
-    Ngas = luts.lu_kwargs.ngas_sw
+    Nband_lw = luts.nbnd_lw
+    Nband_sw = luts.nbnd_sw
+    Ngas = luts.ngas_sw
 
     # Atmospheric state arrays
     rrtmgp_λ = ArrayType{FT}(undef, Nc)
@@ -132,8 +130,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     set_longitude!(rrtmgp_λ, solar_position, grid)
     set_latitude!(rrtmgp_φ, solar_position, grid)
 
-    vmr = init_vmr(Ngas, Nz, Nc, FT, ArrayType; gm=true)
-    set_global_mean_gases!(vmr, luts.lookups.idx_gases_sw, background_atmosphere)
+    vmr = initialize_global_mean_vmr(Ngas, Nz, Nc, FT, ArrayType)
+    set_global_mean_gases!(vmr, luts.idx_gases_sw, background_atmosphere)
 
     atmospheric_state = AtmosphericState(rrtmgp_λ, rrtmgp_φ, rrtmgp_layerdata, rrtmgp_pᶠ, rrtmgp_Tᶠ, rrtmgp_T₀, vmr, nothing, nothing)
 
@@ -299,9 +297,8 @@ function AtmosphereModels._update_radiation!(rtm::ClearSkyRadiativeTransferModel
     # Longwave
     update_lw_fluxes!(solver)
 
-    # Shortwave: we always call the solver; when `cos_zenith ≤ 0` the imposed
-    # boundary condition should yield (near-)zero fluxes.
-    set_flux_to_zero!(solver.sws.flux)
+    # Shortwave: we always call the solver; columns with `cos_zenith ≤ 0`
+    # get zero fluxes (RRTMGP zeroes night columns internally).
     update_sw_fluxes!(solver)
 
     copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)

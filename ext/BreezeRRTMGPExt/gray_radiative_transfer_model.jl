@@ -163,7 +163,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
         rrtmgp_αw₀ .= diffuse_surface_albedo.constant
     end
 
-    grid_parameters = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
+    grid_parameters = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
 
     longwave_solver = NoScatLWRTE(grid_parameters;
                                   params = parameters,
@@ -579,14 +579,14 @@ end
                                     lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 
-    # RRTMGP uses (Nz+1, Nc), we use (i, j, k) for ZFaceField
+    # RRTMGP compute buffers are indexed (Nc, Nz+1), we use (i, j, k) for ZFaceField
     # Sign convention: upwelling positive, downwelling negative
     c = rrtmgp_column_index(i, j, grid.Nx)
 
     @inbounds begin
-        ℐ_lw_up[i, j, k] = lw_flux_up[k, c]
-        ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, c]  # Negate for downward
-        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[k, c]  # Negate for downward
+        ℐ_lw_up[i, j, k] = lw_flux_up[c, k]
+        ℐ_lw_dn[i, j, k] = -lw_flux_dn[c, k]  # Negate for downward
+        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[c, k]  # Negate for downward
     end
 end
 
