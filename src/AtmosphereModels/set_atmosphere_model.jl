@@ -345,12 +345,9 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     # alone is a partial initialization whose complementary field may still be zero, so integrating
     # it could corrupt the valid provisional reference. An explicit keyword overrides this safeguard
     # because it is an intentional request to use the model's current state.
-    density_state_updated = any(name -> name ∈ (:ρ, :ρᵈ), names)
-    thermodynamic_state_updated = any(name -> name ∈ settable_thermodynamic_variables, names)
-    complete_thermodynamic_state = density_state_updated && thermodynamic_state_updated
-    automatic_reset = auto_reset_reference_state(model.dynamics) && complete_thermodynamic_state
-    should_reset = something(compute_reference_state, automatic_reset)
-    if should_reset
+    thermodynamic_state_updated = any(name -> name ∈ (:ρ, :ρᵈ), names) &&any(name -> name ∈ settable_thermodynamic_variables, names)
+    can_compute = something(model.dynamics.reference_state)
+    if can_compute && thermodynamic_state_updated && compute_reference_state
         reset_reference_state!(model)
     end
 
