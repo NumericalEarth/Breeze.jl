@@ -113,11 +113,66 @@ iterative adjustment to partition moisture between vapor and condensate.
 | Auxiliary/Diagnostic | `CenterField` | None needed | `qᵛ`, `qˡ`, `qᶜˡ`, `qʳ` |
 | Velocities | `ZFaceField` | `bottom=nothing` | `wʳ`, `wᶜˡ`, `wʳₙ` |
 
-### Velocity and Humidity Functions
+### Sedimentation Velocities and Bulk Sedimentation Velocities
+
+#### The `sedimentation_velocity` interface
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `microphysical_velocities` | `(microphysics, μ_fields, name)` | Return terminal velocities for advection of tracer `name` |
+| `sedimentation_velocity` | `(microphysics, microphysical_fields, name)` | **Primary interface**: return vertical sedimentation velocity field for tracer `name`, or `nothing` |
+| `moisture_phase` | `(microphysics, name)` | Return `Val(:liquid)`, `Val(:ice)`, or `nothing` for phase classification |
+| `microphysical_velocities` | `(microphysics, microphysical_fields, name)` | **Generic wrapper** (don't override): wraps sedimentation velocity in a velocity tuple |
+
+**Design principle**: Schemes implement `sedimentation_velocity` and `moisture_phase`; the generic
+`microphysical_velocities` wrapper calls `sedimentation_velocity` and constructs a
+`(u=ZeroField(), v=ZeroField(), w=w)` tuple for the advection operator.
+
+CloudMicrophysics returns positive downward terminal-speed magnitudes `𝕎ˣ`. Breeze uses a
+signed vertical coordinate that is positive upward, so the corresponding velocity is
+`wˣ = -𝕎ˣ` and falling hydrometeors have `wˣ < 0`.
+
+#### From individual sedimentation velocities to effective bulk velocities
+
+The effective total liquid and total ice sedimentation velocities are mass-weighted averages
+of all phase mass. A constituent that does not sediment contributes zero to the numerator but
+still contributes to the total phase humidity in the denominator:
+
+```math
+w^{L} = \frac{q^{cl} \, w^{cl} + q^r \, w^r}{q^l}, \qquad
+w^{I} = \frac{q^{ci} \, w^{ci} + q^s \, w^s}{q^i}
+```
+
+The `(velocity_field, humidity_field)` pairs are built generically from `sedimentation_velocity`
+and `moisture_phase`: `moisture_phase` classifies each mass tracer in
+`prognostic_field_names` as liquid or ice. Its sedimentation velocity may be `nothing`, in
+which case the constituent contributes zero to the numerator but remains in the denominator.
+Number tracers (e.g. `:ρnᶜˡ`) return `nothing` from `moisture_phase` and are excluded.
+The numerator uses each component humidity interpolated to the velocity's vertical face, while
+the denominator uses the face-interpolated total `qˡ` or `qⁱ`. The denominator is lower-bounded
+by the sum of positive classified components so numerical negatives cannot produce a bulk speed
+larger than its constituent speeds. Diagnosed, stationary cloud condensate therefore correctly
+slows the effective phase velocity.
+
+#### Model-level bulk sedimentation velocities
+
+When a scheme classifies at least one prognostic mass tracer by phase, precomputed
+aggregate sedimentation velocities are stored on the model as
+`model.sedimentation_velocities`, a `NamedTuple` with keys `ρqᴸ` and `ρqᴵ`:
+
+```julia
+(ρqᴸ = (u=ZeroField(), v=ZeroField(), w=wᴸ),
+ ρqᴵ = (u=ZeroField(), v=ZeroField(), w=wᴵ))
+```
+
+where `wᴸ` and `wᴵ` are `ZFaceField`s storing **negative** values (downward velocity,
+consistent with the advection operator's convention). These fields are updated during
+`update_state!` via `update_sedimentation_velocities!`. Schemes that handle sedimentation
+internally and do not implement `moisture_phase` store `nothing` instead.
+
+### Specific Humidity
+
+| Function | Arguments | Description |
+|----------|-----------|-------------|
 | `specific_humidity` | `(microphysics, model)` | Return vapor mass fraction field |
 
 ## Scheme Implementation Checklist
@@ -148,12 +203,13 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 |----------|---------|
 | `materialize_microphysical_fields(microphysics, grid, bcs)` | Create prognostic + auxiliary fields |
 | `update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)` | Update auxiliary fields at grid points |
-| `microphysical_velocities(microphysics, μ_fields, name)` | Terminal velocities for tracer advection |
+| `sedimentation_velocity(microphysics, μ_fields, name)` | Vertical sedimentation velocity per tracer |
+| `moisture_phase(microphysics, name)` | Phase classification (`:liquid` or `:ice`) |
 
 **Why these are Eulerian-only**:
 - **Field materialization**: Parcel models don't have fields; they store scalars directly in `ParcelState`.
 - **Auxiliary updates**: Parcel models recompute derived quantities on-the-fly; they don't store them in fields.
-- **Terminal velocities**: Sedimentation is a grid-based concept (advection through space). In parcel models,
+- **Sedimentation velocities**: Sedimentation is a grid-based concept (advection through space). In parcel models,
   sedimentation would be modeled as a mass sink in `microphysical_tendency`, not as spatial transport.
 
 ### Summary Table
@@ -166,9 +222,11 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `prognostic_field_names` | ✓ | ✓ | Required for both |
 | `materialize_microphysical_fields` | — | ✓ | Fields for grid storage |
 | `update_microphysical_auxiliaries!` | — | ✓ | Write to diagnostic fields |
-| `microphysical_velocities` | — | ✓§ | Sedimentation advection |
+| `sedimentation_velocity` | — | ✓ | Vertical sedimentation velocity per tracer |
+| `moisture_phase` | — | ✓ | Phase classification for bulk velocities |
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
 | `compute_microphysical_tendencies!` | — | ✓† | Override for fused bundle schemes |
+| `microphysical_velocities` | — | — | Generic wrapper (don't override) |
 | `grid_moisture_fractions` | — | ✓‡ | Override for saturation adjustment |
 | `maybe_adjust_thermodynamic_state` | — | ✓‡ | Override for saturation adjustment |
 
@@ -238,6 +296,6 @@ tendencies and computing the bundle once per cell is a substantial GPU win.
 
 5. **Explicit returns**: All mutating functions `return nothing`.
 
-6. **Sedimentation is Eulerian**: Terminal velocities (`microphysical_velocities`) are only
+6. **Sedimentation is Eulerian**: Sedimentation velocities (`sedimentation_velocity`) are only
    meaningful for grid-based simulations where tracers advect through space. In parcel models,
    precipitation loss should be modeled as a sink term in `microphysical_tendency`.

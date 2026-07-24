@@ -39,7 +39,13 @@ using CloudMicrophysics: MicrophysicsNonEq as CMNonEq
 
 using Breeze.AtmosphereModels: AtmosphereModels,
     AbstractNumberConcentrationCategories,
-    total_density
+    is_moisture_mass_tracer,
+    total_density,
+    moisture_phase,
+    prognostic_field_names,
+    sedimentation_velocity,
+    specific_field_name,
+    transport_velocities
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -76,11 +82,13 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 using Oceananigans: Center, Face, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
-using Oceananigans.Fields: ZeroField, ZFaceField
+using Oceananigans.Fields: ZFaceField
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, NormalFlow
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
+
+using Breeze.Advection: SurfacePrecipitationFluxKernel
 
 include("cloud_microphysics_translations.jl")
 include("one_moment_microphysics.jl")

@@ -224,6 +224,11 @@ AtmosphereModels.standard_pressure(d::ParcelDynamics) = d.standard_pressure
 ##### Materialization
 #####
 
+# Sedimentation is spatial transport in Eulerian models. Parcel microphysics represents
+# precipitation loss through state tendencies instead of grid-based fall-velocity fields.
+AtmosphereModels.materialize_sedimentation_velocities(::ParcelDynamics, microphysics,
+                                                       microphysical_fields, grid) = nothing
+
 function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, constants, microphysics)
     FT = eltype(grid)
     p₀ = convert(FT, d.surface_pressure)

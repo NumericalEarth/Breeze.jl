@@ -1,6 +1,9 @@
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, moisture_phase,
+                               total_density, update_sedimentation_velocities!,
+                               implicit_advection_velocities
 using CloudMicrophysics
+using CloudMicrophysics.Microphysics1M: conv_q_lcl_to_q_rai, accretion
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce, Microphysics1MParams
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -10,7 +13,21 @@ BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysics
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 using Breeze.Microphysics: ConstantRateCondensateFormation
 
-using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition, fill_halo_regions!
+using Oceananigans.Fields: ZeroField, ZFaceField
+using Oceananigans.Operators: ℑzᵃᵃᶠ
+
+struct MockSurfaceFluxTransportModel{G, D, V, M, A, W}
+    grid :: G
+    dynamics :: D
+    velocities :: V
+    microphysical_fields :: M
+    advection :: A
+    transport_w :: W
+end
+
+Breeze.AtmosphereModels.transport_velocities(model::MockSurfaceFluxTransportModel) =
+    (; u = ZeroField(), v = ZeroField(), w = model.transport_w)
 
 #####
 ##### One-moment microphysics tests
@@ -234,6 +251,109 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
+    dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature=300)
+
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; dynamics, microphysics)
+
+    set!(model; ρ = 2, θ = 300, qᵗ = 0.020, qᶜˡ = 0.0001, qʳ = 0.005,
+         enforce_mass_conservation = false)
+
+    production = precipitation_rate(model, :liquid)
+    compute!(production)
+
+    parameters = microphysics.categories.parameters
+    qᶜˡ = @allowscalar model.microphysical_fields.qᶜˡ[1, 1, 1]
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ = @allowscalar total_density(model.dynamics)[1, 1, 1]
+    accretion_option = parameters.options.cloud_liquid_rain_accretion
+    expected_production =
+        conv_q_lcl_to_q_rai(parameters.options.rain_autoconversion, parameters, nothing, (; q_lcl = qᶜˡ), nothing) +
+        accretion(parameters.cloud.liquid, parameters.precip.rain, parameters.terminal_velocity.rain,
+                  accretion_option.e, qᶜˡ, qʳ, ρ)
+    @test @allowscalar production[1, 1, 1] ≈ expected_production
+
+    spf = surface_precipitation_flux(model)
+    @test spf isa Field
+    compute!(spf)
+
+    # The surface precipitation flux uses the advection scheme's face reconstruction.
+    # For uniform condensate fields with Centered(order=2) advection, each
+    # face-reconstructed tracer equals its cell-center value. The density is
+    # face-interpolated (ℑz) to match the advection operator.
+    wᶜˡ = @allowscalar model.microphysical_fields.wᶜˡ[1, 1, 1]
+    wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
+    qᶜˡ = @allowscalar model.microphysical_fields.qᶜˡ[1, 1, 1]
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
+    ρ_reference_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, model.dynamics.reference_state.density)
+    expected_flux = -ρ_face * (wᶜˡ * qᶜˡ + wʳ * qʳ)
+
+    @test ρ_face ≈ FT(2)
+    @test !isapprox(ρ_face, ρ_reference_face)
+    @test @allowscalar spf[1, 1] ≈ expected_flux
+    @test @allowscalar spf[1, 1] > 0
+end
+
+@testset "Bounds-preserving WENO surface precipitation flux [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(6, 6, 6), extent=(100, 100, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics()
+    scalar_advection = (; ρqʳ = WENO(FT; order=5, bounds=(0, 1)))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection)
+
+    set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0.001)
+    flux = surface_precipitation_flux(model)
+    compute!(flux)
+
+    wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
+    @test @allowscalar flux[1, 1] ≈ -ρ_face * wʳ * qʳ
+end
+
+@testset "Adaptive implicit sedimentation includes boundary outflow [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(6, 6, 6), extent=(100, 100, 1))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics()
+    adaptive_discretization = AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5)
+    scalar_advection = (; ρqʳ = WENO(FT; order=5, time_discretization=adaptive_discretization))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection)
+
+    set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0.001)
+    advection = model.advection.ρqʳ
+    td = Oceananigans.TimeSteppers.time_discretization(advection)
+    Δt = FT(10)
+    td.Δt[] = Δt
+
+    velocities = implicit_advection_velocities(model.dynamics, model.velocities, :ρqʳ,
+                                                model.microphysics, model.microphysical_fields)
+    ρ = total_density(model.dynamics)
+    diagonal = @allowscalar Oceananigans.Advection.implicit_advection_diagonal(1, 1, 1, grid,
+                                                                               advection, velocities.w,
+                                                                               Δt, Center(), Center(), ρ)
+    @test diagonal > 0
+
+    flux = surface_precipitation_flux(model)
+    compute!(flux)
+    wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, ρ)
+    @test @allowscalar flux[1, 1] ≈ -ρ_face * wʳ * qʳ
+end
+
+@testset "Surface precipitation flux uses transport velocities [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
@@ -243,16 +363,27 @@ end
 
     set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0.001)
 
-    spf = surface_precipitation_flux(model)
-    @test spf isa Field
+    transport_w = set!(ZFaceField(grid), FT(-1))
+    mock_model = MockSurfaceFluxTransportModel(model.grid,
+                                               model.dynamics,
+                                               model.velocities,
+                                               model.microphysical_fields,
+                                               model.advection,
+                                               transport_w)
+
+    spf = surface_precipitation_flux(mock_model, microphysics)
     compute!(spf)
 
+    wᵗ = @allowscalar transport_w[1, 1, 1]
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
-    ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
-    expected_flux = -wʳ * ρqʳ
+    qʳ = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
 
+    expected_flux = -ρ_face * (wᵗ + wʳ) * qʳ
+    sedimentation_only_flux = -ρ_face * wʳ * qʳ
+
+    @test !isapprox(expected_flux, sedimentation_only_flux)
     @test @allowscalar spf[1, 1] ≈ expected_flux
-    @test @allowscalar spf[1, 1] > 0
 end
 
 # Consolidated simulation-based tests (reduced simulation times)
@@ -344,7 +475,7 @@ end
     @test contains(str_ne, "cloud_formation")
 end
 
-@testset "microphysical_velocities [$(FT)]" for FT in test_float_types()
+@testset "sedimentation_velocity, moisture_phase, and microphysical_velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -357,15 +488,147 @@ end
     set!(model; θ=300, qᵗ=0.015, qʳ=0.001)
 
     μ = model.microphysical_fields
+
+    # sedimentation_velocity returns vertical velocity component fields
+    w_rain = sedimentation_velocity(microphysics, μ, Val(:ρqʳ))
+    @test w_rain !== nothing
+    @test w_rain === μ.wʳ
+
+    # WPNE1M has cloud liquid sedimentation
+    w_cloud = sedimentation_velocity(microphysics, μ, Val(:ρqᶜˡ))
+    @test w_cloud !== nothing
+    @test w_cloud === μ.wᶜˡ
+
+    # moisture_phase classification
+    @test moisture_phase(microphysics, Val(:ρqʳ)) === Val(:liquid)
+    @test moisture_phase(microphysics, Val(:ρqᶜˡ)) === Val(:liquid)
+
+    # microphysical_velocities wraps sedimentation_velocity in a velocity tuple
     vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
     @test vel_rain !== nothing
     @test haskey(vel_rain, :w)
 
-    # Cloud liquid sedimentation velocity (non-equilibrium has it)
-    @test haskey(model.microphysical_fields, :wᶜˡ)
     vel_cloud = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
     @test vel_cloud !== nothing
     @test haskey(vel_cloud, :w)
+
+    # Sedimentation velocity values should be negative downward
+    wʳ = @allowscalar μ.wʳ[1, 1, 2]
+    @test wʳ <= 0
+
+    # Effective sedimentation velocities exist on model
+    bsv = model.sedimentation_velocities
+    @test bsv !== nothing
+    @test haskey(bsv, :ρqᴸ)
+    @test haskey(bsv, :ρqᴵ)
+
+    # Validate effective liquid sedimentation: sign convention and mass-weighted averaging
+    time_step!(model, 1)
+    qʳ_val  = @allowscalar ℑzᵃᵃᶠ(1, 1, 2, grid, μ.qʳ)
+    qᶜˡ_val = @allowscalar ℑzᵃᵃᶠ(1, 1, 2, grid, μ.qᶜˡ)
+    wʳ_val  = @allowscalar μ.wʳ[1, 1, 2]
+    wᶜˡ_val = @allowscalar μ.wᶜˡ[1, 1, 2]
+    wᴸ_val  = @allowscalar bsv.ρqᴸ.w[1, 1, 2]
+
+    @test qʳ_val + qᶜˡ_val > 0
+    @test wᴸ_val <= 0
+    @test wᴸ_val ≈ (wʳ_val * qʳ_val + wᶜˡ_val * qᶜˡ_val) / (qʳ_val + qᶜˡ_val)
+end
+
+@testset "Effective velocity includes diagnosed condensate [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), extent=(100, 100, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=280)
+    dynamics = AnelasticDynamics(reference_state)
+    cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+    model = AtmosphereModel(grid; dynamics, microphysics)
+
+    set!(model; θ=280, qᵗ=0.03, qʳ=0.001)
+    μ = model.microphysical_fields
+    qᶜˡ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qᶜˡ)
+    qʳ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qʳ)
+    wʳ = @allowscalar μ.wʳ[1, 1, 1]
+    wᴸ = @allowscalar model.sedimentation_velocities.ρqᴸ.w[1, 1, 1]
+
+    @test qᶜˡ > 0
+    @test wʳ < 0
+    @test wᴸ ≈ wʳ * qʳ / (qᶜˡ + qʳ)
+    @test abs(wᴸ) < abs(wʳ)
+end
+
+@testset "Effective velocity uses face-collocated humidities [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; dynamics, microphysics)
+    μ = model.microphysical_fields
+
+    lower_cell = (x, y, z) -> ifelse(z < 50, FT(0.002), FT(0))
+    upper_cell = (x, y, z) -> ifelse(z < 50, FT(0), FT(0.004))
+    set!(μ.qᶜˡ, lower_cell)
+    set!(μ.qʳ, upper_cell)
+    set!(μ.qˡ, (x, y, z) -> lower_cell(x, y, z) + upper_cell(x, y, z))
+    set!(μ.wᶜˡ, FT(0))
+    set!(μ.wʳ, FT(-2))
+    fill_halo_regions!((μ.qᶜˡ, μ.qʳ, μ.qˡ, μ.wᶜˡ, μ.wʳ))
+    update_sedimentation_velocities!(model.sedimentation_velocities, microphysics, μ)
+
+    qᶜˡ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 2, grid, μ.qᶜˡ)
+    qʳ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 2, grid, μ.qʳ)
+    wᴸ = @allowscalar model.sedimentation_velocities.ρqᴸ.w[1, 1, 2]
+    expected = FT(-2) * qʳ_face / (qᶜˡ_face + qʳ_face)
+
+    @test qᶜˡ_face ≈ FT(0.001)
+    @test qʳ_face ≈ FT(0.002)
+    @test wᴸ ≈ expected
+
+    # A transient negative stationary constituent must not shrink the denominator
+    # below the positive moving mass and produce a super-terminal bulk velocity.
+    set!(μ.qᶜˡ, FT(-0.001))
+    set!(μ.qʳ, FT(0.002))
+    set!(μ.qˡ, FT(0.001))
+    fill_halo_regions!((μ.qᶜˡ, μ.qʳ, μ.qˡ))
+    update_sedimentation_velocities!(model.sedimentation_velocities, microphysics, μ)
+
+    bounded_wᴸ = @allowscalar model.sedimentation_velocities.ρqᴸ.w[1, 1, 2]
+    @test bounded_wᴸ ≈ FT(-2)
+end
+
+@testset "Mixed-phase ice velocity and snow surface flux [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=250)
+    dynamics = AnelasticDynamics(reference_state)
+    cloud_formation = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+    model = AtmosphereModel(grid; dynamics, microphysics)
+
+    set!(model; θ=250, qᵗ=0.01, qʳ=0.0005, qˢ=0.0005)
+    μ = model.microphysical_fields
+    qᶜⁱ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qᶜⁱ)
+    qʳ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qʳ)
+    qˢ = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, μ.qˢ)
+    wʳ = @allowscalar μ.wʳ[1, 1, 1]
+    wˢ = @allowscalar μ.wˢ[1, 1, 1]
+    wᴵ = @allowscalar model.sedimentation_velocities.ρqᴵ.w[1, 1, 1]
+
+    @test qᶜⁱ > 0
+    @test wˢ < 0
+    @test wᴵ ≈ wˢ * qˢ / (qᶜⁱ + qˢ)
+
+    flux = surface_precipitation_flux(model)
+    compute!(flux)
+    ρ_face = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, total_density(model.dynamics))
+    @test @allowscalar flux[1, 1] ≈ -ρ_face * (wʳ * qʳ + wˢ * qˢ)
 end
 
 @testset "Mixed-phase non-equilibrium snow field materialization [$(FT)]" for FT in test_float_types()
