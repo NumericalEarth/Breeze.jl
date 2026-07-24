@@ -215,8 +215,8 @@ The following notation is specific to the [Predicted Particle Properties (P3)](@
 
 | math symbol                         | code   | property name                       | description                                                                    |
 | ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
-| ``E^{ic}``                          | `Eⁱᶜ`  | `ice_cloud_collection_efficiency`   | Ice-cloud droplet collection efficiency [-]                                    |
-| ``E^{ir}``                          | `Eⁱʳ`  | `ice_rain_collection_efficiency`    | Ice-rain collection efficiency [-]                                             |
+| ``E^{ci}``                          | `Eᶜⁱ`  | `cloud_ice_collection_efficiency`   | Ice-cloud droplet collection efficiency [-]                                    |
+| ``E^{ri}``                          | `Eʳⁱ`  | `rain_ice_collection_efficiency`    | Ice-rain collection efficiency [-]                                             |
 | ``f^{ve}``                          | `fᵛᵉ`  |                                     | Ventilation factor for vapor diffusion enhancement [-]                         |
 
 ### Diameter Thresholds

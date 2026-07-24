@@ -93,8 +93,9 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute per-particle collection kernel ⟨A × V⟩ for riming.
-Returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from lookup table.
+Compute the per-particle cloud-water collection kernel ⟨A × V⟩ for riming.
+Returns the PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from the
+`IceCollection.cloud_collection` table (Fortran `f1pr04`).
 """
 @inline function collection_kernel_per_particle(coll::P3Table5D,
                                                   m_mean, Fᶠ, ρᶠ, prp, p3, μ)

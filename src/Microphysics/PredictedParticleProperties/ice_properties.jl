@@ -102,7 +102,7 @@ function IceProperties(FT::Type{<:AbstractFloat} = Float64;
         IceFallSpeed(FT),
         IceDeposition(FT),
         IceBulkProperties(FT),
-        IceCollection(FT),
+        IceCollection(),
         IceSixthMoment(),
         IceLambdaLimiter(),
         IceRainCollection();

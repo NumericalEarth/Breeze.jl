@@ -52,9 +52,9 @@ function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷ�
     # Mean particle mass
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
-    # PSD-integrated collection kernel ⟨A×V⟩ from lookup table.
-    # Computes ∫ V(D) A(D) N'(D) dD with E=1 (geometric kernel).
-    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
+    # PSD-integrated cloud-water collection kernel ⟨A×V⟩ from lookup table
+    # (Fortran f1pr04). Computes ∫ V(D) A(D) N'(D) dD with E=1 (geometric kernel).
+    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.cloud_collection,
                                                        m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
 
     # Air density correction for ice particle fall speed (Heymsfield et al. 2007):
@@ -101,7 +101,7 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
 
     # Same collection kernel as cloud_riming_rate
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
-    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.rain_collection,
+    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.cloud_collection,
                                                        m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
     ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)

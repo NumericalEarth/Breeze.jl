@@ -84,9 +84,14 @@ function parse_fortran_table_1(filepath::AbstractString, three_moment::Bool, FT:
     n_rhor = FORTRAN_N_RHOR
     n_dr = FORTRAN_N_DRSCALE
 
-    # Column names for ice data
+    # Column names for ice data.
+    # Column 4 (`cloud_collection`) is Fortran `f1pr04`, the ice-cloud-water
+    # sweep-out integral ∫ V(D) A(D) N'(D) dD. Ice-*rain* collection is not in
+    # the 5D ice block: it needs the rain slope parameter as an extra coordinate
+    # and lives in the 6D rain-ice block embedded later in the same Fortran
+    # Lookup Table 1 file (`rain_number` / `rain_mass`).
     col_names_3momI = [
-        :number_weighted, :mass_weighted, :aggregation, :rain_collection,
+        :number_weighted, :mass_weighted, :aggregation, :cloud_collection,
         :ventilation, :effective_radius, :small_q, :large_q,
         :reflectivity, :ventilation_enhanced, :mean_diameter, :mean_density,
         :reflectivity_weighted, :slope_parameter, :shape_parameter,
@@ -100,7 +105,7 @@ function parse_fortran_table_1(filepath::AbstractString, three_moment::Bool, FT:
     ]
 
     col_names_2momI = [
-        :number_weighted, :mass_weighted, :aggregation, :rain_collection,
+        :number_weighted, :mass_weighted, :aggregation, :cloud_collection,
         :ventilation, :effective_radius, :small_q, :large_q,
         :reflectivity, :ventilation_enhanced, :mean_diameter, :mean_density,
         :slope_parameter, :shape_parameter,

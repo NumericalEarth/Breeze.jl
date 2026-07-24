@@ -47,7 +47,6 @@ struct ProcessRateParameters{FT}
     aggregation_timescale :: FT              # τ_agg [s]
     aggregation_efficiency_temperature_low :: FT   # T below which E=0.001 [K]
     aggregation_efficiency_temperature_high :: FT  # T above which E=max [K]
-    aggregation_reference_concentration :: FT # n_ref [1/kg]
 
     # Cloud riming
     cloud_ice_collection_efficiency :: FT    # Eᶜⁱ [-]
@@ -60,8 +59,6 @@ struct ProcessRateParameters{FT}
     maximum_rime_density :: FT               # ρ_rim_max [kg/m³]
 
     # Shedding
-    shedding_timescale :: FT                 # τ_shed [s]
-    maximum_liquid_fraction :: FT            # qʷⁱ_max_frac [-]
     shed_drop_mass :: FT                     # m_shed [kg] (cloud/wet-growth shedding)
     shed_drop_mass_liqfrac :: FT             # m_shed [kg] (liquid-fraction shedding, Fortran 1.928e6)
 
@@ -78,6 +75,7 @@ struct ProcessRateParameters{FT}
     # Immersion freezing (Barklie-Gokhale 1959)
     immersion_freezing_temperature_max :: FT # T_max [K]
     immersion_freezing_coefficient :: FT     # aimm [-]
+    immersion_freezing_nucleation_coefficient :: FT  # bimm [m⁻³s⁻¹]
 
     # Rime splintering (Hallett-Mossop)
     splintering_temperature_low :: FT        # T_low [K]
@@ -90,53 +88,12 @@ struct ProcessRateParameters{FT}
     splintering_liquid_fraction_max :: FT    # Fˡ max for HM splintering
     splintering_surface_temperature_max :: FT # warm-surface shutoff [K] (Inf disables)
 
-    # Rain terminal velocity (power law v = a D^b)
-    rain_fall_speed_coefficient :: FT        # a [m^(1-b)/s]
-    rain_fall_speed_exponent :: FT           # b [-]
-    rain_diameter_min :: FT                  # D_min [m]
-    rain_diameter_max :: FT                  # D_max [m]
-    rain_velocity_min :: FT                  # v_min [m/s]
-    rain_velocity_max :: FT                  # v_max [m/s]
-
-    # Ice terminal velocity
-    ice_fall_speed_coefficient_unrimed :: FT # a for aggregates [Mitchell 1996]
-    ice_fall_speed_exponent_unrimed :: FT    # b for aggregates
-    ice_fall_speed_coefficient_rimed :: FT   # a for graupel
-    ice_fall_speed_exponent_rimed :: FT      # b for graupel
-    ice_small_particle_coefficient :: FT     # Stokes regime coefficient
-    ice_diameter_threshold :: FT             # D_threshold [m]
-    ice_diameter_min :: FT                   # D_min [m]
-    ice_diameter_max :: FT                   # D_max [m]
-    ice_velocity_min :: FT                   # v_min [m/s]
-    ice_velocity_max :: FT                   # v_max [m/s]
-    ice_effective_density_unrimed :: FT      # ρ_eff for aggregates [kg/m³]
-
-    # Ice projected area (Mitchell 1996): A = γ D^σ for aggregates
-    ice_projected_area_coefficient :: FT     # γ [m^(2-σ)]
-    ice_projected_area_exponent :: FT        # σ [-]
-
-    # Ratio factors for weighted velocities
-    velocity_ratio_number_to_mass :: FT      # Vₙ/Vₘ
-    velocity_ratio_reflectivity_to_mass :: FT  # Vᵤ/Vₘ
-
     # Initial rain drop mass (for autoconversion number tendency)
     initial_rain_drop_mass :: FT             # m_rain_init [kg]
-
-    # Immersion freezing nucleation coefficient (Barklie-Gokhale 1959)
-    immersion_freezing_nucleation_coefficient :: FT  # bimm [m⁻³s⁻¹]
-
-    # PSD correction factors: account for the PSD-integrated rate being
-    # larger than the mean-mass value due to the nonlinear dependence on
-    # particle size. These factors bridge the gap between the mean-mass
-    # approximation and full PSD integration (lookup tables).
-    riming_psd_correction :: FT              # For cloud and rain riming [-]
-    freezing_cloud_psd_correction :: FT      # For cloud immersion freezing [-]
-    freezing_rain_psd_correction :: FT       # For rain immersion freezing [-]
 
     # Homogeneous freezing (Koop et al. 2000)
     homogeneous_freezing_temperature :: FT   # T < threshold: all cloud/rain freezes [K]
     homogeneous_freezing_timescale :: FT     # τ_hom [s], effective instantaneous
-    homogeneous_freezing_minimum_drop_mass :: FT           # mass-number consistency cap for N_hom [kg]
 
     # Rime densification
     rime_densification_timescale :: FT       # τ_densif [s]
@@ -185,11 +142,6 @@ struct ProcessRateParameters{FT}
     # values in the diffusional growth equation are uncertain (Fortran comment, line 3721).
     calibration_factor_deposition :: FT
     calibration_factor_sublimation :: FT
-
-    # Fortran PSD-based partitioning always sends some meltwater to rain
-    # (from small particles that fully melt). This floor approximates that
-    # effect without requiring size-threshold table integrals (f1pr24-f1pr27).
-    minimum_complete_melting_fraction :: FT
 end
 
 """
@@ -199,7 +151,13 @@ Construct process rate parameters with default values from P3 literature.
 
 These parameters control the rates of all microphysical processes:
 autoconversion, accretion, aggregation, riming, melting, evaporation,
-deposition, nucleation, and sedimentation.
+deposition, nucleation, and freezing.
+
+Ice terminal-velocity, projected-area, collection, and ventilation integrals are
+read from the Fortran lookup tables by [`read_fortran_lookup_tables`](@ref).
+Rain velocity and evaporation integrals are generated with Julia quadrature.
+Cloud PSD shape is diagnosed from droplet number, while the active rain-process
+path uses ``μ_r = 0``. None are duplicated in this rate-parameter container.
 
 # Default Sources
 
@@ -209,7 +167,6 @@ deposition, nucleation, and sedimentation.
 - Nucleation: Cooper (1986)
 - Freezing: Barklie and Gokhale (1959)
 - Splintering: Hallett and Mossop (1974)
-- Fall speeds: Mitchell (1996), Seifert and Beheng (2006)
 
 # Example
 
@@ -264,7 +221,6 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         aggregation_timescale = 600.0,
         aggregation_efficiency_temperature_low = 253.15,
         aggregation_efficiency_temperature_high = 273.15,
-        aggregation_reference_concentration = 1e4,
 
         # Cloud riming
         cloud_ice_collection_efficiency = 0.5,
@@ -277,8 +233,6 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         maximum_rime_density = 900.0,
 
         # Shedding
-        shedding_timescale = 10.0,
-        maximum_liquid_fraction = 0.3,
         shed_drop_mass = 1 / 1.923e6,  # m19: Fortran 1 mm drop mass (microphy_p3.f90 1.923e6 drops/kg)
         # Fortran uses 1.928e6 for liquid-fraction shedding (nlshd, line 3350)
         shed_drop_mass_liqfrac = 1 / 1.928e6,
@@ -296,6 +250,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Immersion freezing
         immersion_freezing_temperature_max = 269.15,
         immersion_freezing_coefficient = 0.65,
+        # Barklie-Gokhale nucleation coefficient
+        immersion_freezing_nucleation_coefficient = 2.0,
 
         # Rime splintering
         splintering_temperature_low = 265.15,
@@ -315,58 +271,12 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Warm-surface shutoff: nCat=1 uses 282 K, nCat>1 sets Inf (no shutoff).
         splintering_surface_temperature_max = 282.0,
 
-        # Rain terminal velocity
-        rain_fall_speed_coefficient = 841.99667,
-        rain_fall_speed_exponent = 0.8,
-        rain_diameter_min = 1e-4,
-        rain_diameter_max = 5e-3,
-        rain_velocity_min = 0.1,
-        rain_velocity_max = 15.0,
-
-        # Ice terminal velocity
-        ice_fall_speed_coefficient_unrimed = 11.72,
-        ice_fall_speed_exponent_unrimed = 0.41,
-        ice_fall_speed_coefficient_rimed = 19.3,
-        ice_fall_speed_exponent_rimed = 0.37,
-        ice_small_particle_coefficient = 700.0,
-        ice_diameter_threshold = 100e-6,
-        ice_diameter_min = 1e-5,
-        ice_diameter_max = 0.02,
-        ice_velocity_min = 0.01,
-        ice_velocity_max = 8.0,
-        ice_effective_density_unrimed = 100.0,
-
-        # Ice projected area (Mitchell 1996): A = γ D^σ
-        # CGS value 0.2285 converted to MKS: 0.2285 × 100^(1.88 - 2) ≈ 0.1315
-        ice_projected_area_coefficient = 0.2285 * 100.0^(1.88 - 2.0),
-        ice_projected_area_exponent = 1.88,
-
-        # Velocity ratios
-        velocity_ratio_number_to_mass = 0.6,
-        velocity_ratio_reflectivity_to_mass = 1.2,
-
         # Initial rain drop
         initial_rain_drop_mass = 4 * FT(π) / 3 * 1000 * (25e-6)^3,  # Fortran P3 v5.5.0: 25 μm radius drop [kg]
-
-        # Barklie-Gokhale nucleation coefficient
-        immersion_freezing_nucleation_coefficient = 2.0,
-
-        # PSD correction factors: account for the PSD-integrated rate being
-        # larger than the mean-mass value due to the nonlinear (volumetric)
-        # dependence on drop size. For spherical drops with a gamma PSD N'(D) = N₀ D^μ exp(-λD)
-        # the analytical correction is C(μ) = Γ(μ+7)Γ(μ+1) / Γ(μ+4)²
-        # (see psd_correction_spherical_volume).
-        # Cloud drops: μ ≈ 2.3 → C ≈ 5.08; rain drops: μ = 0 → C = 20.0 (exact)
-        riming_psd_correction = 2.0,  # Tunable: keep as empirical parameter
-        freezing_cloud_psd_correction = psd_correction_spherical_volume(2.3),
-        freezing_rain_psd_correction = psd_correction_spherical_volume(0.0),
 
         # Homogeneous freezing
         homogeneous_freezing_temperature = 233.15,
         homogeneous_freezing_timescale = 10.0,
-        # Mass-number consistency cap: at most one particle per minimum-size droplet
-        # (≈ 6 μm radius cloud droplet → m ≈ 4/3 π ρ_w r³ ≈ 9e-13 kg; use 1e-12 kg)
-        homogeneous_freezing_minimum_drop_mass = 1e-12,
 
         # Rime densification
         rime_densification_timescale = 10.0,
@@ -389,24 +299,19 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Liquid fraction clipping (Milbrandt et al. 2025)
         liquid_fraction_clipping_threshold = 0.01,  # Fortran liqfracsmall
 
-        # Liquid fraction mode (Fortran log_LiquidFrac)
-        liquid_fraction_active = true,
-
         # M12(c): Tiny-ice threshold for warm pre-processing (Fortran qsmall_dry).
         # Ice with qi ∈ [qsmall, qsmall_dry) at T ≥ T₀ is converted to rain.
         tiny_ice_to_rain_threshold = 1e-12,
+
+        # Liquid fraction mode (Fortran log_LiquidFrac)
+        liquid_fraction_active = true,
 
         # Predicted supersaturation (Fortran log_predictSsat, default .false.)
         predict_supersaturation = false,
 
         # Deposition/sublimation calibration factors (Fortran clbfact_dep, clbfact_sub)
         calibration_factor_deposition = 1.0,
-        calibration_factor_sublimation = 1.0,
-
-        # Fortran PSD-based partitioning always sends some meltwater to rain
-        # (from small particles that fully melt). This floor approximates that
-        # effect without requiring size-threshold table integrals (f1pr24-f1pr27).
-        minimum_complete_melting_fraction = 0.2)
+        calibration_factor_sublimation = 1.0)
 
     coupled_sink_limiting_iterations > 0 ||
         throw(ArgumentError("coupled_sink_limiting_iterations must be positive"))
@@ -433,13 +338,10 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(aggregation_timescale),
         FT(aggregation_efficiency_temperature_low),
         FT(aggregation_efficiency_temperature_high),
-        FT(aggregation_reference_concentration),
         FT(cloud_ice_collection_efficiency),
         FT(rain_ice_collection_efficiency),
         FT(minimum_rime_density),
         FT(maximum_rime_density),
-        FT(shedding_timescale),
-        FT(maximum_liquid_fraction),
         FT(shed_drop_mass),
         FT(shed_drop_mass_liqfrac),
         FT(refreezing_timescale),
@@ -450,6 +352,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(ice_nucleation_coefficient),
         FT(immersion_freezing_temperature_max),
         FT(immersion_freezing_coefficient),
+        FT(immersion_freezing_nucleation_coefficient),
         FT(splintering_temperature_low),
         FT(splintering_temperature_high),
         FT(splintering_temperature_peak),
@@ -459,35 +362,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(splintering_cloud_riming_scale),
         FT(splintering_liquid_fraction_max),
         FT(splintering_surface_temperature_max),
-        FT(rain_fall_speed_coefficient),
-        FT(rain_fall_speed_exponent),
-        FT(rain_diameter_min),
-        FT(rain_diameter_max),
-        FT(rain_velocity_min),
-        FT(rain_velocity_max),
-        FT(ice_fall_speed_coefficient_unrimed),
-        FT(ice_fall_speed_exponent_unrimed),
-        FT(ice_fall_speed_coefficient_rimed),
-        FT(ice_fall_speed_exponent_rimed),
-        FT(ice_small_particle_coefficient),
-        FT(ice_diameter_threshold),
-        FT(ice_diameter_min),
-        FT(ice_diameter_max),
-        FT(ice_velocity_min),
-        FT(ice_velocity_max),
-        FT(ice_effective_density_unrimed),
-        FT(ice_projected_area_coefficient),
-        FT(ice_projected_area_exponent),
-        FT(velocity_ratio_number_to_mass),
-        FT(velocity_ratio_reflectivity_to_mass),
         FT(initial_rain_drop_mass),
-        FT(immersion_freezing_nucleation_coefficient),
-        FT(riming_psd_correction),
-        FT(freezing_cloud_psd_correction),
-        FT(freezing_rain_psd_correction),
         FT(homogeneous_freezing_temperature),
         FT(homogeneous_freezing_timescale),
-        FT(homogeneous_freezing_minimum_drop_mass),
         FT(rime_densification_timescale),
         FT(rain_lambda_min),
         FT(rain_lambda_max),
@@ -499,8 +376,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         Bool(liquid_fraction_active),
         Bool(predict_supersaturation),
         FT(calibration_factor_deposition),
-        FT(calibration_factor_sublimation),
-        FT(minimum_complete_melting_fraction)
+        FT(calibration_factor_sublimation)
     )
 end
 

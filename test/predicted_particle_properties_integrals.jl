@@ -167,10 +167,11 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
     @testset "Ice collection" begin
         col = IceCollection()
-        @test col.ice_rain_collection_efficiency ≈ 1.0
 
         @test isnothing(col.aggregation)
-        @test isnothing(col.rain_collection)
+        @test isnothing(col.cloud_collection)
+        @test isnothing(col.cloud_aerosol_collection)
+        @test isnothing(col.ice_aerosol_collection)
     end
 
     @testset "Ice sixth moment" begin

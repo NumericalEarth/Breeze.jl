@@ -586,27 +586,23 @@ using Oceananigans.Fields: interior
     end
 
     #####
-    ##### ProcessRateParameters default PSD correction values (Phase B + Step 4)
+    ##### ProcessRateParameters defaults
+    #####
+    ##### The immersion-freezing PSD correction is not stored in
+    ##### `ProcessRateParameters`. `immersion_freezing_cloud_rate` evaluates
+    ##### `psd_correction_spherical_volume` from the locally diagnosed Liu-Daum μ_c,
+    ##### so its correction varies with cloud droplet number.
+    ##### `immersion_freezing_rain_rate` evaluates the same function at fixed μ_r = 0,
+    ##### so the rain correction is constant.
     #####
 
-    @testset "ProcessRateParameters PSD correction defaults" begin
+    @testset "ProcessRateParameters defaults" begin
         prp = ProcessRateParameters(Float64)
-
-        # freezing_cloud_psd_correction: psd_correction_spherical_volume(2.3) ≈ 5.08
-        @test prp.freezing_cloud_psd_correction ≈ psd_correction_spherical_volume(2.3) rtol=1e-6
-
-        # freezing_rain_psd_correction: psd_correction_spherical_volume(0.0)
-        # Gamma(7)*Gamma(1)/Gamma(4)^2 = 720/36 = 20.0
-        @test prp.freezing_rain_psd_correction ≈ psd_correction_spherical_volume(0.0) rtol=1e-6
-        @test prp.freezing_rain_psd_correction ≈ 20.0 atol=0.01
 
         @test prp.reference_air_density ≈ 100000 / (dry_air_gas_constant(ThermodynamicConstants(Float64)) * 273.15) rtol=1e-12
         @test prp.ice_nucleation_supersaturation_threshold == 0.05
         @test prp.rain_lambda_min == 500.0
         @test prp.rain_lambda_max == 100000.0
-
-        # riming_psd_correction should remain unchanged at 2.0
-        @test prp.riming_psd_correction ≈ 2.0
     end
 
     @testset "Vapor + cloud + rain + ice mass conservation" begin

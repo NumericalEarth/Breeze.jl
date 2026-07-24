@@ -212,7 +212,7 @@ function assemble_lookup_tables(ice_5d, rain_ice, table3_objs, three_moment)
 
     collection = (
         aggregation = ice_5d[:aggregation],
-        rain_collection = ice_5d[:rain_collection],
+        cloud_collection = ice_5d[:cloud_collection],
         cloud_aerosol_collection = ice_5d[:cloud_aerosol_collection],
         ice_aerosol_collection = ice_5d[:ice_aerosol_collection],
     )
@@ -311,9 +311,8 @@ function build_ice_properties_from_tables(ice_5d, rain_ice, table3_objs,
     )
 
     collection = IceCollection(
-        ice_base.collection.ice_rain_collection_efficiency,
         ice_5d[:aggregation],
-        ice_5d[:rain_collection],
+        ice_5d[:cloud_collection],
         ice_5d[:cloud_aerosol_collection],
         ice_5d[:ice_aerosol_collection]
     )

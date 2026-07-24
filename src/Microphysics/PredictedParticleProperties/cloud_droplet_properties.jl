@@ -77,9 +77,18 @@ on ice processes or bulk precipitation, prescribed Nc is sufficient.
 
 **Fortran parity note:** The Fortran P3 driver carries and advects prognostic
 `Nc` and `ssat` (supersaturation). The prescribed-Nc simplification means:
-(1) the homogeneous freezing rate includes a mass-number consistency cap to
-prevent ni explosions with trace cloud at T < −40°C, and (2) autoconversion
-sensitivity to Nc is controlled by the prescribed value rather than dynamically.
+(1) homogeneous freezing below −40°C transfers the *prescribed* Nc rather than a
+locally depleted droplet count, and (2) autoconversion sensitivity to Nc is
+controlled by the prescribed value rather than dynamically. Pass
+`aerosol = AerosolActivation(AerosolMode())` to predict Nc instead.
+
+There is no separate mass-number consistency cap on homogeneous freezing: matching
+Fortran, `homogeneous_freezing_cloud_rate` transfers all of `Nc` at
+`T < homogeneous_freezing_temperature`. `compute_p3_process_rates` diagnoses the
+rate from the *post-process* residual cloud and rescales mass and number together
+by a single `sink_limiting_factor`. This limits the frozen mass to the residual
+cloud while preserving its diagnosed mass-number ratio; it does not impose a
+minimum frozen-particle mass or independently limit the transferred number.
 
 **Cloud DSD shape parameter (C4 fix):** The Fortran P3 diagnoses `μ_c ∈ [2, 15]`
 from Nc each timestep via a Liu–Daum (2000)-type relation (`get_cloud_dsd2`).
