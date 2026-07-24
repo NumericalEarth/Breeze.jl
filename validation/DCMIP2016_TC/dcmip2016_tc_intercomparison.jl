@@ -46,6 +46,9 @@ CairoMakie.activate!(type = "png")
 # Bring in the simulation generator.
 include("dcmip2016_tc.jl")
 
+# Committed figures are written to `figures/` (data reductions live in `postproc/`).
+mkpath("figures")
+
 # ### Diagnostics from the surface-pressure output
 #
 # Each run writes its surface pressure (`<prefix>_psfc.jld2`) providing the intensity time
@@ -145,9 +148,9 @@ xlims!(ax, 0, 10); ylims!(ax, 910, 1010)
 ax.xticks = 0:2:10; ax.yticks = 920:20:1000
 ax.xgridvisible = false; ax.ygridvisible = false
 axislegend(ax; position = :lb, framevisible = false)
-save("dcmip_tc_intercomparison_intensity.png", fig_intensity)
+save("figures/dcmip_tc_intercomparison_intensity.png", fig_intensity)
 
-# ![intensity](dcmip_tc_intercomparison_intensity.png)
+# ![intensity](figures/dcmip_tc_intercomparison_intensity.png)
 
 # ### Mature-storm radial pressure structure (days 4–10)
 #
@@ -167,9 +170,9 @@ xlims!(axr, 0, 1000); ylims!(axr, 945, 1020)
 axr.xticks = 0:200:1000; axr.yticks = 950:10:1020
 axr.xgridvisible = false; axr.ygridvisible = false
 axislegend(axr; position = :rb, framevisible = false)
-save("dcmip_tc_intercomparison_radial.png", fig_radial)
+save("figures/dcmip_tc_intercomparison_radial.png", fig_radial)
 
-# ![radial](dcmip_tc_intercomparison_radial.png)
+# ![radial](figures/dcmip_tc_intercomparison_radial.png)
 
 # ### Study 1 summary
 #
@@ -233,9 +236,9 @@ xlims!(axv, 0, 10); ylims!(axv, 955, 1010)
 axv.xticks = 0:2:10; axv.yticks = 960:10:1000
 axv.xgridvisible = false; axv.ygridvisible = false
 axislegend(axv; position = :lb, framevisible = false)
-save("dcmip_tc_intercomparison_vertical.png", fig_vertical)
+save("figures/dcmip_tc_intercomparison_vertical.png", fig_vertical)
 
-# ![vertical](dcmip_tc_intercomparison_vertical.png)
+# ![vertical](figures/dcmip_tc_intercomparison_vertical.png)
 
 # ### Study 2 summary
 
@@ -286,13 +289,13 @@ end
 # > this run: download `refdata/` (see `refdata/DOWNLOAD.md`), run the WENO5/WENO9 0.25° cases with
 # > velocity output, then `julia extract_willson_comparison_data.jl <weno5_dir> <weno9_dir>`
 # > (writes `postproc/breeze_*_010.csv`) and `julia plot_willson_comparison.jl` (writes
-# > `postproc/willson_fig{5,7,8}.png`).
+# > `figures/willson_fig{5,7,8}.png`).
 #
 # ### Intensity time series — cf. Willson et al. (2024), Fig. 5
 #
 # Minimum sea-level pressure (top) and maximum 1 km tangential wind (bottom) versus time.
 #
-# ![Comparison with Willson et al. (2024) Fig. 5](postproc/willson_fig5_intensity.png)
+# ![Comparison with Willson et al. (2024) Fig. 5](figures/willson_fig5_intensity.png)
 #
 # Breeze WENO9 (0.25°) intensifies to ≈ 921 hPa with a peak azimuthal-mean 1 km tangential wind
 # ≈ 59–66 m/s — the **intense end** of the ensemble, alongside CAM-SE; WENO5 is weaker and mid-pack.
@@ -302,7 +305,7 @@ end
 #
 # Days-4–10 azimuthal-mean surface pressure (top) and 1 km tangential wind (bottom) versus radius.
 #
-# ![Comparison with Willson et al. (2024) Fig. 7](postproc/willson_fig7_radial.png)
+# ![Comparison with Willson et al. (2024) Fig. 7](figures/willson_fig7_radial.png)
 #
 # Breeze lies on the ensemble's universal wind–pressure structure — the right wind for a given
 # central pressure — with WENO9 in the intense group. Its eyewall is notably **compact**, RMW
@@ -315,7 +318,7 @@ end
 # (the early version of E3SM), CAM-SE, Breeze-WENO5, and Breeze-WENO9 (0.25°). A cyclonic
 # (red) vortex below the tropopause is capped by the anticyclonic (blue) upper-level outflow.
 #
-# ![Comparison with Willson et al. (2024) Fig. 8](postproc/willson_fig8_rz.png)
+# ![Comparison with Willson et al. (2024) Fig. 8](figures/willson_fig8_rz.png)
 #
 # Breeze reproduces the published intense models' structure — a deep cyclonic core capped by the
 # outflow anticyclone — with a tighter but smooth eyewall, consistent with its higher effective

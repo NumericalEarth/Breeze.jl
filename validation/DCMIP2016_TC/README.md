@@ -5,7 +5,9 @@ benchmark (Reed & Jablonowski 2011; Ullrich et al. 2016; Willson et al. 2024). A
 balanced vortex in a quiescent moist tropical environment intensifies into a tropical
 cyclone over ~10 days under the complete Reed–Jablonowski "simple physics": wind-dependent
 surface drag, wind-dependent boundary-layer mixing, and large-scale condensation with
-instantaneous rain-out (`InstantaneousPrecipitation`).
+instantaneous rain-out (`InstantaneousPrecipitation`). The rendered study — figures, tables,
+and discussion, including the comparison against Willson et al. (2024) — is the deliverable
+[`dcmip2016_tc_intercomparison.md`](dcmip2016_tc_intercomparison.md).
 
 These are 10-day global compressible runs on a GPU — they are intentionally **not** part of
 the documentation build (the `examples/` are rendered, and run, by `docs/make.jl`; this
@@ -18,6 +20,8 @@ the documentation build (the `examples/` are rendered, and run, by `docs/make.jl
 |------|---------|
 | `dcmip2016_tc.jl` | Defines `dcmip2016_tropical_cyclone_simulation(; resolution, advection_order, …)`, which builds a fully configured `Simulation`. Running the file directly executes the best configuration (0.25° + WENO9). |
 | `dcmip2016_tc_intercomparison.jl` | Reuses the generator for two studies — (1) resolution (0.5° vs 0.25°) × advection order (WENO5 vs WENO9), and (2) vertical level configuration at 0.5° WENO9 — and renders the validation (Literate-formatted). |
+| `extract_willson_comparison_data.jl` | Manual post-processing helper: reduces the 0.25° WENO5/WENO9 run fields to azimuthal-mean tangential-wind diagnostics in `postproc/` (matching the TempestExtremes processing Willson et al. applied to the ensemble). |
+| `plot_willson_comparison.jl` | Manual post-processing helper: overlays those reductions on the DCMIP2016 ensemble (Willson et al. 2024, Figs. 5/7/8), writing `figures/willson_fig{5,7,8}.png`. |
 
 ## Running
 

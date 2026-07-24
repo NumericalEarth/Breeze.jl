@@ -1,7 +1,7 @@
 # Willson et al. (2024) Fig. 5/7/8 comparison figures (CairoMakie), overlaying Breeze on the
 # DCMIP2016 ensemble. Reads the published reference profiles from refdata/ (see refdata/DOWNLOAD.md)
 # and the Breeze tangential-wind reductions from postproc/breeze_*_010.csv (written by
-# extract_willson_comparison_data.jl); writes postproc/willson_fig{5,7,8}.png. Both sides use the
+# extract_willson_comparison_data.jl); writes figures/willson_fig{5,7,8}.png. Both sides use the
 # azimuthal-mean TANGENTIAL wind on the published 0.25°-great-circle radial grid.
 #   julia --project=<env-with-CairoMakie> plot_willson_comparison.jl
 using CairoMakie
@@ -9,13 +9,15 @@ using DelimitedFiles
 using Printf
 
 const BASE = @__DIR__
-const WD   = joinpath(BASE, "refdata")
-const PP   = joinpath(BASE, "postproc")
+const WD   = joinpath(BASE, "refdata")    # input: published Willson reference profiles
+const PP   = joinpath(BASE, "postproc")   # input: Breeze CSV reductions
+const FIG  = joinpath(BASE, "figures")    # output: comparison PNGs
 const A_KM = 6371.22
 const DEG  = π / 180
 radii(n) = [(k-1) * 0.25 * DEG * A_KM for k in 1:n]      # r_k = k·0.25°-gc (km), k = 0,1,…
 
 CairoMakie.activate!(type = "png")
+mkpath(FIG)
 
 # ---- published reference parsing (TempestExtremes radial profiles + trajectories) ----
 sim_day(h) = (parse(Int, h[4]) - 1) + parse(Int, h[5]) / 24    # head: track,year,month,day,hour,…
@@ -121,7 +123,7 @@ let
     labs = ["DCMIP2016 ensemble (50 km)", "DCMIP2016 ensemble (25 km)", "FV3 (50 km)",
             [l for (_, _, l) in STYLE]...]
     axislegend(axw, elems, labs; position = :rb, framevisible = false, labelsize = 10)
-    save(joinpath(PP, "willson_fig5_intensity.png"), fig)
+    save(joinpath(FIG, "willson_fig5_intensity.png"), fig)
 end
 
 # ===================== Fig 7 — mature radial structure (cf. Willson Fig. 7) =====================
@@ -160,7 +162,7 @@ let
     labs = ["DCMIP2016 ensemble (50 km)", "DCMIP2016 ensemble (25 km)", "FV3 (50 km)",
             [l for (_, _, l) in STYLE]...]
     axislegend(axp, elems, labs; position = :rb, framevisible = false, labelsize = 10)
-    save(joinpath(PP, "willson_fig7_radial.png"), fig)
+    save(joinpath(FIG, "willson_fig7_radial.png"), fig)
 end
 
 # ===================== Fig 8 — radius–height tangential wind (cf. Willson Fig. 8) =====================
@@ -197,7 +199,7 @@ let
     Colorbar(fig[1:length(rows), 2], cf; label = "azim-mean tangential wind vₜ (m/s)  (+ cyclonic / − anticyclonic)")
     Label(fig[0, 1:2], "DCMIP2016 TC radius–height tangential wind (days 4–10):\n" *
           "FV3 (50 km) and ACME-A / CAM-SE / Breeze (25 km · 0.25°)", fontsize = 12)
-    save(joinpath(PP, "willson_fig8_rz.png"), fig)
+    save(joinpath(FIG, "willson_fig8_rz.png"), fig)
 end
 
-println("wrote postproc/willson_fig{5,7,8}.png")
+println("wrote figures/willson_fig{5,7,8}.png")
