@@ -205,7 +205,6 @@ const ParcelModel = AtmosphereModel{<:ParcelDynamics}
 #####
 
 AtmosphereModels.dynamics_density(d::ParcelDynamics) = d.density
-AtmosphereModels.dynamics_pressure(d::ParcelDynamics) = d.pressure
 
 AtmosphereModels.prognostic_momentum_field_names(::ParcelDynamics) = ()
 AtmosphereModels.prognostic_dynamics_field_names(::ParcelDynamics) = ()

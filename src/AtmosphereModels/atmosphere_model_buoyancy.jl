@@ -57,7 +57,7 @@ end
 end
 
 @inline function virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵛ)
-    pᵣ_field = dynamics_pressure(dynamics)
+    pᵣ_field = mean_pressure(dynamics)
     @inbounds pᵣ = pᵣ_field[i, j, k]
     pˢᵗ = standard_pressure(dynamics)
     q = @inbounds MoistureMassFractions(qᵛ[i, j, k])

@@ -394,14 +394,6 @@ AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_st
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
 AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
 
-"""
-$(TYPEDSIGNATURES)
-
-Return the pressure field for `CompressibleDynamics`.
-Pressure is computed diagnostically from the equation of state.
-"""
-AtmosphereModels.dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
-
 #####
 ##### Prognostic fields
 #####

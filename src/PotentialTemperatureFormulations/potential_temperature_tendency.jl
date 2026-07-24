@@ -162,7 +162,7 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        pᵣ = dynamics_pressure(dynamics)[i, j, k]
+        pᵣ = mean_pressure(dynamics)[i, j, k]
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
         ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρθ = ρᵈθ)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
@@ -234,7 +234,7 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        pᵣ = dynamics_pressure(dynamics)[i, j, k]
+        pᵣ = mean_pressure(dynamics)[i, j, k]
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
         ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρθ = ρᵈθ)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]

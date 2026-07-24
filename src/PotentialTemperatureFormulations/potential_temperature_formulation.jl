@@ -138,7 +138,7 @@ function AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid,
                                                        q)
 
     θ = @inbounds formulation.potential_temperature[i, j, k]
-    pᵣ = @inbounds dynamics_pressure(dynamics)[i, j, k]
+    pᵣ = @inbounds mean_pressure(dynamics)[i, j, k]
     pˢᵗ = standard_pressure(dynamics)
 
     return LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)

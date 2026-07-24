@@ -21,7 +21,7 @@ using Oceananigans.Operators: ℑzᵃᵃᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels,
-    dynamics_density, total_density, dynamics_pressure, standard_pressure, dynamics_prognostic_fields,
+    dynamics_density, total_density, mean_pressure, standard_pressure, dynamics_prognostic_fields,
     grid_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
     c_div_ρU, ∇_dot_Jᶜ, w_buoyancy_forceᶜᶜᶠ,
     AtmosphereModelBuoyancy,

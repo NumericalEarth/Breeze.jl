@@ -97,7 +97,12 @@ make_pressure_correction!(model, Δt) = nothing
 """
     mean_pressure(dynamics)
 
-Return the mean (background/reference) pressure field in Pa.
+Return the mean (background/reference) pressure field in Pa — the pressure entering the
+equation of state, buoyancy, and the thermodynamic tendencies.
+
+For anelastic dynamics, this is the time-independent hydrostatic reference pressure ``pᵣ(z)``.
+For compressible dynamics, this is the prognostic pressure field. The anomaly and total-pressure
+counterparts are [`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
 """
 function mean_pressure end
 
@@ -159,16 +164,6 @@ split must partition this velocity on both the explicit (flux-scaling) and impli
 (tridiagonal) sides, so it stays consistent with the momentum flux divergence.
 """
 @inline advecting_vertical_velocity(dynamics, velocities) = velocities.w
-
-"""
-    dynamics_pressure(dynamics)
-
-Return the pressure field appropriate to the dynamical formulation.
-
-For anelastic dynamics, returns the reference pressure (hydrostatic background state).
-For compressible dynamics, returns the prognostic pressure field.
-"""
-function dynamics_pressure end
 
 #####
 ##### Buoyancy interface
