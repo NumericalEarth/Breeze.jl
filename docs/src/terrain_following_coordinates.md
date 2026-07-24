@@ -745,7 +745,7 @@ comes out hydrostatically balanced — no special handling required:
 θ_profile(x, z) = θ₀ * exp(N² * z / g)   # z here is the physical altitude
 
 set!(model,
-     ρ = model.dynamics.terrain_reference_density,
+     ρ = model.dynamics.reference_state.density,
      θ = θ_profile,
      u = U,
      v = 0,
@@ -765,7 +765,7 @@ precision:
 using Oceananigans.Fields: interior
 
 p  = interior(model.dynamics.pressure)
-pᵣ = interior(model.dynamics.terrain_reference_pressure)
+pᵣ = interior(model.dynamics.reference_state.pressure)
 
 isapprox(p, pᵣ; atol = 1e-9)   # → true for a well-balanced IC
 ```
@@ -917,7 +917,7 @@ model = AtmosphereModel(grid; dynamics = dyn, advection = WENO(order = 9),
 
 # ---- IC: at-rest plus uniform U ----
 set!(model,
-     ρ = model.dynamics.terrain_reference_density,
+     ρ = model.dynamics.reference_state.density,
      θ = θ_profile,
      u = U,
      v = 0,
@@ -932,7 +932,7 @@ run!(simulation)
 ```
 
 The IC is just the hydrostatic thermal path —
-`set!(model, ρ = model.dynamics.terrain_reference_density, θ = θ_profile, …)`
+`set!(model, ρ = model.dynamics.reference_state.density, θ = θ_profile, …)`
 with `w = 0`. The terrain kinematic surface condition (``\rho \tilde{w} = 0``)
 is carried by ``\rho w``'s bottom boundary condition and applied automatically by
 `update_state!`, so no manual bottom-face initialisation is needed (see

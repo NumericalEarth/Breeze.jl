@@ -12,7 +12,7 @@ using CUDA: @allowscalar
 using Oceananigans
 using Oceananigans.Grids: znode
 using Oceananigans.Operators: Δzᶜᶜᶠ, Δzᶜᶜᶜ
-using Breeze.Thermodynamics: hydrostatic_pressure, dry_air_gas_constant, vapor_gas_constant
+using Breeze.Thermodynamics: hydrostatic_pressure, dry_air_gas_constant, vapor_gas_constant, ExnerReferenceState
 using Test
 
 @allowscalar begin
@@ -44,7 +44,7 @@ using Test
         model = AtmosphereModel(grid; dynamics)
         constants = model.thermodynamic_constants
 
-        pᵣ = model.dynamics.terrain_reference_pressure
+        pᵣ = model.dynamics.reference_state.pressure
 
         # At each grid point, pᵣ should match the continuous profile
         # to within the discretization error of the Exner integration (O(Δz²))
@@ -98,7 +98,7 @@ using Test
         model = AtmosphereModel(grid; dynamics)
         constants = model.thermodynamic_constants
 
-        pᵣ = model.dynamics.terrain_reference_pressure
+        pᵣ = model.dynamics.reference_state.pressure
 
         # At each grid point, pᵣ should match the continuous profile
         for i in 1:Nx, k in 1:Nz
@@ -134,8 +134,8 @@ using Test
                                         reference_vapor_mass_fraction = qᵛ_reference)
         model = AtmosphereModel(grid; dynamics)
 
-        p_ref = model.dynamics.terrain_reference_pressure
-        ρ_ref = model.dynamics.terrain_reference_density
+        p_ref = model.dynamics.reference_state.pressure
+        ρ_ref = model.dynamics.reference_state.density
         constants = model.thermodynamic_constants
         g = constants.gravitational_acceleration
         p₀ = dynamics.surface_pressure
@@ -198,8 +198,8 @@ using Test
                                         reference_vapor_mass_fraction = qᵛ_reference)
         model = AtmosphereModel(grid; dynamics)
 
-        p_ref = model.dynamics.terrain_reference_pressure
-        ρ_ref = model.dynamics.terrain_reference_density
+        p_ref = model.dynamics.reference_state.pressure
+        ρ_ref = model.dynamics.reference_state.density
         g = model.thermodynamic_constants.gravitational_acceleration
 
         @test p_ref !== nothing
@@ -214,6 +214,35 @@ using Test
         i_flat = 1
         i_peak = Nx ÷ 2
         @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
+    end
+
+    @testset "reference_state switch: default builds a reference, nothing disables it" begin
+        Nx, Nz = 8, 6
+        Lx, Lz = 10000.0, 5000.0
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+        materialize_terrain!(grid, x -> 200 * exp(-x^2 / 2000^2))
+
+        # Default (`reference_state = :auto`): a single 3D ExnerReferenceState is built and, with no
+        # explicit profile, deduced from the state at set! (reference_from_state = true).
+        default_model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+        @test default_model.dynamics.reference_state isa ExnerReferenceState
+        @test default_model.dynamics.reference_from_state
+        @test size(default_model.dynamics.reference_state.pressure) == (Nx, 1, Nz)  # 3D on terrain
+        @test all(isfinite, Array(interior(default_model.dynamics.reference_state.pressure)))
+        @test all(ρ -> ρ > 0, Array(interior(default_model.dynamics.reference_state.density)))
+
+        # Disabled (`reference_state = nothing`): no reference → full-pressure PGF/buoyancy via ::Nothing.
+        off_model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state=nothing))
+        @test off_model.dynamics.reference_state === nothing
+        @test !off_model.dynamics.reference_from_state
+
+        # Disabling and supplying an explicit reference profile are mutually exclusive.
+        @test_throws ArgumentError CompressibleDynamics(ExplicitTimeStepping();
+                                                        reference_state=nothing,
+                                                        reference_potential_temperature=300)
     end
 
 end
