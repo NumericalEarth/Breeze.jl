@@ -4,9 +4,10 @@ using Breeze
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.Microphysics.PredictedParticleProperties: PredictedParticlePropertiesMicrophysics
 
-using Oceananigans: CPU, Center, CenterField, Field, GridFittedBottom,
+using Oceananigans: CPU, Center, CenterField, Face, Field, GridFittedBottom,
                      ImmersedBoundaryGrid, RectilinearGrid, set!, time_step!
-using Oceananigans.Fields: interior
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.Fields: interior, location
 using Oceananigans.TimeSteppers: update_state!
 
 @testset "P3 atmosphere integration" begin
@@ -87,18 +88,101 @@ using Oceananigans.TimeSteppers: update_state!
              nᶜˡ = FT(2e8), enforce_mass_conservation = false)
         update_state!(model)
 
-        first_fall_speed = Array(interior(model.microphysical_fields.wᶜˡ))
+        # Fall speeds live at z-Faces: index k is the bottom face of cell k, and the top
+        # face (k = Nz+1) is held at zero by the impenetrable top boundary condition so
+        # nothing sediments in from above the model top.
+        Nz = size(grid, 3)
+        first_fall_speed = Array(interior(model.microphysical_fields.wᶜˡ, :, :, 1:Nz))
         first_rain_source = Array(interior(model.microphysical_fields.cache_ρqʳ))
         @test all(first_fall_speed .< 0)
+        @test all(Array(interior(model.microphysical_fields.wᶜˡ, :, :, Nz+1:Nz+1)) .== 0)
         @test any(first_rain_source .> 0)
 
         set!(model; qᶜˡ = FT(0.006), enforce_mass_conservation = false)
         update_state!(model)
 
-        second_fall_speed = Array(interior(model.microphysical_fields.wᶜˡ))
+        second_fall_speed = Array(interior(model.microphysical_fields.wᶜˡ, :, :, 1:Nz))
         second_rain_source = Array(interior(model.microphysical_fields.cache_ρqʳ))
         @test second_fall_speed != first_fall_speed
         @test second_rain_source != first_rain_source
+    end
+
+    @testset "P3 sedimentation velocities live at z-Faces" begin
+        FT = Float64
+        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 4),
+                               extent = (100, 100, 200))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = FT(101325),
+                                         potential_temperature = FT(285))
+        dynamics = AnelasticDynamics(reference_state)
+        model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                                microphysics = PredictedParticlePropertiesMicrophysics(FT))
+        μ = model.microphysical_fields
+
+        # `div_ρUc` reads these as advecting velocities via `Az_qᶜᶜᶠ`, so they must be
+        # located at (Center, Center, Face) like the resolved `w`.
+        velocity_names = (:wᶜˡ, :wᶜˡₙ, :wʳ, :wʳₙ, :wⁱ, :wⁱₙ, :wⁱ_z, :wⁱ_z̃)
+        for name in velocity_names
+            @test location(μ[name]) === (Center, Center, Face)
+            @test location(μ[name]) === location(model.velocities.w)
+        end
+    end
+
+    @testset "P3 surface precipitation boundary condition" begin
+        FT = Float64
+        Nz = 4
+
+        function rain_model(precipitation_boundary_condition)
+            grid = RectilinearGrid(default_arch, FT; size = (2, 2, Nz),
+                                   extent = (100, 100, 200))
+            constants = ThermodynamicConstants(FT)
+            reference_state = ReferenceState(grid, constants;
+                                             surface_pressure = FT(101325),
+                                             potential_temperature = FT(285))
+            dynamics = AnelasticDynamics(reference_state)
+            p3 = PredictedParticlePropertiesMicrophysics(FT; precipitation_boundary_condition)
+            model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                                    microphysics = p3)
+            set!(model; θ = FT(285), qᵛ = FT(0.01), qʳ = FT(1e-3), nʳ = FT(1e6),
+                 enforce_mass_conservation = false)
+            update_state!(model)
+            return model
+        end
+
+        total_water(μ, model) = sum(Array(interior(model.moisture_density))) +
+                               sum(Array(interior(μ.ρqᶜˡ))) +
+                               sum(Array(interior(μ.ρqʳ))) +
+                               sum(Array(interior(μ.ρqⁱ))) +
+                               sum(Array(interior(μ.ρqʷⁱ)))
+
+        open_model = rain_model(nothing)
+        closed_model = rain_model(ImpenetrableBoundaryCondition())
+
+        open_bottom = Array(interior(open_model.microphysical_fields.wʳ, :, :, 1:1))
+        closed_bottom = Array(interior(closed_model.microphysical_fields.wʳ, :, :, 1:1))
+
+        # Open surface: rain falls out through the bottom face. Impenetrable: it cannot.
+        @test all(open_bottom .< 0)
+        @test all(closed_bottom .== 0)
+
+        # Neither boundary condition may admit precipitation through the model top.
+        for model in (open_model, closed_model)
+            @test all(Array(interior(model.microphysical_fields.wʳ, :, :, Nz+1:Nz+1)) .== 0)
+        end
+
+        # With periodic sides, a zero top face and an impenetrable surface, the domain is
+        # closed: total water must be conserved to round-off. The open surface must lose it.
+        Δt = FT(1)
+        closed_before = total_water(closed_model.microphysical_fields, closed_model)
+        open_before = total_water(open_model.microphysical_fields, open_model)
+        time_step!(closed_model, Δt)
+        time_step!(open_model, Δt)
+        closed_after = total_water(closed_model.microphysical_fields, closed_model)
+        open_after = total_water(open_model.microphysical_fields, open_model)
+
+        @test closed_after ≈ closed_before rtol = 1e-12
+        @test open_after < open_before
     end
 
     @testset "P3 square-root moment uses the mean Z/N fall speed" begin
@@ -325,8 +409,15 @@ using Oceananigans.TimeSteppers: update_state!
                                          surface_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
+        # The point of the budget check below is that the cloud -> rain conversion conserves
+        # water, so the domain has to be closed: with the default open surface, cloud
+        # droplets and rain sediment out through the bottom face and the interior total is
+        # *supposed* to drop. Periodic sides plus an impenetrable surface plus the zero top
+        # face make the box closed, so the remaining budget is purely microphysical.
+        p3 = PredictedParticlePropertiesMicrophysics(
+            FT; precipitation_boundary_condition = ImpenetrableBoundaryCondition())
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
-                                microphysics = PredictedParticlePropertiesMicrophysics(FT))
+                                microphysics = p3)
 
         set!(model; θ = FT(285), qᵛ = FT(0.01), qᶜˡ = FT(0.003),
              nᶜˡ = FT(2e8), enforce_mass_conservation = false)
@@ -347,7 +438,7 @@ using Oceananigans.TimeSteppers: update_state!
                             sum(Array(interior(μ.ρqʳ))) +
                             sum(Array(interior(μ.ρqⁱ))) +
                             sum(Array(interior(μ.ρqʷⁱ)))
-        @test total_water_after ≈ total_water_before rtol = 1e-8
+        @test total_water_after ≈ total_water_before rtol = 1e-12
     end
 
     @testset "P3 runs under the acoustic RK stepper" begin

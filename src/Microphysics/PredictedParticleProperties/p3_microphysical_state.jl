@@ -1,6 +1,7 @@
 using Oceananigans: CenterField, Field
-using Oceananigans.Fields: ZeroField
-using Oceananigans.Grids: Center
+using Oceananigans.BoundaryConditions: BoundaryCondition, FieldBoundaryConditions, NormalFlow
+using Oceananigans.Fields: ZeroField, ZFaceField
+using Oceananigans.Grids: Center, Face
 using Oceananigans.Operators: ℑzᵃᵃᶜ
 using DocStringExtensions: TYPEDSIGNATURES
 
@@ -214,6 +215,12 @@ The P3 scheme requires the following fields on `grid`:
 
 **Diagnostic:**
 - `qᵛ`: Vapor specific humidity (mirrors the prognostic vapor field)
+
+**Sedimentation velocities** (`wᶜˡ`, `wᶜˡₙ`, `wʳ`, `wʳₙ`, `wⁱ`, `wⁱₙ`, `wⁱ_z`, `wⁱ_z̃`):
+z-Face fields, because the scalar flux divergence consumes them as advecting velocities at
+(Center, Center, Face). The surface face carries the precipitation flux out of the domain
+unless `precipitation_boundary_condition = ImpenetrableBoundaryCondition()`; the top face
+is held at zero so nothing sediments in from above the model top.
 """
 function AM.materialize_microphysical_fields(::P3, grid, bcs)
     # Create all prognostic fields
@@ -249,15 +256,22 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     # Diagnostic field for vapor
     qᵛ = CenterField(grid)
 
-    # Sedimentation velocity fields (pre-computed once per RK-stage tendency evaluation)
-    wᶜˡ = CenterField(grid) # Cloud mass-weighted terminal velocity
-    wᶜˡₙ = CenterField(grid) # Cloud number-weighted terminal velocity
-    wʳ  = CenterField(grid)  # Rain mass-weighted terminal velocity
-    wʳₙ = CenterField(grid)  # Rain number-weighted terminal velocity
-    wⁱ  = CenterField(grid)  # Ice mass-weighted terminal velocity
-    wⁱₙ = CenterField(grid)  # Ice number-weighted terminal velocity
-    wⁱ_z = CenterField(grid) # Ice reflectivity-weighted terminal velocity
-    wⁱ_z̃ = CenterField(grid) # Ice sqrt-moment terminal velocity
+    # Sedimentation velocity fields (pre-computed once per RK-stage tendency evaluation).
+    # These are *advecting* velocities: the scalar flux divergence reads them at
+    # (Center, Center, Face) via `Az_qᶜᶜᶠ(i, j, k, grid, w) = Azᶜᶜᶠ(i, j, k, grid) * w[i, j, k]`,
+    # so they must live at z-Faces. `bottom = nothing` leaves the kernel-written surface
+    # value untouched by `fill_halo_regions!` (the surface boundary condition is applied in
+    # `write_p3_fall_speeds!` instead), while the default impenetrable top boundary holds
+    # `w[i, j, Nz+1] = 0` so no precipitation falls in through the model top.
+    face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+    wᶜˡ = ZFaceField(grid; boundary_conditions=face_bcs) # Cloud mass-weighted terminal velocity
+    wᶜˡₙ = ZFaceField(grid; boundary_conditions=face_bcs) # Cloud number-weighted terminal velocity
+    wʳ  = ZFaceField(grid; boundary_conditions=face_bcs)  # Rain mass-weighted terminal velocity
+    wʳₙ = ZFaceField(grid; boundary_conditions=face_bcs) # Rain number-weighted terminal velocity
+    wⁱ  = ZFaceField(grid; boundary_conditions=face_bcs)  # Ice mass-weighted terminal velocity
+    wⁱₙ = ZFaceField(grid; boundary_conditions=face_bcs) # Ice number-weighted terminal velocity
+    wⁱ_z = ZFaceField(grid; boundary_conditions=face_bcs) # Ice reflectivity-weighted terminal velocity
+    wⁱ_z̃ = ZFaceField(grid; boundary_conditions=face_bcs) # Ice sqrt-moment terminal velocity
 
     # Microphysical tendency cache (written once per RK-stage tendency evaluation,
     # then added to G). Storing the microphysics-only contribution avoids one
@@ -672,16 +686,45 @@ end
 end
 
 
-@inline function write_p3_fall_speeds!(μ, i, j, k, result::P3FallSpeedResult)
+#####
+##### Surface precipitation boundary condition
+#####
+#
+# The fall-speed fields are at (Center, Center, Face), so index `k = 1` is the bottom
+# face of the domain and carries the surface precipitation flux. `nothing` (the default)
+# keeps the diagnosed fall speed there, so precipitation leaves the domain through an open
+# surface. An `ImpenetrableBoundaryCondition` zeroes it, so precipitation instead
+# accumulates in the lowest cell. Mirrors `bottom_terminal_velocity` in the one-moment
+# scheme; dispatch is on the boundary-condition *type*, so it folds to a constant per
+# concrete P3 type and stays GPU-safe.
+#
+# TODO: Use the lowest *active* face of each column rather than `k = 1` so the condition
+# also applies over an immersed bottom. `compute_p3_surface_temperature!` already performs
+# that column scan for Hallett-Mossop; the one-moment scheme has the same limitation.
+
+const P3ImpenetrableBoundaryCondition = BoundaryCondition{<:NormalFlow, Nothing}
+
+@inline bottom_fall_speed_factor(::Nothing, FT) = one(FT)
+@inline bottom_fall_speed_factor(::P3ImpenetrableBoundaryCondition, FT) = zero(FT)
+
+@inline function write_p3_fall_speeds!(μ, i, j, k, p3::P3,
+                                       result::P3FallSpeedResult{FT}) where FT
+    # `k` indexes the bottom face of cell `k`. Sedimentation is always downward, so the
+    # donor cell for that face is cell `k` itself and the fall speed diagnosed at centre
+    # `k` is the upwind velocity there. The top face (`k = Nz+1`) is outside the `:xyz`
+    # launch region and is held at zero by the impenetrable top boundary condition.
+    surface = ifelse(k == 1,
+                     bottom_fall_speed_factor(p3.precipitation_boundary_condition, FT),
+                     one(FT))
     @inbounds begin
-        μ.wᶜˡ[i, j, k]  = -result.wᶜˡ
-        μ.wᶜˡₙ[i, j, k] = -result.wᶜˡₙ
-        μ.wʳ[i, j, k]   = -result.wʳ
-        μ.wʳₙ[i, j, k]  = -result.wʳₙ
-        μ.wⁱ[i, j, k]   = -result.wⁱ
-        μ.wⁱₙ[i, j, k]  = -result.wⁱₙ
-        μ.wⁱ_z[i, j, k] = -result.wⁱ_z
-        μ.wⁱ_z̃[i, j, k] = -(result.wⁱ_z + result.wⁱₙ) / 2
+        μ.wᶜˡ[i, j, k]  = -surface * result.wᶜˡ
+        μ.wᶜˡₙ[i, j, k] = -surface * result.wᶜˡₙ
+        μ.wʳ[i, j, k]   = -surface * result.wʳ
+        μ.wʳₙ[i, j, k]  = -surface * result.wʳₙ
+        μ.wⁱ[i, j, k]   = -surface * result.wⁱ
+        μ.wⁱₙ[i, j, k]  = -surface * result.wⁱₙ
+        μ.wⁱ_z[i, j, k] = -surface * result.wⁱ_z
+        μ.wⁱ_z̃[i, j, k] = -surface * (result.wⁱ_z + result.wⁱₙ) / 2
     end
     return nothing
 end
@@ -712,7 +755,7 @@ end
     ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
     props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
     result = p3_fall_speed_compute(p3, ρ, ℳ, props)
-    return write_p3_fall_speeds!(μ, i, j, k, result)
+    return write_p3_fall_speeds!(μ, i, j, k, p3, result)
 end
 
 #####

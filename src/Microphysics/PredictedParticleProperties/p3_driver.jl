@@ -45,9 +45,12 @@ function AM.prepare_microphysical_tendencies!(p3::P3, model)
             μ, model.formulation, model.dynamics, grid, constants, p3, ρ_field,
             velocities)
 
-    # The scalar advection operators interpolate terminal velocities through halo
-    # cells. The preparation kernel overwrites interiors after update_state!'s generic
-    # halo fill, so refresh these diagnostic halos before sedimentation is evaluated.
+    # The scalar advection operators read terminal velocities in halo cells. The
+    # preparation kernel overwrites interiors after update_state!'s generic halo fill, so
+    # refresh these diagnostic halos before sedimentation is evaluated. These are z-Face
+    # fields with `bottom = nothing`, so the fill leaves the surface face (where
+    # `write_p3_fall_speeds!` applied the precipitation boundary condition) untouched and
+    # holds the impenetrable top face at zero.
     sedimentation_velocities = (μ.wᶜˡ, μ.wᶜˡₙ, μ.wʳ, μ.wʳₙ,
                                 μ.wⁱ, μ.wⁱₙ, μ.wⁱ_z, μ.wⁱ_z̃)
     fill_halo_regions!(sedimentation_velocities)

@@ -92,8 +92,10 @@ The scheme tracks 11 prognostic densities:
   Pass `nothing` to auto-detect from file presence (prefers 3-moment if
   available).
 - `water_density`: Liquid water density [kg/m³] (default 1000)
-- `precipitation_boundary_condition`: Boundary condition for surface precipitation
-  (default `nothing` = open boundary, precipitation exits domain)
+- `precipitation_boundary_condition`: Boundary condition for surface precipitation.
+  `nothing` (default) is an open surface: the diagnosed fall speed is retained at the
+  bottom face, so all sedimenting species leave the domain. `ImpenetrableBoundaryCondition()`
+  zeroes the fall speed there instead, so precipitation accumulates in the lowest cell.
 
 # Prognostic CCN Activation
 
