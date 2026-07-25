@@ -119,7 +119,7 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -183,7 +183,7 @@ using Test
         Lx, Lz = 10000.0, 5000.0
 
         z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation = LinearDecay())
-        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz),
                                x=(-Lx/2, Lx/2), z=z_faces,
                                topology=(Periodic, Flat, Bounded))
 
@@ -225,11 +225,9 @@ using Test
                                topology=(Periodic, Flat, Bounded))
         materialize_terrain!(grid, x -> 200 * exp(-x^2 / 2000^2))
 
-        # Default (`reference_state = :auto`): a single 3D ExnerReferenceState is built and, with no
-        # explicit profile, deduced from the state at set! (reference_from_state = true).
+        # Default (`reference_state = :auto`): a single 3D standard-atmosphere ExnerReferenceState.
         default_model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
         @test default_model.dynamics.reference_state isa ExnerReferenceState
-        @test default_model.dynamics.reference_from_state
         @test size(default_model.dynamics.reference_state.pressure) == (Nx, 1, Nz)  # 3D on terrain
         @test all(isfinite, Array(interior(default_model.dynamics.reference_state.pressure)))
         @test all(ρ -> ρ > 0, Array(interior(default_model.dynamics.reference_state.density)))
@@ -237,7 +235,6 @@ using Test
         # Disabled (`reference_state = nothing`): no reference → full-pressure PGF/buoyancy via ::Nothing.
         off_model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state=nothing))
         @test off_model.dynamics.reference_state === nothing
-        @test !off_model.dynamics.reference_from_state
 
         # Disabling and supplying an explicit reference profile are mutually exclusive.
         @test_throws ArgumentError CompressibleDynamics(ExplicitTimeStepping();

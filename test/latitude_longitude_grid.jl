@@ -134,10 +134,10 @@ end
     grid = build_test_llg(default_arch)
 
     coriolis = SphericalCoriolis()
-    # Full-pressure PGF/buoyancy (no reference). A constant θ=300 column is isentropically
-    # unbounded (its hydrostatic pressure reaches zero near ~30.8 km), so the default auto
-    # reference — a per-column isentropic integration deduced from this mean — is ill-posed over
-    # the 30 km domain. This test only checks that explicit time-stepping runs, so disable it.
+    # Full-pressure PGF/buoyancy (no reference). A constant-θ column is isentropic and its
+    # hydrostatic pressure reaches zero at a finite height (~29 km for the default θᵣ = 288 K), so
+    # the automatic reference — a per-column isentropic integration — is ill-posed over the 30 km
+    # domain. This test only checks that explicit time-stepping runs, so disable it.
     dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state=nothing)
 
     model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())

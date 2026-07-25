@@ -179,15 +179,13 @@ Variables are set via keyword arguments. Supported variables include:
   to ensure the velocity field satisfies the anelastic continuity equation. If `balancer` is also
   used, a final correction is applied after the balance.
 
-- `compute_reference_state`: Whether to recompute the dynamics' hydrostatic reference state from
-  the horizontal means of the just-set state (see [`set_to_mean!`](@ref)), before the
-  mass-conservation correction. Default (`nothing`) defers to `auto_reset_reference_state(dynamics)`:
-  automatic recomputation occurs for compatible compressible dynamics with no explicit reference
-  profile when the same call supplies both density and a thermodynamic variable. Partial `set!`
-  calls preserve the current valid reference. Dynamics given an explicit reference profile preserve
-  it untouched. Pass `true`/`false` to override. A no-op for dynamics without a reference state.
-  Useful when initializing from an analysis whose mean profile should define the perturbation base
-  state.
+- `compute_reference_state`: If `true` (default `false`), recompute the dynamics' hydrostatic
+  reference state from the horizontal means of the just-set state (see [`set_to_mean!`](@ref)),
+  before the mass-conservation correction. A no-op for dynamics without a reference state. Useful
+  when initializing from an analysis whose mean profile should define the perturbation base state;
+  otherwise the reference built at construction is preserved. For compressible dynamics, supply
+  both a density and a thermodynamic variable in the same `set!` call, since the recomputation
+  integrates the hydrostatic column from the model's current state.
 
 - `balancer`: adiabatic (FV3 `na_init`) spin-up of the nonhydrostatic state, run in place after the
   rest of `set!` — equivalent to calling `balance_adiabatically!(model, balancer)`. `false`
@@ -340,16 +338,9 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     update_state!(model, compute_tendencies=false)
 
     # Recompute the hydrostatic reference state from the just-set state, before the
-    # mass-conservation correction so the pressure projection uses the new reference. Automatic
-    # reset waits until this call supplies both density and a thermodynamic variable. Either one
-    # alone is a partial initialization whose complementary field may still be zero, so integrating
-    # it could corrupt the valid provisional reference. An explicit keyword overrides this safeguard
-    # because it is an intentional request to use the model's current state.
-    thermodynamic_state_updated = any(name -> name ∈ (:ρ, :ρᵈ), names) &&any(name -> name ∈ settable_thermodynamic_variables, names)
-    can_compute = something(model.dynamics.reference_state)
-    if can_compute && thermodynamic_state_updated && compute_reference_state
-        reset_reference_state!(model)
-    end
+    # mass-conservation correction so the pressure projection uses the new reference.
+    # `reset_reference_state!` is itself a no-op when the dynamics carries no reference state.
+    compute_reference_state && reset_reference_state!(model)
 
     # Set the density into discrete hydrostatic balance with the just-set thermodynamic state,
     # before the mass-conservation correction.
