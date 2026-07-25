@@ -81,8 +81,9 @@ Keyword Arguments
 - `surface_pressure`: Mean surface pressure (default: 101325.0 Pa)
 - `reference_potential_temperature`: Potential temperature for building a fixed
   hydrostatically-balanced reference state used in base-state subtraction. Can be a constant `θ₀`
-  or a function `θ(z)`. Default: `nothing` (no base-state correction).
-  When provided, an [`ExnerReferenceState`](@ref) is built during materialization.
+  or a function `θ(z)`. Default: `nothing`, which uses the automatic `θᵣ = 288` K profile when
+  `reference_state = :auto`. When provided, this profile replaces the automatic profile when
+  building the [`ExnerReferenceState`](@ref).
 - `reference_vapor_mass_fraction`: Optional vapor mass fraction for building a moist
   compressible reference state. Can be a constant `qᵛ`, function `qᵛ(z)`, or field,
   and is used with `reference_potential_temperature`.
@@ -130,6 +131,9 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                              `temperature_solver = FixedIterations(2)` for Reactant / differentiable runs, \
                              or `temperature_solver = nothing` for the non-iterated closed-form inversion."))
     end
+
+    reference_state === :auto || reference_state === nothing ||
+        throw(ArgumentError("`reference_state` must be `:auto` or `nothing`; received $(repr(reference_state))."))
 
     FT = float(promote_type(typeof(standard_pressure), typeof(surface_pressure)))
     pˢᵗ = convert(FT, standard_pressure)
@@ -240,14 +244,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     # Resolve terrain metrics: nothing on non-TFVD grids; on TFVD grids, a pre-built
     # `TerrainMetrics` passes through, anything else (a stencil flavor like
     # `SlopeOutsideInterpolation()`) drives `build_terrain_metrics(grid, ·)`.
-    terrain_metrics_spec = dynamics.terrain_metrics
-    terrain_metrics = if grid.z isa TerrainFollowingVerticalDiscretization
-        terrain_metrics_spec isa TerrainMetrics ?
-            terrain_metrics_spec :
-            build_terrain_metrics(grid, terrain_metrics_spec)
-    else
-        nothing
-    end
+    terrain_metrics = materialize_terrain_metrics(dynamics, grid)
 
     # Build the single, grid-polymorphic reference state (or `nothing`). The reference is an
     # `ExnerReferenceState` in discrete hydrostatic balance, used identically by the flat and
@@ -304,6 +301,17 @@ end
 #####
 ##### Reference-state builders (dispatched on whether the grid is terrain-following)
 #####
+
+function materialize_terrain_metrics(dynamics::CompressibleDynamics, grid)
+    terrain_metrics_spec = dynamics.terrain_metrics
+    if grid.z isa TerrainFollowingVerticalDiscretization
+        return terrain_metrics_spec isa TerrainMetrics ?
+               terrain_metrics_spec :
+               build_terrain_metrics(grid, terrain_metrics_spec)
+    else
+        return nothing
+    end
+end
 
 # Explicit-profile reference on a height-coordinate grid: a 1D-column `ExnerReferenceState`
 # (or 3D when the profile depends on the horizontal coordinates). The terrain-following method is
@@ -483,26 +491,24 @@ Return a reference state suitable for boundary-condition diagnostics.
 
 Boundary conditions are materialized before `materialize_dynamics` runs, so the
 stub `CompressibleDynamics.reference_state` field still holds the reference *spec*
-rather than an `ExnerReferenceState`. When that spec is an explicit
-`reference_potential_temperature` profile (a constant, function, or NamedTuple),
-this method builds the `ExnerReferenceState` on demand using the same logic as
-`materialize_dynamics`. When the reference is disabled (`nothing`) or left to the
-default standard-atmosphere build (`AutoReference`, whose grid-dependent form is
-unavailable at this point), or when the dynamics has already been materialized,
-the existing field (or `nothing`) is returned.
+rather than an `ExnerReferenceState`. This method builds explicit and automatic
+references on demand using the same grid-dependent logic as `materialize_dynamics`,
+so boundary conditions that require a reference profile can be materialized before
+the dynamics. When the reference is disabled (`nothing`) or the dynamics has already
+been materialized, the existing value is returned.
 """
 function AtmosphereModels.boundary_conditions_reference_state(dynamics::CompressibleDynamics, grid, thermodynamic_constants)
     ref_spec = dynamics.reference_state
-    ref_spec === nothing && return nothing         # reference disabled
-    ref_spec isa AutoReference && return nothing    # built in materialize_dynamics; unavailable here
+    ref_spec === nothing && return nothing
     ref_spec isa ExnerReferenceState && return ref_spec
 
     standard_pressure = dynamics.standard_pressure
     surface_pressure = dynamics.surface_pressure
+    terrain_metrics = materialize_terrain_metrics(dynamics, grid)
+    reference_profile = ref_spec isa AutoReference ? eltype(grid)(288) : ref_spec
 
-    return ExnerReferenceState(grid, thermodynamic_constants;
-                               surface_pressure, standard_pressure,
-                               exner_kwargs(ref_spec)...)
+    return build_reference_state(grid, terrain_metrics, reference_profile,
+                                 surface_pressure, standard_pressure, thermodynamic_constants)
 end
 
 """

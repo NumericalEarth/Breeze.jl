@@ -240,6 +240,10 @@ using Test
         @test_throws ArgumentError CompressibleDynamics(ExplicitTimeStepping();
                                                         reference_state=nothing,
                                                         reference_potential_temperature=300)
+
+        # Invalid switches must not silently enable the automatic reference.
+        @test_throws ArgumentError CompressibleDynamics(ExplicitTimeStepping(); reference_state=false)
+        @test_throws ArgumentError CompressibleDynamics(ExplicitTimeStepping(); reference_state=:typo)
     end
 
 end
