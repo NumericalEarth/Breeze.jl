@@ -237,8 +237,10 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
 
     # The reference-spec slot, set by the constructor:
     #   `nothing`           → reference explicitly disabled,
-    #   an explicit profile → build the reference from it (preserved by `set!`),
-    #   `AutoReference()`   → build a reference by default and deduce it from the state in `set!`.
+    #   an explicit profile → build the reference from it,
+    #   `AutoReference()`   → build the default standard-atmosphere reference.
+    # Either reference survives `set!` untouched unless `compute_reference_state=true` rebuilds it
+    # from the just-set state.
     ref_spec = dynamics.reference_state
 
     # Resolve terrain metrics: nothing on non-TFVD grids; on TFVD grids, a pre-built
