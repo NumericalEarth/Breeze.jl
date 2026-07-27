@@ -50,9 +50,12 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return the mean (reference) pressure field for `AnelasticDynamics`, in Pa.
+Return the dynamics pressure field for `AnelasticDynamics`, in Pa.
+
+For anelastic models, this is the time-independent hydrostatic reference state
+pressure ``pᵣ(z)``.
 """
-AtmosphereModels.mean_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
+AtmosphereModels.dynamics_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
 
 """
 $(TYPEDSIGNATURES)
@@ -78,7 +81,7 @@ That is ``p = p̄ + p'``, where ``p̄`` is the hydrostatic reference pressure
 and ``p'`` is the non-hydrostatic pressure anomaly.
 """
 function AtmosphereModels.total_pressure(dynamics::AnelasticDynamics)
-    p̄ = mean_pressure(dynamics)
+    p̄ = dynamics_pressure(dynamics)
     p′ = pressure_anomaly(dynamics)
     return p̄ + p′
 end

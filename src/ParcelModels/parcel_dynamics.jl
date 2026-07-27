@@ -213,7 +213,7 @@ AtmosphereModels.validate_velocity_boundary_conditions(::ParcelDynamics, bcs) = 
 AtmosphereModels.velocity_boundary_condition_names(::ParcelDynamics) = (:u, :v, :w)
 
 AtmosphereModels.dynamics_pressure_solver(::ParcelDynamics, grid) = nothing
-AtmosphereModels.mean_pressure(d::ParcelDynamics) = d.pressure
+AtmosphereModels.dynamics_pressure(d::ParcelDynamics) = d.pressure
 AtmosphereModels.pressure_anomaly(::ParcelDynamics) = ZeroField()
 AtmosphereModels.total_pressure(d::ParcelDynamics) = d.pressure
 AtmosphereModels.surface_pressure(d::ParcelDynamics) = d.surface_pressure

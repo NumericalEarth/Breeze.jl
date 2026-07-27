@@ -299,10 +299,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return the mean (reference) pressure for `CompressibleDynamics`.
-For compressible dynamics, there is no separate mean pressure - returns the full pressure field.
+Return the dynamics pressure for `CompressibleDynamics`.
+For compressible dynamics, there is no background/anomaly decomposition - returns the
+prognostic pressure field, computed diagnostically from the equation of state.
 """
-AtmosphereModels.mean_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
+AtmosphereModels.dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
 """
 $(TYPEDSIGNATURES)

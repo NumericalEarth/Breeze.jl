@@ -10,7 +10,7 @@ export
     HydrostaticallyBalancedDensity,
     # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
-    mean_pressure,
+    dynamics_pressure,
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,

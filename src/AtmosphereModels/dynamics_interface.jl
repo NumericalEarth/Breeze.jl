@@ -95,16 +95,16 @@ make_pressure_correction!(model, Δt) = nothing
 #####
 
 """
-    mean_pressure(dynamics)
+    dynamics_pressure(dynamics)
 
-Return the mean (background/reference) pressure field in Pa — the pressure entering the
-equation of state, buoyancy, and the thermodynamic tendencies.
+Return the pressure field appropriate to the dynamical formulation, in Pa — the pressure
+entering the equation of state, buoyancy, and the thermodynamic tendencies.
 
 For anelastic dynamics, this is the time-independent hydrostatic reference pressure ``pᵣ(z)``.
 For compressible dynamics, this is the prognostic pressure field. The anomaly and total-pressure
 counterparts are [`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
 """
-function mean_pressure end
+function dynamics_pressure end
 
 """
     pressure_anomaly(dynamics)
