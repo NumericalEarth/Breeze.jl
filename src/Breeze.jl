@@ -217,6 +217,8 @@ export
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
     SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
+    TKEBasedTurbulenceClosure, MesoscaleLengthScale, MY82Coefficients, MYJCoefficients,
+    diffusivity_coefficient, dissipation_coefficient, surface_tke_coefficient, stress_coefficient,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
