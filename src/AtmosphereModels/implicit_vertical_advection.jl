@@ -20,7 +20,15 @@
 #####    flux with the *velocity* CFL instead, using the same interpolations as the implicit
 #####    velocities so the explicit/implicit split is consistent.
 #####
-##### 2. Vertical momentum `ρw` lives at (Center, Center, Face). Oceananigans keeps the `Ww`
+##### 2. The vertically-implicit *diffusion* half of the tridiagonal row is not mass-flux
+#####    weighted upstream. Breeze's prognostics are density weighted (`q = ρ c`) while the
+#####    explicit flux divergence `∇_dot_Jᶜ`/`∂ⱼ_𝒯ᵢⱼ` forms `∂z(ρ κ ∂z c)` on the *specific*
+#####    variable, so the implicit operator must carry the same weighting. Oceananigans solves
+#####    `∂t q = ∂z(κ ∂z q)` instead — the same operator only for constant `ρ`. The
+#####    mass-flux-weighted z-Center coefficients below fix that; see the section header there
+#####    for the row and for why `ρw` is left alone.
+#####
+##### 3. Vertical momentum `ρw` lives at (Center, Center, Face). Oceananigans keeps the `Ww`
 #####    flux fully explicit and has no implicit-advection coefficients for z-Face fields, so
 #####    AIVA alone does not remove the `w ∂z w` CFL restriction — the limiting term in a deep
 #####    convective updraft. The z-Face, density-weighted coefficients below fill that gap:
@@ -41,6 +49,9 @@ using Oceananigans.Advection:
     vertical_scheme,
     densityᶜᶜᶜ,
     densityᶜᶜᶠ,
+    implicit_advection_upper_diagonal,
+    implicit_advection_lower_diagonal,
+    implicit_advection_diagonal,
     explicit_velocity_scaleᶠᶜᶠ,
     explicit_velocity_scaleᶜᶠᶠ,
     advective_momentum_flux_Wu,
@@ -64,6 +75,7 @@ using Oceananigans.TurbulenceClosures:
     VerticallyImplicitDiffusionLowerDiagonal,
     VerticallyImplicitDiffusionDiagonal,
     VerticallyImplicitDiffusionUpperDiagonal,
+    _implicit_linear_coefficient,
     _ivd_lower_diagonal,
     _ivd_upper_diagonal,
     ivd_diagonal
@@ -81,11 +93,13 @@ const AIVA = AdaptiveImplicitVerticalAdvection
 end
 
 # `ρw` lives at (Center, Center, Face) and needs the Breeze-owned z-Face implicit-advection
-# coefficients below; every other prognostic is at z-Centers and uses Oceananigans' coefficients.
-# Explicit schemes pass through unwrapped, so their implicit step reduces to diffusion only.
-implicit_step_advection(advection, name::Symbol) = advection
+# coefficients below; every other prognostic is at z-Centers and is routed to the mass-flux-weighted
+# z-Center coefficients, which reduce to Oceananigans' when the reference density is constant.
+# Explicit schemes are still wrapped, since the diffusion half needs the weighting either way.
+implicit_step_advection(advection, name::Symbol) =
+    name === :ρw ? advection : MassWeightedImplicitDiffusion(advection)
 implicit_step_advection(advection::AIVA, name::Symbol) =
-    name === :ρw ? VerticalMomentumImplicitAdvection(advection) : advection
+    name === :ρw ? VerticalMomentumImplicitAdvection(advection) : MassWeightedImplicitDiffusion(advection)
 
 # Density weighting the advective flux of each prognostic. Momentum and the thermodynamic
 # variable are carried by the coupling density (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`; see `dynamics_density`),
@@ -261,6 +275,121 @@ end
 
     return Δt * V⁻¹ / ρᶠᵏ * (Az⁺ * ρ⁺ * max(w̄ⁱ⁺, 0) * active⁺ -
                              Az⁻ * ρ⁻ * min(w̄ⁱ⁻, 0) * active⁻) * active
+end
+
+#####
+##### Mass-flux weighting of the vertically-implicit diffusion coefficients (z-Center fields)
+#####
+##### The prognostic is `q = ρ c`, but the flux the explicit path forms is `ρ κ ∂z c`
+##### (`Jᶜz`/`𝒯_uz` in src/TurbulenceClosures/TurbulenceClosures.jl weight the kinematic flux by
+##### `ℑz(ρ)`). Backward Euler on `∂t q = ∂z(ρ κ ∂z (q/ρ))` gives row k
+#####
+#####   du(k)  = - Δt κₖ₊₁ (ρᶠₖ₊₁ / ρᶜₖ₊₁) Δz⁻¹ᶜₖ Δz⁻¹ᶠₖ₊₁
+#####   dl(k′) = - Δt κₖ    (ρᶠₖ   / ρᶜₖ₋₁) Δz⁻¹ᶜₖ Δz⁻¹ᶠₖ,          k = k′ + 1
+#####   d(k)   =   1 + Δt Δz⁻¹ᶜₖ [κₖ₊₁ ρᶠₖ₊₁ Δz⁻¹ᶠₖ₊₁ + κₖ ρᶠₖ Δz⁻¹ᶠₖ] / ρᶜₖ
+#####
+##### The density ratio is the *only* difference from upstream, and it multiplies the whole
+##### κ-sum — so each coefficient is the upstream one times a ratio, and closure tuples (whose
+##### κ-sum happens inside `_ivd_*_diagonal`, see Oceananigans' closure_tuples.jl) and
+##### `closure === nothing` keep working unchanged.
+#####
+##### The `ρᶜ` factor belongs to the *column*, not the row: `du(k)` divides by `ρᶜₖ₊₁` while the
+##### diagonal divides by `ρᶜₖ`. So the diagonal must be written out explicitly rather than as
+##### `1 - du - dl`, which is only conservative when the off-diagonals carry no location-dependent
+##### prefactor.
+#####
+##### `ρw` (z-Face) is deliberately *not* weighted here. Upstream's z-Face coefficients evaluate
+##### `ν` at a single center for both off-diagonals of a row (`ivd_upper_diagonal` at center k and
+##### `ivd_lower_diagonal(k-1)` also at center k, vertically_implicit_diffusion_solver.jl:95-112),
+##### so there is no consistent center at which to evaluate `ρ` for the lower diagonal. That
+##### stencil is exact on uniform grids, which is where it is currently exercised; weighting it
+##### would require fixing the index convention upstream first.
+#####
+
+# Breeze-owned wrapper routing a z-Center prognostic's implicit solve to the mass-flux-weighted
+# coefficients below. Like `VerticalMomentumImplicitAdvection`, wrapping the scheme puts a
+# Breeze-owned type in the `get_coefficient` signature, so these methods are neither type piracy
+# nor ambiguous with Oceananigans' own `AIVA` and fallback methods.
+struct MassWeightedImplicitDiffusion{A}
+    scheme :: A
+end
+
+Adapt.adapt_structure(to, a::MassWeightedImplicitDiffusion) =
+    MassWeightedImplicitDiffusion(adapt(to, a.scheme))
+
+# The implicit-advection contribution, which is present only for adaptive-implicit schemes.
+@inline mass_weighted_advection_upper_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ) = zero(grid)
+@inline mass_weighted_advection_lower_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ) = zero(grid)
+@inline mass_weighted_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ) = zero(grid)
+
+@inline mass_weighted_advection_upper_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ρ) =
+    implicit_advection_upper_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ)
+@inline mass_weighted_advection_lower_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ρ) =
+    implicit_advection_lower_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ)
+@inline mass_weighted_advection_diagonal(i, j, k, grid, scheme::AIVA, w, Δt, ℓx, ℓy, ρ) =
+    implicit_advection_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ρ)
+
+# As with the advection coefficients above, `ρ` is interpolated in z only, so these are exact for
+# a horizontally-uniform density (the anelastic reference state) at all three z-Center locations.
+# The batched solver evaluates the off-diagonals only for k = 1 … Nz-1, so the divisions below
+# never reach a halo value of `ρ`; the diagonal's `ρᶠ⁺` at k = Nz+1 does, but it only multiplies
+# a `du` that the peripheral-node mask has already zeroed.
+@inline function mass_weighted_ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ)
+    du = _ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    ρᶠ = densityᶜᶜᶠ(i, j, k+1, grid, ρ)   # where κₖ₊₁ weights the flux
+    ρᶜ = densityᶜᶜᶜ(i, j, k+1, grid, ρ)   # where qₖ₊₁ is reconstructed as cₖ₊₁ = qₖ₊₁/ρᶜₖ₊₁
+    return du * ρᶠ / ρᶜ
+end
+
+# `k′ = k - 1` (LinearAlgebra.Tridiagonal convention): the coefficient of `q(k′)` in row `k′ + 1`.
+@inline function mass_weighted_ivd_lower_diagonal(i, j, k′, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ)
+    dl = _ivd_lower_diagonal(i, j, k′, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    ρᶠ = densityᶜᶜᶠ(i, j, k′+1, grid, ρ)
+    ρᶜ = densityᶜᶜᶜ(i, j, k′,   grid, ρ)
+    return dl * ρᶠ / ρᶜ
+end
+
+@inline function mass_weighted_ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ)
+    du  = _ivd_upper_diagonal(i, j, k,   grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    dl  = _ivd_lower_diagonal(i, j, k-1, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+    lin = _implicit_linear_coefficient(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields)
+
+    ρᶜ  = densityᶜᶜᶜ(i, j, k,   grid, ρ)
+    ρᶠ⁺ = densityᶜᶜᶠ(i, j, k+1, grid, ρ)
+    ρᶠ⁻ = densityᶜᶜᶠ(i, j, k,   grid, ρ)
+
+    # Both off-diagonal fluxes act on qₖ here, so both divide by ρᶜₖ — not by the neighbours'
+    # ρᶜ, which is why this is not `1 - du - dl`. A linear coefficient damps q and c at the
+    # same rate, so it is unweighted.
+    return one(grid) - Δt * lin - (du * ρᶠ⁺ + dl * ρᶠ⁻) / ρᶜ
+end
+
+#####
+##### get_coefficient seam for z-Center prognostics: mass-weighted diffusion + implicit advection
+#####
+
+@inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionUpperDiagonal, p, ::ZDirection,
+                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
+                                         advection::MassWeightedImplicitDiffusion, w, ρ)
+    du_diff = mass_weighted_ivd_upper_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ)
+    du_adv  = mass_weighted_advection_upper_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
+    return du_diff + du_adv
+end
+
+@inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionLowerDiagonal, p, ::ZDirection,
+                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
+                                         advection::MassWeightedImplicitDiffusion, w, ρ)
+    dl_diff = mass_weighted_ivd_lower_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ)
+    dl_adv  = mass_weighted_advection_lower_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
+    return dl_diff + dl_adv
+end
+
+@inline function Solvers.get_coefficient(i, j, k, grid, ::VerticallyImplicitDiffusionDiagonal, p, ::ZDirection,
+                                         clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields,
+                                         advection::MassWeightedImplicitDiffusion, w, ρ)
+    d_diff = mass_weighted_ivd_diagonal(i, j, k, grid, clo, K, id, ℓx, ℓy, ℓz, Δt, clk, fields, ρ)
+    d_adv  = mass_weighted_advection_diagonal(i, j, k, grid, advection.scheme, w, Δt, ℓx, ℓy, ρ)
+    return d_diff + d_adv
 end
 
 #####

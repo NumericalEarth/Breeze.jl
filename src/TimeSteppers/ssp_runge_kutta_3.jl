@@ -1,7 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields
-using Oceananigans.Advection: needs_implicit_solver
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
     tick_stage!,
@@ -130,34 +129,23 @@ function ssp_rk3_substep!(model, Δt, α)
         field_index = Val(i - 3)
         advection = field_advection_scheme(model.advection, names[i])
 
-        # Adaptive implicit vertical advection schemes add a density-weighted vertical-advection
-        # contribution to the implicit solve (combined with vertically-implicit diffusion).
-        # Scalars, ρu, and ρv use Oceananigans' z-Center coefficients directly; ρw is routed to
-        # Breeze's z-Face coefficients (see AtmosphereModels/implicit_vertical_advection.jl).
-        # All other schemes use the unchanged diffusion-only implicit step (a no-op when there
-        # is no vertically-implicit closure).
-        if needs_implicit_solver(advection)
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           α * Δt,
-                           implicit_step_advection(advection, names[i]),
-                           implicit_advection_velocities(model.dynamics, model.velocities, names[i]),
-                           implicit_advection_density(model.dynamics, model.formulation, names[i]))
-        else
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           α * Δt)
-        end
+        # The implicit solve always carries the reference density: the diffusion half is mass-flux
+        # weighted for the z-Center prognostics, and adaptive implicit vertical advection schemes
+        # add a density-weighted vertical-advection contribution on top. `ρw` routes to Breeze's
+        # z-Face coefficients, scalars/`ρu`/`ρv` to the mass-flux-weighted z-Center ones (see
+        # AtmosphereModels/implicit_vertical_advection.jl). A no-op when there is no
+        # vertically-implicit closure and no adaptive-implicit advection.
+        implicit_step!(u,
+                       model.timestepper.implicit_solver,
+                       model.closure,
+                       model.closure_fields,
+                       field_index,
+                       model.clock,
+                       fields(model),
+                       α * Δt,
+                       implicit_step_advection(advection, names[i]),
+                       implicit_advection_velocities(model.dynamics, model.velocities, names[i]),
+                       implicit_advection_density(model.dynamics, model.formulation, names[i]))
     end
 
     return nothing

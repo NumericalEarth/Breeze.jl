@@ -1,7 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields, architecture
-using Oceananigans.Advection: needs_implicit_solver
 using Oceananigans.Utils: launch!
 
 using Oceananigans.TimeSteppers: implicit_step!
@@ -184,28 +183,17 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
         field_index = Val(i - n_acoustic)
         advection = field_advection_scheme(model.advection, names[i])
 
-        if needs_implicit_solver(advection)
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           Δt_implicit,
-                           advection,
-                           velocities,
-                           ρ)
-        else
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           Δt_implicit)
-        end
+        implicit_step!(u,
+                       model.timestepper.implicit_solver,
+                       model.closure,
+                       model.closure_fields,
+                       field_index,
+                       model.clock,
+                       fields(model),
+                       Δt_implicit,
+                       implicit_step_advection(advection, names[i]),
+                       velocities,
+                       ρ)
     end
 
     return nothing
@@ -276,7 +264,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                    model.clock,
                    fields(model),
                    Δt_stage,
-                   θ_advection,
+                   implicit_step_advection(θ_advection, θ_name),
                    slow_thermodynamic_velocities(model),
                    ρᵈ)
 
