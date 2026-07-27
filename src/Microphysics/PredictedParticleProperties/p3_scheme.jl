@@ -4,6 +4,8 @@
 ##### Main type combining ice, rain, and cloud properties.
 #####
 
+using Breeze.AtmosphereModels: SpeciesBorrowing
+
 using Artifacts: @artifact_str
 using LazyArtifacts: LazyArtifacts
 
@@ -13,7 +15,7 @@ using LazyArtifacts: LazyArtifacts
 The Predicted Particle Properties (P3) microphysics scheme. See the constructor
 [`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
-struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, AERO, WRS}
+struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS}
     # Shared physical constants
     water_density :: FT
     # Top-level thresholds
@@ -27,6 +29,8 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, AE
     process_rates :: PRP
     # Boundary condition
     precipitation_boundary_condition :: BC
+    # Repair of negative densities produced by the (non-positive-definite) advection operator
+    negative_moisture_correction :: NMC
     # Aerosol activation (nothing = prescribed CCN, AerosolActivation = prognostic CCN)
     aerosol :: AERO
     # Warm-rain (autoconversion/accretion/self-collection) scheme selector
@@ -96,6 +100,14 @@ The scheme tracks 11 prognostic densities:
   `nothing` (default) is an open surface: the diagnosed fall speed is retained at the
   bottom face, so all sedimenting species leave the domain. `ImpenetrableBoundaryCondition()`
   zeroes the fall speed there instead, so precipitation accumulates in the lowest cell.
+- `negative_moisture_correction`: Repair of negative densities left by the advection
+  operator, applied at the top of `update_state!`. Defaults to `SpeciesBorrowing()`,
+  which borrows along the chain ``ρqʷⁱ ← ρqⁱ ← ρqʳ ← ρqᶜˡ ← ρqᵛ``, zeroes number and
+  rime fields orphaned by a vanishing ice mass, and clamps negative number, rime, and
+  reflectivity densities. Pass `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())`
+  to additionally redistribute leftover vapor deficits within each column, or `nothing`
+  to disable the repair (P3's process rates then see `clamp_positive`ed values while the
+  prognostic fields keep their negative mass).
 
 # Prognostic CCN Activation
 
@@ -131,6 +143,7 @@ function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Flo
                                                  three_moment_ice = false,
                                                  water_density = 1000,
                                                  precipitation_boundary_condition = nothing,
+                                                 negative_moisture_correction = SpeciesBorrowing(),
                                                  aerosol = nothing,
                                                  cloud = nothing,
                                                  process_rates = nothing,
@@ -141,6 +154,7 @@ function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Flo
     end
     return read_fortran_lookup_tables(lookup_tables; FT, three_moment_ice,
                                       water_density, precipitation_boundary_condition,
+                                      negative_moisture_correction,
                                       aerosol, cloud, process_rates, warm_rain_scheme)
 end
 
@@ -157,6 +171,9 @@ function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, "├── rain: ", summary(p3.rain), "\n")
     print(io, "├── cloud: ", summary(p3.cloud), "\n")
     print(io, "├── process_rates: ", summary(p3.process_rates), "\n")
+    print(io, "├── negative_moisture_correction: ",
+          isnothing(p3.negative_moisture_correction) ? "nothing (no repair)" :
+              summary(p3.negative_moisture_correction), "\n")
     print(io, "├── aerosol: ", isnothing(p3.aerosol) ? "nothing (prescribed CCN)" : summary(p3.aerosol), "\n")
     print(io, "└── warm_rain_scheme: ", summary(p3.warm_rain_scheme))
 end

@@ -49,6 +49,7 @@ function read_fortran_lookup_tables(directory::AbstractString;
                                     three_moment_ice::Union{Bool, Nothing} = nothing,
                                     water_density = 1000,
                                     precipitation_boundary_condition = nothing,
+                                    negative_moisture_correction = SpeciesBorrowing(),
                                     aerosol = nothing,
                                     cloud = nothing,
                                     process_rates = nothing,
@@ -127,6 +128,7 @@ function read_fortran_lookup_tables(directory::AbstractString;
         cloud,
         input_process_rates,
         precipitation_boundary_condition,
+        negative_moisture_correction,
         aerosol,
         warm_rain_scheme
     )

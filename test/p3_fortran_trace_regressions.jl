@@ -13,6 +13,7 @@ function p3_with_warm_rain_scheme(p3, warm_rain_scheme)
         p3.cloud,
         p3.process_rates,
         p3.precipitation_boundary_condition,
+        p3.negative_moisture_correction,
         p3.aerosol,
         warm_rain_scheme,
     )

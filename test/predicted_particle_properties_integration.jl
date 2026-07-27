@@ -185,6 +185,94 @@ using Oceananigans.TimeSteppers: update_state!
         @test open_after < open_before
     end
 
+    @testset "P3 repairs negative densities left by advection" begin
+        FT = Float64
+        grid = RectilinearGrid(default_arch, FT; size = (1, 1, 1),
+                               extent = (100, 100, 100))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = FT(101325),
+                                         potential_temperature = FT(285))
+        dynamics = AnelasticDynamics(reference_state)
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                                microphysics = p3)
+        μ = model.microphysical_fields
+
+        # The repair is opt-out, not opt-in: P3 carries eleven prognostic densities
+        # through a non-positive-definite advection operator.
+        @test AtmosphereModels.negative_moisture_correction(p3) isa AtmosphereModels.SpeciesBorrowing
+        @test AtmosphereModels.correction_moisture_fields(p3, μ) ===
+              (μ.ρqʷⁱ, μ.ρqⁱ, μ.ρqʳ, μ.ρqᶜˡ)
+
+        # Non-mass moments are clamped, never borrowed against. Supersaturation is
+        # excluded because subsaturation is legitimately negative.
+        clamped = AtmosphereModels.correction_number_fields(p3, μ)
+        @test clamped === (μ.ρnᶜˡ, μ.ρnʳ, μ.ρnⁱ, μ.ρqᶠ, μ.ρbᶠ)
+        @test !any(field === μ.ρsˢᵃᵗ for field in clamped)
+
+        # The 3-moment and prognostic-aerosol paths add exactly their own prognostics.
+        p3_three_moment = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)
+        @test AtmosphereModels.correction_number_fields(p3_three_moment, μ) ===
+              (μ.ρnᶜˡ, μ.ρnʳ, μ.ρnⁱ, μ.ρqᶠ, μ.ρbᶠ, μ.ρz̃ⁱ)
+        # Field `==` compares data, so membership has to be tested by identity.
+        pairs_with(p3ᵢ) = AtmosphereModels.correction_number_mass_pairs(p3ᵢ, μ)
+        holds_sixth_moment(pairs) = any(pair -> pair[1] === μ.ρz̃ⁱ && pair[2] === μ.ρqⁱ, pairs)
+        @test holds_sixth_moment(pairs_with(p3_three_moment))
+        @test !holds_sixth_moment(pairs_with(p3))
+
+        total_water(μ) = sum(Array(interior(model.moisture_density))) +
+                         sum(Array(interior(μ.ρqᶜˡ))) +
+                         sum(Array(interior(μ.ρqʳ))) +
+                         sum(Array(interior(μ.ρqⁱ))) +
+                         sum(Array(interior(μ.ρqʷⁱ)))
+
+        only_value(field) = only(Array(interior(field)))
+
+        # Negative cloud liquid borrows from vapor; negative ice borrows from rain.
+        set!(model.moisture_density, FT(1e-2))
+        set!(μ.ρqᶜˡ, FT(-1e-4))
+        set!(μ.ρqʳ, FT(5e-4))
+        set!(μ.ρqⁱ, FT(-2e-4))
+        set!(μ.ρqʷⁱ, 0)
+        water_before = total_water(μ)
+        AtmosphereModels.fix_negative_moisture!(model)
+
+        # Borrowing zeroes the deficit up to the round-off of the ρ-weighting.
+        @test only_value(μ.ρqᶜˡ) ≈ 0 atol = 1e-18
+        @test only_value(μ.ρqⁱ) ≈ 0 atol = 1e-18
+        @test only_value(μ.ρqʳ) ≈ FT(3e-4)
+        @test only_value(model.moisture_density) ≈ FT(1e-2) - FT(1e-4)
+        @test total_water(μ) ≈ water_before rtol = 1e-12
+
+        # A deficit passes an empty immediate donor and reaches available water farther
+        # down the chain.
+        set!(μ.ρqʳ, 0)
+        set!(μ.ρqⁱ, FT(-2e-4))
+        water_before = total_water(μ)
+        vapor_before = only_value(model.moisture_density)
+        AtmosphereModels.fix_negative_moisture!(model)
+        @test only_value(μ.ρqⁱ) ≈ 0 atol = 1e-18
+        @test only_value(model.moisture_density) ≈ vapor_before - FT(2e-4)
+        @test total_water(μ) ≈ water_before rtol = 1e-12
+
+        # Numbers and rime properties orphaned by a vanished ice mass are zeroed, and
+        # negative moments are clamped. Predicted supersaturation is left alone.
+        set!(μ.ρqⁱ, 0)
+        set!(μ.ρnⁱ, FT(1e5))
+        set!(μ.ρqᶠ, FT(1e-5))
+        set!(μ.ρbᶠ, FT(1e-8))
+        set!(μ.ρnʳ, FT(-1e3))
+        set!(μ.ρsˢᵃᵗ, FT(-1e-5))
+        AtmosphereModels.fix_negative_moisture!(model)
+
+        @test only_value(μ.ρnⁱ) == 0
+        @test only_value(μ.ρqᶠ) == 0
+        @test only_value(μ.ρbᶠ) == 0
+        @test only_value(μ.ρnʳ) == 0
+        @test only_value(μ.ρsˢᵃᵗ) ≈ FT(-1e-5)
+    end
+
     @testset "P3 square-root moment uses the mean Z/N fall speed" begin
         FT = Float64
         grid = RectilinearGrid(default_arch, FT; size = (2, 2, 3),

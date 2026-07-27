@@ -148,6 +148,58 @@ end
 # ice mass, so including ρqᶠ would count it twice; ρbᶠ and ρz̃ⁱ are ice properties.
 @inline AM.condensate_field_names(::P3) = (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqʷⁱ)
 
+#####
+##### Negative moisture correction
+#####
+#
+# The advection operator is not positive-definite, so any of P3's eleven prognostic
+# densities can come back negative from a stage update. Without this repair the
+# negative values persist: the process rates `clamp_positive` what they read, but
+# `total_condensate_density` (and through it the total density, buoyancy, and the
+# diagnosed thermodynamic state) keeps seeing the raw negative mass.
+
+AM.negative_moisture_correction(p3::P3) = p3.negative_moisture_correction
+
+# Species-borrowing chain, ordered so that each species borrows from the next and the
+# last borrows from vapor: ρqʷⁱ ← ρqⁱ ← ρqʳ ← ρqᶜˡ ← ρqᵛ. A negative liquid-on-ice
+# deficit is covered by the ice mass that carries it (implied refreezing), negative ice
+# by rain (implied freezing), and the warm-phase tail matches the 1- and 2-moment
+# schemes. Rime mass and volume are *components* of the ice state rather than
+# independent water reservoirs, so they are repaired by clamping instead of borrowing.
+#
+# Borrowing searches the whole lighter-species tail, so an empty immediate donor does
+# not prevent a deficit from reaching available water farther down the chain.
+@inline AM.correction_moisture_fields(::P3, μ) = (μ.ρqʷⁱ, μ.ρqⁱ, μ.ρqʳ, μ.ρqᶜˡ)
+
+# Fields that must vanish with the mass they describe. Ice number, rime mass, rime
+# volume, and the advected sixth moment are all properties of the ice population, so
+# zeroing them when `ρqⁱ` is gone destroys no water. Liquid on ice is deliberately not
+# paired with `ρqⁱ`: it is real water, and the whole-particle clip in
+# `_p3_phase2_rates` (Fˡ > 0.99) already sheds it to rain when the dry ice mass is gone.
+@inline AM.correction_number_mass_pairs(p3::P3, μ) =
+    ((μ.ρnᶜˡ, μ.ρqᶜˡ), (μ.ρnʳ, μ.ρqʳ), (μ.ρnⁱ, μ.ρqⁱ),
+     (μ.ρqᶠ, μ.ρqⁱ), (μ.ρbᶠ, μ.ρqⁱ),
+     z̃ⁱ_correction_pairs(three_moment_shape_table(p3), μ)...)
+
+# Fields clamped to zero rather than borrowed against, because they carry no water:
+# the number moments, the rime properties, the sixth moment, and the unactivated
+# aerosol count. `ρsˢᵃᵗ` is excluded — subsaturation is legitimately negative.
+@inline AM.correction_number_fields(p3::P3, μ) =
+    (μ.ρnᶜˡ, μ.ρnʳ, μ.ρnⁱ, μ.ρqᶠ, μ.ρbᶠ,
+     z̃ⁱ_correction_fields(three_moment_shape_table(p3), μ)...,
+     aerosol_correction_fields(p3.aerosol, μ)...)
+
+# Same compile-time switches as `prognostic_field_names`: dispatch on the *type* of the
+# 3-moment table and of the aerosol container so each tuple folds to a constant.
+@inline z̃ⁱ_correction_pairs(::Nothing, μ) = ()
+@inline z̃ⁱ_correction_pairs(_, μ) = ((μ.ρz̃ⁱ, μ.ρqⁱ),)
+
+@inline z̃ⁱ_correction_fields(::Nothing, μ) = ()
+@inline z̃ⁱ_correction_fields(_, μ) = (μ.ρz̃ⁱ,)
+
+@inline aerosol_correction_fields(::Nothing, μ) = ()
+@inline aerosol_correction_fields(_, μ) = (μ.ρnᵃ,)
+
 """
 $(TYPEDSIGNATURES)
 
