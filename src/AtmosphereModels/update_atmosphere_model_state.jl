@@ -214,8 +214,14 @@ function compute_auxiliary_variables!(model)
     # Dispatch on dynamics type (computes pressure for compressible dynamics)
     compute_auxiliary_dynamics_variables!(model)
 
-    # Compute diffusivities
+    # Compute diffusivities, then fill their halos. A diffusivity stored at (Center, Center, Face)
+    # is interpolated *horizontally* to reach the momentum faces — `νᶠᶜᶠ` averages `ν[i-1, j, k]`
+    # and `ν[i, j, k]` — so an unfilled halo halves the vertical viscous stress in the first column
+    # and at every rank boundary. Every Oceananigans model fills these halos here
+    # (`update_nonhydrostatic_model_state.jl:50`); the omission was latent only because no Breeze
+    # closure produced a spatially varying `νₑ`. A no-op when `closure_fields === nothing`.
     compute_closure_fields!(model.closure_fields, model.closure, model)
+    fill_halo_regions!(model.closure_fields; only_local_halos=true)
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 

@@ -16,7 +16,7 @@ using Oceananigans.Utils: launch!
 #####
 ##### Coefficients
 #####
-##### The neutral constant-flux-layer relations are derived in closures/notes/closure_coefficients.tex.
+##### The neutral constant-flux-layer relations are derived in the closure coefficient note.
 ##### With ℓᵍ = a z the log law constrains only Cˢ a = κ, where Cˢ = Cᴷ/(Cμ)^(1/4); choosing a = κ
 ##### makes that Cˢ = 1, i.e. the locus Cμ = Cᴷ⁴. All three published Mellor–Yamada sets satisfy it,
 ##### because Cμ = Cᴷ⁴ is equivalent to S_M(neutral) = B₁^(-1/3).
@@ -289,6 +289,21 @@ end
 
         e₁ = Array(interior(model.closure_fields.e))[1]
         @test e₁ ≥ surface_tke_coefficient(closure) * u★² * (1 - sqrt(eps(FT)))
+    end
+
+    @testset "νᵐᵃˣ caps the diffusivity as well as the viscosity" begin
+        # `K = ν/Pr` with Pr ≥ Pr₀ < 1 would otherwise exceed the stated ceiling by 1/Pr₀
+        closure = TKEBasedTurbulenceClosure(νᵐᵃˣ = 1e-3)
+        model = AtmosphereModel(grid; closure, coriolis = FPlane(latitude = 45))
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ = z -> θ₀, ρu = z -> FT(20) * z / 2000)
+
+        for _ in 1:5
+            time_step!(model, 10)
+        end
+
+        @test maximum(Array(interior(model.closure_fields.νₑ))) ≤ closure.νᵐᵃˣ
+        @test maximum(Array(interior(model.closure_fields.κₑ))) ≤ closure.νᵐᵃˣ
     end
 
     @testset "alternative constant sets run" begin

@@ -307,14 +307,18 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Zero the diffusivity on the periphery and poison inactive cells, so that a mistake shows up as a
-`NaN` rather than as quiet mixing across an immersed boundary.
+Zero the diffusivity on peripheral and inactive faces.
+
+Oceananigans' equivalent poisons inactive nodes with `NaN` as a debugging canary. On the
+`RectilinearGrid`s this closure targets, `inactive_node` implies `peripheral_node`, so that branch
+can never fire — and where it could fire, `ℑbzᵃᵃᶜ` in `_step_tke!` reconstructs from a face that
+may be entirely inactive, which would put the `NaN` into `:ρtke`. Masking to zero throughout is
+both simpler and inert.
 """
 @inline function mask_diffusivity(i, j, k, grid, κ)
     on_periphery = peripheral_node(i, j, k, grid, Center(), Center(), Face())
     within_inactive = inactive_node(i, j, k, grid, Center(), Center(), Face())
-    nan = convert(eltype(grid), NaN)
-    return ifelse(on_periphery, zero(grid), ifelse(within_inactive, nan, κ))
+    return ifelse(on_periphery | within_inactive, zero(grid), κ)
 end
 
 """
@@ -407,7 +411,10 @@ end
     @inbounds begin
         closure_fields.ℓ[i, j, k]  = mask_diffusivity(i, j, k, grid, FT(ℓ))
         closure_fields.νₑ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(ν))
-        closure_fields.κₑ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(ν / Pr))
+        # `νᵐᵃˣ` caps the diffusivity too. Capping only `ν` would let `K = ν/Pr` reach
+        # `νᵐᵃˣ/Pr₀` — 35% above the stated ceiling at the default `Pr₀`, and precisely in the
+        # neutral and unstable air where `Pr = Pr₀`.
+        closure_fields.κₑ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(min(ν / Pr, closure_ij.νᵐᵃˣ)))
         closure_fields.ℓᶜ[i, j, k] = FT(ℓᶜ)
     end
 end

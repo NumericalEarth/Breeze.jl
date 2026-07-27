@@ -127,7 +127,7 @@ length is what keeps ``ℓᵍ`` finite at the surface, so no floor is wanted.
 @inline height_above_surfaceᶜᶜᶜ(i, j, k, grid) =
     clip(znode(i, j, k, grid, Center(), Center(), Center()) - z_bottom(i, j, grid))
 
-@inline clip(x) = max(zero(x), x)
+@inline clip(x) = max(0, x)
 
 """
 $(TYPEDSIGNATURES)
@@ -145,7 +145,7 @@ end
 $(TYPEDSIGNATURES)
 
 Turbulence branch ``ℓᵗ = Cᵗ ∫ q z \\, dz / ∫ q \\, dz``, the ``q``-weighted centroid of the column.
-Read from the column field computed by `compute_turbulence_length_scale!`, which is constant within
+Read from the column field computed by `_compute_turbulence_length_scale!`, which is constant within
 a column and therefore carries no `k` index.
 """
 @inline turbulence_length_scaleᶜᶜᶠ(i, j, k, grid, ℓᵗ) = @inbounds ℓᵗ[i, j, 1]
