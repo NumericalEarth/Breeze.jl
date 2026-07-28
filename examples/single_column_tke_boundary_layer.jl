@@ -177,26 +177,48 @@ end
 
 depths = ("stable" => stress_depth, "neutral" => stress_depth, "convective" => inversion_depth)
 
+"""Kinematic heat flux ``-K ∂_z θ``, at faces where ``K`` lives."""
+function heat_flux(model)
+    θ = vec(Array(view(model.formulation.potential_temperature, 1, 1, :)))
+    κ = vec(Array(view(model.closure_fields.κₑ, 1, 1, :)))
+    z = Array(znodes(model.formulation.potential_temperature))
+    N = length(θ)
+    ∂zθᶠ = [k == 1 ? 0.0 : (θ[k] - θ[k-1]) / (z[k] - z[k-1]) for k in 1:N]
+    return -κ[1:N] .* ∂zθᶠ
+end
+
 set_theme!(fontsize = 14, linewidth = 2.5)
 
-fig = Figure(size = (1200, 450))
+fig = Figure(size = (1500, 450))
 
 ax_θ = Axis(fig[1, 1]; xlabel = "θ - θ(z=0) (K)", ylabel = "z / zᵢ")
 ax_U = Axis(fig[1, 2]; xlabel = "Wind speed (m s⁻¹)")
 ax_e = Axis(fig[1, 3]; xlabel = "TKE (m² s⁻²)")
 ax_ℓ = Axis(fig[1, 4]; xlabel = "Mixing length (m)")
+ax_J = Axis(fig[1, 5]; xlabel = "w′θ′ / (w′θ′)₀")
 
-for ax in (ax_θ, ax_U, ax_e, ax_ℓ)
-    ylims!(ax, 0, 1.4)
+for ax in (ax_θ, ax_U, ax_e, ax_ℓ, ax_J)
+    ylims!(ax, 0, 1.5)
 end
-[hideydecorations!(ax, grid = false) for ax in (ax_U, ax_e, ax_ℓ)]
+[hideydecorations!(ax, grid = false) for ax in (ax_U, ax_e, ax_ℓ, ax_J)]
+
+## Reference for the *convective* case only: the mixed-layer flux is near-linear from 1 at the
+## surface to -A at zᵢ, with the entrainment ratio A ≈ 0.17 (Soares et al. 2004) to 0.2. The stable
+## case has no such result and is not judged against this line. A flux profile needs no fitted
+## reference — unlike a diffusivity, which cannot even be defined where the LES flux runs
+## counter-gradient, which in the upper half of a CBL is exactly where it does.
+lines!(ax_J, [1, -0.2], [0, 1]; color = :gray50, linestyle = :dash)
+vlines!(ax_J, [0]; color = :gray80, linewidth = 1)
 
 colors = (:dodgerblue, :black, :orangered)
 
-for ((name, simulation), (_, depth), color) in zip(simulations, depths, colors)
+legend_labels = String[]
+
+for ((name, simulation), (_, settings), (_, depth), color) in zip(simulations, regimes, depths, colors)
     model = simulation.model
     u, v, w = model.velocities
     zᵢ = depth(model)
+    push!(legend_labels, "$name (zᵢ = $(round(Int, zᵢ)) m)")
 
     ## The profiles are plotted against a rescaled coordinate, so values and heights are taken
     ## separately rather than handing Makie the `Field`.
@@ -206,15 +228,22 @@ for ((name, simulation), (_, depth), color) in zip(simulations, depths, colors)
 
     ## Each regime starts from a different θ₀, so plot the departure from the surface value
     θᵥ = vec(Array(view(θ, 1, 1, :)))
-    lines!(ax_θ, θᵥ .- θᵥ[1], Array(znodes(θ)) ./ zᵢ; color, label = "$name (zᵢ = $(round(Int, zᵢ)) m)")
+    lines!(ax_θ, θᵥ .- θᵥ[1], Array(znodes(θ)) ./ zᵢ; color)
     lines!(ax_U, vec(Array(view(U, 1, 1, :))), Array(znodes(U)) ./ zᵢ; color)
     lines!(ax_e, vec(Array(view(model.closure_fields.e, 1, 1, :))),
            Array(znodes(model.closure_fields.e)) ./ zᵢ; color)
     lines!(ax_ℓ, vec(Array(view(model.closure_fields.ℓ, 1, 1, :))),
            Array(znodes(model.closure_fields.ℓ)) ./ zᵢ; color)
+    ## The neutral case has no surface heat flux by construction, so it has no normalized flux
+    Q₀ = settings.surface_heat_flux
+    if Q₀ != 0
+        lines!(ax_J, heat_flux(model) ./ Q₀, Array(znodes(θ)) ./ zᵢ; color)
+    end
 end
 
-axislegend(ax_θ; position = :rb, framevisible = false)
+## Built explicitly, so the neutral case still appears even though it has no curve in this panel
+axislegend(ax_J, [LineElement(color = c) for c in colors], legend_labels;
+           position = :rt, framevisible = false)
 
 fig
 
@@ -228,6 +257,12 @@ fig
 # closure with the mass-flux term removed, and report it shows "a lack of a well-mixed CBL feature
 # (i.e., unstable profile throughout the whole CBL) as well as an underprediction of the CBL growth
 # compared to LES" (their Fig. 3a). Both are what a mass-flux branch is for.
+#
+# The last panel is where that shows up most directly. The convective heat flux follows the
+# mixed-layer line through the lower half of the boundary layer, where transport really is
+# downgradient — and then flattens toward zero near the inversion instead of crossing it. A
+# downgradient flux cannot be negative where ``∂_z θ > 0``, so this closure entrains only what the
+# local gradient gives it: an entrainment ratio of 0.04 against the 0.17 that LES reports.
 
 save("single_column_tke_boundary_layer.png", fig) #src
 nothing #hide
