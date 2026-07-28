@@ -5,14 +5,16 @@ using Test
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
     MoistureMassFractions,
+    AbstractReferencePressureState,
     LiquidIceDensityState,
+    LiquidIcePotentialTemperatureState,
     temperature,
     with_temperature,
     mixture_gas_constant,
     mixture_heat_capacity,
     saturation_specific_humidity
 
-using Breeze.Microphysics: SaturationAdjustment, adjust_thermodynamic_state, WarmPhaseEquilibrium
+using Breeze.Microphysics: SaturationAdjustment, adjust_state, adjust_thermodynamic_state, WarmPhaseEquilibrium
 using Oceananigans.TimeSteppers: update_state!
 
 # Regression tests for the compressible θˡⁱ density-based thermodynamic state
@@ -69,6 +71,26 @@ using Oceananigans.TimeSteppers: update_state!
         𝒰dry = adjust_thermodynamic_state(
             LiquidIceDensityState(θ₀, MoistureMassFractions(FT(0.002)), pˢᵗ, ρ), sa, constants)
         @test 𝒰dry.moisture_mass_fractions.liquid == 0
+    end
+
+    # NumericalEarth/Breeze.jl#859: `adjust_state` (and the generic adjustment built on it) reads
+    # `reference_pressure`, a field the density-closed state does not have. Both are therefore
+    # constrained to `AbstractReferencePressureState`, so a `LiquidIceDensityState` can only ever
+    # reach the density-consistent method above.
+    @testset "the reference-pressure adjustment path excludes the density state" begin
+        equilibrium = WarmPhaseEquilibrium()
+        density_state = LiquidIceDensityState{FT, NewtonSolver{FT}}
+        pressure_state = LiquidIcePotentialTemperatureState{FT}
+
+        @test !(:reference_pressure in fieldnames(density_state))
+        @test :reference_pressure in fieldnames(pressure_state)
+
+        @test !(density_state <: AbstractReferencePressureState)
+        @test pressure_state <: AbstractReferencePressureState
+
+        argument_types(𝒮) = Tuple{𝒮, FT, typeof(constants), typeof(equilibrium)}
+        @test !hasmethod(adjust_state, argument_types(density_state))
+        @test hasmethod(adjust_state, argument_types(pressure_state))
     end
 
     @testset "fixes the κ·ΔL temperature inconsistency" begin

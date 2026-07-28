@@ -1,8 +1,16 @@
 abstract type AbstractThermodynamicState{FT} end
 
+# States closed on a reference pressure: they carry a `reference_pressure` field, and their
+# density is diagnosed from it. The density-closed `LiquidIceDensityState` deliberately does
+# *not* subtype this — it carries ρ instead, and its saturation adjustment conserves θˡⁱ at
+# constant density rather than at a fixed reference pressure. See NumericalEarth/Breeze.jl#765.
+# Any code that reads `𝒰.reference_pressure` must dispatch on this type, not on
+# `AbstractThermodynamicState`; see NumericalEarth/Breeze.jl#859.
+abstract type AbstractReferencePressureState{FT} <: AbstractThermodynamicState{FT} end
+
 @inline Base.eltype(::AbstractThermodynamicState{FT}) where FT = FT
 
-@inline function density(𝒰::AbstractThermodynamicState, constants)
+@inline function density(𝒰::AbstractReferencePressureState, constants)
     pᵣ = 𝒰.reference_pressure
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
@@ -19,7 +27,7 @@ end
 ##### Liquid-ice potential temperature state
 #####
 
-struct LiquidIcePotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
+struct LiquidIcePotentialTemperatureState{FT} <: AbstractReferencePressureState{FT}
     potential_temperature :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
     standard_pressure :: FT # pˢᵗ: reference pressure for potential temperature
@@ -138,13 +146,6 @@ end
     θ = (T - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ) / Π
 
     return LiquidIcePotentialTemperatureState(θ, q, 𝒰.standard_pressure, 𝒰.reference_pressure)
-end
-
-@inline function density(𝒰::LiquidIcePotentialTemperatureState, constants)
-    pᵣ = 𝒰.reference_pressure
-    T = temperature(𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    return density(T, pᵣ, q, constants)
 end
 
 #####
@@ -267,7 +268,7 @@ end
 ##### Moist static energy state (for microphysics interfaces)
 #####
 
-struct StaticEnergyState{FT} <: AbstractThermodynamicState{FT}
+struct StaticEnergyState{FT} <: AbstractReferencePressureState{FT}
     static_energy :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
     height :: FT
