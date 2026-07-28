@@ -4,16 +4,10 @@
 # — differences driven by the sign of the surface heat flux. Eddys are not resolved, highlighting
 # the behavior of our [`TKEBasedTurbulenceClosure`](@ref).
 #
-# The closure carries one prognostic equation for the subgrid turbulent kinetic energy ``e``,
-#
-# ```math
-# ∂e/∂t = P + B - ε + \text{transport}, \qquad P = ν S², \qquad B = -K N²,
-# ```
-#
-# and closes the eddy viscosity on it, ``ν = Cᴷ ℓ \sqrt{e}``, with ``ℓ`` blended harmonically from a
-# distance-to-the-surface branch, a turbulence branch and a buoyancy branch. The three regimes
-# below exercise different terms: shear production ``P`` alone in the neutral case, ``P`` against a
-# stabilizing ``B`` in the stable case, and ``B`` alone in the convective one.
+# The closure is described in [Turbulence closures](@ref). The three regimes below exercise
+# different terms of its turbulent kinetic energy budget: shear production ``P`` alone in the
+# neutral case, ``P`` against a stabilizing buoyancy flux ``B`` in the stable case, and ``B`` alone
+# in the convective one.
 
 using Breeze
 using Oceananigans

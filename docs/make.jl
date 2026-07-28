@@ -195,6 +195,7 @@ makedocs(
             ],
         ],
         "Radiative Transfer" => "radiative_transfer.md",
+        "Turbulence closures" => "turbulence_closures.md",
         "Dynamics" => Any[
             "Governing equations" => "dycore_equations_algorithms.md",
             "Anelastic dynamics" => "anelastic_dynamics.md",
