@@ -151,15 +151,16 @@ end
 """Stress-based depth: the 5% level of the peak stress, rescaled by 0.95 (GABLS1/CNBL convention)."""
 function stress_depth(model)
     Nz = size(model.grid, 3)
-    U = Field(sqrt(model.velocities.u^2 + model.velocities.v^2))
-    compute!(U)
-    Uᵥ = vec(Array(view(U, 1, 1, :)))
+    u = vec(Array(view(model.velocities.u, 1, 1, :)))
+    v = vec(Array(view(model.velocities.v, 1, 1, :)))
     ν = vec(Array(view(model.closure_fields.νₑ, 1, 1, :)))
     zc = Array(znodes(model.formulation.potential_temperature))
 
-    ## τ = νₑ |∂z U| at faces, where νₑ lives
-    ∂zUᶠ = [k == 1 ? 0.0 : (Uᵥ[k] - Uᵥ[k-1]) / (zc[k] - zc[k-1]) for k in 1:Nz]
-    τ = ν[1:Nz] .* abs.(∂zUᶠ)
+    ## The stress is a vector: τ = νₑ |∂z 𝐔| at faces, where νₑ lives. Using the gradient of the
+    ## wind *speed* instead would vanish at the low-level jet, where |𝐔| peaks — but the stress
+    ## does not vanish there, because the wind is still turning with height.
+    ∂zᶠ(a) = [k == 1 ? 0.0 : (a[k] - a[k-1]) / (zc[k] - zc[k-1]) for k in 1:Nz]
+    τ = sqrt.((ν[1:Nz] .* ∂zᶠ(u)) .^ 2 .+ (ν[1:Nz] .* ∂zᶠ(v)) .^ 2)
     τs = maximum(τ)
 
     k = findfirst(k -> τ[k] < 0.05τs, 2:Nz)
