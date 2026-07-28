@@ -13,7 +13,6 @@ export
     dynamics_pressure,
     thermodynamic_pressure,
     total_density,
-    mean_pressure,
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
