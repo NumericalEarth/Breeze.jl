@@ -15,8 +15,8 @@ using Test
 
 using Breeze: ReferenceState, AnelasticDynamics
 using Breeze.AtmosphereModels: materialize_dynamics, default_dynamics
-using Breeze.AtmosphereModels: mean_pressure, pressure_anomaly, total_pressure
-using Breeze.AtmosphereModels: dynamics_density, dynamics_pressure
+using Breeze.AtmosphereModels: dynamics_pressure, pressure_anomaly, total_pressure
+using Breeze.AtmosphereModels: dynamics_density
 
 @testset "AnelasticDynamics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -57,8 +57,8 @@ using Breeze.AtmosphereModels: dynamics_density, dynamics_pressure
         dynamics_stub = AnelasticDynamics(reference_state)
         dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
 
-        # Test mean_pressure
-        p̄ = mean_pressure(dynamics)
+        # Test dynamics_pressure
+        p̄ = dynamics_pressure(dynamics)
         @test p̄ === reference_state.pressure
 
         # Test pressure_anomaly (returns an AbstractOperation)

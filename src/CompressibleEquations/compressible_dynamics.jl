@@ -350,10 +350,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return the mean (reference) pressure for `CompressibleDynamics`.
-For compressible dynamics, there is no separate mean pressure - returns the full pressure field.
+Return the dynamics pressure for `CompressibleDynamics`.
+For compressible dynamics, there is no background/anomaly decomposition - returns the
+prognostic pressure field, computed diagnostically from the equation of state.
 """
-AtmosphereModels.mean_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
+AtmosphereModels.dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
 """
 $(TYPEDSIGNATURES)
@@ -442,14 +443,6 @@ AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_st
 # density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
 AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
-
-"""
-$(TYPEDSIGNATURES)
-
-Return the pressure field for `CompressibleDynamics`.
-Pressure is computed diagnostically from the equation of state.
-"""
-AtmosphereModels.dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
 #####
 ##### Prognostic fields
