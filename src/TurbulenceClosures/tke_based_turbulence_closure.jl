@@ -80,8 +80,6 @@ struct TKEBasedTurbulenceClosure{TD, ML, FT} <: AbstractScalarDiffusivity{TD, Ve
     CRi :: FT
     "floor on ``e``, m² s⁻²; also the value subtracted from the ``ℓᵗ`` integrand"
     eᵐⁱⁿ :: FT
-    "cap on ``ν`` and ``K``, m² s⁻¹"
-    νᵐᵃˣ :: FT
 end
 
 const TKEClosureArray{TD} = AbstractArray{<:TKEBasedTurbulenceClosure{TD}} where TD
@@ -90,8 +88,8 @@ const TKEClosureArray{TD} = AbstractArray{<:TKEBasedTurbulenceClosure{TD}} where
 const FlavorOfTKEClosure{TD} = Union{TKEBasedTurbulenceClosure{TD}, TKEClosureArray{TD}} where TD
 
 function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, Cᴷ::FT, Cμ::FT, Pr₀::FT,
-                                       CRi::FT, eᵐⁱⁿ::FT, νᵐᵃˣ::FT) where {TD, ML, FT}
-    return TKEBasedTurbulenceClosure{TD, ML, FT}(mixing_length, Cᴷ, Cμ, Pr₀, CRi, eᵐⁱⁿ, νᵐᵃˣ)
+                                       CRi::FT, eᵐⁱⁿ::FT) where {TD, ML, FT}
+    return TKEBasedTurbulenceClosure{TD, ML, FT}(mixing_length, Cᴷ, Cμ, Pr₀, CRi, eᵐⁱⁿ)
 end
 
 """
@@ -117,8 +115,7 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    Cμ = 0.0578,
                                    Pr₀ = 0.74,
                                    CRi = 3,
-                                   eᵐⁱⁿ = 1e-6,
-                                   νᵐᵃˣ = 1000) where TD
+                                   eᵐⁱⁿ = 1e-6) where TD
 
     mixing_length = convert_eltype(FT, mixing_length)
 
@@ -127,8 +124,7 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                          convert(FT, Cμ),
                                          convert(FT, Pr₀),
                                          convert(FT, CRi),
-                                         convert(FT, eᵐⁱⁿ),
-                                         convert(FT, νᵐᵃˣ))
+                                         convert(FT, eᵐⁱⁿ))
 end
 
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
@@ -307,18 +303,20 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Zero the diffusivity on peripheral and inactive faces.
+Zero the diffusivity on the periphery and poison inactive nodes with `NaN`, so that mixing across
+an immersed boundary shows up as a `NaN` rather than as a quiet wrong answer.
 
-Oceananigans' equivalent poisons inactive nodes with `NaN` as a debugging canary. On the
-`RectilinearGrid`s this closure targets, `inactive_node` implies `peripheral_node`, so that branch
-can never fire — and where it could fire, `ℑbzᵃᵃᶜ` in `_step_tke!` reconstructs from a face that
-may be entirely inactive, which would put the `NaN` into `:ρtke`. Masking to zero throughout is
-both simpler and inert.
+This mirrors Oceananigans' `mask_diffusivity`
+(`TKEBasedVerticalDiffusivities.jl`) exactly, including the `NaN`, which is a deliberate debugging
+canary upstream. On the `RectilinearGrid`s this closure targets `inactive_node` implies
+`peripheral_node`, so the canary never fires; keeping it means it is already in place the day
+immersed boundaries come into scope.
 """
 @inline function mask_diffusivity(i, j, k, grid, κ)
     on_periphery = peripheral_node(i, j, k, grid, Center(), Center(), Face())
     within_inactive = inactive_node(i, j, k, grid, Center(), Center(), Face())
-    return ifelse(on_periphery | within_inactive, zero(grid), κ)
+    nan = convert(eltype(grid), NaN)
+    return ifelse(on_periphery, zero(grid), ifelse(within_inactive, nan, κ))
 end
 
 """
@@ -392,7 +390,7 @@ end
 
     ℓ = mixing_lengthᶜᶜᶠ(i, j, k, grid, closure_ij.mixing_length, q, N², closure_fields.ℓᵗ)
 
-    ν = min(closure_ij.Cᴷ * ℓ * q★, closure_ij.νᵐᵃˣ)
+    ν = closure_ij.Cᴷ * ℓ * q★
 
     # Ri = N²/S² is unbounded where the shear vanishes. Pr saturates in that limit, so clamping Ri
     # to a large value rather than dividing by zero gives the right answer and no NaN.
@@ -411,10 +409,9 @@ end
     @inbounds begin
         closure_fields.ℓ[i, j, k]  = mask_diffusivity(i, j, k, grid, FT(ℓ))
         closure_fields.νₑ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(ν))
-        # `νᵐᵃˣ` caps the diffusivity too. Capping only `ν` would let `K = ν/Pr` reach
-        # `νᵐᵃˣ/Pr₀` — 35% above the stated ceiling at the default `Pr₀`, and precisely in the
-        # neutral and unstable air where `Pr = Pr₀`.
-        closure_fields.κₑ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(min(ν / Pr, closure_ij.νᵐᵃˣ)))
+        # `K` follows from the capped `ν`; it is not capped independently, so that `Pr = ν/K` is
+        # exactly the value `turbulent_prandtl_number` returned even where the cap binds.
+        closure_fields.κₑ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(ν / Pr))
         closure_fields.ℓᶜ[i, j, k] = FT(ℓᶜ)
     end
 end
@@ -574,6 +571,5 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
               "├── Pr₀:  ", prettysummary(closure.Pr₀), '\n',
               "├── CRi:  ", prettysummary(closure.CRi), '\n',
               "├── eᵐⁱⁿ: ", prettysummary(closure.eᵐⁱⁿ), " m² s⁻²", '\n',
-              "├── νᵐᵃˣ: ", prettysummary(closure.νᵐᵃˣ), " m² s⁻¹", '\n',
               "└── mixing_length: ", summary(closure.mixing_length))
 end

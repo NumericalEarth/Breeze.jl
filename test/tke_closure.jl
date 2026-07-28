@@ -265,7 +265,6 @@ end
         @test all(>(0), ℓ[2:end-1])
         @test all(>(0), ℓᶜ)
         @test all(isfinite, ℓᶜ)
-        @test maximum(ν) ≤ TKEBasedTurbulenceClosure().νᵐᵃˣ
 
         # Shear drives turbulence: something must have grown past the floor
         @test maximum(e) > 10 * TKEBasedTurbulenceClosure().eᵐⁱⁿ
@@ -291,9 +290,10 @@ end
         @test e₁ ≥ surface_tke_coefficient(closure) * u★² * (1 - sqrt(eps(FT)))
     end
 
-    @testset "νᵐᵃˣ caps the diffusivity as well as the viscosity" begin
-        # `K = ν/Pr` with Pr ≥ Pr₀ < 1 would otherwise exceed the stated ceiling by 1/Pr₀
-        closure = TKEBasedTurbulenceClosure(νᵐᵃˣ = 1e-3)
+    @testset "K = ν/Pr holds pointwise" begin
+        # Nothing clips ν or K, so the Prandtl number the closure advertises is exactly the one
+        # the fields carry — in a neutral column that is Pr₀ everywhere.
+        closure = TKEBasedTurbulenceClosure()
         model = AtmosphereModel(grid; closure, coriolis = FPlane(latitude = 45))
         θ₀ = model.dynamics.reference_state.potential_temperature
         set!(model; θ = z -> θ₀, ρu = z -> FT(20) * z / 2000)
@@ -302,8 +302,11 @@ end
             time_step!(model, 10)
         end
 
-        @test maximum(Array(interior(model.closure_fields.νₑ))) ≤ closure.νᵐᵃˣ
-        @test maximum(Array(interior(model.closure_fields.κₑ))) ≤ closure.νᵐᵃˣ
+        ν = Array(interior(model.closure_fields.νₑ))
+        κ = Array(interior(model.closure_fields.κₑ))
+
+        @test maximum(ν) > 0                            # the column is actually mixing
+        @test all(isapprox.(κ, ν ./ closure.Pr₀; rtol = sqrt(eps(FT))))
     end
 
     @testset "alternative constant sets run" begin

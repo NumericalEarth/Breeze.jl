@@ -130,11 +130,12 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
-| ``\ell``                            | `ℓ`    |                                     | Master turbulent mixing length, m (`TKEBasedTurbulenceClosure`)                |
+| ``\ell``                            | `ℓ`    |                                     | A **length scale**, m; the superscript says which one. Bare ``ℓ`` is used locally where only one length scale is in play (the master mixing length in `TKEBasedTurbulenceClosure`, the divergence-damping scale in `CompressibleEquations`) |
 | ``\ell^g``                          | `ℓᵍ`   |                                     | Geometric branch of the mixing length, ``ℓᵍ = κ(z + ℓʳ)``                       |
 | ``\ell^t``                          | `ℓᵗ`   |                                     | Turbulence branch of the mixing length, ``ℓᵗ = Cᵗ ∫qz\,dz / ∫q\,dz``            |
 | ``\ell^b``                          | `ℓᵇ`   |                                     | Buoyancy branch of the mixing length, ``ℓᵇ = Cᵇ q / N``                         |
-| ``\ell^r``                          | `ℓʳ`   | `roughness_length`                  | Surface roughness length, m. Superscript ``r`` elsewhere denotes *rain* (``qʳ``); the two never appear together |
+| ``\ell^r``                          | `ℓʳ`   | `roughness_length`                  | Surface roughness length for momentum, m. Superscript ``r`` elsewhere denotes *rain* (``qʳ``); the two never appear together |
+| ``\ell^{rh}``                       | `ℓʳʰ`  | `scalar_roughness_length`           | Surface roughness length for heat and moisture; defaults to ``ℓʳ/7.3`` |
 | ``\kappa``                          | `κ`    |                                     | von Kármán constant. Never used for a diffusivity in Breeze's own code — the Oceananigans accessors literally named `κᶠᶜᶜ`, `κᶜᶠᶜ`, `κᶜᶜᶠ` are the one exception, and they are thin one-liners |
 | ``\nu``                             | `ν`    |                                     | Eddy viscosity, m² s⁻¹                                                         |
 | ``K``                               | `K`    |                                     | Eddy diffusivity, ``K = ν/\mathrm{Pr}``, m² s⁻¹                                |

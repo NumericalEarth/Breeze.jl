@@ -129,23 +129,29 @@ function ssp_rk3_substep!(model, Δt, α)
         field_index = Val(i - 3)
         advection = field_advection_scheme(model.advection, names[i])
 
-        # The implicit solve always carries the reference density: the diffusion half is mass-flux
-        # weighted for the z-Center prognostics, and adaptive implicit vertical advection schemes
-        # add a density-weighted vertical-advection contribution on top. `ρw` routes to Breeze's
-        # z-Face coefficients, scalars/`ρu`/`ρv` to the mass-flux-weighted z-Center ones (see
-        # AtmosphereModels/implicit_vertical_advection.jl). A no-op when there is no
-        # vertically-implicit closure and no adaptive-implicit advection.
-        implicit_step!(u,
-                       model.timestepper.implicit_solver,
-                       model.closure,
-                       model.closure_fields,
-                       field_index,
-                       model.clock,
-                       fields(model),
-                       α * Δt,
-                       implicit_step_advection(advection, names[i]),
-                       implicit_advection_velocities(model.dynamics, model.velocities, names[i]),
-                       implicit_advection_density(model.dynamics, model.formulation, names[i]))
+        # The implicit solve must carry the reference density whenever it runs at all: the
+        # diffusion half is mass-flux weighted for the z-Center prognostics, and adaptive implicit
+        # vertical advection adds a density-weighted advection contribution on top. `ρw` routes to
+        # Breeze's z-Face coefficients, scalars/`ρu`/`ρv` to the mass-flux-weighted z-Center ones
+        # (see AtmosphereModels/implicit_vertical_advection.jl).
+        #
+        # The guard is on the *solver*, not on `needs_implicit_solver(advection)`: that predicate
+        # is false for `advection = nothing` and for ordinary WENO, so keying on it would drop the
+        # density — and hence the mass-flux weighting — for every vertically-implicit closure
+        # without adaptive-implicit advection, the single-column configuration included.
+        if !isnothing(model.timestepper.implicit_solver)
+            implicit_step!(u,
+                           model.timestepper.implicit_solver,
+                           model.closure,
+                           model.closure_fields,
+                           field_index,
+                           model.clock,
+                           fields(model),
+                           α * Δt,
+                           implicit_step_advection(advection, names[i]),
+                           implicit_advection_velocities(model.dynamics, model.velocities, names[i]),
+                           implicit_advection_density(model.dynamics, model.formulation, names[i]))
+        end
     end
 
     return nothing

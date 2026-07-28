@@ -97,7 +97,7 @@ absorbing it into ``Cᴷ``, so that the neutral log-layer constraint on the coef
 `stress_coefficient`) is *defaulted to* and then checked, rather than imposed by construction.
 """
 @inline function geometric_length_scaleᶜᶜᶠ(i, j, k, grid, mixing_length)
-    z = height_above_surfaceᶜᶜᶠ(i, j, k, grid)
+    z = height_above_bottomᶜᶜᶠ(i, j, k, grid)
     return mixing_length.κ * (z + mixing_length.ℓʳ)
 end
 
@@ -107,24 +107,30 @@ $(TYPEDSIGNATURES)
 `geometric_length_scaleᶜᶜᶠ` at cell centers.
 """
 @inline function geometric_length_scaleᶜᶜᶜ(i, j, k, grid, mixing_length)
-    z = height_above_surfaceᶜᶜᶜ(i, j, k, grid)
+    z = height_above_bottomᶜᶜᶜ(i, j, k, grid)
     return mixing_length.κ * (z + mixing_length.ℓʳ)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Height above the surface, at faces and at centers.
+Height above the bottom boundary, at faces and at centers — **unfloored**.
 
-Oceananigans' `height_above_bottomᶜᶜᶠ`/`ᶜᶜᶜ` are *not* usable here: they floor the result at one
-cell thickness, which suits an ocean bottom boundary layer but destroys ``ℓᵍ = κ(z + ℓʳ)`` in
-exactly the cells where the log law is judged, and makes ``ℓᵍ(z₁)`` grid-dependent. The roughness
-length is what keeps ``ℓᵍ`` finite at the surface, so no floor is wanted.
+Breeze owns these rather than reusing Oceananigans' same-named functions, which return
+`max(Δzᶜᶜᶜ(i, j, k-1, grid), h)` (`TurbulenceClosures.jl:190-201`). That floor at one cell
+thickness suits an ocean bottom boundary layer, but here it destroys ``ℓᵍ = κ(z + ℓʳ)`` in exactly
+the cells where the log law is judged, and makes ``ℓᵍ(z₁)`` depend on the grid rather than on the
+flow. The roughness length is what keeps ``ℓᵍ`` finite at the surface, so no floor is wanted.
+
+These are *new functions in this module*, not methods added to Oceananigans'. Extending the
+upstream ones is not possible without type piracy — their signature `(i, j, k, grid)` contains no
+Breeze-owned type — and would silently change the mixing length of every Oceananigans closure that
+calls them, CATKE included.
 """
-@inline height_above_surfaceᶜᶜᶠ(i, j, k, grid) =
+@inline height_above_bottomᶜᶜᶠ(i, j, k, grid) =
     clip(znode(i, j, k, grid, Center(), Center(), Face()) - z_bottom(i, j, grid))
 
-@inline height_above_surfaceᶜᶜᶜ(i, j, k, grid) =
+@inline height_above_bottomᶜᶜᶜ(i, j, k, grid) =
     clip(znode(i, j, k, grid, Center(), Center(), Center()) - z_bottom(i, j, grid))
 
 @inline clip(x) = max(0, x)
@@ -211,7 +217,7 @@ than with the turbulence. Subtracting the floor removes the quiescent contributi
         eᵢ = @inbounds e[i, j, k]
         q  = sqrt(2 * max(eᵐⁱⁿ, eᵢ))
         Δz = Δzᶜᶜᶜ(i, j, k, grid)
-        z  = height_above_surfaceᶜᶜᶜ(i, j, k, grid)
+        z  = height_above_bottomᶜᶜᶜ(i, j, k, grid)
 
         active = !inactive_cell(i, j, k, grid)
         w = (q - qᵐⁱⁿ) * Δz * active

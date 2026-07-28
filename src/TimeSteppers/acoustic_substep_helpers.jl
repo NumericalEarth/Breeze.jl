@@ -183,17 +183,21 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
         field_index = Val(i - n_acoustic)
         advection = field_advection_scheme(model.advection, names[i])
 
-        implicit_step!(u,
-                       model.timestepper.implicit_solver,
-                       model.closure,
-                       model.closure_fields,
-                       field_index,
-                       model.clock,
-                       fields(model),
-                       Δt_implicit,
-                       implicit_step_advection(advection, names[i]),
-                       velocities,
-                       ρ)
+        # Guarded on the solver rather than on `needs_implicit_solver(advection)`; see the note in
+        # ssp_runge_kutta_3.jl for why that predicate would drop the mass-flux weighting.
+        if !isnothing(model.timestepper.implicit_solver)
+            implicit_step!(u,
+                           model.timestepper.implicit_solver,
+                           model.closure,
+                           model.closure_fields,
+                           field_index,
+                           model.clock,
+                           fields(model),
+                           Δt_implicit,
+                           implicit_step_advection(advection, names[i]),
+                           velocities,
+                           ρ)
+        end
     end
 
     return nothing
