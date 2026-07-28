@@ -61,7 +61,6 @@ export
     mixture_heat_capacity,
     dynamics_density,
     dynamics_pressure,
-    thermodynamic_pressure,
     total_density,
 
     # Advective timescale control for the time-step wizard
