@@ -1,11 +1,9 @@
 abstract type AbstractThermodynamicState{FT} end
 
-# States closed on a reference pressure: they carry a `reference_pressure` field, and their
-# density is diagnosed from it. The density-closed `LiquidIceDensityState` deliberately does
-# *not* subtype this — it carries ρ instead, and its saturation adjustment conserves θˡⁱ at
-# constant density rather than at a fixed reference pressure. See NumericalEarth/Breeze.jl#765.
-# Any code that reads `𝒰.reference_pressure` must dispatch on this type, not on
-# `AbstractThermodynamicState`; see NumericalEarth/Breeze.jl#859.
+# States closed on a reference pressure: they carry a `reference_pressure` field, and their density
+# is diagnosed from it. Code that reads `𝒰.reference_pressure` dispatches on this type, not on
+# `AbstractThermodynamicState` — the density-closed `LiquidIceDensityState` (below) carries ρ
+# instead. See NumericalEarth/Breeze.jl#859.
 abstract type AbstractReferencePressureState{FT} <: AbstractThermodynamicState{FT} end
 
 @inline Base.eltype(::AbstractThermodynamicState{FT}) where FT = FT

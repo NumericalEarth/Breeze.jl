@@ -5,9 +5,9 @@ using Test
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
     MoistureMassFractions,
-    AbstractReferencePressureState,
     LiquidIceDensityState,
     LiquidIcePotentialTemperatureState,
+    StaticEnergyState,
     temperature,
     with_temperature,
     mixture_gas_constant,
@@ -73,24 +73,13 @@ using Oceananigans.TimeSteppers: update_state!
         @test 𝒰dry.moisture_mass_fractions.liquid == 0
     end
 
-    # NumericalEarth/Breeze.jl#859: `adjust_state` (and the generic adjustment built on it) reads
-    # `reference_pressure`, a field the density-closed state does not have. Both are therefore
-    # constrained to `AbstractReferencePressureState`, so a `LiquidIceDensityState` can only ever
-    # reach the density-consistent method above.
+    # NumericalEarth/Breeze.jl#859: the reference-pressure `adjust_state` must not accept the
+    # density-closed state, which has no `reference_pressure`.
     @testset "the reference-pressure adjustment path excludes the density state" begin
-        equilibrium = WarmPhaseEquilibrium()
-        density_state = LiquidIceDensityState{FT, NewtonSolver{FT}}
-        pressure_state = LiquidIcePotentialTemperatureState{FT}
-
-        @test !(:reference_pressure in fieldnames(density_state))
-        @test :reference_pressure in fieldnames(pressure_state)
-
-        @test !(density_state <: AbstractReferencePressureState)
-        @test pressure_state <: AbstractReferencePressureState
-
-        argument_types(𝒮) = Tuple{𝒮, FT, typeof(constants), typeof(equilibrium)}
-        @test !hasmethod(adjust_state, argument_types(density_state))
-        @test hasmethod(adjust_state, argument_types(pressure_state))
+        argument_types(𝒮) = Tuple{𝒮, FT, typeof(constants), WarmPhaseEquilibrium}
+        @test !hasmethod(adjust_state, argument_types(LiquidIceDensityState))
+        @test hasmethod(adjust_state, argument_types(LiquidIcePotentialTemperatureState))
+        @test hasmethod(adjust_state, argument_types(StaticEnergyState))
     end
 
     @testset "fixes the κ·ΔL temperature inconsistency" begin

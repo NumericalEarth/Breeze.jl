@@ -164,10 +164,8 @@ end
 
 const ARPS = AbstractReferencePressureState
 
-# Saturate at the state's reference pressure. This is constrained to
-# `AbstractReferencePressureState` because it reads `reference_pressure`, a field the
-# density-closed `LiquidIceDensityState` does not have: that state is served by
-# `saturated_density_residual` below. See NumericalEarth/Breeze.jl#859.
+# Saturate at the state's reference pressure. `LiquidIceDensityState` has none, and is served instead
+# by `adjust_thermodynamic_state(::LiquidIceDensityState, ...)` below. See NumericalEarth/Breeze.jl#859.
 @inline function adjust_state(𝒰₀::ARPS, T, constants, equilibrium)
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_specific_moisture(𝒰₀)
@@ -193,11 +191,7 @@ end
 $(TYPEDSIGNATURES)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration on the temperature
-residual, with the equilibrium evaluated at the state's reference pressure.
-
-States closed on density rather than on a reference pressure require the density-consistent
-residual instead, and are dispatched to their own method (see
-`adjust_thermodynamic_state(::LiquidIceDensityState, ::SaturationAdjustment, constants)`).
+residual, with the equilibrium partition evaluated at `𝒰₀.reference_pressure`.
 """
 @inline function adjust_thermodynamic_state(𝒰₀::ARPS, microphysics::SA, constants)
     FT = eltype(𝒰₀)
