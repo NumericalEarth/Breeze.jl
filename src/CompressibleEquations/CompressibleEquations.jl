@@ -29,6 +29,8 @@ export
     CompressibleDynamics,
     CompressibleModel,
     AcousticSubstepper,
+    SubstepBoundaryUpdate,
+    boundary_tendencies,
     SplitExplicitTimeDiscretization,
     AcousticOuterScheme,
     WickerSkamarock3,
@@ -59,7 +61,7 @@ using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceFi
 using Oceananigans.Grids: rnode, znode
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
                                 ∂zᶜᶜᶜ, ∂zᶜᶜᶠ
-using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 
@@ -69,7 +71,8 @@ using Breeze.Thermodynamics: mixture_gas_constant, dry_air_gas_constant,
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                surface_pressure, standard_pressure, thermodynamic_density,
-                               thermodynamic_density_name, specific_prognostic_moisture
+                               thermodynamic_density_name, specific_prognostic_moisture,
+                               moisture_prognostic_name
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
 include("time_discretizations.jl")
@@ -81,6 +84,7 @@ const CompressibleModel = AtmosphereModel{<:CompressibleDynamics}
 
 include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
+include("substep_boundary_update.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
 

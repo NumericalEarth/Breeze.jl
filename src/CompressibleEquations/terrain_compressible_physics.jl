@@ -299,7 +299,58 @@ terrain_ρw_boundary_conditions(::TerrainFollowingGrid, ρw_bcs) =
                               bottom = NormalFlowBoundaryCondition(terrain_kinematic_bottom_ρw; discrete_form = true),
                               top = ρw_bcs.top, immersed = ρw_bcs.immersed)
 
-@inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics)
+# One-sided, specified-face-dropping interpolation of a face quantity `q(i, j, k, grid,
+# args...)` to a Center, used to gate the terrain slope corrections on a specified side
+# (SubstepBoundaryUpdate). It is the Bool-weighted average `Σ aₚ qₚ / max(Σ aₚ, 1)`
+# over the two bracketing faces, weight `aₚ = !specified(face p)`, so a specified face is
+# dropped and the average becomes one-sided at the specified/interior seam. Written as
+# `2·ℑ(a·q) / max(2·ℑ(a), 1)`, delegating the interpolation to Oceananigans' `ℑxᶜᵃᵃ`/
+# `ℑyᵃᶜᵃ`. Two properties this buys us:
+#   1. On a Flat dimension `ℑ` collapses to the on-node value, so `q` is NEVER evaluated at
+#      an out-of-bounds Flat neighbour — the generalized terrain `∂ᵧp` returns `0·Δy⁻¹ =
+#      NaN` at a Flat-y `j+1`, which a hand-rolled `q(i, j+1, …)` would poison the result
+#      with.
+#   2. The weight is folded through `ifelse` (not `aₚ·qₚ`), so a dropped face whose stencil
+#      reads an unfilled halo is discarded cleanly rather than producing `0·NaN`.
+@inline function x_masked_face_value(i, j, k, grid, specified_sides, q::Q, args...) where Q
+    x_specified, _ = specified_zone_faces(i, j, grid, specified_sides)
+    return ifelse(x_specified, zero(grid), q(i, j, k, grid, args...))
+end
+
+@inline function y_masked_face_value(i, j, k, grid, specified_sides, q::Q, args...) where Q
+    _, y_specified = specified_zone_faces(i, j, grid, specified_sides)
+    return ifelse(y_specified, zero(grid), q(i, j, k, grid, args...))
+end
+
+@inline function x_unspecified_weight(i, j, k, grid, specified_sides)
+    x_specified, _ = specified_zone_faces(i, j, grid, specified_sides)
+    return ifelse(x_specified, zero(grid), one(eltype(grid)))
+end
+
+@inline function y_unspecified_weight(i, j, k, grid, specified_sides)
+    _, y_specified = specified_zone_faces(i, j, grid, specified_sides)
+    return ifelse(y_specified, zero(grid), one(eltype(grid)))
+end
+
+@inline function one_sided_ℑxᶜᵃᵃ(i, j, k, grid, specified_sides, q::Q, args...) where Q
+    num = ℑxᶜᵃᵃ(i, j, k, grid, x_masked_face_value, specified_sides, q, args...)
+    den = ℑxᶜᵃᵃ(i, j, k, grid, x_unspecified_weight, specified_sides)
+    return 2num / max(2den, one(den))
+end
+
+@inline function one_sided_ℑyᵃᶜᵃ(i, j, k, grid, specified_sides, q::Q, args...) where Q
+    num = ℑyᵃᶜᵃ(i, j, k, grid, y_masked_face_value, specified_sides, q, args...)
+    den = ℑyᵃᶜᵃ(i, j, k, grid, y_unspecified_weight, specified_sides)
+    return 2num / max(2den, one(den))
+end
+
+# Full terrain horizontal PGF projected onto the vertical (contravariant) slow tendency.
+# `specified_sides` gates it exactly as the linearized correction below: on a specified side the
+# ∂ₓp/∂ᵧp interpolation is one-sided, dropping specified faces so the re-imposed
+# specified-cell pressure never projects into an interior column's Gˢρw̃ through the slope
+# (a leak channel: SubstepBoundaryUpdate). The `::Nothing` method (no side specified —
+# every unspecified terrain model) is the original plain interpolation, BIT-IDENTICAL.
+@inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics, ::Nothing)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
     ∂x_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, AtmosphereModels.x_pressure_gradient, dynamics)
@@ -307,14 +358,42 @@ terrain_ρw_boundary_conditions(::TerrainFollowingGrid, ρw_bcs) =
     return slope_x * ∂x_p_ccf + slope_y * ∂y_p_ccf
 end
 
+@inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics, specified_sides::OpenSides)
+    slope_x = terrain_slope_x_ccf(i, j, k, grid)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid)
+    ∂x_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, one_sided_ℑxᶜᵃᵃ, specified_sides, AtmosphereModels.x_pressure_gradient, dynamics)
+    ∂y_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, one_sided_ℑyᵃᶜᵃ, specified_sides, AtmosphereModels.y_pressure_gradient, dynamics)
+    return slope_x * ∂x_p_ccf + slope_y * ∂y_p_ccf
+end
+
+# `specified_sides` gates the horizontal linearized-PGF correction so the terrain slope
+# projection never reads a specified face — where the acoustic ∂p′ is switched
+# off in `_explicit_horizontal_step!`, the slope-projected correction must be switched off
+# in lockstep, else the two are out of phase and specified-cell perturbation pressure leaks
+# into interior columns through the non-column-local stencil.
+#
+# The `::Nothing` method (no side specified — every flat model and every unspecified terrain
+# model) is the original plain `ℑxᶜᵃᵃ`/`ℑyᵃᶜᵃ` interpolation, so that path is BIT-IDENTICAL.
 @inline function terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
-                                                                            dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+                                                                            dynamics, ρθ′, Πᴸ, γRᵐᴸ, ::Nothing)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
     ∂x_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ∇ˣp′,
                        dynamics, ρθ′, Πᴸ, γRᵐᴸ)
     ∂y_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ∇ʸp′,
                        dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    return slope_x * ∂x_p′_ccf + slope_y * ∂y_p′_ccf
+end
+
+# Specified: interpolate ∇ˣp′/∇ʸp′ to (Center, Center) with the one-sided, specified-face-
+# dropping average above. Reduces to the plain 2-point average away from the specified
+# zone, so interior columns are unaffected.
+@inline function terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
+                                                                            dynamics, ρθ′, Πᴸ, γRᵐᴸ, specified_sides::OpenSides)
+    slope_x = terrain_slope_x_ccf(i, j, k, grid)
+    slope_y = terrain_slope_y_ccf(i, j, k, grid)
+    ∂x_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, one_sided_ℑxᶜᵃᵃ, specified_sides, ∇ˣp′, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+    ∂y_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, one_sided_ℑyᵃᶜᵃ, specified_sides, ∇ʸp′, dynamics, ρθ′, Πᴸ, γRᵐᴸ)
     return slope_x * ∂x_p′_ccf + slope_y * ∂y_p′_ccf
 end
 
@@ -327,10 +406,11 @@ end
 # vertical acoustic mode is solved implicitly every substep.
 @inline function ∇ᶻp′(i, j, k, grid,
                                                 dynamics::TerrainCompressibleDynamics,
-                                                ρθ′, Πᴸ, γRᵐᴸ, slope_correction)
+                                                ρθ′, Πᴸ, γRᵐᴸ, slope_correction, specified_sides)
     ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Πᴸ, γRᵐᴸ)
     correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
-                                                                            dynamics, ρθ′, Πᴸ, γRᵐᴸ)
+                                                                            dynamics, ρθ′, Πᴸ, γRᵐᴸ,
+                                                                            specified_sides)
     return ∂z_p′ - slope_correction * correction
 end
 
@@ -414,6 +494,33 @@ end
 
 @inline total_momentum(i, j, k, grid, mᴸ, m′) = @inbounds mᴸ[i, j, k] + m′[i, j, k]
 
+# Slow ρu/ρv tendency feeding the terrain slow-w̃ slope projection. At a specified face
+# the specified boundary tendency ∂ₜ(ρu) replaces the interior Gⁿρu (which never drives a
+# specified face). The `::Nothing` method (no side specified / no boundary field allocated)
+# returns Gⁿρu unchanged, so the unspecified path is BIT-IDENTICAL. `oftype` keeps the
+# ifelse type-stable when the substepper's tendency storage uses a different float type
+# than Gⁿ. The wrapping `ℑyᵃᶜᵃ` collapses to the j-only value on a Flat-y grid, so the
+# helper never reads an out-of-bounds Flat neighbour.
+@inline specified_slow_x_momentum_tendency(i, j, k, grid, Gⁿρu, ::Nothing, specified_sides) =
+    @inbounds Gⁿρu[i, j, k]
+
+@inline function specified_slow_x_momentum_tendency(i, j, k, grid, Gⁿρu, ∂ₜρu, specified_sides)
+    x_specified, _ = specified_zone_faces(i, j, grid, specified_sides)
+    @inbounds Gu = Gⁿρu[i, j, k]
+    @inbounds tu = ∂ₜρu[i, j, k]
+    return ifelse(x_specified, oftype(Gu, tu), Gu)
+end
+
+@inline specified_slow_y_momentum_tendency(i, j, k, grid, Gⁿρv, ::Nothing, specified_sides) =
+    @inbounds Gⁿρv[i, j, k]
+
+@inline function specified_slow_y_momentum_tendency(i, j, k, grid, Gⁿρv, ∂ₜρv, specified_sides)
+    _, y_specified = specified_zone_faces(i, j, grid, specified_sides)
+    @inbounds Gv = Gⁿρv[i, j, k]
+    @inbounds tv = ∂ₜρv[i, j, k]
+    return ifelse(y_specified, oftype(Gv, tv), Gv)
+end
+
 function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubstepper,
                                                    model::TerrainCompressibleModel,
                                                    β_stage = nothing)
@@ -426,6 +533,12 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
         β_stage == 1 ? substepper.final_stage_vertical_pressure_tendency_factor :
         substepper.vertical_pressure_tendency_factor
 
+    # SubstepBoundaryUpdate: `nothing` when no momentum BC carries the scheme, so
+    # the kernel's helpers dispatch the specified-face substitution away and the default
+    # terrain path is identical to a schemeless build.
+    specified_sides = active_specified_sides(model)
+    bt = substepper.boundary_tendencies
+
     launch!(arch, grid, :xyz, _assemble_terrain_slow_vertical_momentum_tendency!,
             substepper.slow_vertical_momentum_tendency,
             Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
@@ -433,7 +546,10 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
             dynamics.total_density,
             dynamics.terrain_reference_pressure,
             dynamics.terrain_reference_density,
-            grid, dynamics, g, vertical_pressure_tendency_factor)
+            grid, dynamics, g, vertical_pressure_tendency_factor,
+            boundary_tendency(bt, Val(:ρu)),
+            boundary_tendency(bt, Val(:ρv)),
+            specified_sides)
 
     return nothing
 end
@@ -442,18 +558,22 @@ end
                                                                     Gⁿρu, Gⁿρv, Gⁿρw,
                                                                     pᴸ, ρᴸ, pᵣ, ρᵣ,
                                                                     grid, dynamics, g,
-                                                                    vertical_pressure_tendency_factor)
+                                                                    vertical_pressure_tendency_factor,
+                                                                    ∂ₜρu_boundary, ∂ₜρv_boundary, specified_sides)
     i, j, k = @index(Global, NTuple)
 
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
-    Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, Gⁿρu)
-    Gⁿρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, Gⁿρv)
+    # SubstepBoundaryUpdate: a specified x-/y-face takes its specified boundary
+    # tendency in place of Gⁿρu/Gⁿρv (see the helpers above); unspecified builds are
+    # bit-identical to the plain `ℑ`-of-Gⁿ interpolation.
+    Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, specified_slow_x_momentum_tendency, Gⁿρu, ∂ₜρu_boundary, specified_sides)
+    Gⁿρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, specified_slow_y_momentum_tendency, Gⁿρv, ∂ₜρv_boundary, specified_sides)
 
     ∂z_p′ = terrain_vertical_pressure_gradient(i, j, k, grid, pᴸ, pᵣ)
     ρ′ᶜᶜᶠ = terrain_vertical_buoyancy_density(i, j, k, grid, ρᴸ, ρᵣ)
     horizontal_slow_tendency = slope_x * Gⁿρu_ccf + slope_y * Gⁿρv_ccf
-    horizontal_pressure_gradient = terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics)
+    horizontal_pressure_gradient = terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics, specified_sides)
 
     @inbounds Gˢρw̃[i, j, k] = (Gⁿρw[i, j, k] -
                                 horizontal_slow_tendency -
