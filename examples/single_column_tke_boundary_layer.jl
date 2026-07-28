@@ -138,31 +138,80 @@ for (name, simulation) in simulations
     run!(simulation)
 end
 
-# Each regime leaves a different signature. The stable case builds a shallow layer with a
-# super-geostrophic jet just above it; the neutral case is deeper and jetless; the convective case
-# is deepest, nearly isothermal through its interior, and carries an order of magnitude more TKE.
+# Each regime leaves a different signature, but they span very different depths — 400 m to 4 km —
+# so the profiles are plotted against ``z/zᵢ``.
+#
+# The closure deliberately carries no ``zᵢ``: its turbulence length scale is a ``q``-weighted
+# centroid, not a boundary-layer depth, which keeps a tunable coefficient from absorbing regime
+# error. So the depth is diagnosed here, and each regime gets the definition its own literature
+# uses — there is no single one that works everywhere. The shear-driven cases use the stress
+# threshold of the GABLS1 and CNBL intercomparisons; the convective case has no wind at all, so
+# stress is undefined there and the inversion height is used instead.
+
+"""Stress-based depth: the 5% level of the peak stress, rescaled by 0.95 (GABLS1/CNBL convention)."""
+function stress_depth(model)
+    Nz = size(model.grid, 3)
+    U = Field(sqrt(model.velocities.u^2 + model.velocities.v^2))
+    compute!(U)
+    Uᵥ = vec(Array(view(U, 1, 1, :)))
+    ν = vec(Array(view(model.closure_fields.νₑ, 1, 1, :)))
+    zc = Array(znodes(model.formulation.potential_temperature))
+
+    ## τ = νₑ |∂z U| at faces, where νₑ lives
+    ∂zUᶠ = [k == 1 ? 0.0 : (Uᵥ[k] - Uᵥ[k-1]) / (zc[k] - zc[k-1]) for k in 1:Nz]
+    τ = ν[1:Nz] .* abs.(∂zUᶠ)
+    τs = maximum(τ)
+
+    k = findfirst(k -> τ[k] < 0.05τs, 2:Nz)
+    return isnothing(k) ? last(zc) : zc[k+1] / 0.95
+end
+
+"""Inversion height: the level of maximum ``∂_z θ`` (convective convention)."""
+function inversion_depth(model)
+    θ = vec(Array(view(model.formulation.potential_temperature, 1, 1, :)))
+    z = Array(znodes(model.formulation.potential_temperature))
+    N = length(θ)
+    ∂zθ = [(θ[min(k+1, N)] - θ[max(k-1, 1)]) / (z[min(k+1, N)] - z[max(k-1, 1)]) for k in 1:N]
+    return z[argmax(∂zθ)]
+end
+
+depths = ("stable" => stress_depth, "neutral" => stress_depth, "convective" => inversion_depth)
 
 set_theme!(fontsize = 14, linewidth = 2.5)
 
 fig = Figure(size = (1200, 450))
 
-ax_θ = Axis(fig[1, 1]; xlabel = "Potential temperature (K)", ylabel = "z (m)")
+ax_θ = Axis(fig[1, 1]; xlabel = "θ - θ(z=0) (K)", ylabel = "z / zᵢ")
 ax_U = Axis(fig[1, 2]; xlabel = "Wind speed (m s⁻¹)")
 ax_e = Axis(fig[1, 3]; xlabel = "TKE (m² s⁻²)")
 ax_ℓ = Axis(fig[1, 4]; xlabel = "Mixing length (m)")
 
+for ax in (ax_θ, ax_U, ax_e, ax_ℓ)
+    ylims!(ax, 0, 1.4)
+end
 [hideydecorations!(ax, grid = false) for ax in (ax_U, ax_e, ax_ℓ)]
 
 colors = (:dodgerblue, :black, :orangered)
 
-for ((name, simulation), color) in zip(simulations, colors)
+for ((name, simulation), (_, depth), color) in zip(simulations, depths, colors)
     model = simulation.model
     u, v, w = model.velocities
+    zᵢ = depth(model)
 
-    lines!(ax_θ, model.formulation.potential_temperature; color, label = name)
-    lines!(ax_U, sqrt(u^2 + v^2); color)
-    lines!(ax_e, model.closure_fields.e; color)
-    lines!(ax_ℓ, model.closure_fields.ℓ; color)
+    ## The profiles are plotted against a rescaled coordinate, so values and heights are taken
+    ## separately rather than handing Makie the `Field`.
+    θ = model.formulation.potential_temperature
+    U = Field(sqrt(u^2 + v^2))
+    compute!(U)
+
+    ## Each regime starts from a different θ₀, so plot the departure from the surface value
+    θᵥ = vec(Array(view(θ, 1, 1, :)))
+    lines!(ax_θ, θᵥ .- θᵥ[1], Array(znodes(θ)) ./ zᵢ; color, label = "$name (zᵢ = $(round(Int, zᵢ)) m)")
+    lines!(ax_U, vec(Array(view(U, 1, 1, :))), Array(znodes(U)) ./ zᵢ; color)
+    lines!(ax_e, vec(Array(view(model.closure_fields.e, 1, 1, :))),
+           Array(znodes(model.closure_fields.e)) ./ zᵢ; color)
+    lines!(ax_ℓ, vec(Array(view(model.closure_fields.ℓ, 1, 1, :))),
+           Array(znodes(model.closure_fields.ℓ)) ./ zᵢ; color)
 end
 
 axislegend(ax_θ; position = :rb, framevisible = false)
