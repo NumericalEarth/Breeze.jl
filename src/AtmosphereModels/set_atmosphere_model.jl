@@ -205,8 +205,11 @@ Variables are set via keyword arguments. Supported variables include:
 
 - `compute_reference_state`: If `true` (default `false`), recompute the dynamics' hydrostatic
   reference state from the horizontal means of the just-set state (see [`set_to_mean!`](@ref)),
-  before the mass-conservation correction. A no-op for dynamics without a `ReferenceState`. Useful
-  when initializing from an analysis whose mean profile should define the perturbation base state.
+  before the mass-conservation correction. A no-op for dynamics without a reference state. Useful
+  when initializing from an analysis whose mean profile should define the perturbation base state;
+  otherwise the reference built at construction is preserved. For compressible dynamics, supply
+  both a density and a thermodynamic variable in the same `set!` call, since the recomputation
+  integrates the hydrostatic column from the model's current state.
 
 - `balancer`: adiabatic (FV3 `na_init`) spin-up of the nonhydrostatic state, run in place after the
   rest of `set!` — equivalent to calling `balance_adiabatically!(model, balancer)`. `false`
@@ -445,9 +448,8 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
     # Recompute the hydrostatic reference state from the just-set state, before the
     # mass-conservation correction so the pressure projection uses the new reference.
-    if compute_reference_state
-        reset_reference_state!(model)
-    end
+    # `reset_reference_state!` is itself a no-op when the dynamics carries no reference state.
+    compute_reference_state && reset_reference_state!(model)
 
     # Set the density into discrete hydrostatic balance with the just-set thermodynamic state,
     # before the mass-conservation correction.

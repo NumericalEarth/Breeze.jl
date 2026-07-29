@@ -600,11 +600,13 @@ using Oceananigans.TimeSteppers: update_state!
 
         # Compressible relative-humidity initialization must not require the optional
         # hydrostatic reference state; it closes against prognostic total density and
-        # the equation-of-state pressure.
+        # the equation-of-state pressure. `reference_state = nothing` opts out of the
+        # automatic standard-atmosphere reference so this exercises the no-reference path.
         dynamics_without_reference =
             CompressibleDynamics(SplitExplicitTimeDiscretization();
                                  surface_pressure = FT(1e5),
-                                 standard_pressure = FT(1e5))
+                                 standard_pressure = FT(1e5),
+                                 reference_state = nothing)
         model_without_reference =
             AtmosphereModel(grid; dynamics = dynamics_without_reference,
                             thermodynamic_constants = constants,

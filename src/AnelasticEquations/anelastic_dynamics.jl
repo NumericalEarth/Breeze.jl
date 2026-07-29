@@ -50,9 +50,12 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return the mean (reference) pressure field for `AnelasticDynamics`, in Pa.
+Return the dynamics pressure field for `AnelasticDynamics`, in Pa.
+
+For anelastic models, this is the time-independent hydrostatic reference state
+pressure ``pᵣ(z)``.
 """
-AtmosphereModels.mean_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
+AtmosphereModels.dynamics_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
 
 """
 $(TYPEDSIGNATURES)
@@ -78,7 +81,7 @@ That is ``p = p̄ + p'``, where ``p̄`` is the hydrostatic reference pressure
 and ``p'`` is the non-hydrostatic pressure anomaly.
 """
 function AtmosphereModels.total_pressure(dynamics::AnelasticDynamics)
-    p̄ = mean_pressure(dynamics)
+    p̄ = dynamics_pressure(dynamics)
     p′ = pressure_anomaly(dynamics)
     return p̄ + p′
 end
@@ -115,21 +118,14 @@ reference state density ``ρᵣ(z)``.
 """
 AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
+# The anelastic reference density ρᵣ(z) is evaluated at the reference temperature and
+# composition, so it is not the equation-of-state density of the local air. Vapor partial
+# pressure must use the latter: ρʰ = p(z) / (Rᵐ(q) T) at the reference pressure.
 @inline function AtmosphereModels.humidity_density(i, j, k, dynamics::AnelasticDynamics,
                                                     T, q, constants)
     @inbounds p = dynamics.reference_state.pressure[i, j, k]
     return density(T, p, q, constants)
 end
-
-"""
-$(TYPEDSIGNATURES)
-
-Return the reference pressure field for `AnelasticDynamics`.
-
-For anelastic models, the dynamics pressure is the time-independent
-hydrostatic reference state pressure ``pᵣ(z)``.
-"""
-AtmosphereModels.dynamics_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
 
 #####
 ##### Prognostic fields

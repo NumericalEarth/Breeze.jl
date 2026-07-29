@@ -35,7 +35,7 @@ using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant,
                              dry_air_gas_constant, density
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, mean_pressure, pressure_anomaly,
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_pressure, pressure_anomaly,
                                 kernel_time_step
 
 # Import microphysics interface for buoyancy computation
