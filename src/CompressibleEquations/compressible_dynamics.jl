@@ -7,6 +7,8 @@ using Breeze.TerrainFollowingDiscretization: TerrainMetrics,
                                               SlopeOutsideInterpolation,
                                               build_terrain_metrics
 
+using Oceananigans.Grids: Bounded, topology
+
 """
 $(TYPEDEF)
 
@@ -21,10 +23,14 @@ Fields
 - `standard_pressure`: Reference pressure pˢᵗ for potential temperature (default 10⁵ Pa)
 - `surface_pressure`: Mean pressure at the bottom of the atmosphere p₀
 - `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref) or [`ExplicitTimeStepping`](@ref))
-- `reference_state`: Fixed hydrostatically-balanced reference state for base-state pressure correction (`nothing` or [`ExnerReferenceState`](@ref))
-- `terrain_metrics`: [`TerrainMetrics`](@ref) for terrain-following coordinates (or `nothing`)
+- `reference_state`: The single fixed hydrostatically-balanced reference state for base-state
+  pressure/buoyancy correction (perturbation-form PGF), or `nothing` when disabled. An
+  [`ExnerReferenceState`](@ref) whose fields are grid-polymorphic: a 1D column on
+  height-coordinate grids, and horizontally-varying 3D fields on terrain-following grids (where
+  a single column is not hydrostatically consistent per terrain column).
+- `terrain_metrics`: [`TerrainMetrics`](@ref) for terrain-following coordinates (or `nothing`).
+  This — not `reference_state` — is the sole "is this a terrain grid?" signal.
 - `w̃`, `ρw̃`: contravariant vertical velocity / momentum diagnostic fields (or `nothing` when no terrain metrics)
-- `terrain_reference_pressure`, `terrain_reference_density`: 3D reference pressure / density for the terrain pressure gradient force (or `nothing`)
 
 The `time_discretization` determines how tendencies are computed and which
 time-stepper is used:
@@ -35,20 +41,26 @@ The moist equation-of-state θˡⁱ→T temperature inversion is controlled by t
 thermodynamic formulation, not the dynamics: see `temperature_solver` on
 `LiquidIcePotentialTemperatureFormulation`.
 """
-struct CompressibleDynamics{TD, D, DT, P, FT, RS, TM, CV, CM, TRP, TRD}
+struct CompressibleDynamics{TD, D, DT, P, FT, RS, TM, CV, CM}
     time_discretization :: TD                  # SplitExplicitTimeDiscretization or ExplicitTimeStepping
     dry_density :: D                           # ρᵈ (prognostic dry-air density)
     total_density :: DT                        # ρ = ρᵈ + Σρˣ (diagnosed; thermo/advection/EOS/buoyancy)
     pressure :: P                              # p = ρ R^m T (diagnostic)
     standard_pressure :: FT                    # pˢᵗ (reference pressure for potential temperature)
     surface_pressure :: FT                     # p₀ (mean pressure at the bottom of the atmosphere)
-    reference_state :: RS                      # ExnerReferenceState for base-state pressure correction (or Nothing)
-    terrain_metrics :: TM                      # TerrainMetrics for terrain-following coordinates (or Nothing)
+    reference_state :: RS                      # single grid-polymorphic ExnerReferenceState (1D flat / 3D terrain) or Nothing
+    terrain_metrics :: TM                      # TerrainMetrics for terrain-following coordinates (or Nothing) — the "is terrain?" signal
     contravariant_vertical_velocity :: CV      # w̃ diagnostic field (or Nothing)
     contravariant_vertical_momentum :: CM      # ρw̃ diagnostic field (or Nothing)
-    terrain_reference_pressure :: TRP          # 3D reference pressure for terrain PG (or Nothing)
-    terrain_reference_density :: TRD           # 3D reference density for terrain buoyancy (or Nothing)
 end
+
+# Skeleton-only marker stored in the reference-spec slot for the default `reference_state = :auto`
+# with no explicit reference profile: "build a standard-atmosphere reference state". Distinct from
+# `nothing`, which means the reference is explicitly disabled (`reference_state = nothing`).
+# Resolved in `materialize_dynamics`; never survives materialization.
+struct AutoReference end
+
+Base.summary(::AutoReference) = "auto (standard-atmosphere reference)"
 
 """
 $(TYPEDSIGNATURES)
@@ -69,8 +81,9 @@ Keyword Arguments
 - `surface_pressure`: Mean surface pressure (default: 101325.0 Pa)
 - `reference_potential_temperature`: Potential temperature for building a fixed
   hydrostatically-balanced reference state used in base-state subtraction. Can be a constant `θ₀`
-  or a function `θ(z)`. Default: `nothing` (no base-state correction).
-  When provided, an [`ExnerReferenceState`](@ref) is built during materialization.
+  or a function `θ(z)`. Default: `nothing`, which uses the automatic `θᵣ = 288` K profile when
+  `reference_state = :auto`. When provided, this profile replaces the automatic profile when
+  building the [`ExnerReferenceState`](@ref).
 - `reference_vapor_mass_fraction`: Optional vapor mass fraction for building a moist
   compressible reference state. Can be a constant `qᵛ`, function `qᵛ(z)`, or field,
   and is used with `reference_potential_temperature`.
@@ -78,6 +91,25 @@ Keyword Arguments
   Default: [`SlopeOutsideInterpolation`](@ref). Ignored on non-terrain-following grids.
 - `terrain_metrics`: Escape hatch — pass a pre-built [`TerrainMetrics`](@ref) to bypass the
   automatic build. Default: `nothing` (auto-build from the grid using `slope_stencil`).
+- `reference_state`: Whether to carry the single hydrostatic reference state used for the
+  perturbation-form pressure-gradient force and buoyancy. Default: `:auto` — on a bounded vertical
+  grid, build a standard-atmosphere (`θᵣ = 288` K) hydrostatic reference: a 1D column on
+  height-coordinate grids, 3D fields on terrain-following grids. Periodic and flat vertical
+  topologies carry no automatic reference because a nontrivial hydrostatic atmosphere is
+  incompatible with periodicity and unnecessary without a vertical dimension. Pass
+  `reference_state = nothing` to disable it entirely — the PGF and buoyancy then difference the
+  full pressure, reproducing the un-corrected behavior (useful for testing). Disabling is mutually
+  exclusive with an explicit reference profile. To replace the reference with one deduced from an
+  initial state's horizontal mean, call `set!(model; …, compute_reference_state=true)`.
+
+  !!! note "Deep near-isentropic reference profiles"
+      The reference integrates the hydrostatic equation up each column using `θᵣ(z)`. A (nearly)
+      constant-`θ` column is isentropic and its hydrostatic pressure reaches zero at a finite height
+      (≈ `cᵖ θ / g`, about 29 km for the default `θᵣ = 288` K); if the domain top exceeds that
+      height the integration has no positive-pressure solution and the reference fills with `NaN`.
+      Physical, stably-stratified profiles are unaffected. For such a deep, near-isentropic setup
+      pass either a stratified `reference_potential_temperature` or `reference_state = nothing`
+      (full-pressure form).
 """
 function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               standard_pressure = 1e5,
@@ -87,6 +119,7 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               reference_vapor_mass_fraction = nothing,
                               slope_stencil = SlopeOutsideInterpolation(),
                               terrain_metrics = nothing,
+                              reference_state = :auto,
                               temperature_tolerance = nothing,
                               temperature_maxiter = nothing) where TD
 
@@ -99,28 +132,48 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                              or `temperature_solver = nothing` for the non-iterated closed-form inversion."))
     end
 
+    reference_state === :auto || reference_state === nothing ||
+        throw(ArgumentError("`reference_state` must be `:auto` or `nothing`; received $(repr(reference_state))."))
+
     FT = float(promote_type(typeof(standard_pressure), typeof(surface_pressure)))
     pˢᵗ = convert(FT, standard_pressure)
     p₀ = convert(FT, surface_pressure)
-    # Store reference spec temporarily; ExnerReferenceState is built in materialize_dynamics.
-    # If reference_temperature or reference_vapor_mass_fraction is given, wrap in a
-    # NamedTuple to distinguish from a bare θ₀ spec.
-    ref_spec = if reference_temperature !== nothing
+    # An explicit reference profile (θ₀, T₀, or a moist NamedTuple). `nothing` means none was given.
+    # If reference_temperature or reference_vapor_mass_fraction is present, wrap in a NamedTuple to
+    # distinguish from a bare θ₀ spec.
+    profile_spec = if reference_temperature !== nothing
         (; reference_temperature, reference_vapor_mass_fraction)
     elseif reference_vapor_mass_fraction !== nothing
         (; reference_potential_temperature, reference_vapor_mass_fraction)
     else
         reference_potential_temperature
     end
+    explicit_profile = reference_potential_temperature !== nothing ||
+                       reference_temperature !== nothing ||
+                       reference_vapor_mass_fraction !== nothing
+
+    # Resolve the reference-spec slot stored in the skeleton (built in `materialize_dynamics`):
+    #   `nothing`            → reference explicitly disabled (`reference_state = nothing`),
+    #   an explicit profile  → build the reference from it,
+    #   `AutoReference()`    → build the default standard-atmosphere reference.
+    # `reference_state = nothing` is mutually exclusive with an explicit reference profile.
+    ref_spec = if reference_state === nothing
+        explicit_profile && throw(ArgumentError(
+            "`reference_state = nothing` disables the reference state and is mutually exclusive with an \
+             explicit reference profile (`reference_potential_temperature`/`reference_temperature`/\
+             `reference_vapor_mass_fraction`)."))
+        nothing
+    else
+        explicit_profile ? profile_spec : AutoReference()
+    end
     # Stash either a pre-built TerrainMetrics (escape hatch) or the stencil flavor in the
     # `terrain_metrics` slot. `materialize_dynamics` resolves it: a stencil instance triggers
     # `build_terrain_metrics(grid, stencil)` for TFVD grids; on non-TFVD grids the slot is
-    # zeroed regardless. contravariant fields, terrain_reference_pressure, and
-    # terrain_reference_density are built later in materialize_dynamics.
+    # zeroed regardless. The contravariant fields and reference state are built there too.
     terrain_metrics_spec = terrain_metrics === nothing ? slope_stencil : terrain_metrics
     return CompressibleDynamics(time_discretization, nothing, nothing, nothing, pˢᵗ, p₀, ref_spec,
                                 terrain_metrics_spec,
-                                nothing, nothing, nothing, nothing)
+                                nothing, nothing)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
@@ -133,9 +186,7 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.reference_state),
                          adapt(to, dynamics.terrain_metrics),
                          adapt(to, dynamics.contravariant_vertical_velocity),
-                         adapt(to, dynamics.contravariant_vertical_momentum),
-                         adapt(to, dynamics.terrain_reference_pressure),
-                         adapt(to, dynamics.terrain_reference_density))
+                         adapt(to, dynamics.contravariant_vertical_momentum))
 
 # The compressible θˡⁱ→T inversion is implicit (T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ), so the
 # default temperature solver iterates to convergence. The anelastic inversion is
@@ -184,78 +235,60 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     standard_pressure = convert(FT, dynamics.standard_pressure)
     surface_pressure = convert(FT, dynamics.surface_pressure)
 
-    # Build reference state from the stored spec (θ₀, T₀ NamedTuple, or nothing).
-    # ExnerReferenceState builds the Exner function π₀ by discrete integration,
-    # ensuring exact discrete Exner hydrostatic balance. This is used for both
-    # split-explicit (acoustic substepping) and explicit time stepping.
-    #
-    # For terrain-following grids, the 1D column ExnerReferenceState is NOT used
-    # because Δz varies per column. The column-1 reference creates a mismatch at
-    # other columns that generates spurious vertical accelerations. Instead, terrain
-    # grids use only the 3D terrain_reference_pressure for the horizontal PG.
+    # The reference-spec slot, set by the constructor:
+    #   `nothing`           → reference explicitly disabled,
+    #   an explicit profile → build the reference from it,
+    #   `AutoReference()`   → build the default standard-atmosphere reference.
+    # Either reference survives `set!` untouched unless `compute_reference_state=true` rebuilds it
+    # from the just-set state.
     ref_spec = dynamics.reference_state
 
     # Resolve terrain metrics: nothing on non-TFVD grids; on TFVD grids, a pre-built
     # `TerrainMetrics` passes through, anything else (a stencil flavor like
     # `SlopeOutsideInterpolation()`) drives `build_terrain_metrics(grid, ·)`.
-    terrain_metrics_spec = dynamics.terrain_metrics
-    terrain_metrics = if grid.z isa TerrainFollowingVerticalDiscretization
-        terrain_metrics_spec isa TerrainMetrics ?
-            terrain_metrics_spec :
-            build_terrain_metrics(grid, terrain_metrics_spec)
-    else
+    terrain_metrics = materialize_terrain_metrics(dynamics, grid)
+
+    # Build the single, grid-polymorphic reference state (or `nothing`). The reference is an
+    # `ExnerReferenceState` in discrete hydrostatic balance, used identically by the flat and
+    # terrain PGF/buoyancy — the only difference is the dimensionality of its fields: a 1D column
+    # on height-coordinate grids, and horizontally-varying 3D fields on terrain-following grids
+    # (where Δz varies per column, so a single column is not hydrostatically consistent). This
+    # supports both split-explicit (acoustic substepping) and explicit time stepping.
+    #
+    # With `AutoReference()` (the default, no explicit profile), the reference is built from the
+    # standard 288 K profile, so the public `reference_state` is usable immediately after model
+    # construction; `set!(model; compute_reference_state=true)` replaces it with one deduced from the
+    # initial state's height-resolved horizontal mean. Automatic references are disabled for Periodic
+    # and Flat vertical topologies: gravity makes a nontrivial hydrostatic column nonperiodic, while
+    # a Flat vertical dimension needs no hydrostatic split. Explicit profiles retain their existing
+    # opt-in behavior on every topology.
+    auto_reference = ref_spec isa AutoReference
+    build_auto_reference = auto_reference && topology(grid)[3] === Bounded
+    reference_state = if ref_spec === nothing || (auto_reference && !build_auto_reference)
         nothing
-    end
-
-    if ref_spec === nothing || terrain_metrics !== nothing
-        reference_state = nothing
+    elseif auto_reference
+        build_reference_state(grid, terrain_metrics, FT(288),
+                              surface_pressure, standard_pressure, thermodynamic_constants)
     else
-        reference_state = ExnerReferenceState(grid, thermodynamic_constants;
-                                              surface_pressure, standard_pressure,
-                                              exner_kwargs(ref_spec)...)
+        build_reference_state(grid, terrain_metrics, ref_spec,
+                              surface_pressure, standard_pressure, thermodynamic_constants)
     end
 
-    # Create contravariant velocity/momentum fields and terrain reference state
-    # if terrain metrics are present.
+    # Contravariant transport fields exist on terrain grids regardless of the reference state.
     if terrain_metrics === nothing
         contravariant_vertical_velocity = nothing
         contravariant_vertical_momentum = nothing
-        terrain_reference_pressure = nothing
-        terrain_reference_density = nothing
     else
         contravariant_vertical_velocity = ZFaceField(grid)
         contravariant_vertical_momentum = ZFaceField(grid)
-
-        # Build 3D reference pressure and density fields via per-column discrete
-        # Exner integration. The discrete integration ensures that
-        #   δ(pᵣ)/Δz + g ℑ(ρᵣ) ≈ 0
-        # to high accuracy at every grid face, which is essential for reducing
-        # the truncation error from the near-cancellation of ∂p/∂z and -gρ in
-        # the vertical momentum equation. The reference pressure is also used for
-        # the perturbation horizontal PG to reduce terrain-following PGF errors.
-        if ref_spec === nothing
-            terrain_reference_pressure = nothing
-            terrain_reference_density = nothing
-        else
-            terrain_reference_pressure = CenterField(grid)
-            terrain_reference_density = CenterField(grid)
-            compute_terrain_reference_state!(terrain_reference_pressure,
-                                             terrain_reference_density,
-                                             grid, surface_pressure, ref_spec,
-                                             standard_pressure, thermodynamic_constants)
-        end
     end
 
-    # Seed the diagnostic pressure with the reference profile (or surface pressure if
-    # no reference state is built). Without this, the very first `update_state!` runs
-    # sat-adjust against an uninitialized (zero) pressure field, which produces NaN
-    # temperatures because the Exner function `(p/pˢᵗ)^κ` collapses to zero.
-    # `compute_auxiliary_dynamics_variables!` overwrites pressure properly on every
-    # subsequent call.
+    # Seed the diagnostic pressure so the first `update_state!` sat-adjust does not divide by an
+    # uninitialized (zero) pressure — `(p/pˢᵗ)^κ` would collapse to zero and produce NaN
+    # temperatures. `compute_auxiliary_dynamics_variables!` overwrites pressure on every subsequent
+    # call. Seed from any built reference, else from surface pressure.
     if reference_state isa ExnerReferenceState
         seed_pressure!(pressure, grid, reference_state.pressure)
-    elseif terrain_reference_pressure !== nothing
-        seed_pressure!(pressure, grid, terrain_reference_pressure)
     else
         seed_pressure!(pressure, grid, surface_pressure)
     end
@@ -264,9 +297,29 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
                                 standard_pressure, surface_pressure, reference_state,
                                 terrain_metrics,
                                 contravariant_vertical_velocity,
-                                contravariant_vertical_momentum,
-                                terrain_reference_pressure, terrain_reference_density)
+                                contravariant_vertical_momentum)
 end
+
+#####
+##### Reference-state builders (dispatched on whether the grid is terrain-following)
+#####
+
+function materialize_terrain_metrics(dynamics::CompressibleDynamics, grid)
+    terrain_metrics_spec = dynamics.terrain_metrics
+    if grid.z isa TerrainFollowingVerticalDiscretization
+        return terrain_metrics_spec isa TerrainMetrics ?
+               terrain_metrics_spec :
+               build_terrain_metrics(grid, terrain_metrics_spec)
+    else
+        return nothing
+    end
+end
+
+# Explicit-profile reference on a height-coordinate grid: a 1D-column `ExnerReferenceState`
+# (or 3D when the profile depends on the horizontal coordinates). The terrain-following method is
+# defined in `terrain_compressible_physics.jl`.
+build_reference_state(grid, ::Nothing, ref_spec, surface_pressure, standard_pressure, constants) =
+    ExnerReferenceState(grid, constants; surface_pressure, standard_pressure, exner_kwargs(ref_spec)...)
 
 function seed_pressure!(pressure, grid, pressure_reference)
     arch = grid.architecture
@@ -299,10 +352,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return the mean (reference) pressure for `CompressibleDynamics`.
-For compressible dynamics, there is no separate mean pressure - returns the full pressure field.
+Return the dynamics pressure for `CompressibleDynamics`.
+For compressible dynamics, there is no background/anomaly decomposition - returns the
+prognostic pressure field, computed diagnostically from the equation of state.
 """
-AtmosphereModels.mean_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
+AtmosphereModels.dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
 """
 $(TYPEDSIGNATURES)
@@ -348,9 +402,7 @@ with_time_discretization(dynamics::CompressibleDynamics, time_discretization) =
                          dynamics.reference_state,
                          dynamics.terrain_metrics,
                          dynamics.contravariant_vertical_velocity,
-                         dynamics.contravariant_vertical_momentum,
-                         dynamics.terrain_reference_pressure,
-                         dynamics.terrain_reference_density)
+                         dynamics.contravariant_vertical_momentum)
 
 """
 $(TYPEDSIGNATURES)
@@ -394,14 +446,6 @@ AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_st
 # coupling density `dynamics_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
 AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
 
-"""
-$(TYPEDSIGNATURES)
-
-Return the pressure field for `CompressibleDynamics`.
-Pressure is computed diagnostically from the equation of state.
-"""
-AtmosphereModels.dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
-
 #####
 ##### Prognostic fields
 #####
@@ -441,12 +485,12 @@ $(TYPEDSIGNATURES)
 Return a reference state suitable for boundary-condition diagnostics.
 
 Boundary conditions are materialized before `materialize_dynamics` runs, so the
-stub `CompressibleDynamics.reference_state` field still holds the user's raw
-`reference_potential_temperature` spec (a constant, function, or NamedTuple)
-rather than an `ExnerReferenceState`. When called on the stub, this method
-builds the `ExnerReferenceState` on demand using the same logic as
-`materialize_dynamics`. When the dynamics has already been materialized (or has
-no reference state), the existing field is returned.
+stub `CompressibleDynamics.reference_state` field still holds the reference *spec*
+rather than an `ExnerReferenceState`. This method builds explicit and automatic
+references on demand using the same grid-dependent logic as `materialize_dynamics`,
+so boundary conditions that require a reference profile can be materialized before
+the dynamics. When the reference is disabled (`nothing`) or the dynamics has already
+been materialized, the existing value is returned.
 """
 function AtmosphereModels.boundary_conditions_reference_state(dynamics::CompressibleDynamics, grid, thermodynamic_constants)
     ref_spec = dynamics.reference_state
@@ -455,10 +499,11 @@ function AtmosphereModels.boundary_conditions_reference_state(dynamics::Compress
 
     standard_pressure = dynamics.standard_pressure
     surface_pressure = dynamics.surface_pressure
+    terrain_metrics = materialize_terrain_metrics(dynamics, grid)
+    reference_profile = ref_spec isa AutoReference ? eltype(grid)(288) : ref_spec
 
-    return ExnerReferenceState(grid, thermodynamic_constants;
-                               surface_pressure, standard_pressure,
-                               exner_kwargs(ref_spec)...)
+    return build_reference_state(grid, terrain_metrics, reference_profile,
+                                 surface_pressure, standard_pressure, thermodynamic_constants)
 end
 
 """

@@ -15,8 +15,8 @@ using Test
 
 using Breeze: ReferenceState, AnelasticDynamics
 using Breeze.AtmosphereModels: materialize_dynamics, default_dynamics
-using Breeze.AtmosphereModels: mean_pressure, pressure_anomaly, total_pressure
-using Breeze.AtmosphereModels: dynamics_density, dynamics_pressure
+using Breeze.AtmosphereModels: dynamics_pressure, pressure_anomaly, total_pressure
+using Breeze.AtmosphereModels: dynamics_density
 
 @testset "AnelasticDynamics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -57,8 +57,8 @@ using Breeze.AtmosphereModels: dynamics_density, dynamics_pressure
         dynamics_stub = AnelasticDynamics(reference_state)
         dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
 
-        # Test mean_pressure
-        p̄ = mean_pressure(dynamics)
+        # Test dynamics_pressure
+        p̄ = dynamics_pressure(dynamics)
         @test p̄ === reference_state.pressure
 
         # Test pressure_anomaly (returns an AbstractOperation)
@@ -104,11 +104,17 @@ using Breeze.Thermodynamics: pressure_balanced_density
 
     @testset "materialize_dynamics seeds pressure" begin
         surface_pressure = FT(100000)
-        dynamics_stub = CompressibleDynamics(; surface_pressure)
         constants = ThermodynamicConstants(FT)
-        dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
 
+        dynamics_stub = CompressibleDynamics(; surface_pressure, reference_state=nothing)
+        dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
         @test all(Array(interior(dynamics.pressure)) .== surface_pressure)
+
+        automatic_stub = CompressibleDynamics(; surface_pressure)
+        automatic_dynamics = materialize_dynamics(automatic_stub, grid, NamedTuple(), constants)
+        pressure = Array(interior(automatic_dynamics.pressure))
+        reference_pressure = Array(interior(automatic_dynamics.reference_state.pressure))
+        @test all(pressure .== reference_pressure)
     end
 end
 

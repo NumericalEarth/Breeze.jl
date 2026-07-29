@@ -576,50 +576,45 @@ hydrostatically balanced *per column*. Breeze therefore builds a fully 3D
 reference field via per-column discrete Exner integration:
 
 ```julia
-function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, θᵣ, pˢᵗ, constants)
-    Nx, Ny, Nz = size(grid)
-    c = Center()
-    Rᵈ  = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    κ   = Rᵈ / cᵖᵈ
-    g   = constants.gravitational_acceleration
+# One workitem per column; serial in k. `θ`/`qᵛ` are the reference profiles sampled at this
+# grid's physical heights, `θˢ`/`qᵛˢ`/`pˢ` their values at the terrain surface (the bottom face).
+@kernel function _compute_terrain_reference_state!(πᵣ, pᵣ, ρᵣ, θ, qᵛ, θˢ, qᵛˢ, pˢ,
+                                                   grid, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    i, j = @index(Global, NTuple)
 
-    for j in 1:Ny, i in 1:Nx
-        πₖ = zero(κ)  # initialised below at k = 1
-        for k in 1:Nz
-            z = znode(i, j, k, grid, c, c, c)
-            θₖ     = θᵣ isa Number ? θᵣ : θᵣ(z)
+    # Anchor: the continuous hydrostatic state at this column's terrain height.
+    Rᵐˢ, cᵖᵐˢ, κˢ = moist_reference_constants(qᵛˢ[i, j, 1], Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    Πˢ = (pˢ[i, j, 1] / pˢᵗ)^κˢ
+    ρˢ = pˢ[i, j, 1] / (Rᵐˢ * θˢ[i, j, 1] * Πˢ)
 
-            if k == 1
-                p_hydro = hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
-                πₖ      = (p_hydro / pˢᵗ)^κ
-            else
-                z_below = znode(i, j, k - 1, grid, c, c, c)
-                θ_below = θᵣ isa Number ? θᵣ : θᵣ(z_below)
-                θ_face  = (θₖ + θ_below) / 2
-                Δz      = Δzᶜᶜᶠ(i, j, k, grid)
-                πₖ      = πₖ - g * Δz / (cᵖᵈ * θ_face)
-            end
+    # Surface → first cell center spans half a cell; close it in discrete balance.
+    Rᵐ¹, cᵖᵐ¹, κ¹ = moist_reference_constants(qᵛ[i, j, 1], Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    Δz = Δzᶜᶜᶜ(i, j, 1, grid) / 2
+    Π¹ = Πˢ - g * Δz / (cᵖᵐ¹ * (θ[i, j, 1] + θˢ[i, j, 1]) / 2)     # continuous initial guess
+    p¹ = newton_hydrostatic_pressure(pˢ[i, j, 1], ρˢ, θ[i, j, 1], Rᵐ¹, κ¹, Δz, pˢᵗ, g,
+                                     pˢᵗ * Π¹^(1 / κ¹), FixedIterations(5))
+    πᵣ[i, j, 1] = (p¹ / pˢᵗ)^κ¹
+    pᵣ[i, j, 1] = p¹
+    ρᵣ[i, j, 1] = p¹ / (Rᵐ¹ * θ[i, j, 1] * πᵣ[i, j, 1])
 
-            pₖ = pˢᵗ * πₖ^(1 / κ)
-            ρₖ = pₖ / (Rᵈ * θₖ * πₖ)
-            @inbounds pᵣ[i, j, k] = pₖ
-            @inbounds ρᵣ[i, j, k] = ρₖ
-        end
-    end
+    # Interior faces k = 2…Nz: the same Newton recurrence the height-coordinate reference uses.
+    integrate_exner_column!(πᵣ, pᵣ, ρᵣ, θ, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
 end
 ```
 
-Two things to note:
+Three things to note:
 
-1. Each column starts the discrete Exner integration from the *physical* height
-   ``z`` of the lowest cell — which is over the terrain, not at sea
-   level. We evaluate the continuous hydrostatic pressure at that height and
-   seed ``\pi`` from it.
-2. The march upward is the *discrete* Exner relation,
-   ``\pi_k = \pi_{k-1} - g \Delta z / (c_p \theta_\text{face})``, which satisfies the
-   discrete hydrostatic balance ``\delta_z p_r = -g \, \mathcal{I}_z \rho_r``
-   to machine precision per column.
+1. Each column is anchored at its own *physical* terrain height — over the terrain, not at sea
+   level. The continuous hydrostatic pressure is evaluated there, and every face above it,
+   starting with the surface-to-first-center half cell, is closed by a Newton solve of the
+   *discrete* balance ``\delta_z p_r = -g \, \mathcal{I}_z \rho_r``, which therefore holds to
+   machine precision per column (the continuous Exner relation
+   ``\pi_k = \pi_{k-1} - g \Delta z / (c_p \theta_\text{face})`` supplies only the initial guess).
+2. The reference profiles ``\theta_r(z)`` and ``q^v_r(z)`` may be arbitrary host callables, so
+   they are sampled onto `Field`s (at each column's own `znode`s) before the kernel launches; the
+   column integration itself runs on the device.
+3. The level-local moist constants ``R^m``, ``c_p^m``, ``\kappa^m`` reduce exactly to their dry
+   values when ``q^v \equiv 0``, so dry and moist references share one code path.
 
 Critically, **all ``z``'s in this construction are `znode`**: the *physical*
 altitude of each cell, accounting for terrain deformation.
@@ -745,7 +740,7 @@ comes out hydrostatically balanced — no special handling required:
 θ_profile(x, z) = θ₀ * exp(N² * z / g)   # z here is the physical altitude
 
 set!(model,
-     ρ = model.dynamics.terrain_reference_density,
+     ρ = model.dynamics.reference_state.density,
      θ = θ_profile,
      u = U,
      v = 0,
@@ -765,7 +760,7 @@ precision:
 using Oceananigans.Fields: interior
 
 p  = interior(model.dynamics.pressure)
-pᵣ = interior(model.dynamics.terrain_reference_pressure)
+pᵣ = interior(model.dynamics.reference_state.pressure)
 
 isapprox(p, pᵣ; atol = 1e-9)   # → true for a well-balanced IC
 ```
@@ -917,7 +912,7 @@ model = AtmosphereModel(grid; dynamics = dyn, advection = WENO(order = 9),
 
 # ---- IC: at-rest plus uniform U ----
 set!(model,
-     ρ = model.dynamics.terrain_reference_density,
+     ρ = model.dynamics.reference_state.density,
      θ = θ_profile,
      u = U,
      v = 0,
@@ -932,7 +927,7 @@ run!(simulation)
 ```
 
 The IC is just the hydrostatic thermal path —
-`set!(model, ρ = model.dynamics.terrain_reference_density, θ = θ_profile, …)`
+`set!(model, ρ = model.dynamics.reference_state.density, θ = θ_profile, …)`
 with `w = 0`. The terrain kinematic surface condition (``\rho \tilde{w} = 0``)
 is carried by ``\rho w``'s bottom boundary condition and applied automatically by
 `update_state!`, so no manual bottom-face initialisation is needed (see
