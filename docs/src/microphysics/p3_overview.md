@@ -191,14 +191,16 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
 
 ## Prognostic Variables
 
-P3 evolves eleven prognostic densities:
+P3 evolves eight prognostic densities by default, and up to twelve with every option
+enabled. Each optional group is gated on a type, so a configuration that does not use one
+neither allocates nor advects it.
 
-**Cloud liquid** (2 variables):
+**Cloud liquid** (1-2 variables):
 
 - ``ρq^{cl}``: Cloud droplet mass concentration [kg/m³].
-- ``ρn^{cl}``: Cloud droplet number concentration [1/m³] (always carried; values are taken
-  from aerosol activation when prognostic activation is enabled, or held at the
-  configured ``N_c`` constant otherwise).
+- ``ρn^{cl}``: Cloud droplet number concentration [1/m³], prognostic only when aerosol
+  activation is enabled. Otherwise droplet number is the scheme parameter
+  `cloud.number_concentration` and this field does not exist.
 
 **Rain** (2 variables):
 
@@ -219,8 +221,8 @@ P3 evolves eleven prognostic densities:
 - ``ρs^{sat}``: Predicted supersaturation [kg/m³]
   ([Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008)).
   Breeze exposes a `predict_supersaturation` flag on `ProcessRateParameters`,
-  defaulting to `false`. When `false`, the prognostic field is inactive and
-  has zero microphysical tendency; diagnostics that need local saturation use
+  defaulting to `false`. When `false`, the field is not allocated and is
+  absent from `prognostic_field_names`; diagnostics that need local saturation use
   ``q^v - q^{v,s}(T)`` directly. When `true`, the bounded G&M (2008)
   adjustment fires before the M&G rates, shifting the local ``q^v``,
   ``q^{cl}``, and ``T`` (and thus ``q^{v,s}(T)``) so that

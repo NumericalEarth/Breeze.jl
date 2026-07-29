@@ -245,12 +245,16 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Prognostic field names" begin
-        # 2-moment ice (default): ρz̃ⁱ is not advected.
+        # 2-moment ice (default): ρz̃ⁱ is not advected. Nor is ρnᶜˡ, because the default
+        # prescribed-Nᶜ path takes droplet number from `cloud.number_concentration`.
         p3 = PredictedParticlePropertiesMicrophysics()
         names = prognostic_field_names(p3)
 
+        @test p3.process_rates.predict_supersaturation === false
+        @test p3.process_rates isa ProcessRateParameters{Float64, false}
         @test :ρqᶜˡ ∈ names
-        @test :ρnᶜˡ ∈ names
+        @test :ρnᶜˡ ∉ names
+        @test :ρnᵃ ∉ names
         @test :ρqʳ ∈ names
         @test :ρnʳ ∈ names
         @test :ρqⁱ ∈ names
@@ -260,12 +264,26 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test :ρz̃ⁱ ∉ names
         @test :ρzⁱ ∉ names
         @test :ρqʷⁱ ∈ names
+        @test :ρsˢᵃᵗ ∉ names
+
+        p3_supersaturation =
+            PredictedParticlePropertiesMicrophysics(; predict_supersaturation = true)
+        @test p3_supersaturation.process_rates.predict_supersaturation === true
+        @test p3_supersaturation.process_rates isa ProcessRateParameters{Float64, true}
+        @test :ρsˢᵃᵗ ∈ prognostic_field_names(p3_supersaturation)
 
         # 3-moment ice adds ρz̃ⁱ (the advected √(z·N) variable).
         p3_3mom = PredictedParticlePropertiesMicrophysics(; three_moment_ice=true)
         names_3mom = prognostic_field_names(p3_3mom)
         @test :ρz̃ⁱ ∈ names_3mom
         @test :ρzⁱ ∉ names_3mom
+
+        # Aerosol activation adds the droplet-number and aerosol prognostics together.
+        p3_aerosol = PredictedParticlePropertiesMicrophysics(;
+            aerosol = AerosolActivation(AerosolMode(Float64)))
+        names_aerosol = prognostic_field_names(p3_aerosol)
+        @test :ρnᶜˡ ∈ names_aerosol
+        @test :ρnᵃ ∈ names_aerosol
     end
 
     @testset "Show methods" begin

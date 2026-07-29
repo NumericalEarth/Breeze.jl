@@ -1206,7 +1206,7 @@ end
     ssat_final = liquid_supersaturation_after_moisture_update(𝒰, qᵛ_final, qˡ_final,
                                                               qⁱ_final, ρ, constants)
     ssat_tendency = (ssat_final - ℳ.sˢᵃᵗ) / dt_safety
-    ssat_tendency = ifelse(prp.predict_supersaturation, ssat_tendency, zero(FT))
+    ssat_tendency = gate_predicted_supersaturation(prp, ssat_tendency)
     # `cond_GM` is intentionally NOT rescaled by the cloud sink limiter: the
     # G&M alignment is its own one-shot saturation adjustment with a local
     # `ε ≥ -qᶜˡ` cap, and the cloud budget at the limiter sees `qᶜˡ_adjusted`

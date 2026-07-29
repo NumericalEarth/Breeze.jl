@@ -1,9 +1,12 @@
 # [Prognostic Variables and Tendencies](@id p3_prognostics)
 
-P3 tracks 11 prognostic densities that together describe the complete microphysical
-state of the atmosphere. This section documents each variable, its physical
-meaning, and the source-term assembly used in `tendency_ρ*` (`process_rates.jl`)
-to build the microphysical tendency for each prognostic field.
+P3 tracks 8 prognostic densities by default, and up to 12 with every option enabled;
+together they describe the complete microphysical state of the atmosphere. This section
+documents each variable, its physical meaning, and the source-term assembly used in
+`tendency_ρ*` (`process_rates.jl`) to build the microphysical tendency for each
+prognostic field. Optional groups (``ρ\tilde z^i``, ``ρs^{sat}``, ``ρn^{cl}``/``ρn^a``)
+are gated on a type, so a configuration that does not use one neither allocates nor
+advects it.
 
 The prognostic variable formulation has evolved through the P3 papers:
 
@@ -35,11 +38,12 @@ appear as gains; their negative branches contribute as losses elsewhere.
 | ``ρq^{cl}`` | Cloud liquid mass density | kg/m³ | Mass of cloud droplets per unit volume |
 | ``ρn^{cl}`` | Cloud droplet number density | m⁻³ | Number of cloud droplets per unit volume |
 
-Breeze always carries ``ρn^{cl}`` as a prognostic field. When the optional
-aerosol-activation path (`AerosolActivation` in `aerosol_activation.jl`) is
-enabled, CCN-activation source terms drive ``ρn^{cl}``. Otherwise the field
-is held at the configured constant cloud-droplet number (typical continental
-``\sim 100`` cm⁻³ or marine ``\sim 50`` cm⁻³).
+``ρn^{cl}`` is prognostic only when the optional aerosol-activation path
+(`AerosolActivation` in `aerosol_activation.jl`) is enabled, where CCN-activation source
+terms drive it. Otherwise, matching Fortran `log_predictNc = .false.`, droplet number is
+the scheme parameter `cloud.number_concentration` (typical continental ``\sim 100`` cm⁻³
+or marine ``\sim 50`` cm⁻³): every rate reads that constant, and ``ρn^{cl}`` is neither
+allocated nor advected.
 
 ### Rain
 
@@ -67,7 +71,7 @@ mass / number ratio. Both Fortran and Breeze run with ``μ_r = 0`` at runtime.
 | Symbol | Name | Units | Description |
 |--------|------|-------|-------------|
 | ``ρq^v`` | Water vapor density | kg/m³ | The host-coupled moisture variable |
-| ``ρs^{sat}`` | Predicted supersaturation | kg/m³ | Predicted-supersaturation path. Fortran v5.5 hard-codes `log_predictSsat = .false.`; Breeze's `predict_supersaturation` flag defaults to `false` to match. When `false`, the prognostic field is inactive and has zero microphysical tendency; diagnostics use ``q^v - q^{v,s}(T)`` directly. When `true`, the bounded G&M (2008) adjustment is active. |
+| ``ρs^{sat}`` | Predicted supersaturation | kg/m³ | Predicted-supersaturation path. Fortran v5.5 hard-codes `log_predictSsat = .false.`; Breeze's `predict_supersaturation` flag defaults to `false` to match. When `false`, the field is not allocated and is absent from `prognostic_field_names`; diagnostics use ``q^v - q^{v,s}(T)`` directly. When `true`, the bounded G&M (2008) adjustment is active. |
 
 ## Derived Quantities
 
@@ -319,20 +323,30 @@ not ported); Oceananigans is responsible for stability in transport.
 ## Coupling to AtmosphereModel
 
 In Breeze, P3 microphysics couples to `AtmosphereModel` through the
-microphysics interface in `p3_interface.jl`. Under the hood,
-``\_p3\_scalar\_compute`` returns a `P3CacheResult` that the field-by-field
-`microphysical_tendency` overloads consume:
+microphysics interfaces implemented in `p3_microphysical_state.jl` and
+`p3_driver.jl`. The default configuration uses prescribed cloud droplet number,
+two-moment ice, and diagnostic supersaturation:
 
-```julia
-# Prognostic field names
-names = prognostic_field_names(microphysics)
-# (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρz̃ⁱ, :ρqʷⁱ, :ρsˢᵃᵗ)
+```jldoctest
+using Breeze
+
+microphysics = PredictedParticlePropertiesMicrophysics()
+prognostic_field_names(microphysics)
+
+# output
+(:ρqᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρqʷⁱ)
 ```
+
+``ρz̃ⁱ`` appears only in 3-moment mode. ``ρnᶜˡ`` and ``ρnᵃ`` appear only when `aerosol`
+is an `AerosolActivation`: the default prescribed-Nᶜ path (Fortran
+`log_predictNc = .false.`) takes droplet number from `cloud.number_concentration`, so
+neither field is allocated or advected there. ``ρsˢᵃᵗ`` appears only when
+`predict_supersaturation = true`.
 
 Three host-facing entry points:
 
 1. **`microphysical_tendency`**: Computes source terms for all prognostic variables.
-2. **`compute_moisture_fractions`**: Converts prognostic densities to mixing ratios.
+2. **`moisture_fractions`**: Converts prognostic densities to mixing ratios.
 3. **`update_microphysical_fields!`**: Refreshes diagnostic fields after a state update.
 
 The tendency-only architecture is described in

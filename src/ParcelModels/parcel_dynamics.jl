@@ -871,6 +871,10 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     # Step microphysics prognostics with SSP RK3 formula (density-weighted)
     state.μ = ssp_rk3_microphysics_substep(U⁰.μ, state.μ, tendencies.Gμ, Δt, α)
 
+    # Restore scheme-specific coupled constraints after the prognostic substep.
+    state.μ = AtmosphereModels.postprocess_microphysical_prognostics(
+        model.microphysics, state.μ, state.ρ)
+
     # P3 cleanup: zero Z when ice mass < qsmall (Fortran P3 v5.5.0 convention).
     # The 3-moment Z tables store d(G)/d(env) derivatives that can drive Z negative
     # for newly nucleated ice; this hard clamp matches the Fortran post-process step.
@@ -972,6 +976,10 @@ function step_parcel_state!(model::ParcelModel, Δt)
 
     # Step microphysics prognostics forward using tendencies (density-weighted)
     state.μ = apply_microphysical_tendencies(state.μ, tendencies.Gμ, Δt)
+
+    # Restore scheme-specific coupled constraints after the prognostic substep.
+    state.μ = AtmosphereModels.postprocess_microphysical_prognostics(
+        model.microphysics, state.μ, state.ρ)
 
     # P3 cleanup (same as in SSP RK3 path above)
     state.μ = clamp_ice_sixth_moment(model.microphysics, state.μ, state.ρ)

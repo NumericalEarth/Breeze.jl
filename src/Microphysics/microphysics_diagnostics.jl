@@ -216,14 +216,19 @@ physics at every call site.
 For `TwoMomentCloudMicrophysics`, returns the prognostic ``ρnˣ`` field directly
 (e.g., `:rain` → `ρnʳ`, `:cloud_liquid` → `ρnᶜˡ`).
 
+For `PredictedParticlePropertiesMicrophysics`, returns the prognostic ``ρnˣ`` field
+when present. In the default prescribed-cloud-number configuration,
+`:cloud_liquid` returns a lazy constant operation based on the configured droplet
+number.
+
 Returns `nothing` if the species is not carried by the model (e.g., `:hail` for
 a 1-mom scheme without hail). Errors for microphysics schemes that do not
 define a DSD-based number concentration (e.g., `SaturationAdjustment`).
 
-The return shape is therefore polymorphic — a lazy `KernelFunctionOperation` for
-1-mom and a stored `Field` for 2-mom — so the function is snake-cased rather
-than PascalCased. Use [`number_concentration_field`](@ref) when you want a
-uniformly Field-typed handle.
+The return shape is therefore polymorphic: a lazy `KernelFunctionOperation` for
+diagnosed or prescribed concentrations and a stored `Field` for prognostic
+concentrations. Use [`number_concentration_field`](@ref) when you want a uniformly
+Field-typed handle.
 """
 number_concentration(model, species::Symbol) =
     number_concentration(model, model.microphysics, Val(species))
@@ -233,16 +238,15 @@ number_concentration(model, microphysics, ::Val{species}) where {species} =
     error("number_concentration is not defined for microphysics scheme of type ",
           typeof(microphysics), " (species = :", species, "). ",
           "Supported schemes: OneMomentCloudMicrophysics (species ∈ (:rain, :snow)) ",
-          "and TwoMomentCloudMicrophysics.")
+          "TwoMomentCloudMicrophysics, and PredictedParticlePropertiesMicrophysics.")
 
 """
 $(TYPEDSIGNATURES)
 
-Field-typed handle for the [`number_concentration`](@ref) diagnostic. For 1-mom,
-allocates a `Field` shell around the lazy `KernelFunctionOperation` (use
-`compute!` to populate it). For 2-mom, returns the prognostic ``ρnˣ`` field
-directly. Returns `nothing` when the requested species is not carried by the
-model.
+Field-typed handle for the [`number_concentration`](@ref) diagnostic. Allocates a
+`Field` shell around lazy `KernelFunctionOperation`s (use `compute!` to populate
+it) and returns prognostic ``ρnˣ`` fields directly. Returns `nothing` when the
+requested species is not carried by the model.
 """
 function number_concentration_field(model, species::Symbol)
     result = number_concentration(model, species)

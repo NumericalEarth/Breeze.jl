@@ -544,7 +544,7 @@ When `predict_supersaturation = false`, returns zero tendency.
 """
 @inline function tendency_ρsˢᵃᵗ(rates::P3ProcessRates, ρ, prp)
     raw = ρ * rates.predicted_ssat_tendency
-    return ifelse(prp.predict_supersaturation, raw, zero(ρ))
+    return gate_predicted_supersaturation(prp, raw)
 end
 
 """

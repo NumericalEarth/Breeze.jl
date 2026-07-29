@@ -97,13 +97,14 @@ establish_relative_humidity_densities!(model, total_density_given,
 $(TYPEDSIGNATURES)
 
 Convert a specific microphysical variable name to its density-weighted counterpart.
-For example, `:qᶜˡ` → `:ρqᶜˡ`, `:qʳ` → `:ρqʳ`, `:nᶜˡ` → `:ρnᶜˡ`.
+For example, `:qᶜˡ` → `:ρqᶜˡ`, `:qʳ` → `:ρqʳ`, `:nᶜˡ` → `:ρnᶜˡ`, `:bᶠ` → `:ρbᶠ`.
 
-Returns `nothing` if the name doesn't start with 'q' or 'n'.
+Returns `nothing` if the name doesn't start with 'q', 'n', or 'b'. These are the mass,
+number, and volume prefixes; the set matches [`settable_specific_microphysical_names`](@ref).
 """
 function specific_to_density_weighted(name::Symbol)
     str = string(name)
-    if startswith(str, "q") || startswith(str, "n")
+    if startswith(str, "q") || startswith(str, "n") || startswith(str, "b")
         return Symbol("ρ" * str)
     else
         return nothing
@@ -117,15 +118,20 @@ Return a tuple of specific (non-density-weighted) names that can be set
 for the given microphysics scheme. These are derived from the prognostic
 field names by removing the 'ρ' prefix.
 
-For mass fields (e.g., `ρqᶜˡ` → `qᶜˡ`) and number fields (e.g., `ρnᶜˡ` → `nᶜˡ`).
+For mass fields (e.g., `ρqᶜˡ` → `qᶜˡ`), number fields (e.g., `ρnᶜˡ` → `nᶜˡ`), and
+volume fields (e.g., `ρbᶠ` → `bᶠ`).
 """
 function settable_specific_microphysical_names(microphysics)
     prog_names = prognostic_field_names(microphysics)
     specific_names = Symbol[]
     for name in prog_names
+        # Mass (ρq*), number (ρn*), and volume (ρb*) fields are all per-unit-mass
+        # quantities, so stripping `ρ` gives a specific variable the user can set.
+        # `ρbᶠ` has to be settable for P3: rime mass without a rime volume has no
+        # defined rime density, so `consistent_rime_state` discards it, and a rimed
+        # initial condition would be unreachable if only `qᶠ` could be set.
         str = string(name)
-        # Handle both mass fields (ρq*) and number fields (ρn*)
-        if startswith(str, "ρq") || startswith(str, "ρn")
+        if startswith(str, "ρq") || startswith(str, "ρn") || startswith(str, "ρb")
             push!(specific_names, Symbol(str[nextind(str, 1):end]))  # Remove 'ρ' prefix
         end
     end
@@ -183,7 +189,9 @@ Variables are set via keyword arguments. Supported variables include:
 - `qʳ`: specific rain, sets `ρqʳ = ρᵣ * qʳ`
 - `nᶜˡ`: specific cloud liquid number [1/kg], sets `ρnᶜˡ = ρᵣ * nᶜˡ`
 - `nʳ`: specific rain number [1/kg], sets `ρnʳ = ρᵣ * nʳ`
-- Other prognostic microphysical variables with the `ρ` prefix removed
+- `bᶠ`: specific rime volume [m³/kg], sets `ρbᶠ = ρᵣ * bᶠ`. P3 needs this alongside `qᶠ`:
+  rime mass with no rime volume has no defined rime density and is discarded.
+- Other prognostic microphysical mass, number, and volume variables with the `ρ` prefix removed
 
 !!! note "The meaning of `θ`"
     When using `set!(model, θ=...)`, the value is interpreted as the **liquid-ice
@@ -390,15 +398,20 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     if total_moisture_was_set
         # The moisture and microphysical prognostics are total-air mass fractions.
         # For compressible dynamics this differs from the dry coupling density ρᵈ.
-        ρ = total_density(model.dynamics)
-        qᵗ = model.moisture_density / ρ
+        total_density_field = total_density(model.dynamics)
+        total_moisture = model.moisture_density / total_density_field
 
         if !isnothing(model.microphysics) &&
            hasmethod(specific_prognostic_moisture_from_total,
-                     Tuple{typeof(model.microphysics), typeof(qᵗ), typeof(model.microphysical_fields), typeof(ρ)})
-            qᵛᵉ = specific_prognostic_moisture(model)
-            set!(qᵛᵉ, specific_prognostic_moisture_from_total(model.microphysics, qᵗ, model.microphysical_fields, ρ))
-            set!(model.moisture_density, ρ * qᵛᵉ)
+                     Tuple{typeof(model.microphysics), typeof(total_moisture),
+                           typeof(model.microphysical_fields), typeof(total_density_field)})
+            specific_moisture_field = specific_prognostic_moisture(model)
+            set!(specific_moisture_field,
+                 specific_prognostic_moisture_from_total(model.microphysics,
+                                                         total_moisture,
+                                                         model.microphysical_fields,
+                                                         total_density_field))
+            set!(model.moisture_density, total_density_field * specific_moisture_field)
         end
     end
 

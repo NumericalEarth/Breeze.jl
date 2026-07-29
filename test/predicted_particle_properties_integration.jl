@@ -2,10 +2,13 @@ using Test
 
 using Breeze
 using Breeze.AtmosphereModels: AtmosphereModels
-using Breeze.Microphysics.PredictedParticleProperties: PredictedParticlePropertiesMicrophysics
+using Breeze.Microphysics.PredictedParticleProperties: AerosolActivation,
+                                                       AerosolMode,
+                                                       PredictedParticlePropertiesMicrophysics
+using Breeze.ParcelModels: step_parcel_state!
 
-using Oceananigans: CPU, Center, CenterField, Face, Field, GridFittedBottom,
-                     ImmersedBoundaryGrid, RectilinearGrid, set!, time_step!
+using Oceananigans: Bounded, CPU, Center, CenterField, Face, Field, Flat, GridFittedBottom,
+                     ImmersedBoundaryGrid, RectilinearGrid, compute!, set!, time_step!
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Oceananigans.Fields: interior, location
 using Oceananigans.TimeSteppers: update_state!
@@ -55,15 +58,13 @@ using Oceananigans.TimeSteppers: update_state!
         @test density ≈ expected_density
 
         # These moments and properties are not independent material masses. In
-        # particular, rime mass is already included in total ice mass.
-        set!(μ.ρnᶜˡ, 1e12)
+        # particular, rime mass is already included in total ice mass. `ρnᶜˡ` and `ρnᵃ`
+        # are absent in the prescribed-Nᶜ path, so they cannot be set here.
         set!(μ.ρnʳ, 2e12)
         set!(μ.ρnⁱ, 3e12)
         set!(μ.ρqᶠ, 0.5)
         set!(μ.ρbᶠ, 0.6)
         set!(μ.ρz̃ⁱ, 0.7)
-        set!(μ.ρsˢᵃᵗ, 0.8)
-        set!(μ.ρnᵃ, 4e12)
 
         density_with_nonmass_moments =
             AtmosphereModels.total_density(1, 1, 1, dry_density, p3_three_moment,
@@ -85,7 +86,7 @@ using Oceananigans.TimeSteppers: update_state!
                                 microphysics = p3)
 
         set!(model; θ = FT(285), qᵛ = FT(0.01), qᶜˡ = FT(0.003),
-             nᶜˡ = FT(2e8), enforce_mass_conservation = false)
+             enforce_mass_conservation = false)
         update_state!(model)
 
         # Fall speeds live at z-Faces: index k is the bottom face of cell k, and the top
@@ -107,6 +108,137 @@ using Oceananigans.TimeSteppers: update_state!
         @test second_rain_source != first_rain_source
     end
 
+    @testset "P3 has no droplet-number state in the prescribed-Nᶜ path" begin
+        # Fortran `log_predictNc = .false.`: `nc` is the scheme parameter at every
+        # microphysics call, so droplet number is not a state variable. Carrying `ρnᶜˡ`
+        # anyway meant `compute_tendencies!` integrated the transport of `μ.nᶜˡ`, which
+        # held that constant rather than `ρnᶜˡ / ρ`, so the field drifted with nothing to
+        # restore it and diagnostics reported the drift.
+        FT = Float64
+        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 2),
+                               extent = (100, 100, 100))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = FT(101325),
+                                         potential_temperature = FT(285))
+        dynamics = AnelasticDynamics(reference_state)
+
+        prescribed = PredictedParticlePropertiesMicrophysics(FT)
+        @test isnothing(prescribed.aerosol)
+        @test :ρnᶜˡ ∉ AtmosphereModels.prognostic_field_names(prescribed)
+        @test :ρnᵃ ∉ AtmosphereModels.prognostic_field_names(prescribed)
+        @test :nᶜˡ ∉ AtmosphereModels.settable_specific_microphysical_names(prescribed)
+
+        model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
+                                microphysics = prescribed)
+        μ = model.microphysical_fields
+        cpu(field) = Array(interior(field))
+        density() = cpu(AtmosphereModels.total_density(model.dynamics))
+
+        # No droplet-number state is allocated or advected. The public diagnostic
+        # still reports the prescribed volumetric number as a lazy constant field.
+        for name in (:ρnᶜˡ, :nᶜˡ, :cache_ρnᶜˡ, :ρnᵃ, :nᵃ, :cache_ρnᵃ)
+            @test !haskey(μ, name)
+        end
+        @test !hasproperty(model.timestepper.Gⁿ, :ρnᶜˡ)
+        @test number_concentration(model, :cloud_liquid) !== nothing
+        cloud_number_field = number_concentration_field(model, :cloud_liquid)
+        compute!(cloud_number_field)
+        @test all(≈(prescribed.cloud.number_concentration),
+                  Array(interior(cloud_number_field)))
+
+        set!(model; θ = FT(285), qᵛ = FT(0.01), qᶜˡ = FT(0.003),
+             enforce_mass_conservation = false)
+        update_state!(model)
+        time_step!(model, FT(1))
+
+        # The rates still see the prescribed parameter, so cloud processes are active.
+        @test any(Array(interior(μ.cache_ρqʳ)) .> 0)
+
+        # The aerosol-activation path does carry both, and there `μ.nᶜˡ` is the specific
+        # counterpart that `compute_tendencies!` advects, so it must equal `ρnᶜˡ / ρ`.
+        prognostic = PredictedParticlePropertiesMicrophysics(FT;
+            aerosol = AerosolActivation(AerosolMode(FT)))
+        @test :ρnᶜˡ ∈ AtmosphereModels.prognostic_field_names(prognostic)
+
+        aerosol_model = AtmosphereModel(grid; dynamics,
+                                        thermodynamic_constants = constants,
+                                        microphysics = prognostic)
+        μₐ = aerosol_model.microphysical_fields
+        droplet_number = FT(5e8)
+        set!(aerosol_model; θ = FT(285), qᵛ = FT(0.01), qᶜˡ = FT(0.003),
+             nᶜˡ = droplet_number, enforce_mass_conservation = false)
+        update_state!(aerosol_model)
+
+        ρₐ = Array(interior(AtmosphereModels.total_density(aerosol_model.dynamics)))
+        @test Array(interior(μₐ.nᶜˡ)) ≈ Array(interior(μₐ.ρnᶜˡ)) ./ ρₐ
+        @test all(≈(droplet_number), Array(interior(μₐ.nᶜˡ)))
+        @test number_concentration(aerosol_model, :cloud_liquid) === μₐ.ρnᶜˡ
+
+        # Rime mass with no rime volume is not a representable P3 state: ρᶠ = qᶠ/bᶠ is
+        # undefined, so `consistent_rime_state` zeroes both. The repair has to reach the
+        # prognostics, otherwise the hidden rime sits still while the ice carrying it is
+        # transported away, and reappears once bᶠ grows back.
+        set!(model; qⁱ = FT(0.002), qᶠ = FT(0.0005), enforce_mass_conservation = false)
+        update_state!(model)
+
+        ρ = density()
+        @test all(==(0), cpu(μ.ρqᶠ))
+        @test all(==(0), cpu(μ.ρbᶠ))
+        @test cpu(μ.qᶠ) ≈ cpu(μ.ρqᶠ) ./ ρ
+        @test cpu(μ.bᶠ) ≈ cpu(μ.ρbᶠ) ./ ρ
+
+        # Rime mass exceeding the dry ice mass is capped at that mass, at fixed rime
+        # density. Rime is a component of the ice mass rather than an independent
+        # reservoir, so capping it must leave the total density untouched.
+        rime_density = FT(400)
+        dry_ice = FT(1e-4)
+        excess_rime = FT(1e-3)
+        set!(model; qⁱ = dry_ice, qᶠ = excess_rime, bᶠ = excess_rime / rime_density,
+             enforce_mass_conservation = false)
+        density_before_repair = density()
+        update_state!(model)
+
+        ρ = density()
+        @test ρ ≈ density_before_repair
+        @test all(≈(dry_ice), cpu(μ.ρqᶠ) ./ ρ)
+        @test all(≈(dry_ice / rime_density), cpu(μ.ρbᶠ) ./ ρ)
+        @test cpu(μ.qᶠ) ≈ cpu(μ.ρqᶠ) ./ ρ
+        @test cpu(μ.bᶠ) ≈ cpu(μ.ρbᶠ) ./ ρ
+    end
+
+    @testset "P3 parcel substeps write back a consistent rime state" begin
+        FT = Float64
+        grid = RectilinearGrid(default_arch, FT;
+                               size = 4,
+                               z = (0, 1000),
+                               topology = (Flat, Flat, Bounded))
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        model = AtmosphereModel(grid; dynamics = ParcelDynamics(FT), microphysics = p3)
+
+        temperature_profile(z) = FT(285)
+        pressure_profile(z) = FT(1e5) * exp(-z / FT(8000))
+        density_profile(z) = pressure_profile(z) / (FT(287) * temperature_profile(z))
+        set!(model; T = temperature_profile, p = pressure_profile, ρ = density_profile,
+             qᵗ = FT(0.01), z = FT(0), w = FT(0))
+
+        state = model.dynamics.state
+        ρ = state.ρ
+        dry_ice = FT(1e-4)
+        excess_rime = FT(2e-4)
+        rime_density = FT(400)
+        state.μ = merge(state.μ,
+                        (; ρqⁱ = ρ * dry_ice,
+                           ρnⁱ = ρ * FT(1e5),
+                           ρqᶠ = ρ * excess_rime,
+                           ρbᶠ = ρ * excess_rime / rime_density))
+
+        step_parcel_state!(model, FT(0))
+
+        @test state.μ.ρqᶠ / state.ρ ≈ dry_ice
+        @test state.μ.ρbᶠ / state.ρ ≈ dry_ice / rime_density
+    end
+
     @testset "P3 sedimentation velocities live at z-Faces" begin
         FT = Float64
         grid = RectilinearGrid(default_arch, FT; size = (2, 2, 4),
@@ -122,11 +254,19 @@ using Oceananigans.TimeSteppers: update_state!
 
         # `div_ρUc` reads these as advecting velocities via `Az_qᶜᶜᶠ`, so they must be
         # located at (Center, Center, Face) like the resolved `w`.
-        velocity_names = (:wᶜˡ, :wᶜˡₙ, :wʳ, :wʳₙ, :wⁱ, :wⁱₙ, :wⁱ_z, :wⁱ_z̃)
+        velocity_names = (:wᶜˡ, :wᶜˡₙ, :wʳ, :wʳₙ, :wⁱ, :wⁱₙ, :wⁱ_z)
         for name in velocity_names
             @test location(μ[name]) === (Center, Center, Face)
             @test location(μ[name]) === location(model.velocities.w)
         end
+
+        # `wⁱ_z̃` advects `ρz̃ⁱ`, so it exists only in 3-moment mode.
+        @test !haskey(μ, :wⁱ_z̃)
+        three_moment_model = AtmosphereModel(
+            grid; dynamics, thermodynamic_constants = constants,
+            microphysics = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true))
+        @test location(three_moment_model.microphysical_fields.wⁱ_z̃) ===
+              (Center, Center, Face)
     end
 
     @testset "P3 surface precipitation boundary condition" begin
@@ -199,27 +339,34 @@ using Oceananigans.TimeSteppers: update_state!
                                 microphysics = p3)
         μ = model.microphysical_fields
 
-        # The repair is opt-out, not opt-in: P3 carries eleven prognostic densities
-        # through a non-positive-definite advection operator.
+        # The repair is opt-out, not opt-in: P3 carries eight prognostic densities in the
+        # default configuration, through a non-positive-definite advection operator.
         @test AtmosphereModels.negative_moisture_correction(p3) isa AtmosphereModels.SpeciesBorrowing
         @test AtmosphereModels.correction_moisture_fields(p3, μ) ===
               (μ.ρqʷⁱ, μ.ρqⁱ, μ.ρqʳ, μ.ρqᶜˡ)
 
         # Non-mass moments are clamped, never borrowed against. Supersaturation is
-        # excluded because subsaturation is legitimately negative.
+        # excluded because subsaturation is legitimately negative, and `ρnᶜˡ` is absent
+        # in this path so there is nothing to repair.
         clamped = AtmosphereModels.correction_number_fields(p3, μ)
-        @test clamped === (μ.ρnᶜˡ, μ.ρnʳ, μ.ρnⁱ, μ.ρqᶠ, μ.ρbᶠ)
-        @test !any(field === μ.ρsˢᵃᵗ for field in clamped)
+        @test clamped === (μ.ρnʳ, μ.ρnⁱ, μ.ρqᶠ, μ.ρbᶠ)
 
-        # The 3-moment and prognostic-aerosol paths add exactly their own prognostics.
+        # The 3-moment path adds exactly its own prognostic. It needs its own model: with
+        # 2-moment ice `ρz̃ⁱ` is not allocated, so there is no field to repair.
         p3_three_moment = PredictedParticlePropertiesMicrophysics(FT; three_moment_ice = true)
-        @test AtmosphereModels.correction_number_fields(p3_three_moment, μ) ===
-              (μ.ρnᶜˡ, μ.ρnʳ, μ.ρnⁱ, μ.ρqᶠ, μ.ρbᶠ, μ.ρz̃ⁱ)
+        three_moment_model = AtmosphereModel(grid; dynamics,
+                                             thermodynamic_constants = constants,
+                                             microphysics = p3_three_moment)
+        μ₃ = three_moment_model.microphysical_fields
+        @test AtmosphereModels.correction_number_fields(p3_three_moment, μ₃) ===
+              (μ₃.ρnʳ, μ₃.ρnⁱ, μ₃.ρqᶠ, μ₃.ρbᶠ, μ₃.ρz̃ⁱ)
         # Field `==` compares data, so membership has to be tested by identity.
-        pairs_with(p3ᵢ) = AtmosphereModels.correction_number_mass_pairs(p3ᵢ, μ)
-        holds_sixth_moment(pairs) = any(pair -> pair[1] === μ.ρz̃ⁱ && pair[2] === μ.ρqⁱ, pairs)
-        @test holds_sixth_moment(pairs_with(p3_three_moment))
-        @test !holds_sixth_moment(pairs_with(p3))
+        holds_sixth_moment(pairs, μᵢ) = any(pair -> pair[1] === μᵢ.ρz̃ⁱ && pair[2] === μᵢ.ρqⁱ,
+                                            pairs)
+        @test holds_sixth_moment(
+            AtmosphereModels.correction_number_mass_pairs(p3_three_moment, μ₃), μ₃)
+        @test AtmosphereModels.correction_number_mass_pairs(p3, μ) ===
+              ((μ.ρnʳ, μ.ρqʳ), (μ.ρnⁱ, μ.ρqⁱ), (μ.ρqᶠ, μ.ρqⁱ), (μ.ρbᶠ, μ.ρqⁱ))
 
         total_water(μ) = sum(Array(interior(model.moisture_density))) +
                          sum(Array(interior(μ.ρqᶜˡ))) +
@@ -257,20 +404,31 @@ using Oceananigans.TimeSteppers: update_state!
         @test total_water(μ) ≈ water_before rtol = 1e-12
 
         # Numbers and rime properties orphaned by a vanished ice mass are zeroed, and
-        # negative moments are clamped. Predicted supersaturation is left alone.
+        # negative moments are clamped.
         set!(μ.ρqⁱ, 0)
         set!(μ.ρnⁱ, FT(1e5))
         set!(μ.ρqᶠ, FT(1e-5))
         set!(μ.ρbᶠ, FT(1e-8))
         set!(μ.ρnʳ, FT(-1e3))
-        set!(μ.ρsˢᵃᵗ, FT(-1e-5))
         AtmosphereModels.fix_negative_moisture!(model)
 
         @test only_value(μ.ρnⁱ) == 0
         @test only_value(μ.ρqᶠ) == 0
         @test only_value(μ.ρbᶠ) == 0
         @test only_value(μ.ρnʳ) == 0
-        @test only_value(μ.ρsˢᵃᵗ) ≈ FT(-1e-5)
+
+        # Predicted supersaturation is left alone: subsaturation is legitimately negative.
+        # The field exists only when the switch is on, so check it on such a model.
+        p3_ssat = PredictedParticlePropertiesMicrophysics(FT; predict_supersaturation = true)
+        ssat_model = AtmosphereModel(grid; dynamics,
+                                     thermodynamic_constants = constants,
+                                     microphysics = p3_ssat)
+        μ_ssat = ssat_model.microphysical_fields
+        @test !any(field === μ_ssat.ρsˢᵃᵗ
+                   for field in AtmosphereModels.correction_number_fields(p3_ssat, μ_ssat))
+        set!(μ_ssat.ρsˢᵃᵗ, FT(-1e-5))
+        AtmosphereModels.fix_negative_moisture!(ssat_model)
+        @test only_value(μ_ssat.ρsˢᵃᵗ) ≈ FT(-1e-5)
     end
 
     @testset "P3 square-root moment uses the mean Z/N fall speed" begin
@@ -324,17 +482,22 @@ using Oceananigans.TimeSteppers: update_state!
         qⁱ = FT(0.002)
         qʷⁱ = FT(0.001)
         qᶠ = FT(0.0005)
-        nᶜˡ = FT(2e8)
+        # Rime mass needs a rime volume to go with it: `consistent_rime_state` zeroes both
+        # when `bᶠ` vanishes, and `clamp_rime_state!` writes that repair back. Pick a rime
+        # density inside [minimum_rime_density, maximum_rime_density] so the state survives.
+        rime_density = FT(400)
+        bᶠ = qᶠ / rime_density
+        nⁱ = FT(1e4)
         total_water = qᵛ + qᶜˡ + qʳ + qⁱ + qʷⁱ
         total_density = dry_density / (1 - total_water)
 
         model_with_total = make_model()
         set!(model_with_total; ρ = total_density, T = FT(280), qᵛ, qᶜˡ, qʳ, qⁱ,
-             qʷⁱ, qᶠ, nᶜˡ, enforce_mass_conservation = false)
+             qʷⁱ, qᶠ, bᶠ, nⁱ, enforce_mass_conservation = false)
 
         model_with_dry = make_model()
         set!(model_with_dry; ρᵈ = dry_density, T = FT(280), qᵛ, qᶜˡ, qʳ, qⁱ,
-             qʷⁱ, qᶠ, nᶜˡ, enforce_mass_conservation = false)
+             qʷⁱ, qᶠ, bᶠ, nⁱ, enforce_mass_conservation = false)
 
         cpu(field) = Array(interior(field))
         @test all(≈(total_density), cpu(model_with_dry.dynamics.total_density))
@@ -346,7 +509,8 @@ using Oceananigans.TimeSteppers: update_state!
         @test cpu(model_with_dry.temperature) ≈ cpu(model_with_total.temperature)
 
         for (name, specific_value) in ((:ρqᶜˡ, qᶜˡ), (:ρqʳ, qʳ), (:ρqⁱ, qⁱ),
-                                       (:ρqʷⁱ, qʷⁱ), (:ρqᶠ, qᶠ), (:ρnᶜˡ, nᶜˡ))
+                                       (:ρqʷⁱ, qʷⁱ), (:ρqᶠ, qᶠ), (:ρbᶠ, bᶠ),
+                                       (:ρnⁱ, nⁱ))
             dry_field = model_with_dry.microphysical_fields[name]
             total_field = model_with_total.microphysical_fields[name]
             @test all(≈(total_density * specific_value), cpu(dry_field))
@@ -358,7 +522,7 @@ using Oceananigans.TimeSteppers: update_state!
 
         model_with_total_water = make_model()
         set!(model_with_total_water; ρᵈ = dry_density, T = FT(280), qᵗ = total_water,
-             qᶜˡ, qʳ, qⁱ, qʷⁱ, qᶠ, nᶜˡ, enforce_mass_conservation = false)
+             qᶜˡ, qʳ, qⁱ, qʷⁱ, qᶠ, nⁱ, enforce_mass_conservation = false)
         @test all(≈(total_density), cpu(model_with_total_water.dynamics.total_density))
         @test all(≈(qᵛ), cpu(model_with_total_water.microphysical_fields.qᵛ))
         @test all(≈(total_density * qᵛ), cpu(model_with_total_water.moisture_density))
@@ -368,7 +532,7 @@ using Oceananigans.TimeSteppers: update_state!
 
         model_with_total_and_total_water = make_model()
         set!(model_with_total_and_total_water; ρ = total_density, T = FT(280),
-             qᵗ = total_water, qᶜˡ, qʳ, qⁱ, qʷⁱ, qᶠ, nᶜˡ,
+             qᵗ = total_water, qᶜˡ, qʳ, qⁱ, qʷⁱ, qᶠ, nⁱ,
              enforce_mass_conservation = false)
         @test all(≈(dry_density),
                   cpu(model_with_total_and_total_water.dynamics.dry_density))
@@ -378,7 +542,7 @@ using Oceananigans.TimeSteppers: update_state!
         set!(model_without_repeated_density; ρᵈ = dry_density, T = FT(280),
              qᵛ = FT(0), enforce_mass_conservation = false)
         set!(model_without_repeated_density; T = FT(280), qᵛ, qᶜˡ, qʳ, qⁱ,
-             qʷⁱ, qᶠ, nᶜˡ, enforce_mass_conservation = false)
+             qʷⁱ, qᶠ, nⁱ, enforce_mass_conservation = false)
         @test cpu(model_without_repeated_density.dynamics.total_density) ≈
               cpu(model_with_dry.dynamics.total_density)
         @test cpu(model_without_repeated_density.moisture_density) ≈
@@ -391,12 +555,11 @@ using Oceananigans.TimeSteppers: update_state!
 
         relative_humidity = FT(0.5)
         relative_humidity_cloud = FT(0.01)
-        relative_humidity_number = FT(2e8)
 
         model_with_dry_and_relative_humidity = make_model()
         set!(model_with_dry_and_relative_humidity;
              ρᵈ = dry_density, T = FT(280), ℋ = relative_humidity,
-             qᶜˡ = relative_humidity_cloud, nᶜˡ = relative_humidity_number,
+             qᶜˡ = relative_humidity_cloud,
              enforce_mass_conservation = false)
 
         dry_relative_humidity_total =
@@ -406,8 +569,6 @@ using Oceananigans.TimeSteppers: update_state!
                   cpu(model_with_dry_and_relative_humidity.dynamics.dry_density))
         @test cpu(dry_relative_humidity_fields.ρqᶜˡ) ./ dry_relative_humidity_total ≈
               fill(relative_humidity_cloud, size(dry_relative_humidity_total))
-        @test cpu(dry_relative_humidity_fields.ρnᶜˡ) ./ dry_relative_humidity_total ≈
-              fill(relative_humidity_number, size(dry_relative_humidity_total))
         @test dry_relative_humidity_total ≈
               cpu(model_with_dry_and_relative_humidity.dynamics.dry_density) .+
               cpu(model_with_dry_and_relative_humidity.moisture_density) .+
@@ -420,7 +581,7 @@ using Oceananigans.TimeSteppers: update_state!
         model_with_total_and_relative_humidity = make_model()
         set!(model_with_total_and_relative_humidity;
              ρ = fixed_total_density, T = FT(280), ℋ = relative_humidity,
-             qᶜˡ = relative_humidity_cloud, nᶜˡ = relative_humidity_number,
+             qᶜˡ = relative_humidity_cloud,
              enforce_mass_conservation = false)
 
         total_relative_humidity_fields = model_with_total_and_relative_humidity.microphysical_fields
@@ -508,7 +669,7 @@ using Oceananigans.TimeSteppers: update_state!
                                 microphysics = p3)
 
         set!(model; θ = FT(285), qᵛ = FT(0.01), qᶜˡ = FT(0.003),
-             nᶜˡ = FT(2e8), enforce_mass_conservation = false)
+             enforce_mass_conservation = false)
         @test all(Array(interior(model.microphysical_fields.ρqʳ)) .== 0)
 
         μ = model.microphysical_fields
@@ -544,7 +705,7 @@ using Oceananigans.TimeSteppers: update_state!
             microphysics = PredictedParticlePropertiesMicrophysics(FT),
             timestepper = :AcousticRungeKutta3)
         set!(model; ρᵈ = FT(1), T = FT(280), qᵛ = FT(0.01),
-             qᶜˡ = FT(1e-4), nᶜˡ = FT(1e8),
+             qᶜˡ = FT(1e-4),
              enforce_mass_conservation = false)
 
         Δt = FT(0.01)

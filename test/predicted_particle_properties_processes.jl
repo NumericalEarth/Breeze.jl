@@ -271,7 +271,7 @@ function expected_fortran_predicted_ssat_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
     ε = max(ε, -qᶜˡ)
     ε = ifelse(sˢᵃᵗ < 0, min(0, ε), ε)
     ε = ifelse(abs(ε) < 100 * eps(FT) * max(qᵛ⁺ˡ, qᵛ), zero(FT), ε)
-    ε = ifelse(p3.process_rates.predict_supersaturation, ε, zero(FT))
+    ε = ifelse(PPP.predicts_supersaturation(p3.process_rates), ε, zero(FT))
     return (; ε, rate = ε / τ)
 end
 
@@ -301,7 +301,7 @@ function documented_predict_supersaturation_disabled_semantics()
     overview = read(joinpath(@__DIR__, "..", "docs", "src", "microphysics", "p3_overview.md"), String)
     prognostics = read(joinpath(@__DIR__, "..", "docs", "src", "microphysics", "p3_prognostics.md"), String)
     forbidden = "When `false`, the field is recomputed diagnostically"
-    required = "When `false`, the prognostic field is inactive"
+    required = "When `false`, the field is not allocated"
     return !occursin(forbidden, overview) &&
            !occursin(forbidden, prognostics) &&
            occursin(required, overview) &&
@@ -2351,6 +2351,11 @@ end
         ℳ = Breeze.AtmosphereModels.microphysical_state(p3, ρ, μ, nothing, (u = FT(0), v = FT(0), w = FT(0)))
         @test ℳ.qᶠ == FT(1e-5)
         @test ℳ.bᶠ ≈ FT(2.5e-8)
+
+        corrected_μ =
+            Breeze.AtmosphereModels.postprocess_microphysical_prognostics(p3, μ, ρ)
+        @test corrected_μ.ρqᶠ == ρ * ℳ.qᶠ
+        @test corrected_μ.ρbᶠ ≈ ρ * ℳ.bᶠ
 
         for (qⁱ, qᶠ, bᶠ) in (
             (FT(1e-4), FT(1e-5), FT(1e-16)),

@@ -76,17 +76,23 @@ runtime path is 2-moment ice; pass `three_moment_ice = true` to enable the
 
 # Prognostic Variables
 
-The scheme tracks 11 prognostic densities:
+The scheme tracks 8 prognostic densities by default, and up to 12 with every option on:
 
-| Variable | Description |
-|----------|-------------|
-| ``ρqᶜˡ``, ``ρnᶜˡ`` | Cloud liquid mass and number |
-| ``ρqʳ``, ``ρnʳ`` | Rain mass and number |
-| ``ρqⁱ``, ``ρnⁱ`` | Ice mass and number |
-| ``ρqᶠ``, ``ρbᶠ`` | Rime mass and volume |
-| ``ρz̃ⁱ`` | Advected square-root ice sixth moment, ``ρ sqrt(zⁱ nⁱ)`` |
-| ``ρqʷⁱ`` | Liquid water on ice |
-| ``ρsˢᵃᵗ`` | Predicted supersaturation (off by default) |
+| Variable | Description | Carried when |
+|----------|-------------|--------------|
+| ``ρqᶜˡ`` | Cloud liquid mass | always |
+| ``ρqʳ``, ``ρnʳ`` | Rain mass and number | always |
+| ``ρqⁱ``, ``ρnⁱ`` | Ice mass and number | always |
+| ``ρqᶠ``, ``ρbᶠ`` | Rime mass and volume | always |
+| ``ρqʷⁱ`` | Liquid water on ice | always |
+| ``ρz̃ⁱ`` | Advected square-root ice sixth moment, ``ρ sqrt(zⁱ nⁱ)`` | `three_moment_ice` |
+| ``ρsˢᵃᵗ`` | Predicted supersaturation | `predict_supersaturation` |
+| ``ρnᶜˡ``, ``ρnᵃ`` | Cloud number and unactivated aerosol number | `aerosol` |
+
+Each optional group is gated on a type, so a configuration that does not use one neither
+allocates nor advects it. Cloud droplet number is prognostic only with an
+`AerosolActivation`: the default prescribed-Nᶜ path (Fortran `log_predictNc = .false.`)
+takes it from the scheme parameter `cloud.number_concentration`.
 
 # Keyword Arguments
 

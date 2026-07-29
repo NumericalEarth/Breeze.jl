@@ -162,6 +162,17 @@ See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 @inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, velocities) = NothingMicrophysicalState(typeof(ρ))
 
 """
+$(TYPEDSIGNATURES)
+
+Restore scheme-specific constraints on density-weighted microphysical
+`prognostics` after a parcel time-integration substep.
+
+The default returns `prognostics` unchanged. Schemes with coupled prognostic
+constraints may extend this hook to return a corrected value.
+"""
+@inline postprocess_microphysical_prognostics(microphysics, prognostics, ρ) = prognostics
+
+"""
     grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, velocities)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) at grid point `(i, j, k)`.

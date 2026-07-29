@@ -1,7 +1,8 @@
+using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Fields: ZeroField
+using Oceananigans.Fields: Center, ZeroField
 using Oceananigans.Grids: inactive_cell
-using Oceananigans.Utils: launch!
+using Oceananigans.Utils: Utils, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
 using Breeze.AtmosphereModels: AbstractMicrophysicalState
@@ -54,8 +55,11 @@ function AM.prepare_microphysical_tendencies!(p3::P3, model)
     # fields with `bottom = nothing`, so the fill leaves the surface face (where
     # `write_p3_fall_speeds!` applied the precipitation boundary condition) untouched and
     # holds the impenetrable top face at zero.
+    # `wⁱ_z̃` only exists in 3-moment mode, where it advects `ρz̃ⁱ`. Dispatch on the table
+    # type rather than branching on a Bool, so the tuple stays concretely typed.
     sedimentation_velocities = (μ.wᶜˡ, μ.wᶜˡₙ, μ.wʳ, μ.wʳₙ,
-                                μ.wⁱ, μ.wⁱₙ, μ.wⁱ_z, μ.wⁱ_z̃)
+                                μ.wⁱ, μ.wⁱₙ, μ.wⁱ_z,
+                                sqrt_moment_velocities(three_moment_shape_table(p3), μ)...)
     fill_halo_regions!(sedimentation_velocities)
 
     return nothing
@@ -142,7 +146,7 @@ end
     result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, props,
                                  surface_temperature, temperature_tendency,
                                  vapor_tendency)
-    write_p3_tendency_cache!(μ, i, j, k, result)
+    write_p3_tendency_cache!(μ, i, j, k, p3, result)
 end
 
 
@@ -157,14 +161,13 @@ end
 # The state-based `microphysical_tendency` methods above remain the gridless
 # fallback used by ParcelModels.
 
-@kernel function _add_p3_base_tendencies_kernel!(Gρqᵛ, Gρqᶜˡ, Gρnᶜˡ, Gρqʳ, Gρnʳ,
+@kernel function _add_p3_base_tendencies_kernel!(Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnʳ,
                                                  Gρqⁱ, Gρnⁱ, Gρqᶠ, Gρbᶠ,
-                                                 Gρqʷⁱ, Gρsˢᵃᵗ, μ)
+                                                 Gρqʷⁱ, μ)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         Gρqᵛ[i, j, k]   += μ.cache_ρqᵛ[i, j, k]
         Gρqᶜˡ[i, j, k]  += μ.cache_ρqᶜˡ[i, j, k]
-        Gρnᶜˡ[i, j, k]  += μ.cache_ρnᶜˡ[i, j, k]
         Gρqʳ[i, j, k]   += μ.cache_ρqʳ[i, j, k]
         Gρnʳ[i, j, k]   += μ.cache_ρnʳ[i, j, k]
         Gρqⁱ[i, j, k]   += μ.cache_ρqⁱ[i, j, k]
@@ -172,18 +175,28 @@ end
         Gρqᶠ[i, j, k]   += μ.cache_ρqᶠ[i, j, k]
         Gρbᶠ[i, j, k]   += μ.cache_ρbᶠ[i, j, k]
         Gρqʷⁱ[i, j, k]  += μ.cache_ρqʷⁱ[i, j, k]
-        Gρsˢᵃᵗ[i, j, k] += μ.cache_ρsˢᵃᵗ[i, j, k]
     end
 end
 
+# One kernel per optional prognostic group, launched only when that group exists.
 @kernel function _add_p3_z̃ⁱ_tendency_kernel!(Gρz̃ⁱ, cache_ρz̃ⁱ)
     i, j, k = @index(Global, NTuple)
     @inbounds Gρz̃ⁱ[i, j, k] += cache_ρz̃ⁱ[i, j, k]
 end
 
-@kernel function _add_p3_aerosol_tendency_kernel!(Gρnᵃ, cache_ρnᵃ)
+@kernel function _add_p3_sˢᵃᵗ_tendency_kernel!(Gρsˢᵃᵗ, cache_ρsˢᵃᵗ)
     i, j, k = @index(Global, NTuple)
-    @inbounds Gρnᵃ[i, j, k] += cache_ρnᵃ[i, j, k]
+    @inbounds Gρsˢᵃᵗ[i, j, k] += cache_ρsˢᵃᵗ[i, j, k]
+end
+
+# Droplet number and unactivated aerosol are prognostic together, only in the
+# aerosol-activation path, so one kernel covers both.
+@kernel function _add_p3_aerosol_tendency_kernel!(Gρnᶜˡ, cache_ρnᶜˡ, Gρnᵃ, cache_ρnᵃ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        Gρnᶜˡ[i, j, k] += cache_ρnᶜˡ[i, j, k]
+        Gρnᵃ[i, j, k] += cache_ρnᵃ[i, j, k]
+    end
 end
 
 function AM.compute_microphysical_tendencies!(p3::P3, model)
@@ -202,15 +215,20 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
             model.velocities)
 
     launch!(arch, grid, :xyz, _add_p3_base_tendencies_kernel!,
-            G.ρqᵛ, G.ρqᶜˡ, G.ρnᶜˡ, G.ρqʳ, G.ρnʳ,
-            G.ρqⁱ, G.ρnⁱ, G.ρqᶠ, G.ρbᶠ, G.ρqʷⁱ, G.ρsˢᵃᵗ, μ)
+            G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnʳ,
+            G.ρqⁱ, G.ρnⁱ, G.ρqᶠ, G.ρbᶠ, G.ρqʷⁱ, μ)
 
     if is_three_moment_ice(p3)
         launch!(arch, grid, :xyz, _add_p3_z̃ⁱ_tendency_kernel!, G.ρz̃ⁱ, μ.cache_ρz̃ⁱ)
     end
 
+    if predicts_supersaturation(p3.process_rates)
+        launch!(arch, grid, :xyz, _add_p3_sˢᵃᵗ_tendency_kernel!, G.ρsˢᵃᵗ, μ.cache_ρsˢᵃᵗ)
+    end
+
     if !isnothing(p3.aerosol)
-        launch!(arch, grid, :xyz, _add_p3_aerosol_tendency_kernel!, G.ρnᵃ, μ.cache_ρnᵃ)
+        launch!(arch, grid, :xyz, _add_p3_aerosol_tendency_kernel!,
+                G.ρnᶜˡ, μ.cache_ρnᶜˡ, G.ρnᵃ, μ.cache_ρnᵃ)
     end
 
     return nothing
@@ -220,15 +238,34 @@ end
 ##### Number concentration diagnostic
 #####
 #
-# P3 carries prognostic number-density fields for cloud liquid, rain, and ice,
-# so `number_concentration` just hands the requested field back. This keeps the
-# diagnostic interface uniform with `OneMomentCloudMicrophysics` and
-# `TwoMomentCloudMicrophysics`.
+# P3 carries prognostic number-density fields for rain and ice, and for cloud liquid
+# when aerosol activation is enabled. The default prescribed-Nᶜ path has no `ρnᶜˡ`
+# prognostic, but cloud droplets are still part of the model: their total number
+# concentration is the constant `p3.cloud.number_concentration`. Represent that constant
+# as a lazy operation so `number_concentration_field` works uniformly.
+
+struct PrescribedCloudNumberKernelFunction{FT}
+    number_concentration :: FT
+end
+
+Utils.prettysummary(::PrescribedCloudNumberKernelFunction) =
+    "PrescribedCloudNumberKernelFunction"
+
+@inline (kernel::PrescribedCloudNumberKernelFunction)(i, j, k, grid) =
+    kernel.number_concentration
 
 Microphysics.number_concentration(model, ::P3, ::Val{:rain}) =
     get(model.microphysical_fields, :ρnʳ, nothing)
 
-Microphysics.number_concentration(model, ::P3, ::Val{:cloud_liquid}) =
+Microphysics.number_concentration(model, p3::P3, ::Val{:cloud_liquid}) =
+    cloud_number_concentration(model, p3, p3.aerosol)
+
+function cloud_number_concentration(model, p3, ::Nothing)
+    kernel = PrescribedCloudNumberKernelFunction(p3.cloud.number_concentration)
+    return KernelFunctionOperation{Center, Center, Center}(kernel, model.grid)
+end
+
+cloud_number_concentration(model, p3, aerosol) =
     get(model.microphysical_fields, :ρnᶜˡ, nothing)
 
 Microphysics.number_concentration(model, ::P3, ::Val{:ice}) =

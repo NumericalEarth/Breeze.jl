@@ -13,7 +13,7 @@ export ProcessRateParameters
 Parameters for P3 microphysical process rates.
 See [`ProcessRateParameters()`](@ref) constructor for usage.
 """
-struct ProcessRateParameters{FT}
+struct ProcessRateParameters{FT, PS}
     # Physical constants
     liquid_water_density :: FT       # ρʷ [kg/m³]
     pure_ice_density :: FT           # ρⁱ [kg/m³]
@@ -134,6 +134,12 @@ struct ProcessRateParameters{FT}
     # When true, carry supersaturation as a prognostic variable and use
     # bounded Grabowski-Morrison (2008) adjustment for condensation.
     # When false (default), use relaxation-to-saturation.
+    #
+    # The public field remains a `Bool`. The same value is carried by the `PS` type
+    # parameter so allocation decisions and kernel gates can dispatch at compile time.
+    # `prognostic_field_names` must fold to a constant tuple (a `Union` return type makes
+    # the host-side prognostic loop allocate), and `materialize_microphysical_fields`
+    # needs the type value to decide whether `ρsˢᵃᵗ` exists at all.
     predict_supersaturation :: Bool
 
     # Deposition/sublimation calibration factors (Fortran P3 v5.5.0 clbfact_dep, clbfact_sub).
@@ -170,13 +176,18 @@ path uses ``μ_r = 0``. None are duplicated in this rate-parameter container.
 
 # Example
 
+The second type parameter carries the value of the Boolean
+`predict_supersaturation` field, so the default `false` drops `ρsˢᵃᵗ` from the
+prognostic set entirely while `params.predict_supersaturation` remains usable in
+ordinary Boolean expressions.
+
 ```jldoctest
 using Breeze.Microphysics.PredictedParticleProperties: ProcessRateParameters
 params = ProcessRateParameters(Float64)
 typeof(params)
 
 # output
-ProcessRateParameters{Float64}
+ProcessRateParameters{Float64, false}
 ```
 
 All parameters are keyword arguments with physically-based defaults. The coupled
@@ -316,7 +327,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
     coupled_sink_limiting_iterations > 0 ||
         throw(ArgumentError("coupled_sink_limiting_iterations must be positive"))
 
-    return ProcessRateParameters(
+    predict_supersaturation = Bool(predict_supersaturation)
+
+    return ProcessRateParameters{FT, predict_supersaturation}(
         FT(liquid_water_density),
         FT(pure_ice_density),
         FT(reference_air_density),
@@ -374,11 +387,18 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(liquid_fraction_clipping_threshold),
         FT(tiny_ice_to_rain_threshold),
         Bool(liquid_fraction_active),
-        Bool(predict_supersaturation),
+        predict_supersaturation,
         FT(calibration_factor_deposition),
         FT(calibration_factor_sublimation)
     )
 end
+
+# Gate a rate on the predicted-supersaturation switch. Dispatching on the type value
+# folds the branch at compile time while preserving a user-facing `Bool` field.
+@inline gate_predicted_supersaturation(::ProcessRateParameters{FT, false}, x) where FT = 0 * x
+@inline gate_predicted_supersaturation(::ProcessRateParameters{FT, true}, x) where FT = x
+
+@inline predicts_supersaturation(::ProcessRateParameters{FT, PS}) where {FT, PS} = PS
 
 Base.summary(::ProcessRateParameters) = "ProcessRateParameters"
 

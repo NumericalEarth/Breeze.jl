@@ -76,7 +76,7 @@ state passes through unchanged.
     ε = max(ε, -clamp_positive(qᶜˡ))
     ε = ifelse(sˢᵃᵗ < 0, min(ε, zero(FT)), ε)
     ε = ifelse(abs(ε) < 100 * eps(FT) * max(qᵛ⁺ˡ, qᵛ), zero(FT), ε)
-    ε = ifelse(p3.process_rates.predict_supersaturation, ε, zero(FT))
+    ε = gate_predicted_supersaturation(p3.process_rates, ε)
 
     return (; ε,
               rate = ε / τ,

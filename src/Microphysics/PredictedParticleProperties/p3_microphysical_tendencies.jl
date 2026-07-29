@@ -17,9 +17,10 @@ $(TYPEDSIGNATURES)
 Cloud number tendency: gains from activation and loses proportionally with cloud sinks.
 
 In the prescribed-Nᶜ path (`p3.aerosol === nothing`), `nc` is a scheme-level
-parameter (Fortran `nccnst_2`), not a prognostic. The `ρnᶜˡ` field is still
-allocated but carries no physical meaning, so the microphysical tendency is
-zero and the field remains at its initial value.
+parameter (Fortran `nccnst_2`), not a prognostic. `ρnᶜˡ` is neither allocated nor
+transported there, and every rate takes the prescribed value from
+[`effective_cloud_droplet_number`](@ref), so this method returns zero and is never
+reached through the prognostic loop.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnᶜˡ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     isnothing(p3.aerosol) && return zero(ρ)
