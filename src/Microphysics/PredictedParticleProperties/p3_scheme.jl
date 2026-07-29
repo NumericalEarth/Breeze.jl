@@ -184,5 +184,5 @@ function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, "└── warm_rain_scheme: ", summary(p3.warm_rain_scheme))
 end
 
-# Note: prognostic_field_names is implemented in p3_interface.jl to extend
+# Note: prognostic_field_names is implemented in p3_microphysical_state.jl to extend
 # AtmosphereModels.prognostic_field_names
