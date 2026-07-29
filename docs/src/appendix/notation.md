@@ -143,7 +143,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``q``                               | `q`    |                                     | Turbulent velocity scale ``q = \sqrt{2e}``, m s⁻¹, in mixing-length expressions (distinct from `q`, the `MoistureMassFractions` instance) |
 | ``\rho e``                          | `ρtke` |                                     | Prognostic TKE density, ``ρ e``. Named `ρtke` because `ρe` is the static-energy density |
 | ``C^K``                             | `Cᴷ`   | `diffusivity_coefficient`           | Diffusivity coefficient in ``ν = Cᴷ ℓ \sqrt{e}``                               |
-| ``C^\mu``                           | `Cμ`   |                                     | ``k``–``ε`` coefficient in ``ν = Cμ e²/ε``; sets the turbulence level ``e/u_\star² = (Cμ)^{-1/2}`` |
+| ``C^\mu``                           | `Cμ`   |                                     | ``k``–``ε`` coefficient in ``ν = Cμ e²/ε``; sets the neutral surface-layer turbulence level ``e/u_\star² = (Cμ)^{-1/2}`` |
 | ``C^\varepsilon``                   | `Cᵋ`   | `dissipation_coefficient`           | Dissipation coefficient in ``ε = Cᵋ e^{3/2}/ℓ``; *derived*, ``Cᵋ = Cμ/Cᴷ``      |
 | ``C^\mathrm{sfc}``                  |        | `surface_tke_coefficient`           | Surface TKE level ``e/u_\star²``; *derived*, ``(Cμ)^{-1/2}``                    |
 | ``C^s``                             | `Cˢ`   | `stress_coefficient`                | Stress coefficient; *derived*, ``Cᴷ/(Cμ)^{1/4}``. Equals 1 on the neutral log-law locus ``Cμ = Cᴷ⁴`` |

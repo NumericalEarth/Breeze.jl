@@ -39,8 +39,9 @@ Only ``Cᴷ`` and ``Cμ`` are stored; the dissipation coefficient, the surface t
 the stress coefficient all derive from them (`dissipation_coefficient`, `surface_tke_coefficient`,
 `stress_coefficient`). This pair is chosen because it *separates*:
 
-  - **``Cμ`` alone sets the turbulence level**, ``e/u_\\star² = (Cμ)^{-1/2}``, independently of
-    ``Cᴷ``. It is the ``k``–``ε`` coefficient in ``ν = Cμ e²/ε``, so it is directly comparable
+  - **``Cμ`` alone sets the neutral surface-layer turbulence level**, ``e/u_\\star² = (Cμ)^{-1/2}``,
+    independently of ``Cᴷ``. Away from that layer ``e`` follows the full budget rather than any
+    coefficient. It is the ``k``–``ε`` coefficient in ``ν = Cμ e²/ε``, so it is directly comparable
     across closure families: 0.058 here (MYNN), 0.094 (MY82), 0.090 (standard ``k``–``ε``),
     0.148 (MYJ), 0.200 (SHOC).
 
@@ -72,7 +73,7 @@ struct TKEBasedTurbulenceClosure{TD, ML, FT} <: AbstractScalarDiffusivity{TD, Ve
     mixing_length :: ML
     "``Cᴷ``, the diffusivity coefficient in ``ν = Cᴷ ℓ \\sqrt{e}``"
     Cᴷ :: FT
-    "``Cμ``, the ``k``–``ε`` coefficient; sets the turbulence level ``e/u_\\star² = (Cμ)^{-1/2}``"
+    "``Cμ``, the ``k``–``ε`` coefficient; sets the neutral surface-layer turbulence level ``e/u_\\star² = (Cμ)^{-1/2}``"
     Cμ :: FT
     "``\\mathrm{Pr₀}``, the turbulent Prandtl number in neutral stratification"
     Pr₀ :: FT
@@ -500,9 +501,9 @@ negative takes ``ν`` with it.
     ω = dissipation_coefficient(closure_ij) * sqrt(e★) / ℓ
     e⁺ = e★ / (1 + Δt * ω)
 
-    # The surface floor. On the log-law locus this is the same number the interior equilibrium
-    # relaxes to (see `surface_tke_coefficient`), so it is inert in a spun-up constant-flux layer;
-    # it matters during spin-up and wherever a column has run down.
+    # The surface floor. This is the value at which the local budget P = ε already balances
+    # (see `surface_tke_coefficient`), so it is inert in a spun-up constant-flux layer; it matters
+    # during spin-up and wherever a column has run down.
     u★² = @inbounds closure_fields.u★²[i, j, 1]
     eᶠˡᵒᵒʳ = surface_tke_coefficient(closure_ij) * u★²
     e⁺ = ifelse((k == 1) & (eᶠˡᵒᵒʳ > e⁺), eᶠˡᵒᵒʳ, e⁺)
@@ -563,7 +564,7 @@ end
 function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
     print(io, summary(closure), '\n',
               "├── Cᴷ:   ", prettysummary(closure.Cᴷ), " (diffusivity coefficient)", '\n',
-              "├── Cμ:   ", prettysummary(closure.Cμ), " (turbulence level; e/u★² = ",
+              "├── Cμ:   ", prettysummary(closure.Cμ), " (surface turbulence level; e/u★² = ",
                              prettysummary(surface_tke_coefficient(closure)), ")", '\n',
               "├── Cᵋ:   ", prettysummary(dissipation_coefficient(closure)), " (derived)", '\n',
               "├── Cˢ:   ", prettysummary(stress_coefficient(closure)),

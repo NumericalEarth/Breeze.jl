@@ -410,7 +410,7 @@ end
 # flux has to be carried across the top. In the convective column it instead peaks at
 # ``0.92 zᵢ`` — inside the inversion itself — and is still at 99% of its maximum at ``0.9 zᵢ``.
 #
-# The reason is that only one of the three branches knows about the boundary-layer top. The
+# The reason is that only one of the three branches responds to stratification at all. The
 # geometric branch ``κ(z + ℓʳ)`` grows without bound, and the turbulence branch is a ``q``-weighted
 # centroid of the whole column. That leaves the buoyancy branch ``Cᵇ q / N``, which limits ``ℓ``
 # only where the air is stably stratified — so it does the job in the stable and neutral cases and
