@@ -358,11 +358,15 @@ The deposition rate for ice category ``i`` is then
 ```
 
 where ``S_l = q_v - q_{v,s}`` is the saturation deficit w.r.t. liquid and
-``A`` is a forcing term that, in Fortran, includes a dynamical vapor tendency,
-an adiabatic-cooling proxy, and the Bergeron offset. Breeze currently
-includes only the Bergeron term — the dynamical and adiabatic terms
-are assumed to be carried by the host formulation (which sees them in
-its own thermodynamic equation).
+``A`` sums two contributions: the Bergeron offset, and the external change in
+liquid-relative supersaturation ``∂_t q^v - (dq_{v,s}/dT)\, ∂_t T``. Breeze
+retains the Bergeron offset in full, and approximates the external part with
+adiabatic cooling alone, ``∂_t T = -g\, w / cᵖᵐ`` and ``∂_t q^v = 0``, where
+``w`` is the resolved (or parcel) vertical velocity. Resolved transport,
+turbulent mixing, radiation, and user forcing therefore do not enter this
+driver, even though they do act on the host thermodynamic equation. Supplying
+the complete external tendency, as the Fortran `aaa` term is intended to carry,
+remains a possible future improvement.
 
 Sublimation is the negative branch (``\dot{q}_\text{dep} < 0``); the corresponding
 number rate scales with the dry-ice number-to-mass ratio:

@@ -29,8 +29,11 @@ $(TYPEDSIGNATURES)
 Prepare P3 diagnostics for the current RK stage.
 
 Launches a separate GPU kernel to compute terminal velocities before scalar
-sedimentation tendencies consume them. Process-rate caches use the realized host
-forcing diagnosed from the preceding Runge–Kutta stage.
+sedimentation tendencies consume them. Process-rate caches are built later by
+[`AM.compute_microphysical_tendencies!`](@ref) using the current state, an
+adiabatic temperature tendency, and zero resolved-vapor tendency. Resolved
+transport, turbulent mixing, radiation, and user forcing do not enter this
+diffusional-growth driver.
 """
 function AM.prepare_microphysical_tendencies!(p3::P3, model)
     grid = model.grid
@@ -126,9 +129,9 @@ end
                                                    dynamics, q)
         𝒰 = AM.maybe_adjust_thermodynamic_state(𝒰₀, p3, qᵛᵉ, constants)
 
-        # Resolved thermodynamic forcing driving diffusional growth: the adiabatic
-        # temperature tendency from the local resolved vertical velocity. Resolved
-        # vapor forcing is neglected, matching the gridless parcel path.
+        # Approximate the resolved diffusional-growth driver with adiabatic
+        # cooling from the local vertical velocity. External vapor forcing is
+        # intentionally neglected.
         temperature_tendency = p3_adiabatic_temperature_tendency(ℳ, 𝒰, constants)
         vapor_tendency = zero(temperature_tendency)
 
@@ -147,12 +150,10 @@ end
 ##### Fused tendency override (fast path for AtmosphereModel)
 #####
 #
-# P3 evaluates its process-rate cache using the preceding stage's realized
-# temperature/vapor history and `+=`s the cached microphysical contributions
-# into `Gⁿ` in a single kernel launch. The counterfactual removes cached local
-# P3 sources; P3 sedimentation remains part of the realized transport forcing.
-# TODO: Once Oceananigans exposes tendencies for individual additive transport
-# velocities, also remove the P3 fall-speed contribution from this history.
+# P3 evaluates its process-rate cache from the current state with the
+# adiabatic-only diffusional-growth driver described above, then adds the cached
+# contributions to `Gⁿ`. P3 sedimentation is assembled separately by the scalar
+# transport operators using the fall speeds prepared earlier in the stage.
 # The state-based `microphysical_tendency` methods above remain the gridless
 # fallback used by ParcelModels.
 

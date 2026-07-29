@@ -222,11 +222,10 @@ separately.
     # host-advected `sˢᵃᵗ`.
     ssat_liquid = qᵛ - qᵛ⁺ˡ
     bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * εⁱ
-    # Fortran's `aaa` forcing is the realized host change in liquid-relative
-    # supersaturation: dqᵛ/dt - (dqᵛ⁺ˡ/dT) dT/dt. The atmosphere driver supplies
-    # these two tendencies from the nonmicrophysical RK right-hand side, thereby
-    # retaining mixing, radiation, and resolved vapor forcing in addition to
-    # adiabatic vertical motion.
+    # Fortran's `aaa` forcing represents the external change in liquid-relative
+    # supersaturation: dqᵛ/dt - (dqᵛ⁺ˡ/dT) dT/dt. Breeze currently approximates
+    # this with adiabatic cooling, dT/dt = -g w / cᵖᵐ, and dqᵛ/dt = 0. Resolved
+    # transport, turbulent mixing, radiation, and user forcing are omitted.
     external_driver = vapor_tendency - dqᵛ⁺ˡ_dT * temperature_tendency
     A_total = external_driver + bergeron_driver
 

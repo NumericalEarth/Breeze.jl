@@ -519,7 +519,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
 # Lightweight diagnostics update — called from the thermodynamic variables kernel.
 # Only writes basic specific quantities and vapor. Terminal velocities are deferred to
 # prepare_microphysical_tendencies! before sedimentation. Process-rate caches are filled
-# in compute_microphysical_tendencies! from the preceding stage's realized host history,
+# in compute_microphysical_tendencies! from the current state with an adiabatic-only driver,
 # avoiding GPU compilation failure from force-inlining ~1000 lines of P3 physics into
 # the thermodynamic kernel.
 @inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
@@ -692,10 +692,11 @@ end
 end
 
 
-# Adiabatic temperature tendency from the resolved (grid) or parcel vertical velocity,
-# used as P3's resolved thermodynamic forcing on both paths. Resolved vapor forcing is
-# neglected: gridless parcels conserve static energy, and the grid path drops it for
-# simplicity (see `_p3_compute_tendency_cache_kernel!`).
+# Adiabatic temperature tendency from the grid or parcel vertical velocity, used as
+# P3's external thermodynamic forcing on both paths. The accompanying resolved-vapor
+# tendency is zero. On the Eulerian grid path this deliberately omits resolved
+# transport, turbulent mixing, radiation, and user forcing from the diffusional-growth
+# driver; see `_p3_compute_tendency_cache_kernel!`.
 @inline function p3_adiabatic_temperature_tendency(ℳ::P3MicrophysicalState, 𝒰, constants)
     cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
     return -constants.gravitational_acceleration * ℳ.w / cᵖᵐ
@@ -886,7 +887,7 @@ end
 #
 # Two paths:
 #   1. Grid-based (AtmosphereModel): the fused driver fills the cache once from the
-#      realized host-forcing history and adds every cached tendency to G.
+#      current state using the adiabatic-only forcing and adds every cached tendency to G.
 #   2. Gridless (ParcelModel): microphysical_tendency builds state and computes rates directly.
 
 # Helper to compute P3 rates and extract ice properties from ℳ
