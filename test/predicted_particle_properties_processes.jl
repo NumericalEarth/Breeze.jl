@@ -1312,6 +1312,26 @@ end
         @test tendency_ρqᵛ(rates, ρ) isa FT
     end
 
+    @testset "Cloud DSD diagnosis - Float32 type stability" begin
+        # An untyped `1e-16` floor on nᶜˡ promoted Nᶜ, μ_c and λ_c to Float64 on the
+        # per-cell path, and left the returned nᶜˡ inferred as Union{Float32, Float64}
+        # through the `iszero(ρ)` ifelse. @inferred catches the Union; the eltype
+        # checks catch a silent promotion to a concrete Float64.
+        FT = Float32
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+
+        # Covers the floored (nᶜˡ below the guard), typical, and zero-density branches.
+        states = ((FT(1e-3), FT(0), FT(1.2)),
+                  (FT(1e-3), FT(1e8), FT(1.2)),
+                  (FT(0), FT(1e8), FT(1.2)),
+                  (FT(1e-3), FT(1e8), FT(0)))
+
+        for (qᶜˡ, nᶜˡ, ρ) in states
+            cloud = @inferred PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+            @test all(v -> v isa FT, values(cloud))
+        end
+    end
+
     #####
     ##### Process rate function tests
     #####

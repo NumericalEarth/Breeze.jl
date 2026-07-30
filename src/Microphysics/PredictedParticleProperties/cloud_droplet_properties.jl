@@ -211,7 +211,10 @@ cloud number together with the PSD correction used by immersion freezing.
 @inline function diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
     FT = typeof(qᶜˡ + nᶜˡ + ρ)
     qᶜˡ_eff = max(0, qᶜˡ)
-    nᶜˡ_eff = max(1e-16, nᶜˡ)
+    # The floor must be `FT`-wrapped: an untyped `1e-16` promotes `nᶜˡ_eff` and every
+    # quantity derived from it to Float64 in a Float32 run, which leaves the returned
+    # `nᶜˡ` inferred as `Union{Float32, Float64}` through the `ifelse` below.
+    nᶜˡ_eff = max(nᶜˡ, FT(1e-16))
     Nᶜ = nᶜˡ_eff * ρ
     ρᴸ = p3.process_rates.liquid_water_density
 
