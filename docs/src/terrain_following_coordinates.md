@@ -697,7 +697,10 @@ is needed.
 The lid at ``r = z_\text{top}`` is a closed boundary, but for gravity-wave
 problems we want to absorb rather than reflect upgoing energy. Breeze provides
 [`UpperSponge`](@ref) (`damp_opt = 3` in WRF-speak) — an implicit Rayleigh
-sponge folded into the column tridiag of the acoustic substep. See
+sponge on the *total* contravariant momentum ``\rho \tilde{w}``, split like the
+damping in WRF: the stage-entry part ``-\gamma \rho \tilde{w}^L`` rides in the
+slow tendency, while the acoustic perturbation part ``-\gamma (\rho
+\tilde{w})'`` is folded into the column tridiag of the substep. See
 [`SplitExplicitTimeDiscretization`](@ref) for the keyword interface.
 
 ## Time integration

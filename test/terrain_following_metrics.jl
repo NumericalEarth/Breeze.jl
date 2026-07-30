@@ -10,7 +10,8 @@ using Oceananigans.Architectures: CPU
 
 using CUDA: @allowscalar
 
-using Breeze.CompressibleEquations: compute_contravariant_velocity!, sponge_rhs, sponge_term_diag
+using Breeze.CompressibleEquations: compute_contravariant_velocity!, sponge_rhs, sponge_term_diag,
+                                    sponge_slow_tendency
 using Oceananigans
 using Oceananigans.Grids: rnode, xnode, znode
 using Oceananigans.Operators: divᶜᶜᶜ
@@ -477,6 +478,55 @@ using Test
         @test sponge_term_diag(i_peak, 1, k, grid, sponge, δτᵐ⁺) ≈ expected_diag
         @test sponge_rhs(i_flat, 1, k, grid, sponge, δτˢ⁻, old_ρw) ≈ expected_rhs
         @test sponge_rhs(i_peak, 1, k, grid, sponge, δτˢ⁻, old_ρw) ≈ expected_rhs
+    end
+
+    #####
+    ##### The sponge must damp the CARTESIAN ρw, not the contravariant ρw̃. A horizontally uniform
+    ##### wind over sloping coordinate surfaces has ρw = 0 but ρw̃ = -slope·ρu ≠ 0 well above the
+    ##### terrain (0.4 m/s of w̃ at 10 km in the Schär setup), so a sponge targeting ρw̃ would drive
+    ##### the mean flow to follow the coordinate surfaces and radiate a spurious terrain-locked
+    ##### stationary wave down out of the layer. The give-away is that the spurious tendency is
+    ##### slope-correlated where the physical vertical velocity is identically zero.
+    #####
+
+    @testset "UpperSponge slow tendency targets Cartesian ρw, not ρw̃" begin
+        Nx, Nz = 32, 20
+        Lx, Lz = 20000.0, 10000.0
+
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1));
+                                                        formulation = TwoLevelDecay(large_scale_height = Lz/2,
+                                                                                    small_scale_height = Lz/8))
+        grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+        h(x) = 400 * exp(-x^2 / 2000^2)
+        materialize_terrain!(grid, h)
+
+        sponge = UpperSponge(damping_rate = 0.2, depth = Lz/2, ramp = LinearRamp())
+
+        k = Nz          # a face well inside the sponge layer
+        i_flat = 1      # far field
+        i_peak = Nx ÷ 2 # over the summit, where the coordinate slope is largest
+
+        # The coordinate really is still sloped at this height, so ρw̃ ≠ ρw here.
+        @test znode(i_flat, 1, k, grid, Center(), Center(), Face()) !=
+              znode(i_peak, 1, k, grid, Center(), Center(), Face())
+
+        γ = sponge.damping_rate * sponge.ramp(rnode(k, grid, Face()), grid.Lz, sponge.depth)
+        @test γ > 0
+
+        # A uniform wind has Cartesian ρw = 0 but contravariant ρw̃ = -slope·ρu ≠ 0. The sponge
+        # sees ρw, so it must return exactly zero and leave the mean flow alone.
+        ρw = ZFaceField(grid)
+        set!(ρw, 0)
+        @test sponge_slow_tendency(i_peak, 1, k, grid, sponge, ρw, 1) == 0
+        @test sponge_slow_tendency(i_flat, 1, k, grid, sponge, ρw, 1) == 0
+
+        # A genuine vertical velocity is damped at the full local rate, and identically in the
+        # sloped and flat columns (the ramp depends on the reference coordinate only).
+        set!(ρw, 3)
+        @test sponge_slow_tendency(i_peak, 1, k, grid, sponge, ρw, 1) ≈ -γ * 3
+        @test sponge_slow_tendency(i_flat, 1, k, grid, sponge, ρw, 1) ≈ -γ * 3
     end
 
     @testset "3D TFVD with non-Flat y: explicit step + ∂y operators" begin

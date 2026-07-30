@@ -439,21 +439,56 @@ end
 """
 $(TYPEDEF)
 
-Implicit upper Rayleigh sponge for the substepper inner loop. Damps the
-acoustic vertical momentum perturbation toward zero inside a layer of thickness
-`depth` below the model lid, with peak damping rate `damping_rate` (in 1/s) at
-the lid scaled by `ramp(z)`. The damped variable is ``(ρw)′`` for
-height-coordinate dynamics and ``(ρ\tilde{w})′`` for terrain-following
-dynamics.
+Gaussian sponge ramp, ``\\exp[-(z - H)^2 / \\text{depth}^2]``, reaching 1 at the lid and
+``e^{-1}`` one `depth` below it. Unlike [`CubicRamp`](@ref), [`Sin2Ramp`](@ref) and
+[`LinearRamp`](@ref) it is **not** clamped to zero at the layer base: a weak tail continues all
+the way down.
 
-The damping is applied **inside the column tridiag** as a CN-weighted
-contribution (paralleling the existing implicit divergence-damping
-treatment): ``δτᵐ⁺ × \\text{rate} × \\text{ramp}(z)`` on the LHS diagonal,
-``δτˢ⁻ × \\text{rate} × \\text{ramp}(z)`` on the explicit-half RHS. This
-matches the Rayleigh-layer form of the Klemp, Dudhia & Hassiotis (2008)
-absorbing treatment used in WRF (`damp_opt=3`) and MPAS-Atmosphere. The
-profile shape is controlled by `ramp`; use [`Sin2Ramp`](@ref) for the
-classic ``\\sin^2`` profile.
+That tail is the point. On a long mountain-wave integration a compactly-supported ramp leaves
+a residual in the far field that a tailed one removes: on the Schär case at 2 h, `CubicRamp`
+with `depth = H/2` gives a normalized RMS difference from the linear solution of 0.169 overall
+and 0.455 downstream of the ridge, while `GaussianRamp` with `depth = H/4` gives 0.146 and
+0.281. Neither deepening nor strengthening the clamped ramp substitutes: `depth = 0.6H` scores
+0.547 downstream and `damping_rate = 0.2` scores 0.778, both worse, and both with a slightly
+*larger* core wave, so the added error is reflection rather than over-absorption. A clamped
+ramp's relative gradient `(1/γ)|∂z γ|` is unbounded at its base; a Gaussian's is not.
+
+The tail does apply weak damping below the nominal layer, but for a steadily forced wave the
+relevant comparison is not `exp(-rate × ramp × t)`: the response equilibrates against
+advection, so the cost scales with `rate × ramp(z) / (U k)`. On the Schär case that is 10% at
+`z = H/2`, falling to 0.07% at `H/4`, and the measured rms `w` over `0.5 < z < 10` km differs
+from the clamped ramp by 0.4%. Prefer a clamped ramp when the dynamics just below the sponge
+must be provably untouched, and this one when a quiet far field matters more.
+"""
+struct GaussianRamp <: AbstractRamp end
+
+@inline (::GaussianRamp)(z, sponge_top, depth) = exp(-(z - sponge_top)^2 / depth^2)
+
+"""
+$(TYPEDEF)
+
+Implicit upper Rayleigh sponge for the substepper. Damps the vertical momentum
+toward zero inside a layer of thickness `depth` below the model lid, with peak
+damping rate `damping_rate` (in 1/s) at the lid scaled by `ramp(z)`. The damped
+variable is ``ρw`` for height-coordinate dynamics and ``ρ\\tilde{w}`` for
+terrain-following dynamics.
+
+The damping acts on the **total** momentum, which the substep loop carries as
+``ρw = ρw^L + (ρw)′``, so it is applied in two matching pieces:
+
+  - the stage-entry part ``-\\text{rate} × \\text{ramp}(z) × ρw^L`` is a known
+    constant across the substeps and enters the slow tendency ``G^s_{ρw}``;
+  - the acoustic perturbation part is CN-weighted **inside the column tridiag**
+    (paralleling the implicit divergence damping): ``δτᵐ⁺ × \\text{rate} ×
+    \\text{ramp}(z)`` on the LHS diagonal, ``δτˢ⁻ × \\text{rate} ×
+    \\text{ramp}(z)`` on the explicit-half RHS.
+
+Damping ``(ρw)′`` alone would not absorb anything: the perturbation measures the
+*change* over an RK stage, so a quasi-steady gravity wave passes through
+untouched. This split matches the Rayleigh-layer form of the Klemp, Dudhia &
+Hassiotis (2008) absorbing treatment used in WRF (`damp_opt=3`) and
+MPAS-Atmosphere. The profile shape is controlled by `ramp`; use
+[`Sin2Ramp`](@ref) for the classic ``\\sin^2`` profile.
 
 # Keyword arguments
 

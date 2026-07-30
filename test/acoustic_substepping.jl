@@ -10,7 +10,8 @@ using Breeze
 using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
                                     compute_acoustic_substeps,
-                                    sponge_term_diag, sponge_rhs,
+                                    sponge_term_diag, sponge_rhs, sponge_slow_tendency,
+                                    assemble_slow_vertical_momentum_tendency!,
                                     apply_horizontal_pressure_gradient_substep,
                                     AcousticTridiagLower, AcousticTridiagDiagonal,
                                     AcousticTridiagUpper,
@@ -1106,6 +1107,94 @@ for arch in arches
         @test lid_rhs ≈ δτˢ⁻ * damping_rate * FT(4)
         @test sponge_term_diag(1, 1, grid.Nz + 1, grid, nothing, δτᵐ⁺) == 0
         @test @allowscalar sponge_rhs(1, 1, grid.Nz + 1, grid, nothing, δτˢ⁻, old_ρw) == 0
+    end
+
+    #####
+    ##### `GaussianRamp` is deliberately NOT clamped at the layer base: its weak tail below the
+    ##### nominal layer is what keeps a long mountain-wave integration from retaining a far-field
+    ##### residual. The clamped ramps must stay clamped.
+    #####
+
+    @testset "Sponge ramp shapes [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+        H = FT(20000)
+        depth = FT(5000)
+
+        for ramp in (CubicRamp(), Sin2Ramp(), LinearRamp())
+            @test ramp(H, H, depth) ≈ 1                     # full strength at the lid
+            @test ramp(H - depth, H, depth) == 0            # exactly zero at the base
+            @test ramp(H - 2depth, H, depth) == 0            # and clamped below it
+        end
+
+        gaussian = GaussianRamp()
+        @test gaussian(H, H, depth) ≈ 1
+        @test gaussian(H - depth, H, depth) ≈ exp(-one(FT))  # e⁻¹ one depth down, not zero
+        @test 0 < gaussian(H - 2depth, H, depth) < FT(0.02)  # weak, but a real tail
+        @test gaussian(H - 3depth, H, depth) > 0
+        # Monotone increasing toward the lid, like the others.
+        @test gaussian(H - depth, H, depth) > gaussian(H - 2depth, H, depth)
+    end
+
+    #####
+    ##### The sponge must damp the TOTAL vertical momentum ρw = ρwᴸ + (ρw)′, not only the acoustic
+    ##### perturbation. `(ρw)′` measures the change over an RK stage, so a sponge that sees only the
+    ##### perturbation leaves a quasi-steady gravity wave untouched — the absorbing layer becomes a
+    ##### no-op and upgoing waves reflect off the lid. The stage-entry half of the damping therefore
+    ##### rides in the slow tendency Gˢρw; check that it is there, and that it vanishes at rest.
+    #####
+
+    @testset "UpperSponge damps stage-entry ρw via Gˢρw [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(arch; size=(8, 8, 16), halo=(5, 5, 5),
+                               x=(0, 1kilometers), y=(0, 1kilometers), z=(0, 8kilometers),
+                               topology=(Periodic, Periodic, Bounded))
+
+        damping_rate = FT(0.2)
+        depth = FT(4kilometers)
+        ramp = LinearRamp()
+        sponge = UpperSponge(; damping_rate, depth, ramp)
+        ρw_value = FT(3)
+
+        ρwᴸ = ZFaceField(grid)
+        set!(ρwᴸ, ρw_value)
+
+        @allowscalar begin
+            @test sponge_slow_tendency(1, 1, 1, grid, sponge, ρwᴸ, 1) == 0                     # below the layer
+            @test sponge_slow_tendency(1, 1, grid.Nz + 1, grid, sponge, ρwᴸ, 1) ≈ -damping_rate * ρw_value
+            @test sponge_slow_tendency(1, 1, grid.Nz + 1, grid, nothing, ρwᴸ, 1) == 0
+            # `Gˢρw` is scaled by the signed Δτ, so backward integration flips the sign here to
+            # stay dissipative rather than amplifying.
+            @test sponge_slow_tendency(1, 1, grid.Nz + 1, grid, sponge, ρwᴸ, -1) ≈ damping_rate * ρw_value
+        end
+
+        # Assemble Gˢρw with and without the sponge from an otherwise identical state: the
+        # difference must be exactly the Rayleigh damping of the stage-entry momentum.
+        function assembled_slow_tendency(sponge, ρw)
+            td = SplitExplicitTimeDiscretization(; substeps=4, sponge)
+            model = AtmosphereModel(grid; dynamics=CompressibleDynamics(td; reference_potential_temperature=300))
+            set!(model; θ=300, u=0, qᵗ=0, ρ=model.dynamics.reference_state.density)
+            set!(model.momentum.ρw, ρw)
+            substepper = model.timestepper.substepper
+            assemble_slow_vertical_momentum_tendency!(substepper, model, 1)
+            return Array(interior(substepper.slow_vertical_momentum_tendency, 1, 1, :))
+        end
+
+        Gˢρw_sponge = assembled_slow_tendency(sponge, ρw_value)
+        Gˢρw_none = assembled_slow_tendency(nothing, ρw_value)
+
+        # Faces 2:Nz are the assembled interior (face 1 is pinned by the `k > 1` gate; the lid face
+        # Nz+1 lies outside the `:xyz` launch and is pinned in the tridiag RHS).
+        z_faces = znodes(grid, Face())
+        damped_faces = 0
+        for k in 2:size(grid, 3)
+            γ = damping_rate * ramp(z_faces[k], grid.Lz, depth)
+            @test Gˢρw_sponge[k] - Gˢρw_none[k] ≈ -γ * ρw_value atol=1e-4 * damping_rate * ρw_value
+            γ > 0 && (damped_faces += 1)
+        end
+        @test damped_faces ≥ 4  # the layer really covers part of the column
+
+        # At rest (ρwᴸ = 0) the sponge contributes nothing, so a balanced state stays balanced.
+        @test assembled_slow_tendency(sponge, 0) ≈ assembled_slow_tendency(nothing, 0)
     end
 
     #####
