@@ -1,7 +1,7 @@
 # Breeze.jl validation studies
 
-In-depth studies that validate Breeze.jl against published benchmarks and quantify the
-sensitivity of the results to numerics and physics.
+In-depth studies (aspirational!) that validate Breeze.jl against published benchmarks and quantify
+the sensitivity of the results to numerics and physics.
 
 ## How this differs from `examples/`
 
