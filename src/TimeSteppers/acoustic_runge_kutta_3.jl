@@ -224,9 +224,12 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
 
-    # Advect particles once per step with the full Δt. Wicker–Skamarock RK3 stages all
-    # restart from Uⁿ (β₁ + β₂ + β₃ ≠ 1), so incremental particle pushes cannot mirror
-    # the stage structure.
+    # Advect particles once per step, over the full Δt, with the velocity of the state
+    # just refreshed to tⁿ⁺¹: Xⁿ⁺¹ = Xⁿ + Δt u(Xⁿ, tⁿ⁺¹) — consistent, but first order,
+    # and so lower order than the dycore. A stage-wise update is possible in principle
+    # (X obeys dX/dt = u like any prognostic), but would need Xⁿ stored alongside the
+    # current position, since every Wicker–Skamarock stage restarts from Uⁿ. Pushing
+    # with the stage fractions alone would be wrong: β₁ + β₂ + β₃ = 11/6, not 1.
     step_lagrangian_particles!(model, Δt)
 
     return nothing

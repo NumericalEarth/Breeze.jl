@@ -24,6 +24,16 @@ struct DefaultValue end
 
 const ParticlesOrNothing = Union{Nothing, AbstractLagrangianParticles}
 
+"""
+$(TYPEDSIGNATURES)
+
+Return `particles` unchanged. Extended for grids on which Lagrangian particle
+tracking is not supported, so that the combination is rejected at construction
+rather than producing wrong trajectories at run time (see
+`TerrainFollowingDiscretization/lagrangian_particles.jl`).
+"""
+validate_particles(particles, grid) = particles
+
 tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
 
@@ -85,7 +95,10 @@ Arguments
      a different scheme for each respective scalar, identified by name.
 
    * `particles` are Lagrangian particles to be advected with the flow,
-     constructed with `Oceananigans.LagrangianParticles`. Default: `nothing`.
+     constructed with `Oceananigans.LagrangianParticles`. Particles are advected
+     with the Cartesian velocities `model.velocities` once per time step, over the
+     full `Δt`. Default: `nothing`. See the "Lagrangian particles" section of the
+     documentation for details, including the treatment on terrain-following grids.
 
 Example
 =======
@@ -163,6 +176,7 @@ function AtmosphereModel(grid;
 
     momentum_advection = validate_momentum_advection(momentum_advection, grid)
     default_scalar_advection, scalar_advection = validate_tracer_advection(scalar_advection, grid)
+    particles = validate_particles(particles, grid)
 
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)

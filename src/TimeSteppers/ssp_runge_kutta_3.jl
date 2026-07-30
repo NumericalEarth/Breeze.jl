@@ -269,9 +269,14 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
 
-    # Advect particles once per step with the full Δt. Unlike Oceananigans' low-storage
-    # RK3, whose per-stage increments sum to Δt, SSP RK3 stages recombine with u⁰, so
-    # incremental particle pushes cannot mirror the stage structure.
+    # Advect particles once per step, over the full Δt, with the velocity of the state
+    # just refreshed to tⁿ⁺¹: Xⁿ⁺¹ = Xⁿ + Δt u(Xⁿ, tⁿ⁺¹) — consistent, but first order,
+    # and so lower order than the dycore. A stage-wise update is possible in principle
+    # (X obeys dX/dt = u like any prognostic, so the SSP combination applies to it too),
+    # but would need Xⁿ stored alongside the current position, since every SSP stage
+    # recombines with u⁰. Oceananigans' low-storage RK3 needs no such storage only
+    # because its per-stage increments sum to Δt; the SSP stage coefficients do not
+    # (α¹ + α² + α³ = 23/12), so pushing with them stage by stage would be wrong.
     step_lagrangian_particles!(model, Δt)
 
     return nothing
