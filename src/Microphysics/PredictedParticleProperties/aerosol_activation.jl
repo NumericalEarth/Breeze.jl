@@ -38,9 +38,14 @@ Default chemistry is ammonium sulfate (NH₄)₂SO₄.
 - `number_mixing_ratio`: Aerosol number *per unit mass of air* [kg⁻¹], default 300×10⁶.
   This is the basis of the whole activation path: [`activated_number`](@ref),
   [`total_activated_number`](@ref) and `sum_aerosol_number` are all [kg⁻¹], and the
-  activation cap compares them against the per-mass `nᶜˡ = ρnᶜˡ/ρ` and `nᵃ = ρnᵃ/ρ`. The
-  prognostic reservoir `ρnᵃ` is the ρ-weighted counterpart, seeded through
-  `AtmosphereModels.initial_aerosol_number_density`.
+  activation cap compares them against the per-mass `nᶜˡ = ρnᶜˡ/ρ` and `nᵃ = ρnᵃ/ρ`.
+
+  The prognostic reservoir `ρnᵃ` holds the ρ-weighted counterpart. Nothing needs to be
+  initialized by hand: `AtmosphereModel` construction and every `set!` write it as the air
+  density times this field summed over all of an [`AerosolActivation`](@ref)'s modes, so a
+  multi-mode population is seeded from its own parameters and stays consistent with them.
+  Pass `nᵃ` [kg⁻¹] or `ρnᵃ` [m⁻³] to `set!` to override, which is also how a partly depleted
+  reservoir survives a `set!`.
 - `mean_radius`: Geometric mean radius [m], default 0.05 μm
 - `geometric_std`: Geometric standard deviation [-], default 2.0
 - `vant_hoff_factor`: van't Hoff factor [-], default 3.0

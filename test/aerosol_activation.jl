@@ -121,22 +121,19 @@ end
     nᵃ₀ = FT(sum_aerosol_number(p3.aerosol))
     @test Breeze.initial_aerosol_number(p3) == nᵃ₀
 
-    @testset "Aerosol reservoir is seeded as a ρ-weighted number density" begin
-        grid = RectilinearGrid(default_arch, size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
-        ρ = CenterField(grid)
-        set!(ρ, FT(0.8))
-
-        μ = Breeze.AtmosphereModels.materialize_microphysical_fields(p3, grid, NamedTuple())
-        Breeze.AtmosphereModels.initialize_model_microphysical_fields!(μ, p3, ρ)
-
-        ρnᵃ = only(Array(interior(μ.ρnᵃ)))
-        @test ρnᵃ ≈ FT(0.8) * nᵃ₀
-        # The round trip the rate functions actually perform: nᵃ = ρnᵃ / ρ is [kg⁻¹] again.
-        @test ρnᵃ / FT(0.8) ≈ nᵃ₀
+    @testset "The reservoir is a ρ-weighted number density" begin
+        # `ρnᵃ` holds ρ nᵃ, so the default is the number mixing ratio times the air density,
+        # and the round trip the rate functions perform recovers [kg⁻¹].
+        ρ = FT(0.8)
+        ρnᵃ = Breeze.initial_aerosol_number_density(p3, ρ)
+        @test ρnᵃ ≈ ρ * nᵃ₀
+        @test ρnᵃ / ρ ≈ nᵃ₀
     end
 
     @testset "Anelastic construction seeds ρnᵃ from the reference density" begin
         grid = RectilinearGrid(default_arch, size=(1, 1, 4), x=(0, 1), y=(0, 1), z=(0, 2000))
+        # `initialize_model_thermodynamics!` runs `set!(model, θ=θ₀)` from the constructor, and
+        # the anelastic reference density is already physical there, so the reservoir is seeded.
         model = Breeze.AtmosphereModel(grid; microphysics = p3)
 
         ρ̄ = Breeze.AtmosphereModels.dynamics_density(model.dynamics)
@@ -147,17 +144,76 @@ end
         @test ρnᵃ[1, 1, 4] < ρnᵃ[1, 1, 1]
     end
 
-    @testset "Aerosol reservoir follows a density set after compressible construction" begin
+    @testset "A prescribed density seeds ρnᵃ at construction" begin
+        # The kinematic driver never runs `set!` from the constructor, so this covers the
+        # constructor's own call rather than the one the anelastic path inherits.
+        grid = RectilinearGrid(default_arch, size=(1, 1, 4), x=(0, 1), y=(0, 1), z=(0, 2000))
+        reference_state = Breeze.ReferenceState(grid, Breeze.ThermodynamicConstants())
+        model = Breeze.AtmosphereModel(grid;
+                                       dynamics = Breeze.PrescribedDynamics(reference_state),
+                                       microphysics = p3)
+
+        ρ = Array(interior(Breeze.AtmosphereModels.total_density(model.dynamics)))
+        ρnᵃ = Array(interior(model.microphysical_fields.ρnᵃ))
+        @test ρnᵃ ./ ρ ≈ fill(nᵃ₀, size(ρ)) rtol=1e-12
+    end
+
+    @testset "Compressible ρnᵃ stays zero until set! supplies a density" begin
+        grid = RectilinearGrid(default_arch, size=(1, 1, 4), x=(0, 1), y=(0, 1), z=(0, 2000))
+        # Compressible density fields are zero at construction, so there is nothing to weight
+        # a ρ-weighted reservoir by: the constructor writes zero and `set!` fills it in.
+        model = Breeze.AtmosphereModel(grid;
+                                       dynamics = Breeze.CompressibleDynamics(Breeze.ExplicitTimeStepping()),
+                                       microphysics = p3)
+
+        @test all(iszero, Array(interior(model.microphysical_fields.ρnᵃ)))
+    end
+
+    @testset "The default sums the number mixing ratio over all modes" begin
+        multimode = AerosolActivation(
+            AerosolMode(FT; number_mixing_ratio = 300e6),
+            AerosolMode(FT; number_mixing_ratio = 100e6, mean_radius = 1.0e-6, geometric_std = 2.5),
+            AerosolMode(FT; number_mixing_ratio = 25e6,  mean_radius = 2.0e-6))
+        p3_multimode = PredictedParticlePropertiesMicrophysics(FT; aerosol = multimode)
+
+        nᵃ_summed = FT(425e6)
+        @test sum_aerosol_number(multimode) == nᵃ_summed
+
+        grid = RectilinearGrid(default_arch, size=(1, 1, 4), x=(0, 1), y=(0, 1), z=(0, 2000))
+        model = Breeze.AtmosphereModel(grid; microphysics = p3_multimode)
+
+        ρ̄ = Array(interior(Breeze.AtmosphereModels.dynamics_density(model.dynamics)))
+        ρnᵃ = Array(interior(model.microphysical_fields.ρnᵃ))
+        @test ρnᵃ ./ ρ̄ ≈ fill(nᵃ_summed, size(ρ̄)) rtol=1e-12
+    end
+
+    @testset "Compressible set! seeds ρnᵃ from the density it establishes" begin
         grid = RectilinearGrid(default_arch, size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
         model = Breeze.AtmosphereModel(grid;
                                        dynamics = Breeze.CompressibleDynamics(Breeze.ExplicitTimeStepping()),
                                        microphysics = p3)
 
-        # Compressible dynamics builds its density field at zero, so construction has no
-        # density to weight by and `set!(ρ)` is the first opportunity.
+        # Compressible dynamics builds its density field at zero, so `set!(ρ)` is the first
+        # point at which a ρ-weighted reservoir can be written.
         set!(model; ρ = FT(0.8), θ = FT(300), qᵛ = FT(0), enforce_mass_conservation = false)
 
         @test only(Array(interior(model.microphysical_fields.ρnᵃ))) ≈ FT(0.8) * nᵃ₀
+    end
+
+    @testset "A hydrostatically balanced density seeds the balanced reservoir" begin
+        grid = RectilinearGrid(default_arch, size=(1, 1, 4), x=(0, 1), y=(0, 1), z=(0, 2000))
+        model = Breeze.AtmosphereModel(grid;
+                                       dynamics = Breeze.CompressibleDynamics(Breeze.ExplicitTimeStepping()),
+                                       microphysics = p3)
+
+        # The balanced density is not known until after the column solve, so this checks that
+        # the solve's rescaling of density-weighted fields carries the seeded reservoir.
+        set!(model; ρ = Breeze.HydrostaticallyBalancedDensity(), θ = FT(300), qᵛ = FT(0),
+             enforce_mass_conservation = false)
+
+        ρ = Array(interior(model.dynamics.total_density))
+        ρnᵃ = Array(interior(model.microphysical_fields.ρnᵃ))
+        @test ρnᵃ ./ ρ ≈ fill(nᵃ₀, size(ρ)) rtol=1e-12
     end
 
     @testset "Dry-density initialization uses reconciled total density" begin
@@ -175,7 +231,7 @@ end
         @test ρnᵃ ≈ ρ * nᵃ₀
     end
 
-    @testset "Later density changes preserve aerosol depletion" begin
+    @testset "A later set! resets the reservoir to the distribution default" begin
         grid = RectilinearGrid(default_arch, size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
         model = Breeze.AtmosphereModel(grid;
                                        dynamics = Breeze.CompressibleDynamics(Breeze.ExplicitTimeStepping()),
@@ -184,13 +240,16 @@ end
         set!(model; ρ = FT(0.8), θ = FT(300), qᵛ = FT(0),
              enforce_mass_conservation = false)
         set!(model.microphysical_fields.ρnᵃ, FT(0.25) * nᵃ₀)
+
+        # `set!` re-initializes the state, aerosol included, so a depletion written between
+        # calls is not preserved unless it is passed back in (see the next testset).
         set!(model; ρ = FT(0.7), θ = FT(300), qᵛ = FT(0),
              enforce_mass_conservation = false)
 
-        @test only(Array(interior(model.microphysical_fields.ρnᵃ))) ≈ FT(0.25) * nᵃ₀
+        @test only(Array(interior(model.microphysical_fields.ρnᵃ))) ≈ FT(0.7) * nᵃ₀
     end
 
-    @testset "An explicitly supplied aerosol reservoir survives set!(ρ)" begin
+    @testset "Explicit nᵃ and ρnᵃ own the reservoir" begin
         grid = RectilinearGrid(default_arch, size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
         model = Breeze.AtmosphereModel(grid;
                                        dynamics = Breeze.CompressibleDynamics(Breeze.ExplicitTimeStepping()),
@@ -198,8 +257,12 @@ end
 
         set!(model; ρ = FT(0.8), θ = FT(300), qᵛ = FT(0), ρnᵃ = FT(5e7),
              enforce_mass_conservation = false)
-
         @test only(Array(interior(model.microphysical_fields.ρnᵃ))) ≈ FT(5e7)
+
+        # `nᵃ` is per unit mass, so it is weighted by the density established in the same call.
+        set!(model; ρ = FT(0.8), θ = FT(300), qᵛ = FT(0), nᵃ = FT(0.25) * nᵃ₀,
+             enforce_mass_conservation = false)
+        @test only(Array(interior(model.microphysical_fields.ρnᵃ))) ≈ FT(0.8) * FT(0.25) * nᵃ₀
     end
 
     @testset "Adiabatic balancing preserves aerosol number per unit mass" begin
@@ -219,7 +282,9 @@ end
     end
 
     @testset "Parcel aerosol follows the parcel density" begin
-        grid = RectilinearGrid(default_arch, size=4, z=(0, 1), topology=(Flat, Flat, Bounded))
+        # Parcel models interpolate the environmental profiles on the host, so like every
+        # other parcel test they run on the CPU regardless of `default_arch`.
+        grid = RectilinearGrid(size=4, z=(0, 1), topology=(Flat, Flat, Bounded))
         model = Breeze.AtmosphereModel(grid;
                                        dynamics = Breeze.ParcelDynamics(),
                                        microphysics = p3)

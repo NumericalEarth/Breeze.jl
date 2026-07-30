@@ -78,12 +78,7 @@ mutable struct ParcelState{FT, TH, MP}
     ρℰ :: FT
     𝒰 :: TH
     μ :: MP
-    aerosol_number_initialized :: Bool
 end
-
-# Preserve the public constructor shape from before aerosol initialization became stateful.
-ParcelState(x, y, z, w, ρ, qᵗ, ρqᵗ, ℰ, ρℰ, 𝒰, μ) =
-    ParcelState(x, y, z, w, ρ, qᵗ, ρqᵗ, ℰ, ρℰ, 𝒰, μ, true)
 
 # Accessors
 @inline position(state::ParcelState) = (state.x, state.y, state.z)
@@ -247,21 +242,18 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
     e_default = cᵖᵐ * T_default + g * z_default
     𝒰 = StaticEnergyState(e_default, q, z_default, p₀)
 
+    # Microphysics prognostic variables based on the microphysics scheme
+    μ = materialize_parcel_microphysics_prognostics(FT, microphysics)
+
     # Initialize state with default values
     ρ_default = FT(1.2)
-
-    # Microphysics prognostic variables based on the microphysics scheme
-    μ = materialize_parcel_microphysics_prognostics(FT, microphysics, ρ_default)
-    aerosol_number_initialized = isnothing(μ) || !haskey(μ, :ρnᵃ)
-
     w_default = zero(FT)
     qᵗ_default = zero(FT)
     ρqᵗ_default = ρ_default * qᵗ_default
     ℰ_default = e_default  # static energy for default formulation
     ρℰ_default = ρ_default * ℰ_default
     state = ParcelState(zero(FT), zero(FT), z_default, w_default, ρ_default,
-                        qᵗ_default, ρqᵗ_default, ℰ_default, ρℰ_default, 𝒰, μ,
-                        aerosol_number_initialized)
+                        qᵗ_default, ρqᵗ_default, ℰ_default, ρℰ_default, 𝒰, μ)
 
     # SSP RK3 timestepper with tendencies
     Gμ = zero_microphysics_prognostic_tendencies(μ)
@@ -282,24 +274,44 @@ density-weighted scalars for schemes with prognostic microphysics.
 The prognostic variables use the same ρ-weighted names as the grid-based model
 (e.g., `:ρqᶜˡ`, `:ρqʳ`) from `prognostic_field_names(microphysics)`.
 
-`ρ` is the density used to weight the initial aerosol reservoir `ρnᵃ`, which
-[`initial_aerosol_number_density`](@ref) returns per unit volume [m⁻³]. Parcel-model
-construction uses a provisional density; the first parcel-state initialization replaces
-the aerosol value using the density interpolated at the parcel's actual initial position.
+All values start at zero, including a prognostic aerosol reservoir `ρnᵃ`: it holds a
+ρ-weighted count, so its default is only meaningful once the parcel has an environmental
+density, which `set!` supplies through [`set_parcel_aerosol_number`](@ref).
 """
-function materialize_parcel_microphysics_prognostics(FT, microphysics, ρ = one(FT))
+function materialize_parcel_microphysics_prognostics(FT, microphysics)
     names = AtmosphereModels.prognostic_field_names(microphysics)
     length(names) == 0 && return nothing
-    Nᵃ₀ = FT(AtmosphereModels.initial_aerosol_number_density(microphysics, FT(ρ)))
-    return NamedTuple{names}(ntuple(i -> names[i] == :ρnᵃ ? Nᵃ₀ : zero(FT), length(names)))
+    return NamedTuple{names}(ntuple(_ -> zero(FT), length(names)))
 end
 
-initialize_parcel_aerosol_number(::Nothing, microphysics, ρ) = nothing
+"""
+$(TYPEDSIGNATURES)
 
-function initialize_parcel_aerosol_number(μ::NamedTuple, microphysics, ρ)
-    haskey(μ, :ρnᵃ) || return μ
-    ρnᵃ = convert(typeof(ρ), AtmosphereModels.initial_aerosol_number_density(microphysics, ρ))
-    return merge(μ, (; ρnᵃ))
+Return `μ` with its aerosol reservoir `ρnᵃ` [m⁻³] set from the parcel's environmental
+density `ρ`: to `ρ * nᵃ` if `nᵃ` [kg⁻¹] is given, to `ρnᵃ` if that is given, and otherwise
+to the scheme default [`initial_aerosol_number_density`](@ref).
+
+Because `set!` calls this on every invocation, a later `set!` also resets the reservoir to
+the distribution default. Pass `nᵃ` or `ρnᵃ` explicitly to carry a depleted reservoir
+across a `set!`.
+"""
+function set_parcel_aerosol_number(μ, microphysics, ρ, nᵃ, ρnᵃ)
+    if isnothing(μ) || !haskey(μ, :ρnᵃ)
+        (isnothing(nᵃ) && isnothing(ρnᵃ)) ||
+            throw(ArgumentError("the parcel's microphysics scheme has no prognostic ρnᵃ"))
+        return μ
+    end
+
+    FT = typeof(ρ)
+    aerosol_number_density = if !isnothing(ρnᵃ)
+        FT(ρnᵃ)
+    elseif !isnothing(nᵃ)
+        ρ * FT(nᵃ)
+    else
+        FT(AtmosphereModels.initial_aerosol_number_density(microphysics, ρ))
+    end
+
+    return merge(μ, (; ρnᵃ = aerosol_number_density))
 end
 
 rescale_parcel_microphysics(::Nothing, ratio) = nothing
@@ -378,8 +390,10 @@ conditions interpolated at that height.
 - `y`: Initial parcel y-position [m], default: 0
 - `z`: Initial parcel height [m], required to initialize parcel state
 - `w_parcel`: Initial parcel vertical velocity [m/s], for `PrognosticVerticalVelocity`
-- `nᵃ`: Initial aerosol number per unit mass [kg⁻¹]
-- `ρnᵃ`: Initial aerosol number density [m⁻³]
+- `nᵃ`: Initial aerosol number per unit mass [kg⁻¹]. Defaults to the value implied by the
+  scheme's aerosol distribution, so a depleted reservoir must be passed explicitly to
+  survive a `set!` (see [`set_parcel_aerosol_number`](@ref))
+- `ρnᵃ`: Initial aerosol number density [m⁻³], the ρ-weighted alternative to `nᵃ`
 """
 function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
                            ρ = nothing, p = nothing,
@@ -439,16 +453,10 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
         initialize_parcel_state!(dynamics.state, z, x, y, model)
     end
 
-    if !isnothing(nᵃ) || !isnothing(ρnᵃ)
-        μ = dynamics.state.μ
-        (isnothing(μ) || !haskey(μ, :ρnᵃ)) &&
-            throw(ArgumentError("the parcel's microphysics scheme has no prognostic ρnᵃ"))
-
-        FT = eltype(model.grid)
-        aerosol_number_density = isnothing(ρnᵃ) ? dynamics.state.ρ * FT(nᵃ) : FT(ρnᵃ)
-        dynamics.state.μ = merge(μ, (; ρnᵃ = aerosol_number_density))
-        dynamics.state.aerosol_number_initialized = true
-    end
+    # Weight the aerosol reservoir by the parcel's environmental density, which
+    # `initialize_parcel_state!` has just interpolated at the parcel position.
+    dynamics.state.μ = set_parcel_aerosol_number(dynamics.state.μ, model.microphysics,
+                                                 dynamics.state.ρ, nᵃ, ρnᵃ)
 
     # Set parcel vertical velocity (for PrognosticVerticalVelocity)
     if !isnothing(w_parcel)
@@ -548,14 +556,10 @@ function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     state.z = z₀
     state.w = zero(FT)
 
-    # Preserve specific microphysical quantities when the parcel density changes. On the
-    # first initialization, replace the provisional aerosol value using the actual density.
-    if state.aerosol_number_initialized
-        state.μ = rescale_parcel_microphysics(state.μ, ρ₀ / ρ_previous)
-    else
-        state.μ = initialize_parcel_aerosol_number(state.μ, model.microphysics, ρ₀)
-        state.aerosol_number_initialized = true
-    end
+    # Preserve specific microphysical quantities when the parcel density changes. The
+    # aerosol reservoir is rewritten from `ρ₀` by `set!` immediately after this, unless the
+    # caller supplied it.
+    state.μ = rescale_parcel_microphysics(state.μ, ρ₀ / ρ_previous)
 
     # Set density and moisture
     state.ρ = ρ₀

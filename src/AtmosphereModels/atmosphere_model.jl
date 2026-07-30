@@ -54,7 +54,6 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
     forcing :: Frc
     microphysics :: Mic
     microphysical_fields :: Cnd
-    aerosol_number_initialized :: Bool
     timestepper :: Tst
     closure :: Cls
     closure_fields :: Cfs
@@ -217,14 +216,10 @@ function AtmosphereModel(grid;
         velocities = materialize_velocities(velocities, grid)
     end
 
+    # Microphysical fields, including a prognostic aerosol reservoir `ρnᵃ`, start at zero. `ρnᵃ`
+    # holds a ρ-weighted count, so it is filled in by `set_default_aerosol_number!` at the end of
+    # this constructor, once the dynamics has been materialized and has a density to weight by.
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
-    has_aerosol_number = :ρnᵃ ∈ keys(microphysical_fields)
-    aerosol_number_initialized =
-        !has_aerosol_number || !defer_aerosol_number_initialization(dynamics)
-    if aerosol_number_initialized
-        initialize_model_microphysical_fields!(microphysical_fields, microphysics,
-                                               total_density(dynamics))
-    end
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
@@ -312,7 +307,6 @@ function AtmosphereModel(grid;
                             forcing,
                             microphysics,
                             microphysical_fields,
-                            aerosol_number_initialized,
                             timestepper,
                             closure,
                             closure_fields,
@@ -320,6 +314,13 @@ function AtmosphereModel(grid;
 
     # Initialize thermodynamics (dynamics-specific)
     initialize_model_thermodynamics!(model)
+
+    # Seed the prognostic aerosol reservoir from the microphysics scheme's distribution. Dynamics
+    # whose density is physical at construction (the anelastic reference state, a prescribed
+    # density) are fully initialized here, so a model that is never `set!` still activates.
+    # Compressible density fields are still zero, so this writes zero and the first `set!` that
+    # supplies a density fills it in. Idempotent: every `set!` rewrites it.
+    set_default_aerosol_number!(model)
 
     return model
 end

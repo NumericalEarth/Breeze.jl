@@ -447,10 +447,10 @@ $(TYPEDSIGNATURES)
 
 Return the aerosol population stored in a microphysics scheme's native units.
 
-This compatibility hook predates [`initial_aerosol_number_density`](@ref). Existing
-schemes whose aerosol distribution is volumetric return [m⁻³]. Schemes whose
-distribution is per unit mass may return [kg⁻¹] and override
-[`initial_aerosol_number_density`](@ref) to apply the required density weighting.
+The units are the scheme's own: a volumetric distribution returns [m⁻³], while a
+distribution specified per unit mass of air returns [kg⁻¹]. Use
+[`initial_aerosol_number_density`](@ref) to obtain the value that the prognostic `ρnᵃ`
+holds, whichever basis a scheme uses.
 
 Returns `0` by default.
 """
@@ -459,13 +459,12 @@ initial_aerosol_number(microphysics) = 0
 """
 $(TYPEDSIGNATURES)
 
-Return the initial aerosol number *density* ``ρ nᵃ`` [m⁻³] for a microphysics scheme,
+Return the default aerosol number *density* ``ρ nᵃ`` [m⁻³] for a microphysics scheme,
 given the air density `ρ` (a field for grid models, a number for parcels).
 
-This is the value written into the prognostic field `ρnᵃ` by
-[`initialize_model_microphysical_fields!`](@ref) and by parcel-model construction. It is
-derived from the aerosol size distribution stored in the microphysics scheme, so it stays
-consistent with the activation parameters.
+This is the value `set!` writes into the prognostic field `ρnᵃ` when the user supplies
+neither `nᵃ` nor `ρnᵃ`. It is derived from the aerosol size distribution stored in the
+microphysics scheme, so it stays consistent with the activation parameters.
 
 Each scheme is responsible for the units of its own aerosol distribution: the density
 argument is here so that a scheme whose distribution is specified *per unit mass*
@@ -483,31 +482,26 @@ initial_aerosol_number_density(microphysics, ρ) = initial_aerosol_number(microp
 """
 $(TYPEDSIGNATURES)
 
-Whether aerosol initialization must wait until the model's total density has been set.
+Write the default aerosol reservoir [`initial_aerosol_number_density`](@ref) into `ρnᵃ`,
+using the total air density [`total_density`](@ref) of `model`. A no-op for schemes without
+prognostic aerosol.
 
-The default is `false`. Compressible dynamics overrides this because its density fields
-are zero at construction and are initialized later through `set!`.
+Called at the end of `AtmosphereModel` construction, and again from every `set!` that does
+not supply `nᵃ` or `ρnᵃ`, so the reservoir is weighted by whichever density is established
+at the time: the reference density for anelastic dynamics, a prescribed density for the
+kinematic driver, the reconciled total density for compressible dynamics. Compressible
+density fields are zero at construction, so there the constructor writes zero and the first
+`set!` carrying `ρ`, `ρᵈ`, or a [`HydrostaticallyBalancedDensity`](@ref) fills it in.
+
+Because this runs on every such `set!`, a later call that re-initializes the state also
+resets the reservoir to the distribution default. Pass `nᵃ` or `ρnᵃ` explicitly to carry a
+depleted reservoir across a `set!`.
 """
-defer_aerosol_number_initialization(dynamics) = false
-
-"""
-$(TYPEDSIGNATURES)
-
-Initialize default values for microphysical fields after materialization.
-
-Sets `ρnᵃ` (aerosol number density [m⁻³]) from
-[`initial_aerosol_number_density`](@ref) if the field exists. All other microphysical fields
-remain at zero. Users can override with `set!`.
-
-`density` is the total air density [`total_density`](@ref). For compressible dynamics,
-initialization is deferred until the first density-setting call has reconciled dry and
-total density. Later density changes do not recreate a depleted aerosol reservoir.
-"""
-initialize_model_microphysical_fields!(fields, ::Nothing, density) = nothing
-
-function initialize_model_microphysical_fields!(fields, microphysics, density)
+function set_default_aerosol_number!(model)
+    fields = model.microphysical_fields
     if :ρnᵃ ∈ keys(fields)
-        set!(fields.ρnᵃ, initial_aerosol_number_density(microphysics, density))
+        ρ = total_density(model.dynamics)
+        set!(fields.ρnᵃ, initial_aerosol_number_density(model.microphysics, ρ))
     end
     return nothing
 end

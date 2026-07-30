@@ -393,10 +393,6 @@ Return the prognostic density field for `CompressibleDynamics`.
 """
 AtmosphereModels.dynamics_density(dynamics::CompressibleDynamics) = dynamics.dry_density
 
-# Compressible density fields are zero at construction and acquire their physical values
-# through `set!`, so density-dependent aerosol defaults must wait for that reconciliation.
-AtmosphereModels.defer_aerosol_number_initialization(::CompressibleDynamics) = true
-
 """
 $(TYPEDSIGNATURES)
 
