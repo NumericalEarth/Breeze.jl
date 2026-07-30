@@ -32,7 +32,8 @@
 # > on Julia 1.11 the environment fails to instantiate (a Pkg resolver bug drops a build dependency
 # > from the manifest). The six unique configurations total ≈ 1.75 h on one H100 (0.5° runs ≈ 8 min,
 # > 0.25° runs ≈ 37 min). Each run is skipped if its `<prefix>_psfc.jld2` already exists, so the study
-# > resumes cheaply. The figures committed alongside this file were produced this way.
+# > resumes cheaply. Running the study produces the figures; `validation/make.jl` renders the
+# > markdown document. Both are generated on demand — they are not committed to the repository.
 
 # ## Setup
 
@@ -46,7 +47,8 @@ CairoMakie.activate!(type = "png")
 # Bring in the simulation generator.
 include("dcmip2016_tc.jl")
 
-# Committed figures are written to `figures/` (data reductions live in `postproc/`).
+# Figures are written to `figures/` and data reductions to `postproc/` — both are generated
+# on demand, not committed.
 mkpath("figures")
 
 # ### Diagnostics from the surface-pressure output

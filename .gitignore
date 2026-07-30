@@ -40,8 +40,11 @@ validation_output/
 *.svg
 *.zip
 
-# Validation studies commit the figures they produce (rendered manually, not built in CI)
-!validation/**/*.png
+# Validation study output — figures, data reductions, and the rendered document — is
+# generated on demand (validation/make.jl and the helper scripts), not committed.
+validation/DCMIP2016_TC/figures/
+validation/DCMIP2016_TC/postproc/
+validation/DCMIP2016_TC/dcmip2016_tc_intercomparison.md
 
 # Willson reference data is downloaded manually (see refdata/DOWNLOAD.md), not committed
 validation/DCMIP2016_TC/refdata/*
