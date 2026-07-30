@@ -8,7 +8,7 @@ using Oceananigans.Architectures: Architectures
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
-using Oceananigans.TimeSteppers: TimeStepper
+using Oceananigans.TimeSteppers: TimeSteppers, TimeStepper, AbstractLagrangianParticles, step_lagrangian_particles!
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, build_closure_fields, VerticallyImplicitTimeDiscretization
 using Oceananigans.TimeSteppers: time_discretization
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
@@ -21,6 +21,8 @@ using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 validate_momentum_advection(momentum_advection, grid) = momentum_advection
 
 struct DefaultValue end
+
+const ParticlesOrNothing = Union{Nothing, AbstractLagrangianParticles}
 
 tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
@@ -35,7 +37,7 @@ function validate_tracers(tracers::Tuple)
 end
 
 mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
-                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
+                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad, Prt} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -58,6 +60,7 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
     closure :: Cls
     closure_fields :: Cfs
     radiation :: Rad
+    particles :: Prt
 end
 
 """
@@ -80,6 +83,9 @@ Arguments
    * Alternatively, specific `momentum_advection` and `scalar_advection`
      schemes may be provided. `scalar_advection` may be a `NamedTuple` with
      a different scheme for each respective scalar, identified by name.
+
+   * `particles` are Lagrangian particles to be advected with the flow,
+     constructed with `Oceananigans.LagrangianParticles`. Default: `nothing`.
 
 Example
 =======
@@ -129,7 +135,8 @@ function AtmosphereModel(grid;
                          microphysics = nothing,
                          timestepper = nothing,
                          timestepper_kwargs = NamedTuple(),
-                         radiation = nothing)
+                         radiation = nothing,
+                         particles::ParticlesOrNothing = nothing)
 
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
@@ -304,7 +311,8 @@ function AtmosphereModel(grid;
                             timestepper,
                             closure,
                             closure_fields,
-                            radiation)
+                            radiation,
+                            particles)
 
     # Initialize thermodynamics (dynamics-specific)
     initialize_model_thermodynamics!(model)
@@ -368,8 +376,14 @@ function Base.show(io::IO, model::AtmosphereModel)
 
     print(io, "├── forcing: ", forcing_summary, "\n",
               "├── tracers: ", tracernames, "\n",
-              "├── coriolis: ", summary(model.coriolis), "\n",
-              "└── microphysics: ", Mic)
+              "├── coriolis: ", summary(model.coriolis), "\n")
+
+    if isnothing(model.particles)
+        print(io, "└── microphysics: ", Mic)
+    else
+        print(io, "├── microphysics: ", Mic, "\n",
+                  "└── particles: ", summary(model.particles))
+    end
 end
 
 # `cell_advection_timescale(model::AtmosphereModel)` and the direction-aware `CellAdvectionTimescale`
@@ -548,6 +562,17 @@ function Oceananigans.prognostic_fields(model::AtmosphereModel)
 end
 
 Models.boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
+
+#####
+##### Lagrangian particle tracking
+#####
+
+# Velocities are diagnostic (u = ρu/ρ) and refreshed by `update_state!`, so they are
+# current when the time steppers advect particles at the end of each step.
+@inline Models.total_velocities(model::AtmosphereModel) = model.velocities
+
+TimeSteppers.step_lagrangian_particles!(model::AtmosphereModel, Δt) =
+    step_lagrangian_particles!(model.particles, model, Δt)
 
 function total_energy(model)
     u, v, w = model.velocities

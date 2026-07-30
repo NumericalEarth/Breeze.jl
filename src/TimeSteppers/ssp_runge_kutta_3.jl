@@ -233,7 +233,6 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     tick_stage!(model.clock, Δt)
     update_state!(model, callbacks; compute_tendencies = true)
-    step_lagrangian_particles!(model, Δt)
 
     #
     # Second stage: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * G(u^(1)))
@@ -247,7 +246,6 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     # Don't tick - still at t + Δt for time-dependent forcing
     update_state!(model, callbacks; compute_tendencies = true)
-    step_lagrangian_particles!(model, α² * Δt)
 
     #
     # Third stage: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * G(u^(2)))
@@ -271,7 +269,10 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
 
-    step_lagrangian_particles!(model, α³ * Δt)
+    # Advect particles once per step with the full Δt. Unlike Oceananigans' low-storage
+    # RK3, whose per-stage increments sum to Δt, SSP RK3 stages recombine with u⁰, so
+    # incremental particle pushes cannot mirror the stage structure.
+    step_lagrangian_particles!(model, Δt)
 
     return nothing
 end
