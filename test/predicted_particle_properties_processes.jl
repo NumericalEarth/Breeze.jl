@@ -1027,8 +1027,8 @@ end
         qⁱ_total_new = PPP.total_ice_mass(qⁱ_new, ℳ.qʷⁱ)
         rime_state_new = PPP.consistent_rime_state(p3, qⁱ_new, props.qᶠ, props.bᶠ, ℳ.qʷⁱ)
         Fˡ_new = PPP.liquid_fraction_on_ice(qⁱ_new, ℳ.qʷⁱ)
-        ρ_bulk_new = PPP.ice_mean_density_for_bounds(PPP.ice_integrals_table(p3),
-                                                     qⁱ_total_new, props.nⁱ,
+        ρ_bulk_new = PPP.ice_mean_density_at_fixed_shape(PPP.ice_integrals_table(p3),
+                                                         qⁱ_total_new, props.nⁱ,
                                                      rime_state_new.Fᶠ, Fˡ_new,
                                                      rime_state_new.ρᶠ,
                                                      props.μ_ice)
@@ -1179,8 +1179,8 @@ end
         bᶠ_new = max(0, bᶠ + τ * rain_riming_group1 / p3.process_rates.maximum_rime_density)
         rime_state_new = PPP.consistent_rime_state(p3, qⁱ_new, qᶠ_new, bᶠ_new, qʷⁱ)
         Fˡ_new = PPP.liquid_fraction_on_ice(qⁱ_new, qʷⁱ)
-        ρ_bulk_new = PPP.ice_mean_density_for_bounds(PPP.ice_integrals_table(p3),
-                                                     qⁱ_new, nⁱ,
+        ρ_bulk_new = PPP.ice_mean_density_at_fixed_shape(PPP.ice_integrals_table(p3),
+                                                         qⁱ_new, nⁱ,
                                                      rime_state_new.Fᶠ, Fˡ_new,
                                                      rime_state_new.ρᶠ, μ_ice)
         M₃_new = FT(6) * qⁱ_new / (FT(π) * max(ρ_bulk_new, eps(FT)))

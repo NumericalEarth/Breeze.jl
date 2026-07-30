@@ -42,8 +42,8 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
                                                log10(qⁱ / nⁱ), Fᶠ, Fˡ)
         table3_density = @inferred PPP.ice_mean_density(p3, qⁱ, nⁱ, zⁱ,
                                                       Fᶠ, Fˡ, ρᶠ, μ)
-        table1_density = PPP.ice_mean_density_for_bounds(PPP.ice_integrals_table(p3),
-                                                        qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+        table1_density = PPP.ice_mean_density_at_fixed_shape(PPP.ice_integrals_table(p3),
+                                                             qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
 
         bounded = PPP.bound_ice_sixth_moment(p3, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
         expected_table3_bound = PPP.enforce_z_bounds(zⁱ, qⁱ, nⁱ, table3_density,

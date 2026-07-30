@@ -390,7 +390,15 @@ end
     return ifelse(needs_adjustment, nʳ_bounded, nʳ_eff)
 end
 
-@inline function ice_mean_density_for_bounds(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+# Bulk ice density from Table 1 (the main lookup table) at a *given* shape parameter μ:
+# Fortran `proc_from_LUT_main{2,3}mom(12, …)`, whose μ index comes from
+# `find_lookupTable_indices_1c`. Use this only where μ is already known and held fixed —
+# the group-1 sixth-moment reconstruction (`microphy_p3.f90:4453-4470`) and the two-moment
+# path, where Table 1 is the only source. Where μ itself is being diagnosed from
+# `(qⁱ, nⁱ, zⁱ)`, use `ice_mean_density`, which reads Table 3 in three-moment mode as
+# Fortran's `get_mui_rhoi` does; Table 3's density is a function of `zⁱ/qⁱ`, so feeding it
+# into a reconstruction of `zⁱ` would close a loop on the value being replaced.
+@inline function ice_mean_density_at_fixed_shape(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
     FT = typeof(qⁱ_total)
     m̄ = safe_divide(qⁱ_total, nⁱ, one(FT))
     log_mean_mass = log10(ifelse(m̄ > 0, m̄, one(FT)))
@@ -410,7 +418,7 @@ end
 
 @inline function ice_mean_density(::Nothing, ice_table::P3IceIntegralsTable,
                                   qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)
-    return ice_mean_density_for_bounds(ice_table, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+    return ice_mean_density_at_fixed_shape(ice_table, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
 end
 
 @inline function ice_mean_density(p3, qⁱ_total, nⁱ, zⁱ, Fᶠ, Fˡ, ρᶠ, μ)

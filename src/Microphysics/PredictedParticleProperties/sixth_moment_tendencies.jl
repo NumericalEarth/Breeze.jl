@@ -81,8 +81,14 @@ end
     rime_state = consistent_rime_state(p3, qⁱ_new, qᶠ_new, bᶠ_new, qʷⁱ_new)
     Fˡ_new = liquid_fraction_on_ice(qⁱ_new, qʷⁱ_new)
     qⁱ_total_new = max(total_ice_mass(qⁱ_new, qʷⁱ_new), FT(1e-20))
-    ρ_bulk_new = ice_mean_density_for_bounds(ice_table, qⁱ_total_new, nⁱ_new,
-                                             rime_state.Fᶠ, Fˡ_new, rime_state.ρᶠ, μ_ice)
+    # Group-1 holds μ at its pre-process value (Fortran `mu_i_s`) and rebuilds
+    # `zⁱ = G(μ) M₃²/nⁱ`, so `M₃` must use the Table-1 density evaluated at *that* μ —
+    # Fortran `dumden = proc_from_LUT_main3mom(12, …)` (`microphy_p3.f90:4458-4470`), not the
+    # Table-3 density that `ice_mean_density` returns from `(qⁱ, nⁱ, zⁱ)` elsewhere in the
+    # same step. Fortran states the reason at `:4453-4457`: with μ known and unchanged by
+    # these processes, the main table is the density consistent with it.
+    ρ_bulk_new = ice_mean_density_at_fixed_shape(ice_table, qⁱ_total_new, nⁱ_new,
+                                                 rime_state.Fᶠ, Fˡ_new, rime_state.ρᶠ, μ_ice)
     M₃_new = FT(6) * qⁱ_total_new / (FT(π) * ρ_bulk_new)
     zⁱ_new_raw = g_of_mu(μ_ice) * M₃_new^2 / nⁱ_new
     has_group1_ice = qⁱ_new > FT(1e-20)
