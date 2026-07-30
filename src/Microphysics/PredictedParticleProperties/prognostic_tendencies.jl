@@ -220,30 +220,22 @@ Ice loses from:
     return tendency_ρqⁱ(rates, ρ, nothing)
 end
 
-@inline function retained_non_liquid_wet_growth(rates::P3ProcessRates)
-    FT = typeof(rates.wet_growth_cloud + rates.wet_growth_rain)
-    wg_cloud = clamp_positive(rates.wet_growth_cloud)
-    wg_rain = clamp_positive(rates.wet_growth_rain)
-    wg_total = wg_cloud + wg_rain
-    shed_fraction = safe_divide(rates.wet_growth_shedding, max(wg_total, eps(FT)), zero(FT))
-    retained_fraction = clamp(one(FT) - shed_fraction, zero(FT), one(FT))
-    retained_cloud = wg_cloud * retained_fraction
-    retained_rain = wg_rain * retained_fraction
-    return retained_cloud, retained_rain
-end
-
 @inline function tendency_ρqⁱ(rates::P3ProcessRates, ρ, prp::Union{Nothing, ProcessRateParameters})
     # Phase 1: deposition, melting (both partial and complete reduce ice mass)
     # Phase 2: riming (cloud + rain), refreezing, nucleation, and freezing.
     # Splintering mass is already part of the riming mass (splinters fragment existing rime),
     # so it is not added separately to the total ice mass tendency.
-    retained_cloud, retained_rain = retained_non_liquid_wet_growth(rates)
-    retained_wet_growth = ifelse(liquid_fraction_routing_active(prp),
-                                 zero(typeof(ρ)),
-                                 retained_cloud + retained_rain)
+    #
+    # Wet growth contributes nothing here in either branch, matching Fortran. With
+    # liquid fraction active, `wet_growth_cloud`/`wet_growth_rain` (Fortran qwgrth1c,
+    # qwgrth1r) raise qitot and qiliq by the same amount (microphy_p3.f90:4243-4256),
+    # so the dry ice mass qitot - qiliq = qⁱ is unchanged. Without liquid fraction the
+    # collection retained against the wet-growth capacity is already carried by the
+    # reduced `cloud_riming`/`rain_riming` (process_rates.jl:466-469, Fortran tmp1 at
+    # microphy_p3.f90:4241), so adding it again would double count.
     gain = rates.deposition + rates.cloud_riming + rates.rain_riming + rates.refreezing +
            rates.nucleation_mass + rates.cloud_freezing_mass + rates.rain_freezing_mass +
-           rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass + retained_wet_growth
+           rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass
     # Total melting reduces ice mass (partial stays as liquid coating, complete sheds)
     loss = rates.partial_melting + rates.complete_melting
     return ρ * (gain - loss)
@@ -301,14 +293,16 @@ end
 @inline function tendency_ρqᶠ(rates::P3ProcessRates, ρ, Fᶠ, prp::Union{Nothing, ProcessRateParameters})
     # Phase 2: gains from riming, refreezing, freezing, and homogeneous freezing
     # Frozen cloud/rain becomes fully rimed ice (100% rime fraction for new frozen particles)
-    retained_cloud, retained_rain = retained_non_liquid_wet_growth(rates)
-    retained_wet_growth = ifelse(liquid_fraction_routing_active(prp),
-                                 zero(typeof(ρ)),
-                                 retained_cloud + retained_rain)
+    #
+    # Wet growth contributes no rime mass in either branch. Fortran omits qwgrth1c and
+    # qwgrth1r from the qirim update (microphy_p3.f90:4249), and the dry-branch retained
+    # collection already arrives through `cloud_riming`/`rain_riming`. The dry-branch
+    # soaking densification is carried separately by `wet_growth_densification_mass`
+    # (Fortran log_wetgrowth, microphy_p3.f90:4299-4302).
     gain = rates.cloud_riming + rates.rain_riming + rates.refreezing +
            rates.cloud_freezing_mass + rates.rain_freezing_mass +
            rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass +
-           rates.wet_growth_densification_mass + retained_wet_growth
+           rates.wet_growth_densification_mass
     # Ordinary melting and sublimation remove the beginning-of-stage rime
     # fraction. Whole-particle clipping instead drains the explicitly
     # reconstructed residual rime companion, including post-process changes.
@@ -344,25 +338,22 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
     # Fortran uses rho_rimeMax (900) for homogeneous freezing rime volume, not 917
     ρ_rim_hom = prp.maximum_rime_density
 
-    retained_cloud, retained_rain = retained_non_liquid_wet_growth(rates)
-    retained_cloud_volume = ifelse(prp.liquid_fraction_active,
-                                   zero(FT),
-                                   retained_cloud / ρ_rim_new_safe)
-    retained_rain_volume = ifelse(prp.liquid_fraction_active,
-                                  zero(FT),
-                                  retained_rain / ρ_rimemax)
-
     # Phase 2: Volume gain from new rime
     # Cloud riming uses Cober-List computed density; rain riming uses rho_rimeMax = 900
     # Immersion freezing uses rho_rimeMax = 900 (Fortran convention, not water density)
     # Refreezing uses rho_rimeMax = 900 (Fortran: qifrz * i_rho_rimeMax, line 4253)
+    #
+    # Wet growth adds no rime volume directly: Fortran omits qwgrth1c and qwgrth1r from
+    # the birim update (microphy_p3.f90:4250-4253). In the dry branch the retained
+    # collection is already inside `cloud_riming`/`rain_riming` above, carrying the same
+    # rhorime_c / rho_rimeMax split Fortran uses, and the soaking densification comes
+    # through `wet_growth_densification_volume`.
     volume_gain = rates.cloud_riming / ρ_rim_new_safe +
                    rates.rain_riming / ρ_rimemax +
                    rates.refreezing / ρ_rimemax +
                    (rates.cloud_freezing_mass + rates.rain_freezing_mass) / ρ_rimemax +
                    (rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass) / ρ_rim_hom +
-                   rates.wet_growth_densification_volume +
-                   retained_cloud_volume + retained_rain_volume
+                   rates.wet_growth_densification_volume
 
     # Ordinary melting and sublimation remove volume proportionally. A whole-
     # particle clip uses the reconstructed companion volume so post-process rime

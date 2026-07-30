@@ -2494,6 +2494,12 @@ end
         @test tendency_ρqʳ(warm_rates, ρ, process_rates) ≈ ρ * FT(1e-8)
         @test tendency_ρqʷⁱ(warm_rates, ρ, process_rates) == 0
 
+        # Fortran sets qwgrth1c/qwgrth1r only inside `if (log_LiquidFrac)`
+        # (microphy_p3.f90:3255-3268), so `wet_growth_cloud`/`wet_growth_rain` are
+        # identically zero in this branch. Even when forced nonzero they must not feed
+        # the ice, rime-mass or rime-volume tendencies: Fortran omits both from its
+        # qirim and birim updates (microphy_p3.f90:4249-4253) and adds them equally to
+        # qitot and qiliq (:4243-4256), leaving the dry ice mass unchanged.
         wet_growth_rates = p3_process_rates_with(FT;
             rime_density_new = FT(300),
             wet_growth_cloud = FT(3e-8),
@@ -2501,15 +2507,28 @@ end
             wet_growth_shedding = FT(1e-8),
         )
 
-        retained_total = FT(4e-8)
+        @test tendency_ρqⁱ(wet_growth_rates, ρ, process_rates) == 0
+        @test tendency_ρqᶠ(wet_growth_rates, ρ, Fᶠ, process_rates) == 0
+        @test tendency_ρbᶠ(wet_growth_rates, ρ, Fᶠ, ρᶠ, qⁱ, process_rates) == 0
+        @test tendency_ρqʷⁱ(wet_growth_rates, ρ, process_rates) == 0
+
+        # The collection retained against the wet-growth capacity reaches ice, rime and
+        # rime volume through the reduced riming rates instead (`process_rates.jl`
+        # shrinks cloud_riming/rain_riming to the retained portion, mirroring Fortran's
+        # qccol/qrcol reduction at microphy_p3.f90:3277-3279). Rime volume splits the
+        # two by rhorime_c and rho_rimeMax exactly as microphy_p3.f90:4250-4253 does.
         retained_cloud = FT(2.4e-8)
         retained_rain = FT(1.6e-8)
+        retained_rates = p3_process_rates_with(FT;
+            rime_density_new = FT(300),
+            cloud_riming = retained_cloud,
+            rain_riming = retained_rain,
+        )
 
-        @test tendency_ρqⁱ(wet_growth_rates, ρ, process_rates) ≈ ρ * retained_total
-        @test tendency_ρqᶠ(wet_growth_rates, ρ, Fᶠ, process_rates) ≈ ρ * retained_total
-        @test tendency_ρbᶠ(wet_growth_rates, ρ, Fᶠ, ρᶠ, qⁱ, process_rates) ≈
+        @test tendency_ρqⁱ(retained_rates, ρ, process_rates) ≈ ρ * (retained_cloud + retained_rain)
+        @test tendency_ρqᶠ(retained_rates, ρ, Fᶠ, process_rates) ≈ ρ * (retained_cloud + retained_rain)
+        @test tendency_ρbᶠ(retained_rates, ρ, Fᶠ, ρᶠ, qⁱ, process_rates) ≈
               ρ * (retained_cloud / FT(300) + retained_rain / process_rates.maximum_rime_density)
-        @test tendency_ρqʷⁱ(wet_growth_rates, ρ, process_rates) == 0
     end
 
     @testset "above-freezing rain collection uses table number kernel" begin
