@@ -644,25 +644,18 @@ end
 # state, the reference subtraction makes Gˢρw vanish identically on a
 # resting atmosphere (no FP-rounding noise).
 
+# Height-coordinate (non-terrain) slow vertical-momentum tendency. The terrain method is dispatched
+# separately (`::TerrainCompressibleModel`), so here the single `reference_state`, when present, is
+# a 1D-column `ExnerReferenceState`; `nothing` selects the full-pressure fallback.
 function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubstepper, model, β_stage = nothing)
     grid = model.grid
     arch = architecture(grid)
     g    = convert(eltype(grid), model.thermodynamic_constants.gravitational_acceleration)
     Gⁿρw = model.timestepper.Gⁿ.ρw
 
-    terrain_reference_pressure = model.dynamics.terrain_reference_pressure
-    terrain_reference_density = model.dynamics.terrain_reference_density
     ref = model.dynamics.reference_state
 
-    if terrain_reference_pressure !== nothing && terrain_reference_density !== nothing
-        launch!(arch, grid, :xyz, _assemble_slow_vertical_momentum_tendency!,
-                substepper.slow_vertical_momentum_tendency,
-                Gⁿρw,
-                model.dynamics.pressure,
-                model.dynamics.total_density,
-                terrain_reference_pressure, terrain_reference_density,
-                grid, g)
-    elseif ref isa Nothing
+    if ref isa Nothing
         launch!(arch, grid, :xyz, _assemble_slow_vertical_momentum_tendency_no_ref!,
                 substepper.slow_vertical_momentum_tendency,
                 Gⁿρw,

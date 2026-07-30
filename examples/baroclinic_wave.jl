@@ -110,7 +110,7 @@ z_faces = ExponentialDiscretization(Nz, 0, H; scale = H/2, bias = :left)
 
 grid = LatitudeLongitudeGrid(GPU();
                              size = (Nλ, Nφ, Nz),
-                             halo = (5, 5, 5),
+                             halo = (3, 3, 3),
                              longitude = (0, 360),
                              latitude = (-75, 75),
                              z = z_faces)

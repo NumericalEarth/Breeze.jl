@@ -25,7 +25,7 @@ Breeze = {path = ".."}
 AtmosphericProfilesLibrary = "0.1.7"
 CUDA = "5, 6.0"
 CairoMakie = "0.15"
-CloudMicrophysics = "0.36"
+CloudMicrophysics = "0.37"
 Documenter = "1"
 DocumenterCitations = "1.4"
 Enzyme = "0.13.132"

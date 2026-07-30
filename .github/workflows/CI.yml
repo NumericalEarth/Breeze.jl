@@ -137,7 +137,9 @@ jobs:
           if [[ ${{ matrix.os }} == *linux-nvidia-gpu* ]]; then
               # When running the tests on a GPU node we always want to make sure
               # CUDA is functional.
-              echo "BREEZE_ENSURE_CUDA_FUNCTIONAL=true" >> "${GITHUB_ENV}"
+              echo "BREEZE_ENSURE_CUDA_FUNCTIONAL=true" | tee -a "${GITHUB_ENV}"
+              # In Julia v1.12+, use multiple GC threads.
+              echo "JULIA_NUM_GC_THREADS=4,1" | tee -a "${GITHUB_ENV}"
               # On the GPU runners we sometimes run out-of-memory because we have several
               # concurrent jobs, some of them reaching a large memory usage.  We reduce the
               # number of jobs to avoid memory issues.
