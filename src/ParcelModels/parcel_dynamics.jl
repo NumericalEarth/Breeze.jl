@@ -78,7 +78,12 @@ mutable struct ParcelState{FT, TH, MP}
     ρℰ :: FT
     𝒰 :: TH
     μ :: MP
+    aerosol_number_initialized :: Bool
 end
+
+# Preserve the public constructor shape from before aerosol initialization became stateful.
+ParcelState(x, y, z, w, ρ, qᵗ, ρqᵗ, ℰ, ρℰ, 𝒰, μ) =
+    ParcelState(x, y, z, w, ρ, qᵗ, ρqᵗ, ℰ, ρℰ, 𝒰, μ, true)
 
 # Accessors
 @inline position(state::ParcelState) = (state.x, state.y, state.z)
@@ -242,18 +247,21 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
     e_default = cᵖᵐ * T_default + g * z_default
     𝒰 = StaticEnergyState(e_default, q, z_default, p₀)
 
-    # Microphysics prognostic variables based on the microphysics scheme
-    μ = materialize_parcel_microphysics_prognostics(FT, microphysics)
-
     # Initialize state with default values
     ρ_default = FT(1.2)
+
+    # Microphysics prognostic variables based on the microphysics scheme
+    μ = materialize_parcel_microphysics_prognostics(FT, microphysics, ρ_default)
+    aerosol_number_initialized = isnothing(μ) || !haskey(μ, :ρnᵃ)
+
     w_default = zero(FT)
     qᵗ_default = zero(FT)
     ρqᵗ_default = ρ_default * qᵗ_default
     ℰ_default = e_default  # static energy for default formulation
     ρℰ_default = ρ_default * ℰ_default
     state = ParcelState(zero(FT), zero(FT), z_default, w_default, ρ_default,
-                        qᵗ_default, ρqᵗ_default, ℰ_default, ρℰ_default, 𝒰, μ)
+                        qᵗ_default, ρqᵗ_default, ℰ_default, ρℰ_default, 𝒰, μ,
+                        aerosol_number_initialized)
 
     # SSP RK3 timestepper with tendencies
     Gμ = zero_microphysics_prognostic_tendencies(μ)
@@ -273,12 +281,32 @@ density-weighted scalars for schemes with prognostic microphysics.
 
 The prognostic variables use the same ρ-weighted names as the grid-based model
 (e.g., `:ρqᶜˡ`, `:ρqʳ`) from `prognostic_field_names(microphysics)`.
+
+`ρ` is the density used to weight the initial aerosol reservoir `ρnᵃ`, which
+[`initial_aerosol_number_density`](@ref) returns per unit volume [m⁻³]. Parcel-model
+construction uses a provisional density; the first parcel-state initialization replaces
+the aerosol value using the density interpolated at the parcel's actual initial position.
 """
-function materialize_parcel_microphysics_prognostics(FT, microphysics)
+function materialize_parcel_microphysics_prognostics(FT, microphysics, ρ = one(FT))
     names = AtmosphereModels.prognostic_field_names(microphysics)
     length(names) == 0 && return nothing
-    Nᵃ₀ = FT(AtmosphereModels.initial_aerosol_number(microphysics))
+    Nᵃ₀ = FT(AtmosphereModels.initial_aerosol_number_density(microphysics, FT(ρ)))
     return NamedTuple{names}(ntuple(i -> names[i] == :ρnᵃ ? Nᵃ₀ : zero(FT), length(names)))
+end
+
+initialize_parcel_aerosol_number(::Nothing, microphysics, ρ) = nothing
+
+function initialize_parcel_aerosol_number(μ::NamedTuple, microphysics, ρ)
+    haskey(μ, :ρnᵃ) || return μ
+    ρnᵃ = convert(typeof(ρ), AtmosphereModels.initial_aerosol_number_density(microphysics, ρ))
+    return merge(μ, (; ρnᵃ))
+end
+
+rescale_parcel_microphysics(::Nothing, ratio) = nothing
+
+function rescale_parcel_microphysics(μ::NamedTuple, ratio)
+    names = keys(μ)
+    return NamedTuple{names}(map(name -> ratio * μ[name], names))
 end
 
 function AtmosphereModels.materialize_momentum_and_velocities(::ParcelDynamics, grid, bcs)
@@ -350,13 +378,19 @@ conditions interpolated at that height.
 - `y`: Initial parcel y-position [m], default: 0
 - `z`: Initial parcel height [m], required to initialize parcel state
 - `w_parcel`: Initial parcel vertical velocity [m/s], for `PrognosticVerticalVelocity`
+- `nᵃ`: Initial aerosol number per unit mass [kg⁻¹]
+- `ρnᵃ`: Initial aerosol number density [m⁻³]
 """
 function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
                            ρ = nothing, p = nothing,
                            qᵗ = nothing, ℋ = nothing,
                            u = 0, v = 0, w = 0,
                            w_parcel = nothing,
-                           x = 0, y = 0, z = nothing)
+                           x = 0, y = 0, z = nothing,
+                           nᵃ = nothing, ρnᵃ = nothing)
+
+    !isnothing(nᵃ) && !isnothing(ρnᵃ) &&
+        throw(ArgumentError("set! cannot set both nᵃ and ρnᵃ"))
 
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
@@ -403,6 +437,17 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
     # Initialize parcel state if z is provided
     if !isnothing(z)
         initialize_parcel_state!(dynamics.state, z, x, y, model)
+    end
+
+    if !isnothing(nᵃ) || !isnothing(ρnᵃ)
+        μ = dynamics.state.μ
+        (isnothing(μ) || !haskey(μ, :ρnᵃ)) &&
+            throw(ArgumentError("the parcel's microphysics scheme has no prognostic ρnᵃ"))
+
+        FT = eltype(model.grid)
+        aerosol_number_density = isnothing(ρnᵃ) ? dynamics.state.ρ * FT(nᵃ) : FT(ρnᵃ)
+        dynamics.state.μ = merge(μ, (; ρnᵃ = aerosol_number_density))
+        dynamics.state.aerosol_number_initialized = true
     end
 
     # Set parcel vertical velocity (for PrognosticVerticalVelocity)
@@ -495,12 +540,22 @@ function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     ρ₀ = interpolate(z₀, dynamics.density)
     p₀ = interpolate(z₀, dynamics.pressure)
     qᵗ₀ = interpolate(z₀, specific_prognostic_moisture(model))
+    ρ_previous = state.ρ
 
     # Set position and zero vertical velocity (can be overridden by set! w_parcel keyword)
     state.x = x₀
     state.y = y₀
     state.z = z₀
     state.w = zero(FT)
+
+    # Preserve specific microphysical quantities when the parcel density changes. On the
+    # first initialization, replace the provisional aerosol value using the actual density.
+    if state.aerosol_number_initialized
+        state.μ = rescale_parcel_microphysics(state.μ, ρ₀ / ρ_previous)
+    else
+        state.μ = initialize_parcel_aerosol_number(state.μ, model.microphysics, ρ₀)
+        state.aerosol_number_initialized = true
+    end
 
     # Set density and moisture
     state.ρ = ρ₀
@@ -707,6 +762,11 @@ function apply_microphysical_tendencies(μ::NamedTuple, Gμ::NamedTuple, Δt)
     return NamedTuple{keys(μ)}(new_values)
 end
 
+apply_microphysical_tendencies(μ::Nothing, Gμ, Δt, ρ⁻, ρ⁺) = nothing
+function apply_microphysical_tendencies(μ::NamedTuple, Gμ::NamedTuple, Δt, ρ⁻, ρ⁺)
+    return rescale_parcel_microphysics(apply_microphysical_tendencies(μ, Gμ, Δt), ρ⁺ / ρ⁻)
+end
+
 #####
 ##### ParcelTimestepper: SSP RK3 time-stepping for parcel models
 #####
@@ -839,6 +899,10 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     dynamics = model.dynamics
     state = dynamics.state
     tendencies = dynamics.timestepper.G
+    ρᵐ = state.ρ
+    # `ParcelInitialState` retains its public constructor shape; its initial environmental density
+    # is recovered from the stored height instead of adding another public field.
+    ρ⁰ = interpolate(U⁰.z, dynamics.density)
 
     # Step position and vertical velocity
     state.x = (1 - α) * U⁰.x + α * (state.x + Δt * tendencies.Gx)
@@ -868,7 +932,8 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     state.𝒰 = reconstruct_thermodynamic_state(state.𝒰, state.ℰ, z⁺, p⁺)
 
     # Step microphysics prognostics with SSP RK3 formula (density-weighted)
-    state.μ = ssp_rk3_microphysics_substep(U⁰.μ, state.μ, tendencies.Gμ, Δt, α)
+    state.μ = ssp_rk3_microphysics_substep(U⁰.μ, ρ⁰, state.μ, ρᵐ,
+                                           tendencies.Gμ, Δt, α, ρ⁺)
 
     # Restore scheme-specific coupled constraints after the prognostic substep.
     state.μ = AtmosphereModels.postprocess_microphysical_prognostics(
@@ -909,13 +974,21 @@ end
 $(TYPEDSIGNATURES)
 
 Apply SSP RK3 substep formula to microphysics prognostic variables.
-"""
-ssp_rk3_microphysics_substep(::Nothing, ::Nothing, ::Nothing, Δt, α) = nothing
 
-function ssp_rk3_microphysics_substep(μ⁰::NamedTuple, μᵐ::NamedTuple, Gμ::NamedTuple, Δt, α)
+The stored moments `μ` are density-weighted, while a parcel conserves their specific
+counterparts `μ / ρ` in the absence of microphysical sources. Each RK branch is therefore
+converted to its specific value before combining, then weighted by the new environmental
+density `ρ⁺`.
+"""
+ssp_rk3_microphysics_substep(::Nothing, ρ⁰, ::Nothing, ρᵐ, ::Nothing, Δt, α, ρ⁺) = nothing
+
+function ssp_rk3_microphysics_substep(μ⁰::NamedTuple, ρ⁰,
+                                      μᵐ::NamedTuple, ρᵐ,
+                                      Gμ::NamedTuple, Δt, α, ρ⁺)
     names = keys(μᵐ)
     μ⁺_values = map(names) do name
-        (1 - α) * μ⁰[name] + α * (μᵐ[name] + Δt * Gμ[name])
+        (1 - α) * ρ⁺ / ρ⁰ * μ⁰[name] +
+        α * ρ⁺ / ρᵐ * (μᵐ[name] + Δt * Gμ[name])
     end
     return NamedTuple{names}(μ⁺_values)
 end
@@ -945,6 +1018,7 @@ function step_parcel_state!(model::ParcelModel, Δt)
     dynamics = model.dynamics
     state = dynamics.state
     tendencies = dynamics.timestepper.G
+    ρ⁻ = state.ρ
 
     # Step position and vertical velocity forward (Forward Euler)
     state.x += Δt * tendencies.Gx
@@ -974,7 +1048,7 @@ function step_parcel_state!(model::ParcelModel, Δt)
     state.𝒰 = reconstruct_thermodynamic_state(state.𝒰, state.ℰ, z⁺, p⁺)
 
     # Step microphysics prognostics forward using tendencies (density-weighted)
-    state.μ = apply_microphysical_tendencies(state.μ, tendencies.Gμ, Δt)
+    state.μ = apply_microphysical_tendencies(state.μ, tendencies.Gμ, Δt, ρ⁻, ρ⁺)
 
     # Restore scheme-specific coupled constraints after the prognostic substep.
     state.μ = AtmosphereModels.postprocess_microphysical_prognostics(

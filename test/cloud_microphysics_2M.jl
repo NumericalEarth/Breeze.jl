@@ -302,7 +302,7 @@ end
          z = 0, w = 1)
 
     # Set initial aerosol number
-    Nᵃ₀ = FT(initial_aerosol_number(microphysics))
+    Nᵃ₀ = FT(initial_aerosol_number_density(microphysics, model.dynamics.state.ρ))
     model.dynamics.state.μ = (; ρqᶜˡ=FT(0), ρnᶜˡ=FT(0), ρqʳ=FT(0), ρnʳ=FT(0), ρnᵃ=Nᵃ₀)
 
     # Initially, cloud droplet number should be zero (no droplets before activation)

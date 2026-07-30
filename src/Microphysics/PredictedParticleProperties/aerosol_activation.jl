@@ -12,7 +12,7 @@ One lognormal aerosol mode for CCN activation.
 See [`AerosolMode`](@ref) constructor for details.
 """
 struct AerosolMode{FT}
-    number_mixing_ratio :: FT        # Na [kg⁻¹]
+    number_mixing_ratio :: FT        # Na [kg⁻¹], per unit mass of air (not per volume)
     mean_radius :: FT                # rm [m]
     geometric_std :: FT              # σg [-]
     vant_hoff_factor :: FT           # νi [-]
@@ -35,7 +35,12 @@ Default chemistry is ammonium sulfate (NH₄)₂SO₄.
 
 # Keyword Arguments
 
-- `number_mixing_ratio`: Aerosol number [kg⁻¹], default 300×10⁶
+- `number_mixing_ratio`: Aerosol number *per unit mass of air* [kg⁻¹], default 300×10⁶.
+  This is the basis of the whole activation path: [`activated_number`](@ref),
+  [`total_activated_number`](@ref) and `sum_aerosol_number` are all [kg⁻¹], and the
+  activation cap compares them against the per-mass `nᶜˡ = ρnᶜˡ/ρ` and `nᵃ = ρnᵃ/ρ`. The
+  prognostic reservoir `ρnᵃ` is the ρ-weighted counterpart, seeded through
+  `AtmosphereModels.initial_aerosol_number_density`.
 - `mean_radius`: Geometric mean radius [m], default 0.05 μm
 - `geometric_std`: Geometric standard deviation [-], default 2.0
 - `vant_hoff_factor`: van't Hoff factor [-], default 3.0

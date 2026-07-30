@@ -243,6 +243,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
     total_density_given = (:ρ ∈ names) && !hydrostatic_balance
     dry_density_given   = :ρᵈ ∈ names
+    density_given       = (:ρ ∈ names) || dry_density_given
     prioritized = prioritize_names(names)
 
     direct_moisture_input_names =
@@ -264,6 +265,10 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
     settable_specific_names = settable_specific_microphysical_names(model.microphysics)
     specific_microphysical_names = Tuple(name for name in names if name ∈ settable_specific_names)
+
+    # Whether the user is supplying the aerosol reservoir themselves, in which case
+    # deferred default initialization must not overwrite it.
+    aerosol_number_given = (:nᵃ ∈ names) || (:ρnᵃ ∈ names)
 
     for specific_name in specific_microphysical_names
         density_name = specific_to_density_weighted(specific_name)
@@ -442,6 +447,17 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         end
     end
 
+    # Explicit aerosol input owns the reservoir from this point onward. Otherwise initialize
+    # a deferred default exactly once, after dry and total density have been reconciled. The
+    # hydrostatically balanced path is initialized below because its final density is not known yet.
+    if aerosol_number_given
+        model.aerosol_number_initialized = true
+    elseif density_given && !hydrostatic_balance && !model.aerosol_number_initialized
+        initialize_model_microphysical_fields!(model.microphysical_fields, model.microphysics,
+                                               total_density(model.dynamics))
+        model.aerosol_number_initialized = true
+    end
+
     # Apply a mask
     foreach(mask_immersed_field!, prognostic_fields(model))
     update_state!(model, compute_tendencies=false)
@@ -455,6 +471,14 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     # before the mass-conservation correction.
     if hydrostatic_balance
         set_hydrostatically_balanced_density!(model, balanced_density)
+
+        if !model.aerosol_number_initialized
+            initialize_model_microphysical_fields!(model.microphysical_fields, model.microphysics,
+                                                   total_density(model.dynamics))
+            model.aerosol_number_initialized = true
+            foreach(mask_immersed_field!, prognostic_fields(model))
+            update_state!(model, compute_tendencies=false)
+        end
     end
 
     enforce_mass_conservation && enforce_mass_conservation!(model)

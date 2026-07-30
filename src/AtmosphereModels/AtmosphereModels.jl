@@ -56,6 +56,7 @@ export
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
     initial_aerosol_number,
+    initial_aerosol_number_density,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     materialize_atmosphere_model_boundary_conditions,

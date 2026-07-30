@@ -343,6 +343,14 @@ is an `AerosolActivation`: the default prescribed-Nᶜ path (Fortran
 neither field is allocated or advected there. ``ρsˢᵃᵗ`` appears only when
 `predict_supersaturation = true`.
 
+P3's aerosol distribution is specified **per unit mass of air**: `AerosolMode.number_mixing_ratio`
+is in kg⁻¹, and so are the activated numbers it produces and the ``n^{cl}`` and ``n^a`` that the
+activation cap compares them against. The prognostic reservoir ``ρn^a`` therefore holds the
+``ρ``-weighted count in m⁻³, and `AtmosphereModel` seeds it through
+`initial_aerosol_number_density(microphysics, ρ)`, which multiplies by air density for P3. The
+two-moment scheme's `CloudMicrophysics` modes are volumetric to begin with, so the generic
+density-aware hook forwards their concentration without applying the density argument.
+
 Three host-facing entry points:
 
 1. **`microphysical_tendency`**: Computes source terms for all prognostic variables.

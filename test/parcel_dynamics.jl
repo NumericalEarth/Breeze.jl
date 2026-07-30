@@ -10,6 +10,7 @@ using Breeze.ParcelModels:
     ParcelDynamics,
     ParcelModel,
     ParcelState,
+    ParcelInitialState,
     PrescribedVerticalVelocity,
     PrognosticVerticalVelocity,
     adjust_adiabatically,
@@ -73,6 +74,13 @@ using Test
     @test parcel.ρℰ == ρℰ
     @test parcel.𝒰 === 𝒰
     @test parcel.μ === μ
+
+    initial = ParcelInitialState(FT(0), FT(0), z_init, FT(0), qᵗ, e_init, μ)
+    @test initial.x == 0
+    @test initial.z == z_init
+    @test initial.qᵗ == qᵗ
+    @test initial.ℰ == e_init
+    @test initial.μ === μ
 end
 
 #####
@@ -613,7 +621,7 @@ end
 
     # Initialize with some droplet number (CCN activation)
     nᶜˡ₀ = 100e6  # 100 million droplets per kg
-    Nᵃ₀ = initial_aerosol_number(microphysics)
+    Nᵃ₀ = initial_aerosol_number_density(microphysics, model.dynamics.state.ρ)
     model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0, ρnᵃ= Nᵃ₀)
 
     # Run long enough for condensation to occur (above LCL)
@@ -651,7 +659,7 @@ end
 
     # Initialize with droplet number for 2M scheme
     nᶜˡ₀ = 100e6
-    Nᵃ₀ = initial_aerosol_number(microphysics)
+    Nᵃ₀ = initial_aerosol_number_density(microphysics, model.dynamics.state.ρ)
     model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0, ρnᵃ= Nᵃ₀)
 
     # Run long enough for cloud formation and autoconversion

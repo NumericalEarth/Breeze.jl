@@ -54,6 +54,7 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Buy,
     forcing :: Frc
     microphysics :: Mic
     microphysical_fields :: Cnd
+    aerosol_number_initialized :: Bool
     timestepper :: Tst
     closure :: Cls
     closure_fields :: Cfs
@@ -217,7 +218,13 @@ function AtmosphereModel(grid;
     end
 
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
-    initialize_model_microphysical_fields!(microphysical_fields, microphysics)
+    has_aerosol_number = :ρnᵃ ∈ keys(microphysical_fields)
+    aerosol_number_initialized =
+        !has_aerosol_number || !defer_aerosol_number_initialization(dynamics)
+    if aerosol_number_initialized
+        initialize_model_microphysical_fields!(microphysical_fields, microphysics,
+                                               total_density(dynamics))
+    end
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
@@ -305,6 +312,7 @@ function AtmosphereModel(grid;
                             forcing,
                             microphysics,
                             microphysical_fields,
+                            aerosol_number_initialized,
                             timestepper,
                             closure,
                             closure_fields,

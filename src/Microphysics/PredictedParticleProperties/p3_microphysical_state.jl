@@ -84,14 +84,23 @@ reflectivity/sixth moment `ρz̃ⁱ`).
 """
 @inline is_three_moment_ice(p3::P3) = !isnothing(three_moment_shape_table(p3))
 
-# Initial aerosol number for the prognostic-ρnᵃ path. Returns the total per-mass
-# aerosol count from the AerosolMode parameters; the host (parcel set!,
-# AtmosphereModel set_microphysical_initial_state!) is responsible for scaling
-# by air density when assigning to `ρnᵃ` if a per-volume value is required.
-# The prescribed-Nᶜ path returns 0, matching the framework default.
-@inline AM.initial_aerosol_number(p3::P3) = _initial_aerosol_number(p3.aerosol)
-@inline _initial_aerosol_number(::Nothing) = 0
-@inline _initial_aerosol_number(aerosol::AerosolActivation) = sum_aerosol_number(aerosol)
+# Initial aerosol reservoir for the prognostic-ρnᵃ path.
+#
+# P3's aerosol distribution is specified per unit mass: `AerosolMode.number_mixing_ratio` is
+# [kg⁻¹], so `sum_aerosol_number` is [kg⁻¹] and so are `activated_number` and
+# `total_activated_number`. That is the basis the activation cap in
+# `prognostic_ccn_activation_rate` compares against, since `nᶜˡ = ρnᶜˡ/ρ` and `nᵃ = ρnᵃ/ρ`
+# are both per unit mass, and it is the basis `tendency_ρnᶜˡ` assumes when it multiplies
+# `ncnuc` by ρ.
+#
+# The prognostic field `ρnᵃ` therefore holds ρ nᵃ [m⁻³], and seeding it means multiplying by
+# air density here. Skipping the multiplication makes the diagnosed `nᵃ = ρnᵃ / ρ`
+# proportional to `1 / ρ` instead of equal to the configured number mixing ratio.
+# The prescribed-Nᶜ path has no `ρnᵃ` field, and returns 0 to match the framework default.
+@inline AM.initial_aerosol_number(p3::P3) = initial_aerosol_number(p3.aerosol)
+@inline initial_aerosol_number(::Nothing) = 0
+@inline initial_aerosol_number(aerosol::AerosolActivation) = sum_aerosol_number(aerosol)
+@inline AM.initial_aerosol_number_density(p3::P3, ρ) = ρ * AM.initial_aerosol_number(p3)
 
 #####
 ##### Prognostic field names

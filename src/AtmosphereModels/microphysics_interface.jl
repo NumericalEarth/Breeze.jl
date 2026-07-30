@@ -445,31 +445,69 @@ materialize_microphysical_fields(microphysics::Nothing, grid, boundary_condition
 """
 $(TYPEDSIGNATURES)
 
-Return the total initial aerosol number concentration [m⁻³] for a microphysics scheme.
+Return the aerosol population stored in a microphysics scheme's native units.
 
-This is used by [`initialize_model_microphysical_fields!`](@ref) and parcel model
-construction to set a physically meaningful default for the prognostic aerosol number
-density `ρnᵃ`. The value is derived from the aerosol size distribution stored in the
-microphysics scheme, so it stays consistent with the activation parameters.
+This compatibility hook predates [`initial_aerosol_number_density`](@ref). Existing
+schemes whose aerosol distribution is volumetric return [m⁻³]. Schemes whose
+distribution is per unit mass may return [kg⁻¹] and override
+[`initial_aerosol_number_density`](@ref) to apply the required density weighting.
 
-Returns `0` by default; extensions override this for schemes with prognostic aerosol.
+Returns `0` by default.
 """
 initial_aerosol_number(microphysics) = 0
 
 """
 $(TYPEDSIGNATURES)
 
+Return the initial aerosol number *density* ``ρ nᵃ`` [m⁻³] for a microphysics scheme,
+given the air density `ρ` (a field for grid models, a number for parcels).
+
+This is the value written into the prognostic field `ρnᵃ` by
+[`initialize_model_microphysical_fields!`](@ref) and by parcel-model construction. It is
+derived from the aerosol size distribution stored in the microphysics scheme, so it stays
+consistent with the activation parameters.
+
+Each scheme is responsible for the units of its own aerosol distribution: the density
+argument is here so that a scheme whose distribution is specified *per unit mass*
+[kg⁻¹], as `PredictedParticlePropertiesMicrophysics` is through
+`AerosolMode.number_mixing_ratio`, can return the ``ρ``-weighted value that `ρnᵃ` holds,
+while a scheme whose distribution is already a volumetric concentration [m⁻³] ignores `ρ`.
+Breeze's convention throughout is that `nᵃ = ρnᵃ / ρ` is per unit mass [kg⁻¹]; a scheme
+that omits this scaling diagnoses `nᵃ` with a spurious inverse-density dependence.
+
+By default, forwards to [`initial_aerosol_number`](@ref), which returns `0`
+unless a scheme overrides it.
+"""
+initial_aerosol_number_density(microphysics, ρ) = initial_aerosol_number(microphysics)
+
+"""
+$(TYPEDSIGNATURES)
+
+Whether aerosol initialization must wait until the model's total density has been set.
+
+The default is `false`. Compressible dynamics overrides this because its density fields
+are zero at construction and are initialized later through `set!`.
+"""
+defer_aerosol_number_initialization(dynamics) = false
+
+"""
+$(TYPEDSIGNATURES)
+
 Initialize default values for microphysical fields after materialization.
 
-Sets `ρnᵃ` (aerosol number density) to [`initial_aerosol_number(microphysics)`](@ref)
-if the field exists. All other microphysical fields remain at zero.
-Users can override with `set!`.
-"""
-initialize_model_microphysical_fields!(fields, ::Nothing) = nothing
+Sets `ρnᵃ` (aerosol number density [m⁻³]) from
+[`initial_aerosol_number_density`](@ref) if the field exists. All other microphysical fields
+remain at zero. Users can override with `set!`.
 
-function initialize_model_microphysical_fields!(fields, microphysics)
+`density` is the total air density [`total_density`](@ref). For compressible dynamics,
+initialization is deferred until the first density-setting call has reconciled dry and
+total density. Later density changes do not recreate a depleted aerosol reservoir.
+"""
+initialize_model_microphysical_fields!(fields, ::Nothing, density) = nothing
+
+function initialize_model_microphysical_fields!(fields, microphysics, density)
     if :ρnᵃ ∈ keys(fields)
-        set!(fields.ρnᵃ, initial_aerosol_number(microphysics))
+        set!(fields.ρnᵃ, initial_aerosol_number_density(microphysics, density))
     end
     return nothing
 end
