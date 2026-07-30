@@ -509,6 +509,9 @@ end
 @inline p3_dry_air_heat_capacity(::Nothing, FT) = FT(1005)
 @inline p3_dry_air_heat_capacity(constants, FT) = FT(constants.dry_air.heat_capacity)
 
+@inline p3_gravitational_acceleration(::Nothing, FT) = FT(9.81)
+@inline p3_gravitational_acceleration(constants, FT) = FT(constants.gravitational_acceleration)
+
 # GPU-compatible fallbacks: use precomputed module constants when constants=nothing.
 # The original code used `isnothing(constants) ? ThermodynamicConstants(FT) : constants`
 # but ThermodynamicConstants() allocates and cannot run on GPU. These dispatches provide

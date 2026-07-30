@@ -126,18 +126,32 @@ struct CloudTerminalVelocities{FT}
     number_weighted :: FT
 end
 
+# Stokes-regime cloud-droplet fall speed, `v(D) = a_cn D²`. Fortran `get_cloud_dsd2`
+# sets `acn = g ρʷ / (18 μ_air)` with `bcn = 2`, so the PSD-weighted moments follow from
+# Γ(μ+b+4)/Γ(μ+4) = (μ+5)(μ+4) for mass and Γ(μ+b+1)/Γ(μ+1) = (μ+2)(μ+1) for number.
+# `rime_density` needs the same mass-weighted speed to form the Cober-List rime-impact
+# parameter, so both call these helpers rather than repeating the arithmetic with their
+# own gravitational acceleration.
+@inline cloud_stokes_prefactor(g, ρᴸ, μ_air) =
+    g * ρᴸ / (18 * max(μ_air, oftype(μ_air, 1e-20)))
+
+@inline cloud_mass_weighted_stokes_velocity(a_cn, μ_c, λ_c) =
+    a_cn * (μ_c + 5) * (μ_c + 4) / λ_c^2
+
+@inline cloud_number_weighted_stokes_velocity(a_cn, μ_c, λ_c) =
+    a_cn * (μ_c + 2) * (μ_c + 1) / λ_c^2
+
 # `μ_c` and `λ_c` are the cloud-DSD shape/slope diagnosed by `diagnose_cloud_dsd`;
 # the caller passes the values already computed in `p3_ice_properties`
 # (`props.μ_cloud`/`props.λ_cloud`) so the fall-speed kernel does not re-diagnose them.
-@inline function cloud_terminal_velocities(p3, qᶜˡ, ρ, ν, μ_c, λ_c)
+@inline function cloud_terminal_velocities(p3, qᶜˡ, ρ, ν, μ_c, λ_c, constants)
     FT = typeof(qᶜˡ + ρ + ν + μ_c + λ_c)
     μ_air = ν * ρ
-    a_cn = FT(9.81) * p3.process_rates.liquid_water_density /
-           (FT(18) * max(μ_air, FT(1e-20)))
-    inverse_λ_squared = inv(λ_c^2)
+    g = p3_gravitational_acceleration(constants, FT)
+    a_cn = cloud_stokes_prefactor(g, p3.process_rates.liquid_water_density, μ_air)
     active = qᶜˡ >= p3.minimum_mass_mixing_ratio
-    mass_weighted = a_cn * (μ_c + 5) * (μ_c + 4) * inverse_λ_squared
-    number_weighted = a_cn * (μ_c + 2) * (μ_c + 1) * inverse_λ_squared
+    mass_weighted = cloud_mass_weighted_stokes_velocity(a_cn, μ_c, λ_c)
+    number_weighted = cloud_number_weighted_stokes_velocity(a_cn, μ_c, λ_c)
     return CloudTerminalVelocities{FT}(ifelse(active, mass_weighted, zero(FT)),
                                        ifelse(active, number_weighted, zero(FT)))
 end

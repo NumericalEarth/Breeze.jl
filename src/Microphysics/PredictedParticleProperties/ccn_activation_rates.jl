@@ -39,10 +39,17 @@ concentration, a seed mass is created. The target cloud mass is
 ``N_c / ρ × m_{\\text{drop}}`` where ``m_{\\text{drop}} = (4π/3) ρ_w r^3``
 for ``r = 1`` μm. The rate is limited by the available supersaturation.
 
+The supersaturation limit divides by the same liquid psychrometric factor
+``ξˡ = 1 + ℒˡ² q^{v+ℓ} / (c_p^d R_v T²)`` that `limit_vapor_rates` uses to build
+`qcon_cap` and that the Grabowski-Morrison alignment uses in
+`predicted_supersaturation_adjustment`. Sizing the rate with the moist mixture
+heat capacity and then capping it with the dry-air one would mix two conventions inside
+one cell's vapor budget; Fortran's `ab` is the dry-air form, applied once.
+
 # Returns
 - Rate of vapor → cloud liquid conversion from CCN activation [kg/kg/s]
 """
-@inline function ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖᵐ)
+@inline function ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
@@ -55,14 +62,13 @@ for ``r = 1`` μm. The rate is limited by the available supersaturation.
     # Deficit: how much mass is needed to reach the minimum
     deficit = clamp_positive(target_qc - clamp_positive(qᶜˡ))
 
-    # Psychrometric correction (liquid saturation)
-    ℒˡ = liquid_latent_heat(T, constants)
-    Rᵛ = vapor_gas_constant(constants)
-    dqᵛ⁺_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
-    Γˡ = 1 + (ℒˡ / cᵖᵐ) * dqᵛ⁺_dT
+    # Psychrometric correction (liquid saturation, Fortran `ab`)
+    ℒˡ = vaporization_latent_heat(constants, T)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
 
     # Limit by available supersaturation (Fortran: min(tmp1, (Qv_cld-dumqvs)/ab))
-    max_from_ss = clamp_positive((qᵛ - qᵛ⁺ˡ) / Γˡ)
+    max_from_ss = clamp_positive((qᵛ - qᵛ⁺ˡ) / ξˡ)
     rate = min(deficit, max_from_ss) / prp.sink_limiting_timescale
 
     # Only activate when supersaturated (Fortran threshold: sup_cld > 1e-6)
@@ -76,7 +82,7 @@ $(TYPEDSIGNATURES)
 Dispatch CCN activation: prescribed (Nothing) or prognostic (AerosolActivation).
 Returns `(; mass, number)` named tuple.
 """
-@inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖᵐ)
+@inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
     FT = typeof(qᶜˡ)
     # Prescribed-Nᶜ path (Fortran `log_predictNc = .false.`, `nc = nccnst_2`):
     # the activation target is the scheme parameter, not the DSD-diagnosed `Nᶜ`.
@@ -84,11 +90,11 @@ Returns `(; mass, number)` named tuple.
     # returned `Nᶜ` toward zero — using that value would collapse `target_qc`
     # and block any seed mass from forming in a warm-bubble parcel.
     target_Nᶜ = p3.cloud.number_concentration
-    mass = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, target_Nᶜ, constants, cᵖᵐ)
+    mass = ccn_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, ρ, target_Nᶜ, constants)
     return (; mass, number = zero(FT))
 end
 
-@inline function compute_ccn_activation(aerosol::AerosolActivation, p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖᵐ)
+@inline function compute_ccn_activation(aerosol::AerosolActivation, p3, qᶜˡ, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
     result = prognostic_ccn_activation_rate(aerosol, nᶜˡ, nᵃ, qᵛ, qᵛ⁺ˡ, T)
     return (; mass = result.qcnuc, number = result.ncnuc)
 end

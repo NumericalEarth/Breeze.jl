@@ -35,11 +35,12 @@ function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
 
     qᶜˡ_abs = clamp_positive(qᶜˡ) * ρ
     μ_air = transport.nu * ρ
-    g = constants.gravitational_acceleration
+    g = p3_gravitational_acceleration(constants, FT)
 
-    # Fortran get_cloud_dsd2 / p3_main: bcn = 2 and Γ(μ+6)/Γ(μ+4) = (μ+5)(μ+4).
-    a_cn = g * ρᴸ / (FT(18) * max(μ_air, FT(1e-20)))
-    Vt_qc = a_cn * (μ_c + 5) * (μ_c + 4) / λ_c^2
+    # Fortran get_cloud_dsd2 / p3_main: the droplet impact speed is the mass-weighted
+    # Stokes velocity of the cloud DSD, shared with `cloud_terminal_velocities`.
+    a_cn = cloud_stokes_prefactor(g, ρᴸ, μ_air)
+    Vt_qc = cloud_mass_weighted_stokes_velocity(a_cn, μ_c, λ_c)
     D_c = (μ_c + 4) / λ_c
     inverse_supercooling = inv(min(FT(-0.001), T - T₀))
     Ri = clamp(-(FT(0.5e6) * D_c) * abs(vᵢ - Vt_qc) * inverse_supercooling, FT(1), FT(12))

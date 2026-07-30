@@ -770,13 +770,14 @@ end
 # process rates need the resolved host tendencies assembled during that step.
 # Keep both computations scalar and return concrete structs for GPU compilation.
 @noinline function p3_fall_speed_compute(p3::P3, ρ, ℳ::P3MicrophysicalState,
-                                          props::P3IceProps)
+                                          props::P3IceProps, constants)
     Fᶠ = props.Fᶠ
     ρᶠ = props.ρᶠ
 
     # Cloud terminal velocities — Fortran sediments cloud mass and number with
     # DSD-integrated Stokes velocities in sedimentation_liquid(liq_type = 1).
-    vᶜ = cloud_terminal_velocities(p3, ℳ.qᶜˡ, ρ, props.nu, props.μ_cloud, props.λ_cloud)
+    vᶜ = cloud_terminal_velocities(p3, ℳ.qᶜˡ, ρ, props.nu, props.μ_cloud, props.λ_cloud,
+                                   constants)
     wᶜˡ = vᶜ.mass_weighted
     wᶜˡₙ = vᶜ.number_weighted
 
@@ -875,7 +876,7 @@ end
                                       surface_temperature, temperature_tendency,
                                       vapor_tendency)
     props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
-    velocities = p3_fall_speed_compute(p3, ρ, ℳ, props)
+    velocities = p3_fall_speed_compute(p3, ρ, ℳ, props, constants)
     tendencies = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, props,
                                       surface_temperature, temperature_tendency,
                                       vapor_tendency)
@@ -997,7 +998,7 @@ end
                                           constants, velocities)
     ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
     props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
-    result = p3_fall_speed_compute(p3, ρ, ℳ, props)
+    result = p3_fall_speed_compute(p3, ρ, ℳ, props, constants)
     return write_p3_fall_speeds!(μ, i, j, k, p3, result)
 end
 

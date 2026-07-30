@@ -18,7 +18,6 @@ using Breeze.Thermodynamics: temperature,
                              density,
                              liquid_latent_heat,
                              ice_latent_heat,
-                             mixture_heat_capacity,
                              vapor_gas_constant,
                              MoistureMassFractions,
                              ThermodynamicConstants
@@ -59,8 +58,6 @@ struct P3DerivedState{FT, Q}
     D_v :: FT       # water vapor diffusivity [m²/s]
     K_a :: FT       # thermal conductivity of air [W/m/K]
     nu :: FT        # kinematic viscosity [m²/s]
-    # Mixture heat capacity (hoisted to avoid recomputation in phase-1 sub-functions)
-    cᵖᵐ :: FT       # moist mixture heat capacity [J/kg/K]
 end
 
 @inline function liquid_supersaturation_after_moisture_update(𝒰, qᵛ, qˡ, qⁱ, ρ, constants)
@@ -297,7 +294,6 @@ P3ProcessRates(first_rate::FT, remaining_rates::Vararg{FT, 53}) where FT =
 
     # Transport properties (reconstructed as NamedTuple for existing function signatures)
     transport = (; D_v = state.D_v, K_a = state.K_a, nu = state.nu)
-    cᵖᵐ = state.cᵖᵐ
     qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
 
     # =========================================================================
@@ -312,7 +308,7 @@ P3ProcessRates(first_rate::FT, remaining_rates::Vararg{FT, 53}) where FT =
     cond = vapor_rates.condensation
 
     # CCN activation (prescribed or prognostic; depletes ℳ.nᵃ when prognostic)
-    ccn = compute_ccn_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants, cᵖᵐ)
+    ccn = compute_ccn_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ, qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
     ccn_act = ccn.mass
     ccn_act_n = ccn.number
 
@@ -687,16 +683,16 @@ end
     ℳ_adjusted = P3MicrophysicalState(qᶜˡ, ℳ.nᶜˡ, qʳ, ℳ.nʳ, qⁱ, ℳ.nⁱ,
                                       qᶠ, bᶠ, ℳ.zⁱ, qʷⁱ, qᵛ - qᵛ⁺ˡ, ℳ.nᵃ, ℳ.w)
 
-    # Hoist cᵖᵐ once; shared by coupled_saturation_adjustment_rates and ccn_activation_rate.
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-
     # Build derived state struct (explicit type parameters to avoid
-    # jl_f_throw_methoderror in @noinline GPU compilation)
+    # jl_f_throw_methoderror in @noinline GPU compilation). The rate functions that
+    # need a heat capacity all use the dry-air `cᵖᵈ` psychrometric convention
+    # (`liquid_psychrometric_correction` / `ice_psychrometric_correction`), which is a
+    # scheme constant rather than a per-cell quantity, so no cᵖᵐ is carried here.
     state = P3DerivedState{FT, typeof(q)}(nⁱ, nʳ, qᶠ, bᶠ, Fᶠ, ρᶠ,
                                           μ_ice, Fˡ_mu, Nᶜ, cloud.nᶜˡ,
                                           cloud.μ_c, cloud.λ_c,
                                           T, P, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, q,
-                                          transport.D_v, transport.K_a, transport.nu, cᵖᵐ)
+                                          transport.D_v, transport.K_a, transport.nu)
 
     # === PHASE 1 & 2 RATES (delegated to @noinline sub-functions) ===
     ph1 = _p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,

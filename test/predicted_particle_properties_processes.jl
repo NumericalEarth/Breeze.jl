@@ -946,6 +946,35 @@ end
         @test cache.wᶜˡ ≈ expected_mass_velocity rtol=FT(1e-12)
         @test cache.wᶜˡₙ ≈ expected_number_velocity rtol=FT(1e-12)
         @test cache.wᶜˡ > cache.wᶜˡₙ
+
+        # The Stokes prefactor scales with the *model's* gravitational acceleration
+        # rather than a hardcoded 9.81, so doubling g doubles both fall speeds.
+        heavy = ThermodynamicConstants(FT; gravitational_acceleration = 2 * constants.gravitational_acceleration)
+        vᶜ = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.nu, cloud.μ_c, cloud.λ_c, constants)
+        vᶜ_heavy = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.nu, cloud.μ_c, cloud.λ_c, heavy)
+        @test vᶜ.mass_weighted ≈ expected_mass_velocity rtol=FT(1e-12)
+        @test vᶜ_heavy.mass_weighted ≈ 2 * vᶜ.mass_weighted rtol=FT(1e-12)
+        @test vᶜ_heavy.number_weighted ≈ 2 * vᶜ.number_weighted rtol=FT(1e-12)
+
+        # `rime_density` forms the Cober-List impact parameter from the same
+        # mass-weighted Stokes velocity, so its rime density depends on the ice fall
+        # speed only through |vᵢ - vᶜ.mass_weighted| and is symmetric about it. A
+        # second gravitational acceleration in either function would shift that centre.
+        T_rime = p3.process_rates.freezing_temperature - FT(5)
+        transport_rime = air_transport_properties(T_rime, P)
+        cloud_rim = FT(1e-5)
+        δ = FT(1)
+        for g_constants in (constants, heavy)
+            v_impact = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport_rime.nu,
+                                                     cloud.μ_c, cloud.λ_c,
+                                                     g_constants).mass_weighted
+            ρᶠ_above = rime_density(p3, qᶜˡ, cloud_rim, T_rime, v_impact + δ, ρ,
+                                    g_constants, transport_rime, cloud.μ_c, cloud.λ_c)
+            ρᶠ_below = rime_density(p3, qᶜˡ, cloud_rim, T_rime, v_impact - δ, ρ,
+                                    g_constants, transport_rime, cloud.μ_c, cloud.λ_c)
+            @test ρᶠ_above ≈ ρᶠ_below rtol=FT(1e-12)
+            @test p3.process_rates.minimum_rime_density < ρᶠ_above < p3.process_rates.maximum_rime_density
+        end
     end
 
     @testset "Tabulated deposition does not destroy the sixth moment" begin
@@ -1694,6 +1723,50 @@ end
         @test dep_sink_total * dt_safety <= qdep_cap + FT(10) * eps(FT)
     end
 
+    @testset "CCN activation and the vapor caps share one psychrometric convention" begin
+        FT = Float64
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
+        τ = p3.process_rates.sink_limiting_timescale
+
+        ρ = FT(1)
+        P = FT(9e4)
+        T = FT(283.15)
+        qᵗ = FT(1.2e-2)
+        qᵛ⁺ˡ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants, PlanarLiquidSurface())
+        # Weak supersaturation, so the seed mass is limited by the available vapor rather
+        # than by the prescribed-Nᶜ target mass.
+        qᵛ = qᵛ⁺ˡ + FT(1e-6)
+        qᶜˡ = zero(FT)
+        q = MoistureMassFractions(qᵛ, qᶜˡ, zero(FT))
+        Nᶜ = p3.cloud.number_concentration
+
+        ccn = PPP.compute_ccn_activation(p3.aerosol, p3, qᶜˡ, zero(FT), zero(FT),
+                                         qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+
+        Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
+        ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
+        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+        cons7 = FT(4 * FT(π) / 3 * 1000 * (1e-6)^3)
+        deficit = Nᶜ / ρ * cons7
+        @test (qᵛ - qᵛ⁺ˡ) / ξˡ < deficit
+        @test ccn.mass ≈ ((qᵛ - qᵛ⁺ˡ) / ξˡ) / τ rtol=FT(1e-14)
+
+        # The moist mixture heat capacity gives a materially different factor, so sizing
+        # the rate with it and capping it with cᵖᵈ would disagree within one cell.
+        cᵖᵐ = mixture_heat_capacity(q, constants)
+        Γˡ = 1 + ℒˡ^2 * qᵛ⁺ˡ / (Rᵛ * T^2 * cᵖᵐ)
+        @test Γˡ < ξˡ
+        @test !isapprox(Γˡ, ξˡ; rtol = FT(1e-3))
+
+        # With one convention, a vapor-limited activation rate exactly fills
+        # `limit_vapor_rates`'s liquid budget instead of being rescaled by it.
+        limited = PPP.limit_vapor_rates(zero(FT), ccn.mass, zero(FT), zero(FT), zero(FT),
+                                        zero(FT), zero(FT), zero(FT), zero(FT), zero(FT),
+                                        qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, τ)
+        @test limited.ccn_act ≈ ccn.mass rtol=FT(1e-12)
+    end
+
     @testset "limit_vapor_rates caps evaporation when subsaturated" begin
         FT = Float64
         constants = ThermodynamicConstants(FT)
@@ -1987,7 +2060,6 @@ end
             transport.D_v,
             transport.K_a,
             transport.nu,
-            mixture_heat_capacity(q, constants),
         )
         ℳ = P3MicrophysicalState(
             qᶜˡ,
@@ -2060,7 +2132,6 @@ end
             transport.D_v,
             transport.K_a,
             transport.nu,
-            mixture_heat_capacity(q, constants),
         )
         ℳ = P3MicrophysicalState(
             qᶜˡ,

@@ -27,7 +27,6 @@ using Breeze.Thermodynamics:
     PlanarIceSurface,
     PlanarLiquidSurface,
     ThermodynamicConstants,
-    mixture_heat_capacity,
     saturation_specific_humidity,
     temperature,
     with_temperature
@@ -82,7 +81,6 @@ function routing_derived_state(p3, air_density, microphysical_state,
         transport.D_v,
         transport.K_a,
         transport.nu,
-        mixture_heat_capacity(moisture, constants),
     )
 
     return props, state
@@ -427,9 +425,9 @@ end
             p3, one(FT), coated_wet_growth_state,
             wet_growth_thermodynamic_state, constants)
         wet_growth_fall_speeds = P3Routing.p3_fall_speed_compute(
-            p3, one(FT), wet_growth_state, wet_growth_props)
+            p3, one(FT), wet_growth_state, wet_growth_props, constants)
         coated_wet_growth_fall_speeds = P3Routing.p3_fall_speed_compute(
-            p3, one(FT), coated_wet_growth_state, coated_wet_growth_props)
+            p3, one(FT), coated_wet_growth_state, coated_wet_growth_props, constants)
 
         @test coated_wet_growth_props.qⁱ_total == wet_growth_props.qⁱ_total
         @test coated_wet_growth_props.Fˡ == wet_growth_props.Fˡ == 0
