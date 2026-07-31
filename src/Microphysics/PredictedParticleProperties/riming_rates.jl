@@ -76,7 +76,8 @@ Compute above-freezing cloud collection by melting ice (Fortran qcshd/ncshdc pat
 
 When `T > T₀`, ice particles still sweep up cloud droplets via the same collection
 kernel as riming, but the collected water is immediately shed as rain drops (not frozen).
-The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 1.923e6).
+The number of new rain drops follows `process_rates.shed_drop_mass`, whose default is the
+Fortran 1 mm shed drop (`ncshdc = qcshd × 1.923e6`, i.e. m_shed = 1/1.923e6 kg).
 
 # Returns
 - `(mass_rate, number_rate)`: Cloud → rain mass rate [kg/kg/s] and rain number source [1/kg/s]
@@ -108,7 +109,7 @@ The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 
 
     mass_rate = Eᶜⁱ * qᶜˡ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle
     # Fortran: ncshdc = qcshd * 1.923e6 (shed as 1mm drops: m = π/6 × 1000 × 0.001³ ≈ 5.2e-7 kg)
-    number_rate = mass_rate * FT(1.923e6)
+    number_rate = mass_rate / prp.shed_drop_mass
 
     return (ifelse(active, mass_rate, zero(FT)),
             ifelse(active, number_rate, zero(FT)))

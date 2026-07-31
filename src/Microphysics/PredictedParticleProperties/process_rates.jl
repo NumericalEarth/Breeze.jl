@@ -157,8 +157,10 @@ struct P3ProcessRates{FT}
     cloud_self_collection :: FT    # Cloud number loss from cloud-cloud coalescence [1/kg/s] (SB2001 only; 0 for KK2000/K2013)
     rain_evaporation :: FT         # Rain evaporation magnitude [kg/kg/s]
     rain_evaporation_number :: FT  # Rain number loss from evaporation [1/kg/s]
-    rain_self_collection :: FT     # Rain number loss magnitude [1/kg/s]
-    rain_breakup :: FT             # Rain number gain from breakup [1/kg/s]
+    # The self-collection/breakup pair is netted (only one is nonzero) so that the
+    # rain-number limiter sees Fortran's single signed `nrslf` (`compute_p3_process_rates`).
+    rain_self_collection :: FT     # Net rain number loss from self-collection [1/kg/s]
+    rain_breakup :: FT             # Net rain number gain from breakup [1/kg/s]
 
     # Phase 1: Ice tendencies (BIDIRECTIONAL deposition; positive melting/number)
     deposition :: FT               # Vapor ↔ ice mass [kg/kg/s] (+dep, −sublim)
@@ -1116,6 +1118,23 @@ end
     # Project the remaining number-only sinks onto the population left afterward.
     cloud_warm_rain_number = ifelse(
         prp.liquid_fraction_active, zero(FT), cloud_warm_q / prp.shed_drop_mass)
+
+    # Net the self-collection/breakup pair before it enters the number budget.
+    # Fortran carries one signed term, `nrslf = dum × base` with the
+    # Verlinde-Cotton modifier `dum ≤ 1` (`microphy_p3.f90:3872-3886`), applied as
+    # `nr += -nrslf·dt` (`:4329`) and deliberately left out of every limiter
+    # rescale list (`:4088-4098`). Breeze reports the two directions separately, so
+    # `base` and `(1 - dum)·base` arrive here as a sink/source pair that must be
+    # collapsed first: rescaling only the sink half by `f_rain_number` below would
+    # leave the breakup source at full strength against a limited sink, turning the
+    # net into spurious rain-number production once D_r exceeds the breakup
+    # threshold. Netting here also keeps `f_rain_number` a positivity guarantee —
+    # everything in `rain_number_source_total` stays unscaled, so the limited
+    # sinks cannot outrun the number the budget promised them.
+    net_rain_self = rain_self - rain_br
+    rain_self = max(0, net_rain_self)
+    rain_br = max(0, -net_rain_self)
+
     rain_number_source_total = autoconv / rain_seed_drop_mass(p3) + melt_n +
                                rain_br + shed_n + cloud_warm_rain_number + wg_shed_n
     rain_evap_n = safe_divide(nʳ * rain_evap, qʳ, zero(FT))

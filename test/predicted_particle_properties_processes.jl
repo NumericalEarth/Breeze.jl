@@ -2528,6 +2528,59 @@ end
         @test rates.rime_density_new <= 900
     end
 
+    @testset "rain self-collection and breakup net into a single signed term" begin
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+
+        ρ = FT(1.0)
+        T = FT(283.15)
+        P = FT(85000)
+        pˢᵗ = FT(100000)
+        qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+
+        # Fortran carries one signed term, `nrslf = dum × base` with the
+        # Verlinde-Cotton modifier `dum ≤ 1` (microphy_p3.f90:3872-3886), and never
+        # rescales it in any limiter. Breeze reports the sink and source directions
+        # separately, so the pair must be netted before the rain-number limiter:
+        # rescaling the sink alone would leave the breakup source at full strength and
+        # turn the net into spurious rain-number production above the breakup threshold.
+        function rain_only_rates(qʳ, nʳ)
+            q = MoistureMassFractions(qᵛ, qʳ, zero(FT))
+            𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P),
+                                 T, constants)
+            ℳ = P3MicrophysicalState(zero(FT), zero(FT), qʳ, nʳ, zero(FT), zero(FT),
+                                     zero(FT), zero(FT), zero(FT), zero(FT), zero(FT))
+            return compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        end
+
+        # Large drops: D_r = (qʳ / (π ρʷ nʳ))^(1/3) ≈ 680 μm exceeds the 280 μm
+        # threshold, so dum < 0, breakup outruns self-collection, and the netted pair
+        # must report a pure source.
+        qʳ_large, nʳ_large = FT(1e-3), FT(1e3)
+        base_large = rain_self_collection_rate(p3, qʳ_large, nʳ_large, ρ)
+        breakup_large = rain_breakup_rate(p3, qʳ_large, nʳ_large, base_large)
+        @test breakup_large > base_large > 0
+
+        large = rain_only_rates(qʳ_large, nʳ_large)
+        @test large.rain_self_collection == 0
+        @test large.rain_breakup ≈ breakup_large - base_large rtol=FT(1e-10)
+
+        # Small drops: D_r ≈ 68 μm, breakup inactive, pure sink.
+        qʳ_small, nʳ_small = FT(1e-3), FT(1e6)
+        base_small = rain_self_collection_rate(p3, qʳ_small, nʳ_small, ρ)
+        @test rain_breakup_rate(p3, qʳ_small, nʳ_small, base_small) == 0
+
+        small = rain_only_rates(qʳ_small, nʳ_small)
+        @test small.rain_breakup == 0
+        @test small.rain_self_collection ≈ base_small rtol=FT(1e-10)
+
+        # Only one direction is ever nonzero once netted, so `f_rain_number` can never
+        # scale one half of the pair without the other.
+        @test large.rain_self_collection * large.rain_breakup == 0
+        @test small.rain_self_collection * small.rain_breakup == 0
+    end
+
     @testset "above-freezing cloud collection separates cloud sink from shed rain source" begin
         FT = Float64
         constants = ThermodynamicConstants(FT)
@@ -2566,8 +2619,18 @@ end
             cloud_warm_collection = FT(1e-8),
             cloud_warm_collection_number = FT(1e4),
         )
+        # The shed-drop count follows the configurable `shed_drop_mass` (default the
+        # Fortran 1 mm drop, 1/1.923e6 kg), not a hardcoded literal: the rain-number
+        # limiter budgets this source as `cloud_warm_collection / shed_drop_mass`, so
+        # the assembled tendency has to divide by the same mass.
         expected_shed_drop_source = ρ * manual_rates.cloud_warm_collection * FT(1.923e6)
         @test tendency_ρnʳ(manual_rates, ρ, nⁱ, qⁱ, nʳ, one(FT), p3) ≈ expected_shed_drop_source
+
+        heavy_shed = ProcessRateParameters(FT; liquid_fraction_active = false,
+                                           shed_drop_mass = 1 / 4.0e5)
+        p3_heavy = PredictedParticlePropertiesMicrophysics(FT; process_rates = heavy_shed)
+        @test tendency_ρnʳ(manual_rates, ρ, nⁱ, qⁱ, nʳ, one(FT), p3_heavy) ≈
+              ρ * manual_rates.cloud_warm_collection * FT(4.0e5)
     end
 
     @testset "non-liquid-fraction routing keeps warm collection and wet growth out of qʷⁱ" begin

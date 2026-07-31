@@ -172,12 +172,16 @@ Rain number loses from:
 
     # Gains: shedding produces rain drops
     # cloud_warm_collection → new rain drops from above-freezing cloud
-    #      collection (Fortran ncshdc = qcshd × 1.923e6). Only in
-    #      non-liquid-fraction path; when liquid fraction is active, collected
+    #      collection (Fortran ncshdc = qcshd × 1.923e6, i.e. 1/m_shed). Use the
+    #      configurable `shed_drop_mass` rather than the Fortran literal: the
+    #      rain-number limiter and the homogeneous-freezing residual both budget
+    #      this source as `cloud_warm_collection / shed_drop_mass`, and a hardcoded
+    #      divisor would disagree with them for any non-default drop mass. Only in
+    #      the non-liquid-fraction path; when liquid fraction is active, collected
     #      mass goes to qʷⁱ, not rain.
     # wet_growth_shedding_number → rain drops from excess wet growth (Fortran nrshdr)
     cloud_warm_rain_n = ifelse(prp.liquid_fraction_active, zero(FT),
-                               rates.cloud_warm_collection * FT(1.923e6))
+                               rates.cloud_warm_collection / prp.shed_drop_mass)
     n_gain = n_from_autoconv + n_from_melt +
              rates.rain_breakup +
              rates.shedding_number +
