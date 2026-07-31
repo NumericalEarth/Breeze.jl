@@ -197,8 +197,9 @@ Finding ``λ`` requires solving:
 This is a nonlinear equation in ``λ``, since ``μ = μ(λ)``. In the official P3
 code, ``λ`` is determined during lookup-table generation by scanning over a
 fixed range (roughly 10–10⁷ m⁻¹) and selecting the value that best matches L/N
-for the current ``μ`` and piecewise ``m(D)``. The `distribution_parameters` helper in Breeze instead uses a
-secant solver for direct evaluation.
+for the current ``μ`` and piecewise ``m(D)``. Breeze's [`solve_lambda`](@ref) instead solves the
+equation directly: a secant iteration for the two-moment closure, and a bracketed bisection at
+fixed ``μ`` for three-moment ice.
 
 ```@example p3_psd
 # Solve for distribution parameters
@@ -211,17 +212,35 @@ params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density)
 
 println("Distribution parameters:")
 println("  N₀ = $(round(params.N₀, sigdigits=3)) m⁻⁵⁻μ")
+println("  log N₀ = $(round(params.log_intercept, digits=2))")
 println("  λ  = $(round(params.λ, sigdigits=3)) m⁻¹")
 println("  μ  = $(round(params.μ, digits=2))")
 ```
 
 ### Computing ``N₀``
 
-Once ``λ`` and ``μ`` are known, the intercept is found from normalization:
+Once ``λ`` and ``μ`` are known, the intercept follows from a normalization integral. Inverting
+the zeroth moment normalizes on number,
 
 ```math
-N₀ = \frac{N λ^{μ+1}}{Γ(μ + 1)}
+N₀ = \frac{N λ^{μ+1}}{Γ(μ + 1)},
 ```
+
+which is what [`intercept_parameter`](@ref) returns. [`distribution_parameters`](@ref) instead
+normalizes on mass, as the Fortran table generators do
+(`create_p3_lookupTable_1.f90:1054`, `create_p3_lookupTable_3.f90:366`):
+
+```math
+N₀ = \frac{L}{\int_0^∞ m(D)\, D^μ e^{-λD}\, dD}
+```
+
+The two coincide whenever ``λ`` satisfies the L/N constraint above, since that constraint is
+exactly the statement that the two normalizations agree. They part company only where the
+mean-diameter limiter clamps ``λ``: normalizing on mass keeps ``L`` exact and lets the
+represented number concentration absorb the adjustment — P3's own policy, which adjusts ``N``
+to keep the mean particle size physical — whereas normalizing on number would preserve ``N``
+and misstate the mass. The represented ``N`` and ``Z`` are reported in
+[`IceDistributionParameters`](@ref), so the adjustment is never silent.
 
 ## Visualizing Size Distributions
 
@@ -244,7 +263,7 @@ for (L, L_label, color) in [(1e-5, "L = 10⁻⁵ kg/m³", :blue),
                              (1e-4, "L = 10⁻⁴ kg/m³", :green),
                              (1e-3, "L = 10⁻³ kg/m³", :red)]
     params = distribution_parameters(L, N_ice, 0.0, 400.0)
-    N_D = @. params.N₀ * D_m^params.μ * exp(-params.λ * D_m)
+    N_D = @. exp(params.log_intercept + params.μ * log(D_m) - params.λ * D_m)
     label = L_label * "  (μ = $(round(params.μ, digits=2)))"
     lines!(ax, D_mm, N_D, label=label, color=color)
 end
@@ -273,7 +292,7 @@ for (Ff, Ff_label, color) in [(0.0, "Fᶠ = 0 (unrimed)", :blue),
                                (0.3, "Fᶠ = 0.3", :green),
                                (0.6, "Fᶠ = 0.6", :orange)]
     params = distribution_parameters(L_ice, N_ice, Ff, 500.0)
-    N_D = @. params.N₀ * D_m^params.μ * exp(-params.λ * D_m)
+    N_D = @. exp(params.log_intercept + params.μ * log(D_m) - params.λ * D_m)
     label = Ff_label * "  (μ = $(round(params.μ, digits=2)))"
     lines!(ax, D_mm, N_D, label=label, color=color)
 end
@@ -332,7 +351,13 @@ This allows independent determination of ``μ`` rather than using the μ-λ rela
 Combined with the L/N ratio, this gives two equations for two unknowns (``μ`` and ``λ``).
 In the official P3 code, these constraints are used to build a lookup table that
 returns ``μ`` (and bulk density); ``λ`` is then obtained from
-the main table using the diagnosed ``μ``.
+the main table using the diagnosed ``μ``. Breeze's model path reads those same tables,
+while [`solve_shape_parameter`](@ref) solves the pair directly for offline use. At fixed
+``μ``, ``λ`` first follows from L/N, then the physical diameter bounds and mass
+normalization are applied. The bounded PSD's sixth moment ``M₆(μ)`` is matched against
+``Z`` by bisection between the ``μ`` bounds. When a limiter makes the input moments
+incompatible, [`IceDistributionParameters`](@ref) reports the adjusted number and sixth
+moment represented by the returned PSD.
 
 The benefit of three-moment ice is improved representation of:
 - **Size sorting**: Large particles fall faster and separate from small ones
@@ -350,9 +375,15 @@ The P3 size distribution closure proceeds as:
 
 1. **Prognostic moments**: ``L``, ``N`` (and optionally ``Z``) are carried by the model
 2. **Rime properties**: ``F^f`` and ``ρ^f`` determine the mass-diameter relationship
-3. **Lambda solver**: ``λ`` is tabulated by scanning L/N in the reference Fortran (Breeze uses a secant solver in the helper)
+3. **Lambda solver**: ``λ`` is tabulated by scanning L/N in the reference Fortran
+   (Breeze uses direct root solvers in the helper)
 4. **μ diagnosis**: Piecewise diagnostic for 2-moment, or lookup-table inversion for 3-moment
-5. **Normalization**: Intercept ``N₀`` from number conservation
+   (with [`solve_shape_parameter`](@ref) solving the same constraint directly where no
+   diameter limiter binds)
+5. **Normalization**: Intercept ``N₀`` from the mass integral, so ``L`` is preserved even where
+   the ``λ`` limiter binds; represented ``N`` and ``Z`` expose any required adjustment.
+   ``\log N₀`` is reported alongside ``N₀``, whose m^-(4+μ) units put it beyond Float32 range
+   for narrow distributions of small particles
 
 This provides the complete size distribution needed for computing microphysical rates.
 

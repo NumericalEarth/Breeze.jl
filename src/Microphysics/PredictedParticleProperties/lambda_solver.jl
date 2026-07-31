@@ -43,8 +43,8 @@ matches the observed ratio. This is the two-moment solver using the
 """
 function solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
                       liquid_fraction = zero(typeof(L_ice)),
-                      mass = IceMassPowerLaw(),
-                      closure = TwoMomentClosure(),
+                      mass = IceMassPowerLaw(typeof(L_ice)),
+                      closure = TwoMomentClosure(typeof(L_ice)),
                       logλ_bounds = (log(10), log(P3_LAMBDA_MAX)),
                       max_iterations = 50,
                       tolerance = 1e-10)
@@ -81,6 +81,7 @@ end
 
 """
     solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ;
+                 liquid_fraction = zero(typeof(L_ice)),
                  mass = IceMassPowerLaw(),
                  logλ_bounds = (log(10), log(P3_LAMBDA_MAX)),
                  max_iterations = 50,
@@ -94,16 +95,25 @@ function finds λ that satisfies the L/N constraint at that μ.
 # Arguments
 - `L_ice`: Ice mass concentration [kg/m³]
 - `N_ice`: Ice number concentration [1/m³]
-- `Z_ice`: Ice sixth moment [m⁶/m³] (used for initial guess)
+- `Z_ice`: Ice sixth moment [m⁶/m³] (retained for API symmetry; λ at fixed μ
+  is determined only by `L_ice / N_ice`)
 - `rime_fraction`: Mass fraction of rime [-]
 - `rime_density`: Density of rime [kg/m³]
 - `μ`: Shape parameter (determined from three-moment solver)
+
+# Keyword Arguments
+- `liquid_fraction`: Liquid water fraction [-] (default 0). `L_ice` is the total
+  (ice + liquid coating) mass, so the λ solve must integrate the same wet m(D)
+  that normalizes `N₀` in [`distribution_parameters`](@ref); the Fortran
+  three-moment table generator targets the wet mass identically
+  (`create_p3_lookupTable_3.f90:335`, `:366`).
 
 # Returns
 - `logλ`: Log of slope parameter
 """
 function solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ;
-                      mass = IceMassPowerLaw(),
+                      liquid_fraction = zero(typeof(L_ice)),
+                      mass = IceMassPowerLaw(typeof(L_ice)),
                       logλ_bounds = (log(10), log(P3_LAMBDA_MAX)),
                       max_iterations = 50,
                       tolerance = 1e-10)
@@ -117,44 +127,150 @@ function solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ;
     target = log(L_ice) - log(N_ice)
 
     function f(logλ)
-        log_L_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ)
+        log_L_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ;
+                                         liquid_fraction)
         log_N_over_N₀ = log_gamma_moment(μ, logλ)
         return (log_L_over_N₀ - log_N_over_N₀) - target
     end
 
-    # Use Z/N constraint for initial guess if Z is available
-    if !iszero(Z_ice)
-        logλ_guess = log_lambda_from_reflectivity(μ, log(Z_ice) - log(N_ice))
-        logλ_guess = clamp(logλ_guess, FT(logλ_bounds[1]), FT(logλ_bounds[2]))
-    else
-        logλ_guess = (FT(logλ_bounds[1]) + FT(logλ_bounds[2])) / 2
-    end
+    # The mass-to-number ratio decreases monotonically with λ at fixed μ.
+    # Bracket the solution so an inadmissible Z cannot alter or derail the mass solve.
+    x_lower, x_upper = FT.(logλ_bounds)
+    f_lower, f_upper = f(x_lower), f(x_upper)
 
-    # Secant method starting from Z/N guess
-    x₀ = FT(logλ_bounds[1])
-    x₁ = logλ_guess
-    f₀, f₁ = f(x₀), f(x₁)
+    # The requested mean mass lies outside the numerical λ range.
+    f_lower <= 0 && return x_lower
+    f_upper >= 0 && return x_upper
 
     for _ in 1:max_iterations
-        denom = f₁ - f₀
-        abs(denom) < eps(FT) && return x₁
+        x = (x_lower + x_upper) / 2
+        f_x = f(x)
+        abs(f_x) < tolerance && return x
+        x_upper - x_lower < tolerance * max(abs(x), one(FT)) && return x
 
-        Δx = f₁ * (x₁ - x₀) / denom
-        x₂ = clamp(x₁ - Δx, FT(logλ_bounds[1]), FT(logλ_bounds[2]))
-
-        abs(Δx) < tolerance * abs(x₁) && return x₂
-
-        x₀, f₀ = x₁, f₁
-        x₁, f₁ = x₂, f(x₂)
+        if f_x > 0
+            x_lower = x
+        else
+            x_upper = x
+        end
     end
 
-    return x₁
+    return (x_lower + x_upper) / 2
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Solve for the shape parameter μ from the sixth-moment constraint ``M₆ = Z``.
+
+At fixed μ, [`solve_lambda`](@ref) first finds the λ implied by the prognostic
+mass-to-number ratio. The physical mean-diameter bounds are then applied and ``N₀`` is
+normalized from mass. The bounded distribution therefore always preserves ``L``; when a
+diameter bound binds, its represented number concentration can differ from ``N``, matching
+P3's policy of adjusting number to keep mean particle size physical.
+
+The represented sixth moment is
+
+```math
+M₆(μ) = N₀(μ) \\frac{Γ(μ + 7)}{λ(μ)^{μ + 7}}.
+```
+
+For the P3 mass-diameter law this bounded, mass-normalized ``M₆`` decreases with μ, so
+the three-moment solution is the single root of ``\\log M₆(μ) - \\log Z``, bracketed
+by `closure.μmin` and `closure.μmax` and found here by bisection.
+
+When ``Z`` lies outside the range the bounds can represent, μ is pinned to the nearest
+bound, and the returned [`IceDistributionParameters`](@ref) reports the adjusted sixth
+moment represented by that boundary distribution.
+
+When no diameter limiter binds, this is the direct counterpart of the constraint used to
+generate Fortran Table 3 (`create_p3_lookupTable_3.f90:288-386`). It is not equivalent to
+the legacy runtime `solve_mui`: that routine estimates the geometric third moment from a
+mass-weighted density, an approximation for P3's variable-density particles. Breeze's
+runtime model path reads μ from Table 3 rather than calling either iterative solver.
+"""
+function solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
+                               liquid_fraction = zero(typeof(L_ice)),
+                               mass = IceMassPowerLaw(typeof(L_ice)),
+                               closure = ThreeMomentClosure(typeof(L_ice)),
+                               diameter_bounds = nothing,
+                               max_iterations = 60,
+                               tolerance = 1e-6)
+
+    FT = typeof(L_ice)
+
+    # Without positive mass and number there is no distribution to solve for.
+    if L_ice <= 0 || N_ice <= 0
+        return FT(closure.μmin)
+    end
+
+    # A nonpositive sixth moment is below the representable range. The narrowest
+    # allowable distribution supplies the nearest physical boundary value.
+    Z_ice <= 0 && return FT(closure.μmax)
+
+    log_Z = log(Z_ice)
+    bounds = isnothing(diameter_bounds) ? DiameterBounds(FT, rime_fraction) : diameter_bounds
+
+    function residual(μ)
+        moments = distribution_moments_at_shape(L_ice, N_ice, Z_ice,
+                                                rime_fraction, rime_density, μ,
+                                                bounds; liquid_fraction, mass)
+        return moments.log_sixth_moment - log_Z
+    end
+
+    μ_min = FT(closure.μmin)
+    μ_max = FT(closure.μmax)
+
+    # Z above what the widest distribution supplies, or below what the narrowest does.
+    residual(μ_min) <= 0 && return μ_min
+    residual(μ_max) >= 0 && return μ_max
+
+    for _ in 1:max_iterations
+        μ_max - μ_min < tolerance && break
+        μ = (μ_min + μ_max) / 2
+        if residual(μ) > 0
+            μ_min = μ
+        else
+            μ_max = μ
+        end
+    end
+
+    return (μ_min + μ_max) / 2
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the bounded slope, mass-normalized intercept, and represented zeroth and sixth
+moments at fixed shape parameter μ.
+"""
+function distribution_moments_at_shape(L_ice, N_ice, Z_ice,
+                                       rime_fraction, rime_density, μ, bounds;
+                                       liquid_fraction = zero(typeof(L_ice)),
+                                       mass = IceMassPowerLaw(typeof(L_ice)))
+    logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ;
+                        liquid_fraction, mass)
+    λ = enforce_diameter_bounds(exp(logλ), μ, bounds)
+    logλ = log(λ)
+
+    log_mass = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ;
+                               liquid_fraction)
+    log_intercept = log(L_ice) - log_mass
+    log_number = log_intercept + log_gamma_moment(μ, logλ)
+    log_sixth_moment = log_intercept + log_gamma_moment(μ, logλ; k = 6)
+
+    return (; λ, log_intercept, log_number, log_sixth_moment)
 end
 
 """
 $(TYPEDSIGNATURES)
 
 Compute N₀ from the normalization: N = N₀ × ∫ D^μ exp(-λD) dD.
+
+This is the number-normalized intercept. [`distribution_parameters`](@ref) returns the
+mass-normalized one instead, `N₀ = L / ∫ m(D) D^μ exp(-λD) dD`; the two agree except where
+the mean-diameter limiter clamps λ, in which case only the mass-normalized intercept
+reproduces `L`.
 """
 function intercept_parameter(N_ice, μ, logλ)
     log_N_over_N₀ = log_gamma_moment(μ, logλ)
@@ -277,12 +393,57 @@ end
 """
     IceDistributionParameters
 
-Result of [`distribution_parameters`](@ref). Fields: `N₀`, `λ`, `μ`.
+Result of [`distribution_parameters`](@ref).
+
+The fields `number_concentration` and `sixth_moment` are the moments represented by the
+returned PSD. They equal the supplied prognostic moments when those moments admit a PSD
+within the configured μ and mean-diameter bounds. When a limiter binds, they expose the
+adjusted moments rather than implying that the original, inadmissible moments were retained.
+
+`log_intercept` is ``\\log N₀``, and it is the field to build on in reduced precision.
+Because ``N₀`` carries units of m^-(4+μ), its magnitude grows without physical meaning as
+the distribution narrows: a 10 μm, μ = 8 distribution has ``N₀ ≈ 10⁵⁴``, which exceeds
+the Float32 range even though every moment of that distribution is representable. `N₀` is
+reported as `exp(log_intercept)` and therefore overflows to `Inf` in such cases, while
+`log_intercept` and both represented moments stay exact. Evaluate the distribution as
+
+```math
+N'(D) = \\exp(\\log N₀ + μ \\log D - λ D)
+```
+
+rather than multiplying by ``N₀``. For the degenerate no-ice result every field is zero
+except `log_intercept`, which is ``-∞`` so that ``\\exp(\\log N₀) = N₀ = 0`` still holds.
 """
 struct IceDistributionParameters{FT}
     N₀ :: FT
     λ :: FT
     μ :: FT
+    number_concentration :: FT
+    sixth_moment :: FT
+    log_intercept :: FT
+end
+
+function IceDistributionParameters(N₀::FT, λ::FT, μ::FT) where FT
+    if N₀ <= 0 || λ <= 0
+        return IceDistributionParameters{FT}(N₀, λ, μ, zero(FT), zero(FT), FT(-Inf))
+    end
+
+    logλ = log(λ)
+    log_intercept = log(N₀)
+    number_concentration = exp(log_intercept + log_gamma_moment(μ, logλ))
+    sixth_moment = exp(log_intercept + log_gamma_moment(μ, logλ; k = 6))
+    return IceDistributionParameters{FT}(N₀, λ, μ, number_concentration, sixth_moment,
+                                         log_intercept)
+end
+
+function IceDistributionParameters(N₀, λ, μ)
+    parameters = promote(N₀, λ, μ)
+    return IceDistributionParameters(parameters...)
+end
+
+function IceDistributionParameters(N₀, λ, μ, number_concentration, sixth_moment, log_intercept)
+    parameters = promote(N₀, λ, μ, number_concentration, sixth_moment, log_intercept)
+    return IceDistributionParameters(parameters...)
 end
 
 """
@@ -303,7 +464,8 @@ The solution proceeds in three steps:
 1. **Solve for λ**: Secant method finds the slope parameter satisfying
    the L/N ratio constraint with piecewise m(D)
 2. **Compute μ**: Shape parameter from μ-λ relationship
-3. **Compute N₀**: Intercept from number normalization
+3. **Compute N₀**: Intercept from mass normalization, retaining ``L`` if the
+   mean-diameter limiter adjusts the represented number concentration
 
 # Arguments
 
@@ -319,7 +481,7 @@ The solution proceeds in three steps:
 
 # Returns
 
-[`IceDistributionParameters`](@ref) with fields `N₀`, `λ`, `μ`.
+[`IceDistributionParameters`](@ref) with the PSD parameters and represented moments.
 
 # Example
 
@@ -340,8 +502,8 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Section
 """
 function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
                                   liquid_fraction = zero(typeof(L_ice)),
-                                  mass = IceMassPowerLaw(),
-                                  closure = TwoMomentClosure(),
+                                  mass = IceMassPowerLaw(typeof(L_ice)),
+                                  closure = TwoMomentClosure(typeof(L_ice)),
                                   diameter_bounds = nothing)
     FT = typeof(L_ice)
 
@@ -363,9 +525,13 @@ function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
     logλ = log(λ)
     log_M_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ;
                                      liquid_fraction)
-    N₀ = L_ice / exp(log_M_over_N₀)
+    log_intercept = log(L_ice) - log_M_over_N₀
+    N₀ = exp(log_intercept)
+    number_concentration = exp(log_intercept + log_gamma_moment(μ, logλ))
+    sixth_moment = exp(log_intercept + log_gamma_moment(μ, logλ; k = 6))
 
-    return IceDistributionParameters(N₀, λ, μ)
+    return IceDistributionParameters(N₀, λ, μ, number_concentration, sixth_moment,
+                                     log_intercept)
 end
 
 """
@@ -382,9 +548,15 @@ N'(D) = N₀ D^μ e^{-λD}
 ```
 
 The solution uses:
-1. **Z/N constraint**: Determines λ as a function of μ
-2. **L/N constraint**: Used to solve for the correct μ
-3. **Normalization**: N₀ from the number integral
+1. **L/N constraint**: Diagnoses an unconstrained λ at fixed μ ([`solve_lambda`](@ref))
+2. **Diameter bounds and mass normalization**: Clamp λ and compute N₀ from ``L``
+3. **Sixth-moment constraint**: Select the μ whose bounded, mass-normalized PSD
+   matches ``Z`` ([`solve_shape_parameter`](@ref))
+
+If a diameter limiter binds, the returned PSD preserves ``L`` and, where the μ bounds
+permit, ``Z`` while adjusting the represented number concentration. If the requested
+``Z`` is also outside the representable range, μ is pinned and the represented ``Z`` is
+adjusted. Both adjusted moments are reported in [`IceDistributionParameters`](@ref).
 
 # Advantages of Three-Moment
 
@@ -397,7 +569,7 @@ The solution uses:
 
 - `L_ice`: Ice mass concentration [kg/m³]
 - `N_ice`: Ice number concentration [1/m³]
-- `Z_ice`: Ice sixth moment / reflectivity [m⁶/m³]
+- `Z_ice`: Ice sixth moment [m⁶/m³]
 - `rime_fraction`: Mass fraction of rime [-]
 - `rime_density`: Density of the rime layer [kg/m³]
 
@@ -405,17 +577,19 @@ The solution uses:
 
 - `mass`: Power law parameters (default: `IceMassPowerLaw()`)
 - `closure`: Three-moment closure (default: `ThreeMomentClosure()`)
+- `diameter_bounds`: Bounds on mean particle diameter (default: P3's
+  rime-fraction-dependent bounds)
 
 # Returns
 
-[`IceDistributionParameters`](@ref) with fields `N₀`, `λ`, `μ`.
+[`IceDistributionParameters`](@ref) with the PSD parameters and represented moments.
 
 # Example
 
 ```julia
 using Breeze.Microphysics.PredictedParticleProperties
 
-# Ice with reflectivity constraint
+# Ice with a sixth-moment constraint
 L_ice = 1e-4   # 0.1 g/m³
 N_ice = 1e5    # 100,000 particles/m³
 Z_ice = 1e-12  # Sixth moment [m⁶/m³]
@@ -431,77 +605,32 @@ params = distribution_parameters(L_ice, N_ice, Z_ice, 0.0, 400.0)
 """
 function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
                                   liquid_fraction = zero(typeof(L_ice)),
-                                  mass = IceMassPowerLaw(),
-                                  closure = ThreeMomentClosure(),
+                                  mass = IceMassPowerLaw(typeof(L_ice)),
+                                  closure = ThreeMomentClosure(typeof(L_ice)),
                                   diameter_bounds = nothing)
 
     FT = typeof(L_ice)
 
     # Handle edge cases
-    if iszero(N_ice) || iszero(L_ice)
+    if N_ice <= 0 || L_ice <= 0
         return IceDistributionParameters(zero(FT), zero(FT), zero(FT))
     end
 
     # Fortran always applies Fr-dependent diameter bounds.
     bounds = isnothing(diameter_bounds) ? DiameterBounds(FT, rime_fraction) : diameter_bounds
 
-    # If Z is zero or negative, fall back to two-moment with μ at lower bound
-    if Z_ice ≤ 0
-        μ = closure.μmin
-        logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass)
-        λ = exp(logλ)
-        λ = enforce_diameter_bounds(λ, μ, bounds)
+    # Diagnose μ from the same physically bounded PSD that will be returned.
+    μ = solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
+                              liquid_fraction, mass, closure, diameter_bounds = bounds)
 
-        # Use mass-constrained N₀ (matching two-moment path and Fortran).
-        logλ_final = log(λ)
-        log_M_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ_final;
-                                         liquid_fraction)
-        N₀ = L_ice / exp(log_M_over_N₀)
-        return IceDistributionParameters(N₀, λ, μ)
-    end
+    moments = distribution_moments_at_shape(L_ice, N_ice, Z_ice,
+                                            rime_fraction, rime_density, μ, bounds;
+                                            liquid_fraction, mass)
+    N₀ = exp(moments.log_intercept)
+    λ = moments.λ
+    number_concentration = exp(moments.log_number)
+    sixth_moment = exp(moments.log_sixth_moment)
 
-    # Compute μ from three-moment constraint with density iteration.
-    # Fortran solve_mui iterates up to 5 times: at each step, the bulk density
-    # ρ_bulk is updated from the lookup table (entry 12), which changes M₃ and
-    # hence μ. Here we compute ρ_bulk analytically from the solved (μ, λ) pair
-    # via ρ_bulk = 6L / (π M₃), where M₃ = N Γ(μ+4) / (Γ(μ+1) λ³).
-    ρ_bulk = FT(mass.ice_density)  # initial guess: pure ice density (900 kg/m³)
-    μ = FT(0)
-    logλ = FT(0)
-    for _ in 1:5
-        M₃ = FT(6) * L_ice / (ρ_bulk * FT(π))
-        μ_new = shape_parameter_from_moments(N_ice, M₃, Z_ice, closure.μmax)
-        μ_new = clamp(μ_new, closure.μmin, closure.μmax)
-
-        # Solve for λ using actual piecewise m-D relation
-        logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ_new; mass)
-        λ_iter = exp(logλ)
-
-        # Update bulk density: ρ = 6L Γ(μ+1) λ³ / (π N Γ(μ+4))
-        # This is the effective spherical-equivalent density of the PSD.
-        log_ratio = loggamma(μ_new + 1) - loggamma(μ_new + 4)
-        ρ_bulk_new = FT(6) * L_ice * exp(log_ratio) * λ_iter^3 / (FT(π) * N_ice)
-        ρ_bulk_new = clamp(ρ_bulk_new, FT(50), FT(mass.ice_density))
-
-        # Convergence check (Fortran tolerance: |μ_old - μ_new| < 0.25)
-        converged = abs(μ_new - μ) < FT(0.25)
-        μ = μ_new
-        ρ_bulk = ρ_bulk_new
-        converged && break
-    end
-
-    # Final solve with converged μ
-    logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass)
-    λ = exp(logλ)
-    λ = enforce_diameter_bounds(λ, μ, bounds)
-
-    # Use mass-constrained N₀ (matching two-moment path and Fortran).
-    # After λ clamping, number-normalized N₀ = N × λ^(μ+1)/Γ(μ+1) violates
-    # the mass constraint. Mass-constrained N₀ ensures L = N₀ × ∫m(D)D^μ e^{-λD}dD.
-    logλ_final = log(λ)
-    log_M_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ_final;
-                                     liquid_fraction)
-    N₀ = L_ice / exp(log_M_over_N₀)
-
-    return IceDistributionParameters(N₀, λ, μ)
+    return IceDistributionParameters(N₀, λ, μ, number_concentration, sixth_moment,
+                                     moments.log_intercept)
 end

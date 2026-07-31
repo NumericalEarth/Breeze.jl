@@ -537,6 +537,8 @@ end
         @test isfinite(params.N₀)
         @test isfinite(params.λ)
         @test isfinite(params.μ)
+        @test isfinite(params.number_concentration)
+        @test isfinite(params.sixth_moment)
     end
 
     @testset "Lambda solver - rimed ice" begin
@@ -568,6 +570,160 @@ end
         @test isfinite(ρ_dep_tiny_rime)
         @test ρ_dep_zero_rime ≈ mass.ice_density
         @test ρ_dep_tiny_rime > 0
+    end
+
+    @testset "Three-moment solver inverts the prognostic moments" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        mass = IceMassPowerLaw()
+        closure = ThreeMomentClosure(Float64)
+
+        # Moments of the gamma PSD with prescribed (μ, D̄ = (μ+1)/λ, N). Feeding these
+        # back to the solver must return the (μ, λ) they came from.
+        function prognostic_moments(μ, D̄, N, rime_fraction, rime_density, liquid_fraction)
+            logλ = log((μ + 1) / D̄)
+            N₀ = intercept_parameter(N, μ, logλ)
+            L = N₀ * exp(PPP.log_mass_moment(mass, rime_fraction, rime_density, μ, logλ;
+                                              liquid_fraction))
+            Z = N₀ * exp(PPP.log_gamma_moment(μ, logλ; k = 6))
+            M₃ = N₀ * exp(PPP.log_gamma_moment(μ, logλ; k = 3))
+            return (; λ = exp(logλ), N₀, L, Z, ρ_effective = 6L / (π * M₃))
+        end
+
+        moment(params, k) = params.N₀ * exp(PPP.log_gamma_moment(params.μ, log(params.λ); k))
+        represented_mass(params, rime_fraction, rime_density, liquid_fraction) =
+            params.N₀ * exp(PPP.log_mass_moment(mass, rime_fraction, rime_density,
+                                                 params.μ, log(params.λ);
+                                                 liquid_fraction))
+
+        rime_states = ((0.0, 400.0), (0.333, 400.0), (1.0, 900.0))
+
+        # Mean sizes from small ice to large aggregates, unrimed through fully rimed,
+        # dry and liquid-coated.
+        for D̄ in (5e-5, 5e-4, 1.5e-3), (rime_fraction, rime_density) in rime_states,
+            liquid_fraction in (0.0, 0.5), μ_true in (0.5, 3.0, 8.0)
+
+            N = 1e5
+            state = prognostic_moments(μ_true, D̄, N, rime_fraction, rime_density, liquid_fraction)
+            params = distribution_parameters(state.L, N, state.Z, rime_fraction, rime_density;
+                                             liquid_fraction, mass, closure)
+
+            @test params.μ ≈ μ_true atol=1e-4
+            @test params.λ ≈ state.λ rtol=1e-4
+
+            # The returned PSD reproduces all three prognostic moments.
+            @test moment(params, 0) ≈ N rtol=1e-4
+            @test moment(params, 6) ≈ state.Z rtol=1e-3
+            @test params.number_concentration ≈ N rtol=1e-4
+            @test params.sixth_moment ≈ state.Z rtol=1e-3
+        end
+
+        # Unrimed aggregates sit well below 50 kg/m³ spherical-equivalent density, a
+        # regime a bulk-density iteration floored at 50 kg/m³ cannot reach.
+        unrimed_aggregates = prognostic_moments(3.0, 1.5e-3, 1e4, 0.0, 400.0, 0.0)
+        @test unrimed_aggregates.ρ_effective < 50
+        params = distribution_parameters(unrimed_aggregates.L, 1e4, unrimed_aggregates.Z,
+                                         0.0, 400.0; mass, closure)
+        @test params.μ ≈ 3.0 atol=1e-4
+
+        # Z outside the range the μ bounds can represent pins μ to the nearest bound
+        # rather than returning an inconsistent interior value.
+        state = prognostic_moments(3.0, 5e-4, 1e5, 0.0, 400.0, 0.0)
+        wide = distribution_parameters(state.L, 1e5, 1e6 * state.Z, 0.0, 400.0; mass, closure)
+        narrow = distribution_parameters(state.L, 1e5, 1e-6 * state.Z, 0.0, 400.0; mass, closure)
+        @test wide.μ == closure.μmin
+        @test narrow.μ == closure.μmax
+        @test wide.sixth_moment ≈ moment(wide, 6)
+        @test narrow.sixth_moment ≈ moment(narrow, 6)
+
+        # The mean-diameter limiter participates in the μ solve. Mass stays exact,
+        # while represented moments report the number or Z adjustment needed to obtain
+        # an admissible PSD.
+        large_state = prognostic_moments(3.0, 1e-2, 1e5, 0.0, 400.0, 0.0)
+        large = distribution_parameters(large_state.L, 1e5, large_state.Z,
+                                        0.0, 400.0; mass, closure)
+        @test (large.μ + 1) / large.λ ≈ PPP.P3_DM_MAX_BASE
+        @test represented_mass(large, 0.0, 400.0, 0.0) ≈ large_state.L rtol=1e-10
+        @test large.sixth_moment ≈ large_state.Z rtol=1e-5
+        @test !isapprox(large.number_concentration, 1e5; rtol=1e-3)
+
+        small_state = prognostic_moments(3.0, 1e-6, 1e5, 0.0, 400.0, 0.0)
+        small = distribution_parameters(small_state.L, 1e5, small_state.Z,
+                                        0.0, 400.0; mass, closure)
+        @test small.μ == closure.μmax
+        @test (small.μ + 1) / small.λ ≈ PPP.P3_DM_MIN
+        @test represented_mass(small, 0.0, 400.0, 0.0) ≈ small_state.L rtol=1e-10
+        @test small.sixth_moment > small_state.Z
+        @test !isapprox(small.number_concentration, 1e5; rtol=1e-3)
+
+        # Z ≤ 0 lies below the physical range and therefore maps to the narrowest
+        # distribution without entering log(Z) in the fixed-μ mass solve.
+        for invalid_Z in (0.0, -state.Z)
+            invalid = distribution_parameters(state.L, 1e5, invalid_Z,
+                                              0.0, 400.0; mass, closure)
+            @test invalid.μ == closure.μmax
+            @test invalid.number_concentration > 0
+            @test invalid.sixth_moment > 0
+            @test isfinite(invalid.N₀)
+            @test isfinite(invalid.λ)
+        end
+    end
+
+    @testset "Distribution parameters in reduced precision" begin
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        mass64 = IceMassPowerLaw(Float64)
+
+        # Build the state exactly in Float64, then solve it in each precision.
+        function state(μ, D̄, N, rime_fraction, rime_density, liquid_fraction)
+            logλ = log((μ + 1) / D̄)
+            N₀ = intercept_parameter(N, μ, logλ)
+            L = N₀ * exp(PPP.log_mass_moment(mass64, rime_fraction, rime_density, μ, logλ;
+                                              liquid_fraction))
+            Z = N₀ * exp(PPP.log_gamma_moment(μ, logλ; k = 6))
+            return (; L, Z)
+        end
+
+        # N₀ has units m^-(4+μ), so narrow distributions of small particles push it out of
+        # the Float32 range (μ = 8 at D̄ = 100 μm gives N₀ ≈ 1e45) even though every moment
+        # of those distributions is perfectly representable. Carrying log N₀ keeps them.
+        N = 1e5
+        for (D̄, μ_true) in ((1e-5, 3.0), (1e-4, 8.0), (1e-3, 20.0)),
+            liquid_fraction in (0.0, 0.5)
+
+            s = state(μ_true, D̄, N, 0.333, 400.0, liquid_fraction)
+            for FT in (Float64, Float32)
+                params = distribution_parameters(FT(s.L), FT(N), FT(s.Z), FT(0.333), FT(400);
+                                                 liquid_fraction = FT(liquid_fraction))
+                @test params isa IceDistributionParameters{FT}
+                @test isfinite(params.log_intercept)
+                @test isfinite(params.number_concentration)
+                @test isfinite(params.sixth_moment)
+                @test params.μ ≈ μ_true atol=2e-3
+                @test params.number_concentration ≈ N rtol=1e-3
+                @test params.sixth_moment ≈ s.Z rtol=1e-3
+                @test exp(params.log_intercept) === params.N₀
+            end
+        end
+
+        # Where N₀ is not representable, log_intercept and the moments still are. This is
+        # what keeps the reported moments out of the exponentiated intercept.
+        s = state(20.0, 1e-5, N, 0.0, 400.0, 0.0)   # N₀ ≈ 1e119 m^-24
+        narrow = distribution_parameters(Float32(s.L), Float32(N), Float32(s.Z), 0f0, 400f0)
+        @test !isfinite(narrow.N₀)
+        @test isfinite(narrow.log_intercept)
+        @test narrow.number_concentration ≈ N rtol=1e-3
+        @test narrow.sixth_moment ≈ s.Z rtol=1e-3
+
+        # Two-moment path carries the same field, at the small-diameter λ bound.
+        small = distribution_parameters(1f-8, 1f6, 0f0, 400f0)
+        @test isfinite(small.log_intercept)
+        @test small.number_concentration ≈ 1f6 rtol=1e-3
+        @test exp(small.log_intercept) === small.N₀
+
+        # Degenerate result: exp(log_intercept) still reproduces N₀ = 0.
+        empty = distribution_parameters(0.0, 1e5, 1e-20, 0.0, 400.0)
+        @test empty.N₀ == 0
+        @test empty.log_intercept == -Inf
+        @test exp(empty.log_intercept) == empty.N₀
     end
 
     @testset "Three-moment μ polynomial matches Fortran fit" begin

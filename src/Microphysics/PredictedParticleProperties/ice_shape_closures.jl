@@ -144,8 +144,8 @@ end
 """
     ThreeMomentClosure
 
-Fortran-parity three-moment closure using the upstream P3 `solve_mui` approximation.
-See [`ThreeMomentClosure()`](@ref) constructor.
+Three-moment closure: μ follows from the prognostic sixth moment instead of an empirical
+μ-λ relation. See [`ThreeMomentClosure()`](@ref) constructor.
 """
 struct ThreeMomentClosure{FT}
     μmin :: FT
@@ -155,13 +155,17 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct the Fortran-parity three-moment closure for gamma size distribution.
+Construct the three-moment closure for the gamma size distribution.
 
-This closure follows the current upstream P3 implementation: it iterates on bulk
-ice density, approximates the third diameter moment as spherical, and applies the
-piecewise-polynomial `G(μ)` inversion used by `solve_mui`.
+The closure carries only the μ bounds: with a prognostic sixth moment, μ is determined by
+the moments themselves rather than by a fitted μ-λ relation. [`solve_shape_parameter`](@ref)
+solves the bounded sixth-moment constraint over `[μmin, μmax]` and reports the moments
+represented after any limiter adjustment. The runtime model path reads μ from the
+Fortran-generated Table 3 and uses these bounds to keep the tabulated ``Z`` within the
+range the shape parameter can represent (see `enforce_z_bounds`, which mirrors Fortran's
+`apply_mui_bounds_to_zi`).
 
-Use this closure when Fortran parity is the priority.
+The bounds match the upstream P3 constants (`mu_i_min`, `mu_i_max`).
 
 # Keyword Arguments
 

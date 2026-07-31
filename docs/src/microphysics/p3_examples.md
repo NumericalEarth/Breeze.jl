@@ -116,7 +116,9 @@ for (L, color, label) in [
     (1e-3, :purple, "L = 1.0 g/m³")
 ]
     params = distribution_parameters(L, N_ice, 0.0, 400.0)
-    N_D = @. params.N₀ * D_m^params.μ * exp(-params.λ * D_m)
+    # Evaluate N'(D) = N₀ D^μ e^{-λD} through log N₀: the intercept itself carries units
+    # of m^-(4+μ) and reaches magnitudes that only Float64 can hold.
+    N_D = @. exp(params.log_intercept + params.μ * log(D_m) - params.λ * D_m)
     lines!(ax, D_mm, N_D, color=color, linewidth=2, label=label)
 end
 
@@ -215,7 +217,7 @@ ax2 = Axis(fig[1, 2],
 
 for L in [1e-5, 1e-4, 1e-3]
     params = distribution_parameters(L, 1e5, 0.0, 400.0)
-    N_D = @. params.N₀ * D_m^params.μ * exp(-params.λ * D_m)
+    N_D = @. exp(params.log_intercept + params.μ * log(D_m) - params.λ * D_m)
     lines!(ax2, D_mm, N_D, label="L=$(L*1e3) g/m³")
 end
 ylims!(ax2, 1e3, 1e13)
