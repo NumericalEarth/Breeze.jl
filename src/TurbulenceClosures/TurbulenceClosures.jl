@@ -1,7 +1,13 @@
 module TurbulenceClosures
 
 export TKEBasedTurbulenceClosure,
-       MesoscaleLengthScale,
+       BlendedMixingLength,
+       GeometricLengthScale,
+       TurbulenceLengthScale,
+       BuoyancyLengthScale,
+       MinimumBlend,
+       HarmonicBlend,
+       PowerBlend,
        MY82Coefficients,
        MYJCoefficients,
        diffusivity_coefficient,
@@ -128,7 +134,7 @@ end
         + δzᵃᵃᶠ(i, j, k, grid, Az_qᶜᶜᶜ, 𝒯_wz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
 end
 
-include("mesoscale_length_scale.jl")
+include("blended_mixing_length.jl")
 include("tke_based_turbulence_closure.jl")
 
 end # module TurbulenceClosures

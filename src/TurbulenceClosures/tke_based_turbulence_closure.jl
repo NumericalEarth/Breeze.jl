@@ -26,7 +26,7 @@ energy ``e``,
 ∂e/∂t = P + B - ε + \\text{transport}, \\qquad P = ν S², \\qquad B = -K N²,
 ```
 
-with the mixing length ``ℓ`` supplied by a dispatched component (default `MesoscaleLengthScale`)
+with the mixing length ``ℓ`` supplied by a dispatched component (default `BlendedMixingLength`)
 and the turbulent Prandtl number closed on the gradient Richardson number,
 
 ```math
@@ -111,7 +111,9 @@ round(stress_coefficient(closure), digits=4)
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
                                    FT = Oceananigans.defaults.FloatType;
-                                   mixing_length = MesoscaleLengthScale(),
+                                   mixing_length = BlendedMixingLength(GeometricLengthScale(),
+                                                                       TurbulenceLengthScale(),
+                                                                       BuoyancyLengthScale()),
                                    Cᴷ = 0.4903,
                                    Cμ = 0.0578,
                                    Pr₀ = 0.74,
@@ -131,9 +133,19 @@ end
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
     TKEBasedTurbulenceClosure(VerticallyImplicitTimeDiscretization(), FT; kw...)
 
-@inline convert_eltype(::Type{FT}, m::MesoscaleLengthScale) where FT =
-    MesoscaleLengthScale{FT}(; Dict(p => getproperty(m, p) for p in propertynames(m))...)
-@inline convert_eltype(::Type{FT}, m::MesoscaleLengthScale{FT}) where FT = m
+@inline convert_eltype(::Type{FT}, ℓ::GeometricLengthScale) where FT =
+    GeometricLengthScale{FT}(convert(FT, ℓ.κ), convert(FT, ℓ.ℓʳ))
+@inline convert_eltype(::Type{FT}, ℓ::TurbulenceLengthScale) where FT =
+    TurbulenceLengthScale{FT}(convert(FT, ℓ.Cᵗ))
+@inline convert_eltype(::Type{FT}, ℓ::BuoyancyLengthScale) where FT =
+    BuoyancyLengthScale{FT}(convert(FT, ℓ.Cᵇ), convert(FT, ℓ.N²ᵐⁱⁿ))
+
+@inline convert_eltype(::Type{FT}, blend::AbstractLengthScaleBlend) where FT = blend
+@inline convert_eltype(::Type{FT}, blend::PowerBlend) where FT = PowerBlend{FT}(convert(FT, blend.p))
+
+@inline convert_eltype(::Type{FT}, ml::BlendedMixingLength) where FT =
+    BlendedMixingLength(convert_eltype(FT, ml.blend),
+                        map(branch -> convert_eltype(FT, branch), ml.branches))
 
 """
 $(TYPEDSIGNATURES)

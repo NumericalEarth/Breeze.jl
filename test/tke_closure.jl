@@ -3,10 +3,12 @@ using Oceananigans
 using Test
 
 using Breeze.TurbulenceClosures: TKE_NAME,
-                                 buoyancy_length_scaleᶜᶜᶠ,
-                                 geometric_length_scaleᶜᶜᶠ,
+                                 length_scaleᶜᶜᶠ,
+                                 length_scaleᶜᶜᶜ,
                                  mixing_lengthᶜᶜᶠ,
+                                 mixing_lengthᶜᶜᶜ,
                                  smooth_positive,
+                                 turbulence_length_coefficient,
                                  turbulent_prandtl_number,
                                  _compute_turbulence_length_scale!
 using Oceananigans: prognostic_fields
@@ -73,14 +75,16 @@ using Oceananigans.Utils: launch!
 
     @testset "isbits" begin
         @test isbits(TKEBasedTurbulenceClosure())
-        @test isbits(MesoscaleLengthScale())
+        @test isbits(BlendedMixingLength(GeometricLengthScale(), BuoyancyLengthScale()))
+        @test isbits(BlendedMixingLength(GeometricLengthScale(); blend = PowerBlend(p = 2.0)))
     end
 
     @testset "show" begin
         closure = TKEBasedTurbulenceClosure()
         @test occursin("TKEBasedTurbulenceClosure", summary(closure))
         @test occursin("Cˢ", sprint(show, closure))
-        @test occursin("MesoscaleLengthScale", sprint(show, closure.mixing_length))
+        @test occursin("BlendedMixingLength", sprint(show, closure.mixing_length))
+        @test occursin("GeometricLengthScale", sprint(show, closure.mixing_length))
     end
 end
 
@@ -88,13 +92,19 @@ end
 ##### Mixing length, branch by branch
 #####
 
-@testset "MesoscaleLengthScale branches [$(FT)]" for FT in test_float_types()
+@testset "Mixing-length branches [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     Nz = 32
     Lz = FT(1000)
     grid = RectilinearGrid(default_arch; size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
-    mixing_length = MesoscaleLengthScale{FT}()
+
+    ℓᵗ_field = Field{Center, Center, Nothing}(grid)
+    set!(ℓᵗ_field, 300)
+
+    geometric = GeometricLengthScale{FT}()
+    buoyancy = BuoyancyLengthScale{FT}()
+    turbulence = TurbulenceLengthScale{FT}()
 
     @testset "smooth_positive" begin
         δ = FT(1e-9)
@@ -106,55 +116,153 @@ end
     end
 
     @testset "ℓᵍ = κ(z + ℓʳ)" begin
-        κ = mixing_length.κ
-        ℓʳ = mixing_length.ℓʳ
+        κ, ℓʳ = geometric.κ, geometric.ℓʳ
         Δz = Lz / Nz
         # Face k sits at z = (k - 1) Δz
         for k in (1, 2, 8, Nz)
             z = (k - 1) * Δz
-            @test geometric_length_scaleᶜᶜᶠ(1, 1, k, grid, mixing_length) ≈ κ * (z + ℓʳ)
+            @test length_scaleᶜᶜᶠ(1, 1, k, grid, geometric, FT(1), FT(0), ℓᵗ_field) ≈ κ * (z + ℓʳ)
         end
         # Finite at the surface — this is what ℓʳ is for
-        @test geometric_length_scaleᶜᶜᶠ(1, 1, 1, grid, mixing_length) ≈ κ * ℓʳ
-        @test geometric_length_scaleᶜᶜᶠ(1, 1, 1, grid, mixing_length) > 0
+        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, geometric, FT(1), FT(0), ℓᵗ_field) ≈ κ * ℓʳ
+        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, geometric, FT(1), FT(0), ℓᵗ_field) > 0
+        # Centers sit half a cell above the face below them
+        @test length_scaleᶜᶜᶜ(1, 1, 1, grid, geometric, FT(1), FT(0), ℓᵗ_field) ≈ κ * (Δz / 2 + ℓʳ)
     end
 
     @testset "ℓᵇ = Cᵇ q / N" begin
-        Cᵇ = mixing_length.Cᵇ
+        Cᵇ = buoyancy.Cᵇ
         q = FT(1)
+        ℓᵇ(q, N²) = length_scaleᶜᶜᶠ(1, 1, 1, grid, buoyancy, q, N², ℓᵗ_field)
 
         N² = FT(1e-4)
-        @test buoyancy_length_scaleᶜᶜᶠ(1, 1, 1, grid, mixing_length, q, N²) ≈ Cᵇ * q / sqrt(N²) rtol=1e-5
+        @test ℓᵇ(q, N²) ≈ Cᵇ * q / sqrt(N²) rtol=1e-5
 
         # Scales like q and like 1/N
-        @test buoyancy_length_scaleᶜᶜᶠ(1, 1, 1, grid, mixing_length, 2q, N²) ≈
-              2 * buoyancy_length_scaleᶜᶜᶠ(1, 1, 1, grid, mixing_length, q, N²) rtol=1e-5
-        @test buoyancy_length_scaleᶜᶜᶠ(1, 1, 1, grid, mixing_length, q, 4N²) ≈
-              buoyancy_length_scaleᶜᶜᶠ(1, 1, 1, grid, mixing_length, q, N²) / 2 rtol=1e-5
+        @test ℓᵇ(2q, N²) ≈ 2 * ℓᵇ(q, N²) rtol=1e-5
+        @test ℓᵇ(q, 4N²) ≈ ℓᵇ(q, N²) / 2 rtol=1e-5
 
         # Inactive in unstable and neutral air: the branch returns a length so large that it
-        # drops out of the harmonic blend
-        ℓᵇ_unstable = buoyancy_length_scaleᶜᶜᶠ(1, 1, 1, grid, mixing_length, q, FT(-1e-4))
-        ℓᵇ_neutral  = buoyancy_length_scaleᶜᶜᶠ(1, 1, 1, grid, mixing_length, q, FT(0))
-        @test ℓᵇ_unstable > 1e6
-        @test ℓᵇ_neutral > 1e3
-        @test ℓᵇ_unstable > ℓᵇ_neutral   # smooth, monotone through N² = 0
+        # drops out of any blend that selects the smallest scale
+        @test ℓᵇ(q, FT(-1e-4)) > 1e6
+        @test ℓᵇ(q, FT(0)) > 1e3
+        @test ℓᵇ(q, FT(-1e-4)) > ℓᵇ(q, FT(0))   # smooth, monotone through N² = 0
+
+        # Deardorff's constant is the default; MYNN's realizability bound is the looser Cᵇ = 1
+        @test buoyancy.Cᵇ ≈ FT(0.53)
+
+        # Setting one coefficient to an integer must work: @kwdef alone would demand that every
+        # field share a type, so `Cᵇ = 1` beside a float default would find no method.
+        @test BuoyancyLengthScale(Cᵇ = 1).Cᵇ == 1
+        @test GeometricLengthScale(ℓʳ = 1).ℓʳ == 1
+        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, BuoyancyLengthScale{FT}(Cᵇ = 1), q, N², ℓᵗ_field) ≈
+              q / sqrt(N²) rtol=1e-5
     end
 
-    @testset "harmonic blend is bounded by every branch" begin
-        ℓᵗ_field = Field{Center, Center, Nothing}(grid)
-        set!(ℓᵗ_field, 300)
-        q = FT(0.5)
-        N² = FT(1e-4)
-
-        for k in (2, 8, 20, Nz)
-            ℓ = mixing_lengthᶜᶜᶠ(1, 1, k, grid, mixing_length, q, N², ℓᵗ_field)
-            ℓᵍ = geometric_length_scaleᶜᶜᶠ(1, 1, k, grid, mixing_length)
-            ℓᵇ = buoyancy_length_scaleᶜᶜᶠ(1, 1, k, grid, mixing_length, q, N²)
-            @test ℓ > 0
-            @test ℓ ≤ min(ℓᵍ, ℓᵇ, FT(300)) + sqrt(eps(FT))
+    @testset "ℓᵗ is read from the column field, at both locations" begin
+        for k in (1, 8, Nz)
+            @test length_scaleᶜᶜᶠ(1, 1, k, grid, turbulence, FT(1), FT(0), ℓᵗ_field) == 300
+            @test length_scaleᶜᶜᶜ(1, 1, k, grid, turbulence, FT(1), FT(0), ℓᵗ_field) == 300
         end
     end
+end
+
+#####
+##### Blending rules
+#####
+
+@testset "Length-scale blends [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    ℓs = (FT(3), FT(7), FT(50))
+    ℓᵐⁱⁿ = minimum(ℓs)
+
+    @testset "each rule computes what it claims" begin
+        @test MinimumBlend()(ℓs) == ℓᵐⁱⁿ
+        @test HarmonicBlend()(ℓs) ≈ inv(sum(inv, ℓs))
+        @test PowerBlend{FT}(p = 2)(ℓs) ≈ inv(sqrt(sum(ℓ -> ℓ^-2, ℓs)))
+    end
+
+    @testset "PowerBlend interpolates between harmonic and min" begin
+        # p = 1 is the harmonic blend exactly
+        @test PowerBlend{FT}(p = 1)(ℓs) ≈ HarmonicBlend()(ℓs) rtol=1e-5
+        # and large p approaches the minimum from below
+        @test PowerBlend{FT}(p = 40)(ℓs) ≈ ℓᵐⁱⁿ rtol=1e-2
+        # monotone in p
+        ps = FT[1, 2, 4, 8, 16]
+        blended = [PowerBlend{FT}(p = p)(ℓs) for p in ps]
+        @test issorted(blended)
+    end
+
+    @testset "every rule is bounded by the smallest branch" begin
+        for blend in (MinimumBlend(), HarmonicBlend(), PowerBlend{FT}(p = 2), PowerBlend{FT}(p = 5))
+            @test 0 < blend(ℓs) ≤ ℓᵐⁱⁿ + sqrt(eps(FT))
+        end
+        # An inactive branch (Inf) must not change the result
+        @test HarmonicBlend()((ℓs..., FT(Inf))) ≈ HarmonicBlend()(ℓs)
+        @test MinimumBlend()((ℓs..., FT(Inf))) == MinimumBlend()(ℓs)
+        @test PowerBlend{FT}(p = 2)((ℓs..., FT(Inf))) ≈ PowerBlend{FT}(p = 2)(ℓs)
+    end
+end
+
+#####
+##### Composition
+#####
+
+@testset "BlendedMixingLength [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    Nz = 32
+    Lz = FT(1000)
+    grid = RectilinearGrid(default_arch; size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
+    ℓᵗ_field = Field{Center, Center, Nothing}(grid)
+    set!(ℓᵗ_field, 300)
+
+    q = FT(0.5)
+    N² = FT(1e-4)
+
+    @testset "min is the default blend, and the kwarg overrides it" begin
+        @test BlendedMixingLength(GeometricLengthScale()).blend isa MinimumBlend
+        @test BlendedMixingLength(GeometricLengthScale();
+                                  blend = HarmonicBlend()).blend isa HarmonicBlend
+        @test length(BlendedMixingLength(GeometricLengthScale(), BuoyancyLengthScale()).branches) == 2
+    end
+
+    @testset "the master length is the blend of its branches" begin
+        branches = (GeometricLengthScale{FT}(), TurbulenceLengthScale{FT}(),
+                    BuoyancyLengthScale{FT}())
+        for blend in (MinimumBlend(), HarmonicBlend(), PowerBlend{FT}(p = 2))
+            ml = BlendedMixingLength(branches...; blend)
+            for k in (1, 2, 8, Nz)
+                ℓs = map(b -> length_scaleᶜᶜᶠ(1, 1, k, grid, b, q, N², ℓᵗ_field), branches)
+                @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², ℓᵗ_field) ≈ blend(ℓs)
+                @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², ℓᵗ_field) ≤
+                      minimum(ℓs) + sqrt(eps(FT))
+            end
+        end
+    end
+
+    @testset "a single branch blends to itself" begin
+        ml = BlendedMixingLength(GeometricLengthScale{FT}())
+        for k in (1, 8, Nz)
+            @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², ℓᵗ_field) ≈
+                  length_scaleᶜᶜᶠ(1, 1, k, grid, GeometricLengthScale{FT}(), q, N², ℓᵗ_field)
+        end
+    end
+
+    @testset "Deardorff is expressible" begin
+        # ℓ = min(Δ, 0.76 √e / N); with q = √(2e) the stable branch is 0.53 q / N
+        ml = BlendedMixingLength(BuoyancyLengthScale{FT}(Cᵇ = 0.53))
+        @test mixing_lengthᶜᶜᶠ(1, 1, 4, grid, ml, q, N², ℓᵗ_field) ≈ FT(0.53) * q / sqrt(N²) rtol=1e-5
+    end
+end
+
+#####
+##### The column integral behind ℓᵗ
+#####
+
+@testset "ℓᵗ column integral [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
 
     @testset "ℓᵗ is a q-weighted centroid, not a domain height" begin
         # The same boundary layer on a shallow and a deep column must give the same ℓᵗ. With `q`
@@ -165,7 +273,7 @@ end
 
         turbulent(z) = z < 500 ? 1.0 : eᵐⁱⁿ
 
-        function turbulence_length_scale(Lz, Nz)
+        function turbulence_length_scale(Lz, Nz; closure = closure)
             g = RectilinearGrid(default_arch; size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
             e = CenterField(g)
             set!(e, z -> turbulent(z))
@@ -181,9 +289,17 @@ end
 
         # And it is the centroid of the turbulent layer times Cᵗ: uniform q over 0 ≤ z < 500 has
         # centroid 250
-        @test isapprox(ℓᵗ_shallow, mixing_length.Cᵗ * 250; rtol = 5e-2)
+        @test isapprox(ℓᵗ_shallow, TurbulenceLengthScale{FT}().Cᵗ * 250; rtol = 5e-2)
+
+        # A mixing length carrying no TurbulenceLengthScale branch gets ℓᵗ = Inf, which drops out
+        # of every blend rather than collapsing ℓ to zero.
+        without = TKEBasedTurbulenceClosure(mixing_length =
+            BlendedMixingLength(GeometricLengthScale(), BuoyancyLengthScale()))
+        @test isnothing(turbulence_length_coefficient(without.mixing_length))
+        @test isinf(turbulence_length_scale(FT(2000), 100; closure = without))
     end
 end
+
 
 #####
 ##### Prandtl number

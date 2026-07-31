@@ -33,19 +33,40 @@ an example of closure performance with stable, neutral and convective boundary l
 
 ### The mixing length
 
-The length scale ``ℓ`` is supplied by a dispatched component, by default
-[`MesoscaleLengthScale`](@ref). Structurally this is the three-branch harmonic blend of MYNN
-([Nakanishi and Niino 2009](@cite NakanishiNiino2009), their Eqs. 52–55), which blends the branches
-so that the smallest wins smoothly:
+The length scale ``ℓ`` is supplied by a dispatched component, by default a
+[`BlendedMixingLength`](@ref): a tuple of independent length-scale branches reduced to one master
+length by a blending rule. The three default branches are those of MYNN
+([Nakanishi and Niino 2009](@cite NakanishiNiino2009), their Eqs. 52–55),
 
 ```math
-\frac{1}{ℓ} = \frac{1}{ℓᵍ} + \frac{1}{ℓᵗ} + \frac{1}{ℓᵇ},
-\qquad ℓᵍ = κ (z + ℓʳ), \qquad ℓᵗ = Cᵗ \frac{∫ q z \, dz}{∫ q \, dz}, \qquad ℓᵇ = Cᵇ q / N,
+ℓᵍ = κ (z + ℓʳ), \qquad ℓᵗ = Cᵗ \frac{∫ q z \, dz}{∫ q \, dz}, \qquad ℓᵇ = Cᵇ q / N,
 ```
 
-with ``q = \sqrt{2e}``. The branches are, in order, the distance to the surface offset by a
-roughness length, the depth over which the column is turbulent, and the distance a parcel would
-travel against stable stratification. ``ℓᵗ`` is the only non-local contribution.
+with ``q = \sqrt{2e}``: the distance to the surface offset by a roughness length, the depth over
+which the column is turbulent, and the distance a parcel would travel against stable
+stratification. ``ℓᵗ`` is the only non-local contribution, and a branch that does not apply — ``ℓᵇ``
+in neutral or unstable air — returns a very large length and drops out.
+
+Branches and blend are separate because the choice of rule is itself a modelling decision. The
+default [`MinimumBlend`](@ref) takes ``ℓ = \min(ℓᵍ, ℓᵗ, ℓᵇ)``, so the most restrictive scale wins
+outright. [`HarmonicBlend`](@ref) is MYNN's own ``1/ℓ = 1/ℓᵍ + 1/ℓᵗ + 1/ℓᵇ``, and
+[`PowerBlend`](@ref) interpolates between them,
+
+```math
+ℓ^{-p} = (ℓᵍ)^{-p} + (ℓᵗ)^{-p} + (ℓᵇ)^{-p},
+```
+
+recovering the harmonic blend at ``p = 1`` and the minimum as ``p → ∞``. The exponent matters near
+a wall: writing ``x`` for the ratio of a branch to the smallest one, the blend sits below that
+smallest branch by ``x^p/p``, so at ``p = 1`` an outer scale contaminates the surface layer at
+first order in height. [Mason and Thomson (1992)](@cite MasonThomson1992) match a wall scale to an
+outer scale in exactly this form and recommend ``p = 2``.
+
+Two structural departures from MYNN, both toward smoothness: ``ℓᵇ`` is a branch rather than the
+hard realizability clip ``ℓ/q ≤ 1/N``, and ``N²`` enters through a smooth positive part, so the
+stable limit engages continuously instead of switching on. Two further pieces of MYNN are not yet
+implemented — the stability correction on the surface branch (their Eq. 53) and the convective
+enhancement of ``ℓᵇ`` (their Eq. 55).
 
 ### Coefficients
 

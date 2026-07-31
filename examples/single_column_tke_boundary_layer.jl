@@ -79,7 +79,11 @@ function single_column_simulation(; closure = TKEBasedTurbulenceClosure(),
     ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
     cᵖ = constants.dry_air.heat_capacity
 
-    κ = closure.mixing_length.κ
+    ## The drag laws below use the closure's own von Kármán constant rather than a repeated
+    ## literal, so that the surface layer they impose stays consistent with the log layer the
+    ## mixing length produces. It is read back from the geometric branch, and is `nothing` for a
+    ## mixing length that has none — harmless, since those configurations prescribe `u★` directly.
+    κ = Breeze.TurbulenceClosures.von_karman_constant(closure.mixing_length)
 
     ## The surface is configured in two ways for momentum and two for heat:
     ##
@@ -412,9 +416,13 @@ fig
 #
 # The bottom right panel is where that shows up most directly. The convective heat flux follows the
 # mixed-layer line through the lower half of the boundary layer, where transport really is
-# downgradient — and then flattens toward zero near the inversion instead of crossing it. A
-# downgradient flux cannot be negative where ``∂_z θ > 0``, so this closure entrains only what the
-# local gradient gives it: an entrainment ratio of 0.04 against the 0.17 that LES reports.
+# downgradient — and then flattens toward zero near the inversion instead of crossing it. The sign
+# is not the problem: ``J = -K ∂_z θ`` is negative wherever the air is stably stratified, so a
+# downgradient closure does produce an entraining flux at the inversion. The magnitude is. ``K``
+# collapses there, because the only branch of the mixing length that responds to stratification
+# shrinks ``ℓ`` in exactly the layer the flux has to cross — so the closure entrains only what a
+# vanishing diffusivity against a large gradient allows: an entrainment ratio of 0.04 against the
+# 0.17 reported by [Soares et al. (2004)](@cite Soares2004).
 #
 # The rest of the bottom row says where that comes from, and it is specifically a convective
 # problem. In the stable and neutral columns the mixing length peaks around ``0.35 zᵢ`` and
