@@ -20,12 +20,13 @@ Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 
 [sources]
 Breeze = {path = ".."}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "mg/reactant-set-reduced-fields"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
 CUDA = "5, 6.0"
 CairoMakie = "0.15"
-CloudMicrophysics = "0.37"
+CloudMicrophysics = "0.37.0 - 0.37.1"
 Documenter = "1"
 DocumenterCitations = "1.4"
 Enzyme = "0.13.132"
