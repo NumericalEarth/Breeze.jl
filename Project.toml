@@ -39,7 +39,7 @@ DocStringExtensions = "0.9.5"
 GPUArraysCore = "0.2"
 InteractiveUtils = "<0.0.1, 1"
 JLD2 = "0.5.13, 0.6"
-KernelAbstractions = "0.9"
+KernelAbstractions = "0.9, 0.10"
 Oceananigans = "0.110.8"
 Printf = "1"
 RRTMGP = "0.21"
@@ -47,3 +47,7 @@ Reactant = "0.2.268"
 SpecialFunctions = "2"
 Statistics = "<0.0.1, 1"
 julia = "1.11.9"
+
+[sources]
+KernelAbstractions = {url = "https://github.com/JuliaGPU/KernelAbstractions.jl.git", rev = "0534c7336ea0ef7a178836cbb6268b1250ff65b2"}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "1483172fcebcab5cc77977e81fe27f1e8dbcde58"}
