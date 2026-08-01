@@ -56,12 +56,9 @@ grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
 # compressible time step with Reactant/Enzyme, and the default tolerance-based `NewtonSolver`
 # (a `while` loop) compiles to an XLA `while` op that does not differentiate cheaply, while a high
 # iteration count needlessly inflates the traced graph (NumericalEarth/Breeze.jl#767). The forward
-# and adjoint models use identical dynamics and formulation. We also use the full-pressure form
-# (`reference_state = nothing`) so reinitializing the differentiated model does not rebuild a
-# model-owned hydrostatic reference inside the traced loss.
+# and adjoint models use identical dynamics and formulation.
 formulation = LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2))
-model = AtmosphereModel(grid; formulation,
-                        dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state = nothing))
+model = AtmosphereModel(grid; formulation, dynamics = CompressibleDynamics(ExplicitTimeStepping()))
 
 # ## Background state
 #
@@ -268,8 +265,7 @@ grid_ad = RectilinearGrid(ReactantState(); size = (Nx, Nz),
                           topology = (Periodic, Flat, Bounded))
 
 formulation_ad = LiquidIcePotentialTemperatureFormulation(temperature_solver = FixedIterations(2)) # fixed-trip, low-iteration EOS inversion so Enzyme can differentiate it cheaply (see forward model)
-model_ad = AtmosphereModel(grid_ad; formulation = formulation_ad,
-                           dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state = nothing))
+model_ad = AtmosphereModel(grid_ad; formulation = formulation_ad, dynamics = CompressibleDynamics(ExplicitTimeStepping()))
 
 # ### Fixed and varying fields
 #

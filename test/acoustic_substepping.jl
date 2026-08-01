@@ -1236,9 +1236,7 @@ for arch in arches
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
                                x=(0, 4000), y=(0, 4000), z=(0, 4000))
 
-        # Explicitly disable the reference (the default now builds one on every grid) to exercise
-        # the full-pressure PGF/buoyancy path.
-        dynamics = CompressibleDynamics(; reference_state=nothing)
+        dynamics = CompressibleDynamics()
         model = AtmosphereModel(grid; advection=WENO(), dynamics)
 
         set!(model; θ=300, u=0, qᵗ=0, ρ=FT(1.2))

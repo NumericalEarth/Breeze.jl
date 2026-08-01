@@ -78,16 +78,13 @@ end
                                     standard_pressure = FT(1e5))
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants)
 
-    # Check consistency against the construction reference: setting ρ and θ to the reference
-    # density/potential temperature must diagnose pressure equal to pᵣ. `set!` preserves the
-    # reference built at construction unless `compute_reference_state=true` is passed.
     set!(model,
-         ρ = model.dynamics.reference_state.density,
+         ρ = model.dynamics.terrain_reference_density,
          θ = (x, z) -> θ_profile(z),
          enforce_mass_conservation = false)
 
     p = model.dynamics.pressure
-    pᵣ = model.dynamics.reference_state.pressure
+    pᵣ = model.dynamics.terrain_reference_pressure
     @test @allowscalar maximum(abs, interior(p) .- interior(pᵣ)) < FT(1e-6)
 end
 

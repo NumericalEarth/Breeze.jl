@@ -586,45 +586,10 @@ end
         @test model.dynamics.reference_state.density  ≈ ref_truth.density  rtol=1e-6
     end
 
-    @testset "Automatic reference is valid and preserved unless recomputation is requested" begin
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-        ref = model.dynamics.reference_state
-
-        @test ref isa ExnerReferenceState
-        @test all(isfinite, Array(interior(ref.pressure)))
-        @test all(ρ -> ρ > 0, Array(interior(ref.density)))
-
-        # The default (standard-atmosphere) reference survives `set!` untouched...
-        initial_reference_pressure = Array(interior(ref.pressure))
-        set!(model; ρ=1, θ=300, enforce_mass_conservation=false)
-        @test Array(interior(ref.pressure)) == initial_reference_pressure
-        @test all(isfinite, Array(interior(model.temperature)))
-
-        # ... and is replaced by the state's horizontal mean only when asked for.
-        set!(model; ρ=1, θ=300, compute_reference_state=true, enforce_mass_conservation=false)
-        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=300)
-        @test ref.pressure ≈ ref_truth.pressure rtol=1e-6
-        @test ref.density  ≈ ref_truth.density  rtol=1e-6
-    end
-
-    @testset "Automatic reference is disabled for periodic vertical topology" begin
-        periodic_grid = RectilinearGrid(default_arch;
-                                        size=(4, 4, 8), extent=(100, 100, 1000),
-                                        topology=(Periodic, Periodic, Periodic))
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
-        model = AtmosphereModel(periodic_grid; thermodynamic_constants=constants, dynamics)
-
-        @test model.dynamics.reference_state === nothing
-
-        set!(model; ρ=1, θ=300, enforce_mass_conservation=false)
-        @test all(isfinite, Array(interior(model.temperature)))
-    end
-
     # `reset_reference_state!` is a no-op for dynamics without a reference state (here a
-    # CompressibleDynamics built with `reference_state = nothing`, which disables it).
+    # CompressibleDynamics built with no `reference_potential_temperature`).
     @testset "set!(; compute_reference_state) is a no-op without a reference state" begin
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_state=nothing)
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
         model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
         @test model.dynamics.reference_state === nothing
 
@@ -667,10 +632,10 @@ end
              compute_reference_state=true,
              enforce_mass_conservation=false)
 
-        @test model.dynamics.reference_state.pressure ≈
-              truth_model.dynamics.reference_state.pressure rtol=1e-6
-        @test model.dynamics.reference_state.density ≈
-              truth_model.dynamics.reference_state.density rtol=1e-6
+        @test model.dynamics.terrain_reference_pressure ≈
+              truth_model.dynamics.terrain_reference_pressure rtol=1e-6
+        @test model.dynamics.terrain_reference_density ≈
+              truth_model.dynamics.terrain_reference_density rtol=1e-6
     end
 
     @testset "HorizontalMeanProfile interpolates linearly and clamps outside its range" begin
@@ -685,37 +650,6 @@ end
         @test profile(FT(250)) ≈  FT(25)
         @test profile(FT(300)) == FT(30)   # at the top node
         @test profile(FT(350)) == FT(30)   # above heights[end] → clamp to values[end]
-    end
-
-    @testset "horizontal_mean_profile averages at constant physical height over terrain" begin
-        Nx, Nz = 16, 12
-        Lx, Lz = FT(20000), FT(6000)
-        z_faces = Breeze.TerrainFollowingDiscretization.TerrainFollowingVerticalDiscretization(
-            collect(range(0, Lz, length=Nz+1));
-            formulation = Breeze.TerrainFollowingDiscretization.LinearDecay())
-        terrain_grid = RectilinearGrid(default_arch; size=(Nx, Nz),
-                                       x=(-Lx/2, Lx/2), z=z_faces,
-                                       topology=(Periodic, Flat, Bounded))
-        Breeze.TerrainFollowingDiscretization.materialize_terrain!(terrain_grid,
-                                                                  x -> FT(800) * exp(-x^2 / FT(3000)^2))
-
-        # A field that is an exact linear function of physical height. The height-resolved mean must
-        # reproduce it at every level; a per-computational-level mean could not, since the levels of
-        # different columns sit at different physical heights (here up to ~200 m apart).
-        φ(z) = FT(300) + FT(0.01) * z
-        f = CenterField(terrain_grid)
-        set!(f, (x, z) -> φ(z))
-
-        profile = Breeze.CompressibleEquations.horizontal_mean_profile(f)
-
-        @test length(profile.heights) == Nz
-        @test all(diff(profile.heights) .> 0)
-        # The reference heights are the lowest-terrain column's cell centers.
-        lowest_column = @allowscalar [Oceananigans.Grids.znode(1, 1, k, terrain_grid,
-                                                               Center(), Center(), Center())
-                                      for k in 1:Nz]
-        @test profile.heights ≈ lowest_column
-        @test maximum(abs, profile.values .- φ.(profile.heights)) < sqrt(eps(FT)) * 300
     end
 
     # `ρ = HydrostaticallyBalancedDensity()` integrates the hydrostatic column from the surface

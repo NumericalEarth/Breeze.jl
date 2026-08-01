@@ -22,18 +22,12 @@
 #####
 
 using Oceananigans: architecture
-using Oceananigans.AbstractOperations: KernelFunctionOperation
-using Oceananigans.Architectures: on_architecture
-using Oceananigans.Fields: Field, ZeroField, interior, set!
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶜ
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ, Δzᶜᶜᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!, NormalFlowBoundaryCondition, FieldBoundaryConditions
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
                                               SlopeInsideInterpolation,
                                               TerrainFollowingGrid, ∂z∂x, ∂z∂y
-using Breeze.Thermodynamics: evaluate_profile, hydrostatic_pressure, integrate_exner_column!,
-                             newton_hydrostatic_pressure, moist_reference_constants
-using Breeze.Solvers: FixedIterations
 
 #####
 ##### Terrain-aware type alias
@@ -80,102 +74,39 @@ function (profile::HorizontalMeanProfile)(z)
 end
 
 """
-$(TYPEDEF)
-
-Adapter that makes a vertical profile — a `Number`, a callable `φ(z)`, or a
-[`HorizontalMeanProfile`](@ref) — settable onto a `Field` of any dimensionality. `set!` calls it
-with the field's node coordinates, which are `(x, z)` on a `Flat`-`y` grid, `(x, y, z)` in 3D and
-`(λ, φ, z)` on a latitude-longitude grid; only the last of those — the physical height, which on a
-terrain-following grid varies per column — is used. Subtypes `Function` so `set!` takes its
-function-evaluation path (which evaluates on the host and transfers once).
-"""
-struct HeightProfile{P} <: Function
-    profile :: P
-end
-
-@inline (hp::HeightProfile)(coordinates...) = evaluate_profile(hp.profile, last(coordinates))
-
-@inline physical_heightᶜᶜᶜ(i, j, k, grid) = znode(i, j, k, grid, Center(), Center(), Center())
-
-"""
 $(TYPEDSIGNATURES)
 
-Reduce a 3D `field` to a `HorizontalMeanProfile` of its horizontal mean **at constant physical
-height**. On a terrain-following grid the cell-center height `znode(i, j, k, …)` varies with
-`(i, j)`, so a plain per-`k` average would blend, e.g., valley-floor and mountain-top air at the
-same computational level. Instead every column is first interpolated onto a common set of physical
-heights and the mean is taken there, giving a genuine `θ̄(z)` — the horizontally-uniform reference
-profile that WRF-style base states use, evaluated per column at its own terrain by
-[`compute_terrain_reference_state!`](@ref).
-
-The common heights are the columnwise minima of the cell-center heights at each level `k`, obtained
-by a `minimum!` reduction: on a terrain-following grid these are the levels of the lowest-terrain
-column, they increase strictly with `k`, and every column's level-`k` center lies at or above
-them — so the per-column interpolation never extrapolates above a column's top.
-
-A column whose terrain rises above a given height has no air there, and contributes nothing to that
-height's mean: the interpolation kernel also fills an indicator field, and the mean is the ratio of
-the two `sum!` reductions. Extending such columns downward instead (holding the surface value) would
-bias the mean towards near-surface air by `~(z̄ − z_surface)·dφ/dz` at the lowest levels. The
-lowest-terrain column contributes to every height, so no level is ever empty.
+Reduce a 3D `field` to a `HorizontalMeanProfile` of its horizontal mean at each
+vertical level, paired with the horizontal-mean physical height of that level. On a
+terrain-following grid the cell-center height `znode(i, j, k, …)` varies with `(i, j)`, so
+both the value and the height are averaged over `(i, j)` (on a CPU mirror of the grid) to
+give a single representative profile that can be re-evaluated per column.
 """
 function horizontal_mean_profile(field)
     grid = field.grid
-    arch = architecture(grid)
-    Nz = size(grid, 3)
-
-    z̄ = Field{Nothing, Nothing, Center}(grid)
-    minimum!(z̄, KernelFunctionOperation{Center, Center, Center}(physical_heightᶜᶜᶜ, grid))
-
-    φ̂ = CenterField(grid)
-    contributions = CenterField(grid)
-    launch!(arch, grid, :xy, _interpolate_columns_to_heights!, φ̂, contributions, field, z̄, grid, Nz)
-
-    φ_sum = Field{Nothing, Nothing, Center}(grid)
-    contribution_sum = Field{Nothing, Nothing, Center}(grid)
-    sum!(φ_sum, φ̂)
-    sum!(contribution_sum, contributions)
-
-    heights = vec(Array(interior(z̄)))
-    values = vec(Array(interior(φ_sum))) ./ vec(Array(interior(contribution_sum)))
-
-    return HorizontalMeanProfile(heights, values)
-end
-
-# Interpolate each column of `φ` onto the common heights `z̄`, piecewise-linearly in physical
-# height, and record which columns contribute (those whose lowest cell center lies at or below the
-# target height — the others are inside the terrain there). `m`, the highest cell center at or below
-# z̄[k], never decreases with `k` (both the column's centers and z̄ increase), so it advances
-# monotonically: O(Nz) per column. The `&` is deliberate (not `&&`): both operands are cheap, and a
-# non-short-circuiting comparison keeps the loop free of nested branches on the GPU.
-@kernel function _interpolate_columns_to_heights!(φ̂, contributions, φ, z̄, grid, Nz)
-    i, j = @index(Global, NTuple)
-
-    lowest_center = physical_heightᶜᶜᶜ(i, j, 1, grid)
-    m = 1
+    Nx, Ny, Nz = size(grid)
+    cpu_grid = Oceananigans.Architectures.on_architecture(Oceananigans.CPU(), grid)
+    data = Array(Oceananigans.interior(field))
+    FT = eltype(grid)
+    c = Center()
+    normalization = one(FT) / (Nx * Ny)
+    heights = zeros(FT, Nz)
+    values = zeros(FT, Nz)
 
     for k in 1:Nz
-        @inbounds z★ = z̄[1, 1, k]
+        height_sum = zero(FT)
+        value_sum = zero(FT)
 
-        while (m < Nz) & (physical_heightᶜᶜᶜ(i, j, min(m + 1, Nz), grid) ≤ z★)
-            m += 1
+        for j in 1:Ny, i in 1:Nx
+            height_sum += znode(i, j, k, cpu_grid, c, c, c)
+            value_sum += data[i, j, k]
         end
 
-        m⁺ = min(m + 1, Nz)
-        zᵐ = physical_heightᶜᶜᶜ(i, j, m, grid)
-        zᵐ⁺ = physical_heightᶜᶜᶜ(i, j, m⁺, grid)
-
-        # `max(…, eps)` guards the m = Nz case, where zᵐ⁺ = zᵐ and z★ = zᵐ, so the weight is 0.
-        Δz = max(zᵐ⁺ - zᵐ, eps(zᵐ))
-        w = clamp((z★ - zᵐ) / Δz, 0, 1)
-        φ★ = (1 - w) * @inbounds(φ[i, j, m]) + w * @inbounds(φ[i, j, m⁺])
-
-        contributes = z★ ≥ lowest_center
-        @inbounds begin
-            φ̂[i, j, k] = ifelse(contributes, φ★, 0)
-            contributions[i, j, k] = ifelse(contributes, 1, 0)
-        end
+        heights[k] = height_sum * normalization
+        values[k] = value_sum * normalization
     end
+
+    return HorizontalMeanProfile(heights, values)
 end
 
 #####
@@ -500,8 +431,8 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
             Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
             dynamics.pressure,
             dynamics.total_density,
-            reference_pressure_field(dynamics.reference_state),
-            reference_density_field(dynamics.reference_state),
+            dynamics.terrain_reference_pressure,
+            dynamics.terrain_reference_density,
             grid, dynamics, g, vertical_pressure_tendency_factor)
 
     return nothing
@@ -565,17 +496,9 @@ end
 
 @inline perturbation_pressure(i, j, k, grid, p, pᵣ) = @inbounds p[i, j, k] - pᵣ[i, j, k]
 
-# Extract the reference pressure/density fields (or `nothing` when the reference is disabled) from
-# the single `reference_state` slot, so the terrain PGF/buoyancy kernels keep dispatching on
-# `::Nothing` (full pressure) vs a field (perturbation form).
-@inline reference_pressure_field(::Nothing) = nothing
-@inline reference_pressure_field(ref::ExnerReferenceState) = ref.pressure
-@inline reference_density_field(::Nothing) = nothing
-@inline reference_density_field(ref::ExnerReferenceState) = ref.density
-
 @inline function AtmosphereModels.x_pressure_gradient(i, j, k, grid, d::TerrainCompressibleDynamics)
     stencil = d.terrain_metrics.pressure_gradient_stencil
-    return terrain_x_pressure_gradient(i, j, k, grid, d, stencil, reference_pressure_field(d.reference_state))
+    return terrain_x_pressure_gradient(i, j, k, grid, d, stencil, d.terrain_reference_pressure)
 end
 
 ##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂xᶠᶜᶜ
@@ -625,7 +548,7 @@ end
 
 @inline function AtmosphereModels.y_pressure_gradient(i, j, k, grid, d::TerrainCompressibleDynamics)
     stencil = d.terrain_metrics.pressure_gradient_stencil
-    return terrain_y_pressure_gradient(i, j, k, grid, d, stencil, reference_pressure_field(d.reference_state))
+    return terrain_y_pressure_gradient(i, j, k, grid, d, stencil, d.terrain_reference_pressure)
 end
 
 ##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂yᶜᶠᶜ
@@ -739,16 +662,39 @@ end
 ##### where p' = p - pᵣ and ρ' = ρ - ρᵣ are small perturbations.
 #####
 
-# The vertical pressure gradient `-∂(p - pᵣ)/∂z` and buoyancy `-g(ρ - ρᵣ)` are identical on
-# terrain-following and height-coordinate grids once both read the single grid-polymorphic
-# `reference_state` — the 3D reference field simply broadcasts nothing and indexes `[i, j, k]`.
-# The flat `z_pressure_gradient(::CompressibleDynamics)` and `buoyancy_forceᶜᶜᶜ(::CompressibleDynamics)`
-# methods therefore serve terrain models too (via `∂z_reference_pressureᶜᶜᶠ`/`reference_densityᶜᶜᶜ`);
-# no terrain-specific override is needed.
+@inline function AtmosphereModels.z_pressure_gradient(i, j, k, grid, d::TerrainCompressibleDynamics)
+    ∂z_p = ∂zᶜᶜᶠ(i, j, k, grid, d.pressure)
+    ∂z_pᵣ = terrain_∂z_reference_pressure(i, j, k, grid, d.terrain_reference_pressure)
+    return ∂z_p - ∂z_pᵣ
+end
+
+@inline terrain_∂z_reference_pressure(i, j, k, grid, ::Nothing) = zero(grid)
+@inline terrain_∂z_reference_pressure(i, j, k, grid, pᵣ) = ∂zᶜᶜᶠ(i, j, k, grid, pᵣ)
+
+@inline function AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid,
+                                                    dynamics::TerrainCompressibleDynamics,
+                                                    temperature,
+                                                    specific_moisture,
+                                                    microphysics,
+                                                    microphysical_fields,
+                                                    constants)
+    ρ_field = dynamics.total_density  # total air density: gravity acts on total mass
+    @inbounds ρ = ρ_field[i, j, k]
+    g = constants.gravitational_acceleration
+    ρᵣ = terrain_reference_density(i, j, k, dynamics.terrain_reference_density)
+    return -g * (ρ - ρᵣ)
+end
+
+@inline terrain_reference_density(i, j, k, ::Nothing) = false
+@inline terrain_reference_density(i, j, k, ρᵣ) = @inbounds ρᵣ[i, j, k]
 
 #####
 ##### 3D terrain reference state via per-column discrete Exner integration
 #####
+
+using Breeze.Thermodynamics: evaluate_profile, hydrostatic_pressure,
+                             newton_hydrostatic_pressure, moist_reference_constants
+using Breeze.Solvers: FixedIterations
 
 terrain_reference_profiles(ref_spec) = (ref_spec, nothing)
 
@@ -830,14 +776,17 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Fill the 3D fields `pᵣ`, `ρᵣ` and `πᵣ` with the hydrostatic reference pressure, density and Exner
-function, solving the discrete hydrostatic balance per column. On a terrain-following grid,
-different columns have different physical heights at the same computational index `k`, so the
-reference state varies horizontally even though the reference atmosphere is horizontally uniform.
+Fill the 3D fields `pᵣ` and `ρᵣ` with the hydrostatic reference pressure and
+density, solving the discrete hydrostatic balance per column. On a terrain-following
+grid, different columns have different physical heights at the same computational index
+`k`, so the reference state varies horizontally even though the reference atmosphere is
+horizontally uniform.
 
-Each column is anchored at its own terrain surface with the *continuous* hydrostatic state at that
-physical height, and every face above it — starting with the surface-to-first-center half cell —
-is closed by the Newton solve of the discrete balance
+Moist terrain columns first assign the local terrain surface the continuous hydrostatic
+state at its physical height, then use the same Newton solve for the surface-to-center
+half cell and every interior face to drive the discrete hydrostatic balance. Dry terrain
+columns keep the direct continuous anchor at the first cell center and use the Newton
+solve only on interior faces.
 ```math
 \\frac{p_{ref}[k] - p_{ref}[k-1]}{Δz} + g \\frac{ρ_{ref}[k] + ρ_{ref}[k-1]}{2} = 0
 ```
@@ -851,9 +800,19 @@ would otherwise be dominated by the near-cancellation of two large terms.
 The reference pressure is also used for the perturbation horizontal pressure gradient,
 reducing the terrain-following PGF error.
 """
-function compute_terrain_reference_state!(pᵣ, ρᵣ, πᵣ, grid, p₀, ref_spec, pˢᵗ, constants)
-    arch = architecture(grid)
-    Nz = size(grid, 3)
+function compute_terrain_reference_state!(pᵣ, ρᵣ, grid, p₀, ref_spec, pˢᵗ, constants)
+    # The 3D reference state is filled once, at construction. Each column is an upward,
+    # serial-in-`k` discrete-hydrostatic Newton solve that evaluates the (possibly
+    # functional) reference θ — and qᵛ for moist columns — at the physical height of
+    # every cell. We compute it on the host — into plain arrays, using a CPU mirror of
+    # the grid — then bulk-copy the result into the reference Fields. This keeps
+    # `reference_potential_temperature`/`reference_vapor_mass_fraction` ordinary host
+    # functions (no GPU type-stability/allocation requirement) and costs a single
+    # host→device transfer instead of a scalar host↔device op per cell. The CPU mirror
+    # preserves the materialised terrain through `on_architecture`, so its `znode`/`Δz`
+    # match the device grid exactly.
+    Nx, Ny, Nz = size(grid)
+    c = Center()
 
     θᵣ, qᵛᵣ = terrain_reference_profiles(ref_spec)
 
@@ -863,146 +822,71 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, πᵣ, grid, p₀, ref_sp
     cᵖᵛ = constants.vapor.heat_capacity
     g = constants.gravitational_acceleration
 
-    # The reference profiles are host callables (a number, a user `θ(z)`, or a
-    # `HorizontalMeanProfile`), so they are evaluated by `set!` — which broadcasts over a CPU mirror
-    # of the grid and transfers once — rather than inside a kernel, which would impose GPU
-    # type-stability and allocation requirements on user-supplied functions. `HeightProfile` feeds
-    # each field's own physical `znode`s to the profile, so on a terrain-following grid every column
-    # is sampled at its own heights.
-    θ = CenterField(grid)
-    set!(θ, HeightProfile(θᵣ))
-    fill_halo_regions!(θ)
+    cpu_grid = Oceananigans.Architectures.on_architecture(Oceananigans.CPU(), grid)
+    FT = eltype(grid)
+    p_host = zeros(FT, Nx, Ny, Nz)
+    ρ_host = zeros(FT, Nx, Ny, Nz)
 
-    qᵛ = terrain_reference_vapor_field(qᵛᵣ, grid)
-    θˢ, qᵛˢ, pˢ = terrain_surface_reference_fields(grid, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+    for j in 1:Ny, i in 1:Nx
+        p⁻ = zero(FT)
+        ρ⁻ = zero(FT)
+        Π⁻ = zero(FT)
 
-    launch!(arch, grid, :xy, _compute_terrain_reference_state!,
-            πᵣ, pᵣ, ρᵣ, θ, qᵛ, θˢ, qᵛˢ, pˢ, grid, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+        for k in 1:Nz
+            z_phys = znode(i, j, k, cpu_grid, c, c, c)
+            θₖ = evaluate_profile(θᵣ, z_phys)
+            qᵛₖ = qᵛᵣ === nothing ? zero(θₖ) : evaluate_profile(qᵛᵣ, z_phys)
+            Rᵐₖ, cᵖᵐₖ, κₖ = moist_reference_constants(qᵛₖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
 
+            if k == 1
+                if qᵛᵣ === nothing
+                    pₖ = terrain_hydrostatic_pressure(z_phys, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+                else
+                    z_surface = znode(i, j, 1, cpu_grid, c, c, Face())
+                    θ_surface = evaluate_profile(θᵣ, z_surface)
+                    qᵛ_surface = evaluate_profile(qᵛᵣ, z_surface)
+                    Rᵐ_surface, _cᵖᵐ_surface, κ_surface = moist_reference_constants(qᵛ_surface, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+
+                    p⁻ = terrain_hydrostatic_pressure(z_surface, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+                    Π_surface = (p⁻ / pˢᵗ)^κ_surface
+                    ρ⁻ = p⁻ / (Rᵐ_surface * θ_surface * Π_surface)
+
+                    # The surface sits at the bottom face; the first cell center is
+                    # half a cell above it, so the surface-to-center balance spans Δzᶜᶜᶜ/2.
+                    Δz = Δzᶜᶜᶜ(i, j, 1, cpu_grid) / 2
+                    θ_face = (θₖ + θ_surface) / 2
+                    Πₖ_init = Π_surface - g * Δz / (cᵖᵐₖ * θ_face)
+                    pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
+                    pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, FixedIterations(5))
+                end
+            else
+                z_below = znode(i, j, k - 1, cpu_grid, c, c, c)
+                θ_below = evaluate_profile(θᵣ, z_below)
+                θ_face = (θₖ + θ_below) / 2
+                Δz = Δzᶜᶜᶠ(i, j, k, cpu_grid)
+                Πₖ_init = Π⁻ - g * Δz / (cᵖᵐₖ * θ_face)
+                pₖ = pˢᵗ * Πₖ_init^(1 / κₖ)
+                pₖ = newton_hydrostatic_pressure(p⁻, ρ⁻, θₖ, Rᵐₖ, κₖ, Δz, pˢᵗ, g, pₖ, FixedIterations(5))
+            end
+
+            Πₖ = (pₖ / pˢᵗ)^κₖ
+            ρₖ = pₖ / (Rᵐₖ * θₖ * Πₖ)
+            @inbounds p_host[i, j, k] = pₖ
+            @inbounds ρ_host[i, j, k] = ρₖ
+
+            p⁻ = pₖ
+            ρ⁻ = ρₖ
+            Π⁻ = Πₖ
+        end
+    end
+
+    arch = architecture(grid)
+    copyto!(Oceananigans.interior(pᵣ), Oceananigans.Architectures.on_architecture(arch, p_host))
+    copyto!(Oceananigans.interior(ρᵣ), Oceananigans.Architectures.on_architecture(arch, ρ_host))
     fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
-    fill_halo_regions!(πᵣ)
-
     return nothing
 end
-
-# Vapor mass fraction of the reference atmosphere at cell centers. A dry reference (`nothing`)
-# becomes a `ZeroField`, so `moist_reference_constants(0, …)` recovers the dry constants exactly and
-# the column kernel needs no dry/moist branch.
-terrain_reference_vapor_field(::Nothing, grid) = ZeroField(eltype(grid))
-
-function terrain_reference_vapor_field(qᵛᵣ, grid)
-    qᵛ = CenterField(grid)
-    set!(qᵛ, HeightProfile(qᵛᵣ))
-    fill_halo_regions!(qᵛ)
-    return qᵛ
-end
-
-@kernel function _compute_terrain_surface_heights!(zˢ, grid)
-    i, j = @index(Global, NTuple)
-    @inbounds zˢ[i, j, 1] = znode(i, j, 1, grid, Center(), Center(), Face())
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Return the reference `(θˢ, qᵛˢ, pˢ)` at the terrain surface — the bottom face of each column — as
-2D fields. `pˢ` is the *continuous* hydrostatic pressure at the local terrain height, which anchors
-the column integration in [`compute_terrain_reference_state!`](@ref).
-
-The surface heights come from a kernel; the profiles and the hydrostatic integration are host
-callables (an arbitrary user `θ(z)` and, for moist references, an adaptive vertical integration), so
-they are evaluated in a single vectorized pass over those heights — one evaluation per column, not
-per cell — and transferred back. A dry reference returns `qᵛˢ::ZeroField`.
-"""
-function terrain_surface_reference_fields(grid, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
-    arch = architecture(grid)
-
-    zˢ = Field{Center, Center, Nothing}(grid)
-    launch!(arch, grid, :xy, _compute_terrain_surface_heights!, zˢ, grid)
-
-    heights = Array(interior(zˢ))
-    θˢ_host = map(z -> evaluate_profile(θᵣ, z), heights)
-    pˢ_host = map(z -> terrain_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants), heights)
-
-    θˢ = terrain_surface_field(θˢ_host, grid)
-    pˢ = terrain_surface_field(pˢ_host, grid)
-    qᵛˢ = qᵛᵣ === nothing ? ZeroField(eltype(grid)) :
-          terrain_surface_field(map(z -> evaluate_profile(qᵛᵣ, z), heights), grid)
-
-    return θˢ, qᵛˢ, pˢ
-end
-
-function terrain_surface_field(host_values, grid)
-    field = Field{Center, Center, Nothing}(grid)
-    copyto!(interior(field), on_architecture(architecture(grid), convert.(eltype(grid), host_values)))
-    return field
-end
-
-# Per-column reference integration: anchor at the terrain surface, then integrate upward in discrete
-# hydrostatic balance. The surface sits at the bottom face and the first cell center half a cell
-# above it, so the anchoring balance spans Δzᶜᶜᶜ/2; the interior faces are the same recurrence the
-# height-coordinate reference uses (`integrate_exner_column!`).
-@kernel function _compute_terrain_reference_state!(πᵣ, pᵣ, ρᵣ, θ, qᵛ, θˢ, qᵛˢ, pˢ,
-                                                   grid, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
-    i, j = @index(Global, NTuple)
-
-    @inbounds begin
-        p_surface = pˢ[i, j, 1]
-        θ_surface = θˢ[i, j, 1]
-        qᵛ_surface = qᵛˢ[i, j, 1]
-        θ¹ = θ[i, j, 1]
-        qᵛ¹ = qᵛ[i, j, 1]
-    end
-
-    Rᵐ_surface, _, κ_surface = moist_reference_constants(qᵛ_surface, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-    Π_surface = (p_surface / pˢᵗ)^κ_surface
-    ρ_surface = p_surface / (Rᵐ_surface * θ_surface * Π_surface)
-
-    Rᵐ¹, cᵖᵐ¹, κ¹ = moist_reference_constants(qᵛ¹, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-    Δz = Δzᶜᶜᶜ(i, j, 1, grid) / 2
-    θ_face = (θ¹ + θ_surface) / 2
-    Π¹_init = Π_surface - g * Δz / (cᵖᵐ¹ * θ_face)
-    p¹_init = pˢᵗ * Π¹_init^(1 / κ¹)
-    p¹ = newton_hydrostatic_pressure(p_surface, ρ_surface, θ¹, Rᵐ¹, κ¹, Δz, pˢᵗ, g, p¹_init,
-                                     FixedIterations(5))
-    Π¹ = (p¹ / pˢᵗ)^κ¹
-    ρ¹ = p¹ / (Rᵐ¹ * θ¹ * Π¹)
-
-    @inbounds begin
-        πᵣ[i, j, 1] = Π¹
-        pᵣ[i, j, 1] = p¹
-        ρᵣ[i, j, 1] = ρ¹
-    end
-
-    integrate_exner_column!(πᵣ, pᵣ, ρᵣ, θ, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Build the single 3D `ExnerReferenceState` for a terrain-following compressible model from an
-explicit reference profile `ref_spec` (a `reference_potential_temperature` — constant or `θ(z)` —
-optionally with `reference_vapor_mass_fraction`). Its `pressure`/`density`/`exner_function` are
-horizontally-varying `CenterField`s in per-column discrete hydrostatic balance
-(`compute_terrain_reference_state!`); only `pressure`/`density` are read by the terrain kernels,
-but `exner_function` is filled for consistency with the 1D-column form.
-"""
-function terrain_exner_reference_state(grid, surface_pressure, ref_spec, standard_pressure, constants)
-    FT = eltype(grid)
-    pᵣ = CenterField(grid)
-    ρᵣ = CenterField(grid)
-    πᵣ = CenterField(grid)
-    compute_terrain_reference_state!(pᵣ, ρᵣ, πᵣ, grid, surface_pressure, ref_spec, standard_pressure, constants)
-    θᵣ, _ = terrain_reference_profiles(ref_spec)
-    θ₀ = convert(FT, evaluate_profile(θᵣ, 0))
-    return ExnerReferenceState(convert(FT, surface_pressure), θ₀, convert(FT, standard_pressure), pᵣ, ρᵣ, πᵣ)
-end
-
-# Terrain-following method of the reference-state builder (the height-coordinate method is in
-# `compressible_dynamics.jl`): an explicit profile builds the 3D `ExnerReferenceState`.
-build_reference_state(grid, ::TerrainMetrics, ref_spec, surface_pressure, standard_pressure, constants) =
-    terrain_exner_reference_state(grid, surface_pressure, ref_spec, standard_pressure, constants)
 
 """
 $(TYPEDSIGNATURES)
@@ -1023,20 +907,19 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Recompute the terrain-following model's 3D `ExnerReferenceState` in place from the height-resolved
-horizontal-mean state, via `compute_terrain_reference_state!`. Unlike the flat Exner / anelastic
-`set_to_mean!` reset, this specializes on the *model* (rather than the reference type) because the
-terrain mean must be taken at constant physical height (`horizontal_mean_profile`), not per
-computational level. No `update_state!` follows: the terrain reference feeds only the buoyancy and
-pressure-gradient tendencies, not any diagnostic field. A no-op if the dynamics carries no reference.
+Recompute the 3D terrain reference pressure/density in place from the horizontal-mean state,
+via `compute_terrain_reference_state!`. Unlike the Exner/anelastic `set_to_mean!` reset, no
+`update_state!` follows: the terrain reference feeds only the buoyancy and pressure-gradient
+tendencies, not any diagnostic field. A no-op if the dynamics carries no terrain reference.
 """
 function AtmosphereModels.reset_reference_state!(model::TerrainCompressibleModel)
     dynamics = model.dynamics
-    ref = dynamics.reference_state
-    ref === nothing && return nothing
+    pᵣ = dynamics.terrain_reference_pressure
+    ρᵣ = dynamics.terrain_reference_density
+    (pᵣ === nothing || ρᵣ === nothing) && return nothing
 
     ref_spec = terrain_reference_mean_profiles(model)
-    compute_terrain_reference_state!(ref.pressure, ref.density, ref.exner_function, model.grid,
+    compute_terrain_reference_state!(pᵣ, ρᵣ, model.grid,
                                      surface_pressure(dynamics),
                                      ref_spec,
                                      standard_pressure(dynamics),

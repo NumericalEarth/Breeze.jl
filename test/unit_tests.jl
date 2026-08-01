@@ -104,17 +104,11 @@ using Breeze.Thermodynamics: pressure_balanced_density
 
     @testset "materialize_dynamics seeds pressure" begin
         surface_pressure = FT(100000)
+        dynamics_stub = CompressibleDynamics(; surface_pressure)
         constants = ThermodynamicConstants(FT)
-
-        dynamics_stub = CompressibleDynamics(; surface_pressure, reference_state=nothing)
         dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
-        @test all(Array(interior(dynamics.pressure)) .== surface_pressure)
 
-        automatic_stub = CompressibleDynamics(; surface_pressure)
-        automatic_dynamics = materialize_dynamics(automatic_stub, grid, NamedTuple(), constants)
-        pressure = Array(interior(automatic_dynamics.pressure))
-        reference_pressure = Array(interior(automatic_dynamics.reference_state.pressure))
-        @test all(pressure .== reference_pressure)
+        @test all(Array(interior(dynamics.pressure)) .== surface_pressure)
     end
 end
 
