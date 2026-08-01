@@ -627,14 +627,23 @@ end
         pᵣ[i, j, 1] = p¹
         ρᵣ[i, j, 1] = ρ¹
     end
-    p⁻ = p¹
-    ρ⁻ = ρ¹
+    integrate_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+end
 
-    # Discrete-balance recurrence for k = 2..Nz. The residual
-    #   F(p) = (p − p⁻) / Δz_face + g · (ρ(p) + ρ⁻) / 2
-    # with ρ(p) = p^(1−κᵏ) · pˢᵗ^κᵏ / (Rᵐᵏ θ̄[k]) is monotone increasing in
-    # p, so Newton converges in O(few) iterations from the continuous-Π guess.
-    for k in 2:Nz
+# Upward discrete-balance recurrence for levels k = k_first..Nz of column (i, j), continuing from
+# the already-filled level `k_first - 1`. The residual
+#   F(p) = (p − p⁻) / Δz_face + g · (ρ(p) + ρ⁻) / 2
+# with ρ(p) = p^(1−κᵏ) · pˢᵗ^κᵏ / (Rᵐᵏ θ̄[k]) is monotone increasing in p, so Newton converges in
+# O(few) iterations from the continuous-Π guess. Shared by the height-coordinate anchor above and
+# the terrain-following anchor in `Breeze.CompressibleEquations` — the two differ only in how the
+# first level is set, not in the interior recurrence.
+@inline function integrate_exner_column!(π₀, pᵣ, ρᵣ, θ₀, qᵛ, i, j, grid, k_first, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    @inbounds begin
+        p⁻ = pᵣ[i, j, k_first - 1]
+        ρ⁻ = ρᵣ[i, j, k_first - 1]
+    end
+
+    for k in k_first:Nz
         Δz_face = Δzᶜᶜᶠ(i, j, k, grid)
         @inbounds begin
             θᵏ = θ₀[i, j, k]
