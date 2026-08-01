@@ -173,6 +173,7 @@ makedocs(
         ;
         size_threshold_warn = 2 ^ 19, # 512 KiB
         size_threshold = 2 ^ 20, # 1 MiB
+        prettyurls = get(ENV, "CI", "false") == "true",
     ),
     pages=[
         "Home" => "index.md",
