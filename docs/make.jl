@@ -2,6 +2,7 @@ using Breeze
 using RRTMGP, CloudMicrophysics # to load Breeze extensions
 using Documenter
 using DocumenterCitations
+using DocumenterCodeBlocks: CodeBlocks
 
 using CairoMakie
 CairoMakie.activate!(type = "png")
@@ -167,7 +168,7 @@ makedocs(
     ;
     modules,
     sitename = "Breeze",
-    plugins = [bib],
+    plugins = [bib, CodeBlocks()],
     format = Documenter.HTML(
         ;
         size_threshold_warn = 2 ^ 19, # 512 KiB
