@@ -212,7 +212,7 @@ Colorbar(fig[3, 3], hmu; label = "u′ (m/s)")
 title = @lift "Acoustic wave in log-layer shear — t = $(prettytime(times[$n]))"
 fig[0, :] = Label(fig, title, fontsize = 16, tellwidth = false)
 
-CairoMakie.record(fig, "acoustic_wave.mp4", 1:Nt, framerate = 18) do nn
+CairoMakie.record(fig, "acoustic_wave.mp4", 1:Nt; framerate = 18, compression = 23) do nn
     n[] = nn
 end
 nothing #hide
