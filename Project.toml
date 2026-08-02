@@ -33,6 +33,9 @@ BreezeCloudMicrophysicsExt = ["CloudMicrophysics", "SpecialFunctions"]
 BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
 BreezeReactantExt = "Reactant"
 
+[sources]
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "mg/reactant-set-reduced-fields"}
+
 [compat]
 Adapt = "4.3.0"
 Artifacts = "<0.0.1, 1"
@@ -46,7 +49,7 @@ JLD2 = "0.5.13, 0.6"
 KernelAbstractions = "0.9"
 LazyArtifacts = "<0.0.1, 1"
 OffsetArrays = "1.4"
-Oceananigans = "0.110.8"
+Oceananigans = "0.110.14"
 Printf = "1"
 RRTMGP = "0.21"
 Reactant = "0.2.268"
