@@ -289,7 +289,7 @@ $(TYPEDSIGNATURES)
 
 Return `μ` with its aerosol reservoir `ρnᵃ` [m⁻³] set from the parcel's environmental
 density `ρ`: to `ρ * nᵃ` if `nᵃ` [kg⁻¹] is given, to `ρnᵃ` if that is given, and otherwise
-to the scheme default [`initial_aerosol_number_density`](@ref).
+to the scheme default [`AtmosphereModels.initial_aerosol_number_density`](@ref).
 
 Because `set!` calls this on every invocation, a later `set!` also resets the reservoir to
 the distribution default. Pass `nᵃ` or `ρnᵃ` explicitly to carry a depleted reservoir

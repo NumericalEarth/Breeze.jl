@@ -1,5 +1,9 @@
 # [Size Distribution](@id p3_size_distribution)
 
+```@meta
+CurrentModule = Breeze.Microphysics.PredictedParticleProperties
+```
+
 P3 assumes ice particles follow a **gamma size distribution**, with parameters
 determined from prognostic moments and empirical closure relations.
 
