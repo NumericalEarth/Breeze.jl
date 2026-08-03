@@ -450,8 +450,9 @@ end
         @test all(b -> eltype(typeof(b).parameters[1]) == FT || typeof(b).parameters[1] == FT,
                   closure.mixing_length.branches)   # convert_eltype reached every branch
 
-        # Cq is not folded into the length scale: the default closure is untouched by it
-        @test TKEBasedTurbulenceClosure(FT; mixing_length = NakanishiNiinoLengthScale()).Cq == 1
+        # Cq is not folded into the length scale: selecting MYNN's branches leaves Cq at its
+        # default, so the mesoscale value has to be asked for explicitly.
+        @test TKEBasedTurbulenceClosure(FT; mixing_length = NakanishiNiinoLengthScale()).Cq == 2
     end
 end
 
@@ -632,7 +633,7 @@ end
     @testset "Cq scales the TKE diffusivity only" begin
         # MYNN transport TKE at S_q = 3S_M (their Eq. 67). We default to Cq = 1, and the TKE tracer
         # carries its own field so that momentum and heat are untouched by the choice.
-        for Cq in (FT(1), FT(3))
+        for Cq in (FT(1), FT(2), FT(3))
             closure = TKEBasedTurbulenceClosure(FT; Cq)
             model = AtmosphereModel(grid; closure, coriolis = FPlane(latitude = 45))
             θ₀ = model.dynamics.reference_state.potential_temperature
@@ -655,7 +656,9 @@ end
                   model.closure_fields.νₑᵗ
         end
 
-        @test TKEBasedTurbulenceClosure().Cq == 1        # shipped default leaves TKE as momentum
+        # The shipped default is Deardorff's subgrid value, not the k-ε convention of one that
+        # falls out of simply reusing the momentum diffusivity.
+        @test TKEBasedTurbulenceClosure().Cq == 2
     end
 
     @testset "alternative constant sets run" begin

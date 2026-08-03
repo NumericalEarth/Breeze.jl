@@ -81,12 +81,19 @@ struct TKEBasedTurbulenceClosure{TD, ML, FT} <: AbstractScalarDiffusivity{TD, Ve
     CRi :: FT
     "floor on ``e``, m² s⁻²; also the value subtracted from the ``ℓᵗ`` integrand"
     eᵐⁱⁿ :: FT
-    "``C^q``, the ratio of the TKE diffusivity to the momentum diffusivity. The default of one
-     transports TKE exactly as momentum. [Nakanishi and Niino (2009)](@cite NakanishiNiino2009)
-     take ``S_q = 3S_M`` (their Eq. 67), i.e. ``C^q = 3``. Their 2004 version had used 2 for this
-     *and three other* stability functions alike, for simplicity and after Deardorff (1980); the
-     2009 revision found ``S_q`` several times larger than ``S_M`` while the others were nearly
-     equal to it, so 2 is the discarded average of 3 and 1 rather than a value fitted for TKE"
+    "``C^q``, the ratio of the TKE diffusivity to the momentum diffusivity. The default is
+     Deardorff's ``2K_m`` (his 1980 Eq. 7e), the subgrid value for a large-eddy simulation, where
+     resolved motions carry most of the vertical transport of turbulent kinetic energy.
+
+     [Nakanishi and Niino (2009)](@cite NakanishiNiino2009) instead take ``S_q = 3S_M`` (their
+     Eq. 67), the larger value being appropriate to an ensemble-mean column in which nothing is
+     resolved and this term therefore carries *all* of that transport. Set ``C^q = 3`` alongside
+     [`NakanishiNiinoLengthScale`](@ref) for mesoscale use.
+
+     Their 2004 version had used 2 for this *and three other* stability functions alike, for
+     simplicity and after Deardorff; the 2009 revision found ``S_q`` several times larger than
+     ``S_M`` while the others were nearly equal to it. So the 2 they discarded was an average
+     across four quantities — it agrees with Deardorff's TKE value only by coincidence"
     Cq :: FT
 end
 
@@ -126,7 +133,7 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    Pr₀ = 0.74,
                                    CRi = 3,
                                    eᵐⁱⁿ = 1e-6,
-                                   Cq = 1) where TD
+                                   Cq = 2) where TD
 
     mixing_length = convert_eltype(FT, mixing_length)
 
