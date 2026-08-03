@@ -180,8 +180,9 @@ function AtmosphereModel(grid;
     preliminary_microphysical_fields = materialize_microphysical_fields(microphysics, grid, field_boundary_conditions)
 
     # Materialize atmosphere-specific boundary conditions (fill in VPT diagnostic,
-    # surface pressure, thermodynamic constants, convert ρe → ρθ for potential temperature formulations)
-    p₀ = surface_pressure(dynamics)
+    # thermodynamic constants, convert ρe → ρθ for potential temperature formulations).
+    # Surface fluxes diagnose their pressure from the live model fields at evaluation time.
+    p₀ = base_pressure(dynamics)
     # Pass preliminary microphysical fields for BC materialization; the qᵛ field within
     # provides the specific_prognostic_moisture reference needed by VirtualPotentialTemperature.
     specific_moisture_field = haskey(preliminary_microphysical_fields, :qᵛ) ? preliminary_microphysical_fields.qᵛ : CenterField(grid)
@@ -259,8 +260,9 @@ function AtmosphereModel(grid;
     # below. ContinuousForcing resolves `field_dependencies` to positional indices at
     # materialize time and looks them up positionally at runtime; the two tuples must
     # agree on ordering, or forcings will read the wrong field.
+    auxiliary_fields = (; T=temperature, p=total_pressure(dynamics), ρ=total_density(dynamics))
     model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
-                         (; T=temperature), microphysical_fields)
+                         auxiliary_fields, microphysical_fields)
     density = dynamics_density(dynamics)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, density,
@@ -533,7 +535,7 @@ combine_forcing_values(a, b) = (a, b)
 
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)
-    auxiliary = (; T=model.temperature)
+    auxiliary = (; T=model.temperature, p=total_pressure(model.dynamics), ρ=total_density(model.dynamics))
     return merge(prognostic_fields(model), formulation_fields, model.velocities, auxiliary, model.microphysical_fields)
 end
 

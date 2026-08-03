@@ -15,6 +15,7 @@ using Breeze.BoundaryConditions: PolynomialCoefficient,
                                  stability_correction_factor
 using Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
+using Oceananigans.Grids: XDirection
 using GPUArraysCore: @allowscalar
 
 @testset "PolynomialCoefficient [$FT]" for FT in test_float_types()
@@ -623,7 +624,7 @@ using GPUArraysCore: @allowscalar
         using Breeze.BoundaryConditions: evaluation_height
         grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
 
-        # Nothing → uses znode (first cell center at 10m for this grid)
+        # Nothing → uses the first-cell height above the surface (10 m here)
         h_default = evaluation_height(1, 1, grid, nothing)
         @test h_default ≈ 10.0
 
@@ -807,7 +808,7 @@ using GPUArraysCore: @allowscalar
 
     @testset "Drag flux uses filtered velocity, not instantaneous" begin
         using Oceananigans.Models: BoundaryConditionOperation
-        using Breeze.AtmosphereModels: surface_pressure as model_surface_pressure
+        using Breeze.BoundaryConditions: surface_air_pressure
         using Breeze.Thermodynamics: surface_density
 
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
@@ -843,7 +844,9 @@ using GPUArraysCore: @allowscalar
         compute!(τˣ_field)
 
         # New formula: τ = -ρ₀ * Cᴰ * Ũ * u, with `u` and `Ũ` read from filtered fields.
-        p₀ = model_surface_pressure(model.dynamics)
+        model_fields = Oceananigans.fields(model)
+        p₀ = surface_air_pressure(2, 2, grid, model_fields,
+                                  model.thermodynamic_constants, XDirection())
         T₀_default = Breeze.AtmosphereModels.default_drag_surface_temperature(model.dynamics,
                                                                               grid,
                                                                               model.thermodynamic_constants)

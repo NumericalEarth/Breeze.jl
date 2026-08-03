@@ -1,13 +1,15 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.AtmosphereModels: thermodynamic_density, surface_pressure, standard_pressure
-using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities
+using Breeze.AtmosphereModels: thermodynamic_density, base_pressure, standard_pressure
+using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities,
+                                 surface_air_pressure
 using Breeze.Thermodynamics: potential_temperature_from_temperature
 using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 using Oceananigans.Fields: location
+using Oceananigans.Grids: XDirection
 using Oceananigans.TimeSteppers: compute_flux_bc_tendencies!, update_state!
 using Test
 
@@ -96,7 +98,7 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 2,
                                                                     damping = NoDivergenceDamping());
                                     reference_potential_temperature = FT(300),
-                                    surface_pressure = FT(1e5),
+                                    base_pressure = FT(1e5),
                                     standard_pressure = FT(1e5))
 
     @inline first_dependency(x, y, t, a, b, p) = a
@@ -139,7 +141,7 @@ end
                            topology=(Bounded, Bounded, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                     reference_potential_temperature=FT(300),
-                                    surface_pressure=FT(1e5))
+                                    base_pressure=FT(1e5))
 
     @inline ρu_west(y, z, t, p) = p.ρ * cos(p.ω * t)
     ρu_bcs = FieldBoundaryConditions(
@@ -172,7 +174,7 @@ end
                            topology=(Bounded, Bounded, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                     reference_potential_temperature=FT(300),
-                                    surface_pressure=FT(1e5))
+                                    base_pressure=FT(1e5))
 
     # 2-D (y, z) boundary slice for a west OBC on ρu (Face, Center, Center).
     # Slice values 1, 2, 3 at times 0, 10, 20 so the boundary value linearly
@@ -229,7 +231,7 @@ end
         # constructing a model without an explicit surface_temperature must error.
         compressible_dyn = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=2);
                                                 reference_potential_temperature = FT(300),
-                                                surface_pressure = FT(1e5),
+                                                base_pressure = FT(1e5),
                                                 standard_pressure = FT(1e5))
         ρu_bcs_no_T₀ = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         @test_throws ArgumentError AtmosphereModel(grid; dynamics=compressible_dyn,
@@ -258,14 +260,16 @@ end
         model = AtmosphereModel(grid_1; boundary_conditions=(; ρθ=ρθ_bcs))
 
         constants = model.thermodynamic_constants
-        p₀ = surface_pressure(model.dynamics)
         pˢᵗ = standard_pressure(model.dynamics)
+        set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5))
+        model_fields = Oceananigans.fields(model)
+        p₀ = @allowscalar surface_air_pressure(1, 1, grid_1, model_fields, constants)
         θ_surface = potential_temperature_from_temperature(FT(T₀), p₀, pˢᵗ, constants)
 
         @test p₀ != pˢᵗ
         @test abs(θ_surface - FT(T₀)) > increment_tolerance(FT)
 
-        set!(model; θ=θ_surface, u=FT(5))
+        set!(model; θ=θ_surface)
 
         ρθ = thermodynamic_density(model.formulation)
         Jᶿ_op = BoundaryConditionOperation(ρθ, :bottom, model)
@@ -288,11 +292,13 @@ end
         model = AtmosphereModel(grid_1; boundary_conditions=(; ρθ=ρθ_bcs))
 
         constants = model.thermodynamic_constants
-        p₀ = surface_pressure(model.dynamics)
         pˢᵗ = standard_pressure(model.dynamics)
+        set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5))
+        model_fields = Oceananigans.fields(model)
+        p₀ = @allowscalar surface_air_pressure(1, 1, grid_1, model_fields, constants)
         θ_surface = potential_temperature_from_temperature(FT(T₀), p₀, pˢᵗ, constants)
 
-        set!(model; θ=θ_surface, u=FT(5))
+        set!(model; θ=θ_surface)
         Oceananigans.initialize!(model)
 
         ρθ = thermodynamic_density(model.formulation)
@@ -327,14 +333,15 @@ end
         # Shared FilteredSurfaceVelocities should now expose a θᵥ field
         bc_condition = Oceananigans.boundary_conditions(model.momentum.ρu).bottom.condition
         @test bc_condition.filtered_velocities === fv
-        @test bc_condition.surface_pressure ≈ surface_pressure(model.dynamics)
+        @test !hasproperty(bc_condition, :base_pressure)
 
         Jᵘ_op = BoundaryConditionOperation(model.momentum.ρu, :bottom, model)
         Jᵘ_field = Field(Jᵘ_op)
         compute!(Jᵘ_field)
 
         constants = model.thermodynamic_constants
-        p₀ = surface_pressure(model.dynamics)
+        model_fields = Oceananigans.fields(model)
+        p₀ = @allowscalar surface_air_pressure(1, 1, grid_1, model_fields, constants, XDirection())
         ρ₀ = surface_density(p₀, FT(T₀), constants)
         Ũ = sqrt(U^2 + FT(gustiness)^2)
         Jᵘ_expected = - ρ₀ * FT(Cᴰ) * Ũ * U

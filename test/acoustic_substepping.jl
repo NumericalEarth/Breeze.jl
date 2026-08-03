@@ -823,7 +823,7 @@ for arch in arches
 
         td = SplitExplicitTimeDiscretization(substeps=Ns,
                                              damping=ThermalDivergenceDamping(coefficient=κᵈ))
-        dynamics = CompressibleDynamics(td; surface_pressure=p₀,
+        dynamics = CompressibleDynamics(td; base_pressure=p₀,
                                         reference_potential_temperature=θᵇᵍ)
 
         model = AtmosphereModel(grid; advection=WENO(), dynamics)
@@ -877,30 +877,30 @@ for arch in arches
         Rᵈ = dry_air_gas_constant(constants)
         cᵖᵈ = constants.dry_air.heat_capacity
         κ = Rᵈ / cᵖᵈ
-        surface_pressure = 100000
+        base_pressure = 100000
         standard_pressure = 100000
         θ₀ = 300
         N² = 0
         θ_background(z) = θ₀ * exp(N² * z / g)
-        reference_exner(z) = (surface_pressure / standard_pressure)^κ - g * z / (cᵖᵈ * θ₀)
+        reference_exner(z) = (base_pressure / standard_pressure)^κ - g * z / (cᵖᵈ * θ₀)
         reference_pressure(z) = standard_pressure * reference_exner(z)^(1 / κ)
 
         if kind === :anelastic
             reference_state = ReferenceState(grid, constants;
-                                             surface_pressure,
+                                             base_pressure,
                                              potential_temperature = θ_background)
             dynamics = AnelasticDynamics(reference_state)
             timestepper = :SSPRungeKutta3
         elseif kind === :explicit
             dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                            surface_pressure,
+                                            base_pressure,
                                             standard_pressure,
                                             reference_potential_temperature = θ_background)
             timestepper = :SSPRungeKutta3
         elseif kind === :split_explicit
             time_discretization = SplitExplicitTimeDiscretization(; substeps = 6)
             dynamics = CompressibleDynamics(time_discretization;
-                                            surface_pressure,
+                                            base_pressure,
                                             standard_pressure,
                                             reference_potential_temperature = θ_background)
             timestepper = nothing  # auto-selects :AcousticRungeKutta3 for split-explicit dynamics
@@ -1009,7 +1009,7 @@ for arch in arches
                                x=(0, 16kilometers), y=(0, 8kilometers), z=(0, 10kilometers))
 
         td = SplitExplicitTimeDiscretization(substeps=8)
-        dynamics = CompressibleDynamics(td; surface_pressure=100000,
+        dynamics = CompressibleDynamics(td; base_pressure=100000,
                                         reference_potential_temperature=300)
 
         model = AtmosphereModel(grid; advection=WENO(), dynamics)
@@ -1154,10 +1154,10 @@ for arch in arches
         constants = ThermodynamicConstants(FT)
 
         @testset "Construction and basic properties" begin
-            ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+            ref = ExnerReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
             @test ref isa ExnerReferenceState
             @test eltype(ref) == FT
-            @test ref.surface_pressure == FT(101325)
+            @test ref.base_pressure == FT(101325)
             @test ref.surface_potential_temperature == FT(300)
 
             # Pressure should decrease monotonically
@@ -1169,14 +1169,14 @@ for arch in arches
         end
 
         @testset "show/summary" begin
-            ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+            ref = ExnerReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
             s = sprint(show, ref)
             @test occursin("ExnerReferenceState", s)
             @test occursin("p₀", s)
         end
 
         @testset "surface_density" begin
-            ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+            ref = ExnerReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
             ρ₀ = surface_density(ref)
             @test ρ₀ > 0
             @test ρ₀ isa FT
@@ -1185,7 +1185,7 @@ for arch in arches
         @testset "Function-valued θ₀" begin
             g = constants.gravitational_acceleration
             θ_func(z) = FT(300) * exp(FT(1e-4) * z / g)
-            ref = ExnerReferenceState(grid, constants; surface_pressure=100000, potential_temperature=θ_func)
+            ref = ExnerReferenceState(grid, constants; base_pressure=100000, potential_temperature=θ_func)
             @test ref isa ExnerReferenceState
 
             # Pressure should still decrease monotonically

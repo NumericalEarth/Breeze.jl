@@ -106,7 +106,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{L}^l(T)``                | `ℒˡ`   | `liquid_latent_heat(T, constants)`  | Temperature-dependent latent heat of condensation                              |
 | ``\mathcal{L}^i(T)``                | `ℒⁱ`   | `ice_latent_heat(T, constants)`     | Temperature-dependent latent heat of deposition                                |
 | ``θ₀``                              | `θ₀`   | `RS.potential_temperature`          | (Constant) reference potential temperature for the anelastic formulation       |
-| ``p₀``                              | `p₀`   | `RS.surface_pressure`               | Surface reference pressure                                              |
+| ``p₀``                              | `p₀`   | `RS.base_pressure`               | Reference pressure at ``z = 0``: the datum the reference profiles are anchored to |
+| ``pˢ``                              | `pˢ`   | `RS.surface_pressure`           | Reference pressure at the bottom face of a column (the terrain surface over terrain), obtained by reducing ``p₀`` to that height |
 | ``p^{st}``                          | `pˢᵗ`  | `RS.standard_pressure`              | Standard pressure for potential temperature (default 10⁵ Pa)                   |
 | ``ρᵣ``                              | `ρᵣ`   | `RS.density`                        | Density of a dry reference state for the anelastic formulation                 |
 | ``αᵣ``                              | `αᵣ`   |                                     | Specific volume of a dry reference state, ``αᵣ = Rᵈ θ₀ / pᵣ``                  |

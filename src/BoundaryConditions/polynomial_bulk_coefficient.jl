@@ -404,8 +404,8 @@ will be automatically selected based on the boundary condition type:
 - `surface`: Surface type for computing saturation specific humidity in the stability correction.
   Default is `PlanarLiquidSurface()`. Use `PlanarIceSurface()` for ice surfaces.
 
-The measurement height is automatically determined from the grid as the height of the first
-cell center above the surface.
+The measurement height is automatically determined from the grid as half the first-cell
+thickness, the height of its center above the local surface.
 
 # Examples
 
@@ -597,9 +597,9 @@ $(TYPEDSIGNATURES)
 
 Evaluate the bulk transfer coefficient for given conditions.
 
-For a materialized `PolynomialCoefficient` (with `virtual_potential_temperature`,
-`surface_pressure`, and `thermodynamic_constants` filled in during model construction),
-the stability correction is computed internally from the stored fields.
+Within a bulk boundary condition, the stability correction uses the live surface pressure
+supplied by that condition. The `surface_pressure` stored by a manually populated coefficient
+is a fallback for direct calls to the coefficient.
 
 # Arguments
 - `i`, `j`: Grid indices
@@ -611,7 +611,7 @@ Returns the transfer coefficient (dimensionless).
 """
 # Default: evaluate at first cell center height
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀)
-    h = znode(i, j, 1, grid, Center(), Center(), Center())
+    h = Δzᶜᶜᶜ(i, j, 1, grid) / 2
     return coef(i, j, grid, U, T₀, h, nothing)
 end
 
@@ -623,6 +623,11 @@ end
 end
 
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h, θᵥ_source)
+    p₀ = surface_value(i, j, coef.surface_pressure)
+    return coef(i, j, grid, U, T₀, h, θᵥ_source, p₀)
+end
+
+@inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h, θᵥ_source, p₀)
     C¹⁰ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed)
 
     # Adjust for measurement height using logarithmic profile:
@@ -632,19 +637,19 @@ end
     Cʰ = C¹⁰ * (log(10 / ℓ) / α)^2
 
     # Apply stability correction (reads filtered θᵥ when `θᵥ_source` is provided)
-    return stability_corrected_coefficient(i, j, grid, coef, Cʰ, h, α, U, T₀, θᵥ_source)
+    return stability_corrected_coefficient(i, j, grid, coef, Cʰ, h, α, U, T₀, θᵥ_source, p₀)
 end
 
 # No stability correction (stability_function = nothing) — `θᵥ_source` is ignored
 @inline stability_corrected_coefficient(i, j, grid,
-    ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cʰ, h, α, U, T₀, θᵥ_source) = Cʰ
+    ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cʰ, h, α, U, T₀, θᵥ_source, p₀) = Cʰ
 
 # FittedStabilityFunction correction (Li et al. 2010 mapping + MOST Ψ functions).
 # The `θᵥ_source` argument selects which θᵥ field to read:
 #   - `nothing` → read instantaneous `coef.virtual_potential_temperature[i, j, 1]`
 #   - any field-like (Field, 2D filtered field) → read `θᵥ_source[i, j, 1]`
 @inline function stability_corrected_coefficient(i, j, grid,
-    coef::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, T₀, θᵥ_source)
+    coef::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, T₀, θᵥ_source, p₀)
 
     sf = coef.stability_function
     ℓ = coef.roughness_length
@@ -652,7 +657,7 @@ end
     β = log(ℓ / ℓh)
 
     θᵥ = surface_layer_θᵥ(i, j, coef.virtual_potential_temperature, θᵥ_source)
-    θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants, coef.surface)
+    θᵥ₀ = surface_virtual_potential_temperature(T₀, p₀, coef.thermodynamic_constants, coef.surface)
     Riᴮ = bulk_richardson_number(h, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
 
     return Cʰ * sf(Riᴮ, α, β, coef.transfer_type)
@@ -675,19 +680,20 @@ end
 ##### Evaluation height helper
 #####
 
-@inline evaluation_height(i, j, grid, ::Nothing) = znode(i, j, 1, grid, Center(), Center(), Center())
+@inline evaluation_height(i, j, grid, ::Nothing) = Δzᶜᶜᶜ(i, j, 1, grid) / 2
 @inline evaluation_height(i, j, grid, h) = h
 
 #####
 ##### Bulk coefficient evaluation — no filtering (backward compatible)
 #####
 
-@inline bulk_coefficient(i, j, grid, C::Number, fields, T₀, fv) = C
+@inline bulk_coefficient(i, j, grid, C::Number, fields, T₀, fv, p₀) = C
 
-@inline function bulk_coefficient(i, j, grid, C::PolynomialCoefficient, fields, T₀, ::Nothing)
+@inline function bulk_coefficient(i, j, grid, C::PolynomialCoefficient, fields, T₀, ::Nothing, p₀)
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
-    return C(i, j, grid, U, T₀)
+    h = evaluation_height(i, j, grid, nothing)
+    return C(i, j, grid, U, T₀, h, nothing, p₀)
 end
 
 #####
@@ -699,11 +705,11 @@ end
 ##### every term is computed from filtered state.
 #####
 
-@inline function bulk_coefficient(i, j, grid, C::PolynomialCoefficient, fields, T₀, fv::FilteredSurfaceVelocities)
+@inline function bulk_coefficient(i, j, grid, C::PolynomialCoefficient, fields, T₀, fv::FilteredSurfaceVelocities, p₀)
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields, fv)
     U = sqrt(U²)
     h = evaluation_height(i, j, grid, fv.height)
-    return C(i, j, grid, U, T₀, h, fv.θᵥ)
+    return C(i, j, grid, U, T₀, h, fv.θᵥ, p₀)
 end
 
 #####

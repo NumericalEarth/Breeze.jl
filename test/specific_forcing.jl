@@ -224,7 +224,7 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 2,
                                                                     damping = NoDivergenceDamping());
                                     reference_potential_temperature = FT(300),
-                                    surface_pressure = FT(1e5),
+                                    base_pressure = FT(1e5),
                                     standard_pressure = FT(1e5))
 
     F_θ = FT(-1e-5)

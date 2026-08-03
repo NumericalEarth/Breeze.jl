@@ -905,7 +905,7 @@ materialize_terrain!(grid, hill)
 td = SplitExplicitTimeDiscretization(acoustic_cfl = 0.5)
 dyn = CompressibleDynamics(td;
     reference_potential_temperature  = θ_profile,
-    surface_pressure                 = p₀,
+    base_pressure                 = p₀,
 )
 model = AtmosphereModel(grid; dynamics = dyn, advection = WENO(order = 9),
                         timestepper = :AcousticRungeKutta3)

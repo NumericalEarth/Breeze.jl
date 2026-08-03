@@ -342,7 +342,7 @@ end
     dcmip2016_klemp_wilhelmson_kessler!(T_ref, qᵛ_ref, qᶜˡ_ref, qʳ_ref, ρ_prof, p_prof, Δt, z_centers, constants, microphysics)
 
     # Run Breeze implementation
-    ref_state = ReferenceState(grid, constants; surface_pressure=p₀)
+    ref_state = ReferenceState(grid, constants; base_pressure=p₀)
     dynamics = AnelasticDynamics(ref_state)
     model = AtmosphereModel(grid; dynamics, microphysics, thermodynamic_constants=constants)
 

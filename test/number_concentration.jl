@@ -20,7 +20,7 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -58,7 +58,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=260)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=260)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
@@ -92,7 +92,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     # Warm-phase 1-mom carries rain but not snow, hail, or graupel.
@@ -110,7 +110,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = TwoMomentCloudMicrophysics()

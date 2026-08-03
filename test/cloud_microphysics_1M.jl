@@ -101,7 +101,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -125,7 +125,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
@@ -148,7 +148,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
@@ -172,7 +172,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     # Test non-equilibrium scheme only (saturation adjustment is tested elsewhere)
@@ -211,7 +211,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -237,7 +237,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -265,7 +265,7 @@ end
                            topology=(Periodic, Periodic, Bounded))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -293,7 +293,7 @@ end
                            topology=(Periodic, Periodic, Bounded))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics(; precipitation_boundary_condition=ImpenetrableBoundaryCondition())
@@ -316,7 +316,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=260)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=260)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
@@ -351,7 +351,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -375,7 +375,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=260)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=260)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
@@ -417,7 +417,7 @@ end
                            topology=(Periodic, Periodic, Bounded))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=260)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=260)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))

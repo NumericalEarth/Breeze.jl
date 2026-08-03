@@ -120,7 +120,7 @@ end
     constants = ThermodynamicConstants(Float64)
     θref(z) = 300.0 * exp(9.80616 * z / (1005 * 300.0))
     dyn = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                               surface_pressure = 1e5, standard_pressure = 1e5,
+                               base_pressure = 1e5, standard_pressure = 1e5,
                                reference_potential_temperature = θref)
     model = AtmosphereModel(grid; dynamics = dyn,
                             microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()),
@@ -163,7 +163,7 @@ end
 
     make_model() = AtmosphereModel(grid;
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        surface_pressure = 1e5, standard_pressure = 1e5,
+                                        base_pressure = 1e5, standard_pressure = 1e5,
                                         reference_potential_temperature = z -> 300.0),
         microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()),
         thermodynamic_constants = constants,

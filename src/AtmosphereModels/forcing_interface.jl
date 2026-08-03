@@ -6,7 +6,7 @@
 
 """
     materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                    dynamics, microphysics, surface_pressure, thermodynamic_constants,
+                                                    dynamics, microphysics, base_pressure, thermodynamic_constants,
                                                     microphysical_fields, specific_prognostic_moisture, temperature)
 
 Regularize boundary conditions for an `AtmosphereModel`. This function is extended

@@ -88,17 +88,17 @@ pˢᵗ = 1e5
 # ## Build all four models
 
 advection = WENO()
-surface_pressure = p₀
+base_pressure = p₀
 potential_temperature = θ₀
 
 # #### Case 1: Anelastic
 
-reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature)
+reference_state = ReferenceState(grid, constants; base_pressure, potential_temperature)
 anelastic_dynamics = AnelasticDynamics(reference_state)
 
 # #### Case 2: Boussinesq (constant reference density)
 
-constant_density_reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature)
+constant_density_reference_state = ReferenceState(grid, constants; base_pressure, potential_temperature)
 ρ₀ = adiabatic_hydrostatic_density(0, p₀, θ₀, pˢᵗ, constants)
 set!(constant_density_reference_state.density, ρ₀)
 boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
@@ -106,7 +106,7 @@ boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
 # #### Case 3: Compressible (fully explicit, no substepping)
 
 compressible_dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                             surface_pressure,
+                                             base_pressure,
                                              reference_potential_temperature = θᵇᵍ)
 
 # #### Case 4: Compressible split-explicit (substepper)
@@ -116,7 +116,7 @@ compressible_dynamics = CompressibleDynamics(ExplicitTimeStepping();
 # auto-computed substep count chosen from the horizontal acoustic CFL each step.
 
 substepper_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                           surface_pressure,
+                                           base_pressure,
                                            reference_potential_temperature = θᵇᵍ)
 
 # Build all models:

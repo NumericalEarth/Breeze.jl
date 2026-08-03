@@ -6,6 +6,8 @@
 ##### must be extended by specific dynamics implementations (AnelasticEquations, CompressibleEquations).
 #####
 
+using ..Thermodynamics: ExnerReferenceState
+
 #####
 ##### Construction interface
 #####
@@ -213,13 +215,39 @@ function validate_velocity_boundary_conditions(dynamics, user_boundary_condition
 end
 
 """
+    base_pressure(dynamics)
+
+Return the pressure of the reference atmosphere at ``z = 0``: the datum its hydrostatic profiles
+are anchored to, and a property of that atmosphere rather than of the grid. Always a scalar.
+
+This is not the pressure at the ground. On a domain whose bottom does not sit at ``z = 0`` — a
+raised height-coordinate domain, or any terrain-following grid — the two differ by ``O(ρgh)``.
+For the pressure at the ground, which is what a column integration is anchored at, use
+[`surface_pressure`](@ref).
+"""
+function base_pressure end
+
+"""
     surface_pressure(dynamics)
 
-Return the surface pressure used for boundary condition regularization.
-For anelastic dynamics, this is the reference state surface pressure.
-For compressible dynamics, this may be a constant or computed value.
+Return the pressure of the reference atmosphere at the bottom face of each column — the ground —
+obtained by reducing the [`base_pressure`](@ref) datum to that height along the
+reference profile. A scalar on a height-coordinate grid, whose bottom face is a single level; a
+2D field on a terrain-following grid, where the bottom face is the terrain surface and the
+pressure therefore varies by column.
+
+This is the anchor for a hydrostatic column integration, and what every consumer of "the pressure
+at the surface" over terrain wants. Reading it keeps a consumer consistent with the reference
+state; reading the datum instead disagrees with it by ``O(ρgh)`` per column.
+
+Equal to the datum, exactly, for the usual domain whose bottom sits at ``z = 0``. This accessor
+requires a materialized reference state that explicitly carries its bottom-face pressure. Use
+`diagnostic_surface_pressure(model)` when the pressure should follow the live model state.
 """
-function surface_pressure end
+surface_pressure(dynamics) = surface_pressure(dynamics, dynamics_reference_state(dynamics))
+surface_pressure(dynamics, reference_state) =
+    throw(ArgumentError("$(typeof(dynamics)) has no materialized reference-state surface pressure"))
+surface_pressure(dynamics, reference_state::ExnerReferenceState) = reference_state.surface_pressure
 
 """
     boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants)

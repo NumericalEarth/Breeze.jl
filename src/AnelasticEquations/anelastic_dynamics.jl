@@ -100,7 +100,7 @@ function AtmosphereModels.default_drag_surface_temperature(dynamics::AnelasticDy
     ref = dynamics.reference_state
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
-    Π₀ = (ref.surface_pressure / ref.standard_pressure)^(Rᵈ / cᵖᵈ)
+    Π₀ = (ref.base_pressure / ref.standard_pressure)^(Rᵈ / cᵖᵈ)
     return Π₀ * ref.potential_temperature
 end
 
@@ -131,7 +131,7 @@ $(TYPEDSIGNATURES)
 
 Return the surface pressure from the reference state for boundary condition regularization.
 """
-AtmosphereModels.surface_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.surface_pressure
+AtmosphereModels.base_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.base_pressure
 
 """
 $(TYPEDSIGNATURES)
@@ -147,7 +147,7 @@ AtmosphereModels.dynamics_reference_state(dynamics::AnelasticDynamics) = dynamic
 #####
 
 function Base.summary(dynamics::AnelasticDynamics)
-    p₀_str = prettysummary(dynamics.reference_state.surface_pressure)
+    p₀_str = prettysummary(dynamics.reference_state.base_pressure)
     θ₀_str = prettysummary(dynamics.reference_state.potential_temperature)
     return string("AnelasticDynamics(p₀=", p₀_str, ", θ₀=", θ₀_str, ")")
 end

@@ -55,7 +55,7 @@ grid = RectilinearGrid(size = (128, 128), halo = (5, 5),
 
 p₀, θ₀ = 101325, 285 # Pa, K
 constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀)
+reference_state = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θ₀)
 dynamics = AnelasticDynamics(reference_state)
 
 # The microphysics scheme uses saturation adjustment to maintain thermodynamic

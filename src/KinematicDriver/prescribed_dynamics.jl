@@ -33,7 +33,7 @@ The type parameter `Div` indicates whether divergence correction is applied.
 struct PrescribedDynamics{Div, D, P, FT}
     density :: D
     pressure :: P
-    surface_pressure :: FT
+    base_pressure :: FT
     standard_pressure :: FT
 end
 
@@ -41,9 +41,9 @@ end
 # and infer the others.
 function PrescribedDynamics{Div}(density::D,
                                  pressure::P,
-                                 surface_pressure::FT,
+                                 base_pressure::FT,
                                  standard_pressure::FT) where {Div, D, P, FT}
-    return PrescribedDynamics{Div, D, P, FT}(density, pressure, surface_pressure, standard_pressure)
+    return PrescribedDynamics{Div, D, P, FT}(density, pressure, base_pressure, standard_pressure)
 end
 
 """
@@ -69,14 +69,14 @@ dynamics = PrescribedDynamics(reference_state)
 PrescribedDynamics
 ├── density: PrescribedDensity
 ├── pressure: 1×1×8 Field{Nothing, Nothing, Center} reduced over dims = (1, 2) on RectilinearGrid on CPU
-├── surface_pressure: 101325.0
+├── base_pressure: 101325.0
 └── standard_pressure: 100000.0
 ```
 """
 function PrescribedDynamics(reference_state::ReferenceState; divergence_correction=false)
     density = PrescribedDensity(reference_state.density)
     pressure = reference_state.pressure
-    p₀ = reference_state.surface_pressure
+    p₀ = reference_state.base_pressure
     pˢᵗ = reference_state.standard_pressure
     return PrescribedDynamics{divergence_correction}(density, pressure, p₀, pˢᵗ)
 end
@@ -89,13 +89,13 @@ If `pressure=nothing`, hydrostatic pressure is computed during materialization.
 """
 function PrescribedDynamics(density;
                             pressure = nothing,
-                            surface_pressure = 101325,
+                            base_pressure = 101325,
                             standard_pressure = 1e5,
                             divergence_correction = false)
 
     FT = eltype(density)
     return PrescribedDynamics{divergence_correction}(density, pressure,
-                                                     convert(FT, surface_pressure),
+                                                     convert(FT, base_pressure),
                                                      convert(FT, standard_pressure))
 end
 
@@ -105,7 +105,7 @@ function Base.show(io::IO, d::PrescribedDynamics)
     print(io, "PrescribedDynamics\n")
     print(io, "├── density: ", summary(d.density), '\n')
     print(io, "├── pressure: ", prettysummary(d.pressure), '\n')
-    print(io, "├── surface_pressure: ", prettysummary(d.surface_pressure), '\n')
+    print(io, "├── base_pressure: ", prettysummary(d.base_pressure), '\n')
     print(io, "└── standard_pressure: ", prettysummary(d.standard_pressure))
 end
 
@@ -136,7 +136,7 @@ AtmosphereModels.dynamics_pressure_solver(::PrescribedDynamics, grid) = nothing
 AtmosphereModels.dynamics_pressure(d::PrescribedDynamics) = d.pressure
 AtmosphereModels.pressure_anomaly(::PrescribedDynamics) = ZeroField()
 AtmosphereModels.total_pressure(d::PrescribedDynamics) = d.pressure
-AtmosphereModels.surface_pressure(d::PrescribedDynamics) = d.surface_pressure
+AtmosphereModels.base_pressure(d::PrescribedDynamics) = d.base_pressure
 AtmosphereModels.standard_pressure(d::PrescribedDynamics) = d.standard_pressure
 
 #####
@@ -145,7 +145,7 @@ AtmosphereModels.standard_pressure(d::PrescribedDynamics) = d.standard_pressure
 
 function AtmosphereModels.materialize_dynamics(d::PrescribedDynamics{Div}, grid, bcs, constants) where Div
     FT = eltype(grid)
-    p₀ = convert(FT, d.surface_pressure)
+    p₀ = convert(FT, d.base_pressure)
     pˢᵗ = convert(FT, d.standard_pressure)
     g = constants.gravitational_acceleration
     density = materialize_density(d.density, grid, bcs)
@@ -230,8 +230,8 @@ wrap_velocity(X, Y, Z, f, grid; kwargs...) = field((X, Y, Z), f, grid)
 
 Adapt.adapt_structure(to, d::PrescribedDynamics{Div}) where Div =
     PrescribedDynamics{Div}(adapt(to, d.density), adapt(to, d.pressure),
-                            d.surface_pressure, d.standard_pressure)
+                            d.base_pressure, d.standard_pressure)
 
 Oceananigans.Architectures.on_architecture(to, d::PrescribedDynamics{Div}) where Div =
     PrescribedDynamics{Div}(on_architecture(to, d.density), on_architecture(to, d.pressure),
-                            d.surface_pressure, d.standard_pressure)
+                            d.base_pressure, d.standard_pressure)

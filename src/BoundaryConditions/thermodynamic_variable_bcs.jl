@@ -317,7 +317,7 @@ AtmosphereModels.adiabatic_scalar_bcs(fbcs::FieldBoundaryConditions) =
 const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
-                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                                   side, loc, grid, dynamics, microphysics, base_pressure, constants,
                                                    microphysical_fields, specific_prognostic_moisture, temperature)
     ef = bc.condition
     density = dynamics_density(dynamics)
@@ -329,7 +329,7 @@ end
 const UnregularizedThetaFluxBC = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
-                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                                   side, loc, grid, dynamics, microphysics, base_pressure, constants,
                                                    microphysical_fields, specific_prognostic_moisture, temperature)
     tf = bc.condition
     density = dynamics_density(dynamics)
@@ -346,7 +346,7 @@ set_sensible_heat_formulation(bc, formulation) = bc
 function set_sensible_heat_formulation(bc::BulkSensibleHeatFluxBoundaryCondition, formulation)
     bf = bc.condition
     new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, bf.surface_temperature,
-                                          bf.surface_pressure, bf.standard_pressure, bf.thermodynamic_constants,
+                                          bf.standard_pressure, bf.thermodynamic_constants,
                                           formulation, bf.filtered_velocities, bf.filtered_scalar)
     return BoundaryCondition(Flux(), new_bf)
 end

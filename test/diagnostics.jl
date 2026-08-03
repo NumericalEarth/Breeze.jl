@@ -92,7 +92,7 @@ end
     constants = ThermodynamicConstants()
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
@@ -221,7 +221,7 @@ end
     p₀ = FT(101325) # surface pressure, Pa
     pˢᵗ = FT(1e5) # standard pressure for potential temperature, Pa
     θ₀ = 288 # K
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
