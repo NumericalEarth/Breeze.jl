@@ -114,25 +114,27 @@ end
 
 function copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
     arch = architecture(grid)
-    Nz = size(grid, 3)
 
     lw_flux_up = solver.lws.flux.flux_up
     lw_flux_dn = solver.lws.flux.flux_dn
+    sw_flux_up = solver.sws.flux.flux_up
     sw_flux_dn = solver.sws.flux.flux_dn  # Total SW (direct + diffuse)
 
     ℐ_lw_up = rtm.upwelling_longwave_flux
     ℐ_lw_dn = rtm.downwelling_longwave_flux
+    ℐ_sw_up = rtm.upwelling_shortwave_flux
     ℐ_sw_dn = rtm.downwelling_shortwave_flux
 
     Nx, Ny, Nz = size(grid)
     launch!(arch, grid, (Nx, Ny, Nz+1), _copy_rrtmgp_fluxes!,
-            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn, grid)
+            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
+            lw_flux_up, lw_flux_dn, sw_flux_up, sw_flux_dn, grid)
 
     return nothing
 end
 
-@kernel function _copy_rrtmgp_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
-                                      lw_flux_up, lw_flux_dn, sw_flux_dn, grid)
+@kernel function _copy_rrtmgp_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
+                                      lw_flux_up, lw_flux_dn, sw_flux_up, sw_flux_dn, grid)
     i, j, k = @index(Global, NTuple)
 
     c = rrtmgp_column_index(i, j, grid.Nx)
@@ -140,6 +142,7 @@ end
     @inbounds begin
         ℐ_lw_up[i, j, k] = lw_flux_up[k, c]
         ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, c]
+        ℐ_sw_up[i, j, k] = sw_flux_up[k, c]
         ℐ_sw_dn[i, j, k] = -sw_flux_dn[k, c]
     end
 end
@@ -152,18 +155,20 @@ function compute_radiation_flux_divergence!(rtm, grid)
     arch = architecture(grid)
     ℐ_lw_up = rtm.upwelling_longwave_flux
     ℐ_lw_dn = rtm.downwelling_longwave_flux
+    ℐ_sw_up = rtm.upwelling_shortwave_flux
     ℐ_sw_dn = rtm.downwelling_shortwave_flux
     flux_div = rtm.flux_divergence
-    launch!(arch, grid, :xyz, _compute_radiation_flux_divergence!, flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, grid)
+    launch!(arch, grid, :xyz, _compute_radiation_flux_divergence!,
+            flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, grid)
     return nothing
 end
 
-@kernel function _compute_radiation_flux_divergence!(flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, grid)
+@kernel function _compute_radiation_flux_divergence!(flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn, grid)
     i, j, k = @index(Global, NTuple)
     # Net flux at faces k and k+1 (positive upward)
     @inbounds begin
-        F_k  = ℐ_lw_up[i, j, k]   + ℐ_lw_dn[i, j, k]   + ℐ_sw_dn[i, j, k]
-        F_k1 = ℐ_lw_up[i, j, k+1] + ℐ_lw_dn[i, j, k+1] + ℐ_sw_dn[i, j, k+1]
+        F_k  = ℐ_lw_up[i, j, k]   + ℐ_lw_dn[i, j, k]   + ℐ_sw_up[i, j, k]   + ℐ_sw_dn[i, j, k]
+        F_k1 = ℐ_lw_up[i, j, k+1] + ℐ_lw_dn[i, j, k+1] + ℐ_sw_up[i, j, k+1] + ℐ_sw_dn[i, j, k+1]
     end
     Δz = Δzᶜᶜᶜ(i, j, k, grid)
     # Flux divergence: -dF/dz (positive when flux convergence warms)

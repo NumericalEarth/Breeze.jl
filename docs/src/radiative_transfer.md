@@ -72,21 +72,40 @@ The above two expressions are identical to those in the [RRTMGP documentation](h
 
 ### Radiative Fluxes
 
-After running [`set!`](@ref), the radiative fluxes are available from the radiation model:
+After running [`set!`](@ref), the radiative fluxes are available from the radiation
+model as four `ZFaceField`s, one per stream. All three optics flavors expose the
+same four fields, and all of them follow the sign convention **positive upward**,
+so downwelling fluxes are stored as negative numbers:
 
 ```julia
-# Longwave fluxes (ZFaceFields)
-ℐ_lw_up = radiation.upwelling_longwave_flux
-ℐ_lw_dn = radiation.downwelling_longwave_flux
+# Longwave
+ℐ_lw_up = radiation.upwelling_longwave_flux     # ≥ 0
+ℐ_lw_dn = radiation.downwelling_longwave_flux   # ≤ 0
 
-# Shortwave flux (direct beam only for non-scattering solver)
-ℐ_sw = radiation.downwelling_shortwave_flux
+# Shortwave
+ℐ_sw_up = radiation.upwelling_shortwave_flux    # ≥ 0
+ℐ_sw_dn = radiation.downwelling_shortwave_flux  # ≤ 0
 ```
 
-!!! note "Shortwave Radiation"
-    The gray atmosphere uses a non-scattering shortwave approximation, so only
-    the direct beam flux is computed. There is no diffuse shortwave or upwelling
-    shortwave in this model.
+For clear-sky and all-sky optics, `downwelling_shortwave_flux` is the *total*
+downwelling shortwave (direct beam plus diffuse), and `upwelling_shortwave_flux`
+carries the sunlight scattered back upward by air and clouds together with the
+fraction reflected by the surface.
+
+!!! note "Shortwave radiation in the gray atmosphere"
+    The gray atmosphere uses RRTMGP's non-scattering shortwave solver, so
+    `downwelling_shortwave_flux` is the direct beam alone (no diffuse component)
+    and `upwelling_shortwave_flux` is identically zero. The field still exists so
+    that the four flux components, the net flux, and output writers have the same
+    shape for every optics flavor.
+
+!!! warning "Gray optics ignores the surface albedo in the shortwave"
+    Because the gray shortwave solver only propagates the direct beam downward, it
+    never reflects it: `surface_albedo` (and `direct_surface_albedo` /
+    `diffuse_surface_albedo`) has no effect on the gray shortwave fluxes, and the
+    surface absorbs the full direct beam. The albedo is still used for the
+    clear-sky and all-sky solvers. Use [`ClearSkyOptics`](@ref) or
+    [`AllSkyOptics`](@ref) if the shortwave albedo matters for your study.
 
 ## Solar zenith angle
 
@@ -299,7 +318,13 @@ Radiative fluxes can be used to compute heating rates for the energy equation. T
 F_{\mathscr{I}} = -\frac{1}{\rho cᵖᵐ} \frac{\partial \mathscr{I}_{net}}{\partial z}
 ```
 
-where ``\mathscr{I}_{net}`` is the net radiative flux (upwelling minus downwelling), ``cᵖᵐ`` is the mixture heat capacity, and ``F_{\mathscr{I}}`` is the radiative flux divergence (heating rate).
+where ``cᵖᵐ`` is the mixture heat capacity, ``F_{\mathscr{I}}`` is the radiative flux divergence (heating rate), and ``\mathscr{I}_{net}`` is the net radiative flux (upwelling minus downwelling), summed over *all four* streams,
+
+```math
+\mathscr{I}_{net} = \left( \mathscr{I}_{lw}^{↑} + \mathscr{I}_{sw}^{↑} \right) - \left( \mathscr{I}_{lw}^{↓} + \mathscr{I}_{sw}^{↓} \right) .
+```
+
+Omitting the upwelling shortwave would bias the heating rate everywhere the shortwave scatters or reflects, so `radiation.flux_divergence` always includes it. Because the stored fields are already signed positive-upward, the net flux is simply their sum, and `flux_divergence` is minus its vertical derivative, evaluated at cell centers from the fluxes at the two bounding cell faces.
 
 ## Architecture Support
 

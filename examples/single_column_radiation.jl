@@ -111,25 +111,36 @@ pᵣ = reference_state.pressure
 qᵛ = specific_humidity(gray_model)
 ℋ = RelativeHumidityField(gray_model)
 
+# The net flux is the sum of all four components. Because downwelling fluxes are
+# stored with a negative sign, the sum is already "up minus down". The upwelling
+# shortwave carries the radiation scattered back to space by air and clouds and
+# reflected by the surface, so leaving it out would misstate the net flux, and with
+# it the heating rate, wherever the shortwave scatters. Gray optics uses a
+# non-scattering shortwave solver, so its upwelling shortwave is identically zero.
+
 ℐ_lw_up_gray = gray_radiation.upwelling_longwave_flux
 ℐ_lw_dn_gray = gray_radiation.downwelling_longwave_flux
-ℐ_sw_gray = gray_radiation.downwelling_shortwave_flux
-ℐ_net_gray = ℐ_lw_up_gray + ℐ_lw_dn_gray + ℐ_sw_gray
+ℐ_sw_up_gray = gray_radiation.upwelling_shortwave_flux
+ℐ_sw_dn_gray = gray_radiation.downwelling_shortwave_flux
+ℐ_net_gray = ℐ_lw_up_gray + ℐ_lw_dn_gray + ℐ_sw_up_gray + ℐ_sw_dn_gray
 
 ℐ_lw_up_clear = clear_sky_radiation.upwelling_longwave_flux
 ℐ_lw_dn_clear = clear_sky_radiation.downwelling_longwave_flux
-ℐ_sw_clear = clear_sky_radiation.downwelling_shortwave_flux
-ℐ_net_clear = ℐ_lw_up_clear + ℐ_lw_dn_clear + ℐ_sw_clear
+ℐ_sw_up_clear = clear_sky_radiation.upwelling_shortwave_flux
+ℐ_sw_dn_clear = clear_sky_radiation.downwelling_shortwave_flux
+ℐ_net_clear = ℐ_lw_up_clear + ℐ_lw_dn_clear + ℐ_sw_up_clear + ℐ_sw_dn_clear
 
 ℐ_lw_up_2xco2 = high_co2_radiation.upwelling_longwave_flux
 ℐ_lw_dn_2xco2 = high_co2_radiation.downwelling_longwave_flux
-ℐ_sw_2xco2 = high_co2_radiation.downwelling_shortwave_flux
-ℐ_net_2xco2 = ℐ_lw_up_2xco2 + ℐ_lw_dn_2xco2 + ℐ_sw_2xco2
+ℐ_sw_up_2xco2 = high_co2_radiation.upwelling_shortwave_flux
+ℐ_sw_dn_2xco2 = high_co2_radiation.downwelling_shortwave_flux
+ℐ_net_2xco2 = ℐ_lw_up_2xco2 + ℐ_lw_dn_2xco2 + ℐ_sw_up_2xco2 + ℐ_sw_dn_2xco2
 
 ℐ_lw_up_allsky = all_sky_radiation.upwelling_longwave_flux
 ℐ_lw_dn_allsky = all_sky_radiation.downwelling_longwave_flux
-ℐ_sw_allsky = all_sky_radiation.downwelling_shortwave_flux
-ℐ_net_allsky = ℐ_lw_up_allsky + ℐ_lw_dn_allsky + ℐ_sw_allsky
+ℐ_sw_up_allsky = all_sky_radiation.upwelling_shortwave_flux
+ℐ_sw_dn_allsky = all_sky_radiation.downwelling_shortwave_flux
+ℐ_net_allsky = ℐ_lw_up_allsky + ℐ_lw_dn_allsky + ℐ_sw_up_allsky + ℐ_sw_dn_allsky
 
 # Get cloud liquid for visualization
 qˡ = all_sky_model.microphysical_fields.qˡ
@@ -153,11 +164,11 @@ ax_ql = Axis(fig[1, 4]; xlabel="Cloud liquid (g/kg)", yticks=z_ticks_m)
 # Radiation panels (bottom row) - one per component
 ax_lw_up = Axis(fig[2, 1]; xlabel="LW ↑ (W/m²)", ylabel="Altitude (km)", yticks=z_ticks_m)
 ax_lw_dn = Axis(fig[2, 2]; xlabel="LW ↓ (W/m²)", yticks=z_ticks_m)
-ax_sw_dn = Axis(fig[2, 3]; xlabel="SW ↓ (W/m²)", yticks=z_ticks_m)
+ax_sw = Axis(fig[2, 3]; xlabel="SW ↓ solid, ↑ dashed (W/m²)", yticks=z_ticks_m)
 ax_net = Axis(fig[2, 4]; xlabel="Net flux (W/m²)", yticks=z_ticks_m)
 
 # Hide y-axis decorations on inner panels
-[hideydecorations!(ax, grid=false) for ax in (ax_q, ax_H, ax_ql, ax_lw_dn, ax_sw_dn, ax_net)]
+[hideydecorations!(ax, grid=false) for ax in (ax_q, ax_H, ax_ql, ax_lw_dn, ax_sw, ax_net)]
 
 # Atmospheric state
 lines!(ax_T, T; color=:gray30)
@@ -184,10 +195,17 @@ lines!(ax_lw_dn, -ℐ_lw_dn_2xco2;  color=c_2xco2)
 lines!(ax_lw_dn, -ℐ_lw_dn_allsky; color=c_allsky)
 
 # SW downwelling (negative, so we negate for display)
-lines!(ax_sw_dn, -ℐ_sw_gray;   color=c_gray)
-lines!(ax_sw_dn, -ℐ_sw_clear;  color=c_clear)
-lines!(ax_sw_dn, -ℐ_sw_2xco2;  color=c_2xco2)
-lines!(ax_sw_dn, -ℐ_sw_allsky; color=c_allsky)
+lines!(ax_sw, -ℐ_sw_dn_gray;   color=c_gray)
+lines!(ax_sw, -ℐ_sw_dn_clear;  color=c_clear)
+lines!(ax_sw, -ℐ_sw_dn_2xco2;  color=c_2xco2)
+lines!(ax_sw, -ℐ_sw_dn_allsky; color=c_allsky)
+
+# SW upwelling (positive): scattered and surface-reflected sunlight. This
+# vanishes for gray optics, whose shortwave solver does not scatter.
+lines!(ax_sw, ℐ_sw_up_gray;   color=c_gray,   linestyle=:dash)
+lines!(ax_sw, ℐ_sw_up_clear;  color=c_clear,  linestyle=:dash)
+lines!(ax_sw, ℐ_sw_up_2xco2;  color=c_2xco2,  linestyle=:dash)
+lines!(ax_sw, ℐ_sw_up_allsky; color=c_allsky, linestyle=:dash)
 
 # Net flux
 lines!(ax_net, ℐ_net_gray;   color=c_gray)

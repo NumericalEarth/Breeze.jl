@@ -15,6 +15,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, Rad
                                DiurnalSolarPosition, FixedCosineZenith
 
 using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
+using RRTMGP.Fluxes: set_flux_to_zero!
 using KernelAbstractions: @kernel, @index
 using Dates: AbstractDateTime, Millisecond
 
@@ -177,9 +178,16 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                    sfc_alb_diffuse = rrtmgp_αw₀,
                                    inc_flux_diffuse = nothing)
 
+    # The non-scattering shortwave solver only ever writes the direct beam
+    # (`flux_dn_dir`), leaving `flux_up` and `flux_dn` as allocated-but-unwritten
+    # memory. Zero them once so that every shortwave array in the solver agrees
+    # with the physics: no diffuse and no upwelling shortwave.
+    set_flux_to_zero!(shortwave_solver.flux)
+
     # Create Oceananigans fields to store fluxes for output/plotting
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
+    upwelling_shortwave_flux = ZFaceField(grid)    # Zero for non-scattering gray optics
     downwelling_shortwave_flux = ZFaceField(grid)  # Direct beam only
     flux_divergence = CenterField(grid)
 
@@ -197,6 +205,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   shortwave_solver,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
+                                  upwelling_shortwave_flux,
                                   downwelling_shortwave_flux,
                                   flux_divergence,
                                   nothing,  # liquid_effective_radius = nothing for gray
@@ -556,7 +565,6 @@ For the non-scattering shortwave solver, only the direct beam flux is computed.
 """
 function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     arch = architecture(grid)
-    Nz = size(grid, 3)
 
     # Unpack flux arrays from RRTMGP solvers
     lw_flux_up = rtm.longwave_solver.flux.flux_up
@@ -566,16 +574,18 @@ function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     # Unpack Oceananigans output fields
     ℐ_lw_up = rtm.upwelling_longwave_flux
     ℐ_lw_dn = rtm.downwelling_longwave_flux
+    ℐ_sw_up = rtm.upwelling_shortwave_flux
     ℐ_sw_dn = rtm.downwelling_shortwave_flux
 
     Nx, Ny, Nz = size(grid)
     launch!(arch, grid, (Nx, Ny, Nz+1), _copy_gray_fluxes!,
-            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
+            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
+            lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
 
     return nothing
 end
 
-@kernel function _copy_gray_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
+@kernel function _copy_gray_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_up, ℐ_sw_dn,
                                     lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 
@@ -586,6 +596,7 @@ end
     @inbounds begin
         ℐ_lw_up[i, j, k] = lw_flux_up[k, c]
         ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, c]  # Negate for downward
+        ℐ_sw_up[i, j, k] = 0                   # Non-scattering gray optics has no upward SW
         ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[k, c]  # Negate for downward
     end
 end
