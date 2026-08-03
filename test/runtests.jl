@@ -1,6 +1,5 @@
 import Breeze
 using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests, available_memory
-using Test
 
 # Start with autodiscovered tests
 testsuite = find_tests(@__DIR__)
@@ -10,7 +9,7 @@ args = parse_args(ARGS)
 
 const REACTANT_COMPAT = VERSION < v"1.13-" && Base.JLOptions().check_bounds != 1
 
-# These aren't test files, they are only used as a setup for other files.
+# These aren't test files, they are only used as setup for other tests.
 delete!(testsuite, "setup")
 delete!(testsuite, "reactant/weno_compilation_setup")
 
@@ -34,7 +33,6 @@ if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
     # currently available memory (with a ~20% margin), with a lower bound of 1700 MiB.
     max_rss_memory = max(1_700, round(Int, available_memory() / 2 ^ 20 / 2  * 0.8))
     ENV["JULIA_TEST_MAXRSS_MB"] = string(max_rss_memory)
-    @info "JULIA_TEST_MAXRSS_MB set to $(max_rss_memory)"
 end
 
 runtests(Breeze, args; testsuite)
