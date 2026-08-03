@@ -1,3 +1,5 @@
+include(joinpath(dirname(@__DIR__), "setup.jl"))
+
 #####
 ##### Reactant compilation tests — WENO advection
 #####
