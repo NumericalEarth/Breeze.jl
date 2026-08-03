@@ -3,6 +3,7 @@ module TurbulenceClosures
 export TKEBasedTurbulenceClosure,
        BlendedMixingLength,
        GeometricLengthScale,
+       SurfaceLayerLengthScale,
        TurbulenceLengthScale,
        BuoyancyLengthScale,
        MinimumBlend,

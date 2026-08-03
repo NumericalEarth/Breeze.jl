@@ -9,6 +9,7 @@ using Breeze.TurbulenceClosures: TKE_NAME,
                                  mixing_lengthᶜᶜᶜ,
                                  smooth_positive,
                                  turbulence_length_coefficient,
+                                 von_karman_constant,
                                  turbulent_prandtl_number,
                                  _compute_turbulence_length_scale!
 using Oceananigans: prognostic_fields
@@ -101,6 +102,10 @@ end
 
     ℓᵗ_field = Field{Center, Center, Nothing}(grid)
     set!(ℓᵗ_field, 300)
+    u★²_field = Field{Center, Center, Nothing}(grid)
+    set!(u★²_field, 0.09)
+    Jᵇ_field = Field{Center, Center, Nothing}(grid)      # neutral surface
+    state = (; ℓᵗ = ℓᵗ_field, u★² = u★²_field, Jᵇ = Jᵇ_field)
 
     geometric = GeometricLengthScale{FT}()
     buoyancy = BuoyancyLengthScale{FT}()
@@ -121,19 +126,19 @@ end
         # Face k sits at z = (k - 1) Δz
         for k in (1, 2, 8, Nz)
             z = (k - 1) * Δz
-            @test length_scaleᶜᶜᶠ(1, 1, k, grid, geometric, FT(1), FT(0), ℓᵗ_field) ≈ κ * (z + ℓʳ)
+            @test length_scaleᶜᶜᶠ(1, 1, k, grid, geometric, FT(1), FT(0), state) ≈ κ * (z + ℓʳ)
         end
         # Finite at the surface — this is what ℓʳ is for
-        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, geometric, FT(1), FT(0), ℓᵗ_field) ≈ κ * ℓʳ
-        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, geometric, FT(1), FT(0), ℓᵗ_field) > 0
+        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, geometric, FT(1), FT(0), state) ≈ κ * ℓʳ
+        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, geometric, FT(1), FT(0), state) > 0
         # Centers sit half a cell above the face below them
-        @test length_scaleᶜᶜᶜ(1, 1, 1, grid, geometric, FT(1), FT(0), ℓᵗ_field) ≈ κ * (Δz / 2 + ℓʳ)
+        @test length_scaleᶜᶜᶜ(1, 1, 1, grid, geometric, FT(1), FT(0), state) ≈ κ * (Δz / 2 + ℓʳ)
     end
 
     @testset "ℓᵇ = Cᵇ q / N" begin
         Cᵇ = buoyancy.Cᵇ
         q = FT(1)
-        ℓᵇ(q, N²) = length_scaleᶜᶜᶠ(1, 1, 1, grid, buoyancy, q, N², ℓᵗ_field)
+        ℓᵇ(q, N²) = length_scaleᶜᶜᶠ(1, 1, 1, grid, buoyancy, q, N², state)
 
         N² = FT(1e-4)
         @test ℓᵇ(q, N²) ≈ Cᵇ * q / sqrt(N²) rtol=1e-5
@@ -155,15 +160,163 @@ end
         # field share a type, so `Cᵇ = 1` beside a float default would find no method.
         @test BuoyancyLengthScale(Cᵇ = 1).Cᵇ == 1
         @test GeometricLengthScale(ℓʳ = 1).ℓʳ == 1
-        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, BuoyancyLengthScale{FT}(Cᵇ = 1), q, N², ℓᵗ_field) ≈
+        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, BuoyancyLengthScale{FT}(Cᵇ = 1), q, N², state) ≈
               q / sqrt(N²) rtol=1e-5
     end
 
     @testset "ℓᵗ is read from the column field, at both locations" begin
         for k in (1, 8, Nz)
-            @test length_scaleᶜᶜᶠ(1, 1, k, grid, turbulence, FT(1), FT(0), ℓᵗ_field) == 300
-            @test length_scaleᶜᶜᶜ(1, 1, k, grid, turbulence, FT(1), FT(0), ℓᵗ_field) == 300
+            @test length_scaleᶜᶜᶠ(1, 1, k, grid, turbulence, FT(1), FT(0), state) == 300
+            @test length_scaleᶜᶜᶜ(1, 1, k, grid, turbulence, FT(1), FT(0), state) == 300
         end
+    end
+end
+
+@testset "SurfaceLayerLengthScale [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    Nz = 32
+    Lz = FT(1000)
+    grid = RectilinearGrid(default_arch; size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
+    surface = SurfaceLayerLengthScale{FT}()
+    geometric = GeometricLengthScale{FT}(κ = surface.κ, ℓʳ = surface.ℓʳ)
+
+    ## ζ = z/L with L = -u★³/(κ Jᵇ): Jᵇ < 0 is stable, Jᵇ > 0 unstable, Jᵇ = 0 neutral.
+    function state(u★², Jᵇ)
+        u = Field{Center, Center, Nothing}(grid); set!(u, u★²)
+        J = Field{Center, Center, Nothing}(grid); set!(J, Jᵇ)
+        ℓᵗ = Field{Center, Center, Nothing}(grid); set!(ℓᵗ, 300)
+        return (; ℓᵗ, u★² = u, Jᵇ = J)
+    end
+
+    ℓˢ(k, u★², Jᵇ) = length_scaleᶜᶜᶠ(1, 1, k, grid, surface, FT(1), FT(0), state(u★², Jᵇ))
+    ℓᵍ(k) = length_scaleᶜᶜᶠ(1, 1, k, grid, geometric, FT(1), FT(0), state(FT(0.1), FT(0)))
+
+    @testset "neutral reproduces the plain geometric branch exactly" begin
+        # This is what makes the correction safe to adopt: it cannot disturb a neutral column.
+        for k in (2, 8, Nz)
+            @test ℓˢ(k, FT(0.09), FT(0)) ≈ ℓᵍ(k)
+        end
+    end
+
+    @testset "stable shrinks the branch, unstable grows it" begin
+        for k in (4, 8, Nz)
+            @test ℓˢ(k, FT(0.09), FT(-1e-3)) < ℓᵍ(k)   # stable
+            @test ℓˢ(k, FT(0.09), FT(+1e-3)) > ℓᵍ(k)   # unstable
+        end
+    end
+
+    @testset "the strongly stable limit is ℓᵍ/Cⁿ" begin
+        # ζ ≫ 1 saturates at the first branch of MYNN Eq. 53
+        k = 8
+        @test ℓˢ(k, FT(1e-4), FT(-1)) ≈ ℓᵍ(k) / surface.Cⁿ
+    end
+
+    @testset "the branches join continuously" begin
+        k = 8
+        z = (k - 1) * Lz / Nz
+        # ζ = -κ z Jᵇ / u★³; pick Jᵇ that straddles ζ = 1 and ζ = 0
+        u★² = FT(0.09)
+        u★³ = u★² * sqrt(u★²)
+        Jᵇ_at(ζ) = -ζ * u★³ / (surface.κ * z)
+        for ζ in (FT(0), FT(1))
+            below = ℓˢ(k, u★², Jᵇ_at(ζ - FT(1e-6)))
+            above = ℓˢ(k, u★², Jᵇ_at(ζ + FT(1e-6)))
+            @test isapprox(below, above; rtol = 1e-3)
+        end
+    end
+
+    @testset "free convection is finite, not NaN" begin
+        # u★ = 0 sends ζ → -∞. The shear scale is irrelevant there, so the branch must grow rather
+        # than divide by zero.
+        for Jᵇ in (FT(0), FT(1e-2))
+            ℓ = ℓˢ(8, FT(0), Jᵇ)
+            @test !isnan(ℓ)
+            @test ℓ > 0
+        end
+        @test ℓˢ(8, FT(0), FT(1e-2)) > ℓᵍ(8)
+    end
+
+    @testset "the unstable branch is bounded by ζᵐⁱⁿ" begin
+        # Without the floor, zero mean wind sends ζ → -10¹⁴ and the branch to ~2000 κz, removing
+        # the wall constraint entirely. The ceiling is the branch evaluated at ζᵐⁱⁿ.
+        ceiling(k) = ℓᵍ(k) * (1 - surface.Cᶜ * surface.ζᵐⁱⁿ)^surface.nᶜ
+
+        for k in (2, 8, Nz)
+            # u★ = 0 is the degenerate limit and must land exactly on the ceiling
+            @test ℓˢ(k, FT(0), FT(1e-2)) ≈ ceiling(k) rtol=1e-5
+            # and nothing may exceed it, however extreme the forcing
+            for (u★², Jᵇ) in ((FT(1e-8), FT(1)), (FT(1e-4), FT(1e-1)), (FT(0), FT(1e3)))
+                @test ℓˢ(k, u★², Jᵇ) ≤ ceiling(k) + sqrt(eps(FT))
+            end
+        end
+
+        # The default floor sits just beyond Nakanishi (2001)'s data, ζ ∈ [-3.13, 0.44]
+        @test surface.ζᵐⁱⁿ ≈ FT(-4)
+        @test ceiling(8) / ℓᵍ(8) ≈ FT(401)^FT(0.2) rtol=1e-5
+    end
+
+    @testset "the floor leaves the fitted range untouched" begin
+        # ζ inside the data must be unaffected: compare against a branch with a far deeper floor.
+        deep = SurfaceLayerLengthScale{FT}(ζᵐⁱⁿ = -1000)
+        k, z = 8, 7 * Lz / Nz
+        u★² = FT(0.09)
+        u★³ = u★² * sqrt(u★²)
+        for ζ in (FT(-0.5), FT(-2), FT(-3))          # inside [-3.13, 0]
+            Jᵇ = -ζ * u★³ / (surface.κ * z)
+            @test ℓˢ(k, u★², Jᵇ) ≈
+                  length_scaleᶜᶜᶠ(1, 1, k, grid, deep, FT(1), FT(0), state(u★², Jᵇ)) rtol=1e-5
+        end
+        # and beyond it, the floor binds while the deeper one keeps growing
+        ζ = FT(-40)
+        Jᵇ = -ζ * u★³ / (surface.κ * z)
+        @test ℓˢ(k, u★², Jᵇ) <
+              length_scaleᶜᶜᶠ(1, 1, k, grid, deep, FT(1), FT(0), state(u★², Jᵇ))
+    end
+end
+
+#####
+##### Convective enhancement of ℓᵇ (MYNN Eq. 55)
+#####
+
+@testset "BuoyancyLengthScale convective enhancement [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    Nz = 8
+    grid = RectilinearGrid(default_arch; size=Nz, z=(0, FT(1000)), topology=(Flat, Flat, Bounded))
+
+    function state(Jᵇ, ℓᵗ_value)
+        J = Field{Center, Center, Nothing}(grid); set!(J, Jᵇ)
+        ℓᵗ = Field{Center, Center, Nothing}(grid); set!(ℓᵗ, ℓᵗ_value)
+        u = Field{Center, Center, Nothing}(grid); set!(u, FT(0.09))
+        return (; ℓᵗ, u★² = u, Jᵇ = J)
+    end
+
+    q = FT(1)
+    N² = FT(1e-4)
+    plain = BuoyancyLengthScale{FT}()                  # Cᶜᵇ = 0 by default
+    enhanced = BuoyancyLengthScale{FT}(Cᶜᵇ = 5)
+
+    ℓᵇ(branch, Jᵇ, ℓᵗ) = length_scaleᶜᶜᶠ(1, 1, 2, grid, branch, q, N², state(Jᵇ, ℓᵗ))
+
+    @testset "off by default" begin
+        @test plain.Cᶜᵇ == 0
+        @test ℓᵇ(plain, FT(1e-2), FT(300)) ≈ ℓᵇ(plain, FT(0), FT(300))
+    end
+
+    @testset "lengthens ℓᵇ only under an unstable surface" begin
+        @test ℓᵇ(enhanced, FT(1e-2), FT(300)) > ℓᵇ(plain, FT(1e-2), FT(300))
+        # A stable or neutral surface leaves the branch as plain Cᵇ q / N
+        @test ℓᵇ(enhanced, FT(0), FT(300)) ≈ ℓᵇ(plain, FT(0), FT(300))
+        @test ℓᵇ(enhanced, FT(-1e-2), FT(300)) ≈ ℓᵇ(plain, FT(-1e-2), FT(300))
+    end
+
+    @testset "grows with the surface flux and is finite for an unbounded ℓᵗ" begin
+        @test ℓᵇ(enhanced, FT(4e-2), FT(300)) > ℓᵇ(enhanced, FT(1e-2), FT(300))
+        # A quiescent column has ℓᵗ = Inf; written naively the enhancement would be Inf/Inf
+        ℓ = ℓᵇ(enhanced, FT(1e-2), FT(Inf))
+        @test !isnan(ℓ)
+        @test ℓ ≈ ℓᵇ(plain, FT(1e-2), FT(Inf))
     end
 end
 
@@ -217,6 +370,10 @@ end
     grid = RectilinearGrid(default_arch; size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
     ℓᵗ_field = Field{Center, Center, Nothing}(grid)
     set!(ℓᵗ_field, 300)
+    u★²_field = Field{Center, Center, Nothing}(grid)
+    set!(u★²_field, 0.09)
+    Jᵇ_field = Field{Center, Center, Nothing}(grid)      # neutral surface
+    state = (; ℓᵗ = ℓᵗ_field, u★² = u★²_field, Jᵇ = Jᵇ_field)
 
     q = FT(0.5)
     N² = FT(1e-4)
@@ -234,9 +391,9 @@ end
         for blend in (MinimumBlend(), HarmonicBlend(), PowerBlend{FT}(p = 2))
             ml = BlendedMixingLength(branches...; blend)
             for k in (1, 2, 8, Nz)
-                ℓs = map(b -> length_scaleᶜᶜᶠ(1, 1, k, grid, b, q, N², ℓᵗ_field), branches)
-                @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², ℓᵗ_field) ≈ blend(ℓs)
-                @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², ℓᵗ_field) ≤
+                ℓs = map(b -> length_scaleᶜᶜᶠ(1, 1, k, grid, b, q, N², state), branches)
+                @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², state) ≈ blend(ℓs)
+                @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², state) ≤
                       minimum(ℓs) + sqrt(eps(FT))
             end
         end
@@ -245,15 +402,15 @@ end
     @testset "a single branch blends to itself" begin
         ml = BlendedMixingLength(GeometricLengthScale{FT}())
         for k in (1, 8, Nz)
-            @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², ℓᵗ_field) ≈
-                  length_scaleᶜᶜᶠ(1, 1, k, grid, GeometricLengthScale{FT}(), q, N², ℓᵗ_field)
+            @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², state) ≈
+                  length_scaleᶜᶜᶠ(1, 1, k, grid, GeometricLengthScale{FT}(), q, N², state)
         end
     end
 
     @testset "Deardorff is expressible" begin
         # ℓ = min(Δ, 0.76 √e / N); with q = √(2e) the stable branch is 0.53 q / N
         ml = BlendedMixingLength(BuoyancyLengthScale{FT}(Cᵇ = 0.53))
-        @test mixing_lengthᶜᶜᶠ(1, 1, 4, grid, ml, q, N², ℓᵗ_field) ≈ FT(0.53) * q / sqrt(N²) rtol=1e-5
+        @test mixing_lengthᶜᶜᶠ(1, 1, 4, grid, ml, q, N², state) ≈ FT(0.53) * q / sqrt(N²) rtol=1e-5
     end
 end
 
@@ -296,6 +453,12 @@ end
         without = TKEBasedTurbulenceClosure(mixing_length =
             BlendedMixingLength(GeometricLengthScale(), BuoyancyLengthScale()))
         @test isnothing(turbulence_length_coefficient(without.mixing_length))
+
+        # κ must be findable from either surface branch, since the example builds its drag law
+        # from it; a mixing length with neither reports `nothing` rather than a wrong number.
+        @test von_karman_constant(BlendedMixingLength(GeometricLengthScale())) == 0.4
+        @test von_karman_constant(BlendedMixingLength(SurfaceLayerLengthScale())) == 0.4
+        @test isnothing(von_karman_constant(BlendedMixingLength(BuoyancyLengthScale())))
         @test isinf(turbulence_length_scale(FT(2000), 100; closure = without))
     end
 end

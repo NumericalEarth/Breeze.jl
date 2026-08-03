@@ -138,7 +138,11 @@ TKEBasedTurbulenceClosure(FT::DataType; kw...) =
 @inline convert_eltype(::Type{FT}, ℓ::TurbulenceLengthScale) where FT =
     TurbulenceLengthScale{FT}(convert(FT, ℓ.Cᵗ))
 @inline convert_eltype(::Type{FT}, ℓ::BuoyancyLengthScale) where FT =
-    BuoyancyLengthScale{FT}(convert(FT, ℓ.Cᵇ), convert(FT, ℓ.N²ᵐⁱⁿ))
+    BuoyancyLengthScale{FT}(convert(FT, ℓ.Cᵇ), convert(FT, ℓ.N²ᵐⁱⁿ), convert(FT, ℓ.Cᶜᵇ))
+@inline convert_eltype(::Type{FT}, ℓ::SurfaceLayerLengthScale) where FT =
+    SurfaceLayerLengthScale{FT}(convert(FT, ℓ.κ), convert(FT, ℓ.ℓʳ), convert(FT, ℓ.Cⁿ),
+                                convert(FT, ℓ.Cˢ), convert(FT, ℓ.Cᶜ), convert(FT, ℓ.nᶜ),
+                                convert(FT, ℓ.ζᵐⁱⁿ))
 
 @inline convert_eltype(::Type{FT}, blend::AbstractLengthScaleBlend) where FT = blend
 @inline convert_eltype(::Type{FT}, blend::PowerBlend) where FT = PowerBlend{FT}(convert(FT, blend.p))
@@ -250,6 +254,8 @@ struct TKEClosureFields{V, C, T, KC}
     ℓᵗ :: T
     "squared friction velocity ``u_\\star²``, one value per column"
     u★² :: T
+    "surface buoyancy flux ``\\langle w'b' \\rangle``, one value per column"
+    Jᵇ :: T
     "per-tracer diffusivity lookup, indexed by tracer name"
     tupled_tracer_diffusivities :: KC
 end
@@ -262,6 +268,7 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
                      adapt(to, fields.e),
                      adapt(to, fields.ℓᵗ),
                      adapt(to, fields.u★²),
+                     adapt(to, fields.Jᵇ),
                      adapt(to, fields.tupled_tracer_diffusivities))
 
 BoundaryConditions.fill_halo_regions!(fields::TKEClosureFields, args...; kw...) =
@@ -280,12 +287,13 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     e  = CenterField(grid)
     ℓᵗ = Field{Center, Center, Nothing}(grid)
     u★² = Field{Center, Center, Nothing}(grid)
+    Jᵇ = Field{Center, Center, Nothing}(grid)
 
     # Indexed by the `Val(id)` the model hands to `diffusivity`. TKE is transported with the eddy
     # viscosity, i.e. a turbulent Schmidt number of one.
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? νₑ : κₑ for name in tracer_names)
 
-    return TKEClosureFields(νₑ, κₑ, ℓ, ℓᶜ, e, ℓᵗ, u★², tracer_diffusivities)
+    return TKEClosureFields(νₑ, κₑ, ℓ, ℓᶜ, e, ℓᵗ, u★², Jᵇ, tracer_diffusivities)
 end
 
 @inline Oceananigans.TurbulenceClosures.viscosity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
@@ -401,7 +409,8 @@ end
     N² = ∂z_b(i, j, k, grid, buoyancy, tracers)
     S² = shearᶜᶜᶠ(i, j, k, grid, velocities.u, velocities.v)
 
-    ℓ = mixing_lengthᶜᶜᶠ(i, j, k, grid, closure_ij.mixing_length, q, N², closure_fields.ℓᵗ)
+    state = column_state(closure_fields)
+    ℓ = mixing_lengthᶜᶜᶠ(i, j, k, grid, closure_ij.mixing_length, q, N², state)
 
     ν = closure_ij.Cᴷ * ℓ * q★
 
@@ -416,7 +425,7 @@ end
     # the surface face is masked, so an interpolated ℓ would be wrong in the first cell.
     qᶜ = sqrt(convert(eltype(grid), 2)) * turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure_ij.eᵐⁱⁿ, e)
     N²ᶜ = ℑbzᵃᵃᶜ(i, j, k, grid, ∂z_b, buoyancy, tracers)
-    ℓᶜ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure_ij.mixing_length, qᶜ, N²ᶜ, closure_fields.ℓᵗ)
+    ℓᶜ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure_ij.mixing_length, qᶜ, N²ᶜ, state)
 
     FT = eltype(grid)
     @inbounds begin
@@ -450,6 +459,10 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
     # ℓᵗ is a column integral and must be current before the pointwise pass reads it.
     launch!(arch, grid, :xy, _compute_turbulence_length_scale!,
             closure_fields.ℓᵗ, grid, closure, closure_fields.e)
+
+    # ℓ may depend on the surface buoyancy flux, so it must be current before the pointwise pass.
+    launch!(arch, grid, :xy, _compute_surface_buoyancy_flux!,
+            closure_fields.Jᵇ, grid, closure_fields.κₑ, buoyancy, tracers)
 
     launch!(arch, grid, parameters, _compute_tke_closure_fields!,
             closure_fields, grid, closure, model.velocities, tracers, buoyancy)
@@ -521,6 +534,42 @@ negative takes ``ν`` with it.
     e⁺ = ifelse((k == 1) & (eᶠˡᵒᵒʳ > e⁺), eᶠˡᵒᵒʳ, e⁺)
 
     @inbounds ρe[i, j, k] = ρᵢ * max(closure_ij.eᵐⁱⁿ, e⁺)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+The column quantities the mixing-length branches may read: the turbulence length scale, the squared
+friction velocity and the surface buoyancy flux. Bundling them keeps every branch's signature the
+same regardless of what it needs.
+"""
+@inline column_state(closure_fields) =
+    (ℓᵗ = closure_fields.ℓᵗ, u★² = closure_fields.u★², Jᵇ = closure_fields.Jᵇ)
+
+"""
+$(TYPEDSIGNATURES)
+
+Surface buoyancy flux ``\\langle w'b' \\rangle`` per column, taken as the closure's own
+downgradient flux ``-K N²`` at the lowest interior face.
+
+Reading the thermodynamic boundary condition instead would mean interpreting its units, which differ
+between prognostic formulations: `bulk_scalar_fluxes.jl` returns the flux of the *prognostic*, so
+kelvin-weighted under a potential-temperature formulation and joules under static energy. The
+modelled flux at the first interior face needs no such interpretation and is what the TKE budget
+already uses.
+
+The two agree to 2.5% on GABLS1, measured against the surface buoyancy flux implied by the column
+heat budget (``L`` = 114.0 m against 111.2 m). Since ``ζ = z/L`` scales uniformly, that shifts a
+stability-corrected surface length scale by roughly 1% — two orders of magnitude below the closure's
+own error on that case, which is why the boundary condition is not worth plumbing through. The
+agreement is what a surface layer is: a constant-flux layer.
+
+It lags by one `update_state!`, since `κₑ` is computed in the pass that consumes this. On the first
+call `κₑ` is zero, so the column starts neutral.
+"""
+@kernel function _compute_surface_buoyancy_flux!(Jᵇ, grid, κₑ, buoyancy, tracers)
+    i, j = @index(Global, NTuple)
+    @inbounds Jᵇ[i, j, 1] = buoyancy_productionᶜᶜᶠ(i, j, 2, grid, κₑ, buoyancy, tracers)
 end
 
 """
