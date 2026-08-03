@@ -273,6 +273,38 @@ end
 BlendedMixingLength(branches::AbstractLengthScale...; blend = MinimumBlend()) =
     BlendedMixingLength(blend, branches)
 
+"""
+$(TYPEDSIGNATURES)
+
+The mixing length of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009): their three branches
+(Eqs. 53–55) under the harmonic blend of their Eq. 52.
+
+```julia
+closure = TKEBasedTurbulenceClosure(mixing_length = NakanishiNiinoLengthScale(), Cq = 3)
+```
+
+The blend is not incidental. The unstable coefficient of [`SurfaceLayerLengthScale`](@ref) was
+chosen so that the *blended* length matches the LES, not the branch itself, so pairing these
+branches with a sharper rule leaves ``ℓ`` systematically long. Their companion setting is
+``C^q = 3`` (their Eq. 67), which is deliberately left to the caller rather than folded in here:
+it is a modelling choice with its own provenance, and burying it is how it stops being one.
+
+Note that a closure built this way is *not* the MYNN model. The algebraic stability functions
+``S_M(G_M, G_H)`` and ``S_H(G_M, G_H)`` of the Mellor–Yamada hierarchy are replaced in
+[`TKEBasedTurbulenceClosure`](@ref) by a constant ``Cᴷ`` and a Richardson-dependent Prandtl number,
+which makes it a ``k``–``ℓ`` closure borrowing their parameterizations rather than a level-2.5
+model. What is genuinely theirs is the length scale, and that is what this constructor names.
+
+``Cᵇ`` and ``Cᶜᵇ`` are given explicitly because they are where MYNN differs from this package's own
+branch defaults — Deardorff's ``Cᵇ = 0.53`` and no convective enhancement. For anything else, build
+a [`BlendedMixingLength`](@ref) directly.
+"""
+NakanishiNiinoLengthScale(; ℓʳ = 0.1, Cᵇ = 1, Cᶜᵇ = 5) =
+    BlendedMixingLength(SurfaceLayerLengthScale(; ℓʳ),
+                        TurbulenceLengthScale(),
+                        BuoyancyLengthScale(; Cᵇ, Cᶜᵇ);
+                        blend = HarmonicBlend())
+
 Base.summary(ℓ::AbstractLengthScale) = string(nameof(typeof(ℓ)))
 Base.summary(blend::AbstractLengthScaleBlend) = string(nameof(typeof(blend)))
 Base.summary(blend::PowerBlend) = string("PowerBlend(p = ", prettysummary(blend.p), ")")

@@ -414,6 +414,47 @@ end
     end
 end
 
+@testset "NakanishiNiinoLengthScale [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    ml = NakanishiNiinoLengthScale()
+
+    @testset "it is MYNN's three branches under their harmonic blend" begin
+        @test ml.blend isa HarmonicBlend
+        @test length(ml.branches) == 3
+        @test ml.branches[1] isa SurfaceLayerLengthScale
+        @test ml.branches[2] isa TurbulenceLengthScale
+        @test ml.branches[3] isa BuoyancyLengthScale
+    end
+
+    @testset "it carries MYNN's coefficients, not this package's defaults" begin
+        # Cᵇ and Cᶜᵇ are exactly where MYNN differs from the branch defaults, which are Deardorff's
+        # 0.53 with no convective enhancement.
+        @test ml.branches[3].Cᵇ == 1
+        @test ml.branches[3].Cᶜᵇ == 5
+        @test BuoyancyLengthScale().Cᵇ ≈ 0.53
+        @test BuoyancyLengthScale().Cᶜᵇ == 0
+        @test ml.branches[2].Cᵗ ≈ 0.23           # MYNN Eq. 54
+    end
+
+    @testset "the roughness length propagates" begin
+        @test NakanishiNiinoLengthScale(ℓʳ = 0.03).branches[1].ℓʳ ≈ 0.03
+        @test ml.branches[1].ℓʳ ≈ 0.1
+    end
+
+    @testset "it drops into the closure, with Cq left to the caller" begin
+        closure = TKEBasedTurbulenceClosure(FT; mixing_length = NakanishiNiinoLengthScale(), Cq = 3)
+        @test isbits(closure)
+        @test closure.Cq == 3
+        @test closure.mixing_length.blend isa HarmonicBlend
+        @test all(b -> eltype(typeof(b).parameters[1]) == FT || typeof(b).parameters[1] == FT,
+                  closure.mixing_length.branches)   # convert_eltype reached every branch
+
+        # Cq is not folded into the length scale: the default closure is untouched by it
+        @test TKEBasedTurbulenceClosure(FT; mixing_length = NakanishiNiinoLengthScale()).Cq == 1
+    end
+end
+
 #####
 ##### The column integral behind ℓᵗ
 #####

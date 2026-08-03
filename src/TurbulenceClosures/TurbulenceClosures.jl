@@ -2,6 +2,7 @@ module TurbulenceClosures
 
 export TKEBasedTurbulenceClosure,
        BlendedMixingLength,
+       NakanishiNiinoLengthScale,
        GeometricLengthScale,
        SurfaceLayerLengthScale,
        TurbulenceLengthScale,

@@ -81,8 +81,12 @@ struct TKEBasedTurbulenceClosure{TD, ML, FT} <: AbstractScalarDiffusivity{TD, Ve
     CRi :: FT
     "floor on ``e``, m² s⁻²; also the value subtracted from the ``ℓᵗ`` integrand"
     eᵐⁱⁿ :: FT
-    "``C^q``, the ratio of the TKE diffusivity to the momentum diffusivity. MYNN take ``S_q = 3S_M``
-     (their Eq. 67), i.e. ``C^q = 3``; the default of one transports TKE exactly as momentum"
+    "``C^q``, the ratio of the TKE diffusivity to the momentum diffusivity. The default of one
+     transports TKE exactly as momentum. [Nakanishi and Niino (2009)](@cite NakanishiNiino2009)
+     take ``S_q = 3S_M`` (their Eq. 67), i.e. ``C^q = 3``. Their 2004 version had used 2 for this
+     *and three other* stability functions alike, for simplicity and after Deardorff (1980); the
+     2009 revision found ``S_q`` several times larger than ``S_M`` while the others were nearly
+     equal to it, so 2 is the discarded average of 3 and 1 rather than a value fitted for TKE"
     Cq :: FT
 end
 
