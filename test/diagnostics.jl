@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Test
 using Breeze
 using Breeze.Thermodynamics: dry_air_gas_constant, adiabatic_hydrostatic_pressure,

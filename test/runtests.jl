@@ -10,7 +10,8 @@ args = parse_args(ARGS)
 
 const REACTANT_COMPAT = VERSION < v"1.13-" && Base.JLOptions().check_bounds != 1
 
-# This isn't a test file, it's only used as a setup for other files.
+# These aren't test files, they are only used as a setup for other files.
+delete!(testsuite, "setup")
 delete!(testsuite, "reactant/weno_compilation_setup")
 
 if filter_tests!(testsuite, args)
@@ -25,30 +26,6 @@ if filter_tests!(testsuite, args)
     end
 end
 
-const init_code = quote
-    import CUDA
-    using Oceananigans.Architectures: CPU, GPU
-
-    if get(ENV, "BREEZE_ENSURE_CUDA_FUNCTIONAL", "") == "true"
-        CUDA.functional() || error("CUDA is not functional but we expect it to be, make sure it's set up correctly")
-    end
-
-    const default_arch = CUDA.functional() ? GPU() : CPU()
-
-    # Float type helpers for tests
-    # Default: Float64 only. Set BREEZE_TEST_FLOAT32=true to also test Float32.
-    function test_float_types()
-        if get(ENV, "BREEZE_TEST_FLOAT32", "false") == "true"
-            return (Float32, Float64)
-        else
-            return (Float64,)
-        end
-    end
-
-    # Returns both Float32 and Float64 for tests that need both precision levels
-    all_float_types() = (Float32, Float64)
-end
-
 if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
     GC.gc(true); GC.gc(false); GC.gc(true)
     # macOS runners have little memory compared to the other runners, let's set a more
@@ -60,4 +37,4 @@ if Sys.isapple() && get(ENV, "GITHUB_ACTIONS", "false") == "true"
     @info "JULIA_TEST_MAXRSS_MB set to $(max_rss_memory)"
 end
 
-runtests(Breeze, args; testsuite, init_code)
+runtests(Breeze, args; testsuite)
