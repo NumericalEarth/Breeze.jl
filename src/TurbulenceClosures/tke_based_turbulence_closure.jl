@@ -81,6 +81,9 @@ struct TKEBasedTurbulenceClosure{TD, ML, FT} <: AbstractScalarDiffusivity{TD, Ve
     CRi :: FT
     "floor on ``e``, m² s⁻²; also the value subtracted from the ``ℓᵗ`` integrand"
     eᵐⁱⁿ :: FT
+    "``C^q``, the ratio of the TKE diffusivity to the momentum diffusivity. MYNN take ``S_q = 3S_M``
+     (their Eq. 67), i.e. ``C^q = 3``; the default of one transports TKE exactly as momentum"
+    Cq :: FT
 end
 
 const TKEClosureArray{TD} = AbstractArray{<:TKEBasedTurbulenceClosure{TD}} where TD
@@ -89,8 +92,8 @@ const TKEClosureArray{TD} = AbstractArray{<:TKEBasedTurbulenceClosure{TD}} where
 const FlavorOfTKEClosure{TD} = Union{TKEBasedTurbulenceClosure{TD}, TKEClosureArray{TD}} where TD
 
 function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, Cᴷ::FT, Cμ::FT, Pr₀::FT,
-                                       CRi::FT, eᵐⁱⁿ::FT) where {TD, ML, FT}
-    return TKEBasedTurbulenceClosure{TD, ML, FT}(mixing_length, Cᴷ, Cμ, Pr₀, CRi, eᵐⁱⁿ)
+                                       CRi::FT, eᵐⁱⁿ::FT, Cq::FT) where {TD, ML, FT}
+    return TKEBasedTurbulenceClosure{TD, ML, FT}(mixing_length, Cᴷ, Cμ, Pr₀, CRi, eᵐⁱⁿ, Cq)
 end
 
 """
@@ -118,7 +121,8 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    Cμ = 0.0578,
                                    Pr₀ = 0.74,
                                    CRi = 3,
-                                   eᵐⁱⁿ = 1e-6) where TD
+                                   eᵐⁱⁿ = 1e-6,
+                                   Cq = 1) where TD
 
     mixing_length = convert_eltype(FT, mixing_length)
 
@@ -127,7 +131,8 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                          convert(FT, Cμ),
                                          convert(FT, Pr₀),
                                          convert(FT, CRi),
-                                         convert(FT, eᵐⁱⁿ))
+                                         convert(FT, eᵐⁱⁿ),
+                                         convert(FT, Cq))
 end
 
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
@@ -256,6 +261,8 @@ struct TKEClosureFields{V, C, T, KC}
     u★² :: T
     "surface buoyancy flux ``\\langle w'b' \\rangle``, one value per column"
     Jᵇ :: T
+    "diffusivity for the TKE tracer itself, ``C^q ν``"
+    νₑᵗ :: V
     "per-tracer diffusivity lookup, indexed by tracer name"
     tupled_tracer_diffusivities :: KC
 end
@@ -269,19 +276,21 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
                      adapt(to, fields.ℓᵗ),
                      adapt(to, fields.u★²),
                      adapt(to, fields.Jᵇ),
+                     adapt(to, fields.νₑᵗ),
                      adapt(to, fields.tupled_tracer_diffusivities))
 
 BoundaryConditions.fill_halo_regions!(fields::TKEClosureFields, args...; kw...) =
-    fill_halo_regions!((fields.νₑ, fields.κₑ, fields.ℓ, fields.ℓᶜ, fields.e), args...; kw...)
+    fill_halo_regions!((fields.νₑ, fields.κₑ, fields.νₑᵗ, fields.ℓ, fields.ℓᶜ, fields.e), args...; kw...)
 
 function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, tracer_names, bcs,
                                                       closure::FlavorOfTKEClosure)
     face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()))
-    default_bcs = (νₑ = face_bcs, κₑ = face_bcs, ℓ = face_bcs)
+    default_bcs = (νₑ = face_bcs, κₑ = face_bcs, νₑᵗ = face_bcs, ℓ = face_bcs)
     bcs = merge(default_bcs, bcs)
 
     νₑ = ZFaceField(grid, boundary_conditions=bcs.νₑ)
     κₑ = ZFaceField(grid, boundary_conditions=bcs.κₑ)
+    νₑᵗ = ZFaceField(grid, boundary_conditions=bcs.νₑᵗ)
     ℓ  = ZFaceField(grid, boundary_conditions=bcs.ℓ)
     ℓᶜ = CenterField(grid)
     e  = CenterField(grid)
@@ -291,9 +300,9 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
 
     # Indexed by the `Val(id)` the model hands to `diffusivity`. TKE is transported with the eddy
     # viscosity, i.e. a turbulent Schmidt number of one.
-    tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? νₑ : κₑ for name in tracer_names)
+    tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? νₑᵗ : κₑ for name in tracer_names)
 
-    return TKEClosureFields(νₑ, κₑ, ℓ, ℓᶜ, e, ℓᵗ, u★², Jᵇ, tracer_diffusivities)
+    return TKEClosureFields(νₑ, κₑ, ℓ, ℓᶜ, e, ℓᵗ, u★², Jᵇ, νₑᵗ, tracer_diffusivities)
 end
 
 @inline Oceananigans.TurbulenceClosures.viscosity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
@@ -434,6 +443,7 @@ end
         # `K` follows from the capped `ν`; it is not capped independently, so that `Pr = ν/K` is
         # exactly the value `turbulent_prandtl_number` returned even where the cap binds.
         closure_fields.κₑ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(ν / Pr))
+        closure_fields.νₑᵗ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(closure_ij.Cq * ν))
         closure_fields.ℓᶜ[i, j, k] = FT(ℓᶜ)
     end
 end
@@ -632,6 +642,7 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
                              " (derived; 1 on the log-law locus Cμ = Cᴷ⁴)", '\n',
               "├── Pr₀:  ", prettysummary(closure.Pr₀), '\n',
               "├── CRi:  ", prettysummary(closure.CRi), '\n',
+              "├── Cq:   ", prettysummary(closure.Cq), " (TKE diffusivity ratio; MYNN use 3)", '\n',
               "├── eᵐⁱⁿ: ", prettysummary(closure.eᵐⁱⁿ), " m² s⁻²", '\n',
               "└── mixing_length: ", summary(closure.mixing_length))
 end

@@ -588,6 +588,35 @@ end
         @test all(isapprox.(κ, ν ./ closure.Pr₀; rtol = sqrt(eps(FT))))
     end
 
+    @testset "Cq scales the TKE diffusivity only" begin
+        # MYNN transport TKE at S_q = 3S_M (their Eq. 67). We default to Cq = 1, and the TKE tracer
+        # carries its own field so that momentum and heat are untouched by the choice.
+        for Cq in (FT(1), FT(3))
+            closure = TKEBasedTurbulenceClosure(FT; Cq)
+            model = AtmosphereModel(grid; closure, coriolis = FPlane(latitude = 45))
+            θ₀ = model.dynamics.reference_state.potential_temperature
+            set!(model; θ = z -> θ₀, ρu = z -> FT(20) * z / 2000)
+
+            for _ in 1:5
+                time_step!(model, 10)
+            end
+
+            ν = Array(interior(model.closure_fields.νₑ))
+            νᵗ = Array(interior(model.closure_fields.νₑᵗ))
+            κ = Array(interior(model.closure_fields.κₑ))
+
+            @test maximum(ν) > 0                        # the column is actually mixing
+            @test all(isapprox.(νᵗ, Cq .* ν; rtol = sqrt(eps(FT))))
+            @test all(isapprox.(κ, ν ./ closure.Pr₀; rtol = sqrt(eps(FT))))   # heat unaffected
+
+            # and the TKE tracer is the field that reads it
+            @test model.closure_fields.tupled_tracer_diffusivities[TKE_NAME] ===
+                  model.closure_fields.νₑᵗ
+        end
+
+        @test TKEBasedTurbulenceClosure().Cq == 1        # shipped default leaves TKE as momentum
+    end
+
     @testset "alternative constant sets run" begin
         for closure in (MY82Coefficients(), MYJCoefficients())
             model = AtmosphereModel(grid; closure)
