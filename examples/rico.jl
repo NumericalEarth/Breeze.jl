@@ -458,7 +458,7 @@ rowgap!(fig.layout, 3, -80)
 n₁ = floor(Int, 6hours / output_interval)
 n₂ = ceil(Int, 8hours / output_interval)
 
-CairoMakie.record(fig, "rico_slices.mp4", n₁:n₂, framerate=12) do nn
+CairoMakie.record(fig, "rico_slices.mp4", n₁:n₂; framerate = 12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide
