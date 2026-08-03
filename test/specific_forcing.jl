@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using Breeze: SpecificForcing
 using Breeze.AtmosphereModels: dynamics_density, is_density_tendency_forcing, total_density

@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Adapt: adapt
 using Breeze
 using Breeze: PrescribedDensity, PrescribedDynamics, KinematicModel

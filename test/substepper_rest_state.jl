@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 #####
 ##### Rest-atmosphere validation tests for the acoustic substepper.
 #####

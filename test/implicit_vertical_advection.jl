@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using Oceananigans
 using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization, needs_implicit_solver,

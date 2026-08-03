@@ -1,6 +1,7 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Test
 using Oceananigans
-using Oceananigans.Architectures: CPU
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, NormalFlowBoundaryCondition,
                                        PeriodicBoundaryCondition, fill_halo_regions!
 using GPUArraysCore: @allowscalar

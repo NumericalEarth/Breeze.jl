@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 #####
 ##### Tests for LatitudeLongitudeGrid + CompressibleDynamics + SphericalCoriolis
 #####
@@ -13,12 +15,6 @@ using Oceananigans
 using Oceananigans.Architectures: architecture
 using Oceananigans.Units
 using Test
-
-# Note: When run through the test runner, test_float_types is defined in the init_code.
-# When run directly, we need to define it.
-if !@isdefined(test_float_types)
-    test_float_types() = (Float64,)
-end
 
 #####
 ##### Helper to build a LatitudeLongitudeGrid for tests

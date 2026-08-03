@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Test
 using Pkg.Artifacts: ensure_artifact_installed
 using Oceananigans
