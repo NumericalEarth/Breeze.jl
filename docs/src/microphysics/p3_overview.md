@@ -44,21 +44,36 @@ in place over its internal Δt: it can hard-clamp ``N_i ≤ N_{i,\max}`` after e
 zero out small-mass species and add a compensating ``θ`` correction, and use ``1/Δt``
 relaxation rates for nucleation and saturation adjustment.
 
-Breeze's P3 (`_p3_scalar_compute` in `p3_interface.jl`) returns a `P3CacheResult`
-of *tendencies*, which Breeze sums with advection and diffusion before
-time-stepping. P3 has no write access to the prognostic state and no awareness
-of host Δt. This produces several deliberate, documented differences from
-Fortran:
+Breeze's P3 returns *tendencies*, which Breeze sums with advection and
+diffusion before time-stepping. On a grid, `compute_microphysical_tendencies!`
+(`p3_driver.jl`) launches one kernel that writes a per-field tendency cache and
+a second that adds it to ``G^n``; gridless callers (`ParcelModels`) go through
+the `microphysical_tendency` methods in `p3_microphysical_tendencies.jl`. Both
+paths funnel into `p3_tendency_compute` / `_p3_scalar_compute`
+(`p3_microphysical_state.jl`), which assemble the per-field tendencies from
+`prognostic_tendencies.jl`. P3 has no write access to the prognostic state and
+no awareness of host Δt. This produces several deliberate, documented
+differences from Fortran:
 
-- **Hard prognostic clamps are replaced by read-time caps.** For example,
-  `impose_max_Ni` becomes a 10-second relaxation sink toward
-  ``N_{i,\max}/ρ`` rather than an instantaneous cap.
-- **Per-Δt depletion rates use a fixed timescale.** Cooper nucleation,
-  immersion/homogeneous freezing, and CCN activation use a 10 s relaxation
-  in place of Fortran's ``1/Δt``.
+- **Hard prognostic clamps are replaced by tendency-form relaxations.** For
+  example, `impose_max_Ni` becomes a relaxation sink toward ``N_{i,\max}/ρ``
+  over `sink_limiting_timescale` (default 10 s) rather than an instantaneous cap.
+- **Per-Δt depletion rates use a fixed timescale.** Cooper nucleation and
+  homogeneous freezing relax over `ice_nucleation_timescale` /
+  `homogeneous_freezing_timescale` (both 10 s by default) in place of Fortran's
+  ``1/Δt``; CCN activation uses its own `aerosol.activation_timescale`
+  (default 1 s). Every per-species sink budget is likewise sized against
+  `sink_limiting_timescale`. For a single forward update no longer than that
+  interval, the limited P3 sinks cannot remove more than their donor reservoir.
+  This is a rate-budget guarantee, not an exact equivalence between Breeze's RK
+  tendency update and Fortran's in-place one-shot operator.
 - **Latent heating is delegated to the thermodynamics formulation.** The Anelastic
   and compressible formulations carry energy through their prognostic
   thermodynamic variable ``θ_{li}``.
+- **Negative densities are repaired by the host, not by P3.** The advection
+  operator is not positive-definite, so `update_state!` applies P3's
+  `negative_moisture_correction` (a `SpeciesBorrowing` by default) before the
+  rates are evaluated; see [Prognostic Equations](@ref p3_prognostics).
 
 These choices are noted in context throughout the documentation.
 
@@ -93,7 +108,9 @@ Two-moment ice tracks:
 
 Three-moment ice additionally tracks:
 
-3. **Reflectivity** (``ρz^i``): Sixth moment, proportional to radar reflectivity.
+3. **Reflectivity encoding** (``ρ\tilde z^i``): The advected transformed moment
+   ``ρ\sqrt{z^i n^i}``, where the physical sixth moment ``z^i`` is proportional
+   to radar reflectivity.
 
 The three-moment scheme provides additional constraint on the size distribution, improving
 representation of precipitation-sized particles
@@ -102,16 +119,21 @@ representation of precipitation-sized particles
 [Morrison et al. (2025)](@cite Morrison2025complete3moment)).
 
 When three-moment ice is enabled, Breeze uses the active "hybrid" ``Z_i`` update
-path: between processes, the shape parameter ``μ_i`` and the third statistical
-moment of the PSD ``M_3 = ∫ D^3 N'(D) \, dD`` are recomputed from updated
-``q_i`` and the bulk ice density (using ``q_i ≈ ρ̄_i \, (π/6) \, M_3`` for
-spherical particles), then ``Z_i`` is reconstructed via ``G(μ_i)\, M_3^2 / N_i``.
-Note that ``M_3`` is the third statistical moment of the size distribution
-(mass-related), *not* the third prognostic moment of the scheme, which is
-``ρz^i ∝ M_6``. Initiation processes (nucleation,
-immersion freezing, splintering, homogeneous freezing) add explicit ``Z_i``
-increments using the source PSD's ``μ`` (``μ_c`` for cloud water, ``μ_r`` for
-rain — held at 0 at runtime — and 0 for all other source types).
+path: the shape parameter ``μ_i`` is held at its pre-process (Table-3) value,
+the continuous "group 1" processes are advanced over the limiter timescale to
+obtain updated ``(q_i, q^{wi}, n_i, q^f, b^f)``, the third statistical moment of
+the PSD ``M_3 = ∫ D^3 N'(D) \, dD`` is re-estimated from that state and the
+Table-1 bulk density evaluated at the same fixed ``μ_i`` (using
+``q^i_\text{total} = q^i + q^{wi} ≈ ρ̄_i \, (π/6) \, M_3`` for spherical
+particles), and ``Z_i`` is
+reconstructed via ``G(μ_i)\, M_3^2 / N_i``. Note that ``M_3`` is the third
+statistical moment of the size distribution (mass-related), *not* the third
+prognostic moment of the scheme, which is ``ρ\tilde z^i`` with
+``z^i ∝ M_6``. Initiation processes ("group 2": nucleation, immersion
+freezing, splintering, homogeneous freezing) add explicit ``Z_i`` increments
+using the source PSD's ``μ``: all of them use ``μ_r`` — held at 0 at
+runtime — except homogeneous freezing of *cloud* water, which uses the
+diagnosed cloud shape ``μ_c``.
 
 ### Predicted Liquid Fraction
 
@@ -137,7 +159,7 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
 | Two-moment μ–λ closure (Heymsfield 2003 fit for small particles; rime-/density-weighted relation from the Fortran lookup-table generator for larger particles) | [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) |
 | Sixth moment (reflectivity) as a prognostic variable | [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021), [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024), [Morrison et al. (2025)](@cite Morrison2025complete3moment) |
 | Reflectivity-weighted fall speed | [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021), [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024), [Morrison et al. (2025)](@cite Morrison2025complete3moment) |
-| Active hybrid ``Z_i`` update via ``G(μ_i)\, M_3^2/N_i`` after the continuous "group 1" processes, plus explicit increments for the initiation "group 2" processes via ``G(μ)\, ΔM_3^2/ΔN`` | [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021), [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024), [Morrison et al. (2025)](@cite Morrison2025complete3moment) |
+| Active hybrid ``Z_i`` update via ``G(μ_i)\, M_3^2/N_i`` after the continuous "group 1" processes, plus explicit increments for the initiation "group 2" processes via ``G(μ)\, \dot{M}_3^2/\dot{N}`` | [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021), [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024), [Morrison et al. (2025)](@cite Morrison2025complete3moment) |
 | Liquid fraction prognostic variable (``ρq^{wi}``) | [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) |
 | Wet growth and refreezing | [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) |
 | Tabulated, size-thresholded (``D \ge 9`` mm) shedding | [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) |
@@ -146,12 +168,12 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
 
 !!! note "Multiple free ice categories"
     [Milbrandt & Morrison (2016)](@cite MilbrandtMorrison2016) introduced
-    multiple free ice categories. Breeze defaults to a single ice
-    category. Multi-category scaffolding (`MultiIceCategory`,
-    `inter_category_collection`) exists in the source but is currently a
-    placeholder that is not called from the tendency assembly. Adding
-    multi-category support requires implementing both
-    `compute_inter_category_collection` and the destination/merge logic.
+    multiple free ice categories. Breeze runs a single ice category.
+    Multi-category scaffolding (`MultiIceCategory`,
+    `inter_category_collection` in `multi_ice_category.jl`) exists in the
+    source but `inter_category_collection` is a placeholder that is not
+    called from the tendency assembly. Adding multi-category support
+    requires filling in that kernel and the destination/merge logic.
 
 !!! note "Subgrid cloud and precipitation fractions (SCPF)"
     Breeze runs permanently in the ``\text{SCF}=\text{SPF}=1`` limit. Fortran's SCPF
@@ -165,6 +187,20 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
     number. Tabulated reflectivity-weighted fall speed ``V_Z`` is
     computed but not used to set a Courant constraint inside P3.
 
+!!! note "Lookup-table I/O scope"
+    Breeze reads the same Fortran ASCII ice lookup tables as the reference
+    implementation: `p3_lookupTable_1.dat-v6.9-3momI` or `-2momI` (which carries
+    both the 5-D ice-only integrals and the embedded 6-D ice–rain collection
+    block) and, in three-moment mode, `p3_lookupTable_3.dat-v1.4`. The ice
+    tables are not regenerated. The rain 1D tables (mass- and number-weighted
+    fall speed, evaporation ventilation) *are* tabulated at startup from
+    Chebyshev–Gauss quadrature via `tabulate_rain_from_quadrature`.
+
+## Equivalences with the Fortran runtime
+
+These are options where Fortran and Breeze differ in *form* but agree on
+what actually runs.
+
 !!! note "Alternative warm-rain options"
     The Fortran scheme exposes three autoconversion / accretion / rain
     self-collection options
@@ -173,7 +209,9 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
     keyword — [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000)
     (default, `KhairoutdinovKogan2000`),
     [Seifert and Beheng (2001)](@cite SeifertBeheng2001) (`SeifertBeheng2001`),
-    and [Kogan (2013)](@cite Kogan2013) (`Kogan2013`).
+    and [Kogan (2013)](@cite Kogan2013) (`Kogan2013`). The scheme also sets the
+    seed-drop mass used to convert the autoconversion mass rate into a rain
+    number source.
 
 !!! note "Variable rain shape parameter"
     Both Breeze and Fortran v5.5.0 hold the rain shape parameter at
@@ -181,13 +219,13 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
     commented out in the Fortran source). The closures used by Breeze
     are therefore identical to Fortran's runtime behaviour.
 
-!!! note "Lookup-table I/O scope"
-    Breeze reads the same Fortran ASCII ice lookup tables as the reference
-    implementation (`p3_lookupTable_1`, `p3_lookupTable_2`,
-    `p3_lookupTable_3`); the ice tables are not regenerated. The rain 1D
-    tables (mass- and number-weighted fall speed, evaporation ventilation)
-    *are* tabulated at startup from Chebyshev–Gauss quadrature via
-    `tabulate_rain_from_quadrature`.
+!!! note "Prescribed vs. prognostic droplet number"
+    Fortran v5.5.0 runs with `log_predictNc = .false.`, taking cloud droplet
+    number from a scheme constant. That is Breeze's default too
+    (`cloud.number_concentration`). Passing
+    `aerosol = AerosolActivation(AerosolMode())` switches on the prognostic
+    path, which adds ``ρn^{cl}`` and an unactivated-aerosol reservoir
+    ``ρn^a`` to the prognostic set.
 
 ## Prognostic Variables
 
@@ -195,28 +233,35 @@ P3 evolves eight prognostic densities by default, and up to twelve with every op
 enabled. Each optional group is gated on a type, so a configuration that does not use one
 neither allocates nor advects it.
 
-**Cloud liquid** (1-2 variables):
+**Cloud liquid** (1–2 variables):
 
 - ``ρq^{cl}``: Cloud droplet mass concentration [kg/m³].
 - ``ρn^{cl}``: Cloud droplet number concentration [1/m³], prognostic only when aerosol
   activation is enabled. Otherwise droplet number is the scheme parameter
   `cloud.number_concentration` and this field does not exist.
 
+**Aerosol** (0–1 variables):
+
+- ``ρn^a``: Unactivated aerosol number concentration [1/m³], allocated together
+  with ``ρn^{cl}`` when `aerosol isa AerosolActivation`. Each activated droplet
+  removes one unit from this reservoir.
+
 **Rain** (2 variables):
 
 - ``ρq^r``: Rain mass concentration [kg/m³].
 - ``ρn^r``: Raindrop number concentration [1/m³].
 
-**Ice** (6 variables):
+**Ice** (5–6 variables):
 
 - ``ρq^i``: Dry ice mass concentration [kg/m³] (rime + deposited mass; excludes ``ρq^{wi}``).
 - ``ρn^i``: Ice particle number concentration [1/m³].
 - ``ρq^f``: Rime mass concentration [kg/m³].
 - ``ρb^f``: Rime volume concentration [m³/m³].
-- ``ρz^i``: Ice 6th moment (reflectivity proxy) [m⁶/m³] (only updated when `three_moment_ice = true`).
+- ``ρ\tilde z^i``: Advected square-root 6th moment ``ρ\sqrt{z^i n^i}`` (reflectivity proxy),
+  present only when `three_moment_ice = true`.
 - ``ρq^{wi}``: Liquid water on ice [kg/m³].
 
-**Saturation diagnostic** (1 variable):
+**Saturation diagnostic** (0–1 variables):
 
 - ``ρs^{sat}``: Predicted supersaturation [kg/m³]
   ([Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008)).

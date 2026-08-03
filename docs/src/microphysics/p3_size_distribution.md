@@ -108,7 +108,10 @@ When liquid fraction is active (``F^l > 0``), the bulk density used in
 
 When ``F^f = 0`` the lookup-table generator additionally substitutes
 ``ρ_{g,\text{dry}} \to ρ_\text{rime}`` (the rime-density axis of the table)
-because the partially-rimed regime has zero mass at that point.
+because the partially-rimed regime has zero mass at that point. Within this
+diagnostic ``ρ^f`` is floored at 50 kg/m³, the first coordinate of Table 1's
+rime-density axis, matching the runtime lookup's clamp of the canonical unrimed
+``ρ^f = 0``.
 
 !!! note "Three-Moment Mode"
     In the official P3 code, ``μ`` (and the bulk ice density used in rates) are obtained
@@ -155,12 +158,24 @@ fig
 
 ## Dry Size Distribution (Liquid-Fraction Active)
 
-When ``F^l > 0``, the official P3 generator solves a separate **dry** PSD
-``(λ_d, μ_{i,d}, N_{0,d})`` from the dry-only ice mass ``q^i`` for the
-melting and deposition/sublimation processes (see [Cholette et al. (2019)](@cite Cholette2019parameterization)
-for the rationale). Breeze's `dry_size_distribution` reproduces this branch:
-melting and deposition integrals operate on the dry PSD while collection,
-sedimentation, and reflectivity use the wet PSD.
+When ``F^l > 0``, the official P3 generator solves a separate **dry** PSD from
+the dry-only ice mass ``q^i`` for the four liquid-fraction melting integrals
+(see [Cholette et al. (2019)](@cite Cholette2019parameterization) for the
+rationale). Deposition / sublimation, collection, sedimentation, and
+reflectivity use the wet PSD. Breeze inherits that split through the tables:
+the melting rate reads the dry-PSD Fortran `f1pr24`–`f1pr27` columns, while
+deposition / sublimation reads the wet-PSD `f1pr05` / `f1pr14` pair.
+
+[`dry_size_distribution`](@ref) is the matching analytic evaluator, which
+rescales the wet parameters so the mass moment matches
+``q_\text{dry} = q_\text{total}(1 - F^l)``:
+
+```math
+λ_d = λ\,(1-F^l)^{-1/β},\qquad N_{0,d} = N_0\,(λ_d/λ)^{μ+1},
+```
+
+with ``β`` the effective mass–diameter exponent of the state. At ``F^l = 0`` the
+dry and wet distributions coincide.
 
 ## Determining Distribution Parameters
 

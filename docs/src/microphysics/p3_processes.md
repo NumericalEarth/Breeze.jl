@@ -6,12 +6,21 @@ reference in the [P3-microphysics repository](https://github.com/P3-microphysics
 
 The bulk of the implementation lives in:
 
-- `process_rates.jl` — top-level rate assembly and per-field tendencies.
-- `rain_process_rates.jl` — KK2000 warm-rain rates.
-- `ice_nucleation_rates.jl` — Cooper deposition nucleation, immersion freezing, homogeneous freezing.
+- `process_rates.jl` — top-level rate assembly, sink limiting, and whole-particle clipping.
+- `prognostic_tendencies.jl` — per-field `tendency_ρ*` assembly from those rates.
+- `coupled_saturation_adjustment.jl` — the shared semi-analytic vapor balance
+  (cloud / rain / ice / coated-ice condensation, evaporation, deposition, sublimation).
+- `rain_process_rates.jl` and `warm_rain_schemes.jl` — warm-rain rates and the
+  KK2000 / SB2001 / Kogan2013 selector.
+- `ccn_activation_rates.jl` and `aerosol_activation.jl` — prognostic droplet activation.
+- `ice_nucleation_rates.jl` — Cooper deposition nucleation, immersion freezing,
+  homogeneous freezing, Hallett–Mossop splintering.
 - `melting_rates.jl` — heat-balance melting (with optional Fˡ split).
-- `collection_rates.jl` — riming and aggregation.
-- `ice_rain_collection.jl` — ice–rain collection.
+- `riming_rates.jl`, `ice_collection.jl`, `ice_aggregation_rates.jl` — riming,
+  above-freezing collection, and aggregation.
+- `ice_rain_collection.jl` — ice–rain collection tables.
+- `wet_ice_processes.jl` — Cober–List rime density, shedding, wet growth, refreezing.
+- `sixth_moment_tendencies.jl` — the three-moment ``Z_i`` update.
 
 ## Process Map
 
@@ -44,6 +53,18 @@ breakup, aggregation, splintering) are noted in the per-section text.
 
 ## Warm-Rain Microphysics
 
+Autoconversion, accretion, rain self-collection, and cloud self-collection all
+dispatch on `p3.warm_rain_scheme`, mirroring Fortran's `autoAccr_param`. The
+equations below are the default `KhairoutdinovKogan2000` branch;
+`SeifertBeheng2001` (Long 1974 kernel with a universal function, plus an explicit
+cloud self-collection sink) and `Kogan2013` (updated power laws, including a
+different rain self-collection form) provide their own.
+
+Breeze applies all warm-rain rates to the grid-mean state. Fortran scales them by
+in-cloud / in-precipitation fractions (`iSCF`, `iSPF`, `SPF - SPF_clr`); with no
+subgrid fraction prognostics in Breeze those factors are dropped, equivalent to
+``\text{SCF} = \text{SPF} = 1``, ``\text{SPF}_\text{clr} = 0``.
+
 ### Autoconversion (KK2000)
 
 Cloud droplets coalesce to form rain following [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000):
@@ -60,12 +81,12 @@ with the runtime defaults ``k_1 \approx 0.355`` (= ``1350 \cdot 100^{-1.79}``),
 pair is a unit-rescaled equivalent of the original KK2000 form
 ``1350\, q_{cl}^{2.47}\, N_c[\text{cm}^{-3}]^{-1.79}`` used by the Fortran reference.
 
-!!! note "Selectable warm-rain options"
-    Alongside KK2000 (the default), the reference Fortran offers
-    [Seifert and Beheng (2001)](@cite SeifertBeheng2001) and
-    [Kogan (2013)](@cite Kogan2013) via the `autoAccr_param` switch. Breeze
-    exposes all three through the `warm_rain_scheme` keyword, defaulting to
-    KK2000.
+The autoconversion mass rate also sets the rain *number* source, through a
+scheme-dependent seed-drop mass: a 25 μm-radius drop for KK2000
+(`initial_rain_drop_mass`, Fortran `cons3⁻¹`), 40 μm for Kogan2013
+(`cons8⁻¹`), and ``2/7.6923\times10^{9}`` kg for SB2001. The matching cloud number
+sink is ``\text{AUTO}\, N_c/q_{cl}`` for KK2000 and Kogan2013 (Fortran `ncautc`)
+and a fixed-mass drizzle drop for SB2001.
 
 ### Accretion (KK2000)
 
@@ -99,6 +120,12 @@ where ``D_r = 1/λ_r`` (the Fortran convention; for an exponential PSD this is
 proportional to but not equal to the mass-mean diameter), ``D_\text{th} = 280``
 μm, and ``κ_\text{br} = 2300`` m⁻¹. Above the threshold the multiplier becomes
 negative, i.e. breakup outweighs self-collection.
+
+Fortran carries the result as one signed `nrslf`, so Breeze reports the two
+directions separately for diagnostics but nets them back into a single signed
+term before the rain-number limiter runs — rescaling only the sink half would
+leave breakup at full strength against a limited sink and manufacture rain
+number. Fortran likewise excludes `nrslf` from every limiter rescale list.
 
 ### Rain condensation and evaporation
 
@@ -165,12 +192,23 @@ The mass rate is ``\dot{q}_\text{nuc} = m_{i0}\, \dot{N}_\text{nuc}`` with
 
 Independent of the post-nucleation cap ``N_\text{max} = 10^5`` m⁻³
 above, Breeze enforces a per-cell global ice-number relaxation
-toward ``N_{i,\max} = 2 \times 10^6`` m⁻³ (the Fortran `max_Ni`
-constant in `microphy_p3.f90`). When ``ρn^i`` exceeds ``N_{i,\max}``,
-a 10 s relaxation sink (`maximum_ice_number_density` × `nlim_relaxation_timescale`)
-is added in `tendency_ρnⁱ`. This is the tendency-form analog of
-Fortran's `impose_max_Ni` hard clamp, which runs after the
-sedimentation block in v5.5.0.
+toward ``N_{i,\max} =`` `maximum_ice_number_density` ``= 2 \times 10^6`` m⁻³
+(the Fortran `max_Ni` constant in `microphy_p3.f90`):
+
+```math
+\text{NLIM} = \frac{\max(0,\; n^i - N_{i,\max}/ρ)}{τ_\text{sink}},
+```
+
+with ``τ_\text{sink} =`` `sink_limiting_timescale` (default 10 s). It enters
+``\partial_t (ρn^i)`` as a sink, and is the tendency-form analog of Fortran's
+`impose_max_Ni` hard clamp, which runs at several driver points in v5.5.0
+including after the sedimentation block. The limiter is computed from the *raw*
+prognostic ``n^i``, not the locally pre-capped value the rate functions read —
+otherwise it would always be dead.
+
+Every other rate does see the capped ``\min(n^i, N_{i,\max}/ρ)``, mirroring the
+fact that Fortran caps `nitot` in place so all downstream math (process rates,
+terminal velocities, the ``Z`` tendency, reflectivity) sees the same value.
 
 ### Immersion freezing (Barklie–Gokhale)
 
@@ -216,6 +254,18 @@ Fortran's homogeneous-freezing block runs after sedimentation as an
 instantaneous ``Δt``-paced cleanup; Breeze's tendency-only equivalent uses
 the fixed relaxation timescale.
 
+Crucially, ``q_{cl}`` and ``q_r`` here are the **post-process residuals**, not the
+beginning-of-stage values: Breeze finalizes every ordinary limiter first, then
+re-diagnoses the freezing rate from the liquid that remains. That preserves
+Fortran's ordering and also captures liquid *created* during the interval by
+condensation, melting, or shedding. The number reservoirs are diagnosed the same
+way, so frozen liquid carries the number left by collection, breakup, melting,
+and activation — and in the prescribed-``N_c`` path, cloud number is reset to its
+prescribed value immediately beforehand, as Fortran does. Because
+`homogeneous_freezing_timescale` and `sink_limiting_timescale` are independently
+configurable, both the mass and number rates are then capped consistently so one
+limiter interval can never remove more than the residual.
+
 ### Hallett–Mossop rime splintering
 
 Active for ``-8°\text{C} < T < -3°\text{C}`` and ice with diameter
@@ -236,12 +286,16 @@ stores this as `35.e+4` per gram and applies a ``\times 10^3`` kg→g
 conversion at the call site). The mass rate uses an initial diameter
 ``D_\text{init,HM} = 10\;μ``m at ``ρ_i = 900`` kg/m³.
 
-The 282 K warm-season shutoff uses the ``k=1`` air temperature on regular,
-vertically unpartitioned grids, matching the Fortran column-bottom proxy. For
-gridless calculations, where no column exists, the local air temperature is used.
-Fortran also raises ``D_\text{HM}`` to
-1000 μm for ``n_\text{cat} > 1``; Breeze currently uses the single-category
-threshold (250 μm) regardless.
+The 282 K warm-season shutoff (`splintering_surface_temperature_max`; `Inf`
+disables it) needs a surface temperature, which
+`compute_p3_surface_temperature!` obtains by scanning each column for its lowest
+*active* cell — so it is correct over an immersed bottom, but cannot broadcast
+across a vertical domain partition, since Oceananigans' distributed top/bottom
+halo fills are currently no-ops. For gridless calculations, where no column
+exists, the local air temperature is used. Fortran also raises ``D_\text{HM}`` to
+1000 μm for ``n_\text{cat} > 1``; Breeze uses the single-category
+threshold (250 μm) regardless, and correspondingly keeps the ``n_\text{cat} = 1``
+cloud-riming branch enabled (`splintering_cloud_riming_scale = 1`).
 
 ## Droplet Activation (CCN)
 
@@ -249,17 +303,38 @@ Cloud droplet number is prognostic when CCN activation is enabled. Aerosol
 activation follows the equilibrium Köhler-theory approach of
 [Morrison and Grabowski (2007)](@cite MorrisonGrabowski2007), with
 multi-mode lognormal aerosol distributions and a ``\sigma_g`` width parameter.
-The activated number is:
+The activated number of each mode is:
 
 ```math
 N_\text{act} = N_a\,\frac{1}{2}\left[1 - \text{erf}\!\left(\frac{2\,\ln(s_m/S)}{4.242\,\ln σ_g}\right)\right],
+\qquad
+s_m = \frac{2}{\sqrt{β_\text{act}}}\left(\frac{A_\text{act}}{3\, r_m}\right)^{3/2},
 ```
 
-where ``s_m`` is the mean activation supersaturation (function of aerosol
-size and chemistry), and ``S`` is the environmental supersaturation. The
-resulting rate is gated by ``\max(0, N_\text{act} - N_c)`` divided by an
-independent ``τ_\text{act}`` (`aerosol.activation_timescale`, default
-1 s); this is *separate* from the Cooper ``τ_\text{nuc} = 10`` s.
+where ``s_m`` is the mode's critical supersaturation (a function of aerosol
+size and solute activity, with the Kelvin parameter
+``A_\text{act} = 2 M_w σ_v / (ρ_w R T)``), and ``S`` is the environmental
+supersaturation. The per-mode counts are summed and capped at the total aerosol
+number.
+
+Breeze then tracks the unactivated pool explicitly, so activation cannot exceed
+what remains in it:
+
+```math
+\dot{N}_\text{act} = \frac{\max\!\big(0,\; \min(N_\text{act}(S),\, n^{cl} + n^a) - n^{cl}\big)}{τ_\text{act}},
+```
+
+with ``τ_\text{act}`` = `aerosol.activation_timescale` (default 1 s), *separate*
+from the Cooper ``τ_\text{nuc} = 10`` s. The same rate depletes ``ρn^a``, which
+prevents the spurious re-activation that occurs when ``S`` rebounds after
+autoconversion or partial evaporation has drained ``n^{cl}``. Activation is gated
+on ``S > 10^{-6}`` (Fortran's `sup_cld` threshold), and the mass source is
+``\dot{N}_\text{act}`` times the mass of a 1 μm-radius droplet.
+
+Aerosol distributions are specified **per unit mass of air**: `AerosolMode`'s
+`number_mixing_ratio` is in kg⁻¹, as are ``n^{cl}`` and ``n^a``; the prognostic
+``ρn^a`` holds the ``ρ``-weighted count in m⁻³. See
+[Prognostic Equations](@ref p3_prognostics) for how the reservoir is seeded.
 
 ## Ice Collection and Riming
 
@@ -292,9 +367,13 @@ For ``T > T_0`` the path depends on whether liquid fraction is active:
   ``q^{wi}`` instead of being shed.
 - **Liquid-fraction off** (Fortran "original code" path): collected cloud is
   shed instantaneously back to rain as 1 mm drops with
-  ``\dot{N}_{r,\text{shed}} = 1.923 \times 10^6\, \dot{q}_{c,\text{shed}}``;
-  collected rain mass is unchanged (only rain *number* is removed via the
-  cloud-collection path, matching the Fortran `qrcol` zero-mass branch).
+  ``\dot{N}_{r,\text{shed}} = \dot{q}_{c,\text{shed}} / m_\text{shed}``,
+  ``1/m_\text{shed} = 1.923 \times 10^6`` kg⁻¹ (Fortran `ncshdc`; Breeze reads the
+  configurable `shed_drop_mass` so the rain-number limiter and the
+  homogeneous-freezing residual budget the same value). Collected rain *mass* is
+  left alone — `rain_warm_collection` is zeroed at rate-assembly time, matching
+  the Fortran `qrcol` zero-mass branch — but the rain *number* sink
+  (Fortran `nrcoll` / `nrcol`) fires in both branches.
 
 ### Ice–rain collection
 
@@ -340,24 +419,36 @@ particles: 1 for ``F^f < 0.6`` and ramping linearly to 0 at ``F^f = 0.9``.
 
 ## Vapor Deposition and Sublimation
 
-P3's deposition step uses a coupled semi-analytic vapor balance: cloud,
-rain, ice, and liquid-coated ice all draw from (or release to) a common
-vapor reservoir. Each species ``i`` contributes an inverse relaxation
+P3's deposition step uses a coupled semi-analytic vapor balance
+(`coupled_saturation_adjustment_rates`): cloud, rain, dry ice, and
+liquid-coated ice all draw from (or release to) a common vapor reservoir. Each
+species ``i`` contributes an inverse relaxation
 timescale ``ε_i = 2π\, ρ\, D_v\, \mathcal{C}_i\, N_i`` (where
 ``\mathcal{C}_i`` is the relevant ventilation-enhanced capacitance integral
-from the lookup tables), and the total ``X = ∑_i ε_i\,(\text{Bergeron-corrected})``.
+from the lookup tables), and the total is
+
+```math
+X = ε_{cl} + ε_r + ε_i\,\frac{1 + (L_s/c_p^d)\,dq_{v,s}^l/dT}{ξ^i} + ε_{iw}.
+```
+
+The dry-ice (``ε_i``, Fortran `epsi`) and coated-ice (``ε_{iw}``, Fortran
+`epsiw`) coefficients share the same formula but select mutually exclusive
+liquid-fraction regimes, split at `liquid_fraction_clipping_threshold`, so only
+one of them is nonzero in any cell.
 
 The deposition rate for ice category ``i`` is then
 ([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization)):
 
 ```math
 \dot{q}_\text{dep,i} = \left[\frac{A\,ε_i}{X}
-                            + \frac{(S_l - A/X)\,ε_i}{X\,Δt}\,(1 - e^{-X\,Δt})\right]
-                      \frac{1}{1 + \frac{L_s}{c_p}\frac{dq_{v,i}}{dT}}
-                      + \frac{(q_{v,s}-q_{v,i})\,ε_i}{1 + \frac{L_s}{c_p}\frac{dq_{v,i}}{dT}},
+                            + \frac{(S_l - A/X)\,ε_i}{X\,τ_\text{sink}}\,
+                              \left(1 - e^{-X\,τ_\text{sink}}\right)\right]
+                      \frac{1}{ξ^i}
+                      + \frac{(q_{v,s}^l-q_{v,s}^i)\,ε_i}{ξ^i},
+\qquad ξ^i = 1 + \frac{L_s}{c_p^d}\frac{dq_{v,s}^i}{dT},
 ```
 
-where ``S_l = q_v - q_{v,s}`` is the saturation deficit w.r.t. liquid and
+where ``S_l = q_v - q_{v,s}^l`` is the saturation deficit w.r.t. liquid and
 ``A`` sums two contributions: the Bergeron offset, and the external change in
 liquid-relative supersaturation ``∂_t q^v - (dq_{v,s}/dT)\, ∂_t T``. Breeze
 retains the Bergeron offset in full, and approximates the external part with
@@ -369,15 +460,28 @@ the complete external tendency, as the Fortran `aaa` term is intended to carry,
 remains a possible future improvement.
 
 Sublimation is the negative branch (``\dot{q}_\text{dep} < 0``); the corresponding
-number rate scales with the dry-ice number-to-mass ratio:
+number rate scales with the dry-ice number-to-mass ratio (recall that Breeze's
+``q^i`` is already dry ice):
 
 ```math
-\dot{N}_\text{sub} = -\dot{q}_\text{dep}\,\frac{N_i}{q_i - q^{wi}}.
+\dot{N}_\text{sub} = -\dot{q}_\text{dep}\,\frac{N_i}{q^i}
+                     + \dot{q}_\text{coat-evap}\,\frac{N_i}{q^i + q^{wi}},
 ```
 
-Coupled liquid-coated ice (``F^l \ge 0.01``) uses the saturation
-factor ``1/a_b = 1/(1 + L_v^2 q_{v,s}/(c_p R_v T^2))`` instead of ``1/a_{bi}``,
-matching the coupled liquid-ice branch in Fortran.
+where the second term is the number companion of liquid-coating evaporation
+(Fortran `nlevp`), which shares the same ice-number sink.
+
+Coupled liquid-coated ice (``F^l \ge`` `liquid_fraction_clipping_threshold`)
+uses the liquid-side psychrometric factor
+``1/ξ^l = 1/(1 + L_v^2 q_{v,s}^l/(c_p R_v T^2))`` instead of the ice-side
+``1/ξ^i``, and carries no Bergeron contribution because the surface is already at
+liquid saturation — matching the coupled liquid-ice branch in Fortran.
+
+Deposition and sublimation are each scaled by an ad-hoc calibration factor
+(`calibration_factor_deposition`, `calibration_factor_sublimation`, both 1 by
+default), matching Fortran's `clbfact_dep` / `clbfact_sub`. Sublimation is
+additionally capped at ``q^i/τ_\text{sink}`` (Fortran limits it to the dry-ice
+mass per unit time) and deposition at ``q^v/τ_\text{sink}``.
 
 !!! note "SCF=1 limit"
     Breeze evaluates ``S_l`` and the saturation-adjustment caps without an
@@ -418,9 +522,40 @@ mean particle mass after melting is preserved.
 When liquid fraction is inactive, the full melt rate is routed to rain
 (``\dot{q}_\text{imlt} = 0``).
 
-After tendency application, particles whose liquid fraction exceeds 0.99
-("complete melting" diagnostic) transfer the remaining ice mass and number
-to rain — see [Prognostic Equations](@ref p3_prognostics).
+The whole rate is bounded by ``q^i/τ_\text{sink}``; the physical heat-transfer
+rate is the real limiter and the timescale is a numerical guard.
+
+## Whole-Particle Clipping
+
+Some particles must be transferred as a whole rather than eroded by a rate.
+Breeze diagnoses the union of three predicates and drains each reservoir exactly
+once over `refreezing_timescale`:
+
+| Predicate | Condition | Fortran counterpart |
+|-----------|-----------|--------------------|
+| Warm fully-liquid | ``T \ge T_0`` and ``F^l > 1 - F^l_\text{small}`` | liquid-fraction clip |
+| High liquid fraction | ``F^l > 0.99`` | "complete melting" diagnostic |
+| Tiny warm ice | ``T \ge T_0`` and ``q^i + q^{wi} <`` `tiny_ice_to_rain_threshold` | `qsmall_dry` clip |
+
+The first two require `liquid_fraction_active`. When any fires, the dry mass and
+number go to rain as complete melting, the coating is shed to rain, and every
+process that needs the clipped particle — deposition, coating exchange,
+aggregation, riming, wet growth, splintering, above-freezing collection, the
+number limiter, and both number corrections — is zeroed. Independent new-ice
+sources (nucleation and immersion / homogeneous freezing) survive. The rime mass
+and volume are drained through explicitly reconstructed companions
+(``\text{CLIP}_q``, ``\text{CLIP}_b`` in [Prognostic Equations](@ref p3_prognostics))
+so post-process rime and densification changes are removed exactly, rather than
+by assuming the beginning-of-stage rime fraction.
+
+Fortran applies its ``F^l > 0.99`` clip a second time *after* the ordinary
+process updates, so Breeze reconstructs the post-process reservoirs from the
+limited rates and applies the same clip to particles that crossed the threshold
+during melting.
+
+There is also a mirror-image clip below: with liquid fraction active, ``T < T_0``
+and ``0 < F^l <`` `liquid_fraction_clipping_threshold`, the residual coating is
+added to the refreezing rate rather than left as a vanishing ``q^{wi}``.
 
 ## Wet Growth and Refreezing
 
@@ -437,17 +572,35 @@ where the ``2π`` factor multiplies *only* the latent (vapor-diffusion) term;
 the sensible-conduction term ``K_a (T_0-T)`` carries no ``2π`` (matching the
 Fortran `qwgrth` form).
 
-Without liquid fraction, the excess
-``\dot{q}_\text{wg,excess} = \dot{q}_\text{ccol} + \dot{q}_\text{rcol} - \dot{q}_\text{wg}``
-is shed as 1 mm rain drops, and the rime is set to maximum density
-(``q^f = q^i``, ``b^f = q^f / ρ_{r,\max}``).
+Wet growth fires when the total collection
+``\dot{q}_\text{ccol} + \dot{q}_\text{rcol}``
+exceeds ``\dot{q}_\text{wg}`` and there is at least
+``10^{-6}`` kg/kg of cloud plus rain to collect. The retained fraction is
+``\dot{q}_\text{wg} / (\dot{q}_\text{ccol} + \dot{q}_\text{rcol})``.
 
-With liquid fraction active, the excess is retained as ``q^{wi}``; no
-densification flag is set. Refreezing then transfers ``q^{wi}`` back to
-rime when ``T < T_0``:
+Without liquid fraction, the retained portion becomes dense rime — the riming
+rates are reduced to it and the new rime density is set to ``ρ_{r,\max}`` — while
+the excess is shed as 1 mm drops. Only the excess *cloud* water is a new rain
+*mass* source; excess collected rain simply stays rain, so it contributes to the
+shed *number* only:
 
 ```math
-\dot{q}_\text{frz} = \dot{q}_\text{wg}|_{T < T_0},
+\dot{q}_\text{shed,wg} = \dot{q}_\text{ccol,excess},\qquad
+\dot{N}_\text{shed,wg} = \frac{\dot{q}_\text{ccol,excess} + \dot{q}_\text{rcol,excess}}{m_\text{shed}}.
+```
+
+The existing rime is simultaneously soaked to maximum density over
+`rime_densification_timescale`: ``q^f \to q^i`` and ``b^f \to q^i / ρ_{r,\max}``.
+
+With liquid fraction active, *all* collection becomes liquid coating
+(Fortran `qwgrth1c` / `qwgrth1r`), the riming rates are zeroed, and no
+densification flag is set. Refreezing then transfers ``q^{wi}`` back to
+rime when ``T < T_0``, using the same ventilated heat balance as the wet-growth
+capacity:
+
+```math
+\dot{q}_\text{frz} = N_i\, \max\!\big(0,\; \mathcal{C} f_v [K_a (T_0 - T)
+                     + 2π\, ρ\, L_s D_v (q_{v,s,0} - q_v)/L_f]\big),
 ```
 
 bounded by ``q^{wi} / τ_\text{sink}`` (Breeze uses a fixed
@@ -470,7 +623,13 @@ where ``\mathcal{I}_\text{shed}`` is the tabulated mass integral
 loaded from `p3_lookupTable_1`. The rate is bounded by
 ``q^{wi} / τ_\text{sink}`` (default 10 s) for stability. The shed mass is
 added to rain; the shed number uses the ``1.928 \times 10^6`` per-kg
-conversion (1 mm drops, identical to Fortran's `nlshd` factor).
+conversion (`shed_drop_mass_liqfrac`, 1 mm drops, identical to Fortran's
+`nlshd` factor) — slightly different from the ``1.923 \times 10^6``
+(`shed_drop_mass`) used by cloud and wet-growth shedding.
+
+Shedding is gated off entirely when `liquid_fraction_active = false`. In that
+configuration any coating left on the state (from a restart, say) is drained to
+rain over `sink_limiting_timescale` instead, so ``q^{wi}`` cannot strand water.
 
 ## Rime Density
 
@@ -503,55 +662,82 @@ These caps follow the saturation-adjustment limits in
 [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization)
 appendix C, section b (the Morrison–Grabowski 2008b semi-analytic
 condensation/evaporation framework, extended to the ice phase).
-`limit_vapor_rates` in `process_rates.jl` applies them in the
-tendency interface.
+`limit_vapor_rates` in `process_rate_helpers.jl` applies them, and — matching
+Fortran's ordering — it runs *before* the per-species conservation budgets, so
+those budgets see the already vapor-limited rates. The budgets themselves are
+described under [Conservation Properties](@ref p3_prognostics).
 
 ## Sedimentation
 
 Sedimentation is delegated to Oceananigans transport. Each prognostic field
-falls at its tabulated, density-corrected velocity:
+falls at its tabulated, density-corrected velocity, diagnosed once per RK stage
+into z-Face fields:
 
 | Variable | Velocity | Reference |
 |----------|---------|-----------|
+| Cloud mass / number | mass-weighted ``V_m^{cl}``, number-weighted ``V_n^{cl}`` | DSD-integrated Stokes velocities |
 | Rain mass / number | mass-weighted ``V_m^r``, number-weighted ``V_n^r`` | Gunn–Kinzer 1949 lookup tables |
 | Ice mass / rime mass / rime volume / liquid coating | mass-weighted ``V_m^i`` | Mitchell–Heymsfield 2005 |
 | Ice number | number-weighted ``V_n^i`` | Mitchell–Heymsfield 2005 |
-| Ice 6th moment ``z^i`` | reflectivity-weighted ``V_z^i`` | Mitchell–Heymsfield 2005 |
+| Advected sixth moment ``\tilde z^i`` | ``\tfrac{1}{2}(V_z^i + V_n^i)`` | Mitchell–Heymsfield 2005 |
 
 All ice fall speeds are corrected by the air-density factor
 ``(ρ_s/ρ)^{0.54}`` with the 600 hPa, 253.15 K reference ``ρ_s`` for ice
 and the surface ``ρ_s = p_0/(R_d\, T_0)`` for rain (matching the Fortran
 `rhosur` / `rhosui`).
 
+The prognostic sixth moment is ``\tilde z^i = \sqrt{z^i n^i}``, so its
+sedimentation characteristic is the mean of the ``Z``- and ``N``-weighted particle
+speeds rather than ``V_z^i`` alone. The purely reflectivity-weighted ``V_z^i`` is
+still tabulated and kept as a diagnostic. One velocity is not exact for
+independently size-sorted ``Z`` and ``N`` profiles; a coupled two-flux form
+awaits a host tracer interface that can assemble one tendency from two moment
+fluxes.
+
 The Fortran adaptive `dt_left` Courant substepping is *not* part of P3
-in Breeze; the host transport scheme is responsible for stability. ``V_z``
-is computed for transport but does not feed back into a Courant constraint.
+in Breeze; the host transport scheme is responsible for stability, and no fall
+speed feeds back into a Courant constraint inside P3.
 
 ## Sixth-moment (``Z_i``) update
 
-Breeze follows Fortran v5.5.0's active hybrid path. After each "group 1"
-process (deposition, melting, riming, shedding, sublimation, ``q^{wi}``
-condensation/evaporation), ``μ_i`` is held fixed for the step, ``M_3`` is
-re-estimated from the updated ice mass and bulk density, and:
+Breeze follows Fortran v5.5.0's active hybrid path. ``μ_i`` is held at its
+pre-process (Table-3) value for the whole step. The "group 1" tendencies
+(deposition / sublimation, melting, riming, refreezing, shedding, ``q^{wi}``
+condensation and evaporation, aggregation, and the number limiters — that is,
+every per-field tendency *minus* its group-2 sources) are integrated over
+``τ_\text{sink}`` to get ``(q^i, q^{wi}, n^i, q^f, b^f)_\text{new}``. ``M_3`` is
+then re-estimated from that state,
 
 ```math
-Z_i = G(μ_i)\,\frac{M_3^2}{N_i},\qquad
-G(μ) = \frac{(6+μ)(5+μ)(4+μ)}{(3+μ)(2+μ)(1+μ)}.
+M_{3,\text{new}} = \frac{6\, q^i_\text{total,new}}{π\, \bar{ρ}_i(μ_i)},\qquad
+Z_\text{new} = G(μ_i)\,\frac{M_{3,\text{new}}^2}{n^i_\text{new}},\qquad
+G(μ) = \frac{(6+μ)(5+μ)(4+μ)}{(3+μ)(2+μ)(1+μ)},
 ```
+
+and contributed as ``(Z_\text{new} - Z_i)/τ_\text{sink}``. The bulk density
+``\bar{ρ}_i(μ_i)`` here comes from **Table 1** read at the fixed ``μ_i``
+(`ice_mean_density_at_fixed_shape`, Fortran
+`proc_from_LUT_main3mom(12, …)`), not from Table 3: Table 3's density is a
+function of ``z^i/q^i``, so using it inside a reconstruction of ``z^i`` would
+close a loop on the value being replaced. Fortran states the same reason at
+`microphy_p3.f90:4453-4457`.
 
 For "group 2" initiation processes (deposition nucleation, immersion freezing
-of cloud / rain, splintering, homogeneous freezing of cloud / rain), an
-explicit increment is added:
+of cloud / rain, both splintering branches, homogeneous freezing of cloud /
+rain), an explicit rate increment is added:
 
 ```math
-ΔM_3 = \frac{6\,\dot{q}_\text{src}}{π\, ρ_i},\qquad
-ΔZ_i = G(μ_\text{src})\,\frac{ΔM_3^2}{\dot{N}_\text{src}}\, Δt,
+\dot{M}_3 = \frac{6\,\dot{q}_\text{src}}{π\, ρ_i},\qquad
+\dot{Z}_i = G(μ_\text{src})\,\frac{\dot{M}_3^2}{\dot{N}_\text{src}},
+\qquad ρ_i = 900\;\text{kg/m}^3,
 ```
 
-where ``μ_\text{src} = μ_c`` for cloud-source freezing, ``μ_\text{src} = μ_r = 0``
-for rain-source freezing, and ``μ_\text{src} = 0`` for nucleation and splintering
-(consistent with the Fortran `update_zi_proc2` block, which is identical
-once Fortran's `mu_r_constant = 0` runtime is taken into account).
+where ``μ_\text{src} = μ_r = 0`` for every source *except* homogeneous freezing
+of cloud water, which uses the cloud shape ``μ_c`` diagnosed from the residual
+cloud reservoir just before that process fires. This matches the Fortran
+`update_zi_proc2` block once Fortran's `mu_r_constant = 0` runtime is taken into
+account. The increment is zero unless both the mass and the number source are
+positive.
 
 Breeze does not implement the dormant `log_full3mom` Fortran branch (which
 computes per-process tabulated ``Z_i`` increments), since `log_full3mom = .false.`
@@ -587,6 +773,7 @@ tendency. The relevant latent heats at standard conditions are:
 | Process | Affects | Key parameter / form | Reference |
 |---------|---------|-----------------------|-----------|
 | Condensation / evaporation | ``q^{cl}, q^r, q^{wi}`` | Coupled semi-analytic | [Morrison2015parameterization](@cite) |
+| CCN activation | ``q^{cl}, n^{cl}, n^a`` | Köhler equilibrium, pool-capped, ``τ_\text{act}`` | [MorrisonGrabowski2007](@cite) |
 | Autoconversion | ``q^{cl} \to q^r`` | KK2000 (default) / SB2001 / Kogan2013 | [KhairoutdinovKogan2000](@cite), [SeifertBeheng2001](@cite), [Kogan2013](@cite) |
 | Accretion | ``q^{cl} \to q^r`` | KK2000 (default) / SB2001 / Kogan2013 | [KhairoutdinovKogan2000](@cite), [SeifertBeheng2001](@cite), [Kogan2013](@cite) |
 | Rain self-collection / breakup | ``n^r`` | Verlinde–Cotton + KK2000/SB2001/Kogan2013 | [Morrison2015parameterization](@cite) |
@@ -603,7 +790,8 @@ tendency. The relevant latent heats at standard conditions are:
 | Wet growth | ``q^i, q^{wi}`` | Musil 1970 | [Morrison2015parameterization](@cite) |
 | Shedding | ``q^{wi} \to q^r`` | Tabulated PSD integral, ``D \ge 9`` mm (Fortran `f1pr28`) | [MilbrandtEtAl2025liquidfraction](@cite) |
 | Refreezing | ``q^{wi} \to q^f`` | Wet-growth form, ``T < T_0`` | [MilbrandtEtAl2025liquidfraction](@cite) |
-| Sedimentation | All | Tabulated; delegated to Oceananigans | [MilbrandtYau2005](@cite) |
+| Whole-particle clipping | all ice fields ``\to q^r`` | ``F^l > 0.99``, warm fully-liquid, tiny warm ice | [MilbrandtEtAl2025liquidfraction](@cite) |
+| Sedimentation | Cloud, rain, all ice fields | Tabulated; delegated to Oceananigans | [MilbrandtYau2005](@cite) |
 
 ## References for This Section
 

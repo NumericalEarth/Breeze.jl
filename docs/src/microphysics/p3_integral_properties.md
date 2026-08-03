@@ -104,16 +104,25 @@ where:
 
 ### Ventilation Integrals
 
-P3 computes six ventilation-related integrals for different size regimes:
+`IceDeposition` (`ice_deposition.jl`) holds two wet-PSD ventilation components
+for deposition / sublimation and four dry-PSD components for liquid-fraction
+melting:
 
-| Integral | Description | Size Regime |
-|----------|-------------|-------------|
-| `SmallIceVentilationConstant` | Constant term for small ice | D < 100 μm |
-| `SmallIceVentilationReynolds` | Re-dependent term for small ice | D < 100 μm |
-| `LargeIceVentilationConstant` | Constant term for large ice | D ≥ 100 μm |
-| `LargeIceVentilationReynolds` | Re-dependent term for large ice | D ≥ 100 μm |
-| `Ventilation` | Total ventilation integral | All sizes |
-| `VentilationEnhanced` | Enhanced ventilation (large ice only) | D ≥ 100 μm |
+| Field of `p3.ice.deposition` | Description | Integration / Routing | Fortran |
+|------------------------------|-------------|-----------------------|---------|
+| `small_ice_ventilation_constant` | Constant melting component | ``D \le D_\text{crit}``; meltwater goes to rain | `f1pr24` |
+| `small_ice_ventilation_reynolds` | Re-dependent melting component | ``D \le D_\text{crit}``; meltwater goes to rain | `f1pr25` |
+| `large_ice_ventilation_constant` | Constant melting component | ``D > D_\text{crit}``; meltwater stays on ice | `f1pr26` |
+| `large_ice_ventilation_reynolds` | Re-dependent melting component | ``D > D_\text{crit}``; meltwater stays on ice | `f1pr27` |
+| `ventilation` | Constant deposition / sublimation component | Wet PSD, all sizes | `f1pr05` |
+| `ventilation_enhanced` | Re-dependent deposition / sublimation component | Wet PSD, ``D \ge 100`` μm | `f1pr14` |
+
+The ``D_\text{crit}`` split controls where meltwater is routed. It is distinct
+from the 100 μm Hall-Pruppacher ventilation transition: below 100 μm only the
+constant coefficient contributes, while larger particles also contribute to the
+Re-dependent component. Breeze's melting rate reads `f1pr24`–`f1pr27`; dry-ice
+deposition / sublimation reads the wet-PSD `f1pr05` / `f1pr14` pair (see
+[Size Distribution](@ref p3_size_distribution)).
 
 ## Bulk Property Integrals
 
@@ -192,9 +201,21 @@ I_{agg} = \int_0^∞ \int_0^∞ K_{agg}(D_1, D_2) N'(D_1) N'(D_2)\, dD_1 dD_2
 
 ### Ice-Rain Collection
 
+Unlike cloud collection, this depends on the rain PSD as well, so it is a double
+integral over both distributions and needs the rain slope parameter as an extra
+table coordinate:
+
 ```math
-I_{ir} = \int_0^∞ A(D) V(D) N'(D)\, dD
+I_{ir} = \int_0^∞ \!\! \int_0^∞ \frac{π}{4} (D_i + D_r)^2\, |V(D_i) - V(D_r)|\,
+         N_i'(D_i)\, N_r'(D_r)\, dD_r\, dD_i .
 ```
+
+The mass and number forms (Fortran `f1pr08`, `f1pr07`) are stored as ``\log_{10}``
+values and exponentiated at runtime; the sixth-moment form (`m6collr`) is not.
+They live in the 6-D rain-ice block of Lookup Table 1 rather than the 5-D
+ice-only block, and all three share the same
+``(\log \bar{m}, \log λ_r, F^f, F^l, ρ^f, μ)`` axes, so the interpolation indices
+are computed once per lookup.
 
 ## Sixth Moment Integrals
 
@@ -208,31 +229,51 @@ in the 3-moment lookup table (`p3_lookupTable_1.dat-v*_3momI`).
 | Process | Integral(s) | Physical Meaning |
 |---------|-------------|------------------|
 | Riming | `rime` | Z change from rime accretion |
-| Deposition | `deposition`, `deposition1` | Z change from vapor growth (split by ``D < 100`` μm vs ``D \ge 100`` μm ventilation pieces, matching Fortran `m6dep` / `m6dep1`) |
-| Melting | `melt1`, `melt2`, `melt_all1`, `melt_all2` | Melt-to-rain piece (``D \le D_\text{th}``) and ``q^{wi}``-routed piece for the liquid-fraction path |
+| Deposition | `deposition`, `deposition1` | Z change from vapor growth: a constant ventilation component over all sizes and a Re-dependent component for ``D \ge 100`` μm (Fortran `m6dep` / `m6dep1`) |
+| Melting | `melt1`, `melt2` | Melt-to-rain piece (``D \le D_\text{th}``) and ``q^{wi}``-routed piece for the liquid-fraction path |
 | Aggregation | `aggregation` | Z change from aggregation |
 | Shedding | `shedding` | Z change from liquid shedding |
-| Sublimation | `sublimation`, `sublimation1` | Same two-piece split as deposition, with sign and a ``\dot{N}_0`` contribution |
+| Sublimation | `sublimation`, `sublimation1` | Same constant / Re-dependent decomposition as deposition, with sign and a ``\dot{N}_0`` contribution |
+
+`IceSixthMoment` also carries `melt_all1` / `melt_all2`, the all-``D`` melting
+integrands for the non-liquid-fraction path. The Fortran file has no such
+columns — the all-``D`` distinction only arises in Breeze's own quadrature — so
+reading a Fortran table sets them equal to `melt1` / `melt2`.
 
 ## Lambda Limiter Integrals
 
 To prevent unphysical size distributions, P3 limits the slope parameter ``λ``
-based on physical constraints.
+based on physical constraints. `IceLambdaLimiter` (`ice_lambda_limiter.jl`) holds
+the two tabulated bounds:
 
-| Integral | Purpose |
-|----------|---------|
-| `SmallQLambdaLimit` | Lower bound on λ (prevents unrealistically large particles) |
-| `LargeQLambdaLimit` | Upper bound on λ (prevents unrealistically small particles) |
+| Field of `p3.ice.lambda_limiter` | Purpose | Fortran |
+|----------------------------------|---------|---------|
+| `small_q` | Upper bound on λ (prevents unrealistically small particles) | `f1pr09` |
+| `large_q` | Lower bound on λ (prevents unrealistically large particles) | `f1pr10` |
+
+Fortran clamps `nitot` against these bounds in place. Breeze instead diagnoses
+the bounded number and feeds the difference back as the ``\text{N-CORR}_i``
+relaxation tendency described in [Prognostic Equations](@ref p3_prognostics).
 
 ## Tabulation
 
-For efficiency in simulations, integrals are organized into three Breeze lookup-table families:
+For efficiency in simulations, integrals are organized into three table families.
+Only two files are read: `p3_lookupTable_1.dat-v6.9-3momI` (or `-2momI`), which
+holds the first two families, and `p3_lookupTable_3.dat-v1.4`.
 
-- `lookupTable_1`: fall speed, ventilation, bulk, collection, sixth-moment, and lambda-limiter integrals
-- `lookupTable_2`: ice-rain and inter-category collection families
-- `lookupTable_3`: three-moment diagnostic lookup for `μᶦ` and a companion
+- **Table 1** — the 5-D ice-only block: fall speed, ventilation, bulk,
+  cloud-collection, aggregation, sixth-moment, and lambda-limiter integrals, on
+  ``(\log \bar{m}, F^f, F^l, ρ^f, μ)`` axes (``μ`` is a singleton in 2-moment mode).
+- **Table 2** — the 6-D ice–rain collection block embedded later in the same
+  file, which adds ``\log λ_r`` as a coordinate.
+- **Table 3** — the three-moment diagnostic lookup for ``μ^i`` and a companion
   mean-density column. (The slope ``λ^i`` is *not* in Table 3 — it is
-  recovered at runtime from Table 1 using the diagnosed ``μ^i``.)
+  recovered at runtime from Table 1 using the diagnosed ``μ^i``.) Requesting
+  three-moment ice without this file is an error, matching Fortran's hard stop:
+  a silent fallback to the two-moment ``μ`` closure would give different results.
+
+The `MultiIceCategory` scaffolding has no tabulated inter-category collection
+family; that kernel is an unimplemented placeholder.
 
 ```@example p3_integrals
 using Breeze
@@ -254,10 +295,11 @@ println("  Mass-weighted:   $(typeof(fs.mass_weighted))")
 
 P3 organises its integral properties by concept; the actual column counts in
 the Fortran tables are 21 in the 2-moment ice file (`p3_lookupTable_1.dat-v*`)
-and 31 in the 3-moment ice file (`*_3momI`). Sixth-moment integrals
-(`m6rime, m6dep, m6dep1, m6mlt1, m6mlt2, m6agg, m6shd, m6sub, m6sub1`) and the
-ice–rain collection family (`m6collr`, plus `qrcol`/`nrcol` 4-D tables) make
-up the bulk of the extra columns in the 3-moment file.
+and 31 in the 3-moment ice file (`*_3momI`). The ten extra 3-moment columns are
+the reflectivity-weighted fall speed and the nine sixth-moment integrals
+(`m6rime, m6dep, m6dep1, m6mlt1, m6mlt2, m6agg, m6shd, m6sub, m6sub1`). The
+ice–rain collection family (`qrcol`/`nrcol`, plus `m6collr` in 3-moment mode)
+sits in the separate 6-D block of the same file.
 
 At runtime each ice-side integral is read from the corresponding Fortran
 ASCII lookup table; the rain 1D tables are tabulated at startup inside
