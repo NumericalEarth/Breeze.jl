@@ -3,6 +3,7 @@ using RRTMGP, CloudMicrophysics # to load Breeze extensions
 using Documenter
 using DocumenterCitations
 using Pkg.Artifacts: ensure_artifact_installed
+using DocumenterCodeBlocks: CodeBlocks
 
 using CairoMakie
 CairoMakie.activate!(type = "png")
@@ -173,12 +174,12 @@ makedocs(
     ;
     modules,
     sitename = "Breeze",
-    plugins = [bib],
+    plugins = [bib, CodeBlocks()],
     format = Documenter.HTML(
         ;
         size_threshold_warn = 2 ^ 19, # 512 KiB
         size_threshold = 2 ^ 20, # 1 MiB
-        size_threshold_ignore = ["api.md"],
+        prettyurls = get(ENV, "CI", "false") == "true",
     ),
     pages=[
         "Home" => "index.md",

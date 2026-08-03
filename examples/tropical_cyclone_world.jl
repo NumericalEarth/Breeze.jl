@@ -391,7 +391,7 @@ hm = heatmap!(ax, sn; colormap=:speed, colorrange=(0, slim))
 Colorbar(fig[1, 2], hm; label="Surface wind speed (m/s)")
 fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
-CairoMakie.record(fig, "tc_world.mp4", 1:Nt, framerate=16) do nn
+CairoMakie.record(fig, "tc_world.mp4", 1:Nt; framerate = 16, compression = 23) do nn
     n[] = nn
 end
 nothing #hide
