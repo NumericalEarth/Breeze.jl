@@ -366,7 +366,8 @@ function run_simulation(model, label)
 
     slices_filename = "splitting_supercell_$(label)_slices.jld2"
     simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
-        filename=slices_filename, schedule=TimeInterval(2minutes), overwrite_existing=true)
+        filename=slices_filename, schedule=TimeInterval(2minutes), overwrite_existing=true,
+        jld2_kw = Dict(:compress => true))
 
     run!(simulation)
     wall_seconds = simulation.run_wall_time

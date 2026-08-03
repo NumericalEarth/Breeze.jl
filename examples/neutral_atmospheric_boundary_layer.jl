@@ -228,6 +228,7 @@ avg_output_interval = 10minutes
 simulation.output_writers[:averages] = JLD2Writer(model, merge(avg_outputs, avg_∂z_outputs);
                                                   filename = avg_filename,
                                                   schedule = AveragedTimeInterval(avg_output_interval),
+                                                  jld2_kw = Dict(:compress => true),
                                                   overwrite_existing = true)
 
 # ### Instantaneous slices for animation
@@ -259,6 +260,7 @@ slice_outputs = (
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = "abl_slices.jld2",
                                                 schedule = TimeInterval(5minutes),
+                                                jld2_kw = Dict(:compress => true),
                                                 overwrite_existing = true)
 
 # ### Go time

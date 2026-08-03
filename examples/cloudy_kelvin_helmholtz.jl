@@ -190,6 +190,7 @@ filename = "wave_clouds.jld2"
 
 output_writer = JLD2Writer(model, outputs; filename,
                            schedule = TimeInterval(4),
+                           jld2_kw = Dict(:compress => true),
                            overwrite_existing = true)
 
 simulation.output_writers[:fields] = output_writer

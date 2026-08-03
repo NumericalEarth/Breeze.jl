@@ -323,12 +323,14 @@ slices_filename = filename * "_slices.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
                                                   filename = averages_filename,
                                                   schedule = AveragedTimeInterval(1hour),
+                                                  jld2_kw = Dict(:compress => true),
                                                   overwrite_existing = true)
 
 slice_outputs = (; w, qᵛ, T)
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = slices_filename,
                                                 schedule = TimeInterval(10minutes),
+                                                jld2_kw = Dict(:compress => true),
                                                 overwrite_existing = true)
 
 @info "Starting simulation..."

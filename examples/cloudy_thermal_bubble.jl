@@ -85,6 +85,7 @@ outputs = (; θ, w)
 filename = "dry_thermal_bubble.jld2"
 writer = JLD2Writer(model, outputs; filename,
                     schedule = TimeInterval(10seconds),
+                    jld2_kw = Dict(:compress => true),
                     overwrite_existing = true)
 
 simulation.output_writers[:jld2] = writer
@@ -218,6 +219,7 @@ moist_outputs = (; θ, w, qˡ′)
 moist_filename = "cloudy_thermal_bubble.jld2"
 moist_writer = JLD2Writer(moist_model, moist_outputs; filename=moist_filename,
                           schedule = TimeInterval(10seconds),
+                          jld2_kw = Dict(:compress => true),
                           overwrite_existing = true)
 
 moist_simulation.output_writers[:jld2] = moist_writer
@@ -321,6 +323,7 @@ precip_outputs = (; θ=θ_precip, w=w_precip, qᶜˡ=qᶜˡ_precip, qʳ=qʳ_prec
 precip_filename = "precipitating_thermal_bubble.jld2"
 precip_writer = JLD2Writer(precip_model, precip_outputs; filename=precip_filename,
                            schedule = TimeInterval(30seconds),
+                           jld2_kw = Dict(:compress => true),
                            overwrite_existing = true)
 
 precip_simulation.output_writers[:jld2] = precip_writer
