@@ -274,10 +274,20 @@ function stress_depth(model)
     ## does not vanish there, because the wind is still turning with height.
     ∂zᶠ(a) = [k == 1 ? 0.0 : (a[k] - a[k-1]) / (zc[k] - zc[k-1]) for k in 1:Nz]
     τ = sqrt.((ν[1:Nz] .* ∂zᶠ(u)) .^ 2 .+ (ν[1:Nz] .* ∂zᶠ(v)) .^ 2)
-    τs = maximum(τ)
 
-    k = findfirst(k -> τ[k] < 0.05τs, 2:Nz)
-    return isnothing(k) ? last(zc) : zc[k+1] / 0.95
+    ## Interpolate the crossing rather than snapping to a cell centre. At GABLS1's Δz = 6.25 m the
+    ## quantisation is ~6.6 m, comparable to the differences between closure configurations, so a
+    ## snapped depth reports them as identical. Searching down from the peak also keeps a secondary
+    ## stress maximum from ending the search early.
+    τs, kᵖ = findmax(τ)
+    threshold = 0.05τs
+    for k in kᵖ:Nz-1
+        if τ[k] ≥ threshold > τ[k+1]
+            f = (τ[k] - threshold) / (τ[k] - τ[k+1])
+            return (zc[k] + f * (zc[k+1] - zc[k])) / 0.95
+        end
+    end
+    return last(zc)
 end
 
 """Inversion height: the level of maximum ``∂_z θ`` (convective convention)."""
