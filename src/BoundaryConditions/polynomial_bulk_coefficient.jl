@@ -634,14 +634,9 @@ not virtual temperature at the surface against potential temperature aloft.
 """
 @inline function surface_virtual_potential_temperature(T₀, p₀, pˢᵗ, constants, surface)
     qᵛ⁺ = saturation_total_specific_moisture(T₀, p₀, constants, surface)
-
-    Rᵈ = dry_air_gas_constant(constants)
-    Rᵛ = vapor_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    δᵛᵈ = Rᵛ / Rᵈ - 1
-    Π₀ᵈ = (p₀ / pˢᵗ)^(Rᵈ / cᵖᵈ)
-
-    return (T₀ / Π₀ᵈ) * (1 + δᵛᵈ * qᵛ⁺)
+    # The same θᵥ the air-side of the stability difference goes through, with no condensate at the
+    # surface. Sharing it is what keeps the two sides of that subtraction defined identically.
+    return virtual_potential_temperature(T₀, p₀, pˢᵗ, MoistureMassFractions(qᵛ⁺), constants)
 end
 
 #####

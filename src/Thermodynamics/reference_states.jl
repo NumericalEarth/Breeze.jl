@@ -225,8 +225,16 @@ condition follows, with no need to rebuild the reference state or its fields. Th
 the reference states immutable, and therefore `isbits` after `Adapt`, which they must be because
 the dynamics that owns them is passed directly to GPU kernels.
 """
-function surface_state_field(grid, value)
-    field = Field{Center, Center, Nothing}(grid)
+surface_state_field(grid, value) = set_surface_state!(Field{Center, Center, Nothing}(grid), value)
+
+"""
+$(TYPEDSIGNATURES)
+
+Write `value` into a surface field and fill its halos. The halo fill is the load-bearing half: the
+field's data is aliased into a `ValueBoundaryCondition` by [`surface_boundary_value`](@ref) and read
+by the column kernels, so a write that skipped it would leave both stale.
+"""
+function set_surface_state!(field, value)
     set!(field, value)
     fill_halo_regions!(field)
     return field
@@ -315,14 +323,11 @@ function update_reference_surface_state!(ref::ReferenceState, constants)
     pˢ = ref.base_pressure * exp(-g * zˢ / (Rᵐ¹ * T¹))
     ρˢ = pˢ / (Rᵐ¹ * T¹)
 
-    set!(ref.surface_pressure, convert(FT, pˢ))
-    set!(ref.surface_density, convert(FT, ρˢ))
+    set_surface_state!(ref.surface_pressure, convert(FT, pˢ))
+    set_surface_state!(ref.surface_density, convert(FT, ρˢ))
     # The reduction above extends T¹ isothermally to the bottom face, so T¹ *is* the temperature
     # there under this reference.
-    set!(ref.surface_temperature, convert(FT, T¹))
-    fill_halo_regions!(ref.surface_pressure)
-    fill_halo_regions!(ref.surface_density)
-    fill_halo_regions!(ref.surface_temperature)
+    set_surface_state!(ref.surface_temperature, convert(FT, T¹))
     return nothing
 end
 
@@ -525,8 +530,6 @@ If `profile` is a `Function`, calls `profile(z)`.
 # Surface value for a reference profile: a `Number`, a column profile `f(z)`, or a
 # horizontally varying profile `f(x, y, z)` (the 3D reference path) evaluated at the origin.
 @inline surface_value(θ::Number) = θ
-@inline surface_value(::Nothing) = nothing
-surface_value(f::AbstractField) = @allowscalar f[1, 1, 1]
 
 # `f(z)`, `f(φ, z)` on a `LatitudeLongitudeGrid`, or `f(x, y, z)`, all evaluated at the origin.
 function surface_value(f::Function)
@@ -607,6 +610,10 @@ function column_profile_at_coordinates(profile::Function, coordinates, z)
 end
 
 function columnwise_surface_pressure_field(grid, zˢ, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+    # The reduction is the identity at the datum, so the usual domain starting at z = 0 needs
+    # neither the per-column integration nor the arity resolution it would take to set it up.
+    zˢ == 0 && return surface_state_field(grid, convert(eltype(grid), p₀))
+
     function pressure_at_surface(coordinates...)
         θ_column = column_profile_at_coordinates(θᵣ, coordinates, zˢ)
         qᵛ_column = column_profile_at_coordinates(qᵛᵣ, coordinates, zˢ)
@@ -638,6 +645,20 @@ hydrostatic scale height ``p / (ρg)``. This provides a live surface pressure fr
 model state without assuming where the reference-pressure datum is located.
 """
 @inline surface_pressure_from_cell_center(p, ρ, Δz, g) = p * exp(g * Δz * ρ / (2 * p))
+
+"""
+$(TYPEDSIGNATURES)
+
+The same extrapolation, reading the pressure and density fields at `(i, j, k)`. Every consumer of
+"the live pressure at the bottom face" — the surface fluxes, the diagnostic hydrostatic pressure,
+and `PrescribedDynamics` — goes through this one method, so they cannot drift on which level or
+which half-cell factor they use.
+"""
+@inline function surface_pressure_from_cell_center(i, j, k, grid, p, ρ, g)
+    @inbounds pᵏ = p[i, j, k]
+    @inbounds ρᵏ = ρ[i, j, k]
+    return surface_pressure_from_cell_center(pᵏ, ρᵏ, Δzᶜᶜᶜ(i, j, k, grid), g)
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -1105,27 +1126,18 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
         needs_3d = _needs_3d_reference(potential_temperature) ||
                    _needs_3d_reference(vapor_mass_fraction)
 
-        # Reduce the datum to the bottom face along each reference column. A height-coordinate
-        # bottom is geometrically level, but its pressure is not horizontally uniform when θ or qᵛ
-        # varies horizontally above a uniform pressure datum at z = 0.
-        if needs_3d
-            pˢ_value = nothing
-            pˢ = columnwise_surface_pressure_field(grid, zˢ, p₀,
-                                                       potential_temperature, vapor_mass_fraction,
-                                                       pˢᵗ, constants)
-        else
-            pˢ_value = convert(FT, moist_hydrostatic_pressure(zˢ, p₀,
-                                                                 potential_temperature,
-                                                                 vapor_mass_fraction,
-                                                                 pˢᵗ, constants))
-            pˢ = surface_state_field(grid, pˢ_value)
-        end
-
         if needs_3d
             # 3D reference: per-column discrete-balance integration for
             # horizontally varying θ₀(x, y, z). Same kernel as the 1D path,
             # indexed by (i, j); dry case (qᵛ = ZeroField) and moist case
             # share a single code path.
+            #
+            # Reduce the datum to the bottom face along each reference column: a height-coordinate
+            # bottom is geometrically level, but its pressure is not horizontally uniform when θ or
+            # qᵛ varies horizontally above a uniform pressure datum at z = 0.
+            pˢ = columnwise_surface_pressure_field(grid, zˢ, p₀, potential_temperature,
+                                                   vapor_mass_fraction, pˢᵗ, constants)
+
             θᵣ = CenterField(grid)
             set!(θᵣ, potential_temperature)
             fill_halo_regions!(θᵣ)
@@ -1150,6 +1162,12 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
             # kernel handles both dry (qᵛ = ZeroField) and moist cases via the
             # moist gas constants Rᵐ, cᵖᵐ, κᵐ — these reduce to Rᵈ, cᵖᵈ, κ
             # when qᵛ = 0.
+            #
+            # The bottom face is a single level, so one reduction of the datum serves every column.
+            pˢ_value = convert(FT, moist_hydrostatic_pressure(zˢ, p₀, potential_temperature,
+                                                              vapor_mass_fraction, pˢᵗ, constants))
+            pˢ = surface_state_field(grid, pˢ_value)
+
             loc = (nothing, nothing, Center())
             θᵣ = Field{Nothing, Nothing, Center}(grid)
             set!(θᵣ, potential_temperature)

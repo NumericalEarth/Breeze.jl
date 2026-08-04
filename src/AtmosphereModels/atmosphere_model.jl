@@ -177,20 +177,12 @@ function AtmosphereModel(grid;
     all_names = field_names(dynamics, formulation, microphysics, tracers)
     field_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
-    # Create temporary microphysical fields for BC materialization (using pre-regularized BCs)
-    preliminary_microphysical_fields = materialize_microphysical_fields(microphysics, grid, field_boundary_conditions)
-
     # Materialize atmosphere-specific boundary conditions (fill in the surface-layer θᵥ
     # diagnostic, thermodynamic constants, convert ρe → ρθ for potential temperature
     # formulations). Surface fluxes diagnose their pressure, density and θᵥ from the live model
     # fields at evaluation time, so nothing about the model state is captured here.
-    p₀ = base_pressure(dynamics)
-    # Pass preliminary microphysical fields for BC materialization; the qᵛ field within
-    # provides the specific_prognostic_moisture reference the surface-layer θᵥ needs.
-    specific_moisture_field = haskey(preliminary_microphysical_fields, :qᵛ) ? preliminary_microphysical_fields.qᵛ : CenterField(grid)
     boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                           dynamics, microphysics, p₀, thermodynamic_constants,
-                                                                           preliminary_microphysical_fields, specific_moisture_field, temperature)
+                                                                           dynamics, microphysics, thermodynamic_constants)
 
     # Re-regularize after materialization (materialization may modify boundary conditions)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)

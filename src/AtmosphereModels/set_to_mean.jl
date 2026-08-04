@@ -2,7 +2,7 @@ using ..Thermodynamics: ReferenceState, ExnerReferenceState, compute_hydrostatic
                         _compute_exner_reference!, _compute_exner_reference_3d!,
                         bottom_face_height, constant_moist_hydrostatic_pressure,
                         is_column_reference, moist_hydrostatic_pressure, dry_air_gas_constant,
-                        surface_reference_density, vapor_gas_constant
+                        set_surface_state!, surface_reference_density, vapor_gas_constant
 using Oceananigans: CenterField
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Architectures: architecture
@@ -184,20 +184,17 @@ function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, c
     pˢ = convert(FT, moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ,
                                                 ref.standard_pressure, constants))
 
-    set!(ref.surface_pressure, pˢ)
-    fill_halo_regions!(ref.surface_pressure)
+    set_surface_state!(ref.surface_pressure, pˢ)
     update_exner_surface_density!(ref, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
     return nothing
 end
 
-# The 3D form carries no bottom boundary value on `density`, so there is nothing to update.
-update_exner_surface_density!(ref::ExnerReferenceState{<:Any, <:Any, Nothing},
-                                  pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ) = nothing
-
 function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    # The 3D and terrain-following forms carry no bottom boundary value on `density`, so there is
+    # nothing to keep in sync.
+    isnothing(ref.surface_density) && return nothing
     ρˢ = surface_reference_density(pˢ, θˢ, qᵛˢ, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-    set!(ref.surface_density, convert(eltype(ref), ρˢ))
-    fill_halo_regions!(ref.surface_density)
+    set_surface_state!(ref.surface_density, convert(eltype(ref), ρˢ))
     return nothing
 end
 
@@ -237,17 +234,14 @@ function set_to_mean!(ref::ExnerReferenceState, model)
 
     update_exner_surface_state!(ref, θ̄, q̄ᵛ, grid, constants)
 
-    if is_column_reference(ref)
-        launch!(arch, grid, tuple(1), _compute_exner_reference!,
-                ref.exner_function, ref.pressure, ref.density, θ̄, q̄ᵛ, grid, Nz,
-                ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
-    else
-        # A 3D reference on a height-coordinate grid: the mean profile is horizontally uniform, but
-        # the fields are per-column, so integrate each column from the (uniform) bottom-face anchor.
-        launch!(arch, grid, :xy, _compute_exner_reference_3d!,
-                ref.exner_function, ref.pressure, ref.density, θ̄, q̄ᵛ, grid, Nz,
-                ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
-    end
+    # A 3D reference on a height-coordinate grid has a horizontally uniform mean profile but
+    # per-column fields, so each column is integrated from the (uniform) bottom-face anchor.
+    kernel!, worksize = is_column_reference(ref) ? (_compute_exner_reference!, tuple(1)) :
+                                                  (_compute_exner_reference_3d!, :xy)
+
+    launch!(arch, grid, worksize, kernel!,
+            ref.exner_function, ref.pressure, ref.density, θ̄, q̄ᵛ, grid, Nz,
+            ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
 
     fill_halo_regions!(ref.exner_function)
     fill_halo_regions!(ref.pressure)

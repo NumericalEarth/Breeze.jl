@@ -185,29 +185,18 @@ end
 # A user-prescribed anchor is normalized to a 2D field, so `surface_pressure(dynamics)` reports the
 # same type however the dynamics was built — including when it came from a `ReferenceState`, whose
 # own `surface_pressure` is passed straight through.
-materialize_surface_pressure(surface_pressure::AbstractField, density, p₀, g, grid) = surface_pressure
+materialize_surface_pressure(surface_pressure::AbstractField, grid) = surface_pressure
+materialize_surface_pressure(surface_pressure, grid) = surface_state_field(grid, surface_pressure)
 
-materialize_surface_pressure(surface_pressure, density, p₀, g, grid) =
-    surface_state_field(grid, surface_pressure)
-
-function surface_pressure_from_base(density, p₀, g, grid)
+# Allocate a bottom-face field and fill it from `kernel!`. The halo fill is what lets the result be
+# read by the column kernels and aliased into a boundary condition, so it belongs here rather than
+# at each call site.
+function surface_pressure_field(grid, kernel!, args...)
     pˢ = Field{Center, Center, Nothing}(grid)
-    arch = grid.architecture
-    launch!(arch, grid, :xy, _surface_pressure_from_base!, pˢ, density, p₀, g, grid)
+    launch!(grid.architecture, grid, :xy, kernel!, pˢ, args..., grid)
     fill_halo_regions!(pˢ)
     return pˢ
 end
-
-function surface_pressure_from_pressure_field(pressure, density, g, grid)
-    pˢ = Field{Center, Center, Nothing}(grid)
-    arch = grid.architecture
-    launch!(arch, grid, :xy, _surface_pressure_from_pressure_field!, pˢ, pressure, density, g, grid)
-    fill_halo_regions!(pˢ)
-    return pˢ
-end
-
-fill_pressure_halos!(pressure::Field) = fill_halo_regions!(pressure)
-fill_pressure_halos!(pressure::AbstractField) = nothing
 
 # A pressure field we allocate carries the derived bottom-face pressure as its bottom boundary
 # value; one the user supplied is used exactly as given, boundary conditions included.
@@ -217,35 +206,45 @@ function pressure_field_with_surface_value(grid, pˢ)
     return CenterField(grid, boundary_conditions=p_bcs)
 end
 
-function materialize_pressure(pressure, surface_pressure, density, p₀, g, grid)
+# `materialize_pressure` dispatches on the pressure spec and returns `(pressure, bottom-face
+# pressure)`. Each method derives its own default anchor; a user-supplied `surface_pressure` always
+# wins over it.
+function materialize_pressure(::Nothing, surface_pressure, density, p₀, g, grid)
     ρ = unwrap_density(density)
-    arch = grid.architecture
+    pˢ = isnothing(surface_pressure) ?
+         surface_pressure_field(grid, _surface_pressure_from_base!, ρ, p₀, g) :
+         materialize_surface_pressure(surface_pressure, grid)
+    p = pressure_field_with_surface_value(grid, pˢ)
 
-    if isnothing(pressure)
-        pˢ = isnothing(surface_pressure) ? surface_pressure_from_base(ρ, p₀, g, grid) :
-                                          materialize_surface_pressure(surface_pressure, ρ, p₀, g, grid)
-        p = pressure_field_with_surface_value(grid, pˢ)
+    # Compute hydrostatic pressure: ∂p/∂z = -ρg
+    launch!(grid.architecture, grid, :xy, _hydrostatic_pressure!, p, ρ, pˢ, g, grid)
+    fill_halo_regions!(p)
+    return p, pˢ
+end
 
-        # Compute hydrostatic pressure: ∂p/∂z = -ρg
-        launch!(arch, grid, :xy, _hydrostatic_pressure!, p, ρ, pˢ, g, grid)
-    elseif pressure isa AbstractField
-        p = pressure
-        pˢ = isnothing(surface_pressure) ? surface_pressure_from_pressure_field(p, ρ, g, grid) :
-                                          materialize_surface_pressure(surface_pressure, ρ, p₀, g, grid)
-    else
-        # A number or function: fill a scratch field so the bottom-face pressure can be diagnosed
-        # from it, then build the real field carrying that value as its bottom boundary condition.
-        scratch = CenterField(grid)
-        set!(scratch, pressure)
-        fill_halo_regions!(scratch)
+# A field the user supplied is used exactly as given, halos and boundary conditions included.
+function materialize_pressure(pressure::AbstractField, surface_pressure, density, p₀, g, grid)
+    pˢ = isnothing(surface_pressure) ?
+         surface_pressure_field(grid, _surface_pressure_from_pressure_field!,
+                                pressure, unwrap_density(density), g) :
+         materialize_surface_pressure(surface_pressure, grid)
+    return pressure, pˢ
+end
 
-        pˢ = isnothing(surface_pressure) ? surface_pressure_from_pressure_field(scratch, ρ, g, grid) :
-                                          materialize_surface_pressure(surface_pressure, ρ, p₀, g, grid)
-        p = pressure_field_with_surface_value(grid, pˢ)
-        set!(p, pressure)
-    end
+# A number or function: fill a scratch field so the bottom-face pressure can be diagnosed from it,
+# then build the real field carrying that value as its bottom boundary condition.
+function materialize_pressure(pressure, surface_pressure, density, p₀, g, grid)
+    scratch = CenterField(grid)
+    set!(scratch, pressure)
+    fill_halo_regions!(scratch)
 
-    fill_pressure_halos!(p)
+    pˢ = isnothing(surface_pressure) ?
+         surface_pressure_field(grid, _surface_pressure_from_pressure_field!,
+                                scratch, unwrap_density(density), g) :
+         materialize_surface_pressure(surface_pressure, grid)
+    p = pressure_field_with_surface_value(grid, pˢ)
+    set!(p, pressure)
+    fill_halo_regions!(p)
     return p, pˢ
 end
 
@@ -257,12 +256,7 @@ end
 
 @kernel function _surface_pressure_from_pressure_field!(pˢ, p, ρ, g, grid)
     i, j = @index(Global, NTuple)
-    @inbounds begin
-        p¹ = p[i, j, 1]
-        ρ¹ = ρ[i, j, 1]
-    end
-    Δz = Δzᶜᶜᶜ(i, j, 1, grid)
-    @inbounds pˢ[i, j, 1] = surface_pressure_from_cell_center(p¹, ρ¹, Δz, g)
+    @inbounds pˢ[i, j, 1] = surface_pressure_from_cell_center(i, j, 1, grid, p, ρ, g)
 end
 
 @kernel function _hydrostatic_pressure!(p, ρ, pˢ, g, grid)

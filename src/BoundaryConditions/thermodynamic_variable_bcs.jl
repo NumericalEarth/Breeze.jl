@@ -317,8 +317,7 @@ AtmosphereModels.adiabatic_scalar_bcs(fbcs::FieldBoundaryConditions) =
 const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
-                                                   side, loc, grid, dynamics, microphysics, base_pressure, constants,
-                                                   microphysical_fields, specific_prognostic_moisture, temperature)
+                                                   side, loc, grid, dynamics, microphysics, constants)
     ef = bc.condition
     density = dynamics_density(dynamics)
     new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, density)
@@ -329,8 +328,7 @@ end
 const UnregularizedThetaFluxBC = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
-                                                   side, loc, grid, dynamics, microphysics, base_pressure, constants,
-                                                   microphysical_fields, specific_prognostic_moisture, temperature)
+                                                   side, loc, grid, dynamics, microphysics, constants)
     tf = bc.condition
     density = dynamics_density(dynamics)
     new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, side, microphysics, constants, density)

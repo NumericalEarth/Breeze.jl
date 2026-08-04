@@ -19,8 +19,7 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
         # is the terrain surface and the two differ by O(ρgh) per column. Diagnose it from the live
         # state by extrapolating the first cell center down half a cell, which is independent of
         # where the reference-pressure datum sits.
-        p_interface_bottom = surface_pressure_from_cell_center(p[i, j, 1], ρ[i, j, 1],
-                                                              Δzᶜᶜᶜ(i, j, 1, grid), g)
+        p_interface_bottom = surface_pressure_from_cell_center(i, j, 1, grid, p, ρ, g)
 
         # Compute cell-mean pressure and interface pressures in a single pass
         for k in 1:Nz
