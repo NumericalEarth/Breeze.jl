@@ -230,9 +230,9 @@ function base_pressure end
 
 Return the pressure of the reference atmosphere at the bottom face of each column — the ground —
 obtained by reducing the [`base_pressure`](@ref) datum to that height along the reference profile,
-as a 2D ``(Center, Center, Nothing)`` field. Horizontally uniform on a height-coordinate grid,
-whose bottom face is a single level; genuinely column-dependent on a terrain-following grid, where
-the bottom face is the terrain surface.
+as a 2D ``(Center, Center, Nothing)`` field. Horizontally uniform for a single-column reference on
+a height-coordinate grid; genuinely column-dependent when the reference thermodynamics varies
+horizontally or on a terrain-following grid, where the bottom face is the terrain surface.
 
 This is the anchor for a hydrostatic column integration, and what every consumer of "the pressure
 at the surface" over terrain wants. Reading it keeps a consumer consistent with the reference

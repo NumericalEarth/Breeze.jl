@@ -12,6 +12,7 @@ using Breeze.Thermodynamics:
     dry_air_gas_constant,
     hydrostatic_density,
     hydrostatic_pressure,
+    moist_hydrostatic_pressure,
     surface_pressure_value,
     surface_temperature_value,
     vapor_gas_constant,
@@ -834,6 +835,60 @@ end
         @test surface_pressure_value(isentropic) ≈ hydrostatic_pressure(FT(z_bottom), FT(p₀), FT(θ₀),
                                                                       FT(pˢᵗ), constants) rtol=1e-5
         @test surface_pressure_value(isentropic) < FT(p₀) - 10000
+
+        # A horizontally varying reference has a different hydrostatic reduction in each column,
+        # even though every column shares the same z = 0 pressure datum and bottom height.
+        horizontal_grid = RectilinearGrid(default_arch; size=(2, 2, Nz_raised),
+                                          x=(0, 100), y=(0, 100), z=(z_bottom, 6000),
+                                          topology=(Periodic, Periodic, Bounded))
+        Δx = FT(50)
+        Δy = FT(50)
+        θ³ᵈ(x, y, z) = FT(280) + FT(0.25) * x + FT(0.05) * y + FT(0.001) * z
+        three_dimensional = ExnerReferenceState(horizontal_grid, constants; base_pressure=p₀,
+                                                potential_temperature=θ³ᵈ,
+                                                standard_pressure=pˢᵗ)
+        pˢ³ᵈ = Array(interior(three_dimensional.surface_pressure))[:, :, 1]
+        pˢ³ᵈ_expected = [hydrostatic_pressure(FT(z_bottom), FT(p₀),
+                                                          z -> θ³ᵈ((i - FT(0.5)) * Δx,
+                                                                    (j - FT(0.5)) * Δy, z),
+                                                          FT(pˢᵗ), constants)
+                            for i in 1:2, j in 1:2]
+        @test pˢ³ᵈ ≈ pˢ³ᵈ_expected rtol=10sqrt(eps(FT))
+        @test maximum(pˢ³ᵈ) - minimum(pˢ³ᵈ) > FT(500)
+
+        # Horizontal moisture variation alone must also select the per-column reference path.
+        qᵛ³ᵈ(x, y, z) = FT(0.004) + FT(2e-5) * x + FT(5e-6) * y * exp(-z / FT(3000))
+        moist_three_dimensional = ExnerReferenceState(horizontal_grid, constants; base_pressure=p₀,
+                                                      potential_temperature=FT(300),
+                                                      vapor_mass_fraction=qᵛ³ᵈ,
+                                                      standard_pressure=pˢᵗ)
+        @test size(moist_three_dimensional.pressure)[1:2] == (2, 2)
+        pˢ_moist_3d = Array(interior(moist_three_dimensional.surface_pressure))[:, :, 1]
+        for (i, j) in ((1, 1), (2, 2))
+            x = (i - FT(0.5)) * Δx
+            y = (j - FT(0.5)) * Δy
+            qᵛ_column(z) = qᵛ³ᵈ(x, y, z)
+            expected = moist_hydrostatic_pressure(FT(z_bottom), FT(p₀), FT(300), qᵛ_column,
+                                                    FT(pˢᵗ), constants)
+            @test pˢ_moist_3d[i, j] ≈ expected rtol=10sqrt(eps(FT))
+        end
+
+        # The density boundary value must use qᵛ at the bottom face, not at the first center.
+        qᵛ_profile(z) = FT(0.025) * exp(-z / FT(3000))
+        moist_column = ExnerReferenceState(raised_grid, constants; base_pressure=p₀,
+                                           potential_temperature=FT(300),
+                                           vapor_mass_fraction=qᵛ_profile,
+                                           standard_pressure=pˢᵗ)
+        pˢ_moist = surface_pressure_value(moist_column)
+        qᵛ_surface = qᵛ_profile(FT(z_bottom))
+        Rᵐ_surface = (1 - qᵛ_surface) * Rᵈ + qᵛ_surface * Rᵛ
+        cᵖᵐ_surface = (1 - qᵛ_surface) * constants.dry_air.heat_capacity +
+                      qᵛ_surface * constants.vapor.heat_capacity
+        κᵐ_surface = Rᵐ_surface / cᵖᵐ_surface
+        Πˢ_moist = (pˢ_moist / FT(pˢᵗ))^κᵐ_surface
+        ρˢ_moist_expected = pˢ_moist / (Rᵐ_surface * FT(300) * Πˢ_moist)
+        ρˢ_moist = @allowscalar moist_column.surface_density[1, 1, 1]
+        @test ρˢ_moist ≈ ρˢ_moist_expected rtol=50eps(FT)
 
         # Isothermal: the analytic isothermal profile from the same datum. The two constructors
         # of `ExnerReferenceState` must agree on where `base_pressure` lives, which they do

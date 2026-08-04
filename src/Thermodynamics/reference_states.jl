@@ -272,9 +272,9 @@ reject_renamed_surface_pressure(surface_pressure) =
 """
 $(TYPEDSIGNATURES)
 
-The horizontally uniform bottom-face pressure of `ref` as a scalar. Only valid for a reference
-whose bottom face is a single level (any height-coordinate grid); over terrain the bottom-face
-pressure varies by column and `ref.surface_pressure` must be read as a field.
+The bottom-face pressure of `ref` as a scalar. Only valid for a reference whose bottom-face
+pressure is horizontally uniform. For a horizontally varying 3D reference or over terrain,
+`ref.surface_pressure` must be read as a field.
 """
 surface_pressure_value(ref) = @allowscalar ref.surface_pressure[1, 1, 1]
 
@@ -588,6 +588,34 @@ function moist_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
     return converged_hydrostatic_pressure(z, p₀, dpdz)
 end
 
+# Restrict a horizontally varying reference profile to one vertical column. The coordinate tuple
+# contains every active horizontal coordinate supplied by `set!`. The first branch handles
+# Cartesian f(x, y, z) and two-dimensional f(x, z) profiles. The second handles zonally symmetric
+# f(φ, z) profiles on a three-dimensional LatitudeLongitudeGrid. A plain f(z) remains valid when
+# only the other reference profile varies horizontally.
+column_profile_at_coordinates(value::Number, coordinates, z) = value
+column_profile_at_coordinates(::Nothing, coordinates, z) = nothing
+
+function column_profile_at_coordinates(profile::Function, coordinates, z)
+    applicable(profile, coordinates..., z) && return height -> profile(coordinates..., height)
+    length(coordinates) > 1 && applicable(profile, last(coordinates), z) &&
+        return height -> profile(last(coordinates), height)
+    applicable(profile, z) && return height -> profile(height)
+
+    throw(ArgumentError("A horizontally varying reference profile cannot be evaluated along " *
+                        "a column at horizontal coordinates $coordinates."))
+end
+
+function columnwise_surface_pressure_field(grid, zˢ, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+    function pressure_at_surface(coordinates...)
+        θ_column = column_profile_at_coordinates(θᵣ, coordinates, zˢ)
+        qᵛ_column = column_profile_at_coordinates(qᵛᵣ, coordinates, zˢ)
+        return moist_hydrostatic_pressure(zˢ, p₀, θ_column, qᵛ_column, pˢᵗ, constants)
+    end
+
+    return surface_state_field(grid, pressure_at_surface)
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -596,9 +624,9 @@ reference state is anchored. Zero for the usual domain that starts at the ground
 """
 bottom_face_height(grid) = @allowscalar znode(1, 1, 1, grid, Center(), Center(), Face())
 
-# The anchor pressure for a column integration is either horizontally uniform (a height-coordinate
-# grid, whose bottom face is a single level) or a 2D field (a terrain-following grid, whose bottom
-# face is the terrain surface). Both are read the same way inside the column kernels.
+# The anchor pressure for a column integration is stored either as a scalar or as a 2D field. The
+# field may vary because the reference thermodynamics varies horizontally or because the bottom
+# face is terrain. Both representations are read the same way inside the column kernels.
 @inline column_surface_pressure(pˢ::Number, i, j) = pˢ
 @inline column_surface_pressure(pˢ, i, j) = @inbounds pˢ[i, j, 1]
 
@@ -1073,19 +1101,25 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
                 πᵣ, pᵣ, ρᵣ, θᵣ, grid, Nz, p₀, pˢᵗ, κ, Rᵈ, g, T₀)
     else
         # ── Isentropic base state (constant or z-dependent θ₀) ──
-        # Detect whether θ₀ depends on horizontal coordinates (3D reference).
-        needs_3d = _needs_3d_reference(potential_temperature)
+        # Either thermodynamic profile can make the reference horizontally varying.
+        needs_3d = _needs_3d_reference(potential_temperature) ||
+                   _needs_3d_reference(vapor_mass_fraction)
 
-        # Reduce the datum to the bottom face along the reference profile. A horizontally varying
-        # θ₀(x, y, z) or qᵛ(x, y, z) has no single column profile to integrate along, so *both* are
-        # collapsed to their value at the origin; that is exact whenever the bottom face is at
-        # z = 0, which is the only configuration a 3D reference is used in. Collapsing the moisture
-        # too is what keeps a raised 3D reference working at all: `evaluate_profile` inside the
-        # integration only ever calls a profile as `f(z)`.
-        θ_column = needs_3d ? surface_value(potential_temperature) : potential_temperature
-        qᵛ_column = needs_3d ? surface_value(vapor_mass_fraction) : vapor_mass_fraction
-        pˢ_value = convert(FT, moist_hydrostatic_pressure(zˢ, p₀, θ_column, qᵛ_column, pˢᵗ, constants))
-        pˢ = surface_state_field(grid, pˢ_value)
+        # Reduce the datum to the bottom face along each reference column. A height-coordinate
+        # bottom is geometrically level, but its pressure is not horizontally uniform when θ or qᵛ
+        # varies horizontally above a uniform pressure datum at z = 0.
+        if needs_3d
+            pˢ_value = nothing
+            pˢ = columnwise_surface_pressure_field(grid, zˢ, p₀,
+                                                       potential_temperature, vapor_mass_fraction,
+                                                       pˢᵗ, constants)
+        else
+            pˢ_value = convert(FT, moist_hydrostatic_pressure(zˢ, p₀,
+                                                                 potential_temperature,
+                                                                 vapor_mass_fraction,
+                                                                 pˢᵗ, constants))
+            pˢ = surface_state_field(grid, pˢ_value)
+        end
 
         if needs_3d
             # 3D reference: per-column discrete-balance integration for
@@ -1126,7 +1160,11 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
             θˢ = convert(FT, evaluate_profile(potential_temperature, zˢ))
 
             qᵛᵣ = reference_moisture_field(vapor_mass_fraction, grid)
-            qᵛ_surface = @allowscalar qᵛᵣ[1, 1, 1]
+            qᵛ_surface = if isnothing(vapor_mass_fraction)
+                zero(FT)
+            else
+                convert(FT, evaluate_profile(vapor_mass_fraction, zˢ))
+            end
             ρˢ = surface_state_field(grid, surface_reference_density(pˢ_value, θˢ, qᵛ_surface, pˢᵗ,
                                                                     Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ))
 
@@ -1160,14 +1198,15 @@ $(TYPEDSIGNATURES)
 
 Whether `ref` stores a single reference column broadcast to every `(i, j)`, as opposed to genuinely
 column-dependent 3D fields. Selects between the single-column and per-column integration kernels on
-a reset, and cannot be inferred from `surface_pressure`, which is horizontally uniform on every
-height-coordinate grid regardless of how the reference fields themselves are stored.
+a reset. The field dimensions provide this information directly without relying on the values in
+`surface_pressure`.
 """
 is_column_reference(ref) = size(ref.pressure, 1) == 1 && size(ref.pressure, 2) == 1
 
 # Detect if θ₀ needs a 3D (per-column) reference.
 # Functions with ≥2 methods or ≥2 arguments → 3D.
 _needs_3d_reference(::Number) = false
+_needs_3d_reference(::Nothing) = false
 _needs_3d_reference(f::Function) = _nargs(f) > 1
 _nargs(f) = maximum(m.nargs for m in methods(f)) - 1  # subtract 1 for the function itself
 

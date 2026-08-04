@@ -5,7 +5,7 @@ using Breeze
 using Breeze.Thermodynamics: dry_air_gas_constant, adiabatic_hydrostatic_pressure,
                              mixture_gas_constant, MoistureMassFractions,
                              surface_pressure_from_cell_center
-using Breeze.AtmosphereModels: standard_pressure, total_density, total_pressure
+using Breeze.AtmosphereModels: dynamics_pressure, standard_pressure, total_density
 using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using GPUArraysCore: @allowscalar
@@ -256,7 +256,7 @@ end
     # that extrapolation, so the anchor and the column integration are checked separately, each to
     # the accuracy it actually has.
     Δz₁ = @allowscalar Δzᶜᶜᶜ(1, 1, 1, grid)
-    p¹ = @allowscalar total_pressure(model.dynamics)[1, 1, 1]
+    p¹ = @allowscalar dynamics_pressure(model.dynamics)[1, 1, 1]
     ρ¹ = @allowscalar total_density(model.dynamics)[1, 1, 1]
     pˢ = surface_pressure_from_cell_center(p¹, ρ¹, Δz₁, g)
     @test pˢ ≈ p₀ rtol=1e-3
@@ -277,6 +277,13 @@ end
     end
 
     @test ph ≈ p_expected
+
+    # The anelastic pressure solve determines only the gradient of its kinematic pressure
+    # anomaly. A spatially uniform offset is therefore a gauge change and must not alter a
+    # thermodynamic pressure diagnostic.
+    set!(model.dynamics.pressure_anomaly, FT(1000))
+    ph_with_shifted_gauge = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
+    @test ph_with_shifted_gauge ≈ ph
 end
 
 @testset "Azimuthal-mean diagnostic [$(FT)]" for FT in test_float_types()

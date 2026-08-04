@@ -42,7 +42,7 @@ function compute_hydrostatic_pressure!(ph, model)
     arch = grid.architecture
 
     launch!(arch, grid, :xy, _compute_hydrostatic_pressure!,
-            ph, grid, total_pressure(model.dynamics), total_density(model.dynamics),
+            ph, grid, dynamics_pressure(model.dynamics), total_density(model.dynamics),
             model.temperature, model.thermodynamic_constants)
 
     fill_halo_regions!(ph)
