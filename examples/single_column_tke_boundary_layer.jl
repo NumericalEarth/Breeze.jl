@@ -266,10 +266,10 @@ function stress_depth(model)
     Nz = size(model.grid, 3)
     u = vec(Array(view(model.velocities.u, 1, 1, :)))
     v = vec(Array(view(model.velocities.v, 1, 1, :)))
-    ν = vec(Array(view(model.closure_fields.νₑ, 1, 1, :)))
+    ν = vec(Array(view(model.closure_fields.Kᵘ, 1, 1, :)))
     zc = Array(znodes(model.formulation.potential_temperature))
 
-    ## The stress is a vector: τ = νₑ |∂z 𝐔| at faces, where νₑ lives. Using the gradient of the
+    ## The stress is a vector: τ = Kᵘ |∂z 𝐔| at faces, where Kᵘ lives. Using the gradient of the
     ## wind *speed* instead would vanish at the low-level jet, where |𝐔| peaks — but the stress
     ## does not vanish there, because the wind is still turning with height.
     ∂zᶠ(a) = [k == 1 ? 0.0 : (a[k] - a[k-1]) / (zc[k] - zc[k-1]) for k in 1:Nz]
@@ -304,7 +304,7 @@ depths = ("stable" => stress_depth, "neutral" => stress_depth, "convective" => i
 """Kinematic heat flux ``-K ∂_z θ``, at faces where ``K`` lives."""
 function heat_flux(model)
     θ = vec(Array(view(model.formulation.potential_temperature, 1, 1, :)))
-    κ = vec(Array(view(model.closure_fields.κₑ, 1, 1, :)))
+    κ = vec(Array(view(model.closure_fields.Kᶜ, 1, 1, :)))
     z = Array(znodes(model.formulation.potential_temperature))
     N = length(θ)
     ∂zθᶠ = [k == 1 ? 0.0 : (θ[k] - θ[k-1]) / (z[k] - z[k-1]) for k in 1:N]
@@ -367,8 +367,8 @@ for ((name, simulation), (_, settings), (_, depth), color) in zip(simulations, r
     lines!(ax_U, vec(Array(view(U, 1, 1, :))), Array(znodes(U)) ./ zᵢ; color)
     lines!(ax_e, vec(Array(view(model.closure_fields.e, 1, 1, :))),
            Array(znodes(model.closure_fields.e)) ./ zᵢ; color)
-    K = vec(Array(view(model.closure_fields.κₑ, 1, 1, :)))
-    zᴷ = Array(znodes(model.closure_fields.κₑ))
+    K = vec(Array(view(model.closure_fields.Kᶜ, 1, 1, :)))
+    zᴷ = Array(znodes(model.closure_fields.Kᶜ))
     kᵐᵃˣ = argmax(K)
     push!(diffusivity_labels,
           "K(z = $(round(zᴷ[kᵐᵃˣ] / zᵢ, digits = 2)) zᵢ) = $(round(K[kᵐᵃˣ], digits = 1)) m² s⁻¹")

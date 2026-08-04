@@ -1,7 +1,7 @@
 #####
 ##### `TKEBasedTurbulenceClosure`: an eddy-diffusivity-only, prognostic-TKE closure
 #####
-##### ν = Cᴷ ℓ √e ,  K = ν / Pr ,  ε = Cᵋ e^{3/2} / ℓ
+##### Kᵘ = Cᴷ ℓ √e ,  Kᶜ = Kᵘ / Pr ,  Kᵉ = Cq Kᵘ ,  ε = Cᵋ e^{3/2} / ℓ
 ##### ∂e/∂t = P + B - ε + transport ,  P = ν S² ,  B = -K N²
 #####
 ##### Transport is the ordinary scalar machinery acting on the `:ρtke` tracer; the local source and
@@ -256,11 +256,11 @@ Fields
 $(TYPEDFIELDS)
 """
 struct TKEClosureFields{V, C, T, KC}
-    "eddy viscosity ``ν``, at (Center, Center, Face)"
-    νₑ :: V
-    "eddy diffusivity ``K = ν/\\mathrm{Pr}``, at (Center, Center, Face)"
-    κₑ :: V
-    "master mixing length ``ℓ``, at (Center, Center, Face), where it closes ``ν``"
+    "eddy diffusivity for momentum, ``Kᵘ = Cᴷ ℓ \\sqrt{e}``, at (Center, Center, Face)"
+    Kᵘ :: V
+    "eddy diffusivity for scalars, ``Kᶜ = Kᵘ/\\mathrm{Pr}``, at (Center, Center, Face)"
+    Kᶜ :: V
+    "master mixing length ``ℓ``, at (Center, Center, Face), where it closes ``Kᵘ``"
     ℓ :: V
     "master mixing length at (Center, Center, Center), where it closes ``ε``"
     ℓᶜ :: C
@@ -272,36 +272,36 @@ struct TKEClosureFields{V, C, T, KC}
     u★² :: T
     "surface buoyancy flux ``\\langle w'b' \\rangle``, one value per column"
     Jᵇ :: T
-    "diffusivity for the TKE tracer itself, ``C^q ν``"
-    νₑᵗ :: V
+    "eddy diffusivity for TKE, ``Kᵉ = C^q Kᵘ``, at (Center, Center, Face)"
+    Kᵉ :: V
     "per-tracer diffusivity lookup, indexed by tracer name"
     tupled_tracer_diffusivities :: KC
 end
 
 Adapt.adapt_structure(to, fields::TKEClosureFields) =
-    TKEClosureFields(adapt(to, fields.νₑ),
-                     adapt(to, fields.κₑ),
+    TKEClosureFields(adapt(to, fields.Kᵘ),
+                     adapt(to, fields.Kᶜ),
                      adapt(to, fields.ℓ),
                      adapt(to, fields.ℓᶜ),
                      adapt(to, fields.e),
                      adapt(to, fields.ℓᵗ),
                      adapt(to, fields.u★²),
                      adapt(to, fields.Jᵇ),
-                     adapt(to, fields.νₑᵗ),
+                     adapt(to, fields.Kᵉ),
                      adapt(to, fields.tupled_tracer_diffusivities))
 
 BoundaryConditions.fill_halo_regions!(fields::TKEClosureFields, args...; kw...) =
-    fill_halo_regions!((fields.νₑ, fields.κₑ, fields.νₑᵗ, fields.ℓ, fields.ℓᶜ, fields.e), args...; kw...)
+    fill_halo_regions!((fields.Kᵘ, fields.Kᶜ, fields.Kᵉ, fields.ℓ, fields.ℓᶜ, fields.e), args...; kw...)
 
 function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, tracer_names, bcs,
                                                       closure::FlavorOfTKEClosure)
     face_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()))
-    default_bcs = (νₑ = face_bcs, κₑ = face_bcs, νₑᵗ = face_bcs, ℓ = face_bcs)
+    default_bcs = (Kᵘ = face_bcs, Kᶜ = face_bcs, Kᵉ = face_bcs, ℓ = face_bcs)
     bcs = merge(default_bcs, bcs)
 
-    νₑ = ZFaceField(grid, boundary_conditions=bcs.νₑ)
-    κₑ = ZFaceField(grid, boundary_conditions=bcs.κₑ)
-    νₑᵗ = ZFaceField(grid, boundary_conditions=bcs.νₑᵗ)
+    Kᵘ = ZFaceField(grid, boundary_conditions=bcs.Kᵘ)
+    Kᶜ = ZFaceField(grid, boundary_conditions=bcs.Kᶜ)
+    Kᵉ = ZFaceField(grid, boundary_conditions=bcs.Kᵉ)
     ℓ  = ZFaceField(grid, boundary_conditions=bcs.ℓ)
     ℓᶜ = CenterField(grid)
     e  = CenterField(grid)
@@ -311,15 +311,15 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
 
     # Indexed by the `Val(id)` the model hands to `diffusivity`. TKE is transported with the eddy
     # viscosity, i.e. a turbulent Schmidt number of one.
-    tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? νₑᵗ : κₑ for name in tracer_names)
+    tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
 
-    return TKEClosureFields(νₑ, κₑ, ℓ, ℓᶜ, e, ℓᵗ, u★², Jᵇ, νₑᵗ, tracer_diffusivities)
+    return TKEClosureFields(Kᵘ, Kᶜ, ℓ, ℓᶜ, e, ℓᵗ, u★², Jᵇ, Kᵉ, tracer_diffusivities)
 end
 
 @inline Oceananigans.TurbulenceClosures.viscosity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
 @inline Oceananigans.TurbulenceClosures.diffusivity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
 
-@inline Oceananigans.TurbulenceClosures.viscosity(::FlavorOfTKEClosure, fields) = fields.νₑ
+@inline Oceananigans.TurbulenceClosures.viscosity(::FlavorOfTKEClosure, fields) = fields.Kᵘ
 
 @inline Oceananigans.TurbulenceClosures.diffusivity(::FlavorOfTKEClosure, fields, ::Val{id}) where id =
     fields.tupled_tracer_diffusivities[id]
@@ -432,7 +432,7 @@ end
     state = column_state(closure_fields)
     ℓ = mixing_lengthᶜᶜᶠ(i, j, k, grid, closure_ij.mixing_length, q, N², state)
 
-    ν = closure_ij.Cᴷ * ℓ * q★
+    Kᵘ = closure_ij.Cᴷ * ℓ * q★
 
     # Ri = N²/S² is unbounded where the shear vanishes. Pr saturates in that limit, so clamping Ri
     # to a large value rather than dividing by zero gives the right answer and no NaN.
@@ -450,11 +450,11 @@ end
     FT = eltype(grid)
     @inbounds begin
         closure_fields.ℓ[i, j, k]  = mask_diffusivity(i, j, k, grid, FT(ℓ))
-        closure_fields.νₑ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(ν))
-        # `K` follows from the capped `ν`; it is not capped independently, so that `Pr = ν/K` is
-        # exactly the value `turbulent_prandtl_number` returned even where the cap binds.
-        closure_fields.κₑ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(ν / Pr))
-        closure_fields.νₑᵗ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(closure_ij.Cq * ν))
+        closure_fields.Kᵘ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᵘ))
+        # `Kᶜ` follows from the capped `Kᵘ`; it is not capped independently, so that `Pr = Kᵘ/Kᶜ`
+        # is exactly what `turbulent_prandtl_number` returned even where the cap binds.
+        closure_fields.Kᶜ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᵘ / Pr))
+        closure_fields.Kᵉ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(closure_ij.Cq * Kᵘ))
         closure_fields.ℓᶜ[i, j, k] = FT(ℓᶜ)
     end
 end
@@ -483,7 +483,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
 
     # ℓ may depend on the surface buoyancy flux, so it must be current before the pointwise pass.
     launch!(arch, grid, :xy, _compute_surface_buoyancy_flux!,
-            closure_fields.Jᵇ, grid, closure_fields.κₑ, buoyancy, tracers)
+            closure_fields.Jᵇ, grid, closure_fields.Kᶜ, buoyancy, tracers)
 
     launch!(arch, grid, parameters, _compute_tke_closure_fields!,
             closure_fields, grid, closure, model.velocities, tracers, buoyancy)
@@ -503,16 +503,16 @@ $(TYPEDSIGNATURES)
 
 Shear production ``ν S²`` at (Center, Center, Face).
 """
-@inline shear_productionᶜᶜᶠ(i, j, k, grid, νₑ, u, v) =
-    @inbounds νₑ[i, j, k] * shearᶜᶜᶠ(i, j, k, grid, u, v)
+@inline shear_productionᶜᶜᶠ(i, j, k, grid, Kᵘ, u, v) =
+    @inbounds Kᵘ[i, j, k] * shearᶜᶜᶠ(i, j, k, grid, u, v)
 
 """
 $(TYPEDSIGNATURES)
 
 Buoyancy production ``-K N²`` at (Center, Center, Face); negative in stable stratification.
 """
-@inline buoyancy_productionᶜᶜᶠ(i, j, k, grid, κₑ, buoyancy, tracers) =
-    @inbounds -κₑ[i, j, k] * ∂z_b(i, j, k, grid, buoyancy, tracers)
+@inline buoyancy_productionᶜᶜᶠ(i, j, k, grid, Kᶜ, buoyancy, tracers) =
+    @inbounds -Kᶜ[i, j, k] * ∂z_b(i, j, k, grid, buoyancy, tracers)
 
 """
 $(TYPEDSIGNATURES)
@@ -538,8 +538,8 @@ negative takes ``ν`` with it.
     ρᵢ = @inbounds ρ[i, j, k]
     e = @inbounds ρe[i, j, k] / ρᵢ
 
-    P = ℑbzᵃᵃᶜ(i, j, k, grid, shear_productionᶜᶜᶠ, closure_fields.νₑ, velocities.u, velocities.v)
-    B = ℑbzᵃᵃᶜ(i, j, k, grid, buoyancy_productionᶜᶜᶠ, closure_fields.κₑ, buoyancy, tracers)
+    P = ℑbzᵃᵃᶜ(i, j, k, grid, shear_productionᶜᶜᶠ, closure_fields.Kᵘ, velocities.u, velocities.v)
+    B = ℑbzᵃᵃᶜ(i, j, k, grid, buoyancy_productionᶜᶜᶠ, closure_fields.Kᶜ, buoyancy, tracers)
 
     e★ = max(closure_ij.eᵐⁱⁿ, e + Δt * (P + B))
 
@@ -585,12 +585,12 @@ stability-corrected surface length scale by roughly 1% — two orders of magnitu
 own error on that case, which is why the boundary condition is not worth plumbing through. The
 agreement is what a surface layer is: a constant-flux layer.
 
-It lags by one `update_state!`, since `κₑ` is computed in the pass that consumes this. On the first
-call `κₑ` is zero, so the column starts neutral.
+It lags by one `update_state!`, since `Kᶜ` is computed in the pass that consumes this. On the first
+call `Kᶜ` is zero, so the column starts neutral.
 """
-@kernel function _compute_surface_buoyancy_flux!(Jᵇ, grid, κₑ, buoyancy, tracers)
+@kernel function _compute_surface_buoyancy_flux!(Jᵇ, grid, Kᶜ, buoyancy, tracers)
     i, j = @index(Global, NTuple)
-    @inbounds Jᵇ[i, j, 1] = buoyancy_productionᶜᶜᶠ(i, j, 2, grid, κₑ, buoyancy, tracers)
+    @inbounds Jᵇ[i, j, 1] = buoyancy_productionᶜᶜᶠ(i, j, 2, grid, Kᶜ, buoyancy, tracers)
 end
 
 """

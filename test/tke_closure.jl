@@ -544,7 +544,7 @@ end
         @test TKE_NAME ∈ keys(model.tracers)
         @test TKE_NAME ∈ keys(prognostic_fields(model))
 
-        for name in (:νₑ, :κₑ, :ℓ, :e, :ℓᵗ, :u★²)
+        for name in (:Kᵘ, :Kᶜ, :ℓ, :e, :ℓᵗ, :u★²)
             @test name ∈ propertynames(model.closure_fields)
         end
 
@@ -568,8 +568,8 @@ end
         end
 
         e = Array(interior(model.closure_fields.e))
-        ν = Array(interior(model.closure_fields.νₑ))
-        κ = Array(interior(model.closure_fields.κₑ))
+        ν = Array(interior(model.closure_fields.Kᵘ))
+        κ = Array(interior(model.closure_fields.Kᶜ))
         ℓ = Array(interior(model.closure_fields.ℓ))
         ℓᶜ = Array(interior(model.closure_fields.ℓᶜ))
         ρe = Array(interior(model.tracers[TKE_NAME]))
@@ -623,8 +623,8 @@ end
             time_step!(model, 10)
         end
 
-        ν = Array(interior(model.closure_fields.νₑ))
-        κ = Array(interior(model.closure_fields.κₑ))
+        ν = Array(interior(model.closure_fields.Kᵘ))
+        κ = Array(interior(model.closure_fields.Kᶜ))
 
         @test maximum(ν) > 0                            # the column is actually mixing
         @test all(isapprox.(κ, ν ./ closure.Pr₀; rtol = sqrt(eps(FT))))
@@ -643,9 +643,9 @@ end
                 time_step!(model, 10)
             end
 
-            ν = Array(interior(model.closure_fields.νₑ))
-            νᵗ = Array(interior(model.closure_fields.νₑᵗ))
-            κ = Array(interior(model.closure_fields.κₑ))
+            ν = Array(interior(model.closure_fields.Kᵘ))
+            νᵗ = Array(interior(model.closure_fields.Kᵉ))
+            κ = Array(interior(model.closure_fields.Kᶜ))
 
             @test maximum(ν) > 0                        # the column is actually mixing
             @test all(isapprox.(νᵗ, Cq .* ν; rtol = sqrt(eps(FT))))
@@ -653,7 +653,7 @@ end
 
             # and the TKE tracer is the field that reads it
             @test model.closure_fields.tupled_tracer_diffusivities[TKE_NAME] ===
-                  model.closure_fields.νₑᵗ
+                  model.closure_fields.Kᵉ
         end
 
         # The shipped default is Deardorff's subgrid value, not the k-ε convention of one that
@@ -665,7 +665,7 @@ end
         for closure in (MY82Coefficients(), MYJCoefficients())
             model = AtmosphereModel(grid; closure)
             time_step!(model, 10)
-            @test all(isfinite, Array(interior(model.closure_fields.νₑ)))
+            @test all(isfinite, Array(interior(model.closure_fields.Kᵘ)))
         end
     end
 end
