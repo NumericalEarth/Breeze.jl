@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 #####
 ##### Consolidated unit tests for fast-running tests
 #####

@@ -486,7 +486,7 @@ Colorbar(fig[1:2, 5], hmqᶜˡ_anel)
 Colorbar(fig[1:2, 7], hmqʳ_anel)
 fig[0, :] = Label(fig, title_xy, fontsize=14, tellwidth=false)
 
-CairoMakie.record(fig, "splitting_supercell_xy_comparison.mp4", 1:Nt_xy, framerate=10) do nn
+CairoMakie.record(fig, "splitting_supercell_xy_comparison.mp4", 1:Nt_xy; framerate = 10, compression = 23) do nn
     n_xy[] = nn
 end
 nothing #hide
@@ -535,7 +535,7 @@ Colorbar(fig[1:2, 3], hmw_anel_xz)
 Colorbar(fig[1:2, 5], hmθ_anel_xz)
 fig[0, :] = Label(fig, title_xz, fontsize=14, tellwidth=false)
 
-CairoMakie.record(fig, "splitting_supercell_xz_comparison.mp4", 1:Nt_xz, framerate=10) do nn
+CairoMakie.record(fig, "splitting_supercell_xz_comparison.mp4", 1:Nt_xz; framerate = 10, compression = 23) do nn
     n_xz[] = nn
 end
 nothing #hide
