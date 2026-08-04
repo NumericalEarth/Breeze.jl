@@ -46,7 +46,7 @@ jobs:
 
   build-docs:
     needs: check-files
-    if: ${{ needs.check-files.outputs.files == 'true' }}
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || needs.check-files.outputs.files == 'true' }}
     permissions:
       actions: write
       contents: write
