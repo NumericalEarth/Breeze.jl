@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Test
 using Breeze
 using CloudMicrophysics
