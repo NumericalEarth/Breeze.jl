@@ -31,7 +31,7 @@ thermodynamic variable appropriate to the formulation:
 
 - For `LiquidIcePotentialTemperatureFormulation`: ``Δϕ = θ - θ₀``, where
   ``θ₀ = T₀ / Π₀`` and ``Π₀ = (p₀ / pˢᵗ)^{Rᵈ / cᵖᵈ}`` (potential temperature flux)
-- For `StaticEnergyFormulation`: ``Δϕ = e - cᵖᵈ T₀`` (static energy flux)
+- For `StaticEnergyFormulation`: ``Δϕ = e - (cᵖᵐ T₀ + g z₀)`` (static energy flux)
 
 Here ``p₀`` is the actual surface pressure, while ``pˢᵗ`` is the fixed reference pressure
 used to define potential temperature.
@@ -94,24 +94,25 @@ end
     return θ - θ₀
 end
 
-@inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, bf, T₀, fields, p₀, ::Nothing)
+@inline function surface_static_energy(i, j, grid, bf, T₀, fields)
     constants = bf.thermodynamic_constants
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
     qᵛ = @inbounds fields.qᵛ[i, j, 1]
     cᵖᵐ = (1 - qᵛ) * cᵖᵈ + qᵛ * cᵖᵛ  # no condensate at the surface
-    e₀ = cᵖᵐ * T₀
+    z₀ = znode(i, j, 1, grid, Center(), Center(), Face())
+    g = constants.gravitational_acceleration
+    return cᵖᵐ * T₀ + g * z₀
+end
+
+@inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, bf, T₀, fields, p₀, ::Nothing)
+    e₀ = surface_static_energy(i, j, grid, bf, T₀, fields)
     e = @inbounds fields.e[i, j, 1]
     return e - e₀
 end
 
 @inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, bf, T₀, fields, p₀, fs::FilteredSurfaceScalar)
-    constants = bf.thermodynamic_constants
-    cᵖᵈ = constants.dry_air.heat_capacity
-    cᵖᵛ = constants.vapor.heat_capacity
-    qᵛ = @inbounds fields.qᵛ[i, j, 1]
-    cᵖᵐ = (1 - qᵛ) * cᵖᵈ + qᵛ * cᵖᵛ  # no condensate at the surface
-    e₀ = cᵖᵐ * T₀
+    e₀ = surface_static_energy(i, j, grid, bf, T₀, fields)
     e = @inbounds fs.field[i, j, 1]
     return e - e₀
 end

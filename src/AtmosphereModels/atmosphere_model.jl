@@ -259,10 +259,10 @@ function AtmosphereModel(grid;
     # Build `model_fields` with the same key order as Oceananigans.fields(model::AtmosphereModel)
     # below. ContinuousForcing resolves `field_dependencies` to positional indices at
     # materialize time and looks them up positionally at runtime; the two tuples must
-    # agree on ordering, or forcings will read the wrong field.
-    auxiliary_fields = (; T=temperature, p=total_pressure(dynamics), ρ=total_density(dynamics))
+    # agree on ordering, or forcings will read the wrong field. `auxiliary_model_fields`
+    # is the single definition both sites go through.
     model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
-                         auxiliary_fields, microphysical_fields)
+                         auxiliary_model_fields(temperature, dynamics), microphysical_fields)
     density = dynamics_density(dynamics)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, density,
@@ -533,9 +533,21 @@ combine_forcing_values(a::Tuple, b) = (a..., b)
 combine_forcing_values(a, b::Tuple) = (a, b...)
 combine_forcing_values(a, b) = (a, b)
 
+"""
+$(TYPEDSIGNATURES)
+
+The non-prognostic thermodynamic fields exposed alongside the prognostic ones by
+`Oceananigans.fields(model)`: temperature, and the total pressure and density of the dynamics.
+Surface-flux boundary conditions read `p` and `ρ` from here to diagnose their surface state,
+and forcings resolve them positionally, so every site that assembles the model's field tuple
+must obtain them here rather than rebuild the tuple.
+"""
+auxiliary_model_fields(temperature, dynamics) =
+    (; T=temperature, p=total_pressure(dynamics), ρ=total_density(dynamics))
+
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)
-    auxiliary = (; T=model.temperature, p=total_pressure(model.dynamics), ρ=total_density(model.dynamics))
+    auxiliary = auxiliary_model_fields(model.temperature, model.dynamics)
     return merge(prognostic_fields(model), formulation_fields, model.velocities, auxiliary, model.microphysical_fields)
 end
 

@@ -1,12 +1,13 @@
 using ..Thermodynamics: ReferenceState, ExnerReferenceState, compute_hydrostatic_reference!,
                         _compute_exner_reference!, _compute_exner_reference_3d!,
                         bottom_face_height, constant_moist_hydrostatic_pressure,
-                        dry_air_gas_constant, moist_reference_constants, vapor_gas_constant
+                        moist_hydrostatic_pressure, dry_air_gas_constant,
+                        moist_reference_constants, vapor_gas_constant,
+                        field_with_bottom_value
 using Oceananigans: CenterField
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Architectures: architecture
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition,
-                                       fill_halo_regions!
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: interior, ZeroField, Field
 using Oceananigans.Grids: Center, Face, znode
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
@@ -152,33 +153,12 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
     return nothing
 end
 
-"""
-    set_to_mean!(ref::ExnerReferenceState, model)
-
-Exner analogue of the `ReferenceState` method, for split-explicit `CompressibleDynamics`. Recompute
-the base `exner_function`/`pressure`/`density` by re-running the same discrete Exner column
-integration the constructor uses, with the horizontal-mean liquid-ice potential temperature and vapor
-mass fraction of the current model state. On height-coordinate grids the recomputed reference is
-horizontally uniform. Terrain-following model resets use their specialized constant-height mean and
-per-column integration path.
-
-Unlike the anelastic `ReferenceState` method there is no `rescale_densities` option: the Exner
-reference is only the perturbation-form base state, not the prognostic density (`ρᵈ`), so changing it
-does not require rescaling the density-weighted prognostics.
-"""
 @kernel function _compute_surface_pressure_from_base!(pˢ, grid, θ, qᵛ, p₀, pˢᵗ,
                                                       Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
     i, j = @index(Global, NTuple)
     zˢ = znode(i, j, 1, grid, Center(), Center(), Face())
     @inbounds pˢ[i, j, 1] = constant_moist_hydrostatic_pressure(zˢ, p₀, θ[i, j, 1], qᵛ[i, j, 1],
                                                                 pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
-end
-
-function field_with_bottom_value(field, value)
-    grid = field.grid
-    loc = Oceananigans.instantiated_location(field)
-    bcs = FieldBoundaryConditions(grid, loc, field.indices; bottom=ValueBoundaryCondition(value))
-    return Field(loc, grid, field.data, bcs, field.indices, field.operand, field.status)
 end
 
 function update_scalar_reference_boundary_conditions!(ref, θˢ, qᵛˢ, constants)
@@ -196,36 +176,50 @@ function update_scalar_reference_boundary_conditions!(ref, θˢ, qᵛˢ, constan
 end
 
 function update_surface_pressure!(ref::ExnerReferenceState, θ, qᵛ, grid, constants)
-    Rᵈ  = dry_air_gas_constant(constants)
-    Rᵛ  = vapor_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    cᵖᵛ = constants.vapor.heat_capacity
-    g   = constants.gravitational_acceleration
+    θˢ, qᵛˢ = @allowscalar (θ[1, 1, 1], qᵛ[1, 1, 1])
+    ref.surface_potential_temperature = convert(eltype(ref), θˢ)
 
     if ref.surface_pressure isa Number
+        # Reduce the datum with the same function the constructor anchors on, so a reset lands on
+        # the profile the constructor would have produced from this mean state.
         zˢ = bottom_face_height(grid)
-        θˢ = @allowscalar θ[1, 1, 1]
-        qᵛˢ = @allowscalar qᵛ[1, 1, 1]
         ref.surface_pressure = convert(eltype(ref),
-            constant_moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ,
-                                                ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g))
-        ref.surface_potential_temperature = convert(eltype(ref), θˢ)
+            moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ,
+                                       ref.standard_pressure, constants))
         if size(ref.pressure, 1) == 1 && size(ref.pressure, 2) == 1
             update_scalar_reference_boundary_conditions!(ref, θˢ, qᵛˢ, constants)
         end
     else
+        Rᵈ  = dry_air_gas_constant(constants)
+        Rᵛ  = vapor_gas_constant(constants)
+        cᵖᵈ = constants.dry_air.heat_capacity
+        cᵖᵛ = constants.vapor.heat_capacity
+        g   = constants.gravitational_acceleration
+
         arch = architecture(grid)
         launch!(arch, grid, :xy, _compute_surface_pressure_from_base!,
                 ref.surface_pressure, grid, θ, qᵛ, ref.base_pressure, ref.standard_pressure,
                 Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
         fill_halo_regions!(ref.surface_pressure)
-        θˢ = @allowscalar θ[1, 1, 1]
-        ref.surface_potential_temperature = convert(eltype(ref), θˢ)
     end
 
     return nothing
 end
 
+"""
+    set_to_mean!(ref::ExnerReferenceState, model)
+
+Exner analogue of the `ReferenceState` method, for split-explicit `CompressibleDynamics`. Recompute
+the base `exner_function`/`pressure`/`density` by re-running the same discrete Exner column
+integration the constructor uses, with the horizontal-mean liquid-ice potential temperature and vapor
+mass fraction of the current model state. On height-coordinate grids the recomputed reference is
+horizontally uniform. Terrain-following model resets use their specialized constant-height mean and
+per-column integration path.
+
+Unlike the anelastic `ReferenceState` method there is no `rescale_densities` option: the Exner
+reference is only the perturbation-form base state, not the prognostic density (`ρᵈ`), so changing it
+does not require rescaling the density-weighted prognostics.
+"""
 function set_to_mean!(ref::ExnerReferenceState, model)
     constants = model.thermodynamic_constants
     grid = ref.pressure.grid

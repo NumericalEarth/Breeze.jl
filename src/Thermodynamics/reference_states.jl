@@ -15,8 +15,9 @@ using KernelAbstractions: @kernel, @index
 ##### Reference state computations for Boussinesq and Anelastic models
 #####
 
-struct ReferenceState{FT, P, D, T, QV, QL, QI}
+mutable struct ReferenceState{FT, P, D, T, QV, QL, QI}
     base_pressure :: FT # p₀: the datum, reference pressure at z=0 (not the pressure at the ground)
+    surface_pressure :: FT # pˢ: reference pressure at the bottom face of the domain
     potential_temperature :: FT  # reference potential temperature at z=0
     standard_pressure :: FT # pˢᵗ: reference pressure for potential temperature (default 1e5)
     pressure :: P
@@ -29,6 +30,7 @@ end
 
 Adapt.adapt_structure(to, ref::ReferenceState) =
     ReferenceState(adapt(to, ref.base_pressure),
+                   adapt(to, ref.surface_pressure),
                    adapt(to, ref.potential_temperature),
                    adapt(to, ref.standard_pressure),
                    adapt(to, ref.pressure),
@@ -56,7 +58,7 @@ Base.show(io::IO, ref::ReferenceState) = print(io, summary(ref))
 """
     surface_density(reference_state)
 
-Return the density at z=0 by interpolating the reference density field to the surface.
+Return the density at the bottom face of the domain by interpolating the reference density field.
 """
 function surface_density(ref::ReferenceState)
     ρ = ref.density
@@ -208,6 +210,37 @@ end
     end
 end
 
+function field_with_bottom_value(field, value)
+    grid = field.grid
+    loc = Oceananigans.instantiated_location(field)
+    bcs = FieldBoundaryConditions(grid, loc, field.indices; bottom=ValueBoundaryCondition(value))
+    return Field(loc, grid, field.data, bcs, field.indices, field.operand, field.status)
+end
+
+function update_reference_surface_boundary_conditions!(ref::ReferenceState, constants)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    g = constants.gravitational_acceleration
+    zˢ = bottom_face_height(ref.pressure.grid)
+
+    T¹, qᵛ¹, qˡ¹, qⁱ¹ = @allowscalar begin
+        ref.temperature[1, 1, 1],
+        ref.vapor_mass_fraction[1, 1, 1],
+        ref.liquid_mass_fraction[1, 1, 1],
+        ref.ice_mass_fraction[1, 1, 1]
+    end
+
+    qᵈ¹ = 1 - qᵛ¹ - qˡ¹ - qⁱ¹
+    Rᵐ¹ = qᵈ¹ * Rᵈ + qᵛ¹ * Rᵛ
+    pˢ = ref.base_pressure * exp(-g * zˢ / (Rᵐ¹ * T¹))
+    ρˢ = pˢ / (Rᵐ¹ * T¹)
+
+    ref.surface_pressure = convert(eltype(ref), pˢ)
+    ref.pressure = field_with_bottom_value(ref.pressure, ref.surface_pressure)
+    ref.density = field_with_bottom_value(ref.density, convert(eltype(ref), ρˢ))
+    return nothing
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -219,6 +252,7 @@ The integration uses the mixture gas constant `Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ`
 """
 function compute_hydrostatic_reference!(ref::ReferenceState, constants)
     grid = ref.pressure.grid
+    update_reference_surface_boundary_conditions!(ref, constants)
     arch = architecture(grid)
     Nz = grid.Nz
 
@@ -521,14 +555,16 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
 
     θᵣ = potential_temperature
     θ₀ = convert(FT, surface_value(θᵣ))
-    ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
+    zˢ = bottom_face_height(grid)
+    pˢ = convert(FT, hydrostatic_pressure(zˢ, p₀, θᵣ, pˢᵗ, constants))
+    ρˢ = convert(FT, hydrostatic_density(zˢ, p₀, θᵣ, pˢᵗ, constants))
 
-    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
+    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρˢ))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
     set!(ρᵣ, z -> hydrostatic_density(z, p₀, θᵣ, pˢᵗ, constants))
     fill_halo_regions!(ρᵣ)
 
-    p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
+    p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(pˢ))
     pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants))
     fill_halo_regions!(pᵣ)
@@ -542,7 +578,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     set!(Tᵣ, z -> hydrostatic_temperature(z, p₀, θᵣ, pˢᵗ, constants))
     fill_halo_regions!(Tᵣ)
 
-    return ReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
+    return ReferenceState(p₀, pˢ, θ₀, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
 end
 
 #####

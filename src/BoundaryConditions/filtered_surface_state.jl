@@ -195,12 +195,12 @@ end
 end
 
 # θᵥ is always read at the first cell (matches the height at which the bulk
-# coefficient evaluates stability). The source field may be a
-# `KernelFunctionOperation`, for which `interpolate` is not generally defined.
-@kernel function _update_filtered_θᵥ!(θ̂ᵥ, θᵥ_source, ϵ)
+# coefficient evaluates stability). The source may be an ordinary field or the
+# live boundary-condition diagnostic evaluated from the model field tuple.
+@kernel function _update_filtered_θᵥ!(θ̂ᵥ, θᵥ_source, grid, fields, ϵ)
     i, j = @index(Global, NTuple)
     @inbounds begin
-        θⁿᵥ = θᵥ_source[i, j, 1]
+        θⁿᵥ = boundary_virtual_potential_temperature(i, j, 1, grid, θᵥ_source, fields)
         θ̂ᵥ[i, j, 1] = (θ̂ᵥ[i, j, 1] + ϵ * θⁿᵥ) / (1 + ϵ)
     end
 end
@@ -220,9 +220,10 @@ end
     @inbounds f̂[i, j, 1] = interpolate_or_surface(i, j, grid, field_3d, Center(), Center(), height)
 end
 
-@kernel function _initialize_filtered_θᵥ!(θ̂ᵥ, θᵥ_source)
+@kernel function _initialize_filtered_θᵥ!(θ̂ᵥ, θᵥ_source, grid, fields)
     i, j = @index(Global, NTuple)
-    @inbounds θ̂ᵥ[i, j, 1] = θᵥ_source[i, j, 1]
+    @inbounds θ̂ᵥ[i, j, 1] = boundary_virtual_potential_temperature(i, j, 1, grid,
+                                                                    θᵥ_source, fields)
 end
 
 #####
@@ -291,10 +292,10 @@ end
 
 Set the filtered virtual potential temperature to the current first-cell value.
 """
-function initialize_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid)
+function initialize_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, fields=nothing)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
-    launch!(arch, grid, kp, _initialize_filtered_θᵥ!, fv.θᵥ, θᵥ_source)
+    launch!(arch, grid, kp, _initialize_filtered_θᵥ!, fv.θᵥ, θᵥ_source, grid, fields)
     return nothing
 end
 
@@ -303,11 +304,11 @@ end
 
 Apply the exponential filter to the virtual potential temperature.
 """
-function update_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, Δt)
+function update_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, Δt, fields=nothing)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
     ϵ = Δt / fv.filter_timescale
-    launch!(arch, grid, kp, _update_filtered_θᵥ!, fv.θᵥ, θᵥ_source, ϵ)
+    launch!(arch, grid, kp, _update_filtered_θᵥ!, fv.θᵥ, θᵥ_source, grid, fields, ϵ)
     return nothing
 end
 
@@ -358,7 +359,7 @@ initialize_filtered_θᵥ!(::Nothing, source_field, model) = nothing
 initialize_filtered_θᵥ!(fv::FilteredSurfaceVelocities, ::Nothing, model) = nothing
 
 function initialize_filtered_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, model)
-    initialize_θᵥ!(fv, θᵥ_source, model.grid)
+    initialize_θᵥ!(fv, θᵥ_source, model.grid, Oceananigans.fields(model))
     return nothing
 end
 
@@ -371,7 +372,7 @@ function update_filtered_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, mod
     fv.last_θᵥ_update[] == key && return nothing
     Δt = model.clock.last_Δt
     isinf(Δt) && return nothing
-    update_θᵥ!(fv, θᵥ_source, model.grid, Δt)
+    update_θᵥ!(fv, θᵥ_source, model.grid, Δt, Oceananigans.fields(model))
     fv.last_θᵥ_update[] = key
     return nothing
 end

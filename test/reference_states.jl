@@ -10,6 +10,7 @@ using Breeze.Thermodynamics:
     compute_hydrostatic_reference!,
     ExnerReferenceState,
     dry_air_gas_constant,
+    hydrostatic_density,
     hydrostatic_pressure,
     vapor_gas_constant,
     saturation_specific_humidity,
@@ -764,11 +765,42 @@ end
         θ₀  = 288
         z_bottom = 2000
         Nz_raised = 20
+        Rᵈ = dry_air_gas_constant(constants)
+        g = constants.gravitational_acceleration
 
         raised_grid = RectilinearGrid(default_arch; size=(4, 4, Nz_raised),
                                       x=(0, 100), y=(0, 100), z=(z_bottom, 6000),
                                       topology=(Periodic, Periodic, Bounded))
         z₁ = z_bottom + (6000 - z_bottom) / Nz_raised / 2  # first cell center height
+
+        # The anelastic reference uses the same datum semantics: both its interior profile and
+        # bottom boundary are reduced from z = 0 to their absolute physical heights.
+        anelastic = ReferenceState(raised_grid, constants; base_pressure=p₀,
+                                   potential_temperature=θ₀, standard_pressure=pˢᵗ)
+        pˢ_expected = hydrostatic_pressure(FT(z_bottom), FT(p₀), FT(θ₀), FT(pˢᵗ), constants)
+        ρˢ_expected = hydrostatic_density(FT(z_bottom), FT(p₀), FT(θ₀), FT(pˢᵗ), constants)
+        p₁_expected = hydrostatic_pressure(FT(z₁), FT(p₀), FT(θ₀), FT(pˢᵗ), constants)
+        @test anelastic.surface_pressure ≈ pˢ_expected rtol=1e-5
+        @test @allowscalar(interior(anelastic.pressure)[1, 1, 1]) ≈ p₁_expected rtol=1e-4
+        @test @allowscalar(ℑzᵃᵃᶠ(1, 1, 1, raised_grid, anelastic.pressure)) ≈ pˢ_expected rtol=1e-5
+        @test surface_density(anelastic) ≈ ρˢ_expected rtol=1e-5
+
+        anelastic_dynamics = AnelasticDynamics(anelastic)
+        Tˢ_expected = pˢ_expected / (Rᵈ * ρˢ_expected)
+        @test Breeze.AtmosphereModels.surface_pressure(anelastic_dynamics) ≈ pˢ_expected
+        @test Breeze.AtmosphereModels.default_drag_surface_temperature(anelastic_dynamics,
+                                                                       raised_grid,
+                                                                       constants) ≈ Tˢ_expected
+
+        # Recomputing an isothermal mean state must update the stored ground pressure and the
+        # pressure/density bottom boundary values along with the interior column.
+        T_reset = FT(250)
+        recomputed = ReferenceState(raised_grid, constants; base_pressure=p₀,
+                                    potential_temperature=θ₀, vapor_mass_fraction=0)
+        compute_reference_state!(recomputed, T_reset, FT(0), constants)
+        pˢ_reset = FT(p₀) * exp(-g * FT(z_bottom) / (Rᵈ * T_reset))
+        @test recomputed.surface_pressure ≈ pˢ_reset rtol=1e-5
+        @test @allowscalar(ℑzᵃᵃᶠ(1, 1, 1, raised_grid, recomputed.pressure)) ≈ pˢ_reset rtol=1e-5
 
         # Isentropic: the closed-form adiabatic profile from the datum, evaluated at the
         # *absolute* height of the first cell center.
@@ -789,8 +821,6 @@ end
         # of `ExnerReferenceState` must agree on where `base_pressure` lives, which they do
         # only if both reduce from z = 0.
         T₀ = 250
-        Rᵈ = dry_air_gas_constant(constants)
-        g = constants.gravitational_acceleration
         isothermal = ExnerReferenceState(raised_grid, constants; base_pressure=p₀,
                                          reference_temperature=T₀, standard_pressure=pˢᵗ)
         @test @allowscalar(interior(isothermal.pressure)[1, 1, 1]) ≈

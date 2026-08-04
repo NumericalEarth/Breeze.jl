@@ -362,6 +362,30 @@ end
         @test true
     end
 
+    @testset "Static-energy surface state includes local geopotential [$FT]" begin
+        using Oceananigans.Models: BoundaryConditionOperation
+
+        raised_grid = RectilinearGrid(default_arch; size=(1, 1, 4),
+                                      x=(0, 100), y=(0, 100), z=(FT(2000), FT(2400)))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(raised_grid, constants; potential_temperature=FT(300))
+        dynamics = AnelasticDynamics(reference_state)
+        Tˢ = Breeze.AtmosphereModels.default_drag_surface_temperature(dynamics,
+                                                                      raised_grid,
+                                                                      constants)
+        bc = BulkSensibleHeatFlux(surface_temperature=Tˢ, coefficient=FT(Cᴰ), gustiness=FT(1))
+        ρe_bcs = FieldBoundaryConditions(bottom=bc)
+        model = AtmosphereModel(raised_grid; formulation=:StaticEnergy, dynamics,
+                                thermodynamic_constants=constants,
+                                boundary_conditions=(; ρe=ρe_bcs))
+        set!(model; θ=FT(300), qᵗ=0, u=FT(5))
+
+        ρe = thermodynamic_density(model.formulation)
+        Jᵉ = Field(BoundaryConditionOperation(ρe, :bottom, model))
+        compute!(Jᵉ)
+        @test all(abs.(Array(interior(Jᵉ))) .< FT(0.05))
+    end
+
     @testset "BulkSensibleHeatFlux with ρe auto-converts for θ formulation [$FT]" begin
         bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
 
@@ -461,12 +485,31 @@ end
         time_step!(model, 1e-6)
         @test true
 
-        # Compressible boundary conditions are materialized before the dynamics. The automatic
-        # reference must therefore be available while materializing the polynomial coefficient.
+        # Compressible boundary conditions are materialized before the dynamics. The polynomial
+        # coefficient must remain constructible there while deferring its state reads to live fields.
         compressible_model = AtmosphereModel(grid;
                                              dynamics=CompressibleDynamics(),
                                              boundary_conditions=(; ρu=ρu_bcs))
         @test compressible_model.dynamics.reference_state !== nothing
+
+        # The stability diagnostic must read prognostic compressible pressure and density from
+        # the boundary-condition field tuple, rather than a construction-time reference profile.
+        materialized_bc = Oceananigans.boundary_conditions(compressible_model.momentum.ρu).bottom
+        materialized_coef = materialized_bc.condition.coefficient
+        θᵥ = materialized_coef.virtual_potential_temperature
+        model_fields = Oceananigans.fields(compressible_model)
+        set!(model_fields.T, FT(300))
+        set!(model_fields.ρ, FT(1))
+        set!(model_fields.qᵛ, FT(0))
+        set!(model_fields.p, FT(1e5))
+        θᵥ_1000hPa = @allowscalar θᵥ(1, 1, 1, grid, model_fields)
+        set!(model_fields.p, FT(8e4))
+        θᵥ_800hPa = @allowscalar θᵥ(1, 1, 1, grid, model_fields)
+        κᵈ = dry_air_gas_constant(compressible_model.thermodynamic_constants) /
+             compressible_model.thermodynamic_constants.dry_air.heat_capacity
+        @test isnothing(θᵥ.thermodynamic_state)
+        @test θᵥ_1000hPa ≈ FT(300)
+        @test θᵥ_800hPa ≈ FT(300) * FT(0.8)^(-κᵈ)
     end
 
     @testset "PolynomialCoefficient with no stability correction [$FT]" begin

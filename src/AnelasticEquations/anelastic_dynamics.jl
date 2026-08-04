@@ -90,8 +90,8 @@ end
 $(TYPEDSIGNATURES)
 
 Default surface temperature for `BulkDrag` under `AnelasticDynamics`: the
-reference-state surface temperature, recovered from the reference potential
-temperature via the surface Exner function ``T₀ = (p₀/pˢᵗ)^{Rᵈ/cᵖᵈ}\\,θ₀``.
+reference-state temperature at the bottom face of the domain, recovered from
+the bottom-face pressure and density using the dry ideal-gas law.
 
 Used only when the user constructs `BulkDrag` without an explicit
 `surface_temperature`. The result is a horizontally uniform scalar.
@@ -99,9 +99,9 @@ Used only when the user constructs `BulkDrag` without an explicit
 function AtmosphereModels.default_drag_surface_temperature(dynamics::AnelasticDynamics, grid, constants)
     ref = dynamics.reference_state
     Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    Π₀ = (ref.base_pressure / ref.standard_pressure)^(Rᵈ / cᵖᵈ)
-    return Π₀ * ref.potential_temperature
+    pˢ = AtmosphereModels.surface_pressure(dynamics)
+    ρˢ = surface_density(ref)
+    return pˢ / (Rᵈ * ρˢ)
 end
 
 #####

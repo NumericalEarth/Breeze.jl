@@ -509,6 +509,11 @@ function AtmosphereModels.boundary_conditions_reference_state(dynamics::Compress
                                  base_pressure, standard_pressure, thermodynamic_constants)
 end
 
+# Compressible pressure and density are prognostic. Surface-layer stability must therefore read
+# the live fields supplied to the boundary-condition kernel, not a separately constructed
+# reference profile used only while the model is being assembled.
+AtmosphereModels.boundary_conditions_thermodynamic_state(::CompressibleDynamics, grid, constants) = nothing
+
 """
 $(TYPEDSIGNATURES)
 

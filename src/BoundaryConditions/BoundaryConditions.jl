@@ -26,9 +26,10 @@ export BulkDragFunction,
        default_neutral_latent_heat_polynomial
 
 using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density,
-                          standard_pressure, boundary_conditions_reference_state,
-                          default_drag_surface_temperature
-using ..AtmosphereModels.Diagnostics: VirtualPotentialTemperature, saturation_total_specific_moisture
+                          standard_pressure, boundary_conditions_thermodynamic_state,
+                          default_drag_surface_temperature, moisture_specific_name
+using ..AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
+                                      virtual_potential_temperature
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity, dry_air_gas_constant, vapor_gas_constant,
                         potential_temperature_from_temperature, surface_pressure_from_cell_center
@@ -42,7 +43,7 @@ using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        FieldBoundaryConditions,
                                        Bottom, Top, West, East, South, North
 using Oceananigans.Fields: Field, set!
-using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid
+using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid, znode
 using Oceananigans.Operators: Δzᶜᶜᶜ, ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ,
                               ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ
 
@@ -59,9 +60,9 @@ using DocStringExtensions: TYPEDSIGNATURES
 @inline surface_value(i, j, ::Nothing) = nothing
 
 @inline function surface_air_pressureᶜᶜᶜ(i, j, k, grid, fields, constants)
-    p = @inbounds fields.p[i, j, 1]
-    ρ = @inbounds fields.ρ[i, j, 1]
-    Δz = Δzᶜᶜᶜ(i, j, 1, grid)
+    p = @inbounds fields.p[i, j, k]
+    ρ = @inbounds fields.ρ[i, j, k]
+    Δz = Δzᶜᶜᶜ(i, j, k, grid)
     g = constants.gravitational_acceleration
     return surface_pressure_from_cell_center(p, ρ, Δz, g)
 end
@@ -288,17 +289,18 @@ materialize_coefficient(C, grid, dynamics, microphysics, base_pressure, constant
 function materialize_coefficient(coef::PolynomialCoefficient, grid, dynamics, microphysics,
                                  base_pressure, constants, microphysical_fields,
                                  specific_prognostic_moisture, temperature, transfer_type)
-    reference_state = boundary_conditions_reference_state(dynamics, grid, constants)
-    θᵥ = VirtualPotentialTemperature(grid;
-        reference_state, microphysics, microphysical_fields,
-        specific_prognostic_moisture, temperature, thermodynamic_constants=constants)
+    thermodynamic_state = boundary_conditions_thermodynamic_state(dynamics, grid, constants)
+    pˢᵗ = standard_pressure(dynamics)
+    moisture_name = Val(moisture_specific_name(microphysics))
+    θᵥ = BoundaryVirtualPotentialTemperature(thermodynamic_state, microphysics,
+                                              moisture_name, pˢᵗ, constants)
 
     return PolynomialCoefficient(coef.polynomial,
                                  coef.roughness_length,
                                  coef.minimum_wind_speed,
                                  coef.stability_function,
                                  coef.surface,
-                                 θᵥ, nothing, constants,
+                                 θᵥ, pˢᵗ, constants,
                                  transfer_type)
 end
 

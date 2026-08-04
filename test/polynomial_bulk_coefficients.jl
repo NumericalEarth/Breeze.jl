@@ -12,7 +12,8 @@ using Breeze.BoundaryConditions: PolynomialCoefficient,
                                  bulk_to_flux_richardson_number,
                                  integrated_stability_momentum,
                                  integrated_stability_scalar,
-                                 stability_correction_factor
+                                 stability_correction_factor,
+                                 surface_virtual_potential_temperature
 using Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 using Oceananigans.Grids: XDirection
@@ -256,6 +257,36 @@ using GPUArraysCore: @allowscalar
         @test f_m != f_s
     end
 
+    @testset "Surface virtual potential temperature includes Exner reduction" begin
+        grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
+        constants = ThermodynamicConstants(FT)
+        surface = PlanarLiquidSurface()
+        T₀ = FT(300)
+        p₀ = FT(8e4)
+        pˢᵗ = FT(1e5)
+
+        qᵛ⁺ = Breeze.AtmosphereModels.Diagnostics.saturation_total_specific_moisture(T₀, p₀,
+                                                                                      constants,
+                                                                                      surface)
+        Rᵈ = dry_air_gas_constant(constants)
+        Rᵛ = vapor_gas_constant(constants)
+        cᵖᵈ = constants.dry_air.heat_capacity
+        Π₀ᵈ = (p₀ / pˢᵗ)^(Rᵈ / cᵖᵈ)
+        θᵥ₀_expected = T₀ / Π₀ᵈ * (1 + (Rᵛ / Rᵈ - 1) * qᵛ⁺)
+        θᵥ₀ = surface_virtual_potential_temperature(T₀, p₀, pˢᵗ, constants, surface)
+        @test θᵥ₀ ≈ θᵥ₀_expected
+        @test θᵥ₀ > T₀ * FT(1.05)
+
+        θᵥ_field = CenterField(grid)
+        set!(θᵥ_field, θᵥ₀)
+        coef = PolynomialCoefficient((FT(0.142), FT(0.076), FT(2.7)), FT(1.5e-4), FT(0.1),
+                                     FittedStabilityFunction(FT(1.5e-4 / 7.3)), surface,
+                                     θᵥ_field, pˢᵗ, constants, Val(:momentum))
+        C = coef(1, 1, grid, FT(10), T₀, p₀)
+        C_neutral = neutral_coefficient_10m(coef.polynomial, FT(10), coef.minimum_wind_speed)
+        @test C ≈ C_neutral
+    end
+
     @testset "Callable interface" begin
         # Create a simple grid with first cell center at 10m
         grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
@@ -267,7 +298,8 @@ using GPUArraysCore: @allowscalar
         )
         U = 10.0
         T₀ = 290.0
-        C = coef(1, 1, grid, U, T₀)
+        p₀ = 1e5
+        C = coef(1, 1, grid, U, T₀, p₀)
         @test C isa Number
         @test C > 0
 
@@ -282,11 +314,11 @@ using GPUArraysCore: @allowscalar
             FittedStabilityFunction(1.5e-4 / 7.3),
             Breeze.PlanarLiquidSurface(),
             θᵥ_field,
-            1e5,
+            FT(1e5),
             Breeze.Thermodynamics.ThermodynamicConstants(),
             Val(:momentum)
         )
-        C_fitted = coef_fitted(1, 1, grid, U, T₀)
+        C_fitted = coef_fitted(1, 1, grid, U, T₀, p₀)
         @test C_fitted isa Number
         @test C_fitted > 0
         # Unstable conditions should enhance transfer
@@ -490,16 +522,17 @@ using GPUArraysCore: @allowscalar
         )
         U = 10.0
         T₀ = 290.0
+        p₀ = 1e5
 
-        # Default call (first cell center height = 10m)
-        C_default = coef(1, 1, grid, U, T₀)
+        # Default call (half the first cell thickness = 10m)
+        C_default = coef(1, 1, grid, U, T₀, p₀)
 
         # Explicit height = 10m should give the same result
-        C_10m = coef(1, 1, grid, U, T₀, 10.0)
+        C_10m = coef(1, 1, grid, U, T₀, 10.0, nothing, p₀)
         @test C_10m ≈ C_default atol=1e-12
 
         # Different height should give a different coefficient
-        C_20m = coef(1, 1, grid, U, T₀, 20.0)
+        C_20m = coef(1, 1, grid, U, T₀, 20.0, nothing, p₀)
         @test C_20m != C_default
         # Higher evaluation height → coefficient adjusted by log ratio
         @test C_20m > 0

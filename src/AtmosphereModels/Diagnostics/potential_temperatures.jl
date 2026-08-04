@@ -85,6 +85,15 @@ Adapt.adapt_structure(to, k::MoistPotentialTemperatureKernelFunction) =
                                             adapt(to, k.temperature),
                                             adapt(to, k.thermodynamic_constants))
 
+@inline function virtual_potential_temperature(T, p, pˢᵗ, q, constants)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    Πᵈ = (p / pˢᵗ)^(Rᵈ / cᵖᵈ)
+    δᵛᵈ = Rᵛ / Rᵈ - 1
+    return (T / Πᵈ) * (1 + δᵛᵈ * q.vapor - q.liquid - q.ice)
+end
+
 # Type aliases for the user interface
 const C = Center
 
@@ -573,10 +582,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
 
     elseif d.flavor isa AbstractVirtualFlavor
         # Virtual potential temperature
-        cᵖᵈ = constants.dry_air.heat_capacity
-        Πᵈ = (p / pˢᵗ)^(Rᵈ / cᵖᵈ)
-        δ = Rᵛ / Rᵈ - 1
-        (T / Πᵈ) * (1 + δ * qᵛ - qˡ - qⁱ)
+        virtual_potential_temperature(T, p, pˢᵗ, q, constants)
 
     elseif d.flavor isa AbstractEquivalentFlavor
         # Saturation specific humidity over a liquid surface

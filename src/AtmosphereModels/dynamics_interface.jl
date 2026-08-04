@@ -6,7 +6,7 @@
 ##### must be extended by specific dynamics implementations (AnelasticEquations, CompressibleEquations).
 #####
 
-using ..Thermodynamics: ExnerReferenceState
+using ..Thermodynamics: ExnerReferenceState, ReferenceState
 
 #####
 ##### Construction interface
@@ -241,13 +241,16 @@ at the surface" over terrain wants. Reading it keeps a consumer consistent with 
 state; reading the datum instead disagrees with it by ``O(ρgh)`` per column.
 
 Equal to the datum, exactly, for the usual domain whose bottom sits at ``z = 0``. This accessor
-requires a materialized reference state that explicitly carries its bottom-face pressure. Use
-`diagnostic_surface_pressure(model)` when the pressure should follow the live model state.
+requires a materialized reference state that explicitly carries its bottom-face pressure. When the
+pressure should follow the live model state instead, extrapolate it from the first cell center with
+`Thermodynamics.surface_pressure_from_cell_center`, as the surface fluxes and the diagnostic
+hydrostatic pressure do.
 """
 surface_pressure(dynamics) = surface_pressure(dynamics, dynamics_reference_state(dynamics))
 surface_pressure(dynamics, reference_state) =
     throw(ArgumentError("$(typeof(dynamics)) has no materialized reference-state surface pressure"))
 surface_pressure(dynamics, reference_state::ExnerReferenceState) = reference_state.surface_pressure
+surface_pressure(dynamics, reference_state::ReferenceState) = reference_state.surface_pressure
 
 """
     boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants)
@@ -262,6 +265,21 @@ returns `dynamics.reference_state`, which works for dynamics where the user
 constructs a fully-built reference state up front (e.g. `AnelasticDynamics`).
 """
 boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants) = dynamics.reference_state
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the pressure and density fields that stability-dependent boundary conditions should use.
+The default uses a construction-time reference state when the dynamics carries one. Dynamics
+whose thermodynamic state is prognostic override this hook with `nothing`, which tells the
+boundary condition to read the live `p` and `ρ` entries passed to its kernel.
+"""
+function boundary_conditions_thermodynamic_state(dynamics, grid, thermodynamic_constants)
+    hasproperty(dynamics, :reference_state) || return nothing
+    reference_state = boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants)
+    isnothing(reference_state) && return nothing
+    return (; pressure=reference_state.pressure, density=reference_state.density)
+end
 
 """
     dynamics_reference_state(dynamics)
