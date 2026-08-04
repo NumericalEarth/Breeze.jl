@@ -144,12 +144,6 @@ The following table also uses a few conventions that suffuse the source code and
 | ``e``                               | `e`    |                                     | Subgrid turbulent kinetic energy, m² s⁻². Confined to kernel locals and to `closure_fields.e`: bare ``e`` is static energy in the `StaticEnergy` formulation |
 | ``q``                               | `q`    |                                     | Turbulent velocity scale ``q = \sqrt{2e}``, m s⁻¹, in mixing-length expressions (distinct from `q`, the `MoistureMassFractions` instance) |
 | ``\rho e``                          | `ρtke` |                                     | Prognostic TKE density, ``ρ e``. Named `ρtke` because `ρe` is the static-energy density |
-| ``C^K``                             | `Cᴷ`   | `diffusivity_coefficient`           | Diffusivity coefficient in ``K^u = Cᴷ ℓ \sqrt{e}``                             |
-| ``C^\mu``                           | `Cμ`   |                                     | ``k``–``ε`` coefficient in ``K^u = Cμ e²/ε``; sets the neutral surface-layer turbulence level ``e/u_\star² = (Cμ)^{-1/2}`` |
-| ``C^\varepsilon``                   | `Cᵋ`   | `dissipation_coefficient`           | Dissipation coefficient in ``ε = Cᵋ e^{3/2}/ℓ``; *derived*, ``Cᵋ = Cμ/Cᴷ``      |
-| ``C^\mathrm{sfc}``                  |        | `surface_tke_coefficient`           | Surface TKE level ``e/u_\star²``; *derived*, ``(Cμ)^{-1/2}``                    |
-| ``C^s``                             | `Cˢ`   | `stress_coefficient`                | Stress coefficient; *derived*, ``Cᴷ/(Cμ)^{1/4}``. Equals 1 on the neutral log-law locus ``Cμ = Cᴷ⁴`` |
-| ``C^t``, ``C^b``                    | `Cᵗ`, `Cᵇ` |                                 | Coefficients of the turbulence and buoyancy mixing-length branches             |
 | ``\mathrm{Pr}``                     | `Pr`   |                                     | Turbulent Prandtl number, ``\mathrm{Pr} = K^u/K^c``; ``\mathrm{Pr₀}`` is its neutral value |
 | ``Ri``                              | `Ri`   |                                     | Gradient Richardson number, ``Ri = N²/S²``                                      |
 | ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
