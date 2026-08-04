@@ -13,6 +13,7 @@ using Breeze.Thermodynamics:
     hydrostatic_density,
     hydrostatic_pressure,
     surface_pressure_value,
+    surface_temperature_value,
     vapor_gas_constant,
     saturation_specific_humidity,
     PlanarLiquidSurface
@@ -803,6 +804,22 @@ end
         @test surface_pressure_value(recomputed) ≈ pˢ_reset rtol=1e-5
         @test @allowscalar(ℑzᵃᵃᶠ(1, 1, 1, raised_grid, recomputed.pressure)) ≈ pˢ_reset rtol=1e-5
 
+        # The reported ground temperature must be the *actual* temperature, not the virtual one. A
+        # reset rebuilds the reference density with the mixture gas constant, so recovering the
+        # temperature as pˢ / (Rᵈ ρˢ) would return Tᵛ = (Rᵐ / Rᵈ) T, high by ~3.6 K at qᵛ = 0.02.
+        qᵛ_moist = FT(0.02)
+        moist = ReferenceState(raised_grid, constants; base_pressure=p₀,
+                               potential_temperature=θ₀, vapor_mass_fraction=0)
+        compute_reference_state!(moist, T_reset, qᵛ_moist, constants)
+        Rᵛ = vapor_gas_constant(constants)
+        Rᵐ = (1 - qᵛ_moist) * Rᵈ + qᵛ_moist * Rᵛ
+        moist_dynamics = AnelasticDynamics(moist)
+        @test surface_temperature_value(moist) ≈ T_reset rtol=1e-6
+        @test Breeze.AtmosphereModels.default_drag_surface_temperature(moist_dynamics, raised_grid,
+                                                                      constants) ≈ T_reset rtol=1e-6
+        # The virtual temperature the old inversion would have returned is measurably different.
+        @test surface_pressure_value(moist) / (Rᵈ * surface_density(moist)) ≈ (Rᵐ / Rᵈ) * T_reset rtol=1e-6
+
         # Isentropic: the closed-form adiabatic profile from the datum, evaluated at the
         # *absolute* height of the first cell center.
         isentropic = ExnerReferenceState(raised_grid, constants; base_pressure=p₀,
@@ -851,5 +868,31 @@ end
         @test surface_pressure_value(ref) ≈ pˢ_expected rtol=2e-5
         @test @allowscalar(interior(ref.pressure)[1, 1, 1]) ≈ p₁_expected rtol=2e-4
         @test @allowscalar(ℑzᵃᵃᶠ(1, 1, 1, raised_grid, ref.pressure)) ≈ pˢ_expected rtol=2e-5
+    end
+
+    #####
+    ##### The old `surface_pressure` keyword is rejected, not silently reinterpreted
+    #####
+    #
+    # `surface_pressure` still exists, but it now names the pressure at a column's bottom face
+    # rather than the z = 0 datum, so a script that passed the old keyword must be told rather than
+    # quietly given a different atmosphere.
+
+    @testset "The renamed surface_pressure keyword is rejected" begin
+        @test_throws ArgumentError ReferenceState(grid, constants; surface_pressure=101325)
+        @test_throws ArgumentError ExnerReferenceState(grid, constants; surface_pressure=101325)
+        @test_throws ArgumentError CompressibleDynamics(; surface_pressure=101325)
+        @test_throws ArgumentError MoistAirBuoyancy(grid; surface_pressure=101325)
+
+        # The message names the replacement rather than just listing accepted keywords.
+        message = try
+            ReferenceState(grid, constants; surface_pressure=101325)
+        catch e
+            e.msg
+        end
+        @test occursin("base_pressure", message)
+
+        # `base_pressure` itself is unaffected.
+        @test surface_pressure_value(ReferenceState(grid, constants; base_pressure=101325)) ≈ 101325
     end
 end

@@ -602,9 +602,9 @@ Wind speed is clamped to `U_min` to avoid singularity.
 - `θᵥ₀`: Virtual potential temperature at surface (K)
 - `U`: Wind speed (m/s)
 - `U_min`: Minimum wind speed (m/s)
-- `g`: Gravitational acceleration (m/s², default: 9.81)
+- `g`: Gravitational acceleration (m/s²)
 """
-@inline function bulk_richardson_number(h, θᵥ, θᵥ₀, U, U_min, g = 9.81)
+@inline function bulk_richardson_number(h, θᵥ, θᵥ₀, U, U_min, g)
     # Avoid division by zero
     U_safe = max(U, U_min)
     θᵥ_mean = (θᵥ + θᵥ₀) / 2
@@ -721,7 +721,8 @@ end
     θᵥ = surface_layer_θᵥ(i, j, grid, coef.virtual_potential_temperature, θᵥ_source, fields)
     θᵥ₀ = surface_virtual_potential_temperature(T₀, p₀, coef.standard_pressure,
                                                 coef.thermodynamic_constants, coef.surface)
-    Riᴮ = bulk_richardson_number(h, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
+    g = coef.thermodynamic_constants.gravitational_acceleration
+    Riᴮ = bulk_richardson_number(h, θᵥ, θᵥ₀, U, coef.minimum_wind_speed, g)
 
     return Cʰ * sf(Riᴮ, α, β, coef.transfer_type)
 end

@@ -120,19 +120,20 @@ using GPUArraysCore: @allowscalar
         θᵥ_sfc = 290.0
         U = 10.0
         U_min = 0.1
+        g = ThermodynamicConstants(Float64).gravitational_acceleration
 
         # Unstable case: warm surface (θᵥ < θᵥ_sfc)
         θᵥ_unstable = 288.0
-        Ri_unstable = bulk_richardson_number(z, θᵥ_unstable, θᵥ_sfc, U, U_min)
+        Ri_unstable = bulk_richardson_number(z, θᵥ_unstable, θᵥ_sfc, U, U_min, g)
         @test Ri_unstable < 0
 
         # Neutral case: same temperature
-        Ri_neutral = bulk_richardson_number(z, θᵥ_sfc, θᵥ_sfc, U, U_min)
+        Ri_neutral = bulk_richardson_number(z, θᵥ_sfc, θᵥ_sfc, U, U_min, g)
         @test Ri_neutral ≈ 0.0 atol=1e-10
 
         # Stable case: cold surface (θᵥ > θᵥ_sfc)
         θᵥ_stable = 292.0
-        Ri_stable = bulk_richardson_number(z, θᵥ_stable, θᵥ_sfc, U, U_min)
+        Ri_stable = bulk_richardson_number(z, θᵥ_stable, θᵥ_sfc, U, U_min, g)
         @test Ri_stable > 0
     end
 

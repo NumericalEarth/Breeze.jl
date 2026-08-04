@@ -15,10 +15,11 @@ using KernelAbstractions: @kernel, @index
 ##### Reference state computations for Boussinesq and Anelastic models
 #####
 
-struct ReferenceState{FT, SP, SD, P, D, T, QV, QL, QI}
+struct ReferenceState{FT, SP, SD, STm, P, D, T, QV, QL, QI}
     base_pressure :: FT # p₀: the datum, reference pressure at z=0 (not the pressure at the ground)
     surface_pressure :: SP # pˢ: reference pressure at the bottom face, a 2D field
     surface_density :: SD # ρˢ: reference density at the bottom face, a 2D field
+    surface_temperature :: STm # Tˢ: reference temperature at the bottom face, a 2D field
     potential_temperature :: FT  # reference potential temperature at z=0
     standard_pressure :: FT # pˢᵗ: reference pressure for potential temperature (default 1e5)
     pressure :: P
@@ -33,6 +34,7 @@ Adapt.adapt_structure(to, ref::ReferenceState) =
     ReferenceState(adapt(to, ref.base_pressure),
                    adapt(to, ref.surface_pressure),
                    adapt(to, ref.surface_density),
+                   adapt(to, ref.surface_temperature),
                    adapt(to, ref.potential_temperature),
                    adapt(to, ref.standard_pressure),
                    adapt(to, ref.pressure),
@@ -249,11 +251,43 @@ surface_boundary_value(value::Number) = value
 """
 $(TYPEDSIGNATURES)
 
+Reject the old `surface_pressure` keyword, which named the reference pressure datum at ``z = 0``
+and is now `base_pressure`.
+
+Worth an explicit error rather than a `MethodError`, because the name was not retired: it now names
+the pressure at a column's *bottom face*, which is derived from `base_pressure` and the grid rather
+than set by the user, and which differs from the datum by ``O(ρgh)`` whenever the ground is not at
+``z = 0``. A caller who moved an old script across would otherwise have no hint that the quantity
+they meant is spelled differently now, nor that the spelling they used means something else.
+"""
+reject_renamed_surface_pressure(::Nothing) = nothing
+
+reject_renamed_surface_pressure(surface_pressure) =
+    throw(ArgumentError("`surface_pressure` was renamed to `base_pressure`: the reference pressure \
+                         at z = 0, which is the datum the hydrostatic profiles are anchored to. \
+                         `surface_pressure` now names the reference pressure at a column's bottom \
+                         face — the ground — which is derived rather than prescribed, so passing \
+                         $(surface_pressure) here would not mean what it used to."))
+
+"""
+$(TYPEDSIGNATURES)
+
 The horizontally uniform bottom-face pressure of `ref` as a scalar. Only valid for a reference
 whose bottom face is a single level (any height-coordinate grid); over terrain the bottom-face
 pressure varies by column and `ref.surface_pressure` must be read as a field.
 """
 surface_pressure_value(ref) = @allowscalar ref.surface_pressure[1, 1, 1]
+
+"""
+$(TYPEDSIGNATURES)
+
+The horizontally uniform bottom-face temperature of `ref` as a scalar. Stored rather than recovered
+from `surface_pressure` and `surface_density` through a gas law, because which gas constant closes
+that inversion depends on how the reference was built: the constructor's `density` is dry, while a
+reset rebuilds it with the mixture constant, so `pˢ / (Rᵈ ρˢ)` is the temperature in one case and
+the *virtual* temperature in the other.
+"""
+surface_temperature_value(ref) = @allowscalar ref.surface_temperature[1, 1, 1]
 
 # Reduce the z = 0 datum to the bottom face along the *isothermal* layer implied by the first
 # level's mixture temperature. This must match how `_compute_hydrostatic_reference!` takes its own
@@ -283,8 +317,12 @@ function update_reference_surface_state!(ref::ReferenceState, constants)
 
     set!(ref.surface_pressure, convert(FT, pˢ))
     set!(ref.surface_density, convert(FT, ρˢ))
+    # The reduction above extends T¹ isothermally to the bottom face, so T¹ *is* the temperature
+    # there under this reference.
+    set!(ref.surface_temperature, convert(FT, T¹))
     fill_halo_regions!(ref.surface_pressure)
     fill_halo_regions!(ref.surface_density)
+    fill_halo_regions!(ref.surface_temperature)
     return nothing
 end
 
@@ -325,35 +363,81 @@ end
 ##### Constructor
 #####
 
-# Dry hydrostatic balance is linear in the Exner function Π = (p / pˢᵗ)^κ,
-# so integrating Π(z) directly avoids repeatedly evaluating the nonlinear EOS.
-function converged_hydrostatic_integral(z, Π₀, dΠdz;
-                                        tolerance = sqrt(eps(float(typeof(Π₀)))),
-                                        initial_steps = 16,
-                                        max_steps = 1 << 16)
-    z == 0 && return Π₀
+"""
+$(TYPEDSIGNATURES)
 
-    integrate(nsteps) = begin
-        dz = z / nsteps
-        Π = Π₀
-        for i in 1:nsteps
-            zᵢ = (i - 0.5) * dz
-            Π += dΠdz(zᵢ) * dz
-        end
-        return Π
-    end
+Evaluate `integrate(nsteps)` with the step count repeatedly doubled from `initial_steps`, returning
+the first refinement whose value changes by less than the relative `tolerance`. Returns `y₀`
+unchanged when `z == 0`.
+
+Shared by both hydrostatic reductions from the ``z = 0`` datum, which differ only in their stepper:
+[`midpoint_integral`](@ref) when the integrand depends on height alone, and
+[`runge_kutta2_integral`](@ref) when it also depends on the pressure being solved for.
+
+Warns rather than returning silently if `max_steps` is reached without converging: an unconverged
+reduction would otherwise anchor a whole reference profile at a wrong ground pressure with no
+indication.
+"""
+function converge_by_step_doubling(integrate, y₀, z, tolerance, initial_steps, max_steps)
+    z == 0 && return y₀
 
     nsteps = initial_steps
-    Π_coarse = integrate(nsteps)
+    coarse = integrate(nsteps)
     while nsteps < max_steps
         nsteps *= 2
-        Π_fine = integrate(nsteps)
-        abs(Π_fine - Π_coarse) ≤ tolerance * abs(Π_fine) && return Π_fine
-        Π_coarse = Π_fine
+        fine = integrate(nsteps)
+        abs(fine - coarse) ≤ tolerance * abs(fine) && return fine
+        coarse = fine
     end
 
-    return Π_coarse
+    @warn "Hydrostatic reduction over $z m did not reach a relative tolerance of $tolerance in \
+           $max_steps steps; using the most refined value." maxlog=1
+    return coarse
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Midpoint quadrature of ``∂y/∂z = \\mathrm{dydz}(z)`` from ``0`` to `z` in `nsteps` steps, for an
+integrand that depends on height alone.
+"""
+function midpoint_integral(z, y₀, dydz, nsteps)
+    dz = z / nsteps
+    y = y₀
+    for i in 1:nsteps
+        zᵢ = (i - 1) * dz + dz / 2
+        y += dydz(zᵢ) * dz
+    end
+    return y
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Explicit midpoint (RK2) integration of ``∂y/∂z = \\mathrm{dydz}(z, y)`` from ``0`` to `z` in
+`nsteps` steps, for an integrand that also depends on the solution.
+"""
+function runge_kutta2_integral(z, y₀, dydz, nsteps)
+    dz = z / nsteps
+    half_dz = dz / 2
+    y = y₀
+    for i in 1:nsteps
+        zₗ = (i - 1) * dz
+        k₁ = dydz(zₗ, y)
+        k₂ = dydz(zₗ + half_dz, y + k₁ * half_dz)
+        y += k₂ * dz
+    end
+    return y
+end
+
+# Dry hydrostatic balance is linear in the Exner function Π = (p / pˢᵗ)^κ,
+# so integrating Π(z) directly avoids repeatedly evaluating the nonlinear EOS.
+converged_hydrostatic_integral(z, Π₀, dΠdz;
+                               tolerance = sqrt(eps(float(typeof(Π₀)))),
+                               initial_steps = 16,
+                               max_steps = 1 << 16) =
+    converge_by_step_doubling(nsteps -> midpoint_integral(z, Π₀, dΠdz, nsteps),
+                              Π₀, z, tolerance, initial_steps, max_steps)
 
 """
     numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants)
@@ -460,36 +544,12 @@ height ``z``, repeatedly doubling the number of steps until the pressure at ``z`
 by less than the relative `tolerance` between successive refinements. `dpdz(z, p)` returns
 the local pressure gradient ``-g ρ`` given height and pressure.
 """
-function converged_hydrostatic_pressure(z, p₀, dpdz;
-                                        tolerance = sqrt(eps(float(typeof(p₀)))),
-                                        initial_steps = 16,
-                                        max_steps = 1 << 16)
-    z == 0 && return p₀
-
-    integrate(nsteps) = begin
-        dz = z / nsteps
-        half_dz = dz / 2
-        p = p₀
-        for i in 1:nsteps
-            zₗ = (i - 1) * dz
-            k₁ = dpdz(zₗ, p)
-            k₂ = dpdz(zₗ + half_dz, p + k₁ * half_dz)
-            p += k₂ * dz
-        end
-        return p
-    end
-
-    nsteps = initial_steps
-    p_coarse = integrate(nsteps)
-    while nsteps < max_steps
-        nsteps *= 2
-        p_fine = integrate(nsteps)
-        abs(p_fine - p_coarse) ≤ tolerance * abs(p_fine) && return p_fine
-        p_coarse = p_fine
-    end
-
-    return p_coarse
-end
+converged_hydrostatic_pressure(z, p₀, dpdz;
+                               tolerance = sqrt(eps(float(typeof(p₀)))),
+                               initial_steps = 16,
+                               max_steps = 1 << 16) =
+    converge_by_step_doubling(nsteps -> runge_kutta2_integral(z, p₀, dpdz, nsteps),
+                              p₀, z, tolerance, initial_steps, max_steps)
 
 """
 $(TYPEDSIGNATURES)
@@ -521,8 +581,7 @@ function moist_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
         return -g * p / (Rᵐⁿ * Tⁿ)
     end
 
-    return converged_hydrostatic_pressure(z, p₀, dpdz;
-                                          tolerance = sqrt(eps(float(typeof(p₀)))))
+    return converged_hydrostatic_pressure(z, p₀, dpdz)
 end
 
 """
@@ -597,7 +656,10 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
                         discrete_hydrostatic_balance = false,
                         vapor_mass_fraction = nothing,
                         liquid_mass_fraction = nothing,
-                        ice_mass_fraction = nothing)
+                        ice_mass_fraction = nothing,
+                        surface_pressure = nothing)
+
+    reject_renamed_surface_pressure(surface_pressure)
 
     FT = eltype(grid)
     p₀ = convert(FT, base_pressure)
@@ -614,6 +676,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     zˢ = bottom_face_height(grid)
     pˢ = surface_state_field(grid, convert(FT, hydrostatic_pressure(zˢ, p₀, θᵣ, pˢᵗ, constants)))
     ρˢ = surface_state_field(grid, convert(FT, hydrostatic_density(zˢ, p₀, θᵣ, pˢᵗ, constants)))
+    Tˢ = surface_state_field(grid, convert(FT, hydrostatic_temperature(zˢ, p₀, θᵣ, pˢᵗ, constants)))
 
     ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(ρˢ)))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
@@ -634,7 +697,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     set!(Tᵣ, z -> hydrostatic_temperature(z, p₀, θᵣ, pˢᵗ, constants))
     fill_halo_regions!(Tᵣ)
 
-    return ReferenceState(p₀, pˢ, ρˢ, θ₀, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
+    return ReferenceState(p₀, pˢ, ρˢ, Tˢ, θ₀, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
 end
 
 #####
@@ -956,7 +1019,10 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
                              potential_temperature = 288,
                              reference_temperature = nothing,
                              standard_pressure = 1e5,
-                             vapor_mass_fraction = nothing)
+                             vapor_mass_fraction = nothing,
+                             surface_pressure = nothing)
+
+    reject_renamed_surface_pressure(surface_pressure)
 
     FT = eltype(grid)
     arch = architecture(grid)

@@ -124,7 +124,10 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               terrain_metrics = nothing,
                               reference_state = :auto,
                               temperature_tolerance = nothing,
-                              temperature_maxiter = nothing) where TD
+                              temperature_maxiter = nothing,
+                              surface_pressure = nothing) where TD
+
+    reject_renamed_surface_pressure(surface_pressure)
 
     if temperature_tolerance !== nothing || temperature_maxiter !== nothing
         throw(ArgumentError("The `temperature_tolerance` and `temperature_maxiter` keyword arguments \

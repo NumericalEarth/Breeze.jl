@@ -13,6 +13,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
     PlanarLiquidSurface,
     with_moisture, mixture_heat_capacity, density,
+    reject_renamed_surface_pressure,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
@@ -155,7 +156,9 @@ constructing the `AtmosphereModel`.
 function ParcelDynamics(FT::DataType=Oceananigans.defaults.FloatType;
                         vertical_velocity_formulation = PrescribedVerticalVelocity(),
                         base_pressure = 101325,
-                        standard_pressure = 1e5)
+                        standard_pressure = 1e5,
+                        surface_pressure = nothing)
+    reject_renamed_surface_pressure(surface_pressure)
     U = typeof(vertical_velocity_formulation)
     return ParcelDynamics{Nothing, Nothing, Nothing, Nothing, U, FT}(
         nothing,

@@ -90,19 +90,13 @@ end
 $(TYPEDSIGNATURES)
 
 Default surface temperature for `BulkDrag` under `AnelasticDynamics`: the
-reference-state temperature at the bottom face of the domain, recovered from
-the bottom-face pressure and density using the dry ideal-gas law.
+reference-state temperature at the bottom face of the domain.
 
 Used only when the user constructs `BulkDrag` without an explicit
 `surface_temperature`. The result is a horizontally uniform scalar.
 """
-function AtmosphereModels.default_drag_surface_temperature(dynamics::AnelasticDynamics, grid, constants)
-    ref = dynamics.reference_state
-    Rᵈ = dry_air_gas_constant(constants)
-    pˢ = surface_pressure_value(ref)
-    ρˢ = surface_density(ref)
-    return pˢ / (Rᵈ * ρˢ)
-end
+AtmosphereModels.default_drag_surface_temperature(dynamics::AnelasticDynamics, grid, constants) =
+    surface_temperature_value(dynamics.reference_state)
 
 #####
 ##### Density and pressure access interface

@@ -29,6 +29,7 @@ using ..Thermodynamics:
     Thermodynamics,
     ThermodynamicConstants,
     ReferenceState,
+    reject_renamed_surface_pressure,
     mixture_heat_capacity,
     mixture_gas_constant,
     saturation_specific_humidity,
@@ -90,7 +91,10 @@ function MoistAirBuoyancy(grid;
                           base_pressure = 101325,
                           reference_potential_temperature = 288,
                           standard_pressure = 1e5,
-                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)))
+                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
+                          surface_pressure = nothing)
+
+    reject_renamed_surface_pressure(surface_pressure)
 
     reference_state = ReferenceState(grid, thermodynamic_constants;
                                      base_pressure,
