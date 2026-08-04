@@ -476,43 +476,27 @@ AtmosphereModels.base_pressure(dynamics::CompressibleDynamics) = dynamics.base_p
 """
 $(TYPEDSIGNATURES)
 
+Return the reference pressure at the bottom face of each column, as a 2D field. Requires a
+materialized reference state: with `reference_state = nothing` there is no reference atmosphere
+whose ground pressure could be reported.
+"""
+AtmosphereModels.surface_pressure(dynamics::CompressibleDynamics) =
+    compressible_surface_pressure(dynamics.reference_state)
+
+compressible_surface_pressure(reference_state::ExnerReferenceState) = reference_state.surface_pressure
+
+compressible_surface_pressure(reference_state) =
+    throw(ArgumentError("CompressibleDynamics with reference_state=$(summary(reference_state)) carries \
+                         no materialized reference-state surface pressure"))
+
+"""
+$(TYPEDSIGNATURES)
+
 Return the standard pressure for potential temperature calculations.
 """
 AtmosphereModels.standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
 
 AtmosphereModels.dynamics_reference_state(dynamics::CompressibleDynamics) = dynamics.reference_state
-
-"""
-$(TYPEDSIGNATURES)
-
-Return a reference state suitable for boundary-condition diagnostics.
-
-Boundary conditions are materialized before `materialize_dynamics` runs, so the
-stub `CompressibleDynamics.reference_state` field still holds the reference *spec*
-rather than an `ExnerReferenceState`. This method builds explicit and automatic
-references on demand using the same grid-dependent logic as `materialize_dynamics`,
-so boundary conditions that require a reference profile can be materialized before
-the dynamics. When the reference is disabled (`nothing`) or the dynamics has already
-been materialized, the existing value is returned.
-"""
-function AtmosphereModels.boundary_conditions_reference_state(dynamics::CompressibleDynamics, grid, thermodynamic_constants)
-    ref_spec = dynamics.reference_state
-    ref_spec === nothing && return nothing
-    ref_spec isa ExnerReferenceState && return ref_spec
-
-    standard_pressure = dynamics.standard_pressure
-    base_pressure = dynamics.base_pressure
-    terrain_metrics = materialize_terrain_metrics(dynamics, grid)
-    reference_profile = ref_spec isa AutoReference ? eltype(grid)(288) : ref_spec
-
-    return build_reference_state(grid, terrain_metrics, reference_profile,
-                                 base_pressure, standard_pressure, thermodynamic_constants)
-end
-
-# Compressible pressure and density are prognostic. Surface-layer stability must therefore read
-# the live fields supplied to the boundary-condition kernel, not a separately constructed
-# reference profile used only while the model is being assembled.
-AtmosphereModels.boundary_conditions_thermodynamic_state(::CompressibleDynamics, grid, constants) = nothing
 
 """
 $(TYPEDSIGNATURES)

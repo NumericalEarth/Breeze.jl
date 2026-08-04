@@ -168,8 +168,9 @@ function AtmosphereModel(grid;
     default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
-    # Pre-create diagnostic fields needed for VirtualPotentialTemperature
-    # (used in stability-dependent boundary conditions like PolynomialCoefficient)
+    # Pre-create the temperature field. Stability-dependent boundary conditions like
+    # `PolynomialCoefficient` read it from the model field tuple at evaluation time, but the field
+    # itself has to exist before they are materialized.
     temperature = CenterField(grid)
 
     # Regularize boundary conditions for grid topology before creating microphysical fields
@@ -179,12 +180,13 @@ function AtmosphereModel(grid;
     # Create temporary microphysical fields for BC materialization (using pre-regularized BCs)
     preliminary_microphysical_fields = materialize_microphysical_fields(microphysics, grid, field_boundary_conditions)
 
-    # Materialize atmosphere-specific boundary conditions (fill in VPT diagnostic,
-    # thermodynamic constants, convert ρe → ρθ for potential temperature formulations).
-    # Surface fluxes diagnose their pressure from the live model fields at evaluation time.
+    # Materialize atmosphere-specific boundary conditions (fill in the surface-layer θᵥ
+    # diagnostic, thermodynamic constants, convert ρe → ρθ for potential temperature
+    # formulations). Surface fluxes diagnose their pressure, density and θᵥ from the live model
+    # fields at evaluation time, so nothing about the model state is captured here.
     p₀ = base_pressure(dynamics)
     # Pass preliminary microphysical fields for BC materialization; the qᵛ field within
-    # provides the specific_prognostic_moisture reference needed by VirtualPotentialTemperature.
+    # provides the specific_prognostic_moisture reference the surface-layer θᵥ needs.
     specific_moisture_field = haskey(preliminary_microphysical_fields, :qᵛ) ? preliminary_microphysical_fields.qᵛ : CenterField(grid)
     boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
                                                                            dynamics, microphysics, p₀, thermodynamic_constants,
@@ -537,13 +539,20 @@ combine_forcing_values(a, b) = (a, b)
 $(TYPEDSIGNATURES)
 
 The non-prognostic thermodynamic fields exposed alongside the prognostic ones by
-`Oceananigans.fields(model)`: temperature, and the total pressure and density of the dynamics.
-Surface-flux boundary conditions read `p` and `ρ` from here to diagnose their surface state,
-and forcings resolve them positionally, so every site that assembles the model's field tuple
-must obtain them here rather than rebuild the tuple.
+`Oceananigans.fields(model)`: temperature, and the pressure and density the model's own
+thermodynamics is evaluated with. Surface-flux boundary conditions read `p` and `ρ` from here to
+diagnose their surface state, and forcings resolve them positionally, so every site that assembles
+the model's field tuple must obtain them here rather than rebuild the tuple.
+
+These are [`dynamics_pressure`](@ref) and [`total_density`](@ref), both of which are always
+actual `Field`s: prognostic under `CompressibleDynamics`, the hydrostatic reference profile under
+`AnelasticDynamics`. Deliberately *not* [`total_pressure`](@ref), which for anelastic dynamics is a
+lazy sum that would put an `AbstractOperation` into `Oceananigans.fields(model)` and rebuild it on
+every halo fill — and whose nonhydrostatic anomaly is a Lagrange multiplier defined only up to a
+constant, so no surface diagnostic should depend on it.
 """
 auxiliary_model_fields(temperature, dynamics) =
-    (; T=temperature, p=total_pressure(dynamics), ρ=total_density(dynamics))
+    (; T=temperature, p=dynamics_pressure(dynamics), ρ=total_density(dynamics))
 
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)

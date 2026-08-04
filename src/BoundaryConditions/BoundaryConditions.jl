@@ -26,8 +26,8 @@ export BulkDragFunction,
        default_neutral_latent_heat_polynomial
 
 using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density,
-                          standard_pressure, boundary_conditions_thermodynamic_state,
-                          default_drag_surface_temperature, moisture_specific_name
+                          standard_pressure, default_drag_surface_temperature,
+                          moisture_specific_name
 using ..AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
                                       virtual_potential_temperature
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
@@ -289,11 +289,9 @@ materialize_coefficient(C, grid, dynamics, microphysics, base_pressure, constant
 function materialize_coefficient(coef::PolynomialCoefficient, grid, dynamics, microphysics,
                                  base_pressure, constants, microphysical_fields,
                                  specific_prognostic_moisture, temperature, transfer_type)
-    thermodynamic_state = boundary_conditions_thermodynamic_state(dynamics, grid, constants)
     pˢᵗ = standard_pressure(dynamics)
     moisture_name = Val(moisture_specific_name(microphysics))
-    θᵥ = BoundaryVirtualPotentialTemperature(thermodynamic_state, microphysics,
-                                              moisture_name, pˢᵗ, constants)
+    θᵥ = BoundaryVirtualPotentialTemperature(microphysics, moisture_name, pˢᵗ, constants)
 
     return PolynomialCoefficient(coef.polynomial,
                                  coef.roughness_length,

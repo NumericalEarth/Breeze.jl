@@ -16,15 +16,15 @@ If `formulation` is `:LiquidIcePotentialTemperature` and `ρe` boundary conditio
 they are automatically converted to `ρθ` boundary conditions by wrapping flux BCs in
 `EnergyFluxBoundaryCondition`, which divides by the local mixture heat capacity.
 
-The `dynamics` argument provides access to the reference state for boundary conditions
-that require it, such as `VirtualPotentialTemperature` diagnostics.
+The `dynamics` argument provides the standard pressure, and the `base_pressure` datum, that
+boundary conditions need at materialization time.
 
 The `microphysics` argument specifies the microphysics scheme used to compute moisture
 fractions for mixture heat capacity and virtual potential temperature calculations.
 
-The `microphysical_fields`, `specific_prognostic_moisture`, and `temperature` arguments are pre-created
-fields used to construct the `VirtualPotentialTemperature` diagnostic for stability-dependent
-boundary conditions.
+The `microphysical_fields`, `specific_prognostic_moisture`, and `temperature` arguments are
+pre-created fields that stability-dependent boundary conditions need to exist before they are
+materialized, even though they read them from the model field tuple at evaluation time.
 """
 function materialize_atmosphere_model_boundary_conditions end
 

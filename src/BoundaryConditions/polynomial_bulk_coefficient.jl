@@ -358,8 +358,21 @@ end
 ##### PolynomialCoefficient struct
 #####
 
-struct BoundaryVirtualPotentialTemperature{S, M, N, FT, TC}
-    thermodynamic_state :: S
+"""
+$(TYPEDSIGNATURES)
+
+The virtual potential temperature a stability-dependent bulk boundary condition compares against
+its surface value, evaluated from the model field tuple the boundary-condition kernel is handed
+rather than from fields captured at construction.
+
+Boundary conditions are materialized before the dynamics is, so there are no model fields to
+capture at that point; deferring the read is what lets a compressible model's stability correction
+follow its prognostic pressure and density. The `p` and `ρ` entries come from
+`AtmosphereModels.auxiliary_model_fields`, so this reads the same thermodynamic pressure the rest
+of the model does: prognostic under `CompressibleDynamics`, the hydrostatic reference profile under
+`AnelasticDynamics`.
+"""
+struct BoundaryVirtualPotentialTemperature{M, N, FT, TC}
     microphysics :: M
     specific_moisture_name :: N
     standard_pressure :: FT
@@ -367,27 +380,10 @@ struct BoundaryVirtualPotentialTemperature{S, M, N, FT, TC}
 end
 
 Adapt.adapt_structure(to, θᵥ::BoundaryVirtualPotentialTemperature) =
-    BoundaryVirtualPotentialTemperature(Adapt.adapt(to, θᵥ.thermodynamic_state),
-                                        Adapt.adapt(to, θᵥ.microphysics),
+    BoundaryVirtualPotentialTemperature(Adapt.adapt(to, θᵥ.microphysics),
                                         Adapt.adapt(to, θᵥ.specific_moisture_name),
                                         Adapt.adapt(to, θᵥ.standard_pressure),
                                         Adapt.adapt(to, θᵥ.thermodynamic_constants))
-
-@inline function boundary_pressure_and_density(i, j, k, fields, ::Nothing)
-    @inbounds begin
-        p = fields.p[i, j, k]
-        ρ = fields.ρ[i, j, k]
-    end
-    return p, ρ
-end
-
-@inline function boundary_pressure_and_density(i, j, k, fields, state)
-    @inbounds begin
-        p = state.pressure[i, j, k]
-        ρ = state.density[i, j, k]
-    end
-    return p, ρ
-end
 
 @inline function boundary_specific_moisture(i, j, k, fields, ::Val{name}) where name
     moisture = getproperty(fields, name)
@@ -395,8 +391,11 @@ end
 end
 
 @inline function (θᵥ::BoundaryVirtualPotentialTemperature)(i, j, k, grid, fields)
-    p, ρ = boundary_pressure_and_density(i, j, k, fields, θᵥ.thermodynamic_state)
-    T = @inbounds fields.T[i, j, k]
+    @inbounds begin
+        p = fields.p[i, j, k]
+        ρ = fields.ρ[i, j, k]
+        T = fields.T[i, j, k]
+    end
     qᵛᵉ = boundary_specific_moisture(i, j, k, fields, θᵥ.specific_moisture_name)
     q = grid_moisture_fractions(i, j, k, grid, θᵥ.microphysics, ρ, qᵛᵉ, fields)
     return virtual_potential_temperature(T, p, θᵥ.standard_pressure, q,

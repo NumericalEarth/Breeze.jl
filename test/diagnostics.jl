@@ -3,8 +3,9 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Test
 using Breeze
 using Breeze.Thermodynamics: dry_air_gas_constant, adiabatic_hydrostatic_pressure,
-                             mixture_gas_constant, MoistureMassFractions
-using Breeze.AtmosphereModels: standard_pressure
+                             mixture_gas_constant, MoistureMassFractions,
+                             surface_pressure_from_cell_center
+using Breeze.AtmosphereModels: standard_pressure, total_density, total_pressure
 using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using GPUArraysCore: @allowscalar
@@ -248,6 +249,18 @@ end
     # Compute hydrostatic pressure
     ph = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
 
+    # `compute_hydrostatic_pressure!` anchors each column at the pressure it *diagnoses* at that
+    # column's bottom face, by extrapolating the first cell center down half a cell — so that it
+    # follows the terrain surface instead of assuming the reference datum sits at the ground. On
+    # this z = 0 domain the diagnosed anchor recovers p₀ only to the O((Δz / 2H)²) truncation of
+    # that extrapolation, so the anchor and the column integration are checked separately, each to
+    # the accuracy it actually has.
+    Δz₁ = @allowscalar Δzᶜᶜᶜ(1, 1, 1, grid)
+    p¹ = @allowscalar total_pressure(model.dynamics)[1, 1, 1]
+    ρ¹ = @allowscalar total_density(model.dynamics)[1, 1, 1]
+    pˢ = surface_pressure_from_cell_center(p¹, ρ¹, Δz₁, g)
+    @test pˢ ≈ p₀ rtol=1e-3
+
     # Expected cell-mean pressure for isothermal atmosphere:
     # p_mean = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H))
     # where H = Rᵈ * T₀ / g is the scale height
@@ -255,7 +268,7 @@ end
     H = Rᵈ * T₀ / g
 
     @allowscalar begin
-        p_interface_bottom = p₀
+        p_interface_bottom = pˢ
         for k in 1:grid.Nz
             Δz = Δzᶜᶜᶜ(1, 1, k, grid)
             p_expected[1, 1, k] = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H))

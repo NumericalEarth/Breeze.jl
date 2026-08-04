@@ -35,7 +35,8 @@ using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_density
 using Breeze.Thermodynamics: ReferenceState, column_surface_pressure,
-                             field_with_bottom_value, surface_pressure_from_cell_center
+                             surface_boundary_value, surface_pressure_from_cell_center,
+                             surface_state_field
 
 include("prescribed_dynamics.jl")
 

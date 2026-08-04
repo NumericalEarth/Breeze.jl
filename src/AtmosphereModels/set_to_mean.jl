@@ -1,14 +1,13 @@
 using ..Thermodynamics: ReferenceState, ExnerReferenceState, compute_hydrostatic_reference!,
                         _compute_exner_reference!, _compute_exner_reference_3d!,
                         bottom_face_height, constant_moist_hydrostatic_pressure,
-                        moist_hydrostatic_pressure, dry_air_gas_constant,
-                        moist_reference_constants, vapor_gas_constant,
-                        field_with_bottom_value
+                        is_column_reference, moist_hydrostatic_pressure, dry_air_gas_constant,
+                        surface_reference_density, vapor_gas_constant
 using Oceananigans: CenterField
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Fields: interior, ZeroField, Field
+using Oceananigans.Fields: interior, set!, ZeroField, Field
 using Oceananigans.Grids: Center, Face, znode
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 using GPUArraysCore: @allowscalar
@@ -161,48 +160,44 @@ end
                                                                 pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
 end
 
-function update_scalar_reference_boundary_conditions!(ref, θˢ, qᵛˢ, constants)
+"""
+$(TYPEDSIGNATURES)
+
+Rewrite the bottom-face pressure and density of an `ExnerReferenceState` from the horizontal-mean
+near-surface state `(θˢ, qᵛˢ)`, in place.
+
+The datum is reduced with [`moist_hydrostatic_pressure`](@ref) — the same function the constructor
+anchors on — so a reset lands on the profile the constructor would have produced from this mean
+state. `set_to_mean!` is only reached on a height-coordinate grid, whose bottom face is a single
+level, so a horizontally uniform reduction is exact; terrain-following resets go through
+`reset_reference_state!`, which reduces the datum per column along the terrain.
+"""
+function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, constants)
+    FT  = eltype(ref)
     Rᵈ  = dry_air_gas_constant(constants)
     Rᵛ  = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
-    Rᵐ, _, κᵐ = moist_reference_constants(qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-    pˢ = ref.surface_pressure
-    Πˢ = (pˢ / ref.standard_pressure)^κᵐ
-    ρˢ = pˢ / (Rᵐ * θˢ * Πˢ)
-    ref.pressure = field_with_bottom_value(ref.pressure, pˢ)
-    ref.density = field_with_bottom_value(ref.density, ρˢ)
+
+    θˢ, qᵛˢ = @allowscalar (θ[1, 1, 1], qᵛ[1, 1, 1])
+    zˢ = bottom_face_height(grid)
+    pˢ = convert(FT, moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ,
+                                                ref.standard_pressure, constants))
+
+    set!(ref.surface_pressure, pˢ)
+    fill_halo_regions!(ref.surface_pressure)
+    update_exner_surface_density!(ref, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
     return nothing
 end
 
-function update_surface_pressure!(ref::ExnerReferenceState, θ, qᵛ, grid, constants)
-    θˢ, qᵛˢ = @allowscalar (θ[1, 1, 1], qᵛ[1, 1, 1])
-    ref.surface_potential_temperature = convert(eltype(ref), θˢ)
+# The 3D form carries no bottom boundary value on `density`, so there is nothing to update.
+update_exner_surface_density!(ref::ExnerReferenceState{<:Any, <:Any, Nothing},
+                                  pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ) = nothing
 
-    if ref.surface_pressure isa Number
-        # Reduce the datum with the same function the constructor anchors on, so a reset lands on
-        # the profile the constructor would have produced from this mean state.
-        zˢ = bottom_face_height(grid)
-        ref.surface_pressure = convert(eltype(ref),
-            moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ,
-                                       ref.standard_pressure, constants))
-        if size(ref.pressure, 1) == 1 && size(ref.pressure, 2) == 1
-            update_scalar_reference_boundary_conditions!(ref, θˢ, qᵛˢ, constants)
-        end
-    else
-        Rᵈ  = dry_air_gas_constant(constants)
-        Rᵛ  = vapor_gas_constant(constants)
-        cᵖᵈ = constants.dry_air.heat_capacity
-        cᵖᵛ = constants.vapor.heat_capacity
-        g   = constants.gravitational_acceleration
-
-        arch = architecture(grid)
-        launch!(arch, grid, :xy, _compute_surface_pressure_from_base!,
-                ref.surface_pressure, grid, θ, qᵛ, ref.base_pressure, ref.standard_pressure,
-                Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
-        fill_halo_regions!(ref.surface_pressure)
-    end
-
+function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    ρˢ = surface_reference_density(pˢ, θˢ, qᵛˢ, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    set!(ref.surface_density, convert(eltype(ref), ρˢ))
+    fill_halo_regions!(ref.surface_density)
     return nothing
 end
 
@@ -240,18 +235,15 @@ function set_to_mean!(ref::ExnerReferenceState, model)
     cᵖᵛ = constants.vapor.heat_capacity
     g   = constants.gravitational_acceleration
 
-    update_surface_pressure!(ref, θ̄, q̄ᵛ, grid, constants)
+    update_exner_surface_state!(ref, θ̄, q̄ᵛ, grid, constants)
 
-    if ref.surface_pressure isa Number
+    if is_column_reference(ref)
         launch!(arch, grid, tuple(1), _compute_exner_reference!,
                 ref.exner_function, ref.pressure, ref.density, θ̄, q̄ᵛ, grid, Nz,
                 ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
-
-        if size(ref.pressure, 1) > 1 || size(ref.pressure, 2) > 1
-            launch!(arch, grid, :xyz, _broadcast_exner_reference_column!,
-                    ref.exner_function, ref.pressure, ref.density)
-        end
     else
+        # A 3D reference on a height-coordinate grid: the mean profile is horizontally uniform, but
+        # the fields are per-column, so integrate each column from the (uniform) bottom-face anchor.
         launch!(arch, grid, :xy, _compute_exner_reference_3d!,
                 ref.exner_function, ref.pressure, ref.density, θ̄, q̄ᵛ, grid, Nz,
                 ref.surface_pressure, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
@@ -264,15 +256,6 @@ function set_to_mean!(ref::ExnerReferenceState, model)
     # Recompute all diagnostics (T, qᵗ, u, v, w, …) consistent with the new reference.
     TimeSteppers.update_state!(model; compute_tendencies=false)
     return nothing
-end
-
-@kernel function _broadcast_exner_reference_column!(πᵣ, pᵣ, ρᵣ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        πᵣ[i, j, k] = πᵣ[1, 1, k]
-        pᵣ[i, j, k] = pᵣ[1, 1, k]
-        ρᵣ[i, j, k] = ρᵣ[1, 1, k]
-    end
 end
 
 """
@@ -337,6 +320,10 @@ HydrostaticallyBalancedDensity(; surface_pressure = nothing) = HydrostaticallyBa
 
 default_hydrostatic_surface_pressure(model, θ, qᵛ, ref::ExnerReferenceState) = ref.surface_pressure
 
+# Without a reference state there is no callable profile to integrate below the domain bottom, so
+# the datum is reduced along the constant-θ layer implied by each column's own lowest cell. That is
+# the only reduction the model state supports here, and it agrees with the profile-integrating
+# `moist_hydrostatic_pressure` used elsewhere whenever θ really is constant.
 function default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state)
     grid = model.grid
     arch = architecture(grid)

@@ -12,6 +12,7 @@ using Breeze.Thermodynamics:
     dry_air_gas_constant,
     hydrostatic_density,
     hydrostatic_pressure,
+    surface_pressure_value,
     vapor_gas_constant,
     saturation_specific_humidity,
     PlanarLiquidSurface
@@ -780,14 +781,14 @@ end
         pˢ_expected = hydrostatic_pressure(FT(z_bottom), FT(p₀), FT(θ₀), FT(pˢᵗ), constants)
         ρˢ_expected = hydrostatic_density(FT(z_bottom), FT(p₀), FT(θ₀), FT(pˢᵗ), constants)
         p₁_expected = hydrostatic_pressure(FT(z₁), FT(p₀), FT(θ₀), FT(pˢᵗ), constants)
-        @test anelastic.surface_pressure ≈ pˢ_expected rtol=1e-5
+        @test surface_pressure_value(anelastic) ≈ pˢ_expected rtol=1e-5
         @test @allowscalar(interior(anelastic.pressure)[1, 1, 1]) ≈ p₁_expected rtol=1e-4
         @test @allowscalar(ℑzᵃᵃᶠ(1, 1, 1, raised_grid, anelastic.pressure)) ≈ pˢ_expected rtol=1e-5
         @test surface_density(anelastic) ≈ ρˢ_expected rtol=1e-5
 
         anelastic_dynamics = AnelasticDynamics(anelastic)
         Tˢ_expected = pˢ_expected / (Rᵈ * ρˢ_expected)
-        @test Breeze.AtmosphereModels.surface_pressure(anelastic_dynamics) ≈ pˢ_expected
+        @test @allowscalar(Breeze.AtmosphereModels.surface_pressure(anelastic_dynamics)[1, 1, 1]) ≈ pˢ_expected
         @test Breeze.AtmosphereModels.default_drag_surface_temperature(anelastic_dynamics,
                                                                        raised_grid,
                                                                        constants) ≈ Tˢ_expected
@@ -799,7 +800,7 @@ end
                                     potential_temperature=θ₀, vapor_mass_fraction=0)
         compute_reference_state!(recomputed, T_reset, FT(0), constants)
         pˢ_reset = FT(p₀) * exp(-g * FT(z_bottom) / (Rᵈ * T_reset))
-        @test recomputed.surface_pressure ≈ pˢ_reset rtol=1e-5
+        @test surface_pressure_value(recomputed) ≈ pˢ_reset rtol=1e-5
         @test @allowscalar(ℑzᵃᵃᶠ(1, 1, 1, raised_grid, recomputed.pressure)) ≈ pˢ_reset rtol=1e-5
 
         # Isentropic: the closed-form adiabatic profile from the datum, evaluated at the
@@ -813,9 +814,9 @@ end
         # to the domain bottom — a ~20 kPa reduction over 2 km that the old bottom-face reading
         # dropped entirely.
         @test isentropic.base_pressure == FT(p₀)
-        @test isentropic.surface_pressure ≈ hydrostatic_pressure(FT(z_bottom), FT(p₀), FT(θ₀),
-                                                                     FT(pˢᵗ), constants) rtol=1e-5
-        @test isentropic.surface_pressure < FT(p₀) - 10000
+        @test surface_pressure_value(isentropic) ≈ hydrostatic_pressure(FT(z_bottom), FT(p₀), FT(θ₀),
+                                                                      FT(pˢᵗ), constants) rtol=1e-5
+        @test surface_pressure_value(isentropic) < FT(p₀) - 10000
 
         # Isothermal: the analytic isothermal profile from the same datum. The two constructors
         # of `ExnerReferenceState` must agree on where `base_pressure` lives, which they do
@@ -825,16 +826,16 @@ end
                                          reference_temperature=T₀, standard_pressure=pˢᵗ)
         @test @allowscalar(interior(isothermal.pressure)[1, 1, 1]) ≈
               p₀ * exp(-g * z₁ / (Rᵈ * T₀)) rtol=1e-5
-        @test isothermal.surface_pressure ≈ p₀ * exp(-g * z_bottom / (Rᵈ * T₀)) rtol=1e-5
+        @test surface_pressure_value(isothermal) ≈ p₀ * exp(-g * z_bottom / (Rᵈ * T₀)) rtol=1e-5
 
         # On the usual domain starting at z = 0 the datum *is* the bottom-face pressure, so
         # nothing about the common case moves.
         grounded = ExnerReferenceState(grid, constants; base_pressure=p₀,
                                        potential_temperature=θ₀, standard_pressure=pˢᵗ)
-        @test grounded.surface_pressure == FT(p₀)
+        @test surface_pressure_value(grounded) == FT(p₀)
 
         # Resetting the mean state changes the profile used to reduce the fixed z = 0 datum.
-        # The bottom-face anchor and its boundary value must therefore be rebuilt as well.
+        # The bottom-face anchor and its boundary value must therefore be rewritten as well.
         θ_reset = 300
         dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                         base_pressure=p₀,
@@ -847,7 +848,7 @@ end
         ref = model.dynamics.reference_state
         pˢ_expected = hydrostatic_pressure(FT(z_bottom), FT(p₀), FT(θ_reset), FT(pˢᵗ), constants)
         p₁_expected = hydrostatic_pressure(FT(z₁), FT(p₀), FT(θ_reset), FT(pˢᵗ), constants)
-        @test ref.surface_pressure ≈ pˢ_expected rtol=2e-5
+        @test surface_pressure_value(ref) ≈ pˢ_expected rtol=2e-5
         @test @allowscalar(interior(ref.pressure)[1, 1, 1]) ≈ p₁_expected rtol=2e-4
         @test @allowscalar(ℑzᵃᵃᶠ(1, 1, 1, raised_grid, ref.pressure)) ≈ pˢ_expected rtol=2e-5
     end

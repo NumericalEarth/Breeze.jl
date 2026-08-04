@@ -1,7 +1,7 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
-using Oceananigans.Fields: CenterField, ZeroField
+using Oceananigans.Fields: AbstractField, CenterField, ZeroField, interior
 using Oceananigans.Grids: znode, Face
 using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ
@@ -15,9 +15,10 @@ using KernelAbstractions: @kernel, @index
 ##### Reference state computations for Boussinesq and Anelastic models
 #####
 
-mutable struct ReferenceState{FT, P, D, T, QV, QL, QI}
+struct ReferenceState{FT, SP, SD, P, D, T, QV, QL, QI}
     base_pressure :: FT # p₀: the datum, reference pressure at z=0 (not the pressure at the ground)
-    surface_pressure :: FT # pˢ: reference pressure at the bottom face of the domain
+    surface_pressure :: SP # pˢ: reference pressure at the bottom face, a 2D field
+    surface_density :: SD # ρˢ: reference density at the bottom face, a 2D field
     potential_temperature :: FT  # reference potential temperature at z=0
     standard_pressure :: FT # pˢᵗ: reference pressure for potential temperature (default 1e5)
     pressure :: P
@@ -31,6 +32,7 @@ end
 Adapt.adapt_structure(to, ref::ReferenceState) =
     ReferenceState(adapt(to, ref.base_pressure),
                    adapt(to, ref.surface_pressure),
+                   adapt(to, ref.surface_density),
                    adapt(to, ref.potential_temperature),
                    adapt(to, ref.standard_pressure),
                    adapt(to, ref.pressure),
@@ -210,14 +212,58 @@ end
     end
 end
 
-function field_with_bottom_value(field, value)
-    grid = field.grid
-    loc = Oceananigans.instantiated_location(field)
-    bcs = FieldBoundaryConditions(grid, loc, field.indices; bottom=ValueBoundaryCondition(value))
-    return Field(loc, grid, field.data, bcs, field.indices, field.operand, field.status)
+"""
+$(TYPEDSIGNATURES)
+
+A 2D `(Center, Center, Nothing)` field holding a surface (bottom-face) quantity, initialized to
+`value`. Bottom-face quantities are stored in fields rather than as plain scalars so that the
+`ValueBoundaryCondition` of the reference `pressure`/`density` can point at them once, at
+construction: a reference reset then writes new boundary values *into the field* and the boundary
+condition follows, with no need to rebuild the reference state or its fields. That is what keeps
+the reference states immutable, and therefore `isbits` after `Adapt`, which they must be because
+the dynamics that owns them is passed directly to GPU kernels.
+"""
+function surface_state_field(grid, value)
+    field = Field{Center, Center, Nothing}(grid)
+    set!(field, value)
+    fill_halo_regions!(field)
+    return field
 end
 
-function update_reference_surface_boundary_conditions!(ref::ReferenceState, constants)
+"""
+$(TYPEDSIGNATURES)
+
+A surface quantity in the form Oceananigans' array-valued boundary conditions expect: a genuinely
+two-dimensional, 1-based ``(Nx, Ny)`` array, which is how `getbc` indexes an array condition
+(`condition[i, j]`) and how `Adapt` carries one to the GPU. A `Field{Center, Center, Nothing}` is
+*not* that — its data is three-dimensional with a singleton third dimension — so the field is
+viewed rather than passed directly.
+
+The view aliases the field's memory, which is the point: writing new surface values into the field
+updates every boundary condition built from it, with no need to rebuild the field or the reference
+state that owns it.
+"""
+surface_boundary_value(field::AbstractField) = view(interior(field), :, :, 1)
+surface_boundary_value(value::Number) = value
+
+"""
+$(TYPEDSIGNATURES)
+
+The horizontally uniform bottom-face pressure of `ref` as a scalar. Only valid for a reference
+whose bottom face is a single level (any height-coordinate grid); over terrain the bottom-face
+pressure varies by column and `ref.surface_pressure` must be read as a field.
+"""
+surface_pressure_value(ref) = @allowscalar ref.surface_pressure[1, 1, 1]
+
+# Reduce the z = 0 datum to the bottom face along the *isothermal* layer implied by the first
+# level's mixture temperature. This must match how `_compute_hydrostatic_reference!` takes its own
+# first step — it integrates d(ln p)/dz = -g/(Rᵐ T) from z = 0 with `Rᵐ¹ T¹` over the whole gap —
+# or the stored ground pressure would not lie on the profile it anchors. A `ReferenceState` is
+# parameterized by T(z) and holds no data below its bottom face, so extending T¹ downward is the
+# only reduction available here; the θ-parameterized `ExnerReferenceState` integrates its profile
+# instead (see `moist_hydrostatic_pressure`).
+function update_reference_surface_state!(ref::ReferenceState, constants)
+    FT = eltype(ref)
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
     g = constants.gravitational_acceleration
@@ -235,9 +281,10 @@ function update_reference_surface_boundary_conditions!(ref::ReferenceState, cons
     pˢ = ref.base_pressure * exp(-g * zˢ / (Rᵐ¹ * T¹))
     ρˢ = pˢ / (Rᵐ¹ * T¹)
 
-    ref.surface_pressure = convert(eltype(ref), pˢ)
-    ref.pressure = field_with_bottom_value(ref.pressure, ref.surface_pressure)
-    ref.density = field_with_bottom_value(ref.density, convert(eltype(ref), ρˢ))
+    set!(ref.surface_pressure, convert(FT, pˢ))
+    set!(ref.surface_density, convert(FT, ρˢ))
+    fill_halo_regions!(ref.surface_pressure)
+    fill_halo_regions!(ref.surface_density)
     return nothing
 end
 
@@ -252,7 +299,7 @@ The integration uses the mixture gas constant `Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ`
 """
 function compute_hydrostatic_reference!(ref::ReferenceState, constants)
     grid = ref.pressure.grid
-    update_reference_surface_boundary_conditions!(ref, constants)
+    update_reference_surface_state!(ref, constants)
     arch = architecture(grid)
     Nz = grid.Nz
 
@@ -390,7 +437,16 @@ If `profile` is a `Function`, calls `profile(z)`.
 # Surface value for a reference profile: a `Number`, a column profile `f(z)`, or a
 # horizontally varying profile `f(x, y, z)` (the 3D reference path) evaluated at the origin.
 @inline surface_value(θ::Number) = θ
-surface_value(f::Function) = _nargs(f) == 1 ? f(0) : f(0, 0, 0)
+@inline surface_value(::Nothing) = nothing
+surface_value(f::AbstractField) = @allowscalar f[1, 1, 1]
+
+# `f(z)`, `f(φ, z)` on a `LatitudeLongitudeGrid`, or `f(x, y, z)`, all evaluated at the origin.
+function surface_value(f::Function)
+    nargs = _nargs(f)
+    nargs == 1 && return f(0)
+    nargs == 2 && return f(0, 0)
+    return f(0, 0, 0)
+end
 
 #####
 ##### Continuous hydrostatic reduction from the z = 0 datum
@@ -556,15 +612,15 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     θᵣ = potential_temperature
     θ₀ = convert(FT, surface_value(θᵣ))
     zˢ = bottom_face_height(grid)
-    pˢ = convert(FT, hydrostatic_pressure(zˢ, p₀, θᵣ, pˢᵗ, constants))
-    ρˢ = convert(FT, hydrostatic_density(zˢ, p₀, θᵣ, pˢᵗ, constants))
+    pˢ = surface_state_field(grid, convert(FT, hydrostatic_pressure(zˢ, p₀, θᵣ, pˢᵗ, constants)))
+    ρˢ = surface_state_field(grid, convert(FT, hydrostatic_density(zˢ, p₀, θᵣ, pˢᵗ, constants)))
 
-    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρˢ))
+    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(ρˢ)))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
     set!(ρᵣ, z -> hydrostatic_density(z, p₀, θᵣ, pˢᵗ, constants))
     fill_halo_regions!(ρᵣ)
 
-    p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(pˢ))
+    p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(pˢ)))
     pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants))
     fill_halo_regions!(pᵣ)
@@ -578,7 +634,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     set!(Tᵣ, z -> hydrostatic_temperature(z, p₀, θᵣ, pˢᵗ, constants))
     fill_halo_regions!(Tᵣ)
 
-    return ReferenceState(p₀, pˢ, θ₀, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
+    return ReferenceState(p₀, pˢ, ρˢ, θ₀, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
 end
 
 #####
@@ -609,22 +665,28 @@ Fields
 
 - `base_pressure`: Reference pressure at z=0 (Pa). The datum, not a pressure at the ground:
   the two differ by ``O(ρgh)`` whenever the ground is not at ``z = 0``.
-- `surface_pressure`: Reference pressure at the bottom face of each column (Pa), obtained by
-  reducing `base_pressure` to that height with [`moist_hydrostatic_pressure`](@ref). Equal to
-  `base_pressure` for the usual domain that starts at ``z = 0``. A scalar on a
-  height-coordinate grid, whose bottom face is a single level; a 2D field on a terrain-following
-  grid, where it is the pressure at the terrain surface. This is the anchor every consumer of
-  "pressure at the surface" actually wants, and the quantity that keeps the column integration,
-  the cold start, and the diagnostic hydrostatic pressure consistent over terrain.
+- `surface_pressure`: Reference pressure at the bottom face of each column (Pa), as a 2D
+  ``(Center, Center, Nothing)`` field, obtained by reducing `base_pressure` to that height with
+  [`moist_hydrostatic_pressure`](@ref). Equal to `base_pressure` for the usual domain that starts
+  at ``z = 0``, and horizontally uniform on any height-coordinate grid, whose bottom face is a
+  single level; genuinely column-dependent on a terrain-following grid, where it is the pressure at
+  the terrain surface. This is the anchor every consumer of "pressure at the surface" actually
+  wants, and the quantity that keeps the column integration, the cold start, and the diagnostic
+  hydrostatic pressure consistent over terrain. A reference reset writes into this field in place,
+  so consumers that captured it stay current — see [`surface_state_field`](@ref).
+- `surface_density`: Reference density at the bottom face (kg/m³), the boundary value that the
+  bottom `ValueBoundaryCondition` of `density` reads, or `nothing` for the 3D and terrain-following
+  forms, whose `density` carries no bottom boundary value.
 - `surface_potential_temperature`: Reference potential temperature at z=0 (K)
 - `standard_pressure`: pˢᵗ for potential temperature definition (Pa)
 - `pressure`: Reference pressure field ``p₀ = pˢᵗ π₀^{cᵖᵈ/Rᵈ}`` (derived from π₀)
 - `density`: Reference density field ``ρ₀ = p₀/(Rᵈ T₀)`` (derived from π₀ and θᵣ)
 - `exner_function`: Reference Exner function π₀ (built by discrete integration)
 """
-mutable struct ExnerReferenceState{FT, FS, FP, FD, FE}
+struct ExnerReferenceState{FT, SP, SD, FP, FD, FE}
     base_pressure :: FT
-    surface_pressure :: FS
+    surface_pressure :: SP
+    surface_density :: SD
     surface_potential_temperature :: FT
     standard_pressure :: FT
     pressure :: FP
@@ -635,6 +697,7 @@ end
 Adapt.adapt_structure(to, ref::ExnerReferenceState) =
     ExnerReferenceState(adapt(to, ref.base_pressure),
                         adapt(to, ref.surface_pressure),
+                        adapt(to, ref.surface_density),
                         adapt(to, ref.surface_potential_temperature),
                         adapt(to, ref.standard_pressure),
                         adapt(to, ref.pressure),
@@ -721,6 +784,15 @@ end
     Rᵐ = qᵈ * Rᵈ + qᵛ * Rᵛ
     cᵖᵐ = qᵈ * cᵖᵈ + qᵛ * cᵖᵛ
     return Rᵐ, cᵖᵐ, Rᵐ / cᵖᵐ
+end
+
+# The bottom-face density implied by a bottom-face pressure and the moist state there,
+# ρˢ = pˢ / (Rᵐ θˢ Πˢ). Shared by the `ExnerReferenceState` constructor and by `set_to_mean!`, so a
+# reset lands on the same boundary value the constructor would have produced.
+@inline function surface_reference_density(pˢ, θˢ, qᵛˢ, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    Rᵐ, _, κᵐ = moist_reference_constants(qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    Πˢ = (pˢ / pˢᵗ)^κᵐ
+    return pˢ / (Rᵐ * θˢ * Πˢ)
 end
 
 @inline function constant_moist_hydrostatic_pressure(z, p₀, θ, qᵛ, pˢᵗ,
@@ -916,15 +988,15 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
 
         # The isothermal kernel anchors from the z = 0 datum through `znode`, so it already
         # respects the datum; only the bottom-face values need the analytic reduction.
-        pˢ = convert(FT, p₀ * exp(-g * zˢ / (Rᵈ * T₀)))
+        pˢ_value = convert(FT, p₀ * exp(-g * zˢ / (Rᵈ * T₀)))
+        pˢ = surface_state_field(grid, pˢ_value)
+        ρˢ = surface_state_field(grid, convert(FT, pˢ_value / (Rᵈ * T₀)))
 
         θᵣ = Field{Nothing, Nothing, Center}(grid)
         πᵣ = Field{Nothing, Nothing, Center}(grid)
-        pᵣ = Field{Nothing, Nothing, Center}(grid)
-        ρˢ = pˢ / (Rᵈ * T₀)
-        p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(pˢ))
+        p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(pˢ)))
         pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
-        ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρˢ))
+        ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(ρˢ)))
         ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
 
         launch!(arch, grid, tuple(1), _compute_isothermal_reference!,
@@ -935,11 +1007,15 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
         needs_3d = _needs_3d_reference(potential_temperature)
 
         # Reduce the datum to the bottom face along the reference profile. A horizontally varying
-        # θ₀(x, y, z) has no single column profile to integrate along, so the datum is reduced
-        # along the profile at the origin; that is exact whenever the bottom face is at z = 0,
-        # which is the only configuration a 3D reference is used in.
+        # θ₀(x, y, z) or qᵛ(x, y, z) has no single column profile to integrate along, so *both* are
+        # collapsed to their value at the origin; that is exact whenever the bottom face is at
+        # z = 0, which is the only configuration a 3D reference is used in. Collapsing the moisture
+        # too is what keeps a raised 3D reference working at all: `evaluate_profile` inside the
+        # integration only ever calls a profile as `f(z)`.
         θ_column = needs_3d ? surface_value(potential_temperature) : potential_temperature
-        pˢ = convert(FT, moist_hydrostatic_pressure(zˢ, p₀, θ_column, vapor_mass_fraction, pˢᵗ, constants))
+        qᵛ_column = needs_3d ? surface_value(vapor_mass_fraction) : vapor_mass_fraction
+        pˢ_value = convert(FT, moist_hydrostatic_pressure(zˢ, p₀, θ_column, qᵛ_column, pˢᵗ, constants))
+        pˢ = surface_state_field(grid, pˢ_value)
 
         if needs_3d
             # 3D reference: per-column discrete-balance integration for
@@ -953,6 +1029,8 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
             πᵣ = CenterField(grid)
             pᵣ = CenterField(grid)
             ρᵣ = CenterField(grid)
+            # The 3D form carries no bottom boundary value on `density`.
+            ρˢ = nothing
 
             qᵛᵣ = vapor_mass_fraction === nothing ? ZeroField(FT) :
                   let qf = CenterField(grid)
@@ -979,13 +1057,12 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
 
             qᵛᵣ = reference_moisture_field(vapor_mass_fraction, grid)
             qᵛ_surface = @allowscalar qᵛᵣ[1, 1, 1]
-            Rᵐ_surface, _, κᵐ_surface = moist_reference_constants(qᵛ_surface, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-            π_surface = (pˢ / pˢᵗ)^κᵐ_surface
-            ρˢ = pˢ / (Rᵐ_surface * θˢ * π_surface)
+            ρˢ = surface_state_field(grid, surface_reference_density(pˢ_value, θˢ, qᵛ_surface, pˢᵗ,
+                                                                    Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ))
 
-            p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(pˢ))
+            p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(pˢ)))
             pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
-            ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρˢ))
+            ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(surface_boundary_value(ρˢ)))
             ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
 
             launch!(arch, grid, tuple(1), _compute_exner_reference!,
@@ -1005,8 +1082,18 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
         convert(FT, surface_value(potential_temperature))
     end
 
-    return ExnerReferenceState(p₀, pˢ, θ₀_val, pˢᵗ, pᵣ, ρᵣ, πᵣ)
+    return ExnerReferenceState(p₀, pˢ, ρˢ, θ₀_val, pˢᵗ, pᵣ, ρᵣ, πᵣ)
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Whether `ref` stores a single reference column broadcast to every `(i, j)`, as opposed to genuinely
+column-dependent 3D fields. Selects between the single-column and per-column integration kernels on
+a reset, and cannot be inferred from `surface_pressure`, which is horizontally uniform on every
+height-coordinate grid regardless of how the reference fields themselves are stored.
+"""
+is_column_reference(ref) = size(ref.pressure, 1) == 1 && size(ref.pressure, 2) == 1
 
 # Detect if θ₀ needs a 3D (per-column) reference.
 # Functions with ≥2 methods or ≥2 arguments → 3D.

@@ -944,7 +944,9 @@ function terrain_exner_reference_state(grid, base_pressure, ref_spec, standard_p
                                      standard_pressure, constants)
     θᵣ, _ = terrain_reference_profiles(ref_spec)
     θ₀ = convert(FT, evaluate_profile(θᵣ, 0))
-    return ExnerReferenceState(convert(FT, base_pressure), pˢ, θ₀,
+    # `surface_density = nothing`: the terrain-following pressure/density fields carry no bottom
+    # boundary value, so there is none to keep in sync.
+    return ExnerReferenceState(convert(FT, base_pressure), pˢ, nothing, θ₀,
                                convert(FT, standard_pressure), pᵣ, ρᵣ, πᵣ)
 end
 

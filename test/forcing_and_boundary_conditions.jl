@@ -507,7 +507,8 @@ end
         θᵥ_800hPa = @allowscalar θᵥ(1, 1, 1, grid, model_fields)
         κᵈ = dry_air_gas_constant(compressible_model.thermodynamic_constants) /
              compressible_model.thermodynamic_constants.dry_air.heat_capacity
-        @test isnothing(θᵥ.thermodynamic_state)
+        # No pressure or density captured at materialization: both come from the field tuple.
+        @test !any(f -> f isa Oceananigans.AbstractField, ntuple(i -> getfield(θᵥ, i), fieldcount(typeof(θᵥ))))
         @test θᵥ_1000hPa ≈ FT(300)
         @test θᵥ_800hPa ≈ FT(300) * FT(0.8)^(-κᵈ)
     end

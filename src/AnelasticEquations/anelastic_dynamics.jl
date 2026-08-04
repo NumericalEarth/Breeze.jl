@@ -99,7 +99,7 @@ Used only when the user constructs `BulkDrag` without an explicit
 function AtmosphereModels.default_drag_surface_temperature(dynamics::AnelasticDynamics, grid, constants)
     ref = dynamics.reference_state
     Rᵈ = dry_air_gas_constant(constants)
-    pˢ = AtmosphereModels.surface_pressure(dynamics)
+    pˢ = surface_pressure_value(ref)
     ρˢ = surface_density(ref)
     return pˢ / (Rᵈ * ρˢ)
 end
@@ -132,6 +132,13 @@ $(TYPEDSIGNATURES)
 Return the surface pressure from the reference state for boundary condition regularization.
 """
 AtmosphereModels.base_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.base_pressure
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the reference pressure at the bottom face of the domain, as a 2D field.
+"""
+AtmosphereModels.surface_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.surface_pressure
 
 """
 $(TYPEDSIGNATURES)
