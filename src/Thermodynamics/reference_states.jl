@@ -405,7 +405,11 @@ function midpoint_integral(z, y₀, dydz, nsteps)
     dz = z / nsteps
     y = y₀
     for i in 1:nsteps
-        zᵢ = (i - 1) * dz + dz / 2
+        # `oftype` rather than a bare `0.5`, which would promote a Float32 `dz` to Float64. Written
+        # this way — and not as `(i - 1) * dz + dz / 2` — so the abscissae are bit-for-bit what they
+        # were before this quadrature was factored out of `converged_hydrostatic_integral`, which
+        # keeps reference profiles built from a `z`-dependent θ reproducible to the last ulp.
+        zᵢ = (i - oftype(dz, 0.5)) * dz
         y += dydz(zᵢ) * dz
     end
     return y
