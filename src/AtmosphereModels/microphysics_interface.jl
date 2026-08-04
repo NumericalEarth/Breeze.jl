@@ -22,8 +22,8 @@
 # `compute_microphysical_tendencies!` is the only entry point.
 #####
 
-using Oceananigans.Fields: set!
-using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ
+using Oceananigans.Fields: set!, ZeroField, ZFaceField
+using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 
 using ..Thermodynamics: MoistureMassFractions
 
@@ -658,6 +658,48 @@ where total mass enters the physics — the gravitational/buoyancy term and the 
     return ρᵈ + total_condensate_density(i, j, k, microphysics, moisture_density, microphysical_fields)
 end
 
+#####
+##### Sedimentation velocity interface
+#####
+#
+# The sedimentation_velocity interface returns a vertical velocity component [m/s].
+# Falling hydrometeors have negative w because z is positive upward.
+#
+# Microphysics schemes implement:
+#   sedimentation_velocity(microphysics, microphysical_fields, name) → field or nothing
+#   moisture_phase(microphysics, name) → Val(:liquid), Val(:ice), or nothing
+#
+# The generic microphysical_velocities wrapper calls sedimentation_velocity and
+# uses the result as the w component.
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the sedimentation velocity field (vertical component, [m/s]) for
+the prognostic tracer `name`, or `nothing` if the tracer does not sediment.
+
+Microphysics schemes should extend this function for each sedimenting tracer.
+"""
+# `name` is normalized to a `Val` by the `Symbol` method so schemes only dispatch on `::Val`.
+# The `::Val` fallback returns `nothing` for every scheme (including `Nothing` microphysics)
+# that has not defined a sedimenting tracer, so no `::Nothing` method is needed here (adding
+# one would be ambiguous with the `::Val` fallback).
+@inline sedimentation_velocity(microphysics, microphysical_fields, name::Symbol) =
+    sedimentation_velocity(microphysics, microphysical_fields, Val(name))
+@inline sedimentation_velocity(microphysics, microphysical_fields, ::Val) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the moisture phase (`Val(:liquid)` or `Val(:ice)`) associated with tracer `name`,
+or `nothing` if the tracer has no defined phase.
+
+Microphysics schemes should extend this function.
+"""
+@inline moisture_phase(microphysics, name::Symbol) =
+    moisture_phase(microphysics, Val(name))
+@inline moisture_phase(microphysics, ::Val) = nothing
+
 """
 $(TYPEDSIGNATURES)
 
@@ -666,11 +708,194 @@ Return the microphysical velocities associated with `microphysics`, `microphysic
 Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
 The velocities are added to the bulk flow velocities for advecting the tracer.
 For example, the terminal velocity of falling rain.
+
+The generic implementation calls [`sedimentation_velocity`](@ref) and uses
+the result as the vertical velocity component.
 """
 @inline microphysical_velocities(microphysics::Nothing, microphysical_fields, name) = nothing
 
-# NOTE: The grid-indexed fallback for Nothing microphysics is defined above (line 159)
-# via the generic fallback mechanism which calls the state-based method.
+@inline function microphysical_velocities(microphysics, microphysical_fields, name)
+    w = sedimentation_velocity(microphysics, microphysical_fields, name)
+    return sedimentation_velocity_tuple(w)
+end
+
+@inline sedimentation_velocity_tuple(::Nothing) = nothing
+@inline sedimentation_velocity_tuple(w) = (; u = ZeroField(), v = ZeroField(), w)
+
+#####
+##### Effective sedimentation velocities
+#####
+#
+# Precomputed effective sedimentation velocities for total liquid and total ice.
+# These are mass-weighted averages over all species within each phase, with zero
+# velocity assigned to species that do not sediment:
+#
+#   wᴸ = Σᵢ(wᵢ * qᵢ) / qˡ    for liquid species
+#   wᴵ = Σᵢ(wᵢ * qᵢ) / qⁱ    for ice species
+
+"""
+$(TYPEDSIGNATURES)
+
+Materialize effective sedimentation velocities for the selected dynamics.
+Eulerian dynamics use the microphysics-only materializer by default.
+"""
+materialize_sedimentation_velocities(dynamics, microphysics, microphysical_fields, grid) =
+    materialize_sedimentation_velocities(microphysics, microphysical_fields, grid)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return `nothing` when microphysics is disabled.
+"""
+materialize_sedimentation_velocities(::Nothing, microphysical_fields, grid) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Allocate `ZFaceField`s for effective sedimentation velocities and return a NamedTuple
+with keys `ρqᴸ` and `ρqᴵ`, each containing a velocity NamedTuple `(u, v, w)`.
+Return `nothing` when the scheme does not classify any prognostic mass tracer as
+liquid or ice (for example, when sedimentation is handled internally).
+
+The `w` component of each entry is a `ZFaceField` that will be updated each
+time step with the mass-weighted sedimentation velocity for the corresponding phase.
+"""
+function materialize_sedimentation_velocities(microphysics, microphysical_fields, grid)
+    names = prognostic_field_names(microphysics)
+    liquid_components = sedimentation_constituent(microphysics, microphysical_fields, names, Val(:liquid))
+    ice_components = sedimentation_constituent(microphysics, microphysical_fields, names, Val(:ice))
+    isempty(liquid_components) && isempty(ice_components) && return nothing
+
+    w_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+    wᴸ = ZFaceField(grid; boundary_conditions=w_bcs)
+    wᴵ = ZFaceField(grid; boundary_conditions=w_bcs)
+    return (; ρqᴸ = (; u = ZeroField(), v = ZeroField(), w = wᴸ),
+              ρqᴵ = (; u = ZeroField(), v = ZeroField(), w = wᴵ))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Build a tuple of `(sedimentation_velocity_field, humidity_field)` pairs for prognostic
+mass tracers (names starting with "ρq") that match the given `phase` (`:liquid` or `:ice`).
+
+Each pair consists of the sedimentation velocity field (or `nothing` for a stationary
+constituent) and the corresponding specific humidity field (e.g., `:ρqʳ` maps to `:qʳ`).
+Diagnosed condensate that is not prognostic enters through the total phase humidity in
+the denominator.
+"""
+sedimentation_constituent(microphysics, μ, ::Tuple{}, phase) = ()
+
+function is_moisture_mass_tracer(name::Symbol)
+    name_string = string(name)
+    return length(name_string) >= 2 && name_string[1] == 'ρ' &&
+           name_string[nextind(name_string, 1)] == 'q'
+end
+
+function sedimentation_constituent(microphysics, μ, names::Tuple{Symbol, Vararg}, phase)
+    name = first(names)
+    rest = sedimentation_constituent(microphysics, μ, Base.tail(names), phase)
+    if is_moisture_mass_tracer(name) && moisture_phase(microphysics, Val(name)) === phase
+        w = sedimentation_velocity(microphysics, μ, Val(name))
+        specific_name = specific_field_name(name)
+        q_field = getproperty(μ, specific_name)
+        return ((w, q_field), rest...)
+    end
+    return rest
+end
+
+# Total phase humidities include stationary and diagnosed condensate. The `nothing`
+# fallback supports schemes that expose component fields but no total-phase auxiliary.
+phase_humidity_field(μ, ::Val{:liquid}) = get(μ, :qˡ, nothing)
+phase_humidity_field(μ, ::Val{:ice}) = get(μ, :qⁱ, nothing)
+
+"""
+$(TYPEDSIGNATURES)
+
+No-op when effective sedimentation velocities are disabled.
+"""
+update_sedimentation_velocities!(::Nothing, microphysics, microphysical_fields) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Update the precomputed effective sedimentation velocity fields from the current
+microphysical state. Builds liquid and ice sedimentation constituents and
+launches the kernel to compute mass-weighted averages.
+"""
+function update_sedimentation_velocities!(sedimentation_velocities, microphysics, microphysical_fields)
+    wᴸ = sedimentation_velocities.ρqᴸ.w
+    wᴵ = sedimentation_velocities.ρqᴵ.w
+    grid = wᴸ.grid
+    arch = grid.architecture
+    names = prognostic_field_names(microphysics)
+    liquid_components = sedimentation_constituent(microphysics, microphysical_fields, names, Val(:liquid))
+    ice_components = sedimentation_constituent(microphysics, microphysical_fields, names, Val(:ice))
+    liquid_humidity = phase_humidity_field(microphysical_fields, Val(:liquid))
+    ice_humidity = phase_humidity_field(microphysical_fields, Val(:ice))
+    launch!(arch, grid, :xyz,
+            _compute_sedimentation_velocities!,
+            wᴸ, wᴵ, grid,
+            liquid_components, ice_components,
+            liquid_humidity, ice_humidity)
+    return nothing
+end
+
+@kernel function _compute_sedimentation_velocities!(wᴸ, wᴵ, grid,
+                                                     liquid_components, ice_components,
+                                                     liquid_humidity, ice_humidity)
+    i, j, k = @index(Global, NTuple)
+
+    # Liquid phase
+    liquid_numerator = weighted_sedimentation_velocity_sum(i, j, k, grid, liquid_components)
+    liquid_denominator = phase_humidity_at_face(i, j, k, grid, liquid_humidity, liquid_components)
+    has_liquid = liquid_denominator > 0
+    safe_liquid_denominator = ifelse(has_liquid, liquid_denominator, one(liquid_denominator))
+    wᴸ_value = ifelse(has_liquid, liquid_numerator / safe_liquid_denominator, zero(grid))
+    @inbounds wᴸ[i, j, k] = wᴸ_value
+
+    # Ice phase
+    ice_numerator = weighted_sedimentation_velocity_sum(i, j, k, grid, ice_components)
+    ice_denominator = phase_humidity_at_face(i, j, k, grid, ice_humidity, ice_components)
+    has_ice = ice_denominator > 0
+    safe_ice_denominator = ifelse(has_ice, ice_denominator, one(ice_denominator))
+    wᴵ_value = ifelse(has_ice, ice_numerator / safe_ice_denominator, zero(grid))
+    @inbounds wᴵ[i, j, k] = wᴵ_value
+end
+
+# Recursive face-collocated sum: Σ(wᵢ * ℑz(qᵢ)). The empty-tuple base case returns a
+# grid-typed zero so the numerator (and denominator below) stay `eltype(grid)` even when a
+# phase has no classified components — otherwise the kernel result would be type-unstable.
+@inline weighted_sedimentation_velocity_sum(i, j, k, grid, ::Tuple{}) = zero(grid)
+@inline function weighted_sedimentation_velocity_sum(i, j, k, grid, components::Tuple)
+    w_field, q_field = first(components)
+    q_face = ℑzᵃᵃᶠ(i, j, k, grid, q_field)
+    contribution = weighted_sedimentation_velocity(i, j, k, w_field, q_face)
+    return contribution + weighted_sedimentation_velocity_sum(i, j, k, grid, Base.tail(components))
+end
+
+@inline weighted_sedimentation_velocity(i, j, k, ::Nothing, q_face) = 0
+@inline weighted_sedimentation_velocity(i, j, k, w_field, q_face) =
+    @inbounds w_field[i, j, k] * max(0, q_face)
+
+# Recursive face-collocated sum used when no total-phase auxiliary field exists.
+@inline humidity_sum(i, j, k, grid, ::Tuple{}) = zero(grid)
+@inline function humidity_sum(i, j, k, grid, components::Tuple)
+    _, q_field = first(components)
+    q_face = ℑzᵃᵃᶠ(i, j, k, grid, q_field)
+    return max(0, q_face) + humidity_sum(i, j, k, grid, Base.tail(components))
+end
+
+@inline phase_humidity_at_face(i, j, k, grid, ::Nothing, components) =
+    humidity_sum(i, j, k, grid, components)
+
+@inline function phase_humidity_at_face(i, j, k, grid, phase_humidity, components)
+    total_phase_humidity = max(0, ℑzᵃᵃᶠ(i, j, k, grid, phase_humidity))
+    positive_component_humidity = humidity_sum(i, j, k, grid, components)
+    # Preserve a convex mass-weighted average when numerical negatives make the
+    # diagnosed total smaller than the positive masses used in the numerator.
+    return max(total_phase_humidity, positive_component_humidity)
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -747,8 +972,10 @@ $(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
 
-The surface precipitation flux is ``wʳ ρqʳ`` at the bottom face (`k = 1`), representing
-the rate at which rain mass leaves the domain through the bottom boundary.
+The instantaneous surface precipitation flux is computed using the same spatial
+advection scheme that transports precipitating tracers, evaluated at the bottom
+face (`k = 1`). For adaptive implicit vertical advection, this is the split-operator
+flux evaluated at the current state rather than a time-integrated mass-loss diagnostic.
 
 Units: kg/m²/s (positive = downward flux out of domain)
 
