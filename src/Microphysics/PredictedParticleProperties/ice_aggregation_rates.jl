@@ -104,7 +104,7 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = z
     # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
     # Use ice reference density (Fortran rhosui, P=600 hPa, T=-20°C), not rain reference.
     ρ₀ = p3.ice.fall_speed.reference_air_density
-    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+    rhofaci = ice_air_density_correction(ρ₀, ρ)
     rate = ρ * K_mean * nⁱ_eff^2 * rhofaci
 
     return ifelse(aggregation_active, rate, zero(FT))

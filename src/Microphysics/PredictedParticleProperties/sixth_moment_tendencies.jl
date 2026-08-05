@@ -368,9 +368,3 @@ end
     z_source = safe_divide(g_of_mu(μ_new) * mom3_tendency^2, n_source, zero(FT))
     return ifelse(has_source, z_source, zero(FT))
 end
-
-@inline function nucleation_sixth_moment_tendency(nucleation_number, prp::ProcessRateParameters)
-    FT = typeof(nucleation_number)
-    nucleation_mass = nucleation_number * prp.nucleated_ice_mass
-    return initiated_ice_sixth_moment_tendency(nucleation_mass, nucleation_number, zero(FT))
-end

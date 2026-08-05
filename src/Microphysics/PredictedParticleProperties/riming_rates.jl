@@ -61,7 +61,7 @@ function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷ�
     # ρfaci = (ρ₀_ice / ρ)^0.54, where ρ₀_ice = 60000/(287.15×253.15) ≈ 0.826 kg/m³
     # (Fortran P3: rhosui — NOT the surface/rain reference density rhosur ≈ 1.275).
     ρ₀ = p3.ice.fall_speed.reference_air_density
-    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+    rhofaci = ice_air_density_correction(ρ₀, ρ)
 
     # Collection rate = E × qc × ni × ρ × rhofaci × ⟨A×V⟩
     rate = Eᶜⁱ * qᶜˡ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle
@@ -105,7 +105,7 @@ Fortran 1 mm shed drop (`ncshdc = qcshd × 1.923e6`, i.e. m_shed = 1/1.923e6 kg)
     AV_per_particle = collection_kernel_per_particle(p3.ice.collection.cloud_collection,
                                                        m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
     ρ₀ = p3.ice.fall_speed.reference_air_density
-    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+    rhofaci = ice_air_density_correction(ρ₀, ρ)
 
     mass_rate = Eᶜⁱ * qᶜˡ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle
     # Fortran: ncshdc = qcshd * 1.923e6 (shed as 1mm drops: m = π/6 × 1000 × 0.001³ ≈ 5.2e-7 kg)
@@ -152,7 +152,7 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
     ρ₀ = p3.ice.fall_speed.reference_air_density
-    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+    rhofaci = ice_air_density_correction(ρ₀, ρ)
 
     # Diagnose rain lambda for Table 2 lookup
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
@@ -254,7 +254,7 @@ function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zer
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
     ρ₀ = p3.ice.fall_speed.reference_air_density
-    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+    rhofaci = ice_air_density_correction(ρ₀, ρ)
 
     # Diagnose rain DSD slope parameter
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
@@ -324,7 +324,7 @@ independent PSD-integrated number collection rate.
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
     ρ₀ = p3.ice.fall_speed.reference_air_density
-    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+    rhofaci = ice_air_density_correction(ρ₀, ρ)
 
     # Diagnose rain DSD slope parameter
     λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)

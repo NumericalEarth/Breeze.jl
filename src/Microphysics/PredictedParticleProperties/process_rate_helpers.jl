@@ -543,17 +543,18 @@ using Breeze.Thermodynamics: Thermodynamics
 ##### ξ = 1 + ℒ² qᵛ⁺ / (cᵖᵈ Rᵛ T²) with the appropriate latent heat.
 #####
 
-@inline function liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+@inline function psychrometric_correction(constants, ℒ, qᵛ⁺, Rᵛ, T)
     FT = typeof(T)
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
-    return 1 + ℒˡ^2 * qᵛ⁺ˡ / (Rᵛ * T^2 * cᵖᵈ)
+    return 1 + ℒ^2 * qᵛ⁺ / (Rᵛ * T^2 * cᵖᵈ)
 end
 
-@inline function ice_psychrometric_correction(constants, ℒⁱ, qᵛ⁺ⁱ, Rᵛ, T)
-    FT = typeof(T)
-    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
-    return 1 + ℒⁱ^2 * qᵛ⁺ⁱ / (Rᵛ * T^2 * cᵖᵈ)
-end
+# Named for the phase each caller drives, so call sites still read as ξˡ / ξⁱ.
+@inline liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T) =
+    psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+
+@inline ice_psychrometric_correction(constants, ℒⁱ, qᵛ⁺ⁱ, Rᵛ, T) =
+    psychrometric_correction(constants, ℒⁱ, qᵛ⁺ⁱ, Rᵛ, T)
 
 #####
 ##### Saturation vapor pressure at freezing (M6)

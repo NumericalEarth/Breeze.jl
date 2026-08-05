@@ -482,15 +482,29 @@ end
 @inline AM.microphysical_state(::P3, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, velocities) = AM.NothingMicrophysicalState(typeof(ρ))
 
 # Apply the same rime-state writeback to parcel prognostics that
-# `AM.update_microphysical_fields!` applies to grid fields.
+# `AM.update_microphysical_fields!` applies to grid fields, then the same
+# sixth-moment cleanup that `clamp_ice_sixth_moment!` applies there.
 @inline function AM.postprocess_microphysical_prognostics(p3::P3, μ::NamedTuple, ρ)
     qⁱ = μ.ρqⁱ / ρ
     qᶠ = μ.ρqᶠ / ρ
     bᶠ = μ.ρbᶠ / ρ
     qʷⁱ = μ.ρqʷⁱ / ρ
     rime_state = consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, qʷⁱ)
-    return merge(μ, (; ρqᶠ = ρ * rime_state.qᶠ,
-                       ρbᶠ = ρ * rime_state.bᶠ))
+    μ⁺ = merge(μ, (; ρqᶠ = ρ * rime_state.qᶠ,
+                     ρbᶠ = ρ * rime_state.bᶠ))
+    return clamp_prognostic_ice_sixth_moment(p3, μ⁺, ρ)
+end
+
+# Fortran P3 v5.5.0 cleanup: where (qitot < qsmall) zitot = 0. The 3-moment Z
+# tables store derivative-normalized integrals (d(G)/d(env)) that can drive Z
+# negative for newly nucleated ice, so the sign is repaired after every substep.
+# `ρz̃ⁱ` is absent unless three-moment ice is enabled, in which case this is a no-op.
+@inline function clamp_prognostic_ice_sixth_moment(p3::P3, μ::NamedTuple, ρ)
+    haskey(μ, :ρz̃ⁱ) || return μ
+    qⁱ = μ.ρqⁱ / ρ
+    qsmall = p3.minimum_mass_mixing_ratio
+    ρz̃ⁱ = ifelse(qⁱ < qsmall, zero(μ.ρz̃ⁱ), max(0, μ.ρz̃ⁱ))
+    return merge(μ, (; ρz̃ⁱ))
 end
 
 # Droplet number and unactivated aerosol on the grid. Dispatch on the *type* of

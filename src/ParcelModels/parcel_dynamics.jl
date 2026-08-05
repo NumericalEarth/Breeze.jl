@@ -740,22 +740,6 @@ zero_microphysics_prognostic_tendencies(::Nothing) = nothing
 zero_microphysics_prognostic_tendencies(μ::NamedTuple{names, T}) where {names, T} =
     NamedTuple{names}(ntuple(_ -> zero(eltype(T)), length(names)))
 
-# Fortran P3 v5.5.0 cleanup: where (qitot < qsmall) zitot = 0.
-# The 3-moment Z tables store derivative-normalized integrals (d(G)/d(env))
-# that can drive Z negative for newly nucleated ice. This hard clamp after
-# each substep matches the Fortran's post-process cleanup.
-clamp_ice_sixth_moment(microphysics, μ, ρ) = μ
-clamp_ice_sixth_moment(microphysics, μ::Nothing, ρ) = nothing
-
-function clamp_ice_sixth_moment(microphysics, μ::NamedTuple, ρ)
-    haskey(μ, :ρz̃ⁱ) || return μ
-    haskey(μ, :ρqⁱ) || return μ
-    qⁱ = μ.ρqⁱ / ρ
-    qsmall = microphysics.minimum_mass_mixing_ratio
-    ρz̃ⁱ_clamped = ifelse(qⁱ < qsmall, zero(μ.ρz̃ⁱ), max(μ.ρz̃ⁱ, zero(μ.ρz̃ⁱ)))
-    return merge(μ, (; ρz̃ⁱ = ρz̃ⁱ_clamped))
-end
-
 # Apply tendencies to update microphysics prognostic variables
 apply_microphysical_tendencies(μ::Nothing, Gμ, Δt) = nothing
 function apply_microphysical_tendencies(μ::NamedTuple, Gμ::NamedTuple, Δt)
@@ -943,11 +927,6 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     state.μ = AtmosphereModels.postprocess_microphysical_prognostics(
         model.microphysics, state.μ, state.ρ)
 
-    # P3 cleanup: zero Z when ice mass < qsmall (Fortran P3 v5.5.0 convention).
-    # The 3-moment Z tables store d(G)/d(env) derivatives that can drive Z negative
-    # for newly nucleated ice; this hard clamp matches the Fortran post-process step.
-    state.μ = clamp_ice_sixth_moment(model.microphysics, state.μ, state.ρ)
-
     # Update moisture fractions in thermodynamic state
     microphysics = model.microphysics
     zero_velocities = (; u = zero(state.ρ), v = zero(state.ρ), w = zero(state.ρ))
@@ -1057,9 +1036,6 @@ function step_parcel_state!(model::ParcelModel, Δt)
     # Restore scheme-specific coupled constraints after the prognostic substep.
     state.μ = AtmosphereModels.postprocess_microphysical_prognostics(
         model.microphysics, state.μ, state.ρ)
-
-    # P3 cleanup (same as in SSP RK3 path above)
-    state.μ = clamp_ice_sixth_moment(model.microphysics, state.μ, state.ρ)
 
     # Update moisture fractions in thermodynamic state
     microphysics = model.microphysics

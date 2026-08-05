@@ -10,6 +10,14 @@ using Oceananigans.Utils: TabulatedFunction,
 
 # Oceananigans' TabulatedFunction only supports 1D–5D, so we own the 6D variant
 # outright (defining methods on TabulatedFunction{6} would be type piracy).
+#
+# TODO: `TabulatedFunction6D` and the `prepare_*`/`evaluate_at` split below are
+# scheme-agnostic multilinear-lookup machinery, not P3 physics — nothing here
+# knows about ice. They live in this module only because P3 is the first consumer.
+# They belong upstream in `Oceananigans.Utils` alongside `TabulatedFunction1D`–`5D`
+# (which would also let the 6D case reuse the per-dimension generation there
+# instead of forking it). Move them when a second consumer appears, rather than
+# letting another module reach into `PredictedParticleProperties` for them.
 struct TabulatedFunction6D{F, T, R, D}
     func :: F
     table :: T
@@ -17,7 +25,7 @@ struct TabulatedFunction6D{F, T, R, D}
     inverse_Δ :: D
 end
 
-# Trivial tuple constructor used by lookup_table_2.jl (6D) and lookup_table_3.jl (5D)
+# Trivial tuple constructor used by fortran_table_format.jl (6D) and lookup_table_3.jl (5D)
 @inline table_range(ranges...) = ranges
 
 #####
@@ -114,53 +122,11 @@ end
 ##### 6D interpolation
 #####
 
-@inline function (f::TabulatedFunction6D)(x₁, x₂, x₃, x₄, x₅, x₆)
-    a₁, b₁ = f.range[1]
-    a₂, b₂ = f.range[2]
-    a₃, b₃ = f.range[3]
-    a₄, b₄ = f.range[4]
-    a₅, b₅ = f.range[5]
-    a₆, b₆ = f.range[6]
-
-    c₁ = clamp(x₁, a₁, b₁)
-    c₂ = clamp(x₂, a₂, b₂)
-    c₃ = clamp(x₃, a₃, b₃)
-    c₄ = clamp(x₄, a₄, b₄)
-    c₅ = clamp(x₅, a₅, b₅)
-    c₆ = clamp(x₆, a₆, b₆)
-
-    frac_i = (c₁ - a₁) * f.inverse_Δ[1]
-    frac_j = (c₂ - a₂) * f.inverse_Δ[2]
-    frac_k = (c₃ - a₃) * f.inverse_Δ[3]
-    frac_l = (c₄ - a₄) * f.inverse_Δ[4]
-    frac_m = (c₅ - a₅) * f.inverse_Δ[5]
-    frac_n = (c₆ - a₆) * f.inverse_Δ[6]
-
-    i⁻, i⁺, ξ = interpolator(frac_i)
-    j⁻, j⁺, η = interpolator(frac_j)
-    k⁻, k⁺, ζ = interpolator(frac_k)
-    l⁻, l⁺, θ = interpolator(frac_l)
-    m⁻, m⁺, ψ = interpolator(frac_m)
-    n⁻, n⁺, χ = interpolator(frac_n)
-
-    n₁, n₂, n₃, n₄, n₅, n₆ = size(f.table)
-    i⁻ = i⁻ + 1
-    i⁺ = min(i⁺ + 1, n₁)
-    j⁻ = j⁻ + 1
-    j⁺ = min(j⁺ + 1, n₂)
-    k⁻ = k⁻ + 1
-    k⁺ = min(k⁺ + 1, n₃)
-    l⁻ = l⁻ + 1
-    l⁺ = min(l⁺ + 1, n₄)
-    m⁻ = m⁻ + 1
-    m⁺ = min(m⁺ + 1, n₅)
-    n⁻ = n⁻ + 1
-    n⁺ = min(n⁺ + 1, n₆)
-
-    return interpolate_6d(f.table,
-                           (i⁻, i⁺, ξ), (j⁻, j⁺, η), (k⁻, k⁺, ζ),
-                           (l⁻, l⁺, θ), (m⁻, m⁺, ψ), (n⁻, n⁺, χ))
-end
+# The clamp-and-bracket work lives in `prepare_6d`, which returns the same
+# six index triplets this call operator needs; `evaluate_at` then does the
+# multilinear blend. Sharing them keeps one definition of the axis bounds.
+@inline (f::TabulatedFunction6D)(x₁, x₂, x₃, x₄, x₅, x₆) =
+    evaluate_at(f, prepare_6d(f, x₁, x₂, x₃, x₄, x₅, x₆))
 
 @inline function interpolate_6d(data, ix, iy, iz, iw, iv, iu)
     i⁻, i⁺, ξ = ix

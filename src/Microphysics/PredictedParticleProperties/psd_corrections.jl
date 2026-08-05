@@ -32,7 +32,9 @@ ratio of the two is:
 C(\\mu) = \\frac{\\Gamma(\\mu + 7)\\,\\Gamma(\\mu + 1)}{\\Gamma(\\mu + 4)^2}
 ```
 
-Computed in log-space to avoid overflow at large μ.
+Evaluated through `g_of_mu`, which uses the equivalent rational form
+`(μ+6)(μ+5)(μ+4) / ((μ+3)(μ+2)(μ+1))` — exact, overflow-free, and free of the
+three `loggamma` calls the gamma form would cost at every grid point.
 
 Exact values:
 - μ = 0: 720 × 1 / 36 = 20.0
@@ -50,11 +52,7 @@ using Breeze.Microphysics.PredictedParticleProperties: psd_correction_spherical_
 psd_correction_spherical_volume(0.0)
 
 # output
-20.000000000000007
+20.0
 ```
 """
-@inline function psd_correction_spherical_volume(mu)
-    FT = typeof(mu)
-    log_correction = loggamma(mu + FT(7)) + loggamma(mu + FT(1)) - FT(2) * loggamma(mu + FT(4))
-    return exp(log_correction)
-end
+@inline psd_correction_spherical_volume(mu) = g_of_mu(mu)

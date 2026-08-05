@@ -280,6 +280,26 @@ is smaller than the physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
     return ifelse(active, rate, zero(FT))
 end
 
+# Mason (1971) thermodynamic resistance Φ = A + B for diffusional growth at a
+# liquid surface, shared by rain evaporation and rain condensation. `e_s` is
+# recovered by inverting qᵛ⁺ˡ = ε e_s / (P - (1 - ε) e_s), consistent with the
+# ice deposition path.
+@inline function mason_thermodynamic_factor(qᵛ⁺ˡ, T, P, transport, FT)
+    Rᵛ = FT(VAPOR_GAS_CONSTANT)
+    Rᵈ = FT(DRY_AIR_GAS_CONSTANT)
+    ℒˡ = vaporization_latent_heat(nothing, T)  # Latent heat of vaporization [J/kg]
+    K_a = transport.K_a                        # Thermal conductivity of air [W/m/K]
+    D_v = transport.D_v                        # Diffusivity of water vapor [m²/s]
+
+    ε = Rᵈ / Rᵛ
+    qᵛ⁺ˡ_safe = max(qᵛ⁺ˡ, FT(1e-30))
+    e_s = P * qᵛ⁺ˡ_safe / (ε + qᵛ⁺ˡ_safe * (1 - ε))
+
+    A = ℒˡ / (K_a * T) * (ℒˡ / (Rᵛ * T) - 1)
+    B = Rᵛ * T / (e_s * D_v)
+    return max(A + B, FT(1e-10))
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -329,25 +349,11 @@ approximation path depending on `p3.rain.evaporation`:
     S = qᵛ / max(qᵛ⁺ˡ, FT(1e-10))
     is_subsaturated = S < 1
 
-    # Thermodynamic constants
-    Rᵛ = FT(VAPOR_GAS_CONSTANT)
-    Rᵈ = FT(DRY_AIR_GAS_CONSTANT)
-    ℒˡ = vaporization_latent_heat(nothing, T)  # Latent heat of vaporization [J/kg]
     # T,P-dependent transport properties (pre-computed or computed on demand)
-    K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
     nu  = transport.nu        # Kinematic viscosity [m²/s]
 
-    # Saturation vapor pressure derived from qᵛ⁺ˡ via inversion of
-    # qᵛ⁺ˡ = ε × e_s / (P - (1 - ε) × e_s), consistent with ice deposition path
-    ε = Rᵈ / Rᵛ
-    qᵛ⁺ˡ_safe = max(qᵛ⁺ˡ, FT(1e-30))
-    e_s = P * qᵛ⁺ˡ_safe / (ε + qᵛ⁺ˡ_safe * (1 - ε))
-
-    # Thermodynamic resistance (Mason 1971)
-    A = ℒˡ / (K_a * T) * (ℒˡ / (Rᵛ * T) - 1)
-    B = Rᵛ * T / (e_s * D_v)
-    thermodynamic_factor = max(A + B, FT(1e-10))
+    thermodynamic_factor = mason_thermodynamic_factor(qᵛ⁺ˡ, T, P, transport, FT)
 
     # Internal helpers return negative (S - 1 < 0 when subsaturated).
     # Negate to get positive magnitude (M7 sign convention).
@@ -416,22 +422,11 @@ P3 v5.5.0 semi-analytic framework where ``q_{rcon}`` can be positive.
     S = qᵛ / max(qᵛ⁺ˡ, FT(1e-10))
     is_supersaturated = (S > 1) & (qʳ_eff > FT(1e-14))
 
-    # Thermodynamic constants (same as rain evaporation)
-    Rᵛ = FT(VAPOR_GAS_CONSTANT)
-    Rᵈ = FT(DRY_AIR_GAS_CONSTANT)
-    ℒˡ = vaporization_latent_heat(nothing, T)
-    K_a = transport.K_a
     D_v = transport.D_v
     nu  = transport.nu
 
-    ε = Rᵈ / Rᵛ
-    qᵛ⁺ˡ_safe = max(qᵛ⁺ˡ, FT(1e-30))
-    e_s = P * qᵛ⁺ˡ_safe / (ε + qᵛ⁺ˡ_safe * (1 - ε))
-
-    # Thermodynamic resistance (Mason 1971)
-    A = ℒˡ / (K_a * T) * (ℒˡ / (Rᵛ * T) - 1)
-    B = Rᵛ * T / (e_s * D_v)
-    thermodynamic_factor = max(A + B, FT(1e-10))
+    # Same Mason (1971) resistance as rain evaporation
+    thermodynamic_factor = mason_thermodynamic_factor(qᵛ⁺ˡ, T, P, transport, FT)
 
     # Diffusional growth rate (reuse evaporation ventilation integral)
     # Positive when S > 1 (condensation)

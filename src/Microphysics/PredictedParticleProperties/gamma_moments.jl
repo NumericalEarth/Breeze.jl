@@ -193,22 +193,6 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the full three-moment mass residual for the exact closure.
-"""
-function mass_residual_three_moment(mass::IceMassPowerLaw,
-                                    rime_fraction, rime_density,
-                                    μ, log_Z_over_N, log_L_over_N)
-    logλ = log_lambda_from_reflectivity(μ, log_Z_over_N)
-    log_L_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ)
-    log_N_over_N₀ = log_gamma_moment(μ, logλ)
-    computed_log_L_over_N = log_L_over_N₀ - log_N_over_N₀
-
-    return computed_log_L_over_N - log_L_over_N
-end
-
-"""
-$(TYPEDSIGNATURES)
-
 Compute G(μ) = Γ(μ+7)Γ(μ+1) / Γ(μ+4)² for the three-moment μ-Z constraint.
 Simplifies to (μ+6)(μ+5)(μ+4) / ((μ+3)(μ+2)(μ+1)).
 Matches Fortran `G_of_mu`.
