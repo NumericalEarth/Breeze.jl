@@ -39,15 +39,22 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, Center, Face, Field, set!
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: znode, rnode, ξnode, ηnode
-using Oceananigans.Utils: launch!
+using Oceananigans.Fields: FractionalIndices, interpolate
+using Oceananigans.Grids: Flat, topology, znode, rnode, ξnode, ηnode
+using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
+using Oceananigans.Models: LagrangianParticleTracking
+using Oceananigans.TimeSteppers: AbstractLagrangianParticles
+using Oceananigans.Utils: instantiate, interpolator, launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxyᶠᶠᵃ
+
+using Breeze.AtmosphereModels: AtmosphereModels
 
 include("terrain_metrics.jl")
 include("terrain_formulations.jl")
 include("terrain_following_vertical_discretization.jl")
 include("terrain_amg_operators.jl")
 include("materialize_terrain.jl")
+include("lagrangian_particles.jl")
 
 end # module

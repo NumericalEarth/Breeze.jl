@@ -203,14 +203,12 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
 
     tick_stage!(model.clock, β₁ * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
-    step_lagrangian_particles!(model, β₁ * Δt)
 
     # Stage 2: U** = Uⁿ + (Δt/2) R(U*)
     acoustic_rk3_substep!(model, Δt, β₂)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
-    step_lagrangian_particles!(model, β₂ * Δt)
 
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**)
     acoustic_rk3_substep!(model, Δt, β₃)
@@ -226,7 +224,13 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
 
-    step_lagrangian_particles!(model, β₃ * Δt)
+    # Advect particles once per step, over the full Δt, with the velocity of the state
+    # just refreshed to tⁿ⁺¹: Xⁿ⁺¹ = Xⁿ + Δt u(Xⁿ, tⁿ⁺¹) — consistent, but first order,
+    # and so lower order than the dycore. A stage-wise update is possible in principle
+    # (X obeys dX/dt = u like any prognostic), but would need Xⁿ stored alongside the
+    # current position, since every Wicker–Skamarock stage restarts from Uⁿ. Pushing
+    # with the stage fractions alone would be wrong: β₁ + β₂ + β₃ = 11/6, not 1.
+    step_lagrangian_particles!(model, Δt)
 
     return nothing
 end
