@@ -11,6 +11,7 @@ using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
                                     compute_acoustic_substeps,
                                     sponge_term_diag, sponge_rhs, sponge_slow_tendency,
+                                    materialize_sponge,
                                     assemble_slow_vertical_momentum_tendency!,
                                     apply_horizontal_pressure_gradient_substep,
                                     AcousticTridiagLower, AcousticTridiagDiagonal,
@@ -1096,11 +1097,17 @@ for arch in arches
         old_ρw = ZFaceField(grid)
         set!(old_ρw, FT(4))
 
-        sponge = UpperSponge(damping_rate=damping_rate, depth=depth, ramp=LinearRamp())
+        # The substep kernels read a precomputed γ profile, so the helpers need the materialized
+        # form the `AcousticSubstepper` constructor would build (the bare `UpperSponge(...)` is a
+        # gridless skeleton with `damping_profile = nothing`).
+        sponge = materialize_sponge(grid, UpperSponge(damping_rate=damping_rate, depth=depth, ramp=LinearRamp()))
 
-        bottom_diag = sponge_term_diag(1, 1, 1, grid, sponge, δτᵐ⁺)
-        lid_diag = sponge_term_diag(1, 1, grid.Nz + 1, grid, sponge, δτᵐ⁺)
-        lid_rhs = @allowscalar sponge_rhs(1, 1, grid.Nz + 1, grid, sponge, δτˢ⁻, old_ρw)
+        # γ now lives in device memory, so a host-side read of the coefficients is scalar indexing.
+        bottom_diag, lid_diag, lid_rhs = @allowscalar begin
+            sponge_term_diag(1, 1, 1, grid, sponge, δτᵐ⁺),
+            sponge_term_diag(1, 1, grid.Nz + 1, grid, sponge, δτᵐ⁺),
+            sponge_rhs(1, 1, grid.Nz + 1, grid, sponge, δτˢ⁻, old_ρw)
+        end
 
         @test bottom_diag == 0
         @test lid_diag ≈ δτᵐ⁺ * damping_rate
@@ -1152,19 +1159,28 @@ for arch in arches
         damping_rate = FT(0.2)
         depth = FT(4kilometers)
         ramp = LinearRamp()
-        sponge = UpperSponge(; damping_rate, depth, ramp)
+        sponge = UpperSponge(; damping_rate, depth, ramp)   # skeleton, for the discretization below
+        materialized = materialize_sponge(grid, sponge)     # what the kernels actually see
         ρw_value = FT(3)
 
         ρwᴸ = ZFaceField(grid)
         set!(ρwᴸ, ρw_value)
 
         @allowscalar begin
-            @test sponge_slow_tendency(1, 1, 1, grid, sponge, ρwᴸ, 1) == 0                     # below the layer
-            @test sponge_slow_tendency(1, 1, grid.Nz + 1, grid, sponge, ρwᴸ, 1) ≈ -damping_rate * ρw_value
+            @test sponge_slow_tendency(1, 1, 1, grid, materialized, ρwᴸ, 1) == 0                # below the layer
+            @test sponge_slow_tendency(1, 1, grid.Nz + 1, grid, materialized, ρwᴸ, 1) ≈ -damping_rate * ρw_value
             @test sponge_slow_tendency(1, 1, grid.Nz + 1, grid, nothing, ρwᴸ, 1) == 0
             # `Gˢρw` is scaled by the signed Δτ, so backward integration flips the sign here to
             # stay dissipative rather than amplifying.
-            @test sponge_slow_tendency(1, 1, grid.Nz + 1, grid, sponge, ρwᴸ, -1) ≈ damping_rate * ρw_value
+            @test sponge_slow_tendency(1, 1, grid.Nz + 1, grid, materialized, ρwᴸ, -1) ≈ damping_rate * ρw_value
+        end
+
+        # The precomputed profile must reproduce the ramp exactly at every face it is read at.
+        # This is a height-coordinate grid, so the reference coordinate `r` is just `z`.
+        @allowscalar begin
+            face_z = znodes(grid, Face())
+            @test all(materialized.damping_profile[1, 1, k] ≈ damping_rate * ramp(face_z[k], grid.Lz, depth)
+                      for k in 1:(size(grid, 3) + 1))
         end
 
         # Assemble Gˢρw with and without the sponge from an otherwise identical state: the

@@ -27,7 +27,7 @@
 
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture
+using Oceananigans: Field, CenterField, XFaceField, YFaceField, ZFaceField, architecture
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.Grids: ZDirection, rnode, znode
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
@@ -175,7 +175,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     apply_first_substep_pressure_gradient = split_explicit.apply_first_substep_pressure_gradient
     damping = split_explicit.damping
-    sponge = split_explicit.sponge
+    # Evaluate the ramp into a 1D z-face profile now, so the substep kernels never touch it.
+    sponge = materialize_sponge(grid, split_explicit.sponge)
     substep_distribution = split_explicit.substep_distribution
     open_boundary_relaxation = convert(FT, split_explicit.open_boundary_relaxation)
 
@@ -560,11 +561,58 @@ end
 # no-op at the very moment it is needed. `|δτ|` (not δτ) makes the acoustic half a one-sided
 # dissipative regularizer for either integration direction (forward through a sponge is
 # intentionally not exactly invertible).
+#
+# γ = rate × ramp(z) is a function of the reference face coordinate alone, so it is precomputed
+# once per z-face by `materialize_sponge` and read here with a single load. This is reached twice
+# per face per acoustic substep — from the tridiag diagonal, inside the serial-in-k Thomas sweep,
+# and from `_build_vertical_rhs!` — so evaluating `ramp` inline instead cost 14% of the wall clock
+# per step on CPU/Float64 for a transcendental shape (`GaussianRamp`, `Sin2Ramp`). On an H100 the
+# same comparison was ≤1%: these kernels are bandwidth-bound and the hardware absorbs the
+# transcendental, so there the point is not speed but that shape choice is decoupled from cost,
+# including for arbitrarily expensive user-defined ramps.
 @inline sponge_damping(i, j, k, grid, ::Nothing) = zero(grid)
 
-@inline function sponge_damping(i, j, k, grid, sponge::UpperSponge)
-    z = rnode(i, j, k, grid, Center(), Center(), Face())
-    return sponge.damping_rate * sponge.ramp(z, grid.Lz, sponge.depth)
+@inline sponge_damping(i, j, k, grid, sponge::UpperSponge) =
+    @inbounds sponge.damping_profile[i, j, k]
+
+materialize_sponge(grid, ::Nothing) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Build the grid-dependent form of `sponge` by evaluating its ramp into a 1D profile of the damping
+rate ``γ(z) = \\text{rate} × \\text{ramp}(z)`` over z-faces. Called by the
+[`AcousticSubstepper`](@ref) constructor; a `nothing` sponge returns `nothing`.
+
+The user-facing [`UpperSponge`](@ref) constructor has no grid, so it produces a skeleton with
+`damping_profile = nothing` — this is the matching materialization step.
+"""
+function materialize_sponge(grid, sponge::UpperSponge)
+    FT = eltype(grid)
+    damping_rate = convert(FT, sponge.damping_rate)
+    depth = convert(FT, sponge.depth)
+
+    # Faces 1:Nz+1 are the whole read range (the tridiag covers 1:Nz and `_build_vertical_rhs!`
+    # is launched over 1:Nz+1), so the halo values are left at the field's initial zero.
+    damping_profile = Field{Nothing, Nothing, Face}(grid)
+
+    launch!(architecture(grid), grid, tuple(1), _compute_sponge_damping_profile!,
+            damping_profile, grid, damping_rate, depth, sponge.ramp, size(grid, 3))
+
+    return UpperSponge{FT, typeof(sponge.ramp), typeof(damping_profile)}(damping_rate, depth,
+                                                                        sponge.ramp,
+                                                                        damping_profile)
+end
+
+# One thread walking the column: `ramp` is an arbitrary user-supplied callable, so this is the
+# only place it is evaluated, once per face at construction rather than per substep.
+@kernel function _compute_sponge_damping_profile!(γ, grid, damping_rate, depth, ramp, Nz)
+    _ = @index(Global)
+
+    for k in 1:(Nz + 1)
+        z = rnode(1, 1, k, grid, Center(), Center(), Face())
+        @inbounds γ[1, 1, k] = damping_rate * ramp(z, grid.Lz, depth)
+    end
 end
 
 @inline sponge_term_diag(i, j, k, grid, sponge, δτᵐ⁺) =

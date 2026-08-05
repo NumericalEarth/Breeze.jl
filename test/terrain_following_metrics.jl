@@ -11,7 +11,7 @@ using Oceananigans.Architectures: CPU
 using CUDA: @allowscalar
 
 using Breeze.CompressibleEquations: compute_contravariant_velocity!, sponge_rhs, sponge_term_diag,
-                                    sponge_slow_tendency
+                                    sponge_slow_tendency, materialize_sponge
 using Oceananigans
 using Oceananigans.Grids: rnode, xnode, znode
 using Oceananigans.Operators: divᶜᶜᶜ
@@ -457,7 +457,7 @@ using Test
         h(x) = 500 * exp(-x^2 / 1000^2)
         materialize_terrain!(grid, h)
 
-        sponge = UpperSponge(damping_rate=0.2, depth=2000, ramp=LinearRamp())
+        sponge = materialize_sponge(grid, UpperSponge(damping_rate=0.2, depth=2000, ramp=LinearRamp()))
         δτᵐ⁺ = 3.0
         δτˢ⁻ = 2.0
         k = Nz
@@ -502,7 +502,7 @@ using Test
         h(x) = 400 * exp(-x^2 / 2000^2)
         materialize_terrain!(grid, h)
 
-        sponge = UpperSponge(damping_rate = 0.2, depth = Lz/2, ramp = LinearRamp())
+        sponge = materialize_sponge(grid, UpperSponge(damping_rate = 0.2, depth = Lz/2, ramp = LinearRamp()))
 
         k = Nz          # a face well inside the sponge layer
         i_flat = 1      # far field

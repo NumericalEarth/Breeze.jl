@@ -381,8 +381,16 @@ convert_acoustic_parameter(::Type{FT}, damping::DirectDivergenceDamping) where F
 """
 Abstract supertype for upper-sponge ramp shapes. A concrete `AbstractRamp`
 is callable as `(ramp)(z, sponge_top, depth)` and returns a value in
-``[0, 1]``: zero below ``z_{\\rm sponge\\_top} - \\text{depth}``, rising
-to one at the lid ``z = z_{\\rm sponge\\_top}``.
+``[0, 1]``, rising monotonically to one at the lid ``z = z_{\\rm sponge\\_top}``.
+
+Most shapes have *compact support*, meaning they are exactly zero below the
+layer base ``z_{\\rm sponge\\_top} - \\text{depth}``; [`GaussianRamp`](@ref)
+deliberately does not, and instead carries a weak tail all the way down.
+
+Cost is not a consideration when choosing a shape: [`UpperSponge`](@ref)
+evaluates the ramp once per z-face at construction and stores the resulting
+1D profile, so all shapes (including user-defined ones) are equally cheap
+inside the acoustic substep.
 """
 abstract type AbstractRamp end
 
@@ -409,8 +417,9 @@ Hermite cubic "smoothstep" sponge ramp. ``s² (3 − 2s)`` where
 
 Has zero derivative at both the layer base and the lid, so absorbs
 upgoing waves smoothly without the reflective kink of [`LinearRamp`](@ref).
-Functionally equivalent to [`Sin2Ramp`](@ref) but ~5–10× cheaper inside
-the GPU kernel (no transcendental). Recommended default.
+Functionally equivalent to [`Sin2Ramp`](@ref). The default, and the shape to
+prefer when the dynamics just below the sponge must be provably untouched;
+see [`GaussianRamp`](@ref) for the trade against far-field cleanliness.
 """
 struct CubicRamp <: AbstractRamp end
 
@@ -424,9 +433,9 @@ end
 $(TYPEDEF)
 
 ``\\sin^2`` sponge ramp from Klemp, Dudhia & Hassiotis (2008). Same
-zero-derivative-at-both-ends behaviour as [`CubicRamp`](@ref), but with
-a transcendental call. Provided for parity with WRF (`damp_opt = 3`) /
-MPAS-Atmosphere; prefer `CubicRamp` for performance in new code.
+zero-derivative-at-both-ends behaviour as [`CubicRamp`](@ref), and (because
+the profile is precomputed) the same cost. Provided for parity with WRF
+(`damp_opt = 3`) / MPAS-Atmosphere.
 """
 struct Sin2Ramp <: AbstractRamp end
 
@@ -519,34 +528,59 @@ MPAS-Atmosphere. The profile shape is controlled by `ramp`; use
 
 - `ramp`: an [`AbstractRamp`](@ref) controlling the profile shape.
   Default [`CubicRamp()`](@ref). Other built-ins: [`Sin2Ramp()`](@ref),
-  [`LinearRamp()`](@ref). Custom shapes are supported by subtyping
-  `AbstractRamp` and defining `(::MyRamp)(z, sponge_top, depth)`.
+  [`GaussianRamp()`](@ref), [`LinearRamp()`](@ref). Custom shapes are
+  supported by subtyping `AbstractRamp` and defining
+  `(::MyRamp)(z, sponge_top, depth)`.
+
+  Shape choice is free: `ramp` is never evaluated inside the substep loop, so
+  a transcendental shape costs exactly what a polynomial one does (see below).
 
 The ramp depends only on the reference vertical coordinate (no horizontal
 variation), so the sponge does not break zonal symmetry and remains uniform
-over terrain-following grids.
+over terrain-following grids. That is also what makes the damping rate
+``γ(z) = \\text{rate} × \\text{ramp}(z)`` a 1D profile over z-faces:
+`UpperSponge(; ...)` is a lightweight skeleton with `damping_profile = nothing`,
+and [`materialize_sponge`](@ref) evaluates `ramp` once per face at
+`AcousticSubstepper` construction and stores the result. The substep kernels
+then read `γ` with a single load instead of re-evaluating the shape twice per
+face per acoustic substep. Measured against inline evaluation, that is worth
+14% of the wall clock per step on CPU/Float64 for a transcendental ramp, and
+``≲1%`` on an H100, where the substep kernels are bandwidth-bound and the
+transcendental was already hidden.
 """
-struct UpperSponge{FT, R <: AbstractRamp}
+struct UpperSponge{FT, R <: AbstractRamp, P}
     damping_rate :: FT
     depth :: FT
     ramp :: R
+    damping_profile :: P
 end
 
 function UpperSponge(; damping_rate = 0.2, depth = 5e3, ramp = CubicRamp())
     ramp isa AbstractRamp ||
-        throw(ArgumentError("`ramp` must be an `<:AbstractRamp` (e.g. `CubicRamp()`, `Sin2Ramp()`, `LinearRamp()`)"))
+        throw(ArgumentError("`ramp` must be an `<:AbstractRamp` (e.g. `CubicRamp()`, `Sin2Ramp()`, `GaussianRamp()`, `LinearRamp()`)"))
     FT = Oceananigans.defaults.FloatType
-    return UpperSponge{FT, typeof(ramp)}(convert(FT, damping_rate),
-                                           convert(FT, depth),
-                                           ramp)
+    return UpperSponge{FT, typeof(ramp), Nothing}(convert(FT, damping_rate),
+                                                  convert(FT, depth),
+                                                  ramp,
+                                                  nothing)
 end
+
+Adapt.adapt_structure(to, sponge::UpperSponge) =
+    UpperSponge(sponge.damping_rate,
+                sponge.depth,
+                sponge.ramp,
+                adapt(to, sponge.damping_profile))
 
 convert_acoustic_parameter(::Type{FT}, ::Nothing) where FT = nothing
 
+# Only the scalars are converted here: `materialize_sponge` builds `damping_profile`
+# afterwards at the grid's float type, so a skeleton carries `nothing` through and a
+# materialized sponge keeps the profile it already has.
 convert_acoustic_parameter(::Type{FT}, sponge::UpperSponge) where FT =
-    UpperSponge{FT, typeof(sponge.ramp)}(convert(FT, sponge.damping_rate),
-                                        convert(FT, sponge.depth),
-                                        sponge.ramp)
+    UpperSponge{FT, typeof(sponge.ramp), typeof(sponge.damping_profile)}(convert(FT, sponge.damping_rate),
+                                                                        convert(FT, sponge.depth),
+                                                                        sponge.ramp,
+                                                                        sponge.damping_profile)
 
 """
 $(TYPEDEF)
