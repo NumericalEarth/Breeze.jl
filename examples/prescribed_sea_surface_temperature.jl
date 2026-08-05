@@ -209,6 +209,7 @@ using Breeze.BoundaryConditions: neutral_coefficient_10m, bulk_richardson_number
 
 h = grid.Lz / grid.Nz / 2  # first cell center height
 U_min = 0.1                # m s⁻¹
+g = constants.gravitational_acceleration
 ℓ = coef.roughness_length
 sf = coef.stability_function
 α = log(h / ℓ)
@@ -222,10 +223,10 @@ T_stable   = θ₀ - ΔT_line  # strongly stable
 
 U_range = range(3, 25, length=200)
 Cᴰ_neutral  = [neutral_coefficient_10m(default_neutral_drag_polynomial, U, U_min) for U in U_range]
-Cᴰ_unstable = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_unstable, U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
-Cᴰ_stable   = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_stable,   U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
-Cᴰ_sim_warm = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_warm, U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
-Cᴰ_sim_cold = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_cold, U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_unstable = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_unstable, U, U_min, g), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_stable   = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_stable,   U, U_min, g), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_sim_warm = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_warm, U, U_min, g), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_sim_cold = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_cold, U, U_min, g), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
 
 fig = Figure(size=(1100, 400))
 
