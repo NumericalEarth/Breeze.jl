@@ -227,27 +227,10 @@ potential_temperature_profile(x, z) = potential_temperature_profile(z)
 #
 # Absorbing well matters a lot here: the wave reaches the lid after about an hour, and
 # whatever is not absorbed reflects, descends carrying the mirror-image phase tilt, and
-# partially cancels the tilt of the upgoing wave. Measured at 2 hours by normalized RMS
-# difference against `w_linear` below, evaluated with `nk = 4000` rather than its default: the
-# integrand oscillates like `sin(kx)`, so `nk = 100` gives `Δk·x = 2.7` rad at `x = 30` km and a
-# quadrature error of 0.029 m s⁻¹ in exactly the far field these differences live in. Reported as
-# whole window / downstream of the ridge:
-#
-# | sponge                                    | overall | downstream |
-# |-------------------------------------------|---------|------------|
-# | `CubicRamp`, depth = H/4                  |  0.286  |   1.221    |
-# | `CubicRamp`, depth = H/2                  |  0.169  |   0.455    |
-# | [`GaussianRamp`](@ref), depth = H/4       |  0.146  |   0.281    |
-#
-# The clamped ramps are exactly zero below the layer base, and neither deepening nor
-# strengthening one helps: `depth = 0.6H` scores 0.547 downstream, and `damping_rate = 0.2` at
-# `depth = H/2` scores 0.778. Both are worse than the 0.455 above, and in both the core wave
-# grows slightly instead of shrinking, so what the stronger layer adds is reflection rather
-# than absorption. A ramp clamped to zero has an unbounded relative gradient `(1/γ)|∂z γ|` at
-# its base, and deepening it only moves that base closer to the wave; [`GaussianRamp`](@ref)
-# has no base to reflect off. Its tail does damp weakly below the nominal layer, but for a
-# steadily forced wave that cost scales with `γ/(U k)` rather than `exp(-γ t)`: 10% at
-# `z = H/2`, 0.07% at `H/4`, and a measured wave amplitude within 0.4% of the clamped ramp.
+# partially cancels the tilt of the upgoing wave. We reach for [`GaussianRamp`](@ref) rather
+# than the default [`CubicRamp`](@ref) because its weak tail below the nominal layer leaves a
+# visibly quieter far field downstream of the ridge, at a shallower `depth`. Compare against
+# `w_linear` below to see it.
 
 const sponge_depth = domain_height / 4
 const sponge_damping_rate = 0.1

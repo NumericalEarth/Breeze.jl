@@ -387,10 +387,9 @@ Most shapes have *compact support*, meaning they are exactly zero below the
 layer base ``z_{\\rm sponge\\_top} - \\text{depth}``; [`GaussianRamp`](@ref)
 deliberately does not, and instead carries a weak tail all the way down.
 
-Cost is not a consideration when choosing a shape: [`UpperSponge`](@ref)
-evaluates the ramp once per z-face at construction and stores the resulting
-1D profile, so all shapes (including user-defined ones) are equally cheap
-inside the acoustic substep.
+Choose a shape on absorption behaviour alone. [`UpperSponge`](@ref) evaluates
+the ramp once per z-face at construction and stores the resulting 1D profile,
+so the substep loop never sees the shape, however expensive it is to evaluate.
 """
 abstract type AbstractRamp end
 
@@ -433,9 +432,8 @@ end
 $(TYPEDEF)
 
 ``\\sin^2`` sponge ramp from Klemp, Dudhia & Hassiotis (2008). Same
-zero-derivative-at-both-ends behaviour as [`CubicRamp`](@ref), and (because
-the profile is precomputed) the same cost. Provided for parity with WRF
-(`damp_opt = 3`) / MPAS-Atmosphere.
+zero-derivative-at-both-ends behaviour as [`CubicRamp`](@ref). Provided for
+parity with WRF (`damp_opt = 3`) / MPAS-Atmosphere.
 """
 struct Sin2Ramp <: AbstractRamp end
 
@@ -453,21 +451,19 @@ Gaussian sponge ramp, ``\\exp[-(z - H)^2 / \\text{depth}^2]``, reaching 1 at the
 [`LinearRamp`](@ref) it is **not** clamped to zero at the layer base: a weak tail continues all
 the way down.
 
-That tail is the point. On a long mountain-wave integration a compactly-supported ramp leaves
-a residual in the far field that a tailed one removes: on the Schär case at 2 h, `CubicRamp`
-with `depth = H/2` gives a normalized RMS difference from the linear solution of 0.169 overall
-and 0.455 downstream of the ridge, while `GaussianRamp` with `depth = H/4` gives 0.146 and
-0.281. Neither deepening nor strengthening the clamped ramp substitutes: `depth = 0.6H` scores
-0.547 downstream and `damping_rate = 0.2` scores 0.778, both worse, and both with a slightly
-*larger* core wave, so the added error is reflection rather than over-absorption. A clamped
-ramp's relative gradient `(1/γ)|∂z γ|` is unbounded at its base; a Gaussian's is not.
+That tail is the point: on a long mountain-wave integration a compactly-supported ramp leaves a
+residual in the far field, worst downstream of the ridge, that a tailed one removes at half the
+`depth`. Neither deepening nor strengthening the clamped ramp substitutes — both come out worse
+downstream, and with a slightly *larger* core wave, so what they add is reflection rather than
+absorption. A clamped ramp's relative gradient `(1/γ)|∂z γ|` is unbounded at its base, and
+deepening it only moves that base closer to the wave; a Gaussian has no base to reflect off.
 
-The tail does apply weak damping below the nominal layer, but for a steadily forced wave the
-relevant comparison is not `exp(-rate × ramp × t)`: the response equilibrates against
-advection, so the cost scales with `rate × ramp(z) / (U k)`. On the Schär case that is 10% at
-`z = H/2`, falling to 0.07% at `H/4`, and the measured rms `w` over `0.5 < z < 10` km differs
-from the clamped ramp by 0.4%. Prefer a clamped ramp when the dynamics just below the sponge
-must be provably untouched, and this one when a quiet far field matters more.
+What the tail costs is weak damping below the nominal layer. For a steadily forced wave that is
+not `exp(-rate × ramp × t)`: the response equilibrates against advection, so the amplitude cost
+scales with `rate × ramp(z) / (U k)`, which on the Schär case is 10% at `z = H/2` and 0.07% at
+`H/4`. Measured rms `w` over `0.5 < z < 10` km differs from the clamped ramp by 0.4%. Prefer a
+clamped ramp when the dynamics just below the sponge must be provably untouched, and this one
+when a quiet far field matters more.
 """
 struct GaussianRamp <: AbstractRamp end
 
@@ -539,9 +535,6 @@ MPAS-Atmosphere. The profile shape is controlled by `ramp`; use
   supported by subtyping `AbstractRamp` and defining
   `(::MyRamp)(z, sponge_top, depth)`.
 
-  Shape choice is free: `ramp` is never evaluated inside the substep loop, so
-  a transcendental shape costs exactly what a polynomial one does (see below).
-
 The ramp depends only on the reference vertical coordinate (no horizontal
 variation), so the sponge does not break zonal symmetry and remains uniform
 over terrain-following grids. That is also what makes the damping rate
@@ -550,10 +543,7 @@ over terrain-following grids. That is also what makes the damping rate
 and [`materialize_sponge`](@ref) evaluates `ramp` once per face at
 `AcousticSubstepper` construction and stores the result. The substep kernels
 then read `γ` with a single load instead of re-evaluating the shape twice per
-face per acoustic substep. Measured against inline evaluation, that is worth
-14% of the wall clock per step on CPU/Float64 for a transcendental ramp, and
-``≲1%`` on an H100, where the substep kernels are bandwidth-bound and the
-transcendental was already hidden.
+face per acoustic substep.
 """
 struct UpperSponge{FT, R <: AbstractRamp, P}
     damping_rate :: FT
@@ -566,10 +556,7 @@ function UpperSponge(; damping_rate = 0.2, depth = 5e3, ramp = CubicRamp())
     ramp isa AbstractRamp ||
         throw(ArgumentError("`ramp` must be an `<:AbstractRamp` (e.g. `CubicRamp()`, `Sin2Ramp()`, `GaussianRamp()`, `LinearRamp()`)"))
     FT = Oceananigans.defaults.FloatType
-    return UpperSponge{FT, typeof(ramp), Nothing}(convert(FT, damping_rate),
-                                                  convert(FT, depth),
-                                                  ramp,
-                                                  nothing)
+    return UpperSponge(convert(FT, damping_rate), convert(FT, depth), ramp, nothing)
 end
 
 Adapt.adapt_structure(to, sponge::UpperSponge) =
@@ -580,14 +567,11 @@ Adapt.adapt_structure(to, sponge::UpperSponge) =
 
 convert_acoustic_parameter(::Type{FT}, ::Nothing) where FT = nothing
 
-# Only the scalars are converted here: `materialize_sponge` builds `damping_profile`
-# afterwards at the grid's float type, so a skeleton carries `nothing` through and a
-# materialized sponge keeps the profile it already has.
+# Only the scalars are converted here: this runs on the gridless skeleton, and
+# `materialize_sponge` rebuilds both them and `damping_profile` at the grid's float type.
 convert_acoustic_parameter(::Type{FT}, sponge::UpperSponge) where FT =
-    UpperSponge{FT, typeof(sponge.ramp), typeof(sponge.damping_profile)}(convert(FT, sponge.damping_rate),
-                                                                        convert(FT, sponge.depth),
-                                                                        sponge.ramp,
-                                                                        sponge.damping_profile)
+    UpperSponge(convert(FT, sponge.damping_rate), convert(FT, sponge.depth),
+                sponge.ramp, sponge.damping_profile)
 
 """
 $(TYPEDEF)

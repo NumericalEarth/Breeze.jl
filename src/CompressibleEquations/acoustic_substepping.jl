@@ -563,13 +563,9 @@ end
 # intentionally not exactly invertible).
 #
 # γ = rate × ramp(z) is a function of the reference face coordinate alone, so it is precomputed
-# once per z-face by `materialize_sponge` and read here with a single load. This is reached twice
-# per face per acoustic substep — from the tridiag diagonal, inside the serial-in-k Thomas sweep,
-# and from `_build_vertical_rhs!` — so evaluating `ramp` inline instead cost 14% of the wall clock
-# per step on CPU/Float64 for a transcendental shape (`GaussianRamp`, `Sin2Ramp`). On an H100 the
-# same comparison was ≤1%: these kernels are bandwidth-bound and the hardware absorbs the
-# transcendental, so there the point is not speed but that shape choice is decoupled from cost,
-# including for arbitrarily expensive user-defined ramps.
+# once per z-face by `materialize_sponge` and read here with a single load. It is read twice per
+# face per acoustic substep: from the tridiag diagonal, inside the serial-in-k Thomas sweep, and
+# from `_build_vertical_rhs!`.
 @inline sponge_damping(i, j, k, grid, ::Nothing) = zero(grid)
 
 @inline sponge_damping(i, j, k, grid, sponge::UpperSponge) =
@@ -588,6 +584,8 @@ The user-facing [`UpperSponge`](@ref) constructor has no grid, so it produces a 
 `damping_profile = nothing` — this is the matching materialization step.
 """
 function materialize_sponge(grid, sponge::UpperSponge)
+    # Converting to the *grid* float type is what keeps γ out of the tridiag's promotion path: a
+    # Float64 γ on a Float32 grid would widen the whole Thomas recurrence, per column per substep.
     FT = eltype(grid)
     damping_rate = convert(FT, sponge.damping_rate)
     depth = convert(FT, sponge.depth)
@@ -599,9 +597,7 @@ function materialize_sponge(grid, sponge::UpperSponge)
     launch!(architecture(grid), grid, tuple(1), _compute_sponge_damping_profile!,
             damping_profile, grid, damping_rate, depth, sponge.ramp, size(grid, 3))
 
-    return UpperSponge{FT, typeof(sponge.ramp), typeof(damping_profile)}(damping_rate, depth,
-                                                                        sponge.ramp,
-                                                                        damping_profile)
+    return UpperSponge(damping_rate, depth, sponge.ramp, damping_profile)
 end
 
 # One thread walking the column: `ramp` is an arbitrary user-supplied callable, so this is the
@@ -618,19 +614,19 @@ end
 @inline sponge_term_diag(i, j, k, grid, sponge, δτᵐ⁺) =
     abs(δτᵐ⁺) * sponge_damping(i, j, k, grid, sponge)
 
-@inline sponge_rhs(i, j, k, grid, ::Nothing, δτˢ⁻, ρw_old) = zero(grid)
-
-@inline sponge_rhs(i, j, k, grid, sponge::UpperSponge, δτˢ⁻, ρw_old) =
+# `_build_vertical_rhs!` loads ρw′ at this face anyway, so there is nothing for a `::Nothing`
+# specialization to save here (unlike `sponge_slow_tendency` below).
+@inline sponge_rhs(i, j, k, grid, sponge, δτˢ⁻, ρw_old) =
     @inbounds abs(δτˢ⁻) * sponge_damping(i, j, k, grid, sponge) * ρw_old[i, j, k]
 
 # Rayleigh damping of the stage-entry vertical momentum, folded into the slow tendency Gˢρw. `ρwᴸ`
-# is the **Cartesian** ρw on both height-coordinate and terrain-following grids: the wave is what we
-# want to absorb, and a uniform wind over sloping coordinate surfaces has ρw = 0 but ρw̃ ≠ 0 (see the
-# terrain assembly for why targeting ρw̃ would force the mean flow). `direction = sign(Δτ)` keeps the term
+# is the **Cartesian** ρw on both height-coordinate and terrain-following grids (see the terrain
+# assembly for why targeting ρw̃ would force the mean flow). `direction = sign(Δτ)` keeps the term
 # dissipative when integrating backwards, since `_build_vertical_rhs!` scales Gˢρw by the *signed*
 # Δτ (the acoustic half gets the same treatment through its `abs(δτ)` weights). Riding in Gˢρw also
 # means this half is scaled by `vertical_momentum_tendency_factor` along with the rest of the slow
 # tendency — irrelevant at its default of 1, but worth knowing if that knob is ever turned down.
+# The `::Nothing` method is what keeps ρwᴸ out of the sponge-free assembly kernels entirely.
 @inline sponge_slow_tendency(i, j, k, grid, ::Nothing, ρwᴸ, direction) = zero(grid)
 
 @inline sponge_slow_tendency(i, j, k, grid, sponge::UpperSponge, ρwᴸ, direction) =

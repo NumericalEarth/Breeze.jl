@@ -1187,18 +1187,25 @@ for arch in arches
 
         # Assemble Gˢρw with and without the sponge from an otherwise identical state: the
         # difference must be exactly the Rayleigh damping of the stage-entry momentum.
-        function assembled_slow_tendency(sponge, ρw)
+        function balanced_model(sponge)
             td = SplitExplicitTimeDiscretization(; substeps=4, sponge)
             model = AtmosphereModel(grid; dynamics=CompressibleDynamics(td; reference_potential_temperature=300))
             set!(model; θ=300, u=0, qᵗ=0, ρ=model.dynamics.reference_state.density)
+            return model
+        end
+
+        function assembled_slow_tendency(model, ρw)
             set!(model.momentum.ρw, ρw)
             substepper = model.timestepper.substepper
             assemble_slow_vertical_momentum_tendency!(substepper, model, 1)
             return Array(interior(substepper.slow_vertical_momentum_tendency, 1, 1, :))
         end
 
-        Gˢρw_sponge = assembled_slow_tendency(sponge, ρw_value)
-        Gˢρw_none = assembled_slow_tendency(nothing, ρw_value)
+        sponge_model = balanced_model(sponge)
+        unsponged_model = balanced_model(nothing)
+
+        Gˢρw_sponge = assembled_slow_tendency(sponge_model, ρw_value)
+        Gˢρw_none = assembled_slow_tendency(unsponged_model, ρw_value)
 
         # Faces 2:Nz are the assembled interior (face 1 is pinned by the `k > 1` gate; the lid face
         # Nz+1 lies outside the `:xyz` launch and is pinned in the tridiag RHS).
@@ -1212,7 +1219,7 @@ for arch in arches
         @test damped_faces ≥ 4  # the layer really covers part of the column
 
         # At rest (ρwᴸ = 0) the sponge contributes nothing, so a balanced state stays balanced.
-        @test assembled_slow_tendency(sponge, 0) ≈ assembled_slow_tendency(nothing, 0)
+        @test assembled_slow_tendency(sponge_model, 0) ≈ assembled_slow_tendency(unsponged_model, 0)
     end
 
     #####
