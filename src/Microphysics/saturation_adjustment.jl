@@ -9,7 +9,7 @@ using ..Thermodynamics:
     is_absolute_zero,
     with_moisture,
     total_specific_moisture,
-    AbstractThermodynamicState,
+    AbstractReferencePressureState,
     LiquidIceDensityState,
     WarmPhaseEquilibrium,
     MixedPhaseEquilibrium,
@@ -162,7 +162,11 @@ end
 ##### Saturation adjustment utilities
 #####
 
-@inline function adjust_state(𝒰₀, T, constants, equilibrium)
+const ARPS = AbstractReferencePressureState
+
+# Saturate at the state's reference pressure. `LiquidIceDensityState` has none, and is served instead
+# by `adjust_thermodynamic_state(::LiquidIceDensityState, ...)` below. See NumericalEarth/Breeze.jl#859.
+@inline function adjust_state(𝒰₀::ARPS, T, constants, equilibrium)
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_specific_moisture(𝒰₀)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
@@ -170,13 +174,11 @@ end
     return with_moisture(𝒰₀, q₁)
 end
 
-@inline function saturation_adjustment_residual(T, 𝒰₀, constants, equilibrium)
+@inline function saturation_adjustment_residual(T, 𝒰₀::ARPS, constants, equilibrium)
     𝒰₁ = adjust_state(𝒰₀, T, constants, equilibrium)
     T₁ = temperature(𝒰₁, constants)
     return T - T₁
 end
-
-const ATS = AbstractThermodynamicState
 
 # This function allows saturation adjustment to be used as a microphysics scheme directly
 @inline function AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, qᵉ, constants)
@@ -188,9 +190,10 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return the saturation-adjusted thermodynamic state using a secant iteration.
+Return the saturation-adjusted thermodynamic state using a secant iteration on the temperature
+residual, with the equilibrium partition evaluated at `𝒰₀.reference_pressure`.
 """
-@inline function adjust_thermodynamic_state(𝒰₀::ATS, microphysics::SA, constants)
+@inline function adjust_thermodynamic_state(𝒰₀::ARPS, microphysics::SA, constants)
     FT = eltype(𝒰₀)
     is_absolute_zero(𝒰₀) && return 𝒰₀
 
