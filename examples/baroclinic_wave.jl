@@ -367,7 +367,7 @@ for ax in (ax1, ax2, ax3)
     hidespines!(ax)
 end
 
-CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 12) do nn
+CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide

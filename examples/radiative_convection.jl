@@ -417,7 +417,7 @@ Colorbar(fig[2, 2], hmqᵛ; vertical=false, label="qᵛ (g/kg)")
 
 hideydecorations!(axqᵛ; grid=false)
 
-CairoMakie.record(fig, "radiative_convection.mp4", 1:Nt; framerate=12) do nn
+CairoMakie.record(fig, "radiative_convection.mp4", 1:Nt; framerate = 12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide

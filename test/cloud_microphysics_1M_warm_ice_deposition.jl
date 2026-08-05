@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudIce, CloudLiquid

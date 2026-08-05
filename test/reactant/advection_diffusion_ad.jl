@@ -1,3 +1,5 @@
+include(joinpath(dirname(@__DIR__), "setup.jl"))
+
 using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState

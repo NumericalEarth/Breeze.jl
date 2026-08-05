@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 #####
 ##### Tests for acoustic substepping in CompressibleDynamics
 #####
