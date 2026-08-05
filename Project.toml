@@ -1,6 +1,6 @@
 name = "Breeze"
 uuid = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
-version = "0.7.4"
+version = "0.8.0"
 authors = ["NumericalEarth organization (github.com/NumericalEarth) and lovely contributors"]
 
 [workspace]
@@ -49,7 +49,7 @@ OffsetArrays = "1.4"
 Oceananigans = "0.110.14"
 Printf = "1"
 RRTMGP = "0.21"
-Reactant = "0.2.278"
+Reactant = "0.2.268 - 0.2.274, 0.2.278"
 SpecialFunctions = "2"
 Statistics = "<0.0.1, 1"
 julia = "1.11.9"
