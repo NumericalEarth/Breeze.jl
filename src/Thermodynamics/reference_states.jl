@@ -490,7 +490,17 @@ end
 ##### Dispatch: select closed-form (constant θ₀) or numerical (θᵣ(z)) hydrostatic profiles
 #####
 
-# Closed-form for constant potential temperature
+"""
+$(TYPEDSIGNATURES)
+
+Dry hydrostatic pressure at height `z`, reduced from the datum `p₀` at ``z = 0`` along the
+reference potential temperature, with `pˢᵗ` the standard pressure of the Exner function.
+
+The potential temperature selects how the reduction is carried out: a constant `θ₀` has the
+closed form [`adiabatic_hydrostatic_pressure`](@ref), while a profile `θᵣ(z)` is integrated
+numerically by [`numerically_integrated_hydrostatic_pressure`](@ref). `hydrostatic_density` and
+`hydrostatic_temperature` dispatch the same way.
+"""
 hydrostatic_pressure(z, p₀, θ₀::Number, pˢᵗ, constants) =
     adiabatic_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
 

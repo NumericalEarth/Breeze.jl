@@ -22,7 +22,8 @@ Fields
 - `pressure`: Diagnostic pressure field p = ρ Rᵐ T
 - `standard_pressure`: Reference pressure pˢᵗ for potential temperature (default 10⁵ Pa)
 - `base_pressure`: Mean pressure of the reference atmosphere at ``z = 0`` (p₀). The
-  pressure at the ground is [`surface_pressure`](@ref), which the reference state derives from it
+  pressure at the ground is [`surface_pressure`](@ref AtmosphereModels.surface_pressure), which
+  the reference state derives from it
 - `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref) or [`ExplicitTimeStepping`](@ref))
 - `reference_state`: The single fixed hydrostatically-balanced reference state for base-state
   pressure/buoyancy correction (perturbation-form PGF), or `nothing` when disabled. An
