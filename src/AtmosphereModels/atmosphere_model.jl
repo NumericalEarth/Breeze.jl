@@ -256,7 +256,7 @@ function AtmosphereModel(grid;
     # agree on ordering, or forcings will read the wrong field. `auxiliary_model_fields`
     # is the single definition both sites go through.
     model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
-                         auxiliary_model_fields(temperature, dynamics), microphysical_fields)
+                         auxiliary_model_fields(temperature), microphysical_fields)
     density = dynamics_density(dynamics)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, density,
@@ -530,25 +530,42 @@ combine_forcing_values(a, b) = (a, b)
 """
 $(TYPEDSIGNATURES)
 
-The non-prognostic thermodynamic fields exposed alongside the prognostic ones by
-`Oceananigans.fields(model)`: temperature, and the pressure and density the model's own
-thermodynamics is evaluated with. Surface-flux boundary conditions read `p` and `ρ` from here to
-diagnose their surface state, and forcings resolve them positionally, so every site that assembles
-the model's field tuple must obtain them here rather than rebuild the tuple.
+The non-prognostic fields exposed alongside the prognostic ones by `Oceananigans.fields(model)`,
+which is the temperature and nothing else. Forcings and boundary functions resolve their
+`field_dependencies` to positional indices into this tuple and index it with those at runtime, so
+every site that assembles the model's field tuple must obtain the auxiliaries here rather than
+rebuild the tuple, and every entry must adapt to the *same* device-side type.
+
+That second requirement is what keeps the thermodynamic pressure and density out:
+`Adapt.adapt_structure` unwraps a three-dimensional `Field` to its `OffsetArray` but preserves the
+`Field` around a dimension-reduced one, such as an anelastic reference profile, so admitting them
+would make the positional lookup a non-concrete `Union` and the GPU compiler would then reject
+every kernel that performs one. Boundary conditions receive them as a second tuple instead, from
+[`dynamics_thermodynamic_fields`](@ref), and read them by name.
+"""
+auxiliary_model_fields(temperature) = (; T=temperature)
+
+"""
+$(TYPEDSIGNATURES)
+
+The pressure and density the model's own thermodynamics is evaluated with, which surface-flux
+boundary conditions read to diagnose the surface state below `(i, j)`. `boundary_condition_args`
+passes this tuple after the model field tuple, and Breeze's own boundary conditions merge the two;
+see [`auxiliary_model_fields`](@ref) for why it has to arrive separately.
 
 These are [`dynamics_pressure`](@ref) and [`total_density`](@ref), both of which are always
 actual `Field`s: prognostic under `CompressibleDynamics`, the hydrostatic reference profile under
 `AnelasticDynamics`. Deliberately *not* [`total_pressure`](@ref), which for anelastic dynamics is a
-lazy sum that would put an `AbstractOperation` into `Oceananigans.fields(model)` and rebuild it on
-every halo fill — and whose nonhydrostatic anomaly is a Lagrange multiplier defined only up to a
-constant, so no surface diagnostic should depend on it.
+lazy sum that would rebuild an `AbstractOperation` on every halo fill, and whose nonhydrostatic
+anomaly is a Lagrange multiplier defined only up to a constant, so no surface diagnostic should
+depend on it.
 """
-auxiliary_model_fields(temperature, dynamics) =
-    (; T=temperature, p=dynamics_pressure(dynamics), ρ=total_density(dynamics))
+dynamics_thermodynamic_fields(dynamics) =
+    (; p=dynamics_pressure(dynamics), ρ=total_density(dynamics))
 
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)
-    auxiliary = auxiliary_model_fields(model.temperature, model.dynamics)
+    auxiliary = auxiliary_model_fields(model.temperature)
     return merge(prognostic_fields(model), formulation_fields, model.velocities, auxiliary, model.microphysical_fields)
 end
 
@@ -562,7 +579,8 @@ function Oceananigans.prognostic_fields(model::AtmosphereModel)
     return merge(dynamics_fields, model.momentum, thermodynamic_fields, μ_fields, model.tracers)
 end
 
-Models.boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
+Models.boundary_condition_args(model::AtmosphereModel) =
+    (model.clock, fields(model), dynamics_thermodynamic_fields(model.dynamics))
 
 function total_energy(model)
     u, v, w = model.velocities

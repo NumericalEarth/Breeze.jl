@@ -107,7 +107,8 @@ end
 #####
 
 @inline function OceananigansBC.getbc(df::XDirectionBulkDragFunction, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
+                                      grid::AbstractGrid, clock, model_fields, dynamics_fields)
+    fields = surface_layer_state(model_fields, dynamics_fields)
     T₀ = surface_value(i, j, df.surface_temperature)
     u  = near_surface_velocity(i, j, fields, df.filtered_velocities, XDirection())
     U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields, df.filtered_velocities)
@@ -120,7 +121,8 @@ end
 end
 
 @inline function OceananigansBC.getbc(df::YDirectionBulkDragFunction, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
+                                      grid::AbstractGrid, clock, model_fields, dynamics_fields)
+    fields = surface_layer_state(model_fields, dynamics_fields)
     T₀ = surface_value(i, j, df.surface_temperature)
     v  = near_surface_velocity(i, j, fields, df.filtered_velocities, YDirection())
     U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields, df.filtered_velocities)

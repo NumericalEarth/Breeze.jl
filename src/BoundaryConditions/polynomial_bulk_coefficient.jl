@@ -367,10 +367,11 @@ rather than from fields captured at construction.
 
 Boundary conditions are materialized before the dynamics is, so there are no model fields to
 capture at that point; deferring the read is what lets a compressible model's stability correction
-follow its prognostic pressure and density. The `p` and `ρ` entries come from
-`AtmosphereModels.auxiliary_model_fields`, so this reads the same thermodynamic pressure the rest
-of the model does: prognostic under `CompressibleDynamics`, the hydrostatic reference profile under
-`AnelasticDynamics`.
+follow its prognostic pressure and density. The `T` entry comes from
+`AtmosphereModels.auxiliary_model_fields` and the `p` and `ρ` entries from
+`AtmosphereModels.dynamics_thermodynamic_fields`, which the caller has merged into one tuple by
+this point, so this reads the same thermodynamic pressure the rest of the model does: prognostic
+under `CompressibleDynamics`, the hydrostatic reference profile under `AnelasticDynamics`.
 """
 struct BoundaryVirtualPotentialTemperature{M, N, FT, TC}
     microphysics :: M

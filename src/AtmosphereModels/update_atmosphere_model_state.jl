@@ -421,7 +421,7 @@ function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
 
     # Compute boundary flux contributions
     prognostic_model_fields = prognostic_fields(model)
-    args = (arch, model.clock, fields(model))
+    args = (arch, boundary_condition_args(model)...)
     field_indices = 1:length(prognostic_model_fields)
     Gⁿ = model.timestepper.Gⁿ
 

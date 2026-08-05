@@ -26,6 +26,7 @@ export BulkDragFunction,
        default_neutral_latent_heat_polynomial
 
 using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density,
+                          dynamics_thermodynamic_fields,
                           standard_pressure, default_drag_surface_temperature,
                           moisture_specific_name
 using ..AtmosphereModels.Diagnostics: saturation_total_specific_moisture,
@@ -58,6 +59,18 @@ using DocStringExtensions: TYPEDSIGNATURES
 @inline surface_value(i, j, field::AbstractArray) = @inbounds field[i, j, 1]
 @inline surface_value(i, j, x::Number) = x
 @inline surface_value(i, j, ::Nothing) = nothing
+
+# The surface diagnostics below read the thermodynamic pressure `p` and density `ρ`, which arrive
+# in a second field tuple that `boundary_condition_args` passes after the model fields: they are
+# dimension-reduced fields under anelastic dynamics and cannot ride in the tuple whose entries user
+# forcings and boundary functions look up positionally (see
+# `AtmosphereModels.dynamics_thermodynamic_fields`). Merging the two is resolved at compile time,
+# and everything downstream of here reads its fields by name.
+@inline surface_layer_state(model_fields, dynamics_fields) = merge(model_fields, dynamics_fields)
+
+# The same tuple, assembled from a model by host-side callers (the filtered θᵥ update, tests).
+surface_layer_state(model) = surface_layer_state(Oceananigans.fields(model),
+                                                 dynamics_thermodynamic_fields(model.dynamics))
 
 @inline surface_air_pressureᶜᶜᶜ(i, j, k, grid, fields, constants) =
     surface_pressure_from_cell_center(i, j, k, grid, fields.p, fields.ρ,

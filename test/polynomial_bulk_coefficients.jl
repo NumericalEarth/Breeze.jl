@@ -842,7 +842,7 @@ using GPUArraysCore: @allowscalar
 
     @testset "Drag flux uses filtered velocity, not instantaneous" begin
         using Oceananigans.Models: BoundaryConditionOperation
-        using Breeze.BoundaryConditions: surface_air_pressure
+        using Breeze.BoundaryConditions: surface_air_pressure, surface_layer_state
         using Breeze.Thermodynamics: surface_density
 
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
@@ -878,7 +878,7 @@ using GPUArraysCore: @allowscalar
         compute!(τˣ_field)
 
         # New formula: τ = -ρ₀ * Cᴰ * Ũ * u, with `u` and `Ũ` read from filtered fields.
-        model_fields = Oceananigans.fields(model)
+        model_fields = surface_layer_state(model)
         p₀ = surface_air_pressure(2, 2, grid, model_fields,
                                   model.thermodynamic_constants, XDirection())
         T₀_default = Breeze.AtmosphereModels.default_drag_surface_temperature(model.dynamics,

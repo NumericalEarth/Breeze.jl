@@ -118,7 +118,8 @@ end
 end
 
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
+                                      grid::AbstractGrid, clock, model_fields, dynamics_fields)
+    fields = surface_layer_state(model_fields, dynamics_fields)
     T₀ = surface_value(i, j, bf.surface_temperature)
 
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields, bf.filtered_velocities)
@@ -199,7 +200,8 @@ end
 
 # getbc for BulkVaporFluxFunction
 @inline function OceananigansBC.getbc(bf::BulkVaporFluxFunction, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
+                                      grid::AbstractGrid, clock, model_fields, dynamics_fields)
+    fields = surface_layer_state(model_fields, dynamics_fields)
     constants = bf.thermodynamic_constants
     surface = bf.surface
     T₀ = surface_value(i, j, bf.surface_temperature)

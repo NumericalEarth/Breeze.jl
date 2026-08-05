@@ -9,7 +9,7 @@ using Oceananigans.Grids: XDirection, znode
 using Oceananigans.Models: BoundaryConditionOperation
 using Oceananigans.Operators: Δzᶜᶜᶠ, Δzᶜᶜᶜ
 using Breeze.AtmosphereModels: surface_pressure
-using Breeze.BoundaryConditions: surface_air_pressure
+using Breeze.BoundaryConditions: surface_air_pressure, surface_layer_state
 using Breeze.Thermodynamics: hydrostatic_pressure, dry_air_gas_constant, vapor_gas_constant,
                               potential_temperature_from_temperature, saturation_specific_humidity,
                               surface_density, ExnerReferenceState
@@ -322,7 +322,7 @@ using Test
         Oceananigans.initialize!(model)
 
         constants = model.thermodynamic_constants
-        model_fields = Oceananigans.fields(model)
+        model_fields = surface_layer_state(model)
         pˢ = surface_air_pressure(1, 1, grid, model_fields, constants, XDirection())
         pˢ_center = surface_air_pressure(1, 1, grid, model_fields, constants)
         pˢ_reference = model.dynamics.reference_state.surface_pressure[1, 1, 1]
@@ -361,7 +361,7 @@ using Test
         # The boundary condition must follow the evolving diagnostic pressure rather than
         # retaining the reference pressure it saw during model construction.
         set!(model; θ=θ₀, qᵗ=0, ρ=0.8, u=U, enforce_mass_conservation=false)
-        updated_fields = Oceananigans.fields(model)
+        updated_fields = surface_layer_state(model)
         pˢ_updated = surface_air_pressure(1, 1, grid, updated_fields, constants, XDirection())
         @test abs(pˢ_updated - pˢ_reference) > 1000
 

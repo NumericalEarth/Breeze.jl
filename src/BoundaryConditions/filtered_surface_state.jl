@@ -359,7 +359,7 @@ initialize_filtered_θᵥ!(::Nothing, source_field, model) = nothing
 initialize_filtered_θᵥ!(fv::FilteredSurfaceVelocities, ::Nothing, model) = nothing
 
 function initialize_filtered_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, model)
-    initialize_θᵥ!(fv, θᵥ_source, model.grid, Oceananigans.fields(model))
+    initialize_θᵥ!(fv, θᵥ_source, model.grid, surface_layer_state(model))
     return nothing
 end
 
@@ -372,7 +372,7 @@ function update_filtered_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, mod
     fv.last_θᵥ_update[] == key && return nothing
     Δt = model.clock.last_Δt
     isinf(Δt) && return nothing
-    update_θᵥ!(fv, θᵥ_source, model.grid, Δt, Oceananigans.fields(model))
+    update_θᵥ!(fv, θᵥ_source, model.grid, Δt, surface_layer_state(model))
     fv.last_θᵥ_update[] = key
     return nothing
 end
