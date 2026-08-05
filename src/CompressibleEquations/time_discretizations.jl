@@ -478,19 +478,26 @@ $(TYPEDEF)
 
 Implicit upper Rayleigh sponge for the substepper. Damps the vertical momentum
 toward zero inside a layer of thickness `depth` below the model lid, with peak
-damping rate `damping_rate` (in 1/s) at the lid scaled by `ramp(z)`. The damped
-variable is ``ρw`` for height-coordinate dynamics and ``ρ\\tilde{w}`` for
-terrain-following dynamics.
+damping rate `damping_rate` (in 1/s) at the lid scaled by `ramp(z)`.
 
 The damping acts on the **total** momentum, which the substep loop carries as
 ``ρw = ρw^L + (ρw)′``, so it is applied in two matching pieces:
 
   - the stage-entry part ``-\\text{rate} × \\text{ramp}(z) × ρw^L`` is a known
-    constant across the substeps and enters the slow tendency ``G^s_{ρw}``;
+    constant across the substeps and enters the slow tendency ``G^s_{ρw}``. This
+    half targets the **Cartesian** ``ρw`` on every grid, height-coordinate and
+    terrain-following alike, because a horizontally uniform wind over sloping
+    coordinate surfaces has ``ρw = 0`` but ``ρ\\tilde{w} = -\\text{slope} · ρu``,
+    so damping ``ρ\\tilde{w}^L`` would drive the mean flow to follow the
+    coordinate surfaces;
   - the acoustic perturbation part is CN-weighted **inside the column tridiag**
     (paralleling the implicit divergence damping): ``δτᵐ⁺ × \\text{rate} ×
     \\text{ramp}(z)`` on the LHS diagonal, ``δτˢ⁻ × \\text{rate} ×
-    \\text{ramp}(z)`` on the explicit-half RHS.
+    \\text{ramp}(z)`` on the explicit-half RHS. This half acts on whichever
+    vertical-momentum perturbation the substep evolves, ``(ρw)′`` in height
+    coordinates and ``(ρ\\tilde{w})′`` in terrain-following coordinates. Either
+    way it needs no Cartesian correction, since the mean-flow offset lives
+    entirely in the stage-entry state.
 
 Damping ``(ρw)′`` alone would not absorb anything: the perturbation measures the
 *change* over an RK stage, so a quasi-steady gravity wave passes through
