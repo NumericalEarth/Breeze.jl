@@ -594,18 +594,30 @@ whole step sees one consistent state.
 Small values below numerical thresholds are treated as zero in the source
 assembly:
 
-```julia
-q_min = microphysics.minimum_mass_mixing_ratio     # default: 1e-14 kg/kg
-n_min = microphysics.minimum_number_mixing_ratio   # default: 1e-16 1/kg
+```jldoctest thresholds
+using Breeze
+
+microphysics = PredictedParticlePropertiesMicrophysics()
+
+(microphysics.minimum_mass_mixing_ratio,     # [kg/kg]
+ microphysics.minimum_number_mixing_ratio)   # [1/kg]
+
+# output
+(1.0e-14, 1.0e-16)
 ```
 
 Two further thresholds on `ProcessRateParameters` control whole-particle
-handling:
+handling — `liquid_fraction_clipping_threshold` (Fortran `liqfracsmall`) and
+`tiny_ice_to_rain_threshold` (Fortran `qsmall_dry`, in kg/kg):
 
-```julia
+```jldoctest thresholds
 prp = microphysics.process_rates
-prp.liquid_fraction_clipping_threshold  # default 0.01 (Fortran liqfracsmall)
-prp.tiny_ice_to_rain_threshold          # default 1e-12 kg/kg (Fortran qsmall_dry)
+
+(prp.liquid_fraction_clipping_threshold,
+ prp.tiny_ice_to_rain_threshold)
+
+# output
+(0.01, 1.0e-12)
 ```
 
 ``F^l`` below `liquid_fraction_clipping_threshold` freezes the residual coating to

@@ -322,9 +322,15 @@ the impact parameter ``R_i``, which depends on droplet size, impact velocity, an
 \end{cases}
 ```
 
-The rime density is bounded:
+Wherever the particle carries rime volume, the diagnosed rime density is bounded
+into `[minimum_rime_density, maximum_rime_density]`:
 - ``ρ_{min} = 50`` kg/m³ is minimum rime density
 - ``ρ_{max} = 900`` kg/m³ is maximum rime density
+
+`consistent_rime_state` applies those bounds only when ``ρb^f`` is non-negligible;
+an unrimed particle keeps the canonical ``ρ^f = 0`` rather than being pushed up to
+``ρ_{min}``, and the table lookup clamps that 0 onto the first rime-density
+coordinate on the way in (see [Size Distribution](@ref p3_size_distribution)).
 
 The rime density affects the graupel density ``ρ_g`` and thus the regime thresholds.
 As particles rime more heavily, they become denser and more spherical.
@@ -332,9 +338,12 @@ As particles rime more heavily, they become denser and more spherical.
 !!! note "Official P3 implementation details"
     The Fortran scheme clamps ``R_i`` to [1, 12] before applying the Cober–List fit;
     the linear branch for ``R_i > 8`` is extended to ``R_i = 12`` so that
-    ``ρ^f = 900`` kg/m³. When riming is inactive, ``ρ^f`` defaults to 400 kg/m³.
-    The lookup tables discretize ``ρ^f`` on an uneven grid (50, 250, 450, 650, 900 kg/m³)
-    and interpolate between bins.
+    ``ρ^f = 900`` kg/m³. The lookup tables discretize ``ρ^f`` on an uneven grid
+    (50, 250, 450, 650, 900 kg/m³) and interpolate between bins; `rime_density_index`
+    maps a physical ``ρ^f`` onto that grid. Note that the 400 kg/m³ figure that
+    appears in the analytic helpers is only the `rime_density` keyword default of
+    the offline `IceSizeDistributionState` constructor — it is not a value the
+    model path ever assumes.
 
 ## Summary
 

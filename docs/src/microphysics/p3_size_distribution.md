@@ -113,6 +113,15 @@ diagnostic ``ρ^f`` is floored at 50 kg/m³, the first coordinate of Table 1's
 rime-density axis, matching the runtime lookup's clamp of the canonical unrimed
 ``ρ^f = 0``.
 
+!!! note "Two-Moment Mode"
+    The piecewise closure above is the formula the Fortran table *generator*
+    evaluates, and `TwoMomentClosure` reproduces it analytically. Breeze's model
+    path does not evaluate it per grid point: ``μ`` is read from Table 1's
+    shape-parameter column (Fortran `mu_i_save`), which stores the generator's
+    result, and is interpolated in the same
+    ``(\log \bar{m}, F^f, F^l, ρ^f)`` space as every other Table 1 integral
+    (`compute_ice_shape_parameter` in `process_rate_helpers.jl`).
+
 !!! note "Three-Moment Mode"
     In the official P3 code, ``μ`` (and the bulk ice density used in rates) are obtained
     from lookup table 3 (`p3_lookupTable_3.dat-v1.4`) by interpolation in the ``Z/Q`` space,
@@ -145,9 +154,9 @@ for (Fᶠ, label, color) in [(0.0, "Fᶠ = 0 (unrimed)", :blue),
     λs = Float64[]
     μs = Float64[]
     for L in L_values
-        params = distribution_parameters(L, N_ice, Fᶠ, 500.0)
-        push!(λs, params.λ)
-        push!(μs, params.μ)
+        psd = distribution_parameters(L, N_ice, Fᶠ, 500.0)
+        push!(λs, psd.λ)
+        push!(μs, psd.μ)
     end
     lines!(ax, λs, μs, linewidth=2, color=color, label=label)
 end
@@ -216,9 +225,22 @@ Finding ``λ`` requires solving:
 This is a nonlinear equation in ``λ``, since ``μ = μ(λ)``. In the official P3
 code, ``λ`` is determined during lookup-table generation by scanning over a
 fixed range (roughly 10–10⁷ m⁻¹) and selecting the value that best matches L/N
-for the current ``μ`` and piecewise ``m(D)``. Breeze's [`solve_lambda`](@ref) instead solves the
-equation directly: a secant iteration for the two-moment closure, and a bracketed bisection at
-fixed ``μ`` for three-moment ice.
+for the current ``μ`` and piecewise ``m(D)``. Breeze's [`solve_lambda`](@ref) solves the
+same equation directly instead of scanning: a secant iteration for the two-moment closure,
+and a bracketed bisection at fixed ``μ`` for three-moment ice.
+
+!!! note "The model path does not solve for ice ``λ``"
+    `solve_lambda` and [`distribution_parameters`](@ref) are the analytic
+    reference implementation. They are used for offline work — reproducing the
+    generator, the plots on this page, and the unit tests — and have no caller on
+    the runtime tendency path. Breeze never needs ice ``λ`` per grid point,
+    because every Table 1 integral is indexed by the *mean particle mass*
+    ``\log \bar{m}`` rather than by ``λ``, so the slope is already baked into the
+    tabulated values. (Table 1 does carry a slope-parameter column, which Breeze
+    loads but no rate reads.) Rain is the exception: its distribution is
+    exponential with ``μ_r = 0``, so ``λ_r`` follows in closed form from
+    ``q^r/n^r`` via `rain_slope_parameter`, and rain integrals *are* indexed by
+    ``\log λ_r``.
 
 ```@example p3_psd
 # Solve for distribution parameters
@@ -281,9 +303,9 @@ N_ice = 1e5
 for (L, L_label, color) in [(1e-5, "L = 10⁻⁵ kg/m³", :blue),
                              (1e-4, "L = 10⁻⁴ kg/m³", :green),
                              (1e-3, "L = 10⁻³ kg/m³", :red)]
-    params = distribution_parameters(L, N_ice, 0.0, 400.0)
-    N_D = @. exp(params.log_intercept + params.μ * log(D_m) - params.λ * D_m)
-    label = L_label * "  (μ = $(round(params.μ, digits=2)))"
+    psd = distribution_parameters(L, N_ice, 0.0, 400.0)
+    N_D = @. exp(psd.log_intercept + psd.μ * log(D_m) - psd.λ * D_m)
+    label = L_label * "  (μ = $(round(psd.μ, digits=2)))"
     lines!(ax, D_mm, N_D, label=label, color=color)
 end
 
@@ -310,9 +332,9 @@ N_ice = 1e5
 for (Ff, Ff_label, color) in [(0.0, "Fᶠ = 0 (unrimed)", :blue),
                                (0.3, "Fᶠ = 0.3", :green),
                                (0.6, "Fᶠ = 0.6", :orange)]
-    params = distribution_parameters(L_ice, N_ice, Ff, 500.0)
-    N_D = @. exp(params.log_intercept + params.μ * log(D_m) - params.λ * D_m)
-    label = Ff_label * "  (μ = $(round(params.μ, digits=2)))"
+    psd = distribution_parameters(L_ice, N_ice, Ff, 500.0)
+    N_D = @. exp(psd.log_intercept + psd.μ * log(D_m) - psd.λ * D_m)
+    label = Ff_label * "  (μ = $(round(psd.μ, digits=2)))"
     lines!(ax, D_mm, N_D, label=label, color=color)
 end
 
@@ -383,10 +405,14 @@ The benefit of three-moment ice is improved representation of:
 - **Hail formation**: Accurate simulation of heavily rimed particles
 - **Radar reflectivity**: Direct prognostic variable rather than diagnosed
 
-Both two-moment and three-moment solvers are implemented:
+Both two-moment and three-moment analytic solvers are available for offline work
+(the model path reads the tables instead, as noted above):
 
 - **Two-moment**: Use `distribution_parameters(L, N, Fᶠ, ρᶠ)` with `TwoMomentClosure`
 - **Three-moment**: Use `distribution_parameters(L, N, Z, Fᶠ, ρᶠ)` with `ThreeMomentClosure`
+
+Of these closure types, only `ThreeMomentClosure` is touched by the model path,
+and only for its ``μ`` bounds.
 
 ## Summary
 
@@ -394,11 +420,14 @@ The P3 size distribution closure proceeds as:
 
 1. **Prognostic moments**: ``L``, ``N`` (and optionally ``Z``) are carried by the model
 2. **Rime properties**: ``F^f`` and ``ρ^f`` determine the mass-diameter relationship
-3. **Lambda solver**: ``λ`` is tabulated by scanning L/N in the reference Fortran
-   (Breeze uses direct root solvers in the helper)
-4. **μ diagnosis**: Piecewise diagnostic for 2-moment, or lookup-table inversion for 3-moment
-   (with [`solve_shape_parameter`](@ref) solving the same constraint directly where no
-   diameter limiter binds)
+3. **Slope**: ``λ`` is absorbed into the tables, which the generator indexes by
+   mean particle mass ``\bar{m} = L/N``; the model path interpolates on
+   ``\log \bar{m}`` and never solves for ice ``λ`` itself. [`solve_lambda`](@ref)
+   reproduces the generator's constraint directly for offline use
+4. **μ diagnosis**: a Table 1 lookup for 2-moment (the tabulated `mu_i_save`, i.e.
+   the piecewise closure evaluated at generation time), or a Table 3 lookup in
+   ``Z/L`` space for 3-moment; [`solve_shape_parameter`](@ref) solves the same
+   constraint directly, offline, where no diameter limiter binds
 5. **Normalization**: Intercept ``N₀`` from the mass integral, so ``L`` is preserved even where
    the ``λ`` limiter binds; represented ``N`` and ``Z`` expose any required adjustment.
    ``\log N₀`` is reported alongside ``N₀``, whose m^-(4+μ) units put it beyond Float32 range
