@@ -5,10 +5,12 @@ carried by motions the grid does not resolve. Breeze's closures are Oceananigans
 `AbstractScalarDiffusivity`s, so they compose with the rest of the model through the same
 diffusivity interface as Oceananigans' own. A closure may be either three-dimensional, as a
 subgrid-scale (or subfilter-scale) model for large-eddy simulation; or vertical only, commonly
-referred to as a boundary-layer scheme.
+referred to as a planetary boundary-layer scheme.
 
-In addition to the [`TKEBasedTurbulenceClosure`](@ref) described here, Breeze also inherits
-[Oceananigans' own turbulence closures](https://clima.github.io/OceananigansDocumentation/stable/physics/turbulence_closures).
+!!! tip "Other available turbulence closures"
+
+    In addition to the [`TKEBasedTurbulenceClosure`](@ref) described here, Breeze also inherits
+    [Oceananigans' own turbulence closures](https://clima.github.io/OceananigansDocumentation/stable/physics/turbulence_closures).
 
 ## Prognostic-TKE eddy diffusivity
 
@@ -62,11 +64,17 @@ smallest branch by ``x^p/p``, so at ``p = 1`` an outer scale contaminates the su
 first order in height. [Mason and Thomson (1992)](@cite MasonThomson1992) match a wall scale to an
 outer scale in exactly this form and recommend ``p = 2``.
 
-Two structural departures from MYNN, both toward smoothness: ``ℓᵇ`` is a branch rather than the
-hard realizability clip ``ℓ/q ≤ 1/N``, and ``N²`` enters through a smooth positive part, so the
-stable limit engages continuously instead of switching on. Two further pieces of MYNN are not yet
-implemented — the stability correction on the surface branch (their Eq. 53) and the convective
-enhancement of ``ℓᵇ`` (their Eq. 55).
+Two structural departures from MYNN. ``N²`` enters ``ℓᵇ`` through a smooth positive part, so
+the stable limit engages continuously rather than switching on at ``∂Θᵥ/∂z > 0`` as in their
+Eq. 55. And their separate realizability restriction ``ℓ/q ≤ 1/N`` (their Eq. 56) is dropped:
+every blending rule here is bounded by its smallest branch, so ``ℓ ≤ ℓᵇ = Cᵇ q/N`` already
+satisfies it whenever ``Cᵇ ≤ 1``, which holds for both the default 0.53 and MYNN's own 1.
+
+MYNN's two remaining pieces are implemented but off by default: the stability correction on
+the surface branch (their Eq. 53) is [`SurfaceLayerLengthScale`](@ref), and the convective
+enhancement of ``ℓᵇ`` (their Eq. 55) is the ``Cᶜᵇ`` coefficient of
+[`BuoyancyLengthScale`](@ref), zero unless set. [`NakanishiNiinoLengthScale`](@ref) assembles
+both with MYNN's own coefficients under their harmonic blend.
 
 ### Coefficients
 
@@ -105,7 +113,7 @@ Cˢ ≡ Cᴷ / (Cμ)^{1/4}
 
 is the stress coefficient. The model's own velocity gradient is then ``u_\star / (Cˢ κ z)``, so
 regressing ``U/u_\star`` on ``\ln(z/ℓʳ)`` over the constant-stress layer  returns ``Cˢ κ`` rather than
-``κ``. The log law is recovered exactly on ``Cˢ = 1`` or, equivalently, on the locus ``Cμ = Cᴷ⁴``.
+``κ``. The log law is recovered exactly on ``Cˢ = 1`` or, equivalently, on the locus ``Cμ = (Cᴷ)⁴``.
 The defaults are MYNN's ([Nakanishi and Niino 2009](@cite NakanishiNiino2009)), ``Cᴷ = 0.4903``
 and ``Cμ = 0.0578``, which satisfy it exactly.
 
