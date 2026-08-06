@@ -28,7 +28,9 @@ K^u = Cᴷ ℓ \sqrt{e}, \qquad K^c = K^u / \mathrm{Pr}, \qquad K^e = C^q K^u, \
 The source terms on the right-hand side include: shear production ``P``, buoyancy ``B``,
 dissipation ``ε``, and transport, which is the ordinary scalar machinery acting on a `:ρtke` tracer.
 The turbulent Prandtl number ``Pr`` grows with the gradient Richardson number, so that heat mixes
-less readily than momentum as the column stabilizes.
+less readily than momentum as the column stabilizes. It saturates rather than growing without
+bound — at ``Pr₀ (1 + C^{Ri}) = 2.96`` with the defaults — which is what leaves ``K^c`` finite in a
+strong inversion, and so what lets the closure entrain there at all.
 
 See the [single-column boundary layer example](literated/single_column_tke_boundary_layer.md) for
 an example of closure performance with stable, neutral and convective boundary layers.
@@ -37,8 +39,9 @@ an example of closure performance with stable, neutral and convective boundary l
 
 The length scale ``ℓ`` is supplied by a dispatched component, by default a
 [`BlendedMixingLength`](@ref): a tuple of independent length-scale branches reduced to one master
-length by a blending rule. The three default branches are those of MYNN
-([Nakanishi and Niino 2009](@cite NakanishiNiino2009), their Eqs. 52–55),
+length by a blending rule. The three default branches follow MYNN
+([Nakanishi and Niino 2009](@cite NakanishiNiino2009), their Eqs. 53–55), with the surface
+branch reduced to its neutral limit,
 
 ```math
 ℓᵍ = κ (z + ℓʳ), \qquad ℓᵗ = Cᵗ \frac{∫ q z \, dz}{∫ q \, dz}, \qquad ℓᵇ = Cᵇ q / N,
@@ -59,8 +62,8 @@ outright. [`HarmonicBlend`](@ref) is MYNN's own ``1/ℓ = 1/ℓᵍ + 1/ℓᵗ + 
 ```
 
 recovering the harmonic blend at ``p = 1`` and the minimum as ``p → ∞``. The exponent matters near
-a wall: writing ``x`` for the ratio of a branch to the smallest one, the blend sits below that
-smallest branch by ``x^p/p``, so at ``p = 1`` an outer scale contaminates the surface layer at
+a wall: writing ``x`` for the ratio of the smallest branch to another one, the blend sits below
+that smallest branch by ``x^p/p``, so at ``p = 1`` an outer scale contaminates the surface layer at
 first order in height. [Mason and Thomson (1992)](@cite MasonThomson1992) match a wall scale to an
 outer scale in exactly this form and recommend ``p = 2``.
 
@@ -112,12 +115,12 @@ Cˢ ≡ Cᴷ / (Cμ)^{1/4}
 ```
 
 is the stress coefficient. The model's own velocity gradient is then ``u_\star / (Cˢ κ z)``, so
-regressing ``U/u_\star`` on ``\ln(z/ℓʳ)`` over the constant-stress layer  returns ``Cˢ κ`` rather than
+regressing ``U/u_\star`` on ``\ln(z/ℓʳ)`` over the constant-stress layer returns ``Cˢ κ`` rather than
 ``κ``. The log law is recovered exactly on ``Cˢ = 1`` or, equivalently, on the locus ``Cμ = (Cᴷ)⁴``.
 The defaults are MYNN's ([Nakanishi and Niino 2009](@cite NakanishiNiino2009)), ``Cᴷ = 0.4903``
 and ``Cμ = 0.0578``, which satisfy it exactly.
 
 !!! note "Note about Subgrid Coefficients"
 
-    Subgrid coefficients from large-eddy models (e.g., ``Cˢ``) do not apply here, because there ``ℓ``
-    is the filter width rather than an equilibrium mixing length.
+    Subgrid coefficients from large-eddy models (e.g., Smagorinsky's ``C_s``) do not apply here,
+    because there ``ℓ`` is the filter width rather than an equilibrium mixing length.
