@@ -65,26 +65,26 @@ end
     microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants, microphysics)
 
-    qˢ_value = FT(5e-4)
-    set!(model; θ=260, qᵗ=FT(0.005), qˢ=qˢ_value)
+    qˢⁿ_value = FT(5e-4)
+    set!(model; θ=260, qᵗ=FT(0.005), qˢⁿ=qˢⁿ_value)
 
     op = number_concentration(model, :snow)
     @test op isa Oceananigans.AbstractOperations.KernelFunctionOperation
 
-    ρnˢ = Field(op)
-    compute!(ρnˢ)
-    @test all(isfinite.(interior(ρnˢ)))
+    ρnˢⁿ = Field(op)
+    compute!(ρnˢⁿ)
+    @test all(isfinite.(interior(ρnˢⁿ)))
 
     # Snow's n₀ depends on (q, ρ), so the closed-form rain expression cannot
     # substitute. Compare against CloudMicrophysics directly.
     snow = microphysics.categories.parameters.precip.snow
     ρ = @allowscalar reference_state.density[1, 1, 1]
-    q = qˢ_value
+    q = qˢⁿ_value
     n0 = get_n0(snow.pdf, q, ρ)
     λ⁻¹ = lambda_inverse(snow.pdf, snow.mass, q, ρ)
     expected = n0 * λ⁻¹
 
-    @test @allowscalar isapprox(ρnˢ[1, 1, 1], expected, rtol=100eps(FT))
+    @test @allowscalar isapprox(ρnˢⁿ[1, 1, 1], expected, rtol=100eps(FT))
 end
 
 @testset "NumberConcentration: unsupported species returns nothing [$FT]" for FT in test_float_types()

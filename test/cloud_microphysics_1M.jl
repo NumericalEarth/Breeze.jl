@@ -93,7 +93,7 @@ end
 
     prog_fields_mixed = Breeze.AtmosphereModels.prognostic_field_names(μ1_mixed)
     @test :ρqʳ in prog_fields_mixed
-    @test :ρqˢ in prog_fields_mixed
+    @test :ρqˢⁿ in prog_fields_mixed
 end
 
 @testset "OneMomentCloudMicrophysics non-equilibrium time-stepping [$(FT)]" for FT in test_float_types()
@@ -158,7 +158,7 @@ end
     set!(model; θ=300, qᵗ=0.015)
 
     @test haskey(model.microphysical_fields, :ρqʳ)
-    @test haskey(model.microphysical_fields, :ρqˢ)
+    @test haskey(model.microphysical_fields, :ρqˢⁿ)
     @test haskey(model.microphysical_fields, :qᶜˡ)
     @test haskey(model.microphysical_fields, :qᶜⁱ)
 
@@ -327,7 +327,7 @@ end
     @test :ρqᶜˡ in prog_fields
     @test :ρqᶜⁱ in prog_fields
     @test :ρqʳ in prog_fields
-    @test :ρqˢ in prog_fields
+    @test :ρqˢⁿ in prog_fields
 
     set!(model; θ=260, qᵗ=0.010)
     @test haskey(model.microphysical_fields, :ρqᶜⁱ)
@@ -383,11 +383,11 @@ end
     model = AtmosphereModel(grid; dynamics, microphysics)
 
     # Snow terminal velocity field should exist
-    @test haskey(model.microphysical_fields, :wˢ)
+    @test haskey(model.microphysical_fields, :wˢⁿ)
 
     # Snow sedimentation velocity dispatch
     μ = model.microphysical_fields
-    vel_snow = microphysical_velocities(microphysics, μ, Val(:ρqˢ))
+    vel_snow = microphysical_velocities(microphysics, μ, Val(:ρqˢⁿ))
     @test vel_snow !== nothing
     @test haskey(vel_snow, :w)
 
@@ -437,8 +437,8 @@ end
     @test qᶜⁱ_max > FT(1e-6)
 
     # Snow should have formed from ice autoconversion
-    qˢ_max = maximum(model.microphysical_fields.qˢ)
-    @test qˢ_max > FT(0)
+    qˢⁿ_max = maximum(model.microphysical_fields.qˢⁿ)
+    @test qˢⁿ_max > FT(0)
 
     # Model should complete without errors (all tendencies computed)
     @test model.clock.iteration > 0

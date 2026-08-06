@@ -124,10 +124,10 @@ function Microphysics.number_concentration(model, microphysics::OneMomentLiquidR
 end
 
 function Microphysics.number_concentration(model, microphysics::OneMomentLiquidRain, ::Val{:snow})
-    haskey(model.microphysical_fields, :ρqˢ) || return nothing
+    haskey(model.microphysical_fields, :ρqˢⁿ) || return nothing
     pdf = microphysics.categories.parameters.precip.snow.pdf
     mass = microphysics.categories.parameters.precip.snow.mass
-    ρq = model.microphysical_fields.ρqˢ
+    ρq = model.microphysical_fields.ρqˢⁿ
     return build_number_concentration_op(model, pdf, mass, ρq)
 end
 
