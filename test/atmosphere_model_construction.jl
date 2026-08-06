@@ -14,12 +14,12 @@ function run_nan_checker_test(arch; erroring)
     model = AtmosphereModel(grid)
     simulation = Simulation(model, Δt=1, stop_iteration=2, verbose=false)
     @allowscalar model.momentum.ρu[1, 1, 1] = NaN
-    erroring && erroring_NaNChecker!(simulation)
 
     if erroring
+        erroring_NaNChecker!(simulation)
         @test_throws ErrorException run!(simulation)
     else
-        run!(simulation)
+        @test_logs (:info, r"NaN found in field ρu\. Stopping simulation") run!(simulation)
         @test model.clock.iteration == 1 # simulation stopped after one iteration
     end
 
