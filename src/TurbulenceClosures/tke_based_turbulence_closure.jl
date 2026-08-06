@@ -2,7 +2,7 @@
 ##### `TKEBasedTurbulenceClosure`: an eddy-diffusivity-only, prognostic-TKE closure
 #####
 ##### Kᵘ = Cᴷ ℓ √e ,  Kᶜ = Kᵘ / Pr ,  Kᵉ = Cq Kᵘ ,  ε = Cᵋ e^{3/2} / ℓ
-##### ∂e/∂t = P + B - ε + transport ,  P = ν S² ,  B = -K N²
+##### ∂e/∂t = P + B - ε + transport ,  P = Kᵘ S² ,  B = -Kᶜ N²
 #####
 ##### Transport is the ordinary scalar machinery acting on the `:ρtke` tracer; the local source and
 ##### sink are applied once per outer step in `step_closure_prognostics!`.
@@ -19,11 +19,11 @@ An eddy-diffusivity closure carrying one prognostic equation for the subgrid tur
 energy ``e``,
 
 ```math
-ν = Cᴷ ℓ \\sqrt{e}, \\qquad K = ν / \\mathrm{Pr}, \\qquad ε = Cᵋ e^{3/2} / ℓ,
+Kᵘ = Cᴷ ℓ \\sqrt{e}, \\qquad Kᶜ = Kᵘ / \\mathrm{Pr}, \\qquad ε = Cᵋ e^{3/2} / ℓ,
 ```
 
 ```math
-∂e/∂t = P + B - ε + \\text{transport}, \\qquad P = ν S², \\qquad B = -K N²,
+∂e/∂t = P + B - ε + \\text{transport}, \\qquad P = Kᵘ S², \\qquad B = -Kᶜ N²,
 ```
 
 with the mixing length ``ℓ`` supplied by a dispatched component (default `BlendedMixingLength`)
@@ -41,7 +41,7 @@ the stress coefficient all derive from them (`dissipation_coefficient`, `surface
 
   - **``Cμ`` alone sets the neutral surface-layer turbulence level**, ``e/u_\\star² = (Cμ)^{-1/2}``,
     independently of ``Cᴷ``. Away from that layer ``e`` follows the full budget rather than any
-    coefficient. It is the ``k``–``ε`` coefficient in ``ν = Cμ e²/ε``, so it is directly comparable
+    coefficient. It is the ``k``–``ε`` coefficient in ``Kᵘ = Cμ e²/ε``, so it is directly comparable
     across closure families: 0.058 here (MYNN), 0.094 (MY82), 0.090 (standard ``k``–``ε``),
     0.148 (MYJ), 0.200 (SHOC).
 
@@ -71,7 +71,7 @@ $(TYPEDFIELDS)
 struct TKEBasedTurbulenceClosure{TD, ML, FT} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
     "mixing-length formulation; a dispatched component"
     mixing_length :: ML
-    "``Cᴷ``, the diffusivity coefficient in ``ν = Cᴷ ℓ \\sqrt{e}``"
+    "``Cᴷ``, the diffusivity coefficient in ``Kᵘ = Cᴷ ℓ \\sqrt{e}``"
     Cᴷ :: FT
     "``Cμ``, the ``k``–``ε`` coefficient; sets the neutral surface-layer turbulence level ``e/u_\\star² = (Cμ)^{-1/2}``"
     Cμ :: FT
@@ -191,7 +191,7 @@ MYJCoefficients(args...; kw...) = TKEBasedTurbulenceClosure(args...; Cᴷ = 0.61
 """
 $(TYPEDSIGNATURES)
 
-``Cᴷ``, the coefficient in ``ν = Cᴷ ℓ \\sqrt{e}``.
+``Cᴷ``, the coefficient in ``Kᵘ = Cᴷ ℓ \\sqrt{e}``.
 """
 @inline diffusivity_coefficient(closure::TKEBasedTurbulenceClosure) = closure.Cᴷ
 
@@ -217,7 +217,7 @@ log-law locus. The floor is therefore never an independent constraint fighting t
 $(TYPEDSIGNATURES)
 
 ``Cˢ = Cᴷ / (Cμ)^{1/4}``, the stress coefficient. In a neutral constant-flux layer the closure
-collapses onto Prandtl's mixing-length model ``ν = (Cˢ ℓᵍ)² S``, so ``Cˢ = 1`` is exactly the
+collapses onto Prandtl's mixing-length model ``Kᵘ = (Cˢ ℓᵍ)² S``, so ``Cˢ = 1`` is exactly the
 log-law locus ``Cμ = Cᴷ⁴``, and a column off the locus reports ``κ_\\mathrm{eff} = Cˢ κ``.
 
 A diagnostic: nothing in the closure enforces it, which is the point — the constraint is defaulted
@@ -501,7 +501,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Shear production ``ν S²`` at (Center, Center, Face).
+Shear production ``Kᵘ S²`` at (Center, Center, Face).
 """
 @inline shear_productionᶜᶜᶠ(i, j, k, grid, Kᵘ, u, v) =
     @inbounds Kᵘ[i, j, k] * shearᶜᶜᶠ(i, j, k, grid, u, v)
@@ -509,7 +509,7 @@ Shear production ``ν S²`` at (Center, Center, Face).
 """
 $(TYPEDSIGNATURES)
 
-Buoyancy production ``-K N²`` at (Center, Center, Face); negative in stable stratification.
+Buoyancy production ``-Kᶜ N²`` at (Center, Center, Face); negative in stable stratification.
 """
 @inline buoyancy_productionᶜᶜᶠ(i, j, k, grid, Kᶜ, buoyancy, tracers) =
     @inbounds -Kᶜ[i, j, k] * ∂z_b(i, j, k, grid, buoyancy, tracers)
@@ -520,7 +520,7 @@ $(TYPEDSIGNATURES)
 Advance the local part of the TKE budget, ``∂e/∂t = P + B - ε``, over `Δt`. Transport is left to
 the ordinary scalar tendency acting on the `:ρtke` tracer, so this kernel is purely columnwise.
 
-Production and buoyancy are formed at faces, where ``ν``, ``K``, ``S²`` and ``N²`` all live, and
+Production and buoyancy are formed at faces, where ``Kᵘ``, ``Kᶜ``, ``S²`` and ``N²`` all live, and
 reconstructed to centers. Dissipation is treated implicitly in the rate ``ω = ε/e``,
 
 ```math
@@ -528,7 +528,7 @@ eⁿ⁺¹ = \\frac{e^\\star}{1 + Δt \\, Cᵋ \\sqrt{e^\\star} / ℓ},
 ```
 
 which is unconditionally positive for any `Δt`. An explicit ``-ε Δt`` is not, and TKE that goes
-negative takes ``ν`` with it.
+negative takes ``Kᵘ`` with it.
 """
 @kernel function _step_tke!(ρe, grid, closure, closure_fields, velocities, tracers, buoyancy, ρ, Δt)
     i, j, k = @index(Global, NTuple)
@@ -571,7 +571,7 @@ same regardless of what it needs.
 $(TYPEDSIGNATURES)
 
 Surface buoyancy flux ``\\langle w'b' \\rangle`` per column, taken as the closure's own
-downgradient flux ``-K N²`` at the lowest interior face.
+downgradient flux ``-Kᶜ N²`` at the lowest interior face.
 
 Reading the thermodynamic boundary condition instead would mean interpreting its units, which differ
 between prognostic formulations: `bulk_scalar_fluxes.jl` returns the flux of the *prognostic*, so

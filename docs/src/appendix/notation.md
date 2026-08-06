@@ -137,8 +137,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\ell^r``                          | `ℓʳ`   | `roughness_length`                  | Surface roughness length for momentum, m. Superscript ``r`` elsewhere denotes *rain* (``qʳ``); the two never appear together |
 | ``\ell^{rh}``                       | `ℓʳʰ`  | `scalar_roughness_length`           | Surface roughness length for heat and moisture; defaults to ``ℓʳ/7.3`` |
 | ``\kappa``                          | `κ`    |                                     | von Kármán constant. Never used for a diffusivity in Breeze's own code — the Oceananigans accessors literally named `κᶠᶜᶜ`, `κᶜᶠᶜ`, `κᶜᶜᶠ` are the one exception, and they are thin one-liners |
-| ``\nu``                             | `ν`    |                                     | Eddy viscosity, m² s⁻¹; the scalar-diffusivity closures store it as `νₑ`        |
-| ``K^u``                             | `Kᵘ`   |                                     | Eddy diffusivity for momentum, m² s⁻¹                                          |
+| ``K^u``                             | `Kᵘ`   |                                     | Eddy diffusivity for momentum, m² s⁻¹. Oceananigans' scalar-diffusivity closures spell their own field `νₑ`, which Breeze reads but does not define |
 | ``K^c``                             | `Kᶜ`   |                                     | Eddy diffusivity for scalars, ``K^c = K^u/\mathrm{Pr}``, m² s⁻¹                 |
 | ``K^e``                             | `Kᵉ`   |                                     | Eddy diffusivity for TKE, ``K^e = C^q K^u``, m² s⁻¹                             |
 | ``e``                               | `e`    |                                     | Subgrid turbulent kinetic energy, m² s⁻². Confined to kernel locals and to `closure_fields.e`: bare ``e`` is static energy in the `StaticEnergy` formulation |
