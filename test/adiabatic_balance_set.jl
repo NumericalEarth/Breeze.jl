@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 #####
 ##### Tests for `balance_adiabatically!(model, balancer)` / `set!(model; balancer = …)` — in-place
 ##### adiabatic (FV3 na_init) initialization on a memory-sharing, stripped twin

@@ -133,7 +133,7 @@ hmw = heatmap!(axw, wn, colorrange = (-w_range, w_range), colormap = :balance)
 Colorbar(fig[1, 2], hmρ, label = "ρe′ (J/kg)", vertical = true)
 Colorbar(fig[2, 2], hmw, label = "w (m/s)", vertical = true)
 
-CairoMakie.record(fig, "thermal_bubble.mp4", 1:Nt, framerate = 12) do nn
+CairoMakie.record(fig, "thermal_bubble.mp4", 1:Nt; framerate = 12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide
