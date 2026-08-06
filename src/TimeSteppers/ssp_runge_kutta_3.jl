@@ -11,6 +11,7 @@ using Oceananigans.TimeSteppers:
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
                                 microphysics_model_update!, field_advection_scheme,
+                                dynamics_prognostic_fields,
                                 implicit_advection_density, implicit_advection_velocities,
                                 implicit_step_advection
 using Oceananigans.Utils: launch!, time_difference_seconds
@@ -95,6 +96,13 @@ function SSPRungeKutta3(grid, prognostic_fields;
     return SSPRungeKutta3{FT, U0, TG, TI}(α¹, α², α³, U⁰, Gⁿ, implicit_solver)
 end
 
+# Closure scalar indices exclude dynamics-specific prognostics and the momentum components.
+function closure_scalar_index(model, prognostic_index)
+    n_dynamics = length(dynamics_prognostic_fields(model.dynamics))
+    n_momentum = length(model.momentum)
+    return Val(prognostic_index - n_dynamics - n_momentum)
+end
+
 #####
 ##### Stage update kernel
 #####
@@ -118,15 +126,17 @@ function ssp_rk3_substep!(model, Δt, α)
 
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
+    n_dynamics = length(dynamics_prognostic_fields(model.dynamics))
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt_FT, α)
 
-        # Field index for implicit solver:
-        # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
-        # - indices 4+ are scalars (ρθ/ρe, ρqᵗ, microphysics, tracers)
-        # For scalars, we use Val(i - 3) to get Val(1), Val(2), etc.
-        field_index = Val(i - 3)
+        # Dynamics-specific prognostics such as compressible dry density are advanced explicitly,
+        # but are not closure scalars and must not enter the implicit diffusion solve.
+        i <= n_dynamics && continue
+
+        momentum = names[i] === :ρu || names[i] === :ρv || names[i] === :ρw
+        field_index = momentum ? nothing : closure_scalar_index(model, i)
         advection = field_advection_scheme(model.advection, names[i])
 
         # The implicit solve must carry the reference density whenever it runs at all: the

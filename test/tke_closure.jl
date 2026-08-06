@@ -568,6 +568,29 @@ end
         @test :ρc ∈ keys(model.tracers)
     end
 
+    @testset "compressible scalar indexing and SSPRK3 stepping" begin
+        for time_discretization in (ExplicitTimeStepping(), SplitExplicitTimeDiscretization())
+            dynamics = CompressibleDynamics(time_discretization; reference_potential_temperature = 300)
+            model = AtmosphereModel(grid; dynamics, closure = TKEBasedTurbulenceClosure())
+            prognostic_names = keys(prognostic_fields(model))
+            closure_scalar_names = keys(model.closure_fields.tupled_tracer_diffusivities)
+
+            for (scalar_index, name) in enumerate(closure_scalar_names)
+                prognostic_index = findfirst(==(name), prognostic_names)
+                @test Breeze.TimeSteppers.closure_scalar_index(model, prognostic_index) === Val(scalar_index)
+            end
+        end
+
+        dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_potential_temperature = 300)
+        model = AtmosphereModel(grid; dynamics, closure = TKEBasedTurbulenceClosure())
+        set!(model; θ = 300, ρ = model.dynamics.reference_state.density)
+        time_step!(model, 1)
+
+        @test model.clock.iteration == 1
+        @test all(isfinite, Array(interior(model.dynamics.dry_density)))
+        @test all(isfinite, Array(interior(model.tracers[TKE_NAME])))
+    end
+
     @testset "positivity and finiteness over 20 steps" begin
         model = AtmosphereModel(grid; closure = TKEBasedTurbulenceClosure(),
                                 coriolis = FPlane(latitude = 45))

@@ -180,7 +180,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
 
         launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
 
-        field_index = Val(i - n_acoustic)
+        field_index = closure_scalar_index(model, i)
         advection = field_advection_scheme(model.advection, names[i])
 
         # Guarded on the solver rather than on `needs_implicit_solver(advection)`; see the note in
