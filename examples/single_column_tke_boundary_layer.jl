@@ -266,14 +266,14 @@ function stress_depth(model)
     Nz = size(model.grid, 3)
     u = vec(Array(view(model.velocities.u, 1, 1, :)))
     v = vec(Array(view(model.velocities.v, 1, 1, :)))
-    ν = vec(Array(view(model.closure_fields.Kᵘ, 1, 1, :)))
+    Kᵘ = vec(Array(view(model.closure_fields.Kᵘ, 1, 1, :)))
     zc = Array(znodes(model.formulation.potential_temperature))
 
     ## The stress is a vector: τ = Kᵘ |∂z 𝐔| at faces, where Kᵘ lives. Using the gradient of the
     ## wind *speed* instead would vanish at the low-level jet, where |𝐔| peaks — but the stress
     ## does not vanish there, because the wind is still turning with height.
     ∂zᶠ(a) = [k == 1 ? 0.0 : (a[k] - a[k-1]) / (zc[k] - zc[k-1]) for k in 1:Nz]
-    τ = sqrt.((ν[1:Nz] .* ∂zᶠ(u)) .^ 2 .+ (ν[1:Nz] .* ∂zᶠ(v)) .^ 2)
+    τ = sqrt.((Kᵘ[1:Nz] .* ∂zᶠ(u)) .^ 2 .+ (Kᵘ[1:Nz] .* ∂zᶠ(v)) .^ 2)
 
     ## Interpolate the crossing rather than snapping to a cell centre. At GABLS1's Δz = 6.25 m the
     ## quantisation is ~6.6 m, comparable to the differences between closure configurations, so a
@@ -301,14 +301,14 @@ end
 
 depths = ("stable" => stress_depth, "neutral" => stress_depth, "convective" => inversion_depth)
 
-"""Kinematic heat flux ``-K ∂_z θ``, at faces where ``K`` lives."""
+"""Kinematic heat flux ``-Kᶜ ∂_z θ``, at faces where ``Kᶜ`` lives."""
 function heat_flux(model)
     θ = vec(Array(view(model.formulation.potential_temperature, 1, 1, :)))
-    κ = vec(Array(view(model.closure_fields.Kᶜ, 1, 1, :)))
+    Kᶜ = vec(Array(view(model.closure_fields.Kᶜ, 1, 1, :)))
     z = Array(znodes(model.formulation.potential_temperature))
     N = length(θ)
     ∂zθᶠ = [k == 1 ? 0.0 : (θ[k] - θ[k-1]) / (z[k] - z[k-1]) for k in 1:N]
-    return -κ[1:N] .* ∂zθᶠ
+    return -Kᶜ[1:N] .* ∂zθᶠ
 end
 
 ## Make plots
@@ -324,13 +324,13 @@ ax_U = Axis(fig[1, 2]; xlabel = "Wind speed (m s⁻¹)")
 ax_e = Axis(fig[1, 3]; xlabel = "TKE (m² s⁻²)")
 
 ## Bottom row: what the closure makes of it, in the order it is built — the length scale, the
-## diffusivity formed from it, and the flux they produce. `K` spans two orders of magnitude between
+## diffusivity formed from it, and the flux they produce. `Kᶜ` spans two orders of magnitude between
 ## the stable and convective regimes, so it is scaled by its own maximum in each: the height axis
 ## already normalizes by `zᵢ`, and this makes the horizontal axis a shape comparison to match. A
 ## linear axis keeps the collapse at `zᵢ` looking like the cliff it is, which a logarithmic one
 ## would smooth into a gentle slide. The magnitudes that scaling divides out are annotated on the panel.
 ax_ℓ = Axis(fig[2, 1]; xlabel = "Mixing length ℓ (m)", ylabel = "z / zᵢ")
-ax_K = Axis(fig[2, 2]; xlabel = "K / max(K)")
+ax_K = Axis(fig[2, 2]; xlabel = "Kᶜ / max(Kᶜ)")
 ax_J = Axis(fig[2, 3]; xlabel = "w′θ′ / (w′θ′)₀")
 
 for ax in (ax_θ, ax_U, ax_e, ax_K, ax_ℓ, ax_J)
@@ -367,12 +367,12 @@ for ((name, simulation), (_, settings), (_, depth), color) in zip(simulations, r
     lines!(ax_U, vec(Array(view(U, 1, 1, :))), Array(znodes(U)) ./ zᵢ; color)
     lines!(ax_e, vec(Array(view(model.closure_fields.e, 1, 1, :))),
            Array(znodes(model.closure_fields.e)) ./ zᵢ; color)
-    K = vec(Array(view(model.closure_fields.Kᶜ, 1, 1, :)))
+    Kᶜ = vec(Array(view(model.closure_fields.Kᶜ, 1, 1, :)))
     zᴷ = Array(znodes(model.closure_fields.Kᶜ))
-    kᵐᵃˣ = argmax(K)
+    kᵐᵃˣ = argmax(Kᶜ)
     push!(diffusivity_labels,
-          "K(z = $(round(zᴷ[kᵐᵃˣ] / zᵢ, digits = 2)) zᵢ) = $(round(K[kᵐᵃˣ], digits = 1)) m² s⁻¹")
-    lines!(ax_K, K ./ K[kᵐᵃˣ], zᴷ ./ zᵢ; color)
+          "Kᶜ(z = $(round(zᴷ[kᵐᵃˣ] / zᵢ, digits = 2)) zᵢ) = $(round(Kᶜ[kᵐᵃˣ], digits = 1)) m² s⁻¹")
+    lines!(ax_K, Kᶜ ./ Kᶜ[kᵐᵃˣ], zᴷ ./ zᵢ; color)
     lines!(ax_ℓ, vec(Array(view(model.closure_fields.ℓ, 1, 1, :))),
            Array(znodes(model.closure_fields.ℓ)) ./ zᵢ; color)
     ## The surface flux is prescribed in the convective case but emergent in the stable one, where
@@ -402,52 +402,3 @@ end
 
 save("single_column_tke_boundary_layer.png", fig) #src
 fig
-
-# ## Discussion (TODO: UPDATE THIS)
-#
-# The stable case is the one with a full scorecard, because GABLS1 reports enough of them. Two land
-# inside the LES ensemble: the super-geostrophic jet, 9.40 m s⁻¹ against 9-9.5, and the surface
-# sensible heat flux, -18.5 W m⁻² against -12.5 to -19.6. Two do not. The friction velocity,
-# 0.296 m s⁻¹, is about 6% above the top of the 0.24-0.28 range, and the boundary layer is 266 m
-# deep against an LES 150-200 m — 33 to 77% too deep, with the jet sitting correspondingly high.
-# A deep stable boundary layer is the characteristic bias of this family of closure rather than a
-# surprise, but this is at the poor end of it.
-#
-# The convective profile is the one to look at sceptically. Its interior is *not* well mixed: an
-# eddy-diffusivity closure transports heat down the gradient, so carrying a positive heat flux
-# upward requires ``∂_z θ < 0``, and the mixed layer keeps a residual superadiabatic lapse. For the
-# same reason it barely entrains — ``K`` collapses where the inversion is stable — so the boundary
-# layer also grows too slowly.
-#
-# Neither is a defect in the implementation. Han & Bretherton ran exactly this ablation, a TKE
-# closure with the mass-flux term removed, and report it shows "a lack of a well-mixed CBL feature
-# (i.e., unstable profile throughout the whole CBL) as well as an underprediction of the CBL growth
-# compared to LES" (their Fig. 3a). Both are what a mass-flux branch is for.
-#
-# The bottom right panel is where that shows up most directly. The convective heat flux follows the
-# mixed-layer line through the lower half of the boundary layer, where transport really is
-# downgradient — and then flattens toward zero near the inversion instead of crossing it. The sign
-# is not the problem: ``J = -K ∂_z θ`` is negative wherever the air is stably stratified, so a
-# downgradient closure does produce an entraining flux at the inversion. The magnitude is. ``K``
-# collapses there, because the only branch of the mixing length that responds to stratification
-# shrinks ``ℓ`` in exactly the layer the flux has to cross — so the closure entrains only what a
-# vanishing diffusivity against a large gradient allows: an entrainment ratio of 0.04 against the
-# 0.17 reported by [Soares et al. (2004)](@cite Soares2004).
-#
-# The rest of the bottom row says where that comes from, and it is specifically a convective
-# problem. In the stable and neutral columns the mixing length peaks around ``0.35 zᵢ`` and
-# ``0.50 zᵢ`` and has fallen to 39% and 15% of that by ``0.9 zᵢ``, so it is already small when the
-# flux has to be carried across the top. In the convective column it instead peaks at
-# ``0.92 zᵢ`` — inside the inversion itself — and is still at 99% of its maximum at ``0.9 zᵢ``.
-#
-# The reason is that only one of the three branches responds to stratification at all. The
-# geometric branch ``κ(z + ℓʳ)`` grows without bound, and the turbulence branch is a ``q``-weighted
-# centroid of the whole column. That leaves the buoyancy branch ``Cᵇ q / N``, which limits ``ℓ``
-# only where the air is stably stratified — so it does the job in the stable and neutral cases and
-# switches off in a CBL, whose interior is neutral to unstable everywhere below the inversion.
-# Nothing shrinks ``ℓ`` on the approach from beneath, and the closure arrives at the interface still
-# mixing at full strength. A parcel-travel length of the Bougeault-Lacarrère kind, which both
-# Soares et al. (2004) and Han & Bretherton (2019) use, shrinks on that approach by construction.
-#
-# ``K`` peaks lower than ``ℓ`` in every regime because it also carries ``\sqrt{e}``, and the TKE
-# peaks lower still — at ``0.29 zᵢ`` in the convective case, near the surface in the other two.

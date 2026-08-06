@@ -13,14 +13,14 @@ In addition to the [`TKEBasedTurbulenceClosure`](@ref) described here, Breeze al
 ## Prognostic-TKE eddy diffusivity
 
 [`TKEBasedTurbulenceClosure`](@ref) carries one prognostic equation, for the subgrid turbulent
-kinetic energy ``e``, and closes the vertical eddy viscosity and diffusivity on it:
+kinetic energy ``e``, and closes the vertical eddy diffusivities on it:
 
 ```math
-ν = Cᴷ ℓ \sqrt{e}, \qquad K = ν / \mathrm{Pr}, \qquad ε = Cᵋ e^{3/2} / ℓ,
+K^u = Cᴷ ℓ \sqrt{e}, \qquad K^c = K^u / \mathrm{Pr}, \qquad K^e = C^q K^u, \qquad ε = Cᵋ e^{3/2} / ℓ,
 ```
 
 ```math
-∂e/∂t = P + B - ε + \text{transport}, \qquad P = ν S², \qquad B = -K N².
+∂e/∂t = P + B - ε + \text{transport}, \qquad P = K^u S², \qquad B = -K^c N².
 ```
 
 The source terms on the right-hand side include: shear production ``P``, buoyancy ``B``,
@@ -74,7 +74,7 @@ Eliminating ``ℓ`` between the viscosity and the dissipation gives the ``k``–
 relation, whose coefficient is the product of the other two:
 
 ```math
-ν = Cᴷ ℓ \sqrt{e} = (Cᴷ Cᵋ) \frac{e²}{ε} ≡ Cμ \frac{e²}{ε}, \qquad Cμ ≡ Cᴷ Cᵋ.
+K^u = Cᴷ ℓ \sqrt{e} = (Cᴷ Cᵋ) \frac{e²}{ε} ≡ Cμ \frac{e²}{ε}, \qquad Cμ ≡ Cᴷ Cᵋ.
 ```
 
 So the closure stores ``Cᴷ`` and ``Cμ`` rather than ``Cᴷ`` and ``Cᵋ``, and the dissipation
@@ -82,7 +82,7 @@ coefficient ``Cᵋ = Cμ/Cᴷ``, the surface turbulence level and the stress coe
 the stored pair.
 
 Using ``Cμ`` has the advantage of being defined without reference to a master length scale
-(``Cμ = ν ε / e²``) and therefore may be compared with families that carry no ``ℓ`` at all:
+(``Cμ = K^u ε / e²``) and therefore may be compared with families that carry no ``ℓ`` at all:
 0.058 here (MYNN) against 0.090 for standard ``k``–``ε``, 0.094 (MY82), 0.148 (MYJ), and 0.200
 (SHOC, which is uniquely written with a timescale rather than a length). ``Cμ`` alone fixes the
 turbulence level in the neutral surface layer: a constant-stress layer at local equilibrium
@@ -91,7 +91,7 @@ the full budget rather than by any coefficient.
 
 The surface layer value is also imposed as a floor on ``e`` in the first cell. Since it is where the
 local budget already balances, the floor is inert in a spun-up constant-stress layer; what
-it does is get a column started, where ``e`` would otherwise begin too small for ``P = ν S²`` to
+it does is get a column started, where ``e`` would otherwise begin too small for ``P = K^u S²`` to
 bootstrap any turbulence, and hold the surface consistent with the applied stress in a column that
 has run down.
 
