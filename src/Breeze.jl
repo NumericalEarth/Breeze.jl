@@ -33,6 +33,7 @@ export
     LinearRamp,
     CubicRamp,
     Sin2Ramp,
+    GaussianRamp,
     ExplicitTimeStepping,
     balance_adiabatically!,
     AdiabaticBalancer,
@@ -264,7 +265,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping, DirectDivergenceDamping,
                               UpperSponge,
-                              AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
+                              AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp, GaussianRamp,
                               ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")

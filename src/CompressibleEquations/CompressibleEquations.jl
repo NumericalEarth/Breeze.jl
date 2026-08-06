@@ -46,6 +46,7 @@ export
     LinearRamp,
     CubicRamp,
     Sin2Ramp,
+    GaussianRamp,
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
     freeze_linearization_state!,

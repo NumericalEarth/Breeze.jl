@@ -381,8 +381,15 @@ convert_acoustic_parameter(::Type{FT}, damping::DirectDivergenceDamping) where F
 """
 Abstract supertype for upper-sponge ramp shapes. A concrete `AbstractRamp`
 is callable as `(ramp)(z, sponge_top, depth)` and returns a value in
-``[0, 1]``: zero below ``z_{\\rm sponge\\_top} - \\text{depth}``, rising
-to one at the lid ``z = z_{\\rm sponge\\_top}``.
+``[0, 1]``, rising monotonically to one at the lid ``z = z_{\\rm sponge\\_top}``.
+
+Most shapes have *compact support*, meaning they are exactly zero below the
+layer base ``z_{\\rm sponge\\_top} - \\text{depth}``; [`GaussianRamp`](@ref)
+deliberately does not, and instead carries a weak tail all the way down.
+
+Choose a shape on absorption behaviour alone. [`UpperSponge`](@ref) evaluates
+the ramp once per z-face at construction and stores the resulting 1D profile,
+so the substep loop never sees the shape, however expensive it is to evaluate.
 """
 abstract type AbstractRamp end
 
@@ -409,8 +416,9 @@ Hermite cubic "smoothstep" sponge ramp. ``s² (3 − 2s)`` where
 
 Has zero derivative at both the layer base and the lid, so absorbs
 upgoing waves smoothly without the reflective kink of [`LinearRamp`](@ref).
-Functionally equivalent to [`Sin2Ramp`](@ref) but ~5–10× cheaper inside
-the GPU kernel (no transcendental). Recommended default.
+Functionally equivalent to [`Sin2Ramp`](@ref). The default, and the shape to
+prefer when the dynamics just below the sponge must be provably untouched;
+see [`GaussianRamp`](@ref) for the trade against far-field cleanliness.
 """
 struct CubicRamp <: AbstractRamp end
 
@@ -424,9 +432,8 @@ end
 $(TYPEDEF)
 
 ``\\sin^2`` sponge ramp from Klemp, Dudhia & Hassiotis (2008). Same
-zero-derivative-at-both-ends behaviour as [`CubicRamp`](@ref), but with
-a transcendental call. Provided for parity with WRF (`damp_opt = 3`) /
-MPAS-Atmosphere; prefer `CubicRamp` for performance in new code.
+zero-derivative-at-both-ends behaviour as [`CubicRamp`](@ref). Provided for
+parity with WRF (`damp_opt = 3`) / MPAS-Atmosphere.
 """
 struct Sin2Ramp <: AbstractRamp end
 
@@ -439,21 +446,61 @@ end
 """
 $(TYPEDEF)
 
-Implicit upper Rayleigh sponge for the substepper inner loop. Damps the
-acoustic vertical momentum perturbation toward zero inside a layer of thickness
-`depth` below the model lid, with peak damping rate `damping_rate` (in 1/s) at
-the lid scaled by `ramp(z)`. The damped variable is ``(ρw)′`` for
-height-coordinate dynamics and ``(ρ\tilde{w})′`` for terrain-following
-dynamics.
+Gaussian sponge ramp, ``\\exp[-(z - H)^2 / \\text{depth}^2]``, reaching 1 at the lid and
+``e^{-1}`` one `depth` below it. Unlike [`CubicRamp`](@ref), [`Sin2Ramp`](@ref) and
+[`LinearRamp`](@ref) it is **not** clamped to zero at the layer base: a weak tail continues all
+the way down.
 
-The damping is applied **inside the column tridiag** as a CN-weighted
-contribution (paralleling the existing implicit divergence-damping
-treatment): ``δτᵐ⁺ × \\text{rate} × \\text{ramp}(z)`` on the LHS diagonal,
-``δτˢ⁻ × \\text{rate} × \\text{ramp}(z)`` on the explicit-half RHS. This
-matches the Rayleigh-layer form of the Klemp, Dudhia & Hassiotis (2008)
-absorbing treatment used in WRF (`damp_opt=3`) and MPAS-Atmosphere. The
-profile shape is controlled by `ramp`; use [`Sin2Ramp`](@ref) for the
-classic ``\\sin^2`` profile.
+That tail is the point: on a long mountain-wave integration a compactly-supported ramp leaves a
+residual in the far field, worst downstream of the ridge, that a tailed one removes at half the
+`depth`. Neither deepening nor strengthening the clamped ramp substitutes — both come out worse
+downstream, and with a slightly *larger* core wave, so what they add is reflection rather than
+absorption. A clamped ramp's relative gradient `(1/γ)|∂z γ|` is unbounded at its base, and
+deepening it only moves that base closer to the wave; a Gaussian has no base to reflect off.
+
+What the tail costs is weak damping below the nominal layer. For a steadily forced wave that is
+not `exp(-rate × ramp × t)`: the response equilibrates against advection, so the amplitude cost
+scales with `rate × ramp(z) / (U k)`, which on the Schär case is 10% at `z = H/2` and 0.07% at
+`H/4`. Measured rms `w` over `0.5 < z < 10` km differs from the clamped ramp by 0.4%. Prefer a
+clamped ramp when the dynamics just below the sponge must be provably untouched, and this one
+when a quiet far field matters more.
+"""
+struct GaussianRamp <: AbstractRamp end
+
+@inline (::GaussianRamp)(z, sponge_top, depth) = exp(-(z - sponge_top)^2 / depth^2)
+
+"""
+$(TYPEDEF)
+
+Implicit upper Rayleigh sponge for the substepper. Damps the vertical momentum
+toward zero inside a layer of thickness `depth` below the model lid, with peak
+damping rate `damping_rate` (in 1/s) at the lid scaled by `ramp(z)`.
+
+The damping acts on the **total** momentum, which the substep loop carries as
+``ρw = ρw^L + (ρw)′``, so it is applied in two matching pieces:
+
+  - the stage-entry part ``-\\text{rate} × \\text{ramp}(z) × ρw^L`` is a known
+    constant across the substeps and enters the slow tendency ``G^s_{ρw}``. This
+    half targets the **Cartesian** ``ρw`` on every grid, height-coordinate and
+    terrain-following alike, because a horizontally uniform wind over sloping
+    coordinate surfaces has ``ρw = 0`` but ``ρ\\tilde{w} = -\\text{slope} · ρu``,
+    so damping ``ρ\\tilde{w}^L`` would drive the mean flow to follow the
+    coordinate surfaces;
+  - the acoustic perturbation part is CN-weighted **inside the column tridiag**
+    (paralleling the implicit divergence damping): ``δτᵐ⁺ × \\text{rate} ×
+    \\text{ramp}(z)`` on the LHS diagonal, ``δτˢ⁻ × \\text{rate} ×
+    \\text{ramp}(z)`` on the explicit-half RHS. This half acts on whichever
+    vertical-momentum perturbation the substep evolves, ``(ρw)′`` in height
+    coordinates and ``(ρ\\tilde{w})′`` in terrain-following coordinates. Either
+    way it needs no Cartesian correction, since the mean-flow offset lives
+    entirely in the stage-entry state.
+
+Damping ``(ρw)′`` alone would not absorb anything: the perturbation measures the
+*change* over an RK stage, so a quasi-steady gravity wave passes through
+untouched. This split matches the Rayleigh-layer form of the Klemp, Dudhia &
+Hassiotis (2008) absorbing treatment used in WRF (`damp_opt=3`) and
+MPAS-Atmosphere. The profile shape is controlled by `ramp`; use
+[`Sin2Ramp`](@ref) for the classic ``\\sin^2`` profile.
 
 # Keyword arguments
 
@@ -484,34 +531,47 @@ classic ``\\sin^2`` profile.
 
 - `ramp`: an [`AbstractRamp`](@ref) controlling the profile shape.
   Default [`CubicRamp()`](@ref). Other built-ins: [`Sin2Ramp()`](@ref),
-  [`LinearRamp()`](@ref). Custom shapes are supported by subtyping
-  `AbstractRamp` and defining `(::MyRamp)(z, sponge_top, depth)`.
+  [`GaussianRamp()`](@ref), [`LinearRamp()`](@ref). Custom shapes are
+  supported by subtyping `AbstractRamp` and defining
+  `(::MyRamp)(z, sponge_top, depth)`.
 
 The ramp depends only on the reference vertical coordinate (no horizontal
 variation), so the sponge does not break zonal symmetry and remains uniform
-over terrain-following grids.
+over terrain-following grids. That is also what makes the damping rate
+``γ(z) = \\text{rate} × \\text{ramp}(z)`` a 1D profile over z-faces:
+`UpperSponge(; ...)` is a lightweight skeleton with `damping_profile = nothing`,
+and [`materialize_sponge`](@ref) evaluates `ramp` once per face at
+`AcousticSubstepper` construction and stores the result. The substep kernels
+then read `γ` with a single load instead of re-evaluating the shape twice per
+face per acoustic substep.
 """
-struct UpperSponge{FT, R <: AbstractRamp}
+struct UpperSponge{FT, R <: AbstractRamp, P}
     damping_rate :: FT
     depth :: FT
     ramp :: R
+    damping_profile :: P
 end
 
 function UpperSponge(; damping_rate = 0.2, depth = 5e3, ramp = CubicRamp())
     ramp isa AbstractRamp ||
-        throw(ArgumentError("`ramp` must be an `<:AbstractRamp` (e.g. `CubicRamp()`, `Sin2Ramp()`, `LinearRamp()`)"))
+        throw(ArgumentError("`ramp` must be an `<:AbstractRamp` (e.g. `CubicRamp()`, `Sin2Ramp()`, `GaussianRamp()`, `LinearRamp()`)"))
     FT = Oceananigans.defaults.FloatType
-    return UpperSponge{FT, typeof(ramp)}(convert(FT, damping_rate),
-                                           convert(FT, depth),
-                                           ramp)
+    return UpperSponge(convert(FT, damping_rate), convert(FT, depth), ramp, nothing)
 end
+
+Adapt.adapt_structure(to, sponge::UpperSponge) =
+    UpperSponge(sponge.damping_rate,
+                sponge.depth,
+                sponge.ramp,
+                adapt(to, sponge.damping_profile))
 
 convert_acoustic_parameter(::Type{FT}, ::Nothing) where FT = nothing
 
+# Only the scalars are converted here: this runs on the gridless skeleton, and
+# `materialize_sponge` rebuilds both them and `damping_profile` at the grid's float type.
 convert_acoustic_parameter(::Type{FT}, sponge::UpperSponge) where FT =
-    UpperSponge{FT, typeof(sponge.ramp)}(convert(FT, sponge.damping_rate),
-                                        convert(FT, sponge.depth),
-                                        sponge.ramp)
+    UpperSponge(convert(FT, sponge.damping_rate), convert(FT, sponge.depth),
+                sponge.ramp, sponge.damping_profile)
 
 """
 $(TYPEDEF)

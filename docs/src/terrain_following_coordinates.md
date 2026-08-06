@@ -697,8 +697,32 @@ is needed.
 The lid at ``r = z_\text{top}`` is a closed boundary, but for gravity-wave
 problems we want to absorb rather than reflect upgoing energy. Breeze provides
 [`UpperSponge`](@ref) (`damp_opt = 3` in WRF-speak) — an implicit Rayleigh
-sponge folded into the column tridiag of the acoustic substep. See
-[`SplitExplicitTimeDiscretization`](@ref) for the keyword interface.
+sponge on the *total* vertical momentum, split like the damping in WRF: the
+stage-entry part rides in the slow tendency, while the acoustic perturbation
+part ``-\gamma (\rho \tilde{w})'`` is folded into the column tridiag of the
+substep.
+
+The stage-entry half damps the **Cartesian** ``\rho w``: it contributes
+``-\gamma \rho w^L`` to ``\partial_t (\rho w)``, and therefore the same term to
+``G^s_{\rho \tilde{w}}``, since the transformation
+
+```math
+\partial_t (\rho \tilde{w}) = \partial_t (\rho w)
+- \left(\frac{\partial z}{\partial x}\right)_r \partial_t (\rho u)
+- \left(\frac{\partial z}{\partial y}\right)_r \partial_t (\rho v)
+```
+
+picks the sponge up through ``\partial_t (\rho w)`` alone.
+
+Damping ``\rho \tilde{w}^L`` instead would be wrong by the mean flow: a
+horizontally uniform wind over sloping coordinate surfaces has ``\rho w = 0``
+but ``\rho \tilde{w} = -\text{slope}\cdot\rho u \neq 0`` (0.4 m/s of
+``\tilde{w}`` at 10 km in the Schär case), so the sponge would drive the mean
+flow to follow the coordinate surfaces and radiate a spurious terrain-locked
+stationary wave out of the layer. The perturbation half needs no such
+correction, because the mean-flow offset lives entirely in ``\rho \tilde{w}^L``.
+
+See [`SplitExplicitTimeDiscretization`](@ref) for the keyword interface.
 
 ## Time integration
 
