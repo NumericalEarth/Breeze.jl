@@ -100,7 +100,10 @@ end
 
     Nz = 32
     Lz = FT(1000)
-    grid = RectilinearGrid(default_arch; size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
+    # A CPU grid on purpose: these testsets call the branch functions from the host, so the
+    # `state` fields they read would be scalar-indexed if they lived on a device. The device
+    # path for these branches is covered by stepping a model, below.
+    grid = RectilinearGrid(CPU(); size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
 
     ℓᵗ_field = Field{Center, Center, Nothing}(grid)
     set!(ℓᵗ_field, 300)
@@ -179,7 +182,10 @@ end
 
     Nz = 32
     Lz = FT(1000)
-    grid = RectilinearGrid(default_arch; size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
+    # A CPU grid on purpose: these testsets call the branch functions from the host, so the
+    # `state` fields they read would be scalar-indexed if they lived on a device. The device
+    # path for these branches is covered by stepping a model, below.
+    grid = RectilinearGrid(CPU(); size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
     surface = SurfaceLayerLengthScale{FT}()
     geometric = GeometricLengthScale{FT}(κ = surface.κ, ℓʳ = surface.ℓʳ)
 
@@ -285,7 +291,10 @@ end
     Oceananigans.defaults.FloatType = FT
 
     Nz = 8
-    grid = RectilinearGrid(default_arch; size=Nz, z=(0, FT(1000)), topology=(Flat, Flat, Bounded))
+    # A CPU grid on purpose: these testsets call the branch functions from the host, so the
+    # `state` fields they read would be scalar-indexed if they lived on a device. The device
+    # path for these branches is covered by stepping a model, below.
+    grid = RectilinearGrid(CPU(); size=Nz, z=(0, FT(1000)), topology=(Flat, Flat, Bounded))
 
     function state(Jᵇ, ℓᵗ_value)
         J = Field{Center, Center, Nothing}(grid); set!(J, Jᵇ)
@@ -369,7 +378,10 @@ end
 
     Nz = 32
     Lz = FT(1000)
-    grid = RectilinearGrid(default_arch; size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
+    # A CPU grid on purpose: these testsets call the branch functions from the host, so the
+    # `state` fields they read would be scalar-indexed if they lived on a device. The device
+    # path for these branches is covered by stepping a model, below.
+    grid = RectilinearGrid(CPU(); size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
     ℓᵗ_field = Field{Center, Center, Nothing}(grid)
     set!(ℓᵗ_field, 300)
     u★²_field = Field{Center, Center, Nothing}(grid)
@@ -669,5 +681,59 @@ end
             time_step!(model, 10)
             @test all(isfinite, Array(interior(model.closure_fields.Kᵘ)))
         end
+    end
+end
+
+#####
+##### Every mixing-length branch, on the device
+#####
+
+## The testsets above call the branch functions from the host, so they run on the CPU wherever their
+## data lives and cannot compile anything for a GPU. Stepping a model is what puts a branch inside
+## `compute_closure_fields!` and therefore through the device compiler. The shipped default covers
+## `GeometricLengthScale`, `TurbulenceLengthScale`, `BuoyancyLengthScale` at `Cᶜᵇ = 0` and
+## `MinimumBlend`; this covers the rest, which otherwise reach the device in no test at all:
+## `SurfaceLayerLengthScale` (its `ifelse` chain and `cbrt`), `HarmonicBlend`, `PowerBlend`, and the
+## convective enhancement of `ℓᵇ` (another `cbrt`, plus the guard against Inf/Inf).
+@testset "every mixing length compiles and runs on $(summary(default_arch)) [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    grid = RectilinearGrid(default_arch; size=32, z=(0, 2000), topology=(Flat, Flat, Bounded))
+
+    MYNN = (SurfaceLayerLengthScale(), TurbulenceLengthScale(),
+            BuoyancyLengthScale(Cᵇ = 1, Cᶜᵇ = 5))
+
+    configurations = ("NakanishiNiinoLengthScale" => (NakanishiNiinoLengthScale(), 3),
+                      "MYNN branches under PowerBlend" =>
+                          (BlendedMixingLength(MYNN...; blend = PowerBlend(p = 2)), 2),
+                      "MYNN branches under MinimumBlend" =>
+                          (BlendedMixingLength(MYNN...; blend = MinimumBlend()), 2))
+
+    @testset "$name" for (name, (mixing_length, Cq)) in configurations
+        closure = TKEBasedTurbulenceClosure(FT; mixing_length, Cq)
+        model = AtmosphereModel(grid; closure, coriolis = FPlane(latitude = 45))
+
+        ## Sheared and stably stratified aloft, so shear production is nonzero and ℓᵇ binds; a
+        ## uniform wind would leave the column at the TKE floor and exercise none of this.
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ = z -> θ₀ + max(0, z - 1000) * FT(0.008), ρu = z -> FT(10) * z / 2000)
+
+        for _ in 1:5
+            time_step!(model, 10)
+        end
+
+        Kᵘ = Array(interior(model.closure_fields.Kᵘ))
+        Kᶜ = Array(interior(model.closure_fields.Kᶜ))
+        Kᵉ = Array(interior(model.closure_fields.Kᵉ))
+        ℓ = Array(interior(model.closure_fields.ℓ))
+        ℓᶜ = Array(interior(model.closure_fields.ℓᶜ))
+        e = Array(interior(model.closure_fields.e))
+
+        @test all(isfinite, Kᵘ) && all(isfinite, Kᶜ) && all(isfinite, Kᵉ)
+        @test all(isfinite, ℓ) && all(isfinite, ℓᶜ) && all(isfinite, e)
+        @test all(≥(0), Kᵘ) && all(≥(0), e)
+        @test all(>(0), ℓᶜ)              # the dissipation divides by it
+        @test Kᵉ ≈ Cq .* Kᵘ              # the transport ratio survives the device path
+        @test maximum(Kᵘ) > 0            # the closure did something
     end
 end
