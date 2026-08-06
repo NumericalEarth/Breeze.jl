@@ -19,7 +19,8 @@ An eddy-diffusivity closure carrying one prognostic equation for the subgrid tur
 energy ``e``,
 
 ```math
-Kᵘ = Cᴷ ℓ \\sqrt{e}, \\qquad Kᶜ = Kᵘ / \\mathrm{Pr}, \\qquad ε = Cᵋ e^{3/2} / ℓ,
+Kᵘ = Cᴷ ℓ \\sqrt{e}, \\qquad Kᶜ = Kᵘ / \\mathrm{Pr}, \\qquad Kᵉ = C^q Kᵘ, \\qquad
+ε = Cᵋ e^{3/2} / ℓ,
 ```
 
 ```math
@@ -42,7 +43,7 @@ the stress coefficient all derive from them (`dissipation_coefficient`, `surface
   - **``Cμ`` alone sets the neutral surface-layer turbulence level**, ``e/u_\\star² = (Cμ)^{-1/2}``,
     independently of ``Cᴷ``. Away from that layer ``e`` follows the full budget rather than any
     coefficient. It is the ``k``–``ε`` coefficient in ``Kᵘ = Cμ e²/ε``, so it is directly comparable
-    across closure families: 0.058 here (MYNN), 0.094 (MY82), 0.090 (standard ``k``–``ε``),
+    across closure families: 0.058 here (MYNN), 0.090 (standard ``k``–``ε``), 0.094 (MY82),
     0.148 (MYJ), 0.200 (SHOC).
 
   - **``Cᴷ`` carries log-layer consistency.** In a neutral constant-flux layer with ``ℓᵍ = a z``,
@@ -51,8 +52,9 @@ the stress coefficient all derive from them (`dissipation_coefficient`, `surface
     reads ``Cˢ = 1``, i.e. the locus **``Cμ = Cᴷ⁴``**. Off that locus a column fitted for a von
     Kármán constant returns ``κ_\\mathrm{eff} = Cˢ κ`` instead of ``κ``.
 
-The defaults are MYNN's, ``Cᴷ = 0.4903`` and ``Cμ = 0.0578``, which satisfy ``Cμ = Cᴷ⁴`` exactly:
-initialized consistent for mesoscale modelling in which no turbulent motion is resolved. Both
+The defaults are MYNN's, ``Cᴷ = 0.4903`` and ``Cμ = 0.0578``, which satisfy ``Cμ = Cᴷ⁴`` to the
+four digits they are published to — ``Cᴷ⁴ = 0.057789`` — so the closure is initialized consistent
+with the neutral log layer, as mesoscale modelling wants when no turbulent motion is resolved. Both
 remain independently settable, and `stress_coefficient` is exposed so that a departure from the
 locus is visible rather than silent. The other published sets of the Mellor–Yamada line — MY82's
 ``B₁ = 16.6`` and MYJ's ``B₁ = 11.88`` — also sit on the locus, because ``Cμ = Cᴷ⁴`` is equivalent
@@ -292,8 +294,9 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     u★² = Field{Center, Center, Nothing}(grid)
     Jᵇ = Field{Center, Center, Nothing}(grid)
 
-    # Indexed by the `Val(id)` the model hands to `diffusivity`. TKE is transported with the eddy
-    # viscosity, i.e. a turbulent Schmidt number of one.
+    # Indexed by the `Val(id)` the model hands to `diffusivity`. TKE is transported with `Kᵉ` and
+    # every other scalar with `Kᶜ`, so the turbulent Schmidt number for TKE is 1/Cq — one half by
+    # default, not one.
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
 
     return TKEClosureFields(Kᵘ, Kᶜ, ℓ, ℓᶜ, e, ℓᵗ, u★², Jᵇ, Kᵉ, tracer_diffusivities)
@@ -434,8 +437,8 @@ end
     @inbounds begin
         closure_fields.ℓ[i, j, k]  = mask_diffusivity(i, j, k, grid, FT(ℓ))
         closure_fields.Kᵘ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᵘ))
-        # `Kᶜ` follows from the capped `Kᵘ`; it is not capped independently, so that `Pr = Kᵘ/Kᶜ`
-        # is exactly what `turbulent_prandtl_number` returned even where the cap binds.
+        # `Kᶜ` and `Kᵉ` are formed from `Kᵘ` rather than recomputed, so `Pr = Kᵘ/Kᶜ` and
+        # `Cq = Kᵉ/Kᵘ` hold exactly in the stored fields, whatever happens to `Kᵘ`.
         closure_fields.Kᶜ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᵘ / Pr))
         closure_fields.Kᵉ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(closure_ij.Cq * Kᵘ))
         closure_fields.ℓᶜ[i, j, k] = FT(ℓᶜ)
