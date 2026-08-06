@@ -115,7 +115,7 @@ qᵛ = specific_humidity(gray_model)
 # stored with a negative sign, the sum is already "up minus down". The upwelling
 # shortwave carries the radiation scattered back to space by air and clouds and
 # reflected by the surface, so leaving it out would misstate the net flux, and with
-# it the heating rate, wherever the shortwave scatters. Gray optics uses a
+# it the heating rate, wherever the shortwave scatters or reflects. Gray optics uses a
 # non-scattering shortwave solver, so its upwelling shortwave is identically zero.
 
 ℐ_lw_up_gray = gray_radiation.upwelling_longwave_flux
@@ -229,7 +229,9 @@ fig
 #
 # The `RadiativeTransferModel` automatically computes the heating tendency
 # `Q = -dF_net/dz` (W/m³) from the radiative flux divergence. We convert to K/day
-# using `dT/dt = Q / (ρ cₚ)`.
+# using `dT/dt = Q / (ρᵣ cₚ)`. For this compact comparison we use the reference
+# density and dry-air heat capacity; the model tendencies use the local mixture
+# heat capacity and are therefore slightly different in moist and cloudy layers.
 
 Q_gray   = gray_radiation.flux_divergence
 Q_clear  = clear_sky_radiation.flux_divergence
@@ -238,7 +240,7 @@ Q_allsky = all_sky_radiation.flux_divergence
 
 # Convert W/m³ → K/day: Q / (ρᵣ cᵖᵈ) × 86400
 ρᵣ = reference_state.density
-cᵖᵈ = constants.dry_air.heat_capacity / constants.dry_air.molar_mass  # J/(kg·K)
+cᵖᵈ = constants.dry_air.heat_capacity  # J/(kg·K)
 to_K_per_day = 86400 / cᵖᵈ
 
 fig2 = Figure(size=(800, 500), fontsize=14)

@@ -125,7 +125,7 @@ using RRTMGP
         rrtmgp_sw_up_allsky = Array(RRTMGP.sw_flux_up(all_sky_radiation.longwave_solver))
         @test vec(Array(interior(ℐ_sw_up_allsky))) == vec(rrtmgp_sw_up_allsky)
 
-        # Clouds reflect sunlight, so the all-sky column must send shortwave back up.
+        # Atmospheric scattering and surface reflection must send shortwave back up.
         @allowscalar @test ℐ_sw_up_allsky[1, 1, size(grid, 3) + 1] > 0
 
         # Surface upwelling LW should be significant

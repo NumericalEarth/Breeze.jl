@@ -120,6 +120,11 @@ using RRTMGP
                 vec(Array(interior(ℐ_sw_up))) .+
                 vec(Array(interior(ℐ_sw_dn)))
 
+        # The signed Breeze sum must equal RRTMGP's longwave-plus-shortwave net flux.
+        rrtmgp_net = vec(Array(RRTMGP.lw_flux_net(radiation.longwave_solver))) .+
+                     vec(Array(RRTMGP.sw_flux_net(radiation.longwave_solver)))
+        @test ℐ_net ≈ rrtmgp_net rtol = sqrt(eps(FT))
+
         Δz = 10kilometers / Nz  # the grid is uniform in z
         column_heating = Δz * sum(Array(interior(radiation.flux_divergence)))
         @test column_heating ≈ ℐ_net[1] - ℐ_net[end] rtol = sqrt(eps(FT))

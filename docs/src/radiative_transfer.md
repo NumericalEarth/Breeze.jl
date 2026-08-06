@@ -103,8 +103,8 @@ fraction reflected by the surface.
     Because the gray shortwave solver only propagates the direct beam downward, it
     never reflects it: `surface_albedo` (and `direct_surface_albedo` /
     `diffuse_surface_albedo`) has no effect on the gray shortwave fluxes, and the
-    surface absorbs the full direct beam. The albedo is still used for the
-    clear-sky and all-sky solvers. Use [`ClearSkyOptics`](@ref) or
+    surface absorbs all of the direct beam that reaches it. The albedo is still
+    used for the clear-sky and all-sky solvers. Use [`ClearSkyOptics`](@ref) or
     [`AllSkyOptics`](@ref) if the shortwave albedo matters for your study.
 
 ## Solar zenith angle
@@ -312,19 +312,36 @@ The [`RadiativeTransferModel`](@ref) model requires surface properties:
 
 ## Integration with dynamics
 
-Radiative fluxes can be used to compute heating rates for the energy equation. The radiative heating rate is computed from flux divergence:
+Radiative fluxes provide a volumetric energy source from flux convergence,
 
 ```math
-F_{\mathscr{I}} = -\frac{1}{\rho cᵖᵐ} \frac{\partial \mathscr{I}_{net}}{\partial z}
+Q_{\mathscr{I}} = -\frac{\partial \mathscr{I}_{net}}{\partial z},
 ```
 
-where ``cᵖᵐ`` is the mixture heat capacity, ``F_{\mathscr{I}}`` is the radiative flux divergence (heating rate), and ``\mathscr{I}_{net}`` is the net radiative flux (upwelling minus downwelling), summed over *all four* streams,
+where ``Q_{\mathscr{I}}`` has units W/m³. For
+[`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics), holding
+moisture phase composition fixed, the corresponding temperature tendency is
 
 ```math
-\mathscr{I}_{net} = \left( \mathscr{I}_{lw}^{↑} + \mathscr{I}_{sw}^{↑} \right) - \left( \mathscr{I}_{lw}^{↓} + \mathscr{I}_{sw}^{↓} \right) .
+\left. \frac{\partial T}{\partial t} \right|_{rad} = \frac{Q_{\mathscr{I}}}{ρᵣ cᵖᵐ}.
 ```
 
-Omitting the upwelling shortwave would bias the heating rate everywhere the shortwave scatters or reflects, so `radiation.flux_divergence` always includes it. Because the stored fields are already signed positive-upward, the net flux is simply their sum, and `flux_divergence` is minus its vertical derivative, evaluated at cell centers from the fluxes at the two bounding cell faces.
+Here ``ρᵣ`` is the reference density, ``cᵖᵐ`` is the mixture heat capacity, and
+``\mathscr{I}_{net}`` is the net upward radiative flux. Because Breeze stores
+downwelling components as negative values, the four signed streams are added:
+
+```math
+\mathscr{I}_{net} = \mathscr{I}_{lw}^{↑} + \mathscr{I}_{lw}^{↓}
+                  + \mathscr{I}_{sw}^{↑} + \mathscr{I}_{sw}^{↓} .
+```
+
+Despite its historical name, `radiation.flux_divergence` stores ``Q_{\mathscr{I}}``:
+minus the vertical derivative of the signed flux sum, evaluated at cell centers
+from the two bounding cell faces. The static-energy formulation adds this W/m³
+source directly to its energy-density tendency. The liquid-ice potential-temperature
+formulation adds ``Q_{\mathscr{I}} / (cᵖᵐ Π)`` to its potential-temperature-density
+tendency. Omitting the upwelling shortwave would bias either tendency wherever
+shortwave radiation scatters or reflects.
 
 ## Architecture Support
 
