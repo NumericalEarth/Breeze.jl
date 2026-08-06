@@ -388,6 +388,25 @@ at ``\\mathrm{Pr₀}(1 + C^{Ri})`` in strongly stable stratification and reduces
 This stands in for the full algebraic stability functions ``S_M(G_M, G_H)``, ``S_H(G_M, G_H)`` of
 the Mellor–Yamada hierarchy. The neutral log-layer argument that pins ``Cᴷ`` and ``Cμ`` is
 momentum-only and says nothing about ``\\mathrm{Pr₀}``, so it is an independent parameter.
+
+# Why it saturates
+
+An unbounded ``\\mathrm{Pr}`` is the better physics — local downgradient heat transport really does
+die in strong stratification — and it keeps the flux Richardson number ``Rf = Ri/\\mathrm{Pr} =
+B/P`` below one, as the TKE budget requires. Saturating gives that up: with the defaults
+``\\mathrm{Pr}`` ceilings at 2.96, so ``Rf`` passes one at ``Ri ≈ 2.3`` and reaches 34 at
+``Ri = 100``.
+
+It is kept because ``Kᶜ = Kᵘ/\\mathrm{Pr}``, so the ceiling is a floor under the scalar
+diffusivity — and that floor is what lets this closure entrain. An unbounded ``\\mathrm{Pr}``
+collapses ``Kᶜ`` at exactly the inversion that should be entraining, taking the dry-convective
+entrainment ratio with it. The compensation stands in for the non-local transport an
+eddy-diffusivity closure lacks. [Kitamura (2010)](@cite Kitamura2010) repairs the same defect in
+MYNN properly, but by rescaling ``A₂`` inside their coupled ``S_M``/``S_H``, which readjust momentum
+in step; here ``Cᴷ`` is fixed and ``\\mathrm{Pr}`` is the only handle on heat.
+
+Strong stability still shuts turbulence down, via the budget rather than a critical ``Rf``: once
+``Rf > 1``, ``P + B < 0`` and ``e`` decays to `eᵐⁱⁿ`, taking ``Kᵘ`` with it.
 """
 @inline function turbulent_prandtl_number(Pr₀, CRi, Ri)
     Ri⁺ = max(0, Ri)
