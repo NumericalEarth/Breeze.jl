@@ -203,6 +203,7 @@ for (key, model) in models
     sim.output_writers[:jld2] = JLD2Writer(model, outputs;
                                            filename = "igw_$(key).jld2",
                                            schedule = TimeInterval(100),
+                                           jld2_kw = Dict(:compress => true),
                                            overwrite_existing = true)
     simulations[key] = sim
 end

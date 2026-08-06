@@ -155,6 +155,7 @@ outputs = (; ρ′, u′, w, U, R, W²)
 
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
                                               schedule = TimeInterval(0.01),
+                                              jld2_kw = Dict(:compress => true),
                                               overwrite_existing = true)
 
 run!(simulation)

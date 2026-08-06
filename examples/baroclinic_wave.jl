@@ -303,6 +303,7 @@ for k in (1, 16)
     ow = JLD2Writer(model, outputs; filename,
                     indices = (:, :, k),
                     schedule = TimeInterval(6hours),
+                    jld2_kw = Dict(:compress => true),
                     overwrite_existing = true)
 
     simulation.output_writers[Symbol(filename)] = ow

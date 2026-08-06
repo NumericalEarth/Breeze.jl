@@ -322,6 +322,7 @@ outputs = (; w, contravariant_w)
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
                                               filename,
                                               schedule = TimeInterval(2minutes),
+                                              jld2_kw = Dict(:compress => true),
                                               overwrite_existing = true)
 
 run!(simulation)

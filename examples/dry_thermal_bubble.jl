@@ -93,6 +93,7 @@ outputs = merge(model.velocities, model.tracers, (; ρe′, ρe, T))
 filename = "thermal_bubble.jld2"
 writer = JLD2Writer(model, outputs; filename,
                     schedule = TimeInterval(10seconds),
+                    jld2_kw = Dict(:compress => true),
                     overwrite_existing = true)
 
 simulation.output_writers[:jld2] = writer
