@@ -50,7 +50,7 @@ $(TYPEDFIELDS)
 Base.@kwdef struct GeometricLengthScale{FT} <: AbstractLengthScale
     "von Kármán constant, setting the slope ``ℓᵍ = κ(z + ℓʳ)``"
     κ :: FT = 0.4
-    "roughness length ``ℓʳ``, which keeps ``ℓᵍ`` finite at the surface, m"
+    "roughness length ``ℓʳ``, which keeps ``ℓᵍ > 0`` at the surface, m"
     ℓʳ :: FT = 0.1
 end
 
@@ -144,19 +144,17 @@ Base.@kwdef struct SurfaceLayerLengthScale{FT} <: AbstractLengthScale
     κ :: FT = 0.4
     "roughness length ``ℓʳ``, m"
     ℓʳ :: FT = 0.1
-    "strongly-stable divisor, MYNN's 3.7"
+    "strongly-stable divisor"
     Cⁿ :: FT = 3.7
-    "weakly-stable slope, MYNN's 2.7"
+    "weakly-stable slope"
     Cˢ :: FT = 2.7
-    "unstable coefficient, MYNN's 100"
+    "unstable coefficient"
     Cᶜ :: FT = 100
-    "unstable exponent, MYNN's 0.2"
+    "unstable exponent"
     nᶜ :: FT = 0.2
     "floor on ``ζ``, bounding the unstable branch. Nakanishi (2001)'s LES spans ``ζ ∈ [-3.13, 0.44]``
      (his Table I and Fig. 3), and the unstable branch is the only piece of Eq. 53 that diverges
-     rather than saturating — at zero shear it would otherwise reach ``ζ ~ -10¹⁴``. Because
-     ``ℓˢ ∝ |ζ|^{nᶜ}``, doubling the ceiling would take a 32-fold change here, so the exact value is
-     second order; ``-4`` sits just beyond the data as MYNN's ``ζ = 1`` sits beyond theirs"
+     rather than saturating"
     ζᵐⁱⁿ :: FT = -4
 end
 
@@ -167,9 +165,7 @@ end
 """
 $(TYPEDEF)
 
-``ℓ = \\min(ℓ₁, ℓ₂, …)`` — the most restrictive branch wins outright. The simplest rule, and the
-only one with no free parameter, but it is ``C⁰``: the derivative with respect to a branch that is
-not currently smallest is exactly zero, which matters for gradient-based calibration.
+``ℓ = \\min(ℓ₁, ℓ₂, …)`` — the simplest rule: the most restrictive branch wins outright.
 """
 struct MinimumBlend <: AbstractLengthScaleBlend end
 
@@ -190,14 +186,11 @@ struct HarmonicBlend <: AbstractLengthScaleBlend end
 $(TYPEDEF)
 
 ``ℓ^{-p} = ℓ₁^{-p} + ℓ₂^{-p} + …``, the ``p``-norm blend of
-[Mason and Thomson (1992)](@cite MasonThomson1992), who match a wall scale ``κ(z + z₀)`` to an
+[Mason and Thomson (1992)](@cite MasonThomson1992), who match a wall scale ``κ(z + ℓʳ)`` to an
 outer scale with ``n = 2``.
 
 ``p = 1`` reproduces [`HarmonicBlend`](@ref) and ``p → ∞`` approaches [`MinimumBlend`](@ref).
-Writing ``x`` for the ratio of a branch to the smallest one, the blend sits below that smallest
-branch by ``x^p / p``, so larger ``p`` confines each branch's influence to the region where it is
-actually the relevant scale. ``p = 2`` is both the literature value and the cheapest: it needs one
-reciprocal square root rather than a general power.
+``p = 2`` is both the literature value and the cheapest: it needs one reciprocal square root rather than a general power.
 
 Fields
 ======
@@ -282,12 +275,6 @@ The mixing length of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009): the
 ```julia
 closure = TKEBasedTurbulenceClosure(mixing_length = NakanishiNiinoLengthScale(), Cq = 3)
 ```
-
-The blend is not incidental. The unstable coefficient of [`SurfaceLayerLengthScale`](@ref) was
-chosen so that the *blended* length matches the LES, not the branch itself, so pairing these
-branches with a sharper rule leaves ``ℓ`` systematically long. Their companion setting is
-``C^q = 3`` (their Eq. 67), which is deliberately left to the caller rather than folded in here:
-it is a modelling choice with its own provenance, and burying it is how it stops being one.
 
 Note that a closure built this way is *not* the MYNN model. The algebraic stability functions
 ``S_M(G_M, G_H)`` and ``S_H(G_M, G_H)`` of the Mellor–Yamada hierarchy are replaced in
