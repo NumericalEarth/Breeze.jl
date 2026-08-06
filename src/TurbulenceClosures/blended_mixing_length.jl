@@ -417,11 +417,21 @@ $(TYPEDSIGNATURES)
 
 Height above the bottom boundary, at faces and at centers — **unfloored**.
 
-Breeze owns these rather than reusing Oceananigans' same-named functions, which return
-`max(Δzᶜᶜᶜ(i, j, k-1, grid), h)` (`TurbulenceClosures.jl:190-201`). That floor at one cell thickness
-suits an ocean bottom boundary layer, but here it destroys ``ℓᵍ = κ(z + ℓʳ)`` in exactly the cells
-where the log law is judged, and makes ``ℓᵍ(z₁)`` depend on the grid rather than on the flow. The
-roughness length is what keeps ``ℓᵍ`` finite at the surface, so no floor is wanted.
+Breeze owns these rather than reusing Oceananigans' same-named functions, which floor the height
+at a cell thickness — `max(Δzᶜᶜᶜ(i, j, k-1, grid), h)` at faces and `max(Δzᶜᶜᶜ(i, j, k, grid)/2, h)`
+at centers (`TurbulenceClosures.jl:190-201`). That suits an ocean bottom boundary layer; here the
+roughness length is what keeps ``ℓᵍ = κ(z + ℓʳ)`` finite at the surface, so no floor is wanted.
+
+On the grids this closure currently supports the floor is in fact unreachable, and it is worth
+being precise about why rather than implying it corrupts the log layer. At face ``k`` the height is
+``Δz₁ + … + Δz_{k-1}``, which is never below its own last term, so the floor can bind only at
+``k = 1``; at centers it can never bind at all. The one face it touches is the bottom boundary
+face, which `mask_diffusivity` zeroes before anything is stored — so on a `Bounded`
+`RectilinearGrid`, floored and unfloored give identical `ℓ` and `Kᵘ`.
+
+What the unfloored form buys is immersed boundaries, where `z_bottom` varies horizontally and the
+floor can bind at *interior* faces that no mask reaches. Those are out of scope for now, so treat
+this as keeping the door open, not as fixing a present defect.
 
 These are *new functions in this module*, not methods added to Oceananigans'. Extending the upstream
 ones is not possible without type piracy — their signature `(i, j, k, grid)` contains no
