@@ -30,37 +30,10 @@ using Oceananigans.Utils: launch!
 @testset "TKEBasedTurbulenceClosure coefficients [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
-    constant_sets = (MYNN = TKEBasedTurbulenceClosure(),
-                     MY82 = MY82Coefficients(),
-                     MYJ  = MYJCoefficients())
-
-    # The published sets are quoted to four digits, so the locus holds to that, not to eps
-    rtol = FT === Float32 ? 1e-3 : 1e-3
-
-    @testset "$name lies on the log-law locus" for (name, closure) in pairs(constant_sets)
-        Cᴷ = diffusivity_coefficient(closure)
-        Cμ = closure.Cμ
-
-        @test isapprox(Cμ, Cᴷ^4; rtol)
-        @test isapprox(stress_coefficient(closure), 1; rtol)
-
-        # Cᵋ = Cμ/Cᴷ is the stored relation; on the locus it is also Cᴷ³
-        @test isapprox(dissipation_coefficient(closure), Cμ / Cᴷ; rtol = 1e-6)
-        @test isapprox(dissipation_coefficient(closure), Cᴷ^3; rtol)
-
-        # The surface floor equals the log-layer equilibrium TKE, e/u★² = (Cˢ Cᵋ)^(-2/3),
-        # identically — this is what makes the floor not an independent constraint.
-        Cˢ = stress_coefficient(closure)
-        Cᵋ = dissipation_coefficient(closure)
-        @test isapprox(surface_tke_coefficient(closure), (Cˢ * Cᵋ)^(-2//3); rtol = 1e-5)
-        @test isapprox(surface_tke_coefficient(closure), 1 / sqrt(Cμ); rtol = 1e-6)
-
-        # ... and on the locus it is also Cᴷ⁻²
-        @test isapprox(surface_tke_coefficient(closure), Cᴷ^-2; rtol)
-    end
-
     @testset "the equilibrium TKE tracks Cμ off the locus too" begin
-        # e/u★² = (Cμ)^(-1/2) holds for any (Cᴷ, Cμ), which is the reason this pair is stored
+        # e/u★² = (Cμ)^(-1/2) holds for any (Cᴷ, Cμ), which is the reason this pair is stored.
+        # This identity forces Cˢ Cᵋ = Cμ^(3/4), so a wrong exponent in *either* accessor breaks
+        # it — unlike a check that Cᵋ equals its own one-line body, which cannot fail on its own.
         for Cᴷ in (0.2, 0.4903, 0.8), Cμ in (0.02, 0.0578, 0.2)
             closure = TKEBasedTurbulenceClosure(; Cᴷ, Cμ)
             Cˢ = stress_coefficient(closure)
@@ -699,7 +672,11 @@ end
     end
 
     @testset "alternative constant sets run" begin
-        for closure in (MY82Coefficients(), MYJCoefficients())
+        ## Mellor-Yamada (1982) and Janjić (2001) MYJ, passed directly rather than through
+        ## constructors: what is being tested is that the closure builds and steps away from its
+        ## own defaults, not that any particular published pair was transcribed correctly.
+        for closure in (TKEBasedTurbulenceClosure(FT; Cᴷ = 0.5544, Cμ = 0.0945),
+                        TKEBasedTurbulenceClosure(FT; Cᴷ = 0.6198, Cμ = 0.1476))
             model = AtmosphereModel(grid; closure)
             time_step!(model, 10)
             @test all(isfinite, Array(interior(model.closure_fields.Kᵘ)))

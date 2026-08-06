@@ -54,9 +54,9 @@ the stress coefficient all derive from them (`dissipation_coefficient`, `surface
 The defaults are MYNN's, ``Cᴷ = 0.4903`` and ``Cμ = 0.0578``, which satisfy ``Cμ = Cᴷ⁴`` exactly:
 initialized consistent for mesoscale modelling in which no turbulent motion is resolved. Both
 remain independently settable, and `stress_coefficient` is exposed so that a departure from the
-locus is visible rather than silent. `MY82Coefficients` and `MYJCoefficients` return the other two
-published sets; all three sit on the locus, because ``Cμ = Cᴷ⁴`` is equivalent to
-``S_M(\\text{neutral}) = B₁^{-1/3}``, which every member of the Mellor–Yamada line satisfies.
+locus is visible rather than silent. The other published sets of the Mellor–Yamada line — MY82's
+``B₁ = 16.6`` and MYJ's ``B₁ = 11.88`` — also sit on the locus, because ``Cμ = Cᴷ⁴`` is equivalent
+to ``S_M(\\text{neutral}) = B₁^{-1/3}``, which every member of that line satisfies.
 
 Constants carried over from a large-eddy subgrid model do *not* belong here: with ``ℓ = Δ`` the
 relation is broken on purpose, because the filter width is not the equilibrium mixing length.
@@ -166,23 +166,6 @@ TKEBasedTurbulenceClosure(FT::DataType; kw...) =
 @inline convert_eltype(::Type{FT}, ml::BlendedMixingLength) where FT =
     BlendedMixingLength(convert_eltype(FT, ml.blend),
                         map(branch -> convert_eltype(FT, branch), ml.branches))
-
-"""
-$(TYPEDSIGNATURES)
-
-`TKEBasedTurbulenceClosure` with the Mellor–Yamada (1982) constants, ``B₁ = 16.6``. The 1982 set
-was fit to neutral laboratory and tower data; its critical gradient Richardson number of 0.19 makes
-stable turbulence decay too readily.
-"""
-MY82Coefficients(args...; kw...) = TKEBasedTurbulenceClosure(args...; Cᴷ = 0.5544, Cμ = 0.0945, kw...)
-
-"""
-$(TYPEDSIGNATURES)
-
-`TKEBasedTurbulenceClosure` with the Janjić (2001) MYJ constants, ``B₁ = 11.88``, which support a
-nonzero equilibrium up to a gradient Richardson number of 0.505.
-"""
-MYJCoefficients(args...; kw...) = TKEBasedTurbulenceClosure(args...; Cᴷ = 0.6198, Cμ = 0.1476, kw...)
 
 #####
 ##### Derived coefficients

@@ -217,7 +217,7 @@ export
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
     SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
-    TKEBasedTurbulenceClosure, MY82Coefficients, MYJCoefficients,
+    TKEBasedTurbulenceClosure,
     BlendedMixingLength, NakanishiNiinoLengthScale,
     GeometricLengthScale, SurfaceLayerLengthScale,
     TurbulenceLengthScale, BuoyancyLengthScale,
