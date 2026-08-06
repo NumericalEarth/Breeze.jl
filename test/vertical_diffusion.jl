@@ -232,7 +232,11 @@ end
                                 advection = nothing, tracers = :ρc)
         set!(model; ρc = (x, y, z) -> initial(z))
 
-        Δzᶜ = [Oceananigans.Operators.Δzᶜᶜᶜ(1, 1, k, stretched_grid) for k = 1:Nz]
+        ## One bulk copy of the face positions rather than `Nz` calls to a grid operator: on a
+        ## stretched grid `Δz` is an array, so the comprehension was a scalar read per cell and
+        ## errored on a GPU. `diff` of the faces is exactly `Δzᶜᶜᶜ`, and needs no `@allowscalar`
+        ## — which would only have permitted the reads, leaving the same host-side loop.
+        Δzᶜ = diff(Array(znodes(stretched_grid, Face())))
         mass(m) = sum(Δzᶜ .* Array(interior(m.tracers.ρc, 1, 1, :)))
         mass₀ = mass(model)
 
