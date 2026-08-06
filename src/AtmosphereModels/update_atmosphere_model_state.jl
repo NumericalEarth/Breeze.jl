@@ -216,12 +216,9 @@ function compute_auxiliary_variables!(model)
 
     # Compute diffusivities, then fill their halos. A diffusivity stored at (Center, Center, Face)
     # is interpolated *horizontally* to reach the momentum faces — `νᶠᶜᶠ` averages `ν[i-1, j, k]`
-    # and `ν[i, j, k]` — so an unfilled halo halves the vertical viscous stress in the first column
-    # and at every rank boundary. Every Oceananigans model fills these halos here
-    # (`update_nonhydrostatic_model_state.jl:50`). The omission was latent because no test ever
-    # inspected a halo value of `νₑ` — not because it was harmless: `SmagorinskyLilly`,
-    # `DynamicSmagorinsky` and `AnisotropicMinimumDissipation` all produce a spatially varying `νₑ`
-    # and were all affected. A no-op when `closure_fields === nothing`.
+    # and `ν[i, j, k]` — an unfilled halo halves the vertical viscous stress in the first column
+    # and at every rank boundary. A no-op when `closure_fields === nothing`.
+    # Every Oceananigans model fills these halos here (`update_nonhydrostatic_model_state.jl:50`). 
     compute_closure_fields!(model.closure_fields, model.closure, model)
     fill_halo_regions!(model.closure_fields; only_local_halos=true)
 

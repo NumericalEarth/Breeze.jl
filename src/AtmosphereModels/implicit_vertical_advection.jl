@@ -285,7 +285,7 @@ end
 ##### `ℑz(ρ)`). Backward Euler on `∂t q = ∂z(ρ κ ∂z (q/ρ))` gives row k
 #####
 #####   du(k)  = - Δt κₖ₊₁ (ρᶠₖ₊₁ / ρᶜₖ₊₁) Δz⁻¹ᶜₖ Δz⁻¹ᶠₖ₊₁
-#####   dl(k′) = - Δt κₖ    (ρᶠₖ   / ρᶜₖ₋₁) Δz⁻¹ᶜₖ Δz⁻¹ᶠₖ,          k = k′ + 1
+#####   dl(k′) = - Δt κₖ   (ρᶠₖ   / ρᶜₖ₋₁) Δz⁻¹ᶜₖ Δz⁻¹ᶠₖ,          k = k′ + 1
 #####   d(k)   =   1 + Δt Δz⁻¹ᶜₖ [κₖ₊₁ ρᶠₖ₊₁ Δz⁻¹ᶠₖ₊₁ + κₖ ρᶠₖ Δz⁻¹ᶠₖ] / ρᶜₖ
 #####
 ##### The density ratio is the *only* difference from upstream, and it multiplies the whole
