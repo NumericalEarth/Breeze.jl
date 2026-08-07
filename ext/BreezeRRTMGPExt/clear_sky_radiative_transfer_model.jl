@@ -175,6 +175,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # Oceananigans output fields
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
+    upwelling_shortwave_flux = ZFaceField(grid)
     downwelling_shortwave_flux = ZFaceField(grid)
     flux_divergence = CenterField(grid)
 
@@ -192,6 +193,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   nothing,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
+                                  upwelling_shortwave_flux,
                                   downwelling_shortwave_flux,
                                   flux_divergence,
                                   nothing,  # liquid_effective_radius = nothing for clear-sky
