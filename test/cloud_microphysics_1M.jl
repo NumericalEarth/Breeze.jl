@@ -74,10 +74,7 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     @test :ρqʳ in prog_fields
 end
 
-# CloudMicrophysics' low-level accretion kernels require every float argument to share
-# a single type, so a collision efficiency stored at another precision leaves the
-# accretion wrappers with no applicable method. Inference then returns `Union{}` and the
-# GPU compiler reports a dynamic call inside `cloud_precipitation_accretion`.
+# Precision of CloudMicrophysics parameters should match that of Breeze model fields
 @testset "Accretion options stored at another precision [$(FT)]" for FT in all_float_types()
     other_FT = FT === Float32 ? Float64 : Float32
 
