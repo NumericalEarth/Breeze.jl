@@ -266,13 +266,6 @@ end
     return 0
 end
 
-# The collision efficiencies below are converted to the working precision before they
-# reach CloudMicrophysics. Its low-level accretion kernels are written as `where {FT}`
-# over every float argument, so an efficiency stored at another precision — a Float64
-# default, or a perturbed parameter supplied by a calibration — leaves them with no
-# applicable method. The wrapper then infers to `Union{}`, which surfaces on the GPU as
-# a dynamic call rather than as the `MethodError` seen on the CPU.
-
 @inline function cloud_precipitation_accretion(option, cloud, precipitation, velocity, qᶜ, qᵖ, ρ)
     E = convert(typeof(ρ), option.e)
     return accretion(cloud, precipitation, velocity, E, qᶜ, qᵖ, ρ)
