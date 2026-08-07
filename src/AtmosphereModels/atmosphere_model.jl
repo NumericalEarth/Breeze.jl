@@ -168,26 +168,21 @@ function AtmosphereModel(grid;
     default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
-    # Pre-create diagnostic fields needed for VirtualPotentialTemperature
-    # (used in stability-dependent boundary conditions like PolynomialCoefficient)
+    # Pre-create the temperature field. Stability-dependent boundary conditions like
+    # `PolynomialCoefficient` read it from the model field tuple at evaluation time, but the field
+    # itself has to exist before they are materialized.
     temperature = CenterField(grid)
 
     # Regularize boundary conditions for grid topology before creating microphysical fields
     all_names = field_names(dynamics, formulation, microphysics, tracers)
     field_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
-    # Create temporary microphysical fields for BC materialization (using pre-regularized BCs)
-    preliminary_microphysical_fields = materialize_microphysical_fields(microphysics, grid, field_boundary_conditions)
-
-    # Materialize atmosphere-specific boundary conditions (fill in VPT diagnostic,
-    # surface pressure, thermodynamic constants, convert ρe → ρθ for potential temperature formulations)
-    p₀ = surface_pressure(dynamics)
-    # Pass preliminary microphysical fields for BC materialization; the qᵛ field within
-    # provides the specific_prognostic_moisture reference needed by VirtualPotentialTemperature.
-    specific_moisture_field = haskey(preliminary_microphysical_fields, :qᵛ) ? preliminary_microphysical_fields.qᵛ : CenterField(grid)
+    # Materialize atmosphere-specific boundary conditions (fill in the surface-layer θᵥ
+    # diagnostic, thermodynamic constants, convert ρe → ρθ for potential temperature
+    # formulations). Surface fluxes diagnose their pressure, density and θᵥ from the live model
+    # fields at evaluation time, so nothing about the model state is captured here.
     boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                           dynamics, microphysics, p₀, thermodynamic_constants,
-                                                                           preliminary_microphysical_fields, specific_moisture_field, temperature)
+                                                                           dynamics, microphysics, thermodynamic_constants)
 
     # Re-regularize after materialization (materialization may modify boundary conditions)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
@@ -258,9 +253,10 @@ function AtmosphereModel(grid;
     # Build `model_fields` with the same key order as Oceananigans.fields(model::AtmosphereModel)
     # below. ContinuousForcing resolves `field_dependencies` to positional indices at
     # materialize time and looks them up positionally at runtime; the two tuples must
-    # agree on ordering, or forcings will read the wrong field.
+    # agree on ordering, or forcings will read the wrong field. `auxiliary_model_fields`
+    # is the single definition both sites go through.
     model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
-                         (; T=temperature), microphysical_fields)
+                         auxiliary_model_fields(temperature), microphysical_fields)
     density = dynamics_density(dynamics)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, density,
@@ -531,9 +527,45 @@ combine_forcing_values(a::Tuple, b) = (a..., b)
 combine_forcing_values(a, b::Tuple) = (a, b...)
 combine_forcing_values(a, b) = (a, b)
 
+"""
+$(TYPEDSIGNATURES)
+
+The non-prognostic fields exposed alongside the prognostic ones by `Oceananigans.fields(model)`,
+which is the temperature and nothing else. Forcings and boundary functions resolve their
+`field_dependencies` to positional indices into this tuple and index it with those at runtime, so
+every site that assembles the model's field tuple must obtain the auxiliaries here rather than
+rebuild the tuple, and every entry must adapt to the *same* device-side type.
+
+That second requirement is what keeps the thermodynamic pressure and density out:
+`Adapt.adapt_structure` unwraps a three-dimensional `Field` to its `OffsetArray` but preserves the
+`Field` around a dimension-reduced one, such as an anelastic reference profile, so admitting them
+would make the positional lookup a non-concrete `Union` and the GPU compiler would then reject
+every kernel that performs one. Boundary conditions receive them as a second tuple instead, from
+[`dynamics_thermodynamic_fields`](@ref), and read them by name.
+"""
+auxiliary_model_fields(temperature) = (; T=temperature)
+
+"""
+$(TYPEDSIGNATURES)
+
+The pressure and density the model's own thermodynamics is evaluated with, which surface-flux
+boundary conditions read to diagnose the surface state below `(i, j)`. `boundary_condition_args`
+passes this tuple after the model field tuple, and Breeze's own boundary conditions merge the two;
+see [`auxiliary_model_fields`](@ref) for why it has to arrive separately.
+
+These are [`dynamics_pressure`](@ref) and [`total_density`](@ref), both of which are always
+actual `Field`s: prognostic under `CompressibleDynamics`, the hydrostatic reference profile under
+`AnelasticDynamics`. Deliberately *not* [`total_pressure`](@ref), which for anelastic dynamics is a
+lazy sum that would rebuild an `AbstractOperation` on every halo fill, and whose nonhydrostatic
+anomaly is a Lagrange multiplier defined only up to a constant, so no surface diagnostic should
+depend on it.
+"""
+dynamics_thermodynamic_fields(dynamics) =
+    (; p=dynamics_pressure(dynamics), ρ=total_density(dynamics))
+
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)
-    auxiliary = (; T=model.temperature)
+    auxiliary = auxiliary_model_fields(model.temperature)
     return merge(prognostic_fields(model), formulation_fields, model.velocities, auxiliary, model.microphysical_fields)
 end
 
@@ -547,7 +579,8 @@ function Oceananigans.prognostic_fields(model::AtmosphereModel)
     return merge(dynamics_fields, model.momentum, thermodynamic_fields, μ_fields, model.tracers)
 end
 
-Models.boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
+Models.boundary_condition_args(model::AtmosphereModel) =
+    (model.clock, fields(model), dynamics_thermodynamic_fields(model.dynamics))
 
 function total_energy(model)
     u, v, w = model.velocities

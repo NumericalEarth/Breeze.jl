@@ -34,7 +34,7 @@ using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, Ab
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant,
-                             dry_air_gas_constant
+                             surface_temperature_value
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_pressure, pressure_anomaly,
                                 kernel_time_step
 

@@ -263,7 +263,8 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     # Zeroed forcing, keyed exactly as the constructor would for this stripped prognostic set.
     density = dynamics_density(twin_dynamics)
     twin_model_fields = merge(twin_prognostic, fields(formulation), model.velocities,
-                              (; T = model.temperature), twin_microphysical)
+                              auxiliary_model_fields(model.temperature),
+                              twin_microphysical)
     twin_forcing = atmosphere_model_forcing(NamedTuple(), twin_prognostic, twin_model_fields,
                                             grid, model.coriolis, density,
                                             model.velocities, twin_dynamics, formulation,

@@ -55,7 +55,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
                                topology = (Bounded, Bounded, Bounded))
 
     @testset "Anelastic — Open ρu propagates to u at west/east" begin
-        reference_state = ReferenceState(grid_bpb; surface_pressure=FT(101325),
+        reference_state = ReferenceState(grid_bpb; base_pressure=FT(101325),
                                                     potential_temperature=FT(300))
         dynamics = AnelasticDynamics(reference_state)
 
@@ -85,7 +85,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
     end
 
     @testset "Anelastic — Open ρv propagates to v at south/north" begin
-        reference_state = ReferenceState(grid_bbb; surface_pressure=FT(101325),
+        reference_state = ReferenceState(grid_bbb; base_pressure=FT(101325),
                                                     potential_temperature=FT(300))
         dynamics = AnelasticDynamics(reference_state)
 
@@ -113,7 +113,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
     end
 
     @testset "Anelastic — Open ρw propagates to w at bottom/top" begin
-        reference_state = ReferenceState(grid_bbb; surface_pressure=FT(101325),
+        reference_state = ReferenceState(grid_bbb; base_pressure=FT(101325),
                                                     potential_temperature=FT(300))
         dynamics = AnelasticDynamics(reference_state)
 
@@ -173,7 +173,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         # Confirms the auxiliary defaults still install PeriodicBoundaryCondition on
         # Periodic sides (vs `nothing` on Bounded-Face sides). Periodic halo filling
         # must continue to work on tangential and normal components alike.
-        reference_state = ReferenceState(grid_bpb; surface_pressure=FT(101325),
+        reference_state = ReferenceState(grid_bpb; base_pressure=FT(101325),
                                                     potential_temperature=FT(300))
         dynamics = AnelasticDynamics(reference_state)
         model = AtmosphereModel(grid_bpb; dynamics,
@@ -195,7 +195,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         # Direct regression for the original bug mechanism: snapshot u at the boundary
         # face after compute_velocities!, run fill_halo_regions!(velocities), and confirm
         # the boundary face is unchanged. Pre-fix, this re-set u_west to zero.
-        reference_state = ReferenceState(grid_bpb; surface_pressure=FT(101325),
+        reference_state = ReferenceState(grid_bpb; base_pressure=FT(101325),
                                                     potential_temperature=FT(300))
         dynamics = AnelasticDynamics(reference_state)
 
@@ -229,7 +229,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
         # `nothing` on velocity is the catch-all override, but the default impenetrable
         # behavior must still hold: when momentum has the default NormalFlowBoundaryCondition(0),
         # the kernel writes u = ρu/ρ = 0 at the wall and the wall stays impenetrable.
-        reference_state = ReferenceState(grid_bpb; surface_pressure=FT(101325),
+        reference_state = ReferenceState(grid_bpb; base_pressure=FT(101325),
                                                     potential_temperature=FT(300))
         dynamics = AnelasticDynamics(reference_state)
         model = AtmosphereModel(grid_bpb; dynamics,
@@ -251,7 +251,7 @@ boundary_slice(field, args...) = Array(interior(field, args...))
     @testset "Anelastic — uniform OBC inflow stays uniform under SSP-RK3" begin
         # Pre-fix: this NaN'd within ~100 iters.
         # Post-fix: max|u| should remain ≈ U_bg over a few iters.
-        reference_state = ReferenceState(grid_bpb; surface_pressure=FT(101325),
+        reference_state = ReferenceState(grid_bpb; base_pressure=FT(101325),
                                                     potential_temperature=FT(300))
         dynamics = AnelasticDynamics(reference_state)
 

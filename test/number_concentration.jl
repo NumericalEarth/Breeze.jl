@@ -20,7 +20,7 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMic
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
@@ -58,33 +58,33 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=260)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=260)
     dynamics = AnelasticDynamics(reference_state)
 
     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
     microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants, microphysics)
 
-    qˢ_value = FT(5e-4)
-    set!(model; θ=260, qᵗ=FT(0.005), qˢ=qˢ_value)
+    qˢⁿ_value = FT(5e-4)
+    set!(model; θ=260, qᵗ=FT(0.005), qˢⁿ=qˢⁿ_value)
 
     op = number_concentration(model, :snow)
     @test op isa Oceananigans.AbstractOperations.KernelFunctionOperation
 
-    ρnˢ = Field(op)
-    compute!(ρnˢ)
-    @test all(isfinite.(interior(ρnˢ)))
+    ρnˢⁿ = Field(op)
+    compute!(ρnˢⁿ)
+    @test all(isfinite.(interior(ρnˢⁿ)))
 
     # Snow's n₀ depends on (q, ρ), so the closed-form rain expression cannot
     # substitute. Compare against CloudMicrophysics directly.
     snow = microphysics.categories.parameters.precip.snow
     ρ = @allowscalar reference_state.density[1, 1, 1]
-    q = qˢ_value
+    q = qˢⁿ_value
     n0 = get_n0(snow.pdf, q, ρ)
     λ⁻¹ = lambda_inverse(snow.pdf, snow.mass, q, ρ)
     expected = n0 * λ⁻¹
 
-    @test @allowscalar isapprox(ρnˢ[1, 1, 1], expected, rtol=100eps(FT))
+    @test @allowscalar isapprox(ρnˢⁿ[1, 1, 1], expected, rtol=100eps(FT))
 end
 
 @testset "NumberConcentration: unsupported species returns nothing [$FT]" for FT in test_float_types()
@@ -92,7 +92,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     # Warm-phase 1-mom carries rain but not snow, hail, or graupel.
@@ -110,7 +110,7 @@ end
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
     microphysics = TwoMomentCloudMicrophysics()

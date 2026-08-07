@@ -1,13 +1,16 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
+using Adapt: adapt
 using Breeze
-using Breeze.AtmosphereModels: thermodynamic_density, surface_pressure, standard_pressure
-using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities
+using Breeze.AtmosphereModels: thermodynamic_density, base_pressure, standard_pressure
+using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities,
+                                 surface_air_pressure, surface_layer_state
 using Breeze.Thermodynamics: potential_temperature_from_temperature
 using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 using Oceananigans.Fields: location
+using Oceananigans.Grids: XDirection
 using Oceananigans.TimeSteppers: compute_flux_bc_tendencies!, update_state!
 using Test
 
@@ -96,7 +99,7 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 2,
                                                                     damping = NoDivergenceDamping());
                                     reference_potential_temperature = FT(300),
-                                    surface_pressure = FT(1e5),
+                                    base_pressure = FT(1e5),
                                     standard_pressure = FT(1e5))
 
     @inline first_dependency(x, y, t, a, b, p) = a
@@ -127,6 +130,44 @@ end
     @test all(bottom_flux_tendency((:ρu, :ρv), 2) .== 0)
 end
 
+# The same positional lookup, under `AnelasticDynamics`, whose pressure and density are
+# dimension-reduced reference profiles rather than the compressible case's three-dimensional
+# prognostics. `Adapt.adapt` unwraps a three-dimensional `Field` to its `OffsetArray` but keeps a
+# reduced one wrapped, so admitting either to `fields(model)` makes the lookup a non-concrete
+# `Union`, and the GPU compiler then rejects every kernel that performs one. Adapting with
+# `nothing` reproduces those device-side types on CPU CI as well.
+@testset "Model field tuple stays positionally inferable [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch;
+                           size = (8, 8, 8), halo = (5, 5, 5),
+                           x = (0, 1), y = (0, 1), z = (0, 1),
+                           topology = (Periodic, Periodic, Bounded))
+
+    @inline u_dependency(x, y, t, u, p) = u
+    ρu_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(u_dependency,
+                                                                    field_dependencies = :u,
+                                                                    parameters = (;)))
+    model = AtmosphereModel(grid; boundary_conditions = (; ρu = ρu_bcs))
+
+    model_fields = adapt(nothing, Oceananigans.fields(model))
+    lookup = Base.infer_return_type(getindex, Tuple{typeof(model_fields), Int})
+    @test isconcretetype(lookup)
+
+    # The thermodynamic pressure and density surface fluxes read reach them through the second
+    # field tuple instead, which is where they have to live for the lookup above to compile.
+    surface_fields = surface_layer_state(model)
+    @test haskey(surface_fields, :p)
+    @test haskey(surface_fields, :ρ)
+
+    set!(model; θ = model.dynamics.reference_state.potential_temperature, u = FT(-8.75))
+    update_state!(model; compute_tendencies = false)
+    fill!(parent(model.timestepper.Gⁿ.ρu), 0)
+    compute_flux_bc_tendencies!(model)
+
+    Δz = FT(1 / 8)
+    @test all(Array(interior(model.timestepper.Gⁿ.ρu, :, :, 1)) .≈ FT(-8.75) / Δz)
+end
+
 @testset "Time-dependent Open BC on momentum [$FT]" for FT in test_float_types()
     # Regression test for #717: `compute_velocities!` refilled the density and
     # momentum halos without threading `model.clock`/`fields(model)`, so a
@@ -139,7 +180,7 @@ end
                            topology=(Bounded, Bounded, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                     reference_potential_temperature=FT(300),
-                                    surface_pressure=FT(1e5))
+                                    base_pressure=FT(1e5))
 
     @inline ρu_west(y, z, t, p) = p.ρ * cos(p.ω * t)
     ρu_bcs = FieldBoundaryConditions(
@@ -172,7 +213,7 @@ end
                            topology=(Bounded, Bounded, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                     reference_potential_temperature=FT(300),
-                                    surface_pressure=FT(1e5))
+                                    base_pressure=FT(1e5))
 
     # 2-D (y, z) boundary slice for a west OBC on ρu (Face, Center, Center).
     # Slice values 1, 2, 3 at times 0, 10, 20 so the boundary value linearly
@@ -229,7 +270,7 @@ end
         # constructing a model without an explicit surface_temperature must error.
         compressible_dyn = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=2);
                                                 reference_potential_temperature = FT(300),
-                                                surface_pressure = FT(1e5),
+                                                base_pressure = FT(1e5),
                                                 standard_pressure = FT(1e5))
         ρu_bcs_no_T₀ = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         @test_throws ArgumentError AtmosphereModel(grid; dynamics=compressible_dyn,
@@ -258,14 +299,16 @@ end
         model = AtmosphereModel(grid_1; boundary_conditions=(; ρθ=ρθ_bcs))
 
         constants = model.thermodynamic_constants
-        p₀ = surface_pressure(model.dynamics)
         pˢᵗ = standard_pressure(model.dynamics)
+        set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5))
+        model_fields = surface_layer_state(model)
+        p₀ = @allowscalar surface_air_pressure(1, 1, grid_1, model_fields, constants)
         θ_surface = potential_temperature_from_temperature(FT(T₀), p₀, pˢᵗ, constants)
 
         @test p₀ != pˢᵗ
         @test abs(θ_surface - FT(T₀)) > increment_tolerance(FT)
 
-        set!(model; θ=θ_surface, u=FT(5))
+        set!(model; θ=θ_surface)
 
         ρθ = thermodynamic_density(model.formulation)
         Jᶿ_op = BoundaryConditionOperation(ρθ, :bottom, model)
@@ -288,11 +331,13 @@ end
         model = AtmosphereModel(grid_1; boundary_conditions=(; ρθ=ρθ_bcs))
 
         constants = model.thermodynamic_constants
-        p₀ = surface_pressure(model.dynamics)
         pˢᵗ = standard_pressure(model.dynamics)
+        set!(model; θ=model.dynamics.reference_state.potential_temperature, u=FT(5))
+        model_fields = surface_layer_state(model)
+        p₀ = @allowscalar surface_air_pressure(1, 1, grid_1, model_fields, constants)
         θ_surface = potential_temperature_from_temperature(FT(T₀), p₀, pˢᵗ, constants)
 
-        set!(model; θ=θ_surface, u=FT(5))
+        set!(model; θ=θ_surface)
         Oceananigans.initialize!(model)
 
         ρθ = thermodynamic_density(model.formulation)
@@ -327,14 +372,15 @@ end
         # Shared FilteredSurfaceVelocities should now expose a θᵥ field
         bc_condition = Oceananigans.boundary_conditions(model.momentum.ρu).bottom.condition
         @test bc_condition.filtered_velocities === fv
-        @test bc_condition.surface_pressure ≈ surface_pressure(model.dynamics)
+        @test !hasproperty(bc_condition, :base_pressure)
 
         Jᵘ_op = BoundaryConditionOperation(model.momentum.ρu, :bottom, model)
         Jᵘ_field = Field(Jᵘ_op)
         compute!(Jᵘ_field)
 
         constants = model.thermodynamic_constants
-        p₀ = surface_pressure(model.dynamics)
+        model_fields = surface_layer_state(model)
+        p₀ = @allowscalar surface_air_pressure(1, 1, grid_1, model_fields, constants, XDirection())
         ρ₀ = surface_density(p₀, FT(T₀), constants)
         Ũ = sqrt(U^2 + FT(gustiness)^2)
         Jᵘ_expected = - ρ₀ * FT(Cᴰ) * Ũ * U
@@ -353,6 +399,30 @@ end
         set!(model; θ=θ₀, qᵗ=FT(0.01))
         time_step!(model, 1e-6)
         @test true
+    end
+
+    @testset "Static-energy surface state includes local geopotential [$FT]" begin
+        using Oceananigans.Models: BoundaryConditionOperation
+
+        raised_grid = RectilinearGrid(default_arch; size=(1, 1, 4),
+                                      x=(0, 100), y=(0, 100), z=(FT(2000), FT(2400)))
+        constants = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(raised_grid, constants; potential_temperature=FT(300))
+        dynamics = AnelasticDynamics(reference_state)
+        Tˢ = Breeze.AtmosphereModels.default_drag_surface_temperature(dynamics,
+                                                                      raised_grid,
+                                                                      constants)
+        bc = BulkSensibleHeatFlux(surface_temperature=Tˢ, coefficient=FT(Cᴰ), gustiness=FT(1))
+        ρe_bcs = FieldBoundaryConditions(bottom=bc)
+        model = AtmosphereModel(raised_grid; formulation=:StaticEnergy, dynamics,
+                                thermodynamic_constants=constants,
+                                boundary_conditions=(; ρe=ρe_bcs))
+        set!(model; θ=FT(300), qᵗ=0, u=FT(5))
+
+        ρe = thermodynamic_density(model.formulation)
+        Jᵉ = Field(BoundaryConditionOperation(ρe, :bottom, model))
+        compute!(Jᵉ)
+        @test all(abs.(Array(interior(Jᵉ))) .< FT(0.05))
     end
 
     @testset "BulkSensibleHeatFlux with ρe auto-converts for θ formulation [$FT]" begin
@@ -454,12 +524,32 @@ end
         time_step!(model, 1e-6)
         @test true
 
-        # Compressible boundary conditions are materialized before the dynamics. The automatic
-        # reference must therefore be available while materializing the polynomial coefficient.
+        # Compressible boundary conditions are materialized before the dynamics. The polynomial
+        # coefficient must remain constructible there while deferring its state reads to live fields.
         compressible_model = AtmosphereModel(grid;
                                              dynamics=CompressibleDynamics(),
                                              boundary_conditions=(; ρu=ρu_bcs))
         @test compressible_model.dynamics.reference_state !== nothing
+
+        # The stability diagnostic must read prognostic compressible pressure and density from
+        # the boundary-condition field tuple, rather than a construction-time reference profile.
+        materialized_bc = Oceananigans.boundary_conditions(compressible_model.momentum.ρu).bottom
+        materialized_coef = materialized_bc.condition.coefficient
+        θᵥ = materialized_coef.virtual_potential_temperature
+        model_fields = surface_layer_state(compressible_model)
+        set!(model_fields.T, FT(300))
+        set!(model_fields.ρ, FT(1))
+        set!(model_fields.qᵛ, FT(0))
+        set!(model_fields.p, FT(1e5))
+        θᵥ_1000hPa = @allowscalar θᵥ(1, 1, 1, grid, model_fields)
+        set!(model_fields.p, FT(8e4))
+        θᵥ_800hPa = @allowscalar θᵥ(1, 1, 1, grid, model_fields)
+        κᵈ = dry_air_gas_constant(compressible_model.thermodynamic_constants) /
+             compressible_model.thermodynamic_constants.dry_air.heat_capacity
+        # No pressure or density captured at materialization: both come from the field tuple.
+        @test !any(f -> f isa Oceananigans.AbstractField, ntuple(i -> getfield(θᵥ, i), fieldcount(typeof(θᵥ))))
+        @test θᵥ_1000hPa ≈ FT(300)
+        @test θᵥ_800hPa ≈ FT(300) * FT(0.8)^(-κᵈ)
     end
 
     @testset "PolynomialCoefficient with no stability correction [$FT]" begin

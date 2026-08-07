@@ -380,7 +380,7 @@ atmospheric data. It does not interpolate from layers to levels internally becau
 
 1. **Boundary conditions**: The surface (level 1) and TOA (level Nz+1) require
    boundary values that only the atmospheric model knows. For pressure, we use
-   the reference state's `surface_pressure` at z=0. For the top, we extrapolate
+   the reference state's `base_pressure` at z=0. For the top, we extrapolate
    using the adiabatic hydrostatic formula.
 
 2. **Physics-appropriate interpolation**: Different quantities need different

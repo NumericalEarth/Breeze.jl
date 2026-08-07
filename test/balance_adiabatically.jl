@@ -39,7 +39,7 @@ function _build_adiabatic_model(arch; Nx = 8, Ny = 8, Nz = 32, Lz = 10e3, Lh = 1
     td  = SplitExplicitTimeDiscretization(; sponge = nothing)
     dyn = CompressibleDynamics(td;
                                reference_potential_temperature = θ_iso_ai,
-                               surface_pressure  = 1e5,
+                               base_pressure  = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
                                  thermodynamic_constants = constants,
@@ -132,7 +132,7 @@ end
                                topology = (Periodic, Periodic, Bounded))
         constants = ThermodynamicConstants(eltype(grid))
         reference_state = ReferenceState(grid, constants;
-                                         surface_pressure      = 1e5,
+                                         base_pressure      = 1e5,
                                          potential_temperature = 300,
                                          vapor_mass_fraction   = 0)
         dynamics = AnelasticDynamics(reference_state)

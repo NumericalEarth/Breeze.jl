@@ -76,7 +76,7 @@ p₀ = 101325  # Pa
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants;
-                                 surface_pressure = p₀,
+                                 base_pressure = p₀,
                                  potential_temperature = T₀,
                                  vapor_mass_fraction = 0)
 
