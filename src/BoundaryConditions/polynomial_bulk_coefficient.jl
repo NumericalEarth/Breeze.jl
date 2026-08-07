@@ -178,14 +178,14 @@ Applies structurally correct (and different) corrections for momentum vs scalar 
 - Momentum: ``Cᴰ = Cᴰ_N [α / (α - Ψᴰ)]²``
 - Scalar:   ``Cᵀ = Cᵀ_N [α / (α - Ψᴰ)] [β_h / (β_h - Ψᵀ)]``
 
-where ``α = \\ln(z/ℓ)``, ``β_h = \\ln(z/ℓ_h)``.
+where ``α = \\ln(z/ℓʳ)``, ``β_h = \\ln(z/ℓʳ_h)``.
 
 `FittedStabilityFunction` is callable: `sf(Riᴮ, α, β)` returns the momentum
 stability correction factor, and `sf(Riᴮ, α, β, Val(:scalar))` returns the
 scalar correction factor.
 
 # Arguments
-- `scalar_roughness_length`: Roughness length for heat/moisture ``ℓ_h`` (m).
+- `scalar_roughness_length`: Roughness length for heat/moisture ``ℓʳ_h`` (m).
 
 # Keyword Arguments
 - `richardson_number_mapping`: [`RichardsonNumberMapping`](@ref) coefficients (default: [Li et al. (2010)](@cite Li2010)).
@@ -239,8 +239,8 @@ Map bulk Richardson number ``Riᴮ`` to the Monin-Obukhov stability parameter
 
 # Arguments
 - `Riᴮ`: Bulk Richardson number
-- `α`: ``\\ln(z / ℓ)``
-- `β`: ``\\ln(ℓ / ℓ_h)``
+- `α`: ``\\ln(z / ℓʳ)``
+- `β`: ``\\ln(ℓʳ / ℓʳ_h)``
 - `mapping`: [`RichardsonNumberMapping`](@ref) with regression coefficients
 """
 @inline function bulk_to_flux_richardson_number(Riᴮ, α, β, mapping)
@@ -394,7 +394,7 @@ will be automatically selected based on the boundary condition type:
 # Keyword Arguments
 - `polynomial`: Tuple `(a₀, a₁, a₂)` for the polynomial. If `nothing`, the polynomial
   is automatically selected by the boundary condition constructor.
-- `roughness_length`: Surface roughness `ℓ` in meters (default: 1.5e-4, typical for ocean)
+- `roughness_length`: Surface roughness `ℓʳ` in meters (default: 1.5e-4, typical for ocean)
 - `minimum_wind_speed`: Minimum wind speed to avoid singularity in a₂/U term (default: 0.1 m/s)
 - `stability_function`: Stability correction strategy.
   Default is [`FittedStabilityFunction`](@ref) using [Li et al. (2010)](@cite Li2010) ``Riᴮ → ζ`` mapping
@@ -626,10 +626,10 @@ end
     C¹⁰ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed)
 
     # Adjust for measurement height using logarithmic profile:
-    # C(h) = C₁₀ × [ln(10/ℓ) / ln(h/ℓ)]²
-    ℓ = coef.roughness_length
-    α = log(h / ℓ)
-    Cʰ = C¹⁰ * (log(10 / ℓ) / α)^2
+    # C(h) = C₁₀ × [ln(10/ℓʳ) / ln(h/ℓʳ)]²
+    ℓʳ = coef.roughness_length
+    α = log(h / ℓʳ)
+    Cʰ = C¹⁰ * (log(10 / ℓʳ) / α)^2
 
     # Apply stability correction (reads filtered θᵥ when `θᵥ_source` is provided)
     return stability_corrected_coefficient(i, j, grid, coef, Cʰ, h, α, U, T₀, θᵥ_source)
@@ -647,9 +647,9 @@ end
     coef::PolynomialCoefficient{<:Any, <:Any, <:FittedStabilityFunction}, Cʰ, h, α, U, T₀, θᵥ_source)
 
     sf = coef.stability_function
-    ℓ = coef.roughness_length
-    ℓh = sf.scalar_roughness_length
-    β = log(ℓ / ℓh)
+    ℓʳ = coef.roughness_length
+    ℓʳʰ = sf.scalar_roughness_length
+    β = log(ℓʳ / ℓʳʰ)
 
     θᵥ = surface_layer_θᵥ(i, j, coef.virtual_potential_temperature, θᵥ_source)
     θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants, coef.surface)

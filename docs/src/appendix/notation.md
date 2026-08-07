@@ -130,7 +130,24 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
-| ``\ell``                            | `ℓ`    |                                     | Surface roughness length, m                                                    |
+| ``\ell``                            | `ℓ`    |                                     | A **length scale**, m; the superscript says which one. Bare ``ℓ`` is used locally where only one length scale is in play (the master mixing length in `TKEBasedTurbulenceClosure`, the divergence-damping scale in `CompressibleEquations`) |
+| ``\ell^g``                          | `ℓᵍ`   |                                     | Geometric branch of the mixing length, ``ℓᵍ = κ(z + ℓʳ)``                       |
+| ``\ell^t``                          | `ℓᵗ`   |                                     | Turbulence branch of the mixing length, ``ℓᵗ = Cᵗ ∫qz\,dz / ∫q\,dz``            |
+| ``\ell^b``                          | `ℓᵇ`   |                                     | Buoyancy branch of the mixing length, ``ℓᵇ = Cᵇ q / N``                         |
+| ``\ell^r``                          | `ℓʳ`   | `roughness_length`                  | Surface roughness length for momentum, m. Superscript ``r`` elsewhere denotes *rain* (``qʳ``); the two never appear together |
+| ``\ell^{rh}``                       | `ℓʳʰ`  | `scalar_roughness_length`           | Surface roughness length for heat and moisture; defaults to ``ℓʳ/7.3`` |
+| ``\kappa``                          | `κ`    |                                     | von Kármán constant. Never used for a diffusivity in Breeze's own code — the Oceananigans accessors literally named `κᶠᶜᶜ`, `κᶜᶠᶜ`, `κᶜᶜᶠ` are the one exception, and they are thin one-liners |
+| ``K^u``                             | `Kᵘ`   |                                     | Eddy diffusivity for momentum, m² s⁻¹. Oceananigans' scalar-diffusivity closures spell their own field `νₑ`, which Breeze reads but does not define |
+| ``K^c``                             | `Kᶜ`   |                                     | Eddy diffusivity for scalars, ``K^c = K^u/\mathrm{Pr}``, m² s⁻¹                 |
+| ``K^e``                             | `Kᵉ`   |                                     | Eddy diffusivity for TKE, ``K^e = C^q K^u``, m² s⁻¹                             |
+| ``e``                               | `e`    |                                     | Subgrid turbulent kinetic energy, m² s⁻². Confined to kernel locals and to `closure_fields.e`: bare ``e`` is static energy in the `StaticEnergy` formulation |
+| ``q``                               | `q`    |                                     | Turbulent velocity scale ``q = \sqrt{2e}``, m s⁻¹, in mixing-length expressions (distinct from `q`, the `MoistureMassFractions` instance) |
+| ``\rho e``                          | `ρtke` |                                     | Prognostic TKE density, ``ρ e``. Named `ρtke` because `ρe` is the static-energy density |
+| ``\mathrm{Pr}``                     | `Pr`   |                                     | Turbulent Prandtl number, ``\mathrm{Pr} = K^u/K^c``; ``\mathrm{Pr₀}`` is its neutral value |
+| ``Ri``                              | `Ri`   |                                     | Gradient Richardson number, ``Ri = N²/S²``                                      |
+| ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
+| ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |
+| ``u_\star``                         | `u★`   |                                     | Friction velocity, m s⁻¹                                                       |
 | ``T_0``                             | `T₀`   |                                     | Sea surface temperature                                                        |
 | ``qᵛ₀``                             | `qᵛ₀`  |                                     | Saturation specific humidity at sea surface                                    |
 | ``\mathscr{I}``                     | `ℐ`    |                                     | Radiative flux (intensity), W/m²                                               |
