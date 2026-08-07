@@ -65,17 +65,17 @@ function rescale_dry_density_weighted_fields!(model, ρᵈ⁻)
     return nothing
 end
 
-function scale_total_density_weighted_fields!(model, ρ, ρᵈ⁻)
-    parent(model.moisture_density) .*= parent(ρ) ./ parent(ρᵈ⁻)
+function scale_total_density_weighted_fields!(model, ρ, ρ⁻)
+    parent(model.moisture_density) .*= parent(ρ) ./ parent(ρ⁻)
 
     μ_names = prognostic_field_names(model.microphysics)
     for name in μ_names
         field = model.microphysical_fields[name]
-        parent(field) .*= parent(ρ) ./ parent(ρᵈ⁻)
+        parent(field) .*= parent(ρ) ./ parent(ρ⁻)
     end
 
     for field in model.tracers
-        parent(field) .*= parent(ρ) ./ parent(ρᵈ⁻)
+        parent(field) .*= parent(ρ) ./ parent(ρ⁻)
     end
 
     return nothing
@@ -104,9 +104,9 @@ end
     @inbounds ρᵈ[i, j, k] = ρ[i, j, k] - ρqᵗ
 end
 
-@kernel function _dry_weighted_specific_moisture!(qᵛ, ρqᵛ, ρᵈ)
+@kernel function _total_weighted_specific_moisture!(qᵛ, ρqᵛ, ρ)
     i, j, k = @index(Global, NTuple)
-    @inbounds qᵛ[i, j, k] = ρqᵛ[i, j, k] / ρᵈ[i, j, k]
+    @inbounds qᵛ[i, j, k] = ρqᵛ[i, j, k] / ρ[i, j, k]
 end
 
 """
@@ -252,12 +252,41 @@ Unlike supplying a density field, this guarantees the initial column satisfies t
 hydrostatic balance `(pᵏ − pᵏ⁻¹)/Δz + g(ρᵏ + ρᵏ⁻¹)/2 = 0`, so the cold start carries no spurious
 vertical pressure-gradient force. Combine with `compute_reference_state = true` (perturbation-form
 base state) and `balancer` (nonhydrostatic `ρw` spin-up) for a full one-call initialization.
+
+The current column solve supports liquid-ice potential-temperature thermodynamics and vapor-only
+moisture. It rejects nonzero liquid/ice condensate because condensate heat capacity and latent
+corrections are not yet included in the column integration.
 """
 struct HydrostaticallyBalancedDensity{P}
     surface_pressure :: P
 end
 
 HydrostaticallyBalancedDensity(; surface_pressure = nothing) = HydrostaticallyBalancedDensity(surface_pressure)
+
+has_nonzero_mass_fraction(::Nothing) = false
+
+function has_nonzero_mass_fraction(mass_fraction)
+    field = mass_fraction isa Field ? mass_fraction : Field(mass_fraction)
+    return !all(iszero, interior(field))
+end
+
+function has_condensate(model)
+    names = condensate_field_names(model.microphysics)
+    for name in names
+        field = model.microphysical_fields[name]
+        all(iszero, interior(field)) || return true
+    end
+
+    if applicable(liquid_mass_fraction, model.microphysics, model)
+        has_nonzero_mass_fraction(liquid_mass_fraction(model.microphysics, model)) && return true
+    end
+
+    if applicable(ice_mass_fraction, model.microphysics, model)
+        has_nonzero_mass_fraction(ice_mass_fraction(model.microphysics, model)) && return true
+    end
+
+    return false
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -269,6 +298,15 @@ the density-weighted prognostics, preserving `θ`, `qˣ`, and velocities) so the
 the balanced column.
 """
 function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalancedDensity)
+    hasproperty(model.formulation, :potential_temperature) ||
+        throw(ArgumentError("HydrostaticallyBalancedDensity currently supports only " *
+                            "liquid-ice potential-temperature thermodynamics"))
+
+    has_condensate(model) &&
+        throw(ArgumentError("HydrostaticallyBalancedDensity does not support nonzero " *
+                            "condensate because its column solve includes vapor " *
+                            "thermodynamics only"))
+
     dynamics  = model.dynamics
     grid      = model.grid
     arch      = architecture(grid)
@@ -287,8 +325,11 @@ function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalan
     qᵛ = CenterField(grid)
     ρᵈ = dynamics_density(dynamics)
     ρᵈ_old = CenterField(grid)
+    ρ_old = CenterField(grid)
     copyto!(parent(ρᵈ_old), parent(ρᵈ))
-    launch!(arch, grid, :xyz, _dry_weighted_specific_moisture!, qᵛ, model.moisture_density, ρᵈ_old)
+    copyto!(parent(ρ_old), parent(total_density(dynamics)))
+    launch!(arch, grid, :xyz, _total_weighted_specific_moisture!,
+            qᵛ, model.moisture_density, ρ_old)
 
     # Per-column hydrostatic integration → balanced total density.
     π = CenterField(grid)
@@ -296,10 +337,11 @@ function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalan
     ρ = CenterField(grid)
     launch!(arch, grid, :xy, _compute_exner_reference_3d!,
             π, pressure, ρ, θ, qᵛ, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
+    fill_halo_regions!(ρ)
 
-    # Scale total-density-weighted constituents by ρ / ρᵈ_old, set dry density as the residual,
+    # Scale total-density-weighted constituents by ρ / ρ_old, set dry density as the residual,
     # then scale dry-density-weighted prognostics by ρᵈ_new / ρᵈ_old.
-    scale_total_density_weighted_fields!(model, ρ, ρᵈ_old)
+    scale_total_density_weighted_fields!(model, ρ, ρ_old)
     launch!(arch, grid, :xyz, _set_dry_density_from_total_density!,
             ρᵈ, ρ, model.microphysics, model.moisture_density, model.microphysical_fields)
     fill_halo_regions!(ρᵈ)
