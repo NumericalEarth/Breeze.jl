@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using Breeze.AtmosphereModels: thermodynamic_density, surface_pressure, standard_pressure
 using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, FilteredSurfaceVelocities
@@ -451,6 +453,13 @@ end
         set!(model; θ=θ₀_ref, u=FT(5), qᵗ=FT(0.01))
         time_step!(model, 1e-6)
         @test true
+
+        # Compressible boundary conditions are materialized before the dynamics. The automatic
+        # reference must therefore be available while materializing the polynomial coefficient.
+        compressible_model = AtmosphereModel(grid;
+                                             dynamics=CompressibleDynamics(),
+                                             boundary_conditions=(; ρu=ρu_bcs))
+        @test compressible_model.dynamics.reference_state !== nothing
     end
 
     @testset "PolynomialCoefficient with no stability correction [$FT]" begin

@@ -423,7 +423,7 @@ rowgap!(fig.layout, 1, -50)
 rowgap!(fig.layout, 2, -50)
 
 # Record animation
-CairoMakie.record(fig, "bomex_slices.mp4", 1:Nt, framerate=12) do nn
+CairoMakie.record(fig, "bomex_slices.mp4", 1:Nt; framerate=12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide

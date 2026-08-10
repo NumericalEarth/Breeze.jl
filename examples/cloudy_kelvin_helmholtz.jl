@@ -235,7 +235,7 @@ fig
 
 # We can also make a movie:
 
-CairoMakie.record(fig, "wave_clouds.mp4", 1:Nt, framerate = 12) do nn
+CairoMakie.record(fig, "wave_clouds.mp4", 1:Nt; framerate = 12, compression = 23) do nn
     n[] = nn
 end
 nothing #hide

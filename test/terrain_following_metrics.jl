@@ -1,12 +1,7 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 using Breeze
 using Breeze.AtmosphereModels: x_pressure_gradient
-using Oceananigans.Architectures: CPU
-
-# Run under `default_arch` when the test runner provides it (which routes to
-# GPU when CUDA is functional, matching project convention); otherwise fall
-# back to CPU() so this file can also be included directly with
-# `julia --project=. test/<this file>.jl` during development.
-@isdefined(default_arch) || (default_arch = CPU())
 
 using CUDA: @allowscalar
 
@@ -286,7 +281,11 @@ using Test
 
         h(x) = 200 * exp(-x^2 / 2000^2)
         materialize_terrain!(grid, h)
-        dynamics = CompressibleDynamics(ExplicitTimeStepping())
+        # This testset checks raw metric identities of the PGF operator (e.g. a horizontally
+        # constant *total* pressure has zero gradient), which hold for the full-pressure form.
+        # Disable the terrain reference (on by default for terrain grids) so the operator
+        # differences the full pressure rather than a perturbation about pᵣ(z).
+        dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state=nothing)
         model = AtmosphereModel(grid; dynamics)
 
         set!(model, ρ=1, θ=300, u=1, w=0)
@@ -316,7 +315,9 @@ using Test
                                    x=(-Lx/2, Lx/2), z=z_faces,
                                    topology=(Periodic, Flat, Bounded))
             materialize_terrain!(grid, h)
-            dynamics = CompressibleDynamics(ExplicitTimeStepping(); slope_stencil = stencil)
+            dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                            slope_stencil = stencil,
+                                            reference_state = nothing)
             model = AtmosphereModel(grid; dynamics)
 
             for i in 1:Nx, k in 1:Nz
@@ -353,7 +354,9 @@ using Test
 
             h(x) = 200 * exp(-x^2 / 2000^2)
             materialize_terrain!(grid, h)
-            dynamics = CompressibleDynamics(ExplicitTimeStepping(); slope_stencil = SlopeInsideInterpolation())
+            dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                            slope_stencil = SlopeInsideInterpolation(),
+                                            reference_state = nothing)
             model = AtmosphereModel(grid; dynamics)
 
             for i in 1:Nx, k in 1:Nz
