@@ -19,11 +19,11 @@ function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperatu
     grid = model.grid
     arch = architecture(grid)
 
-    # RRTMGP assumes level pressures are positive and monotonically decreasing with height.
-    # `thermodynamic_pressure` returns the anelastic hydrostatic reference (guaranteed monotonic)
-    # or the compressible diagnosed pressure, whose hydrostatic part dominates dynamic/acoustic
-    # perturbations by orders of magnitude, so monotonicity holds in practice.
-    p = thermodynamic_pressure(model.dynamics)
+    # RRTMGP assumes level pressures are positive and monotonically decreasing with height. That
+    # holds for the anelastic hydrostatic reference exactly, and for the compressible diagnosed
+    # pressure in practice, whose hydrostatic part dominates dynamic/acoustic perturbations by
+    # orders of magnitude.
+    p = dynamics_pressure(model.dynamics)
     T = model.temperature
     qᵛ = specific_humidity(model)
 

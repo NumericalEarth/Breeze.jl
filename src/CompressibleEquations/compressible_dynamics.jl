@@ -358,11 +358,6 @@ prognostic pressure field, computed diagnostically from the equation of state.
 """
 AtmosphereModels.dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
-# Physics parameterizations read the total thermodynamic state via `thermodynamic_pressure` and
-# `total_density`, which `CompressibleDynamics` carries directly as `pressure` and `total_density`.
-# The (flat/terrain) reference states are pressure-gradient devices for the dynamics and must not
-# substitute for the actual thermodynamic state.
-
 """
 $(TYPEDSIGNATURES)
 

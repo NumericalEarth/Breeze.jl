@@ -100,28 +100,17 @@ make_pressure_correction!(model, Δt) = nothing
 Return the pressure field appropriate to the dynamical formulation, in Pa — the pressure
 entering the equation of state, buoyancy, and the thermodynamic tendencies.
 
-For anelastic dynamics, this is the time-independent hydrostatic reference pressure ``pᵣ(z)``.
-For compressible dynamics, this is the prognostic pressure field. The anomaly and total-pressure
-counterparts are [`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
+For anelastic dynamics, this is the time-independent hydrostatic reference pressure ``pᵣ(z)``,
+excluding the non-hydrostatic pressure anomaly that enforces the divergence constraint but does
+not perturb the thermodynamic state. For compressible dynamics, this is the diagnosed
+equation-of-state pressure. The anomaly and total-pressure counterparts are
+[`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
+
+This is the pressure every physics parameterization should read, including radiation. A dynamics'
+(flat or terrain) reference state is a pressure-gradient device for the dynamics and must never
+substitute for the thermodynamic state; [`total_density`](@ref) is the density counterpart.
 """
 function dynamics_pressure end
-
-"""
-$(TYPEDSIGNATURES)
-
-Return the thermodynamic pressure in Pa. A compressible atmosphere returns its diagnosed
-equation-of-state pressure. An anelastic atmosphere returns its hydrostatic reference pressure,
-excluding the non-hydrostatic pressure anomaly that enforces the divergence constraint but does
-not perturb the thermodynamic state.
-"""
-thermodynamic_pressure(dynamics) = dynamics_pressure(dynamics)
-
-"""
-    mean_pressure(dynamics)
-
-Return the mean (background/reference) pressure field in Pa.
-"""
-function mean_pressure end
 
 """
     pressure_anomaly(dynamics)
