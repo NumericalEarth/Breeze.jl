@@ -106,9 +106,13 @@ not perturb the thermodynamic state. For compressible dynamics, this is the diag
 equation-of-state pressure. The anomaly and total-pressure counterparts are
 [`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
 
-This is the pressure every physics parameterization should read, including radiation. A dynamics'
-(flat or terrain) reference state is a pressure-gradient device for the dynamics and must never
-substitute for the thermodynamic state; [`total_density`](@ref) is the density counterpart.
+This is the pressure every physics parameterization should read, including radiation. Call the
+accessor rather than reaching into `dynamics.reference_state` directly: which of the two the
+reference state *is* varies by formulation. On the anelastic core it is the thermodynamic
+pressure, and `dynamics_pressure` returns it. On the compressible core (flat or terrain) it is a
+pressure-gradient device built once from a fixed profile, it does not track the thermodynamic
+state, and several dynamics types carry none at all. [`total_density`](@ref) is the density
+counterpart.
 """
 function dynamics_pressure end
 

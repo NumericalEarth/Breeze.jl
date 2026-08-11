@@ -360,7 +360,7 @@ This matches the finite-volume staggering used in Oceananigans:
 
 ```
                         ┌─────────────────────────────────────────────────┐
-    z_lev[Nz+1] ━━━━━━━ │  level Nz+1 (TOA):  p_lev, t_lev, z_lev         │ ← extrapolated
+    z_lev[Nz+1] ━━━━━━━ │  level Nz+1 (TOA):  p_lev, t_lev, z_lev         │ ← from halo
                         └─────────────────────────────────────────────────┘
                         ┌─────────────────────────────────────────────────┐
                         │  layer Nz:  T[Nz], p_lay[Nz] = p[Nz]            │ ← from model
@@ -377,7 +377,7 @@ This matches the finite-volume staggering used in Oceananigans:
                         ┌─────────────────────────────────────────────────┐
                         │  layer 1:   T[1], p_lay[1] = p[1]               │ ← from model
                         └─────────────────────────────────────────────────┘
-    z_lev[1]    ━━━━━━━   level 1 (surface, z=0):  p_lev, t_lev           │ ← interpolated
+    z_lev[1]    ━━━━━━━   level 1 (surface, z=0):  p_lev, t_lev           │ ← from halo
                         ══════════════════════════════════════════════════
                                         GROUND (t_sfc)
 ```
@@ -387,13 +387,24 @@ This matches the finite-volume staggering used in Oceananigans:
 RRTMGP is a general-purpose radiative transfer solver that operates on columns of
 atmospheric data. It does not interpolate from layers to levels internally because:
 
-1. **Boundary conditions**: The surface (level 1) and TOA (level Nz+1) require
-   boundary values that only the atmospheric model knows. Breeze interpolates or extrapolates
-   its thermodynamic pressure and temperature fields to those boundary faces.
+1. **Boundary conditions**: The surface (level 1) and TOA (level Nz+1) require boundary values
+   that only the atmospheric model knows. Breeze applies the same interior average there, so each
+   boundary level takes whatever that field's halo carries. A `Value` bottom boundary condition
+   (carried by the anelastic and 1D-column Exner reference pressures) reproduces the prescribed
+   surface pressure exactly; a default `NoFlux` halo mirrors the interior (`p[0] = p[1]`), which
+   collapses the level value onto the adjacent layer value.
 
-2. **Physics-appropriate interpolation**: Different quantities need different
-   interpolation methods. Pressure uses geometric mean (log-linear interpolation)
-   because it varies exponentially with height. Temperature uses arithmetic mean.
+   TODO: extrapolate to the boundary faces explicitly rather than inheriting the halo. Wherever
+   the halo mirrors, `p_lev` equals `p_lay` at that end, so the layer spans only half a cell in
+   pressure while `_compute_radiation_flux_divergence!` still divides its flux difference by the
+   full `Δzᶜᶜᶜ`, roughly halving that cell's heating rate. This affects the top cell always, and
+   the bottom cell whenever `dynamics_pressure` carries no `Value` bottom boundary condition
+   (compressible dynamics, and every terrain reference state).
+
+2. **Interpolation to levels**: Interior levels use `ℑzᵃᵃᶠ`, the arithmetic average of the two
+   adjacent cell centers, for both pressure and temperature. That is second-order on a uniform
+   column and first-order wherever `Δz` varies (stretched or terrain-following grids), since the
+   face is then not the midpoint of its neighbouring centers.
 
 3. **Model consistency**: The pressure profile must be consistent with the atmospheric model's
    thermodynamic state. RRTMGP has no knowledge of the anelastic approximation or of which
