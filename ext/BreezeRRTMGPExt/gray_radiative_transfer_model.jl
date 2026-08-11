@@ -180,9 +180,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # The non-scattering shortwave solver only ever writes the direct beam
     # (`flux_dn_dir`), leaving `flux_up` and `flux_dn` as allocated-but-unwritten
     # memory. Zero them once so that every shortwave array in the solver agrees
-    # with the physics: no diffuse and no upwelling shortwave. (RRTMGP v0.22
-    # removed the whole-flux `set_flux_to_zero!`, keeping only per-column
-    # methods meant for use inside kernels.)
+    # with the physics: no diffuse and no upwelling shortwave.
     shortwave_flux = shortwave_solver.flux
     for flux_array in (shortwave_flux.flux_up, shortwave_flux.flux_dn,
                        shortwave_flux.flux_net, shortwave_flux.flux_dn_dir)
