@@ -11,6 +11,7 @@ export
     # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
     dynamics_pressure,
+    total_density,
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,

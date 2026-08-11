@@ -100,9 +100,19 @@ make_pressure_correction!(model, Δt) = nothing
 Return the pressure field appropriate to the dynamical formulation, in Pa — the pressure
 entering the equation of state, buoyancy, and the thermodynamic tendencies.
 
-For anelastic dynamics, this is the time-independent hydrostatic reference pressure ``pᵣ(z)``.
-For compressible dynamics, this is the prognostic pressure field. The anomaly and total-pressure
-counterparts are [`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
+For anelastic dynamics, this is the time-independent hydrostatic reference pressure ``pᵣ(z)``,
+excluding the non-hydrostatic pressure anomaly that enforces the divergence constraint but does
+not perturb the thermodynamic state. For compressible dynamics, this is the diagnosed
+equation-of-state pressure. The anomaly and total-pressure counterparts are
+[`pressure_anomaly`](@ref) and [`total_pressure`](@ref).
+
+This is the pressure every physics parameterization should read, including radiation. Call the
+accessor rather than reaching into `dynamics.reference_state` directly: which of the two the
+reference state *is* varies by formulation. On the anelastic core it is the thermodynamic
+pressure, and `dynamics_pressure` returns it. On the compressible core (flat or terrain) it is a
+pressure-gradient device built once from a fixed profile, it does not track the thermodynamic
+state, and several dynamics types carry none at all. [`total_density`](@ref) is the density
+counterpart.
 """
 function dynamics_pressure end
 

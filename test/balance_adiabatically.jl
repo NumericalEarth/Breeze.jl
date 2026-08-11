@@ -1,3 +1,5 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
 #####
 ##### Tests for `balance_adiabatically!` (FV3-SHiELD `na_init`).
 #####
