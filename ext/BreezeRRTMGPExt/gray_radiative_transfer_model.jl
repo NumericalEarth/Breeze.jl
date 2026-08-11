@@ -15,7 +15,6 @@ using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, Rad
                                DiurnalSolarPosition, FixedCosineZenith
 
 using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
-using RRTMGP.Fluxes: set_flux_to_zero!
 using KernelAbstractions: @kernel, @index
 using Dates: AbstractDateTime, Millisecond
 
@@ -181,8 +180,14 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # The non-scattering shortwave solver only ever writes the direct beam
     # (`flux_dn_dir`), leaving `flux_up` and `flux_dn` as allocated-but-unwritten
     # memory. Zero them once so that every shortwave array in the solver agrees
-    # with the physics: no diffuse and no upwelling shortwave.
-    set_flux_to_zero!(shortwave_solver.flux)
+    # with the physics: no diffuse and no upwelling shortwave. (RRTMGP v0.22
+    # removed the whole-flux `set_flux_to_zero!`, keeping only per-column
+    # methods meant for use inside kernels.)
+    shortwave_flux = shortwave_solver.flux
+    for flux_array in (shortwave_flux.flux_up, shortwave_flux.flux_dn,
+                       shortwave_flux.flux_net, shortwave_flux.flux_dn_dir)
+        fill!(flux_array, 0)
+    end
 
     # Create Oceananigans fields to store fluxes for output/plotting
     upwelling_longwave_flux = ZFaceField(grid)
