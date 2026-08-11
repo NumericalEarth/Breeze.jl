@@ -267,13 +267,15 @@ end
 end
 
 @inline function cloud_precipitation_accretion(option, cloud, precipitation, velocity, qᶜ, qᵖ, ρ)
-    return accretion(cloud, precipitation, velocity, option.e, qᶜ, qᵖ, ρ)
+    E = convert(typeof(ρ), option.e)
+    return accretion(cloud, precipitation, velocity, E, qᶜ, qᵖ, ρ)
 end
 
 @inline rain_sink_accretion(::Nothing, rain, cloud_ice, velocity, qᶜⁱ, qʳ, ρ) = 0
 
 @inline function rain_sink_accretion(option, rain, cloud_ice, velocity, qᶜⁱ, qʳ, ρ)
-    return accretion_rain_sink(rain, cloud_ice, velocity, option.e, qᶜⁱ, qʳ, ρ)
+    E = convert(typeof(ρ), option.e)
+    return accretion_rain_sink(rain, cloud_ice, velocity, E, qᶜⁱ, qʳ, ρ)
 end
 
 @inline function rain_snow_accretion(
@@ -299,13 +301,16 @@ end
     q₂,
     ρ,
 )
+    FT = typeof(ρ)
+    E = convert(FT, option.e)
+    velocity_dispersion = convert(FT, option.coeff_disp)
     return accretion_snow_rain(
         precipitation₁,
         precipitation₂,
         velocity₁,
         velocity₂,
-        option.e,
-        option.coeff_disp,
+        E,
+        velocity_dispersion,
         q₁,
         q₂,
         ρ,

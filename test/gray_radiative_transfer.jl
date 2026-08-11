@@ -43,6 +43,7 @@ using RRTMGP
             # Check flux fields are created
             @test radiation.upwelling_longwave_flux !== nothing
             @test radiation.downwelling_longwave_flux !== nothing
+            @test radiation.upwelling_shortwave_flux !== nothing
             @test radiation.downwelling_shortwave_flux !== nothing
 
             # Check flux divergence field
@@ -55,6 +56,7 @@ using RRTMGP
             # Check flux fields have correct size (Nz+1 levels)
             @test size(radiation.upwelling_longwave_flux) == (1, 1, Nz + 1)
             @test size(radiation.downwelling_longwave_flux) == (1, 1, Nz + 1)
+            @test size(radiation.upwelling_shortwave_flux) == (1, 1, Nz + 1)
             @test size(radiation.downwelling_shortwave_flux) == (1, 1, Nz + 1)
 
             radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
@@ -160,6 +162,7 @@ end
         # Sign convention: positive = upward, negative = downward
         ℐ_lw_up = radiation.upwelling_longwave_flux
         ℐ_lw_dn = radiation.downwelling_longwave_flux
+        ℐ_sw_up = radiation.upwelling_shortwave_flux
         ℐ_sw_dn = radiation.downwelling_shortwave_flux
 
         @allowscalar begin
@@ -181,7 +184,19 @@ end
 
         @test all(interior(ℐ_lw_up) .≥ 0)  # Upwelling should be positive
         @test all(interior(ℐ_lw_dn) .≤ 0)  # Downwelling should be negative
+        @test all(iszero, interior(ℐ_sw_up))  # Non-scattering gray optics has no upward shortwave
         @test all(interior(ℐ_sw_dn) .≤ 0)  # Downwelling should be negative
+
+        # Integrating -∂ℐ_net/∂z over the column must recover the boundary-flux
+        # difference, where ℐ_net sums all four streams (positive upward).
+        ℐ_net = vec(Array(interior(ℐ_lw_up))) .+
+                vec(Array(interior(ℐ_lw_dn))) .+
+                vec(Array(interior(ℐ_sw_up))) .+
+                vec(Array(interior(ℐ_sw_dn)))
+
+        Δz = 10kilometers / Nz  # the grid is uniform in z
+        column_heating = Δz * sum(Array(interior(radiation.flux_divergence)))
+        @test column_heating ≈ ℐ_net[1] - ℐ_net[end] rtol = sqrt(eps(FT))
     end
 end
 

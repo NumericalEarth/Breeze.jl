@@ -229,6 +229,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     # Oceananigans output fields
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
+    upwelling_shortwave_flux = ZFaceField(grid)
     downwelling_shortwave_flux = ZFaceField(grid)
     flux_divergence = CenterField(grid)
 
@@ -255,6 +256,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   nothing,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
+                                  upwelling_shortwave_flux,
                                   downwelling_shortwave_flux,
                                   flux_divergence,
                                   liquid_eff_radius,
@@ -313,29 +315,31 @@ function update_rrtmgp_cloud_state!(cloud_state, model, liquid_effective_radius,
     grid = model.grid
     arch = architecture(grid)
 
-    ρᵣ = model.dynamics.reference_state.density
     microphysics = model.microphysics
     microphysical_fields = model.microphysical_fields
     qᵛ = specific_prognostic_moisture(model)
 
+    # Total ρ, since the cloud water paths weight total air mass. Passed straight into the launch
+    # so no local shadows the `total_density` accessor.
     launch!(arch, grid, :xyz, _update_rrtmgp_cloud_state!,
-            cloud_state, grid, ρᵣ, microphysics, microphysical_fields, qᵛ,
+            cloud_state, grid, total_density(model.dynamics),
+            microphysics, microphysical_fields, qᵛ,
             liquid_effective_radius, ice_effective_radius)
 
     return nothing
 end
 
-@kernel function _update_rrtmgp_cloud_state!(cloud_state, grid, ρᵣ, microphysics, microphysical_fields, specific_prognostic_moisture,
+@kernel function _update_rrtmgp_cloud_state!(cloud_state, grid, total_density, microphysics, microphysical_fields, specific_prognostic_moisture,
                                              liquid_effective_radius, ice_effective_radius)
     i, j, k = @index(Global, NTuple)
 
     c = rrtmgp_column_index(i, j, grid.Nx)
 
-    FT = eltype(ρᵣ)
+    FT = eltype(total_density)
     kg_to_g = convert(FT, 1000)
 
     @inbounds begin
-        ρ = ρᵣ[i, j, k]
+        ρ = total_density[i, j, k]
         Δz = Δzᶜᶜᶜ(i, j, k, grid)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
 
