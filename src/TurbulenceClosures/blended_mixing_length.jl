@@ -502,7 +502,9 @@ with the turbulence. Subtracting the floor removes the quiescent contribution ex
     closure_ij = getclosure(i, j, closure)
     Cᵗ = turbulence_length_coefficient(closure_ij.mixing_length)
     eᵐⁱⁿ = closure_ij.eᵐⁱⁿ
-    qᵐⁱⁿ = sqrt(2 * eᵐⁱⁿ)
+
+    # `q = √(2e)` weights both integrals, so the √2 cancels out of the ratio and only √e is formed.
+    qᵐⁱⁿ = sqrt(eᵐⁱⁿ)
 
     FT = eltype(grid)
 
@@ -514,7 +516,7 @@ with the turbulence. Subtracting the floor removes the quiescent contribution ex
 
         for k in 1:size(grid, 3)
             eᵢ = @inbounds e[i, j, k]
-            q  = sqrt(2 * max(eᵐⁱⁿ, eᵢ))
+            q  = sqrt(max(eᵐⁱⁿ, eᵢ))
             Δz = Δzᶜᶜᶜ(i, j, k, grid)
             z  = height_above_bottomᶜᶜᶜ(i, j, k, grid)
 
