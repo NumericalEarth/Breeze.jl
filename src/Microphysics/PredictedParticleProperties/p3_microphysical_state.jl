@@ -120,6 +120,8 @@ end
 @inline aerosol_prognostic_names(::Nothing) = ()
 @inline aerosol_prognostic_names(_) = (:ρnᵃ,)
 
+@inline AM.aerosol_field_names(p3::P3) = aerosol_prognostic_names(p3.aerosol)
+
 """
 $(TYPEDSIGNATURES)
 
@@ -137,7 +139,7 @@ Return prognostic field names for the P3 scheme.
     rain_names = (:ρqʳ, :ρnʳ)
     ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρqʷⁱ)
     ssat_names = supersaturation_prognostic_names(p3.process_rates)
-    aero_names = aerosol_prognostic_names(p3.aerosol)
+    aero_names = AM.aerosol_field_names(p3)
 
     return tuple(cloud_names..., rain_names..., ice_names...,
                  ssat_names..., aero_names...)

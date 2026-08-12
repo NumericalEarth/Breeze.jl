@@ -2,6 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Test
 import Breeze
+using Breeze.AtmosphereModels: aerosol_field_names
 using Breeze.Microphysics.PredictedParticleProperties:
     AerosolMode,
     AerosolActivation,
@@ -110,6 +111,9 @@ end
     # Construct P3 with prescribed CCN (default)
     p3_prescribed = PredictedParticlePropertiesMicrophysics(FT)
     @test isnothing(p3_prescribed.aerosol)
+    @test aerosol_field_names(p3) == (:ρnᵃ,)
+    @test isempty(aerosol_field_names(p3_prescribed))
+    @test isempty(aerosol_field_names(nothing))
 
     @testset "P3MicrophysicalState defaults missing aerosol to zero" begin
         state = P3MicrophysicalState(ntuple(_ -> zero(FT), 11)...)

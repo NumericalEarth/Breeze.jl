@@ -104,11 +104,6 @@ end
     @inbounds ρᵈ[i, j, k] = ρ[i, j, k] - ρqᵗ
 end
 
-@kernel function _total_weighted_specific_moisture!(qᵛ, ρqᵛ, ρ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds qᵛ[i, j, k] = ρqᵛ[i, j, k] / ρ[i, j, k]
-end
-
 """
     set_to_mean!(reference_state, model; rescale_densities=false)
 
@@ -297,10 +292,17 @@ Exner integration the reference-state constructor uses, then scales the dry dens
 the density-weighted prognostics, preserving `θ`, `qˣ`, and velocities) so the total density matches
 the balanced column.
 """
-function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalancedDensity)
-    hasproperty(model.formulation, :potential_temperature) ||
-        throw(ArgumentError("HydrostaticallyBalancedDensity currently supports only " *
-                            "liquid-ice potential-temperature thermodynamics"))
+set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalancedDensity) =
+    set_hydrostatically_balanced_density!(model.formulation, model, spec)
+
+function set_hydrostatically_balanced_density!(formulation, model, spec::HydrostaticallyBalancedDensity)
+    throw(ArgumentError("HydrostaticallyBalancedDensity does not support " *
+                        "$(summary(formulation)); it currently supports only " *
+                        "liquid-ice potential-temperature thermodynamics"))
+end
+
+function set_potential_temperature_hydrostatically_balanced_density!(
+    model, spec::HydrostaticallyBalancedDensity, θ)
 
     has_condensate(model) &&
         throw(ArgumentError("HydrostaticallyBalancedDensity does not support nonzero " *
@@ -321,23 +323,26 @@ function set_hydrostatically_balanced_density!(model, spec::HydrostaticallyBalan
     cᵖᵛ = constants.vapor.heat_capacity
     g   = constants.gravitational_acceleration
 
-    θ  = model.formulation.potential_temperature   # specific θˡⁱ, filled by the preceding update_state!
-    qᵛ = CenterField(grid)
     ρᵈ = dynamics_density(dynamics)
-    ρᵈ_old = CenterField(grid)
-    ρ_old = CenterField(grid)
-    copyto!(parent(ρᵈ_old), parent(ρᵈ))
-    copyto!(parent(ρ_old), parent(total_density(dynamics)))
-    launch!(arch, grid, :xyz, _total_weighted_specific_moisture!,
-            qᵛ, model.moisture_density, ρ_old)
+
+    # Reuse diagnostic fields as column-solver scratch. `update_state!` below rebuilds all of them.
+    # Aliasing `π` with `qᵛ` is safe because each column is serial in `k`: the kernel reads qᵛ[k]
+    # before writing π[k], and never reads that qᵛ value again.
+    qᵛ       = specific_humidity(model)
+    π        = qᵛ
+    pressure = dynamics_pressure(dynamics)
+    ρ        = model.temperature
+    ρ_old    = total_density(dynamics)
 
     # Per-column hydrostatic integration → balanced total density.
-    π = CenterField(grid)
-    pressure = CenterField(grid)
-    ρ = CenterField(grid)
     launch!(arch, grid, :xy, _compute_exner_reference_3d!,
             π, pressure, ρ, θ, qᵛ, grid, Nz, p₀, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
     fill_halo_regions!(ρ)
+
+    # The diagnosed θ field is no longer needed after the column solve, so use it to retain the old
+    # dry density while the prognostic dry-density-weighted fields are rescaled below.
+    ρᵈ_old = θ
+    copyto!(parent(ρᵈ_old), parent(ρᵈ))
 
     # Scale total-density-weighted constituents by ρ / ρ_old, set dry density as the residual,
     # then scale dry-density-weighted prognostics by ρᵈ_new / ρᵈ_old.

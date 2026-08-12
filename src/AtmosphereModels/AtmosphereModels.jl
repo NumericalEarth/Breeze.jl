@@ -56,6 +56,7 @@ export
     specific_prognostic_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
+    aerosol_field_names,
     initial_aerosol_number,
     initial_aerosol_number_density,
 

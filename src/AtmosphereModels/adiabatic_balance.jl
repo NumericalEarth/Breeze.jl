@@ -239,11 +239,8 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     # Retain prognostic aerosol as a passive density-weighted tracer. Omitting it while the twin
     # changes density would undo P3's density-aware initialization by changing `ρnᵃ / ρ`.
     # Activation and sedimentation remain stripped with the rest of microphysics.
-    microphysical_names = prognostic_field_names(model.microphysics)
-    aerosol_names = :ρnᵃ ∈ microphysical_names ? (:ρnᵃ,) : ()
-    twin_aerosol_tracers =
-        NamedTuple{aerosol_names}(adiabatic_field(model.microphysical_fields[name])
-                                  for name in aerosol_names)
+    aerosol_names = aerosol_field_names(model.microphysics)
+    twin_aerosol_tracers = NamedTuple{aerosol_names}(adiabatic_field(model.microphysical_fields[name]) for name in aerosol_names)
     twin_user_tracers = NamedTuple{keys(model.tracers)}(adiabatic_field(c) for c in model.tracers)
     twin_tracers = merge(twin_aerosol_tracers, twin_user_tracers)
 

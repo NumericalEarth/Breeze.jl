@@ -422,6 +422,17 @@ prognostic_field_names(::Nothing) = tuple()
 """
 $(TYPEDSIGNATURES)
 
+Return the names of prognostic fields that carry aerosol populations for `microphysics`.
+
+Schemes without prognostic aerosol return an empty tuple by default. Microphysics schemes
+with prognostic aerosol extend this interface so model components can retain or process
+those fields without depending on scheme-specific names.
+"""
+@inline aerosol_field_names(microphysics) = tuple()
+
+"""
+$(TYPEDSIGNATURES)
+
 Return the names of the prognostic microphysical fields that carry condensate *mass*
 (condensate and precipitation densities), excluding number-concentration fields.
 

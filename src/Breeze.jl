@@ -107,6 +107,7 @@ export
     PlanarIceSurface,
 
     # Microphysics
+    aerosol_field_names,
     prognostic_field_names,
     SaturationAdjustment,
     InstantaneousPrecipitation,
