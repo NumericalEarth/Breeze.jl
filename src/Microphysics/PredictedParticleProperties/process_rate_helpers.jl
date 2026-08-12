@@ -491,3 +491,15 @@ end
 @inline function saturation_vapor_pressure_at_freezing(constants, T₀)
     return saturation_vapor_pressure(T₀, constants, PlanarLiquidSurface())
 end
+
+# Saturation vapor mass fraction at the melting point T₀. Breeze's qᵛ is a
+# total-air mass fraction (ρᵛ/ρ), so this must use the same basis:
+# q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ). With this convention the diffusion term
+# ℒ Dᵥ ρ (qᵛ - q_sat0) reduces to the exact vapor-density difference ρᵛ - ρᵛ⁺(T₀).
+# The Fortran uses the dry-air mixing ratio ε e_s0/(P - e_s0) because its vapor Qv
+# is itself a dry-air mixing ratio; mixing the two mass bases would bias the
+# melting and refreezing heat balances, so all three call sites share this.
+@inline function freezing_point_saturation_mass_fraction(constants, T₀, ρ)
+    Rᵛ = typeof(ρ)(vapor_gas_constant(constants))
+    return saturation_vapor_pressure_at_freezing(constants, T₀) / (Rᵛ * T₀ * ρ)
+end

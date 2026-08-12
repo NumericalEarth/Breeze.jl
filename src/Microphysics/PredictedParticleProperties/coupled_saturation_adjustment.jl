@@ -137,6 +137,14 @@ end
     return 2 * FT(π) * ρ * Dᵛ * nⁱ_eff * C_fv
 end
 
+# One species' share of the diffusional-growth budget: its relaxation weight
+# `ε / ε_total` against the total driver, plus the transient approach to
+# `ssat_liquid`, over the psychrometric correction `ξ` for the phase it condenses
+# into. All four species use this; only `ε` and `ξ` differ, so a transposed pair
+# would otherwise be invisible in four near-identical lines.
+@inline growth_share(ε, ξ, A_total, ε_total, ssat_liquid, transient) =
+    (A_total * ε / ε_total + (ssat_liquid - A_total / ε_total) * ε / ε_total * transient) / ξ
+
 """
 $(TYPEDSIGNATURES)
 
@@ -204,14 +212,14 @@ separately.
     external_driver = vapor_tendency - dqᵛ⁺ˡ_dT * temperature_tendency
     A_total = external_driver + bergeron_driver
 
-    qc_raw = (A_total * εᶜˡ / ε_total + (ssat_liquid - A_total / ε_total) * εᶜˡ / ε_total * transient) / ξˡ
-    qr_raw = (A_total * εʳ / ε_total + (ssat_liquid - A_total / ε_total) * εʳ / ε_total * transient) / ξˡ
-    qi_raw = (A_total * εⁱ / ε_total + (ssat_liquid - A_total / ε_total) * εⁱ / ε_total * transient) / ξⁱ +
+    qc_raw = growth_share(εᶜˡ, ξˡ, A_total, ε_total, ssat_liquid, transient)
+    qr_raw = growth_share(εʳ,  ξˡ, A_total, ε_total, ssat_liquid, transient)
+    qi_raw = growth_share(εⁱ,  ξⁱ, A_total, ε_total, ssat_liquid, transient) +
              (qᵛ⁺ˡ - qᵛ⁺ⁱ) * εⁱ / ξⁱ
     # Liquid-on-ice coating uses `ξˡ` (like cloud) since the surface condenses
     # vapor as liquid; no Bergeron contribution because the surface is already
     # at liquid saturation.
-    ql_raw = (A_total * εⁱʷ / ε_total + (ssat_liquid - A_total / ε_total) * εⁱʷ / ε_total * transient) / ξˡ
+    ql_raw = growth_share(εⁱʷ, ξˡ, A_total, ε_total, ssat_liquid, transient)
 
     𝒮ˡ = ssat_liquid / max(qᵛ⁺ˡ, FT(floors.divisor))
     𝒮ⁱ = qᵛ / max(qᵛ⁺ⁱ, FT(floors.divisor)) - 1

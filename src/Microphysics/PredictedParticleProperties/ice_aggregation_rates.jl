@@ -87,7 +87,7 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = z
 
     # PSD-integrated self-collection kernel (E-free) from lookup table.
     AV_kernel = aggregation_kernel(p3.ice.collection.aggregation,
-                                     m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
+                                     m_mean, Fᶠ, Fˡ, ρᶠ, μ)
 
     # Collection kernel with temperature-dependent sticking efficiency
     K_mean = Eᵢᵢ * AV_kernel

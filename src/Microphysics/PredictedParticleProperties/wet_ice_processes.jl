@@ -218,21 +218,12 @@ function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ
 
     ℒᶠᵘˢ = fusion_latent_heat(constants, T)
     ℒⁱ = sublimation_latent_heat(constants, T)
-    Rᵛ = FT(vapor_gas_constant(constants))
 
     Kᵃ = transport.Kᵃ
     Dᵛ = transport.Dᵛ
     ν  = transport.ν
 
-    # Saturation vapor mass fraction at the melting point T₀. Breeze's qᵛ is a
-    # total-air mass fraction (ρᵛ/ρ), so q_sat0 must use the same basis:
-    # q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ). With this convention the diffusion
-    # term ℒⁱ Dᵥ ρ (q_sat0 - qᵛ) reduces to the exact vapor-density difference
-    # ρᵛ⁺(T₀) - ρᵛ. The Fortran uses the dry-air mixing ratio ε e_s0/(P - e_s0)
-    # because its vapor Qv is itself a dry-air mixing ratio; mixing the two mass
-    # bases here would bias the heat balance.
-    e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
-    q_sat0 = e_s0 / (Rᵛ * T₀ * ρ)
+    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
     # Mean ice particle mass
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
@@ -302,21 +293,12 @@ function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, co
 
     ℒᶠᵘˢ = fusion_latent_heat(constants, T)
     ℒⁱ = sublimation_latent_heat(constants, T)
-    Rᵛ = FT(vapor_gas_constant(constants))
 
     Kᵃ = transport.Kᵃ
     Dᵛ = transport.Dᵛ
     ν  = transport.ν
 
-    # Saturation vapor mass fraction at the melting point T₀. Breeze's qᵛ is a
-    # total-air mass fraction (ρᵛ/ρ), so q_sat0 must use the same basis:
-    # q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ). With this convention the diffusion
-    # term ℒⁱ Dᵥ ρ (q_sat0 - qᵛ) reduces to the exact vapor-density difference
-    # ρᵛ⁺(T₀) - ρᵛ. The Fortran uses the dry-air mixing ratio ε e_s0/(P - e_s0)
-    # because its vapor Qv is itself a dry-air mixing ratio; mixing the two mass
-    # bases here would bias the heat balance.
-    e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
-    q_sat0 = e_s0 / (Rᵛ * T₀ * ρ)
+    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
     # Mean ice particle mass
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)

@@ -31,21 +31,33 @@ factor for the exponential PSD.
 # Returns
 - Rate of cloud → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = zero(typeof(qⁱ)))
+@inline cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = zero(typeof(qⁱ))) =
+    # Fortran uses T <= trplpt for below-freezing riming
+    cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
+                               T <= p3.process_rates.freezing_temperature, μ, qʷⁱ)
+
+"""
+$(TYPEDSIGNATURES)
+
+Ice sweep-out of cloud water, gated by `temperature_active`. Below freezing the
+collected water rimes onto the ice; above freezing it is shed as rain. Both use
+the same kernel, so they differ only in the gate and in what the caller does with
+the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`](@ref).
+"""
+@inline function cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
+                                            temperature_active, μ,
+                                            qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
     Eᶜⁱ = prp.cloud_ice_collection_efficiency
-    T₀ = prp.freezing_temperature
 
     qᶜˡ_eff = clamp_positive(qᶜˡ)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff = max(clamp_positive(nⁱ), p3.minimum_number_mixing_ratio)
 
-    # Fortran uses T <= trplpt for below-freezing riming
-    below_freezing = T <= T₀
-    active = below_freezing &
+    active = temperature_active &
              (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
              (qⁱ_total >= p3.minimum_mass_mixing_ratio)
 
@@ -55,7 +67,7 @@ function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷ�
     # PSD-integrated cloud-water collection kernel ⟨A×V⟩ from lookup table
     # (Fortran f1pr04). Computes ∫ V(D) A(D) N'(D) dD with E=1 (geometric kernel).
     AV_per_particle = collection_kernel_per_particle(p3.ice.collection.cloud_collection,
-                                                       m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
+                                                       m_mean, Fᶠ, Fˡ, ρᶠ, μ)
 
     # Air density correction for ice particle fall speed (Heymsfield et al. 2007):
     # ρfaci = (ρ₀_ice / ρ)^0.54, where ρ₀_ice = 60000/(287.15×253.15) ≈ 0.826 kg/m³
@@ -83,36 +95,13 @@ Fortran 1 mm shed drop (`ncshdc = qcshd × 1.923e6`, i.e. m_shed = 1/1.923e6 kg)
 - `(mass_rate, number_rate)`: Cloud → rain mass rate [kg/kg/s] and rain number source [1/kg/s]
 """
 @inline function cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = zero(typeof(qⁱ)))
-    FT = typeof(qᶜˡ)
-    prp = p3.process_rates
-
-    Eᶜⁱ = prp.cloud_ice_collection_efficiency
-    T₀ = prp.freezing_temperature
-
-    qᶜˡ_eff = clamp_positive(qᶜˡ)
-    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    nⁱ_eff = max(clamp_positive(nⁱ), p3.minimum_number_mixing_ratio)
-
     # Fortran uses T > trplpt for above-freezing collection
-    above_freezing = T > T₀
-    active = above_freezing &
-             (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
-             (qⁱ_total >= p3.minimum_mass_mixing_ratio)
-
-    # Same collection kernel as cloud_riming_rate
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
-    AV_per_particle = collection_kernel_per_particle(p3.ice.collection.cloud_collection,
-                                                       m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
-    ρ₀ = p3.ice.fall_speed.reference_air_density
-    rhofaci = ice_air_density_correction(ρ₀, ρ)
-
-    mass_rate = Eᶜⁱ * qᶜˡ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle
+    above_freezing = T > p3.process_rates.freezing_temperature
+    mass_rate = cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
+                                           above_freezing, μ, qʷⁱ)
     # Fortran: ncshdc = qcshd * 1.923e6 (shed as 1mm drops: m = π/6 × 1000 × 0.001³ ≈ 5.2e-7 kg)
-    number_rate = mass_rate / prp.shed_drop_mass
-
-    return (ifelse(active, mass_rate, zero(FT)),
-            ifelse(active, number_rate, zero(FT)))
+    # The gate is already applied to `mass_rate`, so the quotient carries it.
+    return (mass_rate, mass_rate / p3.process_rates.shed_drop_mass)
 end
 
 """
@@ -128,46 +117,12 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 # Returns
 - Rain mass rate collected onto ice [kg/kg/s]
 """
-@inline function rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ)))
-    FT = typeof(qʳ)
-    prp = p3.process_rates
-
-    Eʳⁱ = prp.rain_ice_collection_efficiency
-    T₀ = prp.freezing_temperature
-
-    qʳ_eff = clamp_positive(qʳ)
-    nʳ_eff = max(clamp_positive(nʳ), p3.minimum_number_mixing_ratio)
-    qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    nⁱ_eff = max(clamp_positive(nⁱ), p3.minimum_number_mixing_ratio)
-
-    # Fortran uses T > trplpt for above-freezing collection
-    above_freezing = T > T₀
-    active = above_freezing &
-             (qʳ_eff >= p3.minimum_mass_mixing_ratio) &
-             (qⁱ_total >= p3.minimum_mass_mixing_ratio)
-
-    # Use Table 2 (double-PSD kernel) for above-freezing rain-ice collection,
-    # matching the below-freezing rain_riming_rate path and Fortran P3 convention.
-    m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
-
-    ρ₀ = p3.ice.fall_speed.reference_air_density
-    rhofaci = ice_air_density_correction(ρ₀, ρ)
-
-    # Diagnose rain lambda for Table 2 lookup
-    λ_r = rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
-    nʳ_bounded = rain_number_from_slope(qʳ_eff, λ_r, prp)
-
-    mass_kernel = rain_riming_mass_kernel(rain_ice_collection_table(p3),
-        m_mean, λ_r, nʳ_bounded, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
-
-    # Fortran convention: qrcoll = 10^(f1pr08 + logn0r) × ni × env.
-    # N0r = nr × λr (for μr=0).
-    N0r = nʳ_bounded * λ_r
-    rate = Eʳⁱ * N0r * nⁱ_eff * ρ * rhofaci * mass_kernel
-
-    return ifelse(active, rate, zero(FT))
-end
+@inline rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
+                                  μ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ))) =
+    # Fortran uses T > trplpt for above-freezing collection. Same Table 2 double-PSD
+    # kernel as the below-freezing path, matching the Fortran P3 convention.
+    rain_collection_mass_rate(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
+                              T > p3.process_rates.freezing_temperature, μ, qʷⁱ)
 
 """
 $(TYPEDSIGNATURES)    cloud_riming_number_rate(qᶜˡ, Nᶜ, ρ, riming_rate)
@@ -232,12 +187,27 @@ When ``n_r = 0`` the correction is 1 (no change from the legacy path).
 # Returns
 - Rate of rain → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ)))
+@inline rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
+                         μ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ))) =
+    # Fortran uses T <= trplpt for below-freezing riming
+    rain_collection_mass_rate(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
+                              T <= p3.process_rates.freezing_temperature, μ, qʷⁱ)
+
+"""
+$(TYPEDSIGNATURES)
+
+Ice sweep-out of rain water, gated by `temperature_active`. Below freezing the
+collected rain rimes onto the ice; above freezing it becomes liquid coating. The
+mass counterpart of [`rain_collection_number_rate`](@ref); see
+[`rain_riming_rate`](@ref) and [`rain_warm_collection_rate`](@ref) for the gates.
+"""
+@inline function rain_collection_mass_rate(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
+                                           temperature_active, μ = zero(typeof(qʳ)),
+                                           qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qʳ)
     prp = p3.process_rates
 
     Eʳⁱ = prp.rain_ice_collection_efficiency
-    T₀ = prp.freezing_temperature
 
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = max(clamp_positive(nʳ), p3.minimum_number_mixing_ratio)
@@ -245,9 +215,7 @@ function rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ = zer
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff = max(clamp_positive(nⁱ), p3.minimum_number_mixing_ratio)
 
-    # Fortran uses T <= trplpt for below-freezing riming
-    below_freezing = T <= T₀
-    active = below_freezing &
+    active = temperature_active &
              (qʳ_eff >= p3.minimum_mass_mixing_ratio) &
              (qⁱ_total >= p3.minimum_mass_mixing_ratio)
 

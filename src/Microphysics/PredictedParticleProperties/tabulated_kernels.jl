@@ -97,39 +97,24 @@ Compute the per-particle cloud-water collection kernel ⟨A × V⟩ for riming.
 Returns the PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from the
 `IceCollection.cloud_collection` table (Fortran `f1pr04`).
 """
-@inline function collection_kernel_per_particle(coll::P3Table5D,
-                                                  m_mean, Fᶠ, ρᶠ, prp, p3, μ)
-    FT = typeof(m_mean)
-    return collection_kernel_per_particle(coll, m_mean, Fᶠ, zero(FT), ρᶠ, prp, p3, μ)
-end
-
-@inline function collection_kernel_per_particle(coll::P3Table5D,
-                                                  m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
-    FT = typeof(m_mean)
-    # Per-particle-mass log-guard (see deposition_ventilation); not the bulk qmin.
-    log_m = log10(max(m_mean, FT(DEFAULT_FLOORS.mass_scale)))
-    return coll(log_m, Fᶠ, Fˡ, ρᶠ, μ)
-end
+@inline collection_kernel_per_particle(coll::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μ) =
+    tabulated_ice_integral(coll, m_mean, Fᶠ, Fˡ, ρᶠ, μ)
 
 """
 $(TYPEDSIGNATURES)
 
 Compute aggregation kernel for self-collection using PSD-integrated
 kernel from lookup table.
-"""
-@inline function aggregation_kernel(coll::P3Table5D,
-                                      m_mean, Fᶠ, ρᶠ, prp, p3, μ)
-    FT = typeof(m_mean)
-    return aggregation_kernel(coll, m_mean, Fᶠ, zero(FT), ρᶠ, prp, p3, μ)
-end
 
-@inline function aggregation_kernel(coll::P3Table5D,
-                                      m_mean, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
-    FT = typeof(m_mean)
-    # Per-particle-mass log-guard (see deposition_ventilation); not the bulk qmin.
-    log_m = log10(max(m_mean, FT(DEFAULT_FLOORS.mass_scale)))
-    # Table stores the half-integral (Fortran convention):
-    # (1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂
-    # No E_agg — collection efficiency is applied by the caller.
-    return coll(log_m, Fᶠ, Fˡ, ρᶠ, μ)
-end
+The table stores the half-integral (Fortran convention),
+`(1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂`. No `E_agg` — the collection
+efficiency is applied by the caller.
+"""
+@inline aggregation_kernel(coll::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μ) =
+    tabulated_ice_integral(coll, m_mean, Fᶠ, Fˡ, ρᶠ, μ)
+
+# Evaluate a 5D ice table at a per-particle mass. The log guard is the
+# per-particle one (see `deposition_ventilation`), not the bulk qmin — the tables
+# are indexed by log₁₀ of mass per particle, and they clamp to their own mass axis.
+@inline tabulated_ice_integral(table::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μ) =
+    table(log10(max(m_mean, typeof(m_mean)(DEFAULT_FLOORS.mass_scale))), Fᶠ, Fˡ, ρᶠ, μ)

@@ -847,26 +847,8 @@ end
     cloud_warm_to_ice = ifelse(prp.liquid_fraction_active, cloud_warm_q, zero(FT))
     cloud_warm_to_rain = ifelse(prp.liquid_fraction_active, zero(FT), cloud_warm_q)
 
-    # --- Rain sinks ---
-    # As with cloud above, limit ordinary rain processes against the full rain
-    # reservoir. Homogeneous freezing is diagnosed from the residual later.
-    rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
-                        cloud_warm_to_rain + rain_cond
-    rain_available = max(0, qʳ) + rain_source_total * dt_safety
-    rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
-    f_rain = sink_limiting_factor(rain_sink_total, rain_available, dt_safety)
-    rain_rim      = rain_rim * f_rain
-    rain_rim_n    = rain_rim_n * f_rain
-    rain_frz_q    = rain_frz_q * f_rain
-    rain_frz_n    = rain_frz_n * f_rain
-    rain_warm_q   = rain_warm_q * f_rain
-    rain_warm_n   = rain_warm_n * f_rain
-    wg_rain       = wg_rain * f_rain
-    rain_evap     = rain_evap * f_rain
-    wg_excess_rain = wg_excess_rain * f_rain
-    wg_shed_n = (wg_shed + wg_excess_rain) / prp.shed_drop_mass
-
-    # Sublimation number loss
+    # Sublimation number loss, taken from the unlimited `dep` before any budget
+    # scales it; the loop below then scales `sublim_n` wherever it scales `dep`.
     sublim_mag = clamp_positive(-dep)
     sublim_n = sublim_mag * safe_divide(clamp_positive(nⁱ),
                                         max(clamp_positive(qⁱ), FT(prp.floors.mass_scale)),
@@ -876,68 +858,26 @@ end
     # saturation adjustment (P3CoupledVaporRates). The dry/wet exclusivity is
     # enforced inside that formula via εⁱ / εⁱʷ activation.
 
-    # --- Total-ice (qⁱ + qʷⁱ) sink limiting ---
-    # Matches Fortran's single qitot budget at microphy_p3.f90:4106-4136. The
-    # paired qʷⁱ-only budget below mirrors Fortran's qiliq budget at 4138-4170,
-    # so `shed` / `coat_evap` are deliberately scaled in both stages (`qlshd`
-    # / `qlevp` are sinks of both qitot and qiliq in Fortran). `partial_melt`
-    # is not scaled here because `qimlt` is invisible to qitot in Fortran (it
-    # transfers mass dry → coating without changing the total).
-    total_ice_source_total = max(0, dep) + cloud_rim + rain_rim +
-                             nuc_q + cloud_frz_q + rain_frz_q +
-                             cloud_warm_to_ice + rain_warm_q +
-                             wg_cloud + wg_rain + coat_cond
-    total_ice_available = max(total_ice_mass(qⁱ, qʷⁱ_budget), FT(0)) + total_ice_source_total * dt_safety
-    total_ice_sink_total = complete_melt + clamp_positive(-dep) + shed + coat_evap
-    f_total_ice = sink_limiting_factor(total_ice_sink_total, total_ice_available, dt_safety)
-    complete_melt = complete_melt * f_total_ice
-    melt_n        = melt_n * f_total_ice
-    clipping_dry_mass = clipping_dry_mass * f_total_ice
-    clipping_rime_mass = clipping_rime_mass * f_total_ice
-    clipping_rime_volume = clipping_rime_volume * f_total_ice
-    dep           = ifelse(dep < 0, dep * f_total_ice, dep)
-    sublim_n      = sublim_n * f_total_ice
-    shed          = shed * f_total_ice
-    shed_n        = shed_n * f_total_ice
-    coat_evap     = coat_evap * f_total_ice
-
-    # --- qʷⁱ sinks ---
-    qwi_source_total = partial_melt + cloud_warm_to_ice + rain_warm_q +
-                       wg_cloud + wg_rain + coat_cond
-    qwi_available = max(0, qʷⁱ_budget) + qwi_source_total * dt_safety
-    qwi_sink_total = shed + refrz + coat_evap
-    f_qwi = sink_limiting_factor(qwi_sink_total, qwi_available, dt_safety)
-    shed      = shed * f_qwi
-    shed_n    = shed_n * f_qwi
-    refrz     = refrz * f_qwi
-    coat_evap = coat_evap * f_qwi
-
-    # A whole-particle clip transfers dry mass, coating, and number together. If
-    # competition for coating water imposes an additional limiter, apply that same
-    # factor to the dry-mass and number companions.
-    complete_melt = ifelse(whole_particle_clipping, complete_melt * f_qwi,
-                           complete_melt)
-    melt_n = ifelse(whole_particle_clipping, melt_n * f_qwi, melt_n)
-    clipping_dry_mass = ifelse(whole_particle_clipping,
-                               clipping_dry_mass * f_qwi, clipping_dry_mass)
-    clipping_rime_mass = ifelse(whole_particle_clipping,
-                                clipping_rime_mass * f_qwi, clipping_rime_mass)
-    clipping_rime_volume = ifelse(whole_particle_clipping,
-                                  clipping_rime_volume * f_qwi,
-                                  clipping_rime_volume)
-
     # Rain, dry ice, total ice, and coating exchange mass with one another.
     # A single sequential limiter pass can credit a source that a later donor
     # limiter subsequently reduces. Re-project the four donor budgets a
     # configurable number of times; every projection only reduces rates, so
     # this converges monotonically while remaining allocation-free and GPU-safe.
-    for _ in 1:prp.coupled_sink_limiting_iterations
+    #
+    # Iteration 0 is the first pass, which historically ran the rain / total-ice
+    # / coating budgets before the dry-ice budget joined the cycle. Gating
+    # `f_dry_ice` to 1 there reproduces that exactly — multiplying by one is
+    # exact — while keeping every budget written once, so a new rate cannot be
+    # added to the first pass and forgotten in the re-projections.
+    for iteration in 0:prp.coupled_sink_limiting_iterations
         dry_ice_source_total = max(0, dep) + cloud_rim + rain_rim + refrz +
                                nuc_q + cloud_frz_q + rain_frz_q
         dry_ice_available = max(0, qⁱ) + dry_ice_source_total * dt_safety
         dry_ice_sink_total = partial_melt + complete_melt + clamp_positive(-dep)
-        f_dry_ice = sink_limiting_factor(dry_ice_sink_total, dry_ice_available,
-                                         dt_safety)
+        f_dry_ice = ifelse(iteration > 0,
+                           sink_limiting_factor(dry_ice_sink_total, dry_ice_available,
+                                                dt_safety),
+                           one(FT))
         partial_melt = partial_melt * f_dry_ice
         complete_melt = complete_melt * f_dry_ice
         melt_n = melt_n * f_dry_ice

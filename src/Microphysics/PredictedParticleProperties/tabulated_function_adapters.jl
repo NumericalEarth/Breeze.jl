@@ -32,29 +32,36 @@ end
 @inline (f::TabulatedFunction6D)(x₁, x₂, x₃, x₄, x₅, x₆) =
     evaluate_at(f, prepare_6d(f, x₁, x₂, x₃, x₄, x₅, x₆))
 
-@inline function interpolate_6d(data, ix, iy, iz, iw, iv, iu)
+# 32-corner blend at a fixed sixth (μ) index.
+@inline function interpolate_6d_slice(data, ix, iy, iz, iw, iv, ni)
     i⁻, i⁺, ξ = ix
     j⁻, j⁺, η = iy
     k⁻, k⁺, ζ = iz
     l⁻, l⁺, θ = iw
     m⁻, m⁺, ψ = iv
-    n⁻, n⁺, χ = iu
 
     result = zero(eltype(data))
-    @inbounds for (ni, nw) in ((n⁻, 1 - χ), (n⁺, χ))
-        for (mi, mw) in ((m⁻, 1 - ψ), (m⁺, ψ))
-            for (li, lw) in ((l⁻, 1 - θ), (l⁺, θ))
-                for (ki, kw) in ((k⁻, 1 - ζ), (k⁺, ζ))
-                    for (ji, jw) in ((j⁻, 1 - η), (j⁺, η))
-                        for (ii, iw_) in ((i⁻, 1 - ξ), (i⁺, ξ))
-                            result += iw_ * jw * kw * lw * mw * nw * data[ii, ji, ki, li, mi, ni]
-                        end
+    @inbounds for (mi, mw) in ((m⁻, 1 - ψ), (m⁺, ψ))
+        for (li, lw) in ((l⁻, 1 - θ), (l⁺, θ))
+            for (ki, kw) in ((k⁻, 1 - ζ), (k⁺, ζ))
+                for (ji, jw) in ((j⁻, 1 - η), (j⁺, η))
+                    for (ii, iw_) in ((i⁻, 1 - ξ), (i⁺, ξ))
+                        result += iw_ * jw * kw * lw * mw * data[ii, ji, ki, li, mi, ni]
                     end
                 end
             end
         end
     end
     return result
+end
+
+# Same collapse as `collapse_trailing_axis`, on the 6D tables' μ axis: `n⁻ == n⁺`
+# means one 32-corner pass replaces two.
+@inline function interpolate_6d(data, ix, iy, iz, iw, iv, iu)
+    n⁻, n⁺, χ = iu
+    n⁻ == n⁺ && return interpolate_6d_slice(data, ix, iy, iz, iw, iv, n⁻)
+    return (1 - χ) * interpolate_6d_slice(data, ix, iy, iz, iw, iv, n⁻) +
+                χ  * interpolate_6d_slice(data, ix, iy, iz, iw, iv, n⁺)
 end
 
 #####
@@ -80,8 +87,10 @@ struct RimeDensityIndexedTable5D{T}
     table :: T
 end
 
+# Routed through `prepare_5d`/`evaluate_at` so this path gets `collapse_trailing_axis`;
+# `f.table(...)` would reach Oceananigans' operator, which we cannot extend without piracy.
 @inline function (f::RimeDensityIndexedTable5D)(log_m, Fᶠ, Fˡ, ρᶠ, μ)
-    return f.table(log_m, Fᶠ, Fˡ, rime_density_index(ρᶠ), μ)
+    return evaluate_at(f, prepare_5d(f, log_m, Fᶠ, Fˡ, ρᶠ, μ))
 end
 
 struct RimeDensityIndexedTable6D{T}
@@ -155,8 +164,20 @@ end
     return prepare_5d(f.table, log_m, Fᶠ, Fˡ, rime_density_index(ρᶠ), μ)
 end
 
+# Collapse the trailing axis when its bracket is degenerate: `m⁻ == m⁺` means both
+# slices read the same data, so `(1-ψ) A + ψ B` is the identity and one slice will
+# do. The 2-moment tables carry a single μ point, so this fires at every lookup; a
+# 3-moment μ axis takes the blended path unchanged. The branch is on table geometry,
+# not cell data, so it is uniform across a launch — and `ifelse` would evaluate both
+# slices, which is the cost being removed.
+@inline function collapse_trailing_axis(data, ix, iy, iz, iw, iv)
+    m⁻, m⁺, ψ = iv
+    m⁻ == m⁺ && return _interpolate(data, ix, iy, iz, iw, m⁻)
+    return _interpolate(data, ix, iy, iz, iw, iv)
+end
+
 @inline evaluate_at(f::TabulatedFunction5D, p::Prepared5DInterpolation) =
-    _interpolate(f.table, p.ix, p.iy, p.iz, p.iw, p.iv)
+    collapse_trailing_axis(f.table, p.ix, p.iy, p.iz, p.iw, p.iv)
 
 @inline evaluate_at(f::RimeDensityIndexedTable5D, p::Prepared5DInterpolation) =
     evaluate_at(f.table, p)

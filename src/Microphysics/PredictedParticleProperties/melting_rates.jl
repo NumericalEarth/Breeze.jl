@@ -44,8 +44,17 @@ where:
 # Returns
 - Rate of ice → rain conversion [kg/kg/s]
 """
-function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
-                                   constants, transport, μ)
+@inline ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+                         constants, transport, μ) =
+    ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+                                     constants, transport, μ)[1]
+
+# Returns `(melt_rate, small, large)`. The small/large split of the ventilation
+# integral sets the rain-vs-coating partition in `ice_melting_rates`, and comes
+# free with the lookup the melt rate already needs — recomputing it there would
+# repeat one `prepare_5d` and four `evaluate_at` at the same coordinate.
+@inline function ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+                                                  constants, transport, μ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -59,24 +68,15 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     is_melting = ΔT > 0
 
     # Thermodynamic constants: ℒᶠᵘˢ and ℒˡ are T-dependent when constants
-    # are provided (H1), and Rᵛ follows the same runtime thermodynamic source.
+    # are provided (H1).
     ℒᶠᵘˢ = fusion_latent_heat(constants, T)
     ℒˡ = vaporization_latent_heat(constants, T)
-    Rᵛ = FT(vapor_gas_constant(constants))
     # T,P-dependent transport properties (pre-computed or computed on demand)
     Kᵃ = transport.Kᵃ       # Thermal conductivity of air [W/m/K]
     Dᵛ = transport.Dᵛ       # Diffusivity of water vapor [m²/s]
     ν  = transport.ν        # Kinematic viscosity [m²/s]
 
-    # Saturation vapor mass fraction at the melting point T₀. Breeze's qᵛ is a
-    # total-air mass fraction (ρᵛ/ρ), so q_sat0 must use the same basis:
-    # q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ). With this convention the diffusion
-    # term ℒˡ Dᵥ ρ (qᵛ - q_sat0) reduces to the exact vapor-density difference
-    # ρᵛ - ρᵛ⁺(T₀). The Fortran uses the dry-air mixing ratio ε e_s0/(P - e_s0)
-    # because its vapor Qv is itself a dry-air mixing ratio; mixing the two mass
-    # bases here would bias the melting heat balance.
-    e_s0 = saturation_vapor_pressure_at_freezing(constants, T₀)
-    q_sat0 = e_s0 / (Rᵛ * T₀ * ρ)
+    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
 
     # Liquid fraction for Fl-blended ventilation.
     # Fl = qʷⁱ / (qⁱ + qʷⁱ): fraction of ice-particle mass that is liquid.
@@ -103,10 +103,11 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     log_m = log10(max(m_mean, FT(prp.floors.mass_scale)))
     sc_corr = ventilation_sc_correction(ν, Dᵛ, ρ_correction)
     prep = prepare_5d(dep.small_ice_ventilation_constant, log_m, Fᶠ, Fl, ρᶠ, μ)
-    C_fv = (evaluate_at(dep.small_ice_ventilation_constant, prep) +
-            sc_corr * evaluate_at(dep.small_ice_ventilation_reynolds, prep)) +
-           (evaluate_at(dep.large_ice_ventilation_constant, prep) +
-            sc_corr * evaluate_at(dep.large_ice_ventilation_reynolds, prep))
+    small = evaluate_at(dep.small_ice_ventilation_constant, prep) +
+            sc_corr * evaluate_at(dep.small_ice_ventilation_reynolds, prep)
+    large = evaluate_at(dep.large_ice_ventilation_constant, prep) +
+            sc_corr * evaluate_at(dep.large_ice_ventilation_reynolds, prep)
+    C_fv = small + large
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: Kᵃ × (T - T₀)
@@ -137,7 +138,7 @@ function ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρ�
     max_melt = qⁱ_eff / p3.process_rates.sink_limiting_timescale
     melt_rate = min(melt_rate, max_melt)
 
-    return ifelse(is_melting, melt_rate, zero(FT))
+    return (ifelse(is_melting, melt_rate, zero(FT)), small, large)
 end
 
 """
@@ -175,29 +176,13 @@ Requires tabulated small/large ice ventilation integrals.
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
-    # Get total melting rate; pass qʷⁱ for Fl-blended ventilation.
-    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, constants, transport, μ)
+    # Total melting rate, plus the small/large ventilation split it already had to
+    # look up (Fortran f1pr24-f1pr27). Passing qʷⁱ gives the Fl-blended ventilation.
+    total_melt, small, large =
+        ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+                                         constants, transport, μ)
 
-    # PSD-resolved melting partitioning using tabulated small/large ice
-    # ventilation integrals (Fortran f1pr24-f1pr27).
-    qⁱ_eff = clamp_positive(qⁱ)
-    nⁱ_eff = clamp_positive(nⁱ)
-    qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(prp.floors.mass_scale))
-    # Table lookup uses total mass per particle (Fortran qitot/nitot).
-    # With no particles there is nothing to melt, so the fallback mean mass only
-    # has to sit inside the table's mass axis.
-    m_mean = safe_divide(qⁱ_total, nⁱ_eff, FT(prp.floors.mean_particle_mass_fallback))
-    Fl = clamp_positive(qʷⁱ) / qⁱ_total
-    ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
-    ν = transport.ν
-    Dᵛ = transport.Dᵛ
-
-    rain_fraction = psd_melting_rain_fraction(
-        p3.ice.deposition.small_ice_ventilation_constant,
-        p3.ice.deposition.small_ice_ventilation_reynolds,
-        p3.ice.deposition.large_ice_ventilation_constant,
-        p3.ice.deposition.large_ice_ventilation_reynolds,
-        m_mean, Fl, Fᶠ, ρᶠ, prp, ν, Dᵛ, ρ_correction, p3, μ)
+    rain_fraction = psd_melting_rain_fraction(small, large)
 
     complete = total_melt * rain_fraction
     partial  = total_melt * (1 - rain_fraction)
@@ -205,22 +190,12 @@ Requires tabulated small/large ice ventilation integrals.
     return (partial_melting = partial, complete_melting = complete)
 end
 
-# Tabulated path — use PSD-integrated small/large ice ventilation integrals
-# to compute the fraction of melting that goes to rain (small particles, D ≤ D_crit).
+# Fraction of melting that goes to rain (small particles, D ≤ D_crit), from the
+# PSD-integrated small/large ice ventilation integrals computed by
+# `ice_melting_rate_and_ventilation`.
 # Fortran: qrmlt uses f1pr24/f1pr25, qiliqcol uses f1pr26/f1pr27.
-@inline function psd_melting_rain_fraction(sc::P3Table5D, sr::P3Table5D,
-                                            lc::P3Table5D, lr::P3Table5D,
-                                            m_mean, Fl, Fᶠ, ρᶠ, prp, ν, Dᵛ, ρ_correction, p3, μ)
-    FT = typeof(m_mean)
-    # Per-particle-mass log-guard (see ice_melting_rate); not the bulk qmin.
-    log_m = log10(max(m_mean, FT(prp.floors.mass_scale)))
-    sc_corr = ventilation_sc_correction(ν, Dᵛ, ρ_correction)
-
-    # All 4 tables share Table-1 axes by construction, so prepare interpolation
-    # indices once and reuse across tables (mirrors `ice_melting_rate` above).
-    prep = prepare_5d(sc, log_m, Fᶠ, Fl, ρᶠ, μ)
-    small = evaluate_at(sc, prep) + sc_corr * evaluate_at(sr, prep)
-    large = evaluate_at(lc, prep) + sc_corr * evaluate_at(lr, prep)
+@inline function psd_melting_rain_fraction(small, large)
+    FT = typeof(small)
     total = small + large
 
     # With no tabulated ventilation on either side of the split there is nothing to
