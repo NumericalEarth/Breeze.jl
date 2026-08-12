@@ -471,9 +471,9 @@ the two from drifting apart.
 """
 $(TYPEDSIGNATURES)
 
-Compute the ``q``-weighted centroid ``ℓᵗ = Cᵗ ∫ q z \\, dz / ∫ q \\, dz`` for every column, or `Inf`
-where the mixing length carries no `TurbulenceLengthScale` branch — `Inf` being the value that drops
-out of every blend.
+Compute the ``q``-weighted centroid ``ℓᵗ = Cᵗ ∫ q z \\, dz / ∫ q \\, dz`` for every column. Launched
+only when the mixing length carries a `TurbulenceLengthScale` branch; otherwise ``ℓᵗ`` keeps the
+`Inf` it was constructed with, which drops out of every blend.
 
 The integrand is ``q - qᵐⁱⁿ`` rather than ``q``. With ``e`` floored at a small positive value the
 free atmosphere contributes to both integrals, and the ``z`` weighting amplifies that contribution
@@ -493,28 +493,24 @@ with the turbulence. Subtracting the floor removes the quiescent contribution ex
 
     FT = eltype(grid)
 
-    if isnothing(Cᵗ)
-        @inbounds ℓᵗ[i, j, 1] = FT(Inf)
-    else
-        ∫qz = zero(grid)
-        ∫q  = zero(grid)
+    ∫qz = zero(grid)
+    ∫q  = zero(grid)
 
-        for k in 1:size(grid, 3)
-            eᵢ = @inbounds e[i, j, k]
-            q  = sqrt(max(eᵐⁱⁿ, eᵢ))
-            Δz = Δzᶜᶜᶜ(i, j, k, grid)
-            z  = height_above_bottomᶜᶜᶜ(i, j, k, grid)
+    for k in 1:size(grid, 3)
+        eᵢ = @inbounds e[i, j, k]
+        q  = sqrt(max(eᵐⁱⁿ, eᵢ))
+        Δz = Δzᶜᶜᶜ(i, j, k, grid)
+        z  = height_above_bottomᶜᶜᶜ(i, j, k, grid)
 
-            active = !inactive_cell(i, j, k, grid)
-            w = (q - qᵐⁱⁿ) * Δz * active
+        active = !inactive_cell(i, j, k, grid)
+        w = (q - qᵐⁱⁿ) * Δz * active
 
-            ∫qz += w * z
-            ∫q  += w
-        end
-
-        # A quiescent column has ∫q = 0; the remaining branches then set ℓ on their own, which every
-        # blend achieves if ℓᵗ is large rather than zero.
-        ℓ = Cᵗ * ∫qz / ∫q
-        @inbounds ℓᵗ[i, j, 1] = ifelse(∫q > 0, FT(ℓ), FT(Inf))
+        ∫qz += w * z
+        ∫q  += w
     end
+
+    # A quiescent column has ∫q = 0; the remaining branches then set ℓ on their own, which every
+    # blend achieves if ℓᵗ is large rather than zero.
+    ℓ = Cᵗ * ∫qz / ∫q
+    @inbounds ℓᵗ[i, j, 1] = ifelse(∫q > 0, FT(ℓ), FT(Inf))
 end

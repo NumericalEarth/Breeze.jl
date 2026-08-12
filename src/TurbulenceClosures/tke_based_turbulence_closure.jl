@@ -290,7 +290,11 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     ℓ  = ZFaceField(grid, boundary_conditions=bcs.ℓ)
     ℓᶜ = CenterField(grid)
     e  = CenterField(grid)
+    # `Inf` drops out of every blend, which is the right value for a mixing length carrying no
+    # `TurbulenceLengthScale` branch. That case never launches the column integral, so this is the
+    # value that stands.
     ℓᵗ = Field{Center, Center, Nothing}(grid)
+    fill!(ℓᵗ, Inf)
     u★² = Field{Center, Center, Nothing}(grid)
     Jᵇ = Field{Center, Center, Nothing}(grid)
 
@@ -482,9 +486,13 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
             closure_fields.e, model.tracers[TKE_NAME], minimum_tke(closure))
     fill_halo_regions!(closure_fields.e)
 
-    # ℓᵗ is a column integral and must be current before the pointwise pass reads it.
-    launch!(arch, grid, :xy, _compute_turbulence_length_scale!,
-            closure_fields.ℓᵗ, grid, closure, closure_fields.e)
+    # ℓᵗ is a column integral and must be current before the pointwise pass reads it. With no
+    # `TurbulenceLengthScale` branch there is nothing to integrate and `ℓᵗ` keeps its constructed
+    # `Inf`, so the launch is skipped rather than the kernel returning `Inf` for every column.
+    if has_turbulence_length_scale(closure)
+        launch!(arch, grid, :xy, _compute_turbulence_length_scale!,
+                closure_fields.ℓᵗ, grid, closure, closure_fields.e)
+    end
 
     # ℓ may depend on the surface buoyancy flux, so it must be current before the pointwise pass.
     launch!(arch, grid, :xy, _compute_surface_buoyancy_flux!,
@@ -498,6 +506,15 @@ end
 
 @inline minimum_tke(closure::TKEBasedTurbulenceClosure) = closure.eᵐⁱⁿ
 @inline minimum_tke(closure::TKEClosureArray) = @allowscalar closure[1].eᵐⁱⁿ
+
+# Whether the mixing length carries a `TurbulenceLengthScale`, answered on the host so the column
+# integral can be skipped outright. The branch tuple's *type* is what decides, and it is uniform
+# across a `TKEClosureArray`, so its first element answers for the whole array — as with
+# `minimum_tke` above.
+@inline has_turbulence_length_scale(closure::TKEBasedTurbulenceClosure) =
+    !isnothing(turbulence_length_coefficient(closure.mixing_length))
+@inline has_turbulence_length_scale(closure::TKEClosureArray) =
+    @allowscalar !isnothing(turbulence_length_coefficient(closure[1].mixing_length))
 
 #####
 ##### The TKE equation

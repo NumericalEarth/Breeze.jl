@@ -477,18 +477,25 @@ end
         # centroid 250
         @test isapprox(ℓᵗ_shallow, TurbulenceLengthScale{FT}().Cᵗ * 250; rtol = 5e-2)
 
-        # A mixing length carrying no TurbulenceLengthScale branch gets ℓᵗ = Inf, which drops out
-        # of every blend rather than collapsing ℓ to zero.
+        # A mixing length carrying no TurbulenceLengthScale branch never launches the integral, and
+        # ℓᵗ keeps the Inf it was constructed with — which drops out of every blend rather than
+        # collapsing ℓ to zero.
         without = TKEBasedTurbulenceClosure(mixing_length =
             BlendedMixingLength(GeometricLengthScale(), BuoyancyLengthScale()))
         @test isnothing(turbulence_length_coefficient(without.mixing_length))
+        @test !Breeze.TurbulenceClosures.has_turbulence_length_scale(without)
+
+        g = RectilinearGrid(default_arch; size=32, z=(0, 2000), topology=(Flat, Flat, Bounded))
+        model = AtmosphereModel(g; closure = without)
+        time_step!(model, 1)
+        @test all(isinf, Array(interior(model.closure_fields.ℓᵗ)))
+        @test all(isfinite, Array(interior(model.closure_fields.ℓ)))
 
         # κ must be findable from either surface branch, since the example builds its drag law
         # from it; a mixing length with neither reports `nothing` rather than a wrong number.
         @test von_karman_constant(BlendedMixingLength(GeometricLengthScale())) == 0.4
         @test von_karman_constant(BlendedMixingLength(SurfaceLayerLengthScale())) == 0.4
         @test isnothing(von_karman_constant(BlendedMixingLength(BuoyancyLengthScale())))
-        @test isinf(turbulence_length_scale(FT(2000), 100; closure = without))
     end
 end
 
