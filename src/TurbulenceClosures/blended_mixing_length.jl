@@ -372,8 +372,8 @@ error for ``ζ > 1/Cᶜ``, so its argument is clipped to the side of ``ζ = 0`` 
     u★³ = u★² * sqrt(u★²)
     ζ = -ℓ.κ * z * Jᵇ / max(u★³, eps(typeof(ℓᵍ)))
 
-    ζ⁺ = max(ζ, zero(ζ))
-    ζ⁻ = clamp(ζ, ℓ.ζᵐⁱⁿ, zero(ζ))
+    ζ⁺ = max(ζ, 0)
+    ζ⁻ = clamp(ζ, ℓ.ζᵐⁱⁿ, 0)
     weakly_stable = ℓᵍ / (1 + ℓ.Cˢ * ζ⁺)
     strongly_stable = ℓᵍ / ℓ.Cⁿ
     unstable = ℓᵍ * (1 - ℓ.Cᶜ * ζ⁻)^ℓ.nᶜ
