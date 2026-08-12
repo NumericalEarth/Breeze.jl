@@ -380,7 +380,7 @@ This matches the finite-volume staggering used in Oceananigans:
                         ┌─────────────────────────────────────────────────┐
                         │  layer 1:   T[1], p_lay[1] = p[1]               │ ← from model
                         └─────────────────────────────────────────────────┘
-    z_lev[1]    ━━━━━━━   level 1 (surface, z=0):  p_lev, t_lev           │ ← from halo
+    z_lev[1]    ━━━━━━━   level 1 (surface, bottom face):  p_lev, t_lev   │ ← from halo
                         ══════════════════════════════════════════════════
                                         GROUND (t_sfc)
 ```
@@ -396,6 +396,11 @@ atmospheric data. It does not interpolate from layers to levels internally becau
    (carried by the anelastic and 1D-column Exner reference pressures) reproduces the prescribed
    surface pressure exactly; a default `NoFlux` halo mirrors the interior (`p[0] = p[1]`), which
    collapses the level value onto the adjacent layer value.
+
+   That prescribed value is `surface_pressure`, the pressure at the column's bottom face, and not
+   the `base_pressure` datum at z = 0. The two coincide only on a domain whose bottom is the
+   ground; on a raised or terrain-following domain they differ by the hydrostatic reduction from
+   the datum to that face, which is the level 1 pressure radiation must see.
 
    TODO: extrapolate to the boundary faces explicitly rather than inheriting the halo. Wherever
    the halo mirrors, `p_lev` equals `p_lay` at that end, so the layer spans only half a cell in
@@ -424,7 +429,7 @@ the compressible diagnosed pressure. Never the dynamics' pressure-gradient refer
 
 # RRTMGP array layout
 - Layer arrays `(Nz, Nc)`: values at cell centers, layer 1 at bottom
-- Level arrays `(Nz+1, Nc)`: values at cell faces, level 1 at surface (z=0)
+- Level arrays `(Nz+1, Nc)`: values at cell faces, level 1 at the surface (the bottom face)
 """
 function update_rrtmgp_state!(rrtmgp_state::GrayAtmosphericState, model, surface_temperature)
     grid = model.grid

@@ -81,7 +81,7 @@ end
 
     coriolis = SphericalCoriolis()
     dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                    surface_pressure = 100000,
+                                    base_pressure = 100000,
                                     reference_potential_temperature = 300)
 
     model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())

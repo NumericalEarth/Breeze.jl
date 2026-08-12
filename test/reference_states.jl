@@ -10,7 +10,11 @@ using Breeze.Thermodynamics:
     compute_hydrostatic_reference!,
     ExnerReferenceState,
     dry_air_gas_constant,
+    hydrostatic_density,
     hydrostatic_pressure,
+    moist_hydrostatic_pressure,
+    surface_pressure_value,
+    surface_temperature_value,
     vapor_gas_constant,
     saturation_specific_humidity,
     PlanarLiquidSurface
@@ -24,6 +28,7 @@ using Breeze.AtmosphereModels:
 
 using Oceananigans
 using Oceananigans.Fields: ZeroField
+using Oceananigans.Operators: ℑzᵃᵃᶠ
 using GPUArraysCore: @allowscalar
 using Test
 
@@ -71,7 +76,7 @@ using Test
     #####
 
     @testset "surface_density" begin
-        ref = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+        ref = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
         ρ₀ = surface_density(ref)
         # Surface density should be close to p₀ / (Rᵈ T₀) where T₀ ≈ θ₀ Π₀
         # For θ₀=300 and p₀=101325, Π₀ ≈ 1, so T₀ ≈ 300 K
@@ -91,7 +96,7 @@ using Test
     @testset "compute_reference_state! dry isothermal" begin
         T₀ = FT(250)
         p₀ = FT(101325)
-        ref = ReferenceState(grid, constants; surface_pressure=p₀, vapor_mass_fraction=0)
+        ref = ReferenceState(grid, constants; base_pressure=p₀, vapor_mass_fraction=0)
 
         compute_reference_state!(ref, T₀, FT(0), constants)
 
@@ -126,7 +131,7 @@ using Test
         p₀ = FT(101325)
         Rᵐ = (1 - qᵛ) * Rᵈ + qᵛ * Rᵛ
 
-        ref = ReferenceState(grid, constants; surface_pressure=p₀, vapor_mass_fraction=0)
+        ref = ReferenceState(grid, constants; base_pressure=p₀, vapor_mass_fraction=0)
         compute_reference_state!(ref, T₀, qᵛ, constants)
 
         Nz = grid.Nz
@@ -159,7 +164,7 @@ using Test
         p₀ = FT(101325)
 
         ref = ReferenceState(grid, constants;
-                             surface_pressure=p₀,
+                             base_pressure=p₀,
                              vapor_mass_fraction=0,
                              liquid_mass_fraction=0,
                              ice_mass_fraction=0)
@@ -195,7 +200,7 @@ using Test
         T_profile(z) = max(FT(210), FT(300) - FT(0.0065) * z)
         q_profile(z) = FT(0.015) * exp(-z / 3000)
 
-        ref = ReferenceState(grid, constants; surface_pressure=p₀, vapor_mass_fraction=0)
+        ref = ReferenceState(grid, constants; base_pressure=p₀, vapor_mass_fraction=0)
         compute_reference_state!(ref, T_profile, q_profile, constants)
 
         # Temperature should follow the profile
@@ -228,7 +233,7 @@ using Test
 
     @testset "compute_reference_state! overwrites previous state" begin
         p₀ = FT(101325)
-        ref = ReferenceState(grid, constants; surface_pressure=p₀, vapor_mass_fraction=0)
+        ref = ReferenceState(grid, constants; base_pressure=p₀, vapor_mass_fraction=0)
 
         # First adjustment: warm atmosphere
         compute_reference_state!(ref, FT(300), FT(0), constants)
@@ -250,7 +255,7 @@ using Test
         N² = FT(1e-4)
         θ_func(z) = FT(300) * exp(N² * z / g)
 
-        ref = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ_func)
+        ref = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θ_func)
 
         # Pressure should decrease monotonically
         for k in 2:grid.Nz
@@ -534,10 +539,10 @@ end
         θ_new  = 305
         p₀     = 101325
 
-        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, surface_pressure=p₀)
+        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, base_pressure=p₀)
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        reference_potential_temperature=θ_init, surface_pressure=p₀)
+                                        reference_potential_temperature=θ_init, base_pressure=p₀)
         model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
         ref = model.dynamics.reference_state
         @test ref isa ExnerReferenceState
@@ -554,10 +559,10 @@ end
         θ_new = FT(305)
         p₀    = FT(101325)
 
-        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, surface_pressure=p₀)
+        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, base_pressure=p₀)
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        reference_potential_temperature=θ_init, surface_pressure=p₀)
+                                        reference_potential_temperature=θ_init, base_pressure=p₀)
         model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
         ref = model.dynamics.reference_state
         @test ref isa ExnerReferenceState
@@ -576,10 +581,10 @@ end
         θ_new  = 305
         p₀     = 101325
 
-        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, surface_pressure=p₀)
+        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ_new, base_pressure=p₀)
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        reference_potential_temperature=θ_init, surface_pressure=p₀)
+                                        reference_potential_temperature=θ_init, base_pressure=p₀)
         model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
         set!(model; ρ=1, θˡⁱ=θ_new, qᵗ=0, compute_reference_state=true)
@@ -655,13 +660,13 @@ end
 
         truth_dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                               reference_potential_temperature=θ_new,
-                                              surface_pressure=p₀)
+                                              base_pressure=p₀)
         truth_model = AtmosphereModel(terrain_grid; thermodynamic_constants=constants,
                                       dynamics=truth_dynamics)
 
         dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                         reference_potential_temperature=θ_init,
-                                        surface_pressure=p₀)
+                                        base_pressure=p₀)
         model = AtmosphereModel(terrain_grid; thermodynamic_constants=constants,
                                 dynamics)
 
@@ -729,10 +734,10 @@ end
         p₀ = 101325
         qᵗ = FT(0.02)
 
-        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ, surface_pressure=p₀)
+        ref_truth = ExnerReferenceState(grid, constants; potential_temperature=θ, base_pressure=p₀)
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
-                                        reference_potential_temperature=θ, surface_pressure=p₀)
+                                        reference_potential_temperature=θ, base_pressure=p₀)
         model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
         set!(model; θˡⁱ=θ, qᵗ=0, ρ=HydrostaticallyBalancedDensity(surface_pressure=p₀))
@@ -744,5 +749,205 @@ end
              enforce_mass_conservation=false)
 
         @test all(q -> q ≈ qᵗ, Array(interior(specific_humidity(model))))
+    end
+
+    #####
+    ##### `base_pressure` is the datum at z = 0, on every reference path
+    #####
+    #
+    # A domain whose bottom face sits above z = 0 separates the two readings of
+    # `base_pressure`: the datum at z = 0, and the pressure at the domain bottom. Only the
+    # former is a property of the reference atmosphere, so a reference built on a raised domain
+    # must pass through `base_pressure` at z = 0, not at its own bottom face — otherwise the
+    # same scalar names a different atmosphere on every domain, and the isentropic and isothermal
+    # constructors of the same type disagree with each other.
+
+    @testset "Reference states anchor at the z = 0 datum on a raised domain" begin
+        p₀  = 101325
+        pˢᵗ = 100000
+        θ₀  = 288
+        z_bottom = 2000
+        Nz_raised = 20
+        Rᵈ = dry_air_gas_constant(constants)
+        g = constants.gravitational_acceleration
+
+        raised_grid = RectilinearGrid(default_arch; size=(4, 4, Nz_raised),
+                                      x=(0, 100), y=(0, 100), z=(z_bottom, 6000),
+                                      topology=(Periodic, Periodic, Bounded))
+        z₁ = z_bottom + (6000 - z_bottom) / Nz_raised / 2  # first cell center height
+
+        # The anelastic reference uses the same datum semantics: both its interior profile and
+        # bottom boundary are reduced from z = 0 to their absolute physical heights.
+        anelastic = ReferenceState(raised_grid, constants; base_pressure=p₀,
+                                   potential_temperature=θ₀, standard_pressure=pˢᵗ)
+        pˢ_expected = hydrostatic_pressure(FT(z_bottom), FT(p₀), FT(θ₀), FT(pˢᵗ), constants)
+        ρˢ_expected = hydrostatic_density(FT(z_bottom), FT(p₀), FT(θ₀), FT(pˢᵗ), constants)
+        p₁_expected = hydrostatic_pressure(FT(z₁), FT(p₀), FT(θ₀), FT(pˢᵗ), constants)
+        @test surface_pressure_value(anelastic) ≈ pˢ_expected rtol=1e-5
+        @test @allowscalar(interior(anelastic.pressure)[1, 1, 1]) ≈ p₁_expected rtol=1e-4
+        @test @allowscalar(ℑzᵃᵃᶠ(1, 1, 1, raised_grid, anelastic.pressure)) ≈ pˢ_expected rtol=1e-5
+        @test surface_density(anelastic) ≈ ρˢ_expected rtol=1e-5
+
+        anelastic_dynamics = AnelasticDynamics(anelastic)
+        Tˢ_expected = pˢ_expected / (Rᵈ * ρˢ_expected)
+        @test @allowscalar(Breeze.AtmosphereModels.surface_pressure(anelastic_dynamics)[1, 1, 1]) ≈ pˢ_expected
+        @test Breeze.AtmosphereModels.default_drag_surface_temperature(anelastic_dynamics,
+                                                                       raised_grid,
+                                                                       constants) ≈ Tˢ_expected
+
+        # Recomputing an isothermal mean state must update the stored ground pressure and the
+        # pressure/density bottom boundary values along with the interior column.
+        T_reset = FT(250)
+        recomputed = ReferenceState(raised_grid, constants; base_pressure=p₀,
+                                    potential_temperature=θ₀, vapor_mass_fraction=0)
+        compute_reference_state!(recomputed, T_reset, FT(0), constants)
+        pˢ_reset = FT(p₀) * exp(-g * FT(z_bottom) / (Rᵈ * T_reset))
+        @test surface_pressure_value(recomputed) ≈ pˢ_reset rtol=1e-5
+        @test @allowscalar(ℑzᵃᵃᶠ(1, 1, 1, raised_grid, recomputed.pressure)) ≈ pˢ_reset rtol=1e-5
+
+        # The reported ground temperature must be the *actual* temperature, not the virtual one. A
+        # reset rebuilds the reference density with the mixture gas constant, so recovering the
+        # temperature as pˢ / (Rᵈ ρˢ) would return Tᵛ = (Rᵐ / Rᵈ) T, high by ~3.6 K at qᵛ = 0.02.
+        qᵛ_moist = FT(0.02)
+        moist = ReferenceState(raised_grid, constants; base_pressure=p₀,
+                               potential_temperature=θ₀, vapor_mass_fraction=0)
+        compute_reference_state!(moist, T_reset, qᵛ_moist, constants)
+        Rᵛ = vapor_gas_constant(constants)
+        Rᵐ = (1 - qᵛ_moist) * Rᵈ + qᵛ_moist * Rᵛ
+        moist_dynamics = AnelasticDynamics(moist)
+        @test surface_temperature_value(moist) ≈ T_reset rtol=1e-6
+        @test Breeze.AtmosphereModels.default_drag_surface_temperature(moist_dynamics, raised_grid,
+                                                                      constants) ≈ T_reset rtol=1e-6
+        # The virtual temperature the old inversion would have returned is measurably different.
+        @test surface_pressure_value(moist) / (Rᵈ * surface_density(moist)) ≈ (Rᵐ / Rᵈ) * T_reset rtol=1e-6
+
+        # Isentropic: the closed-form adiabatic profile from the datum, evaluated at the
+        # *absolute* height of the first cell center.
+        isentropic = ExnerReferenceState(raised_grid, constants; base_pressure=p₀,
+                                         potential_temperature=θ₀, standard_pressure=pˢᵗ)
+        p_expected = hydrostatic_pressure(z₁, FT(p₀), FT(θ₀), FT(pˢᵗ), constants)
+        @test @allowscalar(interior(isentropic.pressure)[1, 1, 1]) ≈ p_expected rtol=1e-4
+
+        # The datum is retained as-is, and the derived bottom-face pressure is the datum reduced
+        # to the domain bottom — a ~20 kPa reduction over 2 km that the old bottom-face reading
+        # dropped entirely.
+        @test isentropic.base_pressure == FT(p₀)
+        @test surface_pressure_value(isentropic) ≈ hydrostatic_pressure(FT(z_bottom), FT(p₀), FT(θ₀),
+                                                                      FT(pˢᵗ), constants) rtol=1e-5
+        @test surface_pressure_value(isentropic) < FT(p₀) - 10000
+
+        # A horizontally varying reference has a different hydrostatic reduction in each column,
+        # even though every column shares the same z = 0 pressure datum and bottom height.
+        horizontal_grid = RectilinearGrid(default_arch; size=(2, 2, Nz_raised),
+                                          x=(0, 100), y=(0, 100), z=(z_bottom, 6000),
+                                          topology=(Periodic, Periodic, Bounded))
+        Δx = FT(50)
+        Δy = FT(50)
+        θ³ᵈ(x, y, z) = FT(280) + FT(0.25) * x + FT(0.05) * y + FT(0.001) * z
+        three_dimensional = ExnerReferenceState(horizontal_grid, constants; base_pressure=p₀,
+                                                potential_temperature=θ³ᵈ,
+                                                standard_pressure=pˢᵗ)
+        pˢ³ᵈ = Array(interior(three_dimensional.surface_pressure))[:, :, 1]
+        pˢ³ᵈ_expected = [hydrostatic_pressure(FT(z_bottom), FT(p₀),
+                                                          z -> θ³ᵈ((i - FT(0.5)) * Δx,
+                                                                    (j - FT(0.5)) * Δy, z),
+                                                          FT(pˢᵗ), constants)
+                            for i in 1:2, j in 1:2]
+        @test pˢ³ᵈ ≈ pˢ³ᵈ_expected rtol=10sqrt(eps(FT))
+        @test maximum(pˢ³ᵈ) - minimum(pˢ³ᵈ) > FT(500)
+
+        # Horizontal moisture variation alone must also select the per-column reference path.
+        qᵛ³ᵈ(x, y, z) = FT(0.004) + FT(2e-5) * x + FT(5e-6) * y * exp(-z / FT(3000))
+        moist_three_dimensional = ExnerReferenceState(horizontal_grid, constants; base_pressure=p₀,
+                                                      potential_temperature=FT(300),
+                                                      vapor_mass_fraction=qᵛ³ᵈ,
+                                                      standard_pressure=pˢᵗ)
+        @test size(moist_three_dimensional.pressure)[1:2] == (2, 2)
+        pˢ_moist_3d = Array(interior(moist_three_dimensional.surface_pressure))[:, :, 1]
+        for (i, j) in ((1, 1), (2, 2))
+            x = (i - FT(0.5)) * Δx
+            y = (j - FT(0.5)) * Δy
+            qᵛ_column(z) = qᵛ³ᵈ(x, y, z)
+            expected = moist_hydrostatic_pressure(FT(z_bottom), FT(p₀), FT(300), qᵛ_column,
+                                                    FT(pˢᵗ), constants)
+            @test pˢ_moist_3d[i, j] ≈ expected rtol=10sqrt(eps(FT))
+        end
+
+        # The density boundary value must use qᵛ at the bottom face, not at the first center.
+        qᵛ_profile(z) = FT(0.025) * exp(-z / FT(3000))
+        moist_column = ExnerReferenceState(raised_grid, constants; base_pressure=p₀,
+                                           potential_temperature=FT(300),
+                                           vapor_mass_fraction=qᵛ_profile,
+                                           standard_pressure=pˢᵗ)
+        pˢ_moist = surface_pressure_value(moist_column)
+        qᵛ_surface = qᵛ_profile(FT(z_bottom))
+        Rᵐ_surface = (1 - qᵛ_surface) * Rᵈ + qᵛ_surface * Rᵛ
+        cᵖᵐ_surface = (1 - qᵛ_surface) * constants.dry_air.heat_capacity +
+                      qᵛ_surface * constants.vapor.heat_capacity
+        κᵐ_surface = Rᵐ_surface / cᵖᵐ_surface
+        Πˢ_moist = (pˢ_moist / FT(pˢᵗ))^κᵐ_surface
+        ρˢ_moist_expected = pˢ_moist / (Rᵐ_surface * FT(300) * Πˢ_moist)
+        ρˢ_moist = @allowscalar moist_column.surface_density[1, 1, 1]
+        @test ρˢ_moist ≈ ρˢ_moist_expected rtol=50eps(FT)
+
+        # Isothermal: the analytic isothermal profile from the same datum. The two constructors
+        # of `ExnerReferenceState` must agree on where `base_pressure` lives, which they do
+        # only if both reduce from z = 0.
+        T₀ = 250
+        isothermal = ExnerReferenceState(raised_grid, constants; base_pressure=p₀,
+                                         reference_temperature=T₀, standard_pressure=pˢᵗ)
+        @test @allowscalar(interior(isothermal.pressure)[1, 1, 1]) ≈
+              p₀ * exp(-g * z₁ / (Rᵈ * T₀)) rtol=1e-5
+        @test surface_pressure_value(isothermal) ≈ p₀ * exp(-g * z_bottom / (Rᵈ * T₀)) rtol=1e-5
+
+        # On the usual domain starting at z = 0 the datum *is* the bottom-face pressure, so
+        # nothing about the common case moves.
+        grounded = ExnerReferenceState(grid, constants; base_pressure=p₀,
+                                       potential_temperature=θ₀, standard_pressure=pˢᵗ)
+        @test surface_pressure_value(grounded) == FT(p₀)
+
+        # Resetting the mean state changes the profile used to reduce the fixed z = 0 datum.
+        # The bottom-face anchor and its boundary value must therefore be rewritten as well.
+        θ_reset = 300
+        dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                        base_pressure=p₀,
+                                        reference_potential_temperature=θ₀,
+                                        standard_pressure=pˢᵗ)
+        model = AtmosphereModel(raised_grid; dynamics, thermodynamic_constants=constants)
+        set!(model; θ=θ_reset, qᵗ=0, ρ=1,
+             compute_reference_state=true, enforce_mass_conservation=false)
+
+        ref = model.dynamics.reference_state
+        pˢ_expected = hydrostatic_pressure(FT(z_bottom), FT(p₀), FT(θ_reset), FT(pˢᵗ), constants)
+        p₁_expected = hydrostatic_pressure(FT(z₁), FT(p₀), FT(θ_reset), FT(pˢᵗ), constants)
+        @test surface_pressure_value(ref) ≈ pˢ_expected rtol=2e-5
+        @test @allowscalar(interior(ref.pressure)[1, 1, 1]) ≈ p₁_expected rtol=2e-4
+        @test @allowscalar(ℑzᵃᵃᶠ(1, 1, 1, raised_grid, ref.pressure)) ≈ pˢ_expected rtol=2e-5
+    end
+
+    #####
+    ##### The old `surface_pressure` keyword is rejected, not silently reinterpreted
+    #####
+    #
+    # `surface_pressure` still exists, but it now names the pressure at a column's bottom face
+    # rather than the z = 0 datum, so a script that passed the old keyword must be told rather than
+    # quietly given a different atmosphere.
+
+    @testset "The renamed surface_pressure keyword is rejected" begin
+        @test_throws ArgumentError ReferenceState(grid, constants; surface_pressure=101325)
+        @test_throws ArgumentError ExnerReferenceState(grid, constants; surface_pressure=101325)
+        @test_throws ArgumentError CompressibleDynamics(; surface_pressure=101325)
+        @test_throws ArgumentError MoistAirBuoyancy(grid; surface_pressure=101325)
+
+        # The message names the replacement rather than just listing accepted keywords.
+        message = try
+            ReferenceState(grid, constants; surface_pressure=101325)
+        catch e
+            e.msg
+        end
+        @test occursin("base_pressure", message)
+
+        # `base_pressure` itself is unaffected.
+        @test surface_pressure_value(ReferenceState(grid, constants; base_pressure=101325)) ≈ 101325
     end
 end

@@ -11,7 +11,7 @@ using Test
 
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
 
     @testset "Default advection schemes" begin

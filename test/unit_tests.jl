@@ -26,7 +26,7 @@ using Breeze.AtmosphereModels: dynamics_density
     constants = ThermodynamicConstants()
 
     @testset "Constructor with ReferenceState" begin
-        reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+        reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
         dynamics = AnelasticDynamics(reference_state)
 
         @test dynamics isa AnelasticDynamics
@@ -55,7 +55,7 @@ using Breeze.AtmosphereModels: dynamics_density
     end
 
     @testset "Pressure utilities" begin
-        reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+        reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
         dynamics_stub = AnelasticDynamics(reference_state)
         dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
 
@@ -90,7 +90,7 @@ using Breeze.Thermodynamics: pressure_balanced_density
         @test dynamics isa CompressibleDynamics
         @test dynamics.dry_density === nothing  # Not materialized yet
         @test dynamics.standard_pressure == 1e5
-        @test dynamics.surface_pressure == 101325
+        @test dynamics.base_pressure == 101325
     end
 
     @testset "materialize_dynamics" begin
@@ -107,14 +107,14 @@ using Breeze.Thermodynamics: pressure_balanced_density
     end
 
     @testset "materialize_dynamics seeds pressure" begin
-        surface_pressure = FT(100000)
+        base_pressure = FT(100000)
         constants = ThermodynamicConstants(FT)
 
-        dynamics_stub = CompressibleDynamics(; surface_pressure, reference_state=nothing)
+        dynamics_stub = CompressibleDynamics(; base_pressure, reference_state=nothing)
         dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
-        @test all(Array(interior(dynamics.pressure)) .== surface_pressure)
+        @test all(Array(interior(dynamics.pressure)) .== base_pressure)
 
-        automatic_stub = CompressibleDynamics(; surface_pressure)
+        automatic_stub = CompressibleDynamics(; base_pressure)
         automatic_dynamics = materialize_dynamics(automatic_stub, grid, NamedTuple(), constants)
         pressure = Array(interior(automatic_dynamics.pressure))
         reference_pressure = Array(interior(automatic_dynamics.reference_state.pressure))
@@ -144,13 +144,13 @@ end
                            z = (0, 1000))
 
     constants = ThermodynamicConstants(FT)
-    surface_pressure = FT(100000)
+    base_pressure = FT(100000)
     standard_pressure = FT(100000)
     θ_reference(z) = FT(300) + FT(0.01) * z
     qᵛ_reference(z) = FT(0.012) * exp(-z / FT(1000))
 
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=2);
-                                    surface_pressure,
+                                    base_pressure,
                                     standard_pressure,
                                     reference_potential_temperature = θ_reference,
                                     reference_vapor_mass_fraction = qᵛ_reference)

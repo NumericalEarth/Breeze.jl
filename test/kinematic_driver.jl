@@ -9,6 +9,7 @@ using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, NormalFlowBoundaryCondition
 using Oceananigans.Fields: ZeroField
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
+using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Test
 
 @testset "KinematicDriver [$(FT)]" for FT in test_float_types()
@@ -43,6 +44,28 @@ using Test
         set!(ρ, FT(1))
         model = AtmosphereModel(grid; dynamics=PrescribedDynamics(ρ))
         @test haskey(Oceananigans.prognostic_fields(model), :ρ)
+    end
+
+    @testset "Hydrostatic pressure uses the z = 0 datum on a raised domain" begin
+        z_bottom = FT(2000)
+        raised_grid = RectilinearGrid(default_arch; size=(4, 4, 4),
+                                      x=(0, 100), y=(0, 100), z=(z_bottom, FT(3000)))
+        ρ_value = FT(1.2)
+        p₀ = FT(101325)
+        ρ = CenterField(raised_grid)
+        set!(ρ, ρ_value)
+
+        dynamics = PrescribedDynamics(PrescribedDensity(ρ); base_pressure=p₀)
+        model = AtmosphereModel(raised_grid; dynamics, thermodynamic_constants=ThermodynamicConstants(FT))
+        g = model.thermodynamic_constants.gravitational_acceleration
+        Δz = FT(250)
+        pˢ_expected = p₀ - ρ_value * g * z_bottom
+        p¹_expected = pˢ_expected - ρ_value * g * Δz / 2
+
+        @test @allowscalar(model.dynamics.surface_pressure[1, 1, 1]) ≈ pˢ_expected
+        @test @allowscalar(interior(model.dynamics.pressure)[1, 1, 1]) ≈ p¹_expected
+        @test @allowscalar(ℑzᵃᵃᶠ(1, 1, 1, raised_grid, model.dynamics.pressure)) ≈ pˢ_expected
+        @test @allowscalar(Breeze.AtmosphereModels.surface_pressure(model.dynamics)[1, 1, 1]) ≈ pˢ_expected
     end
 
     @testset "KinematicModel with regular fields" begin

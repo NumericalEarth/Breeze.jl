@@ -5,11 +5,10 @@
 struct PotentialTemperatureFlux end
 struct StaticEnergyFlux end
 
-struct BulkSensibleHeatFluxFunction{C, G, T, P, SP, TC, F, FV, FS}
+struct BulkSensibleHeatFluxFunction{C, G, T, SP, TC, F, FV, FS}
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
-    surface_pressure :: P
     standard_pressure :: SP
     thermodynamic_constants :: TC
     formulation :: F
@@ -32,7 +31,7 @@ thermodynamic variable appropriate to the formulation:
 
 - For `LiquidIcePotentialTemperatureFormulation`: ``Δϕ = θ - θ₀``, where
   ``θ₀ = T₀ / Π₀`` and ``Π₀ = (p₀ / pˢᵗ)^{Rᵈ / cᵖᵈ}`` (potential temperature flux)
-- For `StaticEnergyFormulation`: ``Δϕ = e - cᵖᵈ T₀`` (static energy flux)
+- For `StaticEnergyFormulation`: ``Δϕ = e - (cᵖᵐ T₀ + g z₀)`` (static energy flux)
 
 Here ``p₀`` is the actual surface pressure, while ``pˢᵗ`` is the fixed reference pressure
 used to define potential temperature.
@@ -53,14 +52,13 @@ thermodynamic formulation.
 """
 function BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
     return BulkSensibleHeatFluxFunction(coefficient, gustiness, surface_temperature,
-                                        nothing, nothing, nothing, nothing, filtered_velocities, nothing)
+                                        nothing, nothing, nothing, filtered_velocities, nothing)
 end
 
 Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
     BulkSensibleHeatFluxFunction(Adapt.adapt(to, bf.coefficient),
                                  Adapt.adapt(to, bf.gustiness),
                                  Adapt.adapt(to, bf.surface_temperature),
-                                 Adapt.adapt(to, bf.surface_pressure),
                                  Adapt.adapt(to, bf.standard_pressure),
                                  Adapt.adapt(to, bf.thermodynamic_constants),
                                  bf.formulation,
@@ -73,15 +71,14 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 
 # Compute the thermodynamic variable difference at the surface.
 # Default to potential temperature flux when formulation is not set (ρθ BCs passed directly).
-@inline bulk_sensible_heat_difference(i, j, grid, ::Nothing, bf, T₀, fields) =
-    bulk_sensible_heat_difference(i, j, grid, PotentialTemperatureFlux(), bf, T₀, fields, nothing)
-@inline bulk_sensible_heat_difference(i, j, grid, ::Nothing, bf, T₀, fields, fs) =
-    bulk_sensible_heat_difference(i, j, grid, PotentialTemperatureFlux(), bf, T₀, fields, fs)
+@inline bulk_sensible_heat_difference(i, j, grid, ::Nothing, bf, T₀, fields, p₀) =
+    bulk_sensible_heat_difference(i, j, grid, PotentialTemperatureFlux(), bf, T₀, fields, p₀, nothing)
+@inline bulk_sensible_heat_difference(i, j, grid, ::Nothing, bf, T₀, fields, p₀, fs) =
+    bulk_sensible_heat_difference(i, j, grid, PotentialTemperatureFlux(), bf, T₀, fields, p₀, fs)
 
 # No filtered scalar: read from 3D fields (current behavior)
-@inline function bulk_sensible_heat_difference(i, j, grid, ::PotentialTemperatureFlux, bf, T₀, fields, ::Nothing)
+@inline function bulk_sensible_heat_difference(i, j, grid, ::PotentialTemperatureFlux, bf, T₀, fields, p₀, ::Nothing)
     θ = @inbounds fields.θ[i, j, 1]
-    p₀ = bf.surface_pressure
     pˢᵗ = bf.standard_pressure
     constants = bf.thermodynamic_constants
     θ₀ = potential_temperature_from_temperature(T₀, p₀, pˢᵗ, constants)
@@ -89,51 +86,52 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 end
 
 # With filtered scalar: read from the 2D filtered field
-@inline function bulk_sensible_heat_difference(i, j, grid, ::PotentialTemperatureFlux, bf, T₀, fields, fs::FilteredSurfaceScalar)
+@inline function bulk_sensible_heat_difference(i, j, grid, ::PotentialTemperatureFlux, bf, T₀, fields, p₀, fs::FilteredSurfaceScalar)
     θ = @inbounds fs.field[i, j, 1]
-    p₀ = bf.surface_pressure
     pˢᵗ = bf.standard_pressure
     constants = bf.thermodynamic_constants
     θ₀ = potential_temperature_from_temperature(T₀, p₀, pˢᵗ, constants)
     return θ - θ₀
 end
 
-@inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, bf, T₀, fields, ::Nothing)
+@inline function surface_static_energy(i, j, grid, bf, T₀, fields)
     constants = bf.thermodynamic_constants
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
     qᵛ = @inbounds fields.qᵛ[i, j, 1]
     cᵖᵐ = (1 - qᵛ) * cᵖᵈ + qᵛ * cᵖᵛ  # no condensate at the surface
-    e₀ = cᵖᵐ * T₀
+    z₀ = znode(i, j, 1, grid, Center(), Center(), Face())
+    g = constants.gravitational_acceleration
+    return cᵖᵐ * T₀ + g * z₀
+end
+
+@inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, bf, T₀, fields, p₀, ::Nothing)
+    e₀ = surface_static_energy(i, j, grid, bf, T₀, fields)
     e = @inbounds fields.e[i, j, 1]
     return e - e₀
 end
 
-@inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, bf, T₀, fields, fs::FilteredSurfaceScalar)
-    constants = bf.thermodynamic_constants
-    cᵖᵈ = constants.dry_air.heat_capacity
-    cᵖᵛ = constants.vapor.heat_capacity
-    qᵛ = @inbounds fields.qᵛ[i, j, 1]
-    cᵖᵐ = (1 - qᵛ) * cᵖᵈ + qᵛ * cᵖᵛ  # no condensate at the surface
-    e₀ = cᵖᵐ * T₀
+@inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, bf, T₀, fields, p₀, fs::FilteredSurfaceScalar)
+    e₀ = surface_static_energy(i, j, grid, bf, T₀, fields)
     e = @inbounds fs.field[i, j, 1]
     return e - e₀
 end
 
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
+                                      grid::AbstractGrid, clock, model_fields, dynamics_fields)
+    fields = surface_layer_state(model_fields, dynamics_fields)
     T₀ = surface_value(i, j, bf.surface_temperature)
 
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields, bf.filtered_velocities)
     Ũ = sqrt(U² + bf.gustiness^2)
 
     constants = bf.thermodynamic_constants
-    p₀ = bf.surface_pressure
+    p₀ = surface_air_pressure(i, j, grid, fields, constants)
     ρ₀ = surface_density(p₀, T₀, constants)
 
-    Cᵀ = bulk_coefficient(i, j, grid, bf.coefficient, fields, T₀, bf.filtered_velocities)
+    Cᵀ = bulk_coefficient(i, j, grid, bf.coefficient, fields, T₀, bf.filtered_velocities, p₀)
 
-    Δϕ = bulk_sensible_heat_difference(i, j, grid, bf.formulation, bf, T₀, fields, bf.filtered_scalar)
+    Δϕ = bulk_sensible_heat_difference(i, j, grid, bf.formulation, bf, T₀, fields, p₀, bf.filtered_scalar)
     return - ρ₀ * Cᵀ * Ũ * Δϕ
 end
 
@@ -143,11 +141,10 @@ const BulkSensibleHeatFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkSe
 ##### BulkVaporFluxFunction for moisture fluxes
 #####
 
-struct BulkVaporFluxFunction{C, G, T, F, TC, S, FV, FS}
+struct BulkVaporFluxFunction{C, G, T, TC, S, FV, FS}
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
-    surface_pressure :: F
     thermodynamic_constants :: TC
     surface :: S
     filtered_velocities :: FV  # Nothing or FilteredSurfaceVelocities
@@ -180,14 +177,13 @@ specific humidity, and ``qᵛ₀`` is the saturation specific humidity at the su
 """
 function BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
     return BulkVaporFluxFunction(coefficient, gustiness, surface_temperature,
-                                  nothing, nothing, nothing, filtered_velocities, nothing)
+                                  nothing, nothing, filtered_velocities, nothing)
 end
 
 Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
     BulkVaporFluxFunction(Adapt.adapt(to, bf.coefficient),
                           Adapt.adapt(to, bf.gustiness),
                           Adapt.adapt(to, bf.surface_temperature),
-                          Adapt.adapt(to, bf.surface_pressure),
                           Adapt.adapt(to, bf.thermodynamic_constants),
                           Adapt.adapt(to, bf.surface),
                           Adapt.adapt(to, bf.filtered_velocities),
@@ -204,11 +200,12 @@ end
 
 # getbc for BulkVaporFluxFunction
 @inline function OceananigansBC.getbc(bf::BulkVaporFluxFunction, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
+                                      grid::AbstractGrid, clock, model_fields, dynamics_fields)
+    fields = surface_layer_state(model_fields, dynamics_fields)
     constants = bf.thermodynamic_constants
     surface = bf.surface
     T₀ = surface_value(i, j, bf.surface_temperature)
-    p₀ = bf.surface_pressure
+    p₀ = surface_air_pressure(i, j, grid, fields, constants)
     ρ₀ = surface_density(p₀, T₀, constants)
     qᵛ₀ = saturation_specific_humidity(T₀, ρ₀, constants, surface)
 
@@ -217,7 +214,7 @@ end
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields, bf.filtered_velocities)
     Ũ = sqrt(U² + bf.gustiness^2)
 
-    Cᵛ = bulk_coefficient(i, j, grid, bf.coefficient, fields, T₀, bf.filtered_velocities)
+    Cᵛ = bulk_coefficient(i, j, grid, bf.coefficient, fields, T₀, bf.filtered_velocities, p₀)
 
     return - ρ₀ * Cᵛ * Ũ * Δq
 end

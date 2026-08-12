@@ -13,6 +13,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
     PlanarLiquidSurface,
     with_moisture, mixture_heat_capacity, density,
+    reject_renamed_surface_pressure,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
@@ -131,7 +132,7 @@ Lagrangian parcel dynamics for [`AtmosphereModel`](@ref).
 - `timestepper`: SSP RK3 timestepper with tendencies
 - `density`: environmental density field [kg/m³]
 - `pressure`: environmental pressure field [Pa]
-- `surface_pressure`: surface pressure [Pa]
+- `base_pressure`: pressure of the reference atmosphere at ``z = 0`` [Pa]
 - `standard_pressure`: standard pressure for potential temperature [Pa]
 """
 struct ParcelDynamics{S, TS, D, P, U, FT}
@@ -140,7 +141,7 @@ struct ParcelDynamics{S, TS, D, P, U, FT}
     density :: D
     pressure :: P
     vertical_velocity_formulation :: U
-    surface_pressure :: FT
+    base_pressure :: FT
     standard_pressure :: FT
 end
 
@@ -154,8 +155,10 @@ constructing the `AtmosphereModel`.
 """
 function ParcelDynamics(FT::DataType=Oceananigans.defaults.FloatType;
                         vertical_velocity_formulation = PrescribedVerticalVelocity(),
-                        surface_pressure = 101325,
-                        standard_pressure = 1e5)
+                        base_pressure = 101325,
+                        standard_pressure = 1e5,
+                        surface_pressure = nothing)
+    reject_renamed_surface_pressure(surface_pressure)
     U = typeof(vertical_velocity_formulation)
     return ParcelDynamics{Nothing, Nothing, Nothing, Nothing, U, FT}(
         nothing,
@@ -163,7 +166,7 @@ function ParcelDynamics(FT::DataType=Oceananigans.defaults.FloatType;
         nothing,
         nothing,
         vertical_velocity_formulation,
-        convert(FT, surface_pressure),
+        convert(FT, base_pressure),
         convert(FT, standard_pressure)
     )
 end
@@ -178,7 +181,7 @@ function Base.show(io::IO, d::ParcelDynamics)
     println(io, "├── vertical_velocity_formulation: ", summary(d.vertical_velocity_formulation))
     println(io, "├── density: ", isnothing(d.density) ? "unset" : summary(d.density))
     println(io, "├── pressure: ", isnothing(d.pressure) ? "unset" : summary(d.pressure))
-    println(io, "├── surface_pressure: ", d.surface_pressure)
+    println(io, "├── base_pressure: ", d.base_pressure)
     print(io, "└── standard_pressure: ", d.standard_pressure)
 end
 
@@ -216,7 +219,7 @@ AtmosphereModels.dynamics_pressure_solver(::ParcelDynamics, grid) = nothing
 AtmosphereModels.dynamics_pressure(d::ParcelDynamics) = d.pressure
 AtmosphereModels.pressure_anomaly(::ParcelDynamics) = ZeroField()
 AtmosphereModels.total_pressure(d::ParcelDynamics) = d.pressure
-AtmosphereModels.surface_pressure(d::ParcelDynamics) = d.surface_pressure
+AtmosphereModels.base_pressure(d::ParcelDynamics) = d.base_pressure
 AtmosphereModels.standard_pressure(d::ParcelDynamics) = d.standard_pressure
 
 #####
@@ -225,7 +228,7 @@ AtmosphereModels.standard_pressure(d::ParcelDynamics) = d.standard_pressure
 
 function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, constants, microphysics)
     FT = eltype(grid)
-    p₀ = convert(FT, d.surface_pressure)
+    p₀ = convert(FT, d.base_pressure)
     pˢᵗ = convert(FT, d.standard_pressure)
     g = constants.gravitational_acceleration
 
@@ -301,7 +304,7 @@ Adapt.adapt_structure(to, d::ParcelDynamics) =
                    adapt(to, d.density),
                    adapt(to, d.pressure),
                    d.vertical_velocity_formulation,
-                   d.surface_pressure,
+                   d.base_pressure,
                    d.standard_pressure)
 
 Oceananigans.Architectures.on_architecture(to, d::ParcelDynamics) =
@@ -310,7 +313,7 @@ Oceananigans.Architectures.on_architecture(to, d::ParcelDynamics) =
                    on_architecture(to, d.density),
                    on_architecture(to, d.pressure),
                    d.vertical_velocity_formulation,
-                   d.surface_pressure,
+                   d.base_pressure,
                    d.standard_pressure)
 
 #####

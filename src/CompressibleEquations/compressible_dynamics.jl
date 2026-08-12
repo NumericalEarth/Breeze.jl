@@ -21,7 +21,9 @@ Fields
 - `total_density`: Diagnosed total air density ρ = ρᵈ + Σρˣ (used for thermodynamics, scalar advection, EOS, buoyancy)
 - `pressure`: Diagnostic pressure field p = ρ Rᵐ T
 - `standard_pressure`: Reference pressure pˢᵗ for potential temperature (default 10⁵ Pa)
-- `surface_pressure`: Mean pressure at the bottom of the atmosphere p₀
+- `base_pressure`: Mean pressure of the reference atmosphere at ``z = 0`` (p₀). The
+  pressure at the ground is [`surface_pressure`](@ref AtmosphereModels.surface_pressure), which
+  the reference state derives from it
 - `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref) or [`ExplicitTimeStepping`](@ref))
 - `reference_state`: The single fixed hydrostatically-balanced reference state for base-state
   pressure/buoyancy correction (perturbation-form PGF), or `nothing` when disabled. An
@@ -47,7 +49,7 @@ struct CompressibleDynamics{TD, D, DT, P, FT, RS, TM, CV, CM}
     total_density :: DT                        # ρ = ρᵈ + Σρˣ (diagnosed; thermo/advection/EOS/buoyancy)
     pressure :: P                              # p = ρ R^m T (diagnostic)
     standard_pressure :: FT                    # pˢᵗ (reference pressure for potential temperature)
-    surface_pressure :: FT                     # p₀ (mean pressure at the bottom of the atmosphere)
+    base_pressure :: FT                     # p₀ (reference-atmosphere pressure at z = 0)
     reference_state :: RS                      # single grid-polymorphic ExnerReferenceState (1D flat / 3D terrain) or Nothing
     terrain_metrics :: TM                      # TerrainMetrics for terrain-following coordinates (or Nothing) — the "is terrain?" signal
     contravariant_vertical_velocity :: CV      # w̃ diagnostic field (or Nothing)
@@ -78,7 +80,9 @@ Keyword Arguments
 =================
 
 - `standard_pressure`: Reference pressure for potential temperature (default: 10⁵ Pa)
-- `surface_pressure`: Mean surface pressure (default: 101325.0 Pa)
+- `base_pressure`: Mean pressure of the reference atmosphere at ``z = 0``
+  (default: 101325.0 Pa). A datum, not the pressure at the ground: over terrain, or on a domain
+  whose bottom is raised, the two differ by ``O(ρgh)``
 - `reference_potential_temperature`: Potential temperature for building a fixed
   hydrostatically-balanced reference state used in base-state subtraction. Can be a constant `θ₀`
   or a function `θ(z)`. Default: `nothing`, which uses the automatic `θᵣ = 288` K profile when
@@ -113,7 +117,7 @@ Keyword Arguments
 """
 function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               standard_pressure = 1e5,
-                              surface_pressure = 101325.0,
+                              base_pressure = 101325.0,
                               reference_potential_temperature = nothing,
                               reference_temperature = nothing,
                               reference_vapor_mass_fraction = nothing,
@@ -121,7 +125,10 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               terrain_metrics = nothing,
                               reference_state = :auto,
                               temperature_tolerance = nothing,
-                              temperature_maxiter = nothing) where TD
+                              temperature_maxiter = nothing,
+                              surface_pressure = nothing) where TD
+
+    reject_renamed_surface_pressure(surface_pressure)
 
     if temperature_tolerance !== nothing || temperature_maxiter !== nothing
         throw(ArgumentError("The `temperature_tolerance` and `temperature_maxiter` keyword arguments \
@@ -135,9 +142,9 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     reference_state === :auto || reference_state === nothing ||
         throw(ArgumentError("`reference_state` must be `:auto` or `nothing`; received $(repr(reference_state))."))
 
-    FT = float(promote_type(typeof(standard_pressure), typeof(surface_pressure)))
+    FT = float(promote_type(typeof(standard_pressure), typeof(base_pressure)))
     pˢᵗ = convert(FT, standard_pressure)
-    p₀ = convert(FT, surface_pressure)
+    p₀ = convert(FT, base_pressure)
     # An explicit reference profile (θ₀, T₀, or a moist NamedTuple). `nothing` means none was given.
     # If reference_temperature or reference_vapor_mass_fraction is present, wrap in a NamedTuple to
     # distinguish from a bare θ₀ spec.
@@ -182,7 +189,7 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.total_density),
                          adapt(to, dynamics.pressure),
                          dynamics.standard_pressure,
-                         dynamics.surface_pressure,
+                         dynamics.base_pressure,
                          adapt(to, dynamics.reference_state),
                          adapt(to, dynamics.terrain_metrics),
                          adapt(to, dynamics.contravariant_vertical_velocity),
@@ -233,7 +240,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
 
     FT = eltype(grid)
     standard_pressure = convert(FT, dynamics.standard_pressure)
-    surface_pressure = convert(FT, dynamics.surface_pressure)
+    base_pressure = convert(FT, dynamics.base_pressure)
 
     # The reference-spec slot, set by the constructor:
     #   `nothing`           → reference explicitly disabled,
@@ -268,10 +275,10 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         nothing
     elseif auto_reference
         build_reference_state(grid, terrain_metrics, FT(288),
-                              surface_pressure, standard_pressure, thermodynamic_constants)
+                              base_pressure, standard_pressure, thermodynamic_constants)
     else
         build_reference_state(grid, terrain_metrics, ref_spec,
-                              surface_pressure, standard_pressure, thermodynamic_constants)
+                              base_pressure, standard_pressure, thermodynamic_constants)
     end
 
     # Contravariant transport fields exist on terrain grids regardless of the reference state.
@@ -290,11 +297,11 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     if reference_state isa ExnerReferenceState
         seed_pressure!(pressure, grid, reference_state.pressure)
     else
-        seed_pressure!(pressure, grid, surface_pressure)
+        seed_pressure!(pressure, grid, base_pressure)
     end
 
     return CompressibleDynamics(dynamics.time_discretization, density, total_density, pressure,
-                                standard_pressure, surface_pressure, reference_state,
+                                standard_pressure, base_pressure, reference_state,
                                 terrain_metrics,
                                 contravariant_vertical_velocity,
                                 contravariant_vertical_momentum)
@@ -318,8 +325,8 @@ end
 # Explicit-profile reference on a height-coordinate grid: a 1D-column `ExnerReferenceState`
 # (or 3D when the profile depends on the horizontal coordinates). The terrain-following method is
 # defined in `terrain_compressible_physics.jl`.
-build_reference_state(grid, ::Nothing, ref_spec, surface_pressure, standard_pressure, constants) =
-    ExnerReferenceState(grid, constants; surface_pressure, standard_pressure, exner_kwargs(ref_spec)...)
+build_reference_state(grid, ::Nothing, ref_spec, base_pressure, standard_pressure, constants) =
+    ExnerReferenceState(grid, constants; base_pressure, standard_pressure, exner_kwargs(ref_spec)...)
 
 function seed_pressure!(pressure, grid, pressure_reference)
     arch = grid.architecture
@@ -398,7 +405,7 @@ with_time_discretization(dynamics::CompressibleDynamics, time_discretization) =
                          dynamics.total_density,
                          dynamics.pressure,
                          dynamics.standard_pressure,
-                         dynamics.surface_pressure,
+                         dynamics.base_pressure,
                          dynamics.reference_state,
                          dynamics.terrain_metrics,
                          dynamics.contravariant_vertical_velocity,
@@ -468,7 +475,23 @@ $(TYPEDSIGNATURES)
 Return a standard surface pressure for boundary condition regularization.
 For compressible dynamics, uses the standard atmospheric pressure (101325 Pa).
 """
-AtmosphereModels.surface_pressure(dynamics::CompressibleDynamics) = dynamics.surface_pressure
+AtmosphereModels.base_pressure(dynamics::CompressibleDynamics) = dynamics.base_pressure
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the reference pressure at the bottom face of each column, as a 2D field. Requires a
+materialized reference state: with `reference_state = nothing` there is no reference atmosphere
+whose ground pressure could be reported.
+"""
+AtmosphereModels.surface_pressure(dynamics::CompressibleDynamics) =
+    compressible_surface_pressure(dynamics.reference_state)
+
+compressible_surface_pressure(reference_state::ExnerReferenceState) = reference_state.surface_pressure
+
+compressible_surface_pressure(reference_state) =
+    throw(ArgumentError("CompressibleDynamics with reference_state=$(summary(reference_state)) carries \
+                         no materialized reference-state surface pressure"))
 
 """
 $(TYPEDSIGNATURES)
@@ -482,40 +505,11 @@ AtmosphereModels.dynamics_reference_state(dynamics::CompressibleDynamics) = dyna
 """
 $(TYPEDSIGNATURES)
 
-Return a reference state suitable for boundary-condition diagnostics.
-
-Boundary conditions are materialized before `materialize_dynamics` runs, so the
-stub `CompressibleDynamics.reference_state` field still holds the reference *spec*
-rather than an `ExnerReferenceState`. This method builds explicit and automatic
-references on demand using the same grid-dependent logic as `materialize_dynamics`,
-so boundary conditions that require a reference profile can be materialized before
-the dynamics. When the reference is disabled (`nothing`) or the dynamics has already
-been materialized, the existing value is returned.
-"""
-function AtmosphereModels.boundary_conditions_reference_state(dynamics::CompressibleDynamics, grid, thermodynamic_constants)
-    ref_spec = dynamics.reference_state
-    ref_spec === nothing && return nothing
-    ref_spec isa ExnerReferenceState && return ref_spec
-
-    standard_pressure = dynamics.standard_pressure
-    surface_pressure = dynamics.surface_pressure
-    terrain_metrics = materialize_terrain_metrics(dynamics, grid)
-    reference_profile = ref_spec isa AutoReference ? eltype(grid)(288) : ref_spec
-
-    return build_reference_state(grid, terrain_metrics, reference_profile,
-                                 surface_pressure, standard_pressure, thermodynamic_constants)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
 `BulkDrag` under `CompressibleDynamics` requires the user to supply
 `surface_temperature` explicitly. Unlike `AnelasticDynamics`, compressible
 dynamics does not carry a reference profile from which a surface temperature
-can be unambiguously derived. A clean default would require either coupling
-to a surface model or diagnosing the surface state from the prognostic fields
-(which would make ρ₀ grid-dependent and break MO consistency at the surface);
-both are out of scope for now.
+can be unambiguously derived. A clean default requires coupling to a surface
+model or an explicitly prescribed surface temperature.
 """
 AtmosphereModels.default_drag_surface_temperature(::CompressibleDynamics, grid, constants) =
     throw(ArgumentError(

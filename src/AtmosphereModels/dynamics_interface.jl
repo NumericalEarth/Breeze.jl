@@ -223,27 +223,38 @@ function validate_velocity_boundary_conditions(dynamics, user_boundary_condition
 end
 
 """
+    base_pressure(dynamics)
+
+Return the pressure of the reference atmosphere at ``z = 0``: the datum its hydrostatic profiles
+are anchored to, and a property of that atmosphere rather than of the grid. Always a scalar.
+
+This is not the pressure at the ground. On a domain whose bottom does not sit at ``z = 0`` — a
+raised height-coordinate domain, or any terrain-following grid — the two differ by ``O(ρgh)``.
+For the pressure at the ground, which is what a column integration is anchored at, use
+[`surface_pressure`](@ref).
+"""
+function base_pressure end
+
+"""
     surface_pressure(dynamics)
 
-Return the surface pressure used for boundary condition regularization.
-For anelastic dynamics, this is the reference state surface pressure.
-For compressible dynamics, this may be a constant or computed value.
+Return the pressure of the reference atmosphere at the bottom face of each column — the ground —
+obtained by reducing the [`base_pressure`](@ref) datum to that height along the reference profile,
+as a 2D ``(Center, Center, Nothing)`` field. Horizontally uniform for a single-column reference on
+a height-coordinate grid; genuinely column-dependent when the reference thermodynamics varies
+horizontally or on a terrain-following grid, where the bottom face is the terrain surface.
+
+This is the anchor for a hydrostatic column integration, and what every consumer of "the pressure
+at the surface" over terrain wants. Reading it keeps a consumer consistent with the reference
+state; reading the datum instead disagrees with it by ``O(ρgh)`` per column.
+
+Equal to the datum, exactly, for the usual domain whose bottom sits at ``z = 0``. Extended by each
+dynamics that carries a materialized reference state; dynamics without one have no reference
+surface pressure to report. When the pressure should follow the live model state instead,
+extrapolate it from the first cell center with `Thermodynamics.surface_pressure_from_cell_center`,
+as the surface fluxes and the diagnostic hydrostatic pressure do.
 """
 function surface_pressure end
-
-"""
-    boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants)
-
-Return a reference state with `pressure`, `density`, and `standard_pressure` fields
-suitable for constructing boundary-condition diagnostics (e.g. virtual potential
-temperature for stability-dependent bulk fluxes).
-
-Boundary conditions are materialized before `materialize_dynamics` runs, so this
-hook lets each dynamics type decide what to expose at that point. The default
-returns `dynamics.reference_state`, which works for dynamics where the user
-constructs a fully-built reference state up front (e.g. `AnelasticDynamics`).
-"""
-boundary_conditions_reference_state(dynamics, grid, thermodynamic_constants) = dynamics.reference_state
 
 """
     dynamics_reference_state(dynamics)

@@ -3,8 +3,9 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Test
 using Breeze
 using Breeze.Thermodynamics: dry_air_gas_constant, adiabatic_hydrostatic_pressure,
-                             mixture_gas_constant, MoistureMassFractions
-using Breeze.AtmosphereModels: standard_pressure
+                             mixture_gas_constant, MoistureMassFractions,
+                             surface_pressure_from_cell_center
+using Breeze.AtmosphereModels: dynamics_pressure, standard_pressure, total_density
 using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using GPUArraysCore: @allowscalar
@@ -92,7 +93,7 @@ end
     constants = ThermodynamicConstants()
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
@@ -221,7 +222,7 @@ end
     p₀ = FT(101325) # surface pressure, Pa
     pˢᵗ = FT(1e5) # standard pressure for potential temperature, Pa
     θ₀ = 288 # K
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
@@ -248,6 +249,18 @@ end
     # Compute hydrostatic pressure
     ph = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
 
+    # `compute_hydrostatic_pressure!` anchors each column at the pressure it *diagnoses* at that
+    # column's bottom face, by extrapolating the first cell center down half a cell — so that it
+    # follows the terrain surface instead of assuming the reference datum sits at the ground. On
+    # this z = 0 domain the diagnosed anchor recovers p₀ only to the O((Δz / 2H)²) truncation of
+    # that extrapolation, so the anchor and the column integration are checked separately, each to
+    # the accuracy it actually has.
+    Δz₁ = @allowscalar Δzᶜᶜᶜ(1, 1, 1, grid)
+    p¹ = @allowscalar dynamics_pressure(model.dynamics)[1, 1, 1]
+    ρ¹ = @allowscalar total_density(model.dynamics)[1, 1, 1]
+    pˢ = surface_pressure_from_cell_center(p¹, ρ¹, Δz₁, g)
+    @test pˢ ≈ p₀ rtol=1e-3
+
     # Expected cell-mean pressure for isothermal atmosphere:
     # p_mean = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H))
     # where H = Rᵈ * T₀ / g is the scale height
@@ -255,7 +268,7 @@ end
     H = Rᵈ * T₀ / g
 
     @allowscalar begin
-        p_interface_bottom = p₀
+        p_interface_bottom = pˢ
         for k in 1:grid.Nz
             Δz = Δzᶜᶜᶜ(1, 1, k, grid)
             p_expected[1, 1, k] = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H))
@@ -264,6 +277,13 @@ end
     end
 
     @test ph ≈ p_expected
+
+    # The anelastic pressure solve determines only the gradient of its kinematic pressure
+    # anomaly. A spatially uniform offset is therefore a gauge change and must not alter a
+    # thermodynamic pressure diagnostic.
+    set!(model.dynamics.pressure_anomaly, FT(1000))
+    ph_with_shifted_gauge = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
+    @test ph_with_shifted_gauge ≈ ph
 end
 
 @testset "Azimuthal-mean diagnostic [$(FT)]" for FT in test_float_types()

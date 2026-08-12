@@ -466,7 +466,7 @@ Grid indices cannot be eliminated because:
 
 Schemes should write all auxiliary fields in one function. This includes:
 - Specific moisture fractions (`qᶜˡ`, `qʳ`, etc.) from the microphysical state
-- Derived quantities (`qˡ = qᶜˡ + qʳ`, `qⁱ = qᶜⁱ + qˢ`)
+- Derived quantities (`qˡ = qᶜˡ + qʳ`, `qⁱ = qᶜⁱ + qˢⁿ`)
 - Vapor mass fraction `qᵛ` from the thermodynamic state
 - Terminal velocities for sedimentation
 
@@ -589,7 +589,7 @@ end
 @inline function moisture_fractions(microphysics, ℳ::NamedTuple, qᵛᵉ)
     z = zero(qᵛᵉ)
     qˡ = get(ℳ, :qᶜˡ, z) + get(ℳ, :qʳ, z)
-    qⁱ = get(ℳ, :qᶜⁱ, z) + get(ℳ, :qˢ, z)
+    qⁱ = get(ℳ, :qᶜⁱ, z) + get(ℳ, :qˢⁿ, z)
     return MoistureMassFractions(qᵛᵉ, qˡ, qⁱ)
 end
 

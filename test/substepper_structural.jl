@@ -54,7 +54,7 @@ function _build_str_model(arch; ω = 0.55)
                                            damping = NoDivergenceDamping())
     dyn = CompressibleDynamics(td;
                                reference_potential_temperature = θ_iso_str,
-                               surface_pressure = 1e5,
+                               base_pressure = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
                                   thermodynamic_constants = constants)
@@ -307,7 +307,7 @@ end
                                          damping = NoDivergenceDamping())
     dyn = CompressibleDynamics(td;
                                reference_potential_temperature = z -> 300,
-                               surface_pressure = 1e5,
+                               base_pressure = 1e5,
                                standard_pressure = 1e5)
 
     ρu_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.0))

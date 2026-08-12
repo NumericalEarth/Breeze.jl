@@ -31,8 +31,9 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!, NormalFlowBoundaryCon
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
                                               SlopeInsideInterpolation,
                                               TerrainFollowingGrid, ∂z∂x, ∂z∂y
-using Breeze.Thermodynamics: evaluate_profile, hydrostatic_pressure, integrate_exner_column!,
-                             newton_hydrostatic_pressure, moist_reference_constants
+using Breeze.Thermodynamics: evaluate_profile, integrate_exner_column!,
+                             newton_hydrostatic_pressure, moist_reference_constants,
+                             moist_hydrostatic_pressure
 using Breeze.Solvers: FixedIterations
 
 #####
@@ -765,71 +766,6 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Integrate the hydrostatic equation ``∂p/∂z = \\mathrm{dpdz}(z, p)`` from the surface to
-height ``z``, repeatedly doubling the number of steps until the pressure at ``z`` changes
-by less than the relative `tolerance` between successive refinements. `dpdz(z, p)` returns
-the local pressure gradient ``-g ρ`` given height and pressure.
-"""
-function converged_hydrostatic_pressure(z, p₀, dpdz;
-                                        tolerance = sqrt(eps(float(typeof(p₀)))),
-                                        initial_steps = 16,
-                                        max_steps = 1 << 16)
-    z == 0 && return p₀
-
-    integrate(nsteps) = begin
-        dz = z / nsteps
-        half_dz = dz / 2
-        p = p₀
-        for i in 1:nsteps
-            zₗ = (i - 1) * dz
-            k₁ = dpdz(zₗ, p)
-            k₂ = dpdz(zₗ + half_dz, p + k₁ * half_dz)
-            p += k₂ * dz
-        end
-        return p
-    end
-
-    nsteps = initial_steps
-    p_coarse = integrate(nsteps)
-    while nsteps < max_steps
-        nsteps *= 2
-        p_fine = integrate(nsteps)
-        abs(p_fine - p_coarse) ≤ tolerance * abs(p_fine) && return p_fine
-        p_coarse = p_fine
-    end
-
-    return p_coarse
-end
-
-terrain_hydrostatic_pressure(z, p₀, θᵣ, ::Nothing, pˢᵗ, constants) =
-    hydrostatic_pressure(z, p₀, θᵣ, pˢᵗ, constants)
-
-function terrain_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
-    # Compute the continuous hydrostatic pressure at physical height `z`. For
-    # moist terrain columns this supplies the boundary state at the local terrain
-    # surface; the first cell center and the interior levels are then obtained by
-    # the same discrete-balance Newton solve.
-    Rᵈ = dry_air_gas_constant(constants)
-    Rᵛ = vapor_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    cᵖᵛ = constants.vapor.heat_capacity
-    g = constants.gravitational_acceleration
-
-    @inline function dpdz(zⁿ, p)
-        θⁿ = evaluate_profile(θᵣ, zⁿ)
-        qᵛⁿ = evaluate_profile(qᵛᵣ, zⁿ)
-        Rᵐⁿ, _cᵖᵐⁿ, κᵐⁿ = moist_reference_constants(qᵛⁿ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-        Tⁿ = θⁿ * (p / pˢᵗ)^κᵐⁿ
-        return -g * p / (Rᵐⁿ * Tⁿ)
-    end
-
-    return converged_hydrostatic_pressure(z, p₀, dpdz;
-                                          tolerance = sqrt(eps(float(typeof(p₀)))))
-end
-
-"""
-$(TYPEDSIGNATURES)
-
 Fill the 3D fields `pᵣ`, `ρᵣ` and `πᵣ` with the hydrostatic reference pressure, density and Exner
 function, solving the discrete hydrostatic balance per column. On a terrain-following grid,
 different columns have different physical heights at the same computational index `k`, so the
@@ -851,7 +787,7 @@ would otherwise be dominated by the near-cancellation of two large terms.
 The reference pressure is also used for the perturbation horizontal pressure gradient,
 reducing the terrain-following PGF error.
 """
-function compute_terrain_reference_state!(pᵣ, ρᵣ, πᵣ, grid, p₀, ref_spec, pˢᵗ, constants)
+function compute_terrain_reference_state!(pᵣ, ρᵣ, πᵣ, pˢ, grid, p₀, ref_spec, pˢᵗ, constants)
     arch = architecture(grid)
     Nz = size(grid, 3)
 
@@ -874,7 +810,7 @@ function compute_terrain_reference_state!(pᵣ, ρᵣ, πᵣ, grid, p₀, ref_sp
     fill_halo_regions!(θ)
 
     qᵛ = terrain_reference_vapor_field(qᵛᵣ, grid)
-    θˢ, qᵛˢ, pˢ = terrain_surface_reference_fields(grid, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+    θˢ, qᵛˢ = terrain_surface_reference_fields!(pˢ, grid, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
 
     launch!(arch, grid, :xy, _compute_terrain_reference_state!,
             πᵣ, pᵣ, ρᵣ, θ, qᵛ, θˢ, qᵛˢ, pˢ, grid, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g)
@@ -906,16 +842,20 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return the reference `(θˢ, qᵛˢ, pˢ)` at the terrain surface — the bottom face of each column — as
-2D fields. `pˢ` is the *continuous* hydrostatic pressure at the local terrain height, which anchors
-the column integration in [`compute_terrain_reference_state!`](@ref).
+Fill `pˢ` with the reference pressure at the terrain surface — the bottom face of each column —
+and return the matching `(θˢ, qᵛˢ)` there as 2D fields. `pˢ` is the *continuous* hydrostatic
+pressure at the local terrain height, reduced from the ``z = 0`` datum `p₀` by
+[`moist_hydrostatic_pressure`](@ref); it anchors the column integration in
+[`compute_terrain_reference_state!`](@ref) and is retained on the reference state, because the
+cold start and the diagnostic hydrostatic pressure must anchor at the same per-column pressure
+or they disagree with the reference by ``O(ρgh)`` over terrain.
 
 The surface heights come from a kernel; the profiles and the hydrostatic integration are host
 callables (an arbitrary user `θ(z)` and, for moist references, an adaptive vertical integration), so
 they are evaluated in a single vectorized pass over those heights — one evaluation per column, not
 per cell — and transferred back. A dry reference returns `qᵛˢ::ZeroField`.
 """
-function terrain_surface_reference_fields(grid, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
+function terrain_surface_reference_fields!(pˢ, grid, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
     arch = architecture(grid)
 
     zˢ = Field{Center, Center, Nothing}(grid)
@@ -923,21 +863,24 @@ function terrain_surface_reference_fields(grid, p₀, θᵣ, qᵛᵣ, pˢᵗ, co
 
     heights = Array(interior(zˢ))
     θˢ_host = map(z -> evaluate_profile(θᵣ, z), heights)
-    pˢ_host = map(z -> terrain_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants), heights)
+    pˢ_host = map(z -> moist_hydrostatic_pressure(z, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants), heights)
 
+    copy_to_terrain_surface_field!(pˢ, pˢ_host)
     θˢ = terrain_surface_field(θˢ_host, grid)
-    pˢ = terrain_surface_field(pˢ_host, grid)
     qᵛˢ = qᵛᵣ === nothing ? ZeroField(eltype(grid)) :
           terrain_surface_field(map(z -> evaluate_profile(qᵛᵣ, z), heights), grid)
 
-    return θˢ, qᵛˢ, pˢ
+    return θˢ, qᵛˢ
 end
 
-function terrain_surface_field(host_values, grid)
-    field = Field{Center, Center, Nothing}(grid)
+function copy_to_terrain_surface_field!(field, host_values)
+    grid = field.grid
     copyto!(interior(field), on_architecture(architecture(grid), convert.(eltype(grid), host_values)))
     return field
 end
+
+terrain_surface_field(host_values, grid) =
+    copy_to_terrain_surface_field!(Field{Center, Center, Nothing}(grid), host_values)
 
 # Per-column reference integration: anchor at the terrain surface, then integrate upward in discrete
 # hydrostatic balance. The surface sits at the bottom face and the first cell center half a cell
@@ -988,21 +931,29 @@ horizontally-varying `CenterField`s in per-column discrete hydrostatic balance
 (`compute_terrain_reference_state!`); only `pressure`/`density` are read by the terrain kernels,
 but `exner_function` is filled for consistency with the 1D-column form.
 """
-function terrain_exner_reference_state(grid, surface_pressure, ref_spec, standard_pressure, constants)
+function terrain_exner_reference_state(grid, base_pressure, ref_spec, standard_pressure, constants)
     FT = eltype(grid)
     pᵣ = CenterField(grid)
     ρᵣ = CenterField(grid)
     πᵣ = CenterField(grid)
-    compute_terrain_reference_state!(pᵣ, ρᵣ, πᵣ, grid, surface_pressure, ref_spec, standard_pressure, constants)
+    # The per-column terrain-surface pressure is kept on the reference state: it is the anchor
+    # every other "pressure at the surface" consumer needs, and recomputing it elsewhere would
+    # require the reference profile, which the reference state does not carry.
+    pˢ = Field{Center, Center, Nothing}(grid)
+    compute_terrain_reference_state!(pᵣ, ρᵣ, πᵣ, pˢ, grid, base_pressure, ref_spec,
+                                     standard_pressure, constants)
     θᵣ, _ = terrain_reference_profiles(ref_spec)
     θ₀ = convert(FT, evaluate_profile(θᵣ, 0))
-    return ExnerReferenceState(convert(FT, surface_pressure), θ₀, convert(FT, standard_pressure), pᵣ, ρᵣ, πᵣ)
+    # `surface_density = nothing`: the terrain-following pressure/density fields carry no bottom
+    # boundary value, so there is none to keep in sync.
+    return ExnerReferenceState(convert(FT, base_pressure), pˢ, nothing, θ₀,
+                               convert(FT, standard_pressure), pᵣ, ρᵣ, πᵣ)
 end
 
 # Terrain-following method of the reference-state builder (the height-coordinate method is in
 # `compressible_dynamics.jl`): an explicit profile builds the 3D `ExnerReferenceState`.
-build_reference_state(grid, ::TerrainMetrics, ref_spec, surface_pressure, standard_pressure, constants) =
-    terrain_exner_reference_state(grid, surface_pressure, ref_spec, standard_pressure, constants)
+build_reference_state(grid, ::TerrainMetrics, ref_spec, base_pressure, standard_pressure, constants) =
+    terrain_exner_reference_state(grid, base_pressure, ref_spec, standard_pressure, constants)
 
 """
 $(TYPEDSIGNATURES)
@@ -1036,8 +987,9 @@ function AtmosphereModels.reset_reference_state!(model::TerrainCompressibleModel
     ref === nothing && return nothing
 
     ref_spec = terrain_reference_mean_profiles(model)
-    compute_terrain_reference_state!(ref.pressure, ref.density, ref.exner_function, model.grid,
-                                     surface_pressure(dynamics),
+    compute_terrain_reference_state!(ref.pressure, ref.density, ref.exner_function,
+                                     ref.surface_pressure, model.grid,
+                                     base_pressure(dynamics),
                                      ref_spec,
                                      standard_pressure(dynamics),
                                      model.thermodynamic_constants)

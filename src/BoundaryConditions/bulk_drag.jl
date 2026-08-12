@@ -2,13 +2,12 @@
 ##### BulkDragFunction for momentum fluxes
 #####
 
-struct BulkDragFunction{D, C, G, T, FV, P, TC}
+struct BulkDragFunction{D, C, G, T, FV, TC}
     direction :: D
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
     filtered_velocities :: FV  # Nothing or FilteredSurfaceVelocities
-    surface_pressure :: P      # Set during materialization (nothing pre-materialize)
     thermodynamic_constants :: TC
 end
 
@@ -43,12 +42,9 @@ velocity and matching-velocity fluctuations otherwise biases the surface stress
 
 # Monin–Obukhov consistency
 
-`ρ₀` is computed from surface quantities (`surface_pressure` and `surface_temperature`)
-via the ideal gas law, so it is a *true surface* density — independent of the
-vertical grid resolution. Using the prognostic density at the first cell would
-introduce a grid-dependent ρ₀ (the first-cell height ½Δz shifts the value as the
-grid is refined), which is inconsistent with the bulk-flux closure derived from
-Monin–Obukhov similarity.
+`ρ₀` is computed from the surface temperature and the live model pressure extrapolated
+hydrostatically from the first cell center to the bottom face. It is therefore a true
+surface density that follows both terrain and changes in the model state.
 
 # Default surface temperature
 
@@ -79,7 +75,7 @@ function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0,
         throw(ArgumentError("surface_temperature keyword argument must be provided when configuring BulkDrag with a PolynomialCoefficient"))
     end
     return BulkDragFunction(direction, coefficient, gustiness, surface_temperature,
-                            filtered_velocities, nothing, nothing)
+                            filtered_velocities, nothing)
 end
 
 const XDirectionBulkDragFunction = BulkDragFunction{<:XDirection}
@@ -91,7 +87,6 @@ Adapt.adapt_structure(to, df::BulkDragFunction) =
                      Adapt.adapt(to, df.gustiness),
                      Adapt.adapt(to, df.surface_temperature),
                      Adapt.adapt(to, df.filtered_velocities),
-                     Adapt.adapt(to, df.surface_pressure),
                      Adapt.adapt(to, df.thermodynamic_constants))
 
 function Base.summary(df::BulkDragFunction)
@@ -112,24 +107,30 @@ end
 #####
 
 @inline function OceananigansBC.getbc(df::XDirectionBulkDragFunction, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
+                                      grid::AbstractGrid, clock, model_fields, dynamics_fields)
+    fields = surface_layer_state(model_fields, dynamics_fields)
     T₀ = surface_value(i, j, df.surface_temperature)
     u  = near_surface_velocity(i, j, fields, df.filtered_velocities, XDirection())
     U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields, df.filtered_velocities)
     Ũ  = sqrt(U² + df.gustiness^2)
-    ρ₀ = surface_density(df.surface_pressure, T₀, df.thermodynamic_constants)
-    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀, df.filtered_velocities)
+    constants = df.thermodynamic_constants
+    p₀ = surface_air_pressure(i, j, grid, fields, constants, XDirection())
+    ρ₀ = surface_density(p₀, T₀, constants)
+    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀, df.filtered_velocities, p₀)
     return - ρ₀ * Cᴰ * Ũ * u
 end
 
 @inline function OceananigansBC.getbc(df::YDirectionBulkDragFunction, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
+                                      grid::AbstractGrid, clock, model_fields, dynamics_fields)
+    fields = surface_layer_state(model_fields, dynamics_fields)
     T₀ = surface_value(i, j, df.surface_temperature)
     v  = near_surface_velocity(i, j, fields, df.filtered_velocities, YDirection())
     U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields, df.filtered_velocities)
     Ũ  = sqrt(U² + df.gustiness^2)
-    ρ₀ = surface_density(df.surface_pressure, T₀, df.thermodynamic_constants)
-    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀, df.filtered_velocities)
+    constants = df.thermodynamic_constants
+    p₀ = surface_air_pressure(i, j, grid, fields, constants, YDirection())
+    ρ₀ = surface_density(p₀, T₀, constants)
+    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀, df.filtered_velocities, p₀)
     return - ρ₀ * Cᴰ * Ũ * v
 end
 

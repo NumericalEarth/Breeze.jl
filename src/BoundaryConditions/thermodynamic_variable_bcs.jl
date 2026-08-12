@@ -82,43 +82,43 @@ end
 
 # getbc for bottom boundary (k = 1)
 @inline function OceananigansBC.getbc(ef::BottomEnergyFluxBC, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, i, j, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    𝒬 = OceananigansBC.getbc(ef.condition, i, j, grid, clock, fields, dynamics_fields)
     return 𝒬_to_Jᶿ(i, j, 1, grid, ef, 𝒬, fields)
 end
 
 # getbc for top boundary (k = Nz)
 @inline function OceananigansBC.getbc(ef::TopEnergyFluxBC, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, i, j, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    𝒬 = OceananigansBC.getbc(ef.condition, i, j, grid, clock, fields, dynamics_fields)
     return 𝒬_to_Jᶿ(i, j, grid.Nz, grid, ef, 𝒬, fields)
 end
 
 # getbc for west boundary (i = 1)
 @inline function OceananigansBC.getbc(ef::WestEnergyFluxBC, j::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, j, k, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    𝒬 = OceananigansBC.getbc(ef.condition, j, k, grid, clock, fields, dynamics_fields)
     return 𝒬_to_Jᶿ(1, j, k, grid, ef, 𝒬, fields)
 end
 
 # getbc for east boundary (i = Nx)
 @inline function OceananigansBC.getbc(ef::EastEnergyFluxBC, j::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, j, k, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    𝒬 = OceananigansBC.getbc(ef.condition, j, k, grid, clock, fields, dynamics_fields)
     return 𝒬_to_Jᶿ(grid.Nx, j, k, grid, ef, 𝒬, fields)
 end
 
 # getbc for south boundary (j = 1)
 @inline function OceananigansBC.getbc(ef::SouthEnergyFluxBC, i::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, i, k, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    𝒬 = OceananigansBC.getbc(ef.condition, i, k, grid, clock, fields, dynamics_fields)
     return 𝒬_to_Jᶿ(i, 1, k, grid, ef, 𝒬, fields)
 end
 
 # getbc for north boundary (j = Ny)
 @inline function OceananigansBC.getbc(ef::NorthEnergyFluxBC, i::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    𝒬 = OceananigansBC.getbc(ef.condition, i, k, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    𝒬 = OceananigansBC.getbc(ef.condition, i, k, grid, clock, fields, dynamics_fields)
     return 𝒬_to_Jᶿ(i, grid.Ny, k, grid, ef, 𝒬, fields)
 end
 
@@ -203,43 +203,43 @@ end
 
 # getbc for bottom boundary (k = 1)
 @inline function OceananigansBC.getbc(tf::BottomThetaFluxBC, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᶿ = OceananigansBC.getbc(tf.condition, i, j, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    Jᶿ = OceananigansBC.getbc(tf.condition, i, j, grid, clock, fields, dynamics_fields)
     return Jᶿ_to_𝒬(i, j, 1, grid, tf, Jᶿ, fields)
 end
 
 # getbc for top boundary (k = Nz)
 @inline function OceananigansBC.getbc(tf::TopThetaFluxBC, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᶿ = OceananigansBC.getbc(tf.condition, i, j, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    Jᶿ = OceananigansBC.getbc(tf.condition, i, j, grid, clock, fields, dynamics_fields)
     return Jᶿ_to_𝒬(i, j, grid.Nz, grid, tf, Jᶿ, fields)
 end
 
 # getbc for west boundary (i = 1)
 @inline function OceananigansBC.getbc(tf::WestThetaFluxBC, j::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᶿ = OceananigansBC.getbc(tf.condition, j, k, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    Jᶿ = OceananigansBC.getbc(tf.condition, j, k, grid, clock, fields, dynamics_fields)
     return Jᶿ_to_𝒬(1, j, k, grid, tf, Jᶿ, fields)
 end
 
 # getbc for east boundary (i = Nx)
 @inline function OceananigansBC.getbc(tf::EastThetaFluxBC, j::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᶿ = OceananigansBC.getbc(tf.condition, j, k, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    Jᶿ = OceananigansBC.getbc(tf.condition, j, k, grid, clock, fields, dynamics_fields)
     return Jᶿ_to_𝒬(grid.Nx, j, k, grid, tf, Jᶿ, fields)
 end
 
 # getbc for south boundary (j = 1)
 @inline function OceananigansBC.getbc(tf::SouthThetaFluxBC, i::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᶿ = OceananigansBC.getbc(tf.condition, i, k, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    Jᶿ = OceananigansBC.getbc(tf.condition, i, k, grid, clock, fields, dynamics_fields)
     return Jᶿ_to_𝒬(i, 1, k, grid, tf, Jᶿ, fields)
 end
 
 # getbc for north boundary (j = Ny)
 @inline function OceananigansBC.getbc(tf::NorthThetaFluxBC, i::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᶿ = OceananigansBC.getbc(tf.condition, i, k, grid, clock, fields)
+                                      grid::AbstractGrid, clock, fields, dynamics_fields)
+    Jᶿ = OceananigansBC.getbc(tf.condition, i, k, grid, clock, fields, dynamics_fields)
     return Jᶿ_to_𝒬(i, grid.Ny, k, grid, tf, Jᶿ, fields)
 end
 
@@ -317,8 +317,7 @@ AtmosphereModels.adiabatic_scalar_bcs(fbcs::FieldBoundaryConditions) =
 const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
-                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
-                                                   microphysical_fields, specific_prognostic_moisture, temperature)
+                                                   side, loc, grid, dynamics, microphysics, constants)
     ef = bc.condition
     density = dynamics_density(dynamics)
     new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, density)
@@ -329,8 +328,7 @@ end
 const UnregularizedThetaFluxBC = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
-                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
-                                                   microphysical_fields, specific_prognostic_moisture, temperature)
+                                                   side, loc, grid, dynamics, microphysics, constants)
     tf = bc.condition
     density = dynamics_density(dynamics)
     new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, side, microphysics, constants, density)
@@ -346,7 +344,7 @@ set_sensible_heat_formulation(bc, formulation) = bc
 function set_sensible_heat_formulation(bc::BulkSensibleHeatFluxBoundaryCondition, formulation)
     bf = bc.condition
     new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, bf.surface_temperature,
-                                          bf.surface_pressure, bf.standard_pressure, bf.thermodynamic_constants,
+                                          bf.standard_pressure, bf.thermodynamic_constants,
                                           formulation, bf.filtered_velocities, bf.filtered_scalar)
     return BoundaryCondition(Flux(), new_bf)
 end
