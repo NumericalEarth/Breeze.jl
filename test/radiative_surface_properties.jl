@@ -17,35 +17,36 @@ using RRTMGP
 # best, NaN fluxes at worst. These tests check the transfer for all three optics types, at
 # construction and again after a solve (so a property that evolves is picked up).
 
-column_index(i, j, Nx) = i + (j - 1) * Nx
+# Compare against the column ordering the extension actually uses, rather than a copy of it.
+const rrtmgp_column_index = Base.get_extension(Breeze, :BreezeRRTMGPExt).rrtmgp_column_index
 
-# All-sky and clear-sky keep both RTE solvers inside one `RRTMGPSolver`; gray keeps them side by side.
+# All-sky and clear-sky keep both RTE solvers inside one `RRTMGPSolver`, which publishes accessors;
+# gray keeps a `NoScatLWRTE` and a `NoScatSWRTE` side by side, which do not.
 function rrtmgp_surface_arrays(radiation)
     solver = radiation.longwave_solver
-    if isnothing(radiation.shortwave_solver)
-        return (Array(solver.lws.bcs.sfc_emis),
-                Array(solver.sws.bcs.sfc_alb_direct),
-                Array(solver.sws.bcs.sfc_alb_diffuse))
-    else
-        return (Array(solver.bcs.sfc_emis),
-                Array(radiation.shortwave_solver.bcs.sfc_alb_direct),
-                Array(radiation.shortwave_solver.bcs.sfc_alb_diffuse))
-    end
+
+    isnothing(radiation.shortwave_solver) &&
+        return (Array(RRTMGP.surface_emissivity(solver)),
+                Array(RRTMGP.direct_sw_surface_albedo(solver)),
+                Array(RRTMGP.diffuse_sw_surface_albedo(solver)))
+
+    return (Array(solver.bcs.sfc_emis),
+            Array(radiation.shortwave_solver.bcs.sfc_alb_direct),
+            Array(radiation.shortwave_solver.bcs.sfc_alb_diffuse))
 end
 
-# Every band of a column must carry that column's field value.
-function transferred(rrtmgp_array, field, grid)
+# What RRTMGP's (nband, ncolumn) array should hold: every band of a column carrying that column's
+# field value. Comparing whole arrays means a failure reports the mismatch, not just `false`.
+function expected_surface_array(field, grid, Nband)
     Nx, Ny, _ = size(grid)
     values = Array(interior(field))
-
-    all(isfinite, rrtmgp_array) || return false
+    expected = similar(values, Nband, Nx * Ny)
 
     for j in 1:Ny, i in 1:Nx
-        c = column_index(i, j, Nx)
-        all(rrtmgp_array[:, c] .≈ values[i, j, 1]) || return false
+        expected[:, rrtmgp_column_index(i, j, Nx)] .= values[i, j, 1]
     end
 
-    return true
+    return expected
 end
 
 @testset "Field-valued surface radiative properties [$FT]" for FT in test_float_types()
@@ -87,9 +88,9 @@ end
                                                surface_albedo = α)
 
             ε₀, αᵈ₀, αˢ₀ = rrtmgp_surface_arrays(radiation)
-            @test transferred(ε₀, ε, grid)     # emissivity at construction
-            @test transferred(αᵈ₀, α, grid)    # direct albedo at construction
-            @test transferred(αˢ₀, α, grid)    # diffuse albedo at construction
+            @test ε₀ ≈ expected_surface_array(ε, grid, size(ε₀, 1))      # emissivity at construction
+            @test αᵈ₀ ≈ expected_surface_array(α, grid, size(αᵈ₀, 1))    # direct albedo at construction
+            @test αˢ₀ ≈ expected_surface_array(α, grid, size(αˢ₀, 1))    # diffuse albedo at construction
 
             model = AtmosphereModel(grid; dynamics, radiation,
                                     clock = Clock(time = DateTime(2024, 6, 21, 12)),
@@ -105,9 +106,9 @@ end
             Breeze.AtmosphereModels._update_radiation!(radiation, model)
 
             ε₀, αᵈ₀, αˢ₀ = rrtmgp_surface_arrays(radiation)
-            @test transferred(ε₀, ε, grid)     # emissivity after a solve
-            @test transferred(αᵈ₀, α, grid)    # updated direct albedo after a solve
-            @test transferred(αˢ₀, α, grid)    # updated diffuse albedo after a solve
+            @test ε₀ ≈ expected_surface_array(ε, grid, size(ε₀, 1))      # emissivity after a solve
+            @test αᵈ₀ ≈ expected_surface_array(α, grid, size(αᵈ₀, 1))    # updated direct albedo
+            @test αˢ₀ ≈ expected_surface_array(α, grid, size(αˢ₀, 1))    # updated diffuse albedo
 
             @test all(isfinite, Array(interior(radiation.flux_divergence)))
             @test all(isfinite, Array(interior(radiation.upwelling_longwave_flux)))
@@ -146,8 +147,8 @@ end
 
         ε₀, αᵈ₀, αˢ₀ = rrtmgp_surface_arrays(radiation)
         @test all(ε₀ .≈ FT(0.98))
-        @test transferred(αᵈ₀, αᵈ, grid)
-        @test transferred(αˢ₀, αˢ, grid)
+        @test αᵈ₀ ≈ expected_surface_array(αᵈ, grid, size(αᵈ₀, 1))
+        @test αˢ₀ ≈ expected_surface_array(αˢ, grid, size(αˢ₀, 1))
     end
 
     # Emissivity and albedo are fractions. A scalar outside [0, 1] is a user error — an albedo in

@@ -97,6 +97,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     solar_position = maybe_infer_solar_position(solar_position, grid)
 
+    validate_surface_fractions(; surface_emissivity, surface_albedo,
+                                 direct_surface_albedo, diffuse_surface_albedo)
+
     # Materialize background atmosphere (converts O₃ functions to fields)
     background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 
@@ -203,20 +206,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     rrtmgp_αb₀ = ArrayType{FT}(undef, Nband_sw, Nc)
     rrtmgp_αw₀ = ArrayType{FT}(undef, Nband_sw, Nc)
 
-    # Scalars become `ConstantField`s so that emissivity and both albedos are uniformly field-valued;
-    # `update_rrtmgp_surface_boundary_conditions!` below then transfers all three into RRTMGP's arrays
-    # through one path, whether the user passed a number, a field, or a dataset.
-    if surface_emissivity isa Number
-        surface_emissivity = ConstantField(convert(FT, surface_emissivity))
-    end
-
-    if direct_surface_albedo isa Number
-        direct_surface_albedo = ConstantField(convert(FT, direct_surface_albedo))
-    end
-
-    if diffuse_surface_albedo isa Number
-        diffuse_surface_albedo = ConstantField(convert(FT, diffuse_surface_albedo))
-    end
+    surface_emissivity = constant_field_property(surface_emissivity, FT)
+    direct_surface_albedo = constant_field_property(direct_surface_albedo, FT)
+    diffuse_surface_albedo = constant_field_property(diffuse_surface_albedo, FT)
 
     if surface_temperature isa Number
         surface_temperature = ConstantField(convert(FT, surface_temperature))

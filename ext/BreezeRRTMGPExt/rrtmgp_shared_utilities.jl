@@ -4,8 +4,10 @@
 
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ
 using Oceananigans.Architectures: architecture
+using Oceananigans.Fields: ConstantField
 using Oceananigans.Utils: launch!
 
+using RRTMGP: RRTMGPSolver
 using RRTMGP.AtmosphericStates: AtmosphericState
 
 using Breeze.AtmosphereModels: BackgroundAtmosphere, specific_humidity
@@ -119,12 +121,38 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Throw an `ArgumentError` for any keyword whose value is a `Number` outside ``[0, 1]``.
+
+Emissivity and albedo are fractions, so a scalar outside the unit interval is a user error — an albedo
+given in percent, say — worth rejecting at construction rather than carrying into the solver. Values
+that are not `Number`s (a field, a dataset, `nothing`) pass through: a field is validated by whatever
+built it.
+"""
+function validate_surface_fractions(; kw...)
+    for (name, value) in kw
+        value isa Number && !(0 <= value <= 1) &&
+            throw(ArgumentError("`$name` must lie in [0, 1]; received $value."))
+    end
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Wrap a scalar surface property in a `ConstantField` of the working precision, passing anything
+already field-valued through unchanged, so that emissivity and both albedos are uniformly
+field-valued whether the user supplied a number, a field, or a dataset.
+"""
+constant_field_property(x::Number, FT) = ConstantField(convert(FT, x))
+constant_field_property(x, FT) = x
+
+"""
+$(TYPEDSIGNATURES)
+
 Copy the surface emissivity `ε` and the direct and diffuse albedos `αᵈ`, `αˢ` from
 `surface_properties` into RRTMGP's band-by-column boundary-condition arrays `ε₀`, `αᵈ₀`, `αˢ₀`.
 
-Breeze carries these properties as 2D fields (a `ConstantField` when the user passed a scalar), while
-RRTMGP wants `(nband, ncolumn)` arrays. Nothing else writes those arrays, so a spatially varying
-emissivity or albedo — an observed albedo product, a snow-dependent albedo — would otherwise never
+Nothing else writes those arrays, so a spatially varying emissivity or albedo would otherwise never
 reach the solver, which would read whatever the allocation happened to contain. Call once at
 construction and again before every solve, so a property that evolves is picked up rather than frozen.
 
@@ -143,11 +171,12 @@ function update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, su
     return nothing
 end
 
-# Full-spectrum (clear-sky and all-sky) models keep both RTE solvers inside one `RRTMGPSolver`.
-update_rrtmgp_surface_boundary_conditions!(solver, surface_properties, grid) =
-    update_rrtmgp_surface_boundary_conditions!(solver.lws.bcs.sfc_emis,
-                                               solver.sws.bcs.sfc_alb_direct,
-                                               solver.sws.bcs.sfc_alb_diffuse,
+# Full-spectrum (clear-sky and all-sky) models keep both RTE solvers inside one `RRTMGPSolver`,
+# reached through RRTMGP's own accessors rather than its internal field nesting.
+update_rrtmgp_surface_boundary_conditions!(solver::RRTMGPSolver, surface_properties, grid) =
+    update_rrtmgp_surface_boundary_conditions!(RRTMGP.surface_emissivity(solver),
+                                               RRTMGP.direct_sw_surface_albedo(solver),
+                                               RRTMGP.diffuse_sw_surface_albedo(solver),
                                                surface_properties, grid)
 
 @kernel function _update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, ε, αᵈ, αˢ, grid)
