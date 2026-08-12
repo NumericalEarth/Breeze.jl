@@ -658,4 +658,17 @@ Breeze.AtmosphereModels.materialize_surface_property(::TestSurfacePropertySource
 
     # ...and dispatches to source-specific methods.
     @test materialize_surface_property(TestSurfacePropertySource(), grid, nothing) == FT(0.5)
+
+    # Albedo and emissivity are fractions, so the closed unit interval is admissible...
+    @test materialize_surface_property(0, grid) == 0
+    @test materialize_surface_property(1, grid) == 1
+
+    # ...and a scalar outside it is rejected rather than integrated forward. An albedo given in
+    # percent would otherwise reflect more shortwave than the surface receives.
+    @test_throws ArgumentError materialize_surface_property(30, grid)
+    @test_throws ArgumentError materialize_surface_property(-0.1, grid)
+
+    # A field passes unchecked, since it may be rewritten between radiation updates.
+    set!(α, 30)
+    @test materialize_surface_property(α, grid) === α
 end

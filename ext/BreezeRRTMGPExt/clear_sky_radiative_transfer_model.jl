@@ -44,7 +44,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `solar_position`: Specification of the solar zenith angle. See [`AbstractSolarPosition`](@ref) and its subtypes:
   - [`ApparentSolarPosition`](@ref) (default) — time-varying, computed from the model clock and grid (or explicit) longitude/latitude.
   - [`FixedCosineZenith`](@ref) — constant cos(θ_z), independent of the clock.
-- `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
+- `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Can be scalar or 2D field.
 - `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
                     Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
@@ -90,6 +90,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     else
         throw(ArgumentError(error_msg))
     end
+
+    surface_emissivity = materialize_surface_property(surface_emissivity, grid, solar_position)
 
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
@@ -147,19 +149,19 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     rrtmgp_αb₀ = ArrayType{FT}(undef, Nband_sw, Nc)
     rrtmgp_αw₀ = ArrayType{FT}(undef, Nband_sw, Nc)
 
+    # Scalars become `ConstantField`s so that emissivity and both albedos are uniformly field-valued;
+    # `update_rrtmgp_surface_boundary_conditions!` below then transfers all three into RRTMGP's arrays
+    # through one path, whether the user passed a number, a field, or a dataset.
     if surface_emissivity isa Number
         surface_emissivity = ConstantField(convert(FT, surface_emissivity))
-        rrtmgp_ε₀ .= surface_emissivity.constant
     end
 
     if direct_surface_albedo isa Number
         direct_surface_albedo = ConstantField(convert(FT, direct_surface_albedo))
-        rrtmgp_αb₀ .= direct_surface_albedo.constant
     end
 
     if diffuse_surface_albedo isa Number
         diffuse_surface_albedo = ConstantField(convert(FT, diffuse_surface_albedo))
-        rrtmgp_αw₀ .= diffuse_surface_albedo.constant
     end
 
     if surface_temperature isa Number
@@ -183,6 +185,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                     surface_emissivity,
                                                     direct_surface_albedo,
                                                     diffuse_surface_albedo)
+
+    update_rrtmgp_surface_boundary_conditions!(solver, surface_properties, grid)
 
     return RadiativeTransferModel(convert(FT, solar_constant),
                                   solar_position,
@@ -291,6 +295,9 @@ function AtmosphereModels._update_radiation!(rtm::ClearSkyRadiativeTransferModel
     grid = model.grid
     clock = model.clock
     solver = rtm.longwave_solver
+
+    # Surface emissivity and albedos (shared with all-sky), re-read in case they evolve
+    update_rrtmgp_surface_boundary_conditions!(solver, rtm.surface_properties, grid)
 
     # Update atmospheric state
     update_rrtmgp_gas_state!(solver.as, model, rtm.surface_properties.surface_temperature, rtm.background_atmosphere, solver.params)

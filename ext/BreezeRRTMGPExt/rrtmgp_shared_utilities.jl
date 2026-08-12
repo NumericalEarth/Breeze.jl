@@ -113,6 +113,65 @@ end
 end
 
 #####
+##### Surface boundary conditions (shared by gray, clear-sky and all-sky)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Copy the surface emissivity `ε` and the direct and diffuse albedos `αᵈ`, `αˢ` from
+`surface_properties` into RRTMGP's band-by-column boundary-condition arrays `ε₀`, `αᵈ₀`, `αˢ₀`.
+
+Breeze carries these properties as 2D fields (a `ConstantField` when the user passed a scalar), while
+RRTMGP wants `(nband, ncolumn)` arrays. Nothing else writes those arrays, so a spatially varying
+emissivity or albedo — an observed albedo product, a snow-dependent albedo — would otherwise never
+reach the solver, which would read whatever the allocation happened to contain. Call once at
+construction and again before every solve, so a property that evolves is picked up rather than frozen.
+
+Breeze treats all three properties as spectrally grey: every band receives the same value.
+"""
+function update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, surface_properties, grid)
+    arch = architecture(grid)
+
+    launch!(arch, grid, :xy, _update_rrtmgp_surface_boundary_conditions!,
+            ε₀, αᵈ₀, αˢ₀,
+            surface_properties.surface_emissivity,
+            surface_properties.direct_surface_albedo,
+            surface_properties.diffuse_surface_albedo,
+            grid)
+
+    return nothing
+end
+
+# Full-spectrum (clear-sky and all-sky) models keep both RTE solvers inside one `RRTMGPSolver`.
+update_rrtmgp_surface_boundary_conditions!(solver, surface_properties, grid) =
+    update_rrtmgp_surface_boundary_conditions!(solver.lws.bcs.sfc_emis,
+                                               solver.sws.bcs.sfc_alb_direct,
+                                               solver.sws.bcs.sfc_alb_diffuse,
+                                               surface_properties, grid)
+
+@kernel function _update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, ε, αᵈ, αˢ, grid)
+    i, j = @index(Global, NTuple)
+
+    c = rrtmgp_column_index(i, j, grid.Nx)
+
+    @inbounds begin
+        εᵢⱼ = ε[i, j, 1]
+        αᵈᵢⱼ = αᵈ[i, j, 1]
+        αˢᵢⱼ = αˢ[i, j, 1]
+
+        for b in 1:size(ε₀, 1)
+            ε₀[b, c] = εᵢⱼ
+        end
+
+        for b in 1:size(αᵈ₀, 1)
+            αᵈ₀[b, c] = αᵈᵢⱼ
+            αˢ₀[b, c] = αˢᵢⱼ
+        end
+    end
+end
+
+#####
 ##### Copy fluxes to Oceananigans fields (shared by clear-sky and all-sky)
 #####
 

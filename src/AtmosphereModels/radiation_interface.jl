@@ -184,10 +184,18 @@ solver stores: a `Number` becomes a grid-eltype scalar and a `Field` passes thro
 Extend the three-argument form for property sources that must be resolved against the
 grid and the solar `epoch` (e.g. an observed-albedo dataset); it falls back to the
 two-argument form.
+
+Albedo and emissivity are fractions, so a scalar outside `[0, 1]` is rejected here: an albedo
+given in percent would otherwise reflect more shortwave than the surface receives. A `Field`
+passes unchecked, since it may be rewritten between radiation updates.
 """
 materialize_surface_property(x, grid, solar_position) = materialize_surface_property(x, grid)
-materialize_surface_property(x::Number, grid) = convert(eltype(grid), x)
 materialize_surface_property(x::Oceananigans.Field, grid) = x
+
+function materialize_surface_property(x::Number, grid)
+    0 ≤ x ≤ 1 || throw(ArgumentError("Surface albedo and emissivity are fractions in [0, 1]; got $x"))
+    return convert(eltype(grid), x)
+end
 
 """
 $(TYPEDEF)
@@ -406,7 +414,7 @@ materialize_background_atmosphere(::Nothing, grid) = nothing
 
 struct SurfaceRadiativeProperties{ST, SE, SA, DW}
     surface_temperature :: ST  # Scalar or 2D field
-    surface_emissivity :: SE   # Scalar
+    surface_emissivity :: SE   # Scalar or 2D field
     direct_surface_albedo :: SA  # Scalar or 2D field
     diffuse_surface_albedo :: DW  # Scalar or 2D field
 end
