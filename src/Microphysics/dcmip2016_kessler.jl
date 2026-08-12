@@ -14,7 +14,8 @@ using ..Thermodynamics:
 using ..AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
-    standard_pressure
+    standard_pressure,
+    total_density
 
 using ..ParcelModels: ParcelModel
 
@@ -247,8 +248,8 @@ Create and return the microphysical fields for the Kessler scheme.
 - `qᵛ`: Water vapor mass fraction, diagnosed as ``q^v = q^t - q^{cl} - q^r``.
 - `qᶜˡ`: Cloud liquid mass fraction (kg/kg).
 - `qʳ`: Rain mass fraction (kg/kg).
-- `precipitation_rate`: Surface precipitation rate (m/s), defined as ``q^r  v^t_{rain}``
-  to match one-moment microphysics.
+- `precipitation_rate`: Surface precipitation rate (m/s), obtained by normalizing the
+  substep-mean rain mass flux by the final surface air density.
 - `𝕎ʳ`: Rain terminal velocity (m/s).
 """
 function AtmosphereModels.materialize_microphysical_fields(::DCMIP2016KM, grid, boundary_conditions)
@@ -331,8 +332,9 @@ $(TYPEDSIGNATURES)
 Return the liquid precipitation rate field for the DCMIP2016 Kessler microphysics scheme.
 
 The precipitation rate is computed internally by the Kessler kernel and stored in
-`μ.precipitation_rate`. It is defined as ``q^r v^t_{rain}`` (rain mass fraction
-times terminal velocity), matching the one-moment microphysics definition. Units are m/s.
+`μ.precipitation_rate`. The kernel time-averages the rain mass flux across sedimentation
+substeps and normalizes it by the final surface air density. For a fixed-density column this
+reduces to ``q^r v^t_{rain}``, matching the one-moment microphysics definition. Units are m/s.
 
 This implements the Breeze `precipitation_rate(model, phase)` interface, allowing
 the DCMIP2016 Kessler scheme to integrate with Breeze's standard diagnostics.
@@ -347,17 +349,17 @@ $(TYPEDSIGNATURES)
 
 Return the surface precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
 
-The surface precipitation flux is ``ρ q^r v^t_{rain}`` at the surface, matching the
-one-moment microphysics definition. Units are kg/m²/s.
+The surface precipitation flux is the substep-mean ``ρ^r v^t_{rain}`` at the surface.
+The stored precipitation rate is normalized so multiplying it by the final total density
+recovers this mass flux exactly. Units are kg/m²/s.
 
 This implements the Breeze `surface_precipitation_flux(model)` interface.
 """
 function AtmosphereModels.surface_precipitation_flux(model, ::DCMIP2016KM)
     grid = model.grid
     μ = model.microphysical_fields
-    ρ = model.dynamics.reference_state.density
-    # precipitation_rate = qʳ × vᵗ (m/s)
-    # surface_precipitation_flux = ρ × qʳ × vᵗ = ρ × precipitation_rate (kg/m²/s)
+    ρ = total_density(model.dynamics)
+    # surface_precipitation_flux = ρ × precipitation_rate (kg/m²/s)
     kernel = DCMIP2016KesslerSurfaceFluxKernel(μ.precipitation_rate, ρ)
     op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid)
     return Field(op)
@@ -365,18 +367,17 @@ end
 
 struct DCMIP2016KesslerSurfaceFluxKernel{P, R}
     precipitation_rate :: P
-    reference_density :: R
+    density :: R
 end
 
 Adapt.adapt_structure(to, k::DCMIP2016KesslerSurfaceFluxKernel) =
     DCMIP2016KesslerSurfaceFluxKernel(adapt(to, k.precipitation_rate),
-                                      adapt(to, k.reference_density))
+                                      adapt(to, k.density))
 
 @inline function (kernel::DCMIP2016KesslerSurfaceFluxKernel)(i, j, k_idx, grid)
-    # precipitation_rate = qʳ × vᵗ at surface
     # surface_precipitation_flux = ρ × precipitation_rate
     @inbounds P = kernel.precipitation_rate[i, j]
-    @inbounds ρ = kernel.reference_density[i, j, 1]
+    @inbounds ρ = kernel.density[i, j, 1]
     return ρ * P
 end
 
@@ -455,8 +456,13 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     # (e.g., during model construction before any time step has been taken)
     (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
 
-    # Density and pressure fields (compatible with both Anelastic and Compressible dynamics)
-    ρ = dynamics_density(model.dynamics)
+    # Total density weights water mass fractions and enters the Kessler air-density corrections.
+    # The coupling density weights the thermodynamic prognostic ρθˡⁱ and, for compressible
+    # dynamics, is the dry-air carrier of Kessler mixing ratios. These fields alias for anelastic
+    # dynamics and are distinct (total and dry density) for compressible dynamics.
+    ρ = total_density(model.dynamics)
+    ρᵈ = dynamics_density(model.dynamics)
+    dry_air_coupled = ρ !== ρᵈ
     p = dynamics_pressure(model.dynamics)
 
     # Standard pressure (reference pressure for the Exner function, pˢᵗ)
@@ -476,7 +482,8 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     μ = model.microphysical_fields
 
     launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, Δt, ρ, p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
+            microphysics, grid, Nz, Δt, ρ, ρᵈ, dry_air_coupled,
+            p, pˢᵗ, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
@@ -613,7 +620,8 @@ end
 #   T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
 
 @kernel function _microphysical_update!(microphysics, grid, Nz, Δt,
-                                        density, pressure, pˢᵗ, constants,
+                                        density, coupling_density, dry_air_coupled,
+                                        pressure, pˢᵗ, constants,
                                         θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
@@ -681,8 +689,8 @@ end
     Ns = max(1, ceil(Int, Δt / max_Δt))
     inv_Ns = inv(FT(Ns))
     Δtₛ = Δt * inv_Ns
-    # Pˢᵘʳᶠ: accumulated surface precipitation rate (qʳ × 𝕎ʳ) over subcycles
-    Pˢᵘʳᶠ = zero(FT)
+    # Fˢᵘʳᶠ: accumulated surface rain mass flux over subcycles.
+    Fˢᵘʳᶠ = zero(FT)
 
     #####
     ##### PHASE 2: Subcycle microphysics (in mixing ratio space)
@@ -690,14 +698,19 @@ end
 
     for m = 1:Ns
 
-        # Accumulate surface precipitation (qʳ × vᵗ)
+        # Accumulate surface rain mass flux. Kessler mixing ratios are dry-air based for
+        # compressible dynamics (ρʳ = ρᵈrʳ); the anelastic path retains its fixed-density
+        # mass-fraction flux (ρʳ = ρqʳ).
         @inbounds begin
+            ρ₁ = density[i, j, 1]
+            ρᵈ₁ = coupling_density[i, j, 1]
             rᵛ₁ = μ.qᵛ[i, j, 1]
             rᶜˡ₁ = μ.qᶜˡ[i, j, 1]
             rʳ₁ = μ.qʳ[i, j, 1]
             rᵗ₁ = rᵛ₁ + rᶜˡ₁ + rʳ₁
             qʳ₁ = rʳ₁ / (1 + rᵗ₁)
-            Pˢᵘʳᶠ += qʳ₁ * μ.𝕎ʳ[i, j, 1]
+            ρqʳ₁ = ifelse(dry_air_coupled, ρᵈ₁ * rʳ₁, ρ₁ * qʳ₁)
+            Fˢᵘʳᶠ += ρqʳ₁ * μ.𝕎ʳ[i, j, 1]
         end
 
         zᵏ = znode(i, j, 1, grid, Center(), Center(), Center())
@@ -722,11 +735,11 @@ end
                 Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
 
                 # Rain sedimentation flux (upstream differencing)
-                ρᵏ = Cᵨ * ρ
+                ρᵏ = Cᵨ * coupling_density[i, j, k]
                 𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
                 zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
                 Δz = zᵏ⁺¹ - zᵏ
-                ρᵏ⁺¹ = Cᵨ * density[i, j, k+1]
+                ρᵏ⁺¹ = Cᵨ * coupling_density[i, j, k+1]
                 rʳᵏ⁺¹ = μ.qʳ[i, j, k+1]
                 𝕎ʳᵏ⁺¹ = μ.𝕎ʳ[i, j, k+1]
                 Δr𝕎 = Δtₛ * (ρᵏ⁺¹ * rʳᵏ⁺¹ * 𝕎ʳᵏ⁺¹ - ρᵏ * rʳ * 𝕎ʳᵏ) / (ρᵏ * Δz)
@@ -754,7 +767,8 @@ end
                 θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
 
                 θˡⁱ[i, j, k]  = θˡⁱ_new
-                ρθˡⁱ[i, j, k] = ρ * θˡⁱ_new
+                ρᵈ = coupling_density[i, j, k]
+                ρθˡⁱ[i, j, k] = ρᵈ * θˡⁱ_new
             end
         end
 
@@ -807,7 +821,8 @@ end
             θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
 
             θˡⁱ[i, j, k]  = θˡⁱ_new
-            ρθˡⁱ[i, j, k] = ρ * θˡⁱ_new
+            ρᵈ = coupling_density[i, j, k]
+            ρθˡⁱ[i, j, k] = ρᵈ * θˡⁱ_new
         end
 
         # Update terminal velocities for next subcycle
@@ -822,7 +837,13 @@ end
         end
     end
 
-    @inbounds precipitation_rate_field[i, j, 1] = Pˢᵘʳᶠ * inv_Ns
+    @inbounds begin
+        rᵗ₁ = μ.qᵛ[i, j, 1] + μ.qᶜˡ[i, j, 1] + μ.qʳ[i, j, 1]
+        final_surface_density = ifelse(dry_air_coupled,
+                                       coupling_density[i, j, 1] * (1 + rᵗ₁),
+                                       density[i, j, 1])
+        precipitation_rate_field[i, j, 1] = Fˢᵘʳᶠ * inv_Ns / final_surface_density
+    end
 
     #####
     ##### PHASE 3: Convert mixing ratio → mass fraction
@@ -831,15 +852,20 @@ end
     for k = 1:Nz
         @inbounds begin
             ρ = density[i, j, k]
+            ρᵈ = coupling_density[i, j, k]
             rᵛ = μ.qᵛ[i, j, k]
             rᶜˡ = μ.qᶜˡ[i, j, k]
             rʳ = μ.qʳ[i, j, k]
 
             qᵛ, qᶜˡ, qʳ, _qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
 
-            ρqᵛ[i, j, k]    = ρ * qᵛ
-            μ.ρqᶜˡ[i, j, k] = ρ * qᶜˡ
-            μ.ρqʳ[i, j, k]  = ρ * qʳ
+            # Compressible water partial densities are carried by dry air because rˣ = ρˣ/ρᵈ.
+            # After sedimentation changes rᵗ, ρᵈrˣ is consistent with the newly diagnosed
+            # total density ρ = ρᵈ(1 + rᵗ). Anelastic dynamics instead retain their legacy
+            # fixed-reference-density mass-fraction writeback.
+            ρqᵛ[i, j, k]    = ifelse(dry_air_coupled, ρᵈ * rᵛ, ρ * qᵛ)
+            μ.ρqᶜˡ[i, j, k] = ifelse(dry_air_coupled, ρᵈ * rᶜˡ, ρ * qᶜˡ)
+            μ.ρqʳ[i, j, k]  = ifelse(dry_air_coupled, ρᵈ * rʳ, ρ * qʳ)
             μ.qᵛ[i, j, k]   = qᵛ
             μ.qᶜˡ[i, j, k]  = qᶜˡ
             μ.qʳ[i, j, k]   = qʳ

@@ -297,6 +297,10 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     model_fields = fields(model)
 
+    # Refresh stage-local microphysics diagnostics before any tendency reads them.
+    # In particular, scalar sedimentation below consumes precomputed fall speeds.
+    prepare_microphysical_tendencies!(model)
+
     #####
     ##### Momentum tendencies (skip for kinematic dynamics)
     #####

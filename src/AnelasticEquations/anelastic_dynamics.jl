@@ -118,6 +118,15 @@ reference state density ``ρᵣ(z)``.
 """
 AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
+# The anelastic reference density ρᵣ(z) is evaluated at the reference temperature and
+# composition, so it is not the equation-of-state density of the local air. Vapor partial
+# pressure must use the latter: ρʰ = p(z) / (Rᵐ(q) T) at the reference pressure.
+@inline function AtmosphereModels.humidity_density(i, j, k, dynamics::AnelasticDynamics,
+                                                    T, q, constants)
+    @inbounds p = dynamics.reference_state.pressure[i, j, k]
+    return density(T, p, q, constants)
+end
+
 #####
 ##### Prognostic fields
 #####
