@@ -260,21 +260,6 @@ struct P3ProcessRates{FT}
     predicted_ssat_tendency :: FT
 end
 
-# Preserve the original 54-rate positional constructor used by downstream
-# diagnostics. New number-limiter and clip-accounting fields default to zero in
-# that compatibility path.
-function P3ProcessRates{FT}(first_rate::Number,
-                            remaining_rates::Vararg{Number, 53}) where FT
-    converted_rates = map(FT, remaining_rates)
-    return P3ProcessRates{FT}(FT(first_rate), converted_rates[1:4]..., zero(FT),
-                              converted_rates[5:10]...,
-                              zero(FT), zero(FT), zero(FT), zero(FT),
-                              converted_rates[11:53]...)
-end
-
-P3ProcessRates(first_rate::FT, remaining_rates::Vararg{FT, 53}) where FT =
-    P3ProcessRates{FT}(first_rate, remaining_rates...)
-
 @noinline function _p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
                                     temperature_tendency, vapor_tendency)
     FT = typeof(ρ)
@@ -680,7 +665,7 @@ end
     q = MoistureMassFractions(qᵛ, q_base.liquid + ssat_adjustment.ε, q_base.ice)
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρ, constants, T₀, qᵛ⁺ˡ)
-    transport = air_transport_properties(T, P)
+    transport = air_transport_properties(T, P, constants)
 
     cloud = diagnose_cloud_dsd(p3, qᶜˡ, ℳ.nᶜˡ, ρ)
     Nᶜ = cloud.Nᶜ

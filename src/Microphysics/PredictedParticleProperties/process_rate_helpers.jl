@@ -20,13 +20,11 @@ using Breeze.Thermodynamics: temperature,
                              liquid_latent_heat,
                              ice_latent_heat,
                              mixture_gas_constant,
-                             mixture_heat_capacity,
-                             vapor_gas_constant,
-                             LiquidIcePotentialTemperatureState,
-                             LiquidIceDensityState,
-                             StaticEnergyState,
-                             MoistureMassFractions,
-                             ThermodynamicConstants
+                              mixture_heat_capacity,
+                              vapor_gas_constant,
+                              LiquidIcePotentialTemperatureState,
+                              LiquidIceDensityState,
+                              StaticEnergyState
 using DocStringExtensions: TYPEDSIGNATURES
 
 #####
@@ -186,16 +184,6 @@ Returns a NamedTuple of the possibly-rescaled rates.
 
     return (; cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
               dep, coat_cond, coat_evap, nuc_q, nuc_n)
-end
-
-@inline function limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
-                                   dep, coat_cond, coat_evap, nuc_q, nuc_n,
-                                   qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety)
-    freezing_temperature = typeof(T)(273.15)
-    return limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
-                             dep, coat_cond, coat_evap, nuc_q, nuc_n,
-                             qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety,
-                             freezing_temperature)
 end
 
 @inline function safe_divide(a, b, default)
@@ -423,37 +411,19 @@ end
 
 
 #####
-##### Thermodynamic latent heat helpers (H1)
+##### Thermodynamic latent heat helpers
 #####
-##### When thermodynamic constants are available, use T-dependent latent heats
-##### for energy-budget consistency with the condensation path. When `nothing`
-##### is passed (backward-compatible path), fall back to the Fortran P3 v5.5.0
-##### hardcoded constants.
+##### Use T-dependent latent heats for energy-budget consistency with the
+##### condensation path.
 #####
 
-@inline sublimation_latent_heat(::Nothing, T) = typeof(T)(2.835e6)
 @inline sublimation_latent_heat(constants, T) = ice_latent_heat(T, constants)
 
-@inline vaporization_latent_heat(::Nothing, T) = typeof(T)(2.5e6)
 @inline vaporization_latent_heat(constants, T) = liquid_latent_heat(T, constants)
 
-@inline p3_dry_air_heat_capacity(::Nothing, FT) = FT(1005)
 @inline p3_dry_air_heat_capacity(constants, FT) = FT(constants.dry_air.heat_capacity)
 
-@inline p3_gravitational_acceleration(::Nothing, FT) = FT(9.81)
 @inline p3_gravitational_acceleration(constants, FT) = FT(constants.gravitational_acceleration)
-
-# GPU-compatible fallbacks: use precomputed module constants when constants=nothing.
-# The original code used `isnothing(constants) ? ThermodynamicConstants(FT) : constants`
-# but ThermodynamicConstants() allocates and cannot run on GPU. These dispatches provide
-# the same default values without allocation.
-using Breeze.Thermodynamics: Thermodynamics
-@inline Thermodynamics.vapor_gas_constant(::Nothing) = VAPOR_GAS_CONSTANT
-@inline Thermodynamics.dry_air_gas_constant(::Nothing) = DRY_AIR_GAS_CONSTANT
-@inline Thermodynamics.density(T, P, q::MoistureMassFractions, ::Nothing) =
-    Thermodynamics.density(T, P, q, ThermodynamicConstants(typeof(T)))
-@inline Thermodynamics.mixture_heat_capacity(q::MoistureMassFractions, ::Nothing) =
-    Thermodynamics.mixture_heat_capacity(q, ThermodynamicConstants(typeof(q.vapor)))
 
 @inline fusion_latent_heat(constants, T) = sublimation_latent_heat(constants, T) - vaporization_latent_heat(constants, T)
 
@@ -482,12 +452,9 @@ end
 #####
 ##### Saturation vapor pressure at freezing (M6)
 #####
-##### When thermodynamic constants are available, derive e_s(T₀) from the
-##### Clausius-Clapeyron or Tetens formula. When `nothing` is passed, fall back
-##### to the Fortran P3 v5.5.0 hardcoded 611 Pa (≈ e_s at 273.15 K).
+##### Derive e_s(T₀) from the Clausius-Clapeyron or Tetens formula.
 #####
 
-@inline saturation_vapor_pressure_at_freezing(::Nothing, T₀) = typeof(T₀)(611)
 @inline function saturation_vapor_pressure_at_freezing(constants, T₀)
     return saturation_vapor_pressure(T₀, constants, PlanarLiquidSurface())
 end

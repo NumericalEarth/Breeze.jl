@@ -160,6 +160,7 @@ using Oceananigans.Fields: interior
         p3_tab = PredictedParticlePropertiesMicrophysics()
 
         FT = Float64
+        constants = ThermodynamicConstants(FT)
         qr = FT(1e-3)
         nr = FT(1e4)
         T = FT(288.0)
@@ -168,11 +169,11 @@ using Oceananigans.Fields: interior
         qv_sat = FT(0.012)
         qv_sub = FT(0.008)   # 67% RH — subsaturated
 
-        rate_sub = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P)
+        rate_sub = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P, constants)
         @test rate_sub > 0   # Positive magnitude (M7)
 
         # Saturated: zero evaporation
-        rate_sat = rain_evaporation_rate(p3_tab, qr, nr, qv_sat, qv_sat, T, ρ, P)
+        rate_sat = rain_evaporation_rate(p3_tab, qr, nr, qv_sat, qv_sat, T, ρ, P, constants)
         @test rate_sat == 0
     end
 
@@ -182,6 +183,7 @@ using Oceananigans.Fields: interior
         p3_tab = PredictedParticlePropertiesMicrophysics()
 
         FT = Float64
+        constants = ThermodynamicConstants(FT)
         qr = FT(1e-3)
         nr = FT(1e4)
         T = FT(288.0)
@@ -190,7 +192,7 @@ using Oceananigans.Fields: interior
         qv_sat = FT(0.012)
         qv_sub = FT(0.008)
 
-        rate_tab = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P)
+        rate_tab = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P, constants)
 
         # Should be positive magnitude (M7) and finite
         @test rate_tab > 0
@@ -398,28 +400,37 @@ using Oceananigans.Fields: interior
     #####
 
     @testset "Air transport properties - reference values" begin
+        constants = ThermodynamicConstants()
         # T=273.15K, P=101325Pa: Dᵛ ≈ 2.23e-5, Kᵃ ≈ 0.024, ν ≈ 1.33e-5
         # Formula: Dᵛ = 8.794e-5 * T^1.81 / P, Kᵃ = 1414 * 1.496e-6 * T^1.5 / (T+120),
         #          ν  = Kᵃ / 1414 * 287.15 * T / P
-        props = air_transport_properties(273.15, 101325.0)
+        props = air_transport_properties(273.15, 101325.0, constants)
         @test props.Dᵛ ≈ 2.23e-5 atol=5e-7
         @test props.Kᵃ ≈ 0.0243 atol=5e-4
         @test props.ν ≈ 1.33e-5 atol=5e-7
 
+        custom_constants = ThermodynamicConstants(; dry_air_molar_mass=0.03)
+        custom_props = air_transport_properties(273.15, 101325.0, custom_constants)
+        @test custom_props.Dᵛ == props.Dᵛ
+        @test custom_props.Kᵃ == props.Kᵃ
+        @test custom_props.ν / props.ν ≈
+              dry_air_gas_constant(custom_constants) / dry_air_gas_constant(constants)
+
         # T=250K, P=50000Pa: Dᵛ ≈ 3.85e-5 (colder T but much lower P → higher Dᵛ)
-        props_cold_hi = air_transport_properties(250.0, 50000.0)
+        props_cold_hi = air_transport_properties(250.0, 50000.0, constants)
         @test props_cold_hi.Dᵛ ≈ 3.85e-5 atol=5e-6
     end
 
     @testset "Air transport properties - monotonicity" begin
+        constants = ThermodynamicConstants()
         # Dᵛ increases with T at fixed P
-        props_cold = air_transport_properties(240.0, 101325.0)
-        props_warm = air_transport_properties(300.0, 101325.0)
+        props_cold = air_transport_properties(240.0, 101325.0, constants)
+        props_warm = air_transport_properties(300.0, 101325.0, constants)
         @test props_warm.Dᵛ > props_cold.Dᵛ
 
         # Dᵛ decreases with P at fixed T
-        props_lo_p = air_transport_properties(273.15, 50000.0)
-        props_hi_p = air_transport_properties(273.15, 101325.0)
+        props_lo_p = air_transport_properties(273.15, 50000.0, constants)
+        props_hi_p = air_transport_properties(273.15, 101325.0, constants)
         @test props_lo_p.Dᵛ > props_hi_p.Dᵛ
 
         # Kᵃ increases with T (mu_air increases with T)
@@ -427,7 +438,8 @@ using Oceananigans.Fields: interior
     end
 
     @testset "Air transport properties - Float32 type stability" begin
-        props32 = air_transport_properties(Float32(273.15), Float32(101325.0))
+        constants = ThermodynamicConstants(Float32)
+        props32 = air_transport_properties(Float32(273.15), Float32(101325.0), constants)
         @test props32.Dᵛ isa Float32
         @test props32.Kᵃ isa Float32
         @test props32.ν isa Float32
@@ -507,12 +519,17 @@ using Oceananigans.Fields: interior
             FT(2e-7),   # accretion
             FT(0),      # cloud_self_collection (0 for KK2000)
             FT(5e-8),   # rain_evaporation (positive magnitude)
+            FT(0),      # rain_evaporation_number
             FT(1e-6),   # rain_self_collection (positive magnitude)
             FT(5e-7),   # rain_breakup
             FT(3e-7),   # deposition (bidirectional)
             FT(1e-8),   # partial_melting
             FT(5e-8),   # complete_melting
             FT(1e3),    # melting_number (positive magnitude)
+            FT(0),      # clipping_dry_mass
+            FT(0),      # clipping_rime_mass
+            FT(0),      # clipping_rime_volume
+            FT(0),      # post_process_clipping
             FT(0.0),    # sublimation_number (D2: nisub)
             FT(500.0),  # aggregation (positive magnitude)
             FT(0.0),    # ni_limit (C3: global Nᵢ cap)

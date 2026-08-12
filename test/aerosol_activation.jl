@@ -19,12 +19,39 @@ using Oceananigans.Fields: interior, set!
     FT = Float64
 
     @testset "AerosolMode construction" begin
+        thermodynamic_constants = Breeze.ThermodynamicConstants(FT)
         mode = AerosolMode(FT)
         # Default ammonium sulfate (Fortran P3): βact = vi * osm * epsm * mw * rhoa / (map * rhow)
-        expected_beta = 3.0 * 1.0 * 0.9 * 0.018 * 1777.0 / (0.132 * 1000.0)
+        expected_beta = 3 * 0.9 * thermodynamic_constants.vapor.molar_mass * 1777 /
+                        (0.132 * thermodynamic_constants.liquid.density)
         @test mode.solute_activity ≈ expected_beta rtol=1e-10
-        @test mode.number_mixing_ratio == 300e6
-        @test mode.mean_radius == 0.05e-6
+        @test mode.number_mixing_ratio == 3e8
+        @test mode.mean_radius == 5e-8
+
+        aerosol = AerosolActivation(mode)
+        @test aerosol.molecular_weight_water == thermodynamic_constants.vapor.molar_mass
+        @test aerosol.universal_gas_constant == thermodynamic_constants.molar_gas_constant
+        @test aerosol.liquid_water_density == thermodynamic_constants.liquid.density
+        @test aerosol.surface_tension_reference_temperature ==
+              thermodynamic_constants.energy_reference_temperature
+
+        custom_liquid = Breeze.CondensedPhase(FT;
+            reference_latent_heat = 2500800,
+            heat_capacity = 4181,
+            density = 950)
+        custom_constants = Breeze.ThermodynamicConstants(FT;
+            molar_gas_constant = 8,
+            energy_reference_temperature = 275,
+            vapor_molar_mass = 0.02,
+            liquid = custom_liquid)
+        custom_mode = AerosolMode(FT; thermodynamic_constants = custom_constants)
+        custom_aerosol = AerosolActivation(custom_mode;
+                                           thermodynamic_constants = custom_constants)
+        @test custom_mode.solute_activity ≈ 3 * 0.9 * 0.02 * 1777 / (0.132 * 950)
+        @test custom_aerosol.molecular_weight_water == 0.02
+        @test custom_aerosol.universal_gas_constant == 8
+        @test custom_aerosol.liquid_water_density == 950
+        @test custom_aerosol.surface_tension_reference_temperature == 275
     end
 
     @testset "Single-mode activated number" begin
@@ -115,8 +142,8 @@ end
     @test isempty(aerosol_field_names(p3_prescribed))
     @test isempty(aerosol_field_names(nothing))
 
-    @testset "P3MicrophysicalState defaults missing aerosol to zero" begin
-        state = P3MicrophysicalState(ntuple(_ -> zero(FT), 11)...)
+    @testset "P3MicrophysicalState stores aerosol number" begin
+        state = P3MicrophysicalState(ntuple(_ -> zero(FT), 12)...)
         @test state.nᵃ == 0
     end
 

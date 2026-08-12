@@ -208,14 +208,36 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test cloud_custom.shape_parameter > cloud.shape_parameter
     end
 
-    @testset "Water density is shared" begin
-        # Water density should be at top level, shared by cloud and rain
+    @testset "Thermodynamic constants are shared" begin
+        # Water density should be at top level, shared by cloud and rain.
         p3 = PredictedParticlePropertiesMicrophysics()
         @test p3.water_density ≈ 1000.0
+        @test p3.process_rates.liquid_water_density == p3.water_density
 
-        # Custom water density
-        p3_custom = PredictedParticlePropertiesMicrophysics(Float64; water_density=998.0)
+        default_constants = ThermodynamicConstants()
+        custom_liquid = Breeze.CondensedPhase(Float64;
+            reference_latent_heat = default_constants.liquid.reference_latent_heat,
+            heat_capacity = default_constants.liquid.heat_capacity,
+            density = 998)
+        custom_ice = Breeze.CondensedPhase(Float64;
+            reference_latent_heat = default_constants.ice.reference_latent_heat,
+            heat_capacity = default_constants.ice.heat_capacity,
+            density = 910)
+        custom_constants = ThermodynamicConstants(Float64;
+            dry_air_molar_mass = 0.03,
+            liquid = custom_liquid,
+            ice = custom_ice)
+        p3_custom = PredictedParticlePropertiesMicrophysics(Float64;
+                                                            thermodynamic_constants = custom_constants)
+
         @test p3_custom.water_density ≈ 998.0
+        @test p3_custom.process_rates.liquid_water_density == 998
+        @test p3_custom.process_rates.pure_ice_density == 910
+        @test p3_custom.process_rates.initial_rain_drop_mass ≈ 4π / 3 * 998 * (25e-6)^3
+        @test p3_custom.process_rates.reference_air_density ≈
+              100000 / (dry_air_gas_constant(custom_constants) * 273.15)
+        @test p3_custom.ice.fall_speed.reference_air_density ≈
+              60000 / (dry_air_gas_constant(custom_constants) * 253.15)
     end
 
     @testset "Prognostic field names" begin

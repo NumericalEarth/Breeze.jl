@@ -35,6 +35,8 @@ Two weighted fall speeds are computed by integrating over the size distribution:
 
 # Keyword Arguments
 
+- `thermodynamic_constants`: Source of the dry-air gas constant used to diagnose
+  the default reference-air density.
 - `reference_air_density`: Reference ρ₀ [kg/m³], default ≈0.825 (P3 mid-troposphere reference)
 
 # References
@@ -42,7 +44,8 @@ Two weighted fall speeds are computed by integrating over the size distribution:
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 20.
 """
 function IceFallSpeed(FT::Type{<:AbstractFloat} = Float64;
-                      reference_air_density = 60000 / (dry_air_gas_constant(ThermodynamicConstants()) * 253.15))
+                      thermodynamic_constants = ThermodynamicConstants(FT),
+                      reference_air_density = 60000 / (dry_air_gas_constant(thermodynamic_constants) * 253.15))
     return IceFallSpeed(FT(reference_air_density), nothing, nothing)
 end
 

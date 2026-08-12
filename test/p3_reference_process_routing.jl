@@ -57,7 +57,7 @@ function routing_derived_state(p3, air_density, microphysical_state,
         air_temperature, air_density, constants, PlanarLiquidSurface())
     vapor_saturation_ice = saturation_specific_humidity(
         air_temperature, air_density, constants, PlanarIceSurface())
-    transport = P3Routing.air_transport_properties(air_temperature, pressure)
+    transport = P3Routing.air_transport_properties(air_temperature, pressure, constants)
     cloud = P3Routing.diagnose_cloud_dsd(
         p3, microphysical_state.qᶜˡ, microphysical_state.nᶜˡ, air_density)
 
@@ -107,7 +107,8 @@ end
             zero(FT), zero(FT), dry_ice, coating, constants)
         microphysical_state = P3MicrophysicalState(
             zero(FT), zero(FT), zero(FT), zero(FT),
-            dry_ice, ice_number, zero(FT), zero(FT), coating, zero(FT))
+            dry_ice, ice_number, zero(FT), zero(FT), coating, zero(FT),
+            zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
@@ -141,7 +142,8 @@ end
             zero(FT), zero(FT), dry_ice, coating, constants)
         microphysical_state = P3MicrophysicalState(
             zero(FT), zero(FT), zero(FT), zero(FT),
-            dry_ice, ice_number, zero(FT), zero(FT), coating, zero(FT))
+            dry_ice, ice_number, zero(FT), zero(FT), coating, zero(FT),
+            zero(FT), zero(FT))
         _, state = routing_derived_state(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
 
@@ -180,7 +182,7 @@ end
         microphysical_state = P3MicrophysicalState(
             cloud, cloud_number, zero(FT), zero(FT),
             dry_ice, ice_number, rime_mass, rime_volume,
-            coating, zero(FT))
+            coating, zero(FT), zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
@@ -248,7 +250,8 @@ end
             ThermodynamicConstants(FT))
         cloud_state = P3MicrophysicalState(
             cloud_mass, cloud_number, zero(FT), zero(FT),
-            zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT))
+            zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT),
+            zero(FT), zero(FT))
         cloud_rates = compute_p3_process_rates(
             p3, air_density, cloud_state, cloud_thermodynamic_state,
             ThermodynamicConstants(FT))
@@ -280,7 +283,8 @@ end
             ThermodynamicConstants(FT))
         rain_state = P3MicrophysicalState(
             zero(FT), zero(FT), rain_mass, rain_number,
-            zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT))
+            zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT),
+            zero(FT), zero(FT))
         rain_rates = compute_p3_process_rates(
             p3, air_density, rain_state, rain_thermodynamic_state,
             ThermodynamicConstants(FT))
@@ -315,7 +319,7 @@ end
         microphysical_state = P3MicrophysicalState(
             cloud, cloud_number, zero(FT), zero(FT),
             dry_ice, ice_number, rime_mass, rime_volume,
-            coating, zero(FT))
+            coating, zero(FT), zero(FT), zero(FT))
         props, state = routing_derived_state(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
         phase1 = P3Routing.P3Phase1Rates{FT}(
@@ -373,7 +377,7 @@ end
             wet_growth_rain, wet_growth_rain_number,
             wet_growth_ice, wet_growth_ice_number,
             wet_growth_rime, wet_growth_rime / FT(400),
-            zero(FT), zero(FT))
+            zero(FT), zero(FT), zero(FT), zero(FT))
         wet_growth_thermodynamic_state = routing_thermodynamic_state(
             wet_growth_temperature, one(FT), FT(85000), wet_growth_vapor,
             wet_growth_cloud, wet_growth_rain, wet_growth_ice, zero(FT),
@@ -406,7 +410,7 @@ end
             wet_growth_rain, wet_growth_rain_number,
             wet_growth_ice, wet_growth_ice_number,
             wet_growth_rime, wet_growth_rime / FT(400),
-            inactive_coating, zero(FT))
+            inactive_coating, zero(FT), zero(FT), zero(FT))
         coated_wet_growth_rates = compute_p3_process_rates(
             p3, one(FT), coated_wet_growth_state,
             wet_growth_thermodynamic_state, constants)
@@ -446,7 +450,8 @@ end
             zero(FT), zero(FT), dry_ice, coating, constants)
         microphysical_state = P3MicrophysicalState(
             zero(FT), zero(FT), zero(FT), zero(FT),
-            dry_ice, ice_number, zero(FT), zero(FT), coating, zero(FT))
+            dry_ice, ice_number, zero(FT), zero(FT), coating, zero(FT),
+            zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(
             p3, air_density, microphysical_state, thermodynamic_state, constants)

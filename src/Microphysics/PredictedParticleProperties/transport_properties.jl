@@ -40,6 +40,8 @@ size distribution shape parameter throughout this module.
 # Arguments
 - `T`: Temperature [K]
 - `P`: Pressure [Pa]
+- `constants`: Thermodynamic constants supplying the dry-air gas constant used
+  in the kinematic-viscosity calculation.
 
 # Reference values
 
@@ -51,15 +53,17 @@ At T = 273.15 K, P = 101325 Pa:
 # Example
 
 ```jldoctest
+using Breeze
 using Breeze.Microphysics.PredictedParticleProperties: air_transport_properties
-props = air_transport_properties(273.15, 101325.0)
+constants = ThermodynamicConstants()
+props = air_transport_properties(273.15, 101325.0, constants)
 typeof(props.Dᵛ)
 
 # output
 Float64
 ```
 """
-@inline function air_transport_properties(T, P)
+@inline function air_transport_properties(T, P, constants)
     FT = typeof(T)
     T_safe = max(T, FT(MINIMUM_TRANSPORT_TEMPERATURE))
 
@@ -71,7 +75,7 @@ Float64
     η = FT(SUTHERLAND_COEFFICIENT) * sqrt(T_safe)^3 / (T_safe + FT(SUTHERLAND_TEMPERATURE))
 
     Kᵃ = FT(AIR_HEAT_CAPACITY_PRANDTL_RATIO) * η
-    Rᵈ = FT(DRY_AIR_GAS_CONSTANT)
+    Rᵈ = FT(dry_air_gas_constant(constants))
     ν = η * Rᵈ * T_safe / P
 
     return (; Dᵛ, Kᵃ, ν)

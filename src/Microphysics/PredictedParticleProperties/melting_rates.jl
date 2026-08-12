@@ -38,7 +38,7 @@ where:
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
 - `ρ`: Air density [kg/m³]
-- `constants`: Thermodynamic constants (or `nothing` for Fortran-matched hardcoded values)
+- `constants`: Thermodynamic constants
 - `transport`: Pre-computed air transport properties `(; Dᵛ, Kᵃ, ν)`
 
 # Returns
@@ -67,8 +67,7 @@ where:
     ΔT = T - T₀
     is_melting = ΔT > 0
 
-    # Thermodynamic constants: ℒᶠᵘˢ and ℒˡ are T-dependent when constants
-    # are provided (H1).
+    # Thermodynamic constants: ℒᶠᵘˢ and ℒˡ are T-dependent.
     ℒᶠᵘˢ = fusion_latent_heat(constants, T)
     ℒˡ = vaporization_latent_heat(constants, T)
     # T,P-dependent transport properties (pre-computed or computed on demand)
@@ -165,7 +164,7 @@ Requires tabulated small/large ice ventilation integrals.
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
 - `ρ`: Air density [kg/m³]
-- `constants`: Thermodynamic constants (or `nothing` for Fortran-matched hardcoded values)
+- `constants`: Thermodynamic constants
 - `transport`: Pre-computed air transport properties `(; Dᵛ, Kᵃ, ν)`
 
 # Returns

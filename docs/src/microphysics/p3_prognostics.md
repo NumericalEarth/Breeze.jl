@@ -334,8 +334,8 @@ riming, refreezing, immersion freezing, and homogeneous freezing all
 deposit at the maximum rime density ``ρ^f_\text{max} = 900`` kg/m³. ``\dot{b}_\text{clip}``
 is the whole-particle volume companion, and ``\dot{b}_\text{dens}``
 is the melt-densification correction that drives the remaining rime
-toward solid ice density (`pure_ice_density`, 917 kg/m³) when ``ρ^f < 917`` and
-liquid fraction is *not* active.
+toward the configured solid-ice density (`pure_ice_density`, 917 kg/m³ by
+default) when ``ρ^f`` is below that density and liquid fraction is *not* active.
 
 ### Liquid on Ice Tendency
 

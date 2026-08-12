@@ -89,9 +89,9 @@ takes it from the scheme parameter `cloud.number_concentration`.
 
 # Keyword Arguments
 
+- `thermodynamic_constants`: Source of shared phase and dry-air properties.
 - `lookup_tables`: Path to a directory containing Fortran P3 lookup table files
   (default to the artifact `P3_lookup_tables` in `Artifacts.toml`).
-- `water_density`: Liquid water density [kg/m³] (default 1000)
 - `minimum_mass_mixing_ratio`: Mass below which a species is treated as absent
   [kg/kg] (default 10⁻¹⁴, Fortran `qsmall`)
 - `minimum_number_mixing_ratio`: Number below which a population is treated as
@@ -138,7 +138,7 @@ See also the [P3 documentation](@ref p3_overview) for detailed physics.
 """
 function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Float64;
                                                  lookup_tables = artifact"P3_lookup_tables",
-                                                 water_density = 1000,
+                                                 thermodynamic_constants = ThermodynamicConstants(FT),
                                                  minimum_mass_mixing_ratio = 1e-14,
                                                  minimum_number_mixing_ratio = 1e-16,
                                                  precipitation_boundary_condition = nothing,
@@ -149,14 +149,15 @@ function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Flo
                                                  predict_supersaturation = false,
                                                  warm_rain_scheme = KhairoutdinovKogan2000())
     if isnothing(process_rates)
-        process_rates = ProcessRateParameters(FT; predict_supersaturation)
+        process_rates = ProcessRateParameters(FT; thermodynamic_constants,
+                                              predict_supersaturation)
     end
     return read_lookup_tables(lookup_tables; FT,
-                                      water_density,
-                                      minimum_mass_mixing_ratio, minimum_number_mixing_ratio,
-                                      precipitation_boundary_condition,
-                                      negative_moisture_correction,
-                                      aerosol, cloud, process_rates, warm_rain_scheme)
+                              thermodynamic_constants,
+                              minimum_mass_mixing_ratio, minimum_number_mixing_ratio,
+                              precipitation_boundary_condition,
+                              negative_moisture_correction,
+                              aerosol, cloud, process_rates, warm_rain_scheme)
 end
 
 # Shorthand alias

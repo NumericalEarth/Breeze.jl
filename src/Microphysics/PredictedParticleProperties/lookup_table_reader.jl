@@ -38,19 +38,20 @@ since they are not included in the ASCII table files.
 
 - `FT`: Float type (default `Float64`)
 - `arch`: Architecture for GPU transfer (default `CPU()`)
+- `thermodynamic_constants`: Source of shared phase and dry-air properties.
 """
 function read_lookup_tables(directory::AbstractString;
-                                    FT::Type{<:AbstractFloat} = Float64,
-                                    arch = CPU(),
-                                    water_density = 1000,
-                                    minimum_mass_mixing_ratio = 1e-14,
-                                    minimum_number_mixing_ratio = 1e-16,
-                                    precipitation_boundary_condition = nothing,
-                                    negative_moisture_correction = SpeciesBorrowing(),
-                                    aerosol = nothing,
-                                    cloud = nothing,
-                                    process_rates = nothing,
-                                    warm_rain_scheme = KhairoutdinovKogan2000())
+                            FT::Type{<:AbstractFloat} = Float64,
+                            arch = CPU(),
+                            thermodynamic_constants = ThermodynamicConstants(FT),
+                            minimum_mass_mixing_ratio = 1e-14,
+                            minimum_number_mixing_ratio = 1e-16,
+                            precipitation_boundary_condition = nothing,
+                            negative_moisture_correction = SpeciesBorrowing(),
+                            aerosol = nothing,
+                            cloud = nothing,
+                            process_rates = nothing,
+                            warm_rain_scheme = KhairoutdinovKogan2000())
 
     table1_file = joinpath(directory, "p3_lookupTable_1.dat-v6.9-2momI")
     isfile(table1_file) || error("2momI table not found: $table1_file")
@@ -67,7 +68,8 @@ function read_lookup_tables(directory::AbstractString;
 
     # Build IceProperties with tabulated fields
     ice = build_ice_properties_from_tables(
-        ice_tables_5d, rain_ice_tables, ice_integrals_tab, rain_ice_collection_tab, FT)
+        ice_tables_5d, rain_ice_tables, ice_integrals_tab, rain_ice_collection_tab, FT;
+        thermodynamic_constants)
 
     # Generate rain 1D tables from Julia quadrature
     rain_base = RainProperties(FT)
@@ -75,10 +77,14 @@ function read_lookup_tables(directory::AbstractString;
 
     # Construct full scheme
     cloud = isnothing(cloud) ? CloudDropletProperties(FT) : cloud
-    input_process_rates = isnothing(process_rates) ? ProcessRateParameters(FT) : process_rates
+    input_process_rates = if isnothing(process_rates)
+        ProcessRateParameters(FT; thermodynamic_constants)
+    else
+        process_rates
+    end
 
     return PredictedParticlePropertiesMicrophysics(
-        FT(water_density),
+        FT(thermodynamic_constants.liquid.density),
         FT(minimum_mass_mixing_ratio),
         FT(minimum_number_mixing_ratio),
         ice,
@@ -185,9 +191,10 @@ end
 #####
 
 function build_ice_properties_from_tables(ice_5d, rain_ice,
-                                          ice_integrals_tab, rain_ice_collection_tab, FT)
+                                          ice_integrals_tab, rain_ice_collection_tab, FT;
+                                          thermodynamic_constants = ThermodynamicConstants(FT))
     # Start from default IceProperties for physical constants
-    ice_base = IceProperties(FT)
+    ice_base = IceProperties(FT; thermodynamic_constants)
 
     # Build sub-structs with tabulated fields replacing integral placeholders
     fall_speed = IceFallSpeed(

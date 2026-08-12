@@ -40,8 +40,9 @@ particles have significantly enhanced vapor exchange compared to stationary
 particles.
 
 Thermal conductivity ``κ`` and vapor diffusivity ``Dᵥ`` are computed at runtime
-from temperature and pressure via `air_transport_properties(T, P)` — they are
-not stored on `IceDeposition`.
+from temperature, pressure, and the model thermodynamic constants via
+`air_transport_properties(T, P, constants)`. They are not stored on
+`IceDeposition`.
 
 **Basic ventilation integrals:**
 - `ventilation`: Integrated over full size spectrum

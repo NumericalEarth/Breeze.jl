@@ -328,7 +328,8 @@ Compute rime volume tendency from P3 process rates.
 Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime.
 Includes sublimation loss (M8): sublimation removes rime volume proportionally.
 Includes melt-densification (Fortran P3 v5.5.0): during melting, low-density
-rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
+rime portions melt preferentially, driving the remaining rime toward the
+configured solid-ice density.
 """
 @inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ, qⁱ, prp)
     FT = typeof(ρ)
@@ -338,7 +339,8 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
 
     # Fortran P3 v5.5.0: rho_rimeMax = 900 for rain rime and freezing
     ρ_rimemax = prp.maximum_rime_density
-    # Fortran uses rho_rimeMax (900) for homogeneous freezing rime volume, not 917
+    # Fortran uses rho_rimeMax (900) for homogeneous freezing rime volume, not
+    # the solid-ice density.
     ρ_rim_hom = prp.maximum_rime_density
 
     # Phase 2: Volume gain from new rime
@@ -369,17 +371,18 @@ rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
                   rates.clipping_rime_volume
 
     # Melt-densification (Fortran P3 v5.5.0 lines 4309-4313)
-    # Low-density rime portions melt first → remaining ice approaches 917 kg/m³.
-    # In tendency form: additional volume reduction = bᶠ × (917 - ρᶠ) × |melt| / (ρᶠ × qⁱ)
+    # Low-density rime portions melt first, so the remaining ice approaches ρ_solid_ice.
+    # In tendency form: additional volume reduction =
+    # bᶠ × (ρ_solid_ice - ρᶠ) × |melt| / (ρᶠ × qⁱ).
     # Fortran guards with `.not. log_LiquidFrac`: when liquid fraction is active,
     # melt-densification is skipped because the liquid is tracked explicitly in qʷⁱ.
-    # NOTE: The densification target is solid ice density (917), NOT rho_rimeMax (900).
-    ρ_solid_ice = prp.pure_ice_density  # 917 kg/m³
+    # The densification target is the configured solid-ice density, not rho_rimeMax.
+    ρ_solid_ice = prp.pure_ice_density
     qⁱ_safe = max(qⁱ, FT(prp.floors.mass_scale))
     bᶠ = Fᶠ * qⁱ_safe / ρᶠ_safe
     densification = bᶠ * (ρ_solid_ice - ρᶠ_safe) * ordinary_total_melting /
                     (ρᶠ_safe * qⁱ_safe)
-    # Only apply when ρᶠ < 917, there is melting, AND liquid fraction is not active
+    # Apply only below the solid-ice density when liquid fraction is not active.
     apply_densification = (ρᶠ_safe < ρ_solid_ice) & !prp.liquid_fraction_active
     densification = ifelse(apply_densification, densification, zero(FT))
 

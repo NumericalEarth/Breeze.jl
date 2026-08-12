@@ -69,6 +69,7 @@ This container organizes all ice-related computations:
 
 # Keyword Arguments
 
+- `thermodynamic_constants`: Source of constants used by the ice-property defaults.
 - `minimum_rime_density`: Lower bound for ρᶠ [kg/m³], default 50
 - `maximum_rime_density`: Upper bound for ρᶠ [kg/m³], default 900 (pure ice)
 - `maximum_shape_parameter`: Upper limit on μ [-], default 20
@@ -79,6 +80,7 @@ The mass-diameter relationship is from
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 """
 function IceProperties(FT::Type{<:AbstractFloat} = Float64;
+                       thermodynamic_constants = ThermodynamicConstants(FT),
                        minimum_rime_density = 50,
                        maximum_rime_density = 900,
                        maximum_shape_parameter = 20,
@@ -87,7 +89,7 @@ function IceProperties(FT::Type{<:AbstractFloat} = Float64;
         FT(minimum_rime_density),
         FT(maximum_rime_density),
         FT(maximum_shape_parameter),
-        IceFallSpeed(FT),
+        IceFallSpeed(FT; thermodynamic_constants),
         IceDeposition(FT),
         IceBulkProperties(FT),
         IceCollection(),

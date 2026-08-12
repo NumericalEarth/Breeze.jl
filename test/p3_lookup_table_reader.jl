@@ -38,6 +38,8 @@ const _lookup_table_dir = ensure_artifact_installed("P3_lookup_tables", joinpath
     @test tables isa P3LookupTables
     @test tables.ice_integrals isa P3IceIntegralsTable
     @test tables.rain_ice_collection isa P3RainIceCollectionTable
+    @test p3.water_density == 1000
+    @test p3.process_rates.liquid_water_density == 1000
 
     @test p3.ice.fall_speed.mass_weighted isa RimeDensityIndexedTable5D
     @test p3.ice.deposition.ventilation isa RimeDensityIndexedTable5D

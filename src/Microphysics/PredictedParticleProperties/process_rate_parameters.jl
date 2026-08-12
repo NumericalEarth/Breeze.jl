@@ -279,6 +279,9 @@ $(TYPEDSIGNATURES)
 
 Construct process rate parameters with default values from P3 literature.
 
+The liquid-water density and the dry-air gas constant used by the reference-density
+calculation come from `thermodynamic_constants`.
+
 These parameters control the rates of all microphysical processes:
 autoconversion, accretion, aggregation, riming, melting, evaporation,
 deposition, nucleation, and freezing.
@@ -320,11 +323,10 @@ donor-budget limiter uses four re-projection passes by default; set
 """
 function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Physical constants
-        liquid_water_density = 1000,
-        pure_ice_density = 917,
+        thermodynamic_constants = ThermodynamicConstants(FT),
+        pure_ice_density = thermodynamic_constants.ice.density,
         # Reference density for rain fall speed correction (P=1000 hPa, T=0°C)
-        # computed from Breeze's internal dry-air gas constant.
-        reference_air_density = 100000 / (dry_air_gas_constant(ThermodynamicConstants()) * 273.15),
+        reference_air_density = 100000 / (dry_air_gas_constant(thermodynamic_constants) * 273.15),
         nucleated_ice_mass = 4 * FT(π) / 3 * 900 * (1e-6)^3,  # Fortran mi0: sphere of radius 1 μm, ρ=900 kg/m³ [kg]
         activated_droplet_radius = 1e-6,               # Fortran cons7 uses a 1 μm droplet
         activation_supersaturation_threshold = 1e-6,   # Fortran sup_cld threshold
@@ -427,7 +429,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         splintering_surface_temperature_max = 282.0,
 
         # Initial rain drop
-        initial_rain_drop_mass = 4 * FT(π) / 3 * 1000 * (25e-6)^3,  # Fortran P3 v5.5.0: 25 μm radius drop [kg]
+        # Fortran P3 v5.5.0 uses a 25 μm radius; mass follows the configured liquid density.
+        initial_rain_drop_mass = 4 * FT(π) / 3 * thermodynamic_constants.liquid.density * (25e-6)^3,
 
         # Homogeneous freezing
         homogeneous_freezing_temperature = 233.15,
@@ -482,7 +485,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
     predict_supersaturation = Bool(predict_supersaturation)
 
     return ProcessRateParameters{FT, predict_supersaturation}(
-        FT(liquid_water_density),
+        FT(thermodynamic_constants.liquid.density),
         FT(pure_ice_density),
         FT(reference_air_density),
         FT(nucleated_ice_mass),

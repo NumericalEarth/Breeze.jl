@@ -56,20 +56,6 @@ struct P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
     w   :: FT
 end
 
-@inline function P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
-                                      qᶠ, bᶠ, qʷⁱ, sˢᵃᵗ)
-    FT = typeof(sˢᵃᵗ)
-    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
-                                qᶠ, bᶠ, qʷⁱ, sˢᵃᵗ, zero(FT), zero(FT))
-end
-
-@inline function P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
-                                      qᶠ, bᶠ, qʷⁱ, sˢᵃᵗ, nᵃ)
-    FT = typeof(sˢᵃᵗ)
-    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
-                                qᶠ, bᶠ, qʷⁱ, sˢᵃᵗ, nᵃ, zero(FT))
-end
-
 # Initial aerosol reservoir for the prognostic-ρnᵃ path.
 #
 # P3's aerosol distribution is specified per unit mass: `AerosolMode.number_mixing_ratio` is
@@ -885,7 +871,7 @@ end
                                   rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
     T = temperature(𝒰, constants)
     P = p3_air_pressure(𝒰, constants)
-    transport = air_transport_properties(T, P)
+    transport = air_transport_properties(T, P, constants)
     λ_r = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     return P3IceProps{FT}(rime_state.qᶠ, rime_state.bᶠ, rime_state.Fᶠ, Fˡ,
                           rime_state.ρᶠ, bounds.qⁱ_total, bounds.nⁱ,

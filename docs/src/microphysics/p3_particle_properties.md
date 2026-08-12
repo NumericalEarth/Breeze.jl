@@ -27,9 +27,9 @@ m(D) = \frac{π}{6} ρ^i D³
 ```
 
 where ``ρ^i = 900`` kg/m³ is the bulk ice density, matching the Fortran P3
-runtime convention. The slightly higher pure-ice value ``ρ^i_\text{pure} = 917``
-kg/m³ (`pure_ice_density`) is reserved for the radar reflectivity diagnostic
-and the melt densification of rime.
+runtime convention. The pure-ice density (`pure_ice_density`, 917 kg/m³ by
+default) is reserved for the radar reflectivity diagnostic and the melt
+densification of rime.
 
 **Regime 2: Vapor-Grown Aggregates** (``D^{th} ≤ D < D^{gr}`` or unrimed)
 

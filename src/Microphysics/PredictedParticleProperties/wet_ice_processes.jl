@@ -70,19 +70,6 @@ function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
     return clamp(ρᶠ, ρ_rim_min, ρ_rim_max)
 end
 
-# Backward-compatible 8-arg method: uses prescribed cloud DSD (μ_c, Nᶜ from p3.cloud).
-# The full 10-arg form takes locally diagnosed (μ_c, λ_c) per Fortran p3_main parity.
-function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport)
-    FT = typeof(T)
-    μ_c = p3.cloud.shape_parameter
-    Nᶜ = p3.cloud.number_concentration
-    ρᴸ = p3.process_rates.liquid_water_density
-    mass_scale = FT(p3.process_rates.floors.mass_scale)
-    qᶜˡ_abs = max(clamp_positive(qᶜˡ) * ρ, mass_scale)
-    λ_c = cloud_lambda(Nᶜ, μ_c, qᶜˡ_abs, ρᴸ)
-    return rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport, μ_c, λ_c)
-end
-
 #####
 ##### Phase 2: Shedding and Refreezing (liquid fraction dynamics)
 #####
@@ -199,7 +186,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
 - `ρ`: Air density [kg/m³]
-- `constants`: Thermodynamic constants (or `nothing`)
+- `constants`: Thermodynamic constants
 - `transport`: Pre-computed air transport properties `(; Dᵛ, Kᵃ, ν)`
 
 # Returns
@@ -272,7 +259,7 @@ appendix C, section i (and Mason 1971 for the underlying heat-balance form).
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
 - `ρ`: Air density [kg/m³]
-- `constants`: Thermodynamic constants (or `nothing` for Fortran-matched hardcoded values)
+- `constants`: Thermodynamic constants
 - `transport`: Pre-computed air transport properties `(; Dᵛ, Kᵃ, ν)`
 
 # Returns

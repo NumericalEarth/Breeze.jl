@@ -8,8 +8,10 @@
 """
     AerosolMode
 
-One lognormal aerosol mode for CCN activation.
-See [`AerosolMode`](@ref) constructor for details.
+One component of a multimodal aerosol size distribution used for CCN activation.
+Each mode represents a physically distinct particle population with a lognormal
+radius distribution and shared chemical properties. See the [`AerosolMode`](@ref)
+constructor for details.
 """
 struct AerosolMode{FT}
     number_mixing_ratio :: FT        # Na [kg⁻¹], per unit mass of air (not per volume)
@@ -26,7 +28,11 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct an `AerosolMode` representing one lognormal aerosol population.
+Construct an `AerosolMode` representing one component of a multimodal aerosol
+size distribution. Particles in a mode share one chemical composition and their
+radii follow a lognormal distribution described by `mean_radius` and
+`geometric_std`. Multiple modes can therefore represent distinct aerosol
+populations, such as Aitken and accumulation particles.
 
 The solute activity parameter ``β_{act} = ν_i ϕ_s ε_m M_w ρ_a / (M_a ρ_w)``
 is precomputed at construction time from the chemistry parameters.
@@ -47,18 +53,21 @@ Default chemistry is ammonium sulfate (NH₄)₂SO₄.
   Pass `nᵃ` [kg⁻¹] or `ρnᵃ` [m⁻³] to `set!` to override, which is also how a partly depleted
   reservoir survives a `set!`.
 - `mean_radius`: Geometric mean radius [m], default 0.05 μm
-- `geometric_std`: Geometric standard deviation [-], default 2.0
-- `vant_hoff_factor`: van't Hoff factor [-], default 3.0
-- `osmotic_potential`: Osmotic potential [-], default 1.0
+- `geometric_std`: Geometric standard deviation [-], default 2
+- `vant_hoff_factor`: van't Hoff factor [-], default 3
+- `osmotic_potential`: Osmotic potential [-], default 1
 - `mass_fraction_soluble`: Mass fraction soluble [-], default 0.9
-- `aerosol_density`: Aerosol density [kg/m³], default 1777.0
+- `aerosol_density`: Aerosol density [kg/m³], default 1777
 - `molecular_weight_aerosol`: Molecular weight of aerosol [kg/mol], default 0.132
-- `molecular_weight_water`: Molecular weight of the condensate [kg/mol], default 0.018
-- `liquid_water_density`: Density of the condensate [kg/m³], default 1000.0
+- `thermodynamic_constants`: Constants supplying the water molecular weight and
+  liquid-water density
+- `molecular_weight_water`: Molecular weight of the condensate [kg/mol], default
+  `thermodynamic_constants.vapor.molar_mass`
 
-The last two enter only through ``β_{act}``. They are the condensate-specific
-inputs to this mode, so a species other than water is configured by overriding
-them here and the surface-tension fit in [`AerosolActivation`](@ref).
+The molecular weight and `thermodynamic_constants.liquid.density` enter only
+through ``β_{act}``. A condensable species other than water is configured through
+`thermodynamic_constants` and the surface-tension fit in
+[`AerosolActivation`](@ref).
 
 # References
 
@@ -76,16 +85,17 @@ mode.mean_radius
 ```
 """
 function AerosolMode(FT::Type{<:AbstractFloat} = Float64;
-                     number_mixing_ratio = 300e6,
-                     mean_radius = 0.05e-6,
-                     geometric_std = 2.0,
-                     vant_hoff_factor = 3.0,
-                     osmotic_potential = 1.0,
+                     number_mixing_ratio = 3e8,
+                     mean_radius = 5e-8,
+                     geometric_std = 2,
+                     vant_hoff_factor = 3,
+                     osmotic_potential = 1,
                      mass_fraction_soluble = 0.9,
-                     aerosol_density = 1777.0,
+                     aerosol_density = 1777,
                      molecular_weight_aerosol = 0.132,
-                     molecular_weight_water = 0.018,
-                     liquid_water_density = 1000.0)
+                     thermodynamic_constants = ThermodynamicConstants(FT),
+                     molecular_weight_water = thermodynamic_constants.vapor.molar_mass)
+    liquid_water_density = thermodynamic_constants.liquid.density
     solute_activity = FT(vant_hoff_factor) * FT(osmotic_potential) * FT(mass_fraction_soluble) *
                       FT(molecular_weight_water) * FT(aerosol_density) /
                       (FT(molecular_weight_aerosol) * FT(liquid_water_density))
@@ -147,6 +157,9 @@ supersaturation above which activation proceeds, and two floors that keep the
 supersaturation finite. A condensable species other than water is configured by
 overriding the first group here and in [`AerosolMode`](@ref).
 
+By default, the water molecular weight, liquid-water density, universal gas constant,
+and surface-tension reference temperature come from `thermodynamic_constants`.
+
 # Examples
 
 ```jldoctest
@@ -172,14 +185,15 @@ length(aerosol.modes)
 ```
 """
 function AerosolActivation(mode1::AerosolMode{FT}, rest::AerosolMode{FT}...;
-                           molecular_weight_water = 0.018,
-                           universal_gas_constant = 8.3145,
-                           activation_timescale = 1.0,
-                           liquid_water_density = 1000.0,
+                           thermodynamic_constants = ThermodynamicConstants(FT),
+                           molecular_weight_water = thermodynamic_constants.vapor.molar_mass,
+                           universal_gas_constant = thermodynamic_constants.molar_gas_constant,
+                           activation_timescale = 1,
                            # Water surface tension [N/m], linear in T about 0°C (Fortran `sigvl`)
+                           # This fit remains local because aerosol activation is its only consumer.
                            surface_tension_reference = 0.0761,
                            surface_tension_temperature_derivative = -1.55e-4,
-                           surface_tension_reference_temperature = 273.15,
+                           surface_tension_reference_temperature = thermodynamic_constants.energy_reference_temperature,
                            # 3√2 = 4.24264… in the lognormal activation integral; the
                            # Fortran reference rounds it to 4.242, kept here for parity.
                            lognormal_activation_factor = 4.242,
@@ -188,6 +202,7 @@ function AerosolActivation(mode1::AerosolMode{FT}, rest::AerosolMode{FT}...;
                            minimum_supersaturation = 1e-20,
                            minimum_saturation_mass_fraction = 1e-20) where FT
     modes = (mode1, rest...)
+    liquid_water_density = thermodynamic_constants.liquid.density
     return AerosolActivation(modes, FT(molecular_weight_water),
                              FT(universal_gas_constant), FT(activation_timescale),
                              FT(liquid_water_density),

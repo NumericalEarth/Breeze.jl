@@ -184,10 +184,10 @@ end
 # liquid surface, shared by rain evaporation and rain condensation. `e_s` is
 # recovered by inverting qᵛ⁺ˡ = ε e_s / (P - (1 - ε) e_s), consistent with the
 # ice deposition path.
-@inline function mason_thermodynamic_factor(qᵛ⁺ˡ, T, P, transport, prp, FT)
-    Rᵛ = FT(VAPOR_GAS_CONSTANT)
-    Rᵈ = FT(DRY_AIR_GAS_CONSTANT)
-    ℒˡ = vaporization_latent_heat(nothing, T)  # Latent heat of vaporization [J/kg]
+@inline function mason_thermodynamic_factor(qᵛ⁺ˡ, T, P, constants, transport, prp, FT)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    Rᵈ = FT(dry_air_gas_constant(constants))
+    ℒˡ = vaporization_latent_heat(constants, T)  # Latent heat of vaporization [J/kg]
     Kᵃ = transport.Kᵃ                        # Thermal conductivity of air [W/m/K]
     Dᵛ = transport.Dᵛ                        # Diffusivity of water vapor [m²/s]
 
@@ -237,12 +237,14 @@ approximation path depending on `p3.rain.evaporation`:
 - `T`: Temperature [K]
 - `ρ`: Air density [kg/m³]
 - `P`: Air pressure [Pa]
+- `constants`: Thermodynamic constants
 
 # Returns
 - Rate of rain evaporation [kg/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
 @inline function rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P,
-                                       transport=air_transport_properties(T, P))
+                                       constants,
+                                       transport=air_transport_properties(T, P, constants))
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -257,7 +259,7 @@ approximation path depending on `p3.rain.evaporation`:
     Dᵛ = transport.Dᵛ       # Diffusivity of water vapor [m²/s]
     ν  = transport.ν        # Kinematic viscosity [m²/s]
 
-    thermodynamic_factor = mason_thermodynamic_factor(qᵛ⁺ˡ, T, P, transport, prp, FT)
+    thermodynamic_factor = mason_thermodynamic_factor(qᵛ⁺ˡ, T, P, constants, transport, prp, FT)
 
     # Internal helpers return negative (S - 1 < 0 when subsaturated).
     # Negate to get positive magnitude (M7 sign convention).

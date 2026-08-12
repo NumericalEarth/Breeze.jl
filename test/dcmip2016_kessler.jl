@@ -331,10 +331,12 @@ end
         saturation_vapor_pressure = DCMIP2016_tetens_formula,
         liquid = Breeze.Thermodynamics.CondensedPhase(FT;
             reference_latent_heat = 2500000.0,
-            heat_capacity = cᵖ),
+            heat_capacity = cᵖ,
+            density = 1000),
         ice = Breeze.Thermodynamics.CondensedPhase(FT;
             reference_latent_heat = 2834000.0,
-            heat_capacity = cᵖ))
+            heat_capacity = cᵖ,
+            density = 917))
 
     microphysics = DCMIP2016KesslerMicrophysics(FT)
 
