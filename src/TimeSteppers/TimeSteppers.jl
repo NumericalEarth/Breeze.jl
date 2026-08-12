@@ -13,6 +13,7 @@ export SSPRungeKutta3, AcousticRungeKutta3,
        maybe_prepare_first_time_step!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection, FluxFormAdvection
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  update_state!, maybe_prepare_first_time_step!
 using Breeze.AtmosphereModels: kernel_time_step

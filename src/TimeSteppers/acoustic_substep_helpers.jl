@@ -96,6 +96,32 @@ end
 ##### Slow scalar tendencies (density and thermodynamic variable)
 #####
 
+"""
+$(TYPEDSIGNATURES)
+
+Set every adaptive-implicit advection scheme's split time step to `Δt_stage`. The
+Wicker–Skamarock stages act over β Δt, so the CFL-scaled explicit/implicit velocity split
+must be computed from the stage interval — not from `clock.last_Δt`, which the generic
+`update_advection_timestep!` fallback would use (stale by one outer step, and `Inf` before
+the first).
+"""
+set_advection_timestep!(advection, Δt_stage) = nothing
+
+function set_advection_timestep!(a::AdaptiveImplicitVerticalAdvection, Δt_stage)
+    td = OceananigansTimeSteppers.time_discretization(a)
+    td.Δt[] = Δt_stage
+    return nothing
+end
+
+set_advection_timestep!(a::FluxFormAdvection, Δt_stage) = set_advection_timestep!(a.z, Δt_stage)
+
+function set_advection_timestep!(a::NamedTuple, Δt_stage)
+    for scheme in values(a)
+        set_advection_timestep!(scheme, Δt_stage)
+    end
+    return nothing
+end
+
 slow_thermodynamic_velocities(model) = model.velocities
 
 function slow_thermodynamic_velocities(model::TerrainCompressibleAcousticModel)

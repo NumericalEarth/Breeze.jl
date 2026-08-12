@@ -124,6 +124,14 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     substepper = ts.substepper
     U⁰ = ts.U⁰
 
+    # Pin the adaptive-implicit-advection split to THIS stage's interval. The generic
+    # `update_advection_timestep!` fallback leaves `td.Δt[] = clock.last_Δt` — the previous
+    # outer step's Δt for every stage, and `Inf` on the first step (a fully implicit split
+    # from a healthy state). The stage tendencies computed below and `implicit_substep!`
+    # both read the split from this value, so setting it here keeps the explicit and
+    # implicit halves consistent per stage.
+    set_advection_timestep!(model.advection, β * Δt)
+
     # Per-stage cache prep. The linearization coefficients are refreshed
     # to the current RK stage-entry state; the substep perturbations are
     # initialized with a rewind term inside the substep loop so the
