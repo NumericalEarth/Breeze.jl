@@ -417,26 +417,11 @@ $(TYPEDSIGNATURES)
 
 Height above the bottom boundary, at faces and at centers — **unfloored**.
 
-Breeze owns these rather than reusing Oceananigans' same-named functions, which floor the height
-at a cell thickness — `max(Δzᶜᶜᶜ(i, j, k-1, grid), h)` at faces and `max(Δzᶜᶜᶜ(i, j, k, grid)/2, h)`
-at centers (`TurbulenceClosures.jl:190-201`). That suits an ocean bottom boundary layer; here the
-roughness length is what keeps ``ℓᵍ = κ(z + ℓʳ)`` finite at the surface, so no floor is wanted.
-
-On the grids this closure currently supports the floor is in fact unreachable, and it is worth
-being precise about why rather than implying it corrupts the log layer. At face ``k`` the height is
-``Δz₁ + … + Δz_{k-1}``, which is never below its own last term, so the floor can bind only at
-``k = 1``; at centers it can never bind at all. The one face it touches is the bottom boundary
-face, which `mask_diffusivity` zeroes before anything is stored — so on a `Bounded`
-`RectilinearGrid`, floored and unfloored give identical `ℓ` and `Kᵘ`.
-
-What the unfloored form buys is immersed boundaries, where `z_bottom` varies horizontally and the
-floor can bind at *interior* faces that no mask reaches. Those are out of scope for now, so treat
-this as keeping the door open, not as fixing a present defect.
-
-These are *new functions in this module*, not methods added to Oceananigans'. Extending the upstream
-ones is not possible without type piracy — their signature `(i, j, k, grid)` contains no
-Breeze-owned type — and would silently change the mixing length of every Oceananigans closure that
-calls them, CATKE included.
+Oceananigans' same-named functions floor the height at a cell thickness
+(`TurbulenceClosures.jl:190-201`), which suits an ocean bottom boundary layer but is not wanted
+here. These are *new functions in this module*, not methods on the upstream ones: their signature
+`(i, j, k, grid)` carries no Breeze-owned type, so extending them would be type piracy and would
+silently change the mixing length of every Oceananigans closure that calls them, CATKE included.
 """
 @inline height_above_bottomᶜᶜᶠ(i, j, k, grid) =
     clip(znode(i, j, k, grid, Center(), Center(), Face()) - z_bottom(i, j, grid))
