@@ -34,6 +34,20 @@ using Oceananigans.TimeSteppers: update_state!
         @test vec(Array(interior(surface_temperature))) ≈ FT[270.5, 272.5]
     end
 
+    @testset "Density reconciliation distinguishes specific inputs and preserved densities" begin
+        p3 = PredictedParticlePropertiesMicrophysics(Float64)
+        CE = Breeze.CompressibleEquations
+        specific_input_names = (:qᶜˡ, :qᶠ, :nⁱ)
+        density_weighted_input_names =
+            CE.density_weighted_specific_input_names(specific_input_names)
+
+        @test density_weighted_input_names == (:ρqᶜˡ, :ρqᶠ, :ρnⁱ)
+        @test CE.specific_input_condensate_names(p3, density_weighted_input_names) ==
+              (:ρqᶜˡ,)
+        @test CE.preserved_condensate_density_names(p3, density_weighted_input_names) ==
+              (:ρqʳ, :ρqⁱ, :ρqʷⁱ)
+    end
+
     @testset "P3 contributes only physical condensate mass to total density" begin
         p3 = PredictedParticlePropertiesMicrophysics(Float64)
         condensate_names = (:ρqᶜˡ, :ρqʳ, :ρqⁱ, :ρqʷⁱ)

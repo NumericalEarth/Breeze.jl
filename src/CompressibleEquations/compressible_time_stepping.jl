@@ -43,9 +43,12 @@ solve_for_pressure!(::CompressibleModel) = nothing
 #####
 
 # Diagnose the total air density into `dynamics.total_density` from the prognostic dry density and
-# the water (vapor + condensate) densities. Run once per `update_state!`, before the moisture
-# recovery / EOS / buoyancy consume it. It is invariant under saturation adjustment (which
-# conserves total water and dry mass), so a single evaluation per update is correct.
+# the water (vapor + condensate) densities. The concrete field is intentional: total density is
+# reused by halo-dependent advection, the EOS, buoyancy, forcings, and diagnostics. Computing it at
+# every use would repeat the constituent sum and would not provide reusable halo values. Run this
+# once per `update_state!`, before those consumers. Total density is invariant under saturation
+# adjustment (which conserves total water and dry mass), so a single evaluation per update is
+# correct.
 function AtmosphereModels.compute_total_density!(model::CompressibleModel)
     grid = model.grid
     arch = grid.architecture
@@ -83,60 +86,110 @@ end
 #
 # The thermodynamic variable (ρθ = ρᵈθ) and momentum (ρu = ρᵈu) are set afterwards (phase 2) and so
 # need no rescaling here.
+# Specific microphysical inputs (`qˣ`, `nˣ`, or `bˣ`) are initially weighted by the current density
+# placeholder. Their density-weighted storage fields must therefore be rescaled after the final
+# total density is known.
+density_weighted_specific_input_names(specific_microphysical_names) =
+    map(AtmosphereModels.specific_to_density_weighted, specific_microphysical_names)
+
+# Physical condensates supplied through specific inputs contribute to the multiplicative term in
+# the density reconciliation. Number, rime-mass, and rime-volume moments are excluded because
+# `condensate_field_names` contains only independent material masses.
+specific_input_condensate_names(microphysics, density_weighted_input_names) =
+    filter(name -> name ∈ density_weighted_input_names,
+           AtmosphereModels.condensate_field_names(microphysics))
+
+# The remaining physical condensate fields retain their stored partial densities and therefore
+# contribute to the additive term in the density reconciliation.
+preserved_condensate_density_names(microphysics, density_weighted_input_names) =
+    filter(name -> name ∉ density_weighted_input_names,
+           AtmosphereModels.condensate_field_names(microphysics))
+
 function density_reconciliation_fields(model, specific_microphysical_names)
-    specific_density_names = map(AtmosphereModels.specific_to_density_weighted,
-                                 specific_microphysical_names)
-    condensate_names = AtmosphereModels.condensate_field_names(model.microphysics)
-    specific_condensate_names = filter(name -> name ∈ specific_density_names,
-                                        condensate_names)
-    absolute_condensate_names = filter(name -> name ∉ specific_density_names,
-                                        condensate_names)
+    density_weighted_input_names =
+        density_weighted_specific_input_names(specific_microphysical_names)
+    specific_condensates =
+        specific_input_condensate_names(model.microphysics, density_weighted_input_names)
+    preserved_condensate_names =
+        preserved_condensate_density_names(model.microphysics, density_weighted_input_names)
 
     specific_microphysical_fields = map(name -> model.microphysical_fields[name],
-                                         specific_density_names)
+                                        density_weighted_input_names)
     specific_condensate_fields = map(name -> model.microphysical_fields[name],
-                                      specific_condensate_names)
-    absolute_condensate_fields = map(name -> model.microphysical_fields[name],
-                                      absolute_condensate_names)
+                                     specific_condensates)
+    preserved_condensate_density_fields = map(name -> model.microphysical_fields[name],
+                                              preserved_condensate_names)
 
-    return specific_microphysical_fields, specific_condensate_fields, absolute_condensate_fields
+    return (; specific_microphysical_fields,
+              specific_condensate_fields,
+              preserved_condensate_density_fields)
+end
+
+density_reconciliation_mode(::Val{true}, density_reconciliation_needed) = Val(:total_density)
+density_reconciliation_mode(::Val{false}, ::Val{true}) = Val(:dry_density)
+density_reconciliation_mode(::Val{false}, ::Val{false}) = Val(:diagnose_total_density)
+
+function density_reconciliation_mode(total_density_given, dry_density_given, moisture_given,
+                                     specific_microphysical_names)
+    density_reconciliation_needed =
+        dry_density_given || moisture_given || !isempty(specific_microphysical_names)
+    return density_reconciliation_mode(Val(total_density_given),
+                                       Val(density_reconciliation_needed))
 end
 
 function AtmosphereModels.establish_densities!(model::CompressibleModel,
                                                 total_density_given,
                                                 dry_density_given,
-                                                moisture_given=false,
-                                                specific_moisture_given=false,
-                                                total_moisture_given=false,
-                                                specific_microphysical_names=())
+                                                moisture_given = false,
+                                                specific_moisture_given = false,
+                                                total_moisture_given = false,
+                                                specific_microphysical_names = ())
+    mode = density_reconciliation_mode(total_density_given, dry_density_given, moisture_given,
+                                       specific_microphysical_names)
+    return reconcile_densities!(mode, model, specific_moisture_given, total_moisture_given,
+                                specific_microphysical_names)
+end
+
+function reconcile_densities!(::Val{:total_density}, model, specific_moisture_given,
+                              total_moisture_given, specific_microphysical_names)
     grid = model.grid
     arch = grid.architecture
     ρᵈ = model.dynamics.dry_density
     ρ  = model.dynamics.total_density
 
-    if total_density_given
-        launch!(arch, grid, :xyz, _split_total_into_dry!,
-                ρ, ρᵈ, model.microphysics, model.moisture_density,
-                model.microphysical_fields, total_moisture_given)
-    elseif dry_density_given || moisture_given || !isempty(specific_microphysical_names)
-        qᵛᵉ = specific_prognostic_moisture(model)
-        specific_microphysical_fields, specific_condensate_fields, absolute_condensate_fields =
-            density_reconciliation_fields(model, specific_microphysical_names)
-
-        launch!(arch, grid, :xyz, _dry_to_total!,
-                ρ, ρᵈ, qᵛᵉ, model.moisture_density,
-                specific_moisture_given, total_moisture_given,
-                specific_microphysical_fields,
-                specific_condensate_fields,
-                absolute_condensate_fields)
-    else
-        return AtmosphereModels.compute_total_density!(model)
-    end
+    launch!(arch, grid, :xyz, _split_total_into_dry!,
+            ρ, ρᵈ, model.microphysics, model.moisture_density,
+            model.microphysical_fields, total_moisture_given)
 
     fill_halo_regions!(ρ)
     fill_halo_regions!(ρᵈ)
     return nothing
 end
+
+function reconcile_densities!(::Val{:dry_density}, model, specific_moisture_given,
+                              total_moisture_given, specific_microphysical_names)
+    grid = model.grid
+    arch = grid.architecture
+    ρᵈ = model.dynamics.dry_density
+    ρ  = model.dynamics.total_density
+    qᵛᵉ = specific_prognostic_moisture(model)
+    fields = density_reconciliation_fields(model, specific_microphysical_names)
+
+    launch!(arch, grid, :xyz, _dry_to_total!,
+            ρ, ρᵈ, qᵛᵉ, model.moisture_density,
+            specific_moisture_given, total_moisture_given,
+            fields.specific_microphysical_fields,
+            fields.specific_condensate_fields,
+            fields.preserved_condensate_density_fields)
+
+    fill_halo_regions!(ρ)
+    fill_halo_regions!(ρᵈ)
+    return nothing
+end
+
+reconcile_densities!(::Val{:diagnose_total_density}, model, specific_moisture_given,
+                     total_moisture_given, specific_microphysical_names) =
+    AtmosphereModels.compute_total_density!(model)
 
 # Relative humidity is diagnosed after the preliminary density split because it needs temperature.
 # At this point the moisture field contains the requested vapor partial density
@@ -145,21 +198,20 @@ end
 # values while reconciling dry and total density.
 function AtmosphereModels.establish_relative_humidity_densities!(model::CompressibleModel,
                                                                   total_density_given,
-                                                                  specific_microphysical_names=())
+                                                                  specific_microphysical_names = ())
     grid = model.grid
     arch = grid.architecture
     ρᵈ = model.dynamics.dry_density
     ρ = model.dynamics.total_density
     qᵛᵉ = specific_prognostic_moisture(model)
 
-    specific_microphysical_fields, specific_condensate_fields, absolute_condensate_fields =
-        density_reconciliation_fields(model, specific_microphysical_names)
+    fields = density_reconciliation_fields(model, specific_microphysical_names)
 
     launch!(arch, grid, :xyz, _establish_relative_humidity_densities!,
             ρ, ρᵈ, qᵛᵉ, model.moisture_density,
-            specific_microphysical_fields,
-            specific_condensate_fields,
-            absolute_condensate_fields,
+            fields.specific_microphysical_fields,
+            fields.specific_condensate_fields,
+            fields.preserved_condensate_density_fields,
             total_density_given)
 
     fill_halo_regions!(ρ)
@@ -207,13 +259,13 @@ end
 #     ρ⁺ = (ρᵈ + ρqᵛ + A) / (1 - S),
 #
 # where the requested relative humidity fixes vapor partial density ρqᵛ, S contains
-# condensates supplied as specific values, and A contains condensates supplied as partial
-# densities. For fixed total density, retain the supplied ρ and recompute dry density as the
-# residual. Specifically supplied P3 moments remain total-density weighted in either mode.
+# condensates supplied as specific values, and A contains condensate partial densities preserved
+# from the current state. For fixed total density, retain the supplied ρ and recompute dry density
+# as the residual. Specifically supplied P3 moments remain total-density weighted in either mode.
 @kernel function _establish_relative_humidity_densities!(ρ, ρᵈ, qᵛᵉ, moisture_density,
                                                           specific_microphysical_fields,
                                                           specific_condensate_fields,
-                                                          absolute_condensate_fields,
+                                                          preserved_condensate_density_fields,
                                                           total_density_given)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
@@ -222,16 +274,15 @@ end
         vapor_density = moisture_density[i, j, k]
         specific_condensate_density =
             sum_field_tuple(i, j, k, specific_condensate_fields)
-        absolute_condensate_density =
-            sum_field_tuple(i, j, k, absolute_condensate_fields)
+        preserved_condensate_density =
+            sum_field_tuple(i, j, k, preserved_condensate_density_fields)
         specific_condensate = specific_condensate_density / old_total
 
-        diagnosed_total =
-            (dry + vapor_density + absolute_condensate_density) / (1 - specific_condensate)
+        diagnosed_total = (dry + vapor_density + preserved_condensate_density) / (1 - specific_condensate)
         new_total = ifelse(total_density_given, old_total, diagnosed_total)
         ratio = ifelse(total_density_given, 1, new_total / old_total)
         fixed_total_dry = new_total - vapor_density - specific_condensate_density -
-                          absolute_condensate_density
+                          preserved_condensate_density
 
         rescale_field_tuple!(i, j, k, specific_microphysical_fields, ratio)
 
@@ -242,7 +293,7 @@ end
 end
 
 # Given dry density ρᵈ, recover total density from a mixture of specific inputs S
-# and absolute partial-density inputs A:
+# and preserved partial-density inputs A:
 #
 #     ρ = (ρᵈ + A) / (1 - S).
 #
@@ -253,7 +304,7 @@ end
                                 specific_moisture_given, total_moisture_given,
                                 specific_microphysical_fields,
                                 specific_condensate_fields,
-                                absolute_condensate_fields)
+                                preserved_condensate_density_fields)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         ρᵈ_ijk = ρᵈ[i, j, k]
@@ -261,29 +312,28 @@ end
         moisture_partial_density = moisture_density[i, j, k]
 
         specific_water = ifelse(specific_moisture_given, moisture_specific, 0)
-        absolute_water = ifelse(specific_moisture_given, 0, moisture_partial_density)
+        preserved_water_density = ifelse(specific_moisture_given, 0, moisture_partial_density)
 
         specific_condensate = sum_field_tuple(i, j, k, specific_condensate_fields) / ρᵈ_ijk
-        absolute_condensate = sum_field_tuple(i, j, k, absolute_condensate_fields)
+        preserved_condensate_density =
+            sum_field_tuple(i, j, k, preserved_condensate_density_fields)
 
         S = ifelse(total_moisture_given,
                    specific_water,
                    specific_water + specific_condensate)
         A = ifelse(total_moisture_given,
-                   absolute_water,
-                   absolute_water + absolute_condensate)
+                   preserved_water_density,
+                   preserved_water_density + preserved_condensate_density)
 
         ρ_ijk = (ρᵈ_ijk + A) / (1 - S)
         ρ[i, j, k] = ρ_ijk
 
-        moisture_density[i, j, k] =
-            ifelse(specific_moisture_given,
-                   ρ_ijk * moisture_specific,
-                   moisture_partial_density)
-        qᵛᵉ[i, j, k] =
-            ifelse(specific_moisture_given,
-                   moisture_specific,
-                   moisture_partial_density / ρ_ijk)
+        moisture_density[i, j, k] = ifelse(specific_moisture_given,
+                                           ρ_ijk * moisture_specific,
+                                           moisture_partial_density)
+        qᵛᵉ[i, j, k] = ifelse(specific_moisture_given,
+                              moisture_specific,
+                              moisture_partial_density / ρ_ijk)
 
         rescale_field_tuple!(i, j, k, specific_microphysical_fields, ρ_ijk / ρᵈ_ijk)
     end
