@@ -1,7 +1,10 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: prognostic_fields, fields, architecture
-using Oceananigans.Advection: needs_implicit_solver
+using Oceananigans.Advection: needs_implicit_solver, AdaptiveImplicitVerticalAdvection,
+                              vertical_scheme, explicit_velocity_scaleᶜᶜᶠ
+using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.Operators: Azᶜᶜᶠ, δzᵃᵃᶜ, V⁻¹ᶜᶜᶜ
 using Oceananigans.Utils: launch!
 
 using Oceananigans.TimeSteppers: implicit_step!
@@ -241,6 +244,113 @@ end
 ##### Implicit vertical solve for the acoustic prognostics
 #####
 
+# The vertical momentum whose divergence drives the continuity equation: the prognostic
+# ρw on height grids, the contravariant ρw̃ on terrain-following grids (matching the
+# density-tendency kernels).
+continuity_vertical_momentum(model) = model.momentum.ρw
+continuity_vertical_momentum(model::TerrainCompressibleAcousticModel) =
+    model.dynamics.contravariant_vertical_momentum
+
+@inline function residual_vertical_mass_flux(i, j, k, grid, scheme, td, W, ρw)
+    s = explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, scheme, td, W)
+    return @inbounds Azᶜᶜᶠ(i, j, k, grid) * (1 - s) * ρw[i, j, k]
+end
+
+@kernel function _remove_residual_vertical_mass_flux!(Gρ, grid, scheme, td, W, ρw)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gρ[i, j, k] += V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+        δzᵃᵃᶜ(i, j, k, grid, residual_vertical_mass_flux, scheme, td, W, ρw)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Partition the continuity equation like the thermodynamic variable: remove the CFL-withheld
+residual of the vertical mass-flux divergence from the slow density tendency (the in-loop
+implicit solve applies it over each acoustic substep instead). Without this, a stage-frozen
+full-strength vertical mass flux drains terrain wall cells faster than the acoustic
+adjustment responds once α = wΔt/Δz exceeds one, and the dry density goes negative even
+when every advected prognostic is treated implicitly. A no-op unless the thermodynamic
+scheme is adaptive-implicit.
+"""
+split_slow_continuity_tendency!(model) =
+    split_slow_continuity_tendency!(model, vertical_scheme(field_advection_scheme(model.advection,
+                                    thermodynamic_density_name(model.formulation))))
+
+split_slow_continuity_tendency!(model, scheme) = nothing
+
+function split_slow_continuity_tendency!(model, scheme::AdaptiveImplicitVerticalAdvection)
+    grid = model.grid
+    td = OceananigansTimeSteppers.time_discretization(scheme)
+    W = slow_thermodynamic_velocities(model).w
+    ρw = continuity_vertical_momentum(model)
+    launch!(architecture(grid), grid, :xyz, _remove_residual_vertical_mass_flux!,
+            model.timestepper.Gⁿ.ρᵈ, grid, scheme, td, W, ρw)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Build the per-substep adaptive-implicit vertical-advection applicator for the acoustic
+substep loop, or return `nothing` when no advection scheme is adaptive-implicit. The
+returned closure applies the CFL-withheld remainder of vertical advection to each AIVA
+prognostic over one acoustic substep Δτ, operating on the reconstructed full field
+(stage-start base `U⁰` plus the loop's perturbation) so the transport acts on the full
+stratification. Solving inside the loop lets the acoustic pressure adjust to the residual
+transport substep by substep; the once-per-stage post-loop placement is unstable at
+terrain walls (issue #897).
+"""
+function in_loop_implicit_advection(model)
+    solver = model.timestepper.implicit_solver
+    solver === nothing && return nothing
+
+    momentum_advection = model.advection.momentum
+    θ_name = thermodynamic_density_name(model.formulation)
+    θ_advection = field_advection_scheme(model.advection, θ_name)
+    needs_implicit_solver(momentum_advection) || needs_implicit_solver(θ_advection) || return nothing
+
+    substepper = model.timestepper.substepper
+    U⁰ = model.timestepper.U⁰
+    ρᵈ = dynamics_density(model.dynamics)
+    w = advecting_vertical_velocity(model.dynamics, model.velocities)
+    θ_velocities = slow_thermodynamic_velocities(model)
+    perturbations = (; ρu = substepper.momentum_perturbation.u,
+                       ρv = substepper.momentum_perturbation.v,
+                       ρw = substepper.momentum_perturbation.w,
+                       NamedTuple{(θ_name,)}((substepper.density_potential_temperature_perturbation,))...)
+
+    function implicit_advection!(Δτ)
+        for name in (:ρu, :ρv, :ρw)
+            needs_implicit_solver(momentum_advection) || continue
+            implicit_advection_substep!(perturbations[name], U⁰[name], solver, model, Δτ,
+                                        implicit_step_advection(momentum_advection, name), (; w), ρᵈ)
+        end
+        if needs_implicit_solver(θ_advection)
+            implicit_advection_substep!(perturbations[θ_name], U⁰[θ_name], solver, model, Δτ,
+                                        θ_advection, θ_velocities, ρᵈ)
+            # Continuity carries the matching residual (see `split_slow_continuity_tendency!`);
+            # `density = nothing` advects the density field itself.
+            implicit_advection_substep!(substepper.density_perturbation, U⁰.ρᵈ, solver, model, Δτ,
+                                        θ_advection, θ_velocities, nothing)
+        end
+        return nothing
+    end
+
+    return implicit_advection!
+end
+
+# One field's per-substep residual-advection solve: reconstruct the full field from the
+# stage base and the perturbation, solve (I - Δτ Lⁱ) in place, restore the perturbation.
+function implicit_advection_substep!(perturbation, base, solver, model, Δτ, advection, velocities, ρ)
+    parent(perturbation) .+= parent(base)
+    implicit_step!(perturbation, solver, nothing, nothing, nothing,
+                   model.clock, fields(model), Δτ, advection, velocities, ρ)
+    parent(perturbation) .-= parent(base)
+    fill_halo_regions!(perturbation)
+    return nothing
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -287,7 +397,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                        model.clock,
                        fields(model),
                        Δt_stage,
-                       implicit_step_advection(momentum_advection, name),
+                       nothing,   # AIVA advection is applied inside the substep loop
                        (; w),
                        ρᵈ)
     end
@@ -302,7 +412,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                    model.clock,
                    fields(model),
                    Δt_stage,
-                   θ_advection,
+                   nothing,   # AIVA advection is applied inside the substep loop
                    slow_thermodynamic_velocities(model),
                    ρᵈ)
 
