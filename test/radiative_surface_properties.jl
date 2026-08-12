@@ -3,6 +3,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Dates
 using Oceananigans
+using Oceananigans.Fields: ConstantField
 using Oceananigans.Units
 using Test
 
@@ -164,5 +165,21 @@ end
                                                           surface_temperature = 300,
                                                           surface_emissivity = 1.2,
                                                           surface_albedo = 0.2)
+
+        # A `ConstantField` is a scalar in a field's clothing, so it is held to the same range as
+        # the number it wraps rather than slipping through as "some field".
+        @test_throws ArgumentError RadiativeTransferModel(grid, GrayOptics(), constants;
+                                                          solar_position,
+                                                          surface_temperature = 300,
+                                                          surface_albedo = ConstantField(30))
+
+        # A `Field` still passes: its contents may be rewritten before the next solve, so a check
+        # here would say nothing about what the solver eventually reads.
+        αⁱⁿ = Field{Center, Center, Nothing}(grid)
+        set!(αⁱⁿ, 0.3)
+        @test RadiativeTransferModel(grid, GrayOptics(), constants;
+                                     solar_position,
+                                     surface_temperature = 300,
+                                     surface_albedo = αⁱⁿ) isa RadiativeTransferModel
     end
 end

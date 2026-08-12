@@ -121,17 +121,32 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Throw an `ArgumentError` for any keyword whose value is a `Number` outside ``[0, 1]``.
+The scalar behind a surface property that is constant in space and time, or `nothing` when the
+property carries no such scalar.
+
+A `ConstantField` is a scalar in a field's clothing — its value cannot change — so it reports the
+value it holds. A general `Field` reports `nothing`: it may be rewritten between radiation updates,
+so there is no single value to speak of.
+"""
+surface_fraction_scalar(x::Number) = x
+surface_fraction_scalar(x::ConstantField) = surface_fraction_scalar(x.constant)
+surface_fraction_scalar(x) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Throw an `ArgumentError` for any keyword whose value is a spatially uniform scalar outside ``[0, 1]``.
 
 Emissivity and albedo are fractions, so a scalar outside the unit interval is a user error — an albedo
-given in percent, say — worth rejecting at construction rather than carrying into the solver. Values
-that are not `Number`s (a field, a dataset, `nothing`) pass through: a field is validated by whatever
-built it.
+given in percent, say — worth rejecting at construction rather than carrying into the solver. A
+property with no single value (a `Field`, a dataset, `nothing`) passes through, since a check at
+construction says nothing about what it holds at the next solve.
 """
 function validate_surface_fractions(; kw...)
     for (name, value) in kw
-        value isa Number && !(0 <= value <= 1) &&
-            throw(ArgumentError("`$name` must lie in [0, 1]; received $value."))
+        x = surface_fraction_scalar(value)
+        isnothing(x) || 0 <= x <= 1 ||
+            throw(ArgumentError("`$name` must lie in [0, 1]; received $x."))
     end
     return nothing
 end
