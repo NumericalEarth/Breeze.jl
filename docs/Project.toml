@@ -21,6 +21,7 @@ Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 
 [sources]
 Breeze = {path = ".."}
+DocumenterCodeBlocks = {url = "https://github.com/fredrikekre/DocumenterCodeBlocks.jl.git", rev = "codeblocks-meta"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
@@ -29,7 +30,7 @@ CairoMakie = "0.15"
 CloudMicrophysics = "0.37.0 - 0.37.1"
 Documenter = "1"
 DocumenterCitations = "1.4"
-DocumenterCodeBlocks = "1.0.1"
+DocumenterCodeBlocks = "1.3"
 Enzyme = "0.13.132"
 GPUArraysCore = "0.2.0"
 InteractiveUtils = "<0.0.1, 1"
