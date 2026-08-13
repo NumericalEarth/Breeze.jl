@@ -7,6 +7,15 @@ set_theme!(Theme(linewidth = 3))
 script_path = ARGS[1]
 literated_dir = ARGS[2]
 
+# Have continuous line numbering in literate examples:
+# <https://fredrikekre.github.io/DocumenterCodeBlocks.jl/stable/linenumbers/#Continued-numbering>.
+example_preamble = """
+```@codeblocks
+line_counter = :continue
+```
+
+"""
+
 # We'll append the following postamble to the literate examples, to include
 # information about the computing environment used to run them.
 example_postamble = """
@@ -28,6 +37,6 @@ Pkg.status()
 
 @time basename(script_path) Literate.markdown(script_path, literated_dir;
                                               flavor = Literate.DocumenterFlavor(),
-                                              preprocess = content -> content * example_postamble,
+                                              preprocess = content -> example_preamble * content * example_postamble,
                                               execute = true,
                                               )
