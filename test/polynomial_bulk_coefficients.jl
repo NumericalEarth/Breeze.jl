@@ -444,13 +444,14 @@ using GPUArraysCore: @allowscalar
         θᵥ_source = CenterField(grid)
         set!(θᵥ_source, θᵢ)
 
-        Breeze.BoundaryConditions.update_θᵥ!(fv, θᵥ_source, grid, 2.0)
+        # An ordinary field is read directly, so no surface-layer tuple is needed.
+        Breeze.BoundaryConditions.update_θᵥ!(fv, θᵥ_source, grid, 2.0, nothing)
         ε = 2.0 / 20.0
         expected = (0.0 + ε * θᵢ) / (1 + ε)
         @test fv.θᵥ[1, 1, 1] ≈ expected atol=1e-10
 
         # Initialize sets the field directly from the source (no time integration)
-        Breeze.BoundaryConditions.initialize_θᵥ!(fv, θᵥ_source, grid)
+        Breeze.BoundaryConditions.initialize_θᵥ!(fv, θᵥ_source, grid, nothing)
         @test fv.θᵥ[1, 1, 1] ≈ θᵢ atol=1e-10
     end
 

@@ -288,11 +288,16 @@ function update!(fs::FilteredSurfaceScalar, field_3d, grid, Δt)
 end
 
 """
-    initialize_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid)
+    initialize_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, fields)
 
 Set the filtered virtual potential temperature to the current first-cell value.
+
+`fields` is the surface-layer field tuple ([`surface_layer_state`](@ref)); it is mandatory rather
+than defaulted, because a `BoundaryVirtualPotentialTemperature` source evaluates itself from it and
+a kernel cannot report a useful error when it is missing. Pass `nothing` only when `θᵥ_source` is an
+ordinary field, which is read directly.
 """
-function initialize_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, fields=nothing)
+function initialize_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, fields)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
     launch!(arch, grid, kp, _initialize_filtered_θᵥ!, fv.θᵥ, θᵥ_source, grid, fields)
@@ -300,11 +305,12 @@ function initialize_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, fi
 end
 
 """
-    update_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, Δt)
+    update_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, Δt, fields)
 
-Apply the exponential filter to the virtual potential temperature.
+Apply the exponential filter to the virtual potential temperature. `fields` carries the same
+requirement as [`initialize_θᵥ!`](@ref).
 """
-function update_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, Δt, fields=nothing)
+function update_θᵥ!(fv::FilteredSurfaceVelocities, θᵥ_source, grid, Δt, fields)
     arch = architecture(grid)
     kp = filtered_kernel_parameters(grid)
     ϵ = Δt / fv.filter_timescale
