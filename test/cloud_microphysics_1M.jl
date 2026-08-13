@@ -4,7 +4,6 @@ using Breeze
 using Breeze.AtmosphereModels: microphysical_velocities
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce, Microphysics1MParams
-using CloudMicrophysics.Parameters: CloudLiquidRainAccretion, CloudIceRainAccretion, RainSnowAccretion
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
@@ -78,12 +77,13 @@ end
 @testset "Accretion options stored at another precision [$(FT)]" for FT in all_float_types()
     other_FT = FT === Float32 ? Float64 : Float32
 
-    parameters = Microphysics1MParams(FT;
-                                      cloud_liquid_rain_accretion = CloudLiquidRainAccretion(other_FT(0.8)),
-                                      cloud_ice_rain_accretion = CloudIceRainAccretion(other_FT(1)),
-                                      rain_snow_accretion = RainSnowAccretion(other_FT(1), other_FT(0.2)))
+    parameters = Microphysics1MParams(FT)
 
-    options = parameters.options
+    # Accretion parameter values stored at another precision than the model fields
+    process_params = merge(parameters.process_params,
+                           (cloud_liquid_rain_accretion = (; e = other_FT(0.8)),
+                            cloud_ice_rain_accretion = (; e = other_FT(1)),
+                            rain_snow_accretion = (; e = other_FT(1), coeff_disp = other_FT(0.2))))
     cloud_liquid = parameters.cloud.liquid
     cloud_ice = parameters.cloud.ice
     rain = parameters.precip.rain
@@ -96,15 +96,15 @@ end
     ρ = FT(1)
 
     Sᵃᶜᶜ = BreezeCloudMicrophysicsExt.cloud_precipitation_accretion(
-        options.cloud_liquid_rain_accretion, cloud_liquid, rain, rain_velocity, qᶜ, qᵖ, ρ)
+        process_params.cloud_liquid_rain_accretion, cloud_liquid, rain, rain_velocity, qᶜ, qᵖ, ρ)
     @test Sᵃᶜᶜ isa FT
 
     Sᵃᶜᶜʳⁱ = BreezeCloudMicrophysicsExt.rain_sink_accretion(
-        options.cloud_ice_rain_accretion, rain, cloud_ice, rain_velocity, qᶜ, qᵖ, ρ)
+        process_params.cloud_ice_rain_accretion, rain, cloud_ice, rain_velocity, qᶜ, qᵖ, ρ)
     @test Sᵃᶜᶜʳⁱ isa FT
 
     Sʳˢ = BreezeCloudMicrophysicsExt.rain_snow_accretion(
-        options.rain_snow_accretion, snow, rain, snow_velocity, rain_velocity, qᶜ, qᵖ, ρ)
+        process_params.rain_snow_accretion, snow, rain, snow_velocity, rain_velocity, qᶜ, qᵖ, ρ)
     @test Sʳˢ isa FT
 end
 
