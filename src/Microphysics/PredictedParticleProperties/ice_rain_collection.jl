@@ -22,7 +22,7 @@ $(TYPEDSIGNATURES)
 Construct a placeholder `IceRainCollection` with `nothing` fields.
 
 The actual ice-rain collection integrals are double integrals over both
-the ice and rain size distributions, computed in the Fortran lookup tables.
+the ice and rain size distributions, tabulated offline in the P3 lookup tables.
 This placeholder is overwritten when tables are loaded via `read_p3_table`.
 
 # References

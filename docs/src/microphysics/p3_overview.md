@@ -5,9 +5,11 @@ parameterization. Rather than using discrete hydrometeor categories (cloud ice, 
 hail), P3 uses a **single ice category** with continuously predicted properties that evolve
 naturally as particles grow, rime, and melt.
 
-This implementation tracks Fortran [P3-microphysics v5.5.0](https://github.com/P3-microphysics/P3-microphysics)
-([Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) and
-[Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) — the predicted-liquid-fraction extension).
+This implementation follows [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization)
+and [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction), the
+predicted-liquid-fraction extension. "The P3 reference implementation" below
+means the published scheme as originally coded, where contrasting Breeze's
+choices with it makes the reasoning clearer.
 
 ## Motivation
 
@@ -38,10 +40,10 @@ characteristics (mass, fall speed, collection efficiency) are diagnosed from the
 
 ## Architectural choice: Breeze P3 updates tendencies, instead of prognostic variables
 
-The Fortran reference is structured as a subcycle module that updates prognostic variables
-in place over its internal Δt: it can hard-clamp ``n^i ≤ N^i_\text{max}/ρ`` after each step,
-zero out small-mass species and add a compensating ``θ`` correction, and use ``1/Δt``
-relaxation rates for nucleation and saturation adjustment.
+The P3 reference implementation is structured as a subcycle module that updates prognostic
+variables in place over its internal Δt: it can hard-clamp ``n^i ≤ N^i_\text{max}/ρ`` after
+each step, zero out small-mass species and add a compensating ``θ`` correction, and use
+``1/Δt`` relaxation rates for nucleation and saturation adjustment.
 
 Breeze's P3 returns *tendencies*, which Breeze sums with advection and
 diffusion before time-stepping. On a grid, `compute_microphysical_tendencies!`
@@ -51,20 +53,20 @@ the `microphysical_tendency` methods in `p3_microphysical_tendencies.jl`. Both
 paths funnel into `p3_tendency_compute` (`p3_microphysical_state.jl`), which
 assembles the per-field tendencies from `prognostic_tendencies.jl`. P3 has no
 write access to the prognostic state and no awareness of host Δt. This produces
-several deliberate, documented differences from Fortran:
+several deliberate, documented consequences:
 
-- **Hard prognostic clamps are replaced by tendency-form relaxations.** For
-  example, `impose_max_Ni` becomes a relaxation sink toward ``N^i_{\max}/ρ``
+- **Hard prognostic clamps are replaced by tendency-form relaxations.** The global
+  ice-number cap, for example, becomes a relaxation sink toward ``N^i_{\max}/ρ``
   over `sink_limiting_timescale` (default 10 s) rather than an instantaneous cap.
 - **Per-Δt depletion rates use a fixed timescale.** Cooper nucleation and
   homogeneous freezing relax over `ice_nucleation_timescale` /
-  `homogeneous_freezing_timescale` (both 10 s by default) in place of Fortran's
+  `homogeneous_freezing_timescale` (both 10 s by default) rather than over
   ``1/Δt``; CCN activation uses its own `aerosol.activation_timescale`
   (default 1 s). Every per-species sink budget is likewise sized against
   `sink_limiting_timescale`. For a single forward update no longer than that
   interval, the limited P3 sinks cannot remove more than their donor reservoir.
-  This is a rate-budget guarantee, not an exact equivalence between Breeze's RK
-  tendency update and Fortran's in-place one-shot operator.
+  This is a rate-budget guarantee, not an exact equivalence with an in-place
+  one-shot operator.
 - **Latent heating is delegated to the thermodynamics formulation.** The Anelastic
   and compressible formulations carry energy through their prognostic
   thermodynamic variable ``θ_{li}``.
@@ -101,7 +103,7 @@ Breeze runs the **two-moment** ice path, which tracks:
 2. **Number** (``ρn^i``): Ice particle number concentration.
 
 The shape parameter ``μ^i`` is diagnosed from the ``μ``–``λ`` closure tabulated in
-Fortran Lookup Table 1.
+Lookup Table 1.
 
 ### Predicted Liquid Fraction
 
@@ -124,7 +126,7 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
 | Four-regime piecewise mass–diameter and matching area–diameter relationships | [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) |
 | Best-number terminal velocity with air-density correction ``(ρ_s/ρ)^{0.54}`` | [Mitchell and Heymsfield (2005)](@cite MitchellHeymsfield2005) |
 | Cober–List rime density | [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) |
-| Two-moment μ–λ closure (Heymsfield 2003 fit for small particles; rime-/density-weighted relation from the Fortran lookup-table generator for larger particles) | [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) |
+| Two-moment μ–λ closure (Heymsfield 2003 fit for small particles; rime-/density-weighted relation from the lookup-table generator for larger particles) | [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) |
 | Liquid fraction prognostic variable (``ρq^{wi}``) | [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) |
 | Wet growth and refreezing | [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) |
 | Tabulated, size-thresholded (``D \ge 9`` mm) shedding | [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) |
@@ -144,49 +146,41 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
     kernel plus the destination/merge logic; neither is present.
 
 !!! note "Subgrid cloud and precipitation fractions (SCPF)"
-    Breeze runs permanently in the `SCF = SPF = 1` limit. Fortran's SCPF
-    diagnostic, which calls `compute_SCPF` three times per step to
-    diagnose subgrid cloud cover from a bounded total-water PDF, is
-    not ported.
+    Breeze runs permanently in the `SCF = SPF = 1` limit. The SCPF diagnostic,
+    which diagnoses subgrid cloud cover from a bounded total-water PDF, is
+    not implemented.
 
 !!! note "Adaptive sedimentation substepping"
-    Sedimentation is routed through tracer transport rather than the
-    Fortran's adaptive `dt_left` substepping based on the maximum Courant
-    number.
+    Sedimentation is routed through tracer transport rather than through
+    adaptive substepping based on the maximum Courant number.
 
 !!! note "Lookup-table I/O scope"
-    Breeze reads the same Fortran ASCII ice lookup table as the reference
-    implementation: `p3_lookupTable_1.dat-v6.9-2momI`, which carries
-    both the 5-D ice-only integrals and the embedded 6-D ice–rain collection
-    block. The ice tables are not regenerated. The rain 1D tables (mass- and number-weighted
-    fall speed, evaporation ventilation) *are* tabulated at startup from
-    Chebyshev–Gauss quadrature via `tabulate_rain_from_quadrature`.
+    Breeze reads the published P3 ASCII ice lookup table,
+    `p3_lookupTable_1.dat-v6.9-2momI`, which carries both the 5-D ice-only
+    integrals and the embedded 6-D ice–rain collection block. The ice tables are
+    not regenerated. The rain 1D tables (mass- and number-weighted fall speed,
+    evaporation ventilation) *are* tabulated at startup from Chebyshev–Gauss
+    quadrature via `tabulate_rain_from_quadrature`.
 
-## Equivalences with the Fortran runtime
+## Options Breeze fixes rather than exposes
 
-These are options where Fortran and Breeze differ in *form* but agree on
-what actually runs.
+These are switches the published scheme leaves configurable, but which have a
+single setting in Breeze.
 
 !!! note "Alternative warm-rain options"
-    The Fortran scheme exposes three autoconversion / accretion / rain
-    self-collection options
-    (``\mathtt{autoAccr\_param} \in \{\text{SB2001},\, \text{KK2000},\, \text{Kogan2013}\}``,
-    default KK2000). Breeze implements the default only:
-    [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000), selected
-    through the `warm_rain_scheme` keyword as `KhairoutdinovKogan2000()`. The
-    scheme also sets the seed-drop mass used to convert the autoconversion mass
+    P3 admits several autoconversion / accretion / rain self-collection options.
+    Breeze implements one: [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000),
+    selected through the `warm_rain_scheme` keyword as `KhairoutdinovKogan2000()`.
+    The scheme also sets the seed-drop mass used to convert the autoconversion mass
     rate into a rain number source.
 
 !!! note "Variable rain shape parameter"
-    Both Breeze and Fortran v5.5.0 hold the rain shape parameter at
-    ``μ^r = 0`` at runtime (the Cao-2008 variable-``μ^r`` block is
-    commented out in the Fortran source). The closures used by Breeze
-    are therefore identical to Fortran's runtime behaviour.
+    Breeze holds the rain shape parameter at ``μ^r = 0``. A variable-``μ^r``
+    closure is not implemented.
 
 !!! note "Prescribed vs. prognostic droplet number"
-    Fortran v5.5.0 runs with `log_predictNc = .false.`, taking cloud droplet
-    number from a scheme constant. That is Breeze's default too
-    (`cloud.number_concentration`). Passing
+    By default Breeze takes cloud droplet number from a scheme constant,
+    `cloud.number_concentration`. Passing
     `aerosol = AerosolActivation(AerosolMode())` switches on the prognostic
     path, which adds ``ρn^{cl}`` and an unactivated-aerosol reservoir
     ``ρn^a`` to the prognostic set.
@@ -243,11 +237,11 @@ neither allocates nor advects it.
 
 From these, diagnostic properties are computed:
 
-- **Rime fraction**: ``F^f = ρq^f / ρq^i`` (the prognostic ``ρq^i`` is dry ice,
-  matching Fortran's ``Fr = qirim / (qitot - qiliq)``).
+- **Rime fraction**: ``F^f = ρq^f / ρq^i``, where the prognostic ``ρq^i`` is dry ice,
+  so the denominator excludes the liquid coating.
 - **Rime density**: ``ρ^f = ρq^f / ρb^f``.
-- **Liquid fraction**: ``F^l = ρq^{wi} / (ρq^i + ρq^{wi})`` (denominator is total
-  ice mass, matching Fortran's ``Fl = qiliq / qitot``).
+- **Liquid fraction**: ``F^l = ρq^{wi} / (ρq^i + ρq^{wi})``, whose denominator is the
+  total ice mass.
 
 ## Quick Start
 

@@ -307,7 +307,7 @@ end
 
 @testset "P3 Processes" begin
 
-    @testset "Rime splintering follows Fortran guards" begin
+    @testset "Rime splintering respects its temperature and size guards" begin
         FT = Float64
         p3 = PredictedParticlePropertiesMicrophysics(FT)
         parameters = p3.process_rates
@@ -562,7 +562,7 @@ end
                                                          coupled_sink_limiting_iterations = 0)
     end
 
-    @testset "P3 sediments cloud mass and number with Fortran Stokes velocities" begin
+    @testset "P3 sediments cloud mass and number with Stokes velocities" begin
         FT = Float64
         p3 = PredictedParticlePropertiesMicrophysics(FT)
         constants = ThermodynamicConstants(FT)
@@ -844,7 +844,7 @@ end
         @test isfinite(self_collection)
         @test self_collection > 0
 
-        # Cloud self-collection is zero for KK2000 (Fortran ncslf = 0)
+        # Cloud self-collection is zero for KK2000
         @test PredictedParticleProperties.cloud_self_collection_rate(p3_kk, qᶜˡ, Nᶜˡ, ρ) == 0
 
         # Seed-drop mass: KK2000 ≈ 25 μm radius
@@ -918,7 +918,7 @@ end
         expected_rain_relaxation = expected_reference_rain_vapor_relaxation(
             p3, FT(5e-4), FT(1e6), ρ, transport, FT)
         # Fˡ = 0 here, so the dry-ice gate inside `coupled_saturation_adjustment_rates`
-        # is active and the raw relaxation coefficient is Fortran's `epsi`.
+        # is active, so the raw relaxation coefficient is the dry-ice one.
         ice_relaxation = PPP.ice_vapor_relaxation_coefficient(
             p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
         expected_ice_relaxation = expected_reference_ice_vapor_relaxation(
@@ -1048,7 +1048,7 @@ end
         transport = air_transport_properties(T, P, constants)
 
         # Fˡ ≈ 0.33 here, so the wet-ice gate is the active one and the raw
-        # relaxation coefficient is Fortran's `epsiw`.
+        # relaxation coefficient is the wet-ice one.
         coating_relaxation = PPP.ice_vapor_relaxation_coefficient(
             p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
         expected_coating_relaxation = expected_reference_coating_vapor_relaxation(
@@ -1124,7 +1124,7 @@ end
         @test cond_sink_total * dt_safety <= qcon_cap + FT(10) * eps(FT)
 
         # Ice satadj cap: dep + nuc_q ≤ qdep_cap/dt_safety, evaluated against
-        # the post-liquid thermodynamic state (Fortran qv_tmp / t_tmp).
+        # the post-liquid thermodynamic state.
         net_liquid = max(zero(FT), limited.cond) + limited.ccn_act +
                      limited.rain_cond + limited.coat_cond -
                      rain_evap - coat_evap - max(zero(FT), -limited.cond)
@@ -1303,7 +1303,7 @@ end
         @test rates_dry.partial_melting >= 0
         @test rates_dry.complete_melting >= 0
 
-        # With Fortran tables, the partial/complete split depends on the
+        # With the tabulated integrals, the partial/complete split depends on the
         # PSD-integrated ventilation. Verify both branches are non-negative
         # and at least one is positive.
         @test rates_dry.complete_melting >= 0
@@ -1638,7 +1638,7 @@ end
         @test isfinite(rate_rain_dom)
     end
 
-    @testset "rime_density follows the Fortran Ri fit" begin
+    @testset "rime_density follows the Cober-List Ri fit" begin
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
         constants = ThermodynamicConstants(FT)
@@ -1701,7 +1701,8 @@ end
             bᶠ = max(bᶠ, 0)
             ρᶠ = FT(NaN)
 
-            # Mirrors `consistent_rime_state`: Fortran's `bsmall = qsmall/rho_rimeMax`.
+            # Mirrors `consistent_rime_state`: the rime-volume floor is
+            # `minimum_mass_mixing_ratio / maximum_rime_density`.
             if bᶠ >= p3.minimum_mass_mixing_ratio / parameters.maximum_rime_density
                 ρᶠ = qᶠ / bᶠ
                 if ρᶠ < parameters.minimum_rime_density
@@ -1739,7 +1740,7 @@ end
         @test no_volume.Fᶠ == 0
 
         # Above it, repair instead: the implied density overshoots `maximum_rime_density`,
-        # so re-densify to it and recompute `bᶠ`. Fortran's `1e-15` would discard this.
+        # so re-densify to it and recompute `bᶠ` rather than discarding the rime.
         dense_rime = consistent_rime_state(p3, FT(1e-4), FT(1e-5), FT(1e-16), FT(0))
         @test FT(1e-16) > bsmall
         @test dense_rime.qᶠ == FT(1e-5)
@@ -1888,9 +1889,9 @@ end
         pˢᵗ = FT(100000)
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
 
-        # Fortran carries one signed term, `nrslf = dum × base` with the
-        # Verlinde-Cotton modifier `dum ≤ 1` (microphy_p3.f90:3872-3886), and never
-        # rescales it in any limiter. Breeze reports the sink and source directions
+        # Physically this is one signed rate: a base self-collection rate reduced by
+        # the Verlinde-Cotton breakup modifier, never rescaled by a limiter.
+        # Breeze reports the sink and source directions
         # separately, so the pair must be netted before the rain-number limiter:
         # rescaling the sink alone would leave the breakup source at full strength and
         # turn the net into spurious rain-number production above the breakup threshold.
@@ -1969,10 +1970,12 @@ end
             cloud_warm_collection_number = FT(1e4),
         )
         # The shed-drop count follows the configurable `shed_drop_mass` (default the
-        # Fortran 1 mm drop, 1/1.923e6 kg), not a hardcoded literal: the rain-number
-        # limiter budgets this source as `cloud_warm_collection / shed_drop_mass`, so
-        # the assembled tendency has to divide by the same mass.
-        expected_shed_drop_source = ρ * manual_rates.cloud_warm_collection * FT(1.923e6)
+        # mass of a 1 mm drop), not a hardcoded literal: the rain-number limiter
+        # budgets this source as `cloud_warm_collection / shed_drop_mass`, so the
+        # assembled tendency has to divide by the same mass. Read it from the scheme
+        # rather than restating it, so retuning the default cannot desync the test.
+        expected_shed_drop_source = ρ * manual_rates.cloud_warm_collection /
+                                    p3.process_rates.shed_drop_mass
         @test tendency_ρnʳ(manual_rates, ρ, nⁱ, qⁱ, nʳ, one(FT), p3) ≈ expected_shed_drop_source
 
         heavy_shed = ProcessRateParameters(FT; liquid_fraction_active = false,
@@ -1997,12 +2000,12 @@ end
         @test tendency_ρqʳ(warm_rates, ρ, process_rates) ≈ ρ * FT(1e-8)
         @test tendency_ρqʷⁱ(warm_rates, ρ, process_rates) == 0
 
-        # Fortran sets qwgrth1c/qwgrth1r only inside `if (log_LiquidFrac)`
-        # (microphy_p3.f90:3255-3268), so `wet_growth_cloud`/`wet_growth_rain` are
-        # identically zero in this branch. Even when forced nonzero they must not feed
-        # the ice, rime-mass or rime-volume tendencies: Fortran omits both from its
-        # qirim and birim updates (microphy_p3.f90:4249-4253) and adds them equally to
-        # qitot and qiliq (:4243-4256), leaving the dry ice mass unchanged.
+        # Wet growth is only diagnosed with liquid fraction active, so
+        # `wet_growth_cloud`/`wet_growth_rain` are identically zero in this branch.
+        # Even when forced nonzero they must not feed the ice, rime-mass or
+        # rime-volume tendencies: the water they collect stays liquid, raising the
+        # total ice mass and the coating mass equally and leaving the dry ice mass
+        # unchanged.
         wet_growth_rates = p3_process_rates_with(FT;
             rime_density_new = FT(300),
             wet_growth_cloud = FT(3e-8),
@@ -2017,9 +2020,8 @@ end
 
         # The collection retained against the wet-growth capacity reaches ice, rime and
         # rime volume through the reduced riming rates instead (`process_rates.jl`
-        # shrinks cloud_riming/rain_riming to the retained portion, mirroring Fortran's
-        # qccol/qrcol reduction at microphy_p3.f90:3277-3279). Rime volume splits the
-        # two by rhorime_c and rho_rimeMax exactly as microphy_p3.f90:4250-4253 does.
+        # shrinks cloud_riming/rain_riming to the retained portion). Rime volume splits
+        # the two between the fresh-rime density and the maximum rime density.
         retained_cloud = FT(2.4e-8)
         retained_rain = FT(1.6e-8)
         retained_rates = p3_process_rates_with(FT;
@@ -2369,7 +2371,7 @@ end
         FT = Float64
         constants = ThermodynamicConstants(FT)
 
-        # Load Fortran lookup tables
+        # Load the P3 lookup tables
         p3_tab = PredictedParticlePropertiesMicrophysics()
 
         ρ = FT(1.0)

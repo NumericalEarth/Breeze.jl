@@ -3,7 +3,7 @@
 This section provides worked examples demonstrating P3 microphysics concepts
 through visualization and analysis.
 
-Every ice-side quantity below is read from the Fortran lookup tables, which is
+Every ice-side quantity below is read from the P3 lookup tables, which is
 exactly how the model evaluates them at runtime — see
 [Integral Properties](@ref p3_integral_properties) for the table layout. The
 tables are indexed by ``(\log_{10} \bar{m}, F^f, F^l, ρ^f, μ)``, where
@@ -24,7 +24,7 @@ using Breeze.Microphysics.PredictedParticleProperties
 using Logging: NullLogger, with_logger
 using CairoMakie
 
-# The default constructor reads the Fortran ASCII lookup tables
+# The default constructor reads the P3 ASCII lookup tables
 # (downloaded automatically on first use).
 p3 = with_logger(NullLogger()) do
     PredictedParticlePropertiesMicrophysics()

@@ -88,27 +88,25 @@ end
 $(TYPEDSIGNATURES)
 
 Cap vapor sinks and sources against the moist-adiabatic saturation-adjustment
-budget, matching Fortran P3 v5.5.0 `qcon_satadj` / `qevp_satadj` /
-`qdep_satadj` (`microphy_p3.f90:3990-4055`).
+budget.
 
 Defining `qsatadj_ℓ = (qᵛ - qᵛ⁺ˡ) / ξˡ` with the moist-static feedback
 factor `ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T²)`:
 
 - Liquid-phase condensation sinks (`cond > 0`, `ccn_act`, `rain_cond`,
-  `coat_cond`) cannot exceed `max(0, qsatadj_ℓ)` (Fortran 3997-4012).
+  `coat_cond`) cannot exceed `max(0, qsatadj_ℓ)`.
 - Liquid-phase evaporation sources (`cond < 0`, `rain_evap`, `coat_evap`)
-  cannot exceed `max(0, -qsatadj_ℓ)` (Fortran 4014-4028).
+  cannot exceed `max(0, -qsatadj_ℓ)`.
 
 The rescaled liquid tendencies are then carried into a post-liquid state
-`(qᵛ_after, T_after)` (Fortran's `qv_tmp` / `t_tmp`), and `qᵛ⁺ⁱ_after`
-is recomputed at `T_after` to evaluate
+`(qᵛ_after, T_after)`, and `qᵛ⁺ⁱ_after` is recomputed at `T_after` to evaluate
 `ξⁱ_after = 1 + ℒⁱ_after² qᵛ⁺ⁱ_after / (cᵖᵈ Rᵛ T_after²)`. With
 `qsatadj_ᵢ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after`:
 
 - Ice-phase deposition sinks (`dep > 0`, `nuc_q`) cannot exceed
-  `max(0, qsatadj_ᵢ)` (Fortran 4037-4049).
+  `max(0, qsatadj_ᵢ)`.
 - Ice-phase sublimation sources (`dep < 0`) cannot exceed
-  `max(0, -qsatadj_ᵢ)` (Fortran 4050-4055).
+  `max(0, -qsatadj_ᵢ)`.
 
 Number rates `ccn_act_n` and `nuc_n` are scaled by the same factor as their
 companion mass rates to preserve mean particle mass.
@@ -125,15 +123,14 @@ Returns a NamedTuple of the possibly-rescaled rates.
     ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
 
-    # Liquid-phase saturation-adjustment caps (Fortran 3991-4028). In the
-    # SCF=1 limit `qcon_satadj` and `qevp_satadj` collapse to the same signed
-    # value `qsatadj_ℓ`; condensation sees the positive part, evaporation the
-    # negative part.
+    # Liquid-phase saturation-adjustment caps. In the SCF=1 limit the condensation
+    # and evaporation budgets collapse to the same signed value `qsatadj_ℓ`;
+    # condensation sees the positive part, evaporation the negative part.
     qsatadj_ℓ = (qᵛ - qᵛ⁺ˡ) / ξˡ
     qcon_cap = max(0, qsatadj_ℓ)
     qevp_cap = max(0, -qsatadj_ℓ)
 
-    # Condensation cap (Fortran 3997-4012)
+    # Condensation cap
     cond_sink_total = clamp_positive(cond) + ccn_act + rain_cond + coat_cond
     f_cond = sink_limiting_factor(cond_sink_total, qcon_cap, dt_safety)
 
@@ -142,8 +139,8 @@ Returns a NamedTuple of the possibly-rescaled rates.
     rain_cond = rain_cond * f_cond
     coat_cond = coat_cond * f_cond
 
-    # Evaporation cap (Fortran 4014-4028): zero when supersaturated, otherwise
-    # rescale the lumped evaporation rates to fit within `qevp_cap`.
+    # Evaporation cap: zero when supersaturated, otherwise rescale the lumped
+    # evaporation rates to fit within `qevp_cap`.
     evp_total = clamp_positive(-cond) + rain_evap + coat_evap
     f_evp = sink_limiting_factor(evp_total, qevp_cap, dt_safety)
 
@@ -151,8 +148,7 @@ Returns a NamedTuple of the possibly-rescaled rates.
     rain_evap = rain_evap * f_evp
     coat_evap = coat_evap * f_evp
 
-    # Ice-phase cap, after netting the rescaled liquid tendencies into qᵛ and T
-    # (Fortran 4031-4035 `qv_tmp` / `t_tmp`).
+    # Ice-phase cap, after netting the rescaled liquid tendencies into qᵛ and T.
     net_liquid = clamp_positive(cond) + ccn_act + rain_cond + coat_cond -
                  rain_evap - coat_evap - clamp_positive(-cond)
     qᵛ_after = qᵛ - net_liquid * dt_safety
@@ -162,19 +158,19 @@ Returns a NamedTuple of the possibly-rescaled rates.
     ℒⁱ_after = sublimation_latent_heat(constants, T_after)
     ξⁱ_after = ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, Rᵛ, T_after)
 
-    # Ice-phase deposition / sublimation caps (Fortran 4037-4055).
+    # Ice-phase deposition / sublimation caps.
     qsatadj_ᵢ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after
     qdep_cap = max(0, qsatadj_ᵢ)
     qsub_cap = max(0, -qsatadj_ᵢ)
 
-    # Deposition cap (Fortran 4037-4049)
+    # Deposition cap
     dep_sink_total = clamp_positive(dep) + nuc_q
     f_dep = sink_limiting_factor(dep_sink_total, qdep_cap, dt_safety)
 
     nuc_q = nuc_q * f_dep
     nuc_n = nuc_n * f_dep
 
-    # Sublimation cap (Fortran 4050-4055)
+    # Sublimation cap
     sub_total = clamp_positive(-dep)
     f_sub = sink_limiting_factor(sub_total, qsub_cap, dt_safety)
 
@@ -192,9 +188,9 @@ end
 $(TYPEDSIGNATURES)
 
 Mass [kg] of a newly activated cloud droplet, the sphere of radius
-`parameters.activated_droplet_radius` at the liquid water density. This is Fortran P3's
-`cons7`, and it converts a CCN activation *number* rate into the matching *mass*
-rate wherever one of the two is diagnosed from the other.
+`parameters.activated_droplet_radius` at the liquid water density. It converts a
+CCN activation *number* rate into the matching *mass* rate wherever one of the two
+is diagnosed from the other.
 """
 @inline function activated_droplet_mass(parameters, FT)
     r₀ = FT(parameters.activated_droplet_radius)
@@ -240,7 +236,7 @@ end
     return number_gain - number_loss
 end
 
-# Fall-speed correction for ambient air density, Fortran `rhofaci`. The 0.54
+# Fall-speed correction for ambient air density. The 0.54
 # exponent is the [Heymsfield et al. (2007)](@cite HeymsfieldEtAl2007) fit, and the
 # 0.01 kg/m³ floor only bites above ~30 km, where there is no condensate to fall.
 @inline function ice_air_density_correction(reference_air_density, air_density)
@@ -251,20 +247,19 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Apply the Fortran `calc_bulkRhoRime` consistency pass to the prognostic rime
-state. Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density `ρᶠ`.
+Apply a bulk rime-density consistency pass to the prognostic rime state.
+Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density `ρᶠ`.
 
-One departure: the rime-volume threshold is `minimum_mass_mixing_ratio /
-maximum_rime_density` — Fortran P3's `bsmall` — not the `1e-15` literal
-`calc_bulkRhoRime` ships above a commented-out `bsmall` test.
+The rime-volume threshold is `minimum_mass_mixing_ratio / maximum_rime_density`,
+so that it scales with the scheme's mass floor rather than being a fixed literal.
 """
 @inline function consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, qʷⁱ)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
     qⁱ_available = clamp_positive(qⁱ)
-    # Julia's qⁱ is already dry ice (= Fortran qitot - qiliq), so
-    # qⁱ_dry = qⁱ_available (no need to subtract qʷⁱ again).
+    # qⁱ is already the dry ice mass, so qⁱ_dry = qⁱ_available
+    # (no need to subtract qʷⁱ again).
     qⁱ_dry = qⁱ_available
     qᶠ_raw = clamp_positive(qᶠ)
     bᶠ_raw = clamp_positive(bᶠ)
@@ -371,9 +366,8 @@ end
     return ifelse(needs_adjustment, nʳ_bounded, nʳ_eff)
 end
 
-# Bulk ice density from Table 1 (the main lookup table) at the shape parameter μⁱ:
-# Fortran `proc_from_LUT_main2mom(12, …)`, whose μⁱ index comes from
-# `find_lookupTable_indices_1c`.
+# Bulk ice density from Table 1 (the main lookup table), indexed at the shape
+# parameter μⁱ.
 @inline function ice_mean_density(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
     FT = typeof(qⁱ_total)
     m̄ = safe_divide(qⁱ_total, nⁱ, one(FT))
@@ -394,8 +388,8 @@ $(TYPEDSIGNATURES)
 
 Compute the ice PSD shape parameter μⁱ from the lookup tables.
 
-μⁱ is looked up directly from Table 1 (`bulk_properties.shape`), which stores
-the `mu_i_save` value computed during Fortran table generation.
+μⁱ is looked up directly from Table 1 (`bulk_properties.shape`), which stores the
+shape parameter computed when the table was generated.
 """
 @inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ)
@@ -430,8 +424,8 @@ end
 ##### Psychrometric corrections ξˡ, ξⁱ
 #####
 ##### Account for the latent-heat feedback that reduces the effective
-##### supersaturation drive during condensation (ξˡ, Fortran "ab") and ice
-##### deposition (ξⁱ, Fortran "abi"). Both share the form
+##### supersaturation drive during condensation (ξˡ) and ice deposition (ξⁱ).
+##### Both share the form
 ##### ξ = 1 + ℒ² qᵛ⁺ / (cᵖᵈ Rᵛ T²) with the appropriate latent heat.
 #####
 
@@ -462,9 +456,9 @@ end
 # total-air mass fraction (ρᵛ/ρ), so this must use the same basis:
 # q_sat0 = ρᵛ⁺(T₀)/ρ = e_s0 / (Rᵛ T₀ ρ). With this convention the diffusion term
 # ℒ Dᵥ ρ (qᵛ - q_sat0) reduces to the exact vapor-density difference ρᵛ - ρᵛ⁺(T₀).
-# The Fortran uses the dry-air mixing ratio ε e_s0/(P - e_s0) because its vapor Qv
-# is itself a dry-air mixing ratio; mixing the two mass bases would bias the
-# melting and refreezing heat balances, so all three call sites share this.
+# A dry-air mixing ratio ε e_s0/(P - e_s0) would only be correct against a vapor
+# variable that is itself a dry-air mixing ratio; mixing the two mass bases would
+# bias the melting and refreezing heat balances, so all three call sites share this.
 @inline function freezing_point_saturation_mass_fraction(constants, T₀, ρ)
     Rᵛ = typeof(ρ)(vapor_gas_constant(constants))
     return saturation_vapor_pressure_at_freezing(constants, T₀) / (Rᵛ * T₀ * ρ)

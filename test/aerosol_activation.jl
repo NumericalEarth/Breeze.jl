@@ -21,7 +21,7 @@ using Oceananigans.Fields: interior, set!
     @testset "AerosolMode construction" begin
         thermodynamic_constants = Breeze.ThermodynamicConstants(FT)
         mode = AerosolMode(FT)
-        # Default ammonium sulfate (Fortran P3): βact = vi * osm * epsm * mw * rhoa / (map * rhow)
+        # Default ammonium sulfate: βact = vi * osm * epsm * mw * rhoa / (map * rhow)
         expected_beta = 3 * 0.9 * thermodynamic_constants.vapor.molar_mass * 1777 /
                         (0.132 * thermodynamic_constants.liquid.density)
         @test mode.solute_activity ≈ expected_beta rtol=1e-10

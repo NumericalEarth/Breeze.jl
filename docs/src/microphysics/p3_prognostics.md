@@ -33,10 +33,10 @@ appear as gains; their negative branches contribute as losses elsewhere.
 
 !!! note "Convention: prognostic ``ρq^i`` is dry ice"
     In Breeze the prognostic ice-mass density ``ρq^i`` stores **dry ice only**
-    (rime + deposited mass; excludes ``ρq^{wi}``). The Fortran reference uses
-    the opposite convention: `qitot` is the *total* (ice + liquid coating)
-    and the dry-ice mass is recovered as `qitot - qiliq`. The two formulations
-    are equivalent — Breeze's ``ρq^i + ρq^{wi}`` equals Fortran's `qitot`.
+    (rime + deposited mass; excludes ``ρq^{wi}``). The total ice mass, used
+    wherever a lookup table is indexed by particle mass, is the sum
+    ``ρq^i + ρq^{wi}``. Formulations that carry the total as the prognostic and
+    recover the dry mass by subtraction are equivalent.
 
 ## Variable Definitions
 
@@ -50,7 +50,7 @@ appear as gains; their negative branches contribute as losses elsewhere.
 
 ``ρn^{cl}`` and ``ρn^a`` are prognostic only when the optional aerosol-activation path
 (`AerosolActivation` in `aerosol_activation.jl`) is enabled, where CCN-activation source
-terms drive them. Otherwise, matching Fortran `log_predictNc = .false.`, droplet number is
+terms drive them. Otherwise droplet number is
 the scheme parameter `cloud.number_concentration` (typical continental ``\sim 100`` cm⁻³
 or marine ``\sim 50`` cm⁻³): every rate reads that constant, and neither field is
 allocated or advected.
@@ -63,7 +63,7 @@ allocated or advected.
 | ``ρn^r`` | Rain number density | m⁻³ | Number of raindrops per unit volume |
 
 Rain follows a gamma size distribution with parameters diagnosed from the
-mass / number ratio. Both Fortran and Breeze run with ``μ^r = 0`` at runtime.
+mass / number ratio. Breeze runs with ``μ^r = 0``.
 
 ### Ice
 
@@ -80,7 +80,7 @@ mass / number ratio. Both Fortran and Breeze run with ``μ^r = 0`` at runtime.
 | Symbol | Name | Units | Description |
 |--------|------|-------|-------------|
 | ``ρq^v`` | Water vapor density | kg/m³ | The host-coupled moisture variable |
-| ``ρs^{v+l}`` | Supersaturation density, ``s^{v+l} = q^v - q^{v+l}`` | kg/m³ | Predicted-supersaturation path. Fortran v5.5 hard-codes `log_predictSsat = .false.`; Breeze's `predict_supersaturation` flag defaults to `false` to match. When `false`, the field is not allocated and is absent from `prognostic_field_names`; diagnostics use ``q^v - q^{v+l}(T)`` directly. When `true`, the bounded G&M (2008) adjustment is active. |
+| ``ρs^{v+l}`` | Supersaturation density, ``s^{v+l} = q^v - q^{v+l}`` | kg/m³ | Predicted-supersaturation path, controlled by the `predict_supersaturation` flag, which defaults to `false`. When `false`, the field is not allocated and is absent from `prognostic_field_names`; diagnostics use ``q^v - q^{v+l}(T)`` directly. When `true`, the bounded G&M (2008) adjustment is active. |
 
 ## Derived Quantities
 
@@ -92,8 +92,7 @@ From the prognostic variables, key diagnostic properties are computed:
 F^f = \frac{ρq^f}{ρq^i}.
 ```
 
-The denominator is the prognostic dry-ice mass — equivalent to Fortran's
-`qirim / (qitot - qiliq)`.
+The denominator is the prognostic dry-ice mass, which excludes the liquid coating.
 
 **Rime density**:
 
@@ -107,8 +106,7 @@ The denominator is the prognostic dry-ice mass — equivalent to Fortran's
 F^l = \frac{ρq^{wi}}{ρq^i + ρq^{wi}}.
 ```
 
-The denominator is the total ice mass — equivalent to Fortran's
-`qiliq / qitot`.
+The denominator is the total ice mass, dry ice plus liquid coating.
 
 **Mean particle mass** (per total ice mass):
 
@@ -180,11 +178,11 @@ G_{ρn^{cl}}
 ```
 
 - ``\dot{n}^{cl}_\text{aut}`` is scheme-aware: KK2000 scales by the in-cloud
-  ``n^{cl}/q^{cl}`` ratio (Fortran `ncautc = qcaut × nc/qc`).
+  ``n^{cl}/q^{cl}`` ratio.
 - ``\dot{n}^{cl}_\text{slf}`` is cloud self-collection, zero for KK2000.
-- ``\dot{n}^{cl}_\text{corr}`` is the cloud-DSD ``λ``-bound number correction
-  (Fortran `get_cloud_dsd2` write-back), applied as a relaxation over
-  `sink_limiting_timescale`.
+- ``\dot{n}^{cl}_\text{corr}`` is the cloud-DSD ``λ``-bound number correction,
+  applied as a relaxation over `sink_limiting_timescale` rather than as an
+  instantaneous write-back.
 
 ### Rain Mass Tendency
 
@@ -229,19 +227,19 @@ G_{ρn^r}
   ``(n^i/q^i)\,\dot{q}_{\text{mlt},f}``, because a whole-particle clip transfers the
   remaining population even when the dry-ice mass has already gone to zero.
 - ``\dot{n}^{r}_\text{slf}`` and ``\dot{n}^{r}_\text{brk}`` are the *netted* self-collection / breakup pair:
-  Fortran carries one signed `nrslf`, so Breeze collapses the two directions before
+  physically one signed rate, so Breeze collapses the two directions before
   the number limiter runs and at most one of them is nonzero.
-- ``\dot{n}_\text{shed} = \dot{q}_\text{shed} / m_{\text{shed},F^l}`` with
-  ``1/m_{\text{shed},F^l} = 1.928 \times 10^6`` kg⁻¹ (Fortran `nlshd`).
-- ``\dot{n}^{cl}_\text{col} = \dot{q}^{cl}_\text{col} / m_\text{shed}``
-  with ``1/m_\text{shed} = 1.923 \times 10^6`` kg⁻¹ (Fortran `ncshdc`), and only when
-  liquid fraction is *off*.
+- ``\dot{n}_\text{shed} = \dot{q}_\text{shed} / m_{\text{shed},F^l}``, where
+  ``m_{\text{shed},F^l}`` is `shed_drop_mass_liqfrac`.
+- ``\dot{n}^{cl}_\text{col} = \dot{q}^{cl}_\text{col} / m_\text{shed}``, where
+  ``m_\text{shed}`` is `shed_drop_mass`, and only when liquid fraction is *off*.
+  Both masses default to a 1 mm drop, ``π/6\, ρ^L D^3 ≈ 5.24 \times 10^{-7}`` kg.
 - ``\dot{n}^{r}_\text{evap}`` is the evaporation number sink the rain-number limiter budgeted
   (formed from the DSD-bounded ``n^r`` and rescaled by the same factor as the other
   rain-number sinks), not a fresh ``(n^r/q^r)\,\dot{q}^{r}_\text{evap}`` product.
 - ``\dot{n}^{r}_\text{corr}`` is the diagnosed PSD ``λ``-bound number correction
-  (Fortran `get_rain_dsd2` writes back a clipped ``n^r``; Breeze adds a
-  matching relaxation tendency rather than mutating the prognostic state).
+  (the rain PSD diagnosis produces a clipped ``n^r``; Breeze adds a matching
+  relaxation tendency rather than mutating the prognostic state).
 
 ### Ice Mass Tendency
 
@@ -274,16 +272,16 @@ G_{ρn^i}
 
 - ``\dot{n}_\text{HM}`` is the Hallett–Mossop number source.
 - ``\dot{n}_\text{sub}`` is the sublimation number sink, plus the number companion of
-  liquid-coating evaporation (Fortran `nisub + nlevp`).
+  liquid-coating evaporation.
 - ``\dot{n}_\text{agg}`` is the aggregation magnitude.
-- ``\dot{n}_\text{cap}`` is the soft-relaxation analog of Fortran's `impose_max_Ni`
-  hard cap. When ``n^i`` exceeds ``N^i_\text{max}/ρ``, a relaxation sink over
+- ``\dot{n}_\text{cap}`` is the soft-relaxation analog of a hard global ice-number
+  cap. When ``n^i`` exceeds ``N^i_\text{max}/ρ``, a relaxation sink over
   `sink_limiting_timescale` is added to push it back toward the cap.
-- ``\dot{n}^{i}_\text{corr}`` is the ice ``λ``-limiter correction: Fortran clamps `nitot`
-  against the tabulated mean-size bounds (`f1pr09`/`f1pr10`), and Breeze adds
-  the difference between the bounded and the globally capped number as a
-  relaxation tendency. It is suppressed when a whole-particle clip fires, since
-  that path drains the raw population directly.
+- ``\dot{n}^{i}_\text{corr}`` is the ice ``λ``-limiter correction: ``n^i`` is bounded
+  against the tabulated mean-size limits, and Breeze adds the difference between
+  the bounded and the globally capped number as a relaxation tendency. It is
+  suppressed when a whole-particle clip fires, since that path drains the raw
+  population directly.
 
 The three number sinks are additionally projected onto the population that
 actually exists: melting takes priority, then sublimation, then number-only
@@ -328,7 +326,7 @@ G_{ρb^f}
 - \dot{b}_\text{dens}\Bigg].
 ```
 
-The various rime-density denominators reflect the Fortran convention:
+The rime-density denominators differ by process:
 fresh cloud rime uses the Cober–List density ``ρ^f_\text{new}``; rain
 riming, refreezing, immersion freezing, and homogeneous freezing all
 deposit at the maximum rime density ``ρ^f_\text{max} = 900`` kg/m³. ``\dot{b}_\text{clip}``
@@ -394,9 +392,8 @@ at ``(\text{Center}, \text{Center}, \text{Face})``.
 | ``ρb^f`` | ``V_m^i`` | ``\mathcal{F}_{ρb^f} = -V_m^i ρb^f`` |
 | ``ρq^{wi}`` | ``V_m^i`` | ``\mathcal{F}_{ρq^{wi}} = -V_m^i ρq^{wi}`` |
 
-``ρs^{v+l}`` and ``ρn^a`` do not sediment. Cloud droplets do: Fortran settles
-cloud mass and number with DSD-integrated Stokes velocities, and Breeze mirrors
-that.
+``ρs^{v+l}`` and ``ρn^a`` do not sediment. Cloud droplets do: cloud mass and
+number settle with DSD-integrated Stokes velocities.
 
 The sedimentation tendency is
 
@@ -410,8 +407,8 @@ open surface; an `ImpenetrableBoundaryCondition()` zeroes it instead, so
 precipitation accumulates in the lowest cell. The top face is held at zero, so
 nothing sediments in from above the model top.
 
-Breeze does not subcycle sedimentation inside P3 (Fortran's `dt_left` loop is
-not ported); Oceananigans is responsible for stability in transport.
+Breeze does not subcycle sedimentation inside P3; Oceananigans is responsible
+for stability in transport.
 
 ## Coupling to AtmosphereModel
 
@@ -431,9 +428,8 @@ prognostic_field_names(microphysics)
 ```
 
 ``ρnᶜˡ`` and ``ρnᵃ`` appear only when `aerosol`
-is an `AerosolActivation`: the default prescribed-Nᶜˡ path (Fortran
-`log_predictNc = .false.`) takes droplet number from `cloud.number_concentration`, so
-neither field is allocated or advected there. ``ρsᵛ⁺ˡ`` appears only when
+is an `AerosolActivation`: the default prescribed-Nᶜˡ path takes droplet number
+from `cloud.number_concentration`, so neither field is allocated or advected there. ``ρsᵛ⁺ˡ`` appears only when
 `predict_supersaturation = true`.
 
 P3's aerosol distribution is specified **per unit mass of air**: `AerosolMode.number_mixing_ratio`
@@ -483,7 +479,7 @@ P3 conserves total water in a closed system:
 (The liquid coating ``q^{wi}`` is included because shedding moves it to rain,
 and refreezing converts it to rime — both internal to the ice mass.)
 
-Within P3 the limiting happens in two stages, in Fortran's order. First
+Within P3 the limiting happens in two stages. First
 `limit_vapor_rates` (`process_rate_helpers.jl`) applies the
 saturation-adjustment caps (see the saturation adjustment limits in
 [Microphysical Processes](@ref p3_processes)). Then the per-species conservation
@@ -511,9 +507,9 @@ Thus, for a single forward update no longer than that interval, limited P3 sinks
 alone cannot make the corresponding mass or number reservoirs negative. This is
 not an unconditional positivity guarantee for an arbitrary host timestep or RK
 stage. The optional ``ρs^{v+l}`` prognostic is also excluded: subsaturation is
-legitimately negative. Breeze does not implement a Fortran-style post-step
-"return small mass to vapor" cleanup, because that requires state mutation with
-a paired ``θ`` correction.
+legitimately negative. Breeze does not implement a post-step "return small mass
+to vapor" cleanup, because that requires state mutation with a paired ``θ``
+correction.
 
 The advection operator is a separate matter: it is not positive-definite, so a
 stage update can return any density negative. `AtmosphereModel` therefore applies
@@ -568,8 +564,8 @@ microphysics = PredictedParticlePropertiesMicrophysics()
 ```
 
 Two further thresholds on `ProcessRateParameters` control whole-particle
-handling — `liquid_fraction_clipping_threshold` (Fortran `liqfracsmall`) and
-`tiny_ice_to_rain_threshold` (Fortran `qsmall_dry`, in kg/kg):
+handling — `liquid_fraction_clipping_threshold` [-] and
+`tiny_ice_to_rain_threshold` [kg/kg]:
 
 ```jldoctest thresholds
 parameters = microphysics.process_rates

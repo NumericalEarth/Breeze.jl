@@ -1,8 +1,7 @@
 #####
 ##### Warm-rain (autoconversion / accretion / self-collection) schemes
 #####
-##### Breeze implements option 2 of Fortran P3 v5.5.0 `autoAccr_param`:
-#####   2 → Khairoutdinov and Kogan (2000)
+##### Breeze implements Khairoutdinov and Kogan (2000).
 #####
 ##### The scheme is selected by setting the `warm_rain_scheme` field on the
 ##### top-level [`PredictedParticlePropertiesMicrophysics`](@ref) struct and
@@ -24,13 +23,12 @@ abstract type AbstractWarmRainScheme end
 $(TYPEDEF)
 
 [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000) warm-rain
-parameterization. Cloud self-collection is zero, by Fortran convention for
-this scheme.
+parameterization. Cloud self-collection is zero in this scheme.
 
 !!! note "Subgrid fraction factors"
-    Breeze applies all warm-rain rates to grid-mean state; Fortran P3 scales
-    by in-cloud / in-precipitation fractions (`iSCF`, `iSPF`, `SPF-SPF_clr`).
-    Without subgrid cloud/precip fraction prognostics in Breeze, those factors
-    are dropped (equivalent to `SCF = SPF = 1`, `SPF_clr = 0`).
+    Breeze applies all warm-rain rates to the grid-mean state. A subgrid
+    formulation would instead scale them by in-cloud and in-precipitation
+    fractions; without those prognostics the factors are dropped, which is
+    equivalent to `SCF = SPF = 1` and `SPF_clr = 0`.
 """
 struct KhairoutdinovKogan2000 <: AbstractWarmRainScheme end

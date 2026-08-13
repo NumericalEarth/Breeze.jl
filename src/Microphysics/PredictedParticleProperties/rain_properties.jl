@@ -50,7 +50,7 @@ Default coefficients give fall speeds in m/s for D in meters.
 
 # Keyword Arguments
 
-- `maximum_mean_diameter`: Upper Dm limit [m], default 2×10⁻³ (2 mm, Fortran `inv_Drmax = 1/0.002`)
+- `maximum_mean_diameter`: Upper Dm limit [m], default 2×10⁻³ (2 mm)
 - `fall_speed_coefficient`: aᵥ [m^{1-b}/s], default 841.99667
 - `fall_speed_exponent`: bᵥ [-], default 0.8
 

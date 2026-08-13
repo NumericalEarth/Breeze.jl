@@ -4,8 +4,8 @@
     # Both rain-ice tables share `(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μⁱ)` axes
     # by construction, so prep indices once and reuse across evaluations.
     prep = prepare_6d(table.mass, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μⁱ)
-    # Fortran table stores rain-ice mass and number kernels as log10;
-    # exponentiate to recover physical values (Fortran runtime: 10.**proc).
+    # The table stores rain-ice mass and number kernels as log10;
+    # exponentiate to recover physical values.
     return exp10(evaluate_at(table.mass, prep)),
            exp10(evaluate_at(table.number, prep))
 end
@@ -62,8 +62,8 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ 
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff = max(clamp_positive(nⁱ), p3.minimum_number_mixing_ratio)
 
-    # Fortran gates aggregation on bulk ice mass only. It floors the active
-    # category's number to nsmall before evaluating the collection kernel.
+    # Aggregation is gated on bulk ice mass only, with the number floored at
+    # `minimum_number_mixing_ratio` before the collection kernel is evaluated.
     aggregation_active = qⁱ_total >= p3.minimum_mass_mixing_ratio
 
     # Temperature-dependent sticking efficiency (linear ramp)
@@ -76,7 +76,7 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ 
                                    minimum_efficiency, maximum_efficiency)
 
     # Rime-fraction limiter (Eii_fact): shut off aggregation for heavily rimed ice
-    # Fortran P3: Eii_fact = 1 for Fr<0.6, linear ramp to 0 for 0.6≤Fr<0.9, 0 for Fr≥0.9
+    # Eii_fact = 1 for Fᶠ<0.6, a linear ramp to 0 for 0.6≤Fᶠ<0.9, and 0 for Fᶠ≥0.9
     minimum_rime_fraction = parameters.minimum_aggregation_rime_fraction
     maximum_rime_fraction = parameters.maximum_aggregation_rime_fraction
     rime_fraction_factor = clamp(1 - (Fᶠ - minimum_rime_fraction) /
@@ -98,7 +98,7 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ 
     # tendency [1/kg/s]. The 1/2 self-collection factor is already included
     # in the kernel (table stores half-integral, analytical path includes 0.5 factor).
     # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
-    # Use ice reference density (Fortran rhosui, P=600 hPa, T=-20°C), not rain reference.
+    # Use the ice reference density (P=600 hPa, T=-20°C), not the rain reference.
     ρ₀ = p3.ice.fall_speed.reference_air_density
     density_correction = ice_air_density_correction(ρ₀, ρ)
     rate = ρ * mean_collection_kernel * nⁱ_eff^2 * density_correction

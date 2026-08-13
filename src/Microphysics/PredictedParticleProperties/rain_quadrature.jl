@@ -13,7 +13,7 @@
 #####  2. Number-weighted terminal velocity:
 #####       V_num = ∫ V(D) exp(-λ_r D) dD / ∫ exp(-λ_r D) dD              [m/s]
 #####
-#####  3. Evaporation velocity-diameter integral (M18):
+#####  3. Evaporation velocity-diameter integral:
 #####       I_VD = ∫ D √(V(D)×D) exp(-λ_r D) dD                           [m^(5/2)]
 #####       where V(D) is the piecewise Gunn-Kinzer/Beard fall speed.
 #####       ν is NOT baked in; 1/√ν is applied at runtime.
@@ -24,11 +24,10 @@
 #####   D = (scale/λ) * (1+x) / (1-x+ε),  x ∈ [-1, 1]
 ##### with a scale of 10 (10 exponential decay lengths covers >99.99% of the integral).
 #####
-##### References:
-##### - P3 Fortran v5.5.0: ar=842, br=0.8, f1r=0.78, f2r=0.32, ν=1.5e-5 m²/s
+##### Parameters: ar=842, br=0.8, f1r=0.78, f2r=0.32, ν=1.5e-5 m²/s
 #####
 
-##### NOTE (M13): Both the tabulated and analytical rain paths now use the same
+##### NOTE: Both the tabulated and analytical rain paths now use the same
 ##### 4-regime Gunn-Kinzer/Beard piecewise V(D) formula (rain_fall_speed in quadrature.jl).
 ##### The piecewise law captures the terminal velocity plateau above D ~5mm and Stokes
 ##### drag below D ~100μm. The previous analytical path used a single power law
@@ -38,9 +37,10 @@ export RainMassWeightedVelocityEvaluator,
        RainNumberWeightedVelocityEvaluator,
        RainEvaporationVentilationEvaluator
 
-# Rain ventilation constants (Fortran P3 v5.5.0)
+# Rain ventilation constants; see `RainEvaporationVentilationEvaluator` for the
+# ventilation factor they enter and the citation.
 const RAIN_F1R = 0.78       # constant term in ventilation factor [-]
-const RAIN_F2R = 0.32       # Reynolds-dependent ventilation coefficient [-] (Fortran P3 v5.5.0)
+const RAIN_F2R = 0.32       # Reynolds-dependent ventilation coefficient [-]
 
 #####
 ##### RainMassWeightedVelocityEvaluator
@@ -118,8 +118,8 @@ Apply `(ρ₀/ρ)^0.54` at the call site if needed.
     end
 
     # The constant spherical-water mass factor cancels between numerator and
-    # denominator. The floor is Fortran's divide-by-zero guard on this same integral
-    # (`dum4`). A machine-epsilon floor would instead suppress valid Float32 velocities.
+    # denominator. The floor is a divide-by-zero guard on this same integral; a
+    # machine-epsilon floor would instead suppress valid Float32 velocities.
     denominator = max(diameter_cubed_integral, FT(DEFAULT_FLOORS.divisor))
     result = velocity_diameter_cubed_integral / denominator
     return ifelse(isfinite(result), result, zero(FT))
@@ -192,8 +192,7 @@ Returns the velocity in [m/s] at reference air density.
         number_integral += w * psd * J
     end
 
-    # Fortran's divide-by-zero guard on this integral (`dum2`); see the mass-weighted
-    # evaluator above.
+    # Divide-by-zero guard on this integral; see the mass-weighted evaluator above.
     denominator = max(number_integral, FT(DEFAULT_FLOORS.divisor))
     result = vel_integral / denominator
     return ifelse(isfinite(result), result, zero(FT))
@@ -207,7 +206,7 @@ end
     RainEvaporationVentilationEvaluator{N, W}
 
 Callable evaluator for the velocity-diameter part of the rain evaporation
-ventilation integral (M18):
+ventilation integral:
 
 ```math
 I_{\\mathrm{VD}}(\\lambda_r) =
@@ -216,7 +215,7 @@ I_{\\mathrm{VD}}(\\lambda_r) =
 
 where `V(D)` is the piecewise Gunn-Kinzer/Beard rain fall speed at reference
 density. The kinematic viscosity `ν` is **not** baked into the table; `1/√ν`
-is applied at runtime from T,P-dependent transport properties (Fortran convention).
+is applied at runtime from T,P-dependent transport properties.
 
 The full evaporation ventilation integral is assembled at runtime:
 
@@ -225,8 +224,10 @@ I_{\\mathrm{evap}} = \\frac{f_{1r}}{\\lambda_r^2}
     + f_{2r}\\, \\frac{\\mathrm{Sc}^{1/3}}{\\sqrt{\\nu}}\\, I_{\\mathrm{VD}}
 ```
 
-where `f1r = 0.78`, `f2r = 0.32`, `Sc = ν / Dᵛ` is the Schmidt number,
-and `ν` is the T,P-dependent kinematic viscosity. The constant term
+where `Sc = ν / Dᵛ` is the Schmidt number and `ν` is the T,P-dependent kinematic
+viscosity. The ventilation coefficients `f1r = 0.78` and `f2r = 0.32` are the
+standard values for falling drops tabulated by
+[Pruppacher and Klett (2010)](@cite pruppacher2010microphysics). The constant term
 `f1r / λ_r²` is the analytical result of `f1r × ∫ D exp(-λD) dD`.
 
 This integral appears in the PSD-integrated rain evaporation rate (Mason 1971,
@@ -265,7 +266,7 @@ end
 Evaluate `I_VD(λ_r)` = ∫ D √(V(D)×D) exp(-λ_r D) dD at the given `log10(λ_r)`.
 
 Returns the velocity-diameter integral in [m^(5/2)]. The `1/√ν`, constant (f1r),
-and Schmidt number (Sc^(1/3)) contributions are applied at runtime (M18).
+and Schmidt number (Sc^(1/3)) contributions are applied at runtime.
 """
 @inline function (e::RainEvaporationVentilationEvaluator)(log10_slope)
     FT = eltype(e.nodes)
@@ -280,7 +281,7 @@ and Schmidt number (Sc^(1/3)) contributions are applied at runtime (M18).
         D = transform_to_diameter(x, λʳ)
         J = jacobian_diameter_transform(x, λʳ)
 
-        # Use piecewise Gunn-Kinzer/Beard fall speed (Fortran fallr1).
+        # Use the piecewise Gunn-Kinzer/Beard fall speed.
         # ν is NOT baked in; 1/√ν applied at runtime from T,P-dependent transport.
         V = rain_fall_speed(D, one(FT))
         VD_sqrt = sqrt(max(V * D, zero(FT)))

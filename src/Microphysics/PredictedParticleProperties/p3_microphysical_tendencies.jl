@@ -16,8 +16,8 @@ $(TYPEDSIGNATURES)
 
 Cloud number tendency: gains from activation and loses proportionally with cloud sinks.
 
-In the prescribed-Nᶜˡ path (`p3.aerosol === nothing`), `nc` is a scheme-level
-parameter (Fortran `nccnst_2`), not a prognostic. `ρnᶜˡ` is neither allocated nor
+In the prescribed-Nᶜˡ path (`p3.aerosol === nothing`), the droplet number is a
+scheme-level parameter, not a prognostic. `ρnᶜˡ` is neither allocated nor
 transported there, and every rate takes the prescribed value from
 [`effective_cloud_droplet_number`](@ref), so this method returns zero and is never
 reached through the prognostic loop.

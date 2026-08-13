@@ -95,7 +95,7 @@ end
 @inline supersaturation_prognostic_names(::ProcessRateParameters{FT, true}) where FT = (:ρsᵛ⁺ˡ,)
 
 # Droplet number and aerosol depletion are prognostic iff `p3.aerosol` is a concrete
-# `AerosolActivation`. In the prescribed-Nᶜˡ path (Fortran `log_predictNc = .false.`) `nc`
+# `AerosolActivation`. In the prescribed-Nᶜˡ path, `nᶜˡ`
 # is the scheme parameter `p3.cloud.number_concentration` at every microphysics call, so
 # no rate reads `ρnᶜˡ` or `ρnᵃ`. Advecting them would integrate transport unrelated to the
 # number the physics uses, and `materialize_microphysical_fields` does not even allocate
@@ -194,9 +194,9 @@ $(TYPEDSIGNATURES)
 
 Effective cloud droplet number concentration [kg⁻¹] seen by P3's process rates.
 
-In the prescribed-Nᶜˡ path (`p3.aerosol === nothing`, matching Fortran
-`log_predictNc = .false.`), `nc` is always `nccnst_2` at every microphysics call, so this
-helper returns that prescribed value and ignores its `ρnᶜˡ` argument. Droplet number is
+In the prescribed-Nᶜˡ path (`p3.aerosol === nothing`), the droplet number is always
+`p3.cloud.number_concentration` at every microphysics call, so this helper returns
+that prescribed value and ignores its `ρnᶜˡ` argument. Droplet number is
 not a state variable in that configuration: `prognostic_field_names` omits `ρnᶜˡ` and
 `materialize_microphysical_fields` does not allocate it.
 
@@ -252,9 +252,9 @@ The P3 scheme requires the following fields on `grid`:
 - `ρqᶠ`, `ρbᶠ`: Rime mass and volume densities
 - `ρqʷⁱ`: Liquid water on ice mass density
 - `ρnᶜˡ`, `ρnᵃ`: Cloud number and unactivated aerosol number densities, allocated only
-when `p3.aerosol isa AerosolActivation`. The prescribed-Nᶜˡ path (Fortran
-  `log_predictNc = .false.`) takes droplet number from `p3.cloud.number_concentration`,
-  so neither field exists there and neither is advected.
+when `p3.aerosol isa AerosolActivation`. The prescribed-Nᶜˡ path takes droplet
+  number from `p3.cloud.number_concentration`, so neither field exists there and
+  neither is advected.
 
 **Diagnostic:**
 - `qᵛ`: Vapor specific humidity (mirrors the prognostic vapor field)
@@ -339,9 +339,9 @@ end
 # *type* (`Nothing` / `ProcessRateParameters{FT, PS}`) so the merged NamedTuple is a
 # compile-time constant, which lets the read sites fold their guards away.
 
-# Droplet number and unactivated aerosol. The prescribed-Nᶜˡ path (Fortran
-# `log_predictNc = .false.`) takes `nc` from `p3.cloud.number_concentration` at every call
-# and never reads `ρnᶜˡ` or `ρnᵃ`.
+# Droplet number and unactivated aerosol. The prescribed-Nᶜˡ path takes the droplet
+# number from `p3.cloud.number_concentration` at every call and never reads `ρnᶜˡ`
+# or `ρnᵃ`.
 @inline aerosol_activation_fields(::Nothing, grid) = (;)
 
 @inline aerosol_activation_fields(_, grid) =
@@ -352,9 +352,8 @@ end
        cache_ρnᶜˡ = CenterField(grid),
        cache_ρnᵃ = CenterField(grid))
 
-# Predicted supersaturation (Fortran `log_predictSsat`, `.false.` by default). With the
-# switch off every rate that would touch `sᵛ⁺ˡ` is gated to zero, so the prognostic
-# carries no information.
+# Predicted supersaturation, off by default. With the switch off every rate that
+# would touch `sᵛ⁺ˡ` is gated to zero, so the prognostic carries no information.
 @inline supersaturation_fields(::ProcessRateParameters{FT, false}, grid) where FT = (;)
 
 @inline supersaturation_fields(::ProcessRateParameters{FT, true}, grid) where FT =
@@ -590,12 +589,12 @@ struct P3IceProps{FT}
     Fˡ :: FT
     ρᶠ :: FT
     qⁱ_total :: FT
-    # D10 impose_max_Ni cap mirrored from compute_p3_process_rates so the PSD μⁱ
+    # impose_max_Ni cap mirrored from compute_p3_process_rates so the PSD μⁱ
     # uses the same nⁱ that the rate = N × m_table × env decomposition inside the
     # process rates was built with.
     nⁱ :: FT
-    # Number and mean density diagnosed before the lambda limiter. Fortran retains
-    # these values for the volume-equivalent diameter.
+    # Number and mean density diagnosed before the lambda limiter; these are the
+    # values the volume-equivalent diameter is built from.
     nⁱ_diagnostic :: FT
     ρ_mean :: FT
     μⁱ :: FT
@@ -628,8 +627,8 @@ end
     Fᶠ = properties.Fᶠ
     ρᶠ = properties.ρᶠ
 
-    # Cloud terminal velocities — Fortran sediments cloud mass and number with
-    # DSD-integrated Stokes velocities in sedimentation_liquid(liq_type = 1).
+    # Cloud terminal velocities — cloud mass and number sediment with DSD-integrated
+    # Stokes velocities.
     vᶜ = cloud_terminal_velocities(p3, ℳ.qᶜˡ, ρ, properties.ν, properties.μᶜˡ, properties.λᶜˡ,
                                    constants)
     wᶜˡ = vᶜ.mass_weighted
@@ -640,13 +639,13 @@ end
     vᵣ = rain_terminal_velocities(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     wʳ   = vᵣ.mass_weighted
     wʳₙ  = vᵣ.number_weighted
-    # Fortran parity: after impose_max_Ni (microphy_p3.f90:2812/4390/4937) the nitot
-    # array is capped in place, so all downstream math — process rates and terminal
-    # velocities — sees the same value. Mirror that here by using
-    # properties.nⁱ (= min(ℳ.nⁱ, max_Ni/ρ)) wherever Fortran would see capped nitot.
-    # Fortran indexes the ice fall-speed lookup with qitot. `properties.qⁱ_total`
-    # includes liquid coating only when that prognostic mode is active, so a
-    # stale restart coating cannot affect the non-liquid-fraction fast branch.
+    # The global ice-number cap must be seen consistently by all downstream math —
+    # process rates and terminal velocities alike — so use
+    # properties.nⁱ (= min(ℳ.nⁱ, Nⁱ_max/ρ)) rather than the raw prognostic here.
+    # The ice fall-speed lookup is indexed with the total ice mass.
+    # `properties.qⁱ_total` includes the liquid coating only when that prognostic
+    # mode is active, so a stale restart coating cannot affect the
+    # non-liquid-fraction fast branch.
     qⁱ_total = properties.qⁱ_total
     # Fused call: shares m̄, ρ_correction, log(m̄), and the 5D interpolation indices
     # across mass- and number-weighted fall speeds.

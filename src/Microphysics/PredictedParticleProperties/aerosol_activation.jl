@@ -127,7 +127,7 @@ struct AerosolActivation{FT, M}
     liquid_water_density :: FT       # ρᴸ [kg/m³]
 
     # Surface tension of the condensate, linear in temperature:
-    # σ(T) = σ₀ + (dσ/dT) (T - T_ref). Defaults are the water fit used by Fortran P3.
+    # σ(T) = σ₀ + (dσ/dT) (T - T_ref). The defaults are the fit for water.
     surface_tension_reference :: FT              # σ₀ [N/m]
     surface_tension_temperature_derivative :: FT # dσ/dT [N/(m·K)]
     surface_tension_reference_temperature :: FT  # T_ref [K]
@@ -151,8 +151,8 @@ Everything else the activation physics needs is a keyword here rather than a
 literal in [`activated_number`](@ref): the condensate density and molecular
 weight, the linear surface-tension fit ``σ(T) = σ_0 + (dσ/dT)(T - T_{ref})``
 whose defaults are water's, the ``3\\sqrt{2}`` factor of the lognormal
-activation integral (`lognormal_activation_factor`, held at the Fortran
-reference's rounded 4.242), the radius of a newly activated droplet, the
+activation integral (`lognormal_activation_factor`, held at the conventional
+rounded 4.242), the radius of a newly activated droplet, the
 supersaturation above which activation proceeds, and two floors that keep the
 supersaturation finite. A condensable species other than water is configured by
 overriding the first group here and in [`AerosolMode`](@ref).
@@ -189,13 +189,13 @@ function AerosolActivation(mode1::AerosolMode{FT}, rest::AerosolMode{FT}...;
                            molecular_weight_water = thermodynamic_constants.vapor.molar_mass,
                            universal_gas_constant = thermodynamic_constants.molar_gas_constant,
                            activation_timescale = 1,
-                           # Water surface tension [N/m], linear in T about 0°C (Fortran `sigvl`)
+                           # Water surface tension [N/m], linear in T about 0°C
                            # This fit remains local because aerosol activation is its only consumer.
                            surface_tension_reference = 0.0761,
                            surface_tension_temperature_derivative = -1.55e-4,
                            surface_tension_reference_temperature = thermodynamic_constants.energy_reference_temperature,
-                           # 3√2 = 4.24264… in the lognormal activation integral; the
-                           # Fortran reference rounds it to 4.242, kept here for parity.
+                           # 3√2 = 4.24264… in the lognormal activation integral,
+                           # conventionally rounded to 4.242.
                            lognormal_activation_factor = 4.242,
                            activated_droplet_radius = 1e-6,
                            activation_supersaturation_threshold = 1e-6,
@@ -250,7 +250,7 @@ and the activated fraction is ``N^a / 2 \\, [1 - \\text{erf}(u)]`` where
 @inline function activated_number(mode::AerosolMode, aerosol::AerosolActivation, T, S)
     FT = typeof(T)
 
-    # Surface tension of the condensate [N/m] (Fortran: sigvl)
+    # Surface tension of the condensate [N/m]
     σ_v = aerosol.surface_tension_reference +
           aerosol.surface_tension_temperature_derivative *
           (T - aerosol.surface_tension_reference_temperature)
@@ -352,7 +352,7 @@ where ``m_{\\text{seed}} = (4\\pi/3) \\rho_w (10^{-6})^3`` is a 1 μm radius dro
     seed_mass = 4 * FT(π) / 3 * aerosol.liquid_water_density * r_seed^3
     qcnuc = ncnuc * seed_mass
 
-    # Only activate when supersaturated (Fortran threshold: sup_cld > 1e-6)
+    # Only activate when supersaturated
     is_supersaturated = S > aerosol.activation_supersaturation_threshold
     ncnuc = ifelse(is_supersaturated, ncnuc, zero(FT))
     qcnuc = ifelse(is_supersaturated, qcnuc, zero(FT))

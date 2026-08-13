@@ -4,10 +4,9 @@ Bulk microphysical rates require population-averaged quantities computed by inte
 over the particle size distribution. P3 defines numerous integral properties organized
 by physical concept.
 
-Most ice-side integrals are pre-computed offline and stored in the Fortran
-ASCII lookup table (see `create_p3_lookupTable_1.f90`
-in the [P3-microphysics repository](https://github.com/P3-microphysics/P3-microphysics));
-Breeze loads the same file. The 1D rain integrals (mass- and number-weighted
+Most ice-side integrals are pre-computed offline and stored in the published P3
+ASCII lookup table, which Breeze loads directly rather than regenerating.
+The 1D rain integrals (mass- and number-weighted
 fall speeds, evaporation ventilation) are tabulated at startup inside Breeze
 from Chebyshev–Gauss quadrature evaluators in `rain_quadrature.jl`. The
 integral formulations are from:
@@ -26,8 +25,8 @@ where ``X(D)`` is the quantity of interest and ``W(D)`` is a weighting function
 
 ## Fall Speed Integrals
 
-Terminal velocity determines sedimentation rates. P3 computes two weighted fall speeds,
-corresponding to `uns` and `ums` in the Fortran lookup table
+Terminal velocity determines sedimentation rates. P3 computes two weighted fall
+speeds, the number- and mass-weighted forms
 (see [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Section 2b for
 the underlying ``V(D)`` formulation; the integrated fall speeds are stored in
 `p3_lookupTable_1.dat-v*`).
@@ -97,8 +96,8 @@ where:
 for deposition / sublimation and four dry-PSD components for liquid-fraction
 melting:
 
-| Field of `p3.ice.deposition` | Description | Integration / Routing | Fortran |
-|------------------------------|-------------|-----------------------|---------|
+| Field of `p3.ice.deposition` | Description | Integration / Routing | Table column |
+|------------------------------|-------------|-----------------------|--------------|
 | `small_ice_ventilation_constant` | Constant melting component | ``D \le D_\text{crit}``; meltwater goes to rain | `f1pr24` |
 | `small_ice_ventilation_reynolds` | Re-dependent melting component | ``D \le D_\text{crit}``; meltwater goes to rain | `f1pr25` |
 | `large_ice_ventilation_constant` | Constant melting component | ``D > D_\text{crit}``; meltwater stays on ice | `f1pr26` |
@@ -199,8 +198,8 @@ table coordinate:
                    N^{i\prime}(D^i)\, N^{r\prime}(D^r)\, dD^r\, dD^i .
 ```
 
-The mass and number forms (Fortran `f1pr08`, `f1pr07`) are stored as ``\log_{10}``
-values and exponentiated at runtime.
+The mass and number forms (table columns `f1pr08`, `f1pr07`) are stored as
+``\log_{10}`` values and exponentiated at runtime.
 They live in the 6-D rain-ice block of Lookup Table 1 rather than the 5-D
 ice-only block, and both share the same
 ``(\log \bar{m}, \log λ^r, F^f, F^l, ρ^f, μ^i)`` axes, so the interpolation indices
@@ -212,13 +211,13 @@ To prevent unphysical size distributions, P3 limits the slope parameter ``λ``
 based on physical constraints. `IceLambdaLimiter` (`ice_lambda_limiter.jl`) holds
 the two tabulated bounds:
 
-| Field of `p3.ice.lambda_limiter` | Purpose | Fortran |
-|----------------------------------|---------|---------|
+| Field of `p3.ice.lambda_limiter` | Purpose | Table column |
+|----------------------------------|---------|--------------|
 | `small_q` | Upper bound on λ (prevents unrealistically small particles) | `f1pr09` |
 | `large_q` | Lower bound on λ (prevents unrealistically large particles) | `f1pr10` |
 
-Fortran clamps `nitot` against these bounds in place. Breeze instead diagnoses
-the bounded number and feeds the difference back as the ``\dot{n}^{i}_\text{corr}``
+Rather than clamping ``n^i`` against these bounds in place, Breeze diagnoses the
+bounded number and feeds the difference back as the ``\dot{n}^{i}_\text{corr}``
 relaxation tendency described in [Prognostic Equations](@ref p3_prognostics).
 
 ## Tabulation
@@ -236,14 +235,14 @@ both held in `p3_lookupTable_1.dat-v6.9-2momI`.
 using Breeze
 using Logging: NullLogger, with_logger
 
-# The default constructor reads the Fortran ASCII lookup tables
+# The default constructor reads the P3 ASCII lookup tables
 # (downloaded automatically on first use).
 p3 = with_logger(NullLogger()) do
     PredictedParticlePropertiesMicrophysics()
 end
 
 fs = p3.ice.fall_speed
-println("Tabulated fall speed integrals from Fortran tables:")
+println("Tabulated fall speed integrals from the P3 lookup tables:")
 println("  Number-weighted: $(typeof(fs.number_weighted))")
 println("  Mass-weighted:   $(typeof(fs.mass_weighted))")
 ```
@@ -251,11 +250,10 @@ println("  Mass-weighted:   $(typeof(fs.mass_weighted))")
 ## Summary
 
 P3 organises its integral properties by concept; the actual column count in
-the Fortran 2-moment ice file (`p3_lookupTable_1.dat-v6.9-2momI`) is 21. The
-ice–rain collection family (`qrcol`/`nrcol`) sits in the separate 6-D block of
-the same file.
+the 2-moment ice file (`p3_lookupTable_1.dat-v6.9-2momI`) is 21. The
+ice–rain collection integrals sit in the separate 6-D block of the same file.
 
-At runtime each ice-side integral is read from the corresponding Fortran
+At runtime each ice-side integral is read from the corresponding column of that
 ASCII lookup table; the rain 1D tables are tabulated at startup inside
 Breeze using Chebyshev–Gauss quadrature in `rain_quadrature.jl`. The
 quadrature evaluators in `quadrature.jl::chebyshev_gauss_nodes_weights`

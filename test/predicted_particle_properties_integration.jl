@@ -122,8 +122,8 @@ using Oceananigans.TimeSteppers: update_state!
     end
 
 @testset "P3 has no droplet-number state in the prescribed-Nᶜˡ path" begin
-        # Fortran `log_predictNc = .false.`: `nc` is the scheme parameter at every
-        # microphysics call, so droplet number is not a state variable. Carrying `ρnᶜˡ`
+        # In the prescribed-Nᶜˡ path the droplet number is the scheme parameter at every
+        # microphysics call, so it is not a state variable. Carrying `ρnᶜˡ`
         # anyway meant `compute_tendencies!` integrated the transport of `μ.nᶜˡ`, which
         # held that constant rather than `ρnᶜˡ / ρ`, so the field drifted with nothing to
         # restore it and diagnostics reported the drift.

@@ -88,7 +88,7 @@ function routing_derived_state(p3, air_density, microphysical_state,
     return properties, state
 end
 
-@testset "P3 Fortran process routing regressions" begin
+@testset "P3 process routing regressions" begin
     @testset "near-liquid whole-particle cleanup transfers existing number" begin
         FT = Float64
         p3 = PredictedParticlePropertiesMicrophysics(FT)
@@ -341,7 +341,7 @@ end
         @test phase2_warm_surface.splintering_number == 0
     end
 
-    @testset "non-liquid-fraction mode uses the Fortran fast routing" begin
+    @testset "non-liquid-fraction mode uses the fast routing" begin
         FT = Float64
         process_rates = ProcessRateParameters(FT; liquid_fraction_active = false)
         p3 = PredictedParticlePropertiesMicrophysics(FT; process_rates)
@@ -401,7 +401,7 @@ end
             wet_growth_rates, one(FT), p3.process_rates) == 0
         @test wet_growth_total_water_tendency ≈ 0 atol=eps(FT)
 
-        # The fast Fortran branch has no liquid-on-ice reservoir. A nonzero
+        # The fast branch has no liquid-on-ice reservoir. A nonzero
         # restart value is cleaned into rain, but must not alter the dry-ice
         # particle diagnostics or collection rates while that cleanup occurs.
         inactive_coating = FT(2e-5)

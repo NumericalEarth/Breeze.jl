@@ -4,7 +4,7 @@
 ##### Chebyshev–Gauss nodes/weights, the diameter transform they integrate over,
 ##### and the piecewise rain fall-speed law — together these tabulate the 1D rain
 ##### integrals at startup (`tabulate_rain_from_quadrature`). The ice-side
-##### integrals are read from the Fortran tables and need none of this.
+##### integrals are read from the P3 lookup tables and need none of this.
 #####
 
 export chebyshev_gauss_nodes_weights
@@ -84,7 +84,7 @@ Used by the rain quadrature tabulation path.
 @inline function rain_fall_speed(D, ρ_correction)
     FT = typeof(D)
 
-    # The fit is stated for a drop mass in grams, at ρʷ = 997 kg/m³ (Fortran rhow)
+    # The fit is stated for a drop mass in grams, at ρʷ = 997 kg/m³
     m_kg = (FT(π)/6) * FT(997) * D^3
     m_g = m_kg * 1000
 

@@ -41,9 +41,8 @@ end
 $(TYPEDSIGNATURES)
 
 Bounded Grabowski–Morrison saturation adjustment applied before the
-Morrison–Gettelman semi-analytic rates. Mirrors Fortran `microphy_p3.f90`'s
-ssat alignment block (~3940–3989) which runs in-place on `qv`, `qc`, `T`,
-`qvs`, and `qvi` before the per-species rate equations.
+Morrison–Gettelman semi-analytic rates. It aligns `qᵛ`, `qᶜˡ`, `T`, `qᵛ⁺ˡ`, and
+`qᵛ⁺ⁱ` with each other before the per-species rate equations are evaluated.
 
 Given the advected liquid supersaturation ``sᵛ⁺ˡ``, the diagnostic local
 ``qᵛ - qᵛ⁺ˡ``, and the liquid-side psychrometric factor
@@ -140,8 +139,8 @@ end
                                   m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ,
                                   ρ_correction, p3, μⁱ)
 
-    # Fortran P3 computes the raw inverse relaxation coefficient here. The
-    # psychrometric correction is applied later through the coupled `ξˡ` / `ξⁱ` factor.
+    # This is the raw inverse relaxation coefficient; the psychrometric correction
+    # is applied later through the coupled `ξˡ` / `ξⁱ` factor.
     return 2 * FT(π) * ρ * Dᵛ * nⁱ_eff * C_fv
 end
 
@@ -163,9 +162,8 @@ end
 $(TYPEDSIGNATURES)
 
 Compute cloud, rain, and ice diffusional growth rates using a shared
-semi-analytic saturation adjustment. This mirrors the Fortran P3 structure with
-`SCF = SPF = 1`; the subgrid cloud/precipitation fraction framework is handled
-separately.
+semi-analytic saturation adjustment, in the `SCF = SPF = 1` limit; the subgrid
+cloud/precipitation fraction framework is handled separately.
 """
 @inline function coupled_saturation_adjustment_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
                                                      qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
@@ -191,24 +189,24 @@ separately.
     cloud_relaxation = cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, transport.Dᵛ,
                                                           μᶜˡ, λᶜˡ, nᶜˡ_bounded)
     rain_relaxation = rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport)
-    # `qⁱ` is the dry ice mass in Julia — equivalent to Fortran's `qitot - qiliq` —
-    # so `qⁱ + qʷⁱ` maps to Fortran `qitot`. Compute `qⁱ_total`/`Fˡ` once here and
-    # reuse them for the relaxation gates and the tiny-mass overrides below.
+    # `qⁱ` is the dry ice mass, so the total ice mass is `qⁱ + qʷⁱ`. Compute
+    # `qⁱ_total`/`Fˡ` once here and reuse them for the relaxation gates and the
+    # tiny-mass overrides below.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
-    # Dry-ice (`epsi`) and wet-ice (`epsiw`) relaxation coefficients share the same
-    # `ice_vapor_relaxation_coefficient` and select mutually exclusive liquid-fraction regimes
-    # (dry ice below the wet-ice threshold, liquid-coated ice at or above it,
-    # Fortran `epsi(iice)` / `epsiw(iice)`), so evaluate the
-    # coefficient — which carries a `density()` and a ventilation-table lookup — once.
+    # The dry-ice and wet-ice relaxation coefficients share the same
+    # `ice_vapor_relaxation_coefficient` and select mutually exclusive liquid-fraction
+    # regimes (dry ice below the wet-ice threshold, liquid-coated ice at or above it),
+    # so evaluate the coefficient — which carries a `density()` and a
+    # ventilation-table lookup — once.
     ice_relaxation_active = qⁱ_total >= p3.minimum_mass_mixing_ratio
     ice_relaxation = ice_vapor_relaxation_coefficient(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
                                                       constants, transport, q, μⁱ)
     dry_ice_relaxation = ifelse(
         ice_relaxation_active & (Fˡ < p3.process_rates.liquid_fraction_clipping_threshold),
         ice_relaxation, zero(FT))
-    # Fortran `epsiw_tot`: wet-ice surface condenses vapor as liquid, so it
-    # couples through `ξˡ` (like cloud), not through the Bergeron coupling.
+    # The wet-ice surface condenses vapor as liquid, so it couples through `ξˡ`
+    # (like cloud), not through the Bergeron coupling.
     coating_relaxation = ifelse(
         ice_relaxation_active & (Fˡ >= p3.process_rates.liquid_fraction_clipping_threshold),
         ice_relaxation, zero(FT))
@@ -219,12 +217,11 @@ separately.
                            FT(floors.rate_scale))
     transient_response = (1 - exp(-total_relaxation * τ)) / τ
     # `qᵛ`, `qᵛ⁺ˡ`, `qᵛ⁺ⁱ` arrive already adjusted by the G&M step in
-    # `compute_p3_process_rates` (Fortran `microphy_p3.f90` ssat block ~3940–3989),
-    # so the local diagnostic supersaturation here is the post-G&M value, not the
-    # host-advected `sᵛ⁺ˡ`.
+    # `compute_p3_process_rates`, so the local diagnostic supersaturation here is
+    # the post-G&M value, not the host-advected `sᵛ⁺ˡ`.
     supersaturation = qᵛ - qᵛ⁺ˡ
     bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * dry_ice_relaxation
-    # Fortran's `aaa` forcing represents the external change in liquid-relative
+    # The external forcing term is the externally driven change in liquid-relative
     # supersaturation: dqᵛ/dt - (dqᵛ⁺ˡ/dT) dT/dt. Breeze currently approximates
     # this with adiabatic cooling, dT/dt = -g w / cᵖᵐ, and dqᵛ/dt = 0. Resolved
     # transport, turbulent mixing, radiation, and user forcing are omitted.
@@ -247,8 +244,8 @@ separately.
 
     𝒮ˡ = supersaturation / max(qᵛ⁺ˡ, FT(floors.divisor))
     𝒮ⁱ = qᵛ / max(qᵛ⁺ⁱ, FT(floors.divisor)) - 1
-    # Fortran tiny-mass clauses (3684-3685, 3715-3719, 3753-3756) all gate on
-    # total hydrometeor mass (`qⁱ_total`, computed above).
+    # The tiny-mass clauses below all gate on the total hydrometeor mass
+    # (`qⁱ_total`, computed above).
     tiny_mass = parameters.tiny_mass_evaporation_threshold
     subsaturated = -parameters.subsaturation_evaporation_threshold
     raw_cloud_growth = ifelse((𝒮ˡ < subsaturated) & (qᶜˡ < tiny_mass),
@@ -263,7 +260,7 @@ separately.
     raw_ice_growth = ifelse((𝒮ⁱ < subsaturated) & (qⁱ_total < tiny_mass) &
                             (Fˡ < parameters.liquid_fraction_clipping_threshold),
                             -qⁱ / τ, raw_ice_growth)
-    # Wet-ice tiny-mass instant evaporation of the liquid coating (Fortran 3753-3756).
+    # Wet-ice tiny-mass instant evaporation of the liquid coating.
     raw_coating_growth = ifelse((𝒮ⁱ < subsaturated) & (qⁱ_total < tiny_mass) &
                                 (Fˡ >= parameters.liquid_fraction_clipping_threshold),
                                 -qʷⁱ / τ, raw_coating_growth)
@@ -277,8 +274,7 @@ separately.
                          p3.process_rates.calibration_factor_sublimation,
                          p3.process_rates.calibration_factor_deposition)
     deposition_raw = raw_ice_growth * calibration
-    # Fortran sublimation limit (3730): `qisub <= (qitot - qiliq)*i_dt` = dry
-    # ice mass per unit time, which is `qⁱ / τ` in Julia conventions.
+    # Sublimation is limited to the dry ice mass per unit time, `qⁱ / τ`.
     deposition = clamp(deposition_raw, -clamp_positive(qⁱ) / τ, clamp_positive(qᵛ) / τ)
 
     coating_condensation = min(max(0, raw_coating_growth), clamp_positive(qᵛ) / τ)

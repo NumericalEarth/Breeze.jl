@@ -1,7 +1,7 @@
 #####
 ##### GPU/architecture support for P3 container structs
 #####
-##### The ice integrals (5D/6D Fortran tables) and rain integrals (1D tables
+##### The ice integrals (5D/6D lookup tables) and rain integrals (1D tables
 ##### built from quadrature) hold lookup arrays that must be transferred to the
 ##### GPU. Scalar fields and singleton integral types pass through unchanged.
 #####

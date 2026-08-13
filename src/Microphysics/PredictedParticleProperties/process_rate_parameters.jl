@@ -105,7 +105,7 @@ struct ProcessRateParameters{FT, PS}
     # Physical constants
     liquid_water_density :: FT       # ρʷ [kg/m³]
     pure_ice_density :: FT           # ρⁱ [kg/m³]
-    reference_air_density :: FT      # ρ₀ [kg/m³] for rain fall speed correction (Fortran rhosur)
+    reference_air_density :: FT      # ρ₀ [kg/m³] for rain fall speed correction
     nucleated_ice_mass :: FT         # mᵢ₀ [kg], mass of newly nucleated ice crystal
     activated_droplet_radius :: FT   # r₀ [m], radius of a newly activated cloud droplet
     activation_supersaturation_threshold :: FT  # S above which CCN activation proceeds [-]
@@ -123,7 +123,7 @@ struct ProcessRateParameters{FT, PS}
     accretion_exponent :: FT                 # α [-]
 
     # Rain self-collection and breakup (KK2000 self-collection rate combined with
-    # Verlinde-Cotton 1993 breakup multiplier; matches Fortran P3 v5.5.0 autoAccr_param=2)
+    # the Verlinde-Cotton 1993 breakup multiplier)
     rain_self_collection_coefficient :: FT        # k_rr [-]
     rain_breakup_diameter_threshold :: FT    # D_th threshold for breakup [m] (1/λ_r convention)
     rain_breakup_coefficient :: FT           # κ_br [1/m]
@@ -154,8 +154,8 @@ struct ProcessRateParameters{FT, PS}
     maximum_rime_density :: FT               # ρ_rim_max [kg/m³]
 
     # Riming impact parameter Ri, which sets the density of freshly accreted rime.
-    # Ri = c Dᶜ |vⁱ - vᶜ| / (T₀ - T) (Fortran P3 v5.5.0 p3_main cloud-riming branch).
-    rime_impact_coefficient :: FT            # c [K s / m²], Fortran 0.5e6
+    # Ri = c Dᶜ |vⁱ - vᶜ| / (T₀ - T), evaluated in the cloud-riming branch.
+    rime_impact_coefficient :: FT            # c [K s / m²]
     minimum_rime_impact :: FT                # Ri floor [-]
     maximum_rime_impact :: FT                # Ri ceiling [-]
     minimum_riming_supercooling :: FT        # smallest T₀ - T admitted in Ri [K]
@@ -163,7 +163,7 @@ struct ProcessRateParameters{FT, PS}
 
     # Shedding
     shed_drop_mass :: FT                     # m_shed [kg] (cloud/wet-growth shedding)
-    shed_drop_mass_liqfrac :: FT             # m_shed [kg] (liquid-fraction shedding, Fortran 1.928e6)
+    shed_drop_mass_liqfrac :: FT             # m_shed [kg] (liquid-fraction shedding)
 
     # Wet growth is off where there is too little cloud plus rain to collect, or where
     # collection barely outpaces the freezing capacity.
@@ -192,7 +192,7 @@ struct ProcessRateParameters{FT, PS}
     maximum_splintering_temperature :: FT    # upper temperature bound [K]
     splintering_temperature_peak :: FT       # T_peak [K]
     splintering_rate :: FT                   # splinters per kg rime
-    splintering_crystal_mass :: FT           # mass per HM splinter [kg] (Fortran Dinit_HM = 10 μm)
+    splintering_crystal_mass :: FT           # mass per HM splinter [kg] (a 10 μm crystal)
     splintering_diameter_threshold :: FT     # minimum diameter [m] for HM splintering
     splintering_cloud_riming_scale :: FT     # 1.0 for nCat=1 (include), 0.0 for nCat>1 (exclude)
     maximum_splintering_liquid_fraction :: FT # Fˡ max for HM splintering
@@ -208,7 +208,7 @@ struct ProcessRateParameters{FT, PS}
     # Rime densification
     rime_densification_timescale :: FT       # τ_densif [s]
 
-    # Rain size distribution bounds (Fortran P3 v5.5.0: lamr_min, lamr_max)
+    # Rain size distribution slope bounds
     minimum_rain_slope :: FT                # λʳ minimum [1/m]
     maximum_rain_slope :: FT                # λʳ maximum [1/m]
 
@@ -222,36 +222,35 @@ struct ProcessRateParameters{FT, PS}
     # and coating-water sink budgets. Must be positive.
     coupled_sink_limiting_iterations :: Int
 
-    # Global ice number limiter (Fortran P3 v5.5.0 impose_max_Ni)
+    # Global ice number limiter.
     # Applied as a relaxation sink whenever nⁱ × ρ exceeds the maximum.
     maximum_ice_number_density :: FT         # Nⁱ_max [1/m³]
 
     # Liquid fraction clipping threshold (Milbrandt et al. 2025)
     # Fl < this: instantly freeze all qwi to rime; Fl > (1 - this): fully melt to rain.
     # Implemented as a relaxation drain over refreezing_timescale.
-    liquid_fraction_clipping_threshold :: FT              # Fortran liqfracsmall [-]
+    liquid_fraction_clipping_threshold :: FT              # [-]
 
-    # Fortran's separate "complete melting" diagnostic: a particle this liquid is
+    # A separate "complete melting" diagnostic: a particle this liquid is
     # transferred whole to rain regardless of the clipping threshold above.
     complete_melting_liquid_fraction :: FT                # [-]
 
-    # M12(c): Tiny-ice threshold for warm pre-processing (Fortran qsmall_dry).
-    # Ice with qi ∈ [qsmall, qsmall_dry) at T ≥ T₀ is converted to rain.
+    # Tiny-ice threshold for warm pre-processing. Ice holding less than
+    # this at T ≥ T₀ is converted to rain outright.
     tiny_ice_to_rain_threshold :: FT                         # [kg/kg]
 
     # Tiny-mass instant-evaporation clauses of the saturation adjustment
-    # (Fortran microphy_p3.f90 3684-3685, 3715-3719, 3753-3756): a species
-    # holding less than `tiny_mass_evaporation_threshold` in air more than
+    # a species holding less than `tiny_mass_evaporation_threshold` in air more than
     # `subsaturation_evaporation_threshold` below saturation is drained outright.
     tiny_mass_evaporation_threshold :: FT                    # [kg/kg]
     subsaturation_evaporation_threshold :: FT                # [-]
 
-    # Liquid fraction mode (Fortran log_LiquidFrac).
+    # Liquid fraction mode.
     # When true: wet growth rime densification is suppressed (liquid tracked
     # explicitly in qʷⁱ), and melt-densification is skipped.
     liquid_fraction_active :: Bool
 
-    # Predicted supersaturation mode (Fortran log_predictSsat).
+    # Predicted supersaturation mode.
     # When true, carry supersaturation as a prognostic variable and use
     # bounded Grabowski-Morrison (2008) adjustment for condensation.
     # When false (default), use relaxation-to-saturation.
@@ -263,10 +262,10 @@ struct ProcessRateParameters{FT, PS}
 # needs the type value to decide whether `ρsᵛ⁺ˡ` exists at all.
     predict_supersaturation :: Bool
 
-    # Deposition/sublimation calibration factors (Fortran P3 v5.5.0 clbfact_dep, clbfact_sub).
+    # Deposition/sublimation calibration factors.
     # Ad hoc multipliers to increase or decrease deposition and/or sublimation rates.
     # The representation of ice capacitances is highly simplified and the appropriate
-    # values in the diffusional growth equation are uncertain (Fortran comment, line 3721).
+    # values in the diffusional growth equation are uncertain.
     calibration_factor_deposition :: FT
     calibration_factor_sublimation :: FT
 
@@ -287,7 +286,7 @@ autoconversion, accretion, aggregation, riming, melting, evaporation,
 deposition, nucleation, and freezing.
 
 Ice terminal-velocity, projected-area, collection, and ventilation integrals are
-read from the Fortran lookup tables by [`read_lookup_tables`](@ref).
+read from the P3 lookup tables by [`read_lookup_tables`](@ref).
 Rain velocity and evaporation integrals are generated with Julia quadrature.
 Cloud PSD shape is diagnosed from droplet number, while the active rain-process
 path uses ``μ_r = 0``. None are duplicated in this rate-parameter container.
@@ -327,9 +326,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         pure_ice_density = thermodynamic_constants.ice.density,
         # Reference density for rain fall speed correction (P=1000 hPa, T=0°C)
         reference_air_density = 100000 / (dry_air_gas_constant(thermodynamic_constants) * 273.15),
-        nucleated_ice_mass = 4 * FT(π) / 3 * 900 * (1e-6)^3,  # Fortran mi0: sphere of radius 1 μm, ρ=900 kg/m³ [kg]
-        activated_droplet_radius = 1e-6,               # Fortran cons7 uses a 1 μm droplet
-        activation_supersaturation_threshold = 1e-6,   # Fortran sup_cld threshold
+        nucleated_ice_mass = 4 * FT(π) / 3 * 900 * (1e-6)^3,  # sphere of radius 1 μm, ρ = 900 kg/m³ [kg]
+        activated_droplet_radius = 1e-6,               # newly activated droplets are 1 μm
+        activation_supersaturation_threshold = 1e-6,   # S above which CCN activate
         freezing_temperature = 273.15,
 
         # Rain autoconversion
@@ -339,7 +338,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         autoconversion_coefficient = 1350 * 100.0^(-1.79),
         autoconversion_exponent_cloud = 2.47,
         autoconversion_exponent_droplet = -1.79,
-        autoconversion_threshold = 1e-8,  # Fortran P3 v5.5.0 qsmall_dry1
+        autoconversion_threshold = 1e-8,  # qᶜˡ below which autoconversion is off [kg/kg]
         autoconversion_reference_concentration = 1e8,
 
         # Rain accretion
@@ -348,14 +347,14 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Rain self-collection and breakup
         rain_self_collection_coefficient = 5.78,
-        rain_breakup_diameter_threshold = 280e-6,  # 280 μm: Fortran P3 breakup threshold (1/λ_r convention)
+        rain_breakup_diameter_threshold = 280e-6,  # 280 μm, in the 1/λʳ convention
         rain_breakup_coefficient = 2300.0,
 
         # Timescales
         rain_evaporation_timescale = 10.0,
         ice_deposition_timescale = 10.0,
 
-        # Ice aggregation (Morrison & Milbrandt 2015a; Fortran Eii / Eii_fact)
+        # Ice aggregation (Morrison & Milbrandt 2015a)
         maximum_aggregation_efficiency = 0.3,
         minimum_aggregation_efficiency = 0.001,
         aggregation_timescale = 600.0,
@@ -374,19 +373,23 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         minimum_rime_density = 50.0,
         maximum_rime_density = 900.0,
 
-        # Riming impact parameter. The Ri range and the supercooling floor are the
-        # Fortran P3 v5.5.0 bounds; outside 1 ≤ Ri ≤ 12 the underlying rime-density
-        # fit is extrapolating beyond the data it was fit to.
+        # Riming impact parameter. Outside 1 ≤ Ri ≤ 12 the underlying rime-density
+        # fit extrapolates beyond the data it was fit to, so Ri is clamped there.
         rime_impact_coefficient = 0.5e6,
         minimum_rime_impact = 1.0,
         maximum_rime_impact = 12.0,
         minimum_riming_supercooling = 0.001,
         unrimed_rime_density = 400.0,
 
-        # Shedding
-        shed_drop_mass = 1 / 1.923e6,  # m19: Fortran 1 mm drop mass (microphy_p3.f90 1.923e6 drops/kg)
-        # Fortran uses 1.928e6 for liquid-fraction shedding (nlshd, line 3350)
-        shed_drop_mass_liqfrac = 1 / 1.928e6,
+        # Shedding. Every path sheds the same 1 mm drop, so both masses are derived
+        # from one diameter and the configured liquid density rather than carried as
+        # literals: m_shed = π/6 ρʷ D³ = 5.236×10⁻⁷ kg, i.e. 1.910×10⁶ drops per kg.
+        # They stay separate fields so each shedding path remains independently
+        # tunable; pass either mass explicitly to override the shared default.
+        shed_drop_diameter = 1e-3,             # D_shed [m]
+        shed_drop_mass = FT(π) / 6 * thermodynamic_constants.liquid.density *
+                         shed_drop_diameter^3, # cloud and wet-growth shedding
+        shed_drop_mass_liqfrac = shed_drop_mass, # liquid-fraction shedding
 
         # Wet growth
         wet_growth_hydrometeor_threshold = 1e-6,
@@ -415,21 +418,20 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         maximum_splintering_temperature = 270.15,
         splintering_temperature_peak = 268.15,
         # Hallett-Mossop: 3.5e5 splinters/g × 1000 g/kg = 3.5e8 splinters/kg
-        # (Fortran: 35.e+4 * 1000. — the ×1000 kg→g conversion is baked in)
         splintering_rate = 3.5e8,
-        # Fortran Dinit_HM = 10e-6 m; mass = π/6 × 900 × (10e-6)³ = 4.712e-13 kg
+        # A 10 μm splinter: mass = π/6 × 900 × (10e-6)³ = 4.712e-13 kg
         splintering_crystal_mass = FT(π) / 6 * 900 * (10e-6)^3,
-        # Fortran P3 v5.5.0: Dmin_HM = 250e-6 (nCat=1) or 1000e-6 (nCat>1)
+        # 250 μm for a single ice category; 1000 μm with more than one
         splintering_diameter_threshold = 250e-6,
-        # Cloud-riming splintering scale: 1.0 includes (nCat=1), 0.0 excludes (nCat>1).
-        # Fortran only includes cloud riming HM for nCat == 1.
+        # Cloud-riming splintering scale: 1.0 includes it (single ice category),
+        # 0.0 excludes it (more than one category).
         splintering_cloud_riming_scale = 1.0,
         maximum_splintering_liquid_fraction = 0.1,
         # Warm-surface shutoff: nCat=1 uses 282 K, nCat>1 sets Inf (no shutoff).
         maximum_splintering_surface_temperature = 282.0,
 
         # Initial rain drop
-        # Fortran P3 v5.5.0 uses a 25 μm radius; mass follows the configured liquid density.
+        # A 25 μm radius; mass follows the configured liquid density.
         initial_rain_drop_mass = 4 * FT(π) / 3 * thermodynamic_constants.liquid.density * (25e-6)^3,
 
         # Homogeneous freezing
@@ -439,10 +441,10 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Rime densification
         rime_densification_timescale = 10.0,
 
-        # Rain DSD bounds (Fortran P3 v5.5.0 get_rain_dsd2: lammin = (mu_r+1)*inv_Drmax)
-        # inv_Drmax = 1/0.002 = 500 [1/m]. Note: table generation uses 200, runtime uses 500.
-        minimum_rain_slope = 500.0,    # lamr_min [1/m] ≈ D_max ~2mm (Fortran runtime parity)
-        maximum_rain_slope = 100000.0, # lamr_max [1/m] ≈ minimum diameter ~10μm
+        # Rain PSD slope bounds, λʳ = (μʳ + 1) / D. With μʳ = 0 they correspond to the
+        # largest and smallest mean drop diameters the distribution may take.
+        minimum_rain_slope = 500.0,    # [1/m], D_max ≈ 2 mm
+        maximum_rain_slope = 100000.0, # [1/m], D_min ≈ 10 μm
 
         # Sink-limiting safety timescale
         sink_limiting_timescale = 10.0, # dt_safety [s]
@@ -450,29 +452,29 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Coupled donor-budget limiter
         coupled_sink_limiting_iterations::Integer = 4,
 
-        # Global ice number limiter (Fortran P3 v5.5.0 impose_max_Ni)
-        # Relaxation sink drains nⁱ toward the configured maximum divided by ρ.
-        maximum_ice_number_density = 2e6,  # [1/m³], Fortran impose_max_Ni cap
+        # Global ice number limiter: a relaxation sink drains nⁱ toward the
+        # configured maximum divided by ρ.
+        maximum_ice_number_density = 2e6,  # [1/m³]
 
         # Liquid fraction clipping (Milbrandt et al. 2025)
-        liquid_fraction_clipping_threshold = 0.01,  # Fortran liqfracsmall
+        liquid_fraction_clipping_threshold = 0.01,
         complete_melting_liquid_fraction = 0.99,
 
-        # M12(c): Tiny-ice threshold for warm pre-processing (Fortran qsmall_dry).
-        # Ice with qi ∈ [qsmall, qsmall_dry) at T ≥ T₀ is converted to rain.
+        # Tiny-ice threshold for warm pre-processing. Ice holding less
+        # than this at T ≥ T₀ is converted to rain outright.
         tiny_ice_to_rain_threshold = 1e-12,
 
         # Tiny-mass instant-evaporation clauses of the saturation adjustment
         tiny_mass_evaporation_threshold = 1e-12,
         subsaturation_evaporation_threshold = 0.001,
 
-        # Liquid fraction mode (Fortran log_LiquidFrac)
+        # Liquid fraction mode
         liquid_fraction_active = true,
 
-        # Predicted supersaturation (Fortran log_predictSsat, default .false.)
+        # Predicted supersaturation
         predict_supersaturation = false,
 
-        # Deposition/sublimation calibration factors (Fortran clbfact_dep, clbfact_sub)
+        # Deposition/sublimation calibration factors
         calibration_factor_deposition = 1.0,
         calibration_factor_sublimation = 1.0,
 

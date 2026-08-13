@@ -2,8 +2,7 @@
 ##### Rain processes
 #####
 ##### Autoconversion / accretion / self-collection are dispatched on
-##### `p3.warm_rain_scheme` (default and only scheme:
-##### `KhairoutdinovKogan2000`, Fortran P3 v5.5.0 `autoAccr_param = 2`).
+##### `p3.warm_rain_scheme` (default and only scheme: `KhairoutdinovKogan2000`).
 #####
 
 """
@@ -34,12 +33,11 @@ Available schemes:
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
 
-    # Fortran P3 v5.5.0: no autoconversion when in-cloud qc < qsmall_dry1 (1e-8 kg/kg).
+    # No autoconversion below the in-cloud threshold qᶜˡ < 1e-8 kg/kg.
     qᶜˡ_eff = ifelse(qᶜˡ >= parameters.autoconversion_threshold, clamp_positive(qᶜˡ), zero(FT))
 
-    # Fortran KK2000 uses (nc × rho × 1e-6)^β where nc is per-mass [1/kg].
-    # The nc × rho product is a unit conversion to per-volume [1/m³], so no
-    # reference-density normalization is needed — Julia's Nᶜˡ is already per-volume.
+    # KK2000 scales with droplet number per volume, so no reference-density
+    # normalization is needed — Nᶜˡ is already per-volume [1/m³].
     scaled_cloud_number = Nᶜˡ / parameters.autoconversion_reference_concentration
 
     # Khairoutdinov-Kogan (2000): ∂qʳ/∂t = k₁ × qᶜˡ^α × (Nᶜˡ/Nᶜˡ_ref)^β
@@ -78,7 +76,7 @@ Falling rain drops collect cloud droplets via gravitational sweep-out. See
     active = (qᶜˡ_eff >= p3.minimum_mass_mixing_ratio) &
              (qʳ_eff >= p3.minimum_mass_mixing_ratio)
 
-    # KK2000 Eq. 5 (Fortran P3 form): ∂qʳ/∂t = k₂ × (qᶜˡ × qʳ)^α
+    # KK2000 Eq. 5: ∂qʳ/∂t = k₂ × (qᶜˡ × qʳ)^α
     k₂ = parameters.accretion_coefficient
     α = parameters.accretion_exponent
 
@@ -93,7 +91,7 @@ Compute rain self-collection rate (number tendency only). Dispatches on
 `p3.warm_rain_scheme`.
 
 Large rain drops collect smaller ones, reducing number but conserving mass.
-KK2000 uses the linear form `k_rr × ρ × qʳ × nʳ` (Fortran `kr × 1e-3 = 5.78`).
+KK2000 uses the linear form `k_rr × ρ × qʳ × nʳ`, with `k_rr = 5.78`.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters and scheme selector)
@@ -123,20 +121,20 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute rain breakup rate following Fortran P3 v5.5.0.
+Compute rain breakup rate.
 
 Large rain drops spontaneously break up into smaller fragments, producing
 a number source that counterbalances self-collection. Uses a two-piece
-function of ``D^r = (q^r / (π ρ^L n^r))^{1/3} = 1/λ^r`` (Fortran convention,
-no factor of 6; this equals the mean-mass diameter for an exponential DSD):
+function of ``D^r = (q^r / (π ρ^L n^r))^{1/3} = 1/λ^r`` (no factor of 6; this
+equals the mean-mass diameter for an exponential DSD):
 
 1. ``D^r < D^{th}``: No breakup effect (modifier = 1, breakup = 0)
 2. ``D^r ≥ D^{th}``: ``\\text{modifier} = 2 - \\exp(κ_{br} (D^r - D^{th}))``, breakup > 0
 
 The breakup rate is ``(1 - \\text{modifier}) \\times`` self-collection rate.
 
-Note: ``D^r`` here uses the Fortran ``1/λ^r`` convention (no factor of 6), which
-is smaller than the physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
+Note: ``D^r`` here is ``1/λ^r`` (no factor of 6), which is smaller than the
+physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -154,12 +152,12 @@ is smaller than the physical volume-mean diameter by ``6^{1/3} ≈ 1.82``.
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = bounded_rain_number(nʳ, qʳ_eff, parameters)
 
-    # Fortran P3 convention: Dʳ = 1/λʳ after `get_rain_dsd2` applies
-    # the rain lambda limiter and recomputes the DSD-consistent number.
+    # Dʳ = 1/λʳ, evaluated after the rain lambda limiter has been applied and the
+    # DSD-consistent number recomputed.
     λʳ = rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
     mean_rain_diameter = 1 / λʳ
 
-    # Two-piece breakup function (Fortran P3 v5.5.0)
+    # Two-piece breakup function
     breakup_diameter_threshold = parameters.rain_breakup_diameter_threshold
     breakup_coefficient = parameters.rain_breakup_coefficient
 
@@ -315,8 +313,8 @@ $(TYPEDSIGNATURES)
 
 Cloud-droplet self-collection rate (number loss in cloud, not rain).
 
-Dispatched on `p3.warm_rain_scheme`. Zero for KK2000 (Fortran sets
-`ncslf = 0` in that branch). Returned as a positive magnitude.
+Dispatched on `p3.warm_rain_scheme`. Zero for KK2000, which carries no
+cloud-droplet self-collection. Returned as a positive magnitude.
 """
 @inline cloud_self_collection_rate(p3, qᶜˡ, Nᶜˡ, ρ) =
     cloud_self_collection_rate(p3.warm_rain_scheme, p3, qᶜˡ, Nᶜˡ, ρ)
@@ -329,8 +327,8 @@ $(TYPEDSIGNATURES)
 Cloud-droplet number loss from autoconversion (mass → drop count conversion),
 dispatched on `p3.warm_rain_scheme`. Returned as a positive magnitude.
 
-Fortran convention for KK2000: `ncautc = qcaut × Nᶜˡ / qᶜˡ` (cloud number lost in
-proportion to mass lost).
+For KK2000 the loss is `autoconversion × Nᶜˡ / qᶜˡ`: cloud number is lost in
+proportion to the cloud mass lost.
 """
 @inline cloud_number_loss_from_autoconversion(p3, autoconversion, qᶜˡ, Nᶜˡ, ρ) =
     cloud_number_loss_from_autoconversion(p3.warm_rain_scheme, p3,
@@ -339,8 +337,8 @@ proportion to mass lost).
 @inline function cloud_number_loss_from_autoconversion(::KhairoutdinovKogan2000,
                                                        p3, autoconversion, qᶜˡ, Nᶜˡ, ρ)
     FT = typeof(autoconversion)
-    # Fortran ncautc = qcaut × nc / qc, where nc = Nᶜˡ/ρ. The Julia equivalent is
-    # qcaut × Nᶜˡ / (ρ qᶜˡ); safe_divide guards qᶜˡ = 0.
+    # autoconversion × nᶜˡ / qᶜˡ with nᶜˡ = Nᶜˡ/ρ, i.e.
+    # autoconversion × Nᶜˡ / (ρ qᶜˡ); safe_divide guards qᶜˡ = 0.
     cloud_number_per_mass = safe_divide(Nᶜˡ, ρ * qᶜˡ, zero(FT))
     return autoconversion * cloud_number_per_mass
 end
@@ -352,9 +350,8 @@ Mass per newly-formed rain drop produced by autoconversion, dispatched on
 `p3.warm_rain_scheme`. Used to convert autoconversion mass rate into a rain
 number source.
 
-Fortran value for KK2000: mass of a 25 μm radius drop ≈ 6.545e-11 kg
-(`cons3⁻¹`); read from `p3.process_rates.initial_rain_drop_mass` so the radius
-is user-configurable.
+For KK2000 this is the mass of a 25 μm radius drop ≈ 6.545e-11 kg, read from
+`p3.process_rates.initial_rain_drop_mass` so the radius is user-configurable.
 """
 @inline rain_seed_drop_mass(p3) = rain_seed_drop_mass(p3.warm_rain_scheme, p3)
 

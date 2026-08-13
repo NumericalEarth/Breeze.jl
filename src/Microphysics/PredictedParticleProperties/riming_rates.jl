@@ -32,7 +32,7 @@ factor for the exponential PSD.
 - Rate of cloud → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
 @inline cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ = zero(typeof(qⁱ))) =
-    # Fortran uses T <= trplpt for below-freezing riming
+    # Riming is the below-freezing branch, T ≤ T₀
     cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
                                T <= p3.process_rates.freezing_temperature, μⁱ, qʷⁱ)
 
@@ -65,13 +65,13 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
     # PSD-integrated cloud-water collection kernel ⟨A×V⟩ from lookup table
-    # (Fortran f1pr04). Computes ∫ V(D) A(D) N'(D) dD with E=1 (geometric kernel).
+    # ∫ V(D) A(D) N'(D) dD with E=1 (geometric kernel).
     collection_kernel = collection_kernel_per_particle(p3.ice.collection.cloud_collection,
                                                         m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ)
 
     # Air density correction for ice particle fall speed (Heymsfield et al. 2007):
-    # ρfaci = (ρ₀_ice / ρ)^0.54, where ρ₀_ice = 60000/(287.15×253.15) ≈ 0.826 kg/m³
-    # (Fortran P3: rhosui — NOT the surface/rain reference density rhosur ≈ 1.275).
+    # ρfaci = (ρ₀_ice / ρ)^0.54, where ρ₀_ice = 60000/(287.15×253.15) ≈ 0.826 kg/m³.
+    # This is the ice reference density, NOT the surface/rain reference ≈ 1.275.
     ρ₀ = p3.ice.fall_speed.reference_air_density
     density_correction = ice_air_density_correction(ρ₀, ρ)
 
@@ -84,22 +84,22 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute above-freezing cloud collection by melting ice (Fortran qcshd/ncshdc pathway).
+Compute above-freezing cloud collection by melting ice.
 
 When `T > T₀`, ice particles still sweep up cloud droplets via the same collection
 kernel as riming, but the collected water is immediately shed as rain drops (not frozen).
-The number of new rain drops follows `process_rates.shed_drop_mass`, whose default is the
-Fortran 1 mm shed drop (`ncshdc = qcshd × 1.923e6`, i.e. m_shed = 1/1.923e6 kg).
+The number of new rain drops follows `process_rates.shed_drop_mass`, whose default
+is the mass of a 1 mm drop, ``π/6 ρ^L D³ ≈ 5.24 × 10⁻⁷`` kg.
 
 # Returns
 - `(mass_rate, number_rate)`: Cloud → rain mass rate [kg/kg/s] and rain number source [1/kg/s]
 """
 @inline function cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ = zero(typeof(qⁱ)))
-    # Fortran uses T > trplpt for above-freezing collection
+    # Collection above freezing is the T > T₀ branch
     above_freezing = T > p3.process_rates.freezing_temperature
     mass_rate = cloud_collection_mass_rate(p3, qᶜˡ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
                                            above_freezing, μⁱ, qʷⁱ)
-    # Fortran: ncshdc = qcshd * 1.923e6 (shed as 1mm drops: m = π/6 × 1000 × 0.001³ ≈ 5.2e-7 kg)
+    # Collected water is shed as 1 mm drops: m = π/6 × 1000 × 0.001³ ≈ 5.2e-7 kg.
     # The gate is already applied to `mass_rate`, so the quotient carries it.
     return (mass_rate, mass_rate / p3.process_rates.shed_drop_mass)
 end
@@ -107,7 +107,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute above-freezing rain collection by melting ice (Fortran qrcoll pathway).
+Compute above-freezing rain collection by melting ice.
 
 When `T > T₀` and liquid fraction is active, rain drops collected by ice
 contribute to the liquid coating (qʷⁱ) rather than to rime.
@@ -119,8 +119,8 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 """
 @inline rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
                                   μⁱ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ))) =
-    # Fortran uses T > trplpt for above-freezing collection. Same Table 2 double-PSD
-    # kernel as the below-freezing path, matching the Fortran P3 convention.
+    # Collection above freezing is the T > T₀ branch. It uses the same Table 2
+    # double-PSD kernel as the below-freezing path.
     rain_collection_mass_rate(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
                               T > p3.process_rates.freezing_temperature, μⁱ, qʷⁱ)
 
@@ -144,8 +144,7 @@ number removal proportional to the rimed cloud mass fraction.
 @inline function cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, riming_rate)
     FT = typeof(qᶜˡ)
 
-    # Nᶜˡ [#/m³] / (ρ [kg/m³] × qᶜˡ [kg/kg]) = nᶜˡ/qᶜˡ [#/kg],
-    # matching Fortran nc/qc.
+    # Nᶜˡ [#/m³] / (ρ [kg/m³] × qᶜˡ [kg/kg]) = nᶜˡ/qᶜˡ [#/kg].
     ratio = safe_divide(Nᶜˡ, ρ * qᶜˡ, zero(FT))
 
     return ratio * riming_rate
@@ -160,8 +159,8 @@ plus a correction for the rain drop size distribution (C5 fix).
 
 **C5 correction (double-PSD integration):**
 
-The Fortran P3 f1pr07/f1pr08 lookup entries integrate over *both* the ice PSD
-and the rain PSD, capturing how rain drop size affects the collision geometry.
+The ice-rain collection tables integrate over *both* the ice PSD and the rain PSD,
+capturing how rain drop size affects the collision geometry.
 The geometric cross section is ``π/4 (D^i + D^r)^2``, not just ``π/4 (D^i)^2``.
 For an exponential rain PSD (``μ^r = 0``) the exact cross-section correction to the
 single-PSD ice-side integral is:
@@ -189,7 +188,7 @@ When ``n^r = 0`` the correction is 1 (no change from the legacy path).
 """
 @inline rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
                          μⁱ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ))) =
-    # Fortran uses T <= trplpt for below-freezing riming
+    # Riming is the below-freezing branch, T ≤ T₀
     rain_collection_mass_rate(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
                               T <= p3.process_rates.freezing_temperature, μⁱ, qʷⁱ)
 
@@ -229,9 +228,8 @@ mass counterpart of [`rain_collection_number_rate`](@ref); see
     nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
 
     # Use Table 2 (double-PSD kernel) for ice-rain mass collection.
-    # Fortran convention: qrcol = 10^(f1pr08 + logn0r) × ni × ρ × rhofaci × E
-    # The table stores the double-PSD integral with N0r factored out.
-    # N0r = nr × λr (for μr=0 used in table generation).
+    # The table stores the double-PSD integral with N₀ʳ factored out, so the rate is
+    # kernel × N₀ʳ × nⁱ × ρ × (density correction) × E, with N₀ʳ = nʳ λʳ at μʳ = 0.
     mass_kernel = rain_riming_mass_kernel(rain_ice_collection_table(p3),
         m_mean, λʳ, nʳ_bounded, Fᶠ, Fˡ, ρᶠ, parameters, p3, μⁱ)
 
@@ -241,7 +239,7 @@ mass counterpart of [`rain_collection_number_rate`](@ref); see
     return ifelse(active, rate, zero(FT))
 end
 
-# Rain-ice collection table path — uses the dedicated ice-rain mass collection table (Fortran f1pr08).
+# Rain-ice collection table path — uses the dedicated ice-rain mass collection table.
 @inline function rain_riming_mass_kernel(rain_ice_table::P3RainIceCollectionTable,
                                             m_mean, λʳ, nʳ, Fᶠ, Fˡ, ρᶠ, parameters, p3,
                                             μⁱ = zero(typeof(m_mean)))
@@ -253,8 +251,8 @@ end
 $(TYPEDSIGNATURES)
 
 Compute rain number loss from rain-ice collection using the tabulated
-number-weighted collection kernel (RainCollectionNumber / Fortran f1pr07)
-when `temperature_active` is true.
+number-weighted collection kernel (`RainCollectionNumber`) when
+`temperature_active` is true.
 
 Replaces the monodisperse approximation `(nʳ/qʳ) × mass_rate` with an
 independent PSD-integrated number collection rate.
@@ -287,8 +285,7 @@ independent PSD-integrated number collection rate.
     nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
 
     # Use Table 2 (number-weighted kernel) for ice-rain number collection.
-    # Fortran convention: nrcol = 10^(f1pr07 + logn0r) × ni × ρ × rhofaci × E
-    # N0r = nr × λr (for μr=0).
+    # As for the mass kernel, N₀ʳ = nʳ λʳ at μʳ = 0 is factored back in here.
     number_kernel = rain_riming_number_kernel(rain_ice_collection_table(p3),
         m_mean, λʳ, Fᶠ, Fˡ, ρᶠ, parameters, p3, μⁱ)
 
@@ -302,10 +299,10 @@ end
 $(TYPEDSIGNATURES)
 
 Compute below-freezing rain number loss from riming using the tabulated
-number-weighted collection kernel (RainCollectionNumber / Fortran f1pr07).
+number-weighted collection kernel (`RainCollectionNumber`).
 """
 @inline function rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ)))
-    # m14: Fortran uses .le. for below-freezing riming.
+    # Riming is the T ≤ T₀ branch.
     below_freezing = T <= p3.process_rates.freezing_temperature
     return rain_collection_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
                                        below_freezing, μⁱ, qʷⁱ)
@@ -315,7 +312,7 @@ end
 $(TYPEDSIGNATURES)
 
 Compute above-freezing rain number loss using the tabulated number-weighted
-collection kernel (RainCollectionNumber / Fortran f1pr07).
+collection kernel (`RainCollectionNumber`).
 """
 @inline function rain_warm_collection_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
                                                   μⁱ = zero(typeof(qʳ)), qʷⁱ = zero(typeof(qⁱ)))
@@ -324,7 +321,7 @@ collection kernel (RainCollectionNumber / Fortran f1pr07).
                                        above_freezing, μⁱ, qʷⁱ)
 end
 
-# Rain-ice collection table path — uses the dedicated ice-rain number collection table (Fortran f1pr07).
+# Rain-ice collection table path — uses the dedicated ice-rain number collection table.
 @inline function rain_riming_number_kernel(rain_ice_table::P3RainIceCollectionTable,
                                            m_mean, λʳ, Fᶠ, Fˡ, ρᶠ, parameters, p3,
                                            μⁱ = zero(typeof(m_mean)))

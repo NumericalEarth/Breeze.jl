@@ -14,8 +14,8 @@ struct CloudDropletProperties{FT}
     number_concentration :: FT
     condensation_timescale :: FT
     # Cloud gamma PSD shape parameter μᶜˡ ∈ [2, 15].
-    # Diagnosed from Nᶜˡ via the Liu-Daum (2000) relation in the constructor
-    # (matching Fortran P3 get_cloud_dsd2). Affects immersion freezing PSD correction.
+    # Diagnosed from Nᶜˡ via the Liu-Daum (2000) relation in the constructor.
+    # Affects the immersion freezing PSD correction.
     shape_parameter :: FT
     # PSD correction for cloud immersion freezing: C(μᶜˡ) = Γ(μᶜˡ+7)Γ(μᶜˡ+1)/Γ(μᶜˡ+4)²
     # Precomputed at construction time from `shape_parameter` for GPU compatibility.
@@ -27,8 +27,7 @@ $(TYPEDSIGNATURES)
 
 Diagnose the cloud droplet gamma PSD shape parameter μᶜˡ from number concentration.
 
-Implements the Liu-Daum (2000)-type relation used in Fortran P3 `get_cloud_dsd2`
-(lines 10545–10548):
+Implements the Liu-Daum (2000)-type relation:
 
 ```math
 \\chi = 0.0005714 \\, N^{cl}_{\\rm cm} + 0.2714, \\qquad
@@ -37,9 +36,9 @@ Implements the Liu-Daum (2000)-type relation used in Fortran P3 `get_cloud_dsd2`
 
 where ``N^{cl}_{\\rm cm} = N^{cl} \\times 10^{-6}`` is the number concentration in cm⁻³.
 
-In the Fortran, `nc` is a specific quantity [kg⁻¹] and is multiplied by ρ to
-obtain the absolute number density before applying this formula. In Breeze, `Nᶜˡ`
-is already the absolute density [m⁻³], so no ρ is required.
+The relation is written for the absolute number density, so a specific droplet
+number [kg⁻¹] would first have to be multiplied by ρ. `Nᶜˡ` here is already the
+absolute density [m⁻³], so no ρ is required.
 
 # Examples
 
@@ -53,9 +52,9 @@ round(liu_daum_shape_parameter(100e6), digits=1)  # continental default
 """
 function liu_daum_shape_parameter(Nᶜˡ)
     FT = typeof(float(Nᶜˡ))
-    Nᶜˡ_cm³ = Nᶜˡ * FT(1e-6)              # m⁻³ → cm⁻³ (Fortran nc × 10⁻⁶ × ρ equivalent)
-    # Liu-Daum intermediate parameter, and the μᶜˡ bounds Fortran `get_cloud_dsd2`
-    # imposes on the result. Coefficients of a published fit, not free parameters.
+    Nᶜˡ_cm³ = Nᶜˡ * FT(1e-6)              # m⁻³ → cm⁻³
+    # Liu-Daum intermediate parameter, and the μᶜˡ bounds imposed on the result.
+    # Coefficients of a published fit, not free parameters.
     χ = FT(0.0005714) * Nᶜˡ_cm³ + FT(0.2714)
     μᶜˡ = FT(1) / χ^2 - FT(1)
     return clamp(μᶜˡ, FT(2), FT(15))
@@ -77,27 +76,25 @@ Predicting cloud droplet number Nᶜˡ requires treating aerosol activation
 physics, which adds substantial complexity. For simulations focused
 on ice processes or bulk precipitation, prescribed Nᶜˡ is sufficient.
 
-**Fortran parity note:** The Fortran P3 driver carries and advects prognostic
-`nc` and `ssat` (supersaturation). The prescribed-Nᶜˡ simplification means:
-(1) homogeneous freezing below −40°C transfers the *prescribed* Nᶜˡ rather than a
-locally depleted droplet count, and (2) autoconversion sensitivity to Nᶜˡ is
-controlled by the prescribed value rather than dynamically. Pass
-`aerosol = AerosolActivation(AerosolMode())` to predict Nᶜˡ instead.
+The prescribed-Nᶜˡ simplification means: (1) homogeneous freezing below −40°C
+transfers the *prescribed* Nᶜˡ rather than a locally depleted droplet count, and
+(2) autoconversion sensitivity to Nᶜˡ is controlled by the prescribed value rather
+than dynamically. Pass `aerosol = AerosolActivation(AerosolMode())` to predict Nᶜˡ
+instead.
 
-There is no separate mass-number consistency cap on homogeneous freezing: matching
-Fortran, `homogeneous_freezing_cloud_rate` transfers all of Nᶜˡ at
+There is no separate mass-number consistency cap on homogeneous freezing:
+`homogeneous_freezing_cloud_rate` transfers all of Nᶜˡ at
 `T < homogeneous_freezing_temperature`. `compute_p3_process_rates` diagnoses the
 rate from the *post-process* residual cloud and rescales mass and number together
 by a single `sink_limiting_factor`. This limits the frozen mass to the residual
 cloud while preserving its diagnosed mass-number ratio; it does not impose a
 minimum frozen-particle mass or independently limit the transferred number.
 
-**Cloud DSD shape parameter (C4 fix):** The Fortran P3 diagnoses `μᶜˡ ∈ [2, 15]`
-from Nᶜˡ each timestep via a Liu–Daum (2000)-type relation (`get_cloud_dsd2`).
-Since Nᶜˡ is prescribed in Julia (constant), μᶜˡ is also constant and is diagnosed
-from Nᶜˡ at construction time via [`liu_daum_shape_parameter`](@ref), giving the
-same result as Fortran at no runtime cost. Pass `shape_parameter` explicitly to
-override the diagnosis (e.g., for sensitivity studies).
+**Cloud DSD shape parameter (C4 fix):** `μᶜˡ ∈ [2, 15]` is diagnosed from Nᶜˡ via a
+Liu–Daum (2000)-type relation. Since Nᶜˡ is prescribed here, μᶜˡ is constant too, so
+it is diagnosed once at construction time via [`liu_daum_shape_parameter`](@ref)
+rather than every timestep. Pass `shape_parameter` explicitly to override the
+diagnosis (e.g., for sensitivity studies).
 
 The `freezing_psd_correction = Γ(μᶜˡ+7)Γ(μᶜˡ+1)/Γ(μᶜˡ+4)²` is pre-computed
 at construction time and used in `immersion_freezing_cloud_rate`.
@@ -112,7 +109,7 @@ Cloud droplets are converted to rain via collision-coalescence following
 
 # Keyword Arguments
 
-- `number_concentration`: Nᶜˡ [1/m³], default 200×10⁶ (Fortran nccnst_2)
+- `number_concentration`: Nᶜˡ [1/m³], default 200×10⁶
 - `condensation_timescale`: Saturation relaxation [s], default 1.0
 - `shape_parameter`: μᶜˡ for cloud gamma PSD [-], default `nothing` (diagnosed
   from Nᶜˡ via Liu-Daum relation). Pass an explicit value to override.
@@ -170,9 +167,31 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Bounds `(minimum_slope, maximum_slope)` [1/m] on the cloud PSD slope, from Fortran
-`get_cloud_dsd2`: `λ_min = (μᶜˡ + 1) × 2.5×10⁴` and `λ_max = (μᶜˡ + 1) × 10⁶`,
-which correspond to mean droplet diameters of roughly 160 μm and 4 μm.
+Bounds `(minimum_slope, maximum_slope)` [1/m] on the cloud PSD slope:
+`λ_min = (μᶜˡ + 1) × 2.5×10⁴` and `λ_max = (μᶜˡ + 1) × 10⁶`.
+
+Both bounds carry the same `(μᶜˡ + 1)` factor, which makes them bound the mean
+droplet *diameter* rather than the slope itself. For the gamma PSD
+``N(D) = N_0 D^{μ} e^{-λ D}``, the number-weighted mean diameter is
+
+```math
+\\langle D \\rangle = \\frac{\\int_0^∞ D\\, N(D)\\, dD}{\\int_0^∞ N(D)\\, dD}
+                    = \\frac{Γ(μ + 2)}{λ\\, Γ(μ + 1)}
+                    = \\frac{μ + 1}{λ},
+```
+
+using ``Γ(z + 1) = z\\, Γ(z)``. Substituting each bound therefore cancels
+``μ + 1`` and leaves a shape-independent diameter:
+
+```math
+\\langle D \\rangle_{\\max} = \\frac{μ + 1}{λ_{\\min}}
+                         = \\frac{1}{2.5 \\times 10^4\\,\\text{m}^{-1}} = 40\\,μ\\text{m},
+\\qquad
+\\langle D \\rangle_{\\min} = \\frac{μ + 1}{λ_{\\max}}
+                         = \\frac{1}{10^6\\,\\text{m}^{-1}} = 1\\,μ\\text{m}.
+```
+
+So the admitted mean droplet diameters are 1–40 μm for any diagnosed ``μᶜˡ``.
 """
 @inline function cloud_slope_bounds(μᶜˡ)
     FT = typeof(μᶜˡ)
@@ -194,14 +213,12 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return the cloud number concentration [1/m³] adjusted for cloud lambda bounds,
-matching Fortran `get_cloud_dsd2` (lines 10557-10575 of `microphy_p3.f90`).
+Return the cloud number concentration [1/m³] adjusted for the cloud slope bounds.
 
 When the cloud mass is too small (or too large) to support the prescribed `Nᶜˡ` at
-the given `μᶜˡ`, the slope parameter hits its bounds. Fortran recomputes `nc` from
-the clamped lambda to maintain mass-DSD consistency. This function reproduces that
-adjustment so that downstream rates (autoconversion, immersion freezing) see a
-physically consistent cloud number.
+the given `μᶜˡ`, the slope parameter hits its bounds. The number is then recomputed
+from the clamped slope to maintain mass-PSD consistency, so that downstream rates
+(autoconversion, immersion freezing) see a physically consistent cloud number.
 """
 @inline function bounded_cloud_number(Nᶜˡ, μᶜˡ, qᶜˡ, ρ, ρᴸ, mass_scale_floor)
     FT = typeof(qᶜˡ)
@@ -235,8 +252,8 @@ $(TYPEDSIGNATURES)
 
 Diagnose the cloud PSD state from prognostic cloud liquid and cloud number.
 
-This mirrors the Fortran `get_cloud_dsd2` logic used by P3: convert the
-prognostic specific cloud number `nᶜˡ` [kg⁻¹] to an absolute concentration,
+The cloud number is converted from the prognostic specific number `nᶜˡ` [kg⁻¹]
+to an absolute concentration, then
 diagnose `μᶜˡ` via Liu-Daum, apply the slope bounds, and return the adjusted
 cloud number together with the PSD correction used by immersion freezing.
 """

@@ -16,8 +16,8 @@ struct CloudTerminalVelocities{FT}
     number_weighted :: FT
 end
 
-# Stokes-regime cloud-droplet fall speed, `v(D) = a_cn D²`. Fortran `get_cloud_dsd2`
-# sets `acn = g ρʷ / (18 η)` with `bcn = 2`, so the PSD-weighted moments follow from
+# Stokes-regime cloud-droplet fall speed, `v(D) = a_cn D²`, with
+# `a_cn = g ρʷ / (18 η)` and exponent 2, so the PSD-weighted moments follow from
 # Γ(μᶜˡ+b+4)/Γ(μᶜˡ+4) = (μᶜˡ+5)(μᶜˡ+4) for mass and
 # Γ(μᶜˡ+b+1)/Γ(μᶜˡ+1) = (μᶜˡ+2)(μᶜˡ+1) for number.
 # `rime_density` needs the same mass-weighted speed to form the Cober-List rime-impact
@@ -116,7 +116,7 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
     ρ_correction = ice_air_density_correction(ρ₀, ρ)
 
-    # m9: Fortran applies no velocity clamping; table bounds are sufficient.
+    # m9: no velocity clamping is applied; the table bounds are sufficient.
     velocity = tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
     active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
     return ifelse(active, velocity, zero(FT))
@@ -126,8 +126,8 @@ end
 @inline function tabulated_mass_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
     # m̄ = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
     # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
-    # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg), matching
-    # Fortran's clamp of the lookup index to 1 (find_lookupTable_indices_1a).
+    # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg) rather
+    # than extrapolating below it.
     log_mean_mass = log10(max(m̄, oftype(m̄, parameters.floors.mass_scale)))
     vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μⁱ)
     return vₜ_norm * ρ_correction

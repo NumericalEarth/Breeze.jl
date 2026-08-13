@@ -41,8 +41,8 @@ $(TYPEDSIGNATURES)
 Schmidt number correction factor for ventilation-enhanced table values.
 
 The P3 lookup table stores the ventilation-enhanced integral without the
-`Sc^{1/3} √rhofaci / √ν` factor (matching the Fortran convention). This function
-computes the correction that must be applied at runtime:
+`Sc^{1/3} √ρ_correction / √ν` factor. This function computes the correction that
+must be applied at runtime:
 
 ```math
 f_{Sc} = \\frac{Sc^{1/3} \\sqrt{\\rho_{fac}}}{\\sqrt{\\nu}}
@@ -79,8 +79,8 @@ end
     FT = typeof(m_mean)
     # m_mean = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
     # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
-    # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg), matching
-    # Fortran's clamp of the lookup index to 1 (find_lookupTable_indices_1a).
+    # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg) rather
+    # than extrapolating below it.
     log_m = log10(max(m_mean, FT(DEFAULT_FLOORS.mass_scale)))
     # vent stores the constant ventilation term (0.65 × ∫ C(D) N'(D) dD)
     # vent_e stores the enhanced term (0.44 × ∫ C(D)√(V×D) N'(D) dD)  [m² s^(-1/2)]
@@ -95,7 +95,7 @@ $(TYPEDSIGNATURES)
 
 Compute the per-particle cloud-water collection kernel ⟨A × V⟩ for riming.
 Returns the PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from the
-`IceCollection.cloud_collection` table (Fortran `f1pr04`).
+`IceCollection.cloud_collection` table.
 """
 @inline collection_kernel_per_particle(coll::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ) =
     tabulated_ice_integral(coll, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ)
@@ -106,7 +106,7 @@ $(TYPEDSIGNATURES)
 Compute aggregation kernel for self-collection using PSD-integrated
 kernel from lookup table.
 
-The table stores the half-integral (Fortran convention),
+The table stores the half-integral,
 `(1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂`. No `E_agg` — the collection
 efficiency is applied by the caller.
 """

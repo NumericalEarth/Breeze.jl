@@ -82,11 +82,11 @@ function parse_lookup_table_file(filepath::AbstractString, FT::Type)
     n_dr = N_RAIN_SLOPE
 
     # Column names for ice data.
-    # Column 4 (`cloud_collection`) is Fortran `f1pr04`, the ice-cloud-water
-    # sweep-out integral ∫ V(D) A(D) N'(D) dD. Ice-*rain* collection is not in
-    # the 5D ice block: it needs the rain slope parameter as an extra coordinate
-    # and lives in the 6D rain-ice block embedded later in the same Fortran
-    # Lookup Table 1 file (`rain_number` / `rain_mass`).
+    # Column 4 (`cloud_collection`) is the ice-cloud-water sweep-out integral
+    # ∫ V(D) A(D) N'(D) dD. Ice-*rain* collection is not in the 5D ice block: it
+    # needs the rain slope parameter as an extra coordinate and lives in the 6D
+    # rain-ice block embedded later in the same Table 1 file
+    # (`rain_number` / `rain_mass`).
     col_names = [
         :number_weighted, :mass_weighted, :aggregation, :cloud_collection,
         :ventilation, :effective_radius, :small_q, :large_q,
@@ -142,8 +142,8 @@ function parse_lookup_table_file(filepath::AbstractString, FT::Type)
                             line_idx += 1
                             data_offset = n_rain_idx
                             # CRITICAL: reverse the Drscale axis
-                            # Fortran i_Drscale=1 -> largest lambda_r -> Julia index n_dr
-                            # Fortran i_Drscale=30 -> smallest lambda_r -> Julia index 1
+                            # File order runs from largest λʳ to smallest, so it is
+                            # reversed into ascending λʳ order here.
                             j_dr = n_dr - i_dr + 1
                             for (col_idx, name) in enumerate(rain_names)
                                 v = vals[data_offset + col_idx]

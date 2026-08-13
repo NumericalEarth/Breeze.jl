@@ -59,7 +59,7 @@ using Oceananigans.Fields: interior
 
     #####
     ##### 6D lookup table interpolation (the Breeze-owned multilinear blend that
-    ##### the Fortran rain-ice collection tables are read into)
+    ##### the rain-ice collection tables are read into)
     #####
 
     @testset "TabulatedFunction6D - construction and interpolation" begin
@@ -103,7 +103,7 @@ using Oceananigans.Fields: interior
         # For simple power law V(D) = ar * D^br (valid ~134μm to 1.5mm):
         # V_mass = ar * Γ(4 + br) / (Γ(4) * λ_r^br)
         # At λ_r = 5000 m⁻¹ (D_mean = 200μm, intermediate drops):
-        # ar = 842, br = 0.8 (Fortran P3 rain fall speed coefficients)
+        # ar = 842, br = 0.8 (rain fall speed coefficients)
         using SpecialFunctions: gamma
 
         ar = 841.99667
@@ -178,7 +178,7 @@ using Oceananigans.Fields: interior
     end
 
     @testset "tabulated rain evaporation - positive, finite, bounded" begin
-        # Verify PSD-integrated rain evaporation from Fortran tables
+        # Verify PSD-integrated rain evaporation from the tables
         # is physically reasonable.
         p3_tab = PredictedParticlePropertiesMicrophysics()
 
@@ -227,9 +227,8 @@ using Oceananigans.Fields: interior
         # The lookup coordinate is the mean *particle* mass m̄ = qⁱ/nⁱ [kg], which
         # must not be floored by the bulk mass-mixing-ratio threshold
         # `minimum_mass_mixing_ratio` (1e-14 kg/kg). The Table-1 mass axis extends
-        # down to ≈1.56e-15 kg, and newly nucleated ice is ≈3.77e-15 kg. Fortran
-        # (find_lookupTable_indices_1a) uses the raw m̄ and clamps only the table
-        # index; the Julia table clamp reproduces that, so small ice must fall
+        # down to ≈1.56e-15 kg, and newly nucleated ice is ≈3.77e-15 kg. The lookup
+        # takes the raw m̄ and clamps only the table coordinate, so small ice must fall
         # slower than heavier ice instead of collapsing to a single speed.
         p3_tab = PredictedParticlePropertiesMicrophysics()
         FT = Float64
@@ -270,7 +269,7 @@ using Oceananigans.Fields: interior
         @test frozen_mass_rate > 0
         @test frozen_number_rate > 0
 
-        # D25: Fortran has no mass-number consistency cap — all nc transfers to ice.
+        # D25: there is no mass-number consistency cap — all Nᶜˡ transfers to ice.
         # With trace qᶜˡ and large Nᶜˡ, freezing still activates.
         qᶜˡ_trace = FT(1e-7)
         Nᶜˡ_continental = FT(750e6)
@@ -337,7 +336,7 @@ using Oceananigans.Fields: interior
         # Rain immersion freezing: same split (PSD correction on mass only).
         qr = 1e-3
         nr = 1e4   # [1/kg]
-        μ_r = 0.0  # exponential rain PSD (Fortran P3 v5.5.0 mu_r_constant = 0)
+        μ_r = 0.0  # exponential rain PSD
         Q_frz_r, N_frz_r = immersion_freezing_rain_rate(p3, qr, nr, T, μ_r)
         m_mean_r = qr / nr
         @test Q_frz_r / max(N_frz_r, 1e-30) > m_mean_r
@@ -349,9 +348,9 @@ using Oceananigans.Fields: interior
         @test Q_warm == 0
         @test N_warm == 0
 
-        # In the non-saturated regime, Barklie-Gokhale freezing is the Fortran
-        # linear per-second rate. The safety cap only applies when the projected
-        # sink would consume all available droplets.
+        # In the non-saturated regime, Barklie-Gokhale freezing is a linear
+        # per-second rate. The safety cap only applies when the projected sink
+        # would consume all available droplets.
         T_moderate = 230.0
         parameters = p3.process_rates
         nᶜˡ = Nᶜˡ / ρ
@@ -367,10 +366,10 @@ using Oceananigans.Fields: interior
         # Very cold supercell states make the Barklie-Gokhale exponential
         # effectively instantaneous. The raw rate is intentionally NOT capped at
         # 1/τ here (commit 48b073e3): the all-available-over-τ limit is applied
-        # later by the combined cloud/rain budget in compute_p3_process_rates
-        # (Fortran parity). The log-form overflow guard only keeps the extreme-cold
-        # exponential finite, so at the rate-function level we require the moment
-        # rates to be finite (no Float32 overflow) and non-negative.
+        # later by the combined cloud/rain budget in compute_p3_process_rates.
+        # The log-form overflow guard only keeps the extreme-cold exponential
+        # finite, so at the rate-function level we require the moment rates to be
+        # finite (no Float32 overflow) and non-negative.
         FT = Float32
         p3_32 = PredictedParticlePropertiesMicrophysics(FT)
         T_very_cold = FT(136.18727)

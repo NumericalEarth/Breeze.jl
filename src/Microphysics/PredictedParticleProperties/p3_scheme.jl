@@ -84,18 +84,18 @@ The scheme tracks 8 prognostic densities by default, and up to 11 with every opt
 
 Each optional group is gated on a type, so a configuration that does not use one neither
 allocates nor advects it. Cloud droplet number is prognostic only with an
-`AerosolActivation`: the default prescribed-Nᶜˡ path (Fortran `log_predictNc = .false.`)
-takes it from the scheme parameter `cloud.number_concentration`.
+`AerosolActivation`: the default prescribed-Nᶜˡ path takes it from the scheme
+parameter `cloud.number_concentration`.
 
 # Keyword Arguments
 
 - `thermodynamic_constants`: Source of shared phase and dry-air properties.
-- `lookup_tables`: Path to a directory containing Fortran P3 lookup table files
+- `lookup_tables`: Path to a directory containing P3 lookup table files
   (default to the artifact `P3_lookup_tables` in `Artifacts.toml`).
 - `minimum_mass_mixing_ratio`: Mass below which a species is treated as absent
-  [kg/kg] (default 10⁻¹⁴, Fortran `qsmall`)
+  [kg/kg] (default 10⁻¹⁴)
 - `minimum_number_mixing_ratio`: Number below which a population is treated as
-  absent [kg⁻¹] (default 10⁻¹⁶, Fortran `nsmall`)
+  absent [kg⁻¹] (default 10⁻¹⁶)
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation.
   `nothing` (default) is an open surface: the diagnosed fall speed is retained at the
   bottom face, so all sedimenting species leave the domain. `ImpenetrableBoundaryCondition()`

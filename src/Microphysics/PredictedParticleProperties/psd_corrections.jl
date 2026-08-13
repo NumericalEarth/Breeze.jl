@@ -34,8 +34,7 @@ C(\\mu) = \\frac{\\Gamma(\\mu + 7)\\,\\Gamma(\\mu + 1)}{\\Gamma(\\mu + 4)^2}
 
 Evaluated through the equivalent rational form
 `(μ+6)(μ+5)(μ+4) / ((μ+3)(μ+2)(μ+1))` — exact, overflow-free, and free of the
-three `loggamma` calls the gamma form would cost at every grid point. Matches
-Fortran `G_of_mu`.
+three `loggamma` calls the gamma form would cost at every grid point.
 
 Exact values:
 - μ = 0: 720 × 1 / 36 = 20.0

@@ -21,7 +21,7 @@ function p3_with_warm_rain_scheme(p3, warm_rain_scheme)
     )
 end
 
-@testset "P3 Fortran trace-regime parity" begin
+@testset "P3 trace-regime behavior" begin
     @testset "Float32 rain quadrature retains the mass-weighted velocity" begin
         evaluator_32 = PPP.RainMassWeightedVelocityEvaluator(Float32)
         evaluator_64 = PPP.RainMassWeightedVelocityEvaluator(Float64)
@@ -51,7 +51,7 @@ end
         @test PPP.rain_self_collection_rate(p3_scheme, qsmall, 1e3, ρ) > 0
         @test PPP.rain_breakup_rate(p3_scheme, qtrace, 1e3, 1.0) == 0
 
-        # KK2000 carries no explicit cloud self-collection sink (Fortran ncslf = 0).
+        # KK2000 carries no explicit cloud self-collection sink.
         @test PPP.cloud_self_collection_rate(p3_scheme, qsmall, 1e8, ρ) == 0
     end
 

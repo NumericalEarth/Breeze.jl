@@ -1,13 +1,13 @@
 """
 $(TYPEDSIGNATURES)
 
-Compute the density of newly accreted cloud rime using the Fortran P3 Ri fit.
+Compute the density of newly accreted cloud rime from the rime-impact parameter.
 
-This follows the `p3_main` cloud-riming branch: diagnose the cloud gamma PSD
-from `qᶜˡ` and prescribed `Nᶜˡ`, compute the droplet impact speed relative to
-falling ice, form the rime-impact parameter `Ri`, and apply the same piecewise
-fit for `ρ_rime`. When cloud riming is inactive or the air is above freezing,
-the Fortran fallback value `400 kg m⁻³` is used.
+Diagnose the cloud gamma PSD from `qᶜˡ` and `Nᶜˡ`, compute the droplet impact speed
+relative to falling ice, form the rime-impact parameter `Ri`, and apply the
+piecewise density fit of [Cober and List (1993)](@cite CoberList1993). When cloud
+riming is inactive or the air is above freezing, the fallback value `400 kg m⁻³`
+is used.
 
 # Arguments
 - `p3`: P3 microphysics scheme
@@ -38,8 +38,8 @@ function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
     η = transport.ν * ρ
     g = p3_gravitational_acceleration(constants, FT)
 
-    # Fortran get_cloud_dsd2 / p3_main: the droplet impact speed is the mass-weighted
-    # Stokes velocity of the cloud DSD, shared with `cloud_terminal_velocities`.
+    # The droplet impact speed is the mass-weighted Stokes velocity of the cloud
+    # DSD, shared with `cloud_terminal_velocities`.
     stokes_prefactor = cloud_stokes_prefactor(g, ρᴸ, η)
     cloud_terminal_velocity = cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
     cloud_mean_diameter = (μᶜˡ + 4) / λᶜˡ
@@ -52,8 +52,8 @@ function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
                abs(vᵢ - cloud_terminal_velocity) * inverse_supercooling,
                parameters.minimum_rime_impact, parameters.maximum_rime_impact)
 
-    # Cober-List rime-density fit as coded in Fortran P3 v5.5.0 `p3_main`: a
-    # quadratic in g/cm³ (hence the ×10³) below Ri = 8, a linear extension above it.
+    # Cober-List rime-density fit (see the docstring for the citation): a quadratic
+    # in g/cm³ (hence the ×10³) below Ri = 8, a linear extension above it.
     #   Ri ≤ 8:  ρᶠ = (0.051 + 0.114 Ri - 0.0055 Ri²) × 10³
     #   Ri > 8:  ρᶠ = 611 + 72.25 (Ri - 8)
     # These are the coefficients of a published fit, not independently tunable
@@ -82,7 +82,7 @@ Compute liquid shedding rate from ice particles following
 [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
 PSD-integrated shedding of liquid from mixed-phase ice particles with D ≥ 9 mm
-(Rasmussen et al. 2011). Matches Fortran P3 v5.5.0:
+(Rasmussen et al. 2011):
 
 ```math
 q_{lshd} = F^f \\times f_{1pr28} \\times N^i \\times F^l
@@ -115,8 +115,7 @@ function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean, μⁱ)
     f1pr28 = shedding_integral(p3.ice.bulk_properties.shedding, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ,
                                p3.process_rates.floors.mass_scale)
 
-    # Fortran: qlshd = Fr × f1pr28 × ni × Fl
-    # Fr = rime fraction of ice-only mass (= Fᶠ in Julia convention since qⁱ excludes qʷⁱ)
+    # Fᶠ is the rime fraction of the ice-only mass, since qⁱ excludes qʷⁱ.
     rate = Fᶠ * f1pr28 * nⁱ_eff * Fˡ
 
     # Bound by available liquid: qlshd ≤ qwi / dt_safety
@@ -154,8 +153,8 @@ Shed liquid forms rain drops of approximately 1 mm diameter.
 - Rate of rain number increase [1/kg/s]
 """
 @inline function shedding_number_rate(p3, shed_rate)
-    # Liquid-fraction shedding uses 1.928e6 drops/kg (Fortran nlshd, line 3350),
-    # slightly different from cloud/wet-growth shedding (1.923e6).
+    # Liquid-fraction shedding carries its own drop mass so it can be tuned
+    # separately; by default it equals `shed_drop_mass`, the mass of a 1 mm drop.
     m_shed = p3.process_rates.shed_drop_mass_liqfrac
 
     return shed_rate / m_shed
@@ -226,8 +225,8 @@ function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ
     Q_sensible = Kᵃ * (T₀ - T)
     Q_latent = ℒⁱ * Dᵛ * ρ * (q_sat0 - qᵛ)
 
-    # Fortran applies 2π/Lf only to the latent term; the sensible-conduction
-    # term uses the capm convention directly.
+    # 2π/ℒᶠᵘˢ multiplies only the latent term; the sensible-conduction term uses
+    # the capm convention directly.
     qwgrth = C_fv * (Q_sensible + 2 * FT(π) * Q_latent / ℒᶠᵘˢ) * nⁱ_eff
 
     return ifelse(below_freezing, clamp_positive(qwgrth), zero(FT))
@@ -306,8 +305,8 @@ function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, co
     # Supersaturated (q_sat0 < qᵛ): condensation warms particle → opposes freezing
     Q_latent = ℒⁱ * Dᵛ * ρ * (q_sat0 - qᵛ)
 
-    # Only refreeze when net heat balance favors it. As in the Fortran wet-growth
-    # and refreezing paths, 2π/Lf multiplies only the latent-diffusion term.
+    # Only refreeze when the net heat balance favors it. As in the wet-growth path,
+    # 2π/ℒᶠᵘˢ multiplies only the latent-diffusion term.
     dm_dt_refrz = clamp_positive(C_fv * (Q_sensible + 2 * FT(π) * Q_latent / ℒᶠᵘˢ))
 
     refrz_rate = nⁱ_eff * dm_dt_refrz

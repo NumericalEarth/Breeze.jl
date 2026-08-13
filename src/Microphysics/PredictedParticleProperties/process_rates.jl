@@ -45,8 +45,8 @@ struct P3DerivedState{FT, Q}
     Fˡ_for_shape :: FT # liquid fraction for μ lookup
     Nᶜˡ :: FT       # effective cloud droplet number concentration
     nᶜˡ :: FT       # DSD-bounded cloud number (for correction)
-    μᶜˡ :: FT       # local cloud DSD shape parameter (Fortran mu_c)
-    λᶜˡ :: FT       # local cloud DSD slope parameter (Fortran lamc)
+    μᶜˡ :: FT       # local cloud DSD shape parameter
+    λᶜˡ :: FT       # local cloud DSD slope parameter
     # Thermodynamic state
     T :: FT         # temperature [K]
     P :: FT         # pressure [Pa]
@@ -158,7 +158,7 @@ struct P3ProcessRates{FT}
     rain_evaporation :: FT         # Rain evaporation magnitude [kg/kg/s]
     rain_evaporation_number :: FT  # Rain number loss from evaporation [1/kg/s]
     # The self-collection/breakup pair is netted (only one is nonzero) so that the
-    # rain-number limiter sees Fortran's single signed `nrslf` (`compute_p3_process_rates`).
+    # rain-number limiter sees a single signed rate (`compute_p3_process_rates`).
     rain_self_collection :: FT     # Net rain number loss from self-collection [1/kg/s]
     rain_breakup :: FT             # Net rain number gain from breakup [1/kg/s]
 
@@ -172,13 +172,13 @@ struct P3ProcessRates{FT}
     clipping_rime_volume :: FT     # Rime volume removed exactly by whole-particle clips [m³/kg/s]
     post_process_clipping :: FT    # One when the post-process liquid-fraction clip fires
 
-    # D2/D1: Ice number loss from vapor-driven sinks (Fortran nisub + nlevp)
+    # D2/D1: Ice number loss from vapor-driven sinks (sublimation + coating evaporation)
     sublimation_number :: FT       # Ice number loss magnitude from sublimation / coating evaporation [1/kg/s]
 
     # Phase 2: Ice aggregation (positive magnitude)
     aggregation :: FT              # Ice number loss magnitude from self-collection [1/kg/s]
 
-    # Global ice number limiter — Fortran impose_max_Ni (positive magnitude)
+    # Global ice number limiter (positive magnitude)
     ni_limit :: FT                 # Ice number excess removal rate [1/kg/s]
 
     # Phase 2: Riming (all positive magnitudes)
@@ -219,7 +219,7 @@ struct P3ProcessRates{FT}
     rain_warm_collection_number :: FT  # M9: Rain number loss from warm collection [1/kg/s]
 
     # Liquid-fraction wet growth: collected hydrometeors redirected to qʷⁱ when
-    # collection exceeds freezing capacity (Fortran qwgrth1c/qwgrth1r).
+    # collection exceeds freezing capacity.
     wet_growth_cloud :: FT             # Cloud collection redirected to qʷⁱ [kg/kg/s]
     wet_growth_rain :: FT              # Rain collection redirected to qʷⁱ [kg/kg/s]
 
@@ -235,15 +235,15 @@ struct P3ProcessRates{FT}
     coating_condensation :: FT         # Condensation on ice liquid coating [kg/kg/s]
     coating_evaporation :: FT          # Evaporation from ice liquid coating [kg/kg/s]
 
-    # Wet growth rime densification (Fortran lines 4303-4307)
+    # Wet growth rime densification
     # During wet growth, assume total soaking: qᶠ → qⁱ, bᶠ → qⁱ/ρ_rimeMax.
     wet_growth_densification_mass :: FT   # Rime mass source: (qⁱ - qᶠ)/τ [kg/kg/s]
     wet_growth_densification_volume :: FT # Rime volume change: (qⁱ/ρ_max - bᶠ)/τ [m³/kg/s]
 
-    # DSD number correction feedback (Fortran get_cloud_dsd2/get_rain_dsd2)
+    # DSD number correction feedback.
     # After lambda bounding, the DSD-consistent number may differ from the prognostic
-    # number. Fortran writes the bounded value back instantaneously; here we express
-    # the correction as a relaxation rate over dt_safety.
+    # number. The correction is expressed as a relaxation rate over dt_safety rather
+    # than as an instantaneous write-back.
     cloud_number_correction :: FT  # (nᶜˡ_bounded - nᶜˡ) / τ [1/kg/s]
     rain_number_correction :: FT   # (nʳ_bounded - nʳ) / τ [1/kg/s]
     ice_number_correction :: FT    # (nⁱ_lambda_bounded - nⁱ_global_bounded) / τ [1/kg/s]
@@ -314,10 +314,10 @@ end
     # =========================================================================
     # Ice deposition/sublimation and wet-ice coating condensation/evaporation
     # =========================================================================
-    # Fortran gates both dry-ice deposition and wet-coating vapor exchange on
-    # qitot, which includes the liquid coating. In Julia that reservoir is
-    # qⁱ + qʷⁱ; gating on qⁱ alone incorrectly disables vapor exchange
-    # for nearly melted, liquid-coated particles.
+    # Both dry-ice deposition and wet-coating vapor exchange are gated on the total
+    # ice reservoir qⁱ + qʷⁱ, which includes the liquid coating. Gating on qⁱ alone
+    # would incorrectly disable vapor exchange for nearly melted, liquid-coated
+    # particles.
     has_total_ice = total_ice_mass(ℳ.qⁱ, qʷⁱ) >= p3.minimum_mass_mixing_ratio
     dep = ifelse(has_total_ice, vapor_rates.deposition, zero(FT))
 
@@ -401,10 +401,9 @@ end
     # =========================================================================
     agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ)
 
-    # Global ice number limiter — Fortran impose_max_Ni hard-clamps the prognostic
-    # nitot at multiple driver points (microphy_p3.f90:2812, 4390, 4937). Mirror that as
-    # a tendency by using the *raw* prognostic ℳ.nⁱ rather than the locally pre-capped
-    # `state.nⁱ`, which is already bounded and would make this limiter dead.
+    # Global ice number limiter, expressed as a tendency on the *raw* prognostic
+    # ℳ.nⁱ rather than on the locally pre-capped `state.nⁱ`, which is already
+    # bounded and would make this limiter dead.
     maximum_ice_number = parameters.maximum_ice_number_density
     ni_lim = clamp_positive(ℳ.nⁱ - maximum_ice_number / ρ) / parameters.sink_limiting_timescale
 
@@ -417,10 +416,9 @@ end
     rain_rim_n = rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ)
 
     # Rime density
-    # Fortran p3_main indexes the rime density formula with the locally diagnosed
-    # cloud DSD (mu_c, lamc from get_cloud_dsd2 — microphy_p3.f90:2801, 3380-3388),
-    # not prescribed cloud parameters. Pass μᶜˡ and λᶜˡ from `diagnose_cloud_dsd`
-    # through to match Fortran's Cober-List rime density when Nᶜˡ is prognostic.
+    # The rime density formula is indexed with the locally diagnosed cloud DSD, not
+    # with prescribed cloud parameters, so μᶜˡ and λᶜˡ from `diagnose_cloud_dsd` are
+    # passed through to the Cober-List rime density when Nᶜˡ is prognostic.
     # Use total ice mass for terminal velocity to match the table-axis convention.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, nⁱ, Fᶠ, ρᶠ, ρ;
@@ -480,9 +478,9 @@ end
     qⁱ_total = max(total_ice_mass(qⁱ, qʷⁱ), FT(parameters.floors.mass_scale))
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
-    # Fortran diam_ice is the volume-equivalent diameter diagnosed from the
-    # tabulated bulk mean density f1pr16 (Table 1), not a single-particle
-    # inversion of the piecewise mass law.
+    # The mean ice diameter is the volume-equivalent diameter diagnosed from the
+    # tabulated bulk mean density, not a single-particle inversion of the
+    # piecewise mass law.
     diagnostic_mean_mass = qⁱ_total / nⁱ_diagnostic
     D_mean = cbrt(6 * diagnostic_mean_mass / (FT(π) * ρ_mean))
 
@@ -544,14 +542,12 @@ end
     cloud_warm_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_warm_q)
     rain_warm_q_full = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T,
                                                   Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ)
-    # Number sink from above-freezing rain collection fires in both branches
-    # (Fortran nrcoll for liquid-fraction, nrcol for non-liquid-fraction).
+    # Number sink from above-freezing rain collection fires in both branches.
     rain_warm_n = rain_warm_collection_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T,
                                                     Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ)
     # Mass transfer of collected rain into qʷⁱ only happens in the liquid-fraction
-    # branch (Fortran qrcoll). The non-liquid path explicitly leaves rain mass alone
-    # — see microphy_p3.f90:3055-3066, "collection of rain above freezing does not
-    # impact total rain mass" — so zero out rain_warm_q in that case.
+    # branch. In the non-liquid path, collection of rain above freezing does not
+    # impact total rain mass, so zero out rain_warm_q in that case.
     rain_warm_q = ifelse(parameters.liquid_fraction_active, rain_warm_q_full, zero(FT))
 
     return P3Phase2Rates{FT}(
@@ -758,7 +754,7 @@ end
     rain_warm_q = phase2.rain_warm_collection
     rain_warm_n = phase2.rain_warm_collection_number
 
-    # These clips correspond to Fortran's pre-process whole-particle transfers:
+    # These clips are pre-process whole-particle transfers:
     # the original ice particle is gone before collection, vapor growth, or
     # aggregation is evaluated. Retain independent new-ice sources (nucleation and
     # freezing), but suppress every process that requires the clipped particle.
@@ -796,9 +792,9 @@ end
     dt_safety = parameters.sink_limiting_timescale
 
     # --- Vapor sinks ---
-    # Fortran applies the saturation-adjustment caps before the per-species
-    # conservation budgets (microphy_p3.f90:3990-4055, then 4061 onward), so
-    # cloud/rain/ice budgets below must see the final vapor-limited rates.
+    # The saturation-adjustment caps are applied before the per-species conservation
+    # budgets, so the cloud/rain/ice budgets below must see the final vapor-limited
+    # rates.
     qᵗ = q.vapor + q.liquid + q.ice
     vapor_rates = limit_vapor_rates(cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
                                     dep, coat_cond, coat_evap, nuc_q, nuc_n,
@@ -815,15 +811,15 @@ end
     nuc_n = vapor_rates.nuc_n
 
     # --- Cloud liquid sinks ---
-    # Match Fortran's per-species conservation budget (microphy_p3.f90:4060-4083),
-    # which splits signed `qccon` into non-negative `qccon` (source) and `qcevp`
-    # (sink) and includes `qcevp` in the cloud sink total. Track the negative
-    # part of `cond` as a sink magnitude here so it gets rescaled alongside the
-    # other cloud sinks when the budget would over-deplete `qᶜˡ`.
+    # The per-species conservation budget splits the signed condensation rate into a
+    # non-negative source and a non-negative evaporation sink, and counts the sink in
+    # the cloud sink total. Track the negative part of `cond` as a sink magnitude here
+    # so it gets rescaled alongside the other cloud sinks when the budget would
+    # over-deplete `qᶜˡ`.
     cloud_evap = clamp_positive(-cond)
     cloud_source_total = clamp_positive(cond) + ccn_act
     # Homogeneous freezing is applied after all ordinary process budgets below,
-    # matching its ordering in Fortran P3. Do not reserve liquid for it here:
+    # consistent with its place in the process ordering. Do not reserve liquid here:
     # ordinary cloud processes first act on the full cloud reservoir.
     cloud_available = max(0, qᶜˡ) + cloud_source_total * dt_safety
     cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
@@ -956,11 +952,11 @@ end
     qʳ_splintering_rate = min(qʳ_splintering_rate, clamp_positive(rain_rim))
     spl_q = qᶜˡ_splintering_rate + qʳ_splintering_rate
 
-    # Reconstruct the ordinary post-process ice reservoirs. Fortran applies a
-    # second Fˡ > 0.99 clip after these processes, so a particle that crosses
-    # the threshold during melting must transfer its residual mass and number as
-    # a whole. The dry-ice projection above guarantees these residuals are
-    # non-negative before the clip is diagnosed.
+    # Reconstruct the ordinary post-process ice reservoirs. A second Fˡ > 0.99 clip
+    # is applied after these processes, so a particle that crosses the threshold
+    # during melting must transfer its residual mass and number as a whole. The
+    # dry-ice projection above guarantees these residuals are non-negative before
+    # the clip is diagnosed.
     dry_ice_source_total = dep + cloud_rim + rain_rim + refrz +
                            nuc_q + cloud_frz_q + rain_frz_q
     dry_ice_sink_total = partial_melt + complete_melt
@@ -981,7 +977,7 @@ end
 
     # Rime companions are reconstructed with the same formulas used by the
     # prognostic tendencies, excluding homogeneous freezing, which occurs after
-    # this clip in the Fortran ordering.
+    # this clip in the process ordering.
     ordinary_complete_melting = max(0, complete_melt - clipping_dry_mass)
     ordinary_total_melting = partial_melt + ordinary_complete_melting
     sublimation = clamp_positive(-dep)
@@ -1055,20 +1051,18 @@ end
     post_process_clipping = ifelse(post_process_clipping_active, one(FT), zero(FT))
 
     # Reserve the immersion-frozen drops first: their number companion must retain
-    # the same species-budget ratio as rain_freezing_mass (Fortran qrheti/nrheti).
+    # the same species-budget ratio as rain_freezing_mass.
     # Project the remaining number-only sinks onto the population left afterward.
     cloud_warm_rain_number = ifelse(
         parameters.liquid_fraction_active, zero(FT), cloud_warm_q / parameters.shed_drop_mass)
 
     # Net the self-collection/breakup pair before it enters the number budget.
-    # Fortran carries one signed term, `nrslf = dum × base` with the
-    # Verlinde-Cotton modifier `dum ≤ 1` (`microphy_p3.f90:3872-3886`), applied as
-    # `nr += -nrslf·dt` (`:4329`) and deliberately left out of every limiter
-    # rescale list (`:4088-4098`). Breeze reports the two directions separately, so
-    # `base` and `(1 - dum)·base` arrive here as a sink/source pair that must be
-    # collapsed first: rescaling only the sink half by `f_rain_number` below would
-    # leave the breakup source at full strength against a limited sink, turning the
-    # net into spurious rain-number production once Dʳ exceeds the breakup
+    # Physically this is one signed rate: a base self-collection rate reduced by the
+    # Verlinde-Cotton breakup modifier. Breeze reports the two directions separately,
+    # so they arrive here as a sink/source pair that must be collapsed first:
+    # rescaling only the sink half by `f_rain_number` below would leave the breakup
+    # source at full strength against a limited sink, turning the net into spurious
+    # rain-number production once Dʳ exceeds the breakup
     # threshold. Netting here also keeps `f_rain_number` a positivity guarantee —
     # everything in `rain_number_source_total` stays unscaled, so the limited
     # sinks cannot outrun the number the budget promised them.
@@ -1091,13 +1085,12 @@ end
     rain_warm_n = rain_warm_n * f_rain_number
 
     # --- Homogeneous freezing of post-process liquid ---
-    # Fortran applies homogeneous freezing after the ordinary process updates and
-    # sedimentation (`microphy_p3.f90:4650-4757`). Sedimentation is advanced by the
-    # host model in Breeze, but within the local process operator we can preserve
-    # the essential ordering: first finalize every ordinary limiter above, then
-    # freeze the liquid that remains. Re-diagnosing the rate from the residual also
-    # captures liquid created by condensation, melting, or shedding during this
-    # interval.
+    # Homogeneous freezing acts after the ordinary process updates and after
+    # sedimentation. Sedimentation is advanced by the host model in Breeze, but
+    # within the local process operator the essential ordering is preserved: first
+    # finalize every ordinary limiter above, then freeze the liquid that remains.
+    # Re-diagnosing the rate from the residual also captures liquid created by
+    # condensation, melting, or shedding during this interval.
     cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
                        cloud_warm_q + wg_cloud + wg_shed + clamp_positive(-cond)
     cloud_remaining = max(0, max(0, qᶜˡ) +
@@ -1111,8 +1104,8 @@ end
 
     # Diagnose the post-process number reservoirs as well, so frozen liquid carries
     # the number left by collection, breakup, melting, and activation rather than the
-    # beginning-of-stage number. In the prescribed-Nᶜˡ path Fortran resets cloud
-    # number to its prescribed value immediately before homogeneous freezing.
+    # beginning-of-stage number. In the prescribed-Nᶜˡ path, cloud number is reset
+    # to its prescribed value immediately before homogeneous freezing.
     cloud_number_tendency = cloud_number_tendency_before_homogeneous_freezing(
         p3, ρ, qᶜˡ, Nᶜˡ, ccn_act, ccn_act_n, autoconv, accr, cloud_self,
         cloud_rim_n, cloud_frz_n, cloud_warm_n)
@@ -1147,10 +1140,10 @@ end
     ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
     nr_correction = (nʳ - ℳ.nʳ) / dt_safety
 
-    # Fortran's `microphy_p3.f90:5053-5063` recomputes ssat = qv - qvs(T)
-    # at the end of the substep. Breeze must diagnose that final T from the
-    # same conserved thermodynamic variable (`ρθ` or `ρe`) that the host model
-    # advances, not from a standalone cᵖᵈ latent-heating estimate.
+    # The supersaturation is re-diagnosed as sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T) at the end of the
+    # step. That final T must come from the same conserved thermodynamic variable
+    # (`ρθ` or `ρe`) that the host model advances, not from a standalone cᵖᵈ
+    # latent-heating estimate.
     vapor_to_liquid = cond + ccn_act + rain_cond + coat_cond - rain_evap - coat_evap
     vapor_to_ice = dep + nuc_q
     liquid_to_ice = cloud_rim + rain_rim + cloud_frz_q + rain_frz_q +

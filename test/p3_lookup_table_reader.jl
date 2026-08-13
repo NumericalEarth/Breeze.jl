@@ -17,7 +17,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
                               points=(2, 2, 2, 5, 2))
     wrapped = RimeDensityIndexedTable5D(table)
 
-    # Physical rime densities should map to Fortran indices
+    # Physical rime densities should map to table indices
     # rho=50 -> index 1, rho=250 -> index 2, rho=450 -> index 3,
     # rho=650 -> index 4, rho=900 -> index 5
     @test wrapped(0.5, 0.5, 0.5, 50.0, 10.0) ≈ 1.0
@@ -31,7 +31,7 @@ end
 
 const _lookup_table_dir = ensure_artifact_installed("P3_lookup_tables", joinpath(dirname(@__DIR__), "Artifacts.toml"))
 
-@testset "Read Fortran lookup tables (2momI)" begin
+@testset "Read P3 lookup tables (2momI)" begin
     p3 = read_lookup_tables(_lookup_table_dir; FT=Float64)
 
     tables = p3.ice.lookup_tables
@@ -58,7 +58,7 @@ const _lookup_table_dir = ensure_artifact_installed("P3_lookup_tables", joinpath
     @test p3.rain.evaporation isa TabulatedFunction
 end
 
-@testset "Rain tables are computed (not from Fortran)" begin
+@testset "Rain tables are computed, not read from file" begin
     p3 = read_lookup_tables(_lookup_table_dir)
 
     @test p3.rain.velocity_mass isa TabulatedFunction1D
@@ -68,14 +68,14 @@ end
     @test p3.rain.velocity_mass(log_lambda) > 0
 end
 
-@testset "PredictedParticlePropertiesMicrophysics constructor with Fortran tables" begin
+@testset "PredictedParticlePropertiesMicrophysics constructor with lookup tables" begin
     # Test constructor interface
     p3 = PredictedParticlePropertiesMicrophysics()
     @test p3 isa PredictedParticlePropertiesMicrophysics
     @test p3.ice.lookup_tables isa P3LookupTables
 end
 
-@testset "Process rates with Fortran-loaded tables" begin
+@testset "Process rates with table-loaded ice integrals" begin
     p3 = PredictedParticlePropertiesMicrophysics()
 
     FT = Float64

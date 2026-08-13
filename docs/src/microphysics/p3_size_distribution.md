@@ -95,8 +95,7 @@ f_ρ = \max\left(1,\ 1 + 0.00842(\bar{ρ}-400)\right),
 The first branch is the [Heymsfield (2003)](@cite Heymsfield2003) μ–λ fit
 ; the prefactor ``0.076 \cdot (0.01\, λ)^{0.8}``
 embeds the cm⁻¹↔m⁻¹ unit conversion of the original form.
-The second branch increases ``μ`` with particle size and riming in the
-Fortran lookup-table generator.
+The second branch increases ``μ`` with particle size and riming.
 
 When liquid fraction is active (``F^l > 0``), the bulk density used in
 ``D_{mvd}`` and ``f_ρ`` is blended with the liquid density:
@@ -113,9 +112,9 @@ rime-density axis, matching the runtime lookup's clamp of the canonical unrimed
 ``ρ^f = 0``.
 
 !!! note "Two-Moment Mode"
-    The piecewise closure above is the formula the Fortran table *generator*
-    evaluates. Breeze's model path does not evaluate it per grid point: ``μ`` is
-    read from Table 1's shape-parameter column (Fortran `mu_i_save`), which
+    The piecewise closure above is the formula the table *generator* evaluates.
+    Breeze's model path does not evaluate it per grid point: ``μ`` is
+    read from Table 1's shape-parameter column, which
     stores the generator's result, and is interpolated in the same
     ``(\log \bar{m}, F^f, F^l, ρ^f)`` space as every other Table 1 integral
     (`compute_ice_shape_parameter` in `process_rate_helpers.jl`).
@@ -177,7 +176,7 @@ the dry-only ice mass ``q^i`` for the four liquid-fraction melting integrals
 (see [Cholette et al. (2019)](@cite Cholette2019parameterization) for the
 rationale). Deposition / sublimation, collection, sedimentation, and
 reflectivity use the wet PSD. Breeze inherits that split through the tables:
-the melting rate reads the dry-PSD Fortran `f1pr24`–`f1pr27` columns, while
+the melting rate reads the dry-PSD `f1pr24`–`f1pr27` columns, while
 deposition / sublimation reads the wet-PSD `f1pr05` / `f1pr14` pair.
 
 The dry parameters follow from rescaling the wet ones so the mass moment
@@ -189,7 +188,7 @@ matches ``q_\text{dry} = q_\text{total}(1 - F^l)``:
 
 with ``β`` the effective mass–diameter exponent of the state. At ``F^l = 0`` the
 dry and wet distributions coincide. Breeze never evaluates this rescaling at
-runtime — it reads the dry-PSD columns straight out of the Fortran table.
+runtime — it reads the dry-PSD columns straight out of the table.
 
 ## Determining Distribution Parameters
 
@@ -265,8 +264,8 @@ the zeroth moment normalizes on number,
 N₀ = \frac{N λ^{μ+1}}{Γ(μ + 1)},
 ```
 
-which is what `psd_from_table` above evaluates. The Fortran table generator
-instead normalizes on mass (`create_p3_lookupTable_1.f90:1054`):
+which is what `psd_from_table` above evaluates. The table generator instead
+normalizes on mass:
 
 ```math
 N₀ = \frac{L}{\int_0^∞ m(D)\, D^μ e^{-λD}\, dD}

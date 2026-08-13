@@ -26,8 +26,8 @@ Small ice particles are assumed spherical with bulk ice density
 m(D) = \frac{π}{6} ρ^i D³
 ```
 
-where ``ρ^i = 900`` kg/m³ is the bulk ice density, matching the Fortran P3
-runtime convention. The pure-ice density (`pure_ice_density`, 917 kg/m³ by
+where ``ρ^i = 900`` kg/m³ is the bulk ice density used throughout the scheme.
+The pure-ice density (`pure_ice_density`, 917 kg/m³ by
 default) is reserved for the radar reflectivity diagnostic and the melt
 densification of rime.
 
@@ -144,8 +144,8 @@ with the exponent ``\mathbb{C}^A_2 = 1.88`` and the coefficient
 [Mitchell1996powerlaws](@citet) for aggregates of side planes, bullets,
 and columns and assemblages of planar polycrystals, as adopted by
 [Morrison2015parameterization](@citet). Mitchell (1996) quotes the coefficient in
-cgs as ``0.2285`` cm``^{0.12}``; the Fortran reference and Breeze both convert in
-place by multiplying with ``100^{\mathbb{C}^A_2-2}``.
+cgs as ``0.2285`` cm``^{0.12}``; Breeze converts in place by multiplying with
+``100^{\mathbb{C}^A_2-2}``.
 
 **Graupel**:
 
@@ -236,8 +236,8 @@ coordinate on the way in (see [Size Distribution](@ref p3_size_distribution)).
 The rime density affects the graupel density ``ρ^{gr}`` and thus the regime thresholds.
 As particles rime more heavily, they become denser and more spherical.
 
-!!! note "Official P3 implementation details"
-    The Fortran scheme clamps ``R_\text{imp}`` to [1, 12] before applying the Cober–List fit;
+!!! note "Rime-impact clamping and table discretization"
+    ``R_\text{imp}`` is clamped to [1, 12] before the Cober–List fit is applied;
     the linear branch for ``R_\text{imp} > 8`` is extended to ``R_\text{imp} = 12`` so that
     ``ρ^f = 900`` kg/m³. The lookup tables discretize ``ρ^f`` on an uneven grid
     (50, 250, 450, 650, 900 kg/m³) and interpolate between bins; `rime_density_index`

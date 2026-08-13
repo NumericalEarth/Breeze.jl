@@ -33,7 +33,7 @@ $(TYPEDSIGNATURES)
 
 Compute CCN activation rate for the 1-moment (prescribed Nᶜˡ) case.
 
-Following Fortran P3 v5.5.0 (lines 3953-3963): when the air is supersaturated
+When the air is supersaturated
 and the cloud mass is below the minimum threshold for the prescribed droplet
 concentration, a seed mass is created. The target cloud mass is
 ``N^{cl} / ρ × m_{\\text{drop}}`` where ``m_{\\text{drop}} = (4π/3) ρ_w r^3``
@@ -44,7 +44,7 @@ The supersaturation limit divides by the same liquid psychrometric factor
 `qcon_cap` and that the Grabowski-Morrison alignment uses in
 `predicted_supersaturation_adjustment`. Sizing the rate with the moist mixture
 heat capacity and then capping it with the dry-air one would mix two conventions inside
-one cell's vapor budget; Fortran's `ab` is the dry-air form, applied once.
+one cell's vapor budget, so the dry-air form is used throughout.
 
 # Returns
 - Rate of vapor → cloud liquid conversion from CCN activation [kg/kg/s]
@@ -53,25 +53,25 @@ one cell's vapor budget; Fortran's `ab` is the dry-air form, applied once.
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
 
-    # Mass of a newly formed cloud droplet (Fortran cons7)
-    cons7 = activated_droplet_mass(parameters, FT)
+    # Mass of a newly formed cloud droplet
+    droplet_mass = activated_droplet_mass(parameters, FT)
 
     # Target cloud mass for prescribed droplet concentration
-    qᶜˡ_target = Nᶜˡ / ρ * cons7
+    qᶜˡ_target = Nᶜˡ / ρ * droplet_mass
 
     # Deficit: how much mass is needed to reach the minimum
     deficit = clamp_positive(qᶜˡ_target - clamp_positive(qᶜˡ))
 
-    # Psychrometric correction (liquid saturation, Fortran `ab`)
+    # Psychrometric correction (liquid saturation)
     ℒˡ = vaporization_latent_heat(constants, T)
     Rᵛ = FT(vapor_gas_constant(constants))
     ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
 
-    # Limit by available supersaturation (Fortran: min(tmp1, (Qv_cld-dumqvs)/ab))
+    # Limit by the available supersaturation
     max_from_ss = clamp_positive((qᵛ - qᵛ⁺ˡ) / ξˡ)
     rate = min(deficit, max_from_ss) / parameters.sink_limiting_timescale
 
-    # Only activate when supersaturated (Fortran threshold: sup_cld > 1e-6)
+    # Only activate when supersaturated
     floors = parameters.floors
     S = (qᵛ - qᵛ⁺ˡ) / max(qᵛ⁺ˡ, floors.saturation_mass_fraction)
     is_supersaturated = S > parameters.activation_supersaturation_threshold
@@ -87,8 +87,8 @@ Returns `(; mass, number)` named tuple.
 @inline function compute_ccn_activation(::Nothing, p3, qᶜˡ, nᶜˡ, nᵃ,
                                         qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜˡ, constants)
     FT = typeof(qᶜˡ)
-    # Prescribed-Nᶜˡ path (Fortran `log_predictNc = .false.`, `nc = nccnst_2`):
-    # the activation target is the scheme parameter, not the DSD-diagnosed `Nᶜˡ`.
+    # Prescribed-Nᶜˡ path: the activation target is the scheme parameter, not the
+    # DSD-diagnosed `Nᶜˡ`.
     # When `qᶜˡ` is below the mass threshold, `diagnose_cloud_dsd` clamps the
     # returned `Nᶜˡ` toward zero — using that value would collapse `qᶜˡ_target`
     # and block any seed mass from forming in a warm-bubble parcel.

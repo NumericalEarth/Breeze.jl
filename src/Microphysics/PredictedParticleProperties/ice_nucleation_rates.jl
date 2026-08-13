@@ -9,15 +9,16 @@ Compute ice nucleation rate from deposition/condensation freezing.
 
 New ice crystals nucleate when temperature is below a threshold and the air
 is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
-Fortran P3 gates this process on cloud-side ice supersaturation, `supi_cld`.
-Breeze currently runs the P3 LES path with `SCF = 1`, so the local vapor input
-is the cloud-side value. If a subgrid cloud-fraction path is added, pass the
-cloud-side vapor state here rather than a grid-mean vapor state.
+The process is gated on cloud-side ice supersaturation. Breeze carries no subgrid
+cloud fraction, which is the `SCF = 1` limit: the grid cell is treated as uniformly
+cloudy, so the vapor passed in is both the grid-mean and the cloud-side value. If a
+subgrid cloud-fraction path is added, pass the cloud-side vapor state here rather
+than a grid-mean vapor state.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `T`: Temperature [K]
-- `qᵛ`: Cloud-side/local vapor mass fraction [kg/kg]
+- `qᵛ`: Cloud-side vapor mass fraction [kg/kg] (grid-mean when `SCF = 1`)
 - `qᵛ⁺ⁱ`: Saturation vapor mass fraction over ice [kg/kg]
 - `nⁱ`: Current ice number concentration [1/kg]
 - `ρ`: Air density [kg/m³]
@@ -40,12 +41,12 @@ cloud-side vapor state here rather than a grid-mean vapor state.
     temperature_coefficient = parameters.ice_nucleation_temperature_coefficient
     floors = parameters.floors
 
-    # Ice supersaturation. Fortran uses cloud-side `supi_cld`; with the current
-    # LES-only `SCF = 1` formulation, `qᵛ` is that local/cloud-side value.
+    # Ice supersaturation, evaluated cloud-side; in the `SCF = 1` limit `qᵛ` is
+    # both the grid-mean and the cloud-side value.
     Sⁱ = (qᵛ - qᵛ⁺ⁱ) / max(qᵛ⁺ⁱ, floors.saturation_mass_fraction)
 
     # Conditions for nucleation
-    # m6: Fortran uses .ge. for supersaturation threshold
+    # m6: the supersaturation threshold is inclusive
     nucleation_active = (T < nucleation_temperature_threshold) &
                         (Sⁱ >= supersaturation_threshold)
 
@@ -64,7 +65,7 @@ cloud-side vapor state here rather than a grid-mean vapor state.
     # Mass nucleation rate
     nucleated_mass_rate = nucleated_number_rate * nucleated_ice_mass
 
-    # m13: Use one threshold on the number rate for both moments.
+    # Use one threshold on the number rate for both moments.
     active = nucleation_active & (nucleated_number_rate >= floors.rate_scale)
     nucleated_number_rate = ifelse(active, nucleated_number_rate, zero(FT))
     nucleated_mass_rate = ifelse(active, nucleated_mass_rate, zero(FT))
@@ -84,7 +85,7 @@ end
                temperature_exponent_coefficient * supercooling
     # Apply only a common numerical overflow guard. The species-level budget
     # later scales both raw moments together; capping here at 1/τ would prevent
-    # newly condensed liquid from participating in Fortran's combined budget.
+    # newly condensed liquid from participating in the combined budget.
     maximum_rate = sqrt(floatmax(FT)) / max(maximum_multiplier, one(FT))
     return exp(min(log_rate, log(maximum_rate)))
 end
@@ -94,7 +95,7 @@ $(TYPEDSIGNATURES)
 
 Compute immersion freezing rate of cloud droplets using the
 [Barklie and Gokhale (1959)](@cite BarklieGokhale1959) stochastic volume-dependent
-freezing parameterization, following Fortran P3 v5.5.0.
+freezing parameterization.
 
 The probability per droplet per second of freezing is ``J₀ V_{\\text{drop}} \\exp(a ΔT)``,
 where ``J₀ ≈ 2`` m⁻³s⁻¹ is the nucleation rate coefficient (``a = 0.65``) and
@@ -148,12 +149,11 @@ negligible for small droplets.
     droplet_mass = qᶜˡ_eff / nᶜˡ  # [kg]
     droplet_volume = droplet_mass / ρᴸ   # [m³]
 
-    # Fortran's per-drop freezing coefficient (NO psd_correction) is a
-    # linear per-second rate. The log form avoids overflow at very low
-    # temperatures. Any numerical cap is applied equally before the two moment
-    # products so their ratio is unchanged.
-    # The PSD correction applies only to the mass (6th moment) rate,
-    # not the number (3rd moment) rate, matching Fortran P3 v5.5.0.
+    # The per-drop freezing coefficient (NO psd_correction) is a linear per-second
+    # rate. The log form avoids overflow at very low temperatures. Any numerical cap
+    # is applied equally before the two moment products so their ratio is unchanged.
+    # The PSD correction applies only to the mass (6th moment) rate, not to the
+    # number (3rd moment) rate.
     maximum_multiplier = max(qᶜˡ_eff * psd_correction, nᶜˡ)
     freezing_rate = immersion_freezing_rate_coefficient(
         nucleation_rate_coefficient, droplet_volume, temperature_exponent_coefficient,
@@ -178,11 +178,10 @@ Compute immersion freezing rate of rain drops.
 
 Rain drops freeze when temperature is below a threshold. Uses
 [Barklie and Gokhale (1959)](@cite BarklieGokhale1959) stochastic freezing
-parameterization, following Fortran P3 v5.5.0.
+parameterization.
 
 The PSD correction ``C(\\mu_r) = \\Gamma(\\mu_r+7)\\Gamma(\\mu_r+1)/\\Gamma(\\mu_r+4)^2``
-is computed from the actual rain shape parameter ``\\mu_r`` (Fortran P3 v5.5.0
-uses ``\\mu_r(i,k)`` in `gamma(7.+mu_r)` and `gamma(mu_r+4.)` terms).
+is computed from the actual rain shape parameter ``\\mu_r``, not from a fixed value.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -206,8 +205,7 @@ uses ``\\mu_r(i,k)`` in `gamma(7.+mu_r)` and `gamma(mu_r+4.)` terms).
     nucleation_rate_coefficient = parameters.immersion_freezing_nucleation_coefficient
     floors = parameters.floors
 
-    # Compute PSD correction from actual rain shape parameter (Fortran P3 v5.5.0:
-    # uses diagnosed mu_r(i,k) via gamma(7.+mu_r) and gamma(mu_r+4.) terms).
+    # Compute the PSD correction from the diagnosed rain shape parameter.
     psd_correction = psd_correction_spherical_volume(μʳ)
 
     qʳ_eff = clamp_positive(qʳ)
@@ -224,12 +222,11 @@ uses ``\\mu_r(i,k)`` in `gamma(7.+mu_r)` and `gamma(mu_r+4.)` terms).
     droplet_mass = qʳ_eff / safe_rain_number  # [kg]
     droplet_volume = droplet_mass / ρᴸ       # [m³]
 
-    # Fortran's per-drop freezing coefficient (NO psd_correction) is a
-    # linear per-second rate. The log form avoids overflow at very low
-    # temperatures. Any numerical cap is applied equally before the two moment
-    # products so their ratio is unchanged.
-    # The PSD correction applies only to the mass (6th moment) rate,
-    # not the number (3rd moment) rate, matching Fortran P3 v5.5.0.
+    # The per-drop freezing coefficient (NO psd_correction) is a linear per-second
+    # rate. The log form avoids overflow at very low temperatures. Any numerical cap
+    # is applied equally before the two moment products so their ratio is unchanged.
+    # The PSD correction applies only to the mass (6th moment) rate, not to the
+    # number (3rd moment) rate.
     maximum_multiplier = max(qʳ_eff * psd_correction, nʳ_eff)
     freezing_rate = immersion_freezing_rate_coefficient(
         nucleation_rate_coefficient, droplet_volume, temperature_exponent_coefficient,
@@ -257,11 +254,11 @@ Compute homogeneous freezing rate of cloud droplets.
 
 Below −40°C (233.15 K) all supercooled cloud liquid freezes instantaneously.
 The frozen mass deposits as dense rime at ``ρ_{\\text{rim}} = 900`` kg/m³
-(solid ice sphere), following the Fortran P3 v5.5.0 treatment of
+(solid ice sphere), following
 [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization).
 
 All cloud droplets are transferred to ice; the number rate is
-``N_{\\text{hom}} = N^{cl} / (ρ τ_{\\text{hom}})``, matching the Fortran reference.
+``N_{\\text{hom}} = N^{cl} / (ρ τ_{\\text{hom}})``.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -309,8 +306,8 @@ round.((Q, N), sigdigits=4)
     # Number rate: Nᶜˡ is [1/m³] → divide by ρ for [1/kg]
     frozen_number_rate = Nᶜˡ / ρ / freezing_timescale
 
-    # Fortran has no mass-number consistency cap — it transfers all nc to ice
-    # instantaneously below the homogeneous freezing threshold.
+    # No mass-number consistency cap: the whole cloud population is transferred to
+    # ice below the homogeneous freezing threshold.
     frozen_mass_rate = ifelse(freezing_active, frozen_mass_rate, zero(FT))
     frozen_number_rate = ifelse(freezing_active, frozen_number_rate, zero(FT))
 
@@ -324,7 +321,7 @@ Compute homogeneous freezing rate of rain drops.
 
 Below −40°C (233.15 K) all supercooled rain freezes instantaneously.
 The frozen mass deposits as dense rime at ``ρ_{\\text{rim}} = 900`` kg/m³,
-following the Fortran P3 v5.5.0 treatment of
+following
 [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization).
 
 # Arguments
@@ -413,16 +410,16 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
     maximum_temperature = parameters.maximum_splintering_temperature
     T_peak = parameters.splintering_temperature_peak
     c_splinter = parameters.splintering_rate
-    # Use Hallett-Mossop splinter crystal mass (Fortran Dinit_HM = 10 μm),
-    # NOT the nucleated ice mass mi0 (D = 2 μm). Splinters are 125× heavier.
+    # Use the Hallett-Mossop splinter crystal mass (D = 10 μm), NOT the nucleated
+    # ice mass (D = 2 μm). Splinters are 125× heavier.
     mᵢ₀ = parameters.splintering_crystal_mass
 
     warm_branch = clamp((T - minimum_temperature) / (T_peak - minimum_temperature), zero(FT), one(FT))
     cold_branch = clamp((maximum_temperature - T) / (maximum_temperature - T_peak), zero(FT), one(FT))
     efficiency = ifelse(T <= T_peak, warm_branch, cold_branch)
 
-    # Fortran P3 v5.5.0: cloud riming splintering only for nCat == 1.
-    # For nCat > 1, splintering_cloud_riming_scale = 0 disables it.
+    # Cloud-riming splintering applies only with a single ice category; with more
+    # than one, splintering_cloud_riming_scale = 0 disables it.
     cloud_riming_eff = clamp_positive(cloud_riming) * FT(parameters.splintering_cloud_riming_scale)
     rain_riming_eff = clamp_positive(rain_riming)
     has_rime = qᶠ >= p3.minimum_mass_mixing_ratio

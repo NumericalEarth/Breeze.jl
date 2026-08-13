@@ -3,8 +3,7 @@
 #####
 ##### T,P-dependent thermal conductivity Kᵃ, vapor diffusivity Dᵛ, and
 ##### kinematic viscosity ν. Writing the dynamic viscosity as η (μ is the PSD
-##### shape parameter everywhere else in this module), the Fortran P3 v5.5.0
-##### fits are
+##### shape parameter everywhere else in this module), the fits are
 #####   Dᵛ = 8.794e-5 * T^1.81 / P        [m²/s]
 #####   η  = 1.496e-6 * T^1.5 / (T + 120) [Pa s]   (Sutherland's law)
 #####   Kᵃ = 1414 * η                     [W/m/K]
@@ -13,8 +12,8 @@
 
 export air_transport_properties
 
-# Coefficients of the Fortran P3 v5.5.0 transport fits, named so that the
-# provenance of each number is visible where it is used.
+# Coefficients of the transport fits, named so that the provenance of each number
+# is visible where it is used.
 const VAPOR_DIFFUSIVITY_COEFFICIENT = 8.794e-5           # [m² s⁻¹ Pa K^-1.81]
 const VAPOR_DIFFUSIVITY_TEMPERATURE_EXPONENT = 1.81      # [-]
 const SUTHERLAND_COEFFICIENT = 1.496e-6                  # [Pa s K^-1/2]
@@ -25,8 +24,8 @@ const MINIMUM_TRANSPORT_TEMPERATURE = 1                  # [K], keeps the power 
 """
 $(TYPEDSIGNATURES)
 
-Compute T,P-dependent air transport properties following [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021)
-and the Fortran P3 v5.5.0 reference implementation.
+Compute T,P-dependent air transport properties following
+[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021).
 
 Returns a named tuple `(; Dᵛ, Kᵃ, ν)`:
 - `Dᵛ`: vapor diffusivity [m²/s], from `8.794e-5 × T^1.81 / P`

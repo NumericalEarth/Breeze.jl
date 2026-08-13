@@ -14,7 +14,7 @@ The melting rate is determined by the heat flux to the particle:
 \\frac{dm}{dt} = -\\frac{2π \\, \\text{capm}}{ℒᶠᵘˢ} × [Kᵃ(T-T_0) + ρ ℒˡ Dᵛ(q^v - q^{v+}_0)] × f^{ve}
 ```
 
-where capm = cap × D is the P3 Fortran capacitance convention (2× physical C).
+where capm = cap × D is the P3 capacitance convention (2× physical C).
 
 where:
 - C is the capacitance
@@ -82,23 +82,23 @@ where:
     qⁱ_total = max(qⁱ_eff + clamp_positive(qʷⁱ), FT(parameters.floors.mass_scale))
     Fl = clamp_positive(qʷⁱ) / qⁱ_total
 
-    # Table lookup uses total mass per particle (Fortran qitot/nitot),
-    # not dry-only mass, because tables are indexed by total mass.
+    # Table lookup uses the total mass per particle, not the dry-only mass,
+    # because the tables are indexed by total mass.
     # With no particles the rate below is nⁱ_eff * dm/dt = 0 regardless, so the
     # fallback mean mass only has to sit inside the table's mass axis.
     m_mean = safe_divide(qⁱ_total, nⁱ_eff, FT(parameters.floors.mean_particle_mass_fallback))
     ρ_correction = ice_air_density_correction(p3.ice.fall_speed.reference_air_density, ρ)
 
-    # Use dry-ice PSD ventilation tables (small + large, Fortran f1pr24-f1pr27)
-    # for melting. The total Ventilation/VentilationEnhanced tables use wet-ice PSD
-    # and are not appropriate for melting (they are not flagged as melting integrals
-    # during table generation, so they don't use the dry-ice PSD from the M5 fix).
+    # Use the dry-ice PSD ventilation tables (small + large) for melting. The total
+    # Ventilation/VentilationEnhanced tables use the wet-ice PSD and are not
+    # appropriate for melting (they are not flagged as melting integrals during
+    # table generation, so they don't use the dry-ice PSD from the M5 fix).
     # All 4 tables share Table-1 axes so the interpolation indices are computed once.
     dep = p3.ice.deposition
     # m_mean = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
     # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
-    # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg), matching
-    # Fortran's clamp of the lookup index to 1 (find_lookupTable_indices_1a).
+    # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg) rather
+    # than extrapolating below it.
     log_m = log10(max(m_mean, FT(parameters.floors.mass_scale)))
     sc_corr = ventilation_sc_correction(ν, Dᵛ, ρ_correction)
     prep = prepare_5d(dep.small_ice_ventilation_constant, log_m, Fᶠ, Fl, ρᶠ, μⁱ)
@@ -121,7 +121,7 @@ where:
 
     # Melting rate per particle (negative dm/dt → positive melt rate)
     # Uses 2π (not 4π) because ventilation integral stores capm = cap × D
-    # (P3 Fortran convention), which is 2× the physical capacitance.
+    # (the P3 convention), which is 2× the physical capacitance.
     dm_dt_melt = 2 * FT(π) * C_fv * Q_total / ℒᶠᵘˢ
 
     # Clamp to positive (only melting, not refreezing here)
@@ -146,7 +146,7 @@ $(TYPEDSIGNATURES)
 Compute partitioned ice melting rates using PSD-resolved partitioning (H9).
 
 Above freezing, ice particles melt. The meltwater is partitioned using
-tabulated small/large ice ventilation integrals (Fortran f1pr24-f1pr27):
+tabulated small/large ice ventilation integrals:
 - **Complete melting** (small particles, D ≤ D_crit): Meltwater sheds to rain
 - **Partial melting** (large particles, D > D_crit): Meltwater stays as liquid coating (qʷⁱ)
 
@@ -176,7 +176,7 @@ Requires tabulated small/large ice ventilation integrals.
     parameters = p3.process_rates
 
     # Total melting rate, plus the small/large ventilation split it already had to
-    # look up (Fortran f1pr24-f1pr27). Passing qʷⁱ gives the Fl-blended ventilation.
+    # look up. Passing qʷⁱ gives the Fˡ-blended ventilation.
     total_melt, small, large =
         ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
                                          constants, transport, μⁱ)
@@ -192,7 +192,6 @@ end
 # Fraction of melting that goes to rain (small particles, D ≤ D_crit), from the
 # PSD-integrated small/large ice ventilation integrals computed by
 # `ice_melting_rate_and_ventilation`.
-# Fortran: qrmlt uses f1pr24/f1pr25, qiliqcol uses f1pr26/f1pr27.
 @inline function psd_melting_rain_fraction(small, large)
     FT = typeof(small)
     total = small + large
