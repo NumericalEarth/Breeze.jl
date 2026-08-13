@@ -194,14 +194,8 @@ makedocs(
             "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
             "Mixed-phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
             "Predicted Particle Properties (P3)" => Any[
-                "Overview" => "microphysics/p3_overview.md",
-                "Notation" => "microphysics/p3_notation.md",
-                "Particle properties" => "microphysics/p3_particle_properties.md",
-                "Size distribution" => "microphysics/p3_size_distribution.md",
-                "Integral properties" => "microphysics/p3_integral_properties.md",
-                "Processes" => "microphysics/p3_processes.md",
-                "Prognostics" => "microphysics/p3_prognostics.md",
-                "Examples" => "microphysics/p3_examples.md",
+                "Theory" => "microphysics/p3_theory.md",
+                "Usage" => "microphysics/p3_usage.md",
             ],
         ],
         "Developers" => Any[

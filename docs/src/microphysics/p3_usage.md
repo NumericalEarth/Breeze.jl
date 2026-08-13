@@ -1,4 +1,30 @@
-# [P3 Examples and Visualization](@id p3_examples)
+# [Predicted Particle Properties (P3): Usage](@id p3_usage)
+
+This page shows how to construct and use Breeze's P3 microphysics scheme, and
+works through visual examples of the particle properties and size
+distributions it tabulates. For the underlying physics, see
+[Predicted Particle Properties (P3): Theory](@ref p3_theory).
+
+## Quick Start
+
+```@example p3_usage
+using Breeze
+
+# Create a P3 scheme with default parameters
+microphysics = PredictedParticlePropertiesMicrophysics()
+```
+
+```@example p3_usage
+# Access ice properties
+microphysics.ice
+```
+
+```@example p3_usage
+# Get prognostic field names
+prognostic_field_names(microphysics)
+```
+
+## [P3 Examples and Visualization](@id p3_examples)
 
 This section provides worked examples demonstrating P3 microphysics concepts
 through visualization and analysis.
@@ -14,7 +40,7 @@ The examples illustrate key concepts from the P3 papers:
 - Size distribution from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) and [Heymsfield (2003)](@cite Heymsfield2003)
 - μ-λ relationship from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 27
 
-## Ice Particle Property Explorer
+### Ice Particle Property Explorer
 
 Let's explore how ice particle properties vary with mean mass and riming state.
 
@@ -42,7 +68,7 @@ Fˡ = 0.0
 nothing # hide
 ```
 
-### Mean Diameter versus Mean Mass
+#### Mean Diameter versus Mean Mass
 
 ```@example p3_examples
 fig = Figure(size=(700, 500))
@@ -70,7 +96,7 @@ a rimed distribution has the *smaller* mean dimension. The effect grows with
 size, where the mass-diameter relation moves from the aggregate power law into
 the graupel regime.
 
-### Bulk Density and the Riming Regimes
+#### Bulk Density and the Riming Regimes
 
 ```@example p3_examples
 fig = Figure(size=(700, 400))
@@ -96,9 +122,9 @@ Small particles are solid ice spheres at ``ρ_i``. As the mean mass grows the
 distribution moves into the aggregate regime and the bulk density falls; riming
 fills the gaps, pushing the density back toward the graupel value.
 
-## Size Distribution Visualization
+### Size Distribution Visualization
 
-### Effect of Mass Content
+#### Effect of Mass Content
 
 The table supplies the gamma-PSD slope ``λ`` and shape ``μ`` directly. The
 intercept follows from the number concentration,
@@ -150,7 +176,7 @@ fig
 
 Higher mass content (at fixed number) shifts the distribution toward larger particles.
 
-### Shape Parameter Effect
+#### Shape Parameter Effect
 
 ```@example p3_examples
 fig = Figure(size=(700, 500))
@@ -175,7 +201,7 @@ fig
 
 Higher ``μ`` produces a narrower distribution with a more pronounced mode.
 
-## Slope Parameter versus Mean Mass
+### Slope Parameter versus Mean Mass
 
 ```@example p3_examples
 fig = Figure(size=(700, 500))
@@ -199,7 +225,7 @@ At the same mean mass, rimed particles carry a larger ``λ`` (smaller
 characteristic size), because their higher mass-per-particle is reached with
 smaller particles.
 
-## Summary Visualization
+### Summary Visualization
 
 ```@example p3_examples
 fig = Figure(size=(900, 600))

@@ -14,7 +14,7 @@ notation in those can be introduced without colliding with what is already there
 A parameterization dense enough to exhaust the alphabet on its own does not belong
 in it: its notation is scoped to its own pages instead, where reusing a letter
 reserved here is a local decision rather than a conflict. The
-[P3 notation](@ref p3_notation) page does that for the Predicted Particle Properties
+[P3 notation](@ref p3_notation) section does that for the Predicted Particle Properties
 scheme.
 
 A few notes about the following table:

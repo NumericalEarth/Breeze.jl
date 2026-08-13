@@ -295,14 +295,11 @@ function actual_final_liquid_ssat_after_p3_step(formulation, rates, qᵛ₀, q�
 end
 
 function documented_predict_supersaturation_disabled_semantics()
-    overview = read(joinpath(@__DIR__, "..", "docs", "src", "microphysics", "p3_overview.md"), String)
-    prognostics = read(joinpath(@__DIR__, "..", "docs", "src", "microphysics", "p3_prognostics.md"), String)
+    theory = read(joinpath(@__DIR__, "..", "docs", "src", "microphysics", "p3_theory.md"), String)
     forbidden = "When `false`, the field is recomputed diagnostically"
     required = "When `false`, the field is not allocated"
-    return !occursin(forbidden, overview) &&
-           !occursin(forbidden, prognostics) &&
-           occursin(required, overview) &&
-           occursin(required, prognostics)
+    return !occursin(forbidden, theory) &&
+           count(required, theory) >= 2
 end
 
 @testset "P3 Processes" begin
