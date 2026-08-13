@@ -27,8 +27,10 @@ using Breeze.AtmosphereModels:
     total_density
 
 using Oceananigans
+using Oceananigans.BoundaryConditions: getbc
 using Oceananigans.Fields: ZeroField
 using Oceananigans.Operators: ℑzᵃᵃᶠ
+using Adapt: adapt
 using GPUArraysCore: @allowscalar
 using Test
 
@@ -949,5 +951,53 @@ end
 
         # `base_pressure` itself is unaffected.
         @test surface_pressure_value(ReferenceState(grid, constants; base_pressure=101325)) ≈ 101325
+    end
+
+    #####
+    ##### The bottom boundary value follows the surface field
+    #####
+    #
+    # The reference states must stay immutable — the dynamics that owns them is passed straight into
+    # GPU kernels, so it has to be `isbits` after `Adapt`. The mechanism that buys that is aliasing:
+    # the bottom `ValueBoundaryCondition` of the reference `pressure`/`density` is built once from
+    # the surface field itself, so a reset writes new values *into* the field and the boundary
+    # condition follows with nothing rebuilt. Nothing tested that contract directly, and it is the
+    # load-bearing assumption of the whole design.
+
+    @testset "Reference bottom boundary values alias the surface fields [$FT]" begin
+        raised = RectilinearGrid(default_arch; size=(2, 2, 4),
+                                 x=(0, 100), y=(0, 100), z=(FT(2000), FT(4000)))
+        ref = ReferenceState(raised, constants; base_pressure=FT(101325))
+
+        p_condition = ref.pressure.boundary_conditions.bottom.condition
+        ρ_condition = ref.density.boundary_conditions.bottom.condition
+
+        # The condition *is* the field, not a copy or a view of its data. Oceananigans indexes a
+        # `ZReducedField` condition as `condition[i, j, 1]`, so no wrapper is needed.
+        @test p_condition === ref.surface_pressure
+        @test ρ_condition === ref.surface_density
+
+        # It is also usable as a boundary condition in its own right, which is what makes passing
+        # the field through — rather than a `view` of its interior — correct.
+        @test @allowscalar(getbc(p_condition, 2, 2, raised)) ≈ surface_pressure_value(ref)
+
+        # Rewriting the surface field in place moves the boundary value with it, and the halo the
+        # reference profile fills from it, without rebuilding the reference state.
+        p_before = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, raised, ref.pressure)
+        @test p_before ≈ surface_pressure_value(ref) rtol=1e-6
+
+        compute_hydrostatic_reference!(ref, constants)
+        p_after = @allowscalar ℑzᵃᵃᶠ(1, 1, 1, raised, ref.pressure)
+        @test @allowscalar(getbc(p_condition, 1, 1, raised)) ≈ surface_pressure_value(ref)
+        @test p_after ≈ surface_pressure_value(ref) rtol=1e-6
+
+        # The reset really did move the anchor — otherwise the check above would be vacuous.
+        @test !(p_after ≈ p_before)
+
+        # And the reference itself is still an immutable struct, which is the reason the aliasing
+        # exists at all: a mutable scalar field would be simpler but would not survive `Adapt` into
+        # the kernels the owning dynamics is passed to.
+        @test !ismutabletype(typeof(ref))
+        @test adapt(nothing, ref) isa Breeze.Thermodynamics.ReferenceState
     end
 end

@@ -1,7 +1,7 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
-using Oceananigans.Fields: AbstractField, CenterField, ZeroField, interior
+using Oceananigans.Fields: AbstractField, CenterField, ZeroField
 using Oceananigans.Grids: znode, Face
 using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶠ
@@ -231,8 +231,8 @@ surface_state_field(grid, value) = set_surface_state!(Field{Center, Center, Noth
 $(TYPEDSIGNATURES)
 
 Write `value` into a surface field and fill its halos. The halo fill is the load-bearing half: the
-field's data is aliased into a `ValueBoundaryCondition` by [`surface_boundary_value`](@ref) and read
-by the column kernels, so a write that skipped it would leave both stale.
+field is aliased into a `ValueBoundaryCondition` by [`surface_boundary_value`](@ref) and read by the
+column kernels, so a write that skipped it would leave both stale.
 """
 function set_surface_state!(field, value)
     set!(field, value)
@@ -243,17 +243,18 @@ end
 """
 $(TYPEDSIGNATURES)
 
-A surface quantity in the form Oceananigans' array-valued boundary conditions expect: a genuinely
-two-dimensional, 1-based ``(Nx, Ny)`` array, which is how `getbc` indexes an array condition
-(`condition[i, j]`) and how `Adapt` carries one to the GPU. A `Field{Center, Center, Nothing}` is
-*not* that — its data is three-dimensional with a singleton third dimension — so the field is
-viewed rather than passed directly.
+A surface quantity in the form Oceananigans' boundary conditions expect. A
+`Field{Center, Center, Nothing}` already *is* that form: Oceananigans defines
+`getbc(::ZReducedField, i, j, grid, args...) = condition[i, j, 1]` and an `Adapt` rule that
+preserves the location of a reduced field, so one can be used as a boundary value directly. The
+field is therefore passed through rather than wrapped.
 
-The view aliases the field's memory, which is the point: writing new surface values into the field
-updates every boundary condition built from it, with no need to rebuild the field or the reference
-state that owns it.
+Passing the field itself, rather than a `view` of its interior, is what makes the aliasing hold: a
+`ValueBoundaryCondition` built from it reads whatever the field currently contains, so a reference
+reset that writes new surface values in place updates every boundary condition built from it, with
+nothing rebuilt.
 """
-surface_boundary_value(field::AbstractField) = view(interior(field), :, :, 1)
+surface_boundary_value(field::AbstractField) = field
 surface_boundary_value(value::Number) = value
 
 """
