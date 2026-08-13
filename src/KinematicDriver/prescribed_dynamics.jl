@@ -248,6 +248,16 @@ function materialize_pressure(pressure, surface_pressure, density, p₀, g, grid
     return p, pˢ
 end
 
+# Reduce the datum to the bottom face by extending the lowest prescribed density downward. This is
+# the exact integral of ∂p/∂z = -ρg for that layer, and it is the same rule `_hydrostatic_pressure!`
+# below uses inside the domain (linear in each cell, at the cell's own ρ), so the anchor and the
+# profile it anchors are built the same way.
+#
+# It is deliberately *not* `surface_pressure_from_cell_center`, which needs a pressure *and* a
+# density at one level to form a local scale height; here only the datum and ρ¹ are available. The
+# two therefore disagree at O(Δz²): materializing with `pressure = nothing` and then re-materializing
+# from the resulting field recovers a bottom-face pressure larger by (ρgΔz/2)²/2p. That round trip is
+# pinned by a test — the difference is second order and harmless, but it must not grow silently.
 @kernel function _surface_pressure_from_base!(pˢ, ρ, p₀, g, grid)
     i, j = @index(Global, NTuple)
     zˢ = znode(i, j, 1, grid, Center(), Center(), Face())
