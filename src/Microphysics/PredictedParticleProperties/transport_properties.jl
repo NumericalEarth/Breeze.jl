@@ -57,10 +57,10 @@ using Breeze
 using Breeze.Microphysics.PredictedParticleProperties: air_transport_properties
 constants = ThermodynamicConstants()
 properties = air_transport_properties(273.15, 101325.0, constants)
-typeof(properties.Dᵛ)
+map(x -> round(x, sigdigits=3), properties)
 
 # output
-Float64
+(Dᵛ = 2.23e-5, Kᵃ = 0.0243, ν = 1.33e-5)
 ```
 """
 @inline function air_transport_properties(T, P, constants)

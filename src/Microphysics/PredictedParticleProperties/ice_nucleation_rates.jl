@@ -284,10 +284,10 @@ p3 = with_logger(NullLogger()) do
     PredictedParticlePropertiesMicrophysics()
 end
 Q, N = homogeneous_freezing_cloud_rate(p3, 1e-3, 100e6, 230.0, 1.2)
-typeof(Q)
+round.((Q, N), sigdigits=4)
 
 # output
-Float64
+(0.0001, 8.333e6)
 ```
 """
 @inline function homogeneous_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ)
@@ -347,10 +347,10 @@ p3 = with_logger(NullLogger()) do
     PredictedParticlePropertiesMicrophysics()
 end
 Q, N = homogeneous_freezing_rain_rate(p3, 1e-3, 1e4, 220.0)
-typeof(Q)
+round.((Q, N), sigdigits=4)
 
 # output
-Float64
+(0.0001, 1000.0)
 ```
 """
 @inline function homogeneous_freezing_rain_rate(p3, qʳ, nʳ, T)
