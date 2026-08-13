@@ -173,11 +173,14 @@ function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
         liquid = cloud_formation.liquid
         ice = cloud_formation.ice
         parameters = categories.parameters
+        processes = parameters.processes
+        process_params = parameters.process_params
 
         # Liquid: always materialize unless already an AbstractCondensateFormation
         liquid = materialize_condensate_formation(
             liquid,
-            parameters.options.cloud_liquid_formation,
+            processes.cloud_liquid_formation,
+            process_params.cloud_liquid_formation,
             parameters.cloud.liquid.ρw,
         )
 
@@ -185,7 +188,8 @@ function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
         if ice !== nothing
             ice = materialize_condensate_formation(
                 ice,
-                parameters.options.cloud_ice_formation,
+                processes.cloud_ice_formation,
+                process_params.cloud_ice_formation,
                 parameters.cloud.ice.ρᵢ,
             )
         end
@@ -196,34 +200,35 @@ function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
     return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction)
 end
 
-# Materialize a condensate-formation model from a placeholder and process option.
+# Materialize a condensate-formation model from a placeholder, the process option,
+# and the option's parameter data (the matching entry of `process_params`).
 # If already an AbstractCondensateFormation, return as-is.
-materialize_condensate_formation(cf::AbstractCondensateFormation, option, reference) = cf
+materialize_condensate_formation(cf::AbstractCondensateFormation, option, params, reference) = cf
 
-function materialize_condensate_formation(cf, option, reference)
-    return condensate_formation_from_option(option, reference)
+function materialize_condensate_formation(cf, option, params, reference)
+    return condensate_formation_from_option(option, params, reference)
 end
 
-condensate_formation_from_option(::Nothing, reference) = ConstantRateCondensateFormation(zero(reference))
+condensate_formation_from_option(::Nothing, params, reference) = ConstantRateCondensateFormation(zero(reference))
 
-function condensate_formation_from_option(option::TemperatureDependent, reference)
-    rate = convert(typeof(reference), inv(option.τ_relax))
-    return TemperatureDependentIceFormation(rate, option.frostenberg)
+function condensate_formation_from_option(::TemperatureDependent, params, reference)
+    rate = convert(typeof(reference), inv(params.τ_relax))
+    return TemperatureDependentIceFormation(rate, params.frostenberg)
 end
 
-function condensate_formation_from_option(option, reference)
-    rate = convert(typeof(reference), inv(option.τ_relax))
+function condensate_formation_from_option(option, params, reference)
+    rate = convert(typeof(reference), inv(params.τ_relax))
     return ConstantRateCondensateFormation(rate)
 end
 
 @inline function liquid_autoconversion(parameters, qᶜˡ)
     micro = (; q_lcl = qᶜˡ)
-    option = parameters.options.rain_autoconversion
+    option = parameters.processes.rain_autoconversion
     return conv_q_lcl_to_q_rai(option, parameters, nothing, micro, nothing)
 end
 
 @inline function ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
-    option = parameters.options.snow_autoconversion
+    option = parameters.processes.snow_autoconversion
     return ice_autoconversion(option, parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
 end
 
@@ -883,7 +888,8 @@ const τⁿᵘᵐ = 10  # seconds
 @inline function AM.microphysical_tendency(bμp::WarmPhase1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
     parameters = categories.parameters
-    options = parameters.options
+    processes = parameters.processes
+    process_params = parameters.process_params
     cloud_liquid = parameters.cloud.liquid
     rain = parameters.precip.rain
     rain_velocity = parameters.terminal_velocity.rain
@@ -895,7 +901,7 @@ const τⁿᵘᵐ = 10  # seconds
 
     # Accretion: cloud liquid captured by falling rain
     Sᵃᶜᶜ = cloud_precipitation_accretion(
-        options.cloud_liquid_rain_accretion,
+        process_params.cloud_liquid_rain_accretion,
         cloud_liquid,
         rain,
         rain_velocity,
@@ -908,7 +914,7 @@ const τⁿᵘᵐ = 10  # seconds
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     Sᵉᵛᵃᵖ = rain_evaporation_rate(
-        options.rain_condensation_evaporation,
+        processes.rain_condensation_evaporation,
         rain,
         rain_velocity,
         parameters.air_properties,
@@ -936,7 +942,8 @@ end
 @inline function AM.microphysical_tendency(bμp::Union{MP1M, MPNE1M}, ::Val{:ρqʳ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
     parameters = categories.parameters
-    options = parameters.options
+    processes = parameters.processes
+    process_params = parameters.process_params
     cloud_liquid = parameters.cloud.liquid
     rain = parameters.precip.rain
     rain_velocity = parameters.terminal_velocity.rain
@@ -948,7 +955,7 @@ end
 
     # Accretion: cloud liquid captured by falling rain
     Sᵃᶜᶜ = cloud_precipitation_accretion(
-        options.cloud_liquid_rain_accretion,
+        process_params.cloud_liquid_rain_accretion,
         cloud_liquid,
         rain,
         rain_velocity,
@@ -961,7 +968,7 @@ end
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     Sᵉᵛᵃᵖ = rain_evaporation_rate(
-        options.rain_condensation_evaporation,
+        processes.rain_condensation_evaporation,
         rain,
         rain_velocity,
         parameters.air_properties,
@@ -1003,7 +1010,8 @@ end
 @inline function wpne1m_tendencies(bμp::WPNE1M, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
     parameters = categories.parameters
-    options = parameters.options
+    processes = parameters.processes
+    process_params = parameters.process_params
     cloud_liquid = parameters.cloud.liquid
     rain = parameters.precip.rain
     rain_velocity = parameters.terminal_velocity.rain
@@ -1022,7 +1030,7 @@ end
 
     # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
     Sᵉᵛᵃᵖ = rain_evaporation_rate(
-        options.rain_condensation_evaporation,
+        processes.rain_condensation_evaporation,
         rain,
         rain_velocity,
         parameters.air_properties,
@@ -1037,7 +1045,7 @@ end
     # Collection: cloud liquid → rain (does not involve vapor)
     Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
     Sᵃᶜᶜ = cloud_precipitation_accretion(
-        options.cloud_liquid_rain_accretion,
+        process_params.cloud_liquid_rain_accretion,
         cloud_liquid,
         rain,
         rain_velocity,
@@ -1101,7 +1109,8 @@ end
 @inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
     parameters = categories.parameters
-    options = parameters.options
+    processes = parameters.processes
+    process_params = parameters.process_params
     cloud_liquid = parameters.cloud.liquid
     cloud_ice = parameters.cloud.ice
     rain = parameters.precip.rain
@@ -1135,7 +1144,7 @@ end
 
     # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
     Sᵉᵛᵃᵖ = rain_evaporation_rate(
-        options.rain_condensation_evaporation,
+        processes.rain_condensation_evaporation,
         rain,
         rain_velocity,
         air_properties,
@@ -1149,7 +1158,7 @@ end
 
     # Snow sublimation/deposition: snow ↔ vapor (positive = deposition)
     Sˢᵘᵇˡ = snow_deposition_sublimation_rate(
-        options.snow_deposition_sublimation,
+        processes.snow_deposition_sublimation,
         snow,
         snow_velocity,
         air_properties,
@@ -1163,7 +1172,7 @@ end
 
     # Snow melting: snow → rain (always non-negative)
     Sᵐᵉˡᵗ = snow_melt_rate(
-        options.snow_melt,
+        processes.snow_melt,
         snow,
         snow_velocity,
         air_properties,
@@ -1177,7 +1186,7 @@ end
 
     # Cloud ice melting: cloud ice → cloud liquid
     Sᵐᵉˡᵗᶜⁱ = cloud_ice_melt_rate(
-        options.cloud_ice_melt,
+        processes.cloud_ice_melt,
         cloud_ice,
         air_properties,
         qᶜⁱ,
@@ -1191,7 +1200,7 @@ end
     # Collection: cloud liquid → rain (does not involve vapor)
     Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
     Sᵃᶜᶜ = cloud_precipitation_accretion(
-        options.cloud_liquid_rain_accretion,
+        process_params.cloud_liquid_rain_accretion,
         cloud_liquid,
         rain,
         rain_velocity,
@@ -1205,7 +1214,7 @@ end
 
     # Accretion: cloud liquid + snow
     Sᵃᶜᶜˡˢ = cloud_precipitation_accretion(
-        options.cloud_liquid_snow_accretion,
+        process_params.cloud_liquid_snow_accretion,
         cloud_liquid,
         snow,
         snow_velocity,
@@ -1216,7 +1225,7 @@ end
 
     # Accretion: cloud ice + snow → snow
     Sᵃᶜᶜⁱˢ = cloud_precipitation_accretion(
-        options.cloud_ice_snow_accretion,
+        process_params.cloud_ice_snow_accretion,
         cloud_ice,
         snow,
         snow_velocity,
@@ -1227,7 +1236,7 @@ end
 
     # Accretion: cloud ice + rain → snow (ice sink)
     Sᵃᶜᶜⁱʳ = cloud_precipitation_accretion(
-        options.cloud_ice_rain_accretion,
+        process_params.cloud_ice_rain_accretion,
         cloud_ice,
         rain,
         rain_velocity,
@@ -1238,7 +1247,7 @@ end
 
     # Rain sink from ice-rain collisions (rain sink, forms snow)
     Sᵃᶜᶜʳⁱ = rain_sink_accretion(
-        options.cloud_ice_rain_accretion,
+        process_params.cloud_ice_rain_accretion,
         rain,
         cloud_ice,
         rain_velocity,
@@ -1248,10 +1257,10 @@ end
     )
 
     # Rain-snow collisions (computed for both cold and warm pathways)
-    Sʳˢ = rain_snow_accretion(options.rain_snow_accretion,
+    Sʳˢ = rain_snow_accretion(process_params.rain_snow_accretion,
                               snow, rain, snow_velocity, rain_velocity,
                               qˢ, qʳ, ρ)
-    Sˢʳ = rain_snow_accretion(options.rain_snow_accretion,
+    Sˢʳ = rain_snow_accretion(process_params.rain_snow_accretion,
                               rain, snow, rain_velocity, snow_velocity,
                               qʳ, qˢ, ρ)
 
