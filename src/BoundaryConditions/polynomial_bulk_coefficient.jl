@@ -658,28 +658,27 @@ being evaluated, so it follows both terrain and the evolving state.
 - `grid`: The grid
 - `U`: Wind speed (m/s)
 - `T₀`: Surface temperature (K) at location `(i, j)`
-- `h`: Measurement height (m) above the local surface; defaults to half the first-cell thickness
-- `θᵥ_source`: Field of filtered virtual potential temperature, or `nothing` to read the
+- `h`: Measurement height (m) above the local surface; the short form uses half the first-cell
+  thickness
+- `θᵥ_source`: Field of filtered virtual potential temperature, or `nothing` to evaluate the
   instantaneous diagnostic in `coef.virtual_potential_temperature`
-- `fields`: Live model fields used by the instantaneous diagnostic. This is supplied by bulk
-  boundary conditions and is unnecessary when `θᵥ_source` is an ordinary field.
+- `fields`: The surface-layer field tuple the instantaneous diagnostic reads. Required, because a
+  materialized `coef.virtual_potential_temperature` is a `BoundaryVirtualPotentialTemperature` that
+  has no fields of its own; pass `nothing` only when `θᵥ_source` or
+  `coef.virtual_potential_temperature` is an ordinary field, which is then read directly.
 - `p₀`: Air pressure (Pa) at the surface below `(i, j)`
 
 Returns the transfer coefficient (dimensionless).
-"""
-# Default: evaluate at the first cell center, with the instantaneous θᵥ diagnostic
-@inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, p₀)
-    h = evaluation_height(i, j, grid, nothing)
-    return coef(i, j, grid, U, T₀, h, nothing, nothing, p₀)
-end
 
+There are deliberately only these two methods. Earlier `fields`-less forms were separated from
+these by arity alone and silently forwarded `fields = nothing`, which crashes for every coefficient
+`materialize_coefficient` builds — the instantaneous diagnostic would dereference `nothing.p`. A
+kernel cannot raise a useful error, so the argument is mandatory instead.
+"""
+# Short form: evaluate at the first cell center with the instantaneous θᵥ diagnostic.
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, fields, p₀)
     h = evaluation_height(i, j, grid, nothing)
     return coef(i, j, grid, U, T₀, h, nothing, fields, p₀)
-end
-
-@inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h, θᵥ_source, p₀)
-    return coef(i, j, grid, U, T₀, h, θᵥ_source, nothing, p₀)
 end
 
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h, θᵥ_source, fields, p₀)

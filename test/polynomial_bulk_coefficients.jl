@@ -283,7 +283,7 @@ using GPUArraysCore: @allowscalar
         coef = PolynomialCoefficient((FT(0.142), FT(0.076), FT(2.7)), FT(1.5e-4), FT(0.1),
                                      FittedStabilityFunction(FT(1.5e-4 / 7.3)), surface,
                                      θᵥ_field, pˢᵗ, constants, Val(:momentum))
-        C = coef(1, 1, grid, FT(10), T₀, p₀)
+        C = coef(1, 1, grid, FT(10), T₀, nothing, p₀)
         C_neutral = neutral_coefficient_10m(coef.polynomial, FT(10), coef.minimum_wind_speed)
         @test C ≈ C_neutral
     end
@@ -300,7 +300,7 @@ using GPUArraysCore: @allowscalar
         U = 10.0
         T₀ = 290.0
         p₀ = 1e5
-        C = coef(1, 1, grid, U, T₀, p₀)
+        C = coef(1, 1, grid, U, T₀, nothing, p₀)
         @test C isa Number
         @test C > 0
 
@@ -319,7 +319,7 @@ using GPUArraysCore: @allowscalar
             Breeze.Thermodynamics.ThermodynamicConstants(),
             Val(:momentum)
         )
-        C_fitted = coef_fitted(1, 1, grid, U, T₀, p₀)
+        C_fitted = coef_fitted(1, 1, grid, U, T₀, nothing, p₀)
         @test C_fitted isa Number
         @test C_fitted > 0
         # Unstable conditions should enhance transfer
@@ -454,6 +454,46 @@ using GPUArraysCore: @allowscalar
         @test fv.θᵥ[1, 1, 1] ≈ θᵢ atol=1e-10
     end
 
+    # `materialize_coefficient` always installs a `BoundaryVirtualPotentialTemperature`, which
+    # carries no fields of its own and evaluates itself from the surface-layer tuple. The forms that
+    # cannot receive that tuple used to exist and would dereference `nothing.p`; they are gone, and
+    # the live diagnostic is exercised here against the field it is supposed to reproduce.
+    @testset "Materialized coefficient evaluates θᵥ from the live fields [$FT]" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        constants = ThermodynamicConstants(FT)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants,
+                                dynamics=CompressibleDynamics())
+        set!(model; ρ=1, θ=FT(300), qᵗ=0)
+
+        bare = PolynomialCoefficient((0.142, 0.076, 2.7), FT(1.5e-4), FT(0.1),
+                                     FittedStabilityFunction(FT(1.5e-4 / 7.3)),
+                                     Breeze.PlanarLiquidSurface(), nothing, FT(1e5),
+                                     constants, Val(:momentum))
+        coef = Breeze.BoundaryConditions.materialize_coefficient(bare, grid, model.dynamics,
+                                                                 nothing, constants, Val(:momentum))
+        @test coef.virtual_potential_temperature isa
+              Breeze.BoundaryConditions.BoundaryVirtualPotentialTemperature
+
+        fields = Breeze.BoundaryConditions.surface_layer_state(model)
+        U, T₀, p₀ = FT(5), FT(292), FT(101325)
+        C = @allowscalar coef(1, 1, grid, U, T₀, fields, p₀)
+        @test C isa FT
+        @test isfinite(C) && C > 0
+
+        # The instantaneous diagnostic must agree with the `VirtualPotentialTemperature` operation
+        # the model exposes — it is the same quantity, reached through the field tuple instead of a
+        # captured `KernelFunctionOperation`.
+        θᵥ_operation = Field(VirtualPotentialTemperature(model))
+        compute!(θᵥ_operation)
+        θᵥ_boundary = @allowscalar Breeze.BoundaryConditions.boundary_virtual_potential_temperature(
+            1, 1, 1, grid, coef.virtual_potential_temperature, fields)
+        @test θᵥ_boundary ≈ @allowscalar(θᵥ_operation[1, 1, 1]) rtol=1e-6
+
+        # Passing the tuple is mandatory: there is no method that silently omits it.
+        @test !hasmethod(typeof(coef), Tuple{Int, Int, typeof(grid), FT, FT, FT})
+        @test !hasmethod(typeof(coef), Tuple{Int, Int, typeof(grid), FT, FT, FT, Nothing, FT})
+    end
+
     @testset "BulkDrag with filtered_velocities" begin
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
         fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
@@ -526,14 +566,14 @@ using GPUArraysCore: @allowscalar
         p₀ = 1e5
 
         # Default call (half the first cell thickness = 10m)
-        C_default = coef(1, 1, grid, U, T₀, p₀)
+        C_default = coef(1, 1, grid, U, T₀, nothing, p₀)
 
         # Explicit height = 10m should give the same result
-        C_10m = coef(1, 1, grid, U, T₀, 10.0, nothing, p₀)
+        C_10m = coef(1, 1, grid, U, T₀, 10.0, nothing, nothing, p₀)
         @test C_10m ≈ C_default atol=1e-12
 
         # Different height should give a different coefficient
-        C_20m = coef(1, 1, grid, U, T₀, 20.0, nothing, p₀)
+        C_20m = coef(1, 1, grid, U, T₀, 20.0, nothing, nothing, p₀)
         @test C_20m != C_default
         # Higher evaluation height → coefficient adjusted by log ratio
         @test C_20m > 0
