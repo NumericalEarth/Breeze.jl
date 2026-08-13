@@ -69,21 +69,18 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ 
     # Temperature-dependent sticking efficiency (linear ramp)
     # Cold ice is less sticky, near-melting ice is very sticky
     minimum_efficiency = parameters.minimum_aggregation_efficiency
-    aggregation_efficiency = ifelse(T < ramp_start_temperature, minimum_efficiency,
-        ifelse(T > ramp_end_temperature, maximum_efficiency,
-               minimum_efficiency +
-               (T - ramp_start_temperature) /
-               (ramp_end_temperature - ramp_start_temperature) *
-               (maximum_efficiency - minimum_efficiency)))
+    aggregation_efficiency = clamp(minimum_efficiency +
+                                   (T - ramp_start_temperature) /
+                                   (ramp_end_temperature - ramp_start_temperature) *
+                                   (maximum_efficiency - minimum_efficiency),
+                                   minimum_efficiency, maximum_efficiency)
 
     # Rime-fraction limiter (Eii_fact): shut off aggregation for heavily rimed ice
     # Fortran P3: Eii_fact = 1 for Fr<0.6, linear ramp to 0 for 0.6≤Fr<0.9, 0 for Fr≥0.9
     minimum_rime_fraction = parameters.minimum_aggregation_rime_fraction
     maximum_rime_fraction = parameters.maximum_aggregation_rime_fraction
-    rime_fraction_factor = ifelse(Fᶠ < minimum_rime_fraction, FT(1),
-        ifelse(Fᶠ > maximum_rime_fraction, FT(0),
-               FT(1) - (Fᶠ - minimum_rime_fraction) /
-               (maximum_rime_fraction - minimum_rime_fraction)))
+    rime_fraction_factor = clamp(1 - (Fᶠ - minimum_rime_fraction) /
+                                     (maximum_rime_fraction - minimum_rime_fraction), 0, 1)
     aggregation_efficiency *= rime_fraction_factor
 
     # Mean particle properties

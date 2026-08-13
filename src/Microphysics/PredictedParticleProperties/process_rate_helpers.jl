@@ -137,7 +137,6 @@ Returns a NamedTuple of the possibly-rescaled rates.
     cond_sink_total = clamp_positive(cond) + ccn_act + rain_cond + coat_cond
     f_cond = sink_limiting_factor(cond_sink_total, qcon_cap, dt_safety)
 
-    cond_pos_scaled = ifelse(cond > 0, cond * f_cond, cond)
     ccn_act = ccn_act * f_cond
     ccn_act_n = ccn_act_n * f_cond
     rain_cond = rain_cond * f_cond
@@ -148,7 +147,7 @@ Returns a NamedTuple of the possibly-rescaled rates.
     evp_total = clamp_positive(-cond) + rain_evap + coat_evap
     f_evp = sink_limiting_factor(evp_total, qevp_cap, dt_safety)
 
-    cond = ifelse(cond < 0, cond * f_evp, cond_pos_scaled)
+    cond = max(0, cond) * f_cond + min(0, cond) * f_evp
     rain_evap = rain_evap * f_evp
     coat_evap = coat_evap * f_evp
 
@@ -172,7 +171,6 @@ Returns a NamedTuple of the possibly-rescaled rates.
     dep_sink_total = clamp_positive(dep) + nuc_q
     f_dep = sink_limiting_factor(dep_sink_total, qdep_cap, dt_safety)
 
-    dep_pos_scaled = ifelse(dep > 0, dep * f_dep, dep)
     nuc_q = nuc_q * f_dep
     nuc_n = nuc_n * f_dep
 
@@ -180,7 +178,7 @@ Returns a NamedTuple of the possibly-rescaled rates.
     sub_total = clamp_positive(-dep)
     f_sub = sink_limiting_factor(sub_total, qsub_cap, dt_safety)
 
-    dep = ifelse(dep < 0, dep * f_sub, dep_pos_scaled)
+    dep = max(0, dep) * f_dep + min(0, dep) * f_sub
 
     return (; cond, ccn_act, ccn_act_n, rain_cond, rain_evap,
               dep, coat_cond, coat_evap, nuc_q, nuc_n)

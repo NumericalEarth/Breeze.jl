@@ -268,14 +268,9 @@ separately.
                                 (Fˡ >= parameters.liquid_fraction_clipping_threshold),
                                 -qʷⁱ / τ, raw_coating_growth)
 
-    condensation = ifelse(raw_cloud_growth < 0,
-                          max(raw_cloud_growth, -clamp_positive(qᶜˡ) / τ),
-                          min(raw_cloud_growth, clamp_positive(qᵛ) / τ))
-    rain_condensation = ifelse(raw_rain_growth < 0, zero(FT),
-                               min(raw_rain_growth, clamp_positive(qᵛ) / τ))
-    rain_evaporation = ifelse(raw_rain_growth < 0,
-                              min(-raw_rain_growth, clamp_positive(qʳ) / τ),
-                              zero(FT))
+    condensation = clamp(raw_cloud_growth, -clamp_positive(qᶜˡ) / τ, clamp_positive(qᵛ) / τ)
+    rain_condensation = min(max(0, raw_rain_growth), clamp_positive(qᵛ) / τ)
+    rain_evaporation = min(max(0, -raw_rain_growth), clamp_positive(qʳ) / τ)
 
     is_sublimation = raw_ice_growth < 0
     calibration = ifelse(is_sublimation,
@@ -284,15 +279,10 @@ separately.
     deposition_raw = raw_ice_growth * calibration
     # Fortran sublimation limit (3730): `qisub <= (qitot - qiliq)*i_dt` = dry
     # ice mass per unit time, which is `qⁱ / τ` in Julia conventions.
-    deposition = ifelse(is_sublimation,
-                        max(deposition_raw, -clamp_positive(qⁱ) / τ),
-                        min(deposition_raw, clamp_positive(qᵛ) / τ))
+    deposition = clamp(deposition_raw, -clamp_positive(qⁱ) / τ, clamp_positive(qᵛ) / τ)
 
-    coating_condensation = ifelse(raw_coating_growth < 0, zero(FT),
-                                  min(raw_coating_growth, clamp_positive(qᵛ) / τ))
-    coating_evaporation = ifelse(raw_coating_growth < 0,
-                                 min(-raw_coating_growth, clamp_positive(qʷⁱ) / τ),
-                                 zero(FT))
+    coating_condensation = min(max(0, raw_coating_growth), clamp_positive(qᵛ) / τ)
+    coating_evaporation = min(max(0, -raw_coating_growth), clamp_positive(qʷⁱ) / τ)
 
     return P3CoupledVaporRates{FT}(condensation, rain_evaporation, rain_condensation,
                                    deposition, coating_condensation, coating_evaporation)
