@@ -10,7 +10,7 @@ that is, the cloud liquid mass, the rain mass and number, the dry ice mass and
 number, the rime mass and rime volume, and the liquid coating on ice — alongside
 the host's vapor density ``ρq^v``. Three more appear when the corresponding option
 is enabled: the cloud droplet number ``ρn^{cl}`` and unactivated aerosol number
-``ρn^a`` with aerosol activation, and the saturation deficit ``ρs`` with predicted
+``ρn^a`` with aerosol activation, and the supersaturation ``ρs^{v+l}`` with predicted
 supersaturation. Together they describe the complete microphysical state.
 
 This section documents each variable, its physical meaning, and the source-term
@@ -80,7 +80,7 @@ mass / number ratio. Both Fortran and Breeze run with ``μ^r = 0`` at runtime.
 | Symbol | Name | Units | Description |
 |--------|------|-------|-------------|
 | ``ρq^v`` | Water vapor density | kg/m³ | The host-coupled moisture variable |
-| ``ρs`` | Saturation deficit density, ``s = q^v - q^{v+l}`` | kg/m³ | Predicted-supersaturation path. Fortran v5.5 hard-codes `log_predictSsat = .false.`; Breeze's `predict_supersaturation` flag defaults to `false` to match. When `false`, the field is not allocated and is absent from `prognostic_field_names`; diagnostics use ``q^v - q^{v+l}(T)`` directly. When `true`, the bounded G&M (2008) adjustment is active. |
+| ``ρs^{v+l}`` | Supersaturation density, ``s^{v+l} = q^v - q^{v+l}`` | kg/m³ | Predicted-supersaturation path. Fortran v5.5 hard-codes `log_predictSsat = .false.`; Breeze's `predict_supersaturation` flag defaults to `false` to match. When `false`, the field is not allocated and is absent from `prognostic_field_names`; diagnostics use ``q^v - q^{v+l}(T)`` directly. When `true`, the bounded G&M (2008) adjustment is active. |
 
 ## Derived Quantities
 
@@ -394,7 +394,7 @@ at ``(\text{Center}, \text{Center}, \text{Face})``.
 | ``ρb^f`` | ``V_m^i`` | ``\mathcal{F}_{ρb^f} = -V_m^i ρb^f`` |
 | ``ρq^{wi}`` | ``V_m^i`` | ``\mathcal{F}_{ρq^{wi}} = -V_m^i ρq^{wi}`` |
 
-``ρs`` and ``ρn^a`` do not sediment. Cloud droplets do: Fortran settles
+``ρs^{v+l}`` and ``ρn^a`` do not sediment. Cloud droplets do: Fortran settles
 cloud mass and number with DSD-integrated Stokes velocities, and Breeze mirrors
 that.
 
@@ -431,9 +431,9 @@ prognostic_field_names(microphysics)
 ```
 
 ``ρnᶜˡ`` and ``ρnᵃ`` appear only when `aerosol`
-is an `AerosolActivation`: the default prescribed-Nᶜ path (Fortran
+is an `AerosolActivation`: the default prescribed-Nᶜˡ path (Fortran
 `log_predictNc = .false.`) takes droplet number from `cloud.number_concentration`, so
-neither field is allocated or advected there. ``ρsˢᵃᵗ`` appears only when
+neither field is allocated or advected there. ``ρsᵛ⁺ˡ`` appears only when
 `predict_supersaturation = true`.
 
 P3's aerosol distribution is specified **per unit mass of air**: `AerosolMode.number_mixing_ratio`
@@ -477,7 +477,7 @@ The tendency-only architecture is described in
 P3 conserves total water in a closed system:
 
 ```math
-\frac{d}{dt}\left( q_v + q^{cl} + q^r + q^i + q^{wi} \right) = 0.
+\frac{d}{dt}\left( q^v + q^{cl} + q^r + q^i + q^{wi} \right) = 0.
 ```
 
 (The liquid coating ``q^{wi}`` is included because shedding moves it to rain,
@@ -510,7 +510,7 @@ sinks against the donor reservoirs available over `sink_limiting_timescale`.
 Thus, for a single forward update no longer than that interval, limited P3 sinks
 alone cannot make the corresponding mass or number reservoirs negative. This is
 not an unconditional positivity guarantee for an arbitrary host timestep or RK
-stage. The optional ``ρs`` prognostic is also excluded: subsaturation is
+stage. The optional ``ρs^{v+l}`` prognostic is also excluded: subsaturation is
 legitimately negative. Breeze does not implement a Fortran-style post-step
 "return small mass to vapor" cleanup, because that requires state mutation with
 a paired ``θ`` correction.
@@ -533,7 +533,7 @@ rates see the state. The default `SpeciesBorrowing`:
   ``ρq^i``: it is real water, and the whole-particle clip already sheds it to
   rain when the dry ice is gone;
 - clamps the remaining non-water fields (number moments, rime properties,
-  aerosol count). ``ρs`` is excluded, since subsaturation is
+  aerosol count). ``ρs^{v+l}`` is excluded, since subsaturation is
   legitimately negative.
 
 Passing `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())` additionally
@@ -572,10 +572,10 @@ handling — `liquid_fraction_clipping_threshold` (Fortran `liqfracsmall`) and
 `tiny_ice_to_rain_threshold` (Fortran `qsmall_dry`, in kg/kg):
 
 ```jldoctest thresholds
-prp = microphysics.process_rates
+parameters = microphysics.process_rates
 
-(prp.liquid_fraction_clipping_threshold,
- prp.tiny_ice_to_rain_threshold)
+(parameters.liquid_fraction_clipping_threshold,
+ parameters.tiny_ice_to_rain_threshold)
 
 # output
 (0.01, 1.0e-12)

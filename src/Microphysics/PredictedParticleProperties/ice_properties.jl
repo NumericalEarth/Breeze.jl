@@ -72,7 +72,7 @@ This container organizes all ice-related computations:
 - `thermodynamic_constants`: Source of constants used by the ice-property defaults.
 - `minimum_rime_density`: Lower bound for ρᶠ [kg/m³], default 50
 - `maximum_rime_density`: Upper bound for ρᶠ [kg/m³], default 900 (pure ice)
-- `maximum_shape_parameter`: Upper limit on μ [-], default 20
+- `maximum_shape_parameter`: Upper limit on μⁱ [-], default 20
 
 # References
 

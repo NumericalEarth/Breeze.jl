@@ -47,7 +47,7 @@ end
 function routing_derived_state(p3, air_density, microphysical_state,
                                thermodynamic_state, constants)
     FT = typeof(air_density)
-    props = P3Routing.p3_ice_properties(
+    properties = P3Routing.p3_ice_properties(
         p3, air_density, microphysical_state, thermodynamic_state, constants)
     air_temperature = temperature(thermodynamic_state, constants)
     pressure = thermodynamic_state.reference_pressure
@@ -62,18 +62,18 @@ function routing_derived_state(p3, air_density, microphysical_state,
         p3, microphysical_state.qᶜˡ, microphysical_state.nᶜˡ, air_density)
 
     state = P3Routing.P3DerivedState{FT, typeof(moisture)}(
-        props.nⁱ,
+        properties.nⁱ,
         microphysical_state.nʳ,
-        props.qᶠ,
-        props.bᶠ,
-        props.Fᶠ,
-        props.ρᶠ,
-        props.μ_ice,
-        props.Fˡ,
-        props.Nᶜ,
+        properties.qᶠ,
+        properties.bᶠ,
+        properties.Fᶠ,
+        properties.ρᶠ,
+        properties.μⁱ,
+        properties.Fˡ,
+        properties.Nᶜˡ,
         cloud.nᶜˡ,
-        cloud.μ_c,
-        cloud.λ_c,
+        cloud.μᶜˡ,
+        cloud.λᶜˡ,
         air_temperature,
         pressure,
         vapor,
@@ -85,7 +85,7 @@ function routing_derived_state(p3, air_density, microphysical_state,
         transport.ν,
     )
 
-    return props, state
+    return properties, state
 end
 
 @testset "P3 Fortran process routing regressions" begin
@@ -147,7 +147,7 @@ end
         _, state = routing_derived_state(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
 
-        phase1 = P3Routing._p3_phase1_rates(
+    phase1 = P3Routing.p3_phase1_rates(
             p3, air_density, microphysical_state, constants, state,
             zero(FT), zero(FT))
 
@@ -186,7 +186,7 @@ end
 
         rates = compute_p3_process_rates(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
-        props = P3Routing.p3_ice_properties(
+        properties = P3Routing.p3_ice_properties(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
 
         @test rates.post_process_clipping == 1
@@ -201,10 +201,10 @@ end
             τ * tendency_ρqʷⁱ(rates, air_density, p3.process_rates) / air_density
         rime_mass_after = rime_mass +
             τ * tendency_ρqᶠ(
-                rates, air_density, props.Fᶠ, p3.process_rates) / air_density
+                rates, air_density, properties.Fᶠ, p3.process_rates) / air_density
         rime_volume_after = rime_volume +
             τ * tendency_ρbᶠ(
-                rates, air_density, props.Fᶠ, props.ρᶠ, dry_ice,
+                rates, air_density, properties.Fᶠ, properties.ρᶠ, dry_ice,
                 p3.process_rates) / air_density
         total_water_tendency =
             tendency_ρqᵛ(rates, air_density) +
@@ -223,8 +223,8 @@ end
     @testset "immersion-freezing budgets preserve frozen-particle mass" begin
         FT = Float64
         p3 = PredictedParticlePropertiesMicrophysics(FT)
-        prp = p3.process_rates
-        τ = prp.sink_limiting_timescale
+        parameters = p3.process_rates
+        τ = parameters.sink_limiting_timescale
         air_temperature = FT(136)
         air_density = one(FT)
 
@@ -320,22 +320,22 @@ end
             cloud, cloud_number, zero(FT), zero(FT),
             dry_ice, ice_number, rime_mass, rime_volume,
             coating, zero(FT), zero(FT), zero(FT))
-        props, state = routing_derived_state(
+        properties, state = routing_derived_state(
             p3, air_density, microphysical_state, thermodynamic_state, constants)
         phase1 = P3Routing.P3Phase1Rates{FT}(
             ntuple(_ -> zero(FT), fieldcount(P3Routing.P3Phase1Rates{FT}))...)
 
-        phase2 = P3Routing._p3_phase2_rates(
+    phase2 = P3Routing.p3_phase2_rates(
             p3, air_density, microphysical_state, constants, state, phase1, FT(280))
-        phase2_warm_surface = P3Routing._p3_phase2_rates(
+    phase2_warm_surface = P3Routing.p3_phase2_rates(
             p3, air_density, microphysical_state, constants, state, phase1, FT(285))
         # D_mean is the volume-equivalent diameter built from the pre-limiter
         # number and mean density, not the mass-law diameter.
         expected_diameter = cbrt(
-            6 * props.qⁱ_total /
-            (FT(π) * props.ρ_mean * props.nⁱ_diagnostic))
+            6 * properties.qⁱ_total /
+            (FT(π) * properties.ρ_mean * properties.nⁱ_diagnostic))
 
-        @test props.nⁱ != props.nⁱ_diagnostic
+        @test properties.nⁱ != properties.nⁱ_diagnostic
         @test phase2.D_mean ≈ expected_diameter rtol=FT(1e-12)
         @test phase2.splintering_number > 0
         @test phase2_warm_surface.splintering_number == 0
@@ -427,7 +427,7 @@ end
 
         @test coated_wet_growth_props.qⁱ_total == wet_growth_props.qⁱ_total
         @test coated_wet_growth_props.Fˡ == wet_growth_props.Fˡ == 0
-        @test coated_wet_growth_props.μ_ice == wet_growth_props.μ_ice
+    @test coated_wet_growth_props.μⁱ == wet_growth_props.μⁱ
         @test coated_wet_growth_fall_speeds.wⁱ == wet_growth_fall_speeds.wⁱ
         @test coated_wet_growth_fall_speeds.wⁱₙ == wet_growth_fall_speeds.wⁱₙ
         @test coated_wet_growth_rates.cloud_riming ≈ wet_growth_rates.cloud_riming

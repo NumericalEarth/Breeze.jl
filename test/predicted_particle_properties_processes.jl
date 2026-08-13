@@ -21,7 +21,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     tendency_ρqᶠ,
     tendency_ρbᶠ,
     tendency_ρqʷⁱ,
-    tendency_ρsˢᵃᵗ,
+    tendency_ρsᵛ⁺ˡ,
     tendency_ρqᵛ,
     rain_autoconversion_rate,
     rain_accretion_rate,
@@ -103,48 +103,52 @@ function tendency_test_p3(FT; process_rates = ProcessRateParameters(FT),
     return PredictedParticlePropertiesMicrophysics(FT; process_rates, warm_rain_scheme)
 end
 
-function expected_reference_rain_epsilon(p3, qʳ, nʳ, ρ, transport, FT)
-    prp = p3.process_rates
+function expected_reference_rain_vapor_relaxation(p3, qʳ, nʳ, ρ, transport, FT)
+    parameters = p3.process_rates
     qʳ_eff = max(0, qʳ)
     nʳ_eff = max(max(0, nʳ), FT(1e-16))
-    λ_r = PPP.rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
-    nʳ_bounded = qʳ_eff * λ_r^3 / (FT(π) * prp.liquid_water_density)
-    N₀ = nʳ_bounded * λ_r
-    I_VD = p3.rain.evaporation(log10(λ_r))
-    I_const = FT(PPP.RAIN_F1R) / λ_r^2
-    Sc_cbrt = cbrt(transport.ν / max(transport.Dᵛ, FT(1e-10)))
-    I_evap = I_const + FT(PPP.RAIN_F2R) * Sc_cbrt / sqrt(max(transport.ν, FT(1e-10))) * I_VD
-    epsilon_r = FT(2π) * N₀ * ρ * transport.Dᵛ * I_evap
-    return ifelse(qʳ_eff >= p3.minimum_mass_mixing_ratio, epsilon_r, zero(FT))
+    λʳ = PPP.rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
+    nʳ_bounded = qʳ_eff * λʳ^3 / (FT(π) * parameters.liquid_water_density)
+    Nʳ₀ = nʳ_bounded * λʳ
+    velocity_diameter_integral = p3.rain.evaporation(log10(λʳ))
+    constant_integral = FT(PPP.RAIN_F1R) / λʳ^2
+    schmidt_correction = cbrt(transport.ν / max(transport.Dᵛ, FT(1e-10)))
+    evaporation_integral = constant_integral +
+                           FT(PPP.RAIN_F2R) * schmidt_correction /
+                           sqrt(max(transport.ν, FT(1e-10))) * velocity_diameter_integral
+    rain_relaxation = FT(2π) * Nʳ₀ * ρ * transport.Dᵛ * evaporation_integral
+    return ifelse(qʳ_eff >= p3.minimum_mass_mixing_ratio, rain_relaxation, zero(FT))
 end
 
 function expected_reference_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ)
     FT = typeof(qʳ)
-    prp = p3.process_rates
+    parameters = p3.process_rates
     qʳ_eff = max(0, qʳ)
     nʳ_eff = max(0, nʳ)
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     nⁱ_eff = max(0, nⁱ)
-    active = (T > prp.freezing_temperature) &
+    active = (T > parameters.freezing_temperature) &
              (qʳ_eff > FT(1e-14)) &
              (qⁱ_total > FT(1e-14)) &
              (nʳ_eff > FT(1)) &
              (nⁱ_eff > FT(1))
 
-    λ_r = PPP.rain_slope_parameter(qʳ_eff, nʳ_eff, prp)
-    nʳ_bounded = PPP.rain_number_from_slope(qʳ_eff, λ_r, prp)
+    λʳ = PPP.rain_slope_parameter(qʳ_eff, nʳ_eff, parameters)
+    nʳ_bounded = PPP.rain_number_from_slope(qʳ_eff, λʳ, parameters)
     Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
     number_kernel = PPP.rain_riming_number_kernel(PPP.rain_ice_collection_table(p3),
-                                                  m_mean, λ_r, Fᶠ, Fˡ, ρᶠ, prp, p3, μ)
+                                                  m_mean, λʳ, Fᶠ, Fˡ, ρᶠ, parameters, p3, μ)
     ρ₀ = p3.ice.fall_speed.reference_air_density
-    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
-    N₀ʳ = nʳ_bounded * λ_r
-    rate = prp.rain_ice_collection_efficiency * N₀ʳ * nⁱ_eff * ρ * rhofaci * number_kernel
+    density_correction = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+    Nʳ₀ = nʳ_bounded * λʳ
+    rate = parameters.rain_ice_collection_efficiency * Nʳ₀ * nⁱ_eff * ρ *
+           density_correction * number_kernel
     return ifelse(active, rate, zero(FT))
 end
 
-function expected_reference_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
+function expected_reference_ice_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ,
+                                                 T, P, ρ, constants, transport, q, μ)
     FT = typeof(qⁱ)
     Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
@@ -154,15 +158,15 @@ function expected_reference_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, 
                                       p3.ice.deposition.ventilation_enhanced,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
                                       transport.ν, transport.Dᵛ, ρ_correction, p3, μ)
-    epsilon_i = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
+    ice_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
              (Fˡ < p3.process_rates.liquid_fraction_clipping_threshold)
-    return ifelse(active, epsilon_i, zero(FT))
+    return ifelse(active, ice_relaxation, zero(FT))
 end
 
-function expected_reference_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                          constants, transport, q, μ)
+function expected_reference_coating_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ,
+                                                     T, P, ρ, constants, transport, q, μ)
     FT = typeof(qⁱ)
     Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
@@ -172,11 +176,11 @@ function expected_reference_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ,
                                       p3.ice.deposition.ventilation_enhanced,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
                                       transport.ν, transport.Dᵛ, ρ_correction, p3, μ)
-    epsilon_iw = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
+    coating_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
              (Fˡ >= p3.process_rates.liquid_fraction_clipping_threshold)
-    return ifelse(active, epsilon_iw, zero(FT))
+    return ifelse(active, coating_relaxation, zero(FT))
 end
 
 function expected_reduced_reference_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
@@ -187,55 +191,72 @@ function expected_reduced_reference_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, q�
     FT = typeof(qᶜˡ)
     τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
     Rᵛ = FT(Breeze.Thermodynamics.vapor_gas_constant(constants))
-    L_v = PPP.vaporization_latent_heat(constants, T)
-    L_s = PPP.sublimation_latent_heat(constants, T)
+    ℒˡ = PPP.vaporization_latent_heat(constants, T)
+    ℒⁱ = PPP.sublimation_latent_heat(constants, T)
     cᵖᵈ = constants.dry_air.heat_capacity
 
-    dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * L_v / (Rᵛ * T^2)
-    dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * L_s / (Rᵛ * T^2)
-    ab = 1 + L_v * dqᵛ⁺ˡ_dT / cᵖᵈ
-    abi = 1 + L_s * dqᵛ⁺ⁱ_dT / cᵖᵈ
+    dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
+    dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * ℒⁱ / (Rᵛ * T^2)
+    liquid_psychrometric_correction = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
+    ice_psychrometric_correction = 1 + ℒⁱ * dqᵛ⁺ⁱ_dT / cᵖᵈ
 
     cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-    epsc = PPP.cloud_condensation_epsilon(p3, qᶜˡ, ρ, transport.Dᵛ, cloud.μ_c, cloud.λ_c, cloud.nᶜˡ)
-    epsr = expected_reference_rain_epsilon(p3, qʳ, nʳ, ρ, transport, FT)
-    epsi = expected_reference_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                        constants, transport, q, μ)
-    epsiw = expected_reference_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                             constants, transport, q, μ)
+    cloud_relaxation = PPP.cloud_vapor_relaxation_coefficient(
+        p3, qᶜˡ, ρ, transport.Dᵛ, cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ)
+    rain_relaxation = expected_reference_rain_vapor_relaxation(p3, qʳ, nʳ, ρ,
+                                                               transport, FT)
+    ice_relaxation = expected_reference_ice_vapor_relaxation(
+        p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
+    coating_relaxation = expected_reference_coating_vapor_relaxation(
+        p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
 
-    ice_liquid_coupling = (1 + L_s * dqᵛ⁺ˡ_dT / cᵖᵈ) / abi
-    xx = max(epsc + epsr + epsi * ice_liquid_coupling + epsiw, FT(1e-20))
-    transient = (1 - exp(-xx * τ)) / τ
-    ssat_liquid = qᵛ - qᵛ⁺ˡ
-    bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * epsi
+    ice_liquid_coupling = (1 + ℒⁱ * dqᵛ⁺ˡ_dT / cᵖᵈ) / ice_psychrometric_correction
+    total_relaxation = max(cloud_relaxation + rain_relaxation +
+                           ice_relaxation * ice_liquid_coupling + coating_relaxation,
+                           FT(1e-20))
+    transient = (1 - exp(-total_relaxation * τ)) / τ
+    supersaturation = qᵛ - qᵛ⁺ˡ
+    bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * ice_relaxation
     external_driver = vapor_tendency - dqᵛ⁺ˡ_dT * temperature_tendency
-    aaa = external_driver + bergeron_driver
+    total_driver = external_driver + bergeron_driver
+    supersaturation_departure = supersaturation - total_driver / total_relaxation
 
-    qc_raw = (aaa * epsc / xx + (ssat_liquid - aaa / xx) * epsc / xx * transient) / ab
-    qr_raw = (aaa * epsr / xx + (ssat_liquid - aaa / xx) * epsr / xx * transient) / ab
-    qi_raw = (aaa * epsi / xx + (ssat_liquid - aaa / xx) * epsi / xx * transient) / abi +
-             (qᵛ⁺ˡ - qᵛ⁺ⁱ) * epsi / abi
-    ql_raw = (aaa * epsiw / xx + (ssat_liquid - aaa / xx) * epsiw / xx * transient) / ab
+    raw_cloud_growth = (total_driver * cloud_relaxation / total_relaxation +
+                        supersaturation_departure * cloud_relaxation / total_relaxation * transient) /
+                       liquid_psychrometric_correction
+    raw_rain_growth = (total_driver * rain_relaxation / total_relaxation +
+                       supersaturation_departure * rain_relaxation / total_relaxation * transient) /
+                      liquid_psychrometric_correction
+    raw_ice_growth = (total_driver * ice_relaxation / total_relaxation +
+                      supersaturation_departure * ice_relaxation / total_relaxation * transient) /
+                     ice_psychrometric_correction +
+                     (qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_relaxation / ice_psychrometric_correction
+    raw_coating_growth = (total_driver * coating_relaxation / total_relaxation +
+                          supersaturation_departure * coating_relaxation / total_relaxation * transient) /
+                         liquid_psychrometric_correction
 
-    condensation = ifelse(qc_raw < 0, zero(FT), min(qc_raw, qᵛ / τ))
-    rain_condensation = ifelse(qr_raw < 0, zero(FT), min(qr_raw, qᵛ / τ))
-    rain_evaporation = ifelse(qr_raw < 0, min(-qr_raw, max(0, qʳ) / τ), zero(FT))
+    condensation = ifelse(raw_cloud_growth < 0, zero(FT), min(raw_cloud_growth, qᵛ / τ))
+    rain_condensation = ifelse(raw_rain_growth < 0, zero(FT), min(raw_rain_growth, qᵛ / τ))
+    rain_evaporation = ifelse(raw_rain_growth < 0,
+                              min(-raw_rain_growth, max(0, qʳ) / τ), zero(FT))
 
-    is_sublimation = qi_raw < 0
+    is_sublimation = raw_ice_growth < 0
     deposition = ifelse(is_sublimation,
-                        -min(-qi_raw * p3.process_rates.calibration_factor_sublimation,
+                        -min(-raw_ice_growth * p3.process_rates.calibration_factor_sublimation,
                              max(0, qⁱ) / τ),
-                        min(qi_raw * p3.process_rates.calibration_factor_deposition, qᵛ / τ))
+                        min(raw_ice_growth * p3.process_rates.calibration_factor_deposition,
+                            qᵛ / τ))
 
-    coating_condensation = ifelse(ql_raw < 0, zero(FT), min(ql_raw, qᵛ / τ))
-    coating_evaporation = ifelse(ql_raw < 0, min(-ql_raw, max(0, qʷⁱ) / τ), zero(FT))
+    coating_condensation = ifelse(raw_coating_growth < 0, zero(FT),
+                                  min(raw_coating_growth, qᵛ / τ))
+    coating_evaporation = ifelse(raw_coating_growth < 0,
+                                 min(-raw_coating_growth, max(0, qʷⁱ) / τ), zero(FT))
 
     return (; condensation, rain_evaporation, rain_condensation, deposition,
               coating_condensation, coating_evaporation)
 end
 
-function expected_reference_predicted_ssat_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sˢᵃᵗ, T, constants)
+function expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sᵛ⁺ˡ, T, constants)
     FT = typeof(qᶜˡ)
     τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
     Rᵛ = FT(Breeze.Thermodynamics.vapor_gas_constant(constants))
@@ -243,9 +264,9 @@ function expected_reference_predicted_ssat_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺�
     cᵖᵈ = constants.dry_air.heat_capacity
     dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
     ξˡ = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
-    ε = (qᵛ - qᵛ⁺ˡ - sˢᵃᵗ) / ξˡ
+    ε = (qᵛ - qᵛ⁺ˡ - sᵛ⁺ˡ) / ξˡ
     ε = max(ε, -qᶜˡ)
-    ε = ifelse(sˢᵃᵗ < 0, min(0, ε), ε)
+    ε = ifelse(sᵛ⁺ˡ < 0, min(0, ε), ε)
     ε = ifelse(abs(ε) < 100 * eps(FT) * max(qᵛ⁺ˡ, qᵛ), zero(FT), ε)
     ε = ifelse(PPP.predicts_supersaturation(p3.process_rates), ε, zero(FT))
     return (; ε, rate = ε / τ)
@@ -289,7 +310,7 @@ end
     @testset "Rime splintering follows Fortran guards" begin
         FT = Float64
         p3 = PredictedParticlePropertiesMicrophysics(FT)
-        prp = p3.process_rates
+        parameters = p3.process_rates
 
         cloud_riming = FT(3e-7)
         rain_riming = FT(2e-7)
@@ -301,39 +322,39 @@ end
         left_q, left_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
             p3, cloud_riming, rain_riming, FT(266.15), D_ice, Fˡ, surface_T, qᶠ)
         peak_q, peak_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
-            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
+            p3, cloud_riming, rain_riming, parameters.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
         right_q, right_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
             p3, cloud_riming, rain_riming, FT(269.15), D_ice, Fˡ, surface_T, qᶠ)
 
         total_riming = cloud_riming + rain_riming
-        @test left_n ≈ (FT(1) / FT(3)) * prp.splintering_rate * total_riming
-        @test peak_n ≈ prp.splintering_rate * total_riming
-        @test right_n ≈ FT(0.5) * prp.splintering_rate * total_riming
-        @test left_q ≈ left_n * prp.splintering_crystal_mass
-        @test peak_q ≈ peak_n * prp.splintering_crystal_mass
-        @test right_q ≈ right_n * prp.splintering_crystal_mass
+        @test left_n ≈ (FT(1) / FT(3)) * parameters.splintering_rate * total_riming
+        @test peak_n ≈ parameters.splintering_rate * total_riming
+        @test right_n ≈ FT(0.5) * parameters.splintering_rate * total_riming
+        @test left_q ≈ left_n * parameters.splintering_crystal_mass
+        @test peak_q ≈ peak_n * parameters.splintering_crystal_mass
+        @test right_q ≈ right_n * parameters.splintering_crystal_mass
 
         cloud_peak_q, rain_peak_q, split_peak_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rates(
-            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
+            p3, cloud_riming, rain_riming, parameters.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
         @test split_peak_n ≈ peak_n
-        @test cloud_peak_q ≈ prp.splintering_rate * cloud_riming * prp.splintering_crystal_mass
-        @test rain_peak_q ≈ prp.splintering_rate * rain_riming * prp.splintering_crystal_mass
+        @test cloud_peak_q ≈ parameters.splintering_rate * cloud_riming * parameters.splintering_crystal_mass
+        @test rain_peak_q ≈ parameters.splintering_rate * rain_riming * parameters.splintering_crystal_mass
 
         _, cloud_only_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
-            p3, cloud_riming, zero(FT), prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
+            p3, cloud_riming, zero(FT), parameters.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
         _, small_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
-            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, FT(200e-6), Fˡ, surface_T, qᶠ)
+            p3, cloud_riming, rain_riming, parameters.splintering_temperature_peak, FT(200e-6), Fˡ, surface_T, qᶠ)
         _, wet_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
-            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, D_ice, FT(0.2), surface_T, qᶠ)
+            p3, cloud_riming, rain_riming, parameters.splintering_temperature_peak, D_ice, FT(0.2), surface_T, qᶠ)
         _, warm_surface_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
-            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, D_ice, Fˡ, FT(283), qᶠ)
+            p3, cloud_riming, rain_riming, parameters.splintering_temperature_peak, D_ice, Fˡ, FT(283), qᶠ)
         _, no_rime_n = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
-            p3, cloud_riming, rain_riming, prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, zero(FT))
+            p3, cloud_riming, rain_riming, parameters.splintering_temperature_peak, D_ice, Fˡ, surface_T, zero(FT))
 
         # H4: Cloud riming contributes to splintering
         @test cloud_only_n > 0
         cloud_only_q, _ = Breeze.Microphysics.PredictedParticleProperties.rime_splintering_rate(
-            p3, cloud_riming, zero(FT), prp.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
+            p3, cloud_riming, zero(FT), parameters.splintering_temperature_peak, D_ice, Fˡ, surface_T, qᶠ)
         @test cloud_only_q > 0
         @test small_n == 0
         @test wet_n == 0
@@ -356,7 +377,7 @@ end
     @testset "rain DSD lambda limiter recomputes number" begin
         FT = Float64
         p3 = PredictedParticlePropertiesMicrophysics(FT)
-        prp = p3.process_rates
+        parameters = p3.process_rates
         qʳ = FT(1e-3)
         nʳ = FT(1e-5)
         S = FT(0.99)
@@ -365,17 +386,17 @@ end
         Dᵛ = FT(2.2e-5)
         ρ = FT(1)
 
-        λ_r = PPP.rain_slope_parameter(qʳ, nʳ, prp)
-        nʳ_bounded = qʳ * λ_r^3 / (FT(π) * prp.liquid_water_density)
+        λ_r = PPP.rain_slope_parameter(qʳ, nʳ, parameters)
+        nʳ_bounded = qʳ * λ_r^3 / (FT(π) * parameters.liquid_water_density)
 
-        @test λ_r == prp.rain_lambda_min
+        @test λ_r == parameters.minimum_rain_slope
         @test nʳ_bounded > nʳ
 
         raw_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, qʳ, nʳ, S,
-                                             thermodynamic_factor, p3, prp,
+                                             thermodynamic_factor, p3, parameters,
                                              ν, Dᵛ, ρ, FT)
         bounded_rate = PPP.rain_evaporation_rate(p3.rain.evaporation, qʳ, nʳ_bounded, S,
-                                                 thermodynamic_factor, p3, prp,
+                                                 thermodynamic_factor, p3, parameters,
                                                  ν, Dᵛ, ρ, FT)
 
         @test raw_rate ≈ bounded_rate
@@ -405,12 +426,12 @@ end
         upper_nⁱ = limiter.small_q(log_m, rime_state.Fᶠ, Fˡ,
                                    rime_state.ρᶠ, μ_for_limiter) * qⁱ
         expected_nⁱ = clamp(nⁱ, lower_nⁱ, upper_nⁱ)
-        props = PPP.p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+        properties = PPP.p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
 
         @test expected_nⁱ > nⁱ
-        @test props.nⁱ ≈ expected_nⁱ
+        @test properties.nⁱ ≈ expected_nⁱ
 
-        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, props)
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties)
         τ = p3.process_rates.sink_limiting_timescale
         @test rates.ice_number_correction ≈ (expected_nⁱ - nⁱ) / τ
         @test tendency_ρnⁱ(rates, ρ) >= ρ * rates.ice_number_correction
@@ -423,7 +444,7 @@ end
         nⁱ = FT(1e5)   # Ice number [1/kg]
         Fᶠ = FT(0.3)   # Rime fraction
         ρᶠ = FT(400.0)  # Rime density [kg/m³]
-        prp = ProcessRateParameters(FT)
+        parameters = ProcessRateParameters(FT)
 
         # Create rates with typical warm-rain and ice process activity
         # Sign convention (M7): all one-directional rates are positive magnitudes
@@ -451,7 +472,7 @@ end
             FT(0.0),    # sublimation_number
             # Phase 2: Aggregation (positive magnitude)
             FT(500.0),  # aggregation
-            FT(0.0),    # ni_limit (C3: global Nᵢ cap; zero in warm-environment test)
+            FT(0.0),    # ni_limit (C3: global Nⁱ cap; zero in warm-environment test)
             # Phase 2: Riming (all positive magnitudes)
             FT(1e-7),   # cloud_riming
             FT(1e4),    # cloud_riming_number (positive magnitude)
@@ -495,15 +516,15 @@ end
             FT(0.0),    # cloud_number_correction (M6)
             FT(0.0),    # rain_number_correction (M6)
             FT(0.0),    # ice_number_correction (M4)
-            FT(0.0),    # predicted_ssat_adjustment
-            FT(0.0),    # predicted_ssat_tendency
+            FT(0.0),    # predicted_supersaturation_adjustment
+            FT(0.0),    # predicted_supersaturation_tendency
         )
 
         # Test each tendency function returns a finite number
         @test isfinite(tendency_ρqᶜˡ(rates, ρ))
         @test isfinite(tendency_ρqʳ(rates, ρ))
         @test isfinite(tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, zero(FT), one(FT),
-                                    tendency_test_p3(FT; process_rates = prp)))
+                                    tendency_test_p3(FT; process_rates = parameters)))
         @test isfinite(tendency_ρqⁱ(rates, ρ))
         @test isfinite(tendency_ρnⁱ(rates, ρ))
         @test isfinite(tendency_ρqᶠ(rates, ρ, Fᶠ))
@@ -570,15 +591,15 @@ end
         ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, FT(0), FT(0), FT(0), FT(0),
                                  FT(0), FT(0), FT(0), FT(0), FT(0), FT(0))
 
-        props = PPP.p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
-        cache = PPP.p3_fall_speed_compute(p3, ρ, ℳ, props, constants)
+        properties = PPP.p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+        cache = PPP.p3_fall_speed_compute(p3, ρ, ℳ, properties, constants)
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
         transport = air_transport_properties(T, P, constants)
         η = transport.ν * ρ
         a_cn = constants.gravitational_acceleration * p3.process_rates.liquid_water_density /
                (FT(18) * max(η, FT(1e-20)))
-        expected_mass_velocity = a_cn * (cloud.μ_c + 5) * (cloud.μ_c + 4) / cloud.λ_c^2
-        expected_number_velocity = a_cn * (cloud.μ_c + 2) * (cloud.μ_c + 1) / cloud.λ_c^2
+        expected_mass_velocity = a_cn * (cloud.μᶜˡ + 5) * (cloud.μᶜˡ + 4) / cloud.λᶜˡ^2
+        expected_number_velocity = a_cn * (cloud.μᶜˡ + 2) * (cloud.μᶜˡ + 1) / cloud.λᶜˡ^2
 
         @test cache.wᶜˡ ≈ expected_mass_velocity rtol=FT(1e-12)
         @test cache.wᶜˡₙ ≈ expected_number_velocity rtol=FT(1e-12)
@@ -587,8 +608,8 @@ end
         # The Stokes prefactor scales with the *model's* gravitational acceleration
         # rather than a hardcoded 9.81, so doubling g doubles both fall speeds.
         heavy = ThermodynamicConstants(FT; gravitational_acceleration = 2 * constants.gravitational_acceleration)
-        vᶜ = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν, cloud.μ_c, cloud.λ_c, constants)
-        vᶜ_heavy = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν, cloud.μ_c, cloud.λ_c, heavy)
+        vᶜ = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν, cloud.μᶜˡ, cloud.λᶜˡ, constants)
+        vᶜ_heavy = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport.ν, cloud.μᶜˡ, cloud.λᶜˡ, heavy)
         @test vᶜ.mass_weighted ≈ expected_mass_velocity rtol=FT(1e-12)
         @test vᶜ_heavy.mass_weighted ≈ 2 * vᶜ.mass_weighted rtol=FT(1e-12)
         @test vᶜ_heavy.number_weighted ≈ 2 * vᶜ.number_weighted rtol=FT(1e-12)
@@ -603,12 +624,12 @@ end
         δ = FT(1)
         for g_constants in (constants, heavy)
             v_impact = PPP.cloud_terminal_velocities(p3, qᶜˡ, ρ, transport_rime.ν,
-                                                     cloud.μ_c, cloud.λ_c,
+                                                     cloud.μᶜˡ, cloud.λᶜˡ,
                                                      g_constants).mass_weighted
             ρᶠ_above = rime_density(p3, qᶜˡ, cloud_rim, T_rime, v_impact + δ, ρ,
-                                    g_constants, transport_rime, cloud.μ_c, cloud.λ_c)
+                                    g_constants, transport_rime, cloud.μᶜˡ, cloud.λᶜˡ)
             ρᶠ_below = rime_density(p3, qᶜˡ, cloud_rim, T_rime, v_impact - δ, ρ,
-                                    g_constants, transport_rime, cloud.μ_c, cloud.λ_c)
+                                    g_constants, transport_rime, cloud.μᶜˡ, cloud.λᶜˡ)
             @test ρᶠ_above ≈ ρᶠ_below rtol=FT(1e-12)
             @test p3.process_rates.minimum_rime_density < ρᶠ_above < p3.process_rates.maximum_rime_density
         end
@@ -647,7 +668,7 @@ end
                ρqⁱ  = CenterField(grid), ρnⁱ  = CenterField(grid),
                ρqᶠ  = CenterField(grid), ρbᶠ  = CenterField(grid),
                ρqʷⁱ = CenterField(grid),
-               ρsˢᵃᵗ = CenterField(grid), ρnᵃ = CenterField(grid))
+               ρsᵛ⁺ˡ = CenterField(grid), ρnᵃ = CenterField(grid))
 
         w_face = ZFaceField(grid)
         set!(w_face, (x, y, z) -> 2.0)
@@ -716,7 +737,7 @@ end
     end
 
     @testset "Cloud DSD diagnosis - Float32 type stability" begin
-        # An untyped `1e-16` floor on nᶜˡ promoted Nᶜ, μ_c and λ_c to Float64 on the
+        # An untyped `1e-16` floor on nᶜˡ promoted Nᶜˡ, μᶜˡ, and λᶜˡ to Float64 on the
         # per-cell path, and left the returned nᶜˡ inferred as Union{Float32, Float64}
         # through the `iszero(ρ)` ifelse. @inferred catches the Union; the eltype
         # checks catch a silent promotion to a concrete Float64.
@@ -744,26 +765,26 @@ end
         FT = Float64
 
         # KK2000 formula with typical cumulus values
-        qc = FT(1e-3)     # 1 g/kg cloud water
-        Nc = FT(100e6)     # 100 cm⁻³ cloud droplet concentration
+        qᶜˡ = FT(1e-3)     # 1 g/kg cloud water
+        Nᶜˡ = FT(100e6)    # 100 cm⁻³ cloud droplet concentration
         ρ  = FT(1.2)       # sea-level air density
 
-        rate = rain_autoconversion_rate(p3, qc, Nc, ρ)
+        rate = rain_autoconversion_rate(p3, qᶜˡ, Nᶜˡ, ρ)
         @test rate > 0
         # KK2000 gives O(1e-6) kg/kg/s for these inputs
         @test rate > 1e-8
         @test rate < 1e-3
 
         # Higher cloud water content gives faster autoconversion
-        rate_high = rain_autoconversion_rate(p3, FT(2e-3), Nc, ρ)
+        rate_high = rain_autoconversion_rate(p3, FT(2e-3), Nᶜˡ, ρ)
         @test rate_high > rate
 
         # Zero cloud water gives zero autoconversion
-        rate_zero = rain_autoconversion_rate(p3, FT(0), Nc, ρ)
+        rate_zero = rain_autoconversion_rate(p3, FT(0), Nᶜˡ, ρ)
         @test rate_zero == 0
 
         # Small cloud water gives small but nonzero rate (KK2000 has no threshold)
-        rate_small = rain_autoconversion_rate(p3, FT(5e-5), Nc, ρ)
+        rate_small = rain_autoconversion_rate(p3, FT(5e-5), Nᶜˡ, ρ)
         @test rate_small > 0
         @test rate_small < rate
     end
@@ -772,30 +793,30 @@ end
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
-        qc = FT(1e-3)
-        qr = FT(1e-3)
+        qᶜˡ = FT(1e-3)
+        qʳ = FT(1e-3)
 
-        rate = rain_accretion_rate(p3, qc, qr)
+        rate = rain_accretion_rate(p3, qᶜˡ, qʳ)
         @test rate > 0
         @test isfinite(rate)
 
         # Zero cloud gives zero accretion
-        @test rain_accretion_rate(p3, FT(0), qr) == 0
+        @test rain_accretion_rate(p3, FT(0), qʳ) == 0
 
         # Zero rain gives zero accretion
-        @test rain_accretion_rate(p3, qc, FT(0)) == 0
+        @test rain_accretion_rate(p3, qᶜˡ, FT(0)) == 0
 
         # Higher rain gives faster accretion
-        rate_high = rain_accretion_rate(p3, qc, FT(2e-3))
+        rate_high = rain_accretion_rate(p3, qᶜˡ, FT(2e-3))
         @test rate_high > rate
     end
 
     @testset "warm_rain_scheme dispatch" begin
         FT = Float64
-        qc = FT(1e-3)
-        qr = FT(5e-4)
-        Nc = FT(1e8)
-        nr = FT(1e4)
+        qᶜˡ = FT(1e-3)
+        qʳ = FT(5e-4)
+        Nᶜˡ = FT(1e8)
+        nʳ = FT(1e4)
         ρ  = FT(1.0)
 
         p3_kk = PredictedParticlePropertiesMicrophysics(FT; warm_rain_scheme = KhairoutdinovKogan2000())
@@ -804,34 +825,34 @@ end
         p3_default = PredictedParticlePropertiesMicrophysics(FT)
         @test p3_default.warm_rain_scheme isa KhairoutdinovKogan2000
         @test KhairoutdinovKogan2000 <: AbstractWarmRainScheme
-        @test rain_autoconversion_rate(p3_default, qc, Nc, ρ, qr) ==
-              rain_autoconversion_rate(p3_kk, qc, Nc, ρ, qr)
+        @test rain_autoconversion_rate(p3_default, qᶜˡ, Nᶜˡ, ρ, qʳ) ==
+              rain_autoconversion_rate(p3_kk, qᶜˡ, Nᶜˡ, ρ, qʳ)
 
-        a_kk = rain_autoconversion_rate(p3_kk, qc, Nc, ρ, qr)
-        @test isfinite(a_kk)
-        @test a_kk > 0
+        autoconversion = rain_autoconversion_rate(p3_kk, qᶜˡ, Nᶜˡ, ρ, qʳ)
+        @test isfinite(autoconversion)
+        @test autoconversion > 0
 
         # KK2000 autoconversion ignores qʳ
-        @test rain_autoconversion_rate(p3_kk, qc, Nc, ρ, zero(FT)) == a_kk
+        @test rain_autoconversion_rate(p3_kk, qᶜˡ, Nᶜˡ, ρ, zero(FT)) == autoconversion
 
-        c_kk = rain_accretion_rate(p3_kk, qc, qr, ρ)
-        @test isfinite(c_kk)
-        @test c_kk > 0
+        accretion = rain_accretion_rate(p3_kk, qᶜˡ, qʳ, ρ)
+        @test isfinite(accretion)
+        @test accretion > 0
 
         # Rain self-collection: linear form k_rr × ρ × qʳ × nʳ
-        s_kk = rain_self_collection_rate(p3_kk, qr, nr, ρ)
-        @test isfinite(s_kk)
-        @test s_kk > 0
+        self_collection = rain_self_collection_rate(p3_kk, qʳ, nʳ, ρ)
+        @test isfinite(self_collection)
+        @test self_collection > 0
 
         # Cloud self-collection is zero for KK2000 (Fortran ncslf = 0)
-        @test PredictedParticleProperties.cloud_self_collection_rate(p3_kk, qc, Nc, ρ) == 0
+        @test PredictedParticleProperties.cloud_self_collection_rate(p3_kk, qᶜˡ, Nᶜˡ, ρ) == 0
 
         # Seed-drop mass: KK2000 ≈ 25 μm radius
         @test PredictedParticleProperties.rain_seed_drop_mass(p3_kk) ≈ 4π/3 * 1000 * (25e-6)^3
 
         # Autoconversion removes cloud number in proportion to the mass lost
         autoconversion_only = p3_process_rates_with(FT; autoconversion = FT(1e-7))
-        @test tendency_ρnᶜˡ(autoconversion_only, ρ, Nc, qc, p3_kk) < 0
+        @test tendency_ρnᶜˡ(autoconversion_only, ρ, Nᶜˡ, qᶜˡ, p3_kk) < 0
     end
 
     @testset "rain_evaporation_rate" begin
@@ -892,14 +913,16 @@ end
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ + qʷⁱ, qⁱ)
         transport = air_transport_properties(T, P, constants)
 
-        epsr = PPP.rain_condensation_epsilon(p3, FT(5e-4), FT(1e6), ρ, transport)
-        expected_epsr = expected_reference_rain_epsilon(p3, FT(5e-4), FT(1e6), ρ, transport, FT)
+        rain_relaxation = PPP.rain_vapor_relaxation_coefficient(
+            p3, FT(5e-4), FT(1e6), ρ, transport)
+        expected_rain_relaxation = expected_reference_rain_vapor_relaxation(
+            p3, FT(5e-4), FT(1e6), ρ, transport, FT)
         # Fˡ = 0 here, so the dry-ice gate inside `coupled_saturation_adjustment_rates`
-        # is active and the raw relaxation coefficient is the Fortran `epsi`.
-        epsi = PPP.ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                          constants, transport, q, μ)
-        expected_epsi = expected_reference_ice_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                                     constants, transport, q, μ)
+        # is active and the raw relaxation coefficient is Fortran's `epsi`.
+        ice_relaxation = PPP.ice_vapor_relaxation_coefficient(
+            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
+        expected_ice_relaxation = expected_reference_ice_vapor_relaxation(
+            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
         # predict_supersaturation defaults to false, so this M&G call sees
@@ -909,7 +932,7 @@ end
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), FT(0))
+            cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
         expected_rates = expected_reduced_reference_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
@@ -921,10 +944,10 @@ end
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), FT(0))
+            cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
 
-        @test epsr ≈ expected_epsr
-        @test epsi ≈ expected_epsi
+        @test rain_relaxation ≈ expected_rain_relaxation
+        @test ice_relaxation ≈ expected_ice_relaxation
         @test rates.condensation ≈ expected_rates.condensation
         @test rates.rain_evaporation ≈ expected_rates.rain_evaporation
         @test rates.rain_condensation ≈ expected_rates.rain_condensation
@@ -941,7 +964,7 @@ end
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), FT(0))
+            cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
         @test rates_unforced.condensation === rates.condensation
         @test rates_unforced.deposition === rates.deposition
         @test rates_unforced.rain_evaporation === rates.rain_evaporation
@@ -954,7 +977,7 @@ end
             T_ad = FT(280.0)
             qᵛ⁺ˡ_ad = saturation_specific_humidity(T_ad, ρ, constants, PlanarLiquidSurface())
             qᵛ⁺ⁱ_ad = saturation_specific_humidity(T_ad, ρ, constants, PlanarIceSurface())
-            qᵛ_ad = qᵛ⁺ˡ_ad  # exactly saturated → ssat_liquid = 0
+            qᵛ_ad = qᵛ⁺ˡ_ad  # exactly saturated → supersaturation = 0
             q_ad = MoistureMassFractions(qᵛ_ad, qᶜˡ + qʳ + qʷⁱ, zero(FT))
             transport_ad = air_transport_properties(T_ad, P, constants)
             cloud_ad = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
@@ -964,7 +987,7 @@ end
                 p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
                 qᵛ_ad, qᵛ⁺ˡ_ad, qᵛ⁺ⁱ_ad, Fᶠ, ρᶠ, T_ad, P, ρ,
                 constants, transport_ad, q_ad, μ,
-                cloud_ad.μ_c, cloud_ad.λ_c, cloud_ad.nᶜˡ,
+                cloud_ad.μᶜˡ, cloud_ad.λᶜˡ, cloud_ad.nᶜˡ,
                 temperature_tendency, FT(0))
             @test rates_cooling.condensation > 0
             @test rates_cooling.deposition == 0  # no ice present
@@ -985,7 +1008,7 @@ end
             common = (p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
                       qᵛ_s, qᵛ⁺ˡ_s, qᵛ⁺ⁱ_s, Fᶠ, ρᶠ, T_s, P, ρ,
                       constants, transport_s, q_s, μ,
-                      cloud_s.μ_c, cloud_s.λ_c, cloud_s.nᶜˡ)
+                      cloud_s.μᶜˡ, cloud_s.λᶜˡ, cloud_s.nᶜˡ)
             rates_up = PPP.coupled_saturation_adjustment_rates(common..., FT(-0.01), FT(0))
             rates_down = PPP.coupled_saturation_adjustment_rates(common..., FT(+0.01), FT(0))
             @test rates_up.condensation > 0
@@ -1025,25 +1048,25 @@ end
         transport = air_transport_properties(T, P, constants)
 
         # Fˡ ≈ 0.33 here, so the wet-ice gate is the active one and the raw
-        # relaxation coefficient is the Fortran `epsiw`.
-        epsiw = PPP.ice_relaxation_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                           constants, transport, q, μ)
-        expected_epsiw = expected_reference_coating_epsilon(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                                         constants, transport, q, μ)
+        # relaxation coefficient is Fortran's `epsiw`.
+        coating_relaxation = PPP.ice_vapor_relaxation_coefficient(
+            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
+        expected_coating_relaxation = expected_reference_coating_vapor_relaxation(
+            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
         rates = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ,
-            cloud.μ_c, cloud.λ_c, cloud.nᶜˡ, FT(0), FT(0))
+            cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
         expected_rates = expected_reduced_reference_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
             constants, transport, q, μ)
 
-        @test epsiw > 0
-        @test epsiw ≈ expected_epsiw
+        @test coating_relaxation > 0
+        @test coating_relaxation ≈ expected_coating_relaxation
 
         # Mutual exclusivity: the dry-ice and wet-ice branches are gated on
         # complementary liquid-fraction regimes, so only one can be nonzero.
@@ -1127,20 +1150,20 @@ end
         qᵗ = FT(1.2e-2)
         qᵛ⁺ˡ = adjustment_saturation_specific_humidity(T, P, qᵗ, constants, PlanarLiquidSurface())
         # Weak supersaturation, so the seed mass is limited by the available vapor rather
-        # than by the prescribed-Nᶜ target mass.
+        # than by the prescribed-Nᶜˡ target mass.
         qᵛ = qᵛ⁺ˡ + FT(1e-6)
         qᶜˡ = zero(FT)
         q = MoistureMassFractions(qᵛ, qᶜˡ, zero(FT))
-        Nᶜ = p3.cloud.number_concentration
+        Nᶜˡ = p3.cloud.number_concentration
 
         ccn = PPP.compute_ccn_activation(p3.aerosol, p3, qᶜˡ, zero(FT), zero(FT),
-                                         qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜ, constants)
+                                         qᵛ, qᵛ⁺ˡ, T, q, ρ, Nᶜˡ, constants)
 
         Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
         ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
         ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
         cons7 = FT(4 * FT(π) / 3 * 1000 * (1e-6)^3)
-        deficit = Nᶜ / ρ * cons7
+        deficit = Nᶜˡ / ρ * cons7
         @test (qᵛ - qᵛ⁺ˡ) / ξˡ < deficit
         @test ccn.mass ≈ ((qᵛ - qᵛ⁺ˡ) / ξˡ) / τ rtol=FT(1e-14)
 
@@ -1359,7 +1382,7 @@ end
         bᶠ = qᶠ / FT(400)
         Fᶠ = FT(0.1)
         ρᶠ = FT(400)
-        μ_ice = FT(0)
+        μⁱ = FT(0)
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, FT(300e6), ρ)
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qⁱ)
@@ -1371,12 +1394,12 @@ end
             bᶠ,
             Fᶠ,
             ρᶠ,
-            μ_ice,
+            μⁱ,
             FT(0),
-            cloud.Nᶜ,
+            cloud.Nᶜˡ,
             cloud.nᶜˡ,
-            cloud.μ_c,
-            cloud.λ_c,
+            cloud.μᶜˡ,
+            cloud.λᶜˡ,
             T,
             P,
             qᵛ,
@@ -1403,7 +1426,7 @@ end
         )
         phase1 = PPP.P3Phase1Rates{FT}(ntuple(_ -> zero(FT), fieldcount(PPP.P3Phase1Rates{FT}))...)
 
-        rates = PPP._p3_phase2_rates(p3, ρ, ℳ, constants, state, phase1)
+        rates = PPP.p3_phase2_rates(p3, ρ, ℳ, constants, state, phase1)
 
         @test rates.cloud_riming == 0
         @test rates.rain_riming == 0
@@ -1432,7 +1455,7 @@ end
         bᶠ = qᶠ / FT(400)
         Fᶠ = FT(0.1)
         ρᶠ = FT(400)
-        μ_ice = FT(0)
+        μⁱ = FT(0)
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, FT(300e6), ρ)
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qⁱ)
@@ -1444,12 +1467,12 @@ end
             bᶠ,
             Fᶠ,
             ρᶠ,
-            μ_ice,
+            μⁱ,
             FT(0),
-            cloud.Nᶜ,
+            cloud.Nᶜˡ,
             cloud.nᶜˡ,
-            cloud.μ_c,
-            cloud.λ_c,
+            cloud.μᶜˡ,
+            cloud.λᶜˡ,
             T,
             P,
             qᵛ,
@@ -1476,7 +1499,7 @@ end
         )
         phase1 = PPP.P3Phase1Rates{FT}(ntuple(_ -> zero(FT), fieldcount(PPP.P3Phase1Rates{FT}))...)
 
-        rates = PPP._p3_phase2_rates(p3, ρ, ℳ, constants, state, phase1)
+        rates = PPP.p3_phase2_rates(p3, ρ, ℳ, constants, state, phase1)
 
         @test qᶜˡ + qʳ < FT(1e-6)
         @test rates.cloud_riming > 0
@@ -1628,24 +1651,26 @@ end
         P = FT(90000.0)
         transport = air_transport_properties(T, P, constants)
 
-        prp = p3.process_rates
-        μ_c = p3.cloud.shape_parameter
-        Nᶜ = p3.cloud.number_concentration
-        ρ_water = prp.liquid_water_density
+        parameters = p3.process_rates
+        μᶜˡ = p3.cloud.shape_parameter
+        Nᶜˡ = p3.cloud.number_concentration
+        ρ_water = parameters.liquid_water_density
 
         qcl_abs = qcl * ρ
         η = transport.ν * ρ
-        λ_c_uncapped = cbrt(
-            FT(π) * ρ_water * Nᶜ * (μ_c + 3) * (μ_c + 2) * (μ_c + 1) /
+        unbounded_cloud_slope = cbrt(
+            FT(π) * ρ_water * Nᶜˡ * (μᶜˡ + 3) * (μᶜˡ + 2) * (μᶜˡ + 1) /
             (FT(6) * qcl_abs)
         )
-        λ_c = clamp(λ_c_uncapped, (μ_c + 1) * FT(2.5e4), (μ_c + 1) * FT(1e6))
-        ρ_rime = rime_density(p3, qcl, cloud_rim, T, vᵢ, ρ, constants, transport, μ_c, λ_c)
+        λᶜˡ = clamp(unbounded_cloud_slope, (μᶜˡ + 1) * FT(2.5e4),
+                    (μᶜˡ + 1) * FT(1e6))
+        ρ_rime = rime_density(p3, qcl, cloud_rim, T, vᵢ, ρ, constants,
+                              transport, μᶜˡ, λᶜˡ)
         a_cn = constants.gravitational_acceleration * ρ_water / (FT(18) * η)
-        Vt_qc = a_cn * (μ_c + 5) * (μ_c + 4) / λ_c^2
-        D_c = (μ_c + 4) / λ_c
-        inverse_supercooling = inv(min(FT(-0.001), T - prp.freezing_temperature))
-        Ri = clamp(-(FT(0.5e6) * D_c) * abs(vᵢ - Vt_qc) * inverse_supercooling, FT(1), FT(12))
+        Vt_qc = a_cn * (μᶜˡ + 5) * (μᶜˡ + 4) / λᶜˡ^2
+        Dᶜˡ = (μᶜˡ + 4) / λᶜˡ
+        inverse_supercooling = inv(min(FT(-0.001), T - parameters.freezing_temperature))
+        Ri = clamp(-(FT(0.5e6) * Dᶜˡ) * abs(vᵢ - Vt_qc) * inverse_supercooling, FT(1), FT(12))
         expected = ifelse(
             Ri <= FT(8),
             (FT(0.051) + FT(0.114) * Ri - FT(0.0055) * Ri^2) * FT(1000),
@@ -1658,18 +1683,18 @@ end
         T_warm = FT(278.15)
         transport_warm = air_transport_properties(T_warm, P, constants)
         ρ_warm = rime_density(p3, qcl, cloud_rim, T_warm, vᵢ, ρ, constants,
-                              transport_warm, μ_c, λ_c)
+                              transport_warm, μᶜˡ, λᶜˡ)
         @test ρ_warm == 400
 
         ρ_no_cloud = rime_density(p3, qcl, FT(0), T, vᵢ, ρ, constants,
-                                  transport, μ_c, λ_c)
+                                  transport, μᶜˡ, λᶜˡ)
         @test ρ_no_cloud == 400
     end
 
     @testset "Rime consistency enforcement" begin
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
-        prp = p3.process_rates
+        parameters = p3.process_rates
 
         function reference_bulk_rime_density(qⁱ, qᶠ, bᶠ)
             qᶠ = max(qᶠ, 0)
@@ -1677,13 +1702,13 @@ end
             ρᶠ = FT(NaN)
 
             # Mirrors `consistent_rime_state`: Fortran's `bsmall = qsmall/rho_rimeMax`.
-            if bᶠ >= p3.minimum_mass_mixing_ratio / prp.maximum_rime_density
+            if bᶠ >= p3.minimum_mass_mixing_ratio / parameters.maximum_rime_density
                 ρᶠ = qᶠ / bᶠ
-                if ρᶠ < prp.minimum_rime_density
-                    ρᶠ = prp.minimum_rime_density
+                if ρᶠ < parameters.minimum_rime_density
+                    ρᶠ = parameters.minimum_rime_density
                     bᶠ = qᶠ / ρᶠ
-                elseif ρᶠ > prp.maximum_rime_density
-                    ρᶠ = prp.maximum_rime_density
+                elseif ρᶠ > parameters.maximum_rime_density
+                    ρᶠ = parameters.maximum_rime_density
                     bᶠ = qᶠ / ρᶠ
                 end
             else
@@ -1703,7 +1728,7 @@ end
             return (; qᶠ, bᶠ, ρᶠ)
         end
 
-        bsmall = p3.minimum_mass_mixing_ratio / prp.maximum_rime_density
+        bsmall = p3.minimum_mass_mixing_ratio / parameters.maximum_rime_density
         @test bsmall ≈ FT(1e-14) / FT(900)
 
         # Below `bsmall` no admissible density leaves significant rime: drop the pair.
@@ -1718,8 +1743,8 @@ end
         dense_rime = consistent_rime_state(p3, FT(1e-4), FT(1e-5), FT(1e-16), FT(0))
         @test FT(1e-16) > bsmall
         @test dense_rime.qᶠ == FT(1e-5)
-        @test dense_rime.ρᶠ == prp.maximum_rime_density
-        @test dense_rime.bᶠ ≈ dense_rime.qᶠ / prp.maximum_rime_density
+        @test dense_rime.ρᶠ == parameters.maximum_rime_density
+        @test dense_rime.bᶠ ≈ dense_rime.qᶠ / parameters.maximum_rime_density
         @test dense_rime.Fᶠ ≈ FT(0.1)
 
         tiny_rime = consistent_rime_state(p3, FT(1e-4), FT(5e-15), FT(1e-15), FT(0))
@@ -1727,12 +1752,12 @@ end
         @test tiny_rime.bᶠ == 0
 
         low_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-6), FT(0))
-        @test low_density.ρᶠ == prp.minimum_rime_density
-        @test low_density.bᶠ ≈ low_density.qᶠ / prp.minimum_rime_density
+        @test low_density.ρᶠ == parameters.minimum_rime_density
+        @test low_density.bᶠ ≈ low_density.qᶠ / parameters.minimum_rime_density
 
         high_density = consistent_rime_state(p3, FT(1e-4), FT(2e-5), FT(2e-8), FT(0))
-        @test high_density.ρᶠ == prp.maximum_rime_density
-        @test high_density.bᶠ ≈ high_density.qᶠ / prp.maximum_rime_density
+        @test high_density.ρᶠ == parameters.maximum_rime_density
+        @test high_density.bᶠ ≈ high_density.qᶠ / parameters.maximum_rime_density
 
         capped = consistent_rime_state(p3, FT(1e-5), FT(2e-5), FT(5e-8), FT(0))
         @test capped.qᶠ == FT(1e-5)
@@ -1759,7 +1784,7 @@ end
             ρqᶠ = ρ * FT(2e-5),
             ρbᶠ = ρ * FT(5e-8),
             ρqʷⁱ = FT(0),
-            ρsˢᵃᵗ = FT(0),
+            ρsᵛ⁺ˡ = FT(0),
         )
         ℳ = Breeze.AtmosphereModels.microphysical_state(p3, ρ, μ, nothing, (u = FT(0), v = FT(0), w = FT(0)))
         @test ℳ.qᶠ == FT(1e-5)
@@ -1820,7 +1845,7 @@ end
             qf,            # qᶠ
             FT(qf / 400),  # bᶠ (rime volume)
             FT(0),         # qʷⁱ (liquid on ice)
-            FT(0),         # sˢᵃᵗ (predicted supersaturation)
+        FT(0),         # sᵛ⁺ˡ (liquid supersaturation)
             FT(0),         # nᵃ
             FT(0),         # w
         )
@@ -1878,7 +1903,7 @@ end
             return compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         end
 
-        # Large drops: D_r = (qʳ / (π ρʷ nʳ))^(1/3) ≈ 680 μm exceeds the 280 μm
+        # Large drops: Dʳ = (qʳ / (π ρᴸ nʳ))^(1/3) ≈ 680 μm exceeds the 280 μm
         # threshold, so dum < 0, breakup outruns self-collection, and the netted pair
         # must report a pure source.
         qʳ_large, nʳ_large = FT(1e-3), FT(1e3)
@@ -1890,7 +1915,7 @@ end
         @test large.rain_self_collection == 0
         @test large.rain_breakup ≈ breakup_large - base_large rtol=FT(1e-10)
 
-        # Small drops: D_r ≈ 68 μm, breakup inactive, pure sink.
+        # Small drops: Dʳ ≈ 68 μm, breakup inactive, pure sink.
         qʳ_small, nʳ_small = FT(1e-3), FT(1e6)
         base_small = rain_self_collection_rate(p3, qʳ_small, nʳ_small, ρ)
         @test rain_breakup_rate(p3, qʳ_small, nʳ_small, base_small) == 0
@@ -1923,17 +1948,17 @@ end
         nⁱ = FT(1e5)
         qᶠ = FT(1e-5)
         qʷⁱ = FT(0)
-        sˢᵃᵗ = FT(0)
+        sᵛ⁺ˡ = FT(0)
 
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
-                                qᶠ, qᶠ / FT(400), qʷⁱ, sˢᵃᵗ, zero(FT), zero(FT))
+                                qᶠ, qᶠ / FT(400), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
-        expected_cloud_number_per_mass = cloud.Nᶜ / (ρ * qᶜˡ)
+        expected_cloud_number_per_mass = cloud.Nᶜˡ / (ρ * qᶜˡ)
 
         @test rates.cloud_warm_collection > 0
         @test rates.cloud_warm_collection_number / rates.cloud_warm_collection ≈
@@ -2026,14 +2051,14 @@ end
         nⁱ = FT(1e5)
         qᶠ = FT(2e-5)
         qʷⁱ = FT(0)
-        sˢᵃᵗ = FT(0)
+        sᵛ⁺ˡ = FT(0)
         μ = FT(0)
 
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
         q = MoistureMassFractions(qᵛ, qʳ + qʷⁱ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
-                                qᶠ, qᶠ / FT(400), qʷⁱ, sˢᵃᵗ, zero(FT), zero(FT))
+                                qᶠ, qᶠ / FT(400), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         rime = consistent_rime_state(p3, qⁱ, qᶠ, qᶠ / FT(400), qʷⁱ)
@@ -2114,7 +2139,7 @@ end
         nⁱ = FT(0)
         qᶠ = FT(0)
         qʷⁱ = FT(0)
-        sˢᵃᵗ = FT(0)
+        sᵛ⁺ˡ = FT(0)
 
         qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
         qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
@@ -2122,9 +2147,10 @@ end
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ,
-                                qᶠ, FT(0), qʷⁱ, sˢᵃᵗ, zero(FT), zero(FT))
+                                qᶠ, FT(0), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
 
-        gm = expected_reference_predicted_ssat_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, sˢᵃᵗ, T, constants)
+        gm = expected_reference_supersaturation_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
+                                                               sᵛ⁺ˡ, T, constants)
         Tᴳᴹ = T + gm.ε * PPP.vaporization_latent_heat(constants, T) / constants.dry_air.heat_capacity
         qᵛᴳᴹ = qᵛ - gm.ε
         qᶜˡᴳᴹ = qᶜˡ + gm.ε
@@ -2139,7 +2165,7 @@ end
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
 
-        @test rates.predicted_ssat_adjustment ≈ gm.rate
+        @test rates.predicted_supersaturation_adjustment ≈ gm.rate
         @test rates.condensation ≈ gm.rate + expected_process.condensation rtol=FT(1e-10) atol=FT(1e-14)
     end
 
@@ -2161,19 +2187,19 @@ end
         qⁱ = FT(0)
         qᶠ = FT(0)
         qʷⁱ = FT(0)
-        sˢᵃᵗ = FT(0)
+        sᵛ⁺ˡ = FT(0)
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0),
-                                qᶠ, FT(0), qʷⁱ, sˢᵃᵗ, zero(FT), zero(FT))
+                                qᶠ, FT(0), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
                                                           ρ, process_rates.sink_limiting_timescale,
                                                           P, pˢᵗ, constants)
 
-        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ *
+        @test tendency_ρsᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ *
               process_rates.sink_limiting_timescale ≈ expected atol=FT(1e-12)
     end
 
@@ -2196,12 +2222,12 @@ end
         nⁱ = FT(1e3)
         qᶠ = FT(5e-5)
         qʷⁱ = FT(0)
-        sˢᵃᵗ = FT(0)
+        sᵛ⁺ˡ = FT(0)
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-5)
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ + qʷⁱ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, nⁱ,
-                                 qᶠ, qᶠ / FT(400), qʷⁱ, sˢᵃᵗ, zero(FT), zero(FT))
+                                 qᶠ, qᶠ / FT(400), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
@@ -2209,7 +2235,7 @@ end
                                                           P, pˢᵗ, constants)
 
         @test rates.splintering_mass > 0
-        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ *
+        @test tendency_ρsᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ *
               process_rates.sink_limiting_timescale ≈ expected atol=FT(1e-12)
     end
 
@@ -2232,18 +2258,18 @@ end
         qⁱ = FT(0)
         qᶠ = FT(0)
         qʷⁱ = FT(0)
-        sˢᵃᵗ = FT(0)
+        sᵛ⁺ˡ = FT(0)
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0),
-                                qᶠ, FT(0), qʷⁱ, sˢᵃᵗ, zero(FT), zero(FT))
+                                qᶠ, FT(0), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
                                                           ρ, τ, P, pˢᵗ, constants)
 
-        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
+        @test tendency_ρsᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
     end
 
     @testset "predict_supersaturation reset matches static-energy formulation state" begin
@@ -2265,18 +2291,18 @@ end
         qⁱ = FT(0)
         qᶠ = FT(0)
         qʷⁱ = FT(0)
-        sˢᵃᵗ = FT(0)
+        sᵛ⁺ˡ = FT(0)
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface()) + FT(1e-4)
         q = MoistureMassFractions(qᵛ, qᶜˡ, qⁱ)
         𝒰 = with_temperature(StaticEnergyState(zero(FT), q, FT(0), P), T, constants)
         ℳ = P3MicrophysicalState(qᶜˡ, FT(2e8), qʳ, FT(0), qⁱ, FT(0),
-                                qᶠ, FT(0), qʷⁱ, sˢᵃᵗ, zero(FT), zero(FT))
+                                qᶠ, FT(0), qʷⁱ, sᵛ⁺ˡ, zero(FT), zero(FT))
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         expected = actual_final_liquid_ssat_after_p3_step(𝒰, rates, qᵛ, qᶜˡ, qʳ, qⁱ, qʷⁱ,
                                                           ρ, τ, P, pˢᵗ, constants)
 
-        @test tendency_ρsˢᵃᵗ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
+        @test tendency_ρsᵛ⁺ˡ(rates, ρ, p3.process_rates) / ρ * τ ≈ expected atol=FT(1e-12)
     end
 
     @testset "predict_supersaturation disabled docs match inactive field semantics" begin
@@ -2312,7 +2338,7 @@ end
             qf,            # qᶠ
             FT(qf / 400),  # bᶠ
             FT(0),         # qʷⁱ
-            FT(0),         # sˢᵃᵗ
+        FT(0),         # sᵛ⁺ˡ
             FT(0),         # nᵃ
             FT(0),         # w
         )
@@ -2327,7 +2353,7 @@ end
             qf,             # qᶠ
             FT(qf / 400),   # bᶠ
             FT(0),          # qʷⁱ
-            FT(0),          # sˢᵃᵗ
+            FT(0),          # sᵛ⁺ˡ
             FT(0),          # nᵃ
             FT(0),          # w
         )

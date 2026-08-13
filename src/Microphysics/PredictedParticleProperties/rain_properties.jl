@@ -28,10 +28,10 @@ Construct `RainProperties` with parameters and quadrature-based integrals.
 Rain in P3 follows a gamma size distribution similar to ice:
 
 ```math
-N'(D) = N₀ D^{μ_r} e^{-λ_r D}
+N'(D) = Nʳ₀ D^{μ^r} e^{-λ^r D}
 ```
 
-The shape parameter ``μ_r`` is diagnosed from the rain mass and number
+The shape parameter ``μ^r`` is diagnosed from the rain mass and number
 concentrations following [Milbrandt and Yau (2005)](@cite MilbrandtYau2005).
 
 **Terminal velocity:**
@@ -44,7 +44,7 @@ Default coefficients give fall speeds in m/s for D in meters.
 
 **Integrals:**
 
-- `shape_parameter`: Diagnosed μ_r from q_r, N_r
+- `shape_parameter`: Diagnosed μʳ from qʳ, Nʳ
 - `velocity_number`, `velocity_mass`: Weighted fall speeds
 - `evaporation`: Rate integral for rain evaporation
 

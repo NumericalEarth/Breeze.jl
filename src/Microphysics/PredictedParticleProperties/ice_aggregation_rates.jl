@@ -1,9 +1,9 @@
-@inline function ice_rain_collection_lookup(table::P3RainIceCollectionTable, m̄, λr, Fᶠ, Fˡ, ρᶠ, μ = zero(typeof(m̄)))
+@inline function ice_rain_collection_lookup(table::P3RainIceCollectionTable, m̄, λr, Fᶠ, Fˡ, ρᶠ, μⁱ = zero(typeof(m̄)))
     log_m = log10(m̄)
     log_λ = log10(λr)
-    # Both rain-ice tables share `(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ)` axes
+    # Both rain-ice tables share `(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μⁱ)` axes
     # by construction, so prep indices once and reuse across evaluations.
-    prep = prepare_6d(table.mass, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μ)
+    prep = prepare_6d(table.mass, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μⁱ)
     # Fortran table stores rain-ice mass and number kernels as log10;
     # exponentiate to recover physical values (Fortran runtime: 10.**proc).
     return exp10(evaluate_at(table.mass, prep)),
@@ -23,7 +23,7 @@ Ice particles collide and stick together, reducing number concentration
 without changing total mass. The collision kernel is:
 
 ```math
-K(D_1, D_2) = E_{ii} × \\frac{π}{4}(D_1 + D_2)^2 × |V_1 - V_2|
+K(D_1, D_2) = E^{ii} × \\frac{π}{4}(D_1 + D_2)^2 × |V_1 - V_2|
 ```
 
 The number tendency is:
@@ -35,7 +35,7 @@ The number tendency is:
 The ρ factor converts the volumetric collision kernel [m³/s] to the
 mass-specific number tendency [1/kg/s] when nⁱ is in [1/kg].
 
-The sticking efficiency E_ii increases with temperature (more sticky near 0°C).
+The sticking efficiency ``E^{ii}`` increases with temperature (more sticky near 0°C).
 See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
 # Arguments
@@ -50,13 +50,13 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 # Returns
 - Rate of ice number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = zero(typeof(qⁱ)))
+function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
-    prp = p3.process_rates
+    parameters = p3.process_rates
 
-    Eᵢᵢ_max = prp.aggregation_efficiency_max
-    T_low = prp.aggregation_efficiency_temperature_low
-    T_high = prp.aggregation_efficiency_temperature_high
+    maximum_efficiency = parameters.maximum_aggregation_efficiency
+    ramp_start_temperature = parameters.aggregation_efficiency_ramp_start_temperature
+    ramp_end_temperature = parameters.aggregation_efficiency_ramp_end_temperature
 
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
@@ -68,29 +68,33 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = z
 
     # Temperature-dependent sticking efficiency (linear ramp)
     # Cold ice is less sticky, near-melting ice is very sticky
-    Eᵢᵢ_cold = prp.aggregation_efficiency_min
-    Eᵢᵢ = ifelse(T < T_low, Eᵢᵢ_cold,
-                  ifelse(T > T_high, Eᵢᵢ_max,
-                         Eᵢᵢ_cold + (T - T_low) / (T_high - T_low) * (Eᵢᵢ_max - Eᵢᵢ_cold)))
+    minimum_efficiency = parameters.minimum_aggregation_efficiency
+    aggregation_efficiency = ifelse(T < ramp_start_temperature, minimum_efficiency,
+        ifelse(T > ramp_end_temperature, maximum_efficiency,
+               minimum_efficiency +
+               (T - ramp_start_temperature) /
+               (ramp_end_temperature - ramp_start_temperature) *
+               (maximum_efficiency - minimum_efficiency)))
 
     # Rime-fraction limiter (Eii_fact): shut off aggregation for heavily rimed ice
     # Fortran P3: Eii_fact = 1 for Fr<0.6, linear ramp to 0 for 0.6≤Fr<0.9, 0 for Fr≥0.9
-    Fᶠ_low = prp.aggregation_rime_fraction_low
-    Fᶠ_high = prp.aggregation_rime_fraction_high
-    Eᵢᵢ_fact = ifelse(Fᶠ < Fᶠ_low, FT(1),
-                       ifelse(Fᶠ > Fᶠ_high, FT(0),
-                              FT(1) - (Fᶠ - Fᶠ_low) / (Fᶠ_high - Fᶠ_low)))
-    Eᵢᵢ = Eᵢᵢ * Eᵢᵢ_fact
+    minimum_rime_fraction = parameters.minimum_aggregation_rime_fraction
+    maximum_rime_fraction = parameters.maximum_aggregation_rime_fraction
+    rime_fraction_factor = ifelse(Fᶠ < minimum_rime_fraction, FT(1),
+        ifelse(Fᶠ > maximum_rime_fraction, FT(0),
+               FT(1) - (Fᶠ - minimum_rime_fraction) /
+               (maximum_rime_fraction - minimum_rime_fraction)))
+    aggregation_efficiency *= rime_fraction_factor
 
     # Mean particle properties
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
 
     # PSD-integrated self-collection kernel (E-free) from lookup table.
-    AV_kernel = aggregation_kernel(p3.ice.collection.aggregation,
-                                     m_mean, Fᶠ, Fˡ, ρᶠ, μ)
+    aggregation_kernel_value = aggregation_kernel(p3.ice.collection.aggregation,
+                                                  m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ)
 
     # Collection kernel with temperature-dependent sticking efficiency
-    K_mean = Eᵢᵢ * AV_kernel
+    mean_collection_kernel = aggregation_efficiency * aggregation_kernel_value
 
     # Number loss rate: ρ × K × n² × rhofaci (positive magnitude)
     # The ρ factor converts the volumetric kernel [m³/s] to mass-specific
@@ -99,8 +103,8 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ, qʷⁱ = z
     # Sign convention (M7): returns positive; caller subtracts in tendency assembly.
     # Use ice reference density (Fortran rhosui, P=600 hPa, T=-20°C), not rain reference.
     ρ₀ = p3.ice.fall_speed.reference_air_density
-    rhofaci = ice_air_density_correction(ρ₀, ρ)
-    rate = ρ * K_mean * nⁱ_eff^2 * rhofaci
+    density_correction = ice_air_density_correction(ρ₀, ρ)
+    rate = ρ * mean_collection_kernel * nⁱ_eff^2 * density_correction
 
     return ifelse(aggregation_active, rate, zero(FT))
 end

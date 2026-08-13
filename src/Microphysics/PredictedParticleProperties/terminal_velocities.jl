@@ -18,30 +18,31 @@ end
 
 # Stokes-regime cloud-droplet fall speed, `v(D) = a_cn D²`. Fortran `get_cloud_dsd2`
 # sets `acn = g ρʷ / (18 η)` with `bcn = 2`, so the PSD-weighted moments follow from
-# Γ(μ+b+4)/Γ(μ+4) = (μ+5)(μ+4) for mass and Γ(μ+b+1)/Γ(μ+1) = (μ+2)(μ+1) for number.
+# Γ(μᶜˡ+b+4)/Γ(μᶜˡ+4) = (μᶜˡ+5)(μᶜˡ+4) for mass and
+# Γ(μᶜˡ+b+1)/Γ(μᶜˡ+1) = (μᶜˡ+2)(μᶜˡ+1) for number.
 # `rime_density` needs the same mass-weighted speed to form the Cober-List rime-impact
 # parameter, so both call these helpers rather than repeating the arithmetic with their
 # own gravitational acceleration.
 @inline cloud_stokes_prefactor(g, ρᴸ, η) =
     g * ρᴸ / (18 * max(η, oftype(η, DEFAULT_FLOORS.divisor)))
 
-@inline cloud_mass_weighted_stokes_velocity(a_cn, μ_c, λ_c) =
-    a_cn * (μ_c + 5) * (μ_c + 4) / λ_c^2
+@inline cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ) =
+    stokes_prefactor * (μᶜˡ + 5) * (μᶜˡ + 4) / λᶜˡ^2
 
-@inline cloud_number_weighted_stokes_velocity(a_cn, μ_c, λ_c) =
-    a_cn * (μ_c + 2) * (μ_c + 1) / λ_c^2
+@inline cloud_number_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ) =
+    stokes_prefactor * (μᶜˡ + 2) * (μᶜˡ + 1) / λᶜˡ^2
 
-# `μ_c` and `λ_c` are the cloud-DSD shape/slope diagnosed by `diagnose_cloud_dsd`;
+# `μᶜˡ` and `λᶜˡ` are the cloud-DSD shape/slope diagnosed by `diagnose_cloud_dsd`;
 # the caller passes the values already computed in `p3_ice_properties`
-# (`props.μ_cloud`/`props.λ_cloud`) so the fall-speed kernel does not re-diagnose them.
-@inline function cloud_terminal_velocities(p3, qᶜˡ, ρ, ν, μ_c, λ_c, constants)
-    FT = typeof(qᶜˡ + ρ + ν + μ_c + λ_c)
+# (`properties.μᶜˡ`/`properties.λᶜˡ`) so the fall-speed kernel does not re-diagnose them.
+@inline function cloud_terminal_velocities(p3, qᶜˡ, ρ, ν, μᶜˡ, λᶜˡ, constants)
+    FT = typeof(qᶜˡ + ρ + ν + μᶜˡ + λᶜˡ)
     η = ν * ρ
     g = p3_gravitational_acceleration(constants, FT)
-    a_cn = cloud_stokes_prefactor(g, p3.process_rates.liquid_water_density, η)
+    stokes_prefactor = cloud_stokes_prefactor(g, p3.process_rates.liquid_water_density, η)
     active = qᶜˡ >= p3.minimum_mass_mixing_ratio
-    mass_weighted = cloud_mass_weighted_stokes_velocity(a_cn, μ_c, λ_c)
-    number_weighted = cloud_number_weighted_stokes_velocity(a_cn, μ_c, λ_c)
+    mass_weighted = cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
+    number_weighted = cloud_number_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
     return CloudTerminalVelocities{FT}(ifelse(active, mass_weighted, zero(FT)),
                                        ifelse(active, number_weighted, zero(FT)))
 end
@@ -58,25 +59,25 @@ table lookups.
 """
 @inline function rain_terminal_velocities(p3, qʳ, nʳ, ρ)
     FT = typeof(qʳ)
-    prp = p3.process_rates
-    ρ₀ = prp.reference_air_density
-    ρʷ = prp.liquid_water_density
+    parameters = p3.process_rates
+    ρ₀ = parameters.reference_air_density
+    ρʷ = parameters.liquid_water_density
 
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = max(nʳ, p3.minimum_number_mixing_ratio)
     ρ_correction = ice_air_density_correction(ρ₀, ρ)
 
     m̄  = qʳ_eff / nʳ_eff
-    λ_r = cbrt(FT(π) * ρʷ / max(m̄, FT(prp.floors.mass_scale)))
-    λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
-    log_λ = log10(λ_r)
+    λʳ = cbrt(FT(π) * ρʷ / max(m̄, FT(parameters.floors.mass_scale)))
+    λʳ = clamp(λʳ, parameters.minimum_rain_slope, parameters.maximum_rain_slope)
+    log_slope = log10(λʳ)
 
-    vₘ = p3.rain.velocity_mass(log_λ) * ρ_correction
-    vₙ = p3.rain.velocity_number(log_λ) * ρ_correction
+    mass_weighted_velocity = p3.rain.velocity_mass(log_slope) * ρ_correction
+    number_weighted_velocity = p3.rain.velocity_number(log_slope) * ρ_correction
     active = qʳ_eff >= p3.minimum_mass_mixing_ratio
 
-    return RainTerminalVelocities{FT}(ifelse(active, vₘ, zero(FT)),
-                                       ifelse(active, vₙ, zero(FT)))
+    return RainTerminalVelocities{FT}(ifelse(active, mass_weighted_velocity, zero(FT)),
+                                      ifelse(active, number_weighted_velocity, zero(FT)))
 end
 
 """
@@ -100,9 +101,9 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 # Returns
 - Mass-weighted fall speed [m/s] (positive downward)
 """
-@inline function ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)), μ=zero(typeof(qⁱ)))
+@inline function ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)), μⁱ=zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
-    prp = p3.process_rates
+    parameters = p3.process_rates
     fs = p3.ice.fall_speed
 
     ρ₀ = fs.reference_air_density
@@ -116,19 +117,19 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     ρ_correction = ice_air_density_correction(ρ₀, ρ)
 
     # m9: Fortran applies no velocity clamping; table bounds are sufficient.
-    velocity = tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+    velocity = tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
     active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
     return ifelse(active, velocity, zero(FT))
 end
 
 # Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
-@inline function tabulated_mass_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+@inline function tabulated_mass_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
     # m̄ = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
     # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
     # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg), matching
     # Fortran's clamp of the lookup index to 1 (find_lookupTable_indices_1a).
-    log_mean_mass = log10(max(m̄, oftype(m̄, prp.floors.mass_scale)))
-    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
+    log_mean_mass = log10(max(m̄, oftype(m̄, parameters.floors.mass_scale)))
+    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μⁱ)
     return vₜ_norm * ρ_correction
 end
 
@@ -139,11 +140,11 @@ end
 end
 
 # Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
-@inline function tabulated_number_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+@inline function tabulated_number_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
     # Per-particle-mass log-guard; the table clamps its mass axis (see
     # tabulated_mass_weighted_fall_speed), not the bulk qmin.
-    log_mean_mass = log10(max(m̄, oftype(m̄, prp.floors.mass_scale)))
-    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
+    log_mean_mass = log10(max(m̄, oftype(m̄, parameters.floors.mass_scale)))
+    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μⁱ)
     return vₜ_norm * ρ_correction
 end
 
@@ -185,9 +186,9 @@ struct IceTerminalVelocities{FT}
     number_weighted :: FT
 end
 
-function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)), μ=zero(typeof(qⁱ)))
+function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)), μⁱ=zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
-    prp = p3.process_rates
+    parameters = p3.process_rates
     fs = p3.ice.fall_speed
 
     ρ₀ = fs.reference_air_density
@@ -200,7 +201,7 @@ function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeo
     ρ_correction = ice_air_density_correction(ρ₀, ρ)
 
     velocities = fused_fall_speeds(fs.mass_weighted, fs.number_weighted,
-                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
     active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
     return IceTerminalVelocities{FT}(
         ifelse(active, velocities.mass_weighted, zero(FT)),
@@ -209,14 +210,14 @@ function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeo
 end
 
 # Fast path: both tables are 5D (the supported P3 configuration with loaded tables).
-# Interpolation indices for (log_m, Fᶠ, Fˡ, ρᶠ, μ) are shared across the two reads.
+# Interpolation indices for (log_m, Fᶠ, Fˡ, ρᶠ, μⁱ) are shared across the two reads.
 @inline function fused_fall_speeds(mass_table::P3Table5D, number_table::P3Table5D,
-                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
     FT = typeof(m̄)
     # Per-particle-mass log-guard; the table clamps its mass axis (see
     # tabulated_mass_weighted_fall_speed), not the bulk qmin.
-    log_mean_mass = log10(max(m̄, FT(prp.floors.mass_scale)))
-    prep = prepare_5d(mass_table, log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
+    log_mean_mass = log10(max(m̄, FT(parameters.floors.mass_scale)))
+    prep = prepare_5d(mass_table, log_mean_mass, Fᶠ, Fˡ, ρᶠ, μⁱ)
     return IceTerminalVelocities{FT}(
         tabulated_mass_weighted_fall_speed(mass_table, prep, ρ_correction),
         tabulated_number_weighted_fall_speed(number_table, prep, ρ_correction),
@@ -225,10 +226,10 @@ end
 
 # Fallback for non-5D fall speed tables (quadrature path, mixed types).
 @inline function fused_fall_speeds(mass_table, number_table,
-                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ)
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
     FT = typeof(m̄)
     return IceTerminalVelocities{FT}(
-        tabulated_mass_weighted_fall_speed(mass_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ),
-        tabulated_number_weighted_fall_speed(number_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp, μ),
+        tabulated_mass_weighted_fall_speed(mass_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ),
+        tabulated_number_weighted_fall_speed(number_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ),
     )
 end

@@ -32,7 +32,7 @@ end
 @inline (f::TabulatedFunction6D)(x₁, x₂, x₃, x₄, x₅, x₆) =
     evaluate_at(f, prepare_6d(f, x₁, x₂, x₃, x₄, x₅, x₆))
 
-# 32-corner blend at a fixed sixth (μ) index.
+# 32-corner blend at a fixed sixth (μⁱ) index.
 @inline function interpolate_6d_slice(data, ix, iy, iz, iw, iv, ni)
     i⁻, i⁺, ξ = ix
     j⁻, j⁺, η = iy
@@ -55,7 +55,7 @@ end
     return result
 end
 
-# Same collapse as `collapse_trailing_axis`, on the 6D tables' μ axis: `n⁻ == n⁺`
+# Same collapse as `collapse_trailing_axis`, on the 6D tables' μⁱ axis: `n⁻ == n⁺`
 # means one 32-corner pass replaces two.
 @inline function interpolate_6d(data, ix, iy, iz, iw, iv, iu)
     n⁻, n⁺, χ = iu
@@ -89,16 +89,16 @@ end
 
 # Routed through `prepare_5d`/`evaluate_at` so this path gets `collapse_trailing_axis`;
 # `f.table(...)` would reach Oceananigans' operator, which we cannot extend without piracy.
-@inline function (f::RimeDensityIndexedTable5D)(log_m, Fᶠ, Fˡ, ρᶠ, μ)
-    return evaluate_at(f, prepare_5d(f, log_m, Fᶠ, Fˡ, ρᶠ, μ))
+@inline function (f::RimeDensityIndexedTable5D)(log_m, Fᶠ, Fˡ, ρᶠ, μⁱ)
+    return evaluate_at(f, prepare_5d(f, log_m, Fᶠ, Fˡ, ρᶠ, μⁱ))
 end
 
 struct RimeDensityIndexedTable6D{T}
     table :: T
 end
 
-@inline function (f::RimeDensityIndexedTable6D)(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)
-    return f.table(log_m, log_λ_r, Fᶠ, Fˡ, rime_density_index(ρᶠ), μ)
+@inline function (f::RimeDensityIndexedTable6D)(log_m, log_λʳ, Fᶠ, Fˡ, ρᶠ, μⁱ)
+    return f.table(log_m, log_λʳ, Fᶠ, Fˡ, rime_density_index(ρᶠ), μⁱ)
 end
 
 # Union alias for dispatch: accept either a bare or a rime-density-indexed 5D table.
@@ -110,7 +110,7 @@ const P3Table5D = Union{TabulatedFunction5D, RimeDensityIndexedTable5D}
 #####
 ##### When several distinct 5D tables are queried at the *same* coordinates
 ##### (a common pattern in P3 — see `tabulated_z_tendency` where ~16 tables share
-##### `(log_m, Fᶠ, Fˡ, ρᶠ, μ)`), the per-axis clamps, fractional-index multiplies,
+##### `(log_m, Fᶠ, Fˡ, ρᶠ, μⁱ)`), the per-axis clamps, fractional-index multiplies,
 ##### `interpolator` calls, and boundary-min checks are redundantly recomputed for
 ##### each table. Prepare them once and reuse across tables that share `range`,
 ##### `inverse_Δ`, and shape.
@@ -160,14 +160,14 @@ end
                                               (m⁻ + 1, min(m⁺ + 1, n₅), ψ))
 end
 
-@inline function prepare_5d(f::RimeDensityIndexedTable5D, log_m, Fᶠ, Fˡ, ρᶠ, μ)
-    return prepare_5d(f.table, log_m, Fᶠ, Fˡ, rime_density_index(ρᶠ), μ)
+@inline function prepare_5d(f::RimeDensityIndexedTable5D, log_m, Fᶠ, Fˡ, ρᶠ, μⁱ)
+    return prepare_5d(f.table, log_m, Fᶠ, Fˡ, rime_density_index(ρᶠ), μⁱ)
 end
 
 # Collapse the trailing axis when its bracket is degenerate: `m⁻ == m⁺` means both
 # slices read the same data, so `(1-ψ) A + ψ B` is the identity and one slice will
-# do. The 2-moment tables carry a single μ point, so this fires at every lookup; a
-# 3-moment μ axis takes the blended path unchanged. The branch is on table geometry,
+# do. The 2-moment tables carry a single μⁱ point, so this fires at every lookup; a
+# 3-moment μⁱ axis takes the blended path unchanged. The branch is on table geometry,
 # not cell data, so it is uniform across a launch — and `ifelse` would evaluate both
 # slices, which is the cost being removed.
 @inline function collapse_trailing_axis(data, ix, iy, iz, iw, iv)
@@ -187,7 +187,7 @@ end
 #####
 ##### Mirrors `Prepared5DInterpolation` for the 6-D ice-rain collection tables
 ##### (`mass`, `number`). Both are queried at identical
-##### `(log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)` per cell, so prepping once and
+##### `(log_m, log_λʳ, Fᶠ, Fˡ, ρᶠ, μⁱ)` per cell, so prepping once and
 ##### reusing across the pair eliminates redundant clamps / frac-index work.
 ##### All P3 Table 2 entries share the same axes by construction, so
 ##### a single `Prepared6DInterpolation` is valid for any of them.
@@ -241,8 +241,8 @@ end
                                               (n⁻ + 1, min(n⁺ + 1, n₆), χ))
 end
 
-@inline function prepare_6d(f::RimeDensityIndexedTable6D, log_m, log_λ_r, Fᶠ, Fˡ, ρᶠ, μ)
-    return prepare_6d(f.table, log_m, log_λ_r, Fᶠ, Fˡ, rime_density_index(ρᶠ), μ)
+@inline function prepare_6d(f::RimeDensityIndexedTable6D, log_m, log_λʳ, Fᶠ, Fˡ, ρᶠ, μⁱ)
+    return prepare_6d(f.table, log_m, log_λʳ, Fᶠ, Fˡ, rime_density_index(ρᶠ), μⁱ)
 end
 
 @inline evaluate_at(f::TabulatedFunction6D, p::Prepared6DInterpolation) =

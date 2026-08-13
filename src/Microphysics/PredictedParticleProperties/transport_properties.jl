@@ -56,8 +56,8 @@ At T = 273.15 K, P = 101325 Pa:
 using Breeze
 using Breeze.Microphysics.PredictedParticleProperties: air_transport_properties
 constants = ThermodynamicConstants()
-props = air_transport_properties(273.15, 101325.0, constants)
-typeof(props.Dᵛ)
+properties = air_transport_properties(273.15, 101325.0, constants)
+typeof(properties.Dᵛ)
 
 # output
 Float64

@@ -131,7 +131,7 @@ When the rain DSD is supersaturated, vapor condenses *onto* rain
 to vapor (Fortran `qrcon` negative branch, written as `qrevp`). Breeze
 carries both directions in the one signed rain term that
 `coupled_saturation_adjustment_rates` returns, built from the rain
-relaxation rate `rain_condensation_epsilon`; `rain_evaporation_rate`
+relaxation coefficient `rain_vapor_relaxation_coefficient`; `rain_evaporation_rate`
 supplies the underlying ventilation-weighted diffusional growth rate.
 Below cloud base, rain evaporates into subsaturated air following the
 ventilation-enhanced vapor diffusion equation
@@ -204,7 +204,7 @@ including after the sedimentation block. The limiter is computed from the *raw*
 prognostic ``n^i``, not the locally pre-capped value the rate functions read —
 otherwise it would always be dead.
 
-Every other rate does see the capped ``\min(n^i, N_{i,\max}/ρ)``, mirroring the
+Every other rate does see the capped ``\min(n^i, N^i_{\max}/ρ)``, mirroring the
 fact that Fortran caps `nitot` in place so all downstream math (process rates and
 terminal velocities) sees the same value.
 
@@ -213,6 +213,9 @@ terminal velocities) sees the same value.
 Active when ``T \le T_\text{imm} = 269.15`` K (``-4°``C), applied to both
 cloud droplets and rain via the cloud / rain DSD integrals from
 [Barklie and Gokhale (1959)](@cite BarklieGokhale1959):
+
+The process subscript `frz` denotes immersion freezing. It is a process label,
+not a species label; cloud and rain remain the superscripts.
 
 ```math
 \dot{q}^{cl}_\text{frz} = \frac{π^2}{36}\, ρ_w\, b_\text{imm}\,
@@ -237,6 +240,8 @@ relation in `psd_corrections.jl`.
 Disabled in both the Fortran reference and Breeze.
 
 ### Homogeneous freezing
+
+The process subscript `hom` denotes homogeneous freezing.
 
 Active when ``T < T_\text{hom} = 233.15`` K (``-40°``C). All remaining cloud
 liquid and rain are converted to ice on a timescale ``τ_\text{hom}``:
@@ -285,7 +290,7 @@ stores this as `35.e+4` per gram and applies a ``\times 10^3`` kg→g
 conversion at the call site). The mass rate uses an initial diameter
 ``D_\text{init,HM} = 10\;μ``m at ``ρ_i = 900`` kg/m³.
 
-The 282 K warm-season shutoff (`splintering_surface_temperature_max`; `Inf`
+The 282 K warm-season shutoff (`maximum_splintering_surface_temperature`; `Inf`
 disables it) needs a surface temperature, which
 `compute_p3_surface_temperature!` obtains by scanning each column for its lowest
 *active* cell — so it is correct over an immersed bottom, but cannot broadcast
@@ -407,14 +412,14 @@ E^{ii}_\text{max} & T \ge T^{ii}_\text{high}
 \end{cases},
 ```
 
-with ``(E^{ii}_\text{min}, E^{ii}_\text{max}) =`` (`aggregation_efficiency_min`,
-`aggregation_efficiency_max`) ``= (0.001, 0.3)`` and ``(T^{ii}_\text{low}, T^{ii}_\text{high})
-=`` (`aggregation_efficiency_temperature_low`, `aggregation_efficiency_temperature_high`)
+with ``(E^{ii}_\text{min}, E^{ii}_\text{max}) =`` (`minimum_aggregation_efficiency`,
+`maximum_aggregation_efficiency`) ``= (0.001, 0.3)`` and ``(T^{ii}_\text{low}, T^{ii}_\text{high})
+=`` (`aggregation_efficiency_ramp_start_temperature`, `aggregation_efficiency_ramp_end_temperature`)
 ``= (253.15, 273.15)`` K.
 
 The rime ramp ``E^{ii}_\text{fact}`` shuts off aggregation for heavily rimed
-particles: 1 below `aggregation_rime_fraction_low` (0.6), ramping linearly to 0
-at `aggregation_rime_fraction_high` (0.9).
+particles: 1 below `minimum_aggregation_rime_fraction` (0.6), ramping linearly to 0
+at `maximum_aggregation_rime_fraction` (0.9).
 
 !!! note "Inter-category collection"
     The single-category aggregation kernel above is fully wired. Breeze has
@@ -451,7 +456,7 @@ The dry-ice deposition rate is then
 \qquad ξ^i = 1 + \frac{\mathcal{L}^i}{c^{pd}}\frac{dq^{v+i}}{dT},
 ```
 
-where ``s^l = q^v - q^{v+l}`` is the saturation deficit with respect to liquid and
+where ``s^l = q^v - q^{v+l}`` is the supersaturation with respect to liquid and
 ``A`` sums two contributions: the Bergeron offset, and the external change in
 liquid-relative supersaturation ``∂_t q^v - (dq^{v+l}/dT)\, ∂_t T``. Breeze
 retains the Bergeron offset in full, and approximates the external part with

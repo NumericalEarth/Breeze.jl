@@ -54,7 +54,7 @@ write access to the prognostic state and no awareness of host Δt. This produces
 several deliberate, documented differences from Fortran:
 
 - **Hard prognostic clamps are replaced by tendency-form relaxations.** For
-  example, `impose_max_Ni` becomes a relaxation sink toward ``N_{i,\max}/ρ``
+  example, `impose_max_Ni` becomes a relaxation sink toward ``N^i_{\max}/ρ``
   over `sink_limiting_timescale` (default 10 s) rather than an instantaneous cap.
 - **Per-Δt depletion rates use a fixed timescale.** Cooper nucleation and
   homogeneous freezing relax over `ice_nucleation_timescale` /
@@ -223,9 +223,9 @@ neither allocates nor advects it.
 - ``ρb^f``: Rime volume concentration [m³/m³].
 - ``ρq^{wi}``: Liquid water on ice [kg/m³].
 
-**Saturation diagnostic** (0–1 variables):
+**Supersaturation prognostic** (0–1 variables):
 
-- ``ρs^{sat}``: Predicted supersaturation [kg/m³]
+- ``ρs^{v+l}``: Liquid supersaturation density [kg/m³]
   ([Grabowski and Morrison (2008)](@cite GrabowskiMorrison2008)).
   Breeze exposes a `predict_supersaturation` flag on `ProcessRateParameters`,
   defaulting to `false`. When `false`, the field is not allocated and is
@@ -233,11 +233,11 @@ neither allocates nor advects it.
   ``q^v - q^{v+l}(T)`` directly. When `true`, the bounded G&M (2008)
   adjustment fires before the M&G rates, shifting the local ``q^v``,
   ``q^{cl}``, and ``T`` (and thus ``q^{v+l}(T)``) so that
-  ``q^v - q^{v+l}`` matches the advected ``s^{sat}``. The M&G semi-analytic
+  ``q^v - q^{v+l}`` matches the advected ``s^l``. The M&G semi-analytic
   rates then run on this post-G&M state — the "diagnostic supersaturation"
   they see is ``q^v_{\text{post-GM}} - q^{v+l}(T_{\text{post-GM}})``, not the
-  host's ``s^{sat}`` field. The G&M adjustment and the end-of-step
-  ``s^{sat}`` reset both relax over `sink_limiting_timescale`, so they land
+  host's ``s^l`` field. The G&M adjustment and the end-of-step
+  ``s^l`` reset both relax over `sink_limiting_timescale`, so they land
   exactly when the host integrates with
   ``\Delta t = \text{sink\_limiting\_timescale}``.
 

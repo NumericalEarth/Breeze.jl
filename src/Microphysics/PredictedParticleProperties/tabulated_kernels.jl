@@ -68,14 +68,14 @@ using PSD-integrated lookup tables.
 """
 @inline function deposition_ventilation(vent::P3Table5D,
                                           vent_e::P3Table5D,
-                                          m_mean, Fᶠ, ρᶠ, prp, ν, Dᵛ, ρ_correction, p3, μ)
+                                          m_mean, Fᶠ, ρᶠ, parameters, ν, Dᵛ, ρ_correction, p3, μⁱ)
     FT = typeof(m_mean)
-    return deposition_ventilation(vent, vent_e, m_mean, Fᶠ, zero(FT), ρᶠ, prp, ν, Dᵛ, ρ_correction, p3, μ)
+    return deposition_ventilation(vent, vent_e, m_mean, Fᶠ, zero(FT), ρᶠ, parameters, ν, Dᵛ, ρ_correction, p3, μⁱ)
 end
 
 @inline function deposition_ventilation(vent::P3Table5D,
                                           vent_e::P3Table5D,
-                                          m_mean, Fᶠ, Fˡ, ρᶠ, prp, ν, Dᵛ, ρ_correction, p3, μ)
+                                          m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction, p3, μⁱ)
     FT = typeof(m_mean)
     # m_mean = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
     # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
@@ -87,7 +87,7 @@ end
     # Runtime correction via ventilation_sc_correction:
     # Sc^(1/3) × √ρ_fac / √ν [s^(1/2) m^(-1)]
     # Dimensional check: table [m² s^(-1/2)] × correction [s^(1/2)/m] = [m]
-    return vent(log_m, Fᶠ, Fˡ, ρᶠ, μ) + ventilation_sc_correction(ν, Dᵛ, ρ_correction) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    return vent(log_m, Fᶠ, Fˡ, ρᶠ, μⁱ) + ventilation_sc_correction(ν, Dᵛ, ρ_correction) * vent_e(log_m, Fᶠ, Fˡ, ρᶠ, μⁱ)
 end
 
 """
@@ -97,8 +97,8 @@ Compute the per-particle cloud-water collection kernel ⟨A × V⟩ for riming.
 Returns the PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle) from the
 `IceCollection.cloud_collection` table (Fortran `f1pr04`).
 """
-@inline collection_kernel_per_particle(coll::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μ) =
-    tabulated_ice_integral(coll, m_mean, Fᶠ, Fˡ, ρᶠ, μ)
+@inline collection_kernel_per_particle(coll::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ) =
+    tabulated_ice_integral(coll, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ)
 
 """
 $(TYPEDSIGNATURES)
@@ -110,11 +110,11 @@ The table stores the half-integral (Fortran convention),
 `(1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂`. No `E_agg` — the collection
 efficiency is applied by the caller.
 """
-@inline aggregation_kernel(coll::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μ) =
-    tabulated_ice_integral(coll, m_mean, Fᶠ, Fˡ, ρᶠ, μ)
+@inline aggregation_kernel(coll::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ) =
+    tabulated_ice_integral(coll, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ)
 
 # Evaluate a 5D ice table at a per-particle mass. The log guard is the
 # per-particle one (see `deposition_ventilation`), not the bulk qmin — the tables
 # are indexed by log₁₀ of mass per particle, and they clamp to their own mass axis.
-@inline tabulated_ice_integral(table::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μ) =
-    table(log10(max(m_mean, typeof(m_mean)(DEFAULT_FLOORS.mass_scale))), Fᶠ, Fˡ, ρᶠ, μ)
+@inline tabulated_ice_integral(table::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ) =
+    table(log10(max(m_mean, typeof(m_mean)(DEFAULT_FLOORS.mass_scale))), Fᶠ, Fˡ, ρᶠ, μⁱ)

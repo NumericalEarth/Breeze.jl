@@ -48,7 +48,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 #####
 
 @inline liquid_fraction_routing_active(::Nothing) = true
-@inline liquid_fraction_routing_active(prp::ProcessRateParameters) = prp.liquid_fraction_active
+@inline liquid_fraction_routing_active(parameters::ProcessRateParameters) = parameters.liquid_fraction_active
 
 """
 $(TYPEDSIGNATURES)
@@ -105,7 +105,7 @@ Rain loses from:
     return tendency_ρqʳ(rates, ρ, nothing)
 end
 
-@inline function tendency_ρqʳ(rates::P3ProcessRates, ρ, prp::Union{Nothing, ProcessRateParameters})
+@inline function tendency_ρqʳ(rates::P3ProcessRates, ρ, parameters::Union{Nothing, ProcessRateParameters})
     # Phase 1: gains from autoconv, accr, complete_melt; loses from evap
     # Phase 2: gains from shedding; loses from riming, freezing, homogeneous freezing
     # Milbrandt et al. (2025): above-freezing collection and wet growth go to qʷⁱ, NOT rain.
@@ -115,7 +115,7 @@ end
     # Note: rain_warm_collection is zeroed at rate-assembly time in the non-liquid-
     # fraction branch (Fortran microphy_p3.f90:3055-3066) so it can safely be added
     # here unconditionally.
-    cloud_warm_rain_gain = ifelse(liquid_fraction_routing_active(prp),
+    cloud_warm_rain_gain = ifelse(liquid_fraction_routing_active(parameters),
                                   zero(typeof(ρ)),
                                   rates.cloud_warm_collection)
     gain = rates.autoconversion + rates.accretion + rates.complete_melting +
@@ -148,7 +148,7 @@ Rain number loses from:
 """
 @inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ, nʳ, qʳ, p3)
     FT = typeof(ρ)
-    prp = p3.process_rates
+    parameters = p3.process_rates
 
     # Phase 1: New drops from autoconversion, at the scheme's seed-drop mass
     # (KK2000 → 25 μm radius, Fortran cons3⁻¹).
@@ -179,8 +179,8 @@ Rain number loses from:
     #      the non-liquid-fraction path; when liquid fraction is active, collected
     #      mass goes to qʷⁱ, not rain.
     # wet_growth_shedding_number → rain drops from excess wet growth (Fortran nrshdr)
-    cloud_warm_rain_n = ifelse(prp.liquid_fraction_active, zero(FT),
-                               rates.cloud_warm_collection / prp.shed_drop_mass)
+    cloud_warm_rain_n = ifelse(parameters.liquid_fraction_active, zero(FT),
+                               rates.cloud_warm_collection / parameters.shed_drop_mass)
     n_gain = n_from_autoconv + n_from_melt +
              rates.rain_breakup +
              rates.shedding_number +
@@ -223,7 +223,7 @@ Ice loses from:
     return tendency_ρqⁱ(rates, ρ, nothing)
 end
 
-@inline function tendency_ρqⁱ(rates::P3ProcessRates, ρ, prp::Union{Nothing, ProcessRateParameters})
+@inline function tendency_ρqⁱ(rates::P3ProcessRates, ρ, parameters::Union{Nothing, ProcessRateParameters})
     # Phase 1: deposition, melting (both partial and complete reduce ice mass)
     # Phase 2: riming (cloud + rain), refreezing, nucleation, and freezing.
     # Splintering mass is already part of the riming mass (splinters fragment existing rime),
@@ -268,7 +268,7 @@ Ice number loses from:
            rates.cloud_homogeneous_number + rates.rain_homogeneous_number
     # Losses (all positive magnitudes, M7)
     # sublimation_number — ice number loss from sublimation (Fortran nisub)
-    # ni_limit: C3 global Nᵢ cap (impose_max_Ni); relaxation sink above N_max/ρ.
+    # ni_limit: C3 global Nⁱ cap (impose_max_Ni); relaxation sink above Nⁱ_max/ρ.
     loss = rates.melting_number + rates.sublimation_number + rates.aggregation + rates.ni_limit
     return ρ * (gain - loss + rates.ice_number_correction)
 end
@@ -293,7 +293,7 @@ Rime mass loses from:
     return tendency_ρqᶠ(rates, ρ, Fᶠ, nothing)
 end
 
-@inline function tendency_ρqᶠ(rates::P3ProcessRates, ρ, Fᶠ, prp::Union{Nothing, ProcessRateParameters})
+@inline function tendency_ρqᶠ(rates::P3ProcessRates, ρ, Fᶠ, parameters::Union{Nothing, ProcessRateParameters})
     # Phase 2: gains from riming, refreezing, freezing, and homogeneous freezing
     # Frozen cloud/rain becomes fully rimed ice (100% rime fraction for new frozen particles)
     #
@@ -331,17 +331,17 @@ Includes melt-densification (Fortran P3 v5.5.0): during melting, low-density
 rime portions melt preferentially, driving the remaining rime toward the
 configured solid-ice density.
 """
-@inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ, qⁱ, prp)
+@inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ, qⁱ, parameters)
     FT = typeof(ρ)
 
-    ρᶠ_safe = max(ρᶠ, prp.minimum_rime_density)
-    ρ_rim_new_safe = max(rates.rime_density_new, prp.minimum_rime_density)
+    ρᶠ_safe = max(ρᶠ, parameters.minimum_rime_density)
+    ρ_rim_new_safe = max(rates.rime_density_new, parameters.minimum_rime_density)
 
     # Fortran P3 v5.5.0: rho_rimeMax = 900 for rain rime and freezing
-    ρ_rimemax = prp.maximum_rime_density
+    ρ_rimemax = parameters.maximum_rime_density
     # Fortran uses rho_rimeMax (900) for homogeneous freezing rime volume, not
     # the solid-ice density.
-    ρ_rim_hom = prp.maximum_rime_density
+    ρ_rim_hom = parameters.maximum_rime_density
 
     # Phase 2: Volume gain from new rime
     # Cloud riming uses Cober-List computed density; rain riming uses rho_rimeMax = 900
@@ -377,13 +377,13 @@ configured solid-ice density.
     # Fortran guards with `.not. log_LiquidFrac`: when liquid fraction is active,
     # melt-densification is skipped because the liquid is tracked explicitly in qʷⁱ.
     # The densification target is the configured solid-ice density, not rho_rimeMax.
-    ρ_solid_ice = prp.pure_ice_density
-    qⁱ_safe = max(qⁱ, FT(prp.floors.mass_scale))
+    ρ_solid_ice = parameters.pure_ice_density
+    qⁱ_safe = max(qⁱ, FT(parameters.floors.mass_scale))
     bᶠ = Fᶠ * qⁱ_safe / ρᶠ_safe
     densification = bᶠ * (ρ_solid_ice - ρᶠ_safe) * ordinary_total_melting /
                     (ρᶠ_safe * qⁱ_safe)
     # Apply only below the solid-ice density when liquid fraction is not active.
-    apply_densification = (ρᶠ_safe < ρ_solid_ice) & !prp.liquid_fraction_active
+    apply_densification = (ρᶠ_safe < ρ_solid_ice) & !parameters.liquid_fraction_active
     densification = ifelse(apply_densification, densification, zero(FT))
 
     return ρ * (volume_gain - volume_loss - densification)
@@ -398,13 +398,13 @@ Activation creates new cloud droplets. Autoconversion, accretion, riming,
 freezing, and above-freezing collection remove cloud droplets in proportion
 to the cloud mass they consume, following the Fortran `nc` budget structure.
 """
-@inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜ, qᶜˡ, p3)
+@inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜˡ, qᶜˡ, p3)
     FT = typeof(ρ)
-    prp = p3.process_rates
-    # Nᶜ is per-volume [#/m³]; dividing by ρ gives per-mass nᶜˡ [#/kg],
+    parameters = p3.process_rates
+    # Nᶜˡ is per-volume [#/m³]; dividing by ρ gives per-mass nᶜˡ [#/kg],
     # matching Fortran's nc/qc → [#/kg/s] when multiplied by mass rates.
-    number_per_mass = safe_divide(Nᶜ, ρ * qᶜˡ, zero(FT))
-    seed_drop_mass = activated_droplet_mass(prp, FT)
+    number_per_mass = safe_divide(Nᶜˡ, ρ * qᶜˡ, zero(FT))
+    seed_drop_mass = activated_droplet_mass(parameters, FT)
     activation_number = ifelse(iszero(rates.ccn_activation_number),
                                rates.ccn_activation_mass / seed_drop_mass,
                                rates.ccn_activation_number)
@@ -412,7 +412,7 @@ to the cloud mass they consume, following the Fortran `nc` budget structure.
     # Scheme-aware cloud-number loss from autoconversion. KK2000 scales by the
     # in-cloud nc/qc ratio (Fortran ncautc = qcaut × nc/qc).
     autoconv_n = cloud_number_loss_from_autoconversion(p3, rates.autoconversion,
-                                                       qᶜˡ, Nᶜ, ρ)
+    qᶜˡ, Nᶜˡ, ρ)
 
     number_loss = autoconv_n +
                   number_per_mass * rates.accretion +
@@ -454,13 +454,13 @@ Loses from:
     return tendency_ρqʷⁱ(rates, ρ, nothing)
 end
 
-@inline function tendency_ρqʷⁱ(rates::P3ProcessRates, ρ, prp::Union{Nothing, ProcessRateParameters})
+@inline function tendency_ρqʷⁱ(rates::P3ProcessRates, ρ, parameters::Union{Nothing, ProcessRateParameters})
     # Include coating condensation/evaporation (Fortran qlcon/qlevp)
     # wet_growth_shedding diverts excess wet growth mass from qʷⁱ to rain.
     # Note: rain_warm_collection is zeroed at rate-assembly time in the non-liquid-
     # fraction branch (Fortran does not transfer rain mass to qʷⁱ in that path), so
     # it can safely be added here unconditionally.
-    liquid_fraction_active = liquid_fraction_routing_active(prp)
+    liquid_fraction_active = liquid_fraction_routing_active(parameters)
     cloud_warm_gain = ifelse(liquid_fraction_active, rates.cloud_warm_collection, zero(typeof(ρ)))
     rain_warm_gain = ifelse(liquid_fraction_active, rates.rain_warm_collection, zero(typeof(ρ)))
     wet_growth_cloud_gain = ifelse(liquid_fraction_active, rates.wet_growth_cloud, zero(typeof(ρ)))
@@ -513,20 +513,20 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute predicted supersaturation tendency from Grabowski & Morrison (2008).
+Compute the liquid supersaturation tendency from Grabowski & Morrison (2008).
 
-When `predict_supersaturation = true`, supersaturation ``sˢᵃᵗ = qᵛ - q_{vs}``
+When `predict_supersaturation = true`, the liquid supersaturation ``sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ``
 is a prognostic variable advected by the dynamical core. The microphysical
-tendency reproduces Fortran's post-step recompute ``sˢᵃᵗ = qᵛ - q_{vs}(T)``
+tendency reproduces Fortran's post-step recompute ``sᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ(T)``
 (`microphy_p3.f90:5053-5063`). `compute_p3_process_rates` precomputes that
 diagnostic tendency from the final local ``qᵛ`` and ``T`` implied by the
 Fortran-ordered process rates.
 
 When `predict_supersaturation = false`, returns zero tendency.
 """
-@inline function tendency_ρsˢᵃᵗ(rates::P3ProcessRates, ρ, prp)
-    raw = ρ * rates.predicted_ssat_tendency
-    return gate_predicted_supersaturation(prp, raw)
+@inline function tendency_ρsᵛ⁺ˡ(rates::P3ProcessRates, ρ, parameters)
+    raw = ρ * rates.predicted_supersaturation_tendency
+    return gate_predicted_supersaturation(parameters, raw)
 end
 
 """
@@ -535,7 +535,7 @@ $(TYPEDSIGNATURES)
 Aerosol-pool tendency: each activated cloud droplet removes one unit from the
 unactivated reservoir, so ``∂ρn^a/∂t = -ρ \\, n_{\\text{nuc}}`` with
 ``n_{\\text{nuc}}`` the same activation rate that sources ``ρn^{cl}``. In the
-prescribed-Nᶜ path `rates.ccn_activation_number` is zero, so this returns 0.
+prescribed-Nᶜˡ path `rates.ccn_activation_number` is zero, so this returns 0.
 """
 @inline tendency_ρnᵃ(rates::P3ProcessRates, ρ) = -ρ * rates.ccn_activation_number
 
@@ -548,13 +548,13 @@ prescribed-Nᶜ path `rates.ccn_activation_number` is zero, so this returns 0.
 
 @inline tendency_ρqᶜˡ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρqʳ(::Nothing, ρ) = zero(ρ)
-@inline tendency_ρnᶜˡ(::Nothing, ρ, Nᶜ, qᶜˡ, p3) = zero(ρ)
+@inline tendency_ρnᶜˡ(::Nothing, ρ, Nᶜˡ, qᶜˡ, p3) = zero(ρ)
 @inline tendency_ρnʳ(::Nothing, ρ, nⁱ, qⁱ, args...) = zero(ρ)
 @inline tendency_ρqⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρnⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρqᶠ(::Nothing, ρ, Fᶠ) = zero(ρ)
-@inline tendency_ρbᶠ(::Nothing, ρ, Fᶠ, ρᶠ, prp...) = zero(ρ)
+@inline tendency_ρbᶠ(::Nothing, ρ, Fᶠ, ρᶠ, parameters...) = zero(ρ)
 @inline tendency_ρqʷⁱ(::Nothing, ρ) = zero(ρ)
-@inline tendency_ρsˢᵃᵗ(::Nothing, ρ, prp) = zero(ρ)
+@inline tendency_ρsᵛ⁺ˡ(::Nothing, ρ, parameters) = zero(ρ)
 @inline tendency_ρqᵛ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρnᵃ(::Nothing, ρ) = zero(ρ)

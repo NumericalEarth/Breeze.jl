@@ -6,7 +6,7 @@
 ##### GPU. Scalar fields and singleton integral types pass through unchanged.
 #####
 ##### Most container types just walk every field with `Adapt.adapt` and
-##### `on_architecture`. The `@walk_fields_for_gpu` macro below generates both
+##### `on_architecture`. The `@adapt_architecture` macro below generates both
 ##### methods so we don't repeat the field list twice per type. A field-by-field
 ##### walk is equivalent to passing scalars through unchanged because both
 ##### `Adapt.adapt` and `on_architecture` fall back to identity for types without
@@ -17,13 +17,13 @@ using Adapt: Adapt
 using Oceananigans.Architectures: on_architecture
 
 """
-    @walk_fields_for_gpu T
+    @adapt_architecture T
 
 Generate `Adapt.adapt_structure` and `Oceananigans.Architectures.on_architecture`
 methods for `T` that walk every field of `T` and reconstruct via the positional
 constructor. `T` must already be defined when the macro is expanded.
 """
-macro walk_fields_for_gpu(T)
+macro adapt_architecture(T)
     fields = fieldnames(getfield(__module__, T))
     adapt_args = [:(Adapt.adapt(to, x.$f)) for f in fields]
     on_arch_args = [:(on_architecture(arch, x.$f)) for f in fields]
@@ -33,18 +33,18 @@ macro walk_fields_for_gpu(T)
     end)
 end
 
-@walk_fields_for_gpu TabulatedFunction6D
-@walk_fields_for_gpu RimeDensityIndexedTable5D
-@walk_fields_for_gpu RimeDensityIndexedTable6D
-@walk_fields_for_gpu IceFallSpeed
-@walk_fields_for_gpu IceDeposition
-@walk_fields_for_gpu IceBulkProperties
-@walk_fields_for_gpu IceCollection
-@walk_fields_for_gpu IceLambdaLimiter
-@walk_fields_for_gpu IceRainCollection
-@walk_fields_for_gpu P3IceIntegralsTable
-@walk_fields_for_gpu P3RainIceCollectionTable
-@walk_fields_for_gpu P3LookupTables
-@walk_fields_for_gpu IceProperties
-@walk_fields_for_gpu RainProperties
-@walk_fields_for_gpu PredictedParticlePropertiesMicrophysics
+@adapt_architecture TabulatedFunction6D
+@adapt_architecture RimeDensityIndexedTable5D
+@adapt_architecture RimeDensityIndexedTable6D
+@adapt_architecture IceFallSpeed
+@adapt_architecture IceDeposition
+@adapt_architecture IceBulkProperties
+@adapt_architecture IceCollection
+@adapt_architecture IceLambdaLimiter
+@adapt_architecture IceRainCollection
+@adapt_architecture P3IceIntegralsTable
+@adapt_architecture P3RainIceCollectionTable
+@adapt_architecture P3LookupTables
+@adapt_architecture IceProperties
+@adapt_architecture RainProperties
+@adapt_architecture PredictedParticlePropertiesMicrophysics

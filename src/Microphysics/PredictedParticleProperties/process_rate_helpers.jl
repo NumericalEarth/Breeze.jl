@@ -194,29 +194,29 @@ end
 $(TYPEDSIGNATURES)
 
 Mass [kg] of a newly activated cloud droplet, the sphere of radius
-`prp.activated_droplet_radius` at the liquid water density. This is Fortran P3's
+`parameters.activated_droplet_radius` at the liquid water density. This is Fortran P3's
 `cons7`, and it converts a CCN activation *number* rate into the matching *mass*
 rate wherever one of the two is diagnosed from the other.
 """
-@inline function activated_droplet_mass(prp, FT)
-    r₀ = FT(prp.activated_droplet_radius)
-    return 4 * FT(π) / 3 * FT(prp.liquid_water_density) * r₀^3
+@inline function activated_droplet_mass(parameters, FT)
+    r₀ = FT(parameters.activated_droplet_radius)
+    return 4 * FT(π) / 3 * FT(parameters.liquid_water_density) * r₀^3
 end
 
-@inline function cloud_number_tendency_before_homogeneous_freezing(p3, ρ, qᶜˡ, Nᶜ,
+@inline function cloud_number_tendency_before_homogeneous_freezing(p3, ρ, qᶜˡ, Nᶜˡ,
                                                  ccn_activation_mass, ccn_activation_number,
                                                  autoconversion, accretion, self_collection,
                                                  riming_number, freezing_number,
                                                  warm_collection_number)
     FT = typeof(ρ)
-    prp = p3.process_rates
-    seed_drop_mass = activated_droplet_mass(prp, FT)
+    parameters = p3.process_rates
+    seed_drop_mass = activated_droplet_mass(parameters, FT)
     activation_number = ifelse(iszero(ccn_activation_number),
                                ccn_activation_mass / seed_drop_mass,
                                ccn_activation_number)
     autoconversion_number = cloud_number_loss_from_autoconversion(
-        p3, autoconversion, qᶜˡ, Nᶜ, ρ)
-    collection_number = safe_divide(Nᶜ * accretion, ρ * qᶜˡ, zero(FT))
+        p3, autoconversion, qᶜˡ, Nᶜˡ, ρ)
+    collection_number = safe_divide(Nᶜˡ * accretion, ρ * qᶜˡ, zero(FT))
     number_loss = autoconversion_number + collection_number + self_collection +
                   riming_number + freezing_number + warm_collection_number
     return activation_number - number_loss
@@ -230,11 +230,11 @@ end
                                                 warm_collection_number,
                                                 wet_growth_shedding_number)
     FT = typeof(nⁱ + qⁱ + nʳ + qʳ)
-    prp = p3.process_rates
+    parameters = p3.process_rates
     number_from_autoconversion = autoconversion / rain_seed_drop_mass(p3)
     number_from_melting = melting_number
-    cloud_warm_rain_number = ifelse(prp.liquid_fraction_active, zero(FT),
-                                    cloud_warm_collection / prp.shed_drop_mass)
+    cloud_warm_rain_number = ifelse(parameters.liquid_fraction_active, zero(FT),
+                                    cloud_warm_collection / parameters.shed_drop_mass)
     number_gain = number_from_autoconversion + number_from_melting + breakup +
                   shedding_number + cloud_warm_rain_number + wet_growth_shedding_number
     number_loss = evaporation_number + self_collection + riming_number +
@@ -262,7 +262,7 @@ maximum_rime_density` — Fortran P3's `bsmall` — not the `1e-15` literal
 """
 @inline function consistent_rime_state(p3, qⁱ, qᶠ, bᶠ, qʷⁱ)
     FT = typeof(qⁱ)
-    prp = p3.process_rates
+    parameters = p3.process_rates
 
     qⁱ_available = clamp_positive(qⁱ)
     # Julia's qⁱ is already dry ice (= Fortran qitot - qiliq), so
@@ -274,9 +274,9 @@ maximum_rime_density` — Fortran P3's `bsmall` — not the `1e-15` literal
     # Rime volume floor [m³/kg]: the volume a just-significant rime mass occupies at
     # the densest admissible packing. Below it, zero the pair rather than divide by a
     # vanishing bᶠ. `rime_not_small` below is the mass counterpart.
-    has_rime_volume = bᶠ_raw >= p3.minimum_mass_mixing_ratio / prp.maximum_rime_density
+    has_rime_volume = bᶠ_raw >= p3.minimum_mass_mixing_ratio / parameters.maximum_rime_density
     ρᶠ_raw = safe_divide(qᶠ_raw, bᶠ_raw, zero(FT))
-    ρᶠ_bounded = clamp(ρᶠ_raw, prp.minimum_rime_density, prp.maximum_rime_density)
+    ρᶠ_bounded = clamp(ρᶠ_raw, parameters.minimum_rime_density, parameters.maximum_rime_density)
 
     qᶠ_after_volume = ifelse(has_rime_volume, qᶠ_raw, zero(FT))
     bᶠ_after_volume = ifelse(has_rime_volume,
@@ -324,7 +324,7 @@ end
                        FT(DEFAULT_FLOORS.mass_scale))
 end
 
-@inline function bounded_ice_number(table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+@inline function bounded_ice_number(table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
     FT = typeof(qⁱ_total + nⁱ)
     qⁱ_eff = clamp_positive(qⁱ_total)
     nⁱ_eff = clamp_positive(nⁱ)
@@ -332,70 +332,71 @@ end
                               max(nⁱ_eff, FT(DEFAULT_FLOORS.number_scale)),
                               FT(DEFAULT_FLOORS.mass_scale)))
     limiter = table.lambda_limiter
-    nⁱ_min = limiter.large_q(log_m, Fᶠ, Fˡ, ρᶠ, μ) * qⁱ_eff
-    nⁱ_max = limiter.small_q(log_m, Fᶠ, Fˡ, ρᶠ, μ) * qⁱ_eff
+    nⁱ_min = limiter.large_q(log_m, Fᶠ, Fˡ, ρᶠ, μⁱ) * qⁱ_eff
+    nⁱ_max = limiter.small_q(log_m, Fᶠ, Fˡ, ρᶠ, μⁱ) * qⁱ_eff
     bounded = clamp(nⁱ_eff, nⁱ_min, nⁱ_max)
     return ifelse(qⁱ_eff > FT(DEFAULT_FLOORS.mass_scale), bounded, zero(FT))
 end
 
-@inline bounded_ice_number(::Nothing, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ) =
+@inline bounded_ice_number(::Nothing, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ) =
     ifelse(qⁱ_total > zero(qⁱ_total), clamp_positive(nⁱ), zero(nⁱ))
 
-@inline function bounded_ice_number(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
-    return bounded_ice_number(ice_integrals_table(p3), qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+@inline function bounded_ice_number(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
+    return bounded_ice_number(ice_integrals_table(p3), qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
 end
 
-@inline function rain_slope_parameter(qʳ, nʳ, prp)
+@inline function rain_slope_parameter(qʳ, nʳ, parameters)
     FT = typeof(qʳ + nʳ)
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = clamp_positive(nʳ)
-    λ_r_cubed = FT(π) * prp.liquid_water_density * nʳ_eff /
-                max(qʳ_eff, FT(prp.floors.mass_scale))
-    return clamp(cbrt(λ_r_cubed), prp.rain_lambda_min, prp.rain_lambda_max)
+    λʳ_cubed = FT(π) * parameters.liquid_water_density * nʳ_eff /
+               max(qʳ_eff, FT(parameters.floors.mass_scale))
+    return clamp(cbrt(λʳ_cubed), parameters.minimum_rain_slope, parameters.maximum_rain_slope)
 end
 
-@inline function rain_number_from_slope(qʳ, λ_r, prp)
-    FT = typeof(qʳ + λ_r)
+@inline function rain_number_from_slope(qʳ, λʳ, parameters)
+    FT = typeof(qʳ + λʳ)
     qʳ_eff = clamp_positive(qʳ)
-    return qʳ_eff * λ_r^3 / (FT(π) * prp.liquid_water_density)
+    return qʳ_eff * λʳ^3 / (FT(π) * parameters.liquid_water_density)
 end
 
-@inline function bounded_rain_number(nʳ, qʳ, prp)
+@inline function bounded_rain_number(nʳ, qʳ, parameters)
     FT = typeof(qʳ + nʳ)
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = clamp_positive(nʳ)
-    λ_r_uncapped = cbrt(FT(π) * prp.liquid_water_density * nʳ_eff /
-                        max(qʳ_eff, FT(prp.floors.mass_scale)))
-    λ_r = clamp(λ_r_uncapped, prp.rain_lambda_min, prp.rain_lambda_max)
-    nʳ_bounded = rain_number_from_slope(qʳ_eff, λ_r, prp)
-    needs_adjustment = (λ_r_uncapped < prp.rain_lambda_min) | (λ_r_uncapped > prp.rain_lambda_max)
+    unbounded_slope = cbrt(FT(π) * parameters.liquid_water_density * nʳ_eff /
+                           max(qʳ_eff, FT(parameters.floors.mass_scale)))
+    λʳ = clamp(unbounded_slope, parameters.minimum_rain_slope, parameters.maximum_rain_slope)
+    nʳ_bounded = rain_number_from_slope(qʳ_eff, λʳ, parameters)
+    needs_adjustment = (unbounded_slope < parameters.minimum_rain_slope) |
+                       (unbounded_slope > parameters.maximum_rain_slope)
     return ifelse(needs_adjustment, nʳ_bounded, nʳ_eff)
 end
 
-# Bulk ice density from Table 1 (the main lookup table) at the shape parameter μ:
-# Fortran `proc_from_LUT_main2mom(12, …)`, whose μ index comes from
+# Bulk ice density from Table 1 (the main lookup table) at the shape parameter μⁱ:
+# Fortran `proc_from_LUT_main2mom(12, …)`, whose μⁱ index comes from
 # `find_lookupTable_indices_1c`.
-@inline function ice_mean_density(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+@inline function ice_mean_density(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
     FT = typeof(qⁱ_total)
     m̄ = safe_divide(qⁱ_total, nⁱ, one(FT))
     log_mean_mass = log10(ifelse(m̄ > 0, m̄, one(FT)))
-    return ice_table.bulk_properties.mean_density(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μ)
+    return ice_table.bulk_properties.mean_density(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μⁱ)
 end
 
-@inline function ice_mean_density(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
-    return ice_mean_density(ice_integrals_table(p3), qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μ)
+@inline function ice_mean_density(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
+    return ice_mean_density(ice_integrals_table(p3), qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
 end
 
 #####
-##### Ice shape parameter (μ) from Table 1
+##### Ice shape parameter (μⁱ) from Table 1
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-Compute the ice PSD shape parameter μ from the lookup tables.
+Compute the ice PSD shape parameter μⁱ from the lookup tables.
 
-μ is looked up directly from Table 1 (`bulk_properties.shape`), which stores
+μⁱ is looked up directly from Table 1 (`bulk_properties.shape`), which stores
 the `mu_i_save` value computed during Fortran table generation.
 """
 @inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ)

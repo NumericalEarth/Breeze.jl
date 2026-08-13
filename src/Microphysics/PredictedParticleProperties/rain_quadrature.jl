@@ -86,16 +86,16 @@ function RainMassWeightedVelocityEvaluator(FT::Type{<:AbstractFloat} = Float64;
 end
 
 """
-    (e::RainMassWeightedVelocityEvaluator)(log10_lambda_r)
+    (e::RainMassWeightedVelocityEvaluator)(log10_slope)
 
 Evaluate the mass-weighted rain terminal velocity at the given `log10(λ_r)`.
 
 Returns the velocity in [m/s] at reference air density (no density correction).
 Apply `(ρ₀/ρ)^0.54` at the call site if needed.
 """
-@inline function (e::RainMassWeightedVelocityEvaluator)(log10_lambda_r)
+@inline function (e::RainMassWeightedVelocityEvaluator)(log10_slope)
     FT = eltype(e.nodes)
-    λ_r = exp10(FT(log10_lambda_r))
+    λʳ = exp10(FT(log10_slope))
 
     # Density correction is 1 at reference conditions (applied at call site)
     ρ_correction = one(FT)
@@ -107,11 +107,11 @@ Apply `(ρ₀/ρ)^0.54` at the call site if needed.
     for i in 1:n
         x = @inbounds e.nodes[i]
         w = @inbounds e.weights[i]
-        D = transform_to_diameter(x, λ_r)
-        J = jacobian_diameter_transform(x, λ_r)
+        D = transform_to_diameter(x, λʳ)
+        J = jacobian_diameter_transform(x, λʳ)
 
         V = rain_fall_speed(D, ρ_correction)
-        psd = exp(-λ_r * D)
+        psd = exp(-λʳ * D)
 
         velocity_diameter_cubed_integral += w * V * D^3 * psd * J
         diameter_cubed_integral          += w * D^3 * psd * J
@@ -164,15 +164,15 @@ function RainNumberWeightedVelocityEvaluator(FT::Type{<:AbstractFloat} = Float64
 end
 
 """
-    (e::RainNumberWeightedVelocityEvaluator)(log10_lambda_r)
+    (e::RainNumberWeightedVelocityEvaluator)(log10_slope)
 
 Evaluate the number-weighted rain terminal velocity at the given `log10(λ_r)`.
 
 Returns the velocity in [m/s] at reference air density.
 """
-@inline function (e::RainNumberWeightedVelocityEvaluator)(log10_lambda_r)
+@inline function (e::RainNumberWeightedVelocityEvaluator)(log10_slope)
     FT = eltype(e.nodes)
-    λ_r = exp10(FT(log10_lambda_r))
+    λʳ = exp10(FT(log10_slope))
     ρ_correction = one(FT)
 
     vel_integral    = zero(FT)
@@ -182,11 +182,11 @@ Returns the velocity in [m/s] at reference air density.
     for i in 1:n
         x = @inbounds e.nodes[i]
         w = @inbounds e.weights[i]
-        D = transform_to_diameter(x, λ_r)
-        J = jacobian_diameter_transform(x, λ_r)
+        D = transform_to_diameter(x, λʳ)
+        J = jacobian_diameter_transform(x, λʳ)
 
         V   = rain_fall_speed(D, ρ_correction)
-        psd = exp(-λ_r * D)
+        psd = exp(-λʳ * D)
 
         vel_integral    += w * V * psd * J
         number_integral += w * psd * J
@@ -260,16 +260,16 @@ function RainEvaporationVentilationEvaluator(FT::Type{<:AbstractFloat} = Float64
 end
 
 """
-    (e::RainEvaporationVentilationEvaluator)(log10_lambda_r)
+    (e::RainEvaporationVentilationEvaluator)(log10_slope)
 
 Evaluate `I_VD(λ_r)` = ∫ D √(V(D)×D) exp(-λ_r D) dD at the given `log10(λ_r)`.
 
 Returns the velocity-diameter integral in [m^(5/2)]. The `1/√ν`, constant (f1r),
 and Schmidt number (Sc^(1/3)) contributions are applied at runtime (M18).
 """
-@inline function (e::RainEvaporationVentilationEvaluator)(log10_lambda_r)
+@inline function (e::RainEvaporationVentilationEvaluator)(log10_slope)
     FT = eltype(e.nodes)
-    λ_r = exp10(FT(log10_lambda_r))
+    λʳ = exp10(FT(log10_slope))
 
     result = zero(FT)
     n = length(e.nodes)
@@ -277,14 +277,14 @@ and Schmidt number (Sc^(1/3)) contributions are applied at runtime (M18).
     for i in 1:n
         x = @inbounds e.nodes[i]
         w = @inbounds e.weights[i]
-        D = transform_to_diameter(x, λ_r)
-        J = jacobian_diameter_transform(x, λ_r)
+        D = transform_to_diameter(x, λʳ)
+        J = jacobian_diameter_transform(x, λʳ)
 
         # Use piecewise Gunn-Kinzer/Beard fall speed (Fortran fallr1).
         # ν is NOT baked in; 1/√ν applied at runtime from T,P-dependent transport.
         V = rain_fall_speed(D, one(FT))
         VD_sqrt = sqrt(max(V * D, zero(FT)))
-        psd = exp(-λ_r * D)
+        psd = exp(-λʳ * D)
 
         result += w * D * VD_sqrt * psd * J
     end

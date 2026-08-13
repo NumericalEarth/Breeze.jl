@@ -244,7 +244,7 @@ s_m = 2 \\left(\\frac{1}{\\beta_{\\text{act}}}\\right)^{1/2}
       \\left(\\frac{A_{\\text{act}}}{3 \\, r_m}\\right)^{3/2}
 ```
 
-and the activated fraction is ``N_a / 2 \\, [1 - \\text{erf}(u)]`` where
+and the activated fraction is ``N^a / 2 \\, [1 - \\text{erf}(u)]`` where
 ``u = 2 \\ln(s_m / S) / (4.242 \\ln \\sigma_g)``.
 """
 @inline function activated_number(mode::AerosolMode, aerosol::AerosolActivation, T, S)

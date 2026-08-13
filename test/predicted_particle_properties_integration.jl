@@ -73,7 +73,7 @@ using Oceananigans.TimeSteppers: update_state!
 
         # These moments and properties are not independent material masses. In
         # particular, rime mass is already included in total ice mass. `ρnᶜˡ` and `ρnᵃ`
-        # are absent in the prescribed-Nᶜ path, so they cannot be set here.
+    # are absent in the prescribed-Nᶜˡ path, so they cannot be set here.
         set!(μ.ρnʳ, 2e12)
         set!(μ.ρnⁱ, 3e12)
         set!(μ.ρqᶠ, 0.5)
@@ -121,7 +121,7 @@ using Oceananigans.TimeSteppers: update_state!
         @test second_rain_source != first_rain_source
     end
 
-    @testset "P3 has no droplet-number state in the prescribed-Nᶜ path" begin
+@testset "P3 has no droplet-number state in the prescribed-Nᶜˡ path" begin
         # Fortran `log_predictNc = .false.`: `nc` is the scheme parameter at every
         # microphysics call, so droplet number is not a state variable. Carrying `ρnᶜˡ`
         # anyway meant `compute_tendencies!` integrated the transport of `μ.nᶜˡ`, which
@@ -408,18 +408,20 @@ using Oceananigans.TimeSteppers: update_state!
         @test only_value(μ.ρbᶠ) == 0
         @test only_value(μ.ρnʳ) == 0
 
-        # Predicted supersaturation is left alone: subsaturation is legitimately negative.
+        # The predicted supersaturation is left alone: subsaturation is legitimately negative.
         # The field exists only when the switch is on, so check it on such a model.
-        p3_ssat = PredictedParticlePropertiesMicrophysics(FT; predict_supersaturation = true)
-        ssat_model = AtmosphereModel(grid; dynamics,
-                                     thermodynamic_constants = constants,
-                                     microphysics = p3_ssat)
-        μ_ssat = ssat_model.microphysical_fields
-        @test !any(field === μ_ssat.ρsˢᵃᵗ
-                   for field in AtmosphereModels.correction_number_fields(p3_ssat, μ_ssat))
-        set!(μ_ssat.ρsˢᵃᵗ, FT(-1e-5))
-        AtmosphereModels.fix_negative_moisture!(ssat_model)
-        @test only_value(μ_ssat.ρsˢᵃᵗ) ≈ FT(-1e-5)
+        supersaturation_p3 =
+            PredictedParticlePropertiesMicrophysics(FT; predict_supersaturation = true)
+        supersaturation_model = AtmosphereModel(
+            grid; dynamics, thermodynamic_constants = constants,
+            microphysics = supersaturation_p3)
+        supersaturation_fields = supersaturation_model.microphysical_fields
+        @test !any(field === supersaturation_fields.ρsᵛ⁺ˡ for field in
+                   AtmosphereModels.correction_number_fields(
+                       supersaturation_p3, supersaturation_fields))
+        set!(supersaturation_fields.ρsᵛ⁺ˡ, FT(-1e-5))
+        AtmosphereModels.fix_negative_moisture!(supersaturation_model)
+        @test only_value(supersaturation_fields.ρsᵛ⁺ˡ) ≈ FT(-1e-5)
     end
 
     @testset "P3 initialization is consistent for total and dry density inputs" begin

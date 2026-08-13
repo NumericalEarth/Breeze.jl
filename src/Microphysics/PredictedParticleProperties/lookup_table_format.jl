@@ -6,8 +6,8 @@
 ##### text; nothing about the format depends on the language that wrote them.
 ##### A single file holds two blocks:
 #####
-#####   Table 1: ice integrals,          axes (Q̄, Fᶠ, Fˡ, ρᶠ index, μ)
-#####   Table 2: rain-ice collection,    axes (Q̄, λ_r, Fᶠ, Fˡ, ρᶠ index, μ)
+#####   Table 1: ice integrals,          axes (Q̄, Fᶠ, Fˡ, ρᶠ index, μⁱ)
+#####   Table 2: rain-ice collection,    axes (Q̄, λ_r, Fᶠ, Fˡ, ρᶠ index, μⁱ)
 #####
 ##### The rime-density axis is stored as an index 1..5 over the non-uniform grid
 ##### {50, 250, 450, 650, 900} kg/m³; `RimeDensityIndexedTable5D`/`6D` apply the
@@ -194,10 +194,10 @@ end
         gpu_data, ranges, inv_delta)
 
 function ice_integrals_axes(FT)
-    # Axes: (log_mass, Fᶠ, Fˡ, rime-density index, μ). The two mass fractions span
+    # Axes: (log_mass, Fᶠ, Fˡ, rime-density index, μⁱ). The two mass fractions span
     # [0, 1], the rime-density index runs 1..5 over the non-uniform ρᶠ grid (the
-    # wrapper applies the transform), and the μ axis spans [0, 20] but is trivial
-    # here — the 2-moment tables carry a single μ point.
+    # wrapper applies the transform), and the μⁱ axis spans [0, 20] but is trivial
+    # here — the 2-moment tables carry a single μⁱ point.
     return (
         (FT(LOG_MASS_MIN), FT(LOG_MASS_MAX)),
         (FT(0), FT(1)),
@@ -208,7 +208,7 @@ function ice_integrals_axes(FT)
 end
 
 function rain_ice_collection_axes(FT)
-    # Axes: (log_mass, log_lambda_r, Fᶠ, Fˡ, rime-density index, μ); the last four
+    # Axes: (log_mass, log_lambda_r, Fᶠ, Fˡ, rime-density index, μⁱ); the last four
     # match `ice_integrals_axes`.
     return (
         (FT(LOG_MASS_MIN), FT(LOG_MASS_MAX)),

@@ -116,7 +116,7 @@ struct ProcessRateParameters{FT, PS}
     autoconversion_exponent_cloud :: FT      # α [-]
     autoconversion_exponent_droplet :: FT    # β [-]
     autoconversion_threshold :: FT           # qᶜˡ threshold [kg/kg]
-    autoconversion_reference_concentration :: FT  # Nc reference [1/m³]
+    autoconversion_reference_concentration :: FT  # Nᶜˡ reference [1/m³]
 
     # Rain accretion (Khairoutdinov-Kogan 2000)
     accretion_coefficient :: FT              # k₂ [s⁻¹]
@@ -132,16 +132,16 @@ struct ProcessRateParameters{FT, PS}
     rain_evaporation_timescale :: FT         # τ_evap [s]
     ice_deposition_timescale :: FT           # τ_dep [s]
 
-    # Ice aggregation. The sticking efficiency ramps linearly from `min` to `max`
+    # Ice aggregation. The sticking efficiency ramps linearly from its minimum to maximum
     # between the two temperatures, and is then shut off between the two rime
     # fractions, above which heavily rimed particles no longer aggregate.
-    aggregation_efficiency_max :: FT         # Eⁱⁱ_max [-]
-    aggregation_efficiency_min :: FT         # Eⁱⁱ_min [-], the cold-ice value
+    maximum_aggregation_efficiency :: FT     # Eⁱⁱ_max [-]
+    minimum_aggregation_efficiency :: FT     # Eⁱⁱ_min [-], the cold-ice value
     aggregation_timescale :: FT              # τ_agg [s]
-    aggregation_efficiency_temperature_low :: FT   # T below which Eⁱⁱ = Eⁱⁱ_min [K]
-    aggregation_efficiency_temperature_high :: FT  # T above which Eⁱⁱ = Eⁱⁱ_max [K]
-    aggregation_rime_fraction_low :: FT      # Fᶠ below which aggregation is unreduced [-]
-    aggregation_rime_fraction_high :: FT     # Fᶠ above which aggregation is off [-]
+    aggregation_efficiency_ramp_start_temperature :: FT # T where Eⁱⁱ starts increasing [K]
+    aggregation_efficiency_ramp_end_temperature :: FT   # T where Eⁱⁱ reaches Eⁱⁱ_max [K]
+    minimum_aggregation_rime_fraction :: FT  # Fᶠ below which aggregation is unreduced [-]
+    maximum_aggregation_rime_fraction :: FT  # Fᶠ above which aggregation is off [-]
 
     # Cloud riming
     cloud_ice_collection_efficiency :: FT    # Eᶜⁱ [-]
@@ -177,26 +177,26 @@ struct ProcessRateParameters{FT, PS}
     # Deposition nucleation (Cooper 1986)
     ice_nucleation_temperature_threshold :: FT   # T below which nucleation occurs [K]
     ice_nucleation_supersaturation_threshold :: FT  # Sⁱ threshold [-]
-    ice_nucleation_maximum_concentration :: FT   # N_max [1/m³]
+    maximum_ice_nucleation_concentration :: FT   # Nⁱ_max [1/m³]
     ice_nucleation_timescale :: FT               # τ_nuc [s]
     ice_nucleation_coefficient :: FT             # Cooper (1986) prefactor [1/m³] (default 5.0)
     ice_nucleation_temperature_coefficient :: FT # Cooper (1986) supercooling rate [1/K] (default 0.304)
 
     # Immersion freezing (Barklie-Gokhale 1959)
-    immersion_freezing_temperature_max :: FT # T_max [K]
+    maximum_immersion_freezing_temperature :: FT # T_max [K]
     immersion_freezing_coefficient :: FT     # aimm [-]
     immersion_freezing_nucleation_coefficient :: FT  # bimm [m⁻³s⁻¹]
 
     # Rime splintering (Hallett-Mossop)
-    splintering_temperature_low :: FT        # T_low [K]
-    splintering_temperature_high :: FT       # T_high [K]
+    minimum_splintering_temperature :: FT    # lower temperature bound [K]
+    maximum_splintering_temperature :: FT    # upper temperature bound [K]
     splintering_temperature_peak :: FT       # T_peak [K]
     splintering_rate :: FT                   # splinters per kg rime
     splintering_crystal_mass :: FT           # mass per HM splinter [kg] (Fortran Dinit_HM = 10 μm)
-    splintering_diameter_threshold :: FT     # D_min [m] for HM splintering
+    splintering_diameter_threshold :: FT     # minimum diameter [m] for HM splintering
     splintering_cloud_riming_scale :: FT     # 1.0 for nCat=1 (include), 0.0 for nCat>1 (exclude)
-    splintering_liquid_fraction_max :: FT    # Fˡ max for HM splintering
-    splintering_surface_temperature_max :: FT # warm-surface shutoff [K] (Inf disables)
+    maximum_splintering_liquid_fraction :: FT # Fˡ max for HM splintering
+    maximum_splintering_surface_temperature :: FT # warm-surface shutoff [K] (Inf disables)
 
     # Initial rain drop mass (for autoconversion number tendency)
     initial_rain_drop_mass :: FT             # m_rain_init [kg]
@@ -209,8 +209,8 @@ struct ProcessRateParameters{FT, PS}
     rime_densification_timescale :: FT       # τ_densif [s]
 
     # Rain size distribution bounds (Fortran P3 v5.5.0: lamr_min, lamr_max)
-    rain_lambda_min :: FT                   # λ_r minimum [1/m]
-    rain_lambda_max :: FT                   # λ_r maximum [1/m]
+    minimum_rain_slope :: FT                # λʳ minimum [1/m]
+    maximum_rain_slope :: FT                # λʳ maximum [1/m]
 
     # Sink-limiting safety timescale [s]
     # If total sinks for any species × dt_safety exceed available mass,
@@ -223,8 +223,8 @@ struct ProcessRateParameters{FT, PS}
     coupled_sink_limiting_iterations :: Int
 
     # Global ice number limiter (Fortran P3 v5.5.0 impose_max_Ni)
-    # Applied as a relaxation sink whenever nⁱ × ρ > N_max.
-    maximum_ice_number_density :: FT         # Nᵢ_max [1/m³]
+    # Applied as a relaxation sink whenever nⁱ × ρ exceeds the maximum.
+    maximum_ice_number_density :: FT         # Nⁱ_max [1/m³]
 
     # Liquid fraction clipping threshold (Milbrandt et al. 2025)
     # Fl < this: instantly freeze all qwi to rime; Fl > (1 - this): fully melt to rain.
@@ -260,7 +260,7 @@ struct ProcessRateParameters{FT, PS}
     # parameter so allocation decisions and kernel gates can dispatch at compile time.
     # `prognostic_field_names` must fold to a constant tuple (a `Union` return type makes
     # the host-side prognostic loop allocate), and `materialize_microphysical_fields`
-    # needs the type value to decide whether `ρsˢᵃᵗ` exists at all.
+# needs the type value to decide whether `ρsᵛ⁺ˡ` exists at all.
     predict_supersaturation :: Bool
 
     # Deposition/sublimation calibration factors (Fortran P3 v5.5.0 clbfact_dep, clbfact_sub).
@@ -304,7 +304,7 @@ path uses ``μ_r = 0``. None are duplicated in this rate-parameter container.
 # Example
 
 The second type parameter carries the value of the Boolean
-`predict_supersaturation` field, so the default `false` drops `ρsˢᵃᵗ` from the
+`predict_supersaturation` field, so the default `false` drops `ρsᵛ⁺ˡ` from the
 prognostic set entirely while `params.predict_supersaturation` remains usable in
 ordinary Boolean expressions.
 
@@ -333,8 +333,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         freezing_temperature = 273.15,
 
         # Rain autoconversion
-        # KK2000 Eq. 29: dqʳ/dt = 1350 qᶜˡ^2.47 Nᶜ^(-1.79) with Nᶜ in cm⁻³.
-        # Rescaled for (Nᶜ/Nᶜ_ref)^β with Nᶜ_ref = 1e8 m⁻³ = 100 cm⁻³:
+    # KK2000 Eq. 29: dqʳ/dt = 1350 qᶜˡ^2.47 Nᶜˡ^(-1.79) with Nᶜˡ in cm⁻³.
+    # Rescaled for (Nᶜˡ/Nᶜˡ_ref)^β with Nᶜˡ_ref = 1e8 m⁻³ = 100 cm⁻³:
         # k₁ = 1350 × (100)^(-1.79) ≈ 0.355
         autoconversion_coefficient = 1350 * 100.0^(-1.79),
         autoconversion_exponent_cloud = 2.47,
@@ -356,13 +356,13 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         ice_deposition_timescale = 10.0,
 
         # Ice aggregation (Morrison & Milbrandt 2015a; Fortran Eii / Eii_fact)
-        aggregation_efficiency_max = 0.3,
-        aggregation_efficiency_min = 0.001,
+        maximum_aggregation_efficiency = 0.3,
+        minimum_aggregation_efficiency = 0.001,
         aggregation_timescale = 600.0,
-        aggregation_efficiency_temperature_low = 253.15,
-        aggregation_efficiency_temperature_high = 273.15,
-        aggregation_rime_fraction_low = 0.6,
-        aggregation_rime_fraction_high = 0.9,
+        aggregation_efficiency_ramp_start_temperature = 253.15,
+        aggregation_efficiency_ramp_end_temperature = 273.15,
+        minimum_aggregation_rime_fraction = 0.6,
+        maximum_aggregation_rime_fraction = 0.9,
 
         # Cloud riming
         cloud_ice_collection_efficiency = 0.5,
@@ -398,21 +398,21 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Deposition nucleation
         ice_nucleation_temperature_threshold = 258.15,
         ice_nucleation_supersaturation_threshold = 0.05,
-        ice_nucleation_maximum_concentration = 100e3,
+        maximum_ice_nucleation_concentration = 100e3,
         ice_nucleation_timescale = 10.0,
         ice_nucleation_coefficient = 5.0,
         # Cooper (1986): N = c exp(b (T₀ - T)) with b = 0.304 K⁻¹
         ice_nucleation_temperature_coefficient = 0.304,
 
         # Immersion freezing
-        immersion_freezing_temperature_max = 269.15,
+        maximum_immersion_freezing_temperature = 269.15,
         immersion_freezing_coefficient = 0.65,
         # Barklie-Gokhale nucleation coefficient
         immersion_freezing_nucleation_coefficient = 2.0,
 
         # Rime splintering
-        splintering_temperature_low = 265.15,
-        splintering_temperature_high = 270.15,
+        minimum_splintering_temperature = 265.15,
+        maximum_splintering_temperature = 270.15,
         splintering_temperature_peak = 268.15,
         # Hallett-Mossop: 3.5e5 splinters/g × 1000 g/kg = 3.5e8 splinters/kg
         # (Fortran: 35.e+4 * 1000. — the ×1000 kg→g conversion is baked in)
@@ -424,9 +424,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Cloud-riming splintering scale: 1.0 includes (nCat=1), 0.0 excludes (nCat>1).
         # Fortran only includes cloud riming HM for nCat == 1.
         splintering_cloud_riming_scale = 1.0,
-        splintering_liquid_fraction_max = 0.1,
+        maximum_splintering_liquid_fraction = 0.1,
         # Warm-surface shutoff: nCat=1 uses 282 K, nCat>1 sets Inf (no shutoff).
-        splintering_surface_temperature_max = 282.0,
+        maximum_splintering_surface_temperature = 282.0,
 
         # Initial rain drop
         # Fortran P3 v5.5.0 uses a 25 μm radius; mass follows the configured liquid density.
@@ -441,8 +441,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Rain DSD bounds (Fortran P3 v5.5.0 get_rain_dsd2: lammin = (mu_r+1)*inv_Drmax)
         # inv_Drmax = 1/0.002 = 500 [1/m]. Note: table generation uses 200, runtime uses 500.
-        rain_lambda_min = 500.0,    # lamr_min [1/m] ≈ D_max ~2mm (Fortran runtime parity)
-        rain_lambda_max = 100000.0, # lamr_max [1/m] ≈ D_min ~10μm
+        minimum_rain_slope = 500.0,    # lamr_min [1/m] ≈ D_max ~2mm (Fortran runtime parity)
+        maximum_rain_slope = 100000.0, # lamr_max [1/m] ≈ minimum diameter ~10μm
 
         # Sink-limiting safety timescale
         sink_limiting_timescale = 10.0, # dt_safety [s]
@@ -451,7 +451,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         coupled_sink_limiting_iterations::Integer = 4,
 
         # Global ice number limiter (Fortran P3 v5.5.0 impose_max_Ni)
-        # Relaxation sink drains nⁱ toward N_max/ρ when nⁱ × ρ > N_max.
+        # Relaxation sink drains nⁱ toward the configured maximum divided by ρ.
         maximum_ice_number_density = 2e6,  # [1/m³], Fortran impose_max_Ni cap
 
         # Liquid fraction clipping (Milbrandt et al. 2025)
@@ -504,13 +504,13 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(rain_breakup_coefficient),
         FT(rain_evaporation_timescale),
         FT(ice_deposition_timescale),
-        FT(aggregation_efficiency_max),
-        FT(aggregation_efficiency_min),
+        FT(maximum_aggregation_efficiency),
+        FT(minimum_aggregation_efficiency),
         FT(aggregation_timescale),
-        FT(aggregation_efficiency_temperature_low),
-        FT(aggregation_efficiency_temperature_high),
-        FT(aggregation_rime_fraction_low),
-        FT(aggregation_rime_fraction_high),
+        FT(aggregation_efficiency_ramp_start_temperature),
+        FT(aggregation_efficiency_ramp_end_temperature),
+        FT(minimum_aggregation_rime_fraction),
+        FT(maximum_aggregation_rime_fraction),
         FT(cloud_ice_collection_efficiency),
         FT(rain_ice_collection_efficiency),
         FT(minimum_rime_density),
@@ -527,28 +527,28 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(refreezing_timescale),
         FT(ice_nucleation_temperature_threshold),
         FT(ice_nucleation_supersaturation_threshold),
-        FT(ice_nucleation_maximum_concentration),
+        FT(maximum_ice_nucleation_concentration),
         FT(ice_nucleation_timescale),
         FT(ice_nucleation_coefficient),
         FT(ice_nucleation_temperature_coefficient),
-        FT(immersion_freezing_temperature_max),
+        FT(maximum_immersion_freezing_temperature),
         FT(immersion_freezing_coefficient),
         FT(immersion_freezing_nucleation_coefficient),
-        FT(splintering_temperature_low),
-        FT(splintering_temperature_high),
+        FT(minimum_splintering_temperature),
+        FT(maximum_splintering_temperature),
         FT(splintering_temperature_peak),
         FT(splintering_rate),
         FT(splintering_crystal_mass),
         FT(splintering_diameter_threshold),
         FT(splintering_cloud_riming_scale),
-        FT(splintering_liquid_fraction_max),
-        FT(splintering_surface_temperature_max),
+        FT(maximum_splintering_liquid_fraction),
+        FT(maximum_splintering_surface_temperature),
         FT(initial_rain_drop_mass),
         FT(homogeneous_freezing_temperature),
         FT(homogeneous_freezing_timescale),
         FT(rime_densification_timescale),
-        FT(rain_lambda_min),
-        FT(rain_lambda_max),
+        FT(minimum_rain_slope),
+        FT(maximum_rain_slope),
         FT(sink_limiting_timescale),
         Int(coupled_sink_limiting_iterations),
         FT(maximum_ice_number_density),

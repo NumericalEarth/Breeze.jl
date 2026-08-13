@@ -191,9 +191,9 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test cloud.number_concentration ≈ 200e6
         @test cloud.condensation_timescale ≈ 1.0
 
-        # μ_c is diagnosed from Nc via Liu-Daum (2000) by default.
-        # For Nc = 200e6 m⁻³ (200 cm⁻³): χ = 0.0005714*200 + 0.2714 = 0.38568,
-        # μ_c = 1/0.38568² - 1 ≈ 5.72 (clamped to [2, 15])
+        # μᶜˡ is diagnosed from Nᶜˡ via Liu-Daum (2000) by default.
+        # For Nᶜˡ = 200e6 m⁻³ (200 cm⁻³): χ = 0.0005714*200 + 0.2714 = 0.38568,
+        # μᶜˡ = 1/0.38568² - 1 ≈ 5.72 (clamped to [2, 15])
         @test 2 ≤ cloud.shape_parameter ≤ 15
         @test cloud.shape_parameter ≈ liu_daum_shape_parameter(200e6)
 
@@ -204,7 +204,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         # Test custom parameters
         cloud_custom = CloudDropletProperties(Float64; number_concentration=50e6)
         @test cloud_custom.number_concentration ≈ 50e6
-        # Marine Nc → higher μ_c than continental (fewer, larger, more uniform drops)
+        # Marine Nᶜˡ → higher μᶜˡ than continental (fewer, larger, more uniform drops)
         @test cloud_custom.shape_parameter > cloud.shape_parameter
     end
 
@@ -241,7 +241,7 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
     end
 
     @testset "Prognostic field names" begin
-        # ρnᶜˡ is not advected by default, because the prescribed-Nᶜ path takes
+        # ρnᶜˡ is not advected by default, because the prescribed-Nᶜˡ path takes
         # droplet number from `cloud.number_concentration`.
         p3 = PredictedParticlePropertiesMicrophysics()
         names = prognostic_field_names(p3)
@@ -258,13 +258,13 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
         @test :ρqᶠ ∈ names
         @test :ρbᶠ ∈ names
         @test :ρqʷⁱ ∈ names
-        @test :ρsˢᵃᵗ ∉ names
+        @test :ρsᵛ⁺ˡ ∉ names
 
         p3_supersaturation =
             PredictedParticlePropertiesMicrophysics(; predict_supersaturation = true)
         @test p3_supersaturation.process_rates.predict_supersaturation === true
         @test p3_supersaturation.process_rates isa ProcessRateParameters{Float64, true}
-        @test :ρsˢᵃᵗ ∈ prognostic_field_names(p3_supersaturation)
+        @test :ρsᵛ⁺ˡ ∈ prognostic_field_names(p3_supersaturation)
 
         # Aerosol activation adds the droplet-number and aerosol prognostics together.
         p3_aerosol = PredictedParticlePropertiesMicrophysics(;

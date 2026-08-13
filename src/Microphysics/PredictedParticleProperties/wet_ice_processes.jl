@@ -4,7 +4,7 @@ $(TYPEDSIGNATURES)
 Compute the density of newly accreted cloud rime using the Fortran P3 Ri fit.
 
 This follows the `p3_main` cloud-riming branch: diagnose the cloud gamma PSD
-from `qᶜˡ` and prescribed `Nᶜ`, compute the droplet impact speed relative to
+from `qᶜˡ` and prescribed `Nᶜˡ`, compute the droplet impact speed relative to
 falling ice, form the rime-impact parameter `Ri`, and apply the same piecewise
 fit for `ρ_rime`. When cloud riming is inactive or the air is above freezing,
 the Fortran fallback value `400 kg m⁻³` is used.
@@ -23,33 +23,34 @@ the Fortran fallback value `400 kg m⁻³` is used.
 - Rime density [kg/m³]
 """
 function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
-                      μ_c, λ_c)
+                      μᶜˡ, λᶜˡ)
     FT = typeof(T)
-    prp = p3.process_rates
+    parameters = p3.process_rates
     qsmall = p3.minimum_mass_mixing_ratio
 
-    ρ_rim_min = prp.minimum_rime_density
-    ρ_rim_max = prp.maximum_rime_density
-    T₀ = prp.freezing_temperature
-    ρᴸ = prp.liquid_water_density
+    minimum_rime_density = parameters.minimum_rime_density
+    maximum_rime_density = parameters.maximum_rime_density
+    T₀ = parameters.freezing_temperature
+    ρᴸ = parameters.liquid_water_density
 
-    # Dynamic viscosity of air. Written `η`, not `μ`, which is the PSD shape
+    # Dynamic viscosity of air. Written `η`, not `μⁱ`, which is the PSD shape
     # parameter everywhere else in this module.
     η = transport.ν * ρ
     g = p3_gravitational_acceleration(constants, FT)
 
     # Fortran get_cloud_dsd2 / p3_main: the droplet impact speed is the mass-weighted
     # Stokes velocity of the cloud DSD, shared with `cloud_terminal_velocities`.
-    a_cn = cloud_stokes_prefactor(g, ρᴸ, η)
-    Vt_qc = cloud_mass_weighted_stokes_velocity(a_cn, μ_c, λ_c)
-    D_c = (μ_c + 4) / λ_c
+    stokes_prefactor = cloud_stokes_prefactor(g, ρᴸ, η)
+    cloud_terminal_velocity = cloud_mass_weighted_stokes_velocity(stokes_prefactor, μᶜˡ, λᶜˡ)
+    cloud_mean_diameter = (μᶜˡ + 4) / λᶜˡ
 
     # Riming impact parameter Ri = c Dᶜ |vᵢ - Vt_qc| / (T₀ - T): large drops striking
     # fast at weak supercooling pack dense rime. The supercooling floor keeps Ri
     # finite as T → T₀, and the clamp holds Ri inside the range the fit below covers.
-    inverse_supercooling = inv(min(-prp.minimum_riming_supercooling, T - T₀))
-    Ri = clamp(-(prp.rime_impact_coefficient * D_c) * abs(vᵢ - Vt_qc) * inverse_supercooling,
-               prp.minimum_rime_impact, prp.maximum_rime_impact)
+    inverse_supercooling = inv(min(-parameters.minimum_riming_supercooling, T - T₀))
+    Ri = clamp(-(parameters.rime_impact_coefficient * cloud_mean_diameter) *
+               abs(vᵢ - cloud_terminal_velocity) * inverse_supercooling,
+               parameters.minimum_rime_impact, parameters.maximum_rime_impact)
 
     # Cober-List rime-density fit as coded in Fortran P3 v5.5.0 `p3_main`: a
     # quadratic in g/cm³ (hence the ×10³) below Ri = 8, a linear extension above it.
@@ -65,9 +66,9 @@ function rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport,
     )
 
     active_cloud_riming = (cloud_rim >= qsmall) & (qᶜˡ >= qsmall) & (T < T₀)
-    ρᶠ = ifelse(active_cloud_riming, ρ_rime_Ri, prp.unrimed_rime_density)
+    ρᶠ = ifelse(active_cloud_riming, ρ_rime_Ri, parameters.unrimed_rime_density)
 
-    return clamp(ρᶠ, ρ_rim_min, ρ_rim_max)
+    return clamp(ρᶠ, minimum_rime_density, maximum_rime_density)
 end
 
 #####
@@ -84,7 +85,7 @@ PSD-integrated shedding of liquid from mixed-phase ice particles with D ≥ 9 mm
 (Rasmussen et al. 2011). Matches Fortran P3 v5.5.0:
 
 ```math
-q_{lshd} = F_r \\times f_{1pr28} \\times N_i \\times F_l
+q_{lshd} = F^f \\times f_{1pr28} \\times N^i \\times F^l
 ```
 
 where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
@@ -104,14 +105,14 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 # Returns
 - Rate of liquid → rain shedding [kg/kg/s]
 """
-function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean, μ)
+function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean, μⁱ)
     FT = typeof(qʷⁱ)
 
     qʷⁱ_eff = clamp_positive(qʷⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
     # Lookup ∫_{D≥9mm} m(D) N'(D) dD (normalized per particle)
-    f1pr28 = shedding_integral(p3.ice.bulk_properties.shedding, m_mean, Fᶠ, Fˡ, ρᶠ, μ,
+    f1pr28 = shedding_integral(p3.ice.bulk_properties.shedding, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ,
                                p3.process_rates.floors.mass_scale)
 
     # Fortran: qlshd = Fr × f1pr28 × ni × Fl
@@ -132,10 +133,10 @@ $(TYPEDSIGNATURES)
 Lookup the PSD-integrated shedding mass for D ≥ 9 mm particles
 from tabulated `TabulatedFunction5D`.
 """
-@inline function shedding_integral(table::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μ, mass_scale_floor)
+@inline function shedding_integral(table::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ, mass_scale_floor)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(mass_scale_floor)))
-    return table(log_m, Fᶠ, Fˡ, ρᶠ, μ)
+    return table(log_m, Fᶠ, Fˡ, ρᶠ, μⁱ)
 end
 
 """
@@ -170,7 +171,7 @@ The wet growth capacity is the maximum rate at which collected
 hydrometeors can be frozen, determined by the ventilated heat balance:
 
 ```math
-q_{wgrth} = C f_v \\left[Kᵃ(T_0-T) + \\frac{2π}{ℒᶠᵘˢ} ℒⁱ Dᵛ(ρ_{vs}-ρ_v)\\right] × N_i
+q_{wgrth} = C f^{ve} \\left[Kᵃ(T_0-T) + \\frac{2π}{ℒᶠᵘˢ} ℒⁱ Dᵛ(ρ^{v+}-ρ^v)\\right] × N^i
 ```
 
 When the collection rate (cloud + rain riming) exceeds this capacity,
@@ -192,15 +193,15 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 # Returns
 - Wet growth capacity [kg/kg/s] (positive; zero when T ≥ T₀)
 """
-function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ)
+function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μⁱ)
     FT = typeof(qⁱ)
-    prp = p3.process_rates
+    parameters = p3.process_rates
 
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
-    T₀ = prp.freezing_temperature
+    T₀ = parameters.freezing_temperature
     below_freezing = T < T₀
 
     ℒᶠᵘˢ = fusion_latent_heat(constants, T)
@@ -219,7 +220,7 @@ function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ
     # Ventilation integral (same as deposition/refreezing)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, Fˡ, ρᶠ, prp, ν, Dᵛ, ρ_correction, p3, μ)
+                                    m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction, p3, μⁱ)
 
     # Heat balance: sensible + latent
     Q_sensible = Kᵃ * (T₀ - T)
@@ -241,7 +242,7 @@ Below freezing, liquid coating on ice particles refreezes. The rate is
 determined by the heat flux at the particle surface:
 
 ```math
-\\frac{dm}{dt} = C f_v \\left[Kᵃ(T_0-T) + \\frac{2π}{ℒᶠᵘˢ} ρ ℒⁱ Dᵛ (q_{sat0} - q_v)\\right]
+\\frac{dm}{dt} = C f^{ve} \\left[Kᵃ(T_0-T) + \\frac{2π}{ℒᶠᵘˢ} ρ ℒⁱ Dᵛ (q^{v+}_0 - q^v)\\right]
 ```
 
 This mirrors the melting formula with reversed temperature gradient.
@@ -265,16 +266,16 @@ appendix C, section i (and Mason 1971 for the underlying heat-balance form).
 # Returns
 - Rate of liquid → ice refreezing [kg/kg/s]
 """
-function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μ)
+function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μⁱ)
     FT = typeof(qʷⁱ)
-    prp = p3.process_rates
+    parameters = p3.process_rates
 
     qʷⁱ_eff = clamp_positive(qʷⁱ)
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     nⁱ_eff  = clamp_positive(nⁱ)
 
-    T₀ = prp.freezing_temperature
+    T₀ = parameters.freezing_temperature
     below_freezing = T < T₀
     ΔT = T₀ - T  # positive when below freezing
 
@@ -294,7 +295,7 @@ function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, co
     # Ventilation integral (ice-particle capacitance; same path as deposition)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, Fˡ, ρᶠ, prp, ν, Dᵛ, ρ_correction, p3, μ)
+                                    m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction, p3, μⁱ)
 
     # Heat balance for refreezing:
     # Conductive: Kᵃ × (T₀ - T) removes heat from liquid → promotes freezing

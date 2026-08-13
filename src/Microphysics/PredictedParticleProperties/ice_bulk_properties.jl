@@ -41,7 +41,7 @@ size distribution. They are used for radiation, radar, and diagnostics.
 **Distribution parameters (for λ-limiting):**
 
 - `slope`: Slope parameter λ from prognostic constraints
-- `shape`: Shape parameter μ from empirical μ-λ relationship
+- `shape`: Shape parameter μⁱ from empirical μⁱ-λ relationship
 
 **Process integrals:**
 
@@ -55,7 +55,7 @@ size distribution. They are used for radiation, radar, and diagnostics.
 # References
 
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization),
-[Field et al. (2007)](@cite FieldEtAl2007) for μ-λ relationship.
+[Field et al. (2007)](@cite FieldEtAl2007) for μⁱ-λ relationship.
 """
 function IceBulkProperties(FT::Type{<:AbstractFloat} = Float64;
                            maximum_mean_diameter = 20e-3,

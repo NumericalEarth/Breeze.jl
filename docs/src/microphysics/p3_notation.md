@@ -18,7 +18,7 @@ where the appendix reserves nothing and the letter is P3's alone:
 | ``A``  | particle projected area [m²] | — |
 | ``C``  | particle capacitance [m] | surface transfer coefficients ``Cᴰ``, ``Cᵀ``, ``Cᵛ`` |
 | ``V``  | terminal velocity of a single particle [m/s] | — |
-| ``μ``  | gamma-PSD shape parameter, never written without a species label (``μ^{cl}``, `μ_c`) | a bare `μ` in kernel code is the microphysical-field tuple, and ``μ`` is *not* the dynamic viscosity here — that is ``η`` |
+| ``μ``  | gamma-PSD shape parameter, never written without a species label (``μ^{cl}``, `μᶜˡ`) | a bare `μ` in kernel code is the microphysical-field tuple, and ``μ`` is *not* the dynamic viscosity here — that is ``η`` |
 
 ## Conventions
 
@@ -34,15 +34,18 @@ identifiers, the species label rides in the superscript — ``q^{cl}``, ``n^r``,
 ``ρq^i`` — never in the subscript. The labels are `cl` (cloud liquid), `r` (rain),
 `i` (dry ice), `f` (rime, i.e. frozen accretion), `wi` (liquid coating on ice),
 `v` (vapor), and `a` (aerosol). Subscripts are reserved for process names,
-thresholds, and indices.
+thresholds, and indices. Where a symbol carries both, the code form puts the
+species superscript immediately after the letter and the subscript last, so the
+rain PSD intercept ``N_0^r`` is `Nʳ₀` — the species stays adjacent to the letter it
+labels, as in `λʳ`.
 
 **Saturation is ``^+``.** A saturation value carries a `+` in the superscript, as in
 the appendix: ``q^{v+l}`` and ``q^{v+i}`` are the saturation mass fractions over
 planar liquid and ice, and ``p^{v+}`` the saturation vapor pressure. Departures
 from saturation get their own symbols: ``\mathscr{S}^l`` and ``\mathscr{S}^i``
 (`𝒮`) are the supersaturation ratios ``p^v / p^{v+} - 1``, and
-``s^l = q^v - q^{v+l}`` is the liquid saturation deficit in mass-fraction form,
-which is what the optional prognostic ``ρs`` (`ρsˢᵃᵗ`) carries. Nothing in these
+``s^{v+l} = q^v - q^{v+l}`` is the liquid supersaturation in mass-fraction form,
+which is what the optional prognostic ``ρs^{v+l}`` (`ρsᵛ⁺ˡ`) carries. Nothing in these
 pages spells "sat" or "s" as a subscript to mean saturation.
 
 **Free parameters are ``\mathbb{C}``.** Empirically fitted constants do not each
@@ -80,7 +83,7 @@ maximum to eleven. See [Prognostic Variables and Tendencies](@ref p3_prognostics
 | ``ρb^f``    | `ρbᶠ`  | Rime volume density [m³/m³] |
 | ``ρq^{wi}`` | `ρqʷⁱ` | Liquid coating on ice, mass density [kg/m³] |
 | ``ρq^v``    | `ρqᵛ`  | Water vapor density [kg/m³]; the host-coupled moisture variable |
-| ``ρs``      | `ρsˢᵃᵗ` | Saturation deficit density [kg/m³]; only with `predict_supersaturation` |
+| ``ρs^{v+l}`` | `ρsᵛ⁺ˡ` | Liquid supersaturation density [kg/m³]; only with `predict_supersaturation` |
 | ``ρn^a``    | `ρnᵃ`  | Unactivated aerosol number density [m⁻³]; only with aerosol activation |
 
 ## Size Distribution
@@ -90,10 +93,10 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | math symbol | code | property name | description |
 | ----------- | ---- | ------------- | ----------- |
 | ``N'(D)``   |      |               | Number concentration per unit diameter, ``N'(D) = N_0 D^μ e^{-λD}`` [m⁻⁴] |
-| ``N_0``     | `N₀` |               | Intercept of the gamma distribution [m⁻⁴⁻μ]; a scale factor, not a concentration |
-| ``μ^{cl}``, ``μ^r`` | `μ_c`, `μ_r` | `CloudDropletProperties.shape_parameter`, `RainProperties.shape_parameter` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}``, ``μ^r = 0`` at runtime |
-| ``μ^i``     |      | | Ice shape parameter [-]; an axis of the ice lookup tables rather than a stored field |
-| ``λ^{cl}``, ``λ^r`` | `λ_c`, `λ_r` | | Slope parameter [1/m] |
+| ``N_0``     | `N₀` |               | Intercept of the gamma distribution [m⁻⁴⁻μ]; a scale factor, not a concentration. Species-labelled as `Nʳ₀` where the rate needs the rain PSD explicitly |
+| ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `CloudDropletProperties.shape_parameter`, `RainProperties.shape_parameter` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}``, ``μ^r = 0`` at runtime |
+| ``μ^i``     | `μⁱ` | | Ice shape parameter [-]; an axis of the ice lookup tables rather than a stored field |
+| ``λ^{cl}``, ``λ^r`` | `λᶜˡ`, `λʳ` | | Slope parameter [1/m] |
 | ``λ^i``     |      | `IceLambdaLimiter` | Ice slope parameter [1/m], bounded by the mean-size limiter |
 | ``M_k``     |      |               | ``k``-th moment of the distribution, ``M_k = N_0\,Γ(k+μ+1)/λ^{k+μ+1}`` |
 | ``\bar{D}`` |      |               | Mean diameter, ``M_1/M_0`` [m] |

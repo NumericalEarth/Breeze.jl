@@ -138,8 +138,8 @@ end
         surface_temperature = μ.surface_temperature[i, j, 1]
     end
 
-    props = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
-    result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, props,
+    properties = p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+    result = p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
                                  surface_temperature, temperature_tendency,
                                  vapor_tendency)
     write_p3_tendency_cache!(μ, i, j, k, p3, result)
@@ -175,9 +175,9 @@ end
 end
 
 # One kernel per optional prognostic group, launched only when that group exists.
-@kernel function _add_p3_sˢᵃᵗ_tendency_kernel!(Gρsˢᵃᵗ, cache_ρsˢᵃᵗ)
+@kernel function _add_p3_sᵛ⁺ˡ_tendency_kernel!(Gρsᵛ⁺ˡ, cache_ρsᵛ⁺ˡ)
     i, j, k = @index(Global, NTuple)
-    @inbounds Gρsˢᵃᵗ[i, j, k] += cache_ρsˢᵃᵗ[i, j, k]
+    @inbounds Gρsᵛ⁺ˡ[i, j, k] += cache_ρsᵛ⁺ˡ[i, j, k]
 end
 
 # Droplet number and unactivated aerosol are prognostic together, only in the
@@ -210,7 +210,7 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
             G.ρqⁱ, G.ρnⁱ, G.ρqᶠ, G.ρbᶠ, G.ρqʷⁱ, μ)
 
     if predicts_supersaturation(p3.process_rates)
-        launch!(arch, grid, :xyz, _add_p3_sˢᵃᵗ_tendency_kernel!, G.ρsˢᵃᵗ, μ.cache_ρsˢᵃᵗ)
+        launch!(arch, grid, :xyz, _add_p3_sᵛ⁺ˡ_tendency_kernel!, G.ρsᵛ⁺ˡ, μ.cache_ρsᵛ⁺ˡ)
     end
 
     if !isnothing(p3.aerosol)
@@ -226,7 +226,7 @@ end
 #####
 #
 # P3 carries prognostic number-density fields for rain and ice, and for cloud liquid
-# when aerosol activation is enabled. The default prescribed-Nᶜ path has no `ρnᶜˡ`
+    # when aerosol activation is enabled. The default prescribed-Nᶜˡ path has no `ρnᶜˡ`
 # prognostic, but cloud droplets are still part of the model: their total number
 # concentration is the constant `p3.cloud.number_concentration`. Represent that constant
 # as a lazy operation so `number_concentration_field` works uniformly.

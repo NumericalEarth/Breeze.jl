@@ -79,12 +79,12 @@ The scheme tracks 8 prognostic densities by default, and up to 11 with every opt
 | ``ρqⁱ``, ``ρnⁱ`` | Ice mass and number | always |
 | ``ρqᶠ``, ``ρbᶠ`` | Rime mass and volume | always |
 | ``ρqʷⁱ`` | Liquid water on ice | always |
-| ``ρsˢᵃᵗ`` | Predicted supersaturation | `predict_supersaturation` |
+| ``ρsᵛ⁺ˡ`` | Predicted liquid supersaturation | `predict_supersaturation` |
 | ``ρnᶜˡ``, ``ρnᵃ`` | Cloud number and unactivated aerosol number | `aerosol` |
 
 Each optional group is gated on a type, so a configuration that does not use one neither
 allocates nor advects it. Cloud droplet number is prognostic only with an
-`AerosolActivation`: the default prescribed-Nᶜ path (Fortran `log_predictNc = .false.`)
+`AerosolActivation`: the default prescribed-Nᶜˡ path (Fortran `log_predictNc = .false.`)
 takes it from the scheme parameter `cloud.number_concentration`.
 
 # Keyword Arguments

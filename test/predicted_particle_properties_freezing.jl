@@ -262,24 +262,24 @@ using Oceananigans.Fields: interior
         @test N_hom == 0
 
         # Below threshold (T = 230 K): cloud freezing activates
-        qcl = FT(1e-3)
-        Nc = FT(100e6)
+        qᶜˡ = FT(1e-3)
+        Nᶜˡ = FT(100e6)
         ρ = FT(1.2)
         T_cold = FT(230.0)
-        Q_hom, N_hom = homogeneous_freezing_cloud_rate(p3, qcl, Nc, T_cold, ρ)
-        @test Q_hom > 0
-        @test N_hom > 0
+        frozen_mass_rate, frozen_number_rate = homogeneous_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T_cold, ρ)
+        @test frozen_mass_rate > 0
+        @test frozen_number_rate > 0
 
         # D25: Fortran has no mass-number consistency cap — all nc transfers to ice.
-        # With trace qᶜˡ and large Nc, freezing still activates.
-        qcl_trace = FT(1e-7)
-        Nc_continental = FT(750e6)
-        Q_trace, N_trace = homogeneous_freezing_cloud_rate(p3, qcl_trace, Nc_continental, T_cold, ρ)
+        # With trace qᶜˡ and large Nᶜˡ, freezing still activates.
+        qᶜˡ_trace = FT(1e-7)
+        Nᶜˡ_continental = FT(750e6)
+        Q_trace, N_trace = homogeneous_freezing_cloud_rate(p3, qᶜˡ_trace, Nᶜˡ_continental, T_cold, ρ)
         @test Q_trace > 0
         @test N_trace > 0
 
         # Below threshold with qᶜˡ below guard (1e-14): zero rates
-        Q_hom_tiny, N_hom_tiny = homogeneous_freezing_cloud_rate(p3, FT(1e-15), Nc, T_cold, ρ)
+        Q_hom_tiny, N_hom_tiny = homogeneous_freezing_cloud_rate(p3, FT(1e-15), Nᶜˡ, T_cold, ρ)
         @test Q_hom_tiny == 0
         @test N_hom_tiny == 0
 
@@ -305,7 +305,7 @@ using Oceananigans.Fields: interior
         @test N_hom_r_tiny == 0
 
         # Exactly at threshold (T = 233.15 K): should be zero (guard is T < T_threshold)
-        Q_at, N_at = homogeneous_freezing_cloud_rate(p3, qcl, Nc, FT(233.15), ρ)
+        Q_at, N_at = homogeneous_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, FT(233.15), ρ)
         @test Q_at == 0
 
         # --- Type stability ---
@@ -326,10 +326,10 @@ using Oceananigans.Fields: interior
         # Large drops freeze preferentially, so mean frozen mass > mean drop mass.
         T = 260.0
         ρ = 1.0
-        Nc = 100e6  # [1/m³]
-        qcl = 1e-3  # [kg/kg]
-        Q_frz, N_frz = immersion_freezing_cloud_rate(p3, qcl, Nc, T, ρ)
-        m_mean = qcl / (Nc / ρ)  # mean drop mass [kg]
+        Nᶜˡ = 100e6  # [1/m³]
+        qᶜˡ = 1e-3  # [kg/kg]
+        Q_frz, N_frz = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ)
+        m_mean = qᶜˡ / (Nᶜˡ / ρ)  # mean drop mass [kg]
         @test Q_frz / max(N_frz, 1e-30) > m_mean
         @test Q_frz > 0
         @test N_frz > 0
@@ -345,7 +345,7 @@ using Oceananigans.Fields: interior
         @test N_frz_r > 0
 
         # Above threshold temperature: zero rates
-        Q_warm, N_warm = immersion_freezing_cloud_rate(p3, qcl, Nc, 280.0, ρ)
+        Q_warm, N_warm = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, 280.0, ρ)
         @test Q_warm == 0
         @test N_warm == 0
 
@@ -353,16 +353,16 @@ using Oceananigans.Fields: interior
         # linear per-second rate. The safety cap only applies when the projected
         # sink would consume all available droplets.
         T_moderate = 230.0
-        prp = p3.process_rates
-        nᶜ = Nc / ρ
-        V_drop = (qcl / nᶜ) / prp.liquid_water_density
-        linear_rate = prp.immersion_freezing_nucleation_coefficient *
+        parameters = p3.process_rates
+        nᶜˡ = Nᶜˡ / ρ
+        V_drop = (qᶜˡ / nᶜˡ) / parameters.liquid_water_density
+        linear_rate = parameters.immersion_freezing_nucleation_coefficient *
                       V_drop *
-                      exp(prp.immersion_freezing_coefficient *
-                          (prp.freezing_temperature - T_moderate))
-        _, N_moderate = immersion_freezing_cloud_rate(p3, qcl, Nc, T_moderate, ρ)
-        @test linear_rate * prp.sink_limiting_timescale < 1
-        @test N_moderate ≈ nᶜ * linear_rate
+                      exp(parameters.immersion_freezing_coefficient *
+                          (parameters.freezing_temperature - T_moderate))
+        _, N_moderate = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T_moderate, ρ)
+        @test linear_rate * parameters.sink_limiting_timescale < 1
+        @test N_moderate ≈ nᶜˡ * linear_rate
 
         # Very cold supercell states make the Barklie-Gokhale exponential
         # effectively instantaneous. The raw rate is intentionally NOT capped at
@@ -404,16 +404,16 @@ using Oceananigans.Fields: interior
         # T=273.15K, P=101325Pa: Dᵛ ≈ 2.23e-5, Kᵃ ≈ 0.024, ν ≈ 1.33e-5
         # Formula: Dᵛ = 8.794e-5 * T^1.81 / P, Kᵃ = 1414 * 1.496e-6 * T^1.5 / (T+120),
         #          ν  = Kᵃ / 1414 * 287.15 * T / P
-        props = air_transport_properties(273.15, 101325.0, constants)
-        @test props.Dᵛ ≈ 2.23e-5 atol=5e-7
-        @test props.Kᵃ ≈ 0.0243 atol=5e-4
-        @test props.ν ≈ 1.33e-5 atol=5e-7
+        properties = air_transport_properties(273.15, 101325.0, constants)
+        @test properties.Dᵛ ≈ 2.23e-5 atol=5e-7
+        @test properties.Kᵃ ≈ 0.0243 atol=5e-4
+        @test properties.ν ≈ 1.33e-5 atol=5e-7
 
         custom_constants = ThermodynamicConstants(; dry_air_molar_mass=0.03)
         custom_props = air_transport_properties(273.15, 101325.0, custom_constants)
-        @test custom_props.Dᵛ == props.Dᵛ
-        @test custom_props.Kᵃ == props.Kᵃ
-        @test custom_props.ν / props.ν ≈
+        @test custom_props.Dᵛ == properties.Dᵛ
+        @test custom_props.Kᵃ == properties.Kᵃ
+        @test custom_props.ν / properties.ν ≈
               dry_air_gas_constant(custom_constants) / dry_air_gas_constant(constants)
 
         # T=250K, P=50000Pa: Dᵛ ≈ 3.85e-5 (colder T but much lower P → higher Dᵛ)
@@ -490,19 +490,19 @@ using Oceananigans.Fields: interior
     #####
     ##### The immersion-freezing PSD correction is not stored in
     ##### `ProcessRateParameters`. `immersion_freezing_cloud_rate` evaluates
-    ##### `psd_correction_spherical_volume` from the locally diagnosed Liu-Daum μ_c,
+##### `psd_correction_spherical_volume` from the locally diagnosed Liu-Daum μᶜˡ,
     ##### so its correction varies with cloud droplet number.
     ##### `immersion_freezing_rain_rate` evaluates the same function at fixed μ_r = 0,
     ##### so the rain correction is constant.
     #####
 
     @testset "ProcessRateParameters defaults" begin
-        prp = ProcessRateParameters(Float64)
+        parameters = ProcessRateParameters(Float64)
 
-        @test prp.reference_air_density ≈ 100000 / (dry_air_gas_constant(ThermodynamicConstants(Float64)) * 273.15) rtol=1e-12
-        @test prp.ice_nucleation_supersaturation_threshold == 0.05
-        @test prp.rain_lambda_min == 500.0
-        @test prp.rain_lambda_max == 100000.0
+        @test parameters.reference_air_density ≈ 100000 / (dry_air_gas_constant(ThermodynamicConstants(Float64)) * 273.15) rtol=1e-12
+        @test parameters.ice_nucleation_supersaturation_threshold == 0.05
+        @test parameters.minimum_rain_slope == 500.0
+        @test parameters.maximum_rain_slope == 100000.0
     end
 
     @testset "Vapor + cloud + rain + ice mass conservation" begin
@@ -532,7 +532,7 @@ using Oceananigans.Fields: interior
             FT(0),      # post_process_clipping
             FT(0.0),    # sublimation_number (D2: nisub)
             FT(500.0),  # aggregation (positive magnitude)
-            FT(0.0),    # ni_limit (C3: global Nᵢ cap)
+            FT(0.0),    # ni_limit (C3: global Nⁱ cap)
             FT(1e-7),   # cloud_riming
             FT(1e4),    # cloud_riming_number (positive magnitude)
             FT(5e-8),   # rain_riming
@@ -577,8 +577,8 @@ using Oceananigans.Fields: interior
             FT(0.0),    # cloud_number_correction (M6)
             FT(0.0),    # rain_number_correction (M6)
             FT(0.0),    # ice_number_correction (M4)
-            FT(0.0),    # predicted_ssat_adjustment
-            FT(0.0),    # predicted_ssat_tendency
+        FT(0.0),    # predicted_supersaturation_adjustment
+        FT(0.0),    # predicted_supersaturation_tendency
         )
 
         # Compute total water tendency: vapor + cloud + rain + ice + liquid_on_ice
