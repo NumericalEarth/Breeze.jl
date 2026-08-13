@@ -21,7 +21,6 @@ Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 
 [sources]
 Breeze = {path = ".."}
-DocumenterCodeBlocks = {url = "https://github.com/fredrikekre/DocumenterCodeBlocks.jl.git", rev = "codeblocks-meta"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
