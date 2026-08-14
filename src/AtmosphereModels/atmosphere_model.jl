@@ -248,7 +248,8 @@ function AtmosphereModel(grid;
 
     # Build a vertical tridiagonal solver for adaptive implicit vertical advection even when the
     # closure is explicit. When both are present, the diffusion and advection diagonals are summed
-    # into a single system (see implicit_vertical_advection.jl).
+    # into a single system (see mass_weighted_implicit_diffusion.jl for the z-Center prognostics
+    # and implicit_vertical_advection.jl for `ρw`).
     if implicit_solver === nothing && advection_needs_solver
         implicit_solver = implicit_diffusion_solver(VerticallyImplicitTimeDiscretization(), grid)
     end

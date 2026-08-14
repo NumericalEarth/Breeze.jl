@@ -103,6 +103,16 @@ function closure_scalar_index(model, prognostic_index)
     return Val(prognostic_index - n_dynamics - n_momentum)
 end
 
+# Which prognostics sit out the implicit vertical solve. `prognostic_fields` lists the
+# dynamics-specific ones first — the compressible dry density, the kinematic driver's density —
+# and those are advanced explicitly: being neither momentum nor closure scalars, they have no
+# diffusivity to apply. Momentum and every thermodynamic and microphysical scalar come after, and
+# all of them do take the solve.
+function skip_vertical_diffusion(model, prognostic_index)
+    n_dynamics = length(dynamics_prognostic_fields(model.dynamics))
+    return prognostic_index <= n_dynamics
+end
+
 #####
 ##### Stage update kernel
 #####
@@ -126,14 +136,11 @@ function ssp_rk3_substep!(model, Δt, α)
 
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
-    n_dynamics = length(dynamics_prognostic_fields(model.dynamics))
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt_FT, α)
 
-        # Dynamics-specific prognostics such as compressible dry density are advanced explicitly,
-        # but are not closure scalars and must not enter the implicit diffusion solve.
-        i <= n_dynamics && continue
+        skip_vertical_diffusion(model, i) && continue
 
         momentum = names[i] === :ρu || names[i] === :ρv || names[i] === :ρw
         field_index = momentum ? nothing : closure_scalar_index(model, i)
@@ -143,7 +150,7 @@ function ssp_rk3_substep!(model, Δt, α)
         # diffusion half is mass-flux weighted for the z-Center prognostics, and adaptive implicit
         # vertical advection adds a density-weighted advection contribution on top. `ρw` routes to
         # Breeze's z-Face coefficients, scalars/`ρu`/`ρv` to the mass-flux-weighted z-Center ones
-        # (see AtmosphereModels/implicit_vertical_advection.jl).
+        # (see AtmosphereModels/mass_weighted_implicit_diffusion.jl).
         #
         # The guard is on the *solver*, not on `needs_implicit_solver(advection)`: that predicate
         # is false for `advection = nothing` and for ordinary WENO, so keying on it would drop the
