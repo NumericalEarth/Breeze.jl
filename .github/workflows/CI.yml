@@ -62,8 +62,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - "min"
-          - "1.12.6"
+          - "1.13.0-rc2"
         os:
           - ubuntu-latest
           - macOS-latest
@@ -78,11 +77,11 @@ jobs:
         include:
           # `--check-bounds=auto` is necessary for testing Reactant workloads
           # until https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
-          - version: "1.12.6"
+          - version: "1.13.0-rc2"
             os: aws-linux-nvidia-gpu-l4-4xl
             arch: "default"
             check-bounds: "auto"
-          - version: "1.11.9"
+          - version: "1.13.0-rc2"
             os: aws-linux-nvidia-gpu-l4-4xl
             arch: "default"
             check-bounds: "auto"
