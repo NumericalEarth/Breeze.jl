@@ -58,6 +58,12 @@ const P3Table4D = Union{TabulatedFunction4D, RimeDensityIndexedTable4D}
 
 struct PreparedInterpolation{N, FT}
     axes :: NTuple{N, Tuple{Int, Int, FT}}
+
+    # The default constructor `PreparedInterpolation(axes::NTuple{N, Tuple{Int, Int, FT}})`
+    # leaves `FT` unbound for `N == 0`, where the tuple carries no `FT`. Every call site
+    # supplies both parameters, so we define the inner constructor and keep the
+    # ambiguous outer one from being generated.
+    PreparedInterpolation{N, FT}(axes) where {N, FT} = new{N, FT}(axes)
 end
 
 @inline function prepare_interpolation(f::TabulatedFunction{N}, x::Vararg{Any, N}) where N
