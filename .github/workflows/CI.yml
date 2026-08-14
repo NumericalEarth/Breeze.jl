@@ -81,10 +81,6 @@ jobs:
             os: aws-linux-nvidia-gpu-l4-4xl
             arch: "default"
             check-bounds: "auto"
-          - version: "1.13.0-rc2"
-            os: aws-linux-nvidia-gpu-l4-4xl
-            arch: "default"
-            check-bounds: "auto"
     steps:
       - name: df before cleanup
         if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
