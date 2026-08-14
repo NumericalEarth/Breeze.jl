@@ -81,7 +81,7 @@ function single_column_simulation(; closure = TKEBasedTurbulenceClosure(),
 
     ## The drag laws below use the closure's own von Kármán constant rather than a repeated
     ## literal, so that the surface layer they impose stays consistent with the log layer the
-    ## mixing length produces. It is read back from the geometric branch, and is `nothing` for a
+    ## mixing length produces. It is read back from the height-above-surface branch, and is `nothing` for a
     ## mixing length that has none — harmless, since those configurations prescribe `u★` directly.
     κ = Breeze.TurbulenceClosures.von_karman_constant(closure.mixing_length)
 

@@ -51,8 +51,8 @@ using Oceananigans.Utils: launch!
 
     @testset "isbits" begin
         @test isbits(TKEBasedTurbulenceClosure())
-        @test isbits(BlendedMixingLength(GeometricLengthScale(), BuoyancyLengthScale()))
-        @test isbits(BlendedMixingLength(GeometricLengthScale(); blend = PowerBlend(p = 2.0)))
+        @test isbits(BlendedMixingLength(HeightAboveSurface(), BuoyancyLengthScale()))
+        @test isbits(BlendedMixingLength(HeightAboveSurface(); blend = PowerBlend(p = 2.0)))
     end
 
     @testset "show" begin
@@ -60,7 +60,7 @@ using Oceananigans.Utils: launch!
         @test occursin("TKEBasedTurbulenceClosure", summary(closure))
         @test occursin("Cˢ", sprint(show, closure))
         @test occursin("BlendedMixingLength", sprint(show, closure.mixing_length))
-        @test occursin("GeometricLengthScale", sprint(show, closure.mixing_length))
+        @test occursin("HeightAboveSurface", sprint(show, closure.mixing_length))
     end
 end
 
@@ -85,7 +85,7 @@ end
     Jᵇ_field = Field{Center, Center, Nothing}(grid)      # neutral surface
     state = (; ℓᵗ = ℓᵗ_field, u★² = u★²_field, Jᵇ = Jᵇ_field)
 
-    geometric = GeometricLengthScale{FT}()
+    height = HeightAboveSurface{FT}()
     buoyancy = BuoyancyLengthScale{FT}()
     turbulence = TurbulenceLengthScale{FT}()
 
@@ -99,18 +99,18 @@ end
     end
 
     @testset "ℓᵍ = κ(z + ℓʳ)" begin
-        κ, ℓʳ = geometric.κ, geometric.ℓʳ
+        κ, ℓʳ = height.κ, height.ℓʳ
         Δz = Lz / Nz
         # Face k sits at z = (k - 1) Δz
         for k in (1, 2, 8, Nz)
             z = (k - 1) * Δz
-            @test length_scaleᶜᶜᶠ(1, 1, k, grid, geometric, FT(1), FT(0), state) ≈ κ * (z + ℓʳ)
+            @test length_scaleᶜᶜᶠ(1, 1, k, grid, height, FT(1), FT(0), state) ≈ κ * (z + ℓʳ)
         end
         # Finite at the surface — this is what ℓʳ is for
-        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, geometric, FT(1), FT(0), state) ≈ κ * ℓʳ
-        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, geometric, FT(1), FT(0), state) > 0
+        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, height, FT(1), FT(0), state) ≈ κ * ℓʳ
+        @test length_scaleᶜᶜᶠ(1, 1, 1, grid, height, FT(1), FT(0), state) > 0
         # Centers sit half a cell above the face below them
-        @test length_scaleᶜᶜᶜ(1, 1, 1, grid, geometric, FT(1), FT(0), state) ≈ κ * (Δz / 2 + ℓʳ)
+        @test length_scaleᶜᶜᶜ(1, 1, 1, grid, height, FT(1), FT(0), state) ≈ κ * (Δz / 2 + ℓʳ)
     end
 
     @testset "ℓᵇ = Cᵇ q / N" begin
@@ -137,7 +137,7 @@ end
         # Setting one coefficient to an integer must work: @kwdef alone would demand that every
         # field share a type, so `Cᵇ = 1` beside a float default would find no method.
         @test BuoyancyLengthScale(Cᵇ = 1).Cᵇ == 1
-        @test GeometricLengthScale(ℓʳ = 1).ℓʳ == 1
+        @test HeightAboveSurface(ℓʳ = 1).ℓʳ == 1
         @test length_scaleᶜᶜᶠ(1, 1, 1, grid, BuoyancyLengthScale{FT}(Cᵇ = 1), q, N², state) ≈
               q / sqrt(N²) rtol=1e-5
     end
@@ -160,7 +160,7 @@ end
     # path for these branches is covered by stepping a model, below.
     grid = RectilinearGrid(CPU(); size=Nz, z=(0, Lz), topology=(Flat, Flat, Bounded))
     surface = SurfaceLayerLengthScale{FT}()
-    geometric = GeometricLengthScale{FT}(κ = surface.κ, ℓʳ = surface.ℓʳ)
+    height = HeightAboveSurface{FT}(κ = surface.κ, ℓʳ = surface.ℓʳ)
 
     ## ζ = z/L with L = -u★³/(κ Jᵇ): Jᵇ < 0 is stable, Jᵇ > 0 unstable, Jᵇ = 0 neutral.
     function state(u★², Jᵇ)
@@ -171,9 +171,9 @@ end
     end
 
     ℓˢ(k, u★², Jᵇ) = length_scaleᶜᶜᶠ(1, 1, k, grid, surface, FT(1), FT(0), state(u★², Jᵇ))
-    ℓᵍ(k) = length_scaleᶜᶜᶠ(1, 1, k, grid, geometric, FT(1), FT(0), state(FT(0.1), FT(0)))
+    ℓᵍ(k) = length_scaleᶜᶜᶠ(1, 1, k, grid, height, FT(1), FT(0), state(FT(0.1), FT(0)))
 
-    @testset "neutral reproduces the plain geometric branch exactly" begin
+    @testset "neutral reproduces the plain height-above-surface branch exactly" begin
         # This is what makes the correction safe to adopt: it cannot disturb a neutral column.
         for k in (2, 8, Nz)
             @test ℓˢ(k, FT(0.09), FT(0)) ≈ ℓᵍ(k)
@@ -366,14 +366,14 @@ end
     N² = FT(1e-4)
 
     @testset "min is the default blend, and the kwarg overrides it" begin
-        @test BlendedMixingLength(GeometricLengthScale()).blend isa MinimumBlend
-        @test BlendedMixingLength(GeometricLengthScale();
+        @test BlendedMixingLength(HeightAboveSurface()).blend isa MinimumBlend
+        @test BlendedMixingLength(HeightAboveSurface();
                                   blend = HarmonicBlend()).blend isa HarmonicBlend
-        @test length(BlendedMixingLength(GeometricLengthScale(), BuoyancyLengthScale()).branches) == 2
+        @test length(BlendedMixingLength(HeightAboveSurface(), BuoyancyLengthScale()).branches) == 2
     end
 
     @testset "the master length is the blend of its branches" begin
-        branches = (GeometricLengthScale{FT}(), TurbulenceLengthScale{FT}(),
+        branches = (HeightAboveSurface{FT}(), TurbulenceLengthScale{FT}(),
                     BuoyancyLengthScale{FT}())
         for blend in (MinimumBlend(), HarmonicBlend(), PowerBlend{FT}(p = 2))
             ml = BlendedMixingLength(branches...; blend)
@@ -387,10 +387,10 @@ end
     end
 
     @testset "a single branch blends to itself" begin
-        ml = BlendedMixingLength(GeometricLengthScale{FT}())
+        ml = BlendedMixingLength(HeightAboveSurface{FT}())
         for k in (1, 8, Nz)
             @test mixing_lengthᶜᶜᶠ(1, 1, k, grid, ml, q, N², state) ≈
-                  length_scaleᶜᶜᶠ(1, 1, k, grid, GeometricLengthScale{FT}(), q, N², state)
+                  length_scaleᶜᶜᶠ(1, 1, k, grid, HeightAboveSurface{FT}(), q, N², state)
         end
     end
 
@@ -481,7 +481,7 @@ end
         # ℓᵗ keeps the Inf it was constructed with — which drops out of every blend rather than
         # collapsing ℓ to zero.
         without = TKEBasedTurbulenceClosure(mixing_length =
-            BlendedMixingLength(GeometricLengthScale(), BuoyancyLengthScale()))
+            BlendedMixingLength(HeightAboveSurface(), BuoyancyLengthScale()))
         @test isnothing(turbulence_length_coefficient(without.mixing_length))
         @test !Breeze.TurbulenceClosures.has_turbulence_length_scale(without)
 
@@ -493,7 +493,7 @@ end
 
         # κ must be findable from either surface branch, since the example builds its drag law
         # from it; a mixing length with neither reports `nothing` rather than a wrong number.
-        @test von_karman_constant(BlendedMixingLength(GeometricLengthScale())) == 0.4
+        @test von_karman_constant(BlendedMixingLength(HeightAboveSurface())) == 0.4
         @test von_karman_constant(BlendedMixingLength(SurfaceLayerLengthScale())) == 0.4
         @test isnothing(von_karman_constant(BlendedMixingLength(BuoyancyLengthScale())))
     end
@@ -698,7 +698,7 @@ end
 ## The testsets above call the branch functions from the host, so they run on the CPU wherever their
 ## data lives and cannot compile anything for a GPU. Stepping a model is what puts a branch inside
 ## `compute_closure_fields!` and therefore through the device compiler. The shipped default covers
-## `GeometricLengthScale`, `TurbulenceLengthScale`, `BuoyancyLengthScale` at `Cᶜᵇ = 0` and
+## `HeightAboveSurface`, `TurbulenceLengthScale`, `BuoyancyLengthScale` at `Cᶜᵇ = 0` and
 ## `MinimumBlend`; this covers the rest, which otherwise reach the device in no test at all:
 ## `SurfaceLayerLengthScale` (its `ifelse` chain and `cbrt`), `HarmonicBlend`, `PowerBlend`, and the
 ## convective enhancement of `ℓᵇ` (another `cbrt`, plus the guard against Inf/Inf).

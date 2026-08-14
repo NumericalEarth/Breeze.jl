@@ -48,7 +48,7 @@ the stress coefficient all derive from them (`dissipation_coefficient`, `surface
 
   - **``Cᴷ`` carries log-layer consistency.** In a neutral constant-flux layer with ``ℓᵍ = a z``,
     the logarithmic wind profile constrains only the combination ``Cˢ a = κ``, where
-    ``Cˢ = Cᴷ / (Cμ)^{1/4}``. With ``a = κ`` — the plain geometric branch this closure uses — that
+    ``Cˢ = Cᴷ / (Cμ)^{1/4}``. With ``a = κ`` — the plain height-above-surface branch this closure uses — that
     reads ``Cˢ = 1``, i.e. the locus **``Cμ = Cᴷ⁴``**. Off that locus a column fitted for a von
     Kármán constant returns ``κ_\\mathrm{eff} = Cˢ κ`` instead of ``κ``.
 
@@ -127,7 +127,7 @@ round(stress_coefficient(closure), digits=4)
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
                                    FT = Oceananigans.defaults.FloatType;
-                                   mixing_length = BlendedMixingLength(GeometricLengthScale(),
+                                   mixing_length = BlendedMixingLength(HeightAboveSurface(),
                                                                        TurbulenceLengthScale(),
                                                                        BuoyancyLengthScale()),
                                    Cᴷ = 0.4903,
@@ -151,8 +151,8 @@ end
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
     TKEBasedTurbulenceClosure(VerticallyImplicitTimeDiscretization(), FT; kw...)
 
-@inline convert_eltype(::Type{FT}, ℓ::GeometricLengthScale) where FT =
-    GeometricLengthScale{FT}(convert(FT, ℓ.κ), convert(FT, ℓ.ℓʳ))
+@inline convert_eltype(::Type{FT}, ℓ::HeightAboveSurface) where FT =
+    HeightAboveSurface{FT}(convert(FT, ℓ.κ), convert(FT, ℓ.ℓʳ))
 @inline convert_eltype(::Type{FT}, ℓ::TurbulenceLengthScale) where FT =
     TurbulenceLengthScale{FT}(convert(FT, ℓ.Cᵗ))
 @inline convert_eltype(::Type{FT}, ℓ::BuoyancyLengthScale) where FT =

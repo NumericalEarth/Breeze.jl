@@ -219,7 +219,7 @@ export
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
     TKEBasedTurbulenceClosure,
     BlendedMixingLength, NakanishiNiinoLengthScale,
-    GeometricLengthScale, SurfaceLayerLengthScale,
+    HeightAboveSurface, SurfaceLayerLengthScale,
     TurbulenceLengthScale, BuoyancyLengthScale,
     MinimumBlend, HarmonicBlend, PowerBlend,
     diffusivity_coefficient, dissipation_coefficient, surface_tke_coefficient, stress_coefficient,

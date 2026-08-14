@@ -47,7 +47,7 @@ Fields
 
 $(TYPEDFIELDS)
 """
-Base.@kwdef struct GeometricLengthScale{FT} <: AbstractLengthScale
+Base.@kwdef struct HeightAboveSurface{FT} <: AbstractLengthScale
     "von Kármán constant, setting the slope ``ℓᵍ = κ(z + ℓʳ)``"
     κ :: FT = 0.4
     "roughness length ``ℓʳ``, which keeps ``ℓᵍ > 0`` at the surface, m"
@@ -125,7 +125,7 @@ branch. That floor matters: at zero mean wind ``u_\\star = 0`` exactly, so ``L =
 at *every* height, and the unstable branch — the only one of the three that diverges rather than
 saturating — would remove the wall constraint altogether.
 
-This is [`GeometricLengthScale`](@ref) plus the correction it omits. The two agree exactly at
+This is [`HeightAboveSurface`](@ref) plus the correction it omits. The two agree exactly at
 ``ζ = 0``, so replacing one with the other leaves a neutral column untouched; in stable air the
 branch shrinks by up to ``Cⁿ``, and in unstable air it grows up to the ceiling set by ``ζᵐⁱⁿ``. The
 pieces join continuously but not smoothly — the derivative in ``ζ`` jumps across ``ζ = 0``.
@@ -209,7 +209,7 @@ end
 ## `Base.@kwdef` on a `{FT}` struct generates a constructor requiring every field to share one type,
 ## so setting a single coefficient to an integer — `BuoyancyLengthScale(Cᵇ = 1)` — would otherwise
 ## find no method. Promote instead; `convert_eltype` later fixes the element type to the model's.
-GeometricLengthScale(κ, ℓʳ) = GeometricLengthScale(promote(κ, ℓʳ)...)
+HeightAboveSurface(κ, ℓʳ) = HeightAboveSurface(promote(κ, ℓʳ)...)
 BuoyancyLengthScale(Cᵇ, N²ᵐⁱⁿ, Cᶜᵇ) = BuoyancyLengthScale(promote(Cᵇ, N²ᵐⁱⁿ, Cᶜᵇ)...)
 SurfaceLayerLengthScale(κ, ℓʳ, Cⁿ, Cˢ, Cᶜ, nᶜ, ζᵐⁱⁿ) =
     SurfaceLayerLengthScale(promote(κ, ℓʳ, Cⁿ, Cˢ, Cᶜ, nᶜ, ζᵐⁱⁿ)...)
@@ -235,7 +235,7 @@ schemes are then data:
 using Breeze
 
 deardorff = BlendedMixingLength(BuoyancyLengthScale(Cᵇ = 0.53))
-mynn = BlendedMixingLength(GeometricLengthScale(), TurbulenceLengthScale(),
+mynn = BlendedMixingLength(HeightAboveSurface(), TurbulenceLengthScale(),
                            BuoyancyLengthScale(Cᵇ = 1); blend = HarmonicBlend())
 
 length(mynn.branches)
@@ -248,7 +248,7 @@ Two structural departures from MYNN, both toward smoothness: ``ℓᵇ`` is a *br
 hard realizability clip ``ℓ/q ≤ 1/N``, and ``N²`` enters through a smooth positive part.
 
 MYNN's own configuration is available but is not the default — it is
-[`SurfaceLayerLengthScale`](@ref) rather than [`GeometricLengthScale`](@ref), a
+[`SurfaceLayerLengthScale`](@ref) rather than [`HeightAboveSurface`](@ref), a
 [`BuoyancyLengthScale`](@ref) with `Cᵇ = 1` and `Cᶜᵇ = 5`, and a [`HarmonicBlend`](@ref).
 
 Fields
@@ -325,10 +325,10 @@ Smooth positive part of `x` with transition scale `δ > 0`: `(x + √(x² + δ²
 """
 @inline smooth_positive(x, δ) = (x + sqrt(x^2 + δ^2)) / 2
 
-@inline length_scaleᶜᶜᶠ(i, j, k, grid, ℓ::GeometricLengthScale, q, N², state) =
+@inline length_scaleᶜᶜᶠ(i, j, k, grid, ℓ::HeightAboveSurface, q, N², state) =
     ℓ.κ * (height_above_bottomᶜᶜᶠ(i, j, k, grid) + ℓ.ℓʳ)
 
-@inline length_scaleᶜᶜᶜ(i, j, k, grid, ℓ::GeometricLengthScale, q, N², state) =
+@inline length_scaleᶜᶜᶜ(i, j, k, grid, ℓ::HeightAboveSurface, q, N², state) =
     ℓ.κ * (height_above_bottomᶜᶜᶜ(i, j, k, grid) + ℓ.ℓʳ)
 
 @inline length_scaleᶜᶜᶠ(i, j, k, grid, ::TurbulenceLengthScale, q, N², state) =
@@ -403,7 +403,7 @@ $(TYPEDSIGNATURES)
 `mixing_lengthᶜᶜᶠ` at cell centers, for the dissipation ``ε = Cᵋ e^{3/2}/ℓ``, which lives with ``e``
 at centers.
 
-Evaluating the geometric branch here rather than interpolating ``ℓ`` down from the faces matters in
+Evaluating the height-above-surface branch here rather than interpolating ``ℓ`` down from the faces matters in
 the first cell: the face value at the surface is masked to zero, so an interpolated ``ℓ`` would be
 halved (or, ignoring the masked face, doubled) exactly where the log-layer balance is judged.
 """
@@ -454,7 +454,7 @@ by dispatch on the branch tuple, so the search costs nothing at run time.
 $(TYPEDSIGNATURES)
 
 The von Kármán constant carried by whichever branch measures distance to the surface —
-[`GeometricLengthScale`](@ref) or [`SurfaceLayerLengthScale`](@ref) — or `nothing` if there is
+[`HeightAboveSurface`](@ref) or [`SurfaceLayerLengthScale`](@ref) — or `nothing` if there is
 neither.
 
 A surface drag law that is meant to be consistent with the closure's own log layer must use the
@@ -464,7 +464,7 @@ the two from drifting apart.
 @inline von_karman_constant(ml::BlendedMixingLength) = von_karman_constant(ml.branches)
 
 @inline von_karman_constant(::Tuple{}) = nothing
-@inline von_karman_constant(branches::Tuple{GeometricLengthScale, Vararg}) = first(branches).κ
+@inline von_karman_constant(branches::Tuple{HeightAboveSurface, Vararg}) = first(branches).κ
 @inline von_karman_constant(branches::Tuple{SurfaceLayerLengthScale, Vararg}) = first(branches).κ
 @inline von_karman_constant(branches::Tuple) = von_karman_constant(Base.tail(branches))
 
