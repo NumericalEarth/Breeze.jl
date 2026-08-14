@@ -10,9 +10,9 @@ literated_dir = ARGS[2]
 # Have continuous line numbering in literate examples:
 # <https://fredrikekre.github.io/DocumenterCodeBlocks.jl/stable/linenumbers/#Continued-numbering>.
 example_preamble = """
-```@codeblocks
-line_counter = :continue
-```
+# ```@codeblocks
+# line_counter = :continue
+# ```
 
 """
 
