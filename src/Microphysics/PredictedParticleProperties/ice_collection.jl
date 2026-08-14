@@ -47,7 +47,7 @@ Collection by ice particles of water-friendly and ice-friendly interstitial
 aerosol, respectively.
 
 Ice-rain collection is handled separately, by [`IceRainCollection`](@ref) and the
-6D rain-ice block embedded in Lookup Table 1, because its kernel needs the
+5D rain-ice block embedded in Lookup Table 1, because its kernel needs the
 rain slope parameter ``λ_r`` in addition to the ice PSD.
 
 Collection efficiencies are not stored here. They live in

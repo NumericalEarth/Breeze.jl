@@ -110,8 +110,9 @@ Breeze runs the **two-moment** ice path, which tracks:
 1. **Mass** (``ρq^i``): Ice mass concentration (dry component; see prognostic table below).
 2. **Number** (``ρn^i``): Ice particle number concentration.
 
-The shape parameter ``μ^i`` is diagnosed from the ``μ``–``λ`` closure tabulated in
-Lookup Table 1.
+The two-moment process tables do not use an independent ice shape coordinate.
+The generator's ``μ``–``λ`` closure remains available from Lookup Table 1 as an
+on-demand diagnostic.
 
 #### Predicted Liquid Fraction
 
@@ -164,9 +165,10 @@ with ``D \ge 9`` mm (tabulated as `f1pr28`); see
 
 !!! note "Lookup-table I/O scope"
     Breeze reads the published P3 ASCII ice lookup table,
-    `p3_lookupTable_1.dat-v6.9-2momI`, which carries both the 5-D ice-only
-    integrals and the embedded 6-D ice–rain collection block. The ice tables are
-    not regenerated. The rain 1D tables (mass- and number-weighted fall speed,
+    `p3_lookupTable_1.dat-v6.9-2momI`. Its rows carry 4-D ice-only integrals and
+    an embedded 5-D ice–rain collection block, and the loader materializes
+    exactly those coordinates. The ice tables are not regenerated. The rain
+    1D tables (mass- and number-weighted fall speed,
     evaporation ventilation) *are* tabulated at startup from Chebyshev–Gauss
     quadrature via `tabulate_rain_from_quadrature`.
 
@@ -379,7 +381,7 @@ Each species follows a gamma distribution in maximum dimension ``D``.
 | ``N'(D)``   |      |               | Number concentration per unit diameter, ``N'(D) = N_0 D^μ e^{-λD}`` [m⁻⁴] |
 | ``N_0``     | `N₀` |               | Intercept of the gamma distribution [m⁻⁴⁻μ]; a scale factor, not a concentration. Species-labelled as `Nʳ₀` where the rate needs the rain PSD explicitly |
 | ``μ^{cl}``, ``μ^r`` | `μᶜˡ`, `μʳ` | `CloudDropletProperties.shape_parameter`, `RainProperties.shape_parameter` | Shape parameter [-]; ``μ^{cl}`` is diagnosed from ``N^{cl}``, ``μ^r = 0`` at runtime |
-| ``μ^i``     | `μⁱ` | | Ice shape parameter [-]; an axis of the ice lookup tables rather than a stored field |
+| ``μ^i``     | `μⁱ` | | On-demand ice shape diagnostic [-] read from the Table 1 closure column; not a process-table coordinate |
 | ``λ^{cl}``, ``λ^r`` | `λᶜˡ`, `λʳ` | | Slope parameter [1/m] |
 | ``λ^i``     |      | `IceLambdaLimiter` | Ice slope parameter [1/m], bounded by the mean-size limiter |
 | ``M_k``     |      |               | ``k``-th moment of the distribution, ``M_k = N_0\,Γ(k+μ+1)/λ^{k+μ+1}`` |
@@ -858,11 +860,10 @@ rime-density axis, matching the runtime lookup's clamp of the canonical unrimed
 
 !!! note "Two-Moment Mode"
     The piecewise closure above is the formula the table *generator* evaluates.
-    Breeze's model path does not evaluate it per grid point: ``μ`` is
-    read from Table 1's shape-parameter column, which
-    stores the generator's result, and is interpolated in the same
-    ``(\log \bar{m}, F^f, F^l, ρ^f)`` space as every other Table 1 integral
-    (`compute_ice_shape_parameter` in `process_rate_helpers.jl`).
+    Breeze's process-rate path neither diagnoses nor carries ``μ``. The
+    `compute_ice_shape_parameter` helper can read the generator's result from
+    Table 1 on demand in the same ``(\log \bar{m}, F^f, F^l, ρ^f)`` space as
+    every other Table 1 integral.
 
 The plots below read ``λ`` and ``μ`` straight out of Table 1, so they show the
 closure exactly as the model sees it.
@@ -880,14 +881,13 @@ end
 
 bulk = p3.ice.bulk_properties
 
-# Table 1 is indexed by the mean particle mass m̄ = q/N. Liquid fraction and the
-# μ axis are singleton coordinates here.
+# Table 1 is indexed by the mean particle mass m̄ = q/N and ice morphology.
 "Read (λ, μ) from Table 1 and rebuild N₀ = N λ^(μ+1) / Γ(μ+1)."
-function psd_from_table(p3, q, N, Fᶠ, ρᶠ; Fˡ = 0.0, μ_axis = 0.0)
+function psd_from_table(p3, q, N, Fᶠ, ρᶠ; Fˡ = 0.0)
     bulk = p3.ice.bulk_properties
     log_m̄ = log10(q / N)
-    λ = bulk.slope(log_m̄, Fᶠ, Fˡ, ρᶠ, μ_axis)
-    μ = bulk.shape(log_m̄, Fᶠ, Fˡ, ρᶠ, μ_axis)
+    λ = bulk.slope(log_m̄, Fᶠ, Fˡ, ρᶠ)
+    μ = bulk.shape(log_m̄, Fᶠ, Fˡ, ρᶠ)
     log_N₀ = log(N) + (μ + 1) * log(λ) - loggamma(μ + 1)
     return (; λ, μ, log_N₀)
 end
@@ -1342,9 +1342,9 @@ table coordinate:
 
 The mass and number forms (table columns `f1pr08`, `f1pr07`) are stored as
 ``\log_{10}`` values and exponentiated at runtime.
-They live in the 6-D rain-ice block of Lookup Table 1 rather than the 5-D
+They live in the 5-D rain-ice block of Lookup Table 1 rather than the 4-D
 ice-only block, and both share the same
-``(\log \bar{m}, \log λ^r, F^f, F^l, ρ^f, μ^i)`` axes, so the interpolation indices
+``(\log \bar{m}, \log λ^r, F^f, F^l, ρ^f)`` axes, so the interpolation indices
 are computed once per lookup.
 
 ### Lambda Limiter Integrals
@@ -1367,10 +1367,10 @@ relaxation tendency described in [Prognostic Equations](@ref p3_prognostics).
 For efficiency in simulations, integrals are organized into two table families,
 both held in `p3_lookupTable_1.dat-v6.9-2momI`.
 
-- **Table 1** — the 5-D ice-only block: fall speed, ventilation, bulk,
+- **Table 1** — the 4-D ice-only block: fall speed, ventilation, bulk,
   cloud-collection, aggregation, and lambda-limiter integrals, on
-  ``(\log \bar{m}, F^f, F^l, ρ^f, μ)`` axes (``μ`` is a singleton axis).
-- **Table 2** — the 6-D ice–rain collection block embedded later in the same
+  ``(\log \bar{m}, F^f, F^l, ρ^f)`` axes.
+- **Table 2** — the 5-D ice–rain collection block embedded later in the same
   file, which adds ``\log λ^r`` as a coordinate.
 
 ```@example p3_integrals
@@ -1393,7 +1393,7 @@ println("  Mass-weighted:   $(typeof(fs.mass_weighted))")
 
 P3 organises its integral properties by concept; the actual column count in
 the 2-moment ice file (`p3_lookupTable_1.dat-v6.9-2momI`) is 21. The
-ice–rain collection integrals sit in the separate 6-D block of the same file.
+ice–rain collection integrals sit in the separate 5-D block of the same file.
 
 At runtime each ice-side integral is read from the corresponding column of that
 ASCII lookup table; the rain 1D tables are tabulated at startup inside

@@ -1,7 +1,7 @@
 #####
 ##### GPU/architecture support for P3 container structs
 #####
-##### The ice integrals (5D/6D lookup tables) and rain integrals (1D tables
+##### The ice integrals (4D/5D lookup tables) and rain integrals (1D tables
 ##### built from quadrature) hold lookup arrays that must be transferred to the
 ##### GPU. Scalar fields and singleton integral types pass through unchanged.
 #####
@@ -33,9 +33,8 @@ macro adapt_architecture(T)
     end)
 end
 
-@adapt_architecture TabulatedFunction6D
+@adapt_architecture RimeDensityIndexedTable4D
 @adapt_architecture RimeDensityIndexedTable5D
-@adapt_architecture RimeDensityIndexedTable6D
 @adapt_architecture IceFallSpeed
 @adapt_architecture IceDeposition
 @adapt_architecture IceBulkProperties

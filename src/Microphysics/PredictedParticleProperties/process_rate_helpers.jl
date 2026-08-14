@@ -317,7 +317,7 @@ end
                        FT(DEFAULT_FLOORS.mass_scale))
 end
 
-@inline function bounded_ice_number(table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
+@inline function bounded_ice_number(table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ_total + nⁱ)
     qⁱ_eff = clamp_positive(qⁱ_total)
     nⁱ_eff = clamp_positive(nⁱ)
@@ -325,17 +325,19 @@ end
                               max(nⁱ_eff, FT(DEFAULT_FLOORS.number_scale)),
                               FT(DEFAULT_FLOORS.mass_scale)))
     limiter = table.lambda_limiter
-    nⁱ_min = limiter.large_q(log_m, Fᶠ, Fˡ, ρᶠ, μⁱ) * qⁱ_eff
-    nⁱ_max = limiter.small_q(log_m, Fᶠ, Fˡ, ρᶠ, μⁱ) * qⁱ_eff
+    # Both limiter tables share Table-1 axes, so the coordinate is bracketed once.
+    prep = prepare_interpolation(limiter.large_q, log_m, Fᶠ, Fˡ, ρᶠ)
+    nⁱ_min = evaluate_at(limiter.large_q, prep) * qⁱ_eff
+    nⁱ_max = evaluate_at(limiter.small_q, prep) * qⁱ_eff
     bounded = clamp(nⁱ_eff, nⁱ_min, nⁱ_max)
     return ifelse(qⁱ_eff > FT(DEFAULT_FLOORS.mass_scale), bounded, zero(FT))
 end
 
-@inline bounded_ice_number(::Nothing, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ) =
+@inline bounded_ice_number(::Nothing, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ) =
     ifelse(qⁱ_total > zero(qⁱ_total), clamp_positive(nⁱ), zero(nⁱ))
 
-@inline function bounded_ice_number(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
-    return bounded_ice_number(ice_integrals_table(p3), qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
+@inline function bounded_ice_number(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
+    return bounded_ice_number(ice_integrals_table(p3), qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
 end
 
 @inline function rain_slope_parameter(qʳ, nʳ, parameters)
@@ -366,17 +368,16 @@ end
     return ifelse(needs_adjustment, nʳ_bounded, nʳ_eff)
 end
 
-# Bulk ice density from Table 1 (the main lookup table), indexed at the shape
-# parameter μⁱ.
-@inline function ice_mean_density(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
+# Bulk ice density from Table 1 (the main lookup table).
+@inline function ice_mean_density(ice_table::P3IceIntegralsTable, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ_total)
     m̄ = safe_divide(qⁱ_total, nⁱ, one(FT))
     log_mean_mass = log10(ifelse(m̄ > 0, m̄, one(FT)))
-    return ice_table.bulk_properties.mean_density(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μⁱ)
+    return ice_table.bulk_properties.mean_density(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
 end
 
-@inline function ice_mean_density(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
-    return ice_mean_density(ice_integrals_table(p3), qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, μⁱ)
+@inline function ice_mean_density(p3, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
+    return ice_mean_density(ice_integrals_table(p3), qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ)
 end
 
 #####
@@ -393,15 +394,10 @@ shape parameter computed when the table was generated.
 """
 @inline function compute_ice_shape_parameter(p3, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ)
     FT = typeof(qⁱ)
-    return ice_shape_parameter(p3.ice.bulk_properties.shape, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, FT)
-end
-
-@inline function ice_shape_parameter(shape_table::P3Table5D, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, FT)
     m̄ = safe_divide(qⁱ, nⁱ, one(FT))
     log_m = log10(ifelse(m̄ > 0, m̄, one(FT)))
-    return shape_table(log_m, Fᶠ, Fˡ, ρᶠ, zero(FT))
+    return p3.ice.bulk_properties.shape(log_m, Fᶠ, Fˡ, ρᶠ)
 end
-
 
 #####
 ##### Thermodynamic latent heat helpers

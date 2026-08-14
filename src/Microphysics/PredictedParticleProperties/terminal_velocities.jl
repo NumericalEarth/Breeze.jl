@@ -101,7 +101,8 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 # Returns
 - Mass-weighted fall speed [m/s] (positive downward)
 """
-@inline function ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)), μⁱ=zero(typeof(qⁱ)))
+@inline function ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ;
+                                                     Fˡ=zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     parameters = p3.process_rates
     fs = p3.ice.fall_speed
@@ -117,47 +118,34 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     ρ_correction = ice_air_density_correction(ρ₀, ρ)
 
     # m9: no velocity clamping is applied; the table bounds are sufficient.
-    velocity = tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
+    velocity = tabulated_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ,
+                                    ρᶠ, ρ_correction, parameters)
     active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
     return ifelse(active, velocity, zero(FT))
 end
 
-# Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
-@inline function tabulated_mass_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
+# Tabulated version: use the four-dimensional ice lookup table. The mass- and
+# number-weighted speeds differ only in which table is passed in.
+@inline function tabulated_fall_speed(table::P3Table4D, m̄, Fᶠ, Fˡ,
+                                      ρᶠ, ρ_correction, parameters)
     # m̄ = qⁱ/nⁱ is a per-particle mass [kg]; floor it only with a tiny log-guard,
     # NOT the bulk mass-mixing-ratio threshold `minimum_mass_mixing_ratio` (kg/kg).
     # The table clamps the coordinate to its mass axis (min ≈ 1.56e-15 kg) rather
     # than extrapolating below it.
     log_mean_mass = log10(max(m̄, oftype(m̄, parameters.floors.mass_scale)))
-    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μⁱ)
+    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ)
     return vₜ_norm * ρ_correction
 end
 
 # Prepared-index variant: reuse precomputed interpolation indices and skip the log/clamp setup.
-@inline function tabulated_mass_weighted_fall_speed(table::P3Table5D,
-                                                    prep::Prepared5DInterpolation, ρ_correction)
-    return evaluate_at(table, prep) * ρ_correction
-end
-
-# Tabulated version: use TabulatedFunction5D lookup (includes rime density and mu axes)
-@inline function tabulated_number_weighted_fall_speed(table::P3Table5D, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
-    # Per-particle-mass log-guard; the table clamps its mass axis (see
-    # tabulated_mass_weighted_fall_speed), not the bulk qmin.
-    log_mean_mass = log10(max(m̄, oftype(m̄, parameters.floors.mass_scale)))
-    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ, ρᶠ, μⁱ)
-    return vₜ_norm * ρ_correction
-end
-
-@inline function tabulated_number_weighted_fall_speed(table::P3Table5D,
-                                                      prep::Prepared5DInterpolation, ρ_correction)
-    return evaluate_at(table, prep) * ρ_correction
-end
+@inline tabulated_fall_speed(table::P3Table4D, prep::PreparedInterpolation, ρ_correction) =
+    evaluate_at(table, prep) * ρ_correction
 
 """
 $(TYPEDSIGNATURES)
 
 Compute both ice terminal velocities (mass- and number-weighted) in a single call,
-sharing the mean particle mass, the air density correction, and the 5D
+sharing the mean particle mass, the air density correction, and the 4D
 interpolation indices between the two table reads.
 
 [`ice_terminal_velocity_mass_weighted`](@ref) remains available for the one
@@ -186,7 +174,7 @@ struct IceTerminalVelocities{FT}
     number_weighted :: FT
 end
 
-function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)), μⁱ=zero(typeof(qⁱ)))
+function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     parameters = p3.process_rates
     fs = p3.ice.fall_speed
@@ -201,7 +189,7 @@ function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeo
     ρ_correction = ice_air_density_correction(ρ₀, ρ)
 
     velocities = fused_fall_speeds(fs.mass_weighted, fs.number_weighted,
-                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters)
     active = qⁱ_eff >= p3.minimum_mass_mixing_ratio
     return IceTerminalVelocities{FT}(
         ifelse(active, velocities.mass_weighted, zero(FT)),
@@ -209,27 +197,27 @@ function ice_terminal_velocities(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeo
     )
 end
 
-# Fast path: both tables are 5D (the supported P3 configuration with loaded tables).
-# Interpolation indices for (log_m, Fᶠ, Fˡ, ρᶠ, μⁱ) are shared across the two reads.
-@inline function fused_fall_speeds(mass_table::P3Table5D, number_table::P3Table5D,
-                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
+# Fast path: both tables are 4D (the supported P3 configuration with loaded tables).
+# Interpolation indices for (log_m, Fᶠ, Fˡ, ρᶠ) are shared across the two reads.
+@inline function fused_fall_speeds(mass_table::P3Table4D, number_table::P3Table4D,
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters)
     FT = typeof(m̄)
     # Per-particle-mass log-guard; the table clamps its mass axis (see
-    # tabulated_mass_weighted_fall_speed), not the bulk qmin.
+    # tabulated_fall_speed), not the bulk qmin.
     log_mean_mass = log10(max(m̄, FT(parameters.floors.mass_scale)))
-    prep = prepare_5d(mass_table, log_mean_mass, Fᶠ, Fˡ, ρᶠ, μⁱ)
+    prep = prepare_interpolation(mass_table, log_mean_mass, Fᶠ, Fˡ, ρᶠ)
     return IceTerminalVelocities{FT}(
-        tabulated_mass_weighted_fall_speed(mass_table, prep, ρ_correction),
-        tabulated_number_weighted_fall_speed(number_table, prep, ρ_correction),
+        tabulated_fall_speed(mass_table, prep, ρ_correction),
+        tabulated_fall_speed(number_table, prep, ρ_correction),
     )
 end
 
-# Fallback for non-5D fall speed tables (quadrature path, mixed types).
+# Fallback for non-4D fall speed tables (quadrature path, mixed types).
 @inline function fused_fall_speeds(mass_table, number_table,
-                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ)
+                                    m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters)
     FT = typeof(m̄)
     return IceTerminalVelocities{FT}(
-        tabulated_mass_weighted_fall_speed(mass_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ),
-        tabulated_number_weighted_fall_speed(number_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, parameters, μⁱ),
+        tabulated_fall_speed(mass_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, parameters),
+        tabulated_fall_speed(number_table, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, parameters),
     )
 end

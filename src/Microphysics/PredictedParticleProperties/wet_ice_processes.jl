@@ -105,14 +105,14 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 # Returns
 - Rate of liquid → rain shedding [kg/kg/s]
 """
-function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean, μⁱ)
+function shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
     FT = typeof(qʷⁱ)
 
     qʷⁱ_eff = clamp_positive(qʷⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
 
     # Lookup ∫_{D≥9mm} m(D) N'(D) dD (normalized per particle)
-    f1pr28 = shedding_integral(p3.ice.bulk_properties.shedding, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ,
+    f1pr28 = shedding_integral(p3.ice.bulk_properties.shedding, m_mean, Fᶠ, Fˡ, ρᶠ,
                                p3.process_rates.floors.mass_scale)
 
     # Fᶠ is the rime fraction of the ice-only mass, since qⁱ excludes qʷⁱ.
@@ -130,12 +130,12 @@ end
 $(TYPEDSIGNATURES)
 
 Lookup the PSD-integrated shedding mass for D ≥ 9 mm particles
-from tabulated `TabulatedFunction5D`.
+from a tabulated four-dimensional ice integral.
 """
-@inline function shedding_integral(table::P3Table5D, m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ, mass_scale_floor)
+@inline function shedding_integral(table::P3Table4D, m_mean, Fᶠ, Fˡ, ρᶠ, mass_scale_floor)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(mass_scale_floor)))
-    return table(log_m, Fᶠ, Fˡ, ρᶠ, μⁱ)
+    return table(log_m, Fᶠ, Fˡ, ρᶠ)
 end
 
 """
@@ -192,7 +192,8 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
 # Returns
 - Wet growth capacity [kg/kg/s] (positive; zero when T ≥ T₀)
 """
-function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μⁱ)
+function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ,
+                             constants, transport)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
@@ -219,7 +220,8 @@ function wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ
     # Ventilation integral (same as deposition/refreezing)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction, p3, μⁱ)
+                                    m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ,
+                                    ρ_correction, p3)
 
     # Heat balance: sensible + latent
     Q_sensible = Kᵃ * (T₀ - T)
@@ -265,7 +267,8 @@ appendix C, section i (and Mason 1971 for the underlying heat-balance form).
 # Returns
 - Rate of liquid → ice refreezing [kg/kg/s]
 """
-function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, constants, transport, μⁱ)
+function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ,
+                         constants, transport)
     FT = typeof(qʷⁱ)
     parameters = p3.process_rates
 
@@ -294,7 +297,8 @@ function refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ, co
     # Ventilation integral (ice-particle capacitance; same path as deposition)
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ, ρ_correction, p3, μⁱ)
+                                    m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ,
+                                    ρ_correction, p3)
 
     # Heat balance for refreezing:
     # Conductive: Kᵃ × (T₀ - T) removes heat from liquid → promotes freezing

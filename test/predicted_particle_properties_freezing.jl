@@ -8,8 +8,9 @@ using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
 
 using Breeze.Microphysics.PredictedParticleProperties:
     chebyshev_gauss_nodes_weights,
-    TabulatedFunction6D,
     make_lookup_table,
+    prepare_interpolation,
+    evaluate_at,
     P3ProcessRates,
     compute_p3_process_rates,
     consistent_rime_state,
@@ -58,32 +59,54 @@ using Oceananigans.Fields: interior
 @testset "P3 Tabulated and Freezing" begin
 
     #####
-    ##### 6D lookup table interpolation (the Breeze-owned multilinear blend that
-    ##### the rain-ice collection tables are read into)
+    ##### Lookup table dimensionality
     #####
 
-    @testset "TabulatedFunction6D - construction and interpolation" begin
-        f(x, y, z, w, v, u) = x * y + z * w + v * u
-        FT = Float64
+    @testset "Lookup tables reject unsupported dimensions" begin
+        data = zeros(Float64, 2, 2, 2, 2, 2, 2)
+        ranges = ntuple(_ -> (0.0, 1.0), 6)
 
-        n = 5
-        axis = range(FT(0), FT(1); length=n)
-        data = FT[f(axis[i], axis[j], axis[k], axis[l], axis[m], axis[p])
-                  for i in 1:n, j in 1:n, k in 1:n, l in 1:n, m in 1:n, p in 1:n]
-        ranges = ntuple(_ -> (FT(0), FT(1)), 6)
-        f6d = make_lookup_table(data, ranges, CPU())
+        @test_throws ArgumentError make_lookup_table(data, ranges, CPU())
+    end
 
-        @test f6d isa TabulatedFunction6D
-        @test size(f6d.table) == (5, 5, 5, 5, 5, 5)
+    #####
+    ##### Prepared multilinear interpolation (the rain-ice collection tables are 5D)
+    #####
 
-        # Interpolation at grid points should be exact
-        @test f6d(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) ≈ 0.0
-        @test f6d(1.0, 1.0, 1.0, 1.0, 1.0, 1.0) ≈ 3.0
-        @test f6d(0.5, 0.5, 0.5, 0.5, 0.5, 0.5) ≈ 0.75 atol=0.05
+    @testset "Prepared interpolation - 5D" begin
+        # Tabulate a function that multilinear interpolation reproduces exactly on
+        # the whole domain, so grid points and interior points both have known values.
+        points = (3, 4, 2, 2, 5)
+        ranges = ntuple(d -> (0.0, Float64(d)), 5)
+        coefficients = (1.0, 2.0, 3.0, 4.0, 5.0)
+        exact(x) = sum(c * xi for (c, xi) in zip(coefficients, x))
 
-        # Clamping: out-of-range inputs should clamp to boundary values
-        @test f6d(-1.0, 0.0, 0.0, 0.0, 0.0, 0.0) ≈ f6d(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-        @test f6d(2.0, 0.0, 0.0, 0.0, 0.0, 0.0) ≈ f6d(1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        data = [exact(ntuple(d -> ranges[d][1] +
+                                  (i[d] - 1) * (ranges[d][2] - ranges[d][1]) / (points[d] - 1), 5))
+                for i in CartesianIndices(points)]
+        table = make_lookup_table(data, ranges, CPU())
+
+        # Grid points are reproduced exactly.
+        x_grid = (0.0, 2.0, 1.5, 4 / 3, 2.5)
+        @test evaluate_at(table, prepare_interpolation(table, x_grid...)) ≈ exact(x_grid)
+
+        # So are interior points, since the tabulated function is multilinear.
+        x_interior = (0.4, 1.1, 0.75, 2.9, 4.2)
+        @test evaluate_at(table, prepare_interpolation(table, x_interior...)) ≈ exact(x_interior)
+
+        # Out-of-range coordinates clamp to the axis bounds rather than extrapolate.
+        x_above = (10.0, 1.1, 0.75, 2.9, 4.2)
+        x_clamped = (1.0, 1.1, 0.75, 2.9, 4.2)
+        @test evaluate_at(table, prepare_interpolation(table, x_above...)) ≈ exact(x_clamped)
+
+        x_below = (0.4, -5.0, 0.75, 2.9, 4.2)
+        x_floored = (0.4, 0.0, 0.75, 2.9, 4.2)
+        @test evaluate_at(table, prepare_interpolation(table, x_below...)) ≈ exact(x_floored)
+
+        # The prepared indices are reusable across tables that share axes.
+        other = make_lookup_table(2 .* data, ranges, CPU())
+        prep = prepare_interpolation(table, x_interior...)
+        @test evaluate_at(other, prep) ≈ 2 * evaluate_at(table, prep)
     end
 
     @testset "RainMassWeightedVelocityEvaluator - monotonicity" begin

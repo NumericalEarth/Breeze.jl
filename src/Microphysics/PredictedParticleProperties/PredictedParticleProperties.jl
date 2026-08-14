@@ -75,11 +75,11 @@ export
 
     # Tabulated wrapper
     TabulatedFunction1D,
+    TabulatedFunction4D,
     TabulatedFunction5D,
-    TabulatedFunction6D,
+    RimeDensityIndexedTable4D,
     RimeDensityIndexedTable5D,
-    RimeDensityIndexedTable6D,
-    P3Table5D,
+    P3Table4D,
 
     # Transport properties
     air_transport_properties,

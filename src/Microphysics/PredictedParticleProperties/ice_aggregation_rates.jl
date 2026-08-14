@@ -1,9 +1,10 @@
-@inline function ice_rain_collection_lookup(table::P3RainIceCollectionTable, m̄, λr, Fᶠ, Fˡ, ρᶠ, μⁱ = zero(typeof(m̄)))
+@inline function ice_rain_collection_lookup(table::P3RainIceCollectionTable,
+                                            m̄, λr, Fᶠ, Fˡ, ρᶠ)
     log_m = log10(m̄)
     log_λ = log10(λr)
-    # Both rain-ice tables share `(log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μⁱ)` axes
+    # Both rain-ice tables share `(log_m, log_λ, Fᶠ, Fˡ, ρᶠ)` axes
     # by construction, so prep indices once and reuse across evaluations.
-    prep = prepare_6d(table.mass, log_m, log_λ, Fᶠ, Fˡ, ρᶠ, μⁱ)
+    prep = prepare_interpolation(table.mass, log_m, log_λ, Fᶠ, Fˡ, ρᶠ)
     # The table stores rain-ice mass and number kernels as log10;
     # exponentiate to recover physical values.
     return exp10(evaluate_at(table.mass, prep)),
@@ -50,7 +51,8 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 # Returns
 - Rate of ice number loss [1/kg/s] (positive magnitude; sign applied in tendency assembly)
 """
-function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ = zero(typeof(qⁱ)))
+function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ,
+                              qʷⁱ = zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     parameters = p3.process_rates
 
@@ -88,7 +90,7 @@ function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ 
 
     # PSD-integrated self-collection kernel (E-free) from lookup table.
     aggregation_kernel_value = aggregation_kernel(p3.ice.collection.aggregation,
-                                                  m_mean, Fᶠ, Fˡ, ρᶠ, μⁱ)
+                                                  m_mean, Fᶠ, Fˡ, ρᶠ)
 
     # Collection kernel with temperature-dependent sticking efficiency
     mean_collection_kernel = aggregation_efficiency * aggregation_kernel_value

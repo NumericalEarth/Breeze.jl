@@ -122,7 +122,7 @@ end
 end
 
 @inline function ice_vapor_relaxation_coefficient(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                                  constants, transport, q, μⁱ)
+                                                  constants, transport, q)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
     nⁱ_eff = max(clamp_positive(nⁱ), FT(p3.minimum_number_mixing_ratio))
@@ -137,7 +137,7 @@ end
     C_fv = deposition_ventilation(p3.ice.deposition.ventilation,
                                   p3.ice.deposition.ventilation_enhanced,
                                   m_mean, Fᶠ, Fˡ, ρᶠ, parameters, ν, Dᵛ,
-                                  ρ_correction, p3, μⁱ)
+                                  ρ_correction, p3)
 
     # This is the raw inverse relaxation coefficient; the psychrometric correction
     # is applied later through the coupled `ξˡ` / `ξⁱ` factor.
@@ -167,7 +167,7 @@ cloud/precipitation fraction framework is handled separately.
 """
 @inline function coupled_saturation_adjustment_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
                                                      qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                                     constants, transport, q, μⁱ,
+                                                     constants, transport, q,
                                                      μᶜˡ, λᶜˡ, nᶜˡ_bounded,
                                                      temperature_tendency,
                                                      vapor_tendency)
@@ -201,7 +201,7 @@ cloud/precipitation fraction framework is handled separately.
     # ventilation-table lookup — once.
     ice_relaxation_active = qⁱ_total >= p3.minimum_mass_mixing_ratio
     ice_relaxation = ice_vapor_relaxation_coefficient(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                                      constants, transport, q, μⁱ)
+                                                      constants, transport, q)
     dry_ice_relaxation = ifelse(
         ice_relaxation_active & (Fˡ < p3.process_rates.liquid_fraction_clipping_threshold),
         ice_relaxation, zero(FT))

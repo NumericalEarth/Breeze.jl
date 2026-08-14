@@ -60,15 +60,15 @@ function read_lookup_tables(directory::AbstractString;
     table1_fields, table2_fields = parse_lookup_table_file(table1_file, FT)
 
     # Build TabulatedFunction objects
-    ice_tables_5d = build_table_1_functions(table1_fields, FT, arch)
+    ice_tables_4d = build_table_1_functions(table1_fields, FT, arch)
     rain_ice_tables = build_table_2_functions(table2_fields, FT, arch)
 
     # Assemble P3 lookup table structs
-    ice_integrals_tab, rain_ice_collection_tab = assemble_lookup_tables(ice_tables_5d, rain_ice_tables)
+    ice_integrals_tab, rain_ice_collection_tab = assemble_lookup_tables(ice_tables_4d, rain_ice_tables)
 
     # Build IceProperties with tabulated fields
     ice = build_ice_properties_from_tables(
-        ice_tables_5d, rain_ice_tables, ice_integrals_tab, rain_ice_collection_tab, FT;
+        ice_tables_4d, rain_ice_tables, ice_integrals_tab, rain_ice_collection_tab, FT;
         thermodynamic_constants)
 
     # Generate rain 1D tables from Julia quadrature
@@ -99,33 +99,31 @@ function read_lookup_tables(directory::AbstractString;
 end
 
 #####
-##### Build Table 1 (5D) TabulatedFunction objects
+##### Build Table 1 (4D) TabulatedFunction objects
 #####
 
 function build_table_1_functions(table1_fields::Dict, FT::Type, arch)
     ranges = ice_integrals_axes(FT)
 
-    result = Dict{Symbol, RimeDensityIndexedTable5D}()
+    result = Dict{Symbol, RimeDensityIndexedTable4D}()
     for (name, data) in table1_fields
-        # The mu dimension has size 1. The TabulatedFunction still needs 5D,
-        # which works because inv_delta for that axis is 0.
         table = make_lookup_table(data, ranges, arch)
-        result[name] = RimeDensityIndexedTable5D(table)
+        result[name] = RimeDensityIndexedTable4D(table)
     end
     return result
 end
 
 #####
-##### Build Table 2 (6D) TabulatedFunction objects
+##### Build Table 2 (5D) TabulatedFunction objects
 #####
 
 function build_table_2_functions(table2_fields::Dict, FT::Type, arch)
     ranges = rain_ice_collection_axes(FT)
 
-    result = Dict{Symbol, RimeDensityIndexedTable6D}()
+    result = Dict{Symbol, RimeDensityIndexedTable5D}()
     for (name, data) in table2_fields
         table = make_lookup_table(data, ranges, arch)
-        result[name] = RimeDensityIndexedTable6D(table)
+        result[name] = RimeDensityIndexedTable5D(table)
     end
     return result
 end
@@ -134,40 +132,40 @@ end
 ##### Assemble P3 lookup table structs
 #####
 
-function assemble_lookup_tables(ice_5d, rain_ice)
+function assemble_lookup_tables(ice_4d, rain_ice)
     # P3IceIntegralsTable: groups of ice integrals
     fall_speed = (
-        number_weighted = ice_5d[:number_weighted],
-        mass_weighted = ice_5d[:mass_weighted],
+        number_weighted = ice_4d[:number_weighted],
+        mass_weighted = ice_4d[:mass_weighted],
     )
 
     deposition = (
-        ventilation = ice_5d[:ventilation],
-        ventilation_enhanced = ice_5d[:ventilation_enhanced],
-        small_ice_ventilation_constant = ice_5d[:small_ice_ventilation_constant],
-        small_ice_ventilation_reynolds = ice_5d[:small_ice_ventilation_reynolds],
-        large_ice_ventilation_constant = ice_5d[:large_ice_ventilation_constant],
-        large_ice_ventilation_reynolds = ice_5d[:large_ice_ventilation_reynolds],
+        ventilation = ice_4d[:ventilation],
+        ventilation_enhanced = ice_4d[:ventilation_enhanced],
+        small_ice_ventilation_constant = ice_4d[:small_ice_ventilation_constant],
+        small_ice_ventilation_reynolds = ice_4d[:small_ice_ventilation_reynolds],
+        large_ice_ventilation_constant = ice_4d[:large_ice_ventilation_constant],
+        large_ice_ventilation_reynolds = ice_4d[:large_ice_ventilation_reynolds],
     )
 
     bulk_properties = (
-        effective_radius = ice_5d[:effective_radius],
-        mean_diameter = ice_5d[:mean_diameter],
-        mean_density = ice_5d[:mean_density],
-        reflectivity = ice_5d[:reflectivity],
-        shedding = ice_5d[:shedding],
+        effective_radius = ice_4d[:effective_radius],
+        mean_diameter = ice_4d[:mean_diameter],
+        mean_density = ice_4d[:mean_density],
+        reflectivity = ice_4d[:reflectivity],
+        shedding = ice_4d[:shedding],
     )
 
     collection = (
-        aggregation = ice_5d[:aggregation],
-        cloud_collection = ice_5d[:cloud_collection],
-        cloud_aerosol_collection = ice_5d[:cloud_aerosol_collection],
-        ice_aerosol_collection = ice_5d[:ice_aerosol_collection],
+        aggregation = ice_4d[:aggregation],
+        cloud_collection = ice_4d[:cloud_collection],
+        cloud_aerosol_collection = ice_4d[:cloud_aerosol_collection],
+        ice_aerosol_collection = ice_4d[:ice_aerosol_collection],
     )
 
     lambda_limiter = (
-        small_q = ice_5d[:small_q],
-        large_q = ice_5d[:large_q],
+        small_q = ice_4d[:small_q],
+        large_q = ice_4d[:large_q],
     )
 
     ice_rain = (
@@ -190,7 +188,7 @@ end
 ##### Build IceProperties from the tabulated ice integrals
 #####
 
-function build_ice_properties_from_tables(ice_5d, rain_ice,
+function build_ice_properties_from_tables(ice_4d, rain_ice,
                                           ice_integrals_tab, rain_ice_collection_tab, FT;
                                           thermodynamic_constants = ThermodynamicConstants(FT))
     # Start from default IceProperties for physical constants
@@ -199,41 +197,41 @@ function build_ice_properties_from_tables(ice_5d, rain_ice,
     # Build sub-structs with tabulated fields replacing integral placeholders
     fall_speed = IceFallSpeed(
         ice_base.fall_speed.reference_air_density,
-        ice_5d[:number_weighted],
-        ice_5d[:mass_weighted],
+        ice_4d[:number_weighted],
+        ice_4d[:mass_weighted],
     )
 
     deposition = IceDeposition(
-        ice_5d[:ventilation],
-        ice_5d[:ventilation_enhanced],
-        ice_5d[:small_ice_ventilation_constant],
-        ice_5d[:small_ice_ventilation_reynolds],
-        ice_5d[:large_ice_ventilation_constant],
-        ice_5d[:large_ice_ventilation_reynolds]
+        ice_4d[:ventilation],
+        ice_4d[:ventilation_enhanced],
+        ice_4d[:small_ice_ventilation_constant],
+        ice_4d[:small_ice_ventilation_reynolds],
+        ice_4d[:large_ice_ventilation_constant],
+        ice_4d[:large_ice_ventilation_reynolds]
     )
 
     bulk_properties = IceBulkProperties(
         ice_base.bulk_properties.maximum_mean_diameter,
         ice_base.bulk_properties.minimum_mean_diameter,
-        ice_5d[:effective_radius],
-        ice_5d[:mean_diameter],
-        ice_5d[:mean_density],
-        ice_5d[:reflectivity],
-        ice_5d[:slope_parameter],
-        ice_5d[:shape_parameter],
-        ice_5d[:shedding]
+        ice_4d[:effective_radius],
+        ice_4d[:mean_diameter],
+        ice_4d[:mean_density],
+        ice_4d[:reflectivity],
+        ice_4d[:slope_parameter],
+        ice_4d[:shape_parameter],
+        ice_4d[:shedding]
     )
 
     collection = IceCollection(
-        ice_5d[:aggregation],
-        ice_5d[:cloud_collection],
-        ice_5d[:cloud_aerosol_collection],
-        ice_5d[:ice_aerosol_collection]
+        ice_4d[:aggregation],
+        ice_4d[:cloud_collection],
+        ice_4d[:cloud_aerosol_collection],
+        ice_4d[:ice_aerosol_collection]
     )
 
     lambda_limiter = IceLambdaLimiter(
-        ice_5d[:small_q],
-        ice_5d[:large_q]
+        ice_4d[:small_q],
+        ice_4d[:large_q]
     )
 
     ice_rain_coll = IceRainCollection(

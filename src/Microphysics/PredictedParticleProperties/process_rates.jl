@@ -41,8 +41,7 @@ struct P3DerivedState{FT, Q}
     Fᶠ :: FT        # rime fraction
     ρᶠ :: FT        # rime density
     # PSD parameters
-    μⁱ :: FT        # ice shape parameter
-    Fˡ_for_shape :: FT # liquid fraction for μ lookup
+    Fˡ :: FT        # liquid fraction on ice
     Nᶜˡ :: FT       # effective cloud droplet number concentration
     nᶜˡ :: FT       # DSD-bounded cloud number (for correction)
     μᶜˡ :: FT       # local cloud DSD shape parameter
@@ -272,8 +271,6 @@ end
     q = state.q
     Fᶠ = state.Fᶠ
     ρᶠ = state.ρᶠ
-    μⁱ = state.μⁱ
-    Fˡ_for_shape = state.Fˡ_for_shape
     Nᶜˡ = state.Nᶜˡ
     nⁱ = state.nⁱ
     nʳ = state.nʳ
@@ -289,7 +286,7 @@ end
     vapor_rates = coupled_saturation_adjustment_rates(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, nʳ,
                                                       ℳ.qⁱ, qʷⁱ, nⁱ, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ,
                                                       Fᶠ, ρᶠ, T, P, ρ, constants,
-                                                      transport, q, μⁱ,
+                                                      transport, q,
                                                       state.μᶜˡ, state.λᶜˡ, state.nᶜˡ,
                                                       temperature_tendency, vapor_tendency)
     cond = vapor_rates.condensation
@@ -329,7 +326,7 @@ end
                        vapor_rates.coating_evaporation, zero(FT))
 
     melt_rates = ice_melting_rates(p3, ℳ.qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺ˡ,
-                                   Fᶠ, ρᶠ, ρ, constants, transport, μⁱ)
+                                   Fᶠ, ρᶠ, ρ, constants, transport)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
     complete_melt = ifelse(p3.process_rates.liquid_fraction_active,
@@ -359,7 +356,7 @@ end
     qⁱ_total = max(total_ice_mass(ℳ.qⁱ, qʷⁱ),
                    typeof(ρ)(p3.process_rates.floors.mass_scale))
     ρ_mean = ice_mean_density(p3, qⁱ_total, nⁱ_diagnostic,
-                              state.Fᶠ, state.Fˡ_for_shape, state.ρᶠ, state.μⁱ)
+                              state.Fᶠ, state.Fˡ, state.ρᶠ)
     return p3_phase2_rates(p3, ρ, ℳ, constants, state, phase1,
                             surface_temperature, nⁱ_diagnostic, ρ_mean)
 end
@@ -382,8 +379,7 @@ end
     ρᶠ = state.ρᶠ
     qᶠ = state.qᶠ
     bᶠ = state.bᶠ
-    μⁱ = state.μⁱ
-    Fˡ_for_shape = state.Fˡ_for_shape
+    Fˡ = state.Fˡ
     Nᶜˡ = state.Nᶜˡ
     μᶜˡ = state.μᶜˡ
     λᶜˡ = state.λᶜˡ
@@ -399,7 +395,7 @@ end
     # =========================================================================
     # Aggregation
     # =========================================================================
-    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ)
+    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ)
 
     # Global ice number limiter, expressed as a tendency on the *raw* prognostic
     # ℳ.nⁱ rather than on the locally pre-capped `state.nⁱ`, which is already
@@ -410,10 +406,11 @@ end
     # =========================================================================
     # Riming
     # =========================================================================
-    cloud_rim = cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ)
+    cloud_rim = cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, qʷⁱ)
     cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_rim)
-    rain_rim = rain_riming_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ)
-    rain_rim_n = rain_riming_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ)
+    # Riming is the below-freezing branch; mass and number share one Table 2 read.
+    rain_rim, rain_rim_n = rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ,
+                                                 T <= T₀, qʷⁱ)
 
     # Rime density
     # The rime density formula is indexed with the locally diagnosed cloud DSD, not
@@ -422,7 +419,7 @@ end
     # Use total ice mass for terminal velocity to match the table-axis convention.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
     vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ_total, nⁱ, Fᶠ, ρᶠ, ρ;
-                                             Fˡ=Fˡ_for_shape, μⁱ=μⁱ)
+                                             Fˡ = Fˡ)
     ρᶠ_new = rime_density(p3, qᶜˡ, cloud_rim, T, vᵢ, ρ, constants, transport, μᶜˡ, λᶜˡ)
 
     # =========================================================================
@@ -431,7 +428,7 @@ end
     has_hydrometeors = (clamp_positive(qᶜˡ) + clamp_positive(qʳ)) >=
                        parameters.wet_growth_hydrometeor_threshold
     qwgrth_raw = wet_growth_capacity(p3, qⁱ, qʷⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ,
-                                     constants, transport, μⁱ)
+                                     constants, transport)
     qwgrth = ifelse(has_hydrometeors, qwgrth_raw, zero(FT))
 
     total_collection = cloud_rim + rain_rim
@@ -476,7 +473,6 @@ end
     # Shedding and refreezing
     # =========================================================================
     qⁱ_total = max(total_ice_mass(qⁱ, qʷⁱ), FT(parameters.floors.mass_scale))
-    Fˡ = liquid_fraction_on_ice(qⁱ, qʷⁱ)
     m_mean = mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
     # The mean ice diameter is the volume-equivalent diameter diagnosed from the
     # tabulated bulk mean density, not a single-particle inversion of the
@@ -484,10 +480,10 @@ end
     diagnostic_mean_mass = qⁱ_total / nⁱ_diagnostic
     D_mean = cbrt(6 * diagnostic_mean_mass / (FT(π) * ρ_mean))
 
-    shed = shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean, μⁱ)
+    shed = shedding_rate(p3, qʷⁱ, qⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ, m_mean)
     shed_n = shedding_number_rate(p3, shed)
     refrz = refreezing_rate(p3, qʷⁱ, qⁱ, nⁱ, T, P, qᵛ, Fᶠ, ρᶠ, ρ,
-                            constants, transport, μⁱ)
+                            constants, transport)
     shed = ifelse(parameters.liquid_fraction_active, shed, zero(FT))
     shed_n = ifelse(parameters.liquid_fraction_active, shed_n, zero(FT))
     refrz = ifelse(parameters.liquid_fraction_active, refrz, zero(FT))
@@ -538,13 +534,11 @@ end
 
     # Above-freezing collection
     cloud_warm_q, _ = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T,
-                                                  Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ)
+                                                  Fᶠ, ρᶠ, ρ, qʷⁱ)
     cloud_warm_n = cloud_riming_number_rate(qᶜˡ, Nᶜˡ, ρ, cloud_warm_q)
-    rain_warm_q_full = rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T,
-                                                  Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ)
     # Number sink from above-freezing rain collection fires in both branches.
-    rain_warm_n = rain_warm_collection_number_rate(p3, qʳ, nʳ, qⁱ, nⁱ, T,
-                                                    Fᶠ, ρᶠ, ρ, μⁱ, qʷⁱ)
+    rain_warm_q_full, rain_warm_n = rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ,
+                                                          Fᶠ, ρᶠ, ρ, T > T₀, qʷⁱ)
     # Mass transfer of collected rain into qʷⁱ only happens in the liquid-fraction
     # branch. In the non-liquid path, collection of rain above freezing does not
     # impact total rain mass, so zero out rain_warm_q in that case.
@@ -617,6 +611,8 @@ end
     qʷⁱ_budget = ifelse(parameters.liquid_fraction_active, qʷⁱ,
                              clamp_positive(qʷⁱ_prognostic))
 
+    # The globally capped raw number is the baseline the ice-number correction
+    # below relaxes towards; the bounded moments come from `p3_ice_moment_bounds`.
     nⁱ_global = min(clamp_positive(nⁱ_raw),
                     parameters.maximum_ice_number_density / ρ)
 
@@ -636,24 +632,17 @@ end
         properties.qᶠ, properties.bᶠ, properties.Fᶠ, properties.ρᶠ
     end
 
-    if isnothing(properties)
-        qⁱ_total_for_shape = max(clamp_positive(qⁱ) + clamp_positive(qʷⁱ),
-                                 FT(parameters.floors.mass_scale))
-        Fˡ_for_shape = clamp_positive(qʷⁱ) / qⁱ_total_for_shape
-        nⁱ_diagnostic = max(nⁱ_global, p3.minimum_number_mixing_ratio)
-        μⁱ = compute_ice_shape_parameter(p3, qⁱ_total_for_shape, nⁱ_diagnostic,
-                                         Fᶠ, Fˡ_for_shape, ρᶠ)
-        ρ_mean = ice_mean_density(p3, qⁱ_total_for_shape, nⁱ_diagnostic,
-                                  Fᶠ, Fˡ_for_shape, ρᶠ, μⁱ)
-        nⁱ = bounded_ice_number(p3, qⁱ_total_for_shape, nⁱ_diagnostic,
-                                Fᶠ, Fˡ_for_shape, ρᶠ, μⁱ)
+    # The two branches must agree: `properties` carries exactly what `p3_ice_properties`
+    # derives from the same two helpers, so the fallback goes through them too rather
+    # than restating the bounded-moment recipe.
+    Fˡ, qⁱ_total, nⁱ, nⁱ_diagnostic, ρ_mean = if isnothing(properties)
+        Fˡ_diagnosed = liquid_fraction_on_ice(qⁱ, qʷⁱ)
+        bounds = p3_ice_moment_bounds(p3, ρ, total_ice_mass(qⁱ, qʷⁱ), nⁱ_raw,
+                                      Fᶠ, Fˡ_diagnosed, ρᶠ)
+        Fˡ_diagnosed, bounds.qⁱ_total, bounds.nⁱ, bounds.nⁱ_diagnostic, bounds.ρ_mean
     else
-        qⁱ_total_for_shape = properties.qⁱ_total
-        Fˡ_for_shape = properties.Fˡ
-        nⁱ = properties.nⁱ
-        nⁱ_diagnostic = properties.nⁱ_diagnostic
-        ρ_mean = properties.ρ_mean
-        μⁱ = properties.μⁱ
+        properties.Fˡ, properties.qⁱ_total, properties.nⁱ,
+        properties.nⁱ_diagnostic, properties.ρ_mean
     end
 
     T = temperature(𝒰, constants)
@@ -686,7 +675,7 @@ end
     # (`liquid_psychrometric_correction` / `ice_psychrometric_correction`), which is a
     # scheme constant rather than a per-cell quantity, so no cᵖᵐ is carried here.
     state = P3DerivedState{FT, typeof(q)}(nⁱ, nʳ, qᶠ, bᶠ, Fᶠ, ρᶠ,
-                                          μⁱ, Fˡ_for_shape, Nᶜˡ, cloud.nᶜˡ,
+                                          Fˡ, Nᶜˡ, cloud.nᶜˡ,
                                           cloud.μᶜˡ, cloud.λᶜˡ,
                                           T, P, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, q,
                                           transport.Dᵛ, transport.Kᵃ, transport.ν)

@@ -79,31 +79,29 @@ end
         temperature_warm = 278.0
         rime_fraction = 0.0
         rime_density = 400.0
-        shape_parameter = 0.0
         active_ice_mass = 1e-8
 
         @test PPP.ice_aggregation_rate(p3, qtrace, 0.5, temperature_cold,
-                                       rime_fraction, rime_density, ρ, shape_parameter) == 0
+                                       rime_fraction, rime_density, ρ) == 0
         @test PPP.ice_aggregation_rate(p3, qsmall, 0.5, temperature_cold,
-                                       rime_fraction, rime_density, ρ, shape_parameter) > 0
+                                       rime_fraction, rime_density, ρ) > 0
 
         @test PPP.cloud_riming_rate(p3, qsmall, active_ice_mass, 0.5, temperature_cold,
-                                    rime_fraction, rime_density, ρ, shape_parameter) > 0
+                                    rime_fraction, rime_density, ρ) > 0
         @test PPP.cloud_riming_rate(p3, qtrace, active_ice_mass, 0.5, temperature_cold,
-                                    rime_fraction, rime_density, ρ, shape_parameter) == 0
+                                    rime_fraction, rime_density, ρ) == 0
         @test PPP.cloud_warm_collection_rate(p3, qsmall, active_ice_mass, 0.5, temperature_warm,
-                                             rime_fraction, rime_density, ρ,
-                                             shape_parameter)[1] > 0
+                                             rime_fraction, rime_density, ρ)[1] > 0
 
         @test PPP.rain_riming_rate(p3, qsmall, 0.5, qsmall, 0.5, temperature_cold,
-                                   rime_fraction, rime_density, ρ, shape_parameter) > 0
+                                   rime_fraction, rime_density, ρ) > 0
         @test PPP.rain_riming_number_rate(p3, qsmall, 0.5, qsmall, 0.5,
                                           temperature_cold, rime_fraction, rime_density,
-                                          ρ, shape_parameter) > 0
+                                          ρ) > 0
         @test PPP.rain_warm_collection_rate(p3, qsmall, 0.5, qsmall, 0.5,
                                             temperature_warm, rime_fraction, rime_density,
-                                            ρ, shape_parameter) > 0
+                                            ρ) > 0
         @test PPP.rain_riming_rate(p3, qtrace, 0.5, qsmall, 0.5, temperature_cold,
-                                   rime_fraction, rime_density, ρ, shape_parameter) == 0
+                                   rime_fraction, rime_density, ρ) == 0
     end
 end

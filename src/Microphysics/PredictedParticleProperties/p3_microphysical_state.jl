@@ -462,12 +462,11 @@ end
     return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, sᵛ⁺ˡ, nᵃ, w)
 end
 
-# Shared diagnosis of the bounded ice moments and the PSD parameters they imply.
+# Shared diagnosis of bounded ice moments and mean density.
 struct P3IceMomentBounds{FT}
     qⁱ_total :: FT
     nⁱ_diagnostic :: FT
     nⁱ :: FT
-    μⁱ :: FT
     ρ_mean :: FT
 end
 
@@ -479,12 +478,10 @@ end
     nⁱ_global = min(clamp_positive(nⁱ_raw),
                     p3.process_rates.maximum_ice_number_density / ρ)
     nⁱ_diagnostic = max(nⁱ_global, p3.minimum_number_mixing_ratio)
-    μⁱ = compute_ice_shape_parameter(p3, qⁱ_total, nⁱ_diagnostic, Fᶠ, Fˡ, ρᶠ)
-    ρ_mean = ice_mean_density(p3, qⁱ_total, nⁱ_diagnostic, Fᶠ, Fˡ, ρᶠ, μⁱ)
-    nⁱ_bounded = bounded_ice_number(p3, qⁱ_total, nⁱ_diagnostic,
-                           Fᶠ, Fˡ, ρᶠ, μⁱ)
+    ρ_mean = ice_mean_density(p3, qⁱ_total, nⁱ_diagnostic, Fᶠ, Fˡ, ρᶠ)
+    nⁱ_bounded = bounded_ice_number(p3, qⁱ_total, nⁱ_diagnostic, Fᶠ, Fˡ, ρᶠ)
     nⁱ = ifelse(has_ice_mass, nⁱ_bounded, FT(0))
-    return P3IceMomentBounds{FT}(qⁱ_total, nⁱ_diagnostic, nⁱ, μⁱ, ρ_mean)
+    return P3IceMomentBounds{FT}(qⁱ_total, nⁱ_diagnostic, nⁱ, ρ_mean)
 end
 
 # Write the consistent rime state back to the prognostic densities. `grid_microphysical_state`
@@ -589,15 +586,13 @@ struct P3IceProps{FT}
     Fˡ :: FT
     ρᶠ :: FT
     qⁱ_total :: FT
-    # impose_max_Ni cap mirrored from compute_p3_process_rates so the PSD μⁱ
-    # uses the same nⁱ that the rate = N × m_table × env decomposition inside the
-    # process rates was built with.
+    # impose_max_Ni cap mirrored from compute_p3_process_rates so the tabulated
+    # rate decomposition uses the same nⁱ throughout the process path.
     nⁱ :: FT
     # Number and mean density diagnosed before the lambda limiter; these are the
     # values the volume-equivalent diameter is built from.
     nⁱ_diagnostic :: FT
     ρ_mean :: FT
-    μⁱ :: FT
     μᶜˡ :: FT
     λᶜˡ :: FT
     Nᶜˡ :: FT
@@ -647,10 +642,10 @@ end
     # mode is active, so a stale restart coating cannot affect the
     # non-liquid-fraction fast branch.
     qⁱ_total = properties.qⁱ_total
-    # Fused call: shares m̄, ρ_correction, log(m̄), and the 5D interpolation indices
+    # Fused call: shares m̄, ρ_correction, log(m̄), and the 4D interpolation indices
     # across mass- and number-weighted fall speeds.
     vᵢ = ice_terminal_velocities(p3, qⁱ_total, properties.nⁱ, Fᶠ, ρᶠ, ρ;
-                                 Fˡ=properties.Fˡ, μⁱ=properties.μⁱ)
+                                 Fˡ = properties.Fˡ)
     wⁱ, wⁱₙ = vᵢ.mass_weighted, vᵢ.number_weighted
 
     FT = typeof(ρ)
@@ -882,7 +877,7 @@ end
     λʳ = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     return P3IceProps{FT}(rime_state.qᶠ, rime_state.bᶠ, rime_state.Fᶠ, Fˡ,
                           rime_state.ρᶠ, bounds.qⁱ_total, bounds.nⁱ,
-                          bounds.nⁱ_diagnostic, bounds.ρ_mean, bounds.μⁱ,
+                          bounds.nⁱ_diagnostic, bounds.ρ_mean,
                           cloud.μᶜˡ, cloud.λᶜˡ, cloud.Nᶜˡ,
                           transport.ν, λʳ)
 end

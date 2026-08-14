@@ -120,7 +120,8 @@ function expected_reference_rain_vapor_relaxation(p3, qʳ, nʳ, ρ, transport, F
     return ifelse(qʳ_eff >= p3.minimum_mass_mixing_ratio, rain_relaxation, zero(FT))
 end
 
-function expected_reference_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ, μ)
+function expected_reference_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷⁱ,
+                                                        nⁱ, T, Fᶠ, ρᶠ, ρ)
     FT = typeof(qʳ)
     parameters = p3.process_rates
     qʳ_eff = max(0, qʳ)
@@ -137,8 +138,8 @@ function expected_reference_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷ�
     nʳ_bounded = PPP.rain_number_from_slope(qʳ_eff, λʳ, parameters)
     Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
-    number_kernel = PPP.rain_riming_number_kernel(PPP.rain_ice_collection_table(p3),
-                                                  m_mean, λʳ, Fᶠ, Fˡ, ρᶠ, parameters, p3, μ)
+    _, number_kernel = PPP.ice_rain_collection_lookup(PPP.rain_ice_collection_table(p3),
+                                                      m_mean, λʳ, Fᶠ, Fˡ, ρᶠ)
     ρ₀ = p3.ice.fall_speed.reference_air_density
     density_correction = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
     Nʳ₀ = nʳ_bounded * λʳ
@@ -148,7 +149,7 @@ function expected_reference_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷ�
 end
 
 function expected_reference_ice_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ,
-                                                 T, P, ρ, constants, transport, q, μ)
+                                                 T, P, ρ, constants, transport, q)
     FT = typeof(qⁱ)
     Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
@@ -157,7 +158,7 @@ function expected_reference_ice_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, �
     C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
                                       p3.ice.deposition.ventilation_enhanced,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
-                                      transport.ν, transport.Dᵛ, ρ_correction, p3, μ)
+                                      transport.ν, transport.Dᵛ, ρ_correction, p3)
     ice_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
@@ -166,7 +167,7 @@ function expected_reference_ice_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, �
 end
 
 function expected_reference_coating_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ,
-                                                     T, P, ρ, constants, transport, q, μ)
+                                                     T, P, ρ, constants, transport, q)
     FT = typeof(qⁱ)
     Fˡ = PPP.liquid_fraction_on_ice(qⁱ, qʷⁱ)
     m_mean = PPP.mean_total_ice_mass(qⁱ, qʷⁱ, nⁱ)
@@ -175,7 +176,7 @@ function expected_reference_coating_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, F�
     C_fv = PPP.deposition_ventilation(p3.ice.deposition.ventilation,
                                       p3.ice.deposition.ventilation_enhanced,
                                       m_mean, Fᶠ, Fˡ, ρᶠ, p3.process_rates,
-                                      transport.ν, transport.Dᵛ, ρ_correction, p3, μ)
+                                      transport.ν, transport.Dᵛ, ρ_correction, p3)
     coating_relaxation = FT(2π) * ρ * transport.Dᵛ * max(max(0, nⁱ), FT(1e-16)) * C_fv
     qⁱ_total = PPP.total_ice_mass(qⁱ, qʷⁱ)
     active = (qⁱ_total >= p3.minimum_mass_mixing_ratio) &
@@ -184,8 +185,8 @@ function expected_reference_coating_vapor_relaxation(p3, qⁱ, qʷⁱ, nⁱ, F�
 end
 
 function expected_reduced_reference_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
-                                              qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                              constants, transport, q, μ;
+                                               qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                               constants, transport, q;
                                               temperature_tendency = zero(T),
                                               vapor_tendency = zero(qᵛ))
     FT = typeof(qᶜˡ)
@@ -206,9 +207,9 @@ function expected_reduced_reference_vapor_rates(p3, qᶜˡ, nᶜˡ, qʳ, nʳ, q�
     rain_relaxation = expected_reference_rain_vapor_relaxation(p3, qʳ, nʳ, ρ,
                                                                transport, FT)
     ice_relaxation = expected_reference_ice_vapor_relaxation(
-        p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
+        p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q)
     coating_relaxation = expected_reference_coating_vapor_relaxation(
-        p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
+        p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q)
 
     ice_liquid_coupling = (1 + ℒⁱ * dqᵛ⁺ˡ_dT / cᵖᵈ) / ice_psychrometric_correction
     total_relaxation = max(cloud_relaxation + rain_relaxation +
@@ -414,19 +415,20 @@ end
 
         rime_state = PPP.consistent_rime_state(p3, qⁱ, FT(0), FT(0), FT(0))
         Fˡ = PPP.liquid_fraction_on_ice(qⁱ, FT(0))
-        μ_for_limiter = PPP.compute_ice_shape_parameter(p3, qⁱ, nⁱ,
-                                                        rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
         log_m = log10(qⁱ / nⁱ)
         limiter = PPP.ice_integrals_table(p3).lambda_limiter
         lower_nⁱ = limiter.large_q(log_m, rime_state.Fᶠ, Fˡ,
-                                   rime_state.ρᶠ, μ_for_limiter) * qⁱ
+                                   rime_state.ρᶠ) * qⁱ
         upper_nⁱ = limiter.small_q(log_m, rime_state.Fᶠ, Fˡ,
-                                   rime_state.ρᶠ, μ_for_limiter) * qⁱ
+                                   rime_state.ρᶠ) * qⁱ
         expected_nⁱ = clamp(nⁱ, lower_nⁱ, upper_nⁱ)
         properties = PPP.p3_ice_properties(p3, ρ, ℳ, 𝒰, constants)
+        shape_parameter = PPP.compute_ice_shape_parameter(
+            p3, qⁱ, nⁱ, rime_state.Fᶠ, Fˡ, rime_state.ρᶠ)
 
         @test expected_nⁱ > nⁱ
         @test properties.nⁱ ≈ expected_nⁱ
+        @test isfinite(shape_parameter)
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties)
         τ = p3.process_rates.sink_limiting_timescale
@@ -902,8 +904,6 @@ end
         nⁱ = FT(2e4)
         Fᶠ = FT(0)
         ρᶠ = FT(400)
-        μ = FT(0)
-
         qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
         qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
         qᵛ = qᵛ⁺ˡ + FT(1e-4)
@@ -917,9 +917,9 @@ end
         # Fˡ = 0 here, so the dry-ice gate inside `coupled_saturation_adjustment_rates`
         # is active, so the raw relaxation coefficient is the dry-ice one.
         ice_relaxation = PPP.ice_vapor_relaxation_coefficient(
-            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
+            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q)
         expected_ice_relaxation = expected_reference_ice_vapor_relaxation(
-            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
+            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q)
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
         # predict_supersaturation defaults to false, so this M&G call sees
@@ -928,19 +928,19 @@ end
         rates = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-            constants, transport, q, μ,
+            constants, transport, q,
             cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
         expected_rates = expected_reduced_reference_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-            constants, transport, q, μ)
+            constants, transport, q)
 
         # Bergeron check: with ice present, cloud condensation is smaller than
         # with no ice, because ice steals vapor through the shared budget.
         rates_noice = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-            constants, transport, q, μ,
+            constants, transport, q,
             cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
 
         @test rain_relaxation ≈ expected_rain_relaxation
@@ -960,7 +960,7 @@ end
         rates_unforced = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-            constants, transport, q, μ,
+            constants, transport, q,
             cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
         @test rates_unforced.condensation === rates.condensation
         @test rates_unforced.deposition === rates.deposition
@@ -983,7 +983,7 @@ end
             rates_cooling = PPP.coupled_saturation_adjustment_rates(
                 p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
                 qᵛ_ad, qᵛ⁺ˡ_ad, qᵛ⁺ⁱ_ad, Fᶠ, ρᶠ, T_ad, P, ρ,
-                constants, transport_ad, q_ad, μ,
+                constants, transport_ad, q_ad,
                 cloud_ad.μᶜˡ, cloud_ad.λᶜˡ, cloud_ad.nᶜˡ,
                 temperature_tendency, FT(0))
             @test rates_cooling.condensation > 0
@@ -1004,7 +1004,7 @@ end
             cloud_s = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
             common = (p3, qᶜˡ, nᶜˡ, qʳ, nʳ, zero(FT), zero(FT), zero(FT),
                       qᵛ_s, qᵛ⁺ˡ_s, qᵛ⁺ⁱ_s, Fᶠ, ρᶠ, T_s, P, ρ,
-                      constants, transport_s, q_s, μ,
+                      constants, transport_s, q_s,
                       cloud_s.μᶜˡ, cloud_s.λᶜˡ, cloud_s.nᶜˡ)
             rates_up = PPP.coupled_saturation_adjustment_rates(common..., FT(-0.01), FT(0))
             rates_down = PPP.coupled_saturation_adjustment_rates(common..., FT(+0.01), FT(0))
@@ -1036,8 +1036,6 @@ end
         nⁱ = FT(2e4)
         Fᶠ = FT(0)
         ρᶠ = FT(400)
-        μ = FT(0)
-
         qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
         qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
         qᵛ = qᵛ⁺ˡ + FT(1e-4)
@@ -1047,20 +1045,20 @@ end
         # Fˡ ≈ 0.33 here, so the wet-ice gate is the active one and the raw
         # relaxation coefficient is the wet-ice one.
         coating_relaxation = PPP.ice_vapor_relaxation_coefficient(
-            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
+            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q)
         expected_coating_relaxation = expected_reference_coating_vapor_relaxation(
-            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q, μ)
+            p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, T, P, ρ, constants, transport, q)
 
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
         rates = PPP.coupled_saturation_adjustment_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-            constants, transport, q, μ,
+            constants, transport, q,
             cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, FT(0), FT(0))
         expected_rates = expected_reduced_reference_vapor_rates(
             p3, qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-            constants, transport, q, μ)
+            constants, transport, q)
 
         @test coating_relaxation > 0
         @test coating_relaxation ≈ expected_coating_relaxation
@@ -1253,24 +1251,22 @@ end
         Ff = FT(0.0)
         ρf = FT(400.0)
         ρ = FT(1.0)
-        μ = FT(0.0)
-
         # Above freezing: positive melting
         T_warm = FT(275.15)    # +2C
         rate_warm = ice_melting_rate(p3, qi, ni, FT(0), T_warm, P, qv, qv_sat, Ff, ρf, ρ,
-                                     constants, air_transport_properties(T_warm, P, constants), μ)
+                                     constants, air_transport_properties(T_warm, P, constants))
         @test rate_warm > 0
 
         # Below freezing: zero melting
         T_cold = FT(263.15)    # -10C
         rate_cold = ice_melting_rate(p3, qi, ni, FT(0), T_cold, P, qv, qv_sat, Ff, ρf, ρ,
-                                     constants, air_transport_properties(T_cold, P, constants), μ)
+                                     constants, air_transport_properties(T_cold, P, constants))
         @test rate_cold == 0
 
         # Exactly at freezing: zero (no ΔT to drive melting)
         T_freeze = FT(273.15)
         rate_freeze = ice_melting_rate(p3, qi, ni, FT(0), T_freeze, P, qv, qv_sat, Ff, ρf, ρ,
-                                       constants, air_transport_properties(T_freeze, P, constants), μ)
+                                       constants, air_transport_properties(T_freeze, P, constants))
         @test rate_freeze == 0
 
     end
@@ -1292,9 +1288,8 @@ end
 
         # No liquid on ice: all melting is partial (goes to coating)
         qwi_zero = FT(0)
-        μ = FT(0.0)
         rates_dry = ice_melting_rates(p3, qi, ni, qwi_zero, T, P, qv, qv_sat, Ff, ρf, ρ,
-                                      constants, air_transport_properties(T, P, constants), μ)
+                                      constants, air_transport_properties(T, P, constants))
         total = rates_dry.partial_melting + rates_dry.complete_melting
         @test total > 0
         @test rates_dry.partial_melting >= 0
@@ -1308,7 +1303,7 @@ end
         # Saturated liquid coating: more complete melting (or approximately equal)
         qwi_high = FT(0.5 * qi)   # 50% liquid fraction
         rates_wet = ice_melting_rates(p3, qi, ni, qwi_high, T, P, qv, qv_sat, Ff, ρf, ρ,
-                                      constants, air_transport_properties(T, P, constants), μ)
+                                      constants, air_transport_properties(T, P, constants))
         @test rates_wet.complete_melting >= 0
     end
 
@@ -1337,7 +1332,6 @@ end
         Ff = FT(0.2)
         ρf = FT(400.0)
         ρ = FT(1.0)
-        μ = FT(0.0)
         transport = air_transport_properties(T, P, constants)
 
         T₀ = p3.process_rates.freezing_temperature
@@ -1352,9 +1346,11 @@ end
         C_fv = PPP.deposition_ventilation(
             p3.ice.deposition.ventilation,
             p3.ice.deposition.ventilation_enhanced,
-            m_mean, Ff, ρf, p3.process_rates, transport.ν, transport.Dᵛ, ρ_correction, p3, μ)
+            m_mean, Ff, zero(FT), ρf, p3.process_rates, transport.ν, transport.Dᵛ,
+            ρ_correction, p3)
 
-        capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, P, qv, Ff, ρf, ρ, constants, transport, μ)
+        capacity = PPP.wet_growth_capacity(p3, qi, qwi, ni, T, P, qv, Ff, ρf,
+                                           ρ, constants, transport)
         expected = C_fv * transport.Kᵃ * (T₀ - T) * ni
 
         @test capacity ≈ expected rtol=1e-6
@@ -1379,8 +1375,6 @@ end
         bᶠ = qᶠ / FT(400)
         Fᶠ = FT(0.1)
         ρᶠ = FT(400)
-        μⁱ = FT(0)
-
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, FT(300e6), ρ)
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qⁱ)
         transport = air_transport_properties(T, P, constants)
@@ -1391,7 +1385,6 @@ end
             bᶠ,
             Fᶠ,
             ρᶠ,
-            μⁱ,
             FT(0),
             cloud.Nᶜˡ,
             cloud.nᶜˡ,
@@ -1452,8 +1445,6 @@ end
         bᶠ = qᶠ / FT(400)
         Fᶠ = FT(0.1)
         ρᶠ = FT(400)
-        μⁱ = FT(0)
-
         cloud = PPP.diagnose_cloud_dsd(p3, qᶜˡ, FT(300e6), ρ)
         q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ, qⁱ)
         transport = air_transport_properties(T, P, constants)
@@ -1464,7 +1455,6 @@ end
             bᶠ,
             Fᶠ,
             ρᶠ,
-            μⁱ,
             FT(0),
             cloud.Nᶜˡ,
             cloud.nᶜˡ,
@@ -1519,7 +1509,6 @@ end
         Ff = FT(0.2)
         ρf = FT(400.0)
         ρ = FT(1.0)
-        μ = FT(0.0)
         transport = air_transport_properties(T, P, constants)
 
         T₀ = p3.process_rates.freezing_temperature
@@ -1530,7 +1519,8 @@ end
         # M10: set qv = q_sat0 (mixing ratio convention) so latent term vanishes
         qv = ε * e_s0 / max(P - e_s0, FT(1))
 
-        refreezing = PPP.refreezing_rate(p3, qwi, qi, ni, T, P, qv, Ff, ρf, ρ, constants, transport, μ)
+        refreezing = PPP.refreezing_rate(p3, qwi, qi, ni, T, P, qv, Ff, ρf,
+                                         ρ, constants, transport)
 
         # Refreezing should remain active below freezing with liquid-coated ice.
         @test refreezing > 0
@@ -1548,28 +1538,27 @@ end
         # Near freezing (warm ice, sticky): aggregation active
         T_warm = FT(268.15)    # -5C
         ρ = FT(1.0)
-        μ = FT(0.0)
-        rate_warm = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ, μ)
+        rate_warm = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ)
         @test rate_warm > 0     # Positive magnitude (M7)
 
         # Very cold (T < 253.15 K): much less aggregation
         T_cold = FT(233.15)    # -40C
-        rate_cold = ice_aggregation_rate(p3, qi, ni, T_cold, Ff, ρf, ρ, μ)
+        rate_cold = ice_aggregation_rate(p3, qi, ni, T_cold, Ff, ρf, ρ)
         # Aggregation efficiency at very cold T is 0.001 vs ~0.15 at -5C
         @test rate_cold < rate_warm
 
         # Zero ice: zero aggregation
-        rate_noice = ice_aggregation_rate(p3, FT(0), FT(0), T_warm, Ff, ρf, ρ, μ)
+        rate_noice = ice_aggregation_rate(p3, FT(0), FT(0), T_warm, Ff, ρf, ρ)
         @test rate_noice == 0
 
         # Heavily rimed (Ff > 0.9): aggregation shuts off
-        rate_rimed = ice_aggregation_rate(p3, qi, ni, T_warm, FT(0.95), ρf, ρ, μ)
+        rate_rimed = ice_aggregation_rate(p3, qi, ni, T_warm, FT(0.95), ρf, ρ)
         @test rate_rimed == 0
 
         # Rate scales with ρ × rhofaci where rhofaci = (ρ₀/ρ)^0.54 (M11).
         # Combined scaling: rate ∝ ρ × (ρ₀/ρ)^0.54 = ρ₀^0.54 × ρ^0.46
         ρ_half = FT(0.5)
-        rate_half_ρ = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ_half, μ)
+        rate_half_ρ = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ_half)
         @test rate_half_ρ ≈ rate_warm * (ρ_half / ρ)^FT(0.46)
     end
 
@@ -1583,28 +1572,26 @@ end
         Ff = FT(0.0)
         ρf = FT(400.0)
         ρ = FT(1.0)
-        μ = FT(0.0)
-
         # Below freezing with cloud and ice: positive riming
         T_cold = FT(263.15)    # -10C
-        rate = cloud_riming_rate(p3, qc, qi, ni, T_cold, Ff, ρf, ρ, μ)
+        rate = cloud_riming_rate(p3, qc, qi, ni, T_cold, Ff, ρf, ρ)
         @test rate > 0
 
         # Above freezing: zero riming
         T_warm = FT(278.15)
-        rate_warm = cloud_riming_rate(p3, qc, qi, ni, T_warm, Ff, ρf, ρ, μ)
+        rate_warm = cloud_riming_rate(p3, qc, qi, ni, T_warm, Ff, ρf, ρ)
         @test rate_warm == 0
 
         # Zero cloud: zero riming
-        rate_nocloud = cloud_riming_rate(p3, FT(0), qi, ni, T_cold, Ff, ρf, ρ, μ)
+        rate_nocloud = cloud_riming_rate(p3, FT(0), qi, ni, T_cold, Ff, ρf, ρ)
         @test rate_nocloud == 0
 
         # Zero ice: zero riming
-        rate_noice = cloud_riming_rate(p3, qc, FT(0), FT(0), T_cold, Ff, ρf, ρ, μ)
+        rate_noice = cloud_riming_rate(p3, qc, FT(0), FT(0), T_cold, Ff, ρf, ρ)
         @test rate_noice == 0
 
         # More cloud water gives faster riming (rate is linear in qc)
-        rate_high = cloud_riming_rate(p3, FT(2e-3), qi, ni, T_cold, Ff, ρf, ρ, μ)
+        rate_high = cloud_riming_rate(p3, FT(2e-3), qi, ni, T_cold, Ff, ρf, ρ)
         @test rate_high > rate
     end
 
@@ -2051,8 +2038,6 @@ end
         qᶠ = FT(2e-5)
         qʷⁱ = FT(0)
         sᵛ⁺ˡ = FT(0)
-        μ = FT(0)
-
         qᵛ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
         q = MoistureMassFractions(qᵛ, qʳ + qʷⁱ, qⁱ)
         𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, pˢᵗ, P), T, constants)
@@ -2062,9 +2047,9 @@ end
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
         rime = consistent_rime_state(p3, qⁱ, qᶠ, qᶠ / FT(400), qʷⁱ)
         expected_number = expected_reference_warm_rain_collection_number(p3, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
-                                                                       T, rime.Fᶠ, rime.ρᶠ, ρ, μ)
+                                                                       T, rime.Fᶠ, rime.ρᶠ, ρ)
         expected_mass = PPP.rain_warm_collection_rate(p3, qʳ, nʳ, qⁱ, nⁱ,
-                                                      T, rime.Fᶠ, rime.ρᶠ, ρ, μ, qʷⁱ)
+                                                      T, rime.Fᶠ, rime.ρᶠ, ρ, qʷⁱ)
         expected_number_per_mass = expected_number / expected_mass
         actual_number_per_mass = rates.rain_warm_collection_number / rates.rain_warm_collection
         monodisperse_number_per_mass = nʳ / qʳ
@@ -2160,7 +2145,7 @@ end
         expected_process = expected_reduced_reference_vapor_rates(
             p3, qᶜˡᴳᴹ, nᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
             qᵛᴳᴹ, qᵛ⁺ˡᴳᴹ, qᵛ⁺ⁱᴳᴹ, FT(0), FT(400), Tᴳᴹ, P, ρ,
-            constants, transportᴳᴹ, qᴳᴹ, FT(0))
+            constants, transportᴳᴹ, qᴳᴹ)
 
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
 

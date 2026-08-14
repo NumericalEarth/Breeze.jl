@@ -62,9 +62,8 @@ bulk = p3.ice.bulk_properties
 m̄ = 10 .^ range(-13, -3, length=200)
 log_m̄ = log10.(m̄)
 
-# Liquid fraction and shape-parameter coordinates are singleton axes here.
+# Use dry ice for the plots below.
 Fˡ = 0.0
-μ = 0.0
 nothing # hide
 ```
 
@@ -83,7 +82,7 @@ for (Fᶠ, ρᶠ, label) in [(0.0, 400.0, "Unrimed (Fᶠ = 0)"),
                         (0.2, 400.0, "Light rime (Fᶠ = 0.2)"),
                         (0.5, 500.0, "Moderate rime (Fᶠ = 0.5)"),
                         (0.8, 700.0, "Heavy rime (Fᶠ = 0.8)")]
-    D̄ = [bulk.mean_diameter(lm, Fᶠ, Fˡ, ρᶠ, μ) for lm in log_m̄]
+    D̄ = [bulk.mean_diameter(lm, Fᶠ, Fˡ, ρᶠ) for lm in log_m̄]
     lines!(ax, m̄, D̄, linewidth=2, label=label)
 end
 
@@ -110,7 +109,7 @@ for (Fᶠ, ρᶠ, label) in [(0.0, 400.0, "Fᶠ = 0"),
                         (0.2, 400.0, "Fᶠ = 0.2"),
                         (0.5, 500.0, "Fᶠ = 0.5"),
                         (0.8, 700.0, "Fᶠ = 0.8")]
-    ρ̄ = [bulk.mean_density(lm, Fᶠ, Fˡ, ρᶠ, μ) for lm in log_m̄]
+    ρ̄ = [bulk.mean_density(lm, Fᶠ, Fˡ, ρᶠ) for lm in log_m̄]
     lines!(ax, m̄, ρ̄, linewidth=2, label=label)
 end
 
@@ -134,11 +133,11 @@ intercept follows from the number concentration,
 using SpecialFunctions: loggamma
 
 # Reconstruct N'(D) from the tabulated (λ, μ) and a prescribed N.
-function tabulated_psd(p3, q, N, Fᶠ, ρᶠ; Fˡ = 0.0, μ_axis = 0.0)
+function tabulated_psd(p3, q, N, Fᶠ, ρᶠ; Fˡ = 0.0)
     bulk = p3.ice.bulk_properties
     log_m̄ = log10(q / N)
-    λ = bulk.slope(log_m̄, Fᶠ, Fˡ, ρᶠ, μ_axis)
-    μ = bulk.shape(log_m̄, Fᶠ, Fˡ, ρᶠ, μ_axis)
+    λ = bulk.slope(log_m̄, Fᶠ, Fˡ, ρᶠ)
+    μ = bulk.shape(log_m̄, Fᶠ, Fˡ, ρᶠ)
     log_N₀ = log(N) + (μ + 1) * log(λ) - loggamma(μ + 1)
     return (; λ, μ, log_N₀)
 end
@@ -213,7 +212,7 @@ ax = Axis(fig[1, 1],
     title = "Tabulated Slope Parameter vs Mean Particle Mass")
 
 for (Fᶠ, ρᶠ, label) in [(0.0, 400.0, "Unrimed"), (0.5, 500.0, "Rimed (Fᶠ = 0.5)")]
-    λs = [bulk.slope(lm, Fᶠ, Fˡ, ρᶠ, μ) for lm in log_m̄]
+    λs = [bulk.slope(lm, Fᶠ, Fˡ, ρᶠ) for lm in log_m̄]
     lines!(ax, m̄, λs, linewidth=2, label=label)
 end
 
@@ -237,7 +236,7 @@ ax1 = Axis(fig[1, 1],
     title = "Mean Diameter vs Mean Mass")
 
 for (Fᶠ, ρᶠ, label) in [(0.0, 400.0, "Fᶠ=0"), (0.5, 500.0, "Fᶠ=0.5")]
-    D̄ = [bulk.mean_diameter(lm, Fᶠ, Fˡ, ρᶠ, μ) * 1e3 for lm in log_m̄]
+    D̄ = [bulk.mean_diameter(lm, Fᶠ, Fˡ, ρᶠ) * 1e3 for lm in log_m̄]
     lines!(ax1, m̄, D̄, label=label)
 end
 axislegend(ax1, position=:lt)
@@ -265,8 +264,8 @@ ax4 = Axis(fig[2, 1:2],
 
 for (Fᶠ, ρᶠ, label, color) in [(0.0, 400.0, "Fᶠ = 0", :blue),
                                (0.5, 500.0, "Fᶠ = 0.5", :orange)]
-    λs = [bulk.slope(lm, Fᶠ, Fˡ, ρᶠ, μ) for lm in log_m̄]
-    μs = [bulk.shape(lm, Fᶠ, Fˡ, ρᶠ, μ) for lm in log_m̄]
+    λs = [bulk.slope(lm, Fᶠ, Fˡ, ρᶠ) for lm in log_m̄]
+    μs = [bulk.shape(lm, Fᶠ, Fˡ, ρᶠ) for lm in log_m̄]
     lines!(ax4, λs, μs, linewidth=2, color=color, label=label)
 end
 axislegend(ax4, position=:rt)

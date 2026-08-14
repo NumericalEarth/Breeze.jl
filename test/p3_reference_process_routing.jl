@@ -68,7 +68,6 @@ function routing_derived_state(p3, air_density, microphysical_state,
         properties.bᶠ,
         properties.Fᶠ,
         properties.ρᶠ,
-        properties.μⁱ,
         properties.Fˡ,
         properties.Nᶜˡ,
         cloud.nᶜˡ,
@@ -427,7 +426,6 @@ end
 
         @test coated_wet_growth_props.qⁱ_total == wet_growth_props.qⁱ_total
         @test coated_wet_growth_props.Fˡ == wet_growth_props.Fˡ == 0
-    @test coated_wet_growth_props.μⁱ == wet_growth_props.μⁱ
         @test coated_wet_growth_fall_speeds.wⁱ == wet_growth_fall_speeds.wⁱ
         @test coated_wet_growth_fall_speeds.wⁱₙ == wet_growth_fall_speeds.wⁱₙ
         @test coated_wet_growth_rates.cloud_riming ≈ wet_growth_rates.cloud_riming
