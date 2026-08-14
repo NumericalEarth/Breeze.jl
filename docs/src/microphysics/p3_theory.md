@@ -2591,7 +2591,7 @@ activation cap compares them against. The prognostic reservoir ``ρn^a`` therefo
 ``ρ``-weighted count in m⁻³.
 
 Nothing needs to be initialized by hand. `AtmosphereModel` construction and every `set!` write
-``ρn^a`` from [`initial_aerosol_number_density`](@ref), which for P3 is the air density times
+``ρn^a`` from [`initial_aerosol_number_density`](@ref Breeze.AtmosphereModels.initial_aerosol_number_density), which for P3 is the air density times
 `AerosolMode.number_mixing_ratio` summed over all modes, so a multi-mode population is seeded from
 its own parameters. Because that weighting needs a density, the value is written against whichever
 density is established at the time: the reference density for anelastic dynamics, a prescribed
