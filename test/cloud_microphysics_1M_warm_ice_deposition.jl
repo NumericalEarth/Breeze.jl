@@ -19,18 +19,6 @@ using Breeze.Thermodynamics:
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
-# Rebuild a Microphysics1MParams with selected `process_params` entries overridden
-# (CloudMicrophysics 0.38 stores process parameters separately from the option markers).
-override_process_params(parameters; overrides...) =
-    CMP.Microphysics1MParams(;
-        parameters.processes,
-        process_params = merge(parameters.process_params, (; overrides...)),
-        parameters.cloud,
-        parameters.precip,
-        parameters.air_properties,
-        parameters.terminal_velocity,
-    )
-
 @testset "MPNE1M suppresses warm cloud-ice growth [$(FT)]" for FT in test_float_types()
     constants = ThermodynamicConstants(FT)
     microphysics = OneMomentCloudMicrophysics(FT;
@@ -121,9 +109,8 @@ end
     disabled_parameters = CMP.Microphysics1MParams(FT; disabled_options...)
 
     # Supersaturation-dependent ice autoconversion transfers cloud ice to snow.
-    options = merge(disabled_options, (; snow_autoconversion = CMP.WithSupersaturation()))
-    parameters = override_process_params(CMP.Microphysics1MParams(FT; options...);
-                                         snow_autoconversion = (; r_ice_snow = FT(25e-6)))
+    options = merge(disabled_options, (; snow_autoconversion = CMP.WithSupersaturation(FT(25e-6))))
+    parameters = CMP.Microphysics1MParams(FT; options...)
     tendencies, = evaluate_tendencies(parameters, FT(250), FT(0.01), FT(0), FT(1e-4), FT(0), FT(0))
     @test tendencies.ρqᶜⁱ < 0
     @test tendencies.ρqˢ > 0
@@ -183,9 +170,9 @@ end
 
     # TemperatureDependent formation uses the Frostenberg deposition timescale.
     frostenberg = CMP.Frostenberg2023(; σ = FT(1), a = FT(1), b = FT(1), T_freeze = FT(273.15))
-    options = merge(disabled_options, (; cloud_ice_formation = CMP.TemperatureDependent()))
-    parameters = override_process_params(CMP.Microphysics1MParams(FT; options...);
-                                         cloud_ice_formation = (; τ_relax = FT(10), frostenberg))
+    option = CMP.TemperatureDependent(FT(10), frostenberg)
+    options = merge(disabled_options, (; cloud_ice_formation = option))
+    parameters = CMP.Microphysics1MParams(FT; options...)
     tendencies, microphysics = evaluate_tendencies(
         parameters,
         FT(250),

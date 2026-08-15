@@ -106,24 +106,11 @@ import CloudMicrophysics.Parameters as CMP
 one_moment_cloud_microphysics_categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories
 precipitation_boundary_condition = ImpenetrableBoundaryCondition()
 
-## Process parameters, like the condensation timescale τ_relax, live in the
-## `process_params` field of `Microphysics1MParams`; to customize one we rebuild
-## the parameter container with the entry we want overridden.
-function one_moment_parameters(τ_relax)
-    parameters = CMP.Microphysics1MParams(Float64)
-    process_params = merge(parameters.process_params, (; cloud_liquid_formation = (; τ_relax)))
-    return CMP.Microphysics1MParams(;
-        parameters.processes,
-        process_params,
-        parameters.cloud,
-        parameters.precip,
-        parameters.air_properties,
-        parameters.terminal_velocity,
-    )
-end
-
 ## First, a slow scheme
-parameters_slow = one_moment_parameters(20.0)
+parameters_slow = CMP.Microphysics1MParams(
+    Float64;
+    cloud_liquid_formation = CMP.CloudLiquidFormation(20.0),
+)
 categories_slow = one_moment_cloud_microphysics_categories(Float64; parameters = parameters_slow)
 microphysics_1m_slow = OneMomentCloudMicrophysics(;
     categories = categories_slow,
@@ -131,7 +118,10 @@ microphysics_1m_slow = OneMomentCloudMicrophysics(;
 )
 
 # Then a fast scheme
-parameters_fast = one_moment_parameters(2.0)
+parameters_fast = CMP.Microphysics1MParams(
+    Float64;
+    cloud_liquid_formation = CMP.CloudLiquidFormation(2.0),
+)
 categories_fast = one_moment_cloud_microphysics_categories(Float64; parameters = parameters_fast)
 microphysics_1m_fast = OneMomentCloudMicrophysics(;
     categories = categories_fast,
