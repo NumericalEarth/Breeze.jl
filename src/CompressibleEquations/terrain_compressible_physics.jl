@@ -485,12 +485,15 @@ end
 
 function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubstepper,
                                                    model::TerrainCompressibleModel,
-                                                   β_stage = nothing)
+                                                   β_stage = nothing,
+                                                   Δτ = one(eltype(model.grid)))
     grid = model.grid
     arch = architecture(grid)
-    g = convert(eltype(grid), model.thermodynamic_constants.gravitational_acceleration)
+    FT = eltype(grid)
+    g = convert(FT, model.thermodynamic_constants.gravitational_acceleration)
     Gⁿ = model.timestepper.Gⁿ
     dynamics = model.dynamics
+    direction = convert(FT, sign(Δτ))
     vertical_pressure_tendency_factor =
         β_stage == 1 ? substepper.final_stage_vertical_pressure_tendency_factor :
         substepper.vertical_pressure_tendency_factor
@@ -502,16 +505,18 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
             dynamics.total_density,
             reference_pressure_field(dynamics.reference_state),
             reference_density_field(dynamics.reference_state),
-            grid, dynamics, g, vertical_pressure_tendency_factor)
+            model.momentum.ρw,
+            grid, dynamics, g, vertical_pressure_tendency_factor, substepper.sponge, direction)
 
     return nothing
 end
 
 @kernel function _assemble_terrain_slow_vertical_momentum_tendency!(Gˢρw̃,
                                                                     Gⁿρu, Gⁿρv, Gⁿρw,
-                                                                    pᴸ, ρᴸ, pᵣ, ρᵣ,
+                                                                    pᴸ, ρᴸ, pᵣ, ρᵣ, ρwᴸ,
                                                                     grid, dynamics, g,
-                                                                    vertical_pressure_tendency_factor)
+                                                                    vertical_pressure_tendency_factor,
+                                                                    sponge, direction)
     i, j, k = @index(Global, NTuple)
 
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
@@ -523,12 +528,22 @@ end
     ρ′ᶜᶜᶠ = terrain_vertical_buoyancy_density(i, j, k, grid, ρᴸ, ρᵣ)
     horizontal_slow_tendency = slope_x * Gⁿρu_ccf + slope_y * Gⁿρv_ccf
     horizontal_pressure_gradient = terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics)
+    # Rayleigh damping of the stage-entry momentum; the acoustic perturbation half is in the column
+    # tridiag. The damped variable is the **Cartesian** ρw, even though this tendency drives ρw̃:
+    # ∂t(ρw̃) = ∂t(ρw) − slopeₓ ∂t(ρu) − slopeᵧ ∂t(ρv), so asking for ∂t(ρw) ⊃ −γ ρw puts −γ ρwᴸ
+    # here. Damping ρw̃ᴸ instead would be wrong by the mean flow: a horizontally uniform wind over
+    # sloping coordinate surfaces has ρw = 0 but ρw̃ = −slope·ρu ≠ 0 (0.4 m s⁻¹ of w̃ at 10 km for
+    # the Schär case), so it would drive the mean flow to follow the coordinate surfaces and radiate
+    # a spurious terrain-locked stationary wave out of the sponge layer. The perturbation half is
+    # unaffected: (ρw̃)′ carries no mean-flow offset, since the offset lives entirely in ρw̃ᴸ.
+    sponge_tendency = sponge_slow_tendency(i, j, k, grid, sponge, ρwᴸ, direction)
 
     @inbounds Gˢρw̃[i, j, k] = (Gⁿρw[i, j, k] -
                                 horizontal_slow_tendency -
                                 vertical_pressure_tendency_factor * ∂z_p′ +
                                 horizontal_pressure_gradient -
-                                g * ρ′ᶜᶜᶠ) * (k > 1)
+                                g * ρ′ᶜᶜᶠ +
+                                sponge_tendency) * (k > 1)
 end
 
 @inline terrain_vertical_pressure_gradient(i, j, k, grid, p, ::Nothing) =
