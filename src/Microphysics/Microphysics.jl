@@ -27,12 +27,23 @@ export
 
 using ..AtmosphereModels: AtmosphereModels, moisture_fractions, grid_moisture_fractions,
     materialize_microphysical_fields, update_microphysical_fields!,
-    NothingMicrophysicalState, WarmRainState, specific_prognostic_moisture
+    NothingMicrophysicalState, WarmRainState, humidity_density,
+    specific_prognostic_moisture, total_density
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")
 include("microphysics_diagnostics.jl")
 include("dcmip2016_kessler.jl")
 include("instantaneous_precipitation.jl")
+
+#####
+##### Predicted Particle Properties (P3) submodule
+#####
+
+include("PredictedParticleProperties/PredictedParticleProperties.jl")
+using .PredictedParticleProperties
+
+# Re-export key P3 types
+export PredictedParticlePropertiesMicrophysics, P3Microphysics
 
 end # module Microphysics

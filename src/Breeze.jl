@@ -107,6 +107,7 @@ export
     PlanarIceSurface,
 
     # Microphysics
+    prognostic_field_names,
     SaturationAdjustment,
     InstantaneousPrecipitation,
     MixedPhaseEquilibrium,
@@ -122,9 +123,12 @@ export
     number_concentration_field,
     BulkMicrophysics,
     initial_aerosol_number,
+    initial_aerosol_number_density,
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
     ConstantRateCondensateFormation,
+    P3Microphysics,
+    PredictedParticlePropertiesMicrophysics,
 
     # BoundaryConditions
     BulkDrag,

@@ -196,7 +196,6 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
         ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρe = ρᵈe)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
@@ -205,6 +204,7 @@ end
 
     # Get moisture fractions (vapor only for unsaturated air)
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+    pᵣ = pressure_from_density_temperature(i, j, k, dynamics, ρ, T, q, constants)
 
     # Convert temperature to static energy
     z = znode(i, j, k, grid, c, c, c)

@@ -5,9 +5,7 @@ using Oceananigans.Fields: Field, Center
 using Oceananigans.Utils: Utils
 
 using Breeze.Thermodynamics:
-    saturation_specific_humidity,
     vapor_gas_constant,
-    density,
     saturation_vapor_pressure,
     equilibrated_surface
 
@@ -29,12 +27,13 @@ const C = Center
 ##### Relative Humidity
 #####
 
-struct RelativeHumidityKernelFunction{μ, M, MF, T, R, TH}
+struct RelativeHumidityKernelFunction{μ, M, MF, T, R, D, TH}
     microphysics :: μ
     microphysical_fields :: M
     specific_prognostic_moisture :: MF
     temperature :: T
-    reference_state :: R
+    density :: R
+    dynamics :: D
     thermodynamic_constants :: TH
 end
 
@@ -45,7 +44,8 @@ Adapt.adapt_structure(to, k::RelativeHumidityKernelFunction) =
                                    adapt(to, k.microphysical_fields),
                                    adapt(to, k.specific_prognostic_moisture),
                                    adapt(to, k.temperature),
-                                   adapt(to, k.reference_state),
+                                   adapt(to, k.density),
+                                   adapt(to, k.dynamics),
                                    adapt(to, k.thermodynamic_constants))
 
 const RelativeHumidityOp = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:RelativeHumidityKernelFunction}
@@ -118,28 +118,20 @@ We also provide a convenience constructor for the Field:
 ```
 """
 function RelativeHumidity(model)
-    microphysics = if model.microphysics isa SaturationAdjustment
-        model.microphysics
-    else
-        SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
-    end
-
-    func = RelativeHumidityKernelFunction(microphysics,
+    func = RelativeHumidityKernelFunction(model.microphysics,
                                           model.microphysical_fields,
                                           specific_prognostic_moisture(model),
                                           model.temperature,
-                                          model.dynamics.reference_state,
+                                          total_density(model.dynamics),
+                                          model.dynamics,
                                           model.thermodynamic_constants)
 
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
 end
 
-const AdjustmentRH = RelativeHumidityKernelFunction{<:SaturationAdjustment}
-
-function (d::AdjustmentRH)(i, j, k, grid)
+function (d::RelativeHumidityKernelFunction)(i, j, k, grid)
     @inbounds begin
-        pᵣ = d.reference_state.pressure[i, j, k]
-        ρᵣ = d.reference_state.density[i, j, k]
+        ρ = d.density[i, j, k]
         T = d.temperature[i, j, k]
         # qᵛᵉ: vapor (non-equilibrium) or equilibrium moisture (saturation adjustment)
         qᵛᵉ = d.specific_prognostic_moisture[i, j, k]
@@ -149,17 +141,18 @@ function (d::AdjustmentRH)(i, j, k, grid)
     equil = microphysics_phase_equilibrium(d.microphysics)
 
     # Compute moisture fractions (vapor, liquid, ice)
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛᵉ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρ, qᵛᵉ, d.microphysical_fields)
 
     # Vapor specific humidity
     qᵛ = q.vapor
 
-    # Compute actual density from equation of state
-    ρ = density(T, pᵣ, q, constants)
+    # Compressible dynamics uses its prognostic total density. Reference-density
+    # dynamics reconstructs the equation-of-state density from its pressure state.
+    ρʰ = humidity_density(i, j, k, d.dynamics, T, q, constants)
 
     # Vapor pressure from ideal gas law: pᵛ = ρᵛ Rᵛ T = ρ qᵛ Rᵛ T
     Rᵛ = vapor_gas_constant(constants)
-    pᵛ = ρ * qᵛ * Rᵛ * T
+    pᵛ = ρʰ * qᵛ * Rᵛ * T
 
     # Saturation vapor pressure
     surface = equilibrated_surface(equil, T)
@@ -223,14 +216,19 @@ physics at every call site.
 For `TwoMomentCloudMicrophysics`, returns the prognostic ``ρnˣ`` field directly
 (e.g., `:rain` → `ρnʳ`, `:cloud_liquid` → `ρnᶜˡ`).
 
+For `PredictedParticlePropertiesMicrophysics`, returns the prognostic ``ρnˣ`` field
+when present. In the default prescribed-cloud-number configuration,
+`:cloud_liquid` returns a lazy constant operation based on the configured droplet
+number.
+
 Returns `nothing` if the species is not carried by the model (e.g., `:hail` for
 a 1-mom scheme without hail). Errors for microphysics schemes that do not
 define a DSD-based number concentration (e.g., `SaturationAdjustment`).
 
-The return shape is therefore polymorphic — a lazy `KernelFunctionOperation` for
-1-mom and a stored `Field` for 2-mom — so the function is snake-cased rather
-than PascalCased. Use [`number_concentration_field`](@ref) when you want a
-uniformly Field-typed handle.
+The return shape is therefore polymorphic: a lazy `KernelFunctionOperation` for
+diagnosed or prescribed concentrations and a stored `Field` for prognostic
+concentrations. Use [`number_concentration_field`](@ref) when you want a uniformly
+Field-typed handle.
 """
 number_concentration(model, species::Symbol) =
     number_concentration(model, model.microphysics, Val(species))
@@ -240,16 +238,15 @@ number_concentration(model, microphysics, ::Val{species}) where {species} =
     error("number_concentration is not defined for microphysics scheme of type ",
           typeof(microphysics), " (species = :", species, "). ",
           "Supported schemes: OneMomentCloudMicrophysics (species ∈ (:rain, :snow)) ",
-          "and TwoMomentCloudMicrophysics.")
+          "TwoMomentCloudMicrophysics, and PredictedParticlePropertiesMicrophysics.")
 
 """
 $(TYPEDSIGNATURES)
 
-Field-typed handle for the [`number_concentration`](@ref) diagnostic. For 1-mom,
-allocates a `Field` shell around the lazy `KernelFunctionOperation` (use
-`compute!` to populate it). For 2-mom, returns the prognostic ``ρnˣ`` field
-directly. Returns `nothing` when the requested species is not carried by the
-model.
+Field-typed handle for the [`number_concentration`](@ref) diagnostic. Allocates a
+`Field` shell around lazy `KernelFunctionOperation`s (use `compute!` to populate
+it) and returns prognostic ``ρnˣ`` fields directly. Returns `nothing` when the
+requested species is not carried by the model.
 """
 function number_concentration_field(model, species::Symbol)
     result = number_concentration(model, species)

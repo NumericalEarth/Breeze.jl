@@ -130,6 +130,20 @@ Return the total pressure (mean + anomaly) in Pa.
 """
 function total_pressure end
 
+"""
+$(TYPEDSIGNATURES)
+
+Return pressure consistent with a prescribed temperature during thermodynamic initialization.
+
+The default retains [`dynamics_pressure`](@ref) (appropriate for anelastic/reference-pressure
+models, where pressure is not a function of the state being set). Compressible dynamics overrides
+this with the equation of state `p = ρ Rᵐ T`, avoiding a fixed-point error when density or
+composition was changed immediately before setting temperature.
+"""
+@inline function pressure_from_density_temperature(i, j, k, dynamics, ρ, T, q, constants)
+    return @inbounds dynamics_pressure(dynamics)[i, j, k]
+end
+
 #####
 ##### Density and pressure access interface
 #####
@@ -162,6 +176,18 @@ formulations with a single density (e.g. the anelastic reference density). `Comp
 overrides it with a diagnosed total-density field, distinct from the coupling density ρᵈ.
 """
 total_density(dynamics) = dynamics_density(dynamics)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the gas density used to convert vapor mass fraction into vapor partial pressure.
+The default uses [`total_density`](@ref), appropriate to fully compressible and prescribed-density
+models. Reference-density dynamics may override this when their thermodynamic pressure and current
+temperature/composition imply a different equation-of-state density.
+"""
+@inline function humidity_density(i, j, k, dynamics, T, q, constants)
+    return @inbounds total_density(dynamics)[i, j, k]
+end
 
 """
     advecting_vertical_velocity(dynamics, velocities)

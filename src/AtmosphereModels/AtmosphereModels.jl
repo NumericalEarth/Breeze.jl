@@ -49,6 +49,7 @@ export
     WarmRainState,
     microphysical_state,
     microphysical_tendency,
+    prepare_microphysical_tendencies!,
     compute_microphysical_tendencies!,
     moisture_fractions,
     grid_moisture_fractions,
@@ -56,6 +57,7 @@ export
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
     initial_aerosol_number,
+    initial_aerosol_number_density,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     materialize_atmosphere_model_boundary_conditions,
@@ -81,6 +83,9 @@ export
 
     # Cloud effective radius
     ConstantRadiusParticles,
+
+    # Microphysics interface
+    prognostic_field_names,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,

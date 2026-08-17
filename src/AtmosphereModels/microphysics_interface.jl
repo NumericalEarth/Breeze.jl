@@ -19,7 +19,8 @@
 #    schemes write a fused kernel that computes the bundle once per cell.
 #
 # The model never calls `microphysical_tendency` directly during tendency assembly —
-# `compute_microphysical_tendencies!` is the only entry point.
+# `compute_microphysical_tendencies!` is the entry point that adds microphysical
+# sources to `Gⁿ`.
 #####
 
 using Oceananigans.Fields: set!
@@ -161,6 +162,17 @@ See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 @inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, velocities) = NothingMicrophysicalState(typeof(ρ))
 
 """
+$(TYPEDSIGNATURES)
+
+Restore scheme-specific constraints on density-weighted microphysical
+`prognostics` after a parcel time-integration substep.
+
+The default returns `prognostics` unchanged. Schemes with coupled prognostic
+constraints may extend this hook to return a corrected value.
+"""
+@inline postprocess_microphysical_prognostics(microphysics, prognostics, ρ) = prognostics
+
+"""
     grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, velocities)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) at grid point `(i, j, k)`.
@@ -227,17 +239,41 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 ##### Fused microphysical tendency interface
 #####
 #
+# `prepare_microphysical_tendencies!` refreshes stage-local diagnostics consumed
+# while assembling tendencies, such as terminal velocities and process-rate caches.
+# It runs before the scalar kernels so sedimentation uses the current RK-stage state.
+#
 # `compute_microphysical_tendencies!` is the single entry point through which the
-# atmosphere model invokes microphysics during tendency assembly. The model calls it
+# atmosphere model adds microphysical sources during tendency assembly. The model calls it
 # *after* the per-tracer dynamics kernels have written advection + diffusion + forcing
 # into `Gⁿ`; microphysics contributions are added on top via `+=`.
 
 """
 $(TYPEDSIGNATURES)
 
+Prepare stage-local microphysical diagnostics used during tendency assembly.
+
+`compute_tendencies!` calls this once per RK stage before thermodynamic and scalar
+tendencies are evaluated. Schemes should extend the two-argument helper
+`prepare_microphysical_tendencies!(microphysics, model)` when their tendencies or
+sedimentation velocities require a fused precomputation from the current stage state.
+The default is a no-op.
+
+This hook must not advance prognostic fields. Full-step, operator-split updates belong
+in [`microphysics_model_update!`](@ref).
+"""
+prepare_microphysical_tendencies!(model) =
+    prepare_microphysical_tendencies!(model.microphysics, model)
+
+prepare_microphysical_tendencies!(microphysics, model) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
 Add microphysics tendency contributions to the model's `Gⁿ` fields.
 
-This is the only entry point through which `compute_tendencies!` invokes microphysics.
+This is the only entry point through which `compute_tendencies!` adds microphysical
+sources to the model's `Gⁿ` fields.
 Concrete implementations add methods on the two-argument helper
 `compute_microphysical_tendencies!(microphysics, model)`.
 
@@ -409,31 +445,63 @@ materialize_microphysical_fields(microphysics::Nothing, grid, boundary_condition
 """
 $(TYPEDSIGNATURES)
 
-Return the total initial aerosol number concentration [m⁻³] for a microphysics scheme.
+Return the aerosol population stored in a microphysics scheme's native units.
 
-This is used by [`initialize_model_microphysical_fields!`](@ref) and parcel model
-construction to set a physically meaningful default for the prognostic aerosol number
-density `ρnᵃ`. The value is derived from the aerosol size distribution stored in the
-microphysics scheme, so it stays consistent with the activation parameters.
+The units are the scheme's own: a volumetric distribution returns [m⁻³], while a
+distribution specified per unit mass of air returns [kg⁻¹]. Use
+[`initial_aerosol_number_density`](@ref) to obtain the value that the prognostic `ρnᵃ`
+holds, whichever basis a scheme uses.
 
-Returns `0` by default; extensions override this for schemes with prognostic aerosol.
+Returns `0` by default.
 """
 initial_aerosol_number(microphysics) = 0
 
 """
 $(TYPEDSIGNATURES)
 
-Initialize default values for microphysical fields after materialization.
+Return the default aerosol number *density* ``ρ nᵃ`` [m⁻³] for a microphysics scheme,
+given the air density `ρ` (a field for grid models, a number for parcels).
 
-Sets `ρnᵃ` (aerosol number density) to [`initial_aerosol_number(microphysics)`](@ref)
-if the field exists. All other microphysical fields remain at zero.
-Users can override with `set!`.
+This is the value `set!` writes into the prognostic field `ρnᵃ` when the user supplies
+neither `nᵃ` nor `ρnᵃ`. It is derived from the aerosol size distribution stored in the
+microphysics scheme, so it stays consistent with the activation parameters.
+
+Each scheme is responsible for the units of its own aerosol distribution: the density
+argument is here so that a scheme whose distribution is specified *per unit mass*
+[kg⁻¹], as `PredictedParticlePropertiesMicrophysics` is through
+`AerosolMode.number_mixing_ratio`, can return the ``ρ``-weighted value that `ρnᵃ` holds,
+while a scheme whose distribution is already a volumetric concentration [m⁻³] ignores `ρ`.
+Breeze's convention throughout is that `nᵃ = ρnᵃ / ρ` is per unit mass [kg⁻¹]; a scheme
+that omits this scaling diagnoses `nᵃ` with a spurious inverse-density dependence.
+
+By default, forwards to [`initial_aerosol_number`](@ref), which returns `0`
+unless a scheme overrides it.
 """
-initialize_model_microphysical_fields!(fields, ::Nothing) = nothing
+initial_aerosol_number_density(microphysics, ρ) = initial_aerosol_number(microphysics)
 
-function initialize_model_microphysical_fields!(fields, microphysics)
+"""
+$(TYPEDSIGNATURES)
+
+Write the default aerosol reservoir [`initial_aerosol_number_density`](@ref) into `ρnᵃ`,
+using the total air density [`total_density`](@ref) of `model`. A no-op for schemes without
+prognostic aerosol.
+
+Called at the end of `AtmosphereModel` construction, and again from every `set!` that does
+not supply `nᵃ` or `ρnᵃ`, so the reservoir is weighted by whichever density is established
+at the time: the reference density for anelastic dynamics, a prescribed density for the
+kinematic driver, the reconciled total density for compressible dynamics. Compressible
+density fields are zero at construction, so there the constructor writes zero and the first
+`set!` carrying `ρ`, `ρᵈ`, or a [`HydrostaticallyBalancedDensity`](@ref) fills it in.
+
+Because this runs on every such `set!`, a later call that re-initializes the state also
+resets the reservoir to the distribution default. Pass `nᵃ` or `ρnᵃ` explicitly to carry a
+depleted reservoir across a `set!`.
+"""
+function set_default_aerosol_number!(model)
+    fields = model.microphysical_fields
     if :ρnᵃ ∈ keys(fields)
-        set!(fields.ρnᵃ, initial_aerosol_number(microphysics))
+        ρ = total_density(model.dynamics)
+        set!(fields.ρnᵃ, initial_aerosol_number_density(model.microphysics, ρ))
     end
     return nothing
 end
