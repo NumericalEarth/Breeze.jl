@@ -4,6 +4,7 @@ using Documenter
 using DocumenterCitations
 using DocumenterCodeBlocks: CodeBlocks
 
+
 using CairoMakie
 CairoMakie.activate!(type = "png")
 set_theme!(Theme(linewidth = 3))
