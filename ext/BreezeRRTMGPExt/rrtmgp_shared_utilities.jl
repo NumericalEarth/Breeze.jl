@@ -4,8 +4,10 @@
 
 using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ
 using Oceananigans.Architectures: architecture
+using Oceananigans.Fields: ConstantField
 using Oceananigans.Utils: launch!
 
+using RRTMGP: RRTMGPSolver
 using RRTMGP.AtmosphericStates: AtmosphericState
 using RRTMGP.VolumeMixingRatios: VmrGM
 
@@ -128,6 +130,107 @@ end
 
         # O₃ volume mixing ratio - index into field (works for ConstantField or Field)
         vmr_o3[k, c] = O₃[i, j, k]
+    end
+end
+
+#####
+##### Surface boundary conditions (shared by gray, clear-sky and all-sky)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+The scalar behind a surface property that is constant in space and time, or `nothing` when the
+property carries no such scalar.
+
+A `ConstantField` is a scalar in a field's clothing — its value cannot change — so it reports the
+value it holds. A general `Field` reports `nothing`: it may be rewritten between radiation updates,
+so there is no single value to speak of.
+"""
+surface_fraction_scalar(x::Number) = x
+surface_fraction_scalar(x::ConstantField) = surface_fraction_scalar(x.constant)
+surface_fraction_scalar(x) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Throw an `ArgumentError` for any keyword whose value is a spatially uniform scalar outside ``[0, 1]``.
+
+Emissivity and albedo are fractions, so a scalar outside the unit interval is a user error — an albedo
+given in percent, say — worth rejecting at construction rather than carrying into the solver. A
+property with no single value (a `Field`, a dataset, `nothing`) passes through, since a check at
+construction says nothing about what it holds at the next solve.
+"""
+function validate_surface_fractions(; kw...)
+    for (name, value) in kw
+        x = surface_fraction_scalar(value)
+        isnothing(x) || 0 <= x <= 1 ||
+            throw(ArgumentError("`$name` must lie in [0, 1]; received $x."))
+    end
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Wrap a scalar surface property in a `ConstantField` of the working precision, passing anything
+already field-valued through unchanged, so that emissivity and both albedos are uniformly
+field-valued whether the user supplied a number, a field, or a dataset.
+"""
+constant_field_property(x::Number, FT) = ConstantField(convert(FT, x))
+constant_field_property(x, FT) = x
+
+"""
+$(TYPEDSIGNATURES)
+
+Copy the surface emissivity `ε` and the direct and diffuse albedos `αᵈ`, `αˢ` from
+`surface_properties` into RRTMGP's band-by-column boundary-condition arrays `ε₀`, `αᵈ₀`, `αˢ₀`.
+
+Nothing else writes those arrays, so a spatially varying emissivity or albedo would otherwise never
+reach the solver, which would read whatever the allocation happened to contain. Call once at
+construction and again before every solve, so a property that evolves is picked up rather than frozen.
+
+Breeze treats all three properties as spectrally grey: every band receives the same value.
+"""
+function update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, surface_properties, grid)
+    arch = architecture(grid)
+
+    launch!(arch, grid, :xy, _update_rrtmgp_surface_boundary_conditions!,
+            ε₀, αᵈ₀, αˢ₀,
+            surface_properties.surface_emissivity,
+            surface_properties.direct_surface_albedo,
+            surface_properties.diffuse_surface_albedo,
+            grid)
+
+    return nothing
+end
+
+# Full-spectrum (clear-sky and all-sky) models keep both RTE solvers inside one `RRTMGPSolver`,
+# reached through RRTMGP's own accessors rather than its internal field nesting.
+update_rrtmgp_surface_boundary_conditions!(solver::RRTMGPSolver, surface_properties, grid) =
+    update_rrtmgp_surface_boundary_conditions!(RRTMGP.surface_emissivity(solver),
+                                               RRTMGP.direct_sw_surface_albedo(solver),
+                                               RRTMGP.diffuse_sw_surface_albedo(solver),
+                                               surface_properties, grid)
+
+@kernel function _update_rrtmgp_surface_boundary_conditions!(ε₀, αᵈ₀, αˢ₀, ε, αᵈ, αˢ, grid)
+    i, j = @index(Global, NTuple)
+
+    c = rrtmgp_column_index(i, j, grid.Nx)
+
+    @inbounds begin
+        εᵢⱼ = ε[i, j, 1]
+        αᵈᵢⱼ = αᵈ[i, j, 1]
+        αˢᵢⱼ = αˢ[i, j, 1]
+
+        for b in 1:size(ε₀, 1)
+            ε₀[b, c] = εᵢⱼ
+        end
+
+        for b in 1:size(αᵈ₀, 1)
+            αᵈ₀[b, c] = αᵈᵢⱼ
+            αˢ₀[b, c] = αˢᵢⱼ
+        end
     end
 end
 
