@@ -16,11 +16,9 @@ delete!(testsuite, "reactant/weno_compilation_setup")
 if filter_tests!(testsuite, args)
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
     # limitation).
-    if !REACTANT_COMPAT
-        for key in keys(testsuite)
-            if startswith(key, "reactant/") && !REACTANT_COMPAT
-                delete!(testsuite, key)
-            end
+    for key in keys(testsuite)
+        if startswith(key, "reactant/") && !REACTANT_COMPAT
+            delete!(testsuite, key)
         end
     end
 end
