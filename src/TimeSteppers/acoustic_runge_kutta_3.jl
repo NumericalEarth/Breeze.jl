@@ -49,7 +49,8 @@ Fields
 - `β₁, β₂, β₃`: Stage fractions (1/3, 1/2, 1).
 - `U⁰`: Storage for state at the beginning of the outer time-step.
 - `Gⁿ`: Slow-tendency fields, recomputed each stage.
-- `implicit_solver`: Optional implicit solver for diffusion.
+- `implicit_solver`: Optional solver for the vertically-implicit pieces — closure diffusion
+  and the adaptive-implicit vertical-advection remainder.
 - `substepper`: [`AcousticSubstepper`](@ref) for the linearized acoustic
   substep loop.
 
@@ -107,6 +108,72 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     return AcousticRungeKutta3{FT, U0, TG, TI, AS}(β₁, β₂, β₃, U⁰, Gⁿ,
                                                     implicit_solver, substepper)
 end
+
+#####
+##### Adaptive-implicit vertical advection split time step
+#####
+
+# Stage fractions in order, and the increment each stage adds to the clock.
+@inline stage_fraction(ts::AcousticRungeKutta3, ::Val{1}) = ts.β₁
+@inline stage_fraction(ts::AcousticRungeKutta3, ::Val{2}) = ts.β₂
+@inline stage_fraction(ts::AcousticRungeKutta3, ::Val{3}) = ts.β₃
+@inline stage_increment(ts::AcousticRungeKutta3, ::Val{1}) = ts.β₁
+@inline stage_increment(ts::AcousticRungeKutta3, ::Val{2}) = ts.β₂ - ts.β₁
+@inline stage_increment(ts::AcousticRungeKutta3, ::Val{3}) = 1 - ts.β₂
+
+"""
+$(TYPEDSIGNATURES)
+
+Set the adaptive-implicit split time step to the interval of the *next* Wicker–Skamarock
+stage, so the explicit velocity fraction frozen into `Gⁿ` by the tendencies computed here
+pairs with the implicit fraction the next stage applies to them.
+
+Mirrors Oceananigans' `RungeKutta3TimeStepper` and `SplitRungeKuttaTimeStepper`
+specializations, including recovering the outer step from the stage increment the clock was
+just ticked by. Every field — the acoustic prognostics and the tracers alike — then reads one
+value written at one point in the update cycle.
+
+Stage 1 of step ``n`` is written at the end of step ``n-1``, before ``Δtₙ`` is known, so it
+uses ``β₁ Δtₙ₋₁``. This lag is deliberate: `scalar_substep!` consumes tracer tendencies whose
+explicit fraction was frozen against the value in force when they were built, so rewriting the
+split at stage entry would scale the explicit half by ``s(Δt_old)`` and the implicit half by
+``1 - s(Δt_new)`` — the desynchronization this specialization exists to remove. Consistency is
+preserved; only CFL targeting suffers, and only on stage 1 of a step whose ``Δt`` changed: a
+growth by factor ``r`` drives that stage's explicit vertical Courant number to ``r`` times the
+requested `cfl`, capped by the unsplit Courant number.
+"""
+@inline function Oceananigans.Advection.update_advection_timestep!(a::AdaptiveImplicitVerticalAdvection,
+                                                                   timestepper::AcousticRungeKutta3, clock)
+    td = OceananigansTimeSteppers.time_discretization(a)
+
+    # `clock.stage` names the stage about to run; `clock.last_stage_Δt` is the increment the
+    # stage before it contributed. Recover the outer step from that increment, then scale by
+    # the upcoming stage's fraction.
+    stage = clock.stage
+    completed = ifelse(stage == 1, 3, stage - 1)
+    Δt = advection_outer_timestep(timestepper, completed, clock.last_stage_Δt)
+
+    # `maybe_prepare_first_time_step!` seeds `last_stage_Δt`, so the fallback is unreachable in
+    # normal use; it keeps a stage fraction rather than a whole step if a clock arrives unseeded.
+    Δt_stage = advection_stage_timestep(timestepper, stage, Δt)
+    Δt_last = advection_stage_timestep(timestepper, stage, clock.last_Δt)
+    td.Δt[] = ifelse(isfinite(Δt_stage), Δt_stage, Δt_last)
+    return nothing
+end
+
+# A `FluxFormAdvection` whose z-scheme is adaptive-implicit is itself an
+# `AdaptiveImplicitVerticalAdvection` (the alias keys on the z time discretization), so this
+# disambiguates against Oceananigans' `(::FluxFormAdvection, timestepper, clock)`.
+Oceananigans.Advection.update_advection_timestep!(a::FluxFormAdvection, timestepper::AcousticRungeKutta3, clock) =
+    Oceananigans.Advection.update_advection_timestep!(a.z, timestepper, clock)
+
+@inline advection_outer_timestep(ts, stage, Δt_increment) =
+    Δt_increment / (stage == 1 ? stage_increment(ts, Val(1)) :
+                    stage == 2 ? stage_increment(ts, Val(2)) : stage_increment(ts, Val(3)))
+
+@inline advection_stage_timestep(ts, stage, Δt) =
+    Δt * (stage == 1 ? stage_fraction(ts, Val(1)) :
+          stage == 2 ? stage_fraction(ts, Val(2)) : stage_fraction(ts, Val(3)))
 
 #####
 ##### Per-stage substep wrapper
@@ -174,6 +241,29 @@ end
 #####
 ##### Time stepping (main entry point)
 #####
+
+"""
+$(TYPEDSIGNATURES)
+
+Seed `clock.last_stage_Δt` before the first step so that stage 1 sees a stage interval rather
+than a whole outer step. The seed is the increment a completed third stage leaves, ``(1 - β₂)
+Δt``, which is exactly what `update_advection_timestep!` inverts to recover `Δt` at stage 1.
+
+Also fires on a clock carrying a non-finite `last_stage_Δt` at nonzero iteration, which is what
+a hand-assembled or externally-restored clock looks like. `PerturbationAdvection` open boundary
+conditions read the same clock field, so seeding it also gives them a finite relaxation
+interval on the first stage.
+"""
+function OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:AcousticRungeKutta3}, Δt, callbacks)
+    clock = model.clock
+    if clock.iteration == 0 || !isfinite(clock.last_stage_Δt)
+        clock.last_Δt = Δt
+        clock.last_stage_Δt = stage_increment(model.timestepper, Val(3)) * Δt
+        reconcile_state!(model)
+        update_state!(model, callbacks)
+    end
+    return nothing
+end
 
 """
 $(TYPEDSIGNATURES)
