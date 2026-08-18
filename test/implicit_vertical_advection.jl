@@ -269,6 +269,69 @@ import Breeze.AtmosphereModels as AM
         end
     end
 
+    @testset "Advecting-state cache pairs the implicit half with the slow tendencies" begin
+        Nx, Nz = 16, 24
+        z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, 2400.0, length=Nz+1)); formulation=LinearDecay())
+        cache_grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5),
+                                     x=(-8000.0, 8000.0), z=z_faces,
+                                     topology=(Periodic, Flat, Bounded))
+        materialize_terrain!(cache_grid, x -> 200 * exp(-x^2 / 2000^2))
+        cache_dynamics() = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+
+        # No adaptive-implicit scheme ⇒ no cache is allocated and closure-only solves read live state.
+        explicit_model = AtmosphereModel(cache_grid; dynamics=cache_dynamics(), timestepper=:AcousticRungeKutta3,
+                                         momentum_advection=WENO(FT), scalar_advection=(; ρθ=WENO(FT)))
+        @test explicit_model.timestepper.substepper.advecting_vertical_velocity_cache === nothing
+        @test explicit_model.timestepper.substepper.advecting_density_cache === nothing
+
+        adaptive_model = AtmosphereModel(cache_grid; dynamics=cache_dynamics(), timestepper=:AcousticRungeKutta3,
+                                         momentum_advection=aiva(), scalar_advection=(; ρθ=WENO(FT)))
+        substepper = adaptive_model.timestepper.substepper
+        @test substepper.advecting_vertical_velocity_cache isa Field
+        @test substepper.advecting_density_cache isa Field
+
+        p₀, θ₀, pˢᵗ = 101325.0, 300.0, 100000.0
+        set!(adaptive_model; ρ=(x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants), θ=θ₀, u=10)
+        for _ in 1:3
+            time_step!(adaptive_model, 1)
+        end
+
+        # The cache must hold exactly the state the slow tendencies split, immune to anything
+        # written to the live fields between tendency computation and the implicit solve.
+        Breeze.TimeSteppers.prepare_acoustic_cache!(substepper, adaptive_model)
+        Breeze.TimeSteppers.cache_advecting_state!(adaptive_model)
+        w_live = AM.advecting_vertical_velocity(adaptive_model.dynamics, adaptive_model.velocities)
+        ρ_live = AM.dynamics_density(adaptive_model.dynamics)
+        w_at_tendency = Array(parent(w_live))
+        ρ_at_tendency = Array(parent(ρ_live))
+        parent(w_live) .*= 3
+        parent(ρ_live) .*= 2
+        w_used, ρ_used = Breeze.TimeSteppers.advecting_state(adaptive_model)
+        @test Array(parent(w_used)) == w_at_tendency
+        @test Array(parent(ρ_used)) == ρ_at_tendency
+        parent(w_live) ./= 3
+        parent(ρ_live) ./= 2
+
+        # Split identity wᴸ = wᵉ + wⁱ through the real interpolation, at a Δt that saturates
+        # the split (s < 1) — the identity is vacuous where s ≡ 1.
+        scheme = Oceananigans.Advection.vertical_scheme(adaptive_model.advection.momentum)
+        td = Oceananigans.TimeSteppers.time_discretization(scheme)
+        td.Δt[] = 500
+        w_cpu = Oceananigans.on_architecture(CPU(), w_used)
+        cpu_grid = Oceananigans.on_architecture(CPU(), cache_grid)
+        residual = zero(FT)
+        saturated = 0
+        for i in 1:Nx, k in 2:Nz
+            s_face = Oceananigans.Advection.explicit_velocity_scaleᶜᶜᶠ(i, 1, k, cpu_grid, scheme, td, w_cpu)
+            wⁱ = Oceananigans.Advection.implicit_vertical_velocityᶜᶜᶠ(i, 1, k, cpu_grid, scheme, td, w_cpu)
+            wᴸ = @inbounds w_cpu[i, 1, k]
+            residual = max(residual, abs(wᴸ - (s_face * wᴸ + wⁱ)))
+            saturated += s_face < 1
+        end
+        @test saturated > 0
+        @test residual < 10 * eps(FT)
+    end
+
     @testset "Terrain-following dynamics (TFVD, acoustic)" begin
         Nx, Nz = 16, 16
         Lx, Lz = 10000.0, 4000.0

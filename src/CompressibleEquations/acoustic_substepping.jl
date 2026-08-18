@@ -81,7 +81,7 @@ Fields:
   excluded — those are in the fast operator).
 - `vertical_solver`: `BatchedTridiagonalSolver` for the implicit (ρw)′ update.
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC}
     substeps :: N
     acoustic_cfl :: FT
     forward_weight :: FT
@@ -119,6 +119,14 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS}
 
     slow_vertical_momentum_tendency :: GT
     vertical_solver :: TS
+
+    # Stage-entry advecting state for the vertically-implicit advective remainder. The slow
+    # tendencies split fluxes of the stage-entry w and ρ, so the implicit half must size its
+    # coefficients from the same frozen state — not whatever the substep loop has since written
+    # (`_recover_full_state!` rewrites `dynamics.dry_density` before `implicit_substep!` runs).
+    # `nothing` unless an advection scheme needs the implicit solver.
+    advecting_vertical_velocity_cache :: WC
+    advecting_density_cache :: DC
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -145,7 +153,9 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.previous_density_potential_temperature_perturbation),
                        adapt(to, a.time_averaged_velocities),
                        adapt(to, a.slow_vertical_momentum_tendency),
-                       adapt(to, a.vertical_solver))
+                       adapt(to, a.vertical_solver),
+                       adapt(to, a.advecting_vertical_velocity_cache),
+                       adapt(to, a.advecting_density_cache))
 
 #####
 ##### Section 2 — Constructor
@@ -162,7 +172,8 @@ The wall target re-enters via the prognostic momentum's own BC after each subste
 The `prognostic_momentum` kwarg is retained for backwards compatibility but no longer consulted.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
-                            prognostic_momentum = nothing, substep_floattype = eltype(grid))
+                            prognostic_momentum = nothing, substep_floattype = eltype(grid),
+                            cache_advecting_state = false)
     Ns = split_explicit.substeps
     FT = eltype(grid)
     ω = convert(FT, split_explicit.forward_weight)
@@ -222,6 +233,9 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                                                scratch,
                                                tridiagonal_direction = ZDirection())
 
+    advecting_vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
+    advecting_density_cache = cache_advecting_state ? CenterField(grid) : nothing
+
     return AcousticSubstepper(Ns, acoustic_cfl, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,
                               vertical_pressure_tendency_factor,
@@ -240,7 +254,9 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               previous_density_potential_temperature_perturbation,
                               time_averaged_velocities,
                               slow_vertical_momentum_tendency,
-                              vertical_solver)
+                              vertical_solver,
+                              advecting_vertical_velocity_cache,
+                              advecting_density_cache)
 end
 
 #####

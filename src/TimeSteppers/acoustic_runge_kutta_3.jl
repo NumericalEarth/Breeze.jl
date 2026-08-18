@@ -85,6 +85,7 @@ allocating fresh fields (used by the native-stepper adiabatic-balance twin).
 function AcousticRungeKutta3(grid, prognostic_fields;
                              dynamics,
                              implicit_solver::TI = nothing,
+                             cache_advecting_state = false,
                              Gⁿ::TG = map(similar, prognostic_fields),
                              U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
 
@@ -100,6 +101,7 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     β₃ = FT(β[3])
 
     substepper = AcousticSubstepper(grid, dynamics.time_discretization;
+                                    cache_advecting_state,
                                     prognostic_momentum = (ρu = prognostic_fields.ρu,
                                                            ρv = prognostic_fields.ρv,
                                                            ρw = prognostic_fields.ρw))
@@ -196,6 +198,7 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     # initialized with a rewind term inside the substep loop so the
     # WS-RK3 invariant still starts from Uⁿ.
     prepare_acoustic_cache!(substepper, model)
+    cache_advecting_state!(model)
 
     # Slow tendencies (advection + Coriolis + diffusion; PGF and buoyancy
     # are excluded — those are handled inside the substep loop in

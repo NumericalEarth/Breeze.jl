@@ -218,6 +218,39 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Freeze the advecting state the slow tendencies split — the advecting vertical velocity and its
+carrier density — so `implicit_substep!` sizes the withheld remainder from the same state. The
+target invariant is wᴸ = wᵉ + wⁱ with identical interpolation and stage time step: the full
+stage-entry wᴸ is cached (not the clipped wᵉ — in saturated cells |wᵉ| = cfl Δz / Δt and the
+withheld part cannot be recovered from it). A no-op when the substepper carries no cache.
+"""
+cache_advecting_state!(model) =
+    cache_advecting_state!(model.timestepper.substepper.advecting_vertical_velocity_cache,
+                           model.timestepper.substepper.advecting_density_cache, model)
+
+cache_advecting_state!(::Nothing, ::Nothing, model) = nothing
+
+function cache_advecting_state!(w_cache, ρ_cache, model)
+    parent(w_cache) .= parent(advecting_vertical_velocity(model.dynamics, model.velocities))
+    parent(ρ_cache) .= parent(dynamics_density(model.dynamics))
+    return nothing
+end
+
+# The advective coefficient state for the post-loop implicit solve: the frozen stage-entry
+# cache when advection needs it, the live fields otherwise (closure-only solves keep their
+# current behavior exactly).
+advecting_state(model) =
+    advecting_state(model.timestepper.substepper.advecting_vertical_velocity_cache,
+                    model.timestepper.substepper.advecting_density_cache, model)
+
+advecting_state(::Nothing, ::Nothing, model) =
+    (advecting_vertical_velocity(model.dynamics, model.velocities), dynamics_density(model.dynamics))
+
+advecting_state(w_cache, ρ_cache, model) = (w_cache, ρ_cache)
+
+"""
+$(TYPEDSIGNATURES)
+
 Apply the vertically-implicit tridiagonal solve to the prognostics that the acoustic substep
 loop advances: momentum and the thermodynamic variable. Dispatch on the timestepper's
 `implicit_solver` selects the method: `nothing` means nothing in the model is vertically
@@ -245,12 +278,11 @@ implicit_substep!(model, ::Nothing, Δt_stage) = nothing
 
 function implicit_substep!(model, implicit_solver, Δt_stage)
     # Momentum and the thermodynamic variable are coupling-density-weighted (ρu = ρᵈ u, ρθ = ρᵈ θ).
-    ρᵈ = dynamics_density(model.dynamics)
+    # The advective coefficients use the frozen stage-entry (w, ρᵈ) — the state whose fluxes
+    # the slow tendencies split — so the two halves partition one transport (see
+    # `cache_advecting_state!`).
+    w, ρᵈ = advecting_state(model)
     prognostic = prognostic_fields(model)
-
-    # Momentum advects with the (possibly contravariant) advecting vertical velocity — the
-    # same velocity the slow momentum flux divergence splits.
-    w = advecting_vertical_velocity(model.dynamics, model.velocities)
     momentum_advection = model.advection.momentum
     for name in (:ρu, :ρv, :ρw)
         implicit_step!(prognostic[name],
@@ -277,7 +309,7 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                    fields(model),
                    Δt_stage,
                    θ_advection,
-                   slow_thermodynamic_velocities(model),
+                   merge(slow_thermodynamic_velocities(model), (; w)),
                    ρᵈ)
 
     return nothing
