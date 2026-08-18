@@ -55,7 +55,7 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 - `solar_position`: Specification of the solar zenith angle. See [`AbstractSolarPosition`](@ref) and its subtypes:
   - [`ApparentSolarPosition`](@ref) (default) — time-varying, computed from the model clock and grid (or explicit) longitude/latitude.
   - [`FixedCosineZenith`](@ref) — constant cos(θ_z), independent of the clock.
-- `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
+- `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Can be scalar or 2D field.
 - `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
                     Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
@@ -83,6 +83,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     solar_position = maybe_infer_solar_position(solar_position, grid)
 
+    validate_surface_fractions(; surface_emissivity, surface_albedo,
+                                 direct_surface_albedo, diffuse_surface_albedo)
+
     if !isnothing(surface_albedo)
         if !isnothing(direct_surface_albedo) || !isnothing(diffuse_surface_albedo)
             throw(ArgumentError(error_msg))
@@ -98,6 +101,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     else
         throw(ArgumentError(error_msg))
     end
+
+    surface_emissivity = materialize_surface_property(surface_emissivity, grid, solar_position)
 
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
@@ -143,24 +148,13 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     rrtmgp_ℐ₀ .= convert(FT, solar_constant)  # Top-of-atmosphere solar flux
 
-    if surface_emissivity isa Number
-        surface_emissivity = ConstantField(convert(FT, surface_emissivity))
-        rrtmgp_ε₀ .= surface_emissivity.constant
-    end
+    surface_emissivity = constant_field_property(surface_emissivity, FT)
+    direct_surface_albedo = constant_field_property(direct_surface_albedo, FT)
+    diffuse_surface_albedo = constant_field_property(diffuse_surface_albedo, FT)
 
     if surface_temperature isa Number
         surface_temperature = ConstantField(convert(FT, surface_temperature))
         rrtmgp_T₀ .= surface_temperature.constant
-    end
-
-    if direct_surface_albedo isa Number
-        direct_surface_albedo = ConstantField(convert(FT, direct_surface_albedo))
-        rrtmgp_αb₀ .= direct_surface_albedo.constant
-    end
-
-    if diffuse_surface_albedo isa Number
-        diffuse_surface_albedo = ConstantField(convert(FT, diffuse_surface_albedo))
-        rrtmgp_αw₀ .= diffuse_surface_albedo.constant
     end
 
     grid_parameters = RRTMGPGridParams(FT; context, domain_nlay=Nz, ncol=Nc)
@@ -198,6 +192,11 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                     surface_emissivity,
                                                     direct_surface_albedo,
                                                     diffuse_surface_albedo)
+
+    update_rrtmgp_surface_boundary_conditions!(longwave_solver.bcs.sfc_emis,
+                                               shortwave_solver.bcs.sfc_alb_direct,
+                                               shortwave_solver.bcs.sfc_alb_diffuse,
+                                               surface_properties, grid)
 
     return RadiativeTransferModel(convert(FT, solar_constant),
                                   solar_position,
@@ -314,13 +313,11 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
     # Update RRTMGP atmospheric state from model fields
     update_rrtmgp_state!(rrtmgp_state, model, surface_temperature)
 
-    rrtmgp_surface_properties = (;
-        rrtmgp_ε₀ = rtm.longwave_solver.bcs.sfc_emis,
-        rrtmgp_αb₀ = rtm.shortwave_solver.bcs.sfc_alb_direct,
-        rrtmgp_αw₀ = rtm.shortwave_solver.bcs.sfc_alb_diffuse,
-    )
-
-    update_rrtmgp_surface_properties!(rrtmgp_surface_properties, rtm.surface_properties)
+    # Gray optics keeps the two RTE solvers side by side rather than inside one `RRTMGPSolver`.
+    update_rrtmgp_surface_boundary_conditions!(rtm.longwave_solver.bcs.sfc_emis,
+                                               rtm.shortwave_solver.bcs.sfc_alb_direct,
+                                               rtm.shortwave_solver.bcs.sfc_alb_diffuse,
+                                               rtm.surface_properties, grid)
 
     # Update solar zenith angle from the solar_position specification
     update_solar_zenith_angle!(rtm.shortwave_solver, rtm.solar_position, grid, clock)
@@ -339,11 +336,6 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
     # Compute radiation flux divergence
     compute_radiation_flux_divergence!(rtm, grid)
 
-    return nothing
-end
-
-# TODO: This function will launch a kernel that will update the boundary conditions of RRTMGP.
-function update_rrtmgp_surface_properties!(rrtmgp_surface_properties, surface_properties)
     return nothing
 end
 

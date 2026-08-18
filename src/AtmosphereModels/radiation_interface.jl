@@ -406,7 +406,7 @@ materialize_background_atmosphere(::Nothing, grid) = nothing
 
 struct SurfaceRadiativeProperties{ST, SE, SA, DW}
     surface_temperature :: ST  # Scalar or 2D field
-    surface_emissivity :: SE   # Scalar
+    surface_emissivity :: SE   # Scalar or 2D field
     direct_surface_albedo :: SA  # Scalar or 2D field
     diffuse_surface_albedo :: DW  # Scalar or 2D field
 end
