@@ -157,6 +157,59 @@ end
     end
 end
 
+@testset "Acoustic scalar substeps use each field's closure diffusivity" begin
+    FT = Float64
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(CPU();
+                           size = (8, 8, 16),
+                           halo = (5, 5, 5),
+                           x = (0, 1),
+                           y = (0, 1),
+                           z = (0, 1),
+                           topology = (Periodic, Periodic, Bounded))
+
+    dynamics() = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                      reference_potential_temperature = 300)
+    microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
+    implicit_time_discretization = VerticallyImplicitTimeDiscretization()
+    tracer_diffusivity = FT(4)
+
+    indexed_closure = VerticalScalarDiffusivity(implicit_time_discretization;
+                                                κ = (; ρθ = FT(1), ρqᵉ = FT(2), ρc = tracer_diffusivity))
+    reference_closure = VerticalScalarDiffusivity(implicit_time_discretization; κ = tracer_diffusivity)
+
+    function closure_model(closure)
+        return AtmosphereModel(grid;
+                               dynamics = dynamics(),
+                               timestepper = :AcousticRungeKutta3,
+                               microphysics,
+                               closure,
+                               advection = nothing,
+                               tracers = :ρc)
+    end
+
+    indexed_model = closure_model(indexed_closure)
+    reference_model = closure_model(reference_closure)
+    tracer_profile(x, y, z) = 1 + cospi(z) / 2
+
+    for model in (indexed_model, reference_model)
+        set!(model;
+             ρ = model.dynamics.reference_state.density,
+             θ = 300,
+             qᵗ = 0,
+             ρc = tracer_profile)
+    end
+
+    initial_tracer = Array(interior(indexed_model.tracers.ρc))
+    time_step!(indexed_model, FT(1e-3))
+    time_step!(reference_model, FT(1e-3))
+
+    indexed_tracer = Array(interior(indexed_model.tracers.ρc))
+    reference_tracer = Array(interior(reference_model.tracers.ρc))
+    @test indexed_tracer ≈ reference_tracer rtol = sqrt(eps(FT))
+    @test maximum(abs, indexed_tracer - initial_tracer) > sqrt(eps(FT))
+end
+
 #####
 ##### Test AcousticSubstepper construction
 #####

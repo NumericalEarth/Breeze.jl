@@ -166,7 +166,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     Gⁿ = model.timestepper.Gⁿ
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
-    n_acoustic = 5  # ρ, ρu, ρv, ρw, ρθ are advanced inside the substep loop
+    Nacoustic = 5  # ρ, ρu, ρv, ρw, ρθ are advanced inside the substep loop
 
     # Water species and tracers advect as mass fractions of the total density ρ = ρᵈ + Σρˣ
     # (see `scalar_tendency`), so the implicit solve is weighted with the same density. The
@@ -177,11 +177,11 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     velocities = transport_velocities(model)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
-        i <= n_acoustic && continue
+        i <= Nacoustic && continue
 
         launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
 
-        field_index = Val(i - n_acoustic)
+        field_index = Val(i - Nacoustic + 1)
         advection = field_advection_scheme(model.advection, names[i])
 
         if needs_implicit_solver(advection)
